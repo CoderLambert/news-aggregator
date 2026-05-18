@@ -1,0 +1,8 @@
+django>=4.2
+djangorestframework>=3.14
+django-filter>=23.0
+django-cors-headers>=4.0
+scrapy>=2.11
+scrapy-playwright>=0.0.40
+sentence-transformers>=2.2
+chromadb>=0.4
