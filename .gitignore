@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Django
+*.sqlite3
+db.sqlite3
+staticfiles/
+
+# Scrapy
+.scrapy/
+
+# ChromaDB vector data
+chroma_data/
+
+# Logs
+logs/
+*.log
+
+# Node
+node_modules/
+frontend/dist/
+
+# Env
+.env
+.env.local
+*.pem
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Model cache
+.cache/
