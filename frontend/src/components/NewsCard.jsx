@@ -1,5 +1,19 @@
 import { Link } from 'react-router-dom'
 
+function formatRelativeTime(dateStr) {
+  const now = new Date()
+  const date = new Date(dateStr)
+  const diffMs = now - date
+  const diffMin = Math.floor(diffMs / 60000)
+  if (diffMin < 1) return '刚刚'
+  if (diffMin < 60) return `${diffMin} 分钟前`
+  const diffHr = Math.floor(diffMin / 60)
+  if (diffHr < 24) return `${diffHr} 小时前`
+  const diffDay = Math.floor(diffHr / 24)
+  if (diffDay < 7) return `${diffDay} 天前`
+  return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+}
+
 export default function NewsCard({ news }) {
   return (
     <Link
@@ -30,7 +44,7 @@ export default function NewsCard({ news }) {
           </span>
           <div className="flex items-center gap-2">
             <span>{news.source_name}</span>
-            <span>{new Date(news.publish_time).toLocaleDateString('zh-CN')}</span>
+            <span>{formatRelativeTime(news.publish_time)}</span>
           </div>
         </div>
       </div>

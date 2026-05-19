@@ -1,10 +1,18 @@
-export default function SourceFilter({ sources, active, onChange }) {
+export default function SourceFilter({ sources, active = [], onChange }) {
+  const toggle = (id) => {
+    if (active.includes(id)) {
+      onChange(active.filter(a => a !== id))
+    } else {
+      onChange([...active, id])
+    }
+  }
+
   return (
     <div className="flex flex-wrap gap-2">
       <button
-        onClick={() => onChange(null)}
+        onClick={() => onChange([])}
         className={`px-3 py-1 rounded-full text-sm font-medium transition-colors
-          ${active === null
+          ${active.length === 0
             ? 'bg-emerald-600 text-white'
             : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
       >
@@ -13,9 +21,9 @@ export default function SourceFilter({ sources, active, onChange }) {
       {sources.map(src => (
         <button
           key={src.id}
-          onClick={() => onChange(src.id)}
+          onClick={() => toggle(src.id)}
           className={`px-3 py-1 rounded-full text-sm font-medium transition-colors
-            ${active === src.id
+            ${active.includes(src.id)
               ? 'bg-emerald-600 text-white'
               : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
         >

@@ -2,11 +2,26 @@ from django.db.models import Count, Q
 from rest_framework import generics, filters
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
+from django_filters import rest_framework as django_filters
 from .models import Category, Source, News
 from .serializers import (
     CategorySerializer, SourceSerializer,
     NewsListSerializer, NewsDetailSerializer,
 )
+
+
+class CommaSeparatedIntegerFilter(django_filters.BaseInFilter, django_filters.NumberFilter):
+    pass
+
+
+class NewsFilter(django_filters.FilterSet):
+    category = CommaSeparatedIntegerFilter(field_name='category', lookup_expr='in')
+    source = CommaSeparatedIntegerFilter(field_name='source', lookup_expr='in')
+    source__source_type = django_filters.CharFilter(field_name='source__source_type')
+
+    class Meta:
+        model = News
+        fields = ['category', 'source', 'source__source_type']
 
 
 class StandardPagination(PageNumberPagination):
@@ -26,12 +41,16 @@ def reciprocal_rank_fusion(*ranked_lists, k=60):
 class NewsListView(generics.ListAPIView):
     serializer_class = NewsListSerializer
     pagination_class = StandardPagination
-    filterset_fields = ['category', 'source']
+    filter_backends = [django_filters.DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_class = NewsFilter
     search_fields = ['title', 'content']
     ordering_fields = ['publish_time', 'created_at']
     ordering = ['-publish_time']
 
     def get_queryset(self):
+        # By default hide duplicates (entries with related_to set)
+        if self.request.query_params.get('include_dupes', 'false') != 'true':
+            return News.objects.select_related('source', 'category').filter(related_to__isnull=True)
         return News.objects.select_related('source', 'category').all()
 
     def list(self, request, *args, **kwargs):
@@ -49,6 +68,10 @@ class NewsListView(generics.ListAPIView):
 
     def _semantic_search(self, request, query):
         from .services.vector_store import VectorStoreService
+        from .services.embedding import EmbeddingService
+
+        if not EmbeddingService.is_loaded():
+            EmbeddingService.wait_until_ready(timeout=120)
 
         vs = VectorStoreService()
         if vs.count() == 0:
@@ -113,9 +136,11 @@ class NewsListView(generics.ListAPIView):
         if category or source:
             filter_qs = News.objects.filter(id__in=fused_ids)
             if category:
-                filter_qs = filter_qs.filter(category=category)
+                cat_ids = [c.strip() for c in category.split(',')]
+                filter_qs = filter_qs.filter(category_id__in=cat_ids)
             if source:
-                filter_qs = filter_qs.filter(source=source)
+                src_ids = [s.strip() for s in source.split(',')]
+                filter_qs = filter_qs.filter(source_id__in=src_ids)
             allowed_ids = set(filter_qs.values_list('id', flat=True))
             fused_ids = [fid for fid in fused_ids if fid in allowed_ids]
 
@@ -154,15 +179,19 @@ class NewsListView(generics.ListAPIView):
         page_size = int(request.query_params.get('page_size', 20))
         if page * page_size >= total:
             return None
+        params = request.query_params.copy()
+        params['page'] = page + 1
         return request.build_absolute_uri(
-            request.path + f"?page={page + 1}"
+            request.path + '?' + params.urlencode()
         )
 
     def _prev_url(self, request, page):
         if page <= 1:
             return None
+        params = request.query_params.copy()
+        params['page'] = page - 1
         return request.build_absolute_uri(
-            request.path + f"?page={page - 1}"
+            request.path + '?' + params.urlencode()
         )
 
 
