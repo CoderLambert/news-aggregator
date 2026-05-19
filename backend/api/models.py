@@ -17,11 +17,17 @@ class Category(models.Model):
 
 
 class Source(models.Model):
+    TYPE_CHOICES = [
+        ('news', '新闻媒体'),
+        ('aggregator', '聚合平台'),
+        ('discussion', '讨论社区'),
+    ]
     name = models.CharField('来源名称', max_length=100, unique=True)
     url = models.URLField('来源网址', max_length=255)
     logo = models.URLField('Logo', max_length=255, blank=True, default='')
     country = models.CharField('国家', max_length=50, default='CN')
     language = models.CharField('语言', max_length=50, default='zh')
+    source_type = models.CharField('类型', max_length=20, choices=TYPE_CHOICES, default='news')
     created_at = models.DateTimeField('创建时间', auto_now_add=True)
 
     class Meta:
@@ -42,6 +48,8 @@ class News(models.Model):
     category = models.ForeignKey(Category, on_delete=models.CASCADE, verbose_name='分类')
     url = models.URLField('原文链接', max_length=500, unique=True, db_index=True)
     cover_image = models.URLField('封面图', max_length=500, blank=True, default='')
+    title_hash = models.BigIntegerField('标题哈希', null=True, blank=True, db_index=True)
+    related_to = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, verbose_name='关联主新闻')
     created_at = models.DateTimeField('入库时间', auto_now_add=True)
 
     class Meta:

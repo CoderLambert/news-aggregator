@@ -1,6 +1,8 @@
 import scrapy
+import json
 from datetime import datetime
 from news_crawler.items import NewsItem
+from news_crawler.category_map import classify
 
 
 class DevToSpider(scrapy.Spider):
@@ -18,7 +20,6 @@ class DevToSpider(scrapy.Spider):
     }
 
     def parse(self, response):
-        import json
         try:
             articles = json.loads(response.text)
         except (json.JSONDecodeError, TypeError):
@@ -27,7 +28,8 @@ class DevToSpider(scrapy.Spider):
         for article in articles:
             title = article.get('title', '')
             url = article.get('url', '')
-            if not title or not url:
+            article_id = article.get('id')
+            if not title or not url or not article_id:
                 continue
 
             description = article.get('description', '') or ''
@@ -53,25 +55,57 @@ class DevToSpider(scrapy.Spider):
                 except (ValueError, TypeError):
                     pass
 
-            category = '科技'
-            if tags:
-                tag_lower = [t.lower() for t in tags]
-                if any(t in tag_lower for t in ['webdev', 'javascript', 'typescript', 'react', 'vue']):
-                    category = '前端'
-                elif any(t in tag_lower for t in ['python', 'go', 'rust', 'java', 'backend']):
-                    category = '后端'
-                elif any(t in tag_lower for t in ['devops', 'cloud', 'aws', 'docker', 'kubernetes']):
-                    category = 'DevOps'
-                elif any(t in tag_lower for t in ['ai', 'machinelearning', 'datascience']):
-                    category = 'AI'
-
             news = NewsItem()
             news['title'] = title
             news['content'] = content
             news['author'] = author
             news['publish_time'] = publish_time
             news['source_name'] = 'Dev.to'
-            news['category_name'] = category
+            news['category_name'] = classify(title, description + ' ' + ' '.join(tags))
             news['url'] = url
             news['cover_image'] = cover_image
             yield news
+
+            # Fetch full body markdown via API
+            yield scrapy.Request(
+                f'https://dev.to/api/articles/{article_id}',
+                callback=self.parse_article,
+                priority=1,
+            )
+
+    def parse_article(self, response):
+        try:
+            article = json.loads(response.text)
+        except (json.JSONDecodeError, TypeError):
+            return
+
+        title = article.get('title', '')
+        body_markdown = article.get('body_markdown', '')
+        if not title or not body_markdown:
+            return
+
+        author = article.get('user', {}).get('name', '') or article.get('user', {}).get('username', '')
+        published_at = article.get('published_at', '')
+        cover_image = article.get('cover_image', '') or ''
+        tags = article.get('tag_list', [])
+
+        if len(body_markdown) > 5000:
+            body_markdown = body_markdown[:5000]
+
+        publish_time = datetime.now()
+        if published_at:
+            try:
+                publish_time = datetime.fromisoformat(published_at.replace('Z', '+00:00')).replace(tzinfo=None)
+            except (ValueError, TypeError):
+                pass
+
+        news = NewsItem()
+        news['title'] = title
+        news['content'] = body_markdown
+        news['author'] = author
+        news['publish_time'] = publish_time
+        news['source_name'] = 'Dev.to'
+        news['category_name'] = classify(title, body_markdown[:500] + ' ' + ' '.join(tags))
+        news['url'] = article.get('url', '')
+        news['cover_image'] = cover_image
+        yield news

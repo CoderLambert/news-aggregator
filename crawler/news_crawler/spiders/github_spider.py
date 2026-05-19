@@ -1,6 +1,7 @@
 import scrapy
 from datetime import datetime
 from news_crawler.items import NewsItem
+from news_crawler.category_map import classify
 
 
 class GithubTrendingSpider(scrapy.Spider):
@@ -54,15 +55,13 @@ class GithubTrendingSpider(scrapy.Spider):
                 content_parts.append(f'Language: {language}')
             content = ' | '.join(content_parts)
 
-            category = language if language else '开源'
-
             news = NewsItem()
             news['title'] = repo_path
             news['content'] = content
             news['author'] = repo_path.split('/')[0] if '/' in repo_path else ''
             news['publish_time'] = datetime.now()
             news['source_name'] = 'GitHub Trending'
-            news['category_name'] = category
+            news['category_name'] = language if language else classify(repo_path, content)
             news['url'] = url
             news['cover_image'] = ''
             yield news
