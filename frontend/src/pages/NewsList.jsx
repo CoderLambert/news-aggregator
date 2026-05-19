@@ -6,18 +6,46 @@ import CategoryFilter from '../components/CategoryFilter'
 import SourceFilter from '../components/SourceFilter'
 import LoadingSpinner from '../components/LoadingSpinner'
 
+const STORAGE_KEY = 'news-aggregator-filters'
+
+function loadSavedFilters() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return {}
+}
+
 export default function NewsList() {
+  const saved = loadSavedFilters()
   const [news, setNews] = useState([])
   const [categories, setCategories] = useState([])
   const [sources, setSources] = useState([])
   const [loading, setLoading] = useState(false)
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(true)
-  const [search, setSearch] = useState('')
-  const [searchMode, setSearchMode] = useState('hybrid')
-  const [category, setCategory] = useState(null)
-  const [source, setSource] = useState(null)
+  const [search, setSearch] = useState(saved.search || '')
+  const [searchMode, setSearchMode] = useState(saved.searchMode || 'hybrid')
+  const [category, setCategory] = useState(saved.categories || [])
+  const [source, setSource] = useState(saved.sources || [])
   const observer = useRef()
+
+  // Persist filters to localStorage on every change
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      search,
+      searchMode,
+      categories: category,
+      sources: source,
+    }))
+  }, [search, searchMode, category, source])
+
+  useEffect(() => {
+    fetchCategories().then(data => setCategories(data.results || data))
+    fetchSources().then(data => setSources(data.results || data))
+  }, [])
+
+  const loadingRef = useRef(false)
 
   useEffect(() => {
     fetchCategories().then(data => setCategories(data.results || data))
@@ -25,7 +53,8 @@ export default function NewsList() {
   }, [])
 
   const loadNews = useCallback(async (pageNum, reset = false) => {
-    if (loading) return
+    if (loadingRef.current) return
+    loadingRef.current = true
     setLoading(true)
     try {
       const params = { page: pageNum, page_size: 20 }
@@ -33,8 +62,8 @@ export default function NewsList() {
         params.search = search
         params.mode = searchMode
       }
-      if (category) params.category = category
-      if (source) params.source = source
+      if (category.length > 0) params.category = category.join(',')
+      if (source.length > 0) params.source = source.join(',')
       const data = await fetchNews(params)
       const results = data.results || data
       setNews(prev => reset ? results : [...prev, ...results])
@@ -44,8 +73,9 @@ export default function NewsList() {
       console.error('Failed to load news:', err)
     } finally {
       setLoading(false)
+      loadingRef.current = false
     }
-  }, [search, searchMode, category, source, loading])
+  }, [search, searchMode, category, source])
 
   useEffect(() => {
     setNews([])
@@ -56,7 +86,7 @@ export default function NewsList() {
 
   const lastRef = useCallback(
     node => {
-      if (loading || !hasMore) return
+      if (loadingRef.current || !hasMore) return
       if (observer.current) observer.current.disconnect()
       observer.current = new IntersectionObserver(entries => {
         if (entries[0].isIntersecting) {
@@ -65,7 +95,7 @@ export default function NewsList() {
       })
       if (node) observer.current.observe(node)
     },
-    [loading, hasMore, page, loadNews]
+    [hasMore, page, loadNews]
   )
 
   return (
