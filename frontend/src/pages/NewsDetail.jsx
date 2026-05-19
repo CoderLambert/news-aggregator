@@ -65,8 +65,8 @@ export default function NewsDetail() {
               showTooltips: true,
             }}
             codeBlockThemes={{
-              themes: ['vitesse-dark', 'vitesse-light'],
-              darkTheme: 'vitesse-dark',
+              themes: ['vitesse-light'],
+              darkTheme: 'vitesse-light',
               lightTheme: 'vitesse-light',
               monacoOptions: {
                 fontSize: 14,
