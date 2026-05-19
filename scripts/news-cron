@@ -1,0 +1,44 @@
+#!/bin/bash
+# 爬虫定时任务控制
+PROJECT=/root/news-aggregator
+LOG=$PROJECT/logs/cron.log
+PID_FILE=$PROJECT/logs/crond.pid
+
+start() {
+  if status; then
+    echo "crond 已在运行 (PID $(cat "$PID_FILE"))"
+    return 0
+  fi
+  crond >> "$LOG" 2>&1
+  pgrep -x crond > "$PID_FILE"
+  echo "crond 已启动 (PID $(cat "$PID_FILE"))"
+  echo "定时规则:"
+  crontab -l 2>/dev/null | grep -v '^#' | grep -v '^$'
+}
+
+stop() {
+  if [ -f "$PID_FILE" ]; then
+    kill "$(cat "$PID_FILE")" 2>/dev/null
+    rm -f "$PID_FILE"
+    echo "crond 已停止"
+  else
+    pkill -x crond 2>/dev/null && echo "crond 已停止" || echo "crond 未在运行"
+  fi
+}
+
+status() {
+  [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
+}
+
+case "${1:-help}" in
+  start)  start ;;
+  stop)   stop ;;
+  status) if status; then echo "crond 运行中"; else echo "crond 未运行"; fi ;;
+  restart) stop; start ;;
+  run)    cd "$PROJECT/backend" && python3 manage.py crawl all ;;
+  log)    tail -f "$PROJECT/logs/crawl.log" ;;
+  *)
+    echo "用法: news-cron {start|stop|restart|status|run|log}"
+    echo "  run  - 手动执行一次爬虫"
+    ;;
+esac

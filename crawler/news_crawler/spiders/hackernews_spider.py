@@ -2,6 +2,8 @@ import scrapy
 import json
 from datetime import datetime
 from news_crawler.items import NewsItem
+from news_crawler.category_map import classify
+
 
 HN_API = 'https://hacker-news.firebaseio.com/v0'
 
@@ -34,7 +36,6 @@ class HackerNewsSpider(scrapy.Spider):
         if not title:
             return
 
-        # If no external URL, link to HN comments page
         if not url:
             url = f"https://news.ycombinator.com/item?id={data['id']}"
 
@@ -45,22 +46,13 @@ class HackerNewsSpider(scrapy.Spider):
         author = data.get('by', '')
         publish_time = datetime.fromtimestamp(data.get('time', 0))
 
-        category = '科技'
-        title_lower = title.lower()
-        if any(kw in title_lower for kw in ['show hn', 'launch', 'startup', 'fundraising']):
-            category = '创业'
-        elif any(kw in title_lower for kw in ['hire', 'job', 'hiring']):
-            category = '招聘'
-        elif any(kw in title_lower for kw in ['ask hn']):
-            category = '问答'
-
         news = NewsItem()
         news['title'] = title
         news['content'] = content
         news['author'] = author
         news['publish_time'] = publish_time
         news['source_name'] = 'Hacker News'
-        news['category_name'] = category
+        news['category_name'] = classify(title, content)
         news['url'] = url
         news['cover_image'] = ''
         yield news

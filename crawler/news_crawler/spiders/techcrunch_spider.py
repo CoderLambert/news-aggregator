@@ -1,6 +1,8 @@
 import scrapy
+import re
 from datetime import datetime
 from news_crawler.items import NewsItem
+from news_crawler.category_map import classify
 
 
 class TechCrunchSpider(scrapy.Spider):
@@ -24,16 +26,14 @@ class TechCrunchSpider(scrapy.Spider):
                 continue
 
             description = item.css('description::text').get('') or ''
-            # Strip HTML tags from description
-            import re
             description = re.sub(r'<[^>]+>', '', description).strip()
 
-            author = item.css('dc\\:creator::text').get('') or ''
+            # dc namespace: use CSS selector
+            author = item.css('creator::text').get('') or ''
+            if not author:
+                author = item.css('author::text').get('') or ''
             pub_date = item.css('pubDate::text').get('')
-            cover_image = ''
-            enclosure = item.css('enclosure::attr(url)').get()
-            if enclosure:
-                cover_image = enclosure
+            cover_image = item.css('enclosure::attr(url)').get('') or ''
 
             publish_time = datetime.now()
             if pub_date:
@@ -45,28 +45,50 @@ class TechCrunchSpider(scrapy.Spider):
                     except ValueError:
                         pass
 
-            categories_raw = item.css('category::text').getall()
-            category = '科技'
-            if categories_raw:
-                cats_lower = [c.lower() for c in categories_raw]
-                if any(c in cats_lower for c in ['ai', 'artificial intelligence', 'machine learning']):
-                    category = 'AI'
-                elif any(c in cats_lower for c in ['startups', 'venture', 'funding']):
-                    category = '创业'
-                elif any(c in cats_lower for c in ['security', 'privacy']):
-                    category = '安全'
-                elif any(c in cats_lower for c in ['crypto', 'blockchain', 'web3']):
-                    category = '区块链'
-                elif any(c in cats_lower for c in ['apps', 'mobile', 'gadgets']):
-                    category = '产品'
-
+            url = url.strip()
             news = NewsItem()
             news['title'] = title.strip()
             news['content'] = description
             news['author'] = author.strip()
             news['publish_time'] = publish_time
             news['source_name'] = 'TechCrunch'
-            news['category_name'] = category
-            news['url'] = url.strip()
+            news['category_name'] = classify(title.strip(), description)
+            news['url'] = url
             news['cover_image'] = cover_image
             yield news
+
+            # Fetch full article
+            yield scrapy.Request(url, callback=self.parse_article, priority=1)
+
+    def parse_article(self, response):
+        title = response.css('h1::text').get()
+        if not title:
+            return
+
+        blocks = response.css('.entry-content p::text').getall()
+        if not blocks:
+            blocks = response.css('.wp-block-post-content p::text').getall()
+        if not blocks:
+            blocks = response.css('article p::text').getall()
+
+        content = '\n'.join(p.strip() for p in blocks if p.strip())
+        if len(content) < 50:
+            return
+
+        author = (
+            response.css('.author-name::text').get()
+            or response.css('.entry-author a::text').get()
+            or response.css('[class*="author"] a::text').get()
+            or ''
+        )
+
+        news = NewsItem()
+        news['title'] = title.strip()
+        news['content'] = content
+        news['author'] = author.strip()
+        news['publish_time'] = datetime.now()
+        news['source_name'] = 'TechCrunch'
+        news['category_name'] = classify(title.strip(), content)
+        news['url'] = response.url
+        news['cover_image'] = response.css('figure img::attr(src), .post-content img::attr(src)').get() or ''
+        yield news

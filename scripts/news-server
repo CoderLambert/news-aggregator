@@ -1,0 +1,52 @@
+#!/bin/bash
+# Django 后端服务控制
+PROJECT=/root/news-aggregator
+LOG=$PROJECT/logs/django.log
+PID_FILE=$PROJECT/logs/django.pid
+CMD="python3 manage.py runserver 0.0.0.0:9527"
+
+start() {
+  if status; then
+    echo "Django 已在运行 (PID $(cat "$PID_FILE"))"
+    return 0
+  fi
+  cd "$PROJECT/backend"
+  nohup $CMD >> "$LOG" 2>&1 &
+  echo $! > "$PID_FILE"
+  sleep 2
+  if kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+    echo "Django 已启动 (PID $(cat "$PID_FILE"), port 9527)"
+  else
+    echo "启动失败，查看日志: $LOG"
+    rm -f "$PID_FILE"
+    return 1
+  fi
+}
+
+stop() {
+  if [ -f "$PID_FILE" ]; then
+    kill "$(cat "$PID_FILE")" 2>/dev/null
+    rm -f "$PID_FILE"
+    echo "Django 已停止"
+  else
+    pkill -f "runserver.*9527" 2>/dev/null && echo "Django 已停止" || echo "Django 未在运行"
+  fi
+}
+
+status() {
+  if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+    return 0
+  fi
+  pkill -f "runserver.*9527" 2>/dev/null
+}
+
+case "${1:-help}" in
+  start)  start ;;
+  stop)   stop ;;
+  status) if status; then echo "Django 运行中"; else echo "Django 未运行"; fi ;;
+  restart) stop; sleep 1; start ;;
+  log)    tail -f "$LOG" ;;
+  *)
+    echo "用法: news-server {start|stop|restart|status|log}"
+    ;;
+esac

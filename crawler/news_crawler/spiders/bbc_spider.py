@@ -1,6 +1,7 @@
 import scrapy
 from datetime import datetime
 from news_crawler.items import NewsItem
+from news_crawler.category_map import classify
 
 
 class BbcSpider(scrapy.Spider):
@@ -18,20 +19,14 @@ class BbcSpider(scrapy.Spider):
 
     def parse(self, response):
         response.selector.remove_namespaces()
-        for item in response.css('item'):
-            url = item.css('link::text').get()
-            title = item.css('title::text').get()
+        for item in response.xpath('//item'):
+            url = item.xpath('link/text()').get()
+            title = item.xpath('title/text()').get()
             if not url or not title:
                 continue
 
-            category = '国际'
-            if 'technology' in response.url:
-                category = '科技'
-            elif 'business' in response.url:
-                category = '财经'
-
-            description = item.css('description::text').get('') or ''
-            pub_date = item.css('pubDate::text').get('')
+            description = item.xpath('description/text()').get('') or ''
+            pub_date = item.xpath('pubDate/text()').get()
 
             publish_time = datetime.now()
             if pub_date:
@@ -40,24 +35,22 @@ class BbcSpider(scrapy.Spider):
                 except ValueError:
                     pass
 
-            cover_image = ''
-            thumbnail = item.css('media\\:thumbnail::attr(url)').get()
-            if thumbnail:
-                cover_image = thumbnail
+            cover_image = item.xpath('media:thumbnail/@url').get() or ''
 
+            url = url.strip()
             news = NewsItem()
             news['title'] = title.strip()
             news['content'] = description.strip()
             news['author'] = ''
             news['publish_time'] = publish_time
             news['source_name'] = 'BBC'
-            news['category_name'] = category
-            news['url'] = url.strip()
+            news['category_name'] = classify(title.strip(), description)
+            news['url'] = url
             news['cover_image'] = cover_image
             yield news
 
             # Fetch full article
-            yield scrapy.Request(url.strip(), callback=self.parse_article, priority=1)
+            yield scrapy.Request(url, callback=self.parse_article, priority=1)
 
     def parse_article(self, response):
         title = (
@@ -87,19 +80,13 @@ class BbcSpider(scrapy.Spider):
             or ''
         )
 
-        category = '国际'
-        if 'technology' in response.url:
-            category = '科技'
-        elif 'business' in response.url:
-            category = '财经'
-
         news = NewsItem()
         news['title'] = title.strip()
         news['content'] = content
         news['author'] = author.strip()
         news['publish_time'] = datetime.now()
         news['source_name'] = 'BBC'
-        news['category_name'] = category
+        news['category_name'] = classify(title.strip(), content)
         news['url'] = response.url
         news['cover_image'] = cover_image
         yield news

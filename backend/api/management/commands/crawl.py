@@ -7,7 +7,6 @@ from scrapy.utils.project import get_project_settings
 
 CRAWLER_DIR = os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'crawler')
 SPIDERS = {
-    'sina': 'sina',
     'bbc': 'bbc',
     'reuters': 'reuters',
     'hackernews': 'hackernews',
@@ -27,7 +26,7 @@ class Command(BaseCommand):
             nargs='?',
             default='all',
             choices=['all'] + list(SPIDERS.keys()),
-            help='指定爬虫名称 (all=sina,bbc,reuters)',
+            help='指定爬虫名称 (all=全部爬虫)',
         )
 
     def handle(self, *args, **options):

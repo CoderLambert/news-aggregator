@@ -2,6 +2,7 @@ import scrapy
 import re
 from datetime import datetime
 from news_crawler.items import NewsItem
+from news_crawler.category_map import classify
 
 
 class ProductHuntSpider(scrapy.Spider):
@@ -12,20 +13,23 @@ class ProductHuntSpider(scrapy.Spider):
     custom_settings = {
         'DOWNLOAD_DELAY': 2,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 1,
+        'USER_AGENT': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
     }
 
     def parse(self, response):
         response.selector.remove_namespaces()
         for entry in response.css('entry'):
             title = entry.css('title::text').get('')
-            url = entry.css('link[rel="alternate"]::attr(href)').get('')
+            links = entry.css('link[rel="alternate"]')
+            if links:
+                url = links.attrib.get('href', '')
+            else:
+                url = entry.css('link::attr(href)').get('') or ''
             if not title or not url:
                 continue
 
             content_html = entry.css('content::text').get('') or ''
-            # Strip HTML tags
             description = re.sub(r'<[^>]+>', '', content_html).strip()
-            # Clean up whitespace
             description = re.sub(r'\s+', ' ', description).strip()
 
             author = entry.css('author name::text').get('') or ''
@@ -38,23 +42,14 @@ class ProductHuntSpider(scrapy.Spider):
                 except (ValueError, TypeError):
                     pass
 
-            category = '产品'
-            title_lower = title.lower()
-            desc_lower = description.lower()
-            if any(kw in title_lower or kw in desc_lower for kw in ['ai', 'llm', 'gpt', 'agent']):
-                category = 'AI'
-            elif any(kw in title_lower or kw in desc_lower for kw in ['developer', 'api', 'code', 'open source']):
-                category = '开发工具'
-            elif any(kw in title_lower or kw in desc_lower for kw in ['saas', 'productivity', 'workflow']):
-                category = 'SaaS'
-
+            url = url.strip().strip('"')
             news = NewsItem()
             news['title'] = title.strip()
             news['content'] = description
             news['author'] = author.strip()
             news['publish_time'] = publish_time
             news['source_name'] = 'ProductHunt'
-            news['category_name'] = category
-            news['url'] = url.strip()
+            news['category_name'] = classify(title.strip(), description)
+            news['url'] = url
             news['cover_image'] = ''
             yield news
