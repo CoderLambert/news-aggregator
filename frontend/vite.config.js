@@ -8,5 +8,12 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:9527',
     },
+    fs: {
+      allow: ['..'],
+    },
+  },
+  optimizeDeps: {
+    exclude: ['monaco-editor'],
+    include: ['@shikijs/monaco'],
   },
 })
