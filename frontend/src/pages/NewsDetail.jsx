@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { fetchNewsDetail } from '../services/api'
 import LoadingSpinner from '../components/LoadingSpinner'
+import NodeRenderer from 'markstream-react'
+import 'markstream-react/index.css'
 
 export default function NewsDetail() {
   const { id } = useParams()
@@ -52,8 +54,43 @@ export default function NewsDetail() {
           />
         )}
 
-        <div className="prose prose-gray max-w-none text-gray-700 leading-relaxed whitespace-pre-wrap">
-          {news.content}
+        <div className="text-gray-700 leading-relaxed">
+          <NodeRenderer
+            content={news.content || ''}
+            codeBlockProps={{
+              showHeader: true,
+              showCopyButton: true,
+              showCollapseButton: false,
+              showFontSizeButtons: false,
+              showTooltips: true,
+            }}
+            codeBlockThemes={{
+              themes: ['vitesse-dark', 'vitesse-light'],
+              darkTheme: 'vitesse-dark',
+              lightTheme: 'vitesse-light',
+              monacoOptions: {
+                fontSize: 14,
+                fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, monospace",
+                padding: { top: 12, bottom: 12 },
+                lineNumbers: 'on',
+                wordWrap: 'on',
+                minimap: { enabled: false },
+                scrollbar: { vertical: 'hidden', horizontal: 'hidden' },
+                scrollBeyondLastLine: false,
+                overviewRulerLanes: 0,
+                hideCursorInOverviewRuler: true,
+                renderLineHighlight: 'none',
+                renderLineHighlightOnlyWhenFocus: true,
+                contextmenu: false,
+                readOnly: true,
+                domReadOnly: true,
+                mouseWheelZoom: false,
+                smoothScrolling: true,
+                cursorBlinking: 'blink',
+                cursorSmoothCaretAnimation: 'on',
+              },
+            }}
+          />
         </div>
 
         <div className="mt-8 pt-6 border-t border-gray-200">
