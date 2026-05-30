@@ -1,4 +1,8 @@
+import { useLanguage } from '../context/LanguageContext'
+
 export default function CategoryFilter({ categories, active = [], onChange }) {
+  const { lang } = useLanguage()
+
   const toggle = (id) => {
     if (active.includes(id)) {
       onChange(active.filter(a => a !== id))
@@ -16,7 +20,7 @@ export default function CategoryFilter({ categories, active = [], onChange }) {
             ? 'bg-blue-600 text-white'
             : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
       >
-        全部
+        {lang === 'en' ? 'All' : '全部'}
       </button>
       {categories.map(cat => (
         <button

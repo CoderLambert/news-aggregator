@@ -4,6 +4,7 @@ import sys
 import django
 from asgiref.sync import sync_to_async
 from django.utils import timezone
+from django.utils.timezone import now as tz_now
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'backend'))
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'newsaggregator.settings')
@@ -11,6 +12,7 @@ django.setup()
 
 from django.db import close_old_connections
 from api.models import Category, News, Source
+from api.services.translator import translate, is_chinese
 
 
 SOURCE_DEFAULTS = {
@@ -79,6 +81,65 @@ def _index_news(news_id, title, content):
         pass
 
 
+def _try_translate(news):
+    """Try to translate English news to Chinese if not already translated.
+    Records translation status on the news object.
+    """
+    if not news.title or is_chinese(news.title):
+        news.translation_status = 'success'
+        news.save(update_fields=['translation_status'])
+        return
+
+    if news.title_zh:
+        news.translation_status = 'success'
+        news.save(update_fields=['translation_status'])
+        return  # Already translated
+
+    # Mark as translating
+    news.translation_status = 'translating'
+    news.last_translation_attempt = tz_now()
+    news.save(update_fields=['translation_status', 'last_translation_attempt'])
+
+    try:
+        title_zh, err_type, err_msg = translate(news.title, src="en", tgt="zh-CN")
+        if title_zh:
+            news.title_zh = title_zh
+            if news.content and not is_chinese(news.content) and not news.content_zh:
+                content_zh, c_err_type, c_err_msg = translate(
+                    news.content, src="en", tgt="zh-CN"
+                )
+                if content_zh:
+                    news.content_zh = content_zh
+
+            news.translation_status = 'success'
+            news.translation_error = ''
+            news.save(update_fields=[
+                'title_zh', 'content_zh', 'translation_status', 'translation_error'
+            ])
+        else:
+            # Translation returned empty result with error
+            # Map 'unknown' error type to 'failed' status
+            news.translation_status = 'failed' if err_type == 'unknown' else err_type
+            news.translation_error = err_msg or 'Translation returned empty result'
+            news.save(update_fields=['translation_status', 'translation_error'])
+
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Translation failed for news {news.id}: {e}")
+        # Classify the error
+        err_str = str(e).lower()
+        if any(kw in err_str for kw in ["network is unreachable", "connection refused",
+                                         "no address associated"]):
+            news.translation_status = 'network_error'
+        elif "timed out" in err_str or "timeout" in err_str:
+            news.translation_status = 'network_error'
+        else:
+            news.translation_status = 'failed'
+        news.translation_error = str(e)
+        news.save(update_fields=['translation_status', 'translation_error'])
+
+
 @sync_to_async
 def _save_item(item):
     close_old_connections()
@@ -134,6 +195,7 @@ def _save_item(item):
                 news.cover_image = item['cover_image']
             news.save()
             _index_news(news.id, news.title, news.content)
+            _try_translate(news)
     else:
         # Cross-source dedup: check if a similar title already exists
         similar_id = _find_similar_titles(title, threshold=0.65)
@@ -152,6 +214,7 @@ def _save_item(item):
             related_to_id=related_to_id,
         )
         _index_news(news.id, news.title, news.content)
+        _try_translate(news)
 
 
 class DjangoPipeline:

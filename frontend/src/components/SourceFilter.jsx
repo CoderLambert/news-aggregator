@@ -1,4 +1,8 @@
+import { useLanguage } from '../context/LanguageContext'
+
 export default function SourceFilter({ sources, active = [], onChange }) {
+  const { lang } = useLanguage()
+
   const toggle = (id) => {
     if (active.includes(id)) {
       onChange(active.filter(a => a !== id))
@@ -16,7 +20,7 @@ export default function SourceFilter({ sources, active = [], onChange }) {
             ? 'bg-emerald-600 text-white'
             : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
       >
-        全部来源
+        {lang === 'en' ? 'All Sources' : '全部来源'}
       </button>
       {sources.map(src => (
         <button
