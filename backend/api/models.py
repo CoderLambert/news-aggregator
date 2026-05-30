@@ -42,6 +42,8 @@ class Source(models.Model):
 class News(models.Model):
     title = models.CharField('标题', max_length=500, db_index=True)
     content = models.TextField('内容')
+    title_zh = models.TextField('中文标题', blank=True, default='')
+    content_zh = models.TextField('中文内容', blank=True, default='')
     author = models.CharField('作者', max_length=100, blank=True, default='')
     publish_time = models.DateTimeField('发布时间', db_index=True)
     source = models.ForeignKey(Source, on_delete=models.CASCADE, verbose_name='来源')
@@ -51,6 +53,26 @@ class News(models.Model):
     title_hash = models.BigIntegerField('标题哈希', null=True, blank=True, db_index=True)
     related_to = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, verbose_name='关联主新闻')
     created_at = models.DateTimeField('入库时间', auto_now_add=True)
+
+    # Translation tracking
+    TRANSLATION_STATUS_CHOICES = [
+        ('pending', '等待翻译'),
+        ('translating', '翻译中'),
+        ('success', '翻译成功'),
+        ('failed', '翻译失败'),
+        ('network_error', '网络错误'),
+    ]
+    translation_status = models.CharField(
+        '翻译状态', max_length=20, choices=TRANSLATION_STATUS_CHOICES,
+        default='pending', db_index=True,
+    )
+    translation_error = models.TextField('翻译错误信息', blank=True, default='')
+    translation_retry_count = models.PositiveIntegerField('重试次数', default=0)
+    last_translation_attempt = models.DateTimeField('最后翻译时间', null=True, blank=True)
+
+    # Full article content (fetched via Jina Reader)
+    full_content = models.TextField('完整原文(Markdown)', blank=True, default='')
+    full_content_fetched_at = models.DateTimeField('原文获取时间', null=True, blank=True)
 
     class Meta:
         verbose_name = '新闻'

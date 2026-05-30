@@ -1,12 +1,21 @@
 import { useState, useEffect, useRef } from 'react'
+import { useLanguage } from '../context/LanguageContext'
 
-const MODES = [
-  { key: 'keyword', label: '关键词' },
-  { key: 'semantic', label: '语义' },
-  { key: 'hybrid', label: '混合' },
-]
+const MODES = {
+  zh: [
+    { key: 'keyword', label: '关键词' },
+    { key: 'semantic', label: '语义' },
+    { key: 'hybrid', label: '混合' },
+  ],
+  en: [
+    { key: 'keyword', label: 'Keyword' },
+    { key: 'semantic', label: 'Semantic' },
+    { key: 'hybrid', label: 'Hybrid' },
+  ],
+}
 
 export default function SearchBar({ value, onChange, mode, onModeChange }) {
+  const { lang, t } = useLanguage()
   const [input, setInput] = useState(value)
   const timer = useRef(null)
 
@@ -19,6 +28,8 @@ export default function SearchBar({ value, onChange, mode, onModeChange }) {
     clearTimeout(timer.current)
     timer.current = setTimeout(() => onChange(e.target.value), 300)
   }
+
+  const modes = MODES[lang] || MODES.zh
 
   return (
     <div className="flex items-center gap-2">
@@ -34,13 +45,13 @@ export default function SearchBar({ value, onChange, mode, onModeChange }) {
           type="text"
           value={input}
           onChange={handleChange}
-          placeholder="搜索新闻..."
+          placeholder={t.search}
           className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm
             focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
         />
       </div>
       <div className="flex border border-gray-300 rounded-lg overflow-hidden">
-        {MODES.map(m => (
+        {modes.map(m => (
           <button
             key={m.key}
             onClick={() => onModeChange?.(m.key)}

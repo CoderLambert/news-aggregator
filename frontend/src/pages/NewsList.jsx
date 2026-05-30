@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { fetchNews, fetchCategories, fetchSources } from '../services/api'
+import { useLanguage } from '../context/LanguageContext'
 import NewsCard from '../components/NewsCard'
 import SearchBar from '../components/SearchBar'
 import CategoryFilter from '../components/CategoryFilter'
@@ -17,6 +18,7 @@ function loadSavedFilters() {
 }
 
 export default function NewsList() {
+  const { t, lang } = useLanguage()
   const saved = loadSavedFilters()
   const [news, setNews] = useState([])
   const [categories, setCategories] = useState([])
@@ -46,11 +48,6 @@ export default function NewsList() {
   }, [])
 
   const loadingRef = useRef(false)
-
-  useEffect(() => {
-    fetchCategories().then(data => setCategories(data.results || data))
-    fetchSources().then(data => setSources(data.results || data))
-  }, [])
 
   const loadNews = useCallback(async (pageNum, reset = false) => {
     if (loadingRef.current) return
@@ -84,6 +81,14 @@ export default function NewsList() {
     loadNews(1, true)
   }, [search, searchMode, category, source])
 
+  // Refetch when language changes
+  useEffect(() => {
+    setNews([])
+    setPage(1)
+    setHasMore(true)
+    loadNews(1, true)
+  }, [lang])
+
   const lastRef = useCallback(
     node => {
       if (loadingRef.current || !hasMore) return
@@ -100,7 +105,7 @@ export default function NewsList() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6">
-      {/* 搜索栏 */}
+      {/* Search bar */}
       <div className="mb-4">
         <div className="max-w-lg">
           <SearchBar
@@ -112,22 +117,32 @@ export default function NewsList() {
         </div>
       </div>
 
-      {/* 分类筛选 */}
+      {/* Category filter */}
       <div className="mb-3">
-        <span className="text-xs font-medium text-gray-500 mr-2">分类</span>
+        <span className="text-xs font-medium text-gray-500 mr-2">
+          {lang === 'en' ? 'Category' : '分类'}
+        </span>
         <CategoryFilter categories={categories} active={category} onChange={setCategory} />
       </div>
 
-      {/* 来源筛选 */}
+      {/* Source filter */}
       <div className="mb-6">
-        <span className="text-xs font-medium text-gray-500 mr-2">来源</span>
+        <span className="text-xs font-medium text-gray-500 mr-2">
+          {lang === 'en' ? 'Source' : '来源'}
+        </span>
         <SourceFilter sources={sources} active={source} onChange={setSource} />
       </div>
 
       {news.length === 0 && !loading && (
         <div className="text-center py-20 text-gray-400">
-          <p className="text-lg">暂无新闻数据</p>
-          <p className="text-sm mt-1">请先运行爬虫: python manage.py crawl</p>
+          <p className="text-lg">
+            {lang === 'en' ? 'No news data' : '暂无新闻数据'}
+          </p>
+          <p className="text-sm mt-1">
+            {lang === 'en'
+              ? 'Run crawler first: python manage.py crawl'
+              : '请先运行爬虫: python manage.py crawl'}
+          </p>
         </div>
       )}
 
@@ -142,7 +157,9 @@ export default function NewsList() {
       {loading && <LoadingSpinner />}
 
       {!hasMore && news.length > 0 && (
-        <p className="text-center text-sm text-gray-400 py-8">没有更多了</p>
+        <p className="text-center text-sm text-gray-400 py-8">
+          {lang === 'en' ? 'No more results' : '没有更多了'}
+        </p>
       )}
     </div>
   )

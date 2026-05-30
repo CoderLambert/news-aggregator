@@ -43,9 +43,14 @@ class NewsListView(generics.ListAPIView):
     pagination_class = StandardPagination
     filter_backends = [django_filters.DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = NewsFilter
-    search_fields = ['title', 'content']
+    search_fields = ['title', 'content', 'title_zh', 'content_zh']
     ordering_fields = ['publish_time', 'created_at']
     ordering = ['-publish_time']
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['lang'] = self.request.query_params.get('lang', 'original')
+        return context
 
     def get_queryset(self):
         # By default hide duplicates (entries with related_to set)
@@ -198,6 +203,92 @@ class NewsListView(generics.ListAPIView):
 class NewsDetailView(generics.RetrieveAPIView):
     queryset = News.objects.select_related('source', 'category').all()
     serializer_class = NewsDetailSerializer
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['lang'] = self.request.query_params.get('lang', 'original')
+        return context
+
+
+class NewsFetchFullView(generics.GenericAPIView):
+    """Fetch full article content via Jina Reader API and persist to database."""
+    queryset = News.objects.select_related('source', 'category').all()
+    serializer_class = NewsDetailSerializer
+    permission_classes = []  # Public access
+
+    def post(self, request, pk):
+        from django.utils.timezone import now as tz_now
+        import urllib.request
+        import ssl
+        import re
+        import logging
+
+        logger = logging.getLogger(__name__)
+        news = self.get_object()
+
+        # If already has full content, return cached version
+        if news.full_content:
+            serializer = self.get_serializer(news)
+            return Response(serializer.data)
+
+        url = news.url
+        if not url:
+            return Response(
+                {'error': 'No URL available for this article'},
+                status=400,
+            )
+
+        jina_url = f'https://r.jina.ai/{url}'
+
+        try:
+            ctx = ssl.create_default_context()
+            req = urllib.request.Request(
+                jina_url,
+                headers={'Accept': 'text/plain', 'User-Agent': 'Mozilla/5.0'}
+            )
+            with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
+                text = resp.read().decode('utf-8')
+
+            # Extract markdown content after "Markdown Content:" header
+            markdown_match = re.search(r'Markdown Content:\n([\s\S]+)$', text)
+            markdown = markdown_match.group(1).strip() if markdown_match else text.strip()
+
+            if not markdown or markdown == 'Sorry.' or len(markdown) < 20:
+                return Response(
+                    {'error': '未能提取到有效内容'},
+                    status=422,
+                )
+
+            # Save to database
+            news.full_content = markdown
+            news.full_content_fetched_at = tz_now()
+            news.save(update_fields=['full_content', 'full_content_fetched_at'])
+
+            serializer = self.get_serializer(news)
+            return Response(serializer.data)
+
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                return Response(
+                    {'error': '请求过于频繁，请稍后重试'},
+                    status=429,
+                )
+            if e.code == 451:
+                return Response(
+                    {'error': '内容因法律限制无法获取'},
+                    status=451,
+                )
+            logger.error(f'Jina Reader HTTP error for {url}: {e.code} - {e.reason}')
+            return Response(
+                {'error': f'获取失败 ({e.code})'},
+                status=e.code,
+            )
+        except Exception as e:
+            logger.error(f'Jina Reader error for {url}: {e}')
+            return Response(
+                {'error': f'获取失败: {str(e)}'},
+                status=502,
+            )
 
 
 class CategoryListView(generics.ListAPIView):
