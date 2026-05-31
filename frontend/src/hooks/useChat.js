@@ -1,33 +1,43 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { fetchChatHistory, clearChatHistory, chatStream } from '../services/api'
 
 const ASSISTANT_ERROR = '抱歉，我遇到了一些问题，请稍后再试。'
+const SUCCESS_DURATION_MS = 1500
 
 /**
- * Manages chat lifecycle for a given news article.
- * Returns messages + actions; UI components are presentation-only.
+ * Manages chat lifecycle for a given news article + exposes a `phase`
+ * state machine so UI (especially the mascot) can react to lifecycle events.
+ *
+ * Phases:
+ *   - 'loading-history' : initial fetch of past messages
+ *   - 'idle'            : ready, no active request
+ *   - 'thinking'        : user just sent, waiting for first token
+ *   - 'streaming'       : tokens arriving
+ *   - 'success'         : stream finished, transient (auto-reverts after 1.5s)
+ *   - 'error'           : stream failed (sticky until next handleSend)
  *
  * Why no `setIsLoading(true)` synchronously in the effect body?
  *   React 19's `react-hooks/set-state-in-effect` flags it as a cascading
- *   render. Instead we initialise `isLoading` to true from useState and let
- *   the async `load()` only ever flip it to false. For id changes we use a
- *   `loadingId` state we compare against to detect "new id arrived" and reset
- *   inside async land.
+ *   render. We init phase='loading-history' from useState and let the async
+ *   load() only ever flip it forward via the async IIFE.
  */
 export function useChat(newsId) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
-  const [isLoading, setIsLoading] = useState(true)
+  const [phase, setPhase] = useState('loading-history')
+  const successTimerRef = useRef(null)
+
+  // Loading state derived from phase — covers history fetch + active turn
+  const isLoading =
+    phase === 'loading-history' || phase === 'thinking' || phase === 'streaming'
 
   useEffect(() => {
     let cancelled = false
 
     ;(async () => {
-      // Reset happens inside the async IIFE so it's not a synchronous
-      // effect-body setState. Microtask boundary turns this into an event-
-      // like update from React's perspective.
+      // Reset inside async IIFE so it's not a synchronous effect-body setState
       setMessages([])
-      setIsLoading(true)
+      setPhase('loading-history')
       try {
         const data = await fetchChatHistory(newsId)
         if (cancelled) return
@@ -36,14 +46,19 @@ export function useChat(newsId) {
         if (cancelled) return
         console.error('Failed to load chat history:', err)
       } finally {
-        if (!cancelled) setIsLoading(false)
+        if (!cancelled) setPhase('idle')
       }
     })()
 
     return () => { cancelled = true }
   }, [newsId])
 
+  // Cleanup success timer on unmount
+  useEffect(() => () => clearTimeout(successTimerRef.current), [])
+
   async function handleClearChat() {
+    // Friendly confirm via window.confirm (chat panel-level UI lives in the
+    // ChatHeader component — see that file for the friendly dialog variant).
     if (!window.confirm('确定要清空关于这篇文章的对话记录吗？')) return
     try {
       await clearChatHistory(newsId)
@@ -57,14 +72,22 @@ export function useChat(newsId) {
     const trimmed = input.trim()
     if (!trimmed || isLoading) return
 
+    // Clear any pending success-to-idle timer
+    clearTimeout(successTimerRef.current)
+
     const userMessage = { role: 'user', content: trimmed }
     setMessages(prev => [...prev, userMessage, { role: 'assistant', content: '', id: Date.now() }])
     setInput('')
-    setIsLoading(true)
+    setPhase('thinking')
 
     try {
       let accumulated = ''
+      let firstChunk = true
       for await (const chunk of chatStream(newsId, trimmed)) {
+        if (firstChunk) {
+          setPhase('streaming')
+          firstChunk = false
+        }
         accumulated += chunk
         setMessages(prev => {
           const next = prev.slice()
@@ -72,6 +95,9 @@ export function useChat(newsId) {
           return next
         })
       }
+      // Transient success — mascot shows happy mood for 1.5s
+      setPhase('success')
+      successTimerRef.current = setTimeout(() => setPhase('idle'), SUCCESS_DURATION_MS)
     } catch (err) {
       console.error('Chat error:', err)
       setMessages(prev => {
@@ -79,10 +105,13 @@ export function useChat(newsId) {
         next[next.length - 1] = { ...next[next.length - 1], content: ASSISTANT_ERROR }
         return next
       })
-    } finally {
-      setIsLoading(false)
+      setPhase('error')
     }
   }
 
-  return { messages, input, setInput, isLoading, handleSend, handleClearChat }
+  return {
+    messages, input, setInput,
+    isLoading, phase,
+    handleSend, handleClearChat,
+  }
 }
