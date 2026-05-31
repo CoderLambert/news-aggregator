@@ -132,6 +132,9 @@ export default function NewsDetail() {
             t={t}
           />
 
+          {/* TOC — inline on mobile, sidebar on desktop */}
+          <ArticleToc headings={headings} activeId={activeId} />
+
           {news.cover_image && (
             <img src={news.cover_image} alt={displayTitle} className="w-full rounded-xl mb-6" />
           )}
@@ -178,9 +181,6 @@ export default function NewsDetail() {
         </article>
         <NewsChatAssistant newsId={id} />
       </div>
-
-      {/* TOC sidebar / mobile sheet */}
-      <ArticleToc headings={headings} activeId={activeId} />
     </div>
   )
 }

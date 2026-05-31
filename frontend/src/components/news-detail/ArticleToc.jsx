@@ -1,15 +1,16 @@
 import { useState } from 'react'
-import { List, ChevronRight } from 'lucide-react'
+import { List, ChevronDown, ChevronRight } from 'lucide-react'
 
 /**
- * ArticleToc — table of contents sidebar for article headings.
+ * ArticleToc — table of contents for article headings.
+ *
+ * Two presentation modes:
+ *   Mobile: inline collapsible section below the article title
+ *   Desktop: fixed right sidebar
  *
  * Props:
  *   - headings: { id, text, level }[] — flat list extracted by useArticleToc
  *   - activeId: string — id of the heading currently in viewport
- *
- * Mobile: collapsible bottom sheet.
- * Desktop: fixed right sidebar (only visible when there are 2+ headings).
  */
 export default function ArticleToc({ headings, activeId }) {
   const [open, setOpen] = useState(false)
@@ -20,8 +21,6 @@ export default function ArticleToc({ headings, activeId }) {
     const el = document.getElementById(id)
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      // Close on mobile after navigation
-      setOpen(false)
     }
   }
 
@@ -36,7 +35,7 @@ export default function ArticleToc({ headings, activeId }) {
           type="button"
           onClick={() => handleClick(h.id)}
           className={`
-            block w-full text-left text-xs leading-snug py-1 rounded transition-colors
+            block w-full text-left text-xs leading-snug py-1.5 rounded transition-colors
             ${h.id === activeId
               ? 'text-orange-600 font-medium bg-orange-50'
               : 'text-neutral-500 hover:text-neutral-800 hover:bg-neutral-50'}
@@ -51,51 +50,31 @@ export default function ArticleToc({ headings, activeId }) {
 
   return (
     <>
-      {/* Mobile: floating button + bottom sheet */}
-      <div className="lg:hidden">
-        {/* Floating trigger button */}
+      {/* ── Mobile / all: inline collapsible section below title ── */}
+      <div className="lg:hidden mb-4">
         <button
           type="button"
           onClick={() => setOpen(!open)}
-          aria-label={open ? '关闭目录' : '打开目录'}
-          className="fixed bottom-20 right-4 z-40 w-10 h-10 rounded-full
-                     bg-white shadow-lg border border-neutral-200
-                     flex items-center justify-center
-                     active:scale-95 transition-transform"
+          className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl
+                     bg-neutral-50 border border-neutral-200 text-sm
+                     hover:bg-neutral-100 transition-colors"
         >
-          <List className="size-5 text-neutral-600" />
-        </button>
-
-        {/* Backdrop */}
-        {open && (
-          <div
-            className="fixed inset-0 z-40 bg-black/20"
-            onClick={() => setOpen(false)}
+          <List className="size-4 text-neutral-500" />
+          <span className="text-neutral-700 font-medium">文章目录</span>
+          <span className="text-neutral-400 text-xs ml-auto">{headings.length} 节</span>
+          <ChevronDown
+            className={`size-4 text-neutral-400 transition-transform ${open ? 'rotate-180' : ''}`}
           />
-        )}
-
-        {/* Bottom sheet */}
-        <div className={`fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl shadow-xl
-                         border-t border-neutral-200 max-h-[50vh] overflow-y-auto
-                         transition-transform duration-300
-                         ${open ? 'translate-y-0' : 'translate-y-full'}`}
-        >
-          <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-100">
-            <span className="text-sm font-medium text-neutral-800">文章目录</span>
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              aria-label="关闭目录"
-              className="p-1 rounded hover:bg-neutral-100"
-            >
-              ✕
-            </button>
+        </button>
+        {open && (
+          <div className="mt-2 px-3 py-2 bg-white rounded-xl border border-neutral-200 shadow-sm
+                          max-h-[40vh] overflow-y-auto chat-input-scroll">
+            {tocItems}
           </div>
-          <div className="px-4 py-3">{tocItems}</div>
-        </div>
+        )}
       </div>
 
-      {/* Desktop: right sidebar */}
+      {/* ── Desktop: fixed right sidebar ── */}
       <aside className="hidden lg:block fixed right-[max(1rem,calc((100vw-48rem)/2-14rem))]
                          top-24 w-52 max-h-[calc(100vh-8rem)] overflow-y-auto
                          chat-input-scroll">

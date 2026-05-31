@@ -1,3 +1,5 @@
+import { useState, useLayoutEffect, useRef } from 'react'
+
 /**
  * useArticleToc — extracts heading tree from a DOM container.
  *
@@ -6,7 +8,6 @@
  *
  * React 19 + React Compiler enabled.
  */
-import { useState, useLayoutEffect, useRef } from 'react'
 
 const HEADING_SELECTOR = 'h1, h2, h3'
 const OBSERVE_ROOT_MARGIN = '-80px 0px -60% 0px'
@@ -16,7 +17,8 @@ export function useArticleToc(containerRef) {
   const [activeId, setActiveId] = useState('')
   const observerRef = useRef(null)
 
-  // Scan headings on mount / DOM mutation
+  // Scan headings — runs on mount, on DOM mutation, and after a rAF delay
+  // to catch React-rendered content that may not exist at mount time.
   useLayoutEffect(() => {
     const container = containerRef.current
     if (!container) return
@@ -25,27 +27,37 @@ export function useArticleToc(containerRef) {
       const els = container.querySelectorAll(HEADING_SELECTOR)
       const items = []
       els.forEach((el, i) => {
-        // Ensure each heading has a stable id for anchor links
         if (!el.id) {
           el.id = `toc-heading-${i}`
         }
         items.push({
           id: el.id,
           text: el.textContent?.trim() || '',
-          level: parseInt(el.tagName[1], 10), // 1, 2, or 3
+          level: parseInt(el.tagName[1], 10),
         })
       })
       setHeadings(items)
     }
 
+    // Immediate scan
     scan()
+
+    // Delayed scan — React children (FullContentSection etc.) may not have
+    // rendered yet at the time of mount. rAF ensures we scan after paint.
+    const rafId = requestAnimationFrame(scan)
 
     // Observe DOM mutations so dynamically-loaded content (e.g. markdown)
     // gets picked up automatically.
-    const mo = new MutationObserver(scan)
+    const mo = new MutationObserver(() => {
+      // Debounce: wait a frame so React finishes its batch
+      requestAnimationFrame(scan)
+    })
     mo.observe(container, { childList: true, subtree: true })
 
-    return () => mo.disconnect()
+    return () => {
+      mo.disconnect()
+      cancelAnimationFrame(rafId)
+    }
   }, [containerRef])
 
   // IntersectionObserver to track which heading is in viewport
@@ -53,7 +65,6 @@ export function useArticleToc(containerRef) {
     const container = containerRef.current
     if (!container) return
 
-    // Clean up previous observer
     if (observerRef.current) {
       observerRef.current.disconnect()
     }
@@ -63,7 +74,6 @@ export function useArticleToc(containerRef) {
 
     const observer = new IntersectionObserver(
       (entries) => {
-        // Find the topmost visible heading
         const visible = entries
           .filter((e) => e.isIntersecting)
           .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
