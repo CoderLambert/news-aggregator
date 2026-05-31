@@ -8,6 +8,15 @@ from .serializers import (
     CategorySerializer, SourceSerializer,
     NewsListSerializer, NewsDetailSerializer,
 )
+# Module-level import so tests can patch `api.views.get_openai_client`
+from api.services.llm_translator import get_openai_client
+
+# Hardcoded fallback shown when the LLM is unreachable / returns garbage
+SUGGESTED_QUESTIONS_FALLBACK = [
+    '帮我用一句话总结这篇文章',
+    '这篇文章里最重要的三个观点是什么？',
+    '有什么背景知识可以帮我更好理解？',
+]
 
 
 class CommaSeparatedIntegerFilter(django_filters.BaseInFilter, django_filters.NumberFilter):
@@ -470,7 +479,6 @@ class NewsChatView(generics.GenericAPIView):
 
     def post(self, request, pk):
         from django.http import StreamingHttpResponse
-        from api.services.llm_translator import get_openai_client
 
         news = self.get_object()
         
@@ -560,3 +568,85 @@ class SourceListView(generics.ListAPIView):
 
     def get_queryset(self):
         return Source.objects.annotate(news_count=Count('news'))
+
+
+class NewsSuggestedQuestionsView(generics.GenericAPIView):
+    """Return 3 LLM-generated suggested questions for this article.
+
+    Strategy:
+      1. If `news.suggested_questions` is already populated → return cached.
+      2. Else call the chat LLM with a tight JSON-only prompt, parse the
+         result, persist on the News row, then return.
+      3. On ANY error (LLM unreachable, JSON parse fail, empty list) → fall
+         back to the hardcoded 3-question list so the chat panel always shows
+         3 chips. Endpoint always returns 200 unless the article is missing.
+
+    Reuses the same chat LLM client (kimi-k2.5 via Volcengine/DashScope) used
+    by NewsChatView, so there's no new API key or model to configure.
+    """
+    queryset = News.objects.select_related('source', 'category').all()
+    permission_classes = []
+
+    @method_decorator(csrf_exempt)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def post(self, request, pk):
+        import json
+        from django.utils import timezone
+
+        news = self.get_object()
+
+        # Cache hit
+        if news.suggested_questions and len(news.suggested_questions) >= 3:
+            return Response({'questions': news.suggested_questions[:3]})
+
+        # Build context (same shape as the chat view)
+        context = news.full_content_zh if news.full_content_zh else news.content
+        if len(context) > 6000:
+            context = context[:6000]
+        title = news.title_zh or news.title
+
+        prompt = (
+            f'你是一个新闻阅读助手。请阅读下面这篇文章，然后生成 3 个用户读完后'
+            f'最可能想问的问题。要求：\n'
+            f'1. 每个问题必须基于本文实际内容，不要泛泛而谈\n'
+            f'2. 问题要简短自然，像一个真人读者会问的\n'
+            f'3. 三个问题角度不同（一个事实/一个分析/一个拓展）\n'
+            f'4. 只输出一个 JSON 数组，形如 ["问题1", "问题2", "问题3"]，'
+            f'不要有任何解释、Markdown 或其它文字。\n\n'
+            f'## 标题\n{title}\n\n'
+            f'## 正文\n{context}'
+        )
+
+        try:
+            client = get_openai_client()
+            completion = client.chat.completions.create(
+                model='kimi-k2.5',
+                messages=[{'role': 'user', 'content': prompt}],
+                temperature=0.6,
+            )
+            raw = completion.choices[0].message.content or ''
+            # Strip optional markdown code fence
+            raw = raw.strip()
+            if raw.startswith('```'):
+                raw = raw.strip('`')
+                # Drop leading "json\n" if present
+                if raw.lower().startswith('json'):
+                    raw = raw[4:].lstrip()
+            questions = json.loads(raw)
+            if not isinstance(questions, list) or len(questions) < 3:
+                raise ValueError('LLM response did not yield 3 questions')
+            questions = [str(q).strip() for q in questions[:3] if str(q).strip()]
+            if len(questions) < 3:
+                raise ValueError('fewer than 3 non-empty questions')
+
+            news.suggested_questions = questions
+            news.suggested_questions_generated_at = timezone.now()
+            news.save(update_fields=['suggested_questions', 'suggested_questions_generated_at'])
+            return Response({'questions': questions})
+        except Exception as e:
+            # Fall back silently — UX should never show "loading questions failed"
+            import logging
+            logging.getLogger(__name__).warning('suggested-questions LLM failed: %s', e)
+            return Response({'questions': SUGGESTED_QUESTIONS_FALLBACK})

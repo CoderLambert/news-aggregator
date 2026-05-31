@@ -76,6 +76,10 @@ class News(models.Model):
     full_content_zh = models.TextField('完整原文(中文)', blank=True, default='')
     full_content_zh_fetched_at = models.DateTimeField('中文翻译时间', null=True, blank=True)
 
+    # LLM-generated suggested questions (cached per article)
+    suggested_questions = models.JSONField('AI 推荐问题', default=list, blank=True)
+    suggested_questions_generated_at = models.DateTimeField('推荐问题生成时间', null=True, blank=True)
+
     class Meta:
         verbose_name = '新闻'
         verbose_name_plural = '新闻'
