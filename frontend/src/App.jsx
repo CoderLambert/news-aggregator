@@ -8,7 +8,7 @@ export default function App() {
   return (
     <LanguageProvider>
       <BrowserRouter>
-        <div className="min-h-screen bg-gray-50">
+        <div className="min-h-screen bg-gray-50 overflow-x-hidden">
           <Header />
           <main>
             <Routes>

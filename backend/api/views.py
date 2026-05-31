@@ -3,7 +3,7 @@ from rest_framework import generics, filters
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from django_filters import rest_framework as django_filters
-from .models import Category, Source, News
+from .models import Category, Source, News, ChatSession
 from .serializers import (
     CategorySerializer, SourceSerializer,
     NewsListSerializer, NewsDetailSerializer,
@@ -246,7 +246,7 @@ class NewsFetchFullView(generics.GenericAPIView):
                 jina_url,
                 headers={'Accept': 'text/plain', 'User-Agent': 'Mozilla/5.0'}
             )
-            with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
+            with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
                 text = resp.read().decode('utf-8')
 
             # Extract markdown content after "Markdown Content:" header
@@ -258,6 +258,10 @@ class NewsFetchFullView(generics.GenericAPIView):
                     {'error': '未能提取到有效内容'},
                     status=422,
                 )
+
+            # Clean page chrome for GitHub repo pages
+            from api.services.content_cleaner import clean_content
+            markdown = clean_content(markdown, url)
 
             # Save to database
             news.full_content = markdown
@@ -289,6 +293,217 @@ class NewsFetchFullView(generics.GenericAPIView):
                 {'error': f'获取失败: {str(e)}'},
                 status=502,
             )
+
+
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
+import json as json_lib
+
+class NewsTranslateFullView(generics.GenericAPIView):
+    """Translate full article content to Chinese using SSE streaming."""
+    queryset = News.objects.select_related('source', 'category').all()
+    serializer_class = NewsDetailSerializer
+    permission_classes = []
+
+    @method_decorator(csrf_exempt)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def post(self, request, pk):
+        """Translate full article content to Chinese using SSE streaming."""
+        from django.http import StreamingHttpResponse
+        from django.utils import timezone
+        import json as json_lib
+        import time
+        from api.services.llm_translator import _call_llm_stream
+
+        news = self.get_object()
+
+        force = request.data.get('force', False)
+
+        # If already translated, stream existing result immediately (unless forced)
+        if news.full_content_zh and not force:
+            def existing_stream():
+                data = json_lib.dumps({
+                    'full_content_zh': news.full_content_zh,
+                    'full_content_zh_fetched_at': news.full_content_zh_fetched_at.isoformat() if news.full_content_zh_fetched_at else None
+                }, ensure_ascii=False)
+                yield f"data: {data}\n\n"
+            return StreamingHttpResponse(existing_stream(), content_type='text/event-stream')
+
+        if not news.full_content:
+            def error_stream():
+                yield f"data: {json_lib.dumps({'error': '请先获取完整原文'})}\n\n"
+            return StreamingHttpResponse(error_stream(), content_type='text/event-stream')
+
+        # Check for existing translated link first
+        from api.services.llm_translator import find_chinese_translation_link, fetch_and_verify_chinese_content
+        zh_link = find_chinese_translation_link(news.full_content, news.url)
+        if zh_link:
+            zh_content = fetch_and_verify_chinese_content(zh_link)
+            if zh_content:
+                news.full_content_zh = zh_content
+                news.full_content_zh_fetched_at = timezone.now()
+                news.save(update_fields=['full_content_zh', 'full_content_zh_fetched_at'])
+                def cached_stream():
+                    yield f"event: complete\ndata: {json_lib.dumps({'full_content_zh': zh_content, 'full_content_zh_fetched_at': news.full_content_zh_fetched_at.isoformat()}, ensure_ascii=False)}\n\n"
+                return StreamingHttpResponse(cached_stream(), content_type='text/event-stream')
+
+        # FIX: Use the fetched full content for translation
+        context = news.full_content
+        if len(context) > 40000:
+            context = context[:40000]
+
+        prompt = f"请将以下 Markdown 文章翻译成中文：\n\n{context}"
+
+        def translate_stream():
+            full_text = []
+            last_save_len = 0
+            try:
+                for chunk in _call_llm_stream(prompt):
+                    full_text.append(chunk)
+                    current_text = ''.join(full_text)
+                    
+                    # Save progress to DB every ~500 characters (in case client disconnects)
+                    if len(current_text) - last_save_len >= 500:
+                        news.full_content_zh = current_text
+                        news.full_content_zh_fetched_at = timezone.now()
+                        try:
+                            news.save(update_fields=['full_content_zh', 'full_content_zh_fetched_at'])
+                            last_save_len = len(current_text)
+                        except Exception as save_err:
+                            import logging
+                            logging.getLogger(__name__).warning(f'Failed to save translation progress: {save_err}')
+                    
+                    # Yield progress
+                    data = json_lib.dumps({'progress': current_text}, ensure_ascii=False)
+                    yield f"data: {data}\n\n"
+                    # Small yield to force WSGI buffer flush if needed
+                    time.sleep(0.01)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f'Translation failed: {e}')
+                # Try to yield error, but ignore if client already disconnected
+                try:
+                    yield f"data: {json_lib.dumps({'error': str(e)})}\n\n"
+                except Exception:
+                    pass
+                return
+
+            # Final save
+            translated = ''.join(full_text)
+            if translated and not translated.startswith("Error:"):
+                news.full_content_zh = translated
+                news.full_content_zh_fetched_at = timezone.now()
+                news.save(update_fields=['full_content_zh', 'full_content_zh_fetched_at'])
+
+            yield f"event: complete\ndata: {json_lib.dumps({'full_content_zh': translated, 'full_content_zh_fetched_at': news.full_content_zh_fetched_at.isoformat()}, ensure_ascii=False)}\n\n"
+
+        return StreamingHttpResponse(translate_stream(), content_type='text/event-stream')
+
+
+class NewsChatView(generics.GenericAPIView):
+    """Chat with the AI assistant about a specific news article. Supports persistence."""
+    queryset = News.objects.select_related('source', 'category').all()
+    permission_classes = []
+
+    @method_decorator(csrf_exempt)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request, pk):
+        """Return chat history."""
+        news = self.get_object()
+        try:
+            session = ChatSession.objects.get(news=news)
+            return Response({'messages': session.messages})
+        except ChatSession.DoesNotExist:
+            return Response({'messages': []})
+
+    def delete(self, request, pk):
+        """Clear chat history."""
+        news = self.get_object()
+        ChatSession.objects.filter(news=news).delete()
+        return Response({'status': 'cleared'})
+
+    def post(self, request, pk):
+        from django.http import StreamingHttpResponse
+        from api.services.llm_translator import get_openai_client
+
+        news = self.get_object()
+        
+        context = news.full_content_zh if news.full_content_zh else news.content
+        if len(context) > 10000:
+            context = context[-10000:]
+
+        user_question = request.data.get('question', '').strip()
+        if not user_question:
+            return Response({'error': '问题不能为空'}, status=400)
+
+        # Load or create session
+        session, _ = ChatSession.objects.get_or_create(news=news, defaults={'messages': []})
+        
+        # Ensure session.messages is a list
+        if not isinstance(session.messages, list):
+            session.messages = []
+
+        history = session.messages[-20:] # Keep last 20 turns for context
+
+        # Build messages for LLM
+        messages = [
+            {
+                'role': 'system',
+                'content': (
+                    f'你是一位专业的新闻助手。用户正在阅读一篇新闻文章，请基于以下文章内容回答用户的问题。\n\n'
+                    f'## 文章内容:\n{context}\n\n'
+                    f'## 要求:\n'
+                    f'1. 必须严格基于文章内容回答，不要编造信息。\n'
+                    f'2. 如果文章中找不到答案，请明确告知用户。\n'
+                    f'3. 回答要简洁、清晰、有逻辑。\n'
+                    f'4. 使用 Markdown 格式，支持列表、加粗等。'
+                )
+            }
+        ]
+        
+        for msg in history:
+            messages.append(msg)
+        
+        messages.append({'role': 'user', 'content': user_question})
+
+        # Save user message immediately
+        user_msg = {'role': 'user', 'content': user_question}
+        session.messages.append(user_msg)
+        session.save(update_fields=['messages'])
+
+        def save_ai_response(accumulated):
+            """Helper to save AI response after stream finishes"""
+            ai_msg = {'role': 'assistant', 'content': accumulated}
+            session.messages.append(ai_msg)
+            session.save(update_fields=['messages'])
+
+        def generate():
+            full_response = []
+            try:
+                client = get_openai_client()
+                stream = client.chat.completions.create(
+                    model='kimi-k2.5',
+                    messages=messages,
+                    temperature=0.7,
+                    stream=True,
+                )
+
+                for chunk in stream:
+                    delta = chunk.choices[0].delta
+                    if delta.content:
+                        full_response.append(delta.content)
+                        yield delta.content
+            except Exception as e:
+                yield f"\n\n[Error: {str(e)}]"
+            finally:
+                # Save the full response to DB
+                save_ai_response(''.join(full_response))
+
+        return StreamingHttpResponse(generate(), content_type='text/event-stream')
 
 
 class CategoryListView(generics.ListAPIView):

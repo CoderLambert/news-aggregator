@@ -73,6 +73,8 @@ class News(models.Model):
     # Full article content (fetched via Jina Reader)
     full_content = models.TextField('完整原文(Markdown)', blank=True, default='')
     full_content_fetched_at = models.DateTimeField('原文获取时间', null=True, blank=True)
+    full_content_zh = models.TextField('完整原文(中文)', blank=True, default='')
+    full_content_zh_fetched_at = models.DateTimeField('中文翻译时间', null=True, blank=True)
 
     class Meta:
         verbose_name = '新闻'
@@ -85,3 +87,18 @@ class News(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class ChatSession(models.Model):
+    """Stores chat history for a specific news article."""
+    news = models.OneToOneField(News, on_delete=models.CASCADE, related_name='chat_session')
+    messages = models.JSONField('对话记录', default=list, blank=True)
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+
+    class Meta:
+        verbose_name = '对话会话'
+        verbose_name_plural = '对话会话'
+
+    def __str__(self):
+        return f"Chat for {self.news.title[:20]}"

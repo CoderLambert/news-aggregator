@@ -1,0 +1,10 @@
+{
+  "name": "news-aggregator-tests",
+  "version": "1.0.0",
+  "description": "Test utilities for the news aggregator frontend",
+  "scripts": {
+    "test:lint": "eslint src/ --ext .jsx,.js",
+    "test:build": "npm run build && node scripts/validate-build.mjs",
+    "test": "npm run test:lint && npm run test:build"
+  }
+}
