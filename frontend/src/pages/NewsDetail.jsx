@@ -105,7 +105,7 @@ export default function NewsDetail() {
         />
       )}
 
-      <div className="max-w-3xl mx-auto px-4 py-6 sm:py-8 w-full overflow-x-hidden">
+      <div className={`max-w-3xl mx-auto px-4 py-6 sm:py-8 w-full overflow-x-hidden ${searchOpen ? 'pt-14' : ''}`}>
         <div className="flex items-center justify-between mb-6">
           <Link to="/" className="text-sm text-blue-600 hover:underline">
             {t.backToList}
