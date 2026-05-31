@@ -84,6 +84,10 @@ class NewsDetailSerializer(serializers.ModelSerializer):
     full_content_zh = serializers.CharField(read_only=True)
     full_content_zh_fetched_at = serializers.DateTimeField(read_only=True)
     full_content_zh_source = serializers.SerializerMethodField()
+    # True if a background full-article translation worker is still running
+    # for this article. The frontend uses this to auto-attach to the SSE
+    # stream when a user opens (or re-opens) the page mid-translation.
+    full_translation_active = serializers.SerializerMethodField()
 
     class Meta:
         model = News
@@ -96,7 +100,17 @@ class NewsDetailSerializer(serializers.ModelSerializer):
             'translation_status', 'translation_error', 'translation_retry_count',
             'full_content', 'full_content_fetched_at',
             'full_content_zh', 'full_content_zh_fetched_at', 'full_content_zh_source',
+            'full_translation_active',
         ]
+
+    def get_full_translation_active(self, obj):
+        """True if a background translation worker is still running for this article."""
+        try:
+            from .services.translation_jobs import get_job
+            job = get_job(obj.pk)
+            return bool(job and not job.done)
+        except Exception:
+            return False
 
     def get_full_content_zh_source(self, obj):
         """Return source of Chinese translation: 'link' or 'llm'."""

@@ -1,4 +1,4 @@
-"""Translation service using OpenAI-compatible API (DashScope/Kimi) for high-quality Markdown translation."""
+"""Translation service with dual-provider support: Volcengine (primary) → DashScope (fallback)."""
 
 import logging
 import os
@@ -9,12 +9,15 @@ from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
-# DashScope Coding Plan API endpoint
-API_BASE_URL = 'https://coding.dashscope.aliyuncs.com/v1'
-# Use kimi-k2.5 for fast, high-quality translation
-MODEL = 'kimi-k2.5'
+# ============ Primary Provider: Volcengine ============
+VOLCENGINE_BASE_URL = 'https://ark.cn-beijing.volces.com/api/coding/v3'
+VOLCENGINE_MODEL = 'doubao-seed-2.0-pro'
 
-# Translation prompt designed for natural, accurate output
+# ============ Fallback Provider: DashScope ============
+DASHSCOPE_BASE_URL = 'https://coding.dashscope.aliyuncs.com/v1'
+DASHSCOPE_MODEL = 'kimi-k2.5'
+
+# ============ Translation Prompt ============
 TRANSLATION_SYSTEM = """你是一位资深的中英双语翻译专家，擅长将英文技术文章翻译成地道、流畅的中文。
 
 ## 翻译原则：
@@ -47,13 +50,17 @@ TRANSLATION_SYSTEM = """你是一位资深的中英双语翻译专家，擅长�
 请只返回优化排版后的 Markdown 内容，不要有任何其他文字。"""
 
 
-def _get_api_key():
-    """Get DashScope Coding API key from environment or config file."""
-    # First try environment variables
+def _get_volcengine_key():
+    """Get Volcengine ARK API key from environment."""
+    return os.environ.get('VOLCENGINE_API_KEY') or os.environ.get('ARK_API_KEY', '')
+
+
+def _get_dashscope_key():
+    """Get DashScope Coding API key from environment or Hermes config."""
     api_key = os.environ.get('DASHSCOPE_CODING_API_KEY') or os.environ.get('DASHSCOPE_API_KEY')
     if api_key:
         return api_key
-    
+
     # Fallback: read from Hermes config
     try:
         import yaml
@@ -63,20 +70,43 @@ def _get_api_key():
         return config.get('model', {}).get('api_key', '')
     except Exception:
         pass
-    
+
     return ''
 
 
 def get_openai_client():
-    """Get an OpenAI-compatible client for DashScope."""
-    api_key = _get_api_key()
-    if not api_key:
-        raise ValueError("未配置 DASHSCOPE_CODING_API_KEY")
-    
-    return OpenAI(
-        api_key=api_key,
-        base_url=API_BASE_URL,
-    )
+    """Get an OpenAI-compatible client.
+
+    Returns: tuple (client, model_name). Prefers Volcengine; falls back to DashScope.
+    Kept as a single-result API for backward-compat with callers that unpack 1 value:
+    callers should switch to get_clients() for full fallback chain.
+    """
+    clients = get_clients()
+    if not clients:
+        raise ValueError("未配置 VOLCENGINE_API_KEY 或 DASHSCOPE_CODING_API_KEY")
+    return clients[0][0]
+
+
+def get_clients():
+    """Return ordered list of (client, model_name) tuples for failover.
+
+    Order: Volcengine (primary) → DashScope (fallback).
+    Skips providers without an API key.
+    """
+    out = []
+    vk = _get_volcengine_key()
+    if vk:
+        out.append((
+            OpenAI(api_key=vk, base_url=VOLCENGINE_BASE_URL),
+            VOLCENGINE_MODEL,
+        ))
+    dk = _get_dashscope_key()
+    if dk:
+        out.append((
+            OpenAI(api_key=dk, base_url=DASHSCOPE_BASE_URL),
+            DASHSCOPE_MODEL,
+        ))
+    return out
 
 
 # Known Chinese tech blog / translation platform domains
@@ -205,68 +235,81 @@ def fetch_and_verify_chinese_content(url: str) -> str:
 
 
 def _call_llm_stream(prompt: str, max_tokens: int = 32000):
-    """Call the LLM API with streaming response using OpenAI SDK.
-    
+    """Call the LLM API with streaming response, using provider failover.
+
     Yields chunks of translated text.
     """
-    try:
-        client = get_openai_client()
-    except ValueError as e:
-        yield str(e)
+    clients = get_clients()
+    if not clients:
+        yield "未配置 VOLCENGINE_API_KEY 或 DASHSCOPE_CODING_API_KEY"
         return
 
-    try:
-        stream = client.chat.completions.create(
-            model=MODEL,
-            messages=[
-                {'role': 'system', 'content': TRANSLATION_SYSTEM},
-                {'role': 'user', 'content': prompt}
-            ],
-            temperature=0.3,
-            max_tokens=max_tokens,
-            stream=True,
-        )
+    last_err = None
+    for idx, (client, model) in enumerate(clients):
+        try:
+            stream = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {'role': 'system', 'content': TRANSLATION_SYSTEM},
+                    {'role': 'user', 'content': prompt}
+                ],
+                temperature=0.3,
+                max_tokens=max_tokens,
+                stream=True,
+            )
 
-        for chunk in stream:
-            delta = chunk.choices[0].delta
-            if delta.content:
-                yield delta.content
-    except Exception as e:
-        logger.error(f"LLM streaming failed: {e}")
-        yield f"Error: {str(e)}"
+            got_any = False
+            for chunk in stream:
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    got_any = True
+                    yield delta.content
+            if got_any:
+                return  # success
+            # Empty stream — try next provider
+            last_err = f"provider#{idx} ({model}) returned empty stream"
+        except Exception as e:
+            last_err = f"provider#{idx} ({model}) failed: {e}"
+            logger.warning(last_err)
+            continue
+
+    logger.error(f"All LLM providers failed. Last error: {last_err}")
+    yield f"Error: {last_err}"
 
 
 def _call_llm(prompt: str, max_tokens: int = 32000) -> tuple:
-    """Call the LLM API with the given prompt.
-    
+    """Call the LLM API with the given prompt, using provider failover.
+
     Returns:
         tuple: (response_text, error_message)
     """
-    try:
-        client = get_openai_client()
-    except ValueError as e:
-        return ('', str(e))
+    clients = get_clients()
+    if not clients:
+        return ('', '未配置 VOLCENGINE_API_KEY 或 DASHSCOPE_CODING_API_KEY')
 
-    try:
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=[
-                {'role': 'system', 'content': TRANSLATION_SYSTEM},
-                {'role': 'user', 'content': prompt}
-            ],
-            temperature=0.3,
-            max_tokens=max_tokens,
-        )
-        
-        content = response.choices[0].message.content
-        if not content:
-            return ('', '翻译返回为空')
-            
-        return (content.strip(), None)
+    last_err = None
+    for idx, (client, model) in enumerate(clients):
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {'role': 'system', 'content': TRANSLATION_SYSTEM},
+                    {'role': 'user', 'content': prompt}
+                ],
+                temperature=0.3,
+                max_tokens=max_tokens,
+            )
+            content = response.choices[0].message.content
+            if content:
+                return (content.strip(), None)
+            last_err = f"provider#{idx} ({model}) returned empty content"
+        except Exception as e:
+            last_err = f"provider#{idx} ({model}) failed: {e}"
+            logger.warning(last_err)
+            continue
 
-    except Exception as e:
-        logger.error(f'LLM API call failed: {e}')
-        return ('', str(e))
+    logger.error(f'All LLM providers failed. Last error: {last_err}')
+    return ('', last_err or '未知错误')
 
 
 def translate_with_llm(text: str) -> tuple:

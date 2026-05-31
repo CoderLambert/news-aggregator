@@ -314,15 +314,21 @@ class NewsTranslateFullView(generics.GenericAPIView):
         from django.http import StreamingHttpResponse
         from django.utils import timezone
         import json as json_lib
-        import time
-        from api.services.llm_translator import _call_llm_stream
+        # _call_llm_stream is invoked inside the translation_jobs worker, not here.
 
         news = self.get_object()
 
         force = request.data.get('force', False)
 
-        # If already translated, stream existing result immediately (unless forced)
-        if news.full_content_zh and not force:
+        # If a background worker is still running, ALWAYS prefer attaching
+        # to it over the snapshot path — this is the cross-device / re-entry
+        # live-attach case. Falls through to the job logic below.
+        from api.services.translation_jobs import get_job as _get_job
+        active_job = _get_job(news.pk)
+        worker_in_flight = bool(active_job and not active_job.done)
+
+        # If already translated AND no worker running, stream existing result.
+        if news.full_content_zh and not force and not worker_in_flight:
             def existing_stream():
                 data = json_lib.dumps({
                     'full_content_zh': news.full_content_zh,
@@ -331,23 +337,25 @@ class NewsTranslateFullView(generics.GenericAPIView):
                 yield f"data: {data}\n\n"
             return StreamingHttpResponse(existing_stream(), content_type='text/event-stream')
 
-        if not news.full_content:
+        if not news.full_content and not worker_in_flight:
             def error_stream():
                 yield f"data: {json_lib.dumps({'error': '请先获取完整原文'})}\n\n"
             return StreamingHttpResponse(error_stream(), content_type='text/event-stream')
 
-        # Check for existing translated link first
-        from api.services.llm_translator import find_chinese_translation_link, fetch_and_verify_chinese_content
-        zh_link = find_chinese_translation_link(news.full_content, news.url)
-        if zh_link:
-            zh_content = fetch_and_verify_chinese_content(zh_link)
-            if zh_content:
-                news.full_content_zh = zh_content
-                news.full_content_zh_fetched_at = timezone.now()
-                news.save(update_fields=['full_content_zh', 'full_content_zh_fetched_at'])
-                def cached_stream():
-                    yield f"event: complete\ndata: {json_lib.dumps({'full_content_zh': zh_content, 'full_content_zh_fetched_at': news.full_content_zh_fetched_at.isoformat()}, ensure_ascii=False)}\n\n"
-                return StreamingHttpResponse(cached_stream(), content_type='text/event-stream')
+        # Check for existing translated link first — but skip when a worker
+        # is already running (we'd just be doing duplicate network work).
+        if not worker_in_flight:
+            from api.services.llm_translator import find_chinese_translation_link, fetch_and_verify_chinese_content
+            zh_link = find_chinese_translation_link(news.full_content, news.url)
+            if zh_link:
+                zh_content = fetch_and_verify_chinese_content(zh_link)
+                if zh_content:
+                    news.full_content_zh = zh_content
+                    news.full_content_zh_fetched_at = timezone.now()
+                    news.save(update_fields=['full_content_zh', 'full_content_zh_fetched_at'])
+                    def cached_stream():
+                        yield f"event: complete\ndata: {json_lib.dumps({'full_content_zh': zh_content, 'full_content_zh_fetched_at': news.full_content_zh_fetched_at.isoformat()}, ensure_ascii=False)}\n\n"
+                    return StreamingHttpResponse(cached_stream(), content_type='text/event-stream')
 
         # FIX: Use the fetched full content for translation
         context = news.full_content
@@ -356,48 +364,82 @@ class NewsTranslateFullView(generics.GenericAPIView):
 
         prompt = f"请将以下 Markdown 文章翻译成中文：\n\n{context}"
 
-        def translate_stream():
-            full_text = []
-            last_save_len = 0
+        # ---- Decouple LLM work from HTTP lifecycle --------------------------
+        # The actual streaming runs in a background thread (TranslationJob)
+        # so refreshing/closing the page does NOT kill the translation.
+        # This HTTP generator just polls the job and forwards progress.
+        from api.services.translation_jobs import start_or_get_job
+        news_pk = news.pk
+
+        def persist_progress(text, is_final):
+            """Called from worker thread — re-query and save to avoid stale state."""
             try:
-                for chunk in _call_llm_stream(prompt):
-                    full_text.append(chunk)
-                    current_text = ''.join(full_text)
-                    
-                    # Save progress to DB every ~500 characters (in case client disconnects)
-                    if len(current_text) - last_save_len >= 500:
-                        news.full_content_zh = current_text
-                        news.full_content_zh_fetched_at = timezone.now()
-                        try:
-                            news.save(update_fields=['full_content_zh', 'full_content_zh_fetched_at'])
-                            last_save_len = len(current_text)
-                        except Exception as save_err:
-                            import logging
-                            logging.getLogger(__name__).warning(f'Failed to save translation progress: {save_err}')
-                    
-                    # Yield progress
-                    data = json_lib.dumps({'progress': current_text}, ensure_ascii=False)
-                    yield f"data: {data}\n\n"
-                    # Small yield to force WSGI buffer flush if needed
-                    time.sleep(0.01)
+                obj = News.objects.get(pk=news_pk)
+                obj.full_content_zh = text
+                obj.full_content_zh_fetched_at = timezone.now()
+                obj.save(update_fields=['full_content_zh', 'full_content_zh_fetched_at'])
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).error(f'Translation failed: {e}')
-                # Try to yield error, but ignore if client already disconnected
+                logging.getLogger(__name__).warning(
+                    f'persist_progress failed for news={news_pk}: {e}'
+                )
+
+        job = start_or_get_job(news_pk, prompt, persist_progress)
+
+        def translate_stream():
+            sent_len = 0
+            # If we attached to an in-progress job that already has output,
+            # flush what we have immediately.
+            if job.text:
+                data = json_lib.dumps({'progress': job.text}, ensure_ascii=False)
+                yield f"data: {data}\n\n"
+                sent_len = len(job.text)
+
+            # Poll-stream loop. Even if the client disconnects here, the
+            # worker thread keeps consuming the LLM stream and saving to DB.
+            while True:
                 try:
-                    yield f"data: {json_lib.dumps({'error': str(e)})}\n\n"
+                    new_len = job.wait_for_update(sent_len, timeout=1.0)
+                    if new_len > sent_len:
+                        data = json_lib.dumps({'progress': job.text}, ensure_ascii=False)
+                        yield f"data: {data}\n\n"
+                        sent_len = new_len
+                    if job.done:
+                        break
+                except Exception:
+                    # Client likely disconnected — leave the worker running.
+                    return
+
+            if job.error:
+                try:
+                    yield f"data: {json_lib.dumps({'error': job.error})}\n\n"
                 except Exception:
                     pass
                 return
 
-            # Final save
-            translated = ''.join(full_text)
-            if translated and not translated.startswith("Error:"):
-                news.full_content_zh = translated
-                news.full_content_zh_fetched_at = timezone.now()
-                news.save(update_fields=['full_content_zh', 'full_content_zh_fetched_at'])
+            # Re-read to pick up the fetched_at timestamp we just saved.
+            try:
+                fresh = News.objects.get(pk=news_pk)
+                final_payload = {
+                    'full_content_zh': fresh.full_content_zh or job.text,
+                    'full_content_zh_fetched_at': (
+                        fresh.full_content_zh_fetched_at.isoformat()
+                        if fresh.full_content_zh_fetched_at else None
+                    ),
+                }
+            except Exception:
+                final_payload = {
+                    'full_content_zh': job.text,
+                    'full_content_zh_fetched_at': None,
+                }
 
-            yield f"event: complete\ndata: {json_lib.dumps({'full_content_zh': translated, 'full_content_zh_fetched_at': news.full_content_zh_fetched_at.isoformat()}, ensure_ascii=False)}\n\n"
+            try:
+                yield (
+                    "event: complete\n"
+                    f"data: {json_lib.dumps(final_payload, ensure_ascii=False)}\n\n"
+                )
+            except Exception:
+                pass
 
         return StreamingHttpResponse(translate_stream(), content_type='text/event-stream')
 
