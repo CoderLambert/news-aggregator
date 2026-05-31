@@ -19,6 +19,84 @@ SUGGESTED_QUESTIONS_FALLBACK = [
 ]
 
 
+def pick_chat_context(news):
+    """Pick the best available article body for AI consumption.
+
+    Preference order (richest + Chinese first):
+      1. full_content_zh — translated full article (best)
+      2. full_content    — original full article (Chinese readers can still parse)
+      3. content_zh      — translated list-preview blurb
+      4. content         — original list-preview blurb (last resort)
+
+    Returns a non-empty string (empty only if every field is empty).
+    """
+    return (
+        news.full_content_zh
+        or news.full_content
+        or news.content_zh
+        or news.content
+        or ''
+    )
+
+
+def _fetch_via_jina(url):
+    """Fetch an article URL through Jina Reader. Returns cleaned markdown body.
+
+    Raises on any HTTP / parse error so callers can decide whether to swallow.
+    Kept as a module-level function so tests can patch it.
+    """
+    import urllib.request
+    import ssl
+    import re
+    from api.services.content_cleaner import clean_content
+
+    jina_url = f'https://r.jina.ai/{url}'
+    ctx = ssl.create_default_context()
+    req = urllib.request.Request(
+        jina_url,
+        headers={'Accept': 'text/plain', 'User-Agent': 'Mozilla/5.0'}
+    )
+    with urllib.request.urlopen(req, timeout=60, context=ctx) as resp:
+        text = resp.read().decode('utf-8')
+
+    markdown_match = re.search(r'Markdown Content:\n([\s\S]+)$', text)
+    markdown = markdown_match.group(1).strip() if markdown_match else text.strip()
+    if not markdown or markdown == 'Sorry.' or len(markdown) < 20:
+        raise ValueError('jina returned empty or invalid content')
+    return clean_content(markdown, url)
+
+
+def ensure_full_content(news):
+    """Best-effort: make sure news.full_content is populated before AI sees it.
+
+    No-op if full_content already exists or news has no URL.
+    On Jina failure, logs a warning and returns silently — caller falls back
+    to whatever shorter content is available via pick_chat_context().
+
+    This is what makes "open chat without clicking 'fetch full article' first"
+    work end-to-end. The first chat call may pay a 2-10s latency hit for the
+    Jina fetch; subsequent calls hit the cached field.
+    """
+    import logging
+    from django.utils.timezone import now as tz_now
+
+    if news.full_content:
+        return
+    if not news.url:
+        return
+
+    try:
+        body = _fetch_via_jina(news.url)
+        news.full_content = body
+        news.full_content_fetched_at = tz_now()
+        news.save(update_fields=['full_content', 'full_content_fetched_at'])
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            'ensure_full_content: jina fetch failed for news=%s: %s',
+            news.pk, e,
+        )
+
+
 class CommaSeparatedIntegerFilter(django_filters.BaseInFilter, django_filters.NumberFilter):
     pass
 
@@ -481,8 +559,13 @@ class NewsChatView(generics.GenericAPIView):
         from django.http import StreamingHttpResponse
 
         news = self.get_object()
-        
-        context = news.full_content_zh if news.full_content_zh else news.content
+
+        # Auto-fetch full article on first chat — so users don't have to click
+        # "获取原文" before chatting. No-op if already cached, swallows fetch errors.
+        ensure_full_content(news)
+
+        # Pick the richest available context (full_content_zh > full_content > content_zh > content)
+        context = pick_chat_context(news)
         if len(context) > 10000:
             context = context[-10000:]
 
@@ -601,8 +684,12 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
         if news.suggested_questions and len(news.suggested_questions) >= 3:
             return Response({'questions': news.suggested_questions[:3]})
 
-        # Build context (same shape as the chat view)
-        context = news.full_content_zh if news.full_content_zh else news.content
+        # Auto-fetch full article so suggestions are based on the real body,
+        # not the short list-preview blurb. No-op if already cached.
+        ensure_full_content(news)
+
+        # Build context (same chain as chat view)
+        context = pick_chat_context(news)
         if len(context) > 6000:
             context = context[:6000]
         title = news.title_zh or news.title
