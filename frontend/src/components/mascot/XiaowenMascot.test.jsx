@@ -24,7 +24,23 @@ describe('XiaowenMascot', () => {
     const { container } = render(<XiaowenMascot size={120} />)
     const svg = container.querySelector('svg')
     expect(svg).toHaveAttribute('width', '120')
-    expect(svg).toHaveAttribute('height', '120')
+    // viewBox is 100x108 so height = size * 1.08 (gives shadow room)
+    expect(svg).toHaveAttribute('height', String(120 * 1.08))
+  })
+
+  it('does not render ground shadow by default', () => {
+    const { container } = render(<XiaowenMascot />)
+    // The only ellipse(s) without showShadow are blush ones inside the body group
+    const shadowEllipse = container.querySelector('svg > ellipse')
+    expect(shadowEllipse).toBeNull()
+  })
+
+  it('renders ground shadow ellipse when showShadow=true', () => {
+    const { container } = render(<XiaowenMascot showShadow />)
+    // Shadow lives directly under <svg>, not inside the body group
+    const shadowEllipse = container.querySelector('svg > ellipse')
+    expect(shadowEllipse).not.toBeNull()
+    expect(shadowEllipse).toHaveAttribute('cy', '100')
   })
 
   it('shows sleep z text when mood=sleep', () => {

@@ -30,6 +30,7 @@ export default function XiaowenMascot({
   isLookingUp = false,
   autoBlink = true,
   autoTalk = true,
+  showShadow = false,
 }) {
   const uid = useId().replace(/:/g, '')
   const [blinking, setBlinking] = useState(false)
@@ -76,9 +77,9 @@ export default function XiaowenMascot({
 
   return (
     <svg
-      viewBox="0 0 100 100"
+      viewBox="0 0 100 108"
       width={size}
-      height={size}
+      height={size * 1.08}
       className={className}
       role="img"
       aria-label="小闻 AI 助手"
@@ -101,9 +102,27 @@ export default function XiaowenMascot({
           <stop offset="0%" stopColor="#FFFFFF" />
           <stop offset="100%" stopColor="#FED7AA" stopOpacity="0.4" />
         </radialGradient>
+        {/* Ground shadow gradient — dark center fading to transparent edges */}
+        <radialGradient id={`${uid}-shadow`} cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#000000" stopOpacity="0.28" />
+          <stop offset="60%" stopColor="#000000" stopOpacity="0.10" />
+          <stop offset="100%" stopColor="#000000" stopOpacity="0" />
+        </radialGradient>
       </defs>
 
+      {/* Ground shadow — sits below the mascot to give it weight & lift */}
+      {showShadow && (
+        <ellipse
+          cx="50"
+          cy="100"
+          rx="28"
+          ry="4.5"
+          fill={`url(#${uid}-shadow)`}
+        />
+      )}
+
       <g
+        data-testid="xiaowen-body"
         style={{
           transform: `translateY(${lookOffsetY}px) rotate(${headRot}deg)`,
           transformOrigin: '50px 55px',

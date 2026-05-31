@@ -31,7 +31,7 @@ export default function ChatBubbleButton({ onOpen }) {
                  ring-2 ring-orange-100 hover:ring-orange-200
                  animate-mascot-breathe"
     >
-      <XiaowenMascot size={56} isLookingUp={hover} />
+      <XiaowenMascot size={56} isLookingUp={hover} showShadow />
     </button>
   )
 }

@@ -10,7 +10,7 @@ const CODE_BLOCK_THEMES = {
   monacoOptions: { fontSize: 13, wordWrap: 'on', minimap: { enabled: false } },
 }
 
-const SUGGESTED_QUESTIONS = [
+const DEFAULT_SUGGESTED_QUESTIONS = [
   '帮我用一句话总结这篇文章',
   '这篇文章里最重要的三个观点是什么？',
   '有什么背景知识可以帮我更好理解？',
@@ -24,9 +24,19 @@ const SUGGESTED_QUESTIONS = [
  *   - messages: chat history
  *   - phase:    from useChat phase machine — drives the thinking dots
  *   - onSuggestionClick(text): user picks a suggested question
+ *   - suggestedQuestions: optional override; falls back to the hardcoded 3
  */
-export default function ChatMessageList({ messages, phase, onSuggestionClick }) {
+export default function ChatMessageList({
+  messages,
+  phase,
+  onSuggestionClick,
+  suggestedQuestions,
+}) {
   const endRef = useRef(null)
+  const questions =
+    suggestedQuestions && suggestedQuestions.length >= 1
+      ? suggestedQuestions
+      : DEFAULT_SUGGESTED_QUESTIONS
 
   // Auto-scroll on new content. jsdom lacks scrollIntoView, so guard.
   useEffect(() => {
@@ -47,14 +57,14 @@ export default function ChatMessageList({ messages, phase, onSuggestionClick }) 
     return (
       <div className="flex flex-col items-center justify-center h-full text-center px-4 animate-message-pop-in">
         <div className="animate-mascot-bob">
-          <XiaowenMascot mood="happy" size={88} />
+          <XiaowenMascot mood="happy" size={88} showShadow />
         </div>
         <p className="mt-4 text-base font-semibold text-neutral-900">嗨，我是小闻 👋</p>
         <p className="mt-1.5 text-xs text-neutral-500 max-w-[240px] leading-relaxed">
           我已经读完这篇文章了，你想聊点什么？下面是一些建议：
         </p>
         <div className="mt-5 flex flex-col gap-2 w-full max-w-[280px]">
-          {SUGGESTED_QUESTIONS.map(q => (
+          {questions.map(q => (
             <button
               key={q}
               type="button"
