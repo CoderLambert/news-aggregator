@@ -81,6 +81,9 @@ class NewsDetailSerializer(serializers.ModelSerializer):
     # Full article content
     full_content = serializers.CharField(read_only=True)
     full_content_fetched_at = serializers.DateTimeField(read_only=True)
+    full_content_zh = serializers.CharField(read_only=True)
+    full_content_zh_fetched_at = serializers.DateTimeField(read_only=True)
+    full_content_zh_source = serializers.SerializerMethodField()
 
     class Meta:
         model = News
@@ -92,7 +95,16 @@ class NewsDetailSerializer(serializers.ModelSerializer):
             'related_to',
             'translation_status', 'translation_error', 'translation_retry_count',
             'full_content', 'full_content_fetched_at',
+            'full_content_zh', 'full_content_zh_fetched_at', 'full_content_zh_source',
         ]
+
+    def get_full_content_zh_source(self, obj):
+        """Return source of Chinese translation: 'link' or 'llm'."""
+        if not obj.full_content_zh:
+            return None
+        # Default to 'llm' since we don't store this in DB yet
+        # In the future, we could add a model field for this
+        return 'llm'
 
     def get_title(self, obj):
         lang = self.context.get('lang', 'original')
