@@ -267,9 +267,21 @@ def _call_llm_stream(prompt: str, max_tokens: int = 32000):
 
     Yields chunks of translated text.
     """
+    messages = [
+        {'role': 'system', 'content': TRANSLATION_SYSTEM},
+        {'role': 'user', 'content': prompt}
+    ]
+    yield from stream_chat(messages, max_tokens)
+
+
+def stream_chat(messages: list, max_tokens: int = 32000, temperature: float = 0.3):
+    """Generic streaming chat with provider failover.
+
+    Yields chunks of text.  On total failure, yields a single fallback message.
+    """
     clients = get_clients()
     if not clients:
-        yield "未配置 VOLCENGINE_API_KEY 或 DASHSCOPE_CODING_API_KEY"
+        yield "抱歉，当前 AI 服务暂时不可用，请稍后再试。"
         return
 
     last_err = None
@@ -277,11 +289,8 @@ def _call_llm_stream(prompt: str, max_tokens: int = 32000):
         try:
             stream = client.chat.completions.create(
                 model=model,
-                messages=[
-                    {'role': 'system', 'content': TRANSLATION_SYSTEM},
-                    {'role': 'user', 'content': prompt}
-                ],
-                temperature=0.3,
+                messages=messages,
+                temperature=temperature,
                 max_tokens=max_tokens,
                 stream=True,
             )
@@ -294,7 +303,6 @@ def _call_llm_stream(prompt: str, max_tokens: int = 32000):
                     yield delta.content
             if got_any:
                 return  # success
-            # Empty stream — try next provider
             last_err = f"provider#{idx} ({model}) returned empty stream"
         except Exception as e:
             last_err = f"provider#{idx} ({model}) failed: {e}"
@@ -302,7 +310,7 @@ def _call_llm_stream(prompt: str, max_tokens: int = 32000):
             continue
 
     logger.error(f"All LLM providers failed. Last error: {last_err}")
-    yield f"Error: {last_err}"
+    yield f"抱歉，AI 服务暂时不可用（{last_err}），请稍后再试。"
 
 
 def _call_llm(prompt: str, max_tokens: int = 32000) -> tuple:

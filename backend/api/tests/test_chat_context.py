@@ -151,8 +151,11 @@ class TestChatAutoFetch:
         fake_client = MagicMock()
         fake_client.chat.completions.create = fake_stream
 
+        def fake_stream_chat(messages, max_tokens=32000, temperature=0.3):
+            yield '回答'
+
         with patch('api.views._fetch_via_jina', return_value='FETCHED_FULL_BODY') as m_fetch, \
-             patch('api.views.get_clients', return_value=[(fake_client, 'doubao-seed-2.0-pro')]):
+             patch('api.views.stream_chat', side_effect=fake_stream_chat):
             resp = client.post(
                 f'/api/news/{n.pk}/chat/',
                 data={'question': '这文章讲啥？'},
@@ -180,8 +183,11 @@ class TestChatAutoFetch:
         fake_client = MagicMock()
         fake_client.chat.completions.create = fake_stream
 
-        with patch('api.views._fetch_via_jina', side_effect=AssertionError('should not fetch')) as m_fetch, \
-             patch('api.views.get_clients', return_value=[(fake_client, 'doubao-seed-2.0-pro')]):
+        def fake_stream_chat(messages, max_tokens=32000, temperature=0.3):
+            yield '回答'
+
+        with patch('api.views._fetch_via_jina', return_value='FETCHED_FULL_BODY') as m_fetch, \
+             patch('api.views.stream_chat', side_effect=fake_stream_chat):
             resp = client.post(
                 f'/api/news/{n.pk}/chat/',
                 data={'question': 'x'},
@@ -223,3 +229,24 @@ class TestSuggestedQuestionsAutoFetch:
 
         assert resp.status_code == 200
         assert 'FETCHED_FULL_BODY' in captured['prompt']
+
+    def test_chat_returns_fallback_on_stream_failure(self, src, cat, client):
+        """When stream_chat yields a fallback message, the chat endpoint
+        returns it gracefully (200) and saves it to the session.
+        """
+        n = _news(src, cat, full_content='Some content here')
+
+        def failing_stream_chat(messages, max_tokens=32000, temperature=0.3):
+            yield '抱歉，AI 服务暂时不可用，请稍后再试。'
+
+        with patch('api.views.stream_chat', side_effect=failing_stream_chat):
+            resp = client.post(
+                f'/api/news/{n.pk}/chat/',
+                data={'question': '这文章讲啥？'},
+                content_type='application/json',
+            )
+            content = b''.join(resp.streaming_content).decode()
+
+        assert resp.status_code == 200
+        assert '抱歉' in content
+        assert 'AI 服务暂时不可用' in content

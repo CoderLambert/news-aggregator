@@ -9,7 +9,7 @@ from .serializers import (
     NewsListSerializer, NewsDetailSerializer,
 )
 # Module-level import so tests can patch `api.views.get_openai_client`
-from api.services.llm_translator import get_openai_client, get_clients
+from api.services.llm_translator import get_openai_client, get_clients, stream_chat
 
 # Hardcoded fallback shown when the LLM is unreachable / returns garbage
 SUGGESTED_QUESTIONS_FALLBACK = [
@@ -617,26 +617,15 @@ class NewsChatView(generics.GenericAPIView):
         def generate():
             full_response = []
             try:
-                # Use the first available client with its correct model
-                clients = get_clients()
-                if not clients:
-                    yield "\n\n[Error: 未配置翻译服务 API Key]"
-                    return
-                client, model = clients[0]
-                stream = client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=0.7,
-                    stream=True,
-                )
-
-                for chunk in stream:
-                    delta = chunk.choices[0].delta
-                    if delta.content:
-                        full_response.append(delta.content)
-                        yield delta.content
+                # Use stream_chat which has built-in provider failover
+                for chunk in stream_chat(messages, max_tokens=16000, temperature=0.7):
+                    full_response.append(chunk)
+                    yield chunk
             except Exception as e:
-                yield f"\n\n[Error: {str(e)}]"
+                fallback = "抱歉，AI 服务暂时不可用，请稍后再试。"
+                yield f"\n\n[{fallback}]"
+                if not full_response:
+                    full_response = [fallback]
             finally:
                 # Save the full response to DB
                 save_ai_response(''.join(full_response))
