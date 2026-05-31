@@ -96,11 +96,14 @@ describe('FullContentSection', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('翻译失败：429')
   })
 
-  it('lang toggle buttons have aria-pressed reflecting showOriginal', () => {
+  it('lang toggle items reflect showOriginal via aria-checked', () => {
+    // shadcn ToggleGroup is built on Radix → exposes role="radio" /
+    // aria-checked instead of role="button" / aria-pressed. This is a
+    // semantically richer pattern and the migration intentionally adopts it.
     const news = { ...baseNews, full_content_zh: '中文译文' }
     renderSection({ news, showOriginal: false })
-    expect(screen.getByRole('button', { name: '切换中文' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByRole('button', { name: '切换英文' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('radio', { name: '切换中文' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: '切换英文' })).toHaveAttribute('aria-checked', 'false')
   })
 
   it('shows English content when showOriginal=true', () => {

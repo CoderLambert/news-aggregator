@@ -1,3 +1,8 @@
+import { Languages, Loader2, CheckCircle2 } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import MarkdownContent from './MarkdownContent'
 import ErrorBanner from './ErrorBanner'
 
@@ -36,9 +41,11 @@ export default function FullContentSection({
 
       {translateError && <ErrorBanner message={translateError} onRetry={onRetryTranslate} />}
 
-      <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-        <MarkdownContent content={showOriginal ? news.full_content : (news.full_content_zh || news.full_content)} />
-      </div>
+      <Card className="py-5">
+        <CardContent className="px-5">
+          <MarkdownContent content={showOriginal ? news.full_content : (news.full_content_zh || news.full_content)} />
+        </CardContent>
+      </Card>
     </div>
   )
 }
@@ -49,17 +56,15 @@ function Toolbar({ news, translating, translateError, showOriginal, onToggleOrig
   return (
     <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
       <div className="flex items-center gap-2">
-        <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-green-50 text-green-700 border border-green-200">
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-          </svg>
+        <Badge variant="green">
+          <CheckCircle2 />
           原文已加载
-        </span>
+        </Badge>
         {news.full_content_zh && (
-          <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-violet-50 text-violet-700 border border-violet-200">
-            <TranslateIcon className="w-3 h-3" />
+          <Badge variant="violet">
+            <Languages />
             已翻译
-          </span>
+          </Badge>
         )}
       </div>
       <div className="flex items-center gap-2">
@@ -75,45 +80,39 @@ function Toolbar({ news, translating, translateError, showOriginal, onToggleOrig
 }
 
 function LangToggle({ showOriginal, onToggle }) {
+  // shadcn ToggleGroup ('single' type) gives us proper radiogroup semantics +
+  // aria-pressed via Radix. Value is a string ('zh' | 'en').
   return (
-    <div className="flex bg-gray-100 rounded-full p-0.5" role="group" aria-label="切换语言">
-      <button
-        type="button"
-        onClick={() => onToggle(false)}
-        aria-pressed={!showOriginal}
-        aria-label="切换中文"
-        className={`px-3 py-1 text-xs rounded-full transition-all ${
-          !showOriginal ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-        }`}
-      >中文</button>
-      <button
-        type="button"
-        onClick={() => onToggle(true)}
-        aria-pressed={showOriginal}
-        aria-label="切换英文"
-        className={`px-3 py-1 text-xs rounded-full transition-all ${
-          showOriginal ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-        }`}
-      >English</button>
-    </div>
+    <ToggleGroup
+      type="single"
+      value={showOriginal ? 'en' : 'zh'}
+      onValueChange={(v) => {
+        // Radix emits '' when the user clicks the active item — guard so we
+        // don't accidentally clear the selection.
+        if (v) onToggle(v === 'en')
+      }}
+      size="pill"
+      aria-label="切换语言"
+      className="bg-gray-100 p-0.5 rounded-full"
+    >
+      <ToggleGroupItem value="zh" aria-label="切换中文" className="border-0">中文</ToggleGroupItem>
+      <ToggleGroupItem value="en" aria-label="切换英文" className="border-0">English</ToggleGroupItem>
+    </ToggleGroup>
   )
 }
 
 function TranslateButton({ hasTranslation, onClick }) {
   return (
-    <button
+    <Button
       type="button"
       onClick={onClick}
       aria-label={hasTranslation ? '重新翻译' : '翻译为中文'}
-      className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full transition-all duration-200 shadow-sm hover:shadow
-        ${hasTranslation
-          ? 'bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200'
-          : 'bg-violet-600 text-white hover:bg-violet-700'
-        }`}
+      variant={hasTranslation ? 'outline' : 'violet'}
+      size="pill-sm"
     >
-      <TranslateIcon className="w-3.5 h-3.5" />
+      <Languages className="size-3.5" />
       {hasTranslation ? '重新翻译' : '翻译为中文'}
-    </button>
+    </Button>
   )
 }
 
@@ -121,47 +120,29 @@ function TranslationProgressUI({ progress }) {
   // No progress yet — show centred spinner card
   if (!progress) {
     return (
-      <div className="mb-6">
-        <div className="p-8 bg-violet-50 rounded-xl border border-violet-200 text-center mb-4">
-          <Spinner className="w-8 h-8 mx-auto text-violet-500 mb-3" />
+      <Card className="mb-6 py-8 bg-violet-50 border-violet-200 items-center text-center">
+        <Loader2 className="size-8 text-violet-500 animate-spin" />
+        <div>
           <p className="text-sm text-violet-600 font-medium">正在使用 AI 翻译...</p>
           <p className="text-xs text-violet-400 mt-1">通义千问大模型，翻译准确自然</p>
         </div>
-      </div>
+      </Card>
     )
   }
   // Streaming progress — show partial markdown
   return (
     <div className="mb-6">
       <div className="flex items-center gap-2 mb-3">
-        <Spinner className="w-4 h-4 text-violet-500" />
+        <Loader2 className="size-4 text-violet-500 animate-spin" />
         <span className="text-xs text-violet-500 font-medium">AI 正在翻译...</span>
       </div>
-      <div className="bg-white rounded-xl border border-violet-200 p-5 shadow-sm opacity-80">
-        <div className="article-markdown prose prose-gray max-w-none">
-          <MarkdownContent content={progress} />
-        </div>
-      </div>
+      <Card className="border-violet-200 py-5 opacity-80">
+        <CardContent className="px-5">
+          <div className="article-markdown prose prose-gray max-w-none">
+            <MarkdownContent content={progress} />
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }
-
-/* ── Tiny inline visuals (shared inside this file) ──────────────────────── */
-
-function TranslateIcon({ className }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
-    </svg>
-  )
-}
-
-function Spinner({ className }) {
-  return (
-    <svg className={`animate-spin ${className}`} fill="none" viewBox="0 0 24 24">
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-    </svg>
-  )
-}
-

@@ -1,24 +1,29 @@
+import { AlertCircle } from 'lucide-react'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+
 /**
  * ErrorBanner — generic inline error with a retry affordance.
  *
  * Used for both article-fetch and translation errors on the detail page.
+ * Wraps shadcn <Alert variant="destructive"> with a trailing retry link.
  */
 export default function ErrorBanner({ message, onRetry }) {
   return (
-    <div className="mb-6 p-4 bg-red-50 rounded-xl border border-red-200" role="alert">
-      <div className="flex items-center gap-2 text-red-600 text-sm">
-        <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
+    <Alert variant="destructive" className="mb-6 border-red-200 bg-red-50">
+      <AlertCircle />
+      <AlertDescription className="flex items-center justify-between text-red-600">
         <span>{message}</span>
-        <button
+        <Button
           type="button"
+          variant="link"
+          size="sm"
           onClick={onRetry}
-          className="ml-auto text-xs underline hover:no-underline"
+          className="h-auto p-0 text-xs text-red-600 underline hover:no-underline"
         >
           重试
-        </button>
-      </div>
-    </div>
+        </Button>
+      </AlertDescription>
+    </Alert>
   )
 }
