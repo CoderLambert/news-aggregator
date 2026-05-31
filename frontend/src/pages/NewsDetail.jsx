@@ -12,6 +12,7 @@ import ErrorBanner from '../components/news-detail/ErrorBanner'
 import FullContentSection from '../components/news-detail/FullContentSection'
 import ArticleSearchBar from '../components/news-detail/ArticleSearchBar'
 import ArticleToc from '../components/news-detail/ArticleToc'
+import ScrollToTop from '../components/news-detail/ScrollToTop'
 import { useNewsDetail } from '../hooks/useNewsDetail'
 import { useFullArticle } from '../hooks/useFullArticle'
 import { useTranslation } from '../hooks/useTranslation'
@@ -184,6 +185,9 @@ export default function NewsDetail() {
 
       {/* TOC — fixed floating panel on right edge */}
       <ArticleToc headings={headings} activeId={activeId} />
+
+      {/* Scroll-to-top — above chat assistant */}
+      <ScrollToTop />
     </div>
   )
 }
