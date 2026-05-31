@@ -275,10 +275,12 @@ def _call_llm_stream(prompt: str, max_tokens: int = 32000):
 
 
 def stream_chat(messages: list, max_tokens: int = 32000, temperature: float = 0.3):
-    """Generic streaming chat with provider failover.
+    """Generic streaming chat with provider failover + per-provider retry.
 
     Yields chunks of text.  On total failure, yields a single fallback message.
     """
+    MAX_RETRIES = 2  # per provider
+
     clients = get_clients()
     if not clients:
         yield "抱歉，当前 AI 服务暂时不可用，请稍后再试。"
@@ -286,63 +288,82 @@ def stream_chat(messages: list, max_tokens: int = 32000, temperature: float = 0.
 
     last_err = None
     for idx, (client, model) in enumerate(clients):
-        try:
-            stream = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stream=True,
-            )
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                stream = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    stream=True,
+                )
 
-            got_any = False
-            for chunk in stream:
-                delta = chunk.choices[0].delta
-                if delta.content:
-                    got_any = True
-                    yield delta.content
-            if got_any:
-                return  # success
-            last_err = f"provider#{idx} ({model}) returned empty stream"
-        except Exception as e:
-            last_err = f"provider#{idx} ({model}) failed: {e}"
-            logger.warning(last_err)
-            continue
+                got_any = False
+                for chunk in stream:
+                    delta = chunk.choices[0].delta
+                    if delta.content:
+                        got_any = True
+                        yield delta.content
+                if got_any:
+                    return  # success
+                last_err = f"provider#{idx} ({model}) returned empty stream"
+                break  # don't retry empty stream — likely a prompt issue
+            except Exception as e:
+                last_err = f"provider#{idx} ({model}) attempt {attempt}/{MAX_RETRIES} failed: {e}"
+                logger.warning(last_err)
+                # Retry on transient errors (SSL, timeout, connection reset)
+                is_transient = any(kw in str(e).lower() for kw in [
+                    'ssl', 'eof', 'timeout', 'connection', 'reset', 'broken pipe',
+                ])
+                if is_transient and attempt < MAX_RETRIES:
+                    time.sleep(1 * attempt)  # simple backoff
+                    continue
+                break  # non-transient or exhausted retries → try next provider
 
     logger.error(f"All LLM providers failed. Last error: {last_err}")
     yield f"抱歉，AI 服务暂时不可用（{last_err}），请稍后再试。"
 
 
 def _call_llm(prompt: str, max_tokens: int = 32000) -> tuple:
-    """Call the LLM API with the given prompt, using provider failover.
+    """Call the LLM API with the given prompt, using provider failover + retry.
 
     Returns:
         tuple: (response_text, error_message)
     """
+    MAX_RETRIES = 2
+
     clients = get_clients()
     if not clients:
         return ('', '未配置 VOLCENGINE_API_KEY 或 DASHSCOPE_CODING_API_KEY')
 
     last_err = None
     for idx, (client, model) in enumerate(clients):
-        try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {'role': 'system', 'content': TRANSLATION_SYSTEM},
-                    {'role': 'user', 'content': prompt}
-                ],
-                temperature=0.3,
-                max_tokens=max_tokens,
-            )
-            content = response.choices[0].message.content
-            if content:
-                return (content.strip(), None)
-            last_err = f"provider#{idx} ({model}) returned empty content"
-        except Exception as e:
-            last_err = f"provider#{idx} ({model}) failed: {e}"
-            logger.warning(last_err)
-            continue
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {'role': 'system', 'content': TRANSLATION_SYSTEM},
+                        {'role': 'user', 'content': prompt}
+                    ],
+                    temperature=0.3,
+                    max_tokens=max_tokens,
+                )
+                content = response.choices[0].message.content
+                if content:
+                    return (content.strip(), None)
+                last_err = f"provider#{idx} ({model}) returned empty content"
+                break  # don't retry empty content
+            except Exception as e:
+                last_err = f"provider#{idx} ({model}) attempt {attempt}/{MAX_RETRIES} failed: {e}"
+                logger.warning(last_err)
+                is_transient = any(kw in str(e).lower() for kw in [
+                    'ssl', 'eof', 'timeout', 'connection', 'reset', 'broken pipe',
+                ])
+                if is_transient and attempt < MAX_RETRIES:
+                    time.sleep(1 * attempt)
+                    continue
+                break
 
     logger.error(f'All LLM providers failed. Last error: {last_err}')
     return ('', last_err or '未知错误')
