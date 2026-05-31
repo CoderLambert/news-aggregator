@@ -3,24 +3,30 @@ import { LANG_KEY } from '../constants'
 import { streamingFetch, iterSSEEvents, iterTextChunks } from '../utils/sse'
 
 // ---- Axios clients ---------------------------------------------------------
+//
+// We need three timeouts (default REST / full-article fetch / translation),
+// but a SINGLE language-injection interceptor must apply to all of them —
+// the previous setup attached the interceptor only to `api`, so full-article
+// and translation requests silently dropped the user's lang preference.
 
-const api = axios.create({ baseURL: '/api', timeout: 10000 })
-
-// Separate client for article fetching (needs longer timeout)
-const apiFetch = axios.create({ baseURL: '/api', timeout: 120000 }) // 2 min
-
-// Separate client for translation (needs longer timeout)
-const apiLong = axios.create({ baseURL: '/api', timeout: 180000 }) // 3 min
-
-// Interceptor to add lang parameter to all requests
-api.interceptors.request.use((config) => {
+function addLangParam(config) {
   const lang = localStorage.getItem(LANG_KEY) || 'zh'
   if (lang && lang !== 'original') {
     config.params = config.params || {}
     config.params.lang = lang
   }
   return config
-})
+}
+
+function makeApi(timeout) {
+  const inst = axios.create({ baseURL: '/api', timeout })
+  inst.interceptors.request.use(addLangParam)
+  return inst
+}
+
+const api      = makeApi(10_000)   // default REST
+const apiFetch = makeApi(120_000)  // article fetch via Jina (2 min)
+const apiLong  = makeApi(180_000)  // translation (3 min)
 
 // ---- REST endpoints --------------------------------------------------------
 

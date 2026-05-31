@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
-import { useLanguage } from '../context/LanguageContext'
+import { useState, useRef, useEffect } from 'react'
+import { useLanguage } from '../context/useLanguage'
 
 const MODES = {
   zh: [
@@ -16,17 +16,29 @@ const MODES = {
 
 export default function SearchBar({ value, onChange, mode, onModeChange }) {
   const { lang, t } = useLanguage()
-  const [input, setInput] = useState(value)
+  // Track the last prop we synced from. When parent pushes a new `value`
+  // (e.g. on filter clear or saved-filter restore), we adopt it without an
+  // effect. This is React's official "adjusting state while rendering"
+  // pattern — see https://react.dev/learn/you-might-not-need-an-effect
+  // #adjusting-some-state-when-a-prop-changes
+  const [display, setDisplay] = useState(value)
+  const [syncedValue, setSyncedValue] = useState(value)
   const timer = useRef(null)
 
-  useEffect(() => {
-    setInput(value)
-  }, [value])
+  if (value !== syncedValue) {
+    setSyncedValue(value)
+    setDisplay(value)
+  }
+
+  // Cancel any pending debounce on unmount so we don't fire onChange after
+  // the component is gone.
+  useEffect(() => () => clearTimeout(timer.current), [])
 
   const handleChange = (e) => {
-    setInput(e.target.value)
+    const v = e.target.value
+    setDisplay(v)                                 // immediate UI feedback
     clearTimeout(timer.current)
-    timer.current = setTimeout(() => onChange(e.target.value), 300)
+    timer.current = setTimeout(() => onChange(v), 300)
   }
 
   const modes = MODES[lang] || MODES.zh
@@ -43,7 +55,7 @@ export default function SearchBar({ value, onChange, mode, onModeChange }) {
         </svg>
         <input
           type="text"
-          value={input}
+          value={display}
           onChange={handleChange}
           placeholder={t.search}
           className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm
