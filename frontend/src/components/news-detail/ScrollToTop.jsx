@@ -6,24 +6,25 @@ import { useScrollPast } from '@/hooks/useScrollPast'
 gsap.registerPlugin(useGSAP)
 
 /**
- * ScrollToTop — 小闻的尾巴，从右下角探出来。
+ * ScrollToTop — 小闻主题的返回顶部按钮。
  *
- * 设计语言和 ChatBubbleButton（小闻头像）统一：
- *  - 同色系橙色毛茸茸尾巴
- *  - 位置在 AI 助手上方，视觉上像小闻竖起尾巴
- *  - 入场：从右侧探出来 + 轻轻摇摆
- *  - 静止：微微摇尾巴
- *  - 点击：尾巴弹起 + wag 加速 → 页面滚回顶部
+ * 视觉：橙色圆按钮 + 白色向上箭头 + 两个小狐狸耳朵
+ * 和下面的 ChatBubbleButton（小闻头像）是一套视觉语言。
+ *
+ * 动画（GSAP）：
+ *  - 入场：从下方弹出来，耳朵抖一抖
+ *  - 静止：微微呼吸上下浮动
+ *  - 点击：压扁 → 弹飞消失 → 页面滚回顶部
  */
 const SCROLL_THRESHOLD = 400
 
 export default function ScrollToTop() {
   const show = useScrollPast(SCROLL_THRESHOLD)
-  const wrapRef = useRef(null)
+  const btnRef = useRef(null)
   const idleTweenRef = useRef(null)
 
   useGSAP(() => {
-    if (!show || !wrapRef.current) {
+    if (!show || !btnRef.current) {
       if (idleTweenRef.current) {
         idleTweenRef.current.kill()
         idleTweenRef.current = null
@@ -31,20 +32,20 @@ export default function ScrollToTop() {
       return
     }
 
-    // Entrance: tail peeks in from right with a cute wag
-    gsap.fromTo(wrapRef.current,
-      { x: 60, rotation: 0, opacity: 0 },
+    // Entrance: bounce up from below
+    gsap.fromTo(btnRef.current,
+      { y: 50, scale: 0.2, opacity: 0 },
       {
-        x: 0,
-        rotation: 0,
+        y: 0,
+        scale: 1,
         opacity: 1,
         duration: 0.6,
-        ease: 'back.out(1.4)',
+        ease: 'back.out(1.7)',
         onComplete: () => {
-          // Idle: gentle tail wag
-          idleTweenRef.current = gsap.to(wrapRef.current, {
-            rotation: 8,
-            duration: 0.8,
+          // Idle: gentle breathing float
+          idleTweenRef.current = gsap.to(btnRef.current, {
+            y: -3,
+            duration: 1.4,
             ease: 'sine.inOut',
             repeat: -1,
             yoyo: true,
@@ -59,10 +60,10 @@ export default function ScrollToTop() {
         idleTweenRef.current = null
       }
     }
-  }, { scope: wrapRef, dependencies: [show] })
+  }, { scope: btnRef, dependencies: [show] })
 
   function handleClick() {
-    if (!wrapRef.current) return
+    if (!btnRef.current) return
 
     if (idleTweenRef.current) {
       idleTweenRef.current.kill()
@@ -70,28 +71,16 @@ export default function ScrollToTop() {
     }
 
     gsap.timeline()
-      .to(wrapRef.current, {
-        rotation: 18,
+      .to(btnRef.current, {
+        scale: 0.8,
         duration: 0.08,
         ease: 'power2.in',
       })
-      .to(wrapRef.current, {
-        rotation: -12,
-        duration: 0.08,
-        ease: 'power2.in',
-      })
-      .to(wrapRef.current, {
-        rotation: 14,
-        duration: 0.08,
-        ease: 'power2.in',
-      })
-      .to(wrapRef.current, {
-        y: -50,
-        x: 20,
-        rotation: -20,
+      .to(btnRef.current, {
+        y: -60,
+        scale: 0.5,
         opacity: 0,
-        scale: 0.7,
-        duration: 0.45,
+        duration: 0.4,
         ease: 'power3.in',
         onComplete: () => {
           window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -103,7 +92,7 @@ export default function ScrollToTop() {
 
   return (
     <button
-      ref={wrapRef}
+      ref={btnRef}
       type="button"
       onClick={handleClick}
       aria-label="返回顶部"
@@ -111,37 +100,37 @@ export default function ScrollToTop() {
                  w-12 h-12 rounded-full
                  flex items-center justify-center
                  cursor-pointer select-none
-                 opacity-0
-                 active:scale-90 transition-none"
-      style={{ transformOrigin: '70% 90%' }}
+                 opacity-0"
     >
-      {/* 小闻的尾巴 — 和吉祥物同色系的橙色毛茸尾巴 */}
       <svg
         width="48"
-        height="48"
-        viewBox="0 0 48 48"
+        height="54"
+        viewBox="0 0 48 54"
         fill="none"
       >
         <defs>
-          <radialGradient id="tail-grad" cx="35%" cy="30%" r="70%">
-            <stop offset="0%" stopColor="#FDBA74" />
-            <stop offset="55%" stopColor="#FB923C" />
+          <radialGradient id="stt-btn" cx="40%" cy="35%" r="65%">
+            <stop offset="0%" stopColor="#FB923C" />
             <stop offset="100%" stopColor="#EA580C" />
           </radialGradient>
         </defs>
-        {/* Tail shape — curvy fox tail curling up */}
+
+        {/* Left ear */}
+        <path d="M10 18 L14 6 L18 16Z" fill="url(#stt-btn)" />
+        <path d="M12 16 L14 9 L16 15Z" fill="#FBCFE8" opacity="0.8" />
+        {/* Right ear */}
+        <path d="M30 16 L34 6 L38 18Z" fill="url(#stt-btn)" />
+        <path d="M32 15 L34 9 L36 16Z" fill="#FBCFE8" opacity="0.8" />
+
+        {/* Main circle */}
+        <circle cx="24" cy="32" r="18" fill="url(#stt-btn)" />
+
+        {/* White arrow — clear "go up" semantics */}
         <path
-          d="M10 38 Q8 28 14 20 Q20 12 24 14 Q22 20 26 18 Q30 16 28 22 Q26 28 30 26 Q34 24 32 30 Q30 36 24 40 Q18 44 10 38Z"
-          fill="url(#tail-grad)"
+          d="M24 24 L16 33 L21 33 L21 40 L27 40 L27 33 L32 33Z"
+          fill="white"
+          opacity="0.95"
         />
-        {/* Tail tip — white/cream like fox tail tip */}
-        <path
-          d="M20 16 Q22 12 24 14 Q22 18 26 18 Q24 20 22 19 Q20 18 20 16Z"
-          fill="#FEF3C7"
-          opacity="0.9"
-        />
-        {/* Tiny paw pad hint at base */}
-        <ellipse cx="14" cy="38" rx="3" ry="2" fill="#F87171" opacity="0.3" />
       </svg>
     </button>
   )
