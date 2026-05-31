@@ -10,22 +10,42 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load environment from .env if present (project root has highest priority,
+# then backend/). Falls back to plain os.environ if python-dotenv missing.
+try:
+    from dotenv import load_dotenv
+    for _candidate in (BASE_DIR.parent / '.env', BASE_DIR / '.env'):
+        if _candidate.exists():
+            load_dotenv(_candidate, override=False)
+except ImportError:
+    pass
+
+
+def _env(name: str, default: str = '') -> str:
+    return os.environ.get(name, default)
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-vfr%b9)l##^a7e#9q9tpn(5^@a8yx=!k$6!n&5yd%j%g+y1_*i'
+# Set DJANGO_SECRET_KEY in .env (see .env.example). The fallback below is
+# generated per-process for local dev only and will invalidate sessions on
+# every restart — production MUST provide a stable value via env.
+SECRET_KEY = _env('DJANGO_SECRET_KEY') or (
+    'dev-only-' + __import__('secrets').token_urlsafe(48)
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = _env('DJANGO_DEBUG', '1') == '1'
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [h.strip() for h in _env('DJANGO_ALLOWED_HOSTS', '*').split(',') if h.strip()]
 
 
 # Application definition
