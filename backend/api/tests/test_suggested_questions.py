@@ -95,3 +95,42 @@ def test_invalid_json_response_falls_back(news, client):
 def test_404_for_missing_news(db, client):
     resp = client.post('/api/news/999999/suggested-questions/')
     assert resp.status_code == 404
+
+
+def test_force_regenerate_bypasses_cache(news, client):
+    """When the user clicks '换一批', the frontend passes force=1.
+    Backend must re-invoke the LLM even though cache is warm.
+    """
+    news.suggested_questions = ['old q1', 'old q2', 'old q3']
+    news.suggested_questions_generated_at = timezone.now()
+    news.save()
+
+    new_payload = '["new q1","new q2","new q3"]'
+    with patch('api.views.get_openai_client', return_value=_fake_client(new_payload)):
+        resp = client.post(f'/api/news/{news.pk}/suggested-questions/?force=1')
+
+    assert resp.status_code == 200
+    assert resp.json()['questions'] == ['new q1', 'new q2', 'new q3']
+
+    # Cache was overwritten, not appended
+    news.refresh_from_db()
+    assert news.suggested_questions == ['new q1', 'new q2', 'new q3']
+
+
+def test_force_regenerate_falls_back_on_llm_error(news, client):
+    """Even on force-regen, an LLM failure must not break the UX —
+    return the hardcoded fallback so the chips still render.
+    Cached questions are preserved (not wiped) so we don't lose good data.
+    """
+    news.suggested_questions = ['old q1', 'old q2', 'old q3']
+    news.suggested_questions_generated_at = timezone.now()
+    news.save()
+
+    with patch('api.views.get_openai_client', side_effect=RuntimeError('boom')):
+        resp = client.post(f'/api/news/{news.pk}/suggested-questions/?force=1')
+
+    assert resp.status_code == 200
+    assert len(resp.json()['questions']) == 3
+    # Old cache untouched (failure shouldn't destroy good data)
+    news.refresh_from_db()
+    assert news.suggested_questions == ['old q1', 'old q2', 'old q3']

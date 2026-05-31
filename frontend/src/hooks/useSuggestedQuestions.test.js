@@ -59,4 +59,41 @@ describe('useSuggestedQuestions', () => {
     expect(result.current.questions).toEqual([])
     expect(result.current.error).toBeTruthy()
   })
+
+  it('refresh() re-invokes the API with force=true and updates questions', async () => {
+    api.fetchSuggestedQuestions
+      .mockResolvedValueOnce({ questions: ['old1', 'old2', 'old3'] })
+      .mockResolvedValueOnce({ questions: ['new1', 'new2', 'new3'] })
+
+    const { result } = renderHook(() => useSuggestedQuestions('42', true))
+    await waitFor(() => expect(result.current.questions).toEqual(['old1', 'old2', 'old3']))
+    expect(api.fetchSuggestedQuestions).toHaveBeenLastCalledWith('42')
+
+    // User clicks "换一批"
+    await result.current.refresh()
+    await waitFor(() => expect(result.current.questions).toEqual(['new1', 'new2', 'new3']))
+    // Second call must pass the force flag
+    expect(api.fetchSuggestedQuestions).toHaveBeenLastCalledWith('42', { force: true })
+    expect(api.fetchSuggestedQuestions).toHaveBeenCalledTimes(2)
+  })
+
+  it('refresh() keeps old questions on failure (UX never goes blank)', async () => {
+    api.fetchSuggestedQuestions
+      .mockResolvedValueOnce({ questions: ['kept1', 'kept2', 'kept3'] })
+      .mockRejectedValueOnce(new Error('llm down'))
+
+    const { result } = renderHook(() => useSuggestedQuestions('42', true))
+    await waitFor(() => expect(result.current.questions).toEqual(['kept1', 'kept2', 'kept3']))
+
+    await result.current.refresh()
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    // Old questions preserved
+    expect(result.current.questions).toEqual(['kept1', 'kept2', 'kept3'])
+  })
+
+  it('refresh() is a no-op when newsId is missing', async () => {
+    const { result } = renderHook(() => useSuggestedQuestions(null, true))
+    await result.current.refresh()
+    expect(api.fetchSuggestedQuestions).not.toHaveBeenCalled()
+  })
 })

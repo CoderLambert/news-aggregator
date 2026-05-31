@@ -59,8 +59,10 @@ export const fetchChatHistory = (newsId) =>
 export const clearChatHistory = (newsId) =>
   api.delete(`/news/${newsId}/chat/`).then(res => res.data)
 
-export const fetchSuggestedQuestions = (newsId) =>
-  api.post(`/news/${newsId}/suggested-questions/`).then(res => res.data)
+export const fetchSuggestedQuestions = (newsId, { force = false } = {}) =>
+  api.post(`/news/${newsId}/suggested-questions/`, null, {
+    params: force ? { force: 1 } : undefined,
+  }).then(res => res.data)
 
 // ---- Streaming endpoints (SSE / token streams) -----------------------------
 

@@ -680,8 +680,12 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
 
         news = self.get_object()
 
-        # Cache hit
-        if news.suggested_questions and len(news.suggested_questions) >= 3:
+        # ?force=1 from frontend "换一批" button — skip cache, force fresh LLM call.
+        # On failure we keep the old cache (see except branch), so this is safe.
+        force = request.query_params.get('force') in ('1', 'true', 'True')
+
+        # Cache hit (unless forced)
+        if not force and news.suggested_questions and len(news.suggested_questions) >= 3:
             return Response({'questions': news.suggested_questions[:3]})
 
         # Auto-fetch full article so suggestions are based on the real body,

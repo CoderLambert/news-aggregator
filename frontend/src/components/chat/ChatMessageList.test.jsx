@@ -59,4 +59,65 @@ describe('ChatMessageList', () => {
     render(<ChatMessageList messages={messages} phase="streaming" onSuggestionClick={() => {}} />)
     expect(screen.getByTestId('md')).toHaveTextContent('Hello there!')
   })
+
+  describe('refresh suggestions ("换一批")', () => {
+    it('renders a refresh button when onRefreshSuggestions is provided', () => {
+      render(
+        <ChatMessageList
+          messages={[]}
+          phase="idle"
+          onSuggestionClick={() => {}}
+          onRefreshSuggestions={() => {}}
+        />,
+      )
+      expect(screen.getByRole('button', { name: /换一批/ })).toBeInTheDocument()
+    })
+
+    it('does NOT render the refresh button when onRefreshSuggestions is missing', () => {
+      // Backward compat — old callers without refresh capability see no button
+      render(<ChatMessageList messages={[]} phase="idle" onSuggestionClick={() => {}} />)
+      expect(screen.queryByRole('button', { name: /换一批/ })).not.toBeInTheDocument()
+    })
+
+    it('clicking refresh calls onRefreshSuggestions', async () => {
+      const user = userEvent.setup()
+      const onRefreshSuggestions = vi.fn()
+      render(
+        <ChatMessageList
+          messages={[]}
+          phase="idle"
+          onSuggestionClick={() => {}}
+          onRefreshSuggestions={onRefreshSuggestions}
+        />,
+      )
+      await user.click(screen.getByRole('button', { name: /换一批/ }))
+      expect(onRefreshSuggestions).toHaveBeenCalledTimes(1)
+    })
+
+    it('refresh button is disabled and shows spinner state when refreshing=true', () => {
+      render(
+        <ChatMessageList
+          messages={[]}
+          phase="idle"
+          onSuggestionClick={() => {}}
+          onRefreshSuggestions={() => {}}
+          refreshingSuggestions
+        />,
+      )
+      const btn = screen.getByRole('button', { name: /换一批/ })
+      expect(btn).toBeDisabled()
+    })
+
+    it('does NOT render refresh button when there are messages (only in empty state)', () => {
+      render(
+        <ChatMessageList
+          messages={[{ role: 'user', content: 'hi' }]}
+          phase="idle"
+          onSuggestionClick={() => {}}
+          onRefreshSuggestions={() => {}}
+        />,
+      )
+      expect(screen.queryByRole('button', { name: /换一批/ })).not.toBeInTheDocument()
+    })
+  })
 })

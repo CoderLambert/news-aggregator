@@ -41,7 +41,11 @@ export default function NewsChatAssistant({ newsId }) {
 
   // Only fetch LLM suggestions once the user actually opens the panel,
   // to avoid burning tokens for readers who never chat.
-  const { questions: suggestedQuestions } = useSuggestedQuestions(newsId, isOpen)
+  const {
+    questions: suggestedQuestions,
+    loading: refreshingSuggestions,
+    refresh: refreshSuggestions,
+  } = useSuggestedQuestions(newsId, isOpen)
 
   // Fire confetti exactly once when phase first hits 'success'
   useEffect(() => {
@@ -122,6 +126,8 @@ export default function NewsChatAssistant({ newsId }) {
             phase={phase}
             onSuggestionClick={handleSuggestionClick}
             suggestedQuestions={suggestedQuestions}
+            onRefreshSuggestions={refreshSuggestions}
+            refreshingSuggestions={refreshingSuggestions}
           />
         </div>
 

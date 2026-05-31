@@ -1,4 +1,5 @@
 import { useRef, useEffect } from 'react'
+import { RefreshCw } from 'lucide-react'
 import NodeRenderer from 'markstream-react'
 import XiaowenMascot from '../mascot/XiaowenMascot'
 
@@ -25,12 +26,17 @@ const DEFAULT_SUGGESTED_QUESTIONS = [
  *   - phase:    from useChat phase machine — drives the thinking dots
  *   - onSuggestionClick(text): user picks a suggested question
  *   - suggestedQuestions: optional override; falls back to the hardcoded 3
+ *   - onRefreshSuggestions: optional — when provided, shows the "换一批"
+ *       button in the empty state. Called when user clicks it.
+ *   - refreshingSuggestions: when true, button disabled + icon spins
  */
 export default function ChatMessageList({
   messages,
   phase,
   onSuggestionClick,
   suggestedQuestions,
+  onRefreshSuggestions,
+  refreshingSuggestions = false,
 }) {
   const endRef = useRef(null)
   const questions =
@@ -78,6 +84,24 @@ export default function ChatMessageList({
             </button>
           ))}
         </div>
+        {onRefreshSuggestions && (
+          <button
+            type="button"
+            onClick={onRefreshSuggestions}
+            disabled={refreshingSuggestions}
+            aria-label="换一批推荐问题"
+            className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full
+                       text-[11px] text-neutral-500 hover:text-orange-600
+                       hover:bg-orange-50 transition-colors
+                       disabled:opacity-50 disabled:cursor-wait
+                       focus:outline-none focus:ring-2 focus:ring-orange-200"
+          >
+            <RefreshCw
+              className={`w-3 h-3 ${refreshingSuggestions ? 'animate-spin' : ''}`}
+            />
+            <span>换一批</span>
+          </button>
+        )}
       </div>
     )
   }
