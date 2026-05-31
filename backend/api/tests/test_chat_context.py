@@ -152,7 +152,7 @@ class TestChatAutoFetch:
         fake_client.chat.completions.create = fake_stream
 
         with patch('api.views._fetch_via_jina', return_value='FETCHED_FULL_BODY') as m_fetch, \
-             patch('api.views.get_openai_client', return_value=fake_client):
+             patch('api.views.get_clients', return_value=[(fake_client, 'doubao-seed-2.0-pro')]):
             resp = client.post(
                 f'/api/news/{n.pk}/chat/',
                 data={'question': '这文章讲啥？'},
@@ -180,8 +180,8 @@ class TestChatAutoFetch:
         fake_client = MagicMock()
         fake_client.chat.completions.create = fake_stream
 
-        with patch('api.views._fetch_via_jina') as m_fetch, \
-             patch('api.views.get_openai_client', return_value=fake_client):
+        with patch('api.views._fetch_via_jina', side_effect=AssertionError('should not fetch')) as m_fetch, \
+             patch('api.views.get_clients', return_value=[(fake_client, 'doubao-seed-2.0-pro')]):
             resp = client.post(
                 f'/api/news/{n.pk}/chat/',
                 data={'question': 'x'},
@@ -218,7 +218,7 @@ class TestSuggestedQuestionsAutoFetch:
                         return _Completion('["q1","q2","q3"]')
 
         with patch('api.views._fetch_via_jina', return_value='FETCHED_FULL_BODY'), \
-             patch('api.views.get_openai_client', return_value=_FakeClient()):
+             patch('api.views.get_clients', return_value=[(_FakeClient(), 'doubao-seed-2.0-pro')]):
             resp = client.post(f'/api/news/{n.pk}/suggested-questions/')
 
         assert resp.status_code == 200

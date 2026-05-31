@@ -51,27 +51,55 @@ TRANSLATION_SYSTEM = """你是一位资深的中英双语翻译专家，擅长�
 
 
 def _get_volcengine_key():
-    """Get Volcengine ARK API key from environment."""
-    return os.environ.get('VOLCENGINE_API_KEY') or os.environ.get('ARK_API_KEY', '')
+    """Get Volcengine ARK API key from environment or Hermes config.
 
+    Volcengine ARK keys start with 'ark-'.  If the key found in Hermes
+    config starts with 'ark-', use it as the Volcengine key.
+    """
+    vk = os.environ.get('VOLCENGINE_API_KEY') or os.environ.get('ARK_API_KEY', '')
+    if vk and vk.startswith('ark-'):
+        return vk
 
-def _get_dashscope_key():
-    """Get DashScope Coding API key from environment or Hermes config."""
-    api_key = os.environ.get('DASHSCOPE_CODING_API_KEY') or os.environ.get('DASHSCOPE_API_KEY')
-    if api_key:
-        return api_key
-
-    # Fallback: read from Hermes config
+    # Fallback: read from Hermes config (user's main API key may be an ARK key)
     try:
         import yaml
         config_path = os.path.expanduser('~/.hermes/config.yaml')
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
-        return config.get('model', {}).get('api_key', '')
+        ark_key = config.get('model', {}).get('api_key', '')
+        if ark_key and ark_key.startswith('ark-'):
+            return ark_key
     except Exception:
         pass
 
-    return ''
+    return vk
+
+
+def _get_dashscope_key():
+    """Get DashScope Coding API key from environment or Hermes config.
+
+    DashScope keys typically start with 'sk-'.  If the only available key
+    starts with 'ark-' (Volcengine ARK format) it is NOT a valid DashScope
+    key — return empty so we skip DashScope and avoid a 401 error.
+    """
+    api_key = os.environ.get('DASHSCOPE_CODING_API_KEY') or os.environ.get('DASHSCOPE_API_KEY')
+
+    # If env var is explicitly empty (user didn't set it), try Hermes config
+    if not api_key:
+        try:
+            import yaml
+            config_path = os.path.expanduser('~/.hermes/config.yaml')
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f)
+            api_key = config.get('model', {}).get('api_key', '')
+        except Exception:
+            pass
+
+    # ARK-prefixed keys are for Volcengine, not DashScope
+    if api_key and api_key.startswith('ark-'):
+        return ''
+
+    return api_key
 
 
 def get_openai_client():

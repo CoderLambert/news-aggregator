@@ -9,7 +9,7 @@ from .serializers import (
     NewsListSerializer, NewsDetailSerializer,
 )
 # Module-level import so tests can patch `api.views.get_openai_client`
-from api.services.llm_translator import get_openai_client
+from api.services.llm_translator import get_openai_client, get_clients
 
 # Hardcoded fallback shown when the LLM is unreachable / returns garbage
 SUGGESTED_QUESTIONS_FALLBACK = [
@@ -617,9 +617,14 @@ class NewsChatView(generics.GenericAPIView):
         def generate():
             full_response = []
             try:
-                client = get_openai_client()
+                # Use the first available client with its correct model
+                clients = get_clients()
+                if not clients:
+                    yield "\n\n[Error: 未配置翻译服务 API Key]"
+                    return
+                client, model = clients[0]
                 stream = client.chat.completions.create(
-                    model='kimi-k2.5',
+                    model=model,
                     messages=messages,
                     temperature=0.7,
                     stream=True,
@@ -711,9 +716,12 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
         )
 
         try:
-            client = get_openai_client()
+            clients = get_clients()
+            if not clients:
+                raise ValueError("未配置翻译服务 API Key")
+            client, model = clients[0]
             completion = client.chat.completions.create(
-                model='kimi-k2.5',
+                model=model,
                 messages=[{'role': 'user', 'content': prompt}],
                 temperature=0.6,
             )

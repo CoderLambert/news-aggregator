@@ -36,19 +36,19 @@ class _FakeCompletion:
 
 
 def _fake_client(content):
-    """Return a mock OpenAI client whose .chat.completions.create returns content."""
+    """Return [(client, model)] list matching get_clients() output."""
     class _C:
         class chat:
             class completions:
                 @staticmethod
                 def create(**kwargs):
                     return _FakeCompletion(content)
-    return _C()
+    return [(_C(), 'doubao-seed-2.0-pro')]
 
 
 def test_first_call_invokes_llm_and_caches(news, client):
     payload = '["这篇文章讲了什么？", "AI 在新闻领域怎么用？", "有什么风险？"]'
-    with patch('api.views.get_openai_client', return_value=_fake_client(payload)):
+    with patch('api.views.get_clients', return_value=_fake_client(payload)):
         resp = client.post(f'/api/news/{news.pk}/suggested-questions/')
     assert resp.status_code == 200
     data = resp.json()
@@ -68,14 +68,14 @@ def test_second_call_uses_cache(news, client):
     news.save()
 
     # If LLM is invoked, this will raise — proving cache hit short-circuited it
-    with patch('api.views.get_openai_client', side_effect=AssertionError('should not call LLM')):
+    with patch('api.views.get_clients', side_effect=AssertionError('should not call LLM')):
         resp = client.post(f'/api/news/{news.pk}/suggested-questions/')
     assert resp.status_code == 200
     assert resp.json()['questions'] == ['cached q1', 'cached q2', 'cached q3']
 
 
 def test_llm_error_falls_back_to_default(news, client):
-    with patch('api.views.get_openai_client', side_effect=RuntimeError('boom')):
+    with patch('api.views.get_clients', return_value=[]):
         resp = client.post(f'/api/news/{news.pk}/suggested-questions/')
     # Still 200 — UX-friendly: user always sees 3 chips
     assert resp.status_code == 200
@@ -86,7 +86,7 @@ def test_llm_error_falls_back_to_default(news, client):
 
 
 def test_invalid_json_response_falls_back(news, client):
-    with patch('api.views.get_openai_client', return_value=_fake_client('not json at all')):
+    with patch('api.views.get_clients', return_value=_fake_client('not json at all')):
         resp = client.post(f'/api/news/{news.pk}/suggested-questions/')
     assert resp.status_code == 200
     assert len(resp.json()['questions']) == 3
@@ -106,7 +106,7 @@ def test_force_regenerate_bypasses_cache(news, client):
     news.save()
 
     new_payload = '["new q1","new q2","new q3"]'
-    with patch('api.views.get_openai_client', return_value=_fake_client(new_payload)):
+    with patch('api.views.get_clients', return_value=_fake_client(new_payload)):
         resp = client.post(f'/api/news/{news.pk}/suggested-questions/?force=1')
 
     assert resp.status_code == 200
@@ -126,7 +126,7 @@ def test_force_regenerate_falls_back_on_llm_error(news, client):
     news.suggested_questions_generated_at = timezone.now()
     news.save()
 
-    with patch('api.views.get_openai_client', side_effect=RuntimeError('boom')):
+    with patch('api.views.get_clients', return_value=[]):
         resp = client.post(f'/api/news/{news.pk}/suggested-questions/?force=1')
 
     assert resp.status_code == 200
