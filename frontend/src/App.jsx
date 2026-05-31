@@ -10,6 +10,8 @@ import LoadingSpinner from './components/LoadingSpinner'
 // the heaviest component. Lazy-loading means the list page loads faster.
 const NewsList = lazy(() => import('./pages/NewsList'))
 const NewsDetail = lazy(() => import('./pages/NewsDetail'))
+// Design QA route — preview the Xiaowen mascot in all moods.
+const MascotPreview = lazy(() => import('./components/mascot/MascotPreview'))
 
 export default function App() {
   return (
@@ -23,6 +25,7 @@ export default function App() {
                 <Routes>
                   <Route path="/" element={<NewsList />} />
                   <Route path="/news/:id" element={<NewsDetail />} />
+                  <Route path="/__mascot__" element={<MascotPreview />} />
                 </Routes>
               </Suspense>
             </AppErrorBoundary>

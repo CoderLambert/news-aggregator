@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <title>小闻 · 静态预览</title>
+  <style>
+    :root { color-scheme: light; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: #fafafa; color: #111; padding: 24px; }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    .sub { color: #6b7280; font-size: 13px; margin-bottom: 24px; }
+    .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; max-width: 720px; }
+    @media (min-width: 600px) { .grid { grid-template-columns: repeat(3, 1fr); } }
+    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 18px; padding: 18px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); display: flex; flex-direction: column; align-items: center; }
+    .card svg { width: 120px; height: 120px; }
+    .name { margin: 10px 0 2px; font-size: 13px; font-weight: 600; }
+    .desc { font-size: 11px; color: #6b7280; text-align: center; }
+    .sizes { background: #fff; border: 1px solid #e5e7eb; border-radius: 18px; padding: 20px; margin-top: 24px; max-width: 720px; }
+    .sizes-row { display: flex; align-items: flex-end; gap: 22px; flex-wrap: wrap; }
+    .sizes-row figure { margin: 0; display: flex; flex-direction: column; align-items: center; }
+    .sizes-row figcaption { font-size: 11px; color: #6b7280; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <h1>小闻 · 吉祥物预览（静态）</h1>
+  <p class="sub">6 种表情；这是静态 SVG，无动画。</p>
+
+  <div class="grid" id="grid"></div>
+
+  <div class="sizes">
+    <p style="font-size:13px;font-weight:600;margin:0 0 14px;">尺寸预览</p>
+    <div class="sizes-row" id="sizes"></div>
+  </div>
+
+<script>
+// 把表情参数渲染成 SVG，复制自 XiaowenMascot.jsx 的几何造型
+function svg(mood, size, isLookingUp) {
+  size = size || 120;
+  const eyesClosed = mood === 'happy' || mood === 'sleep';
+  const eyesDot    = mood === 'think';
+  const lookOffsetY= isLookingUp ? -3 : 0;
+  const headRot    = mood === 'think' ? -4 : 0;
+
+  let eyes = '';
+  if (eyesClosed) {
+    eyes = `
+      <path d="M36 55 Q40 51 44 55" stroke="#1F2937" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+      <path d="M56 55 Q60 51 64 55" stroke="#1F2937" stroke-width="2.5" stroke-linecap="round" fill="none"/>`;
+  } else if (eyesDot) {
+    eyes = `
+      <circle cx="40" cy="55" r="1.8" fill="#1F2937"/>
+      <circle cx="60" cy="55" r="1.8" fill="#1F2937"/>`;
+  } else {
+    eyes = `
+      <ellipse cx="40" cy="55" rx="3" ry="4" fill="#1F2937"/>
+      <ellipse cx="60" cy="55" rx="3" ry="4" fill="#1F2937"/>
+      <circle  cx="41" cy="53.5" r="1" fill="#FFFFFF"/>
+      <circle  cx="61" cy="53.5" r="1" fill="#FFFFFF"/>`;
+  }
+
+  let brows = '';
+  if (mood === 'confused') {
+    brows = `
+      <path d="M34 47 L44 50" stroke="#1F2937" stroke-width="2" stroke-linecap="round"/>
+      <path d="M66 47 L56 50" stroke="#1F2937" stroke-width="2" stroke-linecap="round"/>`;
+  }
+
+  let mouth;
+  if (mood === 'happy') {
+    mouth = `<path d="M44 71 Q50 76 56 71" stroke="#1F2937" stroke-width="2" stroke-linecap="round" fill="none"/>`;
+  } else if (mood === 'confused') {
+    mouth = `<ellipse cx="50" cy="73" rx="3" ry="3.5" fill="#1F2937"/>`;
+  } else if (mood === 'talk') {
+    mouth = `<ellipse cx="50" cy="72" rx="3" ry="2.5" fill="#1F2937"/>`;
+  } else {
+    mouth = `<path d="M46 71 Q50 73 54 71" stroke="#1F2937" stroke-width="1.8" stroke-linecap="round" fill="none"/>`;
+  }
+
+  const sleepZ = mood === 'sleep'
+    ? `<text x="76" y="32" font-size="12" font-weight="700" fill="#94A3B8" font-family="ui-sans-serif, system-ui">z</text>`
+    : '';
+
+  return `<svg viewBox="0 0 100 100" width="${size}" height="${size}" role="img" aria-label="小闻 AI 助手">
+    <path d="M22 30 L30 12 L40 28 Z" fill="#F97316"/>
+    <path d="M78 30 L70 12 L60 28 Z" fill="#F97316"/>
+    <path d="M27 26 L31 18 L36 26 Z" fill="#FCA5A5" opacity="0.85"/>
+    <path d="M73 26 L69 18 L64 26 Z" fill="#FCA5A5" opacity="0.85"/>
+    <g style="transform: translateY(${lookOffsetY}px) rotate(${headRot}deg); transform-origin: 50px 60px;">
+      <circle cx="50" cy="55" r="32" fill="#FB923C"/>
+      <path d="M50 88 Q26 88 26 65 Q26 58 34 56 Q42 70 50 70 Q58 70 66 56 Q74 58 74 65 Q74 88 50 88 Z" fill="#FFFFFF"/>
+      ${eyes}
+      ${brows}
+      <path d="M48 63 L52 63 L50 66 Z" fill="#1F2937"/>
+      ${mouth}
+      <circle cx="33" cy="64" r="3" fill="#FECACA" opacity="0.7"/>
+      <circle cx="67" cy="64" r="3" fill="#FECACA" opacity="0.7"/>
+    </g>
+    ${sleepZ}
+  </svg>`;
+}
+
+const moods = [
+  ['idle',     '默认'],
+  ['think',    '思考中（眼睛 ··、歪头）'],
+  ['talk',     '说话中（嘴张开）'],
+  ['happy',    '开心（眯眼笑）'],
+  ['confused', '困惑（八字眉张嘴）'],
+  ['sleep',    '睡觉（z）'],
+];
+const grid = document.getElementById('grid');
+grid.innerHTML = moods.map(([m, label]) => `
+  <div class="card">${svg(m, 120, false)}<p class="name">${m}</p><p class="desc">${label}</p></div>
+`).join('');
+
+const sizes = document.getElementById('sizes');
+sizes.innerHTML = [32, 48, 64, 96, 128].map(s => `
+  <figure>${svg('idle', s, false)}<figcaption>${s}px</figcaption></figure>
+`).join('');
+</script>
+</body>
+</html>
