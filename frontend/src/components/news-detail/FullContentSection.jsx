@@ -8,26 +8,13 @@ import ErrorBanner from './ErrorBanner'
 
 /**
  * FullContentSection — toolbar + content panel for the article's full body.
- *
- * Owns three small sub-components (LangToggle / TranslateButton /
- * TranslationProgressUI) that are only meaningful in this context.
- *
- * Props:
- *   news                  — current news object (must have full_content; full_content_zh optional)
- *   translating           — boolean, true while SSE stream is open
- *   translateError        — string | '' — error message from last attempt
- *   translationProgress   — string — incremental markdown being streamed in
- *   showOriginal          — boolean — true when user wants English source visible
- *   onToggleOriginal      — (bool) => void
- *   onTranslate           — () => void   — invoked for fresh translate / attach
- *   onRetryTranslate      — () => void   — invoked after translateError
  */
 export default function FullContentSection({
   news, translating, translateError, translationProgress,
   showOriginal, onToggleOriginal, onTranslate, onRetryTranslate,
 }) {
   return (
-    <div className="mb-6">
+    <div className="mb-8">
       <Toolbar
         news={news}
         translating={translating}
@@ -54,19 +41,22 @@ export default function FullContentSection({
 
 function Toolbar({ news, translating, translateError, showOriginal, onToggleOriginal, onTranslate }) {
   return (
-    <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-      <div className="flex items-center gap-2">
-        <Badge variant="green">
-          <CheckCircle2 />
+    <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+      {/* Left: status badges */}
+      <div className="flex items-center gap-1.5">
+        <Badge variant="green" className="rounded-full px-2.5 py-0.5 text-[11px] font-medium">
+          <CheckCircle2 className="size-3" />
           原文已加载
         </Badge>
         {news.full_content_zh && (
-          <Badge variant="violet">
-            <Languages />
+          <Badge variant="violet" className="rounded-full px-2.5 py-0.5 text-[11px] font-medium">
+            <Languages className="size-3" />
             已翻译
           </Badge>
         )}
       </div>
+
+      {/* Right: action controls */}
       <div className="flex items-center gap-2">
         {news.full_content_zh && (
           <LangToggle showOriginal={showOriginal} onToggle={onToggleOriginal} />
@@ -80,23 +70,19 @@ function Toolbar({ news, translating, translateError, showOriginal, onToggleOrig
 }
 
 function LangToggle({ showOriginal, onToggle }) {
-  // shadcn ToggleGroup ('single' type) gives us proper radiogroup semantics +
-  // aria-pressed via Radix. Value is a string ('zh' | 'en').
   return (
     <ToggleGroup
       type="single"
       value={showOriginal ? 'en' : 'zh'}
       onValueChange={(v) => {
-        // Radix emits '' when the user clicks the active item — guard so we
-        // don't accidentally clear the selection.
         if (v) onToggle(v === 'en')
       }}
       size="pill"
       aria-label="切换语言"
-      className="bg-gray-100 p-0.5 rounded-full"
+      className="bg-neutral-100 p-0.5 rounded-full"
     >
-      <ToggleGroupItem value="zh" aria-label="切换中文" className="border-0">中文</ToggleGroupItem>
-      <ToggleGroupItem value="en" aria-label="切换英文" className="border-0">English</ToggleGroupItem>
+      <ToggleGroupItem value="zh" aria-label="切换中文" className="border-0 text-xs h-6 px-2.5 rounded-full data-[state=on]:bg-white data-[state=on]:shadow-sm data-[state=on]:text-neutral-900 text-neutral-500">中文</ToggleGroupItem>
+      <ToggleGroupItem value="en" aria-label="切换英文" className="border-0 text-xs h-6 px-2.5 rounded-full data-[state=on]:bg-white data-[state=on]:shadow-sm data-[state=on]:text-neutral-900 text-neutral-500">EN</ToggleGroupItem>
     </ToggleGroup>
   )
 }
@@ -109,34 +95,33 @@ function TranslateButton({ hasTranslation, onClick }) {
       aria-label={hasTranslation ? '重新翻译' : '翻译为中文'}
       variant={hasTranslation ? 'outline' : 'violet'}
       size="pill-sm"
+      className={hasTranslation ? 'rounded-full h-7 text-[11px] font-medium border-neutral-200 text-neutral-600 hover:text-neutral-900 hover:border-neutral-300' : 'rounded-full'}
     >
-      <Languages className="size-3.5" />
+      <Languages className="size-3" />
       {hasTranslation ? '重新翻译' : '翻译为中文'}
     </Button>
   )
 }
 
 function TranslationProgressUI({ progress }) {
-  // No progress yet — show centred spinner card
   if (!progress) {
     return (
-      <Card className="mb-6 py-8 bg-violet-50 border-violet-200 items-center text-center">
-        <Loader2 className="size-8 text-violet-500 animate-spin" />
+      <Card className="mb-6 py-8 bg-violet-50/60 border-violet-100 items-center text-center">
+        <Loader2 className="size-7 text-violet-500 animate-spin" />
         <div>
           <p className="text-sm text-violet-600 font-medium">正在使用 AI 翻译...</p>
-          <p className="text-xs text-violet-400 mt-1">通义千问大模型，翻译准确自然</p>
+          <p className="text-xs text-violet-400 mt-1">大模型翻译，准确自然</p>
         </div>
       </Card>
     )
   }
-  // Streaming progress — show partial markdown
   return (
     <div className="mb-6">
       <div className="flex items-center gap-2 mb-3">
-        <Loader2 className="size-4 text-violet-500 animate-spin" />
+        <Loader2 className="size-3.5 text-violet-500 animate-spin" />
         <span className="text-xs text-violet-500 font-medium">AI 正在翻译...</span>
       </div>
-      <Card className="border-violet-200 py-5 opacity-80">
+      <Card className="border-violet-100 py-5 opacity-80">
         <CardContent className="px-5">
           <div className="article-markdown prose prose-gray max-w-none">
             <MarkdownContent content={progress} />

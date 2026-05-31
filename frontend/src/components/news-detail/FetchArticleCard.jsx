@@ -4,24 +4,20 @@ import { Button } from '@/components/ui/button'
 
 /**
  * FetchArticleCard — "load full article via Jina Reader" CTA.
- *
- * Uses shadcn <Card> + <Button variant="indigo" size="pill">. The button
- * variant is project-specific (see ui/button.jsx) and preserves the
- * original indigo accent used for "fetch from source" affordances.
  */
 export default function FetchArticleCard({ onFetch }) {
   return (
-    <Card className="mb-6 gap-3 bg-gradient-to-r from-indigo-50 to-blue-50 border-indigo-100 py-4">
-      <div className="flex items-center gap-3 px-4">
-        <FileText className="size-5 text-indigo-500 shrink-0" />
-        <div>
-          <p className="text-sm font-medium text-gray-900">获取完整原文</p>
-          <p className="text-xs text-gray-500">通过 Jina Reader 自动提取正文内容</p>
+    <Card className="mb-8 gap-2 bg-gradient-to-b from-indigo-50/80 to-white border-indigo-100/60 py-5 px-5">
+      <div className="flex items-center gap-3">
+        <div className="flex items-center justify-center size-9 rounded-xl bg-indigo-100 shrink-0">
+          <FileText className="size-4 text-indigo-600" />
         </div>
-      </div>
-      <div className="px-4">
-        <Button onClick={onFetch} aria-label="加载原文" variant="indigo" size="pill">
-          <Download className="size-4" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-neutral-900">获取完整原文</p>
+          <p className="text-xs text-neutral-400 mt-0.5">自动提取正文内容，支持 AI 翻译</p>
+        </div>
+        <Button onClick={onFetch} aria-label="加载原文" variant="indigo" size="pill-sm">
+          <Download className="size-3.5" />
           加载原文
         </Button>
       </div>

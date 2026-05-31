@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { Search } from 'lucide-react'
+import { Search, ArrowLeft } from 'lucide-react'
 import { useLanguage } from '../context/useLanguage'
 import LoadingSpinner from '../components/LoadingSpinner'
 import NodeRenderer from 'markstream-react'
@@ -105,23 +105,27 @@ export default function NewsDetail() {
         />
       )}
 
-      <div className={`max-w-3xl mx-auto px-4 py-6 sm:py-8 w-full overflow-x-hidden ${searchOpen ? 'pt-14' : ''}`}>
-        <div className="flex items-center justify-between mb-6">
-          <Link to="/" className="text-sm text-blue-600 hover:underline">
+      <div className={`max-w-3xl mx-auto px-4 pt-4 pb-8 sm:pt-6 sm:pb-10 w-full overflow-x-hidden ${searchOpen ? 'pt-16' : ''}`}>
+        {/* ── Top nav bar ── */}
+        <nav className="flex items-center justify-between mb-8">
+          <Link
+            to="/"
+            className="inline-flex items-center gap-1.5 text-sm text-neutral-500 hover:text-neutral-900 transition-colors"
+          >
+            <ArrowLeft className="size-3.5" />
             {t.backToList}
           </Link>
-          {/* Search trigger button — only when search bar is closed */}
           {!searchOpen && (
             <button
               type="button"
               onClick={() => setSearchOpen(true)}
               aria-label="搜索文章内容"
-              className="p-2 rounded-lg hover:bg-neutral-100 transition-colors"
+              className="p-2 -mr-2 rounded-xl hover:bg-neutral-100 active:bg-neutral-200 transition-colors"
             >
-              <Search className="size-4 text-neutral-500" />
+              <Search className="size-[18px] text-neutral-400" />
             </button>
           )}
-        </div>
+        </nav>
 
         <article ref={articleRef} className="w-full break-words min-w-0">
           <ArticleHeader
@@ -129,11 +133,10 @@ export default function NewsDetail() {
             displayTitle={displayTitle}
             showOriginalTitleHint={showZh && !!news.title_zh}
             isEnglishSource={isEnglishSource}
-            t={t}
           />
 
           {news.cover_image && (
-            <img src={news.cover_image} alt={displayTitle} className="w-full rounded-xl mb-6" />
+            <img src={news.cover_image} alt={displayTitle} className="w-full rounded-2xl mb-8 shadow-sm" />
           )}
 
           {/* Fetch full article */}
@@ -170,9 +173,9 @@ export default function NewsDetail() {
             </div>
           </div>
 
-          <div className="mt-8 pt-6 border-t border-gray-200">
-            <a href={news.url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline text-sm">
-              {t.readOriginal}
+          <div className="mt-10 pt-6 border-t border-neutral-100">
+            <a href={news.url} target="_blank" rel="noreferrer" className="text-sm text-neutral-400 hover:text-neutral-600 transition-colors">
+              {t.readOriginal} →
             </a>
           </div>
         </article>
@@ -185,27 +188,40 @@ export default function NewsDetail() {
   )
 }
 
-/* ── Inline header (only used here) ───────────────────────────────────── */
+/* ── Article header ─────────────────────────────────────────────────── */
 
-function ArticleHeader({ news, displayTitle, showOriginalTitleHint, isEnglishSource, t }) {
+function ArticleHeader({ news, displayTitle, showOriginalTitleHint, isEnglishSource }) {
   return (
-    <header className="mb-6">
-      <div className="flex items-center gap-2 mb-3">
-        <span className="inline-block bg-blue-50 text-blue-600 text-xs px-2 py-1 rounded">
+    <header className="mb-8">
+      {/* Tags row */}
+      <div className="flex items-center gap-1.5 mb-4 flex-wrap">
+        <span className="inline-flex items-center h-6 px-2.5 rounded-full bg-neutral-100 text-neutral-600 text-[11px] font-medium tracking-wide uppercase">
           {news.category_name}
         </span>
         {isEnglishSource && <TranslationStatus news={news} />}
       </div>
-      <h1 className="text-2xl md:text-3xl font-bold text-gray-900 leading-tight mb-4">
+
+      {/* Title */}
+      <h1 className="text-[1.625rem] sm:text-3xl font-bold text-neutral-900 leading-snug tracking-tight mb-3">
         {displayTitle}
       </h1>
+
+      {/* Original English subtitle hint */}
       {showOriginalTitleHint && (
-        <p className="text-sm text-gray-400 italic mb-4">{news.title}</p>
+        <p className="text-[13px] text-neutral-400 leading-relaxed mb-4">{news.title}</p>
       )}
-      <div className="flex flex-wrap items-center gap-3 text-sm text-gray-500">
-        {news.author && <span>{t.author}: {news.author}</span>}
-        <span>{t.source}: {news.source_name}</span>
-        <span>{new Date(news.publish_time).toLocaleString('zh-CN')}</span>
+
+      {/* Meta line */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-neutral-400">
+        {news.author && (
+          <span className="flex items-center gap-1">
+            <span className="text-neutral-600">{news.author}</span>
+          </span>
+        )}
+        <span>{news.source_name}</span>
+        <span className="flex items-center gap-1">
+          <time>{new Date(news.publish_time).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}</time>
+        </span>
       </div>
     </header>
   )
