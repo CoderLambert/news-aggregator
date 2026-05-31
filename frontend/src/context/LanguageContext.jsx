@@ -8,7 +8,7 @@ const TRANSLATIONS = {
   zh: {
     home: '首页',
     admin: '后台管理',
-    backToList: '← 返回列表',
+    backToList: '返回列表',
     readOriginal: '阅读原文 →',
     notFound: '新闻未找到',
     backHome: '返回首页',
@@ -29,7 +29,7 @@ const TRANSLATIONS = {
   en: {
     home: 'Home',
     admin: 'Admin',
-    backToList: '← Back to List',
+    backToList: 'Back to List',
     readOriginal: 'Read Original →',
     notFound: 'News not found',
     backHome: 'Back to Home',
