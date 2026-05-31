@@ -1,22 +1,16 @@
 import axios from 'axios'
-import { LANG_KEY } from '../context/LanguageContext'
+import { LANG_KEY } from '../constants'
+import { streamingFetch, iterSSEEvents, iterTextChunks } from '../utils/sse'
 
-const api = axios.create({
-  baseURL: '/api',
-  timeout: 10000,
-})
+// ---- Axios clients ---------------------------------------------------------
+
+const api = axios.create({ baseURL: '/api', timeout: 10000 })
 
 // Separate client for article fetching (needs longer timeout)
-const apiFetch = axios.create({
-  baseURL: '/api',
-  timeout: 120000, // 120 seconds
-})
+const apiFetch = axios.create({ baseURL: '/api', timeout: 120000 }) // 2 min
 
 // Separate client for translation (needs longer timeout)
-const apiLong = axios.create({
-  baseURL: '/api',
-  timeout: 180000, // 3 minutes
-})
+const apiLong = axios.create({ baseURL: '/api', timeout: 180000 }) // 3 min
 
 // Interceptor to add lang parameter to all requests
 api.interceptors.request.use((config) => {
@@ -27,6 +21,8 @@ api.interceptors.request.use((config) => {
   }
   return config
 })
+
+// ---- REST endpoints --------------------------------------------------------
 
 export const fetchNews = (params = {}) =>
   api.get('/news/', { params }).then(res => res.data)
@@ -48,3 +44,40 @@ export const fetchCategories = () =>
 
 export const fetchSources = () =>
   api.get('/sources/').then(res => res.data)
+
+// ---- Chat (REST) -----------------------------------------------------------
+
+export const fetchChatHistory = (newsId) =>
+  api.get(`/news/${newsId}/chat/`).then(res => res.data)
+
+export const clearChatHistory = (newsId) =>
+  api.delete(`/news/${newsId}/chat/`).then(res => res.data)
+
+// ---- Streaming endpoints (SSE / token streams) -----------------------------
+
+/**
+ * Translate full article — yields { progress } | { full_content_zh, full_content_zh_fetched_at } | { error }.
+ *
+ *   for await (const ev of translateFullArticleStream(id, { force: true })) { ... }
+ */
+export async function* translateFullArticleStream(id, { force = false } = {}) {
+  const res = await streamingFetch(`/api/news/${id}/translate/`, {
+    body: JSON.stringify({ force }),
+  })
+  for await (const ev of iterSSEEvents(res)) {
+    if (ev.error) throw new Error(ev.error)
+    yield ev
+  }
+}
+
+/**
+ * Send a chat question — yields raw text chunks as they arrive.
+ *
+ *   for await (const chunk of chatStream(id, "请总结这篇文章")) { accumulated += chunk; ... }
+ */
+export async function* chatStream(newsId, question) {
+  const res = await streamingFetch(`/api/news/${newsId}/chat/`, {
+    body: JSON.stringify({ question }),
+  })
+  yield* iterTextChunks(res)
+}

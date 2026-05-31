@@ -1,8 +1,14 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { LanguageProvider, useLanguage } from './context/LanguageContext'
 import Header from './components/Header'
-import NewsList from './pages/NewsList'
-import NewsDetail from './pages/NewsDetail'
+import AppErrorBoundary from './components/AppErrorBoundary'
+import LoadingSpinner from './components/LoadingSpinner'
+
+// Route-level code splitting — NewsDetail (markstream-react + react-markdown) is
+// the heaviest component. Lazy-loading means the list page loads faster.
+const NewsList = lazy(() => import('./pages/NewsList'))
+const NewsDetail = lazy(() => import('./pages/NewsDetail'))
 
 export default function App() {
   return (
@@ -11,10 +17,14 @@ export default function App() {
         <div className="min-h-screen bg-gray-50 overflow-x-hidden">
           <Header />
           <main>
-            <Routes>
-              <Route path="/" element={<NewsList />} />
-              <Route path="/news/:id" element={<NewsDetail />} />
-            </Routes>
+            <AppErrorBoundary onReset={() => window.location.reload()}>
+              <Suspense fallback={<LoadingSpinner />}>
+                <Routes>
+                  <Route path="/" element={<NewsList />} />
+                  <Route path="/news/:id" element={<NewsDetail />} />
+                </Routes>
+              </Suspense>
+            </AppErrorBoundary>
           </main>
           <Footer />
         </div>

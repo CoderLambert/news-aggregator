@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 
-const LANG_KEY = 'newshub_lang'
+import { LANG_KEY } from '../constants'
 export { LANG_KEY }
 
 const LanguageContext = createContext({
