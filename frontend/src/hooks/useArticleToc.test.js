@@ -42,7 +42,7 @@ describe('useArticleToc', () => {
     div.innerHTML = '<h2>No Id</h2><h2 id="custom">Custom</h2>'
     const ref = { current: div }
     const { result } = renderHook(() => useArticleToc(ref))
-    expect(result.current.headings[0].id).toBe('toc-heading-0')
+    expect(result.current.headings[0].id).toMatch(/^toc-heading-\d+-0$/)
     expect(result.current.headings[1].id).toBe('custom')
   })
 })

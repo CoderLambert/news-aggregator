@@ -1,12 +1,10 @@
-import { useState, useLayoutEffect, useRef } from 'react'
+import { useState, useLayoutEffect, useRef, useCallback } from 'react'
 
 /**
  * useArticleToc — extracts heading tree from a DOM container.
  *
- * Watches the container's h1/h2/h3 headings, builds a flat TOC list
- * with id/text/level, and tracks which heading is currently in viewport.
- *
- * React 19 + React Compiler enabled.
+ * Scans h1/h2/h3 headings, builds a flat TOC list, tracks active heading.
+ * Uses multiple scanning strategies to handle React async rendering.
  */
 
 const HEADING_SELECTOR = 'h1, h2, h3'
@@ -16,58 +14,62 @@ export function useArticleToc(containerRef) {
   const [headings, setHeadings] = useState([])
   const [activeId, setActiveId] = useState('')
   const observerRef = useRef(null)
+  const scanTimerRef = useRef(null)
 
-  // Scan headings — runs on mount, on DOM mutation, and after a rAF delay
-  // to catch React-rendered content that may not exist at mount time.
-  useLayoutEffect(() => {
+  const scan = useCallback(() => {
     const container = containerRef.current
     if (!container) return
 
-    function scan() {
-      const els = container.querySelectorAll(HEADING_SELECTOR)
-      const items = []
-      els.forEach((el, i) => {
-        if (!el.id) {
-          el.id = `toc-heading-${i}`
-        }
-        items.push({
-          id: el.id,
-          text: el.textContent?.trim() || '',
-          level: parseInt(el.tagName[1], 10),
-        })
+    const els = container.querySelectorAll(HEADING_SELECTOR)
+    const items = []
+    els.forEach((el, i) => {
+      if (!el.id) {
+        el.id = `toc-heading-${Date.now()}-${i}`
+      }
+      items.push({
+        id: el.id,
+        text: el.textContent?.trim() || '',
+        level: parseInt(el.tagName[1], 10),
       })
-      setHeadings(items)
-    }
+    })
+    setHeadings(items)
+  }, [containerRef])
 
-    // Immediate scan
+  // Scan on mount + delayed retries for async content
+  useLayoutEffect(() => {
     scan()
 
-    // Delayed scan — React children (FullContentSection etc.) may not have
-    // rendered yet at the time of mount. rAF ensures we scan after paint.
-    const rafId = requestAnimationFrame(scan)
+    // Retry after rAF (after first paint)
+    const raf1 = requestAnimationFrame(scan)
+    // Retry after 500ms (covers lazy-loaded content)
+    const t1 = setTimeout(scan, 500)
+    // Retry after 2s (covers slow network content)
+    const t2 = setTimeout(scan, 2000)
 
-    // Observe DOM mutations so dynamically-loaded content (e.g. markdown)
-    // gets picked up automatically.
+    // MutationObserver for ongoing DOM changes
     const mo = new MutationObserver(() => {
-      // Debounce: wait a frame so React finishes its batch
-      requestAnimationFrame(scan)
+      clearTimeout(scanTimerRef.current)
+      scanTimerRef.current = setTimeout(scan, 100)
     })
-    mo.observe(container, { childList: true, subtree: true })
+    if (containerRef.current) {
+      mo.observe(containerRef.current, { childList: true, subtree: true })
+    }
 
     return () => {
       mo.disconnect()
-      cancelAnimationFrame(rafId)
+      cancelAnimationFrame(raf1)
+      clearTimeout(t1)
+      clearTimeout(t2)
+      clearTimeout(scanTimerRef.current)
     }
-  }, [containerRef])
+  }, [scan, containerRef])
 
-  // IntersectionObserver to track which heading is in viewport
+  // IntersectionObserver for active heading tracking
   useLayoutEffect(() => {
     const container = containerRef.current
     if (!container) return
 
-    if (observerRef.current) {
-      observerRef.current.disconnect()
-    }
+    if (observerRef.current) observerRef.current.disconnect()
 
     const els = container.querySelectorAll(HEADING_SELECTOR)
     if (els.length === 0) return
@@ -77,13 +79,10 @@ export function useArticleToc(containerRef) {
         const visible = entries
           .filter((e) => e.isIntersecting)
           .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
-        if (visible.length > 0) {
-          setActiveId(visible[0].target.id)
-        }
+        if (visible.length > 0) setActiveId(visible[0].target.id)
       },
       { rootMargin: OBSERVE_ROOT_MARGIN },
     )
-
     els.forEach((el) => observer.observe(el))
     observerRef.current = observer
 
