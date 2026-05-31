@@ -6,25 +6,24 @@ import { useScrollPast } from '@/hooks/useScrollPast'
 gsap.registerPlugin(useGSAP)
 
 /**
- * ScrollToTop — floating button that appears after scrolling down.
+ * ScrollToTop — 小闻的尾巴，从右下角探出来。
  *
- * Positioned above the AI chat assistant, horizontally centered with it.
- * Uses GSAP for playful animations:
- *  - Entrance: elastic spring-up with slight wobble
- *  - Idle: gentle floating bob
- *  - Click: squish-press + spring-up, then fly up as page scrolls
+ * 设计语言和 ChatBubbleButton（小闻头像）统一：
+ *  - 同色系橙色毛茸茸尾巴
+ *  - 位置在 AI 助手上方，视觉上像小闻竖起尾巴
+ *  - 入场：从右侧探出来 + 轻轻摇摆
+ *  - 静止：微微摇尾巴
+ *  - 点击：尾巴弹起 + wag 加速 → 页面滚回顶部
  */
 const SCROLL_THRESHOLD = 400
 
 export default function ScrollToTop() {
   const show = useScrollPast(SCROLL_THRESHOLD)
-  const btnRef = useRef(null)
+  const wrapRef = useRef(null)
   const idleTweenRef = useRef(null)
 
-  // Entrance + idle floating animation
   useGSAP(() => {
-    if (!show || !btnRef.current) {
-      // Kill idle animation when hiding
+    if (!show || !wrapRef.current) {
       if (idleTweenRef.current) {
         idleTweenRef.current.kill()
         idleTweenRef.current = null
@@ -32,21 +31,20 @@ export default function ScrollToTop() {
       return
     }
 
-    // Entrance: spring up from below with overshoot
-    gsap.fromTo(btnRef.current,
-      { y: 40, scale: 0.3, opacity: 0, rotation: -15 },
+    // Entrance: tail peeks in from right with a cute wag
+    gsap.fromTo(wrapRef.current,
+      { x: 60, rotation: 0, opacity: 0 },
       {
-        y: 0,
-        scale: 1,
-        opacity: 1,
+        x: 0,
         rotation: 0,
-        duration: 0.7,
-        ease: 'back.out(1.7)',
+        opacity: 1,
+        duration: 0.6,
+        ease: 'back.out(1.4)',
         onComplete: () => {
-          // Start idle bob after entrance finishes
-          idleTweenRef.current = gsap.to(btnRef.current, {
-            y: -4,
-            duration: 1.2,
+          // Idle: gentle tail wag
+          idleTweenRef.current = gsap.to(wrapRef.current, {
+            rotation: 8,
+            duration: 0.8,
             ease: 'sine.inOut',
             repeat: -1,
             yoyo: true,
@@ -61,33 +59,39 @@ export default function ScrollToTop() {
         idleTweenRef.current = null
       }
     }
-  }, { scope: btnRef, dependencies: [show] })
+  }, { scope: wrapRef, dependencies: [show] })
 
   function handleClick() {
-    if (!btnRef.current) return
+    if (!wrapRef.current) return
 
-    // Kill idle animation during click
     if (idleTweenRef.current) {
       idleTweenRef.current.kill()
       idleTweenRef.current = null
     }
 
-    const btn = btnRef.current
-
-    // Squish down then spring up + fly away
     gsap.timeline()
-      .to(btn, {
-        scale: 0.75,
-        rotation: 8,
-        duration: 0.1,
+      .to(wrapRef.current, {
+        rotation: 18,
+        duration: 0.08,
         ease: 'power2.in',
       })
-      .to(btn, {
-        y: -60,
-        scale: 0.6,
+      .to(wrapRef.current, {
+        rotation: -12,
+        duration: 0.08,
+        ease: 'power2.in',
+      })
+      .to(wrapRef.current, {
+        rotation: 14,
+        duration: 0.08,
+        ease: 'power2.in',
+      })
+      .to(wrapRef.current, {
+        y: -50,
+        x: 20,
+        rotation: -20,
         opacity: 0,
-        rotation: -15,
-        duration: 0.5,
+        scale: 0.7,
+        duration: 0.45,
         ease: 'power3.in',
         onComplete: () => {
           window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -99,54 +103,45 @@ export default function ScrollToTop() {
 
   return (
     <button
-      ref={btnRef}
+      ref={wrapRef}
       type="button"
       onClick={handleClick}
       aria-label="返回顶部"
       className="fixed bottom-[7.5rem] right-8 z-50
                  w-12 h-12 rounded-full
-                 bg-white shadow-[0_2px_12px_rgba(0,0,0,0.06)]
                  flex items-center justify-center
-                 ring-1 ring-neutral-200/80
                  cursor-pointer select-none
-                 opacity-0"
+                 opacity-0
+                 active:scale-90 transition-none"
+      style={{ transformOrigin: '70% 90%' }}
     >
-      {/* Playful upward rocket arrow */}
+      {/* 小闻的尾巴 — 和吉祥物同色系的橙色毛茸尾巴 */}
       <svg
-        width="22"
-        height="22"
-        viewBox="0 0 24 24"
+        width="48"
+        height="48"
+        viewBox="0 0 48 48"
         fill="none"
-        className="text-neutral-500"
       >
+        <defs>
+          <radialGradient id="tail-grad" cx="35%" cy="30%" r="70%">
+            <stop offset="0%" stopColor="#FDBA74" />
+            <stop offset="55%" stopColor="#FB923C" />
+            <stop offset="100%" stopColor="#EA580C" />
+          </radialGradient>
+        </defs>
+        {/* Tail shape — curvy fox tail curling up */}
         <path
-          d="M12 19V5"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          strokeLinecap="round"
+          d="M10 38 Q8 28 14 20 Q20 12 24 14 Q22 20 26 18 Q30 16 28 22 Q26 28 30 26 Q34 24 32 30 Q30 36 24 40 Q18 44 10 38Z"
+          fill="url(#tail-grad)"
         />
+        {/* Tail tip — white/cream like fox tail tip */}
         <path
-          d="M6 11l6-6 6 6"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
+          d="M20 16 Q22 12 24 14 Q22 18 26 18 Q24 20 22 19 Q20 18 20 16Z"
+          fill="#FEF3C7"
+          opacity="0.9"
         />
-        {/* Tiny speed lines for cuteness */}
-        <path
-          d="M4 17l2 1"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          opacity="0.4"
-        />
-        <path
-          d="M18 17l2 1"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          opacity="0.4"
-        />
+        {/* Tiny paw pad hint at base */}
+        <ellipse cx="14" cy="38" rx="3" ry="2" fill="#F87171" opacity="0.3" />
       </svg>
     </button>
   )
