@@ -187,3 +187,19 @@ html, body {
 .chat-input-scroll::-webkit-scrollbar-thumb:hover {
   background-color: rgba(115, 115, 115, 0.55);
 }
+
+/* ────────────────────────────────────────────────────────────────────── */
+/* Article search highlight                                               */
+/* ────────────────────────────────────────────────────────────────────── */
+mark[data-article-search-match] {
+  background-color: #fef08a; /* yellow-200 */
+  color: inherit;
+  padding: 1px 0;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.3);
+}
+mark[data-article-search-match].article-search-current {
+  background-color: #fb923c; /* orange-400 */
+  color: white;
+  box-shadow: 0 0 0 2px rgba(251, 146, 60, 0.5);
+}
