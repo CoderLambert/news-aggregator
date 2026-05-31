@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useLanguage } from '../context/useLanguage'
+import { Button } from '@/components/ui/button'
 
 export default function Header() {
   const { lang, setLang, t } = useLanguage()
@@ -14,13 +15,14 @@ export default function Header() {
           <a href="/admin" target="_blank" rel="noreferrer" className="hover:text-gray-900">
             {t.admin}
           </a>
-          <button
+          <Button
+            variant="outline"
+            size="pill-sm"
             onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
-            className="px-3 py-1 rounded-full border border-gray-300 hover:bg-gray-100 text-xs font-medium transition-colors"
             title={lang === 'zh' ? 'Switch to English' : '切换到中文'}
           >
             {t.langToggle}
-          </button>
+          </Button>
         </nav>
       </div>
     </header>
