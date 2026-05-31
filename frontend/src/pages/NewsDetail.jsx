@@ -65,7 +65,7 @@ export default function NewsDetail() {
   )
 
   // TOC
-  const { headings, activeId } = useArticleToc(articleRef, [news.full_content_zh, showOriginal])
+  const { headings, activeId } = useArticleToc(articleRef, [news?.full_content_zh, showOriginal])
 
   // Ctrl/Cmd+F interceptor — open our search bar instead of browser native
   function handleGlobalKeyDown(e) {
