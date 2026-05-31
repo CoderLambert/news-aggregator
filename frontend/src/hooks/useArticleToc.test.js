@@ -45,4 +45,24 @@ describe('useArticleToc', () => {
     expect(result.current.headings[0].id).toMatch(/^toc-heading-\d+-0$/)
     expect(result.current.headings[1].id).toBe('custom')
   })
+
+  it('re-scans when deps change (content switch)', () => {
+    const div = document.createElement('div')
+    div.innerHTML = '<h2>English Heading</h2>'
+    const ref = { current: div }
+    const { result, rerender } = renderHook(
+      ({ deps }) => useArticleToc(ref, deps),
+      { initialProps: { deps: ['en'] } }
+    )
+    expect(result.current.headings).toHaveLength(1)
+    expect(result.current.headings[0].text).toBe('English Heading')
+
+    // Simulate content switch: change DOM + deps
+    div.innerHTML = '<h2>中文标题一</h2><h3>中文子标题</h2>'
+    rerender({ deps: ['zh'] })
+
+    expect(result.current.headings).toHaveLength(2)
+    expect(result.current.headings[0].text).toBe('中文标题一')
+    expect(result.current.headings[1].text).toBe('中文子标题')
+  })
 })

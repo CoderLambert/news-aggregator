@@ -5,12 +5,16 @@ import { useState, useLayoutEffect, useRef, useCallback } from 'react'
  *
  * Scans h1/h2/h3 headings, builds a flat TOC list, tracks active heading.
  * Uses multiple scanning strategies to handle React async rendering.
+ *
+ * @param {React.RefObject} containerRef — ref to the article container
+ * @param {Array} deps — extra dependency array that triggers re-scan
+ *                       (e.g. [news.full_content_zh, showOriginal])
  */
 
 const HEADING_SELECTOR = 'h1, h2, h3'
 const OBSERVE_ROOT_MARGIN = '-80px 0px -60% 0px'
 
-export function useArticleToc(containerRef) {
+export function useArticleToc(containerRef, deps = []) {
   const [headings, setHeadings] = useState([])
   const [activeId, setActiveId] = useState('')
   const observerRef = useRef(null)
@@ -35,7 +39,7 @@ export function useArticleToc(containerRef) {
     setHeadings(items)
   }, [containerRef])
 
-  // Scan on mount + delayed retries for async content
+  // Scan on mount + delayed retries for async content + on deps change
   useLayoutEffect(() => {
     scan()
 
@@ -62,7 +66,8 @@ export function useArticleToc(containerRef) {
       clearTimeout(t2)
       clearTimeout(scanTimerRef.current)
     }
-  }, [scan, containerRef])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deps triggers re-scan on content switch
+  }, [scan, ...deps])
 
   // IntersectionObserver for active heading tracking
   useLayoutEffect(() => {
