@@ -113,8 +113,13 @@ def start_or_get_job(
             for chunk in _call_llm_stream(prompt):
                 if not chunk:
                     continue
-                # Detect provider-level errors flowing through the stream
-                if chunk.startswith('Error:') and not job.text:
+                # Detect provider-level errors flowing through the stream.
+                # Old format: "Error: ..." | New format: "抱歉，AI 服务暂时不可用..."
+                is_error = (
+                    chunk.startswith('Error:')
+                    or chunk.startswith('抱歉，AI 服务暂时不可用')
+                )
+                if is_error and not job.text:
                     job._finish(error=chunk)
                     return
 
@@ -128,7 +133,7 @@ def start_or_get_job(
                         logger.warning(f"Progress save failed (news={news_id}): {save_err}")
 
             # Stream finished normally — final save
-            if job.text and not job.text.startswith('Error:'):
+            if job.text and not job.text.startswith(('Error:', '抱歉，AI 服务暂时不可用')):
                 try:
                     on_save(job.text, True)
                 except Exception as save_err:

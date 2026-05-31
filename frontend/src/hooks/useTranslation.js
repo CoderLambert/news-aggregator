@@ -113,6 +113,13 @@ export function useTranslation(id, news, setNews, loading) {
 
     try {
       for await (const ev of translateFullArticleStream(id, { force })) {
+        if (ev.error) {
+          // Provider fallback message (e.g. "抱歉，AI 服务暂时不可用")
+          setTranslateError(ev.error)
+          setTranslating(false)
+          localStorage.removeItem(translatingMarkerKey(id))
+          return
+        }
         if (ev.full_content_zh) {
           setNews(prev => ({
             ...prev,

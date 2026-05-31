@@ -47,11 +47,12 @@ describe('translateFullArticleStream', () => {
     expect(JSON.parse(init.body)).toEqual({ force: true })
   })
 
-  it('throws when server returns error event', async () => {
+  it('yields error event instead of throwing when server returns error', async () => {
     globalThis.fetch.mockResolvedValueOnce(
       streamResponse(['data: {"error":"翻译服务暂不可用"}\n'])
     )
-    await expect(collect(translateFullArticleStream('42'))).rejects.toThrow('翻译服务暂不可用')
+    const events = await collect(translateFullArticleStream('42'))
+    expect(events).toEqual([{ error: '翻译服务暂不可用' }])
   })
 
   it('throws on non-2xx response', async () => {

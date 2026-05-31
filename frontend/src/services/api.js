@@ -76,7 +76,13 @@ export async function* translateFullArticleStream(id, { force = false } = {}) {
     body: JSON.stringify({ force }),
   })
   for await (const ev of iterSSEEvents(res)) {
-    if (ev.error) throw new Error(ev.error)
+    if (ev.error) {
+      // Friendly fallback messages from the provider failover chain
+      // should be yielded as a special event, not thrown as an exception,
+      // so the UI can display them gracefully instead of a raw "翻译失败".
+      yield { error: ev.error }
+      return
+    }
     yield ev
   }
 }
