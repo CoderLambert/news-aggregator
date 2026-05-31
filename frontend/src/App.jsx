@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
-import { LanguageProvider, useLanguage } from './context/LanguageContext'
+import { LanguageProvider } from './context/LanguageContext'
+import { useLanguage } from './context/useLanguage'
 import Header from './components/Header'
 import AppErrorBoundary from './components/AppErrorBoundary'
 import LoadingSpinner from './components/LoadingSpinner'

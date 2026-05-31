@@ -67,7 +67,12 @@ export async function* iterSSEEvents(response) {
     // flush trailing buffer
     const tail = buffer.trim()
     if (tail.startsWith('data: ')) {
-      try { yield JSON.parse(tail.slice(6)) } catch {}
+      try {
+        yield JSON.parse(tail.slice(6))
+      } catch {
+        // Trailing buffer may be a partial chunk that never completed —
+        // safe to drop, matches behaviour for mid-stream fragmentation above.
+      }
     }
   } finally {
     reader.releaseLock?.()

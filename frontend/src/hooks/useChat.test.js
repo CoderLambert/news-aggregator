@@ -43,6 +43,7 @@ describe('useChat', () => {
   })
 
   it('handleSend writes error message on stream failure', async () => {
+    // eslint-disable-next-line require-yield -- intentional: simulates a stream that throws before producing any chunk
     async function* failing() { throw new Error('network down') }
     vi.spyOn(api, 'chatStream').mockReturnValue(failing())
 

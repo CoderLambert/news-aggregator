@@ -1,4 +1,4 @@
-import { useLanguage } from '../context/LanguageContext'
+import { useLanguage } from '../context/useLanguage'
 
 export default function CategoryFilter({ categories, active = [], onChange }) {
   const { lang } = useLanguage()

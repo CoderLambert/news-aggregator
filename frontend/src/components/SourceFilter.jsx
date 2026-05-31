@@ -1,4 +1,4 @@
-import { useLanguage } from '../context/LanguageContext'
+import { useLanguage } from '../context/useLanguage'
 
 export default function SourceFilter({ sources, active = [], onChange }) {
   const { lang } = useLanguage()

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { fetchNews, fetchCategories, fetchSources } from '../services/api'
-import { useLanguage } from '../context/LanguageContext'
+import { useLanguage } from '../context/useLanguage'
 import NewsCard from '../components/NewsCard'
 import SearchBar from '../components/SearchBar'
 import CategoryFilter from '../components/CategoryFilter'
@@ -13,12 +13,15 @@ function loadSavedFilters() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) return JSON.parse(raw)
-  } catch {}
+  } catch {
+    // localStorage may be unavailable (privacy mode) or contain malformed
+    // JSON from an older version — fall through to defaults.
+  }
   return {}
 }
 
 export default function NewsList() {
-  const { t, lang } = useLanguage()
+  const { lang } = useLanguage()
   const saved = loadSavedFilters()
   const [news, setNews] = useState([])
   const [categories, setCategories] = useState([])
@@ -31,6 +34,7 @@ export default function NewsList() {
   const [category, setCategory] = useState(saved.categories || [])
   const [source, setSource] = useState(saved.sources || [])
   const observer = useRef()
+  const loadingRef = useRef(false)
 
   // Persist filters to localStorage on every change
   useEffect(() => {
@@ -47,47 +51,49 @@ export default function NewsList() {
     fetchSources().then(data => setSources(data.results || data))
   }, [])
 
-  const loadingRef = useRef(false)
-
-  const loadNews = useCallback(async (pageNum, reset = false) => {
+  // Unified loader: handles BOTH "reset" (page 1, replace) and "append" (next
+  // page). All state mutations happen inside the async IIFE so they cross a
+  // microtask boundary — keeps react-hooks/set-state-in-effect happy when
+  // this is invoked from an effect.
+  const loadNews = useCallback((pageNum, reset = false) => {
     if (loadingRef.current) return
     loadingRef.current = true
-    setLoading(true)
-    try {
-      const params = { page: pageNum, page_size: 20 }
-      if (search) {
-        params.search = search
-        params.mode = searchMode
+    return (async () => {
+      setLoading(true)
+      if (reset) {
+        // Reset paging immediately so the IntersectionObserver doesn't fire
+        // for stale results during the in-flight request.
+        setHasMore(true)
       }
-      if (category.length > 0) params.category = category.join(',')
-      if (source.length > 0) params.source = source.join(',')
-      const data = await fetchNews(params)
-      const results = data.results || data
-      setNews(prev => reset ? results : [...prev, ...results])
-      setHasMore(!!data.next)
-      setPage(pageNum)
-    } catch (err) {
-      console.error('Failed to load news:', err)
-    } finally {
-      setLoading(false)
-      loadingRef.current = false
-    }
+      try {
+        const params = { page: pageNum, page_size: 20 }
+        if (search) {
+          params.search = search
+          params.mode = searchMode
+        }
+        if (category.length > 0) params.category = category.join(',')
+        if (source.length > 0) params.source = source.join(',')
+        const data = await fetchNews(params)
+        const results = data.results || data
+        setNews(prev => reset ? results : [...prev, ...results])
+        setHasMore(!!data.next)
+        setPage(pageNum)
+      } catch (err) {
+        console.error('Failed to load news:', err)
+      } finally {
+        setLoading(false)
+        loadingRef.current = false
+      }
+    })()
   }, [search, searchMode, category, source])
 
+  // Single effect for "filters or language changed → reload from page 1".
+  // Previously this was split across two effects, both with synchronous
+  // setState calls (setNews([]) / setPage(1) / setHasMore(true)). All of
+  // that is now handled inside loadNews(1, true).
   useEffect(() => {
-    setNews([])
-    setPage(1)
-    setHasMore(true)
     loadNews(1, true)
-  }, [search, searchMode, category, source])
-
-  // Refetch when language changes
-  useEffect(() => {
-    setNews([])
-    setPage(1)
-    setHasMore(true)
-    loadNews(1, true)
-  }, [lang])
+  }, [search, searchMode, category, source, lang, loadNews])
 
   const lastRef = useCallback(
     node => {
