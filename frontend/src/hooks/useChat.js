@@ -25,6 +25,7 @@ export function useChat(newsId) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [phase, setPhase] = useState('loading-history')
+  const [confirmingClear, setConfirmingClear] = useState(false)
   const successTimerRef = useRef(null)
 
   // Loading state derived from phase — covers history fetch + active turn
@@ -56,10 +57,20 @@ export function useChat(newsId) {
   // Cleanup success timer on unmount
   useEffect(() => () => clearTimeout(successTimerRef.current), [])
 
-  async function handleClearChat() {
-    // Friendly confirm via window.confirm (chat panel-level UI lives in the
-    // ChatHeader component — see that file for the friendly dialog variant).
-    if (!window.confirm('确定要清空关于这篇文章的对话记录吗？')) return
+  // Two-step clear flow (replaces native window.confirm):
+  //   1) UI calls requestClearChat() → confirmingClear becomes true
+  //   2) <ClearChatDialog> renders; user picks confirm or cancel
+  //   3) UI calls confirmClear() or cancelClear()
+  function requestClearChat() {
+    setConfirmingClear(true)
+  }
+
+  function cancelClear() {
+    setConfirmingClear(false)
+  }
+
+  async function confirmClear() {
+    setConfirmingClear(false)
     try {
       await clearChatHistory(newsId)
       setMessages([])
@@ -112,6 +123,7 @@ export function useChat(newsId) {
   return {
     messages, input, setInput,
     isLoading, phase,
-    handleSend, handleClearChat,
+    handleSend,
+    confirmingClear, requestClearChat, cancelClear, confirmClear,
   }
 }

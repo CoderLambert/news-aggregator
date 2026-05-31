@@ -68,15 +68,35 @@ describe('useChat', () => {
     expect(api.chatStream).not.toHaveBeenCalled()
   })
 
-  it('handleClearChat removes messages when confirmed', async () => {
+  it('confirmClear removes messages and clears confirmingClear state', async () => {
     api.fetchChatHistory.mockResolvedValueOnce({ messages: [{ role: 'user', content: 'x' }] })
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
 
     const { result } = renderHook(() => useChat('42'))
     await waitFor(() => expect(result.current.messages).toHaveLength(1))
 
-    await act(async () => { await result.current.handleClearChat() })
+    // Request clear → confirmingClear becomes true
+    act(() => { result.current.requestClearChat() })
+    expect(result.current.confirmingClear).toBe(true)
+
+    // Confirm → API called, messages cleared, dialog closed
+    await act(async () => { await result.current.confirmClear() })
     expect(result.current.messages).toHaveLength(0)
+    expect(result.current.confirmingClear).toBe(false)
     expect(api.clearChatHistory).toHaveBeenCalledWith('42')
+  })
+
+  it('cancelClear closes the dialog without calling API', async () => {
+    api.fetchChatHistory.mockResolvedValueOnce({ messages: [{ role: 'user', content: 'x' }] })
+
+    const { result } = renderHook(() => useChat('42'))
+    await waitFor(() => expect(result.current.messages).toHaveLength(1))
+
+    act(() => { result.current.requestClearChat() })
+    expect(result.current.confirmingClear).toBe(true)
+
+    act(() => { result.current.cancelClear() })
+    expect(result.current.confirmingClear).toBe(false)
+    expect(result.current.messages).toHaveLength(1)
+    expect(api.clearChatHistory).not.toHaveBeenCalled()
   })
 })
