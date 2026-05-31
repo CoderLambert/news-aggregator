@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react'
+import { useRef, useEffect, useState, useLayoutEffect } from 'react'
 import { Send, Loader2 } from 'lucide-react'
 
 const PLACEHOLDERS = [
@@ -7,6 +7,10 @@ const PLACEHOLDERS = [
   '让我帮你梳理梳理',
   '问我点有趣的吧',
 ]
+
+// 5 lines × line-height(20) + py-2 padding (16) = 116px
+// Tuned for mobile readability — beyond 5 lines, scroll instead of grow.
+const MAX_HEIGHT = 116
 
 export default function ChatInput({ value, onChange, onSend, isLoading, autoFocus }) {
   const inputRef = useRef(null)
@@ -17,6 +21,18 @@ export default function ChatInput({ value, onChange, onSend, isLoading, autoFocu
   useEffect(() => {
     if (autoFocus) inputRef.current?.focus()
   }, [autoFocus])
+
+  // Auto-grow: reset to auto so scrollHeight reflects current content,
+  // then clamp to MAX_HEIGHT. useLayoutEffect avoids a visible jump
+  // between paint and resize.
+  useLayoutEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    const next = Math.min(el.scrollHeight, MAX_HEIGHT)
+    el.style.height = `${next}px`
+    el.style.overflowY = el.scrollHeight > MAX_HEIGHT ? 'auto' : 'hidden'
+  }, [value])
 
   function handleKeyDown(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -40,9 +56,11 @@ export default function ChatInput({ value, onChange, onSend, isLoading, autoFocu
           placeholder={placeholder}
           aria-label="输入聊天问题"
           rows="1"
-          className="flex-1 bg-transparent border-none resize-none focus:outline-none focus:ring-0
-                     text-sm text-neutral-900 placeholder-neutral-400 max-h-24 py-2 px-3"
-          style={{ minHeight: '36px' }}
+          className="chat-input-scroll flex-1 bg-transparent border-none resize-none
+                     focus:outline-none focus:ring-0
+                     text-sm leading-5 text-neutral-900 placeholder-neutral-400
+                     py-2 px-3"
+          style={{ minHeight: '36px', maxHeight: `${MAX_HEIGHT}px` }}
         />
         <button
           type="button"
