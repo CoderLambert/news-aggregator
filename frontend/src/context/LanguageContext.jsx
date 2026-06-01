@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react'
-import { LANG_KEY } from '../constants'
+import { LANG_KEY, DISPLAY_MODE_KEY } from '../constants'
 import { LanguageContext } from './useLanguage'
 
 // Static translation table — hoisted out of the component so it's allocated
@@ -54,17 +54,28 @@ export function LanguageProvider({ children }) {
     return localStorage.getItem(LANG_KEY) || 'zh'
   })
 
+  // Display mode controls how news content is rendered:
+  //   'zh'       — Chinese translation (fallback to original if no translation)
+  //   'original' — Original language only
+  //   'bilingual'— Original with light Chinese subtitle underneath
+  const [displayMode, setDisplayModeState] = useState(() => {
+    return localStorage.getItem(DISPLAY_MODE_KEY) || 'zh'
+  })
+
   const setLang = useCallback((newLang) => {
     setLangState(newLang)
     localStorage.setItem(LANG_KEY, newLang)
   }, [])
 
-  // Stable context value — only changes when lang or setLang changes (setLang
-  // is itself stable via useCallback). React Compiler would optimise this too,
-  // but useMemo makes the contract explicit for non-compiled builds.
+  const setDisplayMode = useCallback((mode) => {
+    setDisplayModeState(mode)
+    localStorage.setItem(DISPLAY_MODE_KEY, mode)
+  }, [])
+
+  // Stable context value
   const value = useMemo(
-    () => ({ lang, setLang, t: TRANSLATIONS[lang] || TRANSLATIONS.zh }),
-    [lang, setLang]
+    () => ({ lang, setLang, displayMode, setDisplayMode, t: TRANSLATIONS[lang] || TRANSLATIONS.zh }),
+    [lang, setLang, displayMode, setDisplayMode]
   )
 
   return (

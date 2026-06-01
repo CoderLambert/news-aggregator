@@ -13,18 +13,36 @@ import { LANG_KEY } from '../constants'
  */
 function withLang(url) {
   const lang = (typeof localStorage !== 'undefined' && localStorage.getItem(LANG_KEY)) || 'zh'
-  if (!lang || lang === 'original') return url
+  if (!lang) return url
   const sep = url.includes('?') ? '&' : '?'
   return `${url}${sep}lang=${lang}`
 }
 
 /**
+ * Read Django CSRF token from the `csrftoken` cookie set by /api/auth/csrf/.
+ */
+function getCsrfFromCookie() {
+  if (typeof document === 'undefined') return null
+  const match = document.cookie.match(/csrftoken=([^;]+)/)
+  return match ? decodeURIComponent(match[1]) : null
+}
+
+/**
  * Low-level streaming POST. Returns the raw Response (caller reads body).
+ * Includes credentials + CSRF header for Django Session Auth.
  */
 export async function streamingFetch(url, init = {}) {
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(init.headers || {}),
+  }
+  const csrf = getCsrfFromCookie()
+  if (csrf) headers['X-CSRFToken'] = csrf
+
   const response = await fetch(withLang(url), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(init.headers || {}) },
+    credentials: 'include',
+    headers,
     ...init,
   })
   if (!response.ok) {

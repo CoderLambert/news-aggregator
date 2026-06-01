@@ -11,6 +11,8 @@ import { createContext, useContext } from 'react'
 export const LanguageContext = createContext({
   lang: 'zh',
   setLang: () => {},
+  displayMode: 'zh',
+  setDisplayMode: () => {},
   t: {},
 })
 

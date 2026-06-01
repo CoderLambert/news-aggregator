@@ -153,9 +153,15 @@ def _save_item(item):
         name=source_name,
         defaults=defaults,
     )
-    # Update source_type if source already exists but type is empty
+    # Sync source_type and language if source already exists but fields are empty or outdated
+    needs_save = False
     if not source.source_type:
         source.source_type = defaults['source_type']
+        needs_save = True
+    if not source.language or source.language != defaults['language']:
+        source.language = defaults['language']
+        needs_save = True
+    if needs_save:
         source.save()
 
     category, _ = Category.objects.get_or_create(

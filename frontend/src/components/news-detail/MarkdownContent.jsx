@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import { Check, Copy } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import MermaidBlock from './MermaidBlock'
 
 const IMG_STYLE = { maxHeight: '480px', objectFit: 'contain' }
 
@@ -119,6 +120,14 @@ const MD_COMPONENTS = {
   li: ({ children }) => <li className="pl-1 break-words">{children}</li>,
   code: ({ className, children }) => {
     const isInline = !className
+    const lang = className?.replace(/^language-/, '')
+    const text = String(children).replace(/\n$/, '')
+
+    // Mermaid diagram — render as SVG
+    if (lang === 'mermaid') {
+      return <MermaidBlock code={text} />
+    }
+
     return isInline ? (
       <code className="px-1.5 py-0.5 bg-gray-100 text-rose-600 rounded text-[0.85em] font-mono break-all">
         {children}

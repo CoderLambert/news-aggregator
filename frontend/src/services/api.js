@@ -3,24 +3,53 @@ import { LANG_KEY } from '../constants'
 import { streamingFetch, iterSSEEvents, iterTextChunks } from '../utils/sse'
 
 // ---- Axios clients ---------------------------------------------------------
-//
-// We need three timeouts (default REST / full-article fetch / translation),
-// but a SINGLE language-injection interceptor must apply to all of them —
-// the previous setup attached the interceptor only to `api`, so full-article
-// and translation requests silently dropped the user's lang preference.
 
 function addLangParam(config) {
   const lang = localStorage.getItem(LANG_KEY) || 'zh'
-  if (lang && lang !== 'original') {
+  if (lang) {
     config.params = config.params || {}
     config.params.lang = lang
   }
   return config
 }
 
+// Shared interceptor — injected into ALL axios instances below.
+axios.interceptors.request.use(addLangParam)
+
+/**
+ * Automatically attach Django CSRF token to unsafe HTTP methods.
+ *
+ * After login, the browser holds a `csrftoken` cookie. Axios with
+ * `withCredentials: true` sends the cookie, but Django also requires
+ * the `X-CSRFToken` header on POST/PUT/DELETE/PATCH — otherwise it
+ * returns 403 even when the view has `@csrf_exempt` (DRF's
+ * `SessionAuthentication` enforces CSRF at the auth layer).
+ */
+function getCsrfFromCookie() {
+  if (typeof document === 'undefined') return null
+  const match = document.cookie.match(/csrftoken=([^;]+)/)
+  return match ? decodeURIComponent(match[1]) : null
+}
+
+function attachCsrfToken(config) {
+  const unsafe = ['post', 'put', 'patch', 'delete']
+  if (unsafe.includes(config.method?.toLowerCase())) {
+    const token = getCsrfFromCookie()
+    if (token) {
+      config.headers['X-CSRFToken'] = token
+    }
+  }
+  return config
+}
+
 function makeApi(timeout) {
-  const inst = axios.create({ baseURL: '/api', timeout })
+  const inst = axios.create({
+    baseURL: '/api',
+    timeout,
+    withCredentials: true,  // send cookies for session auth
+  })
   inst.interceptors.request.use(addLangParam)
+  inst.interceptors.request.use(attachCsrfToken)
   return inst
 }
 
@@ -98,3 +127,45 @@ export async function* chatStream(newsId, question) {
   })
   yield* iterTextChunks(res)
 }
+
+// ---- Favorites / Likes / Bookmarks ------------------------------------------
+
+export const toggleFavorite = (newsId, type) =>
+  api.post('/favorites/', { news_id: newsId, type }).then(res => res.data)
+
+export const checkFavoriteStatus = (newsId) =>
+  api.get('/favorites/check/', { params: { news_id: newsId } }).then(res => res.data)
+
+export const fetchUserFavorites = (params = {}) =>
+  api.get('/favorites/', { params }).then(res => res.data)
+
+// ---- Blocked News -----------------------------------------------------------
+
+export const blockNews = (newsId) =>
+  api.post('/blocked/', { news_id: newsId }).then(res => res.data)
+
+export const unblockNews = (newsId) =>
+  api.delete('/blocked/', { data: { news_id: newsId } }).then(res => res.data)
+
+export const checkBlockedStatus = (newsId) =>
+  api.get('/blocked/check/', { params: { news_id: newsId } }).then(res => res.data)
+
+export const fetchBlockedNews = (params = {}) =>
+  api.get('/blocked/', { params }).then(res => res.data)
+
+// ---- Authentication --------------------------------------------------------
+
+export const fetchCsrfToken = () =>
+  api.get('/auth/csrf/').then(res => res.data.csrfToken)
+
+export const registerUser = (username, password, email = '') =>
+  api.post('/auth/register/', { username, password, email }).then(res => res.data)
+
+export const loginUser = (username, password) =>
+  api.post('/auth/login/', { username, password }).then(res => res.data)
+
+export const logoutUser = () =>
+  api.post('/auth/logout/').then(res => res.data)
+
+export const fetchMe = () =>
+  api.get('/auth/me/').then(res => res.data)

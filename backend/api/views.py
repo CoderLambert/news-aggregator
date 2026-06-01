@@ -1,15 +1,24 @@
 from django.db.models import Count, Q
-from rest_framework import generics, filters
+from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.models import User
+from django.middleware.csrf import get_token
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import ensure_csrf_cookie, csrf_exempt
+from rest_framework import generics, filters, status
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from django_filters import rest_framework as django_filters
-from .models import Category, Source, News, ChatSession
+from .models import Category, Source, News, ChatSession, BlockedNews
 from .serializers import (
     CategorySerializer, SourceSerializer,
     NewsListSerializer, NewsDetailSerializer,
+    BlockedNewsSerializer,
 )
 # Module-level import so tests can patch `api.views.get_openai_client`
 from api.services.llm_translator import get_openai_client, get_clients, stream_chat
+from api.services.article_fetcher import FetchError, fetch_article_markdown
 
 # Hardcoded fallback shown when the LLM is unreachable / returns garbage
 SUGGESTED_QUESTIONS_FALLBACK = [
@@ -39,46 +48,21 @@ def pick_chat_context(news):
     )
 
 
-def _fetch_via_jina(url):
-    """Fetch an article URL through Jina Reader. Returns cleaned markdown body.
-
-    Raises on any HTTP / parse error so callers can decide whether to swallow.
-    Kept as a module-level function so tests can patch it.
-    """
-    import urllib.request
-    import ssl
-    import re
-    from api.services.content_cleaner import clean_content
-
-    jina_url = f'https://r.jina.ai/{url}'
-    ctx = ssl.create_default_context()
-    req = urllib.request.Request(
-        jina_url,
-        headers={'Accept': 'text/plain', 'User-Agent': 'Mozilla/5.0'}
-    )
-    with urllib.request.urlopen(req, timeout=60, context=ctx) as resp:
-        text = resp.read().decode('utf-8')
-
-    markdown_match = re.search(r'Markdown Content:\n([\s\S]+)$', text)
-    markdown = markdown_match.group(1).strip() if markdown_match else text.strip()
-    if not markdown or markdown == 'Sorry.' or len(markdown) < 20:
-        raise ValueError('jina returned empty or invalid content')
-    return clean_content(markdown, url)
-
-
 def ensure_full_content(news):
     """Best-effort: make sure news.full_content is populated before AI sees it.
 
     No-op if full_content already exists or news has no URL.
-    On Jina failure, logs a warning and returns silently — caller falls back
+    On provider-chain failure, logs a warning and returns silently — caller falls back
     to whatever shorter content is available via pick_chat_context().
 
     This is what makes "open chat without clicking 'fetch full article' first"
     work end-to-end. The first chat call may pay a 2-10s latency hit for the
-    Jina fetch; subsequent calls hit the cached field.
+    real fetch chain; subsequent calls hit the cached field.
     """
     import logging
     from django.utils.timezone import now as tz_now
+
+    from api.services.full_content_status import classify_fetch_error, mark_failed, mark_success
 
     if news.full_content:
         return
@@ -86,13 +70,23 @@ def ensure_full_content(news):
         return
 
     try:
-        body = _fetch_via_jina(news.url)
-        news.full_content = body
+        result = fetch_article_markdown(
+            news.url,
+            expected_title=news.title,
+            summary=news.content,
+        )
+        news.full_content = result.markdown
         news.full_content_fetched_at = tz_now()
         news.save(update_fields=['full_content', 'full_content_fetched_at'])
+        mark_success(news, result)
     except Exception as e:
+        try:
+            classified = classify_fetch_error(e)
+            mark_failed(news, e, status=classified)
+        except Exception:
+            pass  # Never let status tracking break ensure_full_content
         logging.getLogger(__name__).warning(
-            'ensure_full_content: jina fetch failed for news=%s: %s',
+            'ensure_full_content: real fetch failed for news=%s: %s',
             news.pk, e,
         )
 
@@ -134,16 +128,19 @@ class NewsListView(generics.ListAPIView):
     ordering_fields = ['publish_time', 'created_at']
     ordering = ['-publish_time']
 
-    def get_serializer_context(self):
-        context = super().get_serializer_context()
-        context['lang'] = self.request.query_params.get('lang', 'original')
-        return context
-
     def get_queryset(self):
-        # By default hide duplicates (entries with related_to set)
+        qs = News.objects.select_related('source', 'category')
+        # Hide duplicates by default
         if self.request.query_params.get('include_dupes', 'false') != 'true':
-            return News.objects.select_related('source', 'category').filter(related_to__isnull=True)
-        return News.objects.select_related('source', 'category').all()
+            qs = qs.filter(related_to__isnull=True)
+        # Exclude blocked news for authenticated users
+        if self.request.user.is_authenticated:
+            blocked_ids = BlockedNews.objects.filter(
+                user=self.request.user,
+            ).values_list('news_id', flat=True)
+            if blocked_ids:
+                qs = qs.exclude(pk__in=blocked_ids)
+        return qs
 
     def list(self, request, *args, **kwargs):
         search_query = request.query_params.get('search', '').strip()
@@ -291,23 +288,16 @@ class NewsDetailView(generics.RetrieveAPIView):
     queryset = News.objects.select_related('source', 'category').all()
     serializer_class = NewsDetailSerializer
 
-    def get_serializer_context(self):
-        context = super().get_serializer_context()
-        context['lang'] = self.request.query_params.get('lang', 'original')
-        return context
-
 
 class NewsFetchFullView(generics.GenericAPIView):
-    """Fetch full article content via Jina Reader API and persist to database."""
+    """Fetch verified real article Markdown and persist to database."""
     queryset = News.objects.select_related('source', 'category').all()
     serializer_class = NewsDetailSerializer
     permission_classes = []  # Public access
 
+    @method_decorator(csrf_exempt)
     def post(self, request, pk):
         from django.utils.timezone import now as tz_now
-        import urllib.request
-        import ssl
-        import re
         import logging
 
         logger = logging.getLogger(__name__)
@@ -325,65 +315,47 @@ class NewsFetchFullView(generics.GenericAPIView):
                 status=400,
             )
 
-        jina_url = f'https://r.jina.ai/{url}'
+        # Track fetch status
+        from api.services.full_content_status import (
+            classify_fetch_error,
+            mark_failed,
+            mark_fetching,
+            mark_success,
+        )
+        mark_fetching(news)
 
         try:
-            ctx = ssl.create_default_context()
-            req = urllib.request.Request(
-                jina_url,
-                headers={'Accept': 'text/plain', 'User-Agent': 'Mozilla/5.0'}
+            result = fetch_article_markdown(
+                url,
+                expected_title=news.title,
+                summary=news.content,
             )
-            with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
-                text = resp.read().decode('utf-8')
 
-            # Extract markdown content after "Markdown Content:" header
-            markdown_match = re.search(r'Markdown Content:\n([\s\S]+)$', text)
-            markdown = markdown_match.group(1).strip() if markdown_match else text.strip()
-
-            if not markdown or markdown == 'Sorry.' or len(markdown) < 20:
-                return Response(
-                    {'error': '未能提取到有效内容'},
-                    status=422,
-                )
-
-            # Clean page chrome for GitHub repo pages
-            from api.services.content_cleaner import clean_content
-            markdown = clean_content(markdown, url)
-
-            # Save to database
-            news.full_content = markdown
+            news.full_content = result.markdown
             news.full_content_fetched_at = tz_now()
             news.save(update_fields=['full_content', 'full_content_fetched_at'])
+            mark_success(news, result)
 
             serializer = self.get_serializer(news)
             return Response(serializer.data)
 
-        except urllib.error.HTTPError as e:
-            if e.code == 429:
-                return Response(
-                    {'error': '请求过于频繁，请稍后重试'},
-                    status=429,
-                )
-            if e.code == 451:
-                return Response(
-                    {'error': '内容因法律限制无法获取'},
-                    status=451,
-                )
-            logger.error(f'Jina Reader HTTP error for {url}: {e.code} - {e.reason}')
+        except FetchError as e:
+            classified = classify_fetch_error(e)
+            mark_failed(news, e, status=classified)
+            logger.warning('Full-content fetch failed for %s [%s]: %s', url, classified, e)
             return Response(
-                {'error': f'获取失败 ({e.code})'},
-                status=e.code,
+                {'error': '原文抓取失败，外部站点当前不可达，可稍后重试。'},
+                status=502,
             )
         except Exception as e:
-            logger.error(f'Jina Reader error for {url}: {e}')
+            mark_failed(news, e)
+            logger.exception('Unexpected full-content fetch error for %s: %s', url, e)
             return Response(
-                {'error': f'获取失败: {str(e)}'},
+                {'error': '原文抓取失败，外部站点当前不可达，可稍后重试。'},
                 status=502,
             )
 
 
-from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
 import json as json_lib
 
 class NewsTranslateFullView(generics.GenericAPIView):
@@ -738,3 +710,375 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
             import logging
             logging.getLogger(__name__).warning('suggested-questions LLM failed: %s', e)
             return Response({'questions': SUGGESTED_QUESTIONS_FALLBACK})
+
+
+# ─── Favorite / Like / Bookmark API ─────────────────────────────────────
+
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+from .serializers import FavoriteSerializer
+from .models import Favorite
+
+
+class FavoriteListView(generics.ListCreateAPIView):
+    """
+    GET  /api/favorites/           — list authenticated user's favorites
+    POST /api/favorites/           — like or bookmark a news article
+
+    POST body: { "news_id": 123, "type": "like" | "bookmark" }
+    If the same user + news + type already exists, it is removed (toggle).
+    """
+    serializer_class = FavoriteSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = Favorite.objects.filter(user=self.request.user).select_related(
+            'news', 'news__source', 'news__category',
+        )
+        fav_type = self.request.query_params.get('type')
+        if fav_type in ('like', 'bookmark'):
+            qs = qs.filter(type=fav_type)
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        news_id = request.data.get('news_id')
+        fav_type = request.data.get('type')
+
+        if fav_type not in ('like', 'bookmark'):
+            return Response(
+                {'error': 'type must be "like" or "bookmark"'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Check if already exists → toggle (remove)
+        existing = Favorite.objects.filter(
+            user=request.user, news_id=news_id, type=fav_type,
+        ).first()
+
+        if existing:
+            pk = existing.pk
+            news_data = {
+                'id': existing.news_id,
+                'title': existing.news.title,
+                'title_zh': existing.news.title_zh or '',
+                'url': existing.news.url,
+                'cover_image': existing.news.cover_image or '',
+                'source': {'name': existing.news.source.name},
+                'category': {'name': existing.news.category.name},
+                'publish_time': existing.news.publish_time,
+            }
+            existing.delete()
+            return Response({
+                'id': pk,
+                'news': news_data,
+                'type': fav_type,
+                'created_at': existing.created_at.isoformat() if hasattr(existing.created_at, 'isoformat') else str(existing.created_at),
+                'removed': True,
+            }, status=status.HTTP_200_OK)
+
+        # Create new favorite
+        serializer = self.get_serializer(data={**request.data})
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class FavoriteDestroyView(generics.DestroyAPIView):
+    """DELETE /api/favorites/<pk>/ — remove a favorite."""
+    queryset = Favorite.objects.all()
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Favorite.objects.filter(user=self.request.user)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class FavoriteCheckView(generics.GenericAPIView):
+    """
+    GET /api/favorites/check/?news_id=123
+    Returns like/bookmark status and counts for the given news article.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        news_id = request.query_params.get('news_id')
+        if not news_id:
+            return Response(
+                {'error': 'news_id is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user_favs = Favorite.objects.filter(
+            user=request.user, news_id=news_id,
+        )
+        is_liked = user_favs.filter(type='like').exists()
+        is_bookmarked = user_favs.filter(type='bookmark').exists()
+
+        # Global counts (all users)
+        like_count = Favorite.objects.filter(news_id=news_id, type='like').count()
+        bookmark_count = Favorite.objects.filter(news_id=news_id, type='bookmark').count()
+
+        return Response({
+            'is_liked': is_liked,
+            'is_bookmarked': is_bookmarked,
+            'like_count': like_count,
+            'bookmark_count': bookmark_count,
+        })
+
+
+# ─── Blocked News API ──────────────────────────────────────────────────
+
+class BlockedNewsListView(generics.ListCreateAPIView):
+    """
+    GET    /api/blocked/   — list authenticated user's blocked news
+    POST   /api/blocked/   — block a news article (idempotent)
+    DELETE /api/blocked/   — unblock a news article
+    """
+    serializer_class = BlockedNewsSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return BlockedNews.objects.filter(
+            user=self.request.user,
+        ).select_related('news', 'news__source', 'news__category')
+
+    def create(self, request, *args, **kwargs):
+        news_id = request.data.get('news_id')
+        if not news_id:
+            return Response(
+                {'error': 'news_id is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not News.objects.filter(pk=news_id).exists():
+            return Response(
+                {'error': 'News not found'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        block, created = BlockedNews.objects.get_or_create(
+            user=request.user,
+            news_id=news_id,
+        )
+        if not created:
+            return Response({
+                'id': block.pk,
+                'news_id': news_id,
+                'created': False,
+            }, status=status.HTTP_200_OK)
+
+        serializer = self.get_serializer(block)
+        data = serializer.data
+        data['created'] = True
+        return Response(data, status=status.HTTP_201_CREATED)
+
+    def delete(self, request, *args, **kwargs):
+        """Unblock a news article. Body: { "news_id": 123 }"""
+        news_id = request.data.get('news_id')
+        if not news_id:
+            return Response(
+                {'error': 'news_id is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        deleted, _ = BlockedNews.objects.filter(
+            user=request.user, news_id=news_id,
+        ).delete()
+        return Response({'removed': deleted > 0})
+
+
+class BlockedNewsCheckView(generics.GenericAPIView):
+    """GET /api/blocked/check/?news_id=123 — check if news is blocked."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        news_id = request.query_params.get('news_id')
+        if not news_id:
+            return Response(
+                {'error': 'news_id is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        is_blocked = BlockedNews.objects.filter(
+            user=request.user, news_id=news_id,
+        ).exists()
+        return Response({'is_blocked': is_blocked})
+
+
+# ─── Authentication API ─────────────────────────────────────────────────
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+@ensure_csrf_cookie
+def csrf_token(request):
+    """GET /api/auth/csrf/ — returns CSRF token for SPA to include in subsequent requests."""
+    return Response({'csrfToken': get_token(request)})
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@ensure_csrf_cookie
+def auth_register(request):
+    """POST /api/auth/register/ — create a new user and log them in."""
+    username = request.data.get('username', '').strip()
+    password = request.data.get('password', '')
+    email = request.data.get('email', '')
+
+    if not username or not password:
+        return Response({'error': '用户名和密码不能为空'}, status=status.HTTP_400_BAD_REQUEST)
+    if len(password) < 6:
+        return Response({'error': '密码至少 6 位'}, status=status.HTTP_400_BAD_REQUEST)
+    if User.objects.filter(username=username).exists():
+        return Response({'error': '用户名已被占用'}, status=status.HTTP_400_BAD_REQUEST)
+
+    user = User.objects.create_user(username=username, email=email, password=password)
+    login(request, user)
+    return Response({
+        'id': user.pk,
+        'username': user.username,
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@ensure_csrf_cookie
+def auth_login(request):
+    """POST /api/auth/login/ — authenticate and create a session."""
+    username = request.data.get('username', '').strip()
+    password = request.data.get('password', '')
+
+    user = authenticate(request, username=username, password=password)
+    if user is None:
+        return Response({'error': '用户名或密码错误'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    login(request, user)
+    return Response({
+        'id': user.pk,
+        'username': user.username,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def auth_logout(request):
+    """POST /api/auth/logout/ — end the current session."""
+    logout(request)
+    return Response({'ok': True})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def auth_me(request):
+    """GET /api/auth/me/ — return current user info."""
+    return Response({
+        'id': request.user.pk,
+        'username': request.user.username,
+    })
+
+
+# ─── TTS (Text-to-Speech) API ──────────────────────────────────────────
+
+class NewsTTSView(generics.GenericAPIView):
+    """Stream TTS audio for a news article using Edge TTS (Microsoft Natural voices).
+
+    GET /api/news/<pk>/tts/?displayMode=zh&voice=yunyang&scope=full
+
+    scope: 'summary' (title + short blurb) or 'full' (title + full article).
+    Returns audio/mpeg stream. Supports caching — repeat requests serve from cache.
+    """
+    queryset = News.objects.select_related('source', 'category').all()
+    permission_classes = []
+
+    def get(self, request, pk):
+        import asyncio
+        import edge_tts
+        from django.http import StreamingHttpResponse, FileResponse
+        from api.services.tts_service import (
+            clean_for_tts, pick_tts_voice, get_cached_audio, save_to_cache,
+        )
+
+        news = self.get_object()
+
+        # Resolve parameters
+        display_mode = request.query_params.get('displayMode', 'zh')
+        voice_pref = request.query_params.get('voice', '')
+        scope = request.query_params.get('scope', 'full')
+
+        is_en = news.source.language == 'en'
+        has_zh = is_en and bool(news.title_zh)
+
+        # Pick voice
+        voice = pick_tts_voice(
+            source_language=news.source.language,
+            display_mode=display_mode,
+            has_zh=has_zh,
+            voice_pref=voice_pref,
+        )
+
+        # Check cache first (scope is part of the cache key)
+        cached = get_cached_audio(pk, display_mode, voice + ':' + scope)
+        if cached:
+            return FileResponse(
+                open(cached, 'rb'),
+                content_type='audio/mpeg',
+                as_attachment=False,
+            )
+
+        # Resolve the text to speak
+        if has_zh and display_mode != 'original':
+            if scope == 'full':
+                content = news.full_content_zh or news.content_zh or news.full_content or news.content or ''
+            else:
+                content = news.content_zh or news.content or ''
+            title = news.title_zh or news.title
+        else:
+            if scope == 'full':
+                content = news.full_content or news.content or ''
+            else:
+                content = news.content or ''
+            title = news.title
+
+        # Clean Markdown for natural speech
+        clean_content = clean_for_tts(content)
+        clean_title = clean_for_tts(title)
+        speech_text = f'{clean_title}。{clean_content}'
+
+        if not speech_text.strip():
+            return Response({'error': '没有可朗读的内容'}, status=400)
+
+        # Generate via Edge TTS, collect bytes, cache, then stream
+        audio_chunks = []
+
+        def generate_and_stream():
+            loop = asyncio.new_event_loop()
+            try:
+                async def _gen():
+                    communicate = edge_tts.Communicate(speech_text, voice)
+                    async for chunk in communicate.stream():
+                        if chunk.get('type') == 'audio' and 'data' in chunk:
+                            yield chunk['data']
+
+                gen = _gen()
+                while True:
+                    try:
+                        chunk = loop.run_until_complete(gen.__anext__())
+                        audio_chunks.append(chunk)
+                        yield chunk
+                    except StopAsyncIteration:
+                        break
+            finally:
+                loop.close()
+                # Save to cache after generation completes
+                if audio_chunks:
+                    try:
+                        save_to_cache(pk, display_mode, voice + ':' + scope, b''.join(audio_chunks))
+                    except Exception:
+                        pass  # Cache write failure is non-critical
+
+        response = StreamingHttpResponse(
+            generate_and_stream(),
+            content_type='audio/mpeg',
+        )
+        response['Cache-Control'] = 'public, max-age=86400'
+        return response

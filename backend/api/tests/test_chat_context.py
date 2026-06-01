@@ -20,6 +20,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 from django.utils import timezone
 from api.models import News, Source, Category
+from api.services.article_fetcher import FetchError, FetchResult
 
 
 @pytest.fixture
@@ -87,7 +88,7 @@ class TestEnsureFullContent:
     def test_skips_fetch_when_full_content_already_present(self, src, cat):
         from api.views import ensure_full_content
         n = _news(src, cat, full_content='ALREADY_HERE')
-        with patch('api.views._fetch_via_jina') as m:
+        with patch('api.views.fetch_article_markdown') as m:
             ensure_full_content(n)
         m.assert_not_called()
         n.refresh_from_db()
@@ -96,29 +97,49 @@ class TestEnsureFullContent:
     def test_fetches_and_persists_when_empty(self, src, cat):
         from api.views import ensure_full_content
         n = _news(src, cat)
-        with patch('api.views._fetch_via_jina', return_value='FRESHLY_FETCHED_BODY'):
+        result = FetchResult(ok=True, provider='jina', url=n.url, title=n.title, markdown='FRESHLY_FETCHED_BODY')
+        with patch('api.views.fetch_article_markdown', return_value=result):
             ensure_full_content(n)
         n.refresh_from_db()
         assert n.full_content == 'FRESHLY_FETCHED_BODY'
         assert n.full_content_fetched_at is not None
+        assert n.full_content_fetch_status == 'success'
+        assert n.full_content_fetch_provider == 'jina'
+        assert n.last_full_content_attempt is not None
 
     def test_swallows_fetch_errors_silently(self, src, cat):
         """If Jina fails, chat should still work with whatever content we have."""
         from api.views import ensure_full_content
         n = _news(src, cat, content='SHORT_FALLBACK')
-        with patch('api.views._fetch_via_jina', side_effect=RuntimeError('jina down')):
+        with patch('api.views.fetch_article_markdown', side_effect=FetchError('fetch down')):
             # Must not raise — chat should degrade gracefully
             ensure_full_content(n)
         n.refresh_from_db()
         assert n.full_content == ''  # still empty
         assert n.content == 'SHORT_FALLBACK'  # caller can still use this
+        assert n.full_content_fetch_status == 'failed'
+        assert n.full_content_fetch_error == 'fetch down'
+        assert n.full_content_retry_count == 1
+
+    def test_swallows_network_fetch_errors_and_records_status(self, src, cat):
+        """Network fetch errors are recorded but never escape to chat callers."""
+        from api.views import ensure_full_content
+        n = _news(src, cat, content='SHORT_FALLBACK')
+        with patch('api.views.fetch_article_markdown', side_effect=FetchError('timed out while fetching')):
+            ensure_full_content(n)
+        n.refresh_from_db()
+        assert n.full_content == ''
+        assert n.content == 'SHORT_FALLBACK'
+        assert n.full_content_fetch_status == 'network_error'
+        assert n.full_content_fetch_error == 'timed out while fetching'
+        assert n.full_content_retry_count == 1
 
     def test_skips_fetch_when_no_url(self, src, cat):
         from api.views import ensure_full_content
         n = _news(src, cat, url='https://example.com/x', full_content='')
         n.url = ''  # simulate edge case
         n.save()
-        with patch('api.views._fetch_via_jina') as m:
+        with patch('api.views.fetch_article_markdown') as m:
             ensure_full_content(n)
         m.assert_not_called()
 
@@ -154,7 +175,8 @@ class TestChatAutoFetch:
         def fake_stream_chat(messages, max_tokens=32000, temperature=0.3):
             yield '回答'
 
-        with patch('api.views._fetch_via_jina', return_value='FETCHED_FULL_BODY') as m_fetch, \
+        result = FetchResult(ok=True, provider='jina', url=n.url, title=n.title, markdown='FETCHED_FULL_BODY')
+        with patch('api.views.fetch_article_markdown', return_value=result) as m_fetch, \
              patch('api.views.stream_chat', side_effect=fake_stream_chat):
             resp = client.post(
                 f'/api/news/{n.pk}/chat/',
@@ -186,7 +208,8 @@ class TestChatAutoFetch:
         def fake_stream_chat(messages, max_tokens=32000, temperature=0.3):
             yield '回答'
 
-        with patch('api.views._fetch_via_jina', return_value='FETCHED_FULL_BODY') as m_fetch, \
+        result = FetchResult(ok=True, provider='jina', url=n.url, title=n.title, markdown='FETCHED_FULL_BODY')
+        with patch('api.views.fetch_article_markdown', return_value=result) as m_fetch, \
              patch('api.views.stream_chat', side_effect=fake_stream_chat):
             resp = client.post(
                 f'/api/news/{n.pk}/chat/',
@@ -223,7 +246,8 @@ class TestSuggestedQuestionsAutoFetch:
                         captured['prompt'] = kwargs['messages'][0]['content']
                         return _Completion('["q1","q2","q3"]')
 
-        with patch('api.views._fetch_via_jina', return_value='FETCHED_FULL_BODY'), \
+        result = FetchResult(ok=True, provider='jina', url=n.url, title=n.title, markdown='FETCHED_FULL_BODY')
+        with patch('api.views.fetch_article_markdown', return_value=result), \
              patch('api.views.get_clients', return_value=[(_FakeClient(), 'doubao-seed-2.0-pro')]):
             resp = client.post(f'/api/news/{n.pk}/suggested-questions/')
 

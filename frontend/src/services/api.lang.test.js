@@ -58,10 +58,10 @@ describe('axios lang interceptor coverage', () => {
     expect(config.params?.lang).toBe('en')   // ← will FAIL before fix
   })
 
-  it('omits lang when stored value is "original"', async () => {
-    localStorage.setItem('newshub_lang', 'original')
+  it('always sends lang param for valid language codes', async () => {
+    localStorage.setItem('newshub_lang', 'en')
     const [config] = await captureRequestConfig(api => api.fetchNews())
-    expect(config.params?.lang).toBeUndefined()
+    expect(config.params.lang).toBe('en')
   })
 
   it('defaults to lang=zh when localStorage is empty', async () => {

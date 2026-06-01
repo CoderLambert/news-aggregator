@@ -1,18 +1,20 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { Search, ArrowLeft } from 'lucide-react'
+import { Search, ArrowLeft, Headphones } from 'lucide-react'
 import { useLanguage } from '../context/useLanguage'
+import { useSpeechPlayer } from '../context/SpeechPlayerContext'
 import LoadingSpinner from '../components/LoadingSpinner'
+import AuthModal from '../components/AuthModal'
 import NodeRenderer from 'markstream-react'
 import NewsChatAssistant from '../components/NewsChatAssistant'
 import TranslationStatus from '../components/news-detail/TranslationStatus'
-import FetchArticleCard from '../components/news-detail/FetchArticleCard'
-import FetchArticleSpinner from '../components/news-detail/FetchArticleSpinner'
 import ErrorBanner from '../components/news-detail/ErrorBanner'
 import FullContentSection from '../components/news-detail/FullContentSection'
+import FullContentFetchStatus from '../components/news-detail/FullContentFetchStatus'
 import ArticleSearchBar from '../components/news-detail/ArticleSearchBar'
 import ArticleToc from '../components/news-detail/ArticleToc'
 import ScrollToTop from '../components/news-detail/ScrollToTop'
+import FavoriteButtons from '../components/news-detail/FavoriteButtons'
 import { useNewsDetail } from '../hooks/useNewsDetail'
 import { useFullArticle } from '../hooks/useFullArticle'
 import { useTranslation } from '../hooks/useTranslation'
@@ -47,7 +49,7 @@ const CODE_BLOCK_THEMES = {
 
 export default function NewsDetail() {
   const { id } = useParams()
-  const { lang, t } = useLanguage()
+  const { displayMode, t } = useLanguage()
   const { news, setNews, loading } = useNewsDetail(id)
   const { articleLoading, articleError, handleFetchFullArticle } = useFullArticle(id, setNews)
   const {
@@ -55,9 +57,21 @@ export default function NewsDetail() {
     showOriginal, setShowOriginal, handleTranslate,
   } = useTranslation(id, news, setNews, loading)
 
+  // TTS — uses global player
+  const speechPlayer = useSpeechPlayer()
+  const handleSpeak = useCallback(() => {
+    if (!news) return
+    const isEnglishSource = news.source_language === 'en'
+    const hasZh = isEnglishSource && !!news.title_zh
+    let speechTitle = news.title
+    if (hasZh && displayMode === 'zh') speechTitle = news.title_zh
+    speechPlayer.speak(news.id, speechTitle, displayMode)
+  }, [news, displayMode, speechPlayer])
+
   // Page-internal search
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [authModalOpen, setAuthModalOpen] = useState(false)
   const articleRef = useRef(null)
 
   const { matchCount, currentIndex, goNext, goPrev } = useArticleSearch(
@@ -87,9 +101,27 @@ export default function NewsDetail() {
   }
 
   const isEnglishSource = news.source_language === 'en'
-  const showZh = lang === 'zh' && isEnglishSource
-  const displayTitle   = showZh && news.title_zh   ? news.title_zh   : news.title
-  const displayContent = showZh && news.content_zh ? news.content_zh : news.content
+  const hasZh = isEnglishSource && !!news.title_zh
+
+  // Resolve display text based on displayMode
+  let displayTitle, displayContent, displaySubtitle
+  if (!hasZh) {
+    displayTitle = news.title
+    displayContent = news.content
+    displaySubtitle = null
+  } else if (displayMode === 'zh') {
+    displayTitle = news.title_zh
+    displayContent = news.content_zh || news.content
+    displaySubtitle = null
+  } else if (displayMode === 'bilingual') {
+    displayTitle = news.title
+    displayContent = news.content_zh || news.content
+    displaySubtitle = news.title_zh
+  } else {
+    displayTitle = news.title
+    displayContent = news.content
+    displaySubtitle = null
+  }
 
   return (
     <div onKeyDown={handleGlobalKeyDown}>
@@ -117,14 +149,26 @@ export default function NewsDetail() {
             {t.backToList}
           </Link>
           {!searchOpen && (
-            <button
-              type="button"
-              onClick={() => setSearchOpen(true)}
-              aria-label="搜索文章内容"
-              className="p-2 -mr-2 rounded-xl hover:bg-neutral-100 active:bg-neutral-200 transition-colors"
-            >
-              <Search className="size-[18px] text-neutral-400" />
-            </button>
+            <div className="flex items-center gap-1">
+              {speechPlayer.supported && (
+                <button
+                  type="button"
+                  onClick={handleSpeak}
+                  aria-label="语音播报"
+                  className="p-2 rounded-xl hover:bg-neutral-100 active:bg-neutral-200 transition-colors"
+                >
+                  <Headphones className="size-[18px] text-neutral-400" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setSearchOpen(true)}
+                aria-label="搜索文章内容"
+                className="p-2 -mr-2 rounded-xl hover:bg-neutral-100 active:bg-neutral-200 transition-colors"
+              >
+                <Search className="size-[18px] text-neutral-400" />
+              </button>
+            </div>
           )}
         </nav>
 
@@ -132,19 +176,23 @@ export default function NewsDetail() {
           <ArticleHeader
             news={news}
             displayTitle={displayTitle}
-            showOriginalTitleHint={showZh && !!news.title_zh}
+            displaySubtitle={displaySubtitle}
             isEnglishSource={isEnglishSource}
           />
+
+          {/* 点赞 + 收藏按钮 */}
+          <FavoriteButtons newsId={id} className="mt-4 mb-6" onAuthRequired={() => setAuthModalOpen(true)} />
 
           {news.cover_image && (
             <img src={news.cover_image} alt={displayTitle} className="w-full rounded-2xl mb-8 shadow-sm" />
           )}
 
           {/* Fetch full article */}
-          {isEnglishSource && !news.full_content && !articleLoading && (
-            <FetchArticleCard onFetch={handleFetchFullArticle} />
-          )}
-          {articleLoading && <FetchArticleSpinner />}
+          <FullContentFetchStatus
+            news={news}
+            articleLoading={articleLoading}
+            onFetch={handleFetchFullArticle}
+          />
           {articleError && (
             <ErrorBanner message={articleError} onRetry={handleFetchFullArticle} />
           )}
@@ -188,13 +236,16 @@ export default function NewsDetail() {
 
       {/* Scroll-to-top — above chat assistant */}
       <ScrollToTop />
+
+      {/* Auth modal */}
+      {authModalOpen && <AuthModal onClose={() => setAuthModalOpen(false)} />}
     </div>
   )
 }
 
 /* ── Article header ─────────────────────────────────────────────────── */
 
-function ArticleHeader({ news, displayTitle, showOriginalTitleHint, isEnglishSource }) {
+function ArticleHeader({ news, displayTitle, displaySubtitle, isEnglishSource }) {
   return (
     <header className="mb-8">
       {/* Tags row */}
@@ -210,9 +261,9 @@ function ArticleHeader({ news, displayTitle, showOriginalTitleHint, isEnglishSou
         {displayTitle}
       </h1>
 
-      {/* Original English subtitle hint */}
-      {showOriginalTitleHint && (
-        <p className="text-[13px] text-neutral-400 leading-relaxed mb-4">{news.title}</p>
+      {/* Chinese subtitle (bilingual mode) */}
+      {displaySubtitle && (
+        <p className="text-[13px] text-neutral-400 leading-relaxed mb-4">{displaySubtitle}</p>
       )}
 
       {/* Meta line */}

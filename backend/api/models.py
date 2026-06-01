@@ -70,11 +70,32 @@ class News(models.Model):
     translation_retry_count = models.PositiveIntegerField('重试次数', default=0)
     last_translation_attempt = models.DateTimeField('最后翻译时间', null=True, blank=True)
 
-    # Full article content (fetched via Jina Reader)
+    # Full article content (fetched via real article fetcher providers)
     full_content = models.TextField('完整原文(Markdown)', blank=True, default='')
     full_content_fetched_at = models.DateTimeField('原文获取时间', null=True, blank=True)
     full_content_zh = models.TextField('完整原文(中文)', blank=True, default='')
     full_content_zh_fetched_at = models.DateTimeField('中文翻译时间', null=True, blank=True)
+
+    FULL_CONTENT_STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('fetching', 'Fetching'),
+        ('success', 'Success'),
+        ('failed', 'Failed'),
+        ('network_error', 'Network Error'),
+        ('validation_failed', 'Validation Failed'),
+    ]
+    full_content_fetch_status = models.CharField(
+        '全文抓取状态',
+        max_length=32,
+        choices=FULL_CONTENT_STATUS_CHOICES,
+        default='pending',
+        db_index=True,
+    )
+    full_content_fetch_error = models.TextField('全文抓取错误信息', blank=True, default='')
+    full_content_fetch_provider = models.CharField('全文抓取 Provider', max_length=64, blank=True, default='')
+    full_content_quality_score = models.FloatField('全文质量分', null=True, blank=True)
+    full_content_retry_count = models.PositiveIntegerField('全文抓取重试次数', default=0)
+    last_full_content_attempt = models.DateTimeField('最后全文抓取时间', null=True, blank=True)
 
     # LLM-generated suggested questions (cached per article)
     suggested_questions = models.JSONField('AI 推荐问题', default=list, blank=True)
@@ -106,3 +127,50 @@ class ChatSession(models.Model):
 
     def __str__(self):
         return f"Chat for {self.news.title[:20]}"
+
+
+class Favorite(models.Model):
+    """User likes and bookmarks on news articles."""
+    TYPE_CHOICES = [
+        ('like', '点赞'),
+        ('bookmark', '收藏'),
+    ]
+    user = models.ForeignKey('auth.User', on_delete=models.CASCADE, related_name='favorites')
+    news = models.ForeignKey(News, on_delete=models.CASCADE, related_name='favorited_by')
+    type = models.CharField('类型', max_length=10, choices=TYPE_CHOICES)
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+
+    class Meta:
+        verbose_name = '收藏'
+        verbose_name_plural = '收藏'
+        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'news', 'type'],
+                name='unique_user_news_type',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} {self.type}d {self.news.title[:30]}"
+
+
+class BlockedNews(models.Model):
+    """User-blocked news — hidden from their feed."""
+    user = models.ForeignKey('auth.User', on_delete=models.CASCADE, related_name='blocked_news')
+    news = models.ForeignKey(News, on_delete=models.CASCADE, related_name='blocked_by')
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+
+    class Meta:
+        verbose_name = '屏蔽'
+        verbose_name_plural = '屏蔽'
+        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'news'],
+                name='unique_user_blocked_news',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.user.username} blocked {self.news.title[:30]}'

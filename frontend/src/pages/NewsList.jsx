@@ -155,7 +155,7 @@ export default function NewsList() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {news.map((item, i) => (
           <div key={item.id} ref={i === news.length - 1 ? lastRef : null}>
-            <NewsCard news={item} />
+            <NewsCard news={item} onRemoved={(id) => setNews(prev => prev.filter(n => n.id !== id))} />
           </div>
         ))}
       </div>

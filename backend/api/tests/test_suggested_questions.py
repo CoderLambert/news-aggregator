@@ -9,6 +9,20 @@ from unittest.mock import patch
 import pytest
 from django.utils import timezone
 from api.models import News, Source, Category
+from api.services.article_fetcher import FetchResult
+
+
+@pytest.fixture(autouse=True)
+def no_external_full_content_fetch():
+    result = FetchResult(
+        ok=True,
+        provider='test',
+        url='https://example.com/test',
+        title='测试文章',
+        markdown='测试文章\n\n这是真实抓取测试正文，用于隔离 suggested-questions 单测中的外部网络。' * 20,
+    )
+    with patch('api.views.fetch_article_markdown', return_value=result):
+        yield
 
 
 @pytest.fixture

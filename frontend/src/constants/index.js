@@ -4,6 +4,9 @@
 
 export const LANG_KEY = 'newshub_lang'
 
+// Display mode for news content: zh / original / bilingual
+export const DISPLAY_MODE_KEY = 'newshub_display_mode'
+
 // Translation auto-resume marker (localStorage)
 export const TRANSLATING_MARKER_PREFIX = 'translating_'
 export const TRANSLATING_MARKER_TTL_MS = 5 * 60 * 1000 // 5 min
