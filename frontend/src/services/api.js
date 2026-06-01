@@ -80,6 +80,17 @@ export const fetchCategories = () =>
 export const fetchSources = () =>
   api.get('/sources/').then(res => res.data)
 
+// ---- Provider Comparisons --------------------------------------------------
+
+export const fetchProviderComparisons = (params = {}) =>
+  api.get('/provider-comparisons/', { params }).then(res => res.data)
+
+export const createProviderComparison = (payload) =>
+  apiLong.post('/provider-comparisons/', payload).then(res => res.data)
+
+export const retestProviderComparison = (id) =>
+  apiLong.post(`/provider-comparisons/${id}/retest/`).then(res => res.data)
+
 // ---- Chat (REST) -----------------------------------------------------------
 
 export const fetchChatHistory = (newsId) =>

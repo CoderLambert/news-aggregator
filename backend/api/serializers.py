@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Category, Source, News, Favorite, BlockedNews
+from .models import Category, Source, News, Favorite, BlockedNews, ProviderComparison
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -160,6 +160,41 @@ class FavoriteSerializer(serializers.ModelSerializer):
         elif getattr(self, '_removed', False):
             data['removed'] = True
         return data
+
+
+class ProviderComparisonSerializer(serializers.ModelSerializer):
+    news_title = serializers.CharField(source='news.title', read_only=True)
+    source_name = serializers.CharField(source='news.source.name', read_only=True)
+
+    class Meta:
+        model = ProviderComparison
+        fields = [
+            'id', 'run_id', 'news', 'news_title', 'source_name', 'url',
+            'expected_title', 'summary', 'provider', 'ok', 'title',
+            'canonical_url', 'markdown', 'quality_score', 'error',
+            'validation_reasons', 'content_length', 'extractor', 'metadata',
+            'elapsed_ms', 'created_at',
+        ]
+        read_only_fields = fields
+
+
+class ProviderComparisonRunSerializer(serializers.Serializer):
+    news_id = serializers.IntegerField(required=False)
+    url = serializers.URLField(required=False, max_length=500)
+    expected_title = serializers.CharField(required=False, allow_blank=True, max_length=500)
+    summary = serializers.CharField(required=False, allow_blank=True)
+    providers = serializers.ListField(
+        child=serializers.CharField(max_length=64),
+        required=False,
+        allow_empty=False,
+    )
+
+    def validate(self, attrs):
+        if not attrs.get('news_id') and not attrs.get('url'):
+            raise serializers.ValidationError('news_id or url is required')
+        if attrs.get('news_id') and attrs.get('url'):
+            raise serializers.ValidationError('Use either news_id or url, not both')
+        return attrs
 
 
 class BlockedNewsSerializer(serializers.ModelSerializer):

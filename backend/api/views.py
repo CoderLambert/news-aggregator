@@ -3,18 +3,19 @@ from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
 from django.middleware.csrf import get_token
 from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import ensure_csrf_cookie, csrf_exempt
+from django.views.decorators.csrf import ensure_csrf_cookie, csrf_exempt, csrf_protect
 from rest_framework import generics, filters, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django_filters import rest_framework as django_filters
-from .models import Category, Source, News, ChatSession, BlockedNews
+from .models import Category, Source, News, ChatSession, BlockedNews, ProviderComparison
 from .serializers import (
     CategorySerializer, SourceSerializer,
     NewsListSerializer, NewsDetailSerializer,
     BlockedNewsSerializer,
+    ProviderComparisonRunSerializer, ProviderComparisonSerializer,
 )
 # Module-level import so tests can patch `api.views.get_openai_client`
 from api.services.llm_translator import get_openai_client, get_clients, stream_chat
@@ -281,6 +282,74 @@ class NewsListView(generics.ListAPIView):
         params['page'] = page - 1
         return request.build_absolute_uri(
             request.path + '?' + params.urlencode()
+        )
+
+
+class ProviderComparisonListCreateView(generics.ListCreateAPIView):
+    queryset = ProviderComparison.objects.select_related('news', 'news__source').all()
+    serializer_class = ProviderComparisonSerializer
+    pagination_class = StandardPagination
+    permission_classes = [IsAuthenticated]
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ['created_at', 'provider', 'ok', 'quality_score', 'elapsed_ms']
+    ordering = ['-created_at']
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        from api.services.article_fetcher.comparison import adapted_sites, comparison_metrics
+        response.data['adapted_sites'] = adapted_sites()
+        response.data['metrics'] = comparison_metrics(self.filter_queryset(self.get_queryset()))
+        return response
+
+    @method_decorator(csrf_protect)
+    def post(self, request, *args, **kwargs):
+        run_serializer = ProviderComparisonRunSerializer(data=request.data)
+        run_serializer.is_valid(raise_exception=True)
+        data = run_serializer.validated_data
+
+        from api.services.article_fetcher.comparison import compare_providers, validate_comparison_url
+        try:
+            if data.get('url'):
+                validate_comparison_url(data['url'])
+            run_id, comparisons = compare_providers(
+                news_id=data.get('news_id'),
+                url=data.get('url'),
+                expected_title=data.get('expected_title'),
+                summary=data.get('summary'),
+                provider_names=data.get('providers'),
+            )
+        except News.DoesNotExist:
+            return Response({'news_id': 'News not found'}, status=status.HTTP_404_NOT_FOUND)
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        result_serializer = self.get_serializer(comparisons, many=True)
+        return Response(
+            {'run_id': run_id, 'count': len(comparisons), 'results': result_serializer.data},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ProviderComparisonDetailView(generics.RetrieveAPIView):
+    queryset = ProviderComparison.objects.select_related('news', 'news__source').all()
+    serializer_class = ProviderComparisonSerializer
+    permission_classes = [IsAuthenticated]
+
+
+class ProviderComparisonRetestView(generics.GenericAPIView):
+    queryset = ProviderComparison.objects.select_related('news').all()
+    serializer_class = ProviderComparisonSerializer
+    permission_classes = [IsAuthenticated]
+
+    @method_decorator(csrf_protect)
+    def post(self, request, pk):
+        comparison = self.get_object()
+        from api.services.article_fetcher.comparison import retest_comparison
+        run_id, comparisons = retest_comparison(comparison)
+        serializer = self.get_serializer(comparisons, many=True)
+        return Response(
+            {'run_id': run_id, 'count': len(comparisons), 'results': serializer.data},
+            status=status.HTTP_201_CREATED,
         )
 
 

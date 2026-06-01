@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { Heart, LogOut, Menu, X, Settings, Languages, Type, AlignLeft } from 'lucide-react'
+import { Heart, LogOut, Menu, X, Settings, Languages, Type, AlignLeft, GitCompareArrows } from 'lucide-react'
 import { useLanguage } from '../context/useLanguage'
 import { useAuth } from '../context/AuthContext'
 import AuthModal from './AuthModal'
@@ -108,6 +108,15 @@ export default function Header() {
             >
               <Heart className="w-4 h-4 text-pink-400" />
               我的收藏
+            </Link>
+
+            <Link
+              to="/provider-comparisons"
+              onClick={() => setMenuOpen(false)}
+              className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100 transition-colors"
+            >
+              <GitCompareArrows className="w-4 h-4 text-indigo-400" />
+              Provider 对比
             </Link>
 
             {/* 显示模式 */}

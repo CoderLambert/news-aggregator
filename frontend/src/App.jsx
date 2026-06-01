@@ -17,6 +17,7 @@ import { useState } from 'react'
 const NewsList = lazy(() => import('./pages/NewsList'))
 const NewsDetail = lazy(() => import('./pages/NewsDetail'))
 const FavoritesPage = lazy(() => import('./pages/FavoritesPage'))
+const ProviderComparisons = lazy(() => import('./pages/ProviderComparisons'))
 // Design QA route — preview the Xiaowen mascot in all moods.
 const MascotPreview = lazy(() => import('./components/mascot/MascotPreview'))
 
@@ -35,6 +36,7 @@ export default function App() {
                     <Route path="/" element={<NewsList />} />
                     <Route path="/news/:id" element={<NewsDetail />} />
                     <Route path="/favorites" element={<FavoritesPage />} />
+                    <Route path="/provider-comparisons" element={<ProviderComparisons />} />
                     <Route path="/__mascot__" element={<MascotPreview />} />
                   </Routes>
                   </Suspense>

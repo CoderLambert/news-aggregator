@@ -174,3 +174,50 @@ class BlockedNews(models.Model):
 
     def __str__(self):
         return f'{self.user.username} blocked {self.news.title[:30]}'
+
+
+class ProviderComparison(models.Model):
+    """One provider's result inside a provider-comparison run.
+
+    This model is intentionally independent from News.full_content: comparison
+    runs persist what each provider really returned for diagnostics/UI display,
+    but never mutate the article cache used by readers.
+    """
+
+    run_id = models.UUIDField('对比运行 ID', db_index=True)
+    news = models.ForeignKey(
+        News,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='provider_comparisons',
+        verbose_name='新闻',
+    )
+    url = models.URLField('原文链接', max_length=500, db_index=True)
+    expected_title = models.CharField('期望标题', max_length=500, blank=True, default='')
+    summary = models.TextField('摘要', blank=True, default='')
+    provider = models.CharField('Provider', max_length=64, db_index=True)
+    ok = models.BooleanField('是否成功', default=False, db_index=True)
+    title = models.CharField('抓取标题', max_length=500, blank=True, default='')
+    canonical_url = models.URLField('Canonical URL', max_length=500, blank=True, default='')
+    markdown = models.TextField('Provider 返回 Markdown', blank=True, default='')
+    quality_score = models.FloatField('质量分', null=True, blank=True)
+    error = models.TextField('错误信息', blank=True, default='')
+    validation_reasons = models.JSONField('校验失败原因', default=list, blank=True)
+    content_length = models.PositiveIntegerField('内容长度', default=0)
+    extractor = models.CharField('Extractor', max_length=128, blank=True, default='')
+    metadata = models.JSONField('Provider 元数据', default=dict, blank=True)
+    elapsed_ms = models.PositiveIntegerField('耗时(ms)', default=0)
+    created_at = models.DateTimeField('创建时间', auto_now_add=True, db_index=True)
+
+    class Meta:
+        verbose_name = 'Provider 对比结果'
+        verbose_name_plural = 'Provider 对比结果'
+        ordering = ['-created_at', 'provider']
+        indexes = [
+            models.Index(fields=['run_id', 'provider']),
+            models.Index(fields=['url', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.provider} {"ok" if self.ok else "failed"} {self.url}'
