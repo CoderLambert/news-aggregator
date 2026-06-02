@@ -5,9 +5,9 @@ const FULL_CONTENT_FETCH_FIELDS = [
   'full_content_fetch_status',
   'full_content_fetch_error',
   'full_content_fetch_provider',
-  'full_content_fetch_quality',
-  'full_content_fetch_retry_count',
-  'full_content_fetch_last_attempt',
+  'full_content_quality_score',
+  'full_content_retry_count',
+  'last_full_content_attempt',
 ]
 
 function pickFetchMetadata(data = {}) {

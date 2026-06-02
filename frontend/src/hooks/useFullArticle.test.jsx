@@ -20,9 +20,9 @@ describe('useFullArticle', () => {
       full_content_fetch_status: 'success',
       full_content_fetch_error: '',
       full_content_fetch_provider: 'jina',
-      full_content_fetch_quality: 0.92,
-      full_content_fetch_retry_count: 1,
-      full_content_fetch_last_attempt: '2026-01-01T00:00:00Z',
+      full_content_quality_score: 0.92,
+      full_content_retry_count: 1,
+      last_full_content_attempt: '2026-01-01T00:00:00Z',
     })
     const setNews = vi.fn(updater => updater({ id: 7, title: 'Existing' }))
     const { result } = renderHook(() => useFullArticle(7, setNews))
@@ -40,9 +40,9 @@ describe('useFullArticle', () => {
       full_content_fetch_status: 'success',
       full_content_fetch_error: '',
       full_content_fetch_provider: 'jina',
-      full_content_fetch_quality: 0.92,
-      full_content_fetch_retry_count: 1,
-      full_content_fetch_last_attempt: '2026-01-01T00:00:00Z',
+      full_content_quality_score: 0.92,
+      full_content_retry_count: 1,
+      last_full_content_attempt: '2026-01-01T00:00:00Z',
     })
     expect(result.current.articleError).toBe('')
   })
@@ -55,9 +55,9 @@ describe('useFullArticle', () => {
           full_content_fetch_status: 'network_error',
           full_content_fetch_error: 'timeout',
           full_content_fetch_provider: 'scrapy',
-          full_content_fetch_quality: 0,
-          full_content_fetch_retry_count: 2,
-          full_content_fetch_last_attempt: '2026-01-02T00:00:00Z',
+          full_content_quality_score: 0,
+          full_content_retry_count: 2,
+          last_full_content_attempt: '2026-01-02T00:00:00Z',
         },
       },
     })
@@ -74,9 +74,9 @@ describe('useFullArticle', () => {
       full_content_fetch_status: 'network_error',
       full_content_fetch_error: 'timeout',
       full_content_fetch_provider: 'scrapy',
-      full_content_fetch_quality: 0,
-      full_content_fetch_retry_count: 2,
-      full_content_fetch_last_attempt: '2026-01-02T00:00:00Z',
+      full_content_quality_score: 0,
+      full_content_retry_count: 2,
+      last_full_content_attempt: '2026-01-02T00:00:00Z',
     })
   })
 })

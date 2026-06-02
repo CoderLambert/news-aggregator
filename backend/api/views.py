@@ -412,15 +412,41 @@ class NewsFetchFullView(generics.GenericAPIView):
             classified = classify_fetch_error(e)
             mark_failed(news, e, status=classified)
             logger.warning('Full-content fetch failed for %s [%s]: %s', url, classified, e)
+            news.refresh_from_db()
             return Response(
-                {'error': '原文抓取失败，外部站点当前不可达，可稍后重试。'},
+                {
+                    'error': '原文抓取失败，外部站点当前不可达，可稍后重试。',
+                    'full_content_fetch_status': news.full_content_fetch_status,
+                    'full_content_fetch_error': news.full_content_fetch_error,
+                    'full_content_fetch_provider': news.full_content_fetch_provider,
+                    'full_content_quality_score': news.full_content_quality_score,
+                    'full_content_retry_count': news.full_content_retry_count,
+                    'last_full_content_attempt': (
+                        news.last_full_content_attempt.isoformat()
+                        if news.last_full_content_attempt
+                        else None
+                    ),
+                },
                 status=502,
             )
         except Exception as e:
             mark_failed(news, e)
             logger.exception('Unexpected full-content fetch error for %s: %s', url, e)
+            news.refresh_from_db()
             return Response(
-                {'error': '原文抓取失败，外部站点当前不可达，可稍后重试。'},
+                {
+                    'error': '原文抓取失败，外部站点当前不可达，可稍后重试。',
+                    'full_content_fetch_status': news.full_content_fetch_status,
+                    'full_content_fetch_error': news.full_content_fetch_error,
+                    'full_content_fetch_provider': news.full_content_fetch_provider,
+                    'full_content_quality_score': news.full_content_quality_score,
+                    'full_content_retry_count': news.full_content_retry_count,
+                    'last_full_content_attempt': (
+                        news.last_full_content_attempt.isoformat()
+                        if news.last_full_content_attempt
+                        else None
+                    ),
+                },
                 status=502,
             )
 
