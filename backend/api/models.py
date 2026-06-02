@@ -96,6 +96,8 @@ class News(models.Model):
     full_content_quality_score = models.FloatField('全文质量分', null=True, blank=True)
     full_content_retry_count = models.PositiveIntegerField('全文抓取重试次数', default=0)
     last_full_content_attempt = models.DateTimeField('最后全文抓取时间', null=True, blank=True)
+    full_content_backfill_source = models.CharField('Scrapy 回填来源', max_length=64, blank=True, default='')
+    full_content_backfill_at = models.DateTimeField('Scrapy 回填时间', null=True, blank=True)
 
     # LLM-generated suggested questions (cached per article)
     suggested_questions = models.JSONField('AI 推荐问题', default=list, blank=True)
