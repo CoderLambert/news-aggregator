@@ -8,6 +8,7 @@ Also provides audio caching and voice selection.
 import hashlib
 import os
 import re
+import time
 
 # Cache directory for generated TTS audio files
 TTS_CACHE_DIR = os.path.join(
@@ -67,6 +68,41 @@ def save_to_cache(news_id: int, display_mode: str, voice: str, audio_bytes: byte
     with open(path, 'wb') as f:
         f.write(audio_bytes)
     return path
+
+
+# How many seconds a cached file can go untouched before considered expired.
+TTS_CACHE_MAX_AGE = 3 * 24 * 3600  # 3 days
+
+
+def clean_expired_cache(max_age: int = TTS_CACHE_MAX_AGE) -> tuple[int, int]:
+    """Remove cached TTS files not accessed (atime) or modified (mtime) in max_age seconds.
+
+    Returns (removed_count, freed_bytes) so callers can log the result.
+    """
+    if not os.path.isdir(TTS_CACHE_DIR):
+        return 0, 0
+
+    cutoff = time.time() - max_age
+    removed = 0
+    freed = 0
+
+    for name in os.listdir(TTS_CACHE_DIR):
+        if not name.endswith('.mp3'):
+            continue
+        path = os.path.join(TTS_CACHE_DIR, name)
+        try:
+            stat = os.stat(path)
+            # Use whichever is more recent: last access or last modification
+            last_touched = max(stat.st_atime, stat.st_mtime)
+            if last_touched < cutoff:
+                size = stat.st_size
+                os.remove(path)
+                removed += 1
+                freed += size
+        except OSError:
+            continue
+
+    return removed, freed
 
 
 def clean_for_tts(markdown_text: str) -> str:

@@ -242,6 +242,14 @@ export function SpeechPlayerProvider({ children }) {
     localStorage.setItem(SCOPE_KEY, newScope)
   }, [])
 
+  // Re-generate TTS audio when voice or scope changes and we have an active article.
+  // This effect runs after voice/scope are updated, using the new speak function.
+  useEffect(() => {
+    if (newsId && title && audioRef.current && (status === 'playing' || status === 'paused')) {
+      speak(newsId, title, displayMode)
+    }
+  }, [voice, scope]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Cleanup only when the provider truly unmounts.
   // Important: do NOT depend on _savePosition/newsId here. When speak() sets newsId,
   // React would re-run this cleanup and accidentally destroy the newly-created Audio,

@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useState, useRef, useEffect, useCallback } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { LanguageProvider } from './context/LanguageContext'
 import { useLanguage } from './context/useLanguage'
@@ -10,7 +10,6 @@ import Header from './components/Header'
 import AppErrorBoundary from './components/AppErrorBoundary'
 import LoadingSpinner from './components/LoadingSpinner'
 import { Headphones, Play, Pause, Square, Loader2, Gauge, ChevronUp, FileText } from 'lucide-react'
-import { useState } from 'react'
 
 // Route-level code splitting — NewsDetail (Markdown rendering + chat) is
 // the heaviest component. Lazy-loading means the list page loads faster.
@@ -67,11 +66,88 @@ function GlobalSpeechPlayer() {
   const player = useSpeechPlayer()
   const [expanded, setExpanded] = useState(false)
 
+  // --- Drag-to-seek state ---
+  // Use refs + direct DOM for drag visuals to avoid React re-render jitter.
+  const barRef = useRef(null)
+  const fillRef = useRef(null)
+  const dotRef = useRef(null)
+  const draggingRef = useRef(false)
+
+  const getPctFromEvent = useCallback((clientX) => {
+    const bar = barRef.current
+    if (!bar) return 0.5
+    const rect = bar.getBoundingClientRect()
+    return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+  }, [])
+
+  // Update DOM directly — no state, no re-render
+  const updateDragVisuals = useCallback((fraction) => {
+    const pct = fraction * 100
+    const fill = fillRef.current
+    const dot = dotRef.current
+    if (fill) {
+      fill.style.transition = 'none'
+      fill.style.width = `${pct}%`
+    }
+    if (dot) {
+      dot.style.transition = 'none'
+      dot.style.left = `calc(${pct}% - 6px)`
+      dot.style.opacity = '1'
+      dot.style.transform = 'translateY(-50%) scale(1.25)'
+    }
+  }, [])
+
+  const startDrag = useCallback((clientX) => {
+    draggingRef.current = true
+    updateDragVisuals(getPctFromEvent(clientX))
+  }, [getPctFromEvent, updateDragVisuals])
+
+  const moveDrag = useCallback((clientX) => {
+    if (!draggingRef.current) return
+    updateDragVisuals(getPctFromEvent(clientX))
+  }, [getPctFromEvent, updateDragVisuals])
+
+  const endDrag = useCallback((clientX) => {
+    if (!draggingRef.current) return
+    draggingRef.current = false
+    // Seek from the actual release position, not a cached value
+    const fraction = getPctFromEvent(clientX)
+    player.seek(fraction)
+    // Do NOT clear inline styles here — React will override them on the
+    // next render triggered by audio 'timeupdate'. Clearing causes a flash
+    // to the pre-drag position.
+  }, [player, getPctFromEvent])
+
+  // Global move/up listeners for drag (works even when cursor leaves the bar)
+  useEffect(() => {
+    const onMouseMove = (e) => moveDrag(e.clientX)
+    const onMouseUp = (e) => endDrag(e.clientX)
+    const onTouchMove = (e) => {
+      if (draggingRef.current) {
+        e.preventDefault()
+        moveDrag(e.touches[0].clientX)
+      }
+    }
+    const onTouchEnd = (e) => endDrag(e.changedTouches[0].clientX)
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+    window.addEventListener('touchmove', onTouchMove, { passive: false })
+    window.addEventListener('touchend', onTouchEnd)
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('touchend', onTouchEnd)
+    }
+  }, [moveDrag, endDrag])
+
   if (player.status === 'idle') return null
 
   const isPlaying = player.status === 'playing'
   const isLoading = player.status === 'loading'
   const pct = Math.round(player.progress * 100)
+
+  const displayPct = pct
 
   const formatTime = (s) => {
     if (!s || !isFinite(s)) return '0:00'
@@ -83,28 +159,34 @@ function GlobalSpeechPlayer() {
   return (
     <div className="fixed bottom-0 left-0 right-0 z-50">
       <div className="bg-white/95 backdrop-blur-xl border-t border-neutral-200 shadow-[0_-4px_24px_-4px_rgba(0,0,0,0.08)]">
-        {/* Progress bar — clickable for seek */}
+        {/* Progress bar — clickable + drag-to-seek */}
         <div
-          className="h-1 bg-neutral-100 cursor-pointer relative group"
-          onClick={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect()
-            const fraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-            player.seek(fraction)
+          ref={barRef}
+          className="h-[14px] flex items-center bg-neutral-100 cursor-pointer relative group"
+          onMouseDown={(e) => {
+            e.preventDefault()
+            startDrag(e.clientX)
           }}
+          onTouchStart={(e) => startDrag(e.touches[0].clientX)}
         >
-          <div
-            className={`h-full transition-[width] duration-150 ease-linear ${
-              isLoading ? 'bg-violet-300 animate-pulse' : 'bg-violet-500'
-            }`}
-            style={{ width: isLoading ? '100%' : `${pct}%` }}
-          />
-          {/* Thumb dot */}
-          {!isLoading && player.progress > 0 && (
+          {/* Visual bar inside hit area */}
+          <div className="h-1 w-full relative">
             <div
-              className="absolute top-1/2 -translate-y-1/2 size-3 bg-violet-600 rounded-full shadow opacity-0 group-hover:opacity-100 transition-opacity"
-              style={{ left: `calc(${pct}% - 6px)` }}
+              ref={fillRef}
+              className={`absolute inset-y-0 left-0 transition-[width] duration-150 ease-linear ${
+                isLoading ? 'bg-violet-300 animate-pulse' : 'bg-violet-500'
+              }`}
+              style={{ width: isLoading ? '100%' : `${displayPct}%` }}
             />
-          )}
+            {/* Thumb dot — hover-reveal when not dragging */}
+            {!isLoading && displayPct > 0 && (
+              <div
+                ref={dotRef}
+                className="absolute top-1/2 -translate-y-1/2 size-3 bg-violet-600 rounded-full shadow opacity-0 group-hover:opacity-100 transition-opacity"
+                style={{ left: `calc(${displayPct}% - 6px)` }}
+              />
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-3 px-4 py-2 max-w-3xl mx-auto">
@@ -124,7 +206,7 @@ function GlobalSpeechPlayer() {
             <p className="text-[13px] font-medium text-neutral-800 truncate">{player.title}</p>
             <p className="text-[11px] text-neutral-400">
               {isLoading ? '正在生成语音...' : (
-                <>{formatTime(player.currentTime)} / {formatTime(player.duration)} · {pct}%</>
+                <>{formatTime(player.currentTime)} / {formatTime(player.duration)} · {displayPct}%</>
               )}
             </p>
           </div>

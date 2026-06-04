@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Heart, Bookmark, LogIn, EyeOff } from 'lucide-react'
 import gsap from 'gsap'
 import { useGSAP } from '@gsap/react'
-import { toggleFavorite, checkFavoriteStatus, blockNews, checkBlockedStatus } from '@/services/api'
+import { toggleFavorite, checkFavoriteStatus, blockNews, unblockNews, checkBlockedStatus } from '@/services/api'
 import { useAuth } from '@/context/AuthContext'
 
 gsap.registerPlugin(useGSAP)
@@ -132,6 +132,15 @@ export default function FavoriteButtons({ newsId, className = '', onAuthRequired
     }
   }
 
+  const handleUnblock = async () => {
+    try {
+      await unblockNews(newsId)
+      setIsBlocked(false)
+    } catch (err) {
+      console.error('Failed to unblock news:', err)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 opacity-30">
@@ -223,12 +232,17 @@ export default function FavoriteButtons({ newsId, className = '', onAuthRequired
         </button>
       )}
 
-      {/* 已屏蔽标记 */}
+      {/* 已屏蔽标记 — 可点击取消 */}
       {user && isBlocked && (
-        <span className="text-xs text-red-400 flex items-center gap-1 px-2 py-1 rounded-full bg-red-50 border border-red-100">
+        <button
+          onClick={handleUnblock}
+          className="text-xs text-red-400 flex items-center gap-1 px-2 py-1 rounded-full bg-red-50 border border-red-100 cursor-pointer hover:bg-red-100 active:scale-95 transition-all"
+          aria-label="取消屏蔽"
+          title="点击取消屏蔽"
+        >
           <EyeOff size={12} />
           已屏蔽
-        </span>
+        </button>
       )}
     </div>
   )
