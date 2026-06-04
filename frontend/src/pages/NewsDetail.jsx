@@ -5,11 +5,11 @@ import { useLanguage } from '../context/useLanguage'
 import { useSpeechPlayer } from '../context/SpeechPlayerContext'
 import LoadingSpinner from '../components/LoadingSpinner'
 import AuthModal from '../components/AuthModal'
-import NodeRenderer from 'markstream-react'
 import NewsChatAssistant from '../components/NewsChatAssistant'
 import TranslationStatus from '../components/news-detail/TranslationStatus'
 import ErrorBanner from '../components/news-detail/ErrorBanner'
 import FullContentSection from '../components/news-detail/FullContentSection'
+import MarkdownContent from '../components/news-detail/MarkdownContent'
 import FullContentFetchStatus from '../components/news-detail/FullContentFetchStatus'
 import ArticleSearchBar from '../components/news-detail/ArticleSearchBar'
 import ArticleToc from '../components/news-detail/ArticleToc'
@@ -20,33 +20,6 @@ import { useFullArticle } from '../hooks/useFullArticle'
 import { useTranslation } from '../hooks/useTranslation'
 import { useArticleSearch } from '../hooks/useArticleSearch'
 import { useArticleToc } from '../hooks/useArticleToc'
-import 'markstream-react/index.css'
-
-const CODE_BLOCK_PROPS = {
-  showHeader: true, showCopyButton: true,
-  showCollapseButton: false, showFontSizeButtons: false, showTooltips: true,
-}
-
-const CODE_BLOCK_THEMES = {
-  themes: ['vitesse-light'],
-  darkTheme: 'vitesse-light',
-  lightTheme: 'vitesse-light',
-  monacoOptions: {
-    fontSize: 14,
-    fontFamily: "'JetBrains Mono','Fira Code','Cascadia Code','Source Code Pro',Menlo,Consolas,monospace",
-    padding: { top: 12, bottom: 12 },
-    lineNumbers: 'on', wordWrap: 'on',
-    minimap: { enabled: false },
-    scrollbar: { vertical: 'hidden', horizontal: 'hidden' },
-    scrollBeyondLastLine: false, overviewRulerLanes: 0,
-    hideCursorInOverviewRuler: true, renderLineHighlight: 'none',
-    renderLineHighlightOnlyWhenFocus: true,
-    contextmenu: false, readOnly: true, domReadOnly: true,
-    mouseWheelZoom: false, smoothScrolling: true,
-    cursorBlinking: 'blink', cursorSmoothCaretAnimation: 'on',
-  },
-}
-
 export default function NewsDetail() {
   const { id } = useParams()
   const { displayMode, t } = useLanguage()
@@ -211,14 +184,10 @@ export default function NewsDetail() {
             />
           )}
 
-          {/* Summary content (NodeRenderer) */}
+          {/* Summary content */}
           <div className="text-gray-700 leading-relaxed w-full overflow-x-hidden">
             <div className="w-full max-w-full overflow-hidden">
-              <NodeRenderer
-                content={displayContent || ''}
-                codeBlockProps={CODE_BLOCK_PROPS}
-                codeBlockThemes={CODE_BLOCK_THEMES}
-              />
+              <MarkdownContent content={displayContent || ''} />
             </div>
           </div>
 

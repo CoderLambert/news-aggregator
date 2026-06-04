@@ -12,7 +12,7 @@ import LoadingSpinner from './components/LoadingSpinner'
 import { Headphones, Play, Pause, Square, Loader2, Gauge, ChevronUp, FileText } from 'lucide-react'
 import { useState } from 'react'
 
-// Route-level code splitting — NewsDetail (markstream-react + react-markdown) is
+// Route-level code splitting — NewsDetail (Markdown rendering + chat) is
 // the heaviest component. Lazy-loading means the list page loads faster.
 const NewsList = lazy(() => import('./pages/NewsList'))
 const NewsDetail = lazy(() => import('./pages/NewsDetail'))

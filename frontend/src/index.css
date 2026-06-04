@@ -90,34 +90,223 @@
 }
 
 /* ────────────────────────────────────────────────────────────────────── */
-/* Project overrides — mobile + markstream-react constraints              */
+/* Project overrides — mobile + article content constraints               */
 /* ────────────────────────────────────────────────────────────────────── */
 html, body {
   overflow-x: hidden;
   max-width: 100vw;
 }
 
-.text-gray-700 .markstream-react,
-.text-gray-700 .node-content,
-.text-gray-700 .node-slot {
-  max-width: 100%;
-  overflow-x: hidden;
-}
-
-.text-gray-700 .code-block-container {
-  max-width: 100%;
-  overflow: hidden;
-}
-
-.text-gray-700 .code-editor-layer,
-.text-gray-700 .code-block-content {
-  max-width: 100%;
-}
-
 .article-markdown table {
   display: block;
   max-width: 100%;
   overflow-x: auto;
+}
+
+
+.article-markdown :not(pre) > code {
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  background: #f3f4f6;
+  color: #e11d48;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
+}
+
+.article-markdown .md-code-block {
+  margin: 1.5rem 0;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+}
+
+.article-markdown .md-pre-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.article-markdown .md-lang-badge,
+.article-markdown .md-size-badge {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.6875rem;
+  line-height: 1;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  background: #eef2f7;
+  color: #4b5563;
+  font-weight: 600;
+}
+
+.article-markdown .md-size-badge {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.article-markdown .md-copy-btn {
+  margin-left: auto;
+  height: 1.75rem;
+  padding: 0 0.5rem;
+  gap: 0.25rem;
+  border-color: #e5e7eb;
+  background: rgba(255, 255, 255, 0.9);
+  color: #4b5563;
+  font-size: 0.75rem;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.article-markdown .md-code-block:hover .md-copy-btn,
+.article-markdown .md-copy-btn:focus {
+  opacity: 1;
+}
+
+.article-markdown .md-shiki-html,
+.article-markdown .md-pre-plain {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.article-markdown .md-code-block pre,
+.article-markdown .md-pre-plain {
+  margin: 0 !important;
+  padding: 0.625rem 1rem 0.625rem 0 !important;
+  min-width: max-content;
+  border: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+  font-size: 13px !important;
+  line-height: 1.42 !important;
+  white-space: pre;
+  tab-size: 2;
+}
+
+.article-markdown .md-pre-plain {
+  background: #f9fafb;
+  color: #24292e;
+}
+
+.article-markdown .md-code-block code {
+  display: block;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: pre !important;
+  overflow-wrap: normal !important;
+  word-break: normal !important;
+}
+
+.article-markdown .md-shiki-html *,
+.article-markdown .md-pre-plain,
+.article-markdown .md-pre-plain * {
+  white-space: pre !important;
+  overflow-wrap: normal !important;
+  word-break: normal !important;
+}
+
+.article-markdown .md-code-block .shiki {
+  min-width: max-content;
+  width: max-content;
+  background-color: var(--shiki-light-bg, #fff) !important;
+  color: var(--shiki-light, #24292e) !important;
+}
+.article-markdown .md-code-block .shiki span {
+  display: inline;
+  color: var(--shiki-light) !important;
+  background-color: var(--shiki-light-bg, transparent) !important;
+}
+.dark .article-markdown .md-code-block .shiki,
+html.dark .article-markdown .md-code-block .shiki {
+  background-color: var(--shiki-dark-bg, #24292e) !important;
+  color: var(--shiki-dark, #e1e4e8) !important;
+}
+.dark .article-markdown .md-code-block .shiki span,
+html.dark .article-markdown .md-code-block .shiki span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg, transparent) !important;
+}
+
+.article-markdown .md-code-block .shiki .line {
+  display: block;
+  min-height: 1.42em;
+  min-width: 100%;
+  width: max-content;
+  padding-left: 3rem;
+  padding-right: 1rem;
+  position: relative;
+}
+.article-markdown .md-code-block .shiki .line::before {
+  content: attr(data-line);
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  display: inline-block;
+  width: 2.25rem;
+  margin-left: -3rem;
+  margin-right: 0.75rem;
+  padding-right: 0.5rem;
+  text-align: right;
+  color: #6b7280;
+  background: var(--shiki-light-bg, #fff);
+  border-right: 1px solid rgba(107, 114, 128, 0.16);
+  opacity: 0.55;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+.dark .article-markdown .md-code-block .shiki .line::before,
+html.dark .article-markdown .md-code-block .shiki .line::before {
+  background: var(--shiki-dark-bg, #24292e);
+  border-right-color: rgba(225, 228, 232, 0.16);
+}
+
+@media (max-width: 640px) {
+  .article-markdown .md-code-block {
+    margin: 1rem 0;
+    border-radius: 0.375rem;
+  }
+
+  .article-markdown .md-pre-header {
+    padding: 0.25rem 0.5rem;
+    gap: 0.375rem;
+  }
+
+  .article-markdown .md-lang-badge,
+  .article-markdown .md-size-badge {
+    font-size: 0.625rem;
+    padding: 0.1875rem 0.375rem;
+  }
+
+  .article-markdown .md-copy-btn {
+    height: 1.5rem;
+    padding: 0 0.375rem;
+    font-size: 0.6875rem;
+    opacity: 1;
+  }
+
+  .article-markdown .md-code-block pre,
+  .article-markdown .md-pre-plain {
+    padding: 0.5rem 0.75rem 0.5rem 0 !important;
+    font-size: 12px !important;
+    line-height: 1.35 !important;
+  }
+
+  .article-markdown .md-code-block .shiki .line {
+    min-height: 1.35em;
+    padding-left: 2.25rem;
+    padding-right: 0.75rem;
+  }
+
+  .article-markdown .md-code-block .shiki .line::before {
+    width: 1.75rem;
+    margin-left: -2.25rem;
+    margin-right: 0.5rem;
+    padding-right: 0.375rem;
+  }
 }
 
 /* ────────────────────────────────────────────────────────────────────── */

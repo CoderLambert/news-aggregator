@@ -3,9 +3,8 @@
  *
  * Why MarkdownContent specifically: NewsDetail's full-article + AI
  * translation panels both render through react-markdown via this file.
- * The summary panel and the chat assistant use markstream-react which
- * already ships its own copy button — we only need parity for the
- * react-markdown path.
+ * News detail, provider comparisons, and chat messages all render through
+ * this component, so copy/highlight behavior is verified here.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
@@ -58,4 +57,43 @@ describe('MarkdownContent — code block copy button', () => {
       expect(screen.getByRole('button', { name: /已复制/ })).toBeInTheDocument()
     })
   })
+
+  it('renders fenced code blocks with Shiki highlighted HTML', async () => {
+    const { container } = render(<MarkdownContent content={'```js\nconst x = 1\n```'} />)
+
+    await waitFor(() => {
+      expect(container.querySelector('.shiki')).toBeInTheDocument()
+      expect(container.querySelector('.shiki span[style*="--shiki-light"]')).toBeInTheDocument()
+      expect(container.querySelector('.shiki .line[data-line="1"]')).toBeInTheDocument()
+    })
+  })
+
+  it('shows the declared fenced code language instead of text', () => {
+    render(<MarkdownContent content={'```python\nprint("hi")\n```'} />)
+    expect(screen.getByText('python')).toBeInTheDocument()
+    expect(screen.queryByText('text')).not.toBeInTheDocument()
+  })
+
+  it('infers Python for unlabeled fenced code when the Markdown omits a language', () => {
+    render(<MarkdownContent content={'```\ndef main():\n    print("hi")\n```'} />)
+    expect(screen.getByText('python')).toBeInTheDocument()
+    expect(screen.queryByText('text')).not.toBeInTheDocument()
+  })
+
+  it('keeps unlabeled plain text code blocks as text', () => {
+    render(<MarkdownContent content={'```\nplain notes without code syntax\n```'} />)
+    expect(screen.getByText('text')).toBeInTheDocument()
+  })
+
+  it('repairs token-per-line code blocks from extracted GitHub README content', async () => {
+    render(<MarkdownContent content={'```\nfrom\ncloakbrowser\nimport\nlaunch\nbrowser\n=\nlaunch\n(\n)\n\npage\n=\nbrowser\n.\nnew_page\n(\n)\n```'} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /复制代码/ }))
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
+    expect(writeText.mock.calls[0][0]).toContain('from cloakbrowser import launch')
+    expect(writeText.mock.calls[0][0]).toContain('browser = launch()')
+    expect(writeText.mock.calls[0][0]).toContain('page = browser.new_page()')
+  })
+
 })

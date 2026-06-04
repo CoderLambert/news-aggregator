@@ -1,12 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Check, Copy } from 'lucide-react'
-
 import { Button } from '@/components/ui/button'
 import MermaidBlock from './MermaidBlock'
+import { highlightCode, normalizeShikiLanguage } from '@/lib/shiki'
 
 const IMG_STYLE = { maxHeight: '480px', objectFit: 'contain' }
+const MAX_HIGHLIGHT_CHARS = 80_000
 
 /**
  * extractCodeText — walks a `<pre>` element's children to recover the raw
@@ -24,6 +25,203 @@ function extractCodeText(node) {
   return ''
 }
 
+function extractLanguage(node) {
+  if (node == null || typeof node === 'boolean') return ''
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const lang = extractLanguage(child)
+      if (lang) return lang
+    }
+    return ''
+  }
+
+  const className = node.props?.className || ''
+  const match = String(className).match(/(?:^|\s)language-([^\s]+)/)
+  return match?.[1] || ''
+}
+
+function isExplodedCodeBlock(code) {
+  const lines = String(code || '').split('\n')
+  const nonEmpty = lines.map((line) => line.trim()).filter(Boolean)
+  if (nonEmpty.length < 8) return false
+
+  const shortLines = nonEmpty.filter((line) => line.length <= 24 && !/\s{2,}/.test(line)).length
+  const codeTokens = nonEmpty.filter((line) => /^(from|import|def|class|await|const|let|var|return|if|for|while|print|[{}()[\].,;:=]|#|\/\/)/.test(line)).length
+  return shortLines / nonEmpty.length >= 0.72 && codeTokens >= 3
+}
+
+function inferExplodedLanguage(lines) {
+  const tokens = lines.map((line) => line.trim()).filter(Boolean)
+  const joined = ` ${tokens.join(' ')} `
+
+  if (/\b(from|def|print|asyncio|True|False|None)\b/.test(joined)) return 'python'
+  if (/\b(const|let|var|await|async|newPage|import)\b/.test(joined) || tokens.includes(';')) return 'javascript'
+  return 'text'
+}
+
+function formatTokenLine(tokens) {
+  let value = tokens.filter(Boolean).join(' ')
+  value = value.replace(/\s+([,;:)\]}.])/g, '$1')
+  value = value.replace(/\s+\(/g, '(')
+  value = value.replace(/([([{.])\s+/g, '$1')
+  value = value.replace(/\s*\.\s*/g, '.')
+  value = value.replace(/\s*([=+*/<>-])\s*/g, ' $1 ')
+  value = value.replace(/\s+,/g, ',')
+  value = value.replace(/,([^\s)\]}])/g, ', $1')
+  value = value.replace(/:([^\s])/g, ': $1')
+  value = value.replace(/\s{2,}/g, ' ')
+  return value.trim()
+}
+
+function splitExplodedLines(code) {
+  return String(code || '').split('\n').map((line) => line.trim()).filter(Boolean)
+}
+
+function repairExplodedPython(code) {
+  const tokens = splitExplodedLines(code)
+  const statements = []
+
+  for (let i = 0; i < tokens.length;) {
+    const token = tokens[i]
+
+    if (token === 'from' && tokens[i + 1] && tokens[i + 2] === 'import' && tokens[i + 3]) {
+      statements.push(formatTokenLine(tokens.slice(i, i + 4)))
+      i += 4
+      continue
+    }
+
+    if (token === 'import' && tokens[i + 1]) {
+      statements.push(formatTokenLine(tokens.slice(i, i + 2)))
+      i += 2
+      continue
+    }
+
+    if (token.startsWith('#')) {
+      statements.push(token)
+      i += 1
+      continue
+    }
+
+    const current = []
+    let depth = 0
+    while (i < tokens.length) {
+      const part = tokens[i]
+      current.push(part)
+      if (part === '(' || part === '[' || part === '{') depth += 1
+      if (part === ')' || part === ']' || part === '}') depth = Math.max(0, depth - 1)
+      i += 1
+
+      if (depth === 0 && part === ')') break
+      if (depth === 0 && i < tokens.length) {
+        const next = tokens[i]
+        const nextAfter = tokens[i + 1]
+        if (['from', 'import', 'def', 'class', 'return', 'async', 'await'].includes(next)) break
+        if (/^[A-Za-z_]\w*$/.test(next) && nextAfter === '=') break
+      }
+    }
+
+    if (current.length) statements.push(formatTokenLine(current))
+  }
+
+  return statements.join('\n')
+}
+
+function repairExplodedJavaScript(code) {
+  const tokens = splitExplodedLines(code)
+  const statements = []
+
+  for (let i = 0; i < tokens.length;) {
+    const current = []
+    let depth = 0
+    while (i < tokens.length) {
+      const part = tokens[i]
+      current.push(part)
+      if (part === '(' || part === '[' || part === '{') depth += 1
+      if (part === ')' || part === ']' || part === '}') depth = Math.max(0, depth - 1)
+      i += 1
+      if (depth === 0 && part === ';') break
+      if (depth === 0 && i < tokens.length && ['import', 'const', 'let', 'var', 'await', 'return'].includes(tokens[i])) break
+    }
+    if (current.length) statements.push(formatTokenLine(current))
+  }
+
+  return statements.join('\n')
+}
+
+function repairExplodedCodeBlock(code) {
+  if (!isExplodedCodeBlock(code)) return code
+
+  const language = inferExplodedLanguage(String(code).split('\n'))
+  if (language === 'python') return repairExplodedPython(code)
+  if (language === 'javascript') return repairExplodedJavaScript(code)
+  return formatTokenLine(splitExplodedLines(code))
+}
+
+function inferCodeLanguage(code) {
+  const value = String(code || '').trim()
+  if (!value) return 'text'
+
+  if ((value.startsWith('{') || value.startsWith('['))) {
+    try {
+      JSON.parse(value)
+      return 'json'
+    } catch {
+      // Continue with other heuristics.
+    }
+  }
+
+  if (/^\s*<(!doctype|html|head|body|div|span|script|style|[a-z][\w:-]*\s|\/[a-z][\w:-]*>)/i.test(value)) {
+    return 'html'
+  }
+
+  if (/\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\b[\s\S]*\b(FROM|INTO|TABLE|WHERE|VALUES)\b/i.test(value)) {
+    return 'sql'
+  }
+
+  if (/^\s*([\w.-]+:\s*[^\n]+\n){2,}/.test(value)) {
+    return 'yaml'
+  }
+
+  if (/^\s*(from\s+[\w.]+\s+import\s+\w+|import\s+[\w.]+|def\s+\w+\s*\(|class\s+\w+[(:]|if\s+__name__\s*==|print\s*\()/m.test(value)) {
+    return 'python'
+  }
+
+  if (/\b(interface|type)\s+\w+\s*[=<{]|:\s*(string|number|boolean|unknown|Record<|Promise<)|as\s+const\b/.test(value)) {
+    return 'typescript'
+  }
+
+  if (/^\s*(import\s+.+\s+from\s+['"]|export\s+|const\s+\w+\s*=|let\s+\w+\s*=|var\s+\w+\s*=|function\s+\w+\s*\(|console\.log\s*\(|[\w.]+\s*=>)/m.test(value)) {
+    return value.includes('</') || /<[A-Z][\w]*[\s>]/.test(value) ? 'jsx' : 'javascript'
+  }
+
+  if (/^\s*(#!\/?(?:usr\/bin\/env\s+)?(?:bash|sh|zsh)|(?:npm|pnpm|yarn|bun|pip|python|node|curl|wget|git|docker|kubectl)\s+)/m.test(value)) {
+    return 'bash'
+  }
+
+  if (/^\s*(package\s+\w+|func\s+\w+\s*\(|import\s+\(|fmt\.Print)/m.test(value)) {
+    return 'go'
+  }
+
+  if (/^\s*(fn\s+\w+\s*\(|let\s+mut\s+|use\s+\w+::|impl\s+\w+)/m.test(value)) {
+    return 'rust'
+  }
+
+  if (/^\s*(public\s+class\s+|class\s+\w+\s*\{|import\s+java\.)/m.test(value)) {
+    return 'java'
+  }
+
+  if (/^\s*[.#]?[\w-]+\s*\{[\s\S]*:[\s\S]*\}/.test(value)) {
+    return 'css'
+  }
+
+  return 'text'
+}
+
+function resolveCodeLanguage(children, code) {
+  const declared = normalizeShikiLanguage(extractLanguage(children))
+  return declared === 'text' ? inferCodeLanguage(code) : declared
+}
+
 /**
  * CodeBlock — replaces the plain <pre> used by react-markdown.
  *
@@ -32,38 +230,80 @@ function extractCodeText(node) {
  * react-markdown only routes fenced blocks through `pre`.
  */
 function CodeBlock({ children }) {
+  const rawCode = extractCodeText(children).replace(/\n$/, '')
+  const code = repairExplodedCodeBlock(rawCode)
+  const language = resolveCodeLanguage(children, code)
+
+  if (language === 'mermaid') {
+    return <MermaidBlock code={code} />
+  }
+
+  return <HighlightedCodeBlock code={code} language={language} />
+}
+
+function HighlightedCodeBlock({ code, language }) {
   const [copied, setCopied] = useState(false)
+  const [highlighted, setHighlighted] = useState({ key: '', html: '' })
+  const highlightKey = `${language}::${code}`
+  const isOversized = code.length > MAX_HIGHLIGHT_CHARS
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function highlight() {
+      try {
+        const html = await highlightCode(code, language)
+        if (!cancelled) setHighlighted({ key: highlightKey, html })
+      } catch {
+        if (!cancelled) setHighlighted({ key: highlightKey, html: '' })
+      }
+    }
+
+    if (code && !isOversized) {
+      highlight()
+    }
+
+    return () => {
+      cancelled = true
+    }
+  }, [code, highlightKey, isOversized, language])
 
   const handleCopy = async () => {
-    const code = extractCodeText(children).replace(/\n$/, '')
     try {
-      // Modern path. Falls back silently if clipboard API is unavailable
-      // (e.g. non-HTTPS context, very old browser).
       await navigator.clipboard?.writeText(code)
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1500)
     } catch {
-      // Swallow — copying is a nice-to-have. We could surface a toast here
-      // if/when the project adopts one.
+      // Copy is optional; keep the reader flow uninterrupted if clipboard fails.
     }
   }
 
+  const hasHighlight = highlighted.key === highlightKey && highlighted.html
+
   return (
-    <div className="relative group my-4">
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={handleCopy}
-        aria-label={copied ? '已复制' : '复制代码'}
-        className="absolute top-2 right-2 h-7 px-2 text-xs bg-white/90 backdrop-blur-sm border-gray-200 text-gray-600 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
-      >
-        {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-        {copied ? '已复制' : '复制'}
-      </Button>
-      <pre className="bg-gray-50 rounded-xl p-4 overflow-x-auto border border-gray-200 font-mono text-[13px] leading-[1.6]">
-        {children}
-      </pre>
+    <div className="md-code-block group relative not-prose">
+      <div className="md-pre-header">
+        <span className="md-lang-badge">{language}</span>
+        {isOversized && <span className="md-size-badge">大代码块</span>}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={handleCopy}
+          aria-label={copied ? '已复制' : '复制代码'}
+          className="md-copy-btn"
+        >
+          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+          {copied ? '已复制' : '复制'}
+        </Button>
+      </div>
+      {hasHighlight && !isOversized ? (
+        <div className="md-shiki-html" dangerouslySetInnerHTML={{ __html: highlighted.html }} />
+      ) : (
+        <pre className="md-pre-plain">
+          <code className={language === 'text' ? undefined : `language-${language}`}>{code}</code>
+        </pre>
+      )}
     </div>
   )
 }
@@ -118,26 +358,9 @@ const MD_COMPONENTS = {
     </ol>
   ),
   li: ({ children }) => <li className="pl-1 break-words">{children}</li>,
-  code: ({ className, children }) => {
-    const isInline = !className
-    const lang = className?.replace(/^language-/, '')
-    const text = String(children).replace(/\n$/, '')
-
-    // Mermaid diagram — render as SVG
-    if (lang === 'mermaid') {
-      return <MermaidBlock code={text} />
-    }
-
-    return isInline ? (
-      <code className="px-1.5 py-0.5 bg-gray-100 text-rose-600 rounded text-[0.85em] font-mono break-all">
-        {children}
-      </code>
-    ) : (
-      <code className={className}>{children}</code>
-    )
-  },
-  // Fenced code blocks come through `pre`. The CodeBlock wrapper adds the
-  // hover-visible copy button while preserving the existing <pre> styling.
+  code: ({ className, children }) => <code className={className}>{children}</code>,
+  // Fenced code blocks come through `pre`. The CodeBlock wrapper adds Shiki
+  // highlighting and the hover-visible copy button.
   pre: CodeBlock,
   table: ({ children }) => (
     <div className="overflow-x-auto my-4 rounded-lg border border-gray-200">
@@ -155,15 +378,15 @@ const MD_COMPONENTS = {
   ),
   hr: () => <hr className="my-6 border-gray-200" />,
   img: ({ src, alt }) => (
-    <figure className="my-6 text-center">
+    <span className="my-6 block text-center">
       <img
         src={src}
         alt={alt || ''}
         className="max-w-full h-auto rounded-lg mx-auto shadow-sm"
         style={IMG_STYLE}
       />
-      {alt && <figcaption className="text-xs text-gray-400 mt-2">{alt}</figcaption>}
-    </figure>
+      {alt && <span className="block text-xs text-gray-400 mt-2">{alt}</span>}
+    </span>
   ),
 }
 

@@ -1,4 +1,4 @@
-"""Translation service with dual-provider support: Volcengine (primary) → DashScope (fallback)."""
+"""Translation service with dual-provider support: DashScope (primary) → Volcengine (fallback)."""
 
 import logging
 import os
@@ -9,13 +9,13 @@ from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
-# ============ Primary Provider: Volcengine ============
-VOLCENGINE_BASE_URL = 'https://ark.cn-beijing.volces.com/api/coding/v3'
-VOLCENGINE_MODEL = 'doubao-seed-2.0-pro'
-
-# ============ Fallback Provider: DashScope ============
+# ============ Primary Provider: DashScope ============
 DASHSCOPE_BASE_URL = 'https://coding.dashscope.aliyuncs.com/v1'
 DASHSCOPE_MODEL = 'kimi-k2.5'
+
+# ============ Fallback Provider: Volcengine ============
+VOLCENGINE_BASE_URL = 'https://ark.cn-beijing.volces.com/api/coding/v3'
+VOLCENGINE_MODEL = 'doubao-seed-2.0-pro'
 
 # ============ Translation Prompt ============
 TRANSLATION_SYSTEM = """你是一位资深的中英双语翻译专家，擅长将英文技术文章翻译成地道、流畅的中文。
@@ -23,7 +23,7 @@ TRANSLATION_SYSTEM = """你是一位资深的中英双语翻译专家，擅长�
 ## 翻译原则：
 1. **准确传达原文含义**，不增删原意
 2. **中文表达自然流畅**，避免逐字直译的机械感
-3. **技术术语**：如果该术语在中文技术社区有通用的英文表达方式（如 API、LLM、RAG、Docker），保持英文原文
+3. **技术术语**：如果该术语在中文技术社区有通用的英文表达方式（如 API、LLM、RAG、Docker、Python、JavaScript、TypeScript、Go、Rust、Java、Node.js、React、Django），保持英文原文，严禁把编程语言名翻译成中文词义（例如 Python 不能翻译为“蟒蛇”）
 4. **人名、品牌名、产品名**：保持原文，首次出现时可在括号内加中文说明
 5. **不添加额外内容**：不写译者注、不加"翻译如下"等前缀
 6. **语气和风格**：保持原文的语气和写作风格
@@ -38,16 +38,42 @@ TRANSLATION_SYSTEM = """你是一位资深的中英双语翻译专家，擅长�
 4. **重点标注**：对关键概念、重要提示使用 **粗体** 标注
 5. **引用格式**：对于原文中的提示、注意事项、重要说明，使用 `> 引用块` 格式
 6. **列表优化**：将并列的内容转为无序列表（`- `），将步骤转为有序列表（`1. ` `2. `）
-7. **代码块**：
-   - 务必保留原始代码，不要翻译代码内容
-   - 所有代码块必须标注语言类型（如 ```python、```bash、```js）
-   - 行内代码用反引号包裹
+7. **代码和标识符保护（最高优先级）**：
+   - Markdown fenced code block（```...```）必须逐字符原样保留，包括 opening fence、语言标识（如 python/bash/js）、缩进、空行、注释、字符串和 closing fence，严禁翻译、改写、格式化或补全其中任何内容
+   - Markdown inline code（`...`）必须逐字符原样保留，严禁翻译其中的 API 名、变量名、命令、路径、包名、错误信息或代码片段
+   - 不要把普通正文里的技术标识符翻译成自然语言词义，例如 Python、Java、Go、Rust、Docker、React、Django、FastAPI、API、CLI、SDK、JSON、YAML 均保持英文
+   - 如果原文代码块没有语言标识，可以保持原样；不要为了“补全语言类型”而重写代码块 fence
 8. **表格**：如果原文有对比数据，请使用 Markdown 表格呈现
 9. **链接**：保留所有原始链接，使用 `[描述](URL)` 格式
 10. **图片**：保留 `![描述](URL)` 格式，不要修改图片链接
 
 ## 输出格式：
-请只返回优化排版后的 Markdown 内容，不要有任何其他文字。"""
+请只返回优化排版后的 Markdown 内容，不要有任何其他文字。
+
+## 重要校验：
+输出前自检：所有 ``` fenced code block 和所有 `inline code` 必须与原文完全一致；若无法确认，宁可保留原文片段，也不要翻译或改写。"""
+
+
+def build_translation_prompt(markdown: str) -> str:
+    """Build a strict Markdown translation prompt.
+
+    This intentionally relies on prompt constraints only: the model must keep
+    protected Markdown/code regions unchanged while translating natural prose.
+    """
+    return f"""请将下面的英文 Markdown 技术文章翻译成中文。严格遵守以下规则：
+
+1. 只翻译自然语言正文、标题、列表文字、表格中的自然语言说明。
+2. 不要翻译、改写或格式化任何 fenced code block：从 opening ``` 到 closing ``` 的全部内容必须逐字符保持原样。
+3. 不要翻译任何反引号包裹的 inline code，例如 `Python`、`pip install`、`model.forward()`、`/api/news/` 必须原样输出。
+4. 编程语言名、框架名、库名、命令、API、协议、文件名、路径、环境变量、错误码保持英文或原始拼写；尤其 Python 绝不能翻译为“蟒蛇”。
+5. 保留所有 Markdown 结构、链接 URL、图片 URL、代码块语言标识和表格结构。
+6. 输出只能是翻译后的 Markdown，不要添加解释、校验说明或额外前后缀。
+
+原文开始：
+<<<MARKDOWN_ARTICLE>>>
+{markdown}
+<<<END_MARKDOWN_ARTICLE>>>
+"""
 
 
 def _get_volcengine_key():
@@ -105,7 +131,7 @@ def _get_dashscope_key():
 def get_openai_client():
     """Get an OpenAI-compatible client.
 
-    Returns: tuple (client, model_name). Prefers Volcengine; falls back to DashScope.
+    Returns: tuple (client, model_name). Prefers DashScope; falls back to Volcengine.
     Kept as a single-result API for backward-compat with callers that unpack 1 value:
     callers should switch to get_clients() for full fallback chain.
     """
@@ -118,21 +144,21 @@ def get_openai_client():
 def get_clients():
     """Return ordered list of (client, model_name) tuples for failover.
 
-    Order: Volcengine (primary) → DashScope (fallback).
+    Order: DashScope (primary) → Volcengine (fallback).
     Skips providers without an API key.
     """
     out = []
-    vk = _get_volcengine_key()
-    if vk:
-        out.append((
-            OpenAI(api_key=vk, base_url=VOLCENGINE_BASE_URL),
-            VOLCENGINE_MODEL,
-        ))
     dk = _get_dashscope_key()
     if dk:
         out.append((
             OpenAI(api_key=dk, base_url=DASHSCOPE_BASE_URL),
             DASHSCOPE_MODEL,
+        ))
+    vk = _get_volcengine_key()
+    if vk:
+        out.append((
+            OpenAI(api_key=vk, base_url=VOLCENGINE_BASE_URL),
+            VOLCENGINE_MODEL,
         ))
     return out
 
@@ -385,7 +411,7 @@ def translate_with_llm(text: str) -> tuple:
     if len(text) > 20000:
         return _translate_chunked(text)
 
-    prompt = f"请将以下 Markdown 文章翻译成中文：\n\n{text}"
+    prompt = build_translation_prompt(text)
     return _call_llm(prompt)
 
 

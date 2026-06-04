@@ -7,6 +7,7 @@ from django.core.management import call_command
 from api.services.article_fetcher import FetchError, FetchResult, fetch_article_markdown
 from api.services.article_fetcher.extractors import extract_markdown_from_html
 from api.services.article_fetcher.providers import (
+    GitHubReadmeProvider,
     HackerNewsAPIProvider,
     ScrapyHTTPProvider,
     ScrapySubprocessProvider,
@@ -191,6 +192,7 @@ def test_default_providers_prioritizes_hackernews_api_before_generic_jina():
     providers = default_providers()
 
     assert isinstance(providers[0], HackerNewsAPIProvider)
+    assert isinstance(providers[1], GitHubReadmeProvider)
 
 
 def test_hackernews_api_provider_extracts_self_post_text_without_comments():
@@ -254,6 +256,47 @@ def test_hackernews_api_provider_skips_external_link_story():
     assert result.provider == 'hackernews_api'
     assert result.error == 'external_hn_story'
     assert result.metadata['external_url'] == 'https://example.com/original-article'
+
+
+def test_github_readme_provider_fetches_raw_markdown_and_preserves_code_lines():
+    markdown = '''# CloakHQ/CloakBrowser
+
+Stealth Chromium article body with enough words to satisfy validation. This README preserves source code formatting and avoids GitHub rendered HTML token splitting.
+
+```python
+from cloakbrowser import launch
+browser = launch()
+page = browser.new_page()
+```
+'''
+
+    class Headers(dict):
+        def get(self, key, default=None):
+            return super().get(key, default)
+
+    class Response:
+        headers = Headers({'content-type': 'text/plain; charset=utf-8'})
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return markdown.encode('utf-8')
+
+    with patch('api.services.article_fetcher.providers.urllib.request.urlopen', return_value=Response()) as urlopen:
+        result = GitHubReadmeProvider(timeout=8).fetch(
+            'https://github.com/CloakHQ/CloakBrowser',
+            expected_title='CloakHQ/CloakBrowser',
+        )
+
+    assert result.ok is True
+    assert result.provider == 'github_readme'
+    assert 'from cloakbrowser import launch' in result.markdown
+    assert 'from\ncloakbrowser\nimport\nlaunch' not in result.markdown
+    assert 'raw.githubusercontent.com/CloakHQ/CloakBrowser/HEAD/README.md' in urlopen.call_args.args[0].full_url
 
 
 def test_fetch_article_url_command_uses_site_rule_min_length_for_short_pages(capsys):

@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react'
-import 'markstream-react/index.css'
 import { useChat } from '../hooks/useChat'
 import { useSuggestedQuestions } from '../hooks/useSuggestedQuestions'
 import ChatBubbleButton from './chat/ChatBubbleButton'

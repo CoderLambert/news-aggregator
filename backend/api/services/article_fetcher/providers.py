@@ -26,6 +26,82 @@ DEFAULT_HEADERS = {
 }
 
 
+class GitHubReadmeProvider:
+    """Fetch repository README as raw Markdown for GitHub repo URLs.
+
+    Extracting GitHub's rendered HTML can split highlighted code into many
+    token lines. Raw README Markdown preserves fenced code blocks exactly.
+    """
+
+    name = 'github_readme'
+
+    def __init__(self, timeout: int = 12):
+        self.timeout = timeout
+
+    def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None) -> FetchResult:
+        repo = _github_repo_path(url)
+        if not repo:
+            return FetchResult(ok=False, provider=self.name, url=url, error='not_github_repo')
+
+        owner, name = repo
+        title = expected_title or f'{owner}/{name}'
+        errors: list[str] = []
+
+        for readme_url in _github_readme_urls(owner, name):
+            try:
+                markdown = self._download(readme_url)
+            except urllib.error.HTTPError as exc:
+                errors.append(f'HTTP {exc.code}: {readme_url}')
+                continue
+            except Exception as exc:
+                errors.append(str(exc))
+                continue
+
+            markdown = clean_content(markdown, url)
+            validation = validate_markdown(
+                markdown,
+                expected_title=expected_title,
+                extracted_title=title,
+                url=url,
+                summary=summary,
+                min_chars=_min_chars_for_url(url),
+            )
+            if not validation.ok:
+                return FetchResult(
+                    ok=False,
+                    provider=self.name,
+                    url=url,
+                    title=title,
+                    markdown=markdown,
+                    quality_score=validation.score,
+                    error='validation_failed:' + ','.join(validation.reasons),
+                    validation_reasons=list(validation.reasons),
+                    content_length=len(markdown),
+                    extractor=self.name,
+                )
+
+            return FetchResult(
+                ok=True,
+                provider=self.name,
+                url=url,
+                title=title,
+                markdown=markdown,
+                quality_score=validation.score,
+                content_length=len(markdown),
+                extractor=self.name,
+            )
+
+        return FetchResult(ok=False, provider=self.name, url=url, title=title, error='; '.join(errors) or 'readme_not_found')
+
+    def _download(self, url: str) -> str:
+        req = urllib.request.Request(url, headers={**DEFAULT_HEADERS, 'Accept': 'text/plain,*/*;q=0.8'})
+        with urllib.request.urlopen(req, timeout=self.timeout, context=ssl.create_default_context()) as resp:
+            raw = resp.read()
+            content_type = resp.headers.get('content-type', '')
+        encoding = _encoding_from_content_type(content_type) or 'utf-8'
+        return raw.decode(encoding, errors='replace')
+
+
 class HackerNewsAPIProvider:
     """Fetch Hacker News self-post text from the official Firebase API.
 
@@ -295,6 +371,31 @@ class ScrapySubprocessProvider:
 
 
 
+def _github_repo_path(url: str) -> tuple[str, str] | None:
+    try:
+        parsed = urlparse(url)
+        if normalize_domain(parsed.netloc) != 'github.com':
+            return None
+        parts = [part for part in parsed.path.split('/') if part]
+        if len(parts) < 2:
+            return None
+        owner, repo = parts[0], parts[1]
+        if owner in {'topics', 'trending', 'marketplace', 'features', 'collections', 'orgs'}:
+            return None
+        if repo.endswith('.git'):
+            repo = repo[:-4]
+        return owner, repo
+    except Exception:
+        return None
+
+
+def _github_readme_urls(owner: str, repo: str) -> list[str]:
+    base = f'https://raw.githubusercontent.com/{owner}/{repo}'
+    names = ['README.md', 'readme.md', 'README.markdown', 'README.mdown']
+    branches = ['HEAD', 'main', 'master']
+    return [f'{base}/{branch}/{name}' for branch in branches for name in names]
+
+
 def _parse_jina_title(text: str) -> str:
     match = re.search(r'^Title:\s*(.+)$', text or '', flags=re.MULTILINE)
     return match.group(1).strip() if match else ''
@@ -329,4 +430,4 @@ def _backend_dir() -> str:
 
 
 def default_providers() -> list:
-    return [HackerNewsAPIProvider(), JinaProvider(), ScrapySubprocessProvider(), ScrapyHTTPProvider()]
+    return [HackerNewsAPIProvider(), GitHubReadmeProvider(), JinaProvider(), ScrapySubprocessProvider(), ScrapyHTTPProvider()]

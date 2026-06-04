@@ -516,7 +516,8 @@ class NewsTranslateFullView(generics.GenericAPIView):
         if len(context) > 40000:
             context = context[:40000]
 
-        prompt = f"请将以下 Markdown 文章翻译成中文：\n\n{context}"
+        from api.services.llm_translator import build_translation_prompt
+        prompt = build_translation_prompt(context)
 
         # ---- Decouple LLM work from HTTP lifecycle --------------------------
         # The actual streaming runs in a background thread (TranslationJob)

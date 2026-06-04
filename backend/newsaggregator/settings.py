@@ -167,3 +167,35 @@ SESSION_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_HTTPONLY = False  # SPA needs to read it for X-CSRFToken header
+
+# Auto-fetch full content daemon settings (override via .env)
+# How often to poll for new pending articles (seconds)
+AUTO_FETCH_INTERVAL = int(_env('AUTO_FETCH_INTERVAL', '300'))
+# Max articles to process per batch
+AUTO_FETCH_BATCH = int(_env('AUTO_FETCH_BATCH', '10'))
+# Seconds to sleep between individual fetch requests (anti-bot throttle)
+AUTO_FETCH_THROTTLE = float(_env('AUTO_FETCH_THROTTLE', '2.0'))
+
+# Logging
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'simple': {
+            'format': '[%(asctime)s] %(levelname)s %(name)s: %(message)s',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'simple',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'django': {'level': 'WARNING', 'handlers': ['console'], 'propagate': False},
+    },
+}

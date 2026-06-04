@@ -1,15 +1,7 @@
 import { useRef, useEffect } from 'react'
 import { RefreshCw } from 'lucide-react'
-import NodeRenderer from 'markstream-react'
+import MarkdownContent from '../news-detail/MarkdownContent'
 import XiaowenMascot from '../mascot/XiaowenMascot'
-
-const CODE_BLOCK_PROPS = { showHeader: true, showCopyButton: true, showCollapseButton: false }
-const CODE_BLOCK_THEMES = {
-  themes: ['vitesse-light'],
-  darkTheme: 'vitesse-light',
-  lightTheme: 'vitesse-light',
-  monacoOptions: { fontSize: 13, wordWrap: 'on', minimap: { enabled: false } },
-}
 
 const DEFAULT_SUGGESTED_QUESTIONS = [
   '帮我用一句话总结这篇文章',
@@ -121,7 +113,7 @@ export default function ChatMessageList({
             {msg.role === 'assistant' ? (
               msg.content ? (
                 <div className="prose prose-sm max-w-none">
-                  <NodeRenderer content={msg.content} codeBlockProps={CODE_BLOCK_PROPS} codeBlockThemes={CODE_BLOCK_THEMES} />
+                  <MarkdownContent content={msg.content} />
                 </div>
               ) : (
                 // Empty assistant message + phase=thinking → bouncing dots

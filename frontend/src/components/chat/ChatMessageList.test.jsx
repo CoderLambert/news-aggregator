@@ -3,12 +3,6 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ChatMessageList from './ChatMessageList'
 
-vi.mock('markstream-react', () => ({
-  default: function NodeRenderer({ content }) {
-    return <div data-testid="md">{content}</div>
-  },
-}))
-
 describe('ChatMessageList', () => {
   it('shows mascot loader while loading-history', () => {
     const { container } = render(
@@ -57,7 +51,7 @@ describe('ChatMessageList', () => {
       { role: 'assistant', content: 'Hello there!' },
     ]
     render(<ChatMessageList messages={messages} phase="streaming" onSuggestionClick={() => {}} />)
-    expect(screen.getByTestId('md')).toHaveTextContent('Hello there!')
+    expect(screen.getByText('Hello there!')).toBeInTheDocument()
   })
 
   describe('refresh suggestions ("换一批")', () => {
