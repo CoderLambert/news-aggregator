@@ -60,6 +60,15 @@ export function useResearch() {
     loadSessions()
   }, [loadSessions])
 
+  // Auto-select most recent session on mount so follow-up messages continue
+  // the conversation instead of creating a new session after page reload.
+  // Sessions are ordered by -updated_at, so [0] is the most recent.
+  useEffect(() => {
+    if (sessions.length > 0 && !activeSessionId && phase === 'idle') {
+      setActiveSessionId(sessions[0].id)
+    }
+  }, [sessions])
+
   // ── Load session messages when switching ──────────────────────────────
 
   useEffect(() => {
