@@ -72,6 +72,15 @@ export default function NewsChatAssistant({ newsId }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [isOpen, isFullscreen, confirmingClear])
 
+  // Lock body scroll when panel is open — prevents the main page
+  // from scrolling when the user swipes inside the panel on mobile.
+  useEffect(() => {
+    if (!isOpen) return
+    const original = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = original }
+  }, [isOpen])
+
   if (!isOpen) {
     return <ChatBubbleButton onOpen={() => setIsOpen(true)} />
   }
