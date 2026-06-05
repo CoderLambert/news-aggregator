@@ -114,6 +114,7 @@ def run_agent_loop(session, user_query: str, on_event: Callable, local_only: boo
         local_only: When True, restrict to local news database only (no web search).
     """
     # In local-only mode, filter out web search tools so the LLM cannot call them
+    logger.info('run_agent_loop: local_only=%s', local_only)
     available_tools = [
         t for t in TOOLS
         if not local_only or t['function']['name'] not in ('search_web', 'fetch_webpage')

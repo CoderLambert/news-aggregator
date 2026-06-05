@@ -41,9 +41,15 @@ export default function ResearchInput({ value, onChange, onSend, isLoading, disa
   const canSend = value.trim() && !isLoading && !disabled
 
   return (
-    <div className="px-3 pt-2 pb-3 bg-white/60 backdrop-blur-xl border-t border-neutral-100/50">
-      <div className={`flex items-end gap-2 bg-neutral-50 rounded-2xl p-1.5 transition-all duration-200
-        ${canSend ? 'ring-2 ring-violet-300/50 bg-white' : ''}`}
+    <div className={`px-3 pt-2 pb-3 border-t transition-colors duration-200
+      ${localOnly
+        ? 'bg-violet-50/60 backdrop-blur-xl border-violet-100/50'
+        : 'bg-white/60 backdrop-blur-xl border-neutral-100/50'
+      }`}
+    >
+      <div className={`flex items-end gap-2 rounded-2xl p-1.5 transition-all duration-200
+        ${localOnly ? 'bg-violet-100/50' : 'bg-neutral-50'}
+        ${canSend ? (localOnly ? 'ring-2 ring-violet-400/60 bg-white' : 'ring-2 ring-violet-300/50 bg-white') : ''}`}
       >
         <textarea
           ref={inputRef}

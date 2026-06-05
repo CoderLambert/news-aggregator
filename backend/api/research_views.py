@@ -166,6 +166,7 @@ def research_create(request):
         return Response({'error': 'query is required'}, status=status.HTTP_400_BAD_REQUEST)
 
     local_only = bool(request.data.get('local_only', False))
+    logger.info('research_create: query=%r, local_only=%s', query[:50], local_only)
 
     # Create session scoped to the authenticated user
     session = ResearchSession.objects.create(
@@ -211,6 +212,7 @@ def research_chat(request, pk):
         return Response({'error': 'query is required'}, status=status.HTTP_400_BAD_REQUEST)
 
     local_only = bool(request.data.get('local_only', False))
+    logger.info('research_chat: query=%r, local_only=%s', query[:50], local_only)
 
     # Check for existing running job
     from .services.research.job_manager import get_research_job, start_or_get_research_job
