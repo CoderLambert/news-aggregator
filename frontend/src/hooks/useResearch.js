@@ -107,7 +107,7 @@ export function useResearch() {
 
   // ── Send a research query ─────────────────────────────────────────────
 
-  async function handleSend(query) {
+  async function handleSend(query, { localOnly = false } = {}) {
     if (!query.trim()) return
 
     // Add user message
@@ -122,10 +122,10 @@ export function useResearch() {
       let stream
 
       if (sessionId) {
-        stream = researchChatStream(sessionId, query.trim())
+        stream = researchChatStream(sessionId, query.trim(), { localOnly })
       } else {
         // Create new session
-        stream = createResearchStream(query.trim())
+        stream = createResearchStream(query.trim(), { localOnly })
       }
 
       for await (const ev of stream) {

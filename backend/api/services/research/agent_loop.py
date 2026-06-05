@@ -102,7 +102,7 @@ RESEARCH_SYSTEM_PROMPT = """\
 """
 
 
-def run_agent_loop(session, user_query: str, on_event: Callable):
+def run_agent_loop(session, user_query: str, on_event: Callable, local_only: bool = False):
     """Run the agent loop for a research query.
 
     Args:
@@ -111,19 +111,40 @@ def run_agent_loop(session, user_query: str, on_event: Callable):
         on_event: Callback ``on_event(event_type, data)`` for each agent event.
             Event types: thinking, tool_call, tool_result, text_delta, complete, error,
             query_decomposed.
+        local_only: When True, restrict to local news database only (no web search).
     """
+    # In local-only mode, filter out web search tools so the LLM cannot call them
+    available_tools = [
+        t for t in TOOLS
+        if not local_only or t['function']['name'] not in ('search_web', 'fetch_webpage')
+    ]
+
     messages = list(session.messages)  # Copy existing history
     messages.append({'role': 'user', 'content': user_query})
 
+    # Build system prompt: inject local-only constraint if needed
+    system_prompt = RESEARCH_SYSTEM_PROMPT
+    if local_only:
+        system_prompt = (
+            RESEARCH_SYSTEM_PROMPT.replace(
+                '## 核心能力',
+                '## 搜索范围限制\n'
+                '你只能使用本地新闻数据库，**绝对不能使用联网搜索 (search_web, fetch_webpage)**。\n'
+                '如果本地新闻库中的信息不足以回答用户问题，明确告知用户「本地新闻库中暂无相关信息」，'
+                '并说明哪些内容无法获取。\n\n'
+                '## 核心能力',
+            )
+        )
+
     # Ensure system prompt is present
     if not messages or messages[0].get('role') != 'system':
-        messages.insert(0, {'role': 'system', 'content': RESEARCH_SYSTEM_PROMPT})
+        messages.insert(0, {'role': 'system', 'content': system_prompt})
 
     for iteration in range(MAX_ITERATIONS):
         on_event('thinking', {'iteration': iteration})
 
         # Call LLM with tools
-        response = _call_llm_with_tools(messages)
+        response = _call_llm_with_tools(messages, tools=available_tools)
         if response is None:
             on_event('error', {'message': '所有 LLM 提供商不可用，请稍后再试'})
             return
@@ -205,12 +226,14 @@ def run_agent_loop(session, user_query: str, on_event: Callable):
     on_event('error', {'message': 'Agent 达到最大迭代次数限制，请尝试简化问题'})
 
 
-def _call_llm_with_tools(messages: list):
+def _call_llm_with_tools(messages: list, tools=None):
     """Call LLM with tool schemas, trying each provider with retry.
 
     Returns the response object or None on total failure.
     Uses non-streaming calls for the tool-selection phase.
     """
+    if tools is None:
+        tools = TOOLS
     MAX_RETRIES = 2
     clients = get_clients()
     if not clients:
@@ -223,7 +246,7 @@ def _call_llm_with_tools(messages: list):
                 response = client.chat.completions.create(
                     model=model,
                     messages=messages,
-                    tools=TOOLS,
+                    tools=tools,
                     tool_choice='auto',
                     temperature=0.3,
                     max_tokens=8000,

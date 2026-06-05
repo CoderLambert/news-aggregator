@@ -17,6 +17,7 @@ export default function ResearchPanel() {
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [input, setInput] = useState('')
+  const [localOnly, setLocalOnly] = useState(false)
   const { user } = useAuth()
 
   const {
@@ -43,7 +44,7 @@ export default function ResearchPanel() {
 
   function handleSendQuery() {
     if (!input.trim() || isLoading) return
-    handleSend(input.trim())
+    handleSend(input.trim(), { localOnly })
     setInput('')
   }
 
@@ -52,7 +53,7 @@ export default function ResearchPanel() {
       setShowAuthModal(true)
       return
     }
-    handleSend(text)
+    handleSend(text, { localOnly: false })  // Suggested questions always use full search
   }
 
   // ESC key to close
@@ -159,6 +160,8 @@ export default function ResearchPanel() {
           onSend={user ? handleSendQuery : () => setShowAuthModal(true)}
           isLoading={isLoading}
           disabled={!user}
+          localOnly={localOnly}
+          onToggleLocalOnly={() => setLocalOnly(f => !f)}
         />
       </div>
 

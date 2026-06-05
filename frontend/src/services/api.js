@@ -180,3 +180,55 @@ export const logoutUser = () =>
 
 export const fetchMe = () =>
   api.get('/auth/me/').then(res => res.data)
+
+// ---- Research Agent --------------------------------------------------------
+
+export const listResearchSessions = (params = {}) =>
+  api.get('/research/sessions/', { params }).then(res => res.data)
+
+export const getResearchSession = (sessionId) =>
+  api.get(`/research/${sessionId}/`).then(res => res.data)
+
+export const deleteResearchSession = (sessionId) =>
+  api.delete(`/research/${sessionId}/`).then(res => res.data)
+
+/**
+ * Create a new research session + start the agent loop — yields structured
+ * SSE events: { type: 'thinking'|'tool_call'|'tool_result'|'text_delta'|'complete'|'error', ... }
+ *
+ *   for await (const ev of createResearchStream('LLM agents')) { ... }
+ *
+ * The session ID is returned in the `Session-ID` response header.
+ */
+export async function* createResearchStream(query, { localOnly = false } = {}) {
+  const res = await streamingFetch('/api/research/', {
+    body: JSON.stringify({ query, local_only: localOnly }),
+  })
+  for await (const ev of iterSSEEvents(res)) {
+    yield ev
+  }
+}
+
+/**
+ * Send a follow-up message to an existing research session — yields SSE events.
+ *
+ *   for await (const ev of researchChatStream(sessionId, 'tell me more')) { ... }
+ */
+export async function* researchChatStream(sessionId, query, { localOnly = false } = {}) {
+  const res = await streamingFetch(`/api/research/${sessionId}/chat/`, {
+    body: JSON.stringify({ query, local_only: localOnly }),
+  })
+  for await (const ev of iterSSEEvents(res)) {
+    yield ev
+  }
+}
+
+/**
+ * Fetch search results for a research session.
+ * @param {string} sessionId - Research session UUID
+ * @param {Object} [params] - Query params: result_type, detail
+ * @param {string} [params.result_type] - Filter by type: news, web, article, webpage, topic
+ * @param {boolean} [params.detail] - Pass true to include full result_data
+ */
+export const getResearchResults = (sessionId, params = {}) =>
+  api.get(`/research/${sessionId}/results/`, { params }).then(res => res.data)
