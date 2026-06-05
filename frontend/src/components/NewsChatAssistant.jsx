@@ -127,7 +127,7 @@ export default function NewsChatAssistant({ newsId }) {
           onClose={() => setIsOpen(false)}
         />
 
-        <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-4 bg-gradient-to-b from-orange-50/30 to-white">
+        <div className="flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4 space-y-4 bg-gradient-to-b from-orange-50/30 to-white">
           <ChatMessageList
             messages={messages}
             phase={phase}

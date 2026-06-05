@@ -121,7 +121,7 @@ export default function ResearchPanel() {
         />
 
         {/* Message area */}
-        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 bg-gradient-to-b from-violet-50/30 via-neutral-50/30 to-white">
+        <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-3 space-y-3 bg-gradient-to-b from-violet-50/30 via-neutral-50/30 to-white">
           {!user ? (
             <div className="flex flex-col items-center justify-center h-full text-center px-6">
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-100 to-orange-50 flex items-center justify-center shadow-lg shadow-violet-100/50 mb-4">
