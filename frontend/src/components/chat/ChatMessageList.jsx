@@ -116,11 +116,16 @@ export default function ChatMessageList({
                   <MarkdownContent content={msg.content} />
                 </div>
               ) : (
-                // Empty assistant message + phase=thinking → bouncing dots
-                <div className="flex items-center gap-1.5 py-1 px-1">
-                  <span className="thinking-dot" />
-                  <span className="thinking-dot" />
-                  <span className="thinking-dot" />
+                // Empty assistant message: show thinking indicator immediately
+                // so the user sees their message was received while waiting for
+                // the first token from the backend.
+                <div className="flex flex-col items-start gap-1 py-0.5">
+                  <div className="flex items-center gap-1.5 px-1">
+                    <span className="thinking-dot" />
+                    <span className="thinking-dot" />
+                    <span className="thinking-dot" />
+                  </div>
+                  <span className="text-xs text-neutral-400 select-none">正在思考…</span>
                 </div>
               )
             ) : (

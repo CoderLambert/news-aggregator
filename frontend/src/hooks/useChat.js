@@ -82,19 +82,24 @@ export function useChat(newsId) {
   async function handleSend() {
     const trimmed = input.trim()
     if (!trimmed || isLoading) return
+    doSend(trimmed)
+  }
 
-    // Clear any pending success-to-idle timer
+  /** Send an explicit text string — bypasses the input state.
+   *  Use when a suggestion click or other caller already has the text
+   *  and wants the UI to update immediately without waiting for a re-render. */
+  async function doSend(text) {
+    if (!text || isLoading) return
     clearTimeout(successTimerRef.current)
 
-    const userMessage = { role: 'user', content: trimmed }
+    const userMessage = { role: 'user', content: text }
     setMessages(prev => [...prev, userMessage, { role: 'assistant', content: '', id: Date.now() }])
-    setInput('')
     setPhase('thinking')
 
     try {
       let accumulated = ''
       let firstChunk = true
-      for await (const chunk of chatStream(newsId, trimmed)) {
+      for await (const chunk of chatStream(newsId, text)) {
         if (firstChunk) {
           setPhase('streaming')
           firstChunk = false
@@ -123,7 +128,7 @@ export function useChat(newsId) {
   return {
     messages, input, setInput,
     isLoading, phase,
-    handleSend,
+    handleSend, doSend,
     confirmingClear, requestClearChat, cancelClear, confirmClear,
   }
 }

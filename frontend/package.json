@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "dev:proxy": "./dev-server.sh start",
+    "dev:stop": "./dev-server.sh stop",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest",

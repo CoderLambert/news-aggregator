@@ -34,7 +34,7 @@ export default function NewsChatAssistant({ newsId }) {
   const hasCelebratedRef = useRef(false)
   const {
     messages, input, setInput, isLoading, phase,
-    handleSend,
+    handleSend, doSend,
     confirmingClear, requestClearChat, cancelClear, confirmClear,
   } = useChat(newsId)
 
@@ -78,11 +78,10 @@ export default function NewsChatAssistant({ newsId }) {
 
   const mood = phaseToMood(phase)
 
-  // Suggested-question click: drop into input then send next tick
+  // Suggested-question click: send directly with the text so the UI updates
+  // immediately — no microtask deferral, no flash of stale content.
   function handleSuggestionClick(text) {
-    setInput(text)
-    // Defer to next microtask so the input state is committed before send reads it
-    Promise.resolve().then(() => handleSend())
+    doSend(text)
   }
 
   return (
