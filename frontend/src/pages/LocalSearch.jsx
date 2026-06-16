@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Search, Loader2, FileText, ExternalLink, Globe, Clock, Star, SlidersHorizontal } from 'lucide-react'
 import { fetchNews } from '../services/api'
+import { Pagination } from '../components/Pagination'
 
 const MODES = [
   { key: 'keyword', label: '关键词' },
@@ -451,51 +452,12 @@ export default function LocalSearch() {
           </div>
 
           {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-2 mt-6">
-              <button
-                type="button"
-                onClick={() => handlePageChange(page - 1)}
-                disabled={page <= 1}
-                className="px-3 py-1.5 rounded-lg text-sm font-medium
-                           bg-white border border-neutral-200 text-neutral-600
-                           hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed
-                           transition-all cursor-pointer"
-              >
-                上一页
-              </button>
-              {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
-                let pageNum
-                if (totalPages <= 7) pageNum = i + 1
-                else if (page <= 4) pageNum = i + 1
-                else if (page >= totalPages - 3) pageNum = totalPages - 6 + i
-                else pageNum = page - 3 + i
-                return (
-                  <button
-                    key={pageNum}
-                    type="button"
-                    onClick={() => handlePageChange(pageNum)}
-                    className={`w-9 h-9 rounded-lg text-sm font-medium transition-all cursor-pointer
-                      ${page === pageNum
-                        ? 'bg-violet-500 text-white shadow-sm'
-                        : 'bg-white border border-neutral-200 text-neutral-600 hover:bg-neutral-50'
-                      }`}
-                  >
-                    {pageNum}
-                  </button>
-                )
-              })}
-              <button
-                type="button"
-                onClick={() => handlePageChange(page + 1)}
-                disabled={page >= totalPages}
-                className="px-3 py-1.5 rounded-lg text-sm font-medium
-                           bg-white border border-neutral-200 text-neutral-600
-                           hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed
-                           transition-all cursor-pointer"
-              >
-                下一页
-              </button>
-            </div>
+            <Pagination
+              currentPage={page}
+              totalPages={totalPages}
+              totalCount={totalCount}
+              onPageChange={handlePageChange}
+            />
           )}
         </>
       )}

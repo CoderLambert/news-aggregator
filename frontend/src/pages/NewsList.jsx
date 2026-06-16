@@ -6,6 +6,7 @@ import SearchBar from '../components/SearchBar'
 import CategoryFilter from '../components/CategoryFilter'
 import SourceFilter from '../components/SourceFilter'
 import LoadingSpinner from '../components/LoadingSpinner'
+import { Pagination } from '../components/Pagination'
 
 const STORAGE_KEY = 'news-aggregator-filters'
 
@@ -143,105 +144,15 @@ export default function NewsList() {
 
       {loading && <LoadingSpinner />}
 
-      {/* Pagination controls */}
+      {/* Pagination */}
       {!loading && totalPages > 1 && (
-        <div className="flex items-center justify-center gap-1 mt-10 mb-6">
-          <button
-            onClick={() => handlePageChange(1)}
-            disabled={page === 1}
-            className="px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors
-                       disabled:opacity-40 disabled:cursor-not-allowed
-                       bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300"
-          >
-            {lang === 'en' ? 'First' : '首页'}
-          </button>
-          <button
-            onClick={() => handlePageChange(page - 1)}
-            disabled={page === 1}
-            className="px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors
-                       disabled:opacity-40 disabled:cursor-not-allowed
-                       bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300"
-          >
-            {lang === 'en' ? 'Prev' : '上一页'}
-          </button>
-
-          {(() => {
-            const pages = []
-            const maxVisible = 7
-            let start = Math.max(1, page - Math.floor(maxVisible / 2))
-            const end = Math.min(totalPages, start + maxVisible - 1)
-            if (end - start + 1 < maxVisible) start = Math.max(1, end - maxVisible + 1)
-
-            if (start > 1) {
-              pages.push(
-                <button
-                  key={1}
-                  onClick={() => handlePageChange(1)}
-                  className="w-9 h-9 rounded-lg text-sm font-medium border transition-colors
-                             bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
-                >
-                  1
-                </button>
-              )
-              if (start > 2) pages.push(<span key="dots1" className="px-1 text-gray-400">…</span>)
-            }
-
-            for (let i = start; i <= end; i++) {
-              pages.push(
-                <button
-                  key={i}
-                  onClick={() => handlePageChange(i)}
-                  className={`w-9 h-9 rounded-lg text-sm font-medium border transition-colors
-                    ${i === page
-                      ? 'bg-gray-900 border-gray-900 text-white shadow-sm'
-                      : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                    }`}
-                >
-                  {i}
-                </button>
-              )
-            }
-
-            if (end < totalPages) {
-              if (end < totalPages - 1) pages.push(<span key="dots2" className="px-1 text-gray-400">…</span>)
-              pages.push(
-                <button
-                  key={totalPages}
-                  onClick={() => handlePageChange(totalPages)}
-                  className="w-9 h-9 rounded-lg text-sm font-medium border transition-colors
-                             bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
-                >
-                  {totalPages}
-                </button>
-              )
-            }
-            return pages
-          })()}
-
-          <button
-            onClick={() => handlePageChange(page + 1)}
-            disabled={page === totalPages}
-            className="px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors
-                       disabled:opacity-40 disabled:cursor-not-allowed
-                       bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300"
-          >
-            {lang === 'en' ? 'Next' : '下一页'}
-          </button>
-          <button
-            onClick={() => handlePageChange(totalPages)}
-            disabled={page === totalPages}
-            className="px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors
-                       disabled:opacity-40 disabled:cursor-not-allowed
-                       bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300"
-          >
-            {lang === 'en' ? 'Last' : '尾页'}
-          </button>
-
-          <span className="ml-3 text-xs text-gray-400">
-            {lang === 'en' ? 'Page' : '第'} {page} / {totalPages} {lang === 'en' ? 'of' : '页'}
-            · {totalCount} {lang === 'en' ? 'items' : '条'}
-          </span>
-        </div>
+        <Pagination
+          currentPage={page}
+          totalPages={totalPages}
+          totalCount={totalCount}
+          onPageChange={handlePageChange}
+          lang={lang}
+        />
       )}
 
       {!loading && news.length > 0 && (
