@@ -734,6 +734,8 @@ class NewsChatView(generics.GenericAPIView):
         web_search = request.data.get('web_search', False)
 
         # Web search via research agent's tool — inject results into context
+        # AND pass them to the frontend as structured metadata
+        web_sources = []
         web_context = ''
         if web_search:
             try:
@@ -741,6 +743,17 @@ class NewsChatView(generics.GenericAPIView):
                 search_result = _tool_search_web(user_question, count=5)
                 results = search_result.get('results', [])
                 if results:
+                    # Structured sources for frontend display
+                    web_sources = [
+                        {
+                            'title': r['title'],
+                            'url': r.get('url', ''),
+                            'snippet': r.get('snippet', '')[:200],
+                            'source': r.get('source', ''),
+                        }
+                        for r in results
+                    ]
+                    # Markdown context for the LLM
                     lines = []
                     for i, r in enumerate(results, 1):
                         lines.append(
@@ -814,6 +827,12 @@ class NewsChatView(generics.GenericAPIView):
         def generate():
             full_response = []
             try:
+                # Prepend web search sources as structured JSON for frontend display
+                if web_sources:
+                    import json as _json
+                    meta = _json.dumps({'type': 'web_search', 'sources': web_sources}, ensure_ascii=False)
+                    yield f"​__META__{meta}__META__\n\n"
+
                 # Use stream_chat which has built-in provider failover
                 for chunk in stream_chat(messages, max_tokens=16000, temperature=0.7):
                     full_response.append(chunk)

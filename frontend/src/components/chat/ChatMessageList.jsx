@@ -1,5 +1,5 @@
-import { useRef, useEffect } from 'react'
-import { RefreshCw, Globe } from 'lucide-react'
+import { useRef, useEffect, useState } from 'react'
+import { RefreshCw, Globe, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
 import MarkdownContent from '../news-detail/MarkdownContent'
 import XiaowenMascot from '../mascot/XiaowenMascot'
 
@@ -133,7 +133,10 @@ export default function ChatMessageList({
             ) : (
               <div className="whitespace-pre-wrap">{msg.content}</div>
             )}
-            {msg.role === 'assistant' && msg.content && msg.web_search && (
+            {msg.role === 'assistant' && msg.content && msg.web_sources && (
+              <WebSources sources={msg.web_sources} />
+            )}
+            {msg.role === 'assistant' && msg.content && msg.web_search && !msg.web_sources && (
               <div className="mt-2 pt-2 border-t border-neutral-100 flex items-center gap-1">
                 <Globe className="w-3 h-3 text-orange-400" />
                 <span className="text-[10px] text-neutral-400">使用了联网搜索</span>
@@ -144,5 +147,60 @@ export default function ChatMessageList({
       ))}
       <div ref={endRef} />
     </>
+  )
+}
+
+/**
+ * Collapsible web search sources panel displayed below assistant messages.
+ */
+function WebSources({ sources }) {
+  const [expanded, setExpanded] = useState(false)
+
+  if (!sources || sources.length === 0) return null
+
+  return (
+    <div className="mt-3 pt-2 border-t border-neutral-100">
+      <button
+        type="button"
+        onClick={() => setExpanded(prev => !prev)}
+        className="flex items-center gap-1.5 text-xs text-neutral-500 hover:text-orange-600 transition-colors select-none cursor-pointer"
+      >
+        <Globe className="w-3.5 h-3.5 text-orange-400" />
+        <span>搜索来源 ({sources.length} 条)</span>
+        {expanded
+          ? <ChevronDown className="w-3 h-3" />
+          : <ChevronRight className="w-3 h-3" />
+        }
+      </button>
+
+      {expanded && (
+        <div className="mt-2 space-y-2">
+          {sources.map((s, i) => (
+            <div
+              key={i}
+              className="p-2 rounded-lg bg-neutral-50 border border-neutral-100 text-xs"
+            >
+              <a
+                href={s.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-start gap-1.5 text-orange-600 hover:text-orange-700 font-medium"
+              >
+                <ExternalLink className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                <span>{s.title}</span>
+              </a>
+              {s.snippet && (
+                <p className="mt-1 text-neutral-500 leading-relaxed line-clamp-2">
+                  {s.snippet}
+                </p>
+              )}
+              <span className="mt-1 inline-block text-[10px] text-neutral-400">
+                {s.source}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }

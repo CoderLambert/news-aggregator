@@ -113,12 +113,34 @@ export function useChat(newsId) {
           setPhase('streaming')
           firstChunk = false
         }
-        accumulated += chunk
-        setMessages(prev => {
-          const next = prev.slice()
-          next[next.length - 1] = { ...next[next.length - 1], content: accumulated }
-          return next
-        })
+
+        // Parse __META__ chunks from the stream
+        let cleanChunk = chunk
+        if (chunk.includes('__META__')) {
+          const metaMatch = chunk.match(/__META__({.*?})__META__/s)
+          if (metaMatch) {
+            try {
+              const meta = JSON.parse(metaMatch[1])
+              if (meta.type === 'web_search' && meta.sources) {
+                setMessages(prev => {
+                  const next = prev.slice()
+                  next[next.length - 1] = { ...next[next.length - 1], web_sources: meta.sources }
+                  return next
+                })
+              }
+            } catch {}
+            cleanChunk = chunk.replace(/__META__.*?__META__/g, '')
+          }
+        }
+
+        if (cleanChunk) {
+          accumulated += cleanChunk
+          setMessages(prev => {
+            const next = prev.slice()
+            next[next.length - 1] = { ...next[next.length - 1], content: accumulated }
+            return next
+          })
+        }
       }
       // Transient success — mascot shows happy mood for 1.5s
       setPhase('success')
