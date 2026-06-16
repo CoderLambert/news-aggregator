@@ -821,8 +821,10 @@ def _duckduckgo_search(query: str, count: int) -> dict:
     results = []
 
     # Try block-level parsing first (more resilient to layout changes)
+    # Use a greedy match to capture the full result block including nested divs
     result_blocks = re.findall(
-        r'<div[^>]+class="result results_links[^"]*"[^>]*>.*?</div>\s*</div>',
+        r'<div[^>]+class="result results_links[^"]*"[^>]*>(.*?)'
+        r'<div class="clear"></div>',
         html, re.DOTALL,
     )
     if result_blocks:
@@ -835,11 +837,17 @@ def _duckduckgo_search(query: str, count: int) -> dict:
                 continue
             url, title = link_match.groups()
 
-            snippet_match = re.search(
+            # Try multiple patterns for snippet — DDG varies by query
+            snippet = ''
+            for pattern in [
                 r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>',
-                block, re.DOTALL,
-            )
-            snippet = snippet_match.group(1) if snippet_match else ''
+                r'<div[^>]+class="result__snippet"[^>]*>(.*?)</div>',
+                r'<span[^>]+class="result__snippet"[^>]*>(.*?)</span>',
+            ]:
+                m = re.search(pattern, block, re.DOTALL)
+                if m:
+                    snippet = m.group(1)
+                    break
 
             # Process URL (DDG redirects)
             if 'uddg=' in url:
@@ -866,7 +874,7 @@ def _duckduckgo_search(query: str, count: int) -> dict:
             re.DOTALL,
         )
         snippet_pattern = re.compile(
-            r'<(?:a|td)[^>]+class="result__snippet"[^>]*>(.*?)</(?:a|td)>',
+            r'<(?:a|div|span|td)[^>]+class="result__snippet"[^>]*>(.*?)</(?:a|div|span|td)>',
             re.DOTALL,
         )
         links = link_pattern.findall(html)
