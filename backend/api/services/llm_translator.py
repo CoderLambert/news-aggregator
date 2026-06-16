@@ -318,10 +318,14 @@ def _call_llm_stream(prompt: str, max_tokens: int = 32000):
     yield from stream_chat(messages, max_tokens)
 
 
-def stream_chat(messages: list, max_tokens: int = 32000, temperature: float = 0.3):
+def stream_chat(messages: list, max_tokens: int = 32000, temperature: float = 0.3, enable_search: bool = False):
     """Generic streaming chat with provider failover + per-provider retry.
 
     Yields chunks of text.  On total failure, yields a single fallback message.
+
+    Args:
+        enable_search: When True, enables DashScope's built-in web search
+            so the model can search the internet in real-time.
     """
     MAX_RETRIES = 2  # per provider
 
@@ -334,13 +338,19 @@ def stream_chat(messages: list, max_tokens: int = 32000, temperature: float = 0.
     for idx, (client, model) in enumerate(clients):
         for attempt in range(1, MAX_RETRIES + 1):
             try:
-                stream = client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    stream=True,
-                )
+                # Build API kwargs — enable_search only meaningful for DashScope
+                kwargs = {
+                    'model': model,
+                    'messages': messages,
+                    'temperature': temperature,
+                    'max_tokens': max_tokens,
+                    'stream': True,
+                }
+                # DashScope coding endpoint supports enable_search
+                if enable_search and 'dashscope' in str(client.base_url).lower():
+                    kwargs['enable_search'] = True
+
+                stream = client.chat.completions.create(**kwargs)
 
                 got_any = False
                 for chunk in stream:
