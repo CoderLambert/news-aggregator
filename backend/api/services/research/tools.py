@@ -21,6 +21,73 @@ logger = logging.getLogger(__name__)
 
 _MAX_RESULT_CHARS = 8000
 
+# Full conversational phrases to strip from queries
+_CN_STOP_PHRASES = [
+    '是什么', '是什么？', '是啥', '有哪些', '有哪', '有什么', '有那些',
+    '怎么了', '怎么样', '什么样', '怎么样？', '如何', '如何？',
+    '怎么', '怎么？', '为什么', '为什么？', '为啥', '为啥？',
+    '什么意思', '什么意思？', '指的是什么', '指的什么',
+    '帮我介绍', '帮我介绍下', '帮我介绍一下',
+    '请介绍', '请介绍一下', '能否介绍', '能否介绍一下',
+    '说说', '说说看', '讲讲', '讲一下', '了解下', '了解一下',
+    '帮我', '帮', '说说',
+    '情况如何', '情况怎样', '情况怎么样', '的情况',
+    '相关信息', '详细信息',
+    '呢', '吗', '吧', '啊', '呀', '哦', '嗯', '哎',
+    '的', '了', '和', '与', '及', '及其',
+    '什么', '啥', '哪些', '哪个', '哪些',
+    '一个', '一些', '一种',
+    '东西',
+]
+
+
+def _extract_search_query(user_question: str) -> tuple:
+    """Extract optimized search keywords from a conversational question.
+
+    Returns:
+        (primary_query, secondary_query) — primary is the best query,
+        secondary is an optional additional query for more coverage.
+    """
+    import re
+
+    # Extract English words (product names, tech terms)
+    en_words = re.findall(r'[A-Za-z][A-Za-z0-9.+#]*(?:[\s/-][A-Za-z0-9.+#]+)*', user_question)
+    en_words = [w for w in en_words if len(w) > 1 or w in ('C', 'R', 'Go', 'AI')]
+
+    # Extract all Chinese text (without English)
+    cn_text = re.sub(r'[A-Za-z0-9.+#/\s]+', '', user_question)
+
+    # Remove stop phrases (longest first)
+    remaining = cn_text
+    for phrase in sorted(_CN_STOP_PHRASES, key=len, reverse=True):
+        remaining = remaining.replace(phrase, '')
+
+    # Clean up
+    remaining = re.sub(r'[？?！!，,。、；；\s]+', ' ', remaining).strip()
+    # Keep only Chinese sequences
+    cn_tokens = re.findall(r'[一-鿿]+', remaining)
+    cn_tokens = [t for t in cn_tokens if len(t) >= 2]
+
+    # Build primary and secondary queries
+    if en_words:
+        primary = ' '.join(en_words)
+        if cn_tokens and len(cn_tokens) <= 3:
+            secondary = ' '.join(cn_tokens) + ' ' + primary
+            return secondary, None
+        return primary, None
+    else:
+        if cn_tokens:
+            cn_tokens.sort(key=len, reverse=True)
+            primary = cn_tokens[0]
+            if len(cn_tokens) > 1 and len(cn_tokens[1]) >= 2:
+                secondary = cn_tokens[1]
+                return primary, secondary
+            return primary, None
+        cleaned = re.sub(r'[？?！!，,。、；；\s]+', ' ', user_question).strip()
+        if cleaned:
+            return cleaned, None
+        return user_question, None
+
 
 # ── OpenAI function-calling tool schemas ────────────────────────────────────
 

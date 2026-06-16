@@ -739,11 +739,25 @@ class NewsChatView(generics.GenericAPIView):
         web_context = ''
         if web_search:
             try:
-                from api.services.research.tools import _tool_search_web
-                search_result = _tool_search_web(user_question, count=5)
-                results = search_result.get('results', [])
-                if results:
-                    # Structured sources for frontend display
+                from api.services.research.tools import _tool_search_web, _extract_search_query
+
+                # Extract optimized search keywords from the user question
+                primary_query, secondary_query = _extract_search_query(user_question)
+
+                # Run multiple searches for better coverage
+                all_results = []
+                seen_urls = set()
+                for query in [primary_query, secondary_query]:
+                    if not query:
+                        continue
+                    sr = _tool_search_web(query, count=5)
+                    for r in sr.get('results', []):
+                        url = r.get('url', '')
+                        if url and url not in seen_urls:
+                            seen_urls.add(url)
+                            all_results.append(r)
+
+                if all_results:
                     web_sources = [
                         {
                             'title': r['title'],
@@ -751,11 +765,10 @@ class NewsChatView(generics.GenericAPIView):
                             'snippet': r.get('snippet', '')[:200],
                             'source': r.get('source', ''),
                         }
-                        for r in results
+                        for r in all_results[:8]
                     ]
-                    # Markdown context for the LLM
                     lines = []
-                    for i, r in enumerate(results, 1):
+                    for i, r in enumerate(web_sources, 1):
                         lines.append(
                             f"{i}. **{r['title']}** ({r.get('source', '')})\n"
                             f"   {r['snippet']}\n"
