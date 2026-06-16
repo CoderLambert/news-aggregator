@@ -32,6 +32,14 @@ TOOLS = [
             "description": (
                 "搜索本地新闻数据库。支持语义搜索、关键词搜索和混合搜索模式。"
                 "返回匹配文章的标题、摘要、来源和日期。"
+                "可选参数: "
+                "- order_by: 结果排序方式, 'relevance'(按语义相关性) 或 'time'(按发布时间最新)。"
+                  "当用户需要查找'最新的'、'最近的'文章时使用 order_by='time'。"
+                "- full_content: 设为 true 时仅返回已抓取完整正文的文章。"
+                  "当用户需要深度阅读、分析或需要完整内容时建议开启。"
+                "- days: 限制为最近 N 天的文章。"
+                "- source_type: 按来源类型过滤 ('news'/'aggregator'/'discussion')。"
+                "- category: 按分类名称精确匹配过滤(如 'AI', '前端', '科技')。"
             ),
             "parameters": {
                 "type": "object",
@@ -60,6 +68,21 @@ TOOLS = [
                     "days": {
                         "type": "integer",
                         "description": "限制最近 N 天内的文章",
+                    },
+                    "order_by": {
+                        "type": "string",
+                        "enum": ["relevance", "time"],
+                        "default": "relevance",
+                        "description": "排序方式: relevance=按语义相关性, time=按发布时间从新到旧",
+                    },
+                    "full_content": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "仅返回已获取完整正文的文章",
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "按分类名称过滤, 例如 'AI', '前端', '科技', '安全' 等",
                     },
                 },
                 "required": ["query"],
@@ -430,10 +453,13 @@ def _generate_query_variations(query: str) -> list[str]:
 
 
 def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
-                      source_type: str | None = None, days: int | None = None) -> dict:
+                      source_type: str | None = None, days: int | None = None,
+                      order_by: str = 'relevance', full_content: bool = False,
+                      category: str | None = None) -> dict:
     """Search the local news database using keyword, semantic, or hybrid mode.
 
     Uses multiple query variations for broader coverage.
+    Supports time filtering, ordering, content filtering, and category filtering.
     """
     from api.models import News
     from api.services.vector_store import VectorStoreService
@@ -449,23 +475,41 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
     if source_type:
         qs = qs.filter(source__source_type=source_type)
 
+    # Full content filter
+    if full_content:
+        qs = qs.filter(full_content_fetch_status='success')
+
+    # Category filter (by name, case-insensitive)
+    if category:
+        qs = qs.filter(category__name__iexact=category)
+
     # Generate query variations for broader coverage
     query_variations = _generate_query_variations(query)
 
     if mode == 'keyword':
+        # Fetch more results initially to allow for re-ordering
+        fetch_limit = limit * 3 if order_by == 'time' else limit
         all_articles = []
         seen_ids = set()
         for q in query_variations:
             filtered = qs.filter(
                 Q(title__icontains=q) | Q(content__icontains=q)
                 | Q(title_zh__icontains=q) | Q(content_zh__icontains=q)
-            )[:limit]
+            )[:fetch_limit]
             for art in filtered:
                 if art.id not in seen_ids:
                     seen_ids.add(art.id)
                     all_articles.append(art)
-            if len(all_articles) >= limit:
+            if len(all_articles) >= fetch_limit:
                 break
+
+        # Re-order by publish time if requested
+        if order_by == 'time' and all_articles:
+            ids = [a.id for a in all_articles]
+            ordered_qs = News.objects.filter(id__in=ids).order_by('-publish_time')
+            id_to_article = {a.id: a for a in all_articles}
+            all_articles = [id_to_article[n.id] for n in ordered_qs if n.id in id_to_article]
+
         articles = _serialize_news_list(all_articles[:limit])
 
     elif mode == 'semantic':
@@ -473,10 +517,12 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
         if vs.count() == 0:
             return {'articles': [], 'total': 0, 'query': query, 'mode': mode,
                     'variations_used': query_variations}
+        # Fetch more results to allow for re-ordering
+        fetch_n = limit * 3 if order_by == 'time' else limit
         all_ids = []
         seen_ids = set()
         for q in query_variations:
-            results = vs.search(q, n=limit)
+            results = vs.search(q, n=fetch_n)
             for nid, _ in results:
                 if nid not in seen_ids:
                     seen_ids.add(nid)
@@ -484,6 +530,12 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
         if not all_ids:
             return {'articles': [], 'total': 0, 'query': query, 'mode': mode,
                     'variations_used': query_variations}
+
+        # Re-order by publish time if requested
+        if order_by == 'time':
+            time_ordered = News.objects.filter(id__in=all_ids).order_by('-publish_time').values_list('id', flat=True)
+            all_ids = list(time_ordered)
+
         news_map = News.objects.select_related('source', 'category').in_bulk(all_ids)
         ordered = [news_map[nid] for nid in all_ids if nid in news_map]
         articles = _serialize_news_list(ordered[:limit])
@@ -514,11 +566,17 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
                         semantic_seen.add(nid)
                         semantic_ids.append(nid)
 
-        fused_ids = _reciprocal_rank_fusion(keyword_ids, semantic_ids)[:limit]
+        fused_ids = _reciprocal_rank_fusion(keyword_ids, semantic_ids)
         if not fused_ids:
             return {'articles': [], 'total': 0, 'query': query, 'mode': mode,
                     'variations_used': query_variations}
 
+        # Re-order by publish time if requested
+        if order_by == 'time':
+            time_ordered = News.objects.filter(id__in=fused_ids).order_by('-publish_time').values_list('id', flat=True)
+            fused_ids = list(time_ordered)
+
+        fused_ids = fused_ids[:limit]
         news_map = News.objects.select_related('source', 'category').in_bulk(fused_ids)
         ordered = [news_map[nid] for nid in fused_ids if nid in news_map]
         articles = _serialize_news_list(ordered)
@@ -528,6 +586,7 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
         'total': len(articles),
         'query': query,
         'mode': mode,
+        'order_by': order_by,
         'variations_used': query_variations,
     }
 

@@ -24,7 +24,7 @@ export default function NewsDetail() {
   const { id } = useParams()
   const { displayMode, t } = useLanguage()
   const { news, setNews, loading } = useNewsDetail(id)
-  const { articleLoading, articleError, handleFetchFullArticle } = useFullArticle(id, setNews)
+  const { articleLoading, articleError, handleFetchFullArticle, cancelFetch } = useFullArticle(id, setNews)
   const {
     translating, translateError, translationProgress,
     showOriginal, setShowOriginal, handleTranslate,
@@ -165,6 +165,7 @@ export default function NewsDetail() {
             news={news}
             articleLoading={articleLoading}
             onFetch={handleFetchFullArticle}
+            onCancel={cancelFetch}
           />
           {articleError && (
             <ErrorBanner message={articleError} onRetry={handleFetchFullArticle} />
@@ -181,6 +182,9 @@ export default function NewsDetail() {
               onToggleOriginal={setShowOriginal}
               onTranslate={() => handleTranslate(!!news.full_content_zh)}
               onRetryTranslate={() => handleTranslate(true)}
+              onRefetch={() => handleFetchFullArticle(true)}
+              refetching={articleLoading}
+              onCancelRefetch={cancelFetch}
             />
           )}
 

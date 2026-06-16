@@ -101,6 +101,13 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+        # WAL mode: concurrent reads + faster writes, critical for mobile/eMMC
+        # storage where fsync latency is high and Scrapy pipeline writes
+        # frequently during crawl.
+        'OPTIONS': {
+            'timeout': 30,
+            'init_command': 'PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-2000; PRAGMA foreign_keys=ON;',
+        },
     }
 }
 

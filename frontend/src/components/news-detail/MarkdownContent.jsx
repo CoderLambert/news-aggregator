@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Check, Copy } from 'lucide-react'
+import { Check, Copy, ExternalLink, Link2, Newspaper } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import MermaidBlock from './MermaidBlock'
 import { highlightCode, normalizeShikiLanguage } from '@/lib/shiki'
@@ -308,6 +308,91 @@ function HighlightedCodeBlock({ code, language }) {
   )
 }
 
+// ── Source list helpers ───────────────────────────────────────────────────
+
+/**
+ * Extract plain text from a react-markdown AST node.
+ */
+function extractSourceText(node) {
+  if (!node) return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(extractSourceText).join('')
+  // Skip link text extraction for the text part — we handle links separately
+  if (node.tagName === 'a' || node.type === 'a') return ''
+  if (node.props?.children !== undefined) return extractSourceText(node.props.children)
+  return ''
+}
+
+/**
+ * Extract { href, label } pairs from <a> tags in a react-markdown AST node.
+ */
+function extractSourceLinks(node) {
+  if (!node) return []
+  if (Array.isArray(node)) return node.flatMap(extractSourceLinks)
+
+  if (node.tagName === 'a' || node.type === 'a') {
+    const href = node.props?.href || ''
+    const label = extractSourceText(node.props?.children) || href
+    return href ? [{ href, label }] : []
+  }
+
+  if (node.props?.children !== undefined) {
+    return extractSourceLinks(node.props.children)
+  }
+  return []
+}
+
+/**
+ * A single source reference rendered as a clickable card.
+ */
+function SourceItem({ index, text, links }) {
+  // Clean up the text: remove leading punctuation/colons from the label
+  const cleanText = text.replace(/^[\s：:—\-–]+/, '').trim()
+  const isLocalLink = links.some(l => l.href.startsWith('/news/'))
+
+  return (
+    <div className="group flex items-start gap-2.5 px-3 py-2 rounded-lg border border-neutral-100
+                    hover:border-violet-200 hover:bg-violet-50/30 transition-all duration-150">
+      {/* Index number */}
+      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-neutral-100 group-hover:bg-violet-100
+                       flex items-center justify-center text-[11px] font-medium text-neutral-400
+                       group-hover:text-violet-500 transition-colors">
+        {index}
+      </span>
+
+      {/* Source text */}
+      {cleanText && (
+        <span className="text-[13px] text-neutral-600 leading-snug pt-0.5">
+          {cleanText}
+        </span>
+      )}
+
+      {/* Link buttons */}
+      <div className="flex items-center gap-1 ml-auto flex-shrink-0">
+        {links.map((link, i) => (
+          <a
+            key={i}
+            href={link.href}
+            target={link.href.startsWith('/') ? undefined : '_blank'}
+            rel={link.href.startsWith('/') ? undefined : 'noopener noreferrer'}
+            title={link.href}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium
+                       border border-neutral-100 text-neutral-500
+                       hover:text-violet-600 hover:border-violet-200 hover:bg-violet-50
+                       transition-all duration-150"
+          >
+            {link.href.startsWith('/news/')
+              ? <Newspaper className="w-3 h-3" />
+              : <ExternalLink className="w-3 h-3" />
+            }
+            {link.href.startsWith('/news/') ? '详情' : '原文'}
+          </a>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 const MD_COMPONENTS = {
   h1: ({ children }) => (
     <h1 className="text-2xl font-bold text-gray-900 mt-8 mb-4 pb-2 border-b border-gray-200 break-words">
@@ -330,16 +415,20 @@ const MD_COMPONENTS = {
       {children}
     </p>
   ),
-  a: ({ href, children }) => (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="text-blue-600 hover:text-blue-800 underline decoration-blue-300 hover:decoration-blue-600 underline-offset-2 transition-colors break-all"
-    >
-      {children}
-    </a>
-  ),
+  a: ({ href, children }) => {
+    const isExternal = href && (href.startsWith('http://') || href.startsWith('https://'))
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-blue-600 hover:text-blue-800 underline decoration-blue-300 hover:decoration-blue-600 underline-offset-2 transition-colors break-all inline-flex items-center gap-0.5"
+      >
+        {children}
+        {isExternal && <ExternalLink className="w-3 h-3 flex-shrink-0 opacity-60" />}
+      </a>
+    )
+  },
   strong: ({ children }) => <strong className="font-semibold text-gray-900">{children}</strong>,
   em: ({ children }) => <em className="text-gray-600 italic">{children}</em>,
   blockquote: ({ children }) => (
@@ -352,11 +441,43 @@ const MD_COMPONENTS = {
       {children}
     </ul>
   ),
-  ol: ({ children }) => (
-    <ol className="list-decimal list-outside ml-5 mb-4 space-y-1.5 text-[15px] leading-[1.8] text-gray-700 break-words">
-      {children}
-    </ol>
-  ),
+  ol: ({ children, node }) => {
+    // Detect if this is a source/reference list by checking if items contain links
+    const isSourceList = node?.children?.some?.(child => {
+      // Walk the react tree looking for <a> elements
+      const walk = (n) => {
+        if (!n) return false
+        if (n.type === 'a' || n.tagName === 'a') return true
+        if (n.props?.children) {
+          if (Array.isArray(n.props.children)) return n.props.children.some(walk)
+          return walk(n.props.children)
+        }
+        return false
+      }
+      return walk(child)
+    })
+
+    if (isSourceList) {
+      return (
+        <div className="my-4 space-y-2">
+          {node?.children?.map?.((child, i) => {
+            const text = extractSourceText(child)
+            const links = extractSourceLinks(child)
+            if (!text && links.length === 0) return null
+            return (
+              <SourceItem key={i} index={i + 1} text={text} links={links} />
+            )
+          })}
+        </div>
+      )
+    }
+
+    return (
+      <ol className="list-decimal list-outside ml-5 mb-4 space-y-1.5 text-[15px] leading-[1.8] text-gray-700 break-words">
+        {children}
+      </ol>
+    )
+  },
   li: ({ children }) => <li className="pl-1 break-words">{children}</li>,
   code: ({ className, children }) => <code className={className}>{children}</code>,
   // Fenced code blocks come through `pre`. The CodeBlock wrapper adds Shiki

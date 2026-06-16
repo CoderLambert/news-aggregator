@@ -172,7 +172,13 @@ def _img_to_markdown(img: Tag, base_url: str) -> str:
 
 
 def _escape_md(text: str) -> str:
-    return text.replace('\u00a0', ' ').strip()
+    # Replace non-breaking spaces with regular spaces
+    text = text.replace('\u00a0', ' ')
+    # Strip any stray HTML tags that leaked through as literal text.
+    # This can happen when the source HTML contains escaped entities
+    # like &lt;div&gt; which BeautifulSoup renders as literal '<div>' text.
+    text = re.sub(r'<[^>]+>', '', text)
+    return text.strip()
 
 
 def _node_to_markdown(node: Tag | NavigableString, base_url: str, depth: int = 0) -> str:

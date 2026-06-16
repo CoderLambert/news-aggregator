@@ -28,13 +28,13 @@ export default function NewsList() {
   const [sources, setSources] = useState([])
   const [loading, setLoading] = useState(false)
   const [page, setPage] = useState(1)
-  const [hasMore, setHasMore] = useState(true)
+  const [totalCount, setTotalCount] = useState(0)
   const [search, setSearch] = useState(saved.search || '')
   const [searchMode, setSearchMode] = useState(saved.searchMode || 'hybrid')
   const [category, setCategory] = useState(saved.categories || [])
   const [source, setSource] = useState(saved.sources || [])
-  const observer = useRef()
-  const loadingRef = useRef(false)
+
+  const PAGE_SIZE = 20
 
   // Persist filters to localStorage on every change
   useEffect(() => {
@@ -51,22 +51,12 @@ export default function NewsList() {
     fetchSources().then(data => setSources(data.results || data))
   }, [])
 
-  // Unified loader: handles BOTH "reset" (page 1, replace) and "append" (next
-  // page). All state mutations happen inside the async IIFE so they cross a
-  // microtask boundary — keeps react-hooks/set-state-in-effect happy when
-  // this is invoked from an effect.
-  const loadNews = useCallback((pageNum, reset = false) => {
-    if (loadingRef.current) return
-    loadingRef.current = true
+  // Unified loader — resets list on filter change, replaces on page change.
+  const loadNews = useCallback((pageNum) => {
+    setLoading(true)
     return (async () => {
-      setLoading(true)
-      if (reset) {
-        // Reset paging immediately so the IntersectionObserver doesn't fire
-        // for stale results during the in-flight request.
-        setHasMore(true)
-      }
       try {
-        const params = { page: pageNum, page_size: 20 }
+        const params = { page: pageNum, page_size: PAGE_SIZE }
         if (search) {
           params.search = search
           params.mode = searchMode
@@ -75,39 +65,30 @@ export default function NewsList() {
         if (source.length > 0) params.source = source.join(',')
         const data = await fetchNews(params)
         const results = data.results || data
-        setNews(prev => reset ? results : [...prev, ...results])
-        setHasMore(!!data.next)
+        setNews(results)
+        setTotalCount(data.count || 0)
         setPage(pageNum)
       } catch (err) {
         console.error('Failed to load news:', err)
       } finally {
         setLoading(false)
-        loadingRef.current = false
       }
     })()
   }, [search, searchMode, category, source])
 
-  // Single effect for "filters or language changed → reload from page 1".
-  // Previously this was split across two effects, both with synchronous
-  // setState calls (setNews([]) / setPage(1) / setHasMore(true)). All of
-  // that is now handled inside loadNews(1, true).
+  // Filters or language changed → reload from page 1
   useEffect(() => {
-    loadNews(1, true)
+    loadNews(1)
   }, [search, searchMode, category, source, lang, loadNews])
 
-  const lastRef = useCallback(
-    node => {
-      if (loadingRef.current || !hasMore) return
-      if (observer.current) observer.current.disconnect()
-      observer.current = new IntersectionObserver(entries => {
-        if (entries[0].isIntersecting) {
-          loadNews(page + 1)
-        }
-      })
-      if (node) observer.current.observe(node)
-    },
-    [hasMore, page, loadNews]
-  )
+  function handlePageChange(newPage) {
+    if (newPage < 1 || newPage > Math.ceil(totalCount / PAGE_SIZE)) return
+    loadNews(newPage)
+    // Scroll to top so user sees the new page
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE)
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6">
@@ -153,18 +134,119 @@ export default function NewsList() {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {news.map((item, i) => (
-          <div key={item.id} ref={i === news.length - 1 ? lastRef : null}>
-            <NewsCard news={item} onRemoved={(id) => setNews(prev => prev.filter(n => n.id !== id))} />
+        {news.map((item) => (
+          <div key={item.id}>
+            <NewsCard news={item} onRemoved={() => loadNews(page)} />
           </div>
         ))}
       </div>
 
       {loading && <LoadingSpinner />}
 
-      {!hasMore && news.length > 0 && (
-        <p className="text-center text-sm text-gray-400 py-8">
-          {lang === 'en' ? 'No more results' : '没有更多了'}
+      {/* Pagination controls */}
+      {!loading && totalPages > 1 && (
+        <div className="flex items-center justify-center gap-1 mt-10 mb-6">
+          <button
+            onClick={() => handlePageChange(1)}
+            disabled={page === 1}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors
+                       disabled:opacity-40 disabled:cursor-not-allowed
+                       bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300"
+          >
+            {lang === 'en' ? 'First' : '首页'}
+          </button>
+          <button
+            onClick={() => handlePageChange(page - 1)}
+            disabled={page === 1}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors
+                       disabled:opacity-40 disabled:cursor-not-allowed
+                       bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300"
+          >
+            {lang === 'en' ? 'Prev' : '上一页'}
+          </button>
+
+          {(() => {
+            const pages = []
+            const maxVisible = 7
+            let start = Math.max(1, page - Math.floor(maxVisible / 2))
+            const end = Math.min(totalPages, start + maxVisible - 1)
+            if (end - start + 1 < maxVisible) start = Math.max(1, end - maxVisible + 1)
+
+            if (start > 1) {
+              pages.push(
+                <button
+                  key={1}
+                  onClick={() => handlePageChange(1)}
+                  className="w-9 h-9 rounded-lg text-sm font-medium border transition-colors
+                             bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+                >
+                  1
+                </button>
+              )
+              if (start > 2) pages.push(<span key="dots1" className="px-1 text-gray-400">…</span>)
+            }
+
+            for (let i = start; i <= end; i++) {
+              pages.push(
+                <button
+                  key={i}
+                  onClick={() => handlePageChange(i)}
+                  className={`w-9 h-9 rounded-lg text-sm font-medium border transition-colors
+                    ${i === page
+                      ? 'bg-gray-900 border-gray-900 text-white shadow-sm'
+                      : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                    }`}
+                >
+                  {i}
+                </button>
+              )
+            }
+
+            if (end < totalPages) {
+              if (end < totalPages - 1) pages.push(<span key="dots2" className="px-1 text-gray-400">…</span>)
+              pages.push(
+                <button
+                  key={totalPages}
+                  onClick={() => handlePageChange(totalPages)}
+                  className="w-9 h-9 rounded-lg text-sm font-medium border transition-colors
+                             bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+                >
+                  {totalPages}
+                </button>
+              )
+            }
+            return pages
+          })()}
+
+          <button
+            onClick={() => handlePageChange(page + 1)}
+            disabled={page === totalPages}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors
+                       disabled:opacity-40 disabled:cursor-not-allowed
+                       bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300"
+          >
+            {lang === 'en' ? 'Next' : '下一页'}
+          </button>
+          <button
+            onClick={() => handlePageChange(totalPages)}
+            disabled={page === totalPages}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors
+                       disabled:opacity-40 disabled:cursor-not-allowed
+                       bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300"
+          >
+            {lang === 'en' ? 'Last' : '尾页'}
+          </button>
+
+          <span className="ml-3 text-xs text-gray-400">
+            {lang === 'en' ? 'Page' : '第'} {page} / {totalPages} {lang === 'en' ? 'of' : '页'}
+            · {totalCount} {lang === 'en' ? 'items' : '条'}
+          </span>
+        </div>
+      )}
+
+      {!loading && news.length > 0 && (
+        <p className="text-center text-sm text-gray-400 py-4">
+          {lang === 'en' ? `Showing page ${page} of ${totalPages}` : `共 ${totalCount} 条，第 ${page}/${totalPages} 页`}
         </p>
       )}
     </div>

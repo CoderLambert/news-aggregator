@@ -9,6 +9,7 @@ import { VOICES, RATES, SCOPES } from './constants/tts'
 import Header from './components/Header'
 import AppErrorBoundary from './components/AppErrorBoundary'
 import LoadingSpinner from './components/LoadingSpinner'
+import ResearchPanel from './components/research/ResearchPanel'
 import { Headphones, Play, Pause, Square, Loader2, Gauge, ChevronUp, FileText } from 'lucide-react'
 
 // Route-level code splitting — NewsDetail (Markdown rendering + chat) is
@@ -17,6 +18,7 @@ const NewsList = lazy(() => import('./pages/NewsList'))
 const NewsDetail = lazy(() => import('./pages/NewsDetail'))
 const FavoritesPage = lazy(() => import('./pages/FavoritesPage'))
 const ProviderComparisons = lazy(() => import('./pages/ProviderComparisons'))
+const LocalSearch = lazy(() => import('./pages/LocalSearch'))
 // Design QA route — preview the Xiaowen mascot in all moods.
 const MascotPreview = lazy(() => import('./components/mascot/MascotPreview'))
 
@@ -33,6 +35,7 @@ export default function App() {
                   <Suspense fallback={<LoadingSpinner />}>
                   <Routes>
                     <Route path="/" element={<NewsList />} />
+                    <Route path="/search" element={<LocalSearch />} />
                     <Route path="/news/:id" element={<NewsDetail />} />
                     <Route path="/favorites" element={<FavoritesPage />} />
                     <Route path="/provider-comparisons" element={<ProviderComparisons />} />
@@ -42,6 +45,7 @@ export default function App() {
                 </AppErrorBoundary>
               </main>
               <Footer />
+              <ResearchPanel />
               <GlobalSpeechPlayer />
             </div>
           </BrowserRouter>

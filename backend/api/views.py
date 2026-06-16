@@ -100,10 +100,22 @@ class NewsFilter(django_filters.FilterSet):
     category = CommaSeparatedIntegerFilter(field_name='category', lookup_expr='in')
     source = CommaSeparatedIntegerFilter(field_name='source', lookup_expr='in')
     source__source_type = django_filters.CharFilter(field_name='source__source_type')
+    full_content = django_filters.BooleanFilter(
+        method='filter_full_content',
+    )
+    publish_time_after = django_filters.IsoDateTimeFilter(
+        field_name='publish_time',
+        lookup_expr='gte',
+    )
 
     class Meta:
         model = News
         fields = ['category', 'source', 'source__source_type']
+
+    def filter_full_content(self, queryset, name, value):
+        if value:
+            return queryset.filter(full_content_fetch_status='success')
+        return queryset
 
 
 class StandardPagination(PageNumberPagination):
@@ -148,6 +160,11 @@ class NewsListView(generics.ListAPIView):
         mode = request.query_params.get('mode', 'keyword').strip()
 
         if not search_query or mode == 'keyword':
+            # Wire `order_by=time` into DRF's ordering param for keyword mode
+            order_by = request.query_params.get('order_by', '').strip()
+            if order_by == 'time' and 'ordering' not in request.query_params:
+                request.query_params = request.query_params.copy()
+                request.query_params['ordering'] = '-publish_time'
             return super().list(request, *args, **kwargs)
 
         if mode == 'semantic':
@@ -155,6 +172,36 @@ class NewsListView(generics.ListAPIView):
 
         # mode == 'hybrid'
         return self._hybrid_search(request, search_query)
+
+    def _apply_filters(self, qs, request):
+        """Apply new filter params to the base queryset before search."""
+        full_content = request.query_params.get('full_content', '').strip()
+        if full_content == 'true':
+            qs = qs.filter(full_content_fetch_status='success')
+
+        publish_after = request.query_params.get('publish_time_after', '').strip()
+        if publish_after:
+            from datetime import datetime
+            try:
+                # Support both '2026-06-01' and ISO format
+                dt = datetime.fromisoformat(publish_after.replace('Z', '+00:00'))
+                if dt.tzinfo is None:
+                    from django.utils.timezone import make_aware
+                    dt = make_aware(dt)
+                qs = qs.filter(publish_time__gte=dt)
+            except (ValueError, TypeError):
+                pass
+
+        return qs
+
+    def _reorder_results(self, news_ids, order_by):
+        """Re-order result IDs if order_by=time, else keep original order."""
+        if order_by != 'time' or not news_ids:
+            return news_ids
+
+        # Fetch articles ordered by publish_time, preserving relevance subset
+        time_ordered = News.objects.filter(id__in=news_ids).order_by('-publish_time').values_list('id', flat=True)
+        return list(time_ordered)
 
     def _semantic_search(self, request, query):
         from .services.vector_store import VectorStoreService
@@ -167,17 +214,34 @@ class NewsListView(generics.ListAPIView):
         if vs.count() == 0:
             return super().list(request, *[], **{})
 
+        order_by = request.query_params.get('order_by', 'relevance').strip()
+
         page_size = int(request.query_params.get('page_size', 20))
         page = int(request.query_params.get('page', 1))
         offset = (page - 1) * page_size
-        n_results = offset + page_size
 
-        results = vs.search(query, n=n_results)
+        # Fetch enough results to cover any requested page (cap at 1000)
+        fetch_n = min(1000, max(200, page_size * 50))
+
+        results = vs.search(query, n=fetch_n)
         if not results:
             return self._empty_response(request)
 
         news_ids = [r[0] for r in results]
-        total = len(news_ids)
+
+        # Apply filters (full_content, publish_time_after) to the ID list
+        if request.query_params.get('full_content') == 'true' or request.query_params.get('publish_time_after'):
+            base_qs = self._apply_filters(News.objects.all(), request)
+            allowed = set(base_qs.filter(id__in=news_ids).values_list('id', flat=True))
+            news_ids = [nid for nid in news_ids if nid in allowed]
+
+        # Re-order by time if requested
+        if order_by == 'time' and news_ids:
+            news_ids = list(News.objects.filter(id__in=news_ids).order_by('-publish_time').values_list('id', flat=True))
+
+        # Use ORM count() for the true total — the ID list may be capped by fetch_n
+        # but the actual DB total reflects how many articles really match.
+        total = News.objects.filter(id__in=news_ids).count()
         page_ids = news_ids[offset:offset + page_size]
 
         if not page_ids:
@@ -200,25 +264,49 @@ class NewsListView(generics.ListAPIView):
     def _hybrid_search(self, request, query):
         from .services.vector_store import VectorStoreService
 
+        order_by = request.query_params.get('order_by', 'relevance').strip()
+
+        # Apply pre-search filters to base queryset
+        base_qs = self._apply_filters(self.filter_queryset(self.get_queryset()), request)
+
+        # When ordering by time, fetch more results for a better time-ordered pool
+        if order_by == 'time':
+            keyword_limit = 300
+            semantic_n = 500
+        else:
+            keyword_limit = 100
+            semantic_n = 300
+
         # Keyword search
-        qs = self.filter_queryset(self.get_queryset())
-        keyword_results = qs.filter(
+        keyword_results = base_qs.filter(
             Q(title__icontains=query) | Q(content__icontains=query)
-        )[:100]
+        )[:keyword_limit]
         keyword_ids = [n.id for n in keyword_results]
 
         # Semantic search
         vs = VectorStoreService()
         semantic_ids = []
         if vs.count() > 0:
-            results = vs.search(query, n=100)
-            semantic_ids = [r[0] for r in results]
+            results = vs.search(query, n=semantic_n)
+            vs_ids = [r[0] for r in results]
+            # Apply filters to the vector store results
+            if request.query_params.get('full_content') == 'true' or request.query_params.get('publish_time_after'):
+                base_qs_filter = self._apply_filters(News.objects.all(), request)
+                allowed = set(base_qs_filter.filter(id__in=vs_ids).values_list('id', flat=True))
+                semantic_ids = [nid for nid in vs_ids if nid in allowed]
+            else:
+                semantic_ids = vs_ids
 
         # RRF fusion
         fused_ids = reciprocal_rank_fusion(keyword_ids, semantic_ids)
 
         if not fused_ids:
             return self._empty_response(request)
+
+        # Re-order by time if requested (before category/source filter)
+        if order_by == 'time':
+            time_ordered = News.objects.filter(id__in=fused_ids).order_by('-publish_time').values_list('id', flat=True)
+            fused_ids = list(time_ordered)
 
         # Apply category/source filters to fused results
         category = request.query_params.get('category')
@@ -234,7 +322,7 @@ class NewsListView(generics.ListAPIView):
             allowed_ids = set(filter_qs.values_list('id', flat=True))
             fused_ids = [fid for fid in fused_ids if fid in allowed_ids]
 
-        total = len(fused_ids)
+        total = News.objects.filter(id__in=fused_ids).count()
         page_size = int(request.query_params.get('page_size', 20))
         page = int(request.query_params.get('page', 1))
         offset = (page - 1) * page_size
@@ -372,8 +460,10 @@ class NewsFetchFullView(generics.GenericAPIView):
         logger = logging.getLogger(__name__)
         news = self.get_object()
 
-        # If already has full content, return cached version
-        if news.full_content:
+        force = request.data.get('force', False)
+
+        # If already has full content and not forcing, return cached version
+        if news.full_content and not force:
             serializer = self.get_serializer(news)
             return Response(serializer.data)
 

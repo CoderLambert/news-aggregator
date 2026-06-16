@@ -1,4 +1,5 @@
-import { Languages, Loader2, CheckCircle2 } from 'lucide-react'
+import { useState } from 'react'
+import { Languages, Loader2, CheckCircle2, Copy, Check, RefreshCw, XCircle } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -12,6 +13,7 @@ import ErrorBanner from './ErrorBanner'
 export default function FullContentSection({
   news, translating, translateError, translationProgress,
   showOriginal, onToggleOriginal, onTranslate, onRetryTranslate,
+  onRefetch, refetching, onCancelRefetch,
 }) {
   return (
     <div className="mb-8">
@@ -22,6 +24,9 @@ export default function FullContentSection({
         showOriginal={showOriginal}
         onToggleOriginal={onToggleOriginal}
         onTranslate={onTranslate}
+        onRefetch={onRefetch}
+        refetching={refetching}
+        onCancelRefetch={onCancelRefetch}
       />
 
       {translating && <TranslationProgressUI progress={translationProgress} />}
@@ -39,7 +44,18 @@ export default function FullContentSection({
 
 /* ── Sub-components (private to FullContentSection) ────────────────────── */
 
-function Toolbar({ news, translating, translateError, showOriginal, onToggleOriginal, onTranslate }) {
+function Toolbar({ news, translating, translateError, showOriginal, onToggleOriginal, onTranslate, onRefetch, refetching, onCancelRefetch }) {
+  const [copied, setCopied] = useState(false)
+
+  function handleCopy() {
+    const content = showOriginal ? news.full_content : (news.full_content_zh || news.full_content)
+    if (!content) return
+    navigator.clipboard.writeText(content).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+
   return (
     <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
       {/* Left: status badges */}
@@ -58,6 +74,8 @@ function Toolbar({ news, translating, translateError, showOriginal, onToggleOrig
 
       {/* Right: action controls */}
       <div className="flex items-center gap-2">
+        <CopyButton copied={copied} onCopy={handleCopy} />
+        <RefetchButton refetching={refetching} onClick={onRefetch} onCancel={onCancelRefetch} />
         {news.full_content_zh && (
           <LangToggle showOriginal={showOriginal} onToggle={onToggleOriginal} />
         )}
@@ -100,6 +118,62 @@ function TranslateButton({ hasTranslation, onClick }) {
       <Languages className="size-3" />
       {hasTranslation ? '重新翻译' : '翻译为中文'}
     </Button>
+  )
+}
+
+function RefetchButton({ refetching, onClick, onCancel }) {
+  if (refetching) {
+    return (
+      <button
+        type="button"
+        onClick={onCancel}
+        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium
+                   transition-all border cursor-pointer
+                   bg-amber-50 border-amber-200 text-amber-600 hover:bg-amber-100"
+      >
+        <XCircle className="w-3 h-3" />
+        取消
+      </button>
+    )
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium
+                   transition-all border cursor-pointer
+                   bg-white border-neutral-200 text-neutral-500 hover:border-amber-200 hover:text-amber-600"
+    >
+      <RefreshCw className="w-3 h-3" />
+      重新获取原文
+    </button>
+  )
+}
+
+function CopyButton({ copied, onCopy }) {
+  return (
+    <button
+      type="button"
+      onClick={onCopy}
+      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium
+                   transition-all border cursor-pointer
+                   ${copied
+                     ? 'bg-emerald-50 border-emerald-200 text-emerald-600'
+                     : 'bg-white border-neutral-200 text-neutral-500 hover:border-violet-200 hover:text-violet-600'
+                   }`}
+    >
+      {copied ? (
+        <>
+          <Check className="w-3 h-3" />
+          已复制
+        </>
+      ) : (
+        <>
+          <Copy className="w-3 h-3" />
+          复制全文
+        </>
+      )}
+    </button>
   )
 }
 

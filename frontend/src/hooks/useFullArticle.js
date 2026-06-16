@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { fetchFullArticle } from '../services/api'
 
 const FULL_CONTENT_FETCH_FIELDS = [
@@ -19,23 +19,42 @@ function pickFetchMetadata(data = {}) {
 
 /**
  * Trigger "fetch full article" via Jina Reader, merging response into news state.
+ * Supports abort via AbortController so the user can cancel a stuck fetch.
  */
 export function useFullArticle(id, setNews) {
   const [articleLoading, setArticleLoading] = useState(false)
   const [articleError, setArticleError] = useState('')
+  const abortRef = useRef(null)
 
-  async function handleFetchFullArticle() {
+  async function handleFetchFullArticle(force = false) {
+    // Abort any in-flight request first
+    if (abortRef.current) {
+      abortRef.current.abort()
+      abortRef.current = null
+      setArticleLoading(false)
+      return
+    }
+
+    const controller = new AbortController()
+    abortRef.current = controller
+
     setArticleLoading(true)
     setArticleError('')
     try {
-      const data = await fetchFullArticle(id)
+      const data = await fetchFullArticle(id, force, controller.signal)
       setNews(prev => ({
         ...prev,
         full_content: data.full_content,
         full_content_fetched_at: data.full_content_fetched_at,
+        // Invalidate translation when re-fetching — the content changed.
+        ...(force ? { full_content_zh: '', full_content_zh_fetched_at: null } : {}),
         ...pickFetchMetadata(data),
       }))
     } catch (err) {
+      if (err.name === 'AbortError' || err.name === 'CanceledError') {
+        // User cancelled — treat as non-error
+        return
+      }
       const responseData = err.response?.data || {}
       const metadata = pickFetchMetadata(responseData)
       if (Object.keys(metadata).length > 0) {
@@ -47,9 +66,18 @@ export function useFullArticle(id, setNews) {
       const msg = responseData.error || err.message || '获取失败'
       setArticleError(msg)
     } finally {
+      abortRef.current = null
       setArticleLoading(false)
     }
   }
 
-  return { articleLoading, articleError, handleFetchFullArticle }
+  const cancelFetch = useCallback(() => {
+    if (abortRef.current) {
+      abortRef.current.abort()
+      abortRef.current = null
+      setArticleLoading(false)
+    }
+  }, [])
+
+  return { articleLoading, articleError, handleFetchFullArticle, cancelFetch }
 }

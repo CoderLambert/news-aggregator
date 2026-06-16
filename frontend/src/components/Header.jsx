@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { Heart, LogOut, Menu, X, Settings, Languages, Type, AlignLeft, GitCompareArrows } from 'lucide-react'
+import { Heart, LogOut, Menu, X, Settings, Languages, Type, AlignLeft, GitCompareArrows, Search } from 'lucide-react'
 import { useLanguage } from '../context/useLanguage'
 import { useAuth } from '../context/AuthContext'
 import AuthModal from './AuthModal'
@@ -50,6 +50,15 @@ export default function Header() {
 
           {/* 右侧操作区 */}
           <div className="flex items-center gap-2">
+            {/* 本地搜索 */}
+            <Link
+              to="/search"
+              className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 active:bg-gray-200 transition-colors"
+              aria-label="本地搜索"
+            >
+              <Search className="w-4.5 h-4.5 text-gray-500" />
+            </Link>
+
             {/* 显示模式快捷切换 */}
             <button
               onClick={() => {
@@ -108,6 +117,16 @@ export default function Header() {
             >
               <Heart className="w-4 h-4 text-pink-400" />
               我的收藏
+            </Link>
+
+            {/* 本地搜索 */}
+            <Link
+              to="/search"
+              onClick={() => setMenuOpen(false)}
+              className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100 transition-colors"
+            >
+              <Search className="w-4 h-4 text-violet-400" />
+              本地搜索
             </Link>
 
             <Link

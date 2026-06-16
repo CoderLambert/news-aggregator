@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Category, Source, News, Favorite, BlockedNews, ProviderComparison
+from .models import Category, Source, News, Favorite, BlockedNews, ProviderComparison, ResearchSession, ResearchSearchResult
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -230,3 +230,45 @@ class BlockedNewsSerializer(serializers.ModelSerializer):
         elif getattr(self, '_removed', False):
             data['removed'] = True
         return data
+
+
+class ResearchSessionSerializer(serializers.ModelSerializer):
+    """Full research session with message history."""
+    message_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ResearchSession
+        fields = ['id', 'title', 'messages', 'is_archived', 'message_count', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_message_count(self, obj):
+        return len(obj.messages) if obj.messages else 0
+
+
+class ResearchSessionListSerializer(serializers.ModelSerializer):
+    """Lightweight session info for list views (no full messages)."""
+    message_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ResearchSession
+        fields = ['id', 'title', 'is_archived', 'message_count', 'created_at', 'updated_at']
+
+    def get_message_count(self, obj):
+        return len(obj.messages) if obj.messages else 0
+
+
+class ResearchSearchResultSerializer(serializers.ModelSerializer):
+    """Full search result including result_data."""
+    class Meta:
+        model = ResearchSearchResult
+        fields = ['id', 'session', 'tool_name', 'query', 'result_type',
+                  'source', 'title', 'url', 'hit_count', 'result_data', 'created_at']
+        read_only_fields = fields
+
+
+class ResearchSearchResultListSerializer(serializers.ModelSerializer):
+    """Lightweight search result for list views (no result_data)."""
+    class Meta:
+        model = ResearchSearchResult
+        fields = ['id', 'tool_name', 'query', 'result_type',
+                  'source', 'title', 'url', 'hit_count', 'created_at']

@@ -32,12 +32,12 @@ function StatusAlert({ message, onRetry, showRetry = true }) {
   )
 }
 
-export default function FullContentFetchStatus({ news, articleLoading, onFetch }) {
+export default function FullContentFetchStatus({ news, articleLoading, onFetch, onCancel }) {
   if (!news || news.source_language !== 'en' || news.full_content) return null
 
   const status = articleLoading ? 'fetching' : (news.full_content_fetch_status || 'pending')
 
-  if (status === 'fetching') return <FetchArticleSpinner />
+  if (status === 'fetching') return <FetchArticleSpinner onCancel={onCancel} />
   if (status === 'pending' || status === 'idle') return <FetchArticleCard onFetch={onFetch} />
   if (status === 'network_error') {
     return <StatusAlert message={STATUS_MESSAGES.network_error} onRetry={onFetch} />

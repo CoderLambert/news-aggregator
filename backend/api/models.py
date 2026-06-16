@@ -1,3 +1,5 @@
+import uuid
+
 from django.db import models
 
 
@@ -176,6 +178,66 @@ class BlockedNews(models.Model):
 
     def __str__(self):
         return f'{self.user.username} blocked {self.news.title[:30]}'
+
+
+class ResearchSession(models.Model):
+    """A multi-turn research conversation with the intelligent news agent.
+
+    Stores the full OpenAI-format message history including tool_calls and
+    tool role messages, enabling session persistence and resumption.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey('auth.User', on_delete=models.CASCADE, related_name='research_sessions', null=True, blank=True, verbose_name='用户')
+    title = models.CharField('会话标题', max_length=200, blank=True, default='')
+    messages = models.JSONField('对话记录', default=list, blank=True)
+    is_archived = models.BooleanField('已归档', default=False)
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+
+    class Meta:
+        verbose_name = '研究会话'
+        verbose_name_plural = '研究会话'
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return self.title or str(self.id)[:8]
+
+
+class ResearchSearchResult(models.Model):
+    """Persistent record of each tool execution result within a research session.
+
+    Stores both the full result JSON and extracted summary fields for fast
+    querying and frontend display without parsing the message history.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    session = models.ForeignKey(
+        ResearchSession, on_delete=models.CASCADE,
+        related_name='search_results', verbose_name='研究会话',
+    )
+    tool_name = models.CharField('工具名称', max_length=50)
+    query = models.CharField('搜索查询', max_length=500, blank=True, default='')
+    result_data = models.JSONField('结果数据', default=dict, blank=True)
+    # Extracted summary fields for fast querying / display
+    result_type = models.CharField('结果类型', max_length=20, db_index=True)
+    source = models.CharField('来源', max_length=100, blank=True, default='')
+    title = models.CharField('标题', max_length=500, blank=True, default='')
+    url = models.URLField('链接', max_length=2000, blank=True, default='')
+    hit_count = models.PositiveIntegerField('结果数量', default=0)
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+
+    class Meta:
+        verbose_name = '搜索结果'
+        verbose_name_plural = '搜索结果'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['session', 'result_type'], name='idx_result_session_type'),
+            models.Index(fields=['session', 'created_at'], name='idx_result_session_created'),
+        ]
+
+    def __str__(self):
+        return f'{self.tool_name}: {self.query[:30] or self.title[:30]}'
 
 
 class ProviderComparison(models.Model):

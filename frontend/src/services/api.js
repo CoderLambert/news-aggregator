@@ -68,8 +68,8 @@ export const fetchSemanticSearch = (query, params = {}) =>
 export const fetchNewsDetail = (id) =>
   api.get(`/news/${id}/`).then(res => res.data)
 
-export const fetchFullArticle = (id) =>
-  apiFetch.post(`/news/${id}/fetch-full/`).then(res => res.data)
+export const fetchFullArticle = (id, force = false, signal) =>
+  apiFetch.post(`/news/${id}/fetch-full/`, force ? { force: true } : undefined, { signal }).then(res => res.data)
 
 export const translateFullArticle = (id) =>
   apiLong.post(`/news/${id}/translate/`).then(res => res.data)

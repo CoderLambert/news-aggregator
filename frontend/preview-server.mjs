@@ -77,7 +77,10 @@ const server = http.createServer((req, res) => {
     const ext = path.extname(filePath)
     const ctype = MIME[ext] || 'application/octet-stream'
     res.setHeader('Content-Type', ctype)
-    res.setHeader('Cache-Control', ext === '.html' ? 'no-cache' : 'public, max-age=3600')
+    // Dev-friendly cache control: no caching so rebuilds are picked up immediately
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
+    res.setHeader('Pragma', 'no-cache')
+    res.setHeader('Expires', '0')
     fs.createReadStream(filePath).pipe(res)
   })
 })

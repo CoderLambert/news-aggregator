@@ -29,13 +29,19 @@ from django.core.wsgi import get_wsgi_application
 
 application = get_wsgi_application()
 
-print(f"Starting Waitress on 0.0.0.0:9527...", flush=True)
+# Termux / mobile optimization
+termux_mode = os.environ.get('TERMUX_MODE', '0') == '1'
+threads = int(os.environ.get('WAITRESS_THREADS', '2' if termux_mode else '4'))
+conn_limit = int(os.environ.get('WAITRESS_CONN_LIMIT', '256' if termux_mode else '1000'))
+
+mode = 'Termux' if termux_mode else 'Server'
+print(f"Starting Waitress on 0.0.0.0:9527 ({mode} mode, threads={threads}, connections={conn_limit})...", flush=True)
 
 serve(
     application,
     host='0.0.0.0',
     port=9527,
-    threads=4,
-    connection_limit=1000,
+    threads=threads,
+    connection_limit=conn_limit,
     channel_timeout=300,
 )

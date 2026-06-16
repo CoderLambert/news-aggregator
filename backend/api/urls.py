@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from . import research_views
 
 urlpatterns = [
     path('news/', views.NewsListView.as_view(), name='news-list'),
@@ -21,6 +22,13 @@ urlpatterns = [
     # Blocked news
     path('blocked/', views.BlockedNewsListView.as_view(), name='blocked-list'),
     path('blocked/check/', views.BlockedNewsCheckView.as_view(), name='blocked-check'),
+    # Research Agent
+    path('research/', research_views.research_create, name='research-create'),
+    path('research/sessions/', research_views.ResearchSessionListView.as_view(), name='research-session-list'),
+    path('research/<uuid:pk>/', research_views.ResearchSessionDetailView.as_view(), name='research-session-detail'),
+    path('research/<uuid:pk>/chat/', research_views.research_chat, name='research-chat'),
+    path('research/<uuid:pk>/stream/', research_views.research_stream, name='research-stream'),
+    path('research/<uuid:session_pk>/results/', research_views.ResearchSearchResultListView.as_view(), name='research-results'),
     # Auth
     path('auth/csrf/', views.csrf_token, name='auth-csrf'),
     path('auth/register/', views.auth_register, name='auth-register'),

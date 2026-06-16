@@ -7,8 +7,11 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 
 ROBOTSTXT_OBEY = False
 
-CONCURRENT_REQUESTS_PER_DOMAIN = 2
-DOWNLOAD_DELAY = 2
+# Tuned for Termux/mobile: lower concurrency to avoid CPU/IO contention.
+# On a server/desktop, set CONCURRENT_REQUESTS=16 and CONCURRENT_REQUESTS_PER_DOMAIN=4.
+CONCURRENT_REQUESTS = 4
+CONCURRENT_REQUESTS_PER_DOMAIN = 1
+DOWNLOAD_DELAY = 3
 
 DEFAULT_REQUEST_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",

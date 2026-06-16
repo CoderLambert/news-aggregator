@@ -3,7 +3,7 @@
 PROJECT=/root/news-aggregator
 LOG=$PROJECT/logs/django.log
 PID_FILE=$PROJECT/logs/django.pid
-CMD="python3 manage.py runserver 0.0.0.0:9527"
+CMD="python3 manage.py runserver 0.0.0.0:9527 --noreload"
 
 start() {
   if status; then

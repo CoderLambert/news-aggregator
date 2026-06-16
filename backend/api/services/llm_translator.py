@@ -117,7 +117,25 @@ def _get_dashscope_key():
             config_path = os.path.expanduser('~/.hermes/config.yaml')
             with open(config_path, 'r') as f:
                 config = yaml.safe_load(f)
+            # Try the main model key first
             api_key = config.get('model', {}).get('api_key', '')
+            # If that's an ark- key (Volcengine), look for a DashScope key elsewhere
+            if api_key.startswith('ark-'):
+                # Check auxiliary.title_generation (Hermes default uses dashscope-coding)
+                aux_api_key = config.get('auxiliary', {}).get('title_generation', {}).get('api_key', '')
+                if aux_api_key and aux_api_key.startswith('sk-'):
+                    api_key = aux_api_key
+                else:
+                    # Also check fallback_model for a dashscope key
+                    fb = config.get('fallback_model', {})
+                    if fb.get('provider', '').startswith('dashscope'):
+                        fb_key = fb.get('api_key', '')
+                        if fb_key and fb_key.startswith('sk-'):
+                            api_key = fb_key
+                        else:
+                            api_key = ''
+                    else:
+                        api_key = ''
         except Exception:
             pass
 
