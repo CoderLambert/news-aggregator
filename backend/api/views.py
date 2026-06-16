@@ -731,6 +731,31 @@ class NewsChatView(generics.GenericAPIView):
         if not user_question:
             return Response({'error': '问题不能为空'}, status=400)
 
+        web_search = request.data.get('web_search', False)
+
+        # Web search — runs synchronously before building system prompt
+        web_context = ''
+        if web_search:
+            try:
+                from api.services.research.tools import _tool_search_web
+                search_result = _tool_search_web(user_question, count=3)
+                results = search_result.get('results', [])
+                if results:
+                    lines = []
+                    for i, r in enumerate(results, 1):
+                        lines.append(
+                            f"{i}. **{r['title']}**\n"
+                            f"   {r['snippet']}\n"
+                            f"   来源: {r.get('source', 'unknown')}"
+                        )
+                    web_context = (
+                        "\n\n## 网络搜索结果 (基于用户问题的实时搜索):\n"
+                        + "\n\n".join(lines) + "\n"
+                    )
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning("Web search failed for chat")
+
         # Load or create session
         session, _ = ChatSession.objects.get_or_create(news=news, defaults={'messages': []})
         
@@ -740,14 +765,21 @@ class NewsChatView(generics.GenericAPIView):
 
         history = session.messages[-20:] # Keep last 20 turns for context
 
+        web_instruction = (
+            "\n\n注意：以上网络搜索结果来自互联网实时搜索，可能与文章内容有所补充。"
+            "回答时请综合文章内容和网络搜索结果，并注明信息来源。"
+        ) if web_context else ""
+
         # Build messages for LLM
         messages = [
             {
                 'role': 'system',
                 'content': (
                     f'你是一位专业的新闻助手。用户正在阅读一篇新闻文章，请基于以下文章内容回答用户的问题。\n\n'
-                    f'## 文章内容:\n{context}\n\n'
-                    f'## 要求:\n'
+                    f'## 文章内容:\n{context}'
+                    f'{web_context}'
+                    f'{web_instruction}'
+                    f'\n\n## 要求:\n'
                     f'1. 必须严格基于文章内容回答，不要编造信息。\n'
                     f'2. 如果文章中找不到答案，请明确告知用户。\n'
                     f'3. 回答要简洁、清晰、有逻辑。\n'
@@ -788,7 +820,10 @@ class NewsChatView(generics.GenericAPIView):
                 # Save the full response to DB
                 save_ai_response(''.join(full_response))
 
-        return StreamingHttpResponse(generate(), content_type='text/event-stream')
+        response = StreamingHttpResponse(generate(), content_type='text/event-stream')
+        if web_search:
+            response['X-Web-Search-Used'] = 'true'
+        return response
 
 
 class CategoryListView(generics.ListAPIView):

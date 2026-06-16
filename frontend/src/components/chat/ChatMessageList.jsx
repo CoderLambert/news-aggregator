@@ -1,5 +1,5 @@
 import { useRef, useEffect } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, Globe } from 'lucide-react'
 import MarkdownContent from '../news-detail/MarkdownContent'
 import XiaowenMascot from '../mascot/XiaowenMascot'
 
@@ -125,11 +125,19 @@ export default function ChatMessageList({
                     <span className="thinking-dot" />
                     <span className="thinking-dot" />
                   </div>
-                  <span className="text-xs text-neutral-400 select-none">正在思考…</span>
+                  <span className="text-xs text-neutral-400 select-none">
+                    {msg.web_search ? '正在联网搜索…' : '正在思考…'}
+                  </span>
                 </div>
               )
             ) : (
               <div className="whitespace-pre-wrap">{msg.content}</div>
+            )}
+            {msg.role === 'assistant' && msg.content && msg.web_search && (
+              <div className="mt-2 pt-2 border-t border-neutral-100 flex items-center gap-1">
+                <Globe className="w-3 h-3 text-orange-400" />
+                <span className="text-[10px] text-neutral-400">使用了联网搜索</span>
+              </div>
             )}
           </div>
         </div>

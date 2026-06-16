@@ -36,6 +36,7 @@ export default function NewsChatAssistant({ newsId }) {
     messages, input, setInput, isLoading, phase,
     handleSend, doSend,
     confirmingClear, requestClearChat, cancelClear, confirmClear,
+    webSearch, toggleWebSearch,
   } = useChat(newsId)
 
   // Only fetch LLM suggestions once the user actually opens the panel,
@@ -144,6 +145,8 @@ export default function NewsChatAssistant({ newsId }) {
           onSend={handleSend}
           isLoading={isLoading}
           autoFocus={isOpen}
+          webSearch={webSearch}
+          onWebSearchToggle={toggleWebSearch}
         />
 
         {/* Confetti overlay — fires once on first successful answer */}

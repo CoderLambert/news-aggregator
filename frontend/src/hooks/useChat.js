@@ -26,6 +26,7 @@ export function useChat(newsId) {
   const [input, setInput] = useState('')
   const [phase, setPhase] = useState('loading-history')
   const [confirmingClear, setConfirmingClear] = useState(false)
+  const [webSearch, setWebSearch] = useState(false)
   const successTimerRef = useRef(null)
 
   // Loading state derived from phase — covers history fetch + active turn
@@ -79,6 +80,10 @@ export function useChat(newsId) {
     }
   }
 
+  function toggleWebSearch() {
+    setWebSearch(prev => !prev)
+  }
+
   async function handleSend() {
     const trimmed = input.trim()
     if (!trimmed || isLoading) return
@@ -92,14 +97,18 @@ export function useChat(newsId) {
     if (!text || isLoading) return
     clearTimeout(successTimerRef.current)
 
+    const currentWebSearch = webSearch
     const userMessage = { role: 'user', content: text }
-    setMessages(prev => [...prev, userMessage, { role: 'assistant', content: '', id: Date.now() }])
+    const assistantMsg = { role: 'assistant', content: '', id: Date.now() }
+    if (currentWebSearch) assistantMsg.web_search = true
+
+    setMessages(prev => [...prev, userMessage, assistantMsg])
     setPhase('thinking')
 
     try {
       let accumulated = ''
       let firstChunk = true
-      for await (const chunk of chatStream(newsId, text)) {
+      for await (const chunk of chatStream(newsId, text, { webSearch: currentWebSearch })) {
         if (firstChunk) {
           setPhase('streaming')
           firstChunk = false
@@ -130,5 +139,6 @@ export function useChat(newsId) {
     isLoading, phase,
     handleSend, doSend,
     confirmingClear, requestClearChat, cancelClear, confirmClear,
+    webSearch, toggleWebSearch,
   }
 }

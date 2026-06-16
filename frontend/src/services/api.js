@@ -132,9 +132,9 @@ export async function* translateFullArticleStream(id, { force = false } = {}) {
  *
  *   for await (const chunk of chatStream(id, "请总结这篇文章")) { accumulated += chunk; ... }
  */
-export async function* chatStream(newsId, question) {
+export async function* chatStream(newsId, question, { webSearch = false } = {}) {
   const res = await streamingFetch(`/api/news/${newsId}/chat/`, {
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, web_search: webSearch }),
   })
   yield* iterTextChunks(res)
 }

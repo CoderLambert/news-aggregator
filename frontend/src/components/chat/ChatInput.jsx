@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useLayoutEffect } from 'react'
-import { Send, Loader2 } from 'lucide-react'
+import { Send, Loader2, Globe } from 'lucide-react'
 
 const PLACEHOLDERS = [
   '想问点什么？',
@@ -12,7 +12,7 @@ const PLACEHOLDERS = [
 // Tuned for mobile readability — beyond 5 lines, scroll instead of grow.
 const MAX_HEIGHT = 116
 
-export default function ChatInput({ value, onChange, onSend, isLoading, autoFocus }) {
+export default function ChatInput({ value, onChange, onSend, isLoading, autoFocus, webSearch, onWebSearchToggle }) {
   const inputRef = useRef(null)
   const [placeholder] = useState(
     () => PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)],
@@ -62,6 +62,23 @@ export default function ChatInput({ value, onChange, onSend, isLoading, autoFocu
                      py-2 px-3"
           style={{ minHeight: '36px', maxHeight: `${MAX_HEIGHT}px` }}
         />
+        {onWebSearchToggle && (
+          <button
+            type="button"
+            onClick={onWebSearchToggle}
+            aria-label="联网搜索"
+            title={webSearch ? '已开启联网搜索' : '开启联网搜索'}
+            className={`flex-shrink-0 px-2 py-1.5 rounded-lg text-[11px] font-medium
+              transition-all select-none cursor-pointer
+              ${webSearch
+                ? 'bg-orange-100 text-orange-700 ring-1 ring-orange-300'
+                : 'text-neutral-400 hover:text-neutral-600 hover:bg-neutral-200'
+              }`}
+          >
+            <Globe className="w-3.5 h-3.5 inline mr-0.5 -mt-px" />
+            联网
+          </button>
+        )}
         <button
           type="button"
           onClick={onSend}
