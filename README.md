@@ -1,16 +1,19 @@
 # NewsHub — AI 驱动的智能新闻聚合器
 
-> 一站式科技资讯聚合 + AI 翻译 + 智能对话助手，聚焦中文技术社区阅读体验。
+> 一站式科技资讯聚合 + AI 翻译 + 智能对话 + 深度研究助手，聚焦中文技术社区阅读体验。
 
 ## ✨ 功能概览
 
 | 模块 | 能力 |
 |------|------|
-| **新闻聚合** | Scrapy 爬虫抓取多源科技资讯，自动分类存储 |
+| **新闻聚合** | Scrapy 爬虫抓取多源科技资讯，自动分类存储，支持分页浏览 |
 | **AI 翻译** | Volcengine/DashScope 双 Provider Failover，SSE 流式输出中文翻译 |
 | **智能助手** | 基于文章全文的多轮对话，自动抓取原文，推荐问题一键换批 |
+| **深度研究** | AI Research Agent — LLM 意图分析 + 本地语义搜索 + 多步骤深度分析 |
+| **本地搜索** | 关键词 / 语义 / 混合三种模式，支持结果分页 |
 | **页内搜索** | Ctrl+F 式全文高亮 + 上下跳转计数 |
 | **文章目录** | 右侧悬浮 TOC 面板，IntersectionObserver 实时追踪当前阅读位置 |
+| **语音播报** | 全局 TTS 语音播放器，支持多音色、多语速、播放范围选择 |
 | **代码块复制** | Markdown 代码块一键复制按钮 |
 | **吉祥物交互** | "小闻" 小狐狸动画表情，6 种心情状态随对话切换 |
 
@@ -20,6 +23,7 @@
 Frontend:  React 19 + Vite 8 + Tailwind 4 + shadcn/ui + React Compiler
 Backend:   Django 6 + DRF + SQLite + Scrapy
 AI:        Volcengine ARK (Doubao) / DashScope (Kimi) — 双通道自动切换
+向量检索:   ChromaDB（语义搜索支持）
 测试:      Vitest + Testing Library (前端) | pytest-django (后端)
 ```
 
@@ -175,31 +179,41 @@ npm test -- --run
 news-aggregator/
 ├── backend/                  # Django 后端
 │   ├── api/
-│   │   ├── models.py         # 数据模型（News, Source, Category, ChatSession）
-│   │   ├── views.py          # API 视图（CRUD + 翻译 + 聊天）
+│   │   ├── models.py         # 数据模型（News, Source, Category, ChatSession, ResearchSession）
+│   │   ├── views.py          # API 视图（CRUD + 翻译 + 聊天 + 研究）
 │   │   ├── serializers.py    # DRF 序列化器
 │   │   ├── services/
 │   │   │   ├── llm_translator.py    # LLM 翻译 + 双 Provider Failover
-│   │   │   └── translation_jobs.py  # 后台翻译 Job 管理
+│   │   │   ├── content_cleaner.py   # 内容清洗
+│   │   │   ├── translation_jobs.py  # 后台翻译 Job 管理
+│   │   │   └── research/            # Research Agent
+│   │   │       ├── tools.py         # 研究工具集
+│   │   │       └── __init__.py
 │   │   └── tests/            # pytest 测试
 │   ├── newsaggregator/       # Django 项目配置
 │   │   └── settings.py
 │   └── requirements.txt
 ├── frontend/                 # React 前端
 │   ├── src/
-│   │   ├── pages/            # 页面组件（Home, NewsDetail）
+│   │   ├── pages/            # 页面组件（Home, NewsDetail, LocalSearch）
 │   │   ├── components/       # UI 组件
 │   │   │   ├── ui/           # shadcn/ui 基础组件
 │   │   │   ├── news-detail/  # 详情页子组件
-│   │   │   └── chat/         # AI 聊天组件
+│   │   │   ├── chat/         # AI 聊天组件
+│   │   │   ├── research/     # 深度研究组件（BubbleButton, Header, Timeline）
+│   │   │   └── Pagination.jsx # 响应式分页组件
 │   │   ├── hooks/            # 自定义 Hooks
 │   │   ├── services/         # API 服务层
-│   │   └── constants/        # 常量定义
+│   │   ├── context/          # React Context（语言、认证、语音播放器）
+│   │   └── constants/        # 常量定义（TTS 配置）
 │   ├── vite.config.js        # Vite + React Compiler + 代理配置
 │   └── package.json
 ├── crawler/                  # Scrapy 爬虫
 │   └── news_crawler/
 │       └── spiders/          # 各数据源 Spider
+├── chroma_data/              # ChromaDB 向量数据（LFS 管理）
+├── backend/
+│   └── db.sqlite3            # Django SQLite 数据库（LFS 管理）
 ├── scripts/                  # 运维脚本
 │   ├── news-server           # Django 服务管理
 │   ├── news-dev              # Vite 开发服务器管理
@@ -207,6 +221,7 @@ news-aggregator/
 │   └── run_tests.sh          # 全量测试
 ├── start_waitress.py         # Waitress 生产启动脚本
 ├── .env.example              # 环境变量模板
+├── .gitattributes            # Git LFS 追踪规则
 └── CHANGELOG.md              # 更新日志
 ```
 
@@ -220,8 +235,13 @@ news-aggregator/
 | POST | `/api/news/:id/translate/` | SSE 流式翻译 |
 | POST | `/api/news/:id/chat/` | SSE 流式 AI 对话 |
 | POST | `/api/news/:id/suggested-questions/` | 获取/刷新推荐问题 |
+| POST | `/api/news/:id/speech/` | TTS 语音合成 |
 | GET | `/api/categories/` | 分类列表 |
 | GET | `/api/sources/` | 来源列表 |
+| POST | `/api/research/` | 创建研究会话 |
+| GET | `/api/research/:id/` | 获取研究会话 |
+| POST | `/api/research/:id/query/` | 发送研究查询 |
+| GET | `/api/search/` | 本地搜索（关键词/语义/混合） |
 
 ## ⚙️ 高级配置
 
@@ -252,3 +272,31 @@ news-aggregator/
 ## 📄 License
 
 MIT
+
+## 📦 Git LFS
+
+项目使用 Git LFS 管理数据库文件（`*.sqlite3`）。克隆或更新后需要：
+
+```bash
+# 首次使用前安装
+git lfs install
+
+# 克隆后下载大文件
+git lfs pull
+```
+
+各平台安装：
+```bash
+# Ubuntu/Debian
+sudo apt install git-lfs
+
+# Arch Linux
+sudo pacman -S git-lfs
+
+# macOS
+brew install git-lfs
+```
+
+## 📝 更新日志
+
+详见 [CHANGELOG.md](./CHANGELOG.md)
