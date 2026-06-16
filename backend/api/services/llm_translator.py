@@ -322,10 +322,6 @@ def stream_chat(messages: list, max_tokens: int = 32000, temperature: float = 0.
     """Generic streaming chat with provider failover + per-provider retry.
 
     Yields chunks of text.  On total failure, yields a single fallback message.
-
-    Args:
-        enable_search: When True, passes enable_search=True in the request
-            body so DashScope can search the internet in real-time.
     """
     MAX_RETRIES = 2  # per provider
 
@@ -338,17 +334,13 @@ def stream_chat(messages: list, max_tokens: int = 32000, temperature: float = 0.
     for idx, (client, model) in enumerate(clients):
         for attempt in range(1, MAX_RETRIES + 1):
             try:
-                kwargs = {
-                    'model': model,
-                    'messages': messages,
-                    'temperature': temperature,
-                    'max_tokens': max_tokens,
-                    'stream': True,
-                }
-                if enable_search:
-                    kwargs['extra_body'] = {'enable_search': True}
-
-                stream = client.chat.completions.create(**kwargs)
+                stream = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    stream=True,
+                )
 
                 got_any = False
                 for chunk in stream:

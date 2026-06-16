@@ -733,6 +733,29 @@ class NewsChatView(generics.GenericAPIView):
 
         web_search = request.data.get('web_search', False)
 
+        # Web search via research agent's tool — inject results into context
+        web_context = ''
+        if web_search:
+            try:
+                from api.services.research.tools import _tool_search_web
+                search_result = _tool_search_web(user_question, count=5)
+                results = search_result.get('results', [])
+                if results:
+                    lines = []
+                    for i, r in enumerate(results, 1):
+                        lines.append(
+                            f"{i}. **{r['title']}** ({r.get('source', '')})\n"
+                            f"   {r['snippet']}\n"
+                            f"   链接: {r.get('url', '')}"
+                        )
+                    web_context = (
+                        "\n## 网络搜索结果 (实时搜索):\n"
+                        + "\n\n".join(lines) + "\n"
+                    )
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning("Web search failed for chat")
+
         # Load or create session
         session, _ = ChatSession.objects.get_or_create(news=news, defaults={'messages': []})
 
@@ -745,22 +768,25 @@ class NewsChatView(generics.GenericAPIView):
         # Build messages for LLM
         system_content = (
             f'你是一位专业的新闻助手。用户正在阅读一篇新闻文章，请基于以下文章内容回答用户的问题。\n\n'
-            f'## 文章内容:\n{context}\n\n'
-            f'## 要求:\n'
+            f'## 文章内容:\n{context}'
+        )
+
+        # Inject web search results if available
+        if web_context:
+            system_content += (
+                f'\n\n{web_context}'
+                f'\n\n## 回答指引:\n'
+                f'以上网络搜索结果来自实时搜索，可能与文章内容有所补充。\n'
+                f'请综合文章内容和网络搜索结果回答用户问题，并注明信息来源。\n'
+            )
+
+        system_content += (
+            f'\n\n## 要求:\n'
             f'1. 必须严格基于文章内容回答，不要编造信息。\n'
             f'2. 如果文章中找不到答案，请明确告知用户。\n'
             f'3. 回答要简洁、清晰、有逻辑。\n'
             f'4. 使用 Markdown 格式，支持列表、加粗等。'
         )
-
-        # When web_search is enabled, update system prompt to reflect that
-        if web_search:
-            system_content += (
-                '\n\n## 联网搜索:\n'
-                '你已启用联网搜索能力。当文章内容不足以回答用户问题时，'
-                '请主动使用联网搜索获取最新信息，并将搜索结果与文章内容结合回答。'
-                '如果用户的问题超出了文章范围，请直接联网搜索回答，不要说"无法基于文章内容回答"。\n'
-            )
 
         messages = [
             {
@@ -789,7 +815,7 @@ class NewsChatView(generics.GenericAPIView):
             full_response = []
             try:
                 # Use stream_chat which has built-in provider failover
-                for chunk in stream_chat(messages, max_tokens=16000, temperature=0.7, enable_search=web_search):
+                for chunk in stream_chat(messages, max_tokens=16000, temperature=0.7):
                     full_response.append(chunk)
                     yield chunk
             except Exception as e:
