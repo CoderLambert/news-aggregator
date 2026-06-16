@@ -155,11 +155,12 @@ export default function NewsList() {
         />
       )}
 
-      {!loading && news.length > 0 && (
+      {!loading && news.length === 0 && (
         <p className="text-center text-sm text-gray-400 py-4">
-          {lang === 'en' ? `Showing page ${page} of ${totalPages}` : `共 ${totalCount} 条，第 ${page}/${totalPages} 页`}
+          {lang === 'en' ? 'No results found' : '未找到结果'}
         </p>
       )}
     </div>
   )
 }
+
