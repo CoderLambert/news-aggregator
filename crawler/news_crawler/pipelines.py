@@ -23,6 +23,22 @@ SOURCE_DEFAULTS = {
     'Dev.to': {'url': 'https://dev.to', 'country': 'US', 'language': 'en', 'source_type': 'discussion'},
     'TechCrunch': {'url': 'https://techcrunch.com', 'country': 'US', 'language': 'en', 'source_type': 'news'},
     'ProductHunt': {'url': 'https://www.producthunt.com', 'country': 'US', 'language': 'en', 'source_type': 'aggregator'},
+    # AI Company Blogs
+    'OpenAI Blog': {'url': 'https://openai.com/news', 'country': 'US', 'language': 'en', 'source_type': 'news'},
+    'Anthropic': {'url': 'https://www.anthropic.com', 'country': 'US', 'language': 'en', 'source_type': 'news'},
+    'DeepMind': {'url': 'https://deepmind.google', 'country': 'UK', 'language': 'en', 'source_type': 'news'},
+    'Meta AI': {'url': 'https://ai.meta.com', 'country': 'US', 'language': 'en', 'source_type': 'news'},
+    'Mistral': {'url': 'https://mistral.ai', 'country': 'FR', 'language': 'en', 'source_type': 'news'},
+    # AI Specialized Media
+    'VentureBeat AI': {'url': 'https://venturebeat.com/category/ai/', 'country': 'US', 'language': 'en', 'source_type': 'news'},
+    'Ars Technica AI': {'url': 'https://arstechnica.com/tag/artificial-intelligence/', 'country': 'US', 'language': 'en', 'source_type': 'news'},
+    'MIT Tech Review AI': {'url': 'https://www.technologyreview.com', 'country': 'US', 'language': 'en', 'source_type': 'news'},
+    # AI Papers
+    'arXiv': {'url': 'https://arxiv.org', 'country': 'US', 'language': 'en', 'source_type': 'aggregator'},
+    # Chinese AI News
+    '机器之心': {'url': 'https://www.jiqizhixin.com', 'country': 'CN', 'language': 'zh', 'source_type': 'news'},
+    '量子位': {'url': 'https://www.leiphone.com', 'country': 'CN', 'language': 'zh', 'source_type': 'news'},
+    '36氪': {'url': 'https://36kr.com', 'country': 'CN', 'language': 'zh', 'source_type': 'news'},
 }
 
 

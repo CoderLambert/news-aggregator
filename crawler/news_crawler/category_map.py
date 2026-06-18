@@ -17,7 +17,7 @@ ALL_CATEGORIES = {
 }
 
 KEYWORD_MAP = {
-    'AI': ['ai', 'llm', 'gpt', 'artificial intelligence', 'machine learning', 'deep learning', 'agent'],
+    'AI': ['ai', 'llm', 'gpt', 'artificial intelligence', 'machine learning', 'deep learning', 'agent', 'transformer', 'neural network', 'nlp', 'computer vision', 'robotics', 'generative', 'diffusion', 'multimodal', 'llama', 'stable diffusion', 'dall-e', 'midjourney', 'rag', 'retrieval', 'prompt engineering', 'fine-tuning', 'embedding', 'reinforcement learning', 'rlhf', 'large language model', 'foundation model', 'agentic', 'mixture of experts', 'moe', 'bert', 'clip', 'whisper', 'vision-language', 'text-to-image', 'text-to-video', 'autonomous', 'self-driving', 'copilot', 'hallucination', 'alignment', 'sft', '大模型', '人工智能', '深度学习', '机器学习', '自然语言处理', '计算机视觉', '强化学习', '生成式', '多模态', '智能体'],
     '科技': ['tech', 'technology', 'software', 'computer', 'digital', 'internet', 'cyber'],
     '创业': ['startup', 'venture', 'funding', 'fundraising', 'launch', 'ipo', 'acquisition'],
     '安全': ['security', 'privacy', 'vulnerability', 'hack', 'breach', 'malware', 'exploit'],
