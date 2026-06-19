@@ -23,7 +23,7 @@ KEYWORD_MAP = {
     '安全': ['security', 'privacy', 'vulnerability', 'hack', 'breach', 'malware', 'exploit'],
     '区块链': ['crypto', 'blockchain', 'web3', 'bitcoin', 'ethereum', 'nft', 'defi'],
     '产品': ['product', 'app', 'mobile', 'gadgets', 'design', 'ux', 'ui'],
-    '前端': ['webdev', 'javascript', 'typescript', 'react', 'vue', 'css', 'html', 'frontend'],
+    '前端': ['webdev', 'javascript', 'typescript', 'react', 'vue', 'css', 'html', 'frontend', 'node.js', 'nodejs', 'angular', 'svelte', 'next.js', 'nuxt', 'vite', 'webpack', 'rollup', 'esbuild', 'tailwind', 'bun', 'deno', 'web assembly', 'wasm', 'pwa', 'web components', 'custom elements', 'shadow dom', 'webgl', 'webgpu', 'service worker', 'htmx', 'astro', 'remix', 'solidjs', 'preact', 'styled-components', 'emotion', 'sass', 'scss', 'less', 'postcss', 'bundler', 'transpiler', 'lint', 'eslint', 'prettier', 'npm', 'yarn', 'pnpm'],
     '后端': ['python', 'go', 'rust', 'java', 'backend', 'api', 'server', 'database'],
     'DevOps': ['devops', 'cloud', 'aws', 'docker', 'kubernetes', 'ci/cd', 'infrastructure'],
     '开发工具': ['developer', 'api', 'code', 'open source', 'tool', 'cli', 'sdk'],

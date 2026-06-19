@@ -23,6 +23,18 @@ SOURCE_DEFAULTS = {
     'Dev.to': {'url': 'https://dev.to', 'country': 'US', 'language': 'en', 'source_type': 'discussion'},
     'TechCrunch': {'url': 'https://techcrunch.com', 'country': 'US', 'language': 'en', 'source_type': 'news'},
     'ProductHunt': {'url': 'https://www.producthunt.com', 'country': 'US', 'language': 'en', 'source_type': 'aggregator'},
+    # Frontend Development Sources
+    'CSS-Tricks': {'url': 'https://css-tricks.com', 'country': 'US', 'language': 'en', 'source_type': 'news'},
+    'web.dev': {'url': 'https://web.dev', 'country': 'US', 'language': 'en', 'source_type': 'news'},
+    'Chrome Developers': {'url': 'https://developer.chrome.com', 'country': 'US', 'language': 'en', 'source_type': 'news'},
+    'Smashing Magazine': {'url': 'https://www.smashingmagazine.com', 'country': 'US', 'language': 'en', 'source_type': 'news'},
+    'React Blog': {'url': 'https://react.dev', 'country': 'US', 'language': 'en', 'source_type': 'news'},
+    'Svelte Blog': {'url': 'https://svelte.dev', 'country': 'US', 'language': 'en', 'source_type': 'news'},
+    'Angular Blog': {'url': 'https://blog.angular.dev', 'country': 'US', 'language': 'en', 'source_type': 'news'},
+    'WebKit': {'url': 'https://webkit.org', 'country': 'US', 'language': 'en', 'source_type': 'news'},
+    'V8': {'url': 'https://v8.dev', 'country': 'US', 'language': 'en', 'source_type': 'news'},
+    'Mozilla Hacks': {'url': 'https://hacks.mozilla.org', 'country': 'US', 'language': 'en', 'source_type': 'news'},
+    'Frontend Focus': {'url': 'https://frontendfoc.us', 'country': 'US', 'language': 'en', 'source_type': 'news'},
     # AI Company Blogs
     'OpenAI Blog': {'url': 'https://openai.com/news', 'country': 'US', 'language': 'en', 'source_type': 'news'},
     'Anthropic': {'url': 'https://www.anthropic.com', 'country': 'US', 'language': 'en', 'source_type': 'news'},

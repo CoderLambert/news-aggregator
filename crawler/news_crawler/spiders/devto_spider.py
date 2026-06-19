@@ -12,6 +12,10 @@ class DevToSpider(scrapy.Spider):
         'https://dev.to/api/articles?top=50',
         'https://dev.to/api/articles?per_page=50&tag=python',
         'https://dev.to/api/articles?per_page=50&tag=javascript',
+        'https://dev.to/api/articles?per_page=50&tag=webdev',
+        'https://dev.to/api/articles?per_page=50&tag=css',
+        'https://dev.to/api/articles?per_page=50&tag=typescript',
+        'https://dev.to/api/articles?per_page=50&tag=react',
     ]
 
     custom_settings = {
