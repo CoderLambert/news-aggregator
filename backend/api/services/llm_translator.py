@@ -1,4 +1,4 @@
-"""Translation service with dual-provider support: DashScope (primary) → Volcengine (fallback)."""
+"""Translation service with dual-provider support: Volcengine ARK (primary) → DashScope (fallback)."""
 
 import logging
 import os
@@ -9,13 +9,13 @@ from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
-# ============ Primary Provider: DashScope ============
+# ============ Primary Provider: Volcengine ARK (deepseek) ============
+VOLCENGINE_BASE_URL = 'https://ark.cn-beijing.volces.com/api/coding/v3'
+VOLCENGINE_MODEL = 'deepseek-v4-pro'
+
+# ============ Fallback Provider: DashScope (kimi) ============
 DASHSCOPE_BASE_URL = 'https://coding.dashscope.aliyuncs.com/v1'
 DASHSCOPE_MODEL = 'kimi-k2.5'
-
-# ============ Fallback Provider: Volcengine ============
-VOLCENGINE_BASE_URL = 'https://ark.cn-beijing.volces.com/api/coding/v3'
-VOLCENGINE_MODEL = 'doubao-seed-2.0-pro'
 
 # ============ Translation Prompt ============
 TRANSLATION_SYSTEM = """你是一位资深的中英双语翻译专家，擅长将英文技术文章翻译成地道、流畅的中文。
@@ -162,21 +162,21 @@ def get_openai_client():
 def get_clients():
     """Return ordered list of (client, model_name) tuples for failover.
 
-    Order: DashScope (primary) → Volcengine (fallback).
+    Order: Volcengine ARK (primary, deepseek-v4-pro) → DashScope (fallback, kimi).
     Skips providers without an API key.
     """
     out = []
-    dk = _get_dashscope_key()
-    if dk:
-        out.append((
-            OpenAI(api_key=dk, base_url=DASHSCOPE_BASE_URL),
-            DASHSCOPE_MODEL,
-        ))
     vk = _get_volcengine_key()
     if vk:
         out.append((
             OpenAI(api_key=vk, base_url=VOLCENGINE_BASE_URL),
             VOLCENGINE_MODEL,
+        ))
+    dk = _get_dashscope_key()
+    if dk:
+        out.append((
+            OpenAI(api_key=dk, base_url=DASHSCOPE_BASE_URL),
+            DASHSCOPE_MODEL,
         ))
     return out
 
