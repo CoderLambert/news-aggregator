@@ -430,4 +430,4 @@ def _backend_dir() -> str:
 
 
 def default_providers() -> list:
-    return [HackerNewsAPIProvider(), GitHubReadmeProvider(), JinaProvider(), ScrapySubprocessProvider(), ScrapyHTTPProvider()]
+    return [HackerNewsAPIProvider(), GitHubReadmeProvider(), JinaProvider(timeout=5, retries=0), ScrapySubprocessProvider(), ScrapyHTTPProvider()]

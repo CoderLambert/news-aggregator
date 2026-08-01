@@ -481,6 +481,15 @@ class NewsFetchFullView(generics.GenericAPIView):
             mark_fetching,
             mark_success,
         )
+
+        # Skip domains protected by WAF/CAPTCHA (would hang on timeouts)
+        from api.services.article_fetcher.site_rules import is_waf_blocked
+        if is_waf_blocked(url):
+            return Response(
+                {'error': '该来源受 WAF 保护，暂不支持全文抓取。'},
+                status=400,
+            )
+
         mark_fetching(news)
 
         try:

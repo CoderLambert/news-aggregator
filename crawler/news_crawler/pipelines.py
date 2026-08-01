@@ -47,6 +47,8 @@ SOURCE_DEFAULTS = {
     'MIT Tech Review AI': {'url': 'https://www.technologyreview.com', 'country': 'US', 'language': 'en', 'source_type': 'news'},
     # AI Papers
     'arXiv': {'url': 'https://arxiv.org', 'country': 'US', 'language': 'en', 'source_type': 'aggregator'},
+    # Software Engineering & Architecture
+    'InfoQ': {'url': 'https://www.infoq.com', 'country': 'US', 'language': 'en', 'source_type': 'news'},
     # Chinese AI News
     '机器之心': {'url': 'https://www.jiqizhixin.com', 'country': 'CN', 'language': 'zh', 'source_type': 'news'},
     '量子位': {'url': 'https://www.leiphone.com', 'country': 'CN', 'language': 'zh', 'source_type': 'news'},
@@ -202,18 +204,14 @@ def _save_item(item):
     url = item['url']
     thash = _title_hash(title)
 
-    try:
-        news = News.objects.get(url=url)
-    except News.DoesNotExist:
-        news = None
+    # Use filter().first() instead of get(): a URL may appear more than once
+    # (e.g. duplicate dev.to articles), and get() raises MultipleObjectsReturned.
+    news = News.objects.filter(url=url).first()
 
     # If URL changed (e.g. Google News redirect -> real Reuters URL),
     # fall back to matching by title_hash + source
     if news is None and thash is not None:
-        try:
-            news = News.objects.get(title_hash=thash, source=source)
-        except News.DoesNotExist:
-            pass
+        news = News.objects.filter(title_hash=thash, source=source).first()
 
     if news:
         # Update only if full article content is longer than existing

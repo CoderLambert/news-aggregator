@@ -14,6 +14,13 @@ class SiteRule:
     name: str = ''
 
 
+# Domains protected by WAF/CAPTCHA that cannot be fetched via automated means.
+# Skip these entirely in fetch-full to avoid hanging on timeouts.
+WAF_BLOCKED_DOMAINS: tuple[str, ...] = (
+    'infoq.com',
+)
+
+
 SITE_RULES: tuple[SiteRule, ...] = (
     SiteRule(
         name='GitHub',
@@ -125,3 +132,9 @@ def get_site_rule(url_or_domain: str) -> SiteRule | None:
         if any(domain == registered or domain.endswith(f'.{registered}') for registered in rule.domains):
             return rule
     return None
+
+
+def is_waf_blocked(url_or_domain: str) -> bool:
+    """Check if a URL belongs to a WAF-protected domain that cannot be fetched."""
+    domain = normalize_domain(url_or_domain)
+    return any(domain == registered or domain.endswith(f'.{registered}') for registered in WAF_BLOCKED_DOMAINS)
