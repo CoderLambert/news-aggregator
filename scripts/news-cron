@@ -1,8 +1,18 @@
 #!/bin/bash
 # 爬虫定时任务控制
-PROJECT=/root/news-aggregator
-LOG=$PROJECT/logs/cron.log
-PID_FILE=$PROJECT/logs/crond.pid
+set -u
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+LOG_DIR="$PROJECT/logs"
+LOG="$LOG_DIR/cron.log"
+PID_FILE="$LOG_DIR/crond.pid"
+mkdir -p "$LOG_DIR"
+
+PYTHON="$PROJECT/backend/venv/bin/python"
+if [ ! -x "$PYTHON" ]; then
+  PYTHON="${PYTHON_BIN:-python3}"
+fi
 
 start() {
   if status; then
@@ -35,7 +45,7 @@ case "${1:-help}" in
   stop)   stop ;;
   status) if status; then echo "crond 运行中"; else echo "crond 未运行"; fi ;;
   restart) stop; start ;;
-  run)    cd "$PROJECT/backend" && python3 manage.py crawl all ;;
+  run)    cd "$PROJECT/backend" && "$PYTHON" manage.py crawl all ;;
   log)    tail -f "$PROJECT/logs/crawl.log" ;;
   *)
     echo "用法: news-cron {start|stop|restart|status|run|log}"

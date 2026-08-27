@@ -4,6 +4,13 @@
 
 set -e
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+PYTHON="$PROJECT/backend/venv/bin/python"
+if [ ! -x "$PYTHON" ]; then
+    PYTHON="${PYTHON_BIN:-python3}"
+fi
+
 echo "========================================"
 echo "News Aggregator Test Suite"
 echo "========================================"
@@ -20,8 +27,8 @@ OVERALL_SUCCESS=true
 
 # 1. Run backend tests
 echo -e "${YELLOW}[1/3] Running backend tests...${NC}"
-cd /root/news-aggregator/backend
-if python -m pytest ../tests/backend/ -v --tb=short 2>&1 | tail -20; then
+cd "$PROJECT/backend"
+if "$PYTHON" -m pytest ../tests/backend/ -v --tb=short; then
     echo -e "${GREEN}✓ Backend tests passed${NC}"
 else
     echo -e "${RED}✗ Backend tests failed${NC}"
@@ -31,8 +38,8 @@ echo ""
 
 # 2. Run frontend build validation
 echo -e "${YELLOW}[2/3] Running frontend build validation...${NC}"
-cd /root/news-aggregator
-if python scripts/validate_build.py; then
+cd "$PROJECT"
+if "$PYTHON" scripts/validate_build.py; then
     echo -e "${GREEN}✓ Frontend build validation passed${NC}"
 else
     echo -e "${RED}✗ Frontend build validation failed (some warnings are OK)${NC}"
@@ -42,8 +49,9 @@ echo ""
 
 # 3. Run crawler tests
 echo -e "${YELLOW}[3/3] Running crawler tests...${NC}"
-cd /root/news-aggregator
-if python -m pytest tests/crawler/ -v --tb=short 2>&1 | tail -10; then
+cd "$PROJECT"
+if PYTHONPATH="$PROJECT/backend:$PROJECT/crawler${PYTHONPATH:+:$PYTHONPATH}" \
+    "$PYTHON" -m pytest tests/crawler/ -v --tb=short; then
     echo -e "${GREEN}✓ Crawler tests passed${NC}"
 else
     echo -e "${RED}✗ Crawler tests failed${NC}"

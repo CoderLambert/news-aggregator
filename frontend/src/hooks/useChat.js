@@ -87,7 +87,8 @@ export function useChat(newsId) {
   async function handleSend() {
     const trimmed = input.trim()
     if (!trimmed || isLoading) return
-    doSend(trimmed)
+    setInput('')
+    return doSend(trimmed)
   }
 
   /** Send an explicit text string — bypasses the input state.

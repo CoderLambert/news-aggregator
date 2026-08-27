@@ -36,6 +36,8 @@ AI:        Volcengine ARK (Doubao) / DashScope (Kimi) — 双通道自动切换
 
 ## 🚀 快速开始
 
+> 完整的初始化、开发/生产启动、爬虫、测试、数据和故障排查说明见 [启动与运维说明](./docs/startup.md)。
+
 ### 1. 克隆项目
 
 ```bash

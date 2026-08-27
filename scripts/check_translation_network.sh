@@ -2,17 +2,26 @@
 # Network check script for translation retry trigger
 # Writes status to a file that the retry cron job reads
 
-STATE_FILE="/root/news-aggregator/logs/.translation_network_state"
-LOG_FILE="/root/news-aggregator/logs/cron.log"
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+STATE_FILE="$PROJECT/logs/.translation_network_state"
+LOG_FILE="$PROJECT/logs/cron.log"
+PYTHON="$PROJECT/backend/venv/bin/python"
+if [ ! -x "$PYTHON" ]; then
+  PYTHON="${PYTHON_BIN:-python3}"
+fi
+mkdir -p "$PROJECT/logs"
 
 log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') [net-check] $1" >> "$LOG_FILE"
 }
 
-cd /root/news-aggregator/backend
+cd "$PROJECT/backend"
 
 # Run network check
-if python manage.py check_translation_network --json 2>/dev/null; then
+if "$PYTHON" manage.py check_translation_network --json 2>/dev/null; then
     STATE="ok"
 else
     STATE="down"

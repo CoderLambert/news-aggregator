@@ -1,9 +1,20 @@
 #!/bin/bash
 # 前端开发服务器控制 (Vite)
-PROJECT=/root/news-aggregator
-LOG=$PROJECT/logs/vite.log
-PID_FILE=$PROJECT/logs/vite.pid
-CMD="npx vite --host 0.0.0.0"
+set -u
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+LOG_DIR="$PROJECT/logs"
+LOG="$LOG_DIR/vite.log"
+PID_FILE="$LOG_DIR/vite.pid"
+mkdir -p "$LOG_DIR"
+
+VITE_BIN="$PROJECT/frontend/node_modules/.bin/vite"
+if [ -x "$VITE_BIN" ]; then
+  CMD=("$VITE_BIN" --host 0.0.0.0)
+else
+  CMD=(npx vite --host 0.0.0.0)
+fi
 
 start() {
   if status; then
@@ -11,7 +22,7 @@ start() {
     return 0
   fi
   cd "$PROJECT/frontend"
-  nohup $CMD >> "$LOG" 2>&1 &
+  nohup "${CMD[@]}" >> "$LOG" 2>&1 &
   echo $! > "$PID_FILE"
   sleep 3
   if kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
@@ -29,7 +40,7 @@ stop() {
     rm -f "$PID_FILE"
     echo "Vite 已停止"
   else
-    pkill -f "vite" 2>/dev/null && echo "Vite 已停止" || echo "Vite 未在运行"
+    echo "Vite 未在运行"
   fi
 }
 
@@ -42,7 +53,7 @@ case "${1:-help}" in
   stop)    stop ;;
   status)  if status; then echo "Vite 运行中"; else echo "Vite 未运行"; fi ;;
   restart) stop; sleep 1; start ;;
-  build)   cd "$PROJECT/frontend" && npx vite build ;;
+  build)   cd "$PROJECT/frontend" && "${CMD[@]}" build ;;
   log)     tail -f "$LOG" ;;
   *)
     echo "用法: news-dev {start|stop|restart|status|build|log}"
