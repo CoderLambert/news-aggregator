@@ -113,6 +113,20 @@ npm run build
 
 ### 5. 启动服务
 
+**一键启动（前端 + 后端 + 定时爬虫）**
+
+```bash
+./scripts/news start
+# 访问 http://localhost:5173
+```
+
+查看状态和停止全部服务：
+
+```bash
+./scripts/news status
+./scripts/news stop
+```
+
 **方式 A：开发模式（推荐）**
 
 ```bash
@@ -153,11 +167,17 @@ python manage.py crawl all
 python manage.py crawl hackernews
 ```
 
-也可以设置定时任务：
+也可以手动执行一次全部爬虫：
 
 ```bash
-# 使用项目提供的 cron 脚本
+# 使用项目提供的脚本
 ./scripts/crawl_cron.sh
+```
+
+持续定时抓取请使用统一命令：
+
+```bash
+./scripts/news start
 ```
 
 ## 🧪 测试
@@ -219,6 +239,8 @@ news-aggregator/
 ├── scripts/                  # 运维脚本
 │   ├── news-server           # Django 服务管理
 │   ├── news-dev              # Vite 开发服务器管理
+│   ├── news                  # 前端、后端、爬虫统一管理
+│   ├── news-cron             # 项目级定时爬虫
 │   ├── crawl_cron.sh         # 定时爬虫
 │   └── run_tests.sh          # 全量测试
 ├── start_waitress.py         # Waitress 生产启动脚本

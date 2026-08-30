@@ -1,52 +1,60 @@
-import { useRef, useEffect, useState, useLayoutEffect } from 'react'
-import { Send, Loader2, Globe } from 'lucide-react'
-
+import { useRef, useEffect, useState, useLayoutEffect } from "react";
+import { Send, Loader2, Globe } from "lucide-react";
 const PLACEHOLDERS = [
-  '想问点什么？',
-  '聊聊你的想法…',
-  '让我帮你梳理梳理',
-  '问我点有趣的吧',
-]
+  "想问点什么？",
+  "聊聊你的想法…",
+  "让我帮你梳理梳理",
+  "问我点有趣的吧",
+];
 
 // 5 lines × line-height(20) + py-2 padding (16) = 116px
 // Tuned for mobile readability — beyond 5 lines, scroll instead of grow.
-const MAX_HEIGHT = 116
+const MAX_HEIGHT = 116;
 
-export default function ChatInput({ value, onChange, onSend, isLoading, autoFocus, webSearch, onWebSearchToggle }) {
-  const inputRef = useRef(null)
+export default function ChatInput({
+  value,
+  onChange,
+  onSend,
+  isLoading,
+  autoFocus,
+  webSearch,
+  onWebSearchToggle,
+}) {
+  const inputRef = useRef(null);
   const [placeholder] = useState(
     () => PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)],
-  )
+  );
 
   useEffect(() => {
-    if (autoFocus) inputRef.current?.focus()
-  }, [autoFocus])
+    if (autoFocus) inputRef.current?.focus();
+  }, [autoFocus]);
 
   // Auto-grow: reset to auto so scrollHeight reflects current content,
   // then clamp to MAX_HEIGHT. useLayoutEffect avoids a visible jump
   // between paint and resize.
   useLayoutEffect(() => {
-    const el = inputRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    const next = Math.min(el.scrollHeight, MAX_HEIGHT)
-    el.style.height = `${next}px`
-    el.style.overflowY = el.scrollHeight > MAX_HEIGHT ? 'auto' : 'hidden'
-  }, [value])
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const next = Math.min(el.scrollHeight, MAX_HEIGHT);
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > MAX_HEIGHT ? "auto" : "hidden";
+  }, [value]);
 
   function handleKeyDown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      onSend()
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      onSend();
     }
   }
 
-  const canSend = value.trim() && !isLoading
+  const canSend = value.trim() && !isLoading;
 
   return (
     <div className="px-3 pt-2 pb-3 bg-white border-t border-neutral-100">
-      <div className={`flex items-end gap-2 bg-neutral-100 rounded-2xl p-1.5 transition-all
-        ${canSend ? 'ring-2 ring-orange-200' : 'ring-0'}`}
+      <div
+        className={`flex items-end gap-2 bg-neutral-100 rounded-2xl p-1.5 transition-all
+        ${canSend ? "ring-2 ring-orange-200" : "ring-0"}`}
       >
         <textarea
           ref={inputRef}
@@ -60,19 +68,20 @@ export default function ChatInput({ value, onChange, onSend, isLoading, autoFocu
                      focus:outline-none focus:ring-0
                      text-sm leading-5 text-neutral-900 placeholder-neutral-400
                      py-2 px-3"
-          style={{ minHeight: '36px', maxHeight: `${MAX_HEIGHT}px` }}
+          style={{ minHeight: "36px", maxHeight: `${MAX_HEIGHT}px` }}
         />
         {onWebSearchToggle && (
           <button
             type="button"
             onClick={onWebSearchToggle}
             aria-label="联网搜索"
-            title={webSearch ? '已开启联网搜索' : '开启联网搜索'}
-            className={`flex-shrink-0 px-2 py-1.5 rounded-lg text-[11px] font-medium
+            title={webSearch ? "已开启联网搜索" : "开启联网搜索"}
+            className={`shrink-0 px-2 py-1.5 rounded-lg text-[11px] font-medium
               transition-all select-none cursor-pointer
-              ${webSearch
-                ? 'bg-orange-100 text-orange-700 ring-1 ring-orange-300'
-                : 'text-neutral-400 hover:text-neutral-600 hover:bg-neutral-200'
+              ${
+                webSearch
+                  ? "bg-orange-100 text-orange-700 ring-1 ring-orange-300"
+                  : "text-neutral-400 hover:text-neutral-600 hover:bg-neutral-200"
               }`}
           >
             <Globe className="w-3.5 h-3.5 inline mr-0.5 -mt-px" />
@@ -84,11 +93,12 @@ export default function ChatInput({ value, onChange, onSend, isLoading, autoFocu
           onClick={onSend}
           disabled={!canSend}
           aria-label="发送消息"
-          className={`flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all
+          className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all
             active:scale-90
-            ${canSend
-              ? 'bg-gradient-to-br from-orange-500 to-orange-600 text-white shadow-md hover:shadow-lg hover:scale-105'
-              : 'bg-neutral-300 text-neutral-500 cursor-not-allowed'
+            ${
+              canSend
+                ? "bg-linear-to-br from-orange-500 to-orange-600 text-white shadow-md hover:shadow-lg hover:scale-105"
+                : "bg-neutral-300 text-neutral-500 cursor-not-allowed"
             }`}
         >
           {isLoading ? (
@@ -102,5 +112,5 @@ export default function ChatInput({ value, onChange, onSend, isLoading, autoFocu
         小闻偶尔也会犯错，重要信息请以原文为准 🦊
       </p>
     </div>
-  )
+  );
 }

@@ -184,9 +184,42 @@ backend/venv/bin/python start_waitress.py
 
 ## 5. 服务控制和日志
 
+推荐使用统一命令，一次管理前端、后端和定时爬虫：
+
+```bash
+./scripts/news start
+./scripts/news status
+./scripts/news stop
+```
+
+`start` 默认会立即执行一次全部爬虫，之后每小时执行一次；`stop` 会停止前端、后端、定时器和当前正在运行的爬虫任务。
+
+常用操作：
+
+```bash
+./scripts/news restart       # 重启全部服务
+./scripts/news build         # 构建前端生产资源
+./scripts/news crawl         # 手动执行一次全部爬虫
+./scripts/news log crawler   # 查看爬虫日志
+./scripts/news log backend   # 查看后端日志
+./scripts/news log frontend  # 查看前端日志
+```
+
+定时周期可在根目录 `.env` 中调整：
+
+```dotenv
+CRAWL_INTERVAL_SECONDS=3600
+CRAWL_RUN_ON_START=1
+```
+
+其中 `3600` 表示每小时执行一次，`CRAWL_RUN_ON_START=0` 表示启动定时器时不立即抓取。该调度器由项目自身管理，不依赖系统 `crond` 或 `crontab`。
+
+底层脚本仍可单独使用：
+
 ```bash
 ./scripts/news-server start|stop|restart|status|log
 ./scripts/news-dev start|stop|restart|status|build|log
+./scripts/news-cron start|stop|restart|status|run|log
 ```
 
 日志和 PID 文件位于项目根目录的 `logs/`，该目录被 Git 忽略。若后台脚本不适合当前容器或终端环境，改用 4.1 节的前台命令。
@@ -229,7 +262,8 @@ backend/venv/bin/playwright install chromium
 
 ```bash
 ./scripts/news-cron run       # 手动抓取一次
-./scripts/news-cron start     # 启动 crond（系统需提供 crond/crontab）
+./scripts/news-cron start     # 启动项目级定时器，默认每小时执行
+./scripts/news-cron stop      # 停止定时器和当前爬虫
 ./scripts/news-cron status
 ./scripts/news-cron log
 ```
@@ -240,7 +274,7 @@ backend/venv/bin/playwright install chromium
 ./scripts/check_translation_network.sh
 ```
 
-生产环境应使用系统级 cron 或任务调度器，并确认脚本、Python 环境和日志目录使用绝对路径。
+本地或开发环境可直接使用 `./scripts/news start`。生产环境建议由 systemd、容器编排或其他进程管理器分别托管 Waitress 服务和 `./scripts/news-cron start`，并将 `CRAWL_INTERVAL_SECONDS` 配置在 `.env` 中。
 
 ## 7. 测试和质量检查
 

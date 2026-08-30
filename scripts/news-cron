@@ -1,54 +1,164 @@
 #!/bin/bash
-# 爬虫定时任务控制
+# 项目级定时爬虫控制器
 set -u
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 LOG_DIR="$PROJECT/logs"
-LOG="$LOG_DIR/cron.log"
-PID_FILE="$LOG_DIR/crond.pid"
-mkdir -p "$LOG_DIR"
+LOG="$LOG_DIR/crawl.log"
+PID_FILE="$LOG_DIR/crawler-scheduler.pid"
+RUN_PID_FILE="$LOG_DIR/crawler-run.pid"
+LOCK_FILE="$LOG_DIR/crawler.lock"
+INTERVAL_FILE="$LOG_DIR/crawler-scheduler.interval"
 
 PYTHON="$PROJECT/backend/venv/bin/python"
 if [ ! -x "$PYTHON" ]; then
   PYTHON="${PYTHON_BIN:-python3}"
 fi
 
-start() {
-  if status; then
-    echo "crond 已在运行 (PID $(cat "$PID_FILE"))"
-    return 0
-  fi
-  crond >> "$LOG" 2>&1
-  pgrep -x crond > "$PID_FILE"
-  echo "crond 已启动 (PID $(cat "$PID_FILE"))"
-  echo "定时规则:"
-  crontab -l 2>/dev/null | grep -v '^#' | grep -v '^$'
-}
+# 保留命令行传入的值，使临时测试或运维覆盖优先于 .env。
+INTERVAL_OVERRIDE="${CRAWL_INTERVAL_SECONDS-}"
+RUN_ON_START_OVERRIDE="${CRAWL_RUN_ON_START-}"
 
-stop() {
-  if [ -f "$PID_FILE" ]; then
-    kill "$(cat "$PID_FILE")" 2>/dev/null
-    rm -f "$PID_FILE"
-    echo "crond 已停止"
-  else
-    pkill -x crond 2>/dev/null && echo "crond 已停止" || echo "crond 未在运行"
-  fi
+# 读取项目根目录的 .env，让定时参数可以和后端共用配置。
+if [ -f "$PROJECT/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$PROJECT/.env"
+  set +a
+fi
+
+INTERVAL="${INTERVAL_OVERRIDE:-${CRAWL_INTERVAL_SECONDS:-3600}}"
+RUN_ON_START="${RUN_ON_START_OVERRIDE:-${CRAWL_RUN_ON_START:-1}}"
+mkdir -p "$LOG_DIR"
+
+valid_interval() {
+  case "$INTERVAL" in
+    ''|*[!0-9]*) return 1 ;;
+    0) return 1 ;;
+    *) return 0 ;;
+  esac
 }
 
 status() {
-  [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
+  if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+    return 0
+  fi
+  rm -f "$PID_FILE" "$INTERVAL_FILE"
+  return 1
+}
+
+configured_interval() {
+  if [ -f "$INTERVAL_FILE" ]; then
+    cat "$INTERVAL_FILE"
+  else
+    printf '%s' "$INTERVAL"
+  fi
+}
+
+run_once() {
+  (
+    # 防止手动执行和定时执行重叠，锁文件只属于本项目。
+    exec 9>"$LOCK_FILE"
+    if ! flock -n 9; then
+      echo "[$(date '+%F %T')] 已有爬虫任务运行，跳过本次执行"
+      exit 0
+    fi
+
+    echo "$BASHPID" > "$RUN_PID_FILE"
+    trap 'rm -f "$RUN_PID_FILE"' EXIT
+    echo "[$(date '+%F %T')] 开始抓取全部新闻源"
+    cd "$PROJECT/backend"
+    "$PYTHON" manage.py crawl all
+    result=$?
+    echo "[$(date '+%F %T')] 爬虫结束，退出码: $result"
+    exit "$result"
+  ) >> "$LOG" 2>&1
+}
+
+worker() {
+  if ! valid_interval; then
+    echo "CRAWL_INTERVAL_SECONDS 必须是正整数，当前值: $INTERVAL" >&2
+    return 1
+  fi
+
+  echo "[$(date '+%F %T')] 定时爬虫已启动，间隔: ${INTERVAL}s，启动时执行: ${RUN_ON_START}"
+  if [ "$RUN_ON_START" = "1" ]; then
+    run_once || true
+  fi
+
+  while true; do
+    sleep "$INTERVAL"
+    run_once || true
+  done
+}
+
+start() {
+  if status; then
+    echo "定时爬虫已在运行 (PID $(cat "$PID_FILE"))"
+    return 0
+  fi
+  if ! valid_interval; then
+    echo "CRAWL_INTERVAL_SECONDS 必须是正整数，当前值: $INTERVAL" >&2
+    return 1
+  fi
+
+  nohup setsid "$0" worker >> "$LOG" 2>&1 < /dev/null &
+  echo $! > "$PID_FILE"
+  echo "$INTERVAL" > "$INTERVAL_FILE"
+  sleep 1
+  if status; then
+    echo "定时爬虫已启动 (PID $(cat "$PID_FILE"), interval ${INTERVAL}s)"
+  else
+    echo "启动失败，查看日志: $LOG"
+    rm -f "$PID_FILE" "$INTERVAL_FILE"
+    return 1
+  fi
+}
+
+stop() {
+  local stopped=0
+  if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+    local scheduler_pid
+    scheduler_pid="$(cat "$PID_FILE")"
+    kill -- "-$scheduler_pid" 2>/dev/null || kill "$scheduler_pid" 2>/dev/null || true
+    stopped=1
+  fi
+  if [ -f "$RUN_PID_FILE" ]; then
+    local run_pid
+    run_pid="$(cat "$RUN_PID_FILE" 2>/dev/null || true)"
+    if [ -n "$run_pid" ] && kill -0 "$run_pid" 2>/dev/null; then
+      kill "$run_pid" 2>/dev/null || true
+      stopped=1
+    fi
+  fi
+  rm -f "$PID_FILE" "$RUN_PID_FILE" "$INTERVAL_FILE"
+  if [ "$stopped" = "1" ]; then
+    echo "定时爬虫已停止"
+  else
+    echo "定时爬虫未在运行"
+  fi
 }
 
 case "${1:-help}" in
   start)  start ;;
   stop)   stop ;;
-  status) if status; then echo "crond 运行中"; else echo "crond 未运行"; fi ;;
+  status)
+    if status; then
+      echo "定时爬虫运行中 (PID $(cat "$PID_FILE"), interval $(configured_interval)s)"
+    else
+      echo "定时爬虫未运行"
+    fi
+    ;;
   restart) stop; start ;;
-  run)    cd "$PROJECT/backend" && "$PYTHON" manage.py crawl all ;;
-  log)    tail -f "$PROJECT/logs/crawl.log" ;;
+  run)    run_once ;;
+  log)    tail -f "$LOG" ;;
+  worker) worker ;;
   *)
     echo "用法: news-cron {start|stop|restart|status|run|log}"
-    echo "  run  - 手动执行一次爬虫"
+    echo "  start  - 启动项目级定时爬虫（默认每小时执行一次）"
+    echo "  run    - 手动执行一次爬虫"
+    echo "  stop   - 停止定时器及当前爬虫任务"
+    echo "  环境变量: CRAWL_INTERVAL_SECONDS=3600 CRAWL_RUN_ON_START=1"
     ;;
 esac

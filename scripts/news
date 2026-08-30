@@ -1,0 +1,73 @@
+#!/bin/bash
+# NewsHub 统一服务控制命令
+set -u
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+server() { "$SCRIPT_DIR/news-server" "$@"; }
+frontend() { "$SCRIPT_DIR/news-dev" "$@"; }
+crawler() { "$SCRIPT_DIR/news-cron" "$@"; }
+
+start() {
+  server start || return 1
+  frontend start || return 1
+  crawler start || return 1
+  echo "NewsHub 前端、后端和定时爬虫已全部启动"
+}
+
+stop() {
+  crawler stop || true
+  frontend stop || true
+  server stop || true
+  echo "NewsHub 前端、后端和定时爬虫已全部停止"
+}
+
+status() {
+  echo "[后端]"
+  server status || true
+  echo "[前端]"
+  frontend status || true
+  echo "[爬虫]"
+  crawler status || true
+}
+
+restart() {
+  stop
+  start
+}
+
+logs() {
+  case "${1:-all}" in
+    backend|server) server log ;;
+    frontend|dev) frontend log ;;
+    crawler|crawl) crawler log ;;
+    all)
+      echo "用法: $0 log {backend|frontend|crawler}"
+      echo "三个服务日志分别位于 logs/django.log、logs/vite.log、logs/crawl.log"
+      ;;
+    *)
+      echo "用法: $0 log {backend|frontend|crawler}"
+      return 1
+      ;;
+  esac
+}
+
+case "${1:-help}" in
+  start)   start ;;
+  stop)    stop ;;
+  restart) restart ;;
+  status)  status ;;
+  build)   frontend build ;;
+  crawl)   crawler run ;;
+  log|logs) logs "${2:-all}" ;;
+  *)
+    echo "用法: news {start|stop|restart|status|build|crawl|log}"
+    echo "  start   - 启动前端、后端和定时爬虫"
+    echo "  stop    - 停止前端、后端和定时爬虫"
+    echo "  restart - 重启全部服务"
+    echo "  status  - 查看全部服务状态"
+    echo "  build   - 构建前端生产资源"
+    echo "  crawl   - 手动执行一次全部爬虫"
+    echo "  log     - 查看指定服务日志"
+    ;;
+esac
