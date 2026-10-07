@@ -94,3 +94,16 @@ SearchBar 现在按 React Router 的 POP 导航 key 重置当前草稿并清除�
 验收：`npm run test:run -- --configLoader native`：36 个测试文件、189 项通过；`npm run typecheck`：通过；所有变更源文件和相关回归测试 ESLint 定向检查：通过；production build 输出至 `/tmp/news-aggregator-user-data-slice-dist`：通过。完整 `npm run lint` 仍失败，9 个 errors/2 个 warnings 都在未修改的 MarkdownContent、ProcessTimeline、ResearchHeader、useResearch、ProviderComparisons 文件；首轮记录的 LocalSearch lint 问题已随本次 TSX/Query 迁移消除。本切片未运行真实 API 浏览器 E2E：沿用已记录的 Chromium Crashpad `setsockopt: Operation not permitted` 限制，没有尝试绕过 sandbox。
 
 本切片代码已本地提交：`35d28ab`（`refactor frontend search and user news flows`）；未推送。审阅材料延续同一 Library 文件，准备更新到版本 4。后续审查范围仍包括 Provider Comparisons、Research/其他服务端状态及全局剩余 JS 类型边界；本记录不代表全部前端迁移完成。
+
+## 2026-10-07 P2 收口：搜索草稿与用户状态竞态
+
+起点：`b244fd1593536fdeaadcebed3d240554a8291e4f`。本轮仅修复上轮独审确认的搜索/屏蔽/收藏响应边界；没有更改 Django API 语义、鉴权或业务数据。
+
+- `/search` 去掉 `SearchControls key={location.key}` 全导航重挂。URL query 实际改变时同步输入；仅在新的 POP 导航信号到达时回填 URL query，即使 q 相同、其他筛选不同也会同步。其他 mode、sort、全文、时间和来源类型 PUSH 都保留未提交草稿，并且 POP 后的首个 PUSH 不会再次清空草稿。
+- block/unblock 在 mutation 开始时取消精确 viewer/news block-status query；响应成功后再次取消期间重启的同 key 读取，写入服务端确认状态并使该 status key 与列表 key 失效。deferred GET 回归覆盖 mutation 前和 pending 期间启动、在成功后才返回的旧响应。
+- 收藏 toggle parser 接受真实并发边界 `{created:false}`（以及归一化为双 false 的 no-op）；该响应不改变状态计数或列表项，只失效状态/列表查询以重读，不触发重复 POST。双 true、错误类型或缺少 flags 仍视为畸形响应并不改缓存。
+- Favorites 页面用一个共享 unblock mutation observer，因此 pending 期间全体“恢复”按钮串行禁用，避免 observer 的 `variables` 更新后旧行提前重新可点。
+
+验收：完整 `npm run test:run -- --configLoader native`：36 个测试文件、199 项通过；`npm run typecheck`：通过；变更源文件及回归测试 ESLint 定向检查：通过；production build 输出至 `/tmp/news-aggregator-p2-slice-dist`：通过。完整 `npm run lint` 有 9 个 errors、2 个 warnings，均在未修改的 `MarkdownContent.jsx`、`ProcessTimeline.jsx`、`ResearchHeader.jsx`、`useResearch.js`、`ProviderComparisons.jsx`，与上一轮记录的全仓基线一致；本轮变更文件 lint 通过。没有运行浏览器 E2E，也没有启动 API、访问数据库或调用 AI。工作仍未代表 Provider Comparisons、Research 等剩余模块全部迁移完成。
+
+本轮实现已本地提交：`3cbb9aca148c8ff6aef6e10c0032cb5a769826c2`（`fix frontend search and user state races`）；未推送。审阅补充延续同一 Library 文件，准备更新到版本 6。
