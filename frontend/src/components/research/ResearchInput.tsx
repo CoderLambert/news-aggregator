@@ -93,14 +93,14 @@ export default function ResearchInput({
             type="button"
             onClick={onCancel}
             disabled={!onCancel}
-            aria-label="取消当前研究"
-            title="停止接收流式进度；服务器任务可能仍在运行"
+            aria-label="停止接收当前研究进度"
+            title="仅停止浏览器接收进度；服务器任务可能仍在运行并继续产生费用"
             className="flex-shrink-0 min-h-9 px-2 rounded-xl inline-flex items-center gap-1.5
                        bg-rose-50 text-rose-700 border border-rose-100 hover:bg-rose-100
                        disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
           >
             <Square className="w-3.5 h-3.5" />
-            <span className="text-xs font-medium">取消研究</span>
+            <span className="text-xs font-medium">停止接收</span>
           </button>
         ) : (
           <button
