@@ -1,12 +1,58 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { AuthContext } from '@/context/AuthContext'
-import { blockNews, toggleFavorite, unblockNews } from '@/services/api'
+import { blockNews, checkBlockedStatus, toggleFavorite, unblockNews } from '@/services/api'
 import { useBlockNews, useToggleFavorite, useUnblockNews } from '@/hooks/useNewsMutations'
-import { privateNewsKeys } from '@/services/userNewsQueries'
+import { blockStatusOptions, privateNewsKeys } from '@/services/userNewsQueries'
+import { parseFavoriteToggleResult } from '@/types/userNews'
 
-vi.mock('@/services/api', () => ({ blockNews: vi.fn(), toggleFavorite: vi.fn(), unblockNews: vi.fn() }))
+vi.mock('@/services/api', () => ({
+  blockNews: vi.fn(),
+  checkBlockedStatus: vi.fn(),
+  toggleFavorite: vi.fn(),
+  unblockNews: vi.fn(),
+}))
+
+function deferred() {
+  let resolve
+  const promise = new Promise((accept) => { resolve = accept })
+  return { promise, resolve }
+}
+
+async function startAndResolveLateBlockReads({ client, result, mutation, mutationReply, staleValue, expectedValue }) {
+  const firstRead = deferred()
+  const overlappingRead = deferred()
+  const mutationRequest = deferred()
+  checkBlockedStatus.mockReturnValueOnce(firstRead.promise).mockReturnValueOnce(overlappingRead.promise)
+  mutation.mockReturnValueOnce(mutationRequest.promise)
+
+  const firstReadPromise = client.fetchQuery(blockStatusOptions(12, 21)).catch(() => undefined)
+  await waitFor(() => expect(checkBlockedStatus).toHaveBeenCalledTimes(1))
+  expect(checkBlockedStatus.mock.calls[0][1]).toBeInstanceOf(AbortSignal)
+
+  let mutationPromise
+  await act(async () => {
+    mutationPromise = result.current.mutateAsync({ newsId: 21, viewerId: 12 })
+    await Promise.resolve()
+  })
+  await waitFor(() => expect(mutation).toHaveBeenCalledTimes(1))
+
+  const overlappingReadPromise = client.fetchQuery(blockStatusOptions(12, 21)).catch(() => undefined)
+  await waitFor(() => expect(checkBlockedStatus).toHaveBeenCalledTimes(2))
+
+  await act(async () => {
+    mutationRequest.resolve(mutationReply)
+    await mutationPromise
+  })
+  expect(checkBlockedStatus.mock.calls[0][1].aborted).toBe(true)
+  expect(checkBlockedStatus.mock.calls[1][1].aborted).toBe(true)
+
+  firstRead.resolve(staleValue)
+  overlappingRead.resolve(staleValue)
+  await Promise.all([firstReadPromise, overlappingReadPromise])
+  expect(client.getQueryData(privateNewsKeys.blockStatus(12, 21))).toEqual(expectedValue)
+}
 
 function renderMutation(useMutationHook) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
@@ -25,6 +71,14 @@ function renderMutation(useMutationHook) {
 beforeEach(() => vi.clearAllMocks())
 
 describe('favorite mutations', () => {
+  it.each([
+    { created: false },
+    { removed: false },
+    { created: false, removed: false },
+  ])('accepts a successful no-op response %#', (response) => {
+    expect(parseFavoriteToggleResult(response)).toEqual({ created: false, removed: false })
+  })
+
   it('updates confirmed status counts and invalidates viewer favorite lists', async () => {
     toggleFavorite.mockResolvedValue({ created: true })
     const { result, client, invalidate } = renderMutation(useToggleFavorite)
@@ -49,6 +103,48 @@ describe('favorite mutations', () => {
       await expect(result.current.mutateAsync({ newsId: 21, viewerId: 12, type: 'like' })).rejects.toThrow('forbidden')
     })
     expect(client.getQueryData(statusKey).is_liked).toBe(false)
+    expect(invalidate).not.toHaveBeenCalled()
+  })
+
+  it('accepts a concurrent no-op response without changing cached counts or retrying the POST', async () => {
+    toggleFavorite.mockResolvedValue({ created: false })
+    const { result, client, invalidate } = renderMutation(useToggleFavorite)
+    const statusKey = privateNewsKeys.favoriteStatus(12, 21)
+    const favorite = {
+      id: 55,
+      news: { id: 21, title: 'Existing favorite', title_zh: '', content: '', content_zh: '', url: '', cover_image: '', source_name: '', category_name: '', publish_time: '2026-10-06T09:00:00Z', created_at: '' },
+      type: 'like',
+      created_at: '2026-10-07T06:00:00Z',
+    }
+    const listKey = privateNewsKeys.favorites(12, 'all')
+    const status = { is_liked: true, is_bookmarked: false, like_count: 8, bookmark_count: 1 }
+    const page = { count: 1, next: null, previous: null, results: [favorite] }
+    client.setQueryData(statusKey, status)
+    client.setQueryData(listKey, page)
+
+    await act(async () => { await result.current.mutateAsync({ newsId: 21, viewerId: 12, type: 'like' }) })
+
+    expect(toggleFavorite).toHaveBeenCalledTimes(1)
+    expect(result.current.isError).toBe(false)
+    expect(client.getQueryData(statusKey)).toEqual(status)
+    expect(client.getQueryData(listKey)).toEqual(page)
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: privateNewsKeys.favoriteLists(12) })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: statusKey, exact: true })
+  })
+
+  it('keeps rejecting contradictory favorite mutation flags', async () => {
+    toggleFavorite.mockResolvedValue({ created: true, removed: true })
+    const { result, client, invalidate } = renderMutation(useToggleFavorite)
+    const statusKey = privateNewsKeys.favoriteStatus(12, 21)
+    const status = { is_liked: false, is_bookmarked: false, like_count: 2, bookmark_count: 1 }
+    client.setQueryData(statusKey, status)
+
+    await act(async () => {
+      await expect(result.current.mutateAsync({ newsId: 21, viewerId: 12, type: 'like' })).rejects.toThrow('Invalid favorite mutation response')
+    })
+
+    expect(toggleFavorite).toHaveBeenCalledTimes(1)
+    expect(client.getQueryData(statusKey)).toEqual(status)
     expect(invalidate).not.toHaveBeenCalled()
   })
 
@@ -90,6 +186,19 @@ describe('useBlockNews', () => {
     expect(client.getQueryData(statusKey)).toEqual({ is_blocked: true })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['news', 'list', { viewerId: 12 }] })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: privateNewsKeys.blocked(12) })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: statusKey, exact: true })
+  })
+
+  it('cancels stale and overlapping status GETs before keeping the confirmed blocked state', async () => {
+    const { result, client } = renderMutation(useBlockNews)
+    await startAndResolveLateBlockReads({
+      client,
+      result,
+      mutation: blockNews,
+      mutationReply: { created: true },
+      staleValue: { is_blocked: false },
+      expectedValue: { is_blocked: true },
+    })
   })
 
   it('leaves caches untouched when the server rejects a block', async () => {
@@ -119,6 +228,20 @@ describe('useUnblockNews', () => {
     expect(client.getQueryData(statusKey)).toEqual({ is_blocked: false })
     expect(client.getQueryData(privateNewsKeys.blocked(12)).results).toEqual([])
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['news', 'list', { viewerId: 12 }] })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: statusKey, exact: true })
+  })
+
+  it('cancels stale and overlapping status GETs before keeping the confirmed unblocked state', async () => {
+    const { result, client } = renderMutation(useUnblockNews)
+    client.setQueryData(privateNewsKeys.blockStatus(12, 21), { is_blocked: true })
+    await startAndResolveLateBlockReads({
+      client,
+      result,
+      mutation: unblockNews,
+      mutationReply: { removed: true },
+      staleValue: { is_blocked: true },
+      expectedValue: { is_blocked: false },
+    })
   })
 
   it('leaves caches untouched when the server rejects an unblock', async () => {

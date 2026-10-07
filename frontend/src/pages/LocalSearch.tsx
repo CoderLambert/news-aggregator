@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Link, useLocation, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigationType, useSearchParams } from 'react-router-dom'
 import { Clock, ExternalLink, FileText, Globe, Loader2, Search, SlidersHorizontal, Star } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '@/context/AuthContext'
@@ -122,6 +122,8 @@ function dateAfterDays(days: string): string | undefined {
 export default function LocalSearch() {
   const [searchParams, setSearchParams] = useSearchParams()
   const location = useLocation()
+  const navigationType = useNavigationType()
+  const historyNavigationKey = navigationType === 'POP' ? location.key : null
   const { user, loading: authLoading } = useAuth()
   const { lang } = useLanguage()
   const submittedQuery = (searchParams.get('q') ?? '').trim()
@@ -209,8 +211,8 @@ export default function LocalSearch() {
       </header>
 
       <SearchControls
-        key={location.key}
         initialQuery={submittedQuery}
+        historyNavigationKey={historyNavigationKey}
         mode={mode}
         searching={newsQuery.isFetching}
         buttonLabel={searchButtonLabel}
@@ -348,8 +350,9 @@ export default function LocalSearch() {
   )
 }
 
-function SearchControls({ initialQuery, mode, searching, buttonLabel, onSubmit, onModeChange }: {
+function SearchControls({ initialQuery, historyNavigationKey, mode, searching, buttonLabel, onSubmit, onModeChange }: {
   initialQuery: string
+  historyNavigationKey: string | null
   mode: SearchMode
   searching: boolean
   buttonLabel: string
@@ -357,6 +360,18 @@ function SearchControls({ initialQuery, mode, searching, buttonLabel, onSubmit, 
   onModeChange: (mode: SearchMode) => void
 }) {
   const [draft, setDraft] = useState(initialQuery)
+  const previousQueryRef = useRef(initialQuery)
+  const previousHistoryNavigationKeyRef = useRef(historyNavigationKey)
+
+  useEffect(() => {
+    const queryChanged = previousQueryRef.current !== initialQuery
+    const returnedFromHistory = historyNavigationKey !== null
+      && historyNavigationKey !== previousHistoryNavigationKeyRef.current
+
+    if (queryChanged || returnedFromHistory) setDraft(initialQuery)
+    previousQueryRef.current = initialQuery
+    previousHistoryNavigationKeyRef.current = historyNavigationKey
+  }, [historyNavigationKey, initialQuery])
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
