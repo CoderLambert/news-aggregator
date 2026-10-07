@@ -175,6 +175,42 @@ describe('NewsList URL and server state', () => {
     expect(fetchNews.mock.calls.some(([params]) => params.search === 'discard-after-forward')).toBe(false)
   })
 
+  it('cancels a pending search on back and forward when the search is unchanged', async () => {
+    renderList([
+      '/?search=shared&mode=keyword&category=2&page=1',
+      '/?search=shared&mode=keyword&category=3&page=2',
+    ], { historyControls: true })
+    await waitFor(() => expect(fetchNews).toHaveBeenCalledWith({
+      page: 2,
+      page_size: 20,
+      search: 'shared',
+      mode: 'keyword',
+      category: '3',
+    }, expect.any(AbortSignal)))
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'discard-on-back' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Browser back' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('location-search')).toHaveTextContent('category=2')
+      expect(screen.getByTestId('location-search')).toHaveTextContent('page=1')
+      expect(screen.getByRole('searchbox')).toHaveValue('shared')
+    })
+    await new Promise((resolve) => setTimeout(resolve, 350))
+    expect(screen.getByTestId('location-search')).toHaveTextContent('search=shared')
+    expect(fetchNews.mock.calls.some(([params]) => params.search === 'discard-on-back')).toBe(false)
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'discard-on-forward' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Browser forward' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('location-search')).toHaveTextContent('category=3')
+      expect(screen.getByTestId('location-search')).toHaveTextContent('page=2')
+      expect(screen.getByRole('searchbox')).toHaveValue('shared')
+    })
+    await new Promise((resolve) => setTimeout(resolve, 350))
+    expect(screen.getByTestId('location-search')).toHaveTextContent('search=shared')
+    expect(fetchNews.mock.calls.some(([params]) => params.search === 'discard-on-forward')).toBe(false)
+  })
+
   it('changes pages through URL navigation', async () => {
     renderList('/')
     expect(await screen.findByRole('heading', { name: 'Climate technology update' })).toBeInTheDocument()
