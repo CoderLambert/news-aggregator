@@ -2,6 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { queryClient } from '@/services/queryClient'
+import { newsKeys } from '@/services/newsQueries'
 import { fetchCsrfToken, fetchMe, loginUser, logoutUser, registerUser } from '@/services/api'
 import { isRecord } from '@/types/news'
 
@@ -42,7 +43,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const viewerIdRef = useRef<number | null>(null)
 
   const clearViewerQueries = useCallback(() => {
-    queryClient.removeQueries({ queryKey: ['news', 'list'] })
+    queryClient.removeQueries({ queryKey: newsKeys.lists() })
+    queryClient.removeQueries({ queryKey: newsKeys.details() })
     queryClient.removeQueries({ queryKey: ['private'] })
   }, [])
 

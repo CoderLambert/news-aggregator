@@ -81,3 +81,16 @@
 ## 2026-10-07 小修：相同搜索词的历史 POP
 
 SearchBar 现在按 React Router 的 POP 导航 key 重置当前草稿并清除防抖定时器。列表分类/来源等 PUSH 导航不会清除输入，所以输入后切换筛选仍会合并到最新 URL。新增相同 `search`、不同 `category`/`page` 的后退与前进回归。定向验证：NewsList/SearchBar 2 个测试文件、13 项通过；TypeScript 检查和变更文件 ESLint 通过。
+
+## 2026-10-07 实施检查点：高级搜索、详情与用户新闻数据纵切
+
+分支：`codex/frontend-list-query-slice`，本切片起点 `db3585357fab4573bceb40655b85aa1bad5da50e`。没有改 API 路径、请求字段、Django cookie/CSRF 或业务响应含义，也没有加依赖。
+
+- `/search`、`/news/:id`、`/favorites` 和详情互动按钮已迁至 TSX。高级搜索的已提交词、模式、页码、排序、全文、时间和来源类型仅由 URL 管理；未提交的输入草稿仍是输入组件局部状态。TanStack Query 使用现有搜索参数、语言和 viewer ID 建缓存键，读取传递 `AbortSignal`，同一 viewer/语言切换筛选时可复用占位结果。保留后端既有参数映射：时间范围转为 `publish_time_after`，多选来源类型仍只提交第一项。
+- 详情由 Query 按新闻 ID、语言和 viewer 查询。全文抓取及翻译 SSE 仍通过现有 hook 使用 `setNews`，该 setter 现在写入当前详情 query cache；聊天 SSE 没有迁移。
+- 收藏/点赞状态、屏蔽状态、收藏列表和屏蔽列表使用 viewer 专属 query keys。Query 查询函数均传 `AbortSignal`。Mutation 先校验 API 响应，成功后按目标 viewer 更新已缓存的状态/列表并失效关联列表；拒绝或无效响应保持原状态并显示错误。详情按钮在状态未知或请求进行中时禁用，避免未知状态下重复切换。退出或切换账号仍清除个性化 Query 缓存。
+- 新增 URL 驱动高级搜索测试、Query detail/取消请求/身份隔离测试、收藏/屏蔽成功和失败缓存测试，以及使用 mock API 的搜索→详情→收藏/取消→列表→屏蔽/恢复跨页回归。测试不连接 Django、写入数据库或调用 AI。
+
+验收：`npm run test:run -- --configLoader native`：36 个测试文件、189 项通过；`npm run typecheck`：通过；所有变更源文件和相关回归测试 ESLint 定向检查：通过；production build 输出至 `/tmp/news-aggregator-user-data-slice-dist`：通过。完整 `npm run lint` 仍失败，9 个 errors/2 个 warnings 都在未修改的 MarkdownContent、ProcessTimeline、ResearchHeader、useResearch、ProviderComparisons 文件；首轮记录的 LocalSearch lint 问题已随本次 TSX/Query 迁移消除。本切片未运行真实 API 浏览器 E2E：沿用已记录的 Chromium Crashpad `setsockopt: Operation not permitted` 限制，没有尝试绕过 sandbox。
+
+本地提交与同一 Library review archive 版本号将在此切片最终保存后补录。后续审查范围仍包括 Provider Comparisons、Research/其他服务端状态及全局剩余 JS 类型边界；本记录不代表全部前端迁移完成。
