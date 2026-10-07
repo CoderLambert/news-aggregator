@@ -12,9 +12,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import SearchBar from './SearchBar'
 import { LanguageProvider } from '../context/LanguageContext'
+import { usePreferencesStore } from '../stores/preferences'
 
 function renderWithLang(ui, lang = 'zh') {
-  localStorage.setItem('newshub_lang', lang)
+  usePreferencesStore.getState().setLang(lang)
   return render(<LanguageProvider>{ui}</LanguageProvider>)
 }
 
@@ -22,6 +23,7 @@ beforeEach(() => { vi.useFakeTimers() })
 afterEach(() => {
   vi.useRealTimers()
   localStorage.clear()
+  usePreferencesStore.getState().setLang('zh')
 })
 
 describe('SearchBar', () => {
