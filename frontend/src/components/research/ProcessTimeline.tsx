@@ -1,12 +1,15 @@
 import { useState } from 'react'
+import type { LucideIcon } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import {
   Search, Globe, FileText, BarChart3, FileCheck, ShieldCheck,
   Loader2, Check, ExternalLink, ChevronDown, ChevronRight,
   ArrowUpRight, Newspaper, MessageSquare,
 } from 'lucide-react'
+import { isRecord } from '@/types/news'
+import type { JsonRecord, ResearchArticle, ResearchSearchResult, ResearchToolCall, ResearchWebResult } from '@/types/research'
 
-const TOOL_ICONS = {
+const TOOL_ICONS: Record<string, LucideIcon> = {
   search_news: Search,
   fetch_article: FileText,
   search_web: Globe,
@@ -16,7 +19,7 @@ const TOOL_ICONS = {
   cross_verify: ShieldCheck,
 }
 
-const TOOL_LABELS = {
+const TOOL_LABELS: Record<string, string> = {
   search_news: '搜索新闻库',
   fetch_article: '获取全文',
   search_web: '联网搜索',
@@ -26,13 +29,13 @@ const TOOL_LABELS = {
   cross_verify: '交叉验证',
 }
 
-const SOURCE_TYPE_MAP = {
+const SOURCE_TYPE_MAP: Record<string, { label: string; color: string }> = {
   news: { label: '新闻', color: 'bg-violet-50 text-violet-600' },
   aggregator: { label: '聚合', color: 'bg-amber-50 text-amber-600' },
   discussion: { label: '讨论', color: 'bg-sky-50 text-sky-600' },
 }
 
-const WEB_SOURCE_MAP = {
+const WEB_SOURCE_MAP: Record<string, { label: string; color: string }> = {
   jina: { label: 'Jina', color: 'bg-emerald-50 text-emerald-600' },
   wikipedia_en: { label: 'Wiki EN', color: 'bg-blue-50 text-blue-600' },
   wikipedia_zh: { label: 'Wiki', color: 'bg-blue-50 text-blue-600' },
@@ -48,11 +51,16 @@ const WEB_SOURCE_MAP = {
  * it is used as a supplemental data source — the full result_data is
  * available there even for historical sessions where SSE fields may be absent.
  */
-export default function ProcessTimeline({ toolCalls, searchResults }) {
+interface ProcessTimelineProps {
+  toolCalls?: ResearchToolCall[]
+  searchResults?: ResearchSearchResult[]
+}
+
+export default function ProcessTimeline({ toolCalls, searchResults = [] }: ProcessTimelineProps) {
   if (!toolCalls || toolCalls.length === 0) return null
 
   // Build a lookup: tool_name → [results] for enriching tool call display
-  const resultsByTool = {}
+  const resultsByTool: Record<string, ResearchSearchResult[]> = {}
   if (searchResults && searchResults.length > 0) {
     for (const sr of searchResults) {
       if (!resultsByTool[sr.tool_name]) resultsByTool[sr.tool_name] = []
@@ -65,7 +73,7 @@ export default function ProcessTimeline({ toolCalls, searchResults }) {
       {/* Vertical line */}
       <div className="absolute left-[11px] top-3 bottom-3 w-px bg-gradient-to-b from-violet-200 via-violet-100 to-transparent" />
 
-      {toolCalls.map((tc, i) => {
+      {toolCalls.map((tc) => {
         const isRunning = tc.status === 'running'
         const isDone = tc.status === 'done'
 
@@ -142,28 +150,44 @@ export default function ProcessTimeline({ toolCalls, searchResults }) {
 
 // ── Tool Result Renderers ────────────────────────────────────────────────────
 
+interface ToolResultProps {
+  name: string
+  args: JsonRecord
+  summary: string
+  articles: ResearchArticle[]
+  webResults: ResearchWebResult[]
+  articleTitle: string
+  articleId: string | number | null
+  articleSource: string
+  articleUrl: string
+  contentTruncated: boolean
+  originalLength: number
+  contentLength: number
+  persistedResults: ResearchSearchResult[]
+}
+
 function ToolResult({
   name, args, summary,
   articles, webResults,
   articleTitle, articleId, articleSource, articleUrl,
   contentTruncated, originalLength, contentLength,
   persistedResults,
-}) {
-  let articleList = articles || args?.articles || []
-  let webList = webResults || args?.results || []
+}: ToolResultProps) {
+  let articleList = articles
+  let webList = webResults
 
   // Supplement from persisted search results (from the DB API) when SSE fields are empty
   // This is common for historical sessions where tool results are loaded from messages
   if (articleList.length === 0 && persistedResults?.length > 0) {
     const latest = persistedResults[persistedResults.length - 1]
-    if (latest?.result_data?.articles) {
-      articleList = latest.result_data.articles
+    if (latest?.result_data.articles) {
+      articleList = parseArticleList(latest.result_data.articles)
     }
   }
   if (webList.length === 0 && persistedResults?.length > 0) {
     const latest = persistedResults[persistedResults.length - 1]
-    if (latest?.result_data?.results) {
-      webList = latest.result_data.results
+    if (latest?.result_data.results) {
+      webList = parseWebResultList(latest.result_data.results)
     }
   }
 
@@ -179,12 +203,12 @@ function ToolResult({
     // Try persisted result first (has richer data for historical sessions)
     const persisted = persistedResults?.length > 0 ? persistedResults[persistedResults.length - 1] : null
     const rd = persisted?.result_data || {}
-    const title = articleTitle || args?.title || rd.title_zh || rd.title || ''
-    const id = articleId || args?.id || rd.id
-    const source = articleSource || args?.source || rd.source || ''
-    const url = articleUrl || args?.url || rd.url || ''
-    const truncated = contentTruncated || args?.content_truncated || rd.content_truncated || false
-    const origLen = originalLength || args?.original_length || rd.original_length || 0
+    const title = articleTitle || stringValue(args.title) || stringValue(rd.title_zh) || stringValue(rd.title)
+    const id = articleId ?? optionalId(args.id) ?? optionalId(rd.id)
+    const source = articleSource || stringValue(args.source) || stringValue(rd.source)
+    const url = articleUrl || stringValue(args.url) || stringValue(rd.url)
+    const truncated = contentTruncated || args.content_truncated === true || rd.content_truncated === true
+    const origLen = originalLength || numberValue(args.original_length) || numberValue(rd.original_length)
     return (
       <FetchArticleResult title={title} id={id} source={source} url={url}
         truncated={truncated} originalLength={origLen} />
@@ -194,8 +218,8 @@ function ToolResult({
   if (name === 'fetch_webpage') {
     const persisted = persistedResults?.length > 0 ? persistedResults[persistedResults.length - 1] : null
     const rd = persisted?.result_data || {}
-    const url = articleUrl || args?.url || rd.url || ''
-    const len = contentLength || args?.length || rd.length || 0
+    const url = articleUrl || stringValue(args.url) || stringValue(rd.url)
+    const len = contentLength || numberValue(args.length) || numberValue(rd.length)
     return <FetchWebpageResult url={url} length={len} />
   }
 
@@ -216,15 +240,15 @@ function ToolResult({
 
 // ── search_news: Article cards with external link ────────────────────────────
 
-function SearchNewsResult({ articles }) {
+function SearchNewsResult({ articles }: { articles: ResearchArticle[] }) {
   const [expanded, setExpanded] = useState(false)
   const visible = expanded ? articles : articles.slice(0, 3)
 
   return (
     <div className="mt-1 space-y-1.5">
-      {visible.map(art => (
+      {visible.map((art, index) => (
         <div
-          key={art.id}
+          key={art.id ?? `${art.url ?? 'article'}-${index}`}
           className="group relative bg-white rounded-lg border border-neutral-100
                      hover:border-violet-200 hover:shadow-sm
                      transition-all duration-150 overflow-hidden"
@@ -236,15 +260,15 @@ function SearchNewsResult({ articles }) {
           <div className="flex items-start gap-2 px-3 py-2">
             {/* Main content: link to local detail */}
             <Link
-              to={`/news/${art.id}`}
+              to={`/news/${art.id ?? ''}`}
               className="flex-1 min-w-0"
             >
               <p className="text-[13px] font-medium text-neutral-800 group-hover:text-violet-800 line-clamp-2 leading-snug">
-                {art.title}
+                {art.title || '未命名文章'}
               </p>
               <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                 <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-violet-50 text-[10px] font-medium text-violet-600">
-                  {art.source}
+                  {art.source || '未知来源'}
                 </span>
                 {art.source_type && SOURCE_TYPE_MAP[art.source_type] && (
                   <span className={`inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-medium ${SOURCE_TYPE_MAP[art.source_type].color}`}>
@@ -304,7 +328,7 @@ function SearchNewsResult({ articles }) {
 
 // ── search_web: Web results with snippets ───────────────────────────────────
 
-function SearchWebResult({ results }) {
+function SearchWebResult({ results }: { results: ResearchWebResult[] }) {
   const [expanded, setExpanded] = useState(false)
   const visible = expanded ? results : results.slice(0, 3)
 
@@ -313,7 +337,7 @@ function SearchWebResult({ results }) {
       {visible.map((r, i) => {
         const sourceKey = (r.source || '').replace('wikipedia_', 'wikipedia_')
         const sourceInfo = WEB_SOURCE_MAP[sourceKey] || null
-        const domain = extractDomain(r.url)
+        const domain = extractDomain(stringValue(r.url))
 
         return (
           <a
@@ -374,20 +398,29 @@ function SearchWebResult({ results }) {
 
 // ── fetch_article: Article detail badge ──────────────────────────────────────
 
-function FetchArticleResult({ title, id, source, url, truncated, originalLength }) {
+function FetchArticleResult({ title, id, source, url, truncated, originalLength }: {
+  title: string
+  id: string | number | null
+  source: string
+  url: string
+  truncated: boolean
+  originalLength: number
+}) {
   return (
     <div className="mt-1 inline-flex flex-wrap items-center gap-1.5">
       {/* Internal link to article detail */}
-      <Link
-        to={`/news/${id}`}
-        className="inline-flex items-center gap-1.5 bg-white rounded-lg border border-neutral-100
-                   px-2.5 py-1.5 hover:border-violet-200 hover:bg-violet-50/50 transition-all group"
-      >
-        <FileText className="w-3 h-3 text-neutral-400 group-hover:text-violet-400" />
-        <span className="text-[12px] font-medium text-neutral-700 group-hover:text-violet-700 line-clamp-1 max-w-[200px]">
-          {title}
-        </span>
-      </Link>
+      {id != null ? (
+        <Link
+          to={`/news/${id}`}
+          className="inline-flex items-center gap-1.5 bg-white rounded-lg border border-neutral-100
+                     px-2.5 py-1.5 hover:border-violet-200 hover:bg-violet-50/50 transition-all group"
+        >
+          <FileText className="w-3 h-3 text-neutral-400 group-hover:text-violet-400" />
+          <span className="text-[12px] font-medium text-neutral-700 group-hover:text-violet-700 line-clamp-1 max-w-[200px]">
+            {title}
+          </span>
+        </Link>
+      ) : <span className="text-[12px] font-medium text-neutral-700">{title}</span>}
 
       {/* Source tag */}
       {source && (
@@ -424,7 +457,7 @@ function FetchArticleResult({ title, id, source, url, truncated, originalLength 
 
 // ── fetch_webpage: Scraped page card ────────────────────────────────────────
 
-function FetchWebpageResult({ url, length }) {
+function FetchWebpageResult({ url, length }: { url: string; length: number }) {
   if (!url) return null
   const domain = extractDomain(url)
 
@@ -460,9 +493,14 @@ function FetchWebpageResult({ url, length }) {
 
 // ── generate_report: Report structure with quality checklist ────────────────
 
-function GenerateReportResult({ args, summary }) {
-  const sections = args?.suggested_sections || summary?.match(/(\d+) 个章节/)?.[1]
-  const qualityItems = args?.quality_checklist || []
+function GenerateReportResult({ args, summary }: { args: JsonRecord; summary: string }) {
+  const rawSections = args.suggested_sections
+  const sections = typeof rawSections === 'number' || typeof rawSections === 'string' || Array.isArray(rawSections)
+    ? rawSections
+    : summary.match(/(\d+) 个章节/)?.[1]
+  const qualityItems = Array.isArray(args.quality_checklist)
+    ? args.quality_checklist.filter((item): item is string => typeof item === 'string')
+    : []
 
   return (
     <div className="mt-1 space-y-1">
@@ -489,17 +527,59 @@ function GenerateReportResult({ args, summary }) {
 
 // ── Utilities ───────────────────────────────────────────────────────────────
 
-function truncate(str, max) {
+function parseArticleList(value: unknown): ResearchArticle[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    if (!isRecord(item)) return []
+    return [{
+      ...(typeof item.id === 'number' || typeof item.id === 'string' ? { id: item.id } : {}),
+      ...(typeof item.title === 'string' ? { title: item.title } : {}),
+      ...(typeof item.source === 'string' ? { source: item.source } : {}),
+      ...(typeof item.source_type === 'string' ? { source_type: item.source_type } : {}),
+      ...(typeof item.publish_time === 'string' ? { publish_time: item.publish_time } : {}),
+      ...(typeof item.snippet === 'string' ? { snippet: item.snippet } : {}),
+      ...(typeof item.url === 'string' ? { url: item.url } : {}),
+    }]
+  })
+}
+
+function parseWebResultList(value: unknown): ResearchWebResult[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    if (!isRecord(item)) return []
+    return [{
+      ...(typeof item.title === 'string' ? { title: item.title } : {}),
+      ...(typeof item.source === 'string' ? { source: item.source } : {}),
+      ...(typeof item.snippet === 'string' ? { snippet: item.snippet } : {}),
+      ...(typeof item.url === 'string' ? { url: item.url } : {}),
+    }]
+  })
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
+function optionalId(value: unknown): string | number | null {
+  return typeof value === 'string' || typeof value === 'number' ? value : null
+}
+
+function numberValue(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function truncate(str: unknown, max: number): string {
+  if (typeof str !== 'string' || !str) return ''
   if (!str) return ''
   return str.length > max ? str.slice(0, max) + '…' : str
 }
 
-function formatDate(dateStr) {
+function formatDate(dateStr: string): string {
   if (!dateStr) return ''
   try {
     const d = new Date(dateStr)
     const now = new Date()
-    const diff = now - d
+    const diff = now.getTime() - d.getTime()
     const days = Math.floor(diff / 86400000)
     if (days === 0) return '今天'
     if (days === 1) return '昨天'
@@ -510,7 +590,7 @@ function formatDate(dateStr) {
   }
 }
 
-function extractDomain(url) {
+function extractDomain(url: string): string {
   if (!url) return ''
   try {
     return new URL(url).hostname.replace(/^www\./, '')
@@ -519,7 +599,7 @@ function extractDomain(url) {
   }
 }
 
-function formatCharCount(n) {
+function formatCharCount(n: number): string {
   if (n < 1000) return String(n)
   return `${(n / 1000).toFixed(1)}k`
 }

@@ -107,3 +107,17 @@ SearchBar 现在按 React Router 的 POP 导航 key 重置当前草稿并清除�
 验收：完整 `npm run test:run -- --configLoader native`：36 个测试文件、199 项通过；`npm run typecheck`：通过；变更源文件及回归测试 ESLint 定向检查：通过；production build 输出至 `/tmp/news-aggregator-p2-slice-dist`：通过。完整 `npm run lint` 有 9 个 errors、2 个 warnings，均在未修改的 `MarkdownContent.jsx`、`ProcessTimeline.jsx`、`ResearchHeader.jsx`、`useResearch.js`、`ProviderComparisons.jsx`，与上一轮记录的全仓基线一致；本轮变更文件 lint 通过。没有运行浏览器 E2E，也没有启动 API、访问数据库或调用 AI。工作仍未代表 Provider Comparisons、Research 等剩余模块全部迁移完成。
 
 本轮实现已本地提交：`3cbb9aca148c8ff6aef6e10c0032cb5a769826c2`（`fix frontend search and user state races`）；未推送。审阅补充延续同一 Library 文件，准备更新到版本 6。
+
+## 2026-10-07 实施检查点：Provider 对比与 Research/SSE 纵切
+
+本切片起点为 `9b8329c73b6f86985b79176ec53f103108f9bc5e`。Provider 对比和 Research 面板及依赖组件迁为 TSX，Research SSE 增加运行时事件解析、任务 reducer 与断线重连回放；没有改 API 路径、请求字段、Django session/CSRF 或后端行为，也没有增加依赖。
+
+- TanStack Query 负责 Provider 对比列表、创建/重测后失效，以及 Research 会话、会话详情和持久化结果；viewer/语言参与个性化缓存键，查询传播 AbortSignal。流式增量消息保存在当前 Research 任务本地状态，不复制进 Query 或 Zustand。Zustand 仍只持有全局客户端偏好。
+- Research stream 事件按会话和任务连接归属应用；tool call/result 按 call ID 去重，允许 result 先于对应 call 到达；complete/error 是终态，忽略之后到达的迟到事件。完成后重取持久化会话快照；手动停止仅中止当前浏览器读取，页面明确说明后端 worker 继续运行。刷新/重访可通过已有 GET stream 端点订阅仍活动的任务并接收 replay；已完成结果由会话 Query 恢复。
+- Research 不因挂载、重渲染或重试自动重复创建昂贵任务；创建请求有同步锁，失败/断线用现有任务 ID 恢复。Provider create 仍是现有同步单 POST，不增加自动重试。每个 provider retest 独立发请求、维护 AbortController 和“停止等待”状态；停止仅结束浏览器侧等待，既有 API 没有取消后端 provider 任务的语义。
+- Provider/Research API 和 UI props 增加 TS 类型与 unknown 响应边界检查；Button/Input 共享控件迁为 TSX 修复原有 JS 推断问题。`MarkdownContent.jsx` 移除两处现有未使用符号，使完整 ESLint 可以通过。未改无关业务数据或凭据。
+- 新增 reducer、Research hook/面板、SSE API、Provider API/UI 回归：去重、乱序、complete 后迟到事件、断线恢复、显式取消、失败重试、切换会话/用户、Provider 防重复创建及逐行独立停止等。
+
+验收：`npm run test:run -- --configLoader native`：40 个测试文件、215 项通过；`npm run typecheck`：通过；`npm run lint`：通过。production build 用 `npm run build -- --configLoader native --outDir /tmp/news-aggregator-provider-research-slice-dist --emptyOutDir` 输出至 `/tmp` 并通过。未在浏览器启动真实 API 测试：此前本机 Chromium 因 Crashpad `setsockopt: Operation not permitted` 退出；本切片没有绕过 sandbox，也没有连接 Django、生产/开发数据库或外部 AI。服务端 retest/Research worker 的实际中止仍需后端 API 支持，本前端不会声称停止了服务端执行。
+
+本切片按本地提交保留，未推送，供主助手审查；此前已提交的高级搜索/详情/用户数据切片仍保存在本分支历史中。

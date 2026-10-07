@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Check, Copy, ExternalLink, Link2, Newspaper } from 'lucide-react'
+import { Check, Copy, ExternalLink, Newspaper } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import MermaidBlock from './MermaidBlock'
 import { highlightCode, normalizeShikiLanguage } from '@/lib/shiki'
@@ -348,8 +348,6 @@ function extractSourceLinks(node) {
 function SourceItem({ index, text, links }) {
   // Clean up the text: remove leading punctuation/colons from the label
   const cleanText = text.replace(/^[\s：:—\-–]+/, '').trim()
-  const isLocalLink = links.some(l => l.href.startsWith('/news/'))
-
   return (
     <div className="group flex items-start gap-2.5 px-3 py-2 rounded-lg border border-neutral-100
                     hover:border-violet-200 hover:bg-violet-50/30 transition-all duration-150">
