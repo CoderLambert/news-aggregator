@@ -1,5 +1,5 @@
 import type { MouseEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { EyeOff } from 'lucide-react'
 import { useLanguage } from '@/context/useLanguage'
 import { useAuth } from '@/context/AuthContext'
@@ -35,6 +35,8 @@ function resolveDisplay(news: NewsSummary, displayMode: DisplayMode) {
 export default function NewsCard({ news, onRemoved }: NewsCardProps) {
   const { displayMode, t, lang } = useLanguage()
   const { user } = useAuth()
+  const location = useLocation()
+  const returnTo = `${location.pathname}${location.search}${location.hash}`
   const blockMutation = useBlockNews()
   const { title, subtitle, content } = resolveDisplay(news, displayMode)
 
@@ -52,7 +54,7 @@ export default function NewsCard({ news, onRemoved }: NewsCardProps) {
 
   return (
     <article className="group relative overflow-hidden rounded-xl border border-gray-200 bg-white transition-all duration-200 hover:border-gray-300 hover:shadow-md">
-      <Link to={`/news/${news.id}`} className="block">
+      <Link to={`/news/${news.id}`} state={{ from: returnTo }} className="block">
         {news.cover_image && <div className="aspect-video overflow-hidden bg-gray-100"><img src={news.cover_image} alt="" className="h-full w-full object-cover" loading="lazy" /></div>}
         <div className="p-4">
           <div className="mb-2 flex items-start justify-between gap-2">

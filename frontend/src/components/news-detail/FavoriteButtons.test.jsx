@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import FavoriteButtons from './FavoriteButtons'
 import * as api from '@/services/api'
 import { AuthContext } from '@/context/AuthContext'
@@ -8,15 +9,21 @@ vi.mock('@/services/api', () => ({
   toggleFavorite: vi.fn(),
   checkFavoriteStatus: vi.fn(),
   blockNews: vi.fn(),
+  unblockNews: vi.fn(),
   checkBlockedStatus: vi.fn(),
 }))
 
-function renderWithAuth(ui, user = null) {
-  return render(
-    <AuthContext.Provider value={{ user, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
-      {ui}
-    </AuthContext.Provider>
-  )
+function renderWithAuth(ui, user = null, client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })) {
+  return {
+    client,
+    ...render(
+      <QueryClientProvider client={client}>
+        <AuthContext.Provider value={{ user, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
+          {ui}
+        </AuthContext.Provider>
+      </QueryClientProvider>
+    ),
+  }
 }
 
 describe('FavoriteButtons', () => {
@@ -100,16 +107,38 @@ describe('FavoriteButtons', () => {
     })
   })
 
-  it('blocks news on block button click', async () => {
+  it('invalidates news lists after blocking a news item', async () => {
     api.blockNews.mockResolvedValue({ created: true })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
 
-    renderWithAuth(<FavoriteButtons newsId={1} />, { id: 1, username: 'test' })
+    renderWithAuth(<FavoriteButtons newsId={1} />, { id: 1, username: 'test' }, client)
 
     await waitFor(() => expect(screen.getByLabelText('屏蔽此新闻')).toBeInTheDocument())
     fireEvent.click(screen.getByLabelText('屏蔽此新闻'))
 
     await waitFor(() => {
       expect(api.blockNews).toHaveBeenCalledWith(1)
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['news', 'list'] })
     })
+    expect(await screen.findByLabelText('取消屏蔽')).toBeInTheDocument()
+  })
+
+  it('invalidates news lists after unblocking a news item', async () => {
+    api.checkBlockedStatus.mockResolvedValue({ is_blocked: true })
+    api.unblockNews.mockResolvedValue({ removed: true })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+
+    renderWithAuth(<FavoriteButtons newsId={1} />, { id: 1, username: 'test' }, client)
+
+    await waitFor(() => expect(screen.getByLabelText('取消屏蔽')).toBeInTheDocument())
+    fireEvent.click(screen.getByLabelText('取消屏蔽'))
+
+    await waitFor(() => {
+      expect(api.unblockNews).toHaveBeenCalledWith(1)
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['news', 'list'] })
+    })
+    expect(await screen.findByLabelText('屏蔽此新闻')).toBeInTheDocument()
   })
 })

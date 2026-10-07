@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from 'react'
 import { Heart, Bookmark, LogIn, EyeOff } from 'lucide-react'
 import gsap from 'gsap'
 import { useGSAP } from '@gsap/react'
-import { toggleFavorite, checkFavoriteStatus, blockNews, unblockNews, checkBlockedStatus } from '@/services/api'
+import { toggleFavorite, checkFavoriteStatus, checkBlockedStatus } from '@/services/api'
 import { useAuth } from '@/context/AuthContext'
+import { useBlockNews, useUnblockNews } from '@/hooks/useNewsMutations'
 
 gsap.registerPlugin(useGSAP)
 
@@ -12,6 +13,8 @@ gsap.registerPlugin(useGSAP)
  */
 export default function FavoriteButtons({ newsId, className = '', onAuthRequired, onBlocked }) {
   const { user } = useAuth()
+  const blockMutation = useBlockNews()
+  const unblockMutation = useUnblockNews()
   const [isLiked, setIsLiked] = useState(false)
   const [isBookmarked, setIsBookmarked] = useState(false)
   const [isBlocked, setIsBlocked] = useState(false)
@@ -111,7 +114,7 @@ export default function FavoriteButtons({ newsId, className = '', onAuthRequired
 
   const handleBlock = async () => {
     try {
-      await blockNews(newsId)
+      await blockMutation.mutateAsync(Number(newsId))
       setIsBlocked(true)
 
       // 屏蔽飞走动画
@@ -134,7 +137,7 @@ export default function FavoriteButtons({ newsId, className = '', onAuthRequired
 
   const handleUnblock = async () => {
     try {
-      await unblockNews(newsId)
+      await unblockMutation.mutateAsync(Number(newsId))
       setIsBlocked(false)
     } catch (err) {
       console.error('Failed to unblock news:', err)

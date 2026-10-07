@@ -66,3 +66,14 @@
 ## 待续范围
 
 下一切片应延续该分支和本记录，迁移详情用户数据/Provider 或高级搜索中的一条纵向路径；覆盖 mutation 成功/失败与 Query 缓存失效，再逐模块迁移剩余页面和 SSE 取消/缓存语义。高级搜索路由当前仍保留既有 URL/local state 镜像，不能声称全前端迁移完成。真实 API 浏览器验收需等可用的非生产 API 环境及不冲突端口。
+
+## 2026-10-07 最终审查修补：列表接口回归
+
+分支：`codex/frontend-list-query-slice`。本轮仅补齐首个列表切片在鉴权、URL 导航和现有屏蔽操作之间的接口行为：
+
+- TanStack Query 列表占位数据只在上一查询与当前查询的 `viewerId` 和语言相同时复用；实际 `AuthProvider` 登出及切换账号测试证明新响应到达前不会显示上一身份的列表。
+- SearchBar 的防抖提交读取最新 URL 回调；筛选/搜索模式变化会合并到最近 URL，浏览器前进/后退替换搜索值时会取消未提交草稿。
+- NewsCard 将当前路径与查询串保存在路由 state；详情返回恢复来源 URL，直接打开详情仍回退首页。
+- 列表/详情屏蔽和详情/收藏页取消屏蔽成功后统一定向失效 `newsKeys.lists()`；失败不失效。列表→详情屏蔽→返回以及取消屏蔽→返回测试均确认恢复原筛选 URL 并重新请求列表。
+
+验收：定向回归 7 个文件、30 项测试通过；完整套件 34 个文件、178 项测试通过；`npm run typecheck`、变更文件 ESLint、production build 均通过。完整 `npm run lint` 仍为原基线的 10 errors、3 warnings，均在未修改的 Markdown、Research、LocalSearch、ProviderComparisons 文件。浏览器端到端仍 `NOT_RUN`：Chromium Crashpad sandbox 限制未绕过；未启动后端或触碰生产数据。

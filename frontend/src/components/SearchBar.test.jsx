@@ -66,6 +66,33 @@ describe('SearchBar', () => {
     expect(onChange).toHaveBeenLastCalledWith('react')
   })
 
+  it('calls the latest onChange callback if it changes while a debounce is pending', () => {
+    const oldOnChange = vi.fn()
+    const latestOnChange = vi.fn()
+    const props = { value: '', mode: 'hybrid', onModeChange: () => {} }
+    const { rerender } = renderWithLang(<SearchBar {...props} onChange={oldOnChange} />)
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'fresh' } })
+    rerender(<LanguageProvider><SearchBar {...props} onChange={latestOnChange} /></LanguageProvider>)
+    act(() => { vi.advanceTimersByTime(350) })
+
+    expect(oldOnChange).not.toHaveBeenCalled()
+    expect(latestOnChange).toHaveBeenCalledWith('fresh')
+  })
+
+  it('cancels a pending debounce when an external URL value replaces the draft', () => {
+    const onChange = vi.fn()
+    const props = { mode: 'hybrid', onChange, onModeChange: () => {} }
+    const { rerender } = renderWithLang(<SearchBar {...props} value="before" />)
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'draft' } })
+    rerender(<LanguageProvider><SearchBar {...props} value="after" /></LanguageProvider>)
+    expect(screen.getByRole('searchbox')).toHaveValue('after')
+    act(() => { vi.advanceTimersByTime(350) })
+
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
   it('calls onModeChange when mode button is clicked', () => {
     const onModeChange = vi.fn()
     renderWithLang(

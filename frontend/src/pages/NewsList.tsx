@@ -1,9 +1,10 @@
 import { useEffect } from 'react'
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { useLanguage } from '@/context/useLanguage'
 import { categoryOptions, newsListOptions, sourceOptions } from '@/services/newsQueries'
+import { isRecord } from '@/types/news'
 import type { NewsListParams, SearchMode } from '@/types/news'
 import NewsCard from '@/components/NewsCard'
 import SearchBar from '@/components/SearchBar'
@@ -92,7 +93,12 @@ export default function NewsList() {
   const newsQuery = useQuery({
     ...newsListOptions(query, lang, viewerId),
     enabled: !authLoading && !legacyToMigrate,
-    placeholderData: keepPreviousData,
+    placeholderData: (previousData, previousQuery) => {
+      const previousScope = previousQuery?.queryKey[2]
+      return isRecord(previousScope) && previousScope.viewerId === viewerId && previousScope.lang === lang
+        ? previousData
+        : undefined
+    },
   })
   const categoriesQuery = useQuery(categoryOptions(lang))
   const sourcesQuery = useQuery(sourceOptions(lang))

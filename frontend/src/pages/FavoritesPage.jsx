@@ -2,15 +2,17 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { Heart, Bookmark, ArrowLeft, Clock, LogIn, EyeOff, RotateCcw } from 'lucide-react'
 import LoadingSpinner from '../components/LoadingSpinner'
-import { fetchUserFavorites, fetchBlockedNews, unblockNews } from '../services/api'
+import { fetchUserFavorites, fetchBlockedNews } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import AuthModal from '../components/AuthModal'
+import { useUnblockNews } from '../hooks/useNewsMutations'
 
 /**
  * FavoritesPage — 用户收藏/屏蔽列表页
  */
 export default function FavoritesPage() {
   const { user } = useAuth()
+  const unblockMutation = useUnblockNews()
   const [favorites, setFavorites] = useState([])
   const [blocked, setBlocked] = useState([])
   const [loading, setLoading] = useState(true)
@@ -51,7 +53,7 @@ export default function FavoritesPage() {
 
   const handleUnblock = async (newsId) => {
     try {
-      await unblockNews(newsId)
+      await unblockMutation.mutateAsync(newsId)
       setBlocked(prev => prev.filter(b => b.news?.id !== newsId))
     } catch (err) {
       console.error('Failed to unblock:', err)

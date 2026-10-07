@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useLocation, useParams, Link } from "react-router-dom";
 import { Search, ArrowLeft, Headphones } from "lucide-react";
 import { useLanguage } from "../context/useLanguage";
 import { useSpeechPlayer } from "../context/SpeechPlayerContext";
@@ -22,6 +22,11 @@ import { useArticleSearch } from "../hooks/useArticleSearch";
 import { useArticleToc } from "../hooks/useArticleToc";
 export default function NewsDetail() {
   const { id } = useParams();
+  const location = useLocation();
+  const requestedReturnTo = location.state?.from;
+  const returnTo = typeof requestedReturnTo === "string" && requestedReturnTo.startsWith("/") && !requestedReturnTo.startsWith("//")
+    ? requestedReturnTo
+    : "/";
   const { displayMode, t } = useLanguage();
   const { news, setNews, loading } = useNewsDetail(id);
   const { articleLoading, articleError, handleFetchFullArticle, cancelFetch } =
@@ -130,7 +135,7 @@ export default function NewsDetail() {
         {/* ── Top nav bar ── */}
         <nav className="flex items-center justify-between mb-8">
           <Link
-            to="/"
+            to={returnTo}
             className="inline-flex items-center gap-1.5 text-sm text-neutral-500 hover:text-neutral-900 transition-colors"
           >
             <ArrowLeft className="size-3.5" />
