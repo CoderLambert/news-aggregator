@@ -1,5 +1,7 @@
 import { lazy, Suspense, useState, useRef, useEffect, useCallback } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { queryClient } from './services/queryClient'
 import { LanguageProvider } from './context/LanguageContext'
 import { useLanguage } from './context/useLanguage'
 import { AuthProvider } from './context/AuthContext'
@@ -24,34 +26,36 @@ const MascotPreview = lazy(() => import('./components/mascot/MascotPreview'))
 
 export default function App() {
   return (
-    <LanguageProvider>
-      <AuthProvider>
-        <SpeechPlayerProvider>
-          <BrowserRouter>
-            <div className="min-h-screen bg-gray-50 overflow-x-hidden">
-              <Header />
-              <main>
-                <AppErrorBoundary onReset={() => window.location.reload()}>
-                  <Suspense fallback={<LoadingSpinner />}>
-                  <Routes>
-                    <Route path="/" element={<NewsList />} />
-                    <Route path="/search" element={<LocalSearch />} />
-                    <Route path="/news/:id" element={<NewsDetail />} />
-                    <Route path="/favorites" element={<FavoritesPage />} />
-                    <Route path="/provider-comparisons" element={<ProviderComparisons />} />
-                    <Route path="/__mascot__" element={<MascotPreview />} />
-                  </Routes>
-                  </Suspense>
-                </AppErrorBoundary>
-              </main>
-              <Footer />
-              <ResearchPanel />
-              <GlobalSpeechPlayer />
-            </div>
-          </BrowserRouter>
-        </SpeechPlayerProvider>
-      </AuthProvider>
-    </LanguageProvider>
+    <QueryClientProvider client={queryClient}>
+      <LanguageProvider>
+        <AuthProvider>
+          <SpeechPlayerProvider>
+            <BrowserRouter>
+              <div className="min-h-screen bg-gray-50 overflow-x-hidden">
+                <Header />
+                <main>
+                  <AppErrorBoundary onReset={() => window.location.reload()}>
+                    <Suspense fallback={<LoadingSpinner />}>
+                      <Routes>
+                        <Route path="/" element={<NewsList />} />
+                        <Route path="/search" element={<LocalSearch />} />
+                        <Route path="/news/:id" element={<NewsDetail />} />
+                        <Route path="/favorites" element={<FavoritesPage />} />
+                        <Route path="/provider-comparisons" element={<ProviderComparisons />} />
+                        <Route path="/__mascot__" element={<MascotPreview />} />
+                      </Routes>
+                    </Suspense>
+                  </AppErrorBoundary>
+                </main>
+                <Footer />
+                <ResearchPanel />
+                <GlobalSpeechPlayer />
+              </div>
+            </BrowserRouter>
+          </SpeechPlayerProvider>
+        </AuthProvider>
+      </LanguageProvider>
+    </QueryClientProvider>
   )
 }
 

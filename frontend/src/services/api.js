@@ -59,8 +59,8 @@ const apiLong  = makeApi(180_000)  // translation (3 min)
 
 // ---- REST endpoints --------------------------------------------------------
 
-export const fetchNews = (params = {}) =>
-  api.get('/news/', { params }).then(res => res.data)
+export const fetchNews = (params = {}, signal) =>
+  api.get('/news/', { params, signal }).then(res => res.data)
 
 export const fetchSemanticSearch = (query, params = {}) =>
   api.get('/news/', { params: { ...params, search: query, mode: 'semantic' } }).then(res => res.data)
@@ -74,11 +74,11 @@ export const fetchFullArticle = (id, force = false, signal) =>
 export const translateFullArticle = (id) =>
   apiLong.post(`/news/${id}/translate/`).then(res => res.data)
 
-export const fetchCategories = () =>
-  api.get('/categories/').then(res => res.data)
+export const fetchCategories = (signal) =>
+  api.get('/categories/', { signal }).then(res => res.data)
 
-export const fetchSources = () =>
-  api.get('/sources/').then(res => res.data)
+export const fetchSources = (signal) =>
+  api.get('/sources/', { signal }).then(res => res.data)
 
 // ---- Provider Comparisons --------------------------------------------------
 
