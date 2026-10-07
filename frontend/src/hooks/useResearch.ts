@@ -299,6 +299,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
   })
 
   const [taskSnapshots, setTaskSnapshots] = useState<Map<string, ResearchTaskSnapshot>>(() => new Map())
+  const [connectionBusy, setConnectionBusy] = useState(false)
   const taskSnapshotsRef = useRef(taskSnapshots)
   const connectionRef = useRef<ActiveConnection | null>(null)
   const taskSequenceRef = useRef(0)
@@ -364,6 +365,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     connectionRef.current = null
     connection.controller.abort()
     sendLockRef.current = false
+    setConnectionBusy(false)
     const current = taskSnapshotsRef.current.get(connection.taskKey)
     if (!current || current.id !== connection.id || !isActivePhase(current)) return
     putTask(connection.taskKey, markResearchTaskCancelled(current, notice))
@@ -477,8 +479,8 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     }
   }, [attachSessionId, connectionIsCurrent, currentConnectionTask, putTask, refreshCompletedTask])
 
-  const runStreamTask = useCallback(async (task: ResearchTaskSnapshot, mode: 'create' | 'chat') => {
-    if (connectionRef.current || sendLockRef.current || viewerId === null) return
+  const runStreamTask = useCallback((task: ResearchTaskSnapshot, mode: 'create' | 'chat'): boolean => {
+    if (connectionRef.current || sendLockRef.current || viewerId === null) return false
     const taskKey = task.sessionId
       ? taskStorageKey(queryViewerId, task.sessionId)
       : draftStorageKey(queryViewerId, task.id)
@@ -496,23 +498,33 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     }
     connectionRef.current = connection
     sendLockRef.current = true
+    setConnectionBusy(true)
 
-    try {
-      const events = mode === 'create'
-        ? createResearchStream(task.query, {
-            localOnly: task.localOnly,
-            signal: connection.controller.signal,
-            onSessionId: (sessionId) => attachSessionId(connection, sessionId),
-          })
-        : researchChatStream(task.sessionId ?? '', task.query, { localOnly: task.localOnly, signal: connection.controller.signal })
-      await consumeResearchEvents(connection, events)
-    } finally {
-      if (connectionRef.current === connection) {
-        connectionRef.current = null
-        sendLockRef.current = false
+    void (async () => {
+      try {
+        const events = mode === 'create'
+          ? createResearchStream(task.query, {
+              localOnly: task.localOnly,
+              signal: connection.controller.signal,
+              onSessionId: (sessionId) => attachSessionId(connection, sessionId),
+            })
+          : researchChatStream(task.sessionId ?? '', task.query, { localOnly: task.localOnly, signal: connection.controller.signal })
+        await consumeResearchEvents(connection, events)
+      } catch {
+        if (connectionIsCurrent(connection)) {
+          const current = currentConnectionTask(connection)
+          if (current) putTask(connection.taskKey, markResearchTaskInterrupted(current, ERROR_MESSAGE))
+        }
+      } finally {
+        if (connectionRef.current === connection) {
+          connectionRef.current = null
+          sendLockRef.current = false
+          setConnectionBusy(false)
+        }
       }
-    }
-  }, [attachSessionId, consumeResearchEvents, putTask, queryViewerId, viewerId])
+    })()
+    return true
+  }, [attachSessionId, connectionIsCurrent, consumeResearchEvents, currentConnectionTask, putTask, queryViewerId, viewerId])
 
   const startSessionRecovery = useCallback(async (sessionId: string, requestedTask?: ResearchTaskSnapshot) => {
     if (viewerId === null || connectionRef.current || sendLockRef.current) return
@@ -539,6 +551,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     }
     connectionRef.current = connection
     sendLockRef.current = true
+    setConnectionBusy(true)
     try {
       // Recovery is a read-only probe. It either reattaches to the live SSE
       // stream or returns the already-saved session as JSON.
@@ -582,14 +595,15 @@ export function useResearch(viewerId: ResearchViewerId | null) {
       if (connectionRef.current === connection) {
         connectionRef.current = null
         sendLockRef.current = false
+        setConnectionBusy(false)
       }
     }
   }, [connectionIsCurrent, consumeResearchEvents, currentConnectionTask, lang, putTask, queryClient, queryViewerId, removeTask, viewerId])
 
   const handleSend = useCallback(async (query: string, { localOnly = false }: { localOnly?: boolean } = {}) => {
     const normalizedQuery = query.trim()
-    if (!normalizedQuery || connectionRef.current || sendLockRef.current || viewerId === null) return
-    if (activeTask?.recovery === 'resume') return
+    if (!normalizedQuery || connectionRef.current || sendLockRef.current || viewerId === null) return false
+    if (activeTask?.recovery === 'resume') return false
 
     const sessionId = activeSessionId
     const currentTask = activeTask
@@ -603,7 +617,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
       : { messageCount: 0 }
     const taskId = `research-${Date.now()}-${++taskSequenceRef.current}`
     const task = createResearchTask(taskId, normalizedQuery, localOnly, priorMessages, sessionId, messageCount)
-    await runStreamTask(task, sessionId ? 'chat' : 'create')
+    return runStreamTask(task, sessionId ? 'chat' : 'create')
   }, [activeSessionId, activeTask, lang, queryClient, queryViewerId, runStreamTask, viewerId])
 
   const handleNewSession = useCallback(() => {
@@ -692,6 +706,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     loadingSessions: sessionsQuery.isPending,
     searchResults,
     hasRecoverableTask: activeTask?.recovery === 'resume',
+    isBusy: connectionBusy,
     recoveryAction: activeTask?.recovery ?? 'none',
     handleSend,
     handleNewSession,

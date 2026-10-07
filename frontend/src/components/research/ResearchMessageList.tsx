@@ -15,9 +15,10 @@ interface ResearchMessageListProps {
   phase: ResearchPhase
   searchResults: ResearchSearchResult[]
   onSuggestionClick?: (query: string) => void
+  disabled?: boolean
 }
 
-export default function ResearchMessageList({ messages, phase, searchResults, onSuggestionClick }: ResearchMessageListProps) {
+export default function ResearchMessageList({ messages, phase, searchResults, onSuggestionClick, disabled = false }: ResearchMessageListProps) {
   const endRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -49,6 +50,7 @@ export default function ResearchMessageList({ messages, phase, searchResults, on
               key={query}
               type="button"
               onClick={() => onSuggestionClick?.(query)}
+              disabled={disabled}
               className="text-left px-4 py-3 rounded-xl bg-white border border-neutral-100
                          text-sm text-neutral-700 hover:border-violet-200 hover:bg-violet-50/50
                          hover:text-violet-800 transition-all duration-150 shadow-sm
