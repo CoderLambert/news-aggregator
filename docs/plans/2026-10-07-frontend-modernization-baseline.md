@@ -77,3 +77,7 @@
 - 列表/详情屏蔽和详情/收藏页取消屏蔽成功后统一定向失效 `newsKeys.lists()`；失败不失效。列表→详情屏蔽→返回以及取消屏蔽→返回测试均确认恢复原筛选 URL 并重新请求列表。
 
 验收：定向回归 7 个文件、30 项测试通过；完整套件 34 个文件、178 项测试通过；`npm run typecheck`、变更文件 ESLint、production build 均通过。完整 `npm run lint` 仍为原基线的 10 errors、3 warnings，均在未修改的 Markdown、Research、LocalSearch、ProviderComparisons 文件。浏览器端到端仍 `NOT_RUN`：Chromium Crashpad sandbox 限制未绕过；未启动后端或触碰生产数据。
+
+## 2026-10-07 小修：相同搜索词的历史 POP
+
+SearchBar 现在按 React Router 的 POP 导航 key 重置当前草稿并清除防抖定时器。列表分类/来源等 PUSH 导航不会清除输入，所以输入后切换筛选仍会合并到最新 URL。新增相同 `search`、不同 `category`/`page` 的后退与前进回归。定向验证：NewsList/SearchBar 2 个测试文件、13 项通过；TypeScript 检查和变更文件 ESLint 通过。

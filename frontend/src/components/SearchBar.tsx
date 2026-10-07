@@ -11,6 +11,7 @@ interface SearchBarProps {
   mode: SearchMode
   onChange: (value: string) => void
   onModeChange: (mode: SearchMode) => void
+  historyNavigationKey?: string | null
 }
 
 const modes: Record<'zh' | 'en', Array<{ key: SearchMode; label: string }>> = {
@@ -18,17 +19,24 @@ const modes: Record<'zh' | 'en', Array<{ key: SearchMode; label: string }>> = {
   en: [{ key: 'keyword', label: 'Keyword' }, { key: 'semantic', label: 'Semantic' }, { key: 'hybrid', label: 'Hybrid' }],
 }
 
-export default function SearchBar({ value, mode, onChange, onModeChange }: SearchBarProps) {
+export default function SearchBar({ value, mode, onChange, onModeChange, historyNavigationKey = null }: SearchBarProps) {
   const { lang, t } = useLanguage()
-  const [display, setDisplay] = useState(value)
-  const [syncedValue, setSyncedValue] = useState(value)
+  const [inputState, setInputState] = useState(() => ({ value, display: value, historyNavigationKey }))
+  const display = inputState.display
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const onChangeRef = useRef(onChange)
   const currentValueRef = useRef(value)
+  const lastHistoryNavigationKeyRef = useRef(historyNavigationKey)
 
-  if (value !== syncedValue) {
-    setSyncedValue(value)
-    setDisplay(value)
+  const valueChanged = inputState.value !== value
+  const navigationChanged = inputState.historyNavigationKey !== historyNavigationKey
+  const returnedFromHistory = historyNavigationKey !== null && navigationChanged
+  if (valueChanged || navigationChanged) {
+    setInputState({
+      value,
+      display: valueChanged || returnedFromHistory ? value : inputState.display,
+      historyNavigationKey,
+    })
   }
 
   useEffect(() => {
@@ -44,12 +52,22 @@ export default function SearchBar({ value, mode, onChange, onModeChange }: Searc
     }
   }, [value])
 
+  useEffect(() => {
+    const previousNavigationKey = lastHistoryNavigationKeyRef.current
+    lastHistoryNavigationKeyRef.current = historyNavigationKey
+    if (historyNavigationKey === null || historyNavigationKey === previousNavigationKey) return
+    if (timer.current) {
+      clearTimeout(timer.current)
+      timer.current = null
+    }
+  }, [historyNavigationKey])
+
   useEffect(() => () => {
     if (timer.current) clearTimeout(timer.current)
   }, [])
 
   function handleChange(nextValue: string) {
-    setDisplay(nextValue)
+    setInputState((previous) => ({ ...previous, display: nextValue }))
     if (timer.current) clearTimeout(timer.current)
     timer.current = setTimeout(() => {
       timer.current = null

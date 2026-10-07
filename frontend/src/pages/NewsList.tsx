@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigationType, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { useLanguage } from '@/context/useLanguage'
 import { categoryOptions, newsListOptions, sourceOptions } from '@/services/newsQueries'
@@ -59,6 +59,9 @@ function readLegacyFilters(): LegacyFilters | null {
 export default function NewsList() {
   const { lang } = useLanguage()
   const { user, loading: authLoading } = useAuth()
+  const location = useLocation()
+  const navigationType = useNavigationType()
+  const historyNavigationKey = navigationType === 'POP' ? location.key : null
   const [searchParams, setSearchParams] = useSearchParams()
   const search = searchParams.get('search') ?? ''
   const rawMode = searchParams.get('mode')
@@ -126,6 +129,7 @@ export default function NewsList() {
         <SearchBar
           value={search}
           mode={mode}
+          historyNavigationKey={historyNavigationKey}
           onChange={(value) => updateParams({ search: value.trim() || null, page: null }, true)}
           onModeChange={(value) => updateParams({ mode: value, page: null })}
         />
