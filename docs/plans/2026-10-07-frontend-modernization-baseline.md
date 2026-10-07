@@ -93,4 +93,4 @@ SearchBar 现在按 React Router 的 POP 导航 key 重置当前草稿并清除�
 
 验收：`npm run test:run -- --configLoader native`：36 个测试文件、189 项通过；`npm run typecheck`：通过；所有变更源文件和相关回归测试 ESLint 定向检查：通过；production build 输出至 `/tmp/news-aggregator-user-data-slice-dist`：通过。完整 `npm run lint` 仍失败，9 个 errors/2 个 warnings 都在未修改的 MarkdownContent、ProcessTimeline、ResearchHeader、useResearch、ProviderComparisons 文件；首轮记录的 LocalSearch lint 问题已随本次 TSX/Query 迁移消除。本切片未运行真实 API 浏览器 E2E：沿用已记录的 Chromium Crashpad `setsockopt: Operation not permitted` 限制，没有尝试绕过 sandbox。
 
-本地提交与同一 Library review archive 版本号将在此切片最终保存后补录。后续审查范围仍包括 Provider Comparisons、Research/其他服务端状态及全局剩余 JS 类型边界；本记录不代表全部前端迁移完成。
+本切片代码已本地提交：`35d28ab`（`refactor frontend search and user news flows`）；未推送。审阅材料延续同一 Library 文件，准备更新到版本 4。后续审查范围仍包括 Provider Comparisons、Research/其他服务端状态及全局剩余 JS 类型边界；本记录不代表全部前端迁移完成。
