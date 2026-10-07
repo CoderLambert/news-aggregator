@@ -45,7 +45,7 @@ export default function NewsCard({ news, onRemoved }: NewsCardProps) {
     event.stopPropagation()
     if (!user) return
     try {
-      await blockMutation.mutateAsync(news.id)
+      await blockMutation.mutateAsync({ newsId: news.id, viewerId: user.id })
       onRemoved?.(news.id)
     } catch {
       // Inline feedback below the control is sufficient for this action.

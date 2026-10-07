@@ -65,8 +65,8 @@ export const fetchNews = (params = {}, signal) =>
 export const fetchSemanticSearch = (query, params = {}) =>
   api.get('/news/', { params: { ...params, search: query, mode: 'semantic' } }).then(res => res.data)
 
-export const fetchNewsDetail = (id) =>
-  api.get(`/news/${id}/`).then(res => res.data)
+export const fetchNewsDetail = (id, signal) =>
+  api.get(`/news/${id}/`, { signal }).then(res => res.data)
 
 export const fetchFullArticle = (id, force = false, signal) =>
   apiFetch.post(`/news/${id}/fetch-full/`, force ? { force: true } : undefined, { signal }).then(res => res.data)
@@ -144,11 +144,11 @@ export async function* chatStream(newsId, question, { webSearch = false } = {}) 
 export const toggleFavorite = (newsId, type) =>
   api.post('/favorites/', { news_id: newsId, type }).then(res => res.data)
 
-export const checkFavoriteStatus = (newsId) =>
-  api.get('/favorites/check/', { params: { news_id: newsId } }).then(res => res.data)
+export const checkFavoriteStatus = (newsId, signal) =>
+  api.get('/favorites/check/', { params: { news_id: newsId }, signal }).then(res => res.data)
 
-export const fetchUserFavorites = (params = {}) =>
-  api.get('/favorites/', { params }).then(res => res.data)
+export const fetchUserFavorites = (params = {}, signal) =>
+  api.get('/favorites/', { params, signal }).then(res => res.data)
 
 // ---- Blocked News -----------------------------------------------------------
 
@@ -158,11 +158,11 @@ export const blockNews = (newsId) =>
 export const unblockNews = (newsId) =>
   api.delete('/blocked/', { data: { news_id: newsId } }).then(res => res.data)
 
-export const checkBlockedStatus = (newsId) =>
-  api.get('/blocked/check/', { params: { news_id: newsId } }).then(res => res.data)
+export const checkBlockedStatus = (newsId, signal) =>
+  api.get('/blocked/check/', { params: { news_id: newsId }, signal }).then(res => res.data)
 
-export const fetchBlockedNews = (params = {}) =>
-  api.get('/blocked/', { params }).then(res => res.data)
+export const fetchBlockedNews = (params = {}, signal) =>
+  api.get('/blocked/', { params, signal }).then(res => res.data)
 
 // ---- Authentication --------------------------------------------------------
 

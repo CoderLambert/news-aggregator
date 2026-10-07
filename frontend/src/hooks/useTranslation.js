@@ -11,8 +11,8 @@ import {
  * Translation lifecycle hook.
  *
  * @param {string}  id   — article id
- * @param {object}  news — current news state (read-only for marker checks)
- * @param {(fn: (prev: object) => object) => void} setNews — updater for news state
+ * @param {import('../types/news').NewsDetail|null} news — current news state (read-only for marker checks)
+ * @param {import('react').Dispatch<import('react').SetStateAction<import('../types/news').NewsDetail|null>>} setNews — updater for news state
  * @param {boolean} loading — whether the article is still being fetched
  */
 export function useTranslation(id, news, setNews, loading) {

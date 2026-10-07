@@ -2,6 +2,8 @@ export type SearchMode = 'keyword' | 'semantic' | 'hybrid'
 export type DisplayMode = 'zh' | 'original' | 'bilingual'
 export type Language = 'zh' | 'en'
 export type FavoriteType = 'like' | 'bookmark'
+export type SourceType = 'news' | 'aggregator' | 'discussion'
+export type SearchOrderBy = 'relevance' | 'time'
 
 export interface NewsListParams {
   page: number
@@ -10,8 +12,11 @@ export interface NewsListParams {
   mode?: SearchMode
   category?: string
   source?: string
+  order_by?: SearchOrderBy
+  full_content?: 'true'
+  publish_time_after?: string
+  source__source_type?: SourceType
 }
-
 export interface Page<T> {
   count: number
   next: string | null
@@ -46,6 +51,17 @@ export interface NewsSummary {
   full_content_quality_score: number | null
   full_content_retry_count: number
   last_full_content_attempt: string | null
+}
+
+
+export interface NewsDetail extends NewsSummary {
+  source_url: string
+  full_content: string
+  full_content_fetched_at: string | null
+  full_content_zh: string
+  full_content_zh_fetched_at: string | null
+  full_content_zh_source: string | null
+  full_translation_active: boolean
 }
 
 export interface FilterOption {
@@ -135,3 +151,20 @@ export function parseFilterOptions(value: unknown): FilterOption[] {
     return [{ id: item.id, name: item.name }]
   })
 }
+
+export function parseNewsDetail(value: unknown): NewsDetail {
+  if (!isRecord(value)) throw new TypeError('Invalid detail response: expected an object')
+  const summary = parseNewsSummary(value)
+  const nullableDate = (key: string) => typeof value[key] === 'string' ? value[key] as string : null
+  return {
+    ...summary,
+    source_url: typeof value.source_url === 'string' ? value.source_url : '',
+    full_content: typeof value.full_content === 'string' ? value.full_content : '',
+    full_content_fetched_at: nullableDate('full_content_fetched_at'),
+    full_content_zh: typeof value.full_content_zh === 'string' ? value.full_content_zh : '',
+    full_content_zh_fetched_at: nullableDate('full_content_zh_fetched_at'),
+    full_content_zh_source: typeof value.full_content_zh_source === 'string' ? value.full_content_zh_source : null,
+    full_translation_active: typeof value.full_translation_active === 'boolean' ? value.full_translation_active : false,
+  }
+}
+// Response parsing stays centralized at the API boundary.

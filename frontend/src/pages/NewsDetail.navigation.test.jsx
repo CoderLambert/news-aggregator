@@ -6,15 +6,13 @@ import { AuthContext } from '@/context/AuthContext'
 import { usePreferencesStore } from '@/stores/preferences'
 import NewsList from './NewsList'
 import NewsDetail from './NewsDetail'
-import { blockNews, checkFavoriteStatus, fetchCategories, fetchNews, fetchSources, unblockNews } from '@/services/api'
+import { blockNews, checkFavoriteStatus, fetchCategories, fetchNews, fetchNewsDetail, fetchSources, unblockNews } from '@/services/api'
 
-const { apiState, useNewsDetailMock } = vi.hoisted(() => ({
-  apiState: { blocked: false },
-  useNewsDetailMock: vi.fn(),
-}))
+const apiState = vi.hoisted(() => ({ blocked: false }))
 
 vi.mock('@/services/api', () => ({
   fetchNews: vi.fn(),
+  fetchNewsDetail: vi.fn(),
   fetchCategories: vi.fn(),
   fetchSources: vi.fn(),
   checkFavoriteStatus: vi.fn(),
@@ -24,7 +22,6 @@ vi.mock('@/services/api', () => ({
   unblockNews: vi.fn(async () => { apiState.blocked = false; return { removed: true } }),
 }))
 
-vi.mock('../hooks/useNewsDetail', () => ({ useNewsDetail: useNewsDetailMock }))
 vi.mock('../hooks/useFullArticle', () => ({ useFullArticle: () => ({ articleLoading: false, articleError: '', handleFetchFullArticle: vi.fn(), cancelFetch: vi.fn() }) }))
 vi.mock('../hooks/useTranslation', () => ({ useTranslation: () => ({ translating: false, translateError: '', translationProgress: '', showOriginal: false, setShowOriginal: vi.fn(), handleTranslate: vi.fn() }) }))
 vi.mock('../hooks/useArticleSearch', () => ({ useArticleSearch: () => ({ matchCount: 0, currentIndex: 0, goNext: vi.fn(), goPrev: vi.fn() }) }))
@@ -42,7 +39,10 @@ const listStory = {
 }
 const detailStory = {
   ...listStory,
-  full_content: '', full_content_zh: '', full_translation_active: false,
+  source_url: listStory.url,
+  full_content: '', full_content_fetched_at: null,
+  full_content_zh: '', full_content_zh_fetched_at: null, full_content_zh_source: null,
+  full_translation_active: false,
 }
 
 function RouteProbe() {
@@ -79,8 +79,8 @@ beforeEach(() => {
   fetchNews.mockResolvedValue({ count: 41, next: null, previous: null, results: [listStory] })
   fetchCategories.mockResolvedValue([{ id: 2, name: 'Technology' }])
   fetchSources.mockResolvedValue([{ id: 8, name: 'Example source' }])
+  fetchNewsDetail.mockResolvedValue(detailStory)
   checkFavoriteStatus.mockResolvedValue({ is_liked: false, is_bookmarked: false, like_count: 0, bookmark_count: 0 })
-  useNewsDetailMock.mockReturnValue({ news: detailStory, setNews: vi.fn(), loading: false })
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
 })
 
