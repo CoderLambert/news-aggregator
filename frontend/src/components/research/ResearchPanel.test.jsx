@@ -88,7 +88,7 @@ describe('ResearchPanel', () => {
     expect(await screen.findByRole('dialog', { name: '新闻研究助手' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '分析 AI 芯片竞争格局' }))
 
-    const cancelButton = await screen.findByRole('button', { name: '取消当前研究' })
+    const cancelButton = await screen.findByRole('button', { name: '停止接收当前研究进度' })
     expect(requestSignal.aborted).toBe(false)
     fireEvent.click(cancelButton)
 
