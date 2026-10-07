@@ -133,7 +133,7 @@ export default function FavoritesPage() {
                   key={block.id}
                   block={block}
                   onUnblock={handleUnblock}
-                  pending={unblockMutation.isPending && unblockMutation.variables?.newsId === block.news.id}
+                  pending={unblockMutation.isPending}
                 />
               ))}
             </div>

@@ -139,7 +139,7 @@ function parseMutationFlags(value: unknown, endpoint: string): { created: boolea
 
 export function parseFavoriteToggleResult(value: unknown): FavoriteToggleResult {
   const result = parseMutationFlags(value, 'favorite')
-  if (result.created === result.removed) throw new TypeError('Invalid favorite mutation response')
+  if (result.created && result.removed) throw new TypeError('Invalid favorite mutation response')
   return {
     ...result,
     ...(result.created && isRecord(value) && 'news' in value ? { favorite: parseUserFavorite(value) } : {}),

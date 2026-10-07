@@ -102,6 +102,50 @@ describe('LocalSearch Query and URL state', () => {
     await waitFor(() => expect(screen.getByTestId('route')).toHaveTextContent('page=2'))
   })
 
+  it('preserves an unsent draft across mode and filter PUSH navigations', async () => {
+    renderSearch(['/search?q=committed&mode=semantic'])
+    const input = screen.getByRole('searchbox', { name: '搜索本地新闻文章' })
+    fireEvent.change(input, { target: { value: 'unsent words' } })
+
+    fireEvent.click(screen.getByRole('button', { name: '关键词' }))
+    await waitFor(() => expect(screen.getByTestId('route')).toHaveTextContent('mode=keyword'))
+    expect(input).toHaveValue('unsent words')
+
+    fireEvent.click(screen.getByRole('button', { name: '最新发布' }))
+    await waitFor(() => expect(screen.getByTestId('route')).toHaveTextContent('order_by=time'))
+    expect(input).toHaveValue('unsent words')
+
+    fireEvent.click(screen.getByRole('button', { name: /筛选/ }))
+    fireEvent.click(screen.getByRole('button', { name: '讨论' }))
+    await waitFor(() => expect(screen.getByTestId('route')).toHaveTextContent('source_types=discussion'))
+    expect(input).toHaveValue('unsent words')
+  })
+
+  it('syncs the URL query on POP with the same query and keeps a new draft on the next PUSH', async () => {
+    renderSearch([
+      '/search?q=same&mode=keyword&order_by=relevance',
+      '/search?q=same&mode=semantic&order_by=time',
+    ], 1)
+    const input = screen.getByRole('searchbox', { name: '搜索本地新闻文章' })
+    fireEvent.change(input, { target: { value: 'draft before back' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'history back' }))
+    await waitFor(() => expect(screen.getByTestId('route')).toHaveTextContent('mode=keyword'))
+    expect(input).toHaveValue('same')
+
+    fireEvent.change(input, { target: { value: 'draft after back' } })
+    fireEvent.click(screen.getByRole('button', { name: '最新发布' }))
+    await waitFor(() => expect(screen.getByTestId('route')).toHaveTextContent('order_by=time'))
+    expect(input).toHaveValue('draft after back')
+
+    fireEvent.click(screen.getByRole('button', { name: 'history back' }))
+    await waitFor(() => expect(screen.getByTestId('route')).toHaveTextContent('order_by=relevance'))
+    expect(input).toHaveValue('same')
+    fireEvent.click(screen.getByRole('button', { name: 'history forward' }))
+    await waitFor(() => expect(screen.getByTestId('route')).toHaveTextContent('order_by=time'))
+    expect(input).toHaveValue('same')
+  })
+
   it('shows a retry state on read failure and keeps the empty state for a confirmed empty response', async () => {
     fetchNews.mockRejectedValueOnce(new Error('network unavailable'))
     renderSearch(['/search?q=climate'])

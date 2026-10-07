@@ -33,6 +33,16 @@ export function useToggleFavorite() {
       return { newsId, viewerId, type, result }
     },
     onSuccess: async ({ newsId, viewerId, type, result }) => {
+      const favoriteListsKey = privateNewsKeys.favoriteLists(viewerId)
+      const favoriteStatusKey = privateNewsKeys.favoriteStatus(viewerId, newsId)
+      if (!result.created && !result.removed) {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: favoriteListsKey }),
+          queryClient.invalidateQueries({ queryKey: favoriteStatusKey, exact: true }),
+        ])
+        return
+      }
+
       queryClient.setQueryData<FavoriteStatus>(privateNewsKeys.favoriteStatus(viewerId, newsId), (current) => {
         if (!current) return current
         const field = type === 'like' ? 'is_liked' : 'is_bookmarked'
@@ -64,8 +74,8 @@ export function useToggleFavorite() {
       }
 
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: privateNewsKeys.favoriteLists(viewerId) }),
-        queryClient.invalidateQueries({ queryKey: privateNewsKeys.favoriteStatus(viewerId, newsId), exact: true }),
+        queryClient.invalidateQueries({ queryKey: favoriteListsKey }),
+        queryClient.invalidateQueries({ queryKey: favoriteStatusKey, exact: true }),
       ])
     },
   })
@@ -80,9 +90,15 @@ export function useBlockNews() {
       const result = parseBlockMutationResult(await blockNews(newsId))
       return { newsId, viewerId, result }
     },
+    onMutate: async ({ newsId, viewerId }) => {
+      await queryClient.cancelQueries({ queryKey: privateNewsKeys.blockStatus(viewerId, newsId), exact: true })
+    },
     onSuccess: async ({ newsId, viewerId }) => {
-      queryClient.setQueryData<BlockStatus>(privateNewsKeys.blockStatus(viewerId, newsId), { is_blocked: true })
+      const blockStatusKey = privateNewsKeys.blockStatus(viewerId, newsId)
+      await queryClient.cancelQueries({ queryKey: blockStatusKey, exact: true })
+      queryClient.setQueryData<BlockStatus>(blockStatusKey, { is_blocked: true })
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: blockStatusKey, exact: true }),
         queryClient.invalidateQueries({ queryKey: newsKeys.viewerLists(viewerId) }),
         queryClient.invalidateQueries({ queryKey: privateNewsKeys.blocked(viewerId) }),
       ])
@@ -99,8 +115,13 @@ export function useUnblockNews() {
       const result = parseBlockMutationResult(await unblockNews(newsId))
       return { newsId, viewerId, result }
     },
+    onMutate: async ({ newsId, viewerId }) => {
+      await queryClient.cancelQueries({ queryKey: privateNewsKeys.blockStatus(viewerId, newsId), exact: true })
+    },
     onSuccess: async ({ newsId, viewerId }) => {
-      queryClient.setQueryData<BlockStatus>(privateNewsKeys.blockStatus(viewerId, newsId), { is_blocked: false })
+      const blockStatusKey = privateNewsKeys.blockStatus(viewerId, newsId)
+      await queryClient.cancelQueries({ queryKey: blockStatusKey, exact: true })
+      queryClient.setQueryData<BlockStatus>(blockStatusKey, { is_blocked: false })
       queryClient.setQueriesData({ queryKey: privateNewsKeys.blocked(viewerId) }, (current) => {
         if (!current || typeof current !== 'object' || !('results' in current) || !Array.isArray(current.results)) return current
         return {
@@ -116,6 +137,7 @@ export function useUnblockNews() {
         }
       })
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: blockStatusKey, exact: true }),
         queryClient.invalidateQueries({ queryKey: newsKeys.viewerLists(viewerId) }),
         queryClient.invalidateQueries({ queryKey: privateNewsKeys.blocked(viewerId) }),
       ])
