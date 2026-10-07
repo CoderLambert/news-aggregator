@@ -165,7 +165,7 @@ export function resetResearchTaskForReplay(task: ResearchTaskSnapshot, nextId: s
 export function researchTaskMessages(task: ResearchTaskSnapshot): ResearchMessage[] {
   const messages: ResearchMessage[] = [
     ...task.baseMessages,
-    task.userMessage,
+    ...(task.query ? [task.userMessage] : []),
     { ...task.assistant, toolCalls: [...task.assistant.toolCalls] },
   ]
   if (task.notice) {

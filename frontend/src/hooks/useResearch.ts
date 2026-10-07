@@ -37,6 +37,16 @@ import type { ResearchTaskSnapshot } from './researchTask'
 
 const ERROR_MESSAGE = '研究过程中遇到了问题，请稍后再试。'
 const CANCEL_NOTICE = '已停止接收流式进度。服务器任务可能仍在运行；需要时可继续接收。'
+const RECOVERY_STORAGE_PREFIX = 'news-aggregator:research-recovery:v1'
+
+interface StoredResearchRecovery {
+  version: 1
+  taskId: string
+  sessionId: string
+  query: string
+  localOnly: boolean
+  startingMessageCount: number
+}
 
 interface ResearchSelection {
   viewerId: ResearchViewerId | null
@@ -64,6 +74,81 @@ function taskStorageKey(viewerId: ResearchViewerId, sessionId: string): string {
 
 function draftStorageKey(viewerId: ResearchViewerId, taskId: string): string {
   return `${String(viewerId)}:draft:${taskId}`
+}
+
+function recoveryStorageKey(viewerId: ResearchViewerId, sessionId: string): string {
+  return `${RECOVERY_STORAGE_PREFIX}:${encodeURIComponent(String(viewerId))}:${encodeURIComponent(sessionId)}`
+}
+
+function saveStoredRecovery(viewerId: ResearchViewerId, task: ResearchTaskSnapshot): void {
+  if (!task.sessionId || typeof window === 'undefined') return
+  const stored: StoredResearchRecovery = {
+    version: 1,
+    taskId: task.id,
+    sessionId: task.sessionId,
+    query: task.query,
+    localOnly: task.localOnly,
+    startingMessageCount: task.startingMessageCount,
+  }
+  try {
+    window.sessionStorage.setItem(recoveryStorageKey(viewerId, task.sessionId), JSON.stringify(stored))
+  } catch {
+    // Recovery remains available for this mounted panel if browser storage is disabled.
+  }
+}
+
+function clearStoredRecovery(viewerId: ResearchViewerId, sessionId: string): void {
+  if (typeof window === 'undefined') return
+  try { window.sessionStorage.removeItem(recoveryStorageKey(viewerId, sessionId)) } catch { /* storage is optional */ }
+}
+
+function loadStoredRecovery(viewerId: ResearchViewerId, sessionId: string): StoredResearchRecovery | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const value: unknown = JSON.parse(window.sessionStorage.getItem(recoveryStorageKey(viewerId, sessionId)) ?? 'null')
+    if (!isRecord(value)
+      || value.version !== 1
+      || typeof value.taskId !== 'string'
+      || value.sessionId !== sessionId
+      || typeof value.query !== 'string'
+      || value.query.length > 20_000
+      || typeof value.localOnly !== 'boolean'
+      || typeof value.startingMessageCount !== 'number'
+      || !Number.isInteger(value.startingMessageCount)
+      || value.startingMessageCount < 0) {
+      clearStoredRecovery(viewerId, sessionId)
+      return null
+    }
+    return {
+      version: 1,
+      taskId: value.taskId,
+      sessionId,
+      query: value.query,
+      localOnly: value.localOnly,
+      startingMessageCount: value.startingMessageCount,
+    }
+  } catch {
+    return null
+  }
+}
+
+function restoreStoredTask(
+  stored: StoredResearchRecovery,
+  baseMessages: ResearchMessage[],
+): ResearchTaskSnapshot {
+  return {
+    ...createResearchTask(
+      stored.taskId,
+      stored.query,
+      stored.localOnly,
+      baseMessages,
+      stored.sessionId,
+      stored.startingMessageCount,
+    ),
+    phase: 'cancelled',
+    recovery: 'resume',
+    notice: '正在检查已有的服务器任务；不会自动重新发起研究。',
+  }
 }
 
 function safeParseJson(value: string): JsonRecord {
@@ -219,6 +304,9 @@ export function useResearch(viewerId: ResearchViewerId | null) {
   const taskSequenceRef = useRef(0)
   const activeSessionIdRef = useRef<string | null>(activeSessionId)
   const activeDraftKeyRef = useRef<string | null>(currentSelection.draftKey)
+  const probeSelectionRef = useRef<{ key: string | null; generation: number }>({ key: null, generation: 0 })
+  const startedProbeGenerationRef = useRef(-1)
+  const skipAutoProbeKeyRef = useRef<string | null>(null)
   const sendLockRef = useRef(false)
 
   useEffect(() => {
@@ -290,6 +378,35 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     return task?.id === connection.id ? task : null
   }, [])
 
+  const attachSessionId = useCallback((connection: ActiveConnection, sessionId: string) => {
+    if (!connectionIsCurrent(connection)) return
+    const current = currentConnectionTask(connection)
+    if (!current) return
+    if (current.sessionId === sessionId) {
+      saveStoredRecovery(queryViewerId, current)
+      return
+    }
+
+    const oldKey = connection.taskKey
+    const sessionKey = taskStorageKey(queryViewerId, sessionId)
+    const nextTask = { ...current, sessionId }
+    const nextTasks = new Map(taskSnapshotsRef.current)
+    if (oldKey !== sessionKey) nextTasks.delete(oldKey)
+    nextTasks.set(sessionKey, nextTask)
+    connection.taskKey = sessionKey
+    saveStoredRecovery(queryViewerId, nextTask)
+    publishTasks(nextTasks)
+    if (connection.selectOnCreate && activeDraftKeyRef.current === oldKey) {
+      skipAutoProbeKeyRef.current = sessionKey
+      setSelectionForSession(sessionId)
+      connection.selectOnCreate = false
+    }
+
+    // The backend creates the history row before returning the stream headers.
+    // Refresh here so a user can leave this task and recover it from history.
+    void queryClient.invalidateQueries({ queryKey: researchKeys.sessions(queryViewerId, lang), exact: true })
+  }, [connectionIsCurrent, currentConnectionTask, lang, publishTasks, queryClient, queryViewerId, setSelectionForSession])
+
   const refreshCompletedTask = useCallback(async (connection: ActiveConnection, task: ResearchTaskSnapshot) => {
     if (viewerId === null || !task.sessionId) return
     const sessionId = task.sessionId
@@ -307,6 +424,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
       ])
       const current = taskSnapshotsRef.current.get(taskStorageKey(queryViewerId, sessionId))
       if (sessionHasSavedTask(session, task) && current?.id === connection.id && current.phase === 'success') {
+        clearStoredRecovery(queryViewerId, sessionId)
         removeTask(taskStorageKey(queryViewerId, sessionId), connection.id)
       }
     } catch {
@@ -326,20 +444,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
         if (!current) return
 
         if (event.type === 'session_created') {
-          const nextTask = applyResearchEvent(current, event)
-          if (nextTask.sessionId) {
-            const oldKey = connection.taskKey
-            const sessionKey = taskStorageKey(queryViewerId, nextTask.sessionId)
-            const nextTasks = new Map(taskSnapshotsRef.current)
-            if (oldKey !== sessionKey) nextTasks.delete(oldKey)
-            nextTasks.set(sessionKey, nextTask)
-            connection.taskKey = sessionKey
-            publishTasks(nextTasks)
-            if (connection.selectOnCreate && activeDraftKeyRef.current === oldKey) {
-              setSelectionForSession(nextTask.sessionId)
-              connection.selectOnCreate = false
-            }
-          }
+          attachSessionId(connection, event.session_id)
           continue
         }
 
@@ -370,13 +475,14 @@ export function useResearch(viewerId: ResearchViewerId | null) {
         ? { ...interrupted, recovery: 'none' }
         : interrupted)
     }
-  }, [connectionIsCurrent, currentConnectionTask, publishTasks, putTask, queryViewerId, refreshCompletedTask, setSelectionForSession])
+  }, [attachSessionId, connectionIsCurrent, currentConnectionTask, putTask, refreshCompletedTask])
 
   const runStreamTask = useCallback(async (task: ResearchTaskSnapshot, mode: 'create' | 'chat') => {
     if (connectionRef.current || sendLockRef.current || viewerId === null) return
     const taskKey = task.sessionId
       ? taskStorageKey(queryViewerId, task.sessionId)
       : draftStorageKey(queryViewerId, task.id)
+    if (task.sessionId) saveStoredRecovery(queryViewerId, task)
     putTask(taskKey, task)
     if (!task.sessionId) {
       activeDraftKeyRef.current = taskKey
@@ -393,14 +499,92 @@ export function useResearch(viewerId: ResearchViewerId | null) {
 
     try {
       const events = mode === 'create'
-        ? createResearchStream(task.query, { localOnly: task.localOnly, signal: connection.controller.signal })
+        ? createResearchStream(task.query, {
+            localOnly: task.localOnly,
+            signal: connection.controller.signal,
+            onSessionId: (sessionId) => attachSessionId(connection, sessionId),
+          })
         : researchChatStream(task.sessionId ?? '', task.query, { localOnly: task.localOnly, signal: connection.controller.signal })
       await consumeResearchEvents(connection, events)
     } finally {
-      if (connectionRef.current === connection) connectionRef.current = null
-      sendLockRef.current = false
+      if (connectionRef.current === connection) {
+        connectionRef.current = null
+        sendLockRef.current = false
+      }
     }
-  }, [consumeResearchEvents, putTask, queryViewerId, viewerId])
+  }, [attachSessionId, consumeResearchEvents, putTask, queryViewerId, viewerId])
+
+  const startSessionRecovery = useCallback(async (sessionId: string, requestedTask?: ResearchTaskSnapshot) => {
+    if (viewerId === null || connectionRef.current || sendLockRef.current) return
+    const taskKey = taskStorageKey(queryViewerId, sessionId)
+    const cached = querySessionMessages(queryClient, queryViewerId, lang, sessionId)
+    const existing = requestedTask ?? taskSnapshotsRef.current.get(taskKey) ?? null
+    if (!requestedTask && existing?.phase === 'error' && existing.recovery === 'retry') return
+    const stored = loadStoredRecovery(queryViewerId, sessionId)
+    const taskToRecover = existing?.recovery === 'resume' || existing?.recovery === 'retry'
+      ? existing
+      : stored ? restoreStoredTask(stored, cached.messages) : null
+    const hasRecovery = taskToRecover !== null
+    const sourceTask = taskToRecover
+      ? { ...taskToRecover, baseMessages: taskToRecover.baseMessages.length ? taskToRecover.baseMessages : cached.messages }
+      : createResearchTask(`recovery-${Date.now()}-${++taskSequenceRef.current}`, '', false, cached.messages, sessionId, cached.messageCount)
+    const nextTask = resetResearchTaskForReplay(sourceTask, `research-${Date.now()}-${++taskSequenceRef.current}`)
+    if (hasRecovery) putTask(taskKey, nextTask)
+
+    const connection: ActiveConnection = {
+      id: nextTask.id,
+      taskKey,
+      controller: new AbortController(),
+      selectOnCreate: false,
+    }
+    connectionRef.current = connection
+    sendLockRef.current = true
+    try {
+      // Recovery is a read-only probe. It either reattaches to the live SSE
+      // stream or returns the already-saved session as JSON.
+      const stream = await openResearchSessionStream(sessionId, connection.controller.signal)
+      if (!connectionIsCurrent(connection)) return
+      if (stream.kind === 'session') {
+        queryClient.setQueryData(researchKeys.session(queryViewerId, lang, sessionId), stream.session)
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: researchKeys.sessions(queryViewerId, lang) }),
+          queryClient.invalidateQueries({ queryKey: researchKeys.results(queryViewerId, lang, sessionId) }),
+        ])
+        if (hasRecovery) {
+          if (sessionHasSavedTask(stream.session, nextTask)) {
+            clearStoredRecovery(queryViewerId, sessionId)
+            removeTask(taskKey, nextTask.id)
+          } else {
+            putTask(taskKey, {
+              ...nextTask,
+              phase: 'error',
+              recovery: 'retry',
+              notice: '服务器没有保存完整回答。原请求可能已到达服务器；重新研究会新建任务，可能重复计算或产生费用。',
+            })
+          }
+        }
+      } else {
+        if (!hasRecovery) putTask(taskKey, nextTask)
+        await consumeResearchEvents(connection, stream.events)
+      }
+    } catch (error) {
+      if (!connectionIsCurrent(connection)) return
+      const current = currentConnectionTask(connection)
+      if (!current || !hasRecovery) return
+      const interrupted = markResearchTaskInterrupted(
+        current,
+        error instanceof Error && /\b(401|403)\b/.test(error.message)
+          ? '请先登录后再使用研究助手 🔐'
+          : ERROR_MESSAGE,
+      )
+      putTask(taskKey, interrupted)
+    } finally {
+      if (connectionRef.current === connection) {
+        connectionRef.current = null
+        sendLockRef.current = false
+      }
+    }
+  }, [connectionIsCurrent, consumeResearchEvents, currentConnectionTask, lang, putTask, queryClient, queryViewerId, removeTask, viewerId])
 
   const handleSend = useCallback(async (query: string, { localOnly = false }: { localOnly?: boolean } = {}) => {
     const normalizedQuery = query.trim()
@@ -431,6 +615,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
 
   const handleSelectSession = useCallback((sessionId: string) => {
     if (sessionId === activeSessionId) return
+    skipAutoProbeKeyRef.current = null
     pauseCurrentConnection('已切换到其他会话；原服务端任务可能仍在运行，切回后可继续接收。')
     activeSessionIdRef.current = sessionId
     activeDraftKeyRef.current = null
@@ -439,7 +624,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
 
   const handleRetry = useCallback(async () => {
     const task = activeTask
-    if (!task || task.phase !== 'error' || task.recovery !== 'retry' || viewerId === null) return
+    if (!task || (task.phase !== 'error' && task.phase !== 'cancelled') || task.recovery !== 'retry' || viewerId === null) return
     const next = createResearchTask(
       `research-${Date.now()}-${++taskSequenceRef.current}`,
       task.query,
@@ -453,55 +638,9 @@ export function useResearch(viewerId: ResearchViewerId | null) {
 
   const handleResume = useCallback(async () => {
     const task = activeTask
-    if (!task || task.recovery !== 'resume' || !task.sessionId || connectionRef.current || sendLockRef.current || viewerId === null) return
-    const next = resetResearchTaskForReplay(task, `research-${Date.now()}-${++taskSequenceRef.current}`)
-    const taskKey = taskStorageKey(queryViewerId, task.sessionId)
-    putTask(taskKey, next)
-    const connection: ActiveConnection = {
-      id: next.id,
-      taskKey,
-      controller: new AbortController(),
-      selectOnCreate: false,
-    }
-    connectionRef.current = connection
-    sendLockRef.current = true
-    try {
-      const stream = await openResearchSessionStream(task.sessionId, connection.controller.signal)
-      if (!connectionIsCurrent(connection)) return
-      if (stream.kind === 'session') {
-        const sessionKey = researchKeys.session(queryViewerId, lang, task.sessionId)
-        queryClient.setQueryData(sessionKey, stream.session)
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: researchKeys.sessions(queryViewerId, lang) }),
-          queryClient.invalidateQueries({ queryKey: researchKeys.results(queryViewerId, lang, task.sessionId) }),
-        ])
-        if (sessionHasSavedTask(stream.session, next)) {
-          removeTask(taskKey, next.id)
-        } else {
-          putTask(taskKey, {
-            ...next,
-            phase: 'error',
-            recovery: 'retry',
-            notice: '服务器任务已结束，但没有保存完整回答。可以重新研究此问题。',
-          })
-        }
-      } else {
-        await consumeResearchEvents(connection, stream.events)
-      }
-    } catch (error) {
-      if (!connectionIsCurrent(connection)) return
-      const current = currentConnectionTask(connection)
-      if (current) putTask(taskKey, markResearchTaskInterrupted(
-        current,
-        error instanceof Error && /\b(401|403)\b/.test(error.message)
-          ? '请先登录后再使用研究助手 🔐'
-          : ERROR_MESSAGE,
-      ))
-    } finally {
-      if (connectionRef.current === connection) connectionRef.current = null
-      sendLockRef.current = false
-    }
-  }, [activeTask, connectionIsCurrent, currentConnectionTask, consumeResearchEvents, lang, putTask, removeTask, queryClient, queryViewerId, viewerId])
+    if (!task || task.recovery !== 'resume' || !task.sessionId || viewerId === null) return
+    await startSessionRecovery(task.sessionId, task)
+  }, [activeTask, startSessionRecovery, viewerId])
 
   const handleCancel = useCallback(() => {
     pauseCurrentConnection(CANCEL_NOTICE)
@@ -510,6 +649,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
   const handleDeleteSession = useCallback(async (sessionId: string) => {
     try {
       await deleteMutation.mutateAsync(sessionId)
+      clearStoredRecovery(queryViewerId, sessionId)
       const storageKey = taskStorageKey(queryViewerId, sessionId)
       removeTask(storageKey)
       if (activeSessionId === sessionId) handleNewSession()
@@ -517,6 +657,28 @@ export function useResearch(viewerId: ResearchViewerId | null) {
       console.error('Failed to delete research session:', error)
     }
   }, [activeSessionId, deleteMutation, handleNewSession, queryViewerId, removeTask])
+
+  useEffect(() => {
+    const selectionKey = viewerId !== null && activeSessionId
+      ? taskStorageKey(viewerId, activeSessionId)
+      : null
+    if (probeSelectionRef.current.key !== selectionKey) {
+      probeSelectionRef.current = {
+        key: selectionKey,
+        generation: probeSelectionRef.current.generation + 1,
+      }
+    }
+    if (!selectionKey || !sessionQuery.data || sessionQuery.data.id !== activeSessionId) return
+    if (startedProbeGenerationRef.current === probeSelectionRef.current.generation) return
+    startedProbeGenerationRef.current = probeSelectionRef.current.generation
+    if (skipAutoProbeKeyRef.current === selectionKey) return
+    const selectedTask = taskSnapshotsRef.current.get(selectionKey)
+    // A task created by this mounted hook is already connected through its
+    // original POST/chat stream. Probe history only after it is interrupted,
+    // when the user selects another session, or on a fresh mount.
+    if (selectedTask && selectedTask.recovery === 'none') return
+    void startSessionRecovery(activeSessionId)
+  }, [activeSessionId, sessionQuery.data, startSessionRecovery, taskSnapshots, viewerId])
 
   const refetchSessions = sessionsQuery.refetch
   const loadSessions = useCallback(() => refetchSessions(), [refetchSessions])

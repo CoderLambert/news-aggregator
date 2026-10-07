@@ -153,7 +153,7 @@ function ResearchPanelView({ user }: { user: AuthUser | null }) {
               )}
               {recoveryAction === 'retry' && (
                 <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-100 bg-rose-50 p-3 text-xs text-rose-800">
-                  <span>当前研究没有完成。重新研究会发起一项新的服务端任务。</span>
+                  <span>原请求可能已到达服务器。只有点击下方按钮才会新建任务，可能重复计算或产生费用。</span>
                   <Button type="button" size="sm" variant="outline" onClick={() => void handleRetry()}>
                     重新研究
                   </Button>

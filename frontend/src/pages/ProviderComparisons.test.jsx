@@ -2,12 +2,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { AuthContext } from '../context/AuthContext'
+import { AuthContext, AuthProvider, useAuth } from '../context/AuthContext'
 
 vi.mock('../services/api', () => ({
   fetchProviderComparisons: vi.fn(),
   createProviderComparison: vi.fn(),
   retestProviderComparison: vi.fn(),
+  fetchMe: vi.fn(),
+  fetchCsrfToken: vi.fn(),
+  loginUser: vi.fn(),
+  logoutUser: vi.fn(),
+  registerUser: vi.fn(),
 }))
 
 vi.mock('../components/news-detail/MarkdownContent', () => ({
@@ -18,7 +23,11 @@ import {
   fetchProviderComparisons,
   createProviderComparison,
   retestProviderComparison,
+  fetchMe,
+  logoutUser,
 } from '../services/api'
+import { queryClient } from '../services/queryClient'
+import { providerComparisonKeys } from '../services/providerComparisonsQueries'
 import ProviderComparisons from './ProviderComparisons'
 
 const apiPayload = {
@@ -69,18 +78,22 @@ const apiPayload = {
   ],
 }
 
-function renderPage() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  return render(
+function renderPage(options = {}) {
+  const client = options.client ?? new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  let authState = {
+    user: options.user === undefined ? { id: 1, username: 'tester' } : options.user,
+    loading: options.loading ?? false,
+  }
+  const authValue = () => ({
+    ...authState,
+    login: vi.fn(),
+    register: vi.fn(),
+    logout: vi.fn(),
+    refresh: vi.fn(),
+  })
+  const tree = () => (
     <QueryClientProvider client={client}>
-      <AuthContext.Provider value={{
-        user: { id: 1, username: 'tester' },
-        loading: false,
-        login: vi.fn(),
-        register: vi.fn(),
-        logout: vi.fn(),
-        refresh: vi.fn(),
-      }}>
+      <AuthContext.Provider value={authValue()}>
         <MemoryRouter initialEntries={["/provider-comparisons"]}>
           <Routes>
             <Route path="/provider-comparisons" element={<ProviderComparisons />} />
@@ -89,6 +102,15 @@ function renderPage() {
       </AuthContext.Provider>
     </QueryClientProvider>
   )
+  const view = render(tree())
+  return {
+    ...view,
+    client,
+    setAuth: (next) => {
+      authState = { ...authState, ...next }
+      view.rerender(tree())
+    },
+  }
 }
 
 beforeEach(() => {
@@ -99,9 +121,84 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks()
+  queryClient.clear()
 })
 
+function AuthLifecycleControls() {
+  const auth = useAuth()
+  return (
+    <div>
+      <span>{auth.user?.username ?? 'logged-out'}</span>
+      <button type="button" onClick={() => void auth.refresh()}>refresh identity</button>
+      <button type="button" onClick={() => void auth.logout()}>logout</button>
+    </div>
+  )
+}
+
 describe('ProviderComparisons page', () => {
+  it('waits for auth hydration, hides data on logout, and never queries an anonymous key', async () => {
+    const page = renderPage({ user: null, loading: true })
+
+    expect(screen.getByText('正在确认登录状态...')).toBeInTheDocument()
+    expect(fetchProviderComparisons).not.toHaveBeenCalled()
+
+    page.setAuth({ user: { id: 1, username: 'tester' }, loading: false })
+    expect(await screen.findByText('Example comparison')).toBeInTheDocument()
+    expect(fetchProviderComparisons).toHaveBeenCalledTimes(1)
+
+    page.setAuth({ user: null, loading: false })
+    expect(screen.queryByText('Example comparison')).not.toBeInTheDocument()
+    expect(screen.getByText('请先登录后查看 Provider 对比记录。')).toBeInTheDocument()
+    expect(fetchProviderComparisons).toHaveBeenCalledTimes(1)
+    expect(page.client.getQueryCache().findAll({ queryKey: ['providerComparisons'] }).some((query) =>
+      query.queryKey[2]?.viewerId === 'anonymous')).toBe(false)
+  })
+
+  it('clears Provider cache on authenticated identity change and logout', async () => {
+    queryClient.clear()
+    fetchMe.mockResolvedValueOnce({ id: 1, username: 'viewer-a' })
+    logoutUser.mockResolvedValue(undefined)
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider><AuthLifecycleControls /></AuthProvider>
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByText('viewer-a')).toBeInTheDocument()
+    queryClient.setQueryData(providerComparisonKeys.list('zh', 1), apiPayload)
+
+    fetchMe.mockResolvedValueOnce({ id: 2, username: 'viewer-b' })
+    fireEvent.click(screen.getByRole('button', { name: 'refresh identity' }))
+    expect(await screen.findByText('viewer-b')).toBeInTheDocument()
+    expect(queryClient.getQueryCache().findAll({ queryKey: ['providerComparisons'] })).toHaveLength(0)
+
+    queryClient.setQueryData(providerComparisonKeys.list('zh', 2), apiPayload)
+    fireEvent.click(screen.getByRole('button', { name: 'logout' }))
+    expect(await screen.findByText('logged-out')).toBeInTheDocument()
+    expect(queryClient.getQueryCache().findAll({ queryKey: ['providerComparisons'] })).toHaveLength(0)
+    view.unmount()
+  })
+
+  it('does not let a late create completion from viewer A clear viewer B form state', async () => {
+    let resolveCreate
+    createProviderComparison.mockImplementationOnce(() => new Promise((resolve) => { resolveCreate = resolve }))
+    const page = renderPage()
+    await screen.findByText('Example comparison')
+
+    fireEvent.change(screen.getByLabelText('news_id'), { target: { value: '88' } })
+    fireEvent.click(screen.getByRole('button', { name: '发起对比' }))
+    await waitFor(() => expect(createProviderComparison).toHaveBeenCalledTimes(1))
+    const signal = createProviderComparison.mock.calls[0][1]
+
+    page.setAuth({ user: { id: 2, username: 'viewer-b' }, loading: false })
+    await screen.findByText('Example comparison')
+    expect(signal.aborted).toBe(true)
+    fireEvent.change(screen.getByLabelText('news_id'), { target: { value: '99' } })
+    resolveCreate({ id: 999 })
+
+    await waitFor(() => expect(screen.getByLabelText('news_id')).toHaveValue('99'))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
   it('loads and renders adapted sites, metrics and provider comparison cards', async () => {
     renderPage()
 
@@ -256,6 +353,49 @@ describe('ProviderComparisons page', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: '停止等待 SCRAPY 重测' })).not.toBeInTheDocument())
     await screen.findByRole('button', { name: '重新测试 JINA' })
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('aborts create and retest waits on unmount', async () => {
+    let createSignal
+    let retestSignal
+    createProviderComparison.mockImplementationOnce((_payload, signal) => {
+      createSignal = signal
+      return new Promise(() => {})
+    })
+    retestProviderComparison.mockImplementationOnce((_id, signal) => {
+      retestSignal = signal
+      return new Promise(() => {})
+    })
+    const page = renderPage()
+    await screen.findByText('Example comparison')
+    fireEvent.change(screen.getByLabelText('news_id'), { target: { value: '88' } })
+    fireEvent.click(screen.getByRole('button', { name: '发起对比' }))
+    fireEvent.click(screen.getByRole('button', { name: '重新测试 JINA' }))
+    await waitFor(() => {
+      expect(createSignal).toBeInstanceOf(AbortSignal)
+      expect(retestSignal).toBeInstanceOf(AbortSignal)
+    })
+
+    page.unmount()
+    expect(createSignal.aborted).toBe(true)
+    expect(retestSignal.aborted).toBe(true)
+  })
+
+  it('ignores a late retest error after switching from viewer A to viewer B', async () => {
+    let rejectRetest
+    retestProviderComparison.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectRetest = reject }))
+    const page = renderPage()
+    await screen.findByText('Example comparison')
+    fireEvent.click(screen.getByRole('button', { name: '重新测试 JINA' }))
+    await waitFor(() => expect(retestProviderComparison).toHaveBeenCalledTimes(1))
+    const signal = retestProviderComparison.mock.calls[0][1]
+
+    page.setAuth({ user: { id: 2, username: 'viewer-b' }, loading: false })
+    await screen.findByText('Example comparison')
+    expect(signal.aborted).toBe(true)
+    rejectRetest(new Error('Viewer A retest failed late'))
+
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
   })
 
   it('shows backend error messages from data.error and blocks ambiguous form input', async () => {

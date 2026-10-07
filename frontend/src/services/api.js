@@ -210,13 +210,16 @@ export const deleteResearchSession = (sessionId) =>
  *
  * The session ID is returned in the `Session-ID` response header.
  */
-export async function* createResearchStream(query, { localOnly = false, signal } = {}) {
+export async function* createResearchStream(query, { localOnly = false, signal, onSessionId } = {}) {
   const res = await streamingFetch('/api/research/', {
     body: JSON.stringify({ query, local_only: localOnly }),
     signal,
   })
   const sessionId = res.headers.get('Session-ID')
-  if (sessionId) yield { type: 'session_created', session_id: sessionId }
+  if (sessionId) {
+    onSessionId?.(sessionId)
+    yield { type: 'session_created', session_id: sessionId }
+  }
 
   let headerSessionEventPending = Boolean(sessionId)
   for await (const ev of iterSSEEvents(res)) {

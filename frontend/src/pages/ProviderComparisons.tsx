@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Activity, AlertCircle, CheckCircle2, Clock, FileText, Gauge, Globe2, Loader2, RefreshCw, Send, Square } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -207,20 +207,47 @@ function statusClass(status: string): string {
 }
 
 export default function ProviderComparisons() {
+  const { user, loading: authLoading } = useAuth()
+  const viewerId = user?.id ?? null
+  return <ProviderComparisonsPage key={viewerId ?? 'signed-out'} viewerId={viewerId} authLoading={authLoading} />
+}
+
+function ProviderComparisonsPage({ viewerId, authLoading }: { viewerId: number | null; authLoading: boolean }) {
   const queryClient = useQueryClient()
   const { lang } = useLanguage()
-  const { user } = useAuth()
-  const viewerId = user?.id ?? 'anonymous'
-  const comparisonsQuery = useQuery(providerComparisonsOptions(lang, viewerId))
+  const authReady = !authLoading && viewerId !== null
+  const queryViewerId = viewerId ?? 'pending-auth'
+  const comparisonsQuery = useQuery({
+    ...providerComparisonsOptions(lang, queryViewerId),
+    enabled: authReady,
+  })
   const [newsId, setNewsId] = useState('')
   const [url, setUrl] = useState('')
   const [actionError, setActionError] = useState('')
   const [pendingRetests, setPendingRetests] = useState<Set<number>>(() => new Set())
   const [stoppingRetests, setStoppingRetests] = useState<Set<number>>(() => new Set())
-  const pendingRetestsRef = useRef(new Map<number, AbortController>())
+  const pendingRetestsRef = useRef(new Map<number, { viewerId: number; controller: AbortController }>())
+  const createControllerRef = useRef<AbortController | null>(null)
+  const mountedRef = useRef(false)
   const submitLockRef = useRef(false)
 
+  useEffect(() => {
+    mountedRef.current = true
+    const activeRetests = pendingRetestsRef.current
+    return () => {
+      mountedRef.current = false
+      createControllerRef.current?.abort()
+      createControllerRef.current = null
+      for (const operation of activeRetests.values()) operation.controller.abort()
+      activeRetests.clear()
+    }
+  }, [])
+
+  const ownsViewer = (operationViewerId: number) =>
+    mountedRef.current && viewerId === operationViewerId
+
   const refreshComparisons = async () => {
+    if (!authReady) return
     setActionError('')
     return comparisonsQuery.refetch()
   }
@@ -228,16 +255,18 @@ export default function ProviderComparisons() {
   const createMutation = useMutation({
     mutationFn: ({ payload, signal }: { payload: ProviderComparisonInput; signal: AbortSignal }) =>
       createProviderComparison(payload, signal),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: providerComparisonKeys.lists() }),
   })
   const retestMutation = useMutation({
     mutationFn: ({ id, signal }: { id: number; signal: AbortSignal }) => retestProviderComparison(id, signal),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: providerComparisonKeys.lists() }),
   })
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (submitLockRef.current) return
+    if (!authReady || viewerId === null) {
+      setActionError('请先登录后再发起 Provider 对比')
+      return
+    }
     const trimmedNewsId = newsId.trim()
     const trimmedUrl = url.trim()
     if (!trimmedNewsId && !trimmedUrl) {
@@ -250,23 +279,39 @@ export default function ProviderComparisons() {
     }
 
     const payload: ProviderComparisonInput = trimmedNewsId ? { news_id: trimmedNewsId } : { url: trimmedUrl }
+    const operationViewerId = viewerId
+    const controller = new AbortController()
     submitLockRef.current = true
+    createControllerRef.current = controller
     setActionError('')
     try {
-      await createMutation.mutateAsync({ payload, signal: new AbortController().signal })
+      await createMutation.mutateAsync({ payload, signal: controller.signal })
+      if (!ownsViewer(operationViewerId) || controller.signal.aborted || createControllerRef.current !== controller) return
       setNewsId('')
       setUrl('')
+      void queryClient.invalidateQueries({
+        queryKey: providerComparisonKeys.list(lang, operationViewerId),
+        exact: true,
+      })
     } catch (error) {
-      setActionError(errorMessage(error, '发起对比失败'))
+      if (ownsViewer(operationViewerId) && !controller.signal.aborted && createControllerRef.current === controller) {
+        setActionError(errorMessage(error, '发起对比失败'))
+      }
     } finally {
-      submitLockRef.current = false
+      if (createControllerRef.current === controller) {
+        createControllerRef.current = null
+        if (ownsViewer(operationViewerId)) submitLockRef.current = false
+      }
     }
   }
 
   async function handleRetest(id: number) {
+    if (!authReady || viewerId === null) return
     if (pendingRetestsRef.current.has(id)) return
+    const operationViewerId = viewerId
     const controller = new AbortController()
-    pendingRetestsRef.current.set(id, controller)
+    const operation = { viewerId: operationViewerId, controller }
+    pendingRetestsRef.current.set(id, operation)
     setPendingRetests((current) => new Set(current).add(id))
     setStoppingRetests((current) => {
       const next = new Set(current)
@@ -276,40 +321,50 @@ export default function ProviderComparisons() {
     setActionError('')
     try {
       await retestMutation.mutateAsync({ id, signal: controller.signal })
+      if (ownsViewer(operationViewerId) && !controller.signal.aborted && pendingRetestsRef.current.get(id) === operation) {
+        void queryClient.invalidateQueries({
+          queryKey: providerComparisonKeys.list(lang, operationViewerId),
+          exact: true,
+        })
+      }
     } catch (error) {
-      if (!controller.signal.aborted) setActionError(errorMessage(error, '重新测试失败'))
+      if (ownsViewer(operationViewerId) && !controller.signal.aborted && pendingRetestsRef.current.get(id) === operation) {
+        setActionError(errorMessage(error, '重新测试失败'))
+      }
     } finally {
-      if (pendingRetestsRef.current.get(id) === controller) pendingRetestsRef.current.delete(id)
-      setPendingRetests((current) => {
-        const next = new Set(current)
-        next.delete(id)
-        return next
-      })
-      setStoppingRetests((current) => {
-        const next = new Set(current)
-        next.delete(id)
-        return next
-      })
+      if (pendingRetestsRef.current.get(id) === operation) pendingRetestsRef.current.delete(id)
+      if (ownsViewer(operationViewerId)) {
+        setPendingRetests((current) => {
+          const next = new Set(current)
+          next.delete(id)
+          return next
+        })
+        setStoppingRetests((current) => {
+          const next = new Set(current)
+          next.delete(id)
+          return next
+        })
+      }
     }
   }
 
   function cancelRetest(id: number) {
-    const controller = pendingRetestsRef.current.get(id)
-    if (!controller || controller.signal.aborted) return
+    const operation = pendingRetestsRef.current.get(id)
+    if (!operation || operation.viewerId !== viewerId || operation.controller.signal.aborted) return
     setStoppingRetests((current) => new Set(current).add(id))
-    controller.abort()
+    operation.controller.abort()
   }
 
-  const payload = comparisonsQuery.data
+  const payload = authReady ? comparisonsQuery.data : undefined
   const records = payload ? groupComparisonRows(payload.results) : []
   const sites = payload?.adapted_sites.map(adaptedSite) ?? []
   const metrics = metricCards.map((card) => ({
     ...card,
     value: card.formatter(metricValue(payload?.metrics ?? {}, card.keys) ?? (card.label === '总对比数' ? payload?.count ?? 0 : null)),
   }))
-  const loading = comparisonsQuery.isPending
-  const isRefreshing = comparisonsQuery.isFetching
-  const visibleError = actionError || (comparisonsQuery.error ? errorMessage(comparisonsQuery.error, '加载 Provider 对比失败') : '')
+  const loading = authLoading || (authReady && comparisonsQuery.isPending)
+  const isRefreshing = authReady && comparisonsQuery.isFetching
+  const visibleError = actionError || (authReady && comparisonsQuery.error ? errorMessage(comparisonsQuery.error, '加载 Provider 对比失败') : '')
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 sm:py-8 space-y-6 overflow-x-hidden">
@@ -327,7 +382,7 @@ export default function ProviderComparisons() {
             variant="outline"
             onClick={() => void refreshComparisons()}
             className="bg-white/10 border-white/20 text-white hover:bg-white/20 w-full md:w-auto"
-            disabled={isRefreshing}
+            disabled={!authReady || isRefreshing}
           >
             {isRefreshing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
             刷新
@@ -345,7 +400,7 @@ export default function ProviderComparisons() {
             <span className="text-sm font-medium text-gray-700">url</span>
             <Input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://..." aria-label="url" className="break-all" />
           </label>
-          <Button type="submit" className="w-full md:w-auto bg-gray-900 text-white hover:bg-gray-800" disabled={createMutation.isPending}>
+          <Button type="submit" className="w-full md:w-auto bg-gray-900 text-white hover:bg-gray-800" disabled={!authReady || createMutation.isPending}>
             {createMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
             发起对比
           </Button>
@@ -409,7 +464,11 @@ export default function ProviderComparisons() {
         {loading ? (
           <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-gray-500">
             <Loader2 className="size-6 animate-spin mx-auto mb-2" />
-            加载中...
+            {authLoading ? '正在确认登录状态...' : '加载中...'}
+          </div>
+        ) : !authReady ? (
+          <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-8 text-center text-gray-500">
+            {authLoading ? '正在确认登录状态...' : '请先登录后查看 Provider 对比记录。'}
           </div>
         ) : records.length ? (
           records.map((record) => (
