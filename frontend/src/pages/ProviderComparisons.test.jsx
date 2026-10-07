@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { AuthContext } from '../context/AuthContext'
 
 vi.mock('../services/api', () => ({
   fetchProviderComparisons: vi.fn(),
@@ -68,12 +70,24 @@ const apiPayload = {
 }
 
 function renderPage() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   return render(
-    <MemoryRouter initialEntries={["/provider-comparisons"]}>
-      <Routes>
-        <Route path="/provider-comparisons" element={<ProviderComparisons />} />
-      </Routes>
-    </MemoryRouter>
+    <QueryClientProvider client={client}>
+      <AuthContext.Provider value={{
+        user: { id: 1, username: 'tester' },
+        loading: false,
+        login: vi.fn(),
+        register: vi.fn(),
+        logout: vi.fn(),
+        refresh: vi.fn(),
+      }}>
+        <MemoryRouter initialEntries={["/provider-comparisons"]}>
+          <Routes>
+            <Route path="/provider-comparisons" element={<ProviderComparisons />} />
+          </Routes>
+        </MemoryRouter>
+      </AuthContext.Provider>
+    </QueryClientProvider>
   )
 }
 
@@ -92,9 +106,9 @@ describe('ProviderComparisons page', () => {
     renderPage()
 
     expect(screen.getByText('Provider 对比')).toBeInTheDocument()
-    expect(fetchProviderComparisons).toHaveBeenCalledWith({})
+    expect(fetchProviderComparisons).toHaveBeenCalledWith({}, expect.any(AbortSignal))
 
-    expect(await screen.findByText('已适配站点')).toBeInTheDocument()
+    expect(await screen.findByText('Example comparison')).toBeInTheDocument()
     expect(screen.getAllByText('TechCrunch').length).toBeGreaterThan(0)
     expect(screen.getByText('techcrunch.com')).toBeInTheDocument()
     expect(screen.getByText('总对比数')).toBeInTheDocument()
@@ -119,7 +133,7 @@ describe('ProviderComparisons page', () => {
     fireEvent.click(screen.getByRole('button', { name: '发起对比' }))
 
     await waitFor(() => {
-      expect(createProviderComparison).toHaveBeenCalledWith({ news_id: '88' })
+      expect(createProviderComparison).toHaveBeenCalledWith({ news_id: '88' }, expect.any(AbortSignal))
     })
     expect(fetchProviderComparisons).toHaveBeenCalledTimes(2)
   })
@@ -132,7 +146,7 @@ describe('ProviderComparisons page', () => {
     fireEvent.click(screen.getByRole('button', { name: '发起对比' }))
 
     await waitFor(() => {
-      expect(createProviderComparison).toHaveBeenCalledWith({ url })
+      expect(createProviderComparison).toHaveBeenCalledWith({ url }, expect.any(AbortSignal))
     })
   })
 
@@ -149,7 +163,7 @@ describe('ProviderComparisons page', () => {
     fireEvent.click(screen.getByRole('button', { name: '重新测试 SCRAPY' }))
 
     await waitFor(() => {
-      expect(retestProviderComparison).toHaveBeenCalledWith(102)
+      expect(retestProviderComparison).toHaveBeenCalledWith(102, expect.any(AbortSignal))
     })
     expect(fetchProviderComparisons).toHaveBeenCalledTimes(2)
   })
@@ -208,8 +222,40 @@ describe('ProviderComparisons page', () => {
     expect(screen.getByText('质量分 0.92')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '重新测试 SCRAPY_HTTP' }))
     await waitFor(() => {
-      expect(retestProviderComparison).toHaveBeenCalledWith(202)
+      expect(retestProviderComparison).toHaveBeenCalledWith(202, expect.any(AbortSignal))
     })
+  })
+
+  it('lets provider retests run and stop independently, and locks duplicate create submissions', async () => {
+    const requests = new Map()
+    retestProviderComparison.mockImplementation((id, signal) => new Promise((resolve, reject) => {
+      requests.set(id, { resolve, reject, signal })
+      signal.addEventListener('abort', () => reject(new DOMException('Request aborted', 'AbortError')), { once: true })
+    }))
+    renderPage()
+
+    await screen.findByText('Example comparison')
+    fireEvent.change(screen.getByLabelText('news_id'), { target: { value: '88' } })
+    const createButton = screen.getByRole('button', { name: '发起对比' })
+    fireEvent.click(createButton)
+    fireEvent.click(createButton)
+    await waitFor(() => expect(createProviderComparison).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole('button', { name: '重新测试 JINA' }))
+    fireEvent.click(screen.getByRole('button', { name: '重新测试 SCRAPY' }))
+    await waitFor(() => expect(requests.size).toBe(2))
+
+    const jina = requests.get(101)
+    const scrapy = requests.get(102)
+    expect(jina.signal).not.toBe(scrapy.signal)
+    fireEvent.click(screen.getByRole('button', { name: '停止等待 JINA 重测' }))
+    expect(jina.signal.aborted).toBe(true)
+    expect(scrapy.signal.aborted).toBe(false)
+
+    scrapy.resolve({ run_id: 'run-retest', count: 1, results: [] })
+    await waitFor(() => expect(screen.queryByRole('button', { name: '停止等待 SCRAPY 重测' })).not.toBeInTheDocument())
+    await screen.findByRole('button', { name: '重新测试 JINA' })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('shows backend error messages from data.error and blocks ambiguous form input', async () => {

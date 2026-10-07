@@ -82,14 +82,20 @@ export const fetchSources = (signal) =>
 
 // ---- Provider Comparisons --------------------------------------------------
 
-export const fetchProviderComparisons = (params = {}) =>
-  api.get('/provider-comparisons/', { params }).then(res => res.data)
+export const fetchProviderComparisons = (params = {}, signal) =>
+  (signal
+    ? api.get('/provider-comparisons/', { params, signal })
+    : api.get('/provider-comparisons/', { params })).then(res => res.data)
 
-export const createProviderComparison = (payload) =>
-  apiLong.post('/provider-comparisons/', payload).then(res => res.data)
+export const createProviderComparison = (payload, signal) =>
+  (signal
+    ? apiLong.post('/provider-comparisons/', payload, { signal })
+    : apiLong.post('/provider-comparisons/', payload)).then(res => res.data)
 
-export const retestProviderComparison = (id) =>
-  apiLong.post(`/provider-comparisons/${id}/retest/`).then(res => res.data)
+export const retestProviderComparison = (id, signal) =>
+  (signal
+    ? apiLong.post(`/provider-comparisons/${id}/retest/`, undefined, { signal })
+    : apiLong.post(`/provider-comparisons/${id}/retest/`)).then(res => res.data)
 
 // ---- Chat (REST) -----------------------------------------------------------
 
@@ -183,11 +189,15 @@ export const fetchMe = () =>
 
 // ---- Research Agent --------------------------------------------------------
 
-export const listResearchSessions = (params = {}) =>
-  api.get('/research/sessions/', { params }).then(res => res.data)
+export const listResearchSessions = (params = {}, signal) =>
+  (signal
+    ? api.get('/research/sessions/', { params, signal })
+    : api.get('/research/sessions/', { params })).then(res => res.data)
 
-export const getResearchSession = (sessionId) =>
-  api.get(`/research/${sessionId}/`).then(res => res.data)
+export const getResearchSession = (sessionId, signal) =>
+  (signal
+    ? api.get(`/research/${sessionId}/`, { signal })
+    : api.get(`/research/${sessionId}/`)).then(res => res.data)
 
 export const deleteResearchSession = (sessionId) =>
   api.delete(`/research/${sessionId}/`).then(res => res.data)
@@ -200,11 +210,23 @@ export const deleteResearchSession = (sessionId) =>
  *
  * The session ID is returned in the `Session-ID` response header.
  */
-export async function* createResearchStream(query, { localOnly = false } = {}) {
+export async function* createResearchStream(query, { localOnly = false, signal } = {}) {
   const res = await streamingFetch('/api/research/', {
     body: JSON.stringify({ query, local_only: localOnly }),
+    signal,
   })
+  const sessionId = res.headers.get('Session-ID')
+  if (sessionId) yield { type: 'session_created', session_id: sessionId }
+
+  let headerSessionEventPending = Boolean(sessionId)
   for await (const ev of iterSSEEvents(res)) {
+    // The current backend repeats Session-ID in its first SSE event. The
+    // response header is emitted first so callers can cancel/resume by id,
+    // while this duplicate is suppressed at the API boundary.
+    if (headerSessionEventPending && ev?.type === 'session_created' && ev.session_id === sessionId) {
+      headerSessionEventPending = false
+      continue
+    }
     yield ev
   }
 }
@@ -214,9 +236,10 @@ export async function* createResearchStream(query, { localOnly = false } = {}) {
  *
  *   for await (const ev of researchChatStream(sessionId, 'tell me more')) { ... }
  */
-export async function* researchChatStream(sessionId, query, { localOnly = false } = {}) {
+export async function* researchChatStream(sessionId, query, { localOnly = false, signal } = {}) {
   const res = await streamingFetch(`/api/research/${sessionId}/chat/`, {
     body: JSON.stringify({ query, local_only: localOnly }),
+    signal,
   })
   for await (const ev of iterSSEEvents(res)) {
     yield ev
@@ -224,11 +247,27 @@ export async function* researchChatStream(sessionId, query, { localOnly = false 
 }
 
 /**
+ * Resume the current in-process research job, if one is still running.
+ * The backend returns the saved session as JSON when there is no active job.
+ */
+export async function openResearchSessionStream(sessionId, { signal } = {}) {
+  const response = await streamingFetch(`/api/research/${sessionId}/stream/`, {
+    method: 'GET',
+    signal,
+  })
+  if (response.headers.get('content-type')?.includes('application/json')) {
+    return { kind: 'session', data: await response.json() }
+  }
+  return { kind: 'stream', events: iterSSEEvents(response) }
+}
+
+/**
  * Fetch search results for a research session.
  * @param {string} sessionId - Research session UUID
- * @param {Object} [params] - Query params: result_type, detail
- * @param {string} [params.result_type] - Filter by type: news, web, article, webpage, topic
- * @param {boolean} [params.detail] - Pass true to include full result_data
+ * @param {{result_type?: string, detail?: string}} [params] - Query params: result_type, detail
+ * @param {AbortSignal} [signal] - Cancels the read request when its query is abandoned
  */
-export const getResearchResults = (sessionId, params = {}) =>
-  api.get(`/research/${sessionId}/results/`, { params }).then(res => res.data)
+export const getResearchResults = (sessionId, params = {}, signal) =>
+  (signal
+    ? api.get(`/research/${sessionId}/results/`, { params, signal })
+    : api.get(`/research/${sessionId}/results/`, { params })).then(res => res.data)

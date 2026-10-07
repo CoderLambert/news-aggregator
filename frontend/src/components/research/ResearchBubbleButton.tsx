@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { Search, Sparkles } from 'lucide-react'
 
-/**
- * Floating action button — opens the research panel.
- * Positioned to the left of the chat bubble with a polished look.
- */
-export default function ResearchBubbleButton({ onOpen }) {
+interface ResearchBubbleButtonProps {
+  onOpen: () => void
+}
+
+export default function ResearchBubbleButton({ onOpen }: ResearchBubbleButtonProps) {
   const [hover, setHover] = useState(false)
 
   return (
@@ -27,9 +27,7 @@ export default function ResearchBubbleButton({ onOpen }) {
                  ring-2 ring-violet-100/80 hover:ring-violet-200"
     >
       <div className="relative">
-        <Search className={`w-5 h-5 transition-colors duration-300 ${
-          hover ? 'text-violet-700' : 'text-violet-500'
-        }`} />
+        <Search className={`w-5 h-5 transition-colors duration-300 ${hover ? 'text-violet-700' : 'text-violet-500'}`} />
         {hover && (
           <Sparkles className="w-3 h-3 text-orange-400 absolute -top-1 -right-1.5 animate-pulse" />
         )}

@@ -47,6 +47,18 @@ describe('provider comparison api', () => {
     expect(result).toEqual({ count: 0, results: [] })
   })
 
+  it('passes TanStack cancellation through comparison list reads', async () => {
+    const controller = new AbortController()
+    axios.__mock.clients[0].get.mockResolvedValueOnce({ data: { count: 0, results: [] } })
+
+    await apiModule.fetchProviderComparisons({}, controller.signal)
+
+    expect(axios.__mock.clients[0].get).toHaveBeenCalledWith('/provider-comparisons/', {
+      params: {},
+      signal: controller.signal,
+    })
+  })
+
   it('createProviderComparison posts news_id or url payload', async () => {
     axios.__mock.clients[2].post.mockResolvedValueOnce({ data: { id: 12 } })
 
@@ -60,6 +72,15 @@ describe('provider comparison api', () => {
     expect(result).toEqual({ id: 12 })
   })
 
+  it('passes a caller AbortSignal to a provider comparison create request', async () => {
+    const controller = new AbortController()
+    axios.__mock.clients[2].post.mockResolvedValueOnce({ data: { run_id: 'run-1' } })
+
+    await apiModule.createProviderComparison({ news_id: '42' }, controller.signal)
+
+    expect(axios.__mock.clients[2].post).toHaveBeenCalledWith('/provider-comparisons/', { news_id: '42' }, { signal: controller.signal })
+  })
+
   it('retestProviderComparison posts to the retest action endpoint', async () => {
     axios.__mock.clients[2].post.mockResolvedValueOnce({ data: { id: 7, status: 'queued' } })
 
@@ -68,5 +89,20 @@ describe('provider comparison api', () => {
     expect(axios.__mock.clients[2].post).toHaveBeenCalledWith('/provider-comparisons/7/retest/')
     expect(axios.__mock.clients[2].config.timeout).toBe(180_000)
     expect(result).toEqual({ id: 7, status: 'queued' })
+  })
+
+  it('passes a separate AbortSignal to each provider retest request', async () => {
+    const jinaController = new AbortController()
+    const scrapyController = new AbortController()
+    axios.__mock.clients[2].post.mockResolvedValue({ data: { run_id: 'run-1' } })
+
+    await Promise.all([
+      apiModule.retestProviderComparison(7, jinaController.signal),
+      apiModule.retestProviderComparison(8, scrapyController.signal),
+    ])
+
+    expect(axios.__mock.clients[2].post).toHaveBeenNthCalledWith(1, '/provider-comparisons/7/retest/', undefined, { signal: jinaController.signal })
+    expect(axios.__mock.clients[2].post).toHaveBeenNthCalledWith(2, '/provider-comparisons/8/retest/', undefined, { signal: scrapyController.signal })
+    expect(jinaController.signal).not.toBe(scrapyController.signal)
   })
 })

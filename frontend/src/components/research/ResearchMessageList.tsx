@@ -1,7 +1,8 @@
-import { useRef, useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Search, Sparkles } from 'lucide-react'
-import MarkdownContent from '../news-detail/MarkdownContent'
+import MarkdownContent from '@/components/news-detail/MarkdownContent'
 import ProcessTimeline from './ProcessTimeline'
+import type { ResearchMessage, ResearchPhase, ResearchSearchResult } from '@/types/research'
 
 const SUGGESTED_QUERIES = [
   '最近 LLM Agent 有什么新进展？',
@@ -9,18 +10,15 @@ const SUGGESTED_QUERIES = [
   'React 和 Vue 哪个更受欢迎？',
 ]
 
-/**
- * Renders research messages with a clean, modern design.
- * Tool calls render as a vertical ProcessTimeline.
- * Search results render as clickable article cards.
- */
-export default function ResearchMessageList({
-  messages,
-  phase,
-  searchResults,
-  onSuggestionClick,
-}) {
-  const endRef = useRef(null)
+interface ResearchMessageListProps {
+  messages: ResearchMessage[]
+  phase: ResearchPhase
+  searchResults: ResearchSearchResult[]
+  onSuggestionClick?: (query: string) => void
+}
+
+export default function ResearchMessageList({ messages, phase, searchResults, onSuggestionClick }: ResearchMessageListProps) {
+  const endRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (typeof endRef.current?.scrollIntoView === 'function') {
@@ -31,7 +29,6 @@ export default function ResearchMessageList({
   if (messages.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center px-6 animate-message-pop-in">
-        {/* Animated search icon with gradient ring */}
         <div className="relative mb-5">
           <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-100 to-orange-50 flex items-center justify-center shadow-lg shadow-violet-100/50">
             <Search className="w-7 h-7 text-violet-500" />
@@ -46,20 +43,19 @@ export default function ResearchMessageList({
           深度分析新闻库内容、联网搜索补充信息、追踪话题趋势
         </p>
 
-        {/* Suggested queries — 3 column grid */}
         <div className="mt-6 grid grid-cols-1 gap-2 w-full max-w-[340px]">
-          {SUGGESTED_QUERIES.map(q => (
+          {SUGGESTED_QUERIES.map((query) => (
             <button
-              key={q}
+              key={query}
               type="button"
-              onClick={() => onSuggestionClick?.(q)}
+              onClick={() => onSuggestionClick?.(query)}
               className="text-left px-4 py-3 rounded-xl bg-white border border-neutral-100
                          text-sm text-neutral-700 hover:border-violet-200 hover:bg-violet-50/50
                          hover:text-violet-800 transition-all duration-150 shadow-sm
                          hover:shadow-md active:scale-[0.98]
-                         focus:outline-none focus:ring-2 focus:ring-violet-200"
+                         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-200"
             >
-              {q}
+              {query}
             </button>
           ))}
         </div>
@@ -69,38 +65,34 @@ export default function ResearchMessageList({
 
   return (
     <div className="space-y-4">
-      {messages.map((msg, i) => (
+      {messages.map((message) => (
         <div
-          key={i}
-          className={`flex animate-message-pop-in ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+          key={message.id}
+          className={`flex animate-message-pop-in ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
         >
-          {msg.role === 'user' ? (
+          {message.role === 'user' ? (
             <div className="max-w-[85%] px-4 py-2.5 text-[14px] leading-relaxed break-words
               bg-gradient-to-br from-violet-500 to-violet-600 text-white
               rounded-2xl rounded-tr-md shadow-sm shadow-violet-200/50">
-              <div className="whitespace-pre-wrap">{msg.content}</div>
+              <div className="whitespace-pre-wrap">{message.content}</div>
             </div>
           ) : (
             <div className="max-w-full w-full">
-              {/* Tool calls as vertical timeline */}
-              {msg.toolCalls && msg.toolCalls.length > 0 && (
+              {message.toolCalls && message.toolCalls.length > 0 && (
                 <div className="mb-3">
-                  <ProcessTimeline toolCalls={msg.toolCalls} searchResults={searchResults} />
+                  <ProcessTimeline toolCalls={message.toolCalls} searchResults={searchResults} />
                 </div>
               )}
-              {/* Final answer */}
-              {msg.content ? (
+              {message.content ? (
                 <div className="prose prose-sm max-w-none">
-                  <MarkdownContent content={msg.content} />
+                  <MarkdownContent content={message.content} />
                 </div>
-              ) : (phase === 'thinking' || phase === 'tool_calling') && (!msg.toolCalls || msg.toolCalls.every(tc => tc.status !== 'running')) ? (
-                <div className="flex items-center gap-2 py-2">
+              ) : (phase === 'thinking' || phase === 'tool_calling') && (!message.toolCalls || message.toolCalls.every((call) => call.status !== 'running')) ? (
+                <div className="flex items-center gap-2 py-2" role="status" aria-label={phase === 'thinking' ? '思考中' : '处理中'}>
                   <div className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" />
                   <div className="w-2 h-2 rounded-full bg-violet-400 animate-pulse [animation-delay:150ms]" />
                   <div className="w-2 h-2 rounded-full bg-violet-400 animate-pulse [animation-delay:300ms]" />
-                  <span className="text-xs text-neutral-400 ml-1">
-                    {phase === 'thinking' ? '思考中…' : '处理中…'}
-                  </span>
+                  <span className="text-xs text-neutral-400 ml-1">{phase === 'thinking' ? '思考中…' : '处理中…'}</span>
                 </div>
               ) : null}
             </div>

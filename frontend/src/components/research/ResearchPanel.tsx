@@ -1,35 +1,41 @@
-import { useState, useEffect } from 'react'
-import { useResearch } from '../../hooks/useResearch'
-import { useAuth } from '../../context/AuthContext'
-import AuthModal from '../AuthModal'
+import { useEffect, useState } from 'react'
+import { LogIn } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { useAuth } from '@/context/AuthContext'
+import type { AuthUser } from '@/context/AuthContext'
+import { useResearch } from '@/hooks/useResearch'
+import AuthModal from '@/components/AuthModal'
 import ResearchBubbleButton from './ResearchBubbleButton'
 import ResearchHeader from './ResearchHeader'
 import ResearchMessageList from './ResearchMessageList'
 import ResearchInput from './ResearchInput'
-import { LogIn } from 'lucide-react'
 
-/**
- * Research Agent panel — floating panel with backdrop blur,
- * accessible from any page. Clean, modern design.
- */
 export default function ResearchPanel() {
+  const { user } = useAuth()
+  return <ResearchPanelView key={user?.id ?? 'anonymous'} user={user} />
+}
+
+function ResearchPanelView({ user }: { user: AuthUser | null }) {
   const [isOpen, setIsOpen] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [input, setInput] = useState('')
   const [localOnly, setLocalOnly] = useState(false)
-  const { user } = useAuth()
-
   const {
     sessions,
     activeSessionId,
     messages,
     phase,
     searchResults,
+    hasRecoverableTask,
+    recoveryAction,
     handleSend,
     handleNewSession,
     handleSelectSession,
-  } = useResearch()
+    handleCancel,
+    handleResume,
+    handleRetry,
+  } = useResearch(user?.id ?? null)
 
   const isLoading = phase === 'thinking' || phase === 'tool_calling' || phase === 'streaming'
 
@@ -43,24 +49,24 @@ export default function ResearchPanel() {
   }
 
   function handleSendQuery() {
-    if (!input.trim() || isLoading) return
-    handleSend(input.trim(), { localOnly })
+    if (!input.trim() || isLoading || hasRecoverableTask || !user) return
+    void handleSend(input.trim(), { localOnly })
     setInput('')
   }
 
-  function handleSuggestionClick(text) {
+  function handleSuggestionClick(query: string) {
     if (!user) {
       setShowAuthModal(true)
       return
     }
-    handleSend(text, { localOnly: false })  // Suggested questions always use full search
+    if (hasRecoverableTask) return
+    void handleSend(query, { localOnly: false })
   }
 
-  // ESC key to close
   useEffect(() => {
     if (!isOpen) return
-    function onKey(e) {
-      if (e.key === 'Escape') {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
         if (isFullscreen) setIsFullscreen(false)
         else setIsOpen(false)
       }
@@ -69,25 +75,20 @@ export default function ResearchPanel() {
     return () => window.removeEventListener('keydown', onKey)
   }, [isOpen, isFullscreen])
 
-  // Lock body scroll when panel is open — prevents the main page
-  // from scrolling when the user swipes inside the panel on mobile.
   useEffect(() => {
     if (!isOpen) return
-    const original = document.body.style.overflow
+    const originalOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = original }
+    return () => { document.body.style.overflow = originalOverflow }
   }, [isOpen])
 
-  if (!isOpen) {
-    return <ResearchBubbleButton onOpen={handleOpen} />
-  }
+  if (!isOpen) return <ResearchBubbleButton onOpen={handleOpen} />
 
-  const activeSession = sessions.find(s => s.id === activeSessionId)
+  const activeSession = sessions.find((session) => session.id === activeSessionId)
   const panelTitle = activeSession?.title || '新闻研究'
 
   return (
     <>
-      {/* Backdrop overlay */}
       {!isFullscreen && (
         <div
           className="fixed inset-0 z-30 bg-black/10 backdrop-blur-sm transition-opacity pointer-events-auto"
@@ -96,7 +97,6 @@ export default function ResearchPanel() {
         />
       )}
 
-      {/* Panel */}
       <div
         role="dialog"
         aria-modal="true"
@@ -113,7 +113,7 @@ export default function ResearchPanel() {
           title={panelTitle}
           phase={phase}
           isFullscreen={isFullscreen}
-          onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
+          onToggleFullscreen={() => setIsFullscreen((fullscreen) => !fullscreen)}
           onNewSession={handleNewSession}
           onClose={handleClose}
           sessions={sessions}
@@ -121,7 +121,6 @@ export default function ResearchPanel() {
           onSelectSession={handleSelectSession}
         />
 
-        {/* Message area */}
         <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-3 space-y-3 bg-gradient-to-b from-violet-50/30 via-neutral-50/30 to-white">
           {!user ? (
             <div className="flex flex-col items-center justify-center h-full text-center px-6">
@@ -132,43 +131,51 @@ export default function ResearchPanel() {
               <p className="mt-1.5 text-xs text-neutral-400 max-w-[260px] leading-relaxed">
                 研究助手需要登录后才能使用，登录即可开始深度新闻分析
               </p>
-              <button
-                type="button"
-                onClick={() => setShowAuthModal(true)}
-                className="mt-5 px-6 py-2.5 rounded-full bg-gradient-to-br from-violet-500 to-violet-600
-                           text-white text-sm font-semibold shadow-md shadow-violet-200/50
-                           hover:shadow-lg hover:shadow-violet-300/50 hover:scale-105
-                           active:scale-95 transition-all"
-              >
+              <Button type="button" className="mt-5 rounded-full" onClick={() => setShowAuthModal(true)}>
                 登录 / 注册
-              </button>
+              </Button>
             </div>
           ) : (
-            <ResearchMessageList
-              messages={messages}
-              phase={phase}
-              searchResults={searchResults}
-              onSuggestionClick={handleSuggestionClick}
-            />
+            <>
+              <ResearchMessageList
+                messages={messages}
+                phase={phase}
+                searchResults={searchResults}
+                onSuggestionClick={handleSuggestionClick}
+              />
+              {recoveryAction === 'resume' && (
+                <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs text-amber-800">
+                  <span>浏览器连接已停止；后台任务可能仍在执行。重新连接会回放当前任务的事件。</span>
+                  <Button type="button" size="sm" variant="outline" onClick={() => void handleResume()}>
+                    继续接收
+                  </Button>
+                </div>
+              )}
+              {recoveryAction === 'retry' && (
+                <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-100 bg-rose-50 p-3 text-xs text-rose-800">
+                  <span>当前研究没有完成。重新研究会发起一项新的服务端任务。</span>
+                  <Button type="button" size="sm" variant="outline" onClick={() => void handleRetry()}>
+                    重新研究
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </div>
 
-        {/* Input area */}
         <ResearchInput
           value={input}
           onChange={setInput}
           onSend={user ? handleSendQuery : () => setShowAuthModal(true)}
+          onCancel={handleCancel}
           isLoading={isLoading}
-          disabled={!user}
+          disabled={!user || hasRecoverableTask}
           localOnly={localOnly}
-          onToggleLocalOnly={() => setLocalOnly(f => !f)}
+          onToggleLocalOnly={() => setLocalOnly((enabled) => !enabled)}
         />
       </div>
 
-      {/* Auth modal */}
-      {showAuthModal && (
-        <AuthModal onClose={() => setShowAuthModal(false)} />
-      )}
+      {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} />}
     </>
   )
 }
