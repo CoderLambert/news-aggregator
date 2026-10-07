@@ -121,3 +121,17 @@ SearchBar 现在按 React Router 的 POP 导航 key 重置当前草稿并清除�
 验收：`npm run test:run -- --configLoader native`：40 个测试文件、215 项通过；`npm run typecheck`：通过；`npm run lint`：通过。production build 用 `npm run build -- --configLoader native --outDir /tmp/news-aggregator-provider-research-slice-dist --emptyOutDir` 输出至 `/tmp` 并通过。未在浏览器启动真实 API 测试：此前本机 Chromium 因 Crashpad `setsockopt: Operation not permitted` 退出；本切片没有绕过 sandbox，也没有连接 Django、生产/开发数据库或外部 AI。服务端 retest/Research worker 的实际中止仍需后端 API 支持，本前端不会声称停止了服务端执行。
 
 本切片按本地提交保留，未推送，供主助手审查；此前已提交的高级搜索/详情/用户数据切片仍保存在本分支历史中。
+
+## 2026-10-07 审查检查点：Provider 身份隔离与 Research 恢复
+
+本轮起点为 `8bcc4215e0a03242cf2ae11ccbeb0914a98f9f4a`，分支 `codex/frontend-list-query-slice`。保留既有 API、cookie/CSRF、持久化结果和服务端 worker 语义；没有修改后端或增加依赖。
+
+- Provider 对比查询等待鉴权完成后才执行，并按 viewer ID 隔离；登录身份切换会重挂页面。创建与逐行重测各自持有 AbortController，卸载或切换 viewer 时中止浏览器请求，迟到响应不写入新身份状态；成功后仅失效当前 viewer 的查询。
+- Research 在收到流式响应头中的 session ID 时立即保存仅含恢复所需字段的、viewer/session 隔离的 sessionStorage 记录。重新挂载或切回历史会话时仅调用现有 GET stream/session 接口以恢复活动流或加载已保存结果，不会自动重发昂贵 POST。新会话尚未收到 ID 时的恢复由用户显式点击重试；界面说明原请求可能已被服务器接受，重新研究可能重复计算或收费。
+- 停止只取消浏览器侧接收；已有 API 不支持取消服务端 worker，界面继续明确告知这一边界。测试覆盖身份切换/登出、迟到创建与重测响应、卸载取消、历史恢复 GET、停止后显式重试和连接所有权。
+
+验收：`npm run test:run -- --configLoader runner`：40 个文件、226 项通过；`npm run lint`、`npm run typecheck` 均通过；`npm run build -- --configLoader runner --outDir /tmp/newsagg-p2-build --emptyOutDir` 通过。`git diff --check` 通过。
+
+本地浏览器在隔离 Vite + 临时 Django 环境中验证了 Provider 创建、JINA 行重测，以及 Research 创建后停止接收、再继续接收并显示“本地确定性研究”结果。该环境只使用 `/tmp` 临时 SQLite 与确定性本地 mock；没有打开项目数据库、调用外部模型或 Provider API。临时服务已停止。浏览器验收截图随本轮审查结果提供。
+
+本检查点只完成 Provider/Research 的身份与恢复边界，尚不表示整个前端重构完成。代码和本记录保留在本地分支，等待主助手审查；未推送。下一步先根据审查意见再继续。

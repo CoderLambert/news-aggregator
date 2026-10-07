@@ -43,6 +43,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const viewerIdRef = useRef<number | null>(null)
 
   const clearViewerQueries = useCallback(() => {
+    // Provider comparisons are cached with a viewer key even though their
+    // current backend collection is shared. Drop every viewer-scoped copy on
+    // an identity transition so a disabled query can never reveal old data.
+    void queryClient.cancelQueries({ queryKey: ['providerComparisons'] })
+    queryClient.removeQueries({ queryKey: ['providerComparisons'] })
     queryClient.removeQueries({ queryKey: newsKeys.lists() })
     queryClient.removeQueries({ queryKey: newsKeys.details() })
     queryClient.removeQueries({ queryKey: ['private'] })

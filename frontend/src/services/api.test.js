@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
-import { translateFullArticleStream, chatStream } from './api'
+import { translateFullArticleStream, chatStream, createResearchStream } from './api'
 
 function streamResponse(chunks, init = {}) {
   const encoder = new TextEncoder()
@@ -69,5 +69,27 @@ describe('chatStream', () => {
     globalThis.fetch.mockResolvedValueOnce(streamResponse(['Hello', ' ', 'world']))
     const chunks = await collect(chatStream('1', '你好'))
     expect(chunks).toEqual(['Hello', ' ', 'world'])
+  })
+})
+
+describe('createResearchStream', () => {
+  beforeEach(() => { globalThis.fetch = vi.fn() })
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it('notifies the caller of the response-header session id before yielding stream events', async () => {
+    globalThis.fetch.mockResolvedValueOnce(streamResponse([
+      'data: {"type":"session_created","session_id":"session-header"}\n',
+      'data: {"type":"complete"}\n',
+    ], { headers: { 'content-type': 'text/event-stream', 'Session-ID': 'session-header' } }))
+    const onSessionId = vi.fn()
+    const events = createResearchStream('recover me', { onSessionId })
+
+    expect(await events.next()).toEqual({
+      done: false,
+      value: { type: 'session_created', session_id: 'session-header' },
+    })
+    expect(onSessionId).toHaveBeenCalledOnce()
+    expect(onSessionId).toHaveBeenCalledWith('session-header')
+    expect(await collect(events)).toEqual([{ type: 'complete' }])
   })
 })

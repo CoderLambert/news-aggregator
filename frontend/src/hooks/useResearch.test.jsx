@@ -53,6 +53,7 @@ async function* hangingStream(signal) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  sessionStorage.clear()
   api.listResearchSessions.mockResolvedValue(emptyPage())
   api.getResearchSession.mockImplementation(async (id) => session(id))
   api.getResearchResults.mockResolvedValue(emptyPage())
@@ -82,6 +83,32 @@ describe('useResearch stream lifecycle', () => {
     expect(requestSignal.aborted).toBe(true)
     expect(result.current.recoveryAction).toBe('resume')
     expect(result.current.messages.at(-1).content).toMatch(/服务器任务可能仍在运行/)
+  })
+
+  it('captures the session response header before the first SSE event so stop can recover by GET', async () => {
+    let requestSignal
+    api.createResearchStream.mockImplementation((_query, options) => {
+      requestSignal = options.signal
+      options.onSessionId('session-from-header')
+      return (async function* events() {
+        yield { type: 'session_created', session_id: 'session-from-header' }
+        yield { type: 'thinking' }
+        await waitForAbort(options.signal)
+        throw new DOMException('The operation was aborted', 'AbortError')
+      })()
+    })
+    const { result } = renderResearchHook()
+    await waitFor(() => expect(result.current.loadingSessions).toBe(false))
+    act(() => { void result.current.handleSend('响应头之后立即停止') })
+    await waitFor(() => expect(result.current.activeSessionId).toBe('session-from-header'))
+    await waitFor(() => expect(result.current.phase).toBe('thinking'))
+    await waitFor(() => expect(api.listResearchSessions).toHaveBeenCalledTimes(2))
+
+    act(() => result.current.handleCancel())
+    await waitFor(() => expect(result.current.recoveryAction).toBe('resume'))
+    expect(requestSignal.aborted).toBe(true)
+    expect(sessionStorage.getItem('news-aggregator:research-recovery:v1:1:session-from-header')).toContain('响应头之后立即停止')
+    expect(api.createResearchStream).toHaveBeenCalledTimes(1)
   })
 
   it('replays an interrupted task once, applies duplicate events idempotently, and reloads its saved result', async () => {
@@ -126,6 +153,67 @@ describe('useResearch stream lifecycle', () => {
     expect(result.current.messages.some((message) => message.content === '迟到事件')).toBe(false)
     expect(result.current.phase).toBe('idle')
     expect(client.getQueryData(['private', 'research', 'session', { viewerId: 1, lang: 'zh', sessionId: 'session-active' }]).messages).toHaveLength(2)
+  })
+
+  it('reattaches after hook remount with a GET probe and does not create a second POST', async () => {
+    api.listResearchSessions
+      .mockResolvedValueOnce(emptyPage())
+      .mockResolvedValue(emptyPage([{ id: 'session-active', title: '进行中的研究' }]))
+    let initialSignal
+    api.createResearchStream.mockImplementation((_query, options) => {
+      initialSignal = options.signal
+      options.onSessionId('session-active')
+      return hangingStream(options.signal)
+    })
+    const { result, unmount } = renderResearchHook()
+    await waitFor(() => expect(result.current.loadingSessions).toBe(false))
+    act(() => { void result.current.handleSend('重挂后继续接收') })
+    await waitFor(() => expect(result.current.phase).toBe('thinking'))
+    unmount()
+    expect(initialSignal.aborted).toBe(true)
+
+    const resumedSignals = []
+    api.openResearchSessionStream.mockImplementation(async (id, signal) => {
+      resumedSignals.push({ id, signal })
+      return {
+        kind: 'events',
+        events: (async function* replay() {
+          yield { type: 'thinking' }
+          await waitForAbort(signal)
+          throw new DOMException('The operation was aborted', 'AbortError')
+        })(),
+      }
+    })
+    const remounted = renderResearchHook()
+    await waitFor(() => expect(api.openResearchSessionStream).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(remounted.result.current.activeSessionId).toBe('session-active'))
+    expect(resumedSignals[0].id).toBe('session-active')
+    expect(api.createResearchStream).toHaveBeenCalledTimes(1)
+
+    act(() => remounted.result.current.handleCancel())
+    await waitFor(() => expect(remounted.result.current.recoveryAction).toBe('resume'))
+    expect(resumedSignals[0].signal.aborted).toBe(true)
+    remounted.unmount()
+  })
+
+  it('probes a selected history session again after switching away and back', async () => {
+    api.listResearchSessions.mockResolvedValue(emptyPage([
+      { id: 'session-a', title: '研究 A' },
+      { id: 'session-b', title: '研究 B' },
+    ]))
+    const { result } = renderResearchHook()
+    await waitFor(() => expect(api.openResearchSessionStream).toHaveBeenCalledWith('session-a', expect.any(AbortSignal)))
+    await waitFor(() => expect(result.current.activeSessionId).toBe('session-a'))
+
+    act(() => result.current.handleSelectSession('session-b'))
+    await waitFor(() => expect(result.current.activeSessionId).toBe('session-b'))
+    await waitFor(() => expect(api.openResearchSessionStream).toHaveBeenCalledWith('session-b', expect.any(AbortSignal)))
+
+    act(() => result.current.handleSelectSession('session-a'))
+    await waitFor(() => expect(result.current.activeSessionId).toBe('session-a'))
+    await waitFor(() => expect(api.openResearchSessionStream.mock.calls.filter(([id]) => id === 'session-a')).toHaveLength(2))
+    expect(api.createResearchStream).not.toHaveBeenCalled()
+    expect(api.researchChatStream).not.toHaveBeenCalled()
   })
 
   it('treats stream EOF without complete as interrupted instead of success', async () => {
@@ -184,5 +272,47 @@ describe('useResearch stream lifecycle', () => {
 
     await act(async () => { await result.current.handleRetry() })
     expect(api.researchChatStream).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers explicit retry after stopping before headers arrive and never auto resends', async () => {
+    let resolveLateHeaders
+    let firstSignal
+    let retrySignal
+    const delayedHeaders = new Promise((resolve) => { resolveLateHeaders = resolve })
+    api.createResearchStream.mockImplementationOnce(async function* (_query, options) {
+      firstSignal = options.signal
+      await delayedHeaders
+      yield { type: 'session_created', session_id: 'session-late-header' }
+      yield { type: 'text_delta', text: 'first request eventually replied' }
+    }).mockImplementationOnce((_query, options) => {
+      retrySignal = options.signal
+      options.onSessionId('session-explicit-retry')
+      return (async function* retryStream() {
+        yield { type: 'session_created', session_id: 'session-explicit-retry' }
+        yield { type: 'thinking' }
+        await waitForAbort(options.signal)
+        throw new DOMException('The operation was aborted', 'AbortError')
+      })()
+    })
+    const { result } = renderResearchHook()
+    await waitFor(() => expect(result.current.loadingSessions).toBe(false))
+    act(() => { void result.current.handleSend('提交后响应头延迟') })
+    await waitFor(() => expect(api.createResearchStream).toHaveBeenCalledTimes(1))
+
+    act(() => result.current.handleCancel())
+    await waitFor(() => expect(result.current.phase).toBe('cancelled'))
+    expect(firstSignal.aborted).toBe(true)
+    expect(result.current.recoveryAction).toBe('retry')
+    expect(api.createResearchStream).toHaveBeenCalledTimes(1)
+
+    act(() => { void result.current.handleRetry() })
+    await waitFor(() => expect(api.createResearchStream).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(result.current.phase).toBe('thinking'))
+    resolveLateHeaders()
+    await act(async () => { await Promise.resolve() })
+    act(() => { void result.current.handleSend('不要重复发出任务') })
+    expect(retrySignal.aborted).toBe(false)
+    expect(api.createResearchStream).toHaveBeenCalledTimes(2)
+    act(() => result.current.handleCancel())
   })
 })

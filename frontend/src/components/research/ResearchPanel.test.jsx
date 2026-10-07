@@ -69,6 +69,28 @@ beforeEach(() => {
 })
 
 describe('ResearchPanel', () => {
+  it('warns that retry may duplicate work after stopping before a response header', async () => {
+    api.createResearchStream.mockImplementationOnce((_query, { signal }) => (async function* firstAttempt() {
+      yield { type: 'thinking' }
+      await waitForAbort(signal)
+      throw new DOMException('The operation was aborted', 'AbortError')
+    })()).mockImplementationOnce(async function* retryAttempt() {
+      yield { type: 'complete' }
+    })
+
+    renderPanel()
+    fireEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    await screen.findByRole('dialog', { name: '新闻研究助手' })
+    fireEvent.click(screen.getByRole('button', { name: '分析 AI 芯片竞争格局' }))
+    fireEvent.click(await screen.findByRole('button', { name: '停止接收当前研究进度' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('原请求可能已到达服务器')
+    expect(screen.getByRole('status')).toHaveTextContent('可能重复计算或产生费用')
+    expect(api.createResearchStream).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: '重新研究' }))
+    await waitFor(() => expect(api.createResearchStream).toHaveBeenCalledTimes(2))
+  })
+
   it('shows streaming cancellation and reconnect controls, then displays the persisted result', async () => {
     let requestSignal
     api.createResearchStream.mockImplementation((_query, { signal }) => {

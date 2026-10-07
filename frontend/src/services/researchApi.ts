@@ -56,7 +56,7 @@ export async function deleteResearchSession(sessionId: string): Promise<void> {
 
 export function createResearchStream(
   query: string,
-  options: { localOnly: boolean; signal: AbortSignal },
+  options: { localOnly: boolean; signal: AbortSignal; onSessionId?: (sessionId: string) => void },
 ): AsyncGenerator<ResearchEvent> {
   const source = createResearchStreamRequest(query, options) as AsyncIterable<unknown>
   return typedResearchEvents(source)
