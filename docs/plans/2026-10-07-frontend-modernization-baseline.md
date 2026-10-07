@@ -135,3 +135,13 @@ SearchBar 现在按 React Router 的 POP 导航 key 重置当前草稿并清除�
 本地浏览器在隔离 Vite + 临时 Django 环境中验证了 Provider 创建、JINA 行重测，以及 Research 创建后停止接收、再继续接收并显示“本地确定性研究”结果。该环境只使用 `/tmp` 临时 SQLite 与确定性本地 mock；没有打开项目数据库、调用外部模型或 Provider API。临时服务已停止。浏览器验收截图随本轮审查结果提供。
 
 本检查点只完成 Provider/Research 的身份与恢复边界，尚不表示整个前端重构完成。代码和本记录保留在本地分支，等待主助手审查；未推送。下一步先根据审查意见再继续。
+
+## 2026-10-07 复审修补：Research 历史探测期间的发送边界
+
+复审发现无恢复 checkpoint 的历史会话 GET 探测期间，hook 已持有连接锁但面板仍显示空闲；按 Enter 会清空输入，而 hook 静默拒绝发送。本轮只修复该边界并补直接回归：
+
+- Research hook 将流式连接与历史恢复探测公开为 `isBusy`；探测中输入区显示停止接收状态、发送路径和建议问题均不可触发请求。输入草稿仍可保留供用户在探测完成后发送。
+- `handleSend` 现在返回明确的 accepted 布尔值；面板只在同一份草稿确实取得发送锁时清空输入。连接忙时返回 false，不能清空或重复 POST。
+- 延迟 GET 测试覆盖探测期间键盘发送被阻止、草稿原样保留、没有 create/chat POST，GET 完成后可发送且只清空已接受草稿。附加测试直接覆盖 viewer 间 sessionStorage 隔离，以及成功保存结果和删除会话后的恢复记录清理。
+
+验收：定向 Research hook/面板测试 2 个文件、16 项通过；完整 `npm run test:run -- --configLoader runner`：40 个文件、231 项通过；`npm run lint`、`npm run typecheck`、`npm run build -- --configLoader runner --outDir /tmp/newsagg-p2-final-build --emptyOutDir`、`git diff --check` 均通过。没有修改后端/API，也没有改变“停止只取消浏览器接收”的既有语义。

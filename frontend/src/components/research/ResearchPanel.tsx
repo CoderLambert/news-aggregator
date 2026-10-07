@@ -28,6 +28,7 @@ function ResearchPanelView({ user }: { user: AuthUser | null }) {
     phase,
     searchResults,
     hasRecoverableTask,
+    isBusy,
     recoveryAction,
     handleSend,
     handleNewSession,
@@ -37,7 +38,7 @@ function ResearchPanelView({ user }: { user: AuthUser | null }) {
     handleRetry,
   } = useResearch(user?.id ?? null)
 
-  const isLoading = phase === 'thinking' || phase === 'tool_calling' || phase === 'streaming'
+  const isLoading = isBusy || phase === 'thinking' || phase === 'tool_calling' || phase === 'streaming'
 
   function handleOpen() {
     setIsOpen(true)
@@ -50,8 +51,10 @@ function ResearchPanelView({ user }: { user: AuthUser | null }) {
 
   function handleSendQuery() {
     if (!input.trim() || isLoading || hasRecoverableTask || !user) return
-    void handleSend(input.trim(), { localOnly })
-    setInput('')
+    const submittedInput = input
+    void handleSend(input.trim(), { localOnly }).then((accepted) => {
+      if (accepted) setInput((current) => current === submittedInput ? '' : current)
+    })
   }
 
   function handleSuggestionClick(query: string) {
@@ -59,7 +62,7 @@ function ResearchPanelView({ user }: { user: AuthUser | null }) {
       setShowAuthModal(true)
       return
     }
-    if (hasRecoverableTask) return
+    if (isBusy || hasRecoverableTask) return
     void handleSend(query, { localOnly: false })
   }
 
@@ -142,6 +145,7 @@ function ResearchPanelView({ user }: { user: AuthUser | null }) {
                 phase={phase}
                 searchResults={searchResults}
                 onSuggestionClick={handleSuggestionClick}
+                disabled={isBusy}
               />
               {recoveryAction === 'resume' && (
                 <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs text-amber-800">

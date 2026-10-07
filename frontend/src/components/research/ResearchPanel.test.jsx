@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthContext } from '@/context/AuthContext'
 
@@ -122,5 +122,60 @@ describe('ResearchPanel', () => {
     await waitFor(() => expect(api.openResearchSessionStream).toHaveBeenCalledTimes(1))
     expect(api.createResearchStream).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('button', { name: '继续接收' })).not.toBeInTheDocument()
+  })
+
+  it('keeps typed input while history recovery is pending, then clears only after an accepted send', async () => {
+    let resolveProbe
+    const history = {
+      id: 'history-pending',
+      title: '进行中的历史会话',
+      messages: [],
+      message_count: 0,
+      created_at: '2026-10-07T00:00:00Z',
+      updated_at: '2026-10-07T00:00:00Z',
+    }
+    api.listResearchSessions.mockResolvedValue({
+      count: 1,
+      next: null,
+      previous: null,
+      results: [{ id: history.id, title: history.title }],
+    })
+    api.getResearchSession.mockResolvedValue(history)
+    api.openResearchSessionStream.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveProbe = resolve
+    }))
+    api.researchChatStream.mockImplementation(async function* chat() {
+      yield { type: 'text_delta', text: '问题已接受' }
+      yield { type: 'complete' }
+    })
+
+    renderPanel()
+    fireEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    await screen.findByRole('dialog', { name: '新闻研究助手' })
+    await waitFor(() => expect(api.openResearchSessionStream).toHaveBeenCalledWith(history.id, expect.any(AbortSignal)))
+
+    const input = screen.getByRole('textbox', { name: '输入研究问题' })
+    fireEvent.change(input, { target: { value: '探测期间保留草稿' } })
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: false })
+    expect(input).toHaveValue('探测期间保留草稿')
+    expect(screen.getByRole('button', { name: '停止接收当前研究进度' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '最近 LLM Agent 有什么新进展？' })).toBeDisabled()
+    expect(api.createResearchStream).not.toHaveBeenCalled()
+    expect(api.researchChatStream).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveProbe({ kind: 'session', session: history })
+    })
+    const sendButton = await screen.findByRole('button', { name: '发送' })
+    await waitFor(() => expect(sendButton).toBeEnabled())
+    fireEvent.click(sendButton)
+
+    await waitFor(() => expect(api.researchChatStream).toHaveBeenCalledWith(
+      history.id,
+      '探测期间保留草稿',
+      expect.objectContaining({ signal: expect.any(AbortSignal), localOnly: false }),
+    ))
+    await waitFor(() => expect(input).toHaveValue(''))
+    expect(api.createResearchStream).not.toHaveBeenCalled()
   })
 })

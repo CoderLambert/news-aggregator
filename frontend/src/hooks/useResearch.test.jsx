@@ -31,12 +31,15 @@ function session(id, messages = [], messageCount = messages.length) {
   }
 }
 
-function renderResearchHook() {
+function renderResearchHook(viewerId = 1) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: 30_000 }, mutations: { retry: false } },
   })
   const wrapper = ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
-  const hook = renderHook(() => useResearch(1), { wrapper })
+  const hook = renderHook(({ viewerId: activeViewerId }) => useResearch(activeViewerId), {
+    initialProps: { viewerId },
+    wrapper,
+  })
   return { ...hook, client }
 }
 
@@ -314,5 +317,143 @@ describe('useResearch stream lifecycle', () => {
     expect(retrySignal.aborted).toBe(false)
     expect(api.createResearchStream).toHaveBeenCalledTimes(2)
     act(() => result.current.handleCancel())
+  })
+
+  it('reports busy while probing an uncheckpointed history session and accepts a send after the probe', async () => {
+    let resolveProbe
+    const delayedProbe = new Promise((resolve) => { resolveProbe = resolve })
+    const history = session('history-pending')
+    api.listResearchSessions.mockResolvedValue(emptyPage([{ id: history.id, title: history.title }]))
+    api.getResearchSession.mockResolvedValue(history)
+    api.openResearchSessionStream.mockReturnValue(delayedProbe)
+    api.researchChatStream.mockImplementation(async function* chat() {
+      yield { type: 'text_delta', text: '新问题已接受' }
+      yield { type: 'complete' }
+    })
+
+    const { result } = renderResearchHook()
+    await waitFor(() => expect(api.openResearchSessionStream).toHaveBeenCalledWith(history.id, expect.any(AbortSignal)))
+    expect(result.current.isBusy).toBe(true)
+
+    let acceptedWhileProbing
+    await act(async () => {
+      acceptedWhileProbing = await result.current.handleSend('探测期间不应提交')
+    })
+    expect(acceptedWhileProbing).toBe(false)
+    expect(api.createResearchStream).not.toHaveBeenCalled()
+    expect(api.researchChatStream).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveProbe({ kind: 'session', session: history })
+      await delayedProbe
+    })
+    await waitFor(() => expect(result.current.isBusy).toBe(false))
+
+    let acceptedAfterProbe
+    await act(async () => {
+      acceptedAfterProbe = await result.current.handleSend('探测结束后提交')
+    })
+    expect(acceptedAfterProbe).toBe(true)
+    await waitFor(() => expect(api.researchChatStream).toHaveBeenCalledWith(
+      history.id,
+      '探测结束后提交',
+      expect.objectContaining({ signal: expect.any(AbortSignal), localOnly: false }),
+    ))
+    expect(api.createResearchStream).not.toHaveBeenCalled()
+  })
+
+  it('does not restore another viewer’s sessionStorage recovery record', async () => {
+    const viewerOneKey = 'news-aggregator:research-recovery:v1:1:shared-history'
+    const viewerTwoKey = 'news-aggregator:research-recovery:v1:2:shared-history'
+    sessionStorage.setItem(viewerOneKey, JSON.stringify({
+      version: 1,
+      taskId: 'viewer-one-task',
+      sessionId: 'shared-history',
+      query: 'viewer-one private question',
+      localOnly: false,
+      startingMessageCount: 0,
+    }))
+
+    const { result, rerender } = renderResearchHook(1)
+    await waitFor(() => expect(result.current.loadingSessions).toBe(false))
+
+    const history = session('shared-history')
+    api.listResearchSessions.mockResolvedValue(emptyPage([{ id: history.id, title: history.title }]))
+    api.getResearchSession.mockResolvedValue(history)
+    let probeSignal
+    api.openResearchSessionStream.mockImplementation((_sessionId, signal) => {
+      probeSignal = signal
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+      })
+    })
+    rerender({ viewerId: 2 })
+
+    await waitFor(() => expect(api.openResearchSessionStream).toHaveBeenCalledWith(history.id, expect.any(AbortSignal)))
+    expect(result.current.isBusy).toBe(true)
+    expect(sessionStorage.getItem(viewerTwoKey)).toBeNull()
+    expect(result.current.hasRecoverableTask).toBe(false)
+    expect(result.current.messages.some((message) => message.content.includes('viewer-one private question'))).toBe(false)
+    expect(api.createResearchStream).not.toHaveBeenCalled()
+
+    act(() => result.current.handleCancel())
+    expect(probeSignal.aborted).toBe(true)
+  })
+
+  it('clears viewer-scoped recovery metadata after a completed result is saved', async () => {
+    const history = session('session-complete', [
+      { role: 'user', content: '完成后清理' },
+      { role: 'assistant', content: '保存的完整结果' },
+    ], 2)
+    api.getResearchSession.mockResolvedValue(history)
+    let releaseComplete
+    api.createResearchStream.mockImplementation((_query, options) => {
+      options.onSessionId(history.id)
+      return (async function* stream() {
+        yield { type: 'session_created', session_id: history.id }
+        await new Promise((resolve) => { releaseComplete = resolve })
+        yield { type: 'text_delta', text: '保存的完整结果' }
+        yield { type: 'complete' }
+      })()
+    })
+
+    const { result } = renderResearchHook(7)
+    await waitFor(() => expect(result.current.loadingSessions).toBe(false))
+    await act(async () => {
+      expect(await result.current.handleSend('完成后清理')).toBe(true)
+    })
+
+    const storageKey = 'news-aggregator:research-recovery:v1:7:session-complete'
+    await waitFor(() => expect(sessionStorage.getItem(storageKey)).toContain('完成后清理'))
+    await act(async () => {
+      releaseComplete()
+      await waitFor(() => expect(sessionStorage.getItem(storageKey)).toBeNull())
+    })
+    expect(api.createResearchStream).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears viewer-scoped recovery metadata after deleting a session', async () => {
+    api.createResearchStream.mockImplementation((_query, options) => (async function* stream() {
+      yield { type: 'session_created', session_id: 'session-delete' }
+      yield { type: 'thinking' }
+      await waitForAbort(options.signal)
+      throw new DOMException('The operation was aborted', 'AbortError')
+    })())
+    const { result } = renderResearchHook(9)
+    await waitFor(() => expect(result.current.loadingSessions).toBe(false))
+    await act(async () => {
+      expect(await result.current.handleSend('要删除的研究')).toBe(true)
+    })
+    await waitFor(() => expect(result.current.activeSessionId).toBe('session-delete'))
+    await waitFor(() => expect(sessionStorage.getItem('news-aggregator:research-recovery:v1:9:session-delete')).not.toBeNull())
+
+    act(() => result.current.handleCancel())
+    await waitFor(() => expect(result.current.recoveryAction).toBe('resume'))
+    await act(async () => {
+      await result.current.handleDeleteSession('session-delete')
+    })
+
+    expect(api.deleteResearchSession.mock.calls[0]?.[0]).toBe('session-delete')
+    expect(sessionStorage.getItem('news-aggregator:research-recovery:v1:9:session-delete')).toBeNull()
   })
 })
