@@ -1,4 +1,4 @@
-import { createContext, useContext } from 'react'
+import { createContext, useContext } from "react";
 
 /**
  * SpeechPlayerContext — global TTS state.
@@ -24,12 +24,12 @@ import { createContext, useContext } from 'react'
  *   supported: boolean,
  * }
  */
-export const SpeechPlayerContext = createContext(null)
+export const SpeechPlayerContext = createContext(null);
 
 export function useSpeechPlayer() {
-  const ctx = useContext(SpeechPlayerContext)
+  const ctx = useContext(SpeechPlayerContext);
   if (!ctx) {
-    throw new Error('useSpeechPlayer must be used within SpeechPlayerProvider')
+    throw new Error("useSpeechPlayer must be used within SpeechPlayerProvider");
   }
-  return ctx
+  return ctx;
 }

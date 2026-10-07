@@ -1,99 +1,109 @@
-import { useState, useRef, useCallback } from 'react'
-import { useParams, Link } from 'react-router-dom'
-import { Search, ArrowLeft, Headphones } from 'lucide-react'
-import { useLanguage } from '../context/useLanguage'
-import { useSpeechPlayer } from '../context/SpeechPlayerContext'
-import LoadingSpinner from '../components/LoadingSpinner'
-import AuthModal from '../components/AuthModal'
-import NewsChatAssistant from '../components/NewsChatAssistant'
-import TranslationStatus from '../components/news-detail/TranslationStatus'
-import ErrorBanner from '../components/news-detail/ErrorBanner'
-import FullContentSection from '../components/news-detail/FullContentSection'
-import MarkdownContent from '../components/news-detail/MarkdownContent'
-import FullContentFetchStatus from '../components/news-detail/FullContentFetchStatus'
-import ArticleSearchBar from '../components/news-detail/ArticleSearchBar'
-import ArticleToc from '../components/news-detail/ArticleToc'
-import ScrollToTop from '../components/news-detail/ScrollToTop'
-import FavoriteButtons from '../components/news-detail/FavoriteButtons'
-import { useNewsDetail } from '../hooks/useNewsDetail'
-import { useFullArticle } from '../hooks/useFullArticle'
-import { useTranslation } from '../hooks/useTranslation'
-import { useArticleSearch } from '../hooks/useArticleSearch'
-import { useArticleToc } from '../hooks/useArticleToc'
+import { useState, useRef, useCallback } from "react";
+import { useParams, Link } from "react-router-dom";
+import { Search, ArrowLeft, Headphones } from "lucide-react";
+import { useLanguage } from "../context/useLanguage";
+import { useSpeechPlayer } from "../context/SpeechPlayerContext";
+import LoadingSpinner from "../components/LoadingSpinner";
+import AuthModal from "../components/AuthModal";
+import NewsChatAssistant from "../components/NewsChatAssistant";
+import TranslationStatus from "../components/news-detail/TranslationStatus";
+import ErrorBanner from "../components/news-detail/ErrorBanner";
+import FullContentSection from "../components/news-detail/FullContentSection";
+import MarkdownContent from "../components/news-detail/MarkdownContent";
+import FullContentFetchStatus from "../components/news-detail/FullContentFetchStatus";
+import ArticleSearchBar from "../components/news-detail/ArticleSearchBar";
+import ArticleToc from "../components/news-detail/ArticleToc";
+import ScrollToTop from "../components/news-detail/ScrollToTop";
+import FavoriteButtons from "../components/news-detail/FavoriteButtons";
+import { useNewsDetail } from "../hooks/useNewsDetail";
+import { useFullArticle } from "../hooks/useFullArticle";
+import { useTranslation } from "../hooks/useTranslation";
+import { useArticleSearch } from "../hooks/useArticleSearch";
+import { useArticleToc } from "../hooks/useArticleToc";
 export default function NewsDetail() {
-  const { id } = useParams()
-  const { displayMode, t } = useLanguage()
-  const { news, setNews, loading } = useNewsDetail(id)
-  const { articleLoading, articleError, handleFetchFullArticle, cancelFetch } = useFullArticle(id, setNews)
+  const { id } = useParams();
+  const { displayMode, t } = useLanguage();
+  const { news, setNews, loading } = useNewsDetail(id);
+  const { articleLoading, articleError, handleFetchFullArticle, cancelFetch } =
+    useFullArticle(id, setNews);
   const {
-    translating, translateError, translationProgress,
-    showOriginal, setShowOriginal, handleTranslate,
-  } = useTranslation(id, news, setNews, loading)
+    translating,
+    translateError,
+    translationProgress,
+    showOriginal,
+    setShowOriginal,
+    handleTranslate,
+  } = useTranslation(id, news, setNews, loading);
 
   // TTS — uses global player
-  const speechPlayer = useSpeechPlayer()
+  const speechPlayer = useSpeechPlayer();
   const handleSpeak = useCallback(() => {
-    if (!news) return
-    const isEnglishSource = news.source_language === 'en'
-    const hasZh = isEnglishSource && !!news.title_zh
-    let speechTitle = news.title
-    if (hasZh && displayMode === 'zh') speechTitle = news.title_zh
-    speechPlayer.speak(news.id, speechTitle, displayMode)
-  }, [news, displayMode, speechPlayer])
+    if (!news) return;
+    const isEnglishSource = news.source_language === "en";
+    const hasZh = isEnglishSource && !!news.title_zh;
+    let speechTitle = news.title;
+    if (hasZh && displayMode === "zh") speechTitle = news.title_zh;
+    speechPlayer.speak(news.id, speechTitle, displayMode);
+  }, [news, displayMode, speechPlayer]);
 
   // Page-internal search
-  const [searchOpen, setSearchOpen] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [authModalOpen, setAuthModalOpen] = useState(false)
-  const articleRef = useRef(null)
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const articleRef = useRef(null);
 
   const { matchCount, currentIndex, goNext, goPrev } = useArticleSearch(
     articleRef,
     searchQuery,
-  )
+  );
 
   // TOC
-  const { headings, activeId } = useArticleToc(articleRef, [news?.full_content_zh, showOriginal])
+  const { headings, activeId } = useArticleToc(articleRef, [
+    news?.full_content_zh,
+    showOriginal,
+  ]);
 
   // Ctrl/Cmd+F interceptor — open our search bar instead of browser native
   function handleGlobalKeyDown(e) {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
-      e.preventDefault()
-      setSearchOpen(true)
+    if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+      e.preventDefault();
+      setSearchOpen(true);
     }
   }
 
-  if (loading) return <LoadingSpinner />
+  if (loading) return <LoadingSpinner />;
   if (!news) {
     return (
       <div className="text-center py-20 text-gray-400">
         <p>{t.notFound}</p>
-        <Link to="/" className="text-blue-600 mt-2 inline-block">{t.backHome}</Link>
+        <Link to="/" className="text-blue-600 mt-2 inline-block">
+          {t.backHome}
+        </Link>
       </div>
-    )
+    );
   }
 
-  const isEnglishSource = news.source_language === 'en'
-  const hasZh = isEnglishSource && !!news.title_zh
+  const isEnglishSource = news.source_language === "en";
+  const hasZh = isEnglishSource && !!news.title_zh;
 
   // Resolve display text based on displayMode
-  let displayTitle, displayContent, displaySubtitle
+  let displayTitle, displayContent, displaySubtitle;
   if (!hasZh) {
-    displayTitle = news.title
-    displayContent = news.content
-    displaySubtitle = null
-  } else if (displayMode === 'zh') {
-    displayTitle = news.title_zh
-    displayContent = news.content_zh || news.content
-    displaySubtitle = null
-  } else if (displayMode === 'bilingual') {
-    displayTitle = news.title
-    displayContent = news.content_zh || news.content
-    displaySubtitle = news.title_zh
+    displayTitle = news.title;
+    displayContent = news.content;
+    displaySubtitle = null;
+  } else if (displayMode === "zh") {
+    displayTitle = news.title_zh;
+    displayContent = news.content_zh || news.content;
+    displaySubtitle = null;
+  } else if (displayMode === "bilingual") {
+    displayTitle = news.title;
+    displayContent = news.content_zh || news.content;
+    displaySubtitle = news.title_zh;
   } else {
-    displayTitle = news.title
-    displayContent = news.content
-    displaySubtitle = null
+    displayTitle = news.title;
+    displayContent = news.content;
+    displaySubtitle = null;
   }
 
   return (
@@ -107,11 +117,16 @@ export default function NewsDetail() {
           currentIndex={currentIndex}
           onGoNext={goNext}
           onGoPrev={goPrev}
-          onClose={() => { setSearchOpen(false); setSearchQuery('') }}
+          onClose={() => {
+            setSearchOpen(false);
+            setSearchQuery("");
+          }}
         />
       )}
 
-      <div className={`max-w-3xl mx-auto px-4 pt-4 pb-8 sm:pt-6 sm:pb-10 w-full overflow-x-hidden ${searchOpen ? 'pt-16' : ''}`}>
+      <div
+        className={`max-w-3xl mx-auto px-4 pt-4 pb-8 sm:pt-6 sm:pb-10 w-full overflow-x-hidden ${searchOpen ? "pt-16" : ""}`}
+      >
         {/* ── Top nav bar ── */}
         <nav className="flex items-center justify-between mb-8">
           <Link
@@ -130,7 +145,7 @@ export default function NewsDetail() {
                   aria-label="语音播报"
                   className="p-2 rounded-xl hover:bg-neutral-100 active:bg-neutral-200 transition-colors"
                 >
-                  <Headphones className="size-[18px] text-neutral-400" />
+                  <Headphones className="size-4.5 text-neutral-400" />
                 </button>
               )}
               <button
@@ -154,10 +169,18 @@ export default function NewsDetail() {
           />
 
           {/* 点赞 + 收藏按钮 */}
-          <FavoriteButtons newsId={id} className="mt-4 mb-6" onAuthRequired={() => setAuthModalOpen(true)} />
+          <FavoriteButtons
+            newsId={id}
+            className="mt-4 mb-6"
+            onAuthRequired={() => setAuthModalOpen(true)}
+          />
 
           {news.cover_image && (
-            <img src={news.cover_image} alt={displayTitle} className="w-full rounded-2xl mb-8 shadow-sm" />
+            <img
+              src={news.cover_image}
+              alt={displayTitle}
+              className="w-full rounded-2xl mb-8 shadow-sm"
+            />
           )}
 
           {/* Fetch full article */}
@@ -168,7 +191,10 @@ export default function NewsDetail() {
             onCancel={cancelFetch}
           />
           {articleError && (
-            <ErrorBanner message={articleError} onRetry={handleFetchFullArticle} />
+            <ErrorBanner
+              message={articleError}
+              onRetry={handleFetchFullArticle}
+            />
           )}
 
           {/* Full content + translation toolbar */}
@@ -191,12 +217,17 @@ export default function NewsDetail() {
           {/* Summary content */}
           <div className="text-gray-700 leading-relaxed w-full overflow-x-hidden">
             <div className="w-full max-w-full overflow-hidden">
-              <MarkdownContent content={displayContent || ''} />
+              <MarkdownContent content={displayContent || ""} />
             </div>
           </div>
 
           <div className="mt-10 pt-6 border-t border-neutral-100">
-            <a href={news.url} target="_blank" rel="noreferrer" className="text-sm text-neutral-400 hover:text-neutral-600 transition-colors">
+            <a
+              href={news.url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sm text-neutral-400 hover:text-neutral-600 transition-colors"
+            >
               {t.readOriginal} →
             </a>
           </div>
@@ -213,12 +244,17 @@ export default function NewsDetail() {
       {/* Auth modal */}
       {authModalOpen && <AuthModal onClose={() => setAuthModalOpen(false)} />}
     </div>
-  )
+  );
 }
 
 /* ── Article header ─────────────────────────────────────────────────── */
 
-function ArticleHeader({ news, displayTitle, displaySubtitle, isEnglishSource }) {
+function ArticleHeader({
+  news,
+  displayTitle,
+  displaySubtitle,
+  isEnglishSource,
+}) {
   return (
     <header className="mb-8">
       {/* Tags row */}
@@ -236,7 +272,9 @@ function ArticleHeader({ news, displayTitle, displaySubtitle, isEnglishSource })
 
       {/* Chinese subtitle (bilingual mode) */}
       {displaySubtitle && (
-        <p className="text-[13px] text-neutral-400 leading-relaxed mb-4">{displaySubtitle}</p>
+        <p className="text-[13px] text-neutral-400 leading-relaxed mb-4">
+          {displaySubtitle}
+        </p>
       )}
 
       {/* Meta line */}
@@ -248,9 +286,15 @@ function ArticleHeader({ news, displayTitle, displaySubtitle, isEnglishSource })
         )}
         <span>{news.source_name}</span>
         <span className="flex items-center gap-1">
-          <time>{new Date(news.publish_time).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}</time>
+          <time>
+            {new Date(news.publish_time).toLocaleDateString("zh-CN", {
+              year: "numeric",
+              month: "long",
+              day: "numeric",
+            })}
+          </time>
         </span>
       </div>
     </header>
-  )
+  );
 }
