@@ -23,11 +23,26 @@ export default function SearchBar({ value, mode, onChange, onModeChange }: Searc
   const [display, setDisplay] = useState(value)
   const [syncedValue, setSyncedValue] = useState(value)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const onChangeRef = useRef(onChange)
+  const currentValueRef = useRef(value)
 
   if (value !== syncedValue) {
     setSyncedValue(value)
     setDisplay(value)
   }
+
+  useEffect(() => {
+    onChangeRef.current = onChange
+  }, [onChange])
+
+  useEffect(() => {
+    if (currentValueRef.current === value) return
+    currentValueRef.current = value
+    if (timer.current) {
+      clearTimeout(timer.current)
+      timer.current = null
+    }
+  }, [value])
 
   useEffect(() => () => {
     if (timer.current) clearTimeout(timer.current)
@@ -36,7 +51,10 @@ export default function SearchBar({ value, mode, onChange, onModeChange }: Searc
   function handleChange(nextValue: string) {
     setDisplay(nextValue)
     if (timer.current) clearTimeout(timer.current)
-    timer.current = setTimeout(() => onChange(nextValue), 300)
+    timer.current = setTimeout(() => {
+      timer.current = null
+      onChangeRef.current(nextValue)
+    }, 300)
   }
 
   return (

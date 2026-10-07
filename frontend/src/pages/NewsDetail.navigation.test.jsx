@@ -1,0 +1,118 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { AuthContext } from '@/context/AuthContext'
+import { usePreferencesStore } from '@/stores/preferences'
+import NewsList from './NewsList'
+import NewsDetail from './NewsDetail'
+import { blockNews, checkFavoriteStatus, fetchCategories, fetchNews, fetchSources, unblockNews } from '@/services/api'
+
+const { apiState, useNewsDetailMock } = vi.hoisted(() => ({
+  apiState: { blocked: false },
+  useNewsDetailMock: vi.fn(),
+}))
+
+vi.mock('@/services/api', () => ({
+  fetchNews: vi.fn(),
+  fetchCategories: vi.fn(),
+  fetchSources: vi.fn(),
+  checkFavoriteStatus: vi.fn(),
+  checkBlockedStatus: vi.fn(async () => ({ is_blocked: apiState.blocked })),
+  toggleFavorite: vi.fn(),
+  blockNews: vi.fn(async () => { apiState.blocked = true; return { created: true } }),
+  unblockNews: vi.fn(async () => { apiState.blocked = false; return { removed: true } }),
+}))
+
+vi.mock('../hooks/useNewsDetail', () => ({ useNewsDetail: useNewsDetailMock }))
+vi.mock('../hooks/useFullArticle', () => ({ useFullArticle: () => ({ articleLoading: false, articleError: '', handleFetchFullArticle: vi.fn(), cancelFetch: vi.fn() }) }))
+vi.mock('../hooks/useTranslation', () => ({ useTranslation: () => ({ translating: false, translateError: '', translationProgress: '', showOriginal: false, setShowOriginal: vi.fn(), handleTranslate: vi.fn() }) }))
+vi.mock('../hooks/useArticleSearch', () => ({ useArticleSearch: () => ({ matchCount: 0, currentIndex: 0, goNext: vi.fn(), goPrev: vi.fn() }) }))
+vi.mock('../hooks/useArticleToc', () => ({ useArticleToc: () => ({ headings: [], activeId: '' }) }))
+vi.mock('../context/SpeechPlayerContext', () => ({ useSpeechPlayer: () => ({ supported: false, speak: vi.fn() }) }))
+vi.mock('../components/NewsChatAssistant', () => ({ default: () => null }))
+
+const listStory = {
+  id: 21, title: 'Climate technology update', content: 'A short article summary', title_zh: '', content_zh: '', author: null,
+  publish_time: '2026-10-06T09:00:00Z', source: 8, source_name: 'Example source', source_type: 'news',
+  source_language: 'en', category: 2, category_name: 'Technology', url: 'https://example.com/story', cover_image: null,
+  created_at: '2026-10-06T09:00:00Z', related_to: null, translation_status: '', translation_error: '',
+  translation_retry_count: 0, full_content_fetch_status: '', full_content_fetch_error: '', full_content_fetch_provider: '',
+  full_content_quality_score: null, full_content_retry_count: 0, last_full_content_attempt: null,
+}
+const detailStory = {
+  ...listStory,
+  full_content: '', full_content_zh: '', full_translation_active: false,
+}
+
+function RouteProbe() {
+  const location = useLocation()
+  return <output data-testid="route">{`${location.pathname}${location.search}`}</output>
+}
+
+function renderRoutes(initialEntry) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 }, mutations: { retry: false } } })
+  const user = { id: 12, username: 'reader' }
+  return {
+    client,
+    ...render(
+      <QueryClientProvider client={client}>
+        <AuthContext.Provider value={{ user, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
+          <MemoryRouter initialEntries={[initialEntry]}>
+            <Routes>
+              <Route path="/" element={<NewsList />} />
+              <Route path="/news/:id" element={<NewsDetail />} />
+            </Routes>
+            <RouteProbe />
+          </MemoryRouter>
+        </AuthContext.Provider>
+      </QueryClientProvider>,
+    ),
+  }
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  apiState.blocked = false
+  localStorage.removeItem('news-aggregator-filters')
+  usePreferencesStore.setState({ lang: 'zh' })
+  fetchNews.mockResolvedValue({ count: 41, next: null, previous: null, results: [listStory] })
+  fetchCategories.mockResolvedValue([{ id: 2, name: 'Technology' }])
+  fetchSources.mockResolvedValue([{ id: 8, name: 'Example source' }])
+  checkFavoriteStatus.mockResolvedValue({ is_liked: false, is_bookmarked: false, like_count: 0, bookmark_count: 0 })
+  useNewsDetailMock.mockReturnValue({ news: detailStory, setNews: vi.fn(), loading: false })
+  vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+})
+
+describe('news list return navigation and invalidation', () => {
+  it('restores the filtered list URL and refetches after detail block and unblock', async () => {
+    renderRoutes('/?search=climate&mode=keyword&category=2&source=8&page=2')
+    expect(await screen.findByRole('heading', { name: 'Climate technology update' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('link', { name: /Climate technology update/ }))
+    expect(await screen.findByRole('heading', { name: 'Climate technology update' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '屏蔽此新闻' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '屏蔽此新闻' }))
+    expect(await screen.findByRole('button', { name: '取消屏蔽' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('link', { name: /返回列表/ }))
+    await waitFor(() => expect(screen.getByTestId('route')).toHaveTextContent('/?search=climate&mode=keyword&category=2&source=8&page=2'))
+    await waitFor(() => expect(fetchNews).toHaveBeenCalledTimes(2))
+    expect(fetchNews).toHaveBeenLastCalledWith({ page: 2, page_size: 20, search: 'climate', mode: 'keyword', category: '2', source: '8' }, expect.any(AbortSignal))
+
+    fireEvent.click(screen.getByRole('link', { name: /Climate technology update/ }))
+    expect(await screen.findByRole('button', { name: '取消屏蔽' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '取消屏蔽' }))
+    expect(await screen.findByRole('button', { name: '屏蔽此新闻' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('link', { name: /返回列表/ }))
+    await waitFor(() => expect(screen.getByTestId('route')).toHaveTextContent('/?search=climate&mode=keyword&category=2&source=8&page=2'))
+    await waitFor(() => expect(fetchNews).toHaveBeenCalledTimes(3))
+    expect(blockNews).toHaveBeenCalledWith(21)
+    expect(unblockNews).toHaveBeenCalledWith(21)
+  })
+
+  it('uses the home page as the back-link destination for a directly opened detail URL', async () => {
+    renderRoutes('/news/21')
+    const backLink = await screen.findByRole('link', { name: /返回列表/ })
+    expect(backLink).toHaveAttribute('href', '/')
+  })
+})
