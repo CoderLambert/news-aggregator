@@ -46,3 +46,26 @@ describe('ClearChatDialog', () => {
     expect(onCancel).toHaveBeenCalledOnce()
   })
 })
+
+
+describe('ClearChatDialog busy state', () => {
+  it('displays the recoverable delete error in the still-open dialog', () => {
+    render(<ClearChatDialog open error="清空失败，原有聊天记录仍保留。" onConfirm={() => {}} onCancel={() => {}} />)
+    expect(screen.getByRole('alert')).toHaveTextContent('清空失败')
+    expect(screen.getByRole('button', { name: '再聊聊' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '清空' })).toBeEnabled()
+  })
+
+  it('prevents closing or confirming while the delete request is pending', () => {
+    const onConfirm = vi.fn()
+    const onCancel = vi.fn()
+    render(<ClearChatDialog open isClearing onConfirm={onConfirm} onCancel={onCancel} />)
+    expect(screen.getByRole('alertdialog')).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByRole('button', { name: '再聊聊' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '清空中…' })).toBeDisabled()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    fireEvent.click(screen.getByTestId('clear-dialog-backdrop'))
+    expect(onCancel).not.toHaveBeenCalled()
+    expect(onConfirm).not.toHaveBeenCalled()
+  })
+})

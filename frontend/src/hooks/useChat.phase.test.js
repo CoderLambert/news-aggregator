@@ -57,7 +57,7 @@ describe('useChat phase machine', () => {
     await waitFor(() => expect(result.current.phase).toBe('idle'), { timeout: 3000 })
   })
 
-  it('transitions to error on failure and clears that phase for an explicit next send', async () => {
+  it('keeps a failed request uncertain until the user explicitly resends it', async () => {
     chatStream
       // eslint-disable-next-line require-yield -- intentional: simulates a request that fails before its first token
       .mockImplementationOnce(async function* () { throw new Error('boom') })
@@ -67,10 +67,11 @@ describe('useChat phase machine', () => {
     act(() => result.current.setInput('first'))
     await act(async () => { await result.current.handleSend() })
     expect(result.current.phase).toBe('error')
-    act(() => result.current.setInput('second'))
-    let sendPromise
-    act(() => { sendPromise = result.current.handleSend() })
+    expect(result.current.uncertainTurn?.reconciliation).toBe('unconfirmed')
+    await expect(result.current.handleSend()).resolves.toBe(false)
+    let resendPromise
+    act(() => { resendPromise = result.current.resendUncertainTurn() })
     await waitFor(() => expect(result.current.phase).not.toBe('error'))
-    await act(async () => { await sendPromise })
+    await act(async () => { await resendPromise })
   })
 })

@@ -7,6 +7,7 @@ import ChatMessageList from '@/components/chat/ChatMessageList'
 import ChatInput from '@/components/chat/ChatInput'
 import ClearChatDialog from '@/components/chat/ClearChatDialog'
 import Confetti from '@/components/chat/Confetti'
+import { Button } from '@/components/ui/button'
 
 function phaseToMood(phase: ChatPhase): string {
   switch (phase) {
@@ -27,7 +28,8 @@ export default function NewsChatAssistant({ newsId }: { newsId: string | number 
     messages, input, setInput, isLoading, phase,
     historyError, retryHistory,
     handleSend, doSend, stopWaiting,
-    confirmingClear, requestClearChat, cancelClear, confirmClear,
+    confirmingClear, isClearing, clearError, requestClearChat, cancelClear, confirmClear,
+    uncertainTurn, checkPendingTurn, resendUncertainTurn,
     webSearch, toggleWebSearch,
   } = useChat(newsId, isOpen)
 
@@ -100,6 +102,7 @@ export default function NewsChatAssistant({ newsId }: { newsId: string | number 
           isFullscreen={isFullscreen}
           onToggleFullscreen={() => setIsFullscreen((current) => !current)}
           onClear={requestClearChat}
+          clearDisabled={confirmingClear}
           onClose={closePanel}
         />
 
@@ -107,6 +110,36 @@ export default function NewsChatAssistant({ newsId }: { newsId: string | number 
           {historyError && (
             <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
               聊天记录加载失败。<button type="button" className="ml-1 underline" onClick={() => void retryHistory()}>重试</button>
+            </div>
+          )}
+          {uncertainTurn && (
+            <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              <p className="font-medium">
+                {uncertainTurn.reconciliation === 'checking'
+                  ? '正在只读核对服务器记录…'
+                  : uncertainTurn.reconciliation === 'partial'
+                    ? '服务器已保存这条问题，但暂未找到已保存的回答。为避免重复提交，此问题暂不可重发。'
+                    : '无法确认服务器是否已处理这条问题。草稿已保留；显式重发可能创建重复请求并产生额外费用。'}
+              </p>
+              {uncertainTurn.reconciliation !== 'partial' && (
+                <p className="mt-1 text-xs">
+                  {uncertainTurn.reconciliation === 'failed'
+                    ? '核对记录失败。你可以重新检查，或在确认风险后显式重发。'
+                    : '系统不会自动重发。'}
+                </p>
+              )}
+              <div className="mt-2 flex flex-wrap gap-2">
+                {uncertainTurn.reconciliation !== 'checking' && (
+                  <Button type="button" size="sm" variant="outline" onClick={() => { void checkPendingTurn() }}>
+                    重新检查记录
+                  </Button>
+                )}
+                {!uncertainTurn.serverQuestionSaved && uncertainTurn.reconciliation !== 'checking' && (
+                  <Button type="button" size="sm" variant="destructive" onClick={() => { void resendUncertainTurn() }}>
+                    仍要重发（可能重复/计费）
+                  </Button>
+                )}
+              </div>
             </div>
           )}
           <ChatMessageList
@@ -125,6 +158,8 @@ export default function NewsChatAssistant({ newsId }: { newsId: string | number 
           onSend={() => { void handleSend() }}
           onStop={phase === 'thinking' || phase === 'streaming' ? stopWaiting : undefined}
           isLoading={isLoading}
+          sendDisabled={Boolean(uncertainTurn) || confirmingClear}
+          disabled={confirmingClear || isClearing}
           autoFocus={isOpen}
           webSearch={webSearch}
           onWebSearchToggle={toggleWebSearch}
@@ -133,7 +168,13 @@ export default function NewsChatAssistant({ newsId }: { newsId: string | number 
         <Confetti fire={confettiFired} />
       </div>
 
-      <ClearChatDialog open={confirmingClear} onConfirm={() => { void confirmClear() }} onCancel={cancelClear} />
+      <ClearChatDialog
+        open={confirmingClear}
+        isClearing={isClearing}
+        error={clearError}
+        onConfirm={() => { void confirmClear() }}
+        onCancel={cancelClear}
+      />
     </div>
   )
 }

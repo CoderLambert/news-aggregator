@@ -12,6 +12,8 @@ interface ChatInputProps {
   onSend: () => void
   onStop?: () => void
   isLoading: boolean
+  sendDisabled?: boolean
+  disabled?: boolean
   autoFocus?: boolean
   webSearch?: boolean
   onWebSearchToggle?: () => void
@@ -23,6 +25,8 @@ export default function ChatInput({
   onSend,
   onStop,
   isLoading,
+  sendDisabled = false,
+  disabled = false,
   autoFocus,
   webSearch = false,
   onWebSearchToggle,
@@ -48,13 +52,13 @@ export default function ChatInput({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === 'Enter' && !event.shiftKey && !isLoading) {
+    if (event.key === 'Enter' && !event.shiftKey && !isLoading && !sendDisabled && !disabled) {
       event.preventDefault()
       onSend()
     }
   }
 
-  const canSend = Boolean(value.trim()) && !isLoading
+  const canSend = Boolean(value.trim()) && !isLoading && !sendDisabled && !disabled
   return (
     <div className="border-t border-neutral-100 bg-white px-3 pb-3 pt-2">
       <div className={`flex items-end gap-2 rounded-2xl bg-neutral-100 p-1.5 transition-all ${canSend ? 'ring-2 ring-orange-200' : 'ring-0'}`}>
@@ -62,6 +66,7 @@ export default function ChatInput({
           ref={inputRef}
           value={value}
           onChange={handleChange}
+          disabled={disabled}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           aria-label="输入聊天问题"
@@ -73,6 +78,7 @@ export default function ChatInput({
           <Button
             type="button"
             onClick={onWebSearchToggle}
+            disabled={disabled}
             aria-pressed={webSearch}
             aria-label={webSearch ? '关闭联网搜索' : '开启联网搜索'}
             title={webSearch ? '已开启联网搜索' : '开启联网搜索'}
