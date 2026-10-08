@@ -201,3 +201,17 @@ SearchBar 现在按 React Router 的 POP 导航 key 重置当前草稿并清除�
 从全新前端依赖开始，现有命令为：`cd frontend && npm ci && npm run typecheck && npm run lint && npm run test:run -- --configLoader native && npm run build`。开发模式 `npm run dev` 代理 `/api` 至 `127.0.0.1:9527`；按根目录 `README.md` 与 `docs/startup.md` 的既有说明单独启动 Django 即可。
 
 本切片按本地提交保留，未推送；此记录随提交，便于主助手/用户直接复核。
+
+## 2026-10-08 复审补修与本地真实服务
+
+代码补修提交：`e72bef07c5152bb99ef2be960f86780bd1f614d7`，基于 P5 提交 `53116a3ce97be1a33f8cebc1fa16a063428bf4ca`，未推送。
+
+- MediaSession `play` 的 Promise 拒绝处理再次核对当前 Audio 和请求代次；新增旧音轨拒绝发生在切到下一篇或停止后仍不覆盖当前状态的延迟 Promise 回归。
+- Header 的 outside-pointer 检查同时排除菜单和菜单按钮；新增 pointerdown → pointerup → click 实序列开关回归。
+- 有序列表只在每个列表项都带可渲染的 HTTP(S)/站内根路径引用时改成来源卡片；片段锚点、相对地址、mailto 与普通编号列表保留标准 `<ol>` 和原 children。
+
+测试数差额可复核：P5 前提交 `3d677bd8f6cfd786b87f075757bf3a32dd23c67b` 全量 41 文件/260 项；P5 提交全量 43 文件/252 项。P5 删除旧 `useSpeech.test.js` 13 项，并新增语音播放器 2 项、登录焦点 1 项、Mermaid 失败回退 1 项、SSE reader cancel 1 项，净少 8 项；无测试路径过滤。`useChat.test.js` 与 `useChat.phase.test.js` 相对 P5 前提交无差异，当前定向 25 项全通过；本补修后完整套件 45 文件/260 项全通过。
+
+本修补验收：`npm run typecheck`、`npm run lint`、`git diff --check`、完整 Vitest 与 Vite production build 均通过。仍未迁为 TS 的 27 个生产模块是待办，而非迁移完成：`components/LoadingSpinner.jsx`；`components/chat/{ChatBubbleButton,ChatHeader,ClearChatDialog,Confetti}.jsx`；`components/mascot/{MascotPreview,XiaowenMascot}.jsx`；`components/news-detail/{ArticleSearchBar,ArticleToc,ErrorBanner,FetchArticleCard,FetchArticleSpinner,FullContentFetchStatus,ScrollToTop,TranslationStatus}.jsx`；`components/ui/{alert,badge,card,skeleton,toggle-group}.jsx`；`constants/index.js`；`hooks/{useArticleSearch,useArticleToc,useScrollPast}.js`；`lib/{shiki,utils}.js`；`main.jsx`。详情页、聊天叶组件、共享加载器/吉祥物和 shadcn primitive 仍有活动调用点；现有 `components.json` 仍配置 `tsx: false`。`MascotPreview` 是单独预览路由；`XiaowenMascot` 同时仍被聊天 UI 使用。后续逐组迁移并补齐 prop/DOM 边界类型。
+
+本机验收服务只监听 loopback：Django `127.0.0.1:9527`，Vite `127.0.0.1:5173`；直连新闻 API 与 Vite `/api/news/` 代理均 HTTP 200。Django 以临时 `RUN_MAIN=true` 跳过 `ApiConfig.ready()` embedding preload，使用手动 `runserver --noreload` 与 Vite 命令；未运行迁移、crawler、scheduler/自动全文采集或 AI 请求，未登录或写入数据库。验收入口 `http://127.0.0.1:5173/`。当前 CUA 与 Codex 页面打开连接都返回 `Transport closed`，因此本轮未完成可视浏览器 QA，也没有保存/上传截图；HTTP 状态不代表最终 UI 验收。审查补丁另存于 Library：`news-aggregator-review-fixes-e72bef0.patch`。
