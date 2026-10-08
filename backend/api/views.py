@@ -610,6 +610,17 @@ class NewsTranslateFullView(generics.GenericAPIView):
                         yield f"event: complete\ndata: {json_lib.dumps({'full_content_zh': zh_content, 'full_content_zh_fetched_at': news.full_content_zh_fetched_at.isoformat()}, ensure_ascii=False)}\n\n"
                     return StreamingHttpResponse(cached_stream(), content_type='text/event-stream')
 
+        # Keep the SSE error shape expected by the frontend, but make missing
+        # provider configuration actionable instead of persisting a fallback
+        # sentence as if it were translated content.
+        if not worker_in_flight and not get_clients():
+            def provider_error_stream():
+                message = (
+                    '未配置全文翻译模型提供方。当前支持 Volcengine ARK / DashScope API Key。'
+                )
+                yield f"data: {json_lib.dumps({'error': message}, ensure_ascii=False)}\n\n"
+            return StreamingHttpResponse(provider_error_stream(), content_type='text/event-stream')
+
         # FIX: Use the fetched full content for translation
         context = news.full_content
         if len(context) > 40000:

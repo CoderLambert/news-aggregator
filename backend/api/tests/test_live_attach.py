@@ -152,3 +152,26 @@ def test_finished_worker_falls_through_to_snapshot(news_obj, client):
     assert '已经翻译完成的全文内容。' in body
     # Should be a single snapshot frame, not the attach-path 'complete' event
     assert 'event: complete' not in body
+
+
+def test_missing_provider_returns_actionable_sse_error_without_starting_job(news_obj, client):
+    with (
+        patch('api.views.get_clients', return_value=[]),
+        patch('api.services.llm_translator.find_chinese_translation_link', return_value=None),
+        patch('api.services.translation_jobs.start_or_get_job') as start_job,
+    ):
+        response = client.post(
+            f'/api/news/{news_obj.pk}/translate/',
+            data={'force': False},
+            content_type='application/json',
+        )
+        body = b''.join(response.streaming_content).decode('utf-8')
+
+    start_job.assert_not_called()
+    assert response.status_code == 200
+    assert response['Content-Type'].startswith('text/event-stream')
+    assert '"error"' in body
+    assert '未配置全文翻译模型提供方' in body
+    assert 'Volcengine ARK / DashScope' in body
+    news_obj.refresh_from_db()
+    assert news_obj.full_content_zh == ''
