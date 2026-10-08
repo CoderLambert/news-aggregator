@@ -162,3 +162,13 @@ SearchBar 现在按 React Router 的 POP 导航 key 重置当前草稿并清除�
 验收图由 CUA 浏览器捕获并在审查会话中显示，演示标签为 `http://127.0.0.1:5180/news/1` 且已标记为 deliverable；此 CUA 会话没有提供将截图写入本地路径的接口。两个临时服务已停止。
 
 验收环境注意：首次 Django 启动调用了既有 `ApiConfig.ready()` embedding 预加载钩子，观察到无凭据的 Hugging Face 模型元数据请求后立即中止；之后仅在临时进程设置 `RUN_MAIN=true` 禁用该启动预加载再运行确定性 fixture，无进一步外连。首次请求写入本轮专用 `/tmp/newsagg-p4-home/.cache` 的少量元数据，已删除；后续临时 SQLite 和构建目录仅位于 `/tmp`。
+
+## 2026-10-08 P2 修补：聊天清空互斥与中断请求核对
+
+起点：`767f2d8c86c6cacef2bf143e2f1eb8848341cce5`，分支 `codex/frontend-list-query-slice`。本次仅修补聊天交互竞态，不改 API 路径/请求/响应语义、后端、数据库或依赖。
+
+- 确认清空时立即安装互斥锁、取消本页流并禁用重复清空与发送；DELETE 失败时保留历史和未决行，清空弹窗保持打开并显示可恢复错误，待请求归属仍是当前文章/账号/语言时才允许回写。切换身份会中止 DELETE，迟到响应不会覆盖新身份历史。
+- 聊天流中止或网络失败后只执行一次只读历史 GET，不自动 POST。仅当获取到的历史在请求前快照边界完全按序匹配，且紧随边界出现本次用户问题及其助手记录时，才将该回合视为已保存；仅确认用户问题时隐藏本地重复问题并阻止重发。其余情况保留输入草稿和未决回合，提供显式重查与带重复/费用风险提示的重发按钮。
+- 清空请求失败时已中止的流也会进入同一只读核对流程。测试覆盖流式/空闲清空失败、延迟 DELETE 时发送与重复清空互斥、身份切换后的迟到 DELETE、成功/未成功保存、GET 失败、已有相同问题、单独保存用户问题和明确重发行为。
+
+验收：聊天定向回归 3 个文件、28 项通过；完整 `npm run test:run -- --configLoader native` 为 41 个文件、255 项通过；`npm run lint`、`npm run typecheck`、`git diff --check` 均通过；`npm run build -- --configLoader native --outDir /tmp/newsagg-p2-chat-build-verified --emptyOutDir` 通过。验证只使用 mock API；本轮未运行连接 API 的浏览器 E2E，也未连接 Django、触碰项目数据库或调用 AI。此修补不声称服务端请求具备幂等能力；未决时自动重发仍被禁止。
