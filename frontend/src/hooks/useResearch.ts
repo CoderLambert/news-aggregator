@@ -452,7 +452,11 @@ export function useResearch(viewerId: ResearchViewerId | null) {
 
         const nextTask = applyResearchEvent(current, event)
         if (nextTask !== current) putTask(connection.taskKey, nextTask)
-        if (nextTask !== current && nextTask.phase === 'success') void refreshCompletedTask(connection, nextTask)
+        if (nextTask.phase === 'success') {
+          if (nextTask !== current) await refreshCompletedTask(connection, nextTask)
+          return
+        }
+        if (nextTask.phase === 'error') return
       }
 
       if (!connectionIsCurrent(connection)) return

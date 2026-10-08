@@ -64,6 +64,35 @@ beforeEach(() => {
 })
 
 describe('useResearch stream lifecycle', () => {
+  it.each([
+    ['complete', { type: 'complete' }, 'success'],
+    ['error', { type: 'error', message: 'terminal provider error' }, 'error'],
+  ])('releases the stream lock on terminal %s without waiting for EOF', async (_name, terminal, expectedPhase) => {
+    let iteratorClosed = false
+    api.createResearchStream.mockImplementation(() => (async function* terminalStream() {
+      try {
+        yield { type: 'session_created', session_id: 'terminal-session' }
+        yield terminal
+        if (terminal.type === 'complete') await new Promise(() => {})
+        else throw new Error('reader failed after terminal error')
+      } finally {
+        iteratorClosed = true
+      }
+    })())
+    api.getResearchSession.mockResolvedValue(session('terminal-session'))
+
+    const { result } = renderResearchHook()
+    await waitFor(() => expect(result.current.loadingSessions).toBe(false))
+    act(() => { void result.current.handleSend('terminal task') })
+
+    await waitFor(() => expect(result.current.phase).toBe(expectedPhase))
+    await waitFor(() => expect(result.current.isBusy).toBe(false))
+    expect(iteratorClosed).toBe(true)
+    expect(result.current.phase).toBe(expectedPhase)
+    if (terminal.type === 'complete') expect(api.getResearchSession).toHaveBeenCalledWith('terminal-session', expect.any(AbortSignal))
+    expect(api.createResearchStream).toHaveBeenCalledOnce()
+  })
+
   it('prevents duplicate sends, cancels the browser stream, and leaves the task resumable', async () => {
     let requestSignal
     api.createResearchStream.mockImplementation((_query, { signal }) => {

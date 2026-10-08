@@ -379,7 +379,7 @@ describe('useChat', () => {
     expect(api.chatStream).toHaveBeenCalledOnce()
   })
 
-  it('aborts the active stream on article switch and does not carry the prior turn into the new article', async () => {
+  it('reconciles the interrupted turn read-only after an article 42 to 43 to 42 transition', async () => {
     let signal
     api.chatStream.mockImplementation(async function* (_id, _question, options) {
       signal = options.signal
@@ -396,9 +396,16 @@ describe('useChat', () => {
     await waitFor(() => expect(signal.aborted).toBe(true))
     await act(async () => { await send })
     expect(result.current.messages).toEqual([])
+
+    rerender({ id: '42' })
+    await waitFor(() => expect(api.fetchChatHistory).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(result.current.uncertainTurn?.reconciliation).toBe('unconfirmed'))
+    expect(result.current.uncertainTurn?.user.content).toBe('old story')
+    expect(result.current.messages.some((message) => message.content === 'late token')).toBe(false)
+    expect(api.chatStream).toHaveBeenCalledOnce()
   })
 
-  it('aborts the active stream and uses a fresh history query when the account changes', async () => {
+  it('reconciles the interrupted turn read-only after an account A to B to A transition', async () => {
     let currentUser = { id: 5, username: 'reader-a' }
     let signal
     api.chatStream.mockImplementation(async function* (_id, _question, options) {
@@ -418,6 +425,14 @@ describe('useChat', () => {
     await act(async () => { await send })
     await waitFor(() => expect(api.fetchChatHistory).toHaveBeenCalledTimes(2))
     expect(result.current.messages).toEqual([])
+
+    currentUser = { id: 5, username: 'reader-a' }
+    rerender()
+    await waitFor(() => expect(api.fetchChatHistory).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(result.current.uncertainTurn?.reconciliation).toBe('unconfirmed'))
+    expect(result.current.uncertainTurn?.user.content).toBe('private draft')
+    expect(result.current.messages.some((message) => message.content === 'late answer')).toBe(false)
+    expect(api.chatStream).toHaveBeenCalledOnce()
   })
 
   it('retains messages and exposes a recoverable error when an idle clear fails', async () => {

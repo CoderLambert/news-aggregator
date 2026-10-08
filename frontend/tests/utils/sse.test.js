@@ -1,5 +1,10 @@
-import { describe, it, expect } from 'vitest'
-import { iterSSEEvents, iterTextChunks } from '@/utils/sse'
+import { afterEach, describe, it, expect, vi } from 'vitest'
+import { iterSSEEvents, iterTextChunks, streamingFetch } from '@/utils/sse'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  document.cookie = 'csrftoken=; Max-Age=0; path=/'
+})
 
 /** Helper: build a Response whose body streams the given chunks. */
 function streamResponse(chunks) {
@@ -76,5 +81,43 @@ describe('iterTextChunks', () => {
     const r = streamResponse(['hello ', 'world', '!'])
     const chunks = await collect(iterTextChunks(r))
     expect(chunks).toEqual(['hello ', 'world', '!'])
+  })
+})
+
+describe('streamingFetch', () => {
+  it('sends the session cookie, CSRF header, language, and caller abort signal', async () => {
+    document.cookie = 'csrftoken=csrf%20token; path=/'
+    const controller = new AbortController()
+    const fetchMock = vi.fn().mockResolvedValue(new Response('stream body'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await streamingFetch('/api/stream/', { body: '{}', signal: controller.signal })
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/stream/?lang=zh')
+    expect(init.credentials).toBe('include')
+    expect(init.signal).toBe(controller.signal)
+    expect(new Headers(init.headers).get('X-CSRFToken')).toBe('csrf token')
+    expect(new Headers(init.headers).get('Content-Type')).toBe('application/json')
+  })
+
+  it.each([401, 403])('surfaces a non-JSON authentication error body for HTTP %s', async (status) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Session expired', { status })))
+
+    await expect(streamingFetch('/api/private-stream/')).rejects.toThrow('Session expired')
+  })
+
+  it('propagates a caller deadline abort instead of leaving the stream pending', async () => {
+    const controller = new AbortController()
+    const fetchMock = vi.fn((_url, init) => new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(new DOMException('Request timed out', 'AbortError')), { once: true })
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const request = streamingFetch('/api/slow-stream/', { signal: controller.signal })
+    controller.abort()
+
+    await expect(request).rejects.toMatchObject({ name: 'AbortError', message: 'Request timed out' })
+    expect(fetchMock.mock.calls[0][1].signal).toBe(controller.signal)
   })
 })
