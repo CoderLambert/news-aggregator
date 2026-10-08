@@ -61,8 +61,14 @@ def _title_hash(title):
     return int(hashlib.md5(title.lower().strip().encode()).hexdigest()[:8], 16)
 
 
+def _ai_side_effects_enabled():
+    return os.environ.get('NEWS_CRAWL_ONLY') != '1'
+
+
 def _find_similar_titles(title, exclude_id=None, threshold=0.65):
     """Use vector embeddings to find near-duplicate titles."""
+    if not _ai_side_effects_enabled():
+        return None
     try:
         from api.services.vector_store import VectorStoreService
         results = VectorStoreService().search(title, n=5)
@@ -101,6 +107,8 @@ def _find_similar_titles(title, exclude_id=None, threshold=0.65):
 
 
 def _index_news(news_id, title, content):
+    if not _ai_side_effects_enabled():
+        return
     try:
         from api.services.vector_store import VectorStoreService
         text = title
@@ -115,6 +123,8 @@ def _try_translate(news):
     """Try to translate English news to Chinese if not already translated.
     Records translation status on the news object.
     """
+    if not _ai_side_effects_enabled():
+        return
     if not news.title or is_chinese(news.title):
         news.translation_status = 'success'
         news.save(update_fields=['translation_status'])
@@ -170,8 +180,7 @@ def _try_translate(news):
         news.save(update_fields=['translation_status', 'translation_error'])
 
 
-@sync_to_async
-def _save_item(item):
+def _save_item_sync(item):
     close_old_connections()
 
     source_name = item['source_name']
@@ -226,11 +235,14 @@ def _save_item(item):
             if item.get('cover_image') and not news.cover_image:
                 news.cover_image = item['cover_image']
             news.save()
-            _index_news(news.id, news.title, news.content)
-            _try_translate(news)
+            if _ai_side_effects_enabled():
+                _index_news(news.id, news.title, news.content)
+                _try_translate(news)
     else:
         # Cross-source dedup: check if a similar title already exists
-        similar_id = _find_similar_titles(title, threshold=0.65)
+        similar_id = None
+        if _ai_side_effects_enabled():
+            similar_id = _find_similar_titles(title, threshold=0.65)
         related_to_id = similar_id if similar_id else None
 
         news = News.objects.create(
@@ -245,8 +257,15 @@ def _save_item(item):
             title_hash=thash,
             related_to_id=related_to_id,
         )
-        _index_news(news.id, news.title, news.content)
-        _try_translate(news)
+        if _ai_side_effects_enabled():
+            _index_news(news.id, news.title, news.content)
+            _try_translate(news)
+    return news
+
+
+@sync_to_async
+def _save_item(item):
+    return _save_item_sync(item)
 
 
 class DjangoPipeline:

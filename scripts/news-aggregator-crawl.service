@@ -1,0 +1,13 @@
+[Unit]
+Description=News Aggregator crawl-only update
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/lambert/githubRepos/lambert/news-aggregator
+ExecStart=/usr/bin/bash /home/lambert/githubRepos/lambert/news-aggregator/scripts/crawl_once.sh
+TimeoutStartSec=2h
+KillSignal=SIGINT
+TimeoutStopSec=30s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=news-aggregator-crawl

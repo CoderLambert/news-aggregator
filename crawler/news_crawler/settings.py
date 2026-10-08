@@ -1,3 +1,5 @@
+import os
+
 BOT_NAME = "news_crawler"
 
 SPIDER_MODULES = ["news_crawler.spiders"]
@@ -5,7 +7,10 @@ NEWSPIDER_MODULE = "news_crawler.spiders"
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 
-ROBOTSTXT_OBEY = False
+# Crawl-only jobs honor source robots rules; the default development behavior is unchanged.
+CRAWL_ONLY_MODE = os.environ.get("NEWS_CRAWL_ONLY") == "1"
+ROBOTSTXT_OBEY = CRAWL_ONLY_MODE
+TELNETCONSOLE_ENABLED = not CRAWL_ONLY_MODE
 
 # Tuned for Termux/mobile: lower concurrency to avoid CPU/IO contention.
 # On a server/desktop, set CONCURRENT_REQUESTS=16 and CONCURRENT_REQUESTS_PER_DOMAIN=4.
