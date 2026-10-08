@@ -170,6 +170,83 @@ describe('useChat', () => {
     expect(api.chatStream).toHaveBeenCalledOnce()
   })
 
+  it('settles a second explicit check when an unconfirmed history snapshot is unchanged', async () => {
+    api.fetchChatHistory
+      .mockResolvedValueOnce({ messages: [] })
+      .mockResolvedValueOnce({ messages: [] })
+      .mockResolvedValueOnce({ messages: [] })
+    // eslint-disable-next-line require-yield -- simulates a failure before the first token
+    api.chatStream.mockImplementationOnce(async function* () { throw new Error('network down') })
+    const { result } = renderHook(() => useChat('42', true), { wrapper: makeWrapper() })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    act(() => result.current.setInput('same empty snapshot'))
+
+    await act(async () => { await result.current.handleSend() })
+    expect(result.current.uncertainTurn?.reconciliation).toBe('unconfirmed')
+    await act(async () => { await result.current.checkPendingTurn() })
+
+    expect(result.current.uncertainTurn?.reconciliation).toBe('unconfirmed')
+    expect(result.current.input).toBe('same empty snapshot')
+    expect(api.chatStream).toHaveBeenCalledOnce()
+    expect(api.fetchChatHistory).toHaveBeenCalledTimes(3)
+  })
+
+  it('settles a second explicit check when the question-only history snapshot is unchanged', async () => {
+    const question = { role: 'user', content: 'same partial snapshot' }
+    api.fetchChatHistory
+      .mockResolvedValueOnce({ messages: [] })
+      .mockResolvedValueOnce({ messages: [question] })
+      .mockResolvedValueOnce({ messages: [question] })
+    // eslint-disable-next-line require-yield -- simulates a failure before the first token
+    api.chatStream.mockImplementationOnce(async function* () { throw new Error('network down') })
+    const { result } = renderHook(() => useChat('42', true), { wrapper: makeWrapper() })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    act(() => result.current.setInput(question.content))
+
+    await act(async () => { await result.current.handleSend() })
+    expect(result.current.uncertainTurn?.reconciliation).toBe('partial')
+    await act(async () => { await result.current.checkPendingTurn() })
+
+    expect(result.current.uncertainTurn?.reconciliation).toBe('partial')
+    expect(result.current.messages.filter((message) => message.role === 'user' && message.content === question.content)).toHaveLength(1)
+    await expect(result.current.resendUncertainTurn()).resolves.toBe(false)
+    expect(api.chatStream).toHaveBeenCalledOnce()
+    expect(api.fetchChatHistory).toHaveBeenCalledTimes(3)
+  })
+
+  it('leaves checking on a cancelled recheck without letting the old viewer affect the new one', async () => {
+    let currentUser = { id: 5, username: 'reader-a' }
+    api.fetchChatHistory.mockResolvedValueOnce({ messages: [] }).mockResolvedValue({ messages: [] })
+    // eslint-disable-next-line require-yield -- simulates a failure before the first token
+    api.chatStream.mockImplementationOnce(async function* () { throw new Error('network down') })
+    const { result, rerender } = renderHook(() => useChat('42', true), { wrapper: makeWrapper(() => currentUser) })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    await act(async () => { await result.current.doSend('switch during check') })
+    await waitFor(() => expect(result.current.uncertainTurn?.reconciliation).toBe('unconfirmed'))
+
+    let checkSignal
+    api.fetchChatHistory.mockImplementationOnce((_id, signal) => new Promise((_resolve, reject) => {
+      checkSignal = signal
+      signal.addEventListener('abort', () => reject(Object.assign(new Error('request cancelled'), { name: 'AbortError' })), { once: true })
+    }))
+    let checkPromise
+    act(() => { checkPromise = result.current.checkPendingTurn() })
+    await waitFor(() => expect(checkSignal).toBeInstanceOf(AbortSignal))
+
+    currentUser = { id: 6, username: 'reader-b' }
+    rerender()
+    await waitFor(() => expect(checkSignal.aborted).toBe(true))
+    await act(async () => { await checkPromise })
+    await waitFor(() => expect(result.current.uncertainTurn).toBeNull())
+
+    expect(result.current.messages).toEqual([])
+    expect(api.chatStream).toHaveBeenCalledOnce()
+
+    currentUser = { id: 5, username: 'reader-a' }
+    rerender()
+    await waitFor(() => expect(result.current.uncertainTurn?.reconciliation).toBe('unconfirmed'))
+  })
+
   it('reconciles a later normal history refetch after the first interrupted check found no records', async () => {
     const saved = [{ role: 'user', content: 'recover after check' }, { role: 'assistant', content: 'saved answer' }]
     api.fetchChatHistory
