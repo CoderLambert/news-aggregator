@@ -121,25 +121,52 @@ def test_wait_for_update_unblocks_on_new_chunk():
         assert job.done is True
 
 
-def test_error_chunk_finishes_job_with_error():
-    """If the LLM stream's first emission is an 'Error: ...' string (no
-    real content yet), the job must finish in error state.
-    """
+@pytest.mark.parametrize('error_message', [
+    'Error: 上游 LLM 超时',
+    '抱歉，AI 服务暂时不可用（上游错误），请稍后再试。',
+    '抱歉，当前 AI 服务暂时不可用，请稍后再试。',
+])
+def test_error_chunk_finishes_job_with_error(error_message):
+    """Provider fallbacks finish in error state and are never saved as translation text."""
+    saves = []
+
     def err_stream(prompt, *a, **kw):
-        yield 'Error: 上游 LLM 超时'
+        yield error_message
 
     with patch(
         'api.services.llm_translator._call_llm_stream',
         side_effect=err_stream,
     ):
-        job = translation_jobs.start_or_get_job(404, 'p', lambda t, f: None)
+        job = translation_jobs.start_or_get_job(404, 'p', lambda text, final: saves.append((text, final)))
         deadline = time.time() + 1.0
         while not job.done and time.time() < deadline:
             time.sleep(0.02)
 
     assert job.done is True
-    assert job.error and '超时' in job.error
+    assert job.error == error_message
     assert job.text == ''
+    assert saves == []
+
+
+def test_missing_provider_configuration_fails_without_saving_fallback():
+    """The real no-provider path must not persist its friendly fallback as translation."""
+    saves = []
+
+    with patch('api.services.llm_translator.get_clients', return_value=[]) as get_clients:
+        job = translation_jobs.start_or_get_job(
+            405,
+            'p',
+            lambda text, final: saves.append((text, final)),
+        )
+        deadline = time.time() + 1.0
+        while not job.done and time.time() < deadline:
+            time.sleep(0.02)
+
+    get_clients.assert_called_once()
+    assert job.done is True
+    assert job.error == '抱歉，当前 AI 服务暂时不可用，请稍后再试。'
+    assert job.text == ''
+    assert saves == []
 
 
 def test_finished_job_returned_then_new_one_starts_on_next_call():
