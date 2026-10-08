@@ -5,6 +5,7 @@ import {
   chatStream as streamChat,
   clearChatHistory as clearChatHistoryRequest,
   fetchChatHistory as fetchChatHistoryRequest,
+  fetchNewsDetail as fetchNewsDetailRequest,
   fetchFullArticle as fetchFullArticleRequest,
   fetchSuggestedQuestions as fetchSuggestedQuestionsRequest,
   translateFullArticleStream as streamTranslation,
@@ -171,6 +172,11 @@ export function parseTranslationEvent(value: unknown): TranslationEvent {
 
 export async function fetchFullArticle(id: NewsId, force: boolean, signal: AbortSignal): Promise<FullArticleResult> {
   const data: unknown = await fetchFullArticleRequest(id, force, signal)
+  return parseFullArticleResult(data)
+}
+
+export async function fetchFullArticleStatus(id: NewsId, signal: AbortSignal): Promise<FullArticleResult> {
+  const data: unknown = await fetchNewsDetailRequest(id, signal)
   return parseFullArticleResult(data)
 }
 

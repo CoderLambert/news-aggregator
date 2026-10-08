@@ -53,6 +53,11 @@ describe('axios lang interceptor coverage', () => {
     expect(config.params?.lang).toBe('en')   // ← will FAIL before fix
   })
 
+  it('only enables force for the literal boolean true', async () => {
+    const [config] = await captureRequestConfig(api => api.fetchFullArticle('42', { type: 'click' }))
+    expect(config.data).toBeUndefined()
+  })
+
   it('translateFullArticle (apiLong client) includes lang=en in query params', async () => {
     const [config] = await captureRequestConfig(api => api.translateFullArticle('42'))
     expect(config.params?.lang).toBe('en')   // ← will FAIL before fix

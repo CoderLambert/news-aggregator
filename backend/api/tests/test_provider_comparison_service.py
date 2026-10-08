@@ -7,6 +7,14 @@ from api.services.article_fetcher.comparison import compare_providers, compariso
 from api.services.article_fetcher.types import FetchResult
 
 
+@pytest.fixture(autouse=True)
+def mock_public_comparison_dns(monkeypatch):
+    monkeypatch.setattr(
+        'api.services.article_fetcher.comparison.socket.getaddrinfo',
+        lambda host, port, *args, **kwargs: [(None, None, None, '', ('93.184.216.34', port))],
+    )
+
+
 @pytest.fixture
 def news(db):
     category = Category.objects.create(name='Provider Test', slug='provider-test')
