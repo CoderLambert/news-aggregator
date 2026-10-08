@@ -43,18 +43,25 @@ describe('ErrorBanner', () => {
 describe('FullContentSection', () => {
   const baseNews = {
     full_content: 'English source body',
+    full_content_zh: '',
   }
 
   function renderSection(overrides = {}) {
     const props = {
       news: baseNews,
       translating: false,
+      translationPaused: false,
       translateError: '',
       translationProgress: '',
       showOriginal: false,
       onToggleOriginal: vi.fn(),
       onTranslate: vi.fn(),
       onRetryTranslate: vi.fn(),
+      onResumeTranslation: vi.fn(),
+      onStopTranslation: vi.fn(),
+      onRefetch: vi.fn(),
+      refetching: false,
+      onCancelRefetch: vi.fn(),
       ...overrides,
     }
     return { props, ...render(<FullContentSection {...props} />) }
@@ -83,12 +90,27 @@ describe('FullContentSection', () => {
 
   it('renders the spinner card while translating with no progress yet', () => {
     renderSection({ translating: true, translationProgress: '' })
-    expect(screen.getByText('正在使用 AI 翻译...')).toBeInTheDocument()
+    expect(screen.getByText('正在翻译全文…')).toBeInTheDocument()
+    expect(screen.getByText(/服务端翻译仍会继续/)).toBeInTheDocument()
+  })
+
+  it('stops only the browser wait while the translation worker continues', () => {
+    const { props } = renderSection({ translating: true, translationProgress: 'partial' })
+    fireEvent.click(screen.getByRole('button', { name: '停止接收翻译更新' }))
+    expect(props.onStopTranslation).toHaveBeenCalledOnce()
+  })
+
+  it('exposes an explicit resume action after translation updates are paused', () => {
+    const { props } = renderSection({ translationPaused: true })
+    expect(screen.getByText(/本页已停止接收更新/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '翻译为中文' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '继续接收翻译进度' }))
+    expect(props.onResumeTranslation).toHaveBeenCalledOnce()
   })
 
   it('renders streaming progress when translating with partial content', () => {
     renderSection({ translating: true, translationProgress: '部分译文...' })
-    expect(screen.getByText('AI 正在翻译...')).toBeInTheDocument()
+    expect(screen.getByText('AI 正在翻译…')).toBeInTheDocument()
   })
 
   it('shows ErrorBanner when translateError is non-empty', () => {

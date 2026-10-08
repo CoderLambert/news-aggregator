@@ -99,15 +99,16 @@ export const retestProviderComparison = (id, signal) =>
 
 // ---- Chat (REST) -----------------------------------------------------------
 
-export const fetchChatHistory = (newsId) =>
-  api.get(`/news/${newsId}/chat/`).then(res => res.data)
+export const fetchChatHistory = (newsId, signal) =>
+  api.get(`/news/${newsId}/chat/`, { signal }).then(res => res.data)
 
-export const clearChatHistory = (newsId) =>
-  api.delete(`/news/${newsId}/chat/`).then(res => res.data)
+export const clearChatHistory = (newsId, signal) =>
+  api.delete(`/news/${newsId}/chat/`, { signal }).then(res => res.data)
 
-export const fetchSuggestedQuestions = (newsId, { force = false } = {}) =>
+export const fetchSuggestedQuestions = (newsId, { force = false, signal } = {}) =>
   api.post(`/news/${newsId}/suggested-questions/`, null, {
     params: force ? { force: 1 } : undefined,
+    signal,
   }).then(res => res.data)
 
 // ---- Streaming endpoints (SSE / token streams) -----------------------------
@@ -117,9 +118,10 @@ export const fetchSuggestedQuestions = (newsId, { force = false } = {}) =>
  *
  *   for await (const ev of translateFullArticleStream(id, { force: true })) { ... }
  */
-export async function* translateFullArticleStream(id, { force = false } = {}) {
+export async function* translateFullArticleStream(id, { force = false, signal } = {}) {
   const res = await streamingFetch(`/api/news/${id}/translate/`, {
     body: JSON.stringify({ force }),
+    signal,
   })
   for await (const ev of iterSSEEvents(res)) {
     if (ev.error) {
@@ -138,9 +140,10 @@ export async function* translateFullArticleStream(id, { force = false } = {}) {
  *
  *   for await (const chunk of chatStream(id, "请总结这篇文章")) { accumulated += chunk; ... }
  */
-export async function* chatStream(newsId, question, { webSearch = false } = {}) {
+export async function* chatStream(newsId, question, { webSearch = false, signal } = {}) {
   const res = await streamingFetch(`/api/news/${newsId}/chat/`, {
     body: JSON.stringify({ question, web_search: webSearch }),
+    signal,
   })
   yield* iterTextChunks(res)
 }

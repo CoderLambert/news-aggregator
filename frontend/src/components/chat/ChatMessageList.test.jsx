@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ChatMessageList from './ChatMessageList'
 
@@ -52,6 +52,17 @@ describe('ChatMessageList', () => {
     ]
     render(<ChatMessageList messages={messages} phase="streaming" onSuggestionClick={() => {}} />)
     expect(screen.getByText('Hello there!')).toBeInTheDocument()
+  })
+
+  it('copies code from a streamed assistant Markdown message without changing its text', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText }, writable: true })
+    const streamedMarkdown = '```ts\nconst answer: string = "OK"\n```'
+    render(<ChatMessageList messages={[{ role: 'assistant', content: streamedMarkdown }]} phase="idle" />)
+
+    fireEvent.click(screen.getByRole('button', { name: /复制代码/ }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledOnce())
+    expect(writeText.mock.calls[0][0]).toContain('const answer: string = "OK"')
   })
 
   describe('refresh suggestions ("换一批")', () => {

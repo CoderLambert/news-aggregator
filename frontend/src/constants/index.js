@@ -15,4 +15,9 @@ export const TRANSLATION_COMPLETE_MIN_LENGTH = 50
 // SSE
 export const SSE_PROGRESS_THROTTLE_MS = 200
 
-export const translatingMarkerKey = (id) => `${TRANSLATING_MARKER_PREFIX}${id}`
+export const translatingMarkerKey = (id, viewerId, lang) =>
+  viewerId === undefined && lang === undefined
+    ? `${TRANSLATING_MARKER_PREFIX}${id}`
+    : `${TRANSLATING_MARKER_PREFIX}${id}_${viewerId}_${lang}`
+export const translationPausedMarkerKey = (id, viewerId, lang) =>
+  `translation_paused_${id}_${viewerId}_${lang}`

@@ -5,6 +5,7 @@ import { queryClient } from '@/services/queryClient'
 import { newsKeys } from '@/services/newsQueries'
 import { fetchCsrfToken, fetchMe, loginUser, logoutUser, registerUser } from '@/services/api'
 import { isRecord } from '@/types/news'
+import { newsWorkflowKeys } from '@/services/newsWorkflowQueries'
 
 export interface AuthUser {
   id: number
@@ -50,6 +51,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryClient.removeQueries({ queryKey: ['providerComparisons'] })
     queryClient.removeQueries({ queryKey: newsKeys.lists() })
     queryClient.removeQueries({ queryKey: newsKeys.details() })
+    void queryClient.cancelQueries({ queryKey: newsWorkflowKeys.chatHistories() })
+    queryClient.removeQueries({ queryKey: newsWorkflowKeys.chatHistories() })
     queryClient.removeQueries({ queryKey: ['private'] })
   }, [])
 

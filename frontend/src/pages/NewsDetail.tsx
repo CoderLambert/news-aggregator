@@ -46,11 +46,13 @@ export default function NewsDetail() {
   const { articleLoading, articleError, handleFetchFullArticle, cancelFetch } = useFullArticle(id ?? '', setNews)
   const {
     translating,
+    translationPaused,
     translateError,
     translationProgress,
     showOriginal,
     setShowOriginal,
     handleTranslate,
+    stopTranslationWait,
   } = useTranslation(id ?? '', news, setNews, loading)
 
   const speechPlayer = useSpeechPlayer() as SpeechPlayerApi
@@ -165,12 +167,15 @@ export default function NewsDetail() {
             <FullContentSection
               news={news}
               translating={translating}
+              translationPaused={translationPaused}
               translateError={translateError}
               translationProgress={translationProgress}
               showOriginal={showOriginal}
               onToggleOriginal={setShowOriginal}
               onTranslate={() => handleTranslate(Boolean(news.full_content_zh))}
               onRetryTranslate={() => handleTranslate(true)}
+              onResumeTranslation={() => handleTranslate(false)}
+              onStopTranslation={stopTranslationWait}
               onRefetch={() => handleFetchFullArticle(true)}
               refetching={articleLoading}
               onCancelRefetch={cancelFetch}
