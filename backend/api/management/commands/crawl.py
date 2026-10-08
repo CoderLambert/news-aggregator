@@ -47,6 +47,39 @@ SPIDERS = {
 }
 
 
+def _apply_crawl_only_politeness(settings):
+    """Clamp source-specific Scrapy overrides to conservative crawl-only rates."""
+    delay = max(3.0, settings.getfloat('DOWNLOAD_DELAY', 3.0))
+    global_concurrency = min(4, settings.getint('CONCURRENT_REQUESTS', 4))
+    settings.set('DOWNLOAD_DELAY', delay, priority='spider')
+    settings.set('CONCURRENT_REQUESTS', global_concurrency, priority='spider')
+    settings.set('CONCURRENT_REQUESTS_PER_DOMAIN', 1, priority='spider')
+    settings.set('AUTOTHROTTLE_ENABLED', True, priority='spider')
+    settings.set('AUTOTHROTTLE_START_DELAY', 3.0, priority='spider')
+    settings.set('AUTOTHROTTLE_MAX_DELAY', 60.0, priority='spider')
+    settings.set('AUTOTHROTTLE_TARGET_CONCURRENCY', 1.0, priority='spider')
+
+
+def _format_crawl_summary(spider_name, stats):
+    """Return one stable, grep-friendly result line for a completed spider."""
+    http_statuses = sorted(
+        (
+            key.rsplit('/', 1)[-1], value
+        )
+        for key, value in stats.items()
+        if key.startswith('downloader/response_status_count/')
+    )
+    status_text = ','.join(f'{code}:{count}' for code, count in http_statuses) or '-'
+    return (
+        f'爬虫汇总 source={spider_name} '
+        f'finish={stats.get("finish_reason", "unknown")} '
+        f'items={stats.get("item_scraped_count", 0)} '
+        f'responses={stats.get("downloader/response_count", 0)} '
+        f'errors={stats.get("log_count/ERROR", 0)} '
+        f'http={status_text}'
+    )
+
+
 class Command(BaseCommand):
     help = '运行Scrapy爬虫抓取新闻'
 
@@ -74,9 +107,16 @@ class Command(BaseCommand):
         else:
             spiders = [SPIDERS[spider_name]]
 
+        crawlers = []
         for spider in spiders:
-            process.crawl(spider)
+            crawler = process.create_crawler(spider)
+            if os.environ.get('NEWS_CRAWL_ONLY') == '1':
+                _apply_crawl_only_politeness(crawler.settings)
+            process.crawl(crawler)
+            crawlers.append((spider, crawler))
             self.stdout.write(self.style.SUCCESS(f'启动爬虫: {spider}'))
 
         process.start()
+        for spider, crawler in crawlers:
+            self.stdout.write(_format_crawl_summary(spider, crawler.stats.get_stats()))
         self.stdout.write(self.style.SUCCESS('爬取完成'))

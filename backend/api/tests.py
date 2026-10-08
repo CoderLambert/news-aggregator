@@ -4,6 +4,7 @@ Tests: multi-select category/source filters, time precision, search, pagination
 """
 
 import uuid
+from unittest.mock import patch
 from django.test import TestCase, Client
 from django.utils import timezone
 from datetime import timedelta
@@ -166,13 +167,18 @@ class SearchTest(TestCase):
         self.assertIn(f'{self.f.prefix}_Python async programming', titles)
 
     def test_semantic_search_no_vector_fallback(self):
-        r = self.client.get('/api/news/?search=test&mode=semantic&page_size=10')
+        with (
+            patch('api.services.embedding.EmbeddingService.is_loaded', return_value=True),
+            patch('api.services.vector_store.VectorStoreService.count', return_value=0),
+        ):
+            r = self.client.get('/api/news/?search=test&mode=semantic&page_size=10')
         self.assertEqual(r.status_code, 200)
         d = r.json()
         self.assertIsInstance(d['results'], list)
 
     def test_hybrid_search_no_vector_fallback(self):
-        r = self.client.get('/api/news/?search=test&mode=hybrid&page_size=10')
+        with patch('api.services.vector_store.VectorStoreService.count', return_value=0):
+            r = self.client.get('/api/news/?search=test&mode=hybrid&page_size=10')
         self.assertEqual(r.status_code, 200)
         d = r.json()
         self.assertIsInstance(d['results'], list)

@@ -35,7 +35,8 @@ class BbcSpider(scrapy.Spider):
                 except ValueError:
                     pass
 
-            cover_image = item.xpath('media:thumbnail/@url').get() or ''
+            # Namespaces were removed from this feed above, so select by local name.
+            cover_image = item.xpath('thumbnail/@url').get() or ''
 
             url = url.strip()
             news = NewsItem()

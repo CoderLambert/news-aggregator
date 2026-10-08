@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly News Aggregator crawl
+
+[Timer]
+OnActiveSec=1h
+OnUnitInactiveSec=1h
+AccuracySec=1min
+Unit=news-aggregator-crawl.service
+
+[Install]
+WantedBy=timers.target
