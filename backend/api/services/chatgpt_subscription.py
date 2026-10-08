@@ -37,6 +37,7 @@ from api.models import (
     ChatGPTAuthAttempt,
     ChatGPTOAuthClient,
     ChatGPTSubscriptionConnection,
+    ChatGPTSubscriptionSelection,
 )
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,14 @@ def _validate_handoff_origin(origin: str) -> str:
     return origin
 
 
+def _lock_selection(user_id) -> ChatGPTSubscriptionSelection:
+    """Return the user-level selection fence while the caller holds the user row lock."""
+    selection, _ = ChatGPTSubscriptionSelection.objects.select_for_update().get_or_create(
+        user_id=user_id,
+    )
+    return selection
+
+
 def _parse_granted_scopes(value) -> set[str]:
     if isinstance(value, str):
         return set(value.split())
@@ -195,6 +204,7 @@ def create_authorization_attempt(user, target_connection=None, session_key='', o
 
     with transaction.atomic():
         get_user_model().objects.select_for_update().get(pk=user.pk)
+        selection = _lock_selection(user.pk)
         ChatGPTAuthAttempt.objects.filter(
             session_binding_hash=session_hash, status__in=['pending', 'authorizing', 'processing'],
         ).update(status='cancelled', status_message='新的连接请求已取代此请求。')
@@ -220,7 +230,7 @@ def create_authorization_attempt(user, target_connection=None, session_key='', o
             user=user, is_active=True,
         ).first()
         selection_connection_id = active_selection.pk if active_selection else None
-        selection_generation = active_selection.generation if active_selection else 0
+        selection_generation = selection.generation
 
         params = {
             'response_type': 'code', 'client_id': requested_client_id, 'redirect_uri': REDIRECT_URI,
@@ -502,6 +512,7 @@ def complete_authorization(query, browser_binding_token: str) -> ChatGPTSubscrip
             if locked_attempt is None:
                 raise SubscriptionError('本地登录状态已切换或授权请求已取消。')
             get_user_model().objects.select_for_update().get(pk=locked_attempt.user_id)
+            selection = _lock_selection(locked_attempt.user_id)
             target = None
             if locked_attempt.target_connection_id:
                 target = ChatGPTSubscriptionConnection.objects.select_for_update().filter(
@@ -523,16 +534,17 @@ def complete_authorization(query, browser_binding_token: str) -> ChatGPTSubscrip
                 user=locked_attempt.user, is_active=True,
             ).first()
             current_selection_id = active_selection.pk if active_selection else None
-            current_selection_generation = active_selection.generation if active_selection else 0
             selection_is_unchanged = (
                 current_selection_id == locked_attempt.selection_connection_id_at_start and
-                current_selection_generation == locked_attempt.selection_generation_at_start
+                selection.generation == locked_attempt.selection_generation_at_start
             )
             if selection_is_unchanged:
                 ChatGPTSubscriptionConnection.objects.filter(user=locked_attempt.user).exclude(pk=target.pk).update(
                     is_active=False, generation=F('generation') + 1,
                 )
                 target.is_active = True
+                selection.generation += 1
+                selection.save(update_fields=['generation', 'updated_at'])
             target.subject_hash = _subject_hash(subject)
             target.issuer = issuer
             target.issued_client_id = client_id
@@ -581,6 +593,7 @@ def activate_connection(user, connection_id) -> ChatGPTSubscriptionConnection:
     with _user_lock(user.pk):
         with transaction.atomic():
             get_user_model().objects.select_for_update().get(pk=user.pk)
+            selection = _lock_selection(user.pk)
             target = ChatGPTSubscriptionConnection.objects.select_for_update().filter(
                 user=user, pk=connection_id,
             ).first()
@@ -598,6 +611,8 @@ def activate_connection(user, connection_id) -> ChatGPTSubscriptionConnection:
             target.is_active = True
             target.generation += 1
             target.save(update_fields=['is_active', 'generation', 'updated_at'])
+            selection.generation += 1
+            selection.save(update_fields=['generation', 'updated_at'])
             return target
 
 
@@ -799,6 +814,8 @@ def disconnect_connection(user, connection_id) -> bool:
     """Clear local secrets and invalidate in-flight auth/refresh work before revocation."""
     with _user_lock(user.pk):
         with transaction.atomic():
+            get_user_model().objects.select_for_update().get(pk=user.pk)
+            selection = _lock_selection(user.pk)
             connection = ChatGPTSubscriptionConnection.objects.select_for_update().filter(
                 user=user, pk=connection_id,
             ).first()
@@ -830,6 +847,8 @@ def disconnect_connection(user, connection_id) -> bool:
             ChatGPTAuthAttempt.objects.filter(
                 target_connection=connection, status__in=['pending', 'authorizing', 'processing'],
             ).update(status='cancelled', status_message='订阅连接已断开。')
+            selection.generation += 1
+            selection.save(update_fields=['generation', 'updated_at'])
     if not refresh_token or not client_id:
         return False
     try:

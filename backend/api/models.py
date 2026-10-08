@@ -304,6 +304,21 @@ class ChatGPTOAuthClient(models.Model):
         verbose_name_plural = 'ChatGPT OAuth 客户端'
 
 
+class ChatGPTSubscriptionSelection(models.Model):
+    """Monotonic user-level fence for subscription selection changes."""
+
+    user = models.OneToOneField(
+        'auth.User', primary_key=True, on_delete=models.CASCADE,
+        related_name='chatgpt_subscription_selection',
+    )
+    generation = models.PositiveBigIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'ChatGPT 订阅选择状态'
+        verbose_name_plural = 'ChatGPT 订阅选择状态'
+
+
 class ChatGPTSubscriptionConnection(models.Model):
     """One user's encrypted, replaceable ChatGPT subscription credential set."""
 
