@@ -2,6 +2,12 @@
 .github
 .env
 .env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
 **/node_modules
 node_modules
 **/venv
