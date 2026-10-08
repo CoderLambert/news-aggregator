@@ -388,7 +388,7 @@ class ChatGPTAuthAttempt(models.Model):
     requested_client_id = models.CharField(max_length=255)
     target_attempt_generation = models.PositiveIntegerField(default=0)
     selection_connection_id_at_start = models.UUIDField(null=True, blank=True)
-    selection_generation_at_start = models.PositiveIntegerField(default=0)
+    selection_generation_at_start = models.PositiveBigIntegerField(default=0)
     status = models.CharField(max_length=16, default='pending', db_index=True)
     status_message = models.CharField(max_length=255, blank=True, default='')
     expires_at = models.DateTimeField(db_index=True)
