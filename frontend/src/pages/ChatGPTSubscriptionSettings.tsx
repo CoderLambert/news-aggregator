@@ -1,19 +1,27 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/context/AuthContext'
 import {
   activateChatGPTSubscriptionConnection,
+  cancelChatGPTSubscriptionAttempt,
+  fetchChatGPTSubscriptionAttempt,
   disconnectChatGPTSubscription,
   fetchChatGPTSubscriptionModels,
   fetchChatGPTSubscriptionStatus,
   selectChatGPTSubscriptionModel,
   startChatGPTSubscriptionConnect,
 } from '@/services/api'
-import type { ChatGPTSubscriptionConnection } from '@/services/api'
+import type { ChatGPTSubscriptionAttemptStatus, ChatGPTSubscriptionConnection } from '@/services/api'
 import { newsKeys } from '@/services/newsQueries'
 
 const subscriptionRootKey = ['chatgptSubscription'] as const
+const ATTEMPT_POLL_INTERVAL_MS = 2_000
+const POPUP_CLOSE_CHECK_INTERVAL_MS = 500
+const TERMINAL_ATTEMPT_STATUSES: ReadonlySet<ChatGPTSubscriptionAttemptStatus['status']> = new Set([
+  'completed', 'failed', 'cancelled',
+])
+type ConnectRequestIdentity = { generation: number; ownerId: number }
 
 function errorMessage(error: unknown): string {
   if (axios.isAxiosError(error)) {
@@ -34,17 +42,29 @@ export default function ChatGPTSubscriptionSettings() {
   const { user } = useAuth()
   const queryClient = useQueryClient()
   const [connectPending, setConnectPending] = useState(false)
+  const [attemptId, setAttemptId] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
   const popupRef = useRef<Window | null>(null)
-  const connectionBaselineRef = useRef<Map<string, string>>(new Map())
+  const attemptIdRef = useRef<string | null>(null)
+  const attemptOwnerRef = useRef<number | null>(null)
+  const finishedAttemptRef = useRef<string | null>(null)
+  const connectRequestGenerationRef = useRef(0)
+  const activeConnectRequestRef = useRef<ConnectRequestIdentity | null>(null)
+  const observedUserIdRef = useRef<number | undefined>(user?.id)
+
+  useLayoutEffect(() => () => {
+    connectRequestGenerationRef.current += 1
+    activeConnectRequestRef.current = null
+    popupRef.current?.close()
+    popupRef.current = null
+  }, [])
 
   const statusQuery = useQuery({
     queryKey: [...subscriptionRootKey, 'status', user?.id ?? 'anonymous'],
     queryFn: fetchChatGPTSubscriptionStatus,
     enabled: Boolean(user),
-    refetchInterval: connectPending ? 1500 : false,
+    retry: false,
   })
-  const refetchStatus = statusQuery.refetch
   const activeConnection = useMemo(() => {
     const id = statusQuery.data?.active_connection_id
     return statusQuery.data?.connections.find((connection) => connection.id === id) ?? null
@@ -55,13 +75,28 @@ export default function ChatGPTSubscriptionSettings() {
     enabled: Boolean(activeConnection?.connected),
     staleTime: 0,
   })
+  const attemptQuery = useQuery({
+    queryKey: [...subscriptionRootKey, 'attempt', user?.id ?? 'anonymous', attemptId],
+    queryFn: ({ signal }) => fetchChatGPTSubscriptionAttempt(attemptId!, signal),
+    enabled: Boolean(user && attemptId),
+    refetchInterval: (query) => {
+      if (!attemptId || query.state.status === 'error' ||
+        (query.state.data && TERMINAL_ATTEMPT_STATUSES.has(query.state.data.status))) {
+        return false
+      }
+      // The server makes expired attempts terminal during status reads. Pause
+      // on transport errors so the user can explicitly resume one check.
+      return ATTEMPT_POLL_INTERVAL_MS
+    },
+    retry: false,
+  })
 
-  const invalidatePrivateNews = async () => {
+  const invalidatePrivateNews = useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: subscriptionRootKey }),
       queryClient.invalidateQueries({ queryKey: newsKeys.details() }),
     ])
-  }
+  }, [queryClient])
 
   const activateMutation = useMutation({
     mutationFn: activateChatGPTSubscriptionConnection,
@@ -81,54 +116,147 @@ export default function ChatGPTSubscriptionSettings() {
     },
   })
 
+  const finishConnect = useCallback(async (currentAttemptId: string, message: string, completed = false) => {
+    if (attemptIdRef.current !== currentAttemptId || finishedAttemptRef.current === currentAttemptId) return
+    finishedAttemptRef.current = currentAttemptId
+    if (completed) await invalidatePrivateNews()
+    if (attemptIdRef.current !== currentAttemptId) return
+    setConnectPending(false)
+    setNotice(message)
+    popupRef.current?.close()
+    popupRef.current = null
+    activeConnectRequestRef.current = null
+    attemptOwnerRef.current = null
+    attemptIdRef.current = null
+    setAttemptId(null)
+  }, [invalidatePrivateNews])
+
+  const cancelAttemptMutation = useMutation({
+    mutationFn: cancelChatGPTSubscriptionAttempt,
+    onSuccess: async (attempt) => {
+      if (attempt.status === 'completed') {
+        await finishConnect(attempt.id, 'ChatGPT 订阅账号已连接。', true)
+      } else if (TERMINAL_ATTEMPT_STATUSES.has(attempt.status)) {
+        await finishConnect(attempt.id, attempt.message || 'ChatGPT 订阅连接未完成。')
+      } else {
+        queryClient.setQueryData(
+          [...subscriptionRootKey, 'attempt', user?.id ?? 'anonymous', attempt.id],
+          attempt,
+        )
+        setNotice('服务器仍在处理此授权请求，状态检查会继续。')
+      }
+    },
+  })
+
+  useEffect(() => {
+    const attempt = attemptQuery.data
+    if (!attemptId || !attempt || attempt.id !== attemptId) return
+    if (attempt.status === 'completed') {
+      void finishConnect(attempt.id, 'ChatGPT 订阅账号已连接。', true)
+    } else if (TERMINAL_ATTEMPT_STATUSES.has(attempt.status)) {
+      void finishConnect(attempt.id, attempt.message || 'ChatGPT 订阅连接未完成。')
+    }
+  }, [attemptId, attemptQuery.data, finishConnect])
+
+  useLayoutEffect(() => {
+    if (observedUserIdRef.current === user?.id) return
+    observedUserIdRef.current = user?.id
+    connectRequestGenerationRef.current += 1
+    if (attemptOwnerRef.current === null || user?.id === attemptOwnerRef.current) return
+    activeConnectRequestRef.current = null
+    const stalePopup = popupRef.current
+    popupRef.current = null
+    stalePopup?.close()
+    setConnectPending(false)
+    attemptIdRef.current = null
+    setAttemptId(null)
+    attemptOwnerRef.current = null
+    finishedAttemptRef.current = null
+    setNotice('本地登录账号已切换，此授权请求已停止。')
+  }, [user?.id])
+
   useEffect(() => {
     if (!connectPending) return
     const timer = window.setInterval(() => {
       const popup = popupRef.current
       if (popup && popup.closed) {
+        window.clearInterval(timer)
         popupRef.current = null
-        setConnectPending(false)
-        setNotice((current) => current || '授权窗口已关闭，正在确认连接状态。')
-        void refetchStatus()
+        setNotice('授权窗口已关闭或无法由本页访问；仍以服务器状态为准，检查会继续。')
       }
-    }, 500)
+    }, POPUP_CLOSE_CHECK_INTERVAL_MS)
     return () => window.clearInterval(timer)
-  }, [connectPending, refetchStatus])
-
-  useEffect(() => {
-    if (!connectPending || !statusQuery.data) return
-    const baseline = connectionBaselineRef.current
-    const changed = statusQuery.data.connections.some((connection) =>
-      !baseline.has(connection.id) || baseline.get(connection.id) !== connection.updated_at,
-    )
-    if (changed) {
-      setConnectPending(false)
-      setNotice('ChatGPT 订阅账号已连接。')
-      popupRef.current?.close()
-      popupRef.current = null
-    }
-  }, [connectPending, statusQuery.data])
+  }, [connectPending])
 
   async function beginConnect(connectionId?: string) {
+    const ownerId = user?.id
+    if (ownerId === undefined) return
+    const requestGeneration = ++connectRequestGenerationRef.current
+    const requestIdentity = { generation: requestGeneration, ownerId }
+    activeConnectRequestRef.current = requestIdentity
     setNotice('')
+    attemptIdRef.current = null
+    setAttemptId(null)
+    attemptOwnerRef.current = ownerId
+    finishedAttemptRef.current = null
+    const previousPopup = popupRef.current
+    popupRef.current = null
+    previousPopup?.close()
     const popup = window.open('about:blank', '_blank', 'popup,width=560,height=760')
+    const isCurrentRequest = () => (
+      activeConnectRequestRef.current === requestIdentity &&
+      connectRequestGenerationRef.current === requestGeneration &&
+      observedUserIdRef.current === ownerId &&
+      attemptOwnerRef.current === ownerId
+    )
     if (!popup) {
+      if (!isCurrentRequest()) return
+      activeConnectRequestRef.current = null
+      attemptOwnerRef.current = null
       setNotice('浏览器拦截了授权窗口，请允许此站点打开弹窗后重试。')
       return
     }
     popupRef.current = popup
-    connectionBaselineRef.current = new Map(
-      (statusQuery.data?.connections ?? []).map((connection) => [connection.id, connection.updated_at]),
-    )
     setConnectPending(true)
     try {
-      const authorizationUrl = await startChatGPTSubscriptionConnect(connectionId)
-      popup.location.href = authorizationUrl
+      const handoff = await startChatGPTSubscriptionConnect(connectionId)
+      if (!isCurrentRequest()) return
+      attemptIdRef.current = handoff.attempt_id
+      setAttemptId(handoff.attempt_id)
+      if (popup.closed || popupRef.current !== popup) {
+        if (popupRef.current === popup) popupRef.current = null
+        setNotice('授权窗口已关闭或无法由本页访问；正在等待服务器终态或过期。')
+        return
+      }
+      const form = popup.document.createElement('form')
+      form.method = 'POST'
+      form.action = handoff.handoff_url
+      for (const [name, value] of [
+        ['attempt_id', handoff.attempt_id],
+        ['handoff_token', handoff.handoff_token],
+      ]) {
+        const input = popup.document.createElement('input')
+        input.type = 'hidden'
+        input.name = name
+        input.value = value
+        form.append(input)
+      }
+      popup.document.body.replaceChildren(form)
+      form.submit()
     } catch (error) {
-      popup.close()
-      popupRef.current = null
-      setConnectPending(false)
-      setNotice(errorMessage(error))
+      if (!isCurrentRequest()) return
+      if (popupRef.current === popup) {
+        popup.close()
+        popupRef.current = null
+      }
+      if (attemptIdRef.current) {
+        setNotice(`授权窗口启动未完成，服务器状态仍会检查：${errorMessage(error)}`)
+      } else {
+        activeConnectRequestRef.current = null
+        attemptOwnerRef.current = null
+        setConnectPending(false)
+        setNotice(errorMessage(error))
+      }
     }
   }
 
@@ -157,6 +285,24 @@ export default function ChatGPTSubscriptionSettings() {
 
       {notice && <p role="status" className="mb-4 rounded-lg bg-muted px-3 py-2 text-sm">{notice}</p>}
       {statusQuery.isError && <p role="alert" className="mb-4 text-sm text-destructive">{errorMessage(statusQuery.error)}</p>}
+      {attemptId && attemptQuery.error && (
+        <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">
+          <p role="alert" className="text-destructive">
+            状态检查暂时失败，授权请求仍保留在服务器；自动检查已暂停。{` ${errorMessage(attemptQuery.error)}`}
+          </p>
+          <button
+            type="button"
+            onClick={() => void attemptQuery.refetch()}
+            disabled={attemptQuery.isFetching}
+            className="mt-2 rounded-md border border-border px-3 py-1.5 disabled:opacity-50"
+          >{attemptQuery.isFetching ? '正在重试…' : '重试状态检查'}</button>
+        </div>
+      )}
+      {cancelAttemptMutation.isError && (
+        <p role="alert" className="mb-4 text-sm text-destructive">
+          {`取消授权失败：${errorMessage(cancelAttemptMutation.error)}`}
+        </p>
+      )}
       {activateMutation.isError && <p role="alert" className="mb-4 text-sm text-destructive">{errorMessage(activateMutation.error)}</p>}
       {selectModelMutation.isError && <p role="alert" className="mb-4 text-sm text-destructive">{errorMessage(selectModelMutation.error)}</p>}
       {disconnectMutation.isError && <p role="alert" className="mb-4 text-sm text-destructive">{errorMessage(disconnectMutation.error)}</p>}
@@ -178,6 +324,14 @@ export default function ChatGPTSubscriptionSettings() {
         >
           刷新状态
         </button>
+        {connectPending && attemptId && (
+          <button
+            type="button"
+            onClick={() => cancelAttemptMutation.mutate(attemptId)}
+            disabled={cancelAttemptMutation.isPending}
+            className="rounded-lg border border-destructive/40 px-4 py-2 text-sm text-destructive disabled:opacity-50"
+          >{cancelAttemptMutation.isPending ? '正在取消…' : '取消授权'}</button>
+        )}
       </div>
 
       {statusQuery.isLoading ? (

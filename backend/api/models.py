@@ -1,11 +1,10 @@
 import uuid
-import secrets
 
 from django.db import models
 
 
 def generate_chatgpt_host_id():
-    return secrets.token_urlsafe(32)
+    return f'urn:uuid:{uuid.uuid4()}'
 
 
 class Category(models.Model):
@@ -297,7 +296,6 @@ class ChatGPTOAuthClient(models.Model):
 
     id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
     host_id = models.CharField(max_length=64, unique=True, default=generate_chatgpt_host_id)
-    issued_client_id = models.CharField(max_length=255, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -314,6 +312,11 @@ class ChatGPTSubscriptionConnection(models.Model):
         'auth.User', on_delete=models.CASCADE, related_name='chatgpt_connections',
     )
     subject_hash = models.CharField(max_length=64)
+    issuer = models.CharField(max_length=255)
+    issued_client_id = models.CharField(max_length=255)
+    registration_key_hash = models.CharField(max_length=64)
+    encrypted_subject = models.TextField(blank=True, default='')
+    granted_scopes = models.JSONField(default=list)
     account_name = models.CharField(max_length=255, blank=True, default='')
     account_email = models.EmailField(blank=True, default='')
     encrypted_access_token = models.TextField(blank=True, default='')
@@ -323,6 +326,10 @@ class ChatGPTSubscriptionConnection(models.Model):
     is_active = models.BooleanField(default=False, db_index=True)
     needs_reauth = models.BooleanField(default=False, db_index=True)
     generation = models.PositiveIntegerField(default=0)
+    credential_generation = models.PositiveIntegerField(default=0)
+    auth_attempt_generation = models.PositiveIntegerField(default=0)
+    refresh_lease_id = models.CharField(max_length=64, blank=True, default='')
+    refresh_lease_expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -330,7 +337,7 @@ class ChatGPTSubscriptionConnection(models.Model):
         verbose_name = 'ChatGPT 订阅连接'
         verbose_name_plural = 'ChatGPT 订阅连接'
         constraints = [
-            models.UniqueConstraint(fields=['user', 'subject_hash'], name='unique_chatgpt_user_subject'),
+            models.UniqueConstraint(fields=['user', 'registration_key_hash'], name='unique_chatgpt_user_registration'),
             models.UniqueConstraint(
                 fields=['user'], condition=models.Q(is_active=True),
                 name='one_active_chatgpt_connection_per_user',
@@ -351,10 +358,24 @@ class ChatGPTAuthAttempt(models.Model):
     target_connection = models.ForeignKey(
         ChatGPTSubscriptionConnection, null=True, blank=True, on_delete=models.SET_NULL,
     )
+    result_connection = models.ForeignKey(
+        ChatGPTSubscriptionConnection, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='completed_auth_attempts',
+    )
     state_hash = models.CharField(max_length=64, unique=True)
     nonce_hash = models.CharField(max_length=64)
     encrypted_pkce_verifier = models.TextField()
+    encrypted_authorization_url = models.TextField()
+    handoff_token_hash = models.CharField(max_length=64)
+    browser_binding_hash = models.CharField(max_length=64, blank=True, default='')
+    session_binding_hash = models.CharField(max_length=64, blank=True, default='', db_index=True)
+    handoff_origin = models.CharField(max_length=255, blank=True, default='')
     requested_client_id = models.CharField(max_length=255)
+    target_attempt_generation = models.PositiveIntegerField(default=0)
+    selection_connection_id_at_start = models.UUIDField(null=True, blank=True)
+    selection_generation_at_start = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=16, default='pending', db_index=True)
+    status_message = models.CharField(max_length=255, blank=True, default='')
     expires_at = models.DateTimeField(db_index=True)
     consumed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

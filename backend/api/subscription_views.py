@@ -3,7 +3,7 @@
 import html
 import json
 
-from django.http import HttpResponse, StreamingHttpResponse
+from django.http import HttpResponse, HttpResponseRedirect, StreamingHttpResponse
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -46,10 +46,71 @@ class ChatGPTSubscriptionConnectView(APIView):
         connection_id = request.data.get('connection_id')
         try:
             target = subscription.get_user_connection(request.user, connection_id) if connection_id else None
-            authorization_url = subscription.create_authorization_attempt(request.user, target)
+            if not request.session.session_key:
+                request.session.create()
+            request.session['chatgpt_oauth_session'] = True
+            attempt = subscription.create_authorization_attempt(
+                request.user, target, session_key=request.session.session_key or '',
+                origin=request.META.get('HTTP_ORIGIN', ''),
+            )
         except subscription.SubscriptionError as exc:
             return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response({'authorization_url': authorization_url}, status=status.HTTP_201_CREATED)
+        return Response(attempt, status=status.HTTP_201_CREATED)
+
+
+class ChatGPTSubscriptionHandoffView(APIView):
+    """Set a callback-host-only HttpOnly cookie using a one-time form ticket."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        try:
+            cookie_value, authorization_url = subscription.handoff_authorization(
+                request.data.get('attempt_id', ''), request.data.get('handoff_token', ''),
+                session_key=request.session.session_key or '',
+                origin=request.META.get('HTTP_ORIGIN', ''),
+            )
+        except subscription.SubscriptionError as exc:
+            return HttpResponse(
+                '<!doctype html><meta charset="utf-8"><title>连接失败</title>'
+                f'<p>{html.escape(str(exc))}</p>',
+                status=400, content_type='text/html; charset=utf-8',
+            )
+        response = HttpResponseRedirect(authorization_url)
+        response.set_cookie(
+            subscription.BINDING_COOKIE_NAME,
+            cookie_value,
+            max_age=int(subscription.AUTH_ATTEMPT_TTL.total_seconds()),
+            httponly=True,
+            secure=False,
+            samesite='Lax',
+            path=subscription.BINDING_COOKIE_PATH,
+        )
+        return response
+
+
+class ChatGPTSubscriptionAttemptView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, attempt_id):
+        try:
+            payload = subscription.authorization_attempt_status(request.user, attempt_id)
+        except subscription.SubscriptionError:
+            return Response({'error': '授权请求不存在。'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(payload)
+
+    def delete(self, request, attempt_id):
+        cancelled = subscription.cancel_authorization_attempt(request.user, attempt_id)
+        if not cancelled:
+            try:
+                payload = subscription.authorization_attempt_status(request.user, attempt_id)
+            except subscription.SubscriptionError:
+                return Response({'error': '授权请求不存在。'}, status=status.HTTP_404_NOT_FOUND)
+            return Response(payload)
+        return Response({
+            'id': str(attempt_id), 'status': 'cancelled', 'message': '授权请求已取消。', 'connection_id': None,
+        })
 
 
 class ChatGPTSubscriptionCallbackView(APIView):
@@ -58,7 +119,10 @@ class ChatGPTSubscriptionCallbackView(APIView):
 
     def get(self, request):
         try:
-            subscription.complete_authorization(request.query_params)
+            subscription.complete_authorization(
+                request.query_params,
+                request.COOKIES.get(subscription.BINDING_COOKIE_NAME, ''),
+            )
             message = 'ChatGPT 订阅连接已完成。可以关闭此窗口，原页面会自动更新。'
             result_code = 200
         except subscription.SubscriptionError as exc:
