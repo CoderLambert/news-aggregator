@@ -17,8 +17,8 @@
     "isolatedModules": true,
     "forceConsistentCasingInFileNames": true,
     "noFallthroughCasesInSwitch": true,
-    "paths": { "@/*": ["./src/*"] },
-    "types": ["vite/client"]
+    "paths": { "@/*": ["./src/*"], "@tests/*": ["./tests/*"] },
+    "types": ["vite/client", "vitest/globals"]
   },
-  "include": ["src"]
+  "include": ["src", "tests"]
 }

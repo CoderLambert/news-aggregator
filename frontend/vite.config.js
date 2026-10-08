@@ -18,6 +18,7 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
+      "@tests": path.resolve(import.meta.dirname, "tests"),
       "@": path.resolve(import.meta.dirname, "src"),
     },
   },
@@ -77,6 +78,6 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./vitest.setup.js"],
     css: false,
-    include: ["src/**/*.{test,spec}.{js,jsx}"],
+    include: ["tests/**/*.{test,spec}.{js,jsx,ts,tsx}"],
   },
 });
