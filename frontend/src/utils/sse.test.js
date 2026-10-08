@@ -50,6 +50,25 @@ describe('iterSSEEvents', () => {
     const events = await collect(iterSSEEvents(r))
     expect(events).toEqual([{ progress: 'x' }])
   })
+
+  it('cancels the response reader when a consumer stops early', async () => {
+    const encoder = new TextEncoder()
+    let cancelled = false
+    const response = new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"progress":"first"}\n'))
+      },
+      cancel() {
+        cancelled = true
+      },
+    }))
+    const events = iterSSEEvents(response)
+
+    await expect(events.next()).resolves.toEqual({ value: { progress: 'first' }, done: false })
+    await events.return()
+
+    expect(cancelled).toBe(true)
+  })
 })
 
 describe('iterTextChunks', () => {

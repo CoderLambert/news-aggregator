@@ -1,12 +1,15 @@
-import { useEffect, useState } from 'react'
+import { isValidElement, useEffect, useRef, useState } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
+import type { Components } from 'react-markdown'
+import type { ElementContent } from 'hast'
 import remarkGfm from 'remark-gfm'
 import { Check, Copy, ExternalLink, Newspaper } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import MermaidBlock from './MermaidBlock'
 import { highlightCode, normalizeShikiLanguage } from '@/lib/shiki'
 
-const IMG_STYLE = { maxHeight: '480px', objectFit: 'contain' }
+const IMG_STYLE = { maxHeight: '480px', objectFit: 'contain' } satisfies CSSProperties
 const MAX_HIGHLIGHT_CHARS = 80_000
 
 /**
@@ -17,15 +20,15 @@ const MAX_HIGHLIGHT_CHARS = 80_000
  * just stringify the leaf text so the copy payload always matches what
  * the user actually sees on screen.
  */
-function extractCodeText(node) {
+function extractCodeText(node: ReactNode): string {
   if (node == null || typeof node === 'boolean') return ''
   if (typeof node === 'string' || typeof node === 'number') return String(node)
   if (Array.isArray(node)) return node.map(extractCodeText).join('')
-  if (node.props?.children !== undefined) return extractCodeText(node.props.children)
+  if (isValidElement<{ children?: ReactNode }>(node)) return extractCodeText(node.props.children)
   return ''
 }
 
-function extractLanguage(node) {
+function extractLanguage(node: ReactNode): string {
   if (node == null || typeof node === 'boolean') return ''
   if (Array.isArray(node)) {
     for (const child of node) {
@@ -35,12 +38,12 @@ function extractLanguage(node) {
     return ''
   }
 
-  const className = node.props?.className || ''
+  const className = isValidElement<{ className?: string }>(node) ? node.props.className ?? '' : ''
   const match = String(className).match(/(?:^|\s)language-([^\s]+)/)
   return match?.[1] || ''
 }
 
-function isExplodedCodeBlock(code) {
+function isExplodedCodeBlock(code: string) {
   const lines = String(code || '').split('\n')
   const nonEmpty = lines.map((line) => line.trim()).filter(Boolean)
   if (nonEmpty.length < 8) return false
@@ -50,7 +53,7 @@ function isExplodedCodeBlock(code) {
   return shortLines / nonEmpty.length >= 0.72 && codeTokens >= 3
 }
 
-function inferExplodedLanguage(lines) {
+function inferExplodedLanguage(lines: string[]) {
   const tokens = lines.map((line) => line.trim()).filter(Boolean)
   const joined = ` ${tokens.join(' ')} `
 
@@ -59,7 +62,7 @@ function inferExplodedLanguage(lines) {
   return 'text'
 }
 
-function formatTokenLine(tokens) {
+function formatTokenLine(tokens: string[]) {
   let value = tokens.filter(Boolean).join(' ')
   value = value.replace(/\s+([,;:)\]}.])/g, '$1')
   value = value.replace(/\s+\(/g, '(')
@@ -73,11 +76,11 @@ function formatTokenLine(tokens) {
   return value.trim()
 }
 
-function splitExplodedLines(code) {
+function splitExplodedLines(code: string) {
   return String(code || '').split('\n').map((line) => line.trim()).filter(Boolean)
 }
 
-function repairExplodedPython(code) {
+function repairExplodedPython(code: string) {
   const tokens = splitExplodedLines(code)
   const statements = []
 
@@ -126,7 +129,7 @@ function repairExplodedPython(code) {
   return statements.join('\n')
 }
 
-function repairExplodedJavaScript(code) {
+function repairExplodedJavaScript(code: string) {
   const tokens = splitExplodedLines(code)
   const statements = []
 
@@ -148,7 +151,7 @@ function repairExplodedJavaScript(code) {
   return statements.join('\n')
 }
 
-function repairExplodedCodeBlock(code) {
+function repairExplodedCodeBlock(code: string) {
   if (!isExplodedCodeBlock(code)) return code
 
   const language = inferExplodedLanguage(String(code).split('\n'))
@@ -157,7 +160,7 @@ function repairExplodedCodeBlock(code) {
   return formatTokenLine(splitExplodedLines(code))
 }
 
-function inferCodeLanguage(code) {
+function inferCodeLanguage(code: string) {
   const value = String(code || '').trim()
   if (!value) return 'text'
 
@@ -217,7 +220,7 @@ function inferCodeLanguage(code) {
   return 'text'
 }
 
-function resolveCodeLanguage(children, code) {
+function resolveCodeLanguage(children: ReactNode, code: string) {
   const declared = normalizeShikiLanguage(extractLanguage(children))
   return declared === 'text' ? inferCodeLanguage(code) : declared
 }
@@ -229,7 +232,7 @@ function resolveCodeLanguage(children, code) {
  * flips to "已复制" for ~1.5s on success. Inline code is unaffected —
  * react-markdown only routes fenced blocks through `pre`.
  */
-function CodeBlock({ children }) {
+function CodeBlock({ children }: { children?: ReactNode }) {
   const rawCode = extractCodeText(children).replace(/\n$/, '')
   const code = repairExplodedCodeBlock(rawCode)
   const language = resolveCodeLanguage(children, code)
@@ -241,9 +244,10 @@ function CodeBlock({ children }) {
   return <HighlightedCodeBlock code={code} language={language} />
 }
 
-function HighlightedCodeBlock({ code, language }) {
+function HighlightedCodeBlock({ code, language }: { code: string; language: string }) {
   const [copied, setCopied] = useState(false)
   const [highlighted, setHighlighted] = useState({ key: '', html: '' })
+  const copyTimerRef = useRef<number | null>(null)
   const highlightKey = `${language}::${code}`
   const isOversized = code.length > MAX_HIGHLIGHT_CHARS
 
@@ -270,15 +274,21 @@ function HighlightedCodeBlock({ code, language }) {
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard?.writeText(code)
+      if (!navigator.clipboard?.writeText) return
+      await navigator.clipboard.writeText(code)
       setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
+      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current)
+      copyTimerRef.current = window.setTimeout(() => setCopied(false), 1500)
     } catch {
       // Copy is optional; keep the reader flow uninterrupted if clipboard fails.
     }
   }
 
   const hasHighlight = highlighted.key === highlightKey && highlighted.html
+
+  useEffect(() => () => {
+    if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current)
+  }, [])
 
   return (
     <div className="md-code-block group relative not-prose">
@@ -313,54 +323,55 @@ function HighlightedCodeBlock({ code, language }) {
 /**
  * Extract plain text from a react-markdown AST node.
  */
-function extractSourceText(node) {
-  if (!node) return ''
-  if (typeof node === 'string' || typeof node === 'number') return String(node)
-  if (Array.isArray(node)) return node.map(extractSourceText).join('')
-  // Skip link text extraction for the text part — we handle links separately
-  if (node.tagName === 'a' || node.type === 'a') return ''
-  if (node.props?.children !== undefined) return extractSourceText(node.props.children)
-  return ''
+function extractSourceText(node: ElementContent): string {
+  if (node.type === 'text') return node.value
+  if (node.type !== 'element' || node.tagName === 'a') return ''
+  return node.children.map(extractSourceText).join('')
 }
 
 /**
  * Extract { href, label } pairs from <a> tags in a react-markdown AST node.
  */
-function extractSourceLinks(node) {
-  if (!node) return []
-  if (Array.isArray(node)) return node.flatMap(extractSourceLinks)
+interface SourceLink {
+  href: string
+  label: string
+}
 
-  if (node.tagName === 'a' || node.type === 'a') {
-    const href = node.props?.href || ''
-    const label = extractSourceText(node.props?.children) || href
-    return href ? [{ href, label }] : []
+function extractSourceLinks(node: ElementContent): SourceLink[] {
+  if (node.type !== 'element') return []
+  if (node.tagName === 'a') {
+    const href = typeof node.properties.href === 'string' ? node.properties.href : ''
+    const isInternal = href.startsWith('/') && !href.startsWith('//')
+    const isHttp = /^https?:\/\//i.test(href)
+    if (!href || (!isInternal && !isHttp)) return []
+    return [{ href, label: node.children.map(extractSourceText).join('').trim() || href }]
   }
+  return node.children.flatMap(extractSourceLinks)
+}
 
-  if (node.props?.children !== undefined) {
-    return extractSourceLinks(node.props.children)
-  }
-  return []
+function containsSourceLink(node: ElementContent): boolean {
+  return node.type === 'element' && (node.tagName === 'a' || node.children.some(containsSourceLink))
 }
 
 /**
  * A single source reference rendered as a clickable card.
  */
-function SourceItem({ index, text, links }) {
+function SourceItem({ index, text, links }: { index: number; text: string; links: SourceLink[] }) {
   // Clean up the text: remove leading punctuation/colons from the label
   const cleanText = text.replace(/^[\s：:—\-–]+/, '').trim()
   return (
-    <div className="group flex items-start gap-2.5 px-3 py-2 rounded-lg border border-neutral-100
+    <div className="group flex items-start gap-2.5 px-3 py-2 rounded-lg border border-border
                     hover:border-violet-200 hover:bg-violet-50/30 transition-all duration-150">
       {/* Index number */}
-      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-neutral-100 group-hover:bg-violet-100
-                       flex items-center justify-center text-[11px] font-medium text-neutral-400
+      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-muted group-hover:bg-violet-100
+                       flex items-center justify-center text-[11px] font-medium text-muted-foreground
                        group-hover:text-violet-500 transition-colors">
         {index}
       </span>
 
       {/* Source text */}
       {cleanText && (
-        <span className="text-[13px] text-neutral-600 leading-snug pt-0.5">
+        <span className="text-[13px] text-muted-foreground leading-snug pt-0.5">
           {cleanText}
         </span>
       )}
@@ -375,7 +386,7 @@ function SourceItem({ index, text, links }) {
             rel={link.href.startsWith('/') ? undefined : 'noopener noreferrer'}
             title={link.href}
             className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium
-                       border border-neutral-100 text-neutral-500
+                       border border-border text-muted-foreground
                        hover:text-violet-600 hover:border-violet-200 hover:bg-violet-50
                        transition-all duration-150"
           >
@@ -391,25 +402,25 @@ function SourceItem({ index, text, links }) {
   )
 }
 
-const MD_COMPONENTS = {
+const MD_COMPONENTS: Components = {
   h1: ({ children }) => (
-    <h1 className="text-2xl font-bold text-gray-900 mt-8 mb-4 pb-2 border-b border-gray-200 break-words">
+    <h1 className="text-2xl font-bold text-foreground mt-8 mb-4 pb-2 border-b border-border break-words">
       {children}
     </h1>
   ),
   h2: ({ children }) => (
-    <h2 className="text-xl font-semibold text-gray-800 mt-7 mb-3 pb-1 border-b border-gray-100 break-words">
+    <h2 className="text-xl font-semibold text-foreground mt-7 mb-3 pb-1 border-b border-border break-words">
       {children}
     </h2>
   ),
   h3: ({ children }) => (
-    <h3 className="text-lg font-semibold text-gray-800 mt-6 mb-2 break-words">{children}</h3>
+    <h3 className="text-lg font-semibold text-foreground mt-6 mb-2 break-words">{children}</h3>
   ),
   h4: ({ children }) => (
-    <h4 className="text-base font-semibold text-gray-700 mt-5 mb-2 break-words">{children}</h4>
+    <h4 className="text-base font-semibold text-muted-foreground mt-5 mb-2 break-words">{children}</h4>
   ),
   p: ({ children }) => (
-    <p className="text-[15px] leading-[1.8] text-gray-700 mb-4 text-justify break-words">
+    <p className="text-[15px] leading-[1.8] text-muted-foreground mb-4 text-justify break-words">
       {children}
     </p>
   ),
@@ -427,39 +438,26 @@ const MD_COMPONENTS = {
       </a>
     )
   },
-  strong: ({ children }) => <strong className="font-semibold text-gray-900">{children}</strong>,
-  em: ({ children }) => <em className="text-gray-600 italic">{children}</em>,
+  strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
+  em: ({ children }) => <em className="text-muted-foreground italic">{children}</em>,
   blockquote: ({ children }) => (
-    <blockquote className="border-l-4 border-violet-300 bg-violet-50/50 rounded-r-lg pl-4 py-3 pr-3 my-4 text-gray-600 break-words">
+    <blockquote className="border-l-4 border-violet-300 bg-violet-50/50 rounded-r-lg pl-4 py-3 pr-3 my-4 text-muted-foreground break-words">
       {children}
     </blockquote>
   ),
   ul: ({ children }) => (
-    <ul className="list-disc list-outside ml-5 mb-4 space-y-1.5 text-[15px] leading-[1.8] text-gray-700 break-words">
+    <ul className="list-disc list-outside ml-5 mb-4 space-y-1.5 text-[15px] leading-[1.8] text-muted-foreground break-words">
       {children}
     </ul>
   ),
   ol: ({ children, node }) => {
-    // Detect if this is a source/reference list by checking if items contain links
-    const isSourceList = node?.children?.some?.(child => {
-      // Walk the react tree looking for <a> elements
-      const walk = (n) => {
-        if (!n) return false
-        if (n.type === 'a' || n.tagName === 'a') return true
-        if (n.props?.children) {
-          if (Array.isArray(n.props.children)) return n.props.children.some(walk)
-          return walk(n.props.children)
-        }
-        return false
-      }
-      return walk(child)
-    })
+    const isSourceList = node?.children.some(containsSourceLink) ?? false
 
     if (isSourceList) {
       return (
         <div className="my-4 space-y-2">
-          {node?.children?.map?.((child, i) => {
-            const text = extractSourceText(child)
+          {node?.children.map((child, i) => {
+            const text = extractSourceText(child).trim()
             const links = extractSourceLinks(child)
             if (!text && links.length === 0) return null
             return (
@@ -471,7 +469,7 @@ const MD_COMPONENTS = {
     }
 
     return (
-      <ol className="list-decimal list-outside ml-5 mb-4 space-y-1.5 text-[15px] leading-[1.8] text-gray-700 break-words">
+      <ol className="list-decimal list-outside ml-5 mb-4 space-y-1.5 text-[15px] leading-[1.8] text-muted-foreground break-words">
         {children}
       </ol>
     )
@@ -482,20 +480,20 @@ const MD_COMPONENTS = {
   // highlighting and the hover-visible copy button.
   pre: CodeBlock,
   table: ({ children }) => (
-    <div className="overflow-x-auto my-4 rounded-lg border border-gray-200">
+    <div className="overflow-x-auto my-4 rounded-lg border border-border">
       <table className="min-w-full text-[14px]">{children}</table>
     </div>
   ),
-  thead: ({ children }) => <thead className="bg-gray-50">{children}</thead>,
+  thead: ({ children }) => <thead className="bg-muted">{children}</thead>,
   th: ({ children }) => (
-    <th className="px-4 py-2.5 text-left font-semibold text-gray-700 border-b border-gray-200">
+    <th className="px-4 py-2.5 text-left font-semibold text-muted-foreground border-b border-border">
       {children}
     </th>
   ),
   td: ({ children }) => (
-    <td className="px-4 py-2.5 text-gray-600 border-b border-gray-100">{children}</td>
+    <td className="px-4 py-2.5 text-muted-foreground border-b border-border">{children}</td>
   ),
-  hr: () => <hr className="my-6 border-gray-200" />,
+  hr: () => <hr className="my-6 border-border" />,
   img: ({ src, alt }) => (
     <span className="my-6 block text-center">
       <img
@@ -504,7 +502,7 @@ const MD_COMPONENTS = {
         className="max-w-full h-auto rounded-lg mx-auto shadow-sm"
         style={IMG_STYLE}
       />
-      {alt && <span className="block text-xs text-gray-400 mt-2">{alt}</span>}
+      {alt && <span className="block text-xs text-muted-foreground mt-2">{alt}</span>}
     </span>
   ),
 }
@@ -516,7 +514,7 @@ const REMARK_PLUGINS = [remarkGfm]
  * All custom components and plugin arrays are module-level constants — no
  * per-render allocation, so React Compiler / memo work properly.
  */
-export default function MarkdownContent({ content }) {
+export default function MarkdownContent({ content }: { content: string }) {
   return (
     <div className="article-markdown prose prose-gray max-w-none w-full overflow-hidden">
       <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={MD_COMPONENTS}>

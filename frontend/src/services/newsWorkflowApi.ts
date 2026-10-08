@@ -1,4 +1,6 @@
 import axios from 'axios'
+import type { NewsId } from '@/services/api'
+export type { NewsId } from '@/services/api'
 import {
   chatStream as streamChat,
   clearChatHistory as clearChatHistoryRequest,
@@ -8,8 +10,6 @@ import {
   translateFullArticleStream as streamTranslation,
 } from '@/services/api'
 import { isRecord } from '@/types/news'
-
-export type NewsId = string | number
 
 export interface FullArticleResult {
   full_content: string
