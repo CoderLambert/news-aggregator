@@ -3,6 +3,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/context/AuthContext'
 import { useLanguage } from '@/context/useLanguage'
 import {
+  chatHistoryTurnOverlay,
+  copyChatHistoryBoundary,
+  reconcileChatHistory,
+} from '@/services/chatHistoryReconciliation'
+import {
   chatStream,
   clearChatHistory,
   fetchChatHistory,
@@ -15,7 +20,6 @@ import type { ViewerId } from '@/services/newsWorkflowQueries'
 
 export type ChatPhase = 'loading-history' | 'idle' | 'thinking' | 'streaming' | 'success' | 'error'
 type ReconciliationState = 'idle' | 'checking' | 'unconfirmed' | 'partial' | 'failed'
-type ReconciliationResult = 'answered' | 'question-saved' | 'unconfirmed'
 
 interface KeyedValue<T> {
   ownerKey: string
@@ -111,29 +115,6 @@ function consumeMetaFrame(
   return ''
 }
 
-function copyHistoryBoundary(messages: ChatMessage[] | undefined): ChatMessage[] | null {
-  return messages ? messages.map((message) => ({ ...message })) : null
-}
-
-function matchesBoundary(history: ChatMessage[], boundary: ChatMessage[]): boolean {
-  if (history.length < boundary.length) return false
-  return boundary.every((message, index) => {
-    const candidate = history[index]
-    return candidate?.role === message.role && candidate.content === message.content
-  })
-}
-
-function reconcileHistory(
-  history: ChatHistory,
-  boundary: ChatMessage[] | null,
-  question: string,
-): ReconciliationResult {
-  if (!boundary || !matchesBoundary(history.messages, boundary)) return 'unconfirmed'
-  const userMessage = history.messages[boundary.length]
-  if (userMessage?.role !== 'user' || userMessage.content !== question) return 'unconfirmed'
-  return history.messages[boundary.length + 1]?.role === 'assistant' ? 'answered' : 'question-saved'
-}
-
 function snapshotActiveRequest(request: ActiveRequest): PendingTurn {
   return {
     ownerKey: request.ownerKey,
@@ -190,11 +171,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
   const currentPendingTurn = pendingTurnState?.ownerKey === ownerKey ? pendingTurnState : null
   const messages = [
     ...(historyQuery.data?.messages ?? []),
-    ...(currentPendingTurn
-      ? currentPendingTurn.serverQuestionSaved
-        ? [currentPendingTurn.assistant]
-        : [currentPendingTurn.user, currentPendingTurn.assistant]
-      : []),
+    ...(currentPendingTurn ? chatHistoryTurnOverlay(currentPendingTurn) : []),
   ]
   const phase = enabled && historyQuery.isFetching
     ? 'loading-history'
@@ -270,7 +247,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     ) return
 
     lastReconciledHistoryRef.current = { ownerKey, turnId: snapshot.id, history }
-    const result = reconcileHistory(history, snapshot.historyBoundary, snapshot.user.content)
+    const result = reconcileChatHistory(history, snapshot.historyBoundary, snapshot.user.content)
     if (result === 'answered') {
       setPendingTurn(null)
       if (inputRef.current === snapshot.user.content) setInput('')
@@ -349,7 +326,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       assistant: assistantMessage,
       status: 'streaming',
       webSearch,
-      historyBoundary: copyHistoryBoundary(historyAtSend?.messages),
+      historyBoundary: copyChatHistoryBoundary(historyAtSend?.messages),
       historyBoundaryData: historyAtSend,
       reconciliation: 'idle',
       serverQuestionSaved: false,
