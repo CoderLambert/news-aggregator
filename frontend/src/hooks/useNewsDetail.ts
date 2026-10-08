@@ -23,11 +23,17 @@ export function useNewsDetail(id: string | undefined) {
   const setNews = useCallback((action: SetStateAction<NewsDetail | null>) => {
     if (!validId) return
 
-    queryClient.setQueryData<NewsDetail>(queryKey, (current) => {
+    const applyUpdate = () => queryClient.setQueryData<NewsDetail>(queryKey, (current) => {
       if (!current) return current
       const next = typeof action === 'function' ? action(current) : action
       return next ?? undefined
     })
+
+    if (queryClient.getQueryState(queryKey)?.fetchStatus === 'fetching') {
+      void queryClient.cancelQueries({ queryKey, exact: true }).then(applyUpdate)
+      return
+    }
+    applyUpdate()
   }, [queryClient, queryKey, validId])
 
   return {

@@ -29,6 +29,13 @@ function article(overrides = {}) {
   }
 }
 
+function waitForAbort(signal) {
+  return new Promise((resolve) => {
+    if (signal.aborted) resolve()
+    else signal.addEventListener('abort', resolve, { once: true })
+  })
+}
+
 describe('useTranslation', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -102,18 +109,64 @@ describe('useTranslation', () => {
     })
     const current = { current: article() }
     const setNews = vi.fn((updater) => { current.current = updater(current.current) })
-    const { result, rerender } = renderHook(() => useTranslation('42', article({ full_translation_active: true }), setNews, false), {
-      initialProps: { user: currentUser },
+    const { result, rerender } = renderHook(({ news, loading }) => useTranslation('42', news, setNews, loading), {
+      initialProps: { user: currentUser, news: article({ full_translation_active: true }), loading: false },
       wrapper: makeWrapper(() => currentUser),
     })
     await waitFor(() => expect(signal).toBeInstanceOf(AbortSignal))
     currentUser = { id: 13, username: 'reader-b' }
-    rerender({ user: currentUser })
+    rerender({ user: currentUser, news: null, loading: true })
 
     await waitFor(() => expect(signal.aborted).toBe(true))
     await act(async () => {})
     expect(current.current.full_content_zh).toBe('')
     expect(result.current.translating).toBe(false)
+  })
+
+  it('reattaches once per owner after A to B to A and ignores the late first response', async () => {
+    let currentUser = { id: 12, username: 'reader-a' }
+    const signals = []
+    let releaseFirstResponse
+    api.translateFullArticleStream.mockImplementation((_id, { signal }) => {
+      signals.push(signal)
+      const requestIndex = signals.length
+      return (async function* stream() {
+        if (requestIndex === 1) {
+          await new Promise((resolve) => { releaseFirstResponse = resolve })
+          yield { type: 'complete', fullContentZh: 'late A translation', fetchedAt: null }
+          return
+        }
+        yield { type: 'progress', text: '第二次连接' }
+        await waitForAbort(signal)
+      })()
+    })
+    const saved = article({ full_translation_active: true })
+    const current = { current: saved }
+    const setNews = vi.fn((updater) => { current.current = updater(current.current) })
+    const { result, rerender, unmount } = renderHook(({ news }) => useTranslation('42', news, setNews, false), {
+      initialProps: { news: saved },
+      wrapper: makeWrapper(() => currentUser),
+    })
+
+    await waitFor(() => expect(signals).toHaveLength(1))
+    await waitFor(() => expect(result.current.translating).toBe(true))
+    currentUser = { id: 13, username: 'reader-b' }
+    rerender({ news: article({ full_translation_active: false }) })
+    await waitFor(() => expect(signals[0].aborted).toBe(true))
+    expect(result.current.translating).toBe(false)
+
+    currentUser = { id: 12, username: 'reader-a' }
+    rerender({ news: saved })
+    await waitFor(() => expect(signals).toHaveLength(2))
+    await waitFor(() => expect(result.current.translating).toBe(true))
+    rerender({ news: article({ full_translation_active: true }) })
+    expect(api.translateFullArticleStream).toHaveBeenCalledTimes(2)
+
+    await act(async () => { releaseFirstResponse() })
+    expect(current.current.full_content_zh).toBe('')
+    expect(result.current.translating).toBe(true)
+    unmount()
+    expect(signals[1].aborted).toBe(true)
   })
 
   it('keeps the previously saved translation on failure and does not auto-post again', async () => {

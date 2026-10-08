@@ -11,6 +11,7 @@ class SiteRule:
     remove_selectors: tuple[str, ...] = field(default_factory=tuple)
     min_length: int = 600
     title_selectors: tuple[str, ...] = ('h1', '[data-testid="headline"]')
+    allowed_canonical_domains: tuple[str, ...] = field(default_factory=tuple)
     name: str = ''
 
 
@@ -22,6 +23,20 @@ WAF_BLOCKED_DOMAINS: tuple[str, ...] = (
 
 
 SITE_RULES: tuple[SiteRule, ...] = (
+    SiteRule(
+        name='Google DeepMind',
+        domains=('deepmind.google',),
+        selectors=('article', 'main', '[role="main"]'),
+        remove_selectors=(
+            '.uni-share-dropdown',
+            '.uni-article-hero__meta-aside-divider',
+            '.uni-blog-article-tags',
+            'uni-related-articles',
+        ),
+        min_length=500,
+        title_selectors=('h1',),
+        allowed_canonical_domains=('blog.google',),
+    ),
     SiteRule(
         name='GitHub',
         domains=('github.com',),
@@ -121,9 +136,24 @@ SITE_RULES: tuple[SiteRule, ...] = (
 
 
 def normalize_domain(url_or_domain: str) -> str:
-    parsed = urlparse(url_or_domain)
-    host = parsed.netloc if parsed.netloc else url_or_domain.split('/')[0]
-    return host.lower().removeprefix('www.')
+    value = (url_or_domain or '').strip()
+    if not value:
+        return ''
+    candidate = value
+    try:
+        parsed = urlparse(candidate)
+        if not parsed.scheme and not candidate.startswith('//'):
+            parsed = urlparse(f'//{candidate}')
+        host = parsed.hostname
+    except ValueError:
+        return ''
+    if not host:
+        return ''
+    try:
+        host = host.encode('idna').decode('ascii')
+    except UnicodeError:
+        return ''
+    return host.lower().rstrip('.').removeprefix('www.')
 
 
 def get_site_rule(url_or_domain: str) -> SiteRule | None:

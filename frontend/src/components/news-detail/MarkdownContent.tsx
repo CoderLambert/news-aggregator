@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import type { Element, ElementContent } from 'hast'
+import type { Plugin } from 'unified'
 import remarkGfm from 'remark-gfm'
 import { Check, Copy, ExternalLink, Newspaper } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -11,6 +12,48 @@ import { highlightCode, normalizeShikiLanguage } from '@/lib/shiki'
 
 const IMG_STYLE = { maxHeight: '480px', objectFit: 'contain' } satisfies CSSProperties
 const MAX_HIGHLIGHT_CHARS = 80_000
+
+type MarkdownNode = {
+  type: string
+  value?: string
+  children?: MarkdownNode[]
+}
+
+function splitLegacySummaryParagraphs(node: MarkdownNode) {
+  if (!node.children) return
+
+  const children: MarkdownNode[] = []
+  for (const child of node.children) {
+    const [text] = child.children ?? []
+    if (
+      child.type === 'paragraph'
+      && child.children?.length === 1
+      && text?.type === 'text'
+      && typeof text.value === 'string'
+    ) {
+      const paragraphs = text.value.split(/\u3000{2,}/).filter((part) => part.trim())
+      if (paragraphs.length > 1) {
+        children.push(...paragraphs.map((value) => ({
+          ...child,
+          children: [{ ...text, value }],
+        })))
+        continue
+      }
+    }
+
+    splitLegacySummaryParagraphs(child)
+    children.push(child)
+  }
+  node.children = children
+}
+
+// Historical Chinese feed summaries used repeated ideographic spaces as
+// paragraph separators. Parse Markdown first, then split only plain-text
+// paragraph nodes on the explicitly opted-in summary path. Inline code and
+// code blocks remain opaque AST nodes; no Markdown source is rewritten.
+const remarkLegacySummaryParagraphs: Plugin = () => (tree) => {
+  splitLegacySummaryParagraphs(tree as MarkdownNode)
+}
 
 /**
  * extractCodeText — walks a `<pre>` element's children to recover the raw
@@ -435,10 +478,10 @@ const MD_COMPONENTS: Components = {
     <h3 className="text-lg font-semibold text-foreground mt-6 mb-2 break-words">{children}</h3>
   ),
   h4: ({ children }) => (
-    <h4 className="text-base font-semibold text-muted-foreground mt-5 mb-2 break-words">{children}</h4>
+    <h4 className="text-base font-semibold text-neutral-800 mt-5 mb-2 break-words">{children}</h4>
   ),
   p: ({ children }) => (
-    <p className="text-[15px] leading-[1.8] text-muted-foreground mb-4 text-justify break-words">
+    <p className="text-base leading-[1.9] text-neutral-700 mb-5 text-left break-words">
       {children}
     </p>
   ),
@@ -457,14 +500,14 @@ const MD_COMPONENTS: Components = {
     )
   },
   strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
-  em: ({ children }) => <em className="text-muted-foreground italic">{children}</em>,
+  em: ({ children }) => <em className="text-neutral-700 italic">{children}</em>,
   blockquote: ({ children }) => (
-    <blockquote className="border-l-4 border-violet-300 bg-violet-50/50 rounded-r-lg pl-4 py-3 pr-3 my-4 text-muted-foreground break-words">
+    <blockquote className="border-l-4 border-violet-300 bg-violet-50/50 rounded-r-lg pl-4 py-3 pr-3 my-4 text-neutral-700 break-words">
       {children}
     </blockquote>
   ),
   ul: ({ children }) => (
-    <ul className="list-disc list-outside ml-5 mb-4 space-y-1.5 text-[15px] leading-[1.8] text-muted-foreground break-words">
+    <ul className="list-disc list-outside ml-5 mb-5 space-y-1.5 text-base leading-[1.9] text-neutral-700 break-words">
       {children}
     </ul>
   ),
@@ -488,7 +531,7 @@ const MD_COMPONENTS: Components = {
     }
 
     return (
-      <ol className="list-decimal list-outside ml-5 mb-4 space-y-1.5 text-[15px] leading-[1.8] text-muted-foreground break-words">
+      <ol className="list-decimal list-outside ml-5 mb-5 space-y-1.5 text-base leading-[1.9] text-neutral-700 break-words">
         {children}
       </ol>
     )
@@ -505,12 +548,12 @@ const MD_COMPONENTS: Components = {
   ),
   thead: ({ children }) => <thead className="bg-muted">{children}</thead>,
   th: ({ children }) => (
-    <th className="px-4 py-2.5 text-left font-semibold text-muted-foreground border-b border-border">
+    <th className="px-4 py-2.5 text-left font-semibold text-neutral-700 border-b border-border">
       {children}
     </th>
   ),
   td: ({ children }) => (
-    <td className="px-4 py-2.5 text-muted-foreground border-b border-border">{children}</td>
+    <td className="px-4 py-2.5 text-neutral-700 border-b border-border">{children}</td>
   ),
   hr: () => <hr className="my-6 border-border" />,
   img: ({ src, alt }) => (
@@ -527,16 +570,23 @@ const MD_COMPONENTS: Components = {
 }
 
 const REMARK_PLUGINS = [remarkGfm]
+const LEGACY_SUMMARY_REMARK_PLUGINS = [remarkGfm, remarkLegacySummaryParagraphs]
 
 /**
  * Apple-style article body Markdown renderer.
  * All custom components and plugin arrays are module-level constants — no
  * per-render allocation, so React Compiler / memo work properly.
  */
-export default function MarkdownContent({ content }: { content: string }) {
+export default function MarkdownContent({
+  content,
+  legacySummarySpacing = false,
+}: {
+  content: string
+  legacySummarySpacing?: boolean
+}) {
   return (
-    <div className="article-markdown prose prose-gray max-w-none w-full overflow-hidden">
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={MD_COMPONENTS}>
+    <div className="article-markdown prose prose-gray mx-auto w-full max-w-[74ch] overflow-hidden">
+      <ReactMarkdown remarkPlugins={legacySummarySpacing ? LEGACY_SUMMARY_REMARK_PLUGINS : REMARK_PLUGINS} components={MD_COMPONENTS}>
         {content}
       </ReactMarkdown>
     </div>

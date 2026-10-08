@@ -18,7 +18,7 @@ describe('FetchArticleCard', () => {
 
     expect(screen.getByText('获取完整原文')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '加载原文' }))
-    expect(onFetch).toHaveBeenCalledTimes(1)
+    expect(onFetch).toHaveBeenCalledWith()
   })
 })
 
@@ -36,7 +36,7 @@ describe('ErrorBanner', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('抓取失败：超时')
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
-    expect(onRetry).toHaveBeenCalledTimes(1)
+    expect(onRetry).toHaveBeenCalledWith()
   })
 })
 

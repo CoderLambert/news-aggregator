@@ -54,6 +54,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void queryClient.cancelQueries({ queryKey: newsWorkflowKeys.chatHistories() })
     queryClient.removeQueries({ queryKey: newsWorkflowKeys.chatHistories() })
     queryClient.removeQueries({ queryKey: ['private'] })
+    void queryClient.cancelQueries({ queryKey: ['chatgptSubscription'] })
+    queryClient.removeQueries({ queryKey: ['chatgptSubscription'] })
   }, [])
 
   const ensureCsrf = useCallback(async () => {

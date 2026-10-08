@@ -117,7 +117,7 @@ npm run build
 
 ```bash
 ./scripts/news start
-# 访问 http://localhost:5173
+# 访问 http://127.0.0.1:5173
 ```
 
 查看状态和停止全部服务：
@@ -138,7 +138,7 @@ python manage.py runserver 0.0.0.0:9527
 # 终端 2 — 启动前端开发服务器
 cd frontend
 npm run dev
-# 访问 http://localhost:5173
+# 访问 http://127.0.0.1:5173
 ```
 
 **方式 B：生产模式（Waitress + 静态文件）**
@@ -151,7 +151,7 @@ cd frontend && npm run build
 pip install waitress
 cd /path/to/news-aggregator
 python start_waitress.py
-# 访问 http://localhost:9527
+# 访问 http://127.0.0.1:9527
 ```
 
 ### 6. 抓取新闻数据

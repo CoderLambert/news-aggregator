@@ -1,3 +1,6 @@
+from datetime import timedelta
+from unittest.mock import patch
+
 import pytest
 from django.utils import timezone
 
@@ -5,6 +8,7 @@ from api.models import Category, News, Source
 from api.services.article_fetcher import FetchError, FetchResult
 from api.services.full_content_status import (
     classify_fetch_error,
+    claim_fetch,
     mark_failed,
     mark_fetching,
     mark_success,
@@ -71,6 +75,53 @@ def test_mark_success_records_provider_score_and_timestamp(news):
 
 
 @pytest.mark.django_db
+def test_mark_success_clears_translation_only_when_the_original_body_changes(news):
+    news.full_content = 'old body'
+    news.full_content_zh = 'old translation'
+    news.full_content_zh_fetched_at = timezone.now()
+    news.save(update_fields=['full_content', 'full_content_zh', 'full_content_zh_fetched_at'])
+    result = FetchResult(
+        ok=True,
+        provider='scrapy_cli',
+        url=news.url,
+        title=news.title,
+        markdown='new body',
+        quality_score=0.9,
+    )
+
+    mark_success(news, result, full_content='new body')
+
+    news.refresh_from_db()
+    assert news.full_content == 'new body'
+    assert news.full_content_zh == ''
+    assert news.full_content_zh_fetched_at is None
+
+
+@pytest.mark.django_db
+def test_mark_success_keeps_translation_when_the_original_body_is_unchanged(news):
+    news.full_content = 'same body'
+    news.full_content_zh = 'valid translation'
+    fetched_at = timezone.now()
+    news.full_content_zh_fetched_at = fetched_at
+    news.save(update_fields=['full_content', 'full_content_zh', 'full_content_zh_fetched_at'])
+    result = FetchResult(
+        ok=True,
+        provider='scrapy_cli',
+        url=news.url,
+        title=news.title,
+        markdown='same body',
+        quality_score=0.9,
+    )
+
+    mark_success(news, result, full_content='same body')
+
+    news.refresh_from_db()
+    assert news.full_content == 'same body'
+    assert news.full_content_zh == 'valid translation'
+    assert news.full_content_zh_fetched_at == fetched_at
+
+
+@pytest.mark.django_db
 def test_mark_failed_increments_retry_count_and_records_error(news):
     news.full_content_retry_count = 1
     news.save(update_fields=['full_content_retry_count'])
@@ -83,6 +134,47 @@ def test_mark_failed_increments_retry_count_and_records_error(news):
     assert news.full_content_fetch_provider == 'jina'
     assert news.full_content_retry_count == 2
     assert news.last_full_content_attempt is not None
+
+
+@pytest.mark.django_db
+def test_reclaimed_fetch_fences_out_late_success_and_failure(news):
+    first_started = timezone.now() - timedelta(minutes=10)
+    first_worker = News.objects.get(pk=news.pk)
+    with patch('api.services.full_content_status.tz_now', return_value=first_started):
+        assert claim_fetch(first_worker)
+
+    second_worker = News.objects.get(pk=news.pk)
+    second_started = first_started + timedelta(minutes=6)
+    with patch('api.services.full_content_status.tz_now', return_value=second_started):
+        assert claim_fetch(second_worker)
+
+    stale_result = FetchResult(
+        ok=True,
+        provider='old_worker',
+        url=news.url,
+        markdown='STALE BODY MUST NOT BE SAVED',
+        quality_score=0.5,
+    )
+    assert not mark_success(first_worker, stale_result, full_content=stale_result.markdown)
+    assert not mark_failed(first_worker, RuntimeError('late failure'))
+
+    news.refresh_from_db()
+    assert news.full_content == ''
+    assert news.full_content_fetch_status == 'fetching'
+    assert news.full_content_retry_count == 0
+
+    current_result = FetchResult(
+        ok=True,
+        provider='current_worker',
+        url=news.url,
+        markdown='CURRENT BODY',
+        quality_score=0.9,
+    )
+    assert mark_success(second_worker, current_result, full_content=current_result.markdown)
+    news.refresh_from_db()
+    assert news.full_content == 'CURRENT BODY'
+    assert news.full_content_fetch_status == 'success'
+    assert news.full_content_fetch_provider == 'current_worker'
 
 
 @pytest.mark.parametrize(

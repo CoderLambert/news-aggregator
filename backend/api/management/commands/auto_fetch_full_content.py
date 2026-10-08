@@ -24,8 +24,8 @@ from django.utils.timezone import now as tz_now
 
 from api.services.full_content_status import (
     classify_fetch_error,
+    claim_fetch,
     mark_failed,
-    mark_fetching,
     mark_success,
 )
 
@@ -75,28 +75,26 @@ def _get_scrapy_providers():
 
 
 def _fetch_one(news, providers_chain):
-    """Fetch full content for a single News instance. Returns True on success."""
+    """Fetch one article, or return None when another worker owns the fetch."""
     from api.services.article_fetcher import FetchError, fetch_article_markdown
 
-    mark_fetching(news)
+    if not claim_fetch(news):
+        return None
     result = fetch_article_markdown(
         news.url,
         expected_title=news.title,
         summary=news.content,
         providers=providers_chain,
     )
-    news.full_content = result.markdown
-    news.full_content_fetched_at = tz_now()
-    news.full_content_backfill_source = result.provider or 'scrapy_subprocess'
-    news.full_content_backfill_at = tz_now()
-    news.save(update_fields=[
-        'full_content',
-        'full_content_fetched_at',
-        'full_content_backfill_source',
-        'full_content_backfill_at',
-    ])
-    mark_success(news, result)
-    return result
+    saved = mark_success(
+        news,
+        result,
+        full_content=result.markdown,
+        full_content_fetched_at=tz_now(),
+        full_content_backfill_source=result.provider or 'scrapy_subprocess',
+        full_content_backfill_at=tz_now(),
+    )
+    return result if saved else None
 
 
 def _get_pending():
@@ -171,6 +169,7 @@ def run_loop():
         providers_chain = _get_scrapy_providers()
         ok = 0
         failed = 0
+        skipped = 0
 
         for idx, news in enumerate(pending):
             if _stop_event.is_set():
@@ -178,6 +177,10 @@ def run_loop():
 
             try:
                 result = _fetch_one(news, providers_chain)
+                if result is None:
+                    skipped += 1
+                    logger.info('[auto-fetch] SKIP news=%s; another worker owns the fetch', news.pk)
+                    continue
                 ok += 1
                 logger.info(
                     '[auto-fetch] OK  news=%s  provider=%s  score=%.2f  len=%d',
@@ -203,8 +206,8 @@ def run_loop():
                     break
 
         logger.info(
-            '[auto-fetch] batch done: ok=%d  fail=%d  next poll in %ds',
-            ok, failed, POLL_INTERVAL,
+            '[auto-fetch] batch done: ok=%d  fail=%d  skipped=%d  next poll in %ds',
+            ok, failed, skipped, POLL_INTERVAL,
         )
         _stop_event.wait(timeout=POLL_INTERVAL)
 

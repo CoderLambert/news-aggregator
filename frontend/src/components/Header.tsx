@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { AlignLeft, GitCompareArrows, Heart, Languages, LogOut, Menu, Search, Settings, Type, X } from 'lucide-react'
+import { AlignLeft, GitCompareArrows, Heart, KeyRound, Languages, LogOut, Menu, Search, Settings, Type, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import AuthModal from '@/components/AuthModal'
@@ -125,6 +125,11 @@ export default function Header() {
             <Button variant="ghost" className="w-full justify-start" asChild>
               <Link to="/provider-comparisons" onClick={() => setMenuOpen(false)}><GitCompareArrows aria-hidden="true" className="text-indigo-500" />Provider 对比</Link>
             </Button>
+            {user && (
+              <Button variant="ghost" className="w-full justify-start" asChild>
+                <Link to="/settings/chatgpt" onClick={() => setMenuOpen(false)}><KeyRound aria-hidden="true" className="text-emerald-600" />ChatGPT 订阅设置</Link>
+              </Button>
+            )}
 
             <div className="px-2 py-3">
               <p className="mb-2 text-xs font-medium text-muted-foreground">显示模式</p>
