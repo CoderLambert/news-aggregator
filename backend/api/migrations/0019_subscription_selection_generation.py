@@ -35,6 +35,11 @@ class Migration(migrations.Migration):
                 'verbose_name_plural': 'ChatGPT 订阅选择状态',
             },
         ),
+        migrations.AlterField(
+            model_name='chatgptauthattempt',
+            name='selection_generation_at_start',
+            field=models.PositiveBigIntegerField(default=0),
+        ),
         migrations.RunPython(
             cancel_attempts_with_legacy_selection_snapshots,
             migrations.RunPython.noop,
