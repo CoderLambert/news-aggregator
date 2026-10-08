@@ -1,11 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SpeechPlayerProvider } from './SpeechPlayerProvider'
 import { useSpeechPlayerActions, useSpeechPlayerState } from './SpeechPlayerContext'
 import GlobalSpeechPlayer from '@/components/speech/GlobalSpeechPlayer'
 
 const audioInstances = []
+const mediaSession = {
+  actionHandlers: new Map(),
+  metadata: null,
+  setActionHandler(action, handler) {
+    if (handler) this.actionHandlers.set(action, handler)
+    else this.actionHandlers.delete(action)
+  },
+}
+let previousMediaSessionDescriptor
+
+function deferred() {
+  let reject
+  const promise = new Promise((_, rejectPromise) => { reject = rejectPromise })
+  return { promise, reject }
+}
 
 class MockAudio {
   constructor() {
@@ -52,6 +67,7 @@ function PlayerActions() {
     <div>
       <button type="button" onClick={() => player.speak(11, '第一篇虚构新闻', 'zh')}>朗读第一篇</button>
       <button type="button" onClick={() => player.speak(12, '第二篇虚构新闻', 'original')}>朗读第二篇</button>
+      <button type="button" onClick={player.stop}>停止播放器</button>
       <output data-testid="player-status">{state.status}</output>
     </div>
   )
@@ -70,9 +86,18 @@ beforeEach(() => {
   audioInstances.length = 0
   localStorage.clear()
   vi.stubGlobal('Audio', MockAudio)
+  previousMediaSessionDescriptor = Object.getOwnPropertyDescriptor(navigator, 'mediaSession')
+  mediaSession.actionHandlers.clear()
+  mediaSession.metadata = null
+  Object.defineProperty(navigator, 'mediaSession', { configurable: true, value: mediaSession })
 })
 
 afterEach(() => {
+  if (previousMediaSessionDescriptor) {
+    Object.defineProperty(navigator, 'mediaSession', previousMediaSessionDescriptor)
+  } else {
+    Reflect.deleteProperty(navigator, 'mediaSession')
+  }
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
@@ -122,5 +147,52 @@ describe('global speech player', () => {
     await user.click(screen.getByRole('button', { name: '摘要' }))
     expect(audioInstances.at(-1).src).toContain('scope=summary')
     expect(audioInstances.at(-1).src).toContain('/api/news/11/tts/')
+  })
+
+  it('ignores a MediaSession play rejection after the active article changes', async () => {
+    const user = userEvent.setup()
+    renderPlayer()
+
+    await user.click(screen.getByRole('button', { name: '朗读第一篇' }))
+    const oldAudio = audioInstances[0]
+    oldAudio.pause()
+    const oldPlayAction = mediaSession.actionHandlers.get('play')
+    const oldPlay = deferred()
+    vi.spyOn(oldAudio, 'play').mockReturnValue(oldPlay.promise)
+    oldPlayAction()
+
+    await user.click(screen.getByRole('button', { name: '朗读第二篇' }))
+    expect(await screen.findByText('第二篇虚构新闻')).toBeInTheDocument()
+    expect(screen.getByTestId('player-status')).toHaveTextContent('playing')
+
+    await act(async () => {
+      oldPlay.reject(new Error('old track play rejected'))
+      await oldPlay.promise.catch(() => {})
+    })
+
+    expect(screen.getByTestId('player-status')).toHaveTextContent('playing')
+  })
+
+  it('does not restore a stopped player when an old MediaSession play rejects', async () => {
+    const user = userEvent.setup()
+    renderPlayer()
+
+    await user.click(screen.getByRole('button', { name: '朗读第一篇' }))
+    const oldAudio = audioInstances[0]
+    oldAudio.pause()
+    const oldPlayAction = mediaSession.actionHandlers.get('play')
+    const oldPlay = deferred()
+    vi.spyOn(oldAudio, 'play').mockReturnValue(oldPlay.promise)
+    oldPlayAction()
+
+    await user.click(screen.getByRole('button', { name: '停止语音' }))
+    expect(screen.getByTestId('player-status')).toHaveTextContent('idle')
+
+    await act(async () => {
+      oldPlay.reject(new Error('stopped track play rejected'))
+      await oldPlay.promise.catch(() => {})
+    })
+
+    expect(screen.getByTestId('player-status')).toHaveTextContent('idle')
   })
 })
