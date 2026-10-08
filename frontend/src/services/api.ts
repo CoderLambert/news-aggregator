@@ -101,7 +101,7 @@ export function fetchNewsDetail(id: NewsId, signal?: AbortSignal): Promise<unkno
 }
 
 export function fetchFullArticle(id: NewsId, force = false, signal?: AbortSignal): Promise<unknown> {
-  return apiFetch.post<unknown>(`/news/${id}/fetch-full/`, force ? { force: true } : undefined, { signal }).then(({ data }) => data)
+  return apiFetch.post<unknown>(`/news/${id}/fetch-full/`, force === true ? { force: true } : undefined, { signal }).then(({ data }) => data)
 }
 
 export function translateFullArticle(id: NewsId): Promise<unknown> {

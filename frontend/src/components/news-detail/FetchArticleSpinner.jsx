@@ -16,7 +16,7 @@ export default function FetchArticleSpinner({ onCancel }) {
           className="mt-3 inline-flex items-center gap-1 text-xs text-gray-400 hover:text-red-500 transition-colors cursor-pointer"
         >
           <XCircle className="size-3" />
-          取消
+          停止等待
         </button>
       )}
     </Card>

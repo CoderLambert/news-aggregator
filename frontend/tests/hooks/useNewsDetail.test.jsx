@@ -4,6 +4,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { AuthContext } from '@/context/AuthContext'
 import { usePreferencesStore } from '@/stores/preferences'
 import { useNewsDetail } from '@/hooks/useNewsDetail'
+import { newsDetailOptions, newsKeys } from '@/services/newsQueries'
 import * as api from '@/services/api'
 
 const story = (id, title) => ({
@@ -73,6 +74,51 @@ describe('useNewsDetail', () => {
 
     act(() => result.current.setNews((previous) => previous && { ...previous, full_content: 'Fetched body' }))
     await waitFor(() => expect(result.current.news).toMatchObject({ title: 'A', full_content: 'Fetched body' }))
+  })
+
+  it('cancels only the exact viewer detail request before applying a completed body', async () => {
+    const requests = []
+    const fetch = vi.spyOn(api, 'fetchNewsDetail').mockImplementation((id, signal) => {
+      const request = { id, signal, resolve: null }
+      requests.push(request)
+      if (id === 42 && requests.filter((item) => item.id === 42).length === 1) {
+        return Promise.resolve(story(42, 'Initial detail'))
+      }
+      return new Promise((resolve) => { request.resolve = resolve })
+    })
+    const client = makeClient()
+    const { result } = renderHook(() => useNewsDetail('42'), { wrapper: makeWrapper(client) })
+    await waitFor(() => expect(result.current.news?.title).toBe('Initial detail'))
+
+    const otherArticleKey = newsKeys.detail(43, 'zh', 12)
+    const otherViewerKey = newsKeys.detail(42, 'zh', 13)
+    const otherArticleFetch = client.fetchQuery(newsDetailOptions(43, 'zh', 12))
+    const otherViewerFetch = client.fetchQuery(newsDetailOptions(42, 'zh', 13))
+    await waitFor(() => expect(requests).toHaveLength(3))
+
+    const currentKey = newsKeys.detail(42, 'zh', 12)
+    let refresh
+    act(() => { refresh = client.invalidateQueries({ queryKey: currentKey, exact: true }) })
+    await waitFor(() => expect(requests).toHaveLength(4))
+    const staleRequest = requests[3]
+
+    act(() => result.current.setNews((previous) => previous && ({ ...previous, full_content: 'Completed full body' })))
+    await waitFor(() => expect(result.current.news?.full_content).toBe('Completed full body'))
+    expect(staleRequest.signal.aborted).toBe(true)
+    expect(requests[1].signal.aborted).toBe(false)
+    expect(requests[2].signal.aborted).toBe(false)
+
+    await act(async () => {
+      staleRequest.resolve(story(42, 'Stale GET detail'))
+      await refresh
+      requests[1].resolve(story(43, 'Other article'))
+      requests[2].resolve(story(42, 'Other viewer'))
+      await Promise.all([otherArticleFetch, otherViewerFetch])
+    })
+    expect(client.getQueryData(currentKey)?.full_content).toBe('Completed full body')
+    expect(client.getQueryData(otherArticleKey)?.title).toBe('Other article')
+    expect(client.getQueryData(otherViewerKey)?.title).toBe('Other viewer')
+    expect(fetch).toHaveBeenCalledTimes(4)
   })
 
   it('does not show a previous viewer detail while the new viewer request is pending', async () => {
