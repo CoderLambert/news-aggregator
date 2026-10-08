@@ -178,3 +178,9 @@ SearchBar 现在按 React Router 的 POP 导航 key 重置当前草稿并清除�
 起点：`262cce6214db56a9cfecbba9cab870aa7470d7df`。将中断回合的按序历史边界判定抽为同一协调函数，既处理中断后的只读 GET，也处理后续 TanStack Query 历史数据变化；只协调当前 `ownerKey` 的同一个未决回合。后续响应确认完整问答时移除临时 overlay；只有用户问题时维持原来的防重发状态，草稿被改写成另一条时予以保留。
 
 验收：定向 `useChat` / phase 测试 2 个文件、22 项通过；完整套件 41 个文件、257 项通过；`npm run lint`、`npm run typecheck`、`git diff --check` 通过；`npm run build -- --configLoader native --outDir /tmp/newsagg-history-refetch-verified --emptyOutDir` 通过。新增两项回归覆盖首次核对未发现记录、首次仅发现用户问题后由普通历史 refetch 读到完整问答；两者均只调用一次聊天 POST、去除重复 overlay 并保留新的输入草稿。使用 mock API；未触碰后端、数据库或 AI 服务。
+
+## 2026-10-08 复审补充：重复历史快照的显式重查
+
+起点：`80e69a088c561b08120b11d47e8005d9c7aabea6`。历史对象相同只在当前未决回合已经结算为 `unconfirmed` 或 `partial` 时去重；显式重查处于 `checking` 时，即便 Query 结构共享返回同一对象，也重新结算。viewer 切换取消正在进行的核对后，将旧 viewer 的未决回合恢复为可重查状态；旧响应仍不能影响新 viewer。
+
+验收：定向聊天测试 2 个文件、25 项通过；完整套件 41 个文件、260 项通过；lint、typecheck、diff check 和 production build 均通过。覆盖连续两次相同空历史、连续两次相同仅问题历史、历史 GET 失败、viewer 切换取消，以及此前普通 history refetch 两条回归。构建输出位于 `/tmp/newsagg-refcheck-final`；测试只使用 mock API。

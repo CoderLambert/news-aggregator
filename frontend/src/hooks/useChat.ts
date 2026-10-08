@@ -241,8 +241,18 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       clearControllerRef.current = null
     }
     if (reconciliationControllerRef.current?.ownerKey === ownerKey) {
-      reconciliationControllerRef.current.controller.abort()
+      const reconciliation = reconciliationControllerRef.current
+      reconciliation.controller.abort()
       reconciliationControllerRef.current = null
+      const pending = pendingTurnRef.current
+      if (
+        ownerRef.current !== ownerKey && pending?.ownerKey === ownerKey && pending.id === reconciliation.turnId &&
+        pending.status === 'uncertain' && pending.reconciliation === 'checking'
+      ) {
+        setPendingTurnState((current) => current?.ownerKey === ownerKey && current.id === reconciliation.turnId && current.reconciliation === 'checking'
+          ? { ...current, reconciliation: 'unconfirmed' }
+          : current)
+      }
     }
     if (successTimerRef.current) clearTimeout(successTimerRef.current)
   }, [ownerKey])
@@ -253,7 +263,10 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     const current = pendingTurnRef.current
     if (current?.ownerKey !== ownerKey || current.id !== snapshot.id || current.status !== 'uncertain') return
     const previous = lastReconciledHistoryRef.current
-    if (previous?.ownerKey === ownerKey && previous.turnId === snapshot.id && previous.history === history) return
+    const hasSettledSnapshot = current.reconciliation === 'unconfirmed' || current.reconciliation === 'partial'
+    if (
+      hasSettledSnapshot && previous?.ownerKey === ownerKey && previous.turnId === snapshot.id && previous.history === history
+    ) return
 
     lastReconciledHistoryRef.current = { ownerKey, turnId: snapshot.id, history }
     const result = reconcileHistory(history, snapshot.historyBoundary, snapshot.user.content)
