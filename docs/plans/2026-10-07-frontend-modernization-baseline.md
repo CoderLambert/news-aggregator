@@ -145,3 +145,20 @@ SearchBar 现在按 React Router 的 POP 导航 key 重置当前草稿并清除�
 - 延迟 GET 测试覆盖探测期间键盘发送被阻止、草稿原样保留、没有 create/chat POST，GET 完成后可发送且只清空已接受草稿。附加测试直接覆盖 viewer 间 sessionStorage 隔离，以及成功保存结果和删除会话后的恢复记录清理。
 
 验收：定向 Research hook/面板测试 2 个文件、16 项通过；完整 `npm run test:run -- --configLoader runner`：40 个文件、231 项通过；`npm run lint`、`npm run typecheck`、`npm run build -- --configLoader runner --outDir /tmp/newsagg-p2-final-build --emptyOutDir`、`git diff --check` 均通过。没有修改后端/API，也没有改变“停止只取消浏览器接收”的既有语义。
+
+## 2026-10-08 实施检查点：全文、翻译与聊天工作流
+
+起点：分支 `codex/frontend-list-query-slice`，HEAD `bc9578b0238b3e180c509e54fcf76f18e1d32239`。本轮延续详情页 Query 与现有 API 契约；没有增加依赖，也没有修改后端。
+
+- 全文抓取、翻译、聊天历史和推荐问题的 hooks/依赖组件迁为 TypeScript。新增 `newsWorkflowApi.ts` 的 `unknown` 响应解析边界；TanStack Query 管理聊天历史和推荐问题缓存，key 区分文章/语言及适用的 viewer，GET/POST/DELETE/流请求传播 `AbortSignal`。推荐问题仅在打开助手后加载，缓存失败不会自动重打昂贵 POST；用户点“换一批”才强制请求。
+- 翻译 SSE 进度及聊天草稿/增量响应仍是按文章、viewer、语言隔离的本地 UI 状态。切换文章、账号或卸载会取消本页读取并阻止迟到结果写入新上下文。停止翻译/聊天只结束浏览器接收；UI 提示服务端任务可能继续，停止后不会自动重复提交。显式翻译重试保留已保存译文；聊天失败可显式重试并复用当前页面的临时对话行。
+- 拆出对既有 chat SSE `__META__` 标记跨 chunk 的安全拼接，保留搜索来源、Markdown 与 Shiki 代码块/复制体验。后端聊天历史仍按文章保存，接口没有幂等键，因此服务器收到问题但浏览器断线后的再次发送仍可能使后端保存重复请求；前端能避免同一会话界面重复追加临时行，不能承诺服务器端幂等。
+- 变更范围：`useFullArticle`、`useTranslation`、`useChat`、`useSuggestedQuestions`、聊天与全文展示组件；API 适配层只增加取消信号参数，URL、请求体、cookie/CSRF 和响应语义保持不变。AuthContext 账号切换时取消/清除文章聊天历史的私有 Query；公开推荐问题缓存保留。
+
+验收：扩展定向回归 8 个文件、61 项通过；完整 `npm run test:run -- --configLoader native`：41 个文件、246 项通过；`npm run lint`、`npm run typecheck`、`npm run build -- --configLoader native --outDir /tmp/newsagg-p4-build --emptyOutDir` 和 `git diff --check` 均通过。无依赖变更。
+
+本地浏览器用 `/tmp/newsagg-p4-evidence/isolated-browser-verified.sqlite3` 中的单条虚构新闻验收：全文由本地 fetch mock 返回，翻译 worker 与聊天流均为确定性本地 mock；推荐问题直接使用 fixture 缓存。浏览器确认全文获取、翻译渲染、发送聊天、刷新后译文和聊天历史恢复。项目 `backend/db.sqlite3` 未被打开/修改；没有真实模型推理、登录凭据或 API key。登录态未建立，现有 `/api/auth/me/` 在该环境返回 403；新闻详情及公开工作流端点仍完成验收。
+
+验收图由 CUA 浏览器捕获并在审查会话中显示，演示标签为 `http://127.0.0.1:5180/news/1` 且已标记为 deliverable；此 CUA 会话没有提供将截图写入本地路径的接口。两个临时服务已停止。
+
+验收环境注意：首次 Django 启动调用了既有 `ApiConfig.ready()` embedding 预加载钩子，观察到无凭据的 Hugging Face 模型元数据请求后立即中止；之后仅在临时进程设置 `RUN_MAIN=true` 禁用该启动预加载再运行确定性 fixture，无进一步外连。首次请求写入本轮专用 `/tmp/newsagg-p4-home/.cache` 的少量元数据，已删除；后续临时 SQLite 和构建目录仅位于 `/tmp`。

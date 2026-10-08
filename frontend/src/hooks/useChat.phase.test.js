@@ -1,26 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { createElement } from 'react'
+import { AuthContext } from '@/context/AuthContext'
 import { useChat } from './useChat'
 
-/**
- * useChat phase machine — mascot relies on this to pick its mood.
- *
- * Phases:
- *   - 'loading-history' : initial fetch of past messages
- *   - 'idle'            : ready, no active request
- *   - 'thinking'        : user sent, waiting for first token
- *   - 'streaming'       : tokens arriving
- *   - 'success'         : stream finished (transient, then back to idle after 1.5s)
- *   - 'error'           : stream failed (sticky until next send)
- */
-
-vi.mock('../services/api', () => ({
+vi.mock('@/services/newsWorkflowApi', () => ({
   fetchChatHistory: vi.fn(),
   clearChatHistory: vi.fn(),
   chatStream: vi.fn(),
+  parseWebSources: vi.fn(),
 }))
 
-import { fetchChatHistory, chatStream } from '../services/api'
+import { fetchChatHistory, chatStream } from '@/services/newsWorkflowApi'
+
+function makeWrapper() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
+  return function Wrapper({ children }) {
+    return createElement(QueryClientProvider, { client }, createElement(AuthContext.Provider, {
+      value: { user: { id: 5, username: 'reader' }, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() },
+    }, children))
+  }
+}
 
 describe('useChat phase machine', () => {
   beforeEach(() => {
@@ -29,86 +30,46 @@ describe('useChat phase machine', () => {
   })
 
   it('starts in loading-history then becomes idle', async () => {
-    const { result } = renderHook(() => useChat(1))
+    const { result } = renderHook(() => useChat(1, true), { wrapper: makeWrapper() })
     expect(result.current.phase).toBe('loading-history')
     await waitFor(() => expect(result.current.phase).toBe('idle'))
   })
 
-  it('transitions idle → thinking → streaming → success → idle on successful send', async () => {
-    fetchChatHistory.mockResolvedValue({ messages: [] })
-    let resolveFirstChunk, resolveSecondChunk
+  it('transitions idle → thinking → streaming → success → idle', async () => {
+    let releaseFirst
+    let releaseSecond
     chatStream.mockImplementation(async function* () {
-      // Wait until test signals us — lets us assert "thinking" before first token
-      await new Promise(r => { resolveFirstChunk = r })
+      await new Promise((resolve) => { releaseFirst = resolve })
       yield 'Hello '
-      // Pause between chunks so the test can observe "streaming"
-      await new Promise(r => { resolveSecondChunk = r })
+      await new Promise((resolve) => { releaseSecond = resolve })
       yield 'world'
     })
-
-    const { result } = renderHook(() => useChat(1))
+    const { result } = renderHook(() => useChat(1, true), { wrapper: makeWrapper() })
     await waitFor(() => expect(result.current.phase).toBe('idle'))
-
-    act(() => { result.current.setInput('hi') })
-
+    act(() => result.current.setInput('hi'))
     let sendPromise
     act(() => { sendPromise = result.current.handleSend() })
-
-    // Before any token: thinking
     await waitFor(() => expect(result.current.phase).toBe('thinking'))
-
-    // Release first chunk → phase becomes 'streaming'
-    act(() => { resolveFirstChunk() })
+    act(() => releaseFirst())
     await waitFor(() => expect(result.current.phase).toBe('streaming'))
-
-    // Release final chunk + finish
-    act(() => { resolveSecondChunk() })
+    act(() => releaseSecond())
     await act(async () => { await sendPromise })
-
-    // success is transient — should auto-revert to idle
     await waitFor(() => expect(result.current.phase).toBe('idle'), { timeout: 3000 })
   })
 
-  it('transitions to error phase on stream failure', async () => {
-    fetchChatHistory.mockResolvedValue({ messages: [] })
-    chatStream.mockImplementation(async function* () {
-      throw new Error('Network down')
-      // eslint-disable-next-line no-unreachable
-      yield ''
-    })
-
-    const { result } = renderHook(() => useChat(1))
-    await waitFor(() => expect(result.current.phase).toBe('idle'))
-
-    act(() => { result.current.setInput('hi') })
-    await act(async () => { await result.current.handleSend() })
-
-    expect(result.current.phase).toBe('error')
-  })
-
-  it('error phase clears when user sends a new message', async () => {
-    fetchChatHistory.mockResolvedValue({ messages: [] })
+  it('transitions to error on failure and clears that phase for an explicit next send', async () => {
     chatStream
-      .mockImplementationOnce(async function* () {
-        throw new Error('boom')
-        // eslint-disable-next-line no-unreachable
-        yield ''
-      })
-      .mockImplementationOnce(async function* () {
-        yield 'ok'
-      })
-
-    const { result } = renderHook(() => useChat(1))
+      // eslint-disable-next-line require-yield -- intentional: simulates a request that fails before its first token
+      .mockImplementationOnce(async function* () { throw new Error('boom') })
+      .mockImplementationOnce(async function* () { yield 'ok' })
+    const { result } = renderHook(() => useChat(1, true), { wrapper: makeWrapper() })
     await waitFor(() => expect(result.current.phase).toBe('idle'))
-
-    act(() => { result.current.setInput('first') })
+    act(() => result.current.setInput('first'))
     await act(async () => { await result.current.handleSend() })
     expect(result.current.phase).toBe('error')
-
-    act(() => { result.current.setInput('second') })
+    act(() => result.current.setInput('second'))
     let sendPromise
     act(() => { sendPromise = result.current.handleSend() })
-    // Once second send starts, error should clear
     await waitFor(() => expect(result.current.phase).not.toBe('error'))
     await act(async () => { await sendPromise })
   })

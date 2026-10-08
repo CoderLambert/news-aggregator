@@ -59,6 +59,15 @@ describe('translateFullArticleStream', () => {
     globalThis.fetch.mockResolvedValueOnce(new Response('boom', { status: 500 }))
     await expect(collect(translateFullArticleStream('42'))).rejects.toThrow(/boom|HTTP 500/)
   })
+
+  it('forwards an AbortSignal without changing the translation request body', async () => {
+    globalThis.fetch.mockResolvedValueOnce(streamResponse(['data: {"full_content_zh":"译文"}\n']))
+    const controller = new AbortController()
+    await collect(translateFullArticleStream('42', { force: false, signal: controller.signal }))
+    const [, init] = globalThis.fetch.mock.calls[0]
+    expect(init.signal).toBe(controller.signal)
+    expect(JSON.parse(init.body)).toEqual({ force: false })
+  })
 })
 
 describe('chatStream', () => {
@@ -69,6 +78,15 @@ describe('chatStream', () => {
     globalThis.fetch.mockResolvedValueOnce(streamResponse(['Hello', ' ', 'world']))
     const chunks = await collect(chatStream('1', '你好'))
     expect(chunks).toEqual(['Hello', ' ', 'world'])
+  })
+
+  it('forwards the chat AbortSignal and keeps existing request fields', async () => {
+    globalThis.fetch.mockResolvedValueOnce(streamResponse(['Hello']))
+    const controller = new AbortController()
+    await collect(chatStream('1', '你好', { webSearch: true, signal: controller.signal }))
+    const [, init] = globalThis.fetch.mock.calls[0]
+    expect(init.signal).toBe(controller.signal)
+    expect(JSON.parse(init.body)).toEqual({ question: '你好', web_search: true })
   })
 })
 
