@@ -1,6 +1,11 @@
 import uuid
+import secrets
 
 from django.db import models
+
+
+def generate_chatgpt_host_id():
+    return secrets.token_urlsafe(32)
 
 
 class Category(models.Model):
@@ -285,3 +290,100 @@ class ProviderComparison(models.Model):
 
     def __str__(self):
         return f'{self.provider} {"ok" if self.ok else "failed"} {self.url}'
+
+
+class ChatGPTOAuthClient(models.Model):
+    """Stable OAuth client identity shared by this local app installation."""
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    host_id = models.CharField(max_length=64, unique=True, default=generate_chatgpt_host_id)
+    issued_client_id = models.CharField(max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'ChatGPT OAuth 客户端'
+        verbose_name_plural = 'ChatGPT OAuth 客户端'
+
+
+class ChatGPTSubscriptionConnection(models.Model):
+    """One user's encrypted, replaceable ChatGPT subscription credential set."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        'auth.User', on_delete=models.CASCADE, related_name='chatgpt_connections',
+    )
+    subject_hash = models.CharField(max_length=64)
+    account_name = models.CharField(max_length=255, blank=True, default='')
+    account_email = models.EmailField(blank=True, default='')
+    encrypted_access_token = models.TextField(blank=True, default='')
+    encrypted_refresh_token = models.TextField(blank=True, default='')
+    access_token_expires_at = models.DateTimeField(null=True, blank=True)
+    selected_model = models.CharField(max_length=255, blank=True, default='')
+    is_active = models.BooleanField(default=False, db_index=True)
+    needs_reauth = models.BooleanField(default=False, db_index=True)
+    generation = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'ChatGPT 订阅连接'
+        verbose_name_plural = 'ChatGPT 订阅连接'
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'subject_hash'], name='unique_chatgpt_user_subject'),
+            models.UniqueConstraint(
+                fields=['user'], condition=models.Q(is_active=True),
+                name='one_active_chatgpt_connection_per_user',
+            ),
+        ]
+        ordering = ['-updated_at']
+
+    @property
+    def connected(self):
+        return bool(self.encrypted_access_token and self.encrypted_refresh_token and not self.needs_reauth)
+
+
+class ChatGPTAuthAttempt(models.Model):
+    """Short-lived, one-use OAuth state and encrypted PKCE verifier."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey('auth.User', on_delete=models.CASCADE, related_name='chatgpt_auth_attempts')
+    target_connection = models.ForeignKey(
+        ChatGPTSubscriptionConnection, null=True, blank=True, on_delete=models.SET_NULL,
+    )
+    state_hash = models.CharField(max_length=64, unique=True)
+    nonce_hash = models.CharField(max_length=64)
+    encrypted_pkce_verifier = models.TextField()
+    requested_client_id = models.CharField(max_length=255)
+    expires_at = models.DateTimeField(db_index=True)
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'ChatGPT OAuth 登录尝试'
+        verbose_name_plural = 'ChatGPT OAuth 登录尝试'
+
+
+class ChatGPTArticleTranslation(models.Model):
+    """A completed full-text translation private to a user and connection."""
+
+    user = models.ForeignKey('auth.User', on_delete=models.CASCADE, related_name='chatgpt_translations')
+    connection = models.ForeignKey(
+        ChatGPTSubscriptionConnection, on_delete=models.CASCADE, related_name='translations',
+    )
+    news = models.ForeignKey(News, on_delete=models.CASCADE, related_name='chatgpt_translations')
+    source_hash = models.CharField(max_length=64)
+    model_slug = models.CharField(max_length=255)
+    content = models.TextField()
+    completed_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'ChatGPT 全文翻译'
+        verbose_name_plural = 'ChatGPT 全文翻译'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'connection', 'news'], name='unique_chatgpt_news_translation',
+            ),
+        ]

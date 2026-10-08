@@ -17,6 +17,7 @@ const NewsList = lazy(() => import('@/pages/NewsList'))
 const NewsDetail = lazy(() => import('@/pages/NewsDetail'))
 const FavoritesPage = lazy(() => import('@/pages/FavoritesPage'))
 const ProviderComparisons = lazy(() => import('@/pages/ProviderComparisons'))
+const ChatGPTSubscriptionSettings = lazy(() => import('@/pages/ChatGPTSubscriptionSettings'))
 const LocalSearch = lazy(() => import('@/pages/LocalSearch'))
 
 // This is an isolated design preview, not part of the news reading flow.
@@ -51,6 +52,7 @@ export default function App() {
                         <Route path="/news/:id" element={<NewsDetail />} />
                         <Route path="/favorites" element={<FavoritesPage />} />
                         <Route path="/provider-comparisons" element={<ProviderComparisons />} />
+                        <Route path="/settings/chatgpt" element={<ChatGPTSubscriptionSettings />} />
                         <Route path="/__mascot__" element={<MascotPreview />} />
                       </Routes>
                     </Suspense>
