@@ -4,6 +4,7 @@ from collections import Counter
 from django.core.management.base import BaseCommand
 
 from api.models import News
+from api.services.full_content_status import trimmed_text_expression
 
 
 class Command(BaseCommand):
@@ -31,7 +32,13 @@ class Command(BaseCommand):
             qs = qs.filter(source__name__iexact=source_filter)
 
         total = qs.count()
-        with_full = qs.exclude(full_content='').count()
+        readiness_qs = qs.annotate(
+            _summary_text=trimmed_text_expression('content'),
+            _body_text=trimmed_text_expression('full_content'),
+        )
+        metadata_only = readiness_qs.filter(_summary_text='', _body_text='').count()
+        summary_only = readiness_qs.exclude(_summary_text='').filter(_body_text='').count()
+        with_full = readiness_qs.exclude(_body_text='').count()
         coverage = round(with_full / total, 3) if total else 0.0
 
         # Status distribution
@@ -86,6 +93,11 @@ class Command(BaseCommand):
             'total': total,
             'with_full_content': with_full,
             'coverage': coverage,
+            'content_readiness': {
+                'metadata_only': metadata_only,
+                'summary_only': summary_only,
+                'body_ready': with_full,
+            },
             'status': status_dist,
             'sources': source_dist,
             'providers': provider_dist,
@@ -99,6 +111,10 @@ class Command(BaseCommand):
             self.stdout.write(f'total: {total}')
             self.stdout.write(f'with_full_content: {with_full}')
             self.stdout.write(f'coverage: {coverage:.3f}')
+            self.stdout.write('content_readiness:')
+            self.stdout.write(f'  metadata_only: {metadata_only}')
+            self.stdout.write(f'  summary_only: {summary_only}')
+            self.stdout.write(f'  body_ready: {with_full}')
             self.stdout.write('')
             self.stdout.write('status:')
             for k, v in sorted(status_dist.items(), key=lambda x: -x[1]):

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Category, Source, News, Favorite, BlockedNews, ProviderComparison, ResearchSession, ResearchSearchResult
+from .models import Category, Source, News, Favorite, BlockedNews, ProviderComparison, ResearchSession, ResearchSearchResult, ChatGPTArticleTranslation
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -67,8 +67,8 @@ class NewsDetailSerializer(serializers.ModelSerializer):
     # Full article content
     full_content = serializers.CharField(read_only=True)
     full_content_fetched_at = serializers.DateTimeField(read_only=True)
-    full_content_zh = serializers.CharField(read_only=True)
-    full_content_zh_fetched_at = serializers.DateTimeField(read_only=True)
+    full_content_zh = serializers.SerializerMethodField()
+    full_content_zh_fetched_at = serializers.SerializerMethodField()
     full_content_zh_source = serializers.SerializerMethodField()
     full_content_fetch_status = serializers.CharField(read_only=True)
     full_content_fetch_error = serializers.CharField(read_only=True)
@@ -96,20 +96,68 @@ class NewsDetailSerializer(serializers.ModelSerializer):
             'full_translation_active',
         ]
 
+    def _subscription_translation(self, obj):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if not getattr(user, 'is_authenticated', False):
+            return None, None
+        cache = getattr(self, '_subscription_translation_cache', None)
+        if cache is None:
+            cache = self._subscription_translation_cache = {}
+        if obj.pk in cache:
+            return cache[obj.pk]
+        from .services.chatgpt_subscription import active_connection_for_user, source_hash
+        connection = active_connection_for_user(user)
+        if connection is None:
+            result = (None, None)
+        else:
+            result = (
+                connection,
+                ChatGPTArticleTranslation.objects.filter(
+                    user=user,
+                    connection=connection,
+                    news=obj,
+                    source_hash=source_hash(obj.full_content),
+                ).first(),
+            )
+        cache[obj.pk] = result
+        return result
+
+    def get_full_content_zh(self, obj):
+        connection, translation = self._subscription_translation(obj)
+        if connection is not None:
+            return translation.content if translation else ''
+        return obj.full_content_zh
+
+    def get_full_content_zh_fetched_at(self, obj):
+        connection, translation = self._subscription_translation(obj)
+        if connection is not None:
+            return translation.completed_at if translation else None
+        return obj.full_content_zh_fetched_at
+
     def get_full_translation_active(self, obj):
-        """True if a background translation worker is still running for this article."""
+        """Report a worker only inside the current user's translation namespace."""
         try:
-            from .services.translation_jobs import get_job
-            job = get_job(obj.pk)
+            connection, _translation = self._subscription_translation(obj)
+            if connection is not None:
+                from .services import chatgpt_subscription_jobs
+                from .services.chatgpt_subscription import source_hash
+                job = chatgpt_subscription_jobs.get_job(
+                    connection.user_id, connection.pk, obj.pk, source_hash(obj.full_content),
+                )
+            else:
+                from .services.translation_jobs import get_job
+                job = get_job(obj.pk)
             return bool(job and not job.done)
         except Exception:
             return False
 
     def get_full_content_zh_source(self, obj):
-        """Return source of Chinese translation: 'link' or 'llm'."""
-        if not obj.full_content_zh:
-            return None
-        return 'llm'
+        """Return the provider only within the currently selected translation scope."""
+        connection, translation = self._subscription_translation(obj)
+        if connection is not None:
+            return 'chatgpt' if translation else None
+        return 'llm' if obj.full_content_zh else None
 
 
 class FavoriteNewsSerializer(serializers.Serializer):

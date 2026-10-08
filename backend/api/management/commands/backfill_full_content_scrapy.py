@@ -25,8 +25,8 @@ from api.services.article_fetcher import FetchError, fetch_article_markdown
 from api.services.article_fetcher.providers import ScrapySubprocessProvider
 from api.services.full_content_status import (
     classify_fetch_error,
+    claim_fetch,
     mark_failed,
-    mark_fetching,
     mark_success,
 )
 
@@ -117,28 +117,33 @@ class Command(BaseCommand):
 
         ok = 0
         failed = 0
+        skipped = 0
         providers_chain = _scrapy_only_providers()
 
         for idx, news in enumerate(candidates, start=1):
             try:
-                mark_fetching(news)
+                if not claim_fetch(news):
+                    skipped += 1
+                    self.stdout.write(
+                        f'[{idx}/{total}] SKIP news={news.pk}: another worker owns the fetch'
+                    )
+                    continue
                 result = fetch_article_markdown(
                     news.url,
                     expected_title=news.title,
                     summary=news.content,
                     providers=providers_chain,
                 )
-                news.full_content = result.markdown
-                news.full_content_fetched_at = tz_now()
-                news.full_content_backfill_source = result.provider or 'scrapy_subprocess'
-                news.full_content_backfill_at = tz_now()
-                news.save(update_fields=[
-                    'full_content',
-                    'full_content_fetched_at',
-                    'full_content_backfill_source',
-                    'full_content_backfill_at',
-                ])
-                mark_success(news, result)
+                if not mark_success(
+                    news,
+                    result,
+                    full_content=result.markdown,
+                    full_content_fetched_at=tz_now(),
+                    full_content_backfill_source=result.provider or 'scrapy_subprocess',
+                    full_content_backfill_at=tz_now(),
+                ):
+                    skipped += 1
+                    continue
                 ok += 1
                 self.stdout.write(self.style.SUCCESS(
                     f'[{idx}/{total}] OK news={news.pk} '
@@ -173,6 +178,8 @@ class Command(BaseCommand):
                 time.sleep(sleep_sec)
 
         self.stdout.write('')
-        self.stdout.write(self.style.SUCCESS(f'Done. ok={ok} failed={failed} of {total}'))
+        self.stdout.write(self.style.SUCCESS(
+            f'Done. ok={ok} failed={failed} skipped={skipped} of {total}'
+        ))
         if total > 0:
             self.stdout.write(f'Success rate: {ok / total * 100:.1f}%')

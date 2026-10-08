@@ -1,0 +1,4 @@
+{
+  "html": "<article>\n  <h2>正文结构</h2>\n  <p>第一段第一行<br>同段第二行</p>\n  <p>第二段。</p>\n  <ul><li>列表一</li><li>列表二</li></ul>\n  <pre><code>const value = \"alpha　　beta\";</code></pre>\n</article>",
+  "markdown": "## 正文结构\n\n第一段第一行\\\n同段第二行\n\n第二段。\n\n- 列表一\n- 列表二\n\n```\nconst value = \"alpha　　beta\";\n```"
+}

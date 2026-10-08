@@ -43,7 +43,7 @@ export function useTranslation(
   const pausedKey = newsId === null ? '' : translationPausedMarkerKey(newsId, viewerId, lang)
   const ownerRef = useRef(ownerKey)
   const requestRef = useRef<TranslationRequest | null>(null)
-  const autoResumeArticleRef = useRef<number | null>(null)
+  const autoResumeArticleRef = useRef('')
   const progressRef = useRef('')
   const lastProgressUpdateRef = useRef(0)
   const [state, setState] = useState(EMPTY_TRANSLATION_STATE)
@@ -68,7 +68,7 @@ export function useTranslation(
     const request: TranslationRequest = { ownerKey, controller: new AbortController() }
     requestRef.current = request
     const isCurrent = () => requestRef.current === request && ownerRef.current === ownerKey
-    autoResumeArticleRef.current = newsId
+    autoResumeArticleRef.current = ownerKey
     progressRef.current = ''
     lastProgressUpdateRef.current = 0
     if (pausedKey) localStorage.removeItem(pausedKey)
@@ -132,11 +132,15 @@ export function useTranslation(
       requestRef.current.controller.abort()
       requestRef.current = null
     }
+    progressRef.current = ''
+    lastProgressUpdateRef.current = 0
+    if (autoResumeArticleRef.current === ownerKey) autoResumeArticleRef.current = ''
+    setState((current) => current.ownerKey === ownerKey ? EMPTY_TRANSLATION_STATE : current)
   }, [ownerKey])
 
   useEffect(() => {
-    if (loading || !news || news.id !== newsId || autoResumeArticleRef.current === newsId) return
-    autoResumeArticleRef.current = newsId
+    if (loading || !news || news.id !== newsId || autoResumeArticleRef.current === ownerKey) return
+    autoResumeArticleRef.current = ownerKey
 
     const paused = pausedKey ? localStorage.getItem(pausedKey) : null
     if (paused) {

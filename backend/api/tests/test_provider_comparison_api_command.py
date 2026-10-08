@@ -10,6 +10,14 @@ from api.models import Category, News, ProviderComparison, Source
 from api.services.article_fetcher.types import FetchResult
 
 
+@pytest.fixture(autouse=True)
+def mock_public_comparison_dns(monkeypatch):
+    monkeypatch.setattr(
+        'api.services.article_fetcher.comparison.socket.getaddrinfo',
+        lambda host, port, *args, **kwargs: [(None, None, None, '', ('93.184.216.34', port))],
+    )
+
+
 @pytest.fixture
 def news(db):
     category = Category.objects.create(name='Provider API', slug='provider-api')

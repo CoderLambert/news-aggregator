@@ -3,7 +3,7 @@ from django.utils.timezone import now as tz_now
 
 from api.models import News
 from api.services.article_fetcher import FetchError, fetch_article_markdown
-from api.services.full_content_status import classify_fetch_error, mark_failed, mark_fetching, mark_success
+from api.services.full_content_status import classify_fetch_error, claim_fetch, mark_failed, mark_success
 
 
 class Command(BaseCommand):
@@ -85,20 +85,28 @@ class Command(BaseCommand):
 
         ok = 0
         failed = 0
+        skipped = 0
         provider_stats: dict[str, dict] = {}
 
         for news in candidates:
             try:
-                mark_fetching(news)
+                if not claim_fetch(news, force=force):
+                    skipped += 1
+                    self.stdout.write(f'SKIP news={news.pk}: another worker owns the fetch')
+                    continue
                 result = fetch_article_markdown(
                     news.url,
                     expected_title=news.title,
                     summary=news.content,
                 )
-                news.full_content = result.markdown
-                news.full_content_fetched_at = tz_now()
-                news.save(update_fields=['full_content', 'full_content_fetched_at'])
-                mark_success(news, result)
+                if not mark_success(
+                    news,
+                    result,
+                    full_content=result.markdown,
+                    full_content_fetched_at=tz_now(),
+                ):
+                    skipped += 1
+                    continue
                 ok += 1
                 self.stdout.write(self.style.SUCCESS(
                     f'OK news={news.pk} provider={result.provider} score={result.quality_score:.2f}'
@@ -116,7 +124,7 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.ERROR(f'ERROR news={news.pk}: {exc}'))
                 self._track_provider(provider_stats, '', False, str(exc))
 
-        self.stdout.write(f'Done. ok={ok} failed={failed}')
+        self.stdout.write(f'Done. ok={ok} failed={failed} skipped={skipped}')
 
         if provider_report and provider_stats:
             self.stdout.write('\nProvider report:')

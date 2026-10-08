@@ -65,3 +65,60 @@ describe('MarkdownContent ordered lists', () => {
     expect(screen.getByRole('link', { name: '详情' })).toHaveAttribute('href', '/news/42')
   })
 })
+
+describe('MarkdownContent article readability', () => {
+  it('turns legacy full-width paragraph separators into paragraphs and keeps Markdown structure', () => {
+    const { container } = render(
+      <MarkdownContent
+        content={'## 制度边界\n\n第一段正文。\u3000\u3000第二段正文。\n\n- 第一项\n- 第二项\n\n段内第一行  \n段内第二行'}
+        legacySummarySpacing
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: '制度边界' })).toBeInTheDocument()
+    expect(screen.getByText('第一段正文。')).toBeInTheDocument()
+    expect(screen.getByText('第二段正文。')).toBeInTheDocument()
+    expect(within(screen.getByRole('list')).getAllByRole('listitem')).toHaveLength(2)
+    expect(container.querySelectorAll('br')).toHaveLength(1)
+    expect(container.querySelector('p')).toHaveClass('text-neutral-700')
+  })
+
+  it('leaves full-width spaces untouched by default', () => {
+    const { container } = render(<MarkdownContent content={'第一段正文。\u3000\u3000第二段正文。'} />)
+
+    expect(container.querySelectorAll('p')).toHaveLength(1)
+    expect(container.querySelector('p').textContent).toBe('第一段正文。\u3000\u3000第二段正文。')
+  })
+
+  it('preserves full-width spaces in inline code', () => {
+    const { container } = render(<MarkdownContent content={'前缀 `alpha\u3000\u3000beta` 后缀'} legacySummarySpacing />)
+
+    expect(container.querySelector('p code').textContent).toBe('alpha\u3000\u3000beta')
+    expect(container.querySelectorAll('p')).toHaveLength(1)
+  })
+
+  it('preserves indented code blocks', () => {
+    const { container } = render(<MarkdownContent content={'    alpha\u3000\u3000beta\n    next'} legacySummarySpacing />)
+
+    expect(container.querySelector('pre code').textContent).toBe('alpha\u3000\u3000beta\nnext')
+    expect(container.querySelectorAll('p')).toHaveLength(0)
+  })
+
+  it('preserves fenced code inside a blockquote', () => {
+    const { container } = render(
+      <MarkdownContent content={'> 引用\n>\n> ```js\n> const value = "alpha\u3000\u3000beta"\n> ```'} legacySummarySpacing />,
+    )
+
+    expect(container.querySelector('blockquote')).toBeInTheDocument()
+    expect(container.querySelector('blockquote pre code').textContent).toBe('const value = "alpha\u3000\u3000beta"')
+  })
+
+  it('preserves fenced code inside a list item', () => {
+    const { container } = render(
+      <MarkdownContent content={'- sample:\n  ```txt\n  alpha\u3000\u3000beta\n  ```'} legacySummarySpacing />,
+    )
+
+    expect(container.querySelector('ul li')).toBeInTheDocument()
+    expect(container.querySelector('li pre code').textContent).toBe('alpha\u3000\u3000beta')
+  })
+})

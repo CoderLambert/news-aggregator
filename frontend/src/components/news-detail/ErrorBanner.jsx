@@ -18,7 +18,7 @@ export default function ErrorBanner({ message, onRetry }) {
           type="button"
           variant="link"
           size="sm"
-          onClick={onRetry}
+          onClick={() => onRetry()}
           className="h-auto p-0 text-xs text-red-600 underline hover:no-underline"
         >
           重试

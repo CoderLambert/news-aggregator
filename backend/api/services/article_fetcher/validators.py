@@ -3,6 +3,8 @@ from __future__ import annotations
 from difflib import SequenceMatcher
 from urllib.parse import urlparse
 
+from .site_rules import get_site_rule, normalize_domain
+
 
 class ValidationResult:
     def __init__(self, ok: bool, score: float = 0.0, reasons: list[str] | None = None):
@@ -26,12 +28,20 @@ def _similarity(a: str, b: str) -> float:
 def _same_domain(url: str, canonical_url: str) -> bool:
     if not canonical_url:
         return True
-    try:
-        a = urlparse(url).netloc.lower().removeprefix('www.')
-        b = urlparse(canonical_url).netloc.lower().removeprefix('www.')
-        return not a or not b or a == b
-    except Exception:
+    source_domain = normalize_domain(url)
+    canonical_domain = normalize_domain(canonical_url)
+    if not source_domain or not canonical_domain:
+        return False
+    if source_domain == canonical_domain:
         return True
+    rule = get_site_rule(url)
+    if not rule:
+        return False
+    allowed_domains = {
+        normalize_domain(domain)
+        for domain in rule.allowed_canonical_domains
+    }
+    return canonical_domain in allowed_domains
 
 
 def validate_markdown(

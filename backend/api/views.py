@@ -20,6 +20,7 @@ from .serializers import (
 # Module-level import so tests can patch `api.views.get_openai_client`
 from api.services.llm_translator import get_openai_client, get_clients, stream_chat
 from api.services.article_fetcher import FetchError, fetch_article_markdown
+from api.services.chatgpt_subscription import invalidate_authorization_attempts_for_session
 
 # Hardcoded fallback shown when the LLM is unreachable / returns garbage
 SUGGESTED_QUESTIONS_FALLBACK = [
@@ -63,11 +64,13 @@ def ensure_full_content(news):
     import logging
     from django.utils.timezone import now as tz_now
 
-    from api.services.full_content_status import classify_fetch_error, mark_failed, mark_success
+    from api.services.full_content_status import claim_fetch, classify_fetch_error, mark_failed, mark_success
 
-    if news.full_content:
+    if news.full_content and news.full_content.strip():
         return
     if not news.url:
+        return
+    if not claim_fetch(news):
         return
 
     try:
@@ -76,10 +79,12 @@ def ensure_full_content(news):
             expected_title=news.title,
             summary=news.content,
         )
-        news.full_content = result.markdown
-        news.full_content_fetched_at = tz_now()
-        news.save(update_fields=['full_content', 'full_content_fetched_at'])
-        mark_success(news, result)
+        mark_success(
+            news,
+            result,
+            full_content=result.markdown,
+            full_content_fetched_at=tz_now(),
+        )
     except Exception as e:
         try:
             classified = classify_fetch_error(e)
@@ -450,9 +455,9 @@ class NewsFetchFullView(generics.GenericAPIView):
     """Fetch verified real article Markdown and persist to database."""
     queryset = News.objects.select_related('source', 'category').all()
     serializer_class = NewsDetailSerializer
-    permission_classes = []  # Public access
+    permission_classes = [IsAuthenticated]
 
-    @method_decorator(csrf_exempt)
+    @method_decorator(csrf_protect)
     def post(self, request, pk):
         from django.utils.timezone import now as tz_now
         import logging
@@ -460,10 +465,10 @@ class NewsFetchFullView(generics.GenericAPIView):
         logger = logging.getLogger(__name__)
         news = self.get_object()
 
-        force = request.data.get('force', False)
+        force = request.data.get('force') is True
 
         # If already has full content and not forcing, return cached version
-        if news.full_content and not force:
+        if news.full_content and news.full_content.strip() and not force:
             serializer = self.get_serializer(news)
             return Response(serializer.data)
 
@@ -476,9 +481,9 @@ class NewsFetchFullView(generics.GenericAPIView):
 
         # Track fetch status
         from api.services.full_content_status import (
+            claim_fetch,
             classify_fetch_error,
             mark_failed,
-            mark_fetching,
             mark_success,
         )
 
@@ -490,7 +495,27 @@ class NewsFetchFullView(generics.GenericAPIView):
                 status=400,
             )
 
-        mark_fetching(news)
+        if not claim_fetch(news, force=force):
+            news.refresh_from_db()
+            if news.full_content and news.full_content.strip() and not force:
+                return Response(self.get_serializer(news).data)
+            if news.full_content_fetch_status == 'fetching':
+                return Response(self.get_serializer(news).data, status=status.HTTP_202_ACCEPTED)
+            return Response(
+                {'error': '原文抓取状态刚刚发生变化，请稍后重试。'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        news.refresh_from_db()
+
+        def current_fetch_response():
+            news.refresh_from_db()
+            data = self.get_serializer(news).data
+            if news.full_content_fetch_status == 'fetching':
+                return Response(data, status=status.HTTP_202_ACCEPTED)
+            if news.full_content_fetch_status == 'success' and news.full_content.strip():
+                return Response(data)
+            return Response(data, status=status.HTTP_409_CONFLICT)
 
         try:
             result = fetch_article_markdown(
@@ -498,18 +523,24 @@ class NewsFetchFullView(generics.GenericAPIView):
                 expected_title=news.title,
                 summary=news.content,
             )
+            if not result.markdown.strip():
+                raise FetchError('validation_failed:empty_article_body')
 
-            news.full_content = result.markdown
-            news.full_content_fetched_at = tz_now()
-            news.save(update_fields=['full_content', 'full_content_fetched_at'])
-            mark_success(news, result)
+            if not mark_success(
+                news,
+                result,
+                full_content=result.markdown,
+                full_content_fetched_at=tz_now(),
+            ):
+                return current_fetch_response()
 
             serializer = self.get_serializer(news)
             return Response(serializer.data)
 
         except FetchError as e:
             classified = classify_fetch_error(e)
-            mark_failed(news, e, status=classified)
+            if not mark_failed(news, e, status=classified):
+                return current_fetch_response()
             logger.warning('Full-content fetch failed for %s [%s]: %s', url, classified, e)
             news.refresh_from_db()
             return Response(
@@ -529,7 +560,8 @@ class NewsFetchFullView(generics.GenericAPIView):
                 status=502,
             )
         except Exception as e:
-            mark_failed(news, e)
+            if not mark_failed(news, e):
+                return current_fetch_response()
             logger.exception('Unexpected full-content fetch error for %s: %s', url, e)
             news.refresh_from_db()
             return Response(
@@ -572,6 +604,13 @@ class NewsTranslateFullView(generics.GenericAPIView):
         news = self.get_object()
 
         force = request.data.get('force', False)
+
+        # An active subscription owns a private translation namespace. Never
+        # fall through to the shared provider cache after choosing that path.
+        from api.services.chatgpt_subscription import active_connection_for_user
+        if active_connection_for_user(request.user) is not None:
+            from api.subscription_views import subscription_translation_response
+            return subscription_translation_response(request, news, force=force)
 
         # If a background worker is still running, ALWAYS prefer attaching
         # to it over the snapshot path — this is the cross-device / re-entry
@@ -1213,6 +1252,7 @@ def auth_register(request):
         return Response({'error': '用户名已被占用'}, status=status.HTTP_400_BAD_REQUEST)
 
     user = User.objects.create_user(username=username, email=email, password=password)
+    invalidate_authorization_attempts_for_session(request.session.session_key or '')
     login(request, user)
     return Response({
         'id': user.pk,
@@ -1232,6 +1272,7 @@ def auth_login(request):
     if user is None:
         return Response({'error': '用户名或密码错误'}, status=status.HTTP_401_UNAUTHORIZED)
 
+    invalidate_authorization_attempts_for_session(request.session.session_key or '')
     login(request, user)
     return Response({
         'id': user.pk,
@@ -1243,6 +1284,7 @@ def auth_login(request):
 @permission_classes([IsAuthenticated])
 def auth_logout(request):
     """POST /api/auth/logout/ — end the current session."""
+    invalidate_authorization_attempts_for_session(request.session.session_key or '')
     logout(request)
     return Response({'ok': True})
 

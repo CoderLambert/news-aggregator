@@ -165,16 +165,20 @@ describe('ProviderComparisons page', () => {
     )
     expect(await screen.findByText('viewer-a')).toBeInTheDocument()
     queryClient.setQueryData(providerComparisonKeys.list('zh', 1), apiPayload)
+    queryClient.setQueryData(['chatgptSubscription', 'status', 1], { connections: [{ id: 'private-account-a' }] })
 
     fetchMe.mockResolvedValueOnce({ id: 2, username: 'viewer-b' })
     fireEvent.click(screen.getByRole('button', { name: 'refresh identity' }))
     expect(await screen.findByText('viewer-b')).toBeInTheDocument()
     expect(queryClient.getQueryCache().findAll({ queryKey: ['providerComparisons'] })).toHaveLength(0)
+    expect(queryClient.getQueryCache().findAll({ queryKey: ['chatgptSubscription'] })).toHaveLength(0)
 
     queryClient.setQueryData(providerComparisonKeys.list('zh', 2), apiPayload)
+    queryClient.setQueryData(['chatgptSubscription', 'status', 2], { connections: [{ id: 'private-account-b' }] })
     fireEvent.click(screen.getByRole('button', { name: 'logout' }))
     expect(await screen.findByText('logged-out')).toBeInTheDocument()
     expect(queryClient.getQueryCache().findAll({ queryKey: ['providerComparisons'] })).toHaveLength(0)
+    expect(queryClient.getQueryCache().findAll({ queryKey: ['chatgptSubscription'] })).toHaveLength(0)
     view.unmount()
   })
 

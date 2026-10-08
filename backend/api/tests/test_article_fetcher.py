@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 import json
+from pathlib import Path
 
 from django.core.management import call_command
 
@@ -13,7 +14,8 @@ from api.services.article_fetcher.providers import (
     ScrapySubprocessProvider,
     default_providers,
 )
-from api.services.article_fetcher.validators import validate_markdown
+from api.services.article_fetcher.site_rules import get_site_rule, normalize_domain
+from api.services.article_fetcher.validators import _same_domain, validate_markdown
 
 
 class _FailingProvider:
@@ -158,6 +160,65 @@ def test_extract_markdown_from_html_prefers_article_body_and_strips_chrome():
     assert 'first real paragraph' in result.markdown
     assert 'Home Subscribe Login' not in result.markdown
     assert 'Related articles' not in result.markdown
+
+
+def test_extract_markdown_preserves_headings_paragraphs_lists_and_line_breaks():
+    html = '''
+    <article>
+      <h2>制度边界</h2>
+      <p>第一行<br>段内换行</p>
+      <p>第二段正文。</p>
+      <ul><li>第一项</li><li>第二项</li></ul>
+    </article>
+    '''
+
+    result = extract_markdown_from_html(html, 'https://example.com/article')
+
+    assert '## 制度边界' in result.markdown
+    assert '第一行\\\n段内换行' in result.markdown
+    assert '第二段正文。' in result.markdown
+    assert '- 第一项\n- 第二项' in result.markdown
+    assert result.markdown.index('## 制度边界') < result.markdown.index('第一行')
+    assert result.markdown.index('第一行') < result.markdown.index('第二段正文。')
+    assert result.markdown.index('第二段正文。') < result.markdown.index('- 第一项')
+
+
+def test_deepmind_extractor_removes_share_menu_and_related_story_carousel():
+    html = '''
+    <html><body><main>
+      <article>
+        <h1>Introducing a live model</h1>
+        <!-- Share Dropdown Menu -->
+        <div class="uni-share-dropdown"><ul><li>Share on X</li></ul></div>
+        <p>The first article paragraph links to<a href="/models/live">Gemini Live</a>.</p>
+        <p>The second article paragraph preserves the rest of the source body.</p>
+      </article>
+      <div class="uni-blog-article-tags"><span>Posted in:</span></div>
+      <uni-related-articles><h2>Related stories</h2><p>Unrelated card copy.</p></uni-related-articles>
+    </main></body></html>
+    '''
+
+    result = extract_markdown_from_html(
+        html,
+        'https://deepmind.google/blog/introducing-a-live-model/',
+    )
+
+    assert 'links to [Gemini Live](https://deepmind.google/models/live)' in result.markdown
+    assert 'second article paragraph' in result.markdown
+    assert 'Share on X' not in result.markdown
+    assert 'Share Dropdown Menu' not in result.markdown
+    assert 'Related stories' not in result.markdown
+    assert 'Unrelated card copy' not in result.markdown
+    assert 'Posted in:' not in result.markdown
+
+
+def test_extract_markdown_keeps_block_boundaries_and_html_br_hard_breaks():
+    fixture_path = Path(__file__).parent / 'full_article_renderer_contract.json'
+    fixture = json.loads(fixture_path.read_text(encoding='utf-8'))
+
+    result = extract_markdown_from_html(fixture['html'], 'https://example.com/article')
+
+    assert result.markdown == fixture['markdown']
 
 
 def test_validate_markdown_rejects_summary_sized_content():
@@ -344,3 +405,60 @@ def test_scrapy_http_provider_uses_site_rule_min_length_for_short_valid_pages():
     assert result.provider == 'scrapy_http'
     assert len(result.markdown) < 300
     assert result.quality_score >= 0.8
+
+
+def test_deepmind_official_blog_redirect_is_an_explicit_canonical_alias():
+    markdown = 'Gemini Live Avatar article paragraph. ' * 30
+
+    result = validate_markdown(
+        markdown=markdown,
+        expected_title='Introducing Gemini 3.8 Live with Live Avatar',
+        extracted_title='Introducing Gemini 3.8 Live with Live Avatar',
+        url='https://deepmind.google/blog/introducing-gemini-38-live-with-live-avatar/',
+        canonical_url='https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-with-live-avatar/',
+    )
+
+    assert result.ok
+
+
+def test_unlisted_cross_domain_canonical_is_still_rejected():
+    markdown = '权责边界文章正文段落。' * 100
+
+    result = validate_markdown(
+        markdown=markdown,
+        expected_title='迁移权责确权层',
+        extracted_title='迁移权责确权层',
+        url='https://leiphone.com/category/industrynews/article.html',
+        canonical_url='https://untrusted.example/article.html',
+    )
+
+    assert not result.ok
+    assert 'canonical_domain_mismatch' in result.reasons
+
+
+
+def test_normalize_domain_uses_parsed_hostname_and_rejects_malformed_urls():
+    assert normalize_domain(
+        'https://reader:secret@WWW.DeepMind.Google.:8443/article'
+    ) == 'deepmind.google'
+    assert normalize_domain('deepmind.google/article') == 'deepmind.google'
+    assert normalize_domain('https://[malformed') == ''
+
+
+def test_site_rule_matching_uses_the_real_hostname():
+    assert get_site_rule(
+        'https://reader:secret@www.deepmind.google.:8443/article'
+    ).name == 'Google DeepMind'
+    assert get_site_rule('https://deepmind.google@evil.example/article') is None
+    assert get_site_rule('https://deepmind.google.evil.example/article') is None
+
+
+def test_explicit_canonical_alias_is_hostname_exact_and_fails_closed():
+    source = 'https://deepmind.google/blog/story'
+
+    assert _same_domain(source, 'https://user:secret@www.deepmind.google.:443/story')
+    assert _same_domain(source, 'https://www.blog.google.:443/story')
+    assert not _same_domain(source, 'https://extra.blog.google/story')
+    assert not _same_domain(source, 'https://reader@evil.example/story')
+    assert not _same_domain(source, 'https://[malformed')
+    assert not _same_domain('https://[malformed', 'https://blog.google/story')
