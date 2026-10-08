@@ -69,6 +69,29 @@ beforeEach(() => {
 })
 
 describe('ResearchPanel', () => {
+  it('closes the session menu on Escape before closing the research panel', async () => {
+    api.listResearchSessions.mockResolvedValue({
+      count: 1,
+      next: null,
+      previous: null,
+      results: [{ id: 'panel-session', title: '已完成研究' }],
+    })
+    api.getResearchSession.mockResolvedValue(completedSession())
+    renderPanel()
+    fireEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    await screen.findByRole('dialog', { name: '新闻研究助手' })
+
+    const trigger = await screen.findByRole('button', { name: '历史会话' })
+    fireEvent.click(trigger)
+    const menu = await screen.findByRole('menu', { name: '历史会话' })
+    fireEvent.keyDown(menu, { key: 'Escape' })
+
+    expect(screen.queryByRole('menu', { name: '历史会话' })).not.toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '新闻研究助手' })).toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '新闻研究助手' })).not.toBeInTheDocument())
+  })
+
   it('warns that retry may duplicate work after stopping before a response header', async () => {
     api.createResearchStream.mockImplementationOnce((_query, { signal }) => (async function* firstAttempt() {
       yield { type: 'thinking' }

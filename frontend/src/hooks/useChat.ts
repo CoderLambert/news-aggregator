@@ -138,6 +138,8 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
   const viewerId: ViewerId = user?.id ?? 'anonymous'
   const ownerKey = `${parsedId ?? String(newsId ?? '')}:${viewerId}:${lang}`
   const ownerRef = useRef(ownerKey)
+  const ownerEpochRef = useRef(0)
+  const automaticReconciliationRef = useRef('')
   const [inputState, setInputState] = useState<KeyedValue<string>>({ ownerKey: '', value: '' })
   const [webSearchState, setWebSearchState] = useState<KeyedValue<boolean>>({ ownerKey: '', value: false })
   const [phaseState, setPhaseState] = useState<KeyedValue<ChatPhase>>({ ownerKey: '', value: 'idle' })
@@ -182,6 +184,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
   const clearError = ownerClearState.error
 
   useLayoutEffect(() => {
+    if (ownerRef.current !== ownerKey) ownerEpochRef.current += 1
     ownerRef.current = ownerKey
     inputRef.current = currentInput
     pendingTurnRef.current = pendingTurnState
@@ -211,8 +214,19 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
 
   useEffect(() => () => {
     if (requestRef.current?.ownerKey === ownerKey) {
-      requestRef.current.controller.abort()
+      const request = requestRef.current
       requestRef.current = null
+      request.controller.abort()
+      const interrupted = snapshotActiveRequest(request)
+      interrupted.reconciliation = 'unconfirmed'
+      const pending = pendingTurnRef.current
+      if (pending?.ownerKey === ownerKey && pending.id === request.turnId) {
+        pendingTurnRef.current = interrupted
+        setPendingTurnState((current) => current?.ownerKey === ownerKey && current.id === request.turnId
+          ? interrupted
+          : current)
+      }
+      setPhaseState((current) => current.ownerKey === ownerKey ? { ownerKey, value: 'error' } : current)
     }
     if (clearControllerRef.current?.ownerKey === ownerKey) {
       clearControllerRef.current.controller.abort()
@@ -271,6 +285,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
 
   const reconcileInterruptedTurn = useCallback(async (snapshot: PendingTurn) => {
     if (parsedId === null || ownerRef.current !== ownerKey || snapshot.ownerKey !== ownerKey) return
+    automaticReconciliationRef.current = `${ownerKey}:${ownerEpochRef.current}:${snapshot.id}`
     const previous = reconciliationControllerRef.current
     if (previous?.ownerKey === ownerKey) previous.controller.abort()
     const controller = new AbortController()
@@ -292,6 +307,18 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       if (reconciliationControllerRef.current === request) reconciliationControllerRef.current = null
     }
   }, [applyHistoryReconciliation, historyKey, ownerKey, parsedId, queryClient, updatePendingTurn, updatePhase])
+
+  useEffect(() => {
+    const turn = currentPendingTurn
+    if (
+      !enabled || authLoading || !turn || turn.status !== 'uncertain' ||
+      turn.reconciliation !== 'unconfirmed'
+    ) return
+    const reconciliationKey = `${ownerKey}:${ownerEpochRef.current}:${turn.id}`
+    if (automaticReconciliationRef.current === reconciliationKey) return
+    automaticReconciliationRef.current = reconciliationKey
+    void reconcileInterruptedTurn(turn)
+  }, [authLoading, currentPendingTurn, enabled, ownerKey, reconcileInterruptedTurn])
 
   const sendMessage = useCallback((text: string, explicitlyResending = false): Promise<boolean> => {
     const trimmed = text.trim()

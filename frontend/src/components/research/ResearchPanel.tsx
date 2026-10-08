@@ -69,7 +69,7 @@ function ResearchPanelView({ user }: { user: AuthUser | null }) {
   useEffect(() => {
     if (!isOpen) return
     function onKey(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && !event.defaultPrevented) {
         if (isFullscreen) setIsFullscreen(false)
         else setIsOpen(false)
       }

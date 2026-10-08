@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { History, Maximize2, Minimize2, Plus, Search, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -28,8 +28,12 @@ export default function ResearchHeader({
   onSelectSession,
 }: ResearchHeaderProps) {
   const [showSessionMenu, setShowSessionMenu] = useState(false)
+  const [focusedMenuIndex, setFocusedMenuIndex] = useState(0)
   const btnRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const menuItemRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const pendingOpenFocus = useRef<number | null>(null)
   const [menuPos, setMenuPos] = useState({ top: 0, right: 0 })
   const subtitle = phaseSubtitle(phase)
 
@@ -37,7 +41,10 @@ export default function ResearchHeader({
     if (!showSessionMenu) return
     function handleClick(event: globalThis.MouseEvent) {
       const target = event.target
-      if (target instanceof Node && menuRef.current && !menuRef.current.contains(target)) {
+      if (
+        target instanceof Node && menuRef.current && !menuRef.current.contains(target) &&
+        !triggerRef.current?.contains(target)
+      ) {
         setShowSessionMenu(false)
       }
     }
@@ -51,10 +58,70 @@ export default function ResearchHeader({
     setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
   }, [showSessionMenu])
 
+  useEffect(() => {
+    if (!showSessionMenu || !sessions.length) return
+    const selectedIndex = sessions.findIndex((session) => session.id === activeSessionId)
+    const index = pendingOpenFocus.current ?? (selectedIndex >= 0 ? selectedIndex : 0)
+    pendingOpenFocus.current = null
+    setFocusedMenuIndex(index)
+    menuItemRefs.current[index]?.focus()
+  }, [activeSessionId, sessions, showSessionMenu])
+
+  function focusMenuItem(index: number) {
+    if (!sessions.length) return
+    const nextIndex = (index + sessions.length) % sessions.length
+    setFocusedMenuIndex(nextIndex)
+    menuItemRefs.current[nextIndex]?.focus()
+  }
+
+  function openSessionMenu(index?: number) {
+    const selectedIndex = sessions.findIndex((session) => session.id === activeSessionId)
+    pendingOpenFocus.current = index ?? (selectedIndex >= 0 ? selectedIndex : 0)
+    setShowSessionMenu(true)
+  }
+
+  function handleTriggerKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      openSessionMenu(0)
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      openSessionMenu(sessions.length - 1)
+    }
+  }
+
+  function handleMenuKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (!sessions.length) return
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      setShowSessionMenu(false)
+      triggerRef.current?.focus()
+      return
+    }
+    if (event.key === 'Tab') {
+      window.setTimeout(() => setShowSessionMenu(false), 0)
+      return
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      focusMenuItem(focusedMenuIndex + 1)
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      focusMenuItem(focusedMenuIndex - 1)
+    } else if (event.key === 'Home') {
+      event.preventDefault()
+      focusMenuItem(0)
+    } else if (event.key === 'End') {
+      event.preventDefault()
+      focusMenuItem(sessions.length - 1)
+    }
+  }
+
   function handleSelect(event: MouseEvent<HTMLButtonElement>, sessionId: string) {
     event.preventDefault()
     onSelectSession(sessionId)
     setShowSessionMenu(false)
+    triggerRef.current?.focus()
   }
 
   return (
@@ -73,10 +140,12 @@ export default function ResearchHeader({
         {sessions.length > 0 && (
           <div ref={btnRef}>
             <Button
+              ref={triggerRef}
               type="button"
               variant="ghost"
               size="icon"
               onClick={() => setShowSessionMenu((open) => !open)}
+              onKeyDown={handleTriggerKeyDown}
               aria-label="历史会话"
               aria-haspopup="menu"
               aria-expanded={showSessionMenu}
@@ -93,17 +162,21 @@ export default function ResearchHeader({
                 ref={menuRef}
                 role="menu"
                 aria-label="历史会话"
+                onKeyDown={handleMenuKeyDown}
                 className="fixed w-64 bg-white rounded-xl shadow-xl border border-neutral-100 py-1.5 z-[60] max-h-56 overflow-y-auto animate-message-pop-in"
                 style={{ top: `${menuPos.top}px`, right: `${menuPos.right}px` }}
               >
                 <div className="px-3 py-1.5">
                   <p className="text-[10px] text-neutral-400 uppercase tracking-wider font-medium">历史会话</p>
                 </div>
-                {sessions.map((session) => (
+                {sessions.map((session, index) => (
                   <button
                     key={session.id}
+                    ref={(element) => { menuItemRefs.current[index] = element }}
                     type="button"
                     role="menuitem"
+                    tabIndex={focusedMenuIndex === index ? 0 : -1}
+                    onFocus={() => setFocusedMenuIndex(index)}
                     aria-current={activeSessionId === session.id ? 'true' : undefined}
                     onClick={(event) => handleSelect(event, session.id)}
                     className={`w-full text-left px-3 py-2 text-xs hover:bg-violet-50/50 transition-colors truncate

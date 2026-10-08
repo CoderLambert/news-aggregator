@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import type { KeyboardEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, Bookmark, Clock, EyeOff, Heart, LogIn, RotateCcw } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
@@ -17,6 +18,7 @@ export default function FavoritesPage() {
   const [filter, setFilter] = useState<FavoriteFilter>('all')
   const [tab, setTab] = useState<Tab>('favorites')
   const [showAuth, setShowAuth] = useState(false)
+  const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ favorites: null, blocked: null })
   const unblockMutation = useUnblockNews()
   const viewerId = user?.id ?? 0
   const favoritesQuery = useQuery({
@@ -41,7 +43,27 @@ export default function FavoritesPage() {
     }
   }
 
-  if (authLoading || (user && currentQuery.isPending)) return <LoadingSpinner />
+  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, currentTab: Tab) {
+    const tabs: Tab[] = ['favorites', 'blocked']
+    const currentIndex = tabs.indexOf(currentTab)
+    const nextIndex = event.key === 'ArrowRight'
+      ? (currentIndex + 1) % tabs.length
+      : event.key === 'ArrowLeft'
+        ? (currentIndex + tabs.length - 1) % tabs.length
+        : event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? tabs.length - 1
+            : -1
+
+    if (nextIndex < 0) return
+    event.preventDefault()
+    const nextTab = tabs[nextIndex]
+    setTab(nextTab)
+    tabRefs.current[nextTab]?.focus()
+  }
+
+  if (authLoading) return <LoadingSpinner />
 
   if (!user) {
     return (
@@ -72,10 +94,32 @@ export default function FavoritesPage() {
       </nav>
 
       <div className="mb-6 flex gap-2" role="tablist" aria-label="用户新闻管理">
-        <button type="button" role="tab" aria-selected={tab === 'favorites'} onClick={() => setTab('favorites')} className={`rounded-full px-4 py-2 text-sm font-medium transition-all duration-200 ${tab === 'favorites' ? 'bg-gradient-to-br from-orange-400 to-orange-500 text-white shadow-md shadow-orange-200' : 'border border-gray-200 bg-white text-gray-600 hover:border-orange-300 hover:text-orange-500'}`}>
+        <button
+          ref={(element) => { tabRefs.current.favorites = element }}
+          type="button"
+          role="tab"
+          id="favorites-tab"
+          aria-controls="favorites-panel"
+          aria-selected={tab === 'favorites'}
+          tabIndex={tab === 'favorites' ? 0 : -1}
+          onKeyDown={(event) => handleTabKeyDown(event, 'favorites')}
+          onClick={() => setTab('favorites')}
+          className={`rounded-full px-4 py-2 text-sm font-medium transition-all duration-200 ${tab === 'favorites' ? 'bg-gradient-to-br from-orange-400 to-orange-500 text-white shadow-md shadow-orange-200' : 'border border-gray-200 bg-white text-gray-600 hover:border-orange-300 hover:text-orange-500'}`}
+        >
           <Heart className="mr-1 inline-block size-3.5" fill={tab === 'favorites' ? 'currentColor' : 'none'} />收藏
         </button>
-        <button type="button" role="tab" aria-selected={tab === 'blocked'} onClick={() => setTab('blocked')} className={`rounded-full px-4 py-2 text-sm font-medium transition-all duration-200 ${tab === 'blocked' ? 'bg-gradient-to-br from-red-400 to-red-500 text-white shadow-md shadow-red-200' : 'border border-gray-200 bg-white text-gray-600 hover:border-red-300 hover:text-red-500'}`}>
+        <button
+          ref={(element) => { tabRefs.current.blocked = element }}
+          type="button"
+          role="tab"
+          id="blocked-tab"
+          aria-controls="blocked-panel"
+          aria-selected={tab === 'blocked'}
+          tabIndex={tab === 'blocked' ? 0 : -1}
+          onKeyDown={(event) => handleTabKeyDown(event, 'blocked')}
+          onClick={() => setTab('blocked')}
+          className={`rounded-full px-4 py-2 text-sm font-medium transition-all duration-200 ${tab === 'blocked' ? 'bg-gradient-to-br from-red-400 to-red-500 text-white shadow-md shadow-red-200' : 'border border-gray-200 bg-white text-gray-600 hover:border-red-300 hover:text-red-500'}`}
+        >
           <EyeOff className="mr-1 inline-block size-3.5" />屏蔽
         </button>
       </div>
@@ -87,8 +131,13 @@ export default function FavoritesPage() {
         </div>
       )}
 
-      {tab === 'favorites' && (
-        <section role="tabpanel" aria-label="收藏内容">
+      <section
+        id="favorites-panel"
+        role="tabpanel"
+        aria-labelledby="favorites-tab"
+        tabIndex={0}
+        hidden={tab !== 'favorites'}
+      >
           <div className="mb-6 flex gap-2" aria-label="收藏筛选">
             {([
               { key: 'all', label: '全部' },
@@ -104,7 +153,9 @@ export default function FavoritesPage() {
           </div>
 
           {favoritesQuery.isFetching && favoritesQuery.data && <p role="status" className="mb-3 text-center text-xs text-neutral-400">正在更新…</p>}
-          {!favorites.length && !currentQuery.isError ? (
+          {favoritesQuery.isPending ? (
+            <LoadingSpinner />
+          ) : !favorites.length && !currentQuery.isError ? (
             <div className="py-16 text-center text-gray-400">
               <Heart className="mx-auto mb-4 size-16 opacity-30" />
               <p className="text-lg">还没有收藏内容</p>
@@ -113,14 +164,20 @@ export default function FavoritesPage() {
           ) : (
             <div className="space-y-4">{favorites.map((favorite) => <FavoriteCard key={favorite.id} favorite={favorite} />)}</div>
           )}
-        </section>
-      )}
+      </section>
 
-      {tab === 'blocked' && (
-        <section role="tabpanel" aria-label="屏蔽内容">
+      <section
+        id="blocked-panel"
+        role="tabpanel"
+        aria-labelledby="blocked-tab"
+        tabIndex={0}
+        hidden={tab !== 'blocked'}
+      >
           {blockedQuery.isFetching && blockedQuery.data && <p role="status" className="mb-3 text-center text-xs text-neutral-400">正在更新…</p>}
           {unblockMutation.isError && <p role="alert" className="mb-4 text-center text-sm text-red-700">恢复失败，请重试。</p>}
-          {!blocked.length && !currentQuery.isError ? (
+          {blockedQuery.isPending ? (
+            <LoadingSpinner />
+          ) : !blocked.length && !currentQuery.isError ? (
             <div className="py-16 text-center text-gray-400">
               <EyeOff className="mx-auto mb-4 size-16 opacity-30" />
               <p className="text-lg">没有屏蔽内容</p>
@@ -138,8 +195,7 @@ export default function FavoritesPage() {
               ))}
             </div>
           )}
-        </section>
-      )}
+      </section>
     </div>
   )
 }

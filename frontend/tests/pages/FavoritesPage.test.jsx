@@ -24,6 +24,41 @@ beforeEach(() => {
 })
 
 describe('FavoritesPage unblock', () => {
+  it('implements roving focus and Home/End keyboard navigation for linked tabs and panels', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <AuthContext.Provider value={{ user: { id: 12, username: 'reader' }, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
+          <MemoryRouter><FavoritesPage /></MemoryRouter>
+        </AuthContext.Provider>
+      </QueryClientProvider>,
+    )
+
+    const favoritesTab = await screen.findByRole('tab', { name: '收藏' })
+    const blockedTab = screen.getByRole('tab', { name: '屏蔽' })
+    expect(favoritesTab).toHaveAttribute('aria-controls', 'favorites-panel')
+    expect(blockedTab).toHaveAttribute('aria-controls', 'blocked-panel')
+    expect(document.getElementById('favorites-panel')).toHaveAttribute('aria-labelledby', 'favorites-tab')
+    expect(document.getElementById('blocked-panel')).toHaveAttribute('aria-labelledby', 'blocked-tab')
+    expect(favoritesTab).toHaveAttribute('tabindex', '0')
+    expect(blockedTab).toHaveAttribute('tabindex', '-1')
+
+    favoritesTab.focus()
+    fireEvent.keyDown(favoritesTab, { key: 'ArrowRight' })
+    expect(blockedTab).toHaveFocus()
+    expect(blockedTab).toHaveAttribute('aria-selected', 'true')
+    expect(blockedTab).toHaveAttribute('tabindex', '0')
+
+    fireEvent.keyDown(blockedTab, { key: 'Home' })
+    expect(favoritesTab).toHaveFocus()
+    expect(favoritesTab).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.keyDown(favoritesTab, { key: 'End' })
+    expect(blockedTab).toHaveFocus()
+    fireEvent.keyDown(blockedTab, { key: 'ArrowLeft' })
+    expect(favoritesTab).toHaveFocus()
+  })
+
   it('removes the restored article from the server-data cache after confirmation', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
