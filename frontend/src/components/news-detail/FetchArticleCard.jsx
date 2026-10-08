@@ -16,7 +16,7 @@ export default function FetchArticleCard({ onFetch }) {
           <p className="text-sm font-medium text-neutral-900">获取完整原文</p>
           <p className="text-xs text-neutral-400 mt-0.5">自动提取正文内容，支持 AI 翻译</p>
         </div>
-        <Button onClick={onFetch} aria-label="加载原文" variant="indigo" size="pill-sm">
+        <Button onClick={() => onFetch()} aria-label="加载原文" variant="indigo" size="pill-sm">
           <Download className="size-3.5" />
           加载原文
         </Button>

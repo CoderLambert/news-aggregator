@@ -8,7 +8,7 @@ import NewsList from '@/pages/NewsList'
 import NewsDetail from '@/pages/NewsDetail'
 import { blockNews, checkFavoriteStatus, fetchCategories, fetchNews, fetchNewsDetail, fetchSources, unblockNews } from '@/services/api'
 
-const apiState = vi.hoisted(() => ({ blocked: false }))
+const apiState = vi.hoisted(() => ({ blocked: false, fetchFullArticle: vi.fn() }))
 
 vi.mock('@/services/api', () => ({
   fetchNews: vi.fn(),
@@ -22,7 +22,7 @@ vi.mock('@/services/api', () => ({
   unblockNews: vi.fn(async () => { apiState.blocked = false; return { removed: true } }),
 }))
 
-vi.mock('@/hooks/useFullArticle', () => ({ useFullArticle: () => ({ articleLoading: false, articleError: '', handleFetchFullArticle: vi.fn(), cancelFetch: vi.fn() }) }))
+vi.mock('@/hooks/useFullArticle', () => ({ useFullArticle: () => ({ articleLoading: false, articleError: '', handleFetchFullArticle: apiState.fetchFullArticle, resumeExistingFetch: vi.fn(), cancelFetch: vi.fn() }) }))
 vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => ({ translating: false, translateError: '', translationProgress: '', showOriginal: false, setShowOriginal: vi.fn(), handleTranslate: vi.fn() }) }))
 vi.mock('@/hooks/useArticleSearch', () => ({ useArticleSearch: () => ({ matchCount: 0, currentIndex: 0, goNext: vi.fn(), goPrev: vi.fn() }) }))
 vi.mock('@/hooks/useArticleToc', () => ({ useArticleToc: () => ({ headings: [], activeId: '' }) }))
@@ -54,9 +54,8 @@ function RouteProbe() {
   return <output data-testid="route">{`${location.pathname}${location.search}`}</output>
 }
 
-function renderRoutes(initialEntry) {
+function renderRoutes(initialEntry, user = { id: 12, username: 'reader' }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 }, mutations: { retry: false } } })
-  const user = { id: 12, username: 'reader' }
   return {
     client,
     ...render(
@@ -78,6 +77,7 @@ function renderRoutes(initialEntry) {
 beforeEach(() => {
   vi.clearAllMocks()
   apiState.blocked = false
+  apiState.fetchFullArticle.mockReset()
   localStorage.removeItem('news-aggregator-filters')
   usePreferencesStore.setState({ lang: 'zh' })
   fetchNews.mockResolvedValue({ count: 41, next: null, previous: null, results: [listStory] })
@@ -118,5 +118,45 @@ describe('news list return navigation and invalidation', () => {
     renderRoutes('/news/21')
     const backLink = await screen.findByRole('link', { name: /返回列表/ })
     expect(backLink).toHaveAttribute('href', '/')
+  })
+
+  it('offers original-body loading for Chinese stories and does not repeat the source as author', async () => {
+    fetchNewsDetail.mockResolvedValue({
+      ...detailStory,
+      id: 3033,
+      title: '迁移权责确权层｜跨域行为的权属与越界判定',
+      author: '量子位',
+      source_name: '量子位',
+      source_language: 'zh',
+      content: '第一段正文。\u3000\u3000第二段正文。',
+      full_content: '',
+      full_content_fetch_status: 'pending',
+    })
+    renderRoutes('/news/3033')
+
+    expect(await screen.findByRole('heading', { name: '迁移权责确权层｜跨域行为的权属与越界判定' })).toBeInTheDocument()
+    expect(screen.getAllByText('量子位')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: '加载原文' })).toBeInTheDocument()
+    const firstParagraph = screen.getByText('第一段正文。').closest('p')
+    const secondParagraph = screen.getByText('第二段正文。').closest('p')
+    expect(firstParagraph).not.toBe(secondParagraph)
+  })
+
+  it('opens the login dialog instead of posting a full fetch for a signed-out reader', async () => {
+    fetchNewsDetail.mockResolvedValue({
+      ...detailStory,
+      id: 3033,
+      title: '迁移权责确权层｜跨域行为的权属与越界判定',
+      source_language: 'zh',
+      content: '摘要',
+      full_content: '',
+      full_content_fetch_status: 'pending',
+    })
+    renderRoutes('/news/3033', null)
+
+    fireEvent.click(await screen.findByRole('button', { name: '加载原文' }))
+
+    expect(await screen.findByRole('dialog', { name: '登录小闻' })).toBeInTheDocument()
+    expect(apiState.fetchFullArticle).not.toHaveBeenCalled()
   })
 })

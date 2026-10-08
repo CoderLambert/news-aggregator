@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
-from bs4.element import NavigableString, Tag
+from bs4.element import Comment, NavigableString, Tag
 
 from .site_rules import SiteRule, get_site_rule, normalize_domain
 
@@ -182,6 +182,8 @@ def _escape_md(text: str) -> str:
 
 
 def _node_to_markdown(node: Tag | NavigableString, base_url: str, depth: int = 0) -> str:
+    if isinstance(node, Comment):
+        return ''
     if isinstance(node, NavigableString):
         return _escape_md(str(node))
     if not isinstance(node, Tag):
@@ -235,7 +237,10 @@ def _inline_text(node: Tag, base_url: str) -> str:
                 text = child.get_text(' ', strip=True)
                 href = child.get('href')
                 if text and href:
-                    parts.append(f'[{text}]({urljoin(base_url, str(href))})')
+                    prefix = ''
+                    if parts and parts[-1] and not parts[-1][-1].isspace() and parts[-1][-1] not in '([':
+                        prefix = ' '
+                    parts.append(f'{prefix}[{text}]({urljoin(base_url, str(href))})')
                 elif text:
                     parts.append(text)
             elif name in {'strong', 'b'}:
@@ -251,7 +256,9 @@ def _inline_text(node: Tag, base_url: str) -> str:
                 if text:
                     parts.append(f'`{text}`')
             elif name == 'br':
-                parts.append('\n')
+                # A Markdown soft break renders as a space in react-markdown.
+                # Use the Markdown hard-break escape to preserve HTML <br>.
+                parts.append('\\\n')
             elif name == 'img':
                 img_md = _img_to_markdown(child, base_url)
                 if img_md:
@@ -266,7 +273,10 @@ def _inline_text(node: Tag, base_url: str) -> str:
 
 def _children_markdown(node: Tag, base_url: str, depth: int = 0) -> str:
     chunks = [_node_to_markdown(child, base_url, depth + 1) for child in node.children]
-    text = '\n'.join(c.strip('\n') for c in chunks if c and c.strip())
+    # Each child here is a block-level HTML node (paragraph, heading, list,
+    # blockquote, code block, or container). Separate Markdown blocks with a
+    # blank line so the renderer retains their semantic boundaries.
+    text = '\n\n'.join(c.strip('\n') for c in chunks if c and c.strip())
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip() + ('\n' if text.strip() else '')
 

@@ -68,6 +68,25 @@ def test_full_content_stats_filters_by_source(cat):
 
 
 @pytest.mark.django_db
+def test_full_content_stats_distinguishes_metadata_summary_and_full_body(cat):
+    src = _source('Readiness')
+    _news(src, cat, content='', full_content='')
+    _news(src, cat, content='  Short summary  ', full_content='')
+    _news(src, cat, content='', full_content='  Complete body  ')
+
+    out = StringIO()
+    call_command('full_content_stats', '--json', stdout=out)
+    data = json.loads(out.getvalue())
+
+    assert data['content_readiness'] == {
+        'metadata_only': 1,
+        'summary_only': 1,
+        'body_ready': 1,
+    }
+    assert data['with_full_content'] == data['content_readiness']['body_ready']
+
+
+@pytest.mark.django_db
 def test_full_content_stats_text_output_includes_provider_distribution(cat):
     src = _source('StatsText')
     _news(src, cat, full_content='body', full_content_fetch_status='success', full_content_fetch_provider='scrapy_http')
