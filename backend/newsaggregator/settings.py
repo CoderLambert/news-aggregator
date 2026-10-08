@@ -42,6 +42,11 @@ SECRET_KEY = _env('DJANGO_SECRET_KEY') or (
     'dev-only-' + __import__('secrets').token_urlsafe(48)
 )
 
+# Subscription tokens need a stable key across process restarts. In local mode
+# this defaults only to the explicitly configured stable Django secret.
+CHATGPT_TOKEN_ENCRYPTION_KEY = _env('CHATGPT_TOKEN_ENCRYPTION_KEY') or _env('DJANGO_SECRET_KEY')
+CHATGPT_AGENT_NAME_HINT = _env('CHATGPT_AGENT_NAME_HINT', 'News Aggregator')
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = _env('DJANGO_DEBUG', '1') == '1'
 

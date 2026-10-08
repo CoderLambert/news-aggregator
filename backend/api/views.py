@@ -573,6 +573,13 @@ class NewsTranslateFullView(generics.GenericAPIView):
 
         force = request.data.get('force', False)
 
+        # An active subscription owns a private translation namespace. Never
+        # fall through to the shared provider cache after choosing that path.
+        from api.services.chatgpt_subscription import active_connection_for_user
+        if active_connection_for_user(request.user) is not None:
+            from api.subscription_views import subscription_translation_response
+            return subscription_translation_response(request, news, force=force)
+
         # If a background worker is still running, ALWAYS prefer attaching
         # to it over the snapshot path — this is the cross-device / re-entry
         # live-attach case. Falls through to the job logic below.

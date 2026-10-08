@@ -239,6 +239,93 @@ export function fetchMe(): Promise<unknown> {
   return api.get<unknown>('/auth/me/').then(({ data }) => data)
 }
 
+// ---- Local ChatGPT subscription ------------------------------------------
+
+export interface ChatGPTSubscriptionConnection {
+  id: string
+  account_name: string
+  account_email: string
+  selected_model: string
+  active: boolean
+  connected: boolean
+  needs_reauth: boolean
+  updated_at: string
+}
+
+export interface ChatGPTSubscriptionStatus {
+  connections: ChatGPTSubscriptionConnection[]
+  active_connection_id: string | null
+}
+
+export interface ChatGPTSubscriptionModel {
+  slug: string
+  display_name: string
+}
+
+export interface ChatGPTSubscriptionModels {
+  models: ChatGPTSubscriptionModel[]
+  selected_model: string
+}
+
+function parseChatGPTSubscriptionConnection(value: unknown): ChatGPTSubscriptionConnection {
+  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.active !== 'boolean' ||
+    typeof value.connected !== 'boolean' || typeof value.needs_reauth !== 'boolean') {
+    throw new TypeError('Invalid ChatGPT subscription connection response')
+  }
+  return {
+    id: value.id,
+    account_name: typeof value.account_name === 'string' ? value.account_name : '',
+    account_email: typeof value.account_email === 'string' ? value.account_email : '',
+    selected_model: typeof value.selected_model === 'string' ? value.selected_model : '',
+    active: value.active,
+    connected: value.connected,
+    needs_reauth: value.needs_reauth,
+    updated_at: typeof value.updated_at === 'string' ? value.updated_at : '',
+  }
+}
+
+export async function fetchChatGPTSubscriptionStatus(): Promise<ChatGPTSubscriptionStatus> {
+  const value: unknown = (await api.get<unknown>('/chatgpt-subscription/')).data
+  if (!isRecord(value) || !Array.isArray(value.connections)) throw new TypeError('Invalid ChatGPT subscription status')
+  const activeId = value.active_connection_id
+  if (activeId !== null && typeof activeId !== 'string') throw new TypeError('Invalid active subscription ID')
+  return {
+    connections: value.connections.map(parseChatGPTSubscriptionConnection),
+    active_connection_id: activeId as string | null,
+  }
+}
+
+export async function startChatGPTSubscriptionConnect(connectionId?: string): Promise<string> {
+  const value: unknown = (await api.post<unknown>('/chatgpt-subscription/connect/', connectionId ? { connection_id: connectionId } : {})).data
+  if (!isRecord(value) || typeof value.authorization_url !== 'string') {
+    throw new TypeError('Invalid ChatGPT authorization response')
+  }
+  return value.authorization_url
+}
+
+export async function fetchChatGPTSubscriptionModels(connectionId: string): Promise<ChatGPTSubscriptionModels> {
+  const value: unknown = (await api.get<unknown>(`/chatgpt-subscription/connections/${connectionId}/models/`)).data
+  if (!isRecord(value) || !Array.isArray(value.models)) throw new TypeError('Invalid ChatGPT model list')
+  const models = value.models.flatMap((model) =>
+    isRecord(model) && typeof model.slug === 'string' && typeof model.display_name === 'string'
+      ? [{ slug: model.slug, display_name: model.display_name }]
+      : [],
+  )
+  return { models, selected_model: typeof value.selected_model === 'string' ? value.selected_model : '' }
+}
+
+export function activateChatGPTSubscriptionConnection(connectionId: string): Promise<unknown> {
+  return api.post<unknown>(`/chatgpt-subscription/connections/${connectionId}/activate/`).then(({ data }) => data)
+}
+
+export function selectChatGPTSubscriptionModel(connectionId: string, slug: string): Promise<unknown> {
+  return api.post<unknown>(`/chatgpt-subscription/connections/${connectionId}/select-model/`, { slug }).then(({ data }) => data)
+}
+
+export function disconnectChatGPTSubscription(connectionId: string): Promise<{ disconnected: boolean; revocation_confirmed: boolean }> {
+  return api.delete<{ disconnected: boolean; revocation_confirmed: boolean }>(`/chatgpt-subscription/connections/${connectionId}/`).then(({ data }) => data)
+}
+
 // ---- Research -------------------------------------------------------------
 
 export function listResearchSessions(params: ApiQueryParams = {}, signal?: AbortSignal): Promise<unknown> {
