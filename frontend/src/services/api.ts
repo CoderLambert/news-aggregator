@@ -295,12 +295,59 @@ export async function fetchChatGPTSubscriptionStatus(): Promise<ChatGPTSubscript
   }
 }
 
-export async function startChatGPTSubscriptionConnect(connectionId?: string): Promise<string> {
-  const value: unknown = (await api.post<unknown>('/chatgpt-subscription/connect/', connectionId ? { connection_id: connectionId } : {})).data
-  if (!isRecord(value) || typeof value.authorization_url !== 'string') {
-    throw new TypeError('Invalid ChatGPT authorization response')
+export interface ChatGPTSubscriptionAttemptStart {
+  attempt_id: string
+  handoff_token: string
+  handoff_url: string
+}
+
+export interface ChatGPTSubscriptionAttemptStatus {
+  id: string
+  status: 'pending' | 'authorizing' | 'processing' | 'completed' | 'failed' | 'cancelled'
+  message: string
+  connection_id: string | null
+}
+
+function parseChatGPTSubscriptionAttemptStatus(value: unknown): ChatGPTSubscriptionAttemptStatus {
+  const statuses = ['pending', 'authorizing', 'processing', 'completed', 'failed', 'cancelled'] as const
+  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.status !== 'string' ||
+    typeof value.message !== 'string' || (value.connection_id !== null && typeof value.connection_id !== 'string') ||
+    !statuses.includes(value.status as (typeof statuses)[number])) {
+    throw new TypeError('Invalid ChatGPT authorization attempt status')
   }
-  return value.authorization_url
+  return {
+    id: value.id,
+    status: value.status as ChatGPTSubscriptionAttemptStatus['status'],
+    message: value.message,
+    connection_id: value.connection_id as string | null,
+  }
+}
+
+export async function startChatGPTSubscriptionConnect(connectionId?: string): Promise<ChatGPTSubscriptionAttemptStart> {
+  const value: unknown = (await api.post<unknown>('/chatgpt-subscription/connect/', connectionId ? { connection_id: connectionId } : {})).data
+  if (!isRecord(value) || typeof value.attempt_id !== 'string' || typeof value.handoff_token !== 'string' ||
+    typeof value.handoff_url !== 'string') {
+    throw new TypeError('Invalid ChatGPT authorization handoff response')
+  }
+  const handoff = new URL(value.handoff_url)
+  if (handoff.protocol !== 'http:' || handoff.hostname !== '127.0.0.1' || handoff.port !== '9527' ||
+    handoff.pathname !== '/api/chatgpt-subscription/handoff/' || handoff.search || handoff.hash) {
+    throw new TypeError('Invalid ChatGPT authorization handoff URL')
+  }
+  return { attempt_id: value.attempt_id, handoff_token: value.handoff_token, handoff_url: handoff.href }
+}
+
+export async function fetchChatGPTSubscriptionAttempt(
+  attemptId: string,
+  signal?: AbortSignal,
+): Promise<ChatGPTSubscriptionAttemptStatus> {
+  const value: unknown = (await api.get<unknown>(`/chatgpt-subscription/attempts/${attemptId}/`, { signal })).data
+  return parseChatGPTSubscriptionAttemptStatus(value)
+}
+
+export async function cancelChatGPTSubscriptionAttempt(attemptId: string): Promise<ChatGPTSubscriptionAttemptStatus> {
+  const value: unknown = (await api.delete<unknown>(`/chatgpt-subscription/attempts/${attemptId}/`)).data
+  return parseChatGPTSubscriptionAttemptStatus(value)
 }
 
 export async function fetchChatGPTSubscriptionModels(connectionId: string): Promise<ChatGPTSubscriptionModels> {

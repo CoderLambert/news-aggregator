@@ -6,7 +6,9 @@ from . import subscription_views
 urlpatterns = [
     path('chatgpt-subscription/', subscription_views.ChatGPTSubscriptionStatusView.as_view(), name='chatgpt-subscription-status'),
     path('chatgpt-subscription/connect/', subscription_views.ChatGPTSubscriptionConnectView.as_view(), name='chatgpt-subscription-connect'),
+    path('chatgpt-subscription/handoff/', subscription_views.ChatGPTSubscriptionHandoffView.as_view(), name='chatgpt-subscription-handoff'),
     path('chatgpt-subscription/callback/', subscription_views.ChatGPTSubscriptionCallbackView.as_view(), name='chatgpt-subscription-callback'),
+    path('chatgpt-subscription/attempts/<uuid:attempt_id>/', subscription_views.ChatGPTSubscriptionAttemptView.as_view(), name='chatgpt-subscription-attempt'),
     path('chatgpt-subscription/connections/<uuid:connection_id>/models/', subscription_views.ChatGPTSubscriptionModelsView.as_view(), name='chatgpt-subscription-models'),
     path('chatgpt-subscription/connections/<uuid:connection_id>/activate/', subscription_views.ChatGPTSubscriptionActivateView.as_view(), name='chatgpt-subscription-activate'),
     path('chatgpt-subscription/connections/<uuid:connection_id>/select-model/', subscription_views.ChatGPTSubscriptionSelectModelView.as_view(), name='chatgpt-subscription-select-model'),

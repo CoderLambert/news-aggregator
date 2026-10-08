@@ -20,6 +20,7 @@ from .serializers import (
 # Module-level import so tests can patch `api.views.get_openai_client`
 from api.services.llm_translator import get_openai_client, get_clients, stream_chat
 from api.services.article_fetcher import FetchError, fetch_article_markdown
+from api.services.chatgpt_subscription import invalidate_authorization_attempts_for_session
 
 # Hardcoded fallback shown when the LLM is unreachable / returns garbage
 SUGGESTED_QUESTIONS_FALLBACK = [
@@ -1251,6 +1252,7 @@ def auth_register(request):
         return Response({'error': '用户名已被占用'}, status=status.HTTP_400_BAD_REQUEST)
 
     user = User.objects.create_user(username=username, email=email, password=password)
+    invalidate_authorization_attempts_for_session(request.session.session_key or '')
     login(request, user)
     return Response({
         'id': user.pk,
@@ -1270,6 +1272,7 @@ def auth_login(request):
     if user is None:
         return Response({'error': '用户名或密码错误'}, status=status.HTTP_401_UNAUTHORIZED)
 
+    invalidate_authorization_attempts_for_session(request.session.session_key or '')
     login(request, user)
     return Response({
         'id': user.pk,
@@ -1281,6 +1284,7 @@ def auth_login(request):
 @permission_classes([IsAuthenticated])
 def auth_logout(request):
     """POST /api/auth/logout/ — end the current session."""
+    invalidate_authorization_attempts_for_session(request.session.session_key or '')
     logout(request)
     return Response({'ok': True})
 
