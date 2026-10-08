@@ -30,6 +30,7 @@ interface PendingTurn {
   status: 'streaming' | 'uncertain'
   webSearch: boolean
   historyBoundary: ChatMessage[] | null
+  historyBoundaryData: ChatHistory | undefined
   reconciliation: ReconciliationState
   serverQuestionSaved: boolean
 }
@@ -42,6 +43,7 @@ interface ActiveRequest {
   assistant: ChatMessage
   webSearch: boolean
   historyBoundary: ChatMessage[] | null
+  historyBoundaryData: ChatHistory | undefined
 }
 
 interface ClearChatState {
@@ -141,6 +143,7 @@ function snapshotActiveRequest(request: ActiveRequest): PendingTurn {
     status: 'uncertain',
     webSearch: request.webSearch,
     historyBoundary: request.historyBoundary,
+    historyBoundaryData: request.historyBoundaryData,
     reconciliation: 'checking',
     serverQuestionSaved: false,
   }
@@ -161,6 +164,8 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     ownerKey: '', value: { open: false, clearing: false, error: null },
   })
   const [pendingTurnState, setPendingTurnState] = useState<PendingTurn | null>(null)
+  const pendingTurnRef = useRef<PendingTurn | null>(null)
+  const lastReconciledHistoryRef = useRef<{ ownerKey: string; turnId: string; history: ChatHistory } | null>(null)
   const requestRef = useRef<ActiveRequest | null>(null)
   const clearControllerRef = useRef<{ ownerKey: string; controller: AbortController } | null>(null)
   const reconciliationControllerRef = useRef<{ ownerKey: string; turnId: string; controller: AbortController } | null>(null)
@@ -201,7 +206,8 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
   useLayoutEffect(() => {
     ownerRef.current = ownerKey
     inputRef.current = currentInput
-  }, [currentInput, ownerKey])
+    pendingTurnRef.current = pendingTurnState
+  }, [currentInput, ownerKey, pendingTurnState])
 
   const updatePhase = useCallback((nextPhase: ChatPhase) => {
     if (ownerRef.current === ownerKey) setPhaseState({ ownerKey, value: nextPhase })
@@ -213,12 +219,17 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     setInputState({ ownerKey, value })
   }, [ownerKey])
 
+  const setPendingTurn = useCallback((next: PendingTurn | null | ((current: PendingTurn | null) => PendingTurn | null)) => {
+    const updated = typeof next === 'function' ? next(pendingTurnRef.current) : next
+    pendingTurnRef.current = updated
+    setPendingTurnState(updated)
+  }, [])
+
   const updatePendingTurn = useCallback((turnId: string, update: (turn: PendingTurn) => PendingTurn) => {
     if (ownerRef.current !== ownerKey) return
-    setPendingTurnState((current) => current?.ownerKey === ownerKey && current.id === turnId
-      ? update(current)
-      : current)
-  }, [ownerKey])
+    const current = pendingTurnRef.current
+    if (current?.ownerKey === ownerKey && current.id === turnId) setPendingTurn(update(current))
+  }, [ownerKey, setPendingTurn])
 
   useEffect(() => () => {
     if (requestRef.current?.ownerKey === ownerKey) {
@@ -236,6 +247,37 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     if (successTimerRef.current) clearTimeout(successTimerRef.current)
   }, [ownerKey])
 
+  // Apply both explicit rechecks and later Query snapshots against the original turn boundary.
+  const applyHistoryReconciliation = useCallback((snapshot: PendingTurn, history: ChatHistory) => {
+    if (ownerRef.current !== ownerKey || snapshot.ownerKey !== ownerKey) return
+    const current = pendingTurnRef.current
+    if (current?.ownerKey !== ownerKey || current.id !== snapshot.id || current.status !== 'uncertain') return
+    const previous = lastReconciledHistoryRef.current
+    if (previous?.ownerKey === ownerKey && previous.turnId === snapshot.id && previous.history === history) return
+
+    lastReconciledHistoryRef.current = { ownerKey, turnId: snapshot.id, history }
+    const result = reconcileHistory(history, snapshot.historyBoundary, snapshot.user.content)
+    if (result === 'answered') {
+      setPendingTurn(null)
+      if (inputRef.current === snapshot.user.content) setInput('')
+      updatePhase('idle')
+    } else if (result === 'question-saved') {
+      setPendingTurn({ ...current, status: 'uncertain', reconciliation: 'partial', serverQuestionSaved: true })
+      if (inputRef.current === snapshot.user.content) setInput('')
+      updatePhase('error')
+    } else {
+      setPendingTurn({ ...current, status: 'uncertain', reconciliation: 'unconfirmed', serverQuestionSaved: false })
+      updatePhase('error')
+    }
+  }, [ownerKey, setInput, setPendingTurn, updatePhase])
+
+  useEffect(() => {
+    const turn = currentPendingTurn
+    if (!turn || turn.status !== 'uncertain' || turn.reconciliation === 'checking' || !historyQuery.data) return
+    if (turn.historyBoundaryData === historyQuery.data) return
+    applyHistoryReconciliation(turn, historyQuery.data)
+  }, [applyHistoryReconciliation, currentPendingTurn, historyQuery.data])
+
   const reconcileInterruptedTurn = useCallback(async (snapshot: PendingTurn) => {
     if (parsedId === null || ownerRef.current !== ownerKey || snapshot.ownerKey !== ownerKey) return
     const previous = reconciliationControllerRef.current
@@ -249,30 +291,8 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     try {
       const history = await fetchChatHistory(parsedId, controller.signal)
       if (!isCurrent()) return
-      const result = reconcileHistory(history, snapshot.historyBoundary, snapshot.user.content)
-      queryClient.setQueryData<ChatHistory>(historyKey, history)
-      if (result === 'answered') {
-        setPendingTurnState((current) => current?.ownerKey === ownerKey && current.id === snapshot.id ? null : current)
-        if (inputRef.current === snapshot.user.content) setInput('')
-        updatePhase('idle')
-      } else if (result === 'question-saved') {
-        updatePendingTurn(snapshot.id, (current) => ({
-          ...current,
-          status: 'uncertain',
-          reconciliation: 'partial',
-          serverQuestionSaved: true,
-        }))
-        if (inputRef.current === snapshot.user.content) setInput('')
-        updatePhase('error')
-      } else {
-        updatePendingTurn(snapshot.id, (current) => ({
-          ...current,
-          status: 'uncertain',
-          reconciliation: 'unconfirmed',
-          serverQuestionSaved: false,
-        }))
-        updatePhase('error')
-      }
+      const storedHistory = queryClient.setQueryData<ChatHistory>(historyKey, history) ?? history
+      applyHistoryReconciliation(snapshot, storedHistory)
     } catch {
       if (!isCurrent() || controller.signal.aborted) return
       updatePendingTurn(snapshot.id, (current) => ({ ...current, status: 'uncertain', reconciliation: 'failed' }))
@@ -280,7 +300,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     } finally {
       if (reconciliationControllerRef.current === request) reconciliationControllerRef.current = null
     }
-  }, [historyKey, ownerKey, parsedId, queryClient, setInput, updatePendingTurn, updatePhase])
+  }, [applyHistoryReconciliation, historyKey, ownerKey, parsedId, queryClient, updatePendingTurn, updatePhase])
 
   const sendMessage = useCallback((text: string, explicitlyResending = false): Promise<boolean> => {
     const trimmed = text.trim()
@@ -307,6 +327,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       : { id: `${turnId}-assistant`, role: 'assistant', content: '' }
     const webSearch = currentWebSearch
     if (webSearch) assistantMessage.web_search = true
+    const historyAtSend = queryClient.getQueryData<ChatHistory>(historyKey)
     const turn: PendingTurn = {
       ownerKey,
       id: turnId,
@@ -314,11 +335,13 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       assistant: assistantMessage,
       status: 'streaming',
       webSearch,
-      historyBoundary: copyHistoryBoundary(queryClient.getQueryData<ChatHistory>(historyKey)?.messages),
+      historyBoundary: copyHistoryBoundary(historyAtSend?.messages),
+      historyBoundaryData: historyAtSend,
       reconciliation: 'idle',
       serverQuestionSaved: false,
     }
-    setPendingTurnState(turn)
+    lastReconciledHistoryRef.current = null
+    setPendingTurn(turn)
 
     const request: ActiveRequest = {
       ownerKey,
@@ -328,6 +351,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       assistant: assistantMessage,
       webSearch,
       historyBoundary: turn.historyBoundary,
+      historyBoundaryData: turn.historyBoundaryData,
     }
     requestRef.current = request
     const isCurrent = () => requestRef.current === request && ownerRef.current === ownerKey
@@ -380,7 +404,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
         queryClient.setQueryData<ChatHistory>(historyKey, (current) => ({
           messages: [...(current?.messages ?? []), userMessage, completedAssistant],
         }))
-        setPendingTurnState((current) => current?.ownerKey === ownerKey && current.id === turnId ? null : current)
+        setPendingTurn((current) => current?.ownerKey === ownerKey && current.id === turnId ? null : current)
         if (inputRef.current === trimmed) setInput('')
         updatePhase('success')
         successTimerRef.current = setTimeout(() => {
@@ -395,7 +419,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
           content: request.assistant.content || `${ASSISTANT_ERROR}${message ? ` (${message})` : ''}`,
         }
         const uncertainTurn = snapshotActiveRequest(request)
-        setPendingTurnState(uncertainTurn)
+        setPendingTurn(uncertainTurn)
         if (!inputRef.current) setInput(trimmed)
         updatePhase('error')
         await reconcileInterruptedTurn(uncertainTurn)
@@ -404,7 +428,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
         if (isCurrent()) requestRef.current = null
       }
     })()
-  }, [authLoading, clearState, currentWebSearch, enabled, historyKey, isLoading, ownerKey, parsedId, pendingTurnState, queryClient, reconcileInterruptedTurn, setInput, updatePendingTurn, updatePhase])
+  }, [authLoading, clearState, currentWebSearch, enabled, historyKey, isLoading, ownerKey, parsedId, pendingTurnState, queryClient, reconcileInterruptedTurn, setInput, setPendingTurn, updatePendingTurn, updatePhase])
 
   const doSend = useCallback((text: string): Promise<boolean> => sendMessage(text), [sendMessage])
   const handleSend = useCallback(() => doSend(inputRef.current), [doSend])
@@ -421,11 +445,11 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
         ? `${uncertainTurn.assistant.content}\n\n> ${STOPPED_MESSAGE}`
         : STOPPED_MESSAGE,
     }
-    setPendingTurnState(uncertainTurn)
+    setPendingTurn(uncertainTurn)
     if (!inputRef.current) setInput(request.user.content)
     updatePhase('error')
     void reconcileInterruptedTurn(uncertainTurn)
-  }, [ownerKey, reconcileInterruptedTurn, setInput, updatePhase])
+  }, [ownerKey, reconcileInterruptedTurn, setInput, setPendingTurn, updatePhase])
 
   const requestClearChat = useCallback(() => {
     if (
@@ -455,7 +479,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       requestRef.current = null
       activeRequest.controller.abort()
       interruptedTurn = snapshotActiveRequest(activeRequest)
-      setPendingTurnState(interruptedTurn)
+      setPendingTurn(interruptedTurn)
       updatePhase('error')
     } else if (currentPendingTurn?.status === 'uncertain') {
       interruptedTurn = currentPendingTurn
@@ -474,7 +498,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       await clearChatHistory(parsedId, clearRequest.controller.signal)
       if (ownerRef.current !== ownerKey || clearControllerRef.current !== clearRequest) return false
       queryClient.setQueryData<ChatHistory>(historyKey, { messages: [] })
-      setPendingTurnState((current) => current?.ownerKey === ownerKey ? null : current)
+      setPendingTurn((current) => current?.ownerKey === ownerKey ? null : current)
       updatePhase('idle')
       cleared = true
     } catch {
@@ -492,7 +516,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     }
     if (interruptedTurn && ownerRef.current === ownerKey) void reconcileInterruptedTurn(interruptedTurn)
     return false
-  }, [authLoading, currentPendingTurn, historyKey, ownerKey, parsedId, queryClient, reconcileInterruptedTurn, setClearState, setPendingTurnState, updatePhase])
+  }, [authLoading, currentPendingTurn, historyKey, ownerKey, parsedId, queryClient, reconcileInterruptedTurn, setClearState, setPendingTurn, updatePhase])
 
   const checkPendingTurn = useCallback(async () => {
     if (

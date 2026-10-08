@@ -172,3 +172,9 @@ SearchBar 现在按 React Router 的 POP 导航 key 重置当前草稿并清除�
 - 清空请求失败时已中止的流也会进入同一只读核对流程。测试覆盖流式/空闲清空失败、延迟 DELETE 时发送与重复清空互斥、身份切换后的迟到 DELETE、成功/未成功保存、GET 失败、已有相同问题、单独保存用户问题和明确重发行为。
 
 验收：聊天定向回归 3 个文件、28 项通过；完整 `npm run test:run -- --configLoader native` 为 41 个文件、255 项通过；`npm run lint`、`npm run typecheck`、`git diff --check` 均通过；`npm run build -- --configLoader native --outDir /tmp/newsagg-p2-chat-build-verified --emptyOutDir` 通过。验证只使用 mock API；本轮未运行连接 API 的浏览器 E2E，也未连接 Django、触碰项目数据库或调用 AI。此修补不声称服务端请求具备幂等能力；未决时自动重发仍被禁止。
+
+## 2026-10-08 复审补充：普通聊天历史更新协调
+
+起点：`262cce6214db56a9cfecbba9cab870aa7470d7df`。将中断回合的按序历史边界判定抽为同一协调函数，既处理中断后的只读 GET，也处理后续 TanStack Query 历史数据变化；只协调当前 `ownerKey` 的同一个未决回合。后续响应确认完整问答时移除临时 overlay；只有用户问题时维持原来的防重发状态，草稿被改写成另一条时予以保留。
+
+验收：定向 `useChat` / phase 测试 2 个文件、22 项通过；完整套件 41 个文件、257 项通过；`npm run lint`、`npm run typecheck`、`git diff --check` 通过；`npm run build -- --configLoader native --outDir /tmp/newsagg-history-refetch-verified --emptyOutDir` 通过。新增两项回归覆盖首次核对未发现记录、首次仅发现用户问题后由普通历史 refetch 读到完整问答；两者均只调用一次聊天 POST、去除重复 overlay 并保留新的输入草稿。使用 mock API；未触碰后端、数据库或 AI 服务。
