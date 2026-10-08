@@ -1,3 +1,6 @@
+import shutil
+import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -54,6 +57,28 @@ def test_crawl_summary_reports_each_spider_with_stable_counts():
         '爬虫汇总 source=bbc finish=finished items=12 '
         'responses=15 errors=1 http=200:13,403:2'
     )
+
+
+def test_crawl_once_creates_its_ignored_lock_directory(tmp_path):
+    if shutil.which('flock') is None:
+        pytest.skip('flock is not installed')
+    project = tmp_path / 'project'
+    scripts = project / 'scripts'
+    backend = project / 'backend'
+    python = backend / 'venv' / 'bin' / 'python'
+    scripts.mkdir(parents=True)
+    python.parent.mkdir(parents=True)
+    source = Path(__file__).resolve().parents[2] / 'scripts' / 'crawl_once.sh'
+    script = scripts / 'crawl_once.sh'
+    script.write_text(source.read_text(encoding='utf-8'), encoding='utf-8')
+    script.chmod(0o755)
+    python.write_text('#!/usr/bin/env bash\nexit 0\n', encoding='utf-8')
+    python.chmod(0o755)
+
+    result = subprocess.run([str(script), 'bbc'], capture_output=True, text=True, timeout=10)
+
+    assert result.returncode == 0, result.stderr
+    assert (project / 'logs' / 'crawler.lock').is_file()
 
 
 def test_crawl_only_short_circuits_ai_helpers(monkeypatch):
