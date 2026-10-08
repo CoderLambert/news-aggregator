@@ -2,7 +2,7 @@ import { isValidElement, useEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
-import type { ElementContent } from 'hast'
+import type { Element, ElementContent } from 'hast'
 import remarkGfm from 'remark-gfm'
 import { Check, Copy, ExternalLink, Newspaper } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -349,8 +349,15 @@ function extractSourceLinks(node: ElementContent): SourceLink[] {
   return node.children.flatMap(extractSourceLinks)
 }
 
-function containsSourceLink(node: ElementContent): boolean {
-  return node.type === 'element' && (node.tagName === 'a' || node.children.some(containsSourceLink))
+function getOrderedListItems(node: ElementContent | undefined): Element[] {
+  if (node?.type !== 'element' || node.tagName !== 'ol') return []
+  const items: Element[] = []
+  for (const child of node.children) {
+    if (child.type === 'text' && child.value.trim() === '') continue
+    if (child.type !== 'element' || child.tagName !== 'li') return []
+    items.push(child)
+  }
+  return items
 }
 
 /**
@@ -451,12 +458,13 @@ const MD_COMPONENTS: Components = {
     </ul>
   ),
   ol: ({ children, node }) => {
-    const isSourceList = node?.children.some(containsSourceLink) ?? false
+    const listItems = getOrderedListItems(node)
+    const useSourceItems = listItems.length > 0 && listItems.every((item) => extractSourceLinks(item).length > 0)
 
-    if (isSourceList) {
+    if (useSourceItems) {
       return (
         <div className="my-4 space-y-2">
-          {node?.children.map((child, i) => {
+          {listItems.map((child, i) => {
             const text = extractSourceText(child).trim()
             const links = extractSourceLinks(child)
             if (!text && links.length === 0) return null

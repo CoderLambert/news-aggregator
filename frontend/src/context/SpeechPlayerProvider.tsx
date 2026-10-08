@@ -143,7 +143,11 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     }
     try {
       session.setActionHandler('play', () => {
-        if (isCurrentAudio(audio, requestId)) void audio.play().catch(() => updateStatus('paused'))
+        if (isCurrentAudio(audio, requestId)) {
+          void audio.play().catch(() => {
+            if (isCurrentAudio(audio, requestId)) updateStatus('paused')
+          })
+        }
       })
       session.setActionHandler('pause', () => {
         if (isCurrentAudio(audio, requestId)) audio.pause()

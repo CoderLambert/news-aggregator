@@ -25,9 +25,9 @@ export default function Header() {
   useEffect(() => {
     if (!menuOpen) return
     const handlePointerDown = (event: PointerEvent) => {
-      if (event.target instanceof Node && menuRef.current && !menuRef.current.contains(event.target)) {
-        setMenuOpen(false)
-      }
+      if (!(event.target instanceof Node)) return
+      if (menuRef.current?.contains(event.target) || menuButtonRef.current?.contains(event.target)) return
+      setMenuOpen(false)
     }
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
