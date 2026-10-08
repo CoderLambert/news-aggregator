@@ -280,6 +280,53 @@ def test_reconnect_callback_does_not_override_a_newer_account_selection(user, cr
     assert subscription.decrypt_secret(account_a.encrypted_access_token, 'subscription-access-token') == 'updated-a-access'
 
 
+def test_late_callback_does_not_restore_selection_after_none_to_account_to_none(user, crypto):
+    account_b = make_connection(user, active=False, subject='account-b')
+    discovery = {
+        'authorization_endpoint': 'https://auth.example/authorize',
+        'token_endpoint': 'https://auth.example/token',
+        'jwks_uri': 'https://auth.example/keys',
+        'issuer': 'https://auth.example',
+    }
+    token_response = {
+        'access_token': 'late-access', 'refresh_token': 'late-refresh',
+        'id_token': 'mock-id-token', 'expires_in': 3600,
+        'scope': f'openid offline_access resource.invoke {subscription.REQUIRED_DIRECT_SCOPE}',
+    }
+    real_decrypt = subscription.decrypt_secret
+    with (
+        patch.object(subscription, '_discovery', return_value=discovery),
+        patch.object(
+            subscription, 'decrypt_secret',
+            side_effect=lambda value, purpose: 'mock-pkce-verifier' if purpose == 'oauth-pkce-verifier' else real_decrypt(value, purpose),
+        ),
+    ):
+        start = _create_attempt(user, session_key='none-selection-session')
+        cookie, authorization_url = _handoff(start, session_key='none-selection-session')
+        state = parse_qs(urlparse(authorization_url).query)['state'][0]
+
+        def switch_and_disconnect_then_exchange(*_args, **_kwargs):
+            subscription.activate_connection(user, account_b.pk)
+            subscription.disconnect_connection(user, account_b.pk)
+            return token_response
+
+        with (
+            patch.object(subscription, '_exchange_code', side_effect=switch_and_disconnect_then_exchange),
+            patch.object(subscription, '_verify_id_token', return_value={
+                'iss': 'https://auth.example', 'sub': 'late-account', 'name': 'Late Account',
+            }),
+        ):
+            completed = subscription.complete_authorization({
+                'state': state, 'code': 'mock-code', 'client_id': 'late-client-id',
+            }, cookie)
+
+    account_b.refresh_from_db()
+    completed.refresh_from_db()
+    assert account_b.is_active is False
+    assert completed.is_active is False
+    assert not ChatGPTSubscriptionConnection.objects.filter(user=user, is_active=True).exists()
+
+
 def test_dynamic_oauth_callback_persists_issued_client_id_and_encrypted_tokens(user, crypto):
     discovery = {
         'authorization_endpoint': 'https://auth.example/authorize',
