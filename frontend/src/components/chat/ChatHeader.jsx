@@ -18,6 +18,7 @@ export default function ChatHeader({
   isFullscreen,
   onToggleFullscreen,
   onClear,
+  clearDisabled = false,
   onClose,
 }) {
   return (
@@ -57,6 +58,7 @@ export default function ChatHeader({
           variant="ghost"
           size="icon"
           onClick={onClear}
+          disabled={clearDisabled}
           aria-label="清空对话"
           title="清空对话"
           className="text-neutral-400 hover:text-rose-500 h-8 w-8 rounded-full"
