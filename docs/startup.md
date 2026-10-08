@@ -182,6 +182,25 @@ backend/venv/bin/python start_waitress.py
 - 在反向代理或防火墙层限制访问来源
 - 通过 systemd、容器编排或进程管理器托管 Waitress
 
+### 4.3 Docker 单机模式
+
+Compose 只启动 Waitress Web 服务，前端会先构建并由 Django 同源提供；不会启动定时器或爬虫。服务仅绑定到本机 127.0.0.1:9527。它会复用 backend/（包括 SQLite 数据库及 WAL 文件）、chroma_data/ 和一个独立的 Hugging Face 模型缓存卷。不要让容器和另一套本地后端同时写同一份 SQLite 数据。
+
+~~~bash
+docker compose up -d --build
+docker compose ps
+docker compose logs -f app
+docker compose down
+~~~
+
+访问 <http://127.0.0.1:9527>。首次使用空数据库时，启动前需手动初始化迁移：
+
+~~~bash
+docker compose run --rm app python backend/manage.py migrate
+~~~
+
+.env 会作为容器运行时环境变量注入，但不会进入构建镜像；SQLite 主文件、WAL、SHM 和凭据文件也由 `.dockerignore` 排除。复制 .env.example 后按需填写。首次语义搜索可能需要下载嵌入模型。若 Docker CLI 提示无法访问 daemon，请先由本机 Docker 管理员恢复该用户已有的访问权限，不要通过项目配置扩大系统权限。
+
 ## 5. 服务控制和日志
 
 推荐使用统一命令，一次管理前端、后端和定时爬虫：
@@ -241,6 +260,23 @@ cd frontend
 backend/venv/bin/python backend/manage.py crawl all
 backend/venv/bin/python backend/manage.py crawl hackernews
 ```
+
+需要由 systemd 用户服务托管时，可将仓库中的
+`scripts/news-aggregator-crawl.service` 和
+`scripts/news-aggregator-crawl.timer` 安装到 `~/.config/systemd/user/`。
+这套 timer 在上一轮结束一小时后再启动下一轮，并由 `flock` 阻止重叠；
+不要同时启用下方的项目级 `news-cron` 调度器。每轮强制设置
+`NEWS_CRAWL_ONLY=1`，只保存来源内容，不调用翻译、向量索引或其他 AI 功能。
+完成后日志会为每个 spider 输出一行 `爬虫汇总`，包括条目数、响应数、
+错误数和 HTTP 状态分布：
+
+```bash
+systemctl --user status news-aggregator-crawl.timer
+journalctl --user -u news-aggregator-crawl.service -g '爬虫汇总'
+```
+
+unit 文件中的项目绝对路径应与实际 checkout 一致。`TimeoutStartSec=2h`
+只是单轮最长运行时间，不是调度频率。
 
 全文抓取：
 

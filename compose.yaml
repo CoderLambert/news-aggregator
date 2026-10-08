@@ -1,0 +1,31 @@
+services:
+  app:
+    build:
+      context: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Avoid downloading/loading the embedding model during server startup.
+      RUN_MAIN: "true"
+    ports:
+      - "127.0.0.1:9527:9527"
+    volumes:
+      # Keep SQLite, its WAL sidecars, and the application source/data directory on the host.
+      - ./backend:/app/backend
+      - ./chroma_data:/app/chroma_data
+      - huggingface-cache:/root/.cache/huggingface
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9527/api/news/', timeout=5)"
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  huggingface-cache:
