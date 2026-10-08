@@ -10,9 +10,9 @@ cd /path/to/news-aggregator
 
 | 服务 | 技术 | 默认地址 | 用途 |
 | --- | --- | --- | --- |
-| 后端 | Django + DRF | `http://localhost:9527` | API、管理后台、静态生产页面 |
-| 前端 | React + Vite | `http://localhost:5173` | 开发热更新和 `/api` 代理 |
-| 生产前端 | Vite build + Waitress | `http://localhost:9527` | 单进程提供静态页面和 API |
+| 后端 | Django + DRF | `http://127.0.0.1:9527` | API、管理后台、静态生产页面 |
+| 前端 | React + Vite | `http://127.0.0.1:5173` | 开发热更新和 `/api` 代理 |
+| 生产前端 | Vite build + Waitress | `http://127.0.0.1:9527` | 单进程提供静态页面和 API |
 | 数据库 | SQLite | `backend/db.sqlite3` | 新闻、用户、会话和任务状态 |
 | 向量库 | ChromaDB | `chroma_data/` | 本地语义搜索向量 |
 
@@ -148,9 +148,11 @@ cd ..
 
 访问：
 
-- 前端：<http://localhost:5173>
-- 后端 API：<http://localhost:9527/api/news/>
-- Django Admin：<http://localhost:9527/admin/>
+- 前端：<http://127.0.0.1:5173>
+- 后端 API：<http://127.0.0.1:9527/api/news/>
+- Django Admin：<http://127.0.0.1:9527/admin/>
+
+ChatGPT 订阅授权依赖浏览器在回调端口携带同一主机的本地会话 Cookie。开发模式请使用上述 `127.0.0.1` 地址，不要把入口改写成 `localhost`。
 
 脚本会自动根据自身位置定位项目目录，优先使用 `backend/venv/bin/python` 和本地 Vite，不依赖固定的绝对路径。
 
@@ -174,7 +176,7 @@ cd ..
 backend/venv/bin/python start_waitress.py
 ```
 
-访问 <http://localhost:9527>。生产环境建议：
+访问 <http://127.0.0.1:9527>。生产环境建议：
 
 - 设置 `DJANGO_DEBUG=0`
 - 使用稳定且保密的 `DJANGO_SECRET_KEY`
