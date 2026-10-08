@@ -4,11 +4,11 @@ import {
   fetchProviderComparisons as fetchProviderComparisonsRequest,
   retestProviderComparison as retestProviderComparisonRequest,
 } from '@/services/api'
+import type { ProviderComparisonInput } from '@/services/api'
+export type { ProviderComparisonInput } from '@/services/api'
 import { isRecord } from '@/types/news'
 import type { Language } from '@/types/news'
 import type { ResearchViewerId } from '@/services/researchQueries'
-
-export type ProviderComparisonInput = { news_id: string } | { url: string }
 
 export interface ProviderComparisonResponse {
   count: number

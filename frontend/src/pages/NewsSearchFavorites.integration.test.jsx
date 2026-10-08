@@ -17,7 +17,11 @@ vi.mock('../hooks/useFullArticle', () => ({ useFullArticle: () => ({ articleLoad
 vi.mock('../hooks/useTranslation', () => ({ useTranslation: () => ({ translating: false, translateError: '', translationProgress: '', showOriginal: false, setShowOriginal: vi.fn(), handleTranslate: vi.fn() }) }))
 vi.mock('../hooks/useArticleSearch', () => ({ useArticleSearch: () => ({ matchCount: 0, currentIndex: 0, goNext: vi.fn(), goPrev: vi.fn() }) }))
 vi.mock('../hooks/useArticleToc', () => ({ useArticleToc: () => ({ headings: [], activeId: '' }) }))
-vi.mock('../context/SpeechPlayerContext', () => ({ useSpeechPlayer: () => ({ supported: false, speak: vi.fn() }) }))
+vi.mock('../context/SpeechPlayerContext', () => ({
+  useSpeechPlayer: () => ({ supported: false, speak: vi.fn() }),
+  useSpeechPlayerActions: () => ({ speak: vi.fn() }),
+  useSpeechPlayerCapabilities: () => ({ supported: false }),
+}))
 vi.mock('../components/NewsChatAssistant', () => ({ default: () => null }))
 
 const story = {

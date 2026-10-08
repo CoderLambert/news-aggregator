@@ -3,7 +3,7 @@ import type { KeyboardEvent } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
 import { ArrowLeft, Headphones, Search } from 'lucide-react'
 import { useLanguage } from '@/context/useLanguage'
-import { useSpeechPlayer } from '@/context/SpeechPlayerContext'
+import { useSpeechPlayerActions, useSpeechPlayerCapabilities } from '@/context/SpeechPlayerContext'
 import LoadingSpinner from '@/components/LoadingSpinner'
 import AuthModal from '@/components/AuthModal'
 import NewsChatAssistant from '@/components/NewsChatAssistant'
@@ -22,11 +22,6 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { useArticleSearch } from '@/hooks/useArticleSearch'
 import { useArticleToc } from '@/hooks/useArticleToc'
 import type { NewsDetail as NewsDetailRecord } from '@/types/news'
-
-interface SpeechPlayerApi {
-  supported: boolean
-  speak: (newsId: number, title: string, displayMode: string) => void
-}
 
 function safeReturnPath(value: unknown): string {
   if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//')) return '/'
@@ -55,7 +50,8 @@ export default function NewsDetail() {
     stopTranslationWait,
   } = useTranslation(id ?? '', news, setNews, loading)
 
-  const speechPlayer = useSpeechPlayer() as SpeechPlayerApi
+  const speechPlayer = useSpeechPlayerActions()
+  const { supported: speechSupported } = useSpeechPlayerCapabilities()
   const handleSpeak = useCallback(() => {
     if (!news) return
     const isEnglishSource = news.source_language === 'en'
@@ -141,7 +137,7 @@ export default function NewsDetail() {
           </Link>
           {!searchOpen && (
             <div className="flex items-center gap-1">
-              {speechPlayer.supported && (
+              {speechSupported && (
                 <button type="button" onClick={handleSpeak} aria-label="语音播报" className="rounded-xl p-2 transition-colors hover:bg-neutral-100 active:bg-neutral-200">
                   <Headphones className="size-4.5 text-neutral-400" />
                 </button>

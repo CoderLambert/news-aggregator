@@ -17,6 +17,8 @@ vi.mock('./context/SpeechPlayerProvider', () => ({
 }))
 vi.mock('./context/SpeechPlayerContext', () => ({
   useSpeechPlayer: () => ({ status: 'idle' }),
+  useSpeechPlayerState: () => ({ status: 'idle', progress: 0, currentTime: 0, duration: 0, rate: 1, voice: 'yunyang', scope: 'full', title: '', newsId: null, displayMode: 'zh' }),
+  useSpeechPlayerActions: () => ({ speak: vi.fn(), pause: vi.fn(), resume: vi.fn(), stop: vi.fn(), seek: vi.fn(), setRate: vi.fn(), setVoice: vi.fn(), setScope: vi.fn() }),
 }))
 
 vi.mock('react-router-dom', async () => {

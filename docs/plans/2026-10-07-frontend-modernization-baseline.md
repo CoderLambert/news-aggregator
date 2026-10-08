@@ -184,3 +184,20 @@ SearchBar 现在按 React Router 的 POP 导航 key 重置当前草稿并清除�
 起点：`80e69a088c561b08120b11d47e8005d9c7aabea6`。历史对象相同只在当前未决回合已经结算为 `unconfirmed` 或 `partial` 时去重；显式重查处于 `checking` 时，即便 Query 结构共享返回同一对象，也重新结算。viewer 切换取消正在进行的核对后，将旧 viewer 的未决回合恢复为可重查状态；旧响应仍不能影响新 viewer。
 
 验收：定向聊天测试 2 个文件、25 项通过；完整套件 41 个文件、260 项通过；lint、typecheck、diff check 和 production build 均通过。覆盖连续两次相同空历史、连续两次相同仅问题历史、历史 GET 失败、viewer 切换取消，以及此前普通 history refetch 两条回归。构建输出位于 `/tmp/newsagg-refcheck-final`；测试只使用 mock API。
+
+## 2026-10-08 最终切片：API/SSE、应用壳、共享内容与语音播放器
+
+起点：`3d677bd8f6cfd786b87f075757bf3a32dd23c67b`，分支 `codex/frontend-list-query-slice`。本切片只梳理前端现存基础层；未改 Django、数据库、业务数据或鉴权语义，也没有新增/升级依赖。
+
+- `api.js`、`sse.js`、`tts.js` 与应用壳/共享内容组件迁为 TypeScript。API 适配器以 `unknown` 表示未经验证的 JSON 边界，保留既有 endpoint、参数、请求体、session cookie、CSRF、语言参数和长请求 timeout；Provider/Research 继续用 TanStack Query 的 `AbortSignal`。SSE 保留两种现存流格式；消费者提前结束时取消 reader，并增加取消回归。
+- 将语音播放器控件从 App 壳提为 `GlobalSpeechPlayer.tsx`，拆分 state/actions/capabilities context；播放进度不再迫使详情页订阅者在每次 timeupdate 时重渲染。单个全局 Audio 实例支持切换文章、暂停/续播、键盘/触屏可操作的原生 range、倍速/音色/全文摘要选择；请求代次和当前 Audio 身份阻止旧事件覆盖新文章。位置及偏好仍使用原本的本地存储键。
+- Header、登录弹窗、Error Boundary、Markdown 和 Mermaid 迁为 TSX，并继续沿用现有 shadcn/ui、Tailwind 主题与 lazy routes。增加 skip-to-main、导航菜单 Escape 与焦点返还，以及登录弹窗焦点循环、Escape 关闭与焦点返还。GSAP targets 改为引用真实节点。
+- 删除没有生产调用点的旧 `SpeechPlayer.jsx` 和 `useSpeech.js`；播放器及其过去的行为由新 provider 和组件测试覆盖。`/__mascot__` 是已有独立设计预览路由，保留但明确不属于新闻阅读流程。
+
+验收：`npm run typecheck`、`npm run lint`、`git diff --check` 通过；完整 `npm run test:run -- --configLoader native` 为 43 个测试文件、252 项通过；Vite production build 使用 `--configLoader runner --outDir /tmp/newsagg-p5-build --emptyOutDir` 通过。
+
+本地浏览器在隔离 Vite (`127.0.0.1:5181`) + 合成 API mock (`127.0.0.1:9527`) 验收，只有虚构新闻、合成登录和静音 WAV：键盘登录焦点与 Tab 环绕/Escape 返焦、列表分类+搜索+语义模式、详情、收藏及收藏列表、全文抓取、翻译、聊天、仅本地研究、Provider 创建/重测、语音播放/暂停/续播、跨文章切换与播放器设置均已看到预期 UI。浏览器标签已标记为可交付，验收画面在会话中捕获；CUA 没有提供可写入本机文件的截图路径。没有连接项目数据库、真实 API/模型或发送凭据到外部服务。
+
+从全新前端依赖开始，现有命令为：`cd frontend && npm ci && npm run typecheck && npm run lint && npm run test:run -- --configLoader native && npm run build`。开发模式 `npm run dev` 代理 `/api` 至 `127.0.0.1:9527`；按根目录 `README.md` 与 `docs/startup.md` 的既有说明单独启动 Django 即可。
+
+本切片按本地提交保留，未推送；此记录随提交，便于主助手/用户直接复核。
