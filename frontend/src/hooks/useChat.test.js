@@ -170,6 +170,67 @@ describe('useChat', () => {
     expect(api.chatStream).toHaveBeenCalledOnce()
   })
 
+  it('reconciles a later normal history refetch after the first interrupted check found no records', async () => {
+    const saved = [{ role: 'user', content: 'recover after check' }, { role: 'assistant', content: 'saved answer' }]
+    api.fetchChatHistory
+      .mockResolvedValueOnce({ messages: [] })
+      .mockResolvedValueOnce({ messages: [] })
+      .mockResolvedValueOnce({ messages: saved })
+    api.chatStream.mockImplementation(async function* (_id, _question, { signal }) {
+      yield 'partial'
+      await waitForAbort(signal)
+    })
+    const { result } = renderHook(() => useChat('42', true), { wrapper: makeWrapper() })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    act(() => result.current.setInput('recover after check'))
+    let sendPromise
+    act(() => { sendPromise = result.current.handleSend() })
+    await waitFor(() => expect(result.current.phase).toBe('streaming'))
+    act(() => result.current.stopWaiting())
+    await act(async () => { await sendPromise })
+    await waitFor(() => expect(result.current.uncertainTurn?.reconciliation).toBe('unconfirmed'))
+    act(() => result.current.setInput('keep this new draft'))
+
+    await act(async () => { await result.current.retryHistory() })
+    await waitFor(() => expect(result.current.uncertainTurn).toBeNull())
+
+    expect(result.current.messages).toEqual(saved)
+    expect(result.current.input).toBe('keep this new draft')
+    expect(api.chatStream).toHaveBeenCalledOnce()
+    expect(api.fetchChatHistory).toHaveBeenCalledTimes(3)
+  })
+
+  it('reconciles a later normal history refetch after the first check found only the question', async () => {
+    const question = { role: 'user', content: 'answer arrives later' }
+    const saved = [question, { role: 'assistant', content: 'late saved answer' }]
+    api.fetchChatHistory
+      .mockResolvedValueOnce({ messages: [] })
+      .mockResolvedValueOnce({ messages: [question] })
+      .mockResolvedValueOnce({ messages: saved })
+    api.chatStream.mockImplementation(async function* (_id, _question, { signal }) {
+      yield 'partial'
+      await waitForAbort(signal)
+    })
+    const { result } = renderHook(() => useChat('42', true), { wrapper: makeWrapper() })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    act(() => result.current.setInput('answer arrives later'))
+    let sendPromise
+    act(() => { sendPromise = result.current.handleSend() })
+    await waitFor(() => expect(result.current.phase).toBe('streaming'))
+    act(() => result.current.stopWaiting())
+    await act(async () => { await sendPromise })
+    await waitFor(() => expect(result.current.uncertainTurn?.reconciliation).toBe('partial'))
+    act(() => result.current.setInput('keep this different draft'))
+
+    await act(async () => { await result.current.retryHistory() })
+    await waitFor(() => expect(result.current.uncertainTurn).toBeNull())
+
+    expect(result.current.messages).toEqual(saved)
+    expect(result.current.input).toBe('keep this different draft')
+    expect(api.chatStream).toHaveBeenCalledOnce()
+    expect(api.fetchChatHistory).toHaveBeenCalledTimes(3)
+  })
+
   it('hides a confirmed saved question and prevents resending while its answer is missing', async () => {
     api.fetchChatHistory.mockResolvedValueOnce({ messages: [] }).mockResolvedValueOnce({ messages: [{ role: 'user', content: 'question only' }] })
     api.chatStream.mockImplementation(async function* (_id, _question, { signal }) {
