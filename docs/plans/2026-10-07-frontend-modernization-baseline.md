@@ -208,7 +208,7 @@ SearchBar 现在按 React Router 的 POP 导航 key 重置当前草稿并清除�
 
 - MediaSession `play` 的 Promise 拒绝处理再次核对当前 Audio 和请求代次；新增旧音轨拒绝发生在切到下一篇或停止后仍不覆盖当前状态的延迟 Promise 回归。
 - Header 的 outside-pointer 检查同时排除菜单和菜单按钮；新增 pointerdown → pointerup → click 实序列开关回归。
-- 有序列表只在每个列表项都带可渲染的 HTTP(S)/站内根路径引用时改成来源卡片；片段锚点、相对地址、mailto 与普通编号列表保留标准 `<ol>` 和原 children。
+- 有序列表只在每个列表项的所有锚点都能完整转换为 HTTP(S)/站内根路径来源卡片时才转换；任何列表项含片段锚点、相对地址、mailto 或其他不可完整表示的链接，整表保留标准 `<ol>` 和原 children，避免混合链接被丢弃。
 
 测试数差额可复核：P5 前提交 `3d677bd8f6cfd786b87f075757bf3a32dd23c67b` 全量 41 文件/260 项；P5 提交全量 43 文件/252 项。P5 删除旧 `useSpeech.test.js` 13 项，并新增语音播放器 2 项、登录焦点 1 项、Mermaid 失败回退 1 项、SSE reader cancel 1 项，净少 8 项；无测试路径过滤。`useChat.test.js` 与 `useChat.phase.test.js` 相对 P5 前提交无差异，当前定向 25 项全通过；本补修后完整套件 45 文件/260 项全通过。
 

@@ -360,6 +360,17 @@ function getOrderedListItems(node: ElementContent | undefined): Element[] {
   return items
 }
 
+function countAnchorElements(node: ElementContent): number {
+  if (node.type !== 'element') return 0
+  const current = node.tagName === 'a' ? 1 : 0
+  return current + node.children.reduce((count, child) => count + countAnchorElements(child), 0)
+}
+
+function isFullyRenderableSourceItem(item: Element): boolean {
+  const links = extractSourceLinks(item)
+  return links.length > 0 && links.length === countAnchorElements(item)
+}
+
 /**
  * A single source reference rendered as a clickable card.
  */
@@ -459,7 +470,7 @@ const MD_COMPONENTS: Components = {
   ),
   ol: ({ children, node }) => {
     const listItems = getOrderedListItems(node)
-    const useSourceItems = listItems.length > 0 && listItems.every((item) => extractSourceLinks(item).length > 0)
+    const useSourceItems = listItems.length > 0 && listItems.every(isFullyRenderableSourceItem)
 
     if (useSourceItems) {
       return (
