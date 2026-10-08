@@ -10,7 +10,7 @@ import {
   type ChatHistory,
   type ChatMessage,
 } from '@/services/newsWorkflowApi'
-import { newsWorkflowKeys, parseNewsId } from '@/services/newsWorkflowQueries'
+import { chatHistoryOptions, parseNewsId } from '@/services/newsWorkflowQueries'
 import type { ViewerId } from '@/services/newsWorkflowQueries'
 
 export type ChatPhase = 'loading-history' | 'idle' | 'thinking' | 'streaming' | 'success' | 'error'
@@ -176,15 +176,16 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
   const ownerClearState = clearState.ownerKey === ownerKey
     ? clearState.value
     : { open: false, clearing: false, error: null }
-  const historyKey = useMemo(() => parsedId === null
-    ? ['newsWorkflow', 'chatHistory', 'disabled'] as const
-    : newsWorkflowKeys.chatHistory(parsedId, lang, viewerId), [lang, parsedId, viewerId])
-  const historyQuery = useQuery<ChatHistory>({
-    queryKey: historyKey,
-    queryFn: ({ signal }) => fetchChatHistory(parsedId ?? 0, signal),
+  const historyOptions = useMemo(() => {
+    const options = chatHistoryOptions(parsedId ?? 0, lang, viewerId)
+    return parsedId === null
+      ? { ...options, queryKey: ['newsWorkflow', 'chatHistory', 'disabled'] as unknown as typeof options.queryKey }
+      : options
+  }, [lang, parsedId, viewerId])
+  const historyKey = historyOptions.queryKey
+  const historyQuery = useQuery({
+    ...historyOptions,
     enabled: enabled && !authLoading && parsedId !== null,
-    staleTime: 30_000,
-    retry: false,
   })
   const currentPendingTurn = pendingTurnState?.ownerKey === ownerKey ? pendingTurnState : null
   const messages = [

@@ -13,8 +13,9 @@ vi.mock('@/services/newsWorkflowApi', () => ({
   parseWebSources: vi.fn(),
 }))
 
-function makeWrapper(getUser = () => ({ id: 5, username: 'reader' })) {
+function makeWrapper(getUser = () => ({ id: 5, username: 'reader' }), onClient = () => {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
+  onClient(client)
   return function Wrapper({ children }) {
     return createElement(QueryClientProvider, { client }, createElement(AuthContext.Provider, {
       value: { user: getUser(), loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() },
@@ -39,10 +40,17 @@ describe('useChat', () => {
 
   it('loads the saved history through a cancellable viewer-scoped query', async () => {
     api.fetchChatHistory.mockResolvedValueOnce({ messages: [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }] })
-    const { result } = renderHook(() => useChat('42', true), { wrapper: makeWrapper() })
+    let queryClient
+    const { result } = renderHook(() => useChat('42', true), {
+      wrapper: makeWrapper(undefined, (client) => { queryClient = client }),
+    })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
     expect(result.current.messages).toHaveLength(2)
     expect(api.fetchChatHistory).toHaveBeenCalledWith(42, expect.any(AbortSignal))
+    const historyQuery = queryClient.getQueryCache().getAll().find((query) => query.queryKey[1] === 'chatHistory')
+    expect(historyQuery.queryKey[2]).toMatchObject({ newsId: 42, viewerId: 5 })
+    expect(historyQuery.options.staleTime).toBe(30_000)
+    expect(historyQuery.options.retry).toBe(false)
   })
 
   it('streams one user/assistant pair and clears the submitted draft only on success', async () => {
