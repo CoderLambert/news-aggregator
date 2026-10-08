@@ -6,6 +6,8 @@ PROJECT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 LOCK_FILE="$PROJECT/logs/crawler.lock"
 SPIDER="${1:-all}"
 
+mkdir -p "$PROJECT/logs"
+
 PYTHON="$PROJECT/backend/venv/bin/python"
 if [ ! -x "$PYTHON" ]; then
   PYTHON="${PYTHON_BIN:-python3}"
