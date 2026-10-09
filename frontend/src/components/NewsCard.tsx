@@ -1,16 +1,35 @@
 import type { MouseEvent } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Link, useLocation } from 'react-router-dom'
-import { EyeOff } from 'lucide-react'
+import { EyeOff, FileText } from 'lucide-react'
 import { useLanguage } from '@/context/useLanguage'
 import { useAuth } from '@/context/AuthContext'
 import { Badge } from '@/components/ui/badge'
 import TranslationStatus from '@/components/news-detail/TranslationStatus'
 import { useBlockNews } from '@/hooks/useNewsMutations'
+import { newsDetailOptions } from '@/services/newsQueries'
 import type { DisplayMode, NewsSummary } from '@/types/news'
 
 interface NewsCardProps {
   news: NewsSummary
-  onRemoved?: (newsId: number) => void
+  onBlockStart?: (newsId: number, viewerId: number) => number
+  onBlocked?: (target: BlockedNewsTarget) => void
+}
+
+export interface BlockedNewsTarget {
+  newsId: number
+  viewerId: number
+  version: number
+}
+
+function ContentStatus({ status, lang }: { status: string; lang: 'zh' | 'en' }) {
+  if (status === 'success') {
+    return <Badge variant="green" className="rounded-full"><FileText aria-hidden="true" />{lang === 'en' ? 'Full article' : '有全文'}</Badge>
+  }
+  if (status === 'fetching') {
+    return <Badge variant="amber" className="rounded-full">{lang === 'en' ? 'Fetching' : '获取全文中'}</Badge>
+  }
+  return <Badge variant="gray" className="rounded-full">{lang === 'en' ? 'Summary' : '摘要'}</Badge>
 }
 
 function formatRelativeTime(dateString: string, t: ReturnType<typeof useLanguage>['t']) {
@@ -32,42 +51,51 @@ function resolveDisplay(news: NewsSummary, displayMode: DisplayMode) {
   return { title: news.title, subtitle: null, content: news.content }
 }
 
-export default function NewsCard({ news, onRemoved }: NewsCardProps) {
+export default function NewsCard({ news, onBlockStart, onBlocked }: NewsCardProps) {
   const { displayMode, t, lang } = useLanguage()
   const { user } = useAuth()
+  const queryClient = useQueryClient()
   const location = useLocation()
   const returnTo = `${location.pathname}${location.search}${location.hash}`
   const blockMutation = useBlockNews()
   const { title, subtitle, content } = resolveDisplay(news, displayMode)
+  const viewerId: number | string = user?.id ?? 'anonymous'
+
+  function prefetchDetail() {
+    void queryClient.prefetchQuery(newsDetailOptions(news.id, lang, viewerId))
+  }
 
   async function handleBlock(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault()
     event.stopPropagation()
     if (!user) return
+    const version = onBlockStart?.(news.id, user.id) ?? 0
     try {
       await blockMutation.mutateAsync({ newsId: news.id, viewerId: user.id })
-      onRemoved?.(news.id)
+      onBlocked?.({ newsId: news.id, viewerId: user.id, version })
     } catch {
       // Inline feedback below the control is sufficient for this action.
     }
   }
 
   return (
-    <article className="group relative overflow-hidden rounded-xl border border-gray-200 bg-white transition-all duration-200 hover:border-gray-300 hover:shadow-md">
-      <Link to={`/news/${news.id}`} state={{ from: returnTo }} className="block">
+    <article className="news-card-render group relative overflow-hidden rounded-2xl border border-neutral-200 bg-white transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-neutral-300 hover:shadow-lg">
+      <Link id={`news-card-${news.id}`} to={`/news/${news.id}`} state={{ from: returnTo }} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500" onMouseEnter={prefetchDetail} onFocus={prefetchDetail}>
         {news.cover_image && <div className="aspect-video overflow-hidden bg-gray-100"><img src={news.cover_image} alt="" className="h-full w-full object-cover" loading="lazy" /></div>}
-        <div className="p-4">
-          <div className="mb-2 flex items-start justify-between gap-2">
+        <div className={`p-4 ${user ? 'pr-12' : ''}`}>
+          <div className="mb-2 flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <h2 className="line-clamp-2 text-base font-semibold text-gray-900">{title}</h2>
+              <h2 className="line-clamp-2 text-lg font-semibold leading-snug text-neutral-900 transition-colors group-hover:text-violet-800">{title}</h2>
               {subtitle && <p className="mt-0.5 line-clamp-1 text-xs leading-tight text-gray-400">{subtitle}</p>}
             </div>
             <TranslationStatus news={news} size="compact" />
           </div>
-          <p className="mb-3 line-clamp-2 text-sm text-gray-500">{content?.slice(0, 120)}...</p>
-          <div className="flex items-center justify-between text-xs text-gray-400">
-            <Badge variant="blue" className="rounded px-2 py-0.5">{news.category_name}</Badge>
-            <div className="flex items-center gap-2"><span>{news.source_name}</span><span>{formatRelativeTime(news.publish_time, t)}</span></div>
+          {content && <p className="mb-4 line-clamp-3 text-sm leading-6 text-neutral-600">{content.slice(0, 180)}{content.length > 180 ? '…' : ''}</p>}
+          <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+            <Badge variant="blue" className="rounded-full px-2 py-0.5">{news.category_name}</Badge>
+            <ContentStatus status={news.full_content_fetch_status} lang={lang} />
+            <span className="ml-auto max-w-36 truncate">{news.source_name}</span>
+            <span>{formatRelativeTime(news.publish_time, t)}</span>
           </div>
         </div>
       </Link>

@@ -19,11 +19,24 @@ function phaseToMood(phase: ChatPhase): string {
   }
 }
 
-export default function NewsChatAssistant({ newsId }: { newsId: string | number }) {
-  const [isOpen, setIsOpen] = useState(false)
+interface NewsChatAssistantProps {
+  newsId: string | number
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}
+
+export default function NewsChatAssistant({ newsId, open, onOpenChange }: NewsChatAssistantProps) {
+  const [internalOpen, setInternalOpen] = useState(false)
+  const isOpen = open ?? internalOpen
+  const setIsOpen = useCallback((nextOpen: boolean) => {
+    if (open === undefined) setInternalOpen(nextOpen)
+    onOpenChange?.(nextOpen)
+  }, [onOpenChange, open])
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [confettiFired, setConfettiFired] = useState(false)
   const hasCelebratedRef = useRef(false)
+  const bubbleTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const restoreBubbleFocusRef = useRef(false)
   const {
     messages, input, setInput, isLoading, phase,
     historyError, retryHistory,
@@ -48,10 +61,20 @@ export default function NewsChatAssistant({ newsId }: { newsId: string | number 
     }
   }, [phase])
 
+  const openFromBubble = useCallback(() => {
+    restoreBubbleFocusRef.current = true
+    setIsOpen(true)
+  }, [setIsOpen])
+
   const closePanel = useCallback(() => {
     stopWaiting()
     setIsOpen(false)
-  }, [stopWaiting])
+    const shouldRestoreBubbleFocus = restoreBubbleFocusRef.current
+    restoreBubbleFocusRef.current = false
+    if (shouldRestoreBubbleFocus) {
+      requestAnimationFrame(() => bubbleTriggerRef.current?.focus())
+    }
+  }, [setIsOpen, stopWaiting])
 
   useEffect(() => {
     if (!isOpen) return
@@ -71,7 +94,7 @@ export default function NewsChatAssistant({ newsId }: { newsId: string | number 
     return () => { document.body.style.overflow = original }
   }, [isOpen])
 
-  if (!isOpen) return <ChatBubbleButton onOpen={() => setIsOpen(true)} />
+  if (!isOpen) return <ChatBubbleButton buttonRef={bubbleTriggerRef} onOpen={openFromBubble} />
 
   return (
     <div

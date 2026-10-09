@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { FormEvent, MouseEvent } from 'react'
 import { X } from 'lucide-react'
 import gsap from 'gsap'
@@ -45,9 +45,12 @@ export default function AuthModal({ onClose }: AuthModalProps) {
     gsap.from(content, { opacity: 0, scale: 0.96, y: 8, duration: 0.3, ease: 'power2.out' })
   }, { scope: containerRef, dependencies: [] })
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    containerRef.current?.querySelector<HTMLInputElement>('#auth-username')?.focus()
+    let mounted = true
+    queueMicrotask(() => {
+      if (mounted) containerRef.current?.querySelector<HTMLInputElement>('#auth-username')?.focus()
+    })
 
     function handleKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key === 'Escape') {
@@ -78,6 +81,7 @@ export default function AuthModal({ onClose }: AuthModalProps) {
 
     document.addEventListener('keydown', handleKeyDown)
     return () => {
+      mounted = false
       document.removeEventListener('keydown', handleKeyDown)
       previousFocus?.focus()
     }

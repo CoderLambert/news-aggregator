@@ -17,7 +17,7 @@ describe('FetchArticleCard', () => {
     render(<FetchArticleCard onFetch={onFetch} />)
 
     expect(screen.getByText('获取完整原文')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '加载原文' }))
+    fireEvent.click(screen.getByRole('button', { name: '获取完整原文' }))
     expect(onFetch).toHaveBeenCalledWith()
   })
 })
@@ -79,7 +79,7 @@ describe('FullContentSection', () => {
     renderSection({ news })
     expect(screen.getByRole('button', { name: '重新翻译' })).toBeInTheDocument()
     expect(screen.getByRole('group', { name: '切换语言' })).toBeInTheDocument()
-    expect(screen.getByText('已翻译')).toBeInTheDocument()
+    expect(screen.getByText('已有中文译文')).toBeInTheDocument()
   })
 
   it('clicking 翻译为中文 calls onTranslate', () => {

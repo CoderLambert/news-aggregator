@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import { Search } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { useLanguage } from '@/context/useLanguage'
 import { Input } from '@/components/ui/input'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
@@ -76,10 +77,18 @@ export default function SearchBar({ value, mode, onChange, onModeChange, history
   }
 
   return (
-    <div className="flex items-center gap-2">
-      <div className="relative min-w-0 flex-1">
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400" />
-        <Input type="search" value={display} onChange={(event: ChangeEvent<HTMLInputElement>) => handleChange(event.target.value)} placeholder={t.search} aria-label={t.search} className="h-10 rounded-lg pl-10" />
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400" />
+          <Input type="search" value={display} onChange={(event: ChangeEvent<HTMLInputElement>) => handleChange(event.target.value)} placeholder={t.search} aria-label={t.search} className="h-10 rounded-xl pl-10" />
+        </div>
+        <Link
+          to={`/search${display.trim() ? `?q=${encodeURIComponent(display.trim())}&mode=${mode}` : ''}`}
+          className="shrink-0 rounded-lg px-2 py-2 text-xs font-medium text-violet-700 hover:bg-violet-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+        >
+          {lang === 'en' ? 'Advanced' : '高级搜索'}
+        </Link>
       </div>
       <ToggleGroup
         type="single"

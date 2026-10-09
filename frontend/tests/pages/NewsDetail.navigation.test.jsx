@@ -30,8 +30,16 @@ vi.mock('@/context/SpeechPlayerContext', () => ({
   useSpeechPlayer: () => ({ supported: false, speak: vi.fn() }),
   useSpeechPlayerActions: () => ({ speak: vi.fn() }),
   useSpeechPlayerCapabilities: () => ({ supported: false }),
+  useSpeechPlayerActivity: () => false,
 }))
-vi.mock('@/components/NewsChatAssistant', () => ({ default: () => null }))
+vi.mock('@/components/NewsChatAssistant', () => ({
+  default: ({ open, onOpenChange }) => (
+    <div>
+      <output data-testid="assistant-state">{open ? 'open' : 'closed'}</output>
+      {open && <button type="button" onClick={() => onOpenChange(false)}>关闭测试助手</button>}
+    </div>
+  ),
+}))
 
 const listStory = {
   id: 21, title: 'Climate technology update', content: 'A short article summary', title_zh: '', content_zh: '', author: null,
@@ -136,8 +144,8 @@ describe('news list return navigation and invalidation', () => {
 
     expect(await screen.findByRole('heading', { name: '迁移权责确权层｜跨域行为的权属与越界判定' })).toBeInTheDocument()
     expect(screen.getAllByText('量子位')).toHaveLength(1)
-    expect(screen.getByRole('button', { name: '加载原文' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: '摘要' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '获取完整原文' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '内容摘要' })).toBeInTheDocument()
     const firstParagraph = screen.getByText('第一段正文。').closest('p')
     const secondParagraph = screen.getByText('第二段正文。').closest('p')
     expect(firstParagraph).not.toBe(secondParagraph)
@@ -159,7 +167,25 @@ describe('news list return navigation and invalidation', () => {
     expect(await screen.findByRole('heading', { name: '复杂编程仍有差距' })).toBeInTheDocument()
     expect(screen.getByText('第一段完整正文。')).toBeInTheDocument()
     expect(screen.queryByText('这段摘要不应在全文下方重复出现。')).not.toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: '摘要' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '内容摘要' })).not.toBeInTheDocument()
+  })
+
+  it('opens the same article assistant from the header and summary action', async () => {
+    renderRoutes('/news/21')
+
+    expect(await screen.findByRole('button', { name: '询问 AI 助手小闻' })).toBeInTheDocument()
+    expect(screen.queryByTestId('assistant-state')).not.toBeInTheDocument()
+    const headerAssistantButton = screen.getByRole('button', { name: '询问 AI 助手小闻' })
+    fireEvent.click(headerAssistantButton)
+    expect(await screen.findByTestId('assistant-state')).toHaveTextContent('open')
+    fireEvent.click(screen.getByRole('button', { name: '关闭测试助手' }))
+    await waitFor(() => expect(screen.queryByTestId('assistant-state')).not.toBeInTheDocument())
+    await waitFor(() => expect(headerAssistantButton).toHaveFocus())
+    const summaryAssistantButton = screen.getByRole('button', { name: '基于摘要提问' })
+    fireEvent.click(summaryAssistantButton)
+    expect(await screen.findByTestId('assistant-state')).toHaveTextContent('open')
+    fireEvent.click(screen.getByRole('button', { name: '关闭测试助手' }))
+    await waitFor(() => expect(summaryAssistantButton).toHaveFocus())
   })
 
   it('opens the login dialog instead of posting a full fetch for a signed-out reader', async () => {
@@ -174,7 +200,7 @@ describe('news list return navigation and invalidation', () => {
     })
     renderRoutes('/news/3033', null)
 
-    fireEvent.click(await screen.findByRole('button', { name: '加载原文' }))
+    fireEvent.click(await screen.findByRole('button', { name: '获取完整原文' }))
 
     expect(await screen.findByRole('dialog', { name: '登录小闻' })).toBeInTheDocument()
     expect(apiState.fetchFullArticle).not.toHaveBeenCalled()

@@ -1,22 +1,65 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { LogIn } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/context/AuthContext'
 import type { AuthUser } from '@/context/AuthContext'
 import { useResearch } from '@/hooks/useResearch'
 import AuthModal from '@/components/AuthModal'
-import ResearchBubbleButton from './ResearchBubbleButton'
 import ResearchHeader from './ResearchHeader'
 import ResearchMessageList from './ResearchMessageList'
 import ResearchInput from './ResearchInput'
 
-export default function ResearchPanel() {
-  const { user } = useAuth()
-  return <ResearchPanelView key={user?.id ?? 'anonymous'} user={user} />
+interface ResearchPanelProps {
+  onClose: () => void
 }
 
-function ResearchPanelView({ user }: { user: AuthUser | null }) {
-  const [isOpen, setIsOpen] = useState(false)
+const TAB_STOP_SELECTOR = [
+  'a[href]',
+  'button:not(:disabled)',
+  'input:not(:disabled)',
+  'textarea:not(:disabled)',
+  'select:not(:disabled)',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ')
+
+function isUsableTabStop(element: HTMLElement, dialog: HTMLElement) {
+  if (!element.isConnected || element.tabIndex < 0) return false
+  if (element.matches(':disabled')) return false
+  if (element.getAttribute('aria-disabled') === 'true') return false
+  if (element.closest('[hidden], [inert], [aria-hidden="true"]')) return false
+
+  let ancestor: HTMLElement | null = element
+  while (ancestor) {
+    const style = window.getComputedStyle(ancestor)
+    if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return false
+    if (ancestor === dialog) break
+    ancestor = ancestor.parentElement
+  }
+  return true
+}
+
+function getDialogTabStops(dialog: HTMLElement) {
+  return Array.from(dialog.querySelectorAll<HTMLElement>(TAB_STOP_SELECTOR))
+    .filter((element) => isUsableTabStop(element, dialog))
+}
+
+function focusDialogEdge(dialog: HTMLElement, edge: 'first' | 'last') {
+  const tabStops = getDialogTabStops(dialog)
+  const orderedStops = edge === 'first' ? tabStops : [...tabStops].reverse()
+  for (const tabStop of orderedStops) {
+    tabStop.focus()
+    if (document.activeElement === tabStop) return
+  }
+  dialog.focus()
+}
+
+export default function ResearchPanel({ onClose }: ResearchPanelProps) {
+  const { user } = useAuth()
+  return <ResearchPanelView key={user?.id ?? 'anonymous'} user={user} onClose={onClose} />
+}
+
+function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDivElement | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [input, setInput] = useState('')
@@ -40,14 +83,13 @@ function ResearchPanelView({ user }: { user: AuthUser | null }) {
 
   const isLoading = isBusy || phase === 'thinking' || phase === 'tool_calling' || phase === 'streaming'
 
-  function handleOpen() {
-    setIsOpen(true)
-  }
-
-  function handleClose() {
-    setIsOpen(false)
+  const handleClose = useCallback(() => {
+    const needsRiskReview = isBusy && !activeSessionId
+    handleCancel()
     setIsFullscreen(false)
-  }
+    if (needsRiskReview) return
+    onClose()
+  }, [activeSessionId, handleCancel, isBusy, onClose])
 
   function handleSendQuery() {
     if (!input.trim() || isLoading || hasRecoverableTask || !user) return
@@ -66,26 +108,76 @@ function ResearchPanelView({ user }: { user: AuthUser | null }) {
     void handleSend(query, { localOnly: false })
   }
 
+  useLayoutEffect(() => {
+    if (showAuthModal) return
+    const dialog = dialogRef.current
+    const activeElement = document.activeElement
+    if (!dialog || (activeElement instanceof HTMLElement && (
+      dialog.contains(activeElement) || activeElement.closest('#research-session-menu')
+    ))) return
+    focusDialogEdge(dialog, 'first')
+  })
+
   useEffect(() => {
-    if (!isOpen) return
+    function onFocusIn(event: FocusEvent) {
+      if (showAuthModal || document.querySelector('.auth-modal-backdrop')) return
+      const dialog = dialogRef.current
+      const target = event.target
+      if (!dialog || !(target instanceof HTMLElement)) return
+      if (dialog.contains(target) || target.closest('#research-session-menu')) return
+      focusDialogEdge(dialog, 'first')
+    }
+
     function onKey(event: KeyboardEvent) {
+      if (showAuthModal || document.querySelector('.auth-modal-backdrop')) return
       if (event.key === 'Escape' && !event.defaultPrevented) {
         if (isFullscreen) setIsFullscreen(false)
-        else setIsOpen(false)
+        else handleClose()
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const dialog = dialogRef.current
+      const activeElement = document.activeElement
+      if (!dialog) return
+
+      const tabStops = getDialogTabStops(dialog)
+      if (!tabStops.length) {
+        event.preventDefault()
+        dialog.focus()
+        return
+      }
+
+      const isInsideDialog = activeElement instanceof HTMLElement && dialog.contains(activeElement)
+      const isInsideSessionMenu = activeElement instanceof HTMLElement && Boolean(activeElement.closest('#research-session-menu'))
+      const first = tabStops[0]
+      const last = tabStops[tabStops.length - 1]
+      const activeTabStop = activeElement instanceof HTMLElement && tabStops.includes(activeElement)
+      if (!isInsideDialog && !isInsideSessionMenu) {
+        event.preventDefault()
+        focusDialogEdge(dialog, event.shiftKey ? 'last' : 'first')
+      } else if (isInsideSessionMenu || !activeTabStop || (event.shiftKey && (activeElement === first || activeElement === dialog))) {
+        event.preventDefault()
+        focusDialogEdge(dialog, event.shiftKey ? 'last' : 'first')
+      } else if (!event.shiftKey && (activeElement === last || activeElement === dialog)) {
+        event.preventDefault()
+        focusDialogEdge(dialog, 'first')
       }
     }
+    document.addEventListener('focusin', onFocusIn)
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [isOpen, isFullscreen])
+    return () => {
+      document.removeEventListener('focusin', onFocusIn)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [isFullscreen, handleClose, showAuthModal])
 
   useEffect(() => {
-    if (!isOpen) return
     const originalOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+    dialogRef.current?.focus()
     return () => { document.body.style.overflow = originalOverflow }
-  }, [isOpen])
-
-  if (!isOpen) return <ResearchBubbleButton onOpen={handleOpen} />
+  }, [])
 
   const activeSession = sessions.find((session) => session.id === activeSessionId)
   const panelTitle = activeSession?.title || '新闻研究'
@@ -101,9 +193,11 @@ function ResearchPanelView({ user }: { user: AuthUser | null }) {
       )}
 
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="新闻研究助手"
+        tabIndex={-1}
         className={`fixed z-40 flex flex-col bg-white rounded-t-2xl sm:rounded-2xl shadow-[0_-8px_32px_-8px_rgba(0,0,0,0.12)]
           border border-neutral-200/50 overflow-hidden
           transition-all duration-300 ease-out pointer-events-auto

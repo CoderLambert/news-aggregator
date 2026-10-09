@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { SpeechPlayerActionsContext, SpeechPlayerCapabilitiesContext, SpeechPlayerStateContext } from './SpeechPlayerContext'
+import { SpeechPlayerActionsContext, SpeechPlayerActivityContext, SpeechPlayerCapabilitiesContext, SpeechPlayerStateContext } from './SpeechPlayerContext'
 import {
   POSITION_KEY_PREFIX,
   RATE_KEY,
@@ -335,9 +335,11 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
   return (
     <SpeechPlayerCapabilitiesContext.Provider value={playerCapabilities}>
       <SpeechPlayerActionsContext.Provider value={playerActions}>
-        <SpeechPlayerStateContext.Provider value={playerState}>
-          {children}
-        </SpeechPlayerStateContext.Provider>
+        <SpeechPlayerActivityContext.Provider value={status !== 'idle'}>
+          <SpeechPlayerStateContext.Provider value={playerState}>
+            {children}
+          </SpeechPlayerStateContext.Provider>
+        </SpeechPlayerActivityContext.Provider>
       </SpeechPlayerActionsContext.Provider>
     </SpeechPlayerCapabilitiesContext.Provider>
   )

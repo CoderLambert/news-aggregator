@@ -97,11 +97,11 @@ export function useBlockNews() {
       const blockStatusKey = privateNewsKeys.blockStatus(viewerId, newsId)
       await queryClient.cancelQueries({ queryKey: blockStatusKey, exact: true })
       queryClient.setQueryData<BlockStatus>(blockStatusKey, { is_blocked: true })
-      await Promise.all([
+      void Promise.all([
         queryClient.invalidateQueries({ queryKey: blockStatusKey, exact: true }),
         queryClient.invalidateQueries({ queryKey: newsKeys.viewerLists(viewerId) }),
         queryClient.invalidateQueries({ queryKey: privateNewsKeys.blocked(viewerId) }),
-      ])
+      ]).catch(() => undefined)
     },
   })
 }
@@ -136,11 +136,11 @@ export function useUnblockNews() {
             || entry.news.id !== newsId),
         }
       })
-      await Promise.all([
+      void Promise.all([
         queryClient.invalidateQueries({ queryKey: blockStatusKey, exact: true }),
         queryClient.invalidateQueries({ queryKey: newsKeys.viewerLists(viewerId) }),
         queryClient.invalidateQueries({ queryKey: privateNewsKeys.blocked(viewerId) }),
-      ])
+      ]).catch(() => undefined)
     },
   })
 }
