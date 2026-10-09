@@ -1,7 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext } from 'react'
-import type { DisplayMode } from '@/types/news'
-import type { PlaybackRate, SpeechScope, VoiceKey } from '@/constants/tts'
+import type { PlaybackRate, SpeechLanguage, SpeechScope, VoiceKey } from '@/constants/tts'
 import type { NewsId } from '@/services/api'
 
 export type SpeechStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'error'
@@ -16,7 +15,7 @@ export interface SpeechPlayerState {
   scope: SpeechScope
   title: string
   newsId: NewsId | null
-  displayMode: DisplayMode
+  language: SpeechLanguage
   errorMessage: string | null
 }
 
@@ -25,7 +24,7 @@ export interface SpeechPlayerCapabilities {
 }
 
 export interface SpeechPlayerActions {
-  speak: (newsId: NewsId, title: string, displayMode?: DisplayMode) => void
+  speak: (newsId: NewsId, title: string, options?: Partial<SpeechRequestOptions>) => void
   pause: () => void
   resume: () => void
   stop: () => void
@@ -33,6 +32,13 @@ export interface SpeechPlayerActions {
   setRate: (rate: PlaybackRate) => void
   setVoice: (voice: VoiceKey) => void
   setScope: (scope: SpeechScope) => void
+}
+
+export interface SpeechRequestOptions {
+  language: SpeechLanguage
+  rate: PlaybackRate
+  voice: VoiceKey
+  scope: SpeechScope
 }
 
 export type SpeechPlayerContextValue = SpeechPlayerState & SpeechPlayerActions & SpeechPlayerCapabilities

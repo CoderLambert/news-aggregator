@@ -60,12 +60,12 @@ export default function GlobalSpeechPlayer() {
               ? '正在生成语音…'
               : isError
                 ? player.errorMessage
-                : `${formatTime(player.currentTime)} / ${formatTime(player.duration)} · ${percent}%`}
+                : `${player.language === 'zh' ? '中文' : '英文原文'} · ${player.scope === 'full' ? '全文' : '摘要'} · ${formatTime(player.currentTime)} / ${formatTime(player.duration)} · ${percent}%`}
           </p>
         </div>
 
         {isError && player.newsId !== null && (
-          <Button type="button" variant="ghost" size="sm" onClick={() => actions.speak(player.newsId!, player.title, player.displayMode)}>
+          <Button type="button" variant="ghost" size="sm" onClick={() => actions.speak(player.newsId!, player.title, { language: player.language, scope: player.scope, voice: player.voice, rate: player.rate })}>
             <RotateCcw aria-hidden="true" />重试
           </Button>
         )}
@@ -108,7 +108,7 @@ export default function GlobalSpeechPlayer() {
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label="语音音色">
             <Headphones aria-hidden="true" className="size-4 text-muted-foreground" />
             <span className="mr-1 text-xs text-muted-foreground">声音</span>
-            {VOICES.map((item) => (
+            {VOICES.filter((item) => item.lang === player.language).map((item) => (
               <Button
                 key={item.key}
                 type="button"
