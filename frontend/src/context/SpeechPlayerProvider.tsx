@@ -5,28 +5,26 @@ import {
   POSITION_KEY_PREFIX,
   RATE_KEY,
   RATES,
+  SPEECH_LANGUAGE_KEY,
+  SPEECH_LANGUAGES,
   SCOPE_KEY,
   SCOPES,
   VOICES,
   VOICE_KEY,
 } from '@/constants/tts'
-import type { PlaybackRate, SpeechScope, VoiceKey } from '@/constants/tts'
-import type { DisplayMode } from '@/types/news'
+import type { PlaybackRate, SpeechLanguage, SpeechScope, VoiceKey } from '@/constants/tts'
 import type { NewsId } from '@/services/api'
-import type { SpeechStatus } from './SpeechPlayerContext'
+import type { SpeechRequestOptions, SpeechStatus } from './SpeechPlayerContext'
 import { isRecord } from '@/types/news'
 
 interface ActiveArticle {
   id: NewsId
   title: string
-  displayMode: DisplayMode
-}
-
-interface SpeechOptions {
-  rate: PlaybackRate
-  voice: VoiceKey
+  language: SpeechLanguage
   scope: SpeechScope
 }
+
+type SpeechOptions = SpeechRequestOptions
 
 function readStoredValue<T extends string>(key: string, fallback: T, choices: readonly { key: string }[]): T {
   try {
@@ -54,6 +52,10 @@ function persist(key: string, value: string): void {
   }
 }
 
+function positionKey(article: Pick<ActiveArticle, 'id' | 'language' | 'scope'>): string {
+  return `${POSITION_KEY_PREFIX}${article.id}_${article.language}_${article.scope}`
+}
+
 export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<SpeechStatus>('idle')
   const [progress, setProgress] = useState(0)
@@ -62,9 +64,9 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
   const [rate, setRateState] = useState<PlaybackRate>(readStoredRate)
   const [voice, setVoiceState] = useState<VoiceKey>(() => readStoredValue<VoiceKey>(VOICE_KEY, 'yunyang', VOICES))
   const [scope, setScopeState] = useState<SpeechScope>(() => readStoredValue<SpeechScope>(SCOPE_KEY, 'full', SCOPES))
+  const [language, setLanguage] = useState<SpeechLanguage>(() => readStoredValue<SpeechLanguage>(SPEECH_LANGUAGE_KEY, 'zh', SPEECH_LANGUAGES))
   const [title, setTitle] = useState('')
   const [newsId, setNewsId] = useState<NewsId | null>(null)
-  const [displayMode, setDisplayMode] = useState<DisplayMode>('zh')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -82,7 +84,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     const audio = audioRef.current
     const article = activeArticleRef.current
     if (!article || !audio || !Number.isFinite(audio.currentTime) || audio.currentTime <= 0) return
-    persist(POSITION_KEY_PREFIX + article.id, JSON.stringify({ time: audio.currentTime, ts: Date.now() }))
+    persist(positionKey(article), JSON.stringify({ time: audio.currentTime, ts: Date.now() }))
   }, [])
 
   useEffect(() => {
@@ -94,9 +96,9 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
   const isCurrentAudio = useCallback((audio: HTMLAudioElement, requestId: number) =>
     requestIdRef.current === requestId && audioRef.current === audio, [])
 
-  const restorePosition = useCallback((id: NewsId, audio: HTMLAudioElement) => {
+  const restorePosition = useCallback((article: ActiveArticle, audio: HTMLAudioElement) => {
     try {
-      const savedText = localStorage.getItem(POSITION_KEY_PREFIX + id)
+      const savedText = localStorage.getItem(positionKey(article))
       if (!savedText) return
       const saved: unknown = JSON.parse(savedText)
       if (!isRecord(saved) || typeof saved.time !== 'number' || typeof saved.ts !== 'number') return
@@ -168,7 +170,6 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
   const speak = useCallback((
     id: NewsId,
     articleTitle: string,
-    mode: DisplayMode = 'zh',
     overrides: Partial<SpeechOptions> = {},
   ) => {
     if (!supported) return
@@ -183,12 +184,17 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
       previousAudio.load()
     }
 
+    const selectedLanguage = overrides.language ?? language
+    const requestedVoice = overrides.voice ?? voice
     const selected: SpeechOptions = {
       rate: overrides.rate ?? rate,
-      voice: overrides.voice ?? voice,
+      voice: selectedLanguage === 'original'
+        ? 'guy'
+        : requestedVoice === 'guy' ? 'yunyang' : requestedVoice,
       scope: overrides.scope ?? scope,
+      language: selectedLanguage,
     }
-    const article = { id, title: articleTitle, displayMode: mode }
+    const article = { id, title: articleTitle, language: selected.language, scope: selected.scope }
     const audio = new Audio()
     audioRef.current = audio
     activeArticleRef.current = article
@@ -201,7 +207,10 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     setDuration(0)
     setTitle(articleTitle)
     setNewsId(id)
-    setDisplayMode(mode)
+    setLanguage(selected.language)
+    setVoiceState(selected.voice)
+    persist(SPEECH_LANGUAGE_KEY, selected.language)
+    persist(VOICE_KEY, selected.voice)
     setErrorMessage(null)
 
     const isCurrent = () => isCurrentAudio(audio, requestId)
@@ -236,7 +245,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     }
     audio.onended = () => {
       if (!isCurrent()) return
-      try { localStorage.removeItem(POSITION_KEY_PREFIX + id) } catch { /* optional resume state */ }
+      try { localStorage.removeItem(positionKey(article)) } catch { /* optional resume state */ }
       audioRef.current = null
       activeArticleRef.current = null
       updateStatus('idle')
@@ -250,16 +259,16 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     audio.onloadedmetadata = () => {
       if (!isCurrent()) return
       if (Number.isFinite(audio.duration) && audio.duration > 0) setDuration(audio.duration)
-      restorePosition(id, audio)
+      restorePosition(article, audio)
       setCurrentTime(audio.currentTime)
       void audio.play().catch(() => { if (isCurrent()) updateStatus('paused') })
     }
 
-    const query = new URLSearchParams({ displayMode: mode, voice: selected.voice, scope: selected.scope })
+    const query = new URLSearchParams({ language: selected.language, voice: selected.voice, scope: selected.scope })
     audio.src = `/api/news/${id}/tts/?${query.toString()}`
     updateMediaSession(articleTitle, audio, requestId)
     audio.load()
-  }, [clearMediaSession, isCurrentAudio, rate, restorePosition, savePosition, scope, supported, updateMediaSession, updateStatus, voice])
+  }, [clearMediaSession, isCurrentAudio, language, rate, restorePosition, savePosition, scope, supported, updateMediaSession, updateStatus, voice])
 
   const pause = useCallback(() => {
     const audio = audioRef.current
@@ -292,7 +301,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     const article = activeArticleRef.current
     const currentStatus = statusRef.current
     if (article && (currentStatus === 'playing' || currentStatus === 'paused')) {
-      speak(article.id, article.title, article.displayMode, override)
+      speak(article.id, article.title, { ...override, language: article.language })
     }
   }, [speak])
 
@@ -331,9 +340,9 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     scope,
     title,
     newsId,
-    displayMode,
+    language,
     errorMessage,
-  }), [currentTime, displayMode, duration, errorMessage, newsId, progress, rate, scope, status, title, voice])
+  }), [currentTime, duration, errorMessage, language, newsId, progress, rate, scope, status, title, voice])
 
   const playerActions = useMemo(() => ({ speak, pause, resume, stop, seek, setRate, setVoice, setScope }), [
     pause, resume, seek, setRate, setScope, setVoice, speak, stop,

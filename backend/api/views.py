@@ -1329,7 +1329,7 @@ def auth_me(request):
 class NewsTTSView(generics.GenericAPIView):
     """Stream TTS audio for a news article using Edge TTS (Microsoft Natural voices).
 
-    GET /api/news/<pk>/tts/?displayMode=zh&voice=yunyang&scope=full
+    GET /api/news/<pk>/tts/?language=zh&voice=yunyang&scope=full
 
     scope: 'summary' (title + short blurb) or 'full' (title + full article).
     Returns audio/mpeg stream. Supports caching — repeat requests serve from cache.
@@ -1342,63 +1342,66 @@ class NewsTTSView(generics.GenericAPIView):
         import logging
         from django.http import StreamingHttpResponse, FileResponse
         from api.services.tts_service import (
-            clean_for_tts, pick_tts_voice, get_cached_audio, save_to_cache,
+            TTSContentUnavailable, build_cache_variant, clean_for_tts,
+            get_cached_audio, pick_tts_voice, resolve_tts_content, save_to_cache,
         )
 
         news = self.get_object()
 
         # Resolve parameters
-        display_mode = request.query_params.get('displayMode', 'zh')
+        language = request.query_params.get('language')
+        if language is None:
+            # Backwards compatibility for clients created before speech language
+            # was separated from the page display mode.
+            language = 'original' if request.query_params.get('displayMode') == 'original' else 'zh'
         voice_pref = request.query_params.get('voice', '')
         scope = request.query_params.get('scope', 'full')
 
-        is_en = news.source.language == 'en'
-        has_zh = is_en and bool(news.title_zh)
+        try:
+            resolved = resolve_tts_content(news, request.user, language, scope)
+        except TTSContentUnavailable as exc:
+            response_status = (
+                status.HTTP_409_CONFLICT
+                if exc.code in {'translation_required', 'source_content_required'}
+                else status.HTTP_400_BAD_REQUEST
+            )
+            return Response({'code': exc.code, 'message': exc.message}, status=response_status)
 
-        # Pick voice
         voice = pick_tts_voice(
             source_language=news.source.language,
-            display_mode=display_mode,
-            has_zh=has_zh,
+            display_mode=resolved.language,
+            has_zh=resolved.language == 'zh',
             voice_pref=voice_pref,
         )
 
-        # Check cache first (scope is part of the cache key)
-        cached = get_cached_audio(pk, display_mode, voice + ':' + scope)
+        clean_content = clean_for_tts(resolved.content)
+        clean_title = clean_for_tts(resolved.title)
+        speech_text = '。'.join(part for part in (clean_title, clean_content) if part)
+        if not speech_text.strip():
+            return Response(
+                {'code': 'source_content_required', 'message': '所选范围暂无可朗读内容。'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        cache_variant = build_cache_variant(resolved, scope, voice, speech_text)
+        cached = get_cached_audio(pk, cache_variant)
         if cached:
-            return FileResponse(
+            response = FileResponse(
                 open(cached, 'rb'),
                 content_type='audio/mpeg',
                 as_attachment=False,
             )
-
-        # Resolve the text to speak
-        if has_zh and display_mode != 'original':
-            if scope == 'full':
-                content = news.full_content_zh or news.content_zh or news.full_content or news.content or ''
-            else:
-                content = news.content_zh or news.content or ''
-            title = news.title_zh or news.title
-        else:
-            if scope == 'full':
-                content = news.full_content or news.content or ''
-            else:
-                content = news.content or ''
-            title = news.title
-
-        # Clean Markdown for natural speech
-        clean_content = clean_for_tts(content)
-        clean_title = clean_for_tts(title)
-        speech_text = f'{clean_title}。{clean_content}'
-
-        if not speech_text.strip():
-            return Response({'error': '没有可朗读的内容'}, status=400)
+            response['Cache-Control'] = 'private, max-age=86400'
+            return response
 
         try:
             import edge_tts
         except ImportError:
             logging.getLogger(__name__).exception('TTS dependency edge-tts is not installed')
-            return Response({'error': '语音服务暂不可用'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            return Response(
+                {'code': 'tts_unavailable', 'message': '语音服务暂不可用。'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
         # Generate via Edge TTS, collect bytes, cache, then stream
         audio_chunks = []
@@ -1425,7 +1428,7 @@ class NewsTTSView(generics.GenericAPIView):
                 # Save to cache after generation completes
                 if audio_chunks:
                     try:
-                        save_to_cache(pk, display_mode, voice + ':' + scope, b''.join(audio_chunks))
+                        save_to_cache(pk, cache_variant, b''.join(audio_chunks))
                     except Exception:
                         pass  # Cache write failure is non-critical
 
@@ -1433,5 +1436,5 @@ class NewsTTSView(generics.GenericAPIView):
             generate_and_stream(),
             content_type='audio/mpeg',
         )
-        response['Cache-Control'] = 'public, max-age=86400'
+        response['Cache-Control'] = 'private, max-age=86400'
         return response

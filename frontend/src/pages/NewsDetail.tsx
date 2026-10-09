@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent, MouseEvent } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
-import { ArrowLeft, Headphones, MessageCircle, Search, Sparkles } from 'lucide-react'
+import { ArrowLeft, MessageCircle, Search, Sparkles } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { useLanguage } from '@/context/useLanguage'
 import { useSpeechPlayerActions, useSpeechPlayerCapabilities } from '@/context/SpeechPlayerContext'
@@ -19,12 +19,14 @@ import ArticleSearchBar from '@/components/news-detail/ArticleSearchBar'
 import ArticleToc from '@/components/news-detail/ArticleToc'
 import ScrollToTop from '@/components/news-detail/ScrollToTop'
 import FavoriteButtons from '@/components/news-detail/FavoriteButtons'
+import SpeechStartMenu from '@/components/speech/SpeechStartMenu'
 import { useNewsDetail } from '@/hooks/useNewsDetail'
 import { useFullArticle } from '@/hooks/useFullArticle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useArticleSearch } from '@/hooks/useArticleSearch'
 import { useArticleToc } from '@/hooks/useArticleToc'
 import type { NewsDetail as NewsDetailRecord } from '@/types/news'
+import type { SpeechLanguage, SpeechScope } from '@/constants/tts'
 
 function safeReturnPath(value: unknown): string {
   if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//')) return '/'
@@ -86,13 +88,38 @@ export default function NewsDetail() {
 
   const speechPlayer = useSpeechPlayerActions()
   const { supported: speechSupported } = useSpeechPlayerCapabilities()
-  const handleSpeak = useCallback(() => {
+  const pendingSpeechScopeRef = useRef<SpeechScope | null>(null)
+  const handleSpeak = useCallback((language: SpeechLanguage, scope: SpeechScope) => {
     if (!news) return
-    const isEnglishSource = news.source_language === 'en'
-    const hasChineseTitle = isEnglishSource && Boolean(news.title_zh)
-    const speechTitle = hasChineseTitle && displayMode === 'zh' ? news.title_zh : news.title
-    speechPlayer.speak(news.id, speechTitle, displayMode)
-  }, [news, displayMode, speechPlayer])
+    const speechTitle = language === 'zh' ? (news.title_zh || news.title) : news.title
+    speechPlayer.speak(news.id, speechTitle, { language, scope })
+  }, [news, speechPlayer])
+  const handleTranslateAndPlay = useCallback((scope: SpeechScope) => {
+    if (!user) {
+      setAuthModalOpen(true)
+      return
+    }
+    pendingSpeechScopeRef.current = scope
+    void handleTranslate(false).then((completed) => {
+      const pendingScope = pendingSpeechScopeRef.current
+      if (!completed || !pendingScope) return
+      pendingSpeechScopeRef.current = null
+      handleSpeak('zh', pendingScope)
+    })
+  }, [handleSpeak, handleTranslate, user])
+  useEffect(() => {
+    const pendingScope = pendingSpeechScopeRef.current
+    if (!pendingScope || !news?.full_content_zh) return
+    pendingSpeechScopeRef.current = null
+    handleSpeak('zh', pendingScope)
+  }, [handleSpeak, news?.full_content_zh])
+  useEffect(() => {
+    if (translateError) pendingSpeechScopeRef.current = null
+  }, [translateError])
+  const handleStopTranslation = useCallback(() => {
+    pendingSpeechScopeRef.current = null
+    stopTranslationWait()
+  }, [stopTranslationWait])
 
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -184,9 +211,15 @@ export default function NewsDetail() {
                 <span className="hidden sm:inline">问小闻</span>
               </button>
               {speechSupported && (
-                <button type="button" onClick={handleSpeak} aria-label="语音播报" className="flex size-10 items-center justify-center rounded-xl transition-colors hover:bg-neutral-100 active:bg-neutral-200">
-                  <Headphones className="size-4.5 text-neutral-400" />
-                </button>
+                <SpeechStartMenu
+                  isEnglishSource={isEnglishSource}
+                  hasOriginalFull={Boolean(news.full_content)}
+                  hasChineseFull={isEnglishSource ? Boolean(news.full_content_zh) : Boolean(news.full_content)}
+                  hasChineseSummary={isEnglishSource ? Boolean(news.content_zh) : Boolean(news.content)}
+                  translating={translating}
+                  onPlay={handleSpeak}
+                  onTranslateAndPlay={handleTranslateAndPlay}
+                />
               )}
               <button type="button" onClick={() => setSearchOpen(true)} aria-label="搜索文章内容" className="-mr-2 flex size-10 items-center justify-center rounded-xl transition-colors hover:bg-neutral-100 active:bg-neutral-200">
                 <Search className="size-[18px] text-neutral-400" />
@@ -217,7 +250,7 @@ export default function NewsDetail() {
               onTranslate={() => handleTranslate(Boolean(news.full_content_zh))}
               onRetryTranslate={() => handleTranslate(true)}
               onResumeTranslation={() => handleTranslate(false)}
-              onStopTranslation={stopTranslationWait}
+              onStopTranslation={handleStopTranslation}
               onRefetch={() => requestFullArticle(true)}
               refetching={articleLoading}
               onCancelRefetch={cancelFetch}

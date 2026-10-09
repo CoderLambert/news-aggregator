@@ -9,6 +9,7 @@ import hashlib
 import os
 import re
 import time
+from dataclasses import dataclass
 
 # Cache directory for generated TTS audio files
 TTS_CACHE_DIR = os.path.join(
@@ -45,29 +46,106 @@ VOICE_OPTIONS = {
 }
 
 
-def _cache_key(news_id: int, display_mode: str, voice: str) -> str:
-    """Generate a deterministic cache key for a TTS request."""
-    raw = f'{news_id}:{display_mode}:{voice}'
-    return hashlib.md5(raw.encode()).hexdigest()
+@dataclass(frozen=True)
+class ResolvedTTSContent:
+    language: str
+    title: str
+    content: str
+    namespace: str
 
 
-def get_cached_audio(news_id: int, display_mode: str, voice: str):
+class TTSContentUnavailable(Exception):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+def _cache_key(news_id: int, variant: str) -> str:
+    """Generate an opaque key that includes content and translation ownership."""
+    raw = f'{news_id}:{variant}'
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def get_cached_audio(news_id: int, variant: str):
     """Return cached MP3 file path if it exists, else None."""
-    key = _cache_key(news_id, display_mode, voice)
+    key = _cache_key(news_id, variant)
     path = os.path.join(TTS_CACHE_DIR, f'{key}.mp3')
     if os.path.isfile(path) and os.path.getsize(path) > 100:
         return path
     return None
 
 
-def save_to_cache(news_id: int, display_mode: str, voice: str, audio_bytes: bytes) -> str:
+def save_to_cache(news_id: int, variant: str, audio_bytes: bytes) -> str:
     """Save audio bytes to cache and return the file path."""
     os.makedirs(TTS_CACHE_DIR, exist_ok=True)
-    key = _cache_key(news_id, display_mode, voice)
+    key = _cache_key(news_id, variant)
     path = os.path.join(TTS_CACHE_DIR, f'{key}.mp3')
     with open(path, 'wb') as f:
         f.write(audio_bytes)
     return path
+
+
+def build_cache_variant(resolved: ResolvedTTSContent, scope: str, voice: str, speech_text: str) -> str:
+    text_digest = hashlib.sha256(speech_text.encode()).hexdigest()
+    return ':'.join((resolved.language, scope, voice, resolved.namespace, text_digest))
+
+
+def resolve_tts_content(news, user, language: str, scope: str) -> ResolvedTTSContent:
+    """Resolve speech content using the same private translation boundary as detail serialization."""
+    if language not in {'zh', 'original'}:
+        raise TTSContentUnavailable('unsupported_language', '不支持的朗读语言。')
+    if scope not in {'summary', 'full'}:
+        raise TTSContentUnavailable('unsupported_scope', '不支持的朗读范围。')
+
+    source_language = getattr(news.source, 'language', '')
+    if language == 'original' or source_language == 'zh':
+        content = news.full_content if scope == 'full' else news.content
+        if not content:
+            raise TTSContentUnavailable('source_content_required', '所选范围暂无原文内容。')
+        return ResolvedTTSContent(
+            language='zh' if source_language == 'zh' else 'original',
+            title=news.title,
+            content=content,
+            namespace='source',
+        )
+
+    if scope == 'summary':
+        content = news.content_zh
+        if not content:
+            raise TTSContentUnavailable('translation_required', '当前文章暂无中文摘要。')
+        return ResolvedTTSContent(
+            language='zh', title=news.title_zh, content=content, namespace='shared-summary',
+        )
+
+    if not news.full_content:
+        raise TTSContentUnavailable('source_content_required', '请先获取完整原文，再翻译并朗读。')
+
+    from api.models import ChatGPTArticleTranslation
+    from api.services.chatgpt_subscription import active_connection_for_user, source_hash
+
+    connection = active_connection_for_user(user)
+    if connection is not None:
+        translation = ChatGPTArticleTranslation.objects.filter(
+            user=user,
+            connection=connection,
+            news=news,
+            source_hash=source_hash(news.full_content),
+        ).first()
+        if translation is None or not translation.content:
+            raise TTSContentUnavailable('translation_required', '请先翻译全文，再播放中文语音。')
+        return ResolvedTTSContent(
+            language='zh',
+            title=news.title_zh,
+            content=translation.content,
+            namespace=f'subscription:{user.pk}:{connection.pk}',
+        )
+
+    if not news.full_content_zh:
+        raise TTSContentUnavailable('translation_required', '请先翻译全文，再播放中文语音。')
+    return ResolvedTTSContent(
+        language='zh', title=news.title_zh, content=news.full_content_zh, namespace='shared-full',
+    )
 
 
 # How many seconds a cached file can go untouched before considered expired.
