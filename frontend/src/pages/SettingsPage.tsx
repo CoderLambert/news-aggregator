@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { useAuth } from '@/context/AuthContext'
 import { useLanguage } from '@/context/useLanguage'
 import type { DisplayMode } from '@/types/news'
+import { useCapabilities } from '@/context/CapabilitiesContext'
 
 const DISPLAY_MODES = [
   { key: 'zh', label: '中文', description: '优先显示中文内容', icon: Type },
@@ -15,6 +16,10 @@ const DISPLAY_MODES = [
 export default function SettingsPage() {
   const { lang, setLang, displayMode, setDisplayMode, t } = useLanguage()
   const { user } = useAuth()
+  const { capabilities } = useCapabilities()
+  const canManageChatGPT = capabilities.features.accounts.enabled && capabilities.features.chatgpt_subscription.enabled
+  const canCompareProviders = capabilities.features.provider_comparisons.enabled
+  const canManageAdmin = capabilities.features.admin.enabled && Boolean(user?.isSuperuser)
 
   return (
     <section className="mx-auto w-full max-w-3xl px-4 pb-12 pt-6 sm:pt-10">
@@ -68,7 +73,7 @@ export default function SettingsPage() {
           </div>
         </section>
 
-        <section aria-labelledby="account-settings" className="rounded-2xl border border-border bg-card p-5 sm:p-6">
+        {canManageChatGPT && <section aria-labelledby="account-settings" className="rounded-2xl border border-border bg-card p-5 sm:p-6">
           <h2 id="account-settings" className="text-lg font-semibold">账号与连接</h2>
           <p className="mt-1 text-sm text-muted-foreground">ChatGPT 订阅连接只属于当前 NewsHub 用户。</p>
           <div className="mt-5 flex flex-col gap-4 rounded-xl bg-muted/50 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -83,19 +88,19 @@ export default function SettingsPage() {
               <Link to="/settings/chatgpt">{user ? '管理连接' : '查看说明'}</Link>
             </Button>
           </div>
-        </section>
+        </section>}
 
-        <section aria-labelledby="tool-settings" className="rounded-2xl border border-border bg-card p-5 sm:p-6">
+        {(canCompareProviders || canManageAdmin) && <section aria-labelledby="tool-settings" className="rounded-2xl border border-border bg-card p-5 sm:p-6">
           <h2 id="tool-settings" className="text-lg font-semibold">站点工具</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <Button variant="outline" className="h-12 justify-start" asChild>
+            {canCompareProviders && <Button variant="outline" className="h-12 justify-start" asChild>
               <Link to="/provider-comparisons"><GitCompareArrows aria-hidden="true" />Provider 对比</Link>
-            </Button>
-            <Button variant="outline" className="h-12 justify-start" asChild>
+            </Button>}
+            {canManageAdmin && <Button variant="outline" className="h-12 justify-start" asChild>
               <a href="/admin" target="_blank" rel="noreferrer"><LockKeyhole aria-hidden="true" />{t.admin}</a>
-            </Button>
+            </Button>}
           </div>
-        </section>
+        </section>}
       </div>
     </section>
   )

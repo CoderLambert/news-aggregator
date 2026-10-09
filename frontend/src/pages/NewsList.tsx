@@ -13,6 +13,7 @@ import LoadingSpinner from '@/components/LoadingSpinner'
 import { Pagination } from '@/components/Pagination'
 import { Button } from '@/components/ui/button'
 import { useUnblockNews } from '@/hooks/useNewsMutations'
+import { useCapability } from '@/context/CapabilitiesContext'
 
 const PAGE_SIZE = 20
 const LEGACY_FILTERS_KEY = 'news-aggregator-filters'
@@ -60,19 +61,29 @@ function readLegacyFilters(): LegacyFilters | null {
 export default function NewsList() {
   const { lang } = useLanguage()
   const { user, loading: authLoading } = useAuth()
+  const semanticSearchEnabled = useCapability('semantic_search').enabled
+  const blockedNewsEnabled = useCapability('blocked_news').enabled
   const location = useLocation()
   const navigationType = useNavigationType()
   const historyNavigationKey = navigationType === 'POP' ? location.key : null
   const [searchParams, setSearchParams] = useSearchParams()
   const search = searchParams.get('search') ?? ''
   const rawMode = searchParams.get('mode')
-  const mode: SearchMode = modes.includes(rawMode as SearchMode) ? rawMode as SearchMode : 'hybrid'
+  const requestedMode: SearchMode = modes.includes(rawMode as SearchMode) ? rawMode as SearchMode : 'hybrid'
+  const mode: SearchMode = semanticSearchEnabled ? requestedMode : 'keyword'
   const categories = selectedIds(searchParams.get('category'))
   const sources = selectedIds(searchParams.get('source'))
   const page = positiveInteger(searchParams.get('page'), 1)
   const hasUrlFilters = ['search', 'mode', 'category', 'source', 'page'].some((key) => searchParams.has(key))
   const legacySignature = hasUrlFilters ? null : JSON.stringify(readLegacyFilters())
   const legacyToMigrate = legacySignature && legacySignature !== 'null'
+
+  useEffect(() => {
+    if (semanticSearchEnabled || !rawMode || rawMode === 'keyword') return
+    const next = new URLSearchParams(searchParams)
+    next.set('mode', 'keyword')
+    setSearchParams(next, { replace: true })
+  }, [rawMode, searchParams, semanticSearchEnabled, setSearchParams])
 
   useEffect(() => {
     if (!legacyToMigrate || !legacySignature) return
@@ -138,10 +149,12 @@ export default function NewsList() {
         <SearchBar
           value={search}
           mode={mode}
+          allowSemantic={semanticSearchEnabled}
           historyNavigationKey={historyNavigationKey}
           onChange={(value) => updateParams({ search: value.trim() || null, page: null }, true)}
           onModeChange={(value) => updateParams({ mode: value, page: null })}
         />
+        {!semanticSearchEnabled && <p className="mt-1 text-xs text-muted-foreground" role="status">当前仅支持关键词搜索。</p>}
       </div>
 
       <NewsFilters
@@ -189,7 +202,7 @@ export default function NewsList() {
       )}
 
       <NewsResults
-        key={viewerId}
+        key={String(viewerId) + ':' + String(blockedNewsEnabled)}
         results={data?.results ?? []}
         viewerId={currentViewerId}
         lang={lang}
@@ -220,6 +233,7 @@ function NewsResults({ results, viewerId, lang, fetching }: {
   lang: 'zh' | 'en'
   fetching: boolean
 }) {
+  const blockedNewsEnabled = useCapability('blocked_news').enabled
   const unblockMutation = useUnblockNews()
   const blockVersionRef = useRef(0)
   const latestSuccessfulBlockVersionRef = useRef(0)
@@ -229,7 +243,7 @@ function NewsResults({ results, viewerId, lang, fetching }: {
   const [undoTarget, setUndoTarget] = useState<BlockedNewsTarget | null>(null)
   const [undoPendingVersion, setUndoPendingVersion] = useState<number | null>(null)
   const [undoErrorVersion, setUndoErrorVersion] = useState<number | null>(null)
-  const visibleResults = results.filter((item) => !hiddenBlockedIds.has(item.id))
+  const visibleResults = blockedNewsEnabled ? results.filter((item) => !hiddenBlockedIds.has(item.id)) : results
 
   function startBlock(_newsId: number, initiatingViewerId: number) {
     if (initiatingViewerId !== viewerId) return -1
@@ -257,7 +271,7 @@ function NewsResults({ results, viewerId, lang, fetching }: {
 
   async function undoBlock() {
     const target = undoTargetRef.current
-    if (!target || target.viewerId !== viewerId) return
+    if (!blockedNewsEnabled || !target || target.viewerId !== viewerId) return
     setUndoPendingVersion(target.version)
     setUndoErrorVersion(null)
     try {
@@ -297,7 +311,7 @@ function NewsResults({ results, viewerId, lang, fetching }: {
         ))}
       </div>
 
-      {undoTarget !== null && (
+      {blockedNewsEnabled && undoTarget !== null && (
         <div className="fixed bottom-5 left-1/2 z-50 flex w-[min(92vw,28rem)] -translate-x-1/2 items-center gap-3 rounded-2xl bg-neutral-900 px-4 py-3 text-sm text-white shadow-2xl" role="status" aria-live="polite">
           <span className="min-w-0 flex-1">{lang === 'en' ? 'News hidden from your feed.' : '已从资讯流中屏蔽这篇新闻。'}</span>
           <button ref={undoButtonRef} type="button" onClick={() => void undoBlock()} disabled={undoPendingVersion === undoTarget.version} className="min-h-11 shrink-0 rounded-lg px-3 py-1 font-semibold text-amber-300 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 disabled:opacity-50 sm:min-h-8">
@@ -306,7 +320,7 @@ function NewsResults({ results, viewerId, lang, fetching }: {
           <button type="button" aria-label={lang === 'en' ? 'Dismiss' : '关闭提示'} onClick={dismissUndo} className="flex size-11 shrink-0 items-center justify-center rounded-lg text-neutral-300 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:size-8">×</button>
         </div>
       )}
-      {undoTarget && undoErrorVersion === undoTarget.version && <p role="alert" className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 shadow">{lang === 'en' ? 'Could not restore this news.' : '恢复失败，请重试。'}</p>}
+      {blockedNewsEnabled && undoTarget && undoErrorVersion === undoTarget.version && <p role="alert" className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 shadow">{lang === 'en' ? 'Could not restore this news.' : '恢复失败，请重试。'}</p>}
     </>
   )
 }

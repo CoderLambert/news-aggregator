@@ -12,7 +12,7 @@
 | S05-BACKEND | P00/03 | article_fetcher安全输送/各provider/比较验证器 | 106测试PASS；DNS/每跳/全deadline/wire/GET；High待G1 | TESTED | 7bef7fb候选；未审核 |
 | NH-PUB-04 | 03 | Dockerfile/compose.prod/entrypoint/持久路径 | 阶段A54+8PASS；B镜像/健康/重建持久性/权限待验 | DOING | 基线；未审核 |
 | NH-PUB-02 | 03、04 | deploy/nginx/模板与隔离验证 | nginx -t/路径/SSE/缓存/TLS bootstrap | TODO | 基线；未审核 |
-| NH-PUB-10 | 05 | services/api/AuthContext/页面/index/测试 | 匿名只读、capabilities、handoff/缓存、前端全量 | DOING | 基线；未审核 |
+| NH-PUB-10 | 05 | services/api/AuthContext/页面/index/测试 | 31定向+421全量PASS、typecheck/lint/build0；High待G1 | TESTED | 基线；未审核 |
 | NH-PUB-11/12 | G1 前项 | CI/部署回滚备份恢复/release-gates | 前后端全量/check/Docker/Nginx/模拟恢复/High | TODO | 基线；未审核 |
 | S01/P01/G2 | G1 本地门槛 | Chat 归属迁移/事务/账户 CSRF 限速/前端缓存 | A/B/匿名/并发/历史隔离/登录重放/High | TODO | 基线；未审核 |
 | NH-PUB-06/S02/S04/O01/O02/O03/G3 | G2 | Provider 合规路由/预算/持久任务/SSE | Fake Provider 原子配额/幂等/取消/恢复/隔离/High | TODO | 基线；未审核 |

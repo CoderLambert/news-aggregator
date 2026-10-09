@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import AuthModal from '@/components/AuthModal'
+import { CapabilitiesTestProvider } from '../helpers/capabilities'
 
 const auth = vi.hoisted(() => ({ login: vi.fn(), register: vi.fn() }))
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => auth }))
@@ -21,7 +22,7 @@ function Harness() {
 describe('AuthModal keyboard behavior', () => {
   it('focuses the form, traps Tab, and closes on Escape with focus restored', async () => {
     const user = userEvent.setup()
-    render(<Harness />)
+    render(<CapabilitiesTestProvider><Harness /></CapabilitiesTestProvider>)
 
     const opener = screen.getByRole('button', { name: '打开登录' })
     await user.click(opener)

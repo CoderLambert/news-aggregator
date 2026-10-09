@@ -6,6 +6,35 @@ import { newsKeys } from '@/services/newsQueries'
 import { fetchCsrfToken, fetchMe, loginUser, logoutUser, registerUser } from '@/services/api'
 import { isRecord } from '@/types/news'
 import { newsWorkflowKeys } from '@/services/newsWorkflowQueries'
+import { useCapabilities } from '@/context/CapabilitiesContext'
+
+const PRIVATE_MARKER_PREFIXES = [
+  'translating_',
+  'translation_paused_',
+  'news-aggregator:research-recovery:v1',
+  'newshub:full-article-auto',
+  'newshub:full-article-cancel',
+  'newshub_tts_pos_',
+]
+
+function clearPrivateMarkers(): void {
+  const storages: Storage[] = []
+  try { if (globalThis.localStorage) storages.push(globalThis.localStorage) } catch { /* storage can be unavailable */ }
+  try { if (globalThis.sessionStorage) storages.push(globalThis.sessionStorage) } catch { /* storage can be unavailable */ }
+  for (const storage of storages) {
+    if (!storage) continue
+    try {
+      const keys: string[] = []
+      for (let index = 0; index < storage.length; index += 1) {
+        const key = storage.key(index)
+        if (key && PRIVATE_MARKER_PREFIXES.some((prefix) => key.startsWith(prefix))) keys.push(key)
+      }
+      for (const key of keys) storage.removeItem(key)
+    } catch {
+      // Storage may be disabled; authentication and reading preferences still work.
+    }
+  }
+}
 
 export interface AuthUser {
   id: number
@@ -39,6 +68,9 @@ export function useAuth(): AuthContextValue {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const { capabilities, loading: capabilitiesLoading } = useCapabilities()
+  const accountsEnabled = !capabilitiesLoading && capabilities.features.accounts.enabled
+  const signupEnabled = accountsEnabled && capabilities.features.signup.enabled
   const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
   const [csrfReady, setCsrfReady] = useState(false)
@@ -67,46 +99,92 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [csrfReady])
 
   const refresh = useCallback(async () => {
+    if (!accountsEnabled) {
+      clearPrivateMarkers()
+      if (viewerIdRef.current !== null) clearViewerQueries()
+      viewerIdRef.current = null
+      setUser(null)
+      setLoading(false)
+      return
+    }
     try {
       const nextUser = parseAuthUser(await fetchMe())
-      if (viewerIdRef.current !== nextUser.id) clearViewerQueries()
+      if (viewerIdRef.current !== nextUser.id) {
+        clearViewerQueries()
+        clearPrivateMarkers()
+      }
       viewerIdRef.current = nextUser.id
       setUser(nextUser)
     } catch {
-      if (viewerIdRef.current !== null) clearViewerQueries()
+      if (viewerIdRef.current !== null) {
+        clearViewerQueries()
+        clearPrivateMarkers()
+      }
       viewerIdRef.current = null
       setUser(null)
     } finally {
       setLoading(false)
     }
-  }, [clearViewerQueries])
+  }, [accountsEnabled, clearViewerQueries])
 
-  useEffect(() => { queueMicrotask(() => void refresh()) }, [refresh])
+  useEffect(() => {
+    if (capabilitiesLoading) {
+      return
+    }
+    if (!accountsEnabled) {
+      clearPrivateMarkers()
+      if (viewerIdRef.current !== null) {
+        clearViewerQueries()
+        queueMicrotask(() => setUser(null))
+      }
+      viewerIdRef.current = null
+      return
+    }
+    queueMicrotask(() => void refresh())
+  }, [accountsEnabled, capabilitiesLoading, clearViewerQueries, refresh])
 
   const login = useCallback(async (username: string, password: string) => {
+    if (!accountsEnabled) throw new Error('账号功能当前不可用')
     await ensureCsrf()
     const nextUser = parseAuthUser(await loginUser(username, password))
     clearViewerQueries()
+    clearPrivateMarkers()
     viewerIdRef.current = nextUser.id
     setUser(nextUser)
+    setLoading(false)
     return nextUser
-  }, [clearViewerQueries, ensureCsrf])
+  }, [accountsEnabled, clearViewerQueries, ensureCsrf])
 
   const register = useCallback(async (username: string, password: string, email = '') => {
+    if (!accountsEnabled) throw new Error('账号功能当前不可用')
+    if (!signupEnabled) throw new Error('公开注册当前已关闭')
     await ensureCsrf()
     const nextUser = parseAuthUser(await registerUser(username, password, email))
     clearViewerQueries()
+    clearPrivateMarkers()
     viewerIdRef.current = nextUser.id
     setUser(nextUser)
+    setLoading(false)
     return nextUser
-  }, [clearViewerQueries, ensureCsrf])
+  }, [accountsEnabled, clearViewerQueries, ensureCsrf, signupEnabled])
 
   const logout = useCallback(async () => {
-    try { await logoutUser() } catch { /* clear local identity even if the server session expired */ }
+    if (accountsEnabled) {
+      try { await logoutUser() } catch { /* clear local identity even if the server session expired */ }
+    }
     clearViewerQueries()
+    clearPrivateMarkers()
     viewerIdRef.current = null
     setUser(null)
-  }, [clearViewerQueries])
+    setLoading(false)
+  }, [accountsEnabled, clearViewerQueries])
 
-  return <AuthContext.Provider value={{ user, loading, login, register, logout, refresh }}>{children}</AuthContext.Provider>
+  return <AuthContext.Provider value={{
+    user: accountsEnabled ? user : null,
+    loading: capabilitiesLoading || (accountsEnabled && loading),
+    login,
+    register,
+    logout,
+    refresh,
+  }}>{children}</AuthContext.Provider>
 }

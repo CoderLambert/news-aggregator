@@ -19,6 +19,7 @@ vi.mock('@/services/researchApi', () => api)
 vi.mock('@gsap/react', () => ({ useGSAP: () => {} }))
 
 import ResearchLauncher from '@/components/research/ResearchLauncher'
+import { CapabilitiesTestProvider } from '../../helpers/capabilities'
 
 function waitForAbort(signal) {
   return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))
@@ -59,10 +60,12 @@ function renderPanel(route = '/', withDetailLauncher = false, user = signedInUse
         logout: vi.fn(),
         refresh: vi.fn(),
       }}>
-        <MemoryRouter initialEntries={[route]}>
-          {withDetailLauncher && <button type="button" aria-label="打开 AI 助手小闻" className="fixed bottom-6 right-6 size-16" />}
-          <ResearchLauncher />
-        </MemoryRouter>
+        <CapabilitiesTestProvider client={client}>
+          <MemoryRouter initialEntries={[route]}>
+            {withDetailLauncher && <button type="button" aria-label="打开 AI 助手小闻" className="fixed bottom-6 right-6 size-16" />}
+            <ResearchLauncher />
+          </MemoryRouter>
+        </CapabilitiesTestProvider>
       </AuthContext.Provider>
     </QueryClientProvider>,
   )

@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import FavoriteButtons from '@/components/news-detail/FavoriteButtons'
 import * as api from '@/services/api'
 import { AuthContext } from '@/context/AuthContext'
+import { CapabilitiesTestProvider, fullCapabilities } from '../../helpers/capabilities'
 
 vi.mock('@/services/api', () => ({
   toggleFavorite: vi.fn(),
@@ -16,14 +17,21 @@ vi.mock('@/services/api', () => ({
 let isBlocked
 let favoriteStatus
 
-function renderWithAuth(ui, user = null, client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })) {
+function renderWithAuth(
+  ui,
+  user = null,
+  client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }),
+  capabilities = fullCapabilities(),
+) {
   return {
     client,
     ...render(
       <QueryClientProvider client={client}>
-        <AuthContext.Provider value={{ user, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
-          {ui}
-        </AuthContext.Provider>
+        <CapabilitiesTestProvider client={client} value={capabilities}>
+          <AuthContext.Provider value={{ user, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
+            {ui}
+          </AuthContext.Provider>
+        </CapabilitiesTestProvider>
       </QueryClientProvider>,
     ),
   }
@@ -106,6 +114,22 @@ describe('FavoriteButtons', () => {
     renderWithAuth(<FavoriteButtons newsId={1} />)
     expect(screen.getAllByText('登录')).toHaveLength(2)
     expect(api.checkFavoriteStatus).not.toHaveBeenCalled()
+  })
+
+  it('does not query or render favorite and block controls when both capabilities are disabled', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    renderWithAuth(
+      <FavoriteButtons newsId={1} />,
+      { id: 1, username: 'test' },
+      client,
+      fullCapabilities({ favorites: false, blocked_news: false }),
+    )
+
+    expect(screen.queryByLabelText('点赞')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('收藏')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('屏蔽此新闻')).not.toBeInTheDocument()
+    expect(api.checkFavoriteStatus).not.toHaveBeenCalled()
+    expect(api.checkBlockedStatus).not.toHaveBeenCalled()
   })
 
   it('invalidates viewer-scoped news and block lists after a confirmed block', async () => {

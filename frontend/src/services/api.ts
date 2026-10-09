@@ -8,6 +8,96 @@ import type { FavoriteType } from '@/types/news'
 export type NewsId = string | number
 export type ApiQueryParams = Readonly<Record<string, string | number | boolean | undefined>>
 
+export const CAPABILITY_FEATURE_NAMES = [
+  'news',
+  'keyword_search',
+  'semantic_search',
+  'accounts',
+  'signup',
+  'favorites',
+  'blocked_news',
+  'chat_history',
+  'fetch_full',
+  'translation',
+  'chat',
+  'suggested_questions',
+  'tts',
+  'research',
+  'provider_comparisons',
+  'admin',
+  'chatgpt_subscription',
+] as const
+
+export type CapabilityName = (typeof CAPABILITY_FEATURE_NAMES)[number]
+export type CapabilityReason =
+  | 'public_read_only'
+  | 'ai_disabled'
+  | 'semantic_search_disabled'
+  | 'signup_disabled'
+  | 'chatgpt_auth_disabled'
+  | 'hosted_integration_unapproved'
+  | 'chatgpt_plan_usage_disabled'
+  | 'capabilities_unavailable'
+
+export interface CapabilityFeature {
+  enabled: boolean
+  reason: CapabilityReason | null
+}
+
+export interface SiteCapabilities {
+  site_mode: 'full' | 'read_only'
+  chatgpt_auth_mode: 'disabled' | 'local_oss' | 'website'
+  features: Record<CapabilityName, CapabilityFeature>
+}
+
+const CAPABILITY_REASONS = new Set<CapabilityReason>([
+  'public_read_only',
+  'ai_disabled',
+  'semantic_search_disabled',
+  'signup_disabled',
+  'chatgpt_auth_disabled',
+  'hosted_integration_unapproved',
+  'chatgpt_plan_usage_disabled',
+  'capabilities_unavailable',
+])
+
+export function parseCapabilities(value: unknown): SiteCapabilities {
+  if (!isRecord(value) || (value.site_mode !== 'full' && value.site_mode !== 'read_only') ||
+    (value.chatgpt_auth_mode !== 'disabled' && value.chatgpt_auth_mode !== 'local_oss' && value.chatgpt_auth_mode !== 'website') ||
+    !isRecord(value.features)) {
+    throw new TypeError('Invalid site capabilities response')
+  }
+
+  const featureNames = Object.keys(value.features)
+  if (featureNames.length !== CAPABILITY_FEATURE_NAMES.length ||
+    CAPABILITY_FEATURE_NAMES.some((name) => !Object.prototype.hasOwnProperty.call(value.features, name))) {
+    throw new TypeError('Invalid site capabilities response')
+  }
+
+  const features = {} as Record<CapabilityName, CapabilityFeature>
+  for (const name of CAPABILITY_FEATURE_NAMES) {
+    const feature: unknown = value.features[name]
+    if (!isRecord(feature) || typeof feature.enabled !== 'boolean') {
+      throw new TypeError('Invalid site capabilities response')
+    }
+    if (feature.enabled) {
+      if (feature.reason !== null) throw new TypeError('Invalid site capabilities response')
+      features[name] = { enabled: true, reason: null }
+      continue
+    }
+    if (typeof feature.reason !== 'string' || !CAPABILITY_REASONS.has(feature.reason as CapabilityReason)) {
+      throw new TypeError('Invalid site capabilities response')
+    }
+    features[name] = { enabled: false, reason: feature.reason as CapabilityReason }
+  }
+
+  return {
+    site_mode: value.site_mode,
+    chatgpt_auth_mode: value.chatgpt_auth_mode,
+    features,
+  }
+}
+
 export interface ProviderComparisonParams extends ApiQueryParams {
   page?: number
   page_size?: number
@@ -85,6 +175,11 @@ function makeApi(timeout: number): AxiosInstance {
 const api = makeApi(10_000)
 const apiFetch = makeApi(120_000)
 const apiLong = makeApi(180_000)
+
+export async function fetchCapabilities(): Promise<SiteCapabilities> {
+  const value: unknown = (await api.get<unknown>('/capabilities/')).data
+  return parseCapabilities(value)
+}
 
 // ---- News -----------------------------------------------------------------
 
@@ -330,8 +425,10 @@ export async function startChatGPTSubscriptionConnect(connectionId?: string): Pr
     throw new TypeError('Invalid ChatGPT authorization handoff response')
   }
   const handoff = new URL(value.handoff_url)
-  if (handoff.protocol !== 'http:' || handoff.hostname !== '127.0.0.1' || handoff.port !== '9527' ||
-    handoff.pathname !== '/api/chatgpt-subscription/handoff/' || handoff.search || handoff.hash) {
+  if (value.handoff_url !== 'http://127.0.0.1:9527/api/chatgpt-subscription/handoff/' ||
+    handoff.protocol !== 'http:' || handoff.hostname !== '127.0.0.1' || handoff.port !== '9527' ||
+    handoff.username || handoff.password || handoff.pathname !== '/api/chatgpt-subscription/handoff/' ||
+    handoff.search || handoff.hash) {
     throw new TypeError('Invalid ChatGPT authorization handoff URL')
   }
   return { attempt_id: value.attempt_id, handoff_token: value.handoff_token, handoff_url: handoff.href }

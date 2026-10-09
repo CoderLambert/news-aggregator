@@ -13,6 +13,7 @@ interface SearchBarProps {
   onChange: (value: string) => void
   onModeChange: (mode: SearchMode) => void
   historyNavigationKey?: string | null
+  allowSemantic?: boolean
 }
 
 const modes: Record<'zh' | 'en', Array<{ key: SearchMode; label: string }>> = {
@@ -20,7 +21,7 @@ const modes: Record<'zh' | 'en', Array<{ key: SearchMode; label: string }>> = {
   en: [{ key: 'keyword', label: 'Keyword' }, { key: 'semantic', label: 'Semantic' }, { key: 'hybrid', label: 'Hybrid' }],
 }
 
-export default function SearchBar({ value, mode, onChange, onModeChange, historyNavigationKey = null }: SearchBarProps) {
+export default function SearchBar({ value, mode, onChange, onModeChange, historyNavigationKey = null, allowSemantic = false }: SearchBarProps) {
   const { lang, t } = useLanguage()
   const [inputState, setInputState] = useState(() => ({ value, display: value, historyNavigationKey }))
   const display = inputState.display
@@ -28,6 +29,7 @@ export default function SearchBar({ value, mode, onChange, onModeChange, history
   const onChangeRef = useRef(onChange)
   const currentValueRef = useRef(value)
   const lastHistoryNavigationKeyRef = useRef(historyNavigationKey)
+  const effectiveMode = allowSemantic ? mode : 'keyword'
 
   const valueChanged = inputState.value !== value
   const navigationChanged = inputState.historyNavigationKey !== historyNavigationKey
@@ -84,7 +86,7 @@ export default function SearchBar({ value, mode, onChange, onModeChange, history
           <Input type="search" value={display} onChange={(event: ChangeEvent<HTMLInputElement>) => handleChange(event.target.value)} placeholder={t.search} aria-label={t.search} className="h-10 rounded-xl pl-10" />
         </div>
         <Link
-          to={`/search${display.trim() ? `?q=${encodeURIComponent(display.trim())}&mode=${mode}` : ''}`}
+          to={`/search${display.trim() ? `?q=${encodeURIComponent(display.trim())}&mode=${effectiveMode}` : ''}`}
           className="shrink-0 rounded-lg px-2 py-2 text-xs font-medium text-violet-700 hover:bg-violet-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
         >
           {lang === 'en' ? 'Advanced' : '高级搜索'}
@@ -92,16 +94,16 @@ export default function SearchBar({ value, mode, onChange, onModeChange, history
       </div>
       <ToggleGroup
         type="single"
-        value={mode}
+        value={effectiveMode}
         onValueChange={(nextMode: string) => {
-          if (nextMode === 'keyword' || nextMode === 'semantic' || nextMode === 'hybrid') onModeChange(nextMode)
+          if (nextMode === 'keyword' || (allowSemantic && (nextMode === 'semantic' || nextMode === 'hybrid'))) onModeChange(nextMode as SearchMode)
         }}
         variant="outline"
         size="sm"
         aria-label={lang === 'en' ? 'Search mode' : '搜索模式'}
         className="rounded-lg"
       >
-        {modes[lang].map((option) => (
+        {modes[lang].filter((option) => allowSemantic || option.key === 'keyword').map((option) => (
           <ToggleGroupItem key={option.key} value={option.key} aria-label={option.label} variant="outline" size="sm" className="text-xs font-medium data-[state=on]:bg-blue-500 data-[state=on]:text-white">
             {option.label}
           </ToggleGroupItem>

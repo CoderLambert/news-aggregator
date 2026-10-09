@@ -65,3 +65,9 @@
 - 04A54PASS与shell/export/composequiet检查0；R1八开关default/explicit覆盖与两Workerhealth回归8PASS；R2 context9PASS，实际Docker最小synthetic build/cp证明nested env/credentials/cache excluded、source.py/token_manager.py/frontend源码 included。首轮scratch无CMD create失败已补未启动占位命令后通过。测试随机container/image最终无残留，未真实build生产image/读用户DB/改变运行服务。
 - 默认development/root保留旧bind-mount SQLite权限，production必须--target production且UID10001/SHA标签；生产卷paths、flock迁移一次性service、app/Worker依赖和静态current/previous/共享hashassets已由主Agent读diff整合。
 - 下一批：02+本地域名阶段A（生产模板、测试CA/DNS alias/browser脚本开发与离线/语法核验）；10仍实现capabilities UX。待10结束整合commit才build同SHA镜像，执行04B和正式域名本地HTTPS验收。
+
+## NH-PUB-10 前端完整边界验收
+候选HEAD baa21eacb5055ae7a0dbd15fffa0e94be7b3be3c加10前端diff；状态TESTED，High待G1，未访问真实站点/Provider/OAuth。17feature强类型与fail-closed provider、私有deep route保护、按钮/自动fetch/translation恢复门控、keyword fallback、私人缓存marker清理、local handoff精确URL与SEO均实现。旧full行为用显式fixture验证，无test环境全开豁免。
+- 4新增定向文件31tests PASS退出0；cd frontend && npm run typecheck && npm run lint && npm run test:run && npm run build退出0，全量63files/421tests。首轮测试generator无yield lint错误已修复合法progress event后全链通过，最终版本不重复跑。git diff --check0。
+- 主Agent核对CapabilitiesContext/FeatureRoute/AuthContext/API schema、禁用时不挂private页面以及默认ctx关闭，逐owned diff统计未见越界；后续G2还要补Auth refresh/logout并发响应的epoch保护，不将当前cache清理当全部账户竞争验收。
+- 下一任务：11/12真实测试收集/CI/一致快照恢复与dryrun发布，独立于02本地域名脚本；02当前上游9527保留生产模板，19527仅04 host-network smoke。

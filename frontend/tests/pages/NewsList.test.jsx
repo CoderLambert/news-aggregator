@@ -6,6 +6,7 @@ import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { AuthContext } from '@/context/AuthContext'
 import { usePreferencesStore } from '@/stores/preferences'
 import NewsList from '@/pages/NewsList'
+import { CapabilitiesTestProvider } from '../helpers/capabilities'
 import { blockNews, fetchCategories, fetchNews, fetchNewsDetail, fetchSources, unblockNews } from '@/services/api'
 
 vi.mock('@/services/api', () => ({
@@ -81,13 +82,15 @@ function renderList(url, { historyControls = false } = {}) {
   const initialEntries = Array.isArray(url) ? url : [url]
   return render(
     <QueryClientProvider client={client}>
-      <AuthContext.Provider value={{ user, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
-        <MemoryRouter initialEntries={initialEntries} initialIndex={initialEntries.length - 1}>
-          <NewsList />
-          {historyControls && <HistoryControls />}
-          <LocationProbe />
-        </MemoryRouter>
-      </AuthContext.Provider>
+      <CapabilitiesTestProvider client={client}>
+        <AuthContext.Provider value={{ user, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
+          <MemoryRouter initialEntries={initialEntries} initialIndex={initialEntries.length - 1}>
+            <NewsList />
+            {historyControls && <HistoryControls />}
+            <LocationProbe />
+          </MemoryRouter>
+        </AuthContext.Provider>
+      </CapabilitiesTestProvider>
     </QueryClientProvider>,
   )
 }
@@ -108,7 +111,9 @@ function renderViewerList() {
 
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter><ViewerHarness /></MemoryRouter>
+      <CapabilitiesTestProvider client={client}>
+        <MemoryRouter><ViewerHarness /></MemoryRouter>
+      </CapabilitiesTestProvider>
     </QueryClientProvider>,
   )
 }

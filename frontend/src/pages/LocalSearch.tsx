@@ -8,6 +8,7 @@ import { useLanguage } from '@/context/useLanguage'
 import { newsListOptions, newsListPlaceholderData } from '@/services/newsQueries'
 import { Pagination } from '@/components/Pagination'
 import type { NewsListParams, NewsSummary, SearchMode, SearchOrderBy, SourceType } from '@/types/news'
+import { useCapability } from '@/context/CapabilitiesContext'
 
 const PAGE_SIZE = 20
 const MODES: { key: SearchMode; label: string }[] = [
@@ -126,8 +127,10 @@ export default function LocalSearch() {
   const historyNavigationKey = navigationType === 'POP' ? location.key : null
   const { user, loading: authLoading } = useAuth()
   const { lang } = useLanguage()
+  const semanticSearchEnabled = useCapability('semantic_search').enabled
   const submittedQuery = (searchParams.get('q') ?? '').trim()
-  const mode = resolveMode(searchParams.get('mode'))
+  const requestedMode = resolveMode(searchParams.get('mode'))
+  const mode = semanticSearchEnabled ? requestedMode : 'keyword'
   const page = positiveInteger(searchParams.get('page'), 1)
   const orderBy = resolveOrderBy(searchParams.get('order_by'))
   const fullContentOnly = searchParams.get('full_content') === 'true'
@@ -135,6 +138,14 @@ export default function LocalSearch() {
   const sourceTypeFilters = resolveSourceTypes(searchParams.get('source_types'))
   const sourceType = sourceTypeFilters[0]
   const [showFilters, setShowFilters] = useState(false)
+
+  useEffect(() => {
+    const rawMode = searchParams.get('mode')
+    if (semanticSearchEnabled || !rawMode || rawMode === 'keyword') return
+    const next = new URLSearchParams(searchParams)
+    next.set('mode', 'keyword')
+    setSearchParams(next, { replace: true })
+  }, [searchParams, semanticSearchEnabled, setSearchParams])
 
   const viewerId = user?.id ?? 'anonymous'
   const publishTimeAfter = dateAfterDays(days)
@@ -214,11 +225,13 @@ export default function LocalSearch() {
         initialQuery={submittedQuery}
         historyNavigationKey={historyNavigationKey}
         mode={mode}
+        allowSemantic={semanticSearchEnabled}
         searching={newsQuery.isFetching}
         buttonLabel={searchButtonLabel}
         onSubmit={handleSubmit}
         onModeChange={(value) => updateFilters({ mode: value })}
       />
+      {!semanticSearchEnabled && <p className="mb-3 text-xs text-muted-foreground" role="status">当前仅支持关键词搜索。</p>}
 
       <section aria-label="搜索筛选" className="mb-4 rounded-xl border border-neutral-100 bg-neutral-50/80 p-3">
         <div className="flex flex-wrap items-center gap-4">
@@ -357,10 +370,11 @@ export default function LocalSearch() {
   )
 }
 
-function SearchControls({ initialQuery, historyNavigationKey, mode, searching, buttonLabel, onSubmit, onModeChange }: {
+function SearchControls({ initialQuery, historyNavigationKey, mode, allowSemantic, searching, buttonLabel, onSubmit, onModeChange }: {
   initialQuery: string
   historyNavigationKey: string | null
   mode: SearchMode
+  allowSemantic: boolean
   searching: boolean
   buttonLabel: string
   onSubmit: (query: string) => void
@@ -411,7 +425,10 @@ function SearchControls({ initialQuery, historyNavigationKey, mode, searching, b
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <span className="text-xs text-muted-foreground">模式:</span>
-        <PillGroup options={MODES} value={mode} onChange={(value) => onModeChange(resolveMode(value))} />
+        <PillGroup options={MODES.filter((option) => allowSemantic || option.key === 'keyword')} value={mode} onChange={(value) => {
+          const nextMode = resolveMode(value)
+          if (nextMode === 'keyword' || allowSemantic) onModeChange(nextMode)
+        }} />
         <span className="text-xs text-muted-foreground">{MODE_HINTS[mode]}</span>
       </div>
     </form>

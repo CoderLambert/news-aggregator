@@ -7,6 +7,7 @@ import { queryClient } from '@/services/queryClient'
 import { usePreferencesStore } from '@/stores/preferences'
 import NewsList from '@/pages/NewsList'
 import { fetchCategories, fetchCsrfToken, fetchMe, fetchNews, fetchSources, loginUser, logoutUser, registerUser } from '@/services/api'
+import { CapabilitiesTestProvider } from '../helpers/capabilities'
 
 vi.mock('@/services/api', () => ({
   fetchNews: vi.fn(),
@@ -55,12 +56,14 @@ function AuthControls() {
 function renderAuthenticatedList() {
   return render(
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <MemoryRouter initialEntries={['/']}>
-          <AuthControls />
-          <NewsList />
-        </MemoryRouter>
-      </AuthProvider>
+      <CapabilitiesTestProvider client={queryClient}>
+        <AuthProvider>
+          <MemoryRouter initialEntries={['/']}>
+            <AuthControls />
+            <NewsList />
+          </MemoryRouter>
+        </AuthProvider>
+      </CapabilitiesTestProvider>
     </QueryClientProvider>,
   )
 }

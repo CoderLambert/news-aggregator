@@ -10,6 +10,7 @@ import {
 import { translateFullArticleStream } from '@/services/newsWorkflowApi'
 import { parseNewsId } from '@/services/newsWorkflowQueries'
 import type { NewsDetail } from '@/types/news'
+import { useCapability } from '@/context/CapabilitiesContext'
 
 interface TranslationState {
   ownerKey: string
@@ -38,6 +39,7 @@ export function useTranslation(
 ) {
   const { user } = useAuth()
   const { lang } = useLanguage()
+  const translationEnabled = useCapability('translation').enabled
   const newsId = parseNewsId(id)
   const viewerId = user?.id ?? 'anonymous'
   const ownerKey = `${newsId ?? String(id ?? '')}:${viewerId}:${lang}`
@@ -62,7 +64,7 @@ export function useTranslation(
   }, [ownerKey])
 
   const handleTranslate = useCallback(async (force = false): Promise<boolean> => {
-    if (newsId === null || !news || news.id !== newsId || !news.full_content) return false
+    if (!translationEnabled || newsId === null || !news || news.id !== newsId || !news.full_content) return false
     if (requestRef.current?.ownerKey === ownerKey) return false
     requestRef.current?.controller.abort()
 
@@ -120,7 +122,7 @@ export function useTranslation(
     } finally {
       if (isCurrent()) requestRef.current = null
     }
-  }, [news, newsId, ownerKey, pausedKey, setNews, updateState])
+  }, [news, newsId, ownerKey, pausedKey, setNews, translationEnabled, updateState])
 
   const stopTranslationWait = useCallback(() => {
     const request = requestRef.current
@@ -147,7 +149,18 @@ export function useTranslation(
   }, [ownerKey])
 
   useEffect(() => {
-    if (loading || !news || news.id !== newsId || autoResumeArticleRef.current === ownerKey) return
+    if (translationEnabled) return
+    const request = requestRef.current
+    if (request?.ownerKey === ownerKey) {
+      requestRef.current = null
+      request.controller.abort()
+    }
+    autoResumeArticleRef.current = ''
+    updateState({ translating: false, waitingShared: false, error: '', progress: '' })
+  }, [ownerKey, translationEnabled, updateState])
+
+  useEffect(() => {
+    if (!translationEnabled || loading || !news || news.id !== newsId || autoResumeArticleRef.current === ownerKey) return
     autoResumeArticleRef.current = ownerKey
 
     const paused = pausedKey ? localStorage.getItem(pausedKey) : null
@@ -164,7 +177,7 @@ export function useTranslation(
     if (news.full_translation_active) {
       void handleTranslate(false)
     }
-  }, [handleTranslate, loading, news, newsId, ownerKey, pausedKey, updateState])
+  }, [handleTranslate, loading, news, newsId, ownerKey, pausedKey, translationEnabled, updateState])
 
   return {
     translating: visibleState.translating,

@@ -27,6 +27,7 @@ import { useArticleSearch } from '@/hooks/useArticleSearch'
 import { useArticleToc } from '@/hooks/useArticleToc'
 import type { NewsDetail as NewsDetailRecord } from '@/types/news'
 import type { SpeechLanguage, SpeechScope } from '@/constants/tts'
+import { useCapabilities } from '@/context/CapabilitiesContext'
 
 function safeReturnPath(value: unknown): string {
   if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//')) return '/'
@@ -43,6 +44,11 @@ export default function NewsDetail() {
   const returnTo = safeReturnPath(requestedReturnTo)
   const { displayMode, t } = useLanguage()
   const { user } = useAuth()
+  const { capabilities } = useCapabilities()
+  const chatEnabled = capabilities.features.chat.enabled
+  const fetchFullEnabled = capabilities.features.fetch_full.enabled
+  const translationEnabled = capabilities.features.translation.enabled
+  const ttsEnabled = capabilities.features.tts.enabled
   const { news, setNews, loading, error, refetch } = useNewsDetail(id)
   const { articleLoading, articleError, handleFetchFullArticle, resumeExistingFetch, cancelFetch } = useFullArticle(id ?? '', setNews, news)
   const [authModalOpen, setAuthModalOpen] = useState(false)
@@ -50,10 +56,11 @@ export default function NewsDetail() {
   const assistantOpenerRef = useRef<HTMLButtonElement | null>(null)
   const restoreAssistantFocusRef = useRef(false)
   const openAssistant = useCallback((event: MouseEvent<HTMLButtonElement>) => {
+    if (!chatEnabled) return
     prefetchNewsChatAssistant()
     assistantOpenerRef.current = event.currentTarget
     setAssistantOpen(true)
-  }, [])
+  }, [chatEnabled])
   const handleAssistantOpenChange = useCallback((open: boolean) => {
     setAssistantOpen(open)
     if (open) return
@@ -67,13 +74,14 @@ export default function NewsDetail() {
     opener?.focus()
   }, [assistantOpen])
   const requestFullArticle = useCallback((force = false) => {
+    if (!fetchFullEnabled) return
     if (!user) {
       setAuthModalOpen(true)
       return
     }
     if (force) void handleFetchFullArticle(true)
     else void handleFetchFullArticle()
-  }, [handleFetchFullArticle, user])
+  }, [fetchFullEnabled, handleFetchFullArticle, user])
   const retryFullArticle = useCallback(() => requestFullArticle(), [requestFullArticle])
   const {
     translating,
@@ -91,11 +99,12 @@ export default function NewsDetail() {
   const { supported: speechSupported } = useSpeechPlayerCapabilities()
   const pendingSpeechScopeRef = useRef<SpeechScope | null>(null)
   const handleSpeak = useCallback((language: SpeechLanguage, scope: SpeechScope) => {
-    if (!news) return
+    if (!ttsEnabled || !news) return
     const speechTitle = language === 'zh' ? (news.title_zh || news.title) : news.title
     speechPlayer.speak(news.id, speechTitle, { language, scope })
-  }, [news, speechPlayer])
+  }, [news, speechPlayer, ttsEnabled])
   const handleTranslateAndPlay = useCallback((scope: SpeechScope) => {
+    if (!ttsEnabled || !translationEnabled) return
     if (!user) {
       setAuthModalOpen(true)
       return
@@ -107,7 +116,7 @@ export default function NewsDetail() {
       pendingSpeechScopeRef.current = null
       handleSpeak('zh', pendingScope)
     })
-  }, [handleSpeak, handleTranslate, user])
+  }, [handleSpeak, handleTranslate, translationEnabled, ttsEnabled, user])
   useEffect(() => {
     const pendingScope = pendingSpeechScopeRef.current
     if (!pendingScope || !news?.full_content_zh) return
@@ -199,7 +208,7 @@ export default function NewsDetail() {
           </Link>
           {!searchOpen && (
             <div className="flex items-center gap-1">
-              <button
+              {chatEnabled && <button
                 type="button"
                 onClick={openAssistant}
                 onMouseEnter={prefetchNewsChatAssistant}
@@ -210,8 +219,8 @@ export default function NewsDetail() {
               >
                 <MessageCircle aria-hidden="true" className="size-4" />
                 <span className="hidden sm:inline">问小闻</span>
-              </button>
-              {speechSupported && (
+              </button>}
+              {speechSupported && ttsEnabled && (
                 <SpeechStartMenu
                   isEnglishSource={isEnglishSource}
                   hasOriginalFull={Boolean(news.full_content)}
@@ -236,8 +245,8 @@ export default function NewsDetail() {
 
           {news.cover_image && <img src={news.cover_image} alt={displayTitle} className="mb-8 w-full rounded-2xl shadow-sm" />}
 
-          <FullContentFetchStatus news={news} articleLoading={articleLoading} onFetch={retryFullArticle} onResume={resumeExistingFetch} onCancel={cancelFetch} />
-          {articleError && !hasTerminalFetchFailure && <ErrorBanner message={articleError} onRetry={retryFullArticle} />}
+          {fetchFullEnabled && <FullContentFetchStatus news={news} articleLoading={articleLoading} onFetch={retryFullArticle} onResume={resumeExistingFetch} onCancel={cancelFetch} />}
+          {fetchFullEnabled && articleError && !hasTerminalFetchFailure && <ErrorBanner message={articleError} onRetry={retryFullArticle} />}
 
           {news.full_content && (
             <FullContentSection
@@ -256,21 +265,23 @@ export default function NewsDetail() {
               onRefetch={() => requestFullArticle(true)}
               refetching={articleLoading}
               onCancelRefetch={cancelFetch}
+              allowFetch={fetchFullEnabled}
+              allowTranslation={translationEnabled}
             />
           )}
 
           {!news.full_content && displayContent ? (
-            <SummarySection content={displayContent} onAskAssistant={openAssistant} />
+            <SummarySection content={displayContent} onAskAssistant={chatEnabled ? openAssistant : undefined} />
           ) : null}
 
           <div className="mt-10 border-t border-neutral-100 pt-6">
             <a href={news.url} target="_blank" rel="noreferrer" className="text-sm text-neutral-400 transition-colors hover:text-neutral-600">{t.readOriginal} →</a>
           </div>
         </article>
-        <div hidden={assistantOpen}>
+        {chatEnabled && <div hidden={assistantOpen}>
           <ChatBubbleButton onOpen={openAssistant} onIntent={prefetchNewsChatAssistant} />
-        </div>
-        <LazyNewsChatAssistant
+        </div>}
+        {chatEnabled && <LazyNewsChatAssistant
           newsId={id ?? String(news.id)}
           open={assistantOpen}
           onOpenChange={handleAssistantOpenChange}
@@ -279,7 +290,7 @@ export default function NewsDetail() {
             wordCount: news.full_content ? news.full_content.length : (news.content ? news.content.length : 0),
             title: news.title,
           }}
-        />
+        />}
       </div>
 
       <ArticleToc headings={headings} activeId={activeId} />
@@ -289,7 +300,7 @@ export default function NewsDetail() {
   )
 }
 
-function SummarySection({ content, onAskAssistant }: { content: string; onAskAssistant: (event: MouseEvent<HTMLButtonElement>) => void }) {
+function SummarySection({ content, onAskAssistant }: { content: string; onAskAssistant?: (event: MouseEvent<HTMLButtonElement>) => void }) {
   return (
     <section aria-labelledby="article-summary-heading" className="article-section-render w-full overflow-x-hidden rounded-3xl border border-neutral-200 bg-white px-5 py-6 shadow-[0_18px_50px_rgba(15,23,42,0.06)] sm:px-8 sm:py-8">
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3 border-b border-neutral-100 pb-5">
@@ -301,7 +312,7 @@ function SummarySection({ content, onAskAssistant }: { content: string; onAskAss
           <h2 id="article-summary-heading" data-article-toc="ignore" className="text-lg font-semibold tracking-tight text-neutral-900">内容摘要</h2>
           <p className="mt-1 text-sm leading-6 text-neutral-500">快速了解文章要点；获取原文后可阅读完整段落、列表与代码。</p>
         </div>
-        <button
+        {onAskAssistant && <button
           type="button"
           onClick={onAskAssistant}
           onMouseEnter={prefetchNewsChatAssistant}
@@ -311,7 +322,7 @@ function SummarySection({ content, onAskAssistant }: { content: string; onAskAss
         >
           <Sparkles aria-hidden="true" className="size-4" />
           基于摘要提问
-        </button>
+        </button>}
       </div>
       <div className="summary-markdown w-full max-w-full overflow-hidden text-neutral-700">
         <MarkdownContent content={content} legacySummarySpacing />

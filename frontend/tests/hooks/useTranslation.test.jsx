@@ -1,20 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createElement } from 'react'
+import { QueryClient } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { AuthContext } from '@/context/AuthContext'
 import * as api from '@/services/newsWorkflowApi'
 import { useTranslation } from '@/hooks/useTranslation'
+import { CapabilitiesTestProvider, fullCapabilities } from '../helpers/capabilities'
 
 vi.mock('@/services/newsWorkflowApi', async (importOriginal) => ({
   ...await importOriginal(),
   translateFullArticleStream: vi.fn(),
 }))
 
-function makeWrapper(getUser = () => ({ id: 12, username: 'reader' })) {
+function makeWrapper(getUser = () => ({ id: 12, username: 'reader' }), capabilities = fullCapabilities()) {
   return function Wrapper({ children }) {
-    return createElement(AuthContext.Provider, {
-      value: { user: getUser(), loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() },
-    }, children)
+    return createElement(CapabilitiesTestProvider, { value: capabilities },
+      createElement(AuthContext.Provider, {
+        value: { user: getUser(), loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() },
+      }, children),
+    )
   }
 }
 
@@ -64,6 +68,43 @@ describe('useTranslation', () => {
     expect(current.current.full_content_zh_scope).toBe('shared')
     expect(current.current.full_content_zh_source).toBe('chatgpt')
     expect(result.current.translating).toBe(false)
+  })
+
+  it('does not resume or post a running translation when translation is disabled', async () => {
+    const setNews = vi.fn()
+    const { result } = renderHook(() => useTranslation(
+      '42',
+      article({ full_translation_active: true }),
+      setNews,
+      false,
+    ), { wrapper: makeWrapper(() => ({ id: 12, username: 'reader' }), fullCapabilities({ translation: false })) })
+
+    await act(async () => { expect(await result.current.handleTranslate(false)).toBe(false) })
+    expect(api.translateFullArticleStream).not.toHaveBeenCalled()
+    expect(result.current.translating).toBe(false)
+  })
+
+  it('aborts an active translation stream when translation capability turns off', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    let signal
+    api.translateFullArticleStream.mockImplementation(async function* (_id, options) {
+      signal = options.signal
+      yield { type: 'progress', text: '等待取消' }
+      await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))
+      throw new DOMException('The operation was aborted', 'AbortError')
+    })
+    function Wrapper({ children }) {
+      return createElement(CapabilitiesTestProvider, { client },
+        createElement(AuthContext.Provider, {
+          value: { user: { id: 12, username: 'reader' }, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() },
+        }, children),
+      )
+    }
+    renderHook(() => useTranslation('42', article({ full_translation_active: true }), vi.fn(), false), { wrapper: Wrapper })
+    await waitFor(() => expect(api.translateFullArticleStream).toHaveBeenCalledOnce())
+
+    act(() => client.setQueryData(['capabilities'], fullCapabilities({ translation: false })))
+    await waitFor(() => expect(signal.aborted).toBe(true))
   })
 
   it('reuses the saved query result without an automatic stream and only translates on explicit retry', async () => {

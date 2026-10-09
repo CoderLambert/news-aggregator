@@ -29,6 +29,7 @@ import {
 import { queryClient } from '@/services/queryClient'
 import { providerComparisonKeys } from '@/services/providerComparisonsQueries'
 import ProviderComparisons from '@/pages/ProviderComparisons'
+import { CapabilitiesTestProvider } from '../helpers/capabilities'
 
 const apiPayload = {
   count: 1,
@@ -160,7 +161,9 @@ describe('ProviderComparisons page', () => {
     logoutUser.mockResolvedValue(undefined)
     const view = render(
       <QueryClientProvider client={queryClient}>
-        <AuthProvider><AuthLifecycleControls /></AuthProvider>
+        <CapabilitiesTestProvider client={queryClient}>
+          <AuthProvider><AuthLifecycleControls /></AuthProvider>
+        </CapabilitiesTestProvider>
       </QueryClientProvider>,
     )
     expect(await screen.findByText('viewer-a')).toBeInTheDocument()

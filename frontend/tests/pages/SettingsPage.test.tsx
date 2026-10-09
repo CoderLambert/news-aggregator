@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import SettingsPage from '@/pages/SettingsPage'
+import { CapabilitiesTestProvider } from '../helpers/capabilities'
 
 const preferences = vi.hoisted(() => ({
   lang: 'zh' as const,
@@ -19,7 +20,7 @@ beforeEach(() => vi.clearAllMocks())
 
 describe('SettingsPage', () => {
   it('keeps reading preferences, account connection, and tools in clear sections', () => {
-    render(<MemoryRouter><SettingsPage /></MemoryRouter>)
+    render(<MemoryRouter><CapabilitiesTestProvider><SettingsPage /></CapabilitiesTestProvider></MemoryRouter>)
     expect(screen.getByRole('heading', { name: '阅读偏好' })).toBeTruthy()
     expect(screen.getByRole('heading', { name: '账号与连接' })).toBeTruthy()
     expect(screen.getByRole('heading', { name: '站点工具' })).toBeTruthy()

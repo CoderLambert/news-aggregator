@@ -24,6 +24,8 @@ interface FullContentSectionProps {
   onRefetch: () => void
   refetching: boolean
   onCancelRefetch: () => void
+  allowFetch?: boolean
+  allowTranslation?: boolean
 }
 
 export default function FullContentSection({
@@ -42,6 +44,8 @@ export default function FullContentSection({
   onRefetch,
   refetching,
   onCancelRefetch,
+  allowFetch = true,
+  allowTranslation = true,
 }: FullContentSectionProps) {
   const content = showOriginal ? news.full_content : (news.full_content_zh || news.full_content)
   return (
@@ -57,13 +61,15 @@ export default function FullContentSection({
         onRefetch={onRefetch}
         refetching={refetching}
         onCancelRefetch={onCancelRefetch}
+        allowFetch={allowFetch}
+        allowTranslation={allowTranslation}
       />
 
-      {translating && <TranslationProgressUI progress={translationProgress} waitingShared={translationWaitingShared} onStop={onStopTranslation} />}
-      {translationPaused && !translating && !translateError && (
+      {allowTranslation && translating && <TranslationProgressUI progress={translationProgress} waitingShared={translationWaitingShared} onStop={onStopTranslation} />}
+      {allowTranslation && translationPaused && !translating && !translateError && (
         <TranslationPausedUI onResume={onResumeTranslation} />
       )}
-      {translateError && <ErrorBanner message={translateError} onRetry={onRetryTranslate} />}
+      {allowTranslation && translateError && <ErrorBanner message={translateError} onRetry={onRetryTranslate} />}
 
       <Card className="article-section-render py-5">
         <CardContent className="px-5">
@@ -74,9 +80,9 @@ export default function FullContentSection({
   )
 }
 
-type ToolbarProps = Pick<FullContentSectionProps, 'news' | 'translating' | 'translationPaused' | 'translateError' | 'showOriginal' | 'onToggleOriginal' | 'onTranslate' | 'onRefetch' | 'refetching' | 'onCancelRefetch'>
+type ToolbarProps = Pick<FullContentSectionProps, 'news' | 'translating' | 'translationPaused' | 'translateError' | 'showOriginal' | 'onToggleOriginal' | 'onTranslate' | 'onRefetch' | 'refetching' | 'onCancelRefetch' | 'allowFetch' | 'allowTranslation'>
 
-function Toolbar({ news, translating, translationPaused, translateError, showOriginal, onToggleOriginal, onTranslate, onRefetch, refetching, onCancelRefetch }: ToolbarProps) {
+function Toolbar({ news, translating, translationPaused, translateError, showOriginal, onToggleOriginal, onTranslate, onRefetch, refetching, onCancelRefetch, allowFetch = true, allowTranslation = true }: ToolbarProps) {
   const [copied, setCopied] = useState(false)
   const [copyMessage, setCopyMessage] = useState('')
   const [copyTimer, setCopyTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
@@ -118,15 +124,17 @@ function Toolbar({ news, translating, translationPaused, translateError, showOri
             )}
           </div>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            {isChineseSource ? '正文排版已就绪，可复制或重新获取。' : news.full_content_zh_scope === 'shared' ? '正在复用共享译文，不消耗你的模型额度。个人重新翻译会使用你的账号额度。' : news.full_content_zh_scope === 'private' ? '这是当前账号的个人译文，重新翻译不会覆盖已有共享版本。' : '正文结构已保留，可复制、重新获取或翻译。首次完整翻译后可供其他读者复用。'}
+            {allowFetch && allowTranslation
+              ? isChineseSource ? '正文排版已就绪，可复制或重新获取。' : news.full_content_zh_scope === 'shared' ? '正在复用共享译文，不消耗你的模型额度。个人重新翻译会使用你的账号额度。' : news.full_content_zh_scope === 'private' ? '这是当前账号的个人译文，重新翻译不会覆盖已有共享版本。' : '正文结构已保留，可复制、重新获取或翻译。首次完整翻译后可供其他读者复用。'
+              : isChineseSource ? '正文排版已就绪，可复制。' : news.full_content_zh_scope === 'shared' ? '正在复用共享译文。' : news.full_content_zh_scope === 'private' ? '这是当前账号的个人译文。' : '正文结构已保留，可复制或切换已缓存的语言。'}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <CopyButton copied={copied} onCopy={() => { void handleCopy() }} />
-          <RefetchButton refetching={refetching} onClick={onRefetch} onCancel={onCancelRefetch} />
+          {allowFetch && <RefetchButton refetching={refetching} onClick={onRefetch} onCancel={onCancelRefetch} />}
           {news.full_content_zh && <LangToggle showOriginal={showOriginal} onToggle={onToggleOriginal} />}
-          {!isChineseSource && !translating && !translationPaused && !translateError && (news.full_content_zh_scope !== 'shared' || news.full_translation_personal_available) && (
+          {allowTranslation && !isChineseSource && !translating && !translationPaused && !translateError && (news.full_content_zh_scope !== 'shared' || news.full_translation_personal_available) && (
             <TranslateButton hasTranslation={Boolean(news.full_content_zh)} shared={news.full_content_zh_scope === 'shared'} onClick={onTranslate} />
           )}
         </div>

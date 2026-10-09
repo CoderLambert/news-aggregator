@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
+import { queryClient } from '@/services/queryClient'
+import { fullCapabilities } from './helpers/capabilities'
 
 vi.mock('@/pages/NewsList', () => ({ default: () => <div>News List Page</div> }))
 vi.mock('@/pages/NewsDetail', () => ({ default: () => <div>News Detail Page</div> }))
@@ -36,6 +38,8 @@ import App from '@/App'
 
 describe('App routes', () => {
   it('renders provider comparisons on /provider-comparisons', async () => {
+    queryClient.clear()
+    queryClient.setQueryData(['capabilities'], fullCapabilities())
     render(<App />)
 
     expect(await screen.findByText('Provider Comparisons Route Page')).toBeInTheDocument()

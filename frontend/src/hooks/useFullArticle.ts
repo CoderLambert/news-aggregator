@@ -5,6 +5,7 @@ import { useLanguage } from '@/context/useLanguage'
 import { fetchFullArticle, fetchFullArticleStatus, parseFullArticleFailure } from '@/services/newsWorkflowApi'
 import { parseNewsId } from '@/services/newsWorkflowQueries'
 import type { NewsDetail } from '@/types/news'
+import { useCapability } from '@/context/CapabilitiesContext'
 
 interface FetchState {
   ownerKey: string
@@ -84,13 +85,14 @@ export function useFullArticle(
 ) {
   const { user } = useAuth()
   const { lang } = useLanguage()
+  const fullContentEnabled = useCapability('fetch_full').enabled
   const newsId = parseNewsId(id)
   const ownerKey = `${newsId ?? String(id ?? '')}:${user?.id ?? 'anonymous'}:${lang}`
   const ownerRef = useRef(ownerKey)
   const requestRef = useRef<FetchRequest | null>(null)
   const attachedOwnerRef = useRef<string | null>(null)
   const [state, setState] = useState(EMPTY_FETCH_STATE)
-  const visibleState = state.ownerKey === ownerKey ? state : EMPTY_FETCH_STATE
+  const visibleState = fullContentEnabled && state.ownerKey === ownerKey ? state : EMPTY_FETCH_STATE
 
   useLayoutEffect(() => { ownerRef.current = ownerKey }, [ownerKey])
 
@@ -102,6 +104,16 @@ export function useFullArticle(
     if (attachedOwnerRef.current === ownerKey) attachedOwnerRef.current = null
     setState((current) => current.ownerKey === ownerKey ? EMPTY_FETCH_STATE : current)
   }, [ownerKey])
+
+  useEffect(() => {
+    if (fullContentEnabled) return
+    const request = requestRef.current
+    if (request?.ownerKey === ownerKey) {
+      requestRef.current = null
+      request.controller.abort()
+    }
+    if (attachedOwnerRef.current === ownerKey) attachedOwnerRef.current = null
+  }, [fullContentEnabled, ownerKey])
 
   const applyResult = useCallback((
     data: Awaited<ReturnType<typeof fetchFullArticle>>,
@@ -128,7 +140,7 @@ export function useFullArticle(
   }, [newsId, setNews])
 
   const executeFetch = useCallback(async (force: boolean, attachOnly: boolean): Promise<boolean> => {
-    if (newsId === null) return false
+    if (!fullContentEnabled || newsId === null) return false
     if (requestRef.current?.ownerKey === ownerKey) return false
     requestRef.current?.controller.abort()
 
@@ -205,7 +217,7 @@ export function useFullArticle(
           : current)
       }
     }
-  }, [applyResult, newsId, ownerKey, setNews])
+  }, [applyResult, fullContentEnabled, newsId, ownerKey, setNews])
 
   const handleFetchFullArticle = useCallback(
     (force = false) => executeFetch(force === true, false),
@@ -224,7 +236,7 @@ export function useFullArticle(
   const retryCount = news?.full_content_retry_count ?? 0
 
   useEffect(() => {
-    if (!isCurrentNews || newsId === null || !canFetchInSession || !bodyEmpty) return
+    if (!fullContentEnabled || !isCurrentNews || newsId === null || !canFetchInSession || !bodyEmpty) return
 
     if (status === 'fetching') {
       if (sessionFlag(AUTO_CANCEL_PREFIX, ownerKey) || attachedOwnerRef.current === ownerKey) return
@@ -250,6 +262,7 @@ export function useFullArticle(
   }, [
     attachToExistingFetch,
     bodyEmpty,
+    fullContentEnabled,
     handleFetchFullArticle,
     isCurrentNews,
     canFetchInSession,

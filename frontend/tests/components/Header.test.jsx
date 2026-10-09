@@ -2,6 +2,15 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import Header from '@/components/Header'
+import { CapabilitiesTestProvider } from '../helpers/capabilities'
+
+function renderHeader(initialEntries = ['/']) {
+  return render(
+    <MemoryRouter initialEntries={initialEntries}>
+      <CapabilitiesTestProvider><Header /></CapabilitiesTestProvider>
+    </MemoryRouter>,
+  )
+}
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => ({ user: null, logout: vi.fn() }),
@@ -19,7 +28,7 @@ vi.mock('@/context/useLanguage', () => ({
 
 describe('Header navigation menu', () => {
   it('keeps the menu button inside while handling its real pointer toggle sequence', () => {
-    render(<MemoryRouter><Header /></MemoryRouter>)
+    renderHeader()
 
     const toggle = screen.getByRole('button', { name: '打开菜单' })
     fireEvent.click(toggle)
@@ -34,7 +43,7 @@ describe('Header navigation menu', () => {
   })
 
   it('exposes the four primary destinations and marks the current section', () => {
-    render(<MemoryRouter initialEntries={['/settings']}><Header /></MemoryRouter>)
+    renderHeader(['/settings'])
     fireEvent.click(screen.getByRole('button', { name: '打开菜单' }))
     const navigation = screen.getByRole('navigation', { name: '站点导航' })
     expect(navigation).toHaveTextContent('首页')
@@ -45,7 +54,7 @@ describe('Header navigation menu', () => {
   })
 
   it('marks settings as current on the nested ChatGPT connection route', () => {
-    render(<MemoryRouter initialEntries={['/settings/chatgpt']}><Header /></MemoryRouter>)
+    renderHeader(['/settings/chatgpt'])
     fireEvent.click(screen.getByRole('button', { name: '打开菜单' }))
     expect(screen.getByRole('link', { name: '设置' })).toHaveAttribute('aria-current', 'page')
   })
