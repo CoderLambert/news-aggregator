@@ -1,5 +1,6 @@
 from django.utils import timezone
 import pytest
+import socket
 import uuid
 
 from api.models import Category, News, ProviderComparison, Source
@@ -10,8 +11,10 @@ from api.services.article_fetcher.types import FetchResult
 @pytest.fixture(autouse=True)
 def mock_public_comparison_dns(monkeypatch):
     monkeypatch.setattr(
-        'api.services.article_fetcher.comparison.socket.getaddrinfo',
-        lambda host, port, *args, **kwargs: [(None, None, None, '', ('93.184.216.34', port))],
+        'api.services.article_fetcher.safe_http.socket.getaddrinfo',
+        lambda host, port, *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('93.184.216.34', port)),
+        ],
     )
 
 
@@ -130,7 +133,7 @@ def test_compare_providers_supports_url_only_and_legacy_provider_signature(db):
 
 def test_compare_providers_rejects_url_only_private_and_unadapted_urls(db):
     with pytest.raises(ValueError, match='Private or local'):
-        compare_providers(url='http://127.0.0.1:8000/internal', providers=[LegacyProvider()])
+        compare_providers(url='http://127.0.0.1/internal', providers=[LegacyProvider()])
 
     with pytest.raises(ValueError, match='adapted'):
         compare_providers(url='https://example.com/standalone', providers=[LegacyProvider()])
@@ -140,8 +143,10 @@ def test_compare_providers_rejects_url_only_private_and_unadapted_urls(db):
 
 def test_validate_comparison_url_rejects_domains_resolving_to_private_ips(monkeypatch, db):
     monkeypatch.setattr(
-        'api.services.article_fetcher.comparison.socket.getaddrinfo',
-        lambda *args, **kwargs: [(None, None, None, '', ('127.0.0.1', 443))],
+        'api.services.article_fetcher.safe_http.socket.getaddrinfo',
+        lambda host, port, *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('127.0.0.1', port)),
+        ],
     )
 
     with pytest.raises(ValueError, match='Private or local'):
@@ -151,7 +156,7 @@ def test_validate_comparison_url_rejects_domains_resolving_to_private_ips(monkey
 def test_retest_comparison_revalidates_standalone_url(db):
     comparison = ProviderComparison.objects.create(
         run_id=uuid.uuid4(),
-        url='http://127.0.0.1:8000/internal',
+        url='http://127.0.0.1/internal',
         provider='legacy_provider',
         ok=False,
         error='legacy bad row',
@@ -159,6 +164,20 @@ def test_retest_comparison_revalidates_standalone_url(db):
 
     with pytest.raises(ValueError, match='Private or local'):
         retest_comparison(comparison)
+
+
+def test_compare_providers_validates_database_news_url_before_provider(monkeypatch, news):
+    monkeypatch.setattr(
+        'api.services.article_fetcher.safe_http.socket.getaddrinfo',
+        lambda host, port, *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('10.0.0.8', port)),
+        ],
+    )
+
+    with pytest.raises(ValueError, match='Private or local'):
+        compare_providers(news=news, providers=[SuccessfulProvider()])
+
+    assert ProviderComparison.objects.count() == 0
 
 
 def test_compare_providers_rejects_partially_unknown_provider_names(monkeypatch, news):

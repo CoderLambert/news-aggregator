@@ -3,18 +3,23 @@ from django.core.management import call_command
 from django.utils import timezone
 import io
 import json
+import socket
 import pytest
 from rest_framework.test import APIClient
 
 from api.models import Category, News, ProviderComparison, Source
+from api.services.article_fetcher import safe_http
 from api.services.article_fetcher.types import FetchResult
 
 
 @pytest.fixture(autouse=True)
 def mock_public_comparison_dns(monkeypatch):
     monkeypatch.setattr(
-        'api.services.article_fetcher.comparison.socket.getaddrinfo',
-        lambda host, port, *args, **kwargs: [(None, None, None, '', ('93.184.216.34', port))],
+        safe_http.socket,
+        'getaddrinfo',
+        lambda host, port, *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('93.184.216.34', port))
+        ],
     )
 
 

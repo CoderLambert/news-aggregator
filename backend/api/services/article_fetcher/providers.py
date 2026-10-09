@@ -12,9 +12,12 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from urllib.parse import parse_qs, urlparse
 
+from django.conf import settings
+
 from api.services.content_cleaner import clean_content
 
 from .extractors import extract_markdown_from_html
+from .safe_http import safe_urlopen
 from .site_rules import get_site_rule, normalize_domain
 from .types import FetchResult
 from .validators import validate_markdown
@@ -26,6 +29,13 @@ DEFAULT_HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
     'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
 }
+
+
+def _open_url(request, timeout, context=None):
+    """Use the pinned public transport only in the production runtime."""
+    if settings.DJANGO_ENV == 'production':
+        return safe_urlopen(request, timeout=timeout)
+    return urllib.request.urlopen(request, timeout=timeout, context=context)
 
 
 class GitHubReadmeProvider:
@@ -97,7 +107,7 @@ class GitHubReadmeProvider:
 
     def _download(self, url: str) -> str:
         req = urllib.request.Request(url, headers={**DEFAULT_HEADERS, 'Accept': 'text/plain,*/*;q=0.8'})
-        with urllib.request.urlopen(req, timeout=self.timeout, context=ssl.create_default_context()) as resp:
+        with _open_url(req, timeout=self.timeout, context=ssl.create_default_context()) as resp:
             raw = resp.read()
             content_type = resp.headers.get('content-type', '')
         encoding = _encoding_from_content_type(content_type) or 'utf-8'
@@ -127,7 +137,7 @@ class HackerNewsAPIProvider:
         api_url = f'https://hacker-news.firebaseio.com/v0/item/{item_id}.json'
         try:
             req = urllib.request.Request(api_url, headers={'Accept': 'application/json', 'User-Agent': USER_AGENT})
-            with urllib.request.urlopen(req, timeout=self.timeout, context=ssl.create_default_context()) as resp:
+            with _open_url(req, timeout=self.timeout, context=ssl.create_default_context()) as resp:
                 payload = json.loads(resp.read().decode('utf-8', errors='replace') or '{}')
         except Exception as exc:
             return FetchResult(ok=False, provider=self.name, url=url, error=str(exc))
@@ -274,7 +284,7 @@ class LeiphoneFeedProvider:
                 'Accept': 'application/rss+xml,application/xml;q=0.9,*/*;q=0.7',
             },
         )
-        with urllib.request.urlopen(req, timeout=self.timeout, context=ssl.create_default_context()) as resp:
+        with _open_url(req, timeout=self.timeout, context=ssl.create_default_context()) as resp:
             return resp.read()
 
 
@@ -286,6 +296,8 @@ class JinaProvider:
         self.retries = retries
 
     def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None) -> FetchResult:
+        if settings.DJANGO_ENV == 'production':
+            return FetchResult(ok=False, provider=self.name, url=url, error='unsafe_transport_disabled')
         jina_url = f'https://r.jina.ai/{url}'
         last_error: Exception | None = None
         for attempt in range(self.retries + 1):
@@ -294,7 +306,7 @@ class JinaProvider:
                     jina_url,
                     headers={'Accept': 'text/plain', 'User-Agent': USER_AGENT},
                 )
-                with urllib.request.urlopen(req, timeout=self.timeout, context=ssl.create_default_context()) as resp:
+                with _open_url(req, timeout=self.timeout, context=ssl.create_default_context()) as resp:
                     text = resp.read().decode('utf-8', errors='replace')
                 markdown_match = re.search(r'Markdown Content:\n([\s\S]+)$', text)
                 markdown = markdown_match.group(1).strip() if markdown_match else text.strip()
@@ -396,7 +408,7 @@ class ScrapyHTTPProvider:
 
     def _download(self, url: str) -> str:
         req = urllib.request.Request(url, headers=DEFAULT_HEADERS)
-        with urllib.request.urlopen(req, timeout=self.timeout, context=ssl.create_default_context()) as resp:
+        with _open_url(req, timeout=self.timeout, context=ssl.create_default_context()) as resp:
             raw = resp.read()
             content_type = resp.headers.get('content-type', '')
         encoding = _encoding_from_content_type(content_type) or 'utf-8'
@@ -412,6 +424,8 @@ class ScrapySubprocessProvider:
         self.timeout = timeout
 
     def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None) -> FetchResult:
+        if settings.DJANGO_ENV == 'production':
+            return FetchResult(ok=False, provider=self.name, url=url, error='unsafe_transport_disabled')
         cmd = [
             sys.executable,
             'manage.py',
@@ -532,11 +546,12 @@ def _backend_dir() -> str:
 
 
 def default_providers() -> list:
-    return [
+    providers = [
         HackerNewsAPIProvider(),
         GitHubReadmeProvider(),
         LeiphoneFeedProvider(),
-        JinaProvider(timeout=5, retries=0),
-        ScrapySubprocessProvider(),
-        ScrapyHTTPProvider(),
     ]
+    if settings.DJANGO_ENV != 'production':
+        providers.extend([JinaProvider(timeout=5, retries=0), ScrapySubprocessProvider()])
+    providers.append(ScrapyHTTPProvider())
+    return providers

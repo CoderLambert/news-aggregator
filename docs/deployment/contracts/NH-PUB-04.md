@@ -10,3 +10,6 @@
 - Negative tests：production相对path失败；新空卷migrate成功，无基线User/Chat/Token；第二并发migration锁拒绝；只读新闻不触发model；cache无权限失败不得假PASS；export未--execute不docker create/cp，坏sha/mismatchedlabel/坏root/缺index/缺assets/同名hash不同内容/复制失败都不切current；默认不删除旧release；无secret进image/静态。
 - Forbidden：不改开发compose.yaml，不改用户db或schema迁移，不重设加密密钥、不真实Provider/网络模型下载/收费/SSH部署，不安装系统级软件，不commit；Docker构建正常依赖下载允许，Worker smoke严格离线。无权限问题返回而不扩大Docker权限。
 - Return format：TaskID、阶段A/B、文件/diff、所有命令exit结果/镜像revision与测试SHA、Docker卷/project资源清单/清理、HEAD、剩余阻塞。代码写完不代表G1/REVIEWED。
+
+## 主Agent补充：开发权限兼容
+采用ADR013双target：production非root/固定SHA，最终默认development保留既有root/HF_HOME；真实阶段B命令改docker build --target production --build-arg RELEASE_SHA=<新HEAD> -t newshub:local-<SHA> .。禁止对用户宿主DB chown。

@@ -42,3 +42,16 @@
 - 合同pytest(public_policy/health/production_settings/waitress_proxy)退出0，63 passed（3条依赖/分页警告）。public_policy单独19 passed退出0，两个CORS定向2 passed退出0；git diff --check/py_compile退出0。主Agent核对实际policy/capabilities与回归，不重复已通过版本测试。
 - 用户新增“本地域名测试验收”已纳入ADR011：Docker DNS alias+测试CA+独立Nginx443与临时浏览器信任，不修改hosts/系统CA/公网。新增G1/G2本地域名发布门槛，尚NOT_RUN。
 - 下一任务：04阶段A生产Compose/卷/非root/迁移/静态导出；S05-BACKEND继续，完成后10前端能力感知与本地域名/反代模板验收。
+
+### S05-BACKEND 总期限验收整改R1
+初始五文件88PASS，最后safe_http40PASS/py_compile/diff-check0；初始证据只覆盖慢body。主Agent追加离线probe（mock socket.getaddrinfo sleep0.1、safe_urlopen timeout0.01）实测elapsed0.1，暴露DNS无总deadline；代码检查getresponse header parsing亦仅idle timeout。不能将初版88PASS当完整S05 gate。已发R1，仅safe_http/test_safe_http，ADR012冻结有界DNS/所有读取绝对deadline/GET边界；任务仍DOING，High尚NOT_RUN。
+
+### CI收集范围诊断
+主Agent分别实际运行collect-only（未执行测试/业务Provider）：backend/api/tests/退出0、355tests；tests/backend/ backend/api/tests/ tests/crawler/退出0却仅51tests且没有API节点。原因根pytest.ini filename pattern过窄，而backend/pytest.ini模式广。NH-PUB-11增加root pytest.ini修正和三目录节点范围证据；当前不能宣称后端全量PASS。
+
+## S05-BACKEND / R1 本地闭环
+候选HEAD d7b247b8149625d6a636832616ad9dccd5e35362加安全输送diff，状态TESTED，独立High待完整G1。生产URL全地址校验/固定sockaddr/peer核对/TLS SNI与验证/每次跳转/2MiB限制；生产Jina/subprocess明确禁用，开发兼容。
+- 最终六file pytest（safe_http、article_fetcher_security、article_fetcher、provider_comparison_service、article_fetcher_quality_report、provider_comparison_api_command）：退出0，106 passed，1 chromadb依赖弃用warning。py_compile/diff-check/空白检查0。R1首次参数名request触发pytest保留名收集退出2，改名后验收通过；没有改变安全协议。
+- DNS固定2线程/2pending限额、慢头/状态行/正文绝对deadline、累计wire2MiB+64KiB/仅GET无data均新增离线负例。主Agent重跑原失败probe：slowDNS0.1/requestdeadline0.01现在elapsed0.011秒即UnsafeURL Public DNS resolution deadline exceeded，证明旧缺口已修复；底层DNS尚待返回但最大2个，无新连接。
+- 比较API现fixture同步到安全DNS目标，DB中News URL同样验证；未执行真实DNS/HTTP/TLS/付费。后续G3的研究/翻译候选网页也必须接此输送，当前不把关闭入口当最终安全。
+- 下一步：10前端能力感知；04阶段A定向闭环后02/本地域名阶段A；稳定候选完成CI/真实Docker/本地域名与High再过G1。

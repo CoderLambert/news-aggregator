@@ -65,3 +65,15 @@ Linux生产app使用network_mode:host，Waitress仅绑定127.0.0.1；宿主Nginx
 G1/G2必须增加正式域名的隔离本地链路验收；公网域名尚未使用，当前不做现场探测。使用独立Docker network的news.lambert.host alias，临时测试CA签发仅本地域名SAN证书；Nginx监听该隔离namespace443，app共享该namespace仍仅loopback9527，从而保留正式proxy配置/来源127.0.0.1/Host/Origin/CSRF，不占用宿主443/9527。只在测试Compose override修改network_mode，不修改production真实配置。
 curl使用测试CA验证而非-k；浏览器用临时HOME/NSS trust DB与全新profile（host有chromium/certutil，PythonPlaywright1.62.0），仅该测试profile信任CA，host-resolver-rules把正式域名指向该容器IP，不改hosts/系统证书库；ignoreHTTPSErrors=False，禁止ignore-certificate-errors。先证明未信任CA失败，再证明信任后HTTPS成功，错误SAN拒绝。浏览器拦截非本地域名出网。若浏览器实际信任机制不生效须报告证据，由Sol决策，不能绕过TLS校验。
 G1验收证书/域名解析/HTTPS重定向、匿名首页/新闻深链/关键词、直接API拒绝/OPTIONS、缺assets与未知API404、SSE代理配置/早到首帧、后端转发is_secure/Host、Secure Host-only CSRF Cookie。G2再验真实登录/登录CSRF、注销/A-B缓存与个人权限、Secure HttpOnly Session Cookie。测试用户/新闻只在独立临时卷，删除范围仅自建资源。公网DNS/真实CA签发/安全组/外网性能仍是发布现场门槛，不能以本地模拟冒充上线。
+
+## ADR-012：抓取总deadline覆盖DNS与慢响应头
+主Agent离线复现：getaddrinfo模拟阻塞0.1秒，safe_urlopen(timeout=0.01)直到0.1秒才返回UnsafeURL，不能据慢body用例宣称全链15秒期限。DNS统一固定2线程+2pending semaphore，预留非阻塞、future done释放、result剩余deadline超时即归还请求线程；底层DNS无法取消但最多2个，不无界生成线程，不with executor等待shutdown。HTTPConnection socket facade的makefile包原buffered.read1，每次单源读取前设剩余timeout、后检查绝对时限；自行缓冲readline/read/read1，状态行/headers/body都覆盖，wire上限2MiB+64KiB，body仍2MiB。输送仅GET/无request.data，避免未要求的POST能力。每跳同一个deadline。新增mock Event阻塞DNS/第三预留拒绝/释放恢复、慢status/header fakeClock负例。
+
+## ADR-013：生产非root与开发数据权限兼容
+Docker共享runtime-base，production具名target UID10001/HF_HOME=/var/lib/newshub/model-cache且强制40hex RELEASE_SHA标签；最后默认development target保持root及原HF_HOME=/root/.cache/huggingface，使现有开发compose backend bind-mounted SQLite权限兼容。生产必须docker build --target production，不能把默认development镜像用于发布；Compose显式版本镜像的revision/User在smoke验证。不chown宿主源码/DB。
+
+## ADR-014：完整测试的真实收集范围
+当前根pytest.ini的python_files=tests/backend/test_*.py tests/crawler/test_*.py排除了API测试；主Agent实际三目录collect-only只有51项、无API，而backend目录单独按其pytest.ini收集355项。CI包须把根python_files改通用test_*.py并testpaths包括backend/api/tests，保留unittest/现class/function规则；统一三目录真实运行且收集证据包括三个root。不得用窄51PASS支撑全后端通过。
+
+## ADR-015：OpenAI托管门槛官方资料核对
+2026-10-10依OpenAI Docs技能检索并实际打开[website身份接入](https://developers.openai.com/siwc/website)与[plan usage概览](https://developers.openai.com/siwc/token-sharing-open-source)。网站身份试用需正式client/精确回调和客户端认证方式；identity与plan授权不同。远程托管plan usage须申请，不能拿OSS动态注册本地流程替代。NewsHub两项批准当前都未取得；client_id/secret/scope/resource/认证方法/托管令牌条款均待提供真实批准契约，website保持fail-closed，不将官方示例当应用注册。申请准备由07文档包实现；仅Mock/安全骨架由08后续冻结，不真实访问授权/token端点。
