@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useLocation, useNavigationType, useSearchParams } from 'react-router-dom'
-import { Clock, ExternalLink, FileText, Globe, Loader2, Search, SlidersHorizontal, Star } from 'lucide-react'
+import { AlertCircle, Clock, ExternalLink, FileText, Globe, Loader2, Search, SlidersHorizontal, Star } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '@/context/AuthContext'
 import { useLanguage } from '@/context/useLanguage'
@@ -282,6 +282,13 @@ export default function LocalSearch() {
           </div>
         )}
       </section>
+
+      {data?.searchWarning === 'semantic_index_unavailable' && (
+        <div role="status" className="my-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <AlertCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          <span>语义索引正在恢复，当前显示关键词结果。</span>
+        </div>
+      )}
 
       {newsQuery.isError && (
         <div role="alert" className="my-4 flex items-center justify-center gap-3 text-center text-sm text-red-700">

@@ -35,7 +35,7 @@ git lfs install
 git lfs pull
 ```
 
-项目通过 Git LFS 管理基线 `*.sqlite3` 数据库。`chroma_data/` 是忽略提交的运行时派生数据，不从 Git 恢复；首次部署后运行 `backfill_embeddings` 建立本地语义搜索索引。接管已有实例时按下文的数据迁移步骤复制数据库。
+项目通过 Git LFS 管理基线 `*.sqlite3` 数据库。`chroma_data/` 是忽略提交的运行时派生数据，不从 Git 恢复；Docker indexer Worker 会在首次部署后自动建立并持续同步本地语义搜索索引。接管已有实例时按下文的数据迁移步骤复制数据库。
 
 ### 3.2 创建 Python 环境并安装依赖
 
@@ -186,15 +186,14 @@ backend/venv/bin/python start_waitress.py
 
 ### 4.3 Docker 单机模式
 
-Compose 启动 Waitress Web 服务和独立 crawler Worker。前端会先构建并由 Django 同源提供，Worker 默认启动后抓取一次，之后每小时抓取。Web 服务仅绑定到本机 `127.0.0.1:9527`。容器每次启动时会先执行幂等的 `migrate --noinput`，新克隆和代码升级无需单独运行迁移命令。
+Compose 启动 Waitress Web 服务、独立 crawler Worker 和独立 indexer Worker。前端会先构建并由 Django 同源提供，crawler 默认启动后抓取一次，之后每小时抓取；indexer 周期核对 SQLite 与 ChromaDB。Web 服务仅绑定到本机 `127.0.0.1:9527`。容器每次启动时会先执行幂等的 `migrate --noinput`，新克隆和代码升级无需单独运行迁移命令。
 
-Web 与 crawler 共享 `backend/`（包括 SQLite、WAL、SHM、TTS 缓存），并持久化 `chroma_data/`、`logs/` 和 Hugging Face 模型缓存卷。不要让容器和另一套本地后端或爬虫同时写同一份 SQLite 数据。
+Web、crawler 与 indexer 共享 `backend/`（包括 SQLite、WAL、SHM、TTS 缓存），并持久化 `chroma_data/`、`logs/` 和 Hugging Face 模型缓存卷。不要让容器和另一套本地后端或爬虫同时写同一份 SQLite 数据。
 
 ~~~bash
 docker compose up -d --build --wait
-docker compose exec -T app python /app/backend/manage.py backfill_embeddings --batch-size 100
 docker compose ps
-docker compose logs -f app crawler
+docker compose logs -f app crawler indexer
 docker compose down
 ~~~
 
@@ -207,7 +206,7 @@ curl -f http://127.0.0.1:9527/api/news/
 
 `.env` 会作为容器运行时环境变量注入，但不会进入构建镜像；SQLite 主文件、WAL、SHM 和凭据文件也由 `.dockerignore` 排除。复制 `.env.example` 后按需填写。首次语义搜索可能需要下载嵌入模型。
 
-`backfill_embeddings` 可以重复运行，只补充缺失新闻。若向量索引损坏，先停止 Web 与所有可能写入索引的进程，备份 `chroma_data/`，清空该派生索引目录，再运行上述命令重建；不要删除 `backend/db.sqlite3`。
+indexer 会自动补充缺失新闻、更新内容哈希变化的向量并删除孤立向量。超级管理员可以在管理控制台立即同步或执行版本化完整重建；命令行可使用 `python backend/manage.py sync_embeddings --wait`。索引损坏时执行 `sync_embeddings --rebuild --wait`，不要删除 `backend/db.sqlite3`。
 
 接管已有数据库：
 
@@ -228,7 +227,7 @@ docker compose up -d --build --wait
 
 # 查看新容器状态和日志
 docker compose ps
-docker compose logs --tail=200 app crawler
+docker compose logs --tail=200 app crawler indexer
 ~~~
 
 `docker compose down` 只删除容器和 Compose 网络，宿主机数据库、ChromaDB、爬虫日志和模型缓存卷仍保留。crawler 服务负责自动调度；需要绕过管理控制台手动执行一次时使用：
@@ -451,7 +450,13 @@ lsof -i :5173
 
 ### 语义搜索不可用或首次启动很慢
 
-确认可访问 Hugging Face，等待模型下载完成；也可以先使用关键词搜索。模型下载完成后会复用本地缓存。
+确认 indexer 容器健康并可访问 Hugging Face。模型或索引不可用时语义、混合检索会自动显示关键词结果；模型下载和索引恢复完成后自动恢复语义检索。
+
+```bash
+docker compose ps
+docker compose logs --tail=200 indexer
+docker compose exec -T app python backend/manage.py sync_embeddings --wait
+```
 
 ### `npm ci` 报安全漏洞
 
