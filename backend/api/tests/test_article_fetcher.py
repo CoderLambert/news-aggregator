@@ -184,6 +184,21 @@ def test_extract_markdown_preserves_headings_paragraphs_lists_and_line_breaks():
     assert result.markdown.index('第二段正文。') < result.markdown.index('- 第一项')
 
 
+def test_extract_markdown_flattens_decorative_markup_inside_headings():
+    html = '''
+    <article>
+      <h2><span><br></span><strong><strong><span>复杂编程仍有差距</span><span><br></span></strong></strong></h2>
+      <p>正文段落。</p>
+    </article>
+    '''
+
+    result = extract_markdown_from_html(html, 'https://www.leiphone.com/article')
+
+    assert '## 复杂编程仍有差距' in result.markdown
+    assert '\\**复杂编程仍有差距' not in result.markdown
+    assert '## **复杂编程仍有差距**' not in result.markdown
+
+
 def test_deepmind_extractor_removes_share_menu_and_related_story_carousel():
     html = '''
     <html><body><main>

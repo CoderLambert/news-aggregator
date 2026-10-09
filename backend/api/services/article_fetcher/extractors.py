@@ -194,7 +194,10 @@ def _node_to_markdown(node: Tag | NavigableString, base_url: str, depth: int = 0
         return ''
     if name in {'h1', 'h2', 'h3', 'h4', 'h5', 'h6'}:
         level = int(name[1])
-        text = _inline_text(node, base_url)
+        # A heading already carries emphasis. Use its visible text instead of
+        # preserving nested <strong> and decorative <br> tags as Markdown;
+        # malformed publisher markup can otherwise become a literal `\**`.
+        text = _escape_md(node.get_text(' ', strip=True))
         return f"\n{'#' * level} {text}\n" if text else ''
     if name == 'p':
         text = _inline_text(node, base_url)
