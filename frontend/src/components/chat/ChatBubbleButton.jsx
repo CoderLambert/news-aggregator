@@ -9,11 +9,12 @@ import XiaowenMascot from '../mascot/XiaowenMascot'
  *  - Idle blinking handled inside XiaowenMascot
  *  - Subtle breathing animation on the button itself
  */
-export default function ChatBubbleButton({ onOpen }) {
+export default function ChatBubbleButton({ onOpen, buttonRef }) {
   const [hover, setHover] = useState(false)
 
   return (
     <button
+      ref={buttonRef}
       type="button"
       onClick={onOpen}
       onMouseEnter={() => setHover(true)}
