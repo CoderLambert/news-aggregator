@@ -9,7 +9,7 @@ import { SpeechPlayerProvider } from '@/context/SpeechPlayerProvider'
 import Header from '@/components/Header'
 import AppErrorBoundary from '@/components/AppErrorBoundary'
 import LoadingSpinner from '@/components/LoadingSpinner'
-import ResearchPanel from '@/components/research/ResearchPanel'
+import ResearchLauncher from '@/components/research/ResearchLauncher'
 import GlobalSpeechPlayer from '@/components/speech/GlobalSpeechPlayer'
 
 // Keep feature-heavy routes out of the initial list bundle.
@@ -61,7 +61,7 @@ export default function App() {
                   </AppErrorBoundary>
                 </main>
                 <Footer />
-                <ResearchPanel />
+                <ResearchLauncher />
                 <GlobalSpeechPlayer />
               </div>
             </BrowserRouter>

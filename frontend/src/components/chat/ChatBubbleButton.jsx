@@ -10,7 +10,14 @@ import { useSpeechPlayerActivity } from '@/context/SpeechPlayerContext'
  *  - Idle blinking handled inside XiaowenMascot
  *  - Subtle breathing animation on the button itself
  */
-export default function ChatBubbleButton({ onOpen, buttonRef }) {
+/**
+ * @param {{
+ *   onOpen: import('react').MouseEventHandler<HTMLButtonElement>,
+ *   onIntent?: () => void,
+ *   buttonRef?: import('react').Ref<HTMLButtonElement>
+ * }} props
+ */
+export default function ChatBubbleButton({ onOpen, onIntent, buttonRef }) {
   const [hover, setHover] = useState(false)
   const speechPlayerActive = useSpeechPlayerActivity()
 
@@ -19,9 +26,10 @@ export default function ChatBubbleButton({ onOpen, buttonRef }) {
       ref={buttonRef}
       type="button"
       onClick={onOpen}
-      onMouseEnter={() => setHover(true)}
+      onMouseEnter={() => { setHover(true); onIntent?.() }}
       onMouseLeave={() => setHover(false)}
-      onFocus={() => setHover(true)}
+      onFocus={() => { setHover(true); onIntent?.() }}
+      onPointerDown={onIntent}
       onBlur={() => setHover(false)}
       aria-label="打开 AI 助手小闻"
       title="小闻 · AI 助手"

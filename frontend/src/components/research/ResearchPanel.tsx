@@ -1,22 +1,25 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { LogIn } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/context/AuthContext'
 import type { AuthUser } from '@/context/AuthContext'
 import { useResearch } from '@/hooks/useResearch'
 import AuthModal from '@/components/AuthModal'
-import ResearchBubbleButton from './ResearchBubbleButton'
 import ResearchHeader from './ResearchHeader'
 import ResearchMessageList from './ResearchMessageList'
 import ResearchInput from './ResearchInput'
 
-export default function ResearchPanel() {
-  const { user } = useAuth()
-  return <ResearchPanelView key={user?.id ?? 'anonymous'} user={user} />
+interface ResearchPanelProps {
+  onClose: () => void
 }
 
-function ResearchPanelView({ user }: { user: AuthUser | null }) {
-  const [isOpen, setIsOpen] = useState(false)
+export default function ResearchPanel({ onClose }: ResearchPanelProps) {
+  const { user } = useAuth()
+  return <ResearchPanelView key={user?.id ?? 'anonymous'} user={user} onClose={onClose} />
+}
+
+function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDivElement | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [input, setInput] = useState('')
@@ -40,14 +43,13 @@ function ResearchPanelView({ user }: { user: AuthUser | null }) {
 
   const isLoading = isBusy || phase === 'thinking' || phase === 'tool_calling' || phase === 'streaming'
 
-  function handleOpen() {
-    setIsOpen(true)
-  }
-
-  function handleClose() {
-    setIsOpen(false)
+  const handleClose = useCallback(() => {
+    const needsRiskReview = isBusy && !activeSessionId
+    handleCancel()
     setIsFullscreen(false)
-  }
+    if (needsRiskReview) return
+    onClose()
+  }, [activeSessionId, handleCancel, isBusy, onClose])
 
   function handleSendQuery() {
     if (!input.trim() || isLoading || hasRecoverableTask || !user) return
@@ -67,25 +69,22 @@ function ResearchPanelView({ user }: { user: AuthUser | null }) {
   }
 
   useEffect(() => {
-    if (!isOpen) return
     function onKey(event: KeyboardEvent) {
       if (event.key === 'Escape' && !event.defaultPrevented) {
         if (isFullscreen) setIsFullscreen(false)
-        else setIsOpen(false)
+        else handleClose()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isOpen, isFullscreen])
+  }, [isFullscreen, handleClose])
 
   useEffect(() => {
-    if (!isOpen) return
     const originalOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+    dialogRef.current?.focus()
     return () => { document.body.style.overflow = originalOverflow }
-  }, [isOpen])
-
-  if (!isOpen) return <ResearchBubbleButton onOpen={handleOpen} />
+  }, [])
 
   const activeSession = sessions.find((session) => session.id === activeSessionId)
   const panelTitle = activeSession?.title || '新闻研究'
@@ -101,9 +100,11 @@ function ResearchPanelView({ user }: { user: AuthUser | null }) {
       )}
 
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="新闻研究助手"
+        tabIndex={-1}
         className={`fixed z-40 flex flex-col bg-white rounded-t-2xl sm:rounded-2xl shadow-[0_-8px_32px_-8px_rgba(0,0,0,0.12)]
           border border-neutral-200/50 overflow-hidden
           transition-all duration-300 ease-out pointer-events-auto

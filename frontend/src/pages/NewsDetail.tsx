@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { ErrorBoundary } from 'react-error-boundary'
 import type { KeyboardEvent, MouseEvent } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
 import { ArrowLeft, Headphones, MessageCircle, Search, Sparkles } from 'lucide-react'
@@ -7,7 +8,9 @@ import { useLanguage } from '@/context/useLanguage'
 import { useSpeechPlayerActions, useSpeechPlayerCapabilities } from '@/context/SpeechPlayerContext'
 import LoadingSpinner from '@/components/LoadingSpinner'
 import AuthModal from '@/components/AuthModal'
-import NewsChatAssistant from '@/components/NewsChatAssistant'
+import LazyModalState from '@/components/LazyModalState'
+import ChatBubbleButton from '@/components/chat/ChatBubbleButton'
+import { loadNewsChatAssistant, prefetchNewsChatAssistant } from '@/components/chat/newsChatAssistantLoader'
 import TranslationStatus from '@/components/news-detail/TranslationStatus'
 import ErrorBanner from '@/components/news-detail/ErrorBanner'
 import FullContentSection from '@/components/news-detail/FullContentSection'
@@ -23,6 +26,8 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { useArticleSearch } from '@/hooks/useArticleSearch'
 import { useArticleToc } from '@/hooks/useArticleToc'
 import type { NewsDetail as NewsDetailRecord } from '@/types/news'
+
+const InitialNewsChatAssistant = lazy(loadNewsChatAssistant)
 
 function safeReturnPath(value: unknown): string {
   if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//')) return '/'
@@ -43,17 +48,32 @@ export default function NewsDetail() {
   const { articleLoading, articleError, handleFetchFullArticle, resumeExistingFetch, cancelFetch } = useFullArticle(id ?? '', setNews, news)
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState(false)
+  const [assistantLoadAttempt, setAssistantLoadAttempt] = useState(0)
+  const [NewsChatAssistant, setNewsChatAssistant] = useState(() => InitialNewsChatAssistant)
   const assistantOpenerRef = useRef<HTMLButtonElement | null>(null)
+  const restoreAssistantFocusRef = useRef(false)
   const openAssistant = useCallback((event: MouseEvent<HTMLButtonElement>) => {
+    prefetchNewsChatAssistant()
     assistantOpenerRef.current = event.currentTarget
     setAssistantOpen(true)
   }, [])
   const handleAssistantOpenChange = useCallback((open: boolean) => {
     setAssistantOpen(open)
     if (open) return
+    restoreAssistantFocusRef.current = true
+  }, [])
+  useEffect(() => {
+    if (assistantOpen || !restoreAssistantFocusRef.current) return
+    restoreAssistantFocusRef.current = false
     const opener = assistantOpenerRef.current
     assistantOpenerRef.current = null
-    requestAnimationFrame(() => opener?.focus())
+    opener?.focus()
+  }, [assistantOpen])
+  const retryAssistantLoad = useCallback((resetErrorBoundary: () => void) => {
+    const NextNewsChatAssistant = lazy(loadNewsChatAssistant)
+    setNewsChatAssistant(() => NextNewsChatAssistant)
+    setAssistantLoadAttempt((attempt) => attempt + 1)
+    resetErrorBoundary()
   }, [])
   const requestFullArticle = useCallback((force = false) => {
     if (!user) {
@@ -165,6 +185,9 @@ export default function NewsDetail() {
               <button
                 type="button"
                 onClick={openAssistant}
+                onMouseEnter={prefetchNewsChatAssistant}
+                onFocus={prefetchNewsChatAssistant}
+                onPointerDown={prefetchNewsChatAssistant}
                 aria-label="询问 AI 助手小闻"
                 className="inline-flex h-10 items-center gap-1.5 rounded-xl px-2.5 text-xs font-medium text-neutral-500 transition-colors hover:bg-orange-50 hover:text-orange-700 active:bg-orange-100"
               >
@@ -220,7 +243,28 @@ export default function NewsDetail() {
             <a href={news.url} target="_blank" rel="noreferrer" className="text-sm text-neutral-400 transition-colors hover:text-neutral-600">{t.readOriginal} →</a>
           </div>
         </article>
-        <NewsChatAssistant newsId={id ?? String(news.id)} open={assistantOpen} onOpenChange={handleAssistantOpenChange} />
+        <div hidden={assistantOpen}>
+          <ChatBubbleButton onOpen={openAssistant} onIntent={prefetchNewsChatAssistant} />
+        </div>
+        {assistantOpen && (
+          <ErrorBoundary
+            key={assistantLoadAttempt}
+            onReset={() => setAssistantLoadAttempt((attempt) => attempt + 1)}
+            fallbackRender={({ resetErrorBoundary }) => (
+              <LazyModalState
+                label="AI 助手小闻"
+                message="小闻加载失败，请检查网络后重试。"
+                onClose={() => handleAssistantOpenChange(false)}
+                onRetry={() => retryAssistantLoad(resetErrorBoundary)}
+                variant="chat"
+              />
+            )}
+          >
+            <Suspense fallback={<LazyModalState label="AI 助手小闻" message="正在打开小闻…" onClose={() => handleAssistantOpenChange(false)} variant="chat" />}>
+              <NewsChatAssistant newsId={id ?? String(news.id)} open onOpenChange={handleAssistantOpenChange} />
+            </Suspense>
+          </ErrorBoundary>
+        )}
       </div>
 
       <ArticleToc headings={headings} activeId={activeId} />
@@ -232,7 +276,7 @@ export default function NewsDetail() {
 
 function SummarySection({ content, onAskAssistant }: { content: string; onAskAssistant: (event: MouseEvent<HTMLButtonElement>) => void }) {
   return (
-    <section aria-labelledby="article-summary-heading" className="w-full overflow-x-hidden rounded-3xl border border-neutral-200 bg-white px-5 py-6 shadow-[0_18px_50px_rgba(15,23,42,0.06)] sm:px-8 sm:py-8">
+    <section aria-labelledby="article-summary-heading" className="article-section-render w-full overflow-x-hidden rounded-3xl border border-neutral-200 bg-white px-5 py-6 shadow-[0_18px_50px_rgba(15,23,42,0.06)] sm:px-8 sm:py-8">
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3 border-b border-neutral-100 pb-5">
         <div>
           <div className="mb-2 flex items-center gap-2">
@@ -245,6 +289,9 @@ function SummarySection({ content, onAskAssistant }: { content: string; onAskAss
         <button
           type="button"
           onClick={onAskAssistant}
+          onMouseEnter={prefetchNewsChatAssistant}
+          onFocus={prefetchNewsChatAssistant}
+          onPointerDown={prefetchNewsChatAssistant}
           className="inline-flex h-10 items-center gap-2 rounded-full border border-orange-200 bg-orange-50 px-4 text-sm font-medium text-orange-700 transition-colors hover:bg-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2"
         >
           <Sparkles aria-hidden="true" className="size-4" />
