@@ -42,13 +42,19 @@ def fetch_article_markdown(
             failures.append(result)
             continue
 
+        metadata = result.metadata if isinstance(result.metadata, dict) else {}
+        is_trusted_feed_body = (
+            result.provider == 'leiphone_feed'
+            and metadata.get('trusted_full_article_source') == 'rss_description'
+        )
+        validation_summary = None if is_trusted_feed_body else summary
         validation = validate_markdown(
             result.markdown,
             expected_title=expected_title,
             extracted_title=result.title,
             url=url,
             canonical_url=result.canonical_url,
-            summary=summary,
+            summary=validation_summary,
             min_chars=_min_chars_for_url(url),
         )
         if not validation.ok:

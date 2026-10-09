@@ -137,9 +137,29 @@ describe('news list return navigation and invalidation', () => {
     expect(await screen.findByRole('heading', { name: '迁移权责确权层｜跨域行为的权属与越界判定' })).toBeInTheDocument()
     expect(screen.getAllByText('量子位')).toHaveLength(1)
     expect(screen.getByRole('button', { name: '加载原文' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '摘要' })).toBeInTheDocument()
     const firstParagraph = screen.getByText('第一段正文。').closest('p')
     const secondParagraph = screen.getByText('第二段正文。').closest('p')
     expect(firstParagraph).not.toBe(secondParagraph)
+  })
+
+  it('shows the formatted full article without repeating its summary', async () => {
+    fetchNewsDetail.mockResolvedValue({
+      ...detailStory,
+      id: 3369,
+      title: 'Claude Haiku 5.5 降本背后',
+      source_language: 'zh',
+      content: '这段摘要不应在全文下方重复出现。',
+      full_content: '## 复杂编程仍有差距\n\n第一段完整正文。\n\n第二段完整正文。',
+      full_content_fetch_status: 'success',
+      full_content_fetch_provider: 'leiphone_feed',
+    })
+    renderRoutes('/news/3369')
+
+    expect(await screen.findByRole('heading', { name: '复杂编程仍有差距' })).toBeInTheDocument()
+    expect(screen.getByText('第一段完整正文。')).toBeInTheDocument()
+    expect(screen.queryByText('这段摘要不应在全文下方重复出现。')).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '摘要' })).not.toBeInTheDocument()
   })
 
   it('opens the login dialog instead of posting a full fetch for a signed-out reader', async () => {
