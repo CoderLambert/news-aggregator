@@ -220,6 +220,20 @@ def test_extract_markdown_heading_preserves_adjacent_text_boundaries():
     assert result.markdown == '## ChatGPT5与AIAgent'
 
 
+def test_extract_markdown_heading_keeps_internal_break_as_text_boundary():
+    html = '''
+    <article>
+      <h2>Part one<br>Part two</h2>
+      <h3><span>Step one<span><br></span></span><span>Step two</span></h3>
+    </article>
+    '''
+
+    result = extract_markdown_from_html(html, 'https://example.com/article')
+
+    assert '## Part one Part two' in result.markdown
+    assert '### Step one Step two' in result.markdown
+
+
 def test_deepmind_extractor_removes_share_menu_and_related_story_carousel():
     html = '''
     <html><body><main>

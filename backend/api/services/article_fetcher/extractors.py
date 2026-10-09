@@ -279,6 +279,12 @@ def _heading_inline_text(node: Tag, base_url: str) -> str:
     wrappers are flattened while links, inline code, and text boundaries stay
     intact.
     """
+    text = _heading_inline_raw(node, base_url)
+    text = re.sub(r'[ \t]+', ' ', text)
+    return _escape_md(text)
+
+
+def _heading_inline_raw(node: Tag, base_url: str) -> str:
     parts: list[str] = []
     for child in node.children:
         if isinstance(child, NavigableString):
@@ -289,6 +295,7 @@ def _heading_inline_text(node: Tag, base_url: str) -> str:
 
         name = child.name.lower()
         if name == 'br':
+            parts.append(' ')
             continue
         if name == 'a':
             text = child.get_text(' ', strip=True)
@@ -309,11 +316,9 @@ def _heading_inline_text(node: Tag, base_url: str) -> str:
         if name == 'img':
             continue
 
-        parts.append(_heading_inline_text(child, base_url))
+        parts.append(_heading_inline_raw(child, base_url))
 
-    text = ''.join(parts)
-    text = re.sub(r'[ \t]+', ' ', text)
-    return _escape_md(text)
+    return ''.join(parts)
 
 
 def _children_markdown(node: Tag, base_url: str, depth: int = 0) -> str:
