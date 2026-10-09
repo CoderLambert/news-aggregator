@@ -2,6 +2,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 
+from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 
@@ -101,6 +102,71 @@ def audit_search_index(*, include_changed=True):
 def _update_progress(run_id, **values):
     values['heartbeat_at'] = timezone.now()
     SearchIndexRun.objects.filter(pk=run_id).update(**values)
+
+
+def _write_final_progress(run_id, instance_id, values):
+    updated = SearchIndexRun.objects.filter(
+        pk=run_id,
+        worker_instance_id=instance_id,
+        status__in=['running', 'cancel_requested'],
+    ).update(**values)
+    if updated != 1:
+        raise RuntimeError('index_run_final_progress_not_written')
+
+
+def _commit_index_result(
+    *,
+    run_id,
+    settings_id,
+    old_collection,
+    collection_name,
+    instance_id,
+    rebuild,
+    progress,
+):
+    """Commit the active pointer and final counters as one database unit."""
+    with transaction.atomic():
+        if rebuild:
+            locked_settings = SearchIndexSettings.objects.select_for_update().get(pk=settings_id)
+            if locked_settings.active_collection != old_collection:
+                raise RuntimeError('active_collection_changed_during_rebuild')
+            locked_settings.active_collection = collection_name
+            locked_settings.model_name = MODEL_NAME
+            locked_settings.schema_version = INDEX_SCHEMA_VERSION
+            locked_settings.save(update_fields=[
+                'active_collection', 'model_name', 'schema_version',
+            ])
+        _write_final_progress(run_id, instance_id, progress)
+
+
+def cleanup_inactive_candidate(collection_name, *, vector_store=None):
+    """Delete a rebuild candidate only when no active pointer references it."""
+    if not collection_name:
+        return False
+    active_collection = (
+        SearchIndexSettings.objects.filter(pk=1)
+        .values_list('active_collection', flat=True)
+        .first()
+    )
+    if active_collection == collection_name:
+        return False
+    (vector_store or VectorStoreService()).delete_collection(collection_name)
+    return True
+
+
+def cleanup_recovered_index_runs(runs, *, vector_store=None):
+    cleaned = 0
+    for run in runs:
+        if run.mode != 'rebuild' or not run.collection_name:
+            continue
+        try:
+            if cleanup_inactive_candidate(run.collection_name, vector_store=vector_store):
+                cleaned += 1
+        except Exception:
+            # Candidate cleanup is opportunistic. It must never prevent the
+            # replacement owner from recovering the durable task queue.
+            continue
+    return cleaned
 
 
 def _check_cancel(run_id, callback):
@@ -280,21 +346,24 @@ def synchronize_search_index(run_id, *, heartbeat=None, cancel_requested=None):
             if final_ids != final_database_ids:
                 raise RuntimeError('replacement_collection_not_consistent')
             final_news_count = len(final_database_ids)
-            SearchIndexSettings.objects.filter(pk=settings.pk).update(
-                active_collection=collection_name,
-                model_name=MODEL_NAME,
-                schema_version=INDEX_SCHEMA_VERSION,
-            )
-
-        _update_progress(
-            run_id,
-            news_count=final_news_count,
-            vector_count_after=after,
-            missing_count=missing,
-            changed_count=changed,
-            orphaned_count=len(orphaned),
-            upserted_count=upserted,
-            deleted_count=deleted,
+        final_progress = {
+            'news_count': final_news_count,
+            'vector_count_after': after,
+            'missing_count': missing,
+            'changed_count': changed,
+            'orphaned_count': len(orphaned),
+            'upserted_count': upserted,
+            'deleted_count': deleted,
+            'heartbeat_at': timezone.now(),
+        }
+        _commit_index_result(
+            run_id=run_id,
+            settings_id=settings.pk,
+            old_collection=old_collection,
+            collection_name=collection_name,
+            instance_id=run.worker_instance_id,
+            rebuild=run.mode == 'rebuild',
+            progress=final_progress,
         )
         return {
             'collection_name': collection_name,
@@ -310,7 +379,10 @@ def synchronize_search_index(run_id, *, heartbeat=None, cancel_requested=None):
     except Exception:
         if run.mode == 'rebuild' and collection_name != old_collection:
             try:
-                vector_store.delete_collection(collection_name)
+                cleanup_inactive_candidate(
+                    collection_name,
+                    vector_store=vector_store,
+                )
             except Exception:
                 pass
         raise

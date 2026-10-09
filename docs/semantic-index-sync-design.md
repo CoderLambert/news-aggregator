@@ -26,6 +26,8 @@ SQLite 中的 `News` 是唯一事实来源，ChromaDB 是可重建的派生索�
 4. 只编码缺失或变化的记录，并删除数据库中已不存在的孤立向量。
 5. Chroma 读写通过跨进程文件锁协调；生成 embedding 时不持锁。
 
+Worker 与 `sync_embeddings --wait` 还共享 `logs/embedding-worker.lock` 执行锁。同一时刻只有一个任务执行者。新进程拿到锁即证明前任已经退出，会立即回收前任的 `running` / `cancel_requested` 任务、改写 owner token 并创建恢复任务，不依赖五分钟心跳超时。迟到的旧 owner 不能提交终态。
+
 Crawler 继续使用 `NEWS_CRAWL_ONLY=1`，不自动翻译、生成摘要或调用外部 AI。索引维护使用本地 embedding 模型。
 
 ## 任务与状态
@@ -48,7 +50,7 @@ Crawler 继续使用 `NEWS_CRAWL_ONLY=1`，不自动翻译、生成摘要或调�
 
 ## 全量重建
 
-重建写入新的版本化 collection，校验成功后原子更新 `active_collection`。旧 collection 在当前版本保留作为回滚，不在重建开始时清空。Web 进程按活动 collection 读取，切换期间继续使用旧索引。
+重建写入新的版本化 collection，校验成功后在同一数据库事务中更新 `active_collection`、模型/schema 版本和最终任务计数。旧 collection 在当前版本保留作为回滚，不在重建开始时清空。Web 进程按活动 collection 读取，切换期间继续使用旧索引。异常清理会重新读取活动指针，只删除未启用的候选 collection。
 
 ## 搜索降级
 
@@ -71,6 +73,7 @@ Crawler 继续使用 `NEWS_CRAWL_ONLY=1`，不自动翻译、生成摘要或调�
 - 请求取消活动任务。
 
 所有写操作使用 Session、CSRF 和超级管理员权限。
+设置接口只更新 `enabled`、`interval_seconds`、`batch_size` 和审计字段，并在行锁内重新读取当前设置；不会用页面读取到的旧实例覆盖活动 collection、版本或 Worker 心跳。
 
 ## Docker 与持久化
 

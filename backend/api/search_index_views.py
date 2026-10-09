@@ -1,5 +1,3 @@
-from datetime import timedelta
-
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
@@ -18,6 +16,7 @@ from api.services.search_index_control import (
     index_worker_is_online,
     queue_search_index_run,
     request_index_run_cancel,
+    update_mutable_search_index_settings,
 )
 
 
@@ -59,15 +58,13 @@ class SearchIndexSettingsView(APIView):
         allowed = {'enabled', 'interval_seconds', 'batch_size'}
         if set(request.data) - allowed:
             return error_response('invalid_settings', '包含不允许修改的索引设置。')
-        settings = get_search_index_settings()
-        was_enabled = settings.enabled
-        serializer = SearchIndexSettingsSerializer(settings, data=request.data, partial=True)
+        serializer = SearchIndexSettingsSerializer(data=request.data, partial=True)
         if not serializer.is_valid():
             return error_response('invalid_settings', '索引设置无效。', fields=serializer.errors)
-        updated = serializer.save(updated_by=request.user)
-        if 'interval_seconds' in request.data or (not was_enabled and updated.enabled):
-            updated.next_run_at = timezone.now() + timedelta(seconds=updated.interval_seconds)
-            updated.save(update_fields=['next_run_at'])
+        updated = update_mutable_search_index_settings(
+            serializer.validated_data,
+            updated_by=request.user,
+        )
         data = SearchIndexSettingsSerializer(updated).data
         data['worker_online'] = index_worker_is_online(updated)
         return Response(data)
