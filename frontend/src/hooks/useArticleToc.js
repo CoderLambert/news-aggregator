@@ -11,7 +11,11 @@ import { useState, useLayoutEffect, useRef, useCallback } from 'react'
  *                       (e.g. [news.full_content_zh, showOriginal])
  */
 
-const HEADING_SELECTOR = 'h1, h2, h3'
+const HEADING_SELECTOR = [
+  'h1:not([data-article-toc="ignore"])',
+  'h2:not([data-article-toc="ignore"])',
+  'h3:not([data-article-toc="ignore"])',
+].join(', ')
 const OBSERVE_ROOT_MARGIN = '-80px 0px -60% 0px'
 
 export function useArticleToc(containerRef, deps = []) {

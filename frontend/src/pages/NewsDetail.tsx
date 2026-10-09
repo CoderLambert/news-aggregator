@@ -76,7 +76,7 @@ export default function NewsDetail() {
   const [searchQuery, setSearchQuery] = useState('')
   const articleRef = useRef<HTMLElement | null>(null)
   const { matchCount, currentIndex, goNext, goPrev } = useArticleSearch(articleRef, searchQuery)
-  const { headings, activeId } = useArticleToc(articleRef, [news?.full_content_zh, showOriginal])
+  const { headings, activeId } = useArticleToc(articleRef, [news?.full_content, news?.full_content_zh, showOriginal])
 
   function handleGlobalKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if ((event.metaKey || event.ctrlKey) && event.key === 'f') {
@@ -190,9 +190,7 @@ export default function NewsDetail() {
             />
           )}
 
-          <div className="w-full overflow-x-hidden leading-relaxed text-gray-700">
-            <div className="w-full max-w-full overflow-hidden"><MarkdownContent content={displayContent || ''} legacySummarySpacing /></div>
-          </div>
+          {!news.full_content && displayContent ? <SummarySection content={displayContent} /> : null}
 
           <div className="mt-10 border-t border-neutral-100 pt-6">
             <a href={news.url} target="_blank" rel="noreferrer" className="text-sm text-neutral-400 transition-colors hover:text-neutral-600">{t.readOriginal} →</a>
@@ -205,6 +203,17 @@ export default function NewsDetail() {
       <ScrollToTop />
       {authModalOpen && <AuthModal onClose={() => setAuthModalOpen(false)} />}
     </div>
+  )
+}
+
+function SummarySection({ content }: { content: string }) {
+  return (
+    <section aria-labelledby="article-summary-heading" className="w-full overflow-x-hidden rounded-2xl border border-neutral-200 bg-neutral-50/70 px-5 py-5 text-gray-700">
+      <h2 id="article-summary-heading" data-article-toc="ignore" className="mb-4 text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">摘要</h2>
+      <div className="w-full max-w-full overflow-hidden leading-8">
+        <MarkdownContent content={content} legacySummarySpacing />
+      </div>
+    </section>
   )
 }
 

@@ -3,9 +3,15 @@ Tests for the NewsFetchFullView API endpoint.
 Tests the full article fetching and content cleaning flow.
 """
 import json
+from unittest.mock import patch
+
 import pytest
+from django.contrib.auth import get_user_model
 from django.test import TestCase, Client
 from django.urls import reverse
+from django.utils import timezone
+
+from api.services.article_fetcher import FetchResult
 
 
 class NewsFetchFullViewTest(TestCase):
@@ -13,6 +19,8 @@ class NewsFetchFullViewTest(TestCase):
 
     def setUp(self):
         self.client = Client()
+        self.user = get_user_model().objects.create_user(username='full-content-reader')
+        self.client.force_login(self.user)
         # Create test data
         from api.models import News, Source, Category
         self.source = Source.objects.create(
@@ -31,7 +39,7 @@ class NewsFetchFullViewTest(TestCase):
             url='https://github.com/owner/test-repo',
             source=self.source,
             category=self.category,
-            publish_time='2026-05-30 12:00:00',
+            publish_time=timezone.now(),
         )
 
     def test_fetch_full_content_requires_post(self):
@@ -42,14 +50,22 @@ class NewsFetchFullViewTest(TestCase):
 
     def test_fetch_full_content_with_valid_url(self):
         """POST request with valid URL should return content."""
-        # This test would normally mock the Jina Reader API
-        # For now, just test the endpoint exists
-        response = self.client.post(
-            f'/api/news/{self.news.id}/fetch-full/',
-            content_type='application/json'
+        result = FetchResult(
+            ok=True,
+            provider='test',
+            url=self.news.url,
+            markdown='# Test Content\n\nFetched content.',
+            quality_score=0.9,
         )
-        # Should not crash
-        self.assertIn(response.status_code, [200, 422, 502])
+        with patch('api.views.fetch_article_markdown', return_value=result) as fetch:
+            response = self.client.post(
+                f'/api/news/{self.news.id}/fetch-full/',
+                content_type='application/json'
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('Fetched content', response.json().get('full_content', ''))
+        fetch.assert_called_once()
 
     def test_fetch_full_content_caches_result(self):
         """Second request should return cached result."""
@@ -100,7 +116,7 @@ class NewsTranslateFullViewTest(TestCase):
             url='https://github.com/owner/test-repo',
             source=self.source,
             category=self.category,
-            publish_time='2026-05-30 12:00:00',
+            publish_time=timezone.now(),
         )
 
     def test_translate_requires_post(self):

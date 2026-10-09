@@ -10,6 +10,7 @@ from api.services.article_fetcher.extractors import extract_markdown_from_html
 from api.services.article_fetcher.providers import (
     GitHubReadmeProvider,
     HackerNewsAPIProvider,
+    LeiphoneFeedProvider,
     ScrapyHTTPProvider,
     ScrapySubprocessProvider,
     default_providers,
@@ -183,6 +184,56 @@ def test_extract_markdown_preserves_headings_paragraphs_lists_and_line_breaks():
     assert result.markdown.index('第二段正文。') < result.markdown.index('- 第一项')
 
 
+def test_extract_markdown_flattens_decorative_markup_inside_headings():
+    html = '''
+    <article>
+      <h2><span><br></span><strong><strong><span>复杂编程仍有差距</span><span><br></span></strong></strong></h2>
+      <p>正文段落。</p>
+    </article>
+    '''
+
+    result = extract_markdown_from_html(html, 'https://www.leiphone.com/article')
+
+    assert '## 复杂编程仍有差距' in result.markdown
+    assert '\\**复杂编程仍有差距' not in result.markdown
+    assert '## **复杂编程仍有差距**' not in result.markdown
+
+
+def test_extract_markdown_heading_keeps_links_and_inline_code():
+    html = '''
+    <article>
+      <h2>Use <code>foo()</code> with <a href="/guide">the guide</a></h2>
+      <p>Article body.</p>
+    </article>
+    '''
+
+    result = extract_markdown_from_html(html, 'https://example.com/article')
+
+    assert '## Use `foo()` with [the guide](https://example.com/guide)' in result.markdown
+
+
+def test_extract_markdown_heading_preserves_adjacent_text_boundaries():
+    html = '<article><h2>ChatGPT<strong>5</strong>与AI<span>Agent</span></h2></article>'
+
+    result = extract_markdown_from_html(html, 'https://example.com/article')
+
+    assert result.markdown == '## ChatGPT5与AIAgent'
+
+
+def test_extract_markdown_heading_keeps_internal_break_as_text_boundary():
+    html = '''
+    <article>
+      <h2>Part one<br>Part two</h2>
+      <h3><span>Step one<span><br></span></span><span>Step two</span></h3>
+    </article>
+    '''
+
+    result = extract_markdown_from_html(html, 'https://example.com/article')
+
+    assert '## Part one Part two' in result.markdown
+    assert '### Step one Step two' in result.markdown
+
+
 def test_deepmind_extractor_removes_share_menu_and_related_story_carousel():
     html = '''
     <html><body><main>
@@ -254,6 +305,173 @@ def test_default_providers_prioritizes_hackernews_api_before_generic_jina():
 
     assert isinstance(providers[0], HackerNewsAPIProvider)
     assert isinstance(providers[1], GitHubReadmeProvider)
+    assert isinstance(providers[2], LeiphoneFeedProvider)
+
+
+def test_leiphone_feed_provider_preserves_real_article_structure():
+    body = '这一段补充真实文章背景、评测方法、成本数据与使用限制。' * 20
+    feed = f'''<?xml version="1.0" encoding="UTF-8"?>
+    <rss><channel><item>
+      <title><![CDATA[Claude Haiku 5.5 降本背后]]></title>
+      <link>https://www.leiphone.com/category/ai/example.html</link>
+      <description><![CDATA[
+        <section><p>第一段真实正文，包含足够的背景信息与产品数据。</p></section>
+        <section><h2>01 复杂编程仍有差距</h2><p>第二段真实正文。{body}</p>
+        <ul><li>操作能力提升</li><li>复杂编程仍需更大模型</li></ul>
+        <img src="https://static.leiphone.com/article.png" alt="评测图" /></section>
+      ]]></description>
+    </item></channel></rss>'''.encode()
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return feed
+
+    with patch('api.services.article_fetcher.providers.urllib.request.urlopen', return_value=Response()):
+        result = LeiphoneFeedProvider(timeout=8).fetch(
+            'https://www.leiphone.com/category/ai/example.html',
+            expected_title='Claude Haiku 5.5 降本背后',
+        )
+
+    assert result.ok is True
+    assert result.provider == 'leiphone_feed'
+    assert '第一段真实正文' in result.markdown
+    assert '## 01 复杂编程仍有差距' in result.markdown
+    assert '- 操作能力提升\n- 复杂编程仍需更大模型' in result.markdown
+    assert '![评测图](https://static.leiphone.com/article.png)' in result.markdown
+    assert result.metadata == {'trusted_full_article_source': 'rss_description'}
+
+
+def test_leiphone_feed_download_uses_feed_compatible_user_agent():
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b'<rss />'
+
+    with patch(
+        'api.services.article_fetcher.providers.urllib.request.urlopen',
+        return_value=Response(),
+    ) as urlopen:
+        body = LeiphoneFeedProvider()._download()
+
+    request = urlopen.call_args.args[0]
+    assert body == b'<rss />'
+    assert request.get_header('User-agent') == 'curl/8.0.0'
+    assert request.full_url == 'https://www.leiphone.com/feed'
+
+
+def test_leiphone_feed_full_article_is_not_rejected_as_its_legacy_summary():
+    provider = LeiphoneFeedProvider()
+    markdown = '## 正文\n\n' + ('真实正文段落，来自站点公开 RSS。' * 80)
+    result = FetchResult(
+        ok=True,
+        provider=provider.name,
+        url='https://www.leiphone.com/category/ai/example.html',
+        title='真实文章',
+        markdown=markdown,
+        metadata={'trusted_full_article_source': 'rss_description'},
+    )
+
+    with patch.object(provider, 'fetch', return_value=result):
+        fetched = fetch_article_markdown(
+            result.url,
+            expected_title='真实文章',
+            summary=markdown.replace('## 正文\n\n', ''),
+            providers=[provider],
+        )
+
+    assert fetched.ok is True
+    assert fetched.provider == 'leiphone_feed'
+
+
+def test_untrusted_provider_cannot_skip_summary_similarity_validation():
+    markdown = '这只是摘要内容，不能冒充抓取到的全文。' + ''.join(
+        f'第{index}项摘要信息。' for index in range(80)
+    )
+
+    class Provider:
+        name = 'untrusted'
+
+        def fetch(self, url, expected_title=None, summary=None):
+            return FetchResult(
+                ok=True,
+                provider=self.name,
+                url=url,
+                title=expected_title or '',
+                markdown=markdown,
+                metadata={'trusted_full_article_source': 'rss_description'},
+            )
+
+    try:
+        fetch_article_markdown(
+            'https://example.com/article',
+            expected_title='真实文章',
+            summary=markdown,
+            providers=[Provider()],
+        )
+    except FetchError as exc:
+        assert 'summary_sized' in exc.failures[0].validation_reasons
+    else:
+        raise AssertionError('expected FetchError')
+
+
+def test_leiphone_feed_provider_does_not_accept_another_article():
+    feed = b'''<?xml version="1.0" encoding="UTF-8"?>
+    <rss><channel><item>
+      <title>Another article</title>
+      <link>https://www.leiphone.com/category/ai/another.html</link>
+      <description><![CDATA[<p>Another article body.</p>]]></description>
+    </item></channel></rss>'''
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return feed
+
+    with patch('api.services.article_fetcher.providers.urllib.request.urlopen', return_value=Response()):
+        result = LeiphoneFeedProvider().fetch(
+            'https://www.leiphone.com/category/ai/requested.html',
+            expected_title='Requested article',
+        )
+
+    assert result.ok is False
+    assert result.error == 'feed_item_not_found'
+
+
+def test_leiphone_feed_provider_rejects_invalid_xml():
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b'<rss><channel>'
+
+    with patch('api.services.article_fetcher.providers.urllib.request.urlopen', return_value=Response()):
+        result = LeiphoneFeedProvider().fetch(
+            'https://www.leiphone.com/category/ai/requested.html',
+            expected_title='Requested article',
+        )
+
+    assert result.ok is False
+    assert result.error
 
 
 def test_hackernews_api_provider_extracts_self_post_text_without_comments():

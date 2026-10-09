@@ -46,6 +46,22 @@ describe('useArticleToc', () => {
     expect(result.current.headings[1].id).toBe('custom')
   })
 
+  it('ignores semantic headings that are outside the article outline', () => {
+    const div = document.createElement('div')
+    div.innerHTML = `
+      <h1>Article title</h1>
+      <h2 data-article-toc="ignore">摘要</h2>
+      <h2>First article section</h2>
+    `
+    const ref = { current: div }
+    const { result } = renderHook(() => useArticleToc(ref))
+
+    expect(result.current.headings.map((heading) => heading.text)).toEqual([
+      'Article title',
+      'First article section',
+    ])
+  })
+
   it('re-scans when deps change (content switch)', () => {
     const div = document.createElement('div')
     div.innerHTML = '<h2>English Heading</h2>'

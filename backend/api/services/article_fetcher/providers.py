@@ -9,6 +9,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 from urllib.parse import parse_qs, urlparse
 
 from api.services.content_cleaner import clean_content
@@ -19,6 +20,7 @@ from .types import FetchResult
 from .validators import validate_markdown
 
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+LEIPHONE_FEED_USER_AGENT = 'curl/8.0.0'
 DEFAULT_HEADERS = {
     'User-Agent': USER_AGENT,
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
@@ -186,6 +188,94 @@ class HackerNewsAPIProvider:
             content_length=len(markdown),
             extractor=self.name,
         )
+
+
+class LeiphoneFeedProvider:
+    """Read Leiphone articles from the site's public RSS full-text entries."""
+
+    name = 'leiphone_feed'
+    feed_url = 'https://www.leiphone.com/feed'
+
+    def __init__(self, timeout: int = 15):
+        self.timeout = timeout
+
+    def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None) -> FetchResult:
+        if normalize_domain(url) != 'leiphone.com':
+            return FetchResult(ok=False, provider=self.name, url=url, error='not_leiphone_article')
+
+        try:
+            root = ET.fromstring(self._download())
+        except Exception as exc:
+            return FetchResult(ok=False, provider=self.name, url=url, error=str(exc))
+
+        requested_key = _article_url_key(url)
+        for item in root.iter():
+            if _xml_local_name(item.tag) != 'item':
+                continue
+
+            fields = {
+                _xml_local_name(child.tag): ''.join(child.itertext()).strip()
+                for child in item
+            }
+            item_url = fields.get('link', '')
+            if _article_url_key(item_url) != requested_key:
+                continue
+
+            title = fields.get('title', '') or expected_title or ''
+            description_html = fields.get('description', '')
+            if not description_html:
+                return FetchResult(ok=False, provider=self.name, url=url, title=title, error='empty_feed_description')
+
+            extracted = extract_markdown_from_html(description_html, url)
+            markdown = clean_content(extracted.markdown, url)
+            validation = validate_markdown(
+                markdown,
+                expected_title=expected_title,
+                extracted_title=title,
+                url=url,
+                min_chars=_min_chars_for_url(url),
+            )
+            if not validation.ok:
+                return FetchResult(
+                    ok=False,
+                    provider=self.name,
+                    url=url,
+                    title=title,
+                    markdown=markdown,
+                    quality_score=validation.score,
+                    error='validation_failed:' + ','.join(validation.reasons),
+                    validation_reasons=list(validation.reasons),
+                    content_length=len(markdown),
+                    extractor=self.name,
+                )
+
+            return FetchResult(
+                ok=True,
+                provider=self.name,
+                url=url,
+                title=title,
+                markdown=markdown,
+                quality_score=validation.score,
+                content_length=len(markdown),
+                extractor=self.name,
+                metadata={'trusted_full_article_source': 'rss_description'},
+            )
+
+        return FetchResult(ok=False, provider=self.name, url=url, error='feed_item_not_found')
+
+    def _download(self) -> bytes:
+        # Leiphone's public RSS endpoint rejects browser-style user agents with
+        # HTTP 403 while serving ordinary feed clients. Keep this override
+        # scoped to the fixed feed URL; article URLs still use normal headers.
+        req = urllib.request.Request(
+            self.feed_url,
+            headers={
+                'User-Agent': LEIPHONE_FEED_USER_AGENT,
+                'Accept': 'application/rss+xml,application/xml;q=0.9,*/*;q=0.7',
+            },
+        )
+        with urllib.request.urlopen(req, timeout=self.timeout, context=ssl.create_default_context()) as resp:
+            return resp.read()
 
 
 class JinaProvider:
@@ -412,6 +502,18 @@ def _hackernews_item_id(url: str) -> str:
         return ''
 
 
+def _article_url_key(url: str) -> tuple[str, str]:
+    try:
+        parsed = urlparse(url)
+        return normalize_domain(parsed.netloc), parsed.path.rstrip('/')
+    except Exception:
+        return '', ''
+
+
+def _xml_local_name(tag: str) -> str:
+    return str(tag).rsplit('}', 1)[-1]
+
+
 def _min_chars_for_url(url: str) -> int:
     rule = get_site_rule(url)
     return rule.min_length if rule else 300
@@ -430,4 +532,11 @@ def _backend_dir() -> str:
 
 
 def default_providers() -> list:
-    return [HackerNewsAPIProvider(), GitHubReadmeProvider(), JinaProvider(timeout=5, retries=0), ScrapySubprocessProvider(), ScrapyHTTPProvider()]
+    return [
+        HackerNewsAPIProvider(),
+        GitHubReadmeProvider(),
+        LeiphoneFeedProvider(),
+        JinaProvider(timeout=5, retries=0),
+        ScrapySubprocessProvider(),
+        ScrapyHTTPProvider(),
+    ]
