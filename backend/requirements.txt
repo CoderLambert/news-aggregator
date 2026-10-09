@@ -10,6 +10,7 @@ scrapy>=2.11
 scrapy-playwright>=0.0.40
 beautifulsoup4>=4.12
 deep-translator>=1.11.4
+edge-tts>=7.2.8,<8.0
 sentence-transformers>=2.2
 chromadb>=0.4
 pytest>=8.0

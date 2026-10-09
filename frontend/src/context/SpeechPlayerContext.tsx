@@ -4,7 +4,7 @@ import type { DisplayMode } from '@/types/news'
 import type { PlaybackRate, SpeechScope, VoiceKey } from '@/constants/tts'
 import type { NewsId } from '@/services/api'
 
-export type SpeechStatus = 'idle' | 'loading' | 'playing' | 'paused'
+export type SpeechStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'error'
 
 export interface SpeechPlayerState {
   status: SpeechStatus
@@ -17,6 +17,7 @@ export interface SpeechPlayerState {
   title: string
   newsId: NewsId | null
   displayMode: DisplayMode
+  errorMessage: string | null
 }
 
 export interface SpeechPlayerCapabilities {

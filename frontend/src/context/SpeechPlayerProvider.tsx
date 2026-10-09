@@ -65,6 +65,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
   const [title, setTitle] = useState('')
   const [newsId, setNewsId] = useState<NewsId | null>(null)
   const [displayMode, setDisplayMode] = useState<DisplayMode>('zh')
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const activeArticleRef = useRef<ActiveArticle | null>(null)
@@ -133,6 +134,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     setDuration(0)
     setTitle('')
     setNewsId(null)
+    setErrorMessage(null)
   }, [clearMediaSession, savePosition, updateStatus])
 
   const updateMediaSession = useCallback((articleTitle: string, audio: HTMLAudioElement, requestId: number) => {
@@ -200,9 +202,14 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     setTitle(articleTitle)
     setNewsId(id)
     setDisplayMode(mode)
+    setErrorMessage(null)
 
     const isCurrent = () => isCurrentAudio(audio, requestId)
-    audio.onplay = () => { if (isCurrent()) updateStatus('playing') }
+    audio.onplay = () => {
+      if (!isCurrent()) return
+      setErrorMessage(null)
+      updateStatus('playing')
+    }
     audio.onpause = () => {
       if (!isCurrent() || audio.ended) return
       updateStatus('paused')
@@ -220,12 +227,11 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
       if (!isCurrent()) return
       audioRef.current = null
       activeArticleRef.current = null
-      updateStatus('idle')
+      updateStatus('error')
       setProgress(0)
       setCurrentTime(0)
       setDuration(0)
-      setTitle('')
-      setNewsId(null)
+      setErrorMessage('语音生成失败，请稍后重试。')
       clearMediaSession()
     }
     audio.onended = () => {
@@ -238,6 +244,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
       setCurrentTime(Number.isFinite(audio.duration) ? audio.duration : 0)
       setTitle('')
       setNewsId(null)
+      setErrorMessage(null)
       clearMediaSession()
     }
     audio.onloadedmetadata = () => {
@@ -325,7 +332,8 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     title,
     newsId,
     displayMode,
-  }), [currentTime, displayMode, duration, newsId, progress, rate, scope, status, title, voice])
+    errorMessage,
+  }), [currentTime, displayMode, duration, errorMessage, newsId, progress, rate, scope, status, title, voice])
 
   const playerActions = useMemo(() => ({ speak, pause, resume, stop, seek, setRate, setVoice, setScope }), [
     pause, resume, seek, setRate, setScope, setVoice, speak, stop,
