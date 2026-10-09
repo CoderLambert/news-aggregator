@@ -199,6 +199,27 @@ def test_extract_markdown_flattens_decorative_markup_inside_headings():
     assert '## **复杂编程仍有差距**' not in result.markdown
 
 
+def test_extract_markdown_heading_keeps_links_and_inline_code():
+    html = '''
+    <article>
+      <h2>Use <code>foo()</code> with <a href="/guide">the guide</a></h2>
+      <p>Article body.</p>
+    </article>
+    '''
+
+    result = extract_markdown_from_html(html, 'https://example.com/article')
+
+    assert '## Use `foo()` with [the guide](https://example.com/guide)' in result.markdown
+
+
+def test_extract_markdown_heading_preserves_adjacent_text_boundaries():
+    html = '<article><h2>ChatGPT<strong>5</strong>与AI<span>Agent</span></h2></article>'
+
+    result = extract_markdown_from_html(html, 'https://example.com/article')
+
+    assert result.markdown == '## ChatGPT5与AIAgent'
+
+
 def test_deepmind_extractor_removes_share_menu_and_related_story_carousel():
     html = '''
     <html><body><main>

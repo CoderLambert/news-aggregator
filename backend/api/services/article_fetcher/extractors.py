@@ -194,10 +194,7 @@ def _node_to_markdown(node: Tag | NavigableString, base_url: str, depth: int = 0
         return ''
     if name in {'h1', 'h2', 'h3', 'h4', 'h5', 'h6'}:
         level = int(name[1])
-        # A heading already carries emphasis. Use its visible text instead of
-        # preserving nested <strong> and decorative <br> tags as Markdown;
-        # malformed publisher markup can otherwise become a literal `\**`.
-        text = _escape_md(node.get_text(' ', strip=True))
+        text = _heading_inline_text(node, base_url)
         return f"\n{'#' * level} {text}\n" if text else ''
     if name == 'p':
         text = _inline_text(node, base_url)
@@ -271,6 +268,51 @@ def _inline_text(node: Tag, base_url: str) -> str:
     text = ''.join(parts)
     text = re.sub(r'[ \t]+', ' ', text)
     text = re.sub(r'\n{3,}', '\n\n', text)
+    return _escape_md(text)
+
+
+def _heading_inline_text(node: Tag, base_url: str) -> str:
+    """Render heading inline content without redundant emphasis or breaks.
+
+    Publisher headings often contain several styling-only strong/span layers
+    and leading br tags. A heading already communicates emphasis, so those
+    wrappers are flattened while links, inline code, and text boundaries stay
+    intact.
+    """
+    parts: list[str] = []
+    for child in node.children:
+        if isinstance(child, NavigableString):
+            parts.append(str(child))
+            continue
+        if not isinstance(child, Tag):
+            continue
+
+        name = child.name.lower()
+        if name == 'br':
+            continue
+        if name == 'a':
+            text = child.get_text(' ', strip=True)
+            href = child.get('href')
+            if text and href:
+                prefix = ''
+                if parts and parts[-1] and not parts[-1][-1].isspace() and parts[-1][-1] not in '([':
+                    prefix = ' '
+                parts.append(f'{prefix}[{text}]({urljoin(base_url, str(href))})')
+            elif text:
+                parts.append(text)
+            continue
+        if name == 'code':
+            text = child.get_text('', strip=True)
+            if text:
+                parts.append(f'`{text}`')
+            continue
+        if name == 'img':
+            continue
+
+        parts.append(_heading_inline_text(child, base_url))
+
+    text = ''.join(parts)
+    text = re.sub(r'[ \t]+', ' ', text)
     return _escape_md(text)
 
 
