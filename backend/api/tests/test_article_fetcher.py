@@ -297,6 +297,29 @@ def test_leiphone_feed_provider_preserves_real_article_structure():
     assert result.metadata == {'trusted_full_article_source': 'rss_description'}
 
 
+def test_leiphone_feed_download_uses_feed_compatible_user_agent():
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b'<rss />'
+
+    with patch(
+        'api.services.article_fetcher.providers.urllib.request.urlopen',
+        return_value=Response(),
+    ) as urlopen:
+        body = LeiphoneFeedProvider()._download()
+
+    request = urlopen.call_args.args[0]
+    assert body == b'<rss />'
+    assert request.get_header('User-agent') == 'curl/8.0.0'
+    assert request.full_url == 'https://www.leiphone.com/feed'
+
+
 def test_leiphone_feed_full_article_is_not_rejected_as_its_legacy_summary():
     provider = LeiphoneFeedProvider()
     markdown = '## 正文\n\n' + ('真实正文段落，来自站点公开 RSS。' * 80)

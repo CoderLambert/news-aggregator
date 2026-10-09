@@ -20,6 +20,7 @@ from .types import FetchResult
 from .validators import validate_markdown
 
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+LEIPHONE_FEED_USER_AGENT = 'curl/8.0.0'
 DEFAULT_HEADERS = {
     'User-Agent': USER_AGENT,
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
@@ -263,9 +264,15 @@ class LeiphoneFeedProvider:
         return FetchResult(ok=False, provider=self.name, url=url, error='feed_item_not_found')
 
     def _download(self) -> bytes:
+        # Leiphone's public RSS endpoint rejects browser-style user agents with
+        # HTTP 403 while serving ordinary feed clients. Keep this override
+        # scoped to the fixed feed URL; article URLs still use normal headers.
         req = urllib.request.Request(
             self.feed_url,
-            headers={**DEFAULT_HEADERS, 'Accept': 'application/rss+xml,application/xml;q=0.9,*/*;q=0.7'},
+            headers={
+                'User-Agent': LEIPHONE_FEED_USER_AGENT,
+                'Accept': 'application/rss+xml,application/xml;q=0.9,*/*;q=0.7',
+            },
         )
         with urllib.request.urlopen(req, timeout=self.timeout, context=ssl.create_default_context()) as resp:
             return resp.read()
