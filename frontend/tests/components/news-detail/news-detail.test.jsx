@@ -74,6 +74,25 @@ describe('FullContentSection', () => {
     expect(screen.queryByRole('group', { name: '切换语言' })).not.toBeInTheDocument()
   })
 
+  it('labels a public copy and hides paid personal regeneration without an account', () => {
+    renderSection({ news: { ...baseNews, full_content_zh: '共享文本', full_content_zh_scope: 'shared', full_translation_personal_available: false } })
+    expect(screen.getByText('共享译文')).toBeInTheDocument()
+    expect(screen.getByText(/不消耗你的模型额度/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '生成个人译文' })).not.toBeInTheDocument()
+  })
+
+  it('offers an explicit personal version when a subscription is available', () => {
+    const { props } = renderSection({ news: { ...baseNews, full_content_zh: '共享文本', full_content_zh_scope: 'shared', full_translation_personal_available: true } })
+    fireEvent.click(screen.getByRole('button', { name: '生成个人译文' }))
+    expect(props.onTranslate).toHaveBeenCalledOnce()
+  })
+
+  it('shows a shared wait message rather than another users private progress', () => {
+    renderSection({ translating: true, translationWaitingShared: true })
+    expect(screen.getByText('共享译文正在生成，完成后自动显示…')).toBeInTheDocument()
+    expect(screen.getByText(/正在复用其他读者发起的翻译/)).toBeInTheDocument()
+  })
+
   it('shows "重新翻译" + lang toggle when translation present', () => {
     const news = { ...baseNews, full_content_zh: '中文译文' }
     renderSection({ news })

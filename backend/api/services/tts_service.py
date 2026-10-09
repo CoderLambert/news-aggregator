@@ -132,16 +132,23 @@ def resolve_tts_content(news, user, language: str, scope: str) -> ResolvedTTSCon
             news=news,
             source_hash=source_hash(news.full_content),
         ).first()
-        if translation is None or not translation.content:
-            raise TTSContentUnavailable('translation_required', '请先翻译全文，再播放中文语音。')
+        if translation is not None and translation.content:
+            return ResolvedTTSContent(
+                language='zh',
+                title=news.title_zh,
+                content=translation.content,
+                namespace=f'subscription:{user.pk}:{connection.pk}',
+            )
+
+    from api.services.shared_translations import get_shared_translation
+    shared = get_shared_translation(news)
+    if shared is not None:
         return ResolvedTTSContent(
-            language='zh',
-            title=news.title_zh,
-            content=translation.content,
-            namespace=f'subscription:{user.pk}:{connection.pk}',
+            language='zh', title=news.title_zh, content=shared.content,
+            namespace='shared-full',
         )
 
-    if not news.full_content_zh:
+    if connection is not None or not news.full_content_zh:
         raise TTSContentUnavailable('translation_required', '请先翻译全文，再播放中文语音。')
     return ResolvedTTSContent(
         language='zh', title=news.title_zh, content=news.full_content_zh, namespace='shared-full',

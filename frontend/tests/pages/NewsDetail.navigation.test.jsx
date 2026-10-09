@@ -8,7 +8,7 @@ import NewsList from '@/pages/NewsList'
 import NewsDetail from '@/pages/NewsDetail'
 import { blockNews, checkFavoriteStatus, fetchCategories, fetchNews, fetchNewsDetail, fetchSources, unblockNews } from '@/services/api'
 
-const apiState = vi.hoisted(() => ({ blocked: false, fetchFullArticle: vi.fn() }))
+const apiState = vi.hoisted(() => ({ blocked: false, fetchFullArticle: vi.fn(), translate: vi.fn(), translateError: '' }))
 
 vi.mock('@/services/api', () => ({
   fetchNews: vi.fn(),
@@ -23,7 +23,7 @@ vi.mock('@/services/api', () => ({
 }))
 
 vi.mock('@/hooks/useFullArticle', () => ({ useFullArticle: () => ({ articleLoading: false, articleError: '', handleFetchFullArticle: apiState.fetchFullArticle, resumeExistingFetch: vi.fn(), cancelFetch: vi.fn() }) }))
-vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => ({ translating: false, translateError: '', translationProgress: '', showOriginal: false, setShowOriginal: vi.fn(), handleTranslate: vi.fn() }) }))
+vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => ({ translating: false, translateError: apiState.translateError, translationProgress: '', showOriginal: false, setShowOriginal: vi.fn(), handleTranslate: apiState.translate }) }))
 vi.mock('@/hooks/useArticleSearch', () => ({ useArticleSearch: () => ({ matchCount: 0, currentIndex: 0, goNext: vi.fn(), goPrev: vi.fn() }) }))
 vi.mock('@/hooks/useArticleToc', () => ({ useArticleToc: () => ({ headings: [], activeId: '' }) }))
 vi.mock('@/context/SpeechPlayerContext', () => ({
@@ -85,6 +85,7 @@ function renderRoutes(initialEntry, user = { id: 12, username: 'reader' }) {
 beforeEach(() => {
   vi.clearAllMocks()
   apiState.blocked = false
+  apiState.translateError = ''
   apiState.fetchFullArticle.mockReset()
   localStorage.removeItem('news-aggregator-filters')
   usePreferencesStore.setState({ lang: 'zh' })
@@ -97,6 +98,14 @@ beforeEach(() => {
 })
 
 describe('news list return navigation and invalidation', () => {
+  it.each([['', false], ['已有完整译文', true]])('retries a missing translation through shared dedup and keeps explicit regeneration personal (%s)', async (saved, force) => {
+    apiState.translateError = '翻译任务失败，请重试'
+    fetchNewsDetail.mockResolvedValue({ ...detailStory, full_content: 'Original article body', full_content_zh: saved })
+    renderRoutes('/news/21')
+    fireEvent.click(await screen.findByRole('button', { name: '重试' }))
+    expect(apiState.translate).toHaveBeenCalledWith(force)
+  })
+
   it('restores the filtered list URL and refetches after detail block and unblock', async () => {
     renderRoutes('/?search=climate&mode=keyword&category=2&source=8&page=2')
     expect(await screen.findByRole('heading', { name: 'Climate technology update' })).toBeInTheDocument()

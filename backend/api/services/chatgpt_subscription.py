@@ -1238,6 +1238,7 @@ def save_completed_translation(
     model_slug: str,
     text: str,
     source_digest: str,
+    shared_lease=None,
 ) -> ChatGPTArticleTranslation:
     """Persist a whole result only if this account generation is still active."""
     with _user_lock(user_id):
@@ -1248,6 +1249,14 @@ def save_completed_translation(
             ).first()
             if connection is None:
                 raise ConnectionChangedError('订阅账号已切换或断开，翻译没有保存。')
+            from api.services.shared_translations import publish_translation, SharedTranslationError
+            try:
+                publish_translation(
+                    news_id=news_id, digest=source_digest, text=text,
+                    provider='chatgpt', model_slug=model_slug, lease=shared_lease,
+                )
+            except SharedTranslationError as exc:
+                raise SubscriptionError(str(exc)) from exc
             record, _ = ChatGPTArticleTranslation.objects.update_or_create(
                 user_id=user_id,
                 connection=connection,

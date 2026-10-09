@@ -46,6 +46,26 @@ describe('useTranslation', () => {
   })
   afterEach(() => vi.restoreAllMocks())
 
+  it('waits for a shared result and preserves its scope and source in the query data', async () => {
+    let finish
+    api.translateFullArticleStream.mockImplementation(async function* () {
+      yield { type: 'waiting_shared' }
+      await new Promise((resolve) => { finish = resolve })
+      yield { type: 'complete', fullContentZh: '公共完整译文', fetchedAt: '2026-10-10T00:00:00Z', scope: 'shared', source: 'chatgpt' }
+    })
+    const current = { current: article() }
+    const setNews = vi.fn((updater) => { current.current = updater(current.current) })
+    const { result } = renderHook(() => useTranslation('42', current.current, setNews, false), { wrapper: makeWrapper() })
+    let request
+    act(() => { request = result.current.handleTranslate(false) })
+    await waitFor(() => expect(result.current.translationWaitingShared).toBe(true))
+    expect(result.current.translationProgress).toBe('')
+    await act(async () => { finish(); await request })
+    expect(current.current.full_content_zh_scope).toBe('shared')
+    expect(current.current.full_content_zh_source).toBe('chatgpt')
+    expect(result.current.translating).toBe(false)
+  })
+
   it('reuses the saved query result without an automatic stream and only translates on explicit retry', async () => {
     const savedArticle = article({ full_content_zh: '以前保存的完整译文' })
     const current = { current: savedArticle }

@@ -433,7 +433,7 @@ def test_failed_reauthorization_preserves_the_current_session_and_account_hint(u
 
 def test_upgrade_preserves_legacy_host_users_and_subscription_credentials(transactional_db, settings):
     before = ('api', '0022_searchindexrun_worker_instance_id')
-    after = ('api', '0025_chatgpt_connection_id_token')
+    after = ('api', '0026_shared_article_translations')
     executor = MigrationExecutor(django_connection)
     try:
         executor.migrate([before])

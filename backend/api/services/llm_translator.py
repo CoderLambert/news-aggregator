@@ -315,10 +315,10 @@ def _call_llm_stream(prompt: str, max_tokens: int = 32000):
         {'role': 'system', 'content': TRANSLATION_SYSTEM},
         {'role': 'user', 'content': prompt}
     ]
-    yield from stream_chat(messages, max_tokens)
+    yield from stream_chat(messages, max_tokens, require_completed=True)
 
 
-def stream_chat(messages: list, max_tokens: int = 32000, temperature: float = 0.3, enable_search: bool = False):
+def stream_chat(messages: list, max_tokens: int = 32000, temperature: float = 0.3, enable_search: bool = False, require_completed: bool = False):
     """Generic streaming chat with provider failover + per-provider retry.
 
     Yields chunks of text.  On total failure, yields a single fallback message.
@@ -333,6 +333,9 @@ def stream_chat(messages: list, max_tokens: int = 32000, temperature: float = 0.
     last_err = None
     for idx, (client, model) in enumerate(clients):
         for attempt in range(1, MAX_RETRIES + 1):
+            got_any = False
+            completed = False
+            stream = None
             try:
                 stream = client.chat.completions.create(
                     model=model,
@@ -342,17 +345,25 @@ def stream_chat(messages: list, max_tokens: int = 32000, temperature: float = 0.
                     stream=True,
                 )
 
-                got_any = False
                 for chunk in stream:
+                    if not chunk.choices:
+                        continue
                     delta = chunk.choices[0].delta
+                    if getattr(chunk.choices[0], 'finish_reason', None) == 'stop':
+                        completed = True
                     if delta.content:
                         got_any = True
                         yield delta.content
                 if got_any:
+                    if require_completed and not completed:
+                        raise ValueError('全文翻译响应未完整完成，请重试。')
                     return  # success
                 last_err = f"provider#{idx} ({model}) returned empty stream"
                 break  # don't retry empty stream — likely a prompt issue
             except Exception as e:
+                if require_completed and got_any:
+                    # Never append a second provider's output to a partial article.
+                    raise ValueError('全文翻译响应中断或未完整完成，请重试。') from e
                 last_err = f"provider#{idx} ({model}) attempt {attempt}/{MAX_RETRIES} failed: {e}"
                 logger.warning(last_err)
                 # Retry on transient errors (SSL, timeout, connection reset)
@@ -363,6 +374,9 @@ def stream_chat(messages: list, max_tokens: int = 32000, temperature: float = 0.
                     time.sleep(1 * attempt)  # simple backoff
                     continue
                 break  # non-transient or exhausted retries → try next provider
+            finally:
+                if stream is not None and hasattr(stream, 'close'):
+                    stream.close()
 
     logger.error(f"All LLM providers failed. Last error: {last_err}")
     yield f"抱歉，AI 服务暂时不可用（{last_err}），请稍后再试。"

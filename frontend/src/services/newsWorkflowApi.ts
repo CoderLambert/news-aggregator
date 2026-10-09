@@ -51,7 +51,8 @@ export interface ChatHistory {
 
 export type TranslationEvent =
   | { type: 'progress'; text: string }
-  | { type: 'complete'; fullContentZh: string; fetchedAt: string | null }
+  | { type: 'complete'; fullContentZh: string; fetchedAt: string | null; scope?: string; source?: string }
+  | { type: 'waiting_shared' }
   | { type: 'error'; message: string }
   | { type: 'ignored' }
 
@@ -159,11 +160,14 @@ export function parseSuggestedQuestions(value: unknown): string[] {
 export function parseTranslationEvent(value: unknown): TranslationEvent {
   if (!isRecord(value)) return { type: 'ignored' }
   if (typeof value.error === 'string') return { type: 'error', message: value.error }
+  if (value.waiting_shared === true) return { type: 'waiting_shared' }
   if (typeof value.full_content_zh === 'string') {
     return {
       type: 'complete',
       fullContentZh: value.full_content_zh,
       fetchedAt: typeof value.full_content_zh_fetched_at === 'string' ? value.full_content_zh_fetched_at : null,
+      ...(typeof value.full_content_zh_scope === 'string' ? { scope: value.full_content_zh_scope } : {}),
+      ...(typeof value.full_content_zh_source === 'string' ? { source: value.full_content_zh_source } : {}),
     }
   }
   if (typeof value.progress === 'string') return { type: 'progress', text: value.progress }

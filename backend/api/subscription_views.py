@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 from api.models import ChatGPTArticleTranslation, ChatGPTSubscriptionConnection, News
 from api.services import chatgpt_subscription as subscription
 from api.services import chatgpt_subscription_jobs as translation_jobs
+from api.services import shared_translations
 
 
 def _connection_payload(connection):
@@ -209,10 +210,6 @@ def subscription_translation_response(request, news: News, force=False):
 
     if not user.is_authenticated or connection is None:
         return error_response('请先登录并连接 ChatGPT 订阅账号。')
-    if connection.needs_reauth or not connection.connected:
-        return error_response('ChatGPT 订阅授权已失效，请重新连接账号。')
-    if not connection.selected_model:
-        return error_response('请先在订阅设置中选择可见模型。')
     if not news.full_content:
         return error_response('请先获取完整原文。')
 
@@ -222,20 +219,35 @@ def subscription_translation_response(request, news: News, force=False):
         user=user, connection=connection, news=news, source_hash=digest,
     ).first()
     if cached and not force and not (job and not job.done):
-        def existing_stream():
-            data = {
-                'full_content_zh': cached.content,
-                'full_content_zh_fetched_at': cached.completed_at.isoformat(),
-            }
-            yield f"event: complete\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-        response = StreamingHttpResponse(existing_stream(), content_type='text/event-stream')
-        response['Cache-Control'] = 'no-cache'
-        response['X-Accel-Buffering'] = 'no'
-        return response
+        return shared_translations.completed_response(cached, 'private')
+
+    shared_lease = None
+    if not force and not (job and not job.done):
+        shared = shared_translations.get_shared_translation(news)
+        if shared is not None:
+            return shared_translations.completed_response(shared)
+        if shared_translations.task_is_running(news):
+            return shared_translations.waiting_response(news)
+        else:
+            if connection.needs_reauth or not connection.connected:
+                return error_response('ChatGPT 订阅授权已失效，请重新连接账号。')
+            if not connection.selected_model:
+                return error_response('请先在订阅设置中选择可见模型。')
+            shared_lease = shared_translations.claim_task(news)
+            if shared_lease is None:
+                return shared_translations.waiting_response(news)
+
+    if connection.needs_reauth or not connection.connected:
+        return error_response('ChatGPT 订阅授权已失效，请重新连接账号。')
+    if not connection.selected_model:
+        return error_response('请先在订阅设置中选择可见模型。')
 
     try:
-        job = translation_jobs.start_or_get_job(user, connection, news)
+        if not (job and not job.done and shared_lease is None):
+            job = translation_jobs.start_or_get_job(user, connection, news, shared_lease=shared_lease)
     except subscription.SubscriptionError as exc:
+        if shared_lease is not None:
+            shared_lease.finish('failed')
         return error_response(str(exc))
 
     def stream():

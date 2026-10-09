@@ -70,6 +70,8 @@ class NewsDetailSerializer(serializers.ModelSerializer):
     full_content_zh = serializers.SerializerMethodField()
     full_content_zh_fetched_at = serializers.SerializerMethodField()
     full_content_zh_source = serializers.SerializerMethodField()
+    full_content_zh_scope = serializers.SerializerMethodField()
+    full_translation_personal_available = serializers.SerializerMethodField()
     full_content_fetch_status = serializers.CharField(read_only=True)
     full_content_fetch_error = serializers.CharField(read_only=True)
     full_content_fetch_provider = serializers.CharField(read_only=True)
@@ -90,6 +92,7 @@ class NewsDetailSerializer(serializers.ModelSerializer):
             'translation_status', 'translation_error', 'translation_retry_count',
             'full_content', 'full_content_fetched_at',
             'full_content_zh', 'full_content_zh_fetched_at', 'full_content_zh_source',
+            'full_content_zh_scope', 'full_translation_personal_available',
             'full_content_fetch_status', 'full_content_fetch_error',
             'full_content_fetch_provider', 'full_content_quality_score',
             'full_content_retry_count', 'last_full_content_attempt',
@@ -125,18 +128,45 @@ class NewsDetailSerializer(serializers.ModelSerializer):
 
     def get_full_content_zh(self, obj):
         connection, translation = self._subscription_translation(obj)
-        if connection is not None:
-            return translation.content if translation else ''
-        return obj.full_content_zh
+        shared = self._shared_translation(obj)
+        if translation is not None:
+            return translation.content
+        if shared is not None:
+            return shared.content
+        return '' if connection is not None else obj.full_content_zh
 
     def get_full_content_zh_fetched_at(self, obj):
         connection, translation = self._subscription_translation(obj)
-        if connection is not None:
-            return translation.completed_at if translation else None
-        return obj.full_content_zh_fetched_at
+        shared = self._shared_translation(obj)
+        if translation is not None:
+            return translation.completed_at
+        if shared is not None:
+            return shared.completed_at
+        return None if connection is not None else obj.full_content_zh_fetched_at
+
+    def _shared_translation(self, obj):
+        from .services.shared_translations import get_shared_translation
+        if not hasattr(self, '_shared_translation_cache'):
+            self._shared_translation_cache = {}
+        if obj.pk not in self._shared_translation_cache:
+            self._shared_translation_cache[obj.pk] = get_shared_translation(obj)
+        return self._shared_translation_cache[obj.pk]
+
+    def get_full_content_zh_scope(self, obj):
+        connection, translation = self._subscription_translation(obj)
+        if translation is not None:
+            return 'private'
+        if self._shared_translation(obj) is not None:
+            return 'shared'
+        return 'legacy' if connection is None and obj.full_content_zh else None
+
+    def get_full_translation_personal_available(self, obj):
+        connection, _ = self._subscription_translation(obj)
+        return bool(connection and connection.connected and not connection.needs_reauth
+                    and connection.selected_model)
 
     def get_full_translation_active(self, obj):
-        """Report a worker only inside the current user's translation namespace."""
+        """Personal workers stay scoped; shared task availability is public."""
         try:
             connection, _translation = self._subscription_translation(obj)
             if connection is not None:
@@ -148,16 +178,24 @@ class NewsDetailSerializer(serializers.ModelSerializer):
             else:
                 from .services.translation_jobs import get_job
                 job = get_job(obj.pk)
-            return bool(job and not job.done)
+            if job and not job.done:
+                return True
+            if self.get_full_content_zh(obj):
+                return False
+            from .services.shared_translations import task_is_running
+            return task_is_running(obj)
         except Exception:
             return False
 
     def get_full_content_zh_source(self, obj):
-        """Return the provider only within the currently selected translation scope."""
+        """Expose provider provenance, without the contributing user's identity."""
         connection, translation = self._subscription_translation(obj)
-        if connection is not None:
-            return 'chatgpt' if translation else None
-        return 'llm' if obj.full_content_zh else None
+        if translation is not None:
+            return 'chatgpt'
+        shared = self._shared_translation(obj)
+        if shared is not None:
+            return shared.provider
+        return 'llm' if connection is None and obj.full_content_zh else None
 
 
 class FavoriteNewsSerializer(serializers.Serializer):

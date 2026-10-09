@@ -17,6 +17,7 @@ from api.services.chatgpt_subscription import (
     source_hash,
     stream_full_translation,
 )
+from api.services.shared_translations import keep_lease_alive, result_payload
 
 logger = logging.getLogger(__name__)
 
@@ -77,51 +78,55 @@ def get_job(user_id, connection_id, news_id, source_digest=None):
         return next((job for key, job in _jobs.items() if key[:3] == prefix and not job.done), None)
 
 
-def _run_job(job, *, user_id, connection_id, news_id, source_digest, generation, model_slug, article_markdown):
+def _run_job(job, *, user_id, connection_id, news_id, source_digest, generation, model_slug, article_markdown, shared_lease):
     close_old_connections()
     try:
         current = News.objects.only('full_content').get(pk=news_id)
         if source_hash(current.full_content) != source_digest:
             raise SubscriptionError('原文已更新，请重新开始全文翻译。')
-        output = stream_full_translation(
-            connection_id=connection_id,
-            expected_generation=generation,
-            model_slug=model_slug,
-            article_markdown=article_markdown,
-            on_delta=job.append,
-        )
-        record = save_completed_translation(
-            user_id=user_id,
-            connection_id=connection_id,
-            news_id=news_id,
-            expected_generation=generation,
-            model_slug=model_slug,
-            text=output,
-            source_digest=source_digest,
-        )
-        job.finish(result={
-            'full_content_zh': record.content,
-            'full_content_zh_fetched_at': record.completed_at.isoformat(),
-        })
+        with keep_lease_alive(shared_lease):
+            output = stream_full_translation(
+                connection_id=connection_id,
+                expected_generation=generation,
+                model_slug=model_slug,
+                article_markdown=article_markdown,
+                on_delta=job.append,
+            )
+            record = save_completed_translation(
+                user_id=user_id,
+                connection_id=connection_id,
+                news_id=news_id,
+                expected_generation=generation,
+                model_slug=model_slug,
+                text=output,
+                source_digest=source_digest,
+                shared_lease=shared_lease,
+            )
+        job.finish(result=result_payload(record, 'private'))
     except Exception as exc:
         message = str(exc) if isinstance(exc, SubscriptionError) else 'ChatGPT 全文翻译失败，请稍后重试。'
         job.finish(error=message)
         logger.info('ChatGPT article translation job ended without a saved result (%s).', type(exc).__name__)
     finally:
+        if shared_lease is not None:
+            shared_lease.finish('failed')  # CAS leaves successful/replaced leases untouched.
         close_old_connections()
 
 
-def start_or_get_job(user, connection: ChatGPTSubscriptionConnection, news: News):
+def start_or_get_job(user, connection: ChatGPTSubscriptionConnection, news: News, *, shared_lease=None):
     source_digest = source_hash(news.full_content)
     key = _job_key(user.pk, connection.pk, news.pk, source_digest)
     with _jobs_lock:
         _gc_jobs()
         existing = _jobs.get(key)
-        if existing and not existing.done:
+        if existing and not existing.done and (
+            shared_lease is None or getattr(existing, 'shared_lease', None) == shared_lease
+        ):
             return existing
         if not connection.selected_model:
             raise SubscriptionError('请先在订阅设置中选择可见模型。')
         job = ChatGPTTranslationJob(key)
+        job.shared_lease = shared_lease
         _jobs[key] = job
         _executor.submit(
             _run_job,
@@ -133,5 +138,6 @@ def start_or_get_job(user, connection: ChatGPTSubscriptionConnection, news: News
             generation=connection.generation,
             model_slug=connection.selected_model,
             article_markdown=news.full_content,
+            shared_lease=shared_lease,
         )
         return job

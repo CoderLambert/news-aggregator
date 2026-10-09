@@ -91,6 +91,8 @@ def start_or_get_job(
     prompt: str,
     on_save: Callable[[str, bool], None],
     save_every_chars: int = 500,
+    *,
+    shared_lease=None,
 ) -> TranslationJob:
     """Return existing in-flight job for this news_id, or start a new one.
 
@@ -102,16 +104,27 @@ def start_or_get_job(
     with _jobs_lock:
         _gc_jobs()
         existing = _jobs.get(news_id)
-        if existing and not existing.done:
+        if existing and not existing.done and (
+            shared_lease is None or getattr(existing, 'shared_lease', None) == shared_lease
+        ):
             logger.info(f"Attaching to existing translation job for news {news_id}")
             return existing
 
         job = TranslationJob(news_id)
+        job.shared_lease = shared_lease
         _jobs[news_id] = job
 
-    def _worker() -> None:
+    def _run_worker() -> None:
         # Import here to avoid Django app-loading order surprises
         from api.services.llm_translator import _call_llm_stream
+        if shared_lease is not None:
+            from api.models import News
+            from api.services.shared_translations import source_hash
+            task = shared_lease.current().first()
+            current = News.objects.only('full_content').get(pk=news_id)
+            if task is None or source_hash(current.full_content) != task.source_hash:
+                job._finish(error='原文已更新或翻译任务已过期，请重试。')
+                return
 
         last_saved_len = 0
         try:
@@ -140,12 +153,28 @@ def start_or_get_job(
                     on_save(job.text, True)
                 except Exception as save_err:
                     logger.error(f"Final save failed (news={news_id}): {save_err}")
+                    job._finish(error='完整译文未能保存，请重试。')
+                    return
                 job._finish()
             else:
                 job._finish(error=job.text or '翻译返回为空')
         except Exception as e:
             logger.exception(f"Translation worker crashed (news={news_id})")
             job._finish(error=str(e))
+
+    def _worker():
+        from django.db import close_old_connections
+        from api.services.shared_translations import keep_lease_alive
+        close_old_connections()
+        try:
+            with keep_lease_alive(shared_lease):
+                _run_worker()
+        except Exception:
+            job._finish(error='翻译任务已过期或未能完成，请重试。')
+        finally:
+            if shared_lease is not None:
+                shared_lease.finish('failed')
+            close_old_connections()
 
     t = threading.Thread(target=_worker, name=f"translate-{news_id}", daemon=True)
     t.start()

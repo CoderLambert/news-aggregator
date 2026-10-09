@@ -68,6 +68,8 @@ News Aggregator 使用 OpenAI 的开源应用 Sign in with ChatGPT 流程，让�
 1. 同一部署只有一个 host ID。
 2. 不同 News Aggregator 用户的 client、Token、活动账号和模型选择互不共享。
 
+2026-10-10 新增 [独立共享文章译文](shared-article-translations.md)：仅将完整的公开文章翻译结果复制到独立表，供其他读者复用。首位生成者承担模型用量；其他用户读取公共副本不调用模型。个人重新翻译保留在当前用户/连接的私有记录中，不覆盖已有公共版本；凭据隔离规则继续适用。
+
 ### 官方推荐的三个用户动作
 
 | 操作 | OAuth 行为 | 本地行为 |

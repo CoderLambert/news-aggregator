@@ -14,6 +14,7 @@ import type { NewsDetail } from '@/types/news'
 interface TranslationState {
   ownerKey: string
   translating: boolean
+  waitingShared: boolean
   paused: boolean
   error: string
   progress: string
@@ -26,7 +27,7 @@ interface TranslationRequest {
 }
 
 const EMPTY_TRANSLATION_STATE: TranslationState = {
-  ownerKey: '', translating: false, paused: false, error: '', progress: '', showOriginal: false,
+  ownerKey: '', translating: false, waitingShared: false, paused: false, error: '', progress: '', showOriginal: false,
 }
 
 export function useTranslation(
@@ -72,18 +73,25 @@ export function useTranslation(
     progressRef.current = ''
     lastProgressUpdateRef.current = 0
     if (pausedKey) localStorage.removeItem(pausedKey)
-    updateState({ translating: true, paused: false, error: '', progress: '' })
+    updateState({ translating: true, waitingShared: false, paused: false, error: '', progress: '' })
 
     try {
       for await (const event of translateFullArticleStream(newsId, { force, signal: request.controller.signal })) {
         if (!isCurrent()) return false
+        if (event.type === 'waiting_shared') {
+          updateState({ waitingShared: true })
+          continue
+        }
         if (event.type === 'error') {
           updateState({ translating: false, paused: false, error: event.message })
           return false
         }
         if (event.type === 'complete') {
           setNews((previous) => previous && previous.id === newsId
-            ? { ...previous, full_content_zh: event.fullContentZh, full_content_zh_fetched_at: event.fetchedAt }
+            ? { ...previous, full_content_zh: event.fullContentZh, full_content_zh_fetched_at: event.fetchedAt,
+              full_content_zh_scope: event.scope ?? previous.full_content_zh_scope,
+              full_content_zh_source: event.source ?? previous.full_content_zh_source,
+              full_translation_active: false }
             : previous)
           if (pausedKey) localStorage.removeItem(pausedKey)
           updateState({ translating: false, paused: false, error: '', progress: '' })
@@ -160,6 +168,7 @@ export function useTranslation(
 
   return {
     translating: visibleState.translating,
+    translationWaitingShared: visibleState.waitingShared,
     translationPaused: visibleState.paused,
     translateError: visibleState.error,
     translationProgress: visibleState.progress,

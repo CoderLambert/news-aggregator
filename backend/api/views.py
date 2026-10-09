@@ -45,7 +45,11 @@ def pick_chat_context(news):
 
     Returns a non-empty string (empty only if every field is empty).
     """
+    from api.services.shared_translations import get_shared_translation
+    shared = get_shared_translation(news)
     return (
+        (shared.content if shared else '')
+        or
         news.full_content_zh
         or news.full_content
         or news.content_zh
@@ -647,7 +651,6 @@ class NewsTranslateFullView(generics.GenericAPIView):
     def post(self, request, pk):
         """Translate full article content to Chinese using SSE streaming."""
         from django.http import StreamingHttpResponse
-        from django.utils import timezone
         import json as json_lib
         # _call_llm_stream is invoked inside the translation_jobs worker, not here.
 
@@ -655,12 +658,19 @@ class NewsTranslateFullView(generics.GenericAPIView):
 
         force = request.data.get('force', False)
 
-        # An active subscription owns a private translation namespace. Never
-        # fall through to the shared provider cache after choosing that path.
+        # Personal results take precedence; public copies are a separate fallback.
         from api.services.chatgpt_subscription import active_connection_for_user
         if active_connection_for_user(request.user) is not None:
             from api.subscription_views import subscription_translation_response
             return subscription_translation_response(request, news, force=force)
+
+        from api.services import shared_translations
+        shared = shared_translations.get_shared_translation(news)
+        if shared is not None:
+            # A public-provider request must not silently replace everybody's copy.
+            return shared_translations.completed_response(shared)
+        if shared_translations.task_is_running(news):
+            return shared_translations.waiting_response(news)
 
         # If a background worker is still running, ALWAYS prefer attaching
         # to it over the snapshot path — this is the cross-device / re-entry
@@ -692,12 +702,14 @@ class NewsTranslateFullView(generics.GenericAPIView):
             if zh_link:
                 zh_content = fetch_and_verify_chinese_content(zh_link)
                 if zh_content:
-                    news.full_content_zh = zh_content
-                    news.full_content_zh_fetched_at = timezone.now()
-                    news.save(update_fields=['full_content_zh', 'full_content_zh_fetched_at'])
-                    def cached_stream():
-                        yield f"event: complete\ndata: {json_lib.dumps({'full_content_zh': zh_content, 'full_content_zh_fetched_at': news.full_content_zh_fetched_at.isoformat()}, ensure_ascii=False)}\n\n"
-                    return StreamingHttpResponse(cached_stream(), content_type='text/event-stream')
+                    try:
+                        record = shared_translations.publish_translation(
+                            news_id=news.pk, digest=shared_translations.source_hash(news.full_content),
+                            text=zh_content, provider='source-link',
+                        )
+                    except shared_translations.SharedTranslationError as exc:
+                        return shared_translations.error_response(str(exc))
+                    return shared_translations.completed_response(record)
 
         # Keep the SSE error shape expected by the frontend, but make missing
         # provider configuration actionable instead of persisting a fallback
@@ -705,15 +717,19 @@ class NewsTranslateFullView(generics.GenericAPIView):
         if not worker_in_flight and not get_clients():
             def provider_error_stream():
                 message = (
-                    '未配置全文翻译模型提供方。当前支持 Volcengine ARK / DashScope API Key。'
+                    '未配置全文翻译模型提供方：请前往「设置 → ChatGPT 订阅」连接当前用户自己的 ChatGPT 账号并选择模型；也可由站点管理员配置 Volcengine ARK / DashScope API Key。'
                 )
                 yield f"data: {json_lib.dumps({'error': message}, ensure_ascii=False)}\n\n"
             return StreamingHttpResponse(provider_error_stream(), content_type='text/event-stream')
 
-        # FIX: Use the fetched full content for translation
+        shared_lease = None
+        if not worker_in_flight:
+            shared_lease = shared_translations.claim_task(news)
+            if shared_lease is None:
+                return shared_translations.waiting_response(news)
+
+        # Use the fetched full content for translation.
         context = news.full_content
-        if len(context) > 40000:
-            context = context[:40000]
 
         from api.services.llm_translator import build_translation_prompt
         prompt = build_translation_prompt(context)
@@ -724,21 +740,17 @@ class NewsTranslateFullView(generics.GenericAPIView):
         # This HTTP generator just polls the job and forwards progress.
         from api.services.translation_jobs import start_or_get_job
         news_pk = news.pk
+        source_digest = shared_translations.source_hash(news.full_content)
 
         def persist_progress(text, is_final):
-            """Called from worker thread — re-query and save to avoid stale state."""
-            try:
-                obj = News.objects.get(pk=news_pk)
-                obj.full_content_zh = text
-                obj.full_content_zh_fetched_at = timezone.now()
-                obj.save(update_fields=['full_content_zh', 'full_content_zh_fetched_at'])
-            except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(
-                    f'persist_progress failed for news={news_pk}: {e}'
+            """Only whole results enter public storage; partial text stays in RAM."""
+            if is_final:
+                shared_translations.publish_translation(
+                    news_id=news_pk, digest=source_digest, text=text,
+                    provider='llm', lease=shared_lease,
                 )
 
-        job = start_or_get_job(news_pk, prompt, persist_progress)
+        job = start_or_get_job(news_pk, prompt, persist_progress, shared_lease=shared_lease)
 
         def translate_stream():
             sent_len = 0
@@ -771,15 +783,12 @@ class NewsTranslateFullView(generics.GenericAPIView):
                     pass
                 return
 
-            # Re-read to pick up the fetched_at timestamp we just saved.
+            # The public table is authoritative for completed new jobs.
             try:
                 fresh = News.objects.get(pk=news_pk)
-                final_payload = {
-                    'full_content_zh': fresh.full_content_zh or job.text,
-                    'full_content_zh_fetched_at': (
-                        fresh.full_content_zh_fetched_at.isoformat()
-                        if fresh.full_content_zh_fetched_at else None
-                    ),
+                record = shared_translations.get_shared_translation(fresh)
+                final_payload = shared_translations.result_payload(record) if record else {
+                    'full_content_zh': job.text, 'full_content_zh_fetched_at': None,
                 }
             except Exception:
                 final_payload = {

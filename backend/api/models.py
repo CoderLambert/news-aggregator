@@ -426,6 +426,45 @@ class ChatGPTArticleTranslation(models.Model):
         ]
 
 
+class SharedArticleTranslation(models.Model):
+    """Completed public article output, independent of users and credentials."""
+
+    news = models.ForeignKey(News, on_delete=models.CASCADE, related_name='shared_translations')
+    source_hash = models.CharField(max_length=64)
+    target_language = models.CharField(max_length=16, default='zh-CN')
+    translation_version = models.CharField(max_length=32)
+    content = models.TextField()
+    provider = models.CharField(max_length=32)
+    model_slug = models.CharField(max_length=255, blank=True, default='')
+    completed_at = models.DateTimeField()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=['news', 'source_hash', 'target_language', 'translation_version'],
+            name='unique_shared_article_translation',
+        )]
+
+
+class SharedArticleTranslationTask(models.Model):
+    """Cross-process coordination only; neither private output nor credentials."""
+
+    news = models.ForeignKey(News, on_delete=models.CASCADE, related_name='shared_translation_tasks')
+    source_hash = models.CharField(max_length=64)
+    target_language = models.CharField(max_length=16, default='zh-CN')
+    translation_version = models.CharField(max_length=32)
+    status = models.CharField(max_length=16, default='idle')
+    lease_token = models.UUIDField(default=uuid.uuid4)
+    expires_at = models.DateTimeField(null=True)
+    started_at = models.DateTimeField(null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=['news', 'source_hash', 'target_language', 'translation_version'],
+            name='unique_shared_article_task',
+        )]
+
+
 class CrawlerSettings(models.Model):
     """Singleton scheduler configuration and worker liveness snapshot."""
 

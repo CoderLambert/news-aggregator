@@ -8,6 +8,7 @@ Covers:
 """
 
 import time
+import threading
 from unittest.mock import patch
 
 import pytest
@@ -91,10 +92,16 @@ def test_attach_path_takes_priority_over_snapshot(news_obj, client):
     news_obj.save()
 
     chunks = ['继续 ', '翻译 ', '到 ', '结尾。']
+    allow_finish = threading.Event()
+
+    def controlled_stream(*_args, **_kwargs):
+        yield chunks[0]
+        assert allow_finish.wait(5)
+        yield from chunks[1:]
 
     with patch(
         'api.services.llm_translator._call_llm_stream',
-        side_effect=_slow_stream(chunks, delay=0.08),
+        side_effect=controlled_stream,
     ):
         # Manually start a job to simulate "worker still running"
         job = translation_jobs.start_or_get_job(
@@ -106,11 +113,14 @@ def test_attach_path_takes_priority_over_snapshot(news_obj, client):
 
         # Now hit the endpoint with force=false — should NOT short-circuit
         # to the snapshot path; should attach to the live stream.
-        resp = client.post(
-            f'/api/news/{news_obj.pk}/translate/',
-            data={'force': False},
-            content_type='application/json',
-        )
+        try:
+            resp = client.post(
+                f'/api/news/{news_obj.pk}/translate/',
+                data={'force': False},
+                content_type='application/json',
+            )
+        finally:
+            allow_finish.set()
 
         # Consume the streamed body
         body = b''.join(resp.streaming_content).decode('utf-8')

@@ -64,6 +64,8 @@ export interface NewsDetail extends NewsSummary {
   full_content_zh: string
   full_content_zh_fetched_at: string | null
   full_content_zh_source: string | null
+  full_content_zh_scope?: string | null
+  full_translation_personal_available?: boolean
   full_translation_active: boolean
 }
 
@@ -170,6 +172,8 @@ export function parseNewsDetail(value: unknown): NewsDetail {
     full_content_zh: typeof value.full_content_zh === 'string' ? value.full_content_zh : '',
     full_content_zh_fetched_at: nullableDate('full_content_zh_fetched_at'),
     full_content_zh_source: typeof value.full_content_zh_source === 'string' ? value.full_content_zh_source : null,
+    full_content_zh_scope: typeof value.full_content_zh_scope === 'string' ? value.full_content_zh_scope : null,
+    full_translation_personal_available: value.full_translation_personal_available === true,
     full_translation_active: typeof value.full_translation_active === 'boolean' ? value.full_translation_active : false,
   }
 }

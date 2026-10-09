@@ -11,6 +11,7 @@ import ErrorBanner from './ErrorBanner'
 interface FullContentSectionProps {
   news: NewsDetail
   translating: boolean
+  translationWaitingShared?: boolean
   translationPaused: boolean
   translateError: string
   translationProgress: string
@@ -28,6 +29,7 @@ interface FullContentSectionProps {
 export default function FullContentSection({
   news,
   translating,
+  translationWaitingShared = false,
   translationPaused,
   translateError,
   translationProgress,
@@ -57,7 +59,7 @@ export default function FullContentSection({
         onCancelRefetch={onCancelRefetch}
       />
 
-      {translating && <TranslationProgressUI progress={translationProgress} onStop={onStopTranslation} />}
+      {translating && <TranslationProgressUI progress={translationProgress} waitingShared={translationWaitingShared} onStop={onStopTranslation} />}
       {translationPaused && !translating && !translateError && (
         <TranslationPausedUI onResume={onResumeTranslation} />
       )}
@@ -111,12 +113,12 @@ function Toolbar({ news, translating, translationPaused, translateError, showOri
             </Badge>
             {news.full_content_zh && !isChineseSource && (
               <Badge variant="violet" className="rounded-full px-2.5 py-0.5 text-[11px] font-medium">
-                <Languages className="size-3" />已有中文译文
+                <Languages className="size-3" />{news.full_content_zh_scope === 'shared' ? '共享译文' : news.full_content_zh_scope === 'private' ? '个人译文' : '已有中文译文'}
               </Badge>
             )}
           </div>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            {isChineseSource ? '正文排版已就绪，可复制或重新获取。' : '正文结构已保留，可复制、重新获取或翻译。'}
+            {isChineseSource ? '正文排版已就绪，可复制或重新获取。' : news.full_content_zh_scope === 'shared' ? '正在复用共享译文，不消耗你的模型额度。个人重新翻译会使用你的账号额度。' : news.full_content_zh_scope === 'private' ? '这是当前账号的个人译文，重新翻译不会覆盖已有共享版本。' : '正文结构已保留，可复制、重新获取或翻译。首次完整翻译后可供其他读者复用。'}
           </p>
         </div>
 
@@ -124,8 +126,8 @@ function Toolbar({ news, translating, translationPaused, translateError, showOri
           <CopyButton copied={copied} onCopy={() => { void handleCopy() }} />
           <RefetchButton refetching={refetching} onClick={onRefetch} onCancel={onCancelRefetch} />
           {news.full_content_zh && <LangToggle showOriginal={showOriginal} onToggle={onToggleOriginal} />}
-          {!isChineseSource && !translating && !translationPaused && !translateError && (
-            <TranslateButton hasTranslation={Boolean(news.full_content_zh)} onClick={onTranslate} />
+          {!isChineseSource && !translating && !translationPaused && !translateError && (news.full_content_zh_scope !== 'shared' || news.full_translation_personal_available) && (
+            <TranslateButton hasTranslation={Boolean(news.full_content_zh)} shared={news.full_content_zh_scope === 'shared'} onClick={onTranslate} />
           )}
         </div>
       </div>
@@ -151,17 +153,18 @@ function LangToggle({ showOriginal, onToggle }: { showOriginal: boolean; onToggl
   )
 }
 
-function TranslateButton({ hasTranslation, onClick }: { hasTranslation: boolean; onClick: () => void }) {
+function TranslateButton({ hasTranslation, shared, onClick }: { hasTranslation: boolean; shared: boolean; onClick: () => void }) {
+  const label = shared ? '生成个人译文' : hasTranslation ? '重新翻译' : '翻译为中文'
   return (
     <Button
       type="button"
       onClick={onClick}
-      aria-label={hasTranslation ? '重新翻译' : '翻译为中文'}
+      aria-label={label}
       variant={hasTranslation ? 'outline' : 'violet'}
       size="pill-sm"
       className={hasTranslation ? 'h-10 rounded-full border-neutral-200 px-3 text-xs font-medium text-neutral-600 hover:border-neutral-300 hover:text-neutral-900' : 'h-10 rounded-full px-3'}
     >
-      <Languages className="size-3" />{hasTranslation ? '重新翻译' : '翻译为中文'}
+      <Languages className="size-3" />{label}
     </Button>
   )
 }
@@ -186,7 +189,7 @@ function CopyButton({ copied, onCopy }: { copied: boolean; onCopy: () => void })
   )
 }
 
-function TranslationProgressUI({ progress, onStop }: { progress: string; onStop: () => void }) {
+function TranslationProgressUI({ progress, waitingShared, onStop }: { progress: string; waitingShared: boolean; onStop: () => void }) {
   const stopButton = (
     <Button type="button" variant="outline" size="sm" onClick={onStop} aria-label="停止接收翻译更新" className="mt-3 h-7 rounded-full border-violet-200 px-2.5 text-[11px] text-violet-700">
       停止接收
@@ -197,8 +200,8 @@ function TranslationProgressUI({ progress, onStop }: { progress: string; onStop:
       <Card className="mb-6 items-center border-violet-100 bg-violet-50/60 py-8 text-center">
         <Loader2 className="size-7 animate-spin text-violet-500" />
         <div>
-          <p className="text-sm font-medium text-violet-600">正在翻译全文…</p>
-          <p className="mt-1 text-xs text-violet-500">停止接收只会关闭本页连接，服务端翻译仍会继续。</p>
+          <p className="text-sm font-medium text-violet-600">{waitingShared ? '共享译文正在生成，完成后自动显示…' : '正在翻译全文…'}</p>
+          <p className="mt-1 text-xs text-violet-500">{waitingShared ? '正在复用其他读者发起的翻译，不消耗你的模型额度。' : '停止接收只会关闭本页连接，服务端翻译仍会继续。'}</p>
           {stopButton}
         </div>
       </Card>

@@ -77,6 +77,7 @@ export default function NewsDetail() {
   const retryFullArticle = useCallback(() => requestFullArticle(), [requestFullArticle])
   const {
     translating,
+    translationWaitingShared,
     translationPaused,
     translateError,
     translationProgress,
@@ -242,13 +243,14 @@ export default function NewsDetail() {
             <FullContentSection
               news={news}
               translating={translating}
+              translationWaitingShared={translationWaitingShared}
               translationPaused={translationPaused}
               translateError={translateError}
               translationProgress={translationProgress}
               showOriginal={showOriginal}
               onToggleOriginal={setShowOriginal}
               onTranslate={() => handleTranslate(Boolean(news.full_content_zh))}
-              onRetryTranslate={() => handleTranslate(true)}
+              onRetryTranslate={() => handleTranslate(Boolean(news.full_content_zh))}
               onResumeTranslation={() => handleTranslate(false)}
               onStopTranslation={handleStopTranslation}
               onRefetch={() => requestFullArticle(true)}
