@@ -423,3 +423,136 @@ class ChatGPTArticleTranslation(models.Model):
                 fields=['user', 'connection', 'news'], name='unique_chatgpt_news_translation',
             ),
         ]
+
+
+class CrawlerSettings(models.Model):
+    """Singleton scheduler configuration and worker liveness snapshot."""
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    scheduler_enabled = models.BooleanField(default=True)
+    interval_seconds = models.PositiveIntegerField(default=3600)
+    run_on_worker_start = models.BooleanField(default=True)
+    next_run_at = models.DateTimeField(null=True, blank=True)
+    worker_heartbeat_at = models.DateTimeField(null=True, blank=True)
+    worker_instance_id = models.CharField(max_length=128, blank=True, default='')
+    updated_by = models.ForeignKey(
+        'auth.User', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='crawler_settings_updates',
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = '爬虫调度设置'
+        verbose_name_plural = '爬虫调度设置'
+
+
+class CrawlerTarget(models.Model):
+    """One server-registered spider exposed to the crawler control plane."""
+
+    spider_name = models.CharField(primary_key=True, max_length=64)
+    display_name = models.CharField(max_length=128)
+    enabled = models.BooleanField(default=True, db_index=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    last_status = models.CharField(max_length=32, blank=True, default='')
+    last_started_at = models.DateTimeField(null=True, blank=True)
+    last_finished_at = models.DateTimeField(null=True, blank=True)
+    last_items = models.PositiveIntegerField(default=0)
+    last_responses = models.PositiveIntegerField(default=0)
+    last_errors = models.PositiveIntegerField(default=0)
+    last_safe_error = models.CharField(max_length=500, blank=True, default='')
+
+    class Meta:
+        ordering = ['sort_order', 'spider_name']
+        verbose_name = '爬虫来源'
+        verbose_name_plural = '爬虫来源'
+
+
+class CrawlBatch(models.Model):
+    TRIGGER_CHOICES = [
+        ('scheduled', 'Scheduled'),
+        ('startup', 'Startup'),
+        ('manual', 'Manual'),
+        ('retry', 'Retry'),
+    ]
+    STATUS_CHOICES = [
+        ('queued', 'Queued'),
+        ('running', 'Running'),
+        ('succeeded', 'Succeeded'),
+        ('partial', 'Partial'),
+        ('failed', 'Failed'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    trigger = models.CharField(max_length=16, choices=TRIGGER_CHOICES)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='queued', db_index=True)
+    requested_by = models.ForeignKey(
+        'auth.User', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='requested_crawl_batches',
+    )
+    queued_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    total = models.PositiveIntegerField(default=0)
+    succeeded = models.PositiveIntegerField(default=0)
+    failed = models.PositiveIntegerField(default=0)
+    cancelled = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['-queued_at']
+        verbose_name = '抓取批次'
+        verbose_name_plural = '抓取批次'
+
+
+class CrawlRun(models.Model):
+    STATUS_CHOICES = [
+        ('queued', 'Queued'),
+        ('running', 'Running'),
+        ('succeeded', 'Succeeded'),
+        ('failed', 'Failed'),
+        ('cancel_requested', 'Cancel requested'),
+        ('cancelled', 'Cancelled'),
+        ('skipped', 'Skipped'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    batch = models.ForeignKey(CrawlBatch, on_delete=models.CASCADE, related_name='runs')
+    target = models.ForeignKey(CrawlerTarget, on_delete=models.PROTECT, related_name='runs')
+    status = models.CharField(max_length=24, choices=STATUS_CHOICES, default='queued', db_index=True)
+    requested_by = models.ForeignKey(
+        'auth.User', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='requested_crawl_runs',
+    )
+    queued_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    heartbeat_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    exit_code = models.IntegerField(null=True, blank=True)
+    items = models.PositiveIntegerField(default=0)
+    responses = models.PositiveIntegerField(default=0)
+    errors = models.PositiveIntegerField(default=0)
+    http_statuses = models.JSONField(default=dict, blank=True)
+    stats = models.JSONField(default=dict, blank=True)
+    safe_error = models.CharField(max_length=500, blank=True, default='')
+    log_path = models.CharField(max_length=500, blank=True, default='')
+    retry_of = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='retries',
+    )
+    cancel_requested_by = models.ForeignKey(
+        'auth.User', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='cancelled_crawl_runs',
+    )
+    cancel_requested_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-queued_at']
+        verbose_name = '抓取任务'
+        verbose_name_plural = '抓取任务'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['target'],
+                condition=models.Q(status__in=['queued', 'running', 'cancel_requested']),
+                name='one_active_crawl_run_per_target',
+            ),
+        ]

@@ -22,6 +22,7 @@ RUN pip install --no-cache-dir \
         "torch==${TORCH_VERSION}" \
     && pip install --no-cache-dir -r /app/backend/requirements.txt
 COPY backend/ /app/backend/
+COPY crawler/ /app/crawler/
 COPY start_waitress.py /app/start_waitress.py
 COPY --chmod=755 scripts/docker-entrypoint.sh /app/docker-entrypoint.sh
 COPY --from=frontend-build /app/frontend/dist /app/frontend/dist

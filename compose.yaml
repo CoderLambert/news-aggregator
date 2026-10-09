@@ -2,6 +2,7 @@ services:
   app:
     build:
       context: .
+    image: news-aggregator:local
     env_file:
       - path: .env
         required: false
@@ -22,6 +23,33 @@ services:
         - python
         - -c
         - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9527/api/news/', timeout=5)"
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 30s
+
+  crawler:
+    build:
+      context: .
+    image: news-aggregator:local
+    command: ["python", "/app/backend/manage.py", "crawl_worker"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NEWS_CRAWL_ONLY: "1"
+      CRAWLER_SCHEDULER_ENABLED: "${CRAWLER_SCHEDULER_ENABLED:-1}"
+    volumes:
+      - ./backend:/app/backend
+      - ./logs:/app/logs
+    depends_on:
+      app:
+        condition: service_healthy
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 45s
+    healthcheck:
+      test: ["CMD", "python", "/app/backend/manage.py", "crawler_healthcheck"]
       interval: 30s
       timeout: 8s
       retries: 3

@@ -1279,6 +1279,7 @@ def auth_register(request):
     return Response({
         'id': user.pk,
         'username': user.username,
+        'is_superuser': user.is_superuser,
     }, status=status.HTTP_201_CREATED)
 
 
@@ -1299,6 +1300,7 @@ def auth_login(request):
     return Response({
         'id': user.pk,
         'username': user.username,
+        'is_superuser': user.is_superuser,
     })
 
 
@@ -1318,6 +1320,7 @@ def auth_me(request):
     return Response({
         'id': request.user.pk,
         'username': request.user.username,
+        'is_superuser': request.user.is_superuser,
     })
 
 

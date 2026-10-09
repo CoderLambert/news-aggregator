@@ -14,17 +14,15 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
-from django.contrib import admin
 from django.urls import path, include, re_path
 from django.views.static import serve
 from django.conf import settings
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
     path('api/', include('api.urls')),
     re_path(r'^assets/(?P<path>.*)$', serve, {'document_root': settings.FRONTEND_DIR / 'assets'}),
     re_path(r'^(favicon\.svg|icons\.svg)$', serve, {'document_root': settings.FRONTEND_DIR}, name='frontend-root-static'),
-    re_path(r'^(?!api/|admin/|assets/).+$', serve, {
+    re_path(r'^(?!api/|assets/).+$', serve, {
         'path': 'index.html',
         'document_root': settings.FRONTEND_DIR,
     }),

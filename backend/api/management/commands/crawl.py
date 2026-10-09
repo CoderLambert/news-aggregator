@@ -58,6 +58,9 @@ def _apply_crawl_only_politeness(settings):
     settings.set('AUTOTHROTTLE_START_DELAY', 3.0, priority='spider')
     settings.set('AUTOTHROTTLE_MAX_DELAY', 60.0, priority='spider')
     settings.set('AUTOTHROTTLE_TARGET_CONCURRENCY', 1.0, priority='spider')
+    # DEBUG item dumps may contain full upstream article bodies. Persistent
+    # worker logs only need operational INFO/WARNING/ERROR records.
+    settings.set('LOG_LEVEL', 'INFO', priority='spider')
 
 
 def _format_crawl_summary(spider_name, stats):
@@ -99,6 +102,8 @@ class Command(BaseCommand):
         from scrapy.crawler import CrawlerProcess
 
         settings = get_project_settings()
+        if os.environ.get('NEWS_CRAWL_ONLY') == '1':
+            _apply_crawl_only_politeness(settings)
         process = CrawlerProcess(settings)
 
         spider_name = options['spider']
@@ -110,8 +115,6 @@ class Command(BaseCommand):
         crawlers = []
         for spider in spiders:
             crawler = process.create_crawler(spider)
-            if os.environ.get('NEWS_CRAWL_ONLY') == '1':
-                _apply_crawl_only_politeness(crawler.settings)
             process.crawl(crawler)
             crawlers.append((spider, crawler))
             self.stdout.write(self.style.SUCCESS(f'启动爬虫: {spider}'))

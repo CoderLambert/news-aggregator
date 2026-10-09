@@ -2,8 +2,18 @@ from django.urls import path
 from . import views
 from . import research_views
 from . import subscription_views
+from . import crawler_views
 
 urlpatterns = [
+    path('admin/crawler/dashboard/', crawler_views.CrawlerDashboardView.as_view(), name='crawler-admin-dashboard'),
+    path('admin/crawler/settings/', crawler_views.CrawlerSettingsView.as_view(), name='crawler-admin-settings'),
+    path('admin/crawler/targets/', crawler_views.CrawlerTargetListView.as_view(), name='crawler-admin-targets'),
+    path('admin/crawler/targets/<str:spider_name>/', crawler_views.CrawlerTargetDetailView.as_view(), name='crawler-admin-target-detail'),
+    path('admin/crawler/batches/', crawler_views.CrawlBatchListCreateView.as_view(), name='crawler-admin-batches'),
+    path('admin/crawler/batches/<uuid:batch_id>/', crawler_views.CrawlBatchDetailView.as_view(), name='crawler-admin-batch-detail'),
+    path('admin/crawler/runs/<uuid:run_id>/', crawler_views.CrawlRunDetailView.as_view(), name='crawler-admin-run-detail'),
+    path('admin/crawler/runs/<uuid:run_id>/cancel/', crawler_views.CrawlRunCancelView.as_view(), name='crawler-admin-run-cancel'),
+    path('admin/crawler/runs/<uuid:run_id>/retry/', crawler_views.CrawlRunRetryView.as_view(), name='crawler-admin-run-retry'),
     path('chatgpt-subscription/', subscription_views.ChatGPTSubscriptionStatusView.as_view(), name='chatgpt-subscription-status'),
     path('chatgpt-subscription/connect/', subscription_views.ChatGPTSubscriptionConnectView.as_view(), name='chatgpt-subscription-connect'),
     path('chatgpt-subscription/handoff/', subscription_views.ChatGPTSubscriptionHandoffView.as_view(), name='chatgpt-subscription-handoff'),
