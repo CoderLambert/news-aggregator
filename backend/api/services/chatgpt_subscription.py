@@ -1035,6 +1035,106 @@ def stream_full_translation(
     return final_text
 
 
+def stream_chat_response(connection: ChatGPTSubscriptionConnection, messages: list[dict[str, str]]):
+    """Stream one user-bound chat response through the selected subscription model."""
+    if connection.needs_reauth or not connection.connected:
+        raise SubscriptionError('ChatGPT 订阅授权已失效，请重新连接账号。')
+    if not connection.selected_model:
+        raise SubscriptionError('请先在订阅设置中选择可见模型。')
+    if not isinstance(messages, list) or not messages:
+        raise SubscriptionError('聊天请求缺少有效消息。')
+
+    normalized_messages = []
+    for message in messages:
+        role = message.get('role') if isinstance(message, dict) else None
+        content = message.get('content') if isinstance(message, dict) else None
+        if role not in {'system', 'developer', 'user', 'assistant'} or not isinstance(content, str):
+            raise SubscriptionError('聊天请求包含格式无效的消息。')
+        normalized_messages.append({'role': role, 'content': content})
+
+    connection_id = connection.pk
+    expected_generation = connection.generation
+    access_token = _refresh_access_token(connection_id, expected_generation)
+    current = ChatGPTSubscriptionConnection.objects.filter(pk=connection_id).first()
+    if current is None or not current.is_active or current.generation != expected_generation:
+        raise ConnectionChangedError('订阅账号已切换或断开，请重新发送问题。')
+
+    payload = {
+        'model': connection.selected_model,
+        'input': normalized_messages,
+        'store': False,
+        'stream': True,
+    }
+    try:
+        response = requests.post(
+            RESPONSES_URL,
+            headers={
+                'Authorization': f'Bearer {access_token}',
+                'Accept': 'text/event-stream',
+                'Content-Type': 'application/json',
+            },
+            json=payload,
+            stream=True,
+            timeout=(10, 120),
+        )
+    except Exception as exc:
+        raise SubscriptionError('连接 OpenAI 模型服务失败。') from exc
+    if response.status_code < 200 or response.status_code >= 300:
+        if response.status_code == 401:
+            mark_needs_reauth(connection_id, current.credential_generation)
+        error = _api_error(response.status_code, response)
+        response.close()
+        raise error
+
+    completed_response = None
+    current_event = ''
+    emitted = False
+    try:
+        for raw_line in response.iter_lines(decode_unicode=True):
+            line = raw_line.decode('utf-8', errors='replace') if isinstance(raw_line, bytes) else raw_line
+            if not line:
+                continue
+            if line.startswith('event:'):
+                current_event = line[6:].strip()
+                continue
+            if not line.startswith('data:'):
+                continue
+            data = line[5:].strip()
+            if data == '[DONE]':
+                break
+            try:
+                event = json.loads(data)
+            except (TypeError, ValueError) as exc:
+                raise SubscriptionError('OpenAI 返回了无法解析的 SSE 事件。') from exc
+            if not isinstance(event, dict):
+                continue
+            event_type = event.get('type') or current_event
+            if event_type == 'response.output_text.delta':
+                delta = event.get('delta')
+                if isinstance(delta, str) and delta:
+                    emitted = True
+                    yield delta
+            elif event_type == 'response.completed':
+                completed_response = event.get('response') if isinstance(event.get('response'), dict) else event
+                break
+            elif event_type in ('response.failed', 'response.incomplete', 'error'):
+                raise SubscriptionError('OpenAI 模型未能完整完成本次回答。')
+    except SubscriptionError:
+        raise
+    except Exception as exc:
+        raise SubscriptionError('模型 SSE 连接中断，回答未完整完成。') from exc
+    finally:
+        response.close()
+
+    if completed_response is None:
+        raise SubscriptionError('模型 SSE 流在 response.completed 前中断。')
+    if not emitted:
+        final_text = _extract_response_text(completed_response)
+        if not final_text.strip():
+            raise SubscriptionError('模型已完成响应，但没有返回回答。')
+        yield final_text
+
+
 def save_completed_translation(
     user_id,
     connection_id,
