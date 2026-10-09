@@ -10,7 +10,7 @@ cd /path/to/news-aggregator
 
 | 服务 | 技术 | 默认地址 | 用途 |
 | --- | --- | --- | --- |
-| 后端 | Django + DRF | `http://127.0.0.1:9527` | API、管理后台、静态生产页面 |
+| 后端 | Django + DRF | `http://127.0.0.1:9527` | API、会话鉴权、静态生产页面 |
 | 前端 | React + Vite | `http://127.0.0.1:5173` | 开发热更新和 `/api` 代理 |
 | 生产前端 | Vite build + Waitress | `http://127.0.0.1:9527` | 单进程提供静态页面和 API |
 | 数据库 | SQLite | `backend/db.sqlite3` | 新闻、用户、会话和任务状态 |
@@ -117,7 +117,7 @@ backend/venv/bin/python backend/manage.py migrate
 backend/venv/bin/python backend/manage.py check
 ```
 
-需要后台管理账号时执行：
+需要前端爬虫管理控制台账号时执行：
 
 ```bash
 backend/venv/bin/python backend/manage.py createsuperuser
@@ -186,18 +186,18 @@ backend/venv/bin/python start_waitress.py
 
 ### 4.3 Docker 单机模式
 
-Compose 只启动 Waitress Web 服务，前端会先构建并由 Django 同源提供；不会启动定时器或爬虫。服务仅绑定到本机 `127.0.0.1:9527`。容器每次启动时会先执行幂等的 `migrate --noinput`，新克隆和代码升级无需单独运行迁移命令。
+Compose 启动 Waitress Web 服务和独立 crawler Worker。前端会先构建并由 Django 同源提供，Worker 默认启动后抓取一次，之后每小时抓取。Web 服务仅绑定到本机 `127.0.0.1:9527`。容器每次启动时会先执行幂等的 `migrate --noinput`，新克隆和代码升级无需单独运行迁移命令。
 
-它会复用 `backend/`（包括 SQLite、WAL、SHM、TTS 缓存）、`chroma_data/` 和一个独立的 Hugging Face 模型缓存卷。不要让容器和另一套本地后端或爬虫同时写同一份 SQLite 数据。
+Web 与 crawler 共享 `backend/`（包括 SQLite、WAL、SHM、TTS 缓存），并持久化 `chroma_data/`、`logs/` 和 Hugging Face 模型缓存卷。不要让容器和另一套本地后端或爬虫同时写同一份 SQLite 数据。
 
 ~~~bash
 docker compose up -d --build --wait
 docker compose ps
-docker compose logs -f app
+docker compose logs -f app crawler
 docker compose down
 ~~~
 
-访问 <http://127.0.0.1:9527>，并验证 Web 与 API：
+访问 <http://127.0.0.1:9527>，创建超级管理员后可进入 <http://127.0.0.1:9527/admin/crawlers>。验证 Web 与 API：
 
 ~~~bash
 curl -f http://127.0.0.1:9527/
@@ -225,14 +225,24 @@ docker compose up -d --build --wait
 
 # 查看新容器状态和日志
 docker compose ps
-docker compose logs --tail=200 app
+docker compose logs --tail=200 app crawler
 ~~~
 
-`docker compose down` 只删除容器和 Compose 网络，宿主机数据库、ChromaDB 和模型缓存卷仍保留。Compose 不负责定时抓取；需要手动执行一次时使用：
+`docker compose down` 只删除容器和 Compose 网络，宿主机数据库、ChromaDB、爬虫日志和模型缓存卷仍保留。crawler 服务负责自动调度；需要绕过管理控制台手动执行一次时使用：
 
 ~~~bash
 docker compose exec app python backend/manage.py crawl all
 ~~~
+
+Docker 调度参数：
+
+~~~dotenv
+CRAWLER_SCHEDULER_ENABLED=1
+CRAWL_INTERVAL_SECONDS=3600
+CRAWL_RUN_ON_START=1
+~~~
+
+管理控制台的调度设置持久化在数据库中；首次初始化读取上述环境变量。宿主机 `news-aggregator-crawl.timer` 或 `scripts/news-cron` 必须保持停止，避免两套调度器同时写入。
 
 若 Docker CLI 提示无法访问 daemon，请先由本机 Docker 管理员恢复该用户已有的访问权限，不要通过项目配置扩大系统权限。
 

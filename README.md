@@ -39,7 +39,7 @@ AI:        Volcengine ARK (Doubao) / DashScope (Kimi) — 双通道自动切换
 
 ### Docker 一键部署（推荐）
 
-从克隆到健康服务只需要准备 `.env`，Compose 会构建前端和后端、自动执行数据库迁移，并启动 Waitress：
+从克隆到健康服务只需要准备 `.env`，Compose 会构建前端和后端、自动执行数据库迁移，并启动 Waitress 与独立爬虫 Worker：
 
 ```bash
 git clone https://github.com/CoderLambert/news-aggregator.git
@@ -62,6 +62,7 @@ curl -f http://127.0.0.1:9527/api/news/
 | --- | --- | --- |
 | SQLite、WAL、TTS 缓存 | `./backend/` | `/app/backend/` |
 | ChromaDB 向量数据 | `./chroma_data/` | `/app/chroma_data/` |
+| 爬虫运行日志 | `./logs/` | `/app/logs/` |
 | Hugging Face 模型缓存 | Docker volume `news-aggregator_huggingface-cache` | `/root/.cache/huggingface` |
 
 接管已有数据库时，先停止原后端和爬虫写入者，再把 `db.sqlite3` 及仍存在的 `db.sqlite3-wal`、`db.sqlite3-shm` 一起放入 `backend/`，然后启动 Compose。保存 ChatGPT 订阅连接时还必须沿用原来的 `DJANGO_SECRET_KEY` 或 `CHATGPT_TOKEN_ENCRYPTION_KEY`。
@@ -70,8 +71,8 @@ curl -f http://127.0.0.1:9527/api/news/
 
 ```bash
 docker compose ps
-docker compose logs -f app
-docker compose restart app
+docker compose logs -f app crawler
+docker compose restart app crawler
 docker compose down                    # 数据仍保留
 
 # 更新代码和镜像；容器启动时会自动应用新迁移
@@ -80,10 +81,10 @@ git lfs pull
 docker compose up -d --build --wait
 ```
 
-Compose 只运行 Web 服务，不会自动启动爬虫定时器。需要手动抓取时执行：
+Compose 默认在 Worker 启动后抓取一次，之后每小时抓取；可在 `.env` 调整 `CRAWL_INTERVAL_SECONDS` 和 `CRAWL_RUN_ON_START`。创建超级管理员后，可在 <http://127.0.0.1:9527/admin/crawlers> 控制调度、来源、重试和停止：
 
 ```bash
-docker compose exec app python backend/manage.py crawl all
+docker compose exec app python backend/manage.py createsuperuser
 ```
 
 本地 Python/Node 开发方式如下。
