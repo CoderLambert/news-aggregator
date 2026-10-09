@@ -146,6 +146,15 @@ class NewsListView(generics.ListAPIView):
     ordering_fields = ['publish_time', 'created_at']
     ordering = ['-publish_time']
 
+    def get_ordering(self):
+        """Map the product-level time sort without mutating DRF's request."""
+        if (
+            self.request.query_params.get('order_by', '').strip() == 'time'
+            and 'ordering' not in self.request.query_params
+        ):
+            return ['-publish_time']
+        return super().get_ordering()
+
     def get_queryset(self):
         qs = News.objects.select_related('source', 'category')
         # Hide duplicates by default
@@ -165,11 +174,6 @@ class NewsListView(generics.ListAPIView):
         mode = request.query_params.get('mode', 'keyword').strip()
 
         if not search_query or mode == 'keyword':
-            # Wire `order_by=time` into DRF's ordering param for keyword mode
-            order_by = request.query_params.get('order_by', '').strip()
-            if order_by == 'time' and 'ordering' not in request.query_params:
-                request.query_params = request.query_params.copy()
-                request.query_params['ordering'] = '-publish_time'
             return super().list(request, *args, **kwargs)
 
         if mode == 'semantic':
@@ -212,8 +216,11 @@ class NewsListView(generics.ListAPIView):
         from .services.vector_store import VectorStoreService
         from .services.embedding import EmbeddingService
 
+        # The Docker web process intentionally skips eager model loading. Accessing
+        # the model here loads it once on the first semantic request; the model lock
+        # also joins an in-progress background preload in non-Docker deployments.
         if not EmbeddingService.is_loaded():
-            EmbeddingService.wait_until_ready(timeout=120)
+            EmbeddingService().model
 
         vs = VectorStoreService()
         if vs.count() == 0:

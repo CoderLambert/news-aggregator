@@ -51,6 +51,7 @@ cp .env.example .env
 # 编辑 .env，至少设置一个长期不变的 DJANGO_SECRET_KEY
 
 docker compose up -d --build --wait
+docker compose exec -T app python /app/backend/manage.py backfill_embeddings --batch-size 100
 curl -f http://127.0.0.1:9527/api/news/
 ```
 
@@ -286,7 +287,7 @@ news-aggregator/
 ├── crawler/                  # Scrapy 爬虫
 │   └── news_crawler/
 │       └── spiders/          # 各数据源 Spider
-├── chroma_data/              # ChromaDB 向量数据（LFS 管理）
+├── chroma_data/              # ChromaDB 运行时向量数据（Git 忽略）
 ├── backend/
 │   └── db.sqlite3            # Django SQLite 数据库（LFS 管理）
 ├── scripts/                  # 运维脚本

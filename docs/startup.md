@@ -26,7 +26,7 @@ cd /path/to/news-aggregator
 
 ## 3. 首次初始化
 
-### 3.1 获取代码和 Git LFS 数据
+### 3.1 获取代码和数据库 LFS 数据
 
 ```bash
 git clone https://github.com/CoderLambert/news-aggregator.git
@@ -35,7 +35,7 @@ git lfs install
 git lfs pull
 ```
 
-项目用 Git LFS 管理 `*.sqlite3` 和 `chroma_data/**`。如果没有安装 Git LFS，数据库或向量数据可能只显示为一段 `version https://git-lfs.github.com/spec/v1` 文本。
+项目通过 Git LFS 管理基线 `*.sqlite3` 数据库。`chroma_data/` 是忽略提交的运行时派生数据，不从 Git 恢复；首次部署后运行 `backfill_embeddings` 建立本地语义搜索索引。接管已有实例时按下文的数据迁移步骤复制数据库。
 
 ### 3.2 创建 Python 环境并安装依赖
 
@@ -192,6 +192,7 @@ Web 与 crawler 共享 `backend/`（包括 SQLite、WAL、SHM、TTS 缓存），
 
 ~~~bash
 docker compose up -d --build --wait
+docker compose exec -T app python /app/backend/manage.py backfill_embeddings --batch-size 100
 docker compose ps
 docker compose logs -f app crawler
 docker compose down
@@ -205,6 +206,8 @@ curl -f http://127.0.0.1:9527/api/news/
 ~~~
 
 `.env` 会作为容器运行时环境变量注入，但不会进入构建镜像；SQLite 主文件、WAL、SHM 和凭据文件也由 `.dockerignore` 排除。复制 `.env.example` 后按需填写。首次语义搜索可能需要下载嵌入模型。
+
+`backfill_embeddings` 可以重复运行，只补充缺失新闻。若向量索引损坏，先停止 Web 与所有可能写入索引的进程，备份 `chroma_data/`，清空该派生索引目录，再运行上述命令重建；不要删除 `backend/db.sqlite3`。
 
 接管已有数据库：
 
