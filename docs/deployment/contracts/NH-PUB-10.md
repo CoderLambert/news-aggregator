@@ -10,3 +10,6 @@ Header隐藏关闭的favorites/AI比较/ChatGPT/管理员/账号入口，保留�
 - Negative tests：capsHTTP失败/非法bool/缺feature/未知mode不启用priv；page深链绕过菜单无请求；手工semantic URL和持久化hybrid只keyword；禁用translation/fetchFull时running fixture零网络；禁用signup不能切注册；跨A/B/匿名cache/marker清理且readingprefs保留；127.0.0.1.evil、userinfo、任意HTTPS/localhost、query/hash/其他port handoff拒绝；proddisabled绝不出现可点loopbackhandoff。
 - Forbidden：不改backend/依赖/框架/SSR/Next.js/认证服务，不通过测试环境默认放开能力，不删除/弱化S05安全回归，不调用真实Provider/OAuth/域名/生产资源、不commit。若ownership不够先报告具体文件由Sol授权，不自行扩大。
 - Return format：TaskID、实际paths/diff、定向/完整检查命令与exit/测试数量、HEAD、负例证据、遗留blockers。代码完成不能标REVIEWED。
+
+## 主Agentownership补充
+实际mode控件在SearchBar.tsx，增加owned frontend/src/components/SearchBar.tsx；新增allowSemantic:boolean默认false，由NewsList显式capabilities传true才能显示semantic/hybrid，callback禁用时拒绝非keyword，Advanced link使用effectiveMode。保留debounce/history；旧full tests显式true，默认/readonly增加负例。storage准确translation_paused_由constants定义，保留translating_与其他既定前缀清理。

@@ -11,11 +11,26 @@ import re
 import time
 from dataclasses import dataclass
 
+from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
+
 # Cache directory for generated TTS audio files
-TTS_CACHE_DIR = os.path.join(
+_DEFAULT_TTS_CACHE_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     'media', 'tts_cache',
 )
+TTS_CACHE_DIR = _DEFAULT_TTS_CACHE_DIR
+
+
+def _cache_directory() -> str:
+    # Keep the module constant patchable for existing callers and tests while
+    # resolving production paths from Django settings at use time.
+    if TTS_CACHE_DIR != _DEFAULT_TTS_CACHE_DIR:
+        return os.fspath(TTS_CACHE_DIR)
+    try:
+        return os.fspath(settings.TTS_CACHE_DIR)
+    except ImproperlyConfigured:
+        return TTS_CACHE_DIR
 
 # Available voices for user selection
 VOICE_OPTIONS = {
@@ -70,7 +85,7 @@ def _cache_key(news_id: int, variant: str) -> str:
 def get_cached_audio(news_id: int, variant: str):
     """Return cached MP3 file path if it exists, else None."""
     key = _cache_key(news_id, variant)
-    path = os.path.join(TTS_CACHE_DIR, f'{key}.mp3')
+    path = os.path.join(_cache_directory(), f'{key}.mp3')
     if os.path.isfile(path) and os.path.getsize(path) > 100:
         return path
     return None
@@ -78,9 +93,10 @@ def get_cached_audio(news_id: int, variant: str):
 
 def save_to_cache(news_id: int, variant: str, audio_bytes: bytes) -> str:
     """Save audio bytes to cache and return the file path."""
-    os.makedirs(TTS_CACHE_DIR, exist_ok=True)
+    cache_directory = _cache_directory()
+    os.makedirs(cache_directory, exist_ok=True)
     key = _cache_key(news_id, variant)
-    path = os.path.join(TTS_CACHE_DIR, f'{key}.mp3')
+    path = os.path.join(cache_directory, f'{key}.mp3')
     with open(path, 'wb') as f:
         f.write(audio_bytes)
     return path
@@ -164,17 +180,18 @@ def clean_expired_cache(max_age: int = TTS_CACHE_MAX_AGE) -> tuple[int, int]:
 
     Returns (removed_count, freed_bytes) so callers can log the result.
     """
-    if not os.path.isdir(TTS_CACHE_DIR):
+    cache_directory = _cache_directory()
+    if not os.path.isdir(cache_directory):
         return 0, 0
 
     cutoff = time.time() - max_age
     removed = 0
     freed = 0
 
-    for name in os.listdir(TTS_CACHE_DIR):
+    for name in os.listdir(cache_directory):
         if not name.endswith('.mp3'):
             continue
-        path = os.path.join(TTS_CACHE_DIR, name)
+        path = os.path.join(cache_directory, name)
         try:
             stat = os.stat(path)
             # Use whichever is more recent: last access or last modification

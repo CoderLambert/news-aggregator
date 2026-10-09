@@ -77,3 +77,9 @@ Docker共享runtime-base，production具名target UID10001/HF_HOME=/var/lib/news
 
 ## ADR-015：OpenAI托管门槛官方资料核对
 2026-10-10依OpenAI Docs技能检索并实际打开[website身份接入](https://developers.openai.com/siwc/website)与[plan usage概览](https://developers.openai.com/siwc/token-sharing-open-source)。网站身份试用需正式client/精确回调和客户端认证方式；identity与plan授权不同。远程托管plan usage须申请，不能拿OSS动态注册本地流程替代。NewsHub两项批准当前都未取得；client_id/secret/scope/resource/认证方法/托管令牌条款均待提供真实批准契约，website保持fail-closed，不将官方示例当应用注册。申请准备由07文档包实现；仅Mock/安全骨架由08后续冻结，不真实访问授权/token端点。
+
+## ADR-016：默认可配置开关与Worker探针
+Compose八项开关通过显式--env-file变量/default表达式解析，默认read_only/全部0/disabled；不能硬编码覆盖将来获批的G2/G3配置，也不自动开启。crawler/indexer healthcheck复用现crawler_healthcheck/embedding_healthcheck（30s/8s/3/30s），不以进程running代替心跳健康。
+
+## ADR-017：Docker上下文嵌套秘密/缓存排除实证
+主Agent真实FROM scratch COPY .临时probe复制原.dockerignore，仅含合成dummy；构建退出0，docker cp明确包含backend/.env、frontend/.env.local、backend/media/tts_cache/private.mp3。根.env规则不够。04-A-R2增加所有层级.env/证书/auth.json/.runtime/.cache/logs与backend/media排除，真实最小context fixture还须证明正常源码保留。实验从未读取真实env/db/audio，精确清理自建container/image，无启动/外网。生产正式build仍等04B，不把此最小context proof称发布构建PASS。

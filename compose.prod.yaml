@@ -1,0 +1,120 @@
+x-runtime-environment: &runtime-environment
+  DJANGO_ENV: production
+  DJANGO_DEBUG: "0"
+  DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY using the explicit Compose --env-file}"
+  WAITRESS_TRUSTED_PROXY: "${WAITRESS_TRUSTED_PROXY:?Set the verified Nginx proxy IP using the explicit Compose --env-file}"
+  DJANGO_DB_PATH: /var/lib/newshub/db/db.sqlite3
+  CHROMA_DATA_DIR: /var/lib/newshub/chroma
+  TTS_CACHE_DIR: /var/lib/newshub/tts
+  CHATGPT_DEPLOYMENT_INSTANCE_FILE: /var/lib/newshub/runtime/chatgpt-deployment-id
+  HF_HOME: /var/lib/newshub/model-cache
+  CRAWLER_LOG_DIR: /var/lib/newshub/logs/crawler
+  CRAWLER_WORKER_LOCK: /var/lib/newshub/logs/crawler-worker.lock
+  SEARCH_INDEX_WORKER_LOCK: /var/lib/newshub/logs/search-index-worker.lock
+  PUBLIC_SITE_MODE: "${PUBLIC_SITE_MODE:-read_only}"
+  PUBLIC_SIGNUP_ENABLED: "${PUBLIC_SIGNUP_ENABLED:-0}"
+  PUBLIC_AI_ENABLED: "${PUBLIC_AI_ENABLED:-0}"
+  CHATGPT_PLAN_USAGE_ENABLED: "${CHATGPT_PLAN_USAGE_ENABLED:-0}"
+  CHATGPT_AUTH_MODE: "${CHATGPT_AUTH_MODE:-disabled}"
+  CRAWLER_SCHEDULER_ENABLED: "${CRAWLER_SCHEDULER_ENABLED:-0}"
+  CRAWL_RUN_ON_START: "${CRAWL_RUN_ON_START:-0}"
+  SEARCH_INDEX_ENABLED: "${SEARCH_INDEX_ENABLED:-0}"
+  RUN_MAIN: "true"
+
+services:
+  migrate:
+    image: "${NEWSHUB_IMAGE:?Set NEWSHUB_IMAGE to an immutable SHA tag or digest using the explicit Compose --env-file}"
+    command: ["python", "/app/scripts/docker-migrate.py"]
+    environment: *runtime-environment
+    volumes:
+      - db-data:/var/lib/newshub/db
+    restart: "no"
+
+  app:
+    image: "${NEWSHUB_IMAGE:?Set NEWSHUB_IMAGE to an immutable SHA tag or digest using the explicit Compose --env-file}"
+    env_file:
+      - path: "${NEWSHUB_ENV_FILE:-.env.production}"
+        required: true
+    environment:
+      <<: *runtime-environment
+      WAITRESS_PORT: "9527"
+      WAITRESS_THREADS: "4"
+      WAITRESS_CONN_LIMIT: "1000"
+    network_mode: host
+    volumes:
+      - db-data:/var/lib/newshub/db
+      - chroma-data:/var/lib/newshub/chroma
+      - tts-data:/var/lib/newshub/tts
+      - runtime-data:/var/lib/newshub/runtime
+      - model-cache:/var/lib/newshub/model-cache
+      - logs-data:/var/lib/newshub/logs
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os, urllib.request; request = urllib.request.Request('http://127.0.0.1:' + os.environ['WAITRESS_PORT'] + '/api/health/ready/', headers={'Host': 'news.lambert.host'}); urllib.request.urlopen(request, timeout=5)"
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 30s
+
+  crawler:
+    image: "${NEWSHUB_IMAGE:?Set NEWSHUB_IMAGE to an immutable SHA tag or digest using the explicit Compose --env-file}"
+    command: ["python", "/app/backend/manage.py", "crawl_worker"]
+    environment:
+      <<: *runtime-environment
+      NEWS_CRAWL_ONLY: "1"
+    volumes:
+      - db-data:/var/lib/newshub/db
+      - logs-data:/var/lib/newshub/logs
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      app:
+        condition: service_healthy
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 45s
+    healthcheck:
+      test: ["CMD", "python", "/app/backend/manage.py", "crawler_healthcheck"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 30s
+
+  indexer:
+    image: "${NEWSHUB_IMAGE:?Set NEWSHUB_IMAGE to an immutable SHA tag or digest using the explicit Compose --env-file}"
+    command: ["python", "/app/backend/manage.py", "embedding_worker"]
+    environment: *runtime-environment
+    volumes:
+      - db-data:/var/lib/newshub/db
+      - chroma-data:/var/lib/newshub/chroma
+      - logs-data:/var/lib/newshub/logs
+      - model-cache:/var/lib/newshub/model-cache
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      app:
+        condition: service_healthy
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 45s
+    healthcheck:
+      test: ["CMD", "python", "/app/backend/manage.py", "embedding_healthcheck"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  db-data:
+  chroma-data:
+  tts-data:
+  runtime-data:
+  model-cache:
+  logs-data:

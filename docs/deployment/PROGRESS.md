@@ -55,3 +55,13 @@
 - DNS固定2线程/2pending限额、慢头/状态行/正文绝对deadline、累计wire2MiB+64KiB/仅GET无data均新增离线负例。主Agent重跑原失败probe：slowDNS0.1/requestdeadline0.01现在elapsed0.011秒即UnsafeURL Public DNS resolution deadline exceeded，证明旧缺口已修复；底层DNS尚待返回但最大2个，无新连接。
 - 比较API现fixture同步到安全DNS目标，DB中News URL同样验证；未执行真实DNS/HTTP/TLS/付费。后续G3的研究/翻译候选网页也必须接此输送，当前不把关闭入口当最终安全。
 - 下一步：10前端能力感知；04阶段A定向闭环后02/本地域名阶段A；稳定候选完成CI/真实Docker/本地域名与High再过G1。
+
+### 04阶段A与容器上下文整改
+04A实际54PASS（数据路径/临时migration/并发锁/容器配置/03/Waitress），bash-n/export mock/合成Composequiet/diff-check退出0；04-A-R1默认开关映射与Workerhealth补充后context8PASS/composequiet/export mock/diff-check0。真实生产镜像/卷/本地域名/恢复仍NOT_RUN，04整体DOING。
+主Agent额外真实FROM scratch上下文probe构建0，发现嵌套dummy backend/.env、frontend/.env.local、backend/media/tts_cache/private.mp3 included；自建镜像/container精确清理。已签04-A-R2仅.dockerignore/context tests/container docs，增加层级秘密/缓存排除并实测fixture；不是读取真实秘密或构建生产镜像。待R2通过整合，自动转02本地域名阶段A；10正并行实现前端能力与关闭自动请求。
+
+## 04阶段A/R1/R2整合（正式镜像阶段B待执行）
+候选HEAD fa7e8bdb5e4d61bd75ddfb50a3a5858510dab2af加04diff。路径/迁移锁/Compose/静态导出代码闭环；整项04仍DOING，生产Docker build/smoke/卷持久性NOT_RUN，High尚待G1。
+- 04A54PASS与shell/export/composequiet检查0；R1八开关default/explicit覆盖与两Workerhealth回归8PASS；R2 context9PASS，实际Docker最小synthetic build/cp证明nested env/credentials/cache excluded、source.py/token_manager.py/frontend源码 included。首轮scratch无CMD create失败已补未启动占位命令后通过。测试随机container/image最终无残留，未真实build生产image/读用户DB/改变运行服务。
+- 默认development/root保留旧bind-mount SQLite权限，production必须--target production且UID10001/SHA标签；生产卷paths、flock迁移一次性service、app/Worker依赖和静态current/previous/共享hashassets已由主Agent读diff整合。
+- 下一批：02+本地域名阶段A（生产模板、测试CA/DNS alias/browser脚本开发与离线/语法核验）；10仍实现capabilities UX。待10结束整合commit才build同SHA镜像，执行04B和正式域名本地HTTPS验收。

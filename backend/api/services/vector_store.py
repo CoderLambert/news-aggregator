@@ -33,7 +33,7 @@ class VectorStoreService:
     @property
     def chroma_dir(self):
         from django.conf import settings
-        path = Path(settings.BASE_DIR).parent / 'chroma_data'
+        path = Path(settings.CHROMA_DATA_DIR)
         path.mkdir(parents=True, exist_ok=True)
         return path
 

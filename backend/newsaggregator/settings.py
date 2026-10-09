@@ -13,6 +13,8 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 from .runtime_config import parse_runtime_config, resolve_django_environment
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -32,6 +34,19 @@ if DJANGO_ENV == 'development':
         pass
 
 _RUNTIME_CONFIG = parse_runtime_config(os.environ, environment=DJANGO_ENV)
+
+
+def _data_path(name: str, default: Path) -> Path:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        path = default
+    elif not raw_value.strip():
+        raise ImproperlyConfigured(f"{name} must not be empty.")
+    else:
+        path = Path(raw_value)
+    if DJANGO_ENV == 'production' and not path.is_absolute():
+        raise ImproperlyConfigured(f"{name} must be an absolute path in production.")
+    return path
 
 
 def _env(name: str, default: str = '') -> str:
@@ -62,6 +77,25 @@ PUBLIC_AI_ENABLED = _RUNTIME_CONFIG.public_ai_enabled
 CHATGPT_PLAN_USAGE_ENABLED = _RUNTIME_CONFIG.chatgpt_plan_usage_enabled
 CHATGPT_AUTH_MODE = _RUNTIME_CONFIG.chatgpt_auth_mode
 WAITRESS_TRUSTED_PROXY = _RUNTIME_CONFIG.waitress_trusted_proxy
+
+DJANGO_DB_PATH = _data_path(
+    'DJANGO_DB_PATH',
+    Path('/var/lib/newshub/db/db.sqlite3')
+    if DJANGO_ENV == 'production'
+    else BASE_DIR / 'db.sqlite3',
+)
+CHROMA_DATA_DIR = _data_path(
+    'CHROMA_DATA_DIR',
+    Path('/var/lib/newshub/chroma')
+    if DJANGO_ENV == 'production'
+    else BASE_DIR.parent / 'chroma_data',
+)
+TTS_CACHE_DIR = _data_path(
+    'TTS_CACHE_DIR',
+    Path('/var/lib/newshub/tts')
+    if DJANGO_ENV == 'production'
+    else BASE_DIR / 'media' / 'tts_cache',
+)
 
 
 # Application definition
@@ -117,7 +151,7 @@ WSGI_APPLICATION = 'newsaggregator.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': DJANGO_DB_PATH,
         # WAL mode: concurrent reads + faster writes, critical for mobile/eMMC
         # storage where fsync latency is high and Scrapy pipeline writes
         # frequently during crawl.
