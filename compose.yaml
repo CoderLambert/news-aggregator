@@ -16,6 +16,7 @@ services:
       - ./backend:/app/backend
       - ./chroma_data:/app/chroma_data
       - ./logs:/app/logs
+      - ./frontend/dist:/app/frontend/dist
       - huggingface-cache:/root/.cache/huggingface
     restart: unless-stopped
     healthcheck:
