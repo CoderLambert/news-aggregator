@@ -4,8 +4,11 @@ from . import research_views
 from . import subscription_views
 from . import crawler_views
 from . import search_index_views
+from . import health_views
 
 urlpatterns = [
+    path('health/live/', health_views.health_live, name='health-live'),
+    path('health/ready/', health_views.health_ready, name='health-ready'),
     path('admin/crawler/dashboard/', crawler_views.CrawlerDashboardView.as_view(), name='crawler-admin-dashboard'),
     path('admin/crawler/settings/', crawler_views.CrawlerSettingsView.as_view(), name='crawler-admin-settings'),
     path('admin/crawler/targets/', crawler_views.CrawlerTargetListView.as_view(), name='crawler-admin-targets'),
