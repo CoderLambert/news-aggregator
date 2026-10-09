@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { AuthContext } from '@/context/AuthContext'
 import FavoritesPage from '@/pages/FavoritesPage'
 import { fetchBlockedNews, fetchUserFavorites, unblockNews } from '@/services/api'
@@ -24,6 +24,32 @@ beforeEach(() => {
 })
 
 describe('FavoritesPage unblock', () => {
+  it('restores the selected section and favorite filter from browser history', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    function HistoryHarness() {
+      const location = useLocation()
+      const navigate = useNavigate()
+      return <><FavoritesPage /><output data-testid="location">{location.pathname}{location.search}</output><button type="button" onClick={() => navigate(-1)}>后退</button></>
+    }
+    render(
+      <QueryClientProvider client={client}>
+        <AuthContext.Provider value={{ user: { id: 12, username: 'reader' }, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
+          <MemoryRouter initialEntries={['/favorites?view=blocked&filter=bookmark']}><HistoryHarness /></MemoryRouter>
+        </AuthContext.Provider>
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByRole('tab', { name: '已屏蔽' })).toHaveAttribute('aria-selected', 'true')
+    fireEvent.click(screen.getByRole('tab', { name: '收藏与点赞' }))
+    expect(screen.getByTestId('location')).toHaveTextContent('/favorites?filter=bookmark')
+    fireEvent.click(screen.getByRole('button', { name: '点赞' }))
+    expect(screen.getByTestId('location')).toHaveTextContent('/favorites?filter=like')
+    fireEvent.click(screen.getByRole('button', { name: '后退' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '收藏' })).toHaveAttribute('aria-pressed', 'true'))
+    fireEvent.click(screen.getByRole('button', { name: '后退' }))
+    await waitFor(() => expect(screen.getByRole('tab', { name: '已屏蔽' })).toHaveAttribute('aria-selected', 'true'))
+  })
+
   it('implements roving focus and Home/End keyboard navigation for linked tabs and panels', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
     render(
@@ -34,14 +60,15 @@ describe('FavoritesPage unblock', () => {
       </QueryClientProvider>,
     )
 
-    const favoritesTab = await screen.findByRole('tab', { name: '收藏' })
-    const blockedTab = screen.getByRole('tab', { name: '屏蔽' })
+    const favoritesTab = await screen.findByRole('tab', { name: '收藏与点赞' })
+    const blockedTab = screen.getByRole('tab', { name: '已屏蔽' })
     expect(favoritesTab).toHaveAttribute('aria-controls', 'favorites-panel')
     expect(blockedTab).toHaveAttribute('aria-controls', 'blocked-panel')
     expect(document.getElementById('favorites-panel')).toHaveAttribute('aria-labelledby', 'favorites-tab')
     expect(document.getElementById('blocked-panel')).toHaveAttribute('aria-labelledby', 'blocked-tab')
     expect(favoritesTab).toHaveAttribute('tabindex', '0')
     expect(blockedTab).toHaveAttribute('tabindex', '-1')
+    expect(screen.getByRole('group', { name: '收藏筛选' })).toBeInTheDocument()
 
     favoritesTab.focus()
     fireEvent.keyDown(favoritesTab, { key: 'ArrowRight' })
@@ -70,7 +97,7 @@ describe('FavoritesPage unblock', () => {
       </QueryClientProvider>,
     )
 
-    fireEvent.click(await screen.findByRole('tab', { name: '屏蔽' }))
+    fireEvent.click(await screen.findByRole('tab', { name: '已屏蔽' }))
     expect(await screen.findByRole('heading', { name: 'Blocked article' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '恢复' }))
 
@@ -97,7 +124,7 @@ describe('FavoritesPage unblock', () => {
       </QueryClientProvider>,
     )
 
-    fireEvent.click(await screen.findByRole('tab', { name: '屏蔽' }))
+    fireEvent.click(await screen.findByRole('tab', { name: '已屏蔽' }))
     expect(await screen.findByRole('heading', { name: 'First blocked article' })).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: 'Second blocked article' })).toBeInTheDocument()
     const restoreButtons = screen.getAllByRole('button', { name: '恢复' })
@@ -113,6 +140,29 @@ describe('FavoritesPage unblock', () => {
     expect(unblockNews).toHaveBeenCalledTimes(1)
 
     await act(async () => { resolveUnblock({ removed: true }) })
+  })
+
+  it('moves focus to the next restore action after a blocked item is removed', async () => {
+    let blockedEntries = [
+      { id: 5, news: { id: 21, title: 'First blocked article', publish_time: '2026-10-06T09:00:00Z' }, created_at: '2026-10-06T09:00:00Z' },
+      { id: 6, news: { id: 22, title: 'Second blocked article', publish_time: '2026-10-06T09:00:00Z' }, created_at: '2026-10-06T09:00:00Z' },
+    ]
+    fetchBlockedNews.mockImplementation(async () => ({ results: blockedEntries }))
+    unblockNews.mockImplementation(async (newsId) => { blockedEntries = blockedEntries.filter((entry) => entry.news.id !== newsId); return { removed: true } })
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => { callback(0); return 1 })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <AuthContext.Provider value={{ user: { id: 12, username: 'reader' }, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
+          <MemoryRouter initialEntries={['/favorites?view=blocked']}><FavoritesPage /></MemoryRouter>
+        </AuthContext.Provider>
+      </QueryClientProvider>,
+    )
+
+    const restoreButtons = await screen.findAllByRole('button', { name: '恢复' })
+    fireEvent.click(restoreButtons[0])
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'First blocked article' })).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: '恢复' })).toHaveFocus()
   })
 
   it('shows load and retry feedback instead of the empty state after a failed read', async () => {

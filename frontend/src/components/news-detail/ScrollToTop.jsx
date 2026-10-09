@@ -2,6 +2,7 @@ import { useRef } from 'react'
 import gsap from 'gsap'
 import { useGSAP } from '@gsap/react'
 import { useScrollPast } from '@/hooks/useScrollPast'
+import { useSpeechPlayerActivity } from '@/context/SpeechPlayerContext'
 
 gsap.registerPlugin(useGSAP)
 
@@ -20,6 +21,7 @@ const SCROLL_THRESHOLD = 400
 
 export default function ScrollToTop() {
   const show = useScrollPast(SCROLL_THRESHOLD)
+  const speechPlayerActive = useSpeechPlayerActivity()
   const btnRef = useRef(null)
   const idleTweenRef = useRef(null)
 
@@ -96,11 +98,12 @@ export default function ScrollToTop() {
       type="button"
       onClick={handleClick}
       aria-label="返回顶部"
-      className="fixed bottom-[7.5rem] right-8 z-50
+      className={`fixed right-8 z-50
+                 ${speechPlayerActive ? 'bottom-44' : 'bottom-[7.5rem]'} sm:bottom-[7.5rem]
                  w-12 h-12 rounded-full
                  flex items-center justify-center
                  cursor-pointer select-none
-                 opacity-0"
+                 opacity-0`}
     >
       <svg
         width="48"

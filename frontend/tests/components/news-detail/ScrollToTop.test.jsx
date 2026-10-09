@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ScrollToTop from '@/components/news-detail/ScrollToTop'
+import { SpeechPlayerActivityContext } from '@/context/SpeechPlayerContext'
 
 // Mock the scroll position hook
 vi.mock('@/hooks/useScrollPast', () => ({
@@ -46,6 +47,16 @@ describe('ScrollToTop', () => {
     useScrollPast.mockReturnValue(true)
     render(<ScrollToTop />)
     expect(screen.getByLabelText('返回顶部')).toBeInTheDocument()
+  })
+
+  it('moves above floating launchers while the global speech player is active', () => {
+    useScrollPast.mockReturnValue(true)
+    render(
+      <SpeechPlayerActivityContext.Provider value>
+        <ScrollToTop />
+      </SpeechPlayerActivityContext.Provider>,
+    )
+    expect(screen.getByLabelText('返回顶部')).toHaveClass('bottom-44')
   })
 
   it('calls window.scrollTo on click', async () => {

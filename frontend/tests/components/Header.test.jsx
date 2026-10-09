@@ -32,4 +32,21 @@ describe('Header navigation menu', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
     expect(screen.queryByRole('navigation', { name: '站点导航' })).not.toBeInTheDocument()
   })
+
+  it('exposes the four primary destinations and marks the current section', () => {
+    render(<MemoryRouter initialEntries={['/settings']}><Header /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: '打开菜单' }))
+    const navigation = screen.getByRole('navigation', { name: '站点导航' })
+    expect(navigation).toHaveTextContent('首页')
+    expect(navigation).toHaveTextContent('搜索')
+    expect(navigation).toHaveTextContent('内容偏好')
+    expect(navigation).toHaveTextContent('设置')
+    expect(screen.getByRole('link', { name: '设置' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('marks settings as current on the nested ChatGPT connection route', () => {
+    render(<MemoryRouter initialEntries={['/settings/chatgpt']}><Header /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: '打开菜单' }))
+    expect(screen.getByRole('link', { name: '设置' })).toHaveAttribute('aria-current', 'page')
+  })
 })

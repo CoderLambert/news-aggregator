@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
 import { AuthContext } from '@/context/AuthContext'
 
 const api = vi.hoisted(() => ({
@@ -42,7 +43,7 @@ function completedSession() {
   }
 }
 
-function renderPanel() {
+function renderPanel(route = '/', withDetailLauncher = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 } } })
   return render(
     <QueryClientProvider client={client}>
@@ -54,7 +55,10 @@ function renderPanel() {
         logout: vi.fn(),
         refresh: vi.fn(),
       }}>
-        <ResearchPanel />
+        <MemoryRouter initialEntries={[route]}>
+          {withDetailLauncher && <button type="button" aria-label="打开 AI 助手小闻" className="fixed bottom-6 right-6 size-16" />}
+          <ResearchPanel />
+        </MemoryRouter>
       </AuthContext.Provider>
     </QueryClientProvider>,
   )
@@ -69,6 +73,20 @@ beforeEach(() => {
 })
 
 describe('ResearchPanel', () => {
+  it('keeps the closed launcher at the mobile screen edge', () => {
+    renderPanel()
+    const launcher = screen.getByRole('button', { name: '打开新闻研究助手' })
+    expect(launcher).toHaveClass('right-4', 'size-12', 'sm:right-24', 'sm:size-14')
+  })
+
+  it('places beside the Xiaowen launcher on a news detail route', () => {
+    renderPanel('/news/21', true)
+    const researchLauncher = screen.getByRole('button', { name: '打开新闻研究助手' })
+    const detailLauncher = screen.getByRole('button', { name: '打开 AI 助手小闻' })
+    expect(researchLauncher).toHaveClass('bottom-6', 'right-24', 'size-12')
+    expect(detailLauncher).toHaveClass('bottom-6', 'right-6', 'size-16')
+  })
+
   it('closes the session menu on Escape before closing the research panel', async () => {
     api.listResearchSessions.mockResolvedValue({
       count: 1,

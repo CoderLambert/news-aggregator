@@ -30,6 +30,7 @@ vi.mock('@/context/SpeechPlayerContext', () => ({
   useSpeechPlayer: () => ({ supported: false, speak: vi.fn() }),
   useSpeechPlayerActions: () => ({ speak: vi.fn() }),
   useSpeechPlayerCapabilities: () => ({ supported: false }),
+  useSpeechPlayerActivity: () => false,
 }))
 vi.mock('@/components/NewsChatAssistant', () => ({
   default: ({ open, onOpenChange }) => (

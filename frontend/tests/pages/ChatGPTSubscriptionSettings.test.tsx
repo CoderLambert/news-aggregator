@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { MemoryRouter } from 'react-router-dom'
 import ChatGPTSubscriptionSettings from '@/pages/ChatGPTSubscriptionSettings'
 
 const api = vi.hoisted(() => ({
@@ -25,7 +26,7 @@ function renderSettings() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const view = render(
     <QueryClientProvider client={client}>
-      <ChatGPTSubscriptionSettings />
+      <MemoryRouter><ChatGPTSubscriptionSettings /></MemoryRouter>
     </QueryClientProvider>,
   )
   return { ...view, client }
@@ -67,7 +68,7 @@ async function switchSignedInUser(view: ReturnType<typeof renderSettings>, id: n
     authState.user = { id, username: `reader-${id}` }
     view.rerender(
       <QueryClientProvider client={view.client}>
-        <ChatGPTSubscriptionSettings />
+        <MemoryRouter><ChatGPTSubscriptionSettings /></MemoryRouter>
       </QueryClientProvider>,
     )
   })
@@ -115,6 +116,16 @@ afterEach(() => {
 })
 
 describe('ChatGPT subscription settings', () => {
+  it('shows connection, account and model, and configuration readiness as one guided flow', async () => {
+    renderSettings()
+    const flow = await screen.findByRole('list', { name: 'ChatGPT 订阅设置进度' })
+    expect(flow.textContent).toContain('1. 连接')
+    expect(flow.textContent).toContain('2. 账号与模型')
+    expect(flow.textContent).toContain('3. 配置状态')
+    await waitFor(() => expect(flow.textContent).toContain('账号已连接'))
+    expect(flow.textContent).toContain('请选择可见模型')
+  })
+
   it('loads the account visible model and saves the chosen slug', async () => {
     renderSettings()
     expect(await screen.findByText('Reader account')).toBeTruthy()
@@ -461,7 +472,7 @@ describe('ChatGPT subscription settings', () => {
       authState.user = { id: 8, username: 'another-reader' }
       view.rerender(
         <QueryClientProvider client={view.client}>
-          <ChatGPTSubscriptionSettings />
+          <MemoryRouter><ChatGPTSubscriptionSettings /></MemoryRouter>
         </QueryClientProvider>,
       )
     })
