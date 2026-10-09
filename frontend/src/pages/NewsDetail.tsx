@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
-import type { KeyboardEvent } from 'react'
+import type { KeyboardEvent, MouseEvent } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
-import { ArrowLeft, Headphones, Search } from 'lucide-react'
+import { ArrowLeft, Headphones, MessageCircle, Search, Sparkles } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { useLanguage } from '@/context/useLanguage'
 import { useSpeechPlayerActions, useSpeechPlayerCapabilities } from '@/context/SpeechPlayerContext'
@@ -42,6 +42,19 @@ export default function NewsDetail() {
   const { news, setNews, loading, error, refetch } = useNewsDetail(id)
   const { articleLoading, articleError, handleFetchFullArticle, resumeExistingFetch, cancelFetch } = useFullArticle(id ?? '', setNews, news)
   const [authModalOpen, setAuthModalOpen] = useState(false)
+  const [assistantOpen, setAssistantOpen] = useState(false)
+  const assistantOpenerRef = useRef<HTMLButtonElement | null>(null)
+  const openAssistant = useCallback((event: MouseEvent<HTMLButtonElement>) => {
+    assistantOpenerRef.current = event.currentTarget
+    setAssistantOpen(true)
+  }, [])
+  const handleAssistantOpenChange = useCallback((open: boolean) => {
+    setAssistantOpen(open)
+    if (open) return
+    const opener = assistantOpenerRef.current
+    assistantOpenerRef.current = null
+    requestAnimationFrame(() => opener?.focus())
+  }, [])
   const requestFullArticle = useCallback((force = false) => {
     if (!user) {
       setAuthModalOpen(true)
@@ -149,12 +162,21 @@ export default function NewsDetail() {
           </Link>
           {!searchOpen && (
             <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={openAssistant}
+                aria-label="询问 AI 助手小闻"
+                className="inline-flex h-10 items-center gap-1.5 rounded-xl px-2.5 text-xs font-medium text-neutral-500 transition-colors hover:bg-orange-50 hover:text-orange-700 active:bg-orange-100"
+              >
+                <MessageCircle aria-hidden="true" className="size-4" />
+                <span className="hidden sm:inline">问小闻</span>
+              </button>
               {speechSupported && (
-                <button type="button" onClick={handleSpeak} aria-label="语音播报" className="rounded-xl p-2 transition-colors hover:bg-neutral-100 active:bg-neutral-200">
+                <button type="button" onClick={handleSpeak} aria-label="语音播报" className="flex size-10 items-center justify-center rounded-xl transition-colors hover:bg-neutral-100 active:bg-neutral-200">
                   <Headphones className="size-4.5 text-neutral-400" />
                 </button>
               )}
-              <button type="button" onClick={() => setSearchOpen(true)} aria-label="搜索文章内容" className="-mr-2 rounded-xl p-2 transition-colors hover:bg-neutral-100 active:bg-neutral-200">
+              <button type="button" onClick={() => setSearchOpen(true)} aria-label="搜索文章内容" className="-mr-2 flex size-10 items-center justify-center rounded-xl transition-colors hover:bg-neutral-100 active:bg-neutral-200">
                 <Search className="size-[18px] text-neutral-400" />
               </button>
             </div>
@@ -190,13 +212,15 @@ export default function NewsDetail() {
             />
           )}
 
-          {!news.full_content && displayContent ? <SummarySection content={displayContent} /> : null}
+          {!news.full_content && displayContent ? (
+            <SummarySection content={displayContent} onAskAssistant={openAssistant} />
+          ) : null}
 
           <div className="mt-10 border-t border-neutral-100 pt-6">
             <a href={news.url} target="_blank" rel="noreferrer" className="text-sm text-neutral-400 transition-colors hover:text-neutral-600">{t.readOriginal} →</a>
           </div>
         </article>
-        <NewsChatAssistant newsId={id ?? String(news.id)} />
+        <NewsChatAssistant newsId={id ?? String(news.id)} open={assistantOpen} onOpenChange={handleAssistantOpenChange} />
       </div>
 
       <ArticleToc headings={headings} activeId={activeId} />
@@ -206,11 +230,28 @@ export default function NewsDetail() {
   )
 }
 
-function SummarySection({ content }: { content: string }) {
+function SummarySection({ content, onAskAssistant }: { content: string; onAskAssistant: (event: MouseEvent<HTMLButtonElement>) => void }) {
   return (
-    <section aria-labelledby="article-summary-heading" className="w-full overflow-x-hidden rounded-2xl border border-neutral-200 bg-neutral-50/70 px-5 py-5 text-gray-700">
-      <h2 id="article-summary-heading" data-article-toc="ignore" className="mb-4 text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">摘要</h2>
-      <div className="w-full max-w-full overflow-hidden leading-8">
+    <section aria-labelledby="article-summary-heading" className="w-full overflow-x-hidden rounded-3xl border border-neutral-200 bg-white px-5 py-6 shadow-[0_18px_50px_rgba(15,23,42,0.06)] sm:px-8 sm:py-8">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3 border-b border-neutral-100 pb-5">
+        <div>
+          <div className="mb-2 flex items-center gap-2">
+            <span className="inline-flex rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-amber-700">摘要模式</span>
+            <span className="text-xs text-neutral-400">尚未保存完整原文</span>
+          </div>
+          <h2 id="article-summary-heading" data-article-toc="ignore" className="text-lg font-semibold tracking-tight text-neutral-900">内容摘要</h2>
+          <p className="mt-1 text-sm leading-6 text-neutral-500">快速了解文章要点；获取原文后可阅读完整段落、列表与代码。</p>
+        </div>
+        <button
+          type="button"
+          onClick={onAskAssistant}
+          className="inline-flex h-10 items-center gap-2 rounded-full border border-orange-200 bg-orange-50 px-4 text-sm font-medium text-orange-700 transition-colors hover:bg-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2"
+        >
+          <Sparkles aria-hidden="true" className="size-4" />
+          基于摘要提问
+        </button>
+      </div>
+      <div className="summary-markdown w-full max-w-full overflow-hidden text-neutral-700">
         <MarkdownContent content={content} legacySummarySpacing />
       </div>
     </section>

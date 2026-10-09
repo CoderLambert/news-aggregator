@@ -18,7 +18,7 @@ describe('FullContentFetchStatus', () => {
 
     expect(screen.getByText('获取完整原文')).toBeInTheDocument()
     expect(screen.queryByText('Summary must not appear as original')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '加载原文' }))
+    fireEvent.click(screen.getByRole('button', { name: '获取完整原文' }))
     expect(onFetch).toHaveBeenCalledWith()
   })
 
@@ -33,7 +33,7 @@ describe('FullContentFetchStatus', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '加载原文' }))
+    fireEvent.click(screen.getByRole('button', { name: '获取完整原文' }))
     expect(onFetch).toHaveBeenCalledWith()
   })
 
@@ -47,7 +47,7 @@ describe('FullContentFetchStatus', () => {
       />,
     )
 
-    expect(screen.getByRole('button', { name: '加载原文' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '获取完整原文' })).toBeInTheDocument()
   })
 
   it('shows the fetching state and supports canceling the local wait', () => {
@@ -126,6 +126,9 @@ describe('FullContentFetchStatus', () => {
     )
 
     expect(screen.getByRole('alert')).toHaveTextContent('source timed out')
+    expect(screen.getByRole('alert')).toHaveTextContent('本次原文更新未完成')
+    expect(screen.getByRole('alert')).toHaveTextContent('上次保存的正文仍可阅读')
+    expect(screen.getByRole('alert')).not.toHaveTextContent('下方摘要')
   })
 
   it('offers to reattach to a server fetch after the user stops waiting', () => {

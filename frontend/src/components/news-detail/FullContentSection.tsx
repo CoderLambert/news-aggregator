@@ -100,28 +100,33 @@ function Toolbar({ news, translating, translationPaused, translateError, showOri
   }
 
   return (
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <div className="flex items-center gap-1.5">
-        <Badge variant="green" className="rounded-full px-2.5 py-0.5 text-[11px] font-medium">
-          <CheckCircle2 className="size-3" />原文已加载
-        </Badge>
-        {news.full_content_zh && (
-          <Badge variant="violet" className="rounded-full px-2.5 py-0.5 text-[11px] font-medium">
-            <Languages className="size-3" />已翻译
-          </Badge>
-        )}
-      </div>
+    <section aria-label="正文状态与操作" className="mb-5 rounded-2xl border border-neutral-200 bg-neutral-50/70 p-3 sm:p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge variant="green" className="rounded-full px-2.5 py-0.5 text-[11px] font-medium">
+              <CheckCircle2 className="size-3" />原文已保存
+            </Badge>
+            {news.full_content_zh && (
+              <Badge variant="violet" className="rounded-full px-2.5 py-0.5 text-[11px] font-medium">
+                <Languages className="size-3" />已有中文译文
+              </Badge>
+            )}
+          </div>
+          <p className="mt-1.5 text-xs leading-5 text-neutral-500">正文结构已保留，可复制、重新获取或翻译。</p>
+        </div>
 
-      <div className="flex items-center gap-2">
-        <CopyButton copied={copied} onCopy={() => { void handleCopy() }} />
-        <RefetchButton refetching={refetching} onClick={onRefetch} onCancel={onCancelRefetch} />
-        {news.full_content_zh && <LangToggle showOriginal={showOriginal} onToggle={onToggleOriginal} />}
-        {!translating && !translationPaused && !translateError && (
-          <TranslateButton hasTranslation={Boolean(news.full_content_zh)} onClick={onTranslate} />
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <CopyButton copied={copied} onCopy={() => { void handleCopy() }} />
+          <RefetchButton refetching={refetching} onClick={onRefetch} onCancel={onCancelRefetch} />
+          {news.full_content_zh && <LangToggle showOriginal={showOriginal} onToggle={onToggleOriginal} />}
+          {!translating && !translationPaused && !translateError && (
+            <TranslateButton hasTranslation={Boolean(news.full_content_zh)} onClick={onTranslate} />
+          )}
+        </div>
       </div>
       {copyMessage && <span role="status" className="sr-only">{copyMessage}</span>}
-    </div>
+    </section>
   )
 }
 
@@ -134,10 +139,10 @@ function LangToggle({ showOriginal, onToggle }: { showOriginal: boolean; onToggl
       variant="default"
       size="pill"
       aria-label="切换语言"
-      className="rounded-full bg-neutral-100 p-0.5"
+      className="h-10 rounded-full bg-neutral-100 p-1"
     >
-      <ToggleGroupItem value="zh" variant="default" size="pill" aria-label="切换中文" className="h-6 rounded-full border-0 px-2.5 text-xs data-[state=on]:bg-white data-[state=on]:text-neutral-900 data-[state=on]:shadow-sm">中文</ToggleGroupItem>
-      <ToggleGroupItem value="en" variant="default" size="pill" aria-label="切换英文" className="h-6 rounded-full border-0 px-2.5 text-xs data-[state=on]:bg-white data-[state=on]:text-neutral-900 data-[state=on]:shadow-sm">EN</ToggleGroupItem>
+      <ToggleGroupItem value="zh" variant="default" size="pill" aria-label="切换中文" className="h-8 rounded-full border-0 px-3 text-xs data-[state=on]:bg-white data-[state=on]:text-neutral-900 data-[state=on]:shadow-sm">中文</ToggleGroupItem>
+      <ToggleGroupItem value="en" variant="default" size="pill" aria-label="切换英文" className="h-8 rounded-full border-0 px-3 text-xs data-[state=on]:bg-white data-[state=on]:text-neutral-900 data-[state=on]:shadow-sm">EN</ToggleGroupItem>
     </ToggleGroup>
   )
 }
@@ -150,7 +155,7 @@ function TranslateButton({ hasTranslation, onClick }: { hasTranslation: boolean;
       aria-label={hasTranslation ? '重新翻译' : '翻译为中文'}
       variant={hasTranslation ? 'outline' : 'violet'}
       size="pill-sm"
-      className={hasTranslation ? 'h-7 rounded-full border-neutral-200 text-[11px] font-medium text-neutral-600 hover:border-neutral-300 hover:text-neutral-900' : 'rounded-full'}
+      className={hasTranslation ? 'h-10 rounded-full border-neutral-200 px-3 text-xs font-medium text-neutral-600 hover:border-neutral-300 hover:text-neutral-900' : 'h-10 rounded-full px-3'}
     >
       <Languages className="size-3" />{hasTranslation ? '重新翻译' : '翻译为中文'}
     </Button>
@@ -159,11 +164,11 @@ function TranslateButton({ hasTranslation, onClick }: { hasTranslation: boolean;
 
 function RefetchButton({ refetching, onClick, onCancel }: { refetching: boolean; onClick: () => void; onCancel: () => void }) {
   return refetching ? (
-    <Button type="button" variant="outline" size="sm" onClick={onCancel} aria-label="取消获取原文" className="h-7 rounded-full px-2.5 text-[11px]">
+    <Button type="button" variant="outline" size="sm" onClick={onCancel} aria-label="取消获取原文" className="h-10 rounded-full px-3 text-xs">
       <XCircle className="size-3" />取消
     </Button>
   ) : (
-    <Button type="button" variant="outline" size="sm" onClick={onClick} aria-label="重新获取原文" className="h-7 rounded-full px-2.5 text-[11px]">
+    <Button type="button" variant="outline" size="sm" onClick={onClick} aria-label="重新获取原文" className="h-10 rounded-full px-3 text-xs">
       <RefreshCw className="size-3" />重新获取原文
     </Button>
   )
@@ -171,7 +176,7 @@ function RefetchButton({ refetching, onClick, onCancel }: { refetching: boolean;
 
 function CopyButton({ copied, onCopy }: { copied: boolean; onCopy: () => void }) {
   return (
-    <Button type="button" variant="outline" size="sm" onClick={onCopy} aria-label="复制全文" className="h-7 rounded-full px-2.5 text-[11px]">
+    <Button type="button" variant="outline" size="sm" onClick={onCopy} aria-label="复制全文" className="h-10 rounded-full px-3 text-xs">
       {copied ? <><Check className="size-3" />已复制</> : <><Copy className="size-3" />复制全文</>}
     </Button>
   )
