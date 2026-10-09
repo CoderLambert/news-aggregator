@@ -885,6 +885,9 @@ class NewsChatView(generics.GenericAPIView):
         
         messages.append({'role': 'user', 'content': user_question})
 
+        from api.services.chatgpt_subscription import active_connection_for_user, stream_chat_response
+        subscription_connection = active_connection_for_user(request.user)
+
         # Save user message immediately
         user_msg = {'role': 'user', 'content': user_question}
         session.messages.append(user_msg)
@@ -905,12 +908,22 @@ class NewsChatView(generics.GenericAPIView):
                     meta = _json.dumps({'type': 'web_search', 'sources': web_sources}, ensure_ascii=False)
                     yield f"​__META__{meta}__META__\n\n"
 
-                # Use stream_chat which has built-in provider failover
-                for chunk in stream_chat(messages, max_tokens=16000, temperature=0.7):
+                # A signed-in user's active ChatGPT subscription takes precedence.
+                # Users without one keep the existing configured-provider path.
+                chunks = (
+                    stream_chat_response(subscription_connection, messages)
+                    if subscription_connection is not None
+                    else stream_chat(messages, max_tokens=16000, temperature=0.7)
+                )
+                for chunk in chunks:
                     full_response.append(chunk)
                     yield chunk
-            except Exception as e:
-                fallback = "抱歉，AI 服务暂时不可用，请稍后再试。"
+            except Exception:
+                fallback = (
+                    "抱歉，ChatGPT 订阅暂时不可用，请在订阅设置中刷新状态或重新连接。"
+                    if subscription_connection is not None
+                    else "抱歉，AI 服务暂时不可用，请稍后再试。"
+                )
                 yield f"\n\n[{fallback}]"
                 if not full_response:
                     full_response = [fallback]
@@ -996,16 +1009,25 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
         )
 
         try:
-            clients = get_clients()
-            if not clients:
-                raise ValueError("未配置翻译服务 API Key")
-            client, model = clients[0]
-            completion = client.chat.completions.create(
-                model=model,
-                messages=[{'role': 'user', 'content': prompt}],
-                temperature=0.6,
-            )
-            raw = completion.choices[0].message.content or ''
+            from api.services.chatgpt_subscription import active_connection_for_user, stream_chat_response
+
+            connection = active_connection_for_user(request.user)
+            if connection is not None:
+                raw = ''.join(stream_chat_response(
+                    connection,
+                    [{'role': 'user', 'content': prompt}],
+                ))
+            else:
+                clients = get_clients()
+                if not clients:
+                    raise ValueError("未配置翻译服务 API Key")
+                client, model = clients[0]
+                completion = client.chat.completions.create(
+                    model=model,
+                    messages=[{'role': 'user', 'content': prompt}],
+                    temperature=0.6,
+                )
+                raw = completion.choices[0].message.content or ''
             # Strip optional markdown code fence
             raw = raw.strip()
             if raw.startswith('```'):

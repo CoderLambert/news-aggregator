@@ -279,7 +279,7 @@ export default function ChatGPTSubscriptionSettings() {
         <p className="text-sm font-medium text-orange-600">本地订阅连接</p>
         <h1 className="mt-1 text-2xl font-semibold">ChatGPT 订阅设置</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          连接只属于当前 NewsHub 用户。全文翻译使用此处选中的 ChatGPT 账号和可见模型。
+          连接只属于当前 NewsHub 用户。小闻问答、问题推荐和全文翻译使用此处选中的 ChatGPT 账号与模型。
         </p>
       </header>
 
@@ -348,7 +348,7 @@ export default function ChatGPTSubscriptionSettings() {
       </div>
 
       <div className="mb-3 flex items-end justify-between gap-3">
-        <div><h2 className="font-semibold">2. 选择账号与模型</h2><p className="mt-1 text-sm text-muted-foreground">当前账号和模型会用于订阅全文翻译。</p></div>
+        <div><h2 className="font-semibold">2. 选择账号与模型</h2><p className="mt-1 text-sm text-muted-foreground">当前账号和模型会用于小闻问答、问题推荐和全文翻译。</p></div>
         <span className="shrink-0 text-xs text-muted-foreground">3. 配置状态显示在账号卡片中</span>
       </div>
 
@@ -422,7 +422,7 @@ export default function ChatGPTSubscriptionSettings() {
                     <p className="mt-2 text-sm text-muted-foreground">此账号目前没有可见模型。</p>
                   )}
                   {!connection.selected_model && modelsQuery.data?.models.length ? (
-                    <p className="mt-2 text-sm text-muted-foreground">选择模型后即可使用订阅全文翻译。</p>
+                    <p className="mt-2 text-sm text-muted-foreground">选择模型后即可使用小闻问答、问题推荐和全文翻译。</p>
                   ) : null}
                 </div>
               )}
