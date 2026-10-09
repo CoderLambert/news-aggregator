@@ -7,9 +7,14 @@ interface LazyNewsChatAssistantProps {
   newsId: string
   open: boolean
   onOpenChange: (open: boolean) => void
+  articleContext?: {
+    hasFullContent?: boolean
+    wordCount?: number
+    title?: string
+  }
 }
 
-export default function LazyNewsChatAssistant({ newsId, open, onOpenChange }: LazyNewsChatAssistantProps) {
+export default function LazyNewsChatAssistant({ newsId, open, onOpenChange, articleContext }: LazyNewsChatAssistantProps) {
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [NewsChatAssistant, setNewsChatAssistant] = useState(() => lazy(loadNewsChatAssistant))
 
@@ -36,7 +41,7 @@ export default function LazyNewsChatAssistant({ newsId, open, onOpenChange }: La
       )}
     >
       <Suspense fallback={<LazyModalState label="AI 助手小闻" message="正在打开小闻…" onClose={() => onOpenChange(false)} variant="chat" />}>
-        <NewsChatAssistant newsId={newsId} open onOpenChange={onOpenChange} />
+        <NewsChatAssistant newsId={newsId} open onOpenChange={onOpenChange} articleContext={articleContext} />
       </Suspense>
     </ErrorBoundary>
   )

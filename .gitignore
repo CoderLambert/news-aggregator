@@ -16,6 +16,7 @@ build/
 db.sqlite3
 staticfiles/
 backend/media/
+backend/.runtime/
 media/
 
 # Scrapy

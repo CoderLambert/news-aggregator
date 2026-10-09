@@ -13,11 +13,13 @@ import hmac
 import json
 import logging
 import math
+import os
 import secrets
 import threading
 import time
 import uuid
 from datetime import timedelta
+from pathlib import Path
 from urllib.parse import urlencode, urlparse
 
 import requests
@@ -35,7 +37,7 @@ from django.utils import timezone
 from api.models import (
     ChatGPTArticleTranslation,
     ChatGPTAuthAttempt,
-    ChatGPTOAuthClient,
+    ChatGPTOAuthHost,
     ChatGPTSubscriptionConnection,
     ChatGPTSubscriptionSelection,
 )
@@ -58,6 +60,7 @@ REQUESTED_SCOPES = (
 AUTH_ATTEMPT_TTL = timedelta(minutes=10)
 REFRESH_LEASE_TTL = timedelta(seconds=35)
 REFRESH_WAIT_SECONDS = 40
+REVOCATION_RETRY_DELAYS = (0.25, 0.75)
 
 
 class SubscriptionError(Exception):
@@ -163,9 +166,51 @@ def source_hash(content: str) -> str:
     return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
 
-def get_installation_client() -> ChatGPTOAuthClient:
-    client, _ = ChatGPTOAuthClient.objects.get_or_create(pk=1)
-    return client
+def _deployment_instance_id() -> str:
+    """Load this deployment's non-secret ID, creating it atomically once."""
+    configured = str(getattr(settings, 'CHATGPT_DEPLOYMENT_INSTANCE_ID', '')).strip()
+    if configured:
+        try:
+            return str(uuid.UUID(configured))
+        except (ValueError, AttributeError) as exc:
+            raise SubscriptionError('CHATGPT_DEPLOYMENT_INSTANCE_ID 必须是有效 UUID。') from exc
+
+    path = Path(getattr(
+        settings,
+        'CHATGPT_DEPLOYMENT_INSTANCE_FILE',
+        Path(settings.BASE_DIR) / '.runtime' / 'chatgpt-deployment-id',
+    ))
+    try:
+        value = path.read_text(encoding='utf-8').strip()
+    except FileNotFoundError:
+        value = str(uuid.uuid4())
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, 'w', encoding='ascii') as deployment_file:
+                deployment_file.write(f'{value}\n')
+        except FileExistsError:
+            value = path.read_text(encoding='utf-8').strip()
+        except OSError as exc:
+            raise SubscriptionError('无法保存 ChatGPT 部署实例标识。') from exc
+    except OSError as exc:
+        raise SubscriptionError('无法读取 ChatGPT 部署实例标识。') from exc
+
+    try:
+        return str(uuid.UUID(value))
+    except (ValueError, AttributeError) as exc:
+        raise SubscriptionError('ChatGPT 部署实例标识已损坏，请修复后重试。') from exc
+
+
+def get_oauth_host() -> ChatGPTOAuthHost:
+    """Return the stable OAuth host for this deployment.
+
+    OpenAI defines the host as the app runtime/installation. Local users remain
+    isolated by their own connection, issued client ID, and encrypted tokens.
+    """
+    deployment_hash = _digest(_deployment_instance_id())
+    host, _ = ChatGPTOAuthHost.objects.get_or_create(deployment_hash=deployment_hash)
+    return host
 
 
 def _discovery() -> dict:
@@ -194,7 +239,7 @@ def create_authorization_attempt(user, target_connection=None, session_key='', o
         raise SubscriptionError('请先登录本地账号后再连接 ChatGPT 订阅。')
     handoff_origin = _validate_handoff_origin(origin)
     discovery = _discovery()
-    installation = get_installation_client()
+    oauth_host = get_oauth_host()
     handoff_token = secrets.token_urlsafe(32)
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
@@ -236,10 +281,22 @@ def create_authorization_attempt(user, target_connection=None, session_key='', o
             'response_type': 'code', 'client_id': requested_client_id, 'redirect_uri': REDIRECT_URI,
             'scope': REQUESTED_SCOPES, 'resource': API_RESOURCE, 'state': state, 'nonce': nonce,
             'code_challenge': challenge, 'code_challenge_method': 'S256',
-            'ext_agent_host_id': installation.host_id,
+            'ext_agent_host_id': oauth_host.host_id,
         }
         if requested_client_id == DYNAMIC_CLIENT_ID:
             params['agent_name_hint'] = getattr(settings, 'CHATGPT_AGENT_NAME_HINT', 'News Aggregator')
+        elif current_target is not None:
+            if current_target.account_email:
+                params['login_hint'] = current_target.account_email
+            if current_target.encrypted_id_token:
+                try:
+                    params['id_token_hint'] = decrypt_secret(
+                        current_target.encrypted_id_token, 'subscription-id-token',
+                    )
+                except SubscriptionError:
+                    # The verified email still gives OpenAI a safe returning-account
+                    # hint. A damaged optional hint must not block reauthorization.
+                    logger.info('Stored ChatGPT ID-token hint could not be decrypted; omitting it.')
         authorization_url = f"{discovery['authorization_endpoint']}?{urlencode(params)}"
         attempt = ChatGPTAuthAttempt.objects.create(
             user=user, target_connection=current_target, state_hash=_digest(state), nonce_hash=_digest(nonce),
@@ -475,7 +532,7 @@ def complete_authorization(query, browser_binding_token: str) -> ChatGPTSubscrip
         code = query.get('code', '')
         if not code:
             raise SubscriptionError('OpenAI 登录回调缺少授权码。')
-        installation = get_installation_client()
+        oauth_host = get_oauth_host()
         returned_client_id = query.get('client_id', '')
         if attempt.requested_client_id == DYNAMIC_CLIENT_ID:
             if not isinstance(returned_client_id, str) or not returned_client_id or returned_client_id == DYNAMIC_CLIENT_ID:
@@ -503,7 +560,8 @@ def complete_authorization(query, browser_binding_token: str) -> ChatGPTSubscrip
             raise SubscriptionError('订阅未授予 direct model access 权限，请重新授权并允许该权限。')
         subject = claims['sub']
         issuer = claims['iss']
-        registration_key = _registration_key_hash(issuer, client_id, installation.host_id, subject)
+        subject_hash = _subject_hash(subject)
+        registration_key = _registration_key_hash(issuer, client_id, oauth_host.host_id, subject)
         now = timezone.now()
         with transaction.atomic():
             locked_attempt = ChatGPTAuthAttempt.objects.select_for_update().filter(
@@ -522,7 +580,12 @@ def complete_authorization(query, browser_binding_token: str) -> ChatGPTSubscrip
                     raise SubscriptionError('待重新连接的账号已不存在。')
                 if target.auth_attempt_generation != locked_attempt.target_attempt_generation:
                     raise SubscriptionError('此授权窗口已过期，请从当前连接重新开始。')
-                if target.registration_key_hash and target.registration_key_hash != registration_key:
+                identity_changed = (
+                    target.issuer != issuer or
+                    target.issued_client_id != client_id or
+                    target.subject_hash != subject_hash
+                )
+                if target.registration_key_hash and identity_changed:
                     raise SubscriptionError('登录的 ChatGPT 账号与所选连接不一致；请新建连接。')
             else:
                 target = ChatGPTSubscriptionConnection.objects.select_for_update().filter(
@@ -545,7 +608,7 @@ def complete_authorization(query, browser_binding_token: str) -> ChatGPTSubscrip
                 target.is_active = True
                 selection.generation += 1
                 selection.save(update_fields=['generation', 'updated_at'])
-            target.subject_hash = _subject_hash(subject)
+            target.subject_hash = subject_hash
             target.issuer = issuer
             target.issued_client_id = client_id
             target.registration_key_hash = registration_key
@@ -555,6 +618,7 @@ def complete_authorization(query, browser_binding_token: str) -> ChatGPTSubscrip
             target.account_email = str(claims.get('email', ''))[:254]
             target.encrypted_access_token = encrypt_secret(access_token, 'subscription-access-token')
             target.encrypted_refresh_token = encrypt_secret(refresh_token, 'subscription-refresh-token')
+            target.encrypted_id_token = encrypt_secret(id_token, 'subscription-id-token')
             target.access_token_expires_at = now + timedelta(seconds=float(expires_in))
             target.refresh_lease_id = ''
             target.refresh_lease_expires_at = None
@@ -810,8 +874,41 @@ def discover_models(connection: ChatGPTSubscriptionConnection) -> list[dict[str,
     return models
 
 
+def _revoke_refresh_token(refresh_token: str, client_id: str) -> bool:
+    """Best-effort revocation with bounded retries for transport and 5xx failures."""
+    if not refresh_token or not client_id:
+        return False
+    try:
+        discovery = _discovery()
+    except SubscriptionError:
+        return False
+    revocation_endpoint = discovery.get('revocation_endpoint', '')
+    parsed = urlparse(revocation_endpoint)
+    if parsed.scheme != 'https' or not parsed.netloc:
+        return False
+
+    delays = (0, *REVOCATION_RETRY_DELAYS)
+    for attempt, delay in enumerate(delays):
+        if delay:
+            time.sleep(delay)
+        try:
+            response = requests.post(revocation_endpoint, data={
+                'token': refresh_token, 'token_type_hint': 'refresh_token', 'client_id': client_id,
+            }, timeout=15)
+        except Exception:
+            response = None
+        if response is not None and 200 <= response.status_code < 300:
+            return True
+        if response is not None and response.status_code < 500:
+            return False
+        if attempt == len(delays) - 1:
+            break
+    logger.info('ChatGPT token revocation was not confirmed for a disconnected local connection.')
+    return False
+
+
 def disconnect_connection(user, connection_id) -> bool:
-    """Clear local secrets and invalidate in-flight auth/refresh work before revocation."""
+    """Stop use, revoke the renewable session, then clear this connection's secrets."""
     with _user_lock(user.pk):
         with transaction.atomic():
             get_user_model().objects.select_for_update().get(pk=user.pk)
@@ -829,9 +926,6 @@ def disconnect_connection(user, connection_id) -> bool:
             except SubscriptionError:
                 refresh_token = ''
             client_id = connection.issued_client_id
-            connection.encrypted_access_token = ''
-            connection.encrypted_refresh_token = ''
-            connection.access_token_expires_at = None
             connection.is_active = False
             connection.needs_reauth = True
             connection.generation += 1
@@ -840,30 +934,31 @@ def disconnect_connection(user, connection_id) -> bool:
             connection.refresh_lease_id = ''
             connection.refresh_lease_expires_at = None
             connection.save(update_fields=[
-                'encrypted_access_token', 'encrypted_refresh_token', 'access_token_expires_at',
                 'is_active', 'needs_reauth', 'generation', 'credential_generation',
                 'auth_attempt_generation', 'refresh_lease_id', 'refresh_lease_expires_at', 'updated_at',
             ])
+            disconnected_credential_generation = connection.credential_generation
             ChatGPTAuthAttempt.objects.filter(
                 target_connection=connection, status__in=['pending', 'authorizing', 'processing'],
             ).update(status='cancelled', status_message='订阅连接已断开。')
             selection.generation += 1
             selection.save(update_fields=['generation', 'updated_at'])
-    if not refresh_token or not client_id:
-        return False
-    try:
-        discovery = _discovery()
-        revocation_endpoint = discovery.get('revocation_endpoint', '')
-        parsed = urlparse(revocation_endpoint)
-        if parsed.scheme != 'https' or not parsed.netloc:
-            return False
-        response = requests.post(revocation_endpoint, data={
-            'token': refresh_token, 'token_type_hint': 'refresh_token', 'client_id': client_id,
-        }, timeout=15)
-        return 200 <= response.status_code < 300
-    except Exception:
-        logger.info('ChatGPT token revocation was not confirmed for a disconnected local connection.')
-        return False
+
+        revocation_confirmed = False
+        try:
+            revocation_confirmed = _revoke_refresh_token(refresh_token, client_id)
+        finally:
+            # A callback or another credential update that wins after the
+            # disconnect fence must not be erased by this cleanup.
+            ChatGPTSubscriptionConnection.objects.filter(
+                user=user, pk=connection_id,
+                credential_generation=disconnected_credential_generation,
+                needs_reauth=True,
+            ).update(
+                encrypted_access_token='', encrypted_refresh_token='', encrypted_id_token='',
+                access_token_expires_at=None, updated_at=timezone.now(),
+            )
+        return revocation_confirmed
 
 
 def _extract_response_text(response_data: dict) -> str:

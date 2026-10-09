@@ -46,6 +46,10 @@ SECRET_KEY = _env('DJANGO_SECRET_KEY') or (
 # this defaults only to the explicitly configured stable Django secret.
 CHATGPT_TOKEN_ENCRYPTION_KEY = _env('CHATGPT_TOKEN_ENCRYPTION_KEY') or _env('DJANGO_SECRET_KEY')
 CHATGPT_AGENT_NAME_HINT = _env('CHATGPT_AGENT_NAME_HINT', 'News Aggregator')
+CHATGPT_DEPLOYMENT_INSTANCE_ID = _env('CHATGPT_DEPLOYMENT_INSTANCE_ID')
+CHATGPT_DEPLOYMENT_INSTANCE_FILE = Path(
+    _env('CHATGPT_DEPLOYMENT_INSTANCE_FILE') or BASE_DIR / '.runtime' / 'chatgpt-deployment-id'
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = _env('DJANGO_DEBUG', '1') == '1'

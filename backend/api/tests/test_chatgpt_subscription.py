@@ -18,6 +18,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from django.contrib.auth import get_user_model
 from django.db import connection as django_connection
+from django.db.migrations.executor import MigrationExecutor
 from django.utils import timezone
 from rest_framework.test import APIClient, APIRequestFactory
 
@@ -25,7 +26,7 @@ from api.models import (
     Category,
     ChatGPTArticleTranslation,
     ChatGPTAuthAttempt,
-    ChatGPTOAuthClient,
+    ChatGPTOAuthHost,
     ChatGPTSubscriptionConnection,
     News,
     Source,
@@ -41,6 +42,12 @@ HANDOFF_ORIGIN = 'http://127.0.0.1:5173'
 @pytest.fixture
 def crypto(monkeypatch):
     monkeypatch.setattr(subscription, '_encryption_key', lambda: b'x' * 32)
+
+
+@pytest.fixture(autouse=True)
+def isolated_chatgpt_deployment(settings, tmp_path):
+    settings.CHATGPT_DEPLOYMENT_INSTANCE_ID = ''
+    settings.CHATGPT_DEPLOYMENT_INSTANCE_FILE = tmp_path / 'chatgpt-deployment-id'
 
 
 @pytest.fixture
@@ -75,18 +82,20 @@ def news(db):
 
 def make_connection(user, *, active=True, subject='provider-subject', generation=0, client_id='issued-client-id'):
     issuer = 'https://auth.example'
-    installation = subscription.get_installation_client()
+    oauth_host = subscription.get_oauth_host()
     return ChatGPTSubscriptionConnection.objects.create(
         user=user,
         subject_hash=subscription._subject_hash(subject),
         issuer=issuer,
         issued_client_id=client_id,
-        registration_key_hash=subscription._registration_key_hash(issuer, client_id, installation.host_id, subject),
+        registration_key_hash=subscription._registration_key_hash(issuer, client_id, oauth_host.host_id, subject),
         encrypted_subject=subscription.encrypt_secret(subject, 'verified-oauth-subject'),
         granted_scopes=[subscription.REQUIRED_DIRECT_SCOPE],
         account_name=subject,
+        account_email=f'{subject}@example.com',
         encrypted_access_token=subscription.encrypt_secret('access-token', 'subscription-access-token'),
         encrypted_refresh_token=subscription.encrypt_secret('refresh-token', 'subscription-refresh-token'),
+        encrypted_id_token=subscription.encrypt_secret('retained-id-token', 'subscription-id-token'),
         access_token_expires_at=timezone.now() + timedelta(hours=1),
         selected_model='listed-model-slug',
         is_active=active,
@@ -357,6 +366,8 @@ def test_dynamic_oauth_callback_persists_issued_client_id_and_encrypted_tokens(u
         assert params['code_challenge_method'] == ['S256']
         assert params['resource'] == [subscription.API_RESOURCE]
         assert subscription.REQUIRED_DIRECT_SCOPE in params['scope'][0].split()
+        assert 'id_token_hint' not in params
+        assert 'login_hint' not in params
         state = params['state'][0]
         with (
             patch.object(subscription, '_exchange_code', return_value=token_response) as exchange,
@@ -369,21 +380,106 @@ def test_dynamic_oauth_callback_persists_issued_client_id_and_encrypted_tokens(u
             }, browser_cookie)
             assert exchange.call_args.args[1] == 'issued-client-id'
 
-    installation = ChatGPTOAuthClient.objects.get(pk=1)
+    oauth_host = ChatGPTOAuthHost.objects.get()
     connection.refresh_from_db()
-    assert installation.host_id.startswith('urn:uuid:')
+    assert oauth_host.host_id.startswith('urn:uuid:')
     assert connection.issued_client_id == 'issued-client-id'
     assert connection.account_name == 'Reader'
     assert connection.account_email == 'reader@example.com'
     assert connection.connected and connection.is_active
     assert subscription.decrypt_secret(connection.encrypted_access_token, 'subscription-access-token') == 'mock-access'
     assert subscription.decrypt_secret(connection.encrypted_refresh_token, 'subscription-refresh-token') == 'mock-refresh'
+    assert subscription.decrypt_secret(connection.encrypted_id_token, 'subscription-id-token') == 'mock-id-token'
     with patch.object(subscription, '_discovery', return_value=discovery):
         next_start = _create_attempt(user, target=connection, session_key='local-session-2')
         _, next_url = _handoff(next_start, session_key='local-session-2')
     next_params = parse_qs(urlparse(next_url).query)
     assert next_params['client_id'] == ['issued-client-id']
+    assert next_params['id_token_hint'] == ['mock-id-token']
+    assert next_params['login_hint'] == ['reader@example.com']
     assert 'agent_name_hint' not in next_params
+
+
+def test_failed_reauthorization_preserves_the_current_session_and_account_hint(user, crypto):
+    connection = make_connection(user)
+    saved_credentials = (
+        connection.encrypted_access_token,
+        connection.encrypted_refresh_token,
+        connection.encrypted_id_token,
+    )
+    discovery = {'authorization_endpoint': 'https://auth.example/authorize'}
+    with (
+        patch.object(subscription, '_discovery', return_value=discovery),
+        patch.object(subscription, '_revoke_refresh_token') as revoke,
+    ):
+        start = _create_attempt(user, target=connection, session_key='ordinary-reauthorization')
+        cookie, url = _handoff(start, session_key='ordinary-reauthorization')
+        params = parse_qs(urlparse(url).query)
+        assert params['id_token_hint'] == ['retained-id-token']
+        with pytest.raises(subscription.SubscriptionError, match='取消'):
+            subscription.complete_authorization({
+                'state': params['state'][0], 'error': 'access_denied',
+            }, cookie)
+        revoke.assert_not_called()
+
+    connection.refresh_from_db()
+    assert connection.connected and connection.is_active
+    assert saved_credentials == (
+        connection.encrypted_access_token,
+        connection.encrypted_refresh_token,
+        connection.encrypted_id_token,
+    )
+
+
+def test_upgrade_preserves_legacy_host_users_and_subscription_credentials(transactional_db, settings):
+    before = ('api', '0022_searchindexrun_worker_instance_id')
+    after = ('api', '0025_chatgpt_connection_id_token')
+    executor = MigrationExecutor(django_connection)
+    try:
+        executor.migrate([before])
+        old_apps = executor.loader.project_state([before]).apps
+        LegacyHost = old_apps.get_model('api', 'ChatGPTOAuthClient')
+        LegacyUser = old_apps.get_model('auth', 'User')
+        LegacyConnection = old_apps.get_model('api', 'ChatGPTSubscriptionConnection')
+        LegacyAttempt = old_apps.get_model('api', 'ChatGPTAuthAttempt')
+        host_id = 'urn:uuid:8450472e-45dc-4224-99ac-621c7663bebc'
+        LegacyHost.objects.create(host_id=host_id)
+        admin = LegacyUser.objects.create(username='migration-admin', is_superuser=True, is_staff=True)
+        connection = LegacyConnection.objects.create(
+            user_id=admin.pk, subject_hash='legacy-subject-hash',
+            issuer='https://auth.example', issued_client_id='legacy-issued-client',
+            registration_key_hash='legacy-registration-key',
+            encrypted_subject='legacy-encrypted-subject',
+            encrypted_access_token='legacy-encrypted-access',
+            encrypted_refresh_token='legacy-encrypted-refresh',
+            is_active=True, needs_reauth=False,
+        )
+        attempt = LegacyAttempt.objects.create(
+            user_id=admin.pk, target_connection_id=connection.pk,
+            state_hash='legacy-state-hash', nonce_hash='legacy-nonce-hash',
+            encrypted_pkce_verifier='legacy-encrypted-verifier',
+            encrypted_authorization_url='legacy-encrypted-url', handoff_token_hash='legacy-handoff-hash',
+            requested_client_id='legacy-issued-client', status='authorizing',
+            expires_at=timezone.now() + timedelta(minutes=5),
+        )
+
+        executor = MigrationExecutor(django_connection)
+        executor.migrate([after])
+        assert subscription.get_oauth_host().host_id == host_id
+        assert settings.CHATGPT_DEPLOYMENT_INSTANCE_FILE.is_file()
+        assert ChatGPTOAuthHost.objects.count() == 1
+        restored = User.objects.get(pk=admin.pk)
+        assert restored.is_superuser and restored.is_staff
+        preserved = ChatGPTSubscriptionConnection.objects.get(pk=connection.pk)
+        assert preserved.issued_client_id == 'legacy-issued-client'
+        assert preserved.encrypted_subject == 'legacy-encrypted-subject'
+        assert preserved.encrypted_access_token == 'legacy-encrypted-access'
+        assert preserved.encrypted_refresh_token == 'legacy-encrypted-refresh'
+        assert preserved.encrypted_id_token == ''
+        assert preserved.connected and preserved.is_active
+        assert ChatGPTAuthAttempt.objects.get(pk=attempt.pk).status == 'cancelled'
+    finally:
+        MigrationExecutor(django_connection).migrate([after])
 
 
 def test_expired_oauth_state_is_rejected(user):
@@ -621,9 +717,18 @@ def test_disconnect_clears_tokens_advances_generation_and_revokes(user, news, cr
     connection = make_connection(user)
     previous_generation = connection.generation
     response = FakeResponse(status_code=200)
+
+    def revoke_after_connection_is_stopped(*_args, **_kwargs):
+        connection.refresh_from_db()
+        assert connection.is_active is False
+        assert connection.needs_reauth is True
+        assert connection.encrypted_refresh_token
+        assert connection.encrypted_id_token
+        return response
+
     with (
         patch.object(subscription, '_discovery', return_value={'revocation_endpoint': 'https://auth.example/revoke'}),
-        patch('api.services.chatgpt_subscription.requests.post', return_value=response) as post,
+        patch('api.services.chatgpt_subscription.requests.post', side_effect=revoke_after_connection_is_stopped) as post,
     ):
         confirmed = subscription.disconnect_connection(user, connection.pk)
     connection.refresh_from_db()
@@ -631,6 +736,7 @@ def test_disconnect_clears_tokens_advances_generation_and_revokes(user, news, cr
     assert post.call_args.kwargs['data']['token'] == 'refresh-token'
     assert connection.encrypted_access_token == ''
     assert connection.encrypted_refresh_token == ''
+    assert connection.encrypted_id_token == ''
     assert connection.is_active is False
     assert connection.generation == previous_generation + 1
     with pytest.raises(subscription.ConnectionChangedError, match='已切换或断开'):
@@ -644,6 +750,53 @@ def test_disconnect_clears_tokens_advances_generation_and_revokes(user, news, cr
             source_digest=subscription.source_hash(news.full_content),
         )
     assert not ChatGPTArticleTranslation.objects.filter(user=user, connection=connection, news=news).exists()
+
+
+def test_disconnect_retries_temporary_revocation_failure_before_clearing(user, crypto):
+    connection = make_connection(user)
+    responses = [FakeResponse(status_code=503), FakeResponse(status_code=200)]
+    with (
+        patch.object(subscription, '_discovery', return_value={'revocation_endpoint': 'https://auth.example/revoke'}),
+        patch('api.services.chatgpt_subscription.requests.post', side_effect=responses) as post,
+        patch('api.services.chatgpt_subscription.time.sleep') as sleep,
+    ):
+        confirmed = subscription.disconnect_connection(user, connection.pk)
+
+    assert confirmed is True
+    assert post.call_count == 2
+    sleep.assert_called_once_with(subscription.REVOCATION_RETRY_DELAYS[0])
+    connection.refresh_from_db()
+    assert connection.encrypted_access_token == ''
+    assert connection.encrypted_refresh_token == ''
+    assert connection.encrypted_id_token == ''
+
+
+def test_disconnected_connection_reauthorization_uses_email_hint_without_id_token(user, crypto):
+    connection = make_connection(user)
+    connection.encrypted_access_token = ''
+    connection.encrypted_refresh_token = ''
+    connection.encrypted_id_token = ''
+    connection.needs_reauth = True
+    connection.is_active = False
+    connection.save(update_fields=[
+        'encrypted_access_token', 'encrypted_refresh_token', 'encrypted_id_token',
+        'needs_reauth', 'is_active', 'updated_at',
+    ])
+    discovery = {
+        'authorization_endpoint': 'https://auth.example/authorize',
+        'token_endpoint': 'https://auth.example/token',
+        'jwks_uri': 'https://auth.example/keys',
+        'issuer': 'https://auth.example',
+    }
+    with patch.object(subscription, '_discovery', return_value=discovery):
+        start = _create_attempt(user, target=connection, session_key='signed-out-reconnect')
+        _, url = _handoff(start, session_key='signed-out-reconnect')
+
+    params = parse_qs(urlparse(url).query)
+    assert params['client_id'] == [connection.issued_client_id]
+    assert params['login_hint'] == [connection.account_email]
+    assert 'id_token_hint' not in params
+    assert 'agent_name_hint' not in params
 
 
 def test_discovery_returns_only_list_visible_models_and_preserves_slugs(user, crypto):
@@ -699,6 +852,7 @@ def test_subscription_views_are_scoped_and_never_return_credentials(user, crypto
     assert [item['id'] for item in status_response.data['connections']] == [str(own_connection.pk)]
     assert 'access_token' not in json.dumps(status_response.data)
     assert 'refresh_token' not in json.dumps(status_response.data)
+    assert 'id_token' not in json.dumps(status_response.data)
 
     models_response = client.get(f'/api/chatgpt-subscription/connections/{other_connection.pk}/models/')
     assert models_response.status_code == 400
@@ -929,12 +1083,33 @@ def test_responses_sse_saves_only_after_completed_event(
 
 
 
-def test_host_id_is_stable_urn_uuid_and_registration_is_client_scoped(user, crypto):
-    first_host = subscription.get_installation_client().host_id
-    second_host = subscription.get_installation_client().host_id
+def test_host_id_is_stable_per_deployment_while_connections_are_user_scoped(user, crypto, settings, tmp_path):
+    other_user = User.objects.create_user(username='other-host-user', password='not-used')
+    first_host = subscription.get_oauth_host().host_id
+    second_host = subscription.get_oauth_host().host_id
+
+    discovery = {
+        'authorization_endpoint': 'https://auth.example/authorize',
+        'token_endpoint': 'https://auth.example/token',
+        'jwks_uri': 'https://auth.example/keys',
+        'issuer': 'https://auth.example',
+    }
+    with patch.object(subscription, '_discovery', return_value=discovery):
+        first_attempt = _create_attempt(user, session_key='first-user-session')
+        _, first_url = _handoff(first_attempt, session_key='first-user-session')
+        other_attempt = _create_attempt(other_user, session_key='other-user-session')
+        _, other_url = _handoff(other_attempt, session_key='other-user-session')
+    assert parse_qs(urlparse(first_url).query)['ext_agent_host_id'] == [first_host]
+    assert parse_qs(urlparse(other_url).query)['ext_agent_host_id'] == [first_host]
+
+    settings.CHATGPT_DEPLOYMENT_INSTANCE_FILE = tmp_path / 'another-deployment-id'
+    moved_deployment_host = subscription.get_oauth_host().host_id
+
+    assert first_host == second_host
+    assert first_host != moved_deployment_host
+    assert ChatGPTOAuthHost.objects.count() == 2
     first = make_connection(user, subject='same-subject', client_id='workspace-client-a')
     second = make_connection(user, subject='same-subject', client_id='workspace-client-b', active=False)
-    assert first_host == second_host
     assert first_host.startswith('urn:uuid:')
     assert first.subject_hash == second.subject_hash
     assert first.registration_key_hash != second.registration_key_hash

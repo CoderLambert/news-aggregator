@@ -217,6 +217,10 @@ indexer 会自动补充缺失新闻、更新内容哈希变化的向量并删除
 
 ChatGPT 订阅令牌使用 `CHATGPT_TOKEN_ENCRYPTION_KEY` 加密；未单独设置时使用 `DJANGO_SECRET_KEY`。迁移已有数据库时必须沿用原稳定密钥，否则已有订阅令牌无法解密，需要重新连接账号。
 
+`backend/.runtime/chatgpt-deployment-id` 是当前部署的非敏感标识。同一部署重启或更新时应保留；迁移到新机器或新 VM 时不要复制。每个部署只有一个稳定的随机 ChatGPT OAuth host ID；不同站内用户的 `client_id`、Token 和连接记录始终分开保存。
+
+完整的登录流程、安全边界与 Cloudflare 超时诊断见 [`docs/chatgpt-subscription-oauth.md`](chatgpt-subscription-oauth.md)。
+
 更新与回滚：
 
 ~~~bash

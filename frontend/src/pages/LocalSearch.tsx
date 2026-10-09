@@ -66,8 +66,8 @@ function PillGroup({ options, value, onChange }: {
           onClick={() => onChange(option.key)}
           aria-pressed={value === option.key}
           className={`cursor-pointer rounded-full px-2.5 py-1 text-xs font-medium transition-all ${value === option.key
-            ? 'bg-violet-500 text-white shadow-sm'
-            : 'border border-neutral-200 bg-white text-neutral-600 hover:border-violet-300 hover:bg-violet-50/50'}`}
+            ? 'bg-primary text-primary-foreground shadow-xs'
+            : 'border border-border bg-card text-muted-foreground hover:border-emerald-600/30 hover:bg-accent'}`}
         >
           {option.label}
         </button>
@@ -402,7 +402,7 @@ function SearchControls({ initialQuery, historyNavigationKey, mode, searching, b
         <button
           type="submit"
           disabled={searching || !draft.trim()}
-          className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-500 to-violet-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm shadow-violet-200/50 transition-all hover:scale-[1.02] hover:shadow-md hover:shadow-violet-300/50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
+          className="flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground shadow-xs transition-all hover:bg-primary/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {searching ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
           {buttonLabel}
@@ -410,9 +410,9 @@ function SearchControls({ initialQuery, historyNavigationKey, mode, searching, b
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <span className="text-xs text-neutral-500">模式:</span>
+        <span className="text-xs text-muted-foreground">模式:</span>
         <PillGroup options={MODES} value={mode} onChange={(value) => onModeChange(resolveMode(value))} />
-        <span className="text-xs text-neutral-400">{MODE_HINTS[mode]}</span>
+        <span className="text-xs text-muted-foreground">{MODE_HINTS[mode]}</span>
       </div>
     </form>
   )
@@ -424,25 +424,25 @@ function ArticleCard({ article, returnTo }: { article: NewsSummary; returnTo: st
   const sourceType = article.source_type as SourceType
 
   return (
-    <article className="group block rounded-xl border border-neutral-100 bg-white p-4 transition-all duration-150 hover:border-violet-200 hover:bg-violet-50/30 hover:shadow-md">
+    <article className="group block rounded-xl border border-border bg-card p-4 transition-all duration-150 hover:border-emerald-600/30 hover:shadow-md">
       <div className="flex items-start justify-between gap-3">
-        <Link to={`/news/${article.id}`} state={{ from: returnTo }} className="min-w-0 flex-1 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
-          <h2 className="line-clamp-2 text-sm font-semibold text-neutral-900 transition-colors group-hover:text-violet-800">{title}</h2>
-          {snippet && <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-neutral-500">{snippet}</p>}
+        <Link to={`/news/${article.id}`} state={{ from: returnTo }} className="min-w-0 flex-1 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+          <h2 className="line-clamp-2 text-sm font-semibold text-foreground transition-colors group-hover:text-emerald-800 dark:group-hover:text-emerald-300">{title}</h2>
+          {snippet && <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{snippet}</p>}
         </Link>
         {article.url && (
-          <a href={article.url} target="_blank" rel="noopener noreferrer" className="rounded-md p-1 text-neutral-400 transition-colors hover:bg-violet-50 hover:text-violet-500" aria-label="打开原文">
+          <a href={article.url} target="_blank" rel="noopener noreferrer" className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground" aria-label="打开原文">
             <ExternalLink className="size-3.5" />
           </a>
         )}
       </div>
 
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
-        {article.source_name && <span className="inline-flex items-center gap-1 rounded-md bg-neutral-50 px-2 py-0.5 text-[11px] font-medium text-neutral-600"><Globe className="size-3" />{article.source_name}</span>}
+        {article.source_name && <span className="inline-flex items-center gap-1 rounded-md bg-secondary px-2 py-0.5 text-[11px] font-medium text-foreground"><Globe className="size-3" />{article.source_name}</span>}
         {sourceType in SOURCE_TYPE_LABELS && <span className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${SOURCE_TYPE_COLORS[sourceType]}`}>{SOURCE_TYPE_LABELS[sourceType]}</span>}
-        {article.category_name && <span className="rounded-md bg-purple-50 px-2 py-0.5 text-[11px] font-medium text-purple-600">{article.category_name}</span>}
-        {article.publish_time && <span className="inline-flex items-center gap-1 text-[11px] text-neutral-400"><Clock className="size-3" />{new Date(article.publish_time).toLocaleDateString('zh-CN', { year: 'numeric', month: 'short', day: 'numeric' })}</span>}
-        {article.full_content_fetch_status === 'success' && <span className="inline-flex items-center gap-1 text-[11px] text-amber-500"><Star className="size-3" />全文可用</span>}
+        {article.category_name && <span className="rounded-md bg-secondary px-2 py-0.5 text-[11px] font-medium text-foreground">{article.category_name}</span>}
+        {article.publish_time && <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground"><Clock className="size-3" />{new Date(article.publish_time).toLocaleDateString('zh-CN', { year: 'numeric', month: 'short', day: 'numeric' })}</span>}
+        {article.full_content_fetch_status === 'success' && <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-medium"><Star className="size-3" />全文可用</span>}
       </div>
     </article>
   )

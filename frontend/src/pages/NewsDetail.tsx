@@ -272,6 +272,11 @@ export default function NewsDetail() {
           newsId={id ?? String(news.id)}
           open={assistantOpen}
           onOpenChange={handleAssistantOpenChange}
+          articleContext={{
+            hasFullContent: Boolean(news.full_content),
+            wordCount: news.full_content ? news.full_content.length : (news.content ? news.content.length : 0),
+            title: news.title,
+          }}
         />
       </div>
 

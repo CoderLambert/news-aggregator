@@ -99,28 +99,32 @@ function Toolbar({ news, translating, translationPaused, translateError, showOri
     }
   }
 
+  const isChineseSource = news.source_language === 'zh'
+
   return (
-    <section aria-label="正文状态与操作" className="mb-5 rounded-2xl border border-neutral-200 bg-neutral-50/70 p-3 sm:p-4">
+    <section aria-label="正文状态与操作" className="mb-5 rounded-xl border border-border bg-secondary/50 p-3 sm:p-4 backdrop-blur-xs">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge variant="green" className="rounded-full px-2.5 py-0.5 text-[11px] font-medium">
-              <CheckCircle2 className="size-3" />原文已保存
+              <CheckCircle2 className="size-3" />正文已就绪
             </Badge>
-            {news.full_content_zh && (
+            {news.full_content_zh && !isChineseSource && (
               <Badge variant="violet" className="rounded-full px-2.5 py-0.5 text-[11px] font-medium">
                 <Languages className="size-3" />已有中文译文
               </Badge>
             )}
           </div>
-          <p className="mt-1.5 text-xs leading-5 text-neutral-500">正文结构已保留，可复制、重新获取或翻译。</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            {isChineseSource ? '正文排版已就绪，可复制或重新获取。' : '正文结构已保留，可复制、重新获取或翻译。'}
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <CopyButton copied={copied} onCopy={() => { void handleCopy() }} />
           <RefetchButton refetching={refetching} onClick={onRefetch} onCancel={onCancelRefetch} />
           {news.full_content_zh && <LangToggle showOriginal={showOriginal} onToggle={onToggleOriginal} />}
-          {!translating && !translationPaused && !translateError && (
+          {!isChineseSource && !translating && !translationPaused && !translateError && (
             <TranslateButton hasTranslation={Boolean(news.full_content_zh)} onClick={onTranslate} />
           )}
         </div>

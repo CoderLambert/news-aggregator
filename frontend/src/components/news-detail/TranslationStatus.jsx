@@ -12,6 +12,8 @@ import { Badge } from '@/components/ui/badge'
  * unconditionally into a row of badges.
  */
 export default function TranslationStatus({ news, size = 'default' }) {
+  // Chinese articles do not need translation to Chinese
+  if (news.source_language === 'zh') return null
   const status = news.translation_status
   const retryCount = news.translation_retry_count || 0
   if (!status || status === 'success') return null

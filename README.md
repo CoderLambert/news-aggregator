@@ -63,11 +63,12 @@ curl -f http://127.0.0.1:9527/api/news/
 | 数据 | 宿主机位置 | 容器位置 |
 | --- | --- | --- |
 | SQLite、WAL、TTS 缓存 | `./backend/` | `/app/backend/` |
+| ChatGPT 部署实例标识 | `./backend/.runtime/` | `/app/backend/.runtime/` |
 | ChromaDB 向量数据 | `./chroma_data/` | `/app/chroma_data/` |
 | 爬虫运行日志 | `./logs/` | `/app/logs/` |
 | Hugging Face 模型缓存 | Docker volume `news-aggregator_huggingface-cache` | `/root/.cache/huggingface` |
 
-接管已有数据库时，先停止原后端和爬虫写入者，再把 `db.sqlite3` 及仍存在的 `db.sqlite3-wal`、`db.sqlite3-shm` 一起放入 `backend/`，然后启动 Compose。保存 ChatGPT 订阅连接时还必须沿用原来的 `DJANGO_SECRET_KEY` 或 `CHATGPT_TOKEN_ENCRYPTION_KEY`。
+接管已有数据库时，先停止原后端和爬虫写入者，再把 `db.sqlite3` 及仍存在的 `db.sqlite3-wal`、`db.sqlite3-shm` 一起放入 `backend/`，然后启动 Compose。保存 ChatGPT 订阅连接时还必须沿用原来的 `DJANGO_SECRET_KEY` 或 `CHATGPT_TOKEN_ENCRYPTION_KEY`。如果目标是新机器/新 VM，不要复制 `backend/.runtime/chatgpt-deployment-id`；新部署会生成自己的 OAuth host ID。同一部署内所有站内用户共享这个非敏感 host 标识，但各自的 `client_id` 和 Token 分开保存。
 
 常用维护命令：
 
