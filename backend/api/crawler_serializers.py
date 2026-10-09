@@ -28,6 +28,8 @@ class CrawlRunSerializer(serializers.ModelSerializer):
     target_name = serializers.CharField(source='target.display_name', read_only=True)
     spider_name = serializers.CharField(source='target.spider_name', read_only=True)
     duration_seconds = serializers.SerializerMethodField()
+    latest_retry_id = serializers.SerializerMethodField()
+    latest_retry_status = serializers.SerializerMethodField()
 
     class Meta:
         model = CrawlRun
@@ -35,7 +37,8 @@ class CrawlRunSerializer(serializers.ModelSerializer):
             'id', 'batch', 'spider_name', 'target_name', 'status', 'queued_at',
             'started_at', 'heartbeat_at', 'finished_at', 'duration_seconds',
             'exit_code', 'items', 'responses', 'errors', 'http_statuses',
-            'stats', 'safe_error', 'retry_of', 'cancel_requested_at',
+            'stats', 'safe_error', 'retry_of', 'latest_retry_id',
+            'latest_retry_status', 'cancel_requested_at',
         ]
 
     def get_duration_seconds(self, obj):
@@ -45,6 +48,20 @@ class CrawlRunSerializer(serializers.ModelSerializer):
         if not end:
             return None
         return max(0, int((end - obj.started_at).total_seconds()))
+
+    def _latest_retry(self, obj):
+        prefetched = getattr(obj, 'prefetched_retries', None)
+        if prefetched is not None:
+            return prefetched[0] if prefetched else None
+        return obj.retries.order_by('-queued_at').only('id', 'status').first()
+
+    def get_latest_retry_id(self, obj):
+        retry = self._latest_retry(obj)
+        return retry.pk if retry else None
+
+    def get_latest_retry_status(self, obj):
+        retry = self._latest_retry(obj)
+        return retry.status if retry else None
 
 
 class CrawlerTargetSerializer(serializers.ModelSerializer):

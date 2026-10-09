@@ -9,6 +9,7 @@ class OpenaiBlogSpider(scrapy.Spider):
     name = 'openai_blog'
     allowed_domains = ['openai.com']
     start_urls = ['https://openai.com/news/rss.xml']
+    max_items = 50
 
     custom_settings = {
         'DOWNLOAD_DELAY': 2,
@@ -17,7 +18,7 @@ class OpenaiBlogSpider(scrapy.Spider):
 
     def parse(self, response):
         response.selector.remove_namespaces()
-        for item in response.css('item'):
+        for item in response.css('item')[:self.max_items]:
             title = item.css('title::text').get('')
             link = item.css('link::text').get('')
             if not title or not link:
@@ -53,34 +54,3 @@ class OpenaiBlogSpider(scrapy.Spider):
             news['url'] = url
             news['cover_image'] = cover_image
             yield news
-
-            # Fetch full article
-            yield scrapy.Request(url, callback=self.parse_article, priority=1)
-
-    def parse_article(self, response):
-        title = response.css('h1::text').get()
-        if not title:
-            return
-
-        blocks = response.css('article p::text').getall()
-        if not blocks:
-            blocks = response.css('.post-content p::text').getall()
-        if not blocks:
-            blocks = response.css('p::text').getall()
-
-        content = '\n'.join(p.strip() for p in blocks if p.strip())
-        if len(content) < 50:
-            return
-
-        author = response.css('[class*="author"] a::text, .author::text').get() or ''
-
-        news = NewsItem()
-        news['title'] = title.strip()
-        news['content'] = content
-        news['author'] = author.strip()
-        news['publish_time'] = datetime.now()
-        news['source_name'] = 'OpenAI Blog'
-        news['category_name'] = classify(title.strip(), content)
-        news['url'] = response.url
-        news['cover_image'] = response.css('figure img::attr(src), article img::attr(src)').get() or ''
-        yield news
