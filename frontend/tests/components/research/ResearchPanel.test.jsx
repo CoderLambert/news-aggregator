@@ -16,7 +16,7 @@ const api = vi.hoisted(() => ({
 
 vi.mock('@/services/researchApi', () => api)
 
-import ResearchPanel from '@/components/research/ResearchPanel'
+import ResearchLauncher from '@/components/research/ResearchLauncher'
 
 function waitForAbort(signal) {
   return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))
@@ -57,7 +57,7 @@ function renderPanel(route = '/', withDetailLauncher = false) {
       }}>
         <MemoryRouter initialEntries={[route]}>
           {withDetailLauncher && <button type="button" aria-label="打开 AI 助手小闻" className="fixed bottom-6 right-6 size-16" />}
-          <ResearchPanel />
+          <ResearchLauncher />
         </MemoryRouter>
       </AuthContext.Provider>
     </QueryClientProvider>,
@@ -66,6 +66,7 @@ function renderPanel(route = '/', withDetailLauncher = false) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  sessionStorage.clear()
   api.listResearchSessions.mockResolvedValue({ count: 0, next: null, previous: null, results: [] })
   api.getResearchSession.mockImplementation(async () => completedSession())
   api.getResearchResults.mockResolvedValue({ count: 0, next: null, previous: null, results: [] })
@@ -77,6 +78,7 @@ describe('ResearchPanel', () => {
     renderPanel()
     const launcher = screen.getByRole('button', { name: '打开新闻研究助手' })
     expect(launcher).toHaveClass('right-4', 'size-12', 'sm:right-24', 'sm:size-14')
+    expect(api.listResearchSessions).not.toHaveBeenCalled()
   })
 
   it('places beside the Xiaowen launcher on a news detail route', () => {
@@ -85,6 +87,28 @@ describe('ResearchPanel', () => {
     const detailLauncher = screen.getByRole('button', { name: '打开 AI 助手小闻' })
     expect(researchLauncher).toHaveClass('bottom-6', 'right-24', 'size-12')
     expect(detailLauncher).toHaveClass('bottom-6', 'right-6', 'size-16')
+    expect(api.listResearchSessions).not.toHaveBeenCalled()
+  })
+
+  it('unmounts research work and restores launcher focus when the panel closes', async () => {
+    let requestSignal
+    api.createResearchStream.mockImplementation((_query, { signal }) => {
+      requestSignal = signal
+      return pausedResearch(signal)
+    })
+    renderPanel()
+    fireEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    await screen.findByRole('dialog', { name: '新闻研究助手' })
+    fireEvent.click(await screen.findByRole('button', { name: '分析 AI 芯片竞争格局' }))
+    await screen.findByRole('button', { name: '停止接收当前研究进度' })
+    await waitFor(() => expect(Object.keys(sessionStorage).some((key) => key.includes('panel-session'))).toBe(true))
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+
+    const launcher = await screen.findByRole('button', { name: '打开新闻研究助手' })
+    await waitFor(() => expect(launcher).toHaveFocus())
+    expect(requestSignal.aborted).toBe(true)
+    expect(screen.queryByRole('dialog', { name: '新闻研究助手' })).not.toBeInTheDocument()
   })
 
   it('closes the session menu on Escape before closing the research panel', async () => {
@@ -130,6 +154,25 @@ describe('ResearchPanel', () => {
     expect(api.createResearchStream).toHaveBeenCalledTimes(1)
     fireEvent.click(screen.getByRole('button', { name: '重新研究' }))
     await waitFor(() => expect(api.createResearchStream).toHaveBeenCalledTimes(2))
+  })
+
+  it('keeps the risk warning visible when closing before a session id exists', async () => {
+    api.createResearchStream.mockImplementation((_query, { signal }) => (async function* pendingHeader() {
+      yield { type: 'thinking' }
+      await waitForAbort(signal)
+      throw new DOMException('The operation was aborted', 'AbortError')
+    })())
+    renderPanel()
+    fireEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    fireEvent.click(await screen.findByRole('button', { name: '分析 AI 芯片竞争格局' }))
+    await screen.findByRole('button', { name: '停止接收当前研究进度' })
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('原请求可能已到达服务器')
+    expect(screen.getByRole('dialog', { name: '新闻研究助手' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+    expect(await screen.findByRole('button', { name: '打开新闻研究助手' })).toHaveFocus()
   })
 
   it('shows streaming cancellation and reconnect controls, then displays the persisted result', async () => {

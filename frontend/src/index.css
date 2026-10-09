@@ -108,6 +108,11 @@ html, body {
   contain-intrinsic-size: auto 24rem;
 }
 
+.article-section-render {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 80rem;
+}
+
 .summary-markdown .article-markdown {
   max-width: 68ch;
   margin-inline: 0;

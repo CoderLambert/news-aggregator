@@ -1,13 +1,16 @@
 import { useState } from 'react'
+import type { Ref } from 'react'
 import { Search, Sparkles } from 'lucide-react'
 import { useLocation } from 'react-router-dom'
 import { useSpeechPlayerActivity } from '@/context/SpeechPlayerContext'
 
 interface ResearchBubbleButtonProps {
   onOpen: () => void
+  onIntent?: () => void
+  buttonRef?: Ref<HTMLButtonElement>
 }
 
-export default function ResearchBubbleButton({ onOpen }: ResearchBubbleButtonProps) {
+export default function ResearchBubbleButton({ onOpen, onIntent, buttonRef }: ResearchBubbleButtonProps) {
   const [hover, setHover] = useState(false)
   const { pathname } = useLocation()
   const sharesDetailLauncherSpace = /^\/news\/[^/]+\/?$/.test(pathname)
@@ -18,11 +21,13 @@ export default function ResearchBubbleButton({ onOpen }: ResearchBubbleButtonPro
 
   return (
     <button
+      ref={buttonRef}
       type="button"
       onClick={onOpen}
-      onMouseEnter={() => setHover(true)}
+      onMouseEnter={() => { setHover(true); onIntent?.() }}
       onMouseLeave={() => setHover(false)}
-      onFocus={() => setHover(true)}
+      onFocus={() => { setHover(true); onIntent?.() }}
+      onPointerDown={onIntent}
       onBlur={() => setHover(false)}
       aria-label="打开新闻研究助手"
       title="新闻研究助手"

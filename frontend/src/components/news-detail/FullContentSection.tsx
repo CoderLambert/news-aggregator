@@ -63,7 +63,7 @@ export default function FullContentSection({
       )}
       {translateError && <ErrorBanner message={translateError} onRetry={onRetryTranslate} />}
 
-      <Card className="py-5">
+      <Card className="article-section-render py-5">
         <CardContent className="px-5">
           <MarkdownContent content={content} />
         </CardContent>

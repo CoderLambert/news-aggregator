@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from 'react'
+import { useNearViewport } from '@/hooks/useNearViewport'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : 'Mermaid render failed'
@@ -9,6 +10,7 @@ export default function MermaidBlock({ code }: { code: string }) {
   const [html, setHtml] = useState('')
   const [error, setError] = useState<string | null>(null)
   const renderId = `mermaid-${reactId.replace(/[^a-zA-Z0-9_-]/g, '')}`
+  const { targetRef, isNearViewport } = useNearViewport<HTMLDivElement>()
 
   useEffect(() => {
     let cancelled = false
@@ -35,9 +37,10 @@ export default function MermaidBlock({ code }: { code: string }) {
       }
     }
 
+    if (!isNearViewport) return
     void render()
     return () => { cancelled = true }
-  }, [code, renderId])
+  }, [code, isNearViewport, renderId])
 
   if (error) {
     return (
@@ -50,8 +53,8 @@ export default function MermaidBlock({ code }: { code: string }) {
 
   if (!html) {
     return (
-      <div role="status" aria-live="polite" className="my-4 flex items-center justify-center rounded-md border border-border bg-muted p-6">
-        <span className="text-sm text-muted-foreground">渲染图表中…</span>
+      <div ref={targetRef} role="status" aria-live="polite" className="my-4 flex items-center justify-center rounded-md border border-border bg-muted p-6">
+        <span className="text-sm text-muted-foreground">{isNearViewport ? '渲染图表中…' : '滚动到附近时渲染图表'}</span>
       </div>
     )
   }

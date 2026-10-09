@@ -9,6 +9,7 @@ import { Check, Copy, ExternalLink, Newspaper } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import MermaidBlock from './MermaidBlock'
 import { highlightCode, normalizeShikiLanguage } from '@/lib/shiki'
+import { useNearViewport } from '@/hooks/useNearViewport'
 
 const IMG_STYLE = { maxHeight: '480px', objectFit: 'contain' } satisfies CSSProperties
 const MAX_HIGHLIGHT_CHARS = 80_000
@@ -293,6 +294,7 @@ function HighlightedCodeBlock({ code, language }: { code: string; language: stri
   const copyTimerRef = useRef<number | null>(null)
   const highlightKey = `${language}::${code}`
   const isOversized = code.length > MAX_HIGHLIGHT_CHARS
+  const { targetRef, isNearViewport } = useNearViewport<HTMLDivElement>()
 
   useEffect(() => {
     let cancelled = false
@@ -306,14 +308,14 @@ function HighlightedCodeBlock({ code, language }: { code: string; language: stri
       }
     }
 
-    if (code && !isOversized) {
+    if (code && !isOversized && isNearViewport) {
       highlight()
     }
 
     return () => {
       cancelled = true
     }
-  }, [code, highlightKey, isOversized, language])
+  }, [code, highlightKey, isNearViewport, isOversized, language])
 
   const handleCopy = async () => {
     try {
@@ -334,7 +336,7 @@ function HighlightedCodeBlock({ code, language }: { code: string; language: stri
   }, [])
 
   return (
-    <div className="md-code-block group relative not-prose">
+    <div ref={targetRef} className="md-code-block group relative not-prose">
       <div className="md-pre-header">
         <span className="md-lang-badge">{language}</span>
         {isOversized && <span className="md-size-badge">大代码块</span>}
