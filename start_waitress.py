@@ -9,17 +9,18 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'newsaggregator.settings')
 
 # Ensure API key is available for LLM translation
 if not os.environ.get('DASHSCOPE_CODING_API_KEY'):
-    try:
-        import yaml
-        config_path = os.path.expanduser('~/.hermes/config.yaml')
-        with open(config_path, 'r') as f:
-            config = yaml.safe_load(f)
-        api_key = config.get('model', {}).get('api_key', '')
-        if api_key:
-            os.environ['DASHSCOPE_CODING_API_KEY'] = api_key
-            print(f"Loaded API key from config", flush=True)
-    except Exception as e:
-        print(f"Warning: Could not load API key from config: {e}", flush=True)
+    config_path = os.path.expanduser('~/.hermes/config.yaml')
+    if os.path.isfile(config_path):
+        try:
+            import yaml
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f)
+            api_key = config.get('model', {}).get('api_key', '')
+            if api_key:
+                os.environ['DASHSCOPE_CODING_API_KEY'] = api_key
+                print("Loaded API key from config", flush=True)
+        except Exception as e:
+            print(f"Warning: Could not load API key from config: {e}", flush=True)
 
 import django
 django.setup()

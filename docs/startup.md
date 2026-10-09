@@ -186,22 +186,55 @@ backend/venv/bin/python start_waitress.py
 
 ### 4.3 Docker 单机模式
 
-Compose 只启动 Waitress Web 服务，前端会先构建并由 Django 同源提供；不会启动定时器或爬虫。服务仅绑定到本机 127.0.0.1:9527。它会复用 backend/（包括 SQLite 数据库及 WAL 文件）、chroma_data/ 和一个独立的 Hugging Face 模型缓存卷。不要让容器和另一套本地后端同时写同一份 SQLite 数据。
+Compose 只启动 Waitress Web 服务，前端会先构建并由 Django 同源提供；不会启动定时器或爬虫。服务仅绑定到本机 `127.0.0.1:9527`。容器每次启动时会先执行幂等的 `migrate --noinput`，新克隆和代码升级无需单独运行迁移命令。
+
+它会复用 `backend/`（包括 SQLite、WAL、SHM、TTS 缓存）、`chroma_data/` 和一个独立的 Hugging Face 模型缓存卷。不要让容器和另一套本地后端或爬虫同时写同一份 SQLite 数据。
 
 ~~~bash
-docker compose up -d --build
+docker compose up -d --build --wait
 docker compose ps
 docker compose logs -f app
 docker compose down
 ~~~
 
-访问 <http://127.0.0.1:9527>。首次使用空数据库时，启动前需手动初始化迁移：
+访问 <http://127.0.0.1:9527>，并验证 Web 与 API：
 
 ~~~bash
-docker compose run --rm app python backend/manage.py migrate
+curl -f http://127.0.0.1:9527/
+curl -f http://127.0.0.1:9527/api/news/
 ~~~
 
-.env 会作为容器运行时环境变量注入，但不会进入构建镜像；SQLite 主文件、WAL、SHM 和凭据文件也由 `.dockerignore` 排除。复制 .env.example 后按需填写。首次语义搜索可能需要下载嵌入模型。若 Docker CLI 提示无法访问 daemon，请先由本机 Docker 管理员恢复该用户已有的访问权限，不要通过项目配置扩大系统权限。
+`.env` 会作为容器运行时环境变量注入，但不会进入构建镜像；SQLite 主文件、WAL、SHM 和凭据文件也由 `.dockerignore` 排除。复制 `.env.example` 后按需填写。首次语义搜索可能需要下载嵌入模型。
+
+接管已有数据库：
+
+1. 先停止原 API、爬虫、定时器和其他 SQLite 写入者。
+2. 优先使用 SQLite backup API 生成一致性快照；若直接移动文件，必须在停写后同时移动 `db.sqlite3`、`db.sqlite3-wal` 和 `db.sqlite3-shm`。
+3. 将文件放进宿主机 `backend/`，运行 `docker compose up -d --build --wait`。
+4. 使用 `docker compose exec -T app python backend/manage.py check` 和 API 健康检查确认运行状态。
+
+ChatGPT 订阅令牌使用 `CHATGPT_TOKEN_ENCRYPTION_KEY` 加密；未单独设置时使用 `DJANGO_SECRET_KEY`。迁移已有数据库时必须沿用原稳定密钥，否则已有订阅令牌无法解密，需要重新连接账号。
+
+更新与回滚：
+
+~~~bash
+# 更新代码、LFS 数据和镜像；启动时自动应用迁移
+git pull --ff-only
+git lfs pull
+docker compose up -d --build --wait
+
+# 查看新容器状态和日志
+docker compose ps
+docker compose logs --tail=200 app
+~~~
+
+`docker compose down` 只删除容器和 Compose 网络，宿主机数据库、ChromaDB 和模型缓存卷仍保留。Compose 不负责定时抓取；需要手动执行一次时使用：
+
+~~~bash
+docker compose exec app python backend/manage.py crawl all
+~~~
+
+若 Docker CLI 提示无法访问 daemon，请先由本机 Docker 管理员恢复该用户已有的访问权限，不要通过项目配置扩大系统权限。
 
 ## 5. 服务控制和日志
 

@@ -23,6 +23,7 @@ RUN pip install --no-cache-dir \
     && pip install --no-cache-dir -r /app/backend/requirements.txt
 COPY backend/ /app/backend/
 COPY start_waitress.py /app/start_waitress.py
+COPY --chmod=755 scripts/docker-entrypoint.sh /app/docker-entrypoint.sh
 COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
 EXPOSE 9527
-CMD ["python", "/app/start_waitress.py"]
+CMD ["/app/docker-entrypoint.sh"]
