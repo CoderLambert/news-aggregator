@@ -1314,7 +1314,7 @@ class NewsTTSView(generics.GenericAPIView):
 
     def get(self, request, pk):
         import asyncio
-        import edge_tts
+        import logging
         from django.http import StreamingHttpResponse, FileResponse
         from api.services.tts_service import (
             clean_for_tts, pick_tts_voice, get_cached_audio, save_to_cache,
@@ -1368,6 +1368,12 @@ class NewsTTSView(generics.GenericAPIView):
 
         if not speech_text.strip():
             return Response({'error': '没有可朗读的内容'}, status=400)
+
+        try:
+            import edge_tts
+        except ImportError:
+            logging.getLogger(__name__).exception('TTS dependency edge-tts is not installed')
+            return Response({'error': '语音服务暂不可用'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         # Generate via Edge TTS, collect bytes, cache, then stream
         audio_chunks = []

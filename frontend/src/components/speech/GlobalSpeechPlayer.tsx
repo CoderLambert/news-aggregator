@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronUp, FileText, Gauge, Headphones, Loader2, Pause, Play, Square } from 'lucide-react'
+import { ChevronUp, CircleAlert, FileText, Gauge, Headphones, Loader2, Pause, Play, RotateCcw, Square } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { RATES, SCOPES, VOICES } from '@/constants/tts'
 import { useSpeechPlayerActions, useSpeechPlayerState } from '@/context/SpeechPlayerContext'
@@ -19,12 +19,13 @@ export default function GlobalSpeechPlayer() {
 
   const isLoading = player.status === 'loading'
   const isPlaying = player.status === 'playing'
+  const isError = player.status === 'error'
   const percent = Math.round(player.progress * 100)
 
   return (
     <section
       aria-label="全局语音播放器"
-      aria-live="off"
+      aria-live={isError ? 'polite' : 'off'}
       className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background/95 shadow-[0_-4px_24px_-4px_rgba(0,0,0,0.08)] backdrop-blur-xl"
     >
       <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 pb-2 pt-1">
@@ -45,17 +46,30 @@ export default function GlobalSpeechPlayer() {
 
       <div className="mx-auto flex max-w-3xl items-center gap-2 px-3 pb-2 sm:gap-3 sm:px-4">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-primary">
-          {isLoading ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <Headphones aria-hidden="true" className="size-4" />}
+          {isLoading
+            ? <Loader2 aria-hidden="true" className="size-4 animate-spin" />
+            : isError
+              ? <CircleAlert aria-hidden="true" className="size-4 text-destructive" />
+              : <Headphones aria-hidden="true" className="size-4" />}
         </span>
 
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{player.title}</p>
           <p className="text-xs text-muted-foreground">
-            {isLoading ? '正在生成语音…' : `${formatTime(player.currentTime)} / ${formatTime(player.duration)} · ${percent}%`}
+            {isLoading
+              ? '正在生成语音…'
+              : isError
+                ? player.errorMessage
+                : `${formatTime(player.currentTime)} / ${formatTime(player.duration)} · ${percent}%`}
           </p>
         </div>
 
-        {!isLoading && (isPlaying
+        {isError && player.newsId !== null && (
+          <Button type="button" variant="ghost" size="sm" onClick={() => actions.speak(player.newsId!, player.title, player.displayMode)}>
+            <RotateCcw aria-hidden="true" />重试
+          </Button>
+        )}
+        {!isLoading && !isError && (isPlaying
           ? <Button type="button" variant="ghost" size="icon" onClick={actions.pause} aria-label="暂停语音"><Pause aria-hidden="true" /></Button>
           : <Button type="button" variant="ghost" size="icon" onClick={actions.resume} aria-label="继续播放语音"><Play aria-hidden="true" /></Button>)}
         <Button type="button" variant="ghost" size="icon" onClick={actions.stop} aria-label="停止语音"><Square aria-hidden="true" /></Button>
@@ -72,7 +86,7 @@ export default function GlobalSpeechPlayer() {
         </Button>
       </div>
 
-      {expanded && (
+      {expanded && !isError && (
         <div id="speech-player-options" className="mx-auto max-w-3xl space-y-2 border-t border-border px-4 py-3">
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label="播放速度">
             <Gauge aria-hidden="true" className="size-4 text-muted-foreground" />
