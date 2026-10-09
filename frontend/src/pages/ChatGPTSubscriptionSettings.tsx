@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArrowLeft, Check, CircleDashed } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import {
   activateChatGPTSubscriptionConnection,
@@ -263,6 +265,7 @@ export default function ChatGPTSubscriptionSettings() {
   if (!user) {
     return (
       <section className="mx-auto max-w-3xl px-4 py-10">
+        <Link to="/settings" className="mb-5 inline-flex min-h-11 items-center gap-2 rounded-md text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><ArrowLeft aria-hidden="true" className="size-4" />返回设置</Link>
         <h1 className="text-2xl font-semibold">ChatGPT 订阅连接</h1>
         <p className="mt-3 text-muted-foreground">请先登录 NewsHub 本地账号，再管理此账号自己的 ChatGPT 订阅连接。</p>
       </section>
@@ -271,6 +274,7 @@ export default function ChatGPTSubscriptionSettings() {
 
   return (
     <section className="mx-auto max-w-3xl px-4 py-10">
+      <Link to="/settings" className="mb-5 inline-flex min-h-11 items-center gap-2 rounded-md text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><ArrowLeft aria-hidden="true" className="size-4" />返回设置</Link>
       <header className="mb-6">
         <p className="text-sm font-medium text-orange-600">本地订阅连接</p>
         <h1 className="mt-1 text-2xl font-semibold">ChatGPT 订阅设置</h1>
@@ -279,7 +283,12 @@ export default function ChatGPTSubscriptionSettings() {
         </p>
       </header>
 
-      <div className="mb-5 rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
+      <SubscriptionFlow
+        connected={Boolean(activeConnection?.connected && !activeConnection.needs_reauth)}
+        modelSelected={Boolean(modelsQuery.data?.selected_model || activeConnection?.selected_model)}
+      />
+
+      <div className="mb-5 mt-6 rounded-xl border border-border bg-card p-4 text-sm leading-6 text-muted-foreground">
         OAuth 在单独窗口中通过 OpenAI 官方授权完成。令牌只保存在本地后端，不会写入浏览器存储。
       </div>
 
@@ -307,12 +316,15 @@ export default function ChatGPTSubscriptionSettings() {
       {selectModelMutation.isError && <p role="alert" className="mb-4 text-sm text-destructive">{errorMessage(selectModelMutation.error)}</p>}
       {disconnectMutation.isError && <p role="alert" className="mb-4 text-sm text-destructive">{errorMessage(disconnectMutation.error)}</p>}
 
-      <div className="mb-5 flex flex-wrap items-center gap-3">
+      <div className="mb-5 rounded-2xl border border-border bg-card p-4 sm:p-5">
+        <h2 className="font-semibold">1. 建立连接</h2>
+        <p className="mb-4 mt-1 text-sm text-muted-foreground">在 OpenAI 授权窗口完成连接；关闭窗口不会自动取消服务器请求。</p>
+        <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
           onClick={() => void beginConnect()}
           disabled={connectPending}
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+          className="min-h-11 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
         >
           {connectPending ? '等待 OpenAI 授权…' : '连接新账号'}
         </button>
@@ -320,7 +332,7 @@ export default function ChatGPTSubscriptionSettings() {
           type="button"
           onClick={() => void statusQuery.refetch()}
           disabled={statusQuery.isFetching}
-          className="rounded-lg border border-border px-4 py-2 text-sm disabled:opacity-50"
+          className="min-h-11 rounded-lg border border-border px-4 text-sm disabled:opacity-50"
         >
           刷新状态
         </button>
@@ -329,9 +341,15 @@ export default function ChatGPTSubscriptionSettings() {
             type="button"
             onClick={() => cancelAttemptMutation.mutate(attemptId)}
             disabled={cancelAttemptMutation.isPending}
-            className="rounded-lg border border-destructive/40 px-4 py-2 text-sm text-destructive disabled:opacity-50"
+            className="min-h-11 rounded-lg border border-destructive/40 px-4 text-sm text-destructive disabled:opacity-50"
           >{cancelAttemptMutation.isPending ? '正在取消…' : '取消授权'}</button>
         )}
+        </div>
+      </div>
+
+      <div className="mb-3 flex items-end justify-between gap-3">
+        <div><h2 className="font-semibold">2. 选择账号与模型</h2><p className="mt-1 text-sm text-muted-foreground">当前账号和模型会用于订阅全文翻译。</p></div>
+        <span className="shrink-0 text-xs text-muted-foreground">3. 配置状态显示在账号卡片中</span>
       </div>
 
       {statusQuery.isLoading ? (
@@ -355,21 +373,21 @@ export default function ChatGPTSubscriptionSettings() {
                       type="button"
                       onClick={() => activateMutation.mutate(connection.id)}
                       disabled={activateMutation.isPending}
-                      className="rounded-md border border-border px-3 py-1.5 text-sm disabled:opacity-50"
+                      className="min-h-11 rounded-md border border-border px-3 text-sm disabled:opacity-50"
                     >设置为当前账号</button>
                   )}
                   <button
                     type="button"
                     onClick={() => void beginConnect(connection.id)}
                     disabled={connectPending}
-                    className="rounded-md border border-border px-3 py-1.5 text-sm disabled:opacity-50"
+                    className="min-h-11 rounded-md border border-border px-3 text-sm disabled:opacity-50"
                   >重新连接</button>
                   {connection.connected && (
                     <button
                       type="button"
                       onClick={() => disconnectMutation.mutate(connection.id)}
                       disabled={disconnectMutation.isPending}
-                      className="rounded-md border border-destructive/40 px-3 py-1.5 text-sm text-destructive disabled:opacity-50"
+                      className="min-h-11 rounded-md border border-destructive/40 px-3 text-sm text-destructive disabled:opacity-50"
                     >断开</button>
                   )}
                 </div>
@@ -384,7 +402,7 @@ export default function ChatGPTSubscriptionSettings() {
                         value={modelsQuery.data?.selected_model || connection.selected_model}
                         onChange={(event) => selectModelMutation.mutate({ id: connection.id, slug: event.target.value })}
                         disabled={modelsQuery.isLoading || modelsQuery.isError || selectModelMutation.isPending || !(modelsQuery.data?.models.length)}
-                        className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:opacity-60"
+                        className="min-h-11 w-full rounded-lg border border-border bg-background px-3 disabled:opacity-60"
                       >
                         <option value="">{modelsQuery.isLoading ? '读取模型列表…' : '选择模型'}</option>
                         {modelsQuery.data?.models.map((model) => (
@@ -396,7 +414,7 @@ export default function ChatGPTSubscriptionSettings() {
                       type="button"
                       onClick={() => void modelsQuery.refetch()}
                       disabled={modelsQuery.isFetching}
-                      className="rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-50"
+                      className="min-h-11 rounded-lg border border-border px-3 text-sm disabled:opacity-50"
                     >刷新模型</button>
                   </div>
                   {modelsQuery.isError && <p role="alert" className="mt-2 text-sm text-destructive">{errorMessage(modelsQuery.error)}</p>}
@@ -417,5 +435,29 @@ export default function ChatGPTSubscriptionSettings() {
         </div>
       )}
     </section>
+  )
+}
+
+function SubscriptionFlow({ connected, modelSelected }: { connected: boolean; modelSelected: boolean }) {
+  const ready = connected && modelSelected
+  const steps = [
+    { label: '连接', description: connected ? '账号已连接' : '等待授权连接', complete: connected, active: !connected },
+    { label: '账号与模型', description: modelSelected ? '模型已选择' : connected ? '请选择可见模型' : '连接后选择', complete: modelSelected, active: connected && !modelSelected },
+    { label: '配置状态', description: ready ? '配置已就绪，实际翻译需调用验证' : '尚未就绪', complete: ready, active: ready },
+  ]
+  return (
+    <ol aria-label="ChatGPT 订阅设置进度" className="grid gap-2 sm:grid-cols-3">
+      {steps.map((step, index) => (
+        <li key={step.label} className={`rounded-xl border p-3 ${step.active ? 'border-orange-300 bg-orange-50/70' : 'border-border bg-card'}`}>
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <span className={`flex size-6 items-center justify-center rounded-full ${step.complete ? 'bg-emerald-600 text-white' : 'bg-muted text-muted-foreground'}`}>
+              {step.complete ? <Check aria-hidden="true" className="size-3.5" /> : <CircleDashed aria-hidden="true" className="size-3.5" />}
+            </span>
+            <span>{index + 1}. {step.label}</span>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">{step.description}</p>
+        </li>
+      ))}
+    </ol>
   )
 }

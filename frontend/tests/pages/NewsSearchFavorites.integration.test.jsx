@@ -21,6 +21,7 @@ vi.mock('@/context/SpeechPlayerContext', () => ({
   useSpeechPlayer: () => ({ supported: false, speak: vi.fn() }),
   useSpeechPlayerActions: () => ({ speak: vi.fn() }),
   useSpeechPlayerCapabilities: () => ({ supported: false }),
+  useSpeechPlayerActivity: () => false,
 }))
 vi.mock('@/components/NewsChatAssistant', () => ({ default: () => null }))
 
@@ -163,7 +164,7 @@ describe('search, detail, and user-news flow', () => {
     expect(await screen.findByRole('button', { name: '取消屏蔽' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('link', { name: '返回列表' }))
 
-    fireEvent.click(await screen.findByRole('tab', { name: '屏蔽' }))
+    fireEvent.click(await screen.findByRole('tab', { name: '已屏蔽' }))
     expect(await screen.findByRole('heading', { name: story.title })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '恢复' }))
     await waitFor(() => expect(screen.queryByRole('heading', { name: story.title })).not.toBeInTheDocument())

@@ -39,13 +39,19 @@ export type SpeechPlayerContextValue = SpeechPlayerState & SpeechPlayerActions &
 const SpeechPlayerStateContext = createContext<SpeechPlayerState | null>(null)
 const SpeechPlayerActionsContext = createContext<SpeechPlayerActions | null>(null)
 const SpeechPlayerCapabilitiesContext = createContext<SpeechPlayerCapabilities | null>(null)
+const SpeechPlayerActivityContext = createContext(false)
 
-export { SpeechPlayerStateContext, SpeechPlayerActionsContext, SpeechPlayerCapabilitiesContext }
+export { SpeechPlayerStateContext, SpeechPlayerActionsContext, SpeechPlayerCapabilitiesContext, SpeechPlayerActivityContext }
 
 export function useSpeechPlayerState(): SpeechPlayerState {
   const state = useContext(SpeechPlayerStateContext)
   if (!state) throw new Error('useSpeechPlayerState must be used within <SpeechPlayerProvider>')
   return state
+}
+
+/** Floating controls may render in isolated previews without the full player provider. */
+export function useSpeechPlayerActivity(): boolean {
+  return useContext(SpeechPlayerActivityContext)
 }
 
 /** Subscribe to stable controls without re-rendering on each audio timeupdate. */
