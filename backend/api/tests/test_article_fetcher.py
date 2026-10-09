@@ -184,6 +184,56 @@ def test_extract_markdown_preserves_headings_paragraphs_lists_and_line_breaks():
     assert result.markdown.index('第二段正文。') < result.markdown.index('- 第一项')
 
 
+def test_extract_markdown_flattens_decorative_markup_inside_headings():
+    html = '''
+    <article>
+      <h2><span><br></span><strong><strong><span>复杂编程仍有差距</span><span><br></span></strong></strong></h2>
+      <p>正文段落。</p>
+    </article>
+    '''
+
+    result = extract_markdown_from_html(html, 'https://www.leiphone.com/article')
+
+    assert '## 复杂编程仍有差距' in result.markdown
+    assert '\\**复杂编程仍有差距' not in result.markdown
+    assert '## **复杂编程仍有差距**' not in result.markdown
+
+
+def test_extract_markdown_heading_keeps_links_and_inline_code():
+    html = '''
+    <article>
+      <h2>Use <code>foo()</code> with <a href="/guide">the guide</a></h2>
+      <p>Article body.</p>
+    </article>
+    '''
+
+    result = extract_markdown_from_html(html, 'https://example.com/article')
+
+    assert '## Use `foo()` with [the guide](https://example.com/guide)' in result.markdown
+
+
+def test_extract_markdown_heading_preserves_adjacent_text_boundaries():
+    html = '<article><h2>ChatGPT<strong>5</strong>与AI<span>Agent</span></h2></article>'
+
+    result = extract_markdown_from_html(html, 'https://example.com/article')
+
+    assert result.markdown == '## ChatGPT5与AIAgent'
+
+
+def test_extract_markdown_heading_keeps_internal_break_as_text_boundary():
+    html = '''
+    <article>
+      <h2>Part one<br>Part two</h2>
+      <h3><span>Step one<span><br></span></span><span>Step two</span></h3>
+    </article>
+    '''
+
+    result = extract_markdown_from_html(html, 'https://example.com/article')
+
+    assert '## Part one Part two' in result.markdown
+    assert '### Step one Step two' in result.markdown
+
+
 def test_deepmind_extractor_removes_share_menu_and_related_story_carousel():
     html = '''
     <html><body><main>

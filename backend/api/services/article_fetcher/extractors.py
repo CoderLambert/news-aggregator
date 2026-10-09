@@ -194,7 +194,7 @@ def _node_to_markdown(node: Tag | NavigableString, base_url: str, depth: int = 0
         return ''
     if name in {'h1', 'h2', 'h3', 'h4', 'h5', 'h6'}:
         level = int(name[1])
-        text = _inline_text(node, base_url)
+        text = _heading_inline_text(node, base_url)
         return f"\n{'#' * level} {text}\n" if text else ''
     if name == 'p':
         text = _inline_text(node, base_url)
@@ -269,6 +269,56 @@ def _inline_text(node: Tag, base_url: str) -> str:
     text = re.sub(r'[ \t]+', ' ', text)
     text = re.sub(r'\n{3,}', '\n\n', text)
     return _escape_md(text)
+
+
+def _heading_inline_text(node: Tag, base_url: str) -> str:
+    """Render heading inline content without redundant emphasis or breaks.
+
+    Publisher headings often contain several styling-only strong/span layers
+    and leading br tags. A heading already communicates emphasis, so those
+    wrappers are flattened while links, inline code, and text boundaries stay
+    intact.
+    """
+    text = _heading_inline_raw(node, base_url)
+    text = re.sub(r'[ \t]+', ' ', text)
+    return _escape_md(text)
+
+
+def _heading_inline_raw(node: Tag, base_url: str) -> str:
+    parts: list[str] = []
+    for child in node.children:
+        if isinstance(child, NavigableString):
+            parts.append(str(child))
+            continue
+        if not isinstance(child, Tag):
+            continue
+
+        name = child.name.lower()
+        if name == 'br':
+            parts.append(' ')
+            continue
+        if name == 'a':
+            text = child.get_text(' ', strip=True)
+            href = child.get('href')
+            if text and href:
+                prefix = ''
+                if parts and parts[-1] and not parts[-1][-1].isspace() and parts[-1][-1] not in '([':
+                    prefix = ' '
+                parts.append(f'{prefix}[{text}]({urljoin(base_url, str(href))})')
+            elif text:
+                parts.append(text)
+            continue
+        if name == 'code':
+            text = child.get_text('', strip=True)
+            if text:
+                parts.append(f'`{text}`')
+            continue
+        if name == 'img':
+            continue
+
+        parts.append(_heading_inline_raw(child, base_url))
+
+    return ''.join(parts)
 
 
 def _children_markdown(node: Tag, base_url: str, depth: int = 0) -> str:
