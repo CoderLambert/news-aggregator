@@ -65,8 +65,8 @@ function PlayerActions() {
   const state = useSpeechPlayerState()
   return (
     <div>
-      <button type="button" onClick={() => player.speak(11, '第一篇虚构新闻', 'zh')}>朗读第一篇</button>
-      <button type="button" onClick={() => player.speak(12, '第二篇虚构新闻', 'original')}>朗读第二篇</button>
+      <button type="button" onClick={() => player.speak(11, '第一篇虚构新闻', { language: 'zh' })}>朗读第一篇</button>
+      <button type="button" onClick={() => player.speak(12, '第二篇虚构新闻', { language: 'original' })}>朗读第二篇</button>
       <button type="button" onClick={player.stop}>停止播放器</button>
       <output data-testid="player-status">{state.status}</output>
     </div>
@@ -110,7 +110,7 @@ describe('global speech player', () => {
     await user.click(screen.getByRole('button', { name: '朗读第一篇' }))
     expect(await screen.findByRole('region', { name: '全局语音播放器' })).toHaveTextContent('第一篇虚构新闻')
     expect(screen.getByTestId('player-status')).toHaveTextContent('playing')
-    expect(audioInstances[0].src).toContain('/api/news/11/tts/?displayMode=zh&voice=yunyang&scope=full')
+    expect(audioInstances[0].src).toContain('/api/news/11/tts/?language=zh&voice=yunyang&scope=full')
 
     await user.click(screen.getByRole('button', { name: '暂停语音' }))
     expect(screen.getByRole('button', { name: '继续播放语音' })).toBeInTheDocument()
@@ -120,7 +120,7 @@ describe('global speech player', () => {
     await user.click(screen.getByRole('button', { name: '朗读第二篇' }))
     expect(await screen.findByText('第二篇虚构新闻')).toBeInTheDocument()
     expect(audioInstances[0].src).toBe('')
-    expect(audioInstances[1].src).toContain('/api/news/12/tts/?displayMode=original')
+    expect(audioInstances[1].src).toContain('/api/news/12/tts/?language=original&voice=guy&scope=full')
 
     await user.click(screen.getByRole('button', { name: '停止语音' }))
     expect(screen.queryByRole('region', { name: '全局语音播放器' })).not.toBeInTheDocument()
