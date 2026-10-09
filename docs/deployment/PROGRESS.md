@@ -36,3 +36,9 @@
 - npm run typecheck、npm run lint、npm ls dompurify --depth=0、manifest/lock核验、git diff --check退出0。首轮类型/清理后断言失败已证据修复；未再重复同版本通过测试。
 - 主Agent核对实际diff：SVG二次净化、未执行bindFunctions、危险DOM/超限/Markdown链接负例实测；按React技能核对effect生命周期、hook顺序、直接依赖、懒加载，未发现本切片集成冲突。
 - 自动继续：/root/pub01_preflight复用为S05-BACKEND安全HTTP输送；NH-PUB-05仍正在逐46route×methods测试。04合同/ADR009已由主Agent冻结，需05整合后执行。
+
+## NH-PUB-05 本地定向验收
+候选HEAD f537b7baaf59562cc39d1916bbf37901a89908f4 加05diff；状态TESTED，High待完整G1。实现按路由/方法read_only拒绝，capabilities no-store；46路由枚举、匿名/登录/管理员、模型0调用、DB无写入；CORS预检短路已复现并由Sol补充合同修复；full+AI1语义兼容/full+AI0语义关闭已消除合同歧义并实际mock分支证明。
+- 合同pytest(public_policy/health/production_settings/waitress_proxy)退出0，63 passed（3条依赖/分页警告）。public_policy单独19 passed退出0，两个CORS定向2 passed退出0；git diff --check/py_compile退出0。主Agent核对实际policy/capabilities与回归，不重复已通过版本测试。
+- 用户新增“本地域名测试验收”已纳入ADR011：Docker DNS alias+测试CA+独立Nginx443与临时浏览器信任，不修改hosts/系统CA/公网。新增G1/G2本地域名发布门槛，尚NOT_RUN。
+- 下一任务：04阶段A生产Compose/卷/非root/迁移/静态导出；S05-BACKEND继续，完成后10前端能力感知与本地域名/反代模板验收。

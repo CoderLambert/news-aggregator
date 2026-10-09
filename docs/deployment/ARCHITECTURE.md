@@ -54,3 +54,14 @@ Linux生产app使用network_mode:host，Waitress仅绑定127.0.0.1；宿主Nginx
 ## ADR-009：生产持久目录与单点迁移
 生产新空SQLite默认/var/lib/newshub/db/db.sqlite3（DJANGO_DB_PATH），不复制Git LFS数据库。CHROMA_DATA_DIR=/var/lib/newshub/chroma、TTS_CACHE_DIR=/var/lib/newshub/tts、CHATGPT_DEPLOYMENT_INSTANCE_FILE=/var/lib/newshub/runtime/chatgpt-deployment-id、HF_HOME=/var/lib/newshub/model-cache、CRAWLER_LOG_DIR=/var/lib/newshub/logs/crawler、CRAWLER_WORKER_LOCK与SEARCH_INDEX_WORKER_LOCK在logs卷；开发默认仍旧路径。数据路径生产必须绝对；SQLite/WAL/SHM同目录。镜像uid/gid10001，命名卷初始化所有权，源码非挂载。migrate为一次性独立服务，以SQLite目录flock只允许单个迁移，app/worker依其成功启动；app生产不隐式migrate，默认entrypoint开发兼容自动迁移。RUN_MAIN=true防Web模型预加载。crawler/indexer默认不自动联网任务（scheduler/run_on_start/index_enabled=0），正式发布人工确认后再启用；smoke只能离线心跳/读写临时数据。
 不可变镜像带org.opencontainers.image.revision标签与内置dist，不绑定宿主dist。静态导出至releases/<SHA>，current原子symlink，保留上一版；content-hash assets跨版本保存在共享assets目录，防切换后旧页面chunk404。镜像内不得存在.env/用户DB/token/runtime标识；所有实际Docker测试使用独立project/临时卷/19527端口，不接管用户9527服务。
+
+## ADR-010：CORS 预检短路补充
+05定向测试复现CorsMiddleware会在process_view前给OPTIONS返回200。主Agent批准policy立即位于SecurityMiddleware后/CorsMiddleware前，并在read_only的OPTIONS请求先解析path_info：已知API403/public_read_only、未知API404；其余方法仍process_view逐路由拒绝，不扩大GET白名单。full开发CORS保留。Origin+Access-Control-Request-Method真实Client回归须覆盖news/health/chat/subscription/admin/未知路由。
+
+### 05 mode歧义消除与开发兼容
+前合同mode句缺少重复read_only限定，由主Agent澄清最终规则：read_only始终拒绝非keyword；full+PUBLIC_AI_ENABLED=True允许既有semantic/hybrid，cap semantic_search=True（开发默认1，不回归）；full+PUBLIC_AI_ENABLED=False昂贵语义拒绝403/semantic_search_disabled，cap false/same reason。不得以另需批准为由禁用所有开发模式。成功必须mock实际NewsList语义分支，失败需零embedding调用。
+
+## ADR-011：本地域名/HTTPS发布验收（用户新增要求）
+G1/G2必须增加正式域名的隔离本地链路验收；公网域名尚未使用，当前不做现场探测。使用独立Docker network的news.lambert.host alias，临时测试CA签发仅本地域名SAN证书；Nginx监听该隔离namespace443，app共享该namespace仍仅loopback9527，从而保留正式proxy配置/来源127.0.0.1/Host/Origin/CSRF，不占用宿主443/9527。只在测试Compose override修改network_mode，不修改production真实配置。
+curl使用测试CA验证而非-k；浏览器用临时HOME/NSS trust DB与全新profile（host有chromium/certutil，PythonPlaywright1.62.0），仅该测试profile信任CA，host-resolver-rules把正式域名指向该容器IP，不改hosts/系统证书库；ignoreHTTPSErrors=False，禁止ignore-certificate-errors。先证明未信任CA失败，再证明信任后HTTPS成功，错误SAN拒绝。浏览器拦截非本地域名出网。若浏览器实际信任机制不生效须报告证据，由Sol决策，不能绕过TLS校验。
+G1验收证书/域名解析/HTTPS重定向、匿名首页/新闻深链/关键词、直接API拒绝/OPTIONS、缺assets与未知API404、SSE代理配置/早到首帧、后端转发is_secure/Host、Secure Host-only CSRF Cookie。G2再验真实登录/登录CSRF、注销/A-B缓存与个人权限、Secure HttpOnly Session Cookie。测试用户/新闻只在独立临时卷，删除范围仅自建资源。公网DNS/真实CA签发/安全组/外网性能仍是发布现场门槛，不能以本地模拟冒充上线。

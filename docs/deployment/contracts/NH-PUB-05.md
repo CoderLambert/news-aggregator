@@ -8,3 +8,9 @@
 - Negative tests：匿名/已登录/管理员直接访问read_only Chat GET/DELETE、TTS GET、research GET/POST/DELETE、subscription handoff/callback与管理员接口全部403且无副作用；semantic/hybrid/未知mode及无search semantic拒绝零Embedding调用；未知api404不变；允许路径不能通过前缀相似路径放行；关闭signup不创建User；website即便CLIENT_ID等参数存在也503，不调用token；内部crawler/indexer command/service不受HTTPmiddleware影响（纯policy单元无全局服务patch）。测试只用test DB，禁止现有backend/db.sqlite3。
 - Forbidden：不修改认证/迁移/OAuth/Provider机制/研究调度/前端，不修改.env真实凭据，不调用网络/付费/真实OAuth，不commit，不再派生；规格冲突先交Sol决策。
 - Return format：TaskID、role/model/effort若可见、路径与diff、命令/退出码/负例覆盖、实际HEAD、阻塞；代码完成不代表REVIEWED。
+
+## 主Agent补充合同（复现后冻结）
+CorsMiddleware预检会在process_view前短路，policy必须立即在SecurityMiddleware后、CorsMiddleware前。read_only OPTIONS在__call__/process_request先django.urls.resolve(path_info)，known/api返回403/public_read_only，unknown/api返回404；其余方法维持process_view矩阵，不扩大GET白名单。full开发CORS保留；用带Origin和Access-Control-Request-Method的真实Client测试news/health/chat/subscription/admin及未知路径，不得只直调process_view。
+
+### 05 mode歧义消除与开发兼容
+前合同mode句缺少重复read_only限定，由主Agent澄清最终规则：read_only始终拒绝非keyword；full+PUBLIC_AI_ENABLED=True允许既有semantic/hybrid，cap semantic_search=True（开发默认1，不回归）；full+PUBLIC_AI_ENABLED=False昂贵语义拒绝403/semantic_search_disabled，cap false/same reason。不得以另需批准为由禁用所有开发模式。成功必须mock实际NewsList语义分支，失败需零embedding调用。

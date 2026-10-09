@@ -5,8 +5,10 @@ from . import subscription_views
 from . import crawler_views
 from . import search_index_views
 from . import health_views
+from . import capabilities_views
 
 urlpatterns = [
+    path('capabilities/', capabilities_views.capabilities, name='capabilities'),
     path('health/live/', health_views.health_live, name='health-live'),
     path('health/ready/', health_views.health_ready, name='health-ready'),
     path('admin/crawler/dashboard/', crawler_views.CrawlerDashboardView.as_view(), name='crawler-admin-dashboard'),

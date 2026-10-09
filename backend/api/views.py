@@ -1308,7 +1308,7 @@ class BlockedNewsCheckView(generics.GenericAPIView):
 
 # ─── Authentication API ─────────────────────────────────────────────────
 
-@api_view(['GET'])
+@api_view(['GET', 'HEAD'])
 @permission_classes([AllowAny])
 @ensure_csrf_cookie
 def csrf_token(request):
