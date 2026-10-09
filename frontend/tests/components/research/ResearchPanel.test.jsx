@@ -134,6 +134,51 @@ describe('ResearchPanel', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '新闻研究助手' })).not.toBeInTheDocument())
   })
 
+  it('keeps Tab focus inside the research dialog in both directions', async () => {
+    renderPanel()
+    fireEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    const dialog = await screen.findByRole('dialog', { name: '新闻研究助手' })
+    await waitFor(() => expect(dialog).toHaveFocus())
+    const tabStops = Array.from(dialog.querySelectorAll(
+      'a[href], button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
+    )).filter((element) => element.getAttribute('aria-hidden') !== 'true')
+    const first = tabStops[0]
+    const last = tabStops[tabStops.length - 1]
+
+    fireEvent.keyDown(dialog, { key: 'Tab' })
+    expect(first).toHaveFocus()
+
+    last.focus()
+    fireEvent.keyDown(last, { key: 'Tab' })
+    expect(first).toHaveFocus()
+
+    first.focus()
+    fireEvent.keyDown(first, { key: 'Tab', shiftKey: true })
+    expect(last).toHaveFocus()
+  })
+
+  it('returns Tab focus from the portalled session menu to the research dialog', async () => {
+    api.listResearchSessions.mockResolvedValue({
+      count: 1,
+      next: null,
+      previous: null,
+      results: [{ id: 'panel-session', title: '已完成研究' }],
+    })
+    renderPanel()
+    fireEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    const dialog = await screen.findByRole('dialog', { name: '新闻研究助手' })
+    const trigger = await screen.findByRole('button', { name: '历史会话' })
+    fireEvent.click(trigger)
+    const menuItem = await screen.findByRole('menuitem', { name: '已完成研究' })
+    await waitFor(() => expect(menuItem).toHaveFocus())
+
+    fireEvent.keyDown(menuItem, { key: 'Tab' })
+
+    const firstTabStop = dialog.querySelector('button:not(:disabled)')
+    expect(firstTabStop).toHaveFocus()
+    await waitFor(() => expect(screen.queryByRole('menu', { name: '历史会话' })).not.toBeInTheDocument())
+  })
+
   it('warns that retry may duplicate work after stopping before a response header', async () => {
     api.createResearchStream.mockImplementationOnce((_query, { signal }) => (async function* firstAttempt() {
       yield { type: 'thinking' }

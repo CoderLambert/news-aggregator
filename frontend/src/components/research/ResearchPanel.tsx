@@ -73,6 +73,35 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
       if (event.key === 'Escape' && !event.defaultPrevented) {
         if (isFullscreen) setIsFullscreen(false)
         else handleClose()
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const dialog = dialogRef.current
+      const activeElement = document.activeElement
+      if (!dialog || !(activeElement instanceof HTMLElement)) return
+      const isInsideDialog = dialog.contains(activeElement)
+      const isInsideSessionMenu = Boolean(activeElement.closest('#research-session-menu'))
+      if (!isInsideDialog && !isInsideSessionMenu) return
+
+      const tabStops = Array.from(dialog.querySelectorAll<HTMLElement>(
+        'a[href], button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
+      )).filter((element) => element.getAttribute('aria-hidden') !== 'true')
+      if (!tabStops.length) {
+        event.preventDefault()
+        dialog.focus()
+        return
+      }
+
+      const first = tabStops[0]
+      const last = tabStops[tabStops.length - 1]
+      if (isInsideSessionMenu || (event.shiftKey && (activeElement === first || activeElement === dialog))) {
+        event.preventDefault()
+        const wrapTarget = event.shiftKey ? last : first
+        wrapTarget.focus()
+      } else if (!event.shiftKey && (activeElement === last || activeElement === dialog)) {
+        event.preventDefault()
+        first.focus()
       }
     }
     window.addEventListener('keydown', onKey)

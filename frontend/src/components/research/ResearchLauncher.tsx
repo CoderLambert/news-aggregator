@@ -43,7 +43,6 @@ export default function ResearchLauncher() {
       {open && (
         <ErrorBoundary
           key={loadAttempt}
-          onReset={() => setLoadAttempt((attempt) => attempt + 1)}
           fallbackRender={({ resetErrorBoundary }) => (
             <LazyModalState
               label="新闻研究助手"
