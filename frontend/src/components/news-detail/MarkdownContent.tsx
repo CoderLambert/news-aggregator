@@ -588,7 +588,7 @@ export default function MarkdownContent({
 }) {
   return (
     <div className="article-markdown prose prose-gray mx-auto w-full max-w-[74ch] overflow-hidden">
-      <ReactMarkdown remarkPlugins={legacySummarySpacing ? LEGACY_SUMMARY_REMARK_PLUGINS : REMARK_PLUGINS} components={MD_COMPONENTS}>
+      <ReactMarkdown skipHtml remarkPlugins={legacySummarySpacing ? LEGACY_SUMMARY_REMARK_PLUGINS : REMARK_PLUGINS} components={MD_COMPONENTS}>
         {content}
       </ReactMarkdown>
     </div>

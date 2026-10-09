@@ -7,8 +7,9 @@
 | P00 | 无 | ARCHITECTURE/TASKS/PROGRESS；真实路径与 route matrix | fetch/status/角色发现/部署与服务盘点 | TESTED | 基线；主 Agent 只读预检 |
 | NH-PUB-01 | P00 | scripts/deploy/preflight.sh、news-lambert-host.md；只读报告 | bash -n、离线 mock 缺命令/失败/成功，不误报 PASS | TESTED | 基线；未审核 |
 | NH-PUB-03 | P00 | settings/start_waitress/health/.env.production.example/测试；严格 env 与可信代理 | 定向 pytest/check --deploy/Host/代理/cookie/探针 | TESTED | 基线；未审核 |
-| NH-PUB-05 G1 | 03 | 服务端模式中间件/capabilities/views/urls/测试；逐路由拒绝 | 全 route/method 矩阵、Provider 0 次、内部 Worker | TODO | 基线；未审核 |
-| S05 内容安全 | 05 | Mermaid/Markdown/article_fetcher validators/providers/测试 | 恶意 HTML/SVG/SSRF/DNS/重定向；High | TODO | 基线；未审核 |
+| NH-PUB-05 G1 | 03 | 服务端模式中间件/capabilities/views/urls/测试；逐路由拒绝 | 全 route/method 矩阵、Provider 0 次、内部 Worker | DOING | 基线；未审核 |
+| S05-FRONTEND | P00/03 | Mermaid/Markdown/DOMPurify与负例 | 3文件7测试、typecheck、lint退出0；High待G1 | TESTED | 7bef7fb候选；未审核 |
+| S05-BACKEND | P00/03 | article_fetcher安全输送/各provider/比较验证器 | SSRF/DNS固定/每跳/体积deadline离线测试；High | DOING | 7bef7fb候选；未审核 |
 | NH-PUB-04 | 03 | Dockerfile/compose.prod/entrypoint/持久路径 | 空宿主构建、dist/健康/重建持久性/权限 | TODO | 基线；未审核 |
 | NH-PUB-02 | 03、04 | deploy/nginx/模板与隔离验证 | nginx -t/路径/SSE/缓存/TLS bootstrap | TODO | 基线；未审核 |
 | NH-PUB-10 | 05 | services/api/AuthContext/页面/index/测试 | 匿名只读、capabilities、handoff/缓存、前端全量 | TODO | 基线；未审核 |

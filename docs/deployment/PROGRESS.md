@@ -29,3 +29,10 @@
 - 指定py_compile、env模板空Key核验、git diff --check退出0。主Agent核对health仅SELECT1/live不查库、Waitress代理洗头与WSGI scheme测试、Secure Host-only Cookie测试及生产不读dotenv/Hermes。部署网络实际smoke待04验证。
 - 角色生效证据来自调度工具的固定role/model/effort定义；两子Agent运行界面自身不提供独立查询标签，如实记录，不把TOML文件当实测日志。
 - 下一批：NH-PUB-05完整契约已存contracts/NH-PUB-05.md；独立S05-FRONTEND存contracts/S05-FRONTEND.md。03通过后执行；禁止生产资源/真实Provider/OAuth。
+
+## S05-FRONTEND 本地定向验收
+候选基于7bef7fbcb580bdd528cafbe38b946abfcc5536f5；High完整G1审查待后续，状态TESTED。Mermaid strict/不可覆写安全配置/20k字符500边/真实DOMPurify SVG净化，Markdown skipHtml；懒加载和过期取消保留。dompurify3.4.7直接依赖，lock只添加直接声明，未升级。
+- cd frontend && npm run test:run -- tests/components/news-detail/MarkdownContent.mermaid.test.jsx tests/components/news-detail/MarkdownContent.security.test.tsx tests/components/news-detail/MarkdownContent.extractor-contract.test.jsx：退出0，3文件7测试PASS。
+- npm run typecheck、npm run lint、npm ls dompurify --depth=0、manifest/lock核验、git diff --check退出0。首轮类型/清理后断言失败已证据修复；未再重复同版本通过测试。
+- 主Agent核对实际diff：SVG二次净化、未执行bindFunctions、危险DOM/超限/Markdown链接负例实测；按React技能核对effect生命周期、hook顺序、直接依赖、懒加载，未发现本切片集成冲突。
+- 自动继续：/root/pub01_preflight复用为S05-BACKEND安全HTTP输送；NH-PUB-05仍正在逐46route×methods测试。04合同/ADR009已由主Agent冻结，需05整合后执行。
