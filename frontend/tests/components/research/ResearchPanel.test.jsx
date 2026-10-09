@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { AuthContext } from '@/context/AuthContext'
@@ -15,6 +16,7 @@ const api = vi.hoisted(() => ({
 }))
 
 vi.mock('@/services/researchApi', () => api)
+vi.mock('@gsap/react', () => ({ useGSAP: () => {} }))
 
 import ResearchLauncher from '@/components/research/ResearchLauncher'
 
@@ -43,12 +45,14 @@ function completedSession() {
   }
 }
 
-function renderPanel(route = '/', withDetailLauncher = false) {
+const signedInUser = { id: 7, username: 'tester' }
+
+function renderPanel(route = '/', withDetailLauncher = false, user = signedInUser) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 } } })
   return render(
     <QueryClientProvider client={client}>
       <AuthContext.Provider value={{
-        user: { id: 7, username: 'tester' },
+        user,
         loading: false,
         login: vi.fn(),
         register: vi.fn(),
@@ -134,7 +138,146 @@ describe('ResearchPanel', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '新闻研究助手' })).not.toBeInTheDocument())
   })
 
+  it('keeps Tab focus inside the research dialog in both directions', async () => {
+    const user = userEvent.setup()
+    renderPanel()
+    await user.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    const dialog = await screen.findByRole('dialog', { name: '新闻研究助手' })
+    await waitFor(() => expect(dialog).toHaveFocus())
+    const tabStops = Array.from(dialog.querySelectorAll(
+      'a[href], button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
+    )).filter((element) => element.getAttribute('aria-hidden') !== 'true')
+    const first = tabStops[0]
+    const last = tabStops[tabStops.length - 1]
+
+    await user.tab()
+    expect(first).toHaveFocus()
+
+    last.focus()
+    await user.tab()
+    expect(first).toHaveFocus()
+
+    first.focus()
+    await user.tab({ shift: true })
+    expect(last).toHaveFocus()
+  })
+
+  it('returns forward and reverse Tab focus from the portalled session menu to the research dialog', async () => {
+    const user = userEvent.setup()
+    api.listResearchSessions.mockResolvedValue({
+      count: 1,
+      next: null,
+      previous: null,
+      results: [{ id: 'panel-session', title: '已完成研究' }],
+    })
+    renderPanel()
+    await user.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    const dialog = await screen.findByRole('dialog', { name: '新闻研究助手' })
+    const trigger = await screen.findByRole('button', { name: '历史会话' })
+    await user.click(trigger)
+    const menuItem = await screen.findByRole('menuitem', { name: '已完成研究' })
+    await waitFor(() => expect(menuItem).toHaveFocus())
+
+    await user.tab()
+
+    const firstTabStop = dialog.querySelector('button:not(:disabled)')
+    expect(firstTabStop).toHaveFocus()
+    await waitFor(() => expect(screen.queryByRole('menu', { name: '历史会话' })).not.toBeInTheDocument())
+
+    await user.click(trigger)
+    const reopenedMenuItem = await screen.findByRole('menuitem', { name: '已完成研究' })
+    await waitFor(() => expect(reopenedMenuItem).toHaveFocus())
+    await user.tab({ shift: true })
+
+    const dialogTabStops = Array.from(dialog.querySelectorAll(
+      'a[href], button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
+    )).filter((element) => element.tabIndex >= 0 && !element.closest('[hidden], [inert], [aria-hidden="true"]'))
+    expect(dialogTabStops[dialogTabStops.length - 1]).toHaveFocus()
+    await waitFor(() => expect(screen.queryByRole('menu', { name: '历史会话' })).not.toBeInTheDocument())
+  })
+
+  it('recovers focus when a busy control is removed and keeps outside focus from escaping the active dialog', async () => {
+    const user = userEvent.setup()
+    api.createResearchStream.mockImplementation((_query, { signal }) => pausedResearch(signal))
+    api.openResearchSessionStream.mockResolvedValue({
+      kind: 'events',
+      events: (async function* replay() {
+        yield { type: 'complete' }
+      })(),
+    })
+
+    renderPanel('/', true)
+    await user.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    const dialog = await screen.findByRole('dialog', { name: '新闻研究助手' })
+    await user.click(screen.getByRole('button', { name: '分析 AI 芯片竞争格局' }))
+
+    const stopButton = await screen.findByRole('button', { name: '停止接收当前研究进度' })
+    stopButton.focus()
+    expect(stopButton).toHaveFocus()
+    await user.click(stopButton)
+    const resumeButton = await screen.findByRole('button', { name: '继续接收' })
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
+    expect(document.activeElement).not.toBe(document.body)
+
+    const outsideButton = screen.getByRole('button', { name: '打开 AI 助手小闻' })
+    outsideButton.focus()
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
+
+    document.body.tabIndex = -1
+    document.body.focus()
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
+    document.body.removeAttribute('tabindex')
+
+    resumeButton.focus()
+    expect(resumeButton).toHaveFocus()
+    await user.click(resumeButton)
+    await waitFor(() => expect(screen.queryByRole('button', { name: '继续接收' })).not.toBeInTheDocument())
+    expect(dialog.contains(document.activeElement)).toBe(true)
+  })
+
+  it('skips hidden, inert, and disabled controls when recovering lost focus', async () => {
+    const user = userEvent.setup()
+    renderPanel()
+    await user.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    await screen.findByRole('button', { name: '最近 LLM Agent 有什么新进展？' })
+
+    const newSessionButton = screen.getByRole('button', { name: '新建研究' })
+    const fullscreenButton = screen.getByRole('button', { name: '全屏' })
+    const closeButton = screen.getByRole('button', { name: '关闭' })
+    newSessionButton.hidden = true
+    fullscreenButton.setAttribute('inert', '')
+    closeButton.disabled = true
+    closeButton.tabIndex = 0
+
+    document.body.tabIndex = -1
+    document.body.focus()
+    await waitFor(() => expect(screen.getByRole('button', { name: '最近 LLM Agent 有什么新进展？' })).toHaveFocus())
+    document.body.removeAttribute('tabindex')
+  })
+
+  it('yields focus control to AuthModal and restores focus to Research after Escape', async () => {
+    const user = userEvent.setup()
+    renderPanel('/', false, null)
+    await user.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    const loginButton = await screen.findByRole('button', { name: '登录 / 注册' })
+    const researchDialog = loginButton.closest('[role="dialog"]')
+    expect(researchDialog).toHaveAccessibleName('新闻研究助手')
+
+    await user.click(loginButton)
+    const authDialog = await screen.findByRole('dialog', { name: '登录小闻' })
+    await waitFor(() => expect(screen.getByLabelText('用户名')).toHaveFocus())
+    await user.tab()
+    expect(authDialog.contains(document.activeElement)).toBe(true)
+    expect(researchDialog.contains(document.activeElement)).toBe(false)
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog', { name: '登录小闻' })).not.toBeInTheDocument()
+    expect(researchDialog).toBeInTheDocument()
+    await waitFor(() => expect(loginButton).toHaveFocus())
+  })
+
   it('warns that retry may duplicate work after stopping before a response header', async () => {
+    const user = userEvent.setup()
     api.createResearchStream.mockImplementationOnce((_query, { signal }) => (async function* firstAttempt() {
       yield { type: 'thinking' }
       await waitForAbort(signal)
@@ -152,8 +295,13 @@ describe('ResearchPanel', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('原请求可能已到达服务器')
     expect(screen.getByRole('status')).toHaveTextContent('可能重复计算或产生费用')
     expect(api.createResearchStream).toHaveBeenCalledTimes(1)
-    fireEvent.click(screen.getByRole('button', { name: '重新研究' }))
+    const retryButton = screen.getByRole('button', { name: '重新研究' })
+    retryButton.focus()
+    expect(retryButton).toHaveFocus()
+    await user.click(retryButton)
     await waitFor(() => expect(api.createResearchStream).toHaveBeenCalledTimes(2))
+    const dialog = screen.getByRole('dialog', { name: '新闻研究助手' })
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
   })
 
   it('keeps the risk warning visible when closing before a session id exists', async () => {

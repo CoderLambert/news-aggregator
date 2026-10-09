@@ -20,4 +20,25 @@ describe('LazyModalState', () => {
     unmount()
     expect(document.body.style.overflow).toBe('')
   })
+
+  it('offers separate retry and explicit page reload actions in the error state', () => {
+    const onReload = vi.fn()
+    const onRetry = vi.fn()
+    render(
+      <LazyModalState
+        label="测试错误框"
+        message="加载失败"
+        onClose={vi.fn()}
+        onReload={onReload}
+        onRetry={onRetry}
+        variant="chat"
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '重试加载' }))
+    fireEvent.click(screen.getByRole('button', { name: '刷新页面' }))
+
+    expect(onRetry).toHaveBeenCalledOnce()
+    expect(onReload).toHaveBeenCalledOnce()
+  })
 })

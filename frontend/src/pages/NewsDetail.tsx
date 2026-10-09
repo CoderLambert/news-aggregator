@@ -1,5 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
-import { ErrorBoundary } from 'react-error-boundary'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent, MouseEvent } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
 import { ArrowLeft, Headphones, MessageCircle, Search, Sparkles } from 'lucide-react'
@@ -8,9 +7,9 @@ import { useLanguage } from '@/context/useLanguage'
 import { useSpeechPlayerActions, useSpeechPlayerCapabilities } from '@/context/SpeechPlayerContext'
 import LoadingSpinner from '@/components/LoadingSpinner'
 import AuthModal from '@/components/AuthModal'
-import LazyModalState from '@/components/LazyModalState'
 import ChatBubbleButton from '@/components/chat/ChatBubbleButton'
-import { loadNewsChatAssistant, prefetchNewsChatAssistant } from '@/components/chat/newsChatAssistantLoader'
+import LazyNewsChatAssistant from '@/components/chat/LazyNewsChatAssistant'
+import { prefetchNewsChatAssistant } from '@/components/chat/newsChatAssistantLoader'
 import TranslationStatus from '@/components/news-detail/TranslationStatus'
 import ErrorBanner from '@/components/news-detail/ErrorBanner'
 import FullContentSection from '@/components/news-detail/FullContentSection'
@@ -26,8 +25,6 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { useArticleSearch } from '@/hooks/useArticleSearch'
 import { useArticleToc } from '@/hooks/useArticleToc'
 import type { NewsDetail as NewsDetailRecord } from '@/types/news'
-
-const InitialNewsChatAssistant = lazy(loadNewsChatAssistant)
 
 function safeReturnPath(value: unknown): string {
   if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//')) return '/'
@@ -48,8 +45,6 @@ export default function NewsDetail() {
   const { articleLoading, articleError, handleFetchFullArticle, resumeExistingFetch, cancelFetch } = useFullArticle(id ?? '', setNews, news)
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState(false)
-  const [assistantLoadAttempt, setAssistantLoadAttempt] = useState(0)
-  const [NewsChatAssistant, setNewsChatAssistant] = useState(() => InitialNewsChatAssistant)
   const assistantOpenerRef = useRef<HTMLButtonElement | null>(null)
   const restoreAssistantFocusRef = useRef(false)
   const openAssistant = useCallback((event: MouseEvent<HTMLButtonElement>) => {
@@ -69,12 +64,6 @@ export default function NewsDetail() {
     assistantOpenerRef.current = null
     opener?.focus()
   }, [assistantOpen])
-  const retryAssistantLoad = useCallback((resetErrorBoundary: () => void) => {
-    const NextNewsChatAssistant = lazy(loadNewsChatAssistant)
-    setNewsChatAssistant(() => NextNewsChatAssistant)
-    setAssistantLoadAttempt((attempt) => attempt + 1)
-    resetErrorBoundary()
-  }, [])
   const requestFullArticle = useCallback((force = false) => {
     if (!user) {
       setAuthModalOpen(true)
@@ -246,25 +235,11 @@ export default function NewsDetail() {
         <div hidden={assistantOpen}>
           <ChatBubbleButton onOpen={openAssistant} onIntent={prefetchNewsChatAssistant} />
         </div>
-        {assistantOpen && (
-          <ErrorBoundary
-            key={assistantLoadAttempt}
-            onReset={() => setAssistantLoadAttempt((attempt) => attempt + 1)}
-            fallbackRender={({ resetErrorBoundary }) => (
-              <LazyModalState
-                label="AI 助手小闻"
-                message="小闻加载失败，请检查网络后重试。"
-                onClose={() => handleAssistantOpenChange(false)}
-                onRetry={() => retryAssistantLoad(resetErrorBoundary)}
-                variant="chat"
-              />
-            )}
-          >
-            <Suspense fallback={<LazyModalState label="AI 助手小闻" message="正在打开小闻…" onClose={() => handleAssistantOpenChange(false)} variant="chat" />}>
-              <NewsChatAssistant newsId={id ?? String(news.id)} open onOpenChange={handleAssistantOpenChange} />
-            </Suspense>
-          </ErrorBoundary>
-        )}
+        <LazyNewsChatAssistant
+          newsId={id ?? String(news.id)}
+          open={assistantOpen}
+          onOpenChange={handleAssistantOpenChange}
+        />
       </div>
 
       <ArticleToc headings={headings} activeId={activeId} />
