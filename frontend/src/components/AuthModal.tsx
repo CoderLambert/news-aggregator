@@ -11,6 +11,8 @@ type AuthMode = 'login' | 'register'
 
 interface AuthModalProps {
   onClose: () => void
+  onSuccess?: () => void
+  allowRegister?: boolean
 }
 
 function readableError(error: unknown): string {
@@ -25,7 +27,7 @@ function readableError(error: unknown): string {
   return error instanceof Error && error.message ? error.message : '请求失败，请重试'
 }
 
-export default function AuthModal({ onClose }: AuthModalProps) {
+export default function AuthModal({ onClose, onSuccess, allowRegister = true }: AuthModalProps) {
   const { login, register } = useAuth()
   const [mode, setMode] = useState<AuthMode>('login')
   const [username, setUsername] = useState('')
@@ -94,7 +96,8 @@ export default function AuthModal({ onClose }: AuthModalProps) {
     try {
       if (mode === 'login') await login(username, password)
       else await register(username, password, email)
-      onClose()
+      const finishAuthentication = onSuccess ?? onClose
+      finishAuthentication()
     } catch (submitError) {
       setError(readableError(submitError))
     } finally {
@@ -175,7 +178,7 @@ export default function AuthModal({ onClose }: AuthModalProps) {
           </Button>
         </form>
 
-        <p className="mt-4 text-center text-sm text-muted-foreground">
+        {allowRegister ? <p className="mt-4 text-center text-sm text-muted-foreground">
           {mode === 'login' ? '还没有账号？' : '已有账号？'}{' '}
           <Button
             type="button"
@@ -189,7 +192,7 @@ export default function AuthModal({ onClose }: AuthModalProps) {
           >
             {mode === 'login' ? '立即注册' : '去登录'}
           </Button>
-        </p>
+        </p> : null}
       </section>
     </div>
   )

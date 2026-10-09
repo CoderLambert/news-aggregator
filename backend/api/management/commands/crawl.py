@@ -1,8 +1,10 @@
+import logging
 import os
 import sys
 from django.core.management.base import BaseCommand
 
 from scrapy.crawler import CrawlerProcess
+from scrapy.settings import default_settings as scrapy_default_settings
 from scrapy.utils.project import get_project_settings
 
 CRAWLER_DIR = os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'crawler')
@@ -58,6 +60,20 @@ def _apply_crawl_only_politeness(settings):
     settings.set('AUTOTHROTTLE_START_DELAY', 3.0, priority='spider')
     settings.set('AUTOTHROTTLE_MAX_DELAY', 60.0, priority='spider')
     settings.set('AUTOTHROTTLE_TARGET_CONCURRENCY', 1.0, priority='spider')
+    # DEBUG item dumps may contain full upstream article bodies. Persistent
+    # worker logs only need operational INFO/WARNING/ERROR records.
+    settings.set('LOG_LEVEL', 'INFO', priority='spider')
+    settings.set('LOG_INSTALL_ROOT_HANDLER', False, priority='spider')
+
+
+def _configure_crawl_only_logging():
+    """Keep persistent worker logs operational and free of scraped item bodies."""
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    for handler in root_logger.handlers:
+        handler.setLevel(logging.INFO)
+    logging.getLogger('scrapy').setLevel(logging.INFO)
+    logging.getLogger('asyncio').setLevel(logging.WARNING)
 
 
 def _format_crawl_summary(spider_name, stats):
@@ -99,7 +115,23 @@ class Command(BaseCommand):
         from scrapy.crawler import CrawlerProcess
 
         settings = get_project_settings()
-        process = CrawlerProcess(settings)
+        crawl_only = os.environ.get('NEWS_CRAWL_ONLY') == '1'
+        if crawl_only:
+            _apply_crawl_only_politeness(settings)
+            # Set the existing Django handler before CrawlerProcess logs its
+            # own initialization at DEBUG.
+            _configure_crawl_only_logging()
+        # Django already owns the command's root handler. Scrapy 2.19 reads
+        # LOG_INSTALL_ROOT_HANDLER; 2.18 requires the legacy constructor flag.
+        process_kwargs = {}
+        if crawl_only and not hasattr(scrapy_default_settings, 'LOG_INSTALL_ROOT_HANDLER'):
+            process_kwargs['install_root_handler'] = False
+        process = CrawlerProcess(settings, **process_kwargs)
+        if crawl_only:
+            # Scrapy configures its namespace at DEBUG even without adding a
+            # handler. Clamp both the logger and Django's existing handler so
+            # item dumps never reach persistent worker logs.
+            _configure_crawl_only_logging()
 
         spider_name = options['spider']
         if spider_name == 'all':
@@ -110,8 +142,6 @@ class Command(BaseCommand):
         crawlers = []
         for spider in spiders:
             crawler = process.create_crawler(spider)
-            if os.environ.get('NEWS_CRAWL_ONLY') == '1':
-                _apply_crawl_only_politeness(crawler.settings)
             process.crawl(crawler)
             crawlers.append((spider, crawler))
             self.stdout.write(self.style.SUCCESS(f'启动爬虫: {spider}'))

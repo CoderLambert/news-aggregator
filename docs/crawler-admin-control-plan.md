@@ -120,7 +120,7 @@
 - “立即抓取全部”只为已启用来源创建任务，并显示预计任务数量。
 - 所有写操作显示进行中状态并阻止重复提交。
 - 状态查询使用 React Query；活动页面每 5 秒刷新，页面隐藏后暂停。
-- HTTP 401 引导登录；HTTP 403 显示无权访问并返回首页；不会展示半成品控制台。
+- 鉴权拒绝时重新读取登录态：会话失效则引导登录，非超级管理员显示无权访问；不会展示半成品控制台。
 
 ## 6. 前端组件与数据层
 
@@ -142,7 +142,7 @@ frontend/src/services/crawlerAdminQueries.ts
 frontend/src/types/crawlerAdmin.ts
 ```
 
-`AuthUser` 增加 `isSuperuser: boolean`。解析器必须要求后端明确返回布尔值，不能把缺失字段当成已授权。
+`AuthUser` 增加 `isSuperuser: boolean`。只有后端明确返回 `true` 才视为超级管理员，缺失或其他值一律按无权限处理。
 
 `SuperuserRoute` 的状态：
 
@@ -171,7 +171,7 @@ Django 不负责渲染管理页面，只提供 `/api/admin/crawler/` 命名空�
 API 规则：
 
 - 新增 DRF `IsActiveSuperuser` permission，所有端点统一使用。
-- 未登录返回 401，已登录但非超级管理员返回 403。
+- 未登录或非超级管理员均由 DRF 拒绝访问；前端结合 `/api/auth/me/` 区分登录与权限状态。
 - 写操作保持 Django Session、CSRF 和同源 Cookie 机制。
 - 列表端点分页，过滤参数使用固定枚举。
 - 写操作返回最新资源和稳定错误 `code`，方便前端恢复界面。
@@ -285,6 +285,7 @@ crawler:
       required: false
   environment:
     NEWS_CRAWL_ONLY: "1"
+    CRAWLER_SCHEDULER_ENABLED: "1"
   volumes:
     - ./backend:/app/backend
     - ./logs:/app/logs
@@ -338,7 +339,7 @@ docker compose exec app python backend/manage.py createsuperuser
 - 移除 Django Admin URL，并让 `/admin/*` 使用 SPA fallback。
 - 新增四个模型、迁移、Spider 注册表同步服务。
 - 实现只读 dashboard、targets、batches、runs API。
-- 迁移后默认调度关闭，避免 Worker 尚未部署时产生排队任务。
+- Docker 首次启动默认启用调度；非 Docker 环境可用 `CRAWLER_SCHEDULER_ENABLED=0` 关闭。
 
 ### 阶段 B：Worker 与 Docker 自动抓取
 
