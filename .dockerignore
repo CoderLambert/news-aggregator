@@ -18,6 +18,7 @@ venv
 **/*.sqlite3-wal
 **/*.sqlite3-shm
 backend/db.sqlite3
+backend/.runtime/
 chroma_data/
 logs/
 .cache/

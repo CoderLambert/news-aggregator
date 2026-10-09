@@ -291,17 +291,17 @@ class ProviderComparison(models.Model):
         return f'{self.provider} {"ok" if self.ok else "failed"} {self.url}'
 
 
-class ChatGPTOAuthClient(models.Model):
-    """Stable OAuth client identity shared by this local app installation."""
+class ChatGPTOAuthHost(models.Model):
+    """Stable, opaque OAuth host identity for one deployment."""
 
-    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    deployment_hash = models.CharField(max_length=64, unique=True)
     host_id = models.CharField(max_length=64, unique=True, default=generate_chatgpt_host_id)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        verbose_name = 'ChatGPT OAuth 客户端'
-        verbose_name_plural = 'ChatGPT OAuth 客户端'
+        verbose_name = 'ChatGPT OAuth 主机'
+        verbose_name_plural = 'ChatGPT OAuth 主机'
 
 
 class ChatGPTSubscriptionSelection(models.Model):
@@ -336,6 +336,7 @@ class ChatGPTSubscriptionConnection(models.Model):
     account_email = models.EmailField(blank=True, default='')
     encrypted_access_token = models.TextField(blank=True, default='')
     encrypted_refresh_token = models.TextField(blank=True, default='')
+    encrypted_id_token = models.TextField(blank=True, default='')
     access_token_expires_at = models.DateTimeField(null=True, blank=True)
     selected_model = models.CharField(max_length=255, blank=True, default='')
     is_active = models.BooleanField(default=False, db_index=True)

@@ -113,8 +113,8 @@ export default function ChatGPTSubscriptionSettings() {
     onSuccess: async (result) => {
       await invalidatePrivateNews()
       setNotice(result.revocation_confirmed
-        ? '订阅账号已断开，OpenAI 已确认撤销令牌。'
-        : '本地凭据已清除；OpenAI 未确认撤销令牌。')
+        ? 'OpenAI 已确认撤销授权，本地凭据已清除。不会自动重新连接。'
+        : '本地凭据已清除，OpenAI 未确认撤销授权。不会自动重新连接；可到 ChatGPT 设置中管理授权。')
     },
   })
 
@@ -293,6 +293,11 @@ export default function ChatGPTSubscriptionSettings() {
       </div>
 
       {notice && <p role="status" className="mb-4 rounded-lg bg-muted px-3 py-2 text-sm">{notice}</p>}
+      {connectPending && attemptQuery.data?.status === 'authorizing' && (
+        <p role="status" className="mb-4 rounded-lg border border-border bg-card px-3 py-2 text-sm leading-6 text-muted-foreground">
+          尚未收到 OpenAI 授权结果。如果授权页已显示超时或其他错误，请点击“取消授权”结束本次等待；刷新状态不会修复 OpenAI 登录页。
+        </p>
+      )}
       {statusQuery.isError && <p role="alert" className="mb-4 text-sm text-destructive">{errorMessage(statusQuery.error)}</p>}
       {attemptId && attemptQuery.error && (
         <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">
@@ -318,12 +323,17 @@ export default function ChatGPTSubscriptionSettings() {
 
       <div className="mb-5 rounded-2xl border border-border bg-card p-4 sm:p-5">
         <h2 className="font-semibold">1. 建立连接</h2>
-        <p className="mb-4 mt-1 text-sm text-muted-foreground">在 OpenAI 授权窗口完成连接；关闭窗口不会自动取消服务器请求。</p>
+        <p className="mb-4 mt-1 text-sm text-muted-foreground">
+          “连接新账号”用于添加其他 ChatGPT 账号；已有账号请用卡片中的“重新授权”，原连接会保留到新授权验证成功。
+        </p>
+        <p className="mb-4 text-sm leading-6 text-muted-foreground">
+          重新授权无需先断开。“撤销授权”会停止使用、撤销令牌并清除本地凭据，不会自动重连，也不会清除 OpenAI 浏览器登录状态。以后需要恢复时，再手动点击“重新授权”。
+        </p>
         <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
           onClick={() => void beginConnect()}
-          disabled={connectPending}
+          disabled={connectPending || disconnectMutation.isPending}
           className="min-h-11 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
         >
           {connectPending ? '等待 OpenAI 授权…' : '连接新账号'}
@@ -363,7 +373,7 @@ export default function ChatGPTSubscriptionSettings() {
                   <h2 className="font-medium">{connectionLabel(connection)}</h2>
                   {connection.account_email && <p className="mt-1 text-sm text-muted-foreground">{connection.account_email}</p>}
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {connection.needs_reauth ? '需要重新授权' : connection.connected ? '已连接' : '已断开'}
+                    {connection.connected ? '已连接' : connection.active && connection.needs_reauth ? '授权已失效' : '已断开'}
                     {connection.active ? ' · 当前使用' : ''}
                   </p>
                 </div>
@@ -379,16 +389,16 @@ export default function ChatGPTSubscriptionSettings() {
                   <button
                     type="button"
                     onClick={() => void beginConnect(connection.id)}
-                    disabled={connectPending}
+                    disabled={connectPending || disconnectMutation.isPending}
                     className="min-h-11 rounded-md border border-border px-3 text-sm disabled:opacity-50"
-                  >重新连接</button>
+                  >重新授权</button>
                   {connection.connected && (
                     <button
                       type="button"
                       onClick={() => disconnectMutation.mutate(connection.id)}
-                      disabled={disconnectMutation.isPending}
+                      disabled={connectPending || disconnectMutation.isPending}
                       className="min-h-11 rounded-md border border-destructive/40 px-3 text-sm text-destructive disabled:opacity-50"
-                    >断开</button>
+                    >{disconnectMutation.isPending && disconnectMutation.variables === connection.id ? '正在撤销…' : '撤销授权'}</button>
                   )}
                 </div>
               </div>

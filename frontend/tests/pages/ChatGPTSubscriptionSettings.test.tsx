@@ -142,6 +142,59 @@ describe('ChatGPT subscription settings', () => {
     expect(client.getQueryData(['chatgptSubscription', 'status', 'anonymous'])).toBeUndefined()
   })
 
+  it('reauthorizes the saved account without disconnecting it and explains pre-callback failures', async () => {
+    const { popup, form } = createHandoffPopup()
+    vi.spyOn(window, 'open').mockReturnValue(popup as unknown as Window)
+    renderSettings()
+
+    fireEvent.click(await screen.findByRole('button', { name: '重新授权' }))
+    await waitFor(() => expect(form.submit).toHaveBeenCalledOnce())
+    expect(api.startChatGPTSubscriptionConnect).toHaveBeenCalledWith('connection-a')
+    expect(api.disconnectChatGPTSubscription).not.toHaveBeenCalled()
+    expect(await screen.findByText(/尚未收到 OpenAI 授权结果/)).toBeTruthy()
+    expect(screen.getByText(/重新授权无需先断开/)).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: '取消授权' }))
+    await waitFor(() => expect(api.cancelChatGPTSubscriptionAttempt).toHaveBeenCalledWith('attempt-1', expect.anything()))
+    expect(await screen.findByText('授权请求已取消。')).toBeTruthy()
+    expect(screen.queryByText(/尚未收到 OpenAI 授权结果/)).toBeNull()
+    expect(api.disconnectChatGPTSubscription).not.toHaveBeenCalled()
+  })
+
+  it.each([true, false])('only revokes without opening another sign-in (remote confirmation: %s)', async (confirmed) => {
+    const revoked = deferred<{ disconnected: boolean; revocation_confirmed: boolean }>()
+    api.disconnectChatGPTSubscription.mockReturnValueOnce(revoked.promise)
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    renderSettings()
+
+    fireEvent.click(await screen.findByRole('button', { name: '撤销授权' }))
+    await waitFor(() => expect(api.disconnectChatGPTSubscription).toHaveBeenCalledWith('connection-a', expect.anything()))
+    expect(screen.getByRole('button', { name: '正在撤销…' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: '重新授权' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: '连接新账号' }).hasAttribute('disabled')).toBe(true)
+
+    api.fetchChatGPTSubscriptionStatus.mockResolvedValue({
+      active_connection_id: null,
+      connections: [{
+        id: 'connection-a', account_name: 'Reader account', account_email: 'reader@example.com',
+        selected_model: '', active: false, connected: false, needs_reauth: true,
+        updated_at: '2026-10-10T00:00:00Z',
+      }],
+    })
+    await act(async () => revoked.resolve({ disconnected: true, revocation_confirmed: confirmed }))
+    expect(await screen.findByText(confirmed
+      ? 'OpenAI 已确认撤销授权，本地凭据已清除。不会自动重新连接。'
+      : '本地凭据已清除，OpenAI 未确认撤销授权。不会自动重新连接；可到 ChatGPT 设置中管理授权。',
+    )).toBeTruthy()
+    expect(screen.getByText('已断开')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '撤销授权' })).toBeNull()
+    expect(screen.getByRole('button', { name: '重新授权' }).hasAttribute('disabled')).toBe(false)
+    expect(screen.getByRole('button', { name: '连接新账号' }).hasAttribute('disabled')).toBe(false)
+    expect(api.startChatGPTSubscriptionConnect).not.toHaveBeenCalled()
+    expect(api.cancelChatGPTSubscriptionAttempt).not.toHaveBeenCalled()
+    expect(open).not.toHaveBeenCalled()
+  })
+
   it('POSTs the one-use handoff ticket and does not treat unrelated connection updates as success', async () => {
     const inputs: Array<{ name: string; value: string }> = []
     const form = {
