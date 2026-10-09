@@ -10,13 +10,14 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import SearchBar from '@/components/SearchBar'
 import { LanguageProvider } from '@/context/LanguageContext'
 import { usePreferencesStore } from '@/stores/preferences'
 
 function renderWithLang(ui, lang = 'zh') {
   usePreferencesStore.getState().setLang(lang)
-  return render(<LanguageProvider>{ui}</LanguageProvider>)
+  return render(<MemoryRouter><LanguageProvider>{ui}</LanguageProvider></MemoryRouter>)
 }
 
 beforeEach(() => { vi.useFakeTimers() })
@@ -41,9 +42,9 @@ describe('SearchBar', () => {
     expect(screen.getByPlaceholderText(/搜索/)).toHaveValue('first')
 
     rerender(
-      <LanguageProvider>
+      <MemoryRouter><LanguageProvider>
         <SearchBar value="second" onChange={() => {}} mode="hybrid" onModeChange={() => {}} />
-      </LanguageProvider>
+      </LanguageProvider></MemoryRouter>
     )
     expect(screen.getByPlaceholderText(/搜索/)).toHaveValue('second')
   })
@@ -73,7 +74,7 @@ describe('SearchBar', () => {
     const { rerender } = renderWithLang(<SearchBar {...props} onChange={oldOnChange} />)
 
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'fresh' } })
-    rerender(<LanguageProvider><SearchBar {...props} onChange={latestOnChange} /></LanguageProvider>)
+    rerender(<MemoryRouter><LanguageProvider><SearchBar {...props} onChange={latestOnChange} /></LanguageProvider></MemoryRouter>)
     act(() => { vi.advanceTimersByTime(350) })
 
     expect(oldOnChange).not.toHaveBeenCalled()
@@ -86,7 +87,7 @@ describe('SearchBar', () => {
     const { rerender } = renderWithLang(<SearchBar {...props} value="before" />)
 
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'draft' } })
-    rerender(<LanguageProvider><SearchBar {...props} value="after" /></LanguageProvider>)
+    rerender(<MemoryRouter><LanguageProvider><SearchBar {...props} value="after" /></LanguageProvider></MemoryRouter>)
     expect(screen.getByRole('searchbox')).toHaveValue('after')
     act(() => { vi.advanceTimersByTime(350) })
 
@@ -110,5 +111,13 @@ describe('SearchBar', () => {
     expect(screen.getByText('Keyword')).toBeInTheDocument()
     expect(screen.getByText('Semantic')).toBeInTheDocument()
     expect(screen.getByText('Hybrid')).toBeInTheDocument()
+  })
+
+  it('carries the current draft and mode into advanced search', () => {
+    renderWithLang(
+      <SearchBar value="agent tools" onChange={() => {}} mode="keyword" onModeChange={() => {}} />
+    )
+
+    expect(screen.getByRole('link', { name: '高级搜索' })).toHaveAttribute('href', '/search?q=agent%20tools&mode=keyword')
   })
 })

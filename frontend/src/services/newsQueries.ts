@@ -28,6 +28,7 @@ export const newsDetailOptions = (id: number, lang: Language, viewerId: number |
   queryOptions({
     queryKey: newsKeys.detail(id, lang, viewerId),
     queryFn: async ({ signal }): Promise<NewsDetail> => parseNewsDetail(await fetchNewsDetail(id, signal)),
+    staleTime: 15_000,
   })
 
 export const newsListPlaceholderData = (viewerId: number | string, lang: Language) =>
