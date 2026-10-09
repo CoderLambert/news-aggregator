@@ -10,6 +10,7 @@ import { newsWorkflowKeys } from '@/services/newsWorkflowQueries'
 export interface AuthUser {
   id: number
   username: string
+  isSuperuser: boolean
 }
 
 interface AuthContextValue {
@@ -28,7 +29,7 @@ function parseAuthUser(value: unknown): AuthUser {
   if (!isRecord(value) || typeof value.id !== 'number' || typeof value.username !== 'string') {
     throw new TypeError('Invalid authentication response')
   }
-  return { id: value.id, username: value.username }
+  return { id: value.id, username: value.username, isSuperuser: value.is_superuser === true }
 }
 
 export function useAuth(): AuthContextValue {

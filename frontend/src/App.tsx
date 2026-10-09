@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '@/services/queryClient'
 import { LanguageProvider } from '@/context/LanguageContext'
@@ -11,6 +11,7 @@ import AppErrorBoundary from '@/components/AppErrorBoundary'
 import LoadingSpinner from '@/components/LoadingSpinner'
 import ResearchLauncher from '@/components/research/ResearchLauncher'
 import GlobalSpeechPlayer from '@/components/speech/GlobalSpeechPlayer'
+import SuperuserRoute from '@/components/admin/SuperuserRoute'
 
 // Keep feature-heavy routes out of the initial list bundle.
 const NewsList = lazy(() => import('@/pages/NewsList'))
@@ -20,6 +21,7 @@ const ProviderComparisons = lazy(() => import('@/pages/ProviderComparisons'))
 const ChatGPTSubscriptionSettings = lazy(() => import('@/pages/ChatGPTSubscriptionSettings'))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
 const LocalSearch = lazy(() => import('@/pages/LocalSearch'))
+const CrawlerAdminPage = lazy(() => import('@/pages/admin/CrawlerAdminPage'))
 
 // This is an isolated design preview, not part of the news reading flow.
 const MascotPreview = lazy(() => import('@/components/mascot/MascotPreview'))
@@ -55,6 +57,8 @@ export default function App() {
                         <Route path="/provider-comparisons" element={<ProviderComparisons />} />
                         <Route path="/settings" element={<SettingsPage />} />
                         <Route path="/settings/chatgpt" element={<ChatGPTSubscriptionSettings />} />
+                        <Route path="/admin" element={<Navigate to="/admin/crawlers" replace />} />
+                        <Route path="/admin/crawlers" element={<SuperuserRoute><CrawlerAdminPage /></SuperuserRoute>} />
                         <Route path="/__mascot__" element={<MascotPreview />} />
                       </Routes>
                     </Suspense>

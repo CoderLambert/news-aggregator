@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { AlignLeft, GitCompareArrows, Heart, House, Languages, LogOut, Menu, Search, Settings, Type, X } from 'lucide-react'
+import { AlignLeft, GitCompareArrows, Heart, House, Languages, LogOut, Menu, Search, Settings, ShieldCheck, Type, X } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import AuthModal from '@/components/AuthModal'
@@ -15,7 +15,7 @@ const DISPLAY_MODES = [
 ] satisfies ReadonlyArray<{ key: DisplayMode; label: string; icon: LucideIcon; color: string }>
 
 export default function Header() {
-  const { displayMode, setDisplayMode, t } = useLanguage()
+  const { displayMode, setDisplayMode } = useLanguage()
   const { user, logout } = useAuth()
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -146,11 +146,13 @@ export default function Header() {
                 <GitCompareArrows aria-hidden="true" />Provider 对比
               </Link>
             </Button>
-            <Button variant="ghost" className="h-11 w-full justify-start" asChild>
-              <a href="/admin" target="_blank" rel="noreferrer" onClick={() => setMenuOpen(false)}>
-                <Settings aria-hidden="true" />{t.admin}
-              </a>
-            </Button>
+            {user?.isSuperuser ? (
+              <Button variant={isCurrent('/admin') ? 'secondary' : 'ghost'} className="h-11 w-full justify-start" asChild>
+                <Link to="/admin/crawlers" aria-current={isCurrent('/admin') ? 'page' : undefined} onClick={() => setMenuOpen(false)}>
+                  <ShieldCheck aria-hidden="true" />管理控制台
+                </Link>
+              </Button>
+            ) : null}
 
             {user && (
               <>
