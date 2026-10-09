@@ -556,3 +556,104 @@ class CrawlRun(models.Model):
                 name='one_active_crawl_run_per_target',
             ),
         ]
+
+
+class SearchIndexSettings(models.Model):
+    """Singleton configuration and liveness state for semantic indexing."""
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    enabled = models.BooleanField(default=True)
+    interval_seconds = models.PositiveIntegerField(default=300)
+    batch_size = models.PositiveIntegerField(default=100)
+    active_collection = models.CharField(max_length=128, default='news_embeddings')
+    model_name = models.CharField(
+        max_length=255,
+        default='sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
+    )
+    schema_version = models.CharField(max_length=64, default='news-v1')
+    next_run_at = models.DateTimeField(null=True, blank=True)
+    worker_heartbeat_at = models.DateTimeField(null=True, blank=True)
+    worker_instance_id = models.CharField(max_length=128, blank=True, default='')
+    last_success_at = models.DateTimeField(null=True, blank=True)
+    updated_by = models.ForeignKey(
+        'auth.User', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='search_index_settings_updates',
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = '语义索引设置'
+        verbose_name_plural = '语义索引设置'
+
+
+class SearchIndexRun(models.Model):
+    TRIGGER_CHOICES = [
+        ('startup', 'Startup'),
+        ('scheduled', 'Scheduled'),
+        ('crawl_batch', 'Crawl batch'),
+        ('manual', 'Manual'),
+        ('recovery', 'Recovery'),
+    ]
+    MODE_CHOICES = [('sync', 'Sync'), ('rebuild', 'Rebuild')]
+    STATUS_CHOICES = [
+        ('queued', 'Queued'),
+        ('running', 'Running'),
+        ('cancel_requested', 'Cancel requested'),
+        ('cancelled', 'Cancelled'),
+        ('succeeded', 'Succeeded'),
+        ('failed', 'Failed'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    trigger = models.CharField(max_length=20, choices=TRIGGER_CHOICES)
+    mode = models.CharField(max_length=16, choices=MODE_CHOICES, default='sync')
+    status = models.CharField(max_length=24, choices=STATUS_CHOICES, default='queued', db_index=True)
+    active_slot = models.PositiveSmallIntegerField(default=1, editable=False)
+    crawl_batch = models.ForeignKey(
+        CrawlBatch, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='search_index_runs',
+    )
+    requested_by = models.ForeignKey(
+        'auth.User', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='requested_search_index_runs',
+    )
+    collection_name = models.CharField(max_length=128, blank=True, default='')
+    model_name = models.CharField(max_length=255, blank=True, default='')
+    schema_version = models.CharField(max_length=64, blank=True, default='')
+    news_count = models.PositiveIntegerField(default=0)
+    vector_count_before = models.PositiveIntegerField(default=0)
+    vector_count_after = models.PositiveIntegerField(default=0)
+    missing_count = models.PositiveIntegerField(default=0)
+    changed_count = models.PositiveIntegerField(default=0)
+    orphaned_count = models.PositiveIntegerField(default=0)
+    upserted_count = models.PositiveIntegerField(default=0)
+    deleted_count = models.PositiveIntegerField(default=0)
+    failed_count = models.PositiveIntegerField(default=0)
+    safe_error_code = models.CharField(max_length=64, blank=True, default='')
+    safe_error_message = models.CharField(max_length=500, blank=True, default='')
+    queued_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    heartbeat_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    cancel_requested_by = models.ForeignKey(
+        'auth.User', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='cancelled_search_index_runs',
+    )
+    cancel_requested_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-queued_at']
+        verbose_name = '语义索引任务'
+        verbose_name_plural = '语义索引任务'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['active_slot'],
+                condition=models.Q(status__in=['queued', 'running', 'cancel_requested']),
+                name='one_active_search_index_run',
+            ),
+            models.UniqueConstraint(
+                fields=['crawl_batch'],
+                condition=models.Q(crawl_batch__isnull=False),
+                name='one_search_index_run_per_crawl_batch',
+            ),
+        ]

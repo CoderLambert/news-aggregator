@@ -22,6 +22,9 @@ export interface Page<T> {
   next: string | null
   previous: string | null
   results: T[]
+  searchModeRequested?: SearchMode
+  searchModeApplied?: SearchMode
+  searchWarning?: string
 }
 
 export interface NewsSummary {
@@ -140,6 +143,9 @@ export function parsePage<T>(value: unknown, parseItem: (item: unknown) => T): P
     next: typeof value.next === 'string' ? value.next : null,
     previous: typeof value.previous === 'string' ? value.previous : null,
     results: value.results.map(parseItem),
+    searchModeRequested: typeof value.search_mode_requested === 'string' ? value.search_mode_requested as SearchMode : undefined,
+    searchModeApplied: typeof value.search_mode_applied === 'string' ? value.search_mode_applied as SearchMode : undefined,
+    searchWarning: typeof value.search_warning === 'string' ? value.search_warning : undefined,
   }
 }
 

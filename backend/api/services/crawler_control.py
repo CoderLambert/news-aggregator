@@ -179,6 +179,20 @@ def recompute_batch(batch_id):
         else:
             updates['status'] = 'succeeded'
     CrawlBatch.objects.filter(pk=batch_id).update(**updates)
+    if not active and updates.get('status') in {'succeeded', 'partial', 'failed', 'cancelled'}:
+        # Queue only a durable local-index reconciliation. The crawler remains
+        # crawl-only and never performs translation or external AI calls.
+        from api.services.search_index_control import (
+            get_search_index_settings,
+            queue_search_index_run,
+        )
+        batch = CrawlBatch.objects.filter(pk=batch_id).first()
+        if batch is not None and get_search_index_settings().enabled:
+            queue_search_index_run(
+                trigger='crawl_batch',
+                mode='sync',
+                crawl_batch=batch,
+            )
 
 
 @transaction.atomic

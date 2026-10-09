@@ -3,6 +3,8 @@ import threading
 
 logger = logging.getLogger(__name__)
 
+MODEL_NAME = 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'
+
 
 class EmbeddingService:
     _instance = None
@@ -26,9 +28,7 @@ class EmbeddingService:
                 return self._model
             from sentence_transformers import SentenceTransformer
             logger.info('Loading sentence-transformer model...')
-            self._model = SentenceTransformer(
-                'paraphrase-multilingual-MiniLM-L12-v2'
-            )
+            self._model = SentenceTransformer(MODEL_NAME)
             logger.info('Sentence-transformer model loaded.')
             self._ready_event.set()
             return self._model
@@ -51,17 +51,16 @@ class EmbeddingService:
         def _load():
             try:
                 instance = cls()
-                instance.model  # triggers model load (thread-safe)
-                instance.encode('warmup')  # pay first-inference init cost
+                instance.model
+                instance.encode('warmup')
                 logger.info('Embedding model preloaded and ready.')
             except Exception as e:
-                logger.warning(f'Failed to preload embedding model: {e}')
+                logger.warning('Failed to preload embedding model: %s', type(e).__name__)
 
         threading.Thread(target=_load, daemon=True).start()
 
     @classmethod
     def wait_until_ready(cls, timeout=None):
-        """Block until the model is loaded, with optional timeout."""
         return cls._ready_event.wait(timeout=timeout)
 
     @classmethod

@@ -55,5 +55,35 @@ services:
       retries: 3
       start_period: 30s
 
+  indexer:
+    build:
+      context: .
+    image: news-aggregator:local
+    command: ["python", "/app/backend/manage.py", "embedding_worker"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # The worker loads the local model only when a run needs embeddings.
+      RUN_MAIN: "true"
+      SEARCH_INDEX_ENABLED: "${SEARCH_INDEX_ENABLED:-1}"
+    volumes:
+      - ./backend:/app/backend
+      - ./chroma_data:/app/chroma_data
+      - ./logs:/app/logs
+      - huggingface-cache:/root/.cache/huggingface
+    depends_on:
+      app:
+        condition: service_healthy
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 45s
+    healthcheck:
+      test: ["CMD", "python", "/app/backend/manage.py", "embedding_healthcheck"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 30s
+
 volumes:
   huggingface-cache:

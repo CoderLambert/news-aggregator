@@ -39,7 +39,9 @@ AI:        Volcengine ARK (Doubao) / DashScope (Kimi) — 双通道自动切换
 
 ### Docker 一键部署（推荐）
 
-从克隆到健康服务只需要准备 `.env`，Compose 会构建前端和后端、自动执行数据库迁移，并启动 Waitress 与独立爬虫 Worker：
+语义索引的同步、恢复和管理方案见 [docs/semantic-index-sync-design.md](docs/semantic-index-sync-design.md)。
+
+从克隆到健康服务只需要准备 `.env`，Compose 会构建前端和后端、自动执行数据库迁移，并启动 Waitress、爬虫 Worker 与语义索引 Worker：
 
 ```bash
 git clone https://github.com/CoderLambert/news-aggregator.git
@@ -51,7 +53,6 @@ cp .env.example .env
 # 编辑 .env，至少设置一个长期不变的 DJANGO_SECRET_KEY
 
 docker compose up -d --build --wait
-docker compose exec -T app python /app/backend/manage.py backfill_embeddings --batch-size 100
 curl -f http://127.0.0.1:9527/api/news/
 ```
 
@@ -72,8 +73,8 @@ curl -f http://127.0.0.1:9527/api/news/
 
 ```bash
 docker compose ps
-docker compose logs -f app crawler
-docker compose restart app crawler
+docker compose logs -f app crawler indexer
+docker compose restart app crawler indexer
 docker compose down                    # 数据仍保留
 
 # 更新代码和镜像；容器启动时会自动应用新迁移
@@ -82,7 +83,7 @@ git lfs pull
 docker compose up -d --build --wait
 ```
 
-Compose 默认在 Worker 启动后抓取一次，之后每小时抓取；可在 `.env` 调整 `CRAWL_INTERVAL_SECONDS` 和 `CRAWL_RUN_ON_START`。创建超级管理员后，可在 <http://127.0.0.1:9527/admin/crawlers> 控制调度、来源、重试和停止：
+Compose 默认在 crawler Worker 启动后抓取一次，之后每小时抓取；indexer Worker 会自动维护语义索引。`.env` 提供首次初始化值，运行后在 <http://127.0.0.1:9527/admin/crawlers> 调整爬虫和索引周期。创建超级管理员后，可在同一页面控制两类任务：
 
 ```bash
 docker compose exec app python backend/manage.py createsuperuser

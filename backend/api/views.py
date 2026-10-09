@@ -1,3 +1,5 @@
+import logging
+
 from django.db.models import Count, Q
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
@@ -21,6 +23,8 @@ from .serializers import (
 from api.services.llm_translator import get_openai_client, get_clients, stream_chat
 from api.services.article_fetcher import FetchError, fetch_article_markdown
 from api.services.chatgpt_subscription import invalidate_authorization_attempts_for_session
+
+logger = logging.getLogger(__name__)
 
 # Hardcoded fallback shown when the LLM is unreachable / returns garbage
 SUGGESTED_QUESTIONS_FALLBACK = [
@@ -174,13 +178,42 @@ class NewsListView(generics.ListAPIView):
         mode = request.query_params.get('mode', 'keyword').strip()
 
         if not search_query or mode == 'keyword':
-            return super().list(request, *args, **kwargs)
+            return self._decorate_search_response(
+                super().list(request, *args, **kwargs),
+                requested=mode if search_query else 'keyword',
+                applied='keyword',
+            )
 
-        if mode == 'semantic':
-            return self._semantic_search(request, search_query)
+        try:
+            if mode == 'semantic':
+                response = self._semantic_search(request, search_query)
+            else:
+                response = self._hybrid_search(request, search_query)
+        except Exception as exc:
+            logger.warning(
+                'Semantic index unavailable; applying keyword fallback (%s)',
+                type(exc).__name__,
+            )
+            return self._keyword_fallback(request, mode)
+        return self._decorate_search_response(response, requested=mode, applied=mode)
 
-        # mode == 'hybrid'
-        return self._hybrid_search(request, search_query)
+    def _decorate_search_response(self, response, *, requested, applied, warning=''):
+        if isinstance(response.data, dict):
+            if response.data.get('search_warning'):
+                return response
+            response.data['search_mode_requested'] = requested
+            response.data['search_mode_applied'] = applied
+            response.data['search_warning'] = warning
+        return response
+
+    def _keyword_fallback(self, request, requested):
+        response = super().list(request, *[], **{})
+        return self._decorate_search_response(
+            response,
+            requested=requested,
+            applied='keyword',
+            warning='semantic_index_unavailable',
+        )
 
     def _apply_filters(self, qs, request):
         """Apply new filter params to the base queryset before search."""
@@ -215,6 +248,10 @@ class NewsListView(generics.ListAPIView):
     def _semantic_search(self, request, query):
         from .services.vector_store import VectorStoreService
         from .services.embedding import EmbeddingService
+        from .services.search_index_control import index_version_is_current
+
+        if not index_version_is_current():
+            return self._keyword_fallback(request, 'semantic')
 
         # The Docker web process intentionally skips eager model loading. Accessing
         # the model here loads it once on the first semantic request; the model lock
@@ -224,7 +261,7 @@ class NewsListView(generics.ListAPIView):
 
         vs = VectorStoreService()
         if vs.count() == 0:
-            return super().list(request, *[], **{})
+            return self._keyword_fallback(request, 'semantic')
 
         order_by = request.query_params.get('order_by', 'relevance').strip()
 
@@ -275,6 +312,10 @@ class NewsListView(generics.ListAPIView):
 
     def _hybrid_search(self, request, query):
         from .services.vector_store import VectorStoreService
+        from .services.search_index_control import index_version_is_current
+
+        if not index_version_is_current():
+            return self._keyword_fallback(request, 'hybrid')
 
         order_by = request.query_params.get('order_by', 'relevance').strip()
 
@@ -308,6 +349,8 @@ class NewsListView(generics.ListAPIView):
                 semantic_ids = [nid for nid in vs_ids if nid in allowed]
             else:
                 semantic_ids = vs_ids
+        else:
+            return self._keyword_fallback(request, 'hybrid')
 
         # RRF fusion
         fused_ids = reciprocal_rank_fusion(keyword_ids, semantic_ids)

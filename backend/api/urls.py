@@ -3,6 +3,7 @@ from . import views
 from . import research_views
 from . import subscription_views
 from . import crawler_views
+from . import search_index_views
 
 urlpatterns = [
     path('admin/crawler/dashboard/', crawler_views.CrawlerDashboardView.as_view(), name='crawler-admin-dashboard'),
@@ -14,6 +15,11 @@ urlpatterns = [
     path('admin/crawler/runs/<uuid:run_id>/', crawler_views.CrawlRunDetailView.as_view(), name='crawler-admin-run-detail'),
     path('admin/crawler/runs/<uuid:run_id>/cancel/', crawler_views.CrawlRunCancelView.as_view(), name='crawler-admin-run-cancel'),
     path('admin/crawler/runs/<uuid:run_id>/retry/', crawler_views.CrawlRunRetryView.as_view(), name='crawler-admin-run-retry'),
+    path('admin/search-index/dashboard/', search_index_views.SearchIndexDashboardView.as_view(), name='search-index-admin-dashboard'),
+    path('admin/search-index/settings/', search_index_views.SearchIndexSettingsView.as_view(), name='search-index-admin-settings'),
+    path('admin/search-index/runs/', search_index_views.SearchIndexRunListCreateView.as_view(), name='search-index-admin-runs'),
+    path('admin/search-index/runs/<uuid:run_id>/', search_index_views.SearchIndexRunDetailView.as_view(), name='search-index-admin-run-detail'),
+    path('admin/search-index/runs/<uuid:run_id>/cancel/', search_index_views.SearchIndexRunCancelView.as_view(), name='search-index-admin-run-cancel'),
     path('chatgpt-subscription/', subscription_views.ChatGPTSubscriptionStatusView.as_view(), name='chatgpt-subscription-status'),
     path('chatgpt-subscription/connect/', subscription_views.ChatGPTSubscriptionConnectView.as_view(), name='chatgpt-subscription-connect'),
     path('chatgpt-subscription/handoff/', subscription_views.ChatGPTSubscriptionHandoffView.as_view(), name='chatgpt-subscription-handoff'),
