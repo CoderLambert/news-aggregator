@@ -23,6 +23,7 @@ const badgeVariants = cva(
         amber: 'border-amber-200 bg-amber-50 text-amber-700',
         red: 'border-red-200 bg-red-50 text-red-700',
         gray: 'border-gray-200 bg-gray-50 text-gray-700',
+        sage: 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300',
       },
     },
     defaultVariants: {

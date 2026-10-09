@@ -27,6 +27,8 @@ const buttonVariants = cva(
           'bg-indigo-600 text-white shadow-xs hover:bg-indigo-700 active:scale-95',
         violet:
           'bg-violet-600 text-white shadow-xs hover:bg-violet-700',
+        sage:
+          'bg-[#2D5A37] text-white shadow-xs hover:bg-[#204127] dark:bg-[#386641] dark:hover:bg-[#2D5A37]',
       },
       size: {
         default: 'h-9 px-4 py-2 has-[>svg]:px-3',

@@ -23,9 +23,14 @@ interface NewsChatAssistantProps {
   newsId: string | number
   open?: boolean
   onOpenChange?: (open: boolean) => void
+  articleContext?: {
+    hasFullContent?: boolean
+    wordCount?: number
+    title?: string
+  }
 }
 
-export default function NewsChatAssistant({ newsId, open, onOpenChange }: NewsChatAssistantProps) {
+export default function NewsChatAssistant({ newsId, open, onOpenChange, articleContext }: NewsChatAssistantProps) {
   const [internalOpen, setInternalOpen] = useState(false)
   const isOpen = open ?? internalOpen
   const setIsOpen = useCallback((nextOpen: boolean) => {
@@ -89,9 +94,12 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange }: NewsCh
 
   useEffect(() => {
     if (!isOpen) return
-    const original = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = original }
+    // Only lock scroll on small screens; keep desktop scrollable for side-by-side reading
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      const original = document.body.style.overflow
+      document.body.style.overflow = 'hidden'
+      return () => { document.body.style.overflow = original }
+    }
   }, [isOpen])
 
   if (!isOpen) return <ChatBubbleButton buttonRef={bubbleTriggerRef} onOpen={openFromBubble} />
@@ -102,22 +110,22 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange }: NewsCh
       aria-modal="true"
       aria-label="AI 助手小闻"
       className={`pointer-events-none fixed inset-0 z-50 flex flex-col ${
-        isFullscreen ? 'items-center justify-center bg-white' : 'justify-end sm:items-center sm:justify-center'
+        isFullscreen ? 'items-center justify-center bg-background' : 'justify-end lg:items-end lg:justify-end lg:p-6'
       }`}
     >
       {!isFullscreen && (
         <div
-          className="pointer-events-auto absolute inset-0 bg-black/20 backdrop-blur-sm transition-opacity"
+          className="pointer-events-auto absolute inset-0 bg-black/10 backdrop-blur-xs lg:hidden transition-opacity"
           onClick={closePanel}
           aria-hidden="true"
         />
       )}
 
       <div
-        className={`pointer-events-auto relative flex flex-col overflow-hidden bg-white shadow-2xl ${
+        className={`pointer-events-auto relative flex flex-col overflow-hidden bg-card border border-border shadow-2xl transition-all ${
           isFullscreen
-            ? 'h-full w-full sm:h-[90vh] sm:w-[480px] sm:rounded-2xl'
-            : 'h-[85vh] w-full rounded-t-3xl sm:h-[600px] sm:w-[450px] sm:rounded-2xl'
+            ? 'h-full w-full sm:h-[90vh] sm:w-[500px] sm:rounded-2xl'
+            : 'h-[85vh] w-full rounded-t-3xl sm:h-[640px] sm:w-[460px] sm:rounded-2xl'
         }`}
       >
         <ChatHeader
@@ -129,7 +137,49 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange }: NewsCh
           onClose={closePanel}
         />
 
-        <div className="flex-1 space-y-4 overflow-y-auto overscroll-contain bg-gradient-to-b from-orange-50/30 to-white p-3 sm:p-4">
+        {/* Context Status Banner */}
+        <div className="border-b border-border bg-secondary/60 px-3.5 py-1.5 flex items-center justify-between text-[11px]">
+          <div className="flex items-center gap-1.5 font-medium">
+            <span className={`size-2 rounded-full ${articleContext?.hasFullContent ? 'bg-emerald-500' : 'bg-amber-400'}`} />
+            <span className={articleContext?.hasFullContent ? 'text-emerald-800 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-300'}>
+              {articleContext?.hasFullContent
+                ? `正文上下文就绪${articleContext.wordCount ? `（约 ${articleContext.wordCount} 字）` : ''}`
+                : '仅摘要上下文（建议抓取全文以获得深入分析）'}
+            </span>
+          </div>
+          {suggestedQuestions.length > 0 && (
+            <button
+              type="button"
+              onClick={() => void refreshSuggestions()}
+              disabled={refreshingSuggestions}
+              className="text-muted-foreground hover:text-foreground text-[10px]"
+            >
+              刷新建议
+            </button>
+          )}
+        </div>
+
+        <div className="flex-1 space-y-4 overflow-y-auto overscroll-contain bg-secondary/10 p-3 sm:p-4">
+          {messages.length === 0 && (
+            <div className="rounded-xl border border-border bg-secondary/30 p-3 text-xs text-muted-foreground space-y-2">
+              <p className="font-medium text-foreground">💡 快速向小闻提问：</p>
+              <div className="flex flex-wrap gap-1.5">
+                {(suggestedQuestions.length > 0
+                  ? suggestedQuestions
+                  : ['这篇内容最重要的三个观点是什么？', '用通俗的语言解释文中核心技术', '文章提到的方案有什么优缺点？']
+                ).map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    onClick={() => { setInput(prompt); void doSend(prompt) }}
+                    className="text-left rounded-lg border border-border bg-card px-2.5 py-1 text-[11px] text-foreground hover:bg-accent transition-colors"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {historyError && (
             <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
               聊天记录加载失败。<button type="button" className="ml-1 underline" onClick={() => void retryHistory()}>重试</button>

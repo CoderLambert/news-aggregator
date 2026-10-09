@@ -123,14 +123,14 @@ export default function NewsList() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
-      <header className="mb-5">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">{lang === 'en' ? 'Your news feed' : '你的资讯流'}</p>
+      <header className="mb-6">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-800 dark:text-emerald-400 font-mono">{lang === 'en' ? 'Your news feed' : '你的资讯流'}</p>
         <div className="mt-1 flex flex-wrap items-end justify-between gap-2">
           <div>
-            <h1 id="news-list-title" tabIndex={-1} className="rounded-sm text-2xl font-bold tracking-tight text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">{lang === 'en' ? 'Latest news' : '最新资讯'}</h1>
-            <p className="mt-1 text-sm text-neutral-500">{lang === 'en' ? 'Scan summaries, then open the stories worth your time.' : '先快速浏览摘要，再打开值得深入阅读的内容。'}</p>
+            <h1 id="news-list-title" tabIndex={-1} className="rounded-sm text-2xl font-bold tracking-tight text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary font-serif">{lang === 'en' ? 'Latest news' : '最新资讯'}</h1>
+            <p className="mt-1 text-xs text-muted-foreground">{lang === 'en' ? 'Scan summaries, then open the stories worth your time.' : '先快速浏览摘要，再打开值得深入阅读的内容。'}</p>
           </div>
-          {!initialLoading && data && <p className="text-sm text-neutral-500"><span className="font-semibold text-neutral-900">{data.count}</span> {lang === 'en' ? 'stories' : '篇内容'}</p>}
+          {!initialLoading && data && <p className="text-xs text-muted-foreground"><span className="font-semibold text-foreground font-mono">{data.count}</span> {lang === 'en' ? 'stories' : '篇内容'}</p>}
         </div>
       </header>
 

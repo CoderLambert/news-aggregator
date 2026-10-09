@@ -51,6 +51,20 @@ function resolveDisplay(news: NewsSummary, displayMode: DisplayMode) {
   return { title: news.title, subtitle: null, content: news.content }
 }
 
+function cleanSummary(rawText: string): string {
+  if (!rawText) return ''
+  return rawText
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/HN Score:\s*\d+\s*\|\s*Comments:\s*\d+/g, '')
+    .replace(/\|\s*Total Stars:\s*\d+/g, '')
+    .trim()
+}
+
 export default function NewsCard({ news, onBlockStart, onBlocked }: NewsCardProps) {
   const { displayMode, t, lang } = useLanguage()
   const { user } = useAuth()
@@ -59,6 +73,7 @@ export default function NewsCard({ news, onBlockStart, onBlocked }: NewsCardProp
   const returnTo = `${location.pathname}${location.search}${location.hash}`
   const blockMutation = useBlockNews()
   const { title, subtitle, content } = resolveDisplay(news, displayMode)
+  const cleanedContent = content ? cleanSummary(content) : ''
   const viewerId: number | string = user?.id ?? 'anonymous'
 
   function prefetchDetail() {
@@ -79,20 +94,20 @@ export default function NewsCard({ news, onBlockStart, onBlocked }: NewsCardProp
   }
 
   return (
-    <article className="news-card-render group relative overflow-hidden rounded-2xl border border-neutral-200 bg-white transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-neutral-300 hover:shadow-lg">
-      <Link id={`news-card-${news.id}`} to={`/news/${news.id}`} state={{ from: returnTo }} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500" onMouseEnter={prefetchDetail} onFocus={prefetchDetail}>
-        {news.cover_image && <div className="aspect-video overflow-hidden bg-gray-100"><img src={news.cover_image} alt="" className="h-full w-full object-cover" loading="lazy" /></div>}
+    <article className="news-card-render group relative overflow-hidden rounded-2xl border border-border bg-card transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-emerald-600/30 hover:shadow-md">
+      <Link id={`news-card-${news.id}`} to={`/news/${news.id}`} state={{ from: returnTo }} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary" onMouseEnter={prefetchDetail} onFocus={prefetchDetail}>
+        {news.cover_image && <div className="aspect-video overflow-hidden bg-muted"><img src={news.cover_image} alt="" className="h-full w-full object-cover" loading="lazy" /></div>}
         <div className={`p-4 ${user ? 'pr-12' : ''}`}>
           <div className="mb-2 flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <h2 className="line-clamp-2 text-lg font-semibold leading-snug text-neutral-900 transition-colors group-hover:text-violet-800">{title}</h2>
-              {subtitle && <p className="mt-0.5 line-clamp-1 text-xs leading-tight text-gray-400">{subtitle}</p>}
+              <h2 className="line-clamp-2 text-base font-semibold leading-snug text-foreground transition-colors group-hover:text-emerald-800 dark:group-hover:text-emerald-300">{title}</h2>
+              {subtitle && <p className="mt-0.5 line-clamp-1 text-xs leading-tight text-muted-foreground">{subtitle}</p>}
             </div>
             <TranslationStatus news={news} size="compact" />
           </div>
-          {content && <p className="mb-4 line-clamp-3 text-sm leading-6 text-neutral-600">{content.slice(0, 180)}{content.length > 180 ? '…' : ''}</p>}
-          <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-500">
-            <Badge variant="blue" className="rounded-full px-2 py-0.5">{news.category_name}</Badge>
+          {cleanedContent && <p className="mb-4 line-clamp-3 text-xs leading-relaxed text-muted-foreground">{cleanedContent.slice(0, 180)}{cleanedContent.length > 180 ? '…' : ''}</p>}
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <Badge variant="sage" className="rounded-full px-2 py-0.5">{news.category_name}</Badge>
             <ContentStatus status={news.full_content_fetch_status} lang={lang} />
             <span className="ml-auto max-w-36 truncate">{news.source_name}</span>
             <span>{formatRelativeTime(news.publish_time, t)}</span>

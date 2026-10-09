@@ -100,8 +100,8 @@ export default function FavoritesPage() {
     <div className="mx-auto w-full max-w-3xl px-4 pb-12 pt-6 sm:pt-10">
       <BackHome />
       <header className="mb-7 mt-4">
-        <p className="text-sm font-medium text-orange-600">个性化阅读</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">内容偏好</h1>
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-800 dark:text-emerald-400 font-mono">个性化阅读</p>
+        <h1 className="mt-1 text-3xl font-semibold tracking-tight font-serif">内容偏好</h1>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">集中管理收藏、点赞和不希望在列表中看到的新闻。</p>
       </header>
 
@@ -120,7 +120,7 @@ export default function FavoritesPage() {
       <section id="favorites-panel" role="tabpanel" aria-labelledby="favorites-tab" tabIndex={0} hidden={tab !== 'favorites'}>
         <div className="mb-6 flex flex-wrap gap-2" role="group" aria-label="收藏筛选">
           {([{ key: 'all', label: '全部' }, { key: 'like', label: '点赞' }, { key: 'bookmark', label: '收藏' }] as const).map((option) => (
-            <button key={option.key} type="button" aria-pressed={filter === option.key} onClick={() => updatePreferences('favorites', option.key)} className={`min-h-11 rounded-full border px-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${filter === option.key ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-border bg-background text-muted-foreground hover:text-foreground'}`}>
+            <button key={option.key} type="button" aria-pressed={filter === option.key} onClick={() => updatePreferences('favorites', option.key)} className={`min-h-11 rounded-full border px-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${filter === option.key ? 'border-emerald-600 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300' : 'border-border bg-background text-muted-foreground hover:text-foreground'}`}>
               {option.key === 'like' && <Heart aria-hidden="true" className="mr-1.5 inline-block size-4" fill={filter === option.key ? 'currentColor' : 'none'} />}
               {option.key === 'bookmark' && <Bookmark aria-hidden="true" className="mr-1.5 inline-block size-4" fill={filter === option.key ? 'currentColor' : 'none'} />}
               {option.label}
@@ -177,8 +177,8 @@ function FavoriteCard({ favorite, returnPath }: { favorite: UserFavorite; return
   const date = favorite.created_at ? new Date(favorite.created_at).toLocaleDateString('zh-CN') : ''
   const isLiked = favorite.type === 'like'
   return (
-    <Link to={`/news/${news.id}`} state={{ from: returnPath }} className="block rounded-2xl border border-border bg-card p-5 transition-colors hover:border-orange-300 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-      <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted text-orange-600">{isLiked ? <Heart size={18} fill="currentColor" /> : <Bookmark size={18} fill="currentColor" />}</div><div className="min-w-0 flex-1"><h2 className="line-clamp-2 text-base font-semibold leading-6">{title}</h2>{excerpt && <p className="mt-1 line-clamp-2 text-sm leading-6 text-muted-foreground">{excerpt}</p>}<div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground">{date && <span className="flex items-center gap-1"><Clock className="size-3" />{date}</span>}{news.source_name && <span className="truncate">{news.source_name}</span>}</div></div></div>
+    <Link to={`/news/${news.id}`} state={{ from: returnPath }} className="block rounded-2xl border border-border bg-card p-5 transition-colors hover:border-emerald-600/30 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted text-emerald-700 dark:text-emerald-400">{isLiked ? <Heart size={18} fill="currentColor" /> : <Bookmark size={18} fill="currentColor" />}</div><div className="min-w-0 flex-1"><h2 className="line-clamp-2 text-base font-semibold leading-6">{title}</h2>{excerpt && <p className="mt-1 line-clamp-2 text-sm leading-6 text-muted-foreground">{excerpt}</p>}<div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground">{date && <span className="flex items-center gap-1"><Clock className="size-3" />{date}</span>}{news.source_name && <span className="truncate">{news.source_name}</span>}</div></div></div>
     </Link>
   )
 }
