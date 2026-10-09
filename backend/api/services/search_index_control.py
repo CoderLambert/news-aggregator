@@ -2,6 +2,7 @@ import os
 from datetime import timedelta
 
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from api.models import SearchIndexRun, SearchIndexSettings
@@ -10,6 +11,10 @@ from api.services.embedding import MODEL_NAME
 
 ACTIVE_INDEX_STATUSES = ('queued', 'running', 'cancel_requested')
 INDEX_SCHEMA_VERSION = 'news-v1'
+
+
+class SearchIndexOwnershipLost(Exception):
+    pass
 
 
 def _env_bool(name, default):
@@ -86,7 +91,7 @@ def queue_search_index_run(*, trigger, mode='sync', requested_by=None, crawl_bat
 
 
 @transaction.atomic
-def claim_next_index_run():
+def claim_next_index_run(instance_id):
     run = (
         SearchIndexRun.objects.select_for_update()
         .filter(status='queued')
@@ -101,9 +106,10 @@ def claim_next_index_run():
     run.heartbeat_at = now
     run.safe_error_code = ''
     run.safe_error_message = ''
+    run.worker_instance_id = instance_id
     run.save(update_fields=[
         'status', 'started_at', 'heartbeat_at',
-        'safe_error_code', 'safe_error_message',
+        'safe_error_code', 'safe_error_message', 'worker_instance_id',
     ])
     return run
 
@@ -117,6 +123,7 @@ def touch_index_worker(instance_id, *, run_id=None):
     if run_id:
         SearchIndexRun.objects.filter(
             pk=run_id,
+            worker_instance_id=instance_id,
             status__in=['running', 'cancel_requested'],
         ).update(heartbeat_at=now)
 
@@ -145,7 +152,14 @@ def request_index_run_cancel(run_id, user):
     return run
 
 
-def finish_index_run(run_id, *, status, error_code='', error_message=''):
+def finish_index_run(
+    run_id,
+    *,
+    instance_id,
+    status,
+    error_code='',
+    error_message='',
+):
     now = timezone.now()
     values = dict(
         status=status,
@@ -156,23 +170,42 @@ def finish_index_run(run_id, *, status, error_code='', error_message=''):
     )
     if status == 'failed':
         values['failed_count'] = 1
-    SearchIndexRun.objects.filter(pk=run_id).update(**values)
+    updated = SearchIndexRun.objects.filter(
+        pk=run_id,
+        worker_instance_id=instance_id,
+        status__in=ACTIVE_INDEX_STATUSES,
+    ).update(**values)
+    if updated != 1:
+        raise SearchIndexOwnershipLost(f'Index run ownership lost: {run_id}')
     if status == 'succeeded':
         SearchIndexSettings.objects.filter(pk=1).update(last_success_at=now)
 
 
-def recover_interrupted_index_runs(stale_seconds=300):
-    cutoff = timezone.now() - timedelta(seconds=stale_seconds)
-    return SearchIndexRun.objects.filter(
+@transaction.atomic
+def recover_interrupted_index_runs(
+    *,
+    recovery_owner_id,
+    force=False,
+    stale_seconds=300,
+):
+    runs = SearchIndexRun.objects.select_for_update().filter(
         status__in=['running', 'cancel_requested'],
-        heartbeat_at__lt=cutoff,
-    ).update(
+    )
+    if not force:
+        cutoff = timezone.now() - timedelta(seconds=stale_seconds)
+        runs = runs.filter(Q(heartbeat_at__lt=cutoff) | Q(heartbeat_at__isnull=True))
+    recovered = list(runs)
+    if not recovered:
+        return []
+    SearchIndexRun.objects.filter(pk__in=[run.pk for run in recovered]).update(
         status='failed',
         failed_count=1,
+        worker_instance_id=recovery_owner_id,
         finished_at=timezone.now(),
         safe_error_code='worker_interrupted',
         safe_error_message='索引 Worker 中断，任务可安全重试。',
     )
+    return recovered
 
 
 def schedule_due_index_run():
@@ -186,3 +219,27 @@ def schedule_due_index_run():
     settings.next_run_at = now + timedelta(seconds=settings.interval_seconds)
     settings.save(update_fields=['next_run_at'])
     return run
+
+
+@transaction.atomic
+def update_mutable_search_index_settings(validated_data, *, updated_by):
+    """Update only administrator-owned fields under the singleton row lock."""
+    get_search_index_settings()
+    settings = SearchIndexSettings.objects.select_for_update().get(pk=1)
+    was_enabled = settings.enabled
+    allowed = {'enabled', 'interval_seconds', 'batch_size'}
+    values = {
+        key: value
+        for key, value in validated_data.items()
+        if key in allowed
+    }
+    now = timezone.now()
+    values['updated_by_id'] = updated_by.pk
+    values['updated_at'] = now
+    next_enabled = values.get('enabled', settings.enabled)
+    if 'interval_seconds' in values or (not was_enabled and next_enabled):
+        interval_seconds = values.get('interval_seconds', settings.interval_seconds)
+        values['next_run_at'] = now + timedelta(seconds=interval_seconds)
+    SearchIndexSettings.objects.filter(pk=settings.pk).update(**values)
+    settings.refresh_from_db()
+    return settings

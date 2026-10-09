@@ -36,7 +36,8 @@ class SearchIndexRunSerializer(serializers.ModelSerializer):
     class Meta:
         model = SearchIndexRun
         fields = [
-            'id', 'trigger', 'mode', 'status', 'crawl_batch', 'collection_name',
+            'id', 'trigger', 'mode', 'status', 'worker_instance_id',
+            'crawl_batch', 'collection_name',
             'model_name', 'schema_version', 'news_count', 'vector_count_before',
             'vector_count_after', 'missing_count', 'changed_count',
             'orphaned_count', 'upserted_count', 'deleted_count', 'failed_count',

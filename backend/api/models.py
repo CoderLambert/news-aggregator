@@ -609,6 +609,7 @@ class SearchIndexRun(models.Model):
     mode = models.CharField(max_length=16, choices=MODE_CHOICES, default='sync')
     status = models.CharField(max_length=24, choices=STATUS_CHOICES, default='queued', db_index=True)
     active_slot = models.PositiveSmallIntegerField(default=1, editable=False)
+    worker_instance_id = models.CharField(max_length=128, blank=True, default='')
     crawl_batch = models.ForeignKey(
         CrawlBatch, null=True, blank=True, on_delete=models.SET_NULL,
         related_name='search_index_runs',
