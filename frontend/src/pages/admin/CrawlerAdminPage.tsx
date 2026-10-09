@@ -161,16 +161,24 @@ function BatchCard({ batch, busy, onRetry, onCancel }: {
         </div>
         <div className="text-right text-sm tabular-nums"><span className="text-emerald-700">成功 {batch.succeeded}</span> · <span className="text-red-700">失败 {batch.failed}</span> · 取消 {batch.cancelled}</div>
       </div>
-      {batch.runs.map((run) => (
-        <div key={run.id} className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t pt-3 text-sm">
-          <div><strong>{run.targetName}</strong><span className="ml-2 text-muted-foreground">{run.items} 条 · {formatDuration(run.durationSeconds)}</span>{run.safeError ? <p className="mt-1 text-red-700">{run.safeError}</p> : null}</div>
-          <div className="flex items-center gap-2">
-            <StatusBadge status={run.status} />
-            {['failed', 'cancelled', 'skipped'].includes(run.status) ? <Button size="sm" variant="outline" disabled={busy} onClick={() => onRetry(run.id)}><RotateCcw aria-hidden="true" />重试</Button> : null}
-            {['queued', 'running'].includes(run.status) ? <Button size="sm" variant="destructive" disabled={busy} onClick={() => onCancel(run.id)}><Square aria-hidden="true" />停止</Button> : null}
+      {batch.runs.map((run) => {
+        const retryActive = run.latestRetryStatus && ['queued', 'running', 'cancel_requested'].includes(run.latestRetryStatus)
+        const retrySucceeded = run.latestRetryStatus === 'succeeded'
+        return (
+          <div key={run.id} className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t pt-3 text-sm">
+            <div>
+              <strong>{run.targetName}</strong><span className="ml-2 text-muted-foreground">{run.items} 条 · {formatDuration(run.durationSeconds)}</span>
+              {run.safeError ? <p className="mt-1 text-red-700">{run.safeError}</p> : null}
+              {run.latestRetryStatus ? <p className={`mt-1 ${retrySucceeded ? 'text-emerald-700' : 'text-amber-700'}`}>最新重试：{statusLabel(run.latestRetryStatus)}</p> : null}
+            </div>
+            <div className="flex items-center gap-2">
+              <StatusBadge status={run.status} />
+              {['failed', 'cancelled', 'skipped'].includes(run.status) && !retryActive && !retrySucceeded ? <Button size="sm" variant="outline" disabled={busy} onClick={() => onRetry(run.id)}><RotateCcw aria-hidden="true" />重试</Button> : null}
+              {['queued', 'running'].includes(run.status) ? <Button size="sm" variant="destructive" disabled={busy} onClick={() => onCancel(run.id)}><Square aria-hidden="true" />停止</Button> : null}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
     </article>
   )
 }
@@ -258,7 +266,7 @@ export default function CrawlerAdminPage() {
       </section>
 
       <section id="history" className="mt-10 scroll-mt-20">
-        <div className="mb-4"><h2 className="text-xl font-semibold">最近抓取历史</h2><p className="mt-1 text-sm text-muted-foreground">展示最近 8 个批次及脱敏后的失败原因。</p></div>
+        <div className="mb-4"><h2 className="text-xl font-semibold">最近抓取历史</h2><p className="mt-1 text-sm text-muted-foreground">展示最近 8 个批次及脱敏后的失败原因。历史结果不会被删除，修复后的状态显示在对应记录的“最新重试”中。</p></div>
         <div className="space-y-3">{data.recentBatches.length ? data.recentBatches.map((batch) => <BatchCard key={batch.id} batch={batch} busy={busy} onRetry={(id) => retryMutation.mutate(id)} onCancel={(id) => { if (window.confirm('确认停止这个爬虫任务？')) cancelMutation.mutate(id) }} />) : <Card><CardContent className="py-8 text-center text-sm text-muted-foreground">暂无抓取历史。</CardContent></Card>}</div>
       </section>
     </AdminLayout>

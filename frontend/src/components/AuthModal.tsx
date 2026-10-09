@@ -13,6 +13,7 @@ interface AuthModalProps {
   onClose: () => void
   onSuccess?: () => void
   allowRegister?: boolean
+  loginTitle?: string
 }
 
 function readableError(error: unknown): string {
@@ -27,7 +28,7 @@ function readableError(error: unknown): string {
   return error instanceof Error && error.message ? error.message : '请求失败，请重试'
 }
 
-export default function AuthModal({ onClose, onSuccess, allowRegister = true }: AuthModalProps) {
+export default function AuthModal({ onClose, onSuccess, allowRegister = true, loginTitle = '登录小闻' }: AuthModalProps) {
   const { login, register } = useAuth()
   const [mode, setMode] = useState<AuthMode>('login')
   const [username, setUsername] = useState('')
@@ -124,7 +125,7 @@ export default function AuthModal({ onClose, onSuccess, allowRegister = true }: 
       >
         <div className="mb-5 flex items-center justify-between gap-4">
           <h2 id="auth-modal-title" className="text-lg font-semibold">
-            {mode === 'login' ? '登录小闻' : '注册小闻'}
+            {mode === 'login' ? loginTitle : '注册小闻'}
           </h2>
           <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="关闭登录窗口">
             <X aria-hidden="true" />
@@ -192,7 +193,7 @@ export default function AuthModal({ onClose, onSuccess, allowRegister = true }: 
           >
             {mode === 'login' ? '立即注册' : '去登录'}
           </Button>
-        </p> : null}
+        </p> : <p className="mt-4 text-center text-sm text-muted-foreground">公开注册只创建普通账号；管理员账号由部署者创建或授权。</p>}
       </section>
     </div>
   )

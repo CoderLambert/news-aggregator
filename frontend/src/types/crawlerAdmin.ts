@@ -31,6 +31,8 @@ export interface CrawlRun {
   finishReason: string
   safeError: string
   retryOf: string | null
+  latestRetryId: string | null
+  latestRetryStatus: CrawlRunStatus | null
   cancelRequestedAt: string | null
 }
 

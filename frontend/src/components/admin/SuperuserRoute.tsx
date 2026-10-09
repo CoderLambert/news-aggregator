@@ -25,7 +25,7 @@ export default function SuperuserRoute({ children }: { children: ReactNode }) {
             </CardHeader>
           </Card>
         </div>
-        <AuthModal allowRegister={false} onClose={() => navigate('/', { replace: true })} onSuccess={() => undefined} />
+        <AuthModal allowRegister={false} loginTitle="管理员登录" onClose={() => navigate('/', { replace: true })} onSuccess={() => undefined} />
       </>
     )
   }
@@ -39,7 +39,7 @@ export default function SuperuserRoute({ children }: { children: ReactNode }) {
               <ShieldAlert aria-hidden="true" />
             </div>
             <CardTitle>无权访问管理控制台</CardTitle>
-            <CardDescription>该区域只向已激活的超级管理员开放。</CardDescription>
+            <CardDescription>该区域只向已激活的超级管理员开放。公开注册不会自动获得管理权限，请联系部署者授权。</CardDescription>
           </CardHeader>
           <CardContent>
             <Button asChild><Link to="/">返回新闻首页</Link></Button>

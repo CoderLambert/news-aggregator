@@ -87,6 +87,8 @@ Compose 默认在 Worker 启动后抓取一次，之后每小时抓取；可在 
 docker compose exec app python backend/manage.py createsuperuser
 ```
 
+公开注册只会创建普通用户，不会授予爬虫管理权限。管理员使用同一个登录窗口；新管理员可通过上面的 `createsuperuser` 命令创建，已有账号则由部署者在服务端明确授予 `is_staff` 和 `is_superuser` 权限。
+
 本地 Python/Node 开发方式如下。
 
 ### 1. 克隆项目

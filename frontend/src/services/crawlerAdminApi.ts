@@ -62,6 +62,8 @@ function parseRun(value: unknown): CrawlRun {
     finishReason: text(stats.finish_reason),
     safeError: text(value.safe_error),
     retryOf: nullableText(value.retry_of),
+    latestRetryId: nullableText(value.latest_retry_id),
+    latestRetryStatus: nullableText(value.latest_retry_status) as CrawlRunStatus | null,
     cancelRequestedAt: nullableText(value.cancel_requested_at),
   }
 }

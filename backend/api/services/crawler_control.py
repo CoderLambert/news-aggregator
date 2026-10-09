@@ -268,6 +268,11 @@ def schedule_due_batch():
         return None
     else:
         trigger = 'scheduled'
+    # A full crawl can take longer than its configured interval. Keep one
+    # global queue instead of adding another partial scheduled batch while
+    # the previous queue is still being processed.
+    if CrawlRun.objects.filter(status__in=ACTIVE_RUN_STATUSES).exists():
+        return None
     settings.next_run_at = now + timedelta(seconds=settings.interval_seconds)
     settings.save(update_fields=['next_run_at'])
     try:

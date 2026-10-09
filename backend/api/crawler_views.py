@@ -48,8 +48,15 @@ def target_queryset():
 
 
 def batch_queryset():
+    runs = CrawlRun.objects.select_related('target').prefetch_related(
+        Prefetch(
+            'retries',
+            queryset=CrawlRun.objects.only('id', 'status', 'retry_of_id', 'queued_at').order_by('-queued_at'),
+            to_attr='prefetched_retries',
+        ),
+    ).order_by('queued_at')
     return CrawlBatch.objects.prefetch_related(
-        Prefetch('runs', queryset=CrawlRun.objects.select_related('target').order_by('queued_at')),
+        Prefetch('runs', queryset=runs),
     ).order_by('-queued_at')
 
 
