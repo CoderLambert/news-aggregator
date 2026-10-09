@@ -4,11 +4,12 @@ interface LazyModalStateProps {
   label: string
   message: string
   onClose: () => void
+  onReload?: () => void
   onRetry?: () => void
   variant: 'research' | 'chat'
 }
 
-export default function LazyModalState({ label, message, onClose, onRetry, variant }: LazyModalStateProps) {
+export default function LazyModalState({ label, message, onClose, onReload, onRetry, variant }: LazyModalStateProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const closeRef = useRef<HTMLButtonElement | null>(null)
   const zIndex = variant === 'chat' ? 'z-50' : 'z-40'
@@ -57,6 +58,11 @@ export default function LazyModalState({ label, message, onClose, onRetry, varia
           {onRetry && (
             <button type="button" onClick={onRetry} className="mt-4 min-h-11 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground">
               重试加载
+            </button>
+          )}
+          {onReload && (
+            <button type="button" onClick={onReload} className="ml-2 mt-4 min-h-11 rounded-lg border border-border px-4 text-sm font-medium hover:bg-muted">
+              刷新页面
             </button>
           )}
         </div>

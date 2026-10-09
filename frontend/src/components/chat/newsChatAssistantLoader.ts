@@ -11,3 +11,7 @@ export function loadNewsChatAssistant() {
 export function prefetchNewsChatAssistant() {
   void loadNewsChatAssistant().catch(() => undefined)
 }
+
+export function reloadNewsChatPage() {
+  window.location.reload()
+}
