@@ -29,14 +29,64 @@ AI:        Volcengine ARK (Doubao) / DashScope (Kimi) — 双通道自动切换
 
 ## 📋 环境要求
 
-- **Python** ≥ 3.11
-- **Node.js** ≥ 20（推荐 22+）
-- **npm** ≥ 9
-- 至少一个 LLM API Key（Volcengine 或 DashScope）
+- **Docker 部署**：Docker Engine + Compose v2 + Git LFS
+- **本地开发**：Python ≥ 3.11、Node.js ≥ 20（推荐 22+）、npm ≥ 9
+- AI 功能可使用本地 ChatGPT 订阅连接，或至少配置一个 Volcengine/DashScope API Key
 
 ## 🚀 快速开始
 
 > 完整的初始化、开发/生产启动、爬虫、测试、数据和故障排查说明见 [启动与运维说明](./docs/startup.md)。
+
+### Docker 一键部署（推荐）
+
+从克隆到健康服务只需要准备 `.env`，Compose 会构建前端和后端、自动执行数据库迁移，并启动 Waitress：
+
+```bash
+git clone https://github.com/CoderLambert/news-aggregator.git
+cd news-aggregator
+git lfs install
+git lfs pull
+
+cp .env.example .env
+# 编辑 .env，至少设置一个长期不变的 DJANGO_SECRET_KEY
+
+docker compose up -d --build --wait
+curl -f http://127.0.0.1:9527/api/news/
+```
+
+访问 <http://127.0.0.1:9527>。Docker 生产构建把 React 页面和 Django API 放在同一个端口，不使用开发端口 `5173`。
+
+数据默认保存在宿主机，不随容器删除：
+
+| 数据 | 宿主机位置 | 容器位置 |
+| --- | --- | --- |
+| SQLite、WAL、TTS 缓存 | `./backend/` | `/app/backend/` |
+| ChromaDB 向量数据 | `./chroma_data/` | `/app/chroma_data/` |
+| Hugging Face 模型缓存 | Docker volume `news-aggregator_huggingface-cache` | `/root/.cache/huggingface` |
+
+接管已有数据库时，先停止原后端和爬虫写入者，再把 `db.sqlite3` 及仍存在的 `db.sqlite3-wal`、`db.sqlite3-shm` 一起放入 `backend/`，然后启动 Compose。保存 ChatGPT 订阅连接时还必须沿用原来的 `DJANGO_SECRET_KEY` 或 `CHATGPT_TOKEN_ENCRYPTION_KEY`。
+
+常用维护命令：
+
+```bash
+docker compose ps
+docker compose logs -f app
+docker compose restart app
+docker compose down                    # 数据仍保留
+
+# 更新代码和镜像；容器启动时会自动应用新迁移
+git pull --ff-only
+git lfs pull
+docker compose up -d --build --wait
+```
+
+Compose 只运行 Web 服务，不会自动启动爬虫定时器。需要手动抓取时执行：
+
+```bash
+docker compose exec app python backend/manage.py crawl all
+```
+
+本地 Python/Node 开发方式如下。
 
 ### 1. 克隆项目
 
