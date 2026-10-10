@@ -96,3 +96,31 @@ def test_fetch_webpage_cancellation_after_dns_check_never_starts_http(monkeypatc
             execution_guard=cancel_guard(state),
         )
     assert calls == []
+
+
+def test_semantic_query_variations_stop_before_second_embedding_after_cancellation(monkeypatch):
+    state = {'cancelled': False}
+    calls = []
+
+    class FakeVectorStore:
+        def count(self):
+            return 1
+
+        def search(self, query, n):
+            calls.append(query)
+            state['cancelled'] = True
+            return [(1, 0.8)]
+
+    monkeypatch.setattr(
+        'api.services.vector_store.VectorStoreService', FakeVectorStore,
+    )
+    monkeypatch.setattr(
+        tools, '_generate_query_variations', lambda query: ['first', 'second'],
+    )
+
+    with pytest.raises(Stopped):
+        tools.execute_tool(
+            'search_news', {'query': 'multi variation research', 'mode': 'semantic'},
+            execution_guard=cancel_guard(state),
+        )
+    assert calls == ['first']
