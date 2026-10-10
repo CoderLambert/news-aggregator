@@ -23,6 +23,7 @@ from typing import Any, Iterator
 
 ARTIFACT_SCHEMA_VERSION = 1
 MANIFEST_SCHEMA_VERSION = 1
+RESTORE_VERIFY_TIMEOUT_SECONDS = 120.0
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 BACKUP_TIMEOUT_SECONDS = 120.0
 
@@ -166,11 +167,62 @@ def _online_backup(
     check_deadline(0, 0, 0)
 
 
-def _sha256_file(path: Path) -> str:
+def _check_deadline(deadline: float | None, message: str) -> None:
+    if deadline is not None and time.monotonic() >= deadline:
+        raise SnapshotError(message)
+
+
+@contextlib.contextmanager
+def _sqlite_progress_deadline(connection: sqlite3.Connection, deadline: float | None) -> Iterator[None]:
+    if deadline is None:
+        yield
+        return
+
+    timed_out = False
+
+    def abort_if_expired() -> int:
+        nonlocal timed_out
+        if time.monotonic() >= deadline:
+            timed_out = True
+            return 1
+        return 0
+
+    connection.set_progress_handler(abort_if_expired, 1000)
+    try:
+        yield
+        _check_deadline(deadline, "restore content verification exceeded its deadline")
+    except sqlite3.OperationalError:
+        if timed_out or time.monotonic() >= deadline:
+            raise SnapshotError("restore content verification exceeded its deadline") from None
+        raise
+    finally:
+        connection.set_progress_handler(None, 0)
+
+
+def _sha256_file(path: Path, *, deadline: float | None = None) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            _check_deadline(deadline, "restore content verification exceeded its deadline")
             digest.update(chunk)
+    _check_deadline(deadline, "restore content verification exceeded its deadline")
+    return digest.hexdigest()
+
+
+def _logical_database_sha256(path: Path, *, deadline: float) -> str:
+    digest = hashlib.sha256()
+    timeout_message = "restore content verification exceeded its deadline"
+    with contextlib.closing(_open_readonly(path)) as connection:
+        with _sqlite_progress_deadline(connection, deadline):
+            connection.execute("BEGIN")
+            for name in ("user_version", "application_id"):
+                value = connection.execute(f"PRAGMA {name}").fetchone()[0]
+                digest.update(f"PRAGMA {name}={int(value)}\n".encode("ascii"))
+            for line in connection.iterdump():
+                _check_deadline(deadline, timeout_message)
+                digest.update(line.encode("utf-8"))
+                digest.update(b"\n")
+            _check_deadline(deadline, timeout_message)
     return digest.hexdigest()
 
 
@@ -178,7 +230,12 @@ def _artifact_path(database: Path) -> Path:
     return Path(f"{database}.manifest.json")
 
 
-def _validate_artifact(database: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+def _validate_artifact(
+    database: Path,
+    *,
+    deadline: float | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    _check_deadline(deadline, "restore content verification exceeded its deadline")
     _regular_file(database, "snapshot database")
     sidecar = _artifact_path(database)
     _regular_file(sidecar, "snapshot manifest")
@@ -186,6 +243,7 @@ def _validate_artifact(database: Path) -> tuple[dict[str, Any], dict[str, Any]]:
         artifact = json.loads(sidecar.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         raise SnapshotError("snapshot manifest is unreadable or invalid JSON") from None
+    _check_deadline(deadline, "restore content verification exceeded its deadline")
     if not isinstance(artifact, dict) or set(artifact) != {
         "schema_version", "database_sha256", "migrations", "release_manifest"
     }:
@@ -194,7 +252,7 @@ def _validate_artifact(database: Path) -> tuple[dict[str, Any], dict[str, Any]]:
         raise SnapshotError("snapshot manifest schema version is unsupported")
     if not isinstance(artifact["database_sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", artifact["database_sha256"]):
         raise SnapshotError("snapshot database digest is invalid")
-    if _sha256_file(database) != artifact["database_sha256"]:
+    if _sha256_file(database, deadline=deadline) != artifact["database_sha256"]:
         raise SnapshotError("snapshot database digest does not match its manifest")
     release = artifact["release_manifest"]
     if not isinstance(release, dict):
@@ -204,10 +262,12 @@ def _validate_artifact(database: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     if not isinstance(migrations, list) or migrations != release["migrations"]:
         raise SnapshotError("snapshot migration metadata does not match its release manifest")
     with contextlib.closing(_open_readonly(database)) as connection:
-        _quick_check(connection)
-        database_migrations = _migration_rows(connection)
+        with _sqlite_progress_deadline(connection, deadline):
+            _quick_check(connection)
+            database_migrations = _migration_rows(connection)
     if database_migrations != migrations:
         raise SnapshotError("snapshot database migrations do not match its manifest")
+    _check_deadline(deadline, "restore content verification exceeded its deadline")
     return artifact, release
 
 
@@ -435,6 +495,7 @@ def restore_database(
     replace: bool = False,
     writers_stopped: bool = False,
     prior_backup: Path | None = None,
+    _verification_timeout_seconds: float = RESTORE_VERIFY_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     artifact, embedded_release = _validate_artifact(source)
     expected_release = _read_release_manifest(release_manifest_path)
@@ -443,15 +504,33 @@ def restore_database(
     if target.is_symlink():
         raise SnapshotError("restore target must not be a symlink")
     target, parent = _destination(target, "restore target")
-    if target.exists():
+    target_existed = target.exists()
+    if target_existed:
         if not replace or not writers_stopped or prior_backup is None:
             raise SnapshotError("existing target requires --replace, --writers-stopped, and a prior backup")
-        _validate_artifact(prior_backup)
     elif replace or prior_backup is not None:
         raise SnapshotError("--replace and prior backup are only valid for an existing target")
     staged: Path | None = None
     with migration_file_lock(target):
         try:
+            if target.exists() != target_existed:
+                raise SnapshotError("restore target changed before verification")
+            if target_existed:
+                if prior_backup is None:
+                    raise SnapshotError("existing target requires a prior backup")
+                if (
+                    isinstance(_verification_timeout_seconds, bool)
+                    or not isinstance(_verification_timeout_seconds, (int, float))
+                    or not math.isfinite(_verification_timeout_seconds)
+                    or _verification_timeout_seconds <= 0
+                ):
+                    raise SnapshotError("restore verification timeout must be a finite positive number")
+                deadline = time.monotonic() + _verification_timeout_seconds
+                _validate_artifact(prior_backup, deadline=deadline)
+                prior_digest = _logical_database_sha256(prior_backup, deadline=deadline)
+                target_digest = _logical_database_sha256(target, deadline=deadline)
+                if prior_digest != target_digest:
+                    raise SnapshotError("prior backup does not match the current target content")
             staged = _copy_to_temp(source, parent)
             with contextlib.closing(_open_readonly(staged)) as connection:
                 _quick_check(connection)

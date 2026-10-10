@@ -86,15 +86,46 @@ case "$1" in
     ;;
   create)
     case "$joined" in
-      *'sqlite_snapshot.py backup'*)
+      *'target=/source,readonly'*'time.sleep(300)'*)
         [ "${MOCK_FAIL_BACKUP:-0}" = 1 ] && exit 1
-        printf 'mock-backup-id\n'
+        printf 'mock-backup-container\n'
+        exit 0
+        ;;
+      *'target=/source'*'time.sleep(300)'*)
+        printf 'mock-restore-container\n'
         exit 0
         ;;
       *) printf 'mock-export-id\n'; exit 0 ;;
     esac
     ;;
-  start|rm|cp|exec) exit 0 ;;
+  cp)
+    case "$2" in
+      mock-backup-container:/tmp/snapshot.sqlite3)
+        cp -- "$MOCK_VOLUME_SNAPSHOT" "$3" ;;
+      mock-backup-container:/tmp/snapshot.sqlite3.manifest.json)
+        cp -- "$MOCK_VOLUME_SNAPSHOT.manifest.json" "$3" ;;
+      *) [ -f "$2" ] || exit 8 ;;
+    esac
+    exit 0
+    ;;
+  exec)
+    case "$joined" in
+      *'exec --user 0:0 mock-backup-container python -c '*|*'exec --user 0:0 mock-restore-container python -c '*)
+        case "$joined" in *'os.chown(path,10001,10001)'*'os.chmod(path,0o600)'*) exit 0 ;; esac
+        exit 7
+        ;;
+      *'exec --user 10001:10001 mock-backup-container python /tmp/sqlite_snapshot.py backup'*)
+        touch "$MOCK_BACKUP_RAN_FILE"
+        exit 0
+        ;;
+      *'exec --user 10001:10001 mock-restore-container python /tmp/sqlite_snapshot.py restore'*)
+        touch "$MOCK_RESTORE_RAN_FILE"
+        exit 0
+        ;;
+    esac
+    exit 0
+    ;;
+  start|rm) exit 0 ;;
 esac
 exit 0
 SH
@@ -111,6 +142,7 @@ esac
 SH
 chmod 700 "$WORK_DIR/bin/docker" "$WORK_DIR/bin/curl"
 export DOCKER_LOG CURL_LOG
+export PATH="$WORK_DIR/bin:$PATH"
 
 python3 - "$WORK_DIR" "$PROJECT_ROOT" <<'PY'
 import json
@@ -121,6 +153,7 @@ from pathlib import Path
 root = Path(sys.argv[1])
 sys.path.insert(0, sys.argv[2])
 from scripts.deploy.release_manifest import sha256_exported_release
+from scripts.deploy.sqlite_snapshot import backup_database
 
 release_sha = 'a' * 40
 target_sha = 'b' * 40
@@ -144,8 +177,11 @@ def make_release(sha, marker):
     release = static_root / 'releases' / sha
     release.mkdir(parents=True)
     (release / 'index.html').write_text(f'<html>{marker}</html>', encoding='utf-8')
-    (assets_root / f'{marker}.js').write_text(marker, encoding='utf-8')
-    (release / 'assets').symlink_to('../../assets')
+    release_assets = release / 'assets'
+    release_assets.mkdir()
+    shared_asset = assets_root / f'{marker}.js'
+    shared_asset.write_text(marker, encoding='utf-8')
+    (release_assets / shared_asset.name).hardlink_to(shared_asset)
     return release
 old_release = make_release(release_sha, 'old')
 new_release = make_release(target_sha, 'new')
@@ -171,7 +207,35 @@ connection.execute('CREATE TABLE records (id INTEGER PRIMARY KEY, body TEXT)')
 connection.execute("INSERT INTO records (body) VALUES ('committed row')")
 connection.commit()
 connection.close()
+backup_database(root / 'source.sqlite3', root / 'volume-snapshot.sqlite3', root / 'release.json')
 PY
+
+export MOCK_VOLUME_SNAPSHOT="$WORK_DIR/volume-snapshot.sqlite3"
+export MOCK_BACKUP_RAN_FILE="$WORK_DIR/backup-helper-ran"
+export MOCK_RESTORE_RAN_FILE="$WORK_DIR/restore-helper-ran"
+chmod 600 "$WORK_DIR/release.json"
+"$DEPLOY_DIR/backup.sh" --execute --volume newshub-test_db-data \
+    --image "newshub:$(printf 'a%.0s' {1..40})" --sha "$(printf 'a%.0s' {1..40})" \
+    --filename volume-copy.sqlite3 --output-dir "$WORK_DIR/out" \
+    --manifest "$WORK_DIR/release.json" >/dev/null
+[[ -f "$MOCK_BACKUP_RAN_FILE" ]] || { printf 'test_release_scripts: non-root backup helper did not run.\n' >&2; exit 1; }
+[[ "$(stat -c '%a' "$WORK_DIR/release.json")" == 600 ]] \
+    || { printf 'test_release_scripts: backup staging changed the host manifest mode.\n' >&2; exit 1; }
+[[ "$(stat -c '%a' "$WORK_DIR/out/volume-copy.sqlite3")" == 600 ]] \
+    || { printf 'test_release_scripts: volume backup host output is not mode 0600.\n' >&2; exit 1; }
+[[ "$(stat -c '%a' "$WORK_DIR/out/volume-copy.sqlite3.manifest.json")" == 600 ]] \
+    || { printf 'test_release_scripts: volume backup host manifest is not mode 0600.\n' >&2; exit 1; }
+rg -q '^create --pull=never --network none --user 10001:10001 --entrypoint python .*time.sleep\(300\)' "$DOCKER_LOG" \
+    || { printf 'test_release_scripts: backup helper create argv is incorrect.\n' >&2; exit 1; }
+rg -q '^exec --user 0:0 mock-backup-container python -c .*os.chown\(path,10001,10001\).*os.chmod\(path,0o600\)' "$DOCKER_LOG" \
+    || { printf 'test_release_scripts: backup manifest was not privately staged for UID 10001.\n' >&2; exit 1; }
+rg -q '^exec --user 10001:10001 mock-backup-container python /tmp/sqlite_snapshot.py backup --source /source/db.sqlite3 --output /tmp/snapshot.sqlite3 --release-manifest /tmp/release-manifest.json$' "$DOCKER_LOG" \
+    || { printf 'test_release_scripts: backup helper did not run exact argv as UID 10001.\n' >&2; exit 1; }
+if rg -q 'python python /tmp/sqlite_snapshot.py' "$DOCKER_LOG"; then
+    printf 'test_release_scripts: backup helper argv repeats the interpreter.\n' >&2
+    exit 1
+fi
+: >"$DOCKER_LOG"
 
 PATH="$WORK_DIR/bin:$PATH" "$DEPLOY_DIR/smoke.sh" >/dev/null
 PATH="$WORK_DIR/bin:$PATH" "$DEPLOY_DIR/smoke.sh" --local-domain >/dev/null
@@ -229,6 +293,30 @@ fi
     --target "$WORK_DIR/out/existing.sqlite3" --manifest "$WORK_DIR/release.json" \
     --replace --writers-stopped --prior-backup "$WORK_DIR/out/prior.sqlite3" >/dev/null
 
+MODE_SNAPSHOT="$(stat -c '%a' "$WORK_DIR/out/snapshot.sqlite3")"
+MODE_SNAPSHOT_MANIFEST="$(stat -c '%a' "$WORK_DIR/out/snapshot.sqlite3.manifest.json")"
+MODE_PRIOR="$(stat -c '%a' "$WORK_DIR/out/prior.sqlite3")"
+MODE_PRIOR_MANIFEST="$(stat -c '%a' "$WORK_DIR/out/prior.sqlite3.manifest.json")"
+MODE_RELEASE_MANIFEST="$(stat -c '%a' "$WORK_DIR/release.json")"
+"$DEPLOY_DIR/restore.sh" --execute --snapshot "$WORK_DIR/out/snapshot.sqlite3" \
+    --volume newshub-test_db-data --image "newshub:$(printf 'a%.0s' {1..40})" \
+    --sha "$(printf 'a%.0s' {1..40})" --manifest "$WORK_DIR/release.json" \
+    --replace --writers-stopped --prior-backup "$WORK_DIR/out/prior.sqlite3" >/dev/null
+[[ -f "$MOCK_RESTORE_RAN_FILE" ]] || { printf 'test_release_scripts: non-root restore helper did not run.\n' >&2; exit 1; }
+[[ "$(stat -c '%a' "$WORK_DIR/out/snapshot.sqlite3")" == "$MODE_SNAPSHOT" \
+    && "$(stat -c '%a' "$WORK_DIR/out/snapshot.sqlite3.manifest.json")" == "$MODE_SNAPSHOT_MANIFEST" \
+    && "$(stat -c '%a' "$WORK_DIR/out/prior.sqlite3")" == "$MODE_PRIOR" \
+    && "$(stat -c '%a' "$WORK_DIR/out/prior.sqlite3.manifest.json")" == "$MODE_PRIOR_MANIFEST" \
+    && "$(stat -c '%a' "$WORK_DIR/release.json")" == "$MODE_RELEASE_MANIFEST" ]] \
+    || { printf 'test_release_scripts: restore staging changed host artifact permissions.\n' >&2; exit 1; }
+rg -q '^exec --user 0:0 mock-restore-container python -c .*os.chown\(path,10001,10001\).*os.chmod\(path,0o600\)' "$DOCKER_LOG" \
+    || { printf 'test_release_scripts: restore artifacts were not privately staged for UID 10001.\n' >&2; exit 1; }
+rg -q '^create --pull=never --network none --entrypoint python --user 10001:10001 .*target=/source .*time.sleep\(300\)' "$DOCKER_LOG" \
+    || { printf 'test_release_scripts: restore helper is not bounded and pinned to UID 10001.\n' >&2; exit 1; }
+rg -q '^exec --user 10001:10001 mock-restore-container python /tmp/sqlite_snapshot.py restore --source /tmp/snapshot.sqlite3 --target /source/db.sqlite3 --release-manifest /tmp/release-manifest.json --replace --writers-stopped --prior-backup /tmp/prior.sqlite3$' "$DOCKER_LOG" \
+    || { printf 'test_release_scripts: restore helper did not run exact argv as UID 10001.\n' >&2; exit 1; }
+
+: >"$DOCKER_LOG"
 MOCK_RUNNING_CONTAINER=running-container PATH="$WORK_DIR/bin:$PATH" \
     "$DEPLOY_DIR/restore.sh" --execute --snapshot "$WORK_DIR/out/snapshot.sqlite3" \
     --volume newshub-test_db-data --image "newshub:$(printf 'a%.0s' {1..40})" \

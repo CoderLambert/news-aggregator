@@ -425,6 +425,7 @@ docker compose --project-name "$task_compose_project" --file "$task_compose_file
 FAKE_SSE_SCRIPT="$task_smoke_root/fake_sse.py"
 cat >"$FAKE_SSE_SCRIPT" <<'PY'
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
 import time
 
 class Handler(BaseHTTPRequestHandler):
@@ -437,6 +438,18 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-cache')
         self.end_headers()
         self.wfile.write(b'data: first-frame\n\n')
+        self.wfile.flush()
+        proxy_headers = {
+            'host': self.headers.get('Host'),
+            'x_forwarded_proto': self.headers.get('X-Forwarded-Proto'),
+            'x_forwarded_for': self.headers.get('X-Forwarded-For'),
+            'forwarded': self.headers.get('Forwarded'),
+            'x_forwarded_host': self.headers.get('X-Forwarded-Host'),
+            'x_forwarded_port': self.headers.get('X-Forwarded-Port'),
+        }
+        self.wfile.write(
+            b'data: proxy-headers=' + json.dumps(proxy_headers, sort_keys=True).encode('utf-8') + b'\n\n'
+        )
         self.wfile.flush()
         time.sleep(1)
         self.wfile.write(b'data: final-frame\n\n')

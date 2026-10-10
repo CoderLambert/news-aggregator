@@ -121,9 +121,10 @@ running="$(docker ps --quiet --filter "volume=$VOLUME")" \
 [[ -z "$running" ]] || fail 'restore volume is mounted by a running container; stop all writers first.'
 
 CONTAINER_ID="$(docker create --pull=never --network none --entrypoint python \
+    --user 10001:10001 \
     --mount "type=volume,source=$VOLUME,target=/source" \
     --mount "type=bind,source=$SCRIPT_DIR/sqlite_snapshot.py,target=/tmp/sqlite_snapshot.py,readonly" \
-    "$IMAGE" -c 'import time; exec("while True: time.sleep(3600)")')" \
+    "$IMAGE" -c 'import time; time.sleep(300)')" \
     || fail 'could not create the isolated restore helper.'
 [[ -n "$CONTAINER_ID" ]] || fail 'restore helper did not return a container ID.'
 docker start "$CONTAINER_ID" >/dev/null || fail 'could not start the isolated restore helper.'
@@ -139,13 +140,13 @@ if ((REPLACE)); then
     docker cp "$PRIOR_BACKUP.manifest.json" "$CONTAINER_ID:/tmp/prior.sqlite3.manifest.json" >/dev/null \
         || fail 'could not stage the prior backup manifest in the isolated helper.'
 fi
-chmod_code='import os,sys; [os.chmod(path, 0o644) for path in sys.argv[1:]]'
-chmod_paths=(/tmp/snapshot.sqlite3 /tmp/snapshot.sqlite3.manifest.json /tmp/release-manifest.json)
+prepare_code='import os,sys; [(os.chown(path,10001,10001), os.chmod(path,0o600)) for path in sys.argv[1:]]'
+prepare_paths=(/tmp/snapshot.sqlite3 /tmp/snapshot.sqlite3.manifest.json /tmp/release-manifest.json)
 if ((REPLACE)); then
-    chmod_paths+=(/tmp/prior.sqlite3 /tmp/prior.sqlite3.manifest.json)
+    prepare_paths+=(/tmp/prior.sqlite3 /tmp/prior.sqlite3.manifest.json)
 fi
-docker exec --user 0:0 "$CONTAINER_ID" python -c "$chmod_code" "${chmod_paths[@]}" \
-    || fail 'could not make staged read-only artifacts readable to the non-root helper.'
+docker exec --user 0:0 "$CONTAINER_ID" python -c "$prepare_code" "${prepare_paths[@]}" \
+    || fail 'could not prepare private staged artifacts for the non-root helper.'
 container_restore_args=(restore --source /tmp/snapshot.sqlite3 --target /source/db.sqlite3 --release-manifest /tmp/release-manifest.json)
 if ((REPLACE)); then
     container_restore_args+=(--replace --writers-stopped --prior-backup /tmp/prior.sqlite3)

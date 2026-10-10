@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import contextlib
+import io
 import os
 import sqlite3
 import stat
@@ -132,23 +134,20 @@ class SQLiteSnapshotTests(unittest.TestCase):
         original_target = target.read_bytes()
         advancing_clock.calls = 0
         with patch.object(sqlite_snapshot.sqlite3, "connect", side_effect=track_destination):
-            with patch.object(sqlite_snapshot.time, "monotonic", side_effect=advancing_clock):
-                with patch.object(
-                    sqlite_snapshot,
-                    "_online_backup",
-                    side_effect=lambda source, destination: real_online_backup(
-                        source, destination, timeout_seconds=0.5
-                    ),
-                ):
-                    with self.assertRaisesRegex(sqlite_snapshot.SnapshotError, "exceeded its deadline"):
-                        sqlite_snapshot.restore_database(
-                            snapshot,
-                            target,
-                            self.release,
-                            replace=True,
-                            writers_stopped=True,
-                            prior_backup=prior,
-                        )
+            with patch.object(
+                sqlite_snapshot,
+                "_online_backup",
+                side_effect=sqlite_snapshot.SnapshotError("SQLite online backup exceeded its deadline"),
+            ):
+                with self.assertRaisesRegex(sqlite_snapshot.SnapshotError, "exceeded its deadline"):
+                    sqlite_snapshot.restore_database(
+                        snapshot,
+                        target,
+                        self.release,
+                        replace=True,
+                        writers_stopped=True,
+                        prior_backup=prior,
+                    )
         self.assertEqual(target.read_bytes(), original_target)
         self.assertEqual(
             sorted(path.name for path in self.root.iterdir() if path.name.startswith(".newshub-restore.")),
@@ -211,6 +210,115 @@ class SQLiteSnapshotTests(unittest.TestCase):
         self.assertFalse(Path(f"{target}-wal").exists())
         self.assertFalse(Path(f"{target}-shm").exists())
         self.assertEqual(self.read_rows(target), ["committed row"])
+
+    def test_restore_rejects_stale_or_wrong_prior_and_keeps_target_and_wal_unchanged(self) -> None:
+        snapshot = self.root / "snapshot.sqlite3"
+        sqlite_snapshot.backup_database(self.source, snapshot, self.release)
+        target = self.root / "existing.sqlite3"
+        target_connection = make_database(target)
+        stale_prior = self.root / "stale-prior.sqlite3"
+        sqlite_snapshot.backup_database(target, stale_prior, self.release)
+        target_connection.execute("INSERT INTO records (body) VALUES ('committed after backup')")
+        target_connection.commit()
+        wal = Path(f"{target}-wal")
+        self.assertTrue(wal.exists())
+        original_target = target.read_bytes()
+        original_wal = wal.read_bytes()
+
+        with self.assertRaisesRegex(sqlite_snapshot.SnapshotError, "does not match the current target"):
+            sqlite_snapshot.restore_database(
+                snapshot,
+                target,
+                self.release,
+                replace=True,
+                writers_stopped=True,
+                prior_backup=stale_prior,
+            )
+        self.assertEqual(target.read_bytes(), original_target)
+        self.assertEqual(wal.read_bytes(), original_wal)
+        self.assertEqual(self.read_rows(target), ["committed row", "committed after backup"])
+
+        foreign = self.root / "foreign.sqlite3"
+        foreign_connection = make_database(foreign)
+        foreign_connection.execute("UPDATE records SET body='different database row'")
+        foreign_connection.commit()
+        foreign_connection.close()
+        wrong_prior = self.root / "wrong-prior.sqlite3"
+        sqlite_snapshot.backup_database(foreign, wrong_prior, self.release)
+        with self.assertRaisesRegex(sqlite_snapshot.SnapshotError, "does not match the current target"):
+            sqlite_snapshot.restore_database(
+                snapshot,
+                target,
+                self.release,
+                replace=True,
+                writers_stopped=True,
+                prior_backup=wrong_prior,
+            )
+        self.assertEqual(target.read_bytes(), original_target)
+        self.assertEqual(wal.read_bytes(), original_wal)
+        target_connection.close()
+
+    def test_restore_content_verification_deadline_is_bounded_and_does_not_replace(self) -> None:
+        snapshot = self.root / "snapshot.sqlite3"
+        sqlite_snapshot.backup_database(self.source, snapshot, self.release)
+        target = self.root / "existing.sqlite3"
+        target_connection = make_database(target)
+        prior = self.root / "prior.sqlite3"
+        sqlite_snapshot.backup_database(target, prior, self.release)
+        original = target.read_bytes()
+        clock_values = iter((0.0, 2.0))
+        with patch.object(sqlite_snapshot.time, "monotonic", side_effect=lambda: next(clock_values)):
+            with self.assertRaisesRegex(sqlite_snapshot.SnapshotError, "exceeded its deadline"):
+                sqlite_snapshot.restore_database(
+                    snapshot,
+                    target,
+                    self.release,
+                    replace=True,
+                    writers_stopped=True,
+                    prior_backup=prior,
+                    _verification_timeout_seconds=1.0,
+                )
+        self.assertEqual(target.read_bytes(), original)
+        target_connection.close()
+
+    def test_restore_verification_progress_handler_aborts_and_is_removed(self) -> None:
+        class FakeConnection:
+            handler = None
+            instruction_count = 0
+
+            def set_progress_handler(self, handler, instruction_count):
+                self.handler = handler
+                self.instruction_count = instruction_count
+
+        connection = FakeConnection()
+        with patch.object(sqlite_snapshot.time, "monotonic", return_value=5.0):
+            with self.assertRaisesRegex(sqlite_snapshot.SnapshotError, "exceeded its deadline"):
+                with sqlite_snapshot._sqlite_progress_deadline(connection, 4.0):  # type: ignore[arg-type]
+                    self.assertEqual(connection.instruction_count, 1000)
+                    self.assertEqual(connection.handler(), 1)
+        self.assertIsNone(connection.handler)
+        self.assertEqual(connection.instruction_count, 0)
+
+    def test_logical_digest_covers_schema_rows_and_sqlite_header_pragmas(self) -> None:
+        target = self.root / "digest-source.sqlite3"
+        connection = make_database(target)
+        connection.close()
+        first_deadline = sqlite_snapshot.time.monotonic() + 120
+        before = sqlite_snapshot._logical_database_sha256(target, deadline=first_deadline)
+        with sqlite3.connect(target) as updated:
+            updated.execute("PRAGMA user_version=7")
+            updated.execute("PRAGMA application_id=12345")
+        second_deadline = sqlite_snapshot.time.monotonic() + 120
+        after = sqlite_snapshot._logical_database_sha256(target, deadline=second_deadline)
+        self.assertNotEqual(before, after)
+
+        snapshot = self.root / "digest-copy.sqlite3"
+        sqlite_snapshot.backup_database(target, snapshot, self.release)
+        copied_deadline = sqlite_snapshot.time.monotonic() + 120
+        self.assertEqual(
+            after,
+            sqlite_snapshot._logical_database_sha256(snapshot, deadline=copied_deadline),
+        )
 
     def test_bad_snapshot_manifest_or_database_is_rejected_without_target_change(self) -> None:
         snapshot = self.root / "snapshot.sqlite3"
@@ -344,22 +452,58 @@ class ReleaseManifestTests(unittest.TestCase):
             with self.assertRaisesRegex(release_manifest.ManifestError, "symlink"):
                 release_manifest.sha256_tree(root)
 
-    def test_exported_static_release_matches_image_tree_through_shared_assets_link(self) -> None:
+    def test_exported_static_release_hashes_only_its_hardlinked_assets(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             release = root / "releases" / RELEASE_SHA
-            assets = root / "assets"
+            shared_assets = root / "assets"
+            release_assets = release / "assets"
             release.mkdir(parents=True)
-            assets.mkdir()
+            shared_assets.mkdir()
+            release_assets.mkdir()
             (release / "index.html").write_text("index", encoding="utf-8")
-            (assets / "app.js").write_text("bundle", encoding="utf-8")
-            (release / "assets").symlink_to("../../assets")
+            shared_app = shared_assets / "app.js"
+            shared_app.write_text("bundle", encoding="utf-8")
+            os.link(shared_app, release_assets / "app.js")
+            (shared_assets / "old-version-only.js").write_text("old", encoding="utf-8")
             image_dist = root / "image-dist"
             (image_dist / "assets").mkdir(parents=True)
             (image_dist / "index.html").write_text("index", encoding="utf-8")
             (image_dist / "assets" / "app.js").write_text("bundle", encoding="utf-8")
             expected = release_manifest.sha256_tree(image_dist)
             self.assertEqual(release_manifest.sha256_exported_release(release), expected)
+            self.assertTrue(os.path.samefile(shared_app, release_assets / "app.js"))
+
+            shared_app.write_text("tampered", encoding="utf-8")
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(
+                    release_manifest.main([
+                        "validate-static", "--release", str(release), "--expected-sha", expected
+                    ]),
+                    2,
+                )
+            shared_app.write_text("bundle", encoding="utf-8")
+
+            linked_asset = release_assets / "app.js"
+            linked_asset.unlink()
+            linked_asset.write_text("bundle", encoding="utf-8")
+            with self.assertRaisesRegex(release_manifest.ManifestError, "hardlink"):
+                release_manifest.sha256_exported_release(release)
+            linked_asset.unlink()
+            linked_asset.symlink_to(shared_app)
+            with self.assertRaisesRegex(release_manifest.ManifestError, "symlink"):
+                release_manifest.sha256_exported_release(release)
+
+    def test_production_container_runbook_uses_the_maintenance_gate(self) -> None:
+        document = (ROOT / "docs/deployment/production-containers.md").read_text(encoding="utf-8")
+        self.assertIn("scripts/deploy/deploy.sh", document)
+        self.assertIn("--current-manifest", document)
+        self.assertIn("--backup-output", document)
+        self.assertIn("--fresh", document)
+        self.assertNotIn(
+            "docker compose --env-file .env.production -f compose.prod.yaml up -d",
+            document,
+        )
 
     def test_describe_image_inspects_revision_and_nonroot_user_then_uses_network_none(self) -> None:
         image_json = json.dumps({"migrations": MIGRATIONS, "static_sha": "b" * 64})

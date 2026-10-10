@@ -123,7 +123,8 @@ IMAGE_REVISION="$(docker image inspect --format='{{ index .Config.Labels "org.op
 IMAGE_REVISION="$(printf '%s' "$IMAGE_REVISION" | tr 'A-F' 'a-f')"
 [[ "$IMAGE_REVISION" == "$SHA" ]] || fail 'image revision label does not match --sha.'
 
-mkdir -p -- "$ROOT"
+[[ -d "$(dirname -- "$ROOT")" ]] || fail 'export root parent must already exist.'
+[[ -e "$ROOT" ]] || mkdir -- "$ROOT"
 [[ -d "$ROOT" && ! -L "$ROOT" ]] || fail 'export root must be a real directory, not a symlink.'
 for directory in "$ROOT/releases" "$ROOT/assets"; do
     if [[ -L "$directory" ]]; then
@@ -134,6 +135,21 @@ for directory in "$ROOT/releases" "$ROOT/assets"; do
     fi
     mkdir -p -- "$directory"
 done
+chmod 755 -- "$ROOT" "$ROOT/releases" "$ROOT/assets"
+
+normalize_public_tree() {
+    local directory=$1
+    if find "$directory" -type l -print -quit | grep -q .; then
+        fail 'public static trees must not contain symlinks.'
+    fi
+    if find "$directory" ! -type f ! -type d -print -quit | grep -q .; then
+        fail 'public static trees may contain only regular files and directories.'
+    fi
+    find "$directory" -type d -exec chmod 755 -- {} +
+    find "$directory" -type f -exec chmod 644 -- {} +
+}
+
+normalize_public_tree "$ROOT/assets"
 
 RELEASE_REL="releases/$SHA"
 RELEASE_PATH="$ROOT/$RELEASE_REL"
@@ -207,25 +223,32 @@ while IFS= read -r -d '' source_asset; do
     if [[ -e "$destination_asset" || -L "$destination_asset" ]]; then
         [[ -f "$destination_asset" && ! -L "$destination_asset" ]] || fail 'shared asset destination is not a regular file.'
         cmp -s -- "$source_asset" "$destination_asset" || fail 'same-name shared asset has different content; refusing to overwrite.'
-        continue
-    fi
-    TEMP_ASSET="$(mktemp "$(dirname -- "$destination_asset")/.asset.XXXXXX")"
-    cp -- "$source_asset" "$TEMP_ASSET"
-    if ! ln -- "$TEMP_ASSET" "$destination_asset" 2>/dev/null; then
-        if [[ -f "$destination_asset" && ! -L "$destination_asset" ]] && cmp -s -- "$source_asset" "$destination_asset"; then
+    else
+        TEMP_ASSET="$(mktemp "$(dirname -- "$destination_asset")/.asset.XXXXXX")"
+        cp -- "$source_asset" "$TEMP_ASSET"
+        if ! ln -- "$TEMP_ASSET" "$destination_asset" 2>/dev/null; then
+            if [[ -f "$destination_asset" && ! -L "$destination_asset" ]] && cmp -s -- "$source_asset" "$destination_asset"; then
+                rm -f -- "$TEMP_ASSET"
+                TEMP_ASSET=""
+            else
+                rm -f -- "$TEMP_ASSET"
+                TEMP_ASSET=""
+                fail 'could not atomically add a shared asset.'
+            fi
+        else
             rm -f -- "$TEMP_ASSET"
             TEMP_ASSET=""
-            continue
         fi
-        rm -f -- "$TEMP_ASSET"
-        TEMP_ASSET=""
-        fail 'could not atomically add a shared asset.'
     fi
-    rm -f -- "$TEMP_ASSET"
-    TEMP_ASSET=""
+    release_asset="$STAGE_DIR/assets/$relative_asset"
+    release_asset_parent="$(dirname -- "$release_asset")"
+    mkdir -p -- "$release_asset_parent"
+    [[ ! -e "$release_asset" && ! -L "$release_asset" ]] || fail 'release asset appeared in the staging tree.'
+    ln -- "$destination_asset" "$release_asset" || fail 'could not link release asset to its shared inode.'
 done < <(find "$DIST/assets" -type f -print0)
 
-ln -s ../../assets "$STAGE_DIR/assets"
+normalize_public_tree "$ROOT/assets"
+normalize_public_tree "$STAGE_DIR"
 mv -- "$STAGE_DIR" "$RELEASE_PATH"
 STAGE_DIR=""
 

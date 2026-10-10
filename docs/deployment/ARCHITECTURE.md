@@ -90,3 +90,6 @@ Compose八项开关通过显式--env-file变量/default表达式解析，默认r
 
 ## ADR-019：G2 归属、遗留历史与账户安全
 旧无主Chat逐条完整归档到无级联FK的LegacyChatArchive，仅active superuser只读；不能自动分配新用户。新Chat unique(user,news)，revision CAS避免SQLite伪行锁，generation阻止清理后旧流恢复历史；不可逆迁移必须先备份。登录/注册服务端强制匿名CSRF，研究恢复标准SessionAuthentication，诊断仅active superuser。持久HMAC限速桶用事务第一步写单例锁串行，失败闭锁；生产注册即使开关打开仍需email绑定一次性邀请，密码验证器始终启用，无邮件服务时密码重置BLOCKED。精确边界在G2-CHAT/G2-ACCOUNTS合同；这两项尚待G1完成后执行。
+
+## ADR-020：G1审核后的静态资产与私有恢复对应关系
+High在d220f00发现公开目录0700/asset0600、backup重复解释器与host600 manifest不可读、共享历史assets污染release哈希、文档直接up绕维护窗口4项P1。整改采用公开静态0755/0644，每release真实assets目录仅硬链接该版本资源，共享旧资源保留且不纳入其他版本hash；验证hardlink对应Nginx实际共享文件。私有helper仅在内部/tmp调整复制artifact为10001:10001/0600，host文件不改。restore的合法prior artifact还须持锁、停写、按完整逻辑schema/rows摘要验证等于当前target，防另库/过期备份误替代；绝对120秒超时拒绝。G1仍未通过审核或运行验收，精确整改在G1-RELEASE-R1。

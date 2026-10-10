@@ -87,3 +87,15 @@
 - 正式production build固定app源码7f1148dd5e1bafc4aaba72ac68e75dc7616e1233；第一轮Docker bridge apt反复超时且npm ci 198.5s内部错误退出1，日志/tmp/newshub-production-build-7f1148dd5e1bafc4aaba72ac68e75dc7616e1233.log。主Agent对比同Debian InRelease：宿主curl200/1.328s，curl容器hostnetwork200/1.045s，bridge12s超时28。仅本地构建加--network=host重试，应用验收仍internal网络；无daemon/生产配置改动。
 - hostnet构建大文件网络仍慢但有进展，保留独立日志/tmp/newshub-production-build-hostnet-7f1148dd5e1bafc4aaba72ac68e75dc7616e1233.log；主Agent一次延长上限至30min，连续10min无I/O/输出进展停止，不无限重试。已实际完成frontend dist与torch CPU依赖安装，整镜像/真实HTTPS/browser尚未PASS。
 - G2账户/前端、G3core与08模式合同已准备待依赖通过后派发，仍非功能完成；当前先冻结G1代码开展High完整相关diff审核，Docker运行验证并行且修复必须重新定案。
+
+## G1集成与High首轮审核
+- d220f006445986756f86032bd47afeb9764475fc隔离git archive全量452 tests实际运行退出0/452PASS（3已知warning），日志/tmp/newshub-g1-integrated-sm8tucwn/pytest.log；独立临时HOME/DB无用户凭据。
+- g1_security完整G1相关baseline→d220f00静态只读审核返回4P1：export-static公开目录0700/files600；backup容器python重复argv及host600manifest不可读；共享历史assets污染两版本manifest；production-containers直接up绕维护窗口。另3P2：capabilities重取失败沿用full；代理头验收用redirect豁免health不证明secure；priorbackup未证明当前target完整内容对应。均非已整改，G1不能REVIEWED。
+- 审核前后实测HEAD/120个任务文件hash/完整相关diff SHA256均相同（d5227323dda25405f5d95b797174291fa585266d012f1782fef039c124b6f70b），未含用户DB；审核未写文件。预hash/tmp/newshub-g1-audit-pre-d220f00.json。
+- 主Agent冻结G1-RELEASE-R1/ADR020，待Luna定向整改；真实Dockerbuild还在有界推进，前端dist已完成，整镜像/运行验收仍NOT_RUN。
+
+## G1审核整改定向闭环（复审/实际运行待完成）
+- G1-RELEASE-R1返回：四P1按ADR020整改，restore P2持锁完整内容对应核验；shell syntax/export-static/release mock0，release_operations21PASS退出0，diff-check0。实际异UID Nginx与production volume仍NOT_RUN，不将mock当真实运行。
+- G1-CAPABILITIES-R1仅context与既有测试：cached full重取reject/非法schema即FAIL_CLOSED，成功后恢复；QueryClient真实5tests/typecheck/lint/diff-check均0。NH07申请准备文档离线校验0；两项正式批准仍false/EXTERNAL_BLOCKED，未提交申请。
+- domain_runtime代理P2：非豁免auth/csrf路径真实scheme/cookie检查，Fake头回显另记录，无法观测Django clientaddr明确NOT_RUN；新增3定向pytest、shell syntax/mock、py_compile/diff-check全0。尚未实际运行镜像/浏览器，不预填PASS。
+- 原始build下载依赖文件受限：官方Django HTTPS range256KiB host11.2s/container8.0s，TUNA4.4s；镜像cache probe证明pip层未命中，90s内取消probe130而保留原构建。为了不重复下载已安装Torch，主Agent最终一次有界延长原build至90min，连续10min无IO/输出停止、不自动重试、不更改依赖/registry。正式G1实际验收需依赖层完成后，用修复候选新SHA快速重建frontend/label再运行。

@@ -68,7 +68,7 @@ export function CapabilityProvider({ children }: { children: ReactNode }) {
   })
 
   const value: CapabilitiesContextValue = {
-    capabilities: query.data ?? FAIL_CLOSED_CAPABILITIES,
+    capabilities: query.isError ? FAIL_CLOSED_CAPABILITIES : query.data ?? FAIL_CLOSED_CAPABILITIES,
     loading: query.isPending,
     failed: query.isError,
   }

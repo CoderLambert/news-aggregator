@@ -20,6 +20,14 @@ from urllib.parse import urlparse
 HOST = 'news.lambert.host'
 PLAYWRIGHT_VERSION = '1.62.0'
 STATUS_MARKER = '\n__NEWSHUB_HTTP_STATUS__='
+FORWARDED_SPOOF_HEADERS = (
+    'X-Forwarded-Proto: http',
+    'X-Forwarded-For: 198.51.100.44',
+    'Forwarded: proto=http;host=spoof.invalid',
+    'X-Forwarded-Host: spoof.invalid',
+    'X-Forwarded-Port: 80',
+)
+SSE_PROXY_HEADER_MARKER = b'data: proxy-headers='
 
 
 class AcceptanceError(RuntimeError):
@@ -108,6 +116,41 @@ def _expect_status(args: argparse.Namespace, checks: dict[str, str], name: str, 
     return body, _headers(header_file) if header_file is not None else {}
 
 
+def _require_secure_csrf_cookie(response_headers: dict[str, list[str]]) -> None:
+    cookie_values = response_headers.get('set-cookie', [])
+    csrf_cookie = next((value for value in cookie_values if value.lower().startswith('csrftoken=')), None)
+    _require(csrf_cookie is not None, 'CSRF cookie was not set')
+    cookie_attributes = {part.strip().lower() for part in csrf_cookie.split(';')[1:]}
+    _require('secure' in cookie_attributes, 'CSRF cookie is missing Secure')
+    _require('httponly' not in cookie_attributes, 'CSRF cookie must remain readable by the SPA')
+    _require(not any(part.startswith('domain=') for part in cookie_attributes), 'CSRF cookie must be host-only')
+    _require('samesite=lax' in cookie_attributes, 'CSRF cookie must use SameSite=Lax')
+
+
+def _check_forwarded_header_secure_request(
+    args: argparse.Namespace,
+    checks: dict[str, str],
+    work_dir: Path,
+) -> None:
+    csrf_body, response_headers = _expect_status(
+        args,
+        checks,
+        'real_django_secure_request',
+        '/api/auth/csrf/',
+        200,
+        headers=FORWARDED_SPOOF_HEADERS,
+        header_file=work_dir / 'csrf-forwarded.headers',
+    )
+    _require('csrfToken' in csrf_body, 'spoofed-forwarding CSRF response is missing its token')
+    _require_secure_csrf_cookie(response_headers)
+    checks['real_django_secure_request'] = (
+        'HTTP 200 on non-exempt CSRF path; no HTTPS redirect; Secure host-only CSRF cookie'
+    )
+    checks['real_client_address_observation'] = (
+        'NOT_RUN: this Django endpoint does not expose WSGI REMOTE_ADDR'
+    )
+
+
 def _check_http_api(args: argparse.Namespace, checks: dict[str, str], work_dir: Path) -> None:
     redirect_headers = work_dir / 'http-redirect.headers'
     _expect_status(
@@ -132,29 +175,10 @@ def _check_http_api(args: argparse.Namespace, checks: dict[str, str], work_dir: 
         header_file=headers_file,
     )
     _require('csrfToken' in csrf_body, 'CSRF initialization response is missing its token')
-    cookie_values = response_headers.get('set-cookie', [])
-    csrf_cookie = next((value for value in cookie_values if value.lower().startswith('csrftoken=')), None)
-    _require(csrf_cookie is not None, 'CSRF cookie was not set')
-    cookie_attributes = {part.strip().lower() for part in csrf_cookie.split(';')[1:]}
-    _require('secure' in cookie_attributes, 'CSRF cookie is missing Secure')
-    _require('httponly' not in cookie_attributes, 'CSRF cookie must remain readable by the SPA')
-    _require(not any(part.startswith('domain=') for part in cookie_attributes), 'CSRF cookie must be host-only')
-    _require('samesite=lax' in cookie_attributes, 'CSRF cookie must use SameSite=Lax')
+    _require_secure_csrf_cookie(response_headers)
     checks['csrf_cookie'] = 'Secure, host-only, readable, SameSite=Lax'
 
-    live_status, _, _ = _curl(
-        args,
-        '/api/health/live/',
-        headers=(
-            'X-Forwarded-Proto: http',
-            'X-Forwarded-For: 198.51.100.88',
-            'Forwarded: proto=http;host=spoof.invalid',
-            'X-Forwarded-Host: spoof.invalid',
-            'X-Forwarded-Port: 80',
-        ),
-    )
-    _require(live_status == 200, 'forwarded-header spoof caused an HTTPS redirect or non-200 response')
-    checks['forwarded_header_override'] = 'HTTPS remained secure; client forwarding values were overwritten'
+    _check_forwarded_header_secure_request(args, checks, work_dir)
 
     capabilities_body, capability_headers = _expect_status(
         args, checks, 'capabilities', '/api/capabilities/', 200,
@@ -486,7 +510,11 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
 
 
 def _run_sse_check(args: argparse.Namespace, checks: dict[str, str]) -> None:
-    command = _curl_command(args, f'/api/news/{args.news_id}/chat/')
+    command = _curl_command(
+        args,
+        f'/api/news/{args.news_id}/chat/',
+        headers=FORWARDED_SPOOF_HEADERS,
+    )
     command[command.index('--max-time') + 1] = '8'
     command[command.index('--connect-timeout') + 1] = '2'
     command.extend(['--no-buffer'])
@@ -506,6 +534,36 @@ def _run_sse_check(args: argparse.Namespace, checks: dict[str, str]) -> None:
     _require(process.returncode == 0, 'curl could not read the fake SSE stream')
     _require(b'data: first-frame' in body and b'data: final-frame' in body, 'fake SSE frames are missing')
     _require(total_elapsed - first_elapsed >= 0.5, 'first SSE frame did not arrive before the delayed final frame')
+
+    header_frame = next(
+        (line[len(SSE_PROXY_HEADER_MARKER):] for line in body.splitlines()
+         if line.startswith(SSE_PROXY_HEADER_MARKER)),
+        None,
+    )
+    _require(header_frame is not None, 'fake SSE upstream did not echo the Nginx proxy headers')
+    try:
+        observed_headers = json.loads(header_frame)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise AcceptanceError('fake SSE proxy header echo was not valid JSON') from exc
+    _require(observed_headers.get('host') == HOST, 'Nginx did not set the fixed upstream Host header')
+    _require(
+        observed_headers.get('x_forwarded_proto') == 'https',
+        'Nginx did not set X-Forwarded-Proto to https for the secure request',
+    )
+    try:
+        forwarded_ip = ipaddress.ip_address(observed_headers.get('x_forwarded_for', ''))
+    except ValueError as exc:
+        raise AcceptanceError('fake SSE upstream received an invalid X-Forwarded-For address') from exc
+    _require(
+        forwarded_ip != ipaddress.ip_address('198.51.100.44'),
+        'Nginx preserved the caller-supplied X-Forwarded-For address',
+    )
+    for name in ('forwarded', 'x_forwarded_host', 'x_forwarded_port'):
+        _require(observed_headers.get(name) is None, f'Nginx did not clear the {name} header')
+    checks['fake_sse_proxy_header_echo'] = json.dumps(observed_headers, sort_keys=True)
+    checks['real_client_address_observation'] = (
+        'NOT_RUN: the fake upstream echo verifies proxy headers, not Django WSGI REMOTE_ADDR'
+    )
     checks['sse_first_frame_ms'] = str(round(first_elapsed * 1000))
     checks['sse_total_ms'] = str(round(total_elapsed * 1000))
 

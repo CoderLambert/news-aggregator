@@ -16,6 +16,7 @@
 
 ```sh
 PYTHONPATH=backend:crawler RUN_MAIN=true backend/venv/bin/python -m pytest scripts/deploy/tests/test_nginx_templates.py -q
+PYTHONPATH=backend:crawler RUN_MAIN=true backend/venv/bin/python -m pytest scripts/deploy/tests/test_local_domain_acceptance.py -q
 bash -n scripts/deploy/local-domain-smoke.sh scripts/deploy/tests/test_local_domain_args.sh
 bash scripts/deploy/tests/test_local_domain_args.sh
 backend/venv/bin/python -m py_compile scripts/deploy/local_domain_acceptance.py
@@ -40,6 +41,8 @@ smoke 会核对 app image 的 `org.opencontainers.image.revision`，为临时栈
 
 报告和可能的失败截图保存在经过验证的 `TMPDIR` 下新建的 `newshub-local-domain-report-*` 目录，不包含应用密钥。脚本退出时只删除它自己创建的 `newshub-local-domain.*` 工作目录、Compose project/命名卷和 fake SSE 容器；报告目录会保留以供检查。`TMPDIR` 必须是现存、绝对、非 `/` 且位于源码树之外的目录。脚本不接受 `--root`，未知参数会报错。
 
-G1 包含 bootstrap 与 production Nginx `nginx -t`、ACME fixture/HTTP redirect、未知 Host 关闭、HTTPS 首页和深链、关键词搜索、API/cache/header 边界、缺失资源 404、旧哈希资源缓存、临时 CA 信任与 SAN 负例，以及用 fake upstream 验证准确 SSE 路径的首帧先于延迟终帧抵达。浏览器/API/SSE 结果与 app revision、Nginx image ID、RepoDigest 和版本写入 JSON 报告；报告在清理完成后更新 `cleanup_status`。任一步失败都只清理该次任务的资源。
+G1 包含 bootstrap 与 production Nginx `nginx -t`、ACME fixture/HTTP redirect、未知 Host 关闭、HTTPS 首页和深链、关键词搜索、API/cache/header 边界、缺失资源 404、旧哈希资源缓存、临时 CA 信任与 SAN 负例，以及用 fake upstream 验证准确 SSE 路径的首帧先于延迟终帧抵达。HTTPS 代理头负例会把伪造的 `X-Forwarded-Proto: http`、XFF 和 `Forwarded` 系列头送入真实 app 的 `/api/auth/csrf/` 非豁免路径，检查 HTTP 200（无 HTTPS 重定向）和 Secure、host-only CSRF cookie。独立的 fake SSE upstream 会回显它收到的 Host/转发头，以检查 Nginx 覆写协议与 XFF 并清除 `Forwarded`、`X-Forwarded-Host` 和 `X-Forwarded-Port`；这项 fake upstream 证据与真实 Django 请求分开记录。当前验收不读取 Django WSGI `REMOTE_ADDR`，客户端地址观测明确记为 `NOT_RUN`。
+
+浏览器/API/SSE 结果与 app revision、Nginx image ID、RepoDigest 和版本写入 JSON 报告；报告在清理完成后更新 `cleanup_status`。任一步失败都只清理该次任务的资源。
 
 G2 登录、session 生命周期、已登录 CSRF 写操作和 A/B 用户隔离尚未实现，当前 `--stage g2` 固定返回 `NOT_RUN`，不得把 G1 结果表述成 G2 通过。阶段 B 尚未执行前，也不能把本地模板、镜像或域名链描述为生产验收通过。

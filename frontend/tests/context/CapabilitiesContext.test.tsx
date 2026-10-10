@@ -9,26 +9,34 @@ vi.mock('@/services/api', async (importOriginal) => ({
   fetchCapabilities: mocks.fetchCapabilities,
 }))
 
-import { CapabilityProvider, FAIL_CLOSED_CAPABILITIES, useCapabilities } from '@/context/CapabilitiesContext'
+import { CAPABILITIES_QUERY_KEY, CapabilityProvider, FAIL_CLOSED_CAPABILITIES, useCapabilities } from '@/context/CapabilitiesContext'
 import * as api from '@/services/api'
-import { readOnlyCapabilities } from '../helpers/capabilities'
+import { fullCapabilities, readOnlyCapabilities } from '../helpers/capabilities'
 
 function CapabilitiesProbe() {
   const { capabilities, loading, failed } = useCapabilities()
   return (
     <output data-testid="capabilities">
-      {JSON.stringify({ accounts: capabilities.features.accounts, news: capabilities.features.news, loading, failed })}
+      {JSON.stringify({ capabilities, loading, failed })}
     </output>
   )
 }
 
-function renderProvider() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
+function renderProvider(client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
+  const view = render(
     <QueryClientProvider client={client}>
       <CapabilityProvider><CapabilitiesProbe /></CapabilityProvider>
     </QueryClientProvider>,
   )
+  return { client, ...view }
+}
+
+function readState() {
+  return JSON.parse(screen.getByTestId('capabilities').textContent ?? '{}') as {
+    capabilities: ReturnType<typeof fullCapabilities>
+    loading: boolean
+    failed: boolean
+  }
 }
 
 describe('CapabilityProvider fail-closed behavior', () => {
@@ -59,5 +67,43 @@ describe('CapabilityProvider fail-closed behavior', () => {
     render(<CapabilitiesProbe />)
     expect(screen.getByTestId('capabilities')).toHaveTextContent('"accounts":{"enabled":false,"reason":"capabilities_unavailable"}')
     expect(screen.getByTestId('capabilities')).toHaveTextContent('"loading":false')
+  })
+
+  it.each([
+    ['a rejected refetch', () => { throw new Error('offline') }],
+    ['an invalid schema refetch', () => api.parseCapabilities({ ...fullCapabilities(), features: {} })],
+  ])('fails closed after %s while stale full capabilities remain cached, then recovers', async (_label, rejectRefetch) => {
+    const staleFull = fullCapabilities()
+    mocks.fetchCapabilities.mockResolvedValueOnce(staleFull)
+    const { client } = renderProvider()
+
+    await waitFor(() => expect(readState().capabilities.features.accounts.enabled).toBe(true))
+    expect(client.getQueryData(CAPABILITIES_QUERY_KEY)).toEqual(staleFull)
+
+    mocks.fetchCapabilities.mockImplementationOnce(rejectRefetch)
+    await client.refetchQueries({ queryKey: CAPABILITIES_QUERY_KEY, exact: true })
+
+    await waitFor(() => expect(readState().failed).toBe(true))
+    expect(client.getQueryState(CAPABILITIES_QUERY_KEY)?.status).toBe('error')
+    expect(client.getQueryData(CAPABILITIES_QUERY_KEY)).toEqual(staleFull)
+
+    const failedState = readState()
+    expect(failedState.loading).toBe(false)
+    expect(failedState.capabilities.features.news).toEqual({ enabled: true, reason: null })
+    expect(failedState.capabilities.features.keyword_search).toEqual({ enabled: true, reason: null })
+    for (const [name, feature] of Object.entries(failedState.capabilities.features)) {
+      if (name === 'news' || name === 'keyword_search') continue
+      expect(feature).toEqual({ enabled: false, reason: 'capabilities_unavailable' })
+    }
+    expect(api.fetchCapabilities).toHaveBeenCalledTimes(2)
+
+    const recoveredFull = fullCapabilities()
+    mocks.fetchCapabilities.mockResolvedValueOnce(recoveredFull)
+    await client.refetchQueries({ queryKey: CAPABILITIES_QUERY_KEY, exact: true })
+
+    await waitFor(() => expect(readState().failed).toBe(false))
+    expect(readState().capabilities).toEqual(recoveredFull)
+    expect(client.getQueryData(CAPABILITIES_QUERY_KEY)).toEqual(recoveredFull)
+    expect(api.fetchCapabilities).toHaveBeenCalledTimes(3)
   })
 })

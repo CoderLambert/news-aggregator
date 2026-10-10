@@ -34,7 +34,7 @@ cleanup() {
     local status=$?
     trap - EXIT INT TERM
     if [[ -n "$CONTAINER_ID" ]]; then
-        docker rm "$CONTAINER_ID" >/dev/null 2>&1 || true
+        docker rm -f "$CONTAINER_ID" >/dev/null 2>&1 || true
     fi
     if [[ -n "$WORK_DIR" && -d "$WORK_DIR" ]]; then
         case "$WORK_DIR" in
@@ -117,17 +117,23 @@ running="$(docker ps --quiet --filter "volume=$VOLUME")" \
 WORK_DIR="$(mktemp -d "$OUTPUT_DIR/.newshub-backup.XXXXXX")"
 chmod 700 "$WORK_DIR"
 container_args=(
-    docker create --pull=never --network none --entrypoint python
+    docker create --pull=never --network none --user 10001:10001 --entrypoint python
     --mount "type=volume,source=$VOLUME,target=/source,readonly"
     --mount "type=bind,source=$SCRIPT_DIR/sqlite_snapshot.py,target=/tmp/sqlite_snapshot.py,readonly"
-    --mount "type=bind,source=$MANIFEST,target=/tmp/release-manifest.json,readonly"
-    "$IMAGE" python /tmp/sqlite_snapshot.py backup
-    --source /source/db.sqlite3 --output /tmp/snapshot.sqlite3
-    --release-manifest /tmp/release-manifest.json
+    "$IMAGE" -c 'import time; time.sleep(300)'
 )
 CONTAINER_ID="$("${container_args[@]}")" || fail 'could not create the isolated backup helper.'
 [[ -n "$CONTAINER_ID" ]] || fail 'backup helper did not return a container ID.'
-docker start --attach "$CONTAINER_ID" >/dev/null || fail 'SQLite volume backup helper failed.'
+docker start "$CONTAINER_ID" >/dev/null || fail 'could not start the isolated backup helper.'
+docker cp "$MANIFEST" "$CONTAINER_ID:/tmp/release-manifest.json" >/dev/null \
+    || fail 'could not stage the release manifest in the isolated helper.'
+prepare_code='import os,sys; [(os.chown(path,10001,10001), os.chmod(path,0o600)) for path in sys.argv[1:]]'
+docker exec --user 0:0 "$CONTAINER_ID" python -c "$prepare_code" /tmp/release-manifest.json \
+    || fail 'could not prepare the private release manifest in the isolated helper.'
+docker exec --user 10001:10001 "$CONTAINER_ID" python /tmp/sqlite_snapshot.py backup \
+    --source /source/db.sqlite3 --output /tmp/snapshot.sqlite3 \
+    --release-manifest /tmp/release-manifest.json \
+    || fail 'SQLite volume backup helper failed.'
 docker cp "$CONTAINER_ID:/tmp/snapshot.sqlite3" "$WORK_DIR/$FILENAME" >/dev/null \
     || fail 'could not copy the isolated SQLite snapshot.'
 docker cp "$CONTAINER_ID:/tmp/snapshot.sqlite3.manifest.json" "$WORK_DIR/$FILENAME.manifest.json" >/dev/null \

@@ -71,6 +71,7 @@ SHA_OLD=1111111111111111111111111111111111111111
 SHA_PREVIOUS=2222222222222222222222222222222222222222
 SHA_NEW=abcdef0123456789abcdef0123456789abcdef01
 SHA_MISMATCH=3333333333333333333333333333333333333333
+SHA_SECOND=4444444444444444444444444444444444444444
 
 MOCK_REVISION=$SHA_NEW
 export MOCK_REVISION
@@ -159,6 +160,7 @@ assert grep -q '^rm mock-export-container$' "$DOCKER_LOG"
 unset MOCK_CP_FAIL
 
 SUCCESS_DIST="$TEST_ROOT/success-dist"
+umask 077
 mkdir -p "$SUCCESS_DIST/assets"
 printf '<html><script src="/assets/app.hash.js"></script></html>\n' > "$SUCCESS_DIST/index.html"
 printf '<svg></svg>\n' > "$SUCCESS_DIST/favicon.svg"
@@ -173,12 +175,74 @@ assert test "$(readlink "$SUCCESS_ROOT/previous")" = "releases/$SHA_OLD"
 assert test -d "$SUCCESS_ROOT/releases/$SHA_OLD"
 assert test -d "$SUCCESS_ROOT/releases/$SHA_PREVIOUS"
 assert test -f "$SUCCESS_ROOT/releases/$SHA_NEW/index.html"
-assert test "$(readlink "$SUCCESS_ROOT/releases/$SHA_NEW/assets")" = ../../assets
+assert test -d "$SUCCESS_ROOT/releases/$SHA_NEW/assets"
+assert test ! -L "$SUCCESS_ROOT/releases/$SHA_NEW/assets"
 assert test "$(cat "$SUCCESS_ROOT/assets/app.hash.js")" = 'new asset'
 assert test "$(cat "$SUCCESS_ROOT/assets/old.hash.js")" = 'older content'
+assert test "$SUCCESS_ROOT/assets/app.hash.js" -ef "$SUCCESS_ROOT/releases/$SHA_NEW/assets/app.hash.js"
+assert test "$(stat -c '%a' "$SUCCESS_ROOT")" = 755
+assert test "$(stat -c '%a' "$SUCCESS_ROOT/releases")" = 755
+assert test "$(stat -c '%a' "$SUCCESS_ROOT/assets")" = 755
+assert test "$(stat -c '%a' "$SUCCESS_ROOT/releases/$SHA_NEW")" = 755
+assert test "$(stat -c '%a' "$SUCCESS_ROOT/releases/$SHA_NEW/assets")" = 755
+while IFS= read -r -d '' public_directory; do
+    assert test "$(stat -c '%a' "$public_directory")" = 755
+done < <(find "$SUCCESS_ROOT/releases/$SHA_NEW" -type d -print0)
+while IFS= read -r -d '' public_file; do
+    assert test "$(stat -c '%a' "$public_file")" = 644
+done < <(find "$SUCCESS_ROOT/releases/$SHA_NEW" -type f -print0)
 assert grep -q '^create --network none local/test$' "$DOCKER_LOG"
 assert grep -q '^cp mock-export-container:/app/frontend/dist/\.' "$DOCKER_LOG"
 assert grep -q '^rm mock-export-container$' "$DOCKER_LOG"
 assert test "$(grep -c '^start ' "$DOCKER_LOG" || true)" -eq 0
+
+FIRST_RELEASE_HASH="$(PYTHONPATH="$PROJECT_ROOT" python3 - "$SUCCESS_ROOT/releases/$SHA_NEW" <<'PY'
+import sys
+from pathlib import Path
+from scripts.deploy.release_manifest import sha256_exported_release
+print(sha256_exported_release(Path(sys.argv[1])))
+PY
+)"
+PYTHONPATH="$PROJECT_ROOT" python3 - "$SUCCESS_ROOT/releases/$SHA_NEW" "$SUCCESS_DIST" <<'PY'
+import sys
+from pathlib import Path
+from scripts.deploy.release_manifest import sha256_exported_release, sha256_tree
+release, dist = map(Path, sys.argv[1:])
+assert sha256_exported_release(release) == sha256_tree(dist)
+PY
+
+SECOND_DIST="$TEST_ROOT/second-dist"
+mkdir -p "$SECOND_DIST/assets"
+printf '<html><script src="/assets/app.hash.js"></script><script src="/assets/chunk-v2.hash.js"></script></html>\n' > "$SECOND_DIST/index.html"
+printf 'new asset\n' > "$SECOND_DIST/assets/app.hash.js"
+printf 'second chunk\n' > "$SECOND_DIST/assets/chunk-v2.hash.js"
+MOCK_DIST="$SECOND_DIST"
+MOCK_REVISION="$SHA_SECOND"
+export MOCK_DIST MOCK_REVISION
+"$SCRIPT" --execute --image local/test --sha "$SHA_SECOND" --root "$SUCCESS_ROOT" >"$TEST_ROOT/second.out"
+assert_current "$SUCCESS_ROOT" "$SHA_SECOND"
+assert test "$(readlink "$SUCCESS_ROOT/previous")" = "releases/$SHA_NEW"
+assert test -f "$SUCCESS_ROOT/assets/chunk.hash.js"
+assert test "$(cat "$SUCCESS_ROOT/assets/chunk.hash.js")" = 'chunk'
+assert test ! -e "$SUCCESS_ROOT/releases/$SHA_SECOND/assets/chunk.hash.js"
+assert test "$SUCCESS_ROOT/assets/chunk-v2.hash.js" -ef "$SUCCESS_ROOT/releases/$SHA_SECOND/assets/chunk-v2.hash.js"
+assert test "$(stat -c '%a' "$SUCCESS_ROOT/releases/$SHA_SECOND")" = 755
+assert test "$(stat -c '%a' "$SUCCESS_ROOT/releases/$SHA_SECOND/assets")" = 755
+SECOND_RELEASE_HASH="$(PYTHONPATH="$PROJECT_ROOT" python3 - "$SUCCESS_ROOT/releases/$SHA_SECOND" <<'PY'
+import sys
+from pathlib import Path
+from scripts.deploy.release_manifest import sha256_exported_release
+print(sha256_exported_release(Path(sys.argv[1])))
+PY
+)"
+PYTHONPATH="$PROJECT_ROOT" python3 - "$SUCCESS_ROOT/releases/$SHA_NEW" "$SUCCESS_DIST" "$SUCCESS_ROOT/releases/$SHA_SECOND" "$SECOND_DIST" "$FIRST_RELEASE_HASH" "$SECOND_RELEASE_HASH" <<'PY'
+import sys
+from pathlib import Path
+from scripts.deploy.release_manifest import sha256_exported_release, sha256_tree
+first, first_dist, second, second_dist = map(Path, sys.argv[1:5])
+first_expected, second_expected = sys.argv[5:]
+assert sha256_exported_release(first) == sha256_tree(first_dist) == first_expected
+assert sha256_exported_release(second) == sha256_tree(second_dist) == second_expected
+PY
 
 printf 'export-static tests passed\n'

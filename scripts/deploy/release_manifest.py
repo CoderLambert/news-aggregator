@@ -114,51 +114,48 @@ def sha256_tree(root: Path) -> str:
 
 
 def sha256_exported_release(release_root: Path) -> str:
-    """Hash an export-static release while validating its shared assets link."""
+    """Hash one immutable release and verify its assets are shared hardlinks."""
     if release_root.is_symlink() or not release_root.is_dir():
         raise ManifestError("release directory must be a real directory")
-    assets_link = release_root / "assets"
-    if not assets_link.is_symlink() or os.readlink(assets_link) != "../../assets":
-        raise ManifestError("release assets link does not match the export layout")
-    try:
-        shared_assets = assets_link.resolve(strict=True)
-        expected_assets = (release_root.parent.parent / "assets").resolve(strict=True)
-    except OSError:
-        raise ManifestError("release shared assets directory is missing") from None
-    if shared_assets != expected_assets or not shared_assets.is_dir():
-        raise ManifestError("release assets resolve outside the shared assets directory")
+    release_assets = release_root / "assets"
+    shared_assets = release_root.parent.parent / "assets"
+    if release_assets.is_symlink() or not release_assets.is_dir():
+        raise ManifestError("release assets must be a real directory")
+    if shared_assets.is_symlink() or not shared_assets.is_dir():
+        raise ManifestError("shared assets directory is missing or invalid")
 
-    entries: list[tuple[str, Path]] = []
-    for path in release_root.iterdir():
-        if path.name == "assets":
-            continue
-        if path.is_symlink():
-            raise ManifestError("release contains an unexpected symlink")
-        if path.is_file():
-            entries.append((path.name, path))
-        elif path.is_dir():
-            for child in path.rglob("*"):
-                if child.is_symlink():
-                    raise ManifestError("release contains an unexpected symlink")
-                if child.is_file():
-                    entries.append((child.relative_to(release_root).as_posix(), child))
-                elif not child.is_dir():
-                    raise ManifestError("release contains a non-regular file")
-        else:
-            raise ManifestError("release contains a non-regular file")
-    asset_count = 0
     for path in shared_assets.rglob("*"):
         if path.is_symlink():
             raise ManifestError("shared assets contain a symlink")
-        if path.is_file():
-            asset_count += 1
-            entries.append((f"assets/{path.relative_to(shared_assets).as_posix()}", path))
-        elif not path.is_dir():
+        if not path.is_dir() and not path.is_file():
             raise ManifestError("shared assets contain a non-regular file")
-    if not any(name == "index.html" for name, _path in entries):
+
+    entries: list[tuple[str, Path]] = []
+    asset_count = 0
+    for path in sorted(release_root.rglob("*"), key=lambda item: item.relative_to(release_root).as_posix()):
+        if path.is_symlink():
+            raise ManifestError("release contains a symlink")
+        relative_path = path.relative_to(release_root)
+        if path.is_dir():
+            continue
+        if not path.is_file():
+            raise ManifestError("release contains a non-regular file")
+        if relative_path.parts[0] == "assets":
+            asset_count += 1
+            shared_path = shared_assets.joinpath(*relative_path.parts[1:])
+            if shared_path.is_symlink() or not shared_path.is_file():
+                raise ManifestError("release asset is missing from shared assets")
+            try:
+                if not os.path.samefile(path, shared_path):
+                    raise ManifestError("release asset is not the matching shared hardlink")
+            except OSError:
+                raise ManifestError("release asset is not the matching shared hardlink") from None
+        entries.append((relative_path.as_posix(), path))
+
+    if not (release_root / "index.html").is_file() or (release_root / "index.html").is_symlink():
         raise ManifestError("release is missing index.html")
     if asset_count == 0:
-        raise ManifestError("release shared assets directory is empty")
+        raise ManifestError("release assets directory is empty")
 
     digest = hashlib.sha256()
     for relative, path in sorted(entries, key=lambda item: item[0]):
