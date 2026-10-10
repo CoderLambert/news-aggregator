@@ -389,6 +389,20 @@ def test_main_awaits_g2_browser_checks_before_rate_checks_and_sanitizes_async_fa
         'stage': 'g2', 'check': 'g2.account_browser', 'exception_type': 'RuntimeError',
     }
 
+    with (
+        patch.object(acceptance, '_check_http_api', side_effect=lambda *_args: None),
+        patch.object(acceptance, '_run_browser_checks', side_effect=lambda *_args: None),
+        patch.object(acceptance, '_run_g2_browser_checks', side_effect=browser_accounts),
+        patch.object(
+            acceptance, '_run_g2_rate_limit_checks',
+            side_effect=acceptance.CleanupAcceptanceError('synthetic cleanup failure'),
+        ),
+    ):
+        assert acceptance.main(argv) == 1
+    cleanup_report = json.loads(report.read_text(encoding='utf-8'))
+    assert cleanup_report['status'] == 'FAIL'
+    assert cleanup_report['cleanup_status'] == 'FAIL'
+
 
 def _valid_parent_inspects(project='newshub-local-g2-123-0123456789abcdef'):
     gateway = {
@@ -430,7 +444,17 @@ def _valid_parent_inspects(project='newshub-local-g2-123-0123456789abcdef'):
             'com.docker.compose.network': 'isolated',
         },
     }
-    return gateway, app, network
+    volume = {
+        'Name': f'{project}_db-data',
+        'Driver': 'local',
+        'Scope': 'local',
+        'Options': None,
+        'Labels': {
+            'com.docker.compose.project': project,
+            'com.docker.compose.volume': 'db-data',
+        },
+    }
+    return gateway, app, network, volume
 
 
 def _g2_inspect_args(tmp_path):
@@ -462,6 +486,8 @@ def _mock_parent_docker_run(commands, objects):
             payload = objects['gateway'] if command[-1] == GATEWAY_CONTAINER_ID else objects['app']
         elif command[:3] == ['docker', 'network', 'inspect']:
             payload = objects['network']
+        elif command[:3] == ['docker', 'volume', 'inspect']:
+            payload = objects['volume']
         else:
             raise AssertionError(f'unexpected Docker command: {command}')
         return subprocess.CompletedProcess(command, 0, json.dumps([payload]), '')
@@ -470,7 +496,7 @@ def _mock_parent_docker_run(commands, objects):
 
 def test_g2_parent_inspection_accepts_exact_owned_app_gateway_volume_and_network(tmp_path):
     args = _g2_inspect_args(tmp_path)
-    objects = dict(zip(('gateway', 'app', 'network'), _valid_parent_inspects(args.compose_project)))
+    objects = dict(zip(('gateway', 'app', 'network', 'volume'), _valid_parent_inspects(args.compose_project)))
     commands = []
     with patch.object(acceptance.subprocess, 'run', side_effect=_mock_parent_docker_run(commands, objects)):
         parents = acceptance._inspect_g2_parents(args)
@@ -488,12 +514,14 @@ def test_g2_parent_inspection_accepts_exact_owned_app_gateway_volume_and_network
     'gateway-published-port', 'network-not-internal', 'network-label',
     'app-image', 'app-project', 'app-service', 'app-user', 'app-namespace',
     'app-bind-db', 'app-foreign-volume', 'app-overlapping-mounts',
+    'app-extra-app-bind', 'app-extra-backend-volume', 'app-extra-python-bind', 'app-extra-volume',
+    'db-volume-owner', 'db-volume-label', 'db-volume-driver', 'db-volume-scope', 'db-volume-bind-options',
 ])
 def test_g2_parent_identity_failures_refuse_fixture_exec_and_private_stdin(tmp_path, mutation):
     args = _g2_inspect_args(tmp_path)
     bundle = acceptance._fixtures.create_bundle(args.private_root / 'bundle.json')
-    gateway, app, network = _valid_parent_inspects(args.compose_project)
-    objects = {'gateway': gateway, 'app': app, 'network': network}
+    gateway, app, network, volume = _valid_parent_inspects(args.compose_project)
+    objects = {'gateway': gateway, 'app': app, 'network': network, 'volume': volume}
     if mutation == 'gateway-image': gateway['Image'] = APP_IMAGE_ID
     elif mutation == 'gateway-project': gateway['Config']['Labels']['com.docker.compose.project'] = 'other'
     elif mutation == 'gateway-service': gateway['Config']['Labels']['com.docker.compose.service'] = 'app'
@@ -512,12 +540,33 @@ def test_g2_parent_identity_failures_refuse_fixture_exec_and_private_stdin(tmp_p
         'Type': 'bind', 'Source': '/tmp/synthetic',
         'Destination': '/var/lib/newshub/db/db.sqlite3', 'RW': True,
     })
+    elif mutation == 'app-extra-app-bind': app['Mounts'].append({
+        'Type': 'bind', 'Source': '/tmp/synthetic', 'Destination': '/app', 'RW': True,
+    })
+    elif mutation == 'app-extra-backend-volume': app['Mounts'].append({
+        'Type': 'volume', 'Name': 'other_backend', 'Destination': '/app/backend', 'RW': True,
+    })
+    elif mutation == 'app-extra-python-bind': app['Mounts'].append({
+        'Type': 'bind', 'Source': '/tmp/python', 'Destination': '/usr/local/lib/python3.12/site-packages', 'RW': True,
+    })
+    elif mutation == 'app-extra-volume': app['Mounts'].append({
+        'Type': 'volume', 'Name': 'other_cache', 'Destination': '/var/cache/newshub', 'RW': True,
+    })
+    elif mutation == 'db-volume-owner': volume['Labels']['com.docker.compose.project'] = 'other'
+    elif mutation == 'db-volume-label': volume['Labels']['com.docker.compose.volume'] = 'other'
+    elif mutation == 'db-volume-driver': volume['Driver'] = 'local-persist'
+    elif mutation == 'db-volume-scope': volume['Scope'] = 'global'
+    elif mutation == 'db-volume-bind-options': volume['Options'] = {'type': 'none', 'o': 'bind', 'device': '/tmp/foreign'}
     commands = []
     with patch.object(acceptance.subprocess, 'run', side_effect=_mock_parent_docker_run(commands, objects)):
         with pytest.raises(acceptance.AcceptanceError):
             acceptance._run_fixture_program(args, bundle, 'seed')
     assert not any(command[:2] == ['docker', 'exec'] for command, _kwargs in commands)
     assert not any('input' in kwargs for _command, kwargs in commands)
+    if mutation.startswith('app-extra-'):
+        assert not any(command[:3] == ['docker', 'volume', 'inspect'] for command, _kwargs in commands)
+    if mutation.startswith('db-volume-'):
+        assert any(command[:3] == ['docker', 'volume', 'inspect'] for command, _kwargs in commands)
 
 
 def test_g2_http_api_matrix_requires_full_accounts_and_blocks_private_ai_anonymous(tmp_path):
@@ -795,23 +844,38 @@ def _sidecar_inspect(args, container_id, *, owner=None, image=None, user=None, n
     }
 
 
-def _mock_sidecar_lifecycle(args, rate_root, *, start_result=None, identity=None, rm_code=0):
+def _mock_sidecar_lifecycle(
+    args, rate_root, *, start_result=None, identity=None, rm_code=0,
+    ledger_after_start=None, create_timeout=False, write_cid=True,
+):
     container_id = '9' * 64
     obj = identity or _sidecar_inspect(args, container_id)
     calls = []
+    cidfile_path = None
 
     def run(command, **kwargs):
+        nonlocal cidfile_path
         calls.append((command, kwargs))
         if command[:3] == ['docker', 'inspect', '--type'] and command[-1].startswith('nhsmoke-rate-'):
             return subprocess.CompletedProcess(command, 1, '', '')
         if command[:2] == ['docker', 'create']:
-            cidfile = Path(command[command.index('--cidfile') + 1])
-            cidfile.write_text(container_id + '\n', encoding='ascii')
-            cidfile.chmod(0o600)
+            cidfile_path = Path(command[command.index('--cidfile') + 1])
+            if write_cid:
+                cidfile_path.write_text(container_id + '\n', encoding='ascii')
+                cidfile_path.chmod(0o600)
+            if create_timeout:
+                raise subprocess.TimeoutExpired(command, 30)
             return subprocess.CompletedProcess(command, 0, container_id + '\n', '')
         if command[:3] == ['docker', 'inspect', '--type']:
             return subprocess.CompletedProcess(command, 0, json.dumps([obj]), '')
         if command[:3] == ['docker', 'start', '--attach']:
+            if ledger_after_start == 'lost':
+                assert cidfile_path is not None
+                cidfile_path.unlink()
+            elif ledger_after_start == 'replaced':
+                assert cidfile_path is not None
+                cidfile_path.write_text('8' * 64 + '\n', encoding='ascii')
+                cidfile_path.chmod(0o600)
             if isinstance(start_result, BaseException):
                 raise start_result
             return start_result or subprocess.CompletedProcess(command, 0, 'csrf=200\nsixth=429\n', '')
@@ -887,8 +951,11 @@ def test_g2_rate_sidecar_failures_never_delete_by_name_and_cleanup_only_validate
         }),
         patch.object(acceptance.subprocess, 'run', side_effect=run),
     ):
-        with pytest.raises(acceptance.AcceptanceError):
+        with pytest.raises(acceptance.AcceptanceError) as error:
             acceptance._run_rate_sidecar(args, '127.0.0.70', [('csrf', config)])
+    if failure == 'cleanup-error':
+        assert isinstance(error.value, acceptance.CleanupAcceptanceError)
+        assert error.value.cleanup_status == 'FAIL'
 
     commands = [command for command, _kwargs in calls]
     assert not any(command[1] == 'run' for command in commands)
@@ -902,6 +969,67 @@ def test_g2_rate_sidecar_failures_never_delete_by_name_and_cleanup_only_validate
     else:
         assert commands[3][1] == 'start'
         assert commands[-2:] == [['docker', 'inspect', '--type', 'container', container_id], ['docker', 'rm', '-f', container_id]]
+
+
+@pytest.mark.parametrize('ledger_change', ['lost', 'replaced'])
+def test_g2_rate_sidecar_lost_or_replaced_ledger_fails_but_cleans_only_memory_cid(tmp_path, ledger_change):
+    args, _private_root, rate_root, _output_root, _ca_cert, config = _rate_sidecar_setup(tmp_path)
+    calls, run, container_id = _mock_sidecar_lifecycle(
+        args, rate_root, ledger_after_start=ledger_change,
+        start_result=subprocess.CompletedProcess(['docker', 'start'], 0, 'csrf=200\n', ''),
+    )
+    with (
+        patch.object(acceptance, '_inspect_g2_gateway', return_value={
+            'container_id': GATEWAY_CONTAINER_ID, 'network_id': NETWORK_ID, 'ip': '172.28.0.2',
+        }),
+        patch.object(acceptance.subprocess, 'run', side_effect=run),
+    ):
+        with pytest.raises(acceptance.AcceptanceError, match='CID ledger'):
+            acceptance._run_rate_sidecar(args, '127.0.0.70', [('csrf', config)])
+
+    commands = [command for command, _kwargs in calls]
+    assert ['docker', 'rm', '-f', container_id] in commands
+    assert not any(command[-1] == '8' * 64 for command in commands if command[1] in {'inspect', 'rm'})
+    assert not any(command[1] == 'rm' and command[-1].startswith('nhsmoke-rate-') for command in commands)
+
+
+def test_g2_rate_sidecar_create_timeout_with_written_owned_cid_is_removed_by_exact_id(tmp_path):
+    args, _private_root, rate_root, _output_root, _ca_cert, config = _rate_sidecar_setup(tmp_path)
+    calls, run, container_id = _mock_sidecar_lifecycle(
+        args, rate_root, create_timeout=True,
+    )
+    with (
+        patch.object(acceptance, '_inspect_g2_gateway', return_value={
+            'container_id': GATEWAY_CONTAINER_ID, 'network_id': NETWORK_ID, 'ip': '172.28.0.2',
+        }),
+        patch.object(acceptance.subprocess, 'run', side_effect=run),
+    ):
+        with pytest.raises(acceptance.AcceptanceError, match='bounded runtime') as error:
+            acceptance._run_rate_sidecar(args, '127.0.0.70', [('csrf', config)])
+
+    assert not isinstance(error.value, acceptance.CleanupAcceptanceError)
+    commands = [command for command, _kwargs in calls]
+    assert ['docker', 'rm', '-f', container_id] in commands
+    assert not any(command[1] == 'rm' and command[-1].startswith('nhsmoke-rate-') for command in commands)
+
+
+def test_g2_rate_sidecar_create_timeout_without_verifiable_cid_marks_cleanup_fail(tmp_path):
+    args, _private_root, rate_root, _output_root, _ca_cert, config = _rate_sidecar_setup(tmp_path)
+    calls, run, _container_id = _mock_sidecar_lifecycle(
+        args, rate_root, create_timeout=True, write_cid=False,
+    )
+    with (
+        patch.object(acceptance, '_inspect_g2_gateway', return_value={
+            'container_id': GATEWAY_CONTAINER_ID, 'network_id': NETWORK_ID, 'ip': '172.28.0.2',
+        }),
+        patch.object(acceptance.subprocess, 'run', side_effect=run),
+    ):
+        with pytest.raises(acceptance.CleanupAcceptanceError) as error:
+            acceptance._run_rate_sidecar(args, '127.0.0.70', [('csrf', config)])
+
+    assert error.value.cleanup_status == 'FAIL'
+    commands = [command for command, _kwargs in calls]
+    assert not any(command[1] == 'rm' for command in commands)
 
 
 def test_g2_rate_sidecar_create_failure_without_cid_does_not_delete_reused_name(tmp_path):

@@ -191,6 +191,11 @@ elif args.fixture_phase == 'seed':
     args.fixture_state.chmod(0o600)
     print('{"fixture_phase":"seed","status":"PASS"}')
 else:
+    if os.environ.get('MOCK_G2_CLEANUP_FAIL') == '1':
+        report = {'stage': 'g2', 'status': 'FAIL', 'cleanup_status': 'FAIL'}
+        Path(args.report).write_text(json.dumps(report) + '\n', encoding='utf-8')
+        print(json.dumps(report))
+        raise SystemExit(1)
     if args.sse_only:
         assert args.fixture_bundle is None and args.fixture_state is None and args.compose_project is None
         with open(os.environ['ARGV_VALIDATION_LOG'], 'a', encoding='utf-8') as stream:
@@ -383,5 +388,20 @@ assert report['nginx_image_id'] == 'sha256:' + 'b' * 64
 assert report['curl_image'] == 'curlimages/curl:8.10.1'
 assert report['curl_image_id'] == 'sha256:' + 'c' * 64
 PY
+
+: >"$DOCKER_LOG"
+: >"$OPENSSL_LOG"
+g2_cleanup_output=""
+g2_cleanup_exit=0
+g2_cleanup_output="$(env MOCK_VALIDATE_ACCEPTANCE_ARGS=1 MOCK_G2_CLEANUP_FAIL=1 \
+    "$SMOKE_SCRIPT" --execute --stage g2 --image "$APP_IMAGE" --sha "$MOCK_IMAGE_SHA" 2>&1)" || g2_cleanup_exit=$?
+[[ "$g2_cleanup_exit" != 0 ]] || fail 'a G2 acceptance cleanup failure was reported as PASS by the shell trap.'
+[[ "$g2_cleanup_output" == *'G2 local-domain smoke NOT PASS'* ]] \
+    || fail 'the shell trap hid the G2 cleanup failure from its final status.'
+report_root="$(printf '%s\n' "$g2_cleanup_output" | sed -n 's/.*report directory //p' | tail -n 1)"
+report_path="$report_root/http-browser.json"
+[[ -f "$report_path" ]] || fail 'the failed G2 cleanup report was not retained.'
+"$REAL_PYTHON" -c 'import json,sys; report=json.load(open(sys.argv[1], encoding="utf-8")); assert report["cleanup_status"] == "FAIL" and report["status"] == "FAIL"' "$report_path" \
+    || fail 'the shell trap overwrote cleanup_status FAIL or overall status FAIL.'
 
 printf 'local-domain smoke argument/resource tests passed (Docker/OpenSSL/certutil/curl/browser are stubbed).\n'

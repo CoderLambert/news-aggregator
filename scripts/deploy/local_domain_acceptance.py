@@ -48,6 +48,12 @@ class AcceptanceError(RuntimeError):
     pass
 
 
+class CleanupAcceptanceError(AcceptanceError):
+    """An acceptance failure that must remain visible as a cleanup failure."""
+
+    cleanup_status = 'FAIL'
+
+
 def _require(condition: bool, message: str) -> None:
     if not condition:
         raise AcceptanceError(message)
@@ -217,24 +223,32 @@ def _inspect_g2_app(args: argparse.Namespace, gateway_id: str) -> str:
     db_root = Path('/var/lib/newshub/db')
     mounts = app.get('Mounts')
     _require(
-        isinstance(mounts, list) and all(isinstance(mount, dict) for mount in mounts),
+        isinstance(mounts, list) and len(mounts) == 1
+        and all(isinstance(mount, dict) for mount in mounts),
         'G2 app mount list is invalid',
     )
-    overlapping_mounts = []
-    for mount in mounts:
-        try:
-            destination = Path(mount.get('Destination', ''))
-        except (TypeError, ValueError):
-            continue
-        if destination == db_root or destination in db_root.parents or db_root in destination.parents:
-            overlapping_mounts.append(mount)
+    db_mount = mounts[0]
     _require(
-        len(overlapping_mounts) == 1
-        and overlapping_mounts[0].get('Destination') == str(db_root)
-        and overlapping_mounts[0].get('Type') == 'volume'
-        and overlapping_mounts[0].get('Name') == f'{args.compose_project}_db-data'
-        and overlapping_mounts[0].get('RW') is True,
+        db_mount.get('Destination') == str(db_root)
+        and db_mount.get('Type') == 'volume'
+        and db_mount.get('Name') == f'{args.compose_project}_db-data'
+        and db_mount.get('RW') is True,
         'G2 app database mount is not the unique owned named volume',
+    )
+    volume_name = f'{args.compose_project}_db-data'
+    volume = _docker_inspect_object(
+        ['docker', 'volume', 'inspect', volume_name], 'database volume',
+    )
+    volume_labels = volume.get('Labels')
+    _require(
+        volume.get('Name') == volume_name
+        and volume.get('Driver') == 'local'
+        and volume.get('Scope') == 'local'
+        and volume.get('Options') in (None, {})
+        and isinstance(volume_labels, dict)
+        and volume_labels.get('com.docker.compose.project') == args.compose_project
+        and volume_labels.get('com.docker.compose.volume') == 'db-data',
+        'G2 database volume is not the owned local Compose volume',
     )
     return app_id
 
@@ -450,6 +464,36 @@ def _curl_config_quote(value: str) -> str:
     return json.dumps(value)
 
 
+def _read_rate_sidecar_cidfile(cidfile: Path) -> str:
+    flags = os.O_RDONLY
+    if hasattr(os, 'O_NOFOLLOW'):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(cidfile, flags)
+        with os.fdopen(fd, 'rb') as stream:
+            info = os.fstat(stream.fileno())
+            _require(
+                stat.S_ISREG(info.st_mode)
+                and stat.S_IMODE(info.st_mode) == 0o600
+                and info.st_uid == os.getuid(),
+                'G2 sidecar CID ledger is not a private smoke-owned regular file',
+            )
+            raw = stream.read(130)
+    except OSError as exc:
+        raise AcceptanceError('G2 sidecar CID ledger is missing or unsafe') from exc
+    try:
+        content = raw.decode('ascii')
+    except UnicodeDecodeError as exc:
+        raise AcceptanceError('G2 sidecar CID ledger is invalid') from exc
+    candidate = content[:-1] if content.endswith('\n') else content
+    _require(
+        candidate == candidate.strip()
+        and CONTAINER_ID_PATTERN.fullmatch(candidate) is not None,
+        'G2 sidecar CID ledger does not contain one full container ID',
+    )
+    return candidate
+
+
 def _write_rate_request(
     root: Path,
     name: str,
@@ -544,10 +588,15 @@ def _run_rate_sidecar(args: argparse.Namespace, interface: str, requests: list[t
         '--entrypoint', '/bin/sh', args.curl_image_id,
         f'/smoke/rate/{script_path.name}',
     ]
+    # Keep a validated CID in memory once its exact container identity has
+    # passed inspect. Later cleanup never depends on the mutable CID file.
     container_id: str | None = None
     statuses: dict[str, int] | None = None
     failure: AcceptanceError | None = None
     cleanup_failure: AcceptanceError | None = None
+    ledger_failure: AcceptanceError | None = None
+    create_may_have_created = False
+    active_operation = 'create'
     try:
         old_umask = os.umask(0o077)
         try:
@@ -557,24 +606,20 @@ def _run_rate_sidecar(args: argparse.Namespace, interface: str, requests: list[t
         finally:
             os.umask(old_umask)
         if create_result.returncode != 0:
+            create_may_have_created = cidfile.exists() or cidfile.is_symlink()
             raise AcceptanceError(f'G2 rate sidecar create failed (exit {create_result.returncode})')
+        create_may_have_created = True
         _require(
-            not cidfile.is_symlink()
-            and cidfile.is_file()
-            and stat.S_IMODE(cidfile.stat(follow_symlinks=False).st_mode) == 0o600
-            and cidfile.stat(follow_symlinks=False).st_uid == os.getuid(),
-            'G2 sidecar CID ledger is missing or not private',
+            cidfile.exists() or cidfile.is_symlink(),
+            'G2 sidecar CID ledger is missing',
         )
-        raw_cid = cidfile.read_text(encoding='ascii').strip()
-        _require(
-            CONTAINER_ID_PATTERN.fullmatch(raw_cid.lower()) is not None,
-            'G2 sidecar CID ledger does not contain one full container ID',
-        )
-        container_id = raw_cid.lower()
+        ledger_id = _read_rate_sidecar_cidfile(cidfile)
         stdout_ids = [line.strip().lower() for line in create_result.stdout.splitlines() if line.strip()]
+        container = _inspect_g2_container(ledger_id, 'rate sidecar container')
+        _validate_rate_sidecar_identity(container, ledger_id, args, gateway['container_id'], require_stopped=True)
+        container_id = ledger_id
         _require(stdout_ids == [container_id], 'G2 sidecar create ID did not match its CID ledger')
-        container = _inspect_g2_container(container_id, 'rate sidecar container')
-        _validate_rate_sidecar_identity(container, container_id, args, gateway['container_id'], require_stopped=True)
+        active_operation = 'start'
         start_result = subprocess.run(
             ['docker', 'start', '--attach', container_id],
             capture_output=True, text=True, timeout=120, check=False,
@@ -596,30 +641,35 @@ def _run_rate_sidecar(args: argparse.Namespace, interface: str, requests: list[t
     except subprocess.TimeoutExpired as exc:
         failure = AcceptanceError('G2 rate sidecar exceeded its bounded runtime')
         failure.__cause__ = exc
+        if active_operation == 'create':
+            create_may_have_created = True
     except AcceptanceError as exc:
         failure = exc
     except OSError as exc:
         failure = AcceptanceError('G2 rate sidecar could not be started')
         failure.__cause__ = exc
     finally:
-        if cidfile.exists() or cidfile.is_symlink():
+        if container_id is None and create_may_have_created:
             try:
-                ledger_info = cidfile.stat(follow_symlinks=False)
-                _require(
-                    not cidfile.is_symlink()
-                    and stat.S_ISREG(ledger_info.st_mode)
-                    and stat.S_IMODE(ledger_info.st_mode) == 0o600
-                    and ledger_info.st_uid == os.getuid(),
-                    'G2 sidecar CID ledger changed or lost private ownership',
+                candidate_id = _read_rate_sidecar_cidfile(cidfile)
+                cleanup_container = _inspect_g2_container(candidate_id, 'rate sidecar recovery container')
+                _validate_rate_sidecar_identity(
+                    cleanup_container, candidate_id, args, gateway['container_id'],
                 )
-                ledger_id = cidfile.read_text(encoding='ascii').strip().lower()
-                _require(
-                    CONTAINER_ID_PATTERN.fullmatch(ledger_id) is not None,
-                    'G2 sidecar CID ledger became invalid; refusing name-based cleanup',
-                )
-                if container_id is not None:
+                container_id = candidate_id
+            except (AcceptanceError, OSError, subprocess.TimeoutExpired) as exc:
+                cleanup_failure = CleanupAcceptanceError('G2 rate sidecar cleanup identity could not be verified')
+                cleanup_failure.__cause__ = exc
+
+        if container_id is not None:
+            try:
+                try:
+                    ledger_id = _read_rate_sidecar_cidfile(cidfile)
                     _require(ledger_id == container_id, 'G2 sidecar CID ledger changed after inspection')
-                container_id = ledger_id
+                except (AcceptanceError, OSError) as exc:
+                    ledger_failure = AcceptanceError('G2 sidecar CID ledger changed after container inspection')
+                    ledger_failure.__cause__ = exc
+
                 cleanup_container = _inspect_g2_container(container_id, 'rate sidecar cleanup container')
                 _validate_rate_sidecar_identity(
                     cleanup_container, container_id, args, gateway['container_id'],
@@ -630,8 +680,13 @@ def _run_rate_sidecar(args: argparse.Namespace, interface: str, requests: list[t
                 )
                 _require(cleanup_result.returncode == 0, 'G2 rate sidecar exact-ID cleanup failed')
             except (AcceptanceError, OSError, subprocess.TimeoutExpired) as exc:
-                cleanup_failure = AcceptanceError('G2 rate sidecar exact-ID cleanup failed')
+                cleanup_failure = CleanupAcceptanceError('G2 rate sidecar exact-ID cleanup failed')
                 cleanup_failure.__cause__ = exc
+        elif create_may_have_created and cleanup_failure is None:
+            cleanup_failure = CleanupAcceptanceError('G2 rate sidecar cleanup has no verified container ID')
+
+        if failure is None and ledger_failure is not None:
+            failure = ledger_failure
         if cidfile.exists() and not cidfile.is_symlink():
             cidfile.chmod(0o600)
         for private_file in output_root.iterdir():
@@ -1855,6 +1910,8 @@ def main(argv: list[str] | None = None) -> int:
                 _run_g2_rate_limit_checks(args, checks, _load_fixture_bundle(args.fixture_bundle))
     except Exception as exc:
         result['status'] = 'FAIL'
+        if getattr(exc, 'cleanup_status', None) == 'FAIL':
+            result['cleanup_status'] = 'FAIL'
         if args.stage == 'g2':
             result['failure'] = {
                 'stage': 'g2',

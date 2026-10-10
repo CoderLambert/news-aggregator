@@ -59,6 +59,13 @@ cleanup() {
     local status=$?
     local report_path="${task_report_root:+$task_report_root/report.json}"
     trap - EXIT INT TERM
+    if [[ -n "$task_report_root" && ! -f "$report_path" ]]; then
+        if [[ -n "${http_report:-}" && -f "$http_report" ]]; then
+            report_path="$http_report"
+        elif [[ -n "${sse_report:-}" && -f "$sse_report" ]]; then
+            report_path="$sse_report"
+        fi
+    fi
 
     if [[ -n "$task_fake_server_id" ]]; then
         docker rm -f "$task_fake_server_id" >/dev/null 2>&1 || task_cleanup_failed=1
@@ -81,11 +88,12 @@ cleanup() {
     fi
 
     if [[ -n "$report_path" && -f "$report_path" && -x "$PYTHON_BIN" ]]; then
-        if ! "$PYTHON_BIN" -c 'import json,sys; from pathlib import Path; path=Path(sys.argv[1]); report=json.loads(path.read_text(encoding="utf-8")); report["cleanup_status"]="PASS" if sys.argv[2] == "0" else "FAIL"; report["status"]="FAIL" if sys.argv[2] != "0" else report.get("status", "FAIL"); path.write_text(json.dumps(report, indent=2, sort_keys=True)+"\n", encoding="utf-8")' \
-            "$report_path" "$task_cleanup_failed" >/dev/null 2>&1; then
+        report_cleanup_status="$("$PYTHON_BIN" -c 'import json,sys; from pathlib import Path; path=Path(sys.argv[1]); report=json.loads(path.read_text(encoding="utf-8")); prior=report.get("cleanup_status"); clean=sys.argv[2] == "0" and prior in (None, "pending", "PASS"); report["cleanup_status"]="PASS" if clean else "FAIL"; report["status"]="FAIL" if not clean else report.get("status", "FAIL"); path.write_text(json.dumps(report, indent=2, sort_keys=True)+"\n", encoding="utf-8"); print(report["cleanup_status"])' \
+            "$report_path" "$task_cleanup_failed" 2>/dev/null)" || {
             task_cleanup_failed=1
             status=1
-        fi
+        }
+        [[ "$report_cleanup_status" == PASS ]] || task_cleanup_failed=1
     fi
 
     if ((task_cleanup_failed)); then
