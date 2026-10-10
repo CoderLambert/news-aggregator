@@ -96,6 +96,74 @@ function draftStorageKey(viewerId: ResearchViewerId, taskId: string): string {
   return `${String(viewerId)}:draft:${taskId}`
 }
 
+
+const PENDING_CREATE_PREFIX = 'news-aggregator:research-pending-create:v1'
+
+interface PendingResearchCreate {
+  version: 1
+  taskId: string
+  idempotencyKey: string
+  query: string
+  localOnly: boolean
+  createdAt: number
+}
+
+function pendingCreateStorageKey(viewerId: ResearchViewerId): string {
+  return PENDING_CREATE_PREFIX + ':' + encodeURIComponent(String(viewerId))
+}
+
+function savePendingCreate(viewerId: ResearchViewerId, task: ResearchTaskSnapshot, key: string): void {
+  if (task.sessionId) return
+  const value: PendingResearchCreate = {
+    version: 1, taskId: task.id, idempotencyKey: key, query: task.query,
+    localOnly: task.localOnly, createdAt: Date.now(),
+  }
+  try {
+    window.sessionStorage.setItem(pendingCreateStorageKey(viewerId), JSON.stringify(value))
+  } catch {
+    // An unavailable session store cannot provide pre-header recovery.
+  }
+}
+
+function clearPendingCreate(viewerId: ResearchViewerId, expectedKey?: string): void {
+  try {
+    if (expectedKey) {
+      const current = loadPendingCreate(viewerId)
+      if (!current || current.idempotencyKey !== expectedKey) return
+    }
+    window.sessionStorage.removeItem(pendingCreateStorageKey(viewerId))
+  } catch {
+    // Browser storage is optional.
+  }
+}
+
+function loadPendingCreate(viewerId: ResearchViewerId): PendingResearchCreate | null {
+  try {
+    const raw: unknown = JSON.parse(window.sessionStorage.getItem(pendingCreateStorageKey(viewerId)) ?? 'null')
+    if (!isRecord(raw)) return null
+    const valid = raw.version === 1 && typeof raw.taskId === 'string'
+      && typeof raw.idempotencyKey === 'string' && /^[\x20-\x7e]{1,64}$/.test(raw.idempotencyKey)
+      && typeof raw.query === 'string' && raw.query.length > 0 && raw.query.length <= 20_000
+      && typeof raw.localOnly === 'boolean' && typeof raw.createdAt === 'number'
+      && Number.isFinite(raw.createdAt) && raw.createdAt <= Date.now()
+      && Date.now() - raw.createdAt <= 24 * 60 * 60 * 1000
+    if (valid) return raw as unknown as PendingResearchCreate
+    clearPendingCreate(viewerId)
+  } catch {
+    // Invalid JSON must never turn into a fresh paid request.
+  }
+  return null
+}
+
+function pendingCreateSnapshot(pending: PendingResearchCreate): ResearchTaskSnapshot {
+  return {
+    ...createResearchTask(pending.taskId, pending.query, pending.localOnly, [], null),
+    phase: 'cancelled',
+    recovery: 'resume',
+    notice: '无法确认原研究请求是否到达服务器。继续接收将使用相同请求标识，不会创建第二个不同的请求。',
+  }
+}
+
 function recoveryStorageKey(viewerId: ResearchViewerId, sessionId: string): string {
   return `${RECOVERY_STORAGE_PREFIX}:${encodeURIComponent(String(viewerId))}:${encodeURIComponent(sessionId)}`
 }
