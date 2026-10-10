@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
   createResearchStream: vi.fn(),
   researchChatStream: vi.fn(),
   openResearchSessionStream: vi.fn(),
+  resumeQueuedResearchRun: vi.fn(),
   cancelResearchRun: vi.fn(),
 }))
 
@@ -58,11 +59,74 @@ async function* hangingStream(signal) {
 beforeEach(() => {
   vi.clearAllMocks()
   api.cancelResearchRun.mockReset()
+  api.resumeQueuedResearchRun.mockReset()
+  api.resumeQueuedResearchRun.mockResolvedValue(undefined)
   sessionStorage.clear()
   api.listResearchSessions.mockResolvedValue(emptyPage())
   api.getResearchSession.mockImplementation(async (id) => session(id))
   api.getResearchResults.mockResolvedValue(emptyPage())
   api.deleteResearchSession.mockResolvedValue(undefined)
+})
+
+describe('F03 queued and pre-header recovery', () => {
+  it('preserves the original idempotency key before headers and never silently issues a new POST on remount', async () => {
+    const keys = []
+    api.createResearchStream.mockImplementation((_query, { signal, idempotencyKey }) => {
+      keys.push(idempotencyKey)
+      return (async function* delayedHeaders() {
+        await waitForAbort(signal)
+      })()
+    })
+    const original = renderResearchHook()
+    await waitFor(() => expect(original.result.current.loadingSessions).toBe(false))
+    act(() => { void original.result.current.handleSend('响应头丢失之前提交') })
+    await waitFor(() => expect(keys).toHaveLength(1))
+    expect(sessionStorage.getItem('news-aggregator:research-pending-create:v1:1')).toContain(keys[0])
+
+    original.unmount()
+    const reopened = renderResearchHook()
+    await waitFor(() => expect(reopened.result.current.hasRecoverableTask).toBe(true))
+    expect(api.createResearchStream).toHaveBeenCalledTimes(1)
+
+    act(() => { void reopened.result.current.handleResume() })
+    await waitFor(() => expect(keys).toHaveLength(2))
+    expect(keys).toEqual([keys[0], keys[0]])
+    reopened.unmount()
+  })
+
+  it('recovers an owner queued run without a local pointer and does not issue a new research POST', async () => {
+    api.listResearchSessions.mockResolvedValue(emptyPage([
+      { id: 'orphan-session', title: '排队的研究' },
+    ]))
+    api.openResearchSessionStream
+      .mockResolvedValueOnce({ kind: 'queued', runId: 'original-run' })
+      .mockResolvedValueOnce({
+        kind: 'session',
+        session: session('orphan-session', [
+          { role: 'user', content: '原始查询' },
+          { role: 'assistant', content: '原任务已完成' },
+        ], 2),
+      })
+    const opened = renderResearchHook()
+    await waitFor(() => expect(api.resumeQueuedResearchRun).toHaveBeenCalledWith('orphan-session', 'original-run'))
+    await waitFor(() => expect(api.openResearchSessionStream).toHaveBeenCalledTimes(2))
+    expect(api.createResearchStream).not.toHaveBeenCalled()
+    expect(api.researchChatStream).not.toHaveBeenCalled()
+    opened.unmount()
+  })
+
+  it('does not fake a successful resume for legacy queued work without inputs', async () => {
+    api.listResearchSessions.mockResolvedValue(emptyPage([
+      { id: 'legacy-session', title: '旧任务' },
+    ]))
+    api.openResearchSessionStream.mockResolvedValue({ kind: 'queued', runId: 'legacy-run' })
+    api.resumeQueuedResearchRun.mockRejectedValue({ response: { status: 409 } })
+    const opened = renderResearchHook()
+    await waitFor(() => expect(opened.result.current.recoveryAction).toBe('retry'))
+    expect(opened.result.current.messages.at(-1).content).toContain('无法安全恢复')
+    expect(api.createResearchStream).not.toHaveBeenCalled()
+    opened.unmount()
+  })
 })
 
 describe('useResearch stream lifecycle', () => {
