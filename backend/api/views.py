@@ -81,7 +81,7 @@ def pick_chat_context(news):
     )
 
 
-def ensure_full_content(news):
+def ensure_full_content(news, execution_guard=None):
     """Best-effort: make sure news.full_content is populated before AI sees it.
 
     No-op if full_content already exists or news has no URL.
@@ -101,15 +101,22 @@ def ensure_full_content(news):
         return
     if not news.url:
         return
+    if execution_guard is not None:
+        execution_guard()
     if not claim_fetch(news):
         return
 
     try:
+        if execution_guard is not None:
+            execution_guard()
         result = fetch_article_markdown(
             news.url,
             expected_title=news.title,
             summary=news.content,
+            **({'execution_guard': execution_guard} if execution_guard is not None else {}),
         )
+        if execution_guard is not None:
+            execution_guard()
         mark_success(
             news,
             result,
@@ -117,6 +124,8 @@ def ensure_full_content(news):
             full_content_fetched_at=tz_now(),
         )
     except Exception as e:
+        if execution_guard is not None:
+            execution_guard()
         try:
             classified = classify_fetch_error(e)
             mark_failed(news, e, status=classified)
@@ -675,6 +684,7 @@ class NewsTranslateFullView(generics.GenericAPIView):
         """Translate full article content to Chinese using SSE streaming."""
         from django.http import StreamingHttpResponse
         import json as json_lib
+        from api.translation_sse import translation_sse_records
         # _call_llm_stream is invoked inside the translation_jobs worker, not here.
 
         news = self.get_object()
@@ -705,11 +715,10 @@ class NewsTranslateFullView(generics.GenericAPIView):
         # If already translated AND no worker running, stream existing result.
         if news.full_content_zh and not force and not worker_in_flight:
             def existing_stream():
-                data = json_lib.dumps({
+                yield from translation_sse_records({
                     'full_content_zh': news.full_content_zh,
                     'full_content_zh_fetched_at': news.full_content_zh_fetched_at.isoformat() if news.full_content_zh_fetched_at else None
-                }, ensure_ascii=False)
-                yield f"data: {data}\n\n"
+                })
             return StreamingHttpResponse(existing_stream(), content_type='text/event-stream')
 
         if not news.full_content and not worker_in_flight:
@@ -780,9 +789,9 @@ class NewsTranslateFullView(generics.GenericAPIView):
             # If we attached to an in-progress job that already has output,
             # flush what we have immediately.
             if job.text:
-                data = json_lib.dumps({'progress': job.text}, ensure_ascii=False)
-                yield f"data: {data}\n\n"
-                sent_len = len(job.text)
+                initial = job.text
+                yield from translation_sse_records({'progress': initial})
+                sent_len = len(initial)
 
             # Poll-stream loop. Even if the client disconnects here, the
             # worker thread keeps consuming the LLM stream and saving to DB.
@@ -790,9 +799,10 @@ class NewsTranslateFullView(generics.GenericAPIView):
                 try:
                     new_len = job.wait_for_update(sent_len, timeout=1.0)
                     if new_len > sent_len:
-                        data = json_lib.dumps({'progress': job.text}, ensure_ascii=False)
-                        yield f"data: {data}\n\n"
-                        sent_len = new_len
+                        latest = job.text
+                        if len(latest) > sent_len:
+                            yield from translation_sse_records({'progress_delta': latest[sent_len:]})
+                            sent_len = len(latest)
                     if job.done:
                         break
                 except Exception:
@@ -820,10 +830,7 @@ class NewsTranslateFullView(generics.GenericAPIView):
                 }
 
             try:
-                yield (
-                    "event: complete\n"
-                    f"data: {json_lib.dumps(final_payload, ensure_ascii=False)}\n\n"
-                )
+                yield from translation_sse_records(final_payload, event='complete')
             except Exception:
                 pass
 

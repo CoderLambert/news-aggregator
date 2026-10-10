@@ -225,13 +225,13 @@ chmod 600 "$WORK_DIR/release.json"
     || { printf 'test_release_scripts: volume backup host output is not mode 0600.\n' >&2; exit 1; }
 [[ "$(stat -c '%a' "$WORK_DIR/out/volume-copy.sqlite3.manifest.json")" == 600 ]] \
     || { printf 'test_release_scripts: volume backup host manifest is not mode 0600.\n' >&2; exit 1; }
-rg -q '^create --pull=never --network none --user 10001:10001 --entrypoint python .*time.sleep\(300\)' "$DOCKER_LOG" \
+grep -Eq '^create --pull=never --network none --user 10001:10001 --entrypoint python .*time.sleep\(300\)' "$DOCKER_LOG" \
     || { printf 'test_release_scripts: backup helper create argv is incorrect.\n' >&2; exit 1; }
-rg -q '^exec --user 0:0 mock-backup-container python -c .*os.chown\(path,10001,10001\).*os.chmod\(path,0o600\)' "$DOCKER_LOG" \
+grep -Eq '^exec --user 0:0 mock-backup-container python -c .*os.chown\(path,10001,10001\).*os.chmod\(path,0o600\)' "$DOCKER_LOG" \
     || { printf 'test_release_scripts: backup manifest was not privately staged for UID 10001.\n' >&2; exit 1; }
-rg -q '^exec --user 10001:10001 mock-backup-container python /tmp/sqlite_snapshot.py backup --source /source/db.sqlite3 --output /tmp/snapshot.sqlite3 --release-manifest /tmp/release-manifest.json$' "$DOCKER_LOG" \
+grep -Eq '^exec --user 10001:10001 mock-backup-container python /tmp/sqlite_snapshot.py backup --source /source/db.sqlite3 --output /tmp/snapshot.sqlite3 --release-manifest /tmp/release-manifest.json$' "$DOCKER_LOG" \
     || { printf 'test_release_scripts: backup helper did not run exact argv as UID 10001.\n' >&2; exit 1; }
-if rg -q 'python python /tmp/sqlite_snapshot.py' "$DOCKER_LOG"; then
+if grep -Eq 'python python /tmp/sqlite_snapshot.py' "$DOCKER_LOG"; then
     printf 'test_release_scripts: backup helper argv repeats the interpreter.\n' >&2
     exit 1
 fi
@@ -309,11 +309,11 @@ MODE_RELEASE_MANIFEST="$(stat -c '%a' "$WORK_DIR/release.json")"
     && "$(stat -c '%a' "$WORK_DIR/out/prior.sqlite3.manifest.json")" == "$MODE_PRIOR_MANIFEST" \
     && "$(stat -c '%a' "$WORK_DIR/release.json")" == "$MODE_RELEASE_MANIFEST" ]] \
     || { printf 'test_release_scripts: restore staging changed host artifact permissions.\n' >&2; exit 1; }
-rg -q '^exec --user 0:0 mock-restore-container python -c .*os.chown\(path,10001,10001\).*os.chmod\(path,0o600\)' "$DOCKER_LOG" \
+grep -Eq '^exec --user 0:0 mock-restore-container python -c .*os.chown\(path,10001,10001\).*os.chmod\(path,0o600\)' "$DOCKER_LOG" \
     || { printf 'test_release_scripts: restore artifacts were not privately staged for UID 10001.\n' >&2; exit 1; }
-rg -q '^create --pull=never --network none --entrypoint python --user 10001:10001 .*target=/source .*time.sleep\(300\)' "$DOCKER_LOG" \
+grep -Eq '^create --pull=never --network none --entrypoint python --user 10001:10001 .*target=/source .*time.sleep\(300\)' "$DOCKER_LOG" \
     || { printf 'test_release_scripts: restore helper is not bounded and pinned to UID 10001.\n' >&2; exit 1; }
-rg -q '^exec --user 10001:10001 mock-restore-container python /tmp/sqlite_snapshot.py restore --source /tmp/snapshot.sqlite3 --target /source/db.sqlite3 --release-manifest /tmp/release-manifest.json --replace --writers-stopped --prior-backup /tmp/prior.sqlite3$' "$DOCKER_LOG" \
+grep -Eq '^exec --user 10001:10001 mock-restore-container python /tmp/sqlite_snapshot.py restore --source /tmp/snapshot.sqlite3 --target /source/db.sqlite3 --release-manifest /tmp/release-manifest.json --replace --writers-stopped --prior-backup /tmp/prior.sqlite3$' "$DOCKER_LOG" \
     || { printf 'test_release_scripts: restore helper did not run exact argv as UID 10001.\n' >&2; exit 1; }
 
 : >"$DOCKER_LOG"
@@ -324,7 +324,7 @@ MOCK_RUNNING_CONTAINER=running-container PATH="$WORK_DIR/bin:$PATH" \
         printf 'test_release_scripts: volume restore allowed a running writer.\n' >&2
         exit 1
     }
-if rg -q 'create|start|cp|up' "$DOCKER_LOG"; then
+if grep -Eq 'create|start|cp|up' "$DOCKER_LOG"; then
     printf 'test_release_scripts: volume negative test created or changed Docker resources.\n' >&2
     exit 1
 fi
@@ -385,7 +385,7 @@ if "$DEPLOY_DIR/rollback.sh" --execute "${rollback_args[@]}" >/dev/null 2>&1; th
 fi
 [[ -e "$MOCK_STOPPED_FILE" && ! -e "$MOCK_UP_FILE" ]] \
     || { printf 'test_release_scripts: incompatible rollback did not remain stopped.\n' >&2; exit 1; }
-if rg -q ' up --no-deps --detach ' "$DOCKER_LOG"; then
+if grep -Eq ' up --no-deps --detach ' "$DOCKER_LOG"; then
     printf 'test_release_scripts: incompatible rollback started a service.\n' >&2
     exit 1
 fi

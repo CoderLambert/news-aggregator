@@ -87,14 +87,14 @@ if [[ "$1" == compose ]]; then
             fi
         done
         [[ -n "$compose_file" ]] || exit 1
-        rg -q 'WAITRESS_PORT: "9527"' "$compose_file" || exit 1
-        rg -q 'network_mode: service:gateway' "$compose_file" || exit 1
-        rg -q 'internal: true' "$compose_file" || exit 1
-        rg -F -q "image: \"$MOCK_APP_IMAGE_ID\"" "$compose_file" || exit 1
-        rg -F -q "image: \"$MOCK_NGINX_IMAGE_ID\"" "$compose_file" || exit 1
-        rg -F -q "NEWSHUB_LOCAL_DOMAIN_IMAGE_ID: \"$MOCK_APP_IMAGE_ID\"" "$compose_file" || exit 1
-        ! rg -q '\$\{NEWSHUB_IMAGE|\$\{NGINX_IMAGE' "$compose_file" || exit 1
-        ! rg -q '^    ports:' "$compose_file" || exit 1
+        grep -Eq 'WAITRESS_PORT: "9527"' "$compose_file" || exit 1
+        grep -Eq 'network_mode: service:gateway' "$compose_file" || exit 1
+        grep -Eq 'internal: true' "$compose_file" || exit 1
+        grep -Fq "image: \"$MOCK_APP_IMAGE_ID\"" "$compose_file" || exit 1
+        grep -Fq "image: \"$MOCK_NGINX_IMAGE_ID\"" "$compose_file" || exit 1
+        grep -Fq "NEWSHUB_LOCAL_DOMAIN_IMAGE_ID: \"$MOCK_APP_IMAGE_ID\"" "$compose_file" || exit 1
+        ! grep -Eq '\$\{NEWSHUB_IMAGE|\$\{NGINX_IMAGE' "$compose_file" || exit 1
+        ! grep -Eq '^    ports:' "$compose_file" || exit 1
         if [[ -n "${MOCK_MODE_CAPTURE_LOG:-}" ]]; then
             smoke_root="$(dirname -- "$compose_file")"
             for mode_entry in \
@@ -346,7 +346,7 @@ assert_no_docker_calls
 
 : >"$DOCKER_LOG"
 expect_exit 3 env MOCK_NGINX_MISSING=1 "$SMOKE_SCRIPT" --execute --image "$APP_IMAGE" --sha "$MOCK_IMAGE_SHA"
-if rg -q 'pull([[:space:]]|$)' "$DOCKER_LOG"; then
+if grep -Eq 'pull([[:space:]]|$)' "$DOCKER_LOG"; then
     fail 'the smoke attempted to pull the missing Nginx image.'
 fi
 if find "$task_temp" -mindepth 1 -maxdepth 1 -type d -name 'newshub-local-domain.*' -print -quit | grep -q .; then
@@ -355,16 +355,16 @@ fi
 
 : >"$DOCKER_LOG"
 expect_exit 3 env MOCK_APP_MISSING=1 "$SMOKE_SCRIPT" --execute --image "$APP_IMAGE" --sha "$MOCK_IMAGE_SHA"
-if rg -q 'compose.*(config|run|up)' "$DOCKER_LOG"; then
+if grep -Eq 'compose.*(config|run|up)' "$DOCKER_LOG"; then
     fail 'an unavailable application image reached Compose execution.'
 fi
 
 : >"$DOCKER_LOG"
 expect_exit 2 env MOCK_IMAGE_SHA='ffffffffffffffffffffffffffffffffffffffff' \
     "$SMOKE_SCRIPT" --execute --image "$APP_IMAGE" --sha "$MOCK_IMAGE_SHA"
-rg -q 'org.opencontainers.image.revision' "$DOCKER_LOG" \
+grep -Eq 'org.opencontainers.image.revision' "$DOCKER_LOG" \
     || fail 'the smoke did not inspect the app image revision label.'
-if rg -q 'compose.*(config|run|up)' "$DOCKER_LOG"; then
+if grep -Eq 'compose.*(config|run|up)' "$DOCKER_LOG"; then
     fail 'an app revision mismatch reached Compose execution.'
 fi
 
@@ -388,7 +388,7 @@ module._new_nss_database(task_browser_home, ca_cert)
 PY
 [[ "${HOME:-}" == "$home_before" ]] || fail 'isolated browser profile setup changed the caller HOME.'
 [[ "$(wc -l <"$CERTUTIL_LOG")" -eq 2 ]] || fail 'the mocked NSS helper did not call certutil for database setup and CA import.'
-rg -q "HOME=$task_test_root/task-browser-home API_KEY_PRESENT=$" "$CERTUTIL_LOG" \
+grep -Eq "HOME=$task_test_root/task-browser-home API_KEY_PRESENT=$" "$CERTUTIL_LOG" \
     || fail 'certutil inherited the caller home or an unrelated Provider environment variable.'
 "$REAL_PYTHON" - "$SMOKE_SCRIPT" <<'PY'
 import ast
@@ -413,13 +413,13 @@ output="$("$SMOKE_SCRIPT" --execute --image "$APP_IMAGE" --sha "$MOCK_IMAGE_SHA"
     || fail 'mocked execute smoke did not complete successfully.'
 [[ "$output" == *'G1 local-domain smoke PASS'* ]] || fail 'mocked execute did not report G1 PASS.'
 [[ "$output" == *'report.json'* ]] || fail 'the smoke did not report its JSON artifact path.'
-rg -q 'compose.*down.*--volumes.*--remove-orphans' "$DOCKER_LOG" \
+grep -Eq 'compose.*down.*--volumes.*--remove-orphans' "$DOCKER_LOG" \
     || fail 'the smoke did not clean its unique Compose project and volumes.'
-! rg -q '(^|[[:space:]])pull([[:space:]]|$)' "$DOCKER_LOG" \
+! grep -Eq '(^|[[:space:]])pull([[:space:]]|$)' "$DOCKER_LOG" \
     || fail 'the smoke attempted an implicit Docker pull.'
-rg -q 'nginx.conf:/etc/nginx/conf.d/default.conf:ro|nginx.conf' "$DOCKER_LOG" \
+grep -Eq 'nginx.conf:/etc/nginx/conf.d/default.conf:ro|nginx.conf' "$DOCKER_LOG" \
     || fail 'Nginx config-test commands were not exercised.'
-rg -q 'rand -hex 32' "$OPENSSL_LOG" || fail 'the smoke did not create an ephemeral test-only key.'
+grep -Eq 'rand -hex 32' "$OPENSSL_LOG" || fail 'the smoke did not create an ephemeral test-only key.'
 [[ ! -s "$CURL_LOG" ]] || fail 'the shell smoke invoked curl outside its acceptance helper.'
 if find "$task_temp" -mindepth 1 -maxdepth 1 -type d -name 'newshub-local-domain.*' ! -name 'newshub-local-domain-report-*' -print -quit | grep -q .; then
     fail 'the smoke did not clean its exact temporary work directory.'
@@ -439,7 +439,7 @@ output="$(env NEWSHUB_IMAGE='newshub:untrusted-override' MOCK_VALIDATE_ACCEPTANC
     || fail 'mocked G2 smoke with real acceptance argument parsing did not complete successfully.'
 [[ "$output" == *'G2 local-domain smoke PASS'* ]] || fail 'mocked execute did not report G2 PASS.'
 [[ -s "$ARGV_VALIDATION_LOG" ]] || fail 'the shell-generated G2 SSE argv was not checked by the real parser.'
-rg -q '^g2-sse-only-has-no-account-or-compose-inputs$' "$ARGV_VALIDATION_LOG" \
+grep -Eq '^g2-sse-only-has-no-account-or-compose-inputs$' "$ARGV_VALIDATION_LOG" \
     || fail 'G2 SSE-only argv still carried account or Compose inputs.'
 report_path="$(printf '%s\n' "$output" | sed -n 's/.*report //p' | tail -n 1)"
 [[ -f "$report_path" ]] || fail 'the G2 report artifact was not retained outside the cleaned work directory.'
@@ -460,7 +460,7 @@ for expected_mode in \
     smoke_root=700 report_root=700 fixture_bundle=600 compose_env=600 ca_key=600 \
     acme_root=755 acme_well_known=755 acme_challenge_dir=755 acme_challenge_file=644 \
     legacy_asset=644 fake_sse=644; do
-    rg -q "^${expected_mode}$" "$MODE_CAPTURE_LOG" \
+    grep -Eq "^${expected_mode}$" "$MODE_CAPTURE_LOG" \
         || fail "G2 fixture mode was not preserved: ${expected_mode%%=*}."
 done
 mode_matrix="$(LC_ALL=C sort "$MODE_CAPTURE_LOG" | paste -sd ' ' -)"
