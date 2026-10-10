@@ -7,6 +7,7 @@ import {
   deleteResearchSession,
   openResearchSessionStream,
   researchChatStream,
+  resumeQueuedResearchRun,
 } from '@/services/researchApi'
 import {
   researchKeys,
@@ -779,35 +780,53 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     sendLockRef.current = true
     setConnectionBusy(true)
     try {
-      // GET is read-only and replays the persisted run after process changes.
-      const stream = await openResearchSessionStream(
-        sessionId,
-        connection.controller.signal,
-        (runId) => {
-          if (!connectionIsCurrent(connection)) return
-          connection.runId = runId
-          const current = currentConnectionTask(connection)
-          if (current) saveStoredRecovery(queryViewerId, current, connection.idempotencyKey, runId, connection.requestMode)
-          else if (!hasRecovery) putTask(taskKey, nextTask)
-          void cancelConnectionOnServer(connection)
-        },
-        !(hasRecovery && stored?.idempotencyKey && stored.mode),
+      // Read-only GET first; only a separately authorized owner POST may
+      // dispatch an existing queued run that never reached the provider.
+      const onRunId = (runId: string) => {
+        if (!connectionIsCurrent(connection)) return
+        connection.runId = runId
+        const current = currentConnectionTask(connection)
+        if (current) saveStoredRecovery(queryViewerId, current, connection.idempotencyKey, runId, connection.requestMode)
+        else if (!hasRecovery) putTask(taskKey, nextTask)
+        void cancelConnectionOnServer(connection)
+      }
+      let stream = await openResearchSessionStream(
+        sessionId, connection.controller.signal, onRunId, false,
       )
+      if (!connectionIsCurrent(connection)) return
       if (stream.kind === 'queued') {
-        if (hasRecovery && stored?.idempotencyKey && stored.mode) {
-          const queuedTask = { ...nextTask, query: stored.query, localOnly: stored.localOnly }
-          connectionRef.current = null
-          sendLockRef.current = false
-          if (runStreamTask(queuedTask, stored.mode, stored.idempotencyKey)) return
-          setConnectionBusy(false)
-        } else if (hasRecovery) {
+        if (!stream.runId) {
           putTask(taskKey, {
-            ...nextTask,
-            phase: 'error',
-            recovery: 'retry',
-            notice: '研究任务仍在排队，但此浏览器没有保存幂等恢复信息。请明确发起新一轮研究。',
+            ...nextTask, phase: 'error', recovery: 'resume',
+            notice: '服务器暂时无法确认排队任务身份。请稍后继续接收，不会自动重新发起研究。',
           })
+          return
         }
+        try {
+          await resumeQueuedResearchRun(sessionId, stream.runId)
+        } catch (error) {
+          if (!connectionIsCurrent(connection)) return
+          const status = isRecord(error) && isRecord(error.response) ? error.response.status : null
+          const unavailable = status === 409 || status === 404
+          putTask(taskKey, {
+            ...nextTask, phase: 'error', recovery: unavailable ? 'retry' : 'resume',
+            notice: unavailable
+              ? '旧任务无法安全恢复。只有明确重新研究才会创建新的模型任务。'
+              : '暂时无法恢复排队中的研究；可继续尝试接收，不会自动发起新任务。',
+          })
+          return
+        }
+        if (!connectionIsCurrent(connection)) return
+        stream = await openResearchSessionStream(
+          sessionId, connection.controller.signal, onRunId, true,
+        )
+        if (!connectionIsCurrent(connection)) return
+      }
+      if (stream.kind === 'queued') {
+        putTask(taskKey, {
+          ...nextTask, phase: 'cancelled', recovery: 'resume',
+          notice: '任务仍在排队，尚未发起模型请求；可稍后继续接收。',
+        })
       } else if (stream.kind === 'session') {
         queryClient.setQueryData(researchKeys.session(queryViewerId, lang, sessionId), stream.session)
         await Promise.all([
@@ -815,18 +834,6 @@ export function useResearch(viewerId: ResearchViewerId | null) {
           queryClient.invalidateQueries({ queryKey: researchKeys.results(queryViewerId, lang, sessionId) }),
         ])
         if (!hasRecovery) removeTask(taskKey, nextTask.id)
-        if (
-          hasRecovery &&
-          stream.session.latest_run?.status === 'queued' &&
-          stored?.idempotencyKey &&
-          stored.mode
-        ) {
-          const queuedTask = { ...nextTask, query: stored.query, localOnly: stored.localOnly }
-          connectionRef.current = null
-          sendLockRef.current = false
-          if (runStreamTask(queuedTask, stored.mode, stored.idempotencyKey)) return
-          setConnectionBusy(false)
-        }
         if (hasRecovery) {
           if (sessionHasSavedTask(stream.session, nextTask)) {
             clearStoredRecovery(queryViewerId, sessionId)
