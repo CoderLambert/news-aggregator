@@ -224,12 +224,18 @@ def test_generic_provider_partial_or_length_limited_response_is_not_complete():
     assert client.chat.completions.create.call_count == 1
 
 
-def test_force_request_uses_own_model_but_keeps_public_copy(article):
+def test_force_request_uses_own_model_but_keeps_public_copy(article, monkeypatch):
     owner, connection = reader('owner')
     save(owner, connection, article, '第一份共享版本')
     other, _ = reader('other')
     client = APIClient()
     client.force_authenticate(other)
+    # Focus this fake-only case on per-user/public persistence, not executor
+    # scheduling. The shared-worker concurrency is exercised separately.
+    monkeypatch.setattr(
+        jobs, '_dispatch_task',
+        lambda task_id, generation: jobs._run_persistent_task(task_id, generation),
+    )
     with patch.object(jobs, 'stream_full_translation', return_value='第二位用户主动重翻的个人版本') as model:
         response = client.post(f'/api/news/{article.pk}/translate/', {'force': True}, format='json')
         assert '第二位用户主动重翻的个人版本' in body(response)
