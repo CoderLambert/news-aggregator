@@ -100,7 +100,7 @@ G1静态High整改后无P0/P1，正式镜像依赖下载仍在最终有界运行
 2026-10-10追加：真实production构建及04B已通过，Chat35+3定向和独立High切片通过。允许G2-ACCOUNTS继续同样隔离源码准备，Chat与Accounts只串行编辑，G1整改只改Nginx/deploy runner，不共享文件；正式G1镜像仍只用不含G2未提交文件的git archive。账户测试从纯G1 archive叠加明确Chat九文件及Accounts owned文件，禁止复制工作树backend或用户DB；整体G2门槛仍等待G1完整域名/恢复和自身集成/审查。
 Accounts58+1离线用例通过后，允许G2-FRONTEND同样仅作离线源准备；G1源码先冻结为3c141d9候选，frontend改动只在未提交工作树，G1镜像继续immutable archive。G1剩余runtime/审查与React源文件无共享；G2身份/私有缓存整体验证和High复审仍必须完成。
 
-## ADR-022：站点AI执行、费用与恢复契约
+## ADR-022：站点AI执行、费用与恢复契约（历史，ADR-025已取消，不实施）
 G3扩展既有SQLite租约模式，不引入新的任务平台；job/event/budget/worker-slot在数据库持久化，事务首写安全锁，queued/running也占并发预留。默认用户/IP/全站并发1/2/2，日任务20/40/200、tokens100k/200k/1m、费用2/4/10USD；整数microUSD、最坏工作量预留、未知或部分结果保守全额结算，不能假退款或自动重试收费。
 标准站点API初版固定OpenAI标准endpoint，独立SITE_AI配置/管理员许可门槛/人工填写资格与费率，默认关闭；不读Coding/Hermes/其他OPENAI凭据，不从user_plan失败切到站点收费。真实资格/价格/调用尚未获准，全部测试Fake Provider。每个请求在独立固定worker中，有lease/heartbeat/deadline/取消fence；HTTP只提交和owner读取，SSE占用最多2个Waitress线程。私有翻译/建议保存于owner job，不改公共新闻翻译；公开原文抓取单独0模型费用任务仍限额/安全输送。研究最多4模型/8工具，限制输入/输出/事件大小，默认禁付费搜索/TTS/semantic。
 精确实现顺序：G3-CORE→G3-PROVIDER→G3-BUSINESS→G3-FRONTEND→G3-DEPLOY→LOCAL-DOMAIN-G2-G3阶段G3，最后独立High复审。所有合同目前仅准备，不能据此将功能或正式模型访问标完成。
@@ -118,3 +118,12 @@ G3扩展既有SQLite租约模式，不引入新的任务平台；job/event/budge
 后续AI使用每个用户自己授权的ChatGPT订阅；本站不额外设使用次数或Token预算，不共享管理员订阅。继续账户/凭据/缓存隔离、CSRF、撤销和过期处理、本地域名验收，以及现有长任务的断线/重启恢复；服务运行所需的有界线程、响应体、超时和SSRF护栏属于运行与数据安全，不作为费用或日用量策略。登录/注册防暴力破解限速保留。恢复实现将另立无费用专项合同，不直接派发旧费用平台合同。
 
 2026-10-10再次核实官方文档：网页登录需要注册OAuth客户端/精确回调/issuer端点/实际认证方式，订阅推理需要另行授予相应权限；远程网站接入尚缺正式客户端与批准参数，仍EXTERNAL_BLOCKED。公开文档不能替代本项目实际授权，不用local_oss loopback冒充news域名。可完成的local_oss安全兼容及website关闭骨架继续做，真实网站登录/模型调用不报PASS。依据：https://developers.openai.com/siwc/website 、https://developers.openai.com/siwc/quickstart 、https://developers.openai.com/siwc/token-sharing-open-source 。
+
+
+## ADR-026：订阅全文翻译恢复，沿用现有执行器，无费用平台
+
+依 ADR-025，本站不增加次数、日额度、费用或Token预算。复用 chatgpt_subscription_jobs 的双线程执行器与现有翻译SSE，新增私有持久任务记录，不引入队列产品、共享付费Provider或通用计费/任务平台。迁移0030依赖NH-PUB-08的0029，待其源码和审查闭环后实施；当前仅冻结设计。
+
+任务记录按 user/connection/news/source_hash 唯一，UUID job_id稳定。运行使用随机run_token和generation CAS、60秒租约/20秒心跳；历史内容与结果仍归用户。queued跨进程只能CAS一次claim；running进入任何订阅网络前先持久提交provider_started=true。进程失联且未开始上游可恢复queued；上游已开始则标interrupted，不自动重发，用户明确重试才开始新generation。取消/owner inactive/连接切换/原文改变/租约失效禁止后续网络和保存；cancelled状态不因worker迟到变成success。完成任务状态和现有完整译文保存同一事务，用条件UPDATE先取SQLite写锁再保存，不能只靠select_for_update。
+
+保持现有SSE progress/complete格式与前端兼容，增加Job-ID response header和私有owner任务GET/cancel接口，刷新可读取持久progress/终态；断开SSE不取消后台。执行器仍只负责翻译，不扩成未知托管订阅研究协议。研究恢复另用现有ResearchSession专项；公网订阅模型接入继续外部待批准，所有真实调用NOT_RUN。
