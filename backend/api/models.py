@@ -394,6 +394,8 @@ class ChatGPTAuthAttempt(models.Model):
     oauth_mode = models.CharField(max_length=16, default='local')
     redirect_uri = models.CharField(max_length=512, blank=True, default='')
     token_auth_method = models.CharField(max_length=32, default='none')
+    requested_scopes = models.TextField(blank=True, default='')
+    oauth_resource = models.CharField(max_length=255, blank=True, default='')
     target_attempt_generation = models.PositiveIntegerField(default=0)
     selection_connection_id_at_start = models.UUIDField(null=True, blank=True)
     selection_generation_at_start = models.PositiveBigIntegerField(default=0)
