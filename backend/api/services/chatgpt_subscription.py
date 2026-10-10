@@ -669,6 +669,10 @@ def _assert_attempt_exchangeable(
         raise SubscriptionError('本地登录状态已切换或授权请求已取消。')
     _require_active_user(current.user_id)
     _assert_attempt_protocol(current)
+    if current.target_attempt_generation >= 1 and not current.target_connection_id:
+        raise SubscriptionError(
+            '待重新连接的账号已不存在。', 'target_connection_deleted', 400,
+        )
     if current.target_connection_id:
         target = ChatGPTSubscriptionConnection.objects.filter(
             pk=current.target_connection_id,
@@ -813,6 +817,10 @@ def complete_authorization(
             ).first()
             if locked_attempt is None:
                 raise SubscriptionError('本地登录状态已切换或授权请求已取消。')
+            if locked_attempt.target_attempt_generation >= 1 and not locked_attempt.target_connection_id:
+                raise SubscriptionError(
+                    '待重新连接的账号已不存在。', 'target_connection_deleted', 400,
+                )
             locked_user = get_user_model().objects.select_for_update().get(pk=locked_attempt.user_id)
             if not locked_user.is_active:
                 raise SubscriptionError('请使用有效的本地账号重新登录。', 'inactive_user', 403)

@@ -386,6 +386,106 @@ def test_callback_rechecks_attempt_fence_immediately_before_exchange(
     assert subscription.authorization_attempt_status(user, start['attempt_id'])['status'] == expected_status
 
 
+def test_deleted_reauthorization_target_is_rejected_before_exchange(user, crypto):
+    target = _connection(user)
+    session_key = 'deleted-target-before-exchange-session'
+    start = _start(user, session_key=session_key, target=target)
+    browser_cookie, authorization_url = _handoff(start, session_key=session_key)
+    state = parse_qs(urlparse(authorization_url).query)['state'][0]
+    token_response = {
+        'access_token': 'mock-access', 'refresh_token': 'mock-refresh',
+        'id_token': 'mock-id-token', 'expires_in': 3600,
+        'scope': f'openid offline_access resource.invoke {subscription.REQUIRED_DIRECT_SCOPE}',
+    }
+
+    def discovery_after_deleting_target():
+        target.delete()
+        return DISCOVERY
+
+    exchange = Mock(return_value=token_response)
+    try:
+        with (
+            patch.object(subscription, '_discovery', side_effect=discovery_after_deleting_target),
+            patch.object(subscription, '_exchange_code', exchange),
+            patch.object(subscription, '_verify_id_token', return_value={
+                'iss': DISCOVERY['issuer'], 'sub': 'deleted-target-before-exchange-subject',
+            }),
+        ):
+            subscription.complete_authorization(
+                {'state': state, 'code': 'authorization-code', 'client_id': 'issued-client'},
+                browser_cookie,
+                session_key=session_key,
+                user_id=user.pk,
+            )
+        error = None
+    except subscription.SubscriptionError as exc:
+        error = exc
+
+    attempt = ChatGPTAuthAttempt.objects.get(pk=start['attempt_id'])
+    assert (
+        error is not None and error.error_code == 'target_connection_deleted' and
+        error.status_code == 400 and exchange.call_count == 0 and
+        not ChatGPTSubscriptionConnection.objects.filter(user=user).exists() and
+        attempt.status == 'failed' and attempt.result_connection_id is None
+    ), {
+        'error_code': getattr(error, 'error_code', None),
+        'status_code': getattr(error, 'status_code', None),
+        'exchange_calls': exchange.call_count,
+        'connection_count': ChatGPTSubscriptionConnection.objects.filter(user=user).count(),
+        'attempt_status': attempt.status,
+    }
+
+
+def test_deleted_reauthorization_target_is_rejected_after_exchange(user, crypto):
+    target = _connection(user)
+    session_key = 'deleted-target-after-exchange-session'
+    start = _start(user, session_key=session_key, target=target)
+    browser_cookie, authorization_url = _handoff(start, session_key=session_key)
+    state = parse_qs(urlparse(authorization_url).query)['state'][0]
+    token_response = {
+        'access_token': 'mock-access', 'refresh_token': 'mock-refresh',
+        'id_token': 'mock-id-token', 'expires_in': 3600,
+        'scope': f'openid offline_access resource.invoke {subscription.REQUIRED_DIRECT_SCOPE}',
+    }
+
+    def verify_after_deleting_target(*_args, **_kwargs):
+        target.delete()
+        return {
+            'iss': DISCOVERY['issuer'], 'sub': 'deleted-target-after-exchange-subject',
+        }
+
+    exchange = Mock(return_value=token_response)
+    try:
+        with (
+            patch.object(subscription, '_discovery', return_value=DISCOVERY),
+            patch.object(subscription, '_exchange_code', exchange),
+            patch.object(subscription, '_verify_id_token', side_effect=verify_after_deleting_target),
+        ):
+            subscription.complete_authorization(
+                {'state': state, 'code': 'authorization-code', 'client_id': 'issued-client'},
+                browser_cookie,
+                session_key=session_key,
+                user_id=user.pk,
+            )
+        error = None
+    except subscription.SubscriptionError as exc:
+        error = exc
+
+    attempt = ChatGPTAuthAttempt.objects.get(pk=start['attempt_id'])
+    assert (
+        error is not None and error.error_code == 'target_connection_deleted' and
+        error.status_code == 400 and exchange.call_count == 1 and
+        not ChatGPTSubscriptionConnection.objects.filter(user=user).exists() and
+        attempt.status == 'failed' and attempt.result_connection_id is None
+    ), {
+        'error_code': getattr(error, 'error_code', None),
+        'status_code': getattr(error, 'status_code', None),
+        'exchange_calls': exchange.call_count,
+        'connection_count': ChatGPTSubscriptionConnection.objects.filter(user=user).count(),
+        'attempt_status': attempt.status,
+    }
+
+
 def test_two_database_connections_consume_callback_state_at_most_once(tmp_path):
     repository_root = Path(__file__).resolve().parents[3]
     backend_root = repository_root / 'backend'
