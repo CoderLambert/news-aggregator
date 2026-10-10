@@ -170,6 +170,29 @@ def research_stream(request, pk):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 @authentication_classes([SessionAuthentication])
+def research_resume_queued(request, pk):
+    """Owner-verified, CSRF-protected dispatch of a never-started durable run."""
+    session = _user_sessions(request.user).filter(pk=pk).first()
+    if session is None:
+        return _no_store(Response({'error': 'Session not found'}, status=status.HTTP_404_NOT_FOUND))
+    body = request.data if isinstance(request.data, dict) else {}
+    run_id = body.get('run_id')
+    if not isinstance(run_id, str):
+        return _no_store(Response(
+            {'error': 'run_id is required', 'error_code': 'invalid_run_id'},
+            status=status.HTTP_400_BAD_REQUEST,
+        ))
+    try:
+        run = job_manager.resume_queued_run(request.user, session, run_id)
+    except job_manager.ResearchRunError as exc:
+        return _run_error_response(exc)
+    return _no_store(Response({'run_id': str(run.pk), 'status': run.status}))
+
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@authentication_classes([SessionAuthentication])
 def research_cancel(request, pk):
     """Cancel only the exact latest run in this owner's session."""
     session = _user_sessions(request.user).filter(pk=pk).first()
