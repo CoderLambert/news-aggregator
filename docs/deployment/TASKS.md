@@ -10,10 +10,10 @@
 | NH-PUB-05 G1 | 03 | 服务端模式中间件/capabilities/views/urls/测试；逐路由拒绝 | 全 route/method 矩阵、Provider 0 次、内部 Worker | TESTED | 基线；未审核 |
 | S05-FRONTEND | P00/03 | Mermaid/Markdown/DOMPurify与负例 | 3文件7测试、typecheck、lint退出0；High待G1 | TESTED | 7bef7fb候选；未审核 |
 | S05-BACKEND | P00/03 | article_fetcher安全输送/各provider/比较验证器 | 106测试PASS；DNS/每跳/全deadline/wire/GET；High待G1 | TESTED | 7bef7fb候选；未审核 |
-| NH-PUB-04 | 03 | Dockerfile/compose.prod/entrypoint/持久路径 | 阶段A54+8PASS；B镜像/健康/重建持久性/权限待验 | DOING | 基线；未审核 |
-| NH-PUB-02 | 03、04 | deploy/nginx/模板与隔离验证 | 阶段A离线4项PASS；真实nginx/TLS/browser阶段B待验 | DOING | 5c0e46b候选；未审核 |
+| NH-PUB-04 | 03 | Dockerfile/compose.prod/entrypoint/持久路径 | 正式production build0；04B健康/UID10001/六卷可写/重建持久性实际PASS | TESTED | 1288c；既有High安全整改闭环，完整G1域名/恢复仍待验 |
+| NH-PUB-02 | 03、04 | deploy/nginx/模板与隔离验证 | 静态TLS/cache实际PASS；新增既有default共载失败，coexist修复与完整browser待验 | DOING | G1-NGINX-COEXIST已派发；真实服务器未操作 |
 | NH-PUB-10 | 05 | services/api/AuthContext/页面/index/测试 | 31定向+421全量PASS、typecheck/lint/build0；High待G1 | TESTED | 基线；未审核 |
-| NH-PUB-11/12 | G1 前项 | CI/部署回滚备份恢复/release-gates | 后端432PASS；release16PASS/shell0/收集452；真实Docker/恢复/High待验 | TESTED | 7f1148d候选；未审核 |
+| NH-PUB-11/12 | G1 前项 | CI/部署回滚备份恢复/release-gates | 后端460PASS；volume helper45PASS但实际metadata重复network失败，R3整改待验 | DOING | 1288c；High既有整改闭环，实际恢复未通过 |
 | S01/P01/G2 | G1 本地发布门槛；ADR021允许独立准备 | Chat 归属迁移/事务/账户 CSRF 限速/前端缓存 | A/B/匿名/并发/历史隔离/登录重放/High | DOING | 1288c；仅CHAT源准备派发，账户/前端尚TODO，整体未审核 |
 | NH-PUB-06/S02/S04/O01/O02/O03/G3 | G2 | Provider 合规路由/预算/持久任务/SSE | Fake Provider 原子配额/幂等/取消/恢复/隔离/High | TODO | 基线；未审核 |
 | NH-PUB-07 | P00 | openai-hosted-integration.md；身份/plan 批准分离 | 准备文档离线校验0；真实申请未提交/两批准EXTERNAL_BLOCKED | TESTED | d220f00候选；非获批 |
