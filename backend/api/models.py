@@ -377,6 +377,12 @@ class ChatGPTSubscriptionConnection(models.Model):
         verbose_name_plural = 'ChatGPT 订阅连接'
         constraints = [
             models.UniqueConstraint(fields=['user', 'registration_key_hash'], name='unique_chatgpt_user_registration'),
+            # A hosted ChatGPT identity cannot back multiple website accounts.
+            models.UniqueConstraint(
+                fields=['issuer', 'issued_client_id', 'subject_hash'],
+                condition=models.Q(oauth_mode='website'),
+                name='one_website_chatgpt_account_owner',
+            ),
             models.UniqueConstraint(
                 fields=['user'], condition=models.Q(is_active=True),
                 name='one_active_chatgpt_connection_per_user',
