@@ -13,7 +13,7 @@ _FRAGMENT_CHARS = 2048
 
 def translation_sse_records(payload, *, event=None):
     """Yield SSE records, with each data line safely below the 32-KiB parser cap."""
-    encoded = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
+    encoded = json.dumps(payload, ensure_ascii=False)
     prefix = f'event: {event}\n' if event else ''
     legacy = f'{prefix}data: {encoded}\n\n'
     if len(legacy.encode('utf-8')) <= _MAX_SINGLE_RECORD_BYTES:
