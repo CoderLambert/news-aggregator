@@ -1,5 +1,6 @@
 import logging
 
+from django.conf import settings
 from django.db.models import Count, Q
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
@@ -12,7 +13,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django_filters import rest_framework as django_filters
-from .models import Category, Source, News, ChatSession, BlockedNews, ProviderComparison
+from .models import Category, Source, News, ChatSession, UserNewsChatSession, BlockedNews, ProviderComparison
 from .serializers import (
     CategorySerializer, SourceSerializer,
     NewsListSerializer, NewsDetailSerializer,
@@ -809,6 +810,10 @@ class NewsTranslateFullView(generics.GenericAPIView):
 
 class NewsChatView(generics.GenericAPIView):
     """Chat with the AI assistant about a specific news article. Supports persistence."""
+
+    @staticmethod
+    def website_mode():
+        return getattr(settings, 'CHATGPT_SIWC_MODE', 'local') == 'website'
     queryset = News.objects.select_related('source', 'category').all()
     permission_classes = []
 
@@ -817,24 +822,41 @@ class NewsChatView(generics.GenericAPIView):
         return super().dispatch(*args, **kwargs)
 
     def get(self, request, pk):
-        """Return chat history."""
+        """Return only the current website user's private chat history."""
         news = self.get_object()
-        try:
-            session = ChatSession.objects.get(news=news)
-            return Response({'messages': session.messages})
-        except ChatSession.DoesNotExist:
-            return Response({'messages': []})
+        if self.website_mode():
+            if not request.user.is_authenticated:
+                return Response({'error': '请先登录。'}, status=401)
+            session = UserNewsChatSession.objects.filter(
+                news=news, user=request.user,
+            ).first()
+        else:
+            session = ChatSession.objects.filter(news=news).first()
+        return Response({'messages': session.messages if session else []})
 
     def delete(self, request, pk):
-        """Clear chat history."""
+        """Clear only the user's own website chat, never another user's history."""
         news = self.get_object()
-        ChatSession.objects.filter(news=news).delete()
+        if self.website_mode():
+            if not request.user.is_authenticated:
+                return Response({'error': '请先登录。'}, status=401)
+            UserNewsChatSession.objects.filter(news=news, user=request.user).delete()
+        else:
+            ChatSession.objects.filter(news=news).delete()
         return Response({'status': 'cleared'})
 
     def post(self, request, pk):
         from django.http import StreamingHttpResponse
+        from api.services.chatgpt_subscription import active_connection_for_user, stream_chat_response
 
         news = self.get_object()
+        website_mode = self.website_mode()
+        if website_mode and not request.user.is_authenticated:
+            return Response({'error': '请先登录。'}, status=401)
+        subscription_connection = active_connection_for_user(request.user)
+        if website_mode and (subscription_connection is None or not subscription_connection.connected):
+            # Never spend a site administrator's API key for an unconnected website user.
+            return Response({'error': '请先连接并选择自己的 ChatGPT 订阅账号。'}, status=403)
 
         # Auto-fetch full article on first chat — so users don't have to click
         # "获取原文" before chatting. No-op if already cached, swallows fetch errors.
@@ -900,8 +922,13 @@ class NewsChatView(generics.GenericAPIView):
                 import logging
                 logging.getLogger(__name__).warning("Web search failed for chat")
 
-        # Load or create session
-        session, _ = ChatSession.objects.get_or_create(news=news, defaults={'messages': []})
+        # Hosted website histories belong to individual Django users.
+        if website_mode:
+            session, _ = UserNewsChatSession.objects.get_or_create(
+                user=request.user, news=news, defaults={'messages': []},
+            )
+        else:
+            session, _ = ChatSession.objects.get_or_create(news=news, defaults={'messages': []})
 
         # Ensure session.messages is a list
         if not isinstance(session.messages, list):
@@ -944,9 +971,6 @@ class NewsChatView(generics.GenericAPIView):
         
         messages.append({'role': 'user', 'content': user_question})
 
-        from api.services.chatgpt_subscription import active_connection_for_user, stream_chat_response
-        subscription_connection = active_connection_for_user(request.user)
-
         # Save user message immediately
         user_msg = {'role': 'user', 'content': user_question}
         session.messages.append(user_msg)
@@ -967,8 +991,8 @@ class NewsChatView(generics.GenericAPIView):
                     meta = _json.dumps({'type': 'web_search', 'sources': web_sources}, ensure_ascii=False)
                     yield f"​__META__{meta}__META__\n\n"
 
-                # A signed-in user's active ChatGPT subscription takes precedence.
-                # Users without one keep the existing configured-provider path.
+                # Website mode fails before this point unless this user has a
+                # plan connection. Local mode preserves its legacy fallback.
                 chunks = (
                     stream_chat_response(subscription_connection, messages)
                     if subscription_connection is not None
