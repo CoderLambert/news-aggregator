@@ -51,6 +51,18 @@ CHATGPT_DEPLOYMENT_INSTANCE_FILE = Path(
     _env('CHATGPT_DEPLOYMENT_INSTANCE_FILE') or BASE_DIR / '.runtime' / 'chatgpt-deployment-id'
 )
 
+# Explicitly separate local OSS SIWC from an OpenAI-approved hosted partner client.
+# The approval flag alone is NOT a substitute for written permission.
+CHATGPT_SIWC_MODE = _env('CHATGPT_SIWC_MODE', 'local')
+CHATGPT_WEBSITE_PARTNER_APPROVED = _env('CHATGPT_WEBSITE_PARTNER_APPROVED') == '1'
+CHATGPT_WEBSITE_APPROVAL_REFERENCE = _env('CHATGPT_WEBSITE_APPROVAL_REFERENCE')
+CHATGPT_WEBSITE_ORIGIN = _env('CHATGPT_WEBSITE_ORIGIN')
+CHATGPT_WEBSITE_CLIENT_ID = _env('CHATGPT_WEBSITE_CLIENT_ID')
+CHATGPT_WEBSITE_CLIENT_SECRET = _env('CHATGPT_WEBSITE_CLIENT_SECRET')
+CHATGPT_WEBSITE_REDIRECT_URI = _env('CHATGPT_WEBSITE_REDIRECT_URI')
+CHATGPT_WEBSITE_SCOPES = _env('CHATGPT_WEBSITE_SCOPES')
+CHATGPT_WEBSITE_TOKEN_AUTH_METHOD = _env('CHATGPT_WEBSITE_TOKEN_AUTH_METHOD')
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = _env('DJANGO_DEBUG', '1') == '1'
 
@@ -184,6 +196,17 @@ SESSION_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_HTTPONLY = False  # SPA needs to read it for X-CSRFToken header
+
+# Public HTTPS mode: trust only the reverse proxy that sets this header.
+# Nginx must overwrite X-Forwarded-Proto rather than pass a client-supplied value.
+if CHATGPT_SIWC_MODE == 'website':
+    CORS_ALLOW_ALL_ORIGINS = False
+    CORS_ALLOWED_ORIGINS = [CHATGPT_WEBSITE_ORIGIN] if CHATGPT_WEBSITE_ORIGIN else []
+    CSRF_TRUSTED_ORIGINS = [CHATGPT_WEBSITE_ORIGIN] if CHATGPT_WEBSITE_ORIGIN else []
+    CHATGPT_HANDOFF_ALLOWED_ORIGINS = [CHATGPT_WEBSITE_ORIGIN] if CHATGPT_WEBSITE_ORIGIN else []
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # Auto-fetch full content daemon settings (override via .env)
 # How often to poll for new pending articles (seconds)
