@@ -869,7 +869,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
         setConnectionBusy(false)
       }
     }
-  }, [cancelConnectionOnServer, connectionIsCurrent, consumeResearchEvents, currentConnectionTask, lang, putTask, queryClient, queryViewerId, removeTask, runStreamTask, viewerId])
+  }, [cancelConnectionOnServer, connectionIsCurrent, consumeResearchEvents, currentConnectionTask, lang, putTask, queryClient, queryViewerId, removeTask, viewerId])
 
   const handleSend = useCallback(async (query: string, { localOnly = false }: { localOnly?: boolean } = {}) => {
     const normalizedQuery = query.trim()
@@ -935,7 +935,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
       return
     }
     await startSessionRecovery(task.sessionId, task)
-  }, [activeTask, startSessionRecovery, viewerId])
+  }, [activeTask, runStreamTask, startSessionRecovery, viewerId])
 
   const handleCancel = useCallback(async () => {
     const connection = connectionRef.current
