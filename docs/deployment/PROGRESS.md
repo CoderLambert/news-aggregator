@@ -128,3 +128,10 @@
 - High对22214b3→08838fe七项变化/调用链只读审查无新增P0/P1，发现volume runner两P2（timeout真实ID未补ledger导致清理失败；工作目录mkdir竞争后finally覆盖既有report）。前后HEAD/七文件hash/diff相同，diff SHA256 208f068ffef0033ae1fd2255e395cca9198ebed93b00cdee8f1fc4e50032f838；预文件/tmp/newshub-g1-audit-pre-08838fe.json。已派同两文件G1-VOLUME-RUNTIME-R2，未闭环前不标runner REVIEWED。
 - 原hostnet构建在约77min自行失败：numpy16.7MB只到5.8MB，files.pythonhosted.org ReadTimeout、pip exit2/build exit1，无候选镜像。用户随后明确“现在重试”，因此撤销前一轮不再重试限制，仅开启新一轮正式build，不更改依赖/registry。
 - 新构建从09c991f148ce63dea639ecb561c54fab7d6583b2 git archive干净context，production target/networkhost/固定SHA，镜像newshub:local-09c991f148ce63dea639ecb561c54fab7d6583b2。日志/tmp/newshub-production-retry-9xvihkw9/build.log，结束result.json记录exit/耗时；单次90min硬timeout，10min无I/O停止。Torch196.3MB已实际下载完成约4.4MB/s；官方PyPI 256KiB range206/2.854s，比旧probe11.2s改善，不能据此宣称整镜像PASS。native domain fallback尚未执行，重试优先。
+
+## 正式镜像重试成功与G1实际验收
+- 用户授权新retry实际退出0，493.5s；镜像newshub:local-09c991f148ce63dea639ecb561c54fab7d6583b2，ID sha256:34edcb7f6fc7a7f76ab723c932b1ccafe8dab35c76f489ee785662f55d58b20a。image inspect0，Config.User10001:10001/revision精确匹配；实际network-none/read-only容器id10001:10001、dist index存在/149文件/145 assets核验0。原失败确有网络因素，此次未更改依赖/registry。
+- volume R2两P2修复45定向/compile0，1288c0b提交；High增量复审无新增P0/P1/P2，前后HEAD/两文件hash/diff一致，diff SHA256 7184e5d45f26b14ff8f24f57d7579bd9c797b8170dc8dd6f16579ed5c7395cef。实际volume仍待执行。
+- 为把最后runner修复纳入同SHA镜像，domain进行1288c归档cached rebuild。监控器初次IO类型错误无candidate；第二次归档普通文件0664对比成功归档0644，COPY模式变化造成npm/pip cache MISS（内容SHA同），6秒内停止pip metadata后exit130无wheel。主控定位并冻结仅自建context使用同tarfile data filter归一化644/755，再试缓存；未改Dockerfile/源/依赖/用户DB。这不影响已成功09c镜像。
+- domain实际04B/域名/卷将仅用完成的1288候选和自建资源。native替代fixture没有启动，无需借其冒充容器验收。用户9527与DB始终不迁移、不停止。
+- G2-CHAT已按ADR021派发独立源码准备，Base1288c；测试只archive+owned overlay、新HOME/临时DB/无继承Keys。G1 runtime继续冻结1288 archive，未来G2改动不会混入；G1整体仍DOING，G2整体未REVIEWED。
