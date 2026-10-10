@@ -75,7 +75,9 @@ def test_provider_comparison_api_post_get_list_and_retest(monkeypatch, news):
         'api.services.article_fetcher.comparison.get_provider_chain',
         fake_provider_chain,
     )
-    user = User.objects.create_user(username='provider-user', password='test123')
+    user = User.objects.create_superuser(
+        username='provider-user', email='provider-user@example.test', password='test123',
+    )
     client = APIClient()
     client.force_login(user)
 
@@ -123,7 +125,9 @@ def test_provider_comparison_write_requires_authentication_and_csrf(monkeypatch,
         'api.services.article_fetcher.comparison.get_provider_chain',
         lambda provider_names=None: [ApiSuccessProvider()],
     )
-    user = User.objects.create_user(username='provider-admin', password='test123')
+    user = User.objects.create_superuser(
+        username='provider-admin', email='provider-admin@example.test', password='test123',
+    )
 
     anonymous = APIClient(enforce_csrf_checks=True)
     anonymous_response = anonymous.post(
@@ -160,7 +164,9 @@ def test_provider_comparison_rejects_private_and_unadapted_urls(monkeypatch, db)
         'api.services.article_fetcher.comparison.get_provider_chain',
         lambda provider_names=None: [ApiSuccessProvider()],
     )
-    user = User.objects.create_user(username='provider-admin', password='test123')
+    user = User.objects.create_superuser(
+        username='provider-admin', email='provider-admin@example.test', password='test123',
+    )
     client = APIClient()
     client.force_login(user)
 
@@ -186,7 +192,9 @@ def test_provider_comparison_rejects_unknown_providers(monkeypatch, news):
         'api.services.article_fetcher.comparison.get_provider_chain',
         lambda provider_names=None: [],
     )
-    user = User.objects.create_user(username='provider-admin', password='test123')
+    user = User.objects.create_superuser(
+        username='provider-admin', email='provider-admin@example.test', password='test123',
+    )
     client = APIClient()
     client.force_login(user)
 
@@ -206,7 +214,9 @@ def test_provider_comparison_api_url_only_request(monkeypatch, db):
         'api.services.article_fetcher.comparison.get_provider_chain',
         lambda provider_names=None: [ApiSuccessProvider()],
     )
-    user = User.objects.create_user(username='provider-url-user', password='test123')
+    user = User.objects.create_superuser(
+        username='provider-url-user', email='provider-url-user@example.test', password='test123',
+    )
     client = APIClient()
     client.force_login(user)
 

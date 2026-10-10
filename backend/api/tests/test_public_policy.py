@@ -479,7 +479,11 @@ def test_ai_disabled_rejects_only_frozen_expensive_methods_before_dispatch(
 )
 def test_ai_disabled_still_allows_personal_chat_and_research_history(news_obj):
     user = User.objects.create_user(username="history-user", password="test-password")
-    chat = ChatSession.objects.create(news=news_obj, messages=[{"role": "user", "content": "saved"}])
+    chat = ChatSession.objects.create(
+        user=user,
+        news=news_obj,
+        messages=[{"role": "user", "content": "saved"}],
+    )
     research = ResearchSession.objects.create(
         user=user,
         title="Saved research",
@@ -493,7 +497,10 @@ def test_ai_disabled_still_allows_personal_chat_and_research_history(news_obj):
     assert chat_response.status_code == 200
     assert chat_response.json() == {"messages": chat.messages}
     assert client.delete(chat_path).status_code == 200
-    assert not ChatSession.objects.filter(pk=chat.pk).exists()
+    chat.refresh_from_db()
+    assert chat.messages == []
+    assert chat.revision == 1
+    assert chat.generation == 1
 
     research_path = reverse("research-session-detail", args=[research.pk])
     assert client.get(research_path).status_code == 200
@@ -691,12 +698,23 @@ def test_policy_does_not_apply_to_non_api_paths_or_management_work():
     PUBLIC_AI_ENABLED=True,
     CHATGPT_AUTH_MODE="local_oss",
     CHATGPT_PLAN_USAGE_ENABLED=True,
+    DJANGO_ENV="development",
 )
 def test_full_development_signup_behavior_is_not_changed():
-    response = APIClient().post(
+    client = APIClient(enforce_csrf_checks=True)
+    csrf_response = client.get(reverse("auth-csrf"))
+    token = csrf_response.cookies["csrftoken"].value
+    response = client.post(
         reverse("auth-register"),
-        {"username": "full-mode-user", "password": "test-password"},
+        {
+            "username": "full-mode-user",
+            "email": "full-mode-user@example.test",
+            "password": "Sufficiently-Strong-Development-Password-93!",
+        },
         format="json",
+        secure=True,
+        HTTP_ORIGIN="https://testserver",
+        HTTP_X_CSRFTOKEN=token,
     )
     assert response.status_code == 201
     assert User.objects.filter(username="full-mode-user").exists()

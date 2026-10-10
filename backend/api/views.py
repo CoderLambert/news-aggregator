@@ -3,16 +3,38 @@ import logging
 from django.db.models import Count, Q
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
+from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.core.validators import EmailValidator
 from django.middleware.csrf import get_token
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import ensure_csrf_cookie, csrf_exempt, csrf_protect
 from rest_framework import generics, filters, status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.authentication import SessionAuthentication
+from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django_filters import rest_framework as django_filters
 from .models import Category, Source, News, ChatSession, BlockedNews, ProviderComparison
+from .services.chat_history import (
+    ChatConflict,
+    append_assistant_message,
+    append_user_message,
+    clear_chat_history,
+)
+from .authentication import AnonymousCsrfSessionAuthentication
+from .services.account_security import (
+    AuthSecurityBusy,
+    InvalidClientAddress,
+    RateLimitExceeded,
+    RegistrationUnavailable,
+    SignupInviteRequired,
+    create_registered_user,
+    normalize_email,
+    reserve_login_attempts,
+    reserve_registration_attempts,
+)
 from .serializers import (
     CategorySerializer, SourceSerializer,
     NewsListSerializer, NewsDetailSerializer,
@@ -23,6 +45,7 @@ from .serializers import (
 from api.services.llm_translator import get_openai_client, get_clients, stream_chat
 from api.services.article_fetcher import FetchError, fetch_article_markdown
 from api.services.chatgpt_subscription import invalidate_authorization_attempts_for_session
+from api.crawler_views import IsActiveSuperuser
 
 logger = logging.getLogger(__name__)
 
@@ -436,7 +459,7 @@ class ProviderComparisonListCreateView(generics.ListCreateAPIView):
     queryset = ProviderComparison.objects.select_related('news', 'news__source').all()
     serializer_class = ProviderComparisonSerializer
     pagination_class = StandardPagination
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsActiveSuperuser]
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['created_at', 'provider', 'ok', 'quality_score', 'elapsed_ms']
     ordering = ['-created_at']
@@ -480,13 +503,13 @@ class ProviderComparisonListCreateView(generics.ListCreateAPIView):
 class ProviderComparisonDetailView(generics.RetrieveAPIView):
     queryset = ProviderComparison.objects.select_related('news', 'news__source').all()
     serializer_class = ProviderComparisonSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsActiveSuperuser]
 
 
 class ProviderComparisonRetestView(generics.GenericAPIView):
     queryset = ProviderComparison.objects.select_related('news').all()
     serializer_class = ProviderComparisonSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsActiveSuperuser]
 
     @method_decorator(csrf_protect)
     def post(self, request, pk):
@@ -808,33 +831,52 @@ class NewsTranslateFullView(generics.GenericAPIView):
 
 
 class NewsChatView(generics.GenericAPIView):
-    """Chat with the AI assistant about a specific news article. Supports persistence."""
+    """Chat with the AI assistant about a news article for the authenticated user."""
     queryset = News.objects.select_related('source', 'category').all()
-    permission_classes = []
-
-    @method_decorator(csrf_exempt)
-    def dispatch(self, *args, **kwargs):
-        return super().dispatch(*args, **kwargs)
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
         """Return chat history."""
         news = self.get_object()
-        try:
-            session = ChatSession.objects.get(news=news)
-            return Response({'messages': session.messages})
-        except ChatSession.DoesNotExist:
-            return Response({'messages': []})
+        session = ChatSession.objects.filter(user=request.user, news=news).first()
+        return Response({'messages': session.messages if session else []})
 
     def delete(self, request, pk):
         """Clear chat history."""
         news = self.get_object()
-        ChatSession.objects.filter(news=news).delete()
+        try:
+            clear_chat_history(user_id=request.user.pk, news_id=news.pk)
+        except ChatConflict:
+            return Response(
+                {'error_code': 'chat_conflict', 'error': '聊天记录正在更新，请重试'},
+                status=status.HTTP_409_CONFLICT,
+            )
         return Response({'status': 'cleared'})
 
     def post(self, request, pk):
         from django.http import StreamingHttpResponse
 
         news = self.get_object()
+
+        payload = request.data
+        user_question = payload.get('question') if hasattr(payload, 'get') else None
+        if not isinstance(user_question, str):
+            return Response(
+                {'error_code': 'invalid_question', 'error': '问题必须是非空文本'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(user_question) > 8000:
+            return Response(
+                {'error_code': 'question_too_long', 'error': '问题不能超过8000个字符'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user_question = user_question.strip()
+        if not user_question:
+            return Response(
+                {'error_code': 'invalid_question', 'error': '问题必须是非空文本'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Auto-fetch full article on first chat — so users don't have to click
         # "获取原文" before chatting. No-op if already cached, swallows fetch errors.
@@ -844,10 +886,6 @@ class NewsChatView(generics.GenericAPIView):
         context = pick_chat_context(news)
         if len(context) > 10000:
             context = context[-10000:]
-
-        user_question = request.data.get('question', '').strip()
-        if not user_question:
-            return Response({'error': '问题不能为空'}, status=400)
 
         web_search = request.data.get('web_search', False)
 
@@ -900,14 +938,17 @@ class NewsChatView(generics.GenericAPIView):
                 import logging
                 logging.getLogger(__name__).warning("Web search failed for chat")
 
-        # Load or create session
-        session, _ = ChatSession.objects.get_or_create(news=news, defaults={'messages': []})
-
-        # Ensure session.messages is a list
-        if not isinstance(session.messages, list):
-            session.messages = []
-
-        history = session.messages[-20:] # Keep last 20 turns for context
+        try:
+            chat_snapshot = append_user_message(
+                user_id=request.user.pk,
+                news_id=news.pk,
+                content=user_question,
+            )
+        except ChatConflict:
+            return Response(
+                {'error_code': 'chat_conflict', 'error': '聊天记录正在更新，请重试'},
+                status=status.HTTP_409_CONFLICT,
+            )
 
         # Build messages for LLM
         system_content = (
@@ -939,24 +980,11 @@ class NewsChatView(generics.GenericAPIView):
             }
         ]
         
-        for msg in history:
+        for msg in chat_snapshot.messages[-20:]:
             messages.append(msg)
-        
-        messages.append({'role': 'user', 'content': user_question})
 
         from api.services.chatgpt_subscription import active_connection_for_user, stream_chat_response
         subscription_connection = active_connection_for_user(request.user)
-
-        # Save user message immediately
-        user_msg = {'role': 'user', 'content': user_question}
-        session.messages.append(user_msg)
-        session.save(update_fields=['messages'])
-
-        def save_ai_response(accumulated):
-            """Helper to save AI response after stream finishes"""
-            ai_msg = {'role': 'assistant', 'content': accumulated}
-            session.messages.append(ai_msg)
-            session.save(update_fields=['messages'])
 
         def generate():
             full_response = []
@@ -987,8 +1015,16 @@ class NewsChatView(generics.GenericAPIView):
                 if not full_response:
                     full_response = [fallback]
             finally:
-                # Save the full response to DB
-                save_ai_response(''.join(full_response))
+                try:
+                    append_assistant_message(
+                        user_id=request.user.pk,
+                        news_id=news.pk,
+                        session_id=chat_snapshot.session_id,
+                        generation=chat_snapshot.generation,
+                        content=''.join(full_response),
+                    )
+                except ChatConflict:
+                    logger.info('Discarded late chat response for cleared or deleted history')
 
         response = StreamingHttpResponse(generate(), content_type='text/event-stream')
         if web_search:
@@ -1318,23 +1354,94 @@ def csrf_token(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@authentication_classes([AnonymousCsrfSessionAuthentication])
 @ensure_csrf_cookie
 def auth_register(request):
     """POST /api/auth/register/ — create a new user and log them in."""
-    username = request.data.get('username', '').strip()
-    password = request.data.get('password', '')
-    email = request.data.get('email', '')
+    try:
+        reserve_registration_attempts(request.META.get('REMOTE_ADDR'))
+    except InvalidClientAddress:
+        return Response(
+            {'error_code': 'invalid_client_address', 'error': '客户端地址无效'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    except RateLimitExceeded as error:
+        return Response(
+            {'error_code': 'auth_rate_limited', 'error': '请求过于频繁，请稍后重试'},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={'Retry-After': str(error.retry_after)},
+        )
+    except AuthSecurityBusy:
+        return Response(
+            {'error_code': 'auth_security_busy', 'error': '认证安全服务暂不可用'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
 
-    if not username or not password:
-        return Response({'error': '用户名和密码不能为空'}, status=status.HTTP_400_BAD_REQUEST)
-    if len(password) < 6:
-        return Response({'error': '密码至少 6 位'}, status=status.HTTP_400_BAD_REQUEST)
-    if User.objects.filter(username=username).exists():
-        return Response({'error': '用户名已被占用'}, status=status.HTTP_400_BAD_REQUEST)
+    payload = request.data
+    get_value = payload.get if hasattr(payload, 'get') else lambda _key, _default=None: None
+    raw_username = get_value('username')
+    raw_email = get_value('email')
+    password = get_value('password')
+    invite_token = get_value('invite_token')
+    try:
+        if not isinstance(raw_username, str):
+            raise ValidationError('invalid username')
+        username = raw_username.strip()
+        if not 1 <= len(username) <= 150:
+            raise ValidationError('invalid username')
+        username = User._meta.get_field('username').clean(username, None)
 
-    user = User.objects.create_user(username=username, email=email, password=password)
-    invalidate_authorization_attempts_for_session(request.session.session_key or '')
-    login(request, user)
+        if not isinstance(raw_email, str):
+            raise ValidationError('invalid email')
+        email = normalize_email(raw_email)
+        if not email:
+            raise ValidationError('invalid email')
+        email = User._meta.get_field('email').clean(email, None)
+        EmailValidator()(email)
+
+        if not isinstance(password, str) or len(password) > 1024:
+            raise ValidationError('invalid password')
+        candidate = User(username=username, email=email)
+        from django.contrib.auth.password_validation import validate_password
+        validate_password(password, user=candidate)
+    except ValidationError:
+        return Response(
+            {'error_code': 'invalid_registration', 'error': '注册信息无效'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    def establish_session(user):
+        invalidate_authorization_attempts_for_session(request.session.session_key or '')
+        login(request, user)
+        # Persist the session inside the same transaction as the invite
+        # consumption so a failed session write cannot spend an invitation.
+        request.session.save()
+
+    try:
+        user = create_registered_user(
+            username=username,
+            email=email,
+            password=password,
+            invite_token=invite_token,
+            require_invite=settings.DJANGO_ENV == 'production',
+            on_created=establish_session,
+        )
+    except SignupInviteRequired:
+        return Response(
+            {'error_code': 'invite_required', 'error': '需要有效且匹配邮箱的一次性邀请'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    except RegistrationUnavailable:
+        return Response(
+            {'error_code': 'registration_unavailable', 'error': '暂时无法使用该注册信息'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    except AuthSecurityBusy:
+        return Response(
+            {'error_code': 'auth_security_busy', 'error': '认证安全服务暂不可用'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
     return Response({
         'id': user.pk,
         'username': user.username,
@@ -1344,11 +1451,35 @@ def auth_register(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@authentication_classes([AnonymousCsrfSessionAuthentication])
 @ensure_csrf_cookie
 def auth_login(request):
     """POST /api/auth/login/ — authenticate and create a session."""
-    username = request.data.get('username', '').strip()
-    password = request.data.get('password', '')
+    payload = request.data
+    get_value = payload.get if hasattr(payload, 'get') else lambda _key, _default=None: None
+    raw_username = get_value('username')
+    raw_password = get_value('password')
+    username = raw_username.strip() if isinstance(raw_username, str) else ''
+    password = raw_password if isinstance(raw_password, str) else ''
+
+    try:
+        reserve_login_attempts(request.META.get('REMOTE_ADDR'), username)
+    except InvalidClientAddress:
+        return Response(
+            {'error_code': 'invalid_client_address', 'error': '客户端地址无效'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    except RateLimitExceeded as error:
+        return Response(
+            {'error_code': 'auth_rate_limited', 'error': '请求过于频繁，请稍后重试'},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={'Retry-After': str(error.retry_after)},
+        )
+    except AuthSecurityBusy:
+        return Response(
+            {'error_code': 'auth_security_busy', 'error': '认证安全服务暂不可用'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
 
     user = authenticate(request, username=username, password=password)
     if user is None:
@@ -1365,6 +1496,7 @@ def auth_login(request):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@authentication_classes([SessionAuthentication])
 def auth_logout(request):
     """POST /api/auth/logout/ — end the current session."""
     invalidate_authorization_attempts_for_session(request.session.session_key or '')

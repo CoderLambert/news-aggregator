@@ -123,18 +123,80 @@ class News(models.Model):
 
 
 class ChatSession(models.Model):
-    """Stores chat history for a specific news article."""
-    news = models.OneToOneField(News, on_delete=models.CASCADE, related_name='chat_session')
+    """Stores one user's chat history for a specific news article."""
+    user = models.ForeignKey('auth.User', on_delete=models.CASCADE, related_name='news_chat_sessions')
+    news = models.ForeignKey(News, on_delete=models.CASCADE, related_name='chat_sessions')
     messages = models.JSONField('对话记录', default=list, blank=True)
     created_at = models.DateTimeField('创建时间', auto_now_add=True)
     updated_at = models.DateTimeField('更新时间', auto_now=True)
+    revision = models.PositiveBigIntegerField(default=0)
+    generation = models.PositiveBigIntegerField(default=0)
 
     class Meta:
         verbose_name = '对话会话'
         verbose_name_plural = '对话会话'
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'news'], name='unique_user_news_chat'),
+        ]
 
     def __str__(self):
-        return f"Chat for {self.news.title[:20]}"
+        return f"Chat for {self.user_id}:{self.news.title[:20]}"
+
+
+class LegacyChatArchive(models.Model):
+    """Immutable, unowned snapshot of pre-account chat sessions."""
+    session_id = models.BigIntegerField(primary_key=True)
+    news_id = models.BigIntegerField()
+    title = models.CharField(max_length=500)
+    url = models.URLField(max_length=500)
+    messages = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField()
+    updated_at = models.DateTimeField()
+
+    class Meta:
+        verbose_name = '旧版对话归档'
+        verbose_name_plural = '旧版对话归档'
+        ordering = ['session_id']
+
+    def __str__(self):
+        return f"Legacy chat {self.session_id}: {self.title[:30]}"
+
+
+class AuthSecurityLock(models.Model):
+    """Singleton write fence serializing authentication security updates."""
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    revision = models.PositiveBigIntegerField(default=0)
+
+
+class AuthRateBucket(models.Model):
+    """Persistent fixed-window counter keyed by an HMAC, never a raw client ID."""
+    key = models.CharField(max_length=64)
+    kind = models.CharField(max_length=32)
+    window_start = models.DateTimeField()
+    count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['key', 'window_start'],
+                name='unique_auth_rate_key_window',
+            ),
+        ]
+
+
+class SignupInvite(models.Model):
+    """One-use, email-bound signup token; only its SHA-256 digest is stored."""
+    token_digest = models.CharField(max_length=64, unique=True)
+    email = models.EmailField(max_length=254)
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    consumed_by = models.ForeignKey(
+        'auth.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='consumed_signup_invites',
+    )
 
 
 class Favorite(models.Model):

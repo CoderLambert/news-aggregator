@@ -6,8 +6,8 @@ tool_result, text_delta, complete, error.
 
 All endpoints require authentication. Sessions are scoped to the
 requesting user — one user cannot access another's research sessions.
-CSRF is handled by the frontend sending X-CSRFToken header (the same
-pattern used by the chat and translate SSE endpoints).
+Unsafe requests use standard server-side SessionAuthentication CSRF
+validation; the frontend supplies the token but does not assert validity.
 """
 
 import json as json_lib
@@ -15,9 +15,6 @@ import logging
 import time
 
 from django.http import StreamingHttpResponse
-from django.middleware.csrf import get_token as get_csrf_token
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
 from rest_framework import generics, status
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
@@ -32,27 +29,6 @@ from .serializers import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-# ── CSRF-relaxed SessionAuthentication ──────────────────────────────────────
-# The frontend sends X-CSRFToken header on all POST requests via streamingFetch,
-# but DRF's SessionAuthentication.authenticate() enforces CSRF internally,
-# before @csrf_exempt can take effect. This subclass authenticates the session
-# user but defers CSRF enforcement to Django's middleware (which respects
-# @csrf_exempt). This matches the pattern used by existing chat/translate views.
-# The frontend still validates CSRF via the X-CSRFToken header — we just move
-# the enforcement point.
-
-class CsrfExemptSessionAuthentication(SessionAuthentication):
-    """SessionAuthentication that defers CSRF to Django middleware.
-
-    Used for SSE streaming endpoints where the frontend already sends
-    X-CSRFToken but DRF's internal CSRF check blocks the request before
-    @csrf_exempt can take effect.
-    """
-
-    def enforce_csrf(self, request):
-        return  # Skip DRF's CSRF check — Django middleware + @csrf_exempt handle it
 
 
 # ── SSE heartbeat interval ──────────────────────────────────────────────────
@@ -73,7 +49,7 @@ class ResearchSessionListView(generics.ListAPIView):
     """List research sessions (most recently updated first)."""
     serializer_class = ResearchSessionListSerializer
     permission_classes = [IsAuthenticated]
-    authentication_classes = [CsrfExemptSessionAuthentication]
+    authentication_classes = [SessionAuthentication]
     pagination_class = PageNumberPagination
 
     def get_queryset(self):
@@ -86,7 +62,7 @@ class ResearchSessionDetailView(generics.RetrieveDestroyAPIView):
     """Get or delete a research session."""
     serializer_class = ResearchSessionSerializer
     permission_classes = [IsAuthenticated]
-    authentication_classes = [CsrfExemptSessionAuthentication]
+    authentication_classes = [SessionAuthentication]
     lookup_field = 'pk'
 
     def get_queryset(self):
@@ -151,10 +127,9 @@ def _research_stream_generator(job, session_id=None):
 
 # ── Create session + start agent ────────────────────────────────────────────
 
-@csrf_exempt
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-@authentication_classes([CsrfExemptSessionAuthentication])
+@authentication_classes([SessionAuthentication])
 def research_create(request):
     """Create a new research session and start the agent loop.
 
@@ -192,10 +167,9 @@ def research_create(request):
 
 # ── Continue session (follow-up question) ───────────────────────────────────
 
-@csrf_exempt
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-@authentication_classes([CsrfExemptSessionAuthentication])
+@authentication_classes([SessionAuthentication])
 def research_chat(request, pk):
     """Send a follow-up message to an existing research session.
 
@@ -239,7 +213,7 @@ def research_chat(request, pk):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-@authentication_classes([CsrfExemptSessionAuthentication])
+@authentication_classes([SessionAuthentication])
 def research_stream(request, pk):
     """Re-attach to an in-progress agent SSE stream.
 
@@ -276,7 +250,7 @@ class ResearchSearchResultListView(generics.ListAPIView):
     ``result_data``); pass ``?detail=1`` to include full result data.
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [CsrfExemptSessionAuthentication]
+    authentication_classes = [SessionAuthentication]
     pagination_class = PageNumberPagination
 
     def get_serializer_class(self):

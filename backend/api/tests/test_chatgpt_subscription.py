@@ -182,14 +182,31 @@ def test_auth_register_login_and_logout_do_not_require_subscription_encryption_k
         raise AssertionError('ordinary local authentication must not access the subscription key')
 
     monkeypatch.setattr(subscription, '_encryption_key', unavailable_key)
-    client = APIClient()
-    credentials = {'username': 'reader-without-subscription-key', 'password': 'strong-enough-password'}
+    client = APIClient(enforce_csrf_checks=True)
+    credentials = {
+        'username': 'reader-without-subscription-key',
+        'email': 'reader-without-subscription-key@example.test',
+        'password': 'strong-enough-password',
+    }
 
-    registered = client.post('/api/auth/register/', credentials, format='json')
+    csrf = client.get('/api/auth/csrf/').cookies['csrftoken'].value
+
+    registered = client.post(
+        '/api/auth/register/', credentials, format='json', secure=True,
+        HTTP_ORIGIN='https://testserver', HTTP_X_CSRFTOKEN=csrf,
+    )
     assert registered.status_code == 201
-    logged_in = client.post('/api/auth/login/', credentials, format='json')
+    csrf = client.get('/api/auth/csrf/').cookies['csrftoken'].value
+    logged_in = client.post(
+        '/api/auth/login/', credentials, format='json', secure=True,
+        HTTP_ORIGIN='https://testserver', HTTP_X_CSRFTOKEN=csrf,
+    )
     assert logged_in.status_code == 200
-    logged_out = client.post('/api/auth/logout/', {}, format='json')
+    csrf = client.get('/api/auth/csrf/').cookies['csrftoken'].value
+    logged_out = client.post(
+        '/api/auth/logout/', {}, format='json', secure=True,
+        HTTP_ORIGIN='https://testserver', HTTP_X_CSRFTOKEN=csrf,
+    )
     assert logged_out.status_code == 200
 
 

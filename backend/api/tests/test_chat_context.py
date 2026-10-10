@@ -18,6 +18,7 @@ Fix:
 """
 from unittest.mock import patch, MagicMock
 import pytest
+from django.contrib.auth.models import User
 from django.utils import timezone
 from api.models import News, Source, Category
 from api.services.article_fetcher import FetchError, FetchResult
@@ -151,6 +152,7 @@ class TestEnsureFullContent:
 class TestChatAutoFetch:
     def test_chat_view_auto_fetches_full_content_on_first_call(self, src, cat, client):
         n = _news(src, cat)
+        client.force_login(User.objects.create_user(username='chat-context-auto-fetch'))
         assert n.full_content == ''
 
         # Mock both: Jina fetch + LLM stream
@@ -192,6 +194,7 @@ class TestChatAutoFetch:
 
     def test_chat_view_does_not_refetch_when_full_content_exists(self, src, cat, client):
         n = _news(src, cat, full_content='ALREADY_CACHED')
+        client.force_login(User.objects.create_user(username='chat-context-cached'))
 
         def fake_stream(**kwargs):
             class _Stream:
@@ -259,6 +262,7 @@ class TestSuggestedQuestionsAutoFetch:
         returns it gracefully (200) and saves it to the session.
         """
         n = _news(src, cat, full_content='Some content here')
+        client.force_login(User.objects.create_user(username='chat-context-fallback'))
 
         def failing_stream_chat(messages, max_tokens=32000, temperature=0.3):
             yield '抱歉，AI 服务暂时不可用，请稍后再试。'
