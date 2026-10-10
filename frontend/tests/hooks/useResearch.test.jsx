@@ -75,6 +75,7 @@ describe('F03 queued and pre-header recovery', () => {
       keys.push(idempotencyKey)
       return (async function* delayedHeaders() {
         await waitForAbort(signal)
+        yield { type: 'thinking' }
       })()
     })
     const original = renderResearchHook()
