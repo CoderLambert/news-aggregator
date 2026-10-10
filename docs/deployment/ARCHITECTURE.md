@@ -134,3 +134,9 @@ G3扩展既有SQLite租约模式，不引入新的任务平台；job/event/budge
 研究进度目前只保存在进程内，完整会话/工具结果已有用户归属。后续恢复切片只增加专用ResearchRun持久状态与事件（user/session/idempotency key/lease/run token），沿用研究循环、双线程执行器、已有工具结果，禁止泛化成费用或通用调度平台；迁移0031在0030翻译恢复后串行实施。创建/继续可按owner幂等键附着，GET重连只读取持久进度，取消/失租约/用户禁用/会话删除须在下一模型/工具调用及存储前fence。操作已开始后进程中断一律interrupted，不自动重做；用户明确POST新一轮才执行。状态与完整历史提交用SQLite首写CAS，不跨网络持写锁。
 
 生产研究不得退回旧标准站点API：真实网站订阅工具调用协议尚未获准，生产入口和worker在任何模型、工具网络或任务创建前返回hosted_integration_unapproved/503（现PUBLIC_AI_ENABLED=0早期403保持）；不得靠fake approval env绕过。开发历史Provider兼容仅保留既有行为，所有恢复验收用Fake，不调用真实模型。该外部依赖不阻止本地取消/持久进度/恢复安全代码，但不得声称生产研究AI已可用。未增加用户次数、日额度、费用或Token预算。
+
+## ADR-028：研究恢复、取消与 SSE 资源保护
+
+执行契约：`docs/deployment/contracts/RESEARCH-RECOVERY.md`。复用 ADR-027 的 ResearchSession、研究循环和 ADR-026 同一个双线程执行器；专用 `ResearchRun`/`ResearchRunEvent` 与0031只承载 owner 私有的持久状态/事件，不建立通用队列。SQLite 首写 CAS、随机run_token、60秒租约/20秒心跳；cancel/owner inactive/session deletion/失租约在下一次模型、工具网络或保存前fence；操作已开始后中断为 `interrupted`，不自动重放，显式新 POST 才开启新run。生产即使PUBLIC_AI_ENABLED显式开启仍在数据创建/任何上游前503 `hosted_integration_unapproved`；默认AI开关0原403保持。开发模式保留历史Provider行为，验收一律Fake。
+
+全站AI event-stream route（news-chat/news-translate/research-create/research-chat/research-stream）共享每进程最多2个连接槽，view执行前取得、所有响应关闭路径释放；满额503 `sse_capacity_reached`。这样在默认Waitress 4线程下保留前台新闻请求线程。该限制仅保护HTTP资源，不是用户任务/次数/费用/Token额度。SSE记录上限依ADR-024的16KiB完整wire/2MiB每run/32KiB解析缓冲；全文仍由owner session读取，成功结果不截断。断流只释放SSE槽，不取消后台任务；显式cancel使用owner CSRF endpoint。

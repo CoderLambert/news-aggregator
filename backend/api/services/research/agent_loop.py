@@ -102,17 +102,12 @@ RESEARCH_SYSTEM_PROMPT = """\
 """
 
 
-def run_agent_loop(session, user_query: str, on_event: Callable, local_only: bool = False):
-    """Run the agent loop for a research query.
-
-    Args:
-        session: ResearchSession model instance (messages will be updated in-place).
-        user_query: The user's question or research prompt.
-        on_event: Callback ``on_event(event_type, data)`` for each agent event.
-            Event types: thinking, tool_call, tool_result, text_delta, complete, error,
-            query_decomposed.
-        local_only: When True, restrict to local news database only (no web search).
-    """
+def run_agent_loop(
+    session, user_query: str, on_event: Callable, local_only: bool = False,
+    execution_guard=None, persist_completion=None, persist_tool_result=None,
+):
+    """Run the research agent with optional worker fences and durable writes."""
+    guard = execution_guard or (lambda: None)
     # In local-only mode, filter out web search tools so the LLM cannot call them
     logger.info('run_agent_loop: local_only=%s', local_only)
     available_tools = [
@@ -142,10 +137,12 @@ def run_agent_loop(session, user_query: str, on_event: Callable, local_only: boo
         messages.insert(0, {'role': 'system', 'content': system_prompt})
 
     for iteration in range(MAX_ITERATIONS):
+        guard()
         on_event('thinking', {'iteration': iteration})
 
         # Call LLM with tools
-        response = _call_llm_with_tools(messages, tools=available_tools)
+        response = _call_llm_with_tools(messages, tools=available_tools, execution_guard=guard)
+        guard()
         if response is None:
             on_event('error', {'message': '所有 LLM 提供商不可用，请稍后再试'})
             return
@@ -167,6 +164,7 @@ def run_agent_loop(session, user_query: str, on_event: Callable, local_only: boo
 
                 call_id = tool_call.id
 
+                guard()
                 on_event('tool_call', {
                     'name': fn_name,
                     'args': fn_args,
@@ -174,12 +172,21 @@ def run_agent_loop(session, user_query: str, on_event: Callable, local_only: boo
                 })
 
                 # Execute the tool
-                result = execute_tool(fn_name, fn_args, session=session)
+                guard()
+                tool_kwargs = {}
+                if execution_guard is not None:
+                    tool_kwargs = {
+                        'execution_guard': guard,
+                        'persist_search_result': persist_tool_result,
+                    }
+                result = execute_tool(fn_name, fn_args, session=session, **tool_kwargs)
+                guard()
 
                 # Build a brief summary for the frontend
                 summary = _tool_result_summary(fn_name, result)
 
                 # Include key result data for rich UI rendering (articles, web results)
+                guard()
                 on_event('tool_result', {
                     'call_id': call_id,
                     'summary': summary,
@@ -213,12 +220,18 @@ def run_agent_loop(session, user_query: str, on_event: Callable, local_only: boo
                 'content': final_text,
             })
 
-            # Persist to database
-            session.messages = messages
-            session.save(update_fields=['messages', 'updated_at'])
-
-            # Auto-generate title if this is the first response
+            # Auto-generate a title in memory; the worker commits history,
+            # title and terminal run state in one guarded transaction.
             _maybe_generate_title(session, user_query, final_text)
+            if execution_guard is not None:
+                guard()
+                if persist_completion is not None:
+                    persist_completion(messages)
+                else:
+                    session.messages = messages
+                    session.save(update_fields=['messages', 'title', 'updated_at'])
+            else:
+                session.save(update_fields=['messages', 'title', 'updated_at'])
 
             on_event('complete', {})
             return
@@ -227,22 +240,20 @@ def run_agent_loop(session, user_query: str, on_event: Callable, local_only: boo
     on_event('error', {'message': 'Agent 达到最大迭代次数限制，请尝试简化问题'})
 
 
-def _call_llm_with_tools(messages: list, tools=None):
-    """Call LLM with tool schemas, trying each provider with retry.
-
-    Returns the response object or None on total failure.
-    Uses non-streaming calls for the tool-selection phase.
-    """
+def _call_llm_with_tools(messages: list, tools=None, execution_guard=None):
+    """Call each configured provider in the original order with guarded retries."""
+    guard = execution_guard or (lambda: None)
     if tools is None:
         tools = TOOLS
-    MAX_RETRIES = 2
+    max_retries = 2
+    guard()
     clients = get_clients()
     if not clients:
         return None
 
-    last_err = None
     for idx, (client, model) in enumerate(clients):
-        for attempt in range(1, MAX_RETRIES + 1):
+        for attempt in range(1, max_retries + 1):
+            guard()
             try:
                 response = client.chat.completions.create(
                     model=model,
@@ -252,20 +263,20 @@ def _call_llm_with_tools(messages: list, tools=None):
                     temperature=0.3,
                     max_tokens=8000,
                 )
-                return response
-            except Exception as e:
-                last_err = f'provider#{idx} ({model}) attempt {attempt} failed: {e}'
-                logger.warning(last_err)
-                is_transient = any(
-                    kw in str(e).lower()
-                    for kw in ['ssl', 'eof', 'timeout', 'connection', 'reset', 'broken pipe']
+            except Exception as exc:
+                logger.info('Research provider attempt failed (provider=%s attempt=%s).', idx, attempt)
+                transient = any(
+                    keyword in str(exc).lower()
+                    for keyword in ['ssl', 'eof', 'timeout', 'connection', 'reset', 'broken pipe']
                 )
-                if is_transient and attempt < MAX_RETRIES:
+                if transient and attempt < max_retries:
                     time.sleep(1 * attempt)
                     continue
-                break  # Non-transient or exhausted retries → try next provider
+                break
+            guard()
+            return response
 
-    logger.error('All LLM providers failed for research agent. Last: %s', last_err)
+    logger.info('All configured research providers failed.')
     return None
 
 
@@ -315,47 +326,33 @@ def _tool_result_summary(name: str, result: dict) -> str:
 
 
 def _maybe_generate_title(session, user_query: str, response_text: str):
-    """Auto-generate a session title heuristically from the response.
-
-    Tries to extract a meaningful title from the response content (e.g. the
-    first markdown heading or the 核心摘要 section). Falls back to query
-    truncation. No LLM call needed.
-    """
+    """Set a heuristic title in memory for the enclosing guarded commit."""
     if session.title:
         return
 
     import re
 
-    # Strategy 1: Extract first ## heading from the structured report
     heading_match = re.search(r'^##\s+(.+)$', response_text, re.MULTILINE)
     if heading_match:
-        title = heading_match.group(1).strip()
-        # Clean up: remove trailing punctuation, emojis
-        title = re.sub(r'[：:…—\-–]$', '', title).strip()
+        title = re.sub(r'[：:…—-]$', '', heading_match.group(1).strip()).strip()
         if 2 <= len(title) <= 30:
             session.title = title
-            session.save(update_fields=['title'])
             return
 
-    # Strategy 2: Extract content after "核心摘要" marker
     summary_match = re.search(
         r'核心摘要[：:\n]+(.+?)(?:\n|$)', response_text, re.DOTALL,
     )
     if summary_match:
         title = summary_match.group(1).strip()
-        # Truncate to first sentence
-        for sep in ['。', '！', '？', '\n']:
-            idx = title.find(sep)
-            if idx > 0:
-                title = title[:idx]
+        for separator in ['。', '！', '？', '\n']:
+            index = title.find(separator)
+            if index > 0:
+                title = title[:index]
         if 2 <= len(title) <= 30:
             session.title = title
-            session.save(update_fields=['title'])
             return
 
-    # Fallback: truncate the user query
     title = user_query.strip().replace('\n', ' ')[:50]
     if len(user_query.strip()) > 50:
         title += '...'
     session.title = title
-    session.save(update_fields=['title'])

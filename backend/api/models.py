@@ -822,3 +822,67 @@ class SearchIndexRun(models.Model):
                 name='one_search_index_run_per_crawl_batch',
             ),
         ]
+class ResearchRun(models.Model):
+    """Owner-private durable state for one explicit research attempt."""
+
+    STATUS_CHOICES = [
+        ('queued', '排队中'),
+        ('running', '运行中'),
+        ('succeeded', '已完成'),
+        ('failed', '失败'),
+        ('cancelled', '已取消'),
+        ('interrupted', '已中断'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        'auth.User', on_delete=models.CASCADE, related_name='research_runs',
+    )
+    session = models.ForeignKey(
+        ResearchSession, on_delete=models.CASCADE, related_name='runs',
+    )
+    idempotency_key = models.CharField(max_length=64)
+    request_hash = models.CharField(max_length=64)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='queued', db_index=True)
+    run_token = models.UUIDField(null=True, blank=True)
+    heartbeat_at = models.DateTimeField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    last_event_sequence = models.PositiveBigIntegerField(default=0)
+    event_wire_bytes = models.PositiveBigIntegerField(default=0)
+    error_code = models.CharField(max_length=64, blank=True, default='')
+    error_message = models.CharField(max_length=255, blank=True, default='')
+    queued_at = models.DateTimeField(default=timezone.now)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'idempotency_key'], name='unique_research_run_user_key'),
+            models.UniqueConstraint(
+                fields=['session'],
+                condition=models.Q(status__in=['queued', 'running']),
+                name='one_active_research_run_per_session',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['session', '-queued_at'], name='research_run_session_queued'),
+        ]
+
+
+class ResearchRunEvent(models.Model):
+    """A bounded, replayable SSE event belonging to one private run."""
+
+    id = models.BigAutoField(primary_key=True)
+    run = models.ForeignKey(ResearchRun, on_delete=models.CASCADE, related_name='events')
+    sequence = models.PositiveBigIntegerField()
+    event_type = models.CharField(max_length=32)
+    data = models.JSONField(default=dict)
+    wire_bytes = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['sequence']
+        constraints = [
+            models.UniqueConstraint(fields=['run', 'sequence'], name='unique_research_event_sequence'),
+        ]

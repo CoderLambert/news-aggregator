@@ -113,21 +113,28 @@ export interface ResearchResultsParams extends ApiQueryParams {
 
 export interface ResearchStreamOptions {
   localOnly?: boolean
+  idempotencyKey?: string
   signal?: AbortSignal
   onSessionId?: (sessionId: string) => void
+  onRunId?: (runId: string) => void
 }
 
 export interface ResearchChatStreamOptions {
   localOnly?: boolean
+  idempotencyKey?: string
   signal?: AbortSignal
+  onRunId?: (runId: string) => void
 }
 
 export interface OpenResearchSessionStreamOptions {
   signal?: AbortSignal
+  onRunId?: (runId: string) => void
+  waitForQueued?: boolean
 }
 
 export type OpenResearchSessionStreamResponse =
   | { kind: 'session'; data: unknown }
+  | { kind: 'queued'; runId: string | null }
   | { kind: 'stream'; events: AsyncIterable<unknown> }
 
 interface SuggestedQuestionsOptions {
@@ -250,12 +257,18 @@ export function fetchSuggestedQuestions(newsId: NewsId, { force = false, signal 
 
 export async function* translateFullArticleStream(
   id: NewsId,
-  { force = false, signal }: { force?: boolean; signal?: AbortSignal } = {},
+  { force = false, signal, onJobId }: {
+    force?: boolean
+    signal?: AbortSignal
+    onJobId?: (jobId: string) => void
+  } = {},
 ): AsyncGenerator<unknown> {
   const response = await streamingFetch(`/api/news/${id}/translate/`, {
     body: JSON.stringify({ force }),
     signal,
   })
+  const jobId = response.headers.get('Job-ID')
+  if (jobId) onJobId?.(jobId)
   for await (const event of iterSSEEvents(response)) {
     if (isRecord(event) && typeof event.error === 'string') {
       // Provider failover errors are data for the UI, not transport failures.
@@ -473,6 +486,14 @@ export function disconnectChatGPTSubscription(connectionId: string): Promise<{ d
   return api.delete<{ disconnected: boolean; revocation_confirmed: boolean }>(`/chatgpt-subscription/connections/${connectionId}/`).then(({ data }) => data)
 }
 
+
+export function getChatGPTTranslationTask(jobId: string, signal?: AbortSignal): Promise<unknown> {
+  return api.get<unknown>(`/chatgpt-subscription/jobs/${jobId}/`, { signal }).then(({ data }) => data)
+}
+
+export function cancelChatGPTTranslationTask(jobId: string, generation: number): Promise<unknown> {
+  return api.post<unknown>(`/chatgpt-subscription/jobs/${jobId}/cancel/`, { generation }).then(({ data }) => data)
+}
 // ---- Research -------------------------------------------------------------
 
 export function listResearchSessions(params: ApiQueryParams = {}, signal?: AbortSignal): Promise<unknown> {
@@ -489,13 +510,16 @@ export function deleteResearchSession(sessionId: string): Promise<unknown> {
 
 export async function* createResearchStream(
   query: string,
-  { localOnly = false, signal, onSessionId }: ResearchStreamOptions = {},
+  { localOnly = false, idempotencyKey, signal, onSessionId, onRunId }: ResearchStreamOptions = {},
 ): AsyncGenerator<unknown> {
   const response = await streamingFetch('/api/research/', {
     body: JSON.stringify({ query, local_only: localOnly }),
+    headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     signal,
   })
   const sessionId = response.headers.get('Session-ID')
+  const runId = response.headers.get('Run-ID')
+  if (runId) onRunId?.(runId)
   if (sessionId) {
     onSessionId?.(sessionId)
     yield { type: 'session_created', session_id: sessionId }
@@ -515,24 +539,42 @@ export async function* createResearchStream(
 export async function* researchChatStream(
   sessionId: string,
   query: string,
-  { localOnly = false, signal }: ResearchChatStreamOptions = {},
+  { localOnly = false, idempotencyKey, signal, onRunId }: ResearchChatStreamOptions = {},
 ): AsyncGenerator<unknown> {
   const response = await streamingFetch(`/api/research/${sessionId}/chat/`, {
     body: JSON.stringify({ query, local_only: localOnly }),
+    headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     signal,
   })
+  const runId = response.headers.get('Run-ID')
+  if (runId) onRunId?.(runId)
   yield* iterSSEEvents(response)
 }
 
 export async function openResearchSessionStream(
   sessionId: string,
-  { signal }: OpenResearchSessionStreamOptions = {},
+  { signal, onRunId, waitForQueued = false }: OpenResearchSessionStreamOptions = {},
 ): Promise<OpenResearchSessionStreamResponse> {
-  const response = await streamingFetch(`/api/research/${sessionId}/stream/`, { method: 'GET', signal })
-  if (response.headers.get('content-type')?.includes('application/json')) {
-    return { kind: 'session', data: (await response.json()) as unknown }
+  while (true) {
+    const response = await streamingFetch(`/api/research/${sessionId}/stream/`, { method: 'GET', signal })
+    const runId = response.headers.get('Run-ID')
+    if (runId) onRunId?.(runId)
+    if (response.headers.get('content-type')?.includes('application/json')) {
+      return { kind: 'session', data: (await response.json()) as unknown }
+    }
+    if (response.headers.get('Run-Status') === 'queued') {
+      await response.body?.cancel()
+      if (!waitForQueued) return { kind: 'queued', runId }
+      await new Promise<void>((resolve) => setTimeout(resolve, 1000))
+      if (signal?.aborted) throw new Error('Research stream aborted')
+      continue
+    }
+    return { kind: 'stream', events: iterSSEEvents(response) }
   }
-  return { kind: 'stream', events: iterSSEEvents(response) }
+}
+
+export function cancelResearchRun(sessionId: string, runId: string): Promise<unknown> {
+  return api.post<unknown>(`/research/${sessionId}/cancel/`, { run_id: runId }).then(({ data }) => data)
 }
 
 export function getResearchResults(

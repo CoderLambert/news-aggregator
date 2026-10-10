@@ -248,6 +248,13 @@ class ChatGPTSubscriptionDisconnectView(APIView):
         return Response({'disconnected': True, 'revocation_confirmed': revoked})
 
 
+class _NoStoreAPIView(APIView):
+    def finalize_response(self, request, response, *args, **kwargs):
+        response = super().finalize_response(request, response, *args, **kwargs)
+        response['Cache-Control'] = 'no-store'
+        return response
+
+
 def _translation_task_payload(task):
     return {
         'id': str(task.pk),
@@ -262,46 +269,46 @@ def _translation_task_payload(task):
     }
 
 
-class ChatGPTTranslationTaskView(APIView):
+
+
+class ChatGPTTranslationTaskView(_NoStoreAPIView):
     authentication_classes = [SessionAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request, job_id):
-        task = translation_jobs.get_task(job_id, user_id=request.user.pk)
+        try:
+            task = translation_jobs.get_task(job_id, user_id=request.user.pk)
+        except subscription.SubscriptionError as exc:
+            return _subscription_error_response(exc)
         if task is None:
             return Response({'error': '任务不存在。'}, status=status.HTTP_404_NOT_FOUND)
-        response = Response(_translation_task_payload(task))
-        response['Cache-Control'] = 'no-store'
-        return response
+        return Response(_translation_task_payload(task))
 
 
-class ChatGPTTranslationTaskCancelView(APIView):
+class ChatGPTTranslationTaskCancelView(_NoStoreAPIView):
     authentication_classes = [SessionAuthentication]
     permission_classes = [IsAuthenticated]
 
     def post(self, request, job_id):
-        generation = request.data.get('generation')
-        if isinstance(generation, bool) or not isinstance(generation, int) or generation < 1:
-            response = Response(
+        body = request.data
+        generation = body.get('generation') if isinstance(body, dict) else None
+        if (
+            type(generation) is not int or
+            not 1 <= generation <= 9223372036854775807
+        ):
+            return Response(
                 {'error': 'generation 必须是正整数。', 'error_code': 'invalid_generation'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-            response['Cache-Control'] = 'no-store'
-            return response
         try:
             task, _ = translation_jobs.cancel_task(
                 job_id, user_id=request.user.pk, generation=generation,
             )
         except subscription.SubscriptionError as exc:
-            response = _subscription_error_response(exc)
-            response['Cache-Control'] = 'no-store'
-            return response
+            return _subscription_error_response(exc)
         if task is None:
-            response = Response({'error': '任务不存在。'}, status=status.HTTP_404_NOT_FOUND)
-        else:
-            response = Response(_translation_task_payload(task))
-        response['Cache-Control'] = 'no-store'
-        return response
+            return Response({'error': '任务不存在。'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(_translation_task_payload(task))
 
 
 def subscription_translation_response(request, news: News, force=False):
@@ -317,25 +324,34 @@ def subscription_translation_response(request, news: News, force=False):
         response['X-Accel-Buffering'] = 'no'
         return response
 
+    if type(force) is not bool:
+        return error_response('force 必须是布尔值。')
     if not user.is_authenticated or connection is None:
         return error_response('请先登录并连接 ChatGPT 订阅账号。')
     if not news.full_content:
         return error_response('请先获取完整原文。')
 
     digest = subscription.source_hash(news.full_content)
-    job = translation_jobs.get_job(user.pk, connection.pk, news.pk, digest)
+    try:
+        job = translation_jobs.get_job(user.pk, connection.pk, news.pk, digest)
+    except subscription.SubscriptionError as exc:
+        return error_response(str(exc))
     cached = ChatGPTArticleTranslation.objects.filter(
         user=user, connection=connection, news=news, source_hash=digest,
     ).first()
-    if cached and not force and not (job and not job.done):
+    if cached and not force and not (job and not job.done) and not (job and job.status == 'succeeded'):
         response = shared_translations.completed_response(cached, 'private')
         response['Cache-Control'] = 'no-store'
         return response
 
     terminal_error = bool(job and job.done and job.status in {'failed', 'cancelled', 'interrupted'})
+    successful_job = bool(job and job.done and job.status == 'succeeded')
 
     shared_lease = None
-    if not force and not (job and not job.done) and not terminal_error:
+    if (
+        not force and not (job and not job.done) and not terminal_error and
+        not successful_job
+    ):
         shared = shared_translations.get_shared_translation(news)
         if shared is not None:
             response = shared_translations.completed_response(shared)
@@ -352,7 +368,9 @@ def subscription_translation_response(request, news: News, force=False):
                 return error_response('请先在订阅设置中选择可见模型。')
             shared_lease = shared_translations.claim_task(news)
             if shared_lease is None:
-                return shared_translations.waiting_response(news)
+                response = shared_translations.waiting_response(news)
+                response['Cache-Control'] = 'no-store'
+                return response
 
     if connection.needs_reauth or not connection.connected:
         return error_response('ChatGPT 订阅授权已失效，请重新连接账号。')
@@ -360,8 +378,10 @@ def subscription_translation_response(request, news: News, force=False):
         return error_response('请先在订阅设置中选择可见模型。')
 
     try:
-        if not (job and not job.done and shared_lease is None):
-            job = translation_jobs.start_or_get_job(user, connection, news, shared_lease=shared_lease)
+        if force or not (job and job.status == 'running' and shared_lease is None):
+            job = translation_jobs.start_or_get_job(
+                user, connection, news, force=force, shared_lease=shared_lease,
+            )
     except subscription.SubscriptionError as exc:
         if shared_lease is not None:
             shared_lease.finish('failed')
@@ -386,6 +406,8 @@ def subscription_translation_response(request, news: News, force=False):
                 yield f"data: {json.dumps({'error': '本次翻译没有保存完整结果。'}, ensure_ascii=False)}\n\n"
                 return
             yield f"event: complete\ndata: {json.dumps(job.result, ensure_ascii=False)}\n\n"
+        except subscription.SubscriptionError as exc:
+            yield f"data: {json.dumps({'error': str(exc)}, ensure_ascii=False)}\n\n"
         except GeneratorExit:
             # Closing this subscriber stops only its SSE reader. The background
             # worker continues, matching the existing full-text translation UX.

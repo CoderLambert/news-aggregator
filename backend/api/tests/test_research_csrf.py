@@ -1,4 +1,4 @@
-from types import SimpleNamespace
+import uuid
 from unittest.mock import patch
 
 import pytest
@@ -6,7 +6,15 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from api.models import ResearchSession
+from api.models import ResearchRun, ResearchSession
+from api.services.research import job_manager
+
+
+def _release_research_run(run_id):
+    key = str(run_id)
+    job_manager._release(key)
+    with job_manager._dispatch_lock:
+        job_manager._dispatching.discard(key)
 
 
 def _csrf_token(client):
@@ -66,25 +74,59 @@ def test_research_create_chat_and_delete_reject_missing_or_bad_csrf():
     assert not ResearchSession.objects.filter(pk=session.pk).exists()
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 def test_research_create_uses_standard_session_auth_and_valid_secure_csrf_without_network():
     user = User.objects.create_user(username='research-create-user', password='not-used')
     client = APIClient(enforce_csrf_checks=True)
     client.force_login(user)
     token = _csrf_token(client)
-    fake_job = SimpleNamespace(done=False)
-
-    with patch(
-        'api.services.research.job_manager.start_or_get_research_job',
-        return_value=fake_job,
-    ) as start_job:
+    with patch('api.services.chatgpt_subscription_jobs.submit_background_task') as submit_task:
         response = _secure_post(client, '/api/research/', {'query': 'offline test'}, token)
 
     assert response.status_code == 200
     assert response['Session-ID']
+    assert response['Run-ID']
     session = ResearchSession.objects.get(pk=response['Session-ID'])
     assert session.user_id == user.pk
-    start_job.assert_called_once_with(session.id, session, 'offline test', local_only=False)
+    submit_task.assert_called_once()
+    run_id = response['Run-ID']
+    response.close()
+    _release_research_run(run_id)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_research_cancel_is_owner_scoped_csrf_protected_and_terminal_idempotent():
+    user = User.objects.create_user(username='research-cancel-user', password='not-used')
+    client = APIClient(enforce_csrf_checks=True)
+    client.force_login(user)
+    token = _csrf_token(client)
+
+    with patch('api.services.chatgpt_subscription_jobs.submit_background_task'):
+        created = _secure_post(client, '/api/research/', {'query': 'cancel offline'}, token)
+    session_id = created['Session-ID']
+    run_id = created['Run-ID']
+    created.close()
+    cancel_path = f'/api/research/{session_id}/cancel/'
+
+    missing_csrf = client.post(cancel_path, {'run_id': run_id}, format='json')
+    assert missing_csrf.status_code == 403
+    assert ResearchRun.objects.get(pk=run_id).status == 'queued'
+
+    cancelled = _secure_post(client, cancel_path, {'run_id': run_id}, token)
+    assert cancelled.status_code == 200
+    assert cancelled.data['status'] == 'cancelled'
+    repeated = _secure_post(client, cancel_path, {'run_id': run_id}, token)
+    assert repeated.status_code == 200
+    assert repeated.data['status'] == 'cancelled'
+
+    stale = _secure_post(client, cancel_path, {'run_id': str(uuid.uuid4())}, token)
+    assert stale.status_code == 409
+
+    other = APIClient()
+    other.force_authenticate(User.objects.create_user(username='research-cancel-other', password='not-used'))
+    cross_user = other.post(cancel_path, {'run_id': run_id}, format='json')
+    assert cross_user.status_code == 404
+    _release_research_run(run_id)
 
 
 @pytest.mark.django_db

@@ -1,4 +1,5 @@
 import {
+  cancelResearchRun as cancelResearchRunRequest,
   createResearchStream as createResearchStreamRequest,
   deleteResearchSession as deleteResearchSessionRequest,
   getResearchResults as getResearchResultsRequest,
@@ -19,8 +20,8 @@ import type { Page } from '@/types/news'
 
 export type ResearchSessionStream =
   | { kind: 'session'; session: ResearchSessionDetail }
+  | { kind: 'queued'; runId: string | null }
   | { kind: 'events'; events: AsyncIterable<ResearchEvent> }
-
 function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
   return typeof value === 'object'
     && value !== null
@@ -56,7 +57,13 @@ export async function deleteResearchSession(sessionId: string): Promise<void> {
 
 export function createResearchStream(
   query: string,
-  options: { localOnly: boolean; signal: AbortSignal; onSessionId?: (sessionId: string) => void },
+  options: {
+    localOnly: boolean
+    idempotencyKey: string
+    signal: AbortSignal
+    onSessionId?: (sessionId: string) => void
+    onRunId?: (runId: string) => void
+  },
 ): AsyncGenerator<ResearchEvent> {
   const source = createResearchStreamRequest(query, options) as AsyncIterable<unknown>
   return typedResearchEvents(source)
@@ -65,21 +72,39 @@ export function createResearchStream(
 export function researchChatStream(
   sessionId: string,
   query: string,
-  options: { localOnly: boolean; signal: AbortSignal },
+  options: {
+    localOnly: boolean
+    idempotencyKey: string
+    signal: AbortSignal
+    onRunId?: (runId: string) => void
+  },
 ): AsyncGenerator<ResearchEvent> {
   const source = researchChatStreamRequest(sessionId, query, options) as AsyncIterable<unknown>
   return typedResearchEvents(source)
 }
 
-export async function openResearchSessionStream(sessionId: string, signal: AbortSignal): Promise<ResearchSessionStream> {
-  const response: unknown = await openResearchSessionStreamRequest(sessionId, { signal })
+export async function openResearchSessionStream(
+  sessionId: string,
+  signal: AbortSignal,
+  onRunId?: (runId: string) => void,
+  waitForQueued = false,
+): Promise<ResearchSessionStream> {
+  const response: unknown = await openResearchSessionStreamRequest(
+    sessionId, { signal, onRunId, waitForQueued },
+  )
   if (!isRecord(response)) throw new TypeError('Invalid research stream response')
-
   if (response.kind === 'session') {
     return { kind: 'session', session: parseResearchSessionDetail(response.data) }
+  }
+  if (response.kind === 'queued' && (typeof response.runId === 'string' || response.runId === null)) {
+    return { kind: 'queued', runId: response.runId }
   }
   if (response.kind === 'stream' && isRecord(response) && isAsyncIterable(response.events)) {
     return { kind: 'events', events: typedResearchEvents(response.events) }
   }
   throw new TypeError('Invalid research stream response')
+}
+
+export async function cancelResearchRun(sessionId: string, runId: string): Promise<unknown> {
+  return cancelResearchRunRequest(sessionId, runId)
 }

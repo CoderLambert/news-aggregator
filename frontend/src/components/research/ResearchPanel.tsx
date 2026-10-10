@@ -77,6 +77,7 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
     handleNewSession,
     handleSelectSession,
     handleCancel,
+    handleDisconnect,
     handleResume,
     handleRetry,
   } = useResearch(user?.id ?? null)
@@ -85,11 +86,11 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
 
   const handleClose = useCallback(() => {
     const needsRiskReview = isBusy && !activeSessionId
-    handleCancel()
+    handleDisconnect()
     setIsFullscreen(false)
     if (needsRiskReview) return
     onClose()
-  }, [activeSessionId, handleCancel, isBusy, onClose])
+  }, [activeSessionId, handleDisconnect, isBusy, onClose])
 
   function handleSendQuery() {
     if (!input.trim() || isLoading || hasRecoverableTask || !user) return

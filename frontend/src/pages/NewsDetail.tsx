@@ -92,7 +92,7 @@ export default function NewsDetail() {
     showOriginal,
     setShowOriginal,
     handleTranslate,
-    stopTranslationWait,
+    cancelTranslation,
   } = useTranslation(id ?? '', news, setNews, loading)
 
   const speechPlayer = useSpeechPlayerActions()
@@ -128,8 +128,8 @@ export default function NewsDetail() {
   }, [translateError])
   const handleStopTranslation = useCallback(() => {
     pendingSpeechScopeRef.current = null
-    stopTranslationWait()
-  }, [stopTranslationWait])
+    cancelTranslation()
+  }, [cancelTranslation])
 
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')

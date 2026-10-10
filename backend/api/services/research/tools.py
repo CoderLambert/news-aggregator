@@ -285,15 +285,11 @@ TOOLS = [
 
 # ── Tool dispatcher ─────────────────────────────────────────────────────────
 
-def execute_tool(name: str, args: dict, session=None) -> dict:
-    """Execute a tool by name with the given arguments.
-
-    Returns a structured JSON dict. Each handler must return a dict that can
-    be serialized to JSON and truncated to _MAX_RESULT_CHARS.
-
-    If *session* (a ResearchSession instance) is provided and the result is
-    successful, the result is persisted to ResearchSearchResult automatically.
-    """
+def execute_tool(
+    name: str, args: dict, session=None, execution_guard=None,
+    persist_search_result=None,
+) -> dict:
+    """Run one guarded research tool and persist its successful result."""
     tool_map = {
         'search_news': _tool_search_news,
         'fetch_article': _tool_fetch_article,
@@ -304,22 +300,29 @@ def execute_tool(name: str, args: dict, session=None) -> dict:
     }
     handler = tool_map.get(name)
     if not handler:
-        return {'error': f'Unknown tool: {name}'}
+        return {'error': 'Unknown research tool.'}
+    guard = execution_guard or (lambda: None)
+    guard()
     try:
-        result = handler(**args)
-        result = _truncate_result(result)
-
-        # Persist search result if session is provided and no error
-        if session is not None and 'error' not in result:
-            _save_search_result(session, name, args, result)
-
+        result = _truncate_result(handler(**args))
+        guard()
+        if 'error' in result:
+            return {'error': '研究工具暂时不可用，请稍后重试。'}
+        if session is not None:
+            if persist_search_result is not None:
+                persist_search_result(name, args, result)
+            else:
+                _save_search_result(session, name, args, result, guard=execution_guard)
+        guard()
         return result
-    except Exception as e:
-        logger.exception('Tool %s failed', name)
-        return {'error': str(e)}
+    except Exception as exc:
+        # A failed fence propagates; provider and tool details never enter events.
+        guard()
+        logger.info('Research tool failed (%s).', type(exc).__name__)
+        return {'error': '研究工具暂时不可用，请稍后重试。'}
 
 
-def _save_search_result(session, tool_name: str, args: dict, result: dict):
+def _save_search_result(session, tool_name: str, args: dict, result: dict, guard=None):
     """Extract summary fields from a tool result and persist to the database."""
     from api.models import ResearchSearchResult
 
@@ -373,6 +376,8 @@ def _save_search_result(session, tool_name: str, args: dict, result: dict):
 
     try:
         result_type, query, source, title, url, hit_count = extractor()
+        if guard is not None:
+            guard()
         ResearchSearchResult.objects.create(
             session=session,
             tool_name=tool_name,
@@ -384,10 +389,10 @@ def _save_search_result(session, tool_name: str, args: dict, result: dict):
             url=url,
             hit_count=hit_count,
         )
-    except Exception as e:
-        # Persistence failure should never break the agent loop
-        logger.warning('Failed to save search result: %s', e)
-
+    except Exception as exc:
+        logger.info('Research result persistence failed (%s).', type(exc).__name__)
+        if guard is not None:
+            raise
 
 # ── Helper: truncate large results ──────────────────────────────────────────
 

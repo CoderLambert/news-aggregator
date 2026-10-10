@@ -111,6 +111,13 @@ class PublicPolicyMiddleware:
             if request.method in allowed_methods:
                 return policy_error("ai_disabled")
 
+        if (
+            settings.DJANGO_ENV == "production"
+            and route_name in {"research-create", "research-chat"}
+            and request.method == "POST"
+        ):
+            return policy_error("hosted_integration_unapproved", status_code=503)
+
         if route_name.startswith("chatgpt-subscription-"):
             auth_mode = settings.CHATGPT_AUTH_MODE
             if auth_mode == "disabled":

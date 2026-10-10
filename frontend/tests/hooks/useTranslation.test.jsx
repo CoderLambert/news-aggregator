@@ -10,8 +10,9 @@ import { CapabilitiesTestProvider, fullCapabilities } from '../helpers/capabilit
 vi.mock('@/services/newsWorkflowApi', async (importOriginal) => ({
   ...await importOriginal(),
   translateFullArticleStream: vi.fn(),
+  getTranslationJob: vi.fn(),
+  cancelTranslationJob: vi.fn(),
 }))
-
 function makeWrapper(getUser = () => ({ id: 12, username: 'reader' }), capabilities = fullCapabilities()) {
   return function Wrapper({ children }) {
     return createElement(CapabilitiesTestProvider, { value: capabilities },
@@ -121,22 +122,32 @@ describe('useTranslation', () => {
     expect(api.translateFullArticleStream).not.toHaveBeenCalled()
     await act(async () => { await result.current.handleTranslate(true) })
 
-    expect(api.translateFullArticleStream).toHaveBeenCalledWith(42, { force: true, signal: expect.any(AbortSignal) })
+    expect(api.translateFullArticleStream).toHaveBeenCalledWith(42, expect.objectContaining({
+      force: true,
+      signal: expect.any(AbortSignal),
+    }))
     expect(current.current.full_content_zh).toBe('已保存的完整译文')
     expect(result.current.translating).toBe(false)
     expect(result.current.translateError).toBe('')
   })
 
-  it('stopping is local-only and a later mount does not auto-attach until the user resumes', async () => {
+  it('requests server cancellation and requires an explicit retry after a terminal cancellation', async () => {
     let signal
+    api.getTranslationJob.mockResolvedValue({
+      id: 'job-42', status: 'running', generation: 3, progress: '', result: {}, errorCode: '', errorMessage: '',
+    })
+    api.cancelTranslationJob.mockResolvedValue({
+      id: 'job-42', status: 'cancelled', generation: 3, progress: '', result: {}, errorCode: '', errorMessage: '',
+    })
     api.translateFullArticleStream.mockImplementation(async function* (_id, options) {
-      signal = options.signal
       if (api.translateFullArticleStream.mock.calls.length > 1) {
-        yield { type: 'complete', fullContentZh: 'resume result', fetchedAt: null }
+        yield { type: 'complete', fullContentZh: 'explicit retry result', fetchedAt: null }
         return
       }
+      signal = options.signal
+      options.onJobId('job-42')
       yield { type: 'progress', text: '已完成一半' }
-      await new Promise((resolve) => options.signal.addEventListener('abort', resolve, { once: true }))
+      await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))
     })
     const props = { id: '42', news: article({ full_translation_active: true }), setNews: vi.fn(), loading: false }
     const first = renderHook(({ id, news }) => useTranslation(id, news, props.setNews, false), {
@@ -144,18 +155,22 @@ describe('useTranslation', () => {
     })
     await waitFor(() => expect(api.translateFullArticleStream).toHaveBeenCalledOnce())
     await waitFor(() => expect(first.result.current.translationProgress).toBe('已完成一半'))
-    act(() => first.result.current.stopTranslationWait())
+    await act(async () => { await first.result.current.cancelTranslation() })
+
     expect(signal.aborted).toBe(true)
-    expect(first.result.current.translationPaused).toBe(true)
+    expect(api.getTranslationJob).toHaveBeenCalledWith('job-42', expect.any(AbortSignal))
+    expect(api.cancelTranslationJob).toHaveBeenCalledWith('job-42', 3)
+    expect(first.result.current.translationPaused).toBe(false)
+    expect(first.result.current.translateError).toMatch(/已取消/)
     first.unmount()
 
     const second = renderHook(({ id, news }) => useTranslation(id, news, props.setNews, false), {
       initialProps: props, wrapper: makeWrapper(),
     })
-    await waitFor(() => expect(second.result.current.translationPaused).toBe(true))
+    await waitFor(() => expect(second.result.current.translateError).toMatch(/已取消/))
     expect(api.translateFullArticleStream).toHaveBeenCalledOnce()
 
-    await act(async () => { await second.result.current.handleTranslate(false) })
+    await act(async () => { await second.result.current.handleTranslate(true) })
     expect(api.translateFullArticleStream).toHaveBeenCalledTimes(2)
     second.unmount()
   })

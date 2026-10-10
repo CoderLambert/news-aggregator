@@ -1,19 +1,8 @@
-"""API views for the intelligent news research agent.
+"""Owner-private research sessions, durable runs and replayable SSE routes."""
 
-Provides session CRUD and SSE streaming for the agent loop.
-The SSE protocol carries structured events: thinking, tool_call,
-tool_result, text_delta, complete, error.
-
-All endpoints require authentication. Sessions are scoped to the
-requesting user — one user cannot access another's research sessions.
-Unsafe requests use standard server-side SessionAuthentication CSRF
-validation; the frontend supplies the token but does not assert validity.
-"""
-
-import json as json_lib
-import logging
 import time
 
+from django.db import transaction
 from django.http import StreamingHttpResponse
 from rest_framework import generics, status
 from rest_framework.authentication import SessionAuthentication
@@ -22,44 +11,42 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 
-from .models import ResearchSession, ResearchSearchResult
+from .models import ResearchSession, ResearchSearchResult, ResearchRun
 from .serializers import (
     ResearchSessionSerializer, ResearchSessionListSerializer,
     ResearchSearchResultSerializer, ResearchSearchResultListSerializer,
 )
-
-logger = logging.getLogger(__name__)
-
-
-# ── SSE heartbeat interval ──────────────────────────────────────────────────
+from .services.research import job_manager
 
 _SSE_HEARTBEAT_SEC = 15
 
 
-# ── User-scoped querysets ───────────────────────────────────────────────────
-
 def _user_sessions(user):
-    """Return ResearchSession queryset scoped to the requesting user."""
     return ResearchSession.objects.filter(user=user)
 
 
-# ── Session CRUD ────────────────────────────────────────────────────────────
+def _no_store(response):
+    response['Cache-Control'] = 'no-store'
+    return response
 
-class ResearchSessionListView(generics.ListAPIView):
-    """List research sessions (most recently updated first)."""
+
+class ResearchNoStoreMixin:
+    def finalize_response(self, request, response, *args, **kwargs):
+        response = super().finalize_response(request, response, *args, **kwargs)
+        return _no_store(response)
+
+
+class ResearchSessionListView(ResearchNoStoreMixin, generics.ListAPIView):
     serializer_class = ResearchSessionListSerializer
     permission_classes = [IsAuthenticated]
     authentication_classes = [SessionAuthentication]
     pagination_class = PageNumberPagination
 
     def get_queryset(self):
-        return _user_sessions(self.request.user).filter(
-            is_archived=False
-        ).order_by('-updated_at')
+        return _user_sessions(self.request.user).filter(is_archived=False).order_by('-updated_at')
 
 
-class ResearchSessionDetailView(generics.RetrieveDestroyAPIView):
-    """Get or delete a research session."""
+class ResearchSessionDetailView(ResearchNoStoreMixin, generics.RetrieveDestroyAPIView):
     serializer_class = ResearchSessionSerializer
     permission_classes = [IsAuthenticated]
     authentication_classes = [SessionAuthentication]
@@ -68,187 +55,144 @@ class ResearchSessionDetailView(generics.RetrieveDestroyAPIView):
     def get_queryset(self):
         return _user_sessions(self.request.user)
 
-
-# ── SSE streaming helper ────────────────────────────────────────────────────
-
-def _sse_event(event_type: str, data: dict) -> str:
-    """Format a single SSE event."""
-    payload = {'type': event_type, **data}
-    return f"data: {json_lib.dumps(payload, ensure_ascii=False)}\n\n"
+    def perform_destroy(self, instance):
+        with transaction.atomic():
+            # Fence workers before the existing session cascade removes run/events.
+            job_manager.fence_session_runs(instance.user_id, instance.pk)
+            super().perform_destroy(instance)
 
 
-def _research_stream_generator(job, session_id=None):
-    """Generate SSE events from a ResearchJob's event queue.
-
-    Polls the job's events list using wait_for_events(), yielding
-    structured JSON SSE data lines. Sends heartbeat comments to
-    prevent proxy/browser timeout.
-
-    If session_id is provided, emits an initial 'session_created' event
-    so the frontend can capture the new session ID.
-    """
-    last_index = 0
-    last_heartbeat = time.time()
-
-    # Emit session ID as the first event for newly created sessions
-    if session_id:
-        yield _sse_event('session_created', {'session_id': str(session_id)})
-
-    # Flush any events already accumulated (re-attach case)
-    while last_index < len(job.events):
-        event_type, data = job.events[last_index]
-        yield _sse_event(event_type, data)
-        last_index += 1
-
-    # Poll for new events
+def _sse_stream(run_id):
+    last_sequence = 0
+    last_heartbeat = time.monotonic()
     while True:
-        try:
-            current_len = job.wait_for_events(last_index, timeout=1.0)
-
-            # Send new events
-            while last_index < current_len:
-                event_type, data = job.events[last_index]
-                yield _sse_event(event_type, data)
-                last_index += 1
-
-            # Heartbeat to prevent timeout
-            now = time.time()
-            if now - last_heartbeat >= _SSE_HEARTBEAT_SEC:
-                yield ": keepalive\n\n"
-                last_heartbeat = now
-
-            if job.done:
-                break
-
-        except Exception:
-            # Client likely disconnected; leave the worker running
+        events = list(job_manager.get_run_events(run_id, after_sequence=last_sequence, limit=100))
+        for event in events:
+            yield job_manager.serialize_event(event.event_type, event.data)
+            last_sequence = event.sequence
+        state = ResearchRun.objects.filter(pk=run_id).values(
+            'status', 'last_event_sequence',
+        ).first()
+        if state is None:
             return
+        if state['status'] not in {'queued', 'running'} and last_sequence >= state['last_event_sequence']:
+            return
+        now = time.monotonic()
+        if now - last_heartbeat >= _SSE_HEARTBEAT_SEC:
+            yield ': keepalive\n\n'
+            last_heartbeat = now
+        job_manager.wait_for_run_change(run_id, 1.0)
 
 
-# ── Create session + start agent ────────────────────────────────────────────
+def _stream_response(run, session_id=None):
+    headers = {
+        'Cache-Control': 'no-store',
+        'X-Accel-Buffering': 'no',
+        'Run-ID': str(run.pk),
+        'Run-Status': run.status,
+    }
+    if session_id is not None:
+        headers['Session-ID'] = str(session_id)
+    return _no_store(StreamingHttpResponse(
+        _sse_stream(run.pk), content_type='text/event-stream', headers=headers,
+    ))
+
+
+def _run_error_response(exc):
+    response = Response(
+        {'error': exc.message, 'error_code': exc.error_code},
+        status=exc.status_code,
+    )
+    if exc.error_code == 'research_capacity_reached':
+        response['Retry-After'] = '1'
+    return _no_store(response)
+
+
+def _request_data(request):
+    query = request.data.get('query', '')
+    if not isinstance(query, str) or not query.strip():
+        return None, None, Response({'error': 'query is required'}, status=status.HTTP_400_BAD_REQUEST)
+    return query.strip(), bool(request.data.get('local_only', False)), None
+
+def _submit_response(request, *, session_id=None):
+    query, local_only, error = _request_data(request)
+    if error is not None:
+        return _no_store(error)
+    raw_key = request.headers.get('Idempotency-Key')
+    try:
+        session, run = job_manager.submit_research_run(
+            request.user, session_id=session_id, query=query,
+            local_only=local_only, idempotency_key=raw_key,
+        )
+    except job_manager.ResearchRunError as exc:
+        return _run_error_response(exc)
+    return _stream_response(run, session_id=session.pk)
+
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 @authentication_classes([SessionAuthentication])
 def research_create(request):
-    """Create a new research session and start the agent loop.
+    """Create/attach a research session; request closure never cancels its run."""
+    return _submit_response(request)
 
-    Request body: {"query": "What are the latest developments in LLM agents?", "local_only": true}
-    Response: SSE stream with agent progress events.
-    """
-    query = request.data.get('query', '').strip()
-    if not query:
-        return Response({'error': 'query is required'}, status=status.HTTP_400_BAD_REQUEST)
-
-    local_only = bool(request.data.get('local_only', False))
-    logger.info('research_create: query=%r, local_only=%s', query[:50], local_only)
-
-    # Create session scoped to the authenticated user
-    session = ResearchSession.objects.create(
-        user=request.user,
-        title='',  # Auto-generated after first response
-        messages=[],
-    )
-
-    # Start background research job
-    from .services.research.job_manager import start_or_get_research_job
-    job = start_or_get_research_job(session.id, session, query, local_only=local_only)
-
-    return StreamingHttpResponse(
-        _research_stream_generator(job, session_id=session.id),
-        content_type='text/event-stream',
-        headers={
-            'Cache-Control': 'no-cache',
-            'X-Accel-Buffering': 'no',
-            'Session-ID': str(session.id),
-        },
-    )
-
-
-# ── Continue session (follow-up question) ───────────────────────────────────
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 @authentication_classes([SessionAuthentication])
 def research_chat(request, pk):
-    """Send a follow-up message to an existing research session.
+    """Create/attach a follow-up run in an owner-scoped session."""
+    if not _user_sessions(request.user).filter(pk=pk).exists():
+        return _no_store(Response({'error': 'Session not found'}, status=status.HTTP_404_NOT_FOUND))
+    return _submit_response(request, session_id=pk)
 
-    Request body: {"query": "Tell me more about tool use patterns", "local_only": true}
-    Response: SSE stream with agent progress events.
-    """
-    try:
-        session = _user_sessions(request.user).get(pk=pk)
-    except ResearchSession.DoesNotExist:
-        return Response({'error': 'Session not found'}, status=status.HTTP_404_NOT_FOUND)
-
-    query = request.data.get('query', '').strip()
-    if not query:
-        return Response({'error': 'query is required'}, status=status.HTTP_400_BAD_REQUEST)
-
-    local_only = bool(request.data.get('local_only', False))
-    logger.info('research_chat: query=%r, local_only=%s', query[:50], local_only)
-
-    # Check for existing running job
-    from .services.research.job_manager import get_research_job, start_or_get_research_job
-    existing_job = get_research_job(session.id)
-    if existing_job and not existing_job.done:
-        # Already running — re-attach to the SSE stream
-        return StreamingHttpResponse(
-            _research_stream_generator(existing_job),
-            content_type='text/event-stream',
-            headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
-        )
-
-    # Start new agent loop for the follow-up
-    job = start_or_get_research_job(session.id, session, query, local_only=local_only)
-
-    return StreamingHttpResponse(
-        _research_stream_generator(job),
-        content_type='text/event-stream',
-        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
-    )
-
-
-# ── Re-attach to active SSE stream ─────────────────────────────────────────
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 @authentication_classes([SessionAuthentication])
 def research_stream(request, pk):
-    """Re-attach to an in-progress agent SSE stream.
+    """Read persistent events for an active run or return the saved owner DTO."""
+    session = _user_sessions(request.user).filter(pk=pk).first()
+    if session is None:
+        return _no_store(Response({'error': 'Session not found'}, status=status.HTTP_404_NOT_FOUND))
+    run = job_manager.active_run_for_session(request.user, session)
+    if run is not None:
+        return _stream_response(run)
+    serializer = ResearchSessionSerializer(session)
+    data = dict(serializer.data)
+    data['latest_run'] = job_manager.latest_run_state(request.user, session)
+    response = _no_store(Response(data))
+    if data['latest_run'] is not None:
+        response['Run-ID'] = data['latest_run']['run_id']
+    return response
 
-    Used when the user refreshes or re-opens the research panel while
-    the agent is still running.
-    """
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@authentication_classes([SessionAuthentication])
+def research_cancel(request, pk):
+    """Cancel only the exact latest run in this owner's session."""
+    session = _user_sessions(request.user).filter(pk=pk).first()
+    if session is None:
+        return _no_store(Response({'error': 'Session not found'}, status=status.HTTP_404_NOT_FOUND))
+    body = request.data if isinstance(request.data, dict) else {}
+    run_id = body.get('run_id')
+    if not isinstance(run_id, str):
+        return _no_store(Response(
+            {'error': 'run_id is required', 'error_code': 'invalid_run_id'},
+            status=status.HTTP_400_BAD_REQUEST,
+        ))
     try:
-        session = _user_sessions(request.user).get(pk=pk)
-    except ResearchSession.DoesNotExist:
-        return Response({'error': 'Session not found'}, status=status.HTTP_404_NOT_FOUND)
-
-    from .services.research.job_manager import get_research_job
-    job = get_research_job(session.id)
-
-    if not job or job.done:
-        # No active job — return the session's existing messages
-        serializer = ResearchSessionSerializer(session)
-        return Response(serializer.data)
-
-    return StreamingHttpResponse(
-        _research_stream_generator(job),
-        content_type='text/event-stream',
-        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
-    )
+        run = job_manager.cancel_research_run(request.user, session, run_id)
+    except job_manager.ResearchRunError as exc:
+        return _run_error_response(exc)
+    return _no_store(Response({
+        'run_id': str(run.pk), 'status': run.status,
+        'error_code': run.error_code, 'error_message': run.error_message,
+    }))
 
 
-# ── Search results for a session ─────────────────────────────────────────────
-
-class ResearchSearchResultListView(generics.ListAPIView):
-    """List search results for a research session.
-
-    Supports filtering by ``result_type`` query parameter (news, web, article,
-    webpage, topic).  By default returns the lightweight list serializer (no
-    ``result_data``); pass ``?detail=1`` to include full result data.
-    """
+class ResearchSearchResultListView(ResearchNoStoreMixin, generics.ListAPIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = [SessionAuthentication]
     pagination_class = PageNumberPagination
@@ -260,14 +204,10 @@ class ResearchSearchResultListView(generics.ListAPIView):
 
     def get_queryset(self):
         session_pk = self.kwargs['session_pk']
-        # Verify session belongs to user
         if not _user_sessions(self.request.user).filter(pk=session_pk).exists():
             return ResearchSearchResult.objects.none()
-
-        qs = ResearchSearchResult.objects.filter(session_id=session_pk)
-
+        queryset = ResearchSearchResult.objects.filter(session_id=session_pk)
         result_type = self.request.query_params.get('result_type')
         if result_type:
-            qs = qs.filter(result_type=result_type)
-
-        return qs.order_by('created_at')
+            queryset = queryset.filter(result_type=result_type)
+        return queryset.order_by('created_at')

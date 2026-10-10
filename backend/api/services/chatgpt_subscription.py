@@ -342,8 +342,23 @@ def get_oauth_host() -> ChatGPTOAuthHost:
     return host
 
 
-def _discovery() -> dict:
+def _run_execution_guard(execution_guard):
+    if execution_guard is None:
+        return
+    try:
+        execution_guard()
+    except SubscriptionError:
+        raise
+    except Exception:
+        raise SubscriptionError(
+            '翻译任务已取消或失效。', 'task_lease_lost', 409,
+        ) from None
+
+
+def _discovery(execution_guard=None) -> dict:
     _require_network_mode()
+    _run_execution_guard(execution_guard)
+    response = None
     try:
         response = requests.get(DISCOVERY_URL, timeout=10)
         if response.status_code != 200:
@@ -353,10 +368,15 @@ def _discovery() -> dict:
         raise
     except Exception as exc:
         raise SubscriptionError('暂时无法连接 OpenAI 登录服务。') from exc
+    finally:
+        if response is not None:
+            response.close()
     if not isinstance(data, dict):
         raise SubscriptionError('OpenAI 登录服务返回了无效配置。')
     _protocol_snapshot(data, DYNAMIC_CLIENT_ID)
     return data
+
+
 
 
 def create_authorization_attempt(user, target_connection=None, session_key='', origin='') -> dict[str, str]:
@@ -975,77 +995,94 @@ def _acquire_refresh_lease(connection_id, credential_generation, now, lease_id):
     ).update(refresh_lease_id=lease_id, refresh_lease_expires_at=now + REFRESH_LEASE_TTL)
 
 
-def _refresh_access_token_with_lease(connection, expected_generation, lease_id) -> str:
+def _refresh_access_token_with_lease(
+    connection, expected_generation, lease_id, execution_guard=None,
+) -> str:
     _require_network_mode()
+    _run_execution_guard(execution_guard)
     _require_active_user(connection.user_id)
     connection_id = connection.pk
     credential_generation = connection.credential_generation
+    _run_execution_guard(execution_guard)
     refresh_token = decrypt_secret(connection.encrypted_refresh_token, 'subscription-refresh-token')
     if not connection.issued_client_id:
-        raise SubscriptionError('此连接缺少注册 client_id，请重新连接。')
+        raise SubscriptionError('此连接缺少注册 client_id，请重新连接账号。')
     try:
-        discovery = _discovery()
+        discovery = _discovery(execution_guard)
+        _run_execution_guard(execution_guard)
         response = requests.post(discovery['token_endpoint'], data={
             'grant_type': 'refresh_token', 'refresh_token': refresh_token,
             'client_id': connection.issued_client_id, 'resource': API_RESOURCE,
         }, timeout=20)
+    except SubscriptionError:
+        raise
     except Exception as exc:
         raise SubscriptionError('刷新 ChatGPT 订阅令牌失败，请稍后重试。') from exc
-    if response.status_code in (400, 401) and 'invalid_grant' in response.text:
-        changed = mark_needs_reauth(connection_id, credential_generation, lease_id)
-        if not changed:
-            raise ConnectionChangedError('订阅凭据已更新，已忽略旧 refresh token 的失效响应。')
-        raise SubscriptionError('ChatGPT 订阅授权已失效，请重新连接账号。')
-    if response.status_code < 200 or response.status_code >= 300:
-        raise SubscriptionError(f'ChatGPT 订阅令牌刷新失败（HTTP {response.status_code}）。')
     try:
-        payload = response.json()
-    except Exception as exc:
-        raise SubscriptionError('令牌刷新响应格式无效。') from exc
-    access_token = payload.get('access_token') if isinstance(payload, dict) else None
-    expires_in = payload.get('expires_in') if isinstance(payload, dict) else None
-    rotated_refresh = payload.get('refresh_token') if isinstance(payload, dict) else None
-    if (not isinstance(access_token, str) or not access_token
-            or not isinstance(expires_in, (int, float)) or isinstance(expires_in, bool)
-            or not math.isfinite(expires_in) or expires_in <= 0):
-        raise SubscriptionError('令牌刷新响应缺少有效 access token。')
-    scopes = connection.granted_scopes or []
-    if 'scope' in payload:
-        parsed_scopes = _parse_granted_scopes(payload['scope'])
-        if REQUIRED_DIRECT_SCOPE not in parsed_scopes:
+        _run_execution_guard(execution_guard)
+        if response.status_code in (400, 401) and 'invalid_grant' in response.text:
+            _run_execution_guard(execution_guard)
+            changed = mark_needs_reauth(connection_id, credential_generation, lease_id)
+            if not changed:
+                raise ConnectionChangedError('订阅凭据已更新，已忽略旧 refresh token 的失效响应。')
+            raise SubscriptionError('ChatGPT 订阅授权已失效，请重新连接账号。')
+        if response.status_code < 200 or response.status_code >= 300:
+            raise SubscriptionError(f'ChatGPT 订阅令牌刷新失败（HTTP {response.status_code}）。')
+        try:
+            payload = response.json()
+        except Exception as exc:
+            raise SubscriptionError('令牌刷新响应格式无效。') from exc
+        access_token = payload.get('access_token') if isinstance(payload, dict) else None
+        expires_in = payload.get('expires_in') if isinstance(payload, dict) else None
+        rotated_refresh = payload.get('refresh_token') if isinstance(payload, dict) else None
+        if (not isinstance(access_token, str) or not access_token
+                or not isinstance(expires_in, (int, float)) or isinstance(expires_in, bool)
+                or not math.isfinite(expires_in) or expires_in <= 0):
+            raise SubscriptionError('令牌刷新响应缺少有效 access token。')
+        scopes = connection.granted_scopes or []
+        if 'scope' in payload:
+            parsed_scopes = _parse_granted_scopes(payload['scope'])
+            if REQUIRED_DIRECT_SCOPE not in parsed_scopes:
+                _run_execution_guard(execution_guard)
+                changed = mark_needs_reauth(connection_id, credential_generation, lease_id)
+                if not changed:
+                    raise ConnectionChangedError('订阅凭据已更新，已忽略旧 refresh token 的权限响应。')
+                raise SubscriptionError('令牌刷新未保留 direct model access 权限，请重新连接。')
+            scopes = sorted(parsed_scopes)
+        elif REQUIRED_DIRECT_SCOPE not in scopes:
+            _run_execution_guard(execution_guard)
             changed = mark_needs_reauth(connection_id, credential_generation, lease_id)
             if not changed:
                 raise ConnectionChangedError('订阅凭据已更新，已忽略旧 refresh token 的权限响应。')
-            raise SubscriptionError('令牌刷新未保留 direct model access 权限，请重新连接。')
-        scopes = sorted(parsed_scopes)
-    elif REQUIRED_DIRECT_SCOPE not in scopes:
-        changed = mark_needs_reauth(connection_id, credential_generation, lease_id)
-        if not changed:
-            raise ConnectionChangedError('订阅凭据已更新，已忽略旧 refresh token 的权限响应。')
-        raise SubscriptionError('此连接没有保存 direct model access 授权，请重新连接。')
-    next_refresh = rotated_refresh if isinstance(rotated_refresh, str) and rotated_refresh else refresh_token
-    committed_at = timezone.now()
-    updated = ChatGPTSubscriptionConnection.objects.filter(
-        pk=connection_id, credential_generation=credential_generation,
-        refresh_lease_id=lease_id, needs_reauth=False,
-    ).update(
-        encrypted_access_token=encrypt_secret(access_token, 'subscription-access-token'),
-        encrypted_refresh_token=encrypt_secret(next_refresh, 'subscription-refresh-token'),
-        access_token_expires_at=committed_at + timedelta(seconds=float(expires_in)),
-        granted_scopes=scopes, credential_generation=F('credential_generation') + 1,
-        refresh_lease_id='', refresh_lease_expires_at=None, updated_at=committed_at,
-    )
-    if not updated:
-        raise ConnectionChangedError('订阅账号已断开或凭据已更新，当前令牌没有覆盖新状态。')
+            raise SubscriptionError('此连接没有保存 direct model access 授权，请重新连接。')
+        next_refresh = rotated_refresh if isinstance(rotated_refresh, str) and rotated_refresh else refresh_token
+        committed_at = timezone.now()
+        _run_execution_guard(execution_guard)
+        updated = ChatGPTSubscriptionConnection.objects.filter(
+            pk=connection_id, credential_generation=credential_generation,
+            refresh_lease_id=lease_id, needs_reauth=False,
+        ).update(
+            encrypted_access_token=encrypt_secret(access_token, 'subscription-access-token'),
+            encrypted_refresh_token=encrypt_secret(next_refresh, 'subscription-refresh-token'),
+            access_token_expires_at=committed_at + timedelta(seconds=float(expires_in)),
+            granted_scopes=scopes, credential_generation=F('credential_generation') + 1,
+            refresh_lease_id='', refresh_lease_expires_at=None, updated_at=committed_at,
+        )
+        if not updated:
+            raise ConnectionChangedError('订阅账号已断开或凭据已更新，当前令牌没有覆盖新状态。')
+    finally:
+        response.close()
     latest = ChatGPTSubscriptionConnection.objects.get(pk=connection_id)
     _assert_current_selection(latest, expected_generation)
+    _run_execution_guard(execution_guard)
     return access_token
 
 
-def _refresh_access_token(connection_id, expected_generation=None) -> str:
+def _refresh_access_token(connection_id, expected_generation=None, execution_guard=None) -> str:
     _require_network_mode()
     deadline = time.monotonic() + REFRESH_WAIT_SECONDS
     while True:
+        _run_execution_guard(execution_guard)
         try:
             connection = ChatGPTSubscriptionConnection.objects.get(pk=connection_id)
         except ChatGPTSubscriptionConnection.DoesNotExist as exc:
@@ -1054,17 +1091,21 @@ def _refresh_access_token(connection_id, expected_generation=None) -> str:
         _assert_current_selection(connection, expected_generation)
         now = timezone.now()
         if connection.access_token_expires_at and connection.access_token_expires_at > now + timedelta(seconds=60):
+            _run_execution_guard(execution_guard)
             token = decrypt_secret(connection.encrypted_access_token, 'subscription-access-token')
             _assert_current_selection(ChatGPTSubscriptionConnection.objects.get(pk=connection_id), expected_generation)
+            _run_execution_guard(execution_guard)
             return token
         if not connection.encrypted_refresh_token:
             raise SubscriptionError('ChatGPT 订阅缺少 refresh token，请重新连接。')
         if REQUIRED_DIRECT_SCOPE not in (connection.granted_scopes or []):
+            _run_execution_guard(execution_guard)
             mark_needs_reauth(connection_id, connection.credential_generation)
             raise SubscriptionError('此连接没有保存 direct model access 授权，请重新连接。')
         lease_id = uuid.uuid4().hex
         if _acquire_refresh_lease(connection_id, connection.credential_generation, now, lease_id):
             try:
+                _run_execution_guard(execution_guard)
                 try:
                     latest = ChatGPTSubscriptionConnection.objects.get(pk=connection_id)
                 except ChatGPTSubscriptionConnection.DoesNotExist:
@@ -1076,6 +1117,7 @@ def _refresh_access_token(connection_id, expected_generation=None) -> str:
                 _assert_current_selection(latest, expected_generation)
                 connection = latest
                 if connection.access_token_expires_at and connection.access_token_expires_at > now + timedelta(seconds=60):
+                    _run_execution_guard(execution_guard)
                     token = decrypt_secret(connection.encrypted_access_token, 'subscription-access-token')
                     released = ChatGPTSubscriptionConnection.objects.filter(
                         pk=connection_id, credential_generation=connection.credential_generation,
@@ -1085,8 +1127,11 @@ def _refresh_access_token(connection_id, expected_generation=None) -> str:
                         continue
                     current = ChatGPTSubscriptionConnection.objects.get(pk=connection_id)
                     _assert_current_selection(current, expected_generation)
+                    _run_execution_guard(execution_guard)
                     return token
-                return _refresh_access_token_with_lease(connection, expected_generation, lease_id)
+                return _refresh_access_token_with_lease(
+                    connection, expected_generation, lease_id, execution_guard,
+                )
             finally:
                 # Release only this attempt's lease. A newer owner may have
                 # replaced it while the account selection was changing.
@@ -1098,11 +1143,13 @@ def _refresh_access_token(connection_id, expected_generation=None) -> str:
         time.sleep(0.05)
 
 
-def access_token_for(connection: ChatGPTSubscriptionConnection, expected_generation=None) -> str:
+def access_token_for(
+    connection: ChatGPTSubscriptionConnection, expected_generation=None, execution_guard=None,
+) -> str:
     _require_network_mode()
+    _run_execution_guard(execution_guard)
     _require_active_user(connection.user_id)
-    return _refresh_access_token(connection.pk, expected_generation)
-
+    return _refresh_access_token(connection.pk, expected_generation, execution_guard)
 
 def discover_models(connection: ChatGPTSubscriptionConnection) -> list[dict[str, str]]:
     _require_network_mode()
@@ -1332,13 +1379,22 @@ def stream_full_translation(
 ) -> str:
     """Consume one Responses stream; return only after response.completed."""
     _require_network_mode()
-    if execution_guard is not None:
-        execution_guard()
-    access_token = _refresh_access_token(connection_id, expected_generation)
-    if execution_guard is not None:
-        execution_guard()
+    _run_execution_guard(execution_guard)
     connection = ChatGPTSubscriptionConnection.objects.filter(pk=connection_id).first()
-    if connection is None or not connection.is_active or connection.generation != expected_generation:
+    if (
+        connection is None or not connection.is_active or connection.needs_reauth or
+        connection.generation != expected_generation or connection.selected_model != model_slug
+    ):
+        raise ConnectionChangedError('订阅账号已切换或断开，翻译没有保存。')
+    access_token = access_token_for(
+        connection, expected_generation, execution_guard=execution_guard,
+    )
+    _run_execution_guard(execution_guard)
+    connection = ChatGPTSubscriptionConnection.objects.filter(pk=connection_id).first()
+    if (
+        connection is None or not connection.is_active or connection.needs_reauth or
+        connection.generation != expected_generation or connection.selected_model != model_slug
+    ):
         raise ConnectionChangedError('订阅账号已切换或断开，翻译没有保存。')
     article_input = (
         '请将以下完整 Markdown 文章翻译成中文。保持所有 Markdown 结构、代码块、'
@@ -1351,8 +1407,7 @@ def stream_full_translation(
         'store': False,
         'stream': True,
     }
-    if execution_guard is not None:
-        execution_guard()
+    _run_execution_guard(execution_guard)
     try:
         response = requests.post(
             RESPONSES_URL,
@@ -1367,70 +1422,67 @@ def stream_full_translation(
         )
     except Exception as exc:
         raise SubscriptionError('连接 OpenAI 模型服务失败。') from exc
-    if response.status_code < 200 or response.status_code >= 300:
-        if response.status_code == 401:
-            mark_needs_reauth(connection_id, connection.credential_generation)
-        error = _api_error(response.status_code, response)
-        response.close()
-        raise error
-
-    deltas: list[str] = []
-    completed_response = None
-    current_event = ''
     try:
-        for raw_line in response.iter_lines(decode_unicode=True):
-            line = raw_line.decode('utf-8', errors='replace') if isinstance(raw_line, bytes) else raw_line
-            if not line:
-                continue
-            if line.startswith('event:'):
-                current_event = line[6:].strip()
-                continue
-            if not line.startswith('data:'):
-                continue
-            data = line[5:].strip()
-            if data == '[DONE]':
-                break
-            try:
-                event = json.loads(data)
-            except (TypeError, ValueError):
-                raise SubscriptionError('OpenAI 返回了无法解析的 SSE 事件。')
-            if not isinstance(event, dict):
-                continue
-            event_type = event.get('type') or current_event
-            if event_type == 'response.output_text.delta':
-                delta = event.get('delta')
-                if isinstance(delta, str) and delta:
-                    if execution_guard is not None:
-                        execution_guard()
-                    deltas.append(delta)
-                    on_delta(delta)
-            elif event_type == 'response.completed':
-                if execution_guard is not None:
-                    execution_guard()
-                completed_response = event.get('response') if isinstance(event.get('response'), dict) else event
-                break
-            elif event_type in ('response.failed', 'response.incomplete', 'error'):
-                detail = event.get('error')
-                if isinstance(detail, dict):
-                    code = detail.get('code')
-                    if code == 'rate_limit_exceeded':
-                        raise SubscriptionError('模型请求受到速率或额度限制（HTTP 429），请稍后重试。')
-                raise SubscriptionError('OpenAI 模型未能完整完成本次翻译。')
-    except SubscriptionError:
-        raise
-    except Exception as exc:
-        raise SubscriptionError('模型 SSE 连接中断，未保存不完整译文。') from exc
+        _run_execution_guard(execution_guard)
+        if response.status_code < 200 or response.status_code >= 300:
+            if response.status_code == 401:
+                mark_needs_reauth(connection_id, connection.credential_generation)
+            raise _api_error(response.status_code, response)
+
+        deltas: list[str] = []
+        completed_response = None
+        current_event = ''
+        try:
+            for raw_line in response.iter_lines(decode_unicode=True):
+                line = raw_line.decode('utf-8', errors='replace') if isinstance(raw_line, bytes) else raw_line
+                if not line:
+                    continue
+                if line.startswith('event:'):
+                    current_event = line[6:].strip()
+                    continue
+                if not line.startswith('data:'):
+                    continue
+                data = line[5:].strip()
+                if data == '[DONE]':
+                    break
+                try:
+                    event = json.loads(data)
+                except (TypeError, ValueError):
+                    raise SubscriptionError('OpenAI 返回了无法解析的 SSE 事件。')
+                if not isinstance(event, dict):
+                    continue
+                event_type = event.get('type') or current_event
+                if event_type == 'response.output_text.delta':
+                    delta = event.get('delta')
+                    if isinstance(delta, str) and delta:
+                        _run_execution_guard(execution_guard)
+                        deltas.append(delta)
+                        on_delta(delta)
+                elif event_type == 'response.completed':
+                    _run_execution_guard(execution_guard)
+                    completed_response = event.get('response') if isinstance(event.get('response'), dict) else event
+                    break
+                elif event_type in ('response.failed', 'response.incomplete', 'error'):
+                    detail = event.get('error')
+                    if isinstance(detail, dict):
+                        code = detail.get('code')
+                        if code == 'rate_limit_exceeded':
+                            raise SubscriptionError('模型请求受到速率或额度限制（HTTP 429），请稍后重试。')
+                    raise SubscriptionError('OpenAI 模型未能完整完成本次翻译。')
+        except SubscriptionError:
+            raise
+        except Exception as exc:
+            raise SubscriptionError('模型 SSE 连接中断，未保存不完整译文。') from exc
+
+        if completed_response is None:
+            raise SubscriptionError('模型 SSE 流在 response.completed 前中断，未保存不完整译文。')
+        final_text = _extract_response_text(completed_response) or ''.join(deltas)
+        if not final_text.strip():
+            raise SubscriptionError('模型已完成响应，但没有返回译文。')
+        _run_execution_guard(execution_guard)
+        return final_text
     finally:
         response.close()
-
-    if completed_response is None:
-        raise SubscriptionError('模型 SSE 流在 response.completed 前中断，未保存不完整译文。')
-    final_text = _extract_response_text(completed_response) or ''.join(deltas)
-    if not final_text.strip():
-        raise SubscriptionError('模型已完成响应，但没有返回译文。')
-    if execution_guard is not None:
-        execution_guard()
-    return final_text
 
 
 def stream_chat_response(connection: ChatGPTSubscriptionConnection, messages: list[dict[str, str]]):

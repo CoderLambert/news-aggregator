@@ -255,3 +255,21 @@ Luna实施前指出两处schema缺口，主控已加独立connection_generation�
 ## 2026-10-10 用户要求提交与新窗口交接
 
 R5预检/过滤archive完成但smoke尚未启动时收到交接要求，runtime NOT_RUN，未创建Docker/browser资源；/tmp/newshub-g2-runtime-r5-p4qrdt65/。六backend源作为独立WIP检查点 c5e04222854a21c58b7e2b393703ecd164033188提交；AST语法六项PASS/scoped diff-check0，恢复tests/migrationcheck/代码High均NOT_RUN，明确不能发布。已知refresh guard链/old finally shared lease/cancel generation上界缺口详见HANDOFF-2026-10-10.md。用户DB和既有用户未跟踪文件保留未暂存；未push/上线。
+## G2 R5 固定候选实际复验（2026-10-10）
+
+按合同仅运行一次：runner `62cd633f9b2e1811999dd677c9b212f6835b013a`、app `b2e982d1848a768c7ff03bc77dcb0557883f24da` / image `sha256:313890d46a8fee650b2dd2b06759782d89ff158863ccacce452b3a8f95dea581`，Nginx `nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94`，curl `curlimages/curl@sha256:d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b`。复用已过滤归档 SHA256 `3ef0db9ffb9b747d9980b9c6c79c7b815b5391c139d3ed2c897c2e49da78b2d1`；`env -i`、新0700 HOME/TMPDIR、绝对venv Python/Chromium。执行命令为固定runner `--execute --stage g2 --image sha256:313890d46a8fee650b2dd2b06759782d89ff158863ccacce452b3a8f95dea581 --sha b2e982d1848a768c7ff03bc77dcb0557883f24da --nginx-image nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94 --chromium-executable /usr/bin/chromium`；退出1，23.76秒，整体 **FAIL**。
+
+报告 `/tmp/newshub-g2-runtime-r5-attempt-20261010/tmp/newshub-local-domain-report-b2e982d1848a768c7ff03bc77dcb0557883f24da.sYck3z/http-browser.json`：TLS CA拒绝/信任与首页、深链、Mermaid、HTTP redirect、静态、匿名权限、CSRF Secure Host-only、AI禁用等已记PASS；`g2.shared_browser` 为 `AcceptanceError`，报告未暴露更细子断言/原因，失败截图 `local-domain-browser-failure.png`。G2账户后续、真实来源IP限速及SSE未运行；Django `REMOTE_ADDR`独立直接观测仍NOT_RUN。报告 `cleanup_status=PASS`，对本次精确Compose project复查containers/volumes/networks均无残留。按合同不重试；G2仍DOING，未上线。
+
+
+## 2026-10-10 G3 恢复功能本地实现与验收闭环
+
+按 handoff 顺序完成翻译持久恢复与研究任务持久恢复；research contract/ADR-028 与 translation contract/ADR-026 为行为依据。翻译含 refresh/discovery guard、任务/共享租约 CAS、owner GET/cancel、Job-ID及Fake回归；研究含ResearchRun/Event、共享worker executor、持久SSE、owner取消与生产fail-closed、SSE资源限制，以及前端viewer隔离的cancel/reconnect。页面关闭/切换只断开连接，不隐式取消服务端任务。
+
+- 隔离归档源、`env -i`、独立HOME/TMPDIR及文件型临时SQLite，未接触用户DB或`.env`。后端定向命令：`pytest --ds=verification_settings api/tests/test_subscription_recovery.py api/tests/test_chatgpt_subscription.py api/tests/test_shared_translations.py api/tests/test_research_recovery.py api/tests/test_research_csrf.py api/tests/test_public_policy.py -q`，118 passed、3 warnings。
+- `makemigrations --check --dry-run`输出“No changes detected”；在全新隔离SQLite上执行`manage.py migrate --noinput`，0030和0031均显示已应用。没有对用户数据库迁移。
+- 前端恢复/UI/API/导航定向回归：`npm run test:run -- tests/hooks/useResearch.test.jsx tests/hooks/useTranslation.test.jsx tests/services/api.test.js tests/components/research/ResearchPanel.test.jsx tests/pages/NewsDetail.navigation.test.jsx`，5 files / 51 tests passed。`npm run typecheck`与`npm run build`退出0。
+- 独立security-reviewer对研究/翻译恢复及相关API、迁移、SSE、viewer隔离路径复审，`findings=[]`；没有High/Critical或material lower-severity blocker。
+- 用真实`ResearchPanel`组件在隔离Chromium页面进行视觉演练，测试API仅监听临时本地端口：实际看到“取消研究任务”→“继续接收”→恢复结果；请求均为隔离前端/API，未访问9527或外部站点。浏览器仅记录一次用户主动取消SSE的预期`net::ERR_ABORTED`，无JS异常。
+
+本地代码、文档、测试、migration检查与审查已完成；未调用真实Provider/OAuth/模型、未部署、未提交。G2固定R5仍为FAIL且cleanup PASS，按合同不重试；G2账户后续/限速/SSE及公网发布不宣称通过。真实website/OAuth仍EXTERNAL_BLOCKED。

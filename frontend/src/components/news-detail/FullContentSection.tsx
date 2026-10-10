@@ -199,8 +199,8 @@ function CopyButton({ copied, onCopy }: { copied: boolean; onCopy: () => void })
 
 function TranslationProgressUI({ progress, waitingShared, onStop }: { progress: string; waitingShared: boolean; onStop: () => void }) {
   const stopButton = (
-    <Button type="button" variant="outline" size="sm" onClick={onStop} aria-label="停止接收翻译更新" className="mt-3 h-7 rounded-full border-violet-200 px-2.5 text-[11px] text-violet-700">
-      停止接收
+    <Button type="button" variant="outline" size="sm" onClick={onStop} aria-label="取消全文翻译" className="mt-3 h-7 rounded-full border-violet-200 px-2.5 text-[11px] text-violet-700">
+      取消翻译
     </Button>
   )
   if (!progress) {
@@ -208,8 +208,7 @@ function TranslationProgressUI({ progress, waitingShared, onStop }: { progress: 
       <Card className="mb-6 items-center border-violet-100 bg-violet-50/60 py-8 text-center">
         <Loader2 className="size-7 animate-spin text-violet-500" />
         <div>
-          <p className="text-sm font-medium text-violet-600">{waitingShared ? '共享译文正在生成，完成后自动显示…' : '正在翻译全文…'}</p>
-          <p className="mt-1 text-xs text-violet-500">{waitingShared ? '正在复用其他读者发起的翻译，不消耗你的模型额度。' : '停止接收只会关闭本页连接，服务端翻译仍会继续。'}</p>
+          <p className="mt-1 text-xs text-violet-500">{waitingShared ? '正在复用其他读者发起的翻译，完成后自动显示。' : '取消会阻止后续请求与保存；正在进行的请求可能先完成。'}</p>
           {stopButton}
         </div>
       </Card>
@@ -221,7 +220,7 @@ function TranslationProgressUI({ progress, waitingShared, onStop }: { progress: 
         <Loader2 className="size-3.5 animate-spin text-violet-500" />
         <span className="text-xs font-medium text-violet-500">AI 正在翻译…</span>
         {stopButton}
-        <span className="sr-only">停止接收只会关闭本页连接，服务端翻译仍会继续。</span>
+        <span className="sr-only">取消会阻止后续请求与保存；正在进行的请求可能先完成。</span>
       </div>
       <Card className="border-violet-100 py-5 opacity-80">
         <CardContent className="px-5">
