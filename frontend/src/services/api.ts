@@ -255,6 +255,9 @@ export interface ChatGPTSubscriptionConnection {
 export interface ChatGPTSubscriptionStatus {
   connections: ChatGPTSubscriptionConnection[]
   active_connection_id: string | null
+  available: boolean
+  mode: 'local' | 'website'
+  message: string
 }
 
 export interface ChatGPTSubscriptionModel {
@@ -292,6 +295,9 @@ export async function fetchChatGPTSubscriptionStatus(): Promise<ChatGPTSubscript
   return {
     connections: value.connections.map(parseChatGPTSubscriptionConnection),
     active_connection_id: activeId as string | null,
+    available: value.available !== false,
+    mode: value.mode === 'website' ? 'website' : 'local',
+    message: typeof value.message === 'string' ? value.message : '',
   }
 }
 
@@ -330,7 +336,14 @@ export async function startChatGPTSubscriptionConnect(connectionId?: string): Pr
     throw new TypeError('Invalid ChatGPT authorization handoff response')
   }
   const handoff = new URL(value.handoff_url)
-  if (handoff.protocol !== 'http:' || handoff.hostname !== '127.0.0.1' || handoff.port !== '9527' ||
+  const isKnownLoopback = handoff.protocol === 'http:' &&
+    handoff.hostname === '127.0.0.1' && handoff.port === '9527'
+  // Hosted handoff must be same-origin HTTPS, never a caller-supplied site or subdomain.
+  const isHostedSameOrigin = typeof window !== 'undefined' &&
+    window.location.protocol === 'https:' &&
+    handoff.origin === window.location.origin
+  if ((!isKnownLoopback && !isHostedSameOrigin) ||
+    handoff.username || handoff.password ||
     handoff.pathname !== '/api/chatgpt-subscription/handoff/' || handoff.search || handoff.hash) {
     throw new TypeError('Invalid ChatGPT authorization handoff URL')
   }
