@@ -121,3 +121,10 @@
 - 主控用0df4b1e隔离frontend archive的实际MermaidBlock/index.css、独立临时HOME/Vite loopback19357、Chromium与禁外部请求fixture，真实labels存在，但computed nodeFill/textFill均rgb(0,0,0)。截图/tmp/newshub-mermaid-component.png已人工检视，节点黑块且文字不可读；JSON /tmp/newshub-mermaid-component.json。临时Vite session已Ctrl-C退出130，仅自身测试服务；不是正式域名验收。
 - 已冻结G1-MERMAID-READABILITY/ADR023并派Luna定向修复可信静态CSS；保留全部SVG安全限制。原221a93d不再用于最终PASS，依赖层完成后需新修复SHA重建，G1失败优先于G2源码准备。
 - 构建11:29:43+08起的最终90min硬上限仍12:59:43；pip当前到numpy16.7MB慢下载，连续10min无I/O停止。不再延长/换旧开发镜像替代，网络未完成如实记录BLOCKED并继续独立本地源码工作。
+
+## Mermaid R3闭环与用户授权构建重试
+- 可信CSS初版配色恢复后实际截图仍检出文字锚点/原width100%失去最大尺寸的问题；R3仅清洗后viewBox有限数字归一化root宽高与静态text-anchor。19定向测试/typecheck/lint0；主控真实Chromium确认两label bbox均在node内、图173x160、配色244/240/255与17/24/39、危险元素和inline styles0，截图/tmp/newshub-mermaid-component-r3.png人工检视PASS。08838fe提交。
+- 08838fe独立archive前端全量63files/436PASS、typecheck/lint0，日志/tmp/newshub-mermaid-r3-integrated-2qg40_rm；不重复旧423项报告。build在正式Docker重试中执行，尚未完成。
+- High对22214b3→08838fe七项变化/调用链只读审查无新增P0/P1，发现volume runner两P2（timeout真实ID未补ledger导致清理失败；工作目录mkdir竞争后finally覆盖既有report）。前后HEAD/七文件hash/diff相同，diff SHA256 208f068ffef0033ae1fd2255e395cca9198ebed93b00cdee8f1fc4e50032f838；预文件/tmp/newshub-g1-audit-pre-08838fe.json。已派同两文件G1-VOLUME-RUNTIME-R2，未闭环前不标runner REVIEWED。
+- 原hostnet构建在约77min自行失败：numpy16.7MB只到5.8MB，files.pythonhosted.org ReadTimeout、pip exit2/build exit1，无候选镜像。用户随后明确“现在重试”，因此撤销前一轮不再重试限制，仅开启新一轮正式build，不更改依赖/registry。
+- 新构建从09c991f148ce63dea639ecb561c54fab7d6583b2 git archive干净context，production target/networkhost/固定SHA，镜像newshub:local-09c991f148ce63dea639ecb561c54fab7d6583b2。日志/tmp/newshub-production-retry-9xvihkw9/build.log，结束result.json记录exit/耗时；单次90min硬timeout，10min无I/O停止。Torch196.3MB已实际下载完成约4.4MB/s；官方PyPI 256KiB range206/2.854s，比旧probe11.2s改善，不能据此宣称整镜像PASS。native domain fallback尚未执行，重试优先。
