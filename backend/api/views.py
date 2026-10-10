@@ -661,7 +661,10 @@ class NewsTranslateFullView(generics.GenericAPIView):
 
         # Personal results take precedence; public copies are a separate fallback.
         from api.services.chatgpt_subscription import active_connection_for_user
-        if active_connection_for_user(request.user) is not None:
+        if (getattr(settings, 'CHATGPT_SIWC_MODE', 'local') == 'website'
+                or active_connection_for_user(request.user) is not None):
+            # In website mode do not silently charge the site's API keys for
+            # someone who has not connected their own ChatGPT account.
             from api.subscription_views import subscription_translation_response
             return subscription_translation_response(request, news, force=force)
 
