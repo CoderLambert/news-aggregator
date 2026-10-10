@@ -655,6 +655,53 @@ def test_g2_http_api_matrix_requires_full_accounts_and_blocks_private_ai_anonymo
     assert 'g2_capabilities' in checks and checks['index_no_store'] == 'HTTP 200'
 
 
+def test_expect_status_failure_reports_only_fixed_http_status_metadata():
+    args = SimpleNamespace()
+    private_body = 'response-body-private-marker'
+    private_header = 'X-Private: invite-token-marker'
+    response = subprocess.CompletedProcess(
+        ['curl'], 0, f'{acceptance.STATUS_MARKER}403', private_header,
+    )
+    with patch.object(acceptance, '_curl', return_value=(403, private_body, response)):
+        with pytest.raises(acceptance.AcceptanceError) as raised:
+            acceptance._expect_status(
+                args, {}, 'acme_fixture',
+                '/.well-known/acme-challenge/newshub-local-test', 200,
+                scheme='http',
+            )
+
+    payload = acceptance._g2_failure_report('g2.http_api', raised.value)
+    failure_json = json.dumps(payload, sort_keys=True)
+    assert payload['failure']['source_check_name'] == 'acme_fixture'
+    assert payload['failure']['expected_http_status'] == 200
+    assert payload['failure']['actual_http_status'] == 403
+    assert private_body not in failure_json
+    assert private_header not in failure_json
+    assert 'invite-token-marker' not in failure_json
+
+
+@pytest.mark.parametrize(('check_name', 'expected', 'actual'), [
+    ('acme_fixture;token=private-marker', 200, 403),
+    ('acme_fixture', '200', 403),
+    ('acme_fixture', 200, 600),
+    ('acme_fixture', True, 403),
+])
+def test_g2_failure_report_rejects_untrusted_http_metadata(check_name, expected, actual):
+    exc = acceptance.AcceptanceError(
+        'synthetic exception with private-body-marker',
+        source_check_name=check_name,
+        expected_http_status=expected,
+        actual_http_status=actual,
+    )
+    payload = acceptance._g2_failure_report('g2.http_api', exc)
+    failure = payload['failure']
+    assert failure['check'] == 'g2.http_api'
+    assert 'source_check_name' not in failure
+    assert 'expected_http_status' not in failure
+    assert 'actual_http_status' not in failure
+    assert 'private-body-marker' not in json.dumps(payload)
+
+
 def test_g2_failure_report_redacts_exception_values_from_stdout_and_json(tmp_path, capsys):
     private_root = tmp_path / 'private'
     private_root.mkdir(mode=0o700)
@@ -686,7 +733,13 @@ def test_g2_failure_report_redacts_exception_values_from_stdout_and_json(tmp_pat
         '--curl-image-id', CURL_IMAGE_ID,
         '--private-root', str(private_root),
     ]
-    leaked_exception = RuntimeError(f'fill timeout value={password} invite={invitation} {cookie}')
+    leaked_exception = acceptance.AcceptanceError(
+        f'fill timeout value={password} invite={invitation} {cookie}; '
+        'body=response-body-private-marker header=header-private-marker',
+        source_check_name='acme_fixture',
+        expected_http_status=200,
+        actual_http_status=403,
+    )
     with patch.object(acceptance, '_check_http_api', side_effect=leaked_exception):
         assert acceptance.main(argv) == 1
 
@@ -697,8 +750,16 @@ def test_g2_failure_report_redacts_exception_values_from_stdout_and_json(tmp_pat
         assert private_value not in report
     payload = json.loads(report)
     assert payload['failure'] == {
-        'stage': 'g2', 'check': 'g2.http_api', 'exception_type': 'RuntimeError',
+        'stage': 'g2', 'check': 'g2.http_api', 'exception_type': 'AcceptanceError',
+        'source_check_name': 'acme_fixture',
+        'expected_http_status': 200,
+        'actual_http_status': 403,
     }
+    for private_value in (
+        'response-body-private-marker', 'header-private-marker',
+    ):
+        assert private_value not in stdout
+        assert private_value not in report
 
 
 @pytest.mark.parametrize(('child_error_type', 'reported_error_type'), [

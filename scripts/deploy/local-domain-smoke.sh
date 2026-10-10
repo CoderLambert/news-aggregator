@@ -287,6 +287,9 @@ task_fixture_bundle="$task_smoke_root/g2-fixtures.json"
 task_fixture_state="$task_smoke_root/g2-fixture-state.json"
 mkdir -p -- "$task_smoke_root/certs" "$task_smoke_root/acme/.well-known/acme-challenge" \
     "$task_smoke_root/site"
+chmod 0755 -- "$task_smoke_root/acme" "$task_smoke_root/acme/.well-known" \
+    "$task_smoke_root/acme/.well-known/acme-challenge" \
+    || fail 'could not set public ACME fixture directory modes.'
 if [[ "$STAGE" == g2 ]]; then
     "$PYTHON_BIN" "$PROJECT_ROOT/scripts/deploy/local_domain_fixtures.py" create \
         --output "$task_fixture_bundle" >/dev/null \
@@ -325,6 +328,8 @@ create_leaf_certificate server news.lambert.host news.lambert.host
 create_leaf_certificate wrong-san wrong.invalid wrong.invalid
 printf 'newshub-local-acme-fixture\n' > \
     "$task_smoke_root/acme/.well-known/acme-challenge/newshub-local-test"
+chmod 0644 -- "$task_smoke_root/acme/.well-known/acme-challenge/newshub-local-test" \
+    || fail 'could not set the public ACME fixture file mode.'
 
 sed \
     -e 's#/etc/letsencrypt/live/news.lambert.host/fullchain.pem#/etc/nginx/test-certs/server.crt#g' \
@@ -353,6 +358,8 @@ docker run --rm --pull=never --network=none \
 "$PROJECT_ROOT/scripts/deploy/export-static.sh" --execute --image "$IMAGE_ID" --sha "$SHA" \
     --root "$task_smoke_root/site" || fail 'static export from the selected image failed.'
 printf 'legacy-asset-fixture\n' >"$task_smoke_root/site/assets/local-domain-legacy-12345678.js"
+chmod 0644 -- "$task_smoke_root/site/assets/local-domain-legacy-12345678.js" \
+    || fail 'could not set the public legacy asset fixture mode.'
 
 yaml_quote() {
     local value=$1
@@ -639,6 +646,7 @@ class Handler(BaseHTTPRequestHandler):
 
 HTTPServer(('127.0.0.1', 9527), Handler).serve_forever()
 PY
+chmod 0644 -- "$FAKE_SSE_SCRIPT" || fail 'could not set the public fake SSE script mode.'
 task_fake_server_id="$(docker run -d --rm --pull=never --network "container:$gateway_id" \
     --volume "$FAKE_SSE_SCRIPT:/tmp/newshub-fake-sse.py:ro" \
     "$IMAGE_ID" python /tmp/newshub-fake-sse.py)" \

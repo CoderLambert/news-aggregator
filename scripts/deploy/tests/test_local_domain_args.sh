@@ -12,6 +12,7 @@ task_temp="$task_test_root/tmp"
 task_log="$task_test_root/docker.log"
 CERTUTIL_LOG="$task_test_root/certutil.log"
 ARGV_VALIDATION_LOG="$task_test_root/acceptance-argv.log"
+MODE_CAPTURE_LOG="$task_test_root/public-modes.log"
 mkdir -p -- "$task_bin" "$task_temp"
 
 fail() {
@@ -94,6 +95,25 @@ if [[ "$1" == compose ]]; then
         rg -F -q "NEWSHUB_LOCAL_DOMAIN_IMAGE_ID: \"$MOCK_APP_IMAGE_ID\"" "$compose_file" || exit 1
         ! rg -q '\$\{NEWSHUB_IMAGE|\$\{NGINX_IMAGE' "$compose_file" || exit 1
         ! rg -q '^    ports:' "$compose_file" || exit 1
+        if [[ -n "${MOCK_MODE_CAPTURE_LOG:-}" ]]; then
+            smoke_root="$(dirname -- "$compose_file")"
+            for mode_entry in \
+                "smoke_root:$smoke_root" \
+                "acme_root:$smoke_root/acme" \
+                "acme_well_known:$smoke_root/acme/.well-known" \
+                "acme_challenge_dir:$smoke_root/acme/.well-known/acme-challenge" \
+                "acme_challenge_file:$smoke_root/acme/.well-known/acme-challenge/newshub-local-test" \
+                "legacy_asset:$smoke_root/site/assets/local-domain-legacy-12345678.js" \
+                "fixture_bundle:$smoke_root/g2-fixtures.json" \
+                "compose_env:$smoke_root/compose.env" \
+                "ca_key:$smoke_root/certs/ca.key"; do
+                mode_name="${mode_entry%%:*}"
+                mode_path="${mode_entry#*:}"
+                [[ -e "$mode_path" ]] || exit 1
+                printf '%s=%s\n' "$mode_name" "$(stat -c '%a' -- "$mode_path")" \
+                    >>"$MOCK_MODE_CAPTURE_LOG"
+            done
+        fi
     fi
     if [[ "$*" == *' ps -q gateway' ]]; then
         printf 'fake-gateway-container\n'
@@ -107,6 +127,20 @@ if [[ "$1" == inspect ]]; then
     exit 0
 fi
 if [[ "$1" == run && " $* " == *" -d "* ]]; then
+    if [[ -n "${MOCK_MODE_CAPTURE_LOG:-}" ]]; then
+        volume_mount=""
+        for ((index = 1; index <= $#; index++)); do
+            if [[ "${!index}" == --volume ]]; then
+                next=$((index + 1))
+                volume_mount="${!next}"
+                break
+            fi
+        done
+        fake_sse_source="${volume_mount%%:*}"
+        [[ -f "$fake_sse_source" ]] || exit 1
+        printf 'fake_sse=%s\n' "$(stat -c '%a' -- "$fake_sse_source")" \
+            >>"$MOCK_MODE_CAPTURE_LOG"
+    fi
     printf 'fake-sse-container\n'
     exit 0
 fi
@@ -172,7 +206,7 @@ if [[ "${1:-}" == */local_domain_acceptance.py ]]; then
     shift
     if [[ "${MOCK_VALIDATE_ACCEPTANCE_ARGS:-0}" == 1 ]]; then
         "$REAL_PYTHON" - "$acceptance_script" "$@" <<'PY'
-import importlib.util, json, os, re, sys
+import importlib.util, json, os, re, stat, sys
 from pathlib import Path
 script, *argv = sys.argv[1:]
 spec = importlib.util.spec_from_file_location('local_domain_acceptance_shell_args', script)
@@ -189,6 +223,10 @@ if args.check_parents:
         Path(args.report).chmod(0o600)
         print(json.dumps(report))
         raise SystemExit(1)
+    mode_log = os.environ.get('MOCK_MODE_CAPTURE_LOG')
+    if mode_log:
+        with open(mode_log, 'a', encoding='utf-8') as stream:
+            stream.write(f'report_root={stat.S_IMODE(args.report.parent.stat().st_mode):o}\n')
     report = {'stage': 'g2', 'status': 'PASS', 'checks': {'parent_identity': 'PASS'}}
     Path(args.report).write_text(json.dumps(report) + '\n', encoding='utf-8')
     Path(args.report).chmod(0o600)
@@ -213,6 +251,10 @@ elif args.fixture_phase == 'seed':
         raise SystemExit(1)
     args.fixture_state.write_text('{"ok":true,"news_id":17,"users_seeded":2}\n', encoding='utf-8')
     args.fixture_state.chmod(0o600)
+    mode_log = os.environ.get('MOCK_MODE_CAPTURE_LOG')
+    if mode_log:
+        with open(mode_log, 'a', encoding='utf-8') as stream:
+            stream.write(f'fixture_state={stat.S_IMODE(args.fixture_state.stat().st_mode):o}\n')
     print('{"fixture_phase":"seed","status":"PASS"}')
 else:
     if os.environ.get('MOCK_G2_CLEANUP_FAIL') == '1':
@@ -390,7 +432,9 @@ report_path="$(printf '%s\n' "$output" | sed -n 's/.*report //p' | tail -n 1)"
 : >"$DOCKER_LOG"
 : >"$OPENSSL_LOG"
 : >"$ARGV_VALIDATION_LOG"
+: >"$MODE_CAPTURE_LOG"
 output="$(env NEWSHUB_IMAGE='newshub:untrusted-override' MOCK_VALIDATE_ACCEPTANCE_ARGS=1 \
+    MOCK_MODE_CAPTURE_LOG="$MODE_CAPTURE_LOG" \
     "$SMOKE_SCRIPT" --execute --stage g2 --image "$APP_IMAGE" --sha "$MOCK_IMAGE_SHA")" \
     || fail 'mocked G2 smoke with real acceptance argument parsing did not complete successfully.'
 [[ "$output" == *'G2 local-domain smoke PASS'* ]] || fail 'mocked execute did not report G2 PASS.'
@@ -412,6 +456,15 @@ assert report['nginx_image_id'] == 'sha256:' + 'b' * 64
 assert report['curl_image'] == 'curlimages/curl:8.10.1'
 assert report['curl_image_id'] == 'sha256:' + 'c' * 64
 PY
+for expected_mode in \
+    smoke_root=700 report_root=700 fixture_bundle=600 compose_env=600 ca_key=600 \
+    acme_root=755 acme_well_known=755 acme_challenge_dir=755 acme_challenge_file=644 \
+    legacy_asset=644 fake_sse=644; do
+    rg -q "^${expected_mode}$" "$MODE_CAPTURE_LOG" \
+        || fail "G2 fixture mode was not preserved: ${expected_mode%%=*}."
+done
+mode_matrix="$(LC_ALL=C sort "$MODE_CAPTURE_LOG" | paste -sd ' ' -)"
+printf 'G2 fixture mode matrix: %s\n' "$mode_matrix"
 
 for failure_case in parent seed; do
     : >"$DOCKER_LOG"

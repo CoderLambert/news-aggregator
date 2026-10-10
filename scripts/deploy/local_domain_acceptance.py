@@ -45,7 +45,18 @@ FIXTURE_SPEC.loader.exec_module(_fixtures)
 
 
 class AcceptanceError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        source_check_name: str | None = None,
+        expected_http_status: int | None = None,
+        actual_http_status: int | None = None,
+    ):
+        super().__init__(message)
+        self.source_check_name = source_check_name
+        self.expected_http_status = expected_http_status
+        self.actual_http_status = actual_http_status
 
 
 class CleanupAcceptanceError(AcceptanceError):
@@ -90,7 +101,26 @@ def _g2_failure_report(check: str, exc: BaseException) -> dict:
     child_type = getattr(exc, 'safe_exception_type', None)
     if isinstance(child_type, str) and child_type in SAFE_FIXTURE_EXCEPTION_TYPES:
         failure['child_exception_type'] = child_type
+    failure.update(_safe_http_failure_details(exc))
     return {'stage': 'g2', 'status': 'FAIL', 'failure': failure}
+
+
+def _safe_http_failure_details(exc: BaseException) -> dict[str, str | int]:
+    check_name = getattr(exc, 'source_check_name', None)
+    expected = getattr(exc, 'expected_http_status', None)
+    actual = getattr(exc, 'actual_http_status', None)
+    if (
+        isinstance(check_name, str)
+        and re.fullmatch(r'[a-z0-9_.]{1,80}', check_name) is not None
+        and type(expected) is int and 0 <= expected <= 599
+        and type(actual) is int and 0 <= actual <= 599
+    ):
+        return {
+            'source_check_name': check_name,
+            'expected_http_status': expected,
+            'actual_http_status': actual,
+        }
+    return {}
 
 
 def _write_safe_report(path: Path | None, payload: dict) -> None:
@@ -457,7 +487,13 @@ def _expect_status(args: argparse.Namespace, checks: dict[str, str], name: str, 
                    expected: int, **kwargs) -> tuple[str, dict[str, list[str]]]:
     header_file = kwargs.pop('header_file', None)
     status, body, _ = _curl(args, path, header_file=header_file, **kwargs)
-    _require(status == expected, f'{name} expected HTTP {expected}, got {status}')
+    if status != expected:
+        raise AcceptanceError(
+            f'{name} expected HTTP {expected}, got {status}',
+            source_check_name=name,
+            expected_http_status=expected,
+            actual_http_status=status,
+        )
     checks[name] = f'HTTP {status}'
     return body, _headers(header_file) if header_file is not None else {}
 
@@ -2016,6 +2052,7 @@ def main(argv: list[str] | None = None) -> int:
                 'check': active_check,
                 'exception_type': type(exc).__name__,
             }
+            result['failure'].update(_safe_http_failure_details(exc))
             screenshots = (
                 args.work_dir / 'g2-browser-failure.png',
                 args.work_dir / 'local-domain-browser-failure.png',
