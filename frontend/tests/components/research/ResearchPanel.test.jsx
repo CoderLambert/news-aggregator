@@ -401,7 +401,7 @@ describe('ResearchPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
     await screen.findByRole('dialog', { name: '新闻研究助手' })
     await waitFor(() => expect(api.openResearchSessionStream).toHaveBeenCalledWith(
-      history.id, expect.any(AbortSignal), expect.any(Function), true,
+      history.id, expect.any(AbortSignal), expect.any(Function), false,
     ))
 
     const input = screen.getByRole('textbox', { name: '输入研究问题' })
