@@ -12,3 +12,5 @@ SDK环境隔离补充：实际本机OpenAI3.26.1源码会默认读取OPENAI_ADMI
 - Negative tests：approved坏布尔/模型/费率/缺key启动拒绝；禁用即使旧key存在0client；无lease/失lease/cancel/deadline/变配置0call；超UTF8/输出/迭代预留拒绝；401/429/timeout/partial不收费回退/重试；异常/日志无key、endpoint凭据、raw provider错误；无法证明usage时不得假退款。
 - Forbidden：不真实收费/Provider授权/OAuth，不宣称管理员approval等于官方授权；不变更SDK依赖/价格/现开发provider，不猜托管协议，不改业务和非owned文件、不commit/派生；任何API参数兼容性冲突交Sol冻结后再改。
 - Return format：paths/diff/HEAD、命令exit/test数、参数/0call/Fake费用证据、真实调用NOT_RUN、业务未接入与外部模型资格EXTERNAL_BLOCKED；本合同通过不等于G3完成。
+
+协议尺寸遵循CORE：Provider输出总额不受单event上限替代；业务层将text分为UTF8<=2048bytes Unicode安全片段后进行完整wire<=16KiB校验。64KiB translation/32KiB research结果只通过owner GET status读取，终态不嵌入全文。

@@ -156,3 +156,11 @@
 - 同91dc86b真实domain exit0/status PASS/cleanup PASS：bootstrap/prod nginx-t、migrate/readiness/static、严格CA未信任拒绝与信任HTTPS200/错误SAN、首页/新闻深链/Mermaid/匿名只读/private无API/CSRF Secure/伪造转发/绝对URI Host拒绝、fake SSE首帧6ms/终帧1007ms与proxy echo通过。正式截图mermaid-g1.png主控已人工检视，节点文字居中可读；报告 /tmp/newshub-g1-r5-runtime-26a9410d2c72/newshub-local-domain-report-91dc86b6a5dd212ea29d17f2692888be77e7b254.8CZwHg/report.json。随机项目/卷/network/profiles/CA均精确清理。真实Django REMOTE_ADDR直接观察NOT_RUN，不将fake echo当该观察。公网DNS/正式证书/真服务器仍EXTERNAL_BLOCKED，未上线；G1本地门槛REVIEWED，继续G2。
 - G2 Chat+Accounts19文件944e3c3提交，Frontend实际15文件f7419d7提交，定向39与type/lint0；invite wire canonical invite_token已修正25PASS。Accounts首轮High仅NFKC校验顺序P2、R5无问题，pre/post16文件与scope6d066f13899bff54f88b4fe029d425d127a4b2e0e6de612f5cdb0d7a7de45157一致。G2-ACCOUNT-REVIEW-R1修正先canonical校验与独立子进程legacy迁移，91定向/compile/diff0，8be4f9d提交。旧全量610PASS/2FAIL来自旧默认DB逆迁不可逆并污染schema，已保留失败日志 /tmp/newshub-g2-backend-integrated-w99kgvo6/pytest.log，不修改生产迁移或假reverse。
 - 8be4f9dd7fa8f03e9779b8ec35085538b03032d4全新archive/env-i/HOME/绝对临时DB集成后端616PASS/3已知warnings退出0，日志 /tmp/newshub-g2-integrated-final-b87_3y_h/pytest.log；前端65files/453PASS及typecheck/lint/build全0，日志 /tmp/newshub-g2-frontend-integrated-ec_1oiv2/。不读取/hash/迁移用户DB或WAL，未继承keys/.env。G2最终Frontend/R1 High和actual domain stage2仍待验；LOCAL-DOMAIN-G2-IMPLEMENT精确合同已准备，G3仍TODO。
+
+## G2 最终复审：定向整改，未通过整体门槛
+
+候选66a15233f1b95ff6bcdc64c372821bdf487e32f9：独立High确认18文件hash与两scoped diff和pre一致，账户NFKC及旧迁移测试隔离整改闭环；Frontend发现1P2：挂起登录期间accounts关闭→重开，旧finally调用旧refresh，身份generation过期导致本地持续匿名。无新增P0/P1。已签发G2-FRONTEND-REVIEW-R1，只修两文件与deferred回归；G2仍DOING，不声称REVIEWED。616后端/453前端集成PASS仍是整改前证据。
+
+账户R1实施日志补充：archive源f7419d705f0d68f6b36b59b6e6341ec66538b746，仅overlay三owned文件；临时目录/tmp/newshub-g2-account-review.Ots2mT，组合日志/tmp/newshub-g2-account-review-acceptance.log，单独迁移日志/tmp/newshub-g2-account-review-migration-verified.log。最终整合8be4f9d的主控616用例独立复核已通过。
+
+G3在实施前已冻结ADR-024：单SSE record按完整UTF8 wire精确限制16KiB，text增量2048bytes分片，terminal只含状态，完整私有结果由owner GET读取；解决64KiB翻译结果与事件上限冲突。此项仅合同设计，G3仍未实施。G2域名harness源码准备继续，实际运行等High/固定镜像。

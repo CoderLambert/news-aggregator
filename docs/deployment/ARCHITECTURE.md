@@ -107,3 +107,6 @@ G3扩展既有SQLite租约模式，不引入新的任务平台；job/event/budge
 
 ## ADR-023：严格SVG清洗后的可信配色
 主控实际隔离Chromium渲染当前MermaidBlock发现node/text均黑，截图和computed fills确认不可读；不采用允许SVG任意style作为修复。仅在静态固定wrapper内用站点可信CSS恢复flowchart形状/文字/箭头及尺寸，保持严格模式、htmlLabels关闭、DOMPurify禁止危险元素/链接/style和无bindFunctions。整改优先于G2准备；原221a93d运行候选因此待替换，必须待修复提交后重新冻结镜像SHA。
+
+## ADR-024：持久AI事件与完整结果的尺寸边界
+单SSE record包含JSON转义、id/event/data与空行的全部UTF8字节，限制16KiB，job累计2MiB；前端同单位解析，缓冲32KiB。文本按Unicode边界先分片每片UTF8最多2048bytes，再统一wire serializer精确校验，不能仅限制未转义JSON正文。终态事件只含status及安全error_code，完整translation/research结果保存在owner AIJob.result；前端终态GET owner status确认并读取结果，所有完成/重连用同一适配器。避免64KiB结果进入16KiB SSE record；不得为兼容放大事件上限或截断成功结果。G3尚未实施，这项先冻结入四份合同。
