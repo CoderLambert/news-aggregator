@@ -95,6 +95,52 @@ describe('F03 queued and pre-header recovery', () => {
     reopened.unmount()
   })
 
+  it('treats a failed pre-header fetch as an unknown outcome, never a fresh-key retry', async () => {
+    const seenKeys = []
+    api.createResearchStream.mockImplementation((_query, { idempotencyKey }) => {
+      seenKeys.push(idempotencyKey)
+      return (async function* failedBeforeHeaders() {
+        throw new TypeError('simulated lost network response')
+      })()
+    })
+    const { result, unmount } = renderResearchHook()
+    await waitFor(() => expect(result.current.loadingSessions).toBe(false))
+    act(() => { void result.current.handleSend('unknown server outcome') })
+    await waitFor(() => expect(result.current.recoveryAction).toBe('resume'))
+    expect(seenKeys).toHaveLength(1)
+    expect(result.current.messages.at(-1).content).toContain('原请求可能已到达服务器')
+    const createNew = await result.current.handleSend('different paid query')
+    expect(createNew).toBe(false)
+    await act(async () => { await result.current.handleRetry() })
+    expect(seenKeys).toHaveLength(1)
+
+    act(() => { void result.current.handleResume() })
+    await waitFor(() => expect(seenKeys).toHaveLength(2))
+    expect(seenKeys[1]).toBe(seenKeys[0])
+    unmount()
+  })
+
+  it('preserves the original key if an SSE ends without any Session-ID', async () => {
+    const seenKeys = []
+    api.createResearchStream.mockImplementation((_query, { idempotencyKey }) => {
+      seenKeys.push(idempotencyKey)
+      return (async function* endedBeforeHeaders() {
+        yield { type: 'thinking' }
+      })()
+    })
+    const { result, unmount } = renderResearchHook()
+    await waitFor(() => expect(result.current.loadingSessions).toBe(false))
+    act(() => { void result.current.handleSend('EOF before server id') })
+    await waitFor(() => expect(result.current.recoveryAction).toBe('resume'))
+    expect(seenKeys).toHaveLength(1)
+    expect(result.current.messages.at(-1).content).toContain('原请求可能已到达服务器')
+
+    act(() => { void result.current.handleResume() })
+    await waitFor(() => expect(seenKeys).toHaveLength(2))
+    expect(seenKeys[1]).toBe(seenKeys[0])
+    unmount()
+  })
+
   it('recovers an owner queued run without a local pointer and does not issue a new research POST', async () => {
     api.listResearchSessions.mockResolvedValue(emptyPage([
       { id: 'orphan-session', title: '排队的研究' },
