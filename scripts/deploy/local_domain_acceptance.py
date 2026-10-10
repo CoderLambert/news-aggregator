@@ -21,7 +21,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 
 HOST = 'news.lambert.host'
@@ -64,11 +64,22 @@ SAFE_BROWSER_EXCEPTION_TYPES = frozenset({
     'ValueError', 'TypeError', 'BrowserExecutionError',
 })
 G2_BROWSER_SUBCHECKS = frozenset({
+    'g2.shared_initial', 'g2.shared_untrusted_ca', 'g2.shared_trusted_context',
+    'g2.shared_homepage', 'g2.shared_detail', 'g2.shared_mermaid',
+    'g2.shared_csrf_cookie', 'g2.shared_wrong_san', 'g2.shared_egress',
     'g2.account_initial', 'g2.register_a', 'g2.logout_a', 'g2.register_b',
     'g2.attach_owner', 'g2.owner_b', 'g2.admin_gate', 'g2.logout_b',
-    'g2.owner_a', 'g2.auth_races', 'g2.owner_csrf',
+    'g2.owner_a', 'g2.auth_races',
+    'g2.auth_race_snapshot_a', 'g2.auth_race_route_install',
+    'g2.auth_race_reload', 'g2.auth_race_wait_capture',
+    'g2.auth_race_login_b', 'g2.auth_race_release',
+    'g2.auth_race_identity_b', 'g2.auth_race_favorites_b',
+    'g2.owner_csrf',
     'g2.logout_a_after_owner_writes',
-    'g2.admin', 'g2.final_audit', 'g2.anon_after_logout',
+    'g2.admin_login', 'g2.admin_dashboard_api', 'g2.admin_provider_api',
+    'g2.admin_page', 'g2.admin_dashboard_ready', 'g2.admin_deactivate',
+    'g2.admin_inactive_api', 'g2.admin_inactive_ui',
+    'g2.final_audit', 'g2.anon_after_logout',
     'g2.cookie_attributes',
 })
 
@@ -1311,6 +1322,11 @@ def _browser_environment(task_browser_home: Path) -> dict[str, str]:
 
 
 def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_dir: Path) -> None:
+    def mark_shared_subcheck(subcheck: str) -> None:
+        if args.stage == 'g2':
+            _mark_g2_browser_subcheck(checks, subcheck)
+
+    mark_shared_subcheck('g2.shared_initial')
     try:
         installed_version = importlib.metadata.version('playwright')
     except importlib.metadata.PackageNotFoundError as exc:
@@ -1336,6 +1352,7 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
         except ImportError as exc:
             raise AcceptanceError('Python Playwright 1.62.0 is unavailable to the selected interpreter') from exc
 
+        mark_shared_subcheck('g2.shared_untrusted_ca')
         with sync_playwright() as playwright:
             untrusted_context = playwright.chromium.launch_persistent_context(
                 str(task_browser_home / 'profile'),
@@ -1358,6 +1375,7 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
             finally:
                 untrusted_context.close()
 
+        mark_shared_subcheck('g2.shared_trusted_context')
         task_browser_home = profile_root / 't'
         task_browser_home.mkdir(mode=0o700)
         _new_nss_database(task_browser_home, ca_cert)
@@ -1384,15 +1402,18 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
 
             context.route('**/*', restrict_to_local_domain)
             try:
+                mark_shared_subcheck('g2.shared_homepage')
                 response = page.goto(f'https://{HOST}/', wait_until='domcontentloaded', timeout=20000)
                 _require(response is not None and response.status == 200, 'trusted browser homepage did not return HTTP 200')
                 _require(page.locator('#root').count() == 1, 'SPA root element is missing')
                 checks['browser_homepage'] = 'HTTP 200'
 
+                mark_shared_subcheck('g2.shared_detail')
                 detail = page.goto(f'https://{HOST}/news/{args.news_id}', wait_until='domcontentloaded', timeout=20000)
                 _require(detail is not None and detail.status == 200, 'browser news deep link did not return HTTP 200')
                 checks['browser_news_deep_link'] = 'HTTP 200'
 
+                mark_shared_subcheck('g2.shared_mermaid')
                 page.locator('.article-section-render').scroll_into_view_if_needed()
                 diagram = page.locator('[role="img"][aria-label="Mermaid 图表"]')
                 diagram.wait_for(state='visible', timeout=20000)
@@ -1430,6 +1451,7 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
                 checks['mermaid_chart'] = json.dumps(chart_paint, sort_keys=True)
                 checks['mermaid_screenshot'] = str(mermaid_screenshot)
 
+                mark_shared_subcheck('g2.shared_csrf_cookie')
                 page.evaluate("() => fetch('/api/auth/csrf/').then((response) => response.json())")
                 cookie = page.evaluate("() => document.cookie")
                 _require('csrftoken=' in cookie, 'trusted browser cannot read the CSRF cookie')
@@ -1446,6 +1468,7 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
                     _require(not favorite_api_calls, 'private deep link called its API in read_only mode')
                     checks['private_deep_link'] = 'no favorites API request'
 
+                mark_shared_subcheck('g2.shared_wrong_san')
                 try:
                     page.goto(
                         f'https://{HOST}:{args.wrong_san_port}/',
@@ -1458,6 +1481,7 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
                 else:
                     raise AcceptanceError('browser accepted a certificate with the wrong SAN')
 
+                mark_shared_subcheck('g2.shared_egress')
                 _require(not external_hosts, f'browser attempted non-local egress to {sorted(external_hosts)}')
                 checks['browser_external_egress'] = 'blocked; no external host request observed'
             except Exception:
@@ -1469,6 +1493,9 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
                 raise
             finally:
                 context.close()
+
+    if args.stage == 'g2':
+        checks.pop('_g2_active_subcheck', None)
 
 
 _BROWSER_API_SCRIPT = """async ({method, path, body}) => {
@@ -1553,9 +1580,183 @@ def _is_expected_logout_response(response) -> bool:
     )
 
 
+def _is_auth_me_request_url(url: str) -> bool:
+    if not isinstance(url, str):
+        return False
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except (TypeError, ValueError):
+        return False
+    if parsed.netloc.endswith(':'):
+        return False
+    return (
+        parsed.scheme == 'https'
+        and parsed.hostname == HOST
+        and port in (None, 443)
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path == '/api/auth/me/'
+    )
+
+
+def _is_auth_me_get_response(response) -> bool:
+    request_method = getattr(getattr(response, 'request', None), 'method', None)
+    return (
+        _is_auth_me_request_url(getattr(response, 'url', None))
+        and isinstance(request_method, str)
+        and request_method.upper() == 'GET'
+    )
+
+
+def _is_g2_admin_dashboard_response(response) -> bool:
+    request_method = getattr(getattr(response, 'request', None), 'method', None)
+    try:
+        response_url = getattr(response, 'url', None)
+        if not isinstance(response_url, str):
+            return False
+        parsed = urlsplit(response_url)
+        port = parsed.port
+    except ValueError:
+        return False
+    return (
+        isinstance(request_method, str)
+        and request_method == 'GET'
+        and parsed.scheme == 'https'
+        and parsed.hostname == HOST
+        and parsed.netloc in {HOST, f'{HOST}:443'}
+        and port in (None, 443)
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path == '/api/admin/crawler/dashboard/'
+    )
+
+
+async def _run_g2_admin_acceptance(
+    page,
+    checks: dict[str, str],
+    *,
+    login_admin,
+    browser_api,
+    deactivate_admin,
+) -> None:
+    _mark_g2_browser_subcheck(checks, 'g2.admin_login')
+    await login_admin()
+
+    _mark_g2_browser_subcheck(checks, 'g2.admin_dashboard_api')
+    dashboard_api = await browser_api('GET', '/api/admin/crawler/dashboard/')
+    _require(_safe_http_status(dashboard_api) == 200, 'active synthetic superuser could not read the admin dashboard')
+
+    _mark_g2_browser_subcheck(checks, 'g2.admin_provider_api')
+    provider_api = await browser_api('GET', '/api/provider-comparisons/')
+    _require(_safe_http_status(provider_api) == 200, 'active synthetic superuser could not read provider comparison records')
+
+    _mark_g2_browser_subcheck(checks, 'g2.admin_page')
+    async with page.expect_response(_is_g2_admin_dashboard_response, timeout=15000) as dashboard_info:
+        admin_page = await page.goto(
+            f'https://{HOST}/admin/crawlers',
+            wait_until='domcontentloaded',
+            timeout=15000,
+        )
+    _require(admin_page is not None and _safe_http_status(admin_page) == 200, 'admin UI deep link did not load')
+    dashboard_response = await dashboard_info.value
+    try:
+        completion_error = await asyncio.wait_for(dashboard_response.finished(), timeout=15)
+    except Exception:
+        raise AcceptanceError('active admin dashboard response did not finish cleanly') from None
+    _require(completion_error is None, 'active admin dashboard response did not finish cleanly')
+    _require(_safe_http_status(dashboard_response) == 200, 'active admin dashboard response did not return HTTP 200')
+
+    _mark_g2_browser_subcheck(checks, 'g2.admin_dashboard_ready')
+    await page.get_by_role('heading', name='来源管理', exact=True).wait_for(state='visible', timeout=15000)
+
+    _mark_g2_browser_subcheck(checks, 'g2.admin_deactivate')
+    await deactivate_admin()
+
+    _mark_g2_browser_subcheck(checks, 'g2.admin_inactive_api')
+    for path in (
+        '/api/auth/me/',
+        '/api/admin/crawler/dashboard/',
+        '/api/provider-comparisons/',
+    ):
+        response = await browser_api('GET', path)
+        _require(_safe_http_status(response) == 403, 'inactive admin session retained a protected API access')
+
+    _mark_g2_browser_subcheck(checks, 'g2.admin_inactive_ui')
+    await page.reload(wait_until='domcontentloaded', timeout=20000)
+    await page.get_by_role('button', name='登录', exact=True).wait_for(state='visible', timeout=15000)
+    checks['g2_active_admin'] = 'active synthetic superuser reads admin/provider APIs and completes the dashboard UI before deactivation'
+    checks['g2_inactive_admin_session'] = 'after deactivation, old session receives HTTP 403 from me/admin/provider endpoints and returns to logged-out UI'
+
+
+def _validated_auth_me_snapshot(response: dict, expected_username: str) -> dict:
+    body = response.get('body') if isinstance(response, dict) else None
+    _require(
+        isinstance(response, dict)
+        and response.get('status') == 200
+        and isinstance(body, dict)
+        and body.get('username') == expected_username,
+        'could not capture the authenticated A browser response',
+    )
+    return body
+
+
+async def _hold_first_armed_auth_me_request(route, delayed_me: dict) -> None:
+    request_method = getattr(getattr(route, 'request', None), 'method', None)
+    if (
+        not isinstance(request_method, str)
+        or request_method.upper() != 'GET'
+        or delayed_me.get('armed') is not True
+    ):
+        await route.fallback()
+        return
+
+    snapshot = delayed_me.get('snapshot')
+    expected_username = delayed_me.get('expected_username')
+    if not isinstance(snapshot, dict) or snapshot.get('username') != expected_username:
+        delayed_me['armed'] = False
+        await route.abort()
+        return
+
+    # Claim the one-shot fence before the first await so another matching
+    # request cannot replace the authenticated response being held.
+    delayed_me['armed'] = False
+    delayed_me['fetched'].set()
+    await delayed_me['release'].wait()
+    await route.fulfill(status=200, json=snapshot)
+
+
 def _safe_http_status(response) -> int:
     status = response.get('status') if isinstance(response, dict) else getattr(response, 'status', None)
     return status if type(status) is int and 0 <= status <= 599 else 0
+
+
+async def _release_auth_race_response(page, delayed_me: dict, expected_snapshot: dict) -> None:
+    async with page.expect_response(_is_auth_me_get_response, timeout=10000) as response_info:
+        delayed_me['release'].set()
+    response = await response_info.value
+    try:
+        completion_error = await response.finished()
+    except Exception:
+        raise AcceptanceError('delayed auth response did not finish cleanly') from None
+    _require(completion_error is None, 'delayed auth response did not finish cleanly')
+    _require(_safe_http_status(response) == 200, 'delayed auth response did not return HTTP 200')
+    try:
+        response_json = await response.json()
+    except Exception:
+        response_json = None
+    _require(response_json == expected_snapshot, 'delayed auth response did not match the captured A identity')
+
+
+async def _verify_b_favorites_after_auth_race(page, article_title: str) -> dict:
+    await page.get_by_text('还没有收藏内容', exact=True).wait_for(state='visible', timeout=15000)
+    await page.get_by_text(article_title, exact=False).wait_for(state='hidden', timeout=15000)
+    response = await _browser_api(page, 'GET', '/api/favorites/?type=bookmark')
+    _require(
+        response['status'] == 200 and response['body'].get('results') == [],
+        'A private favorite cache leaked into B after a delayed fetchMe response',
+    )
+    return response
 
 
 def _logout_failure(
@@ -1716,7 +1917,10 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
         observed_cookie_headers: list[dict] = []
         response_tasks: list[asyncio.Task] = []
         requests: list[str] = []
-        delayed_me = {'armed': False, 'response': None, 'fetched': None, 'release': None}
+        delayed_me = {
+            'armed': False, 'snapshot': None, 'expected_username': None,
+            'fetched': None, 'release': None,
+        }
         page = None
 
         async with async_playwright() as playwright:
@@ -1738,15 +1942,7 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
             page = await context.new_page()
 
             async def hold_auth_me(route) -> None:
-                response = await route.fetch()
-                delayed_me['response'] = response
-                try:
-                    delayed_me['actual_user'] = await response.json()
-                except Exception:
-                    delayed_me['actual_user'] = None
-                delayed_me['fetched'].set()
-                await delayed_me['release'].wait()
-                await route.fulfill(response=response)
+                await _hold_first_armed_auth_me_request(route, delayed_me)
 
             async def on_response(response) -> None:
                 path = urlparse(response.url).path
@@ -1881,25 +2077,34 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
                 checks['g2_a_owner_data'] = 'A sees its favorite through the page/API and its Chat/Research history through the API'
 
                 mark('g2.auth_races')
+                mark('g2.auth_race_snapshot_a')
+                a_me_snapshot = _validated_auth_me_snapshot(
+                    await _browser_api(page, 'GET', '/api/auth/me/'),
+                    bundle['users']['a']['username'],
+                )
+                delayed_me['snapshot'] = a_me_snapshot
+                delayed_me['expected_username'] = bundle['users']['a']['username']
                 delayed_me['armed'] = True
                 delayed_me['fetched'] = asyncio.Event()
                 delayed_me['release'] = asyncio.Event()
-                await context.route('**/api/auth/me/', hold_auth_me)
+                mark('g2.auth_race_route_install')
+                await context.route(_is_auth_me_request_url, hold_auth_me)
+                mark('g2.auth_race_reload')
                 await page.reload(wait_until='domcontentloaded', timeout=20000)
+                mark('g2.auth_race_wait_capture')
                 await asyncio.wait_for(delayed_me['fetched'].wait(), timeout=10)
-                _require(isinstance(delayed_me.get('actual_user'), dict) and delayed_me['actual_user'].get('username') == bundle['users']['a']['username'], 'held fetchMe response was not the real authenticated A response')
+                mark('g2.auth_race_login_b')
                 await _login_ui(page, bundle['users']['b'])
-                delayed_me['release'].set()
+                mark('g2.auth_race_release')
+                await _release_auth_race_response(page, delayed_me, a_me_snapshot)
                 await page.wait_for_timeout(250)
+                mark('g2.auth_race_identity_b')
                 await _wait_user(page, bundle['users']['b']['username'])
-                _require(delayed_me['actual_user'].get('username') == bundle['users']['a']['username'], 'late fetchMe fixture did not capture A')
-                await page.goto(f'https://{HOST}/favorites', wait_until='domcontentloaded', timeout=20000)
-                await page.get_by_text('还没有收藏内容', exact=True).wait_for(state='visible', timeout=15000)
-                b_after_switch = await _browser_api(page, 'GET', '/api/favorites/?type=bookmark')
-                _require(b_after_switch['status'] == 200 and b_after_switch['body'].get('results') == [], 'A private favorite cache leaked into B after a delayed fetchMe response')
-                checks['g2_delayed_fetch_me'] = 'real delayed A fetchMe released after B login; B identity and private cache remained isolated'
-                checks['g2_account_switch_cache'] = 'A private favorites were visible to A and absent after switching to B'
-                await context.unroute('**/api/auth/me/', hold_auth_me)
+                mark('g2.auth_race_favorites_b')
+                await _verify_b_favorites_after_auth_race(page, bundle['news']['title'])
+                checks['g2_delayed_fetch_me'] = 'real A identity JSON read earlier through Chromium; reload fetchMe response completed after B login and matched the prior A snapshot'
+                checks['g2_account_switch_cache'] = 'A private favorite was visible to A and absent on the same favorites page after switching to B'
+                await context.unroute(_is_auth_me_request_url, hold_auth_me)
 
                 await _logout_ui(
                     page, bundle['users']['b']['username'], context,
@@ -1925,23 +2130,16 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
                     page, bundle['users']['a']['username'], context,
                     checks=checks, subcheck='g2.logout_a_after_owner_writes',
                 )
-                mark('g2.admin')
-                await _login_ui(page, bundle['users']['admin'])
-                _require((await _browser_api(page, 'GET', '/api/admin/crawler/dashboard/'))['status'] == 200, 'active synthetic superuser could not read the admin dashboard')
-                _require((await _browser_api(page, 'GET', '/api/provider-comparisons/'))['status'] == 200, 'active synthetic superuser could not read provider comparison records')
-                request_paths.clear()
-                admin_page = await page.goto(f'https://{HOST}/admin/crawlers', wait_until='domcontentloaded', timeout=20000)
-                _require(admin_page is not None and admin_page.status == 200, 'admin UI deep link did not load')
-                await page.wait_for_timeout(300)
-                _require(any(path.startswith('/api/admin/crawler/dashboard/') for path in request_paths), 'active superuser admin UI did not query its dashboard')
-                await asyncio.to_thread(_run_fixture_program, args, bundle, 'deactivate-admin')
-                _require((await _browser_api(page, 'GET', '/api/auth/me/'))['status'] == 403, 'inactive admin session still passed auth/me')
-                _require((await _browser_api(page, 'GET', '/api/admin/crawler/dashboard/'))['status'] == 403, 'inactive admin session still read admin dashboard')
-                _require((await _browser_api(page, 'GET', '/api/provider-comparisons/'))['status'] == 403, 'inactive admin session still read provider comparisons')
-                await page.reload(wait_until='domcontentloaded', timeout=20000)
-                await page.get_by_role('button', name='登录', exact=True).wait_for(state='visible', timeout=15000)
-                checks['g2_active_admin'] = 'active synthetic superuser reads admin/provider records and triggers admin UI query'
-                checks['g2_inactive_admin_session'] = 'after deactivation, old session receives HTTP 403 from me/admin/provider endpoints'
+                async def deactivate_synthetic_admin() -> None:
+                    await asyncio.to_thread(_run_fixture_program, args, bundle, 'deactivate-admin')
+
+                await _run_g2_admin_acceptance(
+                    page,
+                    checks,
+                    login_admin=lambda: _login_ui(page, bundle['users']['admin']),
+                    browser_api=lambda method, path: _browser_api(page, method, path),
+                    deactivate_admin=deactivate_synthetic_admin,
+                )
 
                 mark('g2.final_audit')
                 await page.goto(f'https://{HOST}/news/{state["news_id"]}', wait_until='domcontentloaded', timeout=20000)

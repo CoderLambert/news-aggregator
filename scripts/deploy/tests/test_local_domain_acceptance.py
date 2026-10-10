@@ -6,9 +6,10 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -557,19 +558,779 @@ def test_logout_response_matcher_requires_same_origin_exact_path_and_post():
         assert not acceptance._is_expected_logout_response(response)
 
 
+@pytest.mark.parametrize('url', [
+    f'https://{acceptance.HOST}/api/auth/me/',
+    f'https://{acceptance.HOST}/api/auth/me/?lang=zh',
+    f'https://{acceptance.HOST}/api/auth/me/?lang=en&source=header',
+    f'https://{acceptance.HOST}:443/api/auth/me/?lang=zh',
+])
+def test_auth_me_route_matcher_accepts_exact_https_origin_and_query(url):
+    assert acceptance._is_auth_me_request_url(url)
+
+
+@pytest.mark.parametrize('url', [
+    None,
+    '',
+    '/api/auth/me/',
+    'http://news.lambert.host/api/auth/me/',
+    'https://evil.invalid/api/auth/me/',
+    'https://news.lambert.host.evil.invalid/api/auth/me/',
+    'https://news.lambert.host:80/api/auth/me/',
+    'https://news.lambert.host:444/api/auth/me/',
+    'https://news.lambert.host:/api/auth/me/',
+    'https://user:pass@news.lambert.host/api/auth/me/',
+    'https://@news.lambert.host/api/auth/me/',
+    'https://news.lambert.host/api/auth/me',
+    'https://news.lambert.host/api/auth/me/extra',
+    'https://news.lambert.host/api/auth/me//',
+    'https://news.lambert.host:not-a-port/api/auth/me/',
+])
+def test_auth_me_route_matcher_rejects_wrong_or_malformed_urls(url):
+    assert not acceptance._is_auth_me_request_url(url)
+
+
+def test_auth_me_snapshot_requires_a_successful_real_browser_identity():
+    snapshot = {'username': 'A', 'id': 17, 'is_admin': False}
+    assert acceptance._validated_auth_me_snapshot(
+        {'status': 200, 'body': snapshot}, 'A',
+    ) is snapshot
+
+    invalid_responses = (
+        {'status': 403, 'body': snapshot},
+        {'status': 200, 'body': None},
+        {'status': 200, 'body': {'username': 'B'}},
+        None,
+    )
+    for response in invalid_responses:
+        with pytest.raises(acceptance.AcceptanceError, match='could not capture'):
+            acceptance._validated_auth_me_snapshot(response, 'A')
+
+
+@pytest.mark.parametrize(('url', 'method', 'matches'), [
+    (f'https://{acceptance.HOST}/api/auth/me/?lang=zh', 'GET', True),
+    (f'https://{acceptance.HOST}/api/auth/me/', 'POST', False),
+    (f'http://{acceptance.HOST}/api/auth/me/', 'GET', False),
+    ('https://evil.invalid/api/auth/me/', 'GET', False),
+    (f'https://{acceptance.HOST}/api/auth/me/extra', 'GET', False),
+])
+def test_auth_me_response_matcher_requires_exact_origin_path_and_get(url, method, matches):
+    response = SimpleNamespace(
+        url=url,
+        request=SimpleNamespace(method=method),
+    )
+    assert acceptance._is_auth_me_get_response(response) is matches
+
+
+def _fake_auth_race_response_waiter(response, events):
+    class FakeResponseInfo:
+        def __init__(self, predicate):
+            self.predicate = predicate
+            self.value = asyncio.get_running_loop().create_future()
+
+        async def __aenter__(self):
+            events.append('listener_registered')
+            assert self.predicate(response)
+            self.value.set_result(response)
+            return self
+
+        async def __aexit__(self, *_exc_info):
+            return False
+
+    class FakePage:
+        def expect_response(self, predicate, *, timeout):
+            assert timeout == 10000
+            return FakeResponseInfo(predicate)
+
+    class FakeRelease:
+        def set(self):
+            assert events == ['listener_registered']
+            events.append('released')
+
+    return FakePage(), {'release': FakeRelease()}
+
+
+def test_auth_race_release_waits_for_exact_response_finish_and_snapshot_body():
+    snapshot = {'username': 'A', 'id': 17, 'is_admin': False}
+    events = []
+
+    class FakeResponse:
+        url = f'https://{acceptance.HOST}/api/auth/me/?lang=zh'
+        request = SimpleNamespace(method='GET')
+        status = 200
+
+        async def finished(self):
+            assert events[-1] == 'released'
+            events.append('finished')
+            return None
+
+        async def json(self):
+            assert events[-1] == 'finished'
+            events.append('json')
+            return snapshot
+
+    page, state = _fake_auth_race_response_waiter(FakeResponse(), events)
+    asyncio.run(acceptance._release_auth_race_response(page, state, snapshot))
+    assert events == ['listener_registered', 'released', 'finished', 'json']
+
+
+@pytest.mark.parametrize(('status', 'finish_error', 'finish_raises', 'body'), [
+    (200, 'request failed', False, {'username': 'A'}),
+    (200, None, True, {'username': 'A'}),
+    (503, None, False, {'username': 'A'}),
+    (200, None, False, {'username': 'A', 'private': 'synthetic-secret'}),
+])
+def test_auth_race_release_rejects_incomplete_or_wrong_response(status, finish_error, finish_raises, body):
+    snapshot = {'username': 'A', 'id': 17, 'is_admin': False}
+    events = []
+
+    class FakeResponse:
+        url = f'https://{acceptance.HOST}/api/auth/me/'
+        request = SimpleNamespace(method='GET')
+
+        async def finished(self):
+            assert events[-1] == 'released'
+            events.append('finished')
+            if finish_raises:
+                raise TimeoutError('private completion detail')
+            return finish_error
+
+        async def json(self):
+            events.append('json')
+            return body
+
+    response = FakeResponse()
+    response.status = status
+    page, state = _fake_auth_race_response_waiter(response, events)
+    with pytest.raises(acceptance.AcceptanceError) as failure:
+        asyncio.run(acceptance._release_auth_race_response(page, state, snapshot))
+    assert 'private' not in str(failure.value)
+    assert events[:2] == ['listener_registered', 'released']
+
+
+def test_b_favorites_verify_same_page_without_hard_navigation(monkeypatch):
+    events = []
+    title = 'Synthetic A article'
+
+    class FakeLocator:
+        def __init__(self, text, exact):
+            self.text = text
+            self.exact = exact
+
+        async def wait_for(self, *, state, timeout):
+            events.append(('wait', self.text, self.exact, state, timeout))
+
+    class FakePage:
+        def get_by_text(self, text, *, exact):
+            return FakeLocator(text, exact)
+
+        async def goto(self, *_args, **_kwargs):
+            raise AssertionError('account-switch cache check must stay on the current page')
+
+    async def fake_browser_api(_page, method, path):
+        events.append(('api', method, path))
+        return {'status': 200, 'body': {'results': []}}
+
+    monkeypatch.setattr(acceptance, '_browser_api', fake_browser_api)
+    response = asyncio.run(acceptance._verify_b_favorites_after_auth_race(FakePage(), title))
+    assert response == {'status': 200, 'body': {'results': []}}
+    assert events == [
+        ('wait', '还没有收藏内容', True, 'visible', 15000),
+        ('wait', title, False, 'hidden', 15000),
+        ('api', 'GET', '/api/favorites/?type=bookmark'),
+    ]
+
+
+def test_auth_me_holder_fulfills_only_after_release_without_fetch_or_headers():
+    snapshot = {'username': 'A', 'id': 17, 'is_admin': False}
+
+    class FakeRoute:
+        def __init__(self, method, state):
+            self.request = SimpleNamespace(
+                method=method,
+                url=f'https://{acceptance.HOST}/api/auth/me/?lang=zh',
+            )
+            self.state = state
+            self.fetch_calls = 0
+            self.fallback_calls = 0
+            self.abort_calls = 0
+            self.fulfill_kwargs = None
+
+        async def fetch(self):
+            self.fetch_calls += 1
+            raise AssertionError('auth-me holder must not call route.fetch')
+
+        async def fallback(self):
+            self.fallback_calls += 1
+
+        async def abort(self):
+            self.abort_calls += 1
+
+        async def fulfill(self, **kwargs):
+            self.fulfill_kwargs = kwargs
+
+    async def exercise():
+        state = {
+            'armed': True,
+            'snapshot': snapshot,
+            'expected_username': 'A',
+            'fetched': asyncio.Event(),
+            'release': asyncio.Event(),
+        }
+        first = FakeRoute('GET', state)
+        pending = asyncio.create_task(
+            acceptance._hold_first_armed_auth_me_request(first, state)
+        )
+        await asyncio.wait_for(state['fetched'].wait(), timeout=1)
+        assert state['armed'] is False
+        assert first.fetch_calls == 0
+        assert first.fulfill_kwargs is None
+
+        repeated_get = FakeRoute('GET', state)
+        await acceptance._hold_first_armed_auth_me_request(repeated_get, state)
+        assert repeated_get.fallback_calls == 1
+        assert repeated_get.fetch_calls == 0
+
+        post_state = {
+            'armed': True, 'snapshot': snapshot, 'expected_username': 'A',
+            'fetched': asyncio.Event(), 'release': asyncio.Event(),
+        }
+        post = FakeRoute('POST', post_state)
+        await acceptance._hold_first_armed_auth_me_request(post, post_state)
+        assert post.fallback_calls == 1
+        assert post.fetch_calls == 0
+        assert post_state['armed'] is True
+        assert not post_state['fetched'].is_set()
+
+        state['release'].set()
+        await asyncio.wait_for(pending, timeout=1)
+        assert first.fulfill_kwargs == {'status': 200, 'json': snapshot}
+        assert 'headers' not in first.fulfill_kwargs
+
+    asyncio.run(exercise())
+
+
+def test_auth_me_holder_aborts_if_saved_snapshot_is_invalid():
+    class FakeRoute:
+        request = SimpleNamespace(
+            method='GET', url=f'https://{acceptance.HOST}/api/auth/me/',
+        )
+
+        def __init__(self):
+            self.abort_calls = 0
+            self.fallback_calls = 0
+            self.fulfill_calls = 0
+
+        async def abort(self):
+            self.abort_calls += 1
+
+        async def fallback(self):
+            self.fallback_calls += 1
+
+        async def fulfill(self, **_kwargs):
+            self.fulfill_calls += 1
+
+    async def exercise():
+        state = {
+            'armed': True, 'snapshot': {'username': 'B'}, 'expected_username': 'A',
+            'fetched': asyncio.Event(), 'release': asyncio.Event(),
+        }
+        route = FakeRoute()
+        await acceptance._hold_first_armed_auth_me_request(route, state)
+        assert state['armed'] is False
+        assert route.abort_calls == 1
+        assert route.fallback_calls == 0
+        assert route.fulfill_calls == 0
+        assert not state['fetched'].is_set()
+
+    asyncio.run(exercise())
+
+
 def test_g2_browser_subchecks_are_fixed_and_cover_the_account_flow():
     required = {
+        'g2.shared_initial', 'g2.shared_untrusted_ca', 'g2.shared_trusted_context',
+        'g2.shared_homepage', 'g2.shared_detail', 'g2.shared_mermaid',
+        'g2.shared_csrf_cookie', 'g2.shared_wrong_san', 'g2.shared_egress',
         'g2.account_initial', 'g2.register_a', 'g2.logout_a', 'g2.register_b',
         'g2.attach_owner', 'g2.owner_b', 'g2.admin_gate', 'g2.logout_b',
-        'g2.owner_a', 'g2.auth_races', 'g2.owner_csrf', 'g2.admin',
+        'g2.owner_a', 'g2.auth_races',
+        'g2.auth_race_snapshot_a', 'g2.auth_race_route_install',
+        'g2.auth_race_reload', 'g2.auth_race_wait_capture',
+        'g2.auth_race_login_b', 'g2.auth_race_release',
+        'g2.auth_race_identity_b', 'g2.auth_race_favorites_b',
+        'g2.owner_csrf',
+        'g2.admin_login', 'g2.admin_dashboard_api', 'g2.admin_provider_api',
+        'g2.admin_page', 'g2.admin_dashboard_ready', 'g2.admin_deactivate',
+        'g2.admin_inactive_api', 'g2.admin_inactive_ui',
         'g2.final_audit', 'g2.anon_after_logout', 'g2.cookie_attributes',
     }
     assert required <= acceptance.G2_BROWSER_SUBCHECKS
+    for subcheck in (
+        'g2.auth_race_snapshot_a', 'g2.auth_race_route_install',
+        'g2.auth_race_reload', 'g2.auth_race_wait_capture',
+        'g2.auth_race_login_b', 'g2.auth_race_release',
+        'g2.auth_race_identity_b', 'g2.auth_race_favorites_b',
+    ):
+        checks = {}
+        acceptance._mark_g2_browser_subcheck(checks, subcheck)
+        assert checks == {'_g2_active_subcheck': subcheck}
+        failure = acceptance._g2_browser_failure(
+            TimeoutError('private query and synthetic cookie'), subcheck,
+        )
+        assert failure.active_subcheck == subcheck
+        assert failure.browser_exception_type == 'TimeoutError'
+        assert 'private query' not in str(failure)
     checks = {}
     acceptance._mark_g2_browser_subcheck(checks, 'g2.logout_a')
     assert checks == {'_g2_active_subcheck': 'g2.logout_a'}
     with pytest.raises(ValueError):
         acceptance._mark_g2_browser_subcheck(checks, 'g2.secret-value')
+
+
+@pytest.mark.parametrize(('url', 'method', 'matches'), [
+    (f'https://{acceptance.HOST}/api/admin/crawler/dashboard/?lang=zh', 'GET', True),
+    (f'https://{acceptance.HOST}:443/api/admin/crawler/dashboard/', 'GET', True),
+    (f'http://{acceptance.HOST}/api/admin/crawler/dashboard/', 'GET', False),
+    ('https://evil.invalid/api/admin/crawler/dashboard/', 'GET', False),
+    (f'https://user@{acceptance.HOST}/api/admin/crawler/dashboard/', 'GET', False),
+    (f'https://{acceptance.HOST}:444/api/admin/crawler/dashboard/', 'GET', False),
+    (f'https://{acceptance.HOST}/api/admin/crawler/dashboard/extra', 'GET', False),
+    (f'https://{acceptance.HOST}/api/admin/crawler/dashboard-v2/', 'GET', False),
+    (f'https://{acceptance.HOST}/api/admin/crawler/dashboard/', 'POST', False),
+    (f'https://{acceptance.HOST}/api/admin/crawler/dashboard/', 'HEAD', False),
+    (f'https://{acceptance.HOST}/api/admin/crawler/dashboard/', 'get', False),
+    (f'https://{acceptance.HOST}:not-a-port/api/admin/crawler/dashboard/', 'GET', False),
+])
+def test_g2_admin_dashboard_response_matcher_requires_exact_https_url_and_get(url, method, matches):
+    response = SimpleNamespace(url=url, request=SimpleNamespace(method=method))
+    assert acceptance._is_g2_admin_dashboard_response(response) is matches
+
+
+class _FakeG2AdminResponse:
+    def __init__(self, events, *, status=200, finished_error=False, finished_result=None):
+        self.url = f'https://{acceptance.HOST}/api/admin/crawler/dashboard/?lang=zh'
+        self.request = SimpleNamespace(method='GET')
+        self.status = status
+        self.events = events
+        self.finished_error = finished_error
+        self.finished_result = finished_result
+
+    async def finished(self):
+        self.events.append('dashboard.finished')
+        if self.finished_error:
+            raise RuntimeError('synthetic response secret')
+        return self.finished_result
+
+
+class _FakeG2AdminExpectation:
+    def __init__(self, page, predicate):
+        self.page = page
+        self.predicate = predicate
+        self.future = asyncio.get_running_loop().create_future()
+
+    async def __aenter__(self):
+        assert self.page.expectation_active is False
+        self.page.expectation_active = True
+        self.page.events.append('dashboard.listener_registered')
+        return self
+
+    async def __aexit__(self, *_exc_info):
+        self.page.expectation_active = False
+        self.page.events.append('dashboard.response_wait')
+        if self.page.capture_timeout:
+            raise asyncio.TimeoutError('synthetic response timeout secret')
+        if self.page.response_delay:
+            await asyncio.sleep(self.page.response_delay)
+        assert self.predicate(self.page.dashboard_response)
+        self.future.set_result(self.page.dashboard_response)
+        self.page.events.append('dashboard.response_captured')
+        return False
+
+    @property
+    def value(self):
+        return self.future
+
+
+class _FakeG2AdminLocator:
+    def __init__(self, page, role, name):
+        self.page = page
+        self.role = role
+        self.name = name
+
+    async def wait_for(self, *, state, timeout):
+        if self.role == 'heading':
+            assert (self.name, state, timeout) == ('来源管理', 'visible', 15000)
+            self.page.events.append('dashboard.heading_wait')
+            if not self.page.content_ready:
+                raise asyncio.TimeoutError('synthetic private content readiness detail')
+            self.page.events.append('dashboard.heading_visible')
+            return
+        assert (self.role, self.name, state, timeout) == ('button', '登录', 'visible', 15000)
+        self.page.events.append('logged_out_button_visible')
+
+
+class _FakeG2AdminPage:
+    def __init__(
+        self,
+        *,
+        events=None,
+        capture_timeout=False,
+        response_delay=0,
+        navigation_status=200,
+        dashboard_status=200,
+        finished_error=False,
+        finished_result=None,
+        content_ready=True,
+    ):
+        self.events = events if events is not None else []
+        self.expectation_active = False
+        self.capture_timeout = capture_timeout
+        self.response_delay = response_delay
+        self.navigation_status = navigation_status
+        self.content_ready = content_ready
+        self.dashboard_response = _FakeG2AdminResponse(
+            self.events,
+            status=dashboard_status,
+            finished_error=finished_error,
+            finished_result=finished_result,
+        )
+
+    def expect_response(self, predicate, *, timeout):
+        assert timeout == 15000
+        self.events.append('dashboard.expect_created')
+        return _FakeG2AdminExpectation(self, predicate)
+
+    async def goto(self, url, *, wait_until, timeout):
+        assert self.expectation_active
+        assert url == f'https://{acceptance.HOST}/admin/crawlers'
+        assert (wait_until, timeout) == ('domcontentloaded', 15000)
+        self.events.append('admin.goto')
+        return SimpleNamespace(status=self.navigation_status)
+
+    def get_by_role(self, role, *, name, exact):
+        assert exact is True
+        return _FakeG2AdminLocator(self, role, name)
+
+    async def reload(self, *, wait_until, timeout):
+        assert (wait_until, timeout) == ('domcontentloaded', 20000)
+        self.events.append('admin.reload')
+
+
+def _fake_g2_admin_callbacks(events):
+    api_calls = []
+
+    async def login_admin():
+        events.append('admin.login')
+
+    async def browser_api(method, path):
+        assert method == 'GET'
+        api_calls.append(path)
+        events.append(f'api:{path}')
+        if path == '/api/admin/crawler/dashboard/':
+            return {'status': 200 if api_calls.count(path) == 1 else 403}
+        if path == '/api/provider-comparisons/':
+            return {'status': 200 if api_calls.count(path) == 1 else 403}
+        assert path == '/api/auth/me/'
+        return {'status': 403}
+
+    async def deactivate_admin():
+        assert 'dashboard.heading_visible' in events
+        assert events.index('dashboard.finished') < events.index('dashboard.heading_visible')
+        events.append('admin.deactivated')
+
+    return login_admin, browser_api, deactivate_admin, api_calls
+
+
+def test_g2_admin_acceptance_waits_for_slow_dashboard_response_and_ready_content_before_deactivation():
+    events = []
+    page = _FakeG2AdminPage(events=events, response_delay=0.32)
+    login_admin, browser_api, deactivate_admin, api_calls = _fake_g2_admin_callbacks(events)
+    checks = {}
+
+    async def exercise():
+        started = asyncio.get_running_loop().time()
+        await acceptance._run_g2_admin_acceptance(
+            page,
+            checks,
+            login_admin=login_admin,
+            browser_api=browser_api,
+            deactivate_admin=deactivate_admin,
+        )
+        return asyncio.get_running_loop().time() - started
+
+    elapsed = asyncio.run(exercise())
+
+    assert elapsed > 0.30
+    assert events.index('dashboard.listener_registered') < events.index('admin.goto')
+    assert events.index('dashboard.response_captured') < events.index('dashboard.finished')
+    assert events.index('dashboard.finished') < events.index('dashboard.heading_visible')
+    assert events.index('dashboard.heading_visible') < events.index('admin.deactivated')
+    assert events.index('admin.deactivated') < events.index('api:/api/auth/me/')
+    assert api_calls == [
+        '/api/admin/crawler/dashboard/', '/api/provider-comparisons/',
+        '/api/auth/me/', '/api/admin/crawler/dashboard/', '/api/provider-comparisons/',
+    ]
+    assert checks['_g2_active_subcheck'] == 'g2.admin_inactive_ui'
+    assert checks['g2_active_admin'].startswith('active synthetic superuser')
+    assert checks['g2_inactive_admin_session'].startswith('after deactivation')
+
+
+@pytest.mark.parametrize(('failure_options', 'expected_subcheck'), [
+    ({'capture_timeout': True}, 'g2.admin_page'),
+    ({'navigation_status': 503}, 'g2.admin_page'),
+    ({'dashboard_status': 503}, 'g2.admin_page'),
+    ({'finished_error': True}, 'g2.admin_page'),
+    ({'finished_result': 'synthetic response completion error'}, 'g2.admin_page'),
+    ({'content_ready': False}, 'g2.admin_dashboard_ready'),
+])
+def test_g2_admin_acceptance_fails_closed_before_deactivation(failure_options, expected_subcheck):
+    events = []
+    page = _FakeG2AdminPage(events=events, **failure_options)
+    login_admin, browser_api, deactivate_admin, api_calls = _fake_g2_admin_callbacks(events)
+    checks = {}
+
+    async def exercise():
+        await acceptance._run_g2_admin_acceptance(
+            page,
+            checks,
+            login_admin=login_admin,
+            browser_api=browser_api,
+            deactivate_admin=deactivate_admin,
+        )
+
+    with pytest.raises((acceptance.AcceptanceError, asyncio.TimeoutError)):
+        asyncio.run(exercise())
+
+    assert checks['_g2_active_subcheck'] == expected_subcheck
+    assert 'admin.deactivated' not in events
+    assert '/api/auth/me/' not in api_calls
+    assert 'g2_active_admin' not in checks
+    assert 'g2_inactive_admin_session' not in checks
+
+
+def _install_mock_shared_browser(monkeypatch, failure_at=None):
+    secret = 'SECRET Cookie=sessionid=synthetic-cookie URL=https://secret.invalid/path?token=private'
+
+    class Error(Exception):
+        pass
+
+    class UnknownBrowserFailure(Exception):
+        pass
+
+    class FakeResponse:
+        status = 200
+
+    class FakeLocator:
+        def __init__(self, selector):
+            self.selector = selector
+            self.first = self
+
+        def count(self):
+            return 1
+
+        def scroll_into_view_if_needed(self):
+            return None
+
+        def wait_for(self, **_kwargs):
+            return None
+
+        def locator(self, selector):
+            return FakeLocator(f'{self.selector} {selector}')
+
+        def evaluate(self, _script):
+            if failure_at == 'mermaid' and 'svg' in self.selector:
+                raise Error(secret)
+            return {
+                'labels': ['Fixture article', 'Mermaid flow'],
+                'nodeFill': 'rgb(255, 255, 255)',
+                'textFill': 'rgb(0, 0, 0)',
+                'width': 400,
+                'height': 300,
+            }
+
+    class FakePage:
+        def __init__(self, untrusted):
+            self.untrusted = untrusted
+
+        def goto(self, url, **_kwargs):
+            if self.untrusted:
+                raise Error('net::ERR_CERT_AUTHORITY_INVALID')
+            if f':{4443}/' in url:
+                if failure_at == 'wrong_san':
+                    raise RuntimeError(secret)
+                raise Error('net::ERR_CERT_COMMON_NAME_INVALID')
+            return FakeResponse()
+
+        def locator(self, selector):
+            return FakeLocator(selector)
+
+        def evaluate(self, script):
+            if failure_at == 'csrf' and "fetch('/api/auth/csrf/'" in script:
+                raise Error(secret)
+            if 'document.cookie' in script:
+                return 'csrftoken=fixture'
+            return None
+
+        def screenshot(self, **_kwargs):
+            return None
+
+    launches = []
+
+    class FakeContext:
+        def __init__(self, untrusted):
+            self.untrusted = untrusted
+
+        def new_page(self):
+            return FakePage(self.untrusted)
+
+        def route(self, *_args):
+            return None
+
+        def close(self):
+            return None
+
+    class FakeChromium:
+        def launch_persistent_context(self, *_args, **_kwargs):
+            untrusted = not launches
+            launches.append(untrusted)
+            return FakeContext(untrusted)
+
+    class FakePlaywright:
+        def __enter__(self):
+            return SimpleNamespace(chromium=FakeChromium())
+
+        def __exit__(self, *_args):
+            return False
+
+    def fake_version(_package):
+        if failure_at == 'initial':
+            raise UnknownBrowserFailure(secret)
+        return acceptance.PLAYWRIGHT_VERSION
+
+    sync_api = ModuleType('playwright.sync_api')
+    sync_api.Error = Error
+    sync_api.sync_playwright = FakePlaywright
+    playwright = ModuleType('playwright')
+    playwright.sync_api = sync_api
+    monkeypatch.setitem(sys.modules, 'playwright', playwright)
+    monkeypatch.setitem(sys.modules, 'playwright.sync_api', sync_api)
+    monkeypatch.setattr(acceptance.importlib.metadata, 'version', fake_version)
+    monkeypatch.setattr(acceptance.os, 'access', lambda *_args: True)
+    monkeypatch.setattr(acceptance, '_new_nss_database', lambda *_args: None)
+    return secret
+
+
+def _g2_shared_runtime_argv(tmp_path):
+    private_root = tmp_path / 'private'
+    private_root.mkdir(mode=0o700)
+    private_root.chmod(0o700)
+    bundle_path = private_root / 'fixtures.json'
+    acceptance._fixtures.create_bundle(bundle_path)
+    state_path = private_root / 'state.json'
+    state_path.write_text('{"ok":true,"news_id":1}\n', encoding='utf-8')
+    compose_file = private_root / 'compose.yaml'
+    compose_file.write_text('services: {}\n', encoding='utf-8')
+    compose_env = private_root / 'compose.env'
+    compose_env.write_text('SYNTHETIC=1\n', encoding='utf-8')
+    ca_cert = private_root / 'ca.crt'
+    ca_cert.write_text('synthetic CA\n', encoding='utf-8')
+    chromium = private_root / 'chromium'
+    chromium.write_text('mock executable\n', encoding='utf-8')
+    chromium.chmod(0o700)
+    for path in (state_path, compose_file, compose_env):
+        path.chmod(0o600)
+    report = private_root / 'report.json'
+    return [
+        '--gateway-ip', '127.0.0.1', '--ca-cert', str(ca_cert),
+        '--work-dir', str(private_root), '--stage', 'g2', '--report', str(report),
+        '--chromium-executable', str(chromium),
+        '--fixture-bundle', str(bundle_path), '--fixture-state', str(state_path),
+        '--compose-project', 'newshub-local-g2-123-0123456789abcdef',
+        '--compose-file', str(compose_file), '--compose-env', str(compose_env),
+        '--gateway-container-id', GATEWAY_CONTAINER_ID,
+        '--app-image-id', APP_IMAGE_ID, '--gateway-image-id', GATEWAY_IMAGE_ID,
+        '--curl-image-id', CURL_IMAGE_ID, '--private-root', str(private_root),
+    ], report
+
+
+@pytest.mark.parametrize(('failure_at', 'active_subcheck', 'browser_exception_type'), [
+    ('initial', 'g2.shared_initial', 'BrowserExecutionError'),
+    ('mermaid', 'g2.shared_mermaid', 'Error'),
+    ('csrf', 'g2.shared_csrf_cookie', 'Error'),
+    ('wrong_san', 'g2.shared_wrong_san', 'RuntimeError'),
+])
+def test_g2_shared_browser_failures_report_safe_subcheck_and_exception(
+    tmp_path, capsys, monkeypatch, failure_at, active_subcheck, browser_exception_type,
+):
+    secret = _install_mock_shared_browser(monkeypatch, failure_at)
+    argv, report_path = _g2_shared_runtime_argv(tmp_path)
+
+    with patch.object(acceptance, '_check_http_api', side_effect=lambda *_args: None):
+        assert acceptance.main(argv) == 1
+
+    output = capsys.readouterr().out
+    report = report_path.read_text(encoding='utf-8')
+    assert all(value not in output and value not in report for value in (
+        'SECRET', 'synthetic-cookie', 'https://secret.invalid/path?token=private', 'token=private',
+    ))
+    failure = json.loads(report)['failure']
+    assert failure == {
+        'stage': 'g2', 'check': active_subcheck, 'exception_type': 'AcceptanceError',
+        'active_subcheck': active_subcheck,
+        'browser_exception_type': browser_exception_type,
+    }
+    assert secret not in output and secret not in report
+
+
+def test_g2_shared_browser_success_keeps_checks_and_clears_internal_marker(tmp_path, monkeypatch):
+    _install_mock_shared_browser(monkeypatch)
+    argv, report_path = _g2_shared_runtime_argv(tmp_path)
+
+    async def accounts_succeeded(*_args):
+        return None
+
+    with (
+        patch.object(acceptance, '_check_http_api', side_effect=lambda *_args: None),
+        patch.object(acceptance, '_run_g2_browser_checks', side_effect=accounts_succeeded),
+        patch.object(acceptance, '_run_g2_rate_limit_checks', side_effect=lambda *_args: None),
+    ):
+        assert acceptance.main(argv) == 0
+
+    result = json.loads(report_path.read_text(encoding='utf-8'))
+    checks = result['checks']
+    assert result['status'] == 'PASS'
+    assert '_g2_active_subcheck' not in checks
+    assert checks['browser_untrusted_ca'] == 'rejected with ERR_CERT_AUTHORITY_INVALID'
+    assert checks['browser_homepage'] == 'HTTP 200'
+    assert checks['browser_news_deep_link'] == 'HTTP 200'
+    assert checks['mermaid_chart']
+    assert checks['browser_csrf_cookie'] == 'readable through document.cookie'
+    assert checks['browser_wrong_san'] == 'rejected with ERR_CERT_COMMON_NAME_INVALID'
+    assert checks['browser_external_egress'] == 'blocked; no external host request observed'
+
+
+def test_g1_shared_browser_output_contract_does_not_add_g2_metadata(tmp_path, capsys, monkeypatch):
+    work_dir = tmp_path / 'work'
+    work_dir.mkdir()
+    ca_cert = tmp_path / 'ca.crt'
+    ca_cert.write_text('synthetic CA\n', encoding='utf-8')
+    argv = [
+        '--gateway-ip', '127.0.0.1', '--ca-cert', str(ca_cert),
+        '--work-dir', str(work_dir), '--stage', 'g1',
+    ]
+
+    def playwright_not_installed(_package):
+        raise acceptance.importlib.metadata.PackageNotFoundError('playwright')
+
+    monkeypatch.setattr(acceptance.importlib.metadata, 'version', playwright_not_installed)
+
+    with patch.object(acceptance, '_check_http_api', side_effect=lambda *_args: None):
+        assert acceptance.main(argv) == 1
+
+    result = json.loads(capsys.readouterr().out)
+    assert result['failure'] == (
+        'AcceptanceError: Python Playwright is not installed in the selected interpreter'
+    )
+    assert 'active_subcheck' not in result and 'browser_exception_type' not in result
 
 
 def test_g2_browser_failure_metadata_is_fixed_and_redacts_timeout_values(tmp_path, capsys):
