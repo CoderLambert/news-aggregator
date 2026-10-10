@@ -324,3 +324,22 @@ def test_hosted_chatgpt_identity_cannot_be_shared_across_site_users(website, dis
                         'state': params['state'][0], 'code': 'fake',
                     }, cookie)
     assert ChatGPTSubscriptionConnection.objects.filter(oauth_mode='website').count() == 1
+
+
+@pytest.mark.django_db
+def test_website_translation_does_not_use_admin_provider_without_subscription(website):
+    category = Category.objects.create(name='No fallback', slug='no-fallback')
+    source = Source.objects.create(name='No fallback source', url='https://test.example', language='en')
+    news = News.objects.create(
+        title='No fallback', content='Body', url='https://test.example/a',
+        source=source, category=category, publish_time=timezone.now(),
+        full_content='# Original article',
+    )
+    client = APIClient()
+    client.force_authenticate(user=user_for('translation-no-fallback'))
+    with patch('api.views.get_clients') as paid_clients:
+        response = client.post(f'/api/news/{news.pk}/translate/', {}, format='json')
+        assert response.status_code == 200
+        result = b''.join(response.streaming_content).decode('utf-8')
+    assert '请先登录并连接 ChatGPT 订阅账号' in result
+    paid_clients.assert_not_called()
