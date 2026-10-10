@@ -192,7 +192,7 @@ export default function ChatGPTSubscriptionSettings() {
 
   async function beginConnect(connectionId?: string) {
     const ownerId = user?.id
-    if (ownerId === undefined) return
+    if (ownerId === undefined || statusQuery.data?.available === false) return
     const requestGeneration = ++connectRequestGenerationRef.current
     const requestIdentity = { generation: requestGeneration, ownerId }
     activeConnectRequestRef.current = requestIdentity
@@ -276,7 +276,9 @@ export default function ChatGPTSubscriptionSettings() {
     <section className="mx-auto max-w-3xl px-4 py-10">
       <Link to="/settings" className="mb-5 inline-flex min-h-11 items-center gap-2 rounded-md text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><ArrowLeft aria-hidden="true" className="size-4" />返回设置</Link>
       <header className="mb-6">
-        <p className="text-sm font-medium text-orange-600">本地订阅连接</p>
+        <p className="text-sm font-medium text-orange-600">
+          {statusQuery.data?.mode === 'website' ? '网站独立订阅连接' : '本地订阅连接'}
+        </p>
         <h1 className="mt-1 text-2xl font-semibold">ChatGPT 订阅设置</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           连接只属于当前 NewsHub 用户。小闻问答、问题推荐和全文翻译使用此处选中的 ChatGPT 账号与模型。
@@ -289,7 +291,10 @@ export default function ChatGPTSubscriptionSettings() {
       />
 
       <div className="mb-5 mt-6 rounded-xl border border-border bg-card p-4 text-sm leading-6 text-muted-foreground">
-        OAuth 在单独窗口中通过 OpenAI 官方授权完成。令牌只保存在本地后端，不会写入浏览器存储。
+        OAuth 在单独窗口中通过 OpenAI 官方授权完成。
+        {statusQuery.data?.mode === 'website'
+          ? '网站托管模式仅在 OpenAI 明确批准后启用。每位用户的凭据独立加密存储，不会发送给浏览器。'
+          : '令牌只保存在本地后端，不会写入浏览器存储。'}
       </div>
 
       {notice && <p role="status" className="mb-4 rounded-lg bg-muted px-3 py-2 text-sm">{notice}</p>}
@@ -299,6 +304,11 @@ export default function ChatGPTSubscriptionSettings() {
         </p>
       )}
       {statusQuery.isError && <p role="alert" className="mb-4 text-sm text-destructive">{errorMessage(statusQuery.error)}</p>}
+      {statusQuery.data?.available === false && (
+        <p role="alert" className="mb-4 rounded-lg border border-destructive/40 p-3 text-sm text-destructive">
+          {statusQuery.data.message || 'ChatGPT 订阅连接尚未开放。'}
+        </p>
+      )}
       {attemptId && attemptQuery.error && (
         <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">
           <p role="alert" className="text-destructive">
@@ -333,7 +343,7 @@ export default function ChatGPTSubscriptionSettings() {
         <button
           type="button"
           onClick={() => void beginConnect()}
-          disabled={connectPending || disconnectMutation.isPending}
+          disabled={connectPending || disconnectMutation.isPending || statusQuery.data?.available === false}
           className="min-h-11 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
         >
           {connectPending ? '等待 OpenAI 授权…' : '连接新账号'}
