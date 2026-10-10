@@ -639,7 +639,7 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
         semantic_seen = set()
         if vs.count() > 0:
             for q in query_variations:
-            guard()
+                guard()
                 results = vs.search(q, n=100)
                 for nid, _ in results:
                     if nid not in semantic_seen:
