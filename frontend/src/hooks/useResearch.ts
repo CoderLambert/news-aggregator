@@ -165,6 +165,22 @@ function pendingCreateSnapshot(pending: PendingResearchCreate): ResearchTaskSnap
   }
 }
 
+function preserveUnknownCreate(
+  connection: ActiveConnection,
+  task: ResearchTaskSnapshot,
+): ResearchTaskSnapshot {
+  if (task.sessionId || connection.requestMode !== 'create') return task
+  const pending = loadPendingCreate(connection.viewerId)
+  if (pending?.idempotencyKey !== connection.idempotencyKey) return task
+  // An error/EOF before Session-ID cannot prove the server rejected the POST.
+  // Never replace the existing key with a fresh paid attempt automatically.
+  return {
+    ...task,
+    recovery: 'resume',
+    notice: '原请求可能已到达服务器。请继续接收原任务；将使用相同请求标识，不会自动创建新任务。',
+  }
+}
+
 function recoveryStorageKey(viewerId: ResearchViewerId, sessionId: string): string {
   return `${RECOVERY_STORAGE_PREFIX}:${encodeURIComponent(String(viewerId))}:${encodeURIComponent(sessionId)}`
 }
@@ -638,7 +654,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
           continue
         }
 
-        const nextTask = applyResearchEvent(current, event)
+        const nextTask = preserveUnknownCreate(connection, applyResearchEvent(current, event))
         if (nextTask !== current) putTask(connection.taskKey, nextTask)
         if (nextTask.phase === 'success') {
           if (nextTask !== current) await refreshCompletedTask(connection, nextTask)
@@ -650,10 +666,10 @@ export function useResearch(viewerId: ResearchViewerId | null) {
       if (!connectionIsCurrent(connection)) return
       const finalTask = currentConnectionTask(connection)
       if (finalTask && isActivePhase(finalTask)) {
-        putTask(connection.taskKey, markResearchTaskInterrupted(
+        putTask(connection.taskKey, preserveUnknownCreate(connection, markResearchTaskInterrupted(
           finalTask,
           '连接已结束，但没有收到研究完成事件。可以继续接收已有任务，或在没有会话时重新发起。',
-        ))
+        )))
       }
     } catch (error) {
       if (!connectionIsCurrent(connection)) return
@@ -665,9 +681,8 @@ export function useResearch(viewerId: ResearchViewerId | null) {
         task,
         isAuthError ? '请先登录后再使用研究助手 🔐' : ERROR_MESSAGE,
       )
-      putTask(connection.taskKey, isAuthError
-        ? { ...interrupted, recovery: 'none' }
-        : interrupted)
+      const ownerBound = isAuthError ? { ...interrupted, recovery: 'none' as const } : interrupted
+      putTask(connection.taskKey, preserveUnknownCreate(connection, ownerBound))
     }
   }, [attachSessionId, connectionIsCurrent, currentConnectionTask, putTask, refreshCompletedTask])
 
@@ -733,7 +748,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
       } catch {
         if (connectionIsCurrent(connection)) {
           const current = currentConnectionTask(connection)
-          if (current) putTask(connection.taskKey, markResearchTaskInterrupted(current, ERROR_MESSAGE))
+          if (current) putTask(connection.taskKey, preserveUnknownCreate(connection, markResearchTaskInterrupted(current, ERROR_MESSAGE)))
         }
       } finally {
         if (connectionRef.current === connection) {
@@ -912,6 +927,8 @@ export function useResearch(viewerId: ResearchViewerId | null) {
   const handleRetry = useCallback(async () => {
     const task = activeTask
     if (!task || (task.phase !== 'error' && task.phase !== 'cancelled') || task.recovery !== 'retry' || viewerId === null) return
+    // An unanswered create POST may already have invoked a paid provider.
+    if (loadPendingCreate(viewerId)) return
     const next = createResearchTask(
       `research-${Date.now()}-${++taskSequenceRef.current}`,
       task.query,
