@@ -336,7 +336,9 @@ export async function startChatGPTSubscriptionConnect(connectionId?: string): Pr
     throw new TypeError('Invalid ChatGPT authorization handoff response')
   }
   const handoff = new URL(value.handoff_url)
-  const isKnownLoopback = handoff.protocol === 'http:' &&
+  const isKnownLoopback = typeof window !== 'undefined' &&
+    window.location.protocol === 'http:' &&
+    handoff.protocol === 'http:' &&
     handoff.hostname === '127.0.0.1' && handoff.port === '9527'
   // Hosted handoff must be same-origin HTTPS, never a caller-supplied site or subdomain.
   const isHostedSameOrigin = typeof window !== 'undefined' &&
