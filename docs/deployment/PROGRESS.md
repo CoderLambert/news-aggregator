@@ -215,3 +215,43 @@ bf24244七文件提交，隔离83PASS/bash/mock/compile/diff0；/tmp/newshub-g2-
 ## NH-PUB-08 首次High：目标删除P2整改
 
 完整七源（含三新文件）独立High无P0/P1，但1P2 BLOCK：target_connection SET_NULL后callback跳过target分支并可重建已删除的重授权连接，交换前及保存前均有此竞态。pre/post七physicalhash及combined diff一致b1a9e39052709061e5f7bcedc157b6c37e2de96c7e5cbbe90b2d3e5dc53132a1，/tmp/newshub-nhpub08-review-{pre,post}.json。复用真实create target_attempt_generation>=1与new=0标识，exchange前和最终事务均拒绝positive generation且targetID为空；补删除在交换前0exchange/交换后1exchange但无新连接/凭据保存两回归。91PASS只源码证据，NH08仍DOING，不称REVIEWED。
+
+
+## G2 第二次实际运行：seed已通过，HTTP阶段失败
+
+runner bf24244/app b2，/tmp/newshub-g2-runtime-303i52_5/，22秒exit1。先前preflight通用模板读取Nginx不存在的Config.User导致exit1，不是镜像缺失；主控exact.Id/env-i检查0及corrected preflight匹配冻结镜像，未pull替换。实际setup/seed均PASS，HTTP固定redirectPASS/Location准确；http-browser.json安全记录g2.http_api/AcceptanceError/FAIL/cleanupPASS，browser账户/后续TLS/SSE尚NOT_RUN。静态定位G2引入umask077但ACME/legacy/fakeSSE公开fixture仍0700/0600，新增R4精确public模式与脱敏HTTP状态观察，小独立networknone Nginx probe证据后High再执行完整验收，绝不放宽private根/凭据/密钥。
+
+
+## NH08 R1闭环与关闭模式凭据读取P2
+
+b79fd41仅两源positive-target-generation双fence，真实red2FAIL→fixed2PASS、隔离93PASS/3既有warnings/checkcompile0；/tmp/newshub-nh08r1-final.wpgpowd4/ 最终archive在输出前排除DB/env。High原删除目标P2closed，pre/post两hash/diff03569b79afe1aaeeda174871348ae241d3ad5f9486daacc3a4baa05ef9ce979b一致。补充核查发现关闭模式disconnect全字段SELECT/read encrypted tokens（未decrypt/network）及connect提前get_user_connection，同属1P2；R2只guard before SELECT与精确cleanup字段投影、SQL回归，NH08总体BLOCK/DOING，不重复无变化diff审查。
+
+
+## NH08 R2全部闭环与无费用翻译恢复源码准备
+
+a01e243三源提交，SQL投影有效red6FAIL→fixed6PASS、全部99PASS/三既有warnings/migrations/compile/diff0；最终严格archive /tmp/newshub-nh08r2-green.f2vl_p8o/。独立High剩P2closed、无新增P0/P1/P2，pre/post3hash/diff cca9030db11401cc36e120852a95c6e232f178dd76bf235c99eb0f1118f4b349一致。NH08已知安全骨架REVIEWED；正式website身份/plan/真实OAuth均EXTERNAL_BLOCKED/NOT_RUN。允许ADR026无费用翻译恢复仅源码准备（base a01），不假称G2整体通过，不替换冻结G2 app/runner。R4公开fixture精确权限88单测/bash/mock/compile0，实际独立networknone Nginx单CID403→200/bodyexact/cleanupPASS证实umask根因，/tmp/newshub-g2-public-modes-final-zcoqtly4/nginx-mode-probe-actual.json；R4五源冻结High待审，完整G2仍FAIL/browserNOT_RUN。
+
+
+## G2 R4 High闭环，第三次固定候选完整验收
+
+928c93b五deploy源提交，88单测/bash/mock/compile/diff0，单Nginx真实403→200/body精确与cleanupPASS。独立High无P0/P1/P2，pre/post五hash/diff767d27ed77fb0a40fa1293dae6e1b4745e1dc4c5d012348b550feece22170f71一致；/tmp/newshub-g2-public-r4-{pre,post}.json。仅允许此次新R4 runner928c93b一次实际完整重试，app仍b2固定镜像；source archive含已审NH08但容器仍旧b2，因此app migrate仍28，hostrunner只内联fixture/Playwright不把NH08/0030注入image。G2整体未通过前保持DOING。无费用翻译恢复只隔离源码准备，未实施网站模型。
+
+
+## G2 R4真实验收推进到A注册，logout网络屏障待修
+
+固定928runner/b2image第三次实际exit1/26.571s，/tmp/newshub-g2-runtime-r4-4c3948f0764d/final-runtime-results.json。setup/seed/34前置HTTP/TLS/CA/SAN/Host/静态/Mermaid/匿名/privateUI及A真实SPA邀请注册+安全cookie/CSRF旋转PASS。g2.account_browser AcceptanceError，B/owner/trueIP/SSE后续NOT_RUN；report及private截图保留，精确project/container/network/volume无残留cleanupPASS。主控已检视脱敏截图，UI匿名但不能凭此宣称业务logout缺陷；代码_logout_ui只等头像detach，而AuthContext先清本地身份后awaitHTTP，立即GETme/cookie可竞态。签发R5真实POST response.finished屏障与安全固定subcheck，原所有服务Cookie匿名断言保持，不改b2业务源或放宽测试。
+
+
+## 无费用恢复设计完善（未实现验收）
+
+Luna实施前指出两处schema缺口，主控已加独立connection_generation及shared_lease_task_id/token（非OAuth凭据）快照、cancel expected generation/旧gen409。设计独立High仍2P2：guard必须覆盖refresh等待/discovery/token每个IO；旧worker finally不得撤销过期未开始→queued→新run沿用sharedtoken的租约。单合同pre/post哈希2e651d6643722630633d4dde9b3c2ab192c15c16212e76833235621ed9b982b6一致，/tmp/newshub-subscription-recovery-design-{pre,post}.json，仅读a01参考/零tests。这是designBLOCK不是code失败。已扩可选guard贯穿scope并freeze旧run first-write CAS cleanup，两真实负例必测；0030草稿未提交，暂停实现直到修订完整合同，绝不加入费用/日额度/Token预算。
+
+
+## G2 R5 复审闭环并启动实际复验
+
+62cd633f9b2e1811999dd677c9b212f6835b013a仅提交三项deploy源：logout同源POST响应完成后才检查服务端退出，固定安全失败诊断。97项隔离测试和compile/diff通过，独立High无P0/P1/P2；三文件physical hashes与/tmp/newshub-g2-auth-r5-pre.json一致（当前git diff输出格式散列不同，不以该值宣称原diff散列相同）。已派发一次固定app b2的真实R5 runtime，结果待回传；G2保持DOING，生产未上线。恢复源码工作树仍有草稿，未测试/未审查，不计完成。当前优先关闭域名验收，取消费用/预算功能仍有效。
+
+
+## 2026-10-10 用户要求提交与新窗口交接
+
+R5预检/过滤archive完成但smoke尚未启动时收到交接要求，runtime NOT_RUN，未创建Docker/browser资源；/tmp/newshub-g2-runtime-r5-p4qrdt65/。六backend源作为独立WIP检查点 c5e04222854a21c58b7e2b393703ecd164033188提交；AST语法六项PASS/scoped diff-check0，恢复tests/migrationcheck/代码High均NOT_RUN，明确不能发布。已知refresh guard链/old finally shared lease/cancel generation上界缺口详见HANDOFF-2026-10-10.md。用户DB和既有用户未跟踪文件保留未暂存；未push/上线。
