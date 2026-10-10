@@ -20,10 +20,11 @@ beforeEach(() => {
 describe('MarkdownContent Mermaid rendering', () => {
   it('keeps the source visible and announces a failed diagram render', async () => {
     mermaidMock.render.mockRejectedValueOnce(new Error('invalid diagram syntax'))
-    render(<MarkdownContent content={'```mermaid\ngraph TD\n  A --> B\n```'} />)
+    const { container } = render(<MarkdownContent content={'```mermaid\ngraph TD\n  A --> B\n```'} />)
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Mermaid 图表渲染失败'))
     expect(screen.getByRole('alert')).toHaveTextContent('A --> B')
+    expect(container.querySelector('.newshub-mermaid')).toBeNull()
   })
 
   it('sanitizes Mermaid SVG output with the real DOMPurify package', async () => {
@@ -46,6 +47,7 @@ describe('MarkdownContent Mermaid rendering', () => {
 
     await waitFor(() => expect(container.querySelector('[role="img"] svg path')?.getAttribute('d')).toBe('M0 0 L1 1'))
 
+    expect(container.querySelector('[role="img"]')).toHaveClass('newshub-mermaid')
     const svg = container.querySelector('[role="img"] svg')
     expect(svg).not.toBeNull()
     const forbiddenTags = new Set(['foreignobject', 'script', 'iframe', 'object', 'embed', 'style', 'a', 'image', 'use', 'img'])
@@ -74,6 +76,7 @@ describe('MarkdownContent Mermaid rendering', () => {
       expect(mermaidMock.render).toHaveBeenCalledTimes(1)
       expect(container.querySelector('[role="img"] svg text')?.textContent).toBe('diagram')
     })
+    expect(container.querySelector('[role="img"]')).toHaveClass('newshub-mermaid')
     const config = mermaidMock.initialize.mock.calls.at(-1)?.[0]
     expect(config).toMatchObject({
       securityLevel: 'strict',

@@ -105,7 +105,7 @@ export default function MermaidBlock({ code }: { code: string }) {
     <div
       role="img"
       aria-label="Mermaid 图表"
-      className="my-4 flex justify-center overflow-x-auto rounded-md border border-border bg-card p-4"
+      className="newshub-mermaid my-4 flex justify-center overflow-x-auto rounded-md border border-border bg-card p-4"
       dangerouslySetInnerHTML={{ __html: currentRender.html }}
     />
   )
