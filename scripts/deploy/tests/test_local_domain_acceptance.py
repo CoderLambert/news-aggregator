@@ -1,8 +1,11 @@
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
+import pytest
 
 
 PROJECT = Path(__file__).resolve().parents[3]
@@ -35,6 +38,45 @@ def test_forwarded_header_spoof_uses_non_exempt_real_csrf_path_and_checks_secure
     assert kwargs['headers'] == acceptance.FORWARDED_SPOOF_HEADERS
     assert checks['real_django_secure_request'].startswith('HTTP 200 on non-exempt CSRF path')
     assert checks['real_client_address_observation'].startswith('NOT_RUN:')
+
+
+@pytest.mark.parametrize(('scheme', 'exit_code'), [('http', 52), ('https', 52), ('https', 56)])
+def test_closed_without_http_response_accepts_only_expected_empty_status(scheme, exit_code):
+    result = subprocess.CompletedProcess(
+        ['curl'], exit_code, f'{acceptance.STATUS_MARKER}000',
+        'curl: connection closed without an HTTP response',
+    )
+    assert acceptance._curl_closed_without_http_response(result, scheme=scheme)
+
+
+@pytest.mark.parametrize(('scheme', 'exit_code'), [
+    ('http', 56),
+    ('http', 35), ('http', 60), ('http', 28), ('http', 7),
+    ('https', 35), ('https', 60), ('https', 28), ('https', 7),
+])
+def test_closed_without_http_response_rejects_unapproved_curl_exit_codes(scheme, exit_code):
+    result = subprocess.CompletedProcess(['curl'], exit_code, f'{acceptance.STATUS_MARKER}000', '')
+    assert not acceptance._curl_closed_without_http_response(result, scheme=scheme)
+
+
+@pytest.mark.parametrize(('scheme', 'exit_code'), [('http', 52), ('https', 52), ('https', 56)])
+def test_closed_without_http_response_rejects_output_with_http_status_line(scheme, exit_code):
+    result = subprocess.CompletedProcess(
+        ['curl'], exit_code,
+        f'HTTP/1.1 444 No Response\n\n{acceptance.STATUS_MARKER}000',
+        '',
+    )
+    assert not acceptance._curl_closed_without_http_response(result, scheme=scheme)
+
+
+@pytest.mark.parametrize(('status', 'body'), [(200, 'ok'), (403, 'forbidden')])
+def test_closed_without_http_response_rejects_normal_http_responses(status, body):
+    result = subprocess.CompletedProcess(
+        ['curl'], 0,
+        f'HTTP/1.1 {status} Response\n\n{body}{acceptance.STATUS_MARKER}{status}',
+        '',
+    )
+    assert not acceptance._curl_closed_without_http_response(result, scheme='https')
 
 
 def _run_sse_with_headers(observed_headers):

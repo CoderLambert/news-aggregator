@@ -8,6 +8,7 @@ import importlib.metadata
 import ipaddress
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -93,6 +94,19 @@ def _curl(args: argparse.Namespace, path: str, **kwargs) -> tuple[int, str, subp
     if result.returncode != 0 and status != 0:
         raise AcceptanceError(f'curl request failed (exit {result.returncode})')
     return status, body, result
+
+
+def _curl_closed_without_http_response(result: subprocess.CompletedProcess, *, scheme: str) -> bool:
+    """Accept only the expected connection-close curl codes with no HTTP response."""
+    allowed_exit_codes = {'http': {52}, 'https': {52, 56}}
+    if result.returncode not in allowed_exit_codes.get(scheme, set()):
+        return False
+    output_body, marker, status = result.stdout.rpartition(STATUS_MARKER)
+    if not marker or status != '000' or output_body:
+        return False
+    if re.search(r'(?m)^HTTP/\d(?:\.\d)?\s+\d{3}\b', result.stdout):
+        return False
+    return True
 
 
 def _headers(path: Path) -> dict[str, list[str]]:
@@ -276,8 +290,10 @@ def _check_http_api(args: argparse.Namespace, checks: dict[str, str], work_dir: 
         text=True,
         check=False,
     )
-    status_output = unknown_host.stdout.rpartition(STATUS_MARKER)[2]
-    _require(unknown_host.returncode == 52 and status_output == '000', 'unknown HTTPS Host was not closed with 444')
+    _require(
+        _curl_closed_without_http_response(unknown_host, scheme='https'),
+        'unknown HTTPS Host was not closed with 444',
+    )
     checks['unknown_host'] = 'connection closed by Nginx 444'
 
     unknown_http_command = _curl_command(
@@ -292,9 +308,8 @@ def _check_http_api(args: argparse.Namespace, checks: dict[str, str], work_dir: 
         text=True,
         check=False,
     )
-    unknown_http_status = unknown_http.stdout.rpartition(STATUS_MARKER)[2]
     _require(
-        unknown_http.returncode == 52 and unknown_http_status == '000',
+        _curl_closed_without_http_response(unknown_http, scheme='http'),
         'unknown HTTP Host was not closed with 444',
     )
     checks['unknown_http_host'] = 'connection closed by Nginx 444'
