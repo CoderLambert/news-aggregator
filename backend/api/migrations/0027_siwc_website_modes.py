@@ -27,4 +27,14 @@ class Migration(migrations.Migration):
             name='token_auth_method',
             field=models.CharField(default='none', max_length=32),
         ),
+        migrations.AddField(
+            model_name='chatgptauthattempt',
+            name='requested_scopes',
+            field=models.TextField(blank=True, default=''),
+        ),
+        migrations.AddField(
+            model_name='chatgptauthattempt',
+            name='oauth_resource',
+            field=models.CharField(blank=True, default='', max_length=255),
+        ),
     ]
