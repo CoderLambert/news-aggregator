@@ -104,3 +104,9 @@
 - R1 High复审仅新增旧chunk路由P1，其余4P1/3P2静态闭环；posthash23文件/HEAD/diff均相同。domain_runtime两assets块显式root /srv/newshub、仍全站current；主Agent真实Nginx启动检出原regex花括号语法错误（独立nginx-t exit1），Luna仅引用两regex后实际nginx-t exit0、模板4PASS/diff-check0。
 - Primary真实静态fixture第一次仅两release文件/hash通过，Nginx启动失败（container exit1/exec137，无OOM事件）；自有资源清理PASS，失败报告/tmp/newshub-static-runtime-4u529uwg/report.json，不冒充通过。修复后用原production模板、pinned Nginx、自签SAN信任cert且无TLS绕过：A/B源码自身diff/hash、umask077、异UIDworker101/导出者1000、HTTPS首页/旧新chunk200且immutable、缺asset404无immutable、静态切回A旧新chunk仍200、cleanup全PASS；报告/tmp/newshub-static-runtime-r2-asp3ztzb/report.json，template SHA256 bab3dddbbe5ba10220d58b8c9c444c5e98c107b33831bf5c4479fedada54a7ed。
 - 前端0df4b1e已提交源码独立archive复验（临时HOME、仅symlink已有node_modules、无真实env）：typecheck/lint/test/build全0，63files/423tests PASS；日志/tmp/newshub-g1-frontend-uh95b72m。正式production app/volume/browser仍NOT_RUN，不能以静态fixture替代；下一步R2增量High及新SHA镜像运行验收。
+
+## R2增量审核与非hash资源实际验收
+- High对22214b3增量静态审核无P0/P1，剩余P2为generic static regex抢先匹配非hashassets；仅排除assets/，保持hash规则优先，不使用^~。前后6文件/HEAD/diff一致，diff SHA256 41d4f02b0d3db70e19811b6059ab96a69a9ff2d86bea0773b8e570136cf40732。
+- 正式模板实际隔离Nginx、network-none、临时SAN证书与curl CA校验：共享目录独有SVG/font200 no-cache、hashJS200 immutable、missing两类404无immutable、nginx-t与清理全部PASS。报告/tmp/newshub-static-nonhash-2y77fckr/report.json，template SHA256 436b67d1b1b143f9bd70d6b69dc32d21d68056659856e5f81f0174556f603828。
+- 22214b3隔离后端全量退出0/460PASS，日志/tmp/newshub-g1-r2-integrated-stumdn6b/pytest.log。生产应用/卷恢复/完整浏览器仍待镜像，G1整体不能标PASS。
+- 独立90秒HOME位置cache probe在apt阶段超时124，未到pip，无命中或失配证明；仅自身Dockerfile临时变动已全部撤回，无probe image。先前--cache-from错误只是registry importer授权拒绝，不能证明本地层不存在。日志/tmp/newshub-g1-build-cache-probe.log。原正式构建继续最终90分钟边界。

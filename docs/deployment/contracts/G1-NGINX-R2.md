@@ -11,3 +11,5 @@
 
 ## 实际语法检查补充
 主Agent实际nginx -t退出1，line76 unknown directive "8}-[0-9A-Fa-f]"；原UUID与hash资源regex的未引用花括号被Nginx当配置delimiter。两条含量词花括号的完整regex必须用引号包围，pattern语义不变。模板测试block parser须跳过引号内量词，真实独立network-none Nginx+临时SAN证书检查必需退出0，不能只以pytest代替语法有效。
+
+R2 High无P0/P1，另发现generic static regex抢先匹配非hash/assets。冻结其negative lookahead排除api/和assets/（^/(?!api/|assets/)），不把assets prefix改^~（否则跳过hash immutable规则）。新增精确模板断言，真实共享目录独有非hashSVG/font200/no-cache、missing404/hash200immutable由主Agent验证。

@@ -111,7 +111,8 @@ def test_production_hosts_redirects_unknown_hosts_and_static_routing():
     assert 'add_header Cache-Control "no-cache";' in regular_assets
     assert 'immutable' not in regular_assets
     assert 'try_files $uri $uri/ /index.html;' in _block(https_server, 'location / {')
-    assert 'location ~* ^/(?!api/)' in https_server
+    assert 'location ~* ^/(?!api/|assets/).+\\.' in https_server
+    assert 'location ^~ /assets/' not in https_server
     assert 'location ~* "^/assets/' in https_server
 
     hashed_assets = _block(https_server, 'location ~* "^/assets/')

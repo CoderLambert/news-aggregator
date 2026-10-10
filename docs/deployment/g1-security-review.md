@@ -22,3 +22,6 @@
 候选0df4b1e3909da96caa54cbc32af1ecd1472bd0d7，相对已审d220f00。原4P1/3P2静态整改闭环，但新增P1：每release/assets真目录后Nginx仍继承current root，旧chunk HTTP404。High仅复审变化及调用链，仍只读；前后23项文件hash/HEAD/diff均相同（37750611d20e163591ccc31c52f1d7f5ad251a3e37829368767fe81bf95c53ac）。合同G1-NGINX-R2要求两个assets块显式shared root。
 
 主Agent实际隔离Nginx另检出未引用regex花括号的语法问题：nginx -t退出1，line76 unknown directive；Luna已引用两个regex，真实nginx -t退出0。修复后的真实scratch静态fixture验收报告/tmp/newshub-static-runtime-r2-asp3ztzb/report.json：umask077导出A/B、自身文件/hash保留、导出者UID1000和Nginx worker UID101、正式模板TLS证书校验首页/旧新chunk200、缺chunk404无immutable、静态切回A后二版chunk仍200、精确资源清理均PASS。此项仅静态fixture，不替代production app/DB/rollback CLI或完整浏览器验收。
+
+## R2增量复审与P2验证
+High对22214b3及变化调用链未发现P0/P1。只读核对前后6文件/HEAD/diff相同（41d4f02b0d3db70e19811b6059ab96a69a9ff2d86bea0773b8e570136cf40732）。P2非hash共享assets被generic regex遮蔽已作最小排除修复；实际隔离Nginx/TLS验证共享SVG、字体200/no-cache，hashJS200/immutable，两类missing404无immutable，nginx-t与清理PASS，报告/tmp/newshub-static-nonhash-2y77fckr/report.json。完整G1运行门槛仍未结束。
