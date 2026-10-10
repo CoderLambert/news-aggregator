@@ -164,3 +164,9 @@
 账户R1实施日志补充：archive源f7419d705f0d68f6b36b59b6e6341ec66538b746，仅overlay三owned文件；临时目录/tmp/newshub-g2-account-review.Ots2mT，组合日志/tmp/newshub-g2-account-review-acceptance.log，单独迁移日志/tmp/newshub-g2-account-review-migration-verified.log。最终整合8be4f9d的主控616用例独立复核已通过。
 
 G3在实施前已冻结ADR-024：单SSE record按完整UTF8 wire精确限制16KiB，text增量2048bytes分片，terminal只含状态，完整私有结果由owner GET读取；解决64KiB翻译结果与事件上限冲突。此项仅合同设计，G3仍未实施。G2域名harness源码准备继续，实际运行等High/固定镜像。
+
+## G2 Frontend P2 修复与增量 High 闭环
+
+源提交b2e982d1848a768c7ff03bc77dcb0557883f24da，只AuthContext与races两文件；generation layout ref捕获/提交检查、最新refresh ref收尾，保留旧login epoch隔离。可靠分turn baseline red9PASS/1FAIL，/tmp/newshub-g2-front-review-repro-confirmed-red.log；整改15定向PASS/typecheck/lint0。独立High原P2closed、无新增P0/P1/P2，pre/post两physicalhash与scoped diff一致，摘要ab708b1f88d452e2ec40d9db325fe8e553f457db0d5c41f5f91b9cf8a97520a7，/tmp/newshub-g2-front-review-r1-{pre,post}.json。
+
+主控新归档b2e982d（exclude用户DB/env，独立HOME）前端65文件454PASS/build0，/tmp/newshub-g2-front-r1-integrated-4cxjaflg/{test-run.log,build.log,report.json}。后端与先前8be4f9d的616PASS源完全相同，不重复后端全套。G2源码审查门槛已闭环；G2整体仍DOING：本地域名harness源码准备及真实账户browser/限速/owner验收尚未完成。G3仍未实施。
