@@ -113,7 +113,7 @@ export async function cancelResearchRun(sessionId: string, runId: string): Promi
 export async function resumeQueuedResearchRun(sessionId: string, runId: string): Promise<void> {
   const response: unknown = await resumeQueuedResearchRunRequest(sessionId, runId)
   if (!isRecord(response) || response.run_id !== runId ||
-      (response.status !== 'queued' && response.status !== 'running' && response.status !== 'succeeded')) {
+      !['queued', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted'].includes(String(response.status))) {
     throw new TypeError('Invalid queued research recovery result')
   }
 }
