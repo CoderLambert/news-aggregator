@@ -8,3 +8,8 @@
 - Negative tests：恶意style/script/foreignObject/link/image/use/href仍无注入/bind；CSS不使用diagram里任意themeCSS/style/userclass作为外部selector；超text/edge限制不放松；CSS只在wrapper生效；不为通过测试强行mockpaint/browser。
 - Forbidden：不降低sanitizer/strict、不新增依赖/iframe/允许inline styles、不真实API/域名系统修改/生产/用户DB，不commit/派生，两次失败交Sol。
 - Return format：paths/diff/HEAD、定向命令exit/test数、保留安全策略、真实browser NOT_RUN及任何尺寸问题，不能把JSDOM通过当图表可读PASS。
+
+## 实际浏览器第二项根因及R3
+主控真实Chromium修复后node244/240/255、text17/24/39，危险元素/inline style0，配色正确；但截图/tmp/newshub-mermaid-component-r2.png显示文字从节点中心开始向右溢出，图形被放大到512px高度。原Mermaid内置style同时承载text-anchor与intrinsic max-width，不能仅修颜色就PASS。
+Base c8de60835ab72fb2949664eab52004637537a6b2；相同3owned文件，扩充renderer ownership为以下**数字attribute规范化**，不动sanitizer配置。冻结CSS text/tspan新增text-anchor:middle；清洗后用独立template解析safeSvg，仅取svg的viewBox四个分隔数字，必须全部finite且width/height>0且<=10000，才把root width/height设置为对应正数十进制字符串（允许上取整），避免原width100%无限放大；无/坏viewBox不复制其他属性、不新增style，仅保留已清洗SVG。所有数字由Number验证，不拼任意字符串CSS，不允许危险tag/attr恢复；仍max-width100%/max-height32rem。序列化template的已清洗内容，其余markup安全断言保留。
+新增定向测试有效viewBox尺寸成为数字width/height、坏数/Infinity/负尺寸/超10000/缺viewBox不normalize且无unsafe attr/style；CSS规则静态可信。真实browser由主控检查文字bbox在对应node shape内、label完整可见、root按viewBox正常尺寸、XSS限制不变。这是第二次有证据修复，若仍失败必须主控定位，不无限重试。
