@@ -66,6 +66,12 @@ wildcard CORS, insecure cookies, or mismatched HTTPS origins are detected.
 Leave `CHATGPT_SIWC_MODE=local` and approval flag `0` on all existing local
 installations. Local callback and dynamic registration are unchanged.
 
+**For a public site before approval**, configure `CHATGPT_SIWC_MODE=website`
+with `CHATGPT_WEBSITE_PARTNER_APPROVED=0`: the public status page shows
+unavailable and both authorization and plan inference remain disabled.
+Do **not** expose `local` SIWC through a public website merely because
+Nginx has been configured.
+
 ## Nginx
 
 Add to the **existing** `server_name news.lambert.host` HTTPS server.
@@ -106,6 +112,13 @@ the popup's one-time POST handoff and its HttpOnly callback cookie work.
 - Connection queries and model use are scoped by Django user and OAuth mode.
   Refresh uses the stored user's own token; `generation` and database
   refresh leases remain unchanged.
+- Website chat history uses a separate user/news-keyed table. Existing local
+  article-wide `ChatSession` data is preserved and is not exposed on the
+  website. Website chat without an active own subscription is rejected before
+  a server-paid API fallback can run.
+- In hosted mode one verified ChatGPT issuer/client/subject may be linked to
+  only one website user; sharing the same plan across independent site accounts
+  is rejected.
 - Website-mode auth, refresh and revocation use the provisioned token-client
   method; there is **no fallback** to API keys on the SIWC request path.
 - This feature flag is an **operator declaration**, not proof of approval.
