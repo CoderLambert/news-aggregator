@@ -701,6 +701,119 @@ def test_g2_failure_report_redacts_exception_values_from_stdout_and_json(tmp_pat
     }
 
 
+@pytest.mark.parametrize(('child_error_type', 'reported_error_type'), [
+    ('ImproperlyConfigured', 'ImproperlyConfigured'),
+    ('opaque-child-error-private-marker', 'FixtureExecutionError'),
+])
+def test_g2_seed_failure_persists_only_safe_child_error_type(
+    tmp_path, capsys, child_error_type, reported_error_type,
+):
+    private_root = tmp_path / 'private'
+    private_root.mkdir(mode=0o700)
+    private_root.chmod(0o700)
+    report_root = tmp_path / 'reports'
+    report_root.mkdir(mode=0o700)
+    report_root.chmod(0o700)
+    bundle_path = private_root / 'fixtures.json'
+    bundle = acceptance._fixtures.create_bundle(bundle_path)
+    compose_file = private_root / 'compose.yaml'
+    compose_file.write_text('services: {}\n', encoding='utf-8')
+    compose_env = private_root / 'compose.env'
+    compose_env.write_text('SYNTHETIC=1\n', encoding='utf-8')
+    ca_cert = report_root / 'ca.crt'
+    ca_cert.write_text('synthetic CA\n', encoding='utf-8')
+    for path in (compose_file, compose_env, ca_cert):
+        path.chmod(0o600)
+    report_path = report_root / 'seed.json'
+    state_path = private_root / 'state.json'
+    secret = bundle['invitations']['a']['token']
+    argv = [
+        '--gateway-ip', '172.28.0.2', '--ca-cert', str(ca_cert),
+        '--work-dir', str(report_root), '--stage', 'g2', '--report', str(report_path),
+        '--fixture-phase', 'seed', '--fixture-bundle', str(bundle_path),
+        '--fixture-state', str(state_path),
+        '--compose-project', 'newshub-local-g2-123-0123456789abcdef',
+        '--compose-file', str(compose_file), '--compose-env', str(compose_env),
+        '--gateway-container-id', GATEWAY_CONTAINER_ID,
+        '--app-image-id', APP_IMAGE_ID, '--gateway-image-id', GATEWAY_IMAGE_ID,
+        '--private-root', str(private_root),
+    ]
+    child_failure = json.dumps({'ok': False, 'error_type': child_error_type}) + '\n'
+    child_result = subprocess.CompletedProcess(
+        ['docker', 'exec'], 1, child_failure, f'private traceback token={secret}',
+    )
+    with (
+        patch.object(acceptance, '_inspect_g2_parents', return_value={
+            'app_container_id': APP_CONTAINER_ID,
+            'gateway_container_id': GATEWAY_CONTAINER_ID,
+            'gateway_network_id': NETWORK_ID,
+            'gateway_ip': '172.28.0.2',
+        }),
+        patch.object(acceptance.subprocess, 'run', return_value=child_result),
+    ):
+        assert acceptance.main(argv) == 1
+
+    stdout = capsys.readouterr().out
+    report = report_path.read_text(encoding='utf-8')
+    assert stat.S_IMODE(report_path.stat().st_mode) == 0o600
+    assert secret not in stdout and secret not in report
+    if child_error_type != reported_error_type:
+        assert child_error_type not in stdout and child_error_type not in report
+    payload = json.loads(report)
+    assert payload['status'] == 'FAIL'
+    assert payload['failure'] == {
+        'stage': 'g2', 'check': 'g2.fixture_seed',
+        'exception_type': reported_error_type,
+        'child_exception_type': reported_error_type,
+    }
+    private_stderr = list(private_root.glob('fixture-seed-*.stderr'))
+    assert len(private_stderr) == 1
+    assert stat.S_IMODE(private_stderr[0].stat().st_mode) == 0o600
+    assert secret in private_stderr[0].read_text(encoding='utf-8')
+
+
+def test_g2_parent_identity_failure_report_is_safe_and_persistent(tmp_path, capsys):
+    private_root = tmp_path / 'private'
+    private_root.mkdir(mode=0o700)
+    private_root.chmod(0o700)
+    report_root = tmp_path / 'reports'
+    report_root.mkdir(mode=0o700)
+    report_root.chmod(0o700)
+    compose_file = private_root / 'compose.yaml'
+    compose_file.write_text('services: {}\n', encoding='utf-8')
+    compose_env = private_root / 'compose.env'
+    compose_env.write_text('SYNTHETIC=1\n', encoding='utf-8')
+    ca_cert = report_root / 'ca.crt'
+    ca_cert.write_text('synthetic CA\n', encoding='utf-8')
+    for path in (compose_file, compose_env, ca_cert):
+        path.chmod(0o600)
+    report_path = report_root / 'setup.json'
+    secret = 'private-parent-identity-marker'
+    argv = [
+        '--gateway-ip', '172.28.0.2', '--ca-cert', str(ca_cert),
+        '--work-dir', str(report_root), '--stage', 'g2', '--report', str(report_path),
+        '--compose-project', 'newshub-local-g2-123-0123456789abcdef',
+        '--compose-file', str(compose_file), '--compose-env', str(compose_env),
+        '--app-image-id', APP_IMAGE_ID, '--gateway-image-id', GATEWAY_IMAGE_ID,
+        '--private-root', str(private_root), '--check-parents',
+    ]
+    with patch.object(
+        acceptance, '_inspect_g2_parents',
+        side_effect=acceptance.AcceptanceError(f'private inspect detail {secret}'),
+    ):
+        assert acceptance.main(argv) == 1
+
+    stdout = capsys.readouterr().out
+    report = report_path.read_text(encoding='utf-8')
+    assert stat.S_IMODE(report_path.stat().st_mode) == 0o600
+    assert secret not in stdout and secret not in report
+    payload = json.loads(report)
+    assert payload['failure'] == {
+        'stage': 'g2', 'check': 'g2.parent_identity',
+        'exception_type': 'AcceptanceError',
+    }
+
+
 def test_g2_failure_page_is_cleared_or_closed_before_a_screenshot():
     selectors = ('#auth-username', '#auth-email', '#auth-password', '#auth-invite-token')
 

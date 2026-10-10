@@ -54,6 +54,51 @@ class CleanupAcceptanceError(AcceptanceError):
     cleanup_status = 'FAIL'
 
 
+SAFE_FIXTURE_EXCEPTION_TYPES = frozenset({
+    'ImproperlyConfigured', 'OperationalError', 'IntegrityError',
+    'ValueError', 'TypeError', 'KeyError', 'FixtureExecutionError',
+    'AcceptanceError', 'OSError', 'JSONDecodeError',
+})
+
+
+class FixtureProgramError(AcceptanceError):
+    """Safe summary of a failed in-container fixture program."""
+
+    def __init__(self, safe_exception_type: str):
+        self.safe_exception_type = (
+            safe_exception_type
+            if isinstance(safe_exception_type, str)
+            and safe_exception_type in SAFE_FIXTURE_EXCEPTION_TYPES
+            else 'FixtureExecutionError'
+        )
+        super().__init__('private G2 fixture program failed')
+
+
+def _safe_exception_type(exc: BaseException) -> str:
+    supplied = getattr(exc, 'safe_exception_type', None)
+    if isinstance(supplied, str) and supplied in SAFE_FIXTURE_EXCEPTION_TYPES:
+        return supplied
+    name = type(exc).__name__
+    return name if name in SAFE_FIXTURE_EXCEPTION_TYPES else 'AcceptanceError'
+
+
+def _g2_failure_report(check: str, exc: BaseException) -> dict:
+    failure = {
+        'stage': 'g2', 'check': check,
+        'exception_type': _safe_exception_type(exc),
+    }
+    child_type = getattr(exc, 'safe_exception_type', None)
+    if isinstance(child_type, str) and child_type in SAFE_FIXTURE_EXCEPTION_TYPES:
+        failure['child_exception_type'] = child_type
+    return {'stage': 'g2', 'status': 'FAIL', 'failure': failure}
+
+
+def _write_safe_report(path: Path | None, payload: dict) -> None:
+    if path is None:
+        raise AcceptanceError('G2 setup and seed reports are required')
+    _private_write(path, json.dumps(payload, sort_keys=True, separators=(',', ':')) + '\n')
+
+
 def _require(condition: bool, message: str) -> None:
     if not condition:
         raise AcceptanceError(message)
@@ -305,12 +350,23 @@ def _run_fixture_program(args: argparse.Namespace, bundle: dict, phase: str) -> 
     if result.returncode != 0:
         # The source fed on stdin contains private fixture material. Do not
         # include Docker stdout/stderr in the exception, report, or terminal.
-        raise AcceptanceError(f'private G2 fixture phase {phase} failed (exit {result.returncode})')
+        try:
+            failure = json.loads(result.stdout)
+        except (TypeError, json.JSONDecodeError):
+            failure = None
+        safe_type = (
+            failure.get('error_type')
+            if isinstance(failure, dict)
+            and set(failure) == {'ok', 'error_type'}
+            and failure.get('ok') is False
+            else 'FixtureExecutionError'
+        )
+        raise FixtureProgramError(safe_type)
     try:
-        payload = json.loads((args.private_root / f'fixture-{phase}-{nonce}.stdout').read_text(encoding='utf-8'))
-    except json.JSONDecodeError as exc:
+        payload = json.loads(result.stdout)
+    except (TypeError, json.JSONDecodeError) as exc:
         raise AcceptanceError(f'private G2 fixture phase {phase} returned invalid JSON') from exc
-    _require(payload.get('ok') is True, f'private G2 fixture phase {phase} was refused')
+    _require(isinstance(payload, dict) and payload.get('ok') is True, f'private G2 fixture phase {phase} was refused')
     return payload
 
 
@@ -1859,6 +1915,25 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                 parser.error('G2 seed requires the previously inspected gateway container ID')
         elif not args.check_parents and args.gateway_container_id is None:
             parser.error('G2 runtime requires the previously inspected gateway container ID')
+
+        if args.check_parents or args.fixture_phase == 'seed':
+            if args.report is None:
+                parser.error('G2 parent and fixture-seed checks require a persistent --report path')
+            try:
+                report_root = args.work_dir.resolve(strict=True)
+                report_root_info = report_root.stat()
+                report_parent = args.report.parent.resolve(strict=True)
+            except OSError:
+                parser.error('G2 report directory must already exist')
+            if (
+                not stat.S_ISDIR(report_root_info.st_mode)
+                or stat.S_IMODE(report_root_info.st_mode) != 0o700
+                or report_root_info.st_uid != os.getuid()
+                or report_parent != report_root
+            ):
+                parser.error('G2 setup and seed reports must stay in the smoke-owned mode-0700 report directory')
+            if args.report.exists() or args.report.is_symlink():
+                parser.error('G2 setup and seed reports must be new files')
     return args
 
 
@@ -1871,19 +1946,42 @@ def main(argv: list[str] | None = None) -> int:
     _require(args.work_dir.is_dir(), 'the smoke-owned work directory does not exist')
 
     if args.check_parents:
-        print(json.dumps(_inspect_g2_parents(args), sort_keys=True))
+        check = 'g2.parent_identity'
+        try:
+            parents = _inspect_g2_parents(args)
+        except Exception as exc:
+            result = _g2_failure_report(check, exc)
+            _write_safe_report(args.report, result)
+            print(json.dumps(result, sort_keys=True))
+            return 1
+        _write_safe_report(args.report, {
+            'stage': 'g2', 'status': 'PASS', 'checks': {check: 'PASS'},
+        })
+        print(json.dumps(parents, sort_keys=True))
         return 0
     if args.fixture_phase == 'seed':
-        bundle = _load_fixture_bundle(args.fixture_bundle)
-        state = _run_fixture_program(args, bundle, 'seed')
-        _require(
-            state.get('users_seeded') == 2
-            and isinstance(state.get('news_id'), int)
-            and state['news_id'] > 0,
-            'G2 seed returned an incomplete private fixture state',
-        )
-        _store_fixture_state(args.fixture_state, state)
-        print(json.dumps({'fixture_phase': 'seed', 'status': 'PASS'}, sort_keys=True))
+        check = 'g2.fixture_seed'
+        try:
+            bundle = _load_fixture_bundle(args.fixture_bundle)
+            state = _run_fixture_program(args, bundle, 'seed')
+            _require(
+                state.get('users_seeded') == 2
+                and isinstance(state.get('news_id'), int)
+                and state['news_id'] > 0,
+                'G2 seed returned an incomplete private fixture state',
+            )
+            _store_fixture_state(args.fixture_state, state)
+        except Exception as exc:
+            result = _g2_failure_report(check, exc)
+            _write_safe_report(args.report, result)
+            print(json.dumps(result, sort_keys=True))
+            return 1
+        result = {
+            'stage': 'g2', 'status': 'PASS',
+            'checks': {check: 'PASS'},
+        }
+        _write_safe_report(args.report, result)
+        print(json.dumps(result, sort_keys=True))
         return 0
 
     checks: dict[str, str] = {}

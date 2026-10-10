@@ -242,157 +242,181 @@ image_id = env.get("NEWSHUB_LOCAL_DOMAIN_IMAGE_ID", "")
 if not re.fullmatch(r"[0-9a-f]{40}", revision): refuse()
 if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id): refuse()
 
-import django
-django.setup()
-from django.conf import settings
-if settings.DJANGO_ENV != "production" or settings.DEBUG: refuse()
-if settings.PUBLIC_SITE_MODE != "full" or not settings.PUBLIC_SIGNUP_ENABLED: refuse()
-if settings.PUBLIC_AI_ENABLED or settings.CHATGPT_PLAN_USAGE_ENABLED: refuse()
-if settings.CHATGPT_AUTH_MODE != "disabled": refuse()
-if Path(settings.DATABASES["default"]["NAME"]) != db_path: refuse()
+configured_settings_module = env.get("DJANGO_SETTINGS_MODULE", "")
+if configured_settings_module and configured_settings_module != "newsaggregator.settings": refuse()
+env["DJANGO_SETTINGS_MODULE"] = "newsaggregator.settings"
 
-from django.contrib.auth import get_user_model
-from django.db import transaction
-from django.utils import timezone
-from datetime import timedelta
-from api.models import Category, ChatSession, Favorite, News, ResearchSession, SignupInvite, Source
-from api.services.account_security import _bucket_key, _window_start
+SAFE_EXCEPTION_TYPES = {
+    "ImproperlyConfigured", "OperationalError", "IntegrityError",
+    "ValueError", "TypeError", "KeyError",
+}
 
-bundle = _FIXTURE_BUNDLE
-run_id = bundle["run_id"]
-User = get_user_model()
+def report_safe_failure(exc):
+    name = type(exc).__name__
+    error_type = name if name in SAFE_EXCEPTION_TYPES else "FixtureExecutionError"
+    sys.stdout.write(json.dumps({"ok": False, "error_type": error_type}, sort_keys=True) + "\n")
+    sys.stdout.flush()
 
-def user_for(role):
-    person = bundle["users"][role]
-    return User.objects.get(username=person["username"])
+def bootstrap_django():
+    import django
+    django.setup()
+    from django.conf import settings
+    if settings.DJANGO_ENV != "production" or settings.DEBUG: refuse()
+    if settings.PUBLIC_SITE_MODE != "full" or not settings.PUBLIC_SIGNUP_ENABLED: refuse()
+    if settings.PUBLIC_AI_ENABLED or settings.CHATGPT_PLAN_USAGE_ENABLED: refuse()
+    if settings.CHATGPT_AUTH_MODE != "disabled": refuse()
+    if Path(settings.DATABASES["default"]["NAME"]) != db_path: refuse()
 
-def record_token(invite, *, expires_at, email=None):
-    SignupInvite.objects.create(
-        token_digest=hashlib.sha256(invite["token"].encode("utf-8")).hexdigest(),
-        email=email or invite["email"],
-        expires_at=expires_at,
-    )
+def fixture_database_phase():
+    from django.contrib.auth import get_user_model
+    from django.db import transaction
+    from django.utils import timezone
+    from datetime import timedelta
+    from api.models import Category, ChatSession, Favorite, News, ResearchSession, SignupInvite, Source
+    from api.services.account_security import _bucket_key, _window_start
 
-def active_window_count(kind, identity, seconds):
-    start, _retry_after = _window_start(timezone.now(), seconds)
-    key = _bucket_key(kind, identity)
-    row = __import__("api.models", fromlist=["AuthRateBucket"]).AuthRateBucket.objects.filter(
-        key=key, window_start=start,
-    ).values_list("count", flat=True).first()
-    return int(row or 0)
+    bundle = _FIXTURE_BUNDLE
+    run_id = bundle["run_id"]
+    User = get_user_model()
 
-phase = _FIXTURE_PHASE
-with transaction.atomic():
-    if phase == "seed":
-        if User.objects.exists(): refuse()
-        category = Category.objects.create(
-            name=bundle["news"]["category"], slug="newshub-local-g2-" + run_id,
+    def user_for(role):
+        person = bundle["users"][role]
+        return User.objects.get(username=person["username"])
+
+    def record_token(invite, *, expires_at, email=None):
+        SignupInvite.objects.create(
+            token_digest=hashlib.sha256(invite["token"].encode("utf-8")).hexdigest(),
+            email=email or invite["email"],
+            expires_at=expires_at,
         )
-        source = Source.objects.create(
-            name=bundle["news"]["source"], url="https://fixture.invalid/" + run_id,
-        )
-        news = News.objects.create(
-            title=bundle["news"]["title"], content="Synthetic G2 account ownership fixture.",
-            full_content=(
-                "## Isolated article flow\n\n"
-                "```mermaid\n"
-                "flowchart TD\n"
-                "  news[Fixture article] --> diagram[Mermaid flow]\n"
-                "```\n"
-            ),
-            full_content_fetch_status="success", publish_time=timezone.now(),
-            source=source, category=category,
-            url="https://fixture.invalid/newshub-local-g2-" + run_id,
-        )
-        admin = User.objects.create_superuser(
-            username=bundle["users"]["admin"]["username"],
-            email=bundle["users"]["admin"]["email"],
-            password=bundle["users"]["admin"]["password"],
-        )
-        rate = User.objects.create_user(
-            username=bundle["users"]["rate"]["username"],
-            email=bundle["users"]["rate"]["email"],
-            password=bundle["users"]["rate"]["password"],
-        )
-        if not admin.is_active or not admin.is_superuser or rate.is_superuser: refuse()
-        now = timezone.now()
-        record_token(bundle["invitations"]["a"], expires_at=now + timedelta(hours=1))
-        record_token(bundle["invitations"]["b"], expires_at=now + timedelta(hours=1))
-        record_token(bundle["invitations"]["wrong_email"], expires_at=now + timedelta(hours=1))
-        record_token(bundle["invitations"]["expired"], expires_at=now - timedelta(minutes=1))
-        record_token(bundle["invitations"]["weak"], expires_at=now + timedelta(hours=1))
-        result = {"ok": True, "news_id": news.pk, "users_seeded": 2}
-    elif phase == "attach-owner":
-        expected = {
-            person["username"] for person in bundle["users"].values()
-        }
-        actual = set(User.objects.values_list("username", flat=True))
-        if actual != expected or any(not name.startswith("nhsmoke_") for name in actual): refuse()
-        user_a = user_for("a")
-        user_b = user_for("b")
-        news = News.objects.get(title=bundle["news"]["title"])
-        favorite = Favorite.objects.create(user=user_a, news=news, type="bookmark")
-        marker = "nhsmoke-private-chat-" + run_id
-        chat = ChatSession.objects.create(
-            user=user_a, news=news,
-            messages=[{"role": "user", "content": marker}],
-        )
-        research_marker = "nhsmoke-private-research-" + run_id
-        research = ResearchSession.objects.create(
-            user=user_a, title="Synthetic private research " + run_id,
-            messages=[{"role": "assistant", "content": research_marker}],
-        )
-        if user_b.favorites.exists() or user_b.news_chat_sessions.exists() or user_b.research_sessions.exists(): refuse()
-        result = {
-            "ok": True, "news_id": news.pk, "favorite_id": favorite.pk,
-            "chat_id": chat.pk, "research_id": str(research.pk),
-            "chat_marker": marker, "research_marker": research_marker,
-        }
-    elif phase == "deactivate-admin":
-        admin = user_for("admin")
-        if not admin.is_superuser or not admin.username.startswith("nhsmoke_"): refuse()
-        admin.is_active = False
-        admin.save(update_fields=["is_active"])
-        result = {"ok": True, "admin_active": False}
-    elif phase == "audit":
-        expected = {person["username"] for person in bundle["users"].values()}
-        expected.update(item["username"] for item in bundle["negative_registrations"].values())
-        # Negative usernames must never be created.
-        actual = set(User.objects.values_list("username", flat=True))
-        core = {person["username"] for person in bundle["users"].values()}
-        if actual != core or not all(name.startswith("nhsmoke_") for name in actual): refuse()
-        for role in ("a", "b"):
-            invite = SignupInvite.objects.get(
-                token_digest=hashlib.sha256(bundle["invitations"][role]["token"].encode("utf-8")).hexdigest(),
+
+    def active_window_count(kind, identity, seconds):
+        start, _retry_after = _window_start(timezone.now(), seconds)
+        key = _bucket_key(kind, identity)
+        row = __import__("api.models", fromlist=["AuthRateBucket"]).AuthRateBucket.objects.filter(
+            key=key, window_start=start,
+        ).values_list("count", flat=True).first()
+        return int(row or 0)
+
+    phase = _FIXTURE_PHASE
+    with transaction.atomic():
+        if phase == "seed":
+            if User.objects.exists(): refuse()
+            category = Category.objects.create(
+                name=bundle["news"]["category"], slug="newshub-local-g2-" + run_id,
             )
-            if invite.consumed_by_id != user_for(role).pk or invite.consumed_at is None: refuse()
-        for role in ("wrong_email", "expired", "weak"):
-            invite = SignupInvite.objects.get(
-                token_digest=hashlib.sha256(bundle["invitations"][role]["token"].encode("utf-8")).hexdigest(),
+            source = Source.objects.create(
+                name=bundle["news"]["source"], url="https://fixture.invalid/" + run_id,
             )
-            if invite.consumed_at is not None or invite.consumed_by_id is not None: refuse()
-        result = {"ok": True, "synthetic_user_count": len(actual), "negative_users_created": 0}
-    elif phase == "login-rate-count":
-        username = bundle["users"]["rate"]["username"].casefold()
-        count = active_window_count("login_ip_username", "127.0.0.70\0" + username, 600)
-        result = {"ok": True, "count": count}
-    elif phase == "registration-rate-counts":
-        from api.services.account_security import normalize_remote_addr
-        from api.models import AuthRateBucket
-        start, _retry_after = _window_start(timezone.now(), 3600)
-        ips = ["127.0.0.61", "127.0.0.62", "127.0.0.63", "127.0.0.64", "127.0.0.65"]
-        counts = []
-        for address in ips:
-            key = _bucket_key("register_ip", normalize_remote_addr(address))
-            row = AuthRateBucket.objects.filter(key=key, window_start=start).values_list("count", flat=True).first()
-            counts.append(int(row or 0))
-        global_key = _bucket_key("register_global", "global")
-        global_row = AuthRateBucket.objects.filter(key=global_key, window_start=start).values_list("count", flat=True).first()
-        result = {"ok": True, "per_ip_counts": counts, "global_count": int(global_row or 0)}
-    else:
-        refuse()
+            news = News.objects.create(
+                title=bundle["news"]["title"], content="Synthetic G2 account ownership fixture.",
+                full_content=(
+                    "## Isolated article flow\n\n"
+                    "```mermaid\n"
+                    "flowchart TD\n"
+                    "  news[Fixture article] --> diagram[Mermaid flow]\n"
+                    "```\n"
+                ),
+                full_content_fetch_status="success", publish_time=timezone.now(),
+                source=source, category=category,
+                url="https://fixture.invalid/newshub-local-g2-" + run_id,
+            )
+            admin = User.objects.create_superuser(
+                username=bundle["users"]["admin"]["username"],
+                email=bundle["users"]["admin"]["email"],
+                password=bundle["users"]["admin"]["password"],
+            )
+            rate = User.objects.create_user(
+                username=bundle["users"]["rate"]["username"],
+                email=bundle["users"]["rate"]["email"],
+                password=bundle["users"]["rate"]["password"],
+            )
+            if not admin.is_active or not admin.is_superuser or rate.is_superuser: refuse()
+            now = timezone.now()
+            record_token(bundle["invitations"]["a"], expires_at=now + timedelta(hours=1))
+            record_token(bundle["invitations"]["b"], expires_at=now + timedelta(hours=1))
+            record_token(bundle["invitations"]["wrong_email"], expires_at=now + timedelta(hours=1))
+            record_token(bundle["invitations"]["expired"], expires_at=now - timedelta(minutes=1))
+            record_token(bundle["invitations"]["weak"], expires_at=now + timedelta(hours=1))
+            result = {"ok": True, "news_id": news.pk, "users_seeded": 2}
+        elif phase == "attach-owner":
+            expected = {
+                person["username"] for person in bundle["users"].values()
+            }
+            actual = set(User.objects.values_list("username", flat=True))
+            if actual != expected or any(not name.startswith("nhsmoke_") for name in actual): refuse()
+            user_a = user_for("a")
+            user_b = user_for("b")
+            news = News.objects.get(title=bundle["news"]["title"])
+            favorite = Favorite.objects.create(user=user_a, news=news, type="bookmark")
+            marker = "nhsmoke-private-chat-" + run_id
+            chat = ChatSession.objects.create(
+                user=user_a, news=news,
+                messages=[{"role": "user", "content": marker}],
+            )
+            research_marker = "nhsmoke-private-research-" + run_id
+            research = ResearchSession.objects.create(
+                user=user_a, title="Synthetic private research " + run_id,
+                messages=[{"role": "assistant", "content": research_marker}],
+            )
+            if user_b.favorites.exists() or user_b.news_chat_sessions.exists() or user_b.research_sessions.exists(): refuse()
+            result = {
+                "ok": True, "news_id": news.pk, "favorite_id": favorite.pk,
+                "chat_id": chat.pk, "research_id": str(research.pk),
+                "chat_marker": marker, "research_marker": research_marker,
+            }
+        elif phase == "deactivate-admin":
+            admin = user_for("admin")
+            if not admin.is_superuser or not admin.username.startswith("nhsmoke_"): refuse()
+            admin.is_active = False
+            admin.save(update_fields=["is_active"])
+            result = {"ok": True, "admin_active": False}
+        elif phase == "audit":
+            expected = {person["username"] for person in bundle["users"].values()}
+            expected.update(item["username"] for item in bundle["negative_registrations"].values())
+            # Negative usernames must never be created.
+            actual = set(User.objects.values_list("username", flat=True))
+            core = {person["username"] for person in bundle["users"].values()}
+            if actual != core or not all(name.startswith("nhsmoke_") for name in actual): refuse()
+            for role in ("a", "b"):
+                invite = SignupInvite.objects.get(
+                    token_digest=hashlib.sha256(bundle["invitations"][role]["token"].encode("utf-8")).hexdigest(),
+                )
+                if invite.consumed_by_id != user_for(role).pk or invite.consumed_at is None: refuse()
+            for role in ("wrong_email", "expired", "weak"):
+                invite = SignupInvite.objects.get(
+                    token_digest=hashlib.sha256(bundle["invitations"][role]["token"].encode("utf-8")).hexdigest(),
+                )
+                if invite.consumed_at is not None or invite.consumed_by_id is not None: refuse()
+            result = {"ok": True, "synthetic_user_count": len(actual), "negative_users_created": 0}
+        elif phase == "login-rate-count":
+            username = bundle["users"]["rate"]["username"].casefold()
+            count = active_window_count("login_ip_username", "127.0.0.70\0" + username, 600)
+            result = {"ok": True, "count": count}
+        elif phase == "registration-rate-counts":
+            from api.services.account_security import normalize_remote_addr
+            from api.models import AuthRateBucket
+            start, _retry_after = _window_start(timezone.now(), 3600)
+            ips = ["127.0.0.61", "127.0.0.62", "127.0.0.63", "127.0.0.64", "127.0.0.65"]
+            counts = []
+            for address in ips:
+                key = _bucket_key("register_ip", normalize_remote_addr(address))
+                row = AuthRateBucket.objects.filter(key=key, window_start=start).values_list("count", flat=True).first()
+                counts.append(int(row or 0))
+            global_key = _bucket_key("register_global", "global")
+            global_row = AuthRateBucket.objects.filter(key=global_key, window_start=start).values_list("count", flat=True).first()
+            result = {"ok": True, "per_ip_counts": counts, "global_count": int(global_row or 0)}
+        else:
+            refuse()
 
-sys.stdout.write(json.dumps(result, sort_keys=True) + "\n")
+    sys.stdout.write(json.dumps(result, sort_keys=True) + "\n")
+
+try:
+    bootstrap_django()
+    fixture_database_phase()
+except Exception as exc:
+    report_safe_failure(exc)
+    raise SystemExit(1)
 '''
 
 

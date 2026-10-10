@@ -64,6 +64,10 @@ cleanup() {
             report_path="$http_report"
         elif [[ -n "${sse_report:-}" && -f "$sse_report" ]]; then
             report_path="$sse_report"
+        elif [[ -n "${seed_report:-}" && -f "$seed_report" ]]; then
+            report_path="$seed_report"
+        elif [[ -n "${setup_report:-}" && -f "$setup_report" ]]; then
+            report_path="$setup_report"
         fi
     fi
 
@@ -88,8 +92,30 @@ cleanup() {
     fi
 
     if [[ -n "$report_path" && -f "$report_path" && -x "$PYTHON_BIN" ]]; then
-        report_cleanup_status="$("$PYTHON_BIN" -c 'import json,sys; from pathlib import Path; path=Path(sys.argv[1]); report=json.loads(path.read_text(encoding="utf-8")); prior=report.get("cleanup_status"); clean=sys.argv[2] == "0" and prior in (None, "pending", "PASS"); report["cleanup_status"]="PASS" if clean else "FAIL"; report["status"]="FAIL" if not clean else report.get("status", "FAIL"); path.write_text(json.dumps(report, indent=2, sort_keys=True)+"\n", encoding="utf-8"); print(report["cleanup_status"])' \
-            "$report_path" "$task_cleanup_failed" 2>/dev/null)" || {
+        report_cleanup_status="$("$PYTHON_BIN" -c '
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+report = json.loads(path.read_text(encoding="utf-8"))
+prior = report.get("cleanup_status")
+clean = sys.argv[2] == "0" and prior in (None, "pending", "PASS")
+shell_failed = sys.argv[3] != "0"
+report["cleanup_status"] = "PASS" if clean else "FAIL"
+if shell_failed:
+    failure = report.get("failure")
+    if not isinstance(failure, dict) or not failure:
+        report["failure"] = {
+            "stage": report.get("stage", "shell"),
+            "check": "shell_failure",
+            "exception_type": "ShellFailure",
+        }
+report["status"] = "FAIL" if not clean or shell_failed else report.get("status", "FAIL")
+path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+print(report["cleanup_status"])
+' \
+            "$report_path" "$task_cleanup_failed" "$status" 2>/dev/null)" || {
             task_cleanup_failed=1
             status=1
         }
@@ -447,12 +473,13 @@ docker compose --project-name "$task_compose_project" --file "$task_compose_file
 app_container_id=""
 if [[ "$STAGE" == g2 ]]; then
     g2_parent_report="$task_smoke_root/g2-parents.json"
+    setup_report="$task_report_root/setup.json"
     if ! "$PYTHON_BIN" "$PROJECT_ROOT/scripts/deploy/local_domain_acceptance.py" \
         --gateway-ip 127.0.0.1 --ca-cert "$task_smoke_root/certs/ca.crt" \
         --work-dir "$task_report_root" --stage g2 --compose-project "$task_compose_project" \
         --compose-file "$task_compose_file" --compose-env "$task_compose_env" \
         --app-image-id "$IMAGE_ID" --gateway-image-id "$NGINX_IMAGE_ID" \
-        --private-root "$task_smoke_root" --check-parents \
+        --private-root "$task_smoke_root" --check-parents --report "$setup_report" \
         >"$g2_parent_report" 2>"$task_smoke_root/g2-parents.stderr"; then
         fail 'G2 app/gateway/container-network identity validation failed.'
     fi
@@ -512,6 +539,7 @@ if [[ "$STAGE" == g1 ]]; then
     news_id="$(tail -n 1 "$task_smoke_root/seed.stdout" | tr -d '\r')"
     [[ "$news_id" =~ ^[1-9][0-9]*$ ]] || fail 'the isolated news fixture returned an invalid ID.'
 else
+    seed_report="$task_report_root/seed.json"
     if ! "$PYTHON_BIN" "$PROJECT_ROOT/scripts/deploy/local_domain_acceptance.py" \
         --gateway-ip "$gateway_ip" --ca-cert "$task_smoke_root/certs/ca.crt" \
         --work-dir "$task_report_root" --stage g2 --fixture-phase seed \
@@ -519,7 +547,7 @@ else
         --compose-project "$task_compose_project" --compose-file "$task_compose_file" \
         --compose-env "$task_compose_env" --gateway-container-id "$gateway_id" \
         --app-image-id "$IMAGE_ID" --gateway-image-id "$NGINX_IMAGE_ID" \
-        --private-root "$task_smoke_root" \
+        --private-root "$task_smoke_root" --report "$seed_report" \
         >"$task_smoke_root/seed-helper.stdout" 2>"$task_smoke_root/seed.stderr"; then
         fail 'G2 private database fixture seed was refused or failed.'
     fi

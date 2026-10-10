@@ -180,6 +180,18 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 args = module._parse_args(argv)
 if args.check_parents:
+    if os.environ.get('MOCK_G2_PARENT_FAIL') == '1':
+        report = {'stage': 'g2', 'status': 'FAIL', 'failure': {
+            'stage': 'g2', 'check': 'g2.parent_identity',
+            'exception_type': 'AcceptanceError',
+        }}
+        Path(args.report).write_text(json.dumps(report) + '\n', encoding='utf-8')
+        Path(args.report).chmod(0o600)
+        print(json.dumps(report))
+        raise SystemExit(1)
+    report = {'stage': 'g2', 'status': 'PASS', 'checks': {'parent_identity': 'PASS'}}
+    Path(args.report).write_text(json.dumps(report) + '\n', encoding='utf-8')
+    Path(args.report).chmod(0o600)
     print(json.dumps({
         'app_container_id': 'e' * 64,
         'gateway_container_id': 'd' * 64,
@@ -187,6 +199,18 @@ if args.check_parents:
         'gateway_ip': '172.28.0.2',
     }))
 elif args.fixture_phase == 'seed':
+    if os.environ.get('MOCK_G2_SEED_NO_REPORT_FAIL') == '1':
+        raise SystemExit(1)
+    if os.environ.get('MOCK_G2_SEED_FAIL') == '1':
+        report = {'stage': 'g2', 'status': 'FAIL', 'failure': {
+            'stage': 'g2', 'check': 'g2.fixture_seed',
+            'exception_type': 'ImproperlyConfigured',
+            'child_exception_type': 'ImproperlyConfigured',
+        }}
+        Path(args.report).write_text(json.dumps(report) + '\n', encoding='utf-8')
+        Path(args.report).chmod(0o600)
+        print(json.dumps(report))
+        raise SystemExit(1)
     args.fixture_state.write_text('{"ok":true,"news_id":17,"users_seeded":2}\n', encoding='utf-8')
     args.fixture_state.chmod(0o600)
     print('{"fixture_phase":"seed","status":"PASS"}')
@@ -387,6 +411,67 @@ assert report['nginx_image'] == 'nginx:test'
 assert report['nginx_image_id'] == 'sha256:' + 'b' * 64
 assert report['curl_image'] == 'curlimages/curl:8.10.1'
 assert report['curl_image_id'] == 'sha256:' + 'c' * 64
+PY
+
+for failure_case in parent seed; do
+    : >"$DOCKER_LOG"
+    : >"$OPENSSL_LOG"
+    failure_output=""
+    failure_exit=0
+    if [[ "$failure_case" == parent ]]; then
+        failure_output="$(env MOCK_VALIDATE_ACCEPTANCE_ARGS=1 MOCK_G2_PARENT_FAIL=1 \
+            "$SMOKE_SCRIPT" --execute --stage g2 --image "$APP_IMAGE" --sha "$MOCK_IMAGE_SHA" 2>&1)" || failure_exit=$?
+        expected_check=g2.parent_identity
+        expected_file=setup.json
+    else
+        failure_output="$(env MOCK_VALIDATE_ACCEPTANCE_ARGS=1 MOCK_G2_SEED_FAIL=1 \
+            "$SMOKE_SCRIPT" --execute --stage g2 --image "$APP_IMAGE" --sha "$MOCK_IMAGE_SHA" 2>&1)" || failure_exit=$?
+        expected_check=g2.fixture_seed
+        expected_file=seed.json
+    fi
+    [[ "$failure_exit" != 0 ]] || fail "G2 $failure_case failure was reported as PASS."
+    [[ "$failure_output" == *'G2 local-domain smoke NOT PASS'* ]] \
+        || fail "G2 $failure_case failure was hidden by the shell trap."
+    failure_report_root="$(printf '%s\n' "$failure_output" | sed -n 's/.*report directory //p' | tail -n 1)"
+    failure_report="$failure_report_root/$expected_file"
+    [[ -f "$failure_report" ]] || fail "G2 $failure_case safe failure report was not retained."
+    "$REAL_PYTHON" - "$failure_report" "$expected_check" <<'PY'
+import json, stat, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+report = json.loads(path.read_text(encoding='utf-8'))
+assert stat.S_IMODE(path.stat().st_mode) == 0o600
+assert report['stage'] == 'g2' and report['status'] == 'FAIL'
+assert report['cleanup_status'] == 'PASS'
+assert report['failure']['check'] == sys.argv[2]
+assert report['failure']['exception_type'] in ('AcceptanceError', 'ImproperlyConfigured')
+PY
+done
+
+: >"$DOCKER_LOG"
+: >"$OPENSSL_LOG"
+shell_failure_output=""
+shell_failure_exit=0
+shell_failure_output="$(env MOCK_VALIDATE_ACCEPTANCE_ARGS=1 MOCK_G2_SEED_NO_REPORT_FAIL=1 \
+    "$SMOKE_SCRIPT" --execute --stage g2 --image "$APP_IMAGE" --sha "$MOCK_IMAGE_SHA" 2>&1)" \
+    || shell_failure_exit=$?
+[[ "$shell_failure_exit" != 0 ]] || fail 'a seed command failure without a seed report was reported as PASS.'
+[[ "$shell_failure_output" == *'G2 local-domain smoke NOT PASS'* ]] \
+    || fail 'the shell trap hid a failure after setup passed.'
+shell_failure_report_root="$(printf '%s\n' "$shell_failure_output" | sed -n 's/.*report directory //p' | tail -n 1)"
+shell_failure_report="$shell_failure_report_root/setup.json"
+[[ -f "$shell_failure_report" ]] || fail 'the passing setup report was not retained after a later shell failure.'
+"$REAL_PYTHON" - "$shell_failure_report" <<'PY'
+import json, stat, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+report = json.loads(path.read_text(encoding='utf-8'))
+assert stat.S_IMODE(path.stat().st_mode) == 0o600
+assert report['stage'] == 'g2' and report['status'] == 'FAIL'
+assert report['cleanup_status'] == 'PASS'
+assert report['failure'] == {
+    'stage': 'g2', 'check': 'shell_failure', 'exception_type': 'ShellFailure',
+}
 PY
 
 : >"$DOCKER_LOG"
