@@ -98,6 +98,7 @@ R1增量审查发现Nginx还需两个assets块显式root /srv/newshub，不能�
 ## ADR-021：构建等待期间的隔离开发与发布门槛
 G1静态High整改后无P0/P1，正式镜像依赖下载仍在最终有界运行；网络等待不能替代运行PASS，也不必阻止独立本地代码准备。冻结221a93d为G1运行候选，必须git archive该SHA构建，后续共用树G2改动不能混入该镜像。允许G2-CHAT先作离线源代码与临时DB迁移/并发测试准备；不执行用户数据迁移、不开启公共开关、不将G1或G2标REVIEWED、不部署。G2发布/整体审核验收仍依赖真实G1运行门槛。实施者同时仅一个活动编码切片，镜像监控不另改共享业务源码。若G1运行失败，其精确整改优先。
 2026-10-10追加：真实production构建及04B已通过，Chat35+3定向和独立High切片通过。允许G2-ACCOUNTS继续同样隔离源码准备，Chat与Accounts只串行编辑，G1整改只改Nginx/deploy runner，不共享文件；正式G1镜像仍只用不含G2未提交文件的git archive。账户测试从纯G1 archive叠加明确Chat九文件及Accounts owned文件，禁止复制工作树backend或用户DB；整体G2门槛仍等待G1完整域名/恢复和自身集成/审查。
+Accounts58+1离线用例通过后，允许G2-FRONTEND同样仅作离线源准备；G1源码先冻结为3c141d9候选，frontend改动只在未提交工作树，G1镜像继续immutable archive。G1剩余runtime/审查与React源文件无共享；G2身份/私有缓存整体验证和High复审仍必须完成。
 
 ## ADR-022：站点AI执行、费用与恢复契约
 G3扩展既有SQLite租约模式，不引入新的任务平台；job/event/budget/worker-slot在数据库持久化，事务首写安全锁，queued/running也占并发预留。默认用户/IP/全站并发1/2/2，日任务20/40/200、tokens100k/200k/1m、费用2/4/10USD；整数microUSD、最坏工作量预留、未知或部分结果保守全额结算，不能假退款或自动重试收费。
