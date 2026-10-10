@@ -10,3 +10,5 @@ fixture program 可添加安全结构化异常摘要（exception type固定白�
 - Negative tests：wrong module/非法mode/UID/project/dbmount仍拒绝，seed异常中伪造secret不得report，report失败/cleanupFAIL不得PASS；G1普通/父身份/seed/SSE未跳检查。真实browser/account仍NOT_RUN直到重试成功。
 - Forbidden：不读/hash/migrate用户DB/env/WAL/SHM/keys，不触9527/DNS/hosts/CA/真实OAuth/paidAPI，不改业务source或R2guard，不真实Docker/runtime重试、不commit/派生；两次有证据修复失败交主控。
 - Return format：ownedpaths/BaseHEAD/diff，bootstrap原因与正/负例，隔离env/source/overlay/证据/log与退出码/test数，runtime仍FAIL/browserNOT_RUN，High冻结源。
+
+- shell exit传播补充：trap进入时exit status非0则选中的持久report.status强制FAIL，即便只有早先setup PASS报告；保存具体failure或补固定ShellFailure/check shell_setup，不输出stderr。cleanup成功仍PASS但overallFAIL。测试后续helper parseargs/无seed报告时不会留下唯一setup PASS冒充runtime成功。

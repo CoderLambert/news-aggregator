@@ -127,3 +127,10 @@ G3扩展既有SQLite租约模式，不引入新的任务平台；job/event/budge
 任务记录按 user/connection/news/source_hash 唯一，UUID job_id稳定。运行使用随机run_token和generation CAS、60秒租约/20秒心跳；历史内容与结果仍归用户。queued跨进程只能CAS一次claim；running进入任何订阅网络前先持久提交provider_started=true。进程失联且未开始上游可恢复queued；上游已开始则标interrupted，不自动重发，用户明确重试才开始新generation。取消/owner inactive/连接切换/原文改变/租约失效禁止后续网络和保存；cancelled状态不因worker迟到变成success。完成任务状态和现有完整译文保存同一事务，用条件UPDATE先取SQLite写锁再保存，不能只靠select_for_update。
 
 保持现有SSE progress/complete格式与前端兼容，增加Job-ID response header和私有owner任务GET/cancel接口，刷新可读取持久progress/终态；断开SSE不取消后台。执行器仍只负责翻译，不扩成未知托管订阅研究协议。研究恢复另用现有ResearchSession专项；公网订阅模型接入继续外部待批准，所有真实调用NOT_RUN。
+
+
+## ADR-027：研究任务恢复另用现有会话，不接入站点付费模型
+
+研究进度目前只保存在进程内，完整会话/工具结果已有用户归属。后续恢复切片只增加专用ResearchRun持久状态与事件（user/session/idempotency key/lease/run token），沿用研究循环、双线程执行器、已有工具结果，禁止泛化成费用或通用调度平台；迁移0031在0030翻译恢复后串行实施。创建/继续可按owner幂等键附着，GET重连只读取持久进度，取消/失租约/用户禁用/会话删除须在下一模型/工具调用及存储前fence。操作已开始后进程中断一律interrupted，不自动重做；用户明确POST新一轮才执行。状态与完整历史提交用SQLite首写CAS，不跨网络持写锁。
+
+生产研究不得退回旧标准站点API：真实网站订阅工具调用协议尚未获准，生产入口和worker在任何模型、工具网络或任务创建前返回hosted_integration_unapproved/503（现PUBLIC_AI_ENABLED=0早期403保持）；不得靠fake approval env绕过。开发历史Provider兼容仅保留既有行为，所有恢复验收用Fake，不调用真实模型。该外部依赖不阻止本地取消/持久进度/恢复安全代码，但不得声称生产研究AI已可用。未增加用户次数、日额度、费用或Token预算。

@@ -200,3 +200,8 @@ c59e6a507362ad281dbc5e7442bacf1c5bdbb8ba 五文件整改，隔离archive/env-i 7
 ## G2 首次实际运行：seed失败，未进入账户browser
 
 固定runner c59/app b2与三个image通过核验，/tmp/newshub-g2-runtime.I9aZYI/。nginx-t/migrate/app-gateway启动PASS，21秒exit2，fixture seed失败；browser/accounts/TLS/SSE后续NOT_RUN，report目录为空（setup异常在main try外，临时stderr被trap删除）。精确随机project容器/网络/卷无残留cleanupPASS。主控定位rendered program缺DJANGO_SETTINGS_MODULE，image没有该ENV，start_waitress设置仅自身进程；env-i django.setup最小重现ImproperlyConfigured于LOGGING_CONFIG、尚无DB访问。签发R3仅fixture bootstrap和脱敏失败报告，实际第二次验收等源High。未读取用户DB/env或触9527/公网。
+
+
+## NH-PUB-08 离线准备与并发测试诊断
+
+Luna按完整合同实施mode禁网、attempt快照/0029、callback当前session/user与交换紧前fence、cookie及本地凭据清除；尚未提交/High。首轮75PASS/2FAIL分别测试session绑定fixture错和historical model读取当前字段，修正后77PASS。新增fence负例三项PASS；完整扩展轮86PASS/1FAIL是两线程一次消费测试，使用pytest共享内存SQLite（file:memorydb_default?mode=memory&cache=shared、uri=true、timeout30），出现table lock；原日志 /tmp/newshub-nhpub08-final.VZrf1u/acceptance-r3.log 与race-diagnostic2.log保留（后者1成功1OperationalError，非两成功）。权威真实文件子进程forward0029、两独立连接/FakeOAuth证实1成功1SubscriptionError且exchange1次/completed，standalone-race.log退出0。将主回归改为真实文件子进程，不skip或降低断言；最终事务首写CAS和仅存储busy安全503按主控冻结整改中，不能重试授权网络。公共middleware已有chatgpt_auth_disabled早期HTTP码保留，服务直接调用subscription_disabled码分测。无用户DB/.env/真实OAuth/付费调用。
