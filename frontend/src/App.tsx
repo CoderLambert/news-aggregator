@@ -72,7 +72,7 @@ export default function App() {
                         <Route path="/search" element={<LocalSearch />} />
                         <Route path="/news/:id" element={<NewsDetail />} />
                         <Route path="/favorites" element={<FeatureRoute feature="favorites"><FavoritesPage /></FeatureRoute>} />
-                        <Route path="/provider-comparisons" element={<FeatureRoute feature="provider_comparisons"><ProviderComparisons /></FeatureRoute>} />
+                        <Route path="/provider-comparisons" element={<FeatureRoute feature="provider_comparisons" requireSuperuser><ProviderComparisons /></FeatureRoute>} />
                         <Route path="/settings" element={<SettingsPage />} />
                         <Route path="/settings/chatgpt" element={<FeatureRoute feature="accounts"><FeatureRoute feature="chatgpt_subscription"><ChatGPTSubscriptionSettings /></FeatureRoute></FeatureRoute>} />
                         <Route path="/admin" element={<Navigate to="/admin/crawlers" replace />} />

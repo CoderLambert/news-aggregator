@@ -18,7 +18,7 @@ export default function SettingsPage() {
   const { user } = useAuth()
   const { capabilities } = useCapabilities()
   const canManageChatGPT = capabilities.features.accounts.enabled && capabilities.features.chatgpt_subscription.enabled
-  const canCompareProviders = capabilities.features.provider_comparisons.enabled
+  const canCompareProviders = capabilities.features.provider_comparisons.enabled && Boolean(user?.isSuperuser)
   const canManageAdmin = capabilities.features.admin.enabled && Boolean(user?.isSuperuser)
 
   return (

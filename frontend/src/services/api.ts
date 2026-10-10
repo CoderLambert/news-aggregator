@@ -318,8 +318,11 @@ export async function fetchCsrfToken(): Promise<string> {
   return response.csrfToken
 }
 
-export function registerUser(username: string, password: string, email = ''): Promise<unknown> {
-  return api.post<unknown>('/auth/register/', { username, password, email }).then(({ data }) => data)
+export function registerUser(username: string, password: string, email = '', inviteToken = ''): Promise<unknown> {
+  const payload: { username: string; password: string; email: string; invite_token?: string } = { username, password, email }
+  const normalizedInviteToken = inviteToken.trim()
+  if (normalizedInviteToken) payload.invite_token = normalizedInviteToken
+  return api.post<unknown>('/auth/register/', payload).then(({ data }) => data)
 }
 
 export function loginUser(username: string, password: string): Promise<unknown> {

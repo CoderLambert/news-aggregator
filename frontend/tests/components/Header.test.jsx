@@ -1,8 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import Header from '@/components/Header'
 import { CapabilitiesTestProvider } from '../helpers/capabilities'
+
+const authState = vi.hoisted(() => ({ user: null, logout: vi.fn() }))
 
 function renderHeader(initialEntries = ['/']) {
   return render(
@@ -13,7 +15,7 @@ function renderHeader(initialEntries = ['/']) {
 }
 
 vi.mock('@/context/AuthContext', () => ({
-  useAuth: () => ({ user: null, logout: vi.fn() }),
+  useAuth: () => authState,
 }))
 
 vi.mock('@/context/useLanguage', () => ({
@@ -25,6 +27,11 @@ vi.mock('@/context/useLanguage', () => ({
     t: { admin: '管理后台' },
   }),
 }))
+
+beforeEach(() => {
+  authState.user = null
+  authState.logout.mockReset()
+})
 
 describe('Header navigation menu', () => {
   it('keeps the menu button inside while handling its real pointer toggle sequence', () => {
@@ -57,5 +64,34 @@ describe('Header navigation menu', () => {
     renderHeader(['/settings/chatgpt'])
     fireEvent.click(screen.getByRole('button', { name: '打开菜单' }))
     expect(screen.getByRole('link', { name: '设置' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('shows Provider comparisons only to a signed-in superuser', () => {
+    authState.user = { id: 4, username: 'reader', isSuperuser: false }
+    const reader = renderHeader()
+    fireEvent.click(screen.getByRole('button', { name: '打开菜单' }))
+    expect(screen.queryByRole('link', { name: 'Provider 对比' })).not.toBeInTheDocument()
+    reader.unmount()
+
+    authState.user = { id: 5, username: 'admin', isSuperuser: true }
+    renderHeader()
+    fireEvent.click(screen.getByRole('button', { name: '打开菜单' }))
+    expect(screen.getByRole('link', { name: 'Provider 对比' })).toBeInTheDocument()
+  })
+
+  it('shows a visible warning when server logout fails without an unhandled rejection', async () => {
+    authState.user = { id: 7, username: 'reader', isSuperuser: false }
+    authState.logout.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(undefined)
+    renderHeader()
+
+    fireEvent.click(screen.getByRole('button', { name: '打开菜单' }))
+    fireEvent.click(screen.getByRole('button', { name: '退出登录' }))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('退出请求未完成，服务端会话可能仍有效。请刷新后确认。')
+    expect(alert.closest('header')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '打开菜单' }))
+    fireEvent.click(screen.getByRole('button', { name: '退出登录' }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })

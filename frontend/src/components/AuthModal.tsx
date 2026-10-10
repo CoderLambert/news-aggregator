@@ -33,12 +33,13 @@ export default function AuthModal({ onClose, onSuccess, allowRegister = true, lo
   const { login, register } = useAuth()
   const { capabilities, loading: capabilitiesLoading } = useCapabilities()
   const accountsEnabled = capabilities.features.accounts.enabled
-  const registrationEnabled = allowRegister && capabilities.features.signup.enabled
+  const registrationEnabled = accountsEnabled && allowRegister && capabilities.features.signup.enabled
   const [mode, setMode] = useState<AuthMode>('login')
   const visibleMode: AuthMode = registrationEnabled ? mode : 'login'
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [email, setEmail] = useState('')
+  const [inviteToken, setInviteToken] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -102,7 +103,7 @@ export default function AuthModal({ onClose, onSuccess, allowRegister = true, lo
     setSubmitting(true)
     try {
       if (visibleMode === 'login') await login(username, password)
-      else await register(username, password, email)
+      else await register(username, password, email, inviteToken)
       const finishAuthentication = onSuccess ?? onClose
       finishAuthentication()
     } catch (submitError) {
@@ -157,7 +158,7 @@ export default function AuthModal({ onClose, onSuccess, allowRegister = true, lo
 
           {visibleMode === 'register' && (
             <div className="space-y-1.5">
-              <label htmlFor="auth-email" className="text-sm font-medium">邮箱（可选）</label>
+              <label htmlFor="auth-email" className="text-sm font-medium">邮箱</label>
               <Input
                 id="auth-email"
                 type="email"
@@ -165,7 +166,22 @@ export default function AuthModal({ onClose, onSuccess, allowRegister = true, lo
                 onChange={(event) => setEmail(event.currentTarget.value)}
                 placeholder="user@example.com"
                 autoComplete="email"
+                required
               />
+            </div>
+          )}
+
+          {visibleMode === 'register' && (
+            <div className="space-y-1.5">
+              <label htmlFor="auth-invite-token" className="text-sm font-medium">邀请码</label>
+              <Input
+                id="auth-invite-token"
+                type="text"
+                value={inviteToken}
+                onChange={(event) => setInviteToken(event.currentTarget.value)}
+                autoComplete="off"
+              />
+              <p className="text-xs leading-5 text-muted-foreground">公网注册需要有效邀请；密码需符合安全要求。</p>
             </div>
           )}
 
@@ -176,7 +192,7 @@ export default function AuthModal({ onClose, onSuccess, allowRegister = true, lo
               type="password"
               value={password}
               onChange={(event) => setPassword(event.currentTarget.value)}
-              placeholder={visibleMode === 'register' ? '至少 6 位' : '输入密码'}
+              placeholder={visibleMode === 'register' ? '输入符合安全要求的密码' : '输入密码'}
               required
               autoComplete={visibleMode === 'login' ? 'current-password' : 'new-password'}
             />

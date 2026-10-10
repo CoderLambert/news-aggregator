@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient } from '@tanstack/react-query'
 import { AuthContext, AuthProvider, useAuth } from '@/context/AuthContext'
 
 vi.mock('@/services/api', () => ({
@@ -29,7 +29,7 @@ import {
 import { queryClient } from '@/services/queryClient'
 import { providerComparisonKeys } from '@/services/providerComparisonsQueries'
 import ProviderComparisons from '@/pages/ProviderComparisons'
-import { CapabilitiesTestProvider } from '../helpers/capabilities'
+import { CapabilitiesTestProvider, fullCapabilities } from '../helpers/capabilities'
 
 const apiPayload = {
   count: 1,
@@ -82,7 +82,7 @@ const apiPayload = {
 function renderPage(options = {}) {
   const client = options.client ?? new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   let authState = {
-    user: options.user === undefined ? { id: 1, username: 'tester' } : options.user,
+    user: options.user === undefined ? { id: 1, username: 'tester', isSuperuser: true } : options.user,
     loading: options.loading ?? false,
   }
   const authValue = () => ({
@@ -93,7 +93,7 @@ function renderPage(options = {}) {
     refresh: vi.fn(),
   })
   const tree = () => (
-    <QueryClientProvider client={client}>
+    <CapabilitiesTestProvider client={client} value={options.capabilities ?? fullCapabilities()}>
       <AuthContext.Provider value={authValue()}>
         <MemoryRouter initialEntries={["/provider-comparisons"]}>
           <Routes>
@@ -101,7 +101,7 @@ function renderPage(options = {}) {
           </Routes>
         </MemoryRouter>
       </AuthContext.Provider>
-    </QueryClientProvider>
+    </CapabilitiesTestProvider>
   )
   const view = render(tree())
   return {
@@ -143,13 +143,13 @@ describe('ProviderComparisons page', () => {
     expect(screen.getByText('正在确认登录状态...')).toBeInTheDocument()
     expect(fetchProviderComparisons).not.toHaveBeenCalled()
 
-    page.setAuth({ user: { id: 1, username: 'tester' }, loading: false })
+    page.setAuth({ user: { id: 1, username: 'tester', isSuperuser: true }, loading: false })
     expect(await screen.findByText('Example comparison')).toBeInTheDocument()
     expect(fetchProviderComparisons).toHaveBeenCalledTimes(1)
 
     page.setAuth({ user: null, loading: false })
     expect(screen.queryByText('Example comparison')).not.toBeInTheDocument()
-    expect(screen.getByText('请先登录后查看 Provider 对比记录。')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('仅管理员可查看 Provider 对比。')
     expect(fetchProviderComparisons).toHaveBeenCalledTimes(1)
     expect(page.client.getQueryCache().findAll({ queryKey: ['providerComparisons'] }).some((query) =>
       query.queryKey[2]?.viewerId === 'anonymous')).toBe(false)
@@ -160,11 +160,9 @@ describe('ProviderComparisons page', () => {
     fetchMe.mockResolvedValueOnce({ id: 1, username: 'viewer-a' })
     logoutUser.mockResolvedValue(undefined)
     const view = render(
-      <QueryClientProvider client={queryClient}>
-        <CapabilitiesTestProvider client={queryClient}>
-          <AuthProvider><AuthLifecycleControls /></AuthProvider>
-        </CapabilitiesTestProvider>
-      </QueryClientProvider>,
+      <CapabilitiesTestProvider client={queryClient}>
+        <AuthProvider><AuthLifecycleControls /></AuthProvider>
+      </CapabilitiesTestProvider>,
     )
     expect(await screen.findByText('viewer-a')).toBeInTheDocument()
     queryClient.setQueryData(providerComparisonKeys.list('zh', 1), apiPayload)
@@ -185,6 +183,22 @@ describe('ProviderComparisons page', () => {
     view.unmount()
   })
 
+  it('does not query or expose controls for a regular user', () => {
+    renderPage({ user: { id: 9, username: 'ordinary-reader', isSuperuser: false } })
+
+    expect(screen.getByRole('status')).toHaveTextContent('仅管理员可查看 Provider 对比。')
+    expect(fetchProviderComparisons).not.toHaveBeenCalled()
+    expect(createProviderComparison).not.toHaveBeenCalled()
+    expect(retestProviderComparison).not.toHaveBeenCalled()
+  })
+
+  it('does not query when the capability is disabled for a superuser', () => {
+    renderPage({ capabilities: fullCapabilities({ provider_comparisons: false }) })
+
+    expect(screen.getByRole('status')).toHaveTextContent('Provider 对比当前不可用。')
+    expect(fetchProviderComparisons).not.toHaveBeenCalled()
+  })
+
   it('does not let a late create completion from viewer A clear viewer B form state', async () => {
     let resolveCreate
     createProviderComparison.mockImplementationOnce(() => new Promise((resolve) => { resolveCreate = resolve }))
@@ -196,7 +210,7 @@ describe('ProviderComparisons page', () => {
     await waitFor(() => expect(createProviderComparison).toHaveBeenCalledTimes(1))
     const signal = createProviderComparison.mock.calls[0][1]
 
-    page.setAuth({ user: { id: 2, username: 'viewer-b' }, loading: false })
+    page.setAuth({ user: { id: 2, username: 'viewer-b', isSuperuser: true }, loading: false })
     await screen.findByText('Example comparison')
     expect(signal.aborted).toBe(true)
     fireEvent.change(screen.getByLabelText('news_id'), { target: { value: '99' } })
@@ -397,7 +411,7 @@ describe('ProviderComparisons page', () => {
     await waitFor(() => expect(retestProviderComparison).toHaveBeenCalledTimes(1))
     const signal = retestProviderComparison.mock.calls[0][1]
 
-    page.setAuth({ user: { id: 2, username: 'viewer-b' }, loading: false })
+    page.setAuth({ user: { id: 2, username: 'viewer-b', isSuperuser: true }, loading: false })
     await screen.findByText('Example comparison')
     expect(signal.aborted).toBe(true)
     rejectRetest(new Error('Viewer A retest failed late'))

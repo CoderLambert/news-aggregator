@@ -24,6 +24,7 @@ export default function Header() {
   const comparisonsEnabled = capabilities.features.provider_comparisons.enabled
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [logoutError, setLogoutError] = useState('')
   const menuRef = useRef<HTMLElement | null>(null)
   const menuButtonRef = useRef<HTMLButtonElement | null>(null)
   const location = useLocation()
@@ -55,6 +56,16 @@ export default function Header() {
   function cycleDisplayMode() {
     const currentIndex = DISPLAY_MODES.findIndex((mode) => mode.key === displayMode)
     setDisplayMode(DISPLAY_MODES[(currentIndex + 1) % DISPLAY_MODES.length].key)
+  }
+
+  async function handleLogout() {
+    setLogoutError('')
+    setMenuOpen(false)
+    try {
+      await logout()
+    } catch {
+      setLogoutError('退出请求未完成，服务端会话可能仍有效。请刷新后确认。')
+    }
   }
 
   const isCurrent = (path: string) => path === '/'
@@ -185,7 +196,7 @@ export default function Header() {
 
             <div className="my-1 border-t border-border" />
             <p className="px-3 pb-1 pt-2 text-xs font-medium text-muted-foreground">工具</p>
-            {comparisonsEnabled && <Button variant={isCurrent('/provider-comparisons') ? 'secondary' : 'ghost'} className="h-11 w-full justify-start" asChild>
+            {comparisonsEnabled && user?.isSuperuser && <Button variant={isCurrent('/provider-comparisons') ? 'secondary' : 'ghost'} className="h-11 w-full justify-start" asChild>
               <Link to="/provider-comparisons" aria-current={isCurrent('/provider-comparisons') ? 'page' : undefined} onClick={() => setMenuOpen(false)}>
                 <GitCompareArrows aria-hidden="true" />Provider 对比
               </Link>
@@ -205,7 +216,7 @@ export default function Header() {
                   type="button"
                   variant="ghost"
                   className="h-11 w-full justify-start text-destructive hover:text-destructive"
-                  onClick={() => { void logout(); setMenuOpen(false) }}
+                  onClick={() => { void handleLogout() }}
                 >
                   <LogOut aria-hidden="true" />退出登录
                 </Button>
@@ -215,7 +226,14 @@ export default function Header() {
         )}
       </header>
 
-      {accountsEnabled && showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} />}
+      {logoutError && <p role="alert" className="mx-auto mt-3 max-w-6xl px-4 text-sm text-destructive">{logoutError}</p>}
+      {accountsEnabled && showAuthModal && <AuthModal
+        onClose={() => setShowAuthModal(false)}
+        onSuccess={() => {
+          setLogoutError('')
+          setShowAuthModal(false)
+        }}
+      />}
     </>
   )
 }
