@@ -17,3 +17,8 @@
 主Agent审核前后核对：HEAD相同、120项文件hash相同、相关diff SHA256相同（`d5227323dda25405f5d95b797174291fa585266d012f1782fef039c124b6f70b`）。用户运行中SQLite排除，不因其后台修改误判审查者写入。预核对文件 `/tmp/newshub-g1-audit-pre-d220f00.json`。
 
 整改合同：G1-RELEASE-R1、G1-CAPABILITIES-R1；代理验收P2按原ownership补充。整改结果和复审版本待实际完成后追加，不预填PASS。
+
+## R1 增量复审
+候选0df4b1e3909da96caa54cbc32af1ecd1472bd0d7，相对已审d220f00。原4P1/3P2静态整改闭环，但新增P1：每release/assets真目录后Nginx仍继承current root，旧chunk HTTP404。High仅复审变化及调用链，仍只读；前后23项文件hash/HEAD/diff均相同（37750611d20e163591ccc31c52f1d7f5ad251a3e37829368767fe81bf95c53ac）。合同G1-NGINX-R2要求两个assets块显式shared root。
+
+主Agent实际隔离Nginx另检出未引用regex花括号的语法问题：nginx -t退出1，line76 unknown directive；Luna已引用两个regex，真实nginx -t退出0。修复后的真实scratch静态fixture验收报告/tmp/newshub-static-runtime-r2-asp3ztzb/report.json：umask077导出A/B、自身文件/hash保留、导出者UID1000和Nginx worker UID101、正式模板TLS证书校验首页/旧新chunk200、缺chunk404无immutable、静态切回A后二版chunk仍200、精确资源清理均PASS。此项仅静态fixture，不替代production app/DB/rollback CLI或完整浏览器验收。

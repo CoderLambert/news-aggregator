@@ -10,12 +10,42 @@ def _block(source, marker):
     line_end = source.find('\n', marker_start)
     if line_end < 0:
         line_end = len(source)
-    opening = source.rfind('{', marker_start, line_end)
+    opening = None
+    quote = None
+    escaped = False
+    for index in range(marker_start, line_end):
+        character = source[index]
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif character == '\\':
+                escaped = True
+            elif character == quote:
+                quote = None
+        elif character in {'"', "'"}:
+            quote = character
+        elif character == '{':
+            opening = index
+            break
+    if opening is None:
+        raise AssertionError(f'block opening not found after {marker!r}')
     depth = 0
+    quote = None
+    escaped = False
     for index in range(opening, len(source)):
-        if source[index] == '{':
+        character = source[index]
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif character == '\\':
+                escaped = True
+            elif character == quote:
+                quote = None
+        elif character in {'"', "'"}:
+            quote = character
+        elif character == '{':
             depth += 1
-        elif source[index] == '}':
+        elif character == '}':
             depth -= 1
             if depth == 0:
                 return source[opening + 1:index]
@@ -76,14 +106,16 @@ def test_production_hosts_redirects_unknown_hosts_and_static_routing():
 
     assert 'location /assets/' in https_server
     regular_assets = _block(https_server, 'location /assets/')
+    assert 'root /srv/newshub;' in regular_assets
     assert 'try_files $uri =404;' in regular_assets
     assert 'add_header Cache-Control "no-cache";' in regular_assets
     assert 'immutable' not in regular_assets
     assert 'try_files $uri $uri/ /index.html;' in _block(https_server, 'location / {')
     assert 'location ~* ^/(?!api/)' in https_server
-    assert 'location ~* ^/assets/' in https_server
+    assert 'location ~* "^/assets/' in https_server
 
-    hashed_assets = _block(https_server, 'location ~* ^/assets/')
+    hashed_assets = _block(https_server, 'location ~* "^/assets/')
+    assert 'root /srv/newshub;' in hashed_assets
     assert 'add_header Cache-Control "public, max-age=31536000, immutable";' in hashed_assets
     assert 'always' not in hashed_assets
     assert 'try_files $uri =404;' in hashed_assets
@@ -114,7 +146,7 @@ def test_only_approved_sse_paths_disable_nginx_buffering_and_compression():
     sse_markers = (
         'location ~ ^/api/news/[0-9]+/(?:chat|translate)/',
         'location = /api/research/',
-        'location ~ ^/api/research/[0-9A-Fa-f]{8}',
+        'location ~ "^/api/research/[0-9A-Fa-f]{8}',
     )
     for marker in sse_markers:
         block = _block(production, marker)

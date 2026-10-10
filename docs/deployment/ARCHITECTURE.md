@@ -93,3 +93,4 @@ Compose八项开关通过显式--env-file变量/default表达式解析，默认r
 
 ## ADR-020：G1审核后的静态资产与私有恢复对应关系
 High在d220f00发现公开目录0700/asset0600、backup重复解释器与host600 manifest不可读、共享历史assets污染release哈希、文档直接up绕维护窗口4项P1。整改采用公开静态0755/0644，每release真实assets目录仅硬链接该版本资源，共享旧资源保留且不纳入其他版本hash；验证hardlink对应Nginx实际共享文件。私有helper仅在内部/tmp调整复制artifact为10001:10001/0600，host文件不改。restore的合法prior artifact还须持锁、停写、按完整逻辑schema/rows摘要验证等于当前target，防另库/过期备份误替代；绝对120秒超时拒绝。G1仍未通过审核或运行验收，精确整改在G1-RELEASE-R1。
+R1增量审查发现Nginx还需两个assets块显式root /srv/newshub，不能继承current限定本版；regex花括号量词必须引用，实际nginx-t验证语法。主Agent用真实Nginx worker和两版scratch dist验证共享旧新chunk经TLS可读；这是局部静态链路证据，不替代正式app与卷验收。

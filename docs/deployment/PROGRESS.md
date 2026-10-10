@@ -99,3 +99,8 @@
 - G1-CAPABILITIES-R1仅context与既有测试：cached full重取reject/非法schema即FAIL_CLOSED，成功后恢复；QueryClient真实5tests/typecheck/lint/diff-check均0。NH07申请准备文档离线校验0；两项正式批准仍false/EXTERNAL_BLOCKED，未提交申请。
 - domain_runtime代理P2：非豁免auth/csrf路径真实scheme/cookie检查，Fake头回显另记录，无法观测Django clientaddr明确NOT_RUN；新增3定向pytest、shell syntax/mock、py_compile/diff-check全0。尚未实际运行镜像/浏览器，不预填PASS。
 - 原始build下载依赖文件受限：官方Django HTTPS range256KiB host11.2s/container8.0s，TUNA4.4s；镜像cache probe证明pip层未命中，90s内取消probe130而保留原构建。为了不重复下载已安装Torch，主Agent最终一次有界延长原build至90min，连续10min无IO/输出停止、不自动重试、不更改依赖/registry。正式G1实际验收需依赖层完成后，用修复候选新SHA快速重建frontend/label再运行。
+
+## R2实际Nginx与前端集成
+- R1 High复审仅新增旧chunk路由P1，其余4P1/3P2静态闭环；posthash23文件/HEAD/diff均相同。domain_runtime两assets块显式root /srv/newshub、仍全站current；主Agent真实Nginx启动检出原regex花括号语法错误（独立nginx-t exit1），Luna仅引用两regex后实际nginx-t exit0、模板4PASS/diff-check0。
+- Primary真实静态fixture第一次仅两release文件/hash通过，Nginx启动失败（container exit1/exec137，无OOM事件）；自有资源清理PASS，失败报告/tmp/newshub-static-runtime-4u529uwg/report.json，不冒充通过。修复后用原production模板、pinned Nginx、自签SAN信任cert且无TLS绕过：A/B源码自身diff/hash、umask077、异UIDworker101/导出者1000、HTTPS首页/旧新chunk200且immutable、缺asset404无immutable、静态切回A旧新chunk仍200、cleanup全PASS；报告/tmp/newshub-static-runtime-r2-asp3ztzb/report.json，template SHA256 bab3dddbbe5ba10220d58b8c9c444c5e98c107b33831bf5c4479fedada54a7ed。
+- 前端0df4b1e已提交源码独立archive复验（临时HOME、仅symlink已有node_modules、无真实env）：typecheck/lint/test/build全0，63files/423tests PASS；日志/tmp/newshub-g1-frontend-uh95b72m。正式production app/volume/browser仍NOT_RUN，不能以静态fixture替代；下一步R2增量High及新SHA镜像运行验收。
