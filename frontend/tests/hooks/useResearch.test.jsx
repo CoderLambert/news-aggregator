@@ -301,6 +301,8 @@ describe('useResearch stream lifecycle', () => {
     remounted.unmount()
   })
 
+  // History GET performs a single read-only queued-status probe, then only
+  // an explicit owner/run-bound resume operation may dispatch an unstarted run.
   it('probes a selected history session again after switching away and back', async () => {
     api.listResearchSessions.mockResolvedValue(emptyPage([
       { id: 'session-a', title: '研究 A' },
@@ -308,14 +310,14 @@ describe('useResearch stream lifecycle', () => {
     ]))
     const { result } = renderResearchHook()
     await waitFor(() => expect(api.openResearchSessionStream).toHaveBeenCalledWith(
-      'session-a', expect.any(AbortSignal), expect.any(Function), true,
+      'session-a', expect.any(AbortSignal), expect.any(Function), false,
     ))
     await waitFor(() => expect(result.current.activeSessionId).toBe('session-a'))
 
     act(() => result.current.handleSelectSession('session-b'))
     await waitFor(() => expect(result.current.activeSessionId).toBe('session-b'))
     await waitFor(() => expect(api.openResearchSessionStream).toHaveBeenCalledWith(
-      'session-b', expect.any(AbortSignal), expect.any(Function), true,
+      'session-b', expect.any(AbortSignal), expect.any(Function), false,
     ))
 
     act(() => result.current.handleSelectSession('session-a'))
@@ -451,7 +453,7 @@ describe('useResearch stream lifecycle', () => {
 
     const { result } = renderResearchHook()
     await waitFor(() => expect(api.openResearchSessionStream).toHaveBeenCalledWith(
-      history.id, expect.any(AbortSignal), expect.any(Function), true,
+      history.id, expect.any(AbortSignal), expect.any(Function), false,
     ))
     expect(result.current.isBusy).toBe(true)
 
@@ -510,7 +512,7 @@ describe('useResearch stream lifecycle', () => {
     rerender({ viewerId: 2 })
 
     await waitFor(() => expect(api.openResearchSessionStream).toHaveBeenCalledWith(
-      history.id, expect.any(AbortSignal), expect.any(Function), true,
+      history.id, expect.any(AbortSignal), expect.any(Function), false,
     ))
     expect(result.current.isBusy).toBe(true)
     expect(sessionStorage.getItem(viewerTwoKey)).toBeNull()
