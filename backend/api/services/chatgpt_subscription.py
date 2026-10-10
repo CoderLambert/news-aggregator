@@ -359,6 +359,7 @@ def create_authorization_attempt(user, target_connection=None, session_key='', o
             requested_client_id=requested_client_id,
             oauth_mode=config.mode, redirect_uri=config.redirect_uri,
             token_auth_method=config.token_auth_method,
+            requested_scopes=config.scopes, oauth_resource=config.resource,
             target_attempt_generation=target_attempt_generation,
             selection_connection_id_at_start=selection_connection_id,
             selection_generation_at_start=selection_generation,
@@ -396,7 +397,9 @@ def handoff_authorization(
         config = _runtime_config()
         if (attempt.oauth_mode != config.mode
                 or (attempt.redirect_uri and attempt.redirect_uri != config.redirect_uri)
-                or attempt.token_auth_method != config.token_auth_method):
+                or attempt.token_auth_method != config.token_auth_method
+                or (attempt.requested_scopes and attempt.requested_scopes != config.scopes)
+                or (attempt.oauth_resource and attempt.oauth_resource != config.resource)):
             raise SubscriptionError('网站授权配置已变化，请重新发起连接。')
         with transaction.atomic():
             updated = ChatGPTAuthAttempt.objects.filter(
@@ -596,7 +599,9 @@ def complete_authorization(query, browser_binding_token: str) -> ChatGPTSubscrip
         config = _runtime_config()
         if (attempt.oauth_mode != config.mode
                 or (attempt.redirect_uri and attempt.redirect_uri != config.redirect_uri)
-                or attempt.token_auth_method != config.token_auth_method):
+                or attempt.token_auth_method != config.token_auth_method
+                or (attempt.requested_scopes and attempt.requested_scopes != config.scopes)
+                or (attempt.oauth_resource and attempt.oauth_resource != config.resource)):
             raise SubscriptionError('部署 OAuth 配置已变化，请重新发起授权。')
         if config.website and attempt.requested_client_id != config.client_id:
             raise SubscriptionError('网站 Client ID 已变化，请重新发起授权。')
