@@ -601,8 +601,12 @@ def resume_queued_run(user, session, run_id):
         )
     if not user.is_active or session.user_id != user.pk:
         raise ResearchRunError('research_session_not_found', '研究会话不存在。', 404)
+    try:
+        parsed_run_id = uuid.UUID(run_id)
+    except (ValueError, TypeError, AttributeError):
+        raise ResearchRunError('invalid_run_id', '研究任务标识无效。', 400) from None
     run = ResearchRun.objects.filter(
-        pk=run_id, user=user, session=session,
+        pk=parsed_run_id, user=user, session=session,
     ).first()
     if run is None:
         raise ResearchRunError('research_run_not_found', '研究任务不存在。', 404)
