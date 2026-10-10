@@ -31,6 +31,14 @@ class Migration(migrations.Migration):
             name='oauth_mode',
             field=models.CharField(db_index=True, default='local', max_length=16),
         ),
+        migrations.AddConstraint(
+            model_name='chatgptsubscriptionconnection',
+            constraint=models.UniqueConstraint(
+                fields=('issuer', 'issued_client_id', 'subject_hash'),
+                condition=models.Q(oauth_mode='website'),
+                name='one_website_chatgpt_account_owner',
+            ),
+        ),
         migrations.AddField(
             model_name='chatgptauthattempt',
             name='oauth_mode',
