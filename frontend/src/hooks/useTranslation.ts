@@ -137,7 +137,7 @@ export function useTranslation(
     activeNewsId: number,
   ) => {
     if (!request.jobId) return
-    let confirmed: boolean
+    let confirmed = false
     let succeeded = false
     let terminalStatus: string | null = null
     let outcomeMessage = '无法确认翻译任务已取消；可重新连接查看状态。'
@@ -174,7 +174,7 @@ export function useTranslation(
       }
       if (confirmed) clearTranslationRecovery(activeViewerId, activeNewsId)
     } catch {
-      confirmed = false
+      // Preserve the default unconfirmed state and leave a recovery marker.
     } finally {
       if (requestRef.current === request) requestRef.current = null
       request.controller.abort()
