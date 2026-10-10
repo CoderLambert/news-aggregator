@@ -247,3 +247,104 @@ def test_sse_slots_saturate_before_dispatch_and_release_on_close_and_exception()
 
     with sse_resources._sse_lock:
         assert sse_resources._active_sse_requests == 0
+
+
+@pytest.mark.django_db(transaction=True)
+def test_queued_recovery_after_process_restart_dispatches_existing_idempotent_run_once(fake_executor, monkeypatch):
+    owner = make_user()
+    session, run = start_run(owner, query='unstarted research', key='safe-recover-1')
+    assert run.queued_query == 'unstarted research'
+    assert run.queued_local_only is True
+    assert len(fake_executor) == 1
+
+    # Simulate the queue process exiting before it ever claims the row.
+    with job_manager._dispatch_lock:
+        job_manager._dispatching.clear()
+    with job_manager._capacity_lock:
+        job_manager._admitted_runs.clear()
+
+    recovered = job_manager.resume_queued_run(owner, session, str(run.pk))
+    assert recovered.pk == run.pk
+    assert len(fake_executor) == 2
+    calls = []
+    def guarded_agent(session, query, on_event, **kwargs):
+        calls.append((session.pk, query, kwargs['local_only']))
+        kwargs['execution_guard']()
+        kwargs['persist_completion']([{'role': 'assistant', 'content': 'completed'}])
+        on_event('complete', {})
+
+    monkeypatch.setattr('api.services.research.agent_loop.run_agent_loop', guarded_agent)
+    # Both submitted work items can race; only one can claim from queued.
+    for fn, args, kw in reversed(fake_executor):
+        fn(*args, **kw)
+
+    run.refresh_from_db()
+    session.refresh_from_db()
+    assert calls == [(session.pk, 'unstarted research', True)]
+    assert run.status == 'succeeded'
+    assert run.queued_query == ''
+    assert session.messages == [{'role': 'assistant', 'content': 'completed'}]
+    assert ResearchRun.objects.filter(user=owner, session=session).count() == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_started_run_and_terminal_run_cannot_reenter_provider_on_queued_resume(fake_executor):
+    owner = make_user()
+    session, run = start_run(owner, query='one provider attempt', key='no-double-run')
+    token = job_manager._claim(run.pk)
+    assert token is not None
+
+    already_running = job_manager.resume_queued_run(owner, session, str(run.pk))
+    assert already_running.pk == run.pk and already_running.status == 'running'
+    assert len(fake_executor) == 1
+    job_manager.cancel_research_run(owner, session, run.pk)
+    with pytest.raises(job_manager.ResearchRunError) as terminated:
+        job_manager.resume_queued_run(owner, session, str(run.pk))
+    assert terminated.value.error_code == 'research_run_changed'
+    assert len(fake_executor) == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_legacy_queued_without_recoverable_input_fails_closed_and_owner_isolated(fake_executor):
+    owner = make_user()
+    stranger = make_user('stranger-queued')
+    session = ResearchSession.objects.create(user=owner)
+    run = ResearchRun.objects.create(
+        user=owner, session=session, idempotency_key='old-queued',
+        request_hash=job_manager.request_digest('undisclosed query', True, None),
+        status='queued',
+    )
+    with pytest.raises(job_manager.ResearchRunError) as missing:
+        job_manager.resume_queued_run(owner, session, str(run.pk))
+    assert missing.value.error_code == 'research_queued_input_missing'
+    assert missing.value.status_code == 409
+
+    with pytest.raises(job_manager.ResearchRunError) as hidden:
+        job_manager.resume_queued_run(stranger, session, str(run.pk))
+    assert hidden.value.status_code == 404
+    assert len(fake_executor) == 0
+
+
+@pytest.mark.django_db(transaction=True)
+def test_queued_resume_endpoint_rejects_other_users_and_preserves_csrf(fake_executor):
+    from rest_framework.test import APIClient
+
+    owner = make_user()
+    stranger = make_user('stranger-endpoint')
+    session, run = start_run(owner, query='offline', key='http-safe')
+    route = f'/api/research/{session.pk}/resume-queued/'
+    other = APIClient()
+    other.force_authenticate(stranger)
+    assert other.post(route, {'run_id': str(run.pk)}, format='json').status_code == 404
+
+    csrf = APIClient(enforce_csrf_checks=True)
+    csrf.force_login(owner)
+    assert csrf.post(route, {'run_id': str(run.pk)}, format='json').status_code == 403
+
+    valid = APIClient()
+    valid.force_authenticate(owner)
+    response = valid.post(route, {'run_id': str(run.pk)}, format='json')
+    assert response.status_code == 200
+    assert response.data['run_id'] == str(run.pk)
+    assert set(response.data) == {'run_id', 'status'}
+    assert len(fake_executor) == 1  # The original in-process dispatch remains sole owner.
