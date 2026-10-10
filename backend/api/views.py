@@ -1072,6 +1072,14 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
         if not force and news.suggested_questions and len(news.suggested_questions) >= 3:
             return Response({'questions': news.suggested_questions[:3]})
 
+        if getattr(settings, 'CHATGPT_SIWC_MODE', 'local') == 'website':
+            from api.services.chatgpt_subscription import active_connection_for_user
+            connection = active_connection_for_user(request.user)
+            if connection is None or not connection.connected:
+                # No website visitor may silently spend the operator's API quota,
+                # including when force=1 bypasses the cached question list.
+                return Response({'questions': SUGGESTED_QUESTIONS_FALLBACK})
+
         # Auto-fetch full article so suggestions are based on the real body,
         # not the short list-preview blurb. No-op if already cached.
         ensure_full_content(news)
