@@ -64,6 +64,9 @@ SAFE_BROWSER_EXCEPTION_TYPES = frozenset({
     'ValueError', 'TypeError', 'BrowserExecutionError',
 })
 G2_BROWSER_SUBCHECKS = frozenset({
+    'g2.shared_initial', 'g2.shared_untrusted_ca', 'g2.shared_trusted_context',
+    'g2.shared_homepage', 'g2.shared_detail', 'g2.shared_mermaid',
+    'g2.shared_csrf_cookie', 'g2.shared_wrong_san', 'g2.shared_egress',
     'g2.account_initial', 'g2.register_a', 'g2.logout_a', 'g2.register_b',
     'g2.attach_owner', 'g2.owner_b', 'g2.admin_gate', 'g2.logout_b',
     'g2.owner_a', 'g2.auth_races', 'g2.owner_csrf',
@@ -1311,6 +1314,11 @@ def _browser_environment(task_browser_home: Path) -> dict[str, str]:
 
 
 def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_dir: Path) -> None:
+    def mark_shared_subcheck(subcheck: str) -> None:
+        if args.stage == 'g2':
+            _mark_g2_browser_subcheck(checks, subcheck)
+
+    mark_shared_subcheck('g2.shared_initial')
     try:
         installed_version = importlib.metadata.version('playwright')
     except importlib.metadata.PackageNotFoundError as exc:
@@ -1336,6 +1344,7 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
         except ImportError as exc:
             raise AcceptanceError('Python Playwright 1.62.0 is unavailable to the selected interpreter') from exc
 
+        mark_shared_subcheck('g2.shared_untrusted_ca')
         with sync_playwright() as playwright:
             untrusted_context = playwright.chromium.launch_persistent_context(
                 str(task_browser_home / 'profile'),
@@ -1358,6 +1367,7 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
             finally:
                 untrusted_context.close()
 
+        mark_shared_subcheck('g2.shared_trusted_context')
         task_browser_home = profile_root / 't'
         task_browser_home.mkdir(mode=0o700)
         _new_nss_database(task_browser_home, ca_cert)
@@ -1384,15 +1394,18 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
 
             context.route('**/*', restrict_to_local_domain)
             try:
+                mark_shared_subcheck('g2.shared_homepage')
                 response = page.goto(f'https://{HOST}/', wait_until='domcontentloaded', timeout=20000)
                 _require(response is not None and response.status == 200, 'trusted browser homepage did not return HTTP 200')
                 _require(page.locator('#root').count() == 1, 'SPA root element is missing')
                 checks['browser_homepage'] = 'HTTP 200'
 
+                mark_shared_subcheck('g2.shared_detail')
                 detail = page.goto(f'https://{HOST}/news/{args.news_id}', wait_until='domcontentloaded', timeout=20000)
                 _require(detail is not None and detail.status == 200, 'browser news deep link did not return HTTP 200')
                 checks['browser_news_deep_link'] = 'HTTP 200'
 
+                mark_shared_subcheck('g2.shared_mermaid')
                 page.locator('.article-section-render').scroll_into_view_if_needed()
                 diagram = page.locator('[role="img"][aria-label="Mermaid 图表"]')
                 diagram.wait_for(state='visible', timeout=20000)
@@ -1430,6 +1443,7 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
                 checks['mermaid_chart'] = json.dumps(chart_paint, sort_keys=True)
                 checks['mermaid_screenshot'] = str(mermaid_screenshot)
 
+                mark_shared_subcheck('g2.shared_csrf_cookie')
                 page.evaluate("() => fetch('/api/auth/csrf/').then((response) => response.json())")
                 cookie = page.evaluate("() => document.cookie")
                 _require('csrftoken=' in cookie, 'trusted browser cannot read the CSRF cookie')
@@ -1446,6 +1460,7 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
                     _require(not favorite_api_calls, 'private deep link called its API in read_only mode')
                     checks['private_deep_link'] = 'no favorites API request'
 
+                mark_shared_subcheck('g2.shared_wrong_san')
                 try:
                     page.goto(
                         f'https://{HOST}:{args.wrong_san_port}/',
@@ -1458,6 +1473,7 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
                 else:
                     raise AcceptanceError('browser accepted a certificate with the wrong SAN')
 
+                mark_shared_subcheck('g2.shared_egress')
                 _require(not external_hosts, f'browser attempted non-local egress to {sorted(external_hosts)}')
                 checks['browser_external_egress'] = 'blocked; no external host request observed'
             except Exception:
@@ -1469,6 +1485,9 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
                 raise
             finally:
                 context.close()
+
+    if args.stage == 'g2':
+        checks.pop('_g2_active_subcheck', None)
 
 
 _BROWSER_API_SCRIPT = """async ({method, path, body}) => {

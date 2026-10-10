@@ -6,9 +6,10 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -559,6 +560,9 @@ def test_logout_response_matcher_requires_same_origin_exact_path_and_post():
 
 def test_g2_browser_subchecks_are_fixed_and_cover_the_account_flow():
     required = {
+        'g2.shared_initial', 'g2.shared_untrusted_ca', 'g2.shared_trusted_context',
+        'g2.shared_homepage', 'g2.shared_detail', 'g2.shared_mermaid',
+        'g2.shared_csrf_cookie', 'g2.shared_wrong_san', 'g2.shared_egress',
         'g2.account_initial', 'g2.register_a', 'g2.logout_a', 'g2.register_b',
         'g2.attach_owner', 'g2.owner_b', 'g2.admin_gate', 'g2.logout_b',
         'g2.owner_a', 'g2.auth_races', 'g2.owner_csrf', 'g2.admin',
@@ -570,6 +574,232 @@ def test_g2_browser_subchecks_are_fixed_and_cover_the_account_flow():
     assert checks == {'_g2_active_subcheck': 'g2.logout_a'}
     with pytest.raises(ValueError):
         acceptance._mark_g2_browser_subcheck(checks, 'g2.secret-value')
+
+
+def _install_mock_shared_browser(monkeypatch, failure_at=None):
+    secret = 'SECRET Cookie=sessionid=synthetic-cookie URL=https://secret.invalid/path?token=private'
+
+    class Error(Exception):
+        pass
+
+    class UnknownBrowserFailure(Exception):
+        pass
+
+    class FakeResponse:
+        status = 200
+
+    class FakeLocator:
+        def __init__(self, selector):
+            self.selector = selector
+            self.first = self
+
+        def count(self):
+            return 1
+
+        def scroll_into_view_if_needed(self):
+            return None
+
+        def wait_for(self, **_kwargs):
+            return None
+
+        def locator(self, selector):
+            return FakeLocator(f'{self.selector} {selector}')
+
+        def evaluate(self, _script):
+            if failure_at == 'mermaid' and 'svg' in self.selector:
+                raise Error(secret)
+            return {
+                'labels': ['Fixture article', 'Mermaid flow'],
+                'nodeFill': 'rgb(255, 255, 255)',
+                'textFill': 'rgb(0, 0, 0)',
+                'width': 400,
+                'height': 300,
+            }
+
+    class FakePage:
+        def __init__(self, untrusted):
+            self.untrusted = untrusted
+
+        def goto(self, url, **_kwargs):
+            if self.untrusted:
+                raise Error('net::ERR_CERT_AUTHORITY_INVALID')
+            if f':{4443}/' in url:
+                if failure_at == 'wrong_san':
+                    raise RuntimeError(secret)
+                raise Error('net::ERR_CERT_COMMON_NAME_INVALID')
+            return FakeResponse()
+
+        def locator(self, selector):
+            return FakeLocator(selector)
+
+        def evaluate(self, script):
+            if failure_at == 'csrf' and "fetch('/api/auth/csrf/'" in script:
+                raise Error(secret)
+            if 'document.cookie' in script:
+                return 'csrftoken=fixture'
+            return None
+
+        def screenshot(self, **_kwargs):
+            return None
+
+    launches = []
+
+    class FakeContext:
+        def __init__(self, untrusted):
+            self.untrusted = untrusted
+
+        def new_page(self):
+            return FakePage(self.untrusted)
+
+        def route(self, *_args):
+            return None
+
+        def close(self):
+            return None
+
+    class FakeChromium:
+        def launch_persistent_context(self, *_args, **_kwargs):
+            untrusted = not launches
+            launches.append(untrusted)
+            return FakeContext(untrusted)
+
+    class FakePlaywright:
+        def __enter__(self):
+            return SimpleNamespace(chromium=FakeChromium())
+
+        def __exit__(self, *_args):
+            return False
+
+    def fake_version(_package):
+        if failure_at == 'initial':
+            raise UnknownBrowserFailure(secret)
+        return acceptance.PLAYWRIGHT_VERSION
+
+    sync_api = ModuleType('playwright.sync_api')
+    sync_api.Error = Error
+    sync_api.sync_playwright = FakePlaywright
+    playwright = ModuleType('playwright')
+    playwright.sync_api = sync_api
+    monkeypatch.setitem(sys.modules, 'playwright', playwright)
+    monkeypatch.setitem(sys.modules, 'playwright.sync_api', sync_api)
+    monkeypatch.setattr(acceptance.importlib.metadata, 'version', fake_version)
+    monkeypatch.setattr(acceptance.os, 'access', lambda *_args: True)
+    monkeypatch.setattr(acceptance, '_new_nss_database', lambda *_args: None)
+    return secret
+
+
+def _g2_shared_runtime_argv(tmp_path):
+    private_root = tmp_path / 'private'
+    private_root.mkdir(mode=0o700)
+    private_root.chmod(0o700)
+    bundle_path = private_root / 'fixtures.json'
+    acceptance._fixtures.create_bundle(bundle_path)
+    state_path = private_root / 'state.json'
+    state_path.write_text('{"ok":true,"news_id":1}\n', encoding='utf-8')
+    compose_file = private_root / 'compose.yaml'
+    compose_file.write_text('services: {}\n', encoding='utf-8')
+    compose_env = private_root / 'compose.env'
+    compose_env.write_text('SYNTHETIC=1\n', encoding='utf-8')
+    ca_cert = private_root / 'ca.crt'
+    ca_cert.write_text('synthetic CA\n', encoding='utf-8')
+    chromium = private_root / 'chromium'
+    chromium.write_text('mock executable\n', encoding='utf-8')
+    chromium.chmod(0o700)
+    for path in (state_path, compose_file, compose_env):
+        path.chmod(0o600)
+    report = private_root / 'report.json'
+    return [
+        '--gateway-ip', '127.0.0.1', '--ca-cert', str(ca_cert),
+        '--work-dir', str(private_root), '--stage', 'g2', '--report', str(report),
+        '--chromium-executable', str(chromium),
+        '--fixture-bundle', str(bundle_path), '--fixture-state', str(state_path),
+        '--compose-project', 'newshub-local-g2-123-0123456789abcdef',
+        '--compose-file', str(compose_file), '--compose-env', str(compose_env),
+        '--gateway-container-id', GATEWAY_CONTAINER_ID,
+        '--app-image-id', APP_IMAGE_ID, '--gateway-image-id', GATEWAY_IMAGE_ID,
+        '--curl-image-id', CURL_IMAGE_ID, '--private-root', str(private_root),
+    ], report
+
+
+@pytest.mark.parametrize(('failure_at', 'active_subcheck', 'browser_exception_type'), [
+    ('initial', 'g2.shared_initial', 'BrowserExecutionError'),
+    ('mermaid', 'g2.shared_mermaid', 'Error'),
+    ('csrf', 'g2.shared_csrf_cookie', 'Error'),
+    ('wrong_san', 'g2.shared_wrong_san', 'RuntimeError'),
+])
+def test_g2_shared_browser_failures_report_safe_subcheck_and_exception(
+    tmp_path, capsys, monkeypatch, failure_at, active_subcheck, browser_exception_type,
+):
+    secret = _install_mock_shared_browser(monkeypatch, failure_at)
+    argv, report_path = _g2_shared_runtime_argv(tmp_path)
+
+    with patch.object(acceptance, '_check_http_api', side_effect=lambda *_args: None):
+        assert acceptance.main(argv) == 1
+
+    output = capsys.readouterr().out
+    report = report_path.read_text(encoding='utf-8')
+    assert all(value not in output and value not in report for value in (
+        'SECRET', 'synthetic-cookie', 'https://secret.invalid/path?token=private', 'token=private',
+    ))
+    failure = json.loads(report)['failure']
+    assert failure == {
+        'stage': 'g2', 'check': active_subcheck, 'exception_type': 'AcceptanceError',
+        'active_subcheck': active_subcheck,
+        'browser_exception_type': browser_exception_type,
+    }
+    assert secret not in output and secret not in report
+
+
+def test_g2_shared_browser_success_keeps_checks_and_clears_internal_marker(tmp_path, monkeypatch):
+    _install_mock_shared_browser(monkeypatch)
+    argv, report_path = _g2_shared_runtime_argv(tmp_path)
+
+    async def accounts_succeeded(*_args):
+        return None
+
+    with (
+        patch.object(acceptance, '_check_http_api', side_effect=lambda *_args: None),
+        patch.object(acceptance, '_run_g2_browser_checks', side_effect=accounts_succeeded),
+        patch.object(acceptance, '_run_g2_rate_limit_checks', side_effect=lambda *_args: None),
+    ):
+        assert acceptance.main(argv) == 0
+
+    result = json.loads(report_path.read_text(encoding='utf-8'))
+    checks = result['checks']
+    assert result['status'] == 'PASS'
+    assert '_g2_active_subcheck' not in checks
+    assert checks['browser_untrusted_ca'] == 'rejected with ERR_CERT_AUTHORITY_INVALID'
+    assert checks['browser_homepage'] == 'HTTP 200'
+    assert checks['browser_news_deep_link'] == 'HTTP 200'
+    assert checks['mermaid_chart']
+    assert checks['browser_csrf_cookie'] == 'readable through document.cookie'
+    assert checks['browser_wrong_san'] == 'rejected with ERR_CERT_COMMON_NAME_INVALID'
+    assert checks['browser_external_egress'] == 'blocked; no external host request observed'
+
+
+def test_g1_shared_browser_output_contract_does_not_add_g2_metadata(tmp_path, capsys, monkeypatch):
+    work_dir = tmp_path / 'work'
+    work_dir.mkdir()
+    ca_cert = tmp_path / 'ca.crt'
+    ca_cert.write_text('synthetic CA\n', encoding='utf-8')
+    argv = [
+        '--gateway-ip', '127.0.0.1', '--ca-cert', str(ca_cert),
+        '--work-dir', str(work_dir), '--stage', 'g1',
+    ]
+
+    def playwright_not_installed(_package):
+        raise acceptance.importlib.metadata.PackageNotFoundError('playwright')
+
+    monkeypatch.setattr(acceptance.importlib.metadata, 'version', playwright_not_installed)
+
+    with patch.object(acceptance, '_check_http_api', side_effect=lambda *_args: None):
+        assert acceptance.main(argv) == 1
+
+    result = json.loads(capsys.readouterr().out)
+    assert result['failure'] == (
+        'AcceptanceError: Python Playwright is not installed in the selected interpreter'
+    )
+    assert 'active_subcheck' not in result and 'browser_exception_type' not in result
 
 
 def test_g2_browser_failure_metadata_is_fixed_and_redacts_timeout_values(tmp_path, capsys):
