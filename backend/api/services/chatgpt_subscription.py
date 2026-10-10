@@ -102,6 +102,14 @@ def _oauth_auth_headers(client_id: str, method: str, secret: str) -> dict:
 
 def _post_oauth_form(endpoint: str, form: dict, *, client_id: str,
                      method: str = 'none', secret: str = '', timeout: int = 20):
+    # Especially important for confidential clients: never forward client
+    # secrets or authorization codes to a discovery-supplied foreign host.
+    if _runtime_config().website:
+        parsed = urlparse(endpoint)
+        if (parsed.scheme != 'https' or parsed.hostname != 'auth.openai.com'
+                or parsed.port not in (None, 443)
+                or parsed.username or parsed.password or parsed.fragment):
+            raise SubscriptionError('OpenAI OAuth 端点不可信，已阻止凭据发送。')
     return requests.post(
         endpoint, data=form,
         headers=_oauth_auth_headers(client_id, method, secret),
