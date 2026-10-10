@@ -263,7 +263,7 @@ def test_sse_resource_release_on_stream_iteration_exception_and_non_sse_isolatio
     assert middleware.process_view(request, lambda: None, (), {}) is None
     response = middleware(request)
     events = iter(response.streaming_content)
-    assert next(events).startswith('data: ')
+    assert next(events).startswith(b'data: ')
     with pytest.raises(RuntimeError, match='connection reset'):
         next(events)
     response.close()
