@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import os
+import stat
 import subprocess
 from pathlib import Path
 
@@ -348,3 +351,154 @@ def test_cleanup_removes_only_ledgered_container_id_and_owned_volume(tmp_path, m
     assert "user-db" not in all_args
     assert runner.report["resources"]["cleaned_container_ids"] == [container_id]
     assert runner.report["resources"]["cleaned_volumes"] == [volume_name]
+
+
+def _write_fake_docker(path: Path, events: Path) -> None:
+    path.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        "args = sys.argv[1:]\n"
+        "with open(os.environ['NHVOL_FAKE_DOCKER_EVENTS'], 'a', encoding='utf-8') as stream:\n"
+        "    stream.write(json.dumps({'args': args}) + '\\n')\n"
+        "if args[:2] == ['container', 'inspect']:\n"
+        "    format_arg = args[3]\n"
+        "    if 'Config.Labels' in format_arg:\n"
+        "        print(os.environ['NHVOL_FAKE_DOCKER_OWNER_LABEL'])\n"
+        "    elif format_arg == '{{.Id}}':\n"
+        "        print(os.environ['NHVOL_FAKE_DOCKER_CONTAINER_ID'])\n"
+        "    else:\n"
+        "        sys.exit(90)\n"
+        "elif args and args[0] == 'rm':\n"
+        "    with open(os.environ['NHVOL_LEDGER'], encoding='utf-8') as stream:\n"
+        "        entries = [json.loads(line) for line in stream if line.strip()]\n"
+        "    if not any(entry.get('id') == args[-1] and entry.get('owner_token') == os.environ['NHVOL_OWNER_TOKEN'] for entry in entries):\n"
+        "        sys.exit(91)\n"
+        "else:\n"
+        "    sys.exit(92)\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o700)
+
+
+def _prepare_fake_cleanup_runner(tmp_path, monkeypatch, *, wrong_label=False):
+    fake_docker = tmp_path / "fake-real-docker"
+    events = tmp_path / "fake-docker-events.jsonl"
+    _write_fake_docker(fake_docker, events)
+    monkeypatch.setenv("NHVOL_FAKE_DOCKER_EVENTS", str(events))
+    monkeypatch.setenv("NHVOL_FAKE_DOCKER_CONTAINER_ID", "d" * 64)
+    monkeypatch.setattr(acceptance.shutil, "which", lambda name: str(fake_docker) if name == "docker" else None)
+
+    runner = acceptance.AcceptanceRunner(options(tmp_path))
+    monkeypatch.setenv("NHVOL_FAKE_DOCKER_OWNER_LABEL", "wrong-owner" if wrong_label else runner.token)
+    runner._prepare_workspace()
+    container_name = runner.prefix + "-c001"
+    runner.ledger_path.write_text(
+        json.dumps({
+            "kind": "container",
+            "name": container_name,
+            "id": "",
+            "owner_label": acceptance.OWNER_LABEL,
+            "owner_token": runner.token,
+            "state": "timeout",
+        }) + "\n",
+        encoding="utf-8",
+    )
+    return runner, events, container_name
+
+
+def test_cleanup_timeout_container_id_is_persisted_before_secure_shim_removal(tmp_path, monkeypatch):
+    runner, events, container_name = _prepare_fake_cleanup_runner(tmp_path, monkeypatch)
+    container_id = "d" * 64
+
+    runner._cleanup()
+
+    assert acceptance._read_ledger(runner.ledger_path)[0]["id"] == container_id
+    recorded_calls = [json.loads(line)["args"] for line in events.read_text(encoding="utf-8").splitlines()]
+    assert recorded_calls == [
+        ["container", "inspect", "--format", f'{{{{ index .Config.Labels "{acceptance.OWNER_LABEL}" }}}}', container_name],
+        ["container", "inspect", "--format", "{{.Id}}", container_name],
+        ["rm", "-f", container_id],
+    ]
+    assert runner.report["resources"]["cleaned_container_ids"] == [container_id]
+
+
+def test_cleanup_wrong_label_never_persists_id_or_removes_container_through_shim(tmp_path, monkeypatch):
+    runner, events, _container_name = _prepare_fake_cleanup_runner(tmp_path, monkeypatch, wrong_label=True)
+    container_id = "d" * 64
+
+    with pytest.raises(acceptance.AcceptanceError, match="refused to remove container"):
+        runner._cleanup()
+
+    assert acceptance._read_ledger(runner.ledger_path)[0]["id"] == ""
+    recorded_calls = [json.loads(line)["args"] for line in events.read_text(encoding="utf-8").splitlines()]
+    assert len(recorded_calls) == 1
+    assert recorded_calls[0][0:2] == ["container", "inspect"]
+    assert all(args[0] != "rm" or args[-1] != container_id for args in recorded_calls)
+
+
+@pytest.mark.parametrize("race", ["directory", "symlink"])
+def test_run_does_not_write_or_chmod_a_competing_report_path(tmp_path, monkeypatch, race):
+    runner = acceptance.AcceptanceRunner(options(tmp_path))
+    report_dir = runner.report_dir
+    sentinel_dir = tmp_path / "existing-evidence"
+    sentinel_dir.mkdir(mode=0o700)
+    report_file = sentinel_dir / "report.json"
+    report_file.write_bytes(b"preserve competing report\n")
+    report_file.chmod(0o640)
+    sentinel_dir.chmod(0o751)
+
+    if race == "directory":
+        report_dir.mkdir(mode=0o711)
+        report_dir.chmod(0o711)
+        existing_dir = report_dir
+        report_file = report_dir / "report.json"
+        report_file.write_bytes(b"preserve competing report\n")
+        report_file.chmod(0o640)
+    else:
+        report_dir.symlink_to(sentinel_dir, target_is_directory=True)
+        existing_dir = sentinel_dir
+
+    existing_mode = stat.S_IMODE(existing_dir.stat().st_mode)
+    existing_file_mode = stat.S_IMODE(report_file.stat().st_mode)
+    monkeypatch.setattr(runner, "_cleanup", lambda: pytest.fail("cleanup must not run without owned workspace"))
+
+    assert runner.run() == 1
+    assert report_file.read_bytes() == b"preserve competing report\n"
+    assert stat.S_IMODE(existing_dir.stat().st_mode) == existing_mode
+    assert stat.S_IMODE(report_file.stat().st_mode) == existing_file_mode
+    assert sorted(path.name for path in existing_dir.iterdir()) == ["report.json"]
+    if race == "symlink":
+        assert report_dir.is_symlink()
+        assert report_dir.resolve() == sentinel_dir.resolve()
+    else:
+        assert stat.S_IMODE(report_dir.stat().st_mode) == 0o711
+
+
+def test_run_stops_writing_and_skips_cleanup_after_owned_workspace_becomes_symlink(tmp_path, monkeypatch):
+    runner = acceptance.AcceptanceRunner(options(tmp_path))
+    runner.real_docker = "/unused/fake-docker"
+    sentinel_dir = tmp_path / "evidence-target"
+    sentinel_dir.mkdir(mode=0o751)
+    sentinel = sentinel_dir / "report.json"
+    sentinel.write_bytes(b"preserve evidence\n")
+    sentinel.chmod(0o640)
+    original_dir_mode = stat.S_IMODE(sentinel_dir.stat().st_mode)
+    original_file_mode = stat.S_IMODE(sentinel.stat().st_mode)
+    displaced_workspace = tmp_path / "displaced-owned-workspace"
+    prepare_workspace = runner._prepare_workspace
+
+    def prepare_then_replace_with_symlink():
+        prepare_workspace()
+        runner.report_dir.rename(displaced_workspace)
+        runner.report_dir.symlink_to(sentinel_dir, target_is_directory=True)
+
+    monkeypatch.setattr(runner, "_prepare_workspace", prepare_then_replace_with_symlink)
+    monkeypatch.setattr(runner, "_cleanup", lambda: pytest.fail("cleanup must not use a replaced workspace"))
+
+    assert runner.run() == 1
+    assert runner.report_dir.is_symlink()
+    assert sentinel.read_bytes() == b"preserve evidence\n"
+    assert stat.S_IMODE(sentinel_dir.stat().st_mode) == original_dir_mode
+    assert stat.S_IMODE(sentinel.stat().st_mode) == original_file_mode
+    assert sorted(path.name for path in sentinel_dir.iterdir()) == ["report.json"]
+    assert not (displaced_workspace / "report.json").exists()

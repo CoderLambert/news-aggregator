@@ -565,10 +565,15 @@ class AcceptanceRunner:
         }
         self.child_env: dict[str, str] = {}
         self.workspace_created = False
+        self.workspace_identity: tuple[int, int] | None = None
         self.busy_before: list[str] | None = None
 
     def _prepare_workspace(self) -> None:
         self.report_dir.mkdir(mode=0o700)
+        workspace_stat = self.report_dir.lstat()
+        if not stat.S_ISDIR(workspace_stat.st_mode):
+            raise AcceptanceError("report workspace is not a real directory")
+        self.workspace_identity = (workspace_stat.st_dev, workspace_stat.st_ino)
         self.workspace_created = True
         os.chmod(self.report_dir, 0o700)
         self.bin_dir.mkdir(mode=0o700)
@@ -642,7 +647,21 @@ class AcceptanceRunner:
         return details
 
     def _save_report(self) -> None:
+        if not self._owns_workspace():
+            raise AcceptanceError("refused to write outside this run's private report workspace")
         _atomic_private_json(self.report_path, self.report)
+
+    def _owns_workspace(self) -> bool:
+        if not self.workspace_created or self.workspace_identity is None:
+            return False
+        try:
+            current = self.report_dir.lstat()
+        except OSError:
+            return False
+        return (
+            stat.S_ISDIR(current.st_mode)
+            and (current.st_dev, current.st_ino) == self.workspace_identity
+        )
 
     def _run_helper(self, label: str, volume: str, code: str, *, user: str = PRODUCTION_USER, target: str = "/fixture", timeout: float = 90.0) -> subprocess.CompletedProcess[str]:
         return self._command(label, [
@@ -960,6 +979,10 @@ class AcceptanceRunner:
             if inspect_id.returncode != 0 or not re.fullmatch(r"[0-9a-f]{12,64}", container_id):
                 errors.append("could not resolve owned container ID for cleanup")
                 continue
+            _append_private_jsonl(
+                self.ledger_path,
+                {**entry, "id": container_id, "state": "verified_for_cleanup"},
+            )
             remove = self._command("remove_owned_container_id", ["docker", "rm", "-f", container_id])
             if remove.returncode != 0:
                 errors.append("could not remove owned container ID")
@@ -1027,20 +1050,30 @@ class AcceptanceRunner:
         except Exception as exc:
             self.report["error"] = str(exc)
         finally:
-            try:
-                if self.real_docker and self.child_env:
-                    self._cleanup()
-                self.report["checks"]["cleanup"] = {"status": "PASS"}
-            except Exception as exc:
-                self.report["checks"]["cleanup"] = {"status": "FAIL", "detail": str(exc)}
+            if not self._owns_workspace():
+                error = "report workspace was not created by this run or is no longer owned"
+                self.report["checks"]["cleanup"] = {"status": "FAIL", "detail": error}
                 if "error" not in self.report:
-                    self.report["error"] = str(exc)
-            if self.workspace_created and self.report_dir.exists() and not self.report_path.exists():
-                # Preflight failures after report-directory creation remain visible.
-                self._save_report()
-            statuses = [self.report["checks"][name]["status"] for name in CHECK_NAMES]
-            self.report["overall"] = "PASS" if all(status == "PASS" for status in statuses) else "FAIL"
-            self._save_report()
+                    self.report["error"] = error
+                self.report["overall"] = "FAIL"
+            else:
+                try:
+                    if self.real_docker and self.child_env:
+                        self._cleanup()
+                    self.report["checks"]["cleanup"] = {"status": "PASS"}
+                except Exception as exc:
+                    self.report["checks"]["cleanup"] = {"status": "FAIL", "detail": str(exc)}
+                    if "error" not in self.report:
+                        self.report["error"] = str(exc)
+                if self._owns_workspace():
+                    if not self.report_path.exists():
+                        # Preflight failures after our directory creation remain visible.
+                        self._save_report()
+                    statuses = [self.report["checks"][name]["status"] for name in CHECK_NAMES]
+                    self.report["overall"] = "PASS" if all(status == "PASS" for status in statuses) else "FAIL"
+                    self._save_report()
+                else:
+                    self.report["overall"] = "FAIL"
         return 0 if self.report["overall"] == "PASS" else 1
 
 
