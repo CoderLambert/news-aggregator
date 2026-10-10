@@ -320,6 +320,7 @@ def _claim(run_id):
             session__user_id=F('user_id'),
         ).update(
             status='running', run_token=token, started_at=now,
+            queued_query='', queued_local_only=False,
             heartbeat_at=now, lease_expires_at=now + RUN_LEASE, updated_at=now,
         )
     return token if changed else None
