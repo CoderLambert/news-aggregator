@@ -1006,7 +1006,7 @@ class AcceptanceRunner:
         target_prior = self.snapshot_dir / self.target_prior.name
         self._backup("backup_target_before_tamper_test", self.target_volume, target_prior)
         with self.source_a.open("rb") as source, self.tampered.open("xb") as target:
-            data = source.read_bytes()
+            data = source.read()
             if len(data) < 200:
                 raise AcceptanceError("synthetic snapshot is unexpectedly small")
             target.write(data[:-1] + bytes([data[-1] ^ 1]))

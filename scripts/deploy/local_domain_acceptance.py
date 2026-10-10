@@ -408,10 +408,11 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
     _require(os.access(executable_path, os.X_OK), 'Chromium executable is not executable')
 
     ca_cert = args.ca_cert.resolve(strict=True)
-    with tempfile.TemporaryDirectory(prefix='newshub-browser-', dir=work_dir) as temp_name:
+    with tempfile.TemporaryDirectory(prefix='nb-', dir='/tmp') as temp_name:
         profile_root = Path(temp_name)
-        task_browser_home = profile_root / 'untrusted-home'
-        task_browser_home.mkdir()
+        os.chmod(profile_root, 0o700)
+        task_browser_home = profile_root / 'u'
+        task_browser_home.mkdir(mode=0o700)
         _new_nss_database(task_browser_home, None)
 
         try:
@@ -442,8 +443,8 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
             finally:
                 untrusted_context.close()
 
-        task_browser_home = profile_root / 'trusted-home'
-        task_browser_home.mkdir()
+        task_browser_home = profile_root / 't'
+        task_browser_home.mkdir(mode=0o700)
         _new_nss_database(task_browser_home, ca_cert)
         with sync_playwright() as playwright:
             context = playwright.chromium.launch_persistent_context(

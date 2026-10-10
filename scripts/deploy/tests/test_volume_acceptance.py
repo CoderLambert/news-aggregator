@@ -46,6 +46,69 @@ def test_synthetic_fixture_and_uid_integrity_helpers_are_valid_python(tmp_path):
     compile(runner._uid_integrity_code(), "<uid-integrity-helper>", "exec")
 
 
+def test_tampered_snapshot_changes_only_last_byte_and_keeps_private_sidecar(tmp_path, monkeypatch):
+    runner = acceptance.AcceptanceRunner(options(tmp_path))
+    runner.report_dir.mkdir(mode=0o700)
+    runner.snapshot_dir.mkdir(mode=0o700)
+    original = bytes(range(256)) + b"newshub-synthetic-snapshot"
+    runner.source_a.write_bytes(original)
+    runner.source_a.chmod(0o600)
+    source_manifest = Path(f"{runner.source_a}.manifest.json")
+    source_manifest.write_text('{"fixture":"A"}\n', encoding="utf-8")
+    source_manifest.chmod(0o600)
+
+    reads = iter((["A"], ["A"]))
+    restore_calls = []
+    monkeypatch.setattr(runner, "_read_volume", lambda _volume: next(reads))
+    monkeypatch.setattr(runner, "_backup", lambda *_args: None)
+    monkeypatch.setattr(runner, "_restore", lambda *args, **kwargs: restore_calls.append((args, kwargs)))
+
+    result = runner._case_tampered()
+
+    expected_tampered = original[:-1] + bytes([original[-1] ^ 1])
+    assert runner.source_a.read_bytes() == original
+    assert runner.tampered.read_bytes() == expected_tampered
+    assert len(expected_tampered) == len(original) >= 200
+    assert expected_tampered[:-1] == original[:-1]
+    assert expected_tampered[-1] == original[-1] ^ 1
+    tampered_manifest = Path(f"{runner.tampered}.manifest.json")
+    assert tampered_manifest.read_bytes() == source_manifest.read_bytes()
+    assert stat.S_IMODE(runner.tampered.stat().st_mode) == 0o600
+    assert stat.S_IMODE(tampered_manifest.stat().st_mode) == 0o600
+    assert restore_calls == [((
+        "restore_tampered_snapshot_expected_rejection",
+        runner.tampered,
+        runner.target_volume,
+    ), {"replace": True, "prior": runner.target_prior, "expect_success": False})]
+    assert result == {"cli_exit_nonzero": True, "target_rows_unchanged": ["A"]}
+
+
+@pytest.mark.parametrize("failure", ["short_source", "existing_tampered_output"])
+def test_tampered_snapshot_preconditions_fail_before_restore(tmp_path, monkeypatch, failure):
+    runner = acceptance.AcceptanceRunner(options(tmp_path))
+    runner.report_dir.mkdir(mode=0o700)
+    runner.snapshot_dir.mkdir(mode=0o700)
+    if failure == "short_source":
+        runner.source_a.write_bytes(b"short")
+    else:
+        runner.source_a.write_bytes(bytes(range(256)))
+        runner.tampered.write_bytes(b"preserve existing output")
+    source_manifest = Path(f"{runner.source_a}.manifest.json")
+    source_manifest.write_text('{"fixture":"A"}\n', encoding="utf-8")
+    restore_calls = []
+    monkeypatch.setattr(runner, "_read_volume", lambda _volume: ["A"])
+    monkeypatch.setattr(runner, "_backup", lambda *_args: None)
+    monkeypatch.setattr(runner, "_restore", lambda *args, **kwargs: restore_calls.append((args, kwargs)))
+
+    expected = "synthetic snapshot is unexpectedly small" if failure == "short_source" else "File exists"
+    with pytest.raises((acceptance.AcceptanceError, FileExistsError), match=expected):
+        runner._case_tampered()
+
+    assert restore_calls == []
+    if failure == "existing_tampered_output":
+        assert runner.tampered.read_bytes() == b"preserve existing output"
+
+
 def test_secure_docker_policy_names_resources_and_locks_network_image_and_mounts(tmp_path):
     prefix = "nhpub-volume-0123456789abcdef01234567"
     token = "0123456789abcdef01234567"
