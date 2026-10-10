@@ -10,3 +10,5 @@ Nginx新增独立引用regex精确匹配/api/ai/jobs/UUID/events/，与现resear
 - Negative tests：坏workerflag/count、2workers同slot、失心跳health非0、没envflag却--ai-workers1拒绝；维护窗口失败不启动任何worker；不能backup运行中AI卷；SSE路径外不松缓存/认证，UUIDregex语法quoted；不会触碰用户9527/卷。
 - Forbidden：不生产执行/profile开关/真实AI/授权/OAuth/网络模型/用户DB，不改开发compose/既有schema/费用limits，不commit/派生；未拥有业务文件只能报告请求Sol协调，最多两次失败返回。
 - Return format：paths/diff/HEAD、定向exit/真实nginx-t/compose、runtime health和实际维护窗口NOT_RUN或报告、禁用/启动/停止矩阵；不声称服务已上线。
+
+站点配置传播冻结：app需要同一SITE_AI配置用于批准/报价/config fingerprint，但不执行SDK；新增单独x-site-ai-environment anchor，仅合并到app、ai-worker、ai-worker-2，逐项传递SITE_AI_API_KEY/MODEL/PROVIDER_APPROVED/INPUT_MICROUSD_PER_MILLION_TOKENS/OUTPUT_MICROUSD_PER_MILLION_TOKENS。不得将站点key放进crawler/indexer共享x-runtime anchor或全部env_file；crawler/indexer不获site key，provider批准默认0。三AI相关服务共享现Django SECRET_KEY/DB与明确site配置，以免app误关闭或worker配置fingerprint不一致。合成compose config测试须证明app与两worker获得fake site字段，crawler/indexer不获得key/approval。输出config仅--quiet/结构化脱敏断言，不打印凭据。
