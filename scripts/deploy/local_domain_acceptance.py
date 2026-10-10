@@ -76,7 +76,10 @@ G2_BROWSER_SUBCHECKS = frozenset({
     'g2.auth_race_identity_b', 'g2.auth_race_favorites_b',
     'g2.owner_csrf',
     'g2.logout_a_after_owner_writes',
-    'g2.admin', 'g2.final_audit', 'g2.anon_after_logout',
+    'g2.admin_login', 'g2.admin_dashboard_api', 'g2.admin_provider_api',
+    'g2.admin_page', 'g2.admin_dashboard_ready', 'g2.admin_deactivate',
+    'g2.admin_inactive_api', 'g2.admin_inactive_ui',
+    'g2.final_audit', 'g2.anon_after_logout',
     'g2.cookie_attributes',
 })
 
@@ -1606,6 +1609,86 @@ def _is_auth_me_get_response(response) -> bool:
     )
 
 
+def _is_g2_admin_dashboard_response(response) -> bool:
+    request_method = getattr(getattr(response, 'request', None), 'method', None)
+    try:
+        response_url = getattr(response, 'url', None)
+        if not isinstance(response_url, str):
+            return False
+        parsed = urlsplit(response_url)
+        port = parsed.port
+    except ValueError:
+        return False
+    return (
+        isinstance(request_method, str)
+        and request_method == 'GET'
+        and parsed.scheme == 'https'
+        and parsed.hostname == HOST
+        and parsed.netloc in {HOST, f'{HOST}:443'}
+        and port in (None, 443)
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path == '/api/admin/crawler/dashboard/'
+    )
+
+
+async def _run_g2_admin_acceptance(
+    page,
+    checks: dict[str, str],
+    *,
+    login_admin,
+    browser_api,
+    deactivate_admin,
+) -> None:
+    _mark_g2_browser_subcheck(checks, 'g2.admin_login')
+    await login_admin()
+
+    _mark_g2_browser_subcheck(checks, 'g2.admin_dashboard_api')
+    dashboard_api = await browser_api('GET', '/api/admin/crawler/dashboard/')
+    _require(_safe_http_status(dashboard_api) == 200, 'active synthetic superuser could not read the admin dashboard')
+
+    _mark_g2_browser_subcheck(checks, 'g2.admin_provider_api')
+    provider_api = await browser_api('GET', '/api/provider-comparisons/')
+    _require(_safe_http_status(provider_api) == 200, 'active synthetic superuser could not read provider comparison records')
+
+    _mark_g2_browser_subcheck(checks, 'g2.admin_page')
+    async with page.expect_response(_is_g2_admin_dashboard_response, timeout=15000) as dashboard_info:
+        admin_page = await page.goto(
+            f'https://{HOST}/admin/crawlers',
+            wait_until='domcontentloaded',
+            timeout=15000,
+        )
+    _require(admin_page is not None and _safe_http_status(admin_page) == 200, 'admin UI deep link did not load')
+    dashboard_response = await dashboard_info.value
+    try:
+        completion_error = await asyncio.wait_for(dashboard_response.finished(), timeout=15)
+    except Exception:
+        raise AcceptanceError('active admin dashboard response did not finish cleanly') from None
+    _require(completion_error is None, 'active admin dashboard response did not finish cleanly')
+    _require(_safe_http_status(dashboard_response) == 200, 'active admin dashboard response did not return HTTP 200')
+
+    _mark_g2_browser_subcheck(checks, 'g2.admin_dashboard_ready')
+    await page.get_by_role('heading', name='来源管理', exact=True).wait_for(state='visible', timeout=15000)
+
+    _mark_g2_browser_subcheck(checks, 'g2.admin_deactivate')
+    await deactivate_admin()
+
+    _mark_g2_browser_subcheck(checks, 'g2.admin_inactive_api')
+    for path in (
+        '/api/auth/me/',
+        '/api/admin/crawler/dashboard/',
+        '/api/provider-comparisons/',
+    ):
+        response = await browser_api('GET', path)
+        _require(_safe_http_status(response) == 403, 'inactive admin session retained a protected API access')
+
+    _mark_g2_browser_subcheck(checks, 'g2.admin_inactive_ui')
+    await page.reload(wait_until='domcontentloaded', timeout=20000)
+    await page.get_by_role('button', name='登录', exact=True).wait_for(state='visible', timeout=15000)
+    checks['g2_active_admin'] = 'active synthetic superuser reads admin/provider APIs and completes the dashboard UI before deactivation'
+    checks['g2_inactive_admin_session'] = 'after deactivation, old session receives HTTP 403 from me/admin/provider endpoints and returns to logged-out UI'
+
+
 def _validated_auth_me_snapshot(response: dict, expected_username: str) -> dict:
     body = response.get('body') if isinstance(response, dict) else None
     _require(
@@ -2047,23 +2130,16 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
                     page, bundle['users']['a']['username'], context,
                     checks=checks, subcheck='g2.logout_a_after_owner_writes',
                 )
-                mark('g2.admin')
-                await _login_ui(page, bundle['users']['admin'])
-                _require((await _browser_api(page, 'GET', '/api/admin/crawler/dashboard/'))['status'] == 200, 'active synthetic superuser could not read the admin dashboard')
-                _require((await _browser_api(page, 'GET', '/api/provider-comparisons/'))['status'] == 200, 'active synthetic superuser could not read provider comparison records')
-                request_paths.clear()
-                admin_page = await page.goto(f'https://{HOST}/admin/crawlers', wait_until='domcontentloaded', timeout=20000)
-                _require(admin_page is not None and admin_page.status == 200, 'admin UI deep link did not load')
-                await page.wait_for_timeout(300)
-                _require(any(path.startswith('/api/admin/crawler/dashboard/') for path in request_paths), 'active superuser admin UI did not query its dashboard')
-                await asyncio.to_thread(_run_fixture_program, args, bundle, 'deactivate-admin')
-                _require((await _browser_api(page, 'GET', '/api/auth/me/'))['status'] == 403, 'inactive admin session still passed auth/me')
-                _require((await _browser_api(page, 'GET', '/api/admin/crawler/dashboard/'))['status'] == 403, 'inactive admin session still read admin dashboard')
-                _require((await _browser_api(page, 'GET', '/api/provider-comparisons/'))['status'] == 403, 'inactive admin session still read provider comparisons')
-                await page.reload(wait_until='domcontentloaded', timeout=20000)
-                await page.get_by_role('button', name='登录', exact=True).wait_for(state='visible', timeout=15000)
-                checks['g2_active_admin'] = 'active synthetic superuser reads admin/provider records and triggers admin UI query'
-                checks['g2_inactive_admin_session'] = 'after deactivation, old session receives HTTP 403 from me/admin/provider endpoints'
+                async def deactivate_synthetic_admin() -> None:
+                    await asyncio.to_thread(_run_fixture_program, args, bundle, 'deactivate-admin')
+
+                await _run_g2_admin_acceptance(
+                    page,
+                    checks,
+                    login_admin=lambda: _login_ui(page, bundle['users']['admin']),
+                    browser_api=lambda method, path: _browser_api(page, method, path),
+                    deactivate_admin=deactivate_synthetic_admin,
+                )
 
                 mark('g2.final_audit')
                 await page.goto(f'https://{HOST}/news/{state["news_id"]}', wait_until='domcontentloaded', timeout=20000)

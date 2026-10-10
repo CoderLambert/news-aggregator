@@ -857,7 +857,10 @@ def test_g2_browser_subchecks_are_fixed_and_cover_the_account_flow():
         'g2.auth_race_reload', 'g2.auth_race_wait_capture',
         'g2.auth_race_login_b', 'g2.auth_race_release',
         'g2.auth_race_identity_b', 'g2.auth_race_favorites_b',
-        'g2.owner_csrf', 'g2.admin',
+        'g2.owner_csrf',
+        'g2.admin_login', 'g2.admin_dashboard_api', 'g2.admin_provider_api',
+        'g2.admin_page', 'g2.admin_dashboard_ready', 'g2.admin_deactivate',
+        'g2.admin_inactive_api', 'g2.admin_inactive_ui',
         'g2.final_audit', 'g2.anon_after_logout', 'g2.cookie_attributes',
     }
     assert required <= acceptance.G2_BROWSER_SUBCHECKS
@@ -881,6 +884,227 @@ def test_g2_browser_subchecks_are_fixed_and_cover_the_account_flow():
     assert checks == {'_g2_active_subcheck': 'g2.logout_a'}
     with pytest.raises(ValueError):
         acceptance._mark_g2_browser_subcheck(checks, 'g2.secret-value')
+
+
+@pytest.mark.parametrize(('url', 'method', 'matches'), [
+    (f'https://{acceptance.HOST}/api/admin/crawler/dashboard/?lang=zh', 'GET', True),
+    (f'https://{acceptance.HOST}:443/api/admin/crawler/dashboard/', 'GET', True),
+    (f'http://{acceptance.HOST}/api/admin/crawler/dashboard/', 'GET', False),
+    ('https://evil.invalid/api/admin/crawler/dashboard/', 'GET', False),
+    (f'https://user@{acceptance.HOST}/api/admin/crawler/dashboard/', 'GET', False),
+    (f'https://{acceptance.HOST}:444/api/admin/crawler/dashboard/', 'GET', False),
+    (f'https://{acceptance.HOST}/api/admin/crawler/dashboard/extra', 'GET', False),
+    (f'https://{acceptance.HOST}/api/admin/crawler/dashboard-v2/', 'GET', False),
+    (f'https://{acceptance.HOST}/api/admin/crawler/dashboard/', 'POST', False),
+    (f'https://{acceptance.HOST}/api/admin/crawler/dashboard/', 'HEAD', False),
+    (f'https://{acceptance.HOST}/api/admin/crawler/dashboard/', 'get', False),
+    (f'https://{acceptance.HOST}:not-a-port/api/admin/crawler/dashboard/', 'GET', False),
+])
+def test_g2_admin_dashboard_response_matcher_requires_exact_https_url_and_get(url, method, matches):
+    response = SimpleNamespace(url=url, request=SimpleNamespace(method=method))
+    assert acceptance._is_g2_admin_dashboard_response(response) is matches
+
+
+class _FakeG2AdminResponse:
+    def __init__(self, events, *, status=200, finished_error=False, finished_result=None):
+        self.url = f'https://{acceptance.HOST}/api/admin/crawler/dashboard/?lang=zh'
+        self.request = SimpleNamespace(method='GET')
+        self.status = status
+        self.events = events
+        self.finished_error = finished_error
+        self.finished_result = finished_result
+
+    async def finished(self):
+        self.events.append('dashboard.finished')
+        if self.finished_error:
+            raise RuntimeError('synthetic response secret')
+        return self.finished_result
+
+
+class _FakeG2AdminExpectation:
+    def __init__(self, page, predicate):
+        self.page = page
+        self.predicate = predicate
+        self.future = asyncio.get_running_loop().create_future()
+
+    async def __aenter__(self):
+        assert self.page.expectation_active is False
+        self.page.expectation_active = True
+        self.page.events.append('dashboard.listener_registered')
+        return self
+
+    async def __aexit__(self, *_exc_info):
+        self.page.expectation_active = False
+        self.page.events.append('dashboard.response_wait')
+        if self.page.capture_timeout:
+            raise asyncio.TimeoutError('synthetic response timeout secret')
+        if self.page.response_delay:
+            await asyncio.sleep(self.page.response_delay)
+        assert self.predicate(self.page.dashboard_response)
+        self.future.set_result(self.page.dashboard_response)
+        self.page.events.append('dashboard.response_captured')
+        return False
+
+    @property
+    def value(self):
+        return self.future
+
+
+class _FakeG2AdminLocator:
+    def __init__(self, page, role, name):
+        self.page = page
+        self.role = role
+        self.name = name
+
+    async def wait_for(self, *, state, timeout):
+        if self.role == 'heading':
+            assert (self.name, state, timeout) == ('来源管理', 'visible', 15000)
+            self.page.events.append('dashboard.heading_wait')
+            if not self.page.content_ready:
+                raise asyncio.TimeoutError('synthetic private content readiness detail')
+            self.page.events.append('dashboard.heading_visible')
+            return
+        assert (self.role, self.name, state, timeout) == ('button', '登录', 'visible', 15000)
+        self.page.events.append('logged_out_button_visible')
+
+
+class _FakeG2AdminPage:
+    def __init__(
+        self,
+        *,
+        events=None,
+        capture_timeout=False,
+        response_delay=0,
+        navigation_status=200,
+        dashboard_status=200,
+        finished_error=False,
+        finished_result=None,
+        content_ready=True,
+    ):
+        self.events = events if events is not None else []
+        self.expectation_active = False
+        self.capture_timeout = capture_timeout
+        self.response_delay = response_delay
+        self.navigation_status = navigation_status
+        self.content_ready = content_ready
+        self.dashboard_response = _FakeG2AdminResponse(
+            self.events,
+            status=dashboard_status,
+            finished_error=finished_error,
+            finished_result=finished_result,
+        )
+
+    def expect_response(self, predicate, *, timeout):
+        assert timeout == 15000
+        self.events.append('dashboard.expect_created')
+        return _FakeG2AdminExpectation(self, predicate)
+
+    async def goto(self, url, *, wait_until, timeout):
+        assert self.expectation_active
+        assert url == f'https://{acceptance.HOST}/admin/crawlers'
+        assert (wait_until, timeout) == ('domcontentloaded', 15000)
+        self.events.append('admin.goto')
+        return SimpleNamespace(status=self.navigation_status)
+
+    def get_by_role(self, role, *, name, exact):
+        assert exact is True
+        return _FakeG2AdminLocator(self, role, name)
+
+    async def reload(self, *, wait_until, timeout):
+        assert (wait_until, timeout) == ('domcontentloaded', 20000)
+        self.events.append('admin.reload')
+
+
+def _fake_g2_admin_callbacks(events):
+    api_calls = []
+
+    async def login_admin():
+        events.append('admin.login')
+
+    async def browser_api(method, path):
+        assert method == 'GET'
+        api_calls.append(path)
+        events.append(f'api:{path}')
+        if path == '/api/admin/crawler/dashboard/':
+            return {'status': 200 if api_calls.count(path) == 1 else 403}
+        if path == '/api/provider-comparisons/':
+            return {'status': 200 if api_calls.count(path) == 1 else 403}
+        assert path == '/api/auth/me/'
+        return {'status': 403}
+
+    async def deactivate_admin():
+        assert 'dashboard.heading_visible' in events
+        assert events.index('dashboard.finished') < events.index('dashboard.heading_visible')
+        events.append('admin.deactivated')
+
+    return login_admin, browser_api, deactivate_admin, api_calls
+
+
+def test_g2_admin_acceptance_waits_for_slow_dashboard_response_and_ready_content_before_deactivation():
+    events = []
+    page = _FakeG2AdminPage(events=events, response_delay=0.32)
+    login_admin, browser_api, deactivate_admin, api_calls = _fake_g2_admin_callbacks(events)
+    checks = {}
+
+    async def exercise():
+        started = asyncio.get_running_loop().time()
+        await acceptance._run_g2_admin_acceptance(
+            page,
+            checks,
+            login_admin=login_admin,
+            browser_api=browser_api,
+            deactivate_admin=deactivate_admin,
+        )
+        return asyncio.get_running_loop().time() - started
+
+    elapsed = asyncio.run(exercise())
+
+    assert elapsed > 0.30
+    assert events.index('dashboard.listener_registered') < events.index('admin.goto')
+    assert events.index('dashboard.response_captured') < events.index('dashboard.finished')
+    assert events.index('dashboard.finished') < events.index('dashboard.heading_visible')
+    assert events.index('dashboard.heading_visible') < events.index('admin.deactivated')
+    assert events.index('admin.deactivated') < events.index('api:/api/auth/me/')
+    assert api_calls == [
+        '/api/admin/crawler/dashboard/', '/api/provider-comparisons/',
+        '/api/auth/me/', '/api/admin/crawler/dashboard/', '/api/provider-comparisons/',
+    ]
+    assert checks['_g2_active_subcheck'] == 'g2.admin_inactive_ui'
+    assert checks['g2_active_admin'].startswith('active synthetic superuser')
+    assert checks['g2_inactive_admin_session'].startswith('after deactivation')
+
+
+@pytest.mark.parametrize(('failure_options', 'expected_subcheck'), [
+    ({'capture_timeout': True}, 'g2.admin_page'),
+    ({'navigation_status': 503}, 'g2.admin_page'),
+    ({'dashboard_status': 503}, 'g2.admin_page'),
+    ({'finished_error': True}, 'g2.admin_page'),
+    ({'finished_result': 'synthetic response completion error'}, 'g2.admin_page'),
+    ({'content_ready': False}, 'g2.admin_dashboard_ready'),
+])
+def test_g2_admin_acceptance_fails_closed_before_deactivation(failure_options, expected_subcheck):
+    events = []
+    page = _FakeG2AdminPage(events=events, **failure_options)
+    login_admin, browser_api, deactivate_admin, api_calls = _fake_g2_admin_callbacks(events)
+    checks = {}
+
+    async def exercise():
+        await acceptance._run_g2_admin_acceptance(
+            page,
+            checks,
+            login_admin=login_admin,
+            browser_api=browser_api,
+            deactivate_admin=deactivate_admin,
+        )
+
+    with pytest.raises((acceptance.AcceptanceError, asyncio.TimeoutError)):
+        asyncio.run(exercise())
+
+    assert checks['_g2_active_subcheck'] == expected_subcheck
+    assert 'admin.deactivated' not in events
+    assert '/api/auth/me/' not in api_calls
+    assert 'g2_active_admin' not in checks
+    assert 'g2_inactive_admin_session' not in checks
 
 
 def _install_mock_shared_browser(monkeypatch, failure_at=None):
