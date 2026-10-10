@@ -14,7 +14,7 @@
 | NH-PUB-02 | 03、04 | 专属vhosts/真实Host guard/共存与TLS | standalone/coexist nginx-t0、Git/news分流、绝对URI恶意Host拒绝、browser CA/SAN/HTTPS/SSE | REVIEWED | 91dc86b本地域名PASS；真实服务器未操作 |
 | NH-PUB-10 | 05 | 生产相对API/能力展示/身份缓存/SEO | G1前端436全量及正式域名只读UX/深链通过 | REVIEWED | 91dc86b G1；后续G2身份变更另审核 |
 | NH-PUB-11/12 | G1 前项 | CI/deploy/rollback/backup/restore | 正式镜像+domain PASS；真实backup/restore12checks含latest prior/tamper/runningmount拒绝/cleanup PASS | REVIEWED | 91dc86b G1；High增量闭环，外网/真机未验 |
-| S01/P01/G2 | G1本地已通过 | Chat隔离/归档、CSRF/持久限速/一次邀请、前端epoch/私有缓存/管理员 | 8be4f9d隔离后端616PASS、前端453PASS/typecheck/lint/build0；最终High与g2域名待验 | DOING | Chat与Accounts首轮High已整改；源码已提交，整体验收未完成 |
+| S01/P01/G2 | G1本地已通过 | Chat隔离/归档、CSRF/持久限速/一次邀请、前端epoch/私有缓存/管理员 | 8be4f9d隔离后端616PASS、前端453PASS/typecheck/lint/build0；最终High发现1P2 Auth generation竞争定向整改；g2域名待验 | DOING | Chat及Accounts NFKC整改High闭环；Frontend1P2修复中，整体验收未完成 |
 | NH-PUB-06/S02/S04/O01/O02/O03/G3 | G2 | Provider 合规路由/预算/持久任务/SSE | Fake Provider 原子配额/幂等/取消/恢复/隔离/High | TODO | 基线；未审核 |
 | NH-PUB-07 | P00 | openai-hosted-integration.md；身份/plan 批准分离 | 准备文档离线校验0；真实申请未提交/两批准EXTERNAL_BLOCKED | TESTED | d220f00候选；非获批 |
 | NH-PUB-08 | G2、模式 ADR | subscription service/views/models/前端/tests | 离线模式/快照/重放/nonce/aud/iss/cookie/High | TODO | 基线；未审核 |
