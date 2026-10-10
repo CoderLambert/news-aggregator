@@ -208,7 +208,8 @@ function TranslationProgressUI({ progress, waitingShared, onStop }: { progress: 
       <Card className="mb-6 items-center border-violet-100 bg-violet-50/60 py-8 text-center">
         <Loader2 className="size-7 animate-spin text-violet-500" />
         <div>
-          <p className="mt-1 text-xs text-violet-500">{waitingShared ? '正在复用其他读者发起的翻译，完成后自动显示。' : '取消会阻止后续请求与保存；正在进行的请求可能先完成。'}</p>
+          <p className="mt-1 text-sm font-medium text-violet-700">{waitingShared ? '共享译文正在生成，完成后自动显示…' : '正在翻译全文…'}</p>
+          <p className="mt-1 text-xs text-violet-500">{waitingShared ? '正在复用其他读者发起的翻译，不会显示其他用户的私有进度。' : '取消会阻止后续请求与保存；正在进行的请求可能先完成。'}</p>
           {stopButton}
         </div>
       </Card>
