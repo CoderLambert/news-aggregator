@@ -27,6 +27,8 @@ from urllib.parse import urlparse
 HOST = 'news.lambert.host'
 PLAYWRIGHT_VERSION = '1.62.0'
 STATUS_MARKER = '\n__NEWSHUB_HTTP_STATUS__='
+CONTAINER_ID_PATTERN = re.compile(r'[a-f0-9]{64}')
+IMAGE_ID_PATTERN = re.compile(r'sha256:[a-f0-9]{64}')
 FORWARDED_SPOOF_HEADERS = (
     'X-Forwarded-Proto: http',
     'X-Forwarded-For: 198.51.100.44',
@@ -71,6 +73,191 @@ def _read_fixture_state(args: argparse.Namespace) -> dict:
     return state
 
 
+def _docker_compose_container_id(args: argparse.Namespace, service: str) -> str:
+    command = [
+        'docker', 'compose', '--project-name', args.compose_project,
+        '--file', str(args.compose_file), '--env-file', str(args.compose_env),
+        'ps', '-q', service,
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    _require(result.returncode == 0, f'could not resolve the G2 {service} container')
+    ids = [line.strip().lower() for line in result.stdout.splitlines() if line.strip()]
+    _require(
+        len(ids) == 1 and CONTAINER_ID_PATTERN.fullmatch(ids[0]) is not None,
+        f'G2 Compose project did not resolve exactly one {service} container ID',
+    )
+    return ids[0]
+
+
+def _docker_inspect_object(command: list[str], description: str) -> dict:
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    _require(result.returncode == 0, f'could not inspect the G2 {description}')
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise AcceptanceError(f'G2 {description} inspection returned invalid JSON') from exc
+    _require(
+        isinstance(payload, list) and len(payload) == 1 and isinstance(payload[0], dict),
+        f'G2 {description} inspection did not return one object',
+    )
+    return payload[0]
+
+
+def _inspect_g2_container(container_id: str, description: str) -> dict:
+    return _docker_inspect_object(
+        ['docker', 'inspect', '--type', 'container', container_id], description,
+    )
+
+
+def _require_compose_identity(container: dict, container_id: str, args: argparse.Namespace, service: str) -> None:
+    _require(
+        str(container.get('Id', '')).lower() == container_id,
+        f'G2 {service} inspection returned a different container ID',
+    )
+    config = container.get('Config')
+    labels = config.get('Labels') if isinstance(config, dict) else None
+    _require(
+        isinstance(labels, dict)
+        and labels.get('com.docker.compose.project') == args.compose_project
+        and labels.get('com.docker.compose.service') == service,
+        f'G2 {service} Compose ownership labels do not match this smoke project',
+    )
+    _require(
+        isinstance(container.get('State'), dict) and container['State'].get('Running') is True,
+        f'G2 {service} container is not running',
+    )
+
+
+def _inspect_g2_gateway(args: argparse.Namespace) -> dict[str, str]:
+    gateway_id = _docker_compose_container_id(args, 'gateway')
+    if args.gateway_container_id is not None:
+        _require(
+            args.gateway_container_id.lower() == gateway_id,
+            'G2 gateway ID does not match this Compose project',
+        )
+    gateway = _inspect_g2_container(gateway_id, 'gateway container')
+    _require_compose_identity(gateway, gateway_id, args, 'gateway')
+    _require(
+        gateway.get('Image') == args.gateway_image_id,
+        'G2 gateway is not running the expected immutable image ID',
+    )
+    network_settings = gateway.get('NetworkSettings')
+    _require(isinstance(network_settings, dict), 'G2 gateway network settings are invalid')
+    ports = network_settings.get('Ports') or {}
+    _require(
+        isinstance(ports, dict) and all(not bindings for bindings in ports.values()),
+        'G2 gateway has a published host port',
+    )
+    expected_network = f'{args.compose_project}_isolated'
+    networks = network_settings.get('Networks')
+    _require(
+        isinstance(networks, dict)
+        and set(networks) == {expected_network}
+        and isinstance(networks.get(expected_network), dict),
+        'G2 gateway is not attached only to this smoke internal network',
+    )
+    network_id = networks[expected_network].get('NetworkID')
+    _require(
+        isinstance(network_id, str)
+        and CONTAINER_ID_PATTERN.fullmatch(network_id.lower()) is not None,
+        'G2 gateway network ID is invalid',
+    )
+    network = _docker_inspect_object(
+        ['docker', 'network', 'inspect', network_id], 'internal network',
+    )
+    labels = network.get('Labels')
+    _require(
+        network.get('Id') == network_id.lower()
+        and network.get('Name') == expected_network
+        and network.get('Internal') is True
+        and isinstance(labels, dict)
+        and labels.get('com.docker.compose.project') == args.compose_project
+        and labels.get('com.docker.compose.network') == 'isolated',
+        'G2 gateway network is not the owned internal Compose network',
+    )
+    _require(
+        isinstance(gateway.get('HostConfig'), dict)
+        and gateway['HostConfig'].get('NetworkMode') == expected_network,
+        'G2 gateway is not using its owned internal network mode',
+    )
+    address = networks[expected_network].get('IPAddress')
+    try:
+        parsed_address = ipaddress.ip_address(address)
+    except (TypeError, ValueError) as exc:
+        raise AcceptanceError('G2 gateway has no valid internal IPv4 address') from exc
+    _require(
+        isinstance(parsed_address, ipaddress.IPv4Address),
+        'G2 gateway address must be IPv4',
+    )
+    return {
+        'container_id': gateway_id,
+        'network_id': network_id.lower(),
+        'ip': str(parsed_address),
+    }
+
+
+def _inspect_g2_app(args: argparse.Namespace, gateway_id: str) -> str:
+    app_id = _docker_compose_container_id(args, 'app')
+    app = _inspect_g2_container(app_id, 'app container')
+    _require_compose_identity(app, app_id, args, 'app')
+    app_config = app.get('Config')
+    host_config = app.get('HostConfig')
+    _require(
+        app.get('Image') == args.app_image_id,
+        'G2 app is not running the expected immutable image ID',
+    )
+    _require(
+        isinstance(app_config, dict) and app_config.get('User') == '10001:10001',
+        'G2 app does not run as UID:GID 10001:10001',
+    )
+    _require(
+        isinstance(host_config, dict) and host_config.get('NetworkMode') == f'container:{gateway_id}',
+        'G2 app does not share the exact owned gateway network namespace',
+    )
+    db_root = Path('/var/lib/newshub/db')
+    mounts = app.get('Mounts')
+    _require(
+        isinstance(mounts, list) and all(isinstance(mount, dict) for mount in mounts),
+        'G2 app mount list is invalid',
+    )
+    overlapping_mounts = []
+    for mount in mounts:
+        try:
+            destination = Path(mount.get('Destination', ''))
+        except (TypeError, ValueError):
+            continue
+        if destination == db_root or destination in db_root.parents or db_root in destination.parents:
+            overlapping_mounts.append(mount)
+    _require(
+        len(overlapping_mounts) == 1
+        and overlapping_mounts[0].get('Destination') == str(db_root)
+        and overlapping_mounts[0].get('Type') == 'volume'
+        and overlapping_mounts[0].get('Name') == f'{args.compose_project}_db-data'
+        and overlapping_mounts[0].get('RW') is True,
+        'G2 app database mount is not the unique owned named volume',
+    )
+    return app_id
+
+
+def _inspect_g2_parents(args: argparse.Namespace) -> dict[str, str]:
+    _require(
+        IMAGE_ID_PATTERN.fullmatch(args.app_image_id or '') is not None,
+        'G2 expected app image ID is invalid',
+    )
+    _require(
+        IMAGE_ID_PATTERN.fullmatch(args.gateway_image_id or '') is not None,
+        'G2 expected gateway image ID is invalid',
+    )
+    gateway = _inspect_g2_gateway(args)
+    app_id = _inspect_g2_app(args, gateway['container_id'])
+    return {
+        'app_container_id': app_id,
+        'gateway_container_id': gateway['container_id'],
+        'gateway_network_id': gateway['network_id'],
+        'gateway_ip': gateway['ip'],
+    }
+
+
 def _store_fixture_state(path: Path, state: dict) -> None:
     if path.is_symlink():
         raise AcceptanceError('refusing to replace a symlink fixture state')
@@ -95,11 +282,8 @@ def _store_fixture_state(path: Path, state: dict) -> None:
 
 def _run_fixture_program(args: argparse.Namespace, bundle: dict, phase: str) -> dict:
     program = _fixtures.render_app_program(bundle, phase)
-    command = [
-        'docker', 'compose', '--project-name', args.compose_project,
-        '--file', str(args.compose_file), '--env-file', str(args.compose_env),
-        'exec', '-T', '-i', 'app', 'python', '-',
-    ]
+    parents = _inspect_g2_parents(args)
+    command = ['docker', 'exec', '-i', parents['app_container_id'], 'python', '-']
     result = subprocess.run(command, input=program, capture_output=True, text=True, check=False)
     nonce = secrets.token_hex(6)
     _private_write(args.private_root / f'fixture-{phase}-{nonce}.stdout', result.stdout)
@@ -278,15 +462,15 @@ def _write_rate_request(
     origin: str = f'https://{HOST}',
     spoof_xff: bool = False,
 ) -> Path:
-    output = f'/smoke/rate/{name}.body'
-    headers = f'/smoke/rate/{name}.headers'
+    output = f'/smoke/output/{name}.body'
+    headers = f'/smoke/output/{name}.headers'
     lines = [
         'silent', 'show-error', 'connect-timeout = 3', 'max-time = 10',
         f'resolve = {_curl_config_quote(f"{HOST}:443:127.0.0.1")}',
         f'interface = {_curl_config_quote(interface)}',
         'cacert = "/smoke/ca.crt"',
-        f'cookie = {_curl_config_quote(f"/smoke/rate/{cookie_path}")}',
-        f'cookie-jar = {_curl_config_quote(f"/smoke/rate/{cookie_path}")}',
+        f'cookie = {_curl_config_quote(f"/smoke/output/{cookie_path}")}',
+        f'cookie-jar = {_curl_config_quote(f"/smoke/output/{cookie_path}")}',
         f'dump-header = {_curl_config_quote(headers)}',
         f'output = {_curl_config_quote(output)}',
         f'url = {_curl_config_quote(f"https://{HOST}{path}")}',
@@ -311,12 +495,33 @@ def _write_rate_request(
 
 def _run_rate_sidecar(args: argparse.Namespace, interface: str, requests: list[tuple[str, Path]]) -> dict[str, int]:
     rate_root = args.private_root / 'rate'
+    output_root = rate_root / 'output'
+    _require(
+        rate_root.is_dir() and stat.S_IMODE(rate_root.stat().st_mode) == 0o700,
+        'G2 rate fixture root must remain mode 0700',
+    )
+    _require(
+        output_root.is_dir() and stat.S_IMODE(output_root.stat().st_mode) == 0o700,
+        'G2 rate output root must remain mode 0700',
+    )
+    gateway = _inspect_g2_gateway(args)
     owner = f'org.newshub.local-domain.owner={args.compose_project}'
     suffix = secrets.token_hex(5)
     safe_ip = interface.rsplit('.', 1)[-1]
     name = f'nhsmoke-rate-{safe_ip}-{suffix}'
-    exists = subprocess.run(['docker', 'inspect', name], capture_output=True, check=False)
+    cidfile = rate_root / f'{name}.cid'
+    exists = subprocess.run(
+        ['docker', 'inspect', '--type', 'container', name],
+        capture_output=True, check=False,
+    )
     _require(exists.returncode != 0, 'random G2 sidecar container name is already in use')
+    for _marker, config_path in requests:
+        _require(
+            not config_path.is_symlink()
+            and config_path.resolve(strict=True).is_relative_to(rate_root.resolve(strict=True))
+            and stat.S_IMODE(config_path.stat(follow_symlinks=False).st_mode) == 0o600,
+            'G2 sidecar request config must be a private smoke-owned file',
+        )
     script = ['set -eu', 'umask 077']
     for marker, config_path in requests:
         relative = config_path.name
@@ -327,37 +532,146 @@ def _run_rate_sidecar(args: argparse.Namespace, interface: str, requests: list[t
     script_path = rate_root / f'run-{safe_ip}-{suffix}.sh'
     _private_write(script_path, '\n'.join(script) + '\n')
     command = [
-        'docker', 'run', '--rm', '--pull=never', '--name', name,
+        'docker', 'create', '--pull=never', '--name', name,
         '--label', owner,
-        '--network', f'container:{args.gateway_container_id}',
+        '--cidfile', str(cidfile),
+        '--network', f'container:{gateway["container_id"]}',
         '--user', f'{os.getuid()}:{os.getgid()}',
         '--read-only', '--tmpfs', '/tmp:rw,nosuid,noexec,size=16m',
         '--mount', f'type=bind,source={args.ca_cert.resolve(strict=True)},target=/smoke/ca.crt,readonly',
-        '--mount', f'type=bind,source={rate_root.resolve(strict=True)},target=/smoke/rate',
-        '--entrypoint', '/bin/sh', args.curl_image,
+        '--mount', f'type=bind,source={rate_root.resolve(strict=True)},target=/smoke/rate,readonly',
+        '--mount', f'type=bind,source={output_root.resolve(strict=True)},target=/smoke/output',
+        '--entrypoint', '/bin/sh', args.curl_image_id,
         f'/smoke/rate/{script_path.name}',
     ]
+    container_id: str | None = None
+    statuses: dict[str, int] | None = None
+    failure: AcceptanceError | None = None
+    cleanup_failure: AcceptanceError | None = None
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
+        old_umask = os.umask(0o077)
+        try:
+            create_result = subprocess.run(
+                command, capture_output=True, text=True, timeout=30, check=False,
+            )
+        finally:
+            os.umask(old_umask)
+        if create_result.returncode != 0:
+            raise AcceptanceError(f'G2 rate sidecar create failed (exit {create_result.returncode})')
+        _require(
+            not cidfile.is_symlink()
+            and cidfile.is_file()
+            and stat.S_IMODE(cidfile.stat(follow_symlinks=False).st_mode) == 0o600
+            and cidfile.stat(follow_symlinks=False).st_uid == os.getuid(),
+            'G2 sidecar CID ledger is missing or not private',
+        )
+        raw_cid = cidfile.read_text(encoding='ascii').strip()
+        _require(
+            CONTAINER_ID_PATTERN.fullmatch(raw_cid.lower()) is not None,
+            'G2 sidecar CID ledger does not contain one full container ID',
+        )
+        container_id = raw_cid.lower()
+        stdout_ids = [line.strip().lower() for line in create_result.stdout.splitlines() if line.strip()]
+        _require(stdout_ids == [container_id], 'G2 sidecar create ID did not match its CID ledger')
+        container = _inspect_g2_container(container_id, 'rate sidecar container')
+        _validate_rate_sidecar_identity(container, container_id, args, gateway['container_id'], require_stopped=True)
+        start_result = subprocess.run(
+            ['docker', 'start', '--attach', container_id],
+            capture_output=True, text=True, timeout=120, check=False,
+        )
+        _require(
+            start_result.returncode == 0,
+            f'G2 source-IP rate sidecar failed (exit {start_result.returncode})',
+        )
+        statuses = {}
+        for line in start_result.stdout.splitlines():
+            marker, sep, raw_status = line.partition('=')
+            _require(
+                bool(sep) and marker not in statuses and raw_status.isdigit(),
+                'G2 sidecar returned invalid status markers',
+            )
+            statuses[marker] = int(raw_status)
+        expected_markers = {marker for marker, _path in requests}
+        _require(set(statuses) == expected_markers, 'G2 sidecar did not return every expected status marker')
     except subprocess.TimeoutExpired as exc:
-        cleanup = subprocess.run(['docker', 'rm', '-f', name], capture_output=True, check=False)
-        if cleanup.returncode != 0:
-            raise AcceptanceError('timed-out G2 rate sidecar could not be cleaned') from exc
-        raise AcceptanceError('G2 rate sidecar exceeded its 120-second bound') from exc
-    if result.returncode != 0:
-        # curl response bodies, cookies, and private credentials stay in files.
-        raise AcceptanceError(f'G2 source-IP rate sidecar failed (exit {result.returncode})')
-    statuses: dict[str, int] = {}
-    for line in result.stdout.splitlines():
-        marker, sep, raw_status = line.partition('=')
-        _require(bool(sep) and marker not in statuses and raw_status.isdigit(), 'G2 sidecar returned invalid status markers')
-        statuses[marker] = int(raw_status)
-    expected_markers = {marker for marker, _path in requests}
-    _require(set(statuses) == expected_markers, 'G2 sidecar did not return every expected status marker')
-    for private_file in rate_root.iterdir():
-        if private_file.is_file() and not private_file.is_symlink():
-            private_file.chmod(0o600)
+        failure = AcceptanceError('G2 rate sidecar exceeded its bounded runtime')
+        failure.__cause__ = exc
+    except AcceptanceError as exc:
+        failure = exc
+    except OSError as exc:
+        failure = AcceptanceError('G2 rate sidecar could not be started')
+        failure.__cause__ = exc
+    finally:
+        if cidfile.exists() or cidfile.is_symlink():
+            try:
+                ledger_info = cidfile.stat(follow_symlinks=False)
+                _require(
+                    not cidfile.is_symlink()
+                    and stat.S_ISREG(ledger_info.st_mode)
+                    and stat.S_IMODE(ledger_info.st_mode) == 0o600
+                    and ledger_info.st_uid == os.getuid(),
+                    'G2 sidecar CID ledger changed or lost private ownership',
+                )
+                ledger_id = cidfile.read_text(encoding='ascii').strip().lower()
+                _require(
+                    CONTAINER_ID_PATTERN.fullmatch(ledger_id) is not None,
+                    'G2 sidecar CID ledger became invalid; refusing name-based cleanup',
+                )
+                if container_id is not None:
+                    _require(ledger_id == container_id, 'G2 sidecar CID ledger changed after inspection')
+                container_id = ledger_id
+                cleanup_container = _inspect_g2_container(container_id, 'rate sidecar cleanup container')
+                _validate_rate_sidecar_identity(
+                    cleanup_container, container_id, args, gateway['container_id'],
+                )
+                cleanup_result = subprocess.run(
+                    ['docker', 'rm', '-f', container_id],
+                    capture_output=True, text=True, timeout=30, check=False,
+                )
+                _require(cleanup_result.returncode == 0, 'G2 rate sidecar exact-ID cleanup failed')
+            except (AcceptanceError, OSError, subprocess.TimeoutExpired) as exc:
+                cleanup_failure = AcceptanceError('G2 rate sidecar exact-ID cleanup failed')
+                cleanup_failure.__cause__ = exc
+        if cidfile.exists() and not cidfile.is_symlink():
+            cidfile.chmod(0o600)
+        for private_file in output_root.iterdir():
+            if private_file.is_file() and not private_file.is_symlink():
+                private_file.chmod(0o600)
+
+    if cleanup_failure is not None:
+        raise cleanup_failure from failure
+    if failure is not None:
+        raise failure
+    _require(statuses is not None, 'G2 sidecar completed without status results')
     return statuses
+
+
+def _validate_rate_sidecar_identity(
+    container: dict,
+    container_id: str,
+    args: argparse.Namespace,
+    gateway_id: str,
+    *,
+    require_stopped: bool = False,
+) -> None:
+    config = container.get('Config')
+    host_config = container.get('HostConfig')
+    labels = config.get('Labels') if isinstance(config, dict) else None
+    _require(
+        str(container.get('Id', '')).lower() == container_id
+        and container.get('Image') == args.curl_image_id
+        and isinstance(labels, dict)
+        and labels.get('org.newshub.local-domain.owner') == args.compose_project
+        and config.get('User') == f'{os.getuid()}:{os.getgid()}'
+        and isinstance(host_config, dict)
+        and host_config.get('NetworkMode') == f'container:{gateway_id}',
+        'G2 rate sidecar identity does not match its private owner, image, user, or namespace',
+    )
+    if require_stopped:
+        _require(
+            container.get('State', {}).get('Running') is False,
+            'G2 rate sidecar must be inspected before it starts',
+        )
 
 
 def _csrf_from_body(path: Path) -> str:
@@ -380,6 +694,9 @@ def _run_g2_rate_limit_checks(args: argparse.Namespace, checks: dict[str, str], 
     rate_root = args.private_root / 'rate'
     rate_root.mkdir(mode=0o700)
     _require(stat.S_IMODE(rate_root.stat().st_mode) == 0o700, 'G2 rate fixture directory must be mode 0700')
+    output_root = rate_root / 'output'
+    output_root.mkdir(mode=0o700)
+    _require(stat.S_IMODE(output_root.stat().st_mode) == 0o700, 'G2 rate output directory must be mode 0700')
     # The sidecar sees only the CA certificate and its own private cookie/body files.
     _require(args.ca_cert.is_file(), 'G2 sidecar CA certificate is missing')
 
@@ -391,7 +708,7 @@ def _run_g2_rate_limit_checks(args: argparse.Namespace, checks: dict[str, str], 
     )
     statuses = _run_rate_sidecar(args, login_ip, [('csrf', login_csrf_config)])
     _require(statuses['csrf'] == 200, 'login rate sidecar could not initialize CSRF')
-    csrf_token = _csrf_from_body(rate_root / 'login-csrf.body')
+    csrf_token = _csrf_from_body(output_root / 'login-csrf.body')
     # Prove invalid CSRF and hostile Origin do not consume the login bucket.
     bad_csrf = _write_rate_request(
         rate_root, 'login-bad-csrf', interface=login_ip, path='/api/auth/login/',
@@ -426,7 +743,7 @@ def _run_g2_rate_limit_checks(args: argparse.Namespace, checks: dict[str, str], 
     statuses = _run_rate_sidecar(args, login_ip, sidecar_requests)
     _require([statuses[f'login_{attempt}'] for attempt in range(1, 6)] == [401] * 5, 'five bad-password login attempts did not reach authentication')
     _require(statuses['login_6'] == 429, 'spoofed XFF bypassed the sixth login rate limit')
-    retry_after = _retry_after(rate_root / 'login-password-6.headers')
+    retry_after = _retry_after(output_root / 'login-password-6.headers')
     after = _run_fixture_program(args, bundle, 'login-rate-count')
     _require(after.get('count') == 5, 'invalid CSRF/Origin changed the login bucket or the five-attempt limit was not exact')
     checks['g2_login_rate_limit'] = f'127.0.0.70: bad CSRF/Origin uncounted; five 401, sixth spoofed-XFF 429 Retry-After={retry_after}; bucket=5'
@@ -441,7 +758,7 @@ def _run_g2_rate_limit_checks(args: argparse.Namespace, checks: dict[str, str], 
         )
         statuses = _run_rate_sidecar(args, interface, [('csrf', csrf_config)])
         _require(statuses['csrf'] == 200, 'registration sidecar could not initialize CSRF')
-        csrf = _csrf_from_body(rate_root / f'register-{index}-csrf.body')
+        csrf = _csrf_from_body(output_root / f'register-{index}-csrf.body')
         negative = bundle['negative_registrations'][role]
         body = dict(negative)
         if role in ('wrong_email', 'expired'):
@@ -478,7 +795,7 @@ def _run_g2_rate_limit_checks(args: argparse.Namespace, checks: dict[str, str], 
         _require(statuses['special'] == expected_first, f'{role} invitation/password negative returned an unexpected status')
         _require([statuses[f'missing_{attempt}'] for attempt in range(1, 5)] == [403] * 4, 'missing invitation requests were not rejected')
         _require(statuses['sixth'] == 429, f'{interface} spoofed XFF bypassed the registration rate limit')
-        retry_after = _retry_after(rate_root / f'register-{index}-sixth.headers')
+        retry_after = _retry_after(output_root / f'register-{index}-sixth.headers')
         checks[f'g2_registration_rate_{role}'] = f'{interface}: negative registration rejected; five requests then spoofed-XFF 429 Retry-After={retry_after}'
 
     counts = _run_fixture_program(args, bundle, 'registration-rate-counts')
@@ -920,26 +1237,30 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
                 context.close()
 
 
+_BROWSER_API_SCRIPT = """async ({method, path, body}) => {
+    const headers = {};
+    const safeMethod = ['GET', 'HEAD', 'OPTIONS'].includes(method);
+    const hasJsonBody = !safeMethod && body !== undefined && body !== null;
+    if (hasJsonBody) headers['Content-Type'] = 'application/json';
+    if (!safeMethod) {
+      const cookie = document.cookie.split(';').map((value) => value.trim())
+        .find((value) => value.startsWith('csrftoken='));
+      if (!cookie) throw new Error('CSRF cookie is missing');
+      headers['X-CSRFToken'] = decodeURIComponent(cookie.slice('csrftoken='.length));
+    }
+    const options = {method, credentials: 'same-origin', headers};
+    if (hasJsonBody) options.body = JSON.stringify(body);
+    const response = await fetch(path, options);
+    const text = await response.text();
+    let parsed = text;
+    try { parsed = text ? JSON.parse(text) : null; } catch { /* keep text */ }
+    return {status: response.status, body: parsed};
+}"""
+
+
 async def _browser_api(page, method: str, path: str, body: dict | None = None) -> dict:
     response = await page.evaluate(
-        """async ({method, path, body}) => {
-            const headers = {};
-            if (body !== undefined) headers['Content-Type'] = 'application/json';
-            if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
-              const cookie = document.cookie.split(';').map((value) => value.trim())
-                .find((value) => value.startsWith('csrftoken='));
-              if (!cookie) throw new Error('CSRF cookie is missing');
-              headers['X-CSRFToken'] = decodeURIComponent(cookie.slice('csrftoken='.length));
-            }
-            const response = await fetch(path, {
-              method, credentials: 'same-origin', headers,
-              body: body === undefined ? undefined : JSON.stringify(body),
-            });
-            const text = await response.text();
-            let parsed = text;
-            try { parsed = text ? JSON.parse(text) : null; } catch { /* keep text */ }
-            return {status: response.status, body: parsed};
-        }""",
+        _BROWSER_API_SCRIPT,
         {'method': method, 'path': path, 'body': body},
     )
     return response
@@ -1389,8 +1710,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument('--compose-file', type=Path)
     parser.add_argument('--compose-env', type=Path)
     parser.add_argument('--gateway-container-id')
-    parser.add_argument('--curl-image')
+    parser.add_argument('--app-image-id')
+    parser.add_argument('--gateway-image-id')
+    parser.add_argument('--curl-image-id')
     parser.add_argument('--private-root', type=Path)
+    parser.add_argument('--check-parents', action='store_true')
+    parser.add_argument('--fixture-phase', choices=('seed',))
     args = parser.parse_args(argv)
 
     try:
@@ -1404,43 +1729,81 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error('--news-id is out of range')
     if not 1 <= args.wrong_san_port <= 65535:
         parser.error('--wrong-san-port is out of range')
-    if args.stage == 'g2':
-        required = (
-            args.fixture_bundle, args.fixture_state, args.compose_project,
-            args.compose_file, args.compose_env, args.gateway_container_id,
-            args.curl_image, args.private_root,
-        )
-        if any(value is None for value in required):
-            parser.error('G2 requires private fixture, Compose, gateway, curl-image, and root arguments')
+    g2_mode = args.stage == 'g2' and not args.sse_only
+    if args.check_parents and (not g2_mode or args.fixture_phase is not None):
+        parser.error('--check-parents requires the ordinary G2 setup mode')
+    if args.fixture_phase is not None and (not g2_mode or args.check_parents):
+        parser.error('--fixture-phase requires the ordinary G2 setup mode')
+    if args.stage == 'g2' and args.sse_only:
+        if args.check_parents or args.fixture_phase is not None:
+            parser.error('G2 SSE-only mode cannot run parent setup or account fixtures')
+    elif g2_mode:
+        if args.compose_project is None or args.compose_file is None or args.compose_env is None:
+            parser.error('G2 requires its smoke-owned Compose project, file, and environment')
         if not re.fullmatch(r'newshub-local-g2-[0-9]+-[0-9a-f]{16}', args.compose_project):
             parser.error('--compose-project is not a smoke-owned G2 project')
-        if not re.fullmatch(r'[A-Fa-f0-9]{12,64}', args.gateway_container_id):
-            parser.error('--gateway-container-id must be a Docker container ID')
-        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/:@-]*', args.curl_image):
-            parser.error('--curl-image must be a single image reference')
-        try:
-            private_root = args.private_root.resolve(strict=True)
-            args.private_root = private_root
-            for path in (args.fixture_bundle, args.fixture_state, args.compose_file, args.compose_env):
+        if args.gateway_container_id is not None and not CONTAINER_ID_PATTERN.fullmatch(args.gateway_container_id.lower()):
+            parser.error('--gateway-container-id must be a full Docker container ID')
+        if not re.fullmatch(r'sha256:[a-f0-9]{64}', args.app_image_id or ''):
+            parser.error('--app-image-id must be an immutable Docker image ID')
+        if not re.fullmatch(r'sha256:[a-f0-9]{64}', args.gateway_image_id or ''):
+            parser.error('--gateway-image-id must be an immutable Docker image ID')
+
+        needs_fixture = not args.check_parents
+        needs_state = needs_fixture and args.fixture_phase is None
+        needs_curl = needs_state
+        if needs_fixture and (args.fixture_bundle is None or args.fixture_state is None or args.private_root is None):
+            parser.error('G2 fixture mode requires bundle, state path, and private root')
+        if needs_curl and not re.fullmatch(r'sha256:[a-f0-9]{64}', args.curl_image_id or ''):
+            parser.error('--curl-image-id must be an immutable Docker image ID')
+        if args.fixture_phase is not None and args.fixture_phase != 'seed':
+            parser.error('unsupported G2 fixture phase')
+
+        if args.private_root is not None:
+            try:
+                private_root = args.private_root.resolve(strict=True)
+                args.private_root = private_root
+                root_info = private_root.stat()
+            except OSError:
+                parser.error('--private-root must already exist')
+            if not stat.S_ISDIR(root_info.st_mode) or stat.S_IMODE(root_info.st_mode) != 0o700 or root_info.st_uid != os.getuid():
+                parser.error('--private-root must be smoke-owned mode 0700')
+
+        required_existing = [args.compose_file, args.compose_env]
+        if needs_fixture:
+            required_existing.append(args.fixture_bundle)
+        if needs_state:
+            required_existing.append(args.fixture_state)
+        for path in required_existing:
+            try:
                 resolved = path.resolve(strict=True)
-                if not resolved.is_relative_to(private_root):
+                if args.private_root is not None and not resolved.is_relative_to(args.private_root):
                     parser.error('G2 private files must stay below --private-root')
                 if path.is_symlink():
                     parser.error('G2 private files must not be symlinks')
                 file_info = path.stat(follow_symlinks=False)
-                if not stat.S_ISREG(file_info.st_mode) or file_info.st_uid != os.getuid():
-                    parser.error('G2 private files must be smoke-owned regular files')
-                if stat.S_IMODE(file_info.st_mode) != 0o600:
-                    parser.error('G2 private files must remain mode 0600')
-            root_info = private_root.stat()
-        except OSError:
-            parser.error('G2 private root and fixture files must already exist')
-        if not stat.S_ISDIR(root_info.st_mode) or stat.S_IMODE(root_info.st_mode) != 0o700 or root_info.st_uid != os.getuid():
-            parser.error('--private-root must be smoke-owned mode 0700')
-        try:
-            _fixtures.load_bundle(args.fixture_bundle)
-        except (OSError, ValueError, json.JSONDecodeError):
-            parser.error('--fixture-bundle must be a private smoke-owned mode-0600 file')
+            except OSError:
+                parser.error('G2 private input files must already exist')
+            if not stat.S_ISREG(file_info.st_mode) or file_info.st_uid != os.getuid():
+                parser.error('G2 private files must be smoke-owned regular files')
+            if stat.S_IMODE(file_info.st_mode) != 0o600:
+                parser.error('G2 private files must remain mode 0600')
+
+        if needs_fixture and args.fixture_bundle is not None:
+            try:
+                _fixtures.load_bundle(args.fixture_bundle)
+            except (OSError, ValueError, json.JSONDecodeError):
+                parser.error('--fixture-bundle must be a private smoke-owned mode-0600 file')
+
+        if args.fixture_phase == 'seed':
+            assert args.fixture_state is not None and args.private_root is not None
+            state_parent = args.fixture_state.parent.resolve(strict=True)
+            if state_parent != args.private_root or args.fixture_state.exists() or args.fixture_state.is_symlink():
+                parser.error('seed fixture state must be a new path directly below --private-root')
+            if args.gateway_container_id is None:
+                parser.error('G2 seed requires the previously inspected gateway container ID')
+        elif not args.check_parents and args.gateway_container_id is None:
+            parser.error('G2 runtime requires the previously inspected gateway container ID')
     return args
 
 
@@ -1451,6 +1814,22 @@ def main(argv: list[str] | None = None) -> int:
         return 3
     _require(args.ca_cert.is_file(), 'the temporary test CA certificate does not exist')
     _require(args.work_dir.is_dir(), 'the smoke-owned work directory does not exist')
+
+    if args.check_parents:
+        print(json.dumps(_inspect_g2_parents(args), sort_keys=True))
+        return 0
+    if args.fixture_phase == 'seed':
+        bundle = _load_fixture_bundle(args.fixture_bundle)
+        state = _run_fixture_program(args, bundle, 'seed')
+        _require(
+            state.get('users_seeded') == 2
+            and isinstance(state.get('news_id'), int)
+            and state['news_id'] > 0,
+            'G2 seed returned an incomplete private fixture state',
+        )
+        _store_fixture_state(args.fixture_state, state)
+        print(json.dumps({'fixture_phase': 'seed', 'status': 'PASS'}, sort_keys=True))
+        return 0
 
     checks: dict[str, str] = {}
     result = {
@@ -1471,7 +1850,7 @@ def main(argv: list[str] | None = None) -> int:
             _run_browser_checks(args, checks, args.work_dir)
             if args.stage == 'g2':
                 active_check = 'g2.account_browser'
-                _run_g2_browser_checks(args, checks, args.work_dir)
+                asyncio.run(_run_g2_browser_checks(args, checks, args.work_dir))
                 active_check = 'g2.rate_limits'
                 _run_g2_rate_limit_checks(args, checks, _load_fixture_bundle(args.fixture_bundle))
     except Exception as exc:

@@ -11,6 +11,7 @@ task_bin="$task_test_root/bin"
 task_temp="$task_test_root/tmp"
 task_log="$task_test_root/docker.log"
 CERTUTIL_LOG="$task_test_root/certutil.log"
+ARGV_VALIDATION_LOG="$task_test_root/acceptance-argv.log"
 mkdir -p -- "$task_bin" "$task_temp"
 
 fail() {
@@ -51,8 +52,15 @@ if [[ "$1" == image && "$2" == inspect ]]; then
         printf '10001:10001\n'
     elif [[ "$*" == *'json .RepoDigests'* ]]; then
         printf '["nginx@sha256:mock"]\n'
+    elif [[ "$*" == *'.Id'* ]]; then
+        case "$image" in
+            "$APP_IMAGE") printf '%s\n' "$MOCK_APP_IMAGE_ID" ;;
+            "$NGINX_IMAGE") printf '%s\n' "$MOCK_NGINX_IMAGE_ID" ;;
+            "$G2_CURL_IMAGE") printf '%s\n' "$MOCK_CURL_IMAGE_ID" ;;
+            *) exit 1 ;;
+        esac
     else
-        printf 'sha256:local-mock-image\n'
+        printf 'sha256:mock\n'
     fi
     exit 0
 fi
@@ -81,6 +89,10 @@ if [[ "$1" == compose ]]; then
         rg -q 'WAITRESS_PORT: "9527"' "$compose_file" || exit 1
         rg -q 'network_mode: service:gateway' "$compose_file" || exit 1
         rg -q 'internal: true' "$compose_file" || exit 1
+        rg -F -q "image: \"$MOCK_APP_IMAGE_ID\"" "$compose_file" || exit 1
+        rg -F -q "image: \"$MOCK_NGINX_IMAGE_ID\"" "$compose_file" || exit 1
+        rg -F -q "NEWSHUB_LOCAL_DOMAIN_IMAGE_ID: \"$MOCK_APP_IMAGE_ID\"" "$compose_file" || exit 1
+        ! rg -q '\$\{NEWSHUB_IMAGE|\$\{NGINX_IMAGE' "$compose_file" || exit 1
         ! rg -q '^    ports:' "$compose_file" || exit 1
     fi
     if [[ "$*" == *' ps -q gateway' ]]; then
@@ -152,7 +164,43 @@ if [[ "${1:-}" == -c ]]; then
     fi
     exit 0
 fi
+if [[ "${1:-}" == */local_domain_fixtures.py ]]; then
+    exec "$REAL_PYTHON" "$@"
+fi
 if [[ "${1:-}" == */local_domain_acceptance.py ]]; then
+    acceptance_script=$1
+    shift
+    if [[ "${MOCK_VALIDATE_ACCEPTANCE_ARGS:-0}" == 1 ]]; then
+        "$REAL_PYTHON" - "$acceptance_script" "$@" <<'PY'
+import importlib.util, json, os, re, sys
+from pathlib import Path
+script, *argv = sys.argv[1:]
+spec = importlib.util.spec_from_file_location('local_domain_acceptance_shell_args', script)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+args = module._parse_args(argv)
+if args.check_parents:
+    print(json.dumps({
+        'app_container_id': 'e' * 64,
+        'gateway_container_id': 'd' * 64,
+        'gateway_network_id': 'f' * 64,
+        'gateway_ip': '172.28.0.2',
+    }))
+elif args.fixture_phase == 'seed':
+    args.fixture_state.write_text('{"ok":true,"news_id":17,"users_seeded":2}\n', encoding='utf-8')
+    args.fixture_state.chmod(0o600)
+    print('{"fixture_phase":"seed","status":"PASS"}')
+else:
+    if args.sse_only:
+        assert args.fixture_bundle is None and args.fixture_state is None and args.compose_project is None
+        with open(os.environ['ARGV_VALIDATION_LOG'], 'a', encoding='utf-8') as stream:
+            stream.write('g2-sse-only-has-no-account-or-compose-inputs\n')
+    report = {'stage': args.stage, 'status': 'PASS', 'checks': {'sse_first_frame_ms': '1', 'sse_total_ms': '1001'}} if args.sse_only else {'stage': args.stage, 'status': 'PASS', 'checks': {'browser_homepage': 'HTTP 200'}}
+    Path(args.report).write_text(json.dumps(report) + '\n', encoding='utf-8')
+    print(json.dumps(report))
+PY
+        exit $?
+    fi
     report=""
     mode=http
     while (($#)); do
@@ -189,16 +237,23 @@ export DOCKER_LOG="$task_log"
 export OPENSSL_LOG="$task_test_root/openssl.log"
 export CERTUTIL_LOG="$task_test_root/certutil.log"
 export CURL_LOG="$task_test_root/curl.log"
+export ARGV_VALIDATION_LOG
 export APP_IMAGE='newshub:test'
 export NGINX_IMAGE='nginx:test'
+export G2_CURL_IMAGE='curlimages/curl:8.10.1'
+export LOCAL_DOMAIN_CURL_IMAGE="$G2_CURL_IMAGE"
+export MOCK_APP_IMAGE_ID="sha256:$(printf 'a%.0s' {1..64})"
+export MOCK_NGINX_IMAGE_ID="sha256:$(printf 'b%.0s' {1..64})"
+export MOCK_CURL_IMAGE_ID="sha256:$(printf 'c%.0s' {1..64})"
 export MOCK_IMAGE_SHA='0123456789abcdef0123456789abcdef01234567'
+export REAL_PYTHON="${PYTHON_BIN:-$PROJECT_ROOT/backend/venv/bin/python}"
 export PYTHON_BIN="$task_bin/python-task"
-export REAL_PYTHON="$PROJECT_ROOT/backend/venv/bin/python"
 export CHROMIUM_EXECUTABLE="$task_chromium"
 export TMPDIR="$task_temp"
 
 : >"$DOCKER_LOG"
 : >"$OPENSSL_LOG"
+: >"$ARGV_VALIDATION_LOG"
 output="$("$SMOKE_SCRIPT")"
 [[ "$output" == *'Dry run only'* ]] || fail 'default invocation did not stay in dry-run mode.'
 assert_no_docker_calls
@@ -300,7 +355,33 @@ if find "$task_temp" -mindepth 1 -maxdepth 1 -type d -name 'newshub-local-domain
 fi
 report_path="$(printf '%s\n' "$output" | sed -n 's/.*report //p' | tail -n 1)"
 [[ -f "$report_path" ]] || fail 'the report artifact was not retained outside the cleaned work directory.'
-"$REAL_PYTHON" -c 'import json,sys; report=json.load(open(sys.argv[1], encoding="utf-8")); assert report["cleanup_status"] == "PASS" and report["status"] == "PASS" and report["image_revision"] == sys.argv[2] and report["application_image_id"] == "sha256:local-mock-image" and report["application_image_user"] == "10001:10001" and report["nginx_image_id"] == "sha256:local-mock-image" and report["nginx_repo_digests"] == ["nginx@sha256:mock"] and report["nginx_version"] == "nginx version: nginx/1.30.5"' "$report_path" "$MOCK_IMAGE_SHA" \
+"$REAL_PYTHON" -c 'import json,sys; report=json.load(open(sys.argv[1], encoding="utf-8")); assert report["cleanup_status"] == "PASS" and report["status"] == "PASS" and report["image_revision"] == sys.argv[2] and report["application_image_id"] == "sha256:" + "a" * 64 and report["application_image_user"] == "10001:10001" and report["nginx_image_id"] == "sha256:" + "b" * 64 and report["nginx_repo_digests"] == ["nginx@sha256:mock"] and report["nginx_version"] == "nginx version: nginx/1.30.5"' "$report_path" "$MOCK_IMAGE_SHA" \
     || fail 'the final report did not record the image revision and cleanup result.'
+
+: >"$DOCKER_LOG"
+: >"$OPENSSL_LOG"
+: >"$ARGV_VALIDATION_LOG"
+output="$(env NEWSHUB_IMAGE='newshub:untrusted-override' MOCK_VALIDATE_ACCEPTANCE_ARGS=1 \
+    "$SMOKE_SCRIPT" --execute --stage g2 --image "$APP_IMAGE" --sha "$MOCK_IMAGE_SHA")" \
+    || fail 'mocked G2 smoke with real acceptance argument parsing did not complete successfully.'
+[[ "$output" == *'G2 local-domain smoke PASS'* ]] || fail 'mocked execute did not report G2 PASS.'
+[[ -s "$ARGV_VALIDATION_LOG" ]] || fail 'the shell-generated G2 SSE argv was not checked by the real parser.'
+rg -q '^g2-sse-only-has-no-account-or-compose-inputs$' "$ARGV_VALIDATION_LOG" \
+    || fail 'G2 SSE-only argv still carried account or Compose inputs.'
+report_path="$(printf '%s\n' "$output" | sed -n 's/.*report //p' | tail -n 1)"
+[[ -f "$report_path" ]] || fail 'the G2 report artifact was not retained outside the cleaned work directory.'
+"$REAL_PYTHON" - "$report_path" "$MOCK_IMAGE_SHA" <<'PY'
+import json, sys
+from pathlib import Path
+report = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+assert report['cleanup_status'] == 'PASS' and report['status'] == 'PASS'
+assert report['image_revision'] == sys.argv[2]
+assert report['application_image'] == 'newshub:test'
+assert report['application_image_id'] == 'sha256:' + 'a' * 64
+assert report['nginx_image'] == 'nginx:test'
+assert report['nginx_image_id'] == 'sha256:' + 'b' * 64
+assert report['curl_image'] == 'curlimages/curl:8.10.1'
+assert report['curl_image_id'] == 'sha256:' + 'c' * 64
+PY
 
 printf 'local-domain smoke argument/resource tests passed (Docker/OpenSSL/certutil/curl/browser are stubbed).\n'

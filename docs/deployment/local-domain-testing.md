@@ -10,7 +10,7 @@
 
 每次实际验收保存源码 SHA、镜像 revision、命令退出码、浏览器报告/截图及资源清理结果。公网 DNS、真实证书签发、安全组和外网访问另在正式上线时验收；本地通过不能替代这些现场结果。
 
-`local-domain-smoke.sh` 用 Docker 网络别名在本机验证正式主机名 `news.lambert.host`，不查询公网 DNS，也不修改 `/etc/hosts`、系统证书库、浏览器全局配置或服务器。默认调用是 dry-run；只有显式传入 `--execute` 才会检查并启动本地隔离栈。
+`local-domain-smoke.sh` 用 Docker 网络别名在本机验证正式主机名 `news.lambert.host`，不查询公网 DNS，也不修改 `/etc/hosts`、系统证书库、浏览器全局配置或服务器。默认调用是 dry-run；只有显式传入 `--execute` 才会检查并启动本地隔离栈。Compose 在生成时把 app、migrate 和 gateway 镜像都固定到已 inspect 的 immutable image ID；静态导出和 fake SSE upstream 也使用 app image ID。JSON 报告同时保留用户选择的镜像 tag 与实际 image ID。
 
 G1/G2 harness 的离线检查：
 
@@ -47,8 +47,8 @@ news 的 production 模板包含 HTTP 与 HTTPS 两个虚拟主机，bootstrap �
 
 浏览器/API/SSE 结果与 app revision、Nginx image ID、RepoDigest 和版本写入 JSON 报告；报告在清理完成后更新 `cleanup_status`。任一步失败都只清理该次任务的资源。
 
-G2 harness 通过真实 UI 预期覆盖匿名私有路由、A/B 邀请注册与注销/刷新、会话和 CSRF Cookie、个人收藏/Chat/Research 权属、延迟 `auth/me` 响应、管理员激活/停用、登录与注册限速、伪造 XFF 负例。当前这些是已实现的验收路径，尚无 G2 实际 runtime 报告；必须等待固定 candidate 后运行 `--stage g2`，不能用离线检查代替。
+G2 harness 通过真实 UI 预期覆盖匿名私有路由、A/B 邀请注册与注销/刷新、会话和 CSRF Cookie、个人收藏/Chat/Research 权属、延迟 `auth/me` 响应、管理员激活/停用、登录与注册限速、伪造 XFF 负例。G2 每次把私密 fixture 程序送入容器前，都会从本次随机 Compose project 解析完整 app ID，并 inspect 它的 project/service labels、运行状态、image ID、UID:GID 10001 和唯一自有 `/var/lib/newshub/db` 命名卷；gateway 和 internal network 也会按精确 ID、标签、无 host port、namespace 与 `Internal=true` 校验。只有检查通过后才对 exact app ID 执行 `docker exec -i ... python -`。当前这些是已实现的验收路径，尚无 G2 实际 runtime 报告；必须等待固定 candidate 后运行 `--stage g2`，不能用离线检查代替。
 
-G2 使用本次 smoke 私有的 0600 fixture bundle 和数据库。fixture helper 在 Django 初始化前核对随机 Compose project、镜像 revision、生产配置、UID 10001 和自有 `/var/lib/newshub/db/` 路径；只有空用户表允许 seed。A/B 由 SPA 真实邀请注册，个人数据通过一次性合成 owner fixture 附加。登录失败使用真实 `127.0.0.70` loopback 源地址；注册负例分配到 `127.0.0.61`–`127.0.0.65`，第六次请求再附加伪造 XFF 证明它不能绕过限速。侧车复用 gateway network namespace，限制为只读 root、非特权、宿主 UID:GID、内部网络和临时 CA；响应正文和 Cookie 留在私有目录，不写进报告。
+G2 使用本次 smoke 私有的 0600 fixture bundle 和数据库。host runner 在 Django fixture 初始化前通过 Docker inspect 核对 app 的实际 immutable image ID；fixture helper 在 Django 初始化前核对随机 Compose project、revision 与 image-ID 格式、生产配置、UID 10001 和自有 `/var/lib/newshub/db/` 路径；只有空用户表允许 seed。A/B 由 SPA 真实邀请注册，个人数据通过一次性合成 owner fixture 附加。登录失败使用真实 `127.0.0.70` loopback 源地址；注册负例分配到 `127.0.0.61`–`127.0.0.65`，第六次请求再附加伪造 XFF 证明它不能绕过限速。每个限速侧车都先以 `docker create --pull=never` 创建并把完整 ID 写入私有 0600 CID ledger，inspect owner/image/user/gateway namespace 后才 `docker start --attach <ID>`；`finally` 仅在 ledger 和 inspect 身份仍匹配时用该精确 ID 清理。侧车复用 gateway network namespace，限制为只读 root、非特权、宿主 UID:GID、内部网络和临时 CA；响应正文和 Cookie 留在私有目录，不写进报告。G2 SSE-only 子命令不需要也不接收账户 fixture 或 Compose 参数，仍执行独立 SSE 验收。
 
 G3 任务/worker 与 Fake Provider 不属于本轮实现，当前状态为 `NOT_RUN`。公网 DNS、真实证书签发、安全组和外网访问也仍需上线现场验收。

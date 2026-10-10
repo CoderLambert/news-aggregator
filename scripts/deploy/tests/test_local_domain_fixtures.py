@@ -68,6 +68,11 @@ def test_emit_program_compiles_and_guards_environment_before_django_setup(tmp_pa
     assert 'User.objects.exists()' in program
     assert 'hashlib.sha256(invite["token"].encode("utf-8")).hexdigest()' in program
     assert 'PUBLIC_SITE_MODE") != "full"' in program
+    assert 'NEWSHUB_LOCAL_DOMAIN_IMAGE_ID' in program
+    assert 'sha256:[0-9a-f]{64}' in program
+    assert 'Fixture article' in program
+    assert 'Mermaid flow' in program
+    assert '```mermaid' in program
     assert 'settings.DATABASES["default"]["NAME"]' in program
 
     # Source and credentials travel through stdin, never a process argument.

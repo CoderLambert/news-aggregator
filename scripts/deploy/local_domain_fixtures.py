@@ -3,8 +3,8 @@
 
 This module runs on the host to create a mode-0600 credential bundle.  Its
 ``emit-program`` command writes a fixed Django fixture program to stdout; the
-smoke pipes that program to ``docker compose exec -i app python -`` so no
-password, invitation, cookie, or test body appears in a process argument.
+smoke pipes that program to ``docker exec -i <validated-container-id> python -``
+so no password, invitation, cookie, or test body appears in a process argument.
 """
 
 from __future__ import annotations
@@ -238,8 +238,9 @@ db_root = Path("/var/lib/newshub/db")
 if not db_path.is_absolute() or ".." in db_path.parts or not db_path.is_relative_to(db_root): refuse()
 if db_path == db_root or db_path.name != "db.sqlite3": refuse()
 revision = env.get("NEWSHUB_LOCAL_DOMAIN_REVISION", "")
-image = env.get("NEWSHUB_LOCAL_DOMAIN_IMAGE", "")
-if not re.fullmatch(r"[0-9a-f]{40}", revision) or not image.endswith(revision): refuse()
+image_id = env.get("NEWSHUB_LOCAL_DOMAIN_IMAGE_ID", "")
+if not re.fullmatch(r"[0-9a-f]{40}", revision): refuse()
+if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id): refuse()
 
 import django
 django.setup()
@@ -292,7 +293,13 @@ with transaction.atomic():
         )
         news = News.objects.create(
             title=bundle["news"]["title"], content="Synthetic G2 account ownership fixture.",
-            full_content="## Synthetic G2 fixture\n\nOnly local test data.",
+            full_content=(
+                "## Isolated article flow\n\n"
+                "```mermaid\n"
+                "flowchart TD\n"
+                "  news[Fixture article] --> diagram[Mermaid flow]\n"
+                "```\n"
+            ),
             full_content_fetch_status="success", publish_time=timezone.now(),
             source=source, category=category,
             url="https://fixture.invalid/newshub-local-g2-" + run_id,

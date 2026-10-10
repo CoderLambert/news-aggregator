@@ -2,8 +2,11 @@ import asyncio
 import importlib.util
 import json
 import os
+import re
+import shutil
 import stat
 import subprocess
+import textwrap
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -17,6 +20,12 @@ SPEC = importlib.util.spec_from_file_location('local_domain_acceptance', MODULE_
 acceptance = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(acceptance)
+APP_IMAGE_ID = 'sha256:' + 'a' * 64
+GATEWAY_IMAGE_ID = 'sha256:' + 'b' * 64
+CURL_IMAGE_ID = 'sha256:' + 'c' * 64
+GATEWAY_CONTAINER_ID = 'd' * 64
+APP_CONTAINER_ID = 'e' * 64
+NETWORK_ID = 'f' * 64
 
 
 @pytest.mark.parametrize(('scheme', 'request_target'), [
@@ -229,11 +238,16 @@ def test_g2_args_require_private_owned_bundle_and_all_runtime_inputs(tmp_path):
         '--fixture-bundle', str(bundle_path), '--fixture-state', str(state_path),
         '--compose-project', 'newshub-local-g2-123-0123456789abcdef',
         '--compose-file', str(compose_file), '--compose-env', str(compose_env),
-        '--gateway-container-id', '0123456789ab', '--curl-image', 'curlimages/curl:8.10.1',
+        '--gateway-container-id', GATEWAY_CONTAINER_ID,
+        '--app-image-id', APP_IMAGE_ID, '--gateway-image-id', GATEWAY_IMAGE_ID,
+        '--curl-image-id', CURL_IMAGE_ID,
         '--private-root', str(private_root),
     ])
     assert args.stage == 'g2'
     assert args.private_root == private_root.resolve()
+    assert args.app_image_id == APP_IMAGE_ID
+    assert args.gateway_image_id == GATEWAY_IMAGE_ID
+    assert args.curl_image_id == CURL_IMAGE_ID
 
     with pytest.raises(SystemExit):
         acceptance._parse_args([
@@ -249,9 +263,261 @@ def test_g2_args_require_private_owned_bundle_and_all_runtime_inputs(tmp_path):
             '--fixture-bundle', str(bundle_path), '--fixture-state', str(state_path),
             '--compose-project', 'newshub-local-g2-123-0123456789abcdef',
             '--compose-file', str(compose_file), '--compose-env', str(compose_env),
-            '--gateway-container-id', '0123456789ab', '--curl-image', 'curlimages/curl:8.10.1',
+            '--gateway-container-id', GATEWAY_CONTAINER_ID,
+            '--app-image-id', APP_IMAGE_ID, '--gateway-image-id', GATEWAY_IMAGE_ID,
+            '--curl-image-id', CURL_IMAGE_ID,
             '--private-root', str(private_root),
         ])
+
+
+def test_g2_sse_only_parser_needs_no_account_or_compose_inputs(tmp_path):
+    private_root = tmp_path / 'private'
+    private_root.mkdir(mode=0o700)
+    ca_cert = private_root / 'ca.crt'
+    ca_cert.write_text('synthetic CA\n', encoding='utf-8')
+
+    args = acceptance._parse_args([
+        '--gateway-ip', '172.28.0.2', '--ca-cert', str(ca_cert),
+        '--work-dir', str(private_root), '--stage', 'g2', '--sse-only',
+    ])
+
+    assert args.stage == 'g2' and args.sse_only
+    with pytest.raises(SystemExit):
+        acceptance._parse_args([
+            '--gateway-ip', '172.28.0.2', '--ca-cert', str(ca_cert),
+            '--work-dir', str(private_root), '--stage', 'g2',
+        ])
+
+
+def test_browser_api_executes_without_get_head_bodies_and_keeps_post_csrf():
+    node = shutil.which('node')
+    assert node is not None
+    driver = textwrap.dedent(f'''\
+        const source = {json.dumps(acceptance._BROWSER_API_SCRIPT)};
+        const api = (0, eval)('(' + source + ')');
+        const calls = [];
+        globalThis.document = {{cookie: 'csrftoken=token%2Bvalue'}};
+        globalThis.fetch = async (path, options) => {{
+          calls.push({{path, options}});
+          return {{status: 200, text: async () => '{{"ok":true}}'}};
+        }};
+        (async () => {{
+          for (const method of ['GET', 'HEAD', 'OPTIONS']) {{
+            for (const body of [null, undefined, {{ignored: true}}]) {{
+              await api({{method, path: '/api/read/', body}});
+            }}
+          }}
+          await api({{method: 'POST', path: '/api/write/', body: {{value: 1}}}});
+          for (const {{options}} of calls.slice(0, 9)) {{
+            if (Object.hasOwn(options, 'body')) throw new Error('safe method sent a body');
+            if (Object.hasOwn(options.headers, 'Content-Type')) throw new Error('safe method sent JSON Content-Type');
+          }}
+          const post = calls[9].options;
+          if (post.body !== '{{"value":1}}') throw new Error('POST JSON body changed');
+          if (post.headers['Content-Type'] !== 'application/json') throw new Error('POST content type missing');
+          if (post.headers['X-CSRFToken'] !== 'token+value') throw new Error('POST CSRF header missing');
+        }})().catch((error) => {{ console.error(error.message); process.exitCode = 1; }});
+    ''')
+    result = subprocess.run([node, '-e', driver], capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+
+
+def test_main_awaits_g2_browser_checks_before_rate_checks_and_sanitizes_async_failure(tmp_path, capsys):
+    private_root = tmp_path / 'private'
+    private_root.mkdir(mode=0o700)
+    private_root.chmod(0o700)
+    bundle_path = private_root / 'fixtures.json'
+    bundle = acceptance._fixtures.create_bundle(bundle_path)
+    state_path = private_root / 'state.json'
+    state_path.write_text('{"ok":true,"news_id":1}\n', encoding='utf-8')
+    compose_file = private_root / 'compose.yaml'
+    compose_file.write_text('services: {}\n', encoding='utf-8')
+    compose_env = private_root / 'compose.env'
+    compose_env.write_text('SYNTHETIC=1\n', encoding='utf-8')
+    ca_cert = private_root / 'ca.crt'
+    ca_cert.write_text('synthetic CA\n', encoding='utf-8')
+    for path in (state_path, compose_file, compose_env):
+        path.chmod(0o600)
+    report = private_root / 'report.json'
+    argv = [
+        '--gateway-ip', '127.0.0.1', '--ca-cert', str(ca_cert),
+        '--work-dir', str(private_root), '--stage', 'g2', '--report', str(report),
+        '--fixture-bundle', str(bundle_path), '--fixture-state', str(state_path),
+        '--compose-project', 'newshub-local-g2-123-0123456789abcdef',
+        '--compose-file', str(compose_file), '--compose-env', str(compose_env),
+        '--gateway-container-id', GATEWAY_CONTAINER_ID,
+        '--app-image-id', APP_IMAGE_ID, '--gateway-image-id', GATEWAY_IMAGE_ID,
+        '--curl-image-id', CURL_IMAGE_ID, '--private-root', str(private_root),
+    ]
+    events = []
+
+    async def browser_accounts(*_args):
+        events.append('g2-browser-start')
+        await asyncio.sleep(0)
+        events.append('g2-browser-finished')
+
+    with (
+        patch.object(acceptance, '_check_http_api', side_effect=lambda *_args: events.append('http')),
+        patch.object(acceptance, '_run_browser_checks', side_effect=lambda *_args: events.append('shared-browser')),
+        patch.object(acceptance, '_run_g2_browser_checks', side_effect=browser_accounts),
+        patch.object(acceptance, '_run_g2_rate_limit_checks', side_effect=lambda *_args: events.append('rate')),
+    ):
+        assert acceptance.main(argv) == 0
+    capsys.readouterr()
+    assert events == ['http', 'shared-browser', 'g2-browser-start', 'g2-browser-finished', 'rate']
+
+    events.clear()
+    private_values = (bundle['users']['a']['password'], bundle['invitations']['a']['token'])
+
+    async def failing_browser(*_args):
+        events.append('g2-browser-start')
+        await asyncio.sleep(0)
+        raise RuntimeError(f'fill failure {private_values[0]} {private_values[1]}')
+
+    with (
+        patch.object(acceptance, '_check_http_api', side_effect=lambda *_args: events.append('http')),
+        patch.object(acceptance, '_run_browser_checks', side_effect=lambda *_args: events.append('shared-browser')),
+        patch.object(acceptance, '_run_g2_browser_checks', side_effect=failing_browser),
+        patch.object(acceptance, '_run_g2_rate_limit_checks', side_effect=lambda *_args: events.append('rate')),
+    ):
+        assert acceptance.main(argv) == 1
+    failure_output = capsys.readouterr().out
+    failure_report = report.read_text(encoding='utf-8')
+    assert events == ['http', 'shared-browser', 'g2-browser-start']
+    assert all(value not in failure_output and value not in failure_report for value in private_values)
+    assert json.loads(failure_report)['failure'] == {
+        'stage': 'g2', 'check': 'g2.account_browser', 'exception_type': 'RuntimeError',
+    }
+
+
+def _valid_parent_inspects(project='newshub-local-g2-123-0123456789abcdef'):
+    gateway = {
+        'Id': GATEWAY_CONTAINER_ID,
+        'Config': {'Labels': {
+            'com.docker.compose.project': project,
+            'com.docker.compose.service': 'gateway',
+        }},
+        'State': {'Running': True},
+        'Image': GATEWAY_IMAGE_ID,
+        'HostConfig': {'NetworkMode': f'{project}_isolated'},
+        'NetworkSettings': {
+            'Ports': {'80/tcp': None, '443/tcp': None},
+            'Networks': {f'{project}_isolated': {
+                'NetworkID': NETWORK_ID, 'IPAddress': '172.28.0.2',
+            }},
+        },
+    }
+    app = {
+        'Id': APP_CONTAINER_ID,
+        'Config': {'Labels': {
+            'com.docker.compose.project': project,
+            'com.docker.compose.service': 'app',
+        }, 'User': '10001:10001'},
+        'State': {'Running': True},
+        'Image': APP_IMAGE_ID,
+        'HostConfig': {'NetworkMode': f'container:{GATEWAY_CONTAINER_ID}'},
+        'Mounts': [{
+            'Type': 'volume', 'Name': f'{project}_db-data',
+            'Destination': '/var/lib/newshub/db', 'RW': True,
+        }],
+    }
+    network = {
+        'Id': NETWORK_ID,
+        'Name': f'{project}_isolated',
+        'Internal': True,
+        'Labels': {
+            'com.docker.compose.project': project,
+            'com.docker.compose.network': 'isolated',
+        },
+    }
+    return gateway, app, network
+
+
+def _g2_inspect_args(tmp_path):
+    private_root = tmp_path / 'private'
+    private_root.mkdir(mode=0o700)
+    compose_file = private_root / 'compose.yaml'
+    compose_file.write_text('services: {}\n', encoding='utf-8')
+    compose_env = private_root / 'compose.env'
+    compose_env.write_text('SYNTHETIC=1\n', encoding='utf-8')
+    compose_file.chmod(0o600)
+    compose_env.chmod(0o600)
+    return SimpleNamespace(
+        compose_project='newshub-local-g2-123-0123456789abcdef',
+        compose_file=compose_file, compose_env=compose_env,
+        gateway_container_id=GATEWAY_CONTAINER_ID,
+        app_image_id=APP_IMAGE_ID, gateway_image_id=GATEWAY_IMAGE_ID,
+        curl_image_id=CURL_IMAGE_ID, private_root=private_root,
+    )
+
+
+def _mock_parent_docker_run(commands, objects):
+    def run(command, **kwargs):
+        commands.append((command, kwargs))
+        if command[:2] == ['docker', 'compose']:
+            service = command[-1]
+            container_id = GATEWAY_CONTAINER_ID if service == 'gateway' else APP_CONTAINER_ID
+            return subprocess.CompletedProcess(command, 0, container_id + '\n', '')
+        if command[:3] == ['docker', 'inspect', '--type']:
+            payload = objects['gateway'] if command[-1] == GATEWAY_CONTAINER_ID else objects['app']
+        elif command[:3] == ['docker', 'network', 'inspect']:
+            payload = objects['network']
+        else:
+            raise AssertionError(f'unexpected Docker command: {command}')
+        return subprocess.CompletedProcess(command, 0, json.dumps([payload]), '')
+    return run
+
+
+def test_g2_parent_inspection_accepts_exact_owned_app_gateway_volume_and_network(tmp_path):
+    args = _g2_inspect_args(tmp_path)
+    objects = dict(zip(('gateway', 'app', 'network'), _valid_parent_inspects(args.compose_project)))
+    commands = []
+    with patch.object(acceptance.subprocess, 'run', side_effect=_mock_parent_docker_run(commands, objects)):
+        parents = acceptance._inspect_g2_parents(args)
+    assert parents == {
+        'app_container_id': APP_CONTAINER_ID,
+        'gateway_container_id': GATEWAY_CONTAINER_ID,
+        'gateway_network_id': NETWORK_ID,
+        'gateway_ip': '172.28.0.2',
+    }
+    assert not any(command[:2] == ['docker', 'exec'] for command, _kwargs in commands)
+
+
+@pytest.mark.parametrize('mutation', [
+    'gateway-image', 'gateway-project', 'gateway-service', 'gateway-stopped',
+    'gateway-published-port', 'network-not-internal', 'network-label',
+    'app-image', 'app-project', 'app-service', 'app-user', 'app-namespace',
+    'app-bind-db', 'app-foreign-volume', 'app-overlapping-mounts',
+])
+def test_g2_parent_identity_failures_refuse_fixture_exec_and_private_stdin(tmp_path, mutation):
+    args = _g2_inspect_args(tmp_path)
+    bundle = acceptance._fixtures.create_bundle(args.private_root / 'bundle.json')
+    gateway, app, network = _valid_parent_inspects(args.compose_project)
+    objects = {'gateway': gateway, 'app': app, 'network': network}
+    if mutation == 'gateway-image': gateway['Image'] = APP_IMAGE_ID
+    elif mutation == 'gateway-project': gateway['Config']['Labels']['com.docker.compose.project'] = 'other'
+    elif mutation == 'gateway-service': gateway['Config']['Labels']['com.docker.compose.service'] = 'app'
+    elif mutation == 'gateway-stopped': gateway['State']['Running'] = False
+    elif mutation == 'gateway-published-port': gateway['NetworkSettings']['Ports']['443/tcp'] = [{'HostIp': '127.0.0.1', 'HostPort': '443'}]
+    elif mutation == 'network-not-internal': network['Internal'] = False
+    elif mutation == 'network-label': network['Labels']['com.docker.compose.project'] = 'other'
+    elif mutation == 'app-image': app['Image'] = GATEWAY_IMAGE_ID
+    elif mutation == 'app-project': app['Config']['Labels']['com.docker.compose.project'] = 'other'
+    elif mutation == 'app-service': app['Config']['Labels']['com.docker.compose.service'] = 'gateway'
+    elif mutation == 'app-user': app['Config']['User'] = '0:0'
+    elif mutation == 'app-namespace': app['HostConfig']['NetworkMode'] = 'container:other'
+    elif mutation == 'app-bind-db': app['Mounts'][0]['Type'] = 'bind'
+    elif mutation == 'app-foreign-volume': app['Mounts'][0]['Name'] = 'user_db'
+    elif mutation == 'app-overlapping-mounts': app['Mounts'].append({
+        'Type': 'bind', 'Source': '/tmp/synthetic',
+        'Destination': '/var/lib/newshub/db/db.sqlite3', 'RW': True,
+    })
+    commands = []
+    with patch.object(acceptance.subprocess, 'run', side_effect=_mock_parent_docker_run(commands, objects)):
+        with pytest.raises(acceptance.AcceptanceError):
+            acceptance._run_fixture_program(args, bundle, 'seed')
+    assert not any(command[:2] == ['docker', 'exec'] for command, _kwargs in commands)
+    assert not any('input' in kwargs for _command, kwargs in commands)
 
 
 def test_g2_http_api_matrix_requires_full_accounts_and_blocks_private_ai_anonymous(tmp_path):
@@ -366,7 +632,9 @@ def test_g2_failure_report_redacts_exception_values_from_stdout_and_json(tmp_pat
         '--fixture-bundle', str(bundle_path), '--fixture-state', str(state_path),
         '--compose-project', 'newshub-local-g2-123-0123456789abcdef',
         '--compose-file', str(compose_file), '--compose-env', str(compose_env),
-        '--gateway-container-id', '0123456789ab', '--curl-image', 'curlimages/curl:8.10.1',
+        '--gateway-container-id', GATEWAY_CONTAINER_ID,
+        '--app-image-id', APP_IMAGE_ID, '--gateway-image-id', GATEWAY_IMAGE_ID,
+        '--curl-image-id', CURL_IMAGE_ID,
         '--private-root', str(private_root),
     ]
     leaked_exception = RuntimeError(f'fill timeout value={password} invite={invitation} {cookie}')
@@ -454,15 +722,25 @@ def test_g2_fixture_program_uses_stdin_and_keeps_output_files_private(tmp_path):
     args = SimpleNamespace(
         compose_project='newshub-local-g2-123-0123456789abcdef',
         compose_file=private_root / 'compose.yaml', compose_env=private_root / 'compose.env',
-        private_root=private_root,
+        private_root=private_root, app_image_id=APP_IMAGE_ID,
+        gateway_image_id=GATEWAY_IMAGE_ID, gateway_container_id=GATEWAY_CONTAINER_ID,
     )
     result = subprocess.CompletedProcess(['docker'], 0, '{"ok":true}\n', '')
-    with patch.object(acceptance.subprocess, 'run', return_value=result) as run:
+    parents = {
+        'app_container_id': APP_CONTAINER_ID,
+        'gateway_container_id': GATEWAY_CONTAINER_ID,
+        'gateway_network_id': NETWORK_ID,
+        'gateway_ip': '172.28.0.2',
+    }
+    with (
+        patch.object(acceptance, '_inspect_g2_parents', return_value=parents),
+        patch.object(acceptance.subprocess, 'run', return_value=result) as run,
+    ):
         assert acceptance._run_fixture_program(args, bundle, 'seed') == {'ok': True}
     command = run.call_args.args[0]
     program = run.call_args.kwargs['input']
     password = bundle['users']['a']['password']
-    assert command[-2:] == ['python', '-']
+    assert command == ['docker', 'exec', '-i', APP_CONTAINER_ID, 'python', '-']
     assert password in program
     assert password not in command
     assert run.call_args.kwargs['capture_output'] is True
@@ -472,7 +750,10 @@ def test_g2_fixture_program_uses_stdin_and_keeps_output_files_private(tmp_path):
 
     marker = 'private-helper-output-marker'
     failed = subprocess.CompletedProcess(['docker'], 2, marker, marker)
-    with patch.object(acceptance.subprocess, 'run', return_value=failed):
+    with (
+        patch.object(acceptance, '_inspect_g2_parents', return_value=parents),
+        patch.object(acceptance.subprocess, 'run', return_value=failed),
+    ):
         with pytest.raises(acceptance.AcceptanceError) as error:
             acceptance._run_fixture_program(args, bundle, 'audit')
     assert marker not in str(error.value)
@@ -481,36 +762,190 @@ def test_g2_fixture_program_uses_stdin_and_keeps_output_files_private(tmp_path):
     assert all(stat.S_IMODE(path.stat().st_mode) == 0o600 for path in audit_files)
 
 
-def test_g2_rate_sidecar_is_scoped_nonroot_readonly_and_never_ignores_tls(tmp_path):
+def _rate_sidecar_setup(tmp_path):
     private_root = tmp_path / 'private'
+    private_root.mkdir(mode=0o700)
     rate_root = private_root / 'rate'
-    rate_root.mkdir(mode=0o700, parents=True)
+    rate_root.mkdir(mode=0o700)
+    output_root = rate_root / 'output'
+    output_root.mkdir(mode=0o700)
     ca_cert = private_root / 'ca.crt'
     ca_cert.write_text('synthetic CA\n', encoding='utf-8')
+    ca_cert.chmod(0o600)
     config = rate_root / 'probe.curlrc'
     config.write_text('synthetic request\n', encoding='utf-8')
+    config.chmod(0o600)
     args = SimpleNamespace(
         private_root=private_root, compose_project='newshub-local-g2-123-0123456789abcdef',
-        gateway_container_id='0123456789ab', curl_image='curlimages/curl:8.10.1', ca_cert=ca_cert,
+        gateway_container_id=GATEWAY_CONTAINER_ID, curl_image_id=CURL_IMAGE_ID,
+        app_image_id=APP_IMAGE_ID, gateway_image_id=GATEWAY_IMAGE_ID, ca_cert=ca_cert,
     )
-    results = [
-        subprocess.CompletedProcess(['docker', 'inspect'], 1, '', ''),
-        subprocess.CompletedProcess(['docker', 'run'], 0, 'csrf=200\nsixth=429\n', ''),
-    ]
-    config.chmod(0o600)
-    with patch.object(acceptance.subprocess, 'run', side_effect=results) as run:
-        assert acceptance._run_rate_sidecar(args, '127.0.0.70', [('csrf', config), ('sixth', config)]) == {
-            'csrf': 200, 'sixth': 429,
-        }
-    command = run.call_args_list[1].args[0]
-    assert '--pull=never' in command
-    assert command[command.index('--network') + 1] == 'container:0123456789ab'
-    assert command[command.index('--user') + 1] == f'{os.getuid()}:{os.getgid()}'
-    assert '--read-only' in command
-    assert '--privileged' not in command and '-p' not in command and '--publish' not in command
-    assert '-k' not in command and '--insecure' not in command
-    assert any(value.endswith('/smoke/ca.crt,readonly') for value in command if value.startswith('type=bind'))
+    return args, private_root, rate_root, output_root, ca_cert, config
+
+
+def _sidecar_inspect(args, container_id, *, owner=None, image=None, user=None, network=None, running=False):
+    return {
+        'Id': container_id,
+        'Config': {'Labels': {
+            'org.newshub.local-domain.owner': owner or args.compose_project,
+        }, 'User': user or f'{os.getuid()}:{os.getgid()}'},
+        'Image': image or CURL_IMAGE_ID,
+        'HostConfig': {'NetworkMode': network or f'container:{GATEWAY_CONTAINER_ID}'},
+        'State': {'Running': running},
+    }
+
+
+def _mock_sidecar_lifecycle(args, rate_root, *, start_result=None, identity=None, rm_code=0):
+    container_id = '9' * 64
+    obj = identity or _sidecar_inspect(args, container_id)
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        if command[:3] == ['docker', 'inspect', '--type'] and command[-1].startswith('nhsmoke-rate-'):
+            return subprocess.CompletedProcess(command, 1, '', '')
+        if command[:2] == ['docker', 'create']:
+            cidfile = Path(command[command.index('--cidfile') + 1])
+            cidfile.write_text(container_id + '\n', encoding='ascii')
+            cidfile.chmod(0o600)
+            return subprocess.CompletedProcess(command, 0, container_id + '\n', '')
+        if command[:3] == ['docker', 'inspect', '--type']:
+            return subprocess.CompletedProcess(command, 0, json.dumps([obj]), '')
+        if command[:3] == ['docker', 'start', '--attach']:
+            if isinstance(start_result, BaseException):
+                raise start_result
+            return start_result or subprocess.CompletedProcess(command, 0, 'csrf=200\nsixth=429\n', '')
+        if command[:2] == ['docker', 'rm']:
+            return subprocess.CompletedProcess(command, rm_code, '', '')
+        raise AssertionError(f'unexpected sidecar Docker command: {command}')
+
+    return calls, run, container_id
+
+
+def test_g2_rate_sidecar_uses_cid_create_inspect_start_and_exact_cleanup(tmp_path):
+    args, _private_root, rate_root, output_root, ca_cert, config = _rate_sidecar_setup(tmp_path)
+    calls, run, container_id = _mock_sidecar_lifecycle(args, rate_root)
+    with (
+        patch.object(acceptance, '_inspect_g2_gateway', return_value={
+            'container_id': GATEWAY_CONTAINER_ID, 'network_id': NETWORK_ID, 'ip': '172.28.0.2',
+        }),
+        patch.object(acceptance.subprocess, 'run', side_effect=run),
+    ):
+        statuses = acceptance._run_rate_sidecar(args, '127.0.0.70', [('csrf', config), ('sixth', config)])
+
+    assert statuses == {'csrf': 200, 'sixth': 429}
+    commands = [command for command, _kwargs in calls]
+    assert [command[1] for command in commands] == ['inspect', 'create', 'inspect', 'start', 'inspect', 'rm']
+    create = commands[1]
+    assert '--pull=never' in create
+    assert create[create.index('--network') + 1] == f'container:{GATEWAY_CONTAINER_ID}'
+    assert create[create.index('--user') + 1] == f'{os.getuid()}:{os.getgid()}'
+    assert create[-2] == CURL_IMAGE_ID
+    assert '--read-only' in create
+    assert '--privileged' not in create and '-p' not in create and '--publish' not in create
+    assert '-k' not in create and '--insecure' not in create
+    mounts = [value for value in create if value.startswith('type=bind')]
+    assert any(value.endswith('/smoke/ca.crt,readonly') for value in mounts)
+    assert any(value.endswith('/smoke/rate,readonly') for value in mounts)
+    assert any(value.endswith('/smoke/output') for value in mounts)
+    assert commands[3] == ['docker', 'start', '--attach', container_id]
+    assert commands[-1] == ['docker', 'rm', '-f', container_id]
     assert all(stat.S_IMODE(path.stat().st_mode) == 0o600 for path in rate_root.iterdir() if path.is_file())
+    assert stat.S_IMODE(output_root.stat().st_mode) == 0o700
+    assert stat.S_IMODE(ca_cert.stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize('failure', [
+    'start-timeout', 'unexpected-marker', 'owner-mismatch', 'image-mismatch',
+    'user-mismatch', 'namespace-mismatch', 'cleanup-error',
+])
+def test_g2_rate_sidecar_failures_never_delete_by_name_and_cleanup_only_validated_id(tmp_path, failure):
+    args, _private_root, rate_root, _output_root, _ca_cert, config = _rate_sidecar_setup(tmp_path)
+    identity = None
+    start_result = None
+    rm_code = 0
+    if failure == 'start-timeout':
+        start_result = subprocess.TimeoutExpired(['docker', 'start'], 120)
+    elif failure == 'unexpected-marker':
+        start_result = subprocess.CompletedProcess(['docker', 'start'], 0, 'wrong=200\n', '')
+    elif failure == 'owner-mismatch':
+        identity = _sidecar_inspect(args, '9' * 64, owner='another-project')
+    elif failure == 'image-mismatch':
+        identity = _sidecar_inspect(args, '9' * 64, image=APP_IMAGE_ID)
+    elif failure == 'user-mismatch':
+        identity = _sidecar_inspect(args, '9' * 64, user='0:0')
+    elif failure == 'namespace-mismatch':
+        identity = _sidecar_inspect(args, '9' * 64, network='container:another-gateway')
+    elif failure == 'cleanup-error':
+        rm_code = 1
+    calls, run, container_id = _mock_sidecar_lifecycle(
+        args, rate_root, start_result=start_result, identity=identity, rm_code=rm_code,
+    )
+    with (
+        patch.object(acceptance, '_inspect_g2_gateway', return_value={
+            'container_id': GATEWAY_CONTAINER_ID, 'network_id': NETWORK_ID, 'ip': '172.28.0.2',
+        }),
+        patch.object(acceptance.subprocess, 'run', side_effect=run),
+    ):
+        with pytest.raises(acceptance.AcceptanceError):
+            acceptance._run_rate_sidecar(args, '127.0.0.70', [('csrf', config)])
+
+    commands = [command for command, _kwargs in calls]
+    assert not any(command[1] == 'run' for command in commands)
+    assert not any(command[-1].startswith('nhsmoke-rate-') for command in commands if command[1] == 'rm')
+    assert commands[1][1] == 'create'
+    assert commands[2][1] == 'inspect'
+    identity_failure = failure in {'owner-mismatch', 'image-mismatch', 'user-mismatch', 'namespace-mismatch'}
+    if identity_failure:
+        assert not any(command[1] == 'start' for command in commands)
+        assert not any(command[1] == 'rm' for command in commands)
+    else:
+        assert commands[3][1] == 'start'
+        assert commands[-2:] == [['docker', 'inspect', '--type', 'container', container_id], ['docker', 'rm', '-f', container_id]]
+
+
+def test_g2_rate_sidecar_create_failure_without_cid_does_not_delete_reused_name(tmp_path):
+    args, _private_root, _rate_root, _output_root, _ca_cert, config = _rate_sidecar_setup(tmp_path)
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        if command[:3] == ['docker', 'inspect', '--type']:
+            return subprocess.CompletedProcess(command, 1, '', '')
+        if command[:2] == ['docker', 'create']:
+            return subprocess.CompletedProcess(command, 1, '', '')
+        raise AssertionError(f'unexpected command after failed create: {command}')
+
+    with (
+        patch.object(acceptance, '_inspect_g2_gateway', return_value={
+            'container_id': GATEWAY_CONTAINER_ID, 'network_id': NETWORK_ID, 'ip': '172.28.0.2',
+        }),
+        patch.object(acceptance.subprocess, 'run', side_effect=run),
+    ):
+        with pytest.raises(acceptance.AcceptanceError, match='create failed'):
+            acceptance._run_rate_sidecar(args, '127.0.0.70', [('csrf', config)])
+    assert [command[1] for command, _kwargs in calls] == ['inspect', 'create']
+
+
+def test_g2_rate_sidecar_refuses_a_preexisting_random_name_before_create_or_remove(tmp_path):
+    args, _private_root, _rate_root, _output_root, _ca_cert, config = _rate_sidecar_setup(tmp_path)
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        assert command[:3] == ['docker', 'inspect', '--type']
+        return subprocess.CompletedProcess(command, 0, '[{}]', '')
+
+    with (
+        patch.object(acceptance, '_inspect_g2_gateway', return_value={
+            'container_id': GATEWAY_CONTAINER_ID, 'network_id': NETWORK_ID, 'ip': '172.28.0.2',
+        }),
+        patch.object(acceptance.subprocess, 'run', side_effect=run),
+    ):
+        with pytest.raises(acceptance.AcceptanceError, match='name is already in use'):
+            acceptance._run_rate_sidecar(args, '127.0.0.70', [('csrf', config)])
+    assert len(calls) == 1
+    assert not any(command[1] in {'create', 'start', 'rm'} for command, _kwargs in calls)
 
 
 def test_g2_rate_matrix_uses_real_loopback_buckets_and_xff_only_as_negative(tmp_path):
@@ -539,7 +974,7 @@ def test_g2_rate_matrix_uses_real_loopback_buckets_and_xff_only_as_negative(tmp_
         for marker, config in requests:
             if marker == 'csrf':
                 statuses[marker] = 200
-                body_path = rate_root / f'{config.stem}.body'
+                body_path = rate_root / 'output' / f'{config.stem}.body'
                 body_path.write_text(
                     json.dumps({'csrfToken': 'c' * 40}), encoding='utf-8',
                 )
@@ -550,7 +985,7 @@ def test_g2_rate_matrix_uses_real_loopback_buckets_and_xff_only_as_negative(tmp_
                 statuses[marker] = 401
             elif marker == 'login_6' or marker == 'sixth':
                 statuses[marker] = 429
-                headers_path = rate_root / f'{config.stem}.headers'
+                headers_path = rate_root / 'output' / f'{config.stem}.headers'
                 headers_path.write_text('HTTP/1.1 429 Too Many Requests\nRetry-After: 60\n\n', encoding='utf-8')
                 headers_path.chmod(0o600)
             elif marker == 'special':
