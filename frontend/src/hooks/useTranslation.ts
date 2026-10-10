@@ -137,7 +137,7 @@ export function useTranslation(
     activeNewsId: number,
   ) => {
     if (!request.jobId) return
-    let confirmed = false
+    let confirmed: boolean
     let succeeded = false
     let terminalStatus: string | null = null
     let outcomeMessage = '无法确认翻译任务已取消；可重新连接查看状态。'
