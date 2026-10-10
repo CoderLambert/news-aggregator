@@ -52,12 +52,23 @@ def _block(source, marker):
     raise AssertionError(f'unclosed Nginx block after {marker!r}')
 
 
+def _assert_news_host_guards(server):
+    assert 'if ($host != news.lambert.host) { return 444; }' in server
+    assert 'if ($http_host = "") { return 444; }' in server
+
+
 def test_bootstrap_is_http_only_and_keeps_only_the_acme_fixture():
     bootstrap = (NGINX_DIR / 'news.lambert.host.bootstrap.conf').read_text()
+    server = _block(
+        bootstrap,
+        'server {\n    listen 80;\n    server_name news.lambert.host;',
+    )
 
+    assert bootstrap.count('server {') == 1
+    assert 'default_server' not in bootstrap
+    assert 'server_name _;' not in bootstrap
     assert 'server_name news.lambert.host;' in bootstrap
-    assert 'listen 80 default_server;' in bootstrap
-    assert 'return 444;' in bootstrap
+    _assert_news_host_guards(server)
     assert 'location ^~ /.well-known/acme-challenge/' in bootstrap
     assert 'root /var/www/certbot;' in bootstrap
     assert 'try_files $uri =404;' in bootstrap
@@ -68,14 +79,21 @@ def test_bootstrap_is_http_only_and_keeps_only_the_acme_fixture():
 
 def test_production_hosts_redirects_unknown_hosts_and_static_routing():
     production = (NGINX_DIR / 'news.lambert.host.conf').read_text()
+    http_server = _block(
+        production,
+        'server {\n    listen 80;\n    server_name news.lambert.host;',
+    )
     https_server = _block(
         production,
         'server {\n    listen 443 ssl;\n    server_name news.lambert.host;',
     )
 
+    assert production.count('server {') == 2
+    assert 'default_server' not in production
+    assert 'server_name _;' not in production
     assert 'server_name news.lambert.host;' in production
-    assert production.count('server_name _;') == 2
-    assert 'return 444;' in production
+    _assert_news_host_guards(http_server)
+    _assert_news_host_guards(https_server)
     assert 'return 301 https://news.lambert.host$request_uri;' in production
     assert 'location ^~ /.well-known/acme-challenge/' in production
     assert production.count('try_files $uri =404;') >= 8
