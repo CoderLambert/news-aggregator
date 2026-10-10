@@ -205,3 +205,13 @@ c59e6a507362ad281dbc5e7442bacf1c5bdbb8ba 五文件整改，隔离archive/env-i 7
 ## NH-PUB-08 离线准备与并发测试诊断
 
 Luna按完整合同实施mode禁网、attempt快照/0029、callback当前session/user与交换紧前fence、cookie及本地凭据清除；尚未提交/High。首轮75PASS/2FAIL分别测试session绑定fixture错和historical model读取当前字段，修正后77PASS。新增fence负例三项PASS；完整扩展轮86PASS/1FAIL是两线程一次消费测试，使用pytest共享内存SQLite（file:memorydb_default?mode=memory&cache=shared、uri=true、timeout30），出现table lock；原日志 /tmp/newshub-nhpub08-final.VZrf1u/acceptance-r3.log 与race-diagnostic2.log保留（后者1成功1OperationalError，非两成功）。权威真实文件子进程forward0029、两独立连接/FakeOAuth证实1成功1SubscriptionError且exchange1次/completed，standalone-race.log退出0。将主回归改为真实文件子进程，不skip或降低断言；最终事务首写CAS和仅存储busy安全503按主控冻结整改中，不能重试授权网络。公共middleware已有chatgpt_auth_disabled早期HTTP码保留，服务直接调用subscription_disabled码分测。无用户DB/.env/真实OAuth/付费调用。
+
+
+## G2 seed R3 High闭环与第二次实际验收准备
+
+bf24244七文件提交，隔离83PASS/bash/mock/compile/diff0；/tmp/newshub-g2-seed-r3-final-tqdmlm2h/。独立High无新增P0/P1/P2，七physicalhash及scoped diff前后一致2dc5c786ea246267ca868e094b3dd8da9e1994150e221d44ea46e4c8db19892a；/tmp/newshub-g2-seed-r3-{pre,post}.json。新runner固定bf24244、app仍b2精确ID；允许此次整改后仅一次真实重试，不把83单测算账户browserPASS。NH08最终隔离91PASS/三既有warnings及migration/compile/diff0，/tmp/newshub-nhpub08-final2.NIyOyr/，七业务源冻结独立High待审，真实OAuth/网站调用仍未运行。
+
+
+## NH-PUB-08 首次High：目标删除P2整改
+
+完整七源（含三新文件）独立High无P0/P1，但1P2 BLOCK：target_connection SET_NULL后callback跳过target分支并可重建已删除的重授权连接，交换前及保存前均有此竞态。pre/post七physicalhash及combined diff一致b1a9e39052709061e5f7bcedc157b6c37e2de96c7e5cbbe90b2d3e5dc53132a1，/tmp/newshub-nhpub08-review-{pre,post}.json。复用真实create target_attempt_generation>=1与new=0标识，exchange前和最终事务均拒绝positive generation且targetID为空；补删除在交换前0exchange/交换后1exchange但无新连接/凭据保存两回归。91PASS只源码证据，NH08仍DOING，不称REVIEWED。

@@ -38,6 +38,13 @@ from api.services import chatgpt_subscription_jobs as translation_jobs
 
 User = get_user_model()
 HANDOFF_ORIGIN = 'http://127.0.0.1:5173'
+CALLBACK_SESSION_KEY = 'synthetic-authenticated-session'
+CALLBACK_DISCOVERY = {
+    'authorization_endpoint': 'https://auth.example/authorize',
+    'token_endpoint': 'https://auth.example/token',
+    'jwks_uri': 'https://auth.example/keys',
+    'issuer': 'https://auth.example',
+}
 
 
 @pytest.fixture
@@ -123,7 +130,11 @@ class FakeResponse:
         self.closed = True
 
 
-def _attempt(user, state, *, expires_at=None, client_id=subscription.DYNAMIC_CLIENT_ID, target=None, browser_cookie='browser-cookie'):
+def _attempt(
+    user, state, *, expires_at=None, client_id=subscription.DYNAMIC_CLIENT_ID,
+    target=None, browser_cookie='browser-cookie', session_key=CALLBACK_SESSION_KEY,
+):
+    protocol_snapshot = subscription._protocol_snapshot(CALLBACK_DISCOVERY, client_id)
     return ChatGPTAuthAttempt.objects.create(
         user=user,
         target_connection=target,
@@ -133,10 +144,23 @@ def _attempt(user, state, *, expires_at=None, client_id=subscription.DYNAMIC_CLI
         encrypted_authorization_url='encrypted-url',
         handoff_token_hash='unused-handoff-token',
         browser_binding_hash=subscription._digest(browser_cookie),
+        session_binding_hash=subscription._session_binding_hash(session_key),
         requested_client_id=client_id,
+        auth_mode='local_oss',
+        protocol_snapshot=protocol_snapshot,
+        config_fingerprint=subscription._snapshot_fingerprint(protocol_snapshot),
         target_attempt_generation=target.auth_attempt_generation if target else 0,
         status='authorizing',
         expires_at=expires_at or (timezone.now() + timedelta(minutes=5)),
+    )
+
+
+def _complete(user, query, browser_cookie, *, session_key=CALLBACK_SESSION_KEY):
+    return subscription.complete_authorization(
+        query,
+        browser_cookie,
+        session_key=session_key,
+        user_id=user.pk,
     )
 
 
@@ -165,6 +189,7 @@ def test_callback_rejects_authorization_without_direct_scope(user, crypto):
     }
     with (
         patch.object(subscription, '_discovery', return_value={
+            'authorization_endpoint': 'https://auth.example/authorize',
             'token_endpoint': 'https://auth.example/token',
             'issuer': 'https://auth.example',
             'jwks_uri': 'https://auth.example/keys',
@@ -174,7 +199,7 @@ def test_callback_rejects_authorization_without_direct_scope(user, crypto):
         patch.object(subscription, '_verify_id_token', return_value={'sub': 'account-1'}),
     ):
         with pytest.raises(subscription.SubscriptionError, match='direct model access'):
-            subscription.complete_authorization({'state': state, 'code': 'authorization-code', 'client_id': 'issued-client-id'}, 'browser-cookie')
+            _complete(user, {'state': state, 'code': 'authorization-code', 'client_id': 'issued-client-id'}, 'browser-cookie')
     assert not ChatGPTSubscriptionConnection.objects.filter(user=user).exists()
 
 
@@ -295,9 +320,9 @@ def test_reconnect_callback_does_not_override_a_newer_account_selection(user, cr
                 'iss': 'https://auth.example', 'sub': 'account-a', 'name': 'Account A',
             }),
         ):
-            completed = subscription.complete_authorization({
+            completed = _complete(user, {
                 'state': state, 'code': 'mock-code', 'client_id': account_a.issued_client_id,
-            }, cookie)
+            }, cookie, session_key='reconnect-selection-session')
 
     account_a.refresh_from_db()
     account_b.refresh_from_db()
@@ -343,9 +368,9 @@ def test_late_callback_does_not_restore_selection_after_none_to_account_to_none(
                 'iss': 'https://auth.example', 'sub': 'late-account', 'name': 'Late Account',
             }),
         ):
-            completed = subscription.complete_authorization({
+            completed = _complete(user, {
                 'state': state, 'code': 'mock-code', 'client_id': 'late-client-id',
-            }, cookie)
+            }, cookie, session_key='none-selection-session')
 
     account_b.refresh_from_db()
     completed.refresh_from_db()
@@ -393,9 +418,9 @@ def test_dynamic_oauth_callback_persists_issued_client_id_and_encrypted_tokens(u
                 'iss': 'https://auth.example', 'sub': 'account-subject', 'name': 'Reader', 'email': 'reader@example.com',
             }),
         ):
-            connection = subscription.complete_authorization({
+            connection = _complete(user, {
                 'state': state, 'code': 'mock-code', 'client_id': 'issued-client-id',
-            }, browser_cookie)
+            }, browser_cookie, session_key='local-session-1')
             assert exchange.call_args.args[1] == 'issued-client-id'
 
     oauth_host = ChatGPTOAuthHost.objects.get()
@@ -425,7 +450,7 @@ def test_failed_reauthorization_preserves_the_current_session_and_account_hint(u
         connection.encrypted_refresh_token,
         connection.encrypted_id_token,
     )
-    discovery = {'authorization_endpoint': 'https://auth.example/authorize'}
+    discovery = CALLBACK_DISCOVERY
     with (
         patch.object(subscription, '_discovery', return_value=discovery),
         patch.object(subscription, '_revoke_refresh_token') as revoke,
@@ -435,9 +460,9 @@ def test_failed_reauthorization_preserves_the_current_session_and_account_hint(u
         params = parse_qs(urlparse(url).query)
         assert params['id_token_hint'] == ['retained-id-token']
         with pytest.raises(subscription.SubscriptionError, match='取消'):
-            subscription.complete_authorization({
+            _complete(user, {
                 'state': params['state'][0], 'error': 'access_denied',
-            }, cookie)
+            }, cookie, session_key='ordinary-reauthorization')
         revoke.assert_not_called()
 
     connection.refresh_from_db()
@@ -516,7 +541,10 @@ def _exercise_legacy_subscription_upgrade():
         False,
     )
     assert preserved.connected
-    migrated_attempt = ChatGPTAuthAttempt.objects.get(pk=attempt.pk)
+    migrated_attempt_model = executor.loader.project_state([after]).apps.get_model(
+        'api', 'ChatGPTAuthAttempt',
+    )
+    migrated_attempt = migrated_attempt_model.objects.get(pk=attempt.pk)
     assert migrated_attempt.status == 'cancelled'
     assert migrated_attempt.state_hash == 'legacy-state-hash'
     assert migrated_attempt.nonce_hash == 'legacy-nonce-hash'
@@ -564,7 +592,7 @@ def test_expired_oauth_state_is_rejected(user):
     state = 'expired-state'
     attempt = _attempt(user, state, expires_at=timezone.now() - timedelta(seconds=1))
     with pytest.raises(subscription.SubscriptionError, match='已过期'):
-        subscription.complete_authorization({'state': state, 'code': 'ignored'}, 'browser-cookie')
+        _complete(user, {'state': state, 'code': 'ignored'}, 'browser-cookie')
     attempt.refresh_from_db()
     assert attempt.status == 'failed'
 
@@ -1203,6 +1231,7 @@ def test_id_token_scope_claim_cannot_replace_missing_token_response_scope(user, 
     }
     with (
         patch.object(subscription, '_discovery', return_value={
+            'authorization_endpoint': 'https://auth.example/authorize',
             'token_endpoint': 'https://auth.example/token',
             'issuer': 'https://auth.example', 'jwks_uri': 'https://auth.example/keys',
         }),
@@ -1214,7 +1243,7 @@ def test_id_token_scope_claim_cannot_replace_missing_token_response_scope(user, 
         }),
     ):
         with pytest.raises(subscription.SubscriptionError, match='direct model access'):
-            subscription.complete_authorization(
+            _complete(user,
                 {'state': state, 'code': 'authorization-code', 'client_id': 'issued-client-id'},
                 'browser-cookie',
             )
@@ -1235,9 +1264,9 @@ def test_handoff_is_one_use_and_callback_requires_the_same_browser_cookie(user, 
     exchange = Mock()
     with patch.object(subscription, '_exchange_code', exchange):
         with pytest.raises(subscription.SubscriptionError, match='浏览器不匹配'):
-            subscription.complete_authorization(
+            _complete(user,
                 {'state': params['state'][0], 'code': 'mock-code', 'client_id': 'issued-client-id'},
-                'different-browser-cookie',
+                'different-browser-cookie', session_key='same-browser-session',
             )
     exchange.assert_not_called()
     with pytest.raises(subscription.SubscriptionError, match='已使用'):
@@ -1259,8 +1288,9 @@ def test_login_session_change_cancels_callback_before_code_exchange(user, crypto
     exchange = Mock()
     with patch.object(subscription, '_exchange_code', exchange):
         with pytest.raises(subscription.SubscriptionError, match='取消'):
-            subscription.complete_authorization(
+            _complete(user,
                 {'state': state, 'code': 'late-code', 'client_id': 'issued-client-id'}, cookie,
+                session_key='session-before-switch',
             )
     exchange.assert_not_called()
     assert subscription.authorization_attempt_status(user, start['attempt_id'])['status'] == 'cancelled'
@@ -1300,7 +1330,7 @@ def test_explicit_cancel_during_callback_processing_prevents_connection_commit(u
         }),
     ):
         with pytest.raises(subscription.SubscriptionError, match='授权请求已取消'):
-            subscription.complete_authorization({
+            _complete(user, {
                 'state': state, 'code': 'mock-code', 'client_id': 'issued-client-id',
             }, 'browser-cookie')
 
@@ -1338,9 +1368,9 @@ def test_same_subject_under_new_dynamic_registration_creates_distinct_connection
             start = _create_attempt(user, session_key=session)
             cookie, url = _handoff(start, session_key=session)
             state = parse_qs(urlparse(url).query)['state'][0]
-            connections.append(subscription.complete_authorization({
+            connections.append(_complete(user, {
                 'state': state, 'code': 'mock-code', 'client_id': actual_client_id,
-            }, cookie))
+            }, cookie, session_key=session))
     assert connections[0].issued_client_id == 'dynamic-client-a'
     assert connections[1].issued_client_id == 'dynamic-client-b'
     assert connections[0].subject_hash == connections[1].subject_hash
@@ -1362,9 +1392,9 @@ def test_reconnect_rejects_mismatched_returned_client_id_before_exchange(user, c
     exchange = Mock()
     with patch.object(subscription, '_exchange_code', exchange):
         with pytest.raises(subscription.SubscriptionError, match='client_id'):
-            subscription.complete_authorization({
+            _complete(user, {
                 'state': state, 'code': 'mock-code', 'client_id': 'other-client-id',
-            }, cookie)
+            }, cookie, session_key='reconnect-session')
     exchange.assert_not_called()
     assert subscription.authorization_attempt_status(user, start['attempt_id'])['status'] == 'failed'
 
@@ -1512,9 +1542,9 @@ def test_disconnect_cancels_targeted_oauth_and_callback_cannot_restore_it(user, 
     exchange = Mock()
     with patch.object(subscription, '_exchange_code', exchange):
         with pytest.raises(subscription.SubscriptionError, match='取消'):
-            subscription.complete_authorization({
+            _complete(user, {
                 'state': state, 'code': 'late-code', 'client_id': connection.issued_client_id,
-            }, cookie)
+            }, cookie, session_key='disconnect-session')
     exchange.assert_not_called()
     connection.refresh_from_db()
     assert connection.encrypted_access_token == '' and connection.encrypted_refresh_token == ''

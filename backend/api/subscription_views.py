@@ -2,9 +2,11 @@
 
 import html
 import json
+from urllib.parse import urlparse
 
 from django.http import HttpResponse, HttpResponseRedirect, StreamingHttpResponse
 from rest_framework import status
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -26,6 +28,23 @@ def _connection_payload(connection):
         'needs_reauth': connection.needs_reauth,
         'updated_at': connection.updated_at.isoformat(),
     }
+
+
+def _subscription_error_response(exc):
+    return Response(
+        {'error': str(exc), 'error_code': exc.error_code},
+        status=exc.status_code,
+    )
+
+
+def _safe_callback_message(error_code):
+    if error_code in {'subscription_disabled', 'local_oss_production_forbidden'}:
+        return '此环境当前未启用 ChatGPT 订阅连接。'
+    if error_code == 'hosted_integration_unapproved':
+        return '托管订阅连接尚未获得所需批准。'
+    if error_code in {'session_mismatch', 'inactive_user'}:
+        return '本地登录状态已切换，请回到原页面重新开始连接。'
+    return '授权没有完成，请回到原页面重新开始连接。'
 
 
 class ChatGPTSubscriptionStatusView(APIView):
@@ -55,7 +74,7 @@ class ChatGPTSubscriptionConnectView(APIView):
                 origin=request.META.get('HTTP_ORIGIN', ''),
             )
         except subscription.SubscriptionError as exc:
-            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return _subscription_error_response(exc)
         return Response(attempt, status=status.HTTP_201_CREATED)
 
 
@@ -75,8 +94,8 @@ class ChatGPTSubscriptionHandoffView(APIView):
         except subscription.SubscriptionError as exc:
             return HttpResponse(
                 '<!doctype html><meta charset="utf-8"><title>连接失败</title>'
-                f'<p>{html.escape(str(exc))}</p>',
-                status=400, content_type='text/html; charset=utf-8',
+                '<p>连接没有完成，请回到原页面重新开始。</p>',
+                status=exc.status_code, content_type='text/html; charset=utf-8',
             )
         response = HttpResponseRedirect(authorization_url)
         response.set_cookie(
@@ -84,7 +103,7 @@ class ChatGPTSubscriptionHandoffView(APIView):
             cookie_value,
             max_age=int(subscription.AUTH_ATTEMPT_TTL.total_seconds()),
             httponly=True,
-            secure=False,
+            secure=request.is_secure(),
             samesite='Lax',
             path=subscription.BINDING_COOKIE_PATH,
         )
@@ -97,8 +116,11 @@ class ChatGPTSubscriptionAttemptView(APIView):
     def get(self, request, attempt_id):
         try:
             payload = subscription.authorization_attempt_status(request.user, attempt_id)
-        except subscription.SubscriptionError:
-            return Response({'error': '授权请求不存在。'}, status=status.HTTP_404_NOT_FOUND)
+        except subscription.SubscriptionError as exc:
+            return Response(
+                {'error': '授权请求不存在。', 'error_code': exc.error_code},
+                status=status.HTTP_404_NOT_FOUND,
+            )
         return Response(payload)
 
     def delete(self, request, attempt_id):
@@ -106,8 +128,11 @@ class ChatGPTSubscriptionAttemptView(APIView):
         if not cancelled:
             try:
                 payload = subscription.authorization_attempt_status(request.user, attempt_id)
-            except subscription.SubscriptionError:
-                return Response({'error': '授权请求不存在。'}, status=status.HTTP_404_NOT_FOUND)
+            except subscription.SubscriptionError as exc:
+                return Response(
+                    {'error': '授权请求不存在。', 'error_code': exc.error_code},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
             return Response(payload)
         return Response({
             'id': str(attempt_id), 'status': 'cancelled', 'message': '授权请求已取消。', 'connection_id': None,
@@ -115,20 +140,33 @@ class ChatGPTSubscriptionAttemptView(APIView):
 
 
 class ChatGPTSubscriptionCallbackView(APIView):
-    authentication_classes = []
-    permission_classes = [AllowAny]
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        result_code = 200
         try:
+            subscription._require_network_mode()
+            redirect = urlparse(subscription.REDIRECT_URI)
+            if (
+                request.path != subscription.BINDING_COOKIE_PATH or
+                request.get_host().lower() != redirect.netloc.lower() or
+                request.is_secure() != (redirect.scheme == 'https')
+            ):
+                raise subscription.SubscriptionError(
+                    '回调地址与授权请求不匹配。', 'callback_origin_mismatch', 400,
+                )
             subscription.complete_authorization(
                 request.query_params,
                 request.COOKIES.get(subscription.BINDING_COOKIE_NAME, ''),
+                session_key=request.session.session_key or '',
+                user_id=request.user.pk,
             )
-            message = 'ChatGPT 订阅连接已完成。可以关闭此窗口，原页面会自动更新。'
-            result_code = 200
         except subscription.SubscriptionError as exc:
-            message = str(exc)
-            result_code = 400
+            message = _safe_callback_message(exc.error_code)
+            result_code = exc.status_code
+        else:
+            message = 'ChatGPT 订阅连接已完成。可以关闭此窗口，原页面会自动更新。'
         safe_message = html.escape(message)
         page = (
             '<!doctype html><html lang="zh-CN"><meta charset="utf-8">'
@@ -139,7 +177,17 @@ class ChatGPTSubscriptionCallbackView(APIView):
             f'<p>{safe_message}</p><p>关闭此窗口后，回到新闻聚合器查看连接状态。</p>'
             '</body></html>'
         )
-        return HttpResponse(page, status=result_code, content_type='text/html; charset=utf-8')
+        response = HttpResponse(page, status=result_code, content_type='text/html; charset=utf-8')
+        response.set_cookie(
+            subscription.BINDING_COOKIE_NAME,
+            '',
+            max_age=0,
+            httponly=True,
+            secure=request.is_secure(),
+            samesite='Lax',
+            path=subscription.BINDING_COOKIE_PATH,
+        )
+        return response
 
 
 class ChatGPTSubscriptionModelsView(APIView):
@@ -150,7 +198,7 @@ class ChatGPTSubscriptionModelsView(APIView):
             connection = subscription.get_user_connection(request.user, connection_id)
             models = subscription.discover_models(connection)
         except subscription.SubscriptionError as exc:
-            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return _subscription_error_response(exc)
         return Response({'models': models, 'selected_model': connection.selected_model})
 
 
@@ -161,7 +209,7 @@ class ChatGPTSubscriptionActivateView(APIView):
         try:
             connection = subscription.activate_connection(request.user, connection_id)
         except subscription.SubscriptionError as exc:
-            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return _subscription_error_response(exc)
         return Response(_connection_payload(connection))
 
 
@@ -180,7 +228,7 @@ class ChatGPTSubscriptionSelectModelView(APIView):
             connection.selected_model = slug
             connection.save(update_fields=['selected_model', 'updated_at'])
         except subscription.SubscriptionError as exc:
-            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return _subscription_error_response(exc)
         return Response({'selected_model': connection.selected_model})
 
 
@@ -191,7 +239,7 @@ class ChatGPTSubscriptionDisconnectView(APIView):
         try:
             revoked = subscription.disconnect_connection(request.user, connection_id)
         except subscription.SubscriptionError as exc:
-            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return _subscription_error_response(exc)
         return Response({'disconnected': True, 'revocation_confirmed': revoked})
 
 
