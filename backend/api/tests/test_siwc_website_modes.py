@@ -295,3 +295,32 @@ def test_website_article_chat_history_is_private_and_no_key_fallback(website):
         denied = b.post(path, {'question': 'Explain this'}, format='json')
     assert denied.status_code == 403
     paid_llm.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_hosted_chatgpt_identity_cannot_be_shared_across_site_users(website, discovery):
+    alice = user_for('owner-alice')
+    bob = user_for('owner-bob')
+    tokens = {
+        'access_token': 'a', 'refresh_token': 'r', 'id_token': 'signed',
+        'expires_in': 1800, 'scope': website.CHATGPT_WEBSITE_SCOPES,
+    }
+    for index, user in enumerate((alice, bob)):
+        _, cookie, params = begin(user, f'shared-login-{index}', discovery)
+        with (
+            patch.object(subscription, '_discovery', return_value=discovery),
+            patch.object(subscription, '_exchange_code', return_value=tokens),
+            patch.object(subscription, '_verify_id_token', return_value={
+                'iss': discovery['issuer'], 'sub': 'same-ChatGPT-user',
+            }),
+        ):
+            if index == 0:
+                subscription.complete_authorization({
+                    'state': params['state'][0], 'code': 'fake',
+                }, cookie)
+            else:
+                with pytest.raises(subscription.SubscriptionError, match='其他网站账号'):
+                    subscription.complete_authorization({
+                        'state': params['state'][0], 'code': 'fake',
+                    }, cookie)
+    assert ChatGPTSubscriptionConnection.objects.filter(oauth_mode='website').count() == 1
