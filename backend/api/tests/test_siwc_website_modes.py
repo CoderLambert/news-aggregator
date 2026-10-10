@@ -343,3 +343,28 @@ def test_website_translation_does_not_use_admin_provider_without_subscription(we
         result = b''.join(response.streaming_content).decode('utf-8')
     assert '请先登录并连接 ChatGPT 订阅账号' in result
     paid_clients.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_website_suggested_questions_do_not_fallback_to_admin_keys(website):
+    category = Category.objects.create(name='Suggested privacy', slug='suggested-privacy')
+    source = Source.objects.create(name='Suggestions', url='https://suggested.example', language='en')
+    news = News.objects.create(
+        title='Suggestions', content='Body', url='https://suggested.example/a',
+        source=source, category=category, publish_time=timezone.now(),
+        full_content='# Article body',
+    )
+    client = APIClient()
+    client.force_authenticate(user=user_for('suggested-no-fallback'))
+    with (
+        patch('api.views.get_clients') as paid_clients,
+        patch('api.views.ensure_full_content') as fetch_content,
+    ):
+        response = client.post(
+            f'/api/news/{news.pk}/suggested-questions/?force=1',
+            {}, format='json',
+        )
+    assert response.status_code == 200
+    assert len(response.data['questions']) == 3
+    paid_clients.assert_not_called()
+    fetch_content.assert_not_called()
