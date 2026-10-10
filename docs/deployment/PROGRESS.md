@@ -71,3 +71,8 @@
 - 4新增定向文件31tests PASS退出0；cd frontend && npm run typecheck && npm run lint && npm run test:run && npm run build退出0，全量63files/421tests。首轮测试generator无yield lint错误已修复合法progress event后全链通过，最终版本不重复跑。git diff --check0。
 - 主Agent核对CapabilitiesContext/FeatureRoute/AuthContext/API schema、禁用时不挂private页面以及默认ctx关闭，逐owned diff统计未见越界；后续G2还要补Auth refresh/logout并发响应的epoch保护，不将当前cache清理当全部账户竞争验收。
 - 下一任务：11/12真实测试收集/CI/一致快照恢复与dryrun发布，独立于02本地域名脚本；02当前上游9527保留生产模板，19527仅04 host-network smoke。
+
+## 本地域名验收要求与02阶段A结果
+用户要求后续开发补充本地域名测试验收，已在local-domain-testing.md明确为固定开发/上线前门槛，并区分G1只读、G2账户与G3离线任务链路。使用正式域名、隔离DNS alias、临时CA及独立Nginx，不修改公网DNS、hosts、系统证书库或现有服务。
+- 02实施返回：PYTHONPATH=backend:crawler RUN_MAIN=true backend/venv/bin/python -m pytest scripts/deploy/tests/test_nginx_templates.py -q退出0，4 passed；shell语法、mock参数测试、py_compile、diff-check均0。原合同不带PYTHONPATH的pytest退出1，原因是pytest-django找不到newsaggregator，不能将该命令记录为通过。
+- 当前候选HEAD 5c0e46bec0e3d933daf8207848f5a767fffc31ef；阶段A文件尚未提交。实际Docker/Nginx/HTTPS/browser链路、截图、TLS负例及SSE时序均NOT_RUN；G2/G3也NOT_RUN。上线现场公网验收仍EXTERNAL_BLOCKED。

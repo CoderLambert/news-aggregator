@@ -11,7 +11,7 @@
 | S05-FRONTEND | P00/03 | Mermaid/Markdown/DOMPurify与负例 | 3文件7测试、typecheck、lint退出0；High待G1 | TESTED | 7bef7fb候选；未审核 |
 | S05-BACKEND | P00/03 | article_fetcher安全输送/各provider/比较验证器 | 106测试PASS；DNS/每跳/全deadline/wire/GET；High待G1 | TESTED | 7bef7fb候选；未审核 |
 | NH-PUB-04 | 03 | Dockerfile/compose.prod/entrypoint/持久路径 | 阶段A54+8PASS；B镜像/健康/重建持久性/权限待验 | DOING | 基线；未审核 |
-| NH-PUB-02 | 03、04 | deploy/nginx/模板与隔离验证 | nginx -t/路径/SSE/缓存/TLS bootstrap | TODO | 基线；未审核 |
+| NH-PUB-02 | 03、04 | deploy/nginx/模板与隔离验证 | 阶段A离线4项PASS；真实nginx/TLS/browser阶段B待验 | DOING | 5c0e46b候选；未审核 |
 | NH-PUB-10 | 05 | services/api/AuthContext/页面/index/测试 | 31定向+421全量PASS、typecheck/lint/build0；High待G1 | TESTED | 基线；未审核 |
 | NH-PUB-11/12 | G1 前项 | CI/部署回滚备份恢复/release-gates | 前后端全量/check/Docker/Nginx/模拟恢复/High | TODO | 基线；未审核 |
 | S01/P01/G2 | G1 本地门槛 | Chat 归属迁移/事务/账户 CSRF 限速/前端缓存 | A/B/匿名/并发/历史隔离/登录重放/High | TODO | 基线；未审核 |
@@ -23,4 +23,4 @@
 
 历史 ID 去重：S01→G2；S02/S04/O01/O02/O03→06；S05→内容安全；P01→G2。S03→03/G2，O04→04（reference-plan明确关联）；O05/O06/P02/P03 因本地参考未提供原定义保持 NOT_RUN，不宣称被前项覆盖。密码重置因邮件策略未定为 BLOCKED，待 G2明确；不妨碍其他本地任务。
 
-| 本地域名/HTTPS G1/G2追加 | 02/04/05/10，G2追加账户 | 隔离DNS alias/CA/Nginx/browser验收脚本与说明 | 正式域名HTTPS不跳过证书、深链/权限/SSE/CSRF/Cookie/登录/A-B | TODO | ADR011；未审核 |
+| 本地域名/HTTPS G1/G2/G3追加 | 02/04/05/10，G2追加账户，G3追加任务 | 隔离DNS alias/CA/Nginx/browser验收脚本与说明 | 正式域名HTTPS不跳过证书、深链/权限/SSE/CSRF/Cookie/登录/A-B/任务；实际运行NOT_RUN | DOING | ADR011；阶段A完成，未审核 |

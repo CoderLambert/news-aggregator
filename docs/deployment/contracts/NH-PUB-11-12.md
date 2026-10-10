@@ -11,3 +11,6 @@ SQLite助手纯stdlib backup API：source uri mode=ro，不immutable，不复制
 - Negative tests：原51收集假完整消除；dryrun不docker create/up/cp/SSH/write；缺/坏sha、错label、latest或不精确镜像、badroot、缺env/backup、新旧manifest迁移不等、旧static缺失全部拒绝；WAL未提交行不在快照，运行写入主文件不可直接copy；备份输出已存在不覆盖，半成品失败不留敏感文件；restore未停写/已有volume运行使用/无旧backup/坏sqlite/坏manifest拒绝且原数据不动；keys不复制，syntax参数不eval。回滚不能仅凭flag强行通过迁移。
 - Forbidden：不改应用鉴权/模型/OAuth/Provider/迁移、不改02/04/10owned文件、不真实公网/收费/生产操作、不上传secret/备份文件、不触发真实email/消息、不commit/再派生。若实现需要扩展Dockerfile/其他文件或冻结部署步骤不够精确，先返回证据给Sol，不猜补全。
 - Return format：ID、paths/diff、命令/exit/测试数与收集范围、backup/restore真实证据、manifest/schema前提、HEAD、NOT_RUN/BLOCKED清单；CI未真实运行必须NOT_RUN，High尚未审核不得REVIEWED。
+
+## 发布顺序补充（主 Agent 冻结）
+采用维护窗口：仅停止显式 project 的 crawler、indexer、app，确认停止后创建并验证 SQLite 一致备份，再使用新镜像执行一次性迁移。迁移成功后启动 app，ready 通过后启动 workers 并核验健康；全部通过后才原子切换静态 current。迁移锁不能替代停止旧版本读写。任何备份、迁移、启动或健康检查失败，保持该 project app/workers 停止并保留备份和原静态 current；不自动重启旧镜像、不自动跨 schema 回滚。恢复须走严格 manifest/快照验证流程。默认 dry-run 不停止任何服务。此前未完成的文件继续在原 ownership 内完成，不撤销现有助手与测试。

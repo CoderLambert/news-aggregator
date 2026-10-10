@@ -83,3 +83,6 @@ Compose八项开关通过显式--env-file变量/default表达式解析，默认r
 
 ## ADR-017：Docker上下文嵌套秘密/缓存排除实证
 主Agent真实FROM scratch COPY .临时probe复制原.dockerignore，仅含合成dummy；构建退出0，docker cp明确包含backend/.env、frontend/.env.local、backend/media/tts_cache/private.mp3。根.env规则不够。04-A-R2增加所有层级.env/证书/auth.json/.runtime/.cache/logs与backend/media排除，真实最小context fixture还须证明正常源码保留。实验从未读取真实env/db/audio，精确清理自建container/image，无启动/外网。生产正式build仍等04B，不把此最小context proof称发布构建PASS。
+
+## ADR-018：SQLite 发布维护窗口
+迁移锁仅串行迁移，不能保证旧 app/workers 不访问变化中的 schema。发布必须停止指定 project 的 crawler/indexer/app，再核验一致备份、迁移、app readiness、worker health，最后切换静态目录。失败保持服务停止、备份与旧静态保留；不自动跨 schema 启动旧版本。实际生产执行仍不在当前授权范围。
