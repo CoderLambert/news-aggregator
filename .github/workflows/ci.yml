@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Check frontend types
+        working-directory: frontend
+        run: npm run typecheck
+      - name: Lint frontend
+        working-directory: frontend
+        run: npm run lint
+      - name: Test frontend
+        working-directory: frontend
+        run: npm run test:run
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+  backend-and-release-gates:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: backend:crawler
+      RUN_MAIN: 'true'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Create isolated backend environment
+        run: python -m venv backend/venv
+      - name: Install CPU-only PyTorch first
+        run: backend/venv/bin/python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.14.1+cpu'
+      - name: Install backend and test dependencies
+        run: backend/venv/bin/python -m pip install -r backend/requirements.txt
+      - name: Collect all three test roots
+        run: backend/venv/bin/python -m pytest --collect-only -q tests/ backend/api/tests/ scripts/deploy/tests/
+      - name: Run backend and offline deployment tests
+        run: backend/venv/bin/python -m pytest -q tests/ backend/api/tests/ scripts/deploy/tests/
+      - name: Check production Django settings with synthetic values
+        env:
+          DJANGO_ENV: production
+          DJANGO_DEBUG: '0'
+          DJANGO_SECRET_KEY: CI-only-synthetic-strong-secret-not-a-credential-9876543210-abcdef
+          WAITRESS_TRUSTED_PROXY: 127.0.0.1
+          DJANGO_DB_PATH: /tmp/newshub-ci-check.sqlite3
+        run: backend/venv/bin/python backend/manage.py check --deploy
+      - name: Validate release shell syntax and mocked script behavior
+        run: |
+          bash -n scripts/deploy/smoke.sh scripts/deploy/deploy.sh scripts/deploy/rollback.sh scripts/deploy/backup.sh scripts/deploy/restore.sh scripts/deploy/tests/test_release_scripts.sh
+          bash scripts/deploy/tests/test_release_scripts.sh
+          bash scripts/deploy/tests/test_export_static.sh
+          bash scripts/deploy/tests/test_preflight.sh
+          bash scripts/deploy/tests/test_local_domain_args.sh
+      - name: Install isolated browser smoke tools
+        run: |
+          backend/venv/bin/python -m pip install 'playwright==1.62.0'
+          backend/venv/bin/python -m playwright install chromium
+          sudo backend/venv/bin/python -m playwright install-deps chromium
+          sudo apt-get update
+          sudo apt-get install --yes libnss3-tools
+          browser_path="$(find "$HOME/.cache/ms-playwright" -type f -name chrome -perm /111 -print -quit)"
+          test -n "$browser_path"
+          echo "CHROMIUM_EXECUTABLE=$browser_path" >> "$GITHUB_ENV"
+      - name: Build the non-root production image
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+          NEWSHUB_IMAGE: newshub:ci-${{ github.sha }}
+        run: docker build --target production --build-arg "RELEASE_SHA=${RELEASE_SHA}" --tag "${NEWSHUB_IMAGE}" .
+      - name: Preload isolated smoke Nginx image
+        run: docker pull nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
+      - name: Run isolated G1 local-domain smoke
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+          NEWSHUB_IMAGE: newshub:ci-${{ github.sha }}
+          PYTHON_BIN: ${{ github.workspace }}/backend/venv/bin/python
+        run: scripts/deploy/local-domain-smoke.sh --execute --image "${NEWSHUB_IMAGE}" --sha "${RELEASE_SHA}" --nginx-image nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94

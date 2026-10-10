@@ -86,3 +86,7 @@ Compose八项开关通过显式--env-file变量/default表达式解析，默认r
 
 ## ADR-018：SQLite 发布维护窗口
 迁移锁仅串行迁移，不能保证旧 app/workers 不访问变化中的 schema。发布必须停止指定 project 的 crawler/indexer/app，再核验一致备份、迁移、app readiness、worker health，最后切换静态目录。失败保持服务停止、备份与旧静态保留；不自动跨 schema 启动旧版本。实际生产执行仍不在当前授权范围。
+已有数据发布用current-manifest验证现app revision与显式db-volume，再在此次停服窗口生成backup-output；备份schema与旧manifest一致，新镜像目标manifest独立验证。不能用外部旧快照替代停写后的最新备份，也不能拿新schema验证旧DB。fresh仅无旧app且DB文件不存在。
+
+## ADR-019：G2 归属、遗留历史与账户安全
+旧无主Chat逐条完整归档到无级联FK的LegacyChatArchive，仅active superuser只读；不能自动分配新用户。新Chat unique(user,news)，revision CAS避免SQLite伪行锁，generation阻止清理后旧流恢复历史；不可逆迁移必须先备份。登录/注册服务端强制匿名CSRF，研究恢复标准SessionAuthentication，诊断仅active superuser。持久HMAC限速桶用事务第一步写单例锁串行，失败闭锁；生产注册即使开关打开仍需email绑定一次性邀请，密码验证器始终启用，无邮件服务时密码重置BLOCKED。精确边界在G2-CHAT/G2-ACCOUNTS合同；这两项尚待G1完成后执行。

@@ -13,7 +13,7 @@
 | NH-PUB-04 | 03 | Dockerfile/compose.prod/entrypoint/持久路径 | 阶段A54+8PASS；B镜像/健康/重建持久性/权限待验 | DOING | 基线；未审核 |
 | NH-PUB-02 | 03、04 | deploy/nginx/模板与隔离验证 | 阶段A离线4项PASS；真实nginx/TLS/browser阶段B待验 | DOING | 5c0e46b候选；未审核 |
 | NH-PUB-10 | 05 | services/api/AuthContext/页面/index/测试 | 31定向+421全量PASS、typecheck/lint/build0；High待G1 | TESTED | 基线；未审核 |
-| NH-PUB-11/12 | G1 前项 | CI/部署回滚备份恢复/release-gates | 前后端全量/check/Docker/Nginx/模拟恢复/High | TODO | 基线；未审核 |
+| NH-PUB-11/12 | G1 前项 | CI/部署回滚备份恢复/release-gates | 后端432PASS；release16PASS/shell0/收集452；真实Docker/恢复/High待验 | TESTED | 7f1148d候选；未审核 |
 | S01/P01/G2 | G1 本地门槛 | Chat 归属迁移/事务/账户 CSRF 限速/前端缓存 | A/B/匿名/并发/历史隔离/登录重放/High | TODO | 基线；未审核 |
 | NH-PUB-06/S02/S04/O01/O02/O03/G3 | G2 | Provider 合规路由/预算/持久任务/SSE | Fake Provider 原子配额/幂等/取消/恢复/隔离/High | TODO | 基线；未审核 |
 | NH-PUB-07 | P00 | openai-hosted-integration.md；身份/plan 批准分离 | 申请材料完整；真实审批 EXTERNAL_BLOCKED | TODO | 基线；未审核 |

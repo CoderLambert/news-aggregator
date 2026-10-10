@@ -14,3 +14,7 @@ SQLite助手纯stdlib backup API：source uri mode=ro，不immutable，不复制
 
 ## 发布顺序补充（主 Agent 冻结）
 采用维护窗口：仅停止显式 project 的 crawler、indexer、app，确认停止后创建并验证 SQLite 一致备份，再使用新镜像执行一次性迁移。迁移成功后启动 app，ready 通过后启动 workers 并核验健康；全部通过后才原子切换静态 current。迁移锁不能替代停止旧版本读写。任何备份、迁移、启动或健康检查失败，保持该 project app/workers 停止并保留备份和原静态 current；不自动重启旧镜像、不自动跨 schema 回滚。恢复须走严格 manifest/快照验证流程。默认 dry-run 不停止任何服务。此前未完成的文件继续在原 ownership 内完成，不撤销现有助手与测试。
+
+一致备份接口采用方案A：已有数据的deploy必须提供 --current-manifest、--backup-output（新输出不能覆盖）与 --db-volume。停服前核对该project现有app镜像revision与current-manifest、挂载的db volume与参数完全一致；当前schema按旧manifest验证，不能用新manifest验证旧DB。停服后确认该volume没有其他运行容器读写，再调用已实现backup助手，以当前镜像和旧manifest在本次窗口生成一致快照，核验后才能迁移。此规则取代“用户预先提供backup artifact”，外部旧快照不能代替此次停写快照。新发布镜像/目标manifest单独核对。--fresh只在指定project无旧app且DB确实不存在时允许；出现已有db文件立即拒绝，不以空表猜测新库。
+
+SQLite backup API 的connect(timeout=5)不能限制持续busy或不断增长source导致的总快照时间。两处backup调用共用monotonic绝对120秒deadline，通过progress callback检查并在超时raise SnapshotError；保留原source/restore目标、清理临时半成品，不能宣称超时backup成功。临时SQLite另一连接BEGIN EXCLUSIVE或注入慢progress验证有界失败，定向测试用可缩短的Python内部参数（非公共HTTP/不放宽生产默认），不实际等待120秒。

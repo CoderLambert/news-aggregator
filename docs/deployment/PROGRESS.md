@@ -76,3 +76,14 @@
 用户要求后续开发补充本地域名测试验收，已在local-domain-testing.md明确为固定开发/上线前门槛，并区分G1只读、G2账户与G3离线任务链路。使用正式域名、隔离DNS alias、临时CA及独立Nginx，不修改公网DNS、hosts、系统证书库或现有服务。
 - 02实施返回：PYTHONPATH=backend:crawler RUN_MAIN=true backend/venv/bin/python -m pytest scripts/deploy/tests/test_nginx_templates.py -q退出0，4 passed；shell语法、mock参数测试、py_compile、diff-check均0。原合同不带PYTHONPATH的pytest退出1，原因是pytest-django找不到newsaggregator，不能将该命令记录为通过。
 - 当前候选HEAD 5c0e46bec0e3d933daf8207848f5a767fffc31ef；阶段A文件尚未提交。实际Docker/Nginx/HTTPS/browser链路、截图、TLS负例及SSE时序均NOT_RUN；G2/G3也NOT_RUN。上线现场公网验收仍EXTERNAL_BLOCKED。
+
+## 恢复执行与真实后端全量
+- 02阶段A及本地域名要求已提交7f1148dd5e1bafc4aaba72ac68e75dc7616e1233；当前两实施任务为11/12收尾与04B/本地域名实际运行。ADR018/合同补充停服后的旧manifest一致快照，迁移失败不自动跨schema启动旧版本。
+- 主Agent从上述已提交HEAD git archive建立/tmp/newshub-full-tests-99_v8thk/source隔离副本，仅复制修正的pytest.ini；子进程独立临时HOME/SQLite且无用户env/Key/Hermes。实际三目录全量pytest退出0，收集432项全部通过（3个已知依赖/分页warning），日志/tmp/newshub-full-tests-99_v8thk/pytest.log。未读取或改动用户数据库；此证据替代原51项不完整收集。部署助手定向测试由11/12另验，真实CI尚NOT_RUN。
+- G2-CHAT合同已预先冻结，但须G1本地门槛完成后才派发；不能将合同准备记作功能完成。
+
+## 11/12本地定向闭环与构建网络诊断
+- release_finish返回owned pytest16PASS，shell语法/mock发布与回滚/备份恢复exit0；包含真实repo compose路径、旧manifest停服快照、失败闭锁、120s快照deadline/半成品与连接清理、CI固定actions/Nginxdigest。三root collect-only452items exit0（432既有+4Nginx+16release），CI远程运行及Docker volume恢复尚NOT_RUN；状态为TESTED而非REVIEWED。
+- 正式production build固定app源码7f1148dd5e1bafc4aaba72ac68e75dc7616e1233；第一轮Docker bridge apt反复超时且npm ci 198.5s内部错误退出1，日志/tmp/newshub-production-build-7f1148dd5e1bafc4aaba72ac68e75dc7616e1233.log。主Agent对比同Debian InRelease：宿主curl200/1.328s，curl容器hostnetwork200/1.045s，bridge12s超时28。仅本地构建加--network=host重试，应用验收仍internal网络；无daemon/生产配置改动。
+- hostnet构建大文件网络仍慢但有进展，保留独立日志/tmp/newshub-production-build-hostnet-7f1148dd5e1bafc4aaba72ac68e75dc7616e1233.log；主Agent一次延长上限至30min，连续10min无I/O/输出进展停止，不无限重试。已实际完成frontend dist与torch CPU依赖安装，整镜像/真实HTTPS/browser尚未PASS。
+- G2账户/前端、G3core与08模式合同已准备待依赖通过后派发，仍非功能完成；当前先冻结G1代码开展High完整相关diff审核，Docker运行验证并行且修复必须重新定案。
