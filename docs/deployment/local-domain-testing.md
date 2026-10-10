@@ -43,7 +43,7 @@ smoke 会核对 app image 的 `org.opencontainers.image.revision`，为临时栈
 
 G1 包含 bootstrap 与 production Nginx `nginx -t`、ACME fixture/HTTP redirect、未知 Host 关闭、HTTPS 首页和深链、关键词搜索、API/cache/header 边界、缺失资源 404、旧哈希资源缓存、临时 CA 信任与 SAN 负例，以及用 fake upstream 验证准确 SSE 路径的首帧先于延迟终帧抵达。HTTPS 代理头负例会把伪造的 `X-Forwarded-Proto: http`、XFF 和 `Forwarded` 系列头送入真实 app 的 `/api/auth/csrf/` 非豁免路径，检查 HTTP 200（无 HTTPS 重定向）和 Secure、host-only CSRF cookie。独立的 fake SSE upstream 会回显它收到的 Host/转发头，以检查 Nginx 覆写协议与 XFF 并清除 `Forwarded`、`X-Forwarded-Host` 和 `X-Forwarded-Port`；这项 fake upstream 证据与真实 Django 请求分开记录。当前验收不读取 Django WSGI `REMOTE_ADDR`，客户端地址观测明确记为 `NOT_RUN`。
 
-news 的 production 模板包含 HTTP 与 HTTPS 两个虚拟主机，bootstrap 模板只包含 HTTP 虚拟主机；它们都不声明 `default_server` 或全局拒绝站点，避免与已有站点争用 Nginx 的默认入口。每个 news 虚拟主机在独立配置中拒绝非 `news.lambert.host` 和缺失 Host 的请求。隔离验收会先加载一个模拟既有 Git HTTP/HTTPS 默认站点，再加载 news 配置，验证两组站点可共存且分别返回各自 fixture；这只证明模板在测试配置中的共存行为，不代表改动或验收了真实 Git 服务、全局 Nginx 配置或生产服务器。
+news 的 production 模板包含 HTTP 与 HTTPS 两个虚拟主机，bootstrap 模板只包含 HTTP 虚拟主机；它们都不声明 `default_server` 或全局拒绝站点，避免与已有站点争用 Nginx 的默认入口。每个 news 虚拟主机都大小写不敏感地校验实际 `Host` 头，只接受 `news.lambert.host` 以及显式标准端口 `:80` 或 `:443`；空 Host、未知主机、尾随点和其他端口都会被拒绝。校验同时覆盖绝对 URI 请求目标，避免请求目标中的域名掩盖恶意 `Host`。隔离验收会先加载一个模拟既有 Git HTTP/HTTPS 默认站点，再加载 news 配置，验证两组站点可共存且分别返回各自 fixture；这只证明模板在测试配置中的共存行为，不代表改动或验收了真实 Git 服务、全局 Nginx 配置或生产服务器。
 
 浏览器/API/SSE 结果与 app revision、Nginx image ID、RepoDigest 和版本写入 JSON 报告；报告在清理完成后更新 `cleanup_status`。任一步失败都只清理该次任务的资源。
 

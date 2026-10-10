@@ -16,6 +16,62 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(acceptance)
 
 
+@pytest.mark.parametrize(('scheme', 'request_target'), [
+    ('http', 'http://news.lambert.host/'),
+    ('https', 'https://news.lambert.host/'),
+])
+def test_absolute_uri_host_negative_keeps_tls_validation_and_fixed_host(scheme, request_target):
+    args = SimpleNamespace(gateway_ip='127.0.0.1', ca_cert=Path('/tmp/local-domain-test-ca.pem'))
+    with patch.object(acceptance.shutil, 'which', return_value='/usr/bin/curl'):
+        command = acceptance._curl_command(
+            args,
+            '/',
+            scheme=scheme,
+            headers=('Host: evil.invalid',),
+            request_target=request_target,
+        )
+
+    target_index = command.index('--request-target')
+    assert command[target_index + 1] == request_target
+    assert command[command.index('--header') + 1] == 'Host: evil.invalid'
+    assert command[-1] == f'{scheme}://news.lambert.host:{443 if scheme == "https" else 80}/'
+    assert '--cacert' in command if scheme == 'https' else '--cacert' not in command
+    assert '-k' not in command
+    assert '--insecure' not in command
+
+
+@pytest.mark.parametrize(('scheme', 'exit_code'), [('http', 52), ('https', 56)])
+def test_absolute_uri_unknown_host_requires_strict_connection_close(scheme, exit_code):
+    args = SimpleNamespace(gateway_ip='127.0.0.1', ca_cert=Path('/tmp/local-domain-test-ca.pem'))
+    checks = {}
+    response = subprocess.CompletedProcess(
+        ['curl'], exit_code, f'{acceptance.STATUS_MARKER}000', 'connection closed',
+    )
+    with (
+        patch.object(acceptance, '_curl_command', return_value=['curl', '--request-target']),
+        patch.object(acceptance.subprocess, 'run', return_value=response) as run,
+    ):
+        acceptance._check_absolute_uri_unknown_host(args, checks, scheme=scheme)
+
+    assert run.call_args.args[0] == ['curl', '--request-target']
+    assert checks[f'absolute_uri_unknown_{scheme}_host'] == 'connection closed by Nginx 444'
+
+
+def test_absolute_uri_unknown_host_rejects_a_successful_http_response():
+    args = SimpleNamespace(gateway_ip='127.0.0.1', ca_cert=Path('/tmp/local-domain-test-ca.pem'))
+    response = subprocess.CompletedProcess(
+        ['curl'], 0,
+        f'HTTP/1.1 200 OK\n\nfixture{acceptance.STATUS_MARKER}200',
+        '',
+    )
+    with (
+        patch.object(acceptance, '_curl_command', return_value=['curl']),
+        patch.object(acceptance.subprocess, 'run', return_value=response),
+    ):
+        with pytest.raises(acceptance.AcceptanceError, match='absolute-URI HTTPS request'):
+            acceptance._check_absolute_uri_unknown_host(args, {}, scheme='https')
+
+
 def test_forwarded_header_spoof_uses_non_exempt_real_csrf_path_and_checks_secure_cookie(tmp_path):
     args = SimpleNamespace()
     checks = {}

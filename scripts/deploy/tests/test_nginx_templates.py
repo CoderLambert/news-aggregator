@@ -54,7 +54,7 @@ def _block(source, marker):
 
 def _assert_news_host_guards(server):
     assert 'if ($host != news.lambert.host) { return 444; }' in server
-    assert 'if ($http_host = "") { return 444; }' in server
+    assert 'if ($http_host !~* "^news[.]lambert[.]host(:80|:443)?$") { return 444; }' in server
 
 
 def test_bootstrap_is_http_only_and_keeps_only_the_acme_fixture():

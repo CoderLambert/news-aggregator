@@ -399,11 +399,8 @@ def secure_docker_argv(
         )
         if requested_name is not None:
             raise AcceptanceError("container names are allocated only by the acceptance runner")
-        if any(
-            item.startswith(f"--label={OWNER_LABEL}=")
-            or (item == "--label" and index + 1 < len(docker_options) and docker_options[index + 1].startswith(OWNER_LABEL + "="))
-            for index, item in enumerate(docker_options)
-        ):
+        label_values = _docker_option_values_before_image(original, image_index, "--label")
+        if any(value.partition("=")[0] == OWNER_LABEL for value in label_values):
             raise AcceptanceError("reserved ownership labels are allocated only by the runner")
         name = f"{run_prefix}-c{len(owned_names) + 1:03d}-{secrets.token_hex(3)}"
         rewritten = [command, "--pull=never", "--network=none", "--name", name,

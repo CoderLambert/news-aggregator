@@ -157,6 +157,9 @@ def test_secure_docker_rejects_any_unsafe_or_missing_duplicate_network_pull_opti
     [f"--label={acceptance.OWNER_LABEL}=other-token"],
     ["--label", f"{acceptance.OWNER_LABEL}=first", "--label", f"{acceptance.OWNER_LABEL}=second"],
     [f"--label={acceptance.OWNER_LABEL}=first", f"--label={acceptance.OWNER_LABEL}=second"],
+    ["--label", acceptance.OWNER_LABEL],
+    [f"--label={acceptance.OWNER_LABEL}"],
+    ["--label", f"{acceptance.OWNER_LABEL}=", "--label", f"{acceptance.OWNER_LABEL}=other-token"],
 ])
 def test_secure_docker_rejects_any_user_supplied_owner_label(owner_label_options, tmp_path):
     with pytest.raises(acceptance.AcceptanceError, match="reserved ownership labels"):
@@ -177,6 +180,18 @@ def test_secure_docker_does_not_parse_owner_label_lookalikes_after_image(tmp_pat
     ]
     rewritten = acceptance.secure_docker_argv(
         ["run", *tail],
+        run_prefix="nhpub-volume-normalize-test",
+        owner_token="runner-token",
+        image=IMAGE,
+        snapshot_script=tmp_path / "sqlite_snapshot.py",
+    )
+    assert rewritten[rewritten.index(IMAGE):] == tail
+
+
+def test_secure_docker_does_not_treat_environment_value_as_owner_label(tmp_path):
+    tail = [IMAGE, "python", "-c", "pass"]
+    rewritten = acceptance.secure_docker_argv(
+        ["run", "--env", f"APP_HINT=--label={acceptance.OWNER_LABEL}", *tail],
         run_prefix="nhpub-volume-normalize-test",
         owner_token="runner-token",
         image=IMAGE,

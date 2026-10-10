@@ -49,7 +49,7 @@ def _run_checked(command: list[str], *, env: dict[str, str] | None = None) -> su
 
 def _curl_command(args: argparse.Namespace, path: str, *, scheme: str = 'https', port: int | None = None,
                   method: str = 'GET', headers: tuple[str, ...] = (), body: str | None = None,
-                  header_file: Path | None = None) -> list[str]:
+                  header_file: Path | None = None, request_target: str | None = None) -> list[str]:
     resolved_port = port or (443 if scheme == 'https' else 80)
     curl = shutil.which('curl')
     _require(curl is not None, 'curl is required for local G1 HTTP checks')
@@ -74,6 +74,8 @@ def _curl_command(args: argparse.Namespace, path: str, *, scheme: str = 'https',
         command.extend(['--header', header])
     if body is not None:
         command.extend(['--data-binary', body])
+    if request_target is not None:
+        command.extend(['--request-target', request_target])
     command.append(f'{scheme}://{HOST}:{resolved_port}{path}')
     return command
 
@@ -295,6 +297,7 @@ def _check_http_api(args: argparse.Namespace, checks: dict[str, str], work_dir: 
         'unknown HTTPS Host was not closed with 444',
     )
     checks['unknown_host'] = 'connection closed by Nginx 444'
+    _check_absolute_uri_unknown_host(args, checks, scheme='https')
 
     unknown_http_command = _curl_command(
         args,
@@ -313,6 +316,33 @@ def _check_http_api(args: argparse.Namespace, checks: dict[str, str], work_dir: 
         'unknown HTTP Host was not closed with 444',
     )
     checks['unknown_http_host'] = 'connection closed by Nginx 444'
+    _check_absolute_uri_unknown_host(args, checks, scheme='http')
+
+
+def _check_absolute_uri_unknown_host(
+    args: argparse.Namespace,
+    checks: dict[str, str],
+    *,
+    scheme: str,
+) -> None:
+    request_target = f'{scheme}://{HOST}/'
+    result = subprocess.run(
+        _curl_command(
+            args,
+            '/',
+            scheme=scheme,
+            headers=('Host: evil.invalid',),
+            request_target=request_target,
+        ),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    _require(
+        _curl_closed_without_http_response(result, scheme=scheme),
+        f'absolute-URI {scheme.upper()} request with an unknown Host was not closed with 444',
+    )
+    checks[f'absolute_uri_unknown_{scheme}_host'] = 'connection closed by Nginx 444'
 
 
 def _browser_arguments(gateway_ip: str) -> list[str]:
