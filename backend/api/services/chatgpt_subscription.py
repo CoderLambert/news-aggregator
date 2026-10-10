@@ -20,7 +20,7 @@ import time
 import uuid
 from datetime import timedelta
 from pathlib import Path
-from urllib.parse import urlencode, urlparse
+from urllib.parse import quote_plus, urlencode, urlparse
 
 import requests
 from cryptography.hazmat.primitives import hashes, serialization
@@ -41,6 +41,7 @@ from api.models import (
     ChatGPTSubscriptionConnection,
     ChatGPTSubscriptionSelection,
 )
+from api.services.siwc_modes import SiwcConfigError, load_siwc_config
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,43 @@ class SubscriptionError(Exception):
 
 class ConnectionChangedError(SubscriptionError):
     pass
+
+
+def _runtime_config():
+    try:
+        return load_siwc_config()
+    except SiwcConfigError as exc:
+        raise SubscriptionError(str(exc)) from exc
+
+
+def _assert_connection_mode(connection):
+    config = _runtime_config()
+    if connection.oauth_mode != config.mode:
+        raise SubscriptionError('此连接属于另一个 SIWC 部署模式，请在当前模式下重新授权。')
+    if config.website and connection.issued_client_id != config.client_id:
+        raise SubscriptionError('网站 OAuth Client ID 已变更，请重新取得该网站客户端的授权。')
+    return config
+
+
+def _oauth_auth_headers(client_id: str, method: str, secret: str) -> dict:
+    if method == 'none':
+        return {}
+    if method != 'client_secret_basic' or not secret:
+        raise SubscriptionError('OAuth 客户端认证配置无效。')
+    # OAuth 2.0 client_secret_basic encodes both credentials as form components.
+    encoded = base64.b64encode(
+        f'{quote_plus(client_id)}:{quote_plus(secret)}'.encode('utf-8')
+    ).decode('ascii')
+    return {'Authorization': f'Basic {encoded}'}
+
+
+def _post_oauth_form(endpoint: str, form: dict, *, client_id: str,
+                     method: str = 'none', secret: str = '', timeout: int = 20):
+    return requests.post(
+        endpoint, data=form,
+        headers=_oauth_auth_headers(client_id, method, secret),
+        timeout=timeout,
+    )
 
 
 _USER_LOCKS: dict[int, threading.RLock] = {}
@@ -142,7 +180,7 @@ def _session_binding_hash(session_key: str) -> str:
 def _validate_handoff_origin(origin: str) -> str:
     allowed_origins = getattr(settings, 'CHATGPT_HANDOFF_ALLOWED_ORIGINS', ())
     if not isinstance(origin, str) or not origin or origin not in allowed_origins:
-        raise SubscriptionError('请从 http://127.0.0.1:5173 打开本地应用，再开始订阅连接。')
+        raise SubscriptionError('请从当前配置允许的网站页面发起 ChatGPT 订阅连接。')
     return origin
 
 
@@ -238,8 +276,9 @@ def create_authorization_attempt(user, target_connection=None, session_key='', o
     if not session_key:
         raise SubscriptionError('请先登录本地账号后再连接 ChatGPT 订阅。')
     handoff_origin = _validate_handoff_origin(origin)
+    config = _runtime_config()
     discovery = _discovery()
-    oauth_host = get_oauth_host()
+    oauth_host = get_oauth_host() if not config.website else None
     handoff_token = secrets.token_urlsafe(32)
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
@@ -261,15 +300,18 @@ def create_authorization_attempt(user, target_connection=None, session_key='', o
             ).first()
             if current_target is None:
                 raise SubscriptionError('待重新连接的账号已不存在。')
+            _assert_connection_mode(current_target)
             current_target.auth_attempt_generation += 1
             current_target.save(update_fields=['auth_attempt_generation', 'updated_at'])
             target_attempt_generation = current_target.auth_attempt_generation
             ChatGPTAuthAttempt.objects.filter(
                 target_connection=current_target, status__in=['pending', 'authorizing', 'processing'],
             ).update(status='cancelled', status_message='此连接已开始新的授权请求。')
-            requested_client_id = current_target.issued_client_id or DYNAMIC_CLIENT_ID
+            requested_client_id = config.client_id if config.website else (
+                current_target.issued_client_id or DYNAMIC_CLIENT_ID
+            )
         else:
-            requested_client_id = DYNAMIC_CLIENT_ID
+            requested_client_id = config.client_id
 
         active_selection = ChatGPTSubscriptionConnection.objects.select_for_update().filter(
             user=user, is_active=True,
@@ -278,17 +320,19 @@ def create_authorization_attempt(user, target_connection=None, session_key='', o
         selection_generation = selection.generation
 
         params = {
-            'response_type': 'code', 'client_id': requested_client_id, 'redirect_uri': REDIRECT_URI,
-            'scope': REQUESTED_SCOPES, 'resource': API_RESOURCE, 'state': state, 'nonce': nonce,
+            'response_type': 'code', 'client_id': requested_client_id,
+            'redirect_uri': config.redirect_uri, 'scope': config.scopes,
+            'resource': config.resource, 'state': state, 'nonce': nonce,
             'code_challenge': challenge, 'code_challenge_method': 'S256',
-            'ext_agent_host_id': oauth_host.host_id,
         }
-        if requested_client_id == DYNAMIC_CLIENT_ID:
+        if oauth_host is not None:
+            params['ext_agent_host_id'] = oauth_host.host_id
+        if not config.website and requested_client_id == DYNAMIC_CLIENT_ID:
             params['agent_name_hint'] = getattr(settings, 'CHATGPT_AGENT_NAME_HINT', 'News Aggregator')
         elif current_target is not None:
             if current_target.account_email:
                 params['login_hint'] = current_target.account_email
-            if current_target.encrypted_id_token:
+            if not config.website and current_target.encrypted_id_token:
                 try:
                     params['id_token_hint'] = decrypt_secret(
                         current_target.encrypted_id_token, 'subscription-id-token',
@@ -304,12 +348,18 @@ def create_authorization_attempt(user, target_connection=None, session_key='', o
             encrypted_authorization_url=encrypt_secret(authorization_url, 'oauth-authorization-url'),
             handoff_token_hash=_digest(handoff_token), session_binding_hash=session_hash,
             handoff_origin=handoff_origin,
-            requested_client_id=requested_client_id, target_attempt_generation=target_attempt_generation,
+            requested_client_id=requested_client_id,
+            oauth_mode=config.mode, redirect_uri=config.redirect_uri,
+            token_auth_method=config.token_auth_method,
+            target_attempt_generation=target_attempt_generation,
             selection_connection_id_at_start=selection_connection_id,
             selection_generation_at_start=selection_generation,
             expires_at=timezone.now() + AUTH_ATTEMPT_TTL,
         )
-    return {'attempt_id': str(attempt.pk), 'handoff_token': handoff_token, 'handoff_url': HANDOFF_URI}
+    return {
+        'attempt_id': str(attempt.pk), 'handoff_token': handoff_token,
+        'handoff_url': config.handoff_uri,
+    }
 
 
 def handoff_authorization(
@@ -335,6 +385,11 @@ def handoff_authorization(
                 pk=attempt.pk, status='pending', expires_at__lte=now,
             ).update(status='failed', status_message='登录请求已过期，请重新连接。')
             raise SubscriptionError('登录请求已过期，请重新连接。')
+        config = _runtime_config()
+        if (attempt.oauth_mode != config.mode
+                or (attempt.redirect_uri and attempt.redirect_uri != config.redirect_uri)
+                or attempt.token_auth_method != config.token_auth_method):
+            raise SubscriptionError('网站授权配置已变化，请重新发起连接。')
         with transaction.atomic():
             updated = ChatGPTAuthAttempt.objects.filter(
                 pk=attempt.pk, handoff_token_hash=_digest(handoff_token),
