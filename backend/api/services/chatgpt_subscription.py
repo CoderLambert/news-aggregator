@@ -1328,10 +1328,15 @@ def stream_full_translation(
     model_slug: str,
     article_markdown: str,
     on_delta,
+    execution_guard=None,
 ) -> str:
     """Consume one Responses stream; return only after response.completed."""
     _require_network_mode()
+    if execution_guard is not None:
+        execution_guard()
     access_token = _refresh_access_token(connection_id, expected_generation)
+    if execution_guard is not None:
+        execution_guard()
     connection = ChatGPTSubscriptionConnection.objects.filter(pk=connection_id).first()
     if connection is None or not connection.is_active or connection.generation != expected_generation:
         raise ConnectionChangedError('订阅账号已切换或断开，翻译没有保存。')
@@ -1346,6 +1351,8 @@ def stream_full_translation(
         'store': False,
         'stream': True,
     }
+    if execution_guard is not None:
+        execution_guard()
     try:
         response = requests.post(
             RESPONSES_URL,
@@ -1393,9 +1400,13 @@ def stream_full_translation(
             if event_type == 'response.output_text.delta':
                 delta = event.get('delta')
                 if isinstance(delta, str) and delta:
+                    if execution_guard is not None:
+                        execution_guard()
                     deltas.append(delta)
                     on_delta(delta)
             elif event_type == 'response.completed':
+                if execution_guard is not None:
+                    execution_guard()
                 completed_response = event.get('response') if isinstance(event.get('response'), dict) else event
                 break
             elif event_type in ('response.failed', 'response.incomplete', 'error'):
@@ -1417,6 +1428,8 @@ def stream_full_translation(
     final_text = _extract_response_text(completed_response) or ''.join(deltas)
     if not final_text.strip():
         raise SubscriptionError('模型已完成响应，但没有返回译文。')
+    if execution_guard is not None:
+        execution_guard()
     return final_text
 
 
@@ -1537,7 +1550,7 @@ def save_completed_translation(
         with transaction.atomic():
             connection = ChatGPTSubscriptionConnection.objects.select_for_update().filter(
                 pk=connection_id, user_id=user_id, generation=expected_generation,
-                is_active=True, needs_reauth=False,
+                is_active=True, needs_reauth=False, user__is_active=True,
             ).first()
             if connection is None:
                 raise ConnectionChangedError('订阅账号已切换或断开，翻译没有保存。')

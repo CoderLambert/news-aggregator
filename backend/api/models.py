@@ -1,6 +1,7 @@
 import uuid
 
 from django.db import models
+from django.utils import timezone
 
 
 def generate_chatgpt_host_id():
@@ -487,6 +488,64 @@ class ChatGPTArticleTranslation(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=['user', 'connection', 'news'], name='unique_chatgpt_news_translation',
+            ),
+        ]
+
+
+class ChatGPTTranslationTask(models.Model):
+    """Durable, owner-private state for one full-article translation attempt."""
+
+    STATUS_CHOICES = [
+        ('queued', '排队中'),
+        ('running', '运行中'),
+        ('succeeded', '已完成'),
+        ('failed', '失败'),
+        ('cancelled', '已取消'),
+        ('interrupted', '已中断'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        'auth.User', on_delete=models.CASCADE, related_name='chatgpt_translation_tasks',
+    )
+    connection = models.ForeignKey(
+        ChatGPTSubscriptionConnection, on_delete=models.CASCADE,
+        related_name='translation_tasks',
+    )
+    news = models.ForeignKey(News, on_delete=models.CASCADE, related_name='chatgpt_translation_tasks')
+    source_hash = models.CharField(max_length=64)
+    model_slug = models.CharField(max_length=255)
+    connection_generation = models.PositiveBigIntegerField()
+    generation = models.PositiveBigIntegerField(default=1)
+    run_token = models.UUIDField(null=True, blank=True)
+    shared_lease_task_id = models.PositiveBigIntegerField(null=True, blank=True)
+    shared_lease_token = models.UUIDField(null=True, blank=True)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='queued', db_index=True)
+    provider_started = models.BooleanField(default=False)
+    progress = models.TextField(blank=True, default='')
+    error_code = models.CharField(max_length=64, blank=True, default='')
+    error_message = models.CharField(max_length=255, blank=True, default='')
+    result = models.JSONField(default=dict)
+    queued_at = models.DateTimeField(default=timezone.now)
+    started_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'ChatGPT 全文翻译任务'
+        verbose_name_plural = 'ChatGPT 全文翻译任务'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'connection', 'news', 'source_hash'],
+                name='unique_chatgpt_translation_task_source',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(shared_lease_task_id__isnull=True, shared_lease_token__isnull=True)
+                    | models.Q(shared_lease_task_id__isnull=False, shared_lease_token__isnull=False)
+                ),
+                name='chatgpt_translation_task_shared_lease_pair',
             ),
         ]
 
