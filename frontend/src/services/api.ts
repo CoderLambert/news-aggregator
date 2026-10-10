@@ -591,6 +591,7 @@ export async function openResearchSessionStream(
   sessionId: string,
   { signal, onRunId, waitForQueued = false }: OpenResearchSessionStreamOptions = {},
 ): Promise<OpenResearchSessionStreamResponse> {
+  let queuedPolls = 0
   while (true) {
     const response = await streamingFetch(`/api/research/${sessionId}/stream/`, { method: 'GET', signal })
     const runId = response.headers.get('Run-ID')
@@ -600,13 +601,17 @@ export async function openResearchSessionStream(
     }
     if (response.headers.get('Run-Status') === 'queued') {
       await response.body?.cancel()
-      if (!waitForQueued) return { kind: 'queued', runId }
+      if (!waitForQueued || ++queuedPolls >= 10) return { kind: 'queued', runId }
       await new Promise<void>((resolve) => setTimeout(resolve, 1000))
       if (signal?.aborted) throw new Error('Research stream aborted')
       continue
     }
     return { kind: 'stream', events: iterSSEEvents(response) }
   }
+}
+
+export function resumeQueuedResearchRun(sessionId: string, runId: string): Promise<unknown> {
+  return api.post<unknown>('/research/' + sessionId + '/resume-queued/', { run_id: runId }).then(({ data }) => data)
 }
 
 export function cancelResearchRun(sessionId: string, runId: string): Promise<unknown> {
