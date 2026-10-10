@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.db import close_old_connections
+from django.db import OperationalError, close_old_connections
 from django.utils import timezone
 from rest_framework.test import APIClient, APIRequestFactory
 
@@ -86,7 +86,14 @@ def start_queued(user, connection, news, monkeypatch, *, shared_lease=None, forc
 def wait_for_terminal(task_id, *, timeout=5):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        task = ChatGPTTranslationTask.objects.filter(pk=task_id).first()
+        try:
+            task = ChatGPTTranslationTask.objects.filter(pk=task_id).first()
+        except OperationalError:
+            # A concurrent SQLite writer may briefly lock an in-memory test
+            # table. Keep polling: the final terminal-state assertion is
+            # unchanged, and a persistent lock still fails at the deadline.
+            time.sleep(0.02)
+            continue
         if task is None or task.status in jobs.TERMINAL_STATUSES:
             return task
         time.sleep(0.02)
