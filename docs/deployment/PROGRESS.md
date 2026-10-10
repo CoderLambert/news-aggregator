@@ -176,3 +176,9 @@ G3在实施前已冻结ADR-024：单SSE record按完整UTF8 wire精确限制16Ki
 纯G2业务源b2e982d1848a768c7ff03bc77dcb0557883f24da通过High后，以git archive排除backend/db.sqlite3*、统一源目录0755/文件0644或可执行0755构建未改Dockerfile production target，network host、RELEASE_SHA固定；退出0，9.585秒。镜像newshub:local-b2e982d1848a768c7ff03bc77dcb0557883f24da，ID sha256:313890d46a8fee650b2dd2b06759782d89ff158863ccacce452b3a8f95dea581，User10001:10001/revision准确。证据/tmp/newshub-g2-reviewed-build-_hykdser/{metadata.json,build.log,result.json}。无G3代码、无用户数据库或真实env写入镜像；本次build不是上线。
 
 域名harness为宿主脚本，不COPY入生产image；账户验收将分别记录固定app SHA b2e982d及另行提交/审查的runner SHA。runner当前仍准备，实际G2 domain NOT_RUN。后续业务变更不得替换这份已冻结G2候选。
+
+## G2 域名harness源码与High：六P2整改中
+
+930cfddaf8ddbe3ae4660adf8788065de4e73884仅七harness文件，1936新增/86删除。初次36项与shell/mock/compile是在workingtree的临时HOME/绝对DB环境，未证明无dotenv读取，不能称archive隔离；随后固定930cfdd git archive排除DB/.env，env-i最小环境/独立HOME/绝对DB补证36PASS及shell/mock/compile0：/tmp/newshub-g2-archive930-evidence.PImrNY，pytest-env-i.log、env-i-proof.log、shell-syntax-exact.log、shell-mock.log、pycompile.log。早先工作树日志/tmp/newshub-g2-offline-evidence.3VFvqY仅保留为历史，不替代隔离证据。
+
+独立High无P0/P1但六P2 BLOCK：async browser coroutine未await、GET null body、G2 fixture缺共享Mermaid、G2 SSE argv缺账户参数、真实app/gateway身份/自有DB mount未在凭据stdin前核验、sidecar超时按name删除无exactID台账。七physicalhash及scoped diff前后一致，706ea88c407d15eaefe52344db527e9c6129cf158e66852a8e2f002f853d4354；/tmp/newshub-g2-domain-audit-{pre,post}.json。已签发LOCAL-DOMAIN-G2-REVIEW-R1冻结六项修复与有意义回归，源码测试PASS不等于实际G2验收。实际domain仍NOT_RUN，固定app b2e982d镜像保持不变；G2整体DOING。
