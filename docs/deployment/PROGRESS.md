@@ -170,3 +170,9 @@ G3在实施前已冻结ADR-024：单SSE record按完整UTF8 wire精确限制16Ki
 源提交b2e982d1848a768c7ff03bc77dcb0557883f24da，只AuthContext与races两文件；generation layout ref捕获/提交检查、最新refresh ref收尾，保留旧login epoch隔离。可靠分turn baseline red9PASS/1FAIL，/tmp/newshub-g2-front-review-repro-confirmed-red.log；整改15定向PASS/typecheck/lint0。独立High原P2closed、无新增P0/P1/P2，pre/post两physicalhash与scoped diff一致，摘要ab708b1f88d452e2ec40d9db325fe8e553f457db0d5c41f5f91b9cf8a97520a7，/tmp/newshub-g2-front-review-r1-{pre,post}.json。
 
 主控新归档b2e982d（exclude用户DB/env，独立HOME）前端65文件454PASS/build0，/tmp/newshub-g2-front-r1-integrated-4cxjaflg/{test-run.log,build.log,report.json}。后端与先前8be4f9d的616PASS源完全相同，不重复后端全套。G2源码审查门槛已闭环；G2整体仍DOING：本地域名harness源码准备及真实账户browser/限速/owner验收尚未完成。G3仍未实施。
+
+## G2 审核后正式镜像构建
+
+纯G2业务源b2e982d1848a768c7ff03bc77dcb0557883f24da通过High后，以git archive排除backend/db.sqlite3*、统一源目录0755/文件0644或可执行0755构建未改Dockerfile production target，network host、RELEASE_SHA固定；退出0，9.585秒。镜像newshub:local-b2e982d1848a768c7ff03bc77dcb0557883f24da，ID sha256:313890d46a8fee650b2dd2b06759782d89ff158863ccacce452b3a8f95dea581，User10001:10001/revision准确。证据/tmp/newshub-g2-reviewed-build-_hykdser/{metadata.json,build.log,result.json}。无G3代码、无用户数据库或真实env写入镜像；本次build不是上线。
+
+域名harness为宿主脚本，不COPY入生产image；账户验收将分别记录固定app SHA b2e982d及另行提交/审查的runner SHA。runner当前仍准备，实际G2 domain NOT_RUN。后续业务变更不得替换这份已冻结G2候选。
