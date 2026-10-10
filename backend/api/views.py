@@ -1386,7 +1386,7 @@ def auth_register(request):
     try:
         if not isinstance(raw_username, str):
             raise ValidationError('invalid username')
-        username = raw_username.strip()
+        username = User.normalize_username(raw_username.strip())
         if not 1 <= len(username) <= 150:
             raise ValidationError('invalid username')
         username = User._meta.get_field('username').clean(username, None)

@@ -348,6 +348,90 @@ def test_duplicate_username_has_uniform_error_and_does_not_consume_invite():
 
 @pytest.mark.django_db
 @override_settings(PUBLIC_SITE_MODE='full', PUBLIC_SIGNUP_ENABLED=True, DJANGO_ENV='production')
+@pytest.mark.parametrize(
+    ('username', 'password', 'email', 'remote_addr'),
+    [
+        ('ﬃ' * 100, VALID_PASSWORD, 'nfkc-long@example.test', '198.51.100.31'),
+        ('ｔｒａｖｅｌｅｒｘｙｚｑｚ', 'travelerxyzqz', 'nfkc-similar@example.test', '198.51.100.32'),
+    ],
+)
+def test_registration_rejects_nfkc_username_before_validation_without_spending_invite(
+    username, password, email, remote_addr,
+):
+    token = issue_signup_invite(email, 24)
+    client = APIClient(enforce_csrf_checks=True)
+    csrf = _csrf_token(client, remote_addr=remote_addr)
+
+    response = _secure_post(
+        client,
+        '/api/auth/register/',
+        _registration_payload(username=username, email=email, password=password) | {'invite_token': token},
+        csrf,
+        remote_addr=remote_addr,
+    )
+
+    assert response.status_code == 400
+    assert response.json()['error_code'] == 'invalid_registration'
+    assert not User.objects.filter(username=User.normalize_username(username.strip())).exists()
+    invite = SignupInvite.objects.get(token_digest=hashlib.sha256(token.encode()).hexdigest())
+    assert invite.consumed_at is None
+
+
+@pytest.mark.django_db
+@override_settings(PUBLIC_SITE_MODE='full', PUBLIC_SIGNUP_ENABLED=True, DJANGO_ENV='production')
+def test_registration_accepts_maximum_canonical_username_with_invite():
+    username = 'x' * 150
+    email = 'maximum-canonical-name@example.test'
+    token = issue_signup_invite(email, 24)
+    client = APIClient(enforce_csrf_checks=True)
+    remote_addr = '198.51.100.33'
+    csrf = _csrf_token(client, remote_addr=remote_addr)
+
+    response = _secure_post(
+        client,
+        '/api/auth/register/',
+        _registration_payload(username=username, email=email) | {'invite_token': token},
+        csrf,
+        remote_addr=remote_addr,
+    )
+
+    assert response.status_code == 201
+    assert response.json()['username'] == username
+    assert User.objects.filter(username=username).exists()
+    invite = SignupInvite.objects.get(token_digest=hashlib.sha256(token.encode()).hexdigest())
+    assert invite.consumed_at is not None
+
+
+@pytest.mark.django_db
+@override_settings(PUBLIC_SITE_MODE='full', PUBLIC_SIGNUP_ENABLED=True, DJANGO_ENV='production')
+def test_nfkc_duplicate_username_is_unavailable_without_spending_invite():
+    User.objects.create_user(username='travelerxyzqz', password=VALID_PASSWORD)
+    email = 'nfkc-duplicate@example.test'
+    token = issue_signup_invite(email, 24)
+    client = APIClient(enforce_csrf_checks=True)
+    remote_addr = '198.51.100.34'
+    csrf = _csrf_token(client, remote_addr=remote_addr)
+
+    response = _secure_post(
+        client,
+        '/api/auth/register/',
+        _registration_payload(
+            username='ｔｒａｖｅｌｅｒｘｙｚｑｚ',
+            email=email,
+        ) | {'invite_token': token},
+        csrf,
+        remote_addr=remote_addr,
+    )
+
+    assert response.status_code == 400
+    assert response.json()['error_code'] == 'registration_unavailable'
+    assert User.objects.filter(username='travelerxyzqz').count() == 1
+    invite = SignupInvite.objects.get(token_digest=hashlib.sha256(token.encode()).hexdigest())
+    assert invite.consumed_at is None
+
+
+@pytest.mark.django_db
+@override_settings(PUBLIC_SITE_MODE='full', PUBLIC_SIGNUP_ENABLED=True, DJANGO_ENV='production')
 def test_expired_and_consumed_invites_share_the_invite_required_response():
     expired = issue_signup_invite('expired@example.test', 1)
     expired_invite = SignupInvite.objects.get()

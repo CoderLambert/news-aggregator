@@ -16,6 +16,7 @@ from unittest.mock import Mock, patch
 import pytest
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import connection as django_connection
 from django.db.migrations.executor import MigrationExecutor
@@ -448,55 +449,115 @@ def test_failed_reauthorization_preserves_the_current_session_and_account_hint(u
     )
 
 
-def test_upgrade_preserves_legacy_host_users_and_subscription_credentials(transactional_db, settings):
+def _exercise_legacy_subscription_upgrade():
     before = ('api', '0022_searchindexrun_worker_instance_id')
     after = ('api', '0026_shared_article_translations')
     executor = MigrationExecutor(django_connection)
-    try:
-        executor.migrate([before])
-        old_apps = executor.loader.project_state([before]).apps
-        LegacyHost = old_apps.get_model('api', 'ChatGPTOAuthClient')
-        LegacyUser = old_apps.get_model('auth', 'User')
-        LegacyConnection = old_apps.get_model('api', 'ChatGPTSubscriptionConnection')
-        LegacyAttempt = old_apps.get_model('api', 'ChatGPTAuthAttempt')
-        host_id = 'urn:uuid:8450472e-45dc-4224-99ac-621c7663bebc'
-        LegacyHost.objects.create(host_id=host_id)
-        admin = LegacyUser.objects.create(username='migration-admin', is_superuser=True, is_staff=True)
-        connection = LegacyConnection.objects.create(
-            user_id=admin.pk, subject_hash='legacy-subject-hash',
-            issuer='https://auth.example', issued_client_id='legacy-issued-client',
-            registration_key_hash='legacy-registration-key',
-            encrypted_subject='legacy-encrypted-subject',
-            encrypted_access_token='legacy-encrypted-access',
-            encrypted_refresh_token='legacy-encrypted-refresh',
-            is_active=True, needs_reauth=False,
-        )
-        attempt = LegacyAttempt.objects.create(
-            user_id=admin.pk, target_connection_id=connection.pk,
-            state_hash='legacy-state-hash', nonce_hash='legacy-nonce-hash',
-            encrypted_pkce_verifier='legacy-encrypted-verifier',
-            encrypted_authorization_url='legacy-encrypted-url', handoff_token_hash='legacy-handoff-hash',
-            requested_client_id='legacy-issued-client', status='authorizing',
-            expires_at=timezone.now() + timedelta(minutes=5),
-        )
+    executor.migrate([before])
+    old_apps = executor.loader.project_state([before]).apps
+    LegacyHost = old_apps.get_model('api', 'ChatGPTOAuthClient')
+    LegacyUser = old_apps.get_model('auth', 'User')
+    LegacyConnection = old_apps.get_model('api', 'ChatGPTSubscriptionConnection')
+    LegacyAttempt = old_apps.get_model('api', 'ChatGPTAuthAttempt')
+    host_id = 'urn:uuid:8450472e-45dc-4224-99ac-621c7663bebc'
+    LegacyHost.objects.create(host_id=host_id)
+    admin = LegacyUser.objects.create(username='migration-admin', is_superuser=True, is_staff=True)
+    connection = LegacyConnection.objects.create(
+        user_id=admin.pk, subject_hash='legacy-subject-hash',
+        issuer='https://auth.example', issued_client_id='legacy-issued-client',
+        registration_key_hash='legacy-registration-key',
+        encrypted_subject='legacy-encrypted-subject',
+        encrypted_access_token='legacy-encrypted-access',
+        encrypted_refresh_token='legacy-encrypted-refresh',
+        is_active=True, needs_reauth=False,
+    )
+    attempt = LegacyAttempt.objects.create(
+        user_id=admin.pk, target_connection_id=connection.pk,
+        state_hash='legacy-state-hash', nonce_hash='legacy-nonce-hash',
+        encrypted_pkce_verifier='legacy-encrypted-verifier',
+        encrypted_authorization_url='legacy-encrypted-url', handoff_token_hash='legacy-handoff-hash',
+        requested_client_id='legacy-issued-client', status='authorizing',
+        expires_at=timezone.now() + timedelta(minutes=5),
+    )
 
-        executor = MigrationExecutor(django_connection)
-        executor.migrate([after])
-        assert subscription.get_oauth_host().host_id == host_id
-        assert settings.CHATGPT_DEPLOYMENT_INSTANCE_FILE.is_file()
-        assert ChatGPTOAuthHost.objects.count() == 1
-        restored = User.objects.get(pk=admin.pk)
-        assert restored.is_superuser and restored.is_staff
-        preserved = ChatGPTSubscriptionConnection.objects.get(pk=connection.pk)
-        assert preserved.issued_client_id == 'legacy-issued-client'
-        assert preserved.encrypted_subject == 'legacy-encrypted-subject'
-        assert preserved.encrypted_access_token == 'legacy-encrypted-access'
-        assert preserved.encrypted_refresh_token == 'legacy-encrypted-refresh'
-        assert preserved.encrypted_id_token == ''
-        assert preserved.connected and preserved.is_active
-        assert ChatGPTAuthAttempt.objects.get(pk=attempt.pk).status == 'cancelled'
-    finally:
-        MigrationExecutor(django_connection).migrate([after])
+    executor = MigrationExecutor(django_connection)
+    executor.migrate([after])
+    assert subscription.get_oauth_host().host_id == host_id
+    assert settings.CHATGPT_DEPLOYMENT_INSTANCE_FILE.is_file()
+    assert ChatGPTOAuthHost.objects.count() == 1
+    restored = User.objects.get(pk=admin.pk)
+    assert (restored.username, restored.is_superuser, restored.is_staff) == (
+        'migration-admin', True, True,
+    )
+    preserved = ChatGPTSubscriptionConnection.objects.get(pk=connection.pk)
+    assert (
+        preserved.user_id,
+        preserved.subject_hash,
+        preserved.issuer,
+        preserved.issued_client_id,
+        preserved.registration_key_hash,
+        preserved.encrypted_subject,
+        preserved.encrypted_access_token,
+        preserved.encrypted_refresh_token,
+        preserved.encrypted_id_token,
+        preserved.is_active,
+        preserved.needs_reauth,
+    ) == (
+        admin.pk,
+        'legacy-subject-hash',
+        'https://auth.example',
+        'legacy-issued-client',
+        'legacy-registration-key',
+        'legacy-encrypted-subject',
+        'legacy-encrypted-access',
+        'legacy-encrypted-refresh',
+        '',
+        True,
+        False,
+    )
+    assert preserved.connected
+    migrated_attempt = ChatGPTAuthAttempt.objects.get(pk=attempt.pk)
+    assert migrated_attempt.status == 'cancelled'
+    assert migrated_attempt.state_hash == 'legacy-state-hash'
+    assert migrated_attempt.nonce_hash == 'legacy-nonce-hash'
+    assert migrated_attempt.encrypted_pkce_verifier == 'legacy-encrypted-verifier'
+    assert migrated_attempt.encrypted_authorization_url == 'legacy-encrypted-url'
+    assert migrated_attempt.handoff_token_hash == 'legacy-handoff-hash'
+    assert migrated_attempt.requested_client_id == 'legacy-issued-client'
+
+
+def test_upgrade_preserves_legacy_host_users_and_subscription_credentials(tmp_path):
+    backend_root = Path(__file__).resolve().parents[2]
+    home = tmp_path / 'home'
+    home.mkdir()
+    database_path = tmp_path / 'legacy-subscription-upgrade.sqlite3'
+    instance_file = tmp_path / 'deployment-instance-id'
+    environment = {
+        'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
+        'HOME': str(home),
+        'PYTHONPATH': os.pathsep.join((str(backend_root), str(backend_root.parent / 'crawler'))),
+        'DJANGO_SETTINGS_MODULE': 'newsaggregator.settings',
+        'DJANGO_ENV': 'development',
+        'RUN_MAIN': 'true',
+        'DJANGO_DB_PATH': str(database_path),
+        'CHATGPT_DEPLOYMENT_INSTANCE_FILE': str(instance_file),
+    }
+    child_code = r'''
+import django, runpy, sys
+django.setup()
+module = runpy.run_path(sys.argv[1], run_name='g2_legacy_subscription_migration_probe')
+module['_exercise_legacy_subscription_upgrade']()
+'''
+    result = subprocess.run(
+        [sys.executable, '-c', child_code, str(Path(__file__).resolve())],
+        cwd=str(backend_root),
+        capture_output=True,
+        check=False,
+        env=environment,
+        text=True,
+        timeout=90,
+    )
+    assert result.returncode == 0, f'{result.stdout}\n{result.stderr}'
 
 
 def test_expired_oauth_state_is_rejected(user):
