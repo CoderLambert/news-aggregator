@@ -190,3 +190,8 @@ G3在实施前已冻结ADR-024：单SSE record按完整UTF8 wire精确限制16Ki
 被取消设计的独立High记录：1P1（收费启动标记必须先提交后网络IO）与4P2（多轮ceil报价、业务DTO、terminal事件容量、inactive后台fence）；五physicalhash前后一致/tmp/newshub-g3-design-review-{pre,post}.json。这不是代码验收，费用问题不再实施整改；恢复相关状态一致性在新专项中保留，不声称旧设计REVIEWED。
 
 G2 harness R1源e45779bcd6644974b37c5d726df9b38b10285710，隔离64PASS及shell/Node真实JS/SSEargv/compile0，/tmp/newshub-local-domain-g2-r1-8tmbe_5y/validation-results.json。High原六项闭环四项，仍2P2：accept额外源码bind mount、start后CID file丢失可跳清理报成功；已签发LOCAL-DOMAIN-G2-REVIEW-R2。pre/post sevenhash一致/diff0d1c3b7d9ca5540274b01ac6f8636108abc15bf0c3db4fe38b008c81446f0992，/tmp/newshub-g2-domain-r1-{pre,post}.json。实际G2 domain仍NOT_RUN，固定app b2e982d不变。
+
+
+## G2 harness R2 独立复审闭环
+
+c59e6a507362ad281dbc5e7442bacf1c5bdbb8ba 五文件整改，隔离archive/env-i 77PASS及shell/mock/compile0，证据 /tmp/newshub-local-domain-g2-r2-final.ADvu26/。High两剩余P2closed、无新增P0/P1/P2，五physicalhash与scoped diff前后一致d11244b0740c2dcd7e2c3de340875b7216e2bcb6135abbc0baacf16c1230085b；/tmp/newshub-g2-domain-r2-{pre,post}.json。固定b2业务image与c59独立runner可派实际G2域名验收，未执行前仍NOT_RUN。NH-PUB-08按ADR025补充：迁移0029、当前session/user回调绑定、协议快照与模式禁网，绝不恢复费用平台。

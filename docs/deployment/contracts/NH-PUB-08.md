@@ -1,7 +1,7 @@
 # NH-PUB-08 模式隔离与授权快照合同
 
-- Task ID / Depends on / Base HEAD / Goal：NH-PUB-08；G2与ADR015，派发给定HEAD；只实现已知的本地流程安全与网站fail-closed骨架，不猜托管协议。
-- Owned files / Read-only references：backend/api/services/chatgpt_subscription.py、subscription_views.py、models.py（仅attempt快照字段）、migrations/0030_oauth_attempt_snapshot.py、tests/test_subscription_modes.py（新）、tests/test_chatgpt_subscription.py必要真实安全参数适配、docs/deployment/oauth-modes.md新。只读runtime_config/public_policy/G2账户/NH07。migration顺序如有冲突先问Sol；共用树保留他人，不派生。
+- Task ID / Depends on / Base HEAD / Goal：NH-PUB-08；G2与ADR015，Base c59e6a507362ad281dbc5e7442bacf1c5bdbb8ba；只实现已知的本地流程安全与网站fail-closed骨架，不猜托管协议。
+- Owned files / Read-only references：backend/api/services/chatgpt_subscription.py、subscription_views.py、models.py（仅attempt快照字段）、migrations/0029_oauth_attempt_snapshot.py、tests/test_subscription_modes.py（新）、tests/test_chatgpt_subscription.py必要真实安全参数适配、docs/deployment/oauth-modes.md新。只读runtime_config/public_policy/G2账户/NH07。migration顺序如有冲突先问Sol；共用树保留他人，不派生。
 - Decision frozen：所有可接网络的subscription服务入口在任何读token/discovery/refresh/model/revoke/推理之前校验模式。disabled直接拒绝；production local_oss拒绝；website始终hosted_integration_unapproved拒绝503（当前两批准均未取得，不能用假APPROVED env启用）。local_oss仅development兼容既有常量127.0.0.1:9527 callback、dynamic registration、资源与auth-method none；不改成真实域名。active_connection_for_user在disabled/website/production local_oss返回None且不读取凭据，其余网络入口抛有error_code的SubscriptionError，视图按固定403 disabled/503 website映射；现policy早拦截保留。
 Attempt新增auth_mode、protocol_snapshot JSON、config_fingerprint；snapshot包括client_id、精确redirect_uri、排序scopes、resource、token_endpoint_auth_method=none、discovery_url、issuer（创建时从已验证discovery取得）、authorization_endpoint/token_endpoint/jwks_uri，绝不secret/token/verifier明文。对旧无snapshot pending/authorizing/processing attempts migration统一failed/config_changed，已终态保留；不读取猜旧配置。快照创建时固定，每个handoff/callback用当前合法配置生成fingerprint核对；mode/redirect/scope/resource/authmethod/issuer配置变化拒绝前于token exchange，不能callback拿全局新常量替旧attempt。local动态首次issued_client_id仍按已知返回验证，网站永不复用dynamic。
 callback服务接口增加session_key与user_id，真实view使用标准SessionAuthentication（GET无需CSRF但需当前身份），完成前检查hash session binding和user==attempt.user；logout/换用户/session rotate拒绝且token POST0次。handoff原一次性ticket+Origin/session binding保留（跨端口form不以csrf_exempt代替ticket验证），host精确local127.0.0.1且pathcallback，网站未来只允许news.lambert.host HTTPS，当前实际handoff网站拒绝；未经票据不会设置cookie。callback状态consume仍条件UPDATE authorizing→processing原子一次，SQLite多进程竞争最多一次exchange，失败不重复耗授权码。callback errors仅固定安全消息，不返回query/code/token/原始异常。
@@ -11,3 +11,16 @@ binding cookie Host-only、HttpOnly/Lax、精确callback path/max-age10min；loc
 - Negative tests：website即使填fakeclient/secret仍关闭；恶意Origin/Host、callback含userinfo/父域/不安全协议拒绝；过期/重复/ticket绑定错误不exchange；旧无snapshot失败不迁成新批准attempt；不在日志泄密；管理员订阅不能回退给别用户。
 - Forbidden：不申请/发消息/真实OAuth/收费，不新增获批协议或approval假PASS，不改G3路由/账户/其他owned文件，不commit/派生；未知认证方法必须外部blocked。
 - Return format：paths/diff、HEAD、命令exit/test数、local兼容/网络0次/多连接证据、website身份与plan两个EXTERNAL_BLOCKED及真实测试NOT_RUN。
+
+
+## 派发补充冻结（ADR-025 后）
+
+本补充优先于旧费用设计。0029 现在未占用，依赖 0028；后续订阅任务恢复迁移从0030开始。允许模型只新增 attempt 三字段，不改连接或账户模型。
+
+- SubscriptionError 增加兼容默认 error_code=subscription_error/status_code=400；mode disabled 为 subscription_disabled/403，production local_oss 为 local_oss_production_forbidden/403，website 为 hosted_integration_unapproved/503。所有实际网络入口和 token 解密入口（create/handoff/complete/access_token_for/discover_models/stream_full_translation/stream_chat_response/refresh/revoke）必须第一步守模式；读取active_connection返回None。纯加解密工具无需modeguard，因为其他对象加密使用同工具。disconnect仍允许删除自己本地凭据，模式禁网时返回revocation_confirmed=false，不能读取/decrypt/网络撤销。保留内部调用同样守卫。
+- protocol_snapshot.client_id 必须等于 attempt.requested_client_id；首次dynamic sentinel也写入快照，callback返回的新issued ID只用于验证和兑换，不能替换原快照或算作config改变。快照JSON canonical排序序列化SHA256，字段仅上文非秘密协议参数。禁止回调修改快照。
+- 当前静态配置与snapshot比对不发discovery网络：mode/redirect/scopes/resource/auth_method/discovery_url/client_id。handoff在消费ticket或解密URL前检查；callback在consume与解密verifier/token兑换前检查session_key/user_id及active用户。callback随后读取fresh discovery，要求issuer和三个endpoint与snapshot逐字段一致，再兑换；verify使用snapshot协议数据而不是任意新discovery。创建时验证issuer为非空HTTPS URL、无userinfo/fragment；三个endpoint同样HTTPS无userinfo/fragment。callback缺snapshot/auth_mode/fingerprint或不匹配失败config_changed/status400，固定安全消息，旧pending migration failed/status_message=config_changed。不为未批准网站构造协议。
+- _exchange_code通过必传snapshot取得redirect_uri/resource/token_endpoint，不可读取可变全局；保留现有对参数调用测试的适配，禁止为了兼容默默填缺session身份。complete_authorization接口必须关键词session_key与user_id，全部旧直接调用测试传真实合成session/user，旧人为创建attempt需有完整有效snapshot；专门测试旧缺快照拒绝。
+- callback View标准SessionAuthentication + IsAuthenticated，匿名403，完整身份从request.user/session获取，失败响应固定安全HTML，无异常原文；成功和失败都删除binding cookie，path与签发一致、domain省略。handoff保留已有匿名一用ticket机制和跨端口session检查，模式错误按403/503安全HTML，cookie Secure=request.is_secure()（local HTTP False）；website不签发。
+- 状态/模型等API的SubscriptionError响应增加error_code并采用status_code；不改既有成功DTO。不可吞掉mode errors后继续访问token。PUBLIC policy早拒绝保持。Owner inactive在create/callback/凭据读取/模型流执行前拒绝，无网络。
+- 测试须 git archive c59 排除backend/db.sqlite3*、**/.env*，仅overlay owned files，env -i/独立0700 HOME/绝对临时DJANGO_DB_PATH/绝对现有venv python/PYTHONPATH archive backend:crawler/RUN_MAIN=true/DJANGO_ENV=development。不运行workingtree pytest，不读真实.env；完整命令和source/overlay清单记录0700持久临时目录，日志0600。migration测试仅fresh DB空→0028合成旧attempt→0029，禁止reverse不可逆0027。使用临时线程各自close_connections验证consume最多1次，不真实OAuth/模型。不得commit或派生。
