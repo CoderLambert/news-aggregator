@@ -201,6 +201,7 @@ function clearStoredRecovery(viewerId: ResearchViewerId, sessionId: string): voi
 
 function clearViewerRecovery(viewerId: ResearchViewerId): void {
   if (typeof window === 'undefined') return
+  clearPendingCreate(viewerId)
   const prefix = `${RECOVERY_STORAGE_PREFIX}:${encodeURIComponent(String(viewerId))}:`
   try {
     const keys: string[] = []
@@ -396,11 +397,12 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     enabled: viewerId !== null,
   })
   const sessions = sessionsQuery.data?.results ?? []
-  const [selection, setSelection] = useState<ResearchSelection>({
-    viewerId,
-    sessionId: null,
-    newSession: false,
-    draftKey: null,
+  const [selection, setSelection] = useState<ResearchSelection>(() => {
+    const pending = viewerId !== null ? loadPendingCreate(viewerId) : null
+    return {
+      viewerId, sessionId: null, newSession: Boolean(pending),
+      draftKey: pending && viewerId !== null ? draftStorageKey(viewerId, pending.taskId) : null,
+    }
   })
   const currentSelection = selectionForViewer(selection, viewerId)
   const activeSessionId = currentSelection.sessionId ?? (currentSelection.newSession ? null : sessions[0]?.id ?? null)
@@ -417,7 +419,12 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: researchKeys.sessions(queryViewerId, lang) }),
   })
 
-  const [taskSnapshots, setTaskSnapshots] = useState<Map<string, ResearchTaskSnapshot>>(() => new Map())
+  const [taskSnapshots, setTaskSnapshots] = useState<Map<string, ResearchTaskSnapshot>>(() => {
+    const pending = viewerId !== null ? loadPendingCreate(viewerId) : null
+    return pending && viewerId !== null
+      ? new Map([[draftStorageKey(viewerId, pending.taskId), pendingCreateSnapshot(pending)]])
+      : new Map()
+  })
   const [connectionBusy, setConnectionBusy] = useState(false)
   const taskSnapshotsRef = useRef(taskSnapshots)
   const connectionRef = useRef<ActiveConnection | null>(null)
@@ -455,9 +462,16 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     connection?.controller.abort()
     sendLockRef.current = false
     setConnectionBusy(false)
-    const empty = new Map<string, ResearchTaskSnapshot>()
-    taskSnapshotsRef.current = empty
-    setTaskSnapshots(empty)
+    const pending = viewerId !== null ? loadPendingCreate(viewerId) : null
+    const next = pending && viewerId !== null
+      ? new Map([[draftStorageKey(viewerId, pending.taskId), pendingCreateSnapshot(pending)]])
+      : new Map<string, ResearchTaskSnapshot>()
+    taskSnapshotsRef.current = next
+    setTaskSnapshots(next)
+    setSelection({
+      viewerId, sessionId: null, newSession: Boolean(pending),
+      draftKey: pending && viewerId !== null ? draftStorageKey(viewerId, pending.taskId) : null,
+    })
   }, [viewerId])
 
   const activeTaskKey = activeSessionId
@@ -661,6 +675,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
       : draftStorageKey(queryViewerId, task.id)
     const idempotencyKey = existingIdempotencyKey ?? newIdempotencyKey()
     if (task.sessionId) saveStoredRecovery(queryViewerId, task, idempotencyKey, null, mode)
+    else if (mode === 'create') savePendingCreate(queryViewerId, task, idempotencyKey)
     putTask(taskKey, task)
     if (!task.sessionId) {
       activeDraftKeyRef.current = taskKey
