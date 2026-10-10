@@ -249,6 +249,44 @@ def test_sse_slots_saturate_before_dispatch_and_release_on_close_and_exception()
         assert sse_resources._active_sse_requests == 0
 
 
+def test_sse_resource_release_on_stream_iteration_exception_and_non_sse_isolation():
+    factory = RequestFactory()
+    def response_with_failure(_request):
+        def source():
+            yield 'data: {"type":"thinking"}\n\n'
+            raise RuntimeError('connection reset during streaming')
+        return StreamingHttpResponse(source(), content_type='text/event-stream')
+
+    middleware = SSEResourceMiddleware(response_with_failure)
+    request = _sse_request(factory, 'research-stream')
+    request.method = 'GET'
+    assert middleware.process_view(request, lambda: None, (), {}) is None
+    response = middleware(request)
+    events = iter(response.streaming_content)
+    assert next(events).startswith('data: ')
+    with pytest.raises(RuntimeError, match='connection reset'):
+        next(events)
+    response.close()
+    request._sse_resource_release()
+
+    blocked_slots = []
+    for _ in range(2):
+        current = _sse_request(factory)
+        assert middleware.process_view(current, lambda: None, (), {}) is None
+        blocked_slots.append(current)
+    try:
+        unrelated = factory.get('/api/news/')
+        unrelated.resolver_match = SimpleNamespace(url_name='news-list')
+        assert middleware.process_view(unrelated, lambda: None, (), {}) is None
+        assert middleware.process_view(_sse_request(factory), lambda: None, (), {}).status_code == 503
+    finally:
+        for current in blocked_slots:
+            current._sse_resource_release()
+    with sse_resources._sse_lock:
+        assert sse_resources._active_sse_requests == 0
+
+
+
 @pytest.mark.django_db(transaction=True)
 def test_queued_recovery_after_process_restart_dispatches_existing_idempotent_run_once(fake_executor, monkeypatch):
     owner = make_user()
