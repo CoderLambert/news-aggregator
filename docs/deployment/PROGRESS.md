@@ -113,3 +113,5 @@
 
 ## 后续源代码准备与门槛保留
 用户再次要求持续完成全部任务。ADR021冻结221a93d为G1运行候选，未来构建必须使用其git archive；独立G2源码准备可在网络等待期间离线推进，不改用户DB/生产开关。G1整体仍DOING，G2只有源代码准备不是发布完成，G2整体验收依赖G1真实运行。G1-VOLUME-RUNTIME runner正在准备，实际镜像未给定故runtime NOT_RUN；G3-PROVIDER完整契约已冻结但尚未实施。
+- volume runner初版新增两owned文件、17离线测试/compile退出0，runtime未执行。主控整合定位exec --user值被误当container的真实argv兼容问题与失败时创建台账缺口，已给同范围整改；不把初版17PASS当真实CLI通过。
+- G3的CORE/PROVIDER/BUSINESS/FRONTEND/DEPLOY与G2/G3本地域名合同已补齐输入、费用、worker/SSE、私有结果及默认关闭策略；全部仍待实施。主控对实际OpenAI3.26.1使用纯MockTransport做timeout/max_completion_tokens兼容probe退出0，发现默认admin/org/project环境继承须显式隔离，已冻结；未真实调用API。
