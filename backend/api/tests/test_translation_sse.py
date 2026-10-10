@@ -32,6 +32,7 @@ def test_short_translation_result_preserves_existing_wire_protocol():
     frames = list(translation_sse_records(payload, event='complete'))
     assert len(frames) == 1
     assert frames[0].startswith('event: complete\ndata: ')
+    assert '\"full_content_zh\": \"短译文\"' in frames[0]
     assert decode_translation_records(frames) == [payload]
 
 
