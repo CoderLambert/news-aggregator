@@ -910,10 +910,30 @@ export function useResearch(viewerId: ResearchViewerId | null) {
 
   const handleNewSession = useCallback(() => {
     pauseCurrentConnection('已切换到新会话；原服务端任务可能仍在运行，可从历史会话继续接收。')
+    const pending = viewerId !== null ? loadPendingCreate(viewerId) : null
+    if (pending && viewerId !== null) {
+      const pendingDraftKey = draftStorageKey(viewerId, pending.taskId)
+      const existingTask = taskSnapshotsRef.current.get(pendingDraftKey)
+      const pendingTask = existingTask?.id === pending.taskId
+        ? {
+            ...existingTask,
+            recovery: 'resume' as const,
+            notice: '原请求结果尚未确认，请先继续接收原任务。',
+          }
+        : {
+            ...pendingCreateSnapshot(pending),
+            notice: '原请求结果尚未确认，请先继续接收原任务。',
+          }
+      putTask(pendingDraftKey, pendingTask)
+      activeSessionIdRef.current = null
+      activeDraftKeyRef.current = pendingDraftKey
+      setSelection({ viewerId, sessionId: null, newSession: true, draftKey: pendingDraftKey })
+      return
+    }
     activeSessionIdRef.current = null
     activeDraftKeyRef.current = null
     setSelection({ viewerId, sessionId: null, newSession: true, draftKey: null })
-  }, [viewerId, pauseCurrentConnection])
+  }, [viewerId, pauseCurrentConnection, putTask])
 
   const handleSelectSession = useCallback((sessionId: string) => {
     if (sessionId === activeSessionId) return

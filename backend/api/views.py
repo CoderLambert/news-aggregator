@@ -95,7 +95,13 @@ def ensure_full_content(news, execution_guard=None):
     import logging
     from django.utils.timezone import now as tz_now
 
-    from api.services.full_content_status import claim_fetch, classify_fetch_error, mark_failed, mark_success
+    from api.services.full_content_status import (
+        claim_fetch,
+        classify_fetch_error,
+        mark_failed,
+        mark_success,
+        release_fetch_claim,
+    )
 
     if news.full_content and news.full_content.strip():
         return
@@ -125,7 +131,21 @@ def ensure_full_content(news, execution_guard=None):
         )
     except Exception as e:
         if execution_guard is not None:
-            execution_guard()
+            try:
+                execution_guard()
+            except Exception:
+                try:
+                    released = release_fetch_claim(news)
+                except Exception:
+                    logging.getLogger(__name__).warning(
+                        'ensure_full_content: cancelled fetch claim cleanup failed',
+                    )
+                else:
+                    if not released:
+                        logging.getLogger(__name__).warning(
+                            'ensure_full_content: cancelled fetch claim was no longer owned',
+                        )
+                raise
         try:
             classified = classify_fetch_error(e)
             mark_failed(news, e, status=classified)

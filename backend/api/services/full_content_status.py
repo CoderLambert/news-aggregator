@@ -94,6 +94,27 @@ def claim_fetch(news: News, *, force: bool = False) -> bool:
     return claimed
 
 
+def release_fetch_claim(news: News) -> bool:
+    """Release an owned fetch lease without recording a fetch failure."""
+    if not getattr(news, '_full_content_fetch_claimed', False):
+        return False
+    lease = getattr(news, '_full_content_fetch_lease', None)
+    if lease is None:
+        return False
+
+    released = news.__class__.objects.filter(
+        pk=news.pk,
+        full_content_fetch_status='fetching',
+        last_full_content_attempt=lease,
+    ).update(full_content_fetch_status='pending') == 1
+    news._full_content_fetch_lease = None
+    if not released:
+        news.refresh_from_db()
+        return False
+    news.full_content_fetch_status = 'pending'
+    return True
+
+
 def mark_fetching(news: News) -> None:
     """Mark that a full-content fetch attempt has started."""
     news.full_content_fetch_status = 'fetching'

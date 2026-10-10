@@ -49,6 +49,17 @@ function waitForAbort(signal) {
   return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))
 }
 
+function seedPendingCreate(viewerId, { taskId, idempotencyKey, query }) {
+  sessionStorage.setItem(`news-aggregator:research-pending-create:v1:${encodeURIComponent(String(viewerId))}`, JSON.stringify({
+    version: 1,
+    taskId,
+    idempotencyKey,
+    query,
+    localOnly: false,
+    createdAt: Date.now(),
+  }))
+}
+
 async function* hangingStream(signal) {
   yield { type: 'session_created', session_id: 'session-active' }
   yield { type: 'thinking' }
@@ -69,6 +80,124 @@ beforeEach(() => {
 })
 
 describe('F03 queued and pre-header recovery', () => {
+  it('restores a paused pre-header create in the new session and resumes only with its original key', async () => {
+    const seenKeys = []
+    api.createResearchStream.mockImplementation((_query, { signal, idempotencyKey }) => {
+      seenKeys.push(idempotencyKey)
+      return (async function* pendingBeforeHeaders() {
+        yield { type: 'thinking' }
+        await waitForAbort(signal)
+        throw new DOMException('The operation was aborted', 'AbortError')
+      })()
+    })
+    const { result, unmount } = renderResearchHook(7)
+    await waitFor(() => expect(result.current.loadingSessions).toBe(false))
+    await act(async () => {
+      expect(await result.current.handleSend('新会话仍要恢复的原查询')).toBe(true)
+    })
+    await waitFor(() => expect(api.createResearchStream).toHaveBeenCalledTimes(1))
+    const originalKey = api.createResearchStream.mock.calls[0][1].idempotencyKey
+
+    act(() => result.current.handleNewSession())
+
+    expect(result.current.hasRecoverableTask).toBe(true)
+    expect(result.current.recoveryAction).toBe('resume')
+    expect(result.current.messages.some((message) => message.content === '新会话仍要恢复的原查询')).toBe(true)
+    expect(result.current.messages.some((message) => message.content.includes('原请求结果尚未确认，请先继续接收原任务'))).toBe(true)
+    expect(JSON.parse(sessionStorage.getItem('news-aggregator:research-pending-create:v1:7')).idempotencyKey).toBe(originalKey)
+
+    await act(async () => {
+      expect(await result.current.handleSend('不应覆盖原任务')).toBe(false)
+    })
+    expect(api.createResearchStream).toHaveBeenCalledTimes(1)
+
+    await act(async () => { await result.current.handleResume() })
+    await waitFor(() => expect(api.createResearchStream).toHaveBeenCalledTimes(2))
+    expect(seenKeys).toEqual([originalKey, originalKey])
+    expect(api.createResearchStream.mock.calls[1][0]).toBe('新会话仍要恢复的原查询')
+    unmount()
+  })
+
+  it('restores the original query in a new session after a pre-header network error', async () => {
+    api.createResearchStream.mockImplementationOnce(async function* failedBeforeHeaders() {
+      yield* []
+      throw new TypeError('simulated lost network response')
+    })
+    const { result, unmount } = renderResearchHook(7)
+    await waitFor(() => expect(result.current.loadingSessions).toBe(false))
+    await act(async () => { await result.current.handleSend('网络失败后仍要接收的查询') })
+    await waitFor(() => expect(result.current.recoveryAction).toBe('resume'))
+
+    act(() => result.current.handleNewSession())
+
+    expect(result.current.hasRecoverableTask).toBe(true)
+    expect(result.current.messages.some((message) => message.content === '网络失败后仍要接收的查询')).toBe(true)
+    expect(api.createResearchStream).toHaveBeenCalledTimes(1)
+    unmount()
+  })
+
+  it('returns from a history session to the pending create recovery entry', async () => {
+    const history = session('history-after-pending', [{ role: 'user', content: '历史会话问题' }], 1)
+    seedPendingCreate(7, {
+      taskId: 'pending-before-history',
+      idempotencyKey: 'original-before-history',
+      query: '切回新会话后要接收的原查询',
+    })
+    api.listResearchSessions.mockResolvedValue(emptyPage([{ id: history.id, title: history.title }]))
+    api.getResearchSession.mockResolvedValue(history)
+    api.openResearchSessionStream.mockResolvedValue({ kind: 'session', session: history })
+    const { result, unmount } = renderResearchHook(7)
+    await waitFor(() => expect(result.current.hasRecoverableTask).toBe(true))
+
+    act(() => result.current.handleSelectSession(history.id))
+    await waitFor(() => expect(result.current.activeSessionId).toBe(history.id))
+    await waitFor(() => expect(result.current.messages[0]?.content).toBe('历史会话问题'))
+    act(() => result.current.handleNewSession())
+
+    expect(result.current.activeSessionId).toBeNull()
+    expect(result.current.hasRecoverableTask).toBe(true)
+    expect(result.current.recoveryAction).toBe('resume')
+    expect(result.current.messages.some((message) => message.content === '切回新会话后要接收的原查询')).toBe(true)
+    expect(api.createResearchStream).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it('keeps ordinary new-session behavior when there is no pending create', async () => {
+    const history = session('ordinary-history', [{ role: 'user', content: '普通历史内容' }], 1)
+    api.listResearchSessions.mockResolvedValue(emptyPage([{ id: history.id, title: history.title }]))
+    api.getResearchSession.mockResolvedValue(history)
+    api.openResearchSessionStream.mockResolvedValue({ kind: 'session', session: history })
+    const { result, unmount } = renderResearchHook(7)
+    await waitFor(() => expect(result.current.activeSessionId).toBe(history.id))
+    await waitFor(() => expect(result.current.messages[0]?.content).toBe('普通历史内容'))
+
+    act(() => result.current.handleNewSession())
+
+    expect(result.current.activeSessionId).toBeNull()
+    expect(result.current.hasRecoverableTask).toBe(false)
+    expect(result.current.recoveryAction).toBe('none')
+    expect(result.current.messages).toEqual([])
+    unmount()
+  })
+
+  it('does not expose another viewer’s pending create in a new session', async () => {
+    seedPendingCreate(1, {
+      taskId: 'private-viewer-task',
+      idempotencyKey: 'private-viewer-key',
+      query: 'viewer one private query',
+    })
+    const { result, unmount } = renderResearchHook(2)
+    await waitFor(() => expect(result.current.loadingSessions).toBe(false))
+    act(() => result.current.handleNewSession())
+
+    expect(result.current.hasRecoverableTask).toBe(false)
+    expect(result.current.recoveryAction).toBe('none')
+    expect(result.current.messages.some((message) => message.content.includes('viewer one private query'))).toBe(false)
+    expect(api.createResearchStream).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem('news-aggregator:research-pending-create:v1:1')).not.toBeNull()
+    unmount()
+  })
+
   it('preserves the original idempotency key before headers and never silently issues a new POST on remount', async () => {
     const keys = []
     api.createResearchStream.mockImplementation((_query, { signal, idempotencyKey }) => {

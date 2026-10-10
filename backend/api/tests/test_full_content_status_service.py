@@ -12,6 +12,7 @@ from api.services.full_content_status import (
     mark_failed,
     mark_fetching,
     mark_success,
+    release_fetch_claim,
 )
 
 
@@ -175,6 +176,110 @@ def test_reclaimed_fetch_fences_out_late_success_and_failure(news):
     assert news.full_content == 'CURRENT BODY'
     assert news.full_content_fetch_status == 'success'
     assert news.full_content_fetch_provider == 'current_worker'
+
+
+@pytest.mark.django_db
+def test_release_fetch_claim_resets_only_status_and_allows_immediate_reclaim(news):
+    previous_time = timezone.now() - timedelta(hours=1)
+    news.full_content = 'EXISTING_BODY'
+    news.full_content_zh = 'EXISTING_TRANSLATION'
+    news.full_content_fetched_at = previous_time
+    news.full_content_zh_fetched_at = previous_time
+    news.full_content_fetch_provider = 'previous_provider'
+    news.full_content_quality_score = 0.75
+    news.full_content_retry_count = 4
+    news.full_content_fetch_status = 'success'
+    news.save()
+    lease = timezone.now()
+    with patch('api.services.full_content_status.tz_now', return_value=lease):
+        assert claim_fetch(news, force=True)
+
+    assert release_fetch_claim(news)
+    news.refresh_from_db()
+    assert news.full_content_fetch_status == 'pending'
+    assert news.last_full_content_attempt == lease
+    assert news.full_content == 'EXISTING_BODY'
+    assert news.full_content_zh == 'EXISTING_TRANSLATION'
+    assert news.full_content_fetched_at == previous_time
+    assert news.full_content_zh_fetched_at == previous_time
+    assert news.full_content_fetch_provider == 'previous_provider'
+    assert news.full_content_quality_score == 0.75
+    assert news.full_content_retry_count == 4
+    assert news._full_content_fetch_lease is None
+
+    assert claim_fetch(News.objects.get(pk=news.pk), force=True)
+
+
+@pytest.mark.django_db
+def test_release_fetch_claim_does_not_clear_a_newer_lease(news):
+    first_started = timezone.now() - timedelta(minutes=10)
+    first_worker = News.objects.get(pk=news.pk)
+    with patch('api.services.full_content_status.tz_now', return_value=first_started):
+        assert claim_fetch(first_worker)
+
+    newer_worker = News.objects.get(pk=news.pk)
+    newer_started = first_started + timedelta(minutes=6)
+    with patch('api.services.full_content_status.tz_now', return_value=newer_started):
+        assert claim_fetch(newer_worker)
+
+    assert not release_fetch_claim(first_worker)
+    news.refresh_from_db()
+    assert news.full_content_fetch_status == 'fetching'
+    assert news.last_full_content_attempt == newer_started
+    assert news.full_content == ''
+    assert news.full_content_retry_count == 0
+    assert first_worker._full_content_fetch_lease is None
+
+
+@pytest.mark.django_db
+def test_release_fetch_claim_does_not_change_a_newer_success(news):
+    first_started = timezone.now() - timedelta(minutes=10)
+    first_worker = News.objects.get(pk=news.pk)
+    with patch('api.services.full_content_status.tz_now', return_value=first_started):
+        assert claim_fetch(first_worker)
+
+    newer_worker = News.objects.get(pk=news.pk)
+    newer_started = first_started + timedelta(minutes=6)
+    with patch('api.services.full_content_status.tz_now', return_value=newer_started):
+        assert claim_fetch(newer_worker)
+    current_result = FetchResult(
+        ok=True,
+        provider='new_worker',
+        url=news.url,
+        markdown='CURRENT_BODY',
+        quality_score=0.9,
+    )
+    assert mark_success(newer_worker, current_result, full_content='CURRENT_BODY')
+
+    assert not release_fetch_claim(first_worker)
+    news.refresh_from_db()
+    assert news.full_content_fetch_status == 'success'
+    assert news.full_content == 'CURRENT_BODY'
+    assert news.full_content_fetch_provider == 'new_worker'
+    assert news.full_content_retry_count == 0
+    assert first_worker._full_content_fetch_lease is None
+
+
+@pytest.mark.parametrize('has_claim_marker', [False, True])
+@pytest.mark.django_db
+def test_release_fetch_claim_without_lease_has_no_side_effects(news, has_claim_marker):
+    news.full_content = 'UNCHANGED_BODY'
+    news.full_content_zh = 'UNCHANGED_TRANSLATION'
+    news.full_content_retry_count = 3
+    news.full_content_fetch_provider = 'unchanged_provider'
+    news.full_content_fetch_status = 'success'
+    news.save()
+    if has_claim_marker:
+        news._full_content_fetch_claimed = True
+        news._full_content_fetch_lease = None
+
+    assert not release_fetch_claim(news)
+    news.refresh_from_db()
+    assert news.full_content_fetch_status == 'success'
+    assert news.full_content == 'UNCHANGED_BODY'
+    assert news.full_content_zh == 'UNCHANGED_TRANSLATION'
+    assert news.full_content_retry_count == 3
+    assert news.full_content_fetch_provider == 'unchanged_provider'
 
 
 @pytest.mark.parametrize(
