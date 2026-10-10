@@ -798,6 +798,7 @@ def _acquire_refresh_lease(connection_id, credential_generation, now, lease_id):
 
 
 def _refresh_access_token_with_lease(connection, expected_generation, lease_id) -> str:
+    config = _assert_connection_mode(connection)
     connection_id = connection.pk
     credential_generation = connection.credential_generation
     refresh_token = decrypt_secret(connection.encrypted_refresh_token, 'subscription-refresh-token')
@@ -805,10 +806,13 @@ def _refresh_access_token_with_lease(connection, expected_generation, lease_id) 
         raise SubscriptionError('此连接缺少注册 client_id，请重新连接。')
     try:
         discovery = _discovery()
-        response = requests.post(discovery['token_endpoint'], data={
-            'grant_type': 'refresh_token', 'refresh_token': refresh_token,
-            'client_id': connection.issued_client_id, 'resource': API_RESOURCE,
-        }, timeout=20)
+        response = _post_oauth_form(
+            discovery['token_endpoint'], {
+                'grant_type': 'refresh_token', 'refresh_token': refresh_token,
+                'client_id': connection.issued_client_id, 'resource': config.resource,
+            }, client_id=connection.issued_client_id,
+            method=config.token_auth_method, secret=config.client_secret,
+        )
     except Exception as exc:
         raise SubscriptionError('刷新 ChatGPT 订阅令牌失败，请稍后重试。') from exc
     if response.status_code in (400, 401) and 'invalid_grant' in response.text:
@@ -869,6 +873,7 @@ def _refresh_access_token(connection_id, expected_generation=None) -> str:
             connection = ChatGPTSubscriptionConnection.objects.get(pk=connection_id)
         except ChatGPTSubscriptionConnection.DoesNotExist as exc:
             raise ConnectionChangedError('订阅连接已断开。') from exc
+        _assert_connection_mode(connection)
         _assert_current_selection(connection, expected_generation)
         now = timezone.now()
         if connection.access_token_expires_at and connection.access_token_expires_at > now + timedelta(seconds=60):
@@ -964,11 +969,20 @@ def discover_models(connection: ChatGPTSubscriptionConnection) -> list[dict[str,
     return models
 
 
-def _revoke_refresh_token(refresh_token: str, client_id: str) -> bool:
+def _revoke_refresh_token(refresh_token: str, client_id: str,
+                          oauth_mode: str = 'local') -> bool:
     """Best-effort revocation with bounded retries for transport and 5xx failures."""
     if not refresh_token or not client_id:
         return False
     try:
+        if oauth_mode == 'website':
+            config = _runtime_config()
+            if not config.website or config.client_id != client_id:
+                return False
+        else:
+            # Preserve revocation of historical local credentials after a
+            # deployment mode switch: these use the no-secret OSS client.
+            config = None
         discovery = _discovery()
     except SubscriptionError:
         return False
@@ -982,9 +996,15 @@ def _revoke_refresh_token(refresh_token: str, client_id: str) -> bool:
         if delay:
             time.sleep(delay)
         try:
-            response = requests.post(revocation_endpoint, data={
-                'token': refresh_token, 'token_type_hint': 'refresh_token', 'client_id': client_id,
-            }, timeout=15)
+            response = _post_oauth_form(
+                revocation_endpoint, {
+                    'token': refresh_token, 'token_type_hint': 'refresh_token',
+                    'client_id': client_id,
+                }, client_id=client_id,
+                method=config.token_auth_method if config is not None else 'none',
+                secret=config.client_secret if config is not None else '',
+                timeout=15,
+            )
         except Exception:
             response = None
         if response is not None and 200 <= response.status_code < 300:
@@ -1016,6 +1036,7 @@ def disconnect_connection(user, connection_id) -> bool:
             except SubscriptionError:
                 refresh_token = ''
             client_id = connection.issued_client_id
+            oauth_mode = connection.oauth_mode
             connection.is_active = False
             connection.needs_reauth = True
             connection.generation += 1
@@ -1036,7 +1057,9 @@ def disconnect_connection(user, connection_id) -> bool:
 
         revocation_confirmed = False
         try:
-            revocation_confirmed = _revoke_refresh_token(refresh_token, client_id)
+            revocation_confirmed = _revoke_refresh_token(
+                refresh_token, client_id, oauth_mode=oauth_mode,
+            )
         finally:
             # A callback or another credential update that wins after the
             # disconnect fence must not be erased by this cleanup.
