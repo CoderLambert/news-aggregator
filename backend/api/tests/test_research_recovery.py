@@ -382,6 +382,9 @@ def test_queued_resume_endpoint_rejects_other_users_and_preserves_csrf(fake_exec
 
     valid = APIClient()
     valid.force_authenticate(owner)
+    malformed = valid.post(route, {'run_id': 'invalid-uuid'}, format='json')
+    assert malformed.status_code == 400
+    assert malformed.data['error_code'] == 'invalid_run_id'
     response = valid.post(route, {'run_id': str(run.pk)}, format='json')
     assert response.status_code == 200
     assert response.data['run_id'] == str(run.pk)
