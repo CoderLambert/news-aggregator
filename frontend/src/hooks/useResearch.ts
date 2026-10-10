@@ -521,7 +521,11 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     setConnectionBusy(false)
     const current = taskSnapshotsRef.current.get(connection.taskKey)
     if (!current || current.id !== connection.id || !isActivePhase(current)) return
-    putTask(connection.taskKey, markResearchTaskCancelled(current, notice))
+    const cancelled = markResearchTaskCancelled(current, notice)
+    const pending = !current.sessionId && loadPendingCreate(connection.viewerId)
+    putTask(connection.taskKey, pending && pending.idempotencyKey === connection.idempotencyKey
+      ? { ...cancelled, recovery: 'resume' }
+      : cancelled)
   }, [putTask])
 
   const connectionIsCurrent = useCallback((connection: ActiveConnection): boolean => {
@@ -568,6 +572,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     if (!current) return
     if (current.sessionId === sessionId) {
       saveStoredRecovery(queryViewerId, current, connection.idempotencyKey, connection.runId, connection.requestMode)
+      if (connection.idempotencyKey) clearPendingCreate(queryViewerId, connection.idempotencyKey)
       void cancelConnectionOnServer(connection)
       return
     }
@@ -580,6 +585,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     nextTasks.set(sessionKey, nextTask)
     connection.taskKey = sessionKey
     saveStoredRecovery(queryViewerId, nextTask, connection.idempotencyKey, connection.runId, connection.requestMode)
+    if (connection.idempotencyKey) clearPendingCreate(queryViewerId, connection.idempotencyKey)
     publishTasks(nextTasks)
     void cancelConnectionOnServer(connection)
     if (connection.selectOnCreate && activeDraftKeyRef.current === oldKey) {
@@ -861,7 +867,9 @@ export function useResearch(viewerId: ResearchViewerId | null) {
   const handleSend = useCallback(async (query: string, { localOnly = false }: { localOnly?: boolean } = {}) => {
     const normalizedQuery = query.trim()
     if (!normalizedQuery || connectionRef.current || sendLockRef.current || viewerId === null) return false
-    if (activeTask?.recovery === 'resume') return false
+    // Without response headers, a prior create may already have reached Django.
+    // Never create a different request key while its fate is unknown.
+    if (loadPendingCreate(viewerId) || activeTask?.recovery === 'resume') return false
 
     const sessionId = activeSessionId
     const currentTask = activeTask
@@ -910,7 +918,15 @@ export function useResearch(viewerId: ResearchViewerId | null) {
 
   const handleResume = useCallback(async () => {
     const task = activeTask
-    if (!task || task.recovery !== 'resume' || !task.sessionId || viewerId === null) return
+    if (!task || task.recovery !== 'resume' || viewerId === null) return
+    if (!task.sessionId) {
+      const pending = loadPendingCreate(viewerId)
+      if (!pending || pending.taskId !== task.id) return
+      // Reattach with EXACTLY the original idempotency key. No fresh paid key.
+      const retry = createResearchTask(task.id, pending.query, pending.localOnly, [], null)
+      runStreamTask(retry, 'create', pending.idempotencyKey)
+      return
+    }
     await startSessionRecovery(task.sessionId, task)
   }, [activeTask, startSessionRecovery, viewerId])
 
