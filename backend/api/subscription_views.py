@@ -32,9 +32,19 @@ class ChatGPTSubscriptionStatusView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        connections = ChatGPTSubscriptionConnection.objects.filter(user=request.user)
+        try:
+            config = subscription._runtime_config()
+        except subscription.SubscriptionError as exc:
+            return Response({
+                'available': False, 'mode': 'website',
+                'message': str(exc), 'connections': [], 'active_connection_id': None,
+            })
+        connections = ChatGPTSubscriptionConnection.objects.filter(
+            user=request.user, oauth_mode=config.mode,
+        )
         active = connections.filter(is_active=True).first()
         return Response({
+            'available': True, 'mode': config.mode, 'message': '',
             'connections': [_connection_payload(item) for item in connections],
             'active_connection_id': str(active.pk) if active else None,
         })
@@ -79,12 +89,14 @@ class ChatGPTSubscriptionHandoffView(APIView):
                 status=400, content_type='text/html; charset=utf-8',
             )
         response = HttpResponseRedirect(authorization_url)
+        response['Cache-Control'] = 'no-store'
+        response['Referrer-Policy'] = 'no-referrer'
         response.set_cookie(
             subscription.BINDING_COOKIE_NAME,
             cookie_value,
             max_age=int(subscription.AUTH_ATTEMPT_TTL.total_seconds()),
             httponly=True,
-            secure=False,
+            secure=subscription._runtime_config().website,
             samesite='Lax',
             path=subscription.BINDING_COOKIE_PATH,
         )
@@ -139,7 +151,15 @@ class ChatGPTSubscriptionCallbackView(APIView):
             f'<p>{safe_message}</p><p>关闭此窗口后，回到新闻聚合器查看连接状态。</p>'
             '</body></html>'
         )
-        return HttpResponse(page, status=result_code, content_type='text/html; charset=utf-8')
+        response = HttpResponse(page, status=result_code, content_type='text/html; charset=utf-8')
+        response['Cache-Control'] = 'no-store'
+        response['Referrer-Policy'] = 'no-referrer'
+        response['Content-Security-Policy'] = "default-src 'none'; style-src 'unsafe-inline'"
+        response.set_cookie(
+            subscription.BINDING_COOKIE_NAME, '', max_age=0, httponly=True,
+            secure=request.is_secure(), samesite='Lax', path=subscription.BINDING_COOKIE_PATH,
+        )
+        return response
 
 
 class ChatGPTSubscriptionModelsView(APIView):
