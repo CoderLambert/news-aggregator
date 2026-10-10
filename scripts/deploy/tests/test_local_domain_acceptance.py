@@ -589,74 +589,258 @@ def test_auth_me_route_matcher_rejects_wrong_or_malformed_urls(url):
     assert not acceptance._is_auth_me_request_url(url)
 
 
-def test_auth_me_holder_captures_only_first_armed_get_and_falls_back_for_others():
+def test_auth_me_snapshot_requires_a_successful_real_browser_identity():
+    snapshot = {'username': 'A', 'id': 17, 'is_admin': False}
+    assert acceptance._validated_auth_me_snapshot(
+        {'status': 200, 'body': snapshot}, 'A',
+    ) is snapshot
+
+    invalid_responses = (
+        {'status': 403, 'body': snapshot},
+        {'status': 200, 'body': None},
+        {'status': 200, 'body': {'username': 'B'}},
+        None,
+    )
+    for response in invalid_responses:
+        with pytest.raises(acceptance.AcceptanceError, match='could not capture'):
+            acceptance._validated_auth_me_snapshot(response, 'A')
+
+
+@pytest.mark.parametrize(('url', 'method', 'matches'), [
+    (f'https://{acceptance.HOST}/api/auth/me/?lang=zh', 'GET', True),
+    (f'https://{acceptance.HOST}/api/auth/me/', 'POST', False),
+    (f'http://{acceptance.HOST}/api/auth/me/', 'GET', False),
+    ('https://evil.invalid/api/auth/me/', 'GET', False),
+    (f'https://{acceptance.HOST}/api/auth/me/extra', 'GET', False),
+])
+def test_auth_me_response_matcher_requires_exact_origin_path_and_get(url, method, matches):
+    response = SimpleNamespace(
+        url=url,
+        request=SimpleNamespace(method=method),
+    )
+    assert acceptance._is_auth_me_get_response(response) is matches
+
+
+def _fake_auth_race_response_waiter(response, events):
+    class FakeResponseInfo:
+        def __init__(self, predicate):
+            self.predicate = predicate
+            self.value = asyncio.get_running_loop().create_future()
+
+        async def __aenter__(self):
+            events.append('listener_registered')
+            assert self.predicate(response)
+            self.value.set_result(response)
+            return self
+
+        async def __aexit__(self, *_exc_info):
+            return False
+
+    class FakePage:
+        def expect_response(self, predicate, *, timeout):
+            assert timeout == 10000
+            return FakeResponseInfo(predicate)
+
+    class FakeRelease:
+        def set(self):
+            assert events == ['listener_registered']
+            events.append('released')
+
+    return FakePage(), {'release': FakeRelease()}
+
+
+def test_auth_race_release_waits_for_exact_response_finish_and_snapshot_body():
+    snapshot = {'username': 'A', 'id': 17, 'is_admin': False}
+    events = []
+
     class FakeResponse:
+        url = f'https://{acceptance.HOST}/api/auth/me/?lang=zh'
+        request = SimpleNamespace(method='GET')
+        status = 200
+
+        async def finished(self):
+            assert events[-1] == 'released'
+            events.append('finished')
+            return None
+
         async def json(self):
-            return {'username': 'A'}
+            assert events[-1] == 'finished'
+            events.append('json')
+            return snapshot
+
+    page, state = _fake_auth_race_response_waiter(FakeResponse(), events)
+    asyncio.run(acceptance._release_auth_race_response(page, state, snapshot))
+    assert events == ['listener_registered', 'released', 'finished', 'json']
+
+
+@pytest.mark.parametrize(('status', 'finish_error', 'finish_raises', 'body'), [
+    (200, 'request failed', False, {'username': 'A'}),
+    (200, None, True, {'username': 'A'}),
+    (503, None, False, {'username': 'A'}),
+    (200, None, False, {'username': 'A', 'private': 'synthetic-secret'}),
+])
+def test_auth_race_release_rejects_incomplete_or_wrong_response(status, finish_error, finish_raises, body):
+    snapshot = {'username': 'A', 'id': 17, 'is_admin': False}
+    events = []
+
+    class FakeResponse:
+        url = f'https://{acceptance.HOST}/api/auth/me/'
+        request = SimpleNamespace(method='GET')
+
+        async def finished(self):
+            assert events[-1] == 'released'
+            events.append('finished')
+            if finish_raises:
+                raise TimeoutError('private completion detail')
+            return finish_error
+
+        async def json(self):
+            events.append('json')
+            return body
+
+    response = FakeResponse()
+    response.status = status
+    page, state = _fake_auth_race_response_waiter(response, events)
+    with pytest.raises(acceptance.AcceptanceError) as failure:
+        asyncio.run(acceptance._release_auth_race_response(page, state, snapshot))
+    assert 'private' not in str(failure.value)
+    assert events[:2] == ['listener_registered', 'released']
+
+
+def test_b_favorites_verify_same_page_without_hard_navigation(monkeypatch):
+    events = []
+    title = 'Synthetic A article'
+
+    class FakeLocator:
+        def __init__(self, text, exact):
+            self.text = text
+            self.exact = exact
+
+        async def wait_for(self, *, state, timeout):
+            events.append(('wait', self.text, self.exact, state, timeout))
+
+    class FakePage:
+        def get_by_text(self, text, *, exact):
+            return FakeLocator(text, exact)
+
+        async def goto(self, *_args, **_kwargs):
+            raise AssertionError('account-switch cache check must stay on the current page')
+
+    async def fake_browser_api(_page, method, path):
+        events.append(('api', method, path))
+        return {'status': 200, 'body': {'results': []}}
+
+    monkeypatch.setattr(acceptance, '_browser_api', fake_browser_api)
+    response = asyncio.run(acceptance._verify_b_favorites_after_auth_race(FakePage(), title))
+    assert response == {'status': 200, 'body': {'results': []}}
+    assert events == [
+        ('wait', '还没有收藏内容', True, 'visible', 15000),
+        ('wait', title, False, 'hidden', 15000),
+        ('api', 'GET', '/api/favorites/?type=bookmark'),
+    ]
+
+
+def test_auth_me_holder_fulfills_only_after_release_without_fetch_or_headers():
+    snapshot = {'username': 'A', 'id': 17, 'is_admin': False}
 
     class FakeRoute:
-        def __init__(self, method, state, response):
+        def __init__(self, method, state):
             self.request = SimpleNamespace(
                 method=method,
                 url=f'https://{acceptance.HOST}/api/auth/me/?lang=zh',
             )
             self.state = state
-            self.response = response
             self.fetch_calls = 0
             self.fallback_calls = 0
-            self.fulfilled_response = None
+            self.abort_calls = 0
+            self.fulfill_kwargs = None
 
         async def fetch(self):
-            assert self.state['armed'] is False
             self.fetch_calls += 1
-            return self.response
+            raise AssertionError('auth-me holder must not call route.fetch')
 
         async def fallback(self):
             self.fallback_calls += 1
 
-        async def fulfill(self, *, response):
-            self.fulfilled_response = response
+        async def abort(self):
+            self.abort_calls += 1
+
+        async def fulfill(self, **kwargs):
+            self.fulfill_kwargs = kwargs
 
     async def exercise():
-        response = FakeResponse()
         state = {
             'armed': True,
-            'response': None,
-            'actual_user': None,
+            'snapshot': snapshot,
+            'expected_username': 'A',
             'fetched': asyncio.Event(),
             'release': asyncio.Event(),
         }
-        first = FakeRoute('GET', state, response)
-        second = FakeRoute('GET', state, response)
+        first = FakeRoute('GET', state)
         pending = asyncio.create_task(
             acceptance._hold_first_armed_auth_me_request(first, state)
         )
         await asyncio.wait_for(state['fetched'].wait(), timeout=1)
         assert state['armed'] is False
-        assert state['response'] is response
-        assert state['actual_user'] == {'username': 'A'}
+        assert first.fetch_calls == 0
+        assert first.fulfill_kwargs is None
 
-        await acceptance._hold_first_armed_auth_me_request(second, state)
-        assert second.fallback_calls == 1
-        assert second.fetch_calls == 0
+        repeated_get = FakeRoute('GET', state)
+        await acceptance._hold_first_armed_auth_me_request(repeated_get, state)
+        assert repeated_get.fallback_calls == 1
+        assert repeated_get.fetch_calls == 0
 
         post_state = {
-            'armed': True,
-            'response': None,
-            'actual_user': None,
-            'fetched': asyncio.Event(),
-            'release': asyncio.Event(),
+            'armed': True, 'snapshot': snapshot, 'expected_username': 'A',
+            'fetched': asyncio.Event(), 'release': asyncio.Event(),
         }
-        post = FakeRoute('POST', post_state, response)
+        post = FakeRoute('POST', post_state)
         await acceptance._hold_first_armed_auth_me_request(post, post_state)
         assert post.fallback_calls == 1
         assert post.fetch_calls == 0
         assert post_state['armed'] is True
+        assert not post_state['fetched'].is_set()
 
         state['release'].set()
         await asyncio.wait_for(pending, timeout=1)
-        assert first.fetch_calls == 1
-        assert first.fulfilled_response is response
+        assert first.fulfill_kwargs == {'status': 200, 'json': snapshot}
+        assert 'headers' not in first.fulfill_kwargs
+
+    asyncio.run(exercise())
+
+
+def test_auth_me_holder_aborts_if_saved_snapshot_is_invalid():
+    class FakeRoute:
+        request = SimpleNamespace(
+            method='GET', url=f'https://{acceptance.HOST}/api/auth/me/',
+        )
+
+        def __init__(self):
+            self.abort_calls = 0
+            self.fallback_calls = 0
+            self.fulfill_calls = 0
+
+        async def abort(self):
+            self.abort_calls += 1
+
+        async def fallback(self):
+            self.fallback_calls += 1
+
+        async def fulfill(self, **_kwargs):
+            self.fulfill_calls += 1
+
+    async def exercise():
+        state = {
+            'armed': True, 'snapshot': {'username': 'B'}, 'expected_username': 'A',
+            'fetched': asyncio.Event(), 'release': asyncio.Event(),
+        }
+        route = FakeRoute()
+        await acceptance._hold_first_armed_auth_me_request(route, state)
+        assert state['armed'] is False
+        assert route.abort_calls == 1
+        assert route.fallback_calls == 0
+        assert route.fulfill_calls == 0
+        assert not state['fetched'].is_set()
 
     asyncio.run(exercise())
 
@@ -669,14 +853,18 @@ def test_g2_browser_subchecks_are_fixed_and_cover_the_account_flow():
         'g2.account_initial', 'g2.register_a', 'g2.logout_a', 'g2.register_b',
         'g2.attach_owner', 'g2.owner_b', 'g2.admin_gate', 'g2.logout_b',
         'g2.owner_a', 'g2.auth_races',
-        'g2.auth_race_capture', 'g2.auth_race_login_b', 'g2.auth_race_release',
+        'g2.auth_race_snapshot_a', 'g2.auth_race_route_install',
+        'g2.auth_race_reload', 'g2.auth_race_wait_capture',
+        'g2.auth_race_login_b', 'g2.auth_race_release',
         'g2.auth_race_identity_b', 'g2.auth_race_favorites_b',
         'g2.owner_csrf', 'g2.admin',
         'g2.final_audit', 'g2.anon_after_logout', 'g2.cookie_attributes',
     }
     assert required <= acceptance.G2_BROWSER_SUBCHECKS
     for subcheck in (
-        'g2.auth_race_capture', 'g2.auth_race_login_b', 'g2.auth_race_release',
+        'g2.auth_race_snapshot_a', 'g2.auth_race_route_install',
+        'g2.auth_race_reload', 'g2.auth_race_wait_capture',
+        'g2.auth_race_login_b', 'g2.auth_race_release',
         'g2.auth_race_identity_b', 'g2.auth_race_favorites_b',
     ):
         checks = {}

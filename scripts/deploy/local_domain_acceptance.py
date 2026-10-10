@@ -70,7 +70,9 @@ G2_BROWSER_SUBCHECKS = frozenset({
     'g2.account_initial', 'g2.register_a', 'g2.logout_a', 'g2.register_b',
     'g2.attach_owner', 'g2.owner_b', 'g2.admin_gate', 'g2.logout_b',
     'g2.owner_a', 'g2.auth_races',
-    'g2.auth_race_capture', 'g2.auth_race_login_b', 'g2.auth_race_release',
+    'g2.auth_race_snapshot_a', 'g2.auth_race_route_install',
+    'g2.auth_race_reload', 'g2.auth_race_wait_capture',
+    'g2.auth_race_login_b', 'g2.auth_race_release',
     'g2.auth_race_identity_b', 'g2.auth_race_favorites_b',
     'g2.owner_csrf',
     'g2.logout_a_after_owner_writes',
@@ -1595,6 +1597,27 @@ def _is_auth_me_request_url(url: str) -> bool:
     )
 
 
+def _is_auth_me_get_response(response) -> bool:
+    request_method = getattr(getattr(response, 'request', None), 'method', None)
+    return (
+        _is_auth_me_request_url(getattr(response, 'url', None))
+        and isinstance(request_method, str)
+        and request_method.upper() == 'GET'
+    )
+
+
+def _validated_auth_me_snapshot(response: dict, expected_username: str) -> dict:
+    body = response.get('body') if isinstance(response, dict) else None
+    _require(
+        isinstance(response, dict)
+        and response.get('status') == 200
+        and isinstance(body, dict)
+        and body.get('username') == expected_username,
+        'could not capture the authenticated A browser response',
+    )
+    return body
+
+
 async def _hold_first_armed_auth_me_request(route, delayed_me: dict) -> None:
     request_method = getattr(getattr(route, 'request', None), 'method', None)
     if (
@@ -1605,23 +1628,52 @@ async def _hold_first_armed_auth_me_request(route, delayed_me: dict) -> None:
         await route.fallback()
         return
 
+    snapshot = delayed_me.get('snapshot')
+    expected_username = delayed_me.get('expected_username')
+    if not isinstance(snapshot, dict) or snapshot.get('username') != expected_username:
+        delayed_me['armed'] = False
+        await route.abort()
+        return
+
     # Claim the one-shot fence before the first await so another matching
     # request cannot replace the authenticated response being held.
     delayed_me['armed'] = False
-    response = await route.fetch()
-    delayed_me['response'] = response
-    try:
-        delayed_me['actual_user'] = await response.json()
-    except Exception:
-        delayed_me['actual_user'] = None
     delayed_me['fetched'].set()
     await delayed_me['release'].wait()
-    await route.fulfill(response=response)
+    await route.fulfill(status=200, json=snapshot)
 
 
 def _safe_http_status(response) -> int:
     status = response.get('status') if isinstance(response, dict) else getattr(response, 'status', None)
     return status if type(status) is int and 0 <= status <= 599 else 0
+
+
+async def _release_auth_race_response(page, delayed_me: dict, expected_snapshot: dict) -> None:
+    async with page.expect_response(_is_auth_me_get_response, timeout=10000) as response_info:
+        delayed_me['release'].set()
+    response = await response_info.value
+    try:
+        completion_error = await response.finished()
+    except Exception:
+        raise AcceptanceError('delayed auth response did not finish cleanly') from None
+    _require(completion_error is None, 'delayed auth response did not finish cleanly')
+    _require(_safe_http_status(response) == 200, 'delayed auth response did not return HTTP 200')
+    try:
+        response_json = await response.json()
+    except Exception:
+        response_json = None
+    _require(response_json == expected_snapshot, 'delayed auth response did not match the captured A identity')
+
+
+async def _verify_b_favorites_after_auth_race(page, article_title: str) -> dict:
+    await page.get_by_text('还没有收藏内容', exact=True).wait_for(state='visible', timeout=15000)
+    await page.get_by_text(article_title, exact=False).wait_for(state='hidden', timeout=15000)
+    response = await _browser_api(page, 'GET', '/api/favorites/?type=bookmark')
+    _require(
+        response['status'] == 200 and response['body'].get('results') == [],
+        'A private favorite cache leaked into B after a delayed fetchMe response',
+    )
+    return response
 
 
 def _logout_failure(
@@ -1782,7 +1834,10 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
         observed_cookie_headers: list[dict] = []
         response_tasks: list[asyncio.Task] = []
         requests: list[str] = []
-        delayed_me = {'armed': False, 'response': None, 'fetched': None, 'release': None}
+        delayed_me = {
+            'armed': False, 'snapshot': None, 'expected_username': None,
+            'fetched': None, 'release': None,
+        }
         page = None
 
         async with async_playwright() as playwright:
@@ -1939,35 +1994,33 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
                 checks['g2_a_owner_data'] = 'A sees its favorite through the page/API and its Chat/Research history through the API'
 
                 mark('g2.auth_races')
+                mark('g2.auth_race_snapshot_a')
+                a_me_snapshot = _validated_auth_me_snapshot(
+                    await _browser_api(page, 'GET', '/api/auth/me/'),
+                    bundle['users']['a']['username'],
+                )
+                delayed_me['snapshot'] = a_me_snapshot
+                delayed_me['expected_username'] = bundle['users']['a']['username']
                 delayed_me['armed'] = True
                 delayed_me['fetched'] = asyncio.Event()
                 delayed_me['release'] = asyncio.Event()
-                mark('g2.auth_race_capture')
+                mark('g2.auth_race_route_install')
                 await context.route(_is_auth_me_request_url, hold_auth_me)
-                mark('g2.auth_race_capture')
+                mark('g2.auth_race_reload')
                 await page.reload(wait_until='domcontentloaded', timeout=20000)
-                mark('g2.auth_race_capture')
+                mark('g2.auth_race_wait_capture')
                 await asyncio.wait_for(delayed_me['fetched'].wait(), timeout=10)
-                _require(isinstance(delayed_me.get('actual_user'), dict) and delayed_me['actual_user'].get('username') == bundle['users']['a']['username'], 'held fetchMe response was not the real authenticated A response')
                 mark('g2.auth_race_login_b')
                 await _login_ui(page, bundle['users']['b'])
                 mark('g2.auth_race_release')
-                delayed_me['release'].set()
-                mark('g2.auth_race_release')
+                await _release_auth_race_response(page, delayed_me, a_me_snapshot)
                 await page.wait_for_timeout(250)
                 mark('g2.auth_race_identity_b')
                 await _wait_user(page, bundle['users']['b']['username'])
-                _require(delayed_me['actual_user'].get('username') == bundle['users']['a']['username'], 'late fetchMe fixture did not capture A')
                 mark('g2.auth_race_favorites_b')
-                await page.goto(f'https://{HOST}/favorites', wait_until='domcontentloaded', timeout=20000)
-                mark('g2.auth_race_favorites_b')
-                await page.get_by_text('还没有收藏内容', exact=True).wait_for(state='visible', timeout=15000)
-                mark('g2.auth_race_favorites_b')
-                b_after_switch = await _browser_api(page, 'GET', '/api/favorites/?type=bookmark')
-                _require(b_after_switch['status'] == 200 and b_after_switch['body'].get('results') == [], 'A private favorite cache leaked into B after a delayed fetchMe response')
-                checks['g2_delayed_fetch_me'] = 'real delayed A fetchMe released after B login; B identity and private cache remained isolated'
-                checks['g2_account_switch_cache'] = 'A private favorites were visible to A and absent after switching to B'
-                mark('g2.auth_race_capture')
+                await _verify_b_favorites_after_auth_race(page, bundle['news']['title'])
+                checks['g2_delayed_fetch_me'] = 'real A identity JSON read earlier through Chromium; reload fetchMe response completed after B login and matched the prior A snapshot'
+                checks['g2_account_switch_cache'] = 'A private favorite was visible to A and absent on the same favorites page after switching to B'
                 await context.unroute(_is_auth_me_request_url, hold_auth_me)
 
                 await _logout_ui(
