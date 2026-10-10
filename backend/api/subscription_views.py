@@ -51,6 +51,10 @@ class ChatGPTSubscriptionStatusView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        try:
+            subscription._require_network_mode()
+        except subscription.SubscriptionError as exc:
+            return _subscription_error_response(exc)
         connections = ChatGPTSubscriptionConnection.objects.filter(user=request.user)
         active = connections.filter(is_active=True).first()
         return Response({
@@ -63,8 +67,9 @@ class ChatGPTSubscriptionConnectView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        connection_id = request.data.get('connection_id')
         try:
+            subscription._require_network_mode()
+            connection_id = request.data.get('connection_id')
             target = subscription.get_user_connection(request.user, connection_id) if connection_id else None
             if not request.session.session_key:
                 request.session.create()

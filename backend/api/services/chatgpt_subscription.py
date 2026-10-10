@@ -913,6 +913,7 @@ def active_connection_for_user(user):
 
 
 def get_user_connection(user, connection_id) -> ChatGPTSubscriptionConnection:
+    _require_network_mode()
     try:
         return ChatGPTSubscriptionConnection.objects.get(user=user, pk=connection_id)
     except (ChatGPTSubscriptionConnection.DoesNotExist, ValueError, TypeError, ValidationError) as exc:
@@ -920,6 +921,7 @@ def get_user_connection(user, connection_id) -> ChatGPTSubscriptionConnection:
 
 
 def activate_connection(user, connection_id) -> ChatGPTSubscriptionConnection:
+    _require_network_mode()
     with _user_lock(user.pk):
         with transaction.atomic():
             get_user_model().objects.select_for_update().get(pk=user.pk)
@@ -1190,20 +1192,28 @@ def disconnect_connection(user, connection_id) -> bool:
         with transaction.atomic():
             get_user_model().objects.select_for_update().get(pk=user.pk)
             selection = _lock_selection(user.pk)
-            connection = ChatGPTSubscriptionConnection.objects.select_for_update().filter(
+            connection_queryset = ChatGPTSubscriptionConnection.objects.filter(
                 user=user, pk=connection_id,
-            ).first()
+            )
+            if network_allowed:
+                connection = connection_queryset.select_for_update().first()
+            else:
+                connection = connection_queryset.only(
+                    'id', 'user_id', 'generation', 'credential_generation', 'auth_attempt_generation',
+                ).select_for_update().first()
             if connection is None:
                 raise SubscriptionError('订阅连接不存在。')
             refresh_token = ''
-            if network_allowed and connection.encrypted_refresh_token:
-                try:
-                    refresh_token = decrypt_secret(
-                        connection.encrypted_refresh_token, 'subscription-refresh-token',
-                    )
-                except SubscriptionError:
-                    refresh_token = ''
-            client_id = connection.issued_client_id
+            client_id = ''
+            if network_allowed:
+                if connection.encrypted_refresh_token:
+                    try:
+                        refresh_token = decrypt_secret(
+                            connection.encrypted_refresh_token, 'subscription-refresh-token',
+                        )
+                    except SubscriptionError:
+                        refresh_token = ''
+                client_id = connection.issued_client_id
             connection.is_active = False
             connection.needs_reauth = True
             connection.generation += 1

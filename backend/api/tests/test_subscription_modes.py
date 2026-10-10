@@ -12,13 +12,15 @@ from unittest.mock import Mock, patch
 import pytest
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db import OperationalError
+from django.db import OperationalError, connection as db_connection
 from django.test import override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
-from rest_framework.test import APIClient
+from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from api.models import ChatGPTAuthAttempt, ChatGPTSubscriptionConnection
 from api.services import chatgpt_subscription as subscription
+from api.subscription_views import ChatGPTSubscriptionConnectView, ChatGPTSubscriptionStatusView
 
 User = get_user_model()
 HANDOFF_ORIGIN = 'http://127.0.0.1:5173'
@@ -78,6 +80,15 @@ def _handoff(start, session_key='mode-session'):
         start['attempt_id'], start['handoff_token'],
         session_key=session_key, origin=HANDOFF_ORIGIN,
     )
+
+
+def _connection_select_sqls(queries):
+    return [
+        query['sql'].casefold().replace('"', '')
+        for query in queries
+        if query['sql'].lstrip().casefold().startswith('select') and
+        'from api_chatgptsubscriptionconnection' in query['sql'].casefold().replace('"', '')
+    ]
 
 
 @pytest.mark.parametrize(
@@ -776,4 +787,137 @@ for state in ('completed', 'failed', 'cancelled'):
         timeout=120,
     )
     assert result.returncode == 0, f'{result.stdout}\n{result.stderr}'
+
+
+@pytest.mark.parametrize(
+    ('mode', 'environment', 'expected_error', 'expected_status'),
+    [
+        ('disabled', 'development', 'subscription_disabled', 403),
+        ('website', 'development', 'hosted_integration_unapproved', 503),
+        ('local_oss', 'production', 'local_oss_production_forbidden', 403),
+    ],
+)
+def test_closed_modes_guard_connection_reads_before_select_or_session(
+    user, crypto, mode, environment, expected_error, expected_status,
+):
+    target = _connection(user)
+    factory = APIRequestFactory()
+
+    status_request = factory.get('/api/chatgpt-subscription/')
+    force_authenticate(status_request, user=user)
+
+    class Session(dict):
+        session_key = ''
+
+        def __init__(self):
+            super().__init__()
+            self.create_calls = 0
+
+        def create(self):
+            self.create_calls += 1
+            self.session_key = 'must-not-be-created'
+
+    session = Session()
+    connect_request = factory.post(
+        '/api/chatgpt-subscription/connect/', {'connection_id': str(target.pk)}, format='json',
+    )
+    force_authenticate(connect_request, user=user)
+    connect_request.session = session
+
+    with (
+        override_settings(CHATGPT_AUTH_MODE=mode, DJANGO_ENV=environment),
+        patch.object(subscription, 'decrypt_secret') as decrypt,
+        patch.object(subscription, '_discovery') as discovery,
+        patch.object(subscription.requests, 'get') as get,
+        patch.object(subscription.requests, 'post') as post,
+        CaptureQueriesContext(db_connection) as captured,
+    ):
+        direct_errors = []
+        for operation in (
+            lambda: subscription.get_user_connection(user, target.pk),
+            lambda: subscription.activate_connection(user, target.pk),
+        ):
+            try:
+                operation()
+            except subscription.SubscriptionError as exc:
+                direct_errors.append((exc.error_code, exc.status_code))
+            else:
+                direct_errors.append(None)
+        status_response = ChatGPTSubscriptionStatusView.as_view()(status_request)
+        connect_response = ChatGPTSubscriptionConnectView.as_view()(connect_request)
+
+    expected = (expected_error, expected_status)
+    assert direct_errors == [expected, expected]
+    assert (status_response.data['error_code'], status_response.status_code) == expected
+    assert (connect_response.data['error_code'], connect_response.status_code) == expected
+    assert session.create_calls == 0
+    assert _connection_select_sqls(captured.captured_queries) == []
+    decrypt.assert_not_called()
+    discovery.assert_not_called()
+    get.assert_not_called()
+    post.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ('mode', 'environment'),
+    [
+        ('disabled', 'development'),
+        ('website', 'development'),
+        ('local_oss', 'production'),
+    ],
+)
+def test_closed_mode_disconnect_clears_tokens_without_selecting_credentials(
+    user, crypto, mode, environment,
+):
+    target = _connection(user)
+    start = _start(user, session_key=f'disconnect-{mode}-{environment}', target=target)
+    attempt = ChatGPTAuthAttempt.objects.get(pk=start['attempt_id'])
+    target.refresh_from_db()
+    original_generation = target.generation
+    original_credential_generation = target.credential_generation
+    original_attempt_generation = target.auth_attempt_generation
+
+    with (
+        override_settings(CHATGPT_AUTH_MODE=mode, DJANGO_ENV=environment),
+        patch.object(subscription, 'decrypt_secret') as decrypt,
+        patch.object(subscription, '_revoke_refresh_token') as revoke,
+        patch.object(subscription.requests, 'get') as get,
+        patch.object(subscription.requests, 'post') as post,
+        CaptureQueriesContext(db_connection) as captured,
+    ):
+        revoked = subscription.disconnect_connection(user, target.pk)
+
+    selects = _connection_select_sqls(captured.captured_queries)
+    allowed_columns = {'id', 'user_id', 'generation', 'credential_generation', 'auth_attempt_generation'}
+    assert len(selects) == 1
+    selected_columns = {
+        item.rsplit('.', 1)[-1].strip()
+        for item in selects[0].split(' from api_chatgptsubscriptionconnection', 1)[0]
+        .removeprefix('select ').split(',')
+    }
+    assert selected_columns <= allowed_columns, selected_columns
+    for forbidden in (
+        'encrypted_access_token', 'encrypted_refresh_token', 'encrypted_id_token',
+        'encrypted_subject', 'account_email', 'account_name', 'issued_client_id',
+    ):
+        assert forbidden not in selects[0]
+
+    assert revoked is False
+    decrypt.assert_not_called()
+    revoke.assert_not_called()
+    get.assert_not_called()
+    post.assert_not_called()
+
+    # Verify the cleanup after leaving SQL capture; these reads are test assertions only.
+    target.refresh_from_db()
+    attempt.refresh_from_db()
+    assert target.encrypted_access_token == ''
+    assert target.encrypted_refresh_token == ''
+    assert target.encrypted_id_token == ''
+    assert target.generation == original_generation + 1
+    assert target.credential_generation == original_credential_generation + 1
+    assert target.auth_attempt_generation == original_attempt_generation + 1
+    assert target.is_active is False and target.needs_reauth is True
+    assert target.refresh_lease_id == '' and target.refresh_lease_expires_at is None
+    assert attempt.status == 'cancelled'
 
