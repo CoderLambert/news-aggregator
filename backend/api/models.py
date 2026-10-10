@@ -329,6 +329,8 @@ class ChatGPTSubscriptionConnection(models.Model):
     subject_hash = models.CharField(max_length=64)
     issuer = models.CharField(max_length=255)
     issued_client_id = models.CharField(max_length=255)
+    # Existing registrations remain local; never silently relabel them as hosted.
+    oauth_mode = models.CharField(max_length=16, default='local', db_index=True)
     registration_key_hash = models.CharField(max_length=64)
     encrypted_subject = models.TextField(blank=True, default='')
     granted_scopes = models.JSONField(default=list)
@@ -387,6 +389,11 @@ class ChatGPTAuthAttempt(models.Model):
     session_binding_hash = models.CharField(max_length=64, blank=True, default='', db_index=True)
     handoff_origin = models.CharField(max_length=255, blank=True, default='')
     requested_client_id = models.CharField(max_length=255)
+    # Freeze authorization settings so a deployment switch cannot redeem a
+    # callback under a different client/redirect/token-auth contract.
+    oauth_mode = models.CharField(max_length=16, default='local')
+    redirect_uri = models.CharField(max_length=512, blank=True, default='')
+    token_auth_method = models.CharField(max_length=32, default='none')
     target_attempt_generation = models.PositiveIntegerField(default=0)
     selection_connection_id_at_start = models.UUIDField(null=True, blank=True)
     selection_generation_at_start = models.PositiveBigIntegerField(default=0)
