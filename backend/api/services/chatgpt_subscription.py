@@ -20,7 +20,7 @@ import time
 import uuid
 from datetime import timedelta
 from pathlib import Path
-from urllib.parse import urlencode, urlparse
+from urllib.parse import quote_plus, urlencode, urlparse
 
 import requests
 from cryptography.hazmat.primitives import hashes, serialization
@@ -41,6 +41,7 @@ from api.models import (
     ChatGPTSubscriptionConnection,
     ChatGPTSubscriptionSelection,
 )
+from api.services.siwc_modes import SiwcConfigError, load_siwc_config
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,51 @@ class SubscriptionError(Exception):
 
 class ConnectionChangedError(SubscriptionError):
     pass
+
+
+def _runtime_config():
+    try:
+        return load_siwc_config()
+    except SiwcConfigError as exc:
+        raise SubscriptionError(str(exc)) from exc
+
+
+def _assert_connection_mode(connection):
+    config = _runtime_config()
+    if connection.oauth_mode != config.mode:
+        raise SubscriptionError('此连接属于另一个 SIWC 部署模式，请在当前模式下重新授权。')
+    if config.website and connection.issued_client_id != config.client_id:
+        raise SubscriptionError('网站 OAuth Client ID 已变更，请重新取得该网站客户端的授权。')
+    return config
+
+
+def _oauth_auth_headers(client_id: str, method: str, secret: str) -> dict:
+    if method == 'none':
+        return {}
+    if method != 'client_secret_basic' or not secret:
+        raise SubscriptionError('OAuth 客户端认证配置无效。')
+    # OAuth 2.0 client_secret_basic encodes both credentials as form components.
+    encoded = base64.b64encode(
+        f'{quote_plus(client_id)}:{quote_plus(secret)}'.encode('utf-8')
+    ).decode('ascii')
+    return {'Authorization': f'Basic {encoded}'}
+
+
+def _post_oauth_form(endpoint: str, form: dict, *, client_id: str,
+                     method: str = 'none', secret: str = '', timeout: int = 20):
+    # Especially important for confidential clients: never forward client
+    # secrets or authorization codes to a discovery-supplied foreign host.
+    if _runtime_config().website:
+        parsed = urlparse(endpoint)
+        if (parsed.scheme != 'https' or parsed.hostname != 'auth.openai.com'
+                or parsed.port not in (None, 443)
+                or parsed.username or parsed.password or parsed.fragment):
+            raise SubscriptionError('OpenAI OAuth 端点不可信，已阻止凭据发送。')
+    return requests.post(
+        endpoint, data=form,
+        headers=_oauth_auth_headers(client_id, method, secret),
+        timeout=timeout,
+    )
 
 
 _USER_LOCKS: dict[int, threading.RLock] = {}
@@ -142,7 +188,7 @@ def _session_binding_hash(session_key: str) -> str:
 def _validate_handoff_origin(origin: str) -> str:
     allowed_origins = getattr(settings, 'CHATGPT_HANDOFF_ALLOWED_ORIGINS', ())
     if not isinstance(origin, str) or not origin or origin not in allowed_origins:
-        raise SubscriptionError('请从 http://127.0.0.1:5173 打开本地应用，再开始订阅连接。')
+        raise SubscriptionError('请从当前配置允许的网站页面发起 ChatGPT 订阅连接。')
     return origin
 
 
@@ -225,10 +271,21 @@ def _discovery() -> dict:
         raise SubscriptionError('暂时无法连接 OpenAI 登录服务。') from exc
     if not isinstance(data, dict):
         raise SubscriptionError('OpenAI 登录服务返回了无效配置。')
+    if data.get('issuer') != 'https://auth.openai.com':
+        raise SubscriptionError('OpenAI 登录服务签发方不匹配。')
     for key in ('authorization_endpoint', 'token_endpoint', 'jwks_uri'):
         parsed = urlparse(str(data.get(key, '')))
-        if parsed.scheme != 'https' or not parsed.netloc:
-            raise SubscriptionError('OpenAI 登录服务配置缺少有效 HTTPS 端点。')
+        if (parsed.scheme != 'https' or parsed.hostname != 'auth.openai.com'
+                or parsed.port not in (None, 443) or parsed.username
+                or parsed.password or parsed.fragment):
+            raise SubscriptionError('OpenAI 登录服务配置包含不可信端点。')
+    revocation_endpoint = data.get('revocation_endpoint')
+    if revocation_endpoint:
+        parsed = urlparse(str(revocation_endpoint))
+        if (parsed.scheme != 'https' or parsed.hostname != 'auth.openai.com'
+                or parsed.port not in (None, 443) or parsed.username
+                or parsed.password or parsed.fragment):
+            raise SubscriptionError('OpenAI 撤销端点不可信。')
     return data
 
 
@@ -238,8 +295,9 @@ def create_authorization_attempt(user, target_connection=None, session_key='', o
     if not session_key:
         raise SubscriptionError('请先登录本地账号后再连接 ChatGPT 订阅。')
     handoff_origin = _validate_handoff_origin(origin)
+    config = _runtime_config()
     discovery = _discovery()
-    oauth_host = get_oauth_host()
+    oauth_host = get_oauth_host() if not config.website else None
     handoff_token = secrets.token_urlsafe(32)
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
@@ -261,15 +319,18 @@ def create_authorization_attempt(user, target_connection=None, session_key='', o
             ).first()
             if current_target is None:
                 raise SubscriptionError('待重新连接的账号已不存在。')
+            _assert_connection_mode(current_target)
             current_target.auth_attempt_generation += 1
             current_target.save(update_fields=['auth_attempt_generation', 'updated_at'])
             target_attempt_generation = current_target.auth_attempt_generation
             ChatGPTAuthAttempt.objects.filter(
                 target_connection=current_target, status__in=['pending', 'authorizing', 'processing'],
             ).update(status='cancelled', status_message='此连接已开始新的授权请求。')
-            requested_client_id = current_target.issued_client_id or DYNAMIC_CLIENT_ID
+            requested_client_id = config.client_id if config.website else (
+                current_target.issued_client_id or DYNAMIC_CLIENT_ID
+            )
         else:
-            requested_client_id = DYNAMIC_CLIENT_ID
+            requested_client_id = config.client_id
 
         active_selection = ChatGPTSubscriptionConnection.objects.select_for_update().filter(
             user=user, is_active=True,
@@ -278,17 +339,19 @@ def create_authorization_attempt(user, target_connection=None, session_key='', o
         selection_generation = selection.generation
 
         params = {
-            'response_type': 'code', 'client_id': requested_client_id, 'redirect_uri': REDIRECT_URI,
-            'scope': REQUESTED_SCOPES, 'resource': API_RESOURCE, 'state': state, 'nonce': nonce,
+            'response_type': 'code', 'client_id': requested_client_id,
+            'redirect_uri': config.redirect_uri, 'scope': config.scopes,
+            'resource': config.resource, 'state': state, 'nonce': nonce,
             'code_challenge': challenge, 'code_challenge_method': 'S256',
-            'ext_agent_host_id': oauth_host.host_id,
         }
-        if requested_client_id == DYNAMIC_CLIENT_ID:
+        if oauth_host is not None:
+            params['ext_agent_host_id'] = oauth_host.host_id
+        if not config.website and requested_client_id == DYNAMIC_CLIENT_ID:
             params['agent_name_hint'] = getattr(settings, 'CHATGPT_AGENT_NAME_HINT', 'News Aggregator')
         elif current_target is not None:
             if current_target.account_email:
                 params['login_hint'] = current_target.account_email
-            if current_target.encrypted_id_token:
+            if not config.website and current_target.encrypted_id_token:
                 try:
                     params['id_token_hint'] = decrypt_secret(
                         current_target.encrypted_id_token, 'subscription-id-token',
@@ -304,12 +367,19 @@ def create_authorization_attempt(user, target_connection=None, session_key='', o
             encrypted_authorization_url=encrypt_secret(authorization_url, 'oauth-authorization-url'),
             handoff_token_hash=_digest(handoff_token), session_binding_hash=session_hash,
             handoff_origin=handoff_origin,
-            requested_client_id=requested_client_id, target_attempt_generation=target_attempt_generation,
+            requested_client_id=requested_client_id,
+            oauth_mode=config.mode, redirect_uri=config.redirect_uri,
+            token_auth_method=config.token_auth_method,
+            requested_scopes=config.scopes, oauth_resource=config.resource,
+            target_attempt_generation=target_attempt_generation,
             selection_connection_id_at_start=selection_connection_id,
             selection_generation_at_start=selection_generation,
             expires_at=timezone.now() + AUTH_ATTEMPT_TTL,
         )
-    return {'attempt_id': str(attempt.pk), 'handoff_token': handoff_token, 'handoff_url': HANDOFF_URI}
+    return {
+        'attempt_id': str(attempt.pk), 'handoff_token': handoff_token,
+        'handoff_url': config.handoff_uri,
+    }
 
 
 def handoff_authorization(
@@ -335,6 +405,13 @@ def handoff_authorization(
                 pk=attempt.pk, status='pending', expires_at__lte=now,
             ).update(status='failed', status_message='登录请求已过期，请重新连接。')
             raise SubscriptionError('登录请求已过期，请重新连接。')
+        config = _runtime_config()
+        if (attempt.oauth_mode != config.mode
+                or (attempt.redirect_uri and attempt.redirect_uri != config.redirect_uri)
+                or attempt.token_auth_method != config.token_auth_method
+                or (attempt.requested_scopes and attempt.requested_scopes != config.scopes)
+                or (attempt.oauth_resource and attempt.oauth_resource != config.resource)):
+            raise SubscriptionError('网站授权配置已变化，请重新发起连接。')
         with transaction.atomic():
             updated = ChatGPTAuthAttempt.objects.filter(
                 pk=attempt.pk, handoff_token_hash=_digest(handoff_token),
@@ -501,12 +578,16 @@ def _consume_attempt(state: str, browser_binding_token: str) -> ChatGPTAuthAttem
         return attempt
 
 
-def _exchange_code(code: str, client_id: str, verifier: str, token_endpoint: str) -> dict:
+def _exchange_code(code: str, client_id: str, verifier: str, token_endpoint: str,
+                   *, redirect_uri=REDIRECT_URI, token_auth_method='none',
+                   client_secret='', resource=API_RESOURCE) -> dict:
     try:
-        response = requests.post(token_endpoint, data={
-            'grant_type': 'authorization_code', 'code': code, 'redirect_uri': REDIRECT_URI,
-            'client_id': client_id, 'code_verifier': verifier, 'resource': API_RESOURCE,
-        }, timeout=20)
+        response = _post_oauth_form(
+            token_endpoint, {
+                'grant_type': 'authorization_code', 'code': code, 'redirect_uri': redirect_uri,
+                'client_id': client_id, 'code_verifier': verifier, 'resource': resource,
+            }, client_id=client_id, method=token_auth_method, secret=client_secret,
+        )
     except Exception as exc:
         raise SubscriptionError('连接 OpenAI 登录服务失败，请稍后重试。') from exc
     if response.status_code < 200 or response.status_code >= 300:
@@ -526,15 +607,24 @@ def complete_authorization(query, browser_binding_token: str) -> ChatGPTSubscrip
         raise SubscriptionError('登录状态缺失，请重新连接。')
     attempt = _consume_attempt(state, browser_binding_token)
     try:
+        config = _runtime_config()
+        if (attempt.oauth_mode != config.mode
+                or (attempt.redirect_uri and attempt.redirect_uri != config.redirect_uri)
+                or attempt.token_auth_method != config.token_auth_method
+                or (attempt.requested_scopes and attempt.requested_scopes != config.scopes)
+                or (attempt.oauth_resource and attempt.oauth_resource != config.resource)):
+            raise SubscriptionError('部署 OAuth 配置已变化，请重新发起授权。')
+        if config.website and attempt.requested_client_id != config.client_id:
+            raise SubscriptionError('网站 Client ID 已变化，请重新发起授权。')
         if query.get('error'):
             _finish_attempt(attempt.pk, 'cancelled', '你取消了 ChatGPT 订阅授权。')
             raise SubscriptionError('你取消了 ChatGPT 订阅授权。')
         code = query.get('code', '')
         if not code:
             raise SubscriptionError('OpenAI 登录回调缺少授权码。')
-        oauth_host = get_oauth_host()
+        oauth_host = get_oauth_host() if not config.website else None
         returned_client_id = query.get('client_id', '')
-        if attempt.requested_client_id == DYNAMIC_CLIENT_ID:
+        if not config.website and attempt.requested_client_id == DYNAMIC_CLIENT_ID:
             if not isinstance(returned_client_id, str) or not returned_client_id or returned_client_id == DYNAMIC_CLIENT_ID:
                 raise SubscriptionError('首次注册没有返回 OpenAI client_id。')
             client_id = returned_client_id
@@ -544,7 +634,13 @@ def complete_authorization(query, browser_binding_token: str) -> ChatGPTSubscrip
                 raise SubscriptionError('OpenAI 返回的 client_id 与此连接的注册不一致。')
         discovery = _discovery()
         verifier = decrypt_secret(attempt.encrypted_pkce_verifier, 'oauth-pkce-verifier')
-        token_payload = _exchange_code(code, client_id, verifier, discovery['token_endpoint'])
+        token_payload = _exchange_code(
+            code, client_id, verifier, discovery['token_endpoint'],
+            redirect_uri=attempt.redirect_uri or REDIRECT_URI,
+            token_auth_method=attempt.token_auth_method,
+            client_secret=config.client_secret,
+            resource=config.resource,
+        )
         access_token = token_payload.get('access_token')
         refresh_token = token_payload.get('refresh_token')
         id_token = token_payload.get('id_token')
@@ -561,7 +657,8 @@ def complete_authorization(query, browser_binding_token: str) -> ChatGPTSubscrip
         subject = claims['sub']
         issuer = claims['iss']
         subject_hash = _subject_hash(subject)
-        registration_key = _registration_key_hash(issuer, client_id, oauth_host.host_id, subject)
+        registration_host = oauth_host.host_id if oauth_host is not None else 'website'
+        registration_key = _registration_key_hash(issuer, client_id, registration_host, subject)
         now = timezone.now()
         with transaction.atomic():
             locked_attempt = ChatGPTAuthAttempt.objects.select_for_update().filter(
@@ -570,6 +667,11 @@ def complete_authorization(query, browser_binding_token: str) -> ChatGPTSubscrip
             if locked_attempt is None:
                 raise SubscriptionError('本地登录状态已切换或授权请求已取消。')
             get_user_model().objects.select_for_update().get(pk=locked_attempt.user_id)
+            if config.website and ChatGPTSubscriptionConnection.objects.filter(
+                oauth_mode='website', issuer=issuer, issued_client_id=client_id,
+                subject_hash=subject_hash,
+            ).exclude(user_id=locked_attempt.user_id).exists():
+                raise SubscriptionError('该 ChatGPT 账号已连接其他网站账号，不允许共享订阅凭据。')
             selection = _lock_selection(locked_attempt.user_id)
             target = None
             if locked_attempt.target_connection_id:
@@ -578,6 +680,8 @@ def complete_authorization(query, browser_binding_token: str) -> ChatGPTSubscrip
                 ).first()
                 if target is None:
                     raise SubscriptionError('待重新连接的账号已不存在。')
+                if target.oauth_mode != config.mode:
+                    raise SubscriptionError('不能把其他部署模式的旧连接转换为网站注册。')
                 if target.auth_attempt_generation != locked_attempt.target_attempt_generation:
                     raise SubscriptionError('此授权窗口已过期，请从当前连接重新开始。')
                 identity_changed = (
@@ -589,7 +693,8 @@ def complete_authorization(query, browser_binding_token: str) -> ChatGPTSubscrip
                     raise SubscriptionError('登录的 ChatGPT 账号与所选连接不一致；请新建连接。')
             else:
                 target = ChatGPTSubscriptionConnection.objects.select_for_update().filter(
-                    user=locked_attempt.user, registration_key_hash=registration_key,
+                    user=locked_attempt.user, oauth_mode=config.mode,
+                    registration_key_hash=registration_key,
                 ).first()
             if target is None:
                 target = ChatGPTSubscriptionConnection(user=locked_attempt.user)
@@ -611,6 +716,7 @@ def complete_authorization(query, browser_binding_token: str) -> ChatGPTSubscrip
             target.subject_hash = subject_hash
             target.issuer = issuer
             target.issued_client_id = client_id
+            target.oauth_mode = config.mode
             target.registration_key_hash = registration_key
             target.encrypted_subject = encrypt_secret(subject, 'verified-oauth-subject')
             target.granted_scopes = sorted(granted_scopes)
@@ -643,12 +749,24 @@ def complete_authorization(query, browser_binding_token: str) -> ChatGPTSubscrip
 def active_connection_for_user(user):
     if not getattr(user, 'is_authenticated', False):
         return None
-    return ChatGPTSubscriptionConnection.objects.filter(user=user, is_active=True).first()
+    try:
+        config = _runtime_config()
+    except SubscriptionError:
+        # Website plan usage stays disabled when partner approval is missing.
+        return None
+    return ChatGPTSubscriptionConnection.objects.filter(
+        user=user, is_active=True, oauth_mode=config.mode,
+    ).first()
 
 
 def get_user_connection(user, connection_id) -> ChatGPTSubscriptionConnection:
+    config = _runtime_config()
     try:
-        return ChatGPTSubscriptionConnection.objects.get(user=user, pk=connection_id)
+        connection = ChatGPTSubscriptionConnection.objects.get(
+            user=user, pk=connection_id, oauth_mode=config.mode,
+        )
+        _assert_connection_mode(connection)
+        return connection
     except (ChatGPTSubscriptionConnection.DoesNotExist, ValueError, TypeError, ValidationError) as exc:
         raise SubscriptionError('订阅连接不存在。') from exc
 
@@ -663,6 +781,7 @@ def activate_connection(user, connection_id) -> ChatGPTSubscriptionConnection:
             ).first()
             if target is None:
                 raise SubscriptionError('订阅连接不存在。')
+            _assert_connection_mode(target)
             if not target.connected:
                 raise SubscriptionError('该账号需要重新连接后才能启用。')
             for previous in ChatGPTSubscriptionConnection.objects.select_for_update().filter(
@@ -708,6 +827,7 @@ def _acquire_refresh_lease(connection_id, credential_generation, now, lease_id):
 
 
 def _refresh_access_token_with_lease(connection, expected_generation, lease_id) -> str:
+    config = _assert_connection_mode(connection)
     connection_id = connection.pk
     credential_generation = connection.credential_generation
     refresh_token = decrypt_secret(connection.encrypted_refresh_token, 'subscription-refresh-token')
@@ -715,10 +835,13 @@ def _refresh_access_token_with_lease(connection, expected_generation, lease_id) 
         raise SubscriptionError('此连接缺少注册 client_id，请重新连接。')
     try:
         discovery = _discovery()
-        response = requests.post(discovery['token_endpoint'], data={
-            'grant_type': 'refresh_token', 'refresh_token': refresh_token,
-            'client_id': connection.issued_client_id, 'resource': API_RESOURCE,
-        }, timeout=20)
+        response = _post_oauth_form(
+            discovery['token_endpoint'], {
+                'grant_type': 'refresh_token', 'refresh_token': refresh_token,
+                'client_id': connection.issued_client_id, 'resource': config.resource,
+            }, client_id=connection.issued_client_id,
+            method=config.token_auth_method, secret=config.client_secret,
+        )
     except Exception as exc:
         raise SubscriptionError('刷新 ChatGPT 订阅令牌失败，请稍后重试。') from exc
     if response.status_code in (400, 401) and 'invalid_grant' in response.text:
@@ -779,6 +902,7 @@ def _refresh_access_token(connection_id, expected_generation=None) -> str:
             connection = ChatGPTSubscriptionConnection.objects.get(pk=connection_id)
         except ChatGPTSubscriptionConnection.DoesNotExist as exc:
             raise ConnectionChangedError('订阅连接已断开。') from exc
+        _assert_connection_mode(connection)
         _assert_current_selection(connection, expected_generation)
         now = timezone.now()
         if connection.access_token_expires_at and connection.access_token_expires_at > now + timedelta(seconds=60):
@@ -874,11 +998,20 @@ def discover_models(connection: ChatGPTSubscriptionConnection) -> list[dict[str,
     return models
 
 
-def _revoke_refresh_token(refresh_token: str, client_id: str) -> bool:
+def _revoke_refresh_token(refresh_token: str, client_id: str,
+                          oauth_mode: str = 'local') -> bool:
     """Best-effort revocation with bounded retries for transport and 5xx failures."""
     if not refresh_token or not client_id:
         return False
     try:
+        if oauth_mode == 'website':
+            config = _runtime_config()
+            if not config.website or config.client_id != client_id:
+                return False
+        else:
+            # Preserve revocation of historical local credentials after a
+            # deployment mode switch: these use the no-secret OSS client.
+            config = None
         discovery = _discovery()
     except SubscriptionError:
         return False
@@ -892,9 +1025,15 @@ def _revoke_refresh_token(refresh_token: str, client_id: str) -> bool:
         if delay:
             time.sleep(delay)
         try:
-            response = requests.post(revocation_endpoint, data={
-                'token': refresh_token, 'token_type_hint': 'refresh_token', 'client_id': client_id,
-            }, timeout=15)
+            response = _post_oauth_form(
+                revocation_endpoint, {
+                    'token': refresh_token, 'token_type_hint': 'refresh_token',
+                    'client_id': client_id,
+                }, client_id=client_id,
+                method=config.token_auth_method if config is not None else 'none',
+                secret=config.client_secret if config is not None else '',
+                timeout=15,
+            )
         except Exception:
             response = None
         if response is not None and 200 <= response.status_code < 300:
@@ -926,6 +1065,7 @@ def disconnect_connection(user, connection_id) -> bool:
             except SubscriptionError:
                 refresh_token = ''
             client_id = connection.issued_client_id
+            oauth_mode = connection.oauth_mode
             connection.is_active = False
             connection.needs_reauth = True
             connection.generation += 1
@@ -946,7 +1086,9 @@ def disconnect_connection(user, connection_id) -> bool:
 
         revocation_confirmed = False
         try:
-            revocation_confirmed = _revoke_refresh_token(refresh_token, client_id)
+            revocation_confirmed = _revoke_refresh_token(
+                refresh_token, client_id, oauth_mode=oauth_mode,
+            )
         finally:
             # A callback or another credential update that wins after the
             # disconnect fence must not be erased by this cleanup.

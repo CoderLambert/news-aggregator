@@ -137,6 +137,27 @@ class ChatSession(models.Model):
         return f"Chat for {self.news.title[:20]}"
 
 
+class UserNewsChatSession(models.Model):
+    """Private article chat history for one signed-in website user."""
+
+    user = models.ForeignKey(
+        'auth.User', on_delete=models.CASCADE, related_name='private_news_chats',
+    )
+    news = models.ForeignKey(
+        News, on_delete=models.CASCADE, related_name='private_chat_sessions',
+    )
+    messages = models.JSONField('对话记录', default=list, blank=True)
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'news'], name='unique_user_news_chat'),
+        ]
+        verbose_name = '用户私有文章问答'
+        verbose_name_plural = '用户私有文章问答'
+
+
 class Favorite(models.Model):
     """User likes and bookmarks on news articles."""
     TYPE_CHOICES = [
@@ -329,6 +350,8 @@ class ChatGPTSubscriptionConnection(models.Model):
     subject_hash = models.CharField(max_length=64)
     issuer = models.CharField(max_length=255)
     issued_client_id = models.CharField(max_length=255)
+    # Existing registrations remain local; never silently relabel them as hosted.
+    oauth_mode = models.CharField(max_length=16, default='local', db_index=True)
     registration_key_hash = models.CharField(max_length=64)
     encrypted_subject = models.TextField(blank=True, default='')
     granted_scopes = models.JSONField(default=list)
@@ -354,6 +377,12 @@ class ChatGPTSubscriptionConnection(models.Model):
         verbose_name_plural = 'ChatGPT 订阅连接'
         constraints = [
             models.UniqueConstraint(fields=['user', 'registration_key_hash'], name='unique_chatgpt_user_registration'),
+            # A hosted ChatGPT identity cannot back multiple website accounts.
+            models.UniqueConstraint(
+                fields=['issuer', 'issued_client_id', 'subject_hash'],
+                condition=models.Q(oauth_mode='website'),
+                name='one_website_chatgpt_account_owner',
+            ),
             models.UniqueConstraint(
                 fields=['user'], condition=models.Q(is_active=True),
                 name='one_active_chatgpt_connection_per_user',
@@ -387,6 +416,13 @@ class ChatGPTAuthAttempt(models.Model):
     session_binding_hash = models.CharField(max_length=64, blank=True, default='', db_index=True)
     handoff_origin = models.CharField(max_length=255, blank=True, default='')
     requested_client_id = models.CharField(max_length=255)
+    # Freeze authorization settings so a deployment switch cannot redeem a
+    # callback under a different client/redirect/token-auth contract.
+    oauth_mode = models.CharField(max_length=16, default='local')
+    redirect_uri = models.CharField(max_length=512, blank=True, default='')
+    token_auth_method = models.CharField(max_length=32, default='none')
+    requested_scopes = models.TextField(blank=True, default='')
+    oauth_resource = models.CharField(max_length=255, blank=True, default='')
     target_attempt_generation = models.PositiveIntegerField(default=0)
     selection_connection_id_at_start = models.UUIDField(null=True, blank=True)
     selection_generation_at_start = models.PositiveBigIntegerField(default=0)
