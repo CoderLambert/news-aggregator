@@ -100,6 +100,7 @@ describe('F03 queued and pre-header recovery', () => {
     api.createResearchStream.mockImplementation((_query, { idempotencyKey }) => {
       seenKeys.push(idempotencyKey)
       return (async function* failedBeforeHeaders() {
+        yield* [] // Async iterable rejected before delivering any SSE event.
         throw new TypeError('simulated lost network response')
       })()
     })
