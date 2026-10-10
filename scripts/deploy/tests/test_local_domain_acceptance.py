@@ -558,6 +558,109 @@ def test_logout_response_matcher_requires_same_origin_exact_path_and_post():
         assert not acceptance._is_expected_logout_response(response)
 
 
+@pytest.mark.parametrize('url', [
+    f'https://{acceptance.HOST}/api/auth/me/',
+    f'https://{acceptance.HOST}/api/auth/me/?lang=zh',
+    f'https://{acceptance.HOST}/api/auth/me/?lang=en&source=header',
+    f'https://{acceptance.HOST}:443/api/auth/me/?lang=zh',
+])
+def test_auth_me_route_matcher_accepts_exact_https_origin_and_query(url):
+    assert acceptance._is_auth_me_request_url(url)
+
+
+@pytest.mark.parametrize('url', [
+    None,
+    '',
+    '/api/auth/me/',
+    'http://news.lambert.host/api/auth/me/',
+    'https://evil.invalid/api/auth/me/',
+    'https://news.lambert.host.evil.invalid/api/auth/me/',
+    'https://news.lambert.host:80/api/auth/me/',
+    'https://news.lambert.host:444/api/auth/me/',
+    'https://news.lambert.host:/api/auth/me/',
+    'https://user:pass@news.lambert.host/api/auth/me/',
+    'https://@news.lambert.host/api/auth/me/',
+    'https://news.lambert.host/api/auth/me',
+    'https://news.lambert.host/api/auth/me/extra',
+    'https://news.lambert.host/api/auth/me//',
+    'https://news.lambert.host:not-a-port/api/auth/me/',
+])
+def test_auth_me_route_matcher_rejects_wrong_or_malformed_urls(url):
+    assert not acceptance._is_auth_me_request_url(url)
+
+
+def test_auth_me_holder_captures_only_first_armed_get_and_falls_back_for_others():
+    class FakeResponse:
+        async def json(self):
+            return {'username': 'A'}
+
+    class FakeRoute:
+        def __init__(self, method, state, response):
+            self.request = SimpleNamespace(
+                method=method,
+                url=f'https://{acceptance.HOST}/api/auth/me/?lang=zh',
+            )
+            self.state = state
+            self.response = response
+            self.fetch_calls = 0
+            self.fallback_calls = 0
+            self.fulfilled_response = None
+
+        async def fetch(self):
+            assert self.state['armed'] is False
+            self.fetch_calls += 1
+            return self.response
+
+        async def fallback(self):
+            self.fallback_calls += 1
+
+        async def fulfill(self, *, response):
+            self.fulfilled_response = response
+
+    async def exercise():
+        response = FakeResponse()
+        state = {
+            'armed': True,
+            'response': None,
+            'actual_user': None,
+            'fetched': asyncio.Event(),
+            'release': asyncio.Event(),
+        }
+        first = FakeRoute('GET', state, response)
+        second = FakeRoute('GET', state, response)
+        pending = asyncio.create_task(
+            acceptance._hold_first_armed_auth_me_request(first, state)
+        )
+        await asyncio.wait_for(state['fetched'].wait(), timeout=1)
+        assert state['armed'] is False
+        assert state['response'] is response
+        assert state['actual_user'] == {'username': 'A'}
+
+        await acceptance._hold_first_armed_auth_me_request(second, state)
+        assert second.fallback_calls == 1
+        assert second.fetch_calls == 0
+
+        post_state = {
+            'armed': True,
+            'response': None,
+            'actual_user': None,
+            'fetched': asyncio.Event(),
+            'release': asyncio.Event(),
+        }
+        post = FakeRoute('POST', post_state, response)
+        await acceptance._hold_first_armed_auth_me_request(post, post_state)
+        assert post.fallback_calls == 1
+        assert post.fetch_calls == 0
+        assert post_state['armed'] is True
+
+        state['release'].set()
+        await asyncio.wait_for(pending, timeout=1)
+        assert first.fetch_calls == 1
+        assert first.fulfilled_response is response
+
+    asyncio.run(exercise())
+
+
 def test_g2_browser_subchecks_are_fixed_and_cover_the_account_flow():
     required = {
         'g2.shared_initial', 'g2.shared_untrusted_ca', 'g2.shared_trusted_context',
@@ -565,10 +668,26 @@ def test_g2_browser_subchecks_are_fixed_and_cover_the_account_flow():
         'g2.shared_csrf_cookie', 'g2.shared_wrong_san', 'g2.shared_egress',
         'g2.account_initial', 'g2.register_a', 'g2.logout_a', 'g2.register_b',
         'g2.attach_owner', 'g2.owner_b', 'g2.admin_gate', 'g2.logout_b',
-        'g2.owner_a', 'g2.auth_races', 'g2.owner_csrf', 'g2.admin',
+        'g2.owner_a', 'g2.auth_races',
+        'g2.auth_race_capture', 'g2.auth_race_login_b', 'g2.auth_race_release',
+        'g2.auth_race_identity_b', 'g2.auth_race_favorites_b',
+        'g2.owner_csrf', 'g2.admin',
         'g2.final_audit', 'g2.anon_after_logout', 'g2.cookie_attributes',
     }
     assert required <= acceptance.G2_BROWSER_SUBCHECKS
+    for subcheck in (
+        'g2.auth_race_capture', 'g2.auth_race_login_b', 'g2.auth_race_release',
+        'g2.auth_race_identity_b', 'g2.auth_race_favorites_b',
+    ):
+        checks = {}
+        acceptance._mark_g2_browser_subcheck(checks, subcheck)
+        assert checks == {'_g2_active_subcheck': subcheck}
+        failure = acceptance._g2_browser_failure(
+            TimeoutError('private query and synthetic cookie'), subcheck,
+        )
+        assert failure.active_subcheck == subcheck
+        assert failure.browser_exception_type == 'TimeoutError'
+        assert 'private query' not in str(failure)
     checks = {}
     acceptance._mark_g2_browser_subcheck(checks, 'g2.logout_a')
     assert checks == {'_g2_active_subcheck': 'g2.logout_a'}

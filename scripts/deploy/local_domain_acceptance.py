@@ -21,7 +21,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 
 HOST = 'news.lambert.host'
@@ -69,7 +69,10 @@ G2_BROWSER_SUBCHECKS = frozenset({
     'g2.shared_csrf_cookie', 'g2.shared_wrong_san', 'g2.shared_egress',
     'g2.account_initial', 'g2.register_a', 'g2.logout_a', 'g2.register_b',
     'g2.attach_owner', 'g2.owner_b', 'g2.admin_gate', 'g2.logout_b',
-    'g2.owner_a', 'g2.auth_races', 'g2.owner_csrf',
+    'g2.owner_a', 'g2.auth_races',
+    'g2.auth_race_capture', 'g2.auth_race_login_b', 'g2.auth_race_release',
+    'g2.auth_race_identity_b', 'g2.auth_race_favorites_b',
+    'g2.owner_csrf',
     'g2.logout_a_after_owner_writes',
     'g2.admin', 'g2.final_audit', 'g2.anon_after_logout',
     'g2.cookie_attributes',
@@ -1572,6 +1575,50 @@ def _is_expected_logout_response(response) -> bool:
     )
 
 
+def _is_auth_me_request_url(url: str) -> bool:
+    if not isinstance(url, str):
+        return False
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except (TypeError, ValueError):
+        return False
+    if parsed.netloc.endswith(':'):
+        return False
+    return (
+        parsed.scheme == 'https'
+        and parsed.hostname == HOST
+        and port in (None, 443)
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path == '/api/auth/me/'
+    )
+
+
+async def _hold_first_armed_auth_me_request(route, delayed_me: dict) -> None:
+    request_method = getattr(getattr(route, 'request', None), 'method', None)
+    if (
+        not isinstance(request_method, str)
+        or request_method.upper() != 'GET'
+        or delayed_me.get('armed') is not True
+    ):
+        await route.fallback()
+        return
+
+    # Claim the one-shot fence before the first await so another matching
+    # request cannot replace the authenticated response being held.
+    delayed_me['armed'] = False
+    response = await route.fetch()
+    delayed_me['response'] = response
+    try:
+        delayed_me['actual_user'] = await response.json()
+    except Exception:
+        delayed_me['actual_user'] = None
+    delayed_me['fetched'].set()
+    await delayed_me['release'].wait()
+    await route.fulfill(response=response)
+
+
 def _safe_http_status(response) -> int:
     status = response.get('status') if isinstance(response, dict) else getattr(response, 'status', None)
     return status if type(status) is int and 0 <= status <= 599 else 0
@@ -1757,15 +1804,7 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
             page = await context.new_page()
 
             async def hold_auth_me(route) -> None:
-                response = await route.fetch()
-                delayed_me['response'] = response
-                try:
-                    delayed_me['actual_user'] = await response.json()
-                except Exception:
-                    delayed_me['actual_user'] = None
-                delayed_me['fetched'].set()
-                await delayed_me['release'].wait()
-                await route.fulfill(response=response)
+                await _hold_first_armed_auth_me_request(route, delayed_me)
 
             async def on_response(response) -> None:
                 path = urlparse(response.url).path
@@ -1903,22 +1942,33 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
                 delayed_me['armed'] = True
                 delayed_me['fetched'] = asyncio.Event()
                 delayed_me['release'] = asyncio.Event()
-                await context.route('**/api/auth/me/', hold_auth_me)
+                mark('g2.auth_race_capture')
+                await context.route(_is_auth_me_request_url, hold_auth_me)
+                mark('g2.auth_race_capture')
                 await page.reload(wait_until='domcontentloaded', timeout=20000)
+                mark('g2.auth_race_capture')
                 await asyncio.wait_for(delayed_me['fetched'].wait(), timeout=10)
                 _require(isinstance(delayed_me.get('actual_user'), dict) and delayed_me['actual_user'].get('username') == bundle['users']['a']['username'], 'held fetchMe response was not the real authenticated A response')
+                mark('g2.auth_race_login_b')
                 await _login_ui(page, bundle['users']['b'])
+                mark('g2.auth_race_release')
                 delayed_me['release'].set()
+                mark('g2.auth_race_release')
                 await page.wait_for_timeout(250)
+                mark('g2.auth_race_identity_b')
                 await _wait_user(page, bundle['users']['b']['username'])
                 _require(delayed_me['actual_user'].get('username') == bundle['users']['a']['username'], 'late fetchMe fixture did not capture A')
+                mark('g2.auth_race_favorites_b')
                 await page.goto(f'https://{HOST}/favorites', wait_until='domcontentloaded', timeout=20000)
+                mark('g2.auth_race_favorites_b')
                 await page.get_by_text('还没有收藏内容', exact=True).wait_for(state='visible', timeout=15000)
+                mark('g2.auth_race_favorites_b')
                 b_after_switch = await _browser_api(page, 'GET', '/api/favorites/?type=bookmark')
                 _require(b_after_switch['status'] == 200 and b_after_switch['body'].get('results') == [], 'A private favorite cache leaked into B after a delayed fetchMe response')
                 checks['g2_delayed_fetch_me'] = 'real delayed A fetchMe released after B login; B identity and private cache remained isolated'
                 checks['g2_account_switch_cache'] = 'A private favorites were visible to A and absent after switching to B'
-                await context.unroute('**/api/auth/me/', hold_auth_me)
+                mark('g2.auth_race_capture')
+                await context.unroute(_is_auth_me_request_url, hold_auth_me)
 
                 await _logout_ui(
                     page, bundle['users']['b']['username'], context,
