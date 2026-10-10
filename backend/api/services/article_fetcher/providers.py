@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html as html_lib
+from contextvars import ContextVar
 import json
 import re
 import ssl
@@ -31,8 +32,14 @@ DEFAULT_HEADERS = {
 }
 
 
+_research_fetch_guard = ContextVar('research_article_fetch_guard', default=None)
+
+
 def _open_url(request, timeout, context=None):
     """Use the pinned public transport only in the production runtime."""
+    guard = _research_fetch_guard.get()
+    if guard is not None:
+        guard()
     if settings.DJANGO_ENV == 'production':
         return safe_urlopen(request, timeout=timeout)
     return urllib.request.urlopen(request, timeout=timeout, context=context)
