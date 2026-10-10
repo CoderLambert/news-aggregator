@@ -47,6 +47,45 @@ describe('translateFullArticleStream', () => {
     expect(JSON.parse(init.body)).toEqual({ force: true })
   })
 
+  it('reassembles long translated articles and incremental progress under the 32-KiB wire limit', async () => {
+    const translation = ('中文🙂 "escaped"\n' + 'x'.repeat(5)).repeat(5500)
+    const initial = 'already saved prefix '
+    const delta = '段落🌏'.repeat(9000)
+    const final = { full_content_zh: translation, full_content_zh_scope: 'shared' }
+    function framed(payload) {
+      const raw = JSON.stringify(payload)
+      const frames = []
+      for (let offset = 0, index = 0; offset < raw.length; offset += 2048, index += 1) {
+        const frame = 'data: ' + JSON.stringify({
+          __translation_sse_fragment_v1: raw.slice(offset, offset + 2048),
+          index,
+          last: offset + 2048 >= raw.length,
+        }) + '\n\n'
+        expect(new TextEncoder().encode(frame).byteLength).toBeLessThan(32 * 1024)
+        frames.push(frame)
+      }
+      return frames
+    }
+    globalThis.fetch.mockResolvedValueOnce(streamResponse([
+      'data: {"progress":"already saved prefix "}\n\n',
+      ...framed({ progress_delta: delta }),
+      ...framed(final),
+    ]))
+
+    const events = await collect(translateFullArticleStream('42'))
+    expect(events).toHaveLength(3)
+    expect(events[0]).toEqual({ progress: initial })
+    expect(events[1]).toEqual({ progress: initial + delta })
+    expect(events[2]).toEqual(final)
+  })
+
+  it('rejects interrupted translation frames rather than reporting partial success', async () => {
+    globalThis.fetch.mockResolvedValueOnce(streamResponse([
+      'data: {"__translation_sse_fragment_v1":"{\\"full_content_zh\\":\\"part","index":0,"last":false}\n\n',
+    ]))
+    await expect(collect(translateFullArticleStream('42'))).rejects.toThrow(/Incomplete translation SSE fragment/)
+  })
+
   it('yields error event instead of throwing when server returns error', async () => {
     globalThis.fetch.mockResolvedValueOnce(
       streamResponse(['data: {"error":"翻译服务暂不可用"}\n'])
