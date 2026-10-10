@@ -9,7 +9,10 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from api.models import ChatGPTSubscriptionConnection, ChatGPTAuthAttempt
+from api.models import (
+    Category, ChatGPTSubscriptionConnection, ChatGPTAuthAttempt,
+    News, Source, UserNewsChatSession,
+)
 from api.services import chatgpt_subscription as subscription
 from api.services.siwc_modes import SiwcConfigError, load_siwc_config
 
@@ -258,3 +261,37 @@ def test_website_refresh_reauthenticates_using_the_approved_client(website, disc
     assert post.call_args.kwargs['data']['client_id'] == CLIENT_ID
     connection.refresh_from_db()
     assert subscription.decrypt_secret(connection.encrypted_refresh_token, 'subscription-refresh-token') == 'rotated'
+
+
+@pytest.mark.django_db
+def test_website_article_chat_history_is_private_and_no_key_fallback(website):
+    category = Category.objects.create(name='Web privacy', slug='web-privacy')
+    source = Source.objects.create(
+        name='Source Web', url='https://example.com', language='en',
+    )
+    news = News.objects.create(
+        title='Article', content='Article body', url='https://example.com/a',
+        source=source, category=category, publish_time=timezone.now(),
+    )
+    alice = user_for('chat-alice')
+    bob = user_for('chat-bob')
+    UserNewsChatSession.objects.create(
+        news=news, user=alice,
+        messages=[{'role': 'user', 'content': 'Alice private question'}],
+    )
+    path = f'/api/news/{news.pk}/chat/'
+    a = APIClient()
+    a.force_authenticate(user=alice)
+    b = APIClient()
+    b.force_authenticate(user=bob)
+    assert a.get(path).data['messages'][0]['content'] == 'Alice private question'
+    assert b.get(path).data['messages'] == []
+    assert APIClient().get(path).status_code == 401
+    assert b.delete(path).status_code == 200
+    assert UserNewsChatSession.objects.filter(user=alice, news=news).exists()
+    # Without the user's own SIWC connection the API must NOT call its
+    # ordinary server-paid streaming provider.
+    with patch('api.views.stream_chat') as paid_llm:
+        denied = b.post(path, {'question': 'Explain this'}, format='json')
+    assert denied.status_code == 403
+    paid_llm.assert_not_called()
