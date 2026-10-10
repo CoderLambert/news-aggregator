@@ -1,6 +1,6 @@
 # G2-ACCOUNTS 账户与诊断权限合同
 
-- Task ID / Depends on / Base HEAD / Goal：P01/G2-ACCOUNTS；G1及G2-CHAT，派发时最新HEAD；登录CSRF、持久限速、邀请注册、研究CSRF和管理员诊断权限。
+- Task ID / Depends on / Base HEAD / Goal：P01/G2-ACCOUNTS；G2-CHAT定向与High切片已通过，按ADR021仅允许离线源准备，整体Gate仍依赖G1；派发时最新纯G1 HEAD叠加已冻结Chat九文件；登录CSRF、持久限速、邀请注册、研究CSRF和管理员诊断权限。
 - Owned files / Read-only references：backend/api/{models.py,views.py,research_views.py}（仅账户函数/ProviderComparison权限/研究认证）、backend/api/authentication.py（新）、services/account_security.py（新）、management/commands/create_signup_invite.py（新）、migrations/0028_account_security.py（新）、tests/test_account_security.py（新）、tests/test_research_csrf.py（新）；现账号/比较测试仅新安全行为适配，须逐文件返回。docs/deployment/account-security.md（新）。只读public_policy/runtime_config/GOAL/G2-CHAT；不动Chat实现、subscription、frontend。共用树不撤销他人，不派生。
 - Decision frozen：登录/register采用强制anonymous CSRF的SessionAuthentication子类（authenticate第一步self.enforce_csrf(request)，再super.authenticate），使用@authentication_classes；错误CSRF403且验证密码/限速之前。logout标准SessionAuthentication、IsAuthenticated、unsafe CSRF。研究删除CsrfExemptSessionAuthentication与csrf_exempt decorators，全部标准SessionAuthentication+原IsAuthenticated；禁止靠前端发送header声称服务端验证。
 AuthRateBucket key为HMAC SECRET_KEY摘要与kind、window_start、count，unique(key,window_start)，10min固定窗口。每个login请求在authenticate前预留IP桶20/10min及IP+casefold(username)桶5/10min（成功也计数），register IP桶5/hour+全局100/hour。IP仅request.META.REMOTE_ADDR，缺/无效拒绝400 invalid_client_address，不读HTTP_X_FORWARDED_FOR。事务先write singleton AuthSecurityLock row id1，通过F revision增量强制SQLite串行，随后读取/增加桶，超限429 auth_rate_limited + Retry-After剩余窗口秒，不调用password backend；SQLite busy有限最多3次间隔20/40ms，失败503 auth_security_busy，零上游；持久跨进程有效，无内存cache代替。桶清理独立command可选，不在安全请求里扫全表。日志不记录密码/invite/session。
@@ -11,3 +11,5 @@ ProviderComparison三视图全部IsActiveSuperuser（复用crawler_views权限�
 - Negative tests：anonymous login CSRF/恶意Origin/错token403；rate耗尽后authenticate0调用；伪造XFF不影响key；错误邀请/过期/消费/错email/并发不创建第二user；弱密码/坏类型400无泄露；普通/ inactive superuser诊断拒绝；研究无CSRF写403、跨用户404；read_only无改变。
 - Forbidden：不真实邮件/OAuth/付费/生产开关/用户DB，不决定托管认证、不改非owned/private缓存/Chat；不commit/派生；歧义和两次失败交Sol。
 - Return format：paths、diff、HEAD、命令exit/test数、CSRF/限速/并发真实证据、BLOCKED密码重置与NOT_RUN。
+
+派发补充冻结：旧测试允许仅修改 backend/api/tests/{test_public_policy.py,test_provider_comparison_api_command.py} 中账户/比较权限相关fixture/断言，以及 test_chatgpt_subscription.py 唯一注册登录注销测试fixture（密码升级符合验证器；保留原session轮换断言），不改其余订阅协议测试。权限直接复用 api.crawler_views.IsActiveSuperuser，无新增公共permissions文件。测试在给定纯G1 git archive（明确排除backend/db.sqlite3*）上仅叠加 /tmp/newshub-g2-chat-audit-pre.json 九个Chat文件和本合同owned编辑；HOME/绝对DJANGO_DB_PATH放/tmp，env -i最小环境，不继承.env/Hermes/OpenAI/用户凭据。保留Chat源不修改，不能复制整个backend工作树。SQLite锁必须在事务内先write singleton，限速窗口注册明确3600s、登录600s，临时DB多线程join限定且connections及时close。
