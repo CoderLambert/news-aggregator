@@ -137,6 +137,27 @@ class ChatSession(models.Model):
         return f"Chat for {self.news.title[:20]}"
 
 
+class UserNewsChatSession(models.Model):
+    """Private article chat history for one signed-in website user."""
+
+    user = models.ForeignKey(
+        'auth.User', on_delete=models.CASCADE, related_name='private_news_chats',
+    )
+    news = models.ForeignKey(
+        News, on_delete=models.CASCADE, related_name='private_chat_sessions',
+    )
+    messages = models.JSONField('对话记录', default=list, blank=True)
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'news'], name='unique_user_news_chat'),
+        ]
+        verbose_name = '用户私有文章问答'
+        verbose_name_plural = '用户私有文章问答'
+
+
 class Favorite(models.Model):
     """User likes and bookmarks on news articles."""
     TYPE_CHOICES = [
