@@ -20,3 +20,5 @@ API /api/ai/jobs/ POST认证+CSRF返回202（重复相同200），GET只owner分
 
 精确URL冻结：status_url=/api/ai/jobs/{canonical UUID}/，events_url=/api/ai/jobs/{UUID}/events/，cancel_url=/api/ai/jobs/{UUID}/cancel/；不存在额外/status/路由。客户端严格核对这三个同源路径与job_id。
 游标仅ASCII十进制0..9223372036854775807，过长/负数/Unicode数字/溢出统一400 invalid_event_cursor，不进行无限长度int转换。
+
+账目持久字段补充冻结：AIJob必须持久budget_day（提交时UTC日期）与ip_subject_hash（规范REMOTE_ADDR的HMAC摘要，无原IP）、updated_at，以及reserved_tokens/reserved_micro_usd、settled_tokens/settled_micro_usd、actual_tokens/actual_micro_usd（真实usage未知时NULL，不把保守settled伪装actual）。settle/recover始终使用原budget_day及原IP摘要，即使跨UTC午夜/worker无request/用户换IP；幂等request_hash不含IP，重放不迁移原预留。已知usage实际token/cost可保存，未知全reserve计入settled。worker执行配置fingerprint持久在server生成的私有payload/context，不能信body。owner FK使用PROTECT：当前没有账户删除流程，管理删除带财务job用户必须明确拒绝，不能CASCADE丢掉pending预留/未知成本；不新增HTTP账户删除或猜保留政策。API从不输出这些IP/预算私有摘要。跨午夜结算、同key换IP只一次原桶预留/settle、user删除拒绝且账目不丢需定向测试。
