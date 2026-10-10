@@ -13,3 +13,6 @@ chat适配text_delta.data.text为旧chatStream字符串，error/unknown终态抛
 - Return format：paths/diff/HEAD、命令exit/test数、POST/cursor/owner/cancel真实mock序列、开发兼容与NOT_RUN domain；全量和实际本地域名留整合阶段。
 
 协议尺寸遵循CORE最终追加：complete/error/cancelled不嵌入result。接收终态event后获取一次owner status，确认相同job UUID/当前user epoch及可信终态才返回完整result；GET失败不假成功，按现GET有限重试规则处理。suggestions/fetch_full/research最终结果亦从owner status取，重连直接GET终态采用同一适配器，chat不重复追加result.text。16KiB record限制计算UTF8实际wire字节（含头/换行），32KiB buffer同单位；UTF8流decoder保留跨chunk字符，禁止按JS字符串length冒充字节。
+
+精确URL冻结：status_url=/api/ai/jobs/{canonical UUID}/，events_url=/api/ai/jobs/{UUID}/events/，cancel_url=/api/ai/jobs/{UUID}/cancel/；不存在额外/status/路由。客户端严格核对这三个同源路径与job_id。
+parser的32KiB限制针对尚未消费的剩余buffer；一个网络chunk可含很多合法records，必须边feed边消费，不能在解析前以整个chunk总量拒绝。SSE event字段必须与JSON type相等，sequence与id严格一致。定向测试单chunk包含超过32KiB的多条合法小record仍逐条处理，单个record超16KiB则关闭reader并失败。

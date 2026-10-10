@@ -19,3 +19,5 @@ worker同机最多2实例串行作业，独立heartbeat每<=5s更新lease，dead
 协议尺寸遵循CORE最终追加：任何complete不包含全文/result；translation/research大结果保存owner AIJob.result，通过GET status读取。progress/text_delta分片UTF8<=2048bytes，完整wire校验含JSON转义；tool_call/tool_result/thinking只保存有界安全摘要，不复制raw工具文本。
 
 幂等header补充冻结：key严格1..128个可打印非空白ASCII字符（0x21..0x7e），拒绝空白/control/DEL/非ASCII，不静默strip后接受；前端固定UUID满足此限制。无效400 idempotency_key_required，零job/预留/业务副作用。数据库唯一仍(user,key)。
+
+精确URL冻结：status_url=/api/ai/jobs/{canonical UUID}/，events_url=/api/ai/jobs/{UUID}/events/，cancel_url=/api/ai/jobs/{UUID}/cancel/；不存在额外/status/路由。客户端严格核对这三个同源路径与job_id。
