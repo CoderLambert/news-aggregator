@@ -271,10 +271,21 @@ def _discovery() -> dict:
         raise SubscriptionError('暂时无法连接 OpenAI 登录服务。') from exc
     if not isinstance(data, dict):
         raise SubscriptionError('OpenAI 登录服务返回了无效配置。')
+    if data.get('issuer') != 'https://auth.openai.com':
+        raise SubscriptionError('OpenAI 登录服务签发方不匹配。')
     for key in ('authorization_endpoint', 'token_endpoint', 'jwks_uri'):
         parsed = urlparse(str(data.get(key, '')))
-        if parsed.scheme != 'https' or not parsed.netloc:
-            raise SubscriptionError('OpenAI 登录服务配置缺少有效 HTTPS 端点。')
+        if (parsed.scheme != 'https' or parsed.hostname != 'auth.openai.com'
+                or parsed.port not in (None, 443) or parsed.username
+                or parsed.password or parsed.fragment):
+            raise SubscriptionError('OpenAI 登录服务配置包含不可信端点。')
+    revocation_endpoint = data.get('revocation_endpoint')
+    if revocation_endpoint:
+        parsed = urlparse(str(revocation_endpoint))
+        if (parsed.scheme != 'https' or parsed.hostname != 'auth.openai.com'
+                or parsed.port not in (None, 443) or parsed.username
+                or parsed.password or parsed.fragment):
+            raise SubscriptionError('OpenAI 撤销端点不可信。')
     return data
 
 
