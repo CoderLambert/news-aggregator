@@ -539,6 +539,7 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
     from api.models import News
     from api.services.vector_store import VectorStoreService
 
+    guard = execution_guard or (lambda: None)
     limit = min(limit, 30)
     qs = News.objects.select_related('source', 'category')
 
@@ -567,6 +568,7 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
         all_articles = []
         seen_ids = set()
         for q in query_variations:
+            guard()
             filtered = qs.filter(
                 Q(title__icontains=q) | Q(content__icontains=q)
                 | Q(title_zh__icontains=q) | Q(content_zh__icontains=q)
@@ -597,6 +599,7 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
         all_ids = []
         seen_ids = set()
         for q in query_variations:
+            guard()
             results = vs.search(q, n=fetch_n)
             for nid, _ in results:
                 if nid not in seen_ids:
@@ -620,6 +623,7 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
         keyword_ids = []
         keyword_seen = set()
         for q in query_variations:
+            guard()
             keyword_qs = qs.filter(
                 Q(title__icontains=q) | Q(content__icontains=q)
                 | Q(title_zh__icontains=q) | Q(content_zh__icontains=q)
@@ -635,6 +639,7 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
         semantic_seen = set()
         if vs.count() > 0:
             for q in query_variations:
+            guard()
                 results = vs.search(q, n=100)
                 for nid, _ in results:
                     if nid not in semantic_seen:
