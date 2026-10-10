@@ -115,3 +115,9 @@
 用户再次要求持续完成全部任务。ADR021冻结221a93d为G1运行候选，未来构建必须使用其git archive；独立G2源码准备可在网络等待期间离线推进，不改用户DB/生产开关。G1整体仍DOING，G2只有源代码准备不是发布完成，G2整体验收依赖G1真实运行。G1-VOLUME-RUNTIME runner正在准备，实际镜像未给定故runtime NOT_RUN；G3-PROVIDER完整契约已冻结但尚未实施。
 - volume runner初版新增两owned文件、17离线测试/compile退出0，runtime未执行。主控整合定位exec --user值被误当container的真实argv兼容问题与失败时创建台账缺口，已给同范围整改；不把初版17PASS当真实CLI通过。
 - G3的CORE/PROVIDER/BUSINESS/FRONTEND/DEPLOY与G2/G3本地域名合同已补齐输入、费用、worker/SSE、私有结果及默认关闭策略；全部仍待实施。主控对实际OpenAI3.26.1使用纯MockTransport做timeout/max_completion_tokens兼容probe退出0，发现默认admin/org/project环境继承须显式隔离，已冻结；未真实调用API。
+
+## G1真实组件浏览器检查与优先整改
+- volume runner整改40离线测试/compile0，只两owned文件，42a5864提交；实际production image/volume仍NOT_RUN。
+- 主控用0df4b1e隔离frontend archive的实际MermaidBlock/index.css、独立临时HOME/Vite loopback19357、Chromium与禁外部请求fixture，真实labels存在，但computed nodeFill/textFill均rgb(0,0,0)。截图/tmp/newshub-mermaid-component.png已人工检视，节点黑块且文字不可读；JSON /tmp/newshub-mermaid-component.json。临时Vite session已Ctrl-C退出130，仅自身测试服务；不是正式域名验收。
+- 已冻结G1-MERMAID-READABILITY/ADR023并派Luna定向修复可信静态CSS；保留全部SVG安全限制。原221a93d不再用于最终PASS，依赖层完成后需新修复SHA重建，G1失败优先于G2源码准备。
+- 构建11:29:43+08起的最终90min硬上限仍12:59:43；pip当前到numpy16.7MB慢下载，连续10min无I/O停止。不再延长/换旧开发镜像替代，网络未完成如实记录BLOCKED并继续独立本地源码工作。

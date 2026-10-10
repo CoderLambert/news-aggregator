@@ -97,3 +97,11 @@ R1增量审查发现Nginx还需两个assets块显式root /srv/newshub，不能�
 
 ## ADR-021：构建等待期间的隔离开发与发布门槛
 G1静态High整改后无P0/P1，正式镜像依赖下载仍在最终有界运行；网络等待不能替代运行PASS，也不必阻止独立本地代码准备。冻结221a93d为G1运行候选，必须git archive该SHA构建，后续共用树G2改动不能混入该镜像。允许G2-CHAT先作离线源代码与临时DB迁移/并发测试准备；不执行用户数据迁移、不开启公共开关、不将G1或G2标REVIEWED、不部署。G2发布/整体审核验收仍依赖真实G1运行门槛。实施者同时仅一个活动编码切片，镜像监控不另改共享业务源码。若G1运行失败，其精确整改优先。
+
+## ADR-022：站点AI执行、费用与恢复契约
+G3扩展既有SQLite租约模式，不引入新的任务平台；job/event/budget/worker-slot在数据库持久化，事务首写安全锁，queued/running也占并发预留。默认用户/IP/全站并发1/2/2，日任务20/40/200、tokens100k/200k/1m、费用2/4/10USD；整数microUSD、最坏工作量预留、未知或部分结果保守全额结算，不能假退款或自动重试收费。
+标准站点API初版固定OpenAI标准endpoint，独立SITE_AI配置/管理员许可门槛/人工填写资格与费率，默认关闭；不读Coding/Hermes/其他OPENAI凭据，不从user_plan失败切到站点收费。真实资格/价格/调用尚未获准，全部测试Fake Provider。每个请求在独立固定worker中，有lease/heartbeat/deadline/取消fence；HTTP只提交和owner读取，SSE占用最多2个Waitress线程。私有翻译/建议保存于owner job，不改公共新闻翻译；公开原文抓取单独0模型费用任务仍限额/安全输送。研究最多4模型/8工具，限制输入/输出/事件大小，默认禁付费搜索/TTS/semantic。
+精确实现顺序：G3-CORE→G3-PROVIDER→G3-BUSINESS→G3-FRONTEND→G3-DEPLOY→LOCAL-DOMAIN-G2-G3阶段G3，最后独立High复审。所有合同目前仅准备，不能据此将功能或正式模型访问标完成。
+
+## ADR-023：严格SVG清洗后的可信配色
+主控实际隔离Chromium渲染当前MermaidBlock发现node/text均黑，截图和computed fills确认不可读；不采用允许SVG任意style作为修复。仅在静态固定wrapper内用站点可信CSS恢复flowchart形状/文字/箭头及尺寸，保持严格模式、htmlLabels关闭、DOMPurify禁止危险元素/链接/style和无bindFunctions。整改优先于G2准备；原221a93d运行候选因此待替换，必须待修复提交后重新冻结镜像SHA。
