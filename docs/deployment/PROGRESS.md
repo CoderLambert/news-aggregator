@@ -110,3 +110,6 @@
 - 正式模板实际隔离Nginx、network-none、临时SAN证书与curl CA校验：共享目录独有SVG/font200 no-cache、hashJS200 immutable、missing两类404无immutable、nginx-t与清理全部PASS。报告/tmp/newshub-static-nonhash-2y77fckr/report.json，template SHA256 436b67d1b1b143f9bd70d6b69dc32d21d68056659856e5f81f0174556f603828。
 - 22214b3隔离后端全量退出0/460PASS，日志/tmp/newshub-g1-r2-integrated-stumdn6b/pytest.log。生产应用/卷恢复/完整浏览器仍待镜像，G1整体不能标PASS。
 - 独立90秒HOME位置cache probe在apt阶段超时124，未到pip，无命中或失配证明；仅自身Dockerfile临时变动已全部撤回，无probe image。先前--cache-from错误只是registry importer授权拒绝，不能证明本地层不存在。日志/tmp/newshub-g1-build-cache-probe.log。原正式构建继续最终90分钟边界。
+
+## 后续源代码准备与门槛保留
+用户再次要求持续完成全部任务。ADR021冻结221a93d为G1运行候选，未来构建必须使用其git archive；独立G2源码准备可在网络等待期间离线推进，不改用户DB/生产开关。G1整体仍DOING，G2只有源代码准备不是发布完成，G2整体验收依赖G1真实运行。G1-VOLUME-RUNTIME runner正在准备，实际镜像未给定故runtime NOT_RUN；G3-PROVIDER完整契约已冻结但尚未实施。
