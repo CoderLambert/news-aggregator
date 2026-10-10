@@ -62,6 +62,49 @@ describe('MarkdownContent Mermaid rendering', () => {
     expect(mermaidMock.bindFunctions).not.toHaveBeenCalled()
   })
 
+  it('normalizes dimensions from a valid numeric viewBox after sanitization', async () => {
+    mermaidMock.render.mockResolvedValueOnce({
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-10 2.5e2 320.5 119.25" width="100%" height="100%"><text style="fill:red">diagram</text></svg>',
+    })
+    const { container } = render(<MarkdownContent content={'```mermaid\ngraph TD\n  A --> B\n```'} />)
+
+    await waitFor(() => expect(container.querySelector('.newshub-mermaid svg')?.getAttribute('width')).toBe('321'))
+
+    const svg = container.querySelector('.newshub-mermaid svg')
+    expect(svg?.getAttribute('height')).toBe('120')
+    expect(svg?.getAttribute('viewBox')).toBe('-10 2.5e2 320.5 119.25')
+    expect(svg?.querySelector('text')?.hasAttribute('style')).toBe(false)
+  })
+
+  it.each([
+    ['non-numeric width', '0 0 NaN 120'],
+    ['infinite width', '0 0 Infinity 120'],
+    ['negative width', '0 0 -1 120'],
+    ['zero width', '0 0 0 120'],
+    ['width above limit', '0 0 10001 120'],
+    ['non-finite exponent', '0 0 1e999 120'],
+    ['zero height', '0 0 320 0'],
+    ['height above limit', '0 0 320 10001'],
+    ['malformed number', '0 0 320px 120'],
+    ['wrong number count', '0 0 320'],
+    ['repeated separator', '0,,0 320 120'],
+    ['missing viewBox', null],
+  ])('leaves original dimensions unchanged for %s viewBox', async (_description, viewBox) => {
+    const viewBoxAttribute = viewBox === null ? '' : ` viewBox="${viewBox}"`
+    mermaidMock.render.mockResolvedValueOnce({
+      svg: `<svg xmlns="http://www.w3.org/2000/svg"${viewBoxAttribute} width="100%" height="100%" onload="run()"><text style="fill:red">diagram</text></svg>`,
+    })
+    const { container } = render(<MarkdownContent content={'```mermaid\ngraph TD\n  A --> B\n```'} />)
+
+    await waitFor(() => expect(container.querySelector('.newshub-mermaid svg text')?.textContent).toBe('diagram'))
+
+    const svg = container.querySelector('.newshub-mermaid svg')
+    expect(svg?.getAttribute('width')).toBe('100%')
+    expect(svg?.getAttribute('height')).toBe('100%')
+    expect(svg?.hasAttribute('onload')).toBe(false)
+    expect(svg?.querySelector('text')?.hasAttribute('style')).toBe(false)
+  })
+
   it('uses a strict directive-protected configuration and never binds generated functions', async () => {
     const bindFunctions = vi.fn()
     mermaidMock.render.mockResolvedValueOnce({ svg: SAFE_SVG, bindFunctions })

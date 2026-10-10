@@ -22,6 +22,11 @@ const SVG_SANITIZE_OPTIONS = {
   RETURN_TRUSTED_TYPE: false,
 }
 
+const SVG_NUMBER = String.raw`[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?`
+const SVG_VIEW_BOX_PATTERN = new RegExp(
+  String.raw`^\s*(${SVG_NUMBER})(?:\s*,\s*|\s+)(${SVG_NUMBER})(?:\s*,\s*|\s+)(${SVG_NUMBER})(?:\s*,\s*|\s+)(${SVG_NUMBER})\s*$`,
+)
+
 type RenderState = {
   code: string
   html: string
@@ -30,6 +35,32 @@ type RenderState = {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : 'Mermaid render failed'
+}
+
+function normalizeSanitizedSvgDimensions(safeSvg: string): string {
+  const template = document.createElement('template')
+  template.innerHTML = safeSvg
+  const svg = template.content.querySelector('svg')
+  const viewBox = svg?.getAttribute('viewBox')
+  const values = viewBox?.match(SVG_VIEW_BOX_PATTERN)
+
+  if (!svg || !values) return safeSvg
+
+  const [, minXText, minYText, widthText, heightText] = values
+  const [minX, minY, width, height] = [minXText, minYText, widthText, heightText].map(Number)
+  if (
+    ![minX, minY, width, height].every(Number.isFinite)
+    || width <= 0
+    || height <= 0
+    || width > 10_000
+    || height > 10_000
+  ) {
+    return safeSvg
+  }
+
+  svg.setAttribute('width', String(Math.ceil(width)))
+  svg.setAttribute('height', String(Math.ceil(height)))
+  return template.innerHTML
 }
 
 export default function MermaidBlock({ code }: { code: string }) {
@@ -60,8 +91,9 @@ export default function MermaidBlock({ code }: { code: string }) {
         const { svg } = await mermaid.render(renderId, code)
         const safeSvg = DOMPurify.sanitize(svg, SVG_SANITIZE_OPTIONS)
         if (!safeSvg.trim()) throw new Error('Diagram output was removed by the SVG safety filter')
+        const normalizedSvg = normalizeSanitizedSvgDimensions(safeSvg)
         if (!cancelled) {
-          setRenderState({ code, html: safeSvg, error: null })
+          setRenderState({ code, html: normalizedSvg, error: null })
         }
       } catch (renderError) {
         if (!cancelled) {
