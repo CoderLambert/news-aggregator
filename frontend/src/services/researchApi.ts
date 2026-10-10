@@ -7,6 +7,7 @@ import {
   listResearchSessions as listResearchSessionsRequest,
   openResearchSessionStream as openResearchSessionStreamRequest,
   researchChatStream as researchChatStreamRequest,
+  resumeQueuedResearchRun as resumeQueuedResearchRunRequest,
 } from './api'
 import { isRecord } from '@/types/news'
 import {
@@ -107,4 +108,12 @@ export async function openResearchSessionStream(
 
 export async function cancelResearchRun(sessionId: string, runId: string): Promise<unknown> {
   return cancelResearchRunRequest(sessionId, runId)
+}
+
+export async function resumeQueuedResearchRun(sessionId: string, runId: string): Promise<void> {
+  const response: unknown = await resumeQueuedResearchRunRequest(sessionId, runId)
+  if (!isRecord(response) || response.run_id !== runId ||
+      (response.status !== 'queued' && response.status !== 'running' && response.status !== 'succeeded')) {
+    throw new TypeError('Invalid queued research recovery result')
+  }
 }
