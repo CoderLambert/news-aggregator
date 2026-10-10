@@ -15,3 +15,5 @@ API /api/ai/jobs/ POST认证+CSRF返回202（重复相同200），GET只owner分
 - Return format：paths/diff/HEAD、命令exit/test数、真实并发/0upstream/Fake恢复证据、未接入业务的准确NOT_RUN；不能把core通过称G3全完。
 
 主控协议尺寸冻结：complete.data仅{status:"succeeded"}，error.data仅{status,error_code}，cancelled.data仅{status:"cancelled"}，不得嵌入完整result。完整结果仅owner GET status JSON返回；终态status与result必须同事务提交后再可见。业务增量text先按Unicode字符边界切分每片UTF8<=2048 bytes，JSON使用ensure_ascii=False及紧凑分隔符，随后用唯一wire serializer验证完整record<=16KiB；控制字符转义和sequence/header开销也计入，超限拒绝而非截断。event aggregate按实际wire字节累计。status/thinking/tool事件同样按wire检查且不得保存完整原始工具响应/prompt。离线测试最大64KiB translation结果仍可GET，终态小record；引号、反斜线、控制字符、多字节emoji边界，无丢字/错游标。
+
+幂等header补充冻结：key严格1..128个可打印非空白ASCII字符（0x21..0x7e），拒绝空白/control/DEL/非ASCII，不静默strip后接受；前端固定UUID满足此限制。无效400 idempotency_key_required，零job/预留/业务副作用。数据库唯一仍(user,key)。

@@ -17,3 +17,5 @@ worker同机最多2实例串行作业，独立heartbeat每<=5s更新lease，dead
 - Return format：paths/diff/HEAD、命令exit/test数、真实Fake次数/费用/A-B/取消/重启与无HTTP上游证据、尚未frontend/localdomain/实际标准API NOT_RUN；不提前宣称G3审核完成。
 
 协议尺寸遵循CORE最终追加：任何complete不包含全文/result；translation/research大结果保存owner AIJob.result，通过GET status读取。progress/text_delta分片UTF8<=2048bytes，完整wire校验含JSON转义；tool_call/tool_result/thinking只保存有界安全摘要，不复制raw工具文本。
+
+幂等header补充冻结：key严格1..128个可打印非空白ASCII字符（0x21..0x7e），拒绝空白/control/DEL/非ASCII，不静默strip后接受；前端固定UUID满足此限制。无效400 idempotency_key_required，零job/预留/业务副作用。数据库唯一仍(user,key)。
