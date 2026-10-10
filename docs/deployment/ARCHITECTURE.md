@@ -110,3 +110,11 @@ G3扩展既有SQLite租约模式，不引入新的任务平台；job/event/budge
 
 ## ADR-024：持久AI事件与完整结果的尺寸边界
 单SSE record包含JSON转义、id/event/data与空行的全部UTF8字节，限制16KiB，job累计2MiB；前端同单位解析，缓冲32KiB。文本按Unicode边界先分片每片UTF8最多2048bytes，再统一wire serializer精确校验，不能仅限制未转义JSON正文。终态事件只含status及安全error_code，完整translation/research结果保存在owner AIJob.result；前端终态GET owner status确认并读取结果，所有完成/重连用同一适配器。避免64KiB结果进入16KiB SSE record；不得为兼容放大事件上限或截断成功结果。G3尚未实施，这项先冻结入四份合同。
+
+## ADR-025：用户取消AI费用平台，个人订阅优先
+
+最新用户指令：“不需要你考虑 ai 费用的 这个没必要做 chatgpt 订阅登录后随他们怎么用”。该指令覆盖GOAL及ADR-022的费用/额度要求。取消新增费用账目、美元限额、日任务/Token额度、AI用户/IP用量配额、报价与扣费预留，也不新增站点付费API及收费回退。此类G3代码尚未实施，五份旧G3合同停止派发，仅作历史记录。不会把取消称为实现完成。
+
+后续AI使用每个用户自己授权的ChatGPT订阅；本站不额外设使用次数或Token预算，不共享管理员订阅。继续账户/凭据/缓存隔离、CSRF、撤销和过期处理、本地域名验收，以及现有长任务的断线/重启恢复；服务运行所需的有界线程、响应体、超时和SSRF护栏属于运行与数据安全，不作为费用或日用量策略。登录/注册防暴力破解限速保留。恢复实现将另立无费用专项合同，不直接派发旧费用平台合同。
+
+2026-10-10再次核实官方文档：网页登录需要注册OAuth客户端/精确回调/issuer端点/实际认证方式，订阅推理需要另行授予相应权限；远程网站接入尚缺正式客户端与批准参数，仍EXTERNAL_BLOCKED。公开文档不能替代本项目实际授权，不用local_oss loopback冒充news域名。可完成的local_oss安全兼容及website关闭骨架继续做，真实网站登录/模型调用不报PASS。依据：https://developers.openai.com/siwc/website 、https://developers.openai.com/siwc/quickstart 、https://developers.openai.com/siwc/token-sharing-open-source 。

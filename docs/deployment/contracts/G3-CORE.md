@@ -1,3 +1,5 @@
+> 历史设计，停止派发：用户最新明确不要 AI 费用核算、日额度和 Token 预算；后续按用户自己的 ChatGPT 订阅使用，不新增站点付费 API 或费用回退。本合同的费用平台方案未实施。保留作历史记录；执行范围以 ARCHITECTURE ADR-025 与后续订阅专项合同为准。
+
 # G3-CORE 持久任务与费用预留合同（待G2审核后派发）
 
 - Task ID / Depends on / Base HEAD / Goal：NH-PUB-06/G3-CORE；G2审核通过，派发给定HEAD；SQLite可验证的配额预留、持久任务、租约与断线恢复底座，不接真实上游。

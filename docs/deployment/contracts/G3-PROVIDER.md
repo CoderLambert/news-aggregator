@@ -1,3 +1,5 @@
+> 历史设计，停止派发：用户最新明确不要 AI 费用核算、日额度和 Token 预算；后续按用户自己的 ChatGPT 订阅使用，不新增站点付费 API 或费用回退。本合同的费用平台方案未实施。保留作历史记录；执行范围以 ARCHITECTURE ADR-025 与后续订阅专项合同为准。
+
 # G3-PROVIDER 合规站点调用与预留计算（待G2与G3-CORE完成）
 
 - Task ID / Depends on / Base HEAD / Goal：NH-PUB-06-provider；G2审核、G3-CORE完成，派发给定HEAD；单一显式标准站点API配置、保守工作量/费用计算和Fake Provider契约，不连接真实收费上游。

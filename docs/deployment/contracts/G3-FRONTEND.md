@@ -1,3 +1,5 @@
+> 历史设计，停止派发：用户最新明确不要 AI 费用核算、日额度和 Token 预算；后续按用户自己的 ChatGPT 订阅使用，不新增站点付费 API 或费用回退。本合同的费用平台方案未实施。保留作历史记录；执行范围以 ARCHITECTURE ADR-025 与后续订阅专项合同为准。
+
 # G3-FRONTEND 持久任务界面及兼容适配（待G3业务接口完成）
 
 - Task ID / Depends on / Base HEAD / Goal：NH-PUB-10/G3-FRONTEND；G2-FRONTEND完成、G3-CORE/BUSINESS接口定向通过，派发给定HEAD；现阅读/聊天/研究UI使用同源job提交与可恢复事件，提供当前用户任务列表/取消，保留开发旧SSE协议。

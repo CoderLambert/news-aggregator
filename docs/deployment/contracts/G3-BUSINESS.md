@@ -1,3 +1,5 @@
+> 历史设计，停止派发：用户最新明确不要 AI 费用核算、日额度和 Token 预算；后续按用户自己的 ChatGPT 订阅使用，不新增站点付费 API 或费用回退。本合同的费用平台方案未实施。保留作历史记录；执行范围以 ARCHITECTURE ADR-025 与后续订阅专项合同为准。
+
 # G3-BUSINESS 生产业务接入持久任务（待G2/CORE/PROVIDER）
 
 - Task ID / Depends on / Base HEAD / Goal：NH-PUB-06-business；G2-CHAT/ACCOUNTS审核及G3-CORE/PROVIDER完成，派发给定HEAD；生产chat/翻译/研究/建议/抓取全部先持久预留再由worker执行，保留开发旧协议，封堵绕过费用与跨用户缓存。

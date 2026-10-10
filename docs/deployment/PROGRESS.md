@@ -182,3 +182,11 @@ G3在实施前已冻结ADR-024：单SSE record按完整UTF8 wire精确限制16Ki
 930cfddaf8ddbe3ae4660adf8788065de4e73884仅七harness文件，1936新增/86删除。初次36项与shell/mock/compile是在workingtree的临时HOME/绝对DB环境，未证明无dotenv读取，不能称archive隔离；随后固定930cfdd git archive排除DB/.env，env-i最小环境/独立HOME/绝对DB补证36PASS及shell/mock/compile0：/tmp/newshub-g2-archive930-evidence.PImrNY，pytest-env-i.log、env-i-proof.log、shell-syntax-exact.log、shell-mock.log、pycompile.log。早先工作树日志/tmp/newshub-g2-offline-evidence.3VFvqY仅保留为历史，不替代隔离证据。
 
 独立High无P0/P1但六P2 BLOCK：async browser coroutine未await、GET null body、G2 fixture缺共享Mermaid、G2 SSE argv缺账户参数、真实app/gateway身份/自有DB mount未在凭据stdin前核验、sidecar超时按name删除无exactID台账。七physicalhash及scoped diff前后一致，706ea88c407d15eaefe52344db527e9c6129cf158e66852a8e2f002f853d4354；/tmp/newshub-g2-domain-audit-{pre,post}.json。已签发LOCAL-DOMAIN-G2-REVIEW-R1冻结六项修复与有意义回归，源码测试PASS不等于实际G2验收。实际domain仍NOT_RUN，固定app b2e982d镜像保持不变；G2整体DOING。
+
+## 用户范围更新：取消AI费用平台
+
+用户最新明确不要AI费用与用量控制，改以各用户自己的ChatGPT订阅使用。原G3费用/Site API代码未实施，旧五合同停止派发，TASKS标NOT_RUN（用户取消），不算完成代码。保留账户/凭据/缓存隔离、登录/注册安全限速、域名验收与现有长任务恢复，后者另立无费用专项合同。实际官网客户端/订阅授权仍缺，当前合法可做的NH-PUB-08骨架继续；不共享管理员订阅、不自动退回站点付费API。ADR-025为最新范围权威，原GOAL文件保持用户原文。官方文档核实路径见ADR-025。
+
+被取消设计的独立High记录：1P1（收费启动标记必须先提交后网络IO）与4P2（多轮ceil报价、业务DTO、terminal事件容量、inactive后台fence）；五physicalhash前后一致/tmp/newshub-g3-design-review-{pre,post}.json。这不是代码验收，费用问题不再实施整改；恢复相关状态一致性在新专项中保留，不声称旧设计REVIEWED。
+
+G2 harness R1源e45779bcd6644974b37c5d726df9b38b10285710，隔离64PASS及shell/Node真实JS/SSEargv/compile0，/tmp/newshub-local-domain-g2-r1-8tmbe_5y/validation-results.json。High原六项闭环四项，仍2P2：accept额外源码bind mount、start后CID file丢失可跳清理报成功；已签发LOCAL-DOMAIN-G2-REVIEW-R2。pre/post sevenhash一致/diff0d1c3b7d9ca5540274b01ac6f8636108abc15bf0c3db4fe38b008c81446f0992，/tmp/newshub-g2-domain-r1-{pre,post}.json。实际G2 domain仍NOT_RUN，固定app b2e982d不变。

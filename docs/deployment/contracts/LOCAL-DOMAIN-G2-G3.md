@@ -1,3 +1,5 @@
+> 用户范围调整：G2 账户验收仍有效；本文件 G3 中站点 API、报价、预算/日额度场景已取消，不再派发。订阅及恢复验收会另立专项合同。
+
 # LOCAL-DOMAIN-G2-G3 正式域名账户与任务验收
 
 - Task ID / Depends on / Base HEAD / Goal：02-local/G2/G3；G1实际HTTPS通过，G2阶段依赖后端/前端定向与High，G3另依赖CORE/PROVIDER/BUSINESS/FRONTEND与High；派发时给定完整候选SHA。扩展现隔离域名runner阶段，不操作公网/hosts/系统信任。
