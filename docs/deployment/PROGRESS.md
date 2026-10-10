@@ -135,3 +135,10 @@
 - 为把最后runner修复纳入同SHA镜像，domain进行1288c归档cached rebuild。监控器初次IO类型错误无candidate；第二次归档普通文件0664对比成功归档0644，COPY模式变化造成npm/pip cache MISS（内容SHA同），6秒内停止pip metadata后exit130无wheel。主控定位并冻结仅自建context使用同tarfile data filter归一化644/755，再试缓存；未改Dockerfile/源/依赖/用户DB。这不影响已成功09c镜像。
 - domain实际04B/域名/卷将仅用完成的1288候选和自建资源。native替代fixture没有启动，无需借其冒充容器验收。用户9527与DB始终不迁移、不停止。
 - G2-CHAT已按ADR021派发独立源码准备，Base1288c；测试只archive+owned overlay、新HOME/临时DB/无继承Keys。G1 runtime继续冻结1288 archive，未来G2改动不会混入；G1整体仍DOING，G2整体未REVIEWED。
+
+## 生产运行通过，实际验收发现的新增问题
+- 1288c候选正确archive模式命中pip/npm缓存，正式production构建退出0/3.364s；image ID sha256:ff3f46904421d8d40d3b2c42554580c46b78dbad01c715316d45d7bcf4f6d36e，UID与revision精确匹配。
+- 04B真实独立随机Compose项目：migrate0，app/crawler/indexer UID10001且healthy；仅loopback19527临时入口，read_only查询/capabilities/research403/CSRF Secure host-only/trustedHTTPS检查通过；六卷可写、重建后合成DB与deployment ID保留、SQLite integrity ok。全部自身项目资源已清理，用户9527未操作。报告 /tmp/newshub-g1-runtime-1288c0b5-rxfztgbl/runtime-ad896d18ed/runtime-report.json。
+- 正式Nginx模板与模拟既有default_server实际共载nginx-t退出1 duplicate default server:80，报告 /tmp/newshub-nginx-coexist-probe-e4p4tze1/report.json。已冻结G1-NGINX-COEXIST，仅移除news模板全局默认入口、在自身server内拒绝未知/缺Host，不改真实Gitea；待真实共存与域名验收。
+- volume runner首次真实执行metadata阶段Docker125：安全shim重复注入--network=none并保留--network none。没有创建卷/容器，cleanup PASS；失败报告 /tmp/newshub-volume-1288c0b5-ff9cc7d78a/report.json，精确诊断 diagnostic/result.json。主控已核实诊断owner名称无残留，冻结G1-VOLUME-ARGV-R3；尚未恢复通过，不跳过该门槛。
+- G1整体仍DOING，本地域名完整浏览器/SSE与真实备份恢复尚未PASS；生产DNS/证书/上线仍EXTERNAL_BLOCKED。G2-CHAT独立源码准备继续，未提交以保留纯G1候选归档。
