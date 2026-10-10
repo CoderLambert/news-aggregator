@@ -81,7 +81,7 @@ def pick_chat_context(news):
     )
 
 
-def ensure_full_content(news):
+def ensure_full_content(news, execution_guard=None):
     """Best-effort: make sure news.full_content is populated before AI sees it.
 
     No-op if full_content already exists or news has no URL.
@@ -101,15 +101,22 @@ def ensure_full_content(news):
         return
     if not news.url:
         return
+    if execution_guard is not None:
+        execution_guard()
     if not claim_fetch(news):
         return
 
     try:
+        if execution_guard is not None:
+            execution_guard()
         result = fetch_article_markdown(
             news.url,
             expected_title=news.title,
             summary=news.content,
+            **({'execution_guard': execution_guard} if execution_guard is not None else {}),
         )
+        if execution_guard is not None:
+            execution_guard()
         mark_success(
             news,
             result,
@@ -117,6 +124,8 @@ def ensure_full_content(news):
             full_content_fetched_at=tz_now(),
         )
     except Exception as e:
+        if execution_guard is not None:
+            execution_guard()
         try:
             classified = classify_fetch_error(e)
             mark_failed(news, e, status=classified)
