@@ -1,12 +1,31 @@
+from django.conf import settings
 from django.db import migrations, models
+import django.db.models.deletion
 
 
 class Migration(migrations.Migration):
     dependencies = [
         ('api', '0026_shared_article_translations'),
+        migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
+        migrations.CreateModel(
+            name='UserNewsChatSession',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('messages', models.JSONField(blank=True, default=list, verbose_name='对话记录')),
+                ('created_at', models.DateTimeField(auto_now_add=True, verbose_name='创建时间')),
+                ('updated_at', models.DateTimeField(auto_now=True, verbose_name='更新时间')),
+                ('news', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='private_chat_sessions', to='api.news')),
+                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='private_news_chats', to=settings.AUTH_USER_MODEL)),
+            ],
+            options={
+                'verbose_name': '用户私有文章问答',
+                'verbose_name_plural': '用户私有文章问答',
+                'constraints': [models.UniqueConstraint(fields=('user', 'news'), name='unique_user_news_chat')],
+            },
+        ),
         migrations.AddField(
             model_name='chatgptsubscriptionconnection',
             name='oauth_mode',
