@@ -195,3 +195,8 @@ G2 harness R1源e45779bcd6644974b37c5d726df9b38b10285710，隔离64PASS及shell/
 ## G2 harness R2 独立复审闭环
 
 c59e6a507362ad281dbc5e7442bacf1c5bdbb8ba 五文件整改，隔离archive/env-i 77PASS及shell/mock/compile0，证据 /tmp/newshub-local-domain-g2-r2-final.ADvu26/。High两剩余P2closed、无新增P0/P1/P2，五physicalhash与scoped diff前后一致d11244b0740c2dcd7e2c3de340875b7216e2bcb6135abbc0baacf16c1230085b；/tmp/newshub-g2-domain-r2-{pre,post}.json。固定b2业务image与c59独立runner可派实际G2域名验收，未执行前仍NOT_RUN。NH-PUB-08按ADR025补充：迁移0029、当前session/user回调绑定、协议快照与模式禁网，绝不恢复费用平台。
+
+
+## G2 首次实际运行：seed失败，未进入账户browser
+
+固定runner c59/app b2与三个image通过核验，/tmp/newshub-g2-runtime.I9aZYI/。nginx-t/migrate/app-gateway启动PASS，21秒exit2，fixture seed失败；browser/accounts/TLS/SSE后续NOT_RUN，report目录为空（setup异常在main try外，临时stderr被trap删除）。精确随机project容器/网络/卷无残留cleanupPASS。主控定位rendered program缺DJANGO_SETTINGS_MODULE，image没有该ENV，start_waitress设置仅自身进程；env-i django.setup最小重现ImproperlyConfigured于LOGGING_CONFIG、尚无DB访问。签发R3仅fixture bootstrap和脱敏失败报告，实际第二次验收等源High。未读取用户DB/env或触9527/公网。
