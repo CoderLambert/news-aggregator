@@ -99,6 +99,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const viewerIdRef = useRef<number | null>(null)
   const epochRef = useRef(0)
   const refreshSequenceRef = useRef(0)
+  const capabilityGenerationRef = useRef(accountCapability.generation)
+  const refreshRef = useRef<() => Promise<void>>(() => Promise.resolve())
   const pendingMutationsRef = useRef(0)
   const mutationQueueRef = useRef<Promise<void>>(Promise.resolve())
   const csrfReadyRef = useRef(false)
@@ -108,7 +110,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     accountsEnabledRef.current = accountsEnabled
     signupEnabledRef.current = signupEnabled
     capabilitiesLoadingRef.current = capabilitiesLoading
-  }, [accountsEnabled, capabilitiesLoading, signupEnabled])
+    capabilityGenerationRef.current = accountCapability.generation
+  }, [accountCapability.generation, accountsEnabled, capabilitiesLoading, signupEnabled])
 
   const clearViewerQueries = useCallback(async () => {
     await Promise.all(PRIVATE_QUERY_KEYS.map((queryKey) =>
@@ -147,10 +150,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     if (capabilitiesLoadingRef.current || !accountsEnabledRef.current || pendingMutationsRef.current > 0) return
+    const generation = capabilityGenerationRef.current
     const epoch = epochRef.current
     const sequence = ++refreshSequenceRef.current
     const canCommit = () => mountedRef.current && accountsEnabledRef.current &&
-      pendingMutationsRef.current === 0 && epochRef.current === epoch &&
+      capabilityGenerationRef.current === generation && pendingMutationsRef.current === 0 &&
+      epochRef.current === epoch &&
       refreshSequenceRef.current === sequence
 
     try {
@@ -162,7 +167,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!canCommit()) return
       }
       viewerIdRef.current = nextUser.id
-      setIdentity({ user: nextUser, capabilityGeneration: accountCapability.generation })
+      setIdentity({ user: nextUser, capabilityGeneration: generation })
     } catch {
       if (!canCommit()) return
       if (viewerIdRef.current !== null) {
@@ -175,7 +180,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       if (canCommit()) setLoading(false)
     }
-  }, [accountCapability.generation, clearViewerQueries])
+  }, [clearViewerQueries])
+
+  useLayoutEffect(() => {
+    refreshRef.current = refresh
+  }, [refresh])
 
   const enqueueMutation = useCallback(<T,>(
     kind: 'login' | 'register' | 'logout',
@@ -224,13 +233,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (mountedRef.current && accountsEnabledRef.current && epochRef.current === epoch) {
         setLoading(false)
       } else if (pendingMutationsRef.current === 0 && mountedRef.current && accountsEnabledRef.current) {
-        void refresh()
+        void refreshRef.current()
       }
     })
 
     mutationQueueRef.current = task.then(() => undefined, () => undefined)
     return task
-  }, [accountCapability.generation, clearViewerQueries, ensureCsrf, refresh])
+  }, [accountCapability.generation, clearViewerQueries, ensureCsrf])
 
   const login = useCallback((username: string, password: string) => {
     if (capabilitiesLoadingRef.current || !accountsEnabledRef.current) {

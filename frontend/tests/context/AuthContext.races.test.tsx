@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { QueryClient } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthProvider, useAuth } from '@/context/AuthContext'
+import { useCapabilities } from '@/context/CapabilitiesContext'
 import * as api from '@/services/api'
 import { queryClient } from '@/services/queryClient'
 import { CapabilitiesTestProvider, fullCapabilities, readOnlyCapabilities } from '../helpers/capabilities'
@@ -23,6 +24,7 @@ function authUser(id: number, username: string) {
 
 function AuthProbe({ client }: { client: QueryClient }) {
   const auth = useAuth()
+  const { capabilities } = useCapabilities()
   const [error, setError] = useState('')
   const run = (operation: Promise<unknown>) => {
     void operation.catch((reason: unknown) => {
@@ -36,6 +38,7 @@ function AuthProbe({ client }: { client: QueryClient }) {
         username: auth.user?.username ?? null,
         loading: auth.loading,
       })}</output>
+      <output data-testid="accounts-enabled">{String(capabilities.features.accounts.enabled)}</output>
       {error && <p role="alert">{error}</p>}
       <button type="button" onClick={() => run(auth.refresh())}>refresh</button>
       <button type="button" onClick={() => run(auth.login('reader-a', 'password'))}>login A</button>
@@ -43,6 +46,7 @@ function AuthProbe({ client }: { client: QueryClient }) {
       <button type="button" onClick={() => run(auth.register('reader-c', 'password', 'c@example.test', 'invite-c'))}>register C</button>
       <button type="button" onClick={() => run(auth.logout())}>logout</button>
       <button type="button" onClick={() => client.setQueryData(['capabilities'], readOnlyCapabilities())}>disable accounts</button>
+      <button type="button" onClick={() => client.setQueryData(['capabilities'], fullCapabilities())}>enable accounts</button>
     </>
   )
 }
@@ -187,6 +191,42 @@ describe('AuthProvider request ordering and stale-response fencing', () => {
     await waitFor(() => expect(api.logoutUser).toHaveBeenCalledTimes(1))
     expect(events).toEqual(['csrf', 'login', 'csrf', 'logout'])
     await waitFor(() => expect(authState()).toMatchObject({ id: null, username: null, loading: false }))
+  })
+
+  it('uses the current capability generation to refresh identity after a stale login settles', async () => {
+    const pendingLogin = deferred<unknown>()
+    const pendingFollowup = deferred<unknown>()
+    vi.mocked(api.fetchMe)
+      .mockRejectedValueOnce(new Error('anonymous'))
+      .mockImplementationOnce(() => pendingFollowup.promise)
+    vi.mocked(api.loginUser).mockImplementation(() => pendingLogin.promise)
+    renderAuth()
+    await waitForHydration()
+
+    fireEvent.click(screen.getByRole('button', { name: 'login A' }))
+    await waitFor(() => expect(api.loginUser).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole('button', { name: 'disable accounts' }))
+    await waitFor(() => expect(screen.getByTestId('accounts-enabled')).toHaveTextContent('false'))
+    await waitFor(() => expect(authState()).toMatchObject({ id: null, loading: false }))
+    expect(api.fetchMe).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'enable accounts' }))
+    await waitFor(() => expect(screen.getByTestId('accounts-enabled')).toHaveTextContent('true'))
+    await act(async () => { await Promise.resolve() })
+    expect(api.fetchMe).toHaveBeenCalledTimes(1)
+    expect(authState().id).toBeNull()
+
+    await act(async () => pendingLogin.resolve(authUser(1, 'reader-a')))
+    await waitFor(() => expect(api.fetchMe).toHaveBeenCalledTimes(2))
+    expect(authState()).toMatchObject({ id: null, username: null })
+
+    await act(async () => pendingFollowup.resolve(authUser(1, 'reader-a')))
+    await waitFor(() => expect(authState()).toMatchObject({
+      id: 1,
+      username: 'reader-a',
+      loading: false,
+    }))
   })
 
   it('does not issue unsafe authentication calls when CSRF fetch fails and allows a clean retry', async () => {
