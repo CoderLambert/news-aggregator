@@ -142,3 +142,9 @@
 - 正式Nginx模板与模拟既有default_server实际共载nginx-t退出1 duplicate default server:80，报告 /tmp/newshub-nginx-coexist-probe-e4p4tze1/report.json。已冻结G1-NGINX-COEXIST，仅移除news模板全局默认入口、在自身server内拒绝未知/缺Host，不改真实Gitea；待真实共存与域名验收。
 - volume runner首次真实执行metadata阶段Docker125：安全shim重复注入--network=none并保留--network none。没有创建卷/容器，cleanup PASS；失败报告 /tmp/newshub-volume-1288c0b5-ff9cc7d78a/report.json，精确诊断 diagnostic/result.json。主控已核实诊断owner名称无残留，冻结G1-VOLUME-ARGV-R3；尚未恢复通过，不跳过该门槛。
 - G1整体仍DOING，本地域名完整浏览器/SSE与真实备份恢复尚未PASS；生产DNS/证书/上线仍EXTERNAL_BLOCKED。G2-CHAT独立源码准备继续，未提交以保留纯G1候选归档。
+
+## Nginx共存实际闭环与Chat安全切片
+- coexist模板4定向PASS/scoped diff-check0，385f098提交，仅news vhosts自身Host拒绝，不声明全局default。实施fixture先后暴露entrypoint/key映射、只读root缺Nginx临时目录、公开fixture权限及HTTPS444 curl返回码断言错误；这些失败报告均保留，未用语法检查冒充运行通过。
+- Sol接管已保留harness，依据镜像实测pid/temp路径只挂tmpfs /run和/var/cache/nginx，公开fixture0755/0644，使用真实proxy snippet；CA校验HTTPS200后444实际curl56/000无HTTP响应，限定HTTPS断连判断52/56而非忽略TLS。真实三配置nginx-t0、bootstrap503/未知缺Host、productionHTTPS200/redirect/未知缺Host、existing Git HTTP/HTTPS defaults及news两协议分别路由全部PASS。报告 /tmp/newshub-nginx-coexist-primary-r2-v4wylwtn/report.json，cleanupPASS，主控postowner无剩余容器；真服务器未操作。正式domain helper相同52硬编码需G1-TLS-CLOSE-ASSERTION最小修正，完整browser仍待验。
+- Chat九文件离线准备35定向/3 context回归、makemigrations/check/compile/diff-check均0。独立High切片无P0/P1/P2，前后九源hash/scoped diff相同58f214169f88b117065f444ac95714b486eaff2f234bb6a4005d86a47e1b581b；HEAD因G1无共享文件提交改变，代码未变。预hash /tmp/newshub-g2-chat-audit-pre.json，日志 /tmp/newshub-g2chat.rsGBRS/owned-tests.log。此为Chat切片，不等于G2整体验收；源尚未提交。
+- ADR021允许同隔离规则串行推进G2-ACCOUNTS源码准备，不触碰用户DB/开公共开关；G1最后runner/域名helper整改并行仅deploy文件，最终G1构建仍git archive纯G1提交候选。
