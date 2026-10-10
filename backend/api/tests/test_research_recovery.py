@@ -249,6 +249,7 @@ def test_sse_slots_saturate_before_dispatch_and_release_on_close_and_exception()
         assert sse_resources._active_sse_requests == 0
 
 
+@pytest.mark.django_db
 def test_sse_resource_release_on_stream_iteration_exception_and_non_sse_isolation():
     factory = RequestFactory()
     def response_with_failure(_request):
