@@ -405,16 +405,28 @@ def start_or_get_job(user, connection, news, *, force=False, shared_lease=None):
             handle_task = task
     except OperationalError as exc:
         _release_unattached_lease(shared_lease)
-        task = _task_filter(
-            user_id=user.pk, connection_id=current.pk, news_id=current_news.pk,
-            source_digest=digest,
-        ).first()
-        if task is not None and (not force or task.status in {'queued', 'running'}):
-            _recover_expired(task.pk, user_id=user.pk)
-            task.refresh_from_db()
-            if task.status == 'queued' and _snapshot_matches(task, current, current_news):
-                _dispatch_task(task.pk, task.generation)
-            return _handle(task)
+        # SQLite can still be releasing the competing transaction when we try
+        # to attach to its unique task. Retry ONLY the idempotent read/attach:
+        # do not create or reset a task (or call a provider) in this path.
+        for delay in (0, 0.02, 0.05, 0.10, 0.20):
+            if delay:
+                time.sleep(delay)
+            try:
+                task = _task_filter(
+                    user_id=user.pk, connection_id=current.pk, news_id=current_news.pk,
+                    source_digest=digest,
+                ).first()
+                if task is None:
+                    continue
+                if force and task.status not in {'queued', 'running'}:
+                    break
+                _recover_expired(task.pk, user_id=user.pk)
+                task.refresh_from_db()
+                if task.status == 'queued' and _snapshot_matches(task, current, current_news):
+                    _dispatch_task(task.pk, task.generation)
+                return _handle(task)
+            except OperationalError:
+                continue
         logger.info('ChatGPT translation task storage was busy (%s).', type(exc).__name__)
         raise SubscriptionError(
             '翻译任务暂时无法处理，请稍后重试。', 'task_storage_busy', 503,
