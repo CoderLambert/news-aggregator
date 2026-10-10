@@ -667,6 +667,11 @@ def complete_authorization(query, browser_binding_token: str) -> ChatGPTSubscrip
             if locked_attempt is None:
                 raise SubscriptionError('本地登录状态已切换或授权请求已取消。')
             get_user_model().objects.select_for_update().get(pk=locked_attempt.user_id)
+            if config.website and ChatGPTSubscriptionConnection.objects.filter(
+                oauth_mode='website', issuer=issuer, issued_client_id=client_id,
+                subject_hash=subject_hash,
+            ).exclude(user_id=locked_attempt.user_id).exists():
+                raise SubscriptionError('该 ChatGPT 账号已连接其他网站账号，不允许共享订阅凭据。')
             selection = _lock_selection(locked_attempt.user_id)
             target = None
             if locked_attempt.target_connection_id:
