@@ -65,9 +65,13 @@ def load_siwc_config() -> SiwcConfig:
     if (not client_id or client_id == 'dynamic_agent_client'
             or len(client_id) > 255 or any(c.isspace() for c in client_id)):
         raise SiwcConfigError('必须配置 OpenAI 正式签发的网站 Client ID。')
-    parsed = urlsplit(redirect_uri)
+    try:
+        parsed = urlsplit(redirect_uri)
+        port = parsed.port
+    except ValueError as exc:
+        raise SiwcConfigError('网站 OAuth 回调地址格式无效。') from exc
     if (parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password
-            or parsed.port not in (None, 443) or parsed.query or parsed.fragment
+            or port not in (None, 443) or parsed.query or parsed.fragment
             or parsed.path != CALLBACK_PATH):
         raise SiwcConfigError('网站回调必须是登记过的完整 HTTPS URL，且使用固定 callback 路径。')
     origin = f'https://{parsed.hostname}'
