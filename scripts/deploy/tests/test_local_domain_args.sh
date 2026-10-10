@@ -47,6 +47,8 @@ if [[ "$1" == image && "$2" == inspect ]]; then
     fi
     if [[ "$*" == *org.opencontainers.image.revision* ]]; then
         printf '%s\n' "$MOCK_IMAGE_SHA"
+    elif [[ "$*" == *'.Config.User'* ]]; then
+        printf '10001:10001\n'
     elif [[ "$*" == *'json .RepoDigests'* ]]; then
         printf '["nginx@sha256:mock"]\n'
     else
@@ -205,7 +207,10 @@ assert_no_docker_calls
 expect_exit 2 "$SMOKE_SCRIPT" --root "$task_test_root"
 expect_exit 2 "$SMOKE_SCRIPT" --execute --image "$APP_IMAGE" --sha bad
 expect_exit 2 "$SMOKE_SCRIPT" --stage invalid
-expect_exit 3 "$SMOKE_SCRIPT" --stage g2 --execute
+output="$("$SMOKE_SCRIPT" --stage g2 --image "$APP_IMAGE" --sha "$MOCK_IMAGE_SHA")"
+[[ "$output" == *'stage G2'* && "$output" == *'Dry run only'* ]] \
+    || fail 'G2 dry run did not remain no-resource.'
+expect_exit 3 "$SMOKE_SCRIPT" --stage g3 --execute --image "$APP_IMAGE" --sha "$MOCK_IMAGE_SHA"
 assert_no_docker_calls
 
 expect_exit 2 env TMPDIR=relative "$SMOKE_SCRIPT" --execute --image "$APP_IMAGE" --sha "$MOCK_IMAGE_SHA"
@@ -266,7 +271,7 @@ from pathlib import Path
 
 line = next(
     line for line in Path(sys.argv[1]).read_text(encoding='utf-8').splitlines()
-    if line.startswith('seed_code=')
+    if line.lstrip().startswith('seed_code=')
 )
 seed_code = ast.literal_eval(line.split('=', 1)[1])
 compile(seed_code, '<local-domain-fixture-seed>', 'exec')
@@ -295,7 +300,7 @@ if find "$task_temp" -mindepth 1 -maxdepth 1 -type d -name 'newshub-local-domain
 fi
 report_path="$(printf '%s\n' "$output" | sed -n 's/.*report //p' | tail -n 1)"
 [[ -f "$report_path" ]] || fail 'the report artifact was not retained outside the cleaned work directory.'
-"$REAL_PYTHON" -c 'import json,sys; report=json.load(open(sys.argv[1], encoding="utf-8")); assert report["cleanup_status"] == "PASS" and report["status"] == "PASS" and report["image_revision"] == sys.argv[2] and report["nginx_image_id"] == "sha256:local-mock-image" and report["nginx_repo_digests"] == ["nginx@sha256:mock"] and report["nginx_version"] == "nginx version: nginx/1.30.5"' "$report_path" "$MOCK_IMAGE_SHA" \
+"$REAL_PYTHON" -c 'import json,sys; report=json.load(open(sys.argv[1], encoding="utf-8")); assert report["cleanup_status"] == "PASS" and report["status"] == "PASS" and report["image_revision"] == sys.argv[2] and report["application_image_id"] == "sha256:local-mock-image" and report["application_image_user"] == "10001:10001" and report["nginx_image_id"] == "sha256:local-mock-image" and report["nginx_repo_digests"] == ["nginx@sha256:mock"] and report["nginx_version"] == "nginx version: nginx/1.30.5"' "$report_path" "$MOCK_IMAGE_SHA" \
     || fail 'the final report did not record the image revision and cleanup result.'
 
 printf 'local-domain smoke argument/resource tests passed (Docker/OpenSSL/certutil/curl/browser are stubbed).\n'

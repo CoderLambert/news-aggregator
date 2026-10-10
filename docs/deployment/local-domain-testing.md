@@ -4,25 +4,25 @@
 
 | 阶段 | 必须验证 | 当前状态 |
 | --- | --- | --- |
-| G1 只读站点 | 域名解析、证书信任与 SAN 负例、首页/深链接、缓存、只读权限、代理头、SSE 首帧 | 脚本与离线检查完成；实际隔离栈 NOT_RUN |
-| G2 账户功能 | 登录/退出、会话生命周期、Secure/HttpOnly/Host-only Cookie、CSRF 写请求及拒绝负例、匿名和 A/B 用户隔离 | 待账户功能完成后扩展并执行；NOT_RUN |
-| G3 任务功能 | 已登录任务创建、SSE 重连/取消、权限及配额失败；使用离线 Fake Provider | 待任务功能完成后扩展并执行；NOT_RUN |
+| G1 只读站点 | 域名解析、证书信任与 SAN 负例、首页/深链接、缓存、只读权限、代理头、SSE 首帧 | 候选 `91dc86b6a5dd212ea29d17f2692888be77e7b254` 的隔离 runtime 已通过；公网仍需上线现场验收 |
+| G2 账户功能 | 登录/退出、会话生命周期、Secure/HttpOnly/Host-only Cookie、CSRF 写请求及拒绝负例、匿名和 A/B 用户隔离、管理员权限、真实源 IP 限速 | harness 与离线测试已实现；固定 G2 candidate 的实际 runtime 尚未运行，NOT_RUN |
+| G3 任务功能 | 已登录任务创建、SSE 重连/取消、权限及配额失败；使用离线 Fake Provider | 不属于当前实现范围；NOT_RUN |
 
 每次实际验收保存源码 SHA、镜像 revision、命令退出码、浏览器报告/截图及资源清理结果。公网 DNS、真实证书签发、安全组和外网访问另在正式上线时验收；本地通过不能替代这些现场结果。
 
 `local-domain-smoke.sh` 用 Docker 网络别名在本机验证正式主机名 `news.lambert.host`，不查询公网 DNS，也不修改 `/etc/hosts`、系统证书库、浏览器全局配置或服务器。默认调用是 dry-run；只有显式传入 `--execute` 才会检查并启动本地隔离栈。
 
-阶段 A 的离线检查：
+G1/G2 harness 的离线检查：
 
 ```sh
 PYTHONPATH=backend:crawler RUN_MAIN=true backend/venv/bin/python -m pytest scripts/deploy/tests/test_nginx_templates.py -q
-PYTHONPATH=backend:crawler RUN_MAIN=true backend/venv/bin/python -m pytest scripts/deploy/tests/test_local_domain_acceptance.py -q
+PYTHONPATH=backend:crawler RUN_MAIN=true backend/venv/bin/python -m pytest scripts/deploy/tests/test_local_domain_acceptance.py scripts/deploy/tests/test_local_domain_fixtures.py -q
 bash -n scripts/deploy/local-domain-smoke.sh scripts/deploy/tests/test_local_domain_args.sh
 bash scripts/deploy/tests/test_local_domain_args.sh
-backend/venv/bin/python -m py_compile scripts/deploy/local_domain_acceptance.py
+backend/venv/bin/python -m py_compile scripts/deploy/local_domain_acceptance.py scripts/deploy/local_domain_fixtures.py
 ```
 
-执行 G1 前，需要已构建且本地存在与源码 SHA 一致的 production image，以及本地 Nginx image。smoke 不会执行 `docker pull`。默认 Nginx image 是 `nginx:stable-alpine`，可用 `--nginx-image` 或 `NGINX_IMAGE` 选择已存在的镜像；若镜像缺失会返回 `NOT_RUN` 并提示显式预载。阶段 B/CI 可使用已经验证过的 `nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94`，该测试镜像报告版本为 1.30.5。正式服务器版本须在发布现场单独运行 `nginx -t` 核验；本地镜像版本不代表服务器版本。
+执行 G1 或 G2 前，需要已构建且本地存在与源码 SHA 一致的 production image，以及本地 Nginx image。G2 还要求预载 `curlimages/curl:8.10.1`（可用 `LOCAL_DOMAIN_CURL_IMAGE` 指定已存在的镜像）。smoke 不会执行 `docker pull`。默认 Nginx image 是 `nginx:stable-alpine`，可用 `--nginx-image` 或 `NGINX_IMAGE` 选择已存在的镜像；若镜像缺失会返回 `NOT_RUN` 并提示显式预载。阶段 B/CI 可使用已经验证过的 `nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94`，该测试镜像报告版本为 1.30.5。正式服务器版本须在发布现场单独运行 `nginx -t` 核验；本地镜像版本不代表服务器版本。
 
 固定候选镜像 SHA 后，阶段 B 的 G1 命令为：
 
@@ -47,4 +47,8 @@ news 的 production 模板包含 HTTP 与 HTTPS 两个虚拟主机，bootstrap �
 
 浏览器/API/SSE 结果与 app revision、Nginx image ID、RepoDigest 和版本写入 JSON 报告；报告在清理完成后更新 `cleanup_status`。任一步失败都只清理该次任务的资源。
 
-G2 登录、session 生命周期、已登录 CSRF 写操作和 A/B 用户隔离尚未实现，当前 `--stage g2` 固定返回 `NOT_RUN`，不得把 G1 结果表述成 G2 通过。阶段 B 尚未执行前，也不能把本地模板、镜像或域名链描述为生产验收通过。
+G2 harness 通过真实 UI 预期覆盖匿名私有路由、A/B 邀请注册与注销/刷新、会话和 CSRF Cookie、个人收藏/Chat/Research 权属、延迟 `auth/me` 响应、管理员激活/停用、登录与注册限速、伪造 XFF 负例。当前这些是已实现的验收路径，尚无 G2 实际 runtime 报告；必须等待固定 candidate 后运行 `--stage g2`，不能用离线检查代替。
+
+G2 使用本次 smoke 私有的 0600 fixture bundle 和数据库。fixture helper 在 Django 初始化前核对随机 Compose project、镜像 revision、生产配置、UID 10001 和自有 `/var/lib/newshub/db/` 路径；只有空用户表允许 seed。A/B 由 SPA 真实邀请注册，个人数据通过一次性合成 owner fixture 附加。登录失败使用真实 `127.0.0.70` loopback 源地址；注册负例分配到 `127.0.0.61`–`127.0.0.65`，第六次请求再附加伪造 XFF 证明它不能绕过限速。侧车复用 gateway network namespace，限制为只读 root、非特权、宿主 UID:GID、内部网络和临时 CA；响应正文和 Cookie 留在私有目录，不写进报告。
+
+G3 任务/worker 与 Fake Provider 不属于本轮实现，当前状态为 `NOT_RUN`。公网 DNS、真实证书签发、安全组和外网访问也仍需上线现场验收。

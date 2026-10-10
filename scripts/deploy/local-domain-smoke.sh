@@ -9,9 +9,14 @@ IMAGE=""
 SHA=""
 STAGE="g1"
 NGINX_IMAGE="${NGINX_IMAGE:-nginx:stable-alpine}"
+G2_CURL_IMAGE="${LOCAL_DOMAIN_CURL_IMAGE:-curlimages/curl:8.10.1}"
 NGINX_IMAGE_ID=""
 NGINX_REPO_DIGESTS=""
 NGINX_VERSION=""
+CURL_IMAGE_ID=""
+CURL_REPO_DIGESTS=""
+IMAGE_ID=""
+IMAGE_USER=""
 CHROMIUM_EXECUTABLE="${CHROMIUM_EXECUTABLE:-/usr/bin/chromium}"
 PYTHON_BIN="${PYTHON_BIN:-$PROJECT_ROOT/backend/venv/bin/python}"
 task_smoke_root=""
@@ -23,15 +28,18 @@ task_compose_started=0
 task_fake_server_id=""
 task_cleanup_failed=0
 TASK_TMPDIR=""
+task_fixture_bundle=""
+task_fixture_state=""
 
 usage() {
     cat <<'EOF'
 Usage: local-domain-smoke.sh [--execute] [--image IMAGE] [--sha 40-HEX-SHA]
-                             [--stage g1|g2] [--nginx-image IMAGE]
+                             [--stage g1|g2|g3] [--nginx-image IMAGE]
                              [--chromium-executable ABSOLUTE-PATH]
 
 Without --execute, this validates arguments and prints a no-resource dry-run plan.
-Stage g2 is reserved and returns NOT_RUN until it has a separate implementation contract.
+G1 runs the read-only smoke; G2 runs the synthetic account acceptance matrix.
+Stage g3 is explicitly reserved and returns NOT_RUN without creating resources.
 The smoke never pulls images. Preload the selected app and Nginx images first.
 EOF
 }
@@ -86,11 +94,11 @@ cleanup() {
         fi
     fi
     if ((status == 0)); then
-        printf 'G1 local-domain smoke PASS; app revision %s; Nginx image %s; report %s\n' \
-            "$SHA" "$NGINX_IMAGE ($NGINX_IMAGE_ID)" "$report_path"
+        printf 'G%s local-domain smoke PASS; app revision %s; Nginx image %s; report %s\n' \
+            "${STAGE#g}" "$SHA" "$NGINX_IMAGE ($NGINX_IMAGE_ID)" "$report_path"
     elif [[ -n "$task_report_root" ]]; then
-        printf 'G1 local-domain smoke NOT PASS; app revision %s; Nginx image %s; report directory %s\n' \
-            "$SHA" "$NGINX_IMAGE ($NGINX_IMAGE_ID)" "$task_report_root" >&2
+        printf 'G%s local-domain smoke NOT PASS; app revision %s; Nginx image %s; report directory %s\n' \
+            "${STAGE#g}" "$SHA" "$NGINX_IMAGE ($NGINX_IMAGE_ID)" "$task_report_root" >&2
     fi
     exit "$status"
 }
@@ -136,21 +144,23 @@ while (($#)); do
     esac
 done
 
-[[ "$STAGE" == g1 || "$STAGE" == g2 ]] || fail '--stage must be g1 or g2.'
-if [[ "$STAGE" == g2 ]]; then
-    not_run 'G2 browser account/session checks are not implemented; use the G1 stage only.'
+[[ "$STAGE" == g1 || "$STAGE" == g2 || "$STAGE" == g3 ]] \
+    || fail '--stage must be g1, g2, or g3.'
+if [[ "$STAGE" == g3 ]]; then
+    not_run 'G3 task/worker acceptance is not part of this harness implementation.'
 fi
 
 if ((!EXECUTE)); then
     if [[ -z "$IMAGE" && -z "$SHA" ]]; then
-        printf 'Dry run only: stage G1, default Nginx image %s; no Docker, certificate, browser, or filesystem resources created.\n' "$NGINX_IMAGE"
+        printf 'Dry run only: stage %s, default Nginx image %s; no Docker, fixture, certificate, browser, or filesystem resources created.\n' \
+            "${STAGE^^}" "$NGINX_IMAGE"
         exit 0
     fi
     [[ -n "$IMAGE" && -n "$SHA" ]] || fail 'dry-run arguments must include --image and --sha together.'
     [[ "$SHA" =~ ^[[:xdigit:]]{40}$ ]] || fail '--sha must be exactly 40 hexadecimal characters.'
     SHA="${SHA,,}"
-    printf 'Dry run only: would verify image %s at revision %s with Nginx image %s; no resources created.\n' \
-        "$IMAGE" "$SHA" "$NGINX_IMAGE"
+    printf 'Dry run only: would run stage %s against image %s at revision %s with Nginx image %s; no resources created.\n' \
+        "${STAGE^^}" "$IMAGE" "$SHA" "$NGINX_IMAGE"
     exit 0
 fi
 
@@ -159,6 +169,7 @@ fi
 [[ -n "$NGINX_IMAGE" ]] || fail 'Nginx image must not be empty.'
 [[ "$IMAGE" =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$ ]] || fail '--image must be a single valid image reference.'
 [[ "$NGINX_IMAGE" =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$ ]] || fail '--nginx-image must be a single valid image reference.'
+[[ "$G2_CURL_IMAGE" =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$ ]] || fail 'LOCAL_DOMAIN_CURL_IMAGE must be a single valid image reference.'
 [[ "$SHA" =~ ^[[:xdigit:]]{40}$ ]] || fail '--sha must be exactly 40 hexadecimal characters.'
 SHA="${SHA,,}"
 
@@ -189,19 +200,32 @@ fi
 [[ -n "$NGINX_IMAGE_ID" ]] || not_run "Nginx image $NGINX_IMAGE has no local image ID."
 NGINX_REPO_DIGESTS="$(docker image inspect --format='{{json .RepoDigests}}' "$NGINX_IMAGE" 2>/dev/null)" \
     || fail 'could not inspect the selected Nginx image RepoDigests.'
-if ! docker image inspect --format='{{.Id}}' "$IMAGE" >/dev/null 2>&1; then
+if ! IMAGE_ID="$(docker image inspect --format='{{.Id}}' "$IMAGE" 2>/dev/null)"; then
     not_run "application image $IMAGE is not present locally; build or preload the fixed-revision image first."
 fi
+[[ -n "$IMAGE_ID" ]] || fail 'application image has no local image ID.'
 IMAGE_REVISION="$(docker image inspect --format='{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE" 2>/dev/null)" \
     || fail 'could not inspect the requested application image revision label.'
 [[ "$IMAGE_REVISION" =~ ^[[:xdigit:]]{40}$ ]] || fail 'application image revision label is missing or invalid.'
 IMAGE_REVISION="${IMAGE_REVISION,,}"
 [[ "$IMAGE_REVISION" == "$SHA" ]] || fail 'application image revision label does not match --sha.'
+IMAGE_USER="$(docker image inspect --format='{{.Config.User}}' "$IMAGE" 2>/dev/null)" \
+    || fail 'could not inspect the application image user.'
+[[ "$IMAGE_USER" == '10001:10001' ]] || fail 'application image must run as UID:GID 10001:10001.'
 NGINX_VERSION="$(docker run --rm --pull=never --network=none "$NGINX_IMAGE" nginx -v 2>&1)" \
     || fail 'could not read the selected local Nginx version.'
+if [[ "$STAGE" == g2 ]]; then
+    if ! CURL_IMAGE_ID="$(docker image inspect --format='{{.Id}}' "$G2_CURL_IMAGE" 2>/dev/null)"; then
+        not_run "G2 curl sidecar image $G2_CURL_IMAGE is not present locally; preload it explicitly."
+    fi
+    [[ -n "$CURL_IMAGE_ID" ]] || fail 'G2 curl sidecar image has no local image ID.'
+    CURL_REPO_DIGESTS="$(docker image inspect --format='{{json .RepoDigests}}' "$G2_CURL_IMAGE" 2>/dev/null)" \
+        || fail 'could not inspect the G2 curl sidecar image RepoDigests.'
+fi
 
 task_smoke_root="$(mktemp -d "$TASK_TMPDIR/newshub-local-domain.XXXXXX")" \
     || fail 'could not create the isolated smoke directory.'
+umask 077
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -210,15 +234,35 @@ trap 'exit 143' TERM
 task_report_root="$(mktemp -d "$TASK_TMPDIR/newshub-local-domain-report-${SHA}.XXXXXX")" \
     || fail 'could not create the smoke report directory.'
 [[ "$(dirname -- "$task_report_root")" == "$TASK_TMPDIR" ]] || fail 'mktemp returned an unexpected report path.'
-task_compose_project="newshub-local-g1-$$-$RANDOM"
+project_nonce="$(printf '%08x%08x' "$RANDOM" "$RANDOM")"
+task_compose_project="newshub-local-${STAGE}-$$-${project_nonce}"
+for project_resources in \
+    "$(docker ps -aq --filter "label=com.docker.compose.project=$task_compose_project")" \
+    "$(docker volume ls -q --filter "label=com.docker.compose.project=$task_compose_project")" \
+    "$(docker network ls -q --filter "label=com.docker.compose.project=$task_compose_project")"; do
+    [[ -z "$project_resources" ]] || fail 'random Compose project name already owns Docker resources.'
+done
 task_compose_file="$task_smoke_root/compose.yaml"
 task_compose_env="$task_smoke_root/compose.env"
+task_fixture_bundle="$task_smoke_root/g2-fixtures.json"
+task_fixture_state="$task_smoke_root/g2-fixture-state.json"
 mkdir -p -- "$task_smoke_root/certs" "$task_smoke_root/acme/.well-known/acme-challenge" \
     "$task_smoke_root/site"
+if [[ "$STAGE" == g2 ]]; then
+    "$PYTHON_BIN" "$PROJECT_ROOT/scripts/deploy/local_domain_fixtures.py" create \
+        --output "$task_fixture_bundle" >/dev/null \
+        || fail 'could not create the private G2 fixture bundle.'
+fi
 secret_key="$(openssl rand -hex 32)" || fail 'could not create an ephemeral smoke-only application key.'
 [[ "$secret_key" =~ ^[[:xdigit:]]{64}$ ]] || fail 'OpenSSL returned an invalid ephemeral key.'
-printf 'NEWSHUB_IMAGE=%s\nNGINX_IMAGE=%s\nDJANGO_SECRET_KEY=%s\n' \
-    "$IMAGE" "$NGINX_IMAGE" "$secret_key" >"$task_compose_env"
+printf 'NEWSHUB_IMAGE=%s\nNGINX_IMAGE=%s\nNEWSHUB_REVISION=%s\nSMOKE_PROJECT=%s\nSMOKE_STAGE=%s\nDJANGO_SECRET_KEY=%s\n' \
+    "$IMAGE" "$NGINX_IMAGE" "$SHA" "$task_compose_project" "$STAGE" "$secret_key" >"$task_compose_env"
+if [[ "$STAGE" == g1 ]]; then
+    printf 'PUBLIC_SITE_MODE=read_only\nPUBLIC_SIGNUP_ENABLED=0\n' >>"$task_compose_env"
+else
+    printf 'PUBLIC_SITE_MODE=full\nPUBLIC_SIGNUP_ENABLED=1\n' >>"$task_compose_env"
+fi
+chmod 600 -- "$task_compose_env"
 unset secret_key
 
 openssl req -x509 -newkey rsa:2048 -nodes -keyout "$task_smoke_root/certs/ca.key" \
@@ -306,8 +350,8 @@ x-smoke-environment: &smoke-environment
   WAITRESS_THREADS: "4"
   WAITRESS_CONN_LIMIT: "1000"
   DJANGO_DB_PATH: /var/lib/newshub/db/db.sqlite3
-  PUBLIC_SITE_MODE: read_only
-  PUBLIC_SIGNUP_ENABLED: "0"
+  PUBLIC_SITE_MODE: "${PUBLIC_SITE_MODE}"
+  PUBLIC_SIGNUP_ENABLED: "${PUBLIC_SIGNUP_ENABLED}"
   PUBLIC_AI_ENABLED: "0"
   CHATGPT_PLAN_USAGE_ENABLED: "0"
   CHATGPT_AUTH_MODE: disabled
@@ -315,6 +359,11 @@ x-smoke-environment: &smoke-environment
   CRAWL_RUN_ON_START: "0"
   SEARCH_INDEX_ENABLED: "0"
   RUN_MAIN: "true"
+  NEWSHUB_LOCAL_DOMAIN_STAGE: "${SMOKE_STAGE}"
+  NEWSHUB_LOCAL_DOMAIN_PROJECT: "${SMOKE_PROJECT}"
+  NEWSHUB_LOCAL_DOMAIN_FIXTURE_CONFIRMATION: "${SMOKE_PROJECT}"
+  NEWSHUB_LOCAL_DOMAIN_IMAGE: "${NEWSHUB_IMAGE}"
+  NEWSHUB_LOCAL_DOMAIN_REVISION: "${NEWSHUB_REVISION}"
 
 services:
   gateway:
@@ -390,14 +439,35 @@ for _attempt in {1..30}; do
 done
 ((ready)) || fail 'temporary app did not pass its database readiness probe.'
 
-seed_code="from django.utils import timezone; from api.models import Category, News, Source; category,_=Category.objects.get_or_create(name='NewsHub Local Domain Fixture', defaults={'slug':'newshub-local-domain-fixture'}); source,_=Source.objects.get_or_create(name='NewsHub Local Domain Fixture', defaults={'url':'https://fixture.invalid/news'}); flow=\"## Isolated article flow\\n\\n\"+chr(96)*3+\"mermaid\\nflowchart TD\\n  news[Fixture article] --> diagram[Mermaid flow]\\n\"+chr(96)*3+\"\\n\"; news,_=News.objects.get_or_create(url='https://fixture.invalid/newshub-local-domain-g1', defaults={'title':'NewshubLocalDomainG1Fixture','content':'isolated smoke fixture','full_content':flow,'full_content_fetch_status':'success','publish_time':timezone.now(),'source':source,'category':category}); print(news.pk)"
-if ! docker compose --project-name "$task_compose_project" --file "$task_compose_file" \
-    --env-file "$task_compose_env" exec -T app python /app/backend/manage.py shell -c "$seed_code" \
-    >"$task_smoke_root/seed.stdout" 2>"$task_smoke_root/seed.stderr"; then
-    fail 'could not seed the isolated news fixture.'
+if [[ "$STAGE" == g1 ]]; then
+    seed_code="from django.utils import timezone; from api.models import Category, News, Source; category,_=Category.objects.get_or_create(name='NewsHub Local Domain Fixture', defaults={'slug':'newshub-local-domain-fixture'}); source,_=Source.objects.get_or_create(name='NewsHub Local Domain Fixture', defaults={'url':'https://fixture.invalid/news'}); flow=\"## Isolated article flow\\n\\n\"+chr(96)*3+\"mermaid\\nflowchart TD\\n  news[Fixture article] --> diagram[Mermaid flow]\\n\"+chr(96)*3+\"\\n\"; news,_=News.objects.get_or_create(url='https://fixture.invalid/newshub-local-domain-g1', defaults={'title':'NewshubLocalDomainG1Fixture','content':'isolated smoke fixture','full_content':flow,'full_content_fetch_status':'success','publish_time':timezone.now(),'source':source,'category':category}); print(news.pk)"
+    if ! docker compose --project-name "$task_compose_project" --file "$task_compose_file" \
+        --env-file "$task_compose_env" exec -T app python /app/backend/manage.py shell -c "$seed_code" \
+        >"$task_smoke_root/seed.stdout" 2>"$task_smoke_root/seed.stderr"; then
+        fail 'could not seed the isolated news fixture.'
+    fi
+    news_id="$(tail -n 1 "$task_smoke_root/seed.stdout" | tr -d '\r')"
+    [[ "$news_id" =~ ^[1-9][0-9]*$ ]] || fail 'the isolated news fixture returned an invalid ID.'
+else
+    if ! "$PYTHON_BIN" "$PROJECT_ROOT/scripts/deploy/local_domain_fixtures.py" \
+        emit-program --bundle "$task_fixture_bundle" --phase seed \
+        | docker compose --project-name "$task_compose_project" --file "$task_compose_file" \
+            --env-file "$task_compose_env" exec -T -i app python - \
+                >"$task_fixture_state" 2>"$task_smoke_root/seed.stderr"; then
+        fail 'G2 private database fixture seed was refused or failed.'
+    fi
+    chmod 600 -- "$task_fixture_state"
+    news_id="$("$PYTHON_BIN" - "$task_fixture_state" <<'PY'
+import json, re, sys
+from pathlib import Path
+result = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+assert result.get('ok') is True and result.get('users_seeded') == 2
+news_id = result.get('news_id')
+assert isinstance(news_id, int) and news_id > 0
+print(news_id)
+PY
+)" || fail 'G2 fixture seed result was invalid.'
 fi
-news_id="$(tail -n 1 "$task_smoke_root/seed.stdout" | tr -d '\r')"
-[[ "$news_id" =~ ^[1-9][0-9]*$ ]] || fail 'the isolated news fixture returned an invalid ID.'
 
 gateway_id="$(docker compose --project-name "$task_compose_project" --file "$task_compose_file" \
     --env-file "$task_compose_env" ps -q gateway)" || fail 'could not find the isolated Nginx container.'
@@ -410,11 +480,31 @@ gateway_ip="$("$PYTHON_BIN" -c 'import ipaddress,sys; address=ipaddress.ip_addre
 mkdir -p -- "$task_report_root"
 http_report="$task_report_root/http-browser.json"
 sse_report="$task_report_root/sse.json"
+acceptance_args=(
+    --gateway-ip "$gateway_ip"
+    --ca-cert "$task_smoke_root/certs/ca.crt"
+    --work-dir "$task_report_root"
+    --news-id "$news_id"
+    --chromium-executable "$CHROMIUM_EXECUTABLE"
+    --image-revision "$SHA"
+    --nginx-image "$NGINX_IMAGE"
+    --stage "$STAGE"
+    --report "$http_report"
+)
+if [[ "$STAGE" == g2 ]]; then
+    acceptance_args+=(
+        --fixture-bundle "$task_fixture_bundle"
+        --fixture-state "$task_fixture_state"
+        --compose-project "$task_compose_project"
+        --compose-file "$task_compose_file"
+        --compose-env "$task_compose_env"
+        --gateway-container-id "$gateway_id"
+        --curl-image "$G2_CURL_IMAGE"
+        --private-root "$task_smoke_root"
+    )
+fi
 if ! "$PYTHON_BIN" "$PROJECT_ROOT/scripts/deploy/local_domain_acceptance.py" \
-    --gateway-ip "$gateway_ip" --ca-cert "$task_smoke_root/certs/ca.crt" \
-    --work-dir "$task_report_root" --news-id "$news_id" \
-    --chromium-executable "$CHROMIUM_EXECUTABLE" --image-revision "$SHA" \
-    --nginx-image "$NGINX_IMAGE" --report "$http_report"; then
+    "${acceptance_args[@]}"; then
     printf 'local-domain-smoke: HTTP/browser checks failed; report: %s\n' "$http_report" >&2
     exit 1
 fi
@@ -480,13 +570,14 @@ done
 "$PYTHON_BIN" "$PROJECT_ROOT/scripts/deploy/local_domain_acceptance.py" \
     --gateway-ip "$gateway_ip" --ca-cert "$task_smoke_root/certs/ca.crt" \
     --work-dir "$task_report_root" --sse-only --news-id "$news_id" --image-revision "$SHA" \
-    --nginx-image "$NGINX_IMAGE" --report "$sse_report" \
+    --nginx-image "$NGINX_IMAGE" --stage "$STAGE" --report "$sse_report" \
     || fail 'isolated Nginx SSE first-frame timing check failed.'
 docker rm -f "$task_fake_server_id" >/dev/null
 task_fake_server_id=""
 
 "$PYTHON_BIN" - "$http_report" "$sse_report" "$task_report_root/report.json" \
-    "$IMAGE" "$SHA" "$NGINX_IMAGE" "$NGINX_IMAGE_ID" "$NGINX_REPO_DIGESTS" "$NGINX_VERSION" <<'PY'
+    "$IMAGE" "$SHA" "$NGINX_IMAGE" "$NGINX_IMAGE_ID" "$NGINX_REPO_DIGESTS" "$NGINX_VERSION" \
+    "$IMAGE_ID" "$IMAGE_USER" "$STAGE" "$CURL_IMAGE_ID" "$CURL_REPO_DIGESTS" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -495,15 +586,19 @@ http_result = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
 sse_result = json.loads(Path(sys.argv[2]).read_text(encoding='utf-8'))
 checks = {**http_result.get('checks', {}), **sse_result.get('checks', {})}
 result = {
-    'stage': 'g1',
+    'stage': sys.argv[12],
     'status': 'PASS' if http_result.get('status') == 'PASS' and sse_result.get('status') == 'PASS' else 'FAIL',
     'cleanup_status': 'pending',
     'application_image': sys.argv[4],
     'image_revision': sys.argv[5],
+    'application_image_id': sys.argv[10],
+    'application_image_user': sys.argv[11],
     'nginx_image': sys.argv[6],
     'nginx_image_id': sys.argv[7],
     'nginx_repo_digests': json.loads(sys.argv[8]),
     'nginx_version': sys.argv[9],
+    'curl_image_id': sys.argv[13] or None,
+    'curl_repo_digests': json.loads(sys.argv[14]) if sys.argv[14] else [],
     'checks': {
         'compose_config': 'PASS (docker compose config --quiet exit 0)',
         'nginx_bootstrap_config': 'PASS (nginx -t exit 0)',
