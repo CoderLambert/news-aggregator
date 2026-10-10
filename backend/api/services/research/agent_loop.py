@@ -264,6 +264,7 @@ def _call_llm_with_tools(messages: list, tools=None, execution_guard=None):
                     max_tokens=8000,
                 )
             except Exception as exc:
+                guard()  # A cancelled/expired worker never enters a retry or fallback.
                 logger.info('Research provider attempt failed (provider=%s attempt=%s).', idx, attempt)
                 transient = any(
                     keyword in str(exc).lower()
@@ -271,11 +272,14 @@ def _call_llm_with_tools(messages: list, tools=None, execution_guard=None):
                 )
                 if transient and attempt < max_retries:
                     time.sleep(1 * attempt)
+                    guard()
                     continue
                 break
             guard()
             return response
+        guard()  # Fence the boundary between configured Providers.
 
+    guard()
     logger.info('All configured research providers failed.')
     return None
 

@@ -316,9 +316,11 @@ def _claim(run_id):
     now = timezone.now()
     with transaction.atomic():
         changed = ResearchRun.objects.filter(
-            pk=run_id, status='queued', session__user_id=F('user_id'),
+            pk=run_id, status='queued', started_at__isnull=True,
+            session__user_id=F('user_id'),
         ).update(
             status='running', run_token=token, started_at=now,
+            queued_query='', queued_local_only=False,
             heartbeat_at=now, lease_expires_at=now + RUN_LEASE, updated_at=now,
         )
     return token if changed else None
@@ -517,6 +519,9 @@ def submit_research_run(user, *, session_id, query: str, local_only: bool, idemp
             'hosted_integration_unapproved', '网站订阅研究集成尚未获批。', 503,
         )
     key = validate_idempotency_key(idempotency_key)
+    if not isinstance(query, str) or not query.strip() or len(query) > 20_000:
+        raise ResearchRunError('invalid_research_query', '研究问题长度不合法。', 400)
+    query = query.strip()
     digest = request_digest(query, local_only, session_id)
     if session_id is not None:
         session = ResearchSession.objects.filter(pk=session_id, user=user).first()
@@ -558,6 +563,7 @@ def submit_research_run(user, *, session_id, query: str, local_only: bool, idemp
             run = ResearchRun.objects.create(
                 user=user, session=session, idempotency_key=key,
                 request_hash=digest, status='queued',
+                queued_query=query, queued_local_only=local_only,
             )
         _rename_reservation(reservation, str(run.pk))
     except IntegrityError:
@@ -580,6 +586,47 @@ def submit_research_run(user, *, session_id, query: str, local_only: bool, idemp
         raise
     _dispatch(run.pk, query, local_only)
     return session, run
+
+
+
+def resume_queued_run(user, session, run_id):
+    """Explicitly dispatch an existing never-started job, without creating a run.
+
+    A read-only GET cannot dispatch. A RUNNING (or terminal) attempt must never
+    be scheduled again, even after its lease expires or the frontend loses state.
+    """
+    if _blocked_hosted_environment():
+        raise ResearchRunError(
+            'hosted_integration_unapproved', '网站订阅研究集成尚未获批。', 503,
+        )
+    if not user.is_active or session.user_id != user.pk:
+        raise ResearchRunError('research_session_not_found', '研究会话不存在。', 404)
+    try:
+        parsed_run_id = uuid.UUID(run_id)
+    except (ValueError, TypeError, AttributeError):
+        raise ResearchRunError('invalid_run_id', '研究任务标识无效。', 400) from None
+    run = ResearchRun.objects.filter(
+        pk=parsed_run_id, user=user, session=session,
+    ).first()
+    if run is None:
+        raise ResearchRunError('research_run_not_found', '研究任务不存在。', 404)
+    if run.status == 'running':
+        # A committed worker already owns the provider call. Do not dispatch.
+        return _expire_run_if_needed(run)
+    if run.status != 'queued' or run.started_at is not None:
+        raise ResearchRunError('research_run_changed', '研究任务不再等待启动。', 409)
+    if not run.queued_query:
+        # Migration deliberately does not invent historic prompts.
+        raise ResearchRunError(
+            'research_queued_input_missing', '旧任务缺少恢复参数，请明确重新研究。', 409,
+        )
+    if len(run.queued_query) > 20_000:
+        raise ResearchRunError(
+            'research_queued_input_invalid', '研究任务参数不合法。', 409,
+        )
+    _dispatch(run.pk, run.queued_query, run.queued_local_only)
+    run.refresh_from_db()
+    return run
 
 
 def _reconcile_session_expiry(user_id, session_id):

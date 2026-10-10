@@ -313,6 +313,7 @@ class ChatGPTTranslationTaskCancelView(_NoStoreAPIView):
 
 def subscription_translation_response(request, news: News, force=False):
     """SSE adapter for a per-user subscription translation job."""
+    from api.translation_sse import translation_sse_records
     user = request.user
     connection = subscription.active_connection_for_user(user)
 
@@ -391,21 +392,23 @@ def subscription_translation_response(request, news: News, force=False):
         sent_length = 0
         try:
             if job.text:
-                yield f"data: {json.dumps({'progress': job.text}, ensure_ascii=False)}\n\n"
-                sent_length = len(job.text)
+                initial = job.text
+                yield from translation_sse_records({'progress': initial})
+                sent_length = len(initial)
             while not job.done:
                 current_length = job.wait_for_update(sent_length, timeout=1.0)
                 if current_length > sent_length:
-                    data = {'progress': job.text}
-                    yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
-                    sent_length = current_length
+                    latest = job.text
+                    if len(latest) > sent_length:
+                        yield from translation_sse_records({'progress_delta': latest[sent_length:]})
+                        sent_length = len(latest)
             if job.error:
                 yield f"data: {json.dumps({'error': job.error}, ensure_ascii=False)}\n\n"
                 return
             if job.result is None:
                 yield f"data: {json.dumps({'error': '本次翻译没有保存完整结果。'}, ensure_ascii=False)}\n\n"
                 return
-            yield f"event: complete\ndata: {json.dumps(job.result, ensure_ascii=False)}\n\n"
+            yield from translation_sse_records(job.result, event='complete')
         except subscription.SubscriptionError as exc:
             yield f"data: {json.dumps({'error': str(exc)}, ensure_ascii=False)}\n\n"
         except GeneratorExit:

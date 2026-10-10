@@ -1149,11 +1149,19 @@ def test_responses_http400_unknown_json_error_does_not_echo_sensitive_fields(use
     ],
 )
 def test_responses_sse_saves_only_after_completed_event(
-    user, news, crypto, clear_subscription_jobs, transactional_db, lines, expected_content, expected_error,
+    user, news, crypto, clear_subscription_jobs, transactional_db, monkeypatch,
+    lines, expected_content, expected_error,
 ):
     connection = make_connection(user)
     response = FakeResponse(lines=lines)
     request_mock = Mock(return_value=response)
+    # This test verifies SSE terminal parsing and HTTP response cleanup, not
+    # thread scheduling. Execute only its fake worker inline so unrelated
+    # SQLite in-memory writer locks cannot fail it before requests.post.
+    monkeypatch.setattr(
+        translation_jobs, '_dispatch_task',
+        lambda task_id, generation: translation_jobs._run_persistent_task(task_id, generation),
+    )
     with (
         patch('api.services.chatgpt_subscription._refresh_access_token', return_value='mock-bearer'),
         patch('api.services.chatgpt_subscription.requests.post', request_mock),

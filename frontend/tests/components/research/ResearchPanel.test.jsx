@@ -285,7 +285,7 @@ describe('ResearchPanel', () => {
     await waitFor(() => expect(loginButton).toHaveFocus())
   })
 
-  it('warns that retry may duplicate work after stopping before a response header', async () => {
+  it('warns about an uncertain pre-header request and resumes only with the same idempotency key', async () => {
     const user = userEvent.setup()
     api.createResearchStream.mockImplementationOnce((_query, { signal }) => (async function* firstAttempt() {
       yield { type: 'thinking' }
@@ -303,13 +303,17 @@ describe('ResearchPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent('原请求可能已到达服务器')
-    expect(screen.getByRole('status')).toHaveTextContent('可能重复计算或产生费用')
+    expect(screen.getByRole('status')).toHaveTextContent('复用原请求标识')
     expect(api.createResearchStream).toHaveBeenCalledTimes(1)
-    const retryButton = screen.getByRole('button', { name: '重新研究' })
-    retryButton.focus()
-    expect(retryButton).toHaveFocus()
-    await user.click(retryButton)
+    const resumeButton = screen.getByRole('button', { name: '继续接收' })
+    resumeButton.focus()
+    expect(resumeButton).toHaveFocus()
+    await user.click(resumeButton)
     await waitFor(() => expect(api.createResearchStream).toHaveBeenCalledTimes(2))
+    const firstKey = api.createResearchStream.mock.calls[0][1].idempotencyKey
+    const resumedKey = api.createResearchStream.mock.calls[1][1].idempotencyKey
+    expect(firstKey).toMatch(/^[0-9a-f-]{36}$/)
+    expect(resumedKey).toBe(firstKey)
     const dialog = screen.getByRole('dialog', { name: '新闻研究助手' })
     await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
   })
@@ -397,7 +401,7 @@ describe('ResearchPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
     await screen.findByRole('dialog', { name: '新闻研究助手' })
     await waitFor(() => expect(api.openResearchSessionStream).toHaveBeenCalledWith(
-      history.id, expect.any(AbortSignal), expect.any(Function), true,
+      history.id, expect.any(AbortSignal), expect.any(Function), false,
     ))
 
     const input = screen.getByRole('textbox', { name: '输入研究问题' })

@@ -843,6 +843,10 @@ class ResearchRun(models.Model):
     )
     idempotency_key = models.CharField(max_length=64)
     request_hash = models.CharField(max_length=64)
+    # Retained only for owner-authorized recovery before any provider call.
+    # Older queued rows have no input and must never be guessed or replayed.
+    queued_query = models.TextField(default='', blank=True)
+    queued_local_only = models.BooleanField(default=False)
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='queued', db_index=True)
     run_token = models.UUIDField(null=True, blank=True)
     heartbeat_at = models.DateTimeField(null=True, blank=True)

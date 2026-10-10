@@ -174,7 +174,7 @@ export function useTranslation(
       }
       if (confirmed) clearTranslationRecovery(activeViewerId, activeNewsId)
     } catch {
-      confirmed = false
+      // Preserve the default unconfirmed state and leave a recovery marker.
     } finally {
       if (requestRef.current === request) requestRef.current = null
       request.controller.abort()

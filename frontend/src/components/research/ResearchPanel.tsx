@@ -83,14 +83,23 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
   } = useResearch(user?.id ?? null)
 
   const isLoading = isBusy || phase === 'thinking' || phase === 'tool_calling' || phase === 'streaming'
+  // Before receiving a Session-ID, a POST might already have reached Django.
+  // First close surfaces the uncertainty; a second explicit close may dismiss.
+  const [preHeaderWarningSeen, setPreHeaderWarningSeen] = useState(false)
 
   const handleClose = useCallback(() => {
-    const needsRiskReview = isBusy && !activeSessionId
+    const needsRiskReview = !activeSessionId
+      && (isLoading || recoveryAction === 'resume' || recoveryAction === 'retry')
+      && !preHeaderWarningSeen
     handleDisconnect()
     setIsFullscreen(false)
-    if (needsRiskReview) return
+    if (needsRiskReview) {
+      setPreHeaderWarningSeen(true)
+      return
+    }
+    setPreHeaderWarningSeen(false)
     onClose()
-  }, [activeSessionId, handleDisconnect, isBusy, onClose])
+  }, [activeSessionId, handleDisconnect, isLoading, onClose, preHeaderWarningSeen, recoveryAction])
 
   function handleSendQuery() {
     if (!input.trim() || isLoading || hasRecoverableTask || !user) return
@@ -244,7 +253,7 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
               />
               {recoveryAction === 'resume' && (
                 <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs text-amber-800">
-                  <span>浏览器连接已停止；后台任务可能仍在执行。重新连接会回放当前任务的事件。</span>
+                  <span>{!activeSessionId ? '原请求可能已到达服务器。继续接收将复用原请求标识，避免创建新的重复任务；暂时无法确认后台是否已经开始。' : '浏览器连接已停止；后台任务可能仍在执行。重新连接会回放当前任务的事件。'}</span>
                   <Button type="button" size="sm" variant="outline" onClick={() => void handleResume()}>
                     继续接收
                   </Button>

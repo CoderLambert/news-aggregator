@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.db import close_old_connections
+from django.db import OperationalError, close_old_connections
 from django.utils import timezone
 from rest_framework.test import APIClient, APIRequestFactory
 
@@ -86,7 +86,14 @@ def start_queued(user, connection, news, monkeypatch, *, shared_lease=None, forc
 def wait_for_terminal(task_id, *, timeout=5):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        task = ChatGPTTranslationTask.objects.filter(pk=task_id).first()
+        try:
+            task = ChatGPTTranslationTask.objects.filter(pk=task_id).first()
+        except OperationalError:
+            # A concurrent SQLite writer may briefly lock an in-memory test
+            # table. Keep polling: the final terminal-state assertion is
+            # unchanged, and a persistent lock still fails at the deadline.
+            time.sleep(0.02)
+            continue
         if task is None or task.status in jobs.TERMINAL_STATUSES:
             return task
         time.sleep(0.02)
@@ -133,6 +140,43 @@ def test_simultaneous_database_connections_share_one_unique_task(owner, article,
     assert ChatGPTTranslationTask.objects.filter(
         user=owner, connection=connection, news=article,
     ).count() == 1
+
+
+
+def test_task_attach_retries_transient_sqlite_lock_without_new_model_work(owner, article, monkeypatch):
+    connection = make_connection(owner)
+    existing = start_queued(owner, connection, article, monkeypatch)
+    manager = ChatGPTTranslationTask.objects
+    attempts = {'write': 0, 'read': 0}
+    original_filter = jobs._task_filter
+
+    def fake_get_or_create(**kwargs):
+        attempts['write'] += 1
+        raise OperationalError('database table is locked: api_chatgpttranslationtask')
+
+    class TransientLockedQuery:
+        def __init__(self, queryset):
+            self.queryset = queryset
+
+        def first(self):
+            attempts['read'] += 1
+            if attempts['read'] <= 2:
+                raise OperationalError('database table is locked: api_chatgpttranslationtask')
+            return self.queryset.first()
+
+    def fake_filter(**kwargs):
+        return TransientLockedQuery(original_filter(**kwargs))
+
+    monkeypatch.setattr(manager, 'get_or_create', fake_get_or_create)
+    monkeypatch.setattr(jobs, '_task_filter', fake_filter)
+    recovered = jobs.start_or_get_job(owner, connection, article)
+
+    assert recovered.id == existing.id
+    assert attempts == {'write': 1, 'read': 3}
+    assert ChatGPTTranslationTask.objects.filter(
+        user=owner, connection=connection, news=article,
+    ).count() == 1
+    assert ChatGPTTranslationTask.objects.get(pk=existing.id).status == 'queued'
 
 
 def test_worker_claim_is_single_and_started_state_precedes_provider(owner, article, monkeypatch):

@@ -304,7 +304,10 @@ def execute_tool(
     guard = execution_guard or (lambda: None)
     guard()
     try:
-        result = _truncate_result(handler(**args))
+        tool_args = dict(args)
+        if execution_guard is not None:
+            tool_args['execution_guard'] = guard
+        result = _truncate_result(handler(**tool_args))
         guard()
         if 'error' in result:
             return {'error': '研究工具暂时不可用，请稍后重试。'}
@@ -527,7 +530,7 @@ def _generate_query_variations(query: str) -> list[str]:
 def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
                       source_type: str | None = None, days: int | None = None,
                       order_by: str = 'relevance', full_content: bool = False,
-                      category: str | None = None) -> dict:
+                      category: str | None = None, execution_guard=None) -> dict:
     """Search the local news database using keyword, semantic, or hybrid mode.
 
     Uses multiple query variations for broader coverage.
@@ -536,6 +539,7 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
     from api.models import News
     from api.services.vector_store import VectorStoreService
 
+    guard = execution_guard or (lambda: None)
     limit = min(limit, 30)
     qs = News.objects.select_related('source', 'category')
 
@@ -564,6 +568,7 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
         all_articles = []
         seen_ids = set()
         for q in query_variations:
+            guard()
             filtered = qs.filter(
                 Q(title__icontains=q) | Q(content__icontains=q)
                 | Q(title_zh__icontains=q) | Q(content_zh__icontains=q)
@@ -594,6 +599,7 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
         all_ids = []
         seen_ids = set()
         for q in query_variations:
+            guard()
             results = vs.search(q, n=fetch_n)
             for nid, _ in results:
                 if nid not in seen_ids:
@@ -617,6 +623,7 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
         keyword_ids = []
         keyword_seen = set()
         for q in query_variations:
+            guard()
             keyword_qs = qs.filter(
                 Q(title__icontains=q) | Q(content__icontains=q)
                 | Q(title_zh__icontains=q) | Q(content_zh__icontains=q)
@@ -632,6 +639,7 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
         semantic_seen = set()
         if vs.count() > 0:
             for q in query_variations:
+                guard()
                 results = vs.search(q, n=100)
                 for nid, _ in results:
                     if nid not in semantic_seen:
@@ -663,7 +671,7 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
     }
 
 
-def _tool_fetch_article(article_id: int) -> dict:
+def _tool_fetch_article(article_id: int, execution_guard=None) -> dict:
     """Fetch the full content of a specific article by its database ID.
 
     Priority:
@@ -700,7 +708,12 @@ def _tool_fetch_article(article_id: int) -> dict:
 
     # No full content yet — try to fetch it from the original URL
     if news.url:
-        ensure_full_content(news)
+        if execution_guard is not None:
+            execution_guard()
+            ensure_full_content(news, execution_guard=execution_guard)
+            execution_guard()
+        else:
+            ensure_full_content(news)
         # Refresh from DB to get the newly fetched content
         news.refresh_from_db()
         content = pick_chat_context(news)
@@ -722,7 +735,7 @@ def _tool_fetch_article(article_id: int) -> dict:
     }
 
 
-def _tool_search_web(query: str, count: int = 5) -> dict:
+def _tool_search_web(query: str, count: int = 5, execution_guard=None) -> dict:
     """Search the web with multiple fallback sources.
 
     Try order:
@@ -733,7 +746,10 @@ def _tool_search_web(query: str, count: int = 5) -> dict:
     count = min(count, 10)
     errors = []
 
+    guard = execution_guard or (lambda: None)
+
     # 1) Try Jina AI Search
+    guard()
     try:
         search_url = f'https://s.jina.ai/{urllib.parse.quote(query)}'
         headers = {
@@ -746,6 +762,7 @@ def _tool_search_web(query: str, count: int = 5) -> dict:
             headers['Authorization'] = f'Bearer {jina_key}'
 
         req = urllib.request.Request(search_url, headers=headers)
+        guard()
         with urllib.request.urlopen(
             req, timeout=15, context=ssl.create_default_context()
         ) as resp:
@@ -763,24 +780,29 @@ def _tool_search_web(query: str, count: int = 5) -> dict:
             return {'results': results, 'query': query, 'source': 'jina'}
 
     except Exception as e:
+        guard()
         errors.append(f'Jina: {e}')
         logger.info('Jina search failed, trying fallbacks: %s', e)
 
     # 2) Wikipedia OpenSearch (always available, no auth needed)
+    guard()
     try:
-        wiki_results = _wikipedia_search(query, count)
+        wiki_results = _wikipedia_search(query, count, **({'execution_guard': guard} if execution_guard is not None else {}))
         if wiki_results:
             return {'results': wiki_results, 'query': query, 'source': 'wikipedia'}
     except Exception as e:
+        guard()
         errors.append(f'Wikipedia: {e}')
         logger.info('Wikipedia search failed: %s', e)
 
     # 3) DuckDuckGo HTML fallback (may be rate-limited)
+    guard()
     try:
-        ddg_result = _duckduckgo_search(query, count)
+        ddg_result = _duckduckgo_search(query, count, **({'execution_guard': guard} if execution_guard is not None else {}))
         if ddg_result and ddg_result.get('results'):
             return ddg_result
     except Exception as e:
+        guard()
         errors.append(f'DuckDuckGo: {e}')
         logger.warning('DuckDuckGo fallback also failed: %s', e)
 
@@ -799,7 +821,7 @@ def _tool_search_web(query: str, count: int = 5) -> dict:
     }
 
 
-def _wikipedia_search(query: str, count: int) -> list[dict]:
+def _wikipedia_search(query: str, count: int, execution_guard=None) -> list[dict]:
     """Search Wikipedia via the API. Free, no authentication needed.
 
     Uses the search API for richer results. For long Chinese queries,
@@ -821,7 +843,9 @@ def _wikipedia_search(query: str, count: int) -> list[dict]:
     results = []
 
     # Try both English and Chinese Wikipedia
+    guard = execution_guard or (lambda: None)
     for lang in ['en', 'zh']:
+        guard()
         # Use Wikipedia's search API with both original and simplified query
         search_q = simplified if lang == 'en' else query
         url = (
@@ -836,6 +860,7 @@ def _wikipedia_search(query: str, count: int) -> list[dict]:
         req = urllib.request.Request(url, headers={
             'User-Agent': 'NewsHub/1.0 (research agent)',
         })
+        guard()
         with urllib.request.urlopen(
             req, timeout=10, context=ssl.create_default_context()
         ) as resp:
@@ -870,7 +895,7 @@ def _wikipedia_search(query: str, count: int) -> list[dict]:
     return []
 
 
-def _duckduckgo_search(query: str, count: int) -> dict:
+def _duckduckgo_search(query: str, count: int, execution_guard=None) -> dict:
     """Fallback web search via DuckDuckGo HTML with improved parsing resilience."""
     import re
 
@@ -884,6 +909,8 @@ def _duckduckgo_search(query: str, count: int) -> dict:
         'Accept-Language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
         'Referer': 'https://duckduckgo.com/',
     })
+    if execution_guard is not None:
+        execution_guard()
     with urllib.request.urlopen(
         req, timeout=20, context=ssl.create_default_context()
     ) as resp:
@@ -976,10 +1003,13 @@ def _duckduckgo_search(query: str, count: int) -> dict:
     return {'results': results, 'query': query, 'source': 'duckduckgo'}
 
 
-def _tool_fetch_webpage(url: str) -> dict:
+def _tool_fetch_webpage(url: str, execution_guard=None) -> dict:
     """Fetch and extract text content from a URL using Jina Reader."""
     # SSRF protection: validate URL before fetching
+    guard = execution_guard or (lambda: None)
+    guard()
     allowed, reason = _is_url_allowed(url)
+    guard()
     if not allowed:
         logger.warning('SSRF blocked: %s (%s)', url, reason)
         return {'url': url, 'error': f'URL not allowed: {reason}', 'content': ''}
@@ -996,6 +1026,7 @@ def _tool_fetch_webpage(url: str) -> dict:
             headers['Authorization'] = f'Bearer {jina_key}'
 
         req = urllib.request.Request(jina_url, headers=headers)
+        guard()
         with urllib.request.urlopen(
             req, timeout=30, context=ssl.create_default_context()
         ) as resp:
@@ -1008,11 +1039,12 @@ def _tool_fetch_webpage(url: str) -> dict:
         }
 
     except Exception as e:
+        guard()
         logger.warning('Fetch webpage failed for %s: %s', url, e)
         return {'url': url, 'error': str(e), 'content': ''}
 
 
-def _tool_analyze_topic(query: str, depth: str = 'standard') -> dict:
+def _tool_analyze_topic(query: str, depth: str = 'standard', execution_guard=None) -> dict:
     """Analyze a topic across multiple articles with timeline generation."""
     from api.models import News
     from api.services.vector_store import VectorStoreService
@@ -1030,6 +1062,8 @@ def _tool_analyze_topic(query: str, depth: str = 'standard') -> dict:
     vs = VectorStoreService()
     if vs.count() > 0:
         for q in queries:
+            if execution_guard is not None:
+                execution_guard()
             results = vs.search(q, n=limit)
             for nid, _ in results:
                 all_ids.add(nid)
@@ -1093,7 +1127,7 @@ def _tool_analyze_topic(query: str, depth: str = 'standard') -> dict:
 
 def _tool_generate_report(topic: str, sections: list | None = None,
                           include_timeline: bool = False,
-                          quality_check: bool = True) -> dict:
+                          quality_check: bool = True, execution_guard=None) -> dict:
     """Meta-tool: signal the agent to structure its final response with quality control.
 
     Returns suggested report structure and quality checklist for the agent to follow.
