@@ -322,6 +322,318 @@ def test_browser_api_executes_without_get_head_bodies_and_keeps_post_csrf():
     assert result.returncode == 0, result.stderr
 
 
+class _FakeLogoutResponse:
+    def __init__(self, page, status=200, *, leave_session=False):
+        self.page = page
+        self.url = f'https://{acceptance.HOST}/api/auth/logout/'
+        self.request = SimpleNamespace(method='POST')
+        self.status = status
+        self.leave_session = leave_session
+        self.complete = False
+
+    async def finished(self):
+        self.page.events.append('response.finished.wait')
+        await asyncio.sleep(0)
+        self.complete = True
+        if self.status == 200 and not self.leave_session:
+            self.page.context.session_present = False
+        self.page.events.append('response.finished.done')
+        return None
+
+
+class _FakeResponseExpectation:
+    def __init__(self, page, predicate):
+        self.page = page
+        self.predicate = predicate
+        self.future = asyncio.get_running_loop().create_future()
+
+    async def __aenter__(self):
+        self.page.events.append('response.expect.enter')
+        self.page.expectation = self
+        return self
+
+    async def __aexit__(self, *_args):
+        self.page.events.append('response.expect.exit')
+
+    @property
+    def value(self):
+        return self.future
+
+
+class _FakeLogoutLocator:
+    def __init__(self, page, role, name):
+        self.page = page
+        self.role = role
+        self.name = name
+
+    async def click(self):
+        if self.name == '打开菜单':
+            self.page.events.append('menu.click')
+            return
+        assert self.name == '退出登录'
+        self.page.events.append('logout.click')
+        self.page.avatar_visible = False
+        self.page.events.append('avatar.detach.triggered')
+        expectation = self.page.expectation
+        response = _FakeLogoutResponse(
+            self.page,
+            self.page.response_status,
+            leave_session=self.page.leave_session,
+        )
+        self.page.response = response
+        if expectation is None:
+            return
+        if self.page.response_error is not None:
+            expectation.future.set_exception(self.page.response_error)
+            return
+        assert expectation.predicate(response)
+        expectation.future.set_result(response)
+
+    async def wait_for(self, *, state, timeout):
+        assert state == 'detached' and timeout == 15000
+        assert not self.page.avatar_visible
+        self.page.events.append('avatar.detached')
+
+
+class _FakeLogoutPage:
+    def __init__(self, *, status=200, leave_session=False, response_error=None, me_status=403):
+        self.events = []
+        self.context = _FakeLogoutContext(self.events)
+        self.response_status = status
+        self.leave_session = leave_session
+        self.response_error = response_error
+        self.me_status = me_status
+        self.avatar_visible = True
+        self.expectation = None
+        self.response = None
+
+    def expect_response(self, predicate, *, timeout):
+        assert timeout == 15000
+        return _FakeResponseExpectation(self, predicate)
+
+    def get_by_role(self, role, *, name, exact=False):
+        if role == 'img':
+            assert name == 'synthetic-user，已登录'
+            return _FakeLogoutLocator(self, role, name)
+        assert role == 'button'
+        if name == '退出登录':
+            assert exact is True
+        return _FakeLogoutLocator(self, role, name)
+
+
+class _FakeLogoutContext:
+    def __init__(self, events):
+        self.events = events
+        self.session_present = True
+
+    async def cookies(self, origin):
+        assert origin == f'https://{acceptance.HOST}'
+        self.events.append('cookies.read')
+        if self.session_present:
+            return [{'name': 'sessionid', 'value': 'synthetic-session'}]
+        return []
+
+
+async def _fake_logout_api(page, method, path):
+    assert (method, path) == ('GET', '/api/auth/me/')
+    page.events.append('get_me')
+    assert page.response is not None and page.response.complete, 'GET /me ran before logout response.finished()'
+    return {'status': page.me_status, 'body': {}}
+
+
+def test_logout_waits_for_response_finished_before_me_and_cookie_checks():
+    page = _FakeLogoutPage()
+
+    with patch.object(acceptance, '_browser_api', side_effect=_fake_logout_api):
+        asyncio.run(acceptance._logout_ui(page, 'synthetic-user', page.context))
+
+    assert page.events.index('logout.click') < page.events.index('response.finished.wait')
+    assert page.events.index('avatar.detach.triggered') < page.events.index('response.finished.done')
+    assert page.events.index('response.finished.done') < page.events.index('get_me')
+    assert page.events.index('response.finished.done') < page.events.index('avatar.detached')
+    assert page.events.index('get_me') < page.events.index('cookies.read')
+    assert page.context.session_present is False
+
+
+@pytest.mark.parametrize('status', [403, 500])
+def test_logout_non_200_fails_before_get_me_and_preserves_numeric_status(status):
+    page = _FakeLogoutPage(status=status)
+
+    with patch.object(acceptance, '_browser_api', side_effect=_fake_logout_api):
+        with pytest.raises(acceptance.G2BrowserAcceptanceError) as raised:
+            asyncio.run(acceptance._logout_ui(
+                page, 'synthetic-user', page.context,
+                checks={}, subcheck='g2.logout_a',
+            ))
+
+    exc = raised.value
+    assert exc.source_check_name == 'g2.logout_http'
+    assert exc.expected_http_status == 200 and exc.actual_http_status == status
+    assert exc.active_subcheck == 'g2.logout_a'
+    assert exc.browser_exception_type == 'AcceptanceError'
+    assert 'get_me' not in page.events
+    assert page.context.session_present is True
+    assert acceptance._safe_http_failure_details(exc) == {
+        'source_check_name': 'g2.logout_http',
+        'expected_http_status': 200,
+        'actual_http_status': status,
+    }
+
+
+def test_logout_get_me_must_be_anonymous_and_reports_http_status():
+    page = _FakeLogoutPage(me_status=200)
+
+    with patch.object(acceptance, '_browser_api', side_effect=_fake_logout_api):
+        with pytest.raises(acceptance.G2BrowserAcceptanceError) as raised:
+            asyncio.run(acceptance._logout_ui(
+                page, 'synthetic-user', page.context,
+                checks={}, subcheck='g2.logout_a',
+            ))
+
+    exc = raised.value
+    assert exc.source_check_name == 'g2.logout_me'
+    assert exc.expected_http_status == 403 and exc.actual_http_status == 200
+    assert page.events.index('response.finished.done') < page.events.index('get_me')
+    assert 'cookies.read' not in page.events
+
+
+def test_logout_response_timeout_reports_safe_no_response_status():
+    secret_values = ('synthetic-password', 'synthetic-invite', 'synthetic-user@example.invalid')
+    page = _FakeLogoutPage(response_error=TimeoutError('timed out ' + ' '.join(secret_values)))
+
+    with patch.object(acceptance, '_browser_api', side_effect=_fake_logout_api):
+        with pytest.raises(acceptance.G2BrowserAcceptanceError) as raised:
+            asyncio.run(acceptance._logout_ui(
+                page, 'synthetic-user', page.context,
+                checks={}, subcheck='g2.logout_a',
+            ))
+
+    exc = raised.value
+    assert exc.active_subcheck == 'g2.logout_a'
+    assert exc.browser_exception_type == 'TimeoutError'
+    assert exc.source_check_name == 'g2.logout_http'
+    assert exc.expected_http_status == 200 and exc.actual_http_status == 0
+    assert 'get_me' not in page.events and 'cookies.read' not in page.events
+    serialized = json.dumps({
+        'active_subcheck': exc.active_subcheck,
+        'browser_exception_type': exc.browser_exception_type,
+        **acceptance._safe_http_failure_details(exc),
+    }, sort_keys=True)
+    assert all(secret not in serialized for secret in secret_values)
+
+
+def test_logout_200_still_fails_when_session_cookie_remains():
+    page = _FakeLogoutPage(leave_session=True)
+
+    with patch.object(acceptance, '_browser_api', side_effect=_fake_logout_api):
+        with pytest.raises(acceptance.G2BrowserAcceptanceError) as raised:
+            asyncio.run(acceptance._logout_ui(
+                page, 'synthetic-user', page.context,
+                checks={}, subcheck='g2.logout_a',
+            ))
+
+    exc = raised.value
+    assert exc.source_check_name == 'g2.logout_cookie'
+    assert exc.expected_http_status is None and exc.actual_http_status is None
+    assert page.events.index('response.finished.done') < page.events.index('get_me')
+    assert 'cookies.read' in page.events
+
+
+def test_logout_response_matcher_requires_same_origin_exact_path_and_post():
+    good = SimpleNamespace(
+        url=f'https://{acceptance.HOST}/api/auth/logout/',
+        request=SimpleNamespace(method='POST'),
+    )
+    assert acceptance._is_expected_logout_response(good)
+    for url, method in (
+        (f'https://evil.invalid/api/auth/logout/', 'POST'),
+        (f'http://{acceptance.HOST}/api/auth/logout/', 'POST'),
+        (f'https://{acceptance.HOST}/api/auth/logout', 'POST'),
+        (f'https://{acceptance.HOST}/api/auth/login/', 'POST'),
+        (f'https://{acceptance.HOST}/api/auth/logout/', 'GET'),
+        (f'https://{acceptance.HOST}:444/api/auth/logout/', 'POST'),
+    ):
+        response = SimpleNamespace(url=url, request=SimpleNamespace(method=method))
+        assert not acceptance._is_expected_logout_response(response)
+
+
+def test_g2_browser_subchecks_are_fixed_and_cover_the_account_flow():
+    required = {
+        'g2.account_initial', 'g2.register_a', 'g2.logout_a', 'g2.register_b',
+        'g2.attach_owner', 'g2.owner_b', 'g2.admin_gate', 'g2.logout_b',
+        'g2.owner_a', 'g2.auth_races', 'g2.owner_csrf', 'g2.admin',
+        'g2.final_audit', 'g2.anon_after_logout', 'g2.cookie_attributes',
+    }
+    assert required <= acceptance.G2_BROWSER_SUBCHECKS
+    checks = {}
+    acceptance._mark_g2_browser_subcheck(checks, 'g2.logout_a')
+    assert checks == {'_g2_active_subcheck': 'g2.logout_a'}
+    with pytest.raises(ValueError):
+        acceptance._mark_g2_browser_subcheck(checks, 'g2.secret-value')
+
+
+def test_g2_browser_failure_metadata_is_fixed_and_redacts_timeout_values(tmp_path, capsys):
+    private_root = tmp_path / 'private'
+    private_root.mkdir(mode=0o700)
+    private_root.chmod(0o700)
+    bundle_path = private_root / 'fixtures.json'
+    bundle = acceptance._fixtures.create_bundle(bundle_path)
+    state_path = private_root / 'state.json'
+    state_path.write_text('{"ok":true,"news_id":1}\n', encoding='utf-8')
+    compose_file = private_root / 'compose.yaml'
+    compose_file.write_text('services: {}\n', encoding='utf-8')
+    compose_env = private_root / 'compose.env'
+    compose_env.write_text('SYNTHETIC=1\n', encoding='utf-8')
+    ca_cert = private_root / 'ca.crt'
+    ca_cert.write_text('synthetic CA\n', encoding='utf-8')
+    for path in (state_path, compose_file, compose_env):
+        path.chmod(0o600)
+    report_path = private_root / 'report.json'
+    password = bundle['users']['a']['password']
+    invite = bundle['invitations']['a']['token']
+    email = bundle['users']['a']['email']
+    secret = f'{password} {invite} {email} sessionid=synthetic-cookie'
+    argv = [
+        '--gateway-ip', '127.0.0.1', '--ca-cert', str(ca_cert),
+        '--work-dir', str(private_root), '--stage', 'g2', '--report', str(report_path),
+        '--fixture-bundle', str(bundle_path), '--fixture-state', str(state_path),
+        '--compose-project', 'newshub-local-g2-123-0123456789abcdef',
+        '--compose-file', str(compose_file), '--compose-env', str(compose_env),
+        '--gateway-container-id', GATEWAY_CONTAINER_ID,
+        '--app-image-id', APP_IMAGE_ID, '--gateway-image-id', GATEWAY_IMAGE_ID,
+        '--curl-image-id', CURL_IMAGE_ID, '--private-root', str(private_root),
+    ]
+
+    async def failing_browser(_args, checks, _work_dir):
+        checks['_g2_active_subcheck'] = 'g2.logout_a'
+        raise acceptance._g2_browser_failure(
+            TimeoutError(f'fill timeout {secret}'),
+            'g2.logout_a',
+            source_check_name='g2.logout_http',
+            expected_http_status=200,
+            actual_http_status=0,
+        )
+
+    with (
+        patch.object(acceptance, '_check_http_api', side_effect=lambda *_args: None),
+        patch.object(acceptance, '_run_browser_checks', side_effect=lambda *_args: None),
+        patch.object(acceptance, '_run_g2_browser_checks', side_effect=failing_browser),
+    ):
+        assert acceptance.main(argv) == 1
+
+    output = capsys.readouterr().out
+    report = report_path.read_text(encoding='utf-8')
+    assert all(value not in output and value not in report for value in (password, invite, email, 'synthetic-cookie'))
+    failure = json.loads(report)['failure']
+    assert failure == {
+        'stage': 'g2', 'check': 'g2.logout_http', 'exception_type': 'AcceptanceError',
+        'active_subcheck': 'g2.logout_a', 'browser_exception_type': 'TimeoutError',
+        'source_check_name': 'g2.logout_http',
+        'expected_http_status': 200,
+        'actual_http_status': 0,
+    }
+
+
 def test_main_awaits_g2_browser_checks_before_rate_checks_and_sanitizes_async_failure(tmp_path, capsys):
     private_root = tmp_path / 'private'
     private_root.mkdir(mode=0o700)

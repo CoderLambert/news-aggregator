@@ -59,6 +59,93 @@ class AcceptanceError(RuntimeError):
         self.actual_http_status = actual_http_status
 
 
+SAFE_BROWSER_EXCEPTION_TYPES = frozenset({
+    'TimeoutError', 'Error', 'AcceptanceError', 'RuntimeError',
+    'ValueError', 'TypeError', 'BrowserExecutionError',
+})
+G2_BROWSER_SUBCHECKS = frozenset({
+    'g2.account_initial', 'g2.register_a', 'g2.logout_a', 'g2.register_b',
+    'g2.attach_owner', 'g2.owner_b', 'g2.admin_gate', 'g2.logout_b',
+    'g2.owner_a', 'g2.auth_races', 'g2.owner_csrf',
+    'g2.logout_a_after_owner_writes',
+    'g2.admin', 'g2.final_audit', 'g2.anon_after_logout',
+    'g2.cookie_attributes',
+})
+
+
+class G2BrowserAcceptanceError(AcceptanceError):
+    """Safe G2 browser failure metadata, without browser values or exception text."""
+
+    def __init__(
+        self,
+        *,
+        active_subcheck: str,
+        browser_exception_type: str,
+        source_check_name: str | None = None,
+        expected_http_status: int | None = None,
+        actual_http_status: int | None = None,
+    ):
+        self.active_subcheck = (
+            active_subcheck
+            if isinstance(active_subcheck, str) and active_subcheck in G2_BROWSER_SUBCHECKS
+            else 'g2.account_initial'
+        )
+        self.browser_exception_type = (
+            browser_exception_type
+            if isinstance(browser_exception_type, str) and browser_exception_type in SAFE_BROWSER_EXCEPTION_TYPES
+            else 'BrowserExecutionError'
+        )
+        if not isinstance(source_check_name, str) or re.fullmatch(r'[a-z0-9_.]{1,80}', source_check_name) is None:
+            source_check_name = None
+            expected_http_status = None
+            actual_http_status = None
+        super().__init__(
+            'G2 browser acceptance failed',
+            source_check_name=source_check_name,
+            expected_http_status=expected_http_status,
+            actual_http_status=actual_http_status,
+        )
+
+
+def _safe_browser_exception_type(exc: BaseException) -> str:
+    name = type(exc).__name__
+    return name if name in SAFE_BROWSER_EXCEPTION_TYPES else 'BrowserExecutionError'
+
+
+def _mark_g2_browser_subcheck(checks: dict[str, str] | None, subcheck: str) -> None:
+    if not isinstance(subcheck, str) or subcheck not in G2_BROWSER_SUBCHECKS:
+        raise ValueError('unknown fixed G2 browser subcheck')
+    if checks is not None:
+        checks['_g2_active_subcheck'] = subcheck
+
+
+def _g2_browser_failure(
+    exc: BaseException,
+    active_subcheck: str,
+    *,
+    source_check_name: str | None = None,
+    expected_http_status: int | None = None,
+    actual_http_status: int | None = None,
+) -> G2BrowserAcceptanceError:
+    if isinstance(exc, G2BrowserAcceptanceError):
+        return exc
+    return G2BrowserAcceptanceError(
+        active_subcheck=active_subcheck,
+        browser_exception_type=_safe_browser_exception_type(exc),
+        source_check_name=source_check_name or getattr(exc, 'source_check_name', None),
+        expected_http_status=(
+            expected_http_status
+            if expected_http_status is not None
+            else getattr(exc, 'expected_http_status', None)
+        ),
+        actual_http_status=(
+            actual_http_status
+            if actual_http_status is not None
+            else getattr(exc, 'actual_http_status', None)
+        ),
+    )
+
+
 class CleanupAcceptanceError(AcceptanceError):
     """An acceptance failure that must remain visible as a cleanup failure."""
 
@@ -1449,14 +1536,107 @@ async def _login_ui(page, person: dict) -> None:
     await dialog.wait_for(state='detached')
 
 
-async def _logout_ui(page, username: str, context) -> None:
-    await page.get_by_role('button', name='打开菜单').click()
-    await page.get_by_role('button', name='退出登录', exact=True).click()
+def _is_expected_logout_response(response) -> bool:
+    try:
+        parsed = urlparse(response.url)
+        port = parsed.port
+        request_method = response.request.method
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return (
+        parsed.scheme == 'https'
+        and parsed.hostname == HOST
+        and port in (None, 443)
+        and parsed.path == '/api/auth/logout/'
+        and isinstance(request_method, str)
+        and request_method.upper() == 'POST'
+    )
+
+
+def _safe_http_status(response) -> int:
+    status = response.get('status') if isinstance(response, dict) else getattr(response, 'status', None)
+    return status if type(status) is int and 0 <= status <= 599 else 0
+
+
+def _logout_failure(
+    active_subcheck: str,
+    source_check_name: str,
+    expected_http_status: int,
+    actual_http_status: int,
+    browser_exception_type: str = 'AcceptanceError',
+) -> G2BrowserAcceptanceError:
+    return G2BrowserAcceptanceError(
+        active_subcheck=active_subcheck,
+        browser_exception_type=browser_exception_type,
+        source_check_name=source_check_name,
+        expected_http_status=expected_http_status,
+        actual_http_status=actual_http_status,
+    )
+
+
+async def _logout_ui(
+    page,
+    username: str,
+    context,
+    *,
+    checks: dict[str, str] | None = None,
+    subcheck: str = 'g2.logout_a',
+) -> None:
+    _mark_g2_browser_subcheck(checks, subcheck)
+    try:
+        async with page.expect_response(_is_expected_logout_response, timeout=15000) as logout_response:
+            await page.get_by_role('button', name='打开菜单').click()
+            await page.get_by_role('button', name='退出登录', exact=True).click()
+        response = await logout_response.value
+    except Exception as exc:
+        raise _logout_failure(
+            subcheck, 'g2.logout_http', 200, 0, _safe_browser_exception_type(exc),
+        ) from None
+
+    actual_logout_status = _safe_http_status(response)
+    try:
+        completion_error = await response.finished()
+    except Exception as exc:
+        raise _logout_failure(
+            subcheck, 'g2.logout_http', 200, actual_logout_status,
+            _safe_browser_exception_type(exc),
+        ) from None
+    if completion_error is not None:
+        raise _logout_failure(
+            subcheck, 'g2.logout_http', 200, actual_logout_status, 'Error',
+        )
+    if actual_logout_status != 200:
+        raise _logout_failure(subcheck, 'g2.logout_http', 200, actual_logout_status)
+
     await page.get_by_role('img', name=f'{username}，已登录').wait_for(state='detached', timeout=15000)
-    auth_me = await _browser_api(page, 'GET', '/api/auth/me/')
-    _require(auth_me['status'] == 403, 'logged-out browser session still authorized /api/auth/me/')
-    remaining = [cookie for cookie in await context.cookies(f'https://{HOST}') if cookie['name'] == 'sessionid']
-    _require(not remaining, 'logout did not remove the browser session cookie')
+    _mark_g2_browser_subcheck(checks, 'g2.anon_after_logout')
+    try:
+        auth_me = await _browser_api(page, 'GET', '/api/auth/me/')
+    except Exception as exc:
+        raise _logout_failure(
+            'g2.anon_after_logout', 'g2.logout_me', 403, 0,
+            _safe_browser_exception_type(exc),
+        ) from None
+    actual_me_status = _safe_http_status(auth_me)
+    if actual_me_status != 403:
+        raise _logout_failure(
+            'g2.anon_after_logout', 'g2.logout_me', 403, actual_me_status,
+        )
+
+    _mark_g2_browser_subcheck(checks, 'g2.cookie_attributes')
+    try:
+        remaining = [
+            cookie for cookie in await context.cookies(f'https://{HOST}')
+            if cookie.get('name') == 'sessionid'
+        ]
+    except Exception as exc:
+        raise _g2_browser_failure(exc, 'g2.cookie_attributes') from None
+    if remaining:
+        raise G2BrowserAcceptanceError(
+            active_subcheck='g2.cookie_attributes',
+            browser_exception_type='AcceptanceError',
+            source_check_name='g2.logout_cookie',
+        )
 
 
 async def _sanitize_g2_failure_page(page) -> bool:
@@ -1497,6 +1677,14 @@ def _browser_cookie_summary(cookies: list[dict]) -> dict[str, dict]:
 
 
 async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_dir: Path) -> None:
+    active_subcheck = 'g2.account_initial'
+
+    def mark(subcheck: str) -> None:
+        nonlocal active_subcheck
+        active_subcheck = subcheck
+        _mark_g2_browser_subcheck(checks, subcheck)
+
+    mark(active_subcheck)
     bundle = _load_fixture_bundle(args.fixture_bundle)
     state = _read_fixture_state(args)
     _require(bundle['news']['title'].endswith(bundle['run_id']), 'G2 synthetic article marker is invalid')
@@ -1587,6 +1775,7 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
             page.on('response', lambda response: response_tasks.append(asyncio.create_task(on_response(response))))
 
             try:
+                mark('g2.account_initial')
                 home = await page.goto(f'https://{HOST}/', wait_until='domcontentloaded', timeout=20000)
                 _require(home is not None and home.status == 200, 'G2 browser homepage did not return HTTP 200')
                 _require(await page.locator('#root').count() == 1, 'G2 browser SPA root element is missing')
@@ -1604,6 +1793,7 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
                 checks['g2_anonymous_private_route'] = 'favorites page denies anonymous access without querying private API'
                 await page.goto(f'https://{HOST}/', wait_until='domcontentloaded', timeout=20000)
 
+                mark('g2.register_a')
                 initial_csrf = await page.evaluate("async () => { await fetch('/api/auth/csrf/'); return document.cookie.split(';').map(v => v.trim()).find(v => v.startsWith('csrftoken='))?.slice('csrftoken='.length) || ''; }")
                 _require(isinstance(initial_csrf, str) and len(initial_csrf) >= 32, 'G2 browser could not read its host-only CSRF cookie')
                 await _register_ui(page, bundle['users']['a'], bundle['invitations']['a'])
@@ -1619,7 +1809,11 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
                 _require(a_cookie_summary.get('csrftoken', {}).get('same_site') == 'Lax', 'CSRF cookie is not SameSite=Lax')
                 checks['g2_registration_a'] = 'real invitation registration via SPA; session Secure/HttpOnly/host-only; CSRF rotated, Secure/readable/host-only/SameSite=Lax'
 
-                await _logout_ui(page, bundle['users']['a']['username'], context)
+                await _logout_ui(
+                    page, bundle['users']['a']['username'], context,
+                    checks=checks, subcheck='g2.logout_a',
+                )
+                mark('g2.register_b')
                 await _register_ui(page, bundle['users']['b'], bundle['invitations']['b'])
                 await page.reload(wait_until='domcontentloaded', timeout=20000)
                 await _wait_user(page, bundle['users']['b']['username'])
@@ -1627,10 +1821,12 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
                 _require(b_cookie_summary.get('sessionid', {}).get('secure') and b_cookie_summary.get('sessionid', {}).get('http_only'), 'B session cookie security attributes changed after reload')
                 checks['g2_registration_b_session_refresh'] = 'real invitation registration; B identity persisted after browser reload'
 
+                mark('g2.attach_owner')
                 attached = await asyncio.to_thread(_run_fixture_program, args, bundle, 'attach-owner')
                 state.update(attached)
                 _store_fixture_state(args.fixture_state, state)
 
+                mark('g2.owner_b')
                 b_favorites = await _browser_api(page, 'GET', '/api/favorites/?type=bookmark')
                 _require(b_favorites['status'] == 200 and b_favorites['body'].get('results') == [], 'B read A favorite or received an unexpected favorite')
                 cross_favorite_delete = await _browser_api(page, 'DELETE', f"/api/favorites/{state['favorite_id']}/")
@@ -1654,6 +1850,7 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
                 checks['g2_ai_disabled_post'] = 'HTTP 403 ai_disabled before any model/provider request'
                 checks['g2_ordinary_admin_denied'] = 'crawler and provider-comparison APIs return HTTP 403'
 
+                mark('g2.admin_gate')
                 request_paths: list[str] = []
                 page.on('request', lambda request: request_paths.append(urlparse(request.url).path))
                 await page.goto(f'https://{HOST}/admin/crawlers', wait_until='domcontentloaded', timeout=20000)
@@ -1667,7 +1864,11 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
                 checks['g2_ordinary_admin_ui'] = 'protected route rendered without admin API request'
                 checks['g2_provider_ui'] = 'AI-disabled route rendered without provider-comparison API request'
 
-                await _logout_ui(page, bundle['users']['b']['username'], context)
+                await _logout_ui(
+                    page, bundle['users']['b']['username'], context,
+                    checks=checks, subcheck='g2.logout_b',
+                )
+                mark('g2.owner_a')
                 await _login_ui(page, bundle['users']['a'])
                 await page.goto(f'https://{HOST}/favorites', wait_until='domcontentloaded', timeout=20000)
                 await page.get_by_text(bundle['news']['title'], exact=False).wait_for(state='visible', timeout=15000)
@@ -1679,6 +1880,7 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
                 _require(a_research['status'] == 200 and any(state['research_marker'] in item.get('content', '') for item in a_research['body'].get('messages', [])), 'A research fixture was not visible to its owner')
                 checks['g2_a_owner_data'] = 'A sees its favorite through the page/API and its Chat/Research history through the API'
 
+                mark('g2.auth_races')
                 delayed_me['armed'] = True
                 delayed_me['fetched'] = asyncio.Event()
                 delayed_me['release'] = asyncio.Event()
@@ -1699,10 +1901,15 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
                 checks['g2_account_switch_cache'] = 'A private favorites were visible to A and absent after switching to B'
                 await context.unroute('**/api/auth/me/', hold_auth_me)
 
-                await _logout_ui(page, bundle['users']['b']['username'], context)
+                await _logout_ui(
+                    page, bundle['users']['b']['username'], context,
+                    checks=checks, subcheck='g2.logout_b',
+                )
+                mark('g2.owner_a')
                 await _login_ui(page, bundle['users']['a'])
                 await page.goto(f'https://{HOST}/favorites', wait_until='domcontentloaded', timeout=20000)
                 await page.get_by_text(bundle['news']['title'], exact=False).wait_for(state='visible', timeout=15000)
+                mark('g2.owner_csrf')
                 for method, path in (
                     ('DELETE', f"/api/favorites/{state['favorite_id']}/"),
                     ('DELETE', f"/api/news/{state['news_id']}/chat/"),
@@ -1714,7 +1921,11 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
                 _require((await _browser_api(page, 'GET', f"/api/news/{state['news_id']}/chat/"))['body'].get('messages') == [], 'A chat history did not clear for its owner')
                 checks['g2_owner_csrf_writes'] = 'A favorite, Chat, and Research DELETE accepted same-origin CSRF and removed only A-owned fixtures'
 
-                await _logout_ui(page, bundle['users']['a']['username'], context)
+                await _logout_ui(
+                    page, bundle['users']['a']['username'], context,
+                    checks=checks, subcheck='g2.logout_a_after_owner_writes',
+                )
+                mark('g2.admin')
                 await _login_ui(page, bundle['users']['admin'])
                 _require((await _browser_api(page, 'GET', '/api/admin/crawler/dashboard/'))['status'] == 200, 'active synthetic superuser could not read the admin dashboard')
                 _require((await _browser_api(page, 'GET', '/api/provider-comparisons/'))['status'] == 200, 'active synthetic superuser could not read provider comparison records')
@@ -1732,6 +1943,7 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
                 checks['g2_active_admin'] = 'active synthetic superuser reads admin/provider records and triggers admin UI query'
                 checks['g2_inactive_admin_session'] = 'after deactivation, old session receives HTTP 403 from me/admin/provider endpoints'
 
+                mark('g2.final_audit')
                 await page.goto(f'https://{HOST}/news/{state["news_id"]}', wait_until='domcontentloaded', timeout=20000)
                 _require(not external_hosts, f'G2 browser attempted non-local egress to {sorted(external_hosts)}')
                 screenshot = work_dir / 'g2-accounts.png'
@@ -1755,11 +1967,12 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
                     any(item['cookie'] == 'csrftoken' and item['secure'] and not item['http_only'] and item['host_only'] and item['same_site'] == 'lax' for item in observed_cookie_headers),
                     'observed CSRF Set-Cookie headers were missing required security attributes',
                 )
+                mark('g2.cookie_attributes')
                 _require(
                     any(item['cookie'] == 'sessionid' and item['deleted'] for item in observed_cookie_headers),
                     'logout response did not expire the session cookie',
                 )
-            except Exception:
+            except Exception as exc:
                 if delayed_me.get('release') is not None:
                     delayed_me['release'].set()
                 if page is not None:
@@ -1768,7 +1981,10 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
                             await page.screenshot(path=str(work_dir / 'g2-browser-failure.png'), full_page=True, timeout=5000)
                         except Exception:
                             pass
-                raise
+                raise _g2_browser_failure(
+                    exc,
+                    checks.get('_g2_active_subcheck', active_subcheck),
+                ) from None
             finally:
                 for task in response_tasks:
                     if not task.done():
@@ -1777,6 +1993,8 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
                         except Exception:
                             pass
                 await context.close()
+
+    checks.pop('_g2_active_subcheck', None)
 
 
 def _run_sse_check(args: argparse.Namespace, checks: dict[str, str]) -> None:
@@ -2047,12 +2265,35 @@ def main(argv: list[str] | None = None) -> int:
         if getattr(exc, 'cleanup_status', None) == 'FAIL':
             result['cleanup_status'] = 'FAIL'
         if args.stage == 'g2':
-            result['failure'] = {
-                'stage': 'g2',
-                'check': active_check,
-                'exception_type': type(exc).__name__,
-            }
-            result['failure'].update(_safe_http_failure_details(exc))
+            active_subcheck = checks.pop('_g2_active_subcheck', None)
+            reported_exc = exc
+            if (
+                active_subcheck in G2_BROWSER_SUBCHECKS
+                and not isinstance(exc, G2BrowserAcceptanceError)
+            ):
+                reported_exc = _g2_browser_failure(exc, active_subcheck)
+            if isinstance(reported_exc, G2BrowserAcceptanceError):
+                source_check = reported_exc.source_check_name
+                failure_check = (
+                    source_check
+                    if isinstance(source_check, str)
+                    and re.fullmatch(r'[a-z0-9_.]{1,80}', source_check) is not None
+                    else reported_exc.active_subcheck
+                )
+                result['failure'] = {
+                    'stage': 'g2',
+                    'check': failure_check,
+                    'exception_type': 'AcceptanceError',
+                    'active_subcheck': reported_exc.active_subcheck,
+                    'browser_exception_type': reported_exc.browser_exception_type,
+                }
+            else:
+                result['failure'] = {
+                    'stage': 'g2',
+                    'check': active_check,
+                    'exception_type': type(exc).__name__,
+                }
+            result['failure'].update(_safe_http_failure_details(reported_exc))
             screenshots = (
                 args.work_dir / 'g2-browser-failure.png',
                 args.work_dir / 'local-domain-browser-failure.png',
