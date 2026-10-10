@@ -151,6 +151,90 @@ def _option_value(args: Sequence[str], option: str) -> str | None:
     return values[-1] if values else None
 
 
+DOCKER_RUN_VALUE_OPTIONS = {
+    "--pull", "--network", "--user", "--entrypoint", "--mount", "--env",
+    "-e", "--name", "--label", "--workdir", "-w", "--hostname",
+}
+DOCKER_RUN_SHORT_VALUE_OPTIONS = {"-e", "-w"}
+
+
+def _docker_option_values_before_image(
+    args: Sequence[str], image_index: int, option: str,
+) -> list[str]:
+    """Read every occurrence of one Docker option without inspecting image argv."""
+    values: list[str] = []
+    index = 1
+    while index < image_index:
+        item = args[index]
+        if item == option:
+            if index + 1 >= image_index or args[index + 1].startswith("-"):
+                raise AcceptanceError(f"Docker {option} option is missing its value")
+            values.append(args[index + 1])
+            index += 2
+            continue
+        if item.startswith(option + "="):
+            value = item.partition("=")[2]
+            if not value:
+                raise AcceptanceError(f"Docker {option} option is missing its value")
+            values.append(value)
+            index += 1
+            continue
+        if item in DOCKER_RUN_VALUE_OPTIONS:
+            if index + 1 >= image_index:
+                raise AcceptanceError(f"Docker {item} option is missing its value")
+            index += 2
+            continue
+        if any(
+            item.startswith(value_option + "=")
+            for value_option in DOCKER_RUN_VALUE_OPTIONS
+            if value_option.startswith("--")
+        ):
+            index += 1
+            continue
+        if item in DOCKER_RUN_SHORT_VALUE_OPTIONS:
+            if index + 1 >= image_index:
+                raise AcceptanceError(f"Docker {item} option is missing its value")
+            index += 2
+            continue
+        index += 1
+    return values
+
+
+def _one_option_value(values: Sequence[str], option: str) -> str | None:
+    if len(set(values)) > 1:
+        raise AcceptanceError(f"conflicting Docker {option} options are forbidden")
+    return values[-1] if values else None
+
+
+def _options_without_network_and_pull(args: Sequence[str], image_index: int) -> list[str]:
+    """Keep Docker options in order while removing normalized network/pull options."""
+    retained = [args[0]]
+    index = 1
+    while index < image_index:
+        item = args[index]
+        if item in {"--network", "--pull"}:
+            index += 2
+            continue
+        if item.startswith("--network=") or item.startswith("--pull="):
+            index += 1
+            continue
+        if item in DOCKER_RUN_VALUE_OPTIONS or item in DOCKER_RUN_SHORT_VALUE_OPTIONS:
+            retained.extend(args[index:min(index + 2, image_index)])
+            index += 2
+            continue
+        if any(
+            item.startswith(value_option + "=")
+            for value_option in DOCKER_RUN_VALUE_OPTIONS
+            if value_option.startswith("--")
+        ):
+            retained.append(item)
+            index += 1
+            continue
+        retained.append(item)
+        index += 1
+    return retained
+
+
 def _docker_mounts(args: Sequence[str]) -> list[dict[str, str]]:
     mounts: list[dict[str, str]] = []
     index = 0
@@ -177,19 +261,19 @@ def _docker_mounts(args: Sequence[str]) -> list[dict[str, str]]:
 
 def _image_index(args: Sequence[str]) -> int:
     """Find the image operand in a run/create command, rejecting unsupported syntax."""
-    takes_value = {
-        "--pull", "--network", "--user", "--entrypoint", "--mount", "--env",
-        "-e", "--name", "--label", "--workdir", "-w", "--hostname",
-    }
     index = 1
     while index < len(args):
         item = args[index]
         if item == "--":
             raise AcceptanceError("Docker run/create must use an explicit image operand")
-        if item in takes_value:
+        if item in DOCKER_RUN_VALUE_OPTIONS:
             index += 2
             continue
-        if any(item.startswith(option + "=") for option in takes_value if option.startswith("--")):
+        if any(
+            item.startswith(option + "=")
+            for option in DOCKER_RUN_VALUE_OPTIONS
+            if option.startswith("--")
+        ):
             index += 1
             continue
         if item.startswith("-"):
@@ -253,28 +337,31 @@ def secure_docker_argv(
     owned_volumes = {entry.get("name") for entry in ledger_entries if entry.get("kind") == "volume"}
 
     if command in {"run", "create"}:
+        image_index = _image_index(original)
+        if original[image_index] != image:
+            raise AcceptanceError("Docker resource image differs from the requested image")
+        docker_options = original[1:image_index]
         if any(
             item in {"-p", "-P", "--publish", "--publish-all", "--privileged", "--volumes-from", "--device", "--tmpfs", "--net", "--detach", "-d"}
             or item.startswith(("--publish=", "--publish-all=", "--volumes-from=", "--device=", "--net="))
             or (item.startswith("-p") and item != "--pull")
-            for item in original
+            for item in docker_options
         ):
             raise AcceptanceError("published ports, privileged mode, and external mounts are forbidden")
-        if any(item == "--volume" or item.startswith("--volume=") for item in original):
+        if any(item == "--volume" or item.startswith("--volume=") for item in docker_options):
             raise AcceptanceError("short-form or host path mounts are forbidden")
-        if "--pid" in original or "--ipc" in original or "--cgroupns" in original:
+        if "--pid" in docker_options or "--ipc" in docker_options or "--cgroupns" in docker_options:
             raise AcceptanceError("host process and IPC namespaces are forbidden")
-        network = _option_value(original, "--network")
-        pull = _option_value(original, "--pull")
-        if network not in (None, "none") or pull not in (None, "never"):
+        networks = _docker_option_values_before_image(original, image_index, "--network")
+        pulls = _docker_option_values_before_image(original, image_index, "--pull")
+        if any(value != "none" for value in networks) or any(value != "never" for value in pulls):
             raise AcceptanceError("Docker resources must use network none and pull never")
-        image_index = _image_index(original)
-        if original[image_index] != image:
-            raise AcceptanceError("Docker resource image differs from the requested image")
-        user = _option_value(original, "--user")
+        user = _one_option_value(
+            _docker_option_values_before_image(original, image_index, "--user"), "--user",
+        )
         if user not in (None, PRODUCTION_USER, "0:0"):
             raise AcceptanceError("Docker resource user is outside the UID 10001 contract")
-        mounts = _docker_mounts(original)
+        mounts = _docker_mounts(docker_options)
         for mount in mounts:
             kind = mount.get("type")
             if kind == "volume":
@@ -289,14 +376,15 @@ def secure_docker_argv(
                     raise AcceptanceError("Docker bind mounts are restricted to the read-only snapshot helper")
             else:
                 raise AcceptanceError("Docker run/create mount type is unsupported")
-        for item in original:
+        for item in docker_options:
             if item == "-v" or item.startswith("-v"):
                 raise AcceptanceError("short-form mounts are forbidden")
         if user == "0:0":
             code = None
-            for index, item in enumerate(original[:-1]):
+            command_args = original[image_index + 1:]
+            for index, item in enumerate(command_args[:-1]):
                 if item == "-c":
-                    code = original[index + 1]
+                    code = command_args[index + 1]
                     break
             if not (
                 command == "run"
@@ -306,19 +394,22 @@ def secure_docker_argv(
                 and mounts[0].get("target") == "/fixture"
             ):
                 raise AcceptanceError("root may only chown this run's empty synthetic fixture volume")
-        requested_name = _option_value(original, "--name")
+        requested_name = _one_option_value(
+            _docker_option_values_before_image(original, image_index, "--name"), "--name",
+        )
         if requested_name is not None:
             raise AcceptanceError("container names are allocated only by the acceptance runner")
         if any(
-            item == f"--label={OWNER_LABEL}={owner_token}"
-            or (item == "--label" and index + 1 < len(original) and original[index + 1].startswith(OWNER_LABEL + "="))
-            for index, item in enumerate(original)
+            item.startswith(f"--label={OWNER_LABEL}=")
+            or (item == "--label" and index + 1 < len(docker_options) and docker_options[index + 1].startswith(OWNER_LABEL + "="))
+            for index, item in enumerate(docker_options)
         ):
             raise AcceptanceError("reserved ownership labels are allocated only by the runner")
         name = f"{run_prefix}-c{len(owned_names) + 1:03d}-{secrets.token_hex(3)}"
         rewritten = [command, "--pull=never", "--network=none", "--name", name,
                      "--label", f"{OWNER_LABEL}={owner_token}"]
-        rewritten.extend(original[1:])
+        rewritten.extend(_options_without_network_and_pull(original, image_index)[1:])
+        rewritten.extend(original[image_index:])
         return rewritten
 
     if command == "volume" and len(original) >= 2 and original[1] == "create":

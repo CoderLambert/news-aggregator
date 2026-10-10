@@ -87,6 +87,104 @@ def test_secure_docker_policy_names_resources_and_locks_network_image_and_mounts
     assert readonly_bind[0] == "create"
 
 
+@pytest.mark.parametrize("command", ["run", "create"])
+@pytest.mark.parametrize(
+    "network_pull_options",
+    [
+        [],
+        ["--network", "none", "--pull", "never"],
+        ["--network=none", "--pull=never"],
+        ["--network", "none", "--network=none", "--pull=never", "--pull", "never"],
+        ["--label", "description=--network=host --pull=always"],
+    ],
+)
+def test_secure_docker_normalizes_pre_image_network_and_pull_options_only(
+    command, network_pull_options, tmp_path
+):
+    prefix = "nhpub-volume-normalize-test"
+    tail = [
+        IMAGE,
+        "python", "-c", "print('--network=host --pull=always')",
+        "--network=host", "--pull=always",
+    ]
+    rewritten = acceptance.secure_docker_argv(
+        [command, *network_pull_options, *tail],
+        run_prefix=prefix,
+        owner_token="normalize-token",
+        image=IMAGE,
+        snapshot_script=tmp_path / "sqlite_snapshot.py",
+    )
+
+    image_index = rewritten.index(IMAGE)
+    docker_options = rewritten[1:image_index]
+    assert docker_options.count("--pull=never") == 1
+    assert docker_options.count("--network=none") == 1
+    assert "--pull" not in docker_options
+    assert "--network" not in docker_options
+    assert rewritten[image_index:] == tail
+
+
+@pytest.mark.parametrize("command", ["run", "create"])
+@pytest.mark.parametrize(
+    "network_pull_options",
+    [
+        ["--network=none", "--network=host"],
+        ["--network", "host", "--network=none"],
+        ["--network=none", "--network", "none", "--network=host"],
+        ["--pull=never", "--pull=always"],
+        ["--pull", "always", "--pull=never"],
+        ["--network="],
+        ["--pull="],
+        ["--network"],
+        ["--pull"],
+    ],
+)
+def test_secure_docker_rejects_any_unsafe_or_missing_duplicate_network_pull_option(
+    command, network_pull_options, tmp_path
+):
+    with pytest.raises(acceptance.AcceptanceError):
+        acceptance.secure_docker_argv(
+            [command, *network_pull_options, IMAGE, "true"],
+            run_prefix="nhpub-volume-normalize-test",
+            owner_token="normalize-token",
+            image=IMAGE,
+            snapshot_script=tmp_path / "sqlite_snapshot.py",
+        )
+
+
+@pytest.mark.parametrize("owner_label_options", [
+    ["--label", f"{acceptance.OWNER_LABEL}=other-token"],
+    [f"--label={acceptance.OWNER_LABEL}=other-token"],
+    ["--label", f"{acceptance.OWNER_LABEL}=first", "--label", f"{acceptance.OWNER_LABEL}=second"],
+    [f"--label={acceptance.OWNER_LABEL}=first", f"--label={acceptance.OWNER_LABEL}=second"],
+])
+def test_secure_docker_rejects_any_user_supplied_owner_label(owner_label_options, tmp_path):
+    with pytest.raises(acceptance.AcceptanceError, match="reserved ownership labels"):
+        acceptance.secure_docker_argv(
+            ["create", *owner_label_options, IMAGE, "true"],
+            run_prefix="nhpub-volume-normalize-test",
+            owner_token="runner-token",
+            image=IMAGE,
+            snapshot_script=tmp_path / "sqlite_snapshot.py",
+        )
+
+
+def test_secure_docker_does_not_parse_owner_label_lookalikes_after_image(tmp_path):
+    tail = [
+        IMAGE, "python", "-c", "pass",
+        "--label", f"{acceptance.OWNER_LABEL}=application-arg",
+        f"--label={acceptance.OWNER_LABEL}=application-arg-equal",
+    ]
+    rewritten = acceptance.secure_docker_argv(
+        ["run", *tail],
+        run_prefix="nhpub-volume-normalize-test",
+        owner_token="runner-token",
+        image=IMAGE,
+        snapshot_script=tmp_path / "sqlite_snapshot.py",
+    )
+    assert rewritten[rewritten.index(IMAGE):] == tail
+
+
 @pytest.mark.parametrize(
     "command",
     [
