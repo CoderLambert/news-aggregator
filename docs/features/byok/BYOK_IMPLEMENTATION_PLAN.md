@@ -319,6 +319,8 @@ AICallAttempt记录每次上游尝试而非每条SSE订阅。Token缺失为unkno
 
 ## 11. 确定的实施任务和结束条件
 
+> **任务拆分更新（2026-10-11）：** P0–P5 是阶段路线，不是一个 Codex 实现任务。实际按 [tasks/README.md](tasks/README.md) 的 T00–T14 单张功能卡交付，每张配套 [tests/README.md](tests/README.md) 的 Test 契约。T00 不再包含连接管理/持久化/GET 恢复的实现，分别在后续业务功能切片完成。
+
 | ID | 工作 | 依赖/完成标准 |
 | --- | --- | --- |
 | P0 | 官方SDK最小协议切片 | 目标Python环境安装并锁定两个SDK/依赖；3种协议的实际SDK测试、原始终态、两轮工具续接、显式Key隔离成立 |
@@ -381,3 +383,4 @@ AICallAttempt记录每次上游尝试而非每条SSE订阅。Token缺失为unkno
 - [S15 GLM OpenAI兼容](https://docs.bigmodel.cn/cn/guide/develop/openai/introduction)；[Z.AI快速开始](https://docs.z.ai/guides/overview/quick-start)
 - [S16 Kimi API概览](https://platform.kimi.ai/docs/api/overview)；[百炼OpenAI兼容](https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope)
 - [S17 OpenAI迁移Responses](https://developers.openai.com/api/docs/guides/migrate-to-responses)
+

@@ -5,7 +5,7 @@
 - 仓库：`CoderLambert/news-aggregator`
 - 功能分支：`feat/byok-user-api-keys`
 - 上游基线：`feat/news-public-readiness@b874405f31ae303e772d1ed6ef618b68938febed`
-- 设计状态：**页面方向已确认；具体 Task/Test 拆分待下一步开展**
+- 设计状态：**页面方向已确认；T00–T14 功能 Task/Test 契约已拆分（全部未执行）**
 - 功能边界：六家主流官方通用 API Key、连接管理、每用途模型选择、个人结果与现有任务系统复用。
 
 ## 导航
@@ -17,8 +17,8 @@
 | 页面和交互设计 | [BYOK_PAGE_DESIGN_SPEC.md](BYOK_PAGE_DESIGN_SPEC.md) | 真实 NewsHub 页面接入点、交互流程和状态约束 |
 | 独立可交互原型 | [prototype/index.html](prototype/index.html) | 自包含 HTML/CSS/JS，包含模拟连接、模型偏好、文章预览 |
 | 原型使用和视觉复现 | [prototype/README.md](prototype/README.md) | 打开方式与生成桌面/手机截图的方法 |
-| Task 规划 | [tasks/README.md](tasks/README.md) | 待拆分：按功能交付切片，不按文件罗列 |
-| Test 规划 | [tests/README.md](tests/README.md) | 待拆分：变更前基线、状态不变量和回归证明 |
+| 功能 Task | [tasks/README.md](tasks/README.md) | 15 张主任务卡，T13 再拆六厂商；一张一张执行 |
+| Test 契约 | [tests/README.md](tests/README.md) | 同编号用例与真实执行证据占位，全部 NOT_RUN |
 
 ## 设计决定（已固定）
 
@@ -33,7 +33,8 @@
 ## 本阶段交付边界
 
 1. 已完成：产品 UI 方向确认、技术设计基线、独立原型、静态原型验证脚本。
-2. 未开始：项目 BYOK 业务代码、真实 SDK 联调、Task 文档拆分、功能级/发布级测试。
-3. 后续：先形成 Task/Test 对照，再从 P0 技术切片推进。每项任务必须给出变更前证据、必须保持的契约和实际验收结果。
+2. 已拆分 Task/Test 文档；业务代码、实际 SDK 验证、真实厂商联调、功能及发布测试尚未开始。
+3. 后续：从 [T00 SDK 技术门槛](tasks/T00-sdk-protocol.md) 开始，每次只执行一个可验收切片。每项任务必须给出变更前证据、必须保持的契约和实际验收结果。
 
 **备注**：独立 HTML 是审阅原型，不会在生产页面自动出现。设计截图由 `prototype/check_ui.py` 在本地浏览器环境中按需再生成，避免提交冗余二进制截图。
+
