@@ -23,6 +23,7 @@ FEATURE_NAMES = (
     "provider_comparisons",
     "admin",
     "chatgpt_subscription",
+    "ai_byok",
 )
 
 AI_FEATURE_NAMES = (
@@ -50,6 +51,9 @@ def _feature_snapshot() -> dict[str, dict[str, object]]:
 
     if not settings.PUBLIC_SIGNUP_ENABLED:
         features["signup"] = _feature(False, "signup_disabled")
+
+    if not settings.AI_BYOK_ENABLED:
+        features["ai_byok"] = _feature(False, "byok_disabled")
 
     if not settings.PUBLIC_AI_ENABLED:
         features["semantic_search"] = _feature(False, "semantic_search_disabled")

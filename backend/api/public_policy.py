@@ -38,6 +38,7 @@ ERROR_MESSAGES = {
     "chatgpt_auth_disabled": "ChatGPT 订阅连接当前已关闭。",
     "hosted_integration_unapproved": "网站订阅集成尚未获批。",
     "chatgpt_plan_usage_disabled": "ChatGPT 订阅模型调用当前已关闭。",
+    "byok_disabled": "个人 API Key 管理当前已关闭。",
 }
 
 
@@ -110,6 +111,14 @@ class PublicPolicyMiddleware:
             allowed_methods = AI_GATED_METHODS.get(route_name, ())
             if request.method in allowed_methods:
                 return policy_error("ai_disabled")
+
+        if route_name in {
+            "ai-provider-catalog",
+            "ai-connection-list",
+            "ai-connection-detail",
+            "ai-connection-key",
+        } and not settings.AI_BYOK_ENABLED:
+            return policy_error("byok_disabled")
 
         if (
             settings.DJANGO_ENV == "production"

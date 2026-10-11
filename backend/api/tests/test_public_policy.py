@@ -54,6 +54,7 @@ FEATURE_NAMES = {
     "provider_comparisons",
     "admin",
     "chatgpt_subscription",
+    "ai_byok",
 }
 TEST_UUID = uuid.UUID("00000000-0000-0000-0000-000000000123")
 
@@ -617,6 +618,7 @@ def test_read_only_capabilities_have_fixed_schema_no_store_and_no_secrets():
     PUBLIC_AI_ENABLED=False,
     CHATGPT_AUTH_MODE="local_oss",
     CHATGPT_PLAN_USAGE_ENABLED=False,
+    AI_BYOK_ENABLED=False,
 )
 def test_full_capabilities_match_closed_feature_error_codes():
     client = APIClient()
@@ -637,6 +639,7 @@ def test_full_capabilities_match_closed_feature_error_codes():
         "enabled": False,
         "reason": "chatgpt_plan_usage_disabled",
     }
+    assert features["ai_byok"] == {"enabled": False, "reason": "byok_disabled"}
 
     signup = client.post(
         reverse("auth-register"),
@@ -652,6 +655,9 @@ def test_full_capabilities_match_closed_feature_error_codes():
         reverse("chatgpt-subscription-models", kwargs={"connection_id": TEST_UUID})
     )
     _assert_policy_response(subscription, features["chatgpt_subscription"]["reason"])
+
+    byok = client.get(reverse("ai-connection-list"))
+    _assert_policy_response(byok, features["ai_byok"]["reason"])
 
 
 @pytest.mark.django_db

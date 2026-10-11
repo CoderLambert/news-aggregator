@@ -6,8 +6,13 @@ from . import crawler_views
 from . import search_index_views
 from . import health_views
 from . import capabilities_views
+from . import ai_connection_views
 
 urlpatterns = [
+    path('ai/providers/', ai_connection_views.AIProviderCatalogView.as_view(), name='ai-provider-catalog'),
+    path('ai/connections/', ai_connection_views.UserAIConnectionListCreateView.as_view(), name='ai-connection-list'),
+    path('ai/connections/<uuid:connection_id>/', ai_connection_views.UserAIConnectionDetailView.as_view(), name='ai-connection-detail'),
+    path('ai/connections/<uuid:connection_id>/key/', ai_connection_views.UserAIConnectionKeyView.as_view(), name='ai-connection-key'),
     path('capabilities/', capabilities_views.capabilities, name='capabilities'),
     path('health/live/', health_views.health_live, name='health-live'),
     path('health/ready/', health_views.health_ready, name='health-ready'),

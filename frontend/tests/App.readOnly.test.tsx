@@ -139,7 +139,7 @@ describe('read-only application capabilities', () => {
     expect(mocks.fetchMe).not.toHaveBeenCalled()
   })
 
-  it.each(['/provider-comparisons', '/settings/chatgpt', '/admin/crawlers'])(
+  it.each(['/provider-comparisons', '/settings/chatgpt', '/settings/ai', '/admin/crawlers'])(
     'keeps disabled route %s behind its capability without private API calls',
     async (path) => {
       renderAt(path)
