@@ -1,6 +1,6 @@
 # T00 · 共享网关端到端技术验真
 
-> **BLOCKED（2026-10-12）**：最新隔离合成运行 F 为 `396 PASS / 0 FAIL / 396 checks`，CLI 标记 `PARTIAL`，因为未覆盖旧聊天/研究/翻译回归和真实 provider 兼容。T00-02、T00-06、T00-07 已通过本地合成验收。LiteLLM v1.104.2 的原始 Chat EOF 风险仍由负控复现，受保护准入路径已证明在上游前拒绝 Chat streaming。旧业务回归的可复核结果仍缺失；用户报告 DeepSeek 直连基线 PASS，但经 LiteLLM 的 T00-11 仍为 NOT_RUN。精确 SHA、证据与边界见[同编号 Test](../tests/T00-sdk-protocol.md)。本任务状态不表示网关或其他厂商功能已验收。
+> **BLOCKED（2026-10-12）**：最新隔离合成运行 F 为 `396 PASS / 0 FAIL / 396 checks`，CLI 标记 `PARTIAL`，因为未覆盖旧业务回归和真实 provider 兼容。T00-02、T00-06、T00-07 已通过本地合成验收。LiteLLM v1.104.2 的原始 Chat EOF 风险仍由负控复现，受保护准入路径已证明在上游前拒绝 Chat streaming。基线 commit `69e084e` 的完整 CI 为 838 passed；当前分支的两次 backend CI 各有 837 passed / 1 failed，分别在订阅恢复/并发测试遇到 SQLite `OperationalError`。本分支没有修改这些业务文件或旧测试，完整 T00 等待 backend 回归稳定通过。用户报告 DeepSeek 直连基线 PASS，但经 LiteLLM 的 T00-11 仍为 NOT_RUN。精确 SHA、证据与边界见[同编号 Test](../tests/T00-sdk-protocol.md)。本任务状态不表示网关或其他厂商功能已验收。
 
 | 属性 | 内容 |
 | --- | --- |

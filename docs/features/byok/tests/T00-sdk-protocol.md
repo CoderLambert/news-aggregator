@@ -46,9 +46,9 @@
 | 经 LiteLLM 的 T00-11 / 网关真实请求 | **NOT_RUN**；目前只有本地合成 PROXY_LOCAL 证据，未发送真实 provider 网关请求 |
 | 其他 provider 的 PROVIDER_REAL | **NOT_RUN** |
 | CI 上下文（用户提供，只读） | HEAD `69e084e` 的 run `38136034042` backend-and-release-gates / frontend 均 success；较早 `38136011186` backend failure。它们不是 T00 手工网关验收结果 |
-| 旧聊天/研究/翻译测试基线 | **NOT_RUN**：隔离工作区缺 pytest 和 frontend `node_modules`；没有安装全项目依赖。历史 `219 passed / 3 warnings` 没有可恢复的命令/报告；缺 chromadb 的 `82 passed / 23 failed` 不作产品基线 |
+| 旧聊天/研究/翻译测试基线 | 功能分支基线 `69e084e` 的 CI 为 `838 passed / 2 warnings`。当前 T00 commit 的两次 backend CI 均为 `837 passed / 1 failed / 2 warnings`，分别在订阅任务恢复与并发用例触发 SQLite `OperationalError`；稳定通过结果待复验。隔离工作区缺 pytest 和 frontend `node_modules`，未安装全项目依赖。历史 `219 passed / 3 warnings` 没有可恢复命令/报告；缺 chromadb 的 `82 passed / 23 failed` 不作产品基线 |
 | 旧测试断言 diff | `tests/` 与 `frontend/tests/` 无 diff；隔离探针与 DeepSeek 诊断自测共 47 项通过，没有放宽旧断言 |
-| 完整 T00 结论 | **BLOCKED**；T00-02、T00-06、T00-07 的本地验收已通过；旧新闻回归仍未运行。T00-10 风险已通过关闭 Chat streaming 路径隔离；T00-11 与其他经 LiteLLM 的真实调用未运行 |
+| 完整 T00 结论 | **BLOCKED**；T00-02、T00-06、T00-07 的本地验收已通过；当前分支 backend CI 未稳定通过。T00-10 风险已通过关闭 Chat streaming 路径隔离；T00-11 与其他经 LiteLLM 的真实调用未运行 |
 
 ## 最新复测 F（2026-10-12）
 
@@ -56,7 +56,7 @@
 
     /tmp/byok-t00-smoke-20261012/bin/python tools/byok_t00_probe/probe.py
 
-结果：`396 PASS / 0 FAIL / 396 checks`，退出码 0，CLI 状态 `PARTIAL`，未覆盖项为旧聊天/研究/翻译回归基线与 `PROVIDER_REAL` 兼容性。
+结果：`396 PASS / 0 FAIL / 396 checks`，退出码 0，CLI 状态 `PARTIAL`，未覆盖项为完整旧业务回归和 `PROVIDER_REAL` 兼容性。
 
 T00-06 新增一组真正并发的三请求验收：tenant-a 使用 `t00-chat`，tenant-b 同时使用 `t00-chat` 和 `t00-messages`，后两项通过各自模型范围受限的项目虚拟 Key 发出。上游 fixture 为每项记录单调时钟服务区间，三项均各触发一次，tenant/provider Key 均匹配，模型别名和协议路由正确，服务区间共同重叠 `198.372 ms`。这证明并发执行和凭据/模型路由隔离，不只依赖线程池提交顺序。
 
@@ -65,6 +65,8 @@ T00-02 的 EOF/incomplete 检查通过：SDK_LOCAL 三协议 EOF 未合成完整
 本次 Compose 清理 `CLEANUP_COMPOSE_DOWN` 与 `CLEANUP_NO_PROJECT_RESOURCES_LEFT` 均 PASS，残留 containers=0、networks=0；日志与 CLI 输出均未包含合成凭据。自测 `test_probe` 为 30 tests passed；`py_compile`、Compose 配置校验和 `git diff --check` 通过。未发送真实 provider 请求，未读取或使用 DeepSeek Key。
 
 脱敏机器结果：[T00-sdk-protocol-run-f-sanitized.json](../evidence/T00-sdk-protocol-run-f-sanitized.json)，源输出 SHA-256 `2050f6ceb63143fb1404e9a118ff5956e9d98c1d471888a02f2d8fedcc672975`，脱敏副本 SHA-256 `6ec4bd6f4fd5455165cb3330e77812455ccf0c335f1eba2b7a96bda835e28277`。七个 SDK/Proxy `public_output.text` 字段已替换；文件保留 396 项状态、计数、终态、凭据匹配和并发区间事实。
+
+当前提交 `2ef40cd91ce4b00fddb295ae449f7032856a9ce4` 的 CI 前端两次均通过。两次 backend-and-release-gates 都在完整测试中得到 `837 passed / 1 failed / 2 warnings`：运行 [38164051334](https://github.com/CoderLambert/news-aggregator/actions/runs/38164051334) 失败于 `test_sse_disconnect_does_not_cancel_background_worker`，运行 [38164054513](https://github.com/CoderLambert/news-aggregator/actions/runs/38164054513) 失败于 `test_simultaneous_database_connections_share_one_unique_task`；两者日志均为订阅任务存储 `OperationalError`。作为对照，基线 commit `69e084e39552c5650b930a067b6b79d09e95db34` 的 [CI run 38136034042](https://github.com/CoderLambert/news-aggregator/actions/runs/38136034042) frontend 与 backend/release jobs 全部通过，pytest 为 `838 passed / 2 warnings`。T00 改动范围不包含后端业务代码或旧测试；当前分支的稳定 backend 回归仍待重新通过，因此完整 T00 继续 BLOCKED。
 
 ## 历史复测 E（2026-10-12）
 

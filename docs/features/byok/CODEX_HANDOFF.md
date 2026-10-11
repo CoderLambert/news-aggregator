@@ -18,7 +18,7 @@
 - SDK_LOCAL：真实官方客户端 SDK 直接连接受控合成上游；只证明客户端序列化/解析。
 - PROXY_LOCAL：固定 LiteLLM Proxy + 实际客户端 + 受控合成上游；证明集成链路，不代表任何真实厂商可用。
 - PROVIDER_REAL：经共享 Proxy 对指定真实厂商、模型、地域执行有界真实调用。首轮仅 DeepSeek，其他厂商不可从 PROXY_LOCAL 推导兼容。
-- 当前 T00 的 SDK_LOCAL / PROXY_LOCAL 有隔离合成子集证据：复测 F 为 396 PASS / 0 FAIL，CLI 状态 PARTIAL；T00-02、T00-06、T00-07 已通过本地验收，Chat EOF 风险仍保留在 raw 负控中，受保护路由验证为上游前拒绝。完整 T00 等待旧聊天/研究/翻译回归的可复核结果。用户报告的 DeepSeek 直连基线为 PASS（1 次），不代表 LiteLLM 兼容。其他 provider、经 LiteLLM 的 T00-11、T00-G 独立运维和最终 UAT 仍为 NOT_RUN。此前 T00 SDK 任务准备记录的旧业务回归为 219 passed / 3 warnings，只作历史业务基线，不能记作当前 Proxy 或 provider 验收。
+- 当前 T00 的 SDK_LOCAL / PROXY_LOCAL 有隔离合成子集证据：复测 F 为 396 PASS / 0 FAIL，CLI 状态 PARTIAL；T00-02、T00-06、T00-07 已通过本地验收，Chat EOF 风险仍保留在 raw 负控中，受保护路由验证为上游前拒绝。基线 commit 的 CI 有 838 passed；当前分支两次 backend CI 各有 837 passed / 1 failed，失败在不同订阅任务测试并报告 SQLite `OperationalError`。T00 没有修改业务代码或这些测试，完整 T00 等待 backend 回归稳定通过。用户报告的 DeepSeek 直连基线为 PASS（1 次），不代表 LiteLLM 兼容。其他 provider、经 LiteLLM 的 T00-11、T00-G 独立运维和最终 UAT 仍为 NOT_RUN。此前 T00 SDK 任务准备记录的旧业务回归为 219 passed / 3 warnings，只作历史业务基线，不能记作当前 Proxy 或 provider 验收。
 
 ## 任务顺序与独立性
 
