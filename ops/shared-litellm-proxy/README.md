@@ -96,3 +96,5 @@ python3 tests/run_local.py
 脚本使用临时随机 master/project/provider key，provider egress 网络设为 internal，并只连接测试 upstream；它不读取用户密钥、不访问真实 provider。脚本会实际校验配置、Postgres 启动/恢复、两个受限 project key、独立 `curl` CLI、额度字段、错误 project key、未授权模型、缺 provider key、Chat stream 拒绝、usage 脱敏、Proxy 停止/重启和容器清理。测试密钥只存在于临时目录和内存，不打印到终端。
 
 该脚本不替代真实 NewsHub Web/Worker 停止/重启验收、生产备份恢复、生产升级回退或 T13 provider 矩阵；这些结果必须按 T00-G 测试契约分开记录。真实 provider 请求保持 `NOT_RUN`。
+
+2026-10-12 的本地验收结果为 **26 PASS / 0 FAIL**，涵盖两个隔离项目 key、合成上游 provider-key 路由、拒绝路径、usage 脱敏、Proxy 重启和 Postgres 隔离备份恢复。精确基线、实现 SHA、Docker/Compose 版本和每项未验证边界记录在 [T00-G 测试证据](../../docs/features/byok/tests/T00-gateway-service.md)；整卡状态仍为 **PARTIAL**，不代表生产 go-live 或 provider 兼容。

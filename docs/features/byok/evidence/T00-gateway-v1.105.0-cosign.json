@@ -1,0 +1,35 @@
+{
+  "scope": "T00-G pinned LiteLLM image signature and digest verification",
+  "verified_at_utc_date": "2026-10-11",
+  "image": {
+    "repository": "ghcr.io/berriai/litellm",
+    "tag": "v1.105.0",
+    "oci_index_digest": "sha256:60947db020b57e204823d3fbc8bb295c85be890d7c9adcc77fb4f5fc2fe410b2",
+    "compose_reference": "ghcr.io/berriai/litellm:v1.105.0@sha256:60947db020b57e204823d3fbc8bb295c85be890d7c9adcc77fb4f5fc2fe410b2",
+    "platform_manifests": {
+      "linux/amd64": "sha256:97f5f0f6bea031340f323923836303a8db6147292e8115e27f11c87d42a257a2",
+      "linux/arm64": "sha256:ae792cdea380e5de2d5de8cb55efcdd1b7eacaaa8d0b89c6c6b124f221b486e5"
+    }
+  },
+  "signature_verification": {
+    "result": "PASS",
+    "cosign_version": "v3.0.2",
+    "command": "cosign verify --key https://raw.githubusercontent.com/BerriAI/litellm/0112e53046018d726492c814b3644b7d376029d0/cosign.pub ghcr.io/berriai/litellm:v1.105.0",
+    "signature_count": 1,
+    "claimed_image_digest": "sha256:60947db020b57e204823d3fbc8bb295c85be890d7c9adcc77fb4f5fc2fe410b2",
+    "claimed_digest_matches_pinned_oci_index": true,
+    "cosign_claims_validated": true,
+    "signature_verified_against_pinned_public_key": true,
+    "transparency_log_bundle_present": true,
+    "transparency_log": {
+      "log_id": "c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d",
+      "log_index": 3204951777,
+      "integrated_time_unix": 1791712307
+    },
+    "public_key_source_commit": "0112e53046018d726492c814b3644b7d376029d0"
+  },
+  "source": {
+    "official_release": "https://github.com/BerriAI/litellm/releases/tag/v1.105.0",
+    "official_verification_instructions": "https://github.com/BerriAI/litellm/releases"
+  }
+}
