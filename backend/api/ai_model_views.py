@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import re
 
+from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.conf import settings
+from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.authentication import AnonymousCsrfSessionAuthentication
-from api.models import UserAIConnection, UserAIModelConfig
+from api.models import UserAIConnection, UserAIModelConfig, UserAITaskPreference
 from api.public_policy import policy_error
 from api.services.ai_model_registry import (
     MODEL_CATALOG_SOURCES,
@@ -102,6 +104,15 @@ def _no_store(response):
     return response
 
 
+def _valid_ui_query(query_params, *, allowed=()):
+    names = set(query_params)
+    if names - set(allowed) - {'lang'}:
+        return False
+    if len(query_params.getlist('lang')) > 1 or query_params.get('lang') not in (None, 'zh', 'en'):
+        return False
+    return all(len(query_params.getlist(name)) == 1 for name in names - {'lang'})
+
+
 def _require_feature():
     if not settings.AI_BYOK_ENABLED:
         return policy_error('byok_disabled')
@@ -178,7 +189,7 @@ class AIModelCatalogView(NoStoreAPIView):
         denied = _require_feature()
         if denied:
             return denied
-        if set(request.query_params) - {'provider_id'}:
+        if not _valid_ui_query(request.query_params, allowed=('provider_id',)):
             return _no_store(Response({'error_code': 'invalid_query'}, status=status.HTTP_400_BAD_REQUEST))
         provider_id = request.query_params.get('provider_id')
         if provider_id and not any(item['provider_id'] == provider_id for item in PROFILES_BY_ID.values()):
@@ -214,7 +225,7 @@ class UserAIModelListCreateView(NoStoreAPIView):
         denied = _require_feature()
         if denied:
             return denied
-        if request.query_params:
+        if not _valid_ui_query(request.query_params):
             return _no_store(Response({'error_code': 'invalid_query'}, status=status.HTTP_400_BAD_REQUEST))
         rows = UserAIModelConfig.objects.select_related('connection').filter(
             connection__user=request.user,
@@ -315,11 +326,19 @@ class UserAIModelDetailView(NoStoreAPIView):
         denied = _require_feature()
         if denied:
             return denied
-        deleted, _ = UserAIModelConfig.objects.filter(
-            pk=model_id,
-            connection__user=request.user,
-            connection__is_deleted=False,
-        ).delete()
-        if not deleted:
-            return _no_store(Response({'error_code': 'not_found'}, status=status.HTTP_404_NOT_FOUND))
+        with transaction.atomic():
+            get_user_model().objects.select_for_update().get(pk=request.user.pk)
+            model = UserAIModelConfig.objects.select_for_update().filter(
+                pk=model_id,
+                connection__user=request.user,
+                connection__is_deleted=False,
+            ).first()
+            if model is None:
+                return _no_store(Response({'error_code': 'not_found'}, status=status.HTTP_404_NOT_FOUND))
+            UserAITaskPreference.objects.filter(model_config=model).update(
+                model_config=None,
+                requires_reselection=True,
+                updated_at=timezone.now(),
+            )
+            model.delete()
         return _no_store(Response({'deleted': True}))

@@ -71,7 +71,7 @@ def test_versioned_catalog_is_fixed_no_store_and_does_not_contact_provider(monke
         raise AssertionError('model catalog reads must not contact a provider')
 
     monkeypatch.setattr(socket.socket, 'connect', forbidden_network)
-    response = client.get(reverse('ai-model-catalog'), {'provider_id': 'deepseek'})
+    response = client.get(reverse('ai-model-catalog'), {'provider_id': 'deepseek', 'lang': 'zh'})
 
     assert response.status_code == 200
     assert response['Cache-Control'] == 'no-store'
