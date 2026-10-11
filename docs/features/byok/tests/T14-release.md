@@ -10,15 +10,15 @@
 | T14-02 | 两个用户 Session/CSRF、端点白名单、私网阻断 | 无越权和 SSRF 外泄 | NOT_RUN |
 | T14-03 | read_only、PUBLIC_AI_ENABLED、AI_BYOK_ENABLED、worker | 禁用时无新付费调用，既有历史按权限只读 | NOT_RUN |
 | T14-04 | 重启、掉线、取消、完成写库失败 | 不产生伪完成或隐式重复调用 | NOT_RUN |
-| T14-05 | 六厂商真实结果与用户UAT状态 | 未执行标 NOT_RUN，最终 GO/NO-GO 附明确范围 | NOT_RUN |
+| T14-05 | 首批六个预设的真实结果与用户 UAT 状态 | 首轮只有 DeepSeek 可获批真实调用；PROXY_LOCAL 不作 provider 证据；未执行项标 NOT_RUN | NOT_RUN |
 
 ## 如何证明
 
 - **基线**：先用该卡涉及的旧测试在同一环境记录原始结果，再引入代码修改；不要凭“测试数量全绿”掩盖不相关回归。
 - **实际测试**：新 Django unit/DB/HTTP/worker 或 Vitest/浏览器测试按必要范围补齐；没有业务路径运行的模拟测试不能算功能完整。
-- **SDK 真实程度**：实际 SDK + 可控上游为 SDK_LOCAL，真实厂商模型/Key 才能标 PROVIDER_REAL。缺 Key 时明确 NOT_RUN。
+- **SDK/Proxy 真实程度**：真实官方 SDK + 受控 upstream 为 SDK_LOCAL；锁定 LiteLLM Proxy + 真实 SDK + 受控 upstream 为 PROXY_LOCAL；只有指定真实 provider/model/region 请求为 PROVIDER_REAL。三者分开记录，缺少对应真实执行证据时标 NOT_RUN。
 - **回归**：每个改动了旧测试的文件列出 diff，说明产品语义的变更依据；不准无依据放宽断言。
-- **用户验收**：测试环境开 BYOK→聊天/翻译/研究可用→关 BYOK→任何新收费调用被拒绝且自己旧结果可读；旧订阅功能能跑。
+- **用户验收**：测试环境开 BYOK→聊天/翻译/研究可用→关 BYOK→任何新收费调用被拒绝且自己的旧结果仍可读；旧订阅功能能跑。单独记录 T00-G 网关运行证据、DeepSeek 首轮 provider 证据和 UAT；六个预设不是全都通过的前提，也不能从 PROXY_LOCAL 推导。
 
 ## 执行证据（后续任务填写）
 
@@ -29,7 +29,7 @@
 | DB / SDK / 浏览器 / OS 版本 | NOT_RUN |
 | 定向测试和原始 stdout | NOT_RUN |
 | 旧基线与增量回归对照 | NOT_RUN |
-| SDK_LOCAL / PROVIDER_REAL / UAT 分别记录 | NOT_RUN |
+| SDK_LOCAL / PROXY_LOCAL / PROVIDER_REAL / UAT 分别记录 | NOT_RUN |
 | 测试代码 diff（包括旧断言修改） | NOT_RUN |
 | 可复现功能演示结果 | NOT_RUN |
 | 未验证、失败原因、修复 PR | NOT_RUN |

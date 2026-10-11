@@ -4,7 +4,7 @@
 
 | 属性 | 内容 |
 | --- | --- |
-| 前置任务 | [T03](T03-preferences.md)、[T00](T00-sdk-protocol.md) |
+| 前置任务 | [T03](T03-preferences.md)、[T00 本地技术门槛](T00-sdk-protocol.md) |
 | 推荐规模 | M |
 | 对应测试 | [Test T09](../tests/T09-research-first-run.md) |
 
@@ -12,13 +12,13 @@
 
 用户使用已验证工具能力的个人模型，创建研究会话、调用许可检索工具、收到步骤事件并保存完整研究报告。
 
-**允许修改范围**：复用 ResearchRun/ResearchRunEvent、job_manager lease/CAS、研究工具和 SSE，首次研究注入服务端快照/协议适配、可信用户连接；调整 HTTP 与 worker 门禁，区分已许可 BYOK 与未获批订阅研究。
+**允许修改范围**：复用 ResearchRun/ResearchRunEvent、job_manager lease/CAS、研究工具和 SSE，首次研究注入服务端快照、可信用户连接及业务后端→Proxy 路由；本地验收使用临时 LiteLLM Proxy 与受控 upstream，不依赖共享生产服务。调整 HTTP 与 worker 门禁，区分已许可 BYOK 与未获批订阅研究。生产配置缺网关时 fail closed。
 
 **本次明确不做**：不重写 Agent 框架或工具列表、不放开站点全局禁用，不同时实现后续续问重连（T10）。
 
 ### 可直接复现的验收路径
 
-选已验证模型→发起新研究→实际工具调用/记录→完整答案入库→GET读旧报告。
+选已验证模型→经临时 Proxy 发起研究→受控工具调用/记录→完整答案入库→GET 只读旧报告。
 
 ### 对应 Test 用例
 

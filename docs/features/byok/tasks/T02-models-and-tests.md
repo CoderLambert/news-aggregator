@@ -4,7 +4,7 @@
 
 | 属性 | 内容 |
 | --- | --- |
-| 前置任务 | [T01](T01-credentials.md) |
+| 前置任务 | [T01](T01-credentials.md)、[T00 本地技术门槛](T00-sdk-protocol.md) |
 | 推荐规模 | M |
 | 对应测试 | [Test T02](../tests/T02-models-and-tests.md) |
 
@@ -12,7 +12,7 @@
 
 用户对自己的连接添加多个模型，手工输入 ID 或选官方预置，主动点击测试文本/工具能力，得到可信的能力标记。
 
-**允许修改范围**：UserAIModelConfig、版本化目录/可信端点、手动模型 ID、可选发现、模型 CRUD/测试接口、费用提示、model revision+epoch 对测试结果做版本拦截。统一 gateway 在此建立真实上游尝试记录 AICallAttempt，供后续功能复用。
+**允许修改范围**：UserAIModelConfig、版本化目录/可信端点、手动模型 ID、可选发现、模型 CRUD/测试接口、费用提示、model revision+epoch 对测试结果做版本拦截。本地测试通过临时 LiteLLM Proxy 和受控 HTTP upstream；这里建立业务 AICallAttempt 记录，供后续业务调用复用。无可用网关时失败关闭。
 
 **本次明确不做**：保存配置不会自动计费；测试文本成功不代表工具调用通过；不做全套使用分析页面或支持任意额外参数。
 

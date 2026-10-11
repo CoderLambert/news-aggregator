@@ -4,7 +4,7 @@
 
 | 属性 | 内容 |
 | --- | --- |
-| 前置任务 | [T00](T00-sdk-protocol.md) |
+| 前置任务 | 无；Key 管理不调用 Proxy |
 | 推荐规模 | M |
 | 对应测试 | [Test T01](../tests/T01-credentials.md) |
 
@@ -14,7 +14,7 @@
 
 **允许修改范围**：UserAIConnection、可信厂商/地域端点、加密 Secret+AAD/credential_epoch、Session+CSRF、按 user CRUD、最小连接 UI；AI_BYOK_ENABLED 默认关闭，保留 /settings/chatgpt。
 
-**本次明确不做**：不做模型测试或任何收费调用；用户不能任意输入 Base URL；不修改订阅 OAuth 令牌格式。
+**本次明确不做**：不做模型测试、Proxy 请求或任何收费调用；用户不能任意输入 Base URL；不修改订阅 OAuth 令牌格式。
 
 ### 可直接复现的验收路径
 

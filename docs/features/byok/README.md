@@ -1,40 +1,35 @@
 # BYOK · 个人 API Key 与模型配置
 
-> 设计阶段资料总入口。**本分支目前仅提交设计文档、可交互静态原型与原型检查脚本；尚未开发 BYOK API / React 业务页面，也未验证真实付费模型。**
+> 本目录记录已确认的 BYOK 产品设计和任务契约。当前功能分支基线为 feat/byok-user-api-keys@ea2ce55ae22e19e1604e88031b824b68f2666cec；本次只更新独立分支上的文档，不改业务代码、不创建或部署共享网关、不调用真实 provider。
 
-- 仓库：`CoderLambert/news-aggregator`
-- 功能分支：`feat/byok-user-api-keys`
-- 上游基线：`feat/news-public-readiness@b874405f31ae303e772d1ed6ef618b68938febed`
-- 设计状态：**页面方向已确认；T00–T14 功能 Task/Test 契约已拆分（全部未执行）**
-- 功能边界：六家主流官方通用 API Key、连接管理、每用途模型选择、个人结果与现有任务系统复用。
+- 设计状态：页面方向已确认；T00–T14 与 T00-G Task/Test 契约仍为 PLANNED / NOT_RUN。
+- 架构：业务后端经独立 LiteLLM Proxy 访问 provider；用户 provider Key、业务项目 virtual key、Proxy master key 分别隔离。
+- 首批六个 UI 预设为 OpenAI、Claude、DeepSeek、GLM、Qwen、Kimi，不构成 Proxy 支持上限；首轮 PROVIDER_REAL 只允许 DeepSeek。
+- 业务项目继续拥有网站用户、个人 Key 加密存储、任务幂等/恢复/取消、事务和用户私有结果。Proxy 负责 provider 协议、受信路由、项目级受限虚拟 Key、限制和脱敏 usage。
 
 ## 导航
 
 | 内容 | 文件 | 说明 |
 | --- | --- | --- |
-| 技术设计 / 风险验证 | [BYOK_IMPLEMENTATION_PLAN.md](BYOK_IMPLEMENTATION_PLAN.md) | 技术选型、代码现状、预防性约束、实施阶段与验证边界 |
-| Codex 执行交接 | [CODEX_HANDOFF.md](CODEX_HANDOFF.md) | 开发守则、P0 首步、必须保持的不变量 |
-| 页面和交互设计 | [BYOK_PAGE_DESIGN_SPEC.md](BYOK_PAGE_DESIGN_SPEC.md) | 真实 NewsHub 页面接入点、交互流程和状态约束 |
-| 独立可交互原型 | [prototype/index.html](prototype/index.html) | 自包含 HTML/CSS/JS，包含模拟连接、模型偏好、文章预览 |
-| 原型使用和视觉复现 | [prototype/README.md](prototype/README.md) | 打开方式与生成桌面/手机截图的方法 |
-| 功能 Task | [tasks/README.md](tasks/README.md) | 15 张主任务卡，T13 再拆六厂商；一张一张执行 |
-| Test 契约 | [tests/README.md](tests/README.md) | 同编号用例与真实执行证据占位，全部 NOT_RUN |
+| 技术设计 | [BYOK_IMPLEMENTATION_PLAN.md](BYOK_IMPLEMENTATION_PLAN.md) | 角色边界、Key 与数据流安全、任务阶段和证据状态 |
+| Codex 执行交接 | [CODEX_HANDOFF.md](CODEX_HANDOFF.md) | 固定架构、任务依赖、终态/续接门槛 |
+| 页面设计 | [BYOK_PAGE_DESIGN_SPEC.md](BYOK_PAGE_DESIGN_SPEC.md) | 设置页交互、数据接收方与用户路径 |
+| 静态原型 | [prototype/index.html](prototype/index.html) | 纯浏览器内模拟，不接 Proxy/API |
+| 原型说明 | [prototype/README.md](prototype/README.md) | 本地预览与限制 |
+| Task 总表 | [tasks/README.md](tasks/README.md) | T00–T14 单卡拆分与依赖图 |
+| Test 总表 | [tests/README.md](tests/README.md) | SDK_LOCAL / PROXY_LOCAL / PROVIDER_REAL / UAT 证据规则 |
+| T00 技术验真 | [tasks/T00-sdk-protocol.md](tasks/T00-sdk-protocol.md) | 锁定真实 Proxy + SDK + 受控 HTTP upstream |
+| T00-G 运维契约 | [tasks/T00-gateway-service.md](tasks/T00-gateway-service.md) | 独立 Proxy/Postgres、密钥隔离、健康/脱敏/备份/升级 |
+| 执行规则 | [tasks/EXECUTION_RULES.md](tasks/EXECUTION_RULES.md) | 单任务执行、基线与回归规则 |
 
-## 设计决定（已固定）
+## 固定决策摘要
 
-- 两类官方 SDK：`openai`、`anthropic`；三种薄协议适配器：Responses、Chat Completions、Messages。
-- 复用现有 `ResearchRun`、`ResearchRunEvent`、`ChatGPTTranslationTask`，不开发第二套任务系统。
-- 新增 `/settings/ai`，保留 `/settings/chatgpt`，两种凭据不混用。
-- 个人 Key 只用于明确选择的用户任务，永不隐式兜底到管理员 Key 或 ChatGPT 订阅。
-- 恢复只读取历史任务，不隐式发起付费请求；上游真实终态与事务提交成功才能显示完成。
-- 首批不支持用户任意 Base URL、不接入 Coding/Token Plan。
-- 原型所有表单、测试、回答均为浏览器内模拟；**禁止在原型输入真实 API Key**。
-
-## 本阶段交付边界
-
-1. 已完成：产品 UI 方向确认、技术设计基线、独立原型、静态原型验证脚本。
-2. 已拆分 Task/Test 文档；业务代码、实际 SDK 验证、真实厂商联调、功能及发布测试尚未开始。
-3. 后续：从 [T00 SDK 技术门槛](tasks/T00-sdk-protocol.md) 开始，每次只执行一个可验收切片。每项任务必须给出变更前证据、必须保持的契约和实际验收结果。
-
-**备注**：独立 HTML 是审阅原型，不会在生产页面自动出现。设计截图由 `prototype/check_ui.py` 在本地浏览器环境中按需再生成，避免提交冗余二进制截图。
+- LiteLLM Proxy 是与 NewsHub 生命周期分离的共享服务；官方镜像候选固定为 ghcr.io/berriai/litellm:v1.104.2@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500。该镜像、签名和行为仍待 T00/T00-G 实测。
+- 官方 SDK 仅作业务后端的 Proxy 客户端；不在 NewsHub 编写三套 provider 协议适配器。T00 必须验证三协议原始终态、工具双轮 continuation、凭据隔离、资源关闭与重试计数。
+- 项目 virtual key 用于业务后端认证 Proxy；用户 provider Key 按用户授权经业务后端显式传入 Proxy。Proxy master key 仅用于运维，绝不进业务运行容器。
+- 不传任意 user_config、api_base、headers、callback 或路由/fallback 配置；仅使用服务端可信 endpoint、model 和 credential 字段白名单。
+- 用户正文/问题的接收方是业务后端、共享 Proxy 和用户选择的 provider；不写入日志/回调，首版共享内容缓存关闭。
+- 没有用户 Key 或 Proxy 不可用时 fail closed；不得借部署/平台/其他用户 Key、直连 provider 或跨模型 fallback。
+- T01 连接管理不依赖共享服务交付；T04/T09 可用临时本地 Proxy 和受控 upstream 验收。T00-G 服务验收是 T13 真实 provider 调用与 T14 发布门禁的前置条件。
+- SDK_LOCAL 与 PROXY_LOCAL 是本地合成测试；只有指定模型的获授权真实调用才是 PROVIDER_REAL。此前的 219 passed / 3 warnings 只作历史业务回归参考。
 

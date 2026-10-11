@@ -4,7 +4,7 @@
 
 | 属性 | 内容 |
 | --- | --- |
-| 前置任务 | [T04](T04-article-chat.md)、[T05](T05-private-translation.md)、[T06](T06-long-translation.md)、[T07](T07-translation-lifecycle.md)、[T08](T08-translation-readers.md)、[T09](T09-research-first-run.md)、[T10](T10-research-followup.md)、[T11](T11-suggestions.md)、[T12](T12-usage.md)、[T13](T13-providers.md) |
+| 前置任务 | [T04](T04-article-chat.md)、[T05](T05-private-translation.md)、[T06](T06-long-translation.md)、[T07](T07-translation-lifecycle.md)、[T08](T08-translation-readers.md)、[T09](T09-research-first-run.md)、[T10](T10-research-followup.md)、[T11](T11-suggestions.md)、[T12](T12-usage.md)、[T13](T13-providers.md)、[T00-G](T00-gateway-service.md) |
 | 推荐规模 | M·发布门槛 |
 | 对应测试 | [Test T14](../tests/T14-release.md) |
 
@@ -14,7 +14,7 @@
 
 **允许修改范围**：在测试部署检查迁移副本、全部关联回归、账户/CSRF/SSRF、生产 HTTP 与 worker 门禁、环境 Secret、出站限制、移动端、事故回退；给明确 GO/NO-GO，真实用户验收另记。
 
-**本次明确不做**：不临时重建整套架构；不自动合并 main 或部署公网站点；不因只有 fake provider 测试就声称支持六家。
+**本次明确不做**：不临时重建整套架构；不自动合并 main 或部署公网站点；不因仅有 SDK_LOCAL/PROXY_LOCAL 就声称真实 provider 兼容；共享网关运维与 DeepSeek 首轮验证分别记录。
 
 ### 可直接复现的验收路径
 
@@ -28,7 +28,7 @@
 | T14-02 | 两个用户 Session/CSRF、端点白名单、私网阻断 | 无越权和 SSRF 外泄 | [Test 契约](../tests/T14-release.md) |
 | T14-03 | read_only、PUBLIC_AI_ENABLED、AI_BYOK_ENABLED、worker | 禁用时无新付费调用，既有历史按权限只读 | [Test 契约](../tests/T14-release.md) |
 | T14-04 | 重启、掉线、取消、完成写库失败 | 不产生伪完成或隐式重复调用 | [Test 契约](../tests/T14-release.md) |
-| T14-05 | 六厂商真实结果与用户UAT状态 | 未执行标 NOT_RUN，最终 GO/NO-GO 附明确范围 | [Test 契约](../tests/T14-release.md) |
+| T14-05 | 首批六个预设的真实结果（首轮仅 DeepSeek获准）与用户 UAT | PROXY_LOCAL 不作 provider 证据；未执行项标 NOT_RUN，最终 GO/NO-GO 附明确范围 | [Test 契约](../tests/T14-release.md) |
 
 ### 立即停止并纠偏
 

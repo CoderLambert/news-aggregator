@@ -1,38 +1,45 @@
-# Test T00 · SDK 协议验真
+# Test T00 · 共享网关端到端技术验真
 
-> **PLANNED**：本文件为未执行的实施/测试契约，所有测试当前 NOT_RUN。实施时以 `origin/feat/byok-user-api-keys` 最新 HEAD 为准，勿把设计 SHA 当作当前代码。
+> **PLANNED / NOT_RUN**：本 Test 是验收契约，尚无 SDK_LOCAL、PROXY_LOCAL 或 PROVIDER_REAL 结果。任务仅使用合成假 Key 与本地受控 HTTP upstream。
 
 对应：[T00 Task](../tasks/T00-sdk-protocol.md)。
 
-| 用例 | 场景 / 失败注入 | 正确性约束 | 状态 |
+| 用例 | 场景 / 故障注入 | 正确性约束 | 状态 |
 | --- | --- | --- | --- |
-| T00-01 | 真实 SDK 文本和流在三种协议均收到各自完整终态 | 只完整且语义正确时报告成功 | NOT_RUN |
-| T00-02 | partial 后 EOF/length/incomplete/stream error/HTTP error | 全部是明确非成功，不能生成 complete | NOT_RUN |
-| T00-03 | tools 往返保留 Responses items / Anthropic thinking 签名 / Chat reasoning_content | 仅允许白名单工具和完整合法参数，可见消息剔除私密续接 | NOT_RUN |
-| T00-04 | 两组显式 Key/模型并发调用；设置 max_retries=0 | HTTP 请求无凭据混用，无隐式重发 | NOT_RUN |
-| T00-05 | 已有聊天/研究/翻译入口未被替换 | 已有旧测试按基线运行 | NOT_RUN |
+| T00-01 | 三协议完整文字和工具终态 | 原始上游、Proxy、SDK 终态相符；满足协议各自完整条件后才成功 | NOT_RUN |
+| T00-02 | partial 事件后正常 EOF、length/incomplete | 不能合成完整终态；保留原始 incomplete 原因 | NOT_RUN |
+| T00-03 | 截断 body、超时、SSE error、HTTP error | 安全错误可分类，Key/正文不泄露 | NOT_RUN |
+| T00-04 | 半截工具参数、非法 JSON、非白名单工具 | 不派发工具、不成功 | NOT_RUN |
+| T00-05 | 两轮工具续接 | 保留 Responses output items、Anthropic thinking/signature、Chat reasoning_content；公开消息不含 continuation | NOT_RUN |
+| T00-06 | 不同 Key/model 并发隔离 | 不混用用户凭据、模型、Proxy 项目虚拟 Key 或部署 provider Key | NOT_RUN |
+| T00-07 | 成功、异常、取消时关闭 stream/response/HTTP 资源 | 所有已打开资源均关闭 | NOT_RUN |
+| T00-08 | 缺 provider Key、错误项目虚拟 Key | 缺 Key fail closed；错误项目凭据在到达 upstream 前被拒绝 | NOT_RUN |
+| T00-09 | SDK/Proxy 重试与 fallback 计数 | max_retries=0、num_retries=0、无跨模型 fallback，实际请求数与断言一致 | NOT_RUN |
+| T00-10 | v1.104.2 原始上游 EOF 与 Proxy 暴露终态对照 | 仅下游 stop/[DONE] 不足以证明原始上游完整；失败按局部风险记录 | NOT_RUN |
 
 ## 如何证明
 
-- **基线**：先用该卡涉及的旧测试在同一环境记录原始结果，再引入代码修改；不要凭“测试数量全绿”掩盖不相关回归。
-- **实际测试**：新 Django unit/DB/HTTP/worker 或 Vitest/浏览器测试按必要范围补齐；没有业务路径运行的模拟测试不能算功能完整。
-- **SDK 真实程度**：实际 SDK + 可控上游为 SDK_LOCAL，真实厂商模型/Key 才能标 PROVIDER_REAL。缺 Key 时明确 NOT_RUN。
-- **回归**：每个改动了旧测试的文件列出 diff，说明产品语义的变更依据；不准无依据放宽断言。
-- **用户验收**：执行一个脚本依次验证正常完成、仅输出 partial 后 EOF、流内错误与 tools→result→final；打印脱敏结果和版本。
+- **SDK_LOCAL**：使用真实安装的官方客户端 SDK 直连受控合成上游，证明 SDK 请求序列化、响应解析和关闭行为；不证明 Proxy 整合或厂商兼容。
+- **PROXY_LOCAL**：锁定真实 LiteLLM Proxy 镜像、真实 SDK、受控 HTTP upstream，记录上游原始请求/终态、Proxy 返回、SDK 输出和请求计数。本卡主要技术门槛。
+- **PROVIDER_REAL**：本卡不调用真实厂商，状态保持 NOT_RUN。PROXY_LOCAL 不能推出任何厂商兼容性。
+- **日志**：只保留合成凭据标识、事件名、模型别名、耗时、错误类别和请求计数；禁止打印 Key、完整 Authorization、新闻正文或私有 continuation。
+- **基线与断言**：同环境记录任务前相关旧聊天/研究/翻译测试基线。若本卡只改探针/协议契约而没改旧测试，明确写“旧测试断言无 diff”；不得放宽旧断言。
 
-## 执行证据（后续任务填写）
+## 执行证据（后续实际执行时填写）
 
 | 项目 | 结果 |
 | --- | --- |
 | 本卡状态 | **NOT_RUN** |
-| 精确基线 HEAD 与本任务 HEAD | NOT_RUN |
-| DB / SDK / 浏览器 / OS 版本 | NOT_RUN |
-| 定向测试和原始 stdout | NOT_RUN |
-| 旧基线与增量回归对照 | NOT_RUN |
-| SDK_LOCAL / PROVIDER_REAL / UAT 分别记录 | NOT_RUN |
-| 测试代码 diff（包括旧断言修改） | NOT_RUN |
-| 可复现功能演示结果 | NOT_RUN |
-| 未验证、失败原因、修复 PR | NOT_RUN |
+| 精确基线 HEAD | `ea2ce55ae22e19e1604e88031b824b68f2666cec`（此前确认的功能分支基线；执行当天需重新核对） |
+| 实现 SHA | 文档 PR commit 待生成；SDK/Proxy 实施 SHA 未执行 |
+| Python / OpenAI SDK / Anthropic SDK / LiteLLM / Docker 版本 | NOT_RUN |
+| SDK_LOCAL 执行命令及脱敏输出 | NOT_RUN |
+| PROXY_LOCAL 执行命令及脱敏输出 | NOT_RUN |
+| PROVIDER_REAL | **NOT_RUN；本卡不授权真实厂商请求** |
+| 旧聊天/研究/翻译基线与变更后对照 | 历史准备记录：219 passed, 3 warnings；精确运行命令、依赖版本、功能基线 SHA 与报告文件未在本卡重新执行，不能视为本卡证据 |
+| 旧测试断言 diff | NOT_RUN；后续若不改旧测试，记录“无断言 diff”；不放宽旧断言 |
+| 原始终态 / continuation / 请求计数 / 资源关闭 | NOT_RUN |
+| 未验证或阻塞原因 | 尚未实现或运行；所有场景按 NOT_RUN 处理 |
 
-任何来源缺失，保留 NOT_RUN，不能伪造 PASS。
+没有保留原始事件和脱敏计数证据时，不得改为 PASS。
 
