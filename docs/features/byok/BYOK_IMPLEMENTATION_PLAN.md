@@ -2,31 +2,38 @@
 
 版本：1.0 · 2026-10-11  
 适用仓库：CoderLambert/news-aggregator  
-交付性质：开发设计基线；本功能分支仅收录方案及静态原型，尚未修改业务实现，也没有调用真实厂商收费接口。
+交付性质：设计与任务契约；当前独立分支仅更新文档和静态原型，没有改业务实现、部署网关或调用真实厂商接口。
 
 ## 0. 决策摘要
 
-采用 **OpenAI 官方 Python SDK + Anthropic 官方 Python SDK + 三个薄协议适配器**。在当前 Django 后端内实现，不另建项目、不部署网关、不更换研究 Agent 框架、不新增第二套任务系统。
+采用独立共享 LiteLLM Proxy + 业务后端调用 + 用户自有 provider Key 显式逐请求传递。Proxy 使用固定官方镜像，不随 NewsHub 部署或启动。新闻、知序和 TranslateFlow 等业务项目分别持有受限 Proxy virtual key；各自继续拥有网站用户身份、用户 Key 加密存储、任务/事务和私有历史。
 
-三种协议：`openai_responses`、`openai_chat`、`anthropic_messages`。首批产品支持范围是 OpenAI、Claude、GLM、DeepSeek、Qwen、Kimi 的通用开放平台 API Key；具体「厂商 × 模型 × 参数模式 × 功能」只有通过真实联调才标记为已验证。
+T00 的 v1.104.2@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500 是 EOF 风险复现夹具，来源和 registry digest 证据见 [T00 SDK 任务](tasks/T00-sdk-protocol.md)；不是 T00-G 部署推荐。T00-G 执行时需另行解析当时官方稳定候选、验证签名/证明及实际 digest；不同则分别记录，并对部署候选补做兼容验真。Proxy 自有 Postgres、配置、密钥与运维生命周期，需在 T00-G 独立交付；本次只改 BYOK 文档，不建服务仓库、不部署或调用真实 provider。
 
-**修正上一版两项决定：**
+边界按所有权划分：
+- 业务项目：登录用户、其 provider Key 的加密托管和所有权、可信连接/模型/输入快照、选择、任务幂等/恢复/取消、调用记账、事务与结果权限。
+- LiteLLM Proxy：provider 协议、可信模型路由、每个业务项目的受限 virtual key、请求限制和脱敏 usage。
+- provider：接收经用户明确授权的提示词与请求，按其服务条款计费。
 
-1. 首版不采用 LiteLLM 为核心执行依赖。核查 v1.104.2 源码发现：流结束且没有收到结束原因时，统一流封装可以生成 `finish_reason="stop"`。仅依赖这个标准化字段不能证明上游完整完成。为六家厂商额外耦合其内部状态，不如使用官方 SDK 的原始协议事件。此结论不是“所有 LiteLLM 网络错误都会假成功”，也不代表否定其更大规模网关场景。[S2]
-2. 不新增并行的 `UserTranslationTask`。部署准备分支已经有 `ChatGPTTranslationTask`，扩展它的凭据变体，复用同一租约、取消、提交和持久化机制。[S3]
+Proxy master key 仅用于隔离的运维/管理 API，绝不进入业务运行容器。项目 virtual key 与用户 provider Key 是不同凭据。用户 Key 只能由对应业务后端在授权操作中从密文存储解出，并按 T00 实证确认的白名单 credential 字段逐请求传给受信 Proxy；缺 Key 即失败，禁止部署/环境 provider Key、平台 Key、其它用户 Key、直连 provider 或跨模型 fallback 兜底。
 
-本方案确定架构、行为和实施边界；实际 SDK 安装兼容性、六家真实模型调用、仓库基线回归以及公网部署尚未得到运行时证明。开发第一项工作是第 11 节的有界验证切片，而不是重新讨论技术栈。
+初始六个产品预设为 OpenAI、Claude、DeepSeek、GLM、Qwen、Kimi；这是首批 UI/测试范围，不是 LiteLLM 的 provider 架构上限。PROVIDER_REAL 首轮只对 DeepSeek 开放。T00 PROXY_LOCAL 通过后可在独立用户确认下执行一次早期文本冒烟，不等待 T00-G；T13 仍负责完整产品功能矩阵，其他厂商保持 NOT_RUN。
+
+业务通过官方客户端 SDK 访问 Proxy，由 Proxy 管理 Responses、Chat Completions、Messages 上游协议。NewsHub 内不实现三套 provider 适配器。T00 必须真实运行锁定 Proxy + 官方 SDK + 受控 HTTP upstream，核验原始终态、continuation、工具往返、请求计数和 Key 隔离。v1.104.2 EOF/终态风险是特定路径验证点；若原始完成证据无法穿过 Proxy，局部修复、等官方修复或禁用该路由 streaming，不能降低完整性门槛或改回另一套架构。
+
+当前新 SDK_LOCAL、PROXY_LOCAL、PROVIDER_REAL、T00-G 与 UAT 均未执行。本次既有 219 passed / 3 warnings 记录仅是旧业务回归的历史基线，不是新网关验收。本分支只更新文档。
 
 ## 1. 代码基线与事实
 
-本次查询得到：
+BYOK 功能分支当前已核对 HEAD 为 ea2ce55ae22e19e1604e88031b824b68f2666cec；本次文档变更在独立 task 分支进行，后续执行仍要重新核对远端 HEAD、未提交改动和同环境测试基线。
 
-| 版本 | 精确 SHA | 使用方式 |
+| 引用 | 精确 SHA | 使用方式 |
 | --- | --- | --- |
-| main | `8c2823e1fcf8cbea38e9bb7c4e98a33232025fbd` | 对照已合并功能 |
-| feat/news-public-readiness | `b874405f31ae303e772d1ed6ef618b68938febed` | 本方案的增量设计基线 |
+| feat/byok-user-api-keys | ea2ce55ae22e19e1604e88031b824b68f2666cec | 当前文档更新的已核对基线 |
+| feat/news-public-readiness | b874405f31ae303e772d1ed6ef618b68938febed | 原计划所引用的代码观察基线，不再作为新任务分支起点 |
+| main | 8c2823e1fcf8cbea38e9bb7c4e98a33232025fbd | 原设计调研中的历史对照 |
 
-建议开发分支从已经核实的 readiness 基线创建；执行当天重新核对 HEAD、未合并修复和测试基线。不得把该分支称为已经部署或发布验收通过。此次读取该版本仓库根目录 `AGENTS.md` 返回 404；执行者仍须检查实际工作目录中的上级及子目录指导文件。[S1]
+建议后续单任务从执行当天核对的最新 BYOK 功能分支 HEAD 创建独立分支，不重置用户工作树。旧 readiness 源码记录不表示已部署或发布验收通过。每次仍须检查实际上级与子目录指导文件。[S1]
 
 ### 已存在，应直接复用
 
@@ -39,124 +46,110 @@
 
 | 位置 | 已观察事实 | 定向修改 |
 | --- | --- | --- |
-| `research/agent_loop.py` | 从全局 get_clients 获取客户端，消息序列化丢弃 reasoning_content | 注入用户执行快照；由适配器保留续接状态 |
+| `research/agent_loop.py` | 从全局 get_clients 获取客户端，消息序列化丢弃 reasoning_content | 注入用户执行快照；由 ProxyClient 保留并校验服务端续接状态 |
 | `public_policy.py` + research/job_manager | production 条件直接拦截研究 | 保留站点总开关；凭据策略在认证和服务端解析后判断，并覆盖 Worker |
 | `chatgpt_subscription_jobs.py` | translation 任务是订阅专用外键；read handle 的 wait_for_update 可派发 queued 工作 | 扩展凭据变体；新只读恢复不能复用带派发副作用的方法 |
 | `subscription_views.py` / 订阅保存路径 | 私有翻译与公共共享发布相连 | BYOK 私有提交分支不得调用 publish_translation |
 | `serializers.py`、`tts_service.py`、聊天上下文 | 个人译文读取主要识别活动订阅连接 | 共用个人结果解析入口；读取历史不要求 Key 仍有效 |
 
-这里的兼容性缺口来自源码和隔离函数实验；不能写成已经复现六家厂商的线上失败。[S5–S9]
+这里的业务边界来自源码观察；旧隔离函数实验不等于完整 Proxy 行为，也不能写成已经复现六家厂商的线上失败。[S5–S9]
 
 ## 2. 产品范围
 
-### 本期完成
+### 本期业务产品目标
 
-- 登录用户添加多个服务连接；同厂商可配置不同账户。
-- 每个连接添加多个模型配置；支持版本化预置目录和手动模型 ID。
-- 一个默认模型，文章问答、全文翻译、推荐问题、深度研究可单独覆盖。
-- 保存、模型发现、测试模型三个独立动作；测试需要明确点击，显示可能计费。
-- 已保存／凭据启用状态／最近测试结果分别建模；保存成功不意味着可调用，测试失败不抹掉已保存配置。
-- 各功能显示实际使用的服务商、模型与结果来源。
-- 个人结果默认私有，跨设备按网站用户恢复；浏览器不保存 Key。
-- 更换或删除 Key、停用连接；已有个人结果继续可读。
+- 登录用户添加多个自有 API 连接；同一 provider 可登记多个账户。
+- 每个连接添加多个模型配置；预置目录版本化，也允许保存手动 model ID。
+- 一个默认模型，文章问答、全文翻译、推荐问题、深度研究可分别覆盖。
+- 保存、模型发现、用户主动模型测试是分开的动作；测试前提示输入会经业务后端、共享 Proxy 发送到选定 provider，可能收费。
+- 已保存状态、credential 可用状态、能力验证和最近测试结果分开显示；保存成功不等于模型可调用。
+- 各功能显示实际使用的 provider、model 和结果来源。
+- 个人结果默认私有，跨设备按网站用户身份恢复；浏览器不保存 provider Key。
+- 换/删 Key、停用连接不删除历史个人结果。
 
 ### 本期不做
 
-独立模型代理服务、模型市场、自动跨厂商回退、Coding/Token Plan、订阅登录能力重构、任意用户 Base URL、浏览器直连厂商、Embedding 模型切换、新搜索工具框架、完整计费中心。
+不在 NewsHub 内置 Proxy/网关服务，不把 Proxy 用作业务任务队列，不开发模型市场或自动跨 provider fallback，不提供 Coding/Token Plan/订阅 Token 代替通用 API Key，不开放任意用户 Base URL，不让浏览器直连 Proxy/provider，不改订阅登录能力，不换研究 Agent 框架，不开发第二套业务任务系统或完整计费中心。
 
-不改变已有公共译文和订阅连接的历史行为；BYOK 与旧路径通过明确的凭据类型分流。其他兼容服务后续增加可信预设及契约测试；不能仅添加一个厂商名字就声称该厂商所有模型都支持。
+Proxy 服务的独立配置、运行、数据库和运维交付属于 T00-G；不由 BYOK 业务进程管理。以后可增加可信 provider 预设或模型，不将首批六个 UI 预设写死成架构上限，也不因 LiteLLM 路由成功就声明 provider 的每个模型/region/功能均已验证。
 
-## 3. 厂商与 SDK 方案
+## 3. 厂商、路由与客户端方案
 
-| 厂商 | 首版协议 / SDK | 端点配置 |
+| 首批产品预设 | Proxy 路由的上游协议 | 地域/端点配置 |
 | --- | --- | --- |
-| OpenAI | Responses / openai | 官方端点；使用 store=false，按原始 Responses 状态判断完成 |
-| Claude | Messages / anthropic | 官方端点；保留原始内容块、工具块和必要签名 |
-| DeepSeek | Chat Completions / openai | 官方通用端点；思考模式需要保留 reasoning_content |
-| GLM | Chat Completions / openai | 智谱国内与 Z.AI 分别提供官方预设 |
-| Qwen | Chat Completions / openai | 百炼地域和共享／业务空间端点分别配置 |
-| Kimi | Chat Completions / openai | Moonshot 国内与国际站分别配置 |
+| OpenAI | Responses（优先）；必要 Chat Completions 单独验收 | 官方端点 |
+| Claude | Anthropic Messages | 官方端点 |
+| DeepSeek | Chat Completions；思考模式需保留 reasoning_content | 官方通用 API 端点 |
+| GLM | Chat Completions | 智谱国内与 Z.AI 分别为可信 preset |
+| Qwen | Chat Completions | 百炼地域与业务空间端点分别配置 |
+| Kimi | Chat Completions | Moonshot 国内、国际端点分别配置 |
 
-OpenAI、Anthropic 有官方 Python SDK。DeepSeek、智谱/Z.AI、百炼、Kimi 官方文档提供 OpenAI SDK 兼容接入；所以不需要六个 SDK，也不需要自行实现 HTTP/SSE 解码器。[S10–S16]
+后端用 OpenAI/Anthropic 官方客户端 SDK 连接受信 Proxy endpoint；Proxy 负责上游 provider 协议、密钥路由和响应转换。NewsHub 不再内置三套直接访问 provider 的协议适配器，也不让模型配置改变 Proxy URL。通过 Proxy 的实际 SDK/端到端能力由 PROXY_LOCAL 测试证明；通过某真实厂商/模型/region 的能力仅能由获授权的 PROVIDER_REAL 证明。首轮只针对 DeepSeek 申请真实调用。
 
-端点是后端可信配置，不接受前端任意完整 URL。验证过的典型通用地址：
+可信的初始通用 API endpoint preset：
 
-```text
-OpenAI       https://api.openai.com/v1
-Anthropic    https://api.anthropic.com
-DeepSeek     https://api.deepseek.com
-GLM CN       https://open.bigmodel.cn/api/paas/v4/
-Z.AI         https://api.z.ai/api/paas/v4/
-Qwen 北京    https://dashscope.aliyuncs.com/compatible-mode/v1
-Qwen 新加坡  https://dashscope-intl.aliyuncs.com/compatible-mode/v1
-Kimi 国际    https://api.moonshot.ai/v1
-```
+    OpenAI       https://api.openai.com/v1
+    Anthropic    https://api.anthropic.com
+    DeepSeek     https://api.deepseek.com
+    GLM CN       https://open.bigmodel.cn/api/paas/v4/
+    Z.AI         https://api.z.ai/api/paas/v4/
+    Qwen 北京    https://dashscope.aliyuncs.com/compatible-mode/v1
+    Qwen 新加坡  https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    Kimi 国际    https://api.moonshot.ai/v1
 
-端点注册表可以保留其他已核实官方区域预设。Qwen WorkspaceId 作为受限字段输入，后端从固定域名模板生成地址；不允许字段包含点、斜杠、端口或 URL 语法。端点/地域变更创建新连接，不能把已保存 Key 自动转发至另一个地址。
+endpoint 只存在于业务端和 Proxy 管理配置的受信注册表，普通用户不能提交任意完整 URL。Qwen WorkspaceId 等附加项只允许受限值，由管理端固定模板拼接；地域或 endpoint 变更需创建新连接/重新授权，不得悄悄把已保存 Key 发往新主机。
 
-**套餐边界：**百炼官方明确 Coding Plan、Token Plan 仅限交互式 AI 工具，不能用于后端服务。该新闻网站预设只接通用按量 API，不把现有 Coding 环境变量移植到网站用户路径。其余套餐同样不能依据“HTTP 能调通”推断用途授权。[S13]
+套餐边界：百炼 Coding Plan、Token Plan 仅限交互式 AI 工具，不能用于后端服务。此站只接可用于后端服务的通用按量 API；不把用户 Coding 环境变量或 ChatGPT 订阅凭据移植到网站 BYOK。其它套餐需逐个核对条款。
 
-### 模型与参数
+### 模型能力与输入限制
 
-- 目录是版本化数据，不将某一代模型 ID 散落在业务代码。
-- 列表发现是可选能力；某厂商不支持列表 API，仍可用目录或手填 ID，不能使配置流程卡住。
-- 测试结果绑定 connection credential_epoch + model config revision + endpoint profile revision；过期测试不能覆盖新配置状态。
-- `text`、`tools`、`structured_output`、`thinking`、`streaming`、上下文与输出预算独立标记。只有需要的能力不足时禁用对应功能。
-- 未知模型可以保存。完成测试前标为未验证；没有可信上下文限制时，不自动把整篇长文发送给它，应要求有效的模型限制资料或采取保守输入限制。
-- 模型参数采用厂商/模型白名单，不能透传 arbitrary extra_body、headers、base_url、callback。必要的厂商扩展由适配器构造。
+- model ID 可先保存，但 text、tools、structured output、thinking/reasoning、streaming、context window 和最大输出等能力须分别验证；不从“OpenAI 兼容”推导其它能力。
+- 未知模型或没有可信 context-window 限制资料时，不自动发送整篇新闻或长历史。要求补充可核验限制或采用明确的保守输入/输出上限；超限时告知用户或拒绝请求。
+- 模型测试回执绑定 credential_epoch、model config revision 和 endpoint profile revision。替换 Key、改模型/参数或切地域后，旧的迟到回执不得覆盖当前状态。
 
-## 4. 模块和协议契约
+## 4. 模块和 Proxy 请求契约
 
-```text
-React AI 设置 / 现有功能入口
-  -> Django Session + CSRF + 用户权限
-  -> 解析本次操作并冻结 ExecutionSnapshot
-  -> 现有任务 / 研究循环 / 聊天写入边界
-  -> AI Gateway（应用授权、预算、日志脱敏）
-  -> OpenAI Responses | OpenAI Chat | Anthropic Messages
-  -> 官方 SDK
-  -> 用户所选厂商
+    浏览器
+      -> NewsHub Django Session + CSRF + 用户权限
+      -> 解析当前用户拥有的连接/模型与任务意图，冻结 ExecutionSnapshot
+      -> 现有聊天 / 研究 / 翻译业务任务与提交事务
+      -> Business ProxyClient：项目 virtual key + 本次用户 provider Key + allowlisted request
+      -> 独立 LiteLLM Proxy：模型路由、上游协议与 provider 调用
+      -> 用户明确选择的 provider
 
-原始模型终态 -> 业务校验 -> 事务提交结果与任务终态 -> complete 事件
+    Proxy 上游原始终态 -> 业务完整性/工具策略校验 -> DB 结果 + succeeded + complete 同事务
 
-GET 历史 / GET 重放 -> 用户隔离的持久记录；无 SDK / executor / createTask 依赖
-```
+    GET 历史 / GET 重放 -> 用户隔离持久记录；不创建任务、不连接 Proxy、不启动 executor
 
-建议新模块：
+业务侧模块仍围绕用户配置和任务边界：
 
 | 模块 | 职责 |
 | --- | --- |
-| `services/ai/registry.py` | 官方端点、模型配置和能力白名单 |
-| `services/ai/credentials.py` | 应用内密钥封装、用户归属、凭据版本与生命周期 |
-| `services/ai/contracts.py` | ExecutionSnapshot、ModelTurn、ModelEvent、ProviderError |
-| `services/ai/routing.py` | 默认/功能选模；读取既有幂等记录；冻结非秘密配置 |
-| `services/ai/gateway.py` | 调用许可、请求实例、超时、用量与安全错误 |
-| `services/ai/adapters/openai_responses.py` | 原始 Responses 输入输出、工具续接 |
-| `services/ai/adapters/openai_chat.py` | Chat 兼容协议 + 少量厂商字段策略 |
-| `services/ai/adapters/anthropic_messages.py` | 原始 Messages 内容块、工具结果、终态 |
-| `services/article_translations.py` | 同一用户结果身份下的详情、聊天、朗读解析 |
+| services/ai/registry.py | 可信 provider/地域/模型 alias、能力白名单及 Proxy route 注册 |
+| services/ai/credentials.py | 用户 Key 的应用内加密、所有权、epoch 和生命周期；绝不将 Key 写入日志 |
+| services/ai/contracts.py | ExecutionSnapshot、ModelTurn、ModelEvent、安全 ProviderError 与服务端 continuation 类型 |
+| services/ai/routing.py | 用户默认/功能选模；读取既有幂等记录；冻结非秘密执行配置 |
+| services/ai/proxy_client.py | 业务 project virtual key、Proxy endpoint、受控 provider credential 字段、请求超时、用量和脱敏错误 |
+| services/article_translations.py | 详情、聊天、朗读解析同一用户结果身份 |
+| 现有 research/translation/chat 模块 | 继续负责业务任务、锁/租约、工具许可、恢复、取消、事务与结果访问 |
 
-现有研究、翻译调度仍在原模块，不搬迁成通用 workflow 框架。旧订阅函数保留包装入口；内部执行按 credential_kind 选择受限适配器。
+不在 NewsHub 新建 provider 的 Responses/Chat/Messages 适配器；不把 LiteLLM proxy 做成用户任务系统。公共模型层可由 Proxy 支持多种 provider，但业务 API 只接受自有 model config ID 和受信 route，不透传任意 provider options。
 
-核心接口（签名契约，非已实现代码）：
+核心内部接口（签名契约，非已实现代码）：
 
-```python
-resolve_execution(user, task_kind, model_config_id=None) -> ExecutionSnapshot
-complete_turn(execution, conversation, tools, guard) -> ModelTurn
-stream_turn(execution, conversation, guard) -> Iterator[ModelEvent]
-read_task(user, task_id) -> TaskView
-read_article_translation(user, article_id, artifact_id=None) -> TranslationView
-```
+    resolve_execution(user, task_kind, model_config_id=None) -> ExecutionSnapshot
+    complete_turn(execution, conversation, tools, guard) -> ModelTurn
+    stream_turn(execution, conversation, guard) -> Iterator[ModelEvent]
+    read_task(user, task_id) -> TaskView
+    read_article_translation(user, article_id, artifact_id=None) -> TranslationView
 
-`ModelTurn` 至少包含 `text`、`tool_calls`、`finish`、`usage`、服务端专用 `continuation`。不让 UI 或恢复模块看到可以调用 Provider 的对象。
+ModelTurn 至少包含可见文本、经过 allowlist 的完整工具调用、finish、usage、服务端专用 continuation。不能把 continuation 序列化到普通聊天消息、API 可见字段、日志、回调或浏览器缓存。
 
-### 续接状态与可见消息分离
+### Proxy continuation 与可见消息分离
 
-DeepSeek 思考模式工具调用必须回传 reasoning_content；Anthropic 可能需要保留 thinking block/signature；Responses 需要正确回传输出 items / 工具结果。现有“只保留 content 和 tool_calls”不足以承担这三种协议。[S8][S11][S14][S17]
+业务 continuation 由 Proxy/API 回合实际返回的 provider 原生信息组成并带协议/版本标签，限定大小、按用户和会话隔离。T00 PROXY_LOCAL 必须证明 Responses output items、Anthropic thinking/signature、Chat reasoning_content 能在两轮工具 continuation 中正确经过 Proxy；SDK_LOCAL 直连 upstream 不够。若 Proxy 特定客户端/路由无法往返某协议原始状态，在 T00 记录具体事件/请求/输出并停止对应路径，不可悄悄改为直接 provider adapter。
 
-在现有会话持久化记录中增加带版本和协议标签的 provider_state，服务器续接使用它；公开 API 返回经过白名单投影的可见 messages。续接字段不能作为 URL、Key、工具白名单或执行权限的来源。
-
-研究会话首版固定 provider+model+协议配置；更换研究模型新建研究会话，可显式复制可见研究结论，不自动移植另一个厂商的原始续接状态。文章普通问答可在下一次提问切换模型，并仅带入允许共享的可见历史。运行中的任务均不变更快照。
+公开消息是从服务端会话状态生成的白名单投影。续接字段不构成 Key 来源、工具 allowlist、用户权限或执行配置。研究会话首版固定 provider/model/route 配置；切换模型新开会话，可显式复制可见研究结论，不迁移不兼容的原始续接状态。
 
 ## 5. 数据设计：扩展现有执行数据，而非重建
 
@@ -249,17 +242,18 @@ BYOK运行期间原文变更但任务/凭据仍有效时，可把完整结果保
 
 首版 SDK 自动重试设为 0，不使用跨厂商自动回退；超时/中断不透明重发。暂停/撤销会阻断尚未获准的新调用并封禁旧提交，但已经发出的请求只能尽力终止，厂商仍可能计费。这个边界在 UI 和日志中必须如实表达。
 
-## 7. 密钥与公共部署安全
+## 7. 密钥、Proxy 与数据流安全
 
-- 采用现有 cryptography 库的 AEAD，独立稳定应用加密密钥；AAD 绑定 owner、connection_id、provider/endpoint profile、credential_epoch、格式版本。保留旧订阅密文格式，不能无意改变其 HKDF/AAD 导致旧令牌无法解密。
-- 应用加密主密钥置于部署 Secret，不进入数据库、仓库或日志；提供 key_id、轮换和备份恢复说明。缺密钥时失败关闭，不回退明文存储。
-- 查询接口只有 has_key、末四位、启用状态；Key 写入接口单向写入。禁止 Key 进入 localStorage、Query持久化、URL、分析埋点和错误回执。
-- 后端按调用创建显式 api_key/base_url 的 SDK 客户端；不通过每用户修改环境变量或进程全局客户端切换 Key。关闭跨站重定向，保持 TLS 验证。
-- 用户不能编辑任意 Base URL。管理员注册新端点也需要明确的新连接/凭据授权，不能重新解释已有端点 ID 并把旧 Key 转发过去。
-- 官方域名白名单不是完整 SSRF 防护：服务出站网络应阻断私网/云元数据网段；DNS、重定向、代理环境和域名归属均需在目标部署验证。
-- middleware 保留全站只读/AI开关；credential-specific policy 在认证后解析真实拥有的连接，不信任请求中的 `credential_kind` 标签。提交、恢复、Worker和每次模型调用共用同一策略。
-- 所有未配置/失败的 BYOK 用户路径不能落入站点环境 Key。原有管理员批处理需要在单独明确的 operator context 下运行。
-- 页面注明：Key 会由本站服务器加密托管，管理员控制的运行环境仍可解密；这不是零知识保管。新闻正文/问题将发送给所选厂商。搜索抓取/TTS是独立的数据接收方，不能宣称所有处理都只流向所选 LLM。
+- 用户 provider Key 采用现有 cryptography 库 AEAD 加密，AAD 绑定 owner、connection_id、provider/endpoint profile、credential_epoch、格式版本。应用加密主密钥置于业务项目部署 Secret，不进入数据库、仓库或日志；缺 Secret 时 fail closed。
+- 用户 Key 只在所属业务后端获准发起模型调用时从存储短暂解密，经 TLS 显式发送给受信 LiteLLM Proxy 已验证的 per-request credential 字段；候选字段能力须由 T00 实测。Proxy 项目 virtual key 在后端服务 Secret 中，用于认证该项目对 Proxy 的访问。两者不能混用。
+- Proxy master key 只用于隔离的服务运维和管理 API。它不进入业务项目、NewsHub Web/Worker 或任何浏览器。每个业务项目单独受限 virtual key 和模型 allowlist，项目之间不共享用户身份、密钥或内容缓存。
+- 禁止客户端控制/透传 user_config、api_base、任意 headers、callback、route/fallback/retry 选项或 Proxy 管理参数。业务按连接和 model config ID 从受信目录构造 endpoint/model/credential allowlist。阻断私网与云元数据出站地址；DNS、重定向及实际部署 egress policy 须验收。
+- Proxy、业务日志、异常、回调、用量和 tracing 均需遮蔽 provider Key、project virtual key、master key、新闻正文、问题、工具私参和 continuation。使用 request ID 关联 Proxy 记录与 AICallAttempt。
+- 明确告知用户：新闻正文/问题会由业务后端发送给独立共享 Proxy，再到用户选择的 provider。首版关闭共享内容缓存。Provider 接收数据及计费条款由用户所选服务商决定。
+- 缺 Key、密文不可解、Proxy 不可达、错误 project virtual key 都明确失败；禁止使用 Proxy 环境 provider Key、平台服务 Key、管理员 Key、别的用户 Key、订阅凭据、直接 provider 调用或模型 fallback 兜底。
+- 保留旧订阅密文格式/权限边界。旧订阅任务默认保持既有 credential_kind；BYOK 调用不修改订阅 OAuth token AAD/HKDF。
+- Proxy 与业务数据库是独立服务生命周期；NewsHub 停止/重启不得意外改变网关/Postgres。网关故障时新闻浏览和已保存历史可读，新 AI 请求 fail closed。
+- 预算/限流是应用可执行的请求约束，不许承诺等同 provider 账单的绝对硬上限；取消请求也不能保证已发出的 provider 请求停止计费。
 
 ## 8. 前端与 API
 
@@ -281,7 +275,7 @@ BYOK运行期间原文变更但任务/凭据仍有效时，可把完整结果保
 | PUT /api/ai/connections/{id}/key/ | 替换Key并更新epoch；不回传Key |
 | GET /api/ai/connections/{id}/models/ | 已知模型和发现状态 |
 | POST /api/ai/connections/{id}/models/refresh/ | 显式刷新；不支持时返回说明，可继续手填 |
-| POST /api/ai/connections/{id}/test/ | 固定合成输入的有界模型测试；注明可能计费 |
+| POST /api/ai/connections/{id}/test/ | 用户显式发起有界模型测试，经业务后端→共享 Proxy→所选 provider；注明发送对象和可能计费 |
 | /api/ai/model-configs/ | 模型配置CRUD，owner限定 |
 | GET/PATCH /api/ai/preferences/ | 默认与功能偏好 |
 | GET /api/ai/usage/ | 本站调用统计，不伪装厂商余额 |
@@ -306,7 +300,7 @@ AICallAttempt记录每次上游尝试而非每条SSE订阅。Token缺失为unkno
 
 首版仅有本地可执行的输出上限、研究轮数、请求/并发限制与本站用量。费用能可靠计算时显示带币种和价格版本的估算；不能保证用户在其它应用的消耗或厂商真实余额，也不做“绝不会超支”的承诺。
 
-沿用已有执行器和限流。当前进程内并发限制不是跨进程全局限额；首版保持既有单执行器部署形态，不同时引入水平扩容。新接口纳入已有鉴权/限流和资源预算测试；未来多Worker须另行验证跨进程容量约束。
+业务继续沿用已有执行器和限流。共享 LiteLLM Proxy 与独立 Postgres 单独部署、管理和升级，不由 NewsHub 容器启动。T00-G 验证配置/健康、项目 virtual key、脱敏、备份恢复和升级回滚；服务故障时新 BYOK 请求失败关闭，旧新闻和历史结果仍可读。当前业务侧单执行器部署边界保留，不借共享 Proxy 引入水平扩展或第二套任务队列。新接口还须验证 Proxy 请求超时和受限资源预算；预算不等于厂商账单绝对硬上限。
 
 迁移顺序：
 
@@ -319,48 +313,54 @@ AICallAttempt记录每次上游尝试而非每条SSE订阅。Token缺失为unkno
 
 ## 11. 确定的实施任务和结束条件
 
-> **任务拆分更新（2026-10-11）：** P0–P5 是阶段路线，不是一个 Codex 实现任务。实际按 [tasks/README.md](tasks/README.md) 的 T00–T14 单张功能卡交付，每张配套 [tests/README.md](tests/README.md) 的 Test 契约。T00 不再包含连接管理/持久化/GET 恢复的实现，分别在后续业务功能切片完成。
+> 阶段路线按 [tasks/README.md](tasks/README.md) 拆为 T00–T14 单卡交付，并由同编号 Test 契约验收。T00 是本地 Proxy 技术门槛，T00-G 是后置独立网关运维卡；它们不得并入业务表、页面或第二套任务系统。
 
 | ID | 工作 | 依赖/完成标准 |
 | --- | --- | --- |
-| P0 | 官方SDK最小协议切片 | 目标Python环境安装并锁定两个SDK/依赖；3种协议的实际SDK测试、原始终态、两轮工具续接、显式Key隔离成立 |
-| P1 | 个人连接/模型/快照与一次文章问答 | 真实Session+CSRF入口，两个用户不同Key不会串用；模型测试、默认选择、站点不兜底；保留旧问答行为 |
-| P2 | 个人全文翻译闭环 | 扩展原任务与结果表；完成一次生成、持久化、关闭、重开、详情/上下文/朗读一致；GET零新调用 |
-| P3 | 个人深度研究 | 复用ResearchRun/事件/工具；按快照调用；生产凭据策略正确，工具续接不丢失、不能执行非允许工具 |
-| P4 | 推荐问题/用量/其余厂商与配置体验 | 六家通用Key预设逐项接入；缓存/测试状态/参数能力可信；缺少真实证据的模型不标记已验收 |
-| P5 | 回归与交付 | 基线对比、迁移数据对账、故障不变量、账号切换、恢复与取消验证，提供精确SHA和证据 |
+| T00 | 本地共享网关端到端技术门槛 | 官方 LiteLLM Proxy 固定版本/digest + 官方客户端 SDK + 受控 HTTP upstream。三协议终态、异常、工具双轮、continuation、显式 credential isolation、资源关闭与重试/请求计数均有原始证据 |
+| T00-G | 独立共享 Proxy 运维交付 | 独立配置/Postgres、每项目 restricted virtual key、master key 运维隔离、健康/配置检查/日志脱敏/备份恢复/升级回退；真实 provider 仍单独验收 |
+| P1 / T01–T04 | 连接/模型/偏好/新闻问答 | T01 不调用 Proxy；本地测试用临时 Proxy + controlled upstream；生产缺网关须 fail closed |
+| P2 / T05–T08 | 个人全文翻译闭环 | 扩展原任务与结果；关闭/重开/详情/上下文/朗读一致；GET 零新 Proxy 请求 |
+| P3 / T09–T10 | 个人深度研究 | 复用 ResearchRun/事件/工具；本地用受控 Proxy；快照调用、工具 allowlist、服务端 continuation |
+| P4 / T11–T13 | 推荐问题、用量和首批预设验证 | 首批六个产品预设逐项记录；首轮只有 DeepSeek 可以获批 PROVIDER_REAL，其他持续 NOT_RUN |
+| P5 / T14 | 回归与发布 | 业务基线对比、迁移数据对账、故障不变量、账号切换、恢复/取消、T00-G 及明确范围的 provider/UAT 门禁 |
 
-### P0 不是再次大规模调研
+### T00 技术验真门槛
 
-只在真实项目环境实现薄适配器与一个最小调用脚本，不先完成设置页或全部业务改造。
+只使用临时本地 LiteLLM Proxy、受控 HTTP upstream、官方 SDK 和本次生成的合成假 Key。不得读现有 Key、借用全局环境凭据或访问真实 provider。
 
-- 使用真实SDK连接可控的本地测试上游（或当前SDK匹配的注入传输层），验证实际请求headers/URL/body与响应解析；不能用只替换gateway返回值的mock冒充SDK兼容。
-- 3种协议各验证：正常完成、只返回partial后EOF、明确length/incomplete、HTTP错误、流内错误、工具调用→结果→最终回答、资源关闭、无隐式重试。
-- DeepSeek重点验证开启思考时的reasoning_content续接；Claude验证原始内容块/签名；OpenAI验证Responses工具items。Kimi/GLM/Qwen按所选真实模型参数验证，不能从通用兼容性推导全部特殊能力。
-- 获得本地测试Key后，每家至少一个指定模型完成文字生成/流式以及研究所需工具往返，结果绑定具体模型/日期。Key只通过本地环境或配置输入，不发送聊天、测试日志、GitHub或Slack。
-- 任一适配器尚未证明原始终态/续接，就不扩散到所有功能。不需要某一家真实Key才能编写其余共用功能，但不能声称该家完成验收。
-- 当前不能确定可运行的包版本组合；P0负责记录可安装且通过契约的精确lock/hash。这是依赖兼容实测，不授权顺带升级所有项目依赖或更换架构。
+- 实际运行三协议的完整文本流与两轮工具调用；保存 raw upstream 与 Proxy/SDK 观察到的终态。
+- 覆盖正常 EOF 但语义 incomplete、explicit length/incomplete、截断 body、超时、SSE 内错误、HTTP 错误、部分/无效/不在 allowlist 的工具参数及资源关闭。
+- continuation 必须保留 Responses 原始 output items、Anthropic thinking/signature、Chat reasoning_content；对外可见消息不得带私密续接。
+- 两组 provider Key/model 并发隔离；Proxy 项目 virtual key 与个人 provider Key 有不同用途；缺用户 Key 不借用部署 Key；错误项目 Key 在到达 upstream 前拒绝。
+- SDK max_retries=0、Proxy num_retries=0、无 model fallback。代理 upstream request counter 证明失败时没有隐式重发。
+- 精确检查 v1.104.2 streaming EOF 路径。单有 Proxy 的 stop/[DONE] 不能作为上游完整证据。若原始终态无法验证，按 T00 BLOCKED 记录，并只考虑该版本路径的局部修复、等上游修复或关闭具体路由的 streaming；不改成所有 SDK 的自写适配器，不降低终态要求。
 
-### 测试修改规则
+### T00-G 共享服务运维验收门槛
 
-同环境对比变更前后。旧测试基线通过、新分支失败而产品行为未变：修实现。需求明确改了语义：先在契约中写明差异再改对应断言；证明无关行为未改变。两边均失败：记录既有问题/环境/不稳定性，单独处理，不伪装新增回归，也不自动忽略其发布风险。
+T00-G 与业务代码独立交付，验证官方镜像签名/来源与 tag+digest、Proxy/Postgres 单机服务、项目级 virtual key 限制、master key 隔离、请求/并发预算、健康/配置检查、日志回调脱敏、密钥轮换、备份恢复演练、固定版本升级/回滚。单机规模，不引入 Kubernetes、多副本或新的业务任务框架。共享网关挂掉不影响新闻和旧历史阅读；BYOK 新调用清晰失败且不得直连 provider。T00-G 本身不证明 provider 兼容。
+
+### 首轮真实 Provider 验收边界
+
+PROVIDER_REAL 必须在独立 T13 子卡，由用户确认后从用户终端隐藏输入 Key；请求只经共享 Proxy 到官方通用 API。T00 PROXY_LOCAL 通过后，可不等待 T00-G 的备份/升级运维验收，在 T00 阶段申请一次早期 DeepSeek 文本冒烟。此请求需要用户单独确认推荐模型、合成安全输入、请求数/输出 token 上限和最小费用预算；Key 由用户在终端隐藏输入，不持久化/打印。它仅确认所列日期/模型的单次真实路由，不代替 T13 的完整产品功能矩阵。T13 完整矩阵按独立 Proxy 服务运维门槛执行；其它首批预设保持 NOT_RUN。
 
 ## 12. 本次实际验证证据
 
-### 已执行
+### 当前文档任务的事实
 
-1. 通过GitHub连接器读取精确分支、现有模型、研究任务/循环、翻译任务、公共策略和接口。
-2. 对复制出的原始消息序列化函数执行相同续接断言：明确失败，reasoning_content为None。`baseline_failure.txt`保留退出码1对应输出；没有修改仓库原测试。
-3. 对LiteLLM指定版本复制出的finish_reason_handler进行隔离执行：缺失两个终态字段时产生stop；已知length保持length。仅复现该函数行为，没有运行LiteLLM完整网络栈。
-4. 用真实SQLite事务、唯一/CHECK约束和AES-GCM、合成凭据验证设计原型：并发提交/claim、owner隔离、AAD绑定、只读重放、数据库重开读取、撤销、旧提交fencing、终态门槛、事务回滚、事件唯一性。
+- 已通过 GitHub 连接器核对 `origin/feat/byok-user-api-keys` 精确 HEAD 为 `ea2ce55ae22e19e1604e88031b824b68f2666cec`，与用户提供值一致；本次文档更改在独立任务分支上。
+- 此次只改 BYOK 设计/Task/Test/原型说明，不安装 SDK/Proxy、不创建或启动共享网关、不执行测试或 provider 请求、不读取任何真实 Key，不动 NewsHub 业务源码和线上环境。
+- 所有新增 SDK_LOCAL、PROXY_LOCAL、T00-G、PROVIDER_REAL、UAT 证据都保持 NOT_RUN，具体见各 Test 占位表。
 
-验证目录最新输出：`17 passed, 1 xfailed`。其中15项是候选约束/序列化原型，2项是LiteLLM隔离方法反例，1项是明确标识的原始序列化反例。单独运行原始反例使用 `--runxfail` 得到 `1 failed`，防止将预期失败误报为旧实现已经满足契约。
+### 仅供历史回归参考的准备记录
 
-### 没有执行
+较早的 T00 SDK 任务准备在隔离环境对旧业务测试记录过 219 passed、3 warnings；摘要记载的环境是 Python 3.14.8、Django 6.1、pytest 9.1.1，功能分支基线是 ea2ce55。由于当时报告/精确完整命令没有随当前文档任务带入，本次没有重跑，不能将其当作当前文档分支的变更后对照，也不能证明 Proxy/SDK/provider 验收。
 
-官方SDK安装/运行、六家真实模型调用、完整仓库基线/回归、浏览器真实交互、Django迁移、部署与多进程故障恢复。
+更早设计记录还提到 17 passed / 1 xfailed 的隔离实验，内容包括局部序列化约束、SQLite 原型和复制的 LiteLLM helper 函数。它没有运行完整 LiteLLM Proxy 网络栈，也没有真实客户端 SDK 或真实 provider；这些局部实验只属历史设计调研，不能作为本架构的 SDK_LOCAL / PROXY_LOCAL / PROVIDER_REAL 通过证据。
 
-当前容器外网DNS不可达，且未安装Django/openai/anthropic/LiteLLM；未提供或读取真实厂商Key。所有实验Key和Provider输出都是合成夹具。SQLite原型证明的是局部约束可行，不等同于当前Django系统已经拥有这些保证。原型文件不能直接作为生产实现复制。
+### 尚未执行
+
+本次文档更新的自动测试、业务源代码回归、真实 SDK 请求、锁定 Proxy E2E、共享 Proxy 服务部署/运维、厂商请求、用户 UAT 均 NOT_RUN。实施每张卡时须在对应 Test 中记录准确命令、执行时环境版本、基线与实现 SHA、脱敏日志、旧断言 diff 及其修改前后对照。没有这些证据不得标 PASS。
 
 ## 13. 参考资料
 
@@ -383,4 +383,6 @@ AICallAttempt记录每次上游尝试而非每条SSE订阅。Token缺失为unkno
 - [S15 GLM OpenAI兼容](https://docs.bigmodel.cn/cn/guide/develop/openai/introduction)；[Z.AI快速开始](https://docs.z.ai/guides/overview/quick-start)
 - [S16 Kimi API概览](https://platform.kimi.ai/docs/api/overview)；[百炼OpenAI兼容](https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope)
 - [S17 OpenAI迁移Responses](https://developers.openai.com/api/docs/guides/migrate-to-responses)
+- [S18 LiteLLM 官方 v1.104.2 release 与 cosign 验证说明](https://github.com/BerriAI/litellm/releases/tag/v1.104.2)
+- [S19 GHCR v1.104.2 OCI manifest](https://ghcr.io/v2/berriai/litellm/manifests/v1.104.2)；2026-10-11 registry response 为 HTTP 200、application/vnd.oci.image.index.v1+json，Docker-Content-Digest 为 sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500。该 digest 只固定 T00 风险复现 fixture，不推荐为部署版本。
 

@@ -4,7 +4,7 @@
 
 | 属性 | 内容 |
 | --- | --- |
-| 前置任务 | [T01](T01-credentials.md) |
+| 前置任务 | [T01](T01-credentials.md)、[T00 本地技术门槛](T00-sdk-protocol.md) |
 | 推荐规模 | M |
 | 对应测试 | [Test T02](../tests/T02-models-and-tests.md) |
 
@@ -12,7 +12,7 @@
 
 用户对自己的连接添加多个模型，手工输入 ID 或选官方预置，主动点击测试文本/工具能力，得到可信的能力标记。
 
-**允许修改范围**：UserAIModelConfig、版本化目录/可信端点、手动模型 ID、可选发现、模型 CRUD/测试接口、费用提示、model revision+epoch 对测试结果做版本拦截。统一 gateway 在此建立真实上游尝试记录 AICallAttempt，供后续功能复用。
+**允许修改范围**：UserAIModelConfig、版本化目录/可信端点、手动模型 ID、可选发现、模型 CRUD/测试接口、费用提示、model config revision、credential_epoch 与 endpoint profile revision 对测试结果做版本拦截。能力分 text/tools/structured output/thinking/stream/context/output 标记；未知模型可保存，但无可信 context 限制时不自动发送整篇文章。本地测试通过临时 LiteLLM Proxy 和受控 HTTP upstream；这里建立业务 AICallAttempt 记录，供后续业务调用复用。无可用网关时失败关闭。
 
 **本次明确不做**：保存配置不会自动计费；测试文本成功不代表工具调用通过；不做全套使用分析页面或支持任意额外参数。
 
@@ -27,8 +27,9 @@
 | T02-01 | 新增两模型并重新进入列表 | 按连接/用户隔离，目录失败仍允许输入模型ID | [Test 契约](../tests/T02-models-and-tests.md) |
 | T02-02 | 手动触发测试，不触发保存即测试 | 每个真实上游尝试单独记账，提示可能收费 | [Test 契约](../tests/T02-models-and-tests.md) |
 | T02-03 | 工具能力与文本能力分开显示 | 未验证/失败工具的模型不可标记研究可用 | [Test 契约](../tests/T02-models-and-tests.md) |
-| T02-04 | 换 Key/模型参数后旧成功回执迟到 | 不能改变当前状态，未知模型保持未验证 | [Test 契约](../tests/T02-models-and-tests.md) |
-| T02-05 | 任意 URL/extra_body/unsupported model 参数 | 不能进入 SDK 权限面，不自动落到管理员 Key | [Test 契约](../tests/T02-models-and-tests.md) |
+| T02-04 | 换 Key、模型配置或 endpoint profile 后旧成功回执迟到 | 按 credential_epoch/config/endpoint revision fencing；迟到回执不能覆盖当前状态 | [Test 契约](../tests/T02-models-and-tests.md) |
+| T02-05 | 任意 URL/extra_body/unsupported model 参数 | 不能进入 Proxy allowlist，不自动落到管理员 Key | [Test 契约](../tests/T02-models-and-tests.md) |
+| T02-06 | 可保存的未知模型无可信 context limit，用户请求长新闻 | 配置保持未验证；拒绝自动发送全文，或应用可解释的保守输入/输出上限 | [Test 契约](../tests/T02-models-and-tests.md) |
 
 ### 立即停止并纠偏
 

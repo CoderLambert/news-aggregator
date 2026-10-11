@@ -14,7 +14,8 @@
 
 - 模型 ID、地域、SDK 版本、时间：NOT_RUN
 - SDK_LOCAL 请求/响应日志：NOT_RUN
-- PROVIDER_REAL 正常文本/流式/工具：NOT_RUN
+- PROXY_LOCAL 请求/响应与请求计数：NOT_RUN
+- PROVIDER_REAL 正常文本/流式/工具：NOT_RUN（首轮仅 DeepSeek 获准）
 - 真实凭据类别（不包含 Key 字符）：NOT_RUN
 - 脱敏失败记录/参数兼容性：NOT_RUN
 - 精确任务 SHA、变更/测试 diff、PR：NOT_RUN

@@ -1,24 +1,24 @@
-# T13 · 六家厂商真实兼容性关卡
+# T13 · 首批六个产品预设的真实验证关卡
 
 > **PLANNED**：本文件为未执行的实施/测试契约，所有测试当前 NOT_RUN。实施时以 `origin/feat/byok-user-api-keys` 最新 HEAD 为准，勿把设计 SHA 当作当前代码。
 
 | 属性 | 内容 |
 | --- | --- |
-| 前置任务 | [T00](T00-sdk-protocol.md)、[T02](T02-models-and-tests.md)、[T04](T04-article-chat.md)、[T09](T09-research-first-run.md) |
+| 前置任务 | [T00](T00-sdk-protocol.md)、[T00-G](T00-gateway-service.md)、[T02](T02-models-and-tests.md)、[T04](T04-article-chat.md)、[T09](T09-research-first-run.md) |
 | 推荐规模 | 六个独立小验证 |
 | 对应测试 | [Test T13](../tests/T13-providers.md) |
 
 ## 本次交付的完整功能
 
-按 OpenAI、Claude、DeepSeek、GLM、Qwen、Kimi 六个官方通用 API Key，逐厂商证明一个指定模型的真实文本/流/工具功能。
+首批 OpenAI、Claude、DeepSeek、GLM、Qwen、Kimi 六个产品预设分别记录指定模型的真实文本/流/工具证据；它们不是 LiteLLM provider 架构的支持上限。首轮仅 DeepSeek 获准 PROVIDER_REAL，且须在其单独子卡实际执行前获用户确认有界测试。
 
-**允许修改范围**：本卡只作组合门槛，实际 Codex 一次只能执行 T13-A 至 T13-F 其中一张厂商子卡。每次记录真实模型 ID、region、协议、Date、SDK 和测试证据；模拟测试不算厂商通过。
+**允许修改范围**：本卡只作组合门槛，实际一次只能执行 T13-A 至 T13-F 一张子卡。每次记录真实模型 ID、region、协议、日期、Proxy/SDK 版本和测试证据；PROXY_LOCAL 模拟上游不算厂商通过。T00-G 通过后才可开始真实 provider 请求。
 
 **本次明确不做**：无 Key 不绕过，禁止把 Coding Plan/订阅 Token 当作后端通用 Key；不以“兼容 OpenAI SDK”推导所有厂商能力。
 
 ### 可直接复现的验收路径
 
-六份独立的提供商验证记录；没有合法凭据的厂家逐项 BLOCKED/NOT_RUN。
+六个首批预设各有独立验证记录；当前只有 DeepSeek 可以申请首轮真实调用，其余真实兼容状态为 NOT_RUN。没有凭据/授权的卡保持 BLOCKED/NOT_RUN。
 
 ### 对应 Test 用例
 
@@ -32,7 +32,7 @@
 
 ### 立即停止并纠偏
 
-缺任一厂商真实验收，T13 合计不能写全部 PASS；可以先完成其他不依赖的工作。
+缺任一计划预设的真实证据时，T13 总表不得写全项 PASS；首轮非 DeepSeek 子卡保持 NOT_RUN，不阻塞已获授权的 DeepSeek 单卡。
 
 ### Codex 一次任务交付要求
 

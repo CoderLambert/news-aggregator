@@ -16,7 +16,7 @@
 
 - **基线**：先用该卡涉及的旧测试在同一环境记录原始结果，再引入代码修改；不要凭“测试数量全绿”掩盖不相关回归。
 - **实际测试**：新 Django unit/DB/HTTP/worker 或 Vitest/浏览器测试按必要范围补齐；没有业务路径运行的模拟测试不能算功能完整。
-- **SDK 真实程度**：实际 SDK + 可控上游为 SDK_LOCAL，真实厂商模型/Key 才能标 PROVIDER_REAL。缺 Key 时明确 NOT_RUN。
+- **SDK/Proxy 真实程度**：真实官方 SDK + 受控 upstream 为 SDK_LOCAL；锁定 LiteLLM Proxy + 真实 SDK + 受控 upstream 为 PROXY_LOCAL；只有指定真实 provider/model/region 请求为 PROVIDER_REAL。三者分开记录，缺少对应真实执行证据时标 NOT_RUN。
 - **回归**：每个改动了旧测试的文件列出 diff，说明产品语义的变更依据；不准无依据放宽断言。
 - **用户验收**：短/中篇 Markdown→个人模型翻译→显示成功→刷新通过 GET 恢复同一个 result_id；超过预算明确拒绝。
 
@@ -29,7 +29,7 @@
 | DB / SDK / 浏览器 / OS 版本 | NOT_RUN |
 | 定向测试和原始 stdout | NOT_RUN |
 | 旧基线与增量回归对照 | NOT_RUN |
-| SDK_LOCAL / PROVIDER_REAL / UAT 分别记录 | NOT_RUN |
+| SDK_LOCAL / PROXY_LOCAL / PROVIDER_REAL / UAT 分别记录 | NOT_RUN |
 | 测试代码 diff（包括旧断言修改） | NOT_RUN |
 | 可复现功能演示结果 | NOT_RUN |
 | 未验证、失败原因、修复 PR | NOT_RUN |

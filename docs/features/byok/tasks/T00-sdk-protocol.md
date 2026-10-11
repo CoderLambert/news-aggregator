@@ -1,46 +1,64 @@
-# T00 · SDK 协议验真
+# T00 · 共享网关端到端技术验真
 
-> **PLANNED**：本文件为未执行的实施/测试契约，所有测试当前 NOT_RUN。实施时以 `origin/feat/byok-user-api-keys` 最新 HEAD 为准，勿把设计 SHA 当作当前代码。
+> **PLANNED**：本卡尚未执行，SDK_LOCAL、PROXY_LOCAL 和 PROVIDER_REAL 都是 NOT_RUN。实现时先核对最新 `origin/feat/byok-user-api-keys`、独立工作树与实际 Python、Docker、Proxy 版本；本文件不代表通过验收。
 
 | 属性 | 内容 |
 | --- | --- |
 | 前置任务 | 无 |
 | 推荐规模 | S·技术门槛 |
 | 对应测试 | [Test T00](../tests/T00-sdk-protocol.md) |
+| 后续运维子卡 | [T00-G 共享网关运维契约](T00-gateway-service.md) |
 
-## 本次交付的完整功能
+## 目标
 
-能用目标 Python 环境实际安装的 OpenAI/Anthropic SDK，经受控 HTTP 上游完整跑通 Responses、Chat Completions、Messages 的文本流和工具往返。
+以锁定的官方 LiteLLM Proxy 镜像、官方客户端 SDK、受控本地 HTTP 上游，证明真实 SDK→Proxy→上游及返回链路的协议、完整性和凭据隔离。不能只 mock gateway、只调用 Proxy 的函数，或仅用 SDK 直连上游。
 
-**允许修改范围**：固定必要 SDK 版本及适配器契约；ModelTurn/ModelEvent、原生终态、provider_state 和安全异常；独立 CLI 探针覆盖原始请求/响应解析和明确关闭；SDK 自动重试为0。
+v1.104.2 是已记录 EOF/终态风险的复现版本。T00 回归夹具固定为 ghcr.io/berriai/litellm:v1.104.2@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500。来源：LiteLLM [官方 v1.104.2 release](https://github.com/BerriAI/litellm/releases/tag/v1.104.2)；2026-10-11 GHCR manifest 返回 OCI index，Docker-Content-Digest 响应头为 sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500（[registry manifest](https://ghcr.io/v2/berriai/litellm/manifests/v1.104.2)）。执行时仍按官方 release 说明验证镜像签名和实际 digest。该历史风险复现版本不自动成为 T00-G 部署候选。部署候选须另行核验当时官方稳定版本和实际 registry digest；若版本不同，要记录两者并针对部署版本补做兼容验真。实际 Python、客户端 SDK 与锁文件版本由本卡实测后写入 Test 文档。
 
-**本次明确不做**：不得建用户表、设置页、文章聊天、翻译任务或通用网关。仅调用 mocked gateway 不算 SDK 验真。
+官方 SDK 只作为业务后端访问 Proxy 的客户端；LiteLLM Proxy 负责向 OpenAI Responses、OpenAI Chat Completions、Anthropic Messages 上游路由和转换。不得新增三套 provider HTTP/SSE 适配器。项目虚拟 Key 用于业务后端认证 Proxy；用户 provider Key 是另一凭据，由业务后端按请求显式提交到 Proxy 支持且已验证的受限凭据字段。不得把 Proxy master key 放入业务请求。
 
-### 可直接复现的验收路径
+## 允许修改范围
 
-执行一个脚本依次验证正常完成、仅输出 partial 后 EOF、流内错误与 tools→result→final；打印脱敏结果和版本。
+- 固定本探针所需的最小客户端 SDK 与运行依赖版本，不升级全项目或系统软件。
+- 定义最小 ModelTurn、ModelEvent、安全错误和仅服务端可见 continuation 契约；对外可见消息必须排除 continuation。
+- 提供独立可运行 CLI 探针：启动或连接锁定的 LiteLLM Proxy，连接受控本地 HTTP 上游，并由真实安装的 SDK 发请求。
+- 验证 OpenAI Responses、OpenAI Chat Completions、Anthropic Messages 的原始终态、原生不完整状态、工具续接与资源关闭。保留 Responses 原始 output items、Anthropic thinking/signature、Chat reasoning_content。
+- Proxy 和 SDK 重试均设为 0；禁用模型 fallback。记录代理上游请求计数，证明失败时没有隐式重发。
 
-### 对应 Test 用例
+## 明确不做
 
-| Test ID | 可操作情境 | 必须观察到 | Test 文件 |
-| --- | --- | --- | --- |
-| T00-01 | 真实 SDK 文本和流在三种协议均收到各自完整终态 | 只完整且语义正确时报告成功 | [Test 契约](../tests/T00-sdk-protocol.md) |
-| T00-02 | partial 后 EOF/length/incomplete/stream error/HTTP error | 全部是明确非成功，不能生成 complete | [Test 契约](../tests/T00-sdk-protocol.md) |
-| T00-03 | tools 往返保留 Responses items / Anthropic thinking 签名 / Chat reasoning_content | 仅允许白名单工具和完整合法参数，可见消息剔除私密续接 | [Test 契约](../tests/T00-sdk-protocol.md) |
-| T00-04 | 两组显式 Key/模型并发调用；设置 max_retries=0 | HTTP 请求无凭据混用，无隐式重发 | [Test 契约](../tests/T00-sdk-protocol.md) |
-| T00-05 | 已有聊天/研究/翻译入口未被替换 | 已有旧测试按基线运行 | [Test 契约](../tests/T00-sdk-protocol.md) |
+不创建业务数据库模型/迁移、设置页、新闻业务调用、用户任务系统或共享生产网关；本卡核心 PROXY_LOCAL 测试不调用真实厂商。仅在核心 PROXY_LOCAL 完整通过后，可单独申请一次早期 DeepSeek 文本冒烟；须先向用户提供确切模型、安全合成输入、请求/输出上限及最小费用预算，并由用户明确确认后才可执行；不依赖 T00-G，也不替代 T13。不得操作 ssh tencent 或线上环境，不读取环境/文件/旧配置中的 provider Key。所有测试凭据必须是本次探针生成的合成假 Key。不得把本地 Proxy 集成证据记为真实 provider 兼容。
 
-### 立即停止并纠偏
+## 必验场景
 
-SDK 实际流的原始终态不可靠，或 native continuation 丢失，则只修本任务，禁止继续业务接入。
+| ID | 受控场景 | 验收要求 |
+| --- | --- | --- |
+| T00-01 | 三协议正常完整终态 | 保存原始上游事件与 Proxy/SDK 结果；只有各协议终态均完整且语义正确才可返回成功 |
+| T00-02 | 语义不完整但正常 EOF、显式 length/incomplete | 均不得合成 complete；保留原始原因 |
+| T00-03 | 上游截断 body、超时、SSE 流内错误、HTTP 错误 | 返回安全且可分类错误，不暴露 Key/正文；请求次数符合一次，无自动重试 |
+| T00-04 | 部分工具参数、非法 JSON、非白名单工具 | 不执行工具、不生成成功最终答案 |
+| T00-05 | 两轮工具往返 | Responses 原始 items、Anthropic thinking/signature、Chat reasoning_content 在服务端 continuation 中完整回送；公开消息不可见私密状态 |
+| T00-06 | 两组显式不同 provider Key/model 并发请求 | 请求在对应账户和模型间隔离；不读取全局或 Proxy 部署 provider Key |
+| T00-07 | 正常完成、异常、取消后的资源关闭 | SDK response/stream 与 HTTP 资源均关闭 |
+| T00-08 | 缺 provider Key、错误项目虚拟 Key | 缺个人 Key 时拒绝且不借部署 Key；错误项目虚拟 Key 到达上游前被 Proxy 拒绝 |
+| T00-09 | Proxy 与 SDK 请求计数 | max_retries=0、num_retries=0、无 fallback；计数证明失败未隐式重发或改模型 |
+| T00-10 | v1.104.2 原始上游 EOF 与 Proxy 暴露终态对照 | 仅下游 stop/[DONE] 不足以证明原始上游完整；失败按局部风险记录 |
+| T00-11 | 可选 DeepSeek 早期文本冒烟（仅 PROXY_LOCAL 全过且用户单独确认后） | 经 Proxy 到官方通用 API；合成安全短文本、单一模型、明确请求数和输出 token 上限、无自动重试；记录用户确认、模型/预算及脱敏结果。此单次证据不代替 T13 矩阵 |
 
-### Codex 一次任务交付要求
+## LiteLLM 流终态验真阻塞规则
 
-1. 查看当前工作目录 AGENTS、分支和未提交改动；读取本卡和同编号 Test、技术方案/最新相关代码。
-2. 同环境记录受影响旧测试的基线；用既有 Django/React/SSE/SDK/持久任务，先验证关键假设再编码。
-3. 本次只交付这一项**可以运行的完整功能**，包括权限、正常操作与最主要的失败路径；不跨到其它 Txx。
-4. 跑最小定向单元/契约测试以及受影响旧功能回归，列出修改过的测试断言 diff；需求未变时禁止改断言迁就代码。
-5. 更新对应 Test 文档中的真实日志、环境、SHA 和 NOT_RUN 项；单张任务 PR base 指向 `feat/byok-user-api-keys`。未授权时不合并 main、不开始下一张卡。
+针对 v1.104.2 已知 EOF/终态风险，必须比较受控上游原始终止事实、Proxy 的原始响应/事件、客户端收到的终态及错误状态。仅有 Proxy 下游 `finish_reason=stop` 或 `[DONE]` 不能证明上游成功完整结束。该风险只针对实测到的具体路径，不能概括为所有网络错误都会假成功。
 
-**任务结束**：这条用户流程能运行、失败能清楚识别，主要不变量有自动化验证；更新同名 Test 实际证据并留下单张可审核 PR。当前任何未验证的地方明确写 NOT_RUN。
+若代理无法给业务层提供可验证的原始完成证据，停止该路径验收并报告原始请求、事件序列和脱敏日志。只考虑锁定版本的局部补丁、等待官方修复，或禁用该具体路由的 streaming；不得改成另一套 provider 适配器、扩大为所有 SDK 的重构，或降低完整性契约。
+
+## 可复现验收路径
+
+在隔离环境运行 CLI，探针启动固定版本 Proxy 和受控本地 upstream，先执行文本与两轮工具成功路径，再注入 EOF/截断/超时/SSE 错误/HTTP 错误。stdout 只输出版本、用例状态、耗时、脱敏错误类别及请求计数。使用合成的 Proxy 项目虚拟 Key 和合成 provider Key；运行前后核对没有读取现存凭据或发送外网 provider 请求。
+
+## 任务完成条件
+
+- SDK_LOCAL 与 PROXY_LOCAL 各自单独报告。SDK_LOCAL 只能表示 SDK 直连受控上游；本卡主要门槛是 PROXY_LOCAL。可选 DeepSeek 冒烟另记 PROVIDER_REAL，不作为本地技术门槛必做项。
+- Test 文档记录精确基线 HEAD、实现 SHA、Python/SDK/Proxy/Docker 版本、完整执行命令、脱敏输出、旧测试对照和旧断言 diff；真实厂商状态保持单独的 PROVIDER_REAL=NOT_RUN。
+- 原始终态、continuation、凭据隔离、资源关闭或请求计数有任一无法核验时，T00 为 BLOCKED，不得继续把本地链路描述为完整通过。
+- T00-G 是共享服务运维交付卡；它不阻塞 T01/T04 本地开发，也不能由本地技术验真代替。
 

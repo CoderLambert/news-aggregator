@@ -2,7 +2,7 @@
 
 **不要把 [T00–T14 总表](README.md) 作为一次 Codex 实现指令。**
 
-每轮处理一个可验收功能（除 T00 可运行技术探针）；先核对真实 `origin/feat/byok-user-api-keys` HEAD、实际 AGENTS 和工作树。从最新功能分支切自己的 `task/byok-Txx-<short>`，PR base 指向 `feat/byok-user-api-keys`，不从旧设计基线强制重置。
+每轮处理一个可验收功能（T00 是真实 LiteLLM Proxy + SDK + 受控上游的本地技术探针）；先核对真实 `origin/feat/byok-user-api-keys` HEAD、实际 AGENTS 和工作树。从最新功能分支切自己的 `task/byok-Txx-<short>`，PR base 指向 `feat/byok-user-api-keys`，不从旧设计基线强制重置。
 
 1. **研发前**：对照现有代码，只提出未实现的增量；先检查成熟实现/旧任务租约/SSE/Query；记录需要保持的原有功能。
 2. **技术风险**：用最小真实调用/失败注入证明最危险假设；不能依赖模型自述或作者测试摘要作为独立证据。
