@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import secrets
@@ -54,7 +55,8 @@ def marker_in(result: HttpResult, marker: str) -> bool:
     return marker in json.dumps(result.body, ensure_ascii=True, sort_keys=True)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    argparse.ArgumentParser(description=__doc__).parse_args(argv)
     summary: dict = {
         "scope": "T00G_LOCAL_SYNTHETIC_ONLY",
         "provider_real": "NOT_RUN",
