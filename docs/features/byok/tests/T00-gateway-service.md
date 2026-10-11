@@ -24,22 +24,31 @@
 | --- | --- |
 | 本卡状态 | **PARTIAL**；本地合成服务/运维链路通过，尚不具备生产 go-live 或 provider 兼容结论 |
 | 基线 HEAD | `origin/feat/byok-user-api-keys`：`3cd584c95acd52bc533bba0b55eab75b35c41ad5` |
-| 实现 SHA（本次验证代码） | `1724bbca6f27582083193a7d63d35516a965d714` |
-| 执行命令 | `python3 ops/shared-litellm-proxy/tests/run_local.py`，从仓库根目录执行 |
-| 执行环境 | Docker 29.7.2、Docker Compose 5.5.1、Postgres 16 Alpine；OS 发行版未采集 |
+| 实现 SHA（最新复测代码） | `6140489c3a3eabf1b259d7d51c3734fcc1d71776`；包含测试入口参数校验与无副作用 `--help` |
+| PR #35 | open / Draft；base `feat/byok-user-api-keys`，实现 head `6140489c3a3eabf1b259d7d51c3734fcc1d71776` 的两组 frontend/backend-and-release-gates 均通过；runs [38174227321](https://github.com/CoderLambert/news-aggregator/actions/runs/38174227321)、[38174232182](https://github.com/CoderLambert/news-aggregator/actions/runs/38174232182)，backend 各 `838 passed / 2 warnings` |
+| 执行命令 | `python3 ops/shared-litellm-proxy/tests/run_local.py`；另执行 `python3 ops/shared-litellm-proxy/tests/run_local.py --help` 和 `cd ops/shared-litellm-proxy/tests && /tmp/byok-t00-smoke-20261012/bin/python -m unittest -v test_runner_cli` |
+| 执行环境 | Python 3.14.8、Docker 29.7.2、Docker Compose 5.5.1、Postgres 16 Alpine；OS 发行版未采集 |
 | Proxy 镜像 | `ghcr.io/berriai/litellm:v1.105.0@sha256:60947db020b57e204823d3fbc8bb295c85be890d7c9adcc77fb4f5fc2fe410b2` |
 | 镜像签名/摘要 | **PASS**；Cosign v3.0.2 验证 1 个签名，claims 有效，签名匹配固定公钥，claim digest 与 OCI index 一致；[完整机器可读证据](../evidence/T00-gateway-v1.105.0-cosign.json) |
-| 本地测试结果 | **26 PASS / 0 FAIL**；启动约 22.32 秒；Compose profiles 清理成功 |
+| 本地测试结果 | **26 PASS / 0 FAIL**；最新启动 22.0 秒；Compose profiles 清理成功。CLI safety 单测另为 `2 passed`，`--help` 输出 usage 且不调用 Docker |
 | 配置与健康检查 | `docker compose config --quiet` 通过；Proxy 与 Postgres 启动成功；`/health/readiness` 返回 200 |
 | 项目 key / allowlist | `newshub-test` 和 `generic-cli-test` 使用不同虚拟 key；各自显式 provider key 请求均返回 200；跨项目模型请求在上游前返回 403 |
 | fail-closed | 缺 provider key 返回静态 400；错误项目 key 返回 401；Chat streaming 返回静态 400；以上请求未触达合成上游 |
 | provider key 隔离 | 合成上游收到各自匹配的 provider key；未收到项目 key、master key、其简单 SHA-256 或请求体 provider key |
 | usage / 脱敏 | 6 条 usage 行可区分 `newshub-test` 与 `generic-cli-test`，合计观察到 20 tokens；容器日志和 usage 数据无测试 key 或提示词 |
 | Proxy 生命周期 | 停止 Proxy 后新请求连接失败；Proxy 重启后通用 CLI 请求恢复为 200；未启动 NewsHub Web/Worker 容器 |
-| 本地备份恢复 | 备份 257,038 bytes，SHA-256 `84966adf9283f57952c4f059bfe14351ce54fc063aa22a6200e24e7c6d4b3f5e`；隔离恢复 1,762.93 ms；恢复 `LiteLLM_SpendLogs` 和 `LiteLLM_VerificationToken` 两表，共 6 条 spend rows |
+| 本地备份恢复 | 最新备份 257,067 bytes，SHA-256 `7c439f2bf10ac920d830bca619a898efa82733453f4a2edc39136a5acc0baaaf`；隔离恢复 1,732.79 ms；恢复 `LiteLLM_SpendLogs` 和 `LiteLLM_VerificationToken` 两表，共 6 条 spend rows |
 | PROVIDER_REAL | **NOT_RUN**；没有真实 DeepSeek 或其他供应商请求 |
 | 业务回归 / 用户 UAT | **NOT_RUN**；真实 NewsHub Web/Worker 阅读、历史和断网行为未覆盖 |
 | 未验证项 | 生产部署与访问控制、生产密钥轮换、生产 RPO/RTO、升级/回滚、阈值/并发压测、NewsHub 生命周期、T13 provider 矩阵及 T14 发布验收 |
+
+### 当前工作区复测（2026-10-12）
+
+从仓库根目录运行 `python3 ops/shared-litellm-proxy/tests/run_local.py`；结果 **26 PASS / 0 FAIL**，status `PASS`，upstream 合成请求 2 次，`provider_real=NOT_RUN`。固定 LiteLLM v1.105.0 与 Postgres 16 镜像均按 digest 启动；两个项目 alias、两条显式 provider key 路由、未授权模型/缺 key/错误项目 key/Chat streaming 拒绝、usage 脱敏、Proxy 停止/恢复及隔离数据库备份恢复均通过。最终只清理随机项目 `byok-t00g-*`；清理后未发现该项目前缀的容器，既有 NewsHub 和其他项目容器仍保持运行。
+
+补充执行 `python3 ops/shared-litellm-proxy/tests/run_local.py --help`，确认只输出参数帮助，不启动容器；`test_runner_cli` 的 2 项单测验证 `--help` 与未知参数都在调用 Docker/创建测试状态前退出。此修复避免把查询帮助误当作执行入口，实际无参数路径的完整合成验收已在同一代码版本复跑。
+
+前一 PR #35 head `d10ba1c14e41e1fcdb5bc1eff1747a06ef2aa279` 的一份 run 出现既有 `test_sse_disconnect_does_not_cancel_background_worker` SQLite `OperationalError`（837 passed / 1 failed），同一 SHA 的另一完整 CI run 为 838 passed / 2 warnings。当前 CLI guard SHA `6140489c3a3eabf1b259d7d51c3734fcc1d71776` 的两组完整 CI 均已通过；该代码只影响本地测试脚本参数解析。
 
 ### 断言修正记录
 
