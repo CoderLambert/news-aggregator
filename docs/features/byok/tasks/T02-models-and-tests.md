@@ -10,6 +10,7 @@
 | 推荐规模 | M |
 | 对应测试 | [Test T02](../tests/T02-models-and-tests.md) |
 | PR 目标分支 | feat/byok-user-api-keys；PR 描述需要注明依赖 T01 PR #34 与 T00-G PR #35 |
+| 本卡 PR | [#36 Draft](https://github.com/CoderLambert/news-aggregator/pull/36) |
 
 ## 交付内容
 
