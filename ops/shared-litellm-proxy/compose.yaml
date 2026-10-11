@@ -1,0 +1,105 @@
+services:
+  db:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-litellm}
+      POSTGRES_USER: ${POSTGRES_USER:-litellm}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      PGDATA: /var/lib/postgresql/data/pgdata
+    secrets:
+      - postgres_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - gateway
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\" -h 127.0.0.1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  proxy:
+    image: ghcr.io/berriai/litellm:v1.105.0@sha256:60947db020b57e204823d3fbc8bb295c85be890d7c9adcc77fb4f5fc2fe410b2
+    user: "1000:1000"
+    entrypoint: ["/bin/sh", "/app/entrypoint.sh"]
+    command: ["--config", "/app/proxy.yaml", "--port", "4000"]
+    environment:
+      HOME: /tmp
+      XDG_CACHE_HOME: /tmp/cache
+      PYTHONPATH: /app
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-litellm}
+      POSTGRES_USER: ${POSTGRES_USER:-litellm}
+      T00_DENY_STREAMING_CALL_TYPES: acompletion
+    volumes:
+      - ./proxy.yaml:/app/proxy.yaml:ro
+      - ./entrypoint.sh:/app/entrypoint.sh:ro
+      - ./provider_key_guard.py:/app/byok_gateway_policy.py:ro
+    secrets:
+      - postgres_password
+      - litellm_master_key
+      - litellm_salt_key
+    ports:
+      - "127.0.0.1:${PROXY_HOST_PORT:-4000}:4000"
+    networks:
+      - gateway
+      - provider_egress
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/readiness', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 120s
+    restart: unless-stopped
+    stop_grace_period: 45s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,size=512m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 3g
+    cpus: 2.0
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+networks:
+  gateway:
+    name: ${GATEWAY_BACKEND_NETWORK:-byok-gateway-backend}
+    internal: true
+  provider_egress:
+    name: ${GATEWAY_EGRESS_NETWORK:-byok-gateway-egress}
+    internal: ${PROVIDER_EGRESS_INTERNAL:-false}
+
+volumes:
+  postgres_data:
+
+secrets:
+  postgres_password:
+    file: ${POSTGRES_PASSWORD_FILE:?set POSTGRES_PASSWORD_FILE to a protected file}
+  litellm_master_key:
+    file: ${LITELLM_MASTER_KEY_FILE:?set LITELLM_MASTER_KEY_FILE to a protected file}
+  litellm_salt_key:
+    file: ${LITELLM_SALT_KEY_FILE:?set LITELLM_SALT_KEY_FILE to a protected file}

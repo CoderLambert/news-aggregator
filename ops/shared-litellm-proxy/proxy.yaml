@@ -1,0 +1,47 @@
+model_list:
+  - model_name: news.deepseek-flash
+    litellm_params:
+      model: openai/deepseek-flash
+      api_base: https://api.deepseek.com/v1
+  - model_name: generic-cli.deepseek-flash
+    litellm_params:
+      model: openai/deepseek-flash
+      api_base: https://api.deepseek.com/v1
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  allow_requests_on_db_unavailable: false
+  store_prompts_in_spend_logs: false
+  maximum_spend_logs_retention_period: 30d
+  maximum_spend_logs_retention_interval: 1d
+  store_audit_logs: true
+  disable_master_key_return: true
+
+router_settings:
+  num_retries: 0
+  fallbacks: []
+
+litellm_settings:
+  callbacks: byok_gateway_policy.proxy_handler_instance
+  num_retries: 0
+  cache: false
+  turn_off_message_logging: true
+  redact_messages_in_exceptions: true
+  global_disable_no_log_param: true
+  set_verbose: false
+  json_logs: true
+  default_key_generate_params:
+    max_budget: 5.0
+    budget_duration: 1d
+    rpm_limit: 60
+    tpm_limit: 120000
+    max_parallel_requests: 4
+    duration: 90d
+  upperbound_key_generate_params:
+    max_budget: 5.0
+    budget_duration: 1d
+    rpm_limit: 60
+    tpm_limit: 120000
+    max_parallel_requests: 4
+    duration: 90d
