@@ -5,10 +5,30 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useAuth } from '@/context/AuthContext'
-import { fetchAIConnections, fetchAIProviderProfiles, createAIConnection, deleteAIConnection, replaceAIConnectionKey, updateAIConnection } from '@/services/api'
-import type { CreateAIConnectionInput } from '@/services/api'
+import {
+  fetchAIConnections,
+  fetchAIProviderProfiles,
+  fetchAIModelCatalog,
+  fetchAIModels,
+  createAIConnection,
+  createAIModel,
+  deleteAIConnection,
+  deleteAIModel,
+  replaceAIConnectionKey,
+  updateAIConnection,
+  updateAIModel,
+} from '@/services/api'
+import type { AIModelConfig, CreateAIConnectionInput, CreateAIModelInput } from '@/services/api'
 
 const CONNECTIONS_KEY = 'aiConnections'
+const MODELS_KEY = 'aiModels'
+
+function verificationLabel(status: AIModelConfig['verification_status']): string {
+  if (status === 'verified') return '已测试成功'
+  if (status === 'failed') return '最近测试失败'
+  if (status === 'stale') return '配置已变化，测试结果过期'
+  return '未测试'
+}
 
 export default function AIModelSettingsPage() {
   const { user, loading: authLoading } = useAuth()
@@ -40,6 +60,13 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
   const [replacementKey, setReplacementKey] = useState('')
   const [renameFor, setRenameFor] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
+  const [modelFormFor, setModelFormFor] = useState<string | null>(null)
+  const [selectedCatalogModelId, setSelectedCatalogModelId] = useState('')
+  const [modelIdDraft, setModelIdDraft] = useState('')
+  const [modelDisplayName, setModelDisplayName] = useState('')
+  const [editModelFor, setEditModelFor] = useState<string | null>(null)
+  const [editModelId, setEditModelId] = useState('')
+  const [editModelDisplayName, setEditModelDisplayName] = useState('')
   const [notice, setNotice] = useState('')
 
   const providersQuery = useQuery({
@@ -53,13 +80,27 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
     queryFn: ({ signal }) => fetchAIConnections(signal),
     retry: false,
   })
+  const modelCatalogQuery = useQuery({
+    queryKey: ['aiModelCatalog'],
+    queryFn: ({ signal }) => fetchAIModelCatalog(signal),
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  const modelsQuery = useQuery({
+    queryKey: [MODELS_KEY, userId],
+    queryFn: ({ signal }) => fetchAIModels(signal),
+    retry: false,
+  })
 
   const profiles = providersQuery.data ?? []
   const selectedEndpoint = profiles.find((profile) => profile.profile_id === selectedProfile) ?? profiles[0]
   const connections = connectionsQuery.data ?? []
+  const models = modelsQuery.data ?? []
+  const modelPresets = modelCatalogQuery.data?.models ?? []
   const loading = providersQuery.isPending || connectionsQuery.isPending
   const providerError = providersQuery.isError || connectionsQuery.isError
   const refreshConnections = () => queryClient.invalidateQueries({ queryKey: [CONNECTIONS_KEY, userId] })
+  const refreshModels = () => queryClient.invalidateQueries({ queryKey: [MODELS_KEY, userId] })
   const createMutation = useMutation({
     mutationFn: (input: CreateAIConnectionInput) => createAIConnection(input),
     onSuccess: async () => {
@@ -106,6 +147,38 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
     },
     onError: () => setNotice('删除失败，请重试。'),
   })
+  const createModelMutation = useMutation({
+    mutationFn: (input: CreateAIModelInput) => createAIModel(input),
+    onSuccess: async () => {
+      setModelFormFor(null)
+      setSelectedCatalogModelId('')
+      setModelIdDraft('')
+      setModelDisplayName('')
+      setNotice('模型已保存，当前未测试；保存模型不会调用服务商。')
+      await refreshModels()
+    },
+    onError: () => setNotice('模型保存失败，请检查模型 ID 后重试。'),
+  })
+  const deleteModelMutation = useMutation({
+    mutationFn: (modelId: string) => deleteAIModel(modelId),
+    onSuccess: async () => {
+      setNotice('模型配置已删除。')
+      await refreshModels()
+    },
+    onError: () => setNotice('模型删除失败，请重试。'),
+  })
+  const updateModelMutation = useMutation({
+    mutationFn: ({ modelId, nextModelId, displayName }: { modelId: string; nextModelId: string; displayName: string }) =>
+      updateAIModel(modelId, { model_id: nextModelId, display_name: displayName }),
+    onSuccess: async () => {
+      setEditModelFor(null)
+      setEditModelId('')
+      setEditModelDisplayName('')
+      setNotice('模型配置已更新；此前的测试结果已失效。')
+      await refreshModels()
+    },
+    onError: () => setNotice('模型配置更新失败，请检查模型 ID 后重试。'),
+  })
 
   return (
     <section className="mx-auto w-full max-w-3xl px-4 pb-12 pt-6 sm:pt-10">
@@ -115,7 +188,7 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
       <header className="mb-7 mt-4">
         <p className="text-sm font-medium text-orange-600">个人 API Key</p>
         <h1 className="mt-1 text-3xl font-semibold tracking-tight">AI 模型与密钥</h1>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">Key 由本站后端加密保存。保存、查看或停用连接都不会调用服务商；每项连接目前都标为“未测试”。</p>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">Key 由本站后端加密保存。保存连接和模型配置都不会调用服务商；模型需要经过明确测试后才会显示已验证能力。</p>
       </header>
 
       {notice && <p className="mb-5 rounded-lg border border-border bg-muted/40 p-3 text-sm" role="status">{notice}</p>}
@@ -242,6 +315,126 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
                     <Button type="button" variant="outline" className="min-h-11" onClick={() => { setReplaceFor(null); setReplacementKey('') }}>取消</Button>
                   </div>
                 </form>}
+
+                <section aria-labelledby={`models-for-${connection.id}`} className="mt-5 border-t border-border pt-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 id={`models-for-${connection.id}`} className="font-medium">模型配置</h3>
+                      <p className="mt-1 text-xs text-muted-foreground">可选官方目录模型或手动输入 ID；保存不会发送请求。</p>
+                    </div>
+                    <Button type="button" variant="outline" className="min-h-11" onClick={() => {
+                      setModelFormFor(connection.id)
+                      setSelectedCatalogModelId('')
+                      setModelIdDraft('')
+                      setModelDisplayName('')
+                      setNotice('')
+                    }}>
+                      添加模型
+                    </Button>
+                  </div>
+
+                  {modelsQuery.isError && <p className="mt-3 text-sm text-destructive" role="alert">模型列表暂不可用。可以重试读取，目录问题不会阻止手动输入模型 ID。</p>}
+                  {modelsQuery.isPending ? <p className="mt-3 text-sm text-muted-foreground" role="status">正在读取模型配置…</p> : (
+                    <ul className="mt-3 space-y-2">
+                      {models.filter((model) => model.connection_id === connection.id).map((model) => (
+                        <li key={model.id} className="rounded-lg bg-muted/40 p-3">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="font-medium">{model.display_name}</p>
+                              <p className="mt-1 break-all text-xs text-muted-foreground">模型 ID：{model.model_id}</p>
+                              <p className="mt-1 text-xs text-muted-foreground">{model.source === 'catalog' ? `官方目录 ${model.catalog_version} · 声明能力未实测` : '手动录入 · 未经目录核验'}</p>
+                              <p className="mt-1 text-xs text-muted-foreground">文本：{model.capabilities.text} · 工具：{model.capabilities.tools} · {verificationLabel(model.verification_status)}</p>
+                              {model.has_trusted_context_limit ? (
+                                <p className="mt-1 text-xs text-muted-foreground">官方上下文上限 {model.context_window_tokens?.toLocaleString()} tokens；最大输出 {model.max_output_tokens?.toLocaleString() ?? '未知'} tokens</p>
+                              ) : (
+                                <p className="mt-1 text-xs text-amber-700">上下文上限未核实；不会据此自动发送整篇文章。</p>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <Button type="button" variant="outline" className="min-h-11" onClick={() => {
+                                setEditModelFor(model.id)
+                                setEditModelId(model.model_id)
+                                setEditModelDisplayName(model.display_name)
+                                setNotice('')
+                              }}>编辑模型</Button>
+                              <Button type="button" variant="destructive" className="min-h-11" disabled={deleteModelMutation.isPending} onClick={() => {
+                                if (window.confirm('删除这个模型配置？')) deleteModelMutation.mutate(model.id)
+                              }}>删除模型</Button>
+                            </div>
+                          </div>
+                          {editModelFor === model.id && <form className="mt-4 space-y-3 border-t border-border pt-4" onSubmit={(event) => {
+                            event.preventDefault()
+                            if (!editModelId.trim() || !editModelDisplayName.trim() || updateModelMutation.isPending) return
+                            updateModelMutation.mutate({
+                              modelId: model.id,
+                              nextModelId: editModelId.trim(),
+                              displayName: editModelDisplayName.trim(),
+                            })
+                          }}>
+                            <label className="block space-y-2 text-sm font-medium">
+                              <span>模型 ID</span>
+                              <Input value={editModelId} onChange={(event) => setEditModelId(event.target.value)} maxLength={160} autoComplete="off" spellCheck={false} required />
+                            </label>
+                            <label className="block space-y-2 text-sm font-medium">
+                              <span>显示名称</span>
+                              <Input value={editModelDisplayName} onChange={(event) => setEditModelDisplayName(event.target.value)} maxLength={64} autoComplete="off" required />
+                            </label>
+                            <div className="flex flex-wrap gap-2">
+                              <Button type="submit" className="min-h-11" disabled={!editModelId.trim() || !editModelDisplayName.trim() || updateModelMutation.isPending}>
+                                {updateModelMutation.isPending ? '正在保存…' : '保存模型修改'}
+                              </Button>
+                              <Button type="button" variant="outline" className="min-h-11" onClick={() => setEditModelFor(null)}>取消</Button>
+                            </div>
+                          </form>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {modelFormFor === connection.id && <form className="mt-4 space-y-3 rounded-lg border border-border p-3" onSubmit={(event) => {
+                    event.preventDefault()
+                    if (createModelMutation.isPending) return
+                    const input: CreateAIModelInput = selectedCatalogModelId
+                      ? { connection_id: connection.id, catalog_model_id: selectedCatalogModelId, display_name: modelDisplayName }
+                      : { connection_id: connection.id, model_id: modelIdDraft.trim(), display_name: modelDisplayName }
+                    if (!selectedCatalogModelId && !modelIdDraft.trim()) return
+                    setNotice('')
+                    createModelMutation.mutate(input)
+                  }}>
+                    <label className="block space-y-2 text-sm font-medium">
+                      <span>官方模型预设</span>
+                      <select
+                        value={selectedCatalogModelId}
+                        onChange={(event) => setSelectedCatalogModelId(event.target.value)}
+                        className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm"
+                      >
+                        <option value="">手动输入模型 ID</option>
+                        {modelPresets.filter((preset) => preset.provider_id === connection.provider_id).map((preset) => (
+                          <option key={preset.catalog_model_id} value={preset.catalog_model_id}>{preset.display_name} · {preset.model_id}</option>
+                        ))}
+                      </select>
+                    </label>
+                    {modelCatalogQuery.isError && <p className="text-xs text-amber-700" role="status">官方目录暂不可用。你仍可手动输入模型 ID。</p>}
+                    {selectedCatalogModelId ? (
+                      <p className="text-xs text-muted-foreground">已选：{modelPresets.find((preset) => preset.catalog_model_id === selectedCatalogModelId)?.model_id}</p>
+                    ) : (
+                      <label className="block space-y-2 text-sm font-medium">
+                        <span>模型 ID</span>
+                        <Input value={modelIdDraft} onChange={(event) => setModelIdDraft(event.target.value)} maxLength={160} autoComplete="off" spellCheck={false} required />
+                      </label>
+                    )}
+                    <label className="block space-y-2 text-sm font-medium">
+                      <span>显示名称（可选）</span>
+                      <Input value={modelDisplayName} onChange={(event) => setModelDisplayName(event.target.value)} maxLength={64} autoComplete="off" />
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="submit" className="min-h-11" disabled={createModelMutation.isPending || (!selectedCatalogModelId && !modelIdDraft.trim())}>
+                        {createModelMutation.isPending ? '正在保存…' : '保存模型'}
+                      </Button>
+                      <Button type="button" variant="outline" className="min-h-11" onClick={() => setModelFormFor(null)}>取消</Button>
+                    </div>
+                  </form>}
+                </section>
               </li>
             ))}
           </ul>

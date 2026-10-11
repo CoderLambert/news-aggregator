@@ -4,15 +4,20 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AIModelSettingsPage from '@/pages/AIModelSettingsPage'
-import type { AIConnection, AIProviderProfile } from '@/services/api'
+import type { AIConnection, AIModelConfig, AIModelPreset, AIProviderProfile } from '@/services/api'
 
 const mocks = vi.hoisted(() => ({
   fetchAIProviderProfiles: vi.fn(),
   fetchAIConnections: vi.fn(),
+  fetchAIModelCatalog: vi.fn(),
+  fetchAIModels: vi.fn(),
   createAIConnection: vi.fn(),
+  createAIModel: vi.fn(),
   replaceAIConnectionKey: vi.fn(),
   updateAIConnection: vi.fn(),
   deleteAIConnection: vi.fn(),
+  deleteAIModel: vi.fn(),
+  updateAIModel: vi.fn(),
 }))
 
 const authState = vi.hoisted(() => ({
@@ -37,6 +42,22 @@ const connection: AIConnection = {
   verification_status: 'not_tested', updated_at: '2026-10-11T00:00:00Z',
 }
 
+const modelPreset: AIModelPreset = {
+  catalog_model_id: 'deepseek-flash', provider_id: 'deepseek', model_id: 'deepseek-flash',
+  display_name: 'DeepSeek V4.1 Flash', context_window_tokens: 1_048_576, max_output_tokens: 393_216,
+  catalog_version: '2026-10-12.1', source_url: 'https://api-docs.deepseek.com/api/list-models/',
+  provider_claims: { tools: true, stream: true },
+}
+
+const modelConfig: AIModelConfig = {
+  id: 'model-17', connection_id: 'connection-17', model_id: 'vendor/custom-model',
+  display_name: 'vendor/custom-model', source: 'manual', catalog_model_id: '', catalog_version: '',
+  catalog_source_url: '', provider_claims: {}, context_window_tokens: null, max_output_tokens: null,
+  has_trusted_context_limit: false, config_revision: 1, verification_status: 'not_tested',
+  capabilities: { text: 'unknown', tools: 'unknown', structured_output: 'unknown', thinking: 'unknown', stream: 'unknown' },
+  last_tested_at: null, updated_at: '2026-10-12T00:00:00Z',
+}
+
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return { ...render(<MemoryRouter><QueryClientProvider client={client}><AIModelSettingsPage /></QueryClientProvider></MemoryRouter>), client }
@@ -50,10 +71,15 @@ beforeEach(() => {
   authState.loading = false
   mocks.fetchAIProviderProfiles.mockResolvedValue(providerProfiles)
   mocks.fetchAIConnections.mockResolvedValue([])
+  mocks.fetchAIModelCatalog.mockResolvedValue({ catalog_version: '2026-10-12.1', models: [modelPreset], catalog_available: true })
+  mocks.fetchAIModels.mockResolvedValue([])
   mocks.createAIConnection.mockResolvedValue(connection)
+  mocks.createAIModel.mockResolvedValue(modelConfig)
   mocks.replaceAIConnectionKey.mockResolvedValue(connection)
   mocks.updateAIConnection.mockResolvedValue(connection)
   mocks.deleteAIConnection.mockResolvedValue({ deleted: true })
+  mocks.deleteAIModel.mockResolvedValue({ deleted: true })
+  mocks.updateAIModel.mockResolvedValue(modelConfig)
   vi.stubGlobal('confirm', vi.fn(() => true))
 })
 
@@ -133,5 +159,56 @@ describe('AIModelSettingsPage', () => {
 
     expect(await screen.findByLabelText('API Key')).toHaveValue('')
     expect(screen.queryByText('sk-t01-unsaved-account-switch-synthetic')).not.toBeInTheDocument()
+  })
+
+  it('allows manual model entry when the official model catalog is unavailable', async () => {
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModelCatalog.mockRejectedValue(new Error('synthetic catalog outage'))
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: '添加模型' }))
+    expect(await screen.findByText('官方目录暂不可用。你仍可手动输入模型 ID。')).toBeInTheDocument()
+    const modelIdField = screen.getByLabelText('模型 ID')
+    fireEvent.change(modelIdField, { target: { value: 'vendor/manual-model-2026' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存模型' }))
+
+    await waitFor(() => expect(mocks.createAIModel).toHaveBeenCalledWith({
+      connection_id: 'connection-17', model_id: 'vendor/manual-model-2026', display_name: '',
+    }))
+    expect(await screen.findByRole('status')).toHaveTextContent('模型已保存，当前未测试；保存模型不会调用服务商。')
+  })
+
+  it('saves an official preset without treating provider-declared capabilities as verified', async () => {
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: '添加模型' }))
+    fireEvent.change(screen.getByLabelText('官方模型预设'), { target: { value: 'deepseek-flash' } })
+    expect(screen.getByText('已选：deepseek-flash')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '保存模型' }))
+
+    await waitFor(() => expect(mocks.createAIModel).toHaveBeenCalledWith({
+      connection_id: 'connection-17', catalog_model_id: 'deepseek-flash', display_name: '',
+    }))
+  })
+
+  it('updates a model configuration without making a provider request', async () => {
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([modelConfig])
+    mocks.updateAIModel.mockResolvedValue({
+      ...modelConfig, model_id: 'vendor/custom-model-v2', display_name: 'My model', config_revision: 2,
+    })
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑模型' }))
+    fireEvent.change(screen.getByLabelText('模型 ID'), { target: { value: 'vendor/custom-model-v2' } })
+    fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: 'My model' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存模型修改' }))
+
+    await waitFor(() => expect(mocks.updateAIModel).toHaveBeenCalledWith('model-17', {
+      model_id: 'vendor/custom-model-v2', display_name: 'My model',
+    }))
+    expect(await screen.findByRole('status')).toHaveTextContent('模型配置已更新；此前的测试结果已失效。')
+    expect(screen.queryByRole('button', { name: /测试模型/ })).not.toBeInTheDocument()
   })
 })
