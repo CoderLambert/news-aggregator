@@ -31,13 +31,13 @@
 | --- | --- |
 | 本卡状态 | **NOT_RUN** |
 | 精确基线 HEAD | `ea2ce55ae22e19e1604e88031b824b68f2666cec`（此前确认的功能分支基线；执行当天需重新核对） |
-| 实现 SHA | 文档 PR commit 待生成；SDK/Proxy 实施 SHA 未执行 |
+| 实现 SHA | 本次架构文档 commit 6440a07197dae4b43b032c782638ad97e9defb59；SDK/Proxy 实施 SHA 未执行 |
 | Python / OpenAI SDK / Anthropic SDK / LiteLLM / Docker 版本 | NOT_RUN |
 | SDK_LOCAL 执行命令及脱敏输出 | NOT_RUN |
 | PROXY_LOCAL 执行命令及脱敏输出 | NOT_RUN |
 | PROVIDER_REAL | **NOT_RUN；本卡不授权真实厂商请求** |
 | 旧聊天/研究/翻译基线与变更后对照 | 历史准备记录：219 passed, 3 warnings；精确运行命令、依赖版本、功能基线 SHA 与报告文件未在本卡重新执行，不能视为本卡证据 |
-| 旧测试断言 diff | NOT_RUN；后续若不改旧测试，记录“无断言 diff”；不放宽旧断言 |
+| 旧测试断言 diff | 本次 PR 只改文档，不改代码测试或旧断言；T00 的实现前/后回归仍 NOT_RUN |
 | 原始终态 / continuation / 请求计数 / 资源关闭 | NOT_RUN |
 | 未验证或阻塞原因 | 尚未实现或运行；所有场景按 NOT_RUN 处理 |
 
