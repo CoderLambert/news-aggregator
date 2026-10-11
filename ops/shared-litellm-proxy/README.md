@@ -93,6 +93,12 @@ master key 仅用于 Proxy 管理 API，轮换它不会替换项目 virtual key�
 python3 tests/run_local.py
 ```
 
+查看命令帮助不会启动容器；其他未知参数会在运行前报错：
+
+```sh
+python3 tests/run_local.py --help
+```
+
 脚本使用临时随机 master/project/provider key，provider egress 网络设为 internal，并只连接测试 upstream；它不读取用户密钥、不访问真实 provider。脚本会实际校验配置、Postgres 启动/恢复、两个受限 project key、独立 `curl` CLI、额度字段、错误 project key、未授权模型、缺 provider key、Chat stream 拒绝、usage 脱敏、Proxy 停止/重启和容器清理。测试密钥只存在于临时目录和内存，不打印到终端。
 
 该脚本不替代真实 NewsHub Web/Worker 停止/重启验收、生产备份恢复、生产升级回退或 T13 provider 矩阵；这些结果必须按 T00-G 测试契约分开记录。真实 provider 请求保持 `NOT_RUN`。
