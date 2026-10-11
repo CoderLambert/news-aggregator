@@ -187,7 +187,7 @@ T00 当前仍为 **BLOCKED**。任务卡要求核心 PROXY_LOCAL 全部通过后
 | 探针代码提交 | `02a693db37e6aed07ad3a7d46304a220a2f5a5f6`（当前 Draft PR #33 的代码提交；执行前仍核对最终 HEAD） |
 | 环境 | Linux 7.2.5-3-omarchy x86_64；Python 3.14.8；OpenAI SDK 3.28.0；httpx2 2.13.1；依赖按 `tools/byok_t00_probe/requirements.lock` 安装于隔离 venv |
 | 调用路径 | OpenAI Chat Completions SDK → `https://api.deepseek.com`；非流式；只测 DeepSeek `deepseek-flash` |
-| 输入 | 固定、无新闻或隐私内容的 ASCII JSON 指令，101 字符；实际 token 数由响应 usage 记录，未在本机 tokenizer 上核验 |
+| 输入 | 固定、无新闻或隐私内容的 101 字符 ASCII 指令：`Return only a JSON object with exactly these fields: {"probe_id":"byok-deepseek-smoke-v1","ok":true}.`；实际 token 数由响应 usage 记录，未在本机 tokenizer 上核验 |
 | 输出/推理限制 | `max_tokens=24`；thinking 显式 disabled；不请求推理；若 usage 返回 reasoning tokens 则记录；SDK `max_retries=0`，HTTP redirect 关闭，30 秒 timeout |
 | 请求数 | 该命令最多发起 1 次直连 HTTP 请求；LiteLLM 路径为 0。`request_count` 是 SDK HTTP request hook 观察到的发送尝试数，不声称上游一定已处理或计费 |
 | 回答断言 | 非空 JSON object，且恰好包含 `probe_id="byok-deepseek-smoke-v1"`、`ok=true`；还要求唯一 choice 的 `finish_reason=stop`。自由文本、空响应、非法 JSON、额外/缺失字段、`length`、缺少终态、请求数不是 1 均失败 |
