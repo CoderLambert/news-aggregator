@@ -288,6 +288,85 @@ export interface AIModelTestResult {
   billing_notice: 'provider_may_bill'
 }
 
+export type AITaskKind = 'default' | 'article_qa' | 'full_translation' | 'deep_research' | 'question_suggestions'
+export type AITaskPreferenceState = 'available' | 'needs_reselection' | 'inherit_default' | 'unset'
+
+export interface AITaskPreference {
+  task_kind: AITaskKind
+  model_config_id: string | null
+  selection_state: AITaskPreferenceState
+  model: {
+    id: string
+    model_id: string
+    display_name: string
+    connection_id: string
+  } | null
+}
+
+export interface SaveAITaskPreference {
+  task_kind: AITaskKind
+  model_config_id: string | null
+}
+
+const AI_TASK_KINDS: AITaskKind[] = [
+  'default', 'article_qa', 'full_translation', 'deep_research', 'question_suggestions',
+]
+
+function parseAITaskPreference(value: unknown): AITaskPreference {
+  if (!isRecord(value) ||
+    !AI_TASK_KINDS.includes(value.task_kind as AITaskKind) ||
+    !(value.model_config_id === null || typeof value.model_config_id === 'string') ||
+    !['available', 'needs_reselection', 'inherit_default', 'unset'].includes(String(value.selection_state)) ||
+    !(value.model === null || isRecord(value.model)) ||
+    Object.keys(value).some((key) => !['task_kind', 'model_config_id', 'selection_state', 'model'].includes(key))) {
+    throw new TypeError('Invalid AI task preference response')
+  }
+  let model: AITaskPreference['model'] = null
+  if (value.model !== null) {
+    const candidate = value.model
+    if (typeof candidate.id !== 'string' || typeof candidate.model_id !== 'string' ||
+      typeof candidate.display_name !== 'string' || typeof candidate.connection_id !== 'string' ||
+      Object.keys(candidate).some((key) => !['id', 'model_id', 'display_name', 'connection_id'].includes(key)) ||
+      value.model_config_id !== candidate.id) {
+      throw new TypeError('Invalid AI task preference response')
+    }
+    model = {
+      id: candidate.id,
+      model_id: candidate.model_id,
+      display_name: candidate.display_name,
+      connection_id: candidate.connection_id,
+    }
+  }
+  return {
+    task_kind: value.task_kind as AITaskKind,
+    model_config_id: value.model_config_id,
+    selection_state: value.selection_state as AITaskPreferenceState,
+    model,
+  }
+}
+
+function parseAITaskPreferences(value: unknown): AITaskPreference[] {
+  if (!isRecord(value) || !Array.isArray(value.preferences)) throw new TypeError('Invalid AI task preferences response')
+  const preferences = value.preferences.map(parseAITaskPreference)
+  if (preferences.length !== AI_TASK_KINDS.length ||
+    new Set(preferences.map((item) => item.task_kind)).size !== AI_TASK_KINDS.length ||
+    !AI_TASK_KINDS.every((taskKind) => preferences.some((item) => item.task_kind === taskKind))) {
+    throw new TypeError('Invalid AI task preferences response')
+  }
+  return preferences
+}
+
+export async function fetchAITaskPreferences(signal?: AbortSignal): Promise<AITaskPreference[]> {
+  const value: unknown = (await api.get<unknown>('/ai/preferences/', { signal })).data
+  return parseAITaskPreferences(value)
+}
+
+export async function saveAITaskPreferences(preferences: SaveAITaskPreference[]): Promise<AITaskPreference[]> {
+  const safePreferences = preferences.map(({ task_kind, model_config_id }) => ({ task_kind, model_config_id }))
+  const value: unknown = (await api.patch<unknown>('/ai/preferences/', { preferences: safePreferences })).data
+  return parseAITaskPreferences(value)
+}
+
 function parseAIProviderProfiles(value: unknown): AIProviderProfile[] {
   if (!isRecord(value) || !Array.isArray(value.providers)) throw new TypeError('Invalid AI provider catalog')
   return value.providers.map((entry): AIProviderProfile => {

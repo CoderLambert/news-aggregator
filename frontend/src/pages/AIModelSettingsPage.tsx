@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import AITaskPreferencesSection from '@/components/ai/AITaskPreferencesSection'
 import { useAuth } from '@/context/AuthContext'
 import {
   fetchAIConnections,
@@ -102,6 +103,7 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
   const providerError = providersQuery.isError || connectionsQuery.isError
   const refreshConnections = () => queryClient.invalidateQueries({ queryKey: [CONNECTIONS_KEY, userId] })
   const refreshModels = () => queryClient.invalidateQueries({ queryKey: [MODELS_KEY, userId] })
+  const refreshTaskPreferences = () => queryClient.invalidateQueries({ queryKey: ['aiTaskPreferences', userId] })
   const createMutation = useMutation({
     mutationFn: (input: CreateAIConnectionInput) => createAIConnection(input),
     onSuccess: async () => {
@@ -136,7 +138,7 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
     mutationFn: ({ connectionId, isEnabled }: { connectionId: string; isEnabled: boolean }) => updateAIConnection(connectionId, { is_enabled: isEnabled }),
     onSuccess: async (_connection, variables) => {
       setNotice(variables.isEnabled ? '连接已启用。' : '连接已停用，旧凭据版本已失效。')
-      await refreshConnections()
+      await Promise.all([refreshConnections(), refreshTaskPreferences()])
     },
     onError: () => setNotice('状态更新失败，请重试。'),
   })
@@ -144,7 +146,7 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
     mutationFn: (connectionId: string) => deleteAIConnection(connectionId),
     onSuccess: async () => {
       setNotice('连接已删除，站点已清除保存的密文。')
-      await refreshConnections()
+      await Promise.all([refreshConnections(), refreshTaskPreferences()])
     },
     onError: () => setNotice('删除失败，请重试。'),
   })
@@ -164,7 +166,7 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
     mutationFn: (modelId: string) => deleteAIModel(modelId),
     onSuccess: async () => {
       setNotice('模型配置已删除。')
-      await refreshModels()
+      await Promise.all([refreshModels(), refreshTaskPreferences()])
     },
     onError: () => setNotice('模型删除失败，请重试。'),
   })
@@ -210,6 +212,14 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
       </header>
 
       {notice && <p className="mb-5 rounded-lg border border-border bg-muted/40 p-3 text-sm" role="status">{notice}</p>}
+
+      <AITaskPreferencesSection
+        userId={userId}
+        models={models}
+        connections={connections}
+        dataLoading={connectionsQuery.isPending || modelsQuery.isPending}
+        dataError={connectionsQuery.isError || modelsQuery.isError}
+      />
 
       <section aria-labelledby="add-ai-connection" className="rounded-2xl border border-border bg-card p-5 sm:p-6">
         <h2 id="add-ai-connection" className="text-lg font-semibold">添加服务商连接</h2>

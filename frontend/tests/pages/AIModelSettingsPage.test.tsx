@@ -4,13 +4,15 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AIModelSettingsPage from '@/pages/AIModelSettingsPage'
-import type { AIConnection, AIModelConfig, AIModelPreset, AIProviderProfile } from '@/services/api'
+import type { AIConnection, AIModelConfig, AIModelPreset, AIProviderProfile, AITaskKind, AITaskPreference, SaveAITaskPreference } from '@/services/api'
 
 const mocks = vi.hoisted(() => ({
   fetchAIProviderProfiles: vi.fn(),
   fetchAIConnections: vi.fn(),
   fetchAIModelCatalog: vi.fn(),
   fetchAIModels: vi.fn(),
+  fetchAITaskPreferences: vi.fn(),
+  saveAITaskPreferences: vi.fn(),
   createAIConnection: vi.fn(),
   createAIModel: vi.fn(),
   replaceAIConnectionKey: vi.fn(),
@@ -59,6 +61,33 @@ const modelConfig: AIModelConfig = {
   last_tested_at: null, updated_at: '2026-10-12T00:00:00Z',
 }
 
+const taskKinds: AITaskKind[] = ['default', 'article_qa', 'full_translation', 'deep_research', 'question_suggestions']
+
+function preferenceSet(
+  selected: Partial<Record<AITaskKind, string | null>> = {},
+  unavailable: AITaskKind[] = [],
+): AITaskPreference[] {
+  return taskKinds.map((task_kind) => {
+    const model_config_id = selected[task_kind] ?? null
+    const selection_state = unavailable.includes(task_kind)
+      ? 'needs_reselection'
+      : model_config_id !== null
+        ? 'available'
+        : task_kind === 'default' ? 'unset' : 'inherit_default'
+    return {
+      task_kind,
+      model_config_id,
+      selection_state,
+      model: model_config_id === modelConfig.id ? {
+        id: modelConfig.id,
+        model_id: modelConfig.model_id,
+        display_name: modelConfig.display_name,
+        connection_id: modelConfig.connection_id,
+      } : null,
+    }
+  })
+}
+
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return { ...render(<MemoryRouter><QueryClientProvider client={client}><AIModelSettingsPage /></QueryClientProvider></MemoryRouter>), client }
@@ -74,6 +103,10 @@ beforeEach(() => {
   mocks.fetchAIConnections.mockResolvedValue([])
   mocks.fetchAIModelCatalog.mockResolvedValue({ catalog_version: '2026-10-12.1', models: [modelPreset], catalog_available: true })
   mocks.fetchAIModels.mockResolvedValue([])
+  mocks.fetchAITaskPreferences.mockResolvedValue(preferenceSet())
+  mocks.saveAITaskPreferences.mockImplementation(async (preferences: SaveAITaskPreference[]) => preferenceSet(
+    Object.fromEntries(preferences.map(({ task_kind, model_config_id }) => [task_kind, model_config_id])) as Partial<Record<AITaskKind, string | null>>,
+  ))
   mocks.createAIConnection.mockResolvedValue(connection)
   mocks.createAIModel.mockResolvedValue(modelConfig)
   mocks.replaceAIConnectionKey.mockResolvedValue(connection)
@@ -215,7 +248,7 @@ describe('AIModelSettingsPage', () => {
     await waitFor(() => expect(mocks.updateAIModel).toHaveBeenCalledWith('model-17', {
       model_id: 'vendor/custom-model-v2', display_name: 'My model',
     }))
-    expect(await screen.findByRole('status')).toHaveTextContent('模型配置已更新；此前的测试结果已失效。')
+    expect(await screen.findByText('模型配置已更新；此前的测试结果已失效。')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /测试模型/ })).not.toBeInTheDocument()
   })
 
@@ -234,7 +267,7 @@ describe('AIModelSettingsPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: '测试文本能力' }))
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('可能产生费用'))
     await waitFor(() => expect(mocks.testAIModel).toHaveBeenCalledWith('model-17', 'text'))
-    expect(await screen.findByRole('status')).toHaveTextContent('文本能力测试成功。')
+    expect(await screen.findByText('文本能力测试成功。')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '测试工具能力' }))
     await waitFor(() => expect(mocks.testAIModel).toHaveBeenCalledWith('model-17', 'tools'))
@@ -249,5 +282,76 @@ describe('AIModelSettingsPage', () => {
     expect(await screen.findByText('该手动模型尚无预批准网关路由，暂不可测试。')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '测试文本能力' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '测试工具能力' })).not.toBeInTheDocument()
+  })
+
+  it('keeps preference drafts local until save and can revert them', async () => {
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([modelConfig])
+    renderPage()
+
+    const defaultSelect = await screen.findByLabelText('全局默认：默认模型')
+    expect(await screen.findByLabelText('新闻问答：使用模型')).toHaveValue('')
+    fireEvent.change(defaultSelect, { target: { value: modelConfig.id } })
+
+    expect(screen.getByText('当前选择尚未保存。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存用途偏好' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: '撤销修改' }))
+
+    expect(defaultSelect).toHaveValue('')
+    expect(screen.getByText('已撤销本页尚未保存的选择。')).toBeInTheDocument()
+    expect(mocks.saveAITaskPreferences).not.toHaveBeenCalled()
+  })
+
+  it('saves all five preferences explicitly and preserves the saved selection', async () => {
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([modelConfig])
+    mocks.saveAITaskPreferences.mockResolvedValue(preferenceSet({
+      default: modelConfig.id,
+      article_qa: modelConfig.id,
+    }))
+    renderPage()
+
+    fireEvent.change(await screen.findByLabelText('全局默认：默认模型'), { target: { value: modelConfig.id } })
+    fireEvent.change(screen.getByLabelText('新闻问答：使用模型'), { target: { value: modelConfig.id } })
+    fireEvent.click(screen.getByRole('button', { name: '保存用途偏好' }))
+
+    await waitFor(() => expect(mocks.saveAITaskPreferences).toHaveBeenCalledWith([
+      { task_kind: 'default', model_config_id: modelConfig.id },
+      { task_kind: 'article_qa', model_config_id: modelConfig.id },
+      { task_kind: 'full_translation', model_config_id: null },
+      { task_kind: 'deep_research', model_config_id: null },
+      { task_kind: 'question_suggestions', model_config_id: null },
+    ]))
+    expect(await screen.findByText('用途偏好已保存，只影响之后开始的任务；已开始的任务和历史结果保持不变。')).toBeInTheDocument()
+    expect(screen.getByLabelText('全局默认：默认模型')).toHaveValue(modelConfig.id)
+    expect(screen.getByLabelText('新闻问答：使用模型')).toHaveValue(modelConfig.id)
+  })
+
+  it('keeps unsaved choices and reports failure when saving preferences fails', async () => {
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([modelConfig])
+    mocks.saveAITaskPreferences.mockRejectedValue(new Error('synthetic preference outage'))
+    renderPage()
+
+    const defaultSelect = await screen.findByLabelText('全局默认：默认模型')
+    fireEvent.change(defaultSelect, { target: { value: modelConfig.id } })
+    fireEvent.click(screen.getByRole('button', { name: '保存用途偏好' }))
+
+    expect(await screen.findByText('保存失败。未保存的选择仍留在本页，请检查连接状态后重试。')).toBeInTheDocument()
+    expect(defaultSelect).toHaveValue(modelConfig.id)
+    expect(screen.getByRole('button', { name: '保存用途偏好' })).toBeEnabled()
+  })
+
+  it('shows a disabled saved model as requiring reselection and blocks an unchanged stale save', async () => {
+    mocks.fetchAIConnections.mockResolvedValue([{ ...connection, is_enabled: false }])
+    mocks.fetchAIModels.mockResolvedValue([modelConfig])
+    mocks.fetchAITaskPreferences.mockResolvedValue(preferenceSet({ default: modelConfig.id }, ['default']))
+    renderPage()
+
+    const defaultSelect = await screen.findByLabelText('全局默认：默认模型')
+    expect(defaultSelect).toHaveValue(modelConfig.id)
+    expect(screen.getByText('默认模型已停用或删除。请选择有效默认模型。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存用途偏好' })).toBeDisabled()
+    expect(screen.getByText('有用途指向不可用模型，请重新选择后保存。')).toBeInTheDocument()
   })
 })

@@ -9,8 +9,10 @@ from . import capabilities_views
 from . import ai_connection_views
 from . import ai_model_views
 from . import ai_model_test_views
+from . import ai_preference_views
 
 urlpatterns = [
+    path('ai/preferences/', ai_preference_views.UserAITaskPreferencesView.as_view(), name='ai-task-preferences'),
     path('ai/models/catalog/', ai_model_views.AIModelCatalogView.as_view(), name='ai-model-catalog'),
     path('ai/models/', ai_model_views.UserAIModelListCreateView.as_view(), name='ai-model-list'),
     path('ai/models/<uuid:model_id>/', ai_model_views.UserAIModelDetailView.as_view(), name='ai-model-detail'),
