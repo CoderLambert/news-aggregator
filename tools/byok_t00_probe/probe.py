@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.metadata
+import inspect
 import json
 import re
 import shutil
@@ -37,6 +38,7 @@ PROVIDER_KEYS = {
 EXPECTED_IMAGES = {
     "db": "postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea",
     "proxy": "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+    "unguarded_proxy": "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
     "upstream": "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
 }
 URL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -202,6 +204,39 @@ def request_json(
     return decoded
 
 
+def request_json_with_status(
+    url: str,
+    payload: dict,
+    headers: dict[str, str] | None = None,
+    timeout: int = 20,
+) -> tuple[int, dict]:
+    data = json.dumps(payload).encode()
+    request_headers = dict(headers or {})
+    request_headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(url, data=data, headers=request_headers)
+    try:
+        with URL_OPENER.open(request, timeout=timeout) as response:
+            status_code = response.status
+            raw = response.read()
+    except urllib.error.HTTPError as exc:
+        status_code = exc.code
+        raw = exc.read()
+    try:
+        decoded = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        decoded = {}
+    return status_code, decoded if isinstance(decoded, dict) else {}
+
+
+def safe_error_marker(response_body: dict) -> str | None:
+    """Return a known static callback marker without exposing response text."""
+    serialized = json.dumps(response_body, ensure_ascii=True, sort_keys=True)
+    for marker in ("BYOK_PROVIDER_KEY_REQUIRED", "T00_STREAMING_DISABLED"):
+        if marker in serialized:
+            return marker
+    return None
+
+
 def make_virtual_key(proxy_url: str, alias: str, model: str) -> str:
     result = request_json(
         proxy_url + "/key/generate",
@@ -358,7 +393,7 @@ def safe_exception(exc: Exception) -> dict:
     }
 
 
-def proxy_local(proxy_url: str, upstream_url: str) -> dict:
+def proxy_local(proxy_url: str, unguarded_proxy_url: str, upstream_url: str) -> dict:
     """Real SDK -> pinned Proxy -> controlled upstream with synthetic credentials."""
     key_a = make_virtual_key(proxy_url, "tenant-a-chat", "t00-chat")
     key_b = make_virtual_key(proxy_url, "tenant-b-chat", "t00-chat")
@@ -390,6 +425,24 @@ def proxy_local(proxy_url: str, upstream_url: str) -> dict:
         chat_a = future_a.result()
         chat_b = future_b.result()
 
+    responses_client = openai_client(key_a, proxy_url + "/v1")
+    try:
+        try:
+            response = responses_client.responses.create(
+                model="t00-chat",
+                input="T00_PROXY_RESPONSES_A",
+                extra_body={"api_key": PROVIDER_KEYS["tenant-a"]},
+            )
+            responses_result = {
+                "success": True,
+                "status": response.status,
+                "model_alias": "t00-chat",
+            }
+        except Exception as exc:
+            responses_result = safe_exception(exc)
+    finally:
+        responses_client.close()
+
     messages_client = anthropic_client(key_messages, proxy_url, auth_token=True)
     try:
         try:
@@ -408,14 +461,16 @@ def proxy_local(proxy_url: str, upstream_url: str) -> dict:
     finally:
         messages_client.close()
 
-    eof_client = openai_client(key_a, proxy_url + "/v1")
+    # Preserve the raw pinned-version EOF failure reproduction on a separate
+    # proxy instance that has no admission callback configured.
+    eof_client = openai_client(key_a, unguarded_proxy_url + "/v1")
     eof_finishes: list[str] = []
     eof_events = 0
     eof_success = False
     try:
         with eof_client.chat.completions.create(
             model="t00-chat",
-            messages=[{"role": "user", "content": "T00_PROXY_CHAT_EOF_A"}],
+            messages=[{"role": "user", "content": "T00_PROXY_UNGUARDED_CHAT_EOF_A"}],
             stream=True,
             extra_body={"api_key": PROVIDER_KEYS["tenant-a"]},
         ) as stream:
@@ -449,27 +504,113 @@ def proxy_local(proxy_url: str, upstream_url: str) -> dict:
     finally:
         wrong_project.close()
 
-    missing_provider = openai_client(key_a, proxy_url + "/v1")
-    try:
-        try:
-            missing_provider.chat.completions.create(
-                model="t00-chat",
-                messages=[{"role": "user", "content": "T00_PROXY_MISSING_KEY_A"}],
+    # Reproduce the unguarded default-key fallback on the isolated raw proxy.
+    unguarded_missing_status, _unguarded_missing_body = request_json_with_status(
+        unguarded_proxy_url + "/v1/chat/completions",
+        {
+            "model": "t00-chat",
+            "messages": [{"role": "user", "content": "T00_PROXY_UNGUARDED_MISSING_KEY_A"}],
+        },
+        {"Authorization": f"Bearer {key_a}"},
+    )
+    unguarded_missing_provider = {"status_code": unguarded_missing_status}
+
+    admission_cases = []
+    route_specs = {
+        "chat": ("/v1/chat/completions", key_a),
+        "responses": ("/v1/responses", key_a),
+        "messages": ("/v1/messages", key_messages),
+    }
+    invalid_key_variants = {
+        "missing": {},
+        "null": {"api_key": None},
+        "empty": {"api_key": ""},
+        "whitespace": {"api_key": " \t "},
+        "non_string": {"api_key": {"nested": "synthetic"}},
+        "metadata_only": {"metadata": {"api_key": PROVIDER_KEYS["tenant-a"]}},
+        "header_only": {},
+    }
+    for route_name, (route_path, project_key) in route_specs.items():
+        for variant, extra_fields in invalid_key_variants.items():
+            test_id = f"T00_GUARD_{route_name.upper()}_{variant.upper()}"
+            if route_name == "chat":
+                body = {
+                    "model": "t00-chat",
+                    "messages": [{"role": "user", "content": test_id}],
+                }
+            elif route_name == "responses":
+                body = {"model": "t00-chat", "input": test_id}
+            else:
+                body = {
+                    "model": "t00-messages",
+                    "max_tokens": 24,
+                    "messages": [{"role": "user", "content": test_id}],
+                }
+            body.update(extra_fields)
+            headers = {"Authorization": f"Bearer {project_key}"}
+            if variant == "header_only":
+                headers["x-api-key"] = PROVIDER_KEYS["tenant-a"]
+                if route_name == "messages":
+                    headers["anthropic-version"] = "2023-06-01"
+            status_code, response_body = request_json_with_status(
+                proxy_url + route_path,
+                body,
+                headers,
             )
-            missing_provider_result = {"success": True, "status_code": None}
-        except Exception as exc:
-            missing_provider_result = safe_exception(exc)
-    finally:
-        missing_provider.close()
+            error_code = safe_error_marker(response_body)
+            admission_cases.append({
+                "test_id": test_id,
+                "route": route_name,
+                "variant": variant,
+                "status_code": status_code,
+                "error_code": error_code,
+                "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+            })
+
+    stream_denials = []
+    for route_name, (route_path, project_key) in route_specs.items():
+        test_id = f"T00_GUARD_{route_name.upper()}_STREAM_DENIED"
+        if route_name == "chat":
+            body = {
+                "model": "t00-chat",
+                "messages": [{"role": "user", "content": test_id}],
+            }
+        elif route_name == "responses":
+            body = {"model": "t00-chat", "input": test_id}
+        else:
+            body = {
+                "model": "t00-messages",
+                "max_tokens": 24,
+                "messages": [{"role": "user", "content": test_id}],
+            }
+        body.update({"stream": True, "api_key": PROVIDER_KEYS["tenant-a"]})
+        headers = {"Authorization": f"Bearer {project_key}"}
+        if route_name == "messages":
+            headers["anthropic-version"] = "2023-06-01"
+        status_code, response_body = request_json_with_status(
+            proxy_url + route_path,
+            body,
+            headers,
+        )
+        error_code = safe_error_marker(response_body)
+        stream_denials.append({
+            "test_id": test_id,
+            "route": route_name,
+            "status_code": status_code,
+            "error_code": error_code,
+        })
 
     upstream = request_json(upstream_url + "/stats")
     records = upstream.get("records", [])
     return {
         "chat": {"tenant-a": chat_a, "tenant-b": chat_b},
+        "responses": responses_result,
         "messages": messages_result,
         "eof": eof_result,
         "wrong_project": wrong_project_result,
-        "missing_provider": missing_provider_result,
+        "unguarded_missing_provider": unguarded_missing_provider,
+        "admission_cases": admission_cases,
+        "stream_denials": stream_denials,
         "records": records,
         "_secret_values": [
             MASTER_KEY,
@@ -581,12 +722,15 @@ def append_record_checks(
 
 def evaluate_sdk_local(checks: list[dict], sdk: dict, upstream_records: list[dict]) -> None:
     config_text = (TOOL_DIR / "proxy.yaml").read_text(encoding="utf-8")
+    raw_config = (TOOL_DIR / "proxy-unguarded.yaml").read_text(encoding="utf-8")
     add_check(checks, "CONFIG_PROXY_HEADER_FORWARDING_DISABLED", (
         "forward_client_headers_to_llm_api: false" in config_text
         and "forward_llm_provider_auth_headers: false" in config_text
+        and "forward_client_headers_to_llm_api: false" in raw_config
+        and "forward_llm_provider_auth_headers: false" in raw_config
     ))
     add_check(checks, "CONFIG_PROXY_AND_SDK_RETRIES_ZERO", (
-        config_text.count("num_retries: 0") == 2
+        config_text.count("num_retries: 0") + raw_config.count("num_retries: 0") == 4
         and SDK_MAX_RETRIES == 0
         and PROXY_NUM_RETRIES == 0
     ))
@@ -595,6 +739,28 @@ def evaluate_sdk_local(checks: list[dict], sdk: dict, upstream_records: list[dic
         "CONFIG_SYNTHETIC_DEPLOYMENT_DEFAULT_KEY_PRESENT",
         DEPLOYMENT_KEY in config_text,
         {"deployment_default_configured": DEPLOYMENT_KEY in config_text},
+    )
+    compose_text = COMPOSE_FILE.read_text(encoding="utf-8")
+    callback_text = (TOOL_DIR / "proxy_callback.py").read_text(encoding="utf-8")
+    add_check(
+        checks,
+        "CONFIG_GUARD_CALLBACK_AND_STREAM_DENY_ENABLED",
+        "callbacks: proxy_callback.proxy_handler_instance" in config_text
+        and "T00_DENY_STREAMING_CALL_TYPES: acompletion,aresponses,anthropic_messages" in compose_text
+        and 'data.get("stream") is True' in callback_text,
+    )
+    add_check(
+        checks,
+        "CONFIG_RAW_PROXY_HAS_NO_ADMISSION_CALLBACK",
+        "callbacks:" not in raw_config,
+    )
+    key_generation = inspect.getsource(make_virtual_key)
+    add_check(
+        checks,
+        "CONFIG_PROJECT_KEYS_HAVE_NO_TEAM_OR_PROVIDER_OVERRIDE",
+        '"models": [model], "metadata": {"key_alias": alias}' in key_generation
+        and "team_id" not in key_generation
+        and all(key not in compose_text for key in PROVIDER_KEYS.values()),
     )
 
     sdk_cases = [
@@ -661,6 +827,30 @@ def evaluate_proxy_local(checks: list[dict], proxy: dict) -> None:
             {"sdk_success": response.get("success") is True, "finish_reason": response.get("finish_reason")},
         )
 
+    response_rows = records_for(records, "T00_PROXY_RESPONSES_A")
+    response_record = append_record_checks(
+        checks,
+        "PROXY_RESPONSES_TENANT_A",
+        response_rows,
+        1,
+        "tenant-a",
+        "responses",
+    )
+    response = proxy["responses"]
+    add_check(
+        checks,
+        "PROXY_RESPONSES_COMPLETE_TERMINAL",
+        response.get("success") is True
+        and response.get("status") == "completed"
+        and response_record is not None
+        and response_record.get("upstream_terminal") == "response_completed",
+        {
+            "sdk_success": response.get("success") is True,
+            "status": response.get("status"),
+            "upstream_terminal": None if response_record is None else response_record.get("upstream_terminal"),
+        },
+    )
+
     rows = records_for(records, "T00_PROXY_MESSAGES_A")
     record = append_record_checks(checks, "PROXY_MESSAGES_TENANT_A", rows, 1, "tenant-a", "messages")
     response = proxy["messages"]
@@ -672,15 +862,15 @@ def evaluate_proxy_local(checks: list[dict], proxy: dict) -> None:
         {"sdk_success": response.get("success") is True, "stop_reason": response.get("stop_reason"), "upstream_terminal": None if record is None else record.get("upstream_terminal")},
     )
 
-    eof_rows = records_for(records, "T00_PROXY_CHAT_EOF_A")
-    eof_record = append_record_checks(checks, "PROXY_CHAT_EOF", eof_rows, 1, "tenant-a", "chat")
+    eof_rows = records_for(records, "T00_PROXY_UNGUARDED_CHAT_EOF_A")
+    eof_record = append_record_checks(checks, "PROXY_UNGUARDED_CHAT_EOF", eof_rows, 1, "tenant-a", "chat")
     eof_safe = eof_integrity_passes(
         None if eof_record is None else eof_record.get("upstream_terminal"),
         proxy["eof"].get("finish_reasons", []),
     )
     add_check(
         checks,
-        "PROXY_CHAT_EOF_NOT_SYNTHESIZED_COMPLETE",
+        "PROXY_UNGUARDED_CHAT_EOF_NOT_SYNTHESIZED_COMPLETE",
         eof_safe,
         {
             "upstream_terminal": None if eof_record is None else eof_record.get("upstream_terminal"),
@@ -698,28 +888,84 @@ def evaluate_proxy_local(checks: list[dict], proxy: dict) -> None:
         {"http_status": wrong.get("status_code"), "upstream_count": len(wrong_rows)},
     )
 
-    missing_rows = records_for(records, "T00_PROXY_MISSING_KEY_A")
-    missing = proxy["missing_provider"]
+    missing = next(
+        (case for case in proxy["admission_cases"] if case["route"] == "chat" and case["variant"] == "missing"),
+        {},
+    )
+    missing_rows = records_for(records, missing.get("test_id", ""))
     add_check(
         checks,
-        "PROXY_MISSING_PROVIDER_FAILS_CLOSED",
-        missing_provider_fails_closed(missing.get("success") is True, missing_rows),
-        {"http_status": missing.get("status_code"), "upstream_count": len(missing_rows)},
+        "PROXY_GUARD_MISSING_PROVIDER_FAILS_CLOSED",
+        missing.get("status_code") == 400
+        and missing.get("error_code") == "BYOK_PROVIDER_KEY_REQUIRED"
+        and len(missing_rows) == 0,
+        {"http_status": missing.get("status_code"), "error_code": missing.get("error_code"), "upstream_count": len(missing_rows)},
     )
-    default_route_count = sum(1 for row in missing_rows if row.get("deployment_default_match") is True)
+
+    raw_missing_rows = records_for(records, "T00_PROXY_UNGUARDED_MISSING_KEY_A")
+    raw_missing = proxy["unguarded_missing_provider"]
+    default_route_count = sum(1 for row in raw_missing_rows if row.get("deployment_default_match") is True)
     add_check(
         checks,
-        "PROXY_MISSING_PROVIDER_DID_NOT_USE_DEPLOYMENT_DEFAULT",
-        default_route_count == 0,
-        {"deployment_default_route_count": default_route_count},
+        "PROXY_RAW_UNGUARDED_DEFAULT_KEY_FALLBACK_REPRODUCED",
+        raw_missing.get("status_code") == 401
+        and len(raw_missing_rows) == 1
+        and default_route_count == 1,
+        {
+            "http_status": raw_missing.get("status_code"),
+            "upstream_count": len(raw_missing_rows),
+            "deployment_default_route_count": default_route_count,
+        },
     )
+
+    for case in proxy["admission_cases"]:
+        prefix = "PROXY_GUARD_" + case["route"].upper() + "_" + case["variant"].upper()
+        rows = records_for(records, case["test_id"])
+        add_check(
+            checks,
+            prefix + "_400_PROVIDER_KEY_REQUIRED",
+            case.get("status_code") == 400
+            and case.get("error_code") == "BYOK_PROVIDER_KEY_REQUIRED",
+            {"http_status": case.get("status_code"), "error_code": case.get("error_code")},
+        )
+        add_check(
+            checks,
+            prefix + "_NO_UPSTREAM_CALL",
+            len(rows) == 0,
+            {"upstream_count": len(rows)},
+        )
+
+    for denial in proxy["stream_denials"]:
+        prefix = "PROXY_GUARD_" + denial["route"].upper() + "_STREAM"
+        rows = records_for(records, denial["test_id"])
+        add_check(
+            checks,
+            prefix + "_400_STREAM_DISABLED",
+            denial.get("status_code") == 400
+            and denial.get("error_code") == "T00_STREAMING_DISABLED",
+            {"http_status": denial.get("status_code"), "error_code": denial.get("error_code")},
+        )
+        add_check(
+            checks,
+            prefix + "_NO_UPSTREAM_CALL",
+            len(rows) == 0,
+            {"upstream_count": len(rows)},
+        )
 
 
 def cleanup_project(project: str) -> list[dict]:
     outcomes = []
     compose_error = None
     try:
-        compose(project, "down", "--volumes", "--remove-orphans", timeout=90)
+        compose(
+            project,
+            "--profile",
+            "unguarded",
+            "down",
+            "--volumes",
+            "--remove-orphans",
+            timeout=90,
+        )
     except Exception as exc:
         compose_error = type(exc).__name__
     outcomes.append({
@@ -773,7 +1019,20 @@ def run_probe(project: str) -> dict:
             "old chat/research/translation regression baseline",
         ],
     }
+    compose(
+        project,
+        "--profile",
+        "unguarded",
+        "up",
+        "-d",
+        "--wait",
+        "--wait-timeout",
+        "180",
+        "unguarded_proxy",
+        timeout=210,
+    )
     proxy_url = f"http://{inspect_ip(project, 'proxy')}:4000"
+    unguarded_proxy_url = f"http://{inspect_ip(project, 'unguarded_proxy')}:4001"
     upstream_url = f"http://{inspect_ip(project, 'upstream')}:8080"
     result["runtime_versions"] = docker_versions(project)
 
@@ -790,7 +1049,7 @@ def run_probe(project: str) -> dict:
     )
 
     result["sdk_local"] = sdk_local(upstream_url)
-    proxy = proxy_local(proxy_url, upstream_url)
+    proxy = proxy_local(proxy_url, unguarded_proxy_url, upstream_url)
     secret_values = proxy.pop("_secret_values")
     result["proxy_local"] = {
         key: value for key, value in proxy.items() if key != "records"
@@ -800,7 +1059,7 @@ def run_probe(project: str) -> dict:
 
     logs = docker([
         "compose", "--project-name", project, "-f", str(COMPOSE_FILE),
-        "logs", "--no-color", "proxy", "upstream",
+        "logs", "--no-color", "proxy", "unguarded_proxy", "upstream",
     ], timeout=30)
     leaked_secret = any(secret and secret in logs for secret in secret_values)
     add_check(
@@ -850,7 +1109,17 @@ def image_evidence_only() -> int:
         "checks": [],
     }
     try:
-        compose(project, "up", "-d", "--wait", "--wait-timeout", "180", timeout=210)
+        compose(
+            project,
+            "--profile",
+            "unguarded",
+            "up",
+            "-d",
+            "--wait",
+            "--wait-timeout",
+            "180",
+            timeout=210,
+        )
         images, image_checks_pass = container_image_evidence(project)
         result["images"] = images
         add_check(

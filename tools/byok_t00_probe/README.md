@@ -7,8 +7,10 @@ This isolated probe uses the official OpenAI and Anthropic SDKs, pinned LiteLLM 
 - Direct OpenAI SDK calls use the synthetic provider key as Authorization: Bearer; the probe does not add x-api-key.
 - Direct Anthropic Messages calls use the provider key through the SDK api_key option, which sends x-api-key.
 - Proxy SDK calls use a generated synthetic project virtual key in Authorization only. The provider key is sent per request in the official SDK's supported body field api_key (extra_body).
-- LiteLLM has forward_client_headers_to_llm_api and forward_llm_provider_auth_headers disabled. OpenAI upstream requests accept Bearer only; Messages accepts x-api-key only.
-- Both Proxy model entries include a synthetic deployment default provider key. Omitting the per-request provider key deliberately checks whether LiteLLM falls back to it.
+- The guarded Proxy loads the read-only `proxy_callback.py` CustomLogger instance. Its `async_pre_call_hook` requires a nonempty top-level body `api_key` for `acompletion`, `aresponses`, and `anthropic_messages`; it rejects missing, null, empty, whitespace-only, non-string, metadata-only, and header-only credentials with HTTP 400 before routing.
+- Streaming is explicitly denied for all three tested call types through the configurable `T00_DENY_STREAMING_CALL_TYPES` setting. The probe checks Chat, Responses, and Messages streaming receives HTTP 400 and causes zero inference upstream calls.
+- Both Proxy configs set `forward_client_headers_to_llm_api` and `forward_llm_provider_auth_headers` to false. Generated project keys contain only an allowed model and a non-secret alias; no team or project provider credential override is configured. OpenAI upstream requests accept Bearer only; Messages accepts x-api-key only.
+- Both model entries include a synthetic deployment-default provider key as a negative control. The guarded callback rejects missing body credentials before routing; a separate profile `unguarded_proxy` reproduces default-key fallback and the raw Chat EOF issue without the callback.
 
 Upstream records contain only test marker IDs, model/protocol labels, tenant labels, terminal names, counters, and credential-match booleans. The CLI captures container logs in memory and checks them for synthetic credentials before emitting output. Neither keys nor request text are printed.
 
@@ -38,6 +40,6 @@ Both modes tear down only their own unique Compose project, then assert that its
 
 ## Current result boundary
 
-The CLI covers direct SDK complete/EOF flows for all three protocols, Proxy Chat A/B same-model concurrency, Proxy Messages auth, wrong project key rejection, missing provider key behavior with the deployment default control, and the v1.104.2 Chat EOF path. It is intentionally a subset of T00; passing these checks would not complete the original T00 acceptance matrix.
+The CLI covers direct SDK complete/EOF flows for all three protocols; guarded Proxy complete requests for Chat, Responses, and Messages; same-model Chat A/B concurrency; wrong project-key rejection; 21 key-denial cases across the three routes; and streaming denial across those routes. The unguarded proxy profile separately reproduces deployment-default fallback and the v1.104.2 Chat EOF path. It is intentionally a subset of T00 and is not a product feature.
 
-For the tested v1.104.2 image the known EOF integrity check fails: the raw Chat upstream ends without a protocol terminal, but the Proxy SDK yields finish_reason=stop. The missing-provider check also fails because the upstream receives the configured deployment default key. These failures are surfaced individually and cause exit code 1. No local result is a claim of real-provider compatibility. PROVIDER_REAL remains NOT_RUN.
+Latest local guard probe: 152 checks PASS and the raw unguarded Chat EOF integrity check FAILS, so the CLI exits 1. The observed behavior remains: the raw upstream ends without a protocol terminal while the Proxy SDK yields `finish_reason=stop`. The separate unguarded missing-key request also reaches the upstream once with the configured deployment-default credential; the guarded path returns 400 with zero inference calls. No local result claims real-provider compatibility. PROVIDER_REAL remains NOT_RUN.

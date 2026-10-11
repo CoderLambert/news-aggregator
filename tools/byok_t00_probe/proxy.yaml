@@ -21,4 +21,5 @@ router_settings:
   fallbacks: []
 
 litellm_settings:
+  callbacks: proxy_callback.proxy_handler_instance
   num_retries: 0

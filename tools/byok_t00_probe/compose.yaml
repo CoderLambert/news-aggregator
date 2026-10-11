@@ -44,6 +44,40 @@ services:
     user: "1000:1000"
     volumes:
       - ./proxy.yaml:/fixtures/proxy.yaml:ro
+      - ./proxy_callback.py:/fixtures/proxy_callback.py:ro
+    environment:
+      HOME: /tmp
+      XDG_CACHE_HOME: /tmp/cache
+      PYTHONPATH: /fixtures
+      T00_DENY_STREAMING_CALL_TYPES: acompletion,aresponses,anthropic_messages
+      DATABASE_URL: postgresql://t00_user:t00_password_synthetic@db:5432/litellm
+      LITELLM_MASTER_KEY: sk-t00-master-synthetic
+    read_only: true
+    tmpfs:
+      - /tmp:rw,size=512m,mode=1777
+    depends_on:
+      db:
+        condition: service_healthy
+      upstream:
+        condition: service_healthy
+    networks:
+      - isolated
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+
+  unguarded_proxy:
+    profiles: ["unguarded"]
+    image: ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500
+    command: ["--config", "/fixtures/proxy-unguarded.yaml", "--port", "4001"]
+    user: "1000:1000"
+    volumes:
+      - ./proxy-unguarded.yaml:/fixtures/proxy-unguarded.yaml:ro
     environment:
       HOME: /tmp
       XDG_CACHE_HOME: /tmp/cache
@@ -63,7 +97,7 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4001/health/liveliness', timeout=3)"]
       interval: 3s
       timeout: 3s
       retries: 60
