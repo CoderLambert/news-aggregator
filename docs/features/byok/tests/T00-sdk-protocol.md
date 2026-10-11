@@ -1,20 +1,20 @@
 # Test T00 · 共享网关端到端技术验真
 
-> **T00 BLOCKED / GATEWAY_ADMISSION_PROTOTYPE**：下列 11 条原始验收约束完整保留。2026-10-11 的隔离探针增加了仅供验真的准入回调：三类请求的缺失/无效 Key 在部署默认 Key 路由前被拒绝，流式请求也被显式拒绝。独立无回调配置仍复现默认 Key 回落与 Chat EOF 被合成正常 stop。此原型不是产品接入；PROVIDER_REAL 仍为 NOT_RUN。
+> **T00 BLOCKED / GATEWAY_ADMISSION_PROTOTYPE**：2026-10-11 最终隔离合成运行 353 PASS / 4 FAIL。失败集中在三项：LiteLLM Proxy 丢 Responses function-call item 的 `id`、Proxy Messages 下游取消后仍读完上游流、无回调 Chat EOF 被合成为 `stop`（同一取消问题产生两个相关检查失败）。本轮仅在测试夹具中用独立 profile 开放 Responses/Messages native stream；主准入配置仍拒绝 Chat stream。不是产品接入；PROVIDER_REAL 仍为 NOT_RUN。
 
 对应：[T00 Task](../tasks/T00-sdk-protocol.md)。
 
 | 用例 | 场景 / 故障注入 | 正确性约束 | 状态 |
 | --- | --- | --- | --- |
-| T00-01 | 三协议完整文字和工具终态 | 原始上游、Proxy、SDK 终态相符；满足协议各自完整条件后才成功 | PARTIAL |
-| T00-02 | partial 事件后正常 EOF、length/incomplete | 不能合成完整终态；保留原始 incomplete 原因 | BLOCKED |
-| T00-03 | 截断 body、超时、SSE error、HTTP error | 安全错误可分类，Key/正文不泄露 | NOT_RUN |
-| T00-04 | 半截工具参数、非法 JSON、非白名单工具 | 不派发工具、不成功 | NOT_RUN |
-| T00-05 | 两轮工具续接 | 保留 Responses output items、Anthropic thinking/signature、Chat reasoning_content；公开消息不含 continuation | NOT_RUN |
+| T00-01 | 三协议完整文字和工具终态 | 原始上游、Proxy、SDK 终态相符；满足协议各自完整条件后才成功 | BLOCKED |
+| T00-02 | partial 事件后正常 EOF、length/incomplete | 不能合成完整终态；保留原始 incomplete 原因 | PARTIAL |
+| T00-03 | 截断 body、超时、SSE error、HTTP error | 安全错误可分类，Key/正文不泄露 | PASS（本地合成） |
+| T00-04 | 半截工具参数、非法 JSON、非白名单工具 | 不派发工具、不成功 | PASS（本地合成） |
+| T00-05 | 两轮工具续接 | 保留 Responses output items、Anthropic thinking/signature、Chat reasoning_content；公开消息不含 continuation | BLOCKED |
 | T00-06 | 不同 Key/model 并发隔离 | 不混用用户凭据、模型、Proxy 项目虚拟 Key 或部署 provider Key | PARTIAL |
-| T00-07 | 成功、异常、取消时关闭 stream/response/HTTP 资源 | 所有已打开资源均关闭 | PARTIAL |
-| T00-08 | 缺 provider Key、错误项目虚拟 Key | 缺 Key fail closed；错误项目凭据在到达 upstream 前被拒绝 | PARTIAL |
-| T00-09 | SDK/Proxy 重试与 fallback 计数 | max_retries=0、num_retries=0、无跨模型 fallback，实际请求数与断言一致 | PARTIAL |
+| T00-07 | 成功、异常、取消时关闭 stream/response/HTTP 资源 | 所有已打开资源均关闭 | BLOCKED |
+| T00-08 | 缺 provider Key、错误项目虚拟 Key | 缺 Key fail closed；错误项目凭据在到达 upstream 前被拒绝 | PASS（本地合成） |
+| T00-09 | SDK/Proxy 重试与 fallback 计数 | max_retries=0、num_retries=0、无跨模型 fallback，实际请求数与断言一致 | PASS（本地合成） |
 | T00-10 | v1.104.2 原始上游 EOF 与 Proxy 暴露终态对照 | 仅下游 stop/[DONE] 不足以证明原始上游完整；失败按局部风险记录 | BLOCKED |
 | T00-11 | 可选 DeepSeek 早期文本冒烟 | 仅在 PROXY_LOCAL 全过、用户确认确切模型/安全合成输入/请求与输出上限/最小预算后执行；不依赖 T00-G、不替代 T13 | NOT_RUN |
 
@@ -22,7 +22,7 @@
 
 - **SDK_LOCAL**：使用真实安装的官方客户端 SDK 直连受控合成上游，证明 SDK 请求序列化、响应解析和关闭行为；不证明 Proxy 整合或厂商兼容。
 - **PROXY_LOCAL**：锁定真实 LiteLLM Proxy 镜像、真实 SDK、受控 HTTP upstream，记录上游原始请求/终态、Proxy 返回、SDK 输出和请求计数。本卡主要技术门槛。
-- **PROVIDER_REAL**：默认 NOT_RUN。PROXY_LOCAL 全过后可单独提出一次早期 DeepSeek 文本冒烟，不等待 T00-G；执行前用户必须确认确切模型、安全合成输入、请求数、输出 token 上限和最小费用预算，Key 仅由用户在终端隐藏输入且不持久化/打印。此冒烟只证明所列日期/模型的单次真实路由，不代替 T13 产品矩阵；未获确认不得运行。其他 provider 仍 NOT_RUN。
+- **PROVIDER_REAL**：默认 NOT_RUN。本轮未执行或申请执行 DeepSeek 冒烟；已有独立入口仍是实验准备，不表示真实兼容。真实测试只在用户明确指示后由用户终端隐藏提供 Key；其他 provider 仍 NOT_RUN。
 - **日志**：只保留合成凭据标识、事件名、模型别名、耗时、错误类别和请求计数；禁止打印 Key、完整 Authorization、新闻正文或私有 continuation。
 - **基线与断言**：同环境记录任务前相关旧聊天/研究/翻译测试基线。若本卡只改探针/协议契约而没改旧测试，明确写“旧测试断言无 diff”；不得放宽旧断言。
 
@@ -31,20 +31,41 @@
 | 项目 | 结果 |
 | --- | --- |
 | 本卡状态 | **BLOCKED**；本次 CLI 只报告已覆盖子集，T00 完整验收未通过 |
-| 精确功能分支基线 HEAD | 3cd584c95acd52bc533bba0b55eab75b35c41ad5；高于用户报告的 ea2ce55（合并 PR #31，父提交 ea2ce55 与 c22b590）；本分支基于 c22b590 的相同树，未 reset 原工作树 |
-| 本任务分支 | `task/byok-T00-sdk-protocol`；独立工作区；Draft PR base 为 `feat/byok-user-api-keys` |
-| T00 探针实现 SHA（准入原型） | 060445e8d201172fd37724715e4c2587c47fe0b7；仅探针、夹具、自测和 README，无生产适配器或新闻业务调用 |
-| DeepSeek 有界入口实现 SHA | eb3c2e30271ec153f7d44fd181d292e202a71d05；仅提供显式 opt-in 的官方 API 单次请求脚本；本次未执行 |
+| 功能分支目标基线 HEAD | `ea2ce55ae22e19e1604e88031b824b68f2666cec`，与用户报告一致；未重置原工作树 |
+| 本任务实现起点 HEAD | `69e084e39552c5650b930a067b6b79d09e95db34`；分支 `task/byok-T00-sdk-protocol`，独立工作区 |
+| T00 本轮实现 SHA | `e7abc397221c6cc87449715335d609cebf041b28`；仅工具、合成夹具、测试与 README；没有生产适配器或新闻业务改动 |
+| Draft PR | #33，base `feat/byok-user-api-keys`；维持 open / Draft |
 | Python / OpenAI SDK / Anthropic SDK / httpx2 / LiteLLM / Docker Compose | 3.14.8 / 3.28.0 / 1.13.0 / 2.13.1 / 1.104.2 / 5.5.1；Docker Server 29.7.2 |
-| SDK_LOCAL | 三协议真实 SDK complete 与 EOF 直连受控上游路径的协议终态、凭据头和请求计数检查通过 |
-| PROXY_LOCAL | Chat、Responses、Messages 正常完整请求成功；Chat A/B 同模型并发隔离通过。21 种无效/缺失 Key 组合均为 400 且上游计数 0；三路 `stream=true` 均为 400 且上游计数 0。错误项目 Key 在上游前拒绝。无回调 Chat EOF 风险仍复现 |
-| SDK/Proxy 完整子集运行 | 修正前探针 SHA 7978a2894dac6b8c0ebdb64614ce877e34c18c4f 的运行记录为 91 PASS / 3 FAIL；其中镜像证据检查来源错误，已撤销该项 PASS。90 项非镜像 PASS、3 项 FAIL 保留为该版本的路线证据；修正版镜像单项另行实测，未重跑 SDK/Proxy 路径 |
-| 镜像证据修订 | IMAGE_EVIDENCE_ONLY：固定引用解析 ID、运行容器 .Image、image inspect IDs、RepoDigests、Config.Image 均已独立记录，检查 PASS；cleanup PASS，残留 0 |
-| 准入探针完整子集运行 | 当前工作树代码运行 152 PASS / 1 FAIL，退出码 1。唯一 FAIL 为无回调 Chat EOF 仍在下游显示 `finish_reason=stop`；本次回调拒绝与资源清理检查通过 |
+| 最终 SDK_LOCAL / PROXY_LOCAL 合成运行 | `353 PASS / 4 FAIL / 357 checks`，CLI exit 1；失败是 Responses function-call `id` 丢失、Messages Proxy 取消未中止上游（两项检查）、以及无回调 Chat EOF 合成 stop |
+| 21 种无效/缺失 provider Key | Chat / Responses / Messages 全部 HTTP 400，错误码 `BYOK_PROVIDER_KEY_REQUIRED`，每项上游请求 0 |
+| Key/model 隔离 | 同 alias 的 Chat A/B 使用不同显式 provider Key 各 1 次；错配模型的项目 Key 返回 HTTP 403、上游 0；错误项目虚拟 Key 上游 0 |
+| 错误与 incomplete | SDK_LOCAL 与 PROXY_LOCAL 三协议 HTTP 503、超时、截断 body 都各 1 次上游请求；length / incomplete / max_tokens 原因保留 |
+| Native streaming | 受控本地 Responses / Messages Proxy complete、EOF、incomplete、SSE error 均通过；Chat stream 在主准入配置被拒绝且上游 0 |
+| 清理与凭据扫描 | `CLEANUP_COMPOSE_DOWN` 与 `CLEANUP_NO_PROJECT_RESOURCES_LEFT` PASS；containers=0、networks=0；CLI 输出和容器日志没有合成凭据 |
 | PROVIDER_REAL | **NOT_RUN**；未读现有 Key、未发送任何 DeepSeek 请求 |
-| 旧聊天/研究/翻译测试 | 历史摘要 219 passed / 3 warnings 的命令、依赖和报告未恢复；当前 Python 3.14.8 缺 pytest（`python3 -m pytest --version` 返回 `No module named pytest`），按约束未安装全项目依赖，旧基线仍 NOT_RUN；此前缺 chromadb 的 82 passed / 23 failed 不作为产品基线 |
-| 旧测试断言 diff | `tests/` 下没有变化；只新增 tools/byok_t00_probe/test_probe.py 自测，无旧断言放宽 |
-| 完整 T00 结论 | **BLOCKED**；本原型只证明限定路由下回调拒绝路径。工具往返、显式 length/incomplete、截断/超时/SSE/HTTP 错误、取消资源关闭及产品接入仍 NOT_RUN |
+| CI 上下文（用户提供，只读） | HEAD `69e084e` 的 run `38136034042` backend-and-release-gates / frontend 均 success；较早 `38136011186` backend failure。它们不是 T00 手工网关验收结果 |
+| 旧聊天/研究/翻译测试基线 | **NOT_RUN**：当前 Python 缺 pytest，frontend 未安装 node_modules；按约束没有安装全项目依赖。历史 `219 passed / 3 warnings` 没有可恢复的命令/报告；缺 chromadb 的 `82 passed / 23 failed` 不作产品基线 |
+| 旧测试断言 diff | `tests/` 与 `frontend/tests/` 无 diff；仅新增 `tools/byok_t00_probe/test_probe.py` 的 22 项隔离自测，没有放宽旧断言 |
+| 完整 T00 结论 | **BLOCKED**；真实厂商兼容、Responses Proxy 原始 item、取消传播和 Chat EOF 终态仍未满足 |
+
+## 本轮本地证据（2026-10-11）
+
+最终运行命令：
+
+    /tmp/byok-t00-sdk-venv-20261011/bin/python tools/byok_t00_probe/probe.py
+
+脱敏结果写入本机临时文件 `/tmp/byok-t00-run-a9.json`（未提交）；本页摘录其通过/失败计数、终态、错误类别和请求数，不含 Key 或原始新闻/continuation。
+
+本地自测与静态检查：`python3 -m py_compile tools/byok_t00_probe/{probe,upstream,proxy_callback,test_probe}.py`、`cd tools/byok_t00_probe && /tmp/byok-t00-sdk-venv-20261011/bin/python -m unittest -v test_probe`（22 tests passed）、`docker compose -f tools/byok_t00_probe/compose.yaml config --quiet`、`git diff --check` 均通过。全程真实厂商入口未调用，仅使用本地 HTTP fixture 与合成 Key。
+
+- SDK_LOCAL 与 PROXY_LOCAL 中，Chat / Responses / Messages 的 HTTP 503、超时、截断 body 各类错误均显式失败，且每个 marker 只触发 1 个上游请求；SDK `max_retries=0`，Proxy `num_retries=0`、fallbacks 为空。
+- 三协议 length / incomplete 均保留：Chat `length`、Responses `incomplete / max_output_tokens`、Messages `max_tokens`。SDK_LOCAL 三协议和独立 native-stream Proxy 的 Responses / Messages 都通过 complete、正常 EOF、incomplete、SSE-error 事件终态检查。
+- Chat、Responses、Messages 的两轮合成工具往返在 SDK_LOCAL 均保留 continuation 与结果；Proxy Chat / Messages 也通过，且公开结果只有 text、无 Key/continuation。Proxy Responses 保留 reasoning item 全字段、function-call 的 type/call_id/name/arguments/status 及 tool result，但每轮 function-call item 均缺 `id`（缺字段数=1、额外字段数=0）；同一官方 SDK 直连受控 upstream 时两轮字段全部保留，因而这是 LiteLLM Proxy 路径差异。
+- SDK_LOCAL 与 native-stream Proxy 的下游 SDK response 在取消后均关闭。Proxy Responses 上游可观察到取消；Proxy Messages 取消后上游仍成功写完 7 个 SSE frame（含 `[DONE]`），`client_disconnected=false`，未中止上游流，该项保持 FAIL。
+- 无回调 `unguarded_proxy` 原始 Chat EOF：上游 1 次请求且无协议终态；Proxy SDK 正常结束并给出 `finish_reason=stop`，保持 FAIL。没有以 downstream stop 作为上游完成证据。
+- Native-stream Proxy 使用独立 Compose service/profile；主准入配置仅拒绝 Chat `stream=true`。缺失/无效 Key 的 21 个组合仍在路由前拒绝；项目 Key 请求未授权模型时 HTTP 403、上游计数 0。
+
+全部旧测试状态与本地验收分开记录。用户提供的 CI 运行只说明该 HEAD 的 CI job 状态，不作为上述 T00 手工结论。
 
 完整逐项执行输出由 CLI 生成 JSON；其中每项均为 PASS 或 FAIL，含请求计数、终态、认证类别、实际镜像 ID 与清理结果。以下只摘录脱敏汇总和必要事实，不保留任何 Key 或正文。
 
@@ -58,7 +79,7 @@
     cd ../..
     /tmp/byok-t00-sdk-venv-20261011/bin/python tools/byok_t00_probe/probe.py
 
-自测输出：14 tests passed。包含错误租户、错误认证 scheme、项目 Key 转发、部署默认 Key fallback、EOF 后合成 stop 等“错误结果必须判 FAIL”的测试。
+自测输出：22 tests passed。包含错误租户、错误认证 scheme、项目 Key 转发、部署默认 Key fallback、EOF 后合成 stop、Responses failed SSE event 和 cancel close 等“错误结果必须判 FAIL”的测试。
 
 镜像证据复测命令：
 
@@ -96,7 +117,7 @@ SDK/Proxy 功能路径的上次脱敏摘要（镜像核验项已撤销，需与�
 
 固定 LiteLLM v1.104.2 的官方源码核对：共同请求处理器先把 `self.data` 交给 `proxy_logging_obj.pre_call_hook`，之后才调用 `route_request`。本次三路 call type 经源码确认分别为 Chat `acompletion`、Responses `aresponses`、Messages `anthropic_messages`；Messages 与 Responses endpoint 都把请求 body 交给共同处理器。来源：[官方 call-hook 文档](https://docs.litellm.ai/docs/proxy/call_hooks)、[v1.104.2 共同处理器 hook 调用](https://github.com/BerriAI/litellm/blob/v1.104.2/litellm/proxy/common_request_processing.py#L2189-L2194)、[后续 route_request 调用](https://github.com/BerriAI/litellm/blob/v1.104.2/litellm/proxy/common_request_processing.py#L2595-L2603)、[route type 映射](https://github.com/BerriAI/litellm/blob/v1.104.2/litellm/proxy/route_llm_request.py#L76-L86)、[Messages endpoint](https://github.com/BerriAI/litellm/blob/v1.104.2/litellm/proxy/anthropic_endpoints/endpoints.py#L148-L156)、[Responses endpoint](https://github.com/BerriAI/litellm/blob/v1.104.2/litellm/proxy/response_api_endpoints/endpoints.py#L265-L311)。
 
-实现只放在隔离 fixture 的只读挂载 `tools/byok_t00_probe/proxy_callback.py`：`CustomLogger.async_pre_call_hook` 只检查请求顶层 `api_key` 是否为非空且非全空白字符串，不接受 metadata 或 HTTP header 替代；拒绝时抛出 `fastapi.HTTPException(400)` 和静态错误码。不使用返回拒绝字符串、moderation hook 或并行拦截。配置中保留合成 deployment default key 作为负控；当前动态验证证明 callback 在该 default key 路由前拒绝。模型 Key 仅通过虚拟 Key 的模型允许列表与非敏感 alias metadata 建立，没有 team/project provider credential override；两个 Proxy 配置都关闭 `forward_client_headers_to_llm_api` 与 `forward_llm_provider_auth_headers`。
+实现只放在隔离 fixture 的只读挂载 `tools/byok_t00_probe/proxy_callback.py`：`CustomLogger.async_pre_call_hook` 检查 LiteLLM 传入的 pre-call `data` mapping 顶层 `api_key` 是否为非空且非全空白字符串；不接受 metadata 或 HTTP header 替代。该 mapping 不保证是原始、未变更的 HTTP body。拒绝时抛出 `fastapi.HTTPException(400)` 和静态错误码。不使用返回拒绝字符串、moderation hook 或并行拦截。配置中保留合成 deployment default key 作为负控；当前动态验证证明 callback 在该 default key 路由前拒绝。模型 Key 仅通过虚拟 Key 的模型允许列表与非敏感 alias metadata 建立，没有 team/project provider credential override；两个 Proxy 配置都关闭 `forward_client_headers_to_llm_api` 与 `forward_llm_provider_auth_headers`。
 
 本轮本地完整子集命令：
 
@@ -105,14 +126,15 @@ SDK/Proxy 功能路径的上次脱敏摘要（镜像核验项已撤销，需与�
 | 路由 | 拒绝场景 | 每项结果 | 对应上游调用 |
 | --- | --- | --- | --- |
 | Chat / Responses / Messages | 缺字段、null、空字符串、全空白、非字符串、仅 metadata 有值、仅 `x-api-key` header 有值（21 个组合） | 全部 HTTP 400，错误码 `BYOK_PROVIDER_KEY_REQUIRED` | 每项 0 |
-| Chat / Responses / Messages | `stream=true` 且顶层显式合成 Key（3 项） | 全部 HTTP 400，错误码 `T00_STREAMING_DISABLED` | 每项 0 |
+| 主准入 Proxy Chat | `stream=true` 且顶层显式合成 Key | HTTP 400，错误码 `T00_STREAMING_DISABLED` | 0 |
+| 独立 `native-stream` Proxy Responses / Messages | complete、EOF、incomplete、SSE error、取消 | 原生终态/错误事件均有断言；Messages 取消后上游仍完成响应，FAIL | 每项 1 |
 | Chat / Responses / Messages | 正常非流请求 | 完整终态通过；Chat A/B 同 alias 并发使用各自 Key | 每项 1 |
 
-为了保留原始风险复现，独立 `unguarded_proxy` profile 不加载回调：缺 provider Key 时返回 HTTP 401，但上游仍被调用 1 次并观察到 deployment-default；Chat 原始上游无协议终态，而 Proxy SDK 仍观察到 3 个事件和 `finish_reason=stop`。对应 EOF 完整性检查是本轮唯一 FAIL，不能将流拒绝描述为修复了 SDK/Proxy EOF 行为。全运行 152 项 PASS / 1 项 FAIL；日志与最终 JSON 中的合成凭据扫描均为 false，Compose down PASS，残留 containers=0、networks=0。
+为了保留原始风险复现，独立 `unguarded_proxy` profile 不加载回调：缺 provider Key 时返回 HTTP 401，但上游仍被调用 1 次并观察到 deployment-default；Chat 原始上游无协议终态，而 Proxy SDK 仍观察到 3 个事件和 `finish_reason=stop`。对应 EOF 完整性检查仍为 FAIL，不能将流拒绝描述为修复了 SDK/Proxy EOF 行为。最终运行 353 项 PASS / 4 项 FAIL；日志与最终 JSON 中的合成凭据扫描均为 false，Compose down PASS，残留 containers=0、networks=0。
 
 ## DeepSeek 有界入口（已准备，未执行）
 
-入口：`/tmp/byok-t00-sdk-venv-20261011/bin/python tools/byok_t00_probe/deepseek_smoke.py --send-one-request`。未传 `--send-one-request` 时只输出 `NOT_RUN`，不提示或读取 Key。显式启动后只允许一条官方 OpenAI-compatible Chat Completions 请求，固定模型 `deepseek-flash`、固定合成文本 `Reply with exactly the word OK.`、`max_tokens=16`、`reasoning_effort=none`、`max_retries=0`；SDK 传输层计数必须等于 1。Key 由 `getpass` 在 TTY 中隐藏读取，只在进程内存使用，输出仅含脱敏状态、HTTP 类别及计数，不输出响应正文、Key 或原始异常文本。此入口直连 DeepSeek 官方通用 API，尚未执行，也不能替代 T13。官方文档列出 OpenAI 格式 base URL `https://api.deepseek.com`、当前模型 ID `deepseek-flash` 和最高模型输出限制；定价页列出 deepseek-flash 高峰输入 $0.30/M、输出 $1.20/M token，并声明价格可调整。按保守的 16 输入 + 16 输出 token 估算，本次 token 费上界约 **$0.000024**；建议审批预算上限 **$0.01**，以运行时官方价和账户计费为准。参考：[DeepSeek Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing)、[Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion)。执行前仍须由用户在本对话确认模型、单次请求、16 输出 token 上限和 $0.01 预算；当前 `PROVIDER_REAL=NOT_RUN`。
+实验入口 `deepseek_smoke.py` 保持原样、未执行，PROVIDER_REAL=NOT_RUN。它原先被准备为 DeepSeek 官方 OpenAI-compatible API 的单次合成请求，使用 `deepseek-flash`、最多 16 output tokens、`max_retries=0`，Key 仅通过隐藏终端输入；这仍不能替代 T13 或证明厂商兼容。本轮不把它并入 SDK_LOCAL / PROXY_LOCAL 结果。
 
 ## 镜像、清理与隐私证据
 
@@ -135,4 +157,4 @@ SDK/Proxy 功能路径的上次脱敏摘要（镜像核验项已撤销，需与�
 
 既有 tests/ 无 diff，未更改任何旧断言。本次没有重跑新闻项目旧聊天/研究/翻译测试，因此不能声称旧回归通过。先前历史记录只留下 219 passed / 3 warnings 摘要；命令、依赖及机器报告未恢复。另一次因隔离环境缺 chromadb 得到 82 passed / 23 failed，也不能替代功能基线；本次不安装旧项目的无关依赖。
 
-显式 length/incomplete、截断 body、超时、SSE 内 error、HTTP 错误注入、半截/非法工具参数、白名单拒绝、Responses 原始 output items continuation、Anthropic thinking/signature、Chat reasoning_content、两轮工具往返、取消后的资源关闭，以及完整旧业务回归均未运行。SDK_LOCAL 与 PROXY_LOCAL 证据彼此分开；本地证据不表示任何真实 provider 兼容。不得进入 T01 或据此扩大成生产变更。
+SDK_LOCAL / PROXY_LOCAL 的 HTTP、超时、截断、length/incomplete、工具白名单与两轮工具往返已按本页运行并分别记录；Responses Proxy 原始 item `id` 与 Messages Proxy 取消传播仍 FAIL，Chat EOF 风险仍 FAIL。PROVIDER_REAL 与旧新闻聊天/研究/翻译回归仍未运行。本地合成结果不表示任何真实 provider 兼容；不进入 T01 或据此扩大成生产变更。

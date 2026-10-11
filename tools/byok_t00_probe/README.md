@@ -34,11 +34,7 @@ Recheck only image evidence without issuing model requests:
 
     /tmp/byok-t00-sdk-venv-20261011/bin/python tools/byok_t00_probe/probe.py --images-only
 
-The separately gated real-provider entry point is prepared but must not be run before user confirmation. Without its explicit send flag it returns NOT_RUN and never reads a key:
-
-    /tmp/byok-t00-sdk-venv-20261011/bin/python tools/byok_t00_probe/deepseek_smoke.py --send-one-request
-
-It prompts for a DeepSeek key with hidden terminal input and makes one direct request to `https://api.deepseek.com` using `deepseek-flash`, fixed synthetic text, 16 maximum output tokens, and zero SDK retries. It prints no key, response text, or raw error. The path is deliberately separate from the local proxy probe and is not a provider compatibility certification.
+The existing DeepSeek smoke entry remains experimental and unchanged. This local probe did not call it; `PROVIDER_REAL` remains `NOT_RUN`, and no provider key was read. It is not part of local protocol acceptance or a provider compatibility certification.
 
 The probe uses Docker context default, a unique Compose project name, pinned image references, and an internal-only network. For each service it reads only the container ID, .Image, .Config.Image, and service label. It then runs docker image inspect by the actual .Image ID and by the configured fixed reference, recording each image .Id and .RepoDigests separately. Image validation passes only when the runtime image-inspect ID and fixed-reference-resolved ID both equal the container .Image ID, and .Config.Image equals the fixed reference. It does not compare a manifest/index digest string directly with an image config ID. Narrow Docker format strings avoid outputting container Env.
 
@@ -46,6 +42,6 @@ Both modes tear down only their own unique Compose project, then assert that its
 
 ## Current result boundary
 
-The CLI covers direct SDK complete/EOF flows for all three protocols; guarded Proxy complete requests for Chat, Responses, and Messages; same-model Chat A/B concurrency; wrong project-key rejection; 21 key-denial cases across the three routes; and streaming denial across those routes. The unguarded proxy profile separately reproduces deployment-default fallback and the v1.104.2 Chat EOF path. It is intentionally a subset of T00 and is not a product feature.
+The CLI covers direct SDK and guarded Proxy errors, incomplete outcomes, two-round tool continuation, key/model isolation, and terminal checks. A separate `native-stream` Compose service tests Responses and Messages complete/EOF/incomplete/SSE-error/cancel paths; main admission denies Chat streaming. The unguarded proxy profile separately reproduces deployment-default fallback and the v1.104.2 Chat EOF path. It is intentionally a subset of T00 and is not a product feature.
 
-Latest local guard probe: 152 checks PASS and the raw unguarded Chat EOF integrity check FAILS, so the CLI exits 1. The observed behavior remains: the raw upstream ends without a protocol terminal while the Proxy SDK yields `finish_reason=stop`. The separate unguarded missing-key request also reaches the upstream once with the configured deployment-default credential; the guarded path returns 400 with zero inference calls. No local result claims real-provider compatibility. PROVIDER_REAL remains NOT_RUN.
+The latest local synthetic run has 353 PASS / 4 FAIL and exits 1. The failures are the Responses function-call item `id` dropped by LiteLLM Proxy in both continuation rounds, Messages Proxy continuing to consume upstream after downstream cancellation (two related checks), and the raw unguarded Chat EOF being exposed as `finish_reason=stop`. No local result claims real-provider compatibility. PROVIDER_REAL remains NOT_RUN.
