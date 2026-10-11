@@ -1,6 +1,6 @@
 # T00 · 共享网关端到端技术验真
 
-> **PLANNED**：本卡尚未执行，SDK_LOCAL、PROXY_LOCAL 和 PROVIDER_REAL 都是 NOT_RUN。实现时先核对最新 `origin/feat/byok-user-api-keys`、独立工作树与实际 Python、Docker、Proxy 版本；本文件不代表通过验收。
+> **BLOCKED（2026-10-12）**：SDK_LOCAL / PROXY_LOCAL 已有隔离合成运行，但 T00 完整门槛未通过；运行 D 为 `394 PASS / 1 FAIL / 395 checks`，失败是 LiteLLM v1.104.2 无回调 Chat EOF 被暴露为 `finish_reason=stop`。PROVIDER_REAL 仍为 NOT_RUN。精确 SHA、失败证据与 DeepSeek 直连诊断边界见[同编号 Test](../tests/T00-sdk-protocol.md)。本任务状态不表示任何厂商或产品功能已验收。
 
 | 属性 | 内容 |
 | --- | --- |
@@ -27,7 +27,7 @@ v1.104.2 是已记录 EOF/终态风险的复现版本。T00 回归夹具固定�
 
 ## 明确不做
 
-不创建业务数据库模型/迁移、设置页、新闻业务调用、用户任务系统或共享生产网关；本卡核心 PROXY_LOCAL 测试不调用真实厂商。仅在核心 PROXY_LOCAL 完整通过后，可单独申请一次早期 DeepSeek 文本冒烟；须先向用户提供确切模型、安全合成输入、请求/输出上限及最小费用预算，并由用户明确确认后才可执行；不依赖 T00-G，也不替代 T13。不得操作 ssh tencent 或线上环境，不读取环境/文件/旧配置中的 provider Key。所有测试凭据必须是本次探针生成的合成假 Key。不得把本地 Proxy 集成证据记为真实 provider 兼容。
+不创建业务数据库模型/迁移、设置页、新闻业务调用、用户任务系统或共享生产网关；本卡核心 PROXY_LOCAL 测试不调用真实厂商。若 PROXY_LOCAL 未完整通过，可向用户提供独立 DeepSeek 直连诊断供其选择，但不得将其包装成已准入的网关测试或 T00 通过；经 LiteLLM 的真实请求仍须等待 PROXY_LOCAL 完整通过。所有真实调用由用户在本地终端隐藏输入 Key 并执行；提供命令前须记录确切模型、安全合成输入、请求/输出上限及费用估算。本助手不执行收费请求，不读取环境/文件/旧配置中的 provider Key。直连诊断不依赖 T00-G，也不替代 T13。不得操作 ssh tencent 或线上环境。所有本地测试凭据必须是本次探针生成的合成假 Key。不得把本地 Proxy 集成证据记为真实 provider 兼容。
 
 ## 必验场景
 

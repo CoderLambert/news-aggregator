@@ -1,6 +1,6 @@
 # T00 SDK and Proxy probe
 
-This isolated probe uses the official OpenAI and Anthropic SDKs, pinned LiteLLM v1.104.2, an internal-only synthetic HTTP upstream, and temporary Postgres storage. It never calls a real provider or reads an existing provider key.
+The isolated `probe.py` uses the official OpenAI and Anthropic SDKs, pinned LiteLLM v1.104.2, an internal-only synthetic HTTP upstream, and temporary Postgres storage. It never calls a real provider or reads an existing provider key. `deepseek_smoke.py` is a separate, opt-in direct diagnostic described below.
 
 ## Credential contract covered
 
@@ -18,23 +18,23 @@ Upstream records contain only test marker IDs, model/protocol labels, tenant lab
 
 Create the disposable venv and install only the pinned SDK dependencies:
 
-    python3 -m venv /tmp/byok-t00-sdk-venv-20261011
-    /tmp/byok-t00-sdk-venv-20261011/bin/python -m pip install -r tools/byok_t00_probe/requirements.lock
+    python3 -m venv /tmp/byok-t00-smoke-20261012
+    /tmp/byok-t00-smoke-20261012/bin/python -m pip install -r tools/byok_t00_probe/requirements.lock
 
 Run evaluator self-tests:
 
     cd tools/byok_t00_probe
-    /tmp/byok-t00-sdk-venv-20261011/bin/python -m unittest -v test_probe
+    /tmp/byok-t00-smoke-20261012/bin/python -m unittest -v test_probe test_deepseek_smoke
 
 Run the full subset probe from the repository root:
 
-    /tmp/byok-t00-sdk-venv-20261011/bin/python tools/byok_t00_probe/probe.py
+    /tmp/byok-t00-smoke-20261012/bin/python tools/byok_t00_probe/probe.py
 
 Recheck only image evidence without issuing model requests:
 
-    /tmp/byok-t00-sdk-venv-20261011/bin/python tools/byok_t00_probe/probe.py --images-only
+    /tmp/byok-t00-smoke-20261012/bin/python tools/byok_t00_probe/probe.py --images-only
 
-The existing DeepSeek smoke entry remains experimental and unchanged. This local probe did not call it; `PROVIDER_REAL` remains `NOT_RUN`, and no provider key was read. It is not part of local protocol acceptance or a provider compatibility certification.
+`deepseek_smoke.py` is a separate, opt-in **direct diagnostic**. It uses a hidden terminal prompt, validates a structured answer and the non-streaming `finish_reason`, and emits only sanitized status and usage metadata. It does not call LiteLLM and cannot satisfy the T00 PROXY_LOCAL gate or certify T13 compatibility. The current PROXY_LOCAL result still has one preserved Chat EOF failure, so no real gateway command is available. The direct command and its current cost estimate are recorded in `docs/features/byok/tests/T00-sdk-protocol.md`; no provider request has been sent by this implementation.
 
 The probe uses Docker context default, a unique Compose project name, pinned image references, and an internal-only network. For each service it reads only the container ID, .Image, .Config.Image, and service label. It then runs docker image inspect by the actual .Image ID and by the configured fixed reference, recording each image .Id and .RepoDigests separately. Image validation passes only when the runtime image-inspect ID and fixed-reference-resolved ID both equal the container .Image ID, and .Config.Image equals the fixed reference. It does not compare a manifest/index digest string directly with an image config ID. Narrow Docker format strings avoid outputting container Env.
 

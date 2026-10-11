@@ -166,9 +166,62 @@ SDK/Proxy 功能路径的上次脱敏摘要（镜像核验项已撤销，需与�
 
 为了保留原始风险复现，独立 `unguarded_proxy` profile 不加载回调：缺 provider Key 时返回 HTTP 401，但上游仍被调用 1 次并观察到 deployment-default；Chat 原始上游无协议终态，而 Proxy SDK 仍观察到 3 个事件和 `finish_reason=stop`。对应 EOF 完整性检查仍为 FAIL，不能将流拒绝描述为修复了 SDK/Proxy EOF 行为。最终运行 353 项 PASS / 4 项 FAIL；日志与最终 JSON 中的合成凭据扫描均为 false，Compose down PASS，残留 containers=0、networks=0。
 
-## DeepSeek 有界入口（已准备，未执行）
+## DeepSeek 直连诊断（代码已准备，真实调用未执行）
 
-实验入口 `deepseek_smoke.py` 保持原样、未执行，PROVIDER_REAL=NOT_RUN。它原先被准备为 DeepSeek 官方 OpenAI-compatible API 的单次合成请求，使用 `deepseek-flash`、最多 16 output tokens、`max_retries=0`，Key 仅通过隐藏终端输入；这仍不能替代 T13 或证明厂商兼容。本轮不把它并入 SDK_LOCAL / PROXY_LOCAL 结果。
+### 当前准入与分离记录
+
+T00 当前仍为 **BLOCKED**。任务卡要求核心 PROXY_LOCAL 全部通过后，才可申请经 LiteLLM 的 DeepSeek 早期真实调用；最新运行 D 在实现 SHA `25ca792008676889de64cc069ef36c6452983883` 为 `394 PASS / 1 FAIL / 395 checks`。失败项 `PROXY_UNGUARDED_CHAT_EOF_NOT_SYNTHESIZED_COMPLETE` 记录了上游正常 EOF、无协议终态，而 LiteLLM v1.104.2 向 SDK 暴露 `finish_reason=stop`。该失败未改写或屏蔽。
+
+因此目前只准备了可选的 **直连诊断**，不调用 LiteLLM，也不能代表 T00-11 通过。真实 LiteLLM 路径仍是 `BLOCKED / NOT_RUN`；没有提供或执行它的收费命令。若用户选择直连诊断，其结果单独记为 DeepSeek direct baseline，不改变 T00、PROXY_LOCAL 或 T13 状态。未来网关路径必须另有记录；直连与网关请求各自独立计数。
+
+### 官方资料核验（2026-10-12）
+
+- 官方 [Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing/) 与 [model list](https://api-docs.deepseek.com/api/list-models/) 当前列出模型 ID `deepseek-flash`，版本名 DeepSeek-V4.1-Flash；OpenAI 格式 base URL 为 `https://api.deepseek.com`，最大输出为 384K tokens。这个上限不是探针上限。
+- 官方 [Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/) 定义 `max_tokens`、JSON response format 和 Chat Completions 响应终态；[Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/) 说明 thinking 默认启用，且 OpenAI SDK 通过 `extra_body={"thinking":{"type":"disabled"}}` 关闭。thinking 模式下 `temperature` 不生效，因此探针不发送 `temperature`。
+- Flash 当前每百万输入 tokens（cache miss）为非高峰 `$0.15`、高峰 `$0.30`；每百万输出 tokens 为非高峰 `$0.60`、高峰 `$1.20`。高峰为周一至周五 01:00–04:00、06:00–10:00 UTC，排除中国法定节假日；其余时段按非高峰价。官方注明价格可能调整，费用按真实 usage 计。
+
+### 直连代码与用户执行参数
+
+| 项目 | 记录 |
+| --- | --- |
+| 探针代码提交 | `02a693db37e6aed07ad3a7d46304a220a2f5a5f6`（当前 Draft PR #33 的代码提交；执行前仍核对最终 HEAD） |
+| 环境 | Linux 7.2.5-3-omarchy x86_64；Python 3.14.8；OpenAI SDK 3.28.0；httpx2 2.13.1；依赖按 `tools/byok_t00_probe/requirements.lock` 安装于隔离 venv |
+| 调用路径 | OpenAI Chat Completions SDK → `https://api.deepseek.com`；非流式；只测 DeepSeek `deepseek-flash` |
+| 输入 | 固定、无新闻或隐私内容的 ASCII JSON 指令，101 字符；实际 token 数由响应 usage 记录，未在本机 tokenizer 上核验 |
+| 输出/推理限制 | `max_tokens=24`；thinking 显式 disabled；不请求推理；若 usage 返回 reasoning tokens 则记录；SDK `max_retries=0`，HTTP redirect 关闭，30 秒 timeout |
+| 请求数 | 该命令最多发起 1 次直连 HTTP 请求；LiteLLM 路径为 0。`request_count` 是 SDK HTTP request hook 观察到的发送尝试数，不声称上游一定已处理或计费 |
+| 回答断言 | 非空 JSON object，且恰好包含 `probe_id="byok-deepseek-smoke-v1"`、`ok=true`；还要求唯一 choice 的 `finish_reason=stop`。自由文本、空响应、非法 JSON、额外/缺失字段、`length`、缺少终态、请求数不是 1 均失败 |
+| 安全输出 | 只输出状态、固定模型/协议、终态、断言类别、请求数与 usage；不输出 Key、回答正文、请求头、异常文本；Key 只由 `getpass` 隐藏输入并留在进程内，不放进命令参数、环境变量或文件 |
+| 当前真实结果 | `NOT_RUN`；本次只用合成 SDK transport 测试，未访问 `api.deepseek.com` |
+
+按高峰未缓存价格，暂以短提示词不超过约 50 input tokens、最多 24 output tokens 估算，单次直连约 `$0.000044`；非高峰约 `$0.000022`。这是预算估算，不是保证上限：实际 tokenizer/JSON 模式计费、价格变化，以及请求超时后上游仍处理等情况都可能改变账单。thinking 已关闭，预期 reasoning tokens 为 0；最终以厂商 usage 为准。
+
+以下命令只运行直连诊断，需由用户在本地交互终端选择执行。默认启动不发请求；脚本不会自动运行收费调用：
+
+```sh
+cd /home/lambert/Documents/Codex/2026-10-11/task-2/news-aggregator-t00/tools/byok_t00_probe
+/tmp/byok-t00-smoke-20261012/bin/python deepseek_smoke.py --send-one-request
+```
+
+本次未运行上述收费命令。隔离合成验证环境使用 `/tmp/byok-t00-smoke-20261012`，Python 3.14.8；通过下面的命令运行 24 项既有探针 evaluator 自测和 17 项 DeepSeek 诊断测试：
+
+```sh
+cd /home/lambert/Documents/Codex/2026-10-11/task-2/news-aggregator-t00/tools/byok_t00_probe
+/tmp/byok-t00-smoke-20261012/bin/python -m unittest -v test_probe test_deepseek_smoke
+```
+
+结果：`Ran 41 tests ... OK`。测试覆盖固定的 DeepSeek SDK 请求字段、JSON 结果断言、空/非法/错误结构、缺失或不完整终态、零/多次请求、HTTP 错误脱敏、资源关闭、无 TTY/空 Key/取消输入，以及默认不请求路径。实际 OpenAI SDK 使用本地 `httpx2.MockTransport`；没有访问 DeepSeek 或启动 LiteLLM。另有 `py_compile` 与 `git diff --check` 通过；默认 CLI 输出 `{"direct_baseline":"NOT_RUN","request_count":0,"requires":"--send-one-request"}` 并以 0 退出。
+
+这条命令对应 1 次 DeepSeek 直连请求。若以后另行准入 LiteLLM 路径，它将是另一条独立请求，双路径总数为 2；当前 PROXY_LOCAL 失败，所以现在没有第二条用户执行命令，也没有把直连诊断包装为网关验收。
+
+本地合成自测命令：
+
+```sh
+cd /home/lambert/Documents/Codex/2026-10-11/task-2/news-aggregator-t00/tools/byok_t00_probe
+/tmp/byok-t00-smoke-20261012/bin/python -m unittest -v test_probe test_deepseek_smoke
+```
+
+真实 DeepSeek 调用仍须由用户本人执行，且输出需单独记录；本次不读取或请求任何 Key。
 
 ## 镜像、清理与隐私证据
 
