@@ -18,7 +18,7 @@
 - SDK_LOCAL：真实官方客户端 SDK 直接连接受控合成上游；只证明客户端序列化/解析。
 - PROXY_LOCAL：固定 LiteLLM Proxy + 实际客户端 + 受控合成上游；证明集成链路，不代表任何真实厂商可用。
 - PROVIDER_REAL：经共享 Proxy 对指定真实厂商、模型、地域执行有界真实调用。首轮仅 DeepSeek，其他厂商不可从 PROXY_LOCAL 推导兼容。
-- 当前 T00 的 SDK_LOCAL / PROXY_LOCAL 有隔离合成子集证据：复测 F 为 396 PASS / 0 FAIL，CLI 状态 PARTIAL；T00-02、T00-06、T00-07 已通过本地验收，Chat EOF 风险仍保留在 raw 负控中，受保护路由验证为上游前拒绝。LiteLLM v1.104.2 镜像由官方固定公钥验签通过，签名 digest 与运行镜像 pin 一致。当前分支最新两次 CI 均为 838 passed / 2 warnings，frontend、backend 与 release gates 全部通过，因此 T00 状态 PASS。用户报告的 DeepSeek 直连基线为 PASS（1 次），不代表 LiteLLM 兼容；经 LiteLLM 的 T00-11 仍是可选 NOT_RUN。其他 provider、T00-G 独立运维和最终 UAT 仍为 NOT_RUN。此前 T00 SDK 任务准备记录的旧业务回归为 219 passed / 3 warnings，只作历史业务基线，不能记作当前 Proxy 或 provider 验收。
+- 当前 T00 的 SDK_LOCAL / PROXY_LOCAL 有隔离合成子集证据：最新复测 L 为 407 PASS / 0 FAIL，CLI 状态 PARTIAL；T00-02、T00-06、T00-07 已通过本地验收，Chat EOF 风险仍保留在 raw 负控中，受保护路由验证为上游前拒绝。新增 `deepseek/deepseek-flash` 合成路由通过 LiteLLM v1.104.2、本地 upstream 与官方 OpenAI SDK 验证了 `thinking: disabled`、JSON 输出和请求级 Key；没有请求真实 provider。镜像由官方固定公钥验签通过，签名 digest 与运行镜像 pin 一致。当前分支最新两次 CI 均为 838 passed / 2 warnings，frontend、backend 与 release gates 全部通过，因此 T00 状态 PASS。用户报告的 DeepSeek 直连基线为 PASS（1 次），不代表真实 LiteLLM/provider 兼容；经 LiteLLM 的 T00-11 仍是可选 NOT_RUN。其他 provider、T00-G 独立运维和最终 UAT 仍为 NOT_RUN。此前 T00 SDK 任务准备记录的旧业务回归为 219 passed / 3 warnings，只作历史业务基线，不能记作当前 Proxy 或 provider 验收。
 
 ## 任务顺序与独立性
 

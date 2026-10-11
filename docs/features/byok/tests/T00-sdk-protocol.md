@@ -1,6 +1,6 @@
 # Test T00 · 共享网关端到端技术验真
 
-> **T00 PASS / GATEWAY_ADMISSION_PROTOTYPE**：最新隔离合成运行 F（2026-10-12）为 `396 PASS / 0 FAIL / 396 checks`，CLI 标记 `PARTIAL`，因为该 CLI 不包含现有业务回归和真实 provider 兼容。T00-01 至 T00-10 的本地技术门槛和当前完整业务 CI 均通过。v1.104.2 的 unguarded Chat EOF 风险仍被原样复现：上游无协议终态而 SDK 收到 `finish_reason=stop`；受保护准入路径对此请求返回 HTTP 400 `T00_STREAMING_DISABLED`，上游计数为 0。该结果证明特定路径被关闭，不表示 LiteLLM 已修复或 Chat streaming 兼容。锁定镜像的官方 Cosign 签名和实际 digest 已验证。Responses 标准 `fc_` item / `call_` call 两轮续接严格通过；旧 `resp_item_` 仅作为独立 foreign-ID 归一化专例。SDK_LOCAL 与 native-stream Proxy 的取消传播检查在显式 2 秒本地观测窗内通过。A9 历史运行 `353 PASS / 4 FAIL` 仍以独立脱敏文件保留，不与 D/E/F 混合。用户已报告 DeepSeek 直连基线 PASS（1 次请求）；可选的经 LiteLLM T00-11 仍为 NOT_RUN。
+> **T00 PASS / GATEWAY_ADMISSION_PROTOTYPE**：最新隔离合成运行 L（2026-10-12）为 `407 PASS / 0 FAIL / 407 checks`，CLI 标记 `PARTIAL`，因为该 CLI 不包含现有业务回归和真实 provider 兼容。T00-01 至 T00-10 的本地技术门槛和当前完整业务 CI 均通过。v1.104.2 的 unguarded Chat EOF 风险仍被原样复现：上游无协议终态而 SDK 收到 `finish_reason=stop`；受保护准入路径对此请求返回 HTTP 400 `T00_STREAMING_DISABLED`，上游计数为 0。该结果证明特定路径被关闭，不表示 LiteLLM 已修复或 Chat streaming 兼容。锁定镜像的官方 Cosign 签名和实际 digest 已验证。Responses 标准 `fc_` item / `call_` call 两轮续接严格通过；旧 `resp_item_` 仅作为独立 foreign-ID 归一化专例。SDK_LOCAL 与 native-stream Proxy 的取消传播检查在显式 2 秒本地观测窗内通过。A9 历史运行 `353 PASS / 4 FAIL` 仍以独立脱敏文件保留，不与 D/E/F/L 混合。用户已报告 DeepSeek 直连基线 PASS（1 次请求）；真实经 LiteLLM T00-11 仍为 NOT_RUN。
 
 对应：[T00 Task](../tasks/T00-sdk-protocol.md)。
 
@@ -33,11 +33,11 @@
 | 本卡状态 | **PASS**；T00-01 至 T00-10 本地验收、镜像签名校验与当前完整业务 CI 均通过。可选 T00-11 未运行 |
 | 功能分支目标基线 HEAD | `ea2ce55ae22e19e1604e88031b824b68f2666cec`，与用户报告一致；未重置原工作树 |
 | 本任务实现起点 HEAD | `69e084e39552c5650b930a067b6b79d09e95db34`；分支 `task/byok-T00-sdk-protocol`，独立工作区 |
-| T00 本轮实现 SHA | `74d9ca29fa6b07c7b185e7b19c16ab14546992e3`；仅隔离探针、合成夹具、测试与文档；没有生产适配器或新闻业务改动 |
+| T00 本轮实现 SHA | `36a76c85470978bb6a2694a66e78599e648ea14c`；仅隔离探针、合成夹具、测试与文档；没有生产适配器或新闻业务改动 |
 | Draft PR | #33，base `feat/byok-user-api-keys`；维持 open / Draft |
 | Python / OpenAI SDK / Anthropic SDK / httpx2 / LiteLLM / Docker Compose | 3.14.8 / 3.28.0 / 1.13.0 / 2.13.1 / 1.104.2 / 5.5.1；Docker Server 29.7.2 |
 | LiteLLM v1.104.2 image signature | **PASS**；Cosign v3.0.2 使用官方固定提交公钥校验，签名 digest 与锁定的 `sha256:3d88…a500` 一致；[脱敏证据](../evidence/T00-litellm-v1.104.2-cosign.json) |
-| 最新 SDK_LOCAL / PROXY_LOCAL 合成运行 F | `396 PASS / 0 FAIL / 396 checks`，CLI exit 0、状态 `PARTIAL`；原始 unguarded Chat EOF 风险仍保留，受保护路径 HTTP 400 且上游 0 |
+| 最新 SDK_LOCAL / PROXY_LOCAL 合成运行 L | `407 PASS / 0 FAIL / 407 checks`，CLI exit 0、状态 `PARTIAL`；原始 unguarded Chat EOF 风险仍保留，受保护路径 HTTP 400 且上游 0 |
 | 21 种无效/缺失 provider Key | Chat / Responses / Messages 全部 HTTP 400，错误码 `BYOK_PROVIDER_KEY_REQUIRED`，每项上游请求 0 |
 | Key/model 隔离 | Chat A、Chat B、Messages B 三请求并发，各 1 次；tenant 与显式 provider Key 全匹配，两个模型别名对应的项目虚拟 Key 均受限；fixture 共同重叠 `198.372 ms`；错配模型项目 Key 返回 HTTP 403、上游 0，错误项目虚拟 Key 上游 0 |
 | 错误与 incomplete | SDK_LOCAL 与 PROXY_LOCAL 三协议 HTTP 503、超时、截断 body 都各 1 次上游请求；length / incomplete / max_tokens 原因保留 |
@@ -48,10 +48,43 @@
 | 其他 provider 的 PROVIDER_REAL | **NOT_RUN** |
 | CI 上下文（用户提供，只读） | HEAD `69e084e` 的 run `38136034042` backend-and-release-gates / frontend 均 success；较早 `38136011186` backend failure。它们不是 T00 手工网关验收结果 |
 | 旧聊天/研究/翻译测试基线 | 当前 PR head `29d1fd9` 的两次 backend CI 均为 `838 passed / 2 warnings`，另有两次 frontend、release gates 均通过。早先 head `2ef40cd` 的重复 CI 曾分别出现一个订阅任务 SQLite `OperationalError`，随后在无业务代码改动的 head 上全量重跑通过；功能分支基线 `69e084e` 的 CI 也为 `838 passed / 2 warnings`。隔离工作区缺 pytest 和 frontend `node_modules`，未安装全项目依赖。历史 `219 passed / 3 warnings` 没有可恢复命令/报告；缺 chromadb 的 `82 passed / 23 failed` 不作产品基线 |
-| 旧测试断言 diff | `tests/` 与 `frontend/tests/` 无 diff；隔离探针与 DeepSeek 诊断自测共 47 项通过，没有放宽旧断言 |
+| 旧测试断言 diff | `tests/` 与 `frontend/tests/` 无 diff；隔离探针、DeepSeek 直连及网关烟测自测共 56 项通过，没有放宽旧断言 |
 | 完整 T00 结论 | **PASS**；T00-01 至 T00-10、镜像验签和完整业务 CI 均通过。T00-10 风险通过关闭 Chat streaming 路径隔离；可选 T00-11 与其他真实 provider 调用未运行 |
 
-## 最新复测 F（2026-10-12）
+## 最新复测 L（2026-10-12）
+
+实现 SHA：`36a76c85470978bb6a2694a66e78599e648ea14c`。运行命令：
+
+    /tmp/byok-t00-smoke-20261012/bin/python tools/byok_t00_probe/probe.py
+
+结果：`407 PASS / 0 FAIL / 407 checks`，退出码 0，CLI 状态 `PARTIAL`；本 CLI 未覆盖完整旧业务回归和真实 provider 兼容性。
+
+新增 `t00-deepseek-smoke` 合成模型别名使用 LiteLLM 的 `deepseek/deepseek-flash` provider 路由及受控本地 upstream。真实 OpenAI SDK 按 DeepSeek 烟测参数发出一条请求：101 字符合成 prompt、`max_tokens=24`、JSON object、`thinking` disabled。upstream 记录恰好一条请求，tenant 与请求级合成 provider Key 匹配，SDK 收到 `finish_reason=stop` 且预期 JSON 字段断言通过。相同路由不带请求级 provider Key 时返回 HTTP 400 `BYOK_PROVIDER_KEY_REQUIRED`，上游请求为 0；配置中的固定值只是无效 sentinel。该运行全程未连接 DeepSeek 或其他真实 provider。
+
+新建网关脚本另做了不调用模型的启动预检：临时 LiteLLM Proxy 健康就绪、loopback 端口绑定、内存生成受限项目 virtual key，`provider_request_count=0`，随后 Compose 清理通过。合并探针自测 `test_probe test_deepseek_smoke test_deepseek_gateway_smoke` 为 56 tests passed；`py_compile`、Compose config 和 `git diff --check` 均通过。本地全量运行的 `CLEANUP_COMPOSE_DOWN` 与 `CLEANUP_NO_PROJECT_RESOURCES_LEFT` 通过，containers=0、networks=0；日志和 CLI 输出无合成凭据。`provider_real` 仍为 `NOT_RUN`。
+
+脱敏机器结果：[T00-sdk-protocol-run-l-sanitized.json](../evidence/T00-sdk-protocol-run-l-sanitized.json)，源输出 SHA-256 `8fe6fe62c1a2808e877985492df36c65bdae2909fe56005fd48b903157492166`，脱敏副本 SHA-256 `679eff4382dd94c69c7ad39a78f4a0c650232e27426c09b8655dcaaa4344a192`。副本只保留检查 ID/状态、白名单路由事实和版本；不含 prompt、Key 或响应正文。
+
+## T00-11 已准备，等待用户确认
+
+拟执行范围只有一条真实 DeepSeek 请求：模型 `deepseek-flash`（DeepSeek-V4.1-Flash），OpenAI Chat Completions、非流式，官方 base URL `https://api.deepseek.com`。输入固定为 101 字符安全合成文本：
+
+```text
+Return only a JSON object with exactly these fields: {"probe_id":"byok-deepseek-smoke-v1","ok":true}.
+```
+
+预期回答严格为 `{"probe_id":"byok-deepseek-smoke-v1","ok":true}`。请求上限为 `max_tokens=24`，`response_format={"type":"json_object"}`，`thinking={"type":"disabled"}`，30 秒 timeout，SDK retries=0、LiteLLM retries=0、fallbacks=0。脚本计数的是发往 loopback Proxy 的 SDK HTTP 尝试，目标为恰好 1 次；实际 provider 上游次数没有独立计数器，因而不能独立核实。响应必须有一个预期 JSON 对象且 SDK 可见 `finish_reason=stop` 才通过。Key 在 Proxy 启动后由本地终端 `getpass` 隐藏读取，仅在进程内使用，不写入配置或输出。此命令会产生一条真实 provider 请求，助手未执行；用户需先确认上述模型、输入、一次请求、24-token 输出上限与预算后，亲自在终端运行：
+
+```sh
+cd tools/byok_t00_probe
+/tmp/byok-t00-smoke-20261012/bin/python deepseek_gateway_smoke.py --send-one-request
+```
+
+按 2026-10-12 DeepSeek 官方价目，Flash cache-miss 输入为 off-peak `$0.15/M`、peak `$0.30/M`，输出为 off-peak `$0.60/M`、peak `$1.20/M`；peak 适用时间为工作日 UTC 01:00–04:00 和 06:00–10:00（中国法定节假日除外）。以用户直连基线观测的 57 输入 tokens、输出上限 24 tokens、peak 价格估算，新网关请求约 `$0.0000459`，按 `$0.00005` 作为估算上限；用户已完成的直连请求按 57/19 tokens 同价估算约 `$0.0000399`，两条路径合计约 `$0.0000858`（约 `$0.00009`）。这是估值，不是账单硬上限；实际 token 数、价格更新、缓存和超时后的 provider 处理都可能改变扣费，临时 virtual key 的 `$0.01` max budget 也不等同于 provider 账单硬上限。[DeepSeek Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing/)、[Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/)、[Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/)。
+
+在用户运行并提供脱敏结果前，T00-11 / `PROVIDER_REAL` 保持 `NOT_RUN`，不能从本地合成上游结果推断真实 DeepSeek 兼容性。
+
+## 历史复测 F（2026-10-12）
 
 实现 SHA：`74d9ca29fa6b07c7b185e7b19c16ab14546992e3`。运行命令：
 
@@ -285,4 +318,4 @@ cd /home/lambert/Documents/Codex/2026-10-11/task-2/news-aggregator-t00/tools/byo
 
 既有 tests/ 无 diff，未更改任何旧断言。本次没有重跑新闻项目旧聊天/研究/翻译测试，因此不能声称旧回归通过。先前历史记录只留下 219 passed / 3 warnings 摘要；命令、依赖及机器报告未恢复。另一次因隔离环境缺 chromadb 得到 82 passed / 23 failed，也不能替代功能基线；本次不安装旧项目的无关依赖。
 
-历史 A9 的 Responses `resp_item_` 与 Messages cancel 失败已在上方 A9 文件中保留。最新运行 F 中，标准 Responses `fc_`/`call_` 与 foreign-ID 归一化专例均通过，T00-01 至 T00-10 本地验收通过；原始 Chat EOF 缺终态风险继续在 unguarded 负控中复现，准入配置已证明在上游前拒绝该 streaming 路由。完整业务 CI 与镜像签名也已通过。DeepSeek 直连基线为用户报告 PASS；可选的经 LiteLLM T00-11 和其他 provider 测试仍未运行。本地合成结果不表示真实 provider 兼容，也未改生产调用。
+历史 A9 的 Responses `resp_item_` 与 Messages cancel 失败已在上方 A9 文件中保留。最新运行 L 中，标准 Responses `fc_`/`call_` 与 foreign-ID 归一化专例均通过，T00-01 至 T00-10 本地验收通过；原始 Chat EOF 缺终态风险继续在 unguarded 负控中复现，准入配置已证明在上游前拒绝该 streaming 路由。完整业务 CI 与镜像签名也已通过。DeepSeek 直连基线为用户报告 PASS；真实的经 LiteLLM T00-11 和其他 provider 测试仍未运行。本地合成结果不表示真实 provider 兼容，也未改生产调用。

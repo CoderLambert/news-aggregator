@@ -1,6 +1,6 @@
 # T00 · 共享网关端到端技术验真
 
-> **PASS（2026-10-12）**：本地运行 F 为 `396 PASS / 0 FAIL / 396 checks`；T00-01 至 T00-10 和现有业务 CI 均通过。LiteLLM v1.104.2 的原始 Chat EOF 风险仍由负控复现，受保护准入路径已证明在上游前拒绝 Chat streaming；锁定镜像的官方 Cosign 签名与实际 digest 已验证。当前 head 两次完整 backend/frontend/release CI 均通过（backend 各 838 passed / 2 warnings）。可选真实请求 T00-11 与其他 provider 兼容性未运行，不构成本地技术门槛通过声明。精确 SHA、证据与边界见[同编号 Test](../tests/T00-sdk-protocol.md)。本任务 PASS 仅表示本地技术验真和既有业务回归通过，不表示生产网关或其他厂商功能已验收。
+> **PASS（2026-10-12）**：本地运行 L 为 `407 PASS / 0 FAIL / 407 checks`；T00-01 至 T00-10 和现有业务 CI 均通过。LiteLLM v1.104.2 的原始 Chat EOF 风险仍由负控复现，受保护准入路径已证明在上游前拒绝 Chat streaming；锁定镜像的官方 Cosign 签名与实际 digest 已验证。新增 DeepSeek 专属参数的模型路由只指向本地合成 upstream，缺请求级 provider Key 时仍在上游前拒绝。当前 head 两次完整 backend/frontend/release CI 均通过（backend 各 838 passed / 2 warnings）。可选真实请求 T00-11 与其他 provider 兼容性未运行，不构成本地技术门槛通过声明。精确 SHA、证据与边界见[同编号 Test](../tests/T00-sdk-protocol.md)。本任务 PASS 仅表示本地技术验真和既有业务回归通过，不表示生产网关或其他厂商功能已验收。
 
 | 属性 | 内容 |
 | --- | --- |

@@ -1,0 +1,115 @@
+{
+  "cli_status": "PARTIAL",
+  "date": "2026-10-12",
+  "evidence_id": "T00-sdk-protocol-run-l-sanitized",
+  "failed_check_count": 0,
+  "failed_check_ids": [],
+  "gateway_startup_preflight": {
+    "cleanup_pass": true,
+    "loopback_bound": true,
+    "project_key_created_in_memory": true,
+    "provider_request_count": 0,
+    "proxy_started": true,
+    "real_provider_request": "NOT_RUN"
+  },
+  "passed_check_count": 407,
+  "provider_real": "NOT_RUN",
+  "real_provider_requests_by_assistant": 0,
+  "runtime_versions": {
+    "docker_compose": "5.5.1",
+    "docker_server": "29.7.2",
+    "litellm": "1.104.2",
+    "litellm_native_stream_proxy": "1.104.2"
+  },
+  "scope": "PROBE_SUBSET_ONLY",
+  "sdk_versions": {
+    "anthropic": "1.13.0",
+    "httpx2": "2.13.1",
+    "openai": "3.28.0",
+    "python": "3.14.8"
+  },
+  "selected_checks": [
+    {
+      "id": "CLEANUP_COMPOSE_DOWN",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "containers": 0,
+        "networks": 0
+      },
+      "id": "CLEANUP_NO_PROJECT_RESOURCES_LEFT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_values_found_in_output": false
+      },
+      "id": "CLI_OUTPUT_NO_CREDENTIAL_VALUES",
+      "status": "PASS"
+    },
+    {
+      "id": "CONFIG_SYNTHETIC_SENTINEL_AND_REQUEST_KEY_GUARD_ON_SMOKE_ROUTE",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_values_found_in_container_logs": false
+      },
+      "id": "LOGS_NO_SYNTHETIC_CREDENTIAL_VALUES",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "bearer",
+        "observed_scheme": "bearer",
+        "unexpected_provider_header_present": false
+      },
+      "id": "PROXY_CHAT_SMOKE_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "answer_assertion": "json_object_fields_match",
+        "finish_reason": "stop",
+        "model_alias": "t00-deepseek-smoke",
+        "sdk_success": true
+      },
+      "id": "PROXY_CHAT_SMOKE_SDK_COMPLETE_TERMINAL_AND_JSON_ASSERTION",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "PROXY_CHAT_SMOKE_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "PROXY_CHAT_SMOKE_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_DEEPSEEK_SMOKE_MISSING_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_DEEPSEEK_SMOKE_MISSING_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    }
+  ],
+  "source_output_sha256": "8fe6fe62c1a2808e877985492df36c65bdae2909fe56005fd48b903157492166",
+  "synthetic_checks_status": "PASS"
+}
