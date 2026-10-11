@@ -9,6 +9,7 @@
 | 前置任务 | [T02](T02-models-and-tests.md) |
 | 推荐规模 | S-M |
 | 对应测试 | [Test T03](../tests/T03-preferences.md) |
+| 本卡 PR | [#37 Draft](https://github.com/CoderLambert/news-aggregator/pull/37) |
 | PR base | `task/byok-T02-models-and-tests` @ `78c214600dbfbc95693f21370e8e0d54ccf4a30f`（stacked；依赖 Draft PR #36） |
 | 实现提交 | `4310d2143fe1ad748f264f421a5d500f3621abcd` |
 
