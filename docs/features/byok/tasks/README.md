@@ -1,6 +1,6 @@
 # BYOK 功能开发任务（T00–T14）
 
-**任务已拆分；全部 PLANNED，尚未实施或验收。** 一次只交给 Codex 一张业务卡。T00 是本地共享网关技术门槛；T00-G 是独立的共享网关运维子卡。T13 分为六个模型/厂商验证子卡。每张 Task 与 [同编号 Test 契约](../tests/README.md) 配对；T00-G 是新增的运维测试契约。
+**任务按单卡推进，状态以各 Task 和对应 Test 记录为准。** T00/T00-G 仍为 PLANNED，T01 因缺少在途 worker 集成为 BLOCKED，T02 与 T03 已完成限定范围实现并等待评审。T13 分为六个模型/厂商验证子卡。每张 Task 与 [同编号 Test 契约](../tests/README.md) 配对；T00-G 是新增的运维测试契约。
 
 基线：`feat/byok-user-api-keys@ea2ce55ae22e19e1604e88031b824b68f2666cec`（执行当天仍须核对最新远端 HEAD）。本系列 Task 尚未在该 SHA 上实施；工作分支不得从更早功能分支重置。
 
@@ -8,9 +8,9 @@
 | --- | --- | --- | --- | --- |
 | [T00 本地共享网关技术验真](T00-sdk-protocol.md) | 锁定的真实 LiteLLM Proxy + 官方客户端 SDK + 受控 HTTP 上游跑通三协议、原始终态、工具往返、故障、Key 隔离、关闭与无重试；本地通过后可单独申请一次 DeepSeek 早期文本冒烟。 | 无 | S·技术门槛 | PLANNED |
 | [T00-G 共享网关运维交付](T00-gateway-service.md) | 独立 Proxy/Postgres 服务配置、项目 virtual key、模型隔离、脱敏用量、第二个通用 CLI 消费者与 NewsHub 启停隔离、备份恢复、升级回退。此卡不部署于本次文档 PR。 | T00 | 运维子卡 | PLANNED |
-| [T01 个人 Key 连接增删改停](T01-credentials.md) | 在正式 /settings/ai 页面管理网站用户自己的供应商 Key，掩码、替换、停用、删除，跨刷新恢复。 | 无 | M | PLANNED |
-| [T02 录入模型并显式验证](T02-models-and-tests.md) | 添加可信预设/手动模型 ID，主动测试文本与工具能力；本地测试使用临时 Proxy 和受控上游。 | T01、T00 本地技术门槛 | M | PLANNED |
-| [T03 用途默认模型设置](T03-preferences.md) | 为默认、问答、翻译、研究、问题推荐选择并保存模型。 | T02 | S-M | PLANNED |
+| [T01 个人 Key 连接增删改停](T01-credentials.md) | 在正式 /settings/ai 页面管理网站用户自己的供应商 Key，掩码、替换、停用、删除，跨刷新恢复。 | 无 | M | BLOCKED |
+| [T02 录入模型并显式验证](T02-models-and-tests.md) | 添加可信预设/手动模型 ID，主动测试文本与工具能力；本地测试使用临时 Proxy 和受控上游。 | T01、T00 本地技术门槛 | M | READY FOR REVIEW |
+| [T03 用途默认模型设置](T03-preferences.md) | 为默认、问答、翻译、研究、问题推荐选择并保存模型。 | T02 | S-M | READY FOR REVIEW |
 | [T04 新闻问答 BYOK 闭环](T04-article-chat.md) | 新闻详情通过业务后端调用 Proxy；本地开发可运行临时 Proxy+受控上游，不要求共享生产服务已交付。 | T03、T00 本地技术门槛 | M | PLANNED |
 | [T05 个人全文翻译最小闭环](T05-private-translation.md) | 一篇安全长度新闻持久生成、私有结果、重开恢复。 | T04 | M | PLANNED |
 | [T06 长文分块完整翻译](T06-long-translation.md) | 长文分块且完整合并。 | T05 | M | PLANNED |
@@ -57,5 +57,5 @@ T14 业务发布验收
 
 ## 状态规则
 
-`PLANNED` 计划；`WORKING` 正在实现；`BLOCKED` 关键依赖缺失；`CHANGES_REQUESTED` 违反设计/缺证据；`PASS` 完整契约有实际证据；`MERGED` 审查后合并入 BYOK 功能分支。文档或 mock 不能构成 SDK/Proxy/provider PASS。
+`PLANNED` 计划；`WORKING` 正在实现；`BLOCKED` 关键依赖或契约范围内集成缺失；`READY FOR REVIEW` 本卡限定范围实现与验证完成，仍公开记录的 PARTIAL/NOT_RUN 不得表述为完整验收；`CHANGES_REQUESTED` 违反设计/缺证据；`PASS` 完整契约有实际证据；`MERGED` 审查后合并入 BYOK 功能分支。文档或 mock 不能构成 SDK/Proxy/provider PASS。
 
