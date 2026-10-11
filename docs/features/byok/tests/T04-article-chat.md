@@ -11,6 +11,7 @@
 | 精确基线 HEAD / 分支 | `68895c1e26660564ddc01d474caaef510770a22b` / `task/byok-T03-preferences` |
 | 基线 PR | [#37 Draft](https://github.com/CoderLambert/news-aggregator/pull/37)，尚未合并；本卡分支依赖该提交 |
 | T04 分支 | `task/byok-T04-article-chat` |
+| T04 PR | [#38 Draft](https://github.com/CoderLambert/news-aggregator/pull/38)，base 为 T03 分支 |
 | T04 实现提交 | `4f47aacbb959ffdc79acf73c7d66795572799a39` |
 | OS / 架构 | Linux 7.2.5-3-omarchy x86_64 |
 | Python / Django / DRF / pytest / OpenAI SDK | 3.14.8 / 6.1.2 / 3.18.3 / 9.1.1 / 3.28.0 |
