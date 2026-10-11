@@ -1,18 +1,18 @@
 # Test T00 · 共享网关端到端技术验真
 
-> **T00 BLOCKED / GATEWAY_ADMISSION_PROTOTYPE**：最新隔离合成运行 E（2026-10-12）为 `395 PASS / 0 FAIL / 395 checks`，CLI 标记 `PARTIAL`，因为它只覆盖本地探针子集。v1.104.2 的 unguarded Chat EOF 风险仍被原样复现：上游无协议终态而 SDK 收到 `finish_reason=stop`；受保护准入路径对此请求返回 HTTP 400 `T00_STREAMING_DISABLED`，上游计数为 0。该结果证明特定路径被关闭，不表示 LiteLLM 已修复或 Chat streaming 兼容。T00-02、T00-06、T00-07 仍为 PARTIAL，旧业务回归未运行。Responses 标准 `fc_` item / `call_` call 两轮续接严格通过；旧 `resp_item_` 仅作为独立 foreign-ID 归一化专例。SDK_LOCAL 与 native-stream Proxy 的取消传播检查在显式 2 秒本地观测窗内通过。A9 历史运行 `353 PASS / 4 FAIL` 仍以独立脱敏文件保留，不与 D/E 混合。用户已报告 DeepSeek 直连基线 PASS（1 次请求）；经 LiteLLM 的 T00-11 仍为 NOT_RUN。
+> **T00 BLOCKED / GATEWAY_ADMISSION_PROTOTYPE**：最新隔离合成运行 F（2026-10-12）为 `396 PASS / 0 FAIL / 396 checks`，CLI 标记 `PARTIAL`，因为未覆盖旧聊天/研究/翻译回归和真实 provider 兼容。T00-02、T00-06、T00-07 已通过本地合成验收。v1.104.2 的 unguarded Chat EOF 风险仍被原样复现：上游无协议终态而 SDK 收到 `finish_reason=stop`；受保护准入路径对此请求返回 HTTP 400 `T00_STREAMING_DISABLED`，上游计数为 0。该结果证明特定路径被关闭，不表示 LiteLLM 已修复或 Chat streaming 兼容。旧业务回归仍未运行。Responses 标准 `fc_` item / `call_` call 两轮续接严格通过；旧 `resp_item_` 仅作为独立 foreign-ID 归一化专例。SDK_LOCAL 与 native-stream Proxy 的取消传播检查在显式 2 秒本地观测窗内通过。A9 历史运行 `353 PASS / 4 FAIL` 仍以独立脱敏文件保留，不与 D/E/F 混合。用户已报告 DeepSeek 直连基线 PASS（1 次请求）；经 LiteLLM 的 T00-11 仍为 NOT_RUN。
 
 对应：[T00 Task](../tasks/T00-sdk-protocol.md)。
 
 | 用例 | 场景 / 故障注入 | 正确性约束 | 状态 |
 | --- | --- | --- | --- |
 | T00-01 | 三协议完整文字和工具终态 | 原始上游、Proxy、SDK 终态相符；满足协议各自完整条件后才成功 | PASS（SDK/Proxy 本地合成） |
-| T00-02 | partial 事件后正常 EOF、length/incomplete | 不能合成完整终态；保留原始 incomplete 原因 | PARTIAL |
+| T00-02 | partial 事件后正常 EOF、length/incomplete | 不能合成完整终态；保留原始 incomplete 原因 | PASS（Chat streaming 准入拒绝；Responses/Messages native stream 与三协议 incomplete 保留） |
 | T00-03 | 截断 body、超时、SSE error、HTTP error | 安全错误可分类，Key/正文不泄露 | PASS（本地合成） |
 | T00-04 | 半截工具参数、非法 JSON、非白名单工具 | 不派发工具、不成功 | PASS（本地合成） |
 | T00-05 | 两轮工具续接 | 保留 Responses output items、Anthropic thinking/signature、Chat reasoning_content；公开消息不含 continuation | PASS（本地合成；foreign-ID 另列） |
-| T00-06 | 不同 Key/model 并发隔离 | 不混用用户凭据、模型、Proxy 项目虚拟 Key 或部署 provider Key | PARTIAL |
-| T00-07 | 成功、异常、取消时关闭 stream/response/HTTP 资源 | 所有已打开资源均关闭 | PARTIAL（本地受控流通过；不证明供应商停止生成/计费） |
+| T00-06 | 不同 Key/model 并发隔离 | 不混用用户凭据、模型、Proxy 项目虚拟 Key 或部署 provider Key | PASS（不同 tenant 的 Chat A/B 与 Messages B 并发；上游共同重叠 198.372 ms） |
+| T00-07 | 成功、异常、取消时关闭 stream/response/HTTP 资源 | 所有已打开资源均关闭 | PASS（SDK_LOCAL 与 native-stream Proxy 本地资源；不证明供应商端停止生成/计费） |
 | T00-08 | 缺 provider Key、错误项目虚拟 Key | 缺 Key fail closed；错误项目凭据在到达 upstream 前被拒绝 | PASS（本地合成） |
 | T00-09 | SDK/Proxy 重试与 fallback 计数 | max_retries=0、num_retries=0、无跨模型 fallback，实际请求数与断言一致 | PASS（本地合成） |
 | T00-10 | v1.104.2 原始上游 EOF 与 Proxy 暴露终态对照 | 仅下游 stop/[DONE]不足以证明原始上游完整；受保护路径必须禁用该路由并证明上游计数为 0，负控风险单独保留 | PASS（风险复现；Chat streaming 被拒绝） |
@@ -30,15 +30,15 @@
 
 | 项目 | 结果 |
 | --- | --- |
-| 本卡状态 | **BLOCKED**；本次 CLI 只报告已覆盖子集，T00 完整验收未通过 |
+| 本卡状态 | **BLOCKED**；旧新闻聊天/研究/翻译回归仍未取得可复核结果。T00-02、T00-06、T00-07 的本地验收已通过 |
 | 功能分支目标基线 HEAD | `ea2ce55ae22e19e1604e88031b824b68f2666cec`，与用户报告一致；未重置原工作树 |
 | 本任务实现起点 HEAD | `69e084e39552c5650b930a067b6b79d09e95db34`；分支 `task/byok-T00-sdk-protocol`，独立工作区 |
-| T00 本轮实现 SHA | `be395ff7c42f5fbe39c74454bebe966eac56ae2a`；仅隔离探针、合成夹具、测试与文档；没有生产适配器或新闻业务改动 |
+| T00 本轮实现 SHA | `74d9ca29fa6b07c7b185e7b19c16ab14546992e3`；仅隔离探针、合成夹具、测试与文档；没有生产适配器或新闻业务改动 |
 | Draft PR | #33，base `feat/byok-user-api-keys`；维持 open / Draft |
 | Python / OpenAI SDK / Anthropic SDK / httpx2 / LiteLLM / Docker Compose | 3.14.8 / 3.28.0 / 1.13.0 / 2.13.1 / 1.104.2 / 5.5.1；Docker Server 29.7.2 |
-| 最新 SDK_LOCAL / PROXY_LOCAL 合成运行 E | `395 PASS / 0 FAIL / 395 checks`，CLI exit 0、状态 `PARTIAL`；原始 unguarded Chat EOF 风险仍保留，受保护路径 HTTP 400 且上游 0 |
+| 最新 SDK_LOCAL / PROXY_LOCAL 合成运行 F | `396 PASS / 0 FAIL / 396 checks`，CLI exit 0、状态 `PARTIAL`；原始 unguarded Chat EOF 风险仍保留，受保护路径 HTTP 400 且上游 0 |
 | 21 种无效/缺失 provider Key | Chat / Responses / Messages 全部 HTTP 400，错误码 `BYOK_PROVIDER_KEY_REQUIRED`，每项上游请求 0 |
-| Key/model 隔离 | 同 alias 的 Chat A/B 使用不同显式 provider Key 各 1 次；错配模型的项目 Key 返回 HTTP 403、上游 0；错误项目虚拟 Key 上游 0 |
+| Key/model 隔离 | Chat A、Chat B、Messages B 三请求并发，各 1 次；tenant 与显式 provider Key 全匹配，两个模型别名对应的项目虚拟 Key 均受限；fixture 共同重叠 `198.372 ms`；错配模型项目 Key 返回 HTTP 403、上游 0，错误项目虚拟 Key 上游 0 |
 | 错误与 incomplete | SDK_LOCAL 与 PROXY_LOCAL 三协议 HTTP 503、超时、截断 body 都各 1 次上游请求；length / incomplete / max_tokens 原因保留 |
 | Native streaming | 受控本地 Responses / Messages Proxy complete、EOF、incomplete、SSE error 均通过；Chat stream 在主准入配置被拒绝且上游 0 |
 | 清理与凭据扫描 | `CLEANUP_COMPOSE_DOWN` 与 `CLEANUP_NO_PROJECT_RESOURCES_LEFT` PASS；containers=0、networks=0；CLI 输出和容器日志没有合成凭据 |
@@ -46,11 +46,27 @@
 | 经 LiteLLM 的 T00-11 / 网关真实请求 | **NOT_RUN**；目前只有本地合成 PROXY_LOCAL 证据，未发送真实 provider 网关请求 |
 | 其他 provider 的 PROVIDER_REAL | **NOT_RUN** |
 | CI 上下文（用户提供，只读） | HEAD `69e084e` 的 run `38136034042` backend-and-release-gates / frontend 均 success；较早 `38136011186` backend failure。它们不是 T00 手工网关验收结果 |
-| 旧聊天/研究/翻译测试基线 | **NOT_RUN**：当前 Python 缺 pytest，frontend 未安装 node_modules；按约束没有安装全项目依赖。历史 `219 passed / 3 warnings` 没有可恢复的命令/报告；缺 chromadb 的 `82 passed / 23 failed` 不作产品基线 |
-| 旧测试断言 diff | `tests/` 与 `frontend/tests/` 无 diff；隔离探针与 DeepSeek 诊断自测 45 项通过，没有放宽旧断言 |
-| 完整 T00 结论 | **BLOCKED**；T00-02、T00-06、T00-07 仍为 PARTIAL，旧新闻回归仍未运行；T00-10 风险已通过关闭 Chat streaming 路径隔离；T00-11 与其他经 LiteLLM 的真实调用未运行 |
+| 旧聊天/研究/翻译测试基线 | **NOT_RUN**：隔离工作区缺 pytest 和 frontend `node_modules`；没有安装全项目依赖。历史 `219 passed / 3 warnings` 没有可恢复的命令/报告；缺 chromadb 的 `82 passed / 23 failed` 不作产品基线 |
+| 旧测试断言 diff | `tests/` 与 `frontend/tests/` 无 diff；隔离探针与 DeepSeek 诊断自测共 47 项通过，没有放宽旧断言 |
+| 完整 T00 结论 | **BLOCKED**；T00-02、T00-06、T00-07 的本地验收已通过；旧新闻回归仍未运行。T00-10 风险已通过关闭 Chat streaming 路径隔离；T00-11 与其他经 LiteLLM 的真实调用未运行 |
 
-## 最新复测 E（2026-10-12）
+## 最新复测 F（2026-10-12）
+
+实现 SHA：`74d9ca29fa6b07c7b185e7b19c16ab14546992e3`。运行命令：
+
+    /tmp/byok-t00-smoke-20261012/bin/python tools/byok_t00_probe/probe.py
+
+结果：`396 PASS / 0 FAIL / 396 checks`，退出码 0，CLI 状态 `PARTIAL`，未覆盖项为旧聊天/研究/翻译回归基线与 `PROVIDER_REAL` 兼容性。
+
+T00-06 新增一组真正并发的三请求验收：tenant-a 使用 `t00-chat`，tenant-b 同时使用 `t00-chat` 和 `t00-messages`，后两项通过各自模型范围受限的项目虚拟 Key 发出。上游 fixture 为每项记录单调时钟服务区间，三项均各触发一次，tenant/provider Key 均匹配，模型别名和协议路由正确，服务区间共同重叠 `198.372 ms`。这证明并发执行和凭据/模型路由隔离，不只依赖线程池提交顺序。
+
+T00-02 的 EOF/incomplete 检查通过：SDK_LOCAL 三协议 EOF 未合成完整终态；Proxy Responses/Messages native stream EOF 未给出完成终态；Chat streaming 在受保护准入路径被 HTTP 400 `T00_STREAMING_DISABLED` 拒绝且上游计数为 0。Chat 的 unguarded 负控仍保留 v1.104.2 的 `finish_reason=stop` 风险；三协议 length/incomplete 原因均被保留。T00-07 的本地取消用例在 2,000 ms 观测窗内通过：SDK_LOCAL Chat/Responses/Messages 与 Proxy Responses/Messages 均关闭下游响应、观测到上游断开和 producer 退出，窗口末活动 producer 为 0，Proxy health 仍为 HTTP 2xx。该结果只证明本地 SDK/Proxy/fixture 资源释放，不表示供应商端停止生成或计费。
+
+本次 Compose 清理 `CLEANUP_COMPOSE_DOWN` 与 `CLEANUP_NO_PROJECT_RESOURCES_LEFT` 均 PASS，残留 containers=0、networks=0；日志与 CLI 输出均未包含合成凭据。自测 `test_probe` 为 30 tests passed；`py_compile`、Compose 配置校验和 `git diff --check` 通过。未发送真实 provider 请求，未读取或使用 DeepSeek Key。
+
+脱敏机器结果：[T00-sdk-protocol-run-f-sanitized.json](../evidence/T00-sdk-protocol-run-f-sanitized.json)，源输出 SHA-256 `2050f6ceb63143fb1404e9a118ff5956e9d98c1d471888a02f2d8fedcc672975`，脱敏副本 SHA-256 `6ec4bd6f4fd5455165cb3330e77812455ccf0c335f1eba2b7a96bda835e28277`。七个 SDK/Proxy `public_output.text` 字段已替换；文件保留 396 项状态、计数、终态、凭据匹配和并发区间事实。
+
+## 历史复测 E（2026-10-12）
 
 实现 SHA：`be395ff7c42f5fbe39c74454bebe966eac56ae2a`。运行命令：
 
@@ -264,4 +280,4 @@ cd /home/lambert/Documents/Codex/2026-10-11/task-2/news-aggregator-t00/tools/byo
 
 既有 tests/ 无 diff，未更改任何旧断言。本次没有重跑新闻项目旧聊天/研究/翻译测试，因此不能声称旧回归通过。先前历史记录只留下 219 passed / 3 warnings 摘要；命令、依赖及机器报告未恢复。另一次因隔离环境缺 chromadb 得到 82 passed / 23 failed，也不能替代功能基线；本次不安装旧项目的无关依赖。
 
-历史 A9 的 Responses `resp_item_` 与 Messages cancel 失败已在上方 A9 文件中保留。最新运行 E 中，标准 Responses `fc_`/`call_` 与 foreign-ID 归一化专例均通过，受控本地取消传播通过；原始 Chat EOF 缺终态风险继续在 unguarded 负控中复现，准入配置已证明在上游前拒绝该 streaming 路由。T00-02、T00-06、T00-07 与旧新闻聊天/研究/翻译回归仍未完整验收。DeepSeek 直连基线为用户报告 PASS；经 LiteLLM 的 T00-11 和其他 provider 测试仍未运行。本地合成结果不表示真实 provider 兼容，也未改生产调用。
+历史 A9 的 Responses `resp_item_` 与 Messages cancel 失败已在上方 A9 文件中保留。最新运行 F 中，标准 Responses `fc_`/`call_` 与 foreign-ID 归一化专例均通过，T00-02、T00-06、T00-07 本地验收通过；原始 Chat EOF 缺终态风险继续在 unguarded 负控中复现，准入配置已证明在上游前拒绝该 streaming 路由。旧新闻聊天/研究/翻译回归仍未完整验收。DeepSeek 直连基线为用户报告 PASS；经 LiteLLM 的 T00-11 和其他 provider 测试仍未运行。本地合成结果不表示真实 provider 兼容，也未改生产调用。
