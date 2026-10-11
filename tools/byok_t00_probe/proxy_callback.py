@@ -1,8 +1,9 @@
 """Synthetic T00 admission guard loaded by the pinned LiteLLM Proxy fixture.
 
-This callback is intentionally tiny: it reads only the request body's top-level
-api_key and stream values, never logs credential data, and never calls a
-provider. It is not a production integration.
+This callback is intentionally tiny: it reads only the top-level api_key and
+stream fields from LiteLLM's pre-call `data` mapping, never logs credential
+data, and never calls a provider. That mapping is not guaranteed to be the
+original, unmodified HTTP request body. This is not a production integration.
 """
 
 from __future__ import annotations

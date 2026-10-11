@@ -39,6 +39,7 @@ EXPECTED_IMAGES = {
     "db": "postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea",
     "proxy": "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
     "unguarded_proxy": "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+    "native_stream_proxy": "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
     "upstream": "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
 }
 URL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -109,10 +110,21 @@ def docker_versions(project: str) -> dict[str, str]:
         ],
         timeout=15,
     )
+    native_stream_proxy_version = docker(
+        [
+            "exec",
+            service_container_id(project, "native_stream_proxy"),
+            "python",
+            "-c",
+            "import importlib.metadata as m; print(m.version('litellm'))",
+        ],
+        timeout=15,
+    )
     return {
         "docker_server": server,
         "docker_compose": compose_version,
         "litellm": proxy_version,
+        "litellm_native_stream_proxy": native_stream_proxy_version,
     }
 
 
@@ -268,20 +280,20 @@ def sdk_versions() -> dict[str, str]:
     }
 
 
-def openai_client(api_key: str, base_url: str) -> OpenAI:
+def openai_client(api_key: str, base_url: str, *, timeout: float = 30.0) -> OpenAI:
     return OpenAI(
         api_key=api_key,
         base_url=base_url,
         max_retries=SDK_MAX_RETRIES,
-        http_client=httpx2.Client(trust_env=False, timeout=30.0),
+        http_client=httpx2.Client(trust_env=False, timeout=timeout),
     )
 
 
-def anthropic_client(api_key: str, base_url: str, *, auth_token: bool = False) -> Anthropic:
+def anthropic_client(api_key: str, base_url: str, *, auth_token: bool = False, timeout: float = 30.0) -> Anthropic:
     kwargs = {
         "base_url": base_url,
         "max_retries": 0,
-        "http_client": httpx2.Client(trust_env=False, timeout=30.0),
+        "http_client": httpx2.Client(trust_env=False, timeout=timeout),
     }
     if auth_token:
         # Official Anthropic SDK's auth_token uses Authorization: Bearer for Proxy auth.
@@ -382,6 +394,37 @@ def sdk_local(upstream_url: str) -> dict:
         }
     finally:
         client.close()
+
+    sdk_base_urls = {
+        "chat": upstream_url + "/v1",
+        "responses": upstream_url + "/v1",
+        "messages": upstream_url,
+    }
+    sdk_keys = {protocol: PROVIDER_KEYS["tenant-a"] for protocol in sdk_base_urls}
+    errors = {
+        protocol: run_protocol_error_cases(
+            sdk_base_urls[protocol], protocol, f"T00_SDK_{protocol.upper()}",
+            sdk_keys[protocol], provider_key=sdk_keys[protocol],
+            cases=("HTTP_ERROR", "TIMEOUT", "TRUNCATED"),
+        )
+        for protocol in sdk_base_urls
+    }
+    incomplete = {
+        protocol: run_incomplete_cases(sdk_base_urls[protocol], protocol, provider_key=sdk_keys[protocol])
+        for protocol in sdk_base_urls
+    }
+    results["error_cases"] = errors
+    results["incomplete_cases"] = incomplete
+    results["stream_cases"] = run_stream_group(
+        sdk_base_urls, tuple(sdk_base_urls), sdk_keys,
+        cases=("COMPLETE", "EOF", "INCOMPLETE", "SSE_ERROR", "CANCEL"),
+    )
+    results["tool_roundtrips"] = {
+        protocol: proxy_tool_roundtrip(
+            protocol, sdk_base_urls[protocol], sdk_keys[protocol], sdk_keys[protocol], via_proxy=False,
+        )
+        for protocol in sdk_base_urls
+    }
     return results
 
 
@@ -393,7 +436,465 @@ def safe_exception(exc: Exception) -> dict:
     }
 
 
-def proxy_local(proxy_url: str, unguarded_proxy_url: str, upstream_url: str) -> dict:
+def run_chat_error_cases(base_url: str, test_prefix: str, sdk_key: str, provider_key: str | None = None, cases: tuple[str, ...] = ("HTTP_ERROR", "TIMEOUT", "TRUNCATED", "SSE_ERROR")) -> dict:
+    """Exercise HTTP, timeout, truncation, and SSE error paths with one client request each."""
+    results = {}
+    for case in cases:
+        marker = f"{test_prefix}_{case}_A"
+        client = openai_client(sdk_key, base_url, timeout=0.15 if case == "TIMEOUT" else 10.0)
+        try:
+            kwargs = {"model": "t00-chat" if "/4000" in base_url else "test-model", "messages": [{"role": "user", "content": marker}]}
+            if provider_key is not None:
+                kwargs["extra_body"] = {"api_key": provider_key}
+            if case == "SSE_ERROR":
+                kwargs["stream"] = True
+                with client.chat.completions.create(**kwargs) as stream:
+                    for _chunk in stream:
+                        pass
+                results[case.lower()] = {"success": True, "error_type": None, "status_code": None}
+            else:
+                response = client.chat.completions.create(**kwargs)
+                results[case.lower()] = {"success": True, "error_type": None, "status_code": None, "finish_reason": response.choices[0].finish_reason}
+        except Exception as exc:
+            results[case.lower()] = safe_exception(exc)
+        finally:
+            client.close()
+    return results
+
+
+def run_incomplete_cases(base_url: str, protocol: str, *, project_key: str | None = None, provider_key: str | None = None) -> dict:
+    """Check native length/incomplete endings without converting them to complete."""
+    marker = f"T00_{'PROXY' if project_key else 'SDK'}_{protocol.upper()}_INCOMPLETE_A"
+    sdk_key = project_key or provider_key or ""
+    if protocol == "chat":
+        client = openai_client(sdk_key, base_url)
+        try:
+            kwargs = {"model": "t00-chat" if project_key else "test-model", "messages": [{"role": "user", "content": marker}]}
+            if project_key and provider_key:
+                kwargs["extra_body"] = {"api_key": provider_key}
+            response = client.chat.completions.create(**kwargs)
+            return {"success": True, "terminal": response.choices[0].finish_reason}
+        except Exception as exc:
+            return safe_exception(exc)
+        finally:
+            client.close()
+    if protocol == "responses":
+        client = openai_client(sdk_key, base_url)
+        try:
+            kwargs = {"model": "t00-chat" if project_key else "test-model", "input": marker}
+            if project_key and provider_key:
+                kwargs["extra_body"] = {"api_key": provider_key}
+            response = client.responses.create(**kwargs)
+            return {"success": True, "terminal": response.status, "incomplete_reason": None if response.incomplete_details is None else response.incomplete_details.reason}
+        except Exception as exc:
+            return safe_exception(exc)
+        finally:
+            client.close()
+    client = anthropic_client(sdk_key, base_url, auth_token=bool(project_key))
+    try:
+        kwargs = {"model": "t00-messages" if project_key else "test-model", "max_tokens": 40, "messages": [{"role": "user", "content": marker}]}
+        if project_key and provider_key:
+            kwargs["extra_body"] = {"api_key": provider_key}
+        response = client.messages.create(**kwargs)
+        return {"success": True, "terminal": response.stop_reason}
+    except Exception as exc:
+        return safe_exception(exc)
+    finally:
+        client.close()
+
+
+def protocol_client(protocol: str, sdk_key: str, base_url: str, *, via_proxy: bool, timeout: float = 10.0):
+    if protocol == "messages":
+        return anthropic_client(sdk_key, base_url, auth_token=via_proxy, timeout=timeout)
+    return openai_client(sdk_key, base_url, timeout=timeout)
+
+
+def protocol_request(protocol: str, model: str, marker: str, *, provider_key: str | None, via_proxy: bool, stream: bool = False) -> dict:
+    if protocol == "chat":
+        kwargs = {"model": model, "messages": [{"role": "user", "content": marker}]}
+    elif protocol == "responses":
+        kwargs = {"model": model, "input": marker}
+    else:
+        kwargs = {"model": model, "max_tokens": 40, "messages": [{"role": "user", "content": marker}]}
+    if stream:
+        kwargs["stream"] = True
+    if via_proxy and provider_key is not None:
+        kwargs["extra_body"] = {"api_key": provider_key}
+    return kwargs
+
+
+def run_protocol_error_cases(
+    base_url: str,
+    protocol: str,
+    test_prefix: str,
+    sdk_key: str,
+    *,
+    provider_key: str | None = None,
+    via_proxy: bool = False,
+    cases: tuple[str, ...] = ("HTTP_ERROR", "TIMEOUT", "TRUNCATED", "SSE_ERROR"),
+) -> dict:
+    """Run one request per synthetic error class through one SDK/protocol path."""
+    model = ("t00-messages" if protocol == "messages" else "t00-chat") if via_proxy else "test-model"
+    results = {}
+    for case in cases:
+        marker = f"{test_prefix}_{case}_A"
+        client = protocol_client(
+            protocol, sdk_key, base_url, via_proxy=via_proxy,
+            timeout=0.15 if case == "TIMEOUT" else 10.0,
+        )
+        try:
+            kwargs = protocol_request(
+                protocol, model, marker, provider_key=provider_key,
+                via_proxy=via_proxy, stream=case == "SSE_ERROR",
+            )
+            if case == "SSE_ERROR":
+                response = (
+                    client.chat.completions.create(**kwargs)
+                    if protocol == "chat" else
+                    client.responses.create(**kwargs)
+                    if protocol == "responses" else
+                    client.messages.create(**kwargs)
+                )
+                with response:
+                    for _event in response:
+                        pass
+                result = {"success": True, "error_type": None}
+            elif protocol == "chat":
+                response = client.chat.completions.create(**kwargs)
+                result = {"success": True, "finish_reason": response.choices[0].finish_reason}
+            elif protocol == "responses":
+                response = client.responses.create(**kwargs)
+                result = {"success": True, "terminal": response.status}
+            else:
+                response = client.messages.create(**kwargs)
+                result = {"success": True, "terminal": response.stop_reason}
+        except Exception as exc:
+            result = safe_exception(exc)
+        finally:
+            client.close()
+        results[case.lower()] = result
+    return results
+
+
+def _stream_event_facts(protocol: str, event: object) -> tuple[str | None, str | None]:
+    event_type = getattr(event, "type", None)
+    terminal = None
+    stop_reason = None
+    if protocol == "chat":
+        event_type = "chat.chunk"
+        for choice in getattr(event, "choices", []) or []:
+            if choice.finish_reason is not None:
+                terminal = choice.finish_reason
+    elif protocol == "responses" and event_type in {"response.completed", "response.incomplete", "error"}:
+        response = getattr(event, "response", None)
+        terminal = getattr(response, "status", None) or event_type
+    elif protocol == "messages" and event_type == "message_delta":
+        delta = getattr(event, "delta", None)
+        stop_reason = getattr(delta, "stop_reason", None)
+        terminal = stop_reason
+    elif protocol == "messages" and event_type in {"message_stop", "error"}:
+        terminal = event_type
+    return event_type, terminal if terminal is not None else stop_reason
+
+
+def run_protocol_stream_case(
+    base_url: str,
+    protocol: str,
+    case: str,
+    sdk_key: str,
+    *,
+    provider_key: str | None = None,
+    via_proxy: bool = False,
+) -> dict:
+    """Read a protocol stream with the official SDK and record only event names/terminals."""
+    prefix = "PROXY" if via_proxy else "SDK"
+    marker = f"T00_{prefix}_{protocol.upper()}_STREAM_{case}_A"
+    model = ("t00-messages" if protocol == "messages" else "t00-chat") if via_proxy else "test-model"
+    client = protocol_client(protocol, sdk_key, base_url, via_proxy=via_proxy)
+    stream = None
+    event_types: list[str] = []
+    terminals: list[str] = []
+    canceled_after_first = False
+    result: dict
+    try:
+        kwargs = protocol_request(
+            protocol, model, marker, provider_key=provider_key,
+            via_proxy=via_proxy, stream=True,
+        )
+        if protocol == "chat":
+            stream = client.chat.completions.create(**kwargs)
+        elif protocol == "responses":
+            stream = client.responses.create(**kwargs)
+        else:
+            stream = client.messages.create(**kwargs)
+        with stream:
+            if case == "CANCEL":
+                event = next(iter(stream))
+                event_type, terminal = _stream_event_facts(protocol, event)
+                if event_type:
+                    event_types.append(event_type)
+                if terminal:
+                    terminals.append(terminal)
+                canceled_after_first = True
+            else:
+                for event in stream:
+                    event_type, terminal = _stream_event_facts(protocol, event)
+                    if event_type:
+                        event_types.append(event_type)
+                    if terminal:
+                        terminals.append(terminal)
+        result = {"success": True}
+    except Exception as exc:
+        result = safe_exception(exc)
+    finally:
+        response = getattr(stream, "response", None)
+        result.update({
+            "event_count": len(event_types),
+            "event_types": event_types,
+            "terminals": terminals,
+            "canceled_after_first_event": canceled_after_first,
+            "client_response_closed": bool(response is not None and response.is_closed),
+        })
+        client.close()
+    return result
+
+
+def run_stream_group(
+    base_urls: dict[str, str],
+    protocols: tuple[str, ...],
+    sdk_keys: dict[str, str],
+    *,
+    provider_key: str | None = None,
+    via_proxy: bool = False,
+    cases: tuple[str, ...] = ("COMPLETE", "EOF", "INCOMPLETE", "SSE_ERROR", "CANCEL"),
+) -> dict:
+    results = {}
+    for protocol in protocols:
+        results[protocol] = {}
+        for case in cases:
+            results[protocol][case.lower()] = run_protocol_stream_case(
+                base_urls[protocol], protocol, case, sdk_keys[protocol],
+                provider_key=provider_key, via_proxy=via_proxy,
+            )
+    return results
+
+
+OPENAI_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {"city": {"type": "string"}},
+    "required": ["city"],
+    "additionalProperties": False,
+}
+TOOL_SCHEMAS = {
+    "lookup_weather": {"city"},
+    "format_weather": {"summary"},
+}
+
+
+def dispatch_synthetic_tool(name: str, arguments: str | dict) -> tuple[str, str | None]:
+    """Validate tool output before dispatching to pure, local fixture functions."""
+    if name not in TOOL_SCHEMAS:
+        return "not_allowlisted", None
+    if isinstance(arguments, str):
+        try:
+            parsed = json.loads(arguments)
+        except json.JSONDecodeError as exc:
+            reason = "partial_json" if exc.pos >= len(arguments.rstrip()) else "invalid_json"
+            return reason, None
+    elif isinstance(arguments, dict):
+        parsed = arguments
+    else:
+        return "invalid_argument_shape", None
+    if not isinstance(parsed, dict) or set(parsed) != TOOL_SCHEMAS[name]:
+        return "invalid_argument_shape", None
+    value = parsed[next(iter(TOOL_SCHEMAS[name]))]
+    if not isinstance(value, str):
+        return "invalid_argument_shape", None
+    if name == "lookup_weather" and value == "synthetic-city":
+        return "dispatched", "synthetic-weather"
+    if name == "format_weather" and value == "synthetic-weather":
+        return "dispatched", "synthetic-summary"
+    return "invalid_argument_value", None
+
+
+def tool_definitions(protocol: str) -> list[dict]:
+    if protocol == "messages":
+        return [
+            {"name": "lookup_weather", "description": "Synthetic local lookup", "input_schema": OPENAI_TOOL_SCHEMA},
+            {"name": "format_weather", "description": "Synthetic local formatter", "input_schema": {
+                "type": "object", "properties": {"summary": {"type": "string"}},
+                "required": ["summary"], "additionalProperties": False,
+            }},
+        ]
+    if protocol == "responses":
+        return [
+            {"type": "function", "name": "lookup_weather", "description": "Synthetic local lookup", "parameters": OPENAI_TOOL_SCHEMA},
+            {"type": "function", "name": "format_weather", "description": "Synthetic local formatter", "parameters": {
+                "type": "object", "properties": {"summary": {"type": "string"}},
+                "required": ["summary"], "additionalProperties": False,
+            }},
+        ]
+    return [
+        {"type": "function", "function": {"name": "lookup_weather", "description": "Synthetic local lookup", "parameters": OPENAI_TOOL_SCHEMA}},
+        {"type": "function", "function": {"name": "format_weather", "description": "Synthetic local formatter", "parameters": {
+            "type": "object", "properties": {"summary": {"type": "string"}},
+            "required": ["summary"], "additionalProperties": False,
+        }}},
+    ]
+
+
+def _public_output(text: str | None, continuation: object, secrets: list[str]) -> tuple[dict, bool, bool]:
+    public = {"text": text}
+    serialized = json.dumps(public, ensure_ascii=True, sort_keys=True)
+    continuation_serialized = json.dumps(continuation, ensure_ascii=True, default=str)
+    leaked_continuation = any(
+        value and value in serialized for value in (
+            "opaque-chat-state-r1", "opaque-chat-state-r2",
+            "opaque-responses-continuation-r1", "opaque-responses-continuation-r2",
+            "opaque-messages-state-r1", "opaque-signature-r1", "opaque-signature-r2",
+        )
+    ) or continuation_serialized in serialized
+    leaked_key = any(value and value in serialized for value in secrets)
+    return public, leaked_continuation, leaked_key
+
+
+def proxy_tool_roundtrip(
+    protocol: str,
+    proxy_url: str,
+    project_key: str,
+    provider_key: str,
+    *,
+    via_proxy: bool = True,
+) -> dict:
+    """Two synthetic tool turns through the official SDK and optional Proxy."""
+    public_text = None
+    continuation_snapshots = []
+    dispatch_outcomes = []
+    source = "PROXY" if via_proxy else "SDK"
+    model = ("t00-messages" if protocol == "messages" else "t00-chat") if via_proxy else "test-model"
+    provider_body = {"extra_body": {"api_key": provider_key}} if via_proxy else {}
+    client = (
+        anthropic_client(project_key, proxy_url, auth_token=via_proxy)
+        if protocol == "messages"
+        else openai_client(project_key, proxy_url + "/v1")
+    )
+    try:
+        if protocol == "chat":
+            conversation = [{"role": "user", "content": f"T00_{source}_CHAT_TOOL_R1_A"}]
+            for round_number in (1, 2):
+                response = client.chat.completions.create(
+                    model=model, messages=conversation, tools=tool_definitions("chat"),
+                    **provider_body,
+                )
+                message = response.choices[0].message
+                raw_message = message.model_dump(exclude_none=True)
+                continuation_snapshots.append(raw_message)
+                conversation.append(raw_message)
+                for call in message.tool_calls or []:
+                    outcome, result = dispatch_synthetic_tool(call.function.name, call.function.arguments)
+                    dispatch_outcomes.append(outcome)
+                    if outcome == "dispatched":
+                        conversation.append({"role": "tool", "tool_call_id": call.id, "content": result})
+                conversation.append({"role": "user", "content": f"T00_{source}_CHAT_TOOL_R{round_number + 1}_A" if round_number == 1 else f"T00_{source}_CHAT_TOOL_FINAL_A"})
+            final = client.chat.completions.create(
+                model=model, messages=conversation,
+                **provider_body,
+            )
+            public_text = final.choices[0].message.content
+        elif protocol == "responses":
+            input_items = [{"role": "user", "content": f"T00_{source}_RESPONSES_TOOL_R1_A"}]
+            for round_number in (1, 2):
+                response = client.responses.create(
+                    model=model, input=input_items, tools=tool_definitions("responses"),
+                    **provider_body,
+                )
+                raw_items = [item.model_dump(exclude_none=True) for item in response.output]
+                continuation_snapshots.append(raw_items)
+                input_items.extend(raw_items)
+                for item in response.output:
+                    if getattr(item, "type", None) != "function_call":
+                        continue
+                    outcome, result = dispatch_synthetic_tool(item.name, item.arguments)
+                    dispatch_outcomes.append(outcome)
+                    if outcome == "dispatched":
+                        input_items.append({"type": "function_call_output", "call_id": item.call_id, "output": result})
+                input_items.append({"role": "user", "content": f"T00_{source}_RESPONSES_TOOL_R{round_number + 1}_A" if round_number == 1 else f"T00_{source}_RESPONSES_TOOL_FINAL_A"})
+            final = client.responses.create(
+                model=model, input=input_items,
+                **provider_body,
+            )
+            public_text = final.output_text
+        else:
+            messages = [{"role": "user", "content": f"T00_{source}_MESSAGES_TOOL_R1_A"}]
+            for round_number in (1, 2):
+                response = client.messages.create(
+                    model=model, max_tokens=40, messages=messages,
+                    tools=tool_definitions("messages"),
+                    **provider_body,
+                )
+                raw_content = [block.model_dump(exclude_none=True) for block in response.content]
+                continuation_snapshots.append(raw_content)
+                messages.append({"role": "assistant", "content": raw_content})
+                for block in response.content:
+                    if getattr(block, "type", None) != "tool_use":
+                        continue
+                    outcome, result = dispatch_synthetic_tool(block.name, block.input)
+                    dispatch_outcomes.append(outcome)
+                    if outcome == "dispatched":
+                        messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": block.id, "content": result}]})
+                messages.append({"role": "user", "content": f"T00_{source}_MESSAGES_TOOL_R{round_number + 1}_A" if round_number == 1 else f"T00_{source}_MESSAGES_TOOL_FINAL_A"})
+            final = client.messages.create(
+                model=model, max_tokens=40, messages=messages,
+                **provider_body,
+            )
+            public_text = "".join(block.text for block in final.content if getattr(block, "type", None) == "text")
+        public, continuation_leak, key_leak = _public_output(public_text, continuation_snapshots, [provider_key, project_key])
+        return {
+            "success": True,
+            "public_output": public,
+            "tool_dispatch_outcomes": dispatch_outcomes,
+            "continuation_in_public": continuation_leak,
+            "key_in_public": key_leak,
+        }
+    except Exception as exc:
+        return safe_exception(exc)
+    finally:
+        client.close()
+
+
+def probe_invalid_tool(protocol: str, variant: str, proxy_url: str, project_key: str, provider_key: str) -> dict:
+    test_id = f"T00_PROXY_{protocol.upper()}_TOOL_{variant.upper()}_A"
+    client = anthropic_client(project_key, proxy_url, auth_token=True) if protocol == "messages" else openai_client(project_key, proxy_url + "/v1")
+    try:
+        if protocol == "chat":
+            response = client.chat.completions.create(
+                model="t00-chat", messages=[{"role": "user", "content": test_id}],
+                tools=tool_definitions("chat"), extra_body={"api_key": provider_key},
+            )
+            call = response.choices[0].message.tool_calls[0]
+            outcome, _ = dispatch_synthetic_tool(call.function.name, call.function.arguments)
+        elif protocol == "responses":
+            response = client.responses.create(
+                model="t00-chat", input=test_id, tools=tool_definitions("responses"),
+                extra_body={"api_key": provider_key},
+            )
+            call = next(item for item in response.output if getattr(item, "type", None) == "function_call")
+            outcome, _ = dispatch_synthetic_tool(call.name, call.arguments)
+        else:
+            response = client.messages.create(
+                model="t00-messages", max_tokens=40, messages=[{"role": "user", "content": test_id}],
+                tools=tool_definitions("messages"), extra_body={"api_key": provider_key},
+            )
+            call = next(item for item in response.content if getattr(item, "type", None) == "tool_use")
+            outcome, _ = dispatch_synthetic_tool(call.name, call.input)
+        return {"success": True, "test_id": test_id, "rejection": outcome, "dispatched": outcome == "dispatched"}
+    except Exception as exc:
+        return {"success": False, "test_id": test_id, **safe_exception(exc)}
+    finally:
+        client.close()
+
+
+def proxy_local(proxy_url: str, unguarded_proxy_url: str, native_stream_proxy_url: str, upstream_url: str) -> dict:
     """Real SDK -> pinned Proxy -> controlled upstream with synthetic credentials."""
     key_a = make_virtual_key(proxy_url, "tenant-a-chat", "t00-chat")
     key_b = make_virtual_key(proxy_url, "tenant-b-chat", "t00-chat")
@@ -461,6 +962,18 @@ def proxy_local(proxy_url: str, unguarded_proxy_url: str, upstream_url: str) -> 
     finally:
         messages_client.close()
 
+    tool_roundtrips = {
+        "chat": proxy_tool_roundtrip("chat", proxy_url, key_a, PROVIDER_KEYS["tenant-a"]),
+        "responses": proxy_tool_roundtrip("responses", proxy_url, key_a, PROVIDER_KEYS["tenant-a"]),
+        "messages": proxy_tool_roundtrip("messages", proxy_url, key_messages, PROVIDER_KEYS["tenant-a"]),
+    }
+    invalid_tools = {}
+    for protocol, project_key in (("chat", key_a), ("responses", key_a), ("messages", key_messages)):
+        for variant in ("malformed", "invalid", "unknown"):
+            invalid_tools[f"{protocol}_{variant}"] = probe_invalid_tool(
+                protocol, variant, proxy_url, project_key, PROVIDER_KEYS["tenant-a"]
+            )
+
     # Preserve the raw pinned-version EOF failure reproduction on a separate
     # proxy instance that has no admission callback configured.
     eof_client = openai_client(key_a, unguarded_proxy_url + "/v1")
@@ -503,6 +1016,20 @@ def proxy_local(proxy_url: str, unguarded_proxy_url: str, upstream_url: str) -> 
             wrong_project_result = safe_exception(exc)
     finally:
         wrong_project.close()
+
+    wrong_model_client = openai_client(key_a, proxy_url + "/v1")
+    try:
+        try:
+            wrong_model_client.chat.completions.create(
+                model="t00-messages",
+                messages=[{"role": "user", "content": "T00_PROXY_WRONG_MODEL_A"}],
+                extra_body={"api_key": PROVIDER_KEYS["tenant-a"]},
+            )
+            wrong_model_result = {"success": True, "status_code": None}
+        except Exception as exc:
+            wrong_model_result = safe_exception(exc)
+    finally:
+        wrong_model_client.close()
 
     # Reproduce the unguarded default-key fallback on the isolated raw proxy.
     unguarded_missing_status, _unguarded_missing_body = request_json_with_status(
@@ -568,7 +1095,7 @@ def proxy_local(proxy_url: str, unguarded_proxy_url: str, upstream_url: str) -> 
             })
 
     stream_denials = []
-    for route_name, (route_path, project_key) in route_specs.items():
+    for route_name, (route_path, project_key) in {"chat": route_specs["chat"]}.items():
         test_id = f"T00_GUARD_{route_name.upper()}_STREAM_DENIED"
         if route_name == "chat":
             body = {
@@ -600,17 +1127,59 @@ def proxy_local(proxy_url: str, unguarded_proxy_url: str, upstream_url: str) -> 
             "error_code": error_code,
         })
 
+    proxy_base_urls = {
+        "chat": proxy_url + "/v1",
+        "responses": proxy_url + "/v1",
+        "messages": proxy_url,
+    }
+    proxy_keys = {
+        "chat": key_a,
+        "responses": key_a,
+        "messages": key_messages,
+    }
+    error_cases = {
+        protocol: run_protocol_error_cases(
+            proxy_base_urls[protocol], protocol, f"T00_PROXY_{protocol.upper()}",
+            proxy_keys[protocol], provider_key=PROVIDER_KEYS["tenant-a"],
+            via_proxy=True, cases=("HTTP_ERROR", "TIMEOUT", "TRUNCATED"),
+        )
+        for protocol in proxy_base_urls
+    }
+    incomplete_cases = {
+        protocol: run_incomplete_cases(
+            proxy_base_urls[protocol], protocol,
+            project_key=proxy_keys[protocol], provider_key=PROVIDER_KEYS["tenant-a"],
+        )
+        for protocol in proxy_base_urls
+    }
+    stream_cases = run_stream_group(
+        {
+            "responses": native_stream_proxy_url + "/v1",
+            "messages": native_stream_proxy_url,
+        },
+        ("responses", "messages"),
+        {"responses": key_a, "messages": key_messages},
+        provider_key=PROVIDER_KEYS["tenant-a"],
+        via_proxy=True,
+    )
+
     upstream = request_json(upstream_url + "/stats")
     records = upstream.get("records", [])
     return {
         "chat": {"tenant-a": chat_a, "tenant-b": chat_b},
         "responses": responses_result,
         "messages": messages_result,
+        "tool_roundtrips": tool_roundtrips,
+        "invalid_tools": invalid_tools,
         "eof": eof_result,
         "wrong_project": wrong_project_result,
+        "wrong_model": wrong_model_result,
         "unguarded_missing_provider": unguarded_missing_provider,
         "admission_cases": admission_cases,
         "stream_denials": stream_denials,
+        "error_cases": error_cases,
+        "incomplete_cases": incomplete_cases,
+        "stream_cases": stream_cases,
         "records": records,
         "_secret_values": [
             MASTER_KEY,
@@ -720,6 +1289,209 @@ def append_record_checks(
     return record
 
 
+def evaluate_error_paths(
+    checks: list[dict],
+    source: str,
+    records: list[dict],
+    error_cases: dict,
+    protocols: tuple[str, ...],
+    cases: tuple[str, ...] = ("HTTP_ERROR", "TIMEOUT", "TRUNCATED"),
+) -> None:
+    for protocol in protocols:
+        for case in cases:
+            check_id = f"{source}_{protocol.upper()}_{case}"
+            test_id = f"T00_{source}_{protocol.upper()}_{case}_A"
+            outcome = error_cases[protocol][case.lower()]
+            rows = records_for(records, test_id)
+            add_check(
+                checks,
+                check_id + "_SURFACED_AS_ERROR",
+                outcome.get("success") is False and bool(outcome.get("error_type")),
+                {"error_type": outcome.get("error_type"), "status_code": outcome.get("status_code")},
+            )
+            add_check(
+                checks,
+                check_id + "_ONE_UPSTREAM_REQUEST_NO_RETRY",
+                len(rows) == 1,
+                {"upstream_count": len(rows), "configured_sdk_max_retries": SDK_MAX_RETRIES, "configured_proxy_retries": PROXY_NUM_RETRIES},
+            )
+
+
+def evaluate_incomplete_paths(
+    checks: list[dict],
+    source: str,
+    records: list[dict],
+    incomplete_cases: dict,
+    protocols: tuple[str, ...],
+) -> None:
+    expected = {
+        "chat": ("length", None),
+        "responses": ("incomplete", "max_output_tokens"),
+        "messages": ("max_tokens", None),
+    }
+    for protocol in protocols:
+        test_id = f"T00_{source}_{protocol.upper()}_INCOMPLETE_A"
+        outcome = incomplete_cases[protocol]
+        terminal, reason = expected[protocol]
+        rows = records_for(records, test_id)
+        add_check(
+            checks,
+            f"{source}_{protocol.upper()}_INCOMPLETE_TERMINAL_PRESERVED",
+            outcome.get("success") is True
+            and outcome.get("terminal") == terminal
+            and (reason is None or outcome.get("incomplete_reason") == reason),
+            {"terminal": outcome.get("terminal"), "incomplete_reason": outcome.get("incomplete_reason")},
+        )
+        add_check(
+            checks,
+            f"{source}_{protocol.upper()}_INCOMPLETE_ONE_UPSTREAM_REQUEST",
+            len(rows) == 1,
+            {"upstream_count": len(rows)},
+        )
+
+
+def _stream_expectation(protocol: str, case: str, outcome: dict) -> bool:
+    event_types = outcome.get("event_types", [])
+    terminals = outcome.get("terminals", [])
+    if case == "COMPLETE":
+        if protocol == "chat":
+            return outcome.get("success") is True and "stop" in terminals
+        if protocol == "responses":
+            return outcome.get("success") is True and "response.completed" in event_types and "completed" in terminals
+        return outcome.get("success") is True and "message_stop" in event_types and "end_turn" in terminals
+    if case == "EOF":
+        if protocol == "chat":
+            return outcome.get("success") is True and not terminals
+        if protocol == "responses":
+            return outcome.get("success") is True and "response.completed" not in event_types and "completed" not in terminals
+        return outcome.get("success") is True and "message_stop" not in event_types and "end_turn" not in terminals
+    if case == "INCOMPLETE":
+        if protocol == "chat":
+            return outcome.get("success") is True and "length" in terminals
+        if protocol == "responses":
+            return outcome.get("success") is True and "response.incomplete" in event_types and "incomplete" in terminals
+        return outcome.get("success") is True and "max_tokens" in terminals
+    if case == "SSE_ERROR":
+        surfaced = outcome.get("success") is False or any(
+            event_type in {"error", "response.failed"} for event_type in event_types
+        )
+        complete_terminal = ("stop" in terminals or "completed" in terminals or "end_turn" in terminals)
+        return surfaced and not complete_terminal
+    if case == "CANCEL":
+        return (
+            outcome.get("success") is True
+            and outcome.get("canceled_after_first_event") is True
+            and outcome.get("event_count", 0) >= 1
+            and outcome.get("client_response_closed") is True
+        )
+    return False
+
+
+def evaluate_stream_paths(
+    checks: list[dict],
+    source: str,
+    records: list[dict],
+    stream_cases: dict,
+    protocols: tuple[str, ...],
+    cases: tuple[str, ...] = ("COMPLETE", "EOF", "INCOMPLETE", "SSE_ERROR", "CANCEL"),
+) -> None:
+    for protocol in protocols:
+        for case in cases:
+            outcome = stream_cases[protocol][case.lower()]
+            test_id = f"T00_{source}_{protocol.upper()}_STREAM_{case}_A"
+            rows = records_for(records, test_id)
+            record = rows[0] if len(rows) == 1 else {}
+            check_id = f"{source}_{protocol.upper()}_STREAM_{case}"
+            add_check(
+                checks,
+                check_id + "_PROTOCOL_RESULT",
+                _stream_expectation(protocol, case, outcome),
+                {"success": outcome.get("success"), "error_type": outcome.get("error_type"), "event_types": outcome.get("event_types"), "terminals": outcome.get("terminals")},
+            )
+            add_check(
+                checks,
+                check_id + "_ONE_UPSTREAM_REQUEST_NO_RETRY",
+                len(rows) == 1,
+                {"upstream_count": len(rows), "configured_sdk_max_retries": SDK_MAX_RETRIES, "configured_proxy_retries": PROXY_NUM_RETRIES},
+            )
+            if case == "CANCEL":
+                add_check(
+                    checks,
+                    check_id + "_UPSTREAM_DETECTED_CLIENT_CLOSE",
+                    record.get("client_disconnected") is True,
+                    {
+                        "upstream_observed_client_disconnect": record.get("client_disconnected") is True,
+                        "upstream_stream_body_finished": record.get("upstream_stream_body_finished") is True,
+                        "upstream_stream_events_written": record.get("upstream_stream_events_written"),
+                    },
+                )
+                add_check(
+                    checks,
+                    check_id + "_UPSTREAM_STOPPED_AFTER_CLIENT_CLOSE",
+                    record.get("client_disconnected") is True
+                    and record.get("upstream_stream_body_finished") is not True,
+                    {
+                        "upstream_observed_client_disconnect": record.get("client_disconnected") is True,
+                        "upstream_stream_body_finished": record.get("upstream_stream_body_finished") is True,
+                        "upstream_stream_events_written": record.get("upstream_stream_events_written"),
+                    },
+                )
+
+
+def evaluate_tool_roundtrips(
+    checks: list[dict],
+    source: str,
+    records: list[dict],
+    tool_roundtrips: dict,
+) -> None:
+    for protocol in ("chat", "responses", "messages"):
+        prefix = f"{source}_{protocol.upper()}_TOOL_ROUNDTRIP"
+        result = tool_roundtrips[protocol]
+        for marker in ("R1", "R2", "FINAL"):
+            test_id = f"T00_{source}_{protocol.upper()}_TOOL_{marker}_A"
+            rows = records_for(records, test_id)
+            add_check(
+                checks,
+                f"{prefix}_{marker}_ONE_UPSTREAM_REQUEST",
+                len(rows) == 1,
+                {"upstream_count": len(rows)},
+            )
+        add_check(
+            checks,
+            prefix + "_TWO_ALLOWLISTED_SYNTHETIC_TOOLS",
+            result.get("success") is True
+            and result.get("tool_dispatch_outcomes") == ["dispatched", "dispatched"],
+            {"tool_dispatch_outcomes": result.get("tool_dispatch_outcomes", [])},
+        )
+        add_check(
+            checks,
+            prefix + "_PUBLIC_OUTPUT_EXCLUDES_PRIVATE_CONTINUATION_AND_KEYS",
+            result.get("success") is True
+            and result.get("continuation_in_public") is False
+            and result.get("key_in_public") is False
+            and set(result.get("public_output", {})) == {"text"},
+            {
+                "continuation_in_public": result.get("continuation_in_public"),
+                "key_in_public": result.get("key_in_public"),
+                "public_fields": sorted(result.get("public_output", {})),
+            },
+        )
+        final_rows = records_for(records, f"T00_{source}_{protocol.upper()}_TOOL_FINAL_A")
+        facts = final_rows[0].get("continuation_facts", {}) if len(final_rows) == 1 else {}
+        if protocol == "chat":
+            preserved = all(facts.get(f"chat_r{i}_{suffix}") is True for i in (1, 2) for suffix in ("assistant_preserved", "tool_result_id_preserved"))
+        elif protocol == "responses":
+            preserved = all(facts.get(f"responses_r{i}_{suffix}") is True for i in (1, 2) for suffix in ("output_items_preserved", "tool_result_preserved"))
+        else:
+            preserved = all(facts.get(f"messages_r{i}_{suffix}") is True for i in (1, 2) for suffix in ("thinking_signature_preserved", "tool_result_preserved"))
+        add_check(
+            checks,
+            prefix + "_RAW_CONTINUATION_AND_TOOL_RESULT_PRESERVED",
+            len(final_rows) == 1 and preserved,
+            {key: value for key, value in facts.items() if key.endswith("_preserved") or key.endswith("_present")},
+        )
+
+
 def evaluate_sdk_local(checks: list[dict], sdk: dict, upstream_records: list[dict]) -> None:
     config_text = (TOOL_DIR / "proxy.yaml").read_text(encoding="utf-8")
     raw_config = (TOOL_DIR / "proxy-unguarded.yaml").read_text(encoding="utf-8")
@@ -746,7 +1518,8 @@ def evaluate_sdk_local(checks: list[dict], sdk: dict, upstream_records: list[dic
         checks,
         "CONFIG_GUARD_CALLBACK_AND_STREAM_DENY_ENABLED",
         "callbacks: proxy_callback.proxy_handler_instance" in config_text
-        and "T00_DENY_STREAMING_CALL_TYPES: acompletion,aresponses,anthropic_messages" in compose_text
+        and "T00_DENY_STREAMING_CALL_TYPES: acompletion" in compose_text
+        and "native_stream_proxy" in compose_text
         and 'data.get("stream") is True' in callback_text,
     )
     add_check(
@@ -805,6 +1578,11 @@ def evaluate_sdk_local(checks: list[dict], sdk: dict, upstream_records: list[dic
             {"client_incomplete": incomplete, "upstream_terminal": None if record is None else record.get("upstream_terminal")},
         )
 
+    evaluate_error_paths(checks, "SDK", upstream_records, sdk["error_cases"], ("chat", "responses", "messages"))
+    evaluate_incomplete_paths(checks, "SDK", upstream_records, sdk["incomplete_cases"], ("chat", "responses", "messages"))
+    evaluate_stream_paths(checks, "SDK", upstream_records, sdk["stream_cases"], ("chat", "responses", "messages"))
+    evaluate_tool_roundtrips(checks, "SDK", upstream_records, sdk["tool_roundtrips"])
+
 
 def evaluate_proxy_local(checks: list[dict], proxy: dict) -> None:
     records = proxy["records"]
@@ -862,6 +1640,81 @@ def evaluate_proxy_local(checks: list[dict], proxy: dict) -> None:
         {"sdk_success": response.get("success") is True, "stop_reason": response.get("stop_reason"), "upstream_terminal": None if record is None else record.get("upstream_terminal")},
     )
 
+    tool_specs = {
+        "chat": ("tenant-a", "chat", "chat"),
+        "responses": ("tenant-a", "responses", "responses"),
+        "messages": ("tenant-a", "messages", "messages"),
+    }
+    for protocol, (tenant, route, _) in tool_specs.items():
+        prefix = "PROXY_" + protocol.upper() + "_TOOL_ROUNDTRIP"
+        result = proxy["tool_roundtrips"][protocol]
+        for marker in ("R1", "R2", "FINAL"):
+            test_id = f"T00_PROXY_{protocol.upper()}_TOOL_{marker}_A"
+            rows = records_for(records, test_id)
+            append_record_checks(checks, prefix + "_" + marker, rows, 1, tenant, route)
+        add_check(
+            checks,
+            prefix + "_TWO_ALLOWLISTED_SYNTHETIC_TOOLS",
+            result.get("success") is True
+            and result.get("tool_dispatch_outcomes") == ["dispatched", "dispatched"],
+            {"tool_dispatch_outcomes": result.get("tool_dispatch_outcomes", [])},
+        )
+        add_check(
+            checks,
+            prefix + "_PUBLIC_OUTPUT_EXCLUDES_PRIVATE_CONTINUATION_AND_KEYS",
+            result.get("success") is True
+            and result.get("continuation_in_public") is False
+            and result.get("key_in_public") is False
+            and set(result.get("public_output", {})) == {"text"},
+            {
+                "continuation_in_public": result.get("continuation_in_public"),
+                "key_in_public": result.get("key_in_public"),
+                "public_fields": sorted(result.get("public_output", {})),
+            },
+        )
+        final_rows = records_for(records, f"T00_PROXY_{protocol.upper()}_TOOL_FINAL_A")
+        facts = final_rows[0].get("continuation_facts", {}) if len(final_rows) == 1 else {}
+        if protocol == "chat":
+            preserved = all(facts.get(f"chat_r{i}_{suffix}") is True for i in (1, 2) for suffix in ("assistant_preserved", "tool_result_id_preserved"))
+        elif protocol == "responses":
+            preserved = all(facts.get(f"responses_r{i}_{suffix}") is True for i in (1, 2) for suffix in ("output_items_preserved", "tool_result_preserved"))
+        else:
+            preserved = all(facts.get(f"messages_r{i}_{suffix}") is True for i in (1, 2) for suffix in ("thinking_signature_preserved", "tool_result_preserved"))
+        add_check(
+            checks,
+            prefix + "_RAW_CONTINUATION_AND_TOOL_RESULT_PRESERVED",
+            len(final_rows) == 1 and preserved,
+            {key: value for key, value in facts.items() if key.endswith("_preserved") or key.endswith("_present") or key.endswith("_count")},
+        )
+
+    expected_rejections = {
+        "chat_malformed": "partial_json",
+        "chat_invalid": "invalid_json",
+        "chat_unknown": "not_allowlisted",
+        "responses_malformed": "partial_json",
+        "responses_invalid": "invalid_json",
+        "responses_unknown": "not_allowlisted",
+        "messages_malformed": "invalid_argument_shape",
+        "messages_invalid": "invalid_argument_shape",
+        "messages_unknown": "not_allowlisted",
+    }
+    for case_id, expected_rejection in expected_rejections.items():
+        case = proxy["invalid_tools"][case_id]
+        rows = records_for(records, case["test_id"])
+        add_check(
+            checks,
+            "PROXY_TOOL_REJECT_" + case_id.upper(),
+            case.get("success") is True
+            and case.get("rejection") == expected_rejection
+            and case.get("dispatched") is False
+            and len(rows) == 1,
+            {
+                "rejection": case.get("rejection"),
+                "dispatched": case.get("dispatched"),
+                "upstream_count": len(rows),
+            },
+        )
+
     eof_rows = records_for(records, "T00_PROXY_UNGUARDED_CHAT_EOF_A")
     eof_record = append_record_checks(checks, "PROXY_UNGUARDED_CHAT_EOF", eof_rows, 1, "tenant-a", "chat")
     eof_safe = eof_integrity_passes(
@@ -886,6 +1739,15 @@ def evaluate_proxy_local(checks: list[dict], proxy: dict) -> None:
         "PROXY_WRONG_PROJECT_REJECTED_BEFORE_UPSTREAM",
         wrong.get("success") is False and len(wrong_rows) == 0,
         {"http_status": wrong.get("status_code"), "upstream_count": len(wrong_rows)},
+    )
+
+    wrong_model_rows = records_for(records, "T00_PROXY_WRONG_MODEL_A")
+    wrong_model = proxy["wrong_model"]
+    add_check(
+        checks,
+        "PROXY_PROJECT_KEY_MODEL_ALLOWLIST_REJECTED_BEFORE_UPSTREAM",
+        wrong_model.get("success") is False and len(wrong_model_rows) == 0,
+        {"http_status": wrong_model.get("status_code"), "upstream_count": len(wrong_model_rows)},
     )
 
     missing = next(
@@ -952,6 +1814,10 @@ def evaluate_proxy_local(checks: list[dict], proxy: dict) -> None:
             {"upstream_count": len(rows)},
         )
 
+    evaluate_error_paths(checks, "PROXY", records, proxy["error_cases"], ("chat", "responses", "messages"))
+    evaluate_incomplete_paths(checks, "PROXY", records, proxy["incomplete_cases"], ("chat", "responses", "messages"))
+    evaluate_stream_paths(checks, "PROXY", records, proxy["stream_cases"], ("responses", "messages"))
+
 
 def cleanup_project(project: str) -> list[dict]:
     outcomes = []
@@ -961,6 +1827,8 @@ def cleanup_project(project: str) -> list[dict]:
             project,
             "--profile",
             "unguarded",
+            "--profile",
+            "native-stream",
             "down",
             "--volumes",
             "--remove-orphans",
@@ -1006,33 +1874,26 @@ def run_probe(project: str) -> dict:
         "provider_real": "NOT_RUN",
         "sdk_versions": sdk_versions(),
         "checks": [],
-        "uncovered": [
-            "explicit length/incomplete",
-            "truncated body",
-            "timeout",
-            "SSE error",
-            "HTTP error injection",
-            "malformed/partial tool arguments and allowlist rejection",
-            "two tool round trips",
-            "continuation privacy and raw-item preservation",
-            "cancellation resource closure",
-            "old chat/research/translation regression baseline",
-        ],
+        "uncovered": ["old chat/research/translation regression baseline", "PROVIDER_REAL compatibility"],
     }
     compose(
         project,
         "--profile",
         "unguarded",
+        "--profile",
+        "native-stream",
         "up",
         "-d",
         "--wait",
         "--wait-timeout",
         "180",
         "unguarded_proxy",
+        "native_stream_proxy",
         timeout=210,
     )
     proxy_url = f"http://{inspect_ip(project, 'proxy')}:4000"
     unguarded_proxy_url = f"http://{inspect_ip(project, 'unguarded_proxy')}:4001"
+    native_stream_proxy_url = f"http://{inspect_ip(project, 'native_stream_proxy')}:4002"
     upstream_url = f"http://{inspect_ip(project, 'upstream')}:8080"
     result["runtime_versions"] = docker_versions(project)
 
@@ -1049,7 +1910,7 @@ def run_probe(project: str) -> dict:
     )
 
     result["sdk_local"] = sdk_local(upstream_url)
-    proxy = proxy_local(proxy_url, unguarded_proxy_url, upstream_url)
+    proxy = proxy_local(proxy_url, unguarded_proxy_url, native_stream_proxy_url, upstream_url)
     secret_values = proxy.pop("_secret_values")
     result["proxy_local"] = {
         key: value for key, value in proxy.items() if key != "records"
@@ -1059,7 +1920,7 @@ def run_probe(project: str) -> dict:
 
     logs = docker([
         "compose", "--project-name", project, "-f", str(COMPOSE_FILE),
-        "logs", "--no-color", "proxy", "unguarded_proxy", "upstream",
+        "logs", "--no-color", "proxy", "unguarded_proxy", "native_stream_proxy", "upstream",
     ], timeout=30)
     leaked_secret = any(secret and secret in logs for secret in secret_values)
     add_check(
@@ -1082,8 +1943,9 @@ def run_probe(project: str) -> dict:
     add_check(
         result["checks"],
         "ENV_PINNED_LITELLM_RUNTIME",
-        versions.get("litellm") == "1.104.2",
-        {"litellm": versions.get("litellm")},
+        versions.get("litellm") == "1.104.2"
+        and versions.get("litellm_native_stream_proxy") == "1.104.2",
+        {"litellm": versions.get("litellm"), "litellm_native_stream_proxy": versions.get("litellm_native_stream_proxy")},
     )
     add_check(
         result["checks"],
@@ -1113,6 +1975,8 @@ def image_evidence_only() -> int:
             project,
             "--profile",
             "unguarded",
+            "--profile",
+            "native-stream",
             "up",
             "-d",
             "--wait",

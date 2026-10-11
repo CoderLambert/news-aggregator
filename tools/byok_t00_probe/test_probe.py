@@ -9,8 +9,10 @@ from probe import (
     add_check,
     container_image_evidence,
     credential_record_passes,
+    dispatch_synthetic_tool,
     eof_integrity_passes,
     missing_provider_fails_closed,
+    _stream_expectation,
 )
 
 
@@ -149,6 +151,30 @@ class TerminalEvaluatorTests(unittest.TestCase):
         self.assertTrue(eof_integrity_passes("finish_reason_stop", ["stop"]))
 
 
+class NativeStreamingEvaluatorTests(unittest.TestCase):
+    def test_responses_failed_event_is_a_surfaced_sse_error(self):
+        self.assertTrue(_stream_expectation("responses", "SSE_ERROR", {
+            "success": True,
+            "event_types": ["response.created", "response.failed"],
+            "terminals": [],
+        }))
+
+    def test_incomplete_response_is_not_a_complete_terminal(self):
+        self.assertTrue(_stream_expectation("responses", "INCOMPLETE", {
+            "success": True,
+            "event_types": ["response.created", "response.incomplete"],
+            "terminals": ["incomplete"],
+        }))
+
+    def test_cancel_requires_sdk_response_close(self):
+        self.assertFalse(_stream_expectation("messages", "CANCEL", {
+            "success": True,
+            "event_count": 1,
+            "canceled_after_first_event": True,
+            "client_response_closed": False,
+        }))
+
+
 class MissingProviderEvaluatorTests(unittest.TestCase):
     def test_rejection_without_upstream_request_is_fail_closed(self):
         # No particular HTTP status is required for this result.
@@ -171,6 +197,38 @@ class CheckOutputTests(unittest.TestCase):
         checks = []
         add_check(checks, "WRONG_RESULT", False, {"observed": "wrong"})
         self.assertEqual(checks[0]["status"], "FAIL")
+
+
+class ToolDispatchGateTests(unittest.TestCase):
+    def test_allowlisted_complete_arguments_use_only_local_stub(self):
+        self.assertEqual(
+            dispatch_synthetic_tool("lookup_weather", '{"city":"synthetic-city"}'),
+            ("dispatched", "synthetic-weather"),
+        )
+
+    def test_partial_json_is_rejected_before_dispatch(self):
+        self.assertEqual(
+            dispatch_synthetic_tool("lookup_weather", '{"city":'),
+            ("partial_json", None),
+        )
+
+    def test_invalid_json_is_rejected_before_dispatch(self):
+        self.assertEqual(
+            dispatch_synthetic_tool("lookup_weather", "{not-json}"),
+            ("invalid_json", None),
+        )
+
+    def test_non_allowlisted_tool_is_rejected_before_dispatch(self):
+        self.assertEqual(
+            dispatch_synthetic_tool("delete_everything", '{"confirm":true}'),
+            ("not_allowlisted", None),
+        )
+
+    def test_messages_tool_input_must_be_a_valid_object(self):
+        self.assertEqual(
+            dispatch_synthetic_tool("lookup_weather", ["not", "an", "object"]),
+            ("invalid_argument_shape", None),
+        )
 
 
 if __name__ == "__main__":
