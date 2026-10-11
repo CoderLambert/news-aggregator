@@ -186,13 +186,13 @@ class UserAIConnectionDetailView(APIView):
         denied = _require_feature()
         if denied:
             return denied
-        serializer = ConnectionPatchSerializer(data=request.data)
-        if not serializer.is_valid():
-            return _no_store(Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST))
         with transaction.atomic():
             connection = _lock_owned_connection(request.user, connection_id)
             if connection is None:
                 return _no_store(Response({'error_code': 'not_found'}, status=status.HTTP_404_NOT_FOUND))
+            serializer = ConnectionPatchSerializer(data=request.data)
+            if not serializer.is_valid():
+                return _no_store(Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST))
             values = serializer.validated_data
             if 'display_name' in values:
                 connection.display_name = values['display_name']
@@ -236,14 +236,14 @@ class UserAIConnectionKeyView(APIView):
         denied = _require_feature()
         if denied:
             return denied
-        serializer = CredentialReplaceSerializer(data=request.data)
-        if not serializer.is_valid():
-            return _no_store(Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST))
         try:
             with transaction.atomic():
                 connection = _lock_owned_connection(request.user, connection_id)
                 if connection is None:
                     return _no_store(Response({'error_code': 'not_found'}, status=status.HTTP_404_NOT_FOUND))
+                serializer = CredentialReplaceSerializer(data=request.data)
+                if not serializer.is_valid():
+                    return _no_store(Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST))
                 connection.credential_epoch += 1
                 connection.credential_version += 1
                 ciphertext, key_id = encrypt_credential(connection, serializer.validated_data['api_key'])

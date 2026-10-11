@@ -187,6 +187,16 @@ def test_owner_crud_persists_only_aead_ciphertext_and_never_returns_the_key(db, 
         {'is_enabled': True}, format='json', HTTP_X_CSRFTOKEN=csrf,
     )
     assert cannot_reenable.status_code == 404
+    missing_patch_invalid = client.patch(
+        reverse('ai-connection-detail', kwargs={'connection_id': connection.pk}),
+        {'unknown_field': True}, format='json', HTTP_X_CSRFTOKEN=csrf,
+    )
+    assert missing_patch_invalid.status_code == 404
+    missing_key_invalid = client.put(
+        reverse('ai-connection-key', kwargs={'connection_id': connection.pk}),
+        {'api_key': ''}, format='json', HTTP_X_CSRFTOKEN=csrf,
+    )
+    assert missing_key_invalid.status_code == 404
 
 
 def test_key_aad_binds_owner_connection_endpoint_profile_and_credential_version(db):
