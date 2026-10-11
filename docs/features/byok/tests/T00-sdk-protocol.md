@@ -46,8 +46,9 @@
 | DeepSeek 直连基线 | **PASS（用户报告）**；1 次 SDK HTTP 请求尝试，prompt=57 / completion=19 tokens，`finish_reason=stop`，JSON 字段断言通过；执行时间未提供；未读取 Key |
 | 经 LiteLLM 的 T00-11 / 网关真实请求 | **NOT_RUN**；目前只有本地合成 PROXY_LOCAL 证据，未发送真实 provider 网关请求 |
 | 其他 provider 的 PROVIDER_REAL | **NOT_RUN** |
-| CI 上下文（用户提供，只读） | HEAD `69e084e` 的 run `38136034042` backend-and-release-gates / frontend 均 success；较早 `38136011186` backend failure。它们不是 T00 手工网关验收结果 |
-| 旧聊天/研究/翻译测试基线 | 当前 PR head `29d1fd9` 的两次 backend CI 均为 `838 passed / 2 warnings`，另有两次 frontend、release gates 均通过。早先 head `2ef40cd` 的重复 CI 曾分别出现一个订阅任务 SQLite `OperationalError`，随后在无业务代码改动的 head 上全量重跑通过；功能分支基线 `69e084e` 的 CI 也为 `838 passed / 2 warnings`。隔离工作区缺 pytest 和 frontend `node_modules`，未安装全项目依赖。历史 `219 passed / 3 warnings` 没有可恢复命令/报告；缺 chromadb 的 `82 passed / 23 failed` 不作产品基线 |
+| 最新 T00 PR head CI | HEAD `8b02bf439ab92d8f4dcbc660468484a7625a864e` 的 frontend、backend-and-release-gates 最终均通过；runs [38172136755](https://github.com/CoderLambert/news-aggregator/actions/runs/38172136755) 与 [38172140235](https://github.com/CoderLambert/news-aggregator/actions/runs/38172140235)，backend 各 `838 passed / 2 warnings`。run `38172140235` 首次尝试出现既有 SSE disconnect 测试的 SQLite `OperationalError`，未改代码或断言后重跑该失败 job 通过 |
+| T00 基线 CI 上下文（用户提供，只读） | HEAD `69e084e` 的 run `38136034042` backend-and-release-gates / frontend 均 success；较早 `38136011186` backend failure。它们不是 T00 手工网关验收结果 |
+| 旧聊天/研究/翻译测试基线 | 前一 T00 PR head `29d1fd9` 的两次 backend CI 均为 `838 passed / 2 warnings`，另有两次 frontend、release gates 均通过。早先 head `2ef40cd` 的重复 CI 曾分别出现一个订阅任务 SQLite `OperationalError`，随后在无业务代码改动的 head 上全量重跑通过；功能分支基线 `69e084e` 的 CI 也为 `838 passed / 2 warnings`。隔离工作区缺 pytest 和 frontend `node_modules`，未安装全项目依赖。历史 `219 passed / 3 warnings` 没有可恢复命令/报告；缺 chromadb 的 `82 passed / 23 failed` 不作产品基线 |
 | 旧测试断言 diff | `tests/` 与 `frontend/tests/` 无 diff；隔离探针、DeepSeek 直连及网关烟测自测共 56 项通过，没有放宽旧断言 |
 | 完整 T00 结论 | **PASS**；T00-01 至 T00-10、镜像验签和完整业务 CI 均通过。T00-10 风险通过关闭 Chat streaming 路径隔离；可选 T00-11 与其他真实 provider 调用未运行 |
 
