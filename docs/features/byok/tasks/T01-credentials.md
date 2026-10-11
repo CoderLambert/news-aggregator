@@ -1,6 +1,6 @@
 # T01 · 个人 Key 连接增删改停
 
-> **PLANNED**：本文件为未执行的实施/测试契约，所有测试当前 NOT_RUN。实施时以 `origin/feat/byok-user-api-keys` 最新 HEAD 为准，勿把设计 SHA 当作当前代码。
+> **PARTIAL（2026-10-12）**：T01 本地实现和 CRUD/权限/密钥生命周期验证已完成；修复代码 SHA `34f5a843dbc4a9fb218ff9fadf8ed32886f46953`。T01-03 的在途 worker 端到端“不提交结果”仍为 NOT_RUN，因为当前没有 worker 调用方；旧 `credential_epoch` 的服务端拒绝已有定向回归。完整环境、命令和未验证项见 [Test T01](../tests/T01-credentials.md)。
 
 | 属性 | 内容 |
 | --- | --- |
