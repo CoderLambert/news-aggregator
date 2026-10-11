@@ -184,6 +184,15 @@ class DeepSeekDirectRequestTests(unittest.TestCase):
         self.assertEqual(result["direct_baseline"], "FAIL")
         self.assertEqual(result["failure_reason"], "answer_assertion_failed")
 
+    def test_interrupted_request_emits_fail_with_matching_nonzero_exit(self):
+        FakeOpenAI.error = KeyboardInterrupt()
+        exit_code, result = self._run()
+        self.assertEqual(exit_code, 130)
+        self.assertEqual(result["direct_baseline"], "FAIL")
+        self.assertEqual(result["request_count"], 1)
+        self.assertEqual(result["failure_reason"], "request_interrupted")
+        self.assertTrue(FakeOpenAI.instance.closed)
+
     def test_exception_text_is_never_emitted(self):
         FakeOpenAI.error = RuntimeError("synthetic key must not print")
         exit_code, result = self._run()

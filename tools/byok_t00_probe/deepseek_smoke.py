@@ -148,6 +148,14 @@ def run_direct_request(
             "failure_reason": "provider_http_error",
             "http_status": exc.status_code,
         })
+    except KeyboardInterrupt:
+        # The provider may already have processed this attempt, so report a
+        # failure with the observed SDK request count instead of hiding it.
+        result.update({
+            "request_count": request_count,
+            "failure_reason": "request_interrupted",
+        })
+        exit_code = 130
     except Exception as exc:
         # Never emit exception text, request headers, response bodies, or the key.
         result.update({
