@@ -1,6 +1,6 @@
 # Test T00 · 共享网关端到端技术验真
 
-> **T00 BLOCKED / GATEWAY_ADMISSION_PROTOTYPE**：最新隔离合成运行 D（2026-10-11）为 `394 PASS / 1 FAIL / 395 checks`。唯一失败仍是无回调 Chat EOF 被 LiteLLM v1.104.2 暴露成 `finish_reason=stop`。Responses 标准 `fc_` item / `call_` call 两轮续接严格通过；旧 `resp_item_` 仅作为独立 foreign-ID 归一化专例。SDK_LOCAL 与 native-stream Proxy 的取消传播检查在显式 2 秒本地观测窗内通过。A9 历史运行 `353 PASS / 4 FAIL` 仍以独立脱敏文件保留，不与 D 混合。仅测试夹具在独立 profile 开放 Responses/Messages native stream；主准入配置仍拒绝 Chat stream。不是产品接入；PROVIDER_REAL 仍为 NOT_RUN。
+> **T00 BLOCKED / GATEWAY_ADMISSION_PROTOTYPE**：最新隔离合成运行 D（2026-10-11）为 `394 PASS / 1 FAIL / 395 checks`。唯一失败仍是无回调 Chat EOF 被 LiteLLM v1.104.2 暴露成 `finish_reason=stop`。Responses 标准 `fc_` item / `call_` call 两轮续接严格通过；旧 `resp_item_` 仅作为独立 foreign-ID 归一化专例。SDK_LOCAL 与 native-stream Proxy 的取消传播检查在显式 2 秒本地观测窗内通过。A9 历史运行 `353 PASS / 4 FAIL` 仍以独立脱敏文件保留，不与 D 混合。仅测试夹具在独立 profile 开放 Responses/Messages native stream；主准入配置仍拒绝 Chat stream。用户已报告 DeepSeek 直连基线 PASS（1 次请求）；LiteLLM 路径和 T00-11 仍为 NOT_RUN，不构成网关验收。
 
 对应：[T00 Task](../tasks/T00-sdk-protocol.md)。
 
@@ -16,13 +16,13 @@
 | T00-08 | 缺 provider Key、错误项目虚拟 Key | 缺 Key fail closed；错误项目凭据在到达 upstream 前被拒绝 | PASS（本地合成） |
 | T00-09 | SDK/Proxy 重试与 fallback 计数 | max_retries=0、num_retries=0、无跨模型 fallback，实际请求数与断言一致 | PASS（本地合成） |
 | T00-10 | v1.104.2 原始上游 EOF 与 Proxy 暴露终态对照 | 仅下游 stop/[DONE] 不足以证明原始上游完整；失败按局部风险记录 | BLOCKED |
-| T00-11 | 可选 DeepSeek 早期文本冒烟 | 仅在 PROXY_LOCAL 全过、用户确认确切模型/安全合成输入/请求与输出上限/最小预算后执行；不依赖 T00-G、不替代 T13 | NOT_RUN |
+| T00-11 | 可选、经 LiteLLM 的 DeepSeek 早期文本冒烟 | 仅在 PROXY_LOCAL 全过、用户确认确切模型/安全合成输入/请求与输出上限/最小预算后执行；不依赖 T00-G、不替代 T13 | NOT_RUN（直连基线另记） |
 
 ## 如何证明
 
 - **SDK_LOCAL**：使用真实安装的官方客户端 SDK 直连受控合成上游，证明 SDK 请求序列化、响应解析和关闭行为；不证明 Proxy 整合或厂商兼容。
 - **PROXY_LOCAL**：锁定真实 LiteLLM Proxy 镜像、真实 SDK、受控 HTTP upstream，记录上游原始请求/终态、Proxy 返回、SDK 输出和请求计数。本卡主要技术门槛。
-- **PROVIDER_REAL**：默认 NOT_RUN。本轮未执行或申请执行 DeepSeek 冒烟；已有独立入口仍是实验准备，不表示真实兼容。真实测试只在用户明确指示后由用户终端隐藏提供 Key；其他 provider 仍 NOT_RUN。
+- **DeepSeek 直连基线**：用户于 2026-10-12 报告独立 OpenAI SDK 直连诊断 PASS，1 次请求；没有执行 LiteLLM 路径。该结果只证明这一次指定模型、输入和参数的直连基线，不能证明 LiteLLM 集成、流式、工具调用或其他 provider 兼容。经 LiteLLM 的 T00-11 与其他 provider 测试仍为 NOT_RUN。
 - **日志**：只保留合成凭据标识、事件名、模型别名、耗时、错误类别和请求计数；禁止打印 Key、完整 Authorization、新闻正文或私有 continuation。
 - **基线与断言**：同环境记录任务前相关旧聊天/研究/翻译测试基线。若本卡只改探针/协议契约而没改旧测试，明确写“旧测试断言无 diff”；不得放宽旧断言。
 
@@ -42,11 +42,13 @@
 | 错误与 incomplete | SDK_LOCAL 与 PROXY_LOCAL 三协议 HTTP 503、超时、截断 body 都各 1 次上游请求；length / incomplete / max_tokens 原因保留 |
 | Native streaming | 受控本地 Responses / Messages Proxy complete、EOF、incomplete、SSE error 均通过；Chat stream 在主准入配置被拒绝且上游 0 |
 | 清理与凭据扫描 | `CLEANUP_COMPOSE_DOWN` 与 `CLEANUP_NO_PROJECT_RESOURCES_LEFT` PASS；containers=0、networks=0；CLI 输出和容器日志没有合成凭据 |
-| PROVIDER_REAL | **NOT_RUN**；未读现有 Key、未发送任何 DeepSeek 请求 |
+| DeepSeek 直连基线 | **PASS（用户报告）**；1 次 SDK HTTP 请求尝试，prompt=57 / completion=19 tokens，`finish_reason=stop`，JSON 字段断言通过；执行时间未提供；未读取 Key |
+| 经 LiteLLM 的 T00-11 / 网关真实请求 | **NOT_RUN**；PROXY_LOCAL 有保留失败，未发送网关请求 |
+| 其他 provider 的 PROVIDER_REAL | **NOT_RUN** |
 | CI 上下文（用户提供，只读） | HEAD `69e084e` 的 run `38136034042` backend-and-release-gates / frontend 均 success；较早 `38136011186` backend failure。它们不是 T00 手工网关验收结果 |
 | 旧聊天/研究/翻译测试基线 | **NOT_RUN**：当前 Python 缺 pytest，frontend 未安装 node_modules；按约束没有安装全项目依赖。历史 `219 passed / 3 warnings` 没有可恢复的命令/报告；缺 chromadb 的 `82 passed / 23 failed` 不作产品基线 |
 | 旧测试断言 diff | `tests/` 与 `frontend/tests/` 无 diff；隔离探针自测 24 项通过，没有放宽旧断言 |
-| 完整 T00 结论 | **BLOCKED**；Chat EOF 原始终态仍失败，PROVIDER_REAL 和旧新闻回归仍未执行 |
+| 完整 T00 结论 | **BLOCKED**；Chat EOF 原始终态仍失败，经 LiteLLM 的 T00-11 与旧新闻回归仍未执行；DeepSeek 直连只作独立基线记录 |
 
 ## 最新复测 D（2026-10-11）
 
@@ -58,7 +60,7 @@
 
 脱敏 JSON 已提交在 [T00-sdk-protocol-run-d-sanitized.json](../evidence/T00-sdk-protocol-run-d-sanitized.json)；源输出 SHA-256 为 `9d0a034e49a2a7b16746bc41947e9cb02b96f519b55f3807d1d6096961cbb66a`，副本 SHA-256 为 `0dce6b766fd26228f4ade36b92235d8cbcf91bacb132bd2ff79c58c007bda520`。副本的 7 个 SDK/Proxy `public_output.text` 已替换，未包含请求正文、Key、Authorization 值或 Prompt。更早的 A9 原始输出未覆盖（SHA-256 `ef7213c76b62b2ac263d4e934e65d779562f94347d292d0120059edb5c9c093f`）；其脱敏副本 [T00-sdk-protocol-run-a9-sanitized.json](../evidence/T00-sdk-protocol-run-a9-sanitized.json) SHA-256 为 `50326c99d0ece643bb248da2ea729729b496a6b91d786495bf524d70360943cb`，保留原来的 `353 PASS / 4 FAIL / 357 checks`，只作为修正前历史证据。
 
-环境版本：Python 3.14.8、OpenAI SDK 3.28.0、Anthropic SDK 1.13.0、httpx2 2.13.1、LiteLLM Proxy 1.104.2、Docker Compose 5.5.1、Docker Server 29.7.2。PROVIDER_REAL 仍为 `NOT_RUN`。
+环境版本：Python 3.14.8、OpenAI SDK 3.28.0、Anthropic SDK 1.13.0、httpx2 2.13.1、LiteLLM Proxy 1.104.2、Docker Compose 5.5.1、Docker Server 29.7.2。用户另行报告 DeepSeek 直连基线 PASS；经 LiteLLM 的 T00-11 与其他 provider 的 PROVIDER_REAL 仍为 `NOT_RUN`。
 
 - Responses 的正常两轮输出使用 `fc_t00_r1/r2` item ID 与 `call_t00_r1/r2` call ID。SDK_LOCAL 和 PROXY_LOCAL 均严格保留 reasoning raw item、encrypted continuation、function-call 全字段及 tool result 对应关系；公开结果只含 `text`。
 - 旧 `resp_item_call_r1/r2` 输入单独走 foreign-ID 归一化专例。LiteLLM v1.104.2 移除非 `fc_` item ID；两轮中 `call_id`、名称、参数、状态、reasoning、续接 opaque state 及 tool result 对应关系均保留。该专例不会被报告成标准 Responses tool association 失败。LiteLLM 的 [v1.104.2 transformation 实现](https://github.com/BerriAI/litellm/blob/v1.104.2/litellm/llms/openai/responses/transformation.py#L358-L372)记录了这项 foreign ID 处理。
@@ -166,13 +168,13 @@ SDK/Proxy 功能路径的上次脱敏摘要（镜像核验项已撤销，需与�
 
 为了保留原始风险复现，独立 `unguarded_proxy` profile 不加载回调：缺 provider Key 时返回 HTTP 401，但上游仍被调用 1 次并观察到 deployment-default；Chat 原始上游无协议终态，而 Proxy SDK 仍观察到 3 个事件和 `finish_reason=stop`。对应 EOF 完整性检查仍为 FAIL，不能将流拒绝描述为修复了 SDK/Proxy EOF 行为。最终运行 353 项 PASS / 4 项 FAIL；日志与最终 JSON 中的合成凭据扫描均为 false，Compose down PASS，残留 containers=0、networks=0。
 
-## DeepSeek 直连诊断（代码已准备，真实调用未执行）
+## DeepSeek 直连诊断（用户报告已执行；与 LiteLLM 结果分开）
 
 ### 当前准入与分离记录
 
-T00 当前仍为 **BLOCKED**。任务卡要求核心 PROXY_LOCAL 全部通过后，才可申请经 LiteLLM 的 DeepSeek 早期真实调用；最新运行 D 的实测实现 SHA 为 `193d52d0b684c8c47db633a6a93ea96a6690e460`，结果为 `394 PASS / 1 FAIL / 395 checks`。失败项 `PROXY_UNGUARDED_CHAT_EOF_NOT_SYNTHESIZED_COMPLETE` 记录了上游正常 EOF、无协议终态，而 LiteLLM v1.104.2 向 SDK 暴露 `finish_reason=stop`。该失败未改写或屏蔽。
+T00 当前仍为 **BLOCKED**。任务卡要求核心 PROXY_LOCAL 全部通过后，才可执行经 LiteLLM 的 DeepSeek 早期真实调用；最新运行 D 的实测实现 SHA 为 `193d52d0b684c8c47db633a6a93ea96a6690e460`，结果为 `394 PASS / 1 FAIL / 395 checks`。失败项 `PROXY_UNGUARDED_CHAT_EOF_NOT_SYNTHESIZED_COMPLETE` 记录了上游正常 EOF、无协议终态，而 LiteLLM v1.104.2 向 SDK 暴露 `finish_reason=stop`。该失败未改写或屏蔽。用户已经运行下面所述的独立 DeepSeek 直连诊断并提供脱敏结果；这不改变 T00、PROXY_LOCAL 或 T00-11 的状态。
 
-因此目前只准备了可选的 **直连诊断**，不调用 LiteLLM，也不能代表 T00-11 通过。真实 LiteLLM 路径仍是 `BLOCKED / NOT_RUN`；没有提供或执行它的收费命令。若用户选择直连诊断，其结果单独记为 DeepSeek direct baseline，不改变 T00、PROXY_LOCAL 或 T13 状态。未来网关路径必须另有记录；直连与网关请求各自独立计数。
+这次 **直连诊断** 不调用 LiteLLM，也不能代表 T00-11 通过。经 LiteLLM 的真实路径仍是 `BLOCKED / NOT_RUN`；没有执行网关请求。直连与网关请求各自独立计数，用户的直连结果单独作为 DeepSeek direct baseline 记录，不改变 T00、PROXY_LOCAL 或 T13 状态。
 
 ### 官方资料核验（2026-10-12）
 
@@ -192,9 +194,15 @@ T00 当前仍为 **BLOCKED**。任务卡要求核心 PROXY_LOCAL 全部通过后
 | 请求数 | 该命令最多发起 1 次直连 HTTP 请求；LiteLLM 路径为 0。`request_count` 是 SDK HTTP request hook 观察到的发送尝试数，不声称上游一定已处理或计费 |
 | 回答断言 | 非空 JSON object，且恰好包含 `probe_id="byok-deepseek-smoke-v1"`、`ok=true`；还要求唯一 choice 的 `finish_reason=stop`。自由文本、空响应、非法 JSON、额外/缺失字段、`length`、缺少终态、请求数不是 1 均失败 |
 | 安全输出 | 只输出状态、固定模型/协议、终态、断言类别、请求数与 usage；不输出 Key、回答正文、请求头、异常文本；Key 只由 `getpass` 隐藏输入并留在进程内，不放进命令参数、环境变量或文件 |
-| 当前真实结果 | `NOT_RUN`；本次只用合成 SDK transport 测试，未访问 `api.deepseek.com` |
+| 当前真实结果 | **PASS（用户报告，2026-10-12；执行时间未提供）**；1 次请求，`answer_assertion=json_object_fields_match`，`finish_reason=stop`；prompt=57、completion=19，`reasoning_tokens=null`，thinking disabled。用户提供的完整脱敏输出见下方 |
 
-按高峰未缓存价格，暂以短提示词不超过约 50 input tokens、最多 24 output tokens 估算，单次直连约 `$0.000044`；非高峰约 `$0.000022`。这是预算估算，不是保证上限：实际 tokenizer/JSON 模式计费、价格变化，以及请求超时后上游仍处理等情况都可能改变账单。thinking 已关闭，预期 reasoning tokens 为 0；最终以厂商 usage 为准。
+用户提供的脱敏结果：
+
+```json
+{"answer_assertion":"json_object_fields_match","completion_tokens":19,"direct_baseline":"PASS","finish_reason":"stop","max_output_tokens":24,"model":"deepseek-flash","prompt_tokens":57,"protocol":"openai_chat_completions_non_streaming","reasoning_tokens":null,"request_count":1,"request_count_semantics":"SDK HTTP request attempts","thinking":"disabled"}
+```
+
+按上方官方价格和实际 57 input / 19 output tokens 粗估，若输入 token 全部 cache hit，非高峰约 `$0.000011571`、高峰约 `$0.000023142`；若全部 cache miss，非高峰约 `$0.00001995`、高峰约 `$0.0000399`。响应未提供 cache hit/miss 用量，且未提供执行时间，因此不能确定适用时段或精确费用；这只是估算，不是账单。实际价格、缓存和超时后的上游处理都可能影响费用。
 
 以下命令只运行直连诊断，需由用户在本地交互终端选择执行。默认启动不发请求；脚本不会自动运行收费调用：
 
@@ -203,7 +211,7 @@ cd /home/lambert/Documents/Codex/2026-10-11/task-2/news-aggregator-t00/tools/byo
 /tmp/byok-t00-smoke-20261012/bin/python deepseek_smoke.py --send-one-request
 ```
 
-本次未运行上述收费命令。隔离合成验证环境使用 `/tmp/byok-t00-smoke-20261012`，Python 3.14.8；通过下面的命令运行 24 项既有探针 evaluator 自测和 17 项 DeepSeek 诊断测试：
+用户于 2026-10-12 在本地终端执行了上述命令并提供脱敏结果；执行时间未提供。Key 由用户隐藏输入，助手未读取或接收 Key。隔离合成验证环境使用 `/tmp/byok-t00-smoke-20261012`，Python 3.14.8；下面的命令运行 24 项既有探针 evaluator 自测和 17 项 DeepSeek 诊断测试，不会访问 DeepSeek：
 
 ```sh
 cd /home/lambert/Documents/Codex/2026-10-11/task-2/news-aggregator-t00/tools/byok_t00_probe
@@ -212,7 +220,7 @@ cd /home/lambert/Documents/Codex/2026-10-11/task-2/news-aggregator-t00/tools/byo
 
 结果：`Ran 41 tests ... OK`。测试覆盖固定的 DeepSeek SDK 请求字段、JSON 结果断言、空/非法/错误结构、缺失或不完整终态、零/多次请求、HTTP 错误脱敏、资源关闭、无 TTY/空 Key/取消输入，以及默认不请求路径。实际 OpenAI SDK 使用本地 `httpx2.MockTransport`；没有访问 DeepSeek 或启动 LiteLLM。另有 `py_compile` 与 `git diff --check` 通过；默认 CLI 输出 `{"direct_baseline":"NOT_RUN","request_count":0,"requires":"--send-one-request"}` 并以 0 退出。
 
-这条命令对应 1 次 DeepSeek 直连请求。若以后另行准入 LiteLLM 路径，它将是另一条独立请求，双路径总数为 2；当前 PROXY_LOCAL 失败，所以现在没有第二条用户执行命令，也没有把直连诊断包装为网关验收。
+用户报告的直连命令对应 1 次 DeepSeek HTTP 请求尝试；经 LiteLLM 的请求数仍为 0。若将来单独执行网关请求，它会是另一条独立请求，不会复用本次调用结果。
 
 本地合成自测命令：
 
@@ -221,7 +229,7 @@ cd /home/lambert/Documents/Codex/2026-10-11/task-2/news-aggregator-t00/tools/byo
 /tmp/byok-t00-smoke-20261012/bin/python -m unittest -v test_probe test_deepseek_smoke
 ```
 
-真实 DeepSeek 调用仍须由用户本人执行，且输出需单独记录；本次不读取或请求任何 Key。
+本次 DeepSeek 调用由用户本人执行，输出已单独记录；助手没有读取或接收任何 Key。
 
 ## 镜像、清理与隐私证据
 
@@ -244,4 +252,4 @@ cd /home/lambert/Documents/Codex/2026-10-11/task-2/news-aggregator-t00/tools/byo
 
 既有 tests/ 无 diff，未更改任何旧断言。本次没有重跑新闻项目旧聊天/研究/翻译测试，因此不能声称旧回归通过。先前历史记录只留下 219 passed / 3 warnings 摘要；命令、依赖及机器报告未恢复。另一次因隔离环境缺 chromadb 得到 82 passed / 23 failed，也不能替代功能基线；本次不安装旧项目的无关依赖。
 
-历史 A9 的 Responses `resp_item_` 与 Messages cancel 失败已在上方 A9 文件中保留。最新 D 中，标准 Responses `fc_`/`call_` 与 foreign-ID 归一化专例均通过，受控本地取消传播通过；无回调 Chat EOF 的失败继续保留。PROVIDER_REAL 与旧新闻聊天/研究/翻译回归仍未运行。本地合成结果不表示任何真实 provider 兼容，也未改生产调用。
+历史 A9 的 Responses `resp_item_` 与 Messages cancel 失败已在上方 A9 文件中保留。最新 D 中，标准 Responses `fc_`/`call_` 与 foreign-ID 归一化专例均通过，受控本地取消传播通过；无回调 Chat EOF 的失败继续保留。DeepSeek 直连基线为用户报告 PASS；经 LiteLLM 的 T00-11、其他 provider 测试及旧新闻聊天/研究/翻译回归仍未运行。本地合成结果不表示真实 provider 兼容，也未改生产调用。

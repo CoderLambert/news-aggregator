@@ -1,6 +1,6 @@
 # T00 · 共享网关端到端技术验真
 
-> **BLOCKED（2026-10-12）**：SDK_LOCAL / PROXY_LOCAL 已有隔离合成运行，但 T00 完整门槛未通过；运行 D 为 `394 PASS / 1 FAIL / 395 checks`，失败是 LiteLLM v1.104.2 无回调 Chat EOF 被暴露为 `finish_reason=stop`。PROVIDER_REAL 仍为 NOT_RUN。精确 SHA、失败证据与 DeepSeek 直连诊断边界见[同编号 Test](../tests/T00-sdk-protocol.md)。本任务状态不表示任何厂商或产品功能已验收。
+> **BLOCKED（2026-10-12）**：SDK_LOCAL / PROXY_LOCAL 已有隔离合成运行，但 T00 完整门槛未通过；运行 D 为 `394 PASS / 1 FAIL / 395 checks`，失败是 LiteLLM v1.104.2 无回调 Chat EOF 被暴露为 `finish_reason=stop`。用户报告 DeepSeek 直连基线 PASS（1 次请求）；经 LiteLLM 的 T00-11 仍为 NOT_RUN。精确 SHA、失败证据与直连诊断边界见[同编号 Test](../tests/T00-sdk-protocol.md)。本任务状态不表示网关或其他厂商功能已验收。
 
 | 属性 | 内容 |
 | --- | --- |
@@ -57,8 +57,8 @@ v1.104.2 是已记录 EOF/终态风险的复现版本。T00 回归夹具固定�
 
 ## 任务完成条件
 
-- SDK_LOCAL 与 PROXY_LOCAL 各自单独报告。SDK_LOCAL 只能表示 SDK 直连受控上游；本卡主要门槛是 PROXY_LOCAL。可选 DeepSeek 冒烟另记 PROVIDER_REAL，不作为本地技术门槛必做项。
-- Test 文档记录精确基线 HEAD、实现 SHA、Python/SDK/Proxy/Docker 版本、完整执行命令、脱敏输出、旧测试对照和旧断言 diff；真实厂商状态保持单独的 PROVIDER_REAL=NOT_RUN。
+- SDK_LOCAL 与 PROXY_LOCAL 各自单独报告。SDK_LOCAL 只能表示 SDK 直连受控上游；本卡主要门槛是 PROXY_LOCAL。可选经 LiteLLM 的 DeepSeek 冒烟另记 T00-11 / PROVIDER_REAL；独立直连基线单独记录，均不替代本地技术门槛或网关验收。
+- Test 文档记录精确基线 HEAD、实现 SHA、Python/SDK/Proxy/Docker 版本、完整执行命令、脱敏输出、旧测试对照和旧断言 diff；DeepSeek 直连基线与经 LiteLLM 的 T00-11 分开记录，直连结果不能代替网关验收。
 - 原始终态、continuation、凭据隔离、资源关闭或请求计数有任一无法核验时，T00 为 BLOCKED，不得继续把本地链路描述为完整通过。
 - T00-G 是共享服务运维交付卡；它不阻塞 T01/T04 本地开发，也不能由本地技术验真代替。
 
