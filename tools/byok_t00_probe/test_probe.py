@@ -7,6 +7,7 @@ from unittest.mock import patch
 from probe import (
     EXPECTED_IMAGES,
     add_check,
+    chat_eof_gate_passes,
     container_image_evidence,
     credential_record_passes,
     dispatch_synthetic_tool,
@@ -150,6 +151,62 @@ class TerminalEvaluatorTests(unittest.TestCase):
 
     def test_complete_terminal_with_stop_is_allowed(self):
         self.assertTrue(eof_integrity_passes("finish_reason_stop", ["stop"]))
+
+    def test_unsafe_raw_chat_eof_passes_only_when_guarded_route_is_blocked(self):
+        self.assertTrue(chat_eof_gate_passes(
+            "normal_eof_without_protocol_terminal",
+            ["stop"],
+            1,
+            400,
+            "T00_STREAMING_DISABLED",
+            0,
+        ))
+        self.assertFalse(chat_eof_gate_passes(
+            "normal_eof_without_protocol_terminal",
+            ["stop"],
+            1,
+            200,
+            None,
+            1,
+        ))
+
+    def test_unsafe_raw_chat_eof_fails_if_guard_reaches_upstream(self):
+        self.assertFalse(chat_eof_gate_passes(
+            "normal_eof_without_protocol_terminal",
+            ["stop"],
+            1,
+            400,
+            "T00_STREAMING_DISABLED",
+            1,
+        ))
+
+    def test_safe_raw_chat_eof_does_not_require_route_block(self):
+        self.assertTrue(chat_eof_gate_passes(
+            "finish_reason_stop",
+            ["stop"],
+            1,
+            200,
+            None,
+            1,
+        ))
+
+    def test_chat_eof_gate_requires_raw_upstream_evidence(self):
+        self.assertFalse(chat_eof_gate_passes(
+            None,
+            [],
+            0,
+            400,
+            "T00_STREAMING_DISABLED",
+            0,
+        ))
+        self.assertFalse(chat_eof_gate_passes(
+            "unknown_terminal",
+            ["stop"],
+            1,
+            400,
+            "T00_STREAMING_DISABLED",
+            0,
+        ))
 
 
 class NativeStreamingEvaluatorTests(unittest.TestCase):

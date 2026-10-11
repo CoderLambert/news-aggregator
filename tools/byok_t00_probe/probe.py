@@ -1315,6 +1315,31 @@ def eof_integrity_passes(upstream_terminal: str | None, finish_reasons: list[str
     return not incomplete_upstream or not downstream_claimed_complete
 
 
+def chat_eof_gate_passes(
+    upstream_terminal: str | None,
+    finish_reasons: list[str],
+    raw_request_count: int,
+    guarded_status_code: int | None,
+    guarded_error_code: str | None,
+    guarded_upstream_count: int,
+) -> bool:
+    """Pass only if Chat EOF is safe or the unsafe streaming route is blocked."""
+    if raw_request_count != 1 or upstream_terminal not in {
+        "normal_eof_without_protocol_terminal",
+        "finish_reason_stop",
+        "finish_reason_length",
+        "tool_call_turn",
+    }:
+        return False
+    if eof_integrity_passes(upstream_terminal, finish_reasons):
+        return True
+    return (
+        guarded_status_code == 400
+        and guarded_error_code == "T00_STREAMING_DISABLED"
+        and guarded_upstream_count == 0
+    )
+
+
 def missing_provider_fails_closed(success: bool, matching_records: list[dict]) -> bool:
     return not success and len(matching_records) == 0
 
@@ -1904,18 +1929,38 @@ def evaluate_proxy_local(checks: list[dict], proxy: dict) -> None:
 
     eof_rows = records_for(records, "T00_PROXY_UNGUARDED_CHAT_EOF_A")
     eof_record = append_record_checks(checks, "PROXY_UNGUARDED_CHAT_EOF", eof_rows, 1, "tenant-a", "chat")
-    eof_safe = eof_integrity_passes(
+    guarded_chat_stream = next(
+        (denial for denial in proxy["stream_denials"] if denial["route"] == "chat"),
+        {},
+    )
+    guarded_chat_rows = records_for(records, guarded_chat_stream.get("test_id", ""))
+    eof_gate_passes = chat_eof_gate_passes(
         None if eof_record is None else eof_record.get("upstream_terminal"),
         proxy["eof"].get("finish_reasons", []),
+        len(eof_rows),
+        guarded_chat_stream.get("status_code"),
+        guarded_chat_stream.get("error_code"),
+        len(guarded_chat_rows),
     )
     add_check(
         checks,
-        "PROXY_UNGUARDED_CHAT_EOF_NOT_SYNTHESIZED_COMPLETE",
-        eof_safe,
+        "PROXY_CHAT_EOF_RISK_CONTAINED_BY_ADMISSION",
+        eof_gate_passes,
         {
             "upstream_terminal": None if eof_record is None else eof_record.get("upstream_terminal"),
             "downstream_finish_reasons": proxy["eof"].get("finish_reasons", []),
             "sdk_normal_end": proxy["eof"].get("normal_sdk_end") is True,
+            "guarded_stream_status": guarded_chat_stream.get("status_code"),
+            "guarded_stream_error_code": guarded_chat_stream.get("error_code"),
+            "guarded_stream_upstream_count": len(guarded_chat_rows),
+            "interpretation": (
+                "unsafe raw LiteLLM behavior is reproduced; guarded Chat streaming is blocked before upstream"
+                if not eof_integrity_passes(
+                    None if eof_record is None else eof_record.get("upstream_terminal"),
+                    proxy["eof"].get("finish_reasons", []),
+                )
+                else "raw Chat EOF did not claim completion"
+            ),
         },
     )
 
