@@ -7,7 +7,7 @@
 | 前置任务 | T00 本地 Proxy 技术验真 |
 | 推荐规模 | 独立运维子卡 |
 | 对应测试 | [Test T00-G](../tests/T00-gateway-service.md) |
-| 阻塞关系 | T13 的完整真实功能矩阵与 T14 发布验收必须先通过；不阻塞 T01/T04/T09 本地开发，也不阻塞 T00 通过后经用户确认的 DeepSeek 早期冒烟 |
+| 阻塞关系 | T13 的完整真实功能矩阵与 T14 发布验收必须先通过；不阻塞 T01/T04/T09 本地开发，也不阻塞提供独立 DeepSeek 直连诊断。经 LiteLLM 的早期 DeepSeek 请求仍要求 T00 PROXY_LOCAL 通过并由用户单独确认 |
 
 ## 目标与边界
 
@@ -17,7 +17,7 @@ Proxy 负责 provider 协议、可信模型路由、各业务项目独立的受�
 
 Proxy 不建立新闻任务、新闻历史或网站用户表，不持有业务侧用户身份/任务状态。网站账号与 Proxy user/virtual key 不是同一身份。用户 provider Key 由拥有该用户连接的业务后端加密保存，并在每个获准请求中显式传递给受信 Proxy；项目虚拟 Key 仅授权业务后端使用该项目。缺用户 Key 或 Proxy 不可用时业务调用 fail closed，不能使用 Proxy 部署 provider Key、平台 Key 或其它用户 Key 兜底。
 
-共享网关服务有自己的配置、Postgres、密钥和运维生命周期，不由 NewsHub Web/Worker 启停。NewsHub、知序和 TranslateFlow 不共享虚拟 Key、用户历史、缓存命名空间或权限。通过 T00 PROXY_LOCAL 后可在 T00 阶段经单独用户确认进行一次早期 DeepSeek 文本冒烟，不要求 T00-G 备份/升级运维验收全部完成；它不替代 T13 的产品功能矩阵。首轮真实 provider 仍只有 DeepSeek。
+共享网关服务有自己的配置、Postgres、密钥和运维生命周期，不由 NewsHub Web/Worker 启停。NewsHub、知序和 TranslateFlow 不共享虚拟 Key、用户历史、缓存命名空间或权限。PROXY_LOCAL 未通过时，可向用户提供独立 DeepSeek 直连诊断供选择，但它不计为 T00 或网关验收；通过 T00 PROXY_LOCAL 后，才可经单独用户确认进行一次 LiteLLM 路径的早期 DeepSeek 文本冒烟，且不要求 T00-G 备份/升级运维验收全部完成。两种路径都不替代 T13 的产品功能矩阵。首轮真实 provider 仍只有 DeepSeek。
 
 ## 运维交付要求
 
@@ -28,7 +28,7 @@ Proxy 不建立新闻任务、新闻历史或网站用户表，不持有业务�
 - 禁用部署级隐式 provider Key、跨模型 fallback、未授权重试和共享内容缓存。逐项验证空 Key/错误 project key/代理不可达时无绕行。
 - 提供 secret 配置、密钥轮换、备份和恢复演练、健康检查、日志保留、升级评审、升级前备份与回滚步骤。升级仅通过单独批准的新镜像版本及 digest；回滚不得混淆数据库兼容性。
 - 网关停机不影响 NewsHub 新闻浏览与已存历史；所有新 BYOK 上游请求须清晰失败，业务侧不得绕开 Proxy 直连供应商。
-- 对早期 DeepSeek 冒烟，T00-G 不是前置条件；须先 PROXY_LOCAL 全过，并由用户确认模型、安全合成输入、请求/输出上限与预算。T13 的完整产品功能矩阵仍按本卡运维门槛执行。T00-G 运维成功不等于任何供应商/模型兼容或业务功能 go-live。
+- T00-G 不是独立直连诊断或早期 LiteLLM 请求的前置条件。PROXY_LOCAL 未通过时，只可提供独立直连诊断供用户选择，不能作为网关验收；LiteLLM 路径须先 PROXY_LOCAL 全过，再由用户确认模型、安全合成输入、请求/输出上限与预算。T13 的完整产品功能矩阵仍按本卡运维门槛执行。T00-G 运维成功不等于任何供应商/模型兼容或业务功能 go-live。
 
 ## 明确不做
 

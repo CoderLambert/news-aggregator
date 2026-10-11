@@ -1,15 +1,15 @@
 # BYOK 功能开发任务（T00–T14）
 
-**任务已拆分；全部 PLANNED，尚未实施或验收。** 一次只交给 Codex 一张业务卡。T00 是本地共享网关技术门槛；T00-G 是独立的共享网关运维子卡。T13 分为六个模型/厂商验证子卡。每张 Task 与 [同编号 Test 契约](../tests/README.md) 配对；T00-G 是新增的运维测试契约。
+**任务已拆分；T00 和 T01 已有独立 Draft PR，但均未完整验收。** T00 因 Chat EOF 终态风险 BLOCKED；T01 的 CRUD/权限与密钥生命周期本地验证已完成，但 worker 在途提交拦截仍未验证、状态为 BLOCKED。其余任务状态按表中依赖判断。一次只交付一张业务卡。T00 是本地共享网关技术门槛；T00-G 是独立的共享网关运维子卡。T13 分为六个模型/厂商验证子卡。每张 Task 与 [同编号 Test 契约](../tests/README.md) 配对；T00-G 是新增的运维测试契约。
 
 基线：`feat/byok-user-api-keys@ea2ce55ae22e19e1604e88031b824b68f2666cec`（执行当天仍须核对最新远端 HEAD）。本系列 Task 尚未在该 SHA 上实施；工作分支不得从更早功能分支重置。
 
 | Task | 单次可验收的功能/门槛 | 依赖 | 体量 | 状态 |
 | --- | --- | --- | --- | --- |
-| [T00 本地共享网关技术验真](T00-sdk-protocol.md) | 锁定的真实 LiteLLM Proxy + 官方客户端 SDK + 受控 HTTP 上游跑通三协议、原始终态、工具往返、故障、Key 隔离、关闭与无重试；本地通过后可单独申请一次 DeepSeek 早期文本冒烟。 | 无 | S·技术门槛 | PLANNED |
-| [T00-G 共享网关运维交付](T00-gateway-service.md) | 独立 Proxy/Postgres 服务配置、项目 virtual key、模型隔离、脱敏用量、第二个通用 CLI 消费者与 NewsHub 启停隔离、备份恢复、升级回退。此卡不部署于本次文档 PR。 | T00 | 运维子卡 | PLANNED |
-| [T01 个人 Key 连接增删改停](T01-credentials.md) | 在正式 /settings/ai 页面管理网站用户自己的供应商 Key，掩码、替换、停用、删除，跨刷新恢复。 | 无 | M | PLANNED |
-| [T02 录入模型并显式验证](T02-models-and-tests.md) | 添加可信预设/手动模型 ID，主动测试文本与工具能力；本地测试使用临时 Proxy 和受控上游。 | T01、T00 本地技术门槛 | M | PLANNED |
+| [T00 本地共享网关技术验真](T00-sdk-protocol.md) | 锁定的真实 LiteLLM Proxy + 官方客户端 SDK + 受控 HTTP 上游验证三协议、原始终态、工具往返、故障、Key 隔离、关闭与无重试；PROXY_LOCAL 失败时可提供独立 DeepSeek 直连诊断，但不能作为网关验收。 | 无 | S·技术门槛 | BLOCKED |
+| [T00-G 共享网关运维交付](T00-gateway-service.md) | 独立 Proxy/Postgres 服务配置、项目 virtual key、模型隔离、脱敏用量、第二个通用 CLI 消费者与 NewsHub 启停隔离、备份恢复、升级回退。此卡不部署于本次文档 PR。 | T00 | 运维子卡 | BLOCKED |
+| [T01 个人 Key 连接增删改停](T01-credentials.md) | 在正式 /settings/ai 页面管理网站用户自己的供应商 Key，掩码、替换、停用、删除，跨刷新恢复；worker 在途提交拦截尚未验证。 | 无 | M | BLOCKED |
+| [T02 录入模型并显式验证](T02-models-and-tests.md) | 添加可信预设/手动模型 ID，主动测试文本与工具能力；本地测试使用临时 Proxy 和受控上游。 | T01、T00 本地技术门槛 | M | BLOCKED |
 | [T03 用途默认模型设置](T03-preferences.md) | 为默认、问答、翻译、研究、问题推荐选择并保存模型。 | T02 | S-M | PLANNED |
 | [T04 新闻问答 BYOK 闭环](T04-article-chat.md) | 新闻详情通过业务后端调用 Proxy；本地开发可运行临时 Proxy+受控上游，不要求共享生产服务已交付。 | T03、T00 本地技术门槛 | M | PLANNED |
 | [T05 个人全文翻译最小闭环](T05-private-translation.md) | 一篇安全长度新闻持久生成、私有结果、重开恢复。 | T04 | M | PLANNED |
@@ -32,7 +32,7 @@
 - 不传任意 `user_config`、`api_base`、headers、callback、路由/fallback 配置；业务后端仅构造受信端点、模型和凭据字段白名单。
 - 新闻正文/问题的接收方是业务后端、共享 Proxy 和用户选择的 provider；日志与回调不得包含 Key 或正文；首版共享内容缓存关闭。
 - 本地测试级别分开记：SDK_LOCAL 是真实 SDK+受控上游；PROXY_LOCAL 是真实 Proxy+SDK+受控上游；PROVIDER_REAL 才是指定真实 provider/model 的线上请求；UAT 是最终用户操作。四种证据不能互相代替。
-- T00 PROXY_LOCAL 通过后可独立用户确认一次 DeepSeek 早期文本冒烟，不等 T00-G；该记录不代替 T13 矩阵。T13 的完整 provider 功能矩阵仍要求 T00-G，其他首批预设维持 NOT_RUN，不因 PROXY_LOCAL 成功声称兼容。产品首批六个预设不限制未来 Proxy 支持范围。
+- 若 T00 PROXY_LOCAL 失败，可向用户提供独立 DeepSeek 直连诊断供选择，但它不计为 T00 验收。经 LiteLLM 的早期 DeepSeek 真实请求须先通过 PROXY_LOCAL 并单独确认，不等 T00-G；该记录不代替 T13 矩阵。T13 的完整 provider 功能矩阵仍要求 T00-G，其他首批预设维持 NOT_RUN，不因 PROXY_LOCAL 成功声称兼容。产品首批六个预设不限制未来 Proxy 支持范围。
 - T14 之前独立验收服务健康、安全、日志、备份/恢复、升级与回退。网关故障时新闻与保存历史仍可读，新 AI 请求失败关闭。
 
 ## 推荐推进顺序
