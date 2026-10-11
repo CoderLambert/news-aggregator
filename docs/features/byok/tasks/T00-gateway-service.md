@@ -1,6 +1,6 @@
 # T00-G · 共享 LiteLLM Proxy 运维交付契约
 
-> **PLANNED**：本卡只定义共享网关交付边界，尚未创建服务仓库、配置、数据库或部署资源；所有运维验收均 NOT_RUN。
+> **PARTIAL**：共享 LiteLLM Proxy 配置、独立 Postgres Compose 定义和本地合成测试已实现；镜像签名与固定 digest 已验证，本地启动、隔离 key 路由、fail-closed、usage 脱敏及备份恢复演练通过。生产部署、真实 NewsHub Web/Worker 生命周期、升级回滚和真实 provider 兼容仍未执行，见 [Test T00-G](../tests/T00-gateway-service.md)。
 
 | 属性 | 内容 |
 | --- | --- |
@@ -30,13 +30,15 @@ Proxy 不建立新闻任务、新闻历史或网站用户表，不持有业务�
 - 网关停机不影响 NewsHub 新闻浏览与已存历史；所有新 BYOK 上游请求须清晰失败，业务侧不得绕开 Proxy 直连供应商。
 - 对早期 DeepSeek 冒烟，T00-G 不是前置条件；须先 PROXY_LOCAL 全过，并由用户确认模型、安全合成输入、请求/输出上限与预算。T13 的完整产品功能矩阵仍按本卡运维门槛执行。T00-G 运维成功不等于任何供应商/模型兼容或业务功能 go-live。
 
-## 明确不做
+## 本轮范围与明确不做
 
-本任务不在本次文档 PR 中创建服务仓库、配置、云资源、Postgres、容器或部署；不操作线上环境/SSH，不保存真实用户 Key，不调用真实 provider，不把 Proxy 用作新闻任务系统，不把 master key 交给业务项目，不调整 T01/T04/T09 等业务卡的任务边界。
+本轮在当前仓库提供独立 Compose/YAML、secret-file entrypoint、BYOK 准入回调、运维说明和仅供本地使用的合成测试夹具；这不是生产部署，也不改变 NewsHub Web/Worker 的生命周期。没有操作线上环境/SSH 或云资源，没有保存真实用户 Key，也没有调用真实 provider。Proxy 不作为新闻任务系统，master key 不交给业务项目；不调整 T01/T04/T09 等业务卡的任务边界。
 
 ## 交付与验收
 
 交付独立的服务配置和运维说明，固定经来源、签名/证明与 registry manifest 实际核验的镜像 tag+digest，含最小模型路由和项目虚拟 Key 权限策略；记录可脱敏复现的启动、配置验证、健康检查、错误 key 拒绝、重启、备份/恢复和版本回退证据。
 
 T00-G 的 PASS 只说明共享网关运维链路符合约定。T13 子卡仍须按真实模型、地域、日期和有界请求单独记 PROVIDER_REAL；当前只获准 DeepSeek。T14 再单独评估业务发布。
+
+当前本卡为 **PARTIAL**：本地合成服务与隔离恢复通过，但生产访问控制、生产 RPO/RTO、版本回滚、真实 NewsHub 生命周期、T13 provider 矩阵和 T14 发布验收未执行。
 
