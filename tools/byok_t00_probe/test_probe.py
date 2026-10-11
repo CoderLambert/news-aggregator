@@ -1,9 +1,13 @@
 """Self-tests for the probe's safety evaluators (standard-library unittest only)."""
 
+import json
 import unittest
+from unittest.mock import patch
 
 from probe import (
+    EXPECTED_IMAGES,
     add_check,
+    container_image_evidence,
     credential_record_passes,
     eof_integrity_passes,
     missing_provider_fails_closed,
@@ -22,6 +26,90 @@ def good_record(protocol="chat"):
         "admin_key_match": False,
         "deployment_default_match": False,
     }
+
+
+class ContainerImageEvidenceTests(unittest.TestCase):
+    def _run_fixture(self, mismatch=False):
+        services = list(EXPECTED_IMAGES)
+        containers = {}
+        ids = []
+        for service in services:
+            container_id = "container-" + service
+            image_id = "sha256:config-id-db" if service == "db" else "sha256:config-id-litellm"
+            ids.append(container_id)
+            containers[container_id] = (
+                image_id,
+                EXPECTED_IMAGES[service],
+            )
+
+        def fake_compose(_project, *args, **_kwargs):
+            if args[:2] == ("ps", "-q"):
+                return "\n".join(ids)
+            raise AssertionError("unexpected compose call")
+
+        runtime_ids = {
+            image_id: service
+            for service, (image_id, _config_image) in (
+                (name, containers["container-" + name]) for name in services
+            )
+        }
+
+        def fake_docker(args, **_kwargs):
+            if args[0] == "inspect":
+                rows = []
+                for container_id in args[3:]:
+                    image_id, config_image = containers[container_id]
+                    service = container_id.removeprefix("container-")
+                    rows.append(
+                        f"{container_id}|{image_id}|{config_image}|{service}"
+                    )
+                return "\n".join(rows)
+
+            if args[:2] == ["image", "inspect"]:
+                reference = args[-1]
+                if reference in runtime_ids:
+                    service = runtime_ids[reference]
+                    image_id = reference
+                    repo_digests = []
+                else:
+                    service = next(
+                        name for name, pinned in EXPECTED_IMAGES.items()
+                        if pinned == reference
+                    )
+                    image_id = containers["container-" + service][0]
+                    if mismatch and service == "db":
+                        image_id = "sha256:different-image-id"
+                    repo_digests = [reference]
+                return image_id + "|" + json.dumps(repo_digests)
+
+            raise AssertionError("unexpected Docker command")
+
+        with patch("probe.compose", side_effect=fake_compose), patch(
+            "probe.docker", side_effect=fake_docker
+        ):
+            return container_image_evidence("t00-unit-project")
+
+    def test_records_container_and_image_inspect_evidence(self):
+        evidence, passed = self._run_fixture()
+        self.assertTrue(passed)
+        db = evidence["db"]
+        self.assertEqual(db["container_image_id"], "sha256:config-id-db")
+        self.assertEqual(db["runtime_image_inspect_id"], "sha256:config-id-db")
+        self.assertEqual(db["fixed_reference_resolved_image_id"], "sha256:config-id-db")
+        self.assertEqual(db["container_config_image"], EXPECTED_IMAGES["db"])
+        self.assertEqual(db["runtime_repo_digests"], [])
+        self.assertEqual(db["fixed_reference_repo_digests"], [EXPECTED_IMAGES["db"]])
+        self.assertNotEqual(db["container_image_id"], EXPECTED_IMAGES["db"].rsplit("@", 1)[-1])
+
+    def test_fixed_reference_must_resolve_to_runtime_image_id(self):
+        evidence, passed = self._run_fixture(mismatch=True)
+        self.assertFalse(passed)
+        self.assertFalse(evidence["db"]["fixed_reference_resolves_to_runtime_id"])
+        # The manifest digest and config/image ID are different kinds of identifier.
+        self.assertNotEqual(
+            evidence["db"]["container_image_id"],
+            EXPECTED_IMAGES["db"].rsplit("@", 1)[-1],
+        )
 
 
 class CredentialEvaluatorTests(unittest.TestCase):

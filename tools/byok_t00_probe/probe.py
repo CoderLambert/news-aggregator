@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import importlib.metadata
 import json
@@ -113,31 +114,69 @@ def docker_versions(project: str) -> dict[str, str]:
     }
 
 
+def inspect_image(reference: str) -> dict:
+    formatted = docker(
+        ["image", "inspect", "--format", "{{.Id}}|{{json .RepoDigests}}", reference],
+        timeout=20,
+    )
+    image_id, separator, repo_digests_json = formatted.partition("|")
+    if not separator or not image_id:
+        raise RuntimeError("unexpected docker image inspect output")
+    try:
+        repo_digests = json.loads(repo_digests_json)
+    except json.JSONDecodeError:
+        raise RuntimeError("invalid RepoDigests from docker image inspect") from None
+    return {
+        "image_id": image_id,
+        "repo_digests": repo_digests if isinstance(repo_digests, list) else [],
+    }
+
+
 def container_image_evidence(project: str) -> tuple[dict, bool]:
     ids = compose(project, "ps", "-q", timeout=20).splitlines()
     if not ids:
         raise RuntimeError("no running probe containers to inspect")
-    containers = json.loads(docker(["inspect", *ids], timeout=20))
+
+    # Use a narrow Go template so Docker never emits container Env or other config.
+    container_format = (
+        '{{.Id}}|{{.Image}}|{{.Config.Image}}|'
+        '{{index .Config.Labels "com.docker.compose.service"}}'
+    )
+    inspected = docker(
+        ["inspect", "--format", container_format, *ids],
+        timeout=20,
+    )
     evidence = {}
     all_pinned = True
-    for container in containers:
-        service = container.get("Config", {}).get("Labels", {}).get("com.docker.compose.service", "unknown")
-        repo_digests = container.get("RepoDigests") or []
-        config_image = container.get("Config", {}).get("Image", "")
+    for line in inspected.splitlines():
+        container_id, runtime_image_id, config_image, service = line.split("|", 3)
+        runtime_image = inspect_image(runtime_image_id)
         expected = EXPECTED_IMAGES.get(service)
-        expected_digest = expected.rsplit("@sha256:", 1)[-1] if expected else None
-        image_id = container.get("Image")
-        repo_digest_match = bool(expected and expected in repo_digests)
-        image_id_match = bool(expected_digest and image_id == "sha256:" + expected_digest)
-        digest_match = repo_digest_match or image_id_match
-        config_match = config_image == expected
-        all_pinned = all_pinned and digest_match and config_match
+        pinned_image = inspect_image(expected) if expected else None
+
+        runtime_inspect_matches = runtime_image["image_id"] == runtime_image_id
+        reference_resolves_to_runtime = bool(
+            pinned_image and pinned_image["image_id"] == runtime_image_id
+        )
+        config_reference_matches = config_image == expected
+        service_passes = (
+            runtime_inspect_matches
+            and reference_resolves_to_runtime
+            and config_reference_matches
+        )
+        all_pinned = all_pinned and service_passes
         evidence[service] = {
-            "image_id": image_id,
-            "configured_image": config_image,
-            "repo_digests": repo_digests,
-            "digest_match": digest_match,
-            "digest_evidence": "RepoDigest" if repo_digest_match else "image_id" if image_id_match else "no_match",
+            "container_id": container_id,
+            "container_image_id": runtime_image_id,
+            "container_config_image": config_image,
+            "expected_fixed_reference": expected,
+            "runtime_image_inspect_id": runtime_image["image_id"],
+            "runtime_repo_digests": runtime_image["repo_digests"],
+            "fixed_reference_resolved_image_id": None if pinned_image is None else pinned_image["image_id"],
+            "fixed_reference_repo_digests": [] if pinned_image is None else pinned_image["repo_digests"],
+            "runtime_id_matches_image_inspect": runtime_inspect_matches,
+            "fixed_reference_resolves_to_runtime_id": reference_resolves_to_runtime,
+            "config_image_matches_fixed_reference": config_reference_matches,
         }
     return evidence, all_pinned and set(evidence) == set(EXPECTED_IMAGES)
 
@@ -802,7 +841,51 @@ def run_probe(project: str) -> dict:
     return result
 
 
+
+def image_evidence_only() -> int:
+    project = "byok-t00-images-" + uuid.uuid4().hex[:8]
+    result = {
+        "scope": "IMAGE_EVIDENCE_ONLY",
+        "provider_real": "NOT_RUN",
+        "checks": [],
+    }
+    try:
+        compose(project, "up", "-d", "--wait", "--wait-timeout", "180", timeout=210)
+        images, image_checks_pass = container_image_evidence(project)
+        result["images"] = images
+        add_check(
+            result["checks"],
+            "IMAGE_FIXED_REFERENCES_RESOLVE_TO_RUNNING_IDS",
+            image_checks_pass,
+            {"services": sorted(images)},
+        )
+    except Exception as exc:
+        add_check(
+            result["checks"],
+            "IMAGE_EVIDENCE_COMPLETED",
+            False,
+            {"error_type": type(exc).__name__},
+        )
+    finally:
+        result["checks"].extend(cleanup_project(project))
+
+    failed_checks = [item for item in result["checks"] if item["status"] == "FAIL"]
+    result["status"] = "FAIL" if failed_checks else "PASS"
+    result["failed_check_ids"] = [item["id"] for item in failed_checks]
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    return 1 if failed_checks else 0
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--images-only",
+        action="store_true",
+        help="start the isolated Compose fixture, verify image references/IDs, and clean it up without model requests",
+    )
+    args = parser.parse_args()
+    if args.images_only:
+        return image_evidence_only()
     project = "byok-t00-probe-" + uuid.uuid4().hex[:8]
     result = {
         "scope": "PROBE_SUBSET_ONLY",

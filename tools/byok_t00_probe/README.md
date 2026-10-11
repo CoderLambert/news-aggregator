@@ -24,11 +24,17 @@ Run evaluator self-tests:
     cd tools/byok_t00_probe
     /tmp/byok-t00-sdk-venv-20261011/bin/python -m unittest -v test_probe
 
-Run the Docker probe from the repository root:
+Run the full subset probe from the repository root:
 
     /tmp/byok-t00-sdk-venv-20261011/bin/python tools/byok_t00_probe/probe.py
 
-The probe uses Docker context default, a unique Compose project name, pinned image references, and an internal-only network. It inspects each running container's actual image ID and digest evidence. It tears down only its own unique Compose project, then asserts that its containers and network are gone. Any failed check, including cleanup, makes the CLI exit nonzero. A nonzero exit is a test failure, not a fixed blocked exit code.
+Recheck only image evidence without issuing model requests:
+
+    /tmp/byok-t00-sdk-venv-20261011/bin/python tools/byok_t00_probe/probe.py --images-only
+
+The probe uses Docker context default, a unique Compose project name, pinned image references, and an internal-only network. For each service it reads only the container ID, .Image, .Config.Image, and service label. It then runs docker image inspect by the actual .Image ID and by the configured fixed reference, recording each image .Id and .RepoDigests separately. Image validation passes only when the runtime image-inspect ID and fixed-reference-resolved ID both equal the container .Image ID, and .Config.Image equals the fixed reference. It does not compare a manifest/index digest string directly with an image config ID. Narrow Docker format strings avoid outputting container Env.
+
+Both modes tear down only their own unique Compose project, then assert that its containers and network are gone. Any failed check, including cleanup, makes the CLI exit nonzero.
 
 ## Current result boundary
 
