@@ -1,18 +1,18 @@
 # Test T00 · 共享网关端到端技术验真
 
-> **T00 BLOCKED / GATEWAY_ADMISSION_PROTOTYPE**：2026-10-11 最终隔离合成运行 353 PASS / 4 FAIL。失败集中在三项：LiteLLM Proxy 丢 Responses function-call item 的 `id`、Proxy Messages 下游取消后仍读完上游流、无回调 Chat EOF 被合成为 `stop`（同一取消问题产生两个相关检查失败）。本轮仅在测试夹具中用独立 profile 开放 Responses/Messages native stream；主准入配置仍拒绝 Chat stream。不是产品接入；PROVIDER_REAL 仍为 NOT_RUN。
+> **T00 BLOCKED / GATEWAY_ADMISSION_PROTOTYPE**：最新隔离合成运行 D（2026-10-11）为 `394 PASS / 1 FAIL / 395 checks`。唯一失败仍是无回调 Chat EOF 被 LiteLLM v1.104.2 暴露成 `finish_reason=stop`。Responses 标准 `fc_` item / `call_` call 两轮续接严格通过；旧 `resp_item_` 仅作为独立 foreign-ID 归一化专例。SDK_LOCAL 与 native-stream Proxy 的取消传播检查在显式 2 秒本地观测窗内通过。A9 历史运行 `353 PASS / 4 FAIL` 仍以独立脱敏文件保留，不与 D 混合。仅测试夹具在独立 profile 开放 Responses/Messages native stream；主准入配置仍拒绝 Chat stream。不是产品接入；PROVIDER_REAL 仍为 NOT_RUN。
 
 对应：[T00 Task](../tasks/T00-sdk-protocol.md)。
 
 | 用例 | 场景 / 故障注入 | 正确性约束 | 状态 |
 | --- | --- | --- | --- |
-| T00-01 | 三协议完整文字和工具终态 | 原始上游、Proxy、SDK 终态相符；满足协议各自完整条件后才成功 | BLOCKED |
+| T00-01 | 三协议完整文字和工具终态 | 原始上游、Proxy、SDK 终态相符；满足协议各自完整条件后才成功 | PASS（SDK/Proxy 本地合成） |
 | T00-02 | partial 事件后正常 EOF、length/incomplete | 不能合成完整终态；保留原始 incomplete 原因 | PARTIAL |
 | T00-03 | 截断 body、超时、SSE error、HTTP error | 安全错误可分类，Key/正文不泄露 | PASS（本地合成） |
 | T00-04 | 半截工具参数、非法 JSON、非白名单工具 | 不派发工具、不成功 | PASS（本地合成） |
-| T00-05 | 两轮工具续接 | 保留 Responses output items、Anthropic thinking/signature、Chat reasoning_content；公开消息不含 continuation | BLOCKED |
+| T00-05 | 两轮工具续接 | 保留 Responses output items、Anthropic thinking/signature、Chat reasoning_content；公开消息不含 continuation | PASS（本地合成；foreign-ID 另列） |
 | T00-06 | 不同 Key/model 并发隔离 | 不混用用户凭据、模型、Proxy 项目虚拟 Key 或部署 provider Key | PARTIAL |
-| T00-07 | 成功、异常、取消时关闭 stream/response/HTTP 资源 | 所有已打开资源均关闭 | BLOCKED |
+| T00-07 | 成功、异常、取消时关闭 stream/response/HTTP 资源 | 所有已打开资源均关闭 | PARTIAL（本地受控流通过；不证明供应商停止生成/计费） |
 | T00-08 | 缺 provider Key、错误项目虚拟 Key | 缺 Key fail closed；错误项目凭据在到达 upstream 前被拒绝 | PASS（本地合成） |
 | T00-09 | SDK/Proxy 重试与 fallback 计数 | max_retries=0、num_retries=0、无跨模型 fallback，实际请求数与断言一致 | PASS（本地合成） |
 | T00-10 | v1.104.2 原始上游 EOF 与 Proxy 暴露终态对照 | 仅下游 stop/[DONE] 不足以证明原始上游完整；失败按局部风险记录 | BLOCKED |
@@ -33,10 +33,10 @@
 | 本卡状态 | **BLOCKED**；本次 CLI 只报告已覆盖子集，T00 完整验收未通过 |
 | 功能分支目标基线 HEAD | `ea2ce55ae22e19e1604e88031b824b68f2666cec`，与用户报告一致；未重置原工作树 |
 | 本任务实现起点 HEAD | `69e084e39552c5650b930a067b6b79d09e95db34`；分支 `task/byok-T00-sdk-protocol`，独立工作区 |
-| T00 本轮实现 SHA | `e7abc397221c6cc87449715335d609cebf041b28`；仅工具、合成夹具、测试与 README；没有生产适配器或新闻业务改动 |
+| T00 本轮实现 SHA | `193d52d0b684c8c47db633a6a93ea96a6690e460`；仅工具、合成夹具、测试与 README；没有生产适配器或新闻业务改动 |
 | Draft PR | #33，base `feat/byok-user-api-keys`；维持 open / Draft |
 | Python / OpenAI SDK / Anthropic SDK / httpx2 / LiteLLM / Docker Compose | 3.14.8 / 3.28.0 / 1.13.0 / 2.13.1 / 1.104.2 / 5.5.1；Docker Server 29.7.2 |
-| 最终 SDK_LOCAL / PROXY_LOCAL 合成运行 | `353 PASS / 4 FAIL / 357 checks`，CLI exit 1；失败是 Responses function-call `id` 丢失、Messages Proxy 取消未中止上游（两项检查）、以及无回调 Chat EOF 合成 stop |
+| 最新 SDK_LOCAL / PROXY_LOCAL 合成运行 D | `394 PASS / 1 FAIL / 395 checks`，CLI exit 1；唯一失败为无回调 Chat EOF 合成 `stop`，没有弱化该断言 |
 | 21 种无效/缺失 provider Key | Chat / Responses / Messages 全部 HTTP 400，错误码 `BYOK_PROVIDER_KEY_REQUIRED`，每项上游请求 0 |
 | Key/model 隔离 | 同 alias 的 Chat A/B 使用不同显式 provider Key 各 1 次；错配模型的项目 Key 返回 HTTP 403、上游 0；错误项目虚拟 Key 上游 0 |
 | 错误与 incomplete | SDK_LOCAL 与 PROXY_LOCAL 三协议 HTTP 503、超时、截断 body 都各 1 次上游请求；length / incomplete / max_tokens 原因保留 |
@@ -45,16 +45,50 @@
 | PROVIDER_REAL | **NOT_RUN**；未读现有 Key、未发送任何 DeepSeek 请求 |
 | CI 上下文（用户提供，只读） | HEAD `69e084e` 的 run `38136034042` backend-and-release-gates / frontend 均 success；较早 `38136011186` backend failure。它们不是 T00 手工网关验收结果 |
 | 旧聊天/研究/翻译测试基线 | **NOT_RUN**：当前 Python 缺 pytest，frontend 未安装 node_modules；按约束没有安装全项目依赖。历史 `219 passed / 3 warnings` 没有可恢复的命令/报告；缺 chromadb 的 `82 passed / 23 failed` 不作产品基线 |
-| 旧测试断言 diff | `tests/` 与 `frontend/tests/` 无 diff；仅新增 `tools/byok_t00_probe/test_probe.py` 的 22 项隔离自测，没有放宽旧断言 |
-| 完整 T00 结论 | **BLOCKED**；真实厂商兼容、Responses Proxy 原始 item、取消传播和 Chat EOF 终态仍未满足 |
+| 旧测试断言 diff | `tests/` 与 `frontend/tests/` 无 diff；隔离探针自测 24 项通过，没有放宽旧断言 |
+| 完整 T00 结论 | **BLOCKED**；Chat EOF 原始终态仍失败，PROVIDER_REAL 和旧新闻回归仍未执行 |
 
-## 本轮本地证据（2026-10-11）
+## 最新复测 D（2026-10-11）
+
+实现 SHA：`193d52d0b684c8c47db633a6a93ea96a6690e460`。运行命令：
+
+    /tmp/byok-t00-sdk-venv-20261011/bin/python tools/byok_t00_probe/probe.py
+
+该命令退出码为 1，结果 `394 PASS / 1 FAIL / 395 checks`。唯一失败是 `PROXY_UNGUARDED_CHAT_EOF_NOT_SYNTHESIZED_COMPLETE`：上游有 1 次请求且没有协议终态，Proxy SDK 正常结束并观察到 `finish_reason=stop`。此失败是保留的风险复现。
+
+脱敏 JSON 已提交在 [T00-sdk-protocol-run-d-sanitized.json](../evidence/T00-sdk-protocol-run-d-sanitized.json)；源输出 SHA-256 为 `9d0a034e49a2a7b16746bc41947e9cb02b96f519b55f3807d1d6096961cbb66a`，副本 SHA-256 为 `0dce6b766fd26228f4ade36b92235d8cbcf91bacb132bd2ff79c58c007bda520`。副本的 7 个 SDK/Proxy `public_output.text` 已替换，未包含请求正文、Key、Authorization 值或 Prompt。更早的 A9 原始输出未覆盖（SHA-256 `ef7213c76b62b2ac263d4e934e65d779562f94347d292d0120059edb5c9c093f`）；其脱敏副本 [T00-sdk-protocol-run-a9-sanitized.json](../evidence/T00-sdk-protocol-run-a9-sanitized.json) SHA-256 为 `50326c99d0ece643bb248da2ea729729b496a6b91d786495bf524d70360943cb`，保留原来的 `353 PASS / 4 FAIL / 357 checks`，只作为修正前历史证据。
+
+环境版本：Python 3.14.8、OpenAI SDK 3.28.0、Anthropic SDK 1.13.0、httpx2 2.13.1、LiteLLM Proxy 1.104.2、Docker Compose 5.5.1、Docker Server 29.7.2。PROVIDER_REAL 仍为 `NOT_RUN`。
+
+- Responses 的正常两轮输出使用 `fc_t00_r1/r2` item ID 与 `call_t00_r1/r2` call ID。SDK_LOCAL 和 PROXY_LOCAL 均严格保留 reasoning raw item、encrypted continuation、function-call 全字段及 tool result 对应关系；公开结果只含 `text`。
+- 旧 `resp_item_call_r1/r2` 输入单独走 foreign-ID 归一化专例。LiteLLM v1.104.2 移除非 `fc_` item ID；两轮中 `call_id`、名称、参数、状态、reasoning、续接 opaque state 及 tool result 对应关系均保留。该专例不会被报告成标准 Responses tool association 失败。LiteLLM 的 [v1.104.2 transformation 实现](https://github.com/BerriAI/litellm/blob/v1.104.2/litellm/llms/openai/responses/transformation.py#L358-L372)记录了这项 foreign ID 处理。
+- Chat 保留 `[DONE]`；Responses 和 Messages 不附加该 sentinel，分别以 `response.completed` 与 `message_stop` 作为协议终态。对应 framing 检查通过。
+
+取消测试使用合成长流、fixture 最长生成 8 秒，并以 **2,000 ms 本地观测窗**判定传播。时间戳由客户端与本机容器写入单调时钟。关闭 SDK 响应后，所有测试都只消费 1 个初始事件，随后 fixture 观测到上游 socket 断开、producer 退出，活动 fixture producer 为 0；native-stream Proxy health endpoint 为 2xx：
+
+| 路径 | 下游关闭至上游断开 | producer 退出延迟 | 断开前成功写入 frame / 关闭后写入 | 窗口末活动 producer | Proxy health |
+| --- | ---: | ---: | ---: | ---: | --- |
+| SDK Chat | 9.888 ms | 9.919 ms | 3 / 1 | 0 | N/A |
+| SDK Responses | 9.983 ms | 10.004 ms | 3 / 1 | 0 | N/A |
+| SDK Messages | 9.887 ms | 9.901 ms | 3 / 1 | 0 | N/A |
+| Proxy Responses | 8.963 ms | 8.967 ms | 4 / 1 | 0 | HTTP 2xx |
+| Proxy Messages | 7.855 ms | 7.860 ms | 3 / 1 | 0 | HTTP 2xx |
+
+frame 数是 fixture 的 socket 写入计数，不能当作 Proxy 内部缓冲帧数，也不证明供应商即时停止生成或计费。这次 Messages cancel 原来附加 `[DONE]` 且用 1 MiB 单帧观察；现改为真实 Messages `message_stop` 语义、重复 32 KiB synthetic delta、socket 断连与 producer 资源观测。
+
+本轮检查：24 项标准库 `unittest` 自测通过；`py_compile`、`docker compose -f tools/byok_t00_probe/compose.yaml config --quiet`、`git diff --check` 通过。Compose `down` 与项目资源核对通过，containers=0、networks=0。
+
+旧新闻聊天/研究/翻译回归仍为 `NOT_RUN`，其原因与历史基线相同：隔离环境没有 pytest 和 frontend `node_modules`，没有为此安装全项目依赖。`tests/` 与 `frontend/tests/` 没有改动；没有放宽旧断言。用户提供的 CI 运行仍只作为独立上下文，不算 T00 手工验收。
+
+## 历史 A9 本地证据（2026-10-11，fixture 修正前）
 
 最终运行命令：
 
     /tmp/byok-t00-sdk-venv-20261011/bin/python tools/byok_t00_probe/probe.py
 
-脱敏结果写入本机临时文件 `/tmp/byok-t00-run-a9.json`（未提交）；本页摘录其通过/失败计数、终态、错误类别和请求数，不含 Key 或原始新闻/continuation。
+本节以下内容完整记录 fixture 修正前的 A9 历史状态。A9 原始 CLI 输出仍位于 `/tmp/byok-t00-run-a9.json`；提交版本为 `../evidence/T00-sdk-protocol-run-a9-sanitized.json`，公开输出文本已脱敏。
+
+以下 `SDK_LOCAL`、`PROXY_LOCAL`、准入与镜像细节均属于 A9 历史快照；最新状态以本页前面的复测 D 与其脱敏 JSON 为准。
 
 本地自测与静态检查：`python3 -m py_compile tools/byok_t00_probe/{probe,upstream,proxy_callback,test_probe}.py`、`cd tools/byok_t00_probe && /tmp/byok-t00-sdk-venv-20261011/bin/python -m unittest -v test_probe`（22 tests passed）、`docker compose -f tools/byok_t00_probe/compose.yaml config --quiet`、`git diff --check` 均通过。全程真实厂商入口未调用，仅使用本地 HTTP fixture 与合成 Key。
 
@@ -157,4 +191,4 @@ SDK/Proxy 功能路径的上次脱敏摘要（镜像核验项已撤销，需与�
 
 既有 tests/ 无 diff，未更改任何旧断言。本次没有重跑新闻项目旧聊天/研究/翻译测试，因此不能声称旧回归通过。先前历史记录只留下 219 passed / 3 warnings 摘要；命令、依赖及机器报告未恢复。另一次因隔离环境缺 chromadb 得到 82 passed / 23 failed，也不能替代功能基线；本次不安装旧项目的无关依赖。
 
-SDK_LOCAL / PROXY_LOCAL 的 HTTP、超时、截断、length/incomplete、工具白名单与两轮工具往返已按本页运行并分别记录；Responses Proxy 原始 item `id` 与 Messages Proxy 取消传播仍 FAIL，Chat EOF 风险仍 FAIL。PROVIDER_REAL 与旧新闻聊天/研究/翻译回归仍未运行。本地合成结果不表示任何真实 provider 兼容；不进入 T01 或据此扩大成生产变更。
+历史 A9 的 Responses `resp_item_` 与 Messages cancel 失败已在上方 A9 文件中保留。最新 D 中，标准 Responses `fc_`/`call_` 与 foreign-ID 归一化专例均通过，受控本地取消传播通过；无回调 Chat EOF 的失败继续保留。PROVIDER_REAL 与旧新闻聊天/研究/翻译回归仍未运行。本地合成结果不表示任何真实 provider 兼容，也未改生产调用。
