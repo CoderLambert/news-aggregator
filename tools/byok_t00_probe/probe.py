@@ -22,6 +22,12 @@ from pathlib import Path
 import httpx2
 from anthropic import Anthropic
 from openai import OpenAI
+from deepseek_smoke import (
+    EXPECTED_ANSWER as DEEPSEEK_EXPECTED_ANSWER,
+    MAX_OUTPUT_TOKENS as DEEPSEEK_MAX_OUTPUT_TOKENS,
+    PROMPT as DEEPSEEK_SMOKE_PROMPT,
+    _valid_completion as validate_deepseek_completion,
+)
 
 
 TOOL_DIR = Path(__file__).resolve().parent
@@ -985,9 +991,13 @@ def proxy_local(proxy_url: str, unguarded_proxy_url: str, native_stream_proxy_ur
     """Real SDK -> pinned Proxy -> controlled upstream with synthetic credentials."""
     key_a = make_virtual_key(proxy_url, "tenant-a-chat", "t00-chat")
     key_b = make_virtual_key(proxy_url, "tenant-b-chat", "t00-chat")
+    key_smoke = make_virtual_key(proxy_url, "tenant-a-deepseek-smoke", "t00-deepseek-smoke")
     key_messages = make_virtual_key(proxy_url, "tenant-a-messages", "t00-messages")
     key_messages_b = make_virtual_key(proxy_url, "tenant-b-messages-concurrent", "t00-messages")
-    register_project_key_fingerprints(upstream_url, [key_a, key_b, key_messages, key_messages_b])
+    register_project_key_fingerprints(
+        upstream_url,
+        [key_a, key_b, key_smoke, key_messages, key_messages_b],
+    )
 
     def call_chat(tenant: str, project_key: str) -> dict:
         test_id = "T00_PROXY_CHAT_A" if tenant == "tenant-a" else "T00_PROXY_CHAT_B"
@@ -1026,6 +1036,35 @@ def proxy_local(proxy_url: str, unguarded_proxy_url: str, native_stream_proxy_ur
             return safe_exception(exc)
         finally:
             client.close()
+
+    client_smoke = openai_client(key_smoke, proxy_url + "/v1")
+    try:
+        try:
+            response = client_smoke.chat.completions.create(
+                model="t00-deepseek-smoke",
+                messages=[{"role": "user", "content": DEEPSEEK_SMOKE_PROMPT}],
+                max_tokens=DEEPSEEK_MAX_OUTPUT_TOKENS,
+                response_format={"type": "json_object"},
+                extra_body={
+                    "api_key": PROVIDER_KEYS["tenant-a"],
+                    "thinking": {"type": "disabled"},
+                },
+            )
+            answer_valid, answer_assertion, _finish_reason = validate_deepseek_completion(
+                response,
+                1,
+            )
+            chat_smoke = {
+                "success": True,
+                "finish_reason": response.choices[0].finish_reason,
+                "model_alias": "t00-deepseek-smoke",
+                "answer_valid": answer_valid,
+                "answer_assertion": answer_assertion,
+            }
+        except Exception as exc:
+            chat_smoke = safe_exception(exc)
+    finally:
+        client_smoke.close()
 
     with ThreadPoolExecutor(max_workers=3) as pool:
         future_a = pool.submit(call_chat, "tenant-a", key_a)
@@ -1207,6 +1246,24 @@ def proxy_local(proxy_url: str, unguarded_proxy_url: str, native_stream_proxy_ur
                 "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
             })
 
+    smoke_missing_test_id = "T00_GUARD_DEEPSEEK_SMOKE_MISSING"
+    smoke_missing_status, smoke_missing_body = request_json_with_status(
+        proxy_url + "/v1/chat/completions",
+        {
+            "model": "t00-deepseek-smoke",
+            "messages": [{"role": "user", "content": smoke_missing_test_id}],
+        },
+        {"Authorization": f"Bearer {key_smoke}"},
+    )
+    admission_cases.append({
+        "test_id": smoke_missing_test_id,
+        "route": "deepseek_smoke",
+        "variant": "missing",
+        "status_code": smoke_missing_status,
+        "error_code": safe_error_marker(smoke_missing_body),
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+    })
+
     stream_denials = []
     for route_name, (route_path, project_key) in {"chat": route_specs["chat"]}.items():
         test_id = f"T00_GUARD_{route_name.upper()}_STREAM_DENIED"
@@ -1282,6 +1339,7 @@ def proxy_local(proxy_url: str, unguarded_proxy_url: str, native_stream_proxy_ur
     records = upstream.get("records", [])
     return {
         "chat": {"tenant-a": chat_a, "tenant-b": chat_b},
+        "chat_smoke": chat_smoke,
         "concurrent_messages_b": concurrent_messages_b,
         "responses": responses_result,
         "messages": messages_result,
@@ -1306,6 +1364,7 @@ def proxy_local(proxy_url: str, unguarded_proxy_url: str, native_stream_proxy_ur
             *PROVIDER_KEYS.values(),
             key_a,
             key_b,
+            key_smoke,
             key_messages,
             key_messages_b,
         ],
@@ -1736,8 +1795,21 @@ def evaluate_sdk_local(checks: list[dict], sdk: dict, upstream_records: list[dic
         DEPLOYMENT_KEY in config_text,
         {"deployment_default_configured": DEPLOYMENT_KEY in config_text},
     )
-    compose_text = COMPOSE_FILE.read_text(encoding="utf-8")
+    chat_model = config_text.partition("  - model_name: t00-deepseek-smoke\n")[2].split("\n  - model_name:", 1)[0]
     callback_text = (TOOL_DIR / "proxy_callback.py").read_text(encoding="utf-8")
+    add_check(
+        checks,
+        "CONFIG_SYNTHETIC_SENTINEL_AND_REQUEST_KEY_GUARD_ON_SMOKE_ROUTE",
+        bool(chat_model)
+        and "model: deepseek/deepseek-flash" in chat_model
+        and "api_base: http://upstream:8080" in chat_model
+        and "api_key: " + DEPLOYMENT_KEY in chat_model
+        and "callbacks: proxy_callback.proxy_handler_instance" in config_text
+        and 'provider_key = data.get("api_key")' in callback_text
+        and '"BYOK_PROVIDER_KEY_REQUIRED"' in callback_text,
+        {"synthetic_sentinel_configured": DEPLOYMENT_KEY in chat_model},
+    )
+    compose_text = COMPOSE_FILE.read_text(encoding="utf-8")
     add_check(
         checks,
         "CONFIG_GUARD_CALLBACK_AND_STREAM_DENY_ENABLED",
@@ -1868,6 +1940,33 @@ def evaluate_proxy_local(checks: list[dict], proxy: dict) -> None:
             response.get("success") is True and response.get("finish_reason") == "stop",
             {"sdk_success": response.get("success") is True, "finish_reason": response.get("finish_reason")},
         )
+
+    smoke_rows = records_for(records, "T00_PROXY_CHAT_SMOKE_A")
+    smoke_record = append_record_checks(
+        checks,
+        "PROXY_CHAT_SMOKE",
+        smoke_rows,
+        1,
+        "tenant-a",
+        "chat",
+    )
+    smoke_response = proxy["chat_smoke"]
+    add_check(
+        checks,
+        "PROXY_CHAT_SMOKE_SDK_COMPLETE_TERMINAL_AND_JSON_ASSERTION",
+        smoke_response.get("success") is True
+        and smoke_response.get("model_alias") == "t00-deepseek-smoke"
+        and smoke_response.get("finish_reason") == "stop"
+        and smoke_response.get("answer_valid") is True
+        and smoke_response.get("answer_assertion") == "json_object_fields_match"
+        and smoke_record is not None,
+        {
+            "sdk_success": smoke_response.get("success") is True,
+            "model_alias": smoke_response.get("model_alias"),
+            "finish_reason": smoke_response.get("finish_reason"),
+            "answer_assertion": smoke_response.get("answer_assertion"),
+        },
+    )
 
     response_rows = records_for(records, "T00_PROXY_RESPONSES_A")
     response_record = append_record_checks(

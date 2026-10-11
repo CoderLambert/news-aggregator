@@ -429,6 +429,22 @@ class Handler(BaseHTTPRequestHandler):
         route = self.path.rsplit("/", 1)[-1]
         is_messages = self.path.endswith("/messages")
         test_id = extract_marker(request)
+        if (
+            test_id == "T00_UNKNOWN"
+            and self.path.endswith("/chat/completions")
+            and any(
+                message.get("role") == "user"
+                and message.get("content") == (
+                    'Return only a JSON object with exactly these fields: '
+                    '{"probe_id":"byok-deepseek-smoke-v1","ok":true}.'
+                )
+                for message in request.get("messages", [])
+                if isinstance(message, dict)
+            )
+        ):
+            # The one-shot DeepSeek gateway fixture uses its exact production
+            # probe prompt, without adding a test marker to the user message.
+            test_id = "T00_PROXY_CHAT_SMOKE_A"
         expected = expected_tenant(test_id)
         scenario = (
             "eof-no-terminal" if "_EOF_" in test_id
@@ -551,12 +567,20 @@ class Handler(BaseHTTPRequestHandler):
                         "usage": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
                     })
                     return
+                answer = (
+                    json.dumps(
+                        {"probe_id": "byok-deepseek-smoke-v1", "ok": True},
+                        separators=(",", ":"),
+                    )
+                    if test_id == "T00_PROXY_CHAT_SMOKE_A"
+                    else "synthetic t00 chat pass"
+                )
                 self._json(200, {
                     "id": "chatcmpl_t00_synthetic",
                     "object": "chat.completion",
                     "created": 1,
                     "model": model,
-                    "choices": [{"index": 0, "message": {"role": "assistant", "content": "synthetic t00 chat pass"}, "finish_reason": "stop"}],
+                    "choices": [{"index": 0, "message": {"role": "assistant", "content": answer}, "finish_reason": "stop"}],
                     "usage": {"prompt_tokens": 4, "completion_tokens": 5, "total_tokens": 9},
                 })
             return

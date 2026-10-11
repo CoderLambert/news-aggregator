@@ -4,6 +4,13 @@ model_list:
       model: openai/test-model
       api_base: http://upstream:8080/v1
       api_key: sk-t00-deployment-default-synthetic
+  - model_name: t00-deepseek-smoke
+    litellm_params:
+      model: deepseek/deepseek-flash
+      api_base: http://upstream:8080
+      # Nonfunctional test sentinel; the admission callback requires the
+      # request-scoped synthetic provider key before route selection.
+      api_key: sk-t00-deployment-default-synthetic
   - model_name: t00-messages
     litellm_params:
       model: anthropic/test-model
