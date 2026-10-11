@@ -72,4 +72,28 @@ describe('BYOK model API boundary', () => {
     expect(mocks.post).toHaveBeenCalledWith('/ai/models/', input)
     expect(JSON.stringify(mocks.post.mock.calls)).not.toContain('api_key')
   })
+
+  it('posts only a capability kind and rejects provider payloads in the response', async () => {
+    mocks.post.mockResolvedValueOnce({ data: {
+      attempt_id: 'attempt-1', probe_kind: 'text', status: 'succeeded',
+      verification_status: 'verified', capability: 'supported', stale: false,
+      safe_error_code: '', latency_ms: 120, input_tokens: 8, output_tokens: 2,
+      billing_notice: 'provider_may_bill',
+    } })
+
+    await expect(api.testAIModel('model-1', 'text')).resolves.toMatchObject({
+      attempt_id: 'attempt-1', status: 'succeeded', capability: 'supported',
+      billing_notice: 'provider_may_bill',
+    })
+    expect(mocks.post).toHaveBeenCalledWith('/ai/models/model-1/test/', { probe_kind: 'text' })
+    expect(JSON.stringify(mocks.post.mock.calls)).not.toContain('api_key')
+
+    mocks.post.mockResolvedValueOnce({ data: {
+      attempt_id: 'attempt-2', probe_kind: 'text', status: 'succeeded',
+      verification_status: 'verified', capability: 'supported', stale: false,
+      safe_error_code: '', latency_ms: 80, input_tokens: null, output_tokens: null,
+      billing_notice: 'provider_may_bill', raw_response: { api_key: 'synthetic-secret' },
+    } })
+    await expect(api.testAIModel('model-1', 'text')).rejects.toThrow(TypeError)
+  })
 })

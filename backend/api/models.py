@@ -986,6 +986,10 @@ class AICallAttempt(models.Model):
         ('unknown', '结果未知'),
         ('not_sent', '未发送'),
     ]
+    PROBE_KIND_CHOICES = [
+        ('text', '文本能力'),
+        ('tools', '工具调用能力'),
+    ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     attempt_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
@@ -997,6 +1001,7 @@ class AICallAttempt(models.Model):
         related_name='call_attempts',
     )
     purpose = models.CharField(max_length=32, choices=PURPOSE_CHOICES)
+    probe_kind = models.CharField(max_length=16, choices=PROBE_KIND_CHOICES, default='text')
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='started')
     snapshot_digest = models.CharField(max_length=64)
     credential_epoch = models.PositiveBigIntegerField()

@@ -272,6 +272,22 @@ export type CreateAIModelInput =
   | { connection_id: string; catalog_model_id: string; display_name?: string }
   | { connection_id: string; model_id: string; display_name?: string }
 
+export type AIModelProbeKind = 'text' | 'tools'
+
+export interface AIModelTestResult {
+  attempt_id: string
+  probe_kind: AIModelProbeKind
+  status: 'succeeded' | 'failed' | 'unknown' | 'not_sent' | 'stale'
+  verification_status: AIModelVerificationStatus
+  capability: AIModelCapability
+  stale: boolean
+  safe_error_code: string
+  latency_ms: number
+  input_tokens: number | null
+  output_tokens: number | null
+  billing_notice: 'provider_may_bill'
+}
+
 function parseAIProviderProfiles(value: unknown): AIProviderProfile[] {
   if (!isRecord(value) || !Array.isArray(value.providers)) throw new TypeError('Invalid AI provider catalog')
   return value.providers.map((entry): AIProviderProfile => {
@@ -458,6 +474,41 @@ export async function deleteAIModel(modelId: string): Promise<{ deleted: boolean
   const value: unknown = (await api.delete<unknown>(`/ai/models/${modelId}/`)).data
   if (!isRecord(value) || value.deleted !== true) throw new TypeError('Invalid AI model delete response')
   return { deleted: true }
+}
+
+function parseAIModelTestResult(value: unknown): AIModelTestResult {
+  if (!isRecord(value) ||
+    typeof value.attempt_id !== 'string' ||
+    !['text', 'tools'].includes(String(value.probe_kind)) ||
+    !['succeeded', 'failed', 'unknown', 'not_sent', 'stale'].includes(String(value.status)) ||
+    !['not_tested', 'verified', 'failed', 'stale'].includes(String(value.verification_status)) ||
+    !['unknown', 'supported', 'unsupported'].includes(String(value.capability)) ||
+    typeof value.stale !== 'boolean' || typeof value.safe_error_code !== 'string' ||
+    typeof value.latency_ms !== 'number' ||
+    !(value.input_tokens === null || typeof value.input_tokens === 'number') ||
+    !(value.output_tokens === null || typeof value.output_tokens === 'number') ||
+    value.billing_notice !== 'provider_may_bill' ||
+    Object.keys(value).some((key) => ['api_key', 'provider_key', 'raw_response', 'response_body'].includes(key))) {
+    throw new TypeError('Invalid AI model test response')
+  }
+  return {
+    attempt_id: value.attempt_id,
+    probe_kind: value.probe_kind as AIModelProbeKind,
+    status: value.status as AIModelTestResult['status'],
+    verification_status: value.verification_status as AIModelVerificationStatus,
+    capability: value.capability as AIModelCapability,
+    stale: value.stale,
+    safe_error_code: value.safe_error_code,
+    latency_ms: value.latency_ms,
+    input_tokens: value.input_tokens,
+    output_tokens: value.output_tokens,
+    billing_notice: 'provider_may_bill',
+  }
+}
+
+export async function testAIModel(modelId: string, probeKind: AIModelProbeKind): Promise<AIModelTestResult> {
+  const value: unknown = (await api.post<unknown>(`/ai/models/${modelId}/test/`, { probe_kind: probeKind })).data
+  return parseAIModelTestResult(value)
 }
 
 // ---- News -----------------------------------------------------------------

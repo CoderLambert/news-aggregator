@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   deleteAIConnection: vi.fn(),
   deleteAIModel: vi.fn(),
   updateAIModel: vi.fn(),
+  testAIModel: vi.fn(),
 }))
 
 const authState = vi.hoisted(() => ({
@@ -80,6 +81,12 @@ beforeEach(() => {
   mocks.deleteAIConnection.mockResolvedValue({ deleted: true })
   mocks.deleteAIModel.mockResolvedValue({ deleted: true })
   mocks.updateAIModel.mockResolvedValue(modelConfig)
+  mocks.testAIModel.mockResolvedValue({
+    attempt_id: 'attempt-17', probe_kind: 'text', status: 'succeeded',
+    verification_status: 'verified', capability: 'supported', stale: false,
+    safe_error_code: '', latency_ms: 120, input_tokens: 8, output_tokens: 2,
+    billing_notice: 'provider_may_bill',
+  })
   vi.stubGlobal('confirm', vi.fn(() => true))
 })
 
@@ -210,5 +217,37 @@ describe('AIModelSettingsPage', () => {
     }))
     expect(await screen.findByRole('status')).toHaveTextContent('模型配置已更新；此前的测试结果已失效。')
     expect(screen.queryByRole('button', { name: /测试模型/ })).not.toBeInTheDocument()
+  })
+
+  it('requires a billing confirmation before testing each capability on a routed preset', async () => {
+    const routedModel: AIModelConfig = {
+      ...modelConfig, model_id: 'deepseek-flash', display_name: 'DeepSeek V4.1 Flash',
+      source: 'catalog', catalog_model_id: 'deepseek-flash', catalog_version: '2026-10-12.1',
+      catalog_source_url: modelPreset.source_url, provider_claims: modelPreset.provider_claims,
+      context_window_tokens: 1_048_576, max_output_tokens: 393_216,
+      has_trusted_context_limit: true,
+    }
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([routedModel])
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: '测试文本能力' }))
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('可能产生费用'))
+    await waitFor(() => expect(mocks.testAIModel).toHaveBeenCalledWith('model-17', 'text'))
+    expect(await screen.findByRole('status')).toHaveTextContent('文本能力测试成功。')
+
+    fireEvent.click(screen.getByRole('button', { name: '测试工具能力' }))
+    await waitFor(() => expect(mocks.testAIModel).toHaveBeenCalledWith('model-17', 'tools'))
+    expect(window.confirm).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not offer a gateway test for an unknown manual model ID', async () => {
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([modelConfig])
+    renderPage()
+
+    expect(await screen.findByText('该手动模型尚无预批准网关路由，暂不可测试。')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '测试文本能力' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '测试工具能力' })).not.toBeInTheDocument()
   })
 })

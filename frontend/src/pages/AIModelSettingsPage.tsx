@@ -15,10 +15,11 @@ import {
   deleteAIConnection,
   deleteAIModel,
   replaceAIConnectionKey,
+  testAIModel,
   updateAIConnection,
   updateAIModel,
 } from '@/services/api'
-import type { AIModelConfig, CreateAIConnectionInput, CreateAIModelInput } from '@/services/api'
+import type { AIModelConfig, AIModelProbeKind, CreateAIConnectionInput, CreateAIModelInput } from '@/services/api'
 
 const CONNECTIONS_KEY = 'aiConnections'
 const MODELS_KEY = 'aiModels'
@@ -178,6 +179,23 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
       await refreshModels()
     },
     onError: () => setNotice('模型配置更新失败，请检查模型 ID 后重试。'),
+  })
+  const testModelMutation = useMutation({
+    mutationFn: ({ modelId, probeKind }: { modelId: string; probeKind: AIModelProbeKind }) => testAIModel(modelId, probeKind),
+    retry: false,
+    onSuccess: async (result) => {
+      if (result.stale || result.status === 'stale') {
+        setNotice('测试请求已结束，但配置期间发生变化；旧结果没有覆盖当前状态。')
+      } else if (result.status === 'succeeded') {
+        setNotice(result.probe_kind === 'text' ? '文本能力测试成功。' : '工具调用能力测试成功。')
+      } else if (result.status === 'unknown') {
+        setNotice('无法确认请求是否到达服务商；为避免重复费用，本站没有自动重试。')
+      } else {
+        setNotice('本次模型能力测试失败。请确认 Key、模型可用性和服务状态后再决定是否重试。')
+      }
+      await refreshModels()
+    },
+    onError: () => setNotice('模型测试服务暂不可用，本站没有自动改用其它凭据或服务。'),
   })
 
   return (
@@ -351,6 +369,22 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
                               )}
                             </div>
                             <div className="flex flex-wrap gap-2">
+                              {model.catalog_model_id ? (
+                                <>
+                                  <Button type="button" variant="outline" className="min-h-11" disabled={testModelMutation.isPending} onClick={() => {
+                                    if (window.confirm('这会向服务商发送一条极短的文本请求，可能产生费用。本站不会自动重试。要继续吗？')) {
+                                      testModelMutation.mutate({ modelId: model.id, probeKind: 'text' })
+                                    }
+                                  }}>测试文本能力</Button>
+                                  <Button type="button" variant="outline" className="min-h-11" disabled={testModelMutation.isPending} onClick={() => {
+                                    if (window.confirm('这会向服务商发送一条极短的工具调用请求，可能产生费用。本站不会自动重试。要继续吗？')) {
+                                      testModelMutation.mutate({ modelId: model.id, probeKind: 'tools' })
+                                    }
+                                  }}>测试工具能力</Button>
+                                </>
+                              ) : (
+                                <p className="self-center text-xs text-muted-foreground">该手动模型尚无预批准网关路由，暂不可测试。</p>
+                              )}
                               <Button type="button" variant="outline" className="min-h-11" onClick={() => {
                                 setEditModelFor(model.id)
                                 setEditModelId(model.model_id)
