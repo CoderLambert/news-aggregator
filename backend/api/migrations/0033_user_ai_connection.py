@@ -25,6 +25,7 @@ class Migration(migrations.Migration):
                 ('credential_ciphertext', models.TextField(blank=True, default='')),
                 ('encryption_key_id', models.CharField(blank=True, default='', max_length=64)),
                 ('credential_epoch', models.PositiveBigIntegerField(default=1)),
+                ('credential_version', models.PositiveBigIntegerField(default=1)),
                 ('is_enabled', models.BooleanField(default=True)),
                 ('is_deleted', models.BooleanField(default=False)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),

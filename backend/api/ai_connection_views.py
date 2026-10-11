@@ -8,7 +8,6 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers, status
-from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -19,6 +18,7 @@ from api.public_policy import policy_error
 from api.services.ai_credentials import (
     CredentialEncryptionUnavailable,
     CredentialUnavailable,
+    decrypt_credential,
     encrypt_credential,
 )
 from api.services.ai_registry import PROFILES_BY_ID, get_profile, provider_catalog
@@ -115,10 +115,17 @@ def _storage_error():
     return Response(
         {
             'error_code': 'credential_storage_unavailable',
-            'error': '当前无法安全保存凭据，请联系站点管理员。',
+            'error': '当前无法安全使用凭据，请联系站点管理员。',
         },
         status=status.HTTP_503_SERVICE_UNAVAILABLE,
     )
+
+
+def _lock_owned_connection(user, connection_id):
+    """Lock only a live row belonging to this owner; callers use it in atomic()."""
+    return UserAIConnection.objects.select_for_update().filter(
+        pk=connection_id, user=user, is_deleted=False,
+    ).first()
 
 
 class AIProviderCatalogView(APIView):
@@ -175,27 +182,26 @@ class UserAIConnectionDetailView(APIView):
     authentication_classes = [AnonymousCsrfSessionAuthentication]
     permission_classes = [IsAuthenticated]
 
-    def _owned_connection(self, user, connection_id):
-        return UserAIConnection.objects.filter(
-            pk=connection_id, user=user, is_deleted=False,
-        ).first()
-
     def patch(self, request, connection_id):
         denied = _require_feature()
         if denied:
             return denied
-        connection = self._owned_connection(request.user, connection_id)
-        if connection is None:
-            return _no_store(Response({'error_code': 'not_found'}, status=status.HTTP_404_NOT_FOUND))
         serializer = ConnectionPatchSerializer(data=request.data)
         if not serializer.is_valid():
             return _no_store(Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST))
         with transaction.atomic():
-            connection = UserAIConnection.objects.select_for_update().get(pk=connection.pk)
+            connection = _lock_owned_connection(request.user, connection_id)
+            if connection is None:
+                return _no_store(Response({'error_code': 'not_found'}, status=status.HTTP_404_NOT_FOUND))
             values = serializer.validated_data
             if 'display_name' in values:
                 connection.display_name = values['display_name']
             if 'is_enabled' in values and values['is_enabled'] != connection.is_enabled:
+                if values['is_enabled']:
+                    try:
+                        decrypt_credential(connection)
+                    except (CredentialEncryptionUnavailable, CredentialUnavailable):
+                        return _no_store(_storage_error())
                 connection.is_enabled = values['is_enabled']
                 connection.credential_epoch += 1
             connection.save(update_fields=['display_name', 'is_enabled', 'credential_epoch', 'updated_at'])
@@ -206,9 +212,7 @@ class UserAIConnectionDetailView(APIView):
         if denied:
             return denied
         with transaction.atomic():
-            connection = UserAIConnection.objects.select_for_update().filter(
-                pk=connection_id, user=request.user, is_deleted=False,
-            ).first()
+            connection = _lock_owned_connection(request.user, connection_id)
             if connection is None:
                 return _no_store(Response({'error_code': 'not_found'}, status=status.HTTP_404_NOT_FOUND))
             connection.is_enabled = False
@@ -232,25 +236,21 @@ class UserAIConnectionKeyView(APIView):
         denied = _require_feature()
         if denied:
             return denied
-        connection = UserAIConnection.objects.filter(
-            pk=connection_id, user=request.user, is_deleted=False,
-        ).first()
-        if connection is None:
-            return _no_store(Response({'error_code': 'not_found'}, status=status.HTTP_404_NOT_FOUND))
         serializer = CredentialReplaceSerializer(data=request.data)
         if not serializer.is_valid():
             return _no_store(Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST))
         try:
             with transaction.atomic():
-                connection = UserAIConnection.objects.select_for_update().get(
-                    pk=connection.pk, user=request.user, is_deleted=False,
-                )
+                connection = _lock_owned_connection(request.user, connection_id)
+                if connection is None:
+                    return _no_store(Response({'error_code': 'not_found'}, status=status.HTTP_404_NOT_FOUND))
                 connection.credential_epoch += 1
+                connection.credential_version += 1
                 ciphertext, key_id = encrypt_credential(connection, serializer.validated_data['api_key'])
                 connection.credential_ciphertext = ciphertext
                 connection.encryption_key_id = key_id
                 connection.save(update_fields=[
-                    'credential_epoch', 'credential_ciphertext',
+                    'credential_epoch', 'credential_version', 'credential_ciphertext',
                     'encryption_key_id', 'updated_at',
                 ])
         except CredentialEncryptionUnavailable:

@@ -49,7 +49,7 @@ def _aad(connection: UserAIConnection) -> bytes:
             'provider_id': connection.provider_id,
             'endpoint_profile': connection.endpoint_profile,
             'endpoint_profile_version': connection.endpoint_profile_version,
-            'credential_epoch': connection.credential_epoch,
+            'credential_version': connection.credential_version,
         },
         ensure_ascii=True,
         sort_keys=True,

@@ -905,7 +905,10 @@ class UserAIConnection(models.Model):
     display_name = models.CharField(max_length=64)
     credential_ciphertext = models.TextField(blank=True, default='')
     encryption_key_id = models.CharField(max_length=64, blank=True, default='')
+    # Authorization fencing version; status changes revoke stale queued work.
     credential_epoch = models.PositiveBigIntegerField(default=1)
+    # Ciphertext generation bound into AAD; only key replacement changes it.
+    credential_version = models.PositiveBigIntegerField(default=1)
     is_enabled = models.BooleanField(default=True)
     is_deleted = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
