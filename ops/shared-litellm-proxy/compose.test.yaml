@@ -1,0 +1,97 @@
+services:
+  proxy:
+    volumes:
+      - ./proxy.test.yaml:/app/proxy.yaml:ro
+      - ./tests/provider_key_guard_test.py:/app/byok_gateway_policy_test.py:ro
+      - ./tests/admin_client.py:/app/test_admin_client.py:ro
+    environment:
+      T00G_TEST_PROVIDER_KEY_HASHES: ${T00G_TEST_PROVIDER_KEY_HASHES:?test provider-key hashes are required}
+    networks:
+      - gateway
+      - provider_egress
+    ports: !reset []
+
+  test-upstream:
+    profiles: ["test"]
+    image: ghcr.io/berriai/litellm:v1.105.0@sha256:60947db020b57e204823d3fbc8bb295c85be890d7c9adcc77fb4f5fc2fe410b2
+    entrypoint: ["python", "-u", "/fixtures/upstream.py"]
+    user: "1000:1000"
+    volumes:
+      - ./tests/upstream.py:/fixtures/upstream.py:ro
+    networks:
+      - gateway
+    read_only: true
+    tmpfs:
+      - /tmp:rw,size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  newshub-test-client:
+    profiles: ["test"]
+    image: ghcr.io/berriai/litellm:v1.105.0@sha256:60947db020b57e204823d3fbc8bb295c85be890d7c9adcc77fb4f5fc2fe410b2
+    entrypoint: ["sleep", "infinity"]
+    user: "1000:1000"
+    volumes:
+      - ./tests/cli_client.py:/fixtures/cli_client.py:ro
+    networks:
+      - gateway
+    read_only: true
+    tmpfs:
+      - /tmp:rw,size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  generic-cli-consumer:
+    profiles: ["test"]
+    image: ghcr.io/berriai/litellm:v1.105.0@sha256:60947db020b57e204823d3fbc8bb295c85be890d7c9adcc77fb4f5fc2fe410b2
+    entrypoint: ["sleep", "infinity"]
+    user: "1000:1000"
+    volumes:
+      - ./tests/cli_client.py:/fixtures/cli_client.py:ro
+    networks:
+      - gateway
+    read_only: true
+    tmpfs:
+      - /tmp:rw,size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  restore-db:
+    profiles: ["restore"]
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment:
+      POSTGRES_DB: ${RESTORE_POSTGRES_DB:-litellm_restore}
+      POSTGRES_USER: ${POSTGRES_USER:-litellm}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      PGDATA: /var/lib/postgresql/data/pgdata
+    secrets:
+      - postgres_password
+    volumes:
+      - restore_postgres_data:/var/lib/postgresql/data
+    networks:
+      - gateway
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\" -h 127.0.0.1"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  provider_egress:
+    internal: true
+
+volumes:
+  restore_postgres_data:
