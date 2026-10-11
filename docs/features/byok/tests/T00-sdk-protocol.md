@@ -32,11 +32,12 @@
 | --- | --- |
 | 本卡状态 | **BLOCKED**；本次 CLI 只报告已覆盖子集，T00 完整验收未通过 |
 | 精确功能分支基线 HEAD | 3cd584c95acd52bc533bba0b55eab75b35c41ad5；PR #32 base 为 feat/byok-user-api-keys。工作树未 reset 到基线 |
-| T00 探针实现 SHA | 7978a2894dac6b8c0ebdb64614ce877e34c18c4f；仅探针、夹具、自测和 README，无生产适配器或新闻业务调用 |
+| T00 探针实现 SHA（镜像证据修订） | a0504ef；仅探针、夹具、自测和 README，无生产适配器或新闻业务调用 |
 | Python / OpenAI SDK / Anthropic SDK / httpx2 / LiteLLM / Docker Compose | 3.14.8 / 3.28.0 / 1.13.0 / 2.13.1 / 1.104.2 / 5.5.1；Docker Server 29.7.2 |
 | SDK_LOCAL | 三协议真实 SDK complete 与 EOF 直连受控上游路径的协议终态、凭据头和请求计数检查通过 |
 | PROXY_LOCAL | OpenAI Chat A/B 同模型并发与 Anthropic Messages 凭据路径通过；错误项目 Key 在上游前拒绝。EOF 完整性及缺 provider Key 两项失败 |
-| CLI 整体结果 | 91 项 PASS、3 项 FAIL，退出码 1。三个失败项见下文；CLI 不用固定状态码掩盖结果 |
+| SDK/Proxy 完整子集运行 | 修正前探针 SHA 7978a2894dac6b8c0ebdb64614ce877e34c18c4f 的运行记录为 91 PASS / 3 FAIL；其中镜像证据检查来源错误，已撤销该项 PASS。90 项非镜像 PASS、3 项 FAIL 保留为该版本的路线证据；修正版镜像单项另行实测，未重跑 SDK/Proxy 路径 |
+| 镜像证据修订 | IMAGE_EVIDENCE_ONLY：固定引用解析 ID、运行容器 .Image、image inspect IDs、RepoDigests、Config.Image 均已独立记录，检查 PASS；cleanup PASS，残留 0 |
 | PROVIDER_REAL | **NOT_RUN**；未读现有 Key、未发送任何 DeepSeek 请求 |
 | 旧聊天/研究/翻译测试 | 历史摘要 219 passed / 3 warnings 的命令、依赖和报告未恢复，本次仍 NOT_RUN；此前缺 chromadb 的 82 passed / 23 failed 不作为产品基线 |
 | 旧测试断言 diff | 现有 tests/ 下断言无变化；只新增 tools/byok_t00_probe/test_probe.py 自测，无旧断言放宽 |
@@ -54,7 +55,13 @@
     cd ../..
     /tmp/byok-t00-sdk-venv-20261011/bin/python tools/byok_t00_probe/probe.py
 
-自测输出：12 tests passed。包含错误租户、错误认证 scheme、项目 Key 转发、部署默认 Key fallback、EOF 后合成 stop 等“错误结果必须判 FAIL”的测试。
+自测输出：14 tests passed。包含错误租户、错误认证 scheme、项目 Key 转发、部署默认 Key fallback、EOF 后合成 stop 等“错误结果必须判 FAIL”的测试。
+
+镜像证据复测命令：
+
+    /tmp/byok-t00-sdk-venv-20261011/bin/python tools/byok_t00_probe/probe.py --images-only
+
+脱敏摘要：`IMAGE_EVIDENCE_ONLY` 总结果 PASS；`IMAGE_FIXED_REFERENCES_RESOLVE_TO_RUNNING_IDS`、`CLEANUP_COMPOSE_DOWN`、`CLEANUP_NO_PROJECT_RESOURCES_LEFT` 均 PASS，残留 containers=0、networks=0。此模式没有发起模型请求。`docker inspect` 只输出容器 ID、`.Image`、`.Config.Image` 和 service label；image ID 与 RepoDigests 来自 `docker image inspect` 并分列记录，未输出 Env。
 
 三协议 SDK_LOCAL 都用已安装的 OpenAI / Anthropic 官方 SDK 直接连接受控 HTTP upstream：
 
@@ -80,34 +87,26 @@ EOF 复现路径原始上游只有 1 次请求，终止事实为 normal_eof_with
 
 版本决策沿用当前任务固定的 v1.104.2。根据根任务提供的官方源码调研记录，截至 2026-10-11，官方 stable 仍为 v1.104.2，main 相同路径仍在 EOF 缺终态时补 stop，尚无确认的配置修复。本次没有盲目升级，也没有声称其他或未来版本已修复；探针证据只覆盖下面记录的 v1.104.2 容器。
 
-CLI 脱敏摘要：
-
-    {"status":"FAIL","scope":"PROBE_SUBSET_ONLY","passed_check_count":91,"failed_check_count":3,"failed_check_ids":["PROXY_CHAT_EOF_NOT_SYNTHESIZED_COMPLETE","PROXY_MISSING_PROVIDER_FAILS_CLOSED","PROXY_MISSING_PROVIDER_DID_NOT_USE_DEPLOYMENT_DEFAULT"],"provider_real":"NOT_RUN"}
-
-退出码为 1。容器日志与最终 CLI JSON 的 synthetic credential scan 均为 false。成功完整终态、每条上游计数、错误项目 Key 拒绝、缺 Key 默认 fallback、EOF、请求重试配置均由独立检查项判断。
+SDK/Proxy 功能路径的上次脱敏摘要（镜像核验项已撤销，需与下方 IMAGE_EVIDENCE_ONLY 证据分开）：三个失败检查仍为 PROXY_CHAT_EOF_NOT_SYNTHESIZED_COMPLETE、PROXY_MISSING_PROVIDER_FAILS_CLOSED、PROXY_MISSING_PROVIDER_DID_NOT_USE_DEPLOYMENT_DEFAULT。该 SDK/Proxy 全量子集未因镜像证据修订而重跑。容器日志与输出的 synthetic credential scan 均为 false。
 
 ## 镜像、清理与隐私证据
 
-探针使用 Docker context default、内部 Compose 网络及唯一项目名。结束后的 cleanup 检查为 PASS：Compose down 成功，残留 containers=0、networks=0。
+镜像证据由单独 IMAGE_EVIDENCE_ONLY 模式复测；未发起 SDK inference。探针只用 Docker format 输出 container ID、.Image、.Config.Image 和 service label，不读取或输出 Env。然后对每个运行容器的 .Image ID 及其固定 Config.Image 分别执行 docker image inspect，只取 .Id 与 .RepoDigests。
 
-运行容器的实际 Image IDs 与固定配置如下。Docker 本次返回的 RepoDigests 数组为空；探针同时记录运行时 Image ID，并验证它与固定 digest 字符串一致以及 Config.Image 仍指向该固定引用：
+通过条件为：运行时 image inspect .Id 等于容器 .Image；固定引用解析出的 image inspect .Id 也等于容器 .Image；.Config.Image 等于该服务的固定引用。RepoDigests 被单独记录，不与 config/image ID 直接比较。
 
-| 服务 | 固定 Config.Image | 实际运行 Image ID | RepoDigests |
-| --- | --- | --- | --- |
-| db | postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea | sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea | [] |
-| proxy | ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500 | sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500 | [] |
-| upstream | ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500 | sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500 | [] |
+| 服务 | Container ID | 容器 .Image | 容器 .Config.Image | 运行时 image inspect .Id | 运行时 RepoDigests | 固定引用解析 .Id | 固定引用 RepoDigests |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| db | de739e33a1d84b6ceca7c6aaee89c63a1283247caa4aab7c657f191ca8b9d2a5 | sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea | postgres@sha256:721873c34ceb9f8d8fc265984dc982404c105f19ad51be9fdc5970a6080ea | sha256:721873c34ceb9f8d8fc265984dc982404c105f19ad51be9fdc5970a6080ea | [postgres@sha256:721873c34ceb9f8d8fc265984dc982404c105f19ad51be9fdc5970a6080ea] | sha256:721873c34ceb9f8d8fc265984dc982404c105f19ad51be9fdc5970a6080ea | [postgres@sha256:721873c34ceb9f8d8fc265984dc982404c105f19ad51be9fdc5970a6080ea] |
+| proxy | f3e8d1cf7df3031179ef6b5c633763ecff1a37353a35b22305ade1368fe25e4a | sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500 | ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500 | sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500 | [ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500] | sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500 | [ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500] |
+| upstream | 3f1f8e9f046eb4c96f60955c45621fd4c435f5e97ad011612c37ee499bb3ef61 | sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500 | ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500 | sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500 | [ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500] | sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500 | [ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500] |
 
-Key 只使用本次合成值。SDK trust_env=false；没有读取 .env、进程环境或旧配置中的 provider Key。CLI 在 stdout 与 proxy/upstream 容器日志内存中检查所有合成项目/provider/master/admin/default Key；两项检查均 PASS，未打印 Key、Authorization、正文或 continuation。官方 cosign 签名验证仍为 NOT_RUN。
+本次 IMAGE_EVIDENCE_ONLY 的 IMAGE_FIXED_REFERENCES_RESOLVE_TO_RUNNING_IDS、CLEANUP_COMPOSE_DOWN、CLEANUP_NO_PROJECT_RESOURCES_LEFT 均 PASS；残留 containers=0、networks=0。RepoDigests 来自 image inspect 输出，不再使用 container inspect 上的 RepoDigests 字段。前一版把容器 .Image ID 字符串与固定 digest 字符串直接相等作为证据，该判断已撤销。
+
+此前 SDK/Proxy 完整子集运行在本任务自己的唯一 Compose 项目下 cleanup PASS。Key 只使用本次合成值。SDK trust_env=false；没有读取 .env、进程环境或旧配置中的 provider Key。前次该运行的 proxy/upstream 容器日志及 CLI JSON synthetic credential scan 均为 false，未打印 Key、Authorization、正文或 continuation。官方 cosign 签名验证仍为 NOT_RUN。
 
 ## 旧测试对照与未验证项
 
 既有 tests/ 无 diff，未更改任何旧断言。本次没有重跑新闻项目旧聊天/研究/翻译测试，因此不能声称旧回归通过。先前历史记录只留下 219 passed / 3 warnings 摘要；命令、依赖及机器报告未恢复。另一次因隔离环境缺 chromadb 得到 82 passed / 23 failed，也不能替代功能基线；本次不安装旧项目的无关依赖。
 
 显式 length/incomplete、截断 body、超时、SSE 内 error、HTTP 错误注入、半截/非法工具参数、白名单拒绝、Responses 原始 output items continuation、Anthropic thinking/signature、Chat reasoning_content、两轮工具往返、取消后的资源关闭，以及完整旧业务回归均未运行。SDK_LOCAL 与 PROXY_LOCAL 证据彼此分开；本地证据不表示任何真实 provider 兼容。不得进入 T01 或据此扩大成生产变更。
-
-## 后续可选 DeepSeek 有界冒烟（尚未执行）
-
-按当前官方文档，可提议 model=deepseek-flash、官方 OpenAI-compatible base URL https://api.deepseek.com、一次非流式短文本请求、输入上限 128 tokens、max_tokens=32、max_retries=0、请求数 1。DeepSeek 官方定价页当前列出的 peak cache-miss 输入费为 USD 0.30 / 1M tokens，输出费为 USD 1.20 / 1M tokens，因此该上限的估算最多约 USD 0.0000768；建议以 USD 0.01 作为用户确认的单次总预算上限，并在真正执行前再次复核官方价格。来源：[DeepSeek Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing/)。
-
-这只是供确认的测试边界，不是授权或已执行结果。运行前仍需你确认具体模型、合成输入、token/请求上限和预算；Key 只由你在终端隐藏输入，不持久化、不打印。其他厂商仍为 NOT_RUN。
