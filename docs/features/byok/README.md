@@ -24,12 +24,13 @@
 
 ## 固定决策摘要
 
-- LiteLLM Proxy 是与 NewsHub 生命周期分离的共享服务；官方镜像候选固定为 ghcr.io/berriai/litellm:v1.104.2@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500。该镜像、签名和行为仍待 T00/T00-G 实测。
+- T00 EOF 风险复现夹具固定为 ghcr.io/berriai/litellm:v1.104.2@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500。来源：官方 [v1.104.2 release](https://github.com/BerriAI/litellm/releases/tag/v1.104.2)；2026-10-11 查询 GHCR OCI index 的 Docker-Content-Digest 响应头为该 SHA256（[manifest endpoint](https://ghcr.io/v2/berriai/litellm/manifests/v1.104.2)）。此历史风险复现镜像不是 T00-G 部署推荐。
+- T00-G 部署候选暂未解析。执行时核验当时官方稳定 release 的签名/证明及 registry 实际 manifest digest，分别记录版本和 digest；如与 T00 复现镜像不同，须用部署候选再执行兼容验真。
 - 官方 SDK 仅作业务后端的 Proxy 客户端；不在 NewsHub 编写三套 provider 协议适配器。T00 必须验证三协议原始终态、工具双轮 continuation、凭据隔离、资源关闭与重试计数。
 - 项目 virtual key 用于业务后端认证 Proxy；用户 provider Key 按用户授权经业务后端显式传入 Proxy。Proxy master key 仅用于运维，绝不进业务运行容器。
 - 不传任意 user_config、api_base、headers、callback 或路由/fallback 配置；仅使用服务端可信 endpoint、model 和 credential 字段白名单。
 - 用户正文/问题的接收方是业务后端、共享 Proxy 和用户选择的 provider；不写入日志/回调，首版共享内容缓存关闭。
 - 没有用户 Key 或 Proxy 不可用时 fail closed；不得借部署/平台/其他用户 Key、直连 provider 或跨模型 fallback。
-- T01 连接管理不依赖共享服务交付；T04/T09 可用临时本地 Proxy 和受控 upstream 验收。T00-G 服务验收是 T13 真实 provider 调用与 T14 发布门禁的前置条件。
+- T01 连接管理不依赖共享服务交付；T04/T09 可用临时本地 Proxy 和受控 upstream 验收。T00 PROXY_LOCAL 通过后可在独立用户确认下进行 DeepSeek 早期文本冒烟，该冒烟不依赖 T00-G，且不替代 T13 产品功能矩阵。T00-G 是 T13 完整真实功能矩阵与 T14 发布门禁的前置条件。
 - SDK_LOCAL 与 PROXY_LOCAL 是本地合成测试；只有指定模型的获授权真实调用才是 PROVIDER_REAL。此前的 219 passed / 3 warnings 只作历史业务回归参考。
 

@@ -16,12 +16,13 @@
 | T00-08 | 缺 provider Key、错误项目虚拟 Key | 缺 Key fail closed；错误项目凭据在到达 upstream 前被拒绝 | NOT_RUN |
 | T00-09 | SDK/Proxy 重试与 fallback 计数 | max_retries=0、num_retries=0、无跨模型 fallback，实际请求数与断言一致 | NOT_RUN |
 | T00-10 | v1.104.2 原始上游 EOF 与 Proxy 暴露终态对照 | 仅下游 stop/[DONE] 不足以证明原始上游完整；失败按局部风险记录 | NOT_RUN |
+| T00-11 | 可选 DeepSeek 早期文本冒烟 | 仅在 PROXY_LOCAL 全过、用户确认确切模型/安全合成输入/请求与输出上限/最小预算后执行；不依赖 T00-G、不替代 T13 | NOT_RUN |
 
 ## 如何证明
 
 - **SDK_LOCAL**：使用真实安装的官方客户端 SDK 直连受控合成上游，证明 SDK 请求序列化、响应解析和关闭行为；不证明 Proxy 整合或厂商兼容。
 - **PROXY_LOCAL**：锁定真实 LiteLLM Proxy 镜像、真实 SDK、受控 HTTP upstream，记录上游原始请求/终态、Proxy 返回、SDK 输出和请求计数。本卡主要技术门槛。
-- **PROVIDER_REAL**：本卡不调用真实厂商，状态保持 NOT_RUN。PROXY_LOCAL 不能推出任何厂商兼容性。
+- **PROVIDER_REAL**：默认 NOT_RUN。PROXY_LOCAL 全过后可单独提出一次早期 DeepSeek 文本冒烟，不等待 T00-G；执行前用户必须确认确切模型、安全合成输入、请求数、输出 token 上限和最小费用预算，Key 仅由用户在终端隐藏输入且不持久化/打印。此冒烟只证明所列日期/模型的单次真实路由，不代替 T13 产品矩阵；未获确认不得运行。其他 provider 仍 NOT_RUN。
 - **日志**：只保留合成凭据标识、事件名、模型别名、耗时、错误类别和请求计数；禁止打印 Key、完整 Authorization、新闻正文或私有 continuation。
 - **基线与断言**：同环境记录任务前相关旧聊天/研究/翻译测试基线。若本卡只改探针/协议契约而没改旧测试，明确写“旧测试断言无 diff”；不得放宽旧断言。
 
@@ -31,11 +32,11 @@
 | --- | --- |
 | 本卡状态 | **NOT_RUN** |
 | 精确基线 HEAD | `ea2ce55ae22e19e1604e88031b824b68f2666cec`（此前确认的功能分支基线；执行当天需重新核对） |
-| 实现 SHA | 本次架构文档 commit 6440a07197dae4b43b032c782638ad97e9defb59；SDK/Proxy 实施 SHA 未执行 |
+| T00 SDK/Proxy 实现 SHA | NOT_RUN；历史计划文档版本 commit 6440a07197dae4b43b032c782638ad97e9defb59（不是实现 SHA） |
 | Python / OpenAI SDK / Anthropic SDK / LiteLLM / Docker 版本 | NOT_RUN |
 | SDK_LOCAL 执行命令及脱敏输出 | NOT_RUN |
 | PROXY_LOCAL 执行命令及脱敏输出 | NOT_RUN |
-| PROVIDER_REAL | **NOT_RUN；本卡不授权真实厂商请求** |
+| PROVIDER_REAL | **NOT_RUN；可选早期 DeepSeek 冒烟须另行给出模型/预算并获用户确认** |
 | 旧聊天/研究/翻译基线与变更后对照 | 历史准备记录：219 passed, 3 warnings；精确运行命令、依赖版本、功能基线 SHA 与报告文件未在本卡重新执行，不能视为本卡证据 |
 | 旧测试断言 diff | 本次 PR 只改文档，不改代码测试或旧断言；T00 的实现前/后回归仍 NOT_RUN |
 | 原始终态 / continuation / 请求计数 / 资源关闭 | NOT_RUN |

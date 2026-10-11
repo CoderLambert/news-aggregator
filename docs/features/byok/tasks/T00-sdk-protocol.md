@@ -13,7 +13,7 @@
 
 以锁定的官方 LiteLLM Proxy 镜像、官方客户端 SDK、受控本地 HTTP 上游，证明真实 SDK→Proxy→上游及返回链路的协议、完整性和凭据隔离。不能只 mock gateway、只调用 Proxy 的函数，或仅用 SDK 直连上游。
 
-候选镜像为 `ghcr.io/berriai/litellm:v1.104.2@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500`。T00 必须先核对官方发布/签名和 digest；若验证不通过，记录阻塞并停下，不自行换版本。实际 Python、客户端 SDK 与锁文件版本由本卡实测后写入 Test 文档。
+v1.104.2 是已记录 EOF/终态风险的复现版本。T00 回归夹具固定为 ghcr.io/berriai/litellm:v1.104.2@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500。来源：LiteLLM [官方 v1.104.2 release](https://github.com/BerriAI/litellm/releases/tag/v1.104.2)；2026-10-11 GHCR manifest 返回 OCI index，Docker-Content-Digest 响应头为 sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500（[registry manifest](https://ghcr.io/v2/berriai/litellm/manifests/v1.104.2)）。执行时仍按官方 release 说明验证镜像签名和实际 digest。该历史风险复现版本不自动成为 T00-G 部署候选。部署候选须另行核验当时官方稳定版本和实际 registry digest；若版本不同，要记录两者并针对部署版本补做兼容验真。实际 Python、客户端 SDK 与锁文件版本由本卡实测后写入 Test 文档。
 
 官方 SDK 只作为业务后端访问 Proxy 的客户端；LiteLLM Proxy 负责向 OpenAI Responses、OpenAI Chat Completions、Anthropic Messages 上游路由和转换。不得新增三套 provider HTTP/SSE 适配器。项目虚拟 Key 用于业务后端认证 Proxy；用户 provider Key 是另一凭据，由业务后端按请求显式提交到 Proxy 支持且已验证的受限凭据字段。不得把 Proxy master key 放入业务请求。
 
@@ -27,7 +27,7 @@
 
 ## 明确不做
 
-不创建业务数据库模型/迁移、设置页、新闻业务调用、用户任务系统、共享生产网关部署或真实厂商调用；不操作 ssh tencent 或线上环境，不读取环境/文件/旧配置中的 provider Key。所有测试凭据必须是本次探针生成的合成假 Key。不得把本地 Proxy 集成证据记为真实 provider 兼容。
+不创建业务数据库模型/迁移、设置页、新闻业务调用、用户任务系统或共享生产网关；本卡核心 PROXY_LOCAL 测试不调用真实厂商。仅在核心 PROXY_LOCAL 完整通过后，可单独申请一次早期 DeepSeek 文本冒烟；须先向用户提供确切模型、安全合成输入、请求/输出上限及最小费用预算，并由用户明确确认后才可执行；不依赖 T00-G，也不替代 T13。不得操作 ssh tencent 或线上环境，不读取环境/文件/旧配置中的 provider Key。所有测试凭据必须是本次探针生成的合成假 Key。不得把本地 Proxy 集成证据记为真实 provider 兼容。
 
 ## 必验场景
 
@@ -42,6 +42,8 @@
 | T00-07 | 正常完成、异常、取消后的资源关闭 | SDK response/stream 与 HTTP 资源均关闭 |
 | T00-08 | 缺 provider Key、错误项目虚拟 Key | 缺个人 Key 时拒绝且不借部署 Key；错误项目虚拟 Key 到达上游前被 Proxy 拒绝 |
 | T00-09 | Proxy 与 SDK 请求计数 | max_retries=0、num_retries=0、无 fallback；计数证明失败未隐式重发或改模型 |
+| T00-10 | v1.104.2 原始上游 EOF 与 Proxy 暴露终态对照 | 仅下游 stop/[DONE] 不足以证明原始上游完整；失败按局部风险记录 |
+| T00-11 | 可选 DeepSeek 早期文本冒烟（仅 PROXY_LOCAL 全过且用户单独确认后） | 经 Proxy 到官方通用 API；合成安全短文本、单一模型、明确请求数和输出 token 上限、无自动重试；记录用户确认、模型/预算及脱敏结果。此单次证据不代替 T13 矩阵 |
 
 ## LiteLLM 流终态验真阻塞规则
 
@@ -55,7 +57,7 @@
 
 ## 任务完成条件
 
-- SDK_LOCAL 与 PROXY_LOCAL 各自单独报告。SDK_LOCAL 只能表示 SDK 直连受控上游；本卡主要门槛是 PROXY_LOCAL。
+- SDK_LOCAL 与 PROXY_LOCAL 各自单独报告。SDK_LOCAL 只能表示 SDK 直连受控上游；本卡主要门槛是 PROXY_LOCAL。可选 DeepSeek 冒烟另记 PROVIDER_REAL，不作为本地技术门槛必做项。
 - Test 文档记录精确基线 HEAD、实现 SHA、Python/SDK/Proxy/Docker 版本、完整执行命令、脱敏输出、旧测试对照和旧断言 diff；真实厂商状态保持单独的 PROVIDER_REAL=NOT_RUN。
 - 原始终态、continuation、凭据隔离、资源关闭或请求计数有任一无法核验时，T00 为 BLOCKED，不得继续把本地链路描述为完整通过。
 - T00-G 是共享服务运维交付卡；它不阻塞 T01/T04 本地开发，也不能由本地技术验真代替。

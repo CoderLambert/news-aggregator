@@ -5,7 +5,7 @@
 ## 固定架构
 
 - LiteLLM Proxy 是新闻、知序、TranslateFlow 等项目可复用的独立服务。用官方容器镜像固定版本与 OCI digest；独立部署、配置和数据库生命周期，不由 NewsHub 启动。本轮仅定义文档，不建仓库、不部署服务、不操作线上环境，也不 fork 或重写 provider 适配。
-- 当前记录的镜像候选为 ghcr.io/berriai/litellm:v1.104.2@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500。T00/T00-G 仍须执行镜像来源/签名与功能验真；在验收前不能称为生产通过。
+- v1.104.2 只作为 T00 EOF 风险复现夹具：ghcr.io/berriai/litellm:v1.104.2@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500；来源为 [官方 release](https://github.com/BerriAI/litellm/releases/tag/v1.104.2) 与 [2026-10-11 GHCR OCI manifest](https://ghcr.io/v2/berriai/litellm/manifests/v1.104.2)，其 Docker-Content-Digest 响应头为 sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500. 这不是部署版本选择。T00-G 执行时核验当时官方稳定候选、签名/证明与真实 registry digest；若不同于复现夹具，分别记录并针对部署版本复验。
 - 网关负责 provider 协议、受控模型路由、项目级受限虚拟 Key、限流、脱敏用量。业务项目负责网站用户身份、个人 BYOK Key 的安全托管、功能选模、任务幂等/恢复/取消、数据库事务和结果权限。
 - Proxy 的 master key 只用于运维和管理 API，绝不进业务运行容器。每个项目拥有独立、受限的虚拟 Key；虚拟 Key 与个人 provider Key 是两种不同凭据。NewsHub、知序、TranslateFlow 彼此不共享虚拟 Key、个人历史或网站用户身份。
 - 用户个人 provider Key 只能由所属业务后端在已认证的用户操作中，从加密托管记录按请求显式提供给受信网关。缺 Key 即失败；禁止使用 Proxy 部署/环境 Key、平台服务 Key 或其它用户 Key 兜底。
@@ -22,11 +22,11 @@
 
 ## 任务顺序与独立性
 
-1. T00：用本地实际 LiteLLM Proxy、受控上游和实际 SDK 客户端完成端到端技术门槛，不做新闻业务表、设置页或部署服务。
-2. T00-G：单独交付共享 Proxy 运维契约，含固定镜像/digest、Postgres、配置校验、密钥隔离、健康检查、脱敏日志、备份恢复与升级回退。它是 T00 后置子卡，也是 T13 真实厂商验收及 T14 发布门禁的前置条件。
+1. T00：用本地实际 LiteLLM Proxy、受控上游和实际 SDK 客户端完成端到端技术门槛，不做新闻业务表、设置页或部署服务。通过后可单独申请一次 DeepSeek 早期文本冒烟，不依赖 T00-G。
+2. T00 PROXY_LOCAL 通过后，可单独向用户申请一次早期 DeepSeek 文本冒烟；需先确认确切模型、安全合成输入、请求/输出上限和最小预算，不等 T00-G，也不替代 T13。T00-G 单独验收部署候选镜像、Postgres、配置校验、密钥隔离、健康检查、脱敏日志、备份恢复与升级回退，是 T13 完整 provider 功能矩阵及 T14 的前置条件。
 3. T01 只保存/管理网站用户 Key，可先完成，不调用 Proxy。T04 开发和验证可启动临时本地 Proxy 与受控上游，不要求共享生产服务已部署。生产调用遇网关缺失必须清楚失败、不得直连 provider 或回退平台 Key。
 4. 按 tasks/README.md 保留 T01–T14 原业务拆分。模型测试、聊天、翻译、研究和问题推荐都由业务后端调用共享网关；持久任务、幂等、取消、事务与用户私有结果仍由原新闻业务系统负责。
-5. T13 逐模型记录 PROVIDER_REAL；先只执行 DeepSeek 子卡，其他厂商按 NOT_RUN 记录。T14 同时要求业务功能回归、T00-G 独立网关验收和获授权的 provider/UAT 结果。
+5. T13 逐模型记录完整 PROVIDER_REAL 功能矩阵；首轮只允许 DeepSeek 子卡，其他厂商按 NOT_RUN 记录。T14 同时要求业务功能回归、T00-G 独立网关验收和获授权的 provider/UAT 结果。
 
 独立网关发生故障时，NewsHub 的新闻阅读与已保存历史仍可用；新 BYOK 调用失败关闭。不要引入 Kubernetes、多副本或第二套业务任务框架。
 
@@ -54,6 +54,6 @@
 
 实施前核对最新 origin/feat/byok-user-api-keys HEAD、独立工作树、实际 AGENTS、SDK/Proxy/Docker 版本与适用测试。先记录未修改旧回归基线，按单张 Task 工作；需求未改变时禁止通过弱化旧断言制造绿灯。
 
-只允许合成凭据进行 SDK_LOCAL/PROXY_LOCAL。真实厂商调用仅在明确任务获准时使用，首轮只 DeepSeek，由用户本人在终端隐藏输入；不把 Key 发到聊天、日志、GitHub 或提交。
+只允许合成凭据进行 SDK_LOCAL/PROXY_LOCAL。可选早期 DeepSeek 文本冒烟须在 PROXY_LOCAL 全过后，经用户单独确认确切模型、安全合成输入、请求数/输出 token 上限和最低预算，再由用户本人终端隐藏输入 Key；不依赖 T00-G，也不替代 T13。不得把 Key 发到聊天、日志、GitHub 或提交。
 
 本轮仅更新文档，不创建服务仓库/配置、不部署或操作线上服务。后续 T00 只做本地 Proxy+SDK 技术验真；T00-G 可在隔离测试环境交付共享 Proxy 配置与运维验收，但不做生产 go-live，生产发布归 T14。T00/G、每张 Task 和 Test 分别记录精确 SHA、固定镜像/digest、SDK/Python 版本、脱敏执行日志、测试 diff、PROXY_LOCAL / PROVIDER_REAL / UAT 状态及未验证项。文档审核 PR 以 feat/byok-user-api-keys 为 base，不合并。

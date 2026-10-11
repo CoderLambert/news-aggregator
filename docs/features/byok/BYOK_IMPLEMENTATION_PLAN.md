@@ -8,7 +8,7 @@
 
 采用独立共享 LiteLLM Proxy + 业务后端调用 + 用户自有 provider Key 显式逐请求传递。Proxy 使用固定官方镜像，不随 NewsHub 部署或启动。新闻、知序和 TranslateFlow 等业务项目分别持有受限 Proxy virtual key；各自继续拥有网站用户身份、用户 Key 加密存储、任务/事务和私有历史。
 
-当前记录的镜像候选为 ghcr.io/berriai/litellm:v1.104.2@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500。这是待 T00 验证签名、digest 和端到端行为的候选，不是生产验收。Proxy 自有 Postgres、配置、密钥与运维生命周期，需在 T00-G 独立交付；本次只改 BYOK 文档，不建服务仓库、不部署或调用真实 provider。
+T00 的 v1.104.2@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500 是 EOF 风险复现夹具，来源和 registry digest 证据见 [T00 SDK 任务](tasks/T00-sdk-protocol.md)；不是 T00-G 部署推荐。T00-G 执行时需另行解析当时官方稳定候选、验证签名/证明及实际 digest；不同则分别记录，并对部署候选补做兼容验真。Proxy 自有 Postgres、配置、密钥与运维生命周期，需在 T00-G 独立交付；本次只改 BYOK 文档，不建服务仓库、不部署或调用真实 provider。
 
 边界按所有权划分：
 - 业务项目：登录用户、其 provider Key 的加密托管和所有权、可信连接/模型/输入快照、选择、任务幂等/恢复/取消、调用记账、事务与结果权限。
@@ -17,7 +17,7 @@
 
 Proxy master key 仅用于隔离的运维/管理 API，绝不进入业务运行容器。项目 virtual key 与用户 provider Key 是不同凭据。用户 Key 只能由对应业务后端在授权操作中从密文存储解出，并按 T00 实证确认的白名单 credential 字段逐请求传给受信 Proxy；缺 Key 即失败，禁止部署/环境 provider Key、平台 Key、其它用户 Key、直连 provider 或跨模型 fallback 兜底。
 
-初始六个产品预设为 OpenAI、Claude、DeepSeek、GLM、Qwen、Kimi；这是首批 UI/测试范围，不是 LiteLLM 的 provider 架构上限。PROVIDER_REAL 首轮只对 DeepSeek 开放；其它厂商保持 NOT_RUN，直至分别获准并按真实模型/地域验收。
+初始六个产品预设为 OpenAI、Claude、DeepSeek、GLM、Qwen、Kimi；这是首批 UI/测试范围，不是 LiteLLM 的 provider 架构上限。PROVIDER_REAL 首轮只对 DeepSeek 开放。T00 PROXY_LOCAL 通过后可在独立用户确认下执行一次早期文本冒烟，不等待 T00-G；T13 仍负责完整产品功能矩阵，其他厂商保持 NOT_RUN。
 
 业务通过官方客户端 SDK 访问 Proxy，由 Proxy 管理 Responses、Chat Completions、Messages 上游协议。NewsHub 内不实现三套 provider 适配器。T00 必须真实运行锁定 Proxy + 官方 SDK + 受控 HTTP upstream，核验原始终态、continuation、工具往返、请求计数和 Key 隔离。v1.104.2 EOF/终态风险是特定路径验证点；若原始完成证据无法穿过 Proxy，局部修复、等官方修复或禁用该路由 streaming，不能降低完整性门槛或改回另一套架构。
 
@@ -100,6 +100,12 @@ Proxy 服务的独立配置、运行、数据库和运维交付属于 T00-G；�
 endpoint 只存在于业务端和 Proxy 管理配置的受信注册表，普通用户不能提交任意完整 URL。Qwen WorkspaceId 等附加项只允许受限值，由管理端固定模板拼接；地域或 endpoint 变更需创建新连接/重新授权，不得悄悄把已保存 Key 发往新主机。
 
 套餐边界：百炼 Coding Plan、Token Plan 仅限交互式 AI 工具，不能用于后端服务。此站只接可用于后端服务的通用按量 API；不把用户 Coding 环境变量或 ChatGPT 订阅凭据移植到网站 BYOK。其它套餐需逐个核对条款。
+
+### 模型能力与输入限制
+
+- model ID 可先保存，但 text、tools、structured output、thinking/reasoning、streaming、context window 和最大输出等能力须分别验证；不从“OpenAI 兼容”推导其它能力。
+- 未知模型或没有可信 context-window 限制资料时，不自动发送整篇新闻或长历史。要求补充可核验限制或采用明确的保守输入/输出上限；超限时告知用户或拒绝请求。
+- 模型测试回执绑定 credential_epoch、model config revision 和 endpoint profile revision。替换 Key、改模型/参数或切地域后，旧的迟到回执不得覆盖当前状态。
 
 ## 4. 模块和 Proxy 请求契约
 
@@ -336,7 +342,7 @@ T00-G 与业务代码独立交付，验证官方镜像签名/来源与 tag+diges
 
 ### 首轮真实 Provider 验收边界
 
-PROVIDER_REAL 必须在独立 T13 子卡，由用户确认后从用户终端隐藏输入 Key；请求只经共享 Proxy 到官方通用 API。首轮只 DeepSeek；使用明确模型、合成短文本、关闭自动重试、设置明确请求数和输出 token 上限。其他五个预设保持 NOT_RUN；不能以 SDK_LOCAL、PROXY_LOCAL 或 LiteLLM 路由支持声明通过。运行前应提供推荐模型及最小请求预算给用户确认。
+PROVIDER_REAL 必须在独立 T13 子卡，由用户确认后从用户终端隐藏输入 Key；请求只经共享 Proxy 到官方通用 API。T00 PROXY_LOCAL 通过后，可不等待 T00-G 的备份/升级运维验收，在 T00 阶段申请一次早期 DeepSeek 文本冒烟。此请求需要用户单独确认推荐模型、合成安全输入、请求数/输出 token 上限和最小费用预算；Key 由用户在终端隐藏输入，不持久化/打印。它仅确认所列日期/模型的单次真实路由，不代替 T13 的完整产品功能矩阵。T13 完整矩阵按独立 Proxy 服务运维门槛执行；其它首批预设保持 NOT_RUN。
 
 ## 12. 本次实际验证证据
 
@@ -377,4 +383,6 @@ PROVIDER_REAL 必须在独立 T13 子卡，由用户确认后从用户终端隐�
 - [S15 GLM OpenAI兼容](https://docs.bigmodel.cn/cn/guide/develop/openai/introduction)；[Z.AI快速开始](https://docs.z.ai/guides/overview/quick-start)
 - [S16 Kimi API概览](https://platform.kimi.ai/docs/api/overview)；[百炼OpenAI兼容](https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope)
 - [S17 OpenAI迁移Responses](https://developers.openai.com/api/docs/guides/migrate-to-responses)
+- [S18 LiteLLM 官方 v1.104.2 release 与 cosign 验证说明](https://github.com/BerriAI/litellm/releases/tag/v1.104.2)
+- [S19 GHCR v1.104.2 OCI manifest](https://ghcr.io/v2/berriai/litellm/manifests/v1.104.2)；2026-10-11 registry response 为 HTTP 200、application/vnd.oci.image.index.v1+json，Docker-Content-Digest 为 sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500。该 digest 只固定 T00 风险复现 fixture，不推荐为部署版本。
 

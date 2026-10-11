@@ -9,8 +9,9 @@
 | T02-01 | 新增两模型并重新进入列表 | 按连接/用户隔离，目录失败仍允许输入模型ID | NOT_RUN |
 | T02-02 | 手动触发测试，不触发保存即测试 | 每个真实上游尝试单独记账，提示可能收费 | NOT_RUN |
 | T02-03 | 工具能力与文本能力分开显示 | 未验证/失败工具的模型不可标记研究可用 | NOT_RUN |
-| T02-04 | 换 Key/模型参数后旧成功回执迟到 | 不能改变当前状态，未知模型保持未验证 | NOT_RUN |
-| T02-05 | 任意 URL/extra_body/unsupported model 参数 | 不能进入 SDK 权限面，不自动落到管理员 Key | NOT_RUN |
+| T02-04 | 换 Key、模型配置或 endpoint profile 后旧成功回执迟到 | 按 credential_epoch/config/endpoint revision fencing；迟到回执不能覆盖当前状态 | NOT_RUN |
+| T02-05 | 任意 URL/extra_body/unsupported model 参数 | 不能进入 Proxy allowlist，不自动落到管理员 Key | NOT_RUN |
+| T02-06 | 可保存的未知模型无可信 context limit，用户请求长新闻 | 配置保持未验证；拒绝自动发送全文，或应用可解释的保守输入/输出上限 | NOT_RUN |
 
 ## 如何证明
 
