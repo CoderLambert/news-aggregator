@@ -986,7 +986,8 @@ def proxy_local(proxy_url: str, unguarded_proxy_url: str, native_stream_proxy_ur
     key_a = make_virtual_key(proxy_url, "tenant-a-chat", "t00-chat")
     key_b = make_virtual_key(proxy_url, "tenant-b-chat", "t00-chat")
     key_messages = make_virtual_key(proxy_url, "tenant-a-messages", "t00-messages")
-    register_project_key_fingerprints(upstream_url, [key_a, key_b, key_messages])
+    key_messages_b = make_virtual_key(proxy_url, "tenant-b-messages-concurrent", "t00-messages")
+    register_project_key_fingerprints(upstream_url, [key_a, key_b, key_messages, key_messages_b])
 
     def call_chat(tenant: str, project_key: str) -> dict:
         test_id = "T00_PROXY_CHAT_A" if tenant == "tenant-a" else "T00_PROXY_CHAT_B"
@@ -1007,11 +1008,32 @@ def proxy_local(proxy_url: str, unguarded_proxy_url: str, native_stream_proxy_ur
         finally:
             client.close()
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    def call_concurrent_messages(tenant: str, project_key: str) -> dict:
+        client = anthropic_client(project_key, proxy_url, auth_token=True)
+        try:
+            message = client.messages.create(
+                model="t00-messages",
+                max_tokens=40,
+                messages=[{"role": "user", "content": "T00_PROXY_MESSAGES_CONCURRENT_B"}],
+                extra_body={"api_key": PROVIDER_KEYS[tenant]},
+            )
+            return {
+                "success": True,
+                "stop_reason": message.stop_reason,
+                "model_alias": "t00-messages",
+            }
+        except Exception as exc:
+            return safe_exception(exc)
+        finally:
+            client.close()
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
         future_a = pool.submit(call_chat, "tenant-a", key_a)
         future_b = pool.submit(call_chat, "tenant-b", key_b)
+        future_messages_b = pool.submit(call_concurrent_messages, "tenant-b", key_messages_b)
         chat_a = future_a.result()
         chat_b = future_b.result()
+        concurrent_messages_b = future_messages_b.result()
 
     responses_client = openai_client(key_a, proxy_url + "/v1")
     try:
@@ -1260,6 +1282,7 @@ def proxy_local(proxy_url: str, unguarded_proxy_url: str, native_stream_proxy_ur
     records = upstream.get("records", [])
     return {
         "chat": {"tenant-a": chat_a, "tenant-b": chat_b},
+        "concurrent_messages_b": concurrent_messages_b,
         "responses": responses_result,
         "messages": messages_result,
         "tool_roundtrips": tool_roundtrips,
@@ -1284,6 +1307,7 @@ def proxy_local(proxy_url: str, unguarded_proxy_url: str, native_stream_proxy_ur
             key_a,
             key_b,
             key_messages,
+            key_messages_b,
         ],
     }
 
@@ -1307,6 +1331,25 @@ def credential_record_passes(record: dict | None, tenant: str, protocol: str) ->
         and record.get("admin_key_match") is False
         and record.get("deployment_default_match") is False
     )
+
+
+def upstream_service_overlap_ns(records: list[dict]) -> int | None:
+    """Return the common overlap duration for fixture requests, if observed."""
+    if len(records) < 2:
+        return None
+    starts = [record.get("request_service_started_monotonic_ns") for record in records]
+    finishes = [record.get("request_service_completed_monotonic_ns") for record in records]
+    if any(not isinstance(value, int) for value in starts + finishes):
+        return None
+    if any(finish <= start for start, finish in zip(starts, finishes)):
+        return None
+    overlap_ns = min(finishes) - max(starts)
+    return overlap_ns if overlap_ns > 0 else None
+
+
+def upstream_service_intervals_overlap(records: list[dict]) -> bool:
+    """Require every observed fixture request interval to overlap in time."""
+    return upstream_service_overlap_ns(records) is not None
 
 
 def eof_integrity_passes(upstream_terminal: str | None, finish_reasons: list[str]) -> bool:
@@ -1772,6 +1815,46 @@ def evaluate_proxy_local(checks: list[dict], proxy: dict) -> None:
         "PROXY_CHAT_AB_USE_SAME_MODEL_ALIAS",
         all(proxy["chat"][tenant].get("model_alias") == "t00-chat" for tenant in ("tenant-a", "tenant-b")),
         {"tenant_a_model_alias": proxy["chat"]["tenant-a"].get("model_alias"), "tenant_b_model_alias": proxy["chat"]["tenant-b"].get("model_alias")},
+    )
+    concurrent_specs = (
+        ("T00_PROXY_CHAT_A", "tenant-a", "chat", proxy["chat"]["tenant-a"], "t00-chat"),
+        ("T00_PROXY_CHAT_B", "tenant-b", "chat", proxy["chat"]["tenant-b"], "t00-chat"),
+        ("T00_PROXY_MESSAGES_CONCURRENT_B", "tenant-b", "messages", proxy["concurrent_messages_b"], "t00-messages"),
+    )
+    concurrent_records = []
+    concurrent_routes_pass = True
+    for test_id, tenant, protocol, response, model_alias in concurrent_specs:
+        rows = records_for(records, test_id)
+        record = rows[0] if len(rows) == 1 else None
+        if record is not None:
+            concurrent_records.append(record)
+        concurrent_routes_pass = concurrent_routes_pass and (
+            len(rows) == 1
+            and credential_record_passes(record, tenant, protocol)
+            and response.get("success") is True
+            and response.get("model_alias") == model_alias
+        )
+    overlap_ns = upstream_service_overlap_ns(concurrent_records)
+    add_check(
+        checks,
+        "PROXY_DIFFERENT_KEYS_AND_MODELS_RUN_CONCURRENTLY",
+        concurrent_routes_pass and upstream_service_intervals_overlap(concurrent_records),
+        {
+            "request_count_by_route": {
+                test_id: len(records_for(records, test_id))
+                for test_id, *_ in concurrent_specs
+            },
+            "expected_tenants": [tenant for _, tenant, *_ in concurrent_specs],
+            "expected_model_aliases": [model for *_, model in concurrent_specs],
+            "observed_tenants": [record.get("tenant") for record in concurrent_records],
+            "provider_key_matches": [record.get("provider_key_match") for record in concurrent_records],
+            "observed_model_aliases": [response.get("model_alias") for _, _, _, response, _ in concurrent_specs],
+            "observed_upstream_protocols": [
+                record.get("protocol") for record in concurrent_records
+            ],
+            "all_fixture_service_intervals_overlap": upstream_service_intervals_overlap(concurrent_records),
+            "common_overlap_ms": round(overlap_ns / 1_000_000, 3) if overlap_ns is not None else None,
+        },
     )
     for tenant in ("tenant-a", "tenant-b"):
         test_id = "T00_PROXY_CHAT_A" if tenant == "tenant-a" else "T00_PROXY_CHAT_B"

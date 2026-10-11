@@ -14,6 +14,8 @@ from probe import (
     eof_integrity_passes,
     missing_provider_fails_closed,
     responses_foreign_id_normalization_passes,
+    upstream_service_overlap_ns,
+    upstream_service_intervals_overlap,
     _stream_expectation,
 )
 
@@ -138,6 +140,29 @@ class CredentialEvaluatorTests(unittest.TestCase):
         record = good_record("chat")
         record["provider_auth_scheme"] = "x-api-key"
         self.assertFalse(credential_record_passes(record, "tenant-a", "chat"))
+
+
+class ConcurrentRequestEvidenceTests(unittest.TestCase):
+    def test_all_request_intervals_must_overlap(self):
+        records = [
+            {"request_service_started_monotonic_ns": 100, "request_service_completed_monotonic_ns": 350},
+            {"request_service_started_monotonic_ns": 150, "request_service_completed_monotonic_ns": 400},
+            {"request_service_started_monotonic_ns": 200, "request_service_completed_monotonic_ns": 320},
+        ]
+        self.assertTrue(upstream_service_intervals_overlap(records))
+        self.assertEqual(upstream_service_overlap_ns(records), 120)
+
+    def test_sequential_or_missing_intervals_fail(self):
+        sequential = [
+            {"request_service_started_monotonic_ns": 100, "request_service_completed_monotonic_ns": 200},
+            {"request_service_started_monotonic_ns": 200, "request_service_completed_monotonic_ns": 300},
+        ]
+        missing = [
+            {"request_service_started_monotonic_ns": 100, "request_service_completed_monotonic_ns": 300},
+            {"request_service_started_monotonic_ns": 150},
+        ]
+        self.assertFalse(upstream_service_intervals_overlap(sequential))
+        self.assertFalse(upstream_service_intervals_overlap(missing))
 
 
 class TerminalEvaluatorTests(unittest.TestCase):

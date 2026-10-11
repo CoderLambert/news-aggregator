@@ -459,9 +459,11 @@ class Handler(BaseHTTPRequestHandler):
         if project_match:
             credential_label = "project"
         upstream_terminal = terminal_for(self.path, request, scenario == "eof-no-terminal")
+        request_started_ns = time.monotonic_ns()
         record = {
             "event": "upstream_request",
             "test_id": test_id,
+            "request_service_started_monotonic_ns": request_started_ns,
             "protocol": route,
             "scenario": scenario,
             "model": request.get("model"),
@@ -496,6 +498,15 @@ class Handler(BaseHTTPRequestHandler):
         }
         with LOCK:
             RECORDS.append(record)
+        if test_id in {
+            "T00_PROXY_CHAT_A",
+            "T00_PROXY_CHAT_B",
+            "T00_PROXY_MESSAGES_CONCURRENT_B",
+        }:
+            # A bounded synthetic delay makes overlap observable in the upstream
+            # fixture instead of treating simultaneous SDK submission as proof.
+            time.sleep(0.2)
+            record["request_service_completed_monotonic_ns"] = time.monotonic_ns()
         print(json.dumps(record, separators=(",", ":"), sort_keys=True), flush=True)
 
         if not provider_credential or credential_label not in {"tenant-a", "tenant-b"}:
