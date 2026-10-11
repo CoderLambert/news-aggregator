@@ -10,8 +10,9 @@ from django.test import override_settings
 from django.urls import reverse
 from rest_framework.test import APIClient
 
-from api.models import UserAIConnection, UserAIModelConfig
+from api.models import AICallAttempt, UserAIConnection, UserAIModelConfig
 from api.services.ai_credentials import encrypt_credential
+from api.services.ai_model_test import ProbeOutcome
 
 
 ENCRYPTION_KEY = base64.urlsafe_b64encode(b't02-synthetic-app-encryption-key').decode('ascii').rstrip('=')
@@ -24,6 +25,8 @@ def enable_test_settings(settings):
     settings.AI_CONNECTION_ENCRYPTION_KEY = ENCRYPTION_KEY
     settings.AI_CONNECTION_ENCRYPTION_KEY_ID = 't02-test-key-v1'
     settings.PUBLIC_SITE_MODE = 'full'
+    settings.AI_BYOK_GATEWAY_URL = 'http://127.0.0.1:4000'
+    settings.AI_BYOK_GATEWAY_PROJECT_KEY = 'sk-' + ('a' * 32)
 
 
 def _authenticated_client(username):
@@ -278,3 +281,217 @@ def test_model_endpoints_require_session_and_csrf_for_mutation():
     )
     assert blocked_session_mutation.status_code == 403
     assert blocked_session_mutation['Cache-Control'] == 'no-store'
+    blocked_session_test = authenticated_without_csrf.post(
+        reverse('ai-model-test', kwargs={'model_id': '00000000-0000-0000-0000-000000000001'}),
+        {'probe_kind': 'text'}, format='json',
+    )
+    assert blocked_session_test.status_code == 403
+    assert blocked_session_test['Cache-Control'] == 'no-store'
+
+
+@pytest.mark.django_db
+def test_only_server_routed_presets_can_be_tested(monkeypatch):
+    client, _user, csrf = _authenticated_client('model-route-owner')
+    connection_id = _create_connection(client, csrf)
+    manual = _add_model(client, csrf, connection_id, model_id='vendor/unlisted-model').json()
+
+    def forbidden_provider_request(**_kwargs):
+        raise AssertionError('an unknown manual model must not reach the gateway')
+
+    monkeypatch.setattr('api.ai_model_test_views.send_model_probe', forbidden_provider_request)
+    rejected = client.post(
+        reverse('ai-model-test', kwargs={'model_id': manual['id']}),
+        {'probe_kind': 'text'}, format='json', HTTP_X_CSRFTOKEN=csrf,
+    )
+
+    assert rejected.status_code == 409
+    assert rejected.json() == {'error_code': 'model_test_route_unavailable'}
+    assert rejected['Cache-Control'] == 'no-store'
+    assert AICallAttempt.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_probe_api_rejects_user_supplied_article_content(monkeypatch):
+    client, _user, csrf = _authenticated_client('model-probe-content-owner')
+    connection_id = _create_connection(client, csrf)
+    created = client.post(
+        reverse('ai-model-list'),
+        {'connection_id': connection_id, 'catalog_model_id': 'deepseek-flash'},
+        format='json', HTTP_X_CSRFTOKEN=csrf,
+    ).json()
+
+    def forbidden_provider_request(**_kwargs):
+        raise AssertionError('the explicit capability probe must not accept article content')
+
+    monkeypatch.setattr('api.ai_model_test_views.send_model_probe', forbidden_provider_request)
+    article = 'synthetic unpublished article content ' * 1000
+    rejected = client.post(
+        reverse('ai-model-test', kwargs={'model_id': created['id']}),
+        {
+            'probe_kind': 'text',
+            'messages': [{'role': 'user', 'content': article}],
+        },
+        format='json', HTTP_X_CSRFTOKEN=csrf,
+    )
+
+    assert rejected.status_code == 400
+    assert article not in rejected.content.decode('utf-8')
+    assert AICallAttempt.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_explicit_text_and_tools_probes_record_secret_free_attempts(monkeypatch):
+    client, user, csrf = _authenticated_client('model-test-owner')
+    connection_id = _create_connection(client, csrf)
+    created = client.post(
+        reverse('ai-model-list'),
+        {'connection_id': connection_id, 'catalog_model_id': 'deepseek-flash'},
+        format='json', HTTP_X_CSRFTOKEN=csrf,
+    ).json()
+    received = []
+
+    def fake_probe(**kwargs):
+        received.append(kwargs)
+        return ProbeOutcome(
+            'succeeded', provider_request_id=f'proxy-request-{len(received)}',
+            input_tokens=7, output_tokens=2,
+        )
+
+    monkeypatch.setattr('api.ai_model_test_views.send_model_probe', fake_probe)
+    text_result = client.post(
+        reverse('ai-model-test', kwargs={'model_id': created['id']}),
+        {'probe_kind': 'text'}, format='json', HTTP_X_CSRFTOKEN=csrf,
+    )
+    tools_result = client.post(
+        reverse('ai-model-test', kwargs={'model_id': created['id']}),
+        {'probe_kind': 'tools'}, format='json', HTTP_X_CSRFTOKEN=csrf,
+    )
+
+    assert text_result.status_code == tools_result.status_code == 200
+    assert text_result['Cache-Control'] == 'no-store'
+    assert text_result.json()['capability'] == 'supported'
+    assert tools_result.json()['capability'] == 'supported'
+    assert SYNTHETIC_PROVIDER_KEY not in text_result.content.decode()
+    assert len(received) == 2
+    assert received == [
+        {
+            'gateway_url': 'http://127.0.0.1:4000',
+            'project_key': 'sk-' + ('a' * 32),
+            'provider_key': SYNTHETIC_PROVIDER_KEY,
+            'model_alias': 'news.deepseek-flash',
+            'probe_kind': 'text',
+        },
+        {
+            'gateway_url': 'http://127.0.0.1:4000',
+            'project_key': 'sk-' + ('a' * 32),
+            'provider_key': SYNTHETIC_PROVIDER_KEY,
+            'model_alias': 'news.deepseek-flash',
+            'probe_kind': 'tools',
+        },
+    ]
+    attempts = list(AICallAttempt.objects.filter(user=user).order_by('created_at', 'id'))
+    assert len(attempts) == 2
+    assert [(row.purpose, row.probe_kind, row.status) for row in attempts] == [
+        ('model_test', 'text', 'succeeded'), ('model_test', 'tools', 'succeeded'),
+    ]
+    assert all(len(row.snapshot_digest) == 64 for row in attempts)
+    assert all(row.input_tokens == 7 and row.output_tokens == 2 for row in attempts)
+    assert SYNTHETIC_PROVIDER_KEY not in json.dumps([
+        {field.name: getattr(row, field.name) for field in row._meta.fields if field.name != 'id'}
+        for row in attempts
+    ], default=str)
+    refreshed = client.get(reverse('ai-model-list')).json()['models'][0]
+    assert refreshed['capabilities']['text'] == 'supported'
+    assert refreshed['capabilities']['tools'] == 'supported'
+
+
+@pytest.mark.django_db
+def test_probe_failure_is_safe_and_unknown_result_is_not_retried(monkeypatch):
+    client, user, csrf = _authenticated_client('model-unknown-result-owner')
+    connection_id = _create_connection(client, csrf)
+    created = client.post(
+        reverse('ai-model-list'),
+        {'connection_id': connection_id, 'catalog_model_id': 'deepseek-flash'},
+        format='json', HTTP_X_CSRFTOKEN=csrf,
+    ).json()
+    calls = []
+
+    def ambiguous_result(**_kwargs):
+        calls.append(True)
+        return ProbeOutcome('unknown', 'result_unknown')
+
+    monkeypatch.setattr('api.ai_model_test_views.send_model_probe', ambiguous_result)
+    result = client.post(
+        reverse('ai-model-test', kwargs={'model_id': created['id']}),
+        {'probe_kind': 'text'}, format='json', HTTP_X_CSRFTOKEN=csrf,
+    )
+
+    assert result.status_code == 200
+    assert result.json()['status'] == 'unknown'
+    assert result.json()['safe_error_code'] == 'result_unknown'
+    assert 'response_body' not in result.json()
+    assert calls == [True]
+    attempt = AICallAttempt.objects.get(user=user)
+    assert attempt.status == 'unknown'
+    assert attempt.safe_error_code == 'result_unknown'
+
+
+@pytest.mark.django_db
+def test_stale_probe_result_cannot_overwrite_a_new_connection_epoch(monkeypatch):
+    client, _user, csrf = _authenticated_client('model-stale-probe-owner')
+    connection_id = _create_connection(client, csrf)
+    created = client.post(
+        reverse('ai-model-list'),
+        {'connection_id': connection_id, 'catalog_model_id': 'deepseek-flash'},
+        format='json', HTTP_X_CSRFTOKEN=csrf,
+    ).json()
+    model = UserAIModelConfig.objects.get(pk=created['id'])
+    model.verification_status = 'verified'
+    model.verified_credential_epoch = model.connection.credential_epoch
+    model.verified_config_revision = model.config_revision
+    model.verified_endpoint_profile_version = model.connection.endpoint_profile_version
+    model.capability_snapshot = {'text': 'supported', 'tools': 'unknown'}
+    model.save()
+
+    def rotate_while_probe_is_in_flight(**_kwargs):
+        UserAIConnection.objects.filter(pk=connection_id).update(credential_epoch=2)
+        return ProbeOutcome('succeeded', input_tokens=7, output_tokens=2)
+
+    monkeypatch.setattr('api.ai_model_test_views.send_model_probe', rotate_while_probe_is_in_flight)
+    result = client.post(
+        reverse('ai-model-test', kwargs={'model_id': created['id']}),
+        {'probe_kind': 'tools'}, format='json', HTTP_X_CSRFTOKEN=csrf,
+    )
+    refreshed = client.get(reverse('ai-model-list')).json()['models'][0]
+
+    assert result.status_code == 200
+    assert result.json()['status'] == 'stale'
+    assert result.json()['stale'] is True
+    assert refreshed['verification_status'] == 'stale'
+    assert refreshed['capabilities']['text'] == 'supported'
+    assert refreshed['capabilities']['tools'] == 'unknown'
+    assert AICallAttempt.objects.get(model_config__isnull=False).status == 'succeeded'
+
+
+@pytest.mark.django_db
+def test_test_action_requires_owner_and_gateway_configuration(monkeypatch):
+    owner, _owner_user, owner_csrf = _authenticated_client('model-test-route-owner')
+    connection_id = _create_connection(owner, owner_csrf)
+    created = owner.post(
+        reverse('ai-model-list'),
+        {'connection_id': connection_id, 'catalog_model_id': 'deepseek-flash'},
+        format='json', HTTP_X_CSRFTOKEN=owner_csrf,
+    ).json()
+    other, _other_user, other_csrf = _authenticated_client('model-test-route-other')
+    model_test_url = reverse('ai-model-test', kwargs={'model_id': created['id']})
+    assert other.post(
+        model_test_url, {'probe_kind': 'text'}, format='json', HTTP_X_CSRFTOKEN=other_csrf,
+    ).status_code == 404
+
+    monkeypatch.setattr('api.ai_model_test_views.settings.AI_BYOK_GATEWAY_URL', '')
+    forbidden = owner.post(
+        model_test_url, {'probe_kind': 'text'}, format='json', HTTP_X_CSRFTOKEN=owner_csrf,
+    )
+    assert forbidden.status_code == 503
+    assert forbidden.json() == {'error_code': 'model_test_gateway_unavailable'}
+    assert AICallAttempt.objects.count() == 0

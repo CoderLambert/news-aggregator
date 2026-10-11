@@ -8,11 +8,13 @@ from . import health_views
 from . import capabilities_views
 from . import ai_connection_views
 from . import ai_model_views
+from . import ai_model_test_views
 
 urlpatterns = [
     path('ai/models/catalog/', ai_model_views.AIModelCatalogView.as_view(), name='ai-model-catalog'),
     path('ai/models/', ai_model_views.UserAIModelListCreateView.as_view(), name='ai-model-list'),
     path('ai/models/<uuid:model_id>/', ai_model_views.UserAIModelDetailView.as_view(), name='ai-model-detail'),
+    path('ai/models/<uuid:model_id>/test/', ai_model_test_views.AIModelTestView.as_view(), name='ai-model-test'),
     path('ai/providers/', ai_connection_views.AIProviderCatalogView.as_view(), name='ai-provider-catalog'),
     path('ai/connections/', ai_connection_views.UserAIConnectionListCreateView.as_view(), name='ai-connection-list'),
     path('ai/connections/<uuid:connection_id>/', ai_connection_views.UserAIConnectionDetailView.as_view(), name='ai-connection-detail'),
