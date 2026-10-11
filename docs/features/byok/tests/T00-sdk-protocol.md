@@ -170,7 +170,7 @@ SDK/Proxy 功能路径的上次脱敏摘要（镜像核验项已撤销，需与�
 
 ### 当前准入与分离记录
 
-T00 当前仍为 **BLOCKED**。任务卡要求核心 PROXY_LOCAL 全部通过后，才可申请经 LiteLLM 的 DeepSeek 早期真实调用；最新运行 D 在实现 SHA `25ca792008676889de64cc069ef36c6452983883` 为 `394 PASS / 1 FAIL / 395 checks`。失败项 `PROXY_UNGUARDED_CHAT_EOF_NOT_SYNTHESIZED_COMPLETE` 记录了上游正常 EOF、无协议终态，而 LiteLLM v1.104.2 向 SDK 暴露 `finish_reason=stop`。该失败未改写或屏蔽。
+T00 当前仍为 **BLOCKED**。任务卡要求核心 PROXY_LOCAL 全部通过后，才可申请经 LiteLLM 的 DeepSeek 早期真实调用；最新运行 D 的实测实现 SHA 为 `193d52d0b684c8c47db633a6a93ea96a6690e460`，结果为 `394 PASS / 1 FAIL / 395 checks`。失败项 `PROXY_UNGUARDED_CHAT_EOF_NOT_SYNTHESIZED_COMPLETE` 记录了上游正常 EOF、无协议终态，而 LiteLLM v1.104.2 向 SDK 暴露 `finish_reason=stop`。该失败未改写或屏蔽。
 
 因此目前只准备了可选的 **直连诊断**，不调用 LiteLLM，也不能代表 T00-11 通过。真实 LiteLLM 路径仍是 `BLOCKED / NOT_RUN`；没有提供或执行它的收费命令。若用户选择直连诊断，其结果单独记为 DeepSeek direct baseline，不改变 T00、PROXY_LOCAL 或 T13 状态。未来网关路径必须另有记录；直连与网关请求各自独立计数。
 
