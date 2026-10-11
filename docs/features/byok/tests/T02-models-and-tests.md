@@ -12,6 +12,7 @@
 | T02 CRUD 提交 | 2bcf1cb22d4f0e070bedc0de14272a90cf4b325d |
 | T02 探测实现提交 | 80bc47180786071ba651ea256581dffad90c892a |
 | 分支 / PR 目标 | task/byok-T02-models-and-tests / feat/byok-user-api-keys |
+| T02 PR | [#36 Draft](https://github.com/CoderLambert/news-aggregator/pull/36) |
 | 前置网关 | T00-G PR #35，Draft、未合并；测试源码提交 89e1694f071601b85cb604d6551af7836917199a |
 | OS / 架构 | Linux 7.2.5-3-omarchy x86_64 |
 | Python / Django / DRF / cryptography / pytest | 3.14.8 / 6.1.2 / 3.18.3 / 50.0.2 / 9.1.1 |
