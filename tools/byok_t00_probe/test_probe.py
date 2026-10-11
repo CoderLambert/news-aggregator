@@ -12,6 +12,7 @@ from probe import (
     dispatch_synthetic_tool,
     eof_integrity_passes,
     missing_provider_fails_closed,
+    responses_foreign_id_normalization_passes,
     _stream_expectation,
 )
 
@@ -166,13 +167,61 @@ class NativeStreamingEvaluatorTests(unittest.TestCase):
             "terminals": ["incomplete"],
         }))
 
-    def test_cancel_requires_sdk_response_close(self):
-        self.assertFalse(_stream_expectation("messages", "CANCEL", {
+    def test_cancel_requires_close_disconnect_and_resource_release(self):
+        outcome = {
             "success": True,
+            "outcome": "cancelled",
+            "stream_complete": False,
             "event_count": 1,
             "canceled_after_first_event": True,
-            "client_response_closed": False,
+            "terminals": [],
+            "client_response_closed": True,
+            "upstream_disconnect_within_observation_window": True,
+            "upstream_producer_exited_within_observation_window": True,
+            "active_upstream_producers_at_observation_end": 0,
+            "proxy_liveness_http_2xx_after_cancel": True,
+            "upstream_stream_body_finished": False,
+        }
+        self.assertTrue(_stream_expectation("messages", "CANCEL", outcome))
+        outcome["event_count"] = 2
+        self.assertFalse(_stream_expectation("messages", "CANCEL", outcome))
+
+    def test_cancel_fails_when_upstream_keeps_running_or_returns_complete(self):
+        self.assertFalse(_stream_expectation("messages", "CANCEL", {
+            "success": True,
+            "outcome": "cancelled",
+            "stream_complete": True,
+            "event_count": 1,
+            "canceled_after_first_event": True,
+            "terminals": [],
+            "client_response_closed": True,
+            "upstream_disconnect_within_observation_window": False,
+            "upstream_producer_exited_within_observation_window": False,
+            "active_upstream_producers_at_observation_end": 1,
+            "proxy_liveness_http_2xx_after_cancel": True,
+            "upstream_stream_body_finished": True,
         }))
+
+
+class ResponsesForeignIdNormalizationTests(unittest.TestCase):
+    def test_foreign_item_id_may_normalize_but_call_association_must_survive(self):
+        facts = {
+            f"responses_r{round_index}_{suffix}": True
+            for round_index in (1, 2)
+            for suffix in (
+                "reasoning_id_preserved",
+                "reasoning_summary_preserved",
+                "encrypted_continuation_preserved",
+                "reasoning_keyset_preserved",
+                "non_id_function_call_fields_preserved",
+                "foreign_item_id_normalized",
+                "foreign_call_id_and_tool_association_preserved",
+                "tool_result_preserved",
+            )
+        }
+        self.assertTrue(responses_foreign_id_normalization_passes(facts))
+        facts["responses_r2_tool_result_preserved"] = False
+        self.assertFalse(responses_foreign_id_normalization_passes(facts))
 
 
 class MissingProviderEvaluatorTests(unittest.TestCase):

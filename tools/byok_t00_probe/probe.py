@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -29,6 +30,7 @@ MASTER_KEY = "sk-t00-master-synthetic"
 ADMIN_KEY = "sk-t00-admin-synthetic"
 SDK_MAX_RETRIES = 0
 PROXY_NUM_RETRIES = 0
+CANCEL_PROPAGATION_OBSERVATION_WINDOW_SECONDS = 2.0
 WRONG_PROJECT_KEY = "sk-t00-wrong-project-synthetic"
 DEPLOYMENT_KEY = "sk-t00-deployment-default-synthetic"
 PROVIDER_KEYS = {
@@ -214,6 +216,16 @@ def request_json(
     if not isinstance(decoded, dict):
         raise RuntimeError("unexpected JSON response")
     return decoded
+
+
+def http_status_ok(url: str, timeout: float = 1.0) -> bool:
+    """Return only whether a local health endpoint responds with HTTP 2xx."""
+    request = urllib.request.Request(url)
+    try:
+        with URL_OPENER.open(request, timeout=timeout) as response:
+            return 200 <= response.status < 300
+    except (OSError, urllib.error.URLError):
+        return False
 
 
 def request_json_with_status(
@@ -417,6 +429,7 @@ def sdk_local(upstream_url: str) -> dict:
     results["incomplete_cases"] = incomplete
     results["stream_cases"] = run_stream_group(
         sdk_base_urls, tuple(sdk_base_urls), sdk_keys,
+        upstream_url=upstream_url,
         cases=("COMPLETE", "EOF", "INCOMPLETE", "SSE_ERROR", "CANCEL"),
     )
     results["tool_roundtrips"] = {
@@ -605,6 +618,8 @@ def run_protocol_stream_case(
     *,
     provider_key: str | None = None,
     via_proxy: bool = False,
+    upstream_url: str | None = None,
+    proxy_health_url: str | None = None,
 ) -> dict:
     """Read a protocol stream with the official SDK and record only event names/terminals."""
     prefix = "PROXY" if via_proxy else "SDK"
@@ -615,6 +630,7 @@ def run_protocol_stream_case(
     event_types: list[str] = []
     terminals: list[str] = []
     canceled_after_first = False
+    downstream_close_monotonic_ns = None
     result: dict
     try:
         kwargs = protocol_request(
@@ -643,19 +659,84 @@ def run_protocol_stream_case(
                         event_types.append(event_type)
                     if terminal:
                         terminals.append(terminal)
-        result = {"success": True}
+        result = {
+            "success": True,
+            "outcome": "cancelled" if case == "CANCEL" else "stream_consumed",
+            "stream_complete": case != "CANCEL",
+        }
     except Exception as exc:
         result = safe_exception(exc)
     finally:
         response = getattr(stream, "response", None)
+        if case == "CANCEL":
+            downstream_close_monotonic_ns = time.monotonic_ns()
         result.update({
             "event_count": len(event_types),
             "event_types": event_types,
             "terminals": terminals,
             "canceled_after_first_event": canceled_after_first,
             "client_response_closed": bool(response is not None and response.is_closed),
+            "downstream_close_monotonic_ns": downstream_close_monotonic_ns,
         })
         client.close()
+    if case == "CANCEL" and upstream_url and downstream_close_monotonic_ns is not None:
+        deadline = time.monotonic() + CANCEL_PROPAGATION_OBSERVATION_WINDOW_SECONDS
+        latest_stats: dict = {}
+        observed_record: dict = {}
+        while time.monotonic() <= deadline:
+            try:
+                latest_stats = request_json(upstream_url + "/stats", timeout=0.25)
+                observed_record = next((
+                    item for item in latest_stats.get("records", [])
+                    if item.get("test_id") == marker
+                ), {})
+            except (OSError, RuntimeError, HttpStatusError):
+                observed_record = {}
+            if (
+                observed_record.get("client_disconnected") is True
+                and observed_record.get("upstream_stream_producer_exit_monotonic_ns") is not None
+            ):
+                break
+            time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+
+        disconnect_ns = observed_record.get("upstream_disconnect_monotonic_ns")
+        producer_exit_ns = observed_record.get("upstream_stream_producer_exit_monotonic_ns")
+        disconnect_delay_ms = (
+            None if disconnect_ns is None else round((disconnect_ns - downstream_close_monotonic_ns) / 1_000_000, 3)
+        )
+        producer_exit_delay_ms = (
+            None if producer_exit_ns is None else round((producer_exit_ns - downstream_close_monotonic_ns) / 1_000_000, 3)
+        )
+        observation_window_ms = int(CANCEL_PROPAGATION_OBSERVATION_WINDOW_SECONDS * 1000)
+        active_producers = latest_stats.get("active_stream_producers")
+        proxy_liveness_ok = (
+            None if proxy_health_url is None else http_status_ok(proxy_health_url, timeout=1.0)
+        )
+        write_times = observed_record.get("upstream_stream_write_monotonic_ns", [])
+        result.update({
+            "cancel_observation_window_ms": observation_window_ms,
+            "upstream_disconnect_delay_ms": disconnect_delay_ms,
+            "upstream_producer_exit_delay_ms": producer_exit_delay_ms,
+            "upstream_disconnect_monotonic_ns": disconnect_ns,
+            "upstream_producer_exit_monotonic_ns": producer_exit_ns,
+            "upstream_disconnect_within_observation_window": (
+                disconnect_delay_ms is not None and 0 <= disconnect_delay_ms <= observation_window_ms
+            ),
+            "upstream_producer_exited_within_observation_window": (
+                producer_exit_delay_ms is not None and 0 <= producer_exit_delay_ms <= observation_window_ms
+            ),
+            "active_upstream_producers_at_observation_end": active_producers,
+            "proxy_liveness_http_2xx_after_cancel": proxy_liveness_ok,
+            "upstream_disconnect_observed": observed_record.get("client_disconnected") is True,
+            "upstream_producer_exit_reason": observed_record.get("producer_exit_reason"),
+            "upstream_stream_body_finished": observed_record.get("upstream_stream_body_finished") is True,
+            "upstream_frames_written_at_disconnect": observed_record.get("upstream_stream_events_written"),
+            "upstream_frames_written_after_downstream_close": (
+                sum(1 for write_ns in write_times if write_ns > downstream_close_monotonic_ns)
+                if isinstance(write_times, list) else None
+            ),
+            "upstream_cancel_fixture_frames_written": observed_record.get("cancel_fixture_frames_written", 0),
+        })
     return result
 
 
@@ -666,6 +747,8 @@ def run_stream_group(
     *,
     provider_key: str | None = None,
     via_proxy: bool = False,
+    upstream_url: str | None = None,
+    proxy_health_url: str | None = None,
     cases: tuple[str, ...] = ("COMPLETE", "EOF", "INCOMPLETE", "SSE_ERROR", "CANCEL"),
 ) -> dict:
     results = {}
@@ -675,6 +758,8 @@ def run_stream_group(
             results[protocol][case.lower()] = run_protocol_stream_case(
                 base_urls[protocol], protocol, case, sdk_keys[protocol],
                 provider_key=provider_key, via_proxy=via_proxy,
+                upstream_url=upstream_url,
+                proxy_health_url=proxy_health_url,
             )
     return results
 
@@ -765,6 +850,7 @@ def proxy_tool_roundtrip(
     provider_key: str,
     *,
     via_proxy: bool = True,
+    foreign_responses_ids: bool = False,
 ) -> dict:
     """Two synthetic tool turns through the official SDK and optional Proxy."""
     public_text = None
@@ -802,7 +888,8 @@ def proxy_tool_roundtrip(
             )
             public_text = final.choices[0].message.content
         elif protocol == "responses":
-            input_items = [{"role": "user", "content": f"T00_{source}_RESPONSES_TOOL_R1_A"}]
+            marker_prefix = f"T00_{source}_RESPONSES_" + ("FOREIGN_TOOL_" if foreign_responses_ids else "TOOL_")
+            input_items = [{"role": "user", "content": marker_prefix + "R1_A"}]
             for round_number in (1, 2):
                 response = client.responses.create(
                     model=model, input=input_items, tools=tool_definitions("responses"),
@@ -818,7 +905,7 @@ def proxy_tool_roundtrip(
                     dispatch_outcomes.append(outcome)
                     if outcome == "dispatched":
                         input_items.append({"type": "function_call_output", "call_id": item.call_id, "output": result})
-                input_items.append({"role": "user", "content": f"T00_{source}_RESPONSES_TOOL_R{round_number + 1}_A" if round_number == 1 else f"T00_{source}_RESPONSES_TOOL_FINAL_A"})
+                input_items.append({"role": "user", "content": marker_prefix + f"R{round_number + 1}_A" if round_number == 1 else marker_prefix + "FINAL_A"})
             final = client.responses.create(
                 model=model, input=input_items,
                 **provider_body,
@@ -967,6 +1054,10 @@ def proxy_local(proxy_url: str, unguarded_proxy_url: str, native_stream_proxy_ur
         "responses": proxy_tool_roundtrip("responses", proxy_url, key_a, PROVIDER_KEYS["tenant-a"]),
         "messages": proxy_tool_roundtrip("messages", proxy_url, key_messages, PROVIDER_KEYS["tenant-a"]),
     }
+    responses_foreign_id_case = proxy_tool_roundtrip(
+        "responses", proxy_url, key_a, PROVIDER_KEYS["tenant-a"],
+        foreign_responses_ids=True,
+    )
     invalid_tools = {}
     for protocol, project_key in (("chat", key_a), ("responses", key_a), ("messages", key_messages)):
         for variant in ("malformed", "invalid", "unknown"):
@@ -1161,6 +1252,8 @@ def proxy_local(proxy_url: str, unguarded_proxy_url: str, native_stream_proxy_ur
         {"responses": key_a, "messages": key_messages},
         provider_key=PROVIDER_KEYS["tenant-a"],
         via_proxy=True,
+        upstream_url=upstream_url,
+        proxy_health_url=native_stream_proxy_url + "/health/liveliness",
     )
 
     upstream = request_json(upstream_url + "/stats")
@@ -1170,6 +1263,7 @@ def proxy_local(proxy_url: str, unguarded_proxy_url: str, native_stream_proxy_ur
         "responses": responses_result,
         "messages": messages_result,
         "tool_roundtrips": tool_roundtrips,
+        "responses_foreign_id_case": responses_foreign_id_case,
         "invalid_tools": invalid_tools,
         "eof": eof_result,
         "wrong_project": wrong_project_result,
@@ -1380,9 +1474,17 @@ def _stream_expectation(protocol: str, case: str, outcome: dict) -> bool:
     if case == "CANCEL":
         return (
             outcome.get("success") is True
+            and outcome.get("outcome") == "cancelled"
+            and outcome.get("stream_complete") is False
             and outcome.get("canceled_after_first_event") is True
-            and outcome.get("event_count", 0) >= 1
+            and outcome.get("event_count") == 1
+            and not terminals
             and outcome.get("client_response_closed") is True
+            and outcome.get("upstream_disconnect_within_observation_window") is True
+            and outcome.get("upstream_producer_exited_within_observation_window") is True
+            and outcome.get("active_upstream_producers_at_observation_end") == 0
+            and outcome.get("proxy_liveness_http_2xx_after_cancel") is not False
+            and outcome.get("upstream_stream_body_finished") is False
         )
     return False
 
@@ -1414,26 +1516,62 @@ def evaluate_stream_paths(
                 len(rows) == 1,
                 {"upstream_count": len(rows), "configured_sdk_max_retries": SDK_MAX_RETRIES, "configured_proxy_retries": PROXY_NUM_RETRIES},
             )
+            if case in {"COMPLETE", "INCOMPLETE"}:
+                expected_done_sentinel = protocol == "chat"
+                add_check(
+                    checks,
+                    check_id + "_PROTOCOL_TERMINAL_FRAMING",
+                    len(rows) == 1 and record.get("upstream_protocol_done_sentinel_written") is expected_done_sentinel,
+                    {
+                        "protocol": protocol,
+                        "done_sentinel_expected": expected_done_sentinel,
+                        "done_sentinel_written": record.get("upstream_protocol_done_sentinel_written"),
+                    },
+                )
             if case == "CANCEL":
                 add_check(
                     checks,
                     check_id + "_UPSTREAM_DETECTED_CLIENT_CLOSE",
-                    record.get("client_disconnected") is True,
+                    outcome.get("upstream_disconnect_within_observation_window") is True
+                    and record.get("client_disconnected") is True,
                     {
                         "upstream_observed_client_disconnect": record.get("client_disconnected") is True,
+                        "disconnect_delay_ms": outcome.get("upstream_disconnect_delay_ms"),
+                        "observation_window_ms": outcome.get("cancel_observation_window_ms"),
                         "upstream_stream_body_finished": record.get("upstream_stream_body_finished") is True,
                         "upstream_stream_events_written": record.get("upstream_stream_events_written"),
+                        "upstream_frames_written_after_downstream_close": outcome.get("upstream_frames_written_after_downstream_close"),
                     },
                 )
                 add_check(
                     checks,
                     check_id + "_UPSTREAM_STOPPED_AFTER_CLIENT_CLOSE",
                     record.get("client_disconnected") is True
-                    and record.get("upstream_stream_body_finished") is not True,
+                    and record.get("upstream_stream_body_finished") is not True
+                    and record.get("producer_exit_reason") == "client_disconnect",
                     {
                         "upstream_observed_client_disconnect": record.get("client_disconnected") is True,
                         "upstream_stream_body_finished": record.get("upstream_stream_body_finished") is True,
+                        "producer_exit_reason": record.get("producer_exit_reason"),
+                        "producer_exit_delay_ms": outcome.get("upstream_producer_exit_delay_ms"),
                         "upstream_stream_events_written": record.get("upstream_stream_events_written"),
+                    },
+                )
+                add_check(
+                    checks,
+                    check_id + "_CLIENT_CANCEL_RESOURCES_RELEASED",
+                    outcome.get("client_response_closed") is True
+                    and outcome.get("event_count") == 1
+                    and outcome.get("active_upstream_producers_at_observation_end") == 0
+                    and outcome.get("upstream_producer_exited_within_observation_window") is True
+                    and outcome.get("proxy_liveness_http_2xx_after_cancel") is not False,
+                    {
+                        "downstream_response_closed": outcome.get("client_response_closed") is True,
+                        "downstream_events_consumed": outcome.get("event_count"),
+                        "cancelled_not_reported_complete": outcome.get("outcome") == "cancelled" and outcome.get("stream_complete") is False,
+                        "active_upstream_producers_at_observation_end": outcome.get("active_upstream_producers_at_observation_end"),
+                        "proxy_liveness_http_2xx_after_cancel": outcome.get("proxy_liveness_http_2xx_after_cancel"),
+                        "cancel_observation_window_ms": outcome.get("cancel_observation_window_ms"),
                     },
                 )
 
@@ -1490,6 +1628,24 @@ def evaluate_tool_roundtrips(
             len(final_rows) == 1 and preserved,
             {key: value for key, value in facts.items() if key.endswith("_preserved") or key.endswith("_present")},
         )
+
+
+def responses_foreign_id_normalization_passes(facts: dict) -> bool:
+    """Only the old foreign item id may be normalized; call association stays strict."""
+    return all(
+        facts.get(f"responses_r{round_index}_{suffix}") is True
+        for round_index in (1, 2)
+        for suffix in (
+            "reasoning_id_preserved",
+            "reasoning_summary_preserved",
+            "encrypted_continuation_preserved",
+            "reasoning_keyset_preserved",
+            "non_id_function_call_fields_preserved",
+            "foreign_item_id_normalized",
+            "foreign_call_id_and_tool_association_preserved",
+            "tool_result_preserved",
+        )
+    )
 
 
 def evaluate_sdk_local(checks: list[dict], sdk: dict, upstream_records: list[dict]) -> None:
@@ -1686,6 +1842,37 @@ def evaluate_proxy_local(checks: list[dict], proxy: dict) -> None:
             len(final_rows) == 1 and preserved,
             {key: value for key, value in facts.items() if key.endswith("_preserved") or key.endswith("_present") or key.endswith("_count")},
         )
+
+    foreign_result = proxy["responses_foreign_id_case"]
+    foreign_prefix = "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION"
+    foreign_final_id = "T00_PROXY_RESPONSES_FOREIGN_TOOL_FINAL_A"
+    foreign_final_rows = records_for(records, foreign_final_id)
+    foreign_facts = foreign_final_rows[0].get("continuation_facts", {}) if len(foreign_final_rows) == 1 else {}
+    for marker in ("R1", "R2", "FINAL"):
+        test_id = f"T00_PROXY_RESPONSES_FOREIGN_TOOL_{marker}_A"
+        rows = records_for(records, test_id)
+        append_record_checks(checks, foreign_prefix + "_" + marker, rows, 1, "tenant-a", "responses")
+    add_check(
+        checks,
+        foreign_prefix + "_OLD_RESP_ITEM_IDS_NORMALIZED_ONLY",
+        len(foreign_final_rows) == 1 and responses_foreign_id_normalization_passes(foreign_facts),
+        {key: value for key, value in foreign_facts.items() if "responses_r" in key},
+    )
+    add_check(
+        checks,
+        foreign_prefix + "_TOOLS_DISPATCHED_AND_PUBLIC_OUTPUT_SAFE",
+        foreign_result.get("success") is True
+        and foreign_result.get("tool_dispatch_outcomes") == ["dispatched", "dispatched"]
+        and foreign_result.get("continuation_in_public") is False
+        and foreign_result.get("key_in_public") is False
+        and set(foreign_result.get("public_output", {})) == {"text"},
+        {
+            "tool_dispatch_outcomes": foreign_result.get("tool_dispatch_outcomes"),
+            "continuation_in_public": foreign_result.get("continuation_in_public"),
+            "key_in_public": foreign_result.get("key_in_public"),
+            "public_fields": sorted(foreign_result.get("public_output", {})),
+        },
+    )
 
     expected_rejections = {
         "chat_malformed": "partial_json",
