@@ -1,6 +1,6 @@
 # T00 · 共享网关端到端技术验真
 
-> **BLOCKED（2026-10-12）**：SDK_LOCAL / PROXY_LOCAL 已有隔离合成运行，但 T00 完整门槛未通过；运行 D 为 `394 PASS / 1 FAIL / 395 checks`，失败是 LiteLLM v1.104.2 无回调 Chat EOF 被暴露为 `finish_reason=stop`。用户报告 DeepSeek 直连基线 PASS（1 次请求）；经 LiteLLM 的 T00-11 仍为 NOT_RUN。精确 SHA、失败证据与直连诊断边界见[同编号 Test](../tests/T00-sdk-protocol.md)。本任务状态不表示网关或其他厂商功能已验收。
+> **BLOCKED（2026-10-12）**：最新隔离合成运行 E 为 `395 PASS / 0 FAIL / 395 checks`，但 CLI 仍标记 `PARTIAL`；T00-02、T00-06、T00-07 和旧业务回归尚未完整验收。LiteLLM v1.104.2 的原始 Chat EOF 风险仍由负控复现，受保护准入路径已证明在上游前拒绝 Chat streaming。用户报告 DeepSeek 直连基线 PASS；经 LiteLLM 的 T00-11 仍为 NOT_RUN。精确 SHA、证据与边界见[同编号 Test](../tests/T00-sdk-protocol.md)。本任务状态不表示网关或其他厂商功能已验收。
 
 | 属性 | 内容 |
 | --- | --- |
@@ -42,7 +42,7 @@ v1.104.2 是已记录 EOF/终态风险的复现版本。T00 回归夹具固定�
 | T00-07 | 正常完成、异常、取消后的资源关闭 | SDK response/stream 与 HTTP 资源均关闭 |
 | T00-08 | 缺 provider Key、错误项目虚拟 Key | 缺个人 Key 时拒绝且不借部署 Key；错误项目虚拟 Key 到达上游前被 Proxy 拒绝 |
 | T00-09 | Proxy 与 SDK 请求计数 | max_retries=0、num_retries=0、无 fallback；计数证明失败未隐式重发或改模型 |
-| T00-10 | v1.104.2 原始上游 EOF 与 Proxy 暴露终态对照 | 仅下游 stop/[DONE] 不足以证明原始上游完整；失败按局部风险记录 |
+| T00-10 | v1.104.2 原始上游 EOF 与 Proxy 暴露终态对照 | 仅下游 stop/[DONE]不足以证明原始上游完整；若负控复现风险，受保护准入路径须返回 400 并在 upstream 前拒绝该 streaming 路由 |
 | T00-11 | 可选 DeepSeek 早期文本冒烟（仅 PROXY_LOCAL 全过且用户单独确认后） | 经 Proxy 到官方通用 API；合成安全短文本、单一模型、明确请求数和输出 token 上限、无自动重试；记录用户确认、模型/预算及脱敏结果。此单次证据不代替 T13 矩阵 |
 
 ## LiteLLM 流终态验真阻塞规则
@@ -50,6 +50,8 @@ v1.104.2 是已记录 EOF/终态风险的复现版本。T00 回归夹具固定�
 针对 v1.104.2 已知 EOF/终态风险，必须比较受控上游原始终止事实、Proxy 的原始响应/事件、客户端收到的终态及错误状态。仅有 Proxy 下游 `finish_reason=stop` 或 `[DONE]` 不能证明上游成功完整结束。该风险只针对实测到的具体路径，不能概括为所有网络错误都会假成功。
 
 若代理无法给业务层提供可验证的原始完成证据，停止该路径验收并报告原始请求、事件序列和脱敏日志。只考虑锁定版本的局部补丁、等待官方修复，或禁用该具体路由的 streaming；不得改成另一套 provider 适配器、扩大为所有 SDK 的重构，或降低完整性契约。
+
+若采用禁用路由作为隔离，必须同时保留无回调负控以记录原始风险，并通过 guarded Proxy 实测该 Chat streaming 请求返回 HTTP 400 `T00_STREAMING_DISABLED` 且 upstream 请求数为 0。满足这两个条件只代表该路由被关闭，不代表其兼容；不能把 raw `finish_reason=stop` 解释为上游完整。
 
 ## 可复现验收路径
 

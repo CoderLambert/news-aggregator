@@ -1,8 +1,8 @@
 # BYOK · 个人 API Key 与模型配置
 
-> 本目录记录已确认的 BYOK 产品设计和任务契约。当前功能分支基线为 feat/byok-user-api-keys@ea2ce55ae22e19e1604e88031b824b68f2666cec。T00 隔离探针已实现，但 PROXY_LOCAL 仍有一项 Chat EOF 失败，状态为 BLOCKED；用户已报告独立 DeepSeek 直连基线 PASS（1 次请求），经 LiteLLM 的真实请求仍为 NOT_RUN。T01 的 CRUD 与权限本地验证已完成，但 worker 在途提交拦截仍未验证，状态也为 BLOCKED；其余任务依赖状态见[任务总表](tasks/README.md)。当前分支不创建或部署共享网关，也未发起生产调用。
+> 本目录记录已确认的 BYOK 产品设计和任务契约。当前功能分支基线为 feat/byok-user-api-keys@ea2ce55ae22e19e1604e88031b824b68f2666cec。T00 最新隔离运行 E 为 395 PASS / 0 FAIL，但仍为 PARTIAL/BLOCKED：Chat EOF 风险在负控中保留，准入路由已验证会在上游前拒绝；T00-02、T00-06、T00-07 和旧业务回归仍有缺口。用户已报告独立 DeepSeek 直连基线 PASS（1 次请求），经 LiteLLM 的真实请求仍为 NOT_RUN。T01 的 CRUD 与权限本地验证已完成，但 worker 在途提交拦截仍未验证，状态也为 BLOCKED；其余任务依赖状态见[任务总表](tasks/README.md)。当前分支不创建或部署共享网关，也未发起生产调用。
 
-- 设计状态：页面方向已确认；T00 因 Chat EOF 终态风险 BLOCKED，T01 因 worker 在途提交拦截尚未集成 BLOCKED；后续任务状态见各 Task/Test 记录。
+- 设计状态：页面方向已确认；T00 的 Chat EOF 风险已通过拒绝该 streaming 路由隔离，但 T00-02、T00-06、T00-07 与旧业务回归仍有缺口、状态 BLOCKED；T01 因 worker 在途提交拦截尚未集成而 BLOCKED；后续任务状态见各 Task/Test 记录。
 - 架构：业务后端经独立 LiteLLM Proxy 访问 provider；用户 provider Key、业务项目 virtual key、Proxy master key 分别隔离。
 - 首批六个 UI 预设为 OpenAI、Claude、DeepSeek、GLM、Qwen、Kimi，不构成 Proxy 支持上限；首轮 PROVIDER_REAL 只允许 DeepSeek。
 - 业务项目继续拥有网站用户、个人 Key 加密存储、任务幂等/恢复/取消、事务和用户私有结果。Proxy 负责 provider 协议、受信路由、项目级受限虚拟 Key、限制和脱敏 usage。
