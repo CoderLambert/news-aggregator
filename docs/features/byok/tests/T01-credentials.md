@@ -33,6 +33,24 @@
 | 隔离 | Python venv 和空 HOME 在 `/tmp`；测试使用 `env -i`；`chromadb` 未安装，使用仅供测试导入的 stub（若业务路径调用会立即失败） |
 | 浏览器 | Vitest DOM 测试；Codex in-app browser 对隔离本地前后端完成合成账户手工验收 |
 
+### 2026-10-12 当前提交复测
+
+在 T01 分支当前 HEAD `5cd9bc52c8282629a724d27f22575b94a183f764` 上重跑定向回归；代码未改动。后端沿用 `/tmp/byok-t01-verify-20261012` 的隔离 Python 3.14.8 环境、空 HOME、导入 stub 和全新 SQLite `/tmp/byok-t01-verification-20261012c.sqlite3`，命令仍为上文“后端实现后”七个测试文件的 `env -i ... pytest -q` 命令：
+
+```text
+154 passed, 2 warnings in 21.17s
+```
+
+两条 warning 仍是 `Category` 与 `Source` queryset 未排序的既有 DRF `UnorderedObjectListWarning`。前端在相同提交重跑上文八个定向 Vitest 文件：
+
+```text
+Test Files  8 passed (8)
+Tests       65 passed (65)
+Duration    5.62s
+```
+
+这次复测重新确认当前提交的连接管理 API 和 UI 回归；T01-03 在途 worker/结果提交拦截仍未实现、未验证，不能由服务层 epoch gate 测试推导为端到端 PASS。
+
 最初用户报告的基线 `ea2ce55ae22e19e1604e88031b824b68f2666cec` 已由基线前合入的文档 PR #31 前移至以上 tracking ref。实现基于该 ref 建立的独立工作树；最终实时 `git ls-remote` 因 DNS 无法解析 `github.com` 暂不可验证。
 
 ## 定向测试命令与脱敏输出
