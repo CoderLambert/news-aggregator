@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useAuth } from '@/context/AuthContext'
+import { fetchAIModels } from '@/services/api'
+import type { AIModelConfig } from '@/services/api'
 import { useChat, type ChatPhase } from '@/hooks/useChat'
 import { useSuggestedQuestions } from '@/hooks/useSuggestedQuestions'
 import ChatBubbleButton from '@/components/chat/ChatBubbleButton'
@@ -31,6 +35,7 @@ interface NewsChatAssistantProps {
 }
 
 export default function NewsChatAssistant({ newsId, open, onOpenChange, articleContext }: NewsChatAssistantProps) {
+  const { user, loading: authLoading } = useAuth()
   const [internalOpen, setInternalOpen] = useState(false)
   const isOpen = open ?? internalOpen
   const setIsOpen = useCallback((nextOpen: boolean) => {
@@ -39,6 +44,21 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
   }, [onOpenChange, open])
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [confettiFired, setConfettiFired] = useState(false)
+  const [modelSelection, setModelSelection] = useState<{ viewerId: number | null; modelConfigId: string | null }>({
+    viewerId: null,
+    modelConfigId: null,
+  })
+  const modelListQuery = useQuery({
+    queryKey: ['private', 'aiModels', user?.id ?? 'anonymous'],
+    queryFn: ({ signal }) => fetchAIModels(signal),
+    enabled: isOpen && !authLoading && user !== null,
+    retry: false,
+    staleTime: 30_000,
+  })
+  const modelOptions: AIModelConfig[] = (modelListQuery.data ?? []).filter((model) =>
+    model.source === 'catalog' && model.catalog_model_id === 'deepseek-flash')
+  const selectedModelConfigId = modelSelection.viewerId === user?.id ? modelSelection.modelConfigId : null
+  const selectedModel = modelOptions.find((model) => model.id === selectedModelConfigId) ?? null
   const hasCelebratedRef = useRef(false)
   const bubbleTriggerRef = useRef<HTMLButtonElement | null>(null)
   const restoreBubbleFocusRef = useRef(false)
@@ -49,7 +69,7 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
     confirmingClear, isClearing, clearError, requestClearChat, cancelClear, confirmClear,
     uncertainTurn, checkPendingTurn, resendUncertainTurn,
     webSearch, toggleWebSearch,
-  } = useChat(newsId, isOpen)
+  } = useChat(newsId, isOpen, selectedModelConfigId)
 
   const {
     questions: suggestedQuestions,
@@ -224,6 +244,46 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
             refreshingSuggestions={refreshingSuggestions}
           />
         </div>
+
+        {user && (
+          <div className="border-t border-border bg-card px-3.5 py-2">
+            <div className="flex items-center gap-2">
+              <label htmlFor="news-chat-model" className="shrink-0 text-xs font-medium text-muted-foreground">
+                本次回答模型
+              </label>
+              <select
+                id="news-chat-model"
+                aria-label="本次回答模型"
+                value={selectedModelConfigId ?? ''}
+                disabled={isLoading || authLoading}
+                onChange={(event) => setModelSelection({
+                  viewerId: user.id,
+                  modelConfigId: event.target.value || null,
+                })}
+                className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-orange-300 disabled:opacity-60"
+              >
+                <option value="">保持当前聊天方式</option>
+                {selectedModelConfigId && !selectedModel && (
+                  <option value={selectedModelConfigId} disabled>所选模型当前不可用</option>
+                )}
+                {modelOptions.map((model) => (
+                  <option key={model.id} value={model.id}>{model.display_name}</option>
+                ))}
+              </select>
+            </div>
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              {selectedModel
+                ? `本轮通过你的 ${selectedModel.display_name} 连接处理；不会修改长期用途偏好。`
+                : modelListQuery.isLoading
+                  ? '正在读取你的可用模型…'
+                  : modelListQuery.isError
+                    ? '个人模型列表暂时不可用；如需 BYOK，请检查模型设置后重试。'
+                    : modelOptions.length === 0
+                      ? '暂无可用于新闻问答的个人模型；可在设置中添加 DeepSeek V4.1 Flash。'
+                      : '可为本轮新闻问答单独选择个人模型。'}
+            </p>
+          </div>
+        )}
 
         <ChatInput
           value={input}

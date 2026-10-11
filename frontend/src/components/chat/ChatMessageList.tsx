@@ -90,6 +90,11 @@ export default function ChatMessageList({
               )
             ) : <div className="whitespace-pre-wrap">{message.content}</div>}
             {message.role === 'assistant' && message.content && message.web_sources && <WebSources sources={message.web_sources} />}
+            {message.role === 'assistant' && message.content && message.model_source && (
+              <div className="mt-2 border-t border-neutral-100 pt-2 text-[10px] text-neutral-400" aria-label="回答模型来源">
+                模型来源：{message.model_source.provider} · {message.model_source.model}
+              </div>
+            )}
             {message.role === 'assistant' && message.content && message.web_search && !message.web_sources && (
               <div className="mt-2 flex items-center gap-1 border-t border-neutral-100 pt-2"><Globe className="size-3 text-orange-400" /><span className="text-[10px] text-neutral-400">使用了联网搜索</span></div>
             )}

@@ -19,8 +19,11 @@ from django_filters import rest_framework as django_filters
 from .models import Category, Source, News, ChatSession, BlockedNews, ProviderComparison
 from .services.chat_history import (
     ChatConflict,
+    append_completed_chat_turn,
     append_assistant_message,
     append_user_message,
+    assert_chat_turn_current,
+    begin_chat_turn,
     clear_chat_history,
 )
 from .authentication import AnonymousCsrfSessionAuthentication
@@ -867,7 +870,9 @@ class NewsChatView(generics.GenericAPIView):
         """Return chat history."""
         news = self.get_object()
         session = ChatSession.objects.filter(user=request.user, news=news).first()
-        return Response({'messages': session.messages if session else []})
+        response = Response({'messages': session.messages if session else []})
+        response['Cache-Control'] = 'no-store'
+        return response
 
     def delete(self, request, pk):
         """Clear chat history."""
@@ -879,7 +884,9 @@ class NewsChatView(generics.GenericAPIView):
                 {'error_code': 'chat_conflict', 'error': '聊天记录正在更新，请重试'},
                 status=status.HTTP_409_CONFLICT,
             )
-        return Response({'status': 'cleared'})
+        response = Response({'status': 'cleared'})
+        response['Cache-Control'] = 'no-store'
+        return response
 
     def post(self, request, pk):
         from django.http import StreamingHttpResponse
@@ -904,6 +911,45 @@ class NewsChatView(generics.GenericAPIView):
                 {'error_code': 'invalid_question', 'error': '问题必须是非空文本'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        model_config_id = payload.get('model_config_id') if hasattr(payload, 'get') else None
+        article_chat_execution = None
+        if model_config_id is not None:
+            import uuid
+
+            if not isinstance(model_config_id, str) or len(model_config_id) > 64:
+                return Response(
+                    {'error_code': 'invalid_model_selection', 'error': '所选模型无效'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            try:
+                normalized_model_config_id = str(uuid.UUID(model_config_id))
+            except (ValueError, AttributeError):
+                return Response(
+                    {'error_code': 'invalid_model_selection', 'error': '所选模型无效'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if not settings.AI_BYOK_ENABLED:
+                return Response(
+                    {'error_code': 'byok_disabled', 'error': 'BYOK 模型功能当前不可用'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            from api.services.ai_chat import (
+                ArticleChatError,
+                article_chat_error_payload,
+                prepare_article_chat_execution,
+            )
+
+            try:
+                article_chat_execution = prepare_article_chat_execution(
+                    request.user,
+                    normalized_model_config_id,
+                )
+            except ArticleChatError as error:
+                status_code, error_payload = article_chat_error_payload(error)
+                response = Response(error_payload, status=status_code)
+                response['Cache-Control'] = 'no-store'
+                return response
 
         # Auto-fetch full article on first chat — so users don't have to click
         # "获取原文" before chatting. No-op if already cached, swallows fetch errors.
@@ -965,11 +1011,16 @@ class NewsChatView(generics.GenericAPIView):
                 import logging
                 logging.getLogger(__name__).warning("Web search failed for chat")
 
+        user_id = request.user.pk
         try:
-            chat_snapshot = append_user_message(
-                user_id=request.user.pk,
-                news_id=news.pk,
-                content=user_question,
+            chat_snapshot = (
+                begin_chat_turn(user_id=user_id, news_id=news.pk)
+                if article_chat_execution is not None
+                else append_user_message(
+                    user_id=user_id,
+                    news_id=news.pk,
+                    content=user_question,
+                )
             )
         except ChatConflict:
             return Response(
@@ -1007,13 +1058,89 @@ class NewsChatView(generics.GenericAPIView):
             }
         ]
         
-        for msg in chat_snapshot.messages[-20:]:
-            messages.append(msg)
+        previous_messages = chat_snapshot.messages[-19:] if article_chat_execution is not None else chat_snapshot.messages[-20:]
+        for msg in previous_messages:
+            if (
+                isinstance(msg, dict)
+                and msg.get('role') in {'user', 'assistant'}
+                and isinstance(msg.get('content'), str)
+            ):
+                messages.append({'role': msg['role'], 'content': msg['content']})
+        if article_chat_execution is not None:
+            messages.append({'role': 'user', 'content': user_question})
 
-        from api.services.chatgpt_subscription import active_connection_for_user, stream_chat_response
-        subscription_connection = active_connection_for_user(request.user)
+        subscription_connection = None
+        if article_chat_execution is None:
+            from api.services.chatgpt_subscription import active_connection_for_user, stream_chat_response
+            subscription_connection = active_connection_for_user(request.user)
 
         def generate():
+            if article_chat_execution is not None:
+                import json as _json
+                from api.services.ai_chat import (
+                    ARTICLE_CHAT_ERRORS,
+                    ArticleChatError,
+                    assert_article_chat_execution_current,
+                    stream_article_chat,
+                )
+
+                def emit_error(code):
+                    safe_error = ARTICLE_CHAT_ERRORS.get(code, ARTICLE_CHAT_ERRORS['provider_unavailable'])[1]
+                    payload = _json.dumps(
+                        {'code': code, 'message': safe_error},
+                        ensure_ascii=False,
+                        separators=(',', ':'),
+                    )
+                    return f"\u200b__ERROR__{payload}__ERROR__\n\n"
+
+                if web_sources:
+                    meta = _json.dumps({'type': 'web_search', 'sources': web_sources}, ensure_ascii=False)
+                    yield f"\u200b__META__{meta}__META__\n\n"
+                source_meta = _json.dumps(
+                    {'model_source': article_chat_execution.model_source},
+                    ensure_ascii=False,
+                    separators=(',', ':'),
+                )
+                yield f"\u200b__META__{source_meta}__META__\n\n"
+                answer_chunks = []
+
+                def execution_guard():
+                    assert_article_chat_execution_current(article_chat_execution)
+                    assert_chat_turn_current(
+                        user_id=user_id,
+                        news_id=news.pk,
+                        session_id=chat_snapshot.session_id,
+                        generation=chat_snapshot.generation,
+                    )
+
+                try:
+                    for chunk in stream_article_chat(
+                        article_chat_execution,
+                        messages,
+                        execution_guard=execution_guard,
+                    ):
+                        answer_chunks.append(chunk)
+                        yield chunk
+                    execution_guard()
+                    append_completed_chat_turn(
+                        user_id=user_id,
+                        news_id=news.pk,
+                        session_id=chat_snapshot.session_id,
+                        generation=chat_snapshot.generation,
+                        question=user_question,
+                        answer=''.join(answer_chunks),
+                        model_source=article_chat_execution.model_source,
+                    )
+                except ArticleChatError as error:
+                    yield emit_error(error.code)
+                except ChatConflict:
+                    yield emit_error('execution_changed')
+                except Exception:
+                    # Do not log SDK/provider exception bodies or expose credentials.
+                    logger.warning('BYOK article chat failed before history commit')
+                    yield emit_error('provider_unavailable')
+                return
+
             full_response = []
             try:
                 # Prepend web search sources as structured JSON for frontend display
@@ -1054,6 +1181,9 @@ class NewsChatView(generics.GenericAPIView):
                     logger.info('Discarded late chat response for cleared or deleted history')
 
         response = StreamingHttpResponse(generate(), content_type='text/event-stream')
+        response['Cache-Control'] = 'no-store'
+        response['Vary'] = 'Cookie'
+        response['X-Accel-Buffering'] = 'no'
         if web_search:
             response['X-Web-Search-Used'] = 'true'
         return response
