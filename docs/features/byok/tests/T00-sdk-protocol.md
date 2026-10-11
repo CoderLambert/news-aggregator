@@ -1,6 +1,6 @@
 # Test T00 · 共享网关端到端技术验真
 
-> **T00 BLOCKED / GATEWAY_ADMISSION_PROTOTYPE**：最新隔离合成运行 F（2026-10-12）为 `396 PASS / 0 FAIL / 396 checks`，CLI 标记 `PARTIAL`，因为未覆盖旧聊天/研究/翻译回归和真实 provider 兼容。T00-02、T00-06、T00-07 已通过本地合成验收。v1.104.2 的 unguarded Chat EOF 风险仍被原样复现：上游无协议终态而 SDK 收到 `finish_reason=stop`；受保护准入路径对此请求返回 HTTP 400 `T00_STREAMING_DISABLED`，上游计数为 0。该结果证明特定路径被关闭，不表示 LiteLLM 已修复或 Chat streaming 兼容。旧业务回归仍未运行。Responses 标准 `fc_` item / `call_` call 两轮续接严格通过；旧 `resp_item_` 仅作为独立 foreign-ID 归一化专例。SDK_LOCAL 与 native-stream Proxy 的取消传播检查在显式 2 秒本地观测窗内通过。A9 历史运行 `353 PASS / 4 FAIL` 仍以独立脱敏文件保留，不与 D/E/F 混合。用户已报告 DeepSeek 直连基线 PASS（1 次请求）；经 LiteLLM 的 T00-11 仍为 NOT_RUN。
+> **T00 PASS / GATEWAY_ADMISSION_PROTOTYPE**：最新隔离合成运行 F（2026-10-12）为 `396 PASS / 0 FAIL / 396 checks`，CLI 标记 `PARTIAL`，因为该 CLI 不包含现有业务回归和真实 provider 兼容。T00-01 至 T00-10 的本地技术门槛和当前完整业务 CI 均通过。v1.104.2 的 unguarded Chat EOF 风险仍被原样复现：上游无协议终态而 SDK 收到 `finish_reason=stop`；受保护准入路径对此请求返回 HTTP 400 `T00_STREAMING_DISABLED`，上游计数为 0。该结果证明特定路径被关闭，不表示 LiteLLM 已修复或 Chat streaming 兼容。锁定镜像的官方 Cosign 签名和实际 digest 已验证。Responses 标准 `fc_` item / `call_` call 两轮续接严格通过；旧 `resp_item_` 仅作为独立 foreign-ID 归一化专例。SDK_LOCAL 与 native-stream Proxy 的取消传播检查在显式 2 秒本地观测窗内通过。A9 历史运行 `353 PASS / 4 FAIL` 仍以独立脱敏文件保留，不与 D/E/F 混合。用户已报告 DeepSeek 直连基线 PASS（1 次请求）；可选的经 LiteLLM T00-11 仍为 NOT_RUN。
 
 对应：[T00 Task](../tasks/T00-sdk-protocol.md)。
 
@@ -30,12 +30,13 @@
 
 | 项目 | 结果 |
 | --- | --- |
-| 本卡状态 | **BLOCKED**；旧新闻聊天/研究/翻译回归仍未取得可复核结果。T00-02、T00-06、T00-07 的本地验收已通过 |
+| 本卡状态 | **PASS**；T00-01 至 T00-10 本地验收、镜像签名校验与当前完整业务 CI 均通过。可选 T00-11 未运行 |
 | 功能分支目标基线 HEAD | `ea2ce55ae22e19e1604e88031b824b68f2666cec`，与用户报告一致；未重置原工作树 |
 | 本任务实现起点 HEAD | `69e084e39552c5650b930a067b6b79d09e95db34`；分支 `task/byok-T00-sdk-protocol`，独立工作区 |
 | T00 本轮实现 SHA | `74d9ca29fa6b07c7b185e7b19c16ab14546992e3`；仅隔离探针、合成夹具、测试与文档；没有生产适配器或新闻业务改动 |
 | Draft PR | #33，base `feat/byok-user-api-keys`；维持 open / Draft |
 | Python / OpenAI SDK / Anthropic SDK / httpx2 / LiteLLM / Docker Compose | 3.14.8 / 3.28.0 / 1.13.0 / 2.13.1 / 1.104.2 / 5.5.1；Docker Server 29.7.2 |
+| LiteLLM v1.104.2 image signature | **PASS**；Cosign v3.0.2 使用官方固定提交公钥校验，签名 digest 与锁定的 `sha256:3d88…a500` 一致；[脱敏证据](../evidence/T00-litellm-v1.104.2-cosign.json) |
 | 最新 SDK_LOCAL / PROXY_LOCAL 合成运行 F | `396 PASS / 0 FAIL / 396 checks`，CLI exit 0、状态 `PARTIAL`；原始 unguarded Chat EOF 风险仍保留，受保护路径 HTTP 400 且上游 0 |
 | 21 种无效/缺失 provider Key | Chat / Responses / Messages 全部 HTTP 400，错误码 `BYOK_PROVIDER_KEY_REQUIRED`，每项上游请求 0 |
 | Key/model 隔离 | Chat A、Chat B、Messages B 三请求并发，各 1 次；tenant 与显式 provider Key 全匹配，两个模型别名对应的项目虚拟 Key 均受限；fixture 共同重叠 `198.372 ms`；错配模型项目 Key 返回 HTTP 403、上游 0，错误项目虚拟 Key 上游 0 |
@@ -46,9 +47,9 @@
 | 经 LiteLLM 的 T00-11 / 网关真实请求 | **NOT_RUN**；目前只有本地合成 PROXY_LOCAL 证据，未发送真实 provider 网关请求 |
 | 其他 provider 的 PROVIDER_REAL | **NOT_RUN** |
 | CI 上下文（用户提供，只读） | HEAD `69e084e` 的 run `38136034042` backend-and-release-gates / frontend 均 success；较早 `38136011186` backend failure。它们不是 T00 手工网关验收结果 |
-| 旧聊天/研究/翻译测试基线 | 功能分支基线 `69e084e` 的 CI 为 `838 passed / 2 warnings`。当前 T00 commit 的两次 backend CI 均为 `837 passed / 1 failed / 2 warnings`，分别在订阅任务恢复与并发用例触发 SQLite `OperationalError`；稳定通过结果待复验。隔离工作区缺 pytest 和 frontend `node_modules`，未安装全项目依赖。历史 `219 passed / 3 warnings` 没有可恢复命令/报告；缺 chromadb 的 `82 passed / 23 failed` 不作产品基线 |
+| 旧聊天/研究/翻译测试基线 | 当前 PR head `29d1fd9` 的两次 backend CI 均为 `838 passed / 2 warnings`，另有两次 frontend、release gates 均通过。早先 head `2ef40cd` 的重复 CI 曾分别出现一个订阅任务 SQLite `OperationalError`，随后在无业务代码改动的 head 上全量重跑通过；功能分支基线 `69e084e` 的 CI 也为 `838 passed / 2 warnings`。隔离工作区缺 pytest 和 frontend `node_modules`，未安装全项目依赖。历史 `219 passed / 3 warnings` 没有可恢复命令/报告；缺 chromadb 的 `82 passed / 23 failed` 不作产品基线 |
 | 旧测试断言 diff | `tests/` 与 `frontend/tests/` 无 diff；隔离探针与 DeepSeek 诊断自测共 47 项通过，没有放宽旧断言 |
-| 完整 T00 结论 | **BLOCKED**；T00-02、T00-06、T00-07 的本地验收已通过；当前分支 backend CI 未稳定通过。T00-10 风险已通过关闭 Chat streaming 路径隔离；T00-11 与其他经 LiteLLM 的真实调用未运行 |
+| 完整 T00 结论 | **PASS**；T00-01 至 T00-10、镜像验签和完整业务 CI 均通过。T00-10 风险通过关闭 Chat streaming 路径隔离；可选 T00-11 与其他真实 provider 调用未运行 |
 
 ## 最新复测 F（2026-10-12）
 
@@ -66,7 +67,9 @@ T00-02 的 EOF/incomplete 检查通过：SDK_LOCAL 三协议 EOF 未合成完整
 
 脱敏机器结果：[T00-sdk-protocol-run-f-sanitized.json](../evidence/T00-sdk-protocol-run-f-sanitized.json)，源输出 SHA-256 `2050f6ceb63143fb1404e9a118ff5956e9d98c1d471888a02f2d8fedcc672975`，脱敏副本 SHA-256 `6ec4bd6f4fd5455165cb3330e77812455ccf0c335f1eba2b7a96bda835e28277`。七个 SDK/Proxy `public_output.text` 字段已替换；文件保留 396 项状态、计数、终态、凭据匹配和并发区间事实。
 
-当前提交 `2ef40cd91ce4b00fddb295ae449f7032856a9ce4` 的 CI 前端两次均通过。两次 backend-and-release-gates 都在完整测试中得到 `837 passed / 1 failed / 2 warnings`：运行 [38164051334](https://github.com/CoderLambert/news-aggregator/actions/runs/38164051334) 失败于 `test_sse_disconnect_does_not_cancel_background_worker`，运行 [38164054513](https://github.com/CoderLambert/news-aggregator/actions/runs/38164054513) 失败于 `test_simultaneous_database_connections_share_one_unique_task`；两者日志均为订阅任务存储 `OperationalError`。作为对照，基线 commit `69e084e39552c5650b930a067b6b79d09e95db34` 的 [CI run 38136034042](https://github.com/CoderLambert/news-aggregator/actions/runs/38136034042) frontend 与 backend/release jobs 全部通过，pytest 为 `838 passed / 2 warnings`。T00 改动范围不包含后端业务代码或旧测试；当前分支的稳定 backend 回归仍待重新通过，因此完整 T00 继续 BLOCKED。
+当前 head `29d1fd958cf542cabb1d82aec5ace48e6189f2bf` 的两个全量 CI run [38164348518](https://github.com/CoderLambert/news-aggregator/actions/runs/38164348518) 与 [38164352361](https://github.com/CoderLambert/news-aggregator/actions/runs/38164352361) 均通过：frontend types/lint/tests/build 全部成功；backend 与离线部署测试各 `838 passed / 2 warnings`，后续 production settings、release shell、image build 与 G1 local-domain smoke 也通过。早先 head `2ef40cd` 的两次 backend run 曾各失败一个不同的 SQLite busy / `OperationalError` 测试，随后无业务代码改动的后续完整运行通过，按历史瞬时失败保留。T00 分支对照基线 [CI run 38136034042](https://github.com/CoderLambert/news-aggregator/actions/runs/38136034042) 同样为 `838 passed / 2 warnings`。
+
+镜像签名通过 LiteLLM [v1.104.2 release 的 Cosign 指令](https://github.com/BerriAI/litellm/releases/tag/v1.104.2)，使用不可变提交 `0112e53046018d726492c814b3644b7d376029d0` 中的公钥；Cosign 验证 claims、签名和 transparency log inclusion 均成功。签名 payload 中的 manifest digest 与代理实际运行 pin `sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500` 相同。Sigstore 对 [Cosign image claim 验证](https://docs.sigstore.dev/cosign/verifying/verify/)说明其默认会检查签名 payload digest 与目标镜像相符；脱敏验证结果见 [T00-litellm-v1.104.2-cosign.json](../evidence/T00-litellm-v1.104.2-cosign.json)。
 
 ## 历史复测 E（2026-10-12）
 
@@ -200,11 +203,11 @@ SDK/Proxy 功能路径的上次脱敏摘要（镜像核验项已撤销，需与�
 
 ## DeepSeek 直连诊断（用户报告已执行；与 LiteLLM 结果分开）
 
-### 当前准入与分离记录
+### 直连诊断时的准入状态与分离记录
 
-T00 当前仍为 **BLOCKED**。任务卡要求核心 PROXY_LOCAL 全部通过后，才可执行经 LiteLLM 的 DeepSeek 早期真实调用。历史运行 D 的实现 SHA 为 `193d52d0b684c8c47db633a6a93ea96a6690e460`，结果为 `394 PASS / 1 FAIL / 395 checks`。失败项 `PROXY_UNGUARDED_CHAT_EOF_NOT_SYNTHESIZED_COMPLETE` 记录了上游正常 EOF、无协议终态，而 LiteLLM v1.104.2 向 SDK 暴露 `finish_reason=stop`。运行 E 保留了这项 raw 风险复现，同时证明受保护路径被拒绝；这不改变 T00 其余验收状态。用户已经运行下面所述的独立 DeepSeek 直连诊断并提供脱敏结果；这不改变 T00、PROXY_LOCAL 或 T00-11 的状态。
+用户运行独立 DeepSeek 直连诊断时，T00 尚处于 **BLOCKED**。当时历史运行 D 的实现 SHA 为 `193d52d0b684c8c47db633a6a93ea96a6690e460`，结果为 `394 PASS / 1 FAIL / 395 checks`。失败项 `PROXY_UNGUARDED_CHAT_EOF_NOT_SYNTHESIZED_COMPLETE` 记录了上游正常 EOF、无协议终态，而 LiteLLM v1.104.2 向 SDK 暴露 `finish_reason=stop`。随后运行 E 保留了这项 raw 风险复现，同时证明受保护路径被拒绝。当前状态已在上文更新为 **PASS**；这次直连诊断仍不改变 PROXY_LOCAL、也不代表可选 T00-11 通过。
 
-这次 **直连诊断** 不调用 LiteLLM，也不能代表 T00-11 通过。经 LiteLLM 的真实路径仍是 `BLOCKED / NOT_RUN`；没有执行网关请求。直连与网关请求各自独立计数，用户的直连结果单独作为 DeepSeek direct baseline 记录，不改变 T00、PROXY_LOCAL 或 T13 状态。
+这次 **直连诊断** 不调用 LiteLLM，也不能代表 T00-11 通过。此后也未执行经 LiteLLM 的真实 provider 请求；直连与网关请求各自独立计数，用户的直连结果单独作为 DeepSeek direct baseline 记录，不改变 T00、PROXY_LOCAL 或 T13 的真实兼容性状态。
 
 ### 官方资料核验（2026-10-12）
 
@@ -276,10 +279,10 @@ cd /home/lambert/Documents/Codex/2026-10-11/task-2/news-aggregator-t00/tools/byo
 
 本次四服务 IMAGE_EVIDENCE_ONLY 的 IMAGE_FIXED_REFERENCES_RESOLVE_TO_RUNNING_IDS、CLEANUP_COMPOSE_DOWN、CLEANUP_NO_PROJECT_RESOURCES_LEFT 均 PASS；四服务镜像 ID 与固定引用解析匹配，残留 containers=0、networks=0。RepoDigests 来自 image inspect 输出，不再使用 container inspect 上的 RepoDigests 字段。前一版把容器 .Image ID 字符串与固定 digest 字符串直接相等作为证据，该判断已撤销。
 
-此前 SDK/Proxy 完整子集运行在本任务自己的唯一 Compose 项目下 cleanup PASS。Key 只使用本次合成值。SDK trust_env=false；没有读取 .env、进程环境或旧配置中的 provider Key。前次该运行的 proxy/upstream 容器日志及 CLI JSON synthetic credential scan 均为 false，未打印 Key、Authorization、正文或 continuation。官方 cosign 签名验证仍为 NOT_RUN。
+上述历史 A9 运行的 SDK/Proxy 子集使用本任务自己的唯一 Compose 项目且 cleanup PASS。Key 只使用本次合成值。SDK trust_env=false；没有读取 .env、进程环境或旧配置中的 provider Key。该历史运行的 proxy/upstream 容器日志及 CLI JSON synthetic credential scan 均为 false，未打印 Key、Authorization、正文或 continuation；当时的官方 Cosign 签名校验还未执行，当前验签结果见上文复测 F。
 
 ## 旧测试对照与未验证项
 
 既有 tests/ 无 diff，未更改任何旧断言。本次没有重跑新闻项目旧聊天/研究/翻译测试，因此不能声称旧回归通过。先前历史记录只留下 219 passed / 3 warnings 摘要；命令、依赖及机器报告未恢复。另一次因隔离环境缺 chromadb 得到 82 passed / 23 failed，也不能替代功能基线；本次不安装旧项目的无关依赖。
 
-历史 A9 的 Responses `resp_item_` 与 Messages cancel 失败已在上方 A9 文件中保留。最新运行 F 中，标准 Responses `fc_`/`call_` 与 foreign-ID 归一化专例均通过，T00-02、T00-06、T00-07 本地验收通过；原始 Chat EOF 缺终态风险继续在 unguarded 负控中复现，准入配置已证明在上游前拒绝该 streaming 路由。旧新闻聊天/研究/翻译回归仍未完整验收。DeepSeek 直连基线为用户报告 PASS；经 LiteLLM 的 T00-11 和其他 provider 测试仍未运行。本地合成结果不表示真实 provider 兼容，也未改生产调用。
+历史 A9 的 Responses `resp_item_` 与 Messages cancel 失败已在上方 A9 文件中保留。最新运行 F 中，标准 Responses `fc_`/`call_` 与 foreign-ID 归一化专例均通过，T00-01 至 T00-10 本地验收通过；原始 Chat EOF 缺终态风险继续在 unguarded 负控中复现，准入配置已证明在上游前拒绝该 streaming 路由。完整业务 CI 与镜像签名也已通过。DeepSeek 直连基线为用户报告 PASS；可选的经 LiteLLM T00-11 和其他 provider 测试仍未运行。本地合成结果不表示真实 provider 兼容，也未改生产调用。

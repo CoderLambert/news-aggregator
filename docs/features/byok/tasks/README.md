@@ -1,12 +1,12 @@
 # BYOK 功能开发任务（T00–T14）
 
-**任务已拆分；T00 和 T01 已有独立 Draft PR，但均未完整验收。** T00 最新本地运行 F 为 396 PASS / 0 FAIL；Chat EOF 风险由受保护准入路由隔离，T00-02、T00-06、T00-07 已通过本地合成验收。完整 T00 仍 BLOCKED：基线 commit 的完整 CI 为 838 passed，当前分支两次 backend CI 各有一个订阅任务 SQLite OperationalError 失败；T00 改动未涉及业务代码或旧测试。T01 的 CRUD/权限与密钥生命周期本地验证已完成，但 worker 在途提交拦截仍未验证、状态为 BLOCKED。其余任务状态按表中依赖判断。一次只交付一张业务卡。T00 是本地共享网关技术门槛；T00-G 是独立的共享网关运维子卡。T13 分为六个模型/厂商验证子卡。每张 Task 与 [同编号 Test 契约](../tests/README.md) 配对；T00-G 是新增的运维测试契约。
+**任务已拆分；T00 和 T01 已有独立 Draft PR。** T00 最新本地运行 F 为 396 PASS / 0 FAIL，镜像签名及当前分支业务 CI 全部通过；Chat EOF 风险由受保护准入路由隔离，T00-02、T00-06、T00-07 通过本地合成验收，T00 状态 PASS。T01 的 CRUD/权限与密钥生命周期本地验证已完成，但 worker 在途提交拦截仍未验证、状态为 BLOCKED。其余任务状态按表中依赖判断。一次只交付一张业务卡。T00 是本地共享网关技术门槛；T00-G 是独立的共享网关运维子卡。T13 分为六个模型/厂商验证子卡。每张 Task 与 [同编号 Test 契约](../tests/README.md) 配对；T00-G 是新增的运维测试契约。
 
 基线：`feat/byok-user-api-keys@ea2ce55ae22e19e1604e88031b824b68f2666cec`（执行当天仍须核对最新远端 HEAD）。本系列 Task 尚未在该 SHA 上实施；工作分支不得从更早功能分支重置。
 
 | Task | 单次可验收的功能/门槛 | 依赖 | 体量 | 状态 |
 | --- | --- | --- | --- | --- |
-| [T00 本地共享网关技术验真](T00-sdk-protocol.md) | 锁定的真实 LiteLLM Proxy + 官方客户端 SDK + 受控 HTTP 上游验证三协议、原始终态、工具往返、故障、Key 隔离、关闭与无重试；PROXY_LOCAL 失败时可提供独立 DeepSeek 直连诊断，但不能作为网关验收。 | 无 | S·技术门槛 | BLOCKED |
+| [T00 本地共享网关技术验真](T00-sdk-protocol.md) | 锁定的真实 LiteLLM Proxy + 官方客户端 SDK + 受控 HTTP 上游验证三协议、原始终态、工具往返、故障、Key 隔离、关闭与无重试；PROXY_LOCAL 失败时可提供独立 DeepSeek 直连诊断，但不能作为网关验收。 | 无 | S·技术门槛 | PASS |
 | [T00-G 共享网关运维交付](T00-gateway-service.md) | 独立 Proxy/Postgres 服务配置、项目 virtual key、模型隔离、脱敏用量、第二个通用 CLI 消费者与 NewsHub 启停隔离、备份恢复、升级回退。此卡不部署于本次文档 PR。 | T00 | 运维子卡 | BLOCKED |
 | [T01 个人 Key 连接增删改停](T01-credentials.md) | 在正式 /settings/ai 页面管理网站用户自己的供应商 Key，掩码、替换、停用、删除，跨刷新恢复；worker 在途提交拦截尚未验证。 | 无 | M | BLOCKED |
 | [T02 录入模型并显式验证](T02-models-and-tests.md) | 添加可信预设/手动模型 ID，主动测试文本与工具能力；本地测试使用临时 Proxy 和受控上游。 | T01、T00 本地技术门槛 | M | BLOCKED |
