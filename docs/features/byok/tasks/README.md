@@ -1,6 +1,6 @@
 # BYOK 功能开发任务（T00–T14）
 
-**任务按单卡推进，状态以各 Task 和对应 Test 记录为准。** T00/T00-G 仍为 PLANNED，T01 因缺少在途 worker 集成为 BLOCKED，T02 与 T03 已完成限定范围实现并等待评审。T13 分为六个模型/厂商验证子卡。每张 Task 与 [同编号 Test 契约](../tests/README.md) 配对；T00-G 是新增的运维测试契约。
+**任务按单卡推进，状态以各 Task 和对应 Test 记录为准。** T00/T00-G 仍为 PLANNED，T01 因缺少在途 worker 集成为 BLOCKED，T02、T03 与 T04 已完成限定范围实现并等待评审。T13 分为六个模型/厂商验证子卡。每张 Task 与 [同编号 Test 契约](../tests/README.md) 配对；T00-G 是新增的运维测试契约。
 
 基线：`feat/byok-user-api-keys@ea2ce55ae22e19e1604e88031b824b68f2666cec`（执行当天仍须核对最新远端 HEAD）。本系列 Task 尚未在该 SHA 上实施；工作分支不得从更早功能分支重置。
 
@@ -11,7 +11,7 @@
 | [T01 个人 Key 连接增删改停](T01-credentials.md) | 在正式 /settings/ai 页面管理网站用户自己的供应商 Key，掩码、替换、停用、删除，跨刷新恢复。 | 无 | M | BLOCKED |
 | [T02 录入模型并显式验证](T02-models-and-tests.md) | 添加可信预设/手动模型 ID，主动测试文本与工具能力；本地测试使用临时 Proxy 和受控上游。 | T01、T00 本地技术门槛 | M | READY FOR REVIEW |
 | [T03 用途默认模型设置](T03-preferences.md) | 为默认、问答、翻译、研究、问题推荐选择并保存模型。 | T02 | S-M | READY FOR REVIEW |
-| [T04 新闻问答 BYOK 闭环](T04-article-chat.md) | 新闻详情通过业务后端调用 Proxy；本地开发可运行临时 Proxy+受控上游，不要求共享生产服务已交付。 | T03、T00 本地技术门槛 | M | PLANNED |
+| [T04 新闻问答 BYOK 闭环](T04-article-chat.md) | 新闻详情通过业务后端调用 Proxy；本地开发可运行临时 Proxy+受控上游，不要求共享生产服务已交付。 | T03、T00 本地技术门槛 | M | READY FOR REVIEW |
 | [T05 个人全文翻译最小闭环](T05-private-translation.md) | 一篇安全长度新闻持久生成、私有结果、重开恢复。 | T04 | M | PLANNED |
 | [T06 长文分块完整翻译](T06-long-translation.md) | 长文分块且完整合并。 | T05 | M | PLANNED |
 | [T07 翻译取消与显式重新生成](T07-translation-lifecycle.md) | 观看断开、服务端取消和重新生成语义正确。 | T05 | S-M | PLANNED |

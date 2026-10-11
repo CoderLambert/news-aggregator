@@ -1,8 +1,8 @@
 # BYOK · 个人 API Key 与模型配置
 
-> 本目录记录已确认的 BYOK 产品设计和任务契约。当前功能分支基线为 feat/byok-user-api-keys@ea2ce55ae22e19e1604e88031b824b68f2666cec；本次只更新独立分支上的文档，不改业务代码、不创建或部署共享网关、不调用真实 provider。
+> 本目录记录 BYOK 产品设计、单卡任务契约和实际执行证据。各任务状态以对应 Task/Test 文档为准；T02、T03、T04 已有独立实现分支等待评审，T04 的测试与未验证项见同编号 Test。
 
-- 设计状态：页面方向已确认；T00–T14 与 T00-G Task/Test 契约仍为 PLANNED / NOT_RUN。
+- 任务状态：T00/T00-G 仍为 PLANNED，T01 为 BLOCKED，T02/T03/T04 为 READY FOR REVIEW；后续任务按单卡推进。
 - 架构：业务后端经独立 LiteLLM Proxy 访问 provider；用户 provider Key、业务项目 virtual key、Proxy master key 分别隔离。
 - 首批六个 UI 预设为 OpenAI、Claude、DeepSeek、GLM、Qwen、Kimi，不构成 Proxy 支持上限；首轮 PROVIDER_REAL 只允许 DeepSeek。
 - 业务项目继续拥有网站用户、个人 Key 加密存储、任务幂等/恢复/取消、事务和用户私有结果。Proxy 负责 provider 协议、受信路由、项目级受限虚拟 Key、限制和脱敏 usage。
