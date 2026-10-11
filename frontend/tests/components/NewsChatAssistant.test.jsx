@@ -1,6 +1,10 @@
 import { useState } from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { AuthContext } from '@/context/AuthContext'
+import { fetchAIModels } from '@/services/api'
+import { useChat } from '@/hooks/useChat'
 import NewsChatAssistant from '@/components/NewsChatAssistant'
 
 const chatState = vi.hoisted(() => ({ stopWaiting: vi.fn() }))
@@ -15,6 +19,8 @@ vi.mock('@/hooks/useChat', () => ({
     webSearch: false, toggleWebSearch: vi.fn(),
   })),
 }))
+
+vi.mock('@/services/api', () => ({ fetchAIModels: vi.fn() }))
 
 vi.mock('@/hooks/useSuggestedQuestions', () => ({
   useSuggestedQuestions: () => ({ questions: [], loading: false, refresh: vi.fn() }),
@@ -43,11 +49,27 @@ function ControlledHarness() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  fetchAIModels.mockResolvedValue([])
 })
+
+function renderWithProviders(element) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <AuthContext.Provider value={{
+        user: { id: 5, username: 'reader', isSuperuser: false },
+        loading: false,
+        login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn(),
+      }}>
+        {element}
+      </AuthContext.Provider>
+    </QueryClientProvider>,
+  )
+}
 
 describe('NewsChatAssistant open state', () => {
   it('keeps the floating entry working in uncontrolled mode', async () => {
-    render(<NewsChatAssistant newsId={21} />)
+    renderWithProviders(<NewsChatAssistant newsId={21} />)
 
     fireEvent.click(screen.getByRole('button', { name: '打开浮动助手' }))
     expect(screen.getByRole('dialog', { name: 'AI 助手小闻' })).toBeInTheDocument()
@@ -58,7 +80,7 @@ describe('NewsChatAssistant open state', () => {
   })
 
   it('opens and closes through the controlled page state', () => {
-    render(<ControlledHarness />)
+    renderWithProviders(<ControlledHarness />)
 
     fireEvent.click(screen.getByRole('button', { name: '外部打开助手' }))
     expect(screen.getByRole('dialog', { name: 'AI 助手小闻' })).toBeInTheDocument()
@@ -67,7 +89,7 @@ describe('NewsChatAssistant open state', () => {
   })
 
   it('restores the controlled floating entry after the dialog closes', async () => {
-    render(<ControlledHarness />)
+    renderWithProviders(<ControlledHarness />)
 
     fireEvent.click(screen.getByRole('button', { name: '打开浮动助手' }))
     expect(screen.getByRole('dialog', { name: 'AI 助手小闻' })).toBeInTheDocument()
@@ -77,10 +99,28 @@ describe('NewsChatAssistant open state', () => {
 
   it('does not mutate internal state when a controlled parent keeps it closed', () => {
     const onOpenChange = vi.fn()
-    render(<NewsChatAssistant newsId={21} open={false} onOpenChange={onOpenChange} />)
+    renderWithProviders(<NewsChatAssistant newsId={21} open={false} onOpenChange={onOpenChange} />)
 
     fireEvent.click(screen.getByRole('button', { name: '打开浮动助手' }))
     expect(onOpenChange).toHaveBeenCalledWith(true)
     expect(screen.queryByRole('dialog', { name: 'AI 助手小闻' })).not.toBeInTheDocument()
+  })
+
+  it('passes a selected personal model to this article chat without saving a preference', async () => {
+    fetchAIModels.mockResolvedValueOnce([{
+      id: 'model-config-a',
+      source: 'catalog',
+      catalog_model_id: 'deepseek-flash',
+      display_name: 'DeepSeek V4.1 Flash',
+    }])
+    renderWithProviders(<NewsChatAssistant newsId={21} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '打开浮动助手' }))
+    const modelSelector = await screen.findByRole('combobox', { name: '本次回答模型' })
+    await waitFor(() => expect(modelSelector.querySelectorAll('option')).toHaveLength(2))
+    fireEvent.change(modelSelector, { target: { value: 'model-config-a' } })
+
+    await waitFor(() => expect(useChat).toHaveBeenLastCalledWith(21, true, 'model-config-a'))
+    expect(screen.getByText(/不会修改长期用途偏好/)).toBeInTheDocument()
   })
 })

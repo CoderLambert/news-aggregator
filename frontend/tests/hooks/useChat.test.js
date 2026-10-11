@@ -68,6 +68,52 @@ describe('useChat', () => {
     expect(result.current.isLoading).toBe(false)
   })
 
+  it('sends the selected model for this turn and keeps its source on the saved assistant message', async () => {
+    const source = { provider: 'DeepSeek', model: 'DeepSeek V4.1 Flash' }
+    const meta = `\u200b__META__${JSON.stringify({ model_source: source })}__META__\n\n`
+    api.chatStream.mockReturnValue((async function* () {
+      yield meta.slice(0, 13)
+      yield meta.slice(13)
+      yield 'answer'
+    })())
+    const { result } = renderHook(() => useChat('42', true, 'model-config-a'), { wrapper: makeWrapper() })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    act(() => result.current.setInput('question'))
+
+    await act(async () => { await result.current.handleSend() })
+
+    expect(api.chatStream).toHaveBeenCalledWith(42, 'question', expect.objectContaining({
+      modelConfigId: 'model-config-a',
+      signal: expect.any(AbortSignal),
+    }))
+    expect(result.current.messages[1]).toMatchObject({ role: 'assistant', content: 'answer', model_source: source })
+  })
+
+  it('treats a known incomplete gateway stream as an error and never caches it as success', async () => {
+    const failure = `\u200b__ERROR__${JSON.stringify({
+      code: 'incomplete_response',
+      message: '回答流未正常完成，本次内容未保存。',
+    })}__ERROR__\n\n`
+    api.chatStream.mockReturnValue((async function* () {
+      yield 'partial answer'
+      yield failure
+    })())
+    let queryClient
+    const { result } = renderHook(() => useChat('42', true, 'model-config-a'), {
+      wrapper: makeWrapper(undefined, (client) => { queryClient = client }),
+    })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    act(() => result.current.setInput('question'))
+
+    await act(async () => { await result.current.handleSend() })
+
+    expect(result.current.phase).toBe('error')
+    expect(result.current.uncertainTurn).not.toBeNull()
+    expect(result.current.messages[1].content).toContain('回答流未正常完成，本次内容未保存。')
+    const historyQuery = queryClient.getQueryCache().getAll().find((query) => query.queryKey[1] === 'chatHistory')
+    expect(historyQuery.state.data).toEqual({ messages: [] })
+  })
+
   it('reassembles split web-search metadata and preserves streamed Markdown exactly', async () => {
     const markdown = 'Summary\n\n```ts\nconst answer: string = "OK"\n```'
     const metaFrame = '\u200b__META__{"type":"web_search","sources":[{"title":"Example","url":"https://example.com"}]}__META__\n\n'

@@ -40,8 +40,8 @@ def _pause_before_retry(attempt: int) -> None:
     time.sleep(0.005 * attempt)
 
 
-def _append_message(*, user_id: int, news_id: int, message: dict, session_id: int | None = None,
-                    generation: int | None = None, create: bool) -> ChatSnapshot:
+def _append_messages(*, user_id: int, news_id: int, messages: list[dict], session_id: int | None = None,
+                     generation: int | None = None, create: bool) -> ChatSnapshot:
     last_busy_error: OperationalError | None = None
 
     for attempt in range(1, MAX_CAS_ATTEMPTS + 1):
@@ -73,7 +73,7 @@ def _append_message(*, user_id: int, news_id: int, message: dict, session_id: in
             if not isinstance(session.messages, list):
                 raise ChatConflict('chat_conflict')
 
-            updated_messages = [*session.messages, message]
+            updated_messages = [*session.messages, *messages]
             updated = ChatSession.objects.filter(
                 pk=session.pk,
                 user_id=user_id,
@@ -106,21 +106,84 @@ def _append_message(*, user_id: int, news_id: int, message: dict, session_id: in
     raise ChatConflict('chat_conflict') from last_busy_error
 
 
-def append_user_message(*, user_id: int, news_id: int, content: str) -> ChatSnapshot:
-    return _append_message(
+def begin_chat_turn(*, user_id: int, news_id: int) -> ChatSnapshot:
+    """Reserve the current history generation without persisting an unfinished turn."""
+    last_busy_error: OperationalError | None = None
+    for attempt in range(1, MAX_CAS_ATTEMPTS + 1):
+        try:
+            session = ChatSession.objects.filter(user_id=user_id, news_id=news_id).first()
+            if session is None:
+                try:
+                    with transaction.atomic():
+                        session = ChatSession.objects.create(
+                            user_id=user_id,
+                            news_id=news_id,
+                            messages=[],
+                        )
+                except IntegrityError:
+                    # A concurrent request created the unique (user, news) row.
+                    continue
+            if not isinstance(session.messages, list):
+                raise ChatConflict('chat_conflict')
+            return ChatSnapshot(
+                session_id=session.pk,
+                generation=session.generation,
+                messages=session.messages,
+            )
+        except OperationalError as error:
+            if not _is_sqlite_busy(error):
+                raise
+            last_busy_error = error
+            if attempt < MAX_CAS_ATTEMPTS:
+                _pause_before_retry(attempt)
+    raise ChatConflict('chat_conflict') from last_busy_error
+
+
+def assert_chat_turn_current(*, user_id: int, news_id: int, session_id: int, generation: int) -> None:
+    """Fence a streaming response after the owner clears or replaces its history."""
+    if not ChatSession.objects.filter(
+        pk=session_id,
         user_id=user_id,
         news_id=news_id,
-        message={'role': 'user', 'content': content},
+        generation=generation,
+    ).exists():
+        raise ChatConflict('chat_conflict')
+
+
+def append_user_message(*, user_id: int, news_id: int, content: str) -> ChatSnapshot:
+    return _append_messages(
+        user_id=user_id,
+        news_id=news_id,
+        messages=[{'role': 'user', 'content': content}],
         create=True,
     )
 
 
 def append_assistant_message(*, user_id: int, news_id: int, session_id: int,
                              generation: int, content: str) -> ChatSnapshot:
-    return _append_message(
+    return _append_messages(
         user_id=user_id,
         news_id=news_id,
-        message={'role': 'assistant', 'content': content},
+        messages=[{'role': 'assistant', 'content': content}],
+        session_id=session_id,
+        generation=generation,
+        create=False,
+    )
+
+
+def append_completed_chat_turn(*, user_id: int, news_id: int, session_id: int,
+                               generation: int, question: str, answer: str,
+                               model_source: dict | None = None) -> ChatSnapshot:
+    assistant_message = {'role': 'assistant', 'content': answer}
+    if model_source is not None:
+        assistant_message['model_source'] = model_source
+    return _append_messages(
+        user_id=user_id,
+        news_id=news_id,
+        messages=[
+            {'role': 'user', 'content': question},
+            assistant_message,
+        ],
         session_id=session_id,
         generation=generation,
         create=False,

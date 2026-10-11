@@ -14,6 +14,7 @@ import {
   parseWebSources,
   type ChatHistory,
   type ChatMessage,
+  type ChatModelSource,
 } from '@/services/newsWorkflowApi'
 import { chatHistoryOptions, parseNewsId } from '@/services/newsWorkflowQueries'
 import type { ViewerId } from '@/services/newsWorkflowQueries'
@@ -33,6 +34,7 @@ interface PendingTurn {
   assistant: ChatMessage
   status: 'streaming' | 'uncertain'
   webSearch: boolean
+  modelConfigId: string | null
   historyBoundary: ChatMessage[] | null
   historyBoundaryData: ChatHistory | undefined
   reconciliation: ReconciliationState
@@ -46,6 +48,7 @@ interface ActiveRequest {
   user: ChatMessage
   assistant: ChatMessage
   webSearch: boolean
+  modelConfigId: string | null
   historyBoundary: ChatMessage[] | null
   historyBoundaryData: ChatHistory | undefined
 }
@@ -61,37 +64,61 @@ const STOPPED_MESSAGE = '已停止接收本页更新。正在只读核对服务�
 const CLEAR_ERROR = '清空失败，原有聊天记录仍保留。请检查网络后重试。'
 const SUCCESS_DURATION_MS = 1500
 const META_MARKER = '__META__'
+const ERROR_MARKER = '__ERROR__'
 let nextTurnId = 0
 
-function readMetaSources(value: string): ReturnType<typeof parseWebSources> {
+class ChatStreamFailure extends Error {}
+
+function readMetaFrame(value: string): { sources?: ReturnType<typeof parseWebSources>; modelSource?: ChatModelSource } {
   try {
     const parsed: unknown = JSON.parse(value)
-    if (typeof parsed === 'object' && parsed !== null && 'sources' in parsed) {
-      return parseWebSources(parsed.sources)
+    if (typeof parsed === 'object' && parsed !== null) {
+      const result: { sources?: ReturnType<typeof parseWebSources>; modelSource?: ChatModelSource } = {}
+      if ('sources' in parsed) result.sources = parseWebSources(parsed.sources)
+      if ('model_source' in parsed && typeof parsed.model_source === 'object' && parsed.model_source !== null &&
+        'provider' in parsed.model_source && typeof parsed.model_source.provider === 'string' &&
+        'model' in parsed.model_source && typeof parsed.model_source.model === 'string') {
+        result.modelSource = {
+          provider: parsed.model_source.provider,
+          model: parsed.model_source.model,
+        }
+      }
+      return result
     }
   } catch {
-    return undefined
+    return {}
   }
-  return undefined
+  return {}
 }
 
-/** Consume the backend's inline metadata frame without losing split markers. */
-function consumeMetaFrame(
+/** Consume inline metadata/error frames without losing split markers or partials. */
+function consumeChatFrames(
   buffered: string,
   chunk: string,
   final: boolean,
   onText: (text: string) => void,
   onSources: (sources: NonNullable<ReturnType<typeof parseWebSources>>) => void,
+  onModelSource: (source: ChatModelSource) => void,
 ): string {
   let remaining = buffered + chunk
   while (remaining) {
-    const start = remaining.indexOf(META_MARKER)
+    const metaStart = remaining.indexOf(META_MARKER)
+    const errorStart = remaining.indexOf(ERROR_MARKER)
+    const isError = errorStart >= 0 && (metaStart < 0 || errorStart < metaStart)
+    const marker = isError ? ERROR_MARKER : META_MARKER
+    const start = isError ? errorStart : metaStart
     if (start < 0) {
       if (final) {
+        if ([META_MARKER, ERROR_MARKER].some((candidate) =>
+          Array.from({ length: candidate.length - 1 }, (_value, index) => candidate.slice(0, index + 1))
+            .some((prefix) => remaining.endsWith(prefix)))) {
+          throw new ChatStreamFailure('回答流未正常结束，本次内容未保存。')
+        }
         onText(remaining)
         return ''
       }
-      const safeLength = Math.max(0, remaining.length - META_MARKER.length + 1)
+      const markerLength = Math.max(META_MARKER.length, ERROR_MARKER.length)
+      const safeLength = Math.max(0, remaining.length - markerLength + 1)
       if (safeLength > 0) onText(remaining.slice(0, safeLength))
       return remaining.slice(safeLength)
     }
@@ -101,14 +128,29 @@ function consumeMetaFrame(
       onText(prefix.endsWith('\u200b') ? prefix.slice(0, -1) : prefix)
       remaining = remaining.slice(start)
     }
-    const end = remaining.indexOf(META_MARKER, META_MARKER.length)
+    const end = remaining.indexOf(marker, marker.length)
     if (end < 0) {
-      if (final) onText(remaining)
+      if (final) throw new ChatStreamFailure('回答流未正常结束，本次内容未保存。')
       return final ? '' : remaining
     }
-    const sources = readMetaSources(remaining.slice(META_MARKER.length, end))
-    if (sources) onSources(sources)
-    remaining = remaining.slice(end + META_MARKER.length)
+    const frameValue = remaining.slice(marker.length, end)
+    if (isError) {
+      let message = '模型服务暂时不可用，本次回答未保存。'
+      try {
+        const parsed: unknown = JSON.parse(frameValue)
+        if (typeof parsed === 'object' && parsed !== null && 'message' in parsed &&
+          typeof parsed.message === 'string' && parsed.message.length <= 240) {
+          message = parsed.message
+        }
+      } catch {
+        // A malformed backend error frame is presented as a generic failure.
+      }
+      throw new ChatStreamFailure(message)
+    }
+    const meta = readMetaFrame(frameValue)
+    if (meta.sources) onSources(meta.sources)
+    if (meta.modelSource) onModelSource(meta.modelSource)
+    remaining = remaining.slice(end + marker.length)
     if (remaining.startsWith('\r\n\r\n')) remaining = remaining.slice(4)
     else if (remaining.startsWith('\n\n')) remaining = remaining.slice(2)
   }
@@ -123,6 +165,7 @@ function snapshotActiveRequest(request: ActiveRequest): PendingTurn {
     assistant: request.assistant,
     status: 'uncertain',
     webSearch: request.webSearch,
+    modelConfigId: request.modelConfigId,
     historyBoundary: request.historyBoundary,
     historyBoundaryData: request.historyBoundaryData,
     reconciliation: 'checking',
@@ -130,7 +173,11 @@ function snapshotActiveRequest(request: ActiveRequest): PendingTurn {
   }
 }
 
-export function useChat(newsId: string | number | null | undefined, enabled: boolean) {
+export function useChat(
+  newsId: string | number | null | undefined,
+  enabled: boolean,
+  selectedModelConfigId: string | null = null,
+) {
   const queryClient = useQueryClient()
   const { user, loading: authLoading } = useAuth()
   const { lang } = useLanguage()
@@ -320,7 +367,11 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     void reconcileInterruptedTurn(turn)
   }, [authLoading, currentPendingTurn, enabled, ownerKey, reconcileInterruptedTurn])
 
-  const sendMessage = useCallback((text: string, explicitlyResending = false): Promise<boolean> => {
+  const sendMessage = useCallback((
+    text: string,
+    explicitlyResending = false,
+    modelConfigIdOverride?: string | null,
+  ): Promise<boolean> => {
     const trimmed = text.trim()
     const clearInFlight = clearControllerRef.current?.ownerKey === ownerKey
     const clearDialogOpen = clearState.ownerKey === ownerKey && clearState.value.open
@@ -344,6 +395,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       ? { ...previousTurn.assistant, content: '', web_sources: undefined }
       : { id: `${turnId}-assistant`, role: 'assistant', content: '' }
     const webSearch = currentWebSearch
+    const modelConfigId = modelConfigIdOverride === undefined ? selectedModelConfigId : modelConfigIdOverride
     if (webSearch) assistantMessage.web_search = true
     const historyAtSend = queryClient.getQueryData<ChatHistory>(historyKey)
     const turn: PendingTurn = {
@@ -353,6 +405,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       assistant: assistantMessage,
       status: 'streaming',
       webSearch,
+      modelConfigId,
       historyBoundary: copyChatHistoryBoundary(historyAtSend?.messages),
       historyBoundaryData: historyAtSend,
       reconciliation: 'idle',
@@ -368,6 +421,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       user: userMessage,
       assistant: assistantMessage,
       webSearch,
+      modelConfigId,
       historyBoundary: turn.historyBoundary,
       historyBoundaryData: turn.historyBoundaryData,
     }
@@ -381,13 +435,17 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       let firstChunk = true
       let frameBuffer = ''
       try {
-        for await (const chunk of chatStream(parsedId, trimmed, { webSearch, signal: request.controller.signal })) {
+        for await (const chunk of chatStream(parsedId, trimmed, {
+          webSearch,
+          modelConfigId: request.modelConfigId,
+          signal: request.controller.signal,
+        })) {
           if (!isCurrent()) return false
           if (firstChunk) {
             firstChunk = false
             updatePhase('streaming')
           }
-          frameBuffer = consumeMetaFrame(frameBuffer, chunk, false,
+          frameBuffer = consumeChatFrames(frameBuffer, chunk, false,
             (content) => { accumulated += content },
             (sources) => {
               webSources = sources
@@ -395,6 +453,13 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
               updatePendingTurn(turnId, (current) => ({
                 ...current,
                 assistant: { ...current.assistant, web_sources: sources },
+              }))
+            },
+            (modelSource) => {
+              request.assistant = { ...request.assistant, model_source: modelSource }
+              updatePendingTurn(turnId, (current) => ({
+                ...current,
+                assistant: { ...current.assistant, model_source: modelSource },
               }))
             },
           )
@@ -405,7 +470,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
           }))
         }
         if (!isCurrent()) return false
-        consumeMetaFrame(frameBuffer, '', true,
+        consumeChatFrames(frameBuffer, '', true,
           (content) => { accumulated += content },
           (sources) => {
             webSources = sources
@@ -415,10 +480,18 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
               assistant: { ...current.assistant, web_sources: sources },
             }))
           },
+          (modelSource) => {
+            request.assistant = { ...request.assistant, model_source: modelSource }
+            updatePendingTurn(turnId, (current) => ({
+              ...current,
+              assistant: { ...current.assistant, model_source: modelSource },
+            }))
+          },
         )
 
         const completedAssistant: ChatMessage = { ...assistantMessage, content: accumulated }
         if (webSources) completedAssistant.web_sources = webSources
+        if (request.assistant.model_source) completedAssistant.model_source = request.assistant.model_source
         queryClient.setQueryData<ChatHistory>(historyKey, (current) => ({
           messages: [...(current?.messages ?? []), userMessage, completedAssistant],
         }))
@@ -431,10 +504,12 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
         return true
       } catch (error: unknown) {
         if (!isCurrent() || request.controller.signal.aborted) return false
-        const message = error instanceof Error ? error.message : ASSISTANT_ERROR
+        const message = error instanceof ChatStreamFailure ? error.message : ASSISTANT_ERROR
         request.assistant = {
           ...request.assistant,
-          content: request.assistant.content || `${ASSISTANT_ERROR}${message ? ` (${message})` : ''}`,
+          content: request.assistant.content
+            ? `${request.assistant.content}\n\n> ${message}`
+            : `${ASSISTANT_ERROR}${message ? ` (${message})` : ''}`,
         }
         const uncertainTurn = snapshotActiveRequest(request)
         setPendingTurn(uncertainTurn)
@@ -446,7 +521,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
         if (isCurrent()) requestRef.current = null
       }
     })()
-  }, [authLoading, clearState, currentWebSearch, enabled, historyKey, isLoading, ownerKey, parsedId, pendingTurnState, queryClient, reconcileInterruptedTurn, setInput, setPendingTurn, updatePendingTurn, updatePhase])
+  }, [authLoading, clearState, currentWebSearch, enabled, historyKey, isLoading, ownerKey, parsedId, pendingTurnState, queryClient, reconcileInterruptedTurn, selectedModelConfigId, setInput, setPendingTurn, updatePendingTurn, updatePhase])
 
   const doSend = useCallback((text: string): Promise<boolean> => sendMessage(text), [sendMessage])
   const handleSend = useCallback(() => doSend(inputRef.current), [doSend])
@@ -549,7 +624,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       currentPendingTurn?.status !== 'uncertain' || currentPendingTurn.serverQuestionSaved ||
       currentPendingTurn.reconciliation === 'checking'
     ) return Promise.resolve(false)
-    return sendMessage(currentPendingTurn.user.content, true)
+    return sendMessage(currentPendingTurn.user.content, true, currentPendingTurn.modelConfigId)
   }, [currentPendingTurn, sendMessage])
 
   const toggleWebSearch = useCallback(() => {

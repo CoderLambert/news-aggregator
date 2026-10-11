@@ -1,6 +1,6 @@
-# BYOK Test 契约（尚未执行）
+# BYOK Test 契约与执行状态
 
-**所有 T00–T14 / T13-A–F / T00-G 测试当前均为 NOT_RUN。** 每张 [Task 卡](../tasks/README.md) 对应同编号 Test；T00-G 为独立网关运维 Test。
+每张 [Task 卡](../tasks/README.md) 对应同编号 Test；T00-G 为独立网关运维 Test。各卡的 READY FOR REVIEW、PARTIAL、NOT_RUN 和失败项以同编号 Test 文档中的实测证据为准；当前 T02、T03、T04 已有实现和执行记录，不能再用本页的一段总述覆盖单卡状态。
 
 ## 证据级别
 

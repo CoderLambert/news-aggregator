@@ -4,8 +4,21 @@ import {
   copyChatHistoryBoundary,
   reconcileChatHistory,
 } from '@/services/chatHistoryReconciliation'
+import { parseChatHistory } from '@/services/newsWorkflowApi'
 
 describe('chat history reconciliation', () => {
+  it('retains a validated BYOK model source when saved history is reloaded', () => {
+    expect(parseChatHistory({ messages: [{
+      role: 'assistant',
+      content: 'answer',
+      model_source: { provider: 'DeepSeek', model: 'DeepSeek V4.1 Flash', api_key: 'ignored' },
+    }] })).toEqual({ messages: [{
+      role: 'assistant',
+      content: 'answer',
+      model_source: { provider: 'DeepSeek', model: 'DeepSeek V4.1 Flash' },
+    }] })
+  })
+
   it.each([
     ['missing boundary', null, []],
     ['changed boundary', [{ role: 'user', content: 'before' }], [{ role: 'assistant', content: 'changed' }]],

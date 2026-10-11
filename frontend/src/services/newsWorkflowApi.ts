@@ -39,12 +39,18 @@ export interface WebSource {
   source?: string
 }
 
+export interface ChatModelSource {
+  provider: string
+  model: string
+}
+
 export interface ChatMessage {
   id?: string | number
   role: 'user' | 'assistant'
   content: string
   web_search?: boolean
   web_sources?: WebSource[]
+  model_source?: ChatModelSource
 }
 
 export interface ChatHistory {
@@ -174,6 +180,14 @@ function parseChatMessage(value: unknown): ChatMessage | null {
   if (typeof value.web_search === 'boolean') message.web_search = value.web_search
   const sources = parseWebSources(value.web_sources)
   if (sources) message.web_sources = sources
+  if (isRecord(value.model_source) &&
+    typeof value.model_source.provider === 'string' &&
+    typeof value.model_source.model === 'string') {
+    message.model_source = {
+      provider: value.model_source.provider,
+      model: value.model_source.model,
+    }
+  }
   return message
 }
 
@@ -254,7 +268,7 @@ export async function cancelTranslationJob(jobId: string, generation: number): P
 export async function* chatStream(
   id: NewsId,
   question: string,
-  options: { webSearch: boolean; signal: AbortSignal },
+  options: { webSearch: boolean; modelConfigId?: string | null; signal: AbortSignal },
 ): AsyncGenerator<string> {
   for await (const rawChunk of streamChat(id, question, options)) {
     if (typeof rawChunk === 'string') yield rawChunk
