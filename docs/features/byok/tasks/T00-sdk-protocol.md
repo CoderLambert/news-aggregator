@@ -1,6 +1,6 @@
 # T00 · 共享网关端到端技术验真
 
-> **PLANNED**：本卡尚未执行，SDK_LOCAL、PROXY_LOCAL 和 PROVIDER_REAL 都是 NOT_RUN。实现时先核对最新 `origin/feat/byok-user-api-keys`、独立工作树与实际 Python、Docker、Proxy 版本；本文件不代表通过验收。
+> **本地技术门槛 PASS（2026-10-12）**：隔离运行 L 与代码 HEAD `ad0f14eb599ddbf8a691dc535227d7ef18298cb6` 复核均为 `407 PASS / 0 FAIL / 407 checks`；PR #33 已验证的 docs-only head `04051772e0a3a52fb8d3f9dc98480c4fc2132790` 的 backend/frontend 两组 CI 均通过。LiteLLM v1.104.2 的原始 Chat EOF 风险仍由负控复现，受保护准入路径已证明在上游前拒绝 Chat streaming；锁定镜像的官方 Cosign 签名与实际 digest 已验证。DeepSeek 专属模型路由只指向本地合成 upstream，缺请求级 provider Key 时仍在上游前拒绝。可选真实请求 T00-11 与其他 provider 兼容性未运行；本地技术 PASS 不表示生产网关或真实 provider 兼容性已验收。精确证据与边界见[同编号 Test](../tests/T00-sdk-protocol.md)。
 
 | 属性 | 内容 |
 | --- | --- |
@@ -27,7 +27,7 @@ v1.104.2 是已记录 EOF/终态风险的复现版本。T00 回归夹具固定�
 
 ## 明确不做
 
-不创建业务数据库模型/迁移、设置页、新闻业务调用、用户任务系统或共享生产网关；本卡核心 PROXY_LOCAL 测试不调用真实厂商。仅在核心 PROXY_LOCAL 完整通过后，可单独申请一次早期 DeepSeek 文本冒烟；须先向用户提供确切模型、安全合成输入、请求/输出上限及最小费用预算，并由用户明确确认后才可执行；不依赖 T00-G，也不替代 T13。不得操作 ssh tencent 或线上环境，不读取环境/文件/旧配置中的 provider Key。所有测试凭据必须是本次探针生成的合成假 Key。不得把本地 Proxy 集成证据记为真实 provider 兼容。
+不创建业务数据库模型/迁移、设置页、新闻业务调用、用户任务系统或共享生产网关；本卡核心 PROXY_LOCAL 测试不调用真实厂商。若 PROXY_LOCAL 未完整通过，可向用户提供独立 DeepSeek 直连诊断供其选择，但不得将其包装成已准入的网关测试或 T00 通过；经 LiteLLM 的真实请求仍须等待 PROXY_LOCAL 完整通过。所有真实调用由用户在本地终端隐藏输入 Key 并执行；提供命令前须记录确切模型、安全合成输入、请求/输出上限及费用估算。本助手不执行收费请求，不读取环境/文件/旧配置中的 provider Key。直连诊断不依赖 T00-G，也不替代 T13。不得操作 ssh tencent 或线上环境。所有本地测试凭据必须是本次探针生成的合成假 Key。不得把本地 Proxy 集成证据记为真实 provider 兼容。
 
 ## 必验场景
 
@@ -42,7 +42,7 @@ v1.104.2 是已记录 EOF/终态风险的复现版本。T00 回归夹具固定�
 | T00-07 | 正常完成、异常、取消后的资源关闭 | SDK response/stream 与 HTTP 资源均关闭 |
 | T00-08 | 缺 provider Key、错误项目虚拟 Key | 缺个人 Key 时拒绝且不借部署 Key；错误项目虚拟 Key 到达上游前被 Proxy 拒绝 |
 | T00-09 | Proxy 与 SDK 请求计数 | max_retries=0、num_retries=0、无 fallback；计数证明失败未隐式重发或改模型 |
-| T00-10 | v1.104.2 原始上游 EOF 与 Proxy 暴露终态对照 | 仅下游 stop/[DONE] 不足以证明原始上游完整；失败按局部风险记录 |
+| T00-10 | v1.104.2 原始上游 EOF 与 Proxy 暴露终态对照 | 仅下游 stop/[DONE]不足以证明原始上游完整；若负控复现风险，受保护准入路径须返回 400 并在 upstream 前拒绝该 streaming 路由 |
 | T00-11 | 可选 DeepSeek 早期文本冒烟（仅 PROXY_LOCAL 全过且用户单独确认后） | 经 Proxy 到官方通用 API；合成安全短文本、单一模型、明确请求数和输出 token 上限、无自动重试；记录用户确认、模型/预算及脱敏结果。此单次证据不代替 T13 矩阵 |
 
 ## LiteLLM 流终态验真阻塞规则
@@ -51,14 +51,16 @@ v1.104.2 是已记录 EOF/终态风险的复现版本。T00 回归夹具固定�
 
 若代理无法给业务层提供可验证的原始完成证据，停止该路径验收并报告原始请求、事件序列和脱敏日志。只考虑锁定版本的局部补丁、等待官方修复，或禁用该具体路由的 streaming；不得改成另一套 provider 适配器、扩大为所有 SDK 的重构，或降低完整性契约。
 
+若采用禁用路由作为隔离，必须同时保留无回调负控以记录原始风险，并通过 guarded Proxy 实测该 Chat streaming 请求返回 HTTP 400 `T00_STREAMING_DISABLED` 且 upstream 请求数为 0。满足这两个条件只代表该路由被关闭，不代表其兼容；不能把 raw `finish_reason=stop` 解释为上游完整。
+
 ## 可复现验收路径
 
 在隔离环境运行 CLI，探针启动固定版本 Proxy 和受控本地 upstream，先执行文本与两轮工具成功路径，再注入 EOF/截断/超时/SSE 错误/HTTP 错误。stdout 只输出版本、用例状态、耗时、脱敏错误类别及请求计数。使用合成的 Proxy 项目虚拟 Key 和合成 provider Key；运行前后核对没有读取现存凭据或发送外网 provider 请求。
 
 ## 任务完成条件
 
-- SDK_LOCAL 与 PROXY_LOCAL 各自单独报告。SDK_LOCAL 只能表示 SDK 直连受控上游；本卡主要门槛是 PROXY_LOCAL。可选 DeepSeek 冒烟另记 PROVIDER_REAL，不作为本地技术门槛必做项。
-- Test 文档记录精确基线 HEAD、实现 SHA、Python/SDK/Proxy/Docker 版本、完整执行命令、脱敏输出、旧测试对照和旧断言 diff；真实厂商状态保持单独的 PROVIDER_REAL=NOT_RUN。
+- SDK_LOCAL 与 PROXY_LOCAL 各自单独报告。SDK_LOCAL 只能表示 SDK 直连受控上游；本卡主要门槛是 PROXY_LOCAL。可选经 LiteLLM 的 DeepSeek 冒烟另记 T00-11 / PROVIDER_REAL；独立直连基线单独记录，均不替代本地技术门槛或网关验收。
+- Test 文档记录精确基线 HEAD、实现 SHA、Python/SDK/Proxy/Docker 版本、完整执行命令、脱敏输出、旧测试对照和旧断言 diff；DeepSeek 直连基线与经 LiteLLM 的 T00-11 分开记录，直连结果不能代替网关验收。
 - 原始终态、continuation、凭据隔离、资源关闭或请求计数有任一无法核验时，T00 为 BLOCKED，不得继续把本地链路描述为完整通过。
 - T00-G 是共享服务运维交付卡；它不阻塞 T01/T04 本地开发，也不能由本地技术验真代替。
 

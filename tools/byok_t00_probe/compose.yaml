@@ -1,0 +1,141 @@
+services:
+  db:
+    image: postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: t00_user
+      POSTGRES_PASSWORD: t00_password_synthetic
+    tmpfs:
+      - /var/lib/postgresql/data:rw,size=256m,mode=0700
+    shm_size: 64m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U t00_user -d litellm -h 127.0.0.1"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks:
+      - isolated
+    security_opt:
+      - no-new-privileges:true
+
+  upstream:
+    image: ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500
+    entrypoint: ["python", "-u", "/fixtures/upstream.py"]
+    user: "1000:1000"
+    volumes:
+      - ./upstream.py:/fixtures/upstream.py:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,size=64m,mode=1777
+    networks:
+      - isolated
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  proxy:
+    image: ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500
+    command: ["--config", "/fixtures/proxy.yaml", "--port", "4000"]
+    user: "1000:1000"
+    volumes:
+      - ./proxy.yaml:/fixtures/proxy.yaml:ro
+      - ./proxy_callback.py:/fixtures/proxy_callback.py:ro
+    environment:
+      HOME: /tmp
+      XDG_CACHE_HOME: /tmp/cache
+      PYTHONPATH: /fixtures
+      T00_DENY_STREAMING_CALL_TYPES: acompletion
+      DATABASE_URL: postgresql://t00_user:t00_password_synthetic@db:5432/litellm
+      LITELLM_MASTER_KEY: sk-t00-master-synthetic
+    read_only: true
+    tmpfs:
+      - /tmp:rw,size=512m,mode=1777
+    depends_on:
+      db:
+        condition: service_healthy
+      upstream:
+        condition: service_healthy
+    networks:
+      - isolated
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+
+  unguarded_proxy:
+    profiles: ["unguarded"]
+    image: ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500
+    command: ["--config", "/fixtures/proxy-unguarded.yaml", "--port", "4001"]
+    user: "1000:1000"
+    volumes:
+      - ./proxy-unguarded.yaml:/fixtures/proxy-unguarded.yaml:ro
+    environment:
+      HOME: /tmp
+      XDG_CACHE_HOME: /tmp/cache
+      DATABASE_URL: postgresql://t00_user:t00_password_synthetic@db:5432/litellm
+      LITELLM_MASTER_KEY: sk-t00-master-synthetic
+    read_only: true
+    tmpfs:
+      - /tmp:rw,size=512m,mode=1777
+    depends_on:
+      db:
+        condition: service_healthy
+      upstream:
+        condition: service_healthy
+    networks:
+      - isolated
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4001/health/liveliness', timeout=3)"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+
+  native_stream_proxy:
+    profiles: ["native-stream"]
+    image: ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500
+    command: ["--config", "/fixtures/proxy.yaml", "--port", "4002"]
+    user: "1000:1000"
+    volumes:
+      - ./proxy.yaml:/fixtures/proxy.yaml:ro
+      - ./proxy_callback.py:/fixtures/proxy_callback.py:ro
+    environment:
+      HOME: /tmp
+      XDG_CACHE_HOME: /tmp/cache
+      PYTHONPATH: /fixtures
+      T00_DENY_STREAMING_CALL_TYPES: acompletion
+      DATABASE_URL: postgresql://t00_user:t00_password_synthetic@db:5432/litellm
+      LITELLM_MASTER_KEY: sk-t00-master-synthetic
+    read_only: true
+    tmpfs:
+      - /tmp:rw,size=512m,mode=1777
+    depends_on:
+      db:
+        condition: service_healthy
+      upstream:
+        condition: service_healthy
+    networks:
+      - isolated
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4002/health/liveliness', timeout=3)"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+
+networks:
+  isolated:
+    internal: true

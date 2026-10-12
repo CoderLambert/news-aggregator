@@ -1,0 +1,42 @@
+{
+  "verification": "PASS",
+  "verified_at": "2026-10-12",
+  "image_reference": "ghcr.io/berriai/litellm:v1.104.2",
+  "locked_image_digest": "sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+  "signature_claim_digests": [
+    "sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500"
+  ],
+  "signature_claim_matches_locked_digest": true,
+  "cosign_version": "v3.0.2",
+  "go_version": "go1.27.1",
+  "public_key_source": "https://raw.githubusercontent.com/BerriAI/litellm/0112e53046018d726492c814b3644b7d376029d0/cosign.pub",
+  "verification_command": "/tmp/byok-t00-cosign-v3.0.2/cosign verify --key https://raw.githubusercontent.com/BerriAI/litellm/0112e53046018d726492c814b3644b7d376029d0/cosign.pub ghcr.io/berriai/litellm:v1.104.2",
+  "cosign_claims_validated": true,
+  "transparency_log_inclusion_verified": true,
+  "signature_verified_against_specified_public_key": true,
+  "verification_stdout_sha256": "b55a8220898e2d5e784338856f0c15b5eacccf84226e42bf2fd45a272a7ca112",
+  "signature_claims": [
+    {
+      "critical": {
+        "identity": {
+          "docker-reference": "ghcr.io/berriai/litellm"
+        },
+        "image": {
+          "docker-manifest-digest": "sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500"
+        },
+        "type": "cosign container image signature"
+      },
+      "optional": {
+        "Bundle": {
+          "SignedEntryTimestamp": "MEQCIFhJF3gd4aQChcil0IxlmnIcM8DMxJWIPhJ8el16DK9UAiBMKluS7J3AwvAp1ponfMJ08LOpAP6tDlqLUzgYuyMrnA==",
+          "Payload": {
+            "body": "eyJhcGlWZXJzaW9uIjoiMC4wLjEiLCJraW5kIjoiaGFzaGVkcmVrb3JkIiwic3BlYyI6eyJkYXRhIjp7Imhhc2giOnsiYWxnb3JpdGhtIjoic2hhMjU2IiwidmFsdWUiOiIzNGQxMjA4MDNiOTFmZTBjM2RjYWIxNTY2Mzk0MGY2OGFlYWYzOWQ2YjU0NzI4YTMyZjU5ZTFlMWQ1ZTczNTk2In19LCJzaWduYXR1cmUiOnsiY29udGVudCI6Ik1FVUNJRi9SNFNFQXI4ZnNQR05ZVVFQZnArMzJka0JLV05FVlYzdkEydG1xc09tU0FpRUF0R2VIS1Q3RjVWUEx0ekF2VGVKdHFpZ1pnVWsrZmFEczlzSmROYzk3Rjl3PSIsInB1YmxpY0tleSI6eyJjb250ZW50IjoiTFMwdExTMUNSVWRKVGlCUVZVSk1TVU1nUzBWWkxTMHRMUzBLVFVacmQwVjNXVWhMYjFwSmVtb3dRMEZSV1VsTGIxcEplbW93UkVGUlkwUlJaMEZGUzJrMGFYWnhSM0JGTWpNeFQwZElOVEJRUzJKeGVURlpNVXRyWWdwUVQwcERPQ3RwTWxkcmJ6Z3laMEpQVlVObE0wMHdWbmM0Tmtndk5ISm9WV2htYjFsRmRHazBaMlJLT1hkYVlsbHRTekJKTWtWRk9UWm5QVDBLTFMwdExTMUZUa1FnVUZWQ1RFbERJRXRGV1MwdExTMHRDZz09In19fX0=",
+            "integratedTime": 1791448609,
+            "logIndex": 3144616019,
+            "logID": "c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d"
+          }
+        }
+      }
+    }
+  ]
+}

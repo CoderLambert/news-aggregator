@@ -1,0 +1,32 @@
+model_list:
+  - model_name: t00-chat
+    litellm_params:
+      model: openai/test-model
+      api_base: http://upstream:8080/v1
+      api_key: sk-t00-deployment-default-synthetic
+  - model_name: t00-deepseek-smoke
+    litellm_params:
+      model: deepseek/deepseek-flash
+      api_base: http://upstream:8080
+      # Nonfunctional test sentinel; the admission callback requires the
+      # request-scoped synthetic provider key before route selection.
+      api_key: sk-t00-deployment-default-synthetic
+  - model_name: t00-messages
+    litellm_params:
+      model: anthropic/test-model
+      api_base: http://upstream:8080
+      api_key: sk-t00-deployment-default-synthetic
+
+general_settings:
+  master_key: sk-t00-master-synthetic
+  database_url: postgresql://t00_user:t00_password_synthetic@db:5432/litellm
+  forward_llm_provider_auth_headers: false
+  forward_client_headers_to_llm_api: false
+
+router_settings:
+  num_retries: 0
+  fallbacks: []
+
+litellm_settings:
+  callbacks: proxy_callback.proxy_handler_instance
+  num_retries: 0

@@ -1,0 +1,4658 @@
+{
+  "_evidence_handoff": {
+    "credentials_or_raw_request_bodies_in_copy": false,
+    "provider_real": "NOT_RUN",
+    "public_output_text_fields_redacted": 7,
+    "redaction": "Every SDK/Proxy public output text value replaced; the saved copy retains statuses, terminal names, counters, and synthetic-only evidence.",
+    "run_id": "D",
+    "source_file": "/tmp/byok-t00-run-d.json",
+    "source_sha256": "9d0a034e49a2a7b16746bc41947e9cb02b96f519b55f3807d1d6096961cbb66a"
+  },
+  "checks": [
+    {
+      "facts": {
+        "all_configured_refs_and_runtime_image_ids_match_pins": true,
+        "services": [
+          "db",
+          "native_stream_proxy",
+          "proxy",
+          "unguarded_proxy",
+          "upstream"
+        ]
+      },
+      "id": "ENV_ACTUAL_CONTAINER_IMAGE_IDS_AND_DIGESTS",
+      "status": "PASS"
+    },
+    {
+      "facts": {},
+      "id": "CONFIG_PROXY_HEADER_FORWARDING_DISABLED",
+      "status": "PASS"
+    },
+    {
+      "facts": {},
+      "id": "CONFIG_PROXY_AND_SDK_RETRIES_ZERO",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "deployment_default_configured": true
+      },
+      "id": "CONFIG_SYNTHETIC_DEPLOYMENT_DEFAULT_KEY_PRESENT",
+      "status": "PASS"
+    },
+    {
+      "facts": {},
+      "id": "CONFIG_GUARD_CALLBACK_AND_STREAM_DENY_ENABLED",
+      "status": "PASS"
+    },
+    {
+      "facts": {},
+      "id": "CONFIG_RAW_PROXY_HAS_NO_ADMISSION_CALLBACK",
+      "status": "PASS"
+    },
+    {
+      "facts": {},
+      "id": "CONFIG_PROJECT_KEYS_HAVE_NO_TEAM_OR_PROVIDER_OVERRIDE",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "SDK_CHAT_COMPLETE_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "SDK_CHAT_COMPLETE_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "bearer",
+        "observed_scheme": "bearer",
+        "unexpected_provider_header_present": false
+      },
+      "id": "SDK_CHAT_COMPLETE_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_CHAT_COMPLETE_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_CHAT_COMPLETE_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_CHAT_COMPLETE_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_CHAT_COMPLETE_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "client_terminal": true,
+        "upstream_terminal": "finish_reason_stop"
+      },
+      "id": "SDK_CHAT_COMPLETE_TERMINAL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "SDK_RESPONSES_COMPLETE_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "SDK_RESPONSES_COMPLETE_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "bearer",
+        "observed_scheme": "bearer",
+        "unexpected_provider_header_present": false
+      },
+      "id": "SDK_RESPONSES_COMPLETE_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_RESPONSES_COMPLETE_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_RESPONSES_COMPLETE_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_RESPONSES_COMPLETE_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_RESPONSES_COMPLETE_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "client_terminal": true,
+        "upstream_terminal": "response_completed"
+      },
+      "id": "SDK_RESPONSES_COMPLETE_TERMINAL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "SDK_MESSAGES_COMPLETE_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "SDK_MESSAGES_COMPLETE_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "x-api-key",
+        "observed_scheme": "x-api-key",
+        "unexpected_provider_header_present": false
+      },
+      "id": "SDK_MESSAGES_COMPLETE_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_MESSAGES_COMPLETE_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_MESSAGES_COMPLETE_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_MESSAGES_COMPLETE_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_MESSAGES_COMPLETE_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "client_terminal": true,
+        "upstream_terminal": "message_stop"
+      },
+      "id": "SDK_MESSAGES_COMPLETE_TERMINAL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "SDK_CHAT_EOF_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "SDK_CHAT_EOF_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "bearer",
+        "observed_scheme": "bearer",
+        "unexpected_provider_header_present": false
+      },
+      "id": "SDK_CHAT_EOF_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_CHAT_EOF_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_CHAT_EOF_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_CHAT_EOF_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_CHAT_EOF_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "client_incomplete": true,
+        "upstream_terminal": "normal_eof_without_protocol_terminal"
+      },
+      "id": "SDK_CHAT_EOF_INCOMPLETE",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "SDK_RESPONSES_EOF_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "SDK_RESPONSES_EOF_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "bearer",
+        "observed_scheme": "bearer",
+        "unexpected_provider_header_present": false
+      },
+      "id": "SDK_RESPONSES_EOF_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_RESPONSES_EOF_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_RESPONSES_EOF_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_RESPONSES_EOF_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_RESPONSES_EOF_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "client_incomplete": true,
+        "upstream_terminal": "normal_eof_without_protocol_terminal"
+      },
+      "id": "SDK_RESPONSES_EOF_INCOMPLETE",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "SDK_MESSAGES_EOF_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "SDK_MESSAGES_EOF_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "x-api-key",
+        "observed_scheme": "x-api-key",
+        "unexpected_provider_header_present": false
+      },
+      "id": "SDK_MESSAGES_EOF_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_MESSAGES_EOF_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_MESSAGES_EOF_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_MESSAGES_EOF_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "SDK_MESSAGES_EOF_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "client_incomplete": true,
+        "upstream_terminal": "normal_eof_without_protocol_terminal"
+      },
+      "id": "SDK_MESSAGES_EOF_INCOMPLETE",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "InternalServerError",
+        "status_code": 503
+      },
+      "id": "SDK_CHAT_HTTP_ERROR_SURFACED_AS_ERROR",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_CHAT_HTTP_ERROR_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "APITimeoutError",
+        "status_code": null
+      },
+      "id": "SDK_CHAT_TIMEOUT_SURFACED_AS_ERROR",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_CHAT_TIMEOUT_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "APIConnectionError",
+        "status_code": null
+      },
+      "id": "SDK_CHAT_TRUNCATED_SURFACED_AS_ERROR",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_CHAT_TRUNCATED_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "InternalServerError",
+        "status_code": 503
+      },
+      "id": "SDK_RESPONSES_HTTP_ERROR_SURFACED_AS_ERROR",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_RESPONSES_HTTP_ERROR_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "APITimeoutError",
+        "status_code": null
+      },
+      "id": "SDK_RESPONSES_TIMEOUT_SURFACED_AS_ERROR",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_RESPONSES_TIMEOUT_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "APIConnectionError",
+        "status_code": null
+      },
+      "id": "SDK_RESPONSES_TRUNCATED_SURFACED_AS_ERROR",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_RESPONSES_TRUNCATED_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "InternalServerError",
+        "status_code": 503
+      },
+      "id": "SDK_MESSAGES_HTTP_ERROR_SURFACED_AS_ERROR",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_MESSAGES_HTTP_ERROR_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "APITimeoutError",
+        "status_code": null
+      },
+      "id": "SDK_MESSAGES_TIMEOUT_SURFACED_AS_ERROR",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_MESSAGES_TIMEOUT_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "APIConnectionError",
+        "status_code": null
+      },
+      "id": "SDK_MESSAGES_TRUNCATED_SURFACED_AS_ERROR",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_MESSAGES_TRUNCATED_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "incomplete_reason": null,
+        "terminal": "length"
+      },
+      "id": "SDK_CHAT_INCOMPLETE_TERMINAL_PRESERVED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 1
+      },
+      "id": "SDK_CHAT_INCOMPLETE_ONE_UPSTREAM_REQUEST",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "incomplete_reason": "max_output_tokens",
+        "terminal": "incomplete"
+      },
+      "id": "SDK_RESPONSES_INCOMPLETE_TERMINAL_PRESERVED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 1
+      },
+      "id": "SDK_RESPONSES_INCOMPLETE_ONE_UPSTREAM_REQUEST",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "incomplete_reason": null,
+        "terminal": "max_tokens"
+      },
+      "id": "SDK_MESSAGES_INCOMPLETE_TERMINAL_PRESERVED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 1
+      },
+      "id": "SDK_MESSAGES_INCOMPLETE_ONE_UPSTREAM_REQUEST",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null,
+        "event_types": [
+          "chat.chunk",
+          "chat.chunk",
+          "chat.chunk"
+        ],
+        "success": true,
+        "terminals": [
+          "stop"
+        ]
+      },
+      "id": "SDK_CHAT_STREAM_COMPLETE_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_CHAT_STREAM_COMPLETE_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "done_sentinel_expected": true,
+        "done_sentinel_written": true,
+        "protocol": "chat"
+      },
+      "id": "SDK_CHAT_STREAM_COMPLETE_PROTOCOL_TERMINAL_FRAMING",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null,
+        "event_types": [
+          "chat.chunk",
+          "chat.chunk"
+        ],
+        "success": true,
+        "terminals": []
+      },
+      "id": "SDK_CHAT_STREAM_EOF_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_CHAT_STREAM_EOF_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null,
+        "event_types": [
+          "chat.chunk",
+          "chat.chunk",
+          "chat.chunk"
+        ],
+        "success": true,
+        "terminals": [
+          "length"
+        ]
+      },
+      "id": "SDK_CHAT_STREAM_INCOMPLETE_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_CHAT_STREAM_INCOMPLETE_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "done_sentinel_expected": true,
+        "done_sentinel_written": true,
+        "protocol": "chat"
+      },
+      "id": "SDK_CHAT_STREAM_INCOMPLETE_PROTOCOL_TERMINAL_FRAMING",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "APIError",
+        "event_types": [
+          "chat.chunk",
+          "chat.chunk"
+        ],
+        "success": false,
+        "terminals": []
+      },
+      "id": "SDK_CHAT_STREAM_SSE_ERROR_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_CHAT_STREAM_SSE_ERROR_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null,
+        "event_types": [
+          "chat.chunk"
+        ],
+        "success": true,
+        "terminals": []
+      },
+      "id": "SDK_CHAT_STREAM_CANCEL_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_CHAT_STREAM_CANCEL_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "disconnect_delay_ms": 9.888,
+        "observation_window_ms": 2000,
+        "upstream_frames_written_after_downstream_close": 1,
+        "upstream_observed_client_disconnect": true,
+        "upstream_stream_body_finished": false,
+        "upstream_stream_events_written": 3
+      },
+      "id": "SDK_CHAT_STREAM_CANCEL_UPSTREAM_DETECTED_CLIENT_CLOSE",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "producer_exit_delay_ms": 9.919,
+        "producer_exit_reason": "client_disconnect",
+        "upstream_observed_client_disconnect": true,
+        "upstream_stream_body_finished": false,
+        "upstream_stream_events_written": 3
+      },
+      "id": "SDK_CHAT_STREAM_CANCEL_UPSTREAM_STOPPED_AFTER_CLIENT_CLOSE",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "active_upstream_producers_at_observation_end": 0,
+        "cancel_observation_window_ms": 2000,
+        "cancelled_not_reported_complete": true,
+        "downstream_events_consumed": 1,
+        "downstream_response_closed": true,
+        "proxy_liveness_http_2xx_after_cancel": null
+      },
+      "id": "SDK_CHAT_STREAM_CANCEL_CLIENT_CANCEL_RESOURCES_RELEASED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null,
+        "event_types": [
+          "response.created",
+          "response.output_text.delta",
+          "response.completed"
+        ],
+        "success": true,
+        "terminals": [
+          "completed"
+        ]
+      },
+      "id": "SDK_RESPONSES_STREAM_COMPLETE_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_RESPONSES_STREAM_COMPLETE_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "done_sentinel_expected": false,
+        "done_sentinel_written": false,
+        "protocol": "responses"
+      },
+      "id": "SDK_RESPONSES_STREAM_COMPLETE_PROTOCOL_TERMINAL_FRAMING",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null,
+        "event_types": [
+          "response.created",
+          "response.output_text.delta"
+        ],
+        "success": true,
+        "terminals": []
+      },
+      "id": "SDK_RESPONSES_STREAM_EOF_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_RESPONSES_STREAM_EOF_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null,
+        "event_types": [
+          "response.created",
+          "response.output_text.delta",
+          "response.incomplete"
+        ],
+        "success": true,
+        "terminals": [
+          "incomplete"
+        ]
+      },
+      "id": "SDK_RESPONSES_STREAM_INCOMPLETE_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_RESPONSES_STREAM_INCOMPLETE_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "done_sentinel_expected": false,
+        "done_sentinel_written": false,
+        "protocol": "responses"
+      },
+      "id": "SDK_RESPONSES_STREAM_INCOMPLETE_PROTOCOL_TERMINAL_FRAMING",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "APIError",
+        "event_types": [
+          "response.created",
+          "response.output_text.delta"
+        ],
+        "success": false,
+        "terminals": []
+      },
+      "id": "SDK_RESPONSES_STREAM_SSE_ERROR_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_RESPONSES_STREAM_SSE_ERROR_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null,
+        "event_types": [
+          "response.created"
+        ],
+        "success": true,
+        "terminals": []
+      },
+      "id": "SDK_RESPONSES_STREAM_CANCEL_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_RESPONSES_STREAM_CANCEL_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "disconnect_delay_ms": 9.983,
+        "observation_window_ms": 2000,
+        "upstream_frames_written_after_downstream_close": 1,
+        "upstream_observed_client_disconnect": true,
+        "upstream_stream_body_finished": false,
+        "upstream_stream_events_written": 3
+      },
+      "id": "SDK_RESPONSES_STREAM_CANCEL_UPSTREAM_DETECTED_CLIENT_CLOSE",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "producer_exit_delay_ms": 10.004,
+        "producer_exit_reason": "client_disconnect",
+        "upstream_observed_client_disconnect": true,
+        "upstream_stream_body_finished": false,
+        "upstream_stream_events_written": 3
+      },
+      "id": "SDK_RESPONSES_STREAM_CANCEL_UPSTREAM_STOPPED_AFTER_CLIENT_CLOSE",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "active_upstream_producers_at_observation_end": 0,
+        "cancel_observation_window_ms": 2000,
+        "cancelled_not_reported_complete": true,
+        "downstream_events_consumed": 1,
+        "downstream_response_closed": true,
+        "proxy_liveness_http_2xx_after_cancel": null
+      },
+      "id": "SDK_RESPONSES_STREAM_CANCEL_CLIENT_CANCEL_RESOURCES_RELEASED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null,
+        "event_types": [
+          "message_start",
+          "content_block_start",
+          "content_block_delta",
+          "content_block_stop",
+          "message_delta",
+          "message_stop"
+        ],
+        "success": true,
+        "terminals": [
+          "end_turn",
+          "message_stop"
+        ]
+      },
+      "id": "SDK_MESSAGES_STREAM_COMPLETE_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_MESSAGES_STREAM_COMPLETE_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "done_sentinel_expected": false,
+        "done_sentinel_written": false,
+        "protocol": "messages"
+      },
+      "id": "SDK_MESSAGES_STREAM_COMPLETE_PROTOCOL_TERMINAL_FRAMING",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null,
+        "event_types": [
+          "message_start",
+          "content_block_start",
+          "content_block_delta"
+        ],
+        "success": true,
+        "terminals": []
+      },
+      "id": "SDK_MESSAGES_STREAM_EOF_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_MESSAGES_STREAM_EOF_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null,
+        "event_types": [
+          "message_start",
+          "content_block_start",
+          "content_block_delta",
+          "content_block_stop",
+          "message_delta",
+          "message_stop"
+        ],
+        "success": true,
+        "terminals": [
+          "max_tokens",
+          "message_stop"
+        ]
+      },
+      "id": "SDK_MESSAGES_STREAM_INCOMPLETE_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_MESSAGES_STREAM_INCOMPLETE_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "done_sentinel_expected": false,
+        "done_sentinel_written": false,
+        "protocol": "messages"
+      },
+      "id": "SDK_MESSAGES_STREAM_INCOMPLETE_PROTOCOL_TERMINAL_FRAMING",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "APIStatusError",
+        "event_types": [
+          "message_start",
+          "content_block_start",
+          "content_block_delta"
+        ],
+        "success": false,
+        "terminals": []
+      },
+      "id": "SDK_MESSAGES_STREAM_SSE_ERROR_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_MESSAGES_STREAM_SSE_ERROR_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null,
+        "event_types": [
+          "message_start"
+        ],
+        "success": true,
+        "terminals": []
+      },
+      "id": "SDK_MESSAGES_STREAM_CANCEL_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "SDK_MESSAGES_STREAM_CANCEL_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "disconnect_delay_ms": 9.887,
+        "observation_window_ms": 2000,
+        "upstream_frames_written_after_downstream_close": 1,
+        "upstream_observed_client_disconnect": true,
+        "upstream_stream_body_finished": false,
+        "upstream_stream_events_written": 3
+      },
+      "id": "SDK_MESSAGES_STREAM_CANCEL_UPSTREAM_DETECTED_CLIENT_CLOSE",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "producer_exit_delay_ms": 9.901,
+        "producer_exit_reason": "client_disconnect",
+        "upstream_observed_client_disconnect": true,
+        "upstream_stream_body_finished": false,
+        "upstream_stream_events_written": 3
+      },
+      "id": "SDK_MESSAGES_STREAM_CANCEL_UPSTREAM_STOPPED_AFTER_CLIENT_CLOSE",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "active_upstream_producers_at_observation_end": 0,
+        "cancel_observation_window_ms": 2000,
+        "cancelled_not_reported_complete": true,
+        "downstream_events_consumed": 1,
+        "downstream_response_closed": true,
+        "proxy_liveness_http_2xx_after_cancel": null
+      },
+      "id": "SDK_MESSAGES_STREAM_CANCEL_CLIENT_CANCEL_RESOURCES_RELEASED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 1
+      },
+      "id": "SDK_CHAT_TOOL_ROUNDTRIP_R1_ONE_UPSTREAM_REQUEST",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 1
+      },
+      "id": "SDK_CHAT_TOOL_ROUNDTRIP_R2_ONE_UPSTREAM_REQUEST",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 1
+      },
+      "id": "SDK_CHAT_TOOL_ROUNDTRIP_FINAL_ONE_UPSTREAM_REQUEST",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "tool_dispatch_outcomes": [
+          "dispatched",
+          "dispatched"
+        ]
+      },
+      "id": "SDK_CHAT_TOOL_ROUNDTRIP_TWO_ALLOWLISTED_SYNTHETIC_TOOLS",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "continuation_in_public": false,
+        "key_in_public": false,
+        "public_fields": [
+          "text"
+        ]
+      },
+      "id": "SDK_CHAT_TOOL_ROUNDTRIP_PUBLIC_OUTPUT_EXCLUDES_PRIVATE_CONTINUATION_AND_KEYS",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "chat_r1_assistant_preserved": true,
+        "chat_r1_tool_result_id_preserved": true,
+        "chat_r2_assistant_preserved": true,
+        "chat_r2_tool_result_id_preserved": true
+      },
+      "id": "SDK_CHAT_TOOL_ROUNDTRIP_RAW_CONTINUATION_AND_TOOL_RESULT_PRESERVED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 1
+      },
+      "id": "SDK_RESPONSES_TOOL_ROUNDTRIP_R1_ONE_UPSTREAM_REQUEST",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 1
+      },
+      "id": "SDK_RESPONSES_TOOL_ROUNDTRIP_R2_ONE_UPSTREAM_REQUEST",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 1
+      },
+      "id": "SDK_RESPONSES_TOOL_ROUNDTRIP_FINAL_ONE_UPSTREAM_REQUEST",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "tool_dispatch_outcomes": [
+          "dispatched",
+          "dispatched"
+        ]
+      },
+      "id": "SDK_RESPONSES_TOOL_ROUNDTRIP_TWO_ALLOWLISTED_SYNTHETIC_TOOLS",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "continuation_in_public": false,
+        "key_in_public": false,
+        "public_fields": [
+          "text"
+        ]
+      },
+      "id": "SDK_RESPONSES_TOOL_ROUNDTRIP_PUBLIC_OUTPUT_EXCLUDES_PRIVATE_CONTINUATION_AND_KEYS",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "responses_r1_encrypted_continuation_preserved": true,
+        "responses_r1_foreign_call_id_and_tool_association_preserved": false,
+        "responses_r1_function_call_arguments_preserved": true,
+        "responses_r1_function_call_call_id_preserved": true,
+        "responses_r1_function_call_fields_preserved": true,
+        "responses_r1_function_call_id_field_present": true,
+        "responses_r1_function_call_id_preserved": true,
+        "responses_r1_function_call_item_present": true,
+        "responses_r1_function_call_keyset_preserved": true,
+        "responses_r1_function_call_name_preserved": true,
+        "responses_r1_function_call_status_preserved": true,
+        "responses_r1_function_call_type_preserved": true,
+        "responses_r1_non_id_function_call_fields_preserved": false,
+        "responses_r1_output_items_preserved": true,
+        "responses_r1_reasoning_id_preserved": true,
+        "responses_r1_reasoning_keyset_preserved": true,
+        "responses_r1_reasoning_summary_preserved": true,
+        "responses_r1_tool_result_preserved": true,
+        "responses_r2_encrypted_continuation_preserved": true,
+        "responses_r2_foreign_call_id_and_tool_association_preserved": false,
+        "responses_r2_function_call_arguments_preserved": true,
+        "responses_r2_function_call_call_id_preserved": true,
+        "responses_r2_function_call_fields_preserved": true,
+        "responses_r2_function_call_id_field_present": true,
+        "responses_r2_function_call_id_preserved": true,
+        "responses_r2_function_call_item_present": true,
+        "responses_r2_function_call_keyset_preserved": true,
+        "responses_r2_function_call_name_preserved": true,
+        "responses_r2_function_call_status_preserved": true,
+        "responses_r2_function_call_type_preserved": true,
+        "responses_r2_non_id_function_call_fields_preserved": false,
+        "responses_r2_output_items_preserved": true,
+        "responses_r2_reasoning_id_preserved": true,
+        "responses_r2_reasoning_keyset_preserved": true,
+        "responses_r2_reasoning_summary_preserved": true,
+        "responses_r2_tool_result_preserved": true
+      },
+      "id": "SDK_RESPONSES_TOOL_ROUNDTRIP_RAW_CONTINUATION_AND_TOOL_RESULT_PRESERVED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 1
+      },
+      "id": "SDK_MESSAGES_TOOL_ROUNDTRIP_R1_ONE_UPSTREAM_REQUEST",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 1
+      },
+      "id": "SDK_MESSAGES_TOOL_ROUNDTRIP_R2_ONE_UPSTREAM_REQUEST",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 1
+      },
+      "id": "SDK_MESSAGES_TOOL_ROUNDTRIP_FINAL_ONE_UPSTREAM_REQUEST",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "tool_dispatch_outcomes": [
+          "dispatched",
+          "dispatched"
+        ]
+      },
+      "id": "SDK_MESSAGES_TOOL_ROUNDTRIP_TWO_ALLOWLISTED_SYNTHETIC_TOOLS",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "continuation_in_public": false,
+        "key_in_public": false,
+        "public_fields": [
+          "text"
+        ]
+      },
+      "id": "SDK_MESSAGES_TOOL_ROUNDTRIP_PUBLIC_OUTPUT_EXCLUDES_PRIVATE_CONTINUATION_AND_KEYS",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "messages_r1_thinking_signature_preserved": true,
+        "messages_r1_tool_result_preserved": true,
+        "messages_r2_thinking_signature_preserved": true,
+        "messages_r2_tool_result_preserved": true
+      },
+      "id": "SDK_MESSAGES_TOOL_ROUNDTRIP_RAW_CONTINUATION_AND_TOOL_RESULT_PRESERVED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "tenant_a_model_alias": "t00-chat",
+        "tenant_b_model_alias": "t00-chat"
+      },
+      "id": "PROXY_CHAT_AB_USE_SAME_MODEL_ALIAS",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "PROXY_CHAT_TENANT_A_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "PROXY_CHAT_TENANT_A_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "bearer",
+        "observed_scheme": "bearer",
+        "unexpected_provider_header_present": false
+      },
+      "id": "PROXY_CHAT_TENANT_A_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_CHAT_TENANT_A_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_CHAT_TENANT_A_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_CHAT_TENANT_A_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_CHAT_TENANT_A_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "finish_reason": "stop",
+        "sdk_success": true
+      },
+      "id": "PROXY_CHAT_TENANT_A_SDK_COMPLETE_TERMINAL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "PROXY_CHAT_TENANT_B_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-b"
+      },
+      "id": "PROXY_CHAT_TENANT_B_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "bearer",
+        "observed_scheme": "bearer",
+        "unexpected_provider_header_present": false
+      },
+      "id": "PROXY_CHAT_TENANT_B_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_CHAT_TENANT_B_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_CHAT_TENANT_B_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_CHAT_TENANT_B_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_CHAT_TENANT_B_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "finish_reason": "stop",
+        "sdk_success": true
+      },
+      "id": "PROXY_CHAT_TENANT_B_SDK_COMPLETE_TERMINAL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "PROXY_RESPONSES_TENANT_A_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "PROXY_RESPONSES_TENANT_A_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "bearer",
+        "observed_scheme": "bearer",
+        "unexpected_provider_header_present": false
+      },
+      "id": "PROXY_RESPONSES_TENANT_A_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_TENANT_A_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_TENANT_A_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_TENANT_A_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_TENANT_A_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "sdk_success": true,
+        "status": "completed",
+        "upstream_terminal": "response_completed"
+      },
+      "id": "PROXY_RESPONSES_COMPLETE_TERMINAL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "PROXY_MESSAGES_TENANT_A_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "PROXY_MESSAGES_TENANT_A_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "x-api-key",
+        "observed_scheme": "x-api-key",
+        "unexpected_provider_header_present": false
+      },
+      "id": "PROXY_MESSAGES_TENANT_A_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_MESSAGES_TENANT_A_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_MESSAGES_TENANT_A_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_MESSAGES_TENANT_A_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_MESSAGES_TENANT_A_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "sdk_success": true,
+        "stop_reason": "end_turn",
+        "upstream_terminal": "message_stop"
+      },
+      "id": "PROXY_MESSAGES_COMPLETE_TERMINAL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_R1_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_R1_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "bearer",
+        "observed_scheme": "bearer",
+        "unexpected_provider_header_present": false
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_R1_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_R1_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_R1_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_R1_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_R1_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_R2_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_R2_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "bearer",
+        "observed_scheme": "bearer",
+        "unexpected_provider_header_present": false
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_R2_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_R2_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_R2_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_R2_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_R2_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_FINAL_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_FINAL_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "bearer",
+        "observed_scheme": "bearer",
+        "unexpected_provider_header_present": false
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_FINAL_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_FINAL_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_FINAL_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_FINAL_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_FINAL_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "tool_dispatch_outcomes": [
+          "dispatched",
+          "dispatched"
+        ]
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_TWO_ALLOWLISTED_SYNTHETIC_TOOLS",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "continuation_in_public": false,
+        "key_in_public": false,
+        "public_fields": [
+          "text"
+        ]
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_PUBLIC_OUTPUT_EXCLUDES_PRIVATE_CONTINUATION_AND_KEYS",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "chat_assistant_turn_count": 2,
+        "chat_r1_assistant_preserved": true,
+        "chat_r1_tool_result_id_preserved": true,
+        "chat_r2_assistant_preserved": true,
+        "chat_r2_tool_result_id_preserved": true,
+        "chat_tool_result_count": 2
+      },
+      "id": "PROXY_CHAT_TOOL_ROUNDTRIP_RAW_CONTINUATION_AND_TOOL_RESULT_PRESERVED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_R1_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_R1_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "bearer",
+        "observed_scheme": "bearer",
+        "unexpected_provider_header_present": false
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_R1_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_R1_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_R1_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_R1_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_R1_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_R2_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_R2_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "bearer",
+        "observed_scheme": "bearer",
+        "unexpected_provider_header_present": false
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_R2_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_R2_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_R2_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_R2_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_R2_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_FINAL_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_FINAL_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "bearer",
+        "observed_scheme": "bearer",
+        "unexpected_provider_header_present": false
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_FINAL_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_FINAL_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_FINAL_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_FINAL_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_FINAL_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "tool_dispatch_outcomes": [
+          "dispatched",
+          "dispatched"
+        ]
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_TWO_ALLOWLISTED_SYNTHETIC_TOOLS",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "continuation_in_public": false,
+        "key_in_public": false,
+        "public_fields": [
+          "text"
+        ]
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_PUBLIC_OUTPUT_EXCLUDES_PRIVATE_CONTINUATION_AND_KEYS",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "responses_input_item_count": 9,
+        "responses_r1_encrypted_continuation_preserved": true,
+        "responses_r1_foreign_call_id_and_tool_association_preserved": false,
+        "responses_r1_function_call_arguments_preserved": true,
+        "responses_r1_function_call_call_id_preserved": true,
+        "responses_r1_function_call_extra_field_count": 0,
+        "responses_r1_function_call_fields_preserved": true,
+        "responses_r1_function_call_id_field_present": true,
+        "responses_r1_function_call_id_preserved": true,
+        "responses_r1_function_call_item_present": true,
+        "responses_r1_function_call_keyset_preserved": true,
+        "responses_r1_function_call_missing_expected_field_count": 0,
+        "responses_r1_function_call_name_preserved": true,
+        "responses_r1_function_call_status_preserved": true,
+        "responses_r1_function_call_type_preserved": true,
+        "responses_r1_non_id_function_call_fields_preserved": false,
+        "responses_r1_output_items_preserved": true,
+        "responses_r1_reasoning_id_preserved": true,
+        "responses_r1_reasoning_keyset_preserved": true,
+        "responses_r1_reasoning_summary_preserved": true,
+        "responses_r1_tool_result_preserved": true,
+        "responses_r2_encrypted_continuation_preserved": true,
+        "responses_r2_foreign_call_id_and_tool_association_preserved": false,
+        "responses_r2_function_call_arguments_preserved": true,
+        "responses_r2_function_call_call_id_preserved": true,
+        "responses_r2_function_call_extra_field_count": 0,
+        "responses_r2_function_call_fields_preserved": true,
+        "responses_r2_function_call_id_field_present": true,
+        "responses_r2_function_call_id_preserved": true,
+        "responses_r2_function_call_item_present": true,
+        "responses_r2_function_call_keyset_preserved": true,
+        "responses_r2_function_call_missing_expected_field_count": 0,
+        "responses_r2_function_call_name_preserved": true,
+        "responses_r2_function_call_status_preserved": true,
+        "responses_r2_function_call_type_preserved": true,
+        "responses_r2_non_id_function_call_fields_preserved": false,
+        "responses_r2_output_items_preserved": true,
+        "responses_r2_reasoning_id_preserved": true,
+        "responses_r2_reasoning_keyset_preserved": true,
+        "responses_r2_reasoning_summary_preserved": true,
+        "responses_r2_tool_result_preserved": true
+      },
+      "id": "PROXY_RESPONSES_TOOL_ROUNDTRIP_RAW_CONTINUATION_AND_TOOL_RESULT_PRESERVED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_R1_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_R1_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "x-api-key",
+        "observed_scheme": "x-api-key",
+        "unexpected_provider_header_present": false
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_R1_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_R1_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_R1_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_R1_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_R1_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_R2_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_R2_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "x-api-key",
+        "observed_scheme": "x-api-key",
+        "unexpected_provider_header_present": false
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_R2_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_R2_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_R2_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_R2_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_R2_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_FINAL_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_FINAL_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "x-api-key",
+        "observed_scheme": "x-api-key",
+        "unexpected_provider_header_present": false
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_FINAL_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_FINAL_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_FINAL_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_FINAL_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_FINAL_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "tool_dispatch_outcomes": [
+          "dispatched",
+          "dispatched"
+        ]
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_TWO_ALLOWLISTED_SYNTHETIC_TOOLS",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "continuation_in_public": false,
+        "key_in_public": false,
+        "public_fields": [
+          "text"
+        ]
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_PUBLIC_OUTPUT_EXCLUDES_PRIVATE_CONTINUATION_AND_KEYS",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "messages_assistant_turn_count": 2,
+        "messages_r1_thinking_signature_preserved": true,
+        "messages_r1_tool_result_preserved": true,
+        "messages_r2_thinking_signature_preserved": true,
+        "messages_r2_tool_result_preserved": true
+      },
+      "id": "PROXY_MESSAGES_TOOL_ROUNDTRIP_RAW_CONTINUATION_AND_TOOL_RESULT_PRESERVED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_R1_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_R1_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "bearer",
+        "observed_scheme": "bearer",
+        "unexpected_provider_header_present": false
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_R1_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_R1_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_R1_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_R1_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_R1_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_R2_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_R2_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "bearer",
+        "observed_scheme": "bearer",
+        "unexpected_provider_header_present": false
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_R2_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_R2_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_R2_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_R2_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_R2_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_FINAL_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_FINAL_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "bearer",
+        "observed_scheme": "bearer",
+        "unexpected_provider_header_present": false
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_FINAL_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_FINAL_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_FINAL_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_FINAL_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_FINAL_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "responses_r1_encrypted_continuation_preserved": true,
+        "responses_r1_foreign_call_id_and_tool_association_preserved": true,
+        "responses_r1_foreign_item_id_normalized": true,
+        "responses_r1_function_call_arguments_preserved": true,
+        "responses_r1_function_call_call_id_preserved": true,
+        "responses_r1_function_call_extra_field_count": 0,
+        "responses_r1_function_call_fields_preserved": false,
+        "responses_r1_function_call_id_field_present": false,
+        "responses_r1_function_call_id_preserved": false,
+        "responses_r1_function_call_item_present": true,
+        "responses_r1_function_call_keyset_preserved": false,
+        "responses_r1_function_call_missing_expected_field_count": 1,
+        "responses_r1_function_call_name_preserved": true,
+        "responses_r1_function_call_status_preserved": true,
+        "responses_r1_function_call_type_preserved": true,
+        "responses_r1_non_id_function_call_fields_preserved": true,
+        "responses_r1_output_item_count_matches": true,
+        "responses_r1_output_items_preserved": false,
+        "responses_r1_reasoning_id_preserved": true,
+        "responses_r1_reasoning_keyset_preserved": true,
+        "responses_r1_reasoning_summary_preserved": true,
+        "responses_r1_tool_result_preserved": true,
+        "responses_r2_encrypted_continuation_preserved": true,
+        "responses_r2_foreign_call_id_and_tool_association_preserved": true,
+        "responses_r2_foreign_item_id_normalized": true,
+        "responses_r2_function_call_arguments_preserved": true,
+        "responses_r2_function_call_call_id_preserved": true,
+        "responses_r2_function_call_extra_field_count": 0,
+        "responses_r2_function_call_fields_preserved": false,
+        "responses_r2_function_call_id_field_present": false,
+        "responses_r2_function_call_id_preserved": false,
+        "responses_r2_function_call_item_present": true,
+        "responses_r2_function_call_keyset_preserved": false,
+        "responses_r2_function_call_missing_expected_field_count": 1,
+        "responses_r2_function_call_name_preserved": true,
+        "responses_r2_function_call_status_preserved": true,
+        "responses_r2_function_call_type_preserved": true,
+        "responses_r2_non_id_function_call_fields_preserved": true,
+        "responses_r2_output_item_count_matches": true,
+        "responses_r2_output_items_preserved": false,
+        "responses_r2_reasoning_id_preserved": true,
+        "responses_r2_reasoning_keyset_preserved": true,
+        "responses_r2_reasoning_summary_preserved": true,
+        "responses_r2_tool_result_preserved": true
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_OLD_RESP_ITEM_IDS_NORMALIZED_ONLY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "continuation_in_public": false,
+        "key_in_public": false,
+        "public_fields": [
+          "text"
+        ],
+        "tool_dispatch_outcomes": [
+          "dispatched",
+          "dispatched"
+        ]
+      },
+      "id": "PROXY_RESPONSES_FOREIGN_ID_NORMALIZATION_TOOLS_DISPATCHED_AND_PUBLIC_OUTPUT_SAFE",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "dispatched": false,
+        "rejection": "partial_json",
+        "upstream_count": 1
+      },
+      "id": "PROXY_TOOL_REJECT_CHAT_MALFORMED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "dispatched": false,
+        "rejection": "invalid_json",
+        "upstream_count": 1
+      },
+      "id": "PROXY_TOOL_REJECT_CHAT_INVALID",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "dispatched": false,
+        "rejection": "not_allowlisted",
+        "upstream_count": 1
+      },
+      "id": "PROXY_TOOL_REJECT_CHAT_UNKNOWN",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "dispatched": false,
+        "rejection": "partial_json",
+        "upstream_count": 1
+      },
+      "id": "PROXY_TOOL_REJECT_RESPONSES_MALFORMED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "dispatched": false,
+        "rejection": "invalid_json",
+        "upstream_count": 1
+      },
+      "id": "PROXY_TOOL_REJECT_RESPONSES_INVALID",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "dispatched": false,
+        "rejection": "not_allowlisted",
+        "upstream_count": 1
+      },
+      "id": "PROXY_TOOL_REJECT_RESPONSES_UNKNOWN",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "dispatched": false,
+        "rejection": "invalid_argument_shape",
+        "upstream_count": 1
+      },
+      "id": "PROXY_TOOL_REJECT_MESSAGES_MALFORMED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "dispatched": false,
+        "rejection": "invalid_argument_shape",
+        "upstream_count": 1
+      },
+      "id": "PROXY_TOOL_REJECT_MESSAGES_INVALID",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "dispatched": false,
+        "rejection": "not_allowlisted",
+        "upstream_count": 1
+      },
+      "id": "PROXY_TOOL_REJECT_MESSAGES_UNKNOWN",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected": 1,
+        "observed": 1
+      },
+      "id": "PROXY_UNGUARDED_CHAT_EOF_UPSTREAM_COUNT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "provider_key_match": true,
+        "tenant": "tenant-a"
+      },
+      "id": "PROXY_UNGUARDED_CHAT_EOF_SELECTED_PROVIDER_KEY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "expected_scheme": "bearer",
+        "observed_scheme": "bearer",
+        "unexpected_provider_header_present": false
+      },
+      "id": "PROXY_UNGUARDED_CHAT_EOF_PROVIDER_AUTH_SCHEME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_UNGUARDED_CHAT_EOF_NO_PROJECT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_UNGUARDED_CHAT_EOF_NO_MASTER_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_UNGUARDED_CHAT_EOF_NO_ADMIN_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_match": false
+      },
+      "id": "PROXY_UNGUARDED_CHAT_EOF_NO_DEPLOYMENT_KEY_FORWARDED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "downstream_finish_reasons": [
+          "stop"
+        ],
+        "sdk_normal_end": true,
+        "upstream_terminal": "normal_eof_without_protocol_terminal"
+      },
+      "id": "PROXY_UNGUARDED_CHAT_EOF_NOT_SYNTHESIZED_COMPLETE",
+      "status": "FAIL"
+    },
+    {
+      "facts": {
+        "http_status": 401,
+        "upstream_count": 0
+      },
+      "id": "PROXY_WRONG_PROJECT_REJECTED_BEFORE_UPSTREAM",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "http_status": 403,
+        "upstream_count": 0
+      },
+      "id": "PROXY_PROJECT_KEY_MODEL_ALLOWLIST_REJECTED_BEFORE_UPSTREAM",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400,
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_MISSING_PROVIDER_FAILS_CLOSED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "deployment_default_route_count": 1,
+        "http_status": 401,
+        "upstream_count": 1
+      },
+      "id": "PROXY_RAW_UNGUARDED_DEFAULT_KEY_FALLBACK_REPRODUCED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_CHAT_MISSING_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_CHAT_MISSING_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_CHAT_NULL_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_CHAT_NULL_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_CHAT_EMPTY_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_CHAT_EMPTY_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_CHAT_WHITESPACE_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_CHAT_WHITESPACE_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_CHAT_NON_STRING_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_CHAT_NON_STRING_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_CHAT_METADATA_ONLY_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_CHAT_METADATA_ONLY_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_CHAT_HEADER_ONLY_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_CHAT_HEADER_ONLY_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_RESPONSES_MISSING_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_RESPONSES_MISSING_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_RESPONSES_NULL_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_RESPONSES_NULL_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_RESPONSES_EMPTY_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_RESPONSES_EMPTY_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_RESPONSES_WHITESPACE_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_RESPONSES_WHITESPACE_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_RESPONSES_NON_STRING_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_RESPONSES_NON_STRING_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_RESPONSES_METADATA_ONLY_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_RESPONSES_METADATA_ONLY_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_RESPONSES_HEADER_ONLY_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_RESPONSES_HEADER_ONLY_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_MESSAGES_MISSING_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_MESSAGES_MISSING_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_MESSAGES_NULL_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_MESSAGES_NULL_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_MESSAGES_EMPTY_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_MESSAGES_EMPTY_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_MESSAGES_WHITESPACE_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_MESSAGES_WHITESPACE_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_MESSAGES_NON_STRING_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_MESSAGES_NON_STRING_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_MESSAGES_METADATA_ONLY_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_MESSAGES_METADATA_ONLY_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_MESSAGES_HEADER_ONLY_400_PROVIDER_KEY_REQUIRED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_MESSAGES_HEADER_ONLY_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_code": "T00_STREAMING_DISABLED",
+        "http_status": 400
+      },
+      "id": "PROXY_GUARD_CHAT_STREAM_400_STREAM_DISABLED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 0
+      },
+      "id": "PROXY_GUARD_CHAT_STREAM_NO_UPSTREAM_CALL",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "InternalServerError",
+        "status_code": 503
+      },
+      "id": "PROXY_CHAT_HTTP_ERROR_SURFACED_AS_ERROR",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "PROXY_CHAT_HTTP_ERROR_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "APITimeoutError",
+        "status_code": null
+      },
+      "id": "PROXY_CHAT_TIMEOUT_SURFACED_AS_ERROR",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "PROXY_CHAT_TIMEOUT_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "InternalServerError",
+        "status_code": 500
+      },
+      "id": "PROXY_CHAT_TRUNCATED_SURFACED_AS_ERROR",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "PROXY_CHAT_TRUNCATED_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "InternalServerError",
+        "status_code": 503
+      },
+      "id": "PROXY_RESPONSES_HTTP_ERROR_SURFACED_AS_ERROR",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "PROXY_RESPONSES_HTTP_ERROR_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "APITimeoutError",
+        "status_code": null
+      },
+      "id": "PROXY_RESPONSES_TIMEOUT_SURFACED_AS_ERROR",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "PROXY_RESPONSES_TIMEOUT_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "InternalServerError",
+        "status_code": 500
+      },
+      "id": "PROXY_RESPONSES_TRUNCATED_SURFACED_AS_ERROR",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "PROXY_RESPONSES_TRUNCATED_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "InternalServerError",
+        "status_code": 503
+      },
+      "id": "PROXY_MESSAGES_HTTP_ERROR_SURFACED_AS_ERROR",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "PROXY_MESSAGES_HTTP_ERROR_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "APITimeoutError",
+        "status_code": null
+      },
+      "id": "PROXY_MESSAGES_TIMEOUT_SURFACED_AS_ERROR",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "PROXY_MESSAGES_TIMEOUT_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "InternalServerError",
+        "status_code": 500
+      },
+      "id": "PROXY_MESSAGES_TRUNCATED_SURFACED_AS_ERROR",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "PROXY_MESSAGES_TRUNCATED_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "incomplete_reason": null,
+        "terminal": "length"
+      },
+      "id": "PROXY_CHAT_INCOMPLETE_TERMINAL_PRESERVED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 1
+      },
+      "id": "PROXY_CHAT_INCOMPLETE_ONE_UPSTREAM_REQUEST",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "incomplete_reason": "max_output_tokens",
+        "terminal": "incomplete"
+      },
+      "id": "PROXY_RESPONSES_INCOMPLETE_TERMINAL_PRESERVED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 1
+      },
+      "id": "PROXY_RESPONSES_INCOMPLETE_ONE_UPSTREAM_REQUEST",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "incomplete_reason": null,
+        "terminal": "max_tokens"
+      },
+      "id": "PROXY_MESSAGES_INCOMPLETE_TERMINAL_PRESERVED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "upstream_count": 1
+      },
+      "id": "PROXY_MESSAGES_INCOMPLETE_ONE_UPSTREAM_REQUEST",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null,
+        "event_types": [
+          "response.created",
+          "response.output_text.delta",
+          "response.completed"
+        ],
+        "success": true,
+        "terminals": [
+          "completed"
+        ]
+      },
+      "id": "PROXY_RESPONSES_STREAM_COMPLETE_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "PROXY_RESPONSES_STREAM_COMPLETE_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "done_sentinel_expected": false,
+        "done_sentinel_written": false,
+        "protocol": "responses"
+      },
+      "id": "PROXY_RESPONSES_STREAM_COMPLETE_PROTOCOL_TERMINAL_FRAMING",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null,
+        "event_types": [
+          "response.created",
+          "response.output_text.delta"
+        ],
+        "success": true,
+        "terminals": []
+      },
+      "id": "PROXY_RESPONSES_STREAM_EOF_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "PROXY_RESPONSES_STREAM_EOF_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null,
+        "event_types": [
+          "response.created",
+          "response.output_text.delta",
+          "response.incomplete"
+        ],
+        "success": true,
+        "terminals": [
+          "incomplete"
+        ]
+      },
+      "id": "PROXY_RESPONSES_STREAM_INCOMPLETE_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "PROXY_RESPONSES_STREAM_INCOMPLETE_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "done_sentinel_expected": false,
+        "done_sentinel_written": false,
+        "protocol": "responses"
+      },
+      "id": "PROXY_RESPONSES_STREAM_INCOMPLETE_PROTOCOL_TERMINAL_FRAMING",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null,
+        "event_types": [
+          "response.created",
+          "response.output_text.delta",
+          "response.failed"
+        ],
+        "success": true,
+        "terminals": []
+      },
+      "id": "PROXY_RESPONSES_STREAM_SSE_ERROR_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "PROXY_RESPONSES_STREAM_SSE_ERROR_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null,
+        "event_types": [
+          "response.created"
+        ],
+        "success": true,
+        "terminals": []
+      },
+      "id": "PROXY_RESPONSES_STREAM_CANCEL_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "PROXY_RESPONSES_STREAM_CANCEL_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "disconnect_delay_ms": 8.963,
+        "observation_window_ms": 2000,
+        "upstream_frames_written_after_downstream_close": 1,
+        "upstream_observed_client_disconnect": true,
+        "upstream_stream_body_finished": false,
+        "upstream_stream_events_written": 4
+      },
+      "id": "PROXY_RESPONSES_STREAM_CANCEL_UPSTREAM_DETECTED_CLIENT_CLOSE",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "producer_exit_delay_ms": 8.967,
+        "producer_exit_reason": "client_disconnect",
+        "upstream_observed_client_disconnect": true,
+        "upstream_stream_body_finished": false,
+        "upstream_stream_events_written": 4
+      },
+      "id": "PROXY_RESPONSES_STREAM_CANCEL_UPSTREAM_STOPPED_AFTER_CLIENT_CLOSE",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "active_upstream_producers_at_observation_end": 0,
+        "cancel_observation_window_ms": 2000,
+        "cancelled_not_reported_complete": true,
+        "downstream_events_consumed": 1,
+        "downstream_response_closed": true,
+        "proxy_liveness_http_2xx_after_cancel": true
+      },
+      "id": "PROXY_RESPONSES_STREAM_CANCEL_CLIENT_CANCEL_RESOURCES_RELEASED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null,
+        "event_types": [
+          "message_start",
+          "content_block_start",
+          "content_block_delta",
+          "content_block_stop",
+          "message_delta",
+          "message_stop"
+        ],
+        "success": true,
+        "terminals": [
+          "end_turn",
+          "message_stop"
+        ]
+      },
+      "id": "PROXY_MESSAGES_STREAM_COMPLETE_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "PROXY_MESSAGES_STREAM_COMPLETE_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "done_sentinel_expected": false,
+        "done_sentinel_written": false,
+        "protocol": "messages"
+      },
+      "id": "PROXY_MESSAGES_STREAM_COMPLETE_PROTOCOL_TERMINAL_FRAMING",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null,
+        "event_types": [
+          "message_start",
+          "content_block_start",
+          "content_block_delta"
+        ],
+        "success": true,
+        "terminals": []
+      },
+      "id": "PROXY_MESSAGES_STREAM_EOF_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "PROXY_MESSAGES_STREAM_EOF_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null,
+        "event_types": [
+          "message_start",
+          "content_block_start",
+          "content_block_delta",
+          "content_block_stop",
+          "message_delta",
+          "message_stop"
+        ],
+        "success": true,
+        "terminals": [
+          "max_tokens",
+          "message_stop"
+        ]
+      },
+      "id": "PROXY_MESSAGES_STREAM_INCOMPLETE_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "PROXY_MESSAGES_STREAM_INCOMPLETE_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "done_sentinel_expected": false,
+        "done_sentinel_written": false,
+        "protocol": "messages"
+      },
+      "id": "PROXY_MESSAGES_STREAM_INCOMPLETE_PROTOCOL_TERMINAL_FRAMING",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": "APIStatusError",
+        "event_types": [
+          "message_start",
+          "content_block_start",
+          "content_block_delta"
+        ],
+        "success": false,
+        "terminals": []
+      },
+      "id": "PROXY_MESSAGES_STREAM_SSE_ERROR_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "PROXY_MESSAGES_STREAM_SSE_ERROR_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null,
+        "event_types": [
+          "message_start"
+        ],
+        "success": true,
+        "terminals": []
+      },
+      "id": "PROXY_MESSAGES_STREAM_CANCEL_PROTOCOL_RESULT",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "configured_proxy_retries": 0,
+        "configured_sdk_max_retries": 0,
+        "upstream_count": 1
+      },
+      "id": "PROXY_MESSAGES_STREAM_CANCEL_ONE_UPSTREAM_REQUEST_NO_RETRY",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "disconnect_delay_ms": 7.855,
+        "observation_window_ms": 2000,
+        "upstream_frames_written_after_downstream_close": 1,
+        "upstream_observed_client_disconnect": true,
+        "upstream_stream_body_finished": false,
+        "upstream_stream_events_written": 3
+      },
+      "id": "PROXY_MESSAGES_STREAM_CANCEL_UPSTREAM_DETECTED_CLIENT_CLOSE",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "producer_exit_delay_ms": 7.86,
+        "producer_exit_reason": "client_disconnect",
+        "upstream_observed_client_disconnect": true,
+        "upstream_stream_body_finished": false,
+        "upstream_stream_events_written": 3
+      },
+      "id": "PROXY_MESSAGES_STREAM_CANCEL_UPSTREAM_STOPPED_AFTER_CLIENT_CLOSE",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "active_upstream_producers_at_observation_end": 0,
+        "cancel_observation_window_ms": 2000,
+        "cancelled_not_reported_complete": true,
+        "downstream_events_consumed": 1,
+        "downstream_response_closed": true,
+        "proxy_liveness_http_2xx_after_cancel": true
+      },
+      "id": "PROXY_MESSAGES_STREAM_CANCEL_CLIENT_CANCEL_RESOURCES_RELEASED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_values_found_in_container_logs": false
+      },
+      "id": "LOGS_NO_SYNTHETIC_CREDENTIAL_VALUES",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "credential_values_found_in_output": false
+      },
+      "id": "CLI_OUTPUT_NO_CREDENTIAL_VALUES",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "litellm": "1.104.2",
+        "litellm_native_stream_proxy": "1.104.2"
+      },
+      "id": "ENV_PINNED_LITELLM_RUNTIME",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "anthropic": "1.13.0",
+        "max_retries_configured": 0,
+        "openai": "3.28.0",
+        "proxy_num_retries_configured": 0
+      },
+      "id": "ENV_SDK_RETRIES_DISABLED",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "error_type": null
+      },
+      "id": "CLEANUP_COMPOSE_DOWN",
+      "status": "PASS"
+    },
+    {
+      "facts": {
+        "containers": 0,
+        "error_type": null,
+        "networks": 0
+      },
+      "id": "CLEANUP_NO_PROJECT_RESOURCES_LEFT",
+      "status": "PASS"
+    }
+  ],
+  "failed_check_count": 1,
+  "failed_check_ids": [
+    "PROXY_UNGUARDED_CHAT_EOF_NOT_SYNTHESIZED_COMPLETE"
+  ],
+  "images": {
+    "db": {
+      "config_image_matches_fixed_reference": true,
+      "container_config_image": "postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea",
+      "container_id": "4deeafd46c3bd234074b72e6853a473d14645eabf9b3cfbf95719778c9fadba9",
+      "container_image_id": "sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea",
+      "expected_fixed_reference": "postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea",
+      "fixed_reference_repo_digests": [
+        "postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea"
+      ],
+      "fixed_reference_resolved_image_id": "sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea",
+      "fixed_reference_resolves_to_runtime_id": true,
+      "runtime_id_matches_image_inspect": true,
+      "runtime_image_inspect_id": "sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea",
+      "runtime_repo_digests": [
+        "postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea"
+      ]
+    },
+    "native_stream_proxy": {
+      "config_image_matches_fixed_reference": true,
+      "container_config_image": "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+      "container_id": "412a1ed179211a1d9c8f7c5d1aadba8596202b0f03b2e21805dba90d3a976c36",
+      "container_image_id": "sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+      "expected_fixed_reference": "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+      "fixed_reference_repo_digests": [
+        "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500"
+      ],
+      "fixed_reference_resolved_image_id": "sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+      "fixed_reference_resolves_to_runtime_id": true,
+      "runtime_id_matches_image_inspect": true,
+      "runtime_image_inspect_id": "sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+      "runtime_repo_digests": [
+        "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500"
+      ]
+    },
+    "proxy": {
+      "config_image_matches_fixed_reference": true,
+      "container_config_image": "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+      "container_id": "8829ec8673edc1d2e964cbae308c48fb949c7d0a28e31442c85c0aef430d80d6",
+      "container_image_id": "sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+      "expected_fixed_reference": "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+      "fixed_reference_repo_digests": [
+        "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500"
+      ],
+      "fixed_reference_resolved_image_id": "sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+      "fixed_reference_resolves_to_runtime_id": true,
+      "runtime_id_matches_image_inspect": true,
+      "runtime_image_inspect_id": "sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+      "runtime_repo_digests": [
+        "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500"
+      ]
+    },
+    "unguarded_proxy": {
+      "config_image_matches_fixed_reference": true,
+      "container_config_image": "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+      "container_id": "a47382dbc1ad96ca0bd09ed1ce05bcffb24c4564a2d85f68a41fe81536425dd3",
+      "container_image_id": "sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+      "expected_fixed_reference": "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+      "fixed_reference_repo_digests": [
+        "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500"
+      ],
+      "fixed_reference_resolved_image_id": "sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+      "fixed_reference_resolves_to_runtime_id": true,
+      "runtime_id_matches_image_inspect": true,
+      "runtime_image_inspect_id": "sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+      "runtime_repo_digests": [
+        "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500"
+      ]
+    },
+    "upstream": {
+      "config_image_matches_fixed_reference": true,
+      "container_config_image": "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+      "container_id": "7d5331dfb85355e0627d746741606a7e529be1ecc196eaaa3ba91b25f95f62c7",
+      "container_image_id": "sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+      "expected_fixed_reference": "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+      "fixed_reference_repo_digests": [
+        "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500"
+      ],
+      "fixed_reference_resolved_image_id": "sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+      "fixed_reference_resolves_to_runtime_id": true,
+      "runtime_id_matches_image_inspect": true,
+      "runtime_image_inspect_id": "sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500",
+      "runtime_repo_digests": [
+        "ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500"
+      ]
+    }
+  },
+  "passed_check_count": 394,
+  "provider_real": "NOT_RUN",
+  "proxy_local": {
+    "admission_cases": [
+      {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "route": "chat",
+        "status_code": 400,
+        "test_id": "T00_GUARD_CHAT_MISSING",
+        "variant": "missing"
+      },
+      {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "route": "chat",
+        "status_code": 400,
+        "test_id": "T00_GUARD_CHAT_NULL",
+        "variant": "null"
+      },
+      {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "route": "chat",
+        "status_code": 400,
+        "test_id": "T00_GUARD_CHAT_EMPTY",
+        "variant": "empty"
+      },
+      {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "route": "chat",
+        "status_code": 400,
+        "test_id": "T00_GUARD_CHAT_WHITESPACE",
+        "variant": "whitespace"
+      },
+      {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "route": "chat",
+        "status_code": 400,
+        "test_id": "T00_GUARD_CHAT_NON_STRING",
+        "variant": "non_string"
+      },
+      {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "route": "chat",
+        "status_code": 400,
+        "test_id": "T00_GUARD_CHAT_METADATA_ONLY",
+        "variant": "metadata_only"
+      },
+      {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "route": "chat",
+        "status_code": 400,
+        "test_id": "T00_GUARD_CHAT_HEADER_ONLY",
+        "variant": "header_only"
+      },
+      {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "route": "responses",
+        "status_code": 400,
+        "test_id": "T00_GUARD_RESPONSES_MISSING",
+        "variant": "missing"
+      },
+      {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "route": "responses",
+        "status_code": 400,
+        "test_id": "T00_GUARD_RESPONSES_NULL",
+        "variant": "null"
+      },
+      {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "route": "responses",
+        "status_code": 400,
+        "test_id": "T00_GUARD_RESPONSES_EMPTY",
+        "variant": "empty"
+      },
+      {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "route": "responses",
+        "status_code": 400,
+        "test_id": "T00_GUARD_RESPONSES_WHITESPACE",
+        "variant": "whitespace"
+      },
+      {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "route": "responses",
+        "status_code": 400,
+        "test_id": "T00_GUARD_RESPONSES_NON_STRING",
+        "variant": "non_string"
+      },
+      {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "route": "responses",
+        "status_code": 400,
+        "test_id": "T00_GUARD_RESPONSES_METADATA_ONLY",
+        "variant": "metadata_only"
+      },
+      {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "route": "responses",
+        "status_code": 400,
+        "test_id": "T00_GUARD_RESPONSES_HEADER_ONLY",
+        "variant": "header_only"
+      },
+      {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "route": "messages",
+        "status_code": 400,
+        "test_id": "T00_GUARD_MESSAGES_MISSING",
+        "variant": "missing"
+      },
+      {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "route": "messages",
+        "status_code": 400,
+        "test_id": "T00_GUARD_MESSAGES_NULL",
+        "variant": "null"
+      },
+      {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "route": "messages",
+        "status_code": 400,
+        "test_id": "T00_GUARD_MESSAGES_EMPTY",
+        "variant": "empty"
+      },
+      {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "route": "messages",
+        "status_code": 400,
+        "test_id": "T00_GUARD_MESSAGES_WHITESPACE",
+        "variant": "whitespace"
+      },
+      {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "route": "messages",
+        "status_code": 400,
+        "test_id": "T00_GUARD_MESSAGES_NON_STRING",
+        "variant": "non_string"
+      },
+      {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "route": "messages",
+        "status_code": 400,
+        "test_id": "T00_GUARD_MESSAGES_METADATA_ONLY",
+        "variant": "metadata_only"
+      },
+      {
+        "error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "expected_error_code": "BYOK_PROVIDER_KEY_REQUIRED",
+        "route": "messages",
+        "status_code": 400,
+        "test_id": "T00_GUARD_MESSAGES_HEADER_ONLY",
+        "variant": "header_only"
+      }
+    ],
+    "chat": {
+      "tenant-a": {
+        "finish_reason": "stop",
+        "model_alias": "t00-chat",
+        "success": true
+      },
+      "tenant-b": {
+        "finish_reason": "stop",
+        "model_alias": "t00-chat",
+        "success": true
+      }
+    },
+    "eof": {
+      "error_type": null,
+      "events": 3,
+      "finish_reasons": [
+        "stop"
+      ],
+      "normal_sdk_end": true,
+      "status_code": null,
+      "success": true
+    },
+    "error_cases": {
+      "chat": {
+        "http_error": {
+          "error_type": "InternalServerError",
+          "status_code": 503,
+          "success": false
+        },
+        "timeout": {
+          "error_type": "APITimeoutError",
+          "status_code": null,
+          "success": false
+        },
+        "truncated": {
+          "error_type": "InternalServerError",
+          "status_code": 500,
+          "success": false
+        }
+      },
+      "messages": {
+        "http_error": {
+          "error_type": "InternalServerError",
+          "status_code": 503,
+          "success": false
+        },
+        "timeout": {
+          "error_type": "APITimeoutError",
+          "status_code": null,
+          "success": false
+        },
+        "truncated": {
+          "error_type": "InternalServerError",
+          "status_code": 500,
+          "success": false
+        }
+      },
+      "responses": {
+        "http_error": {
+          "error_type": "InternalServerError",
+          "status_code": 503,
+          "success": false
+        },
+        "timeout": {
+          "error_type": "APITimeoutError",
+          "status_code": null,
+          "success": false
+        },
+        "truncated": {
+          "error_type": "InternalServerError",
+          "status_code": 500,
+          "success": false
+        }
+      }
+    },
+    "incomplete_cases": {
+      "chat": {
+        "success": true,
+        "terminal": "length"
+      },
+      "messages": {
+        "success": true,
+        "terminal": "max_tokens"
+      },
+      "responses": {
+        "incomplete_reason": "max_output_tokens",
+        "success": true,
+        "terminal": "incomplete"
+      }
+    },
+    "invalid_tools": {
+      "chat_invalid": {
+        "dispatched": false,
+        "rejection": "invalid_json",
+        "success": true,
+        "test_id": "T00_PROXY_CHAT_TOOL_INVALID_A"
+      },
+      "chat_malformed": {
+        "dispatched": false,
+        "rejection": "partial_json",
+        "success": true,
+        "test_id": "T00_PROXY_CHAT_TOOL_MALFORMED_A"
+      },
+      "chat_unknown": {
+        "dispatched": false,
+        "rejection": "not_allowlisted",
+        "success": true,
+        "test_id": "T00_PROXY_CHAT_TOOL_UNKNOWN_A"
+      },
+      "messages_invalid": {
+        "dispatched": false,
+        "rejection": "invalid_argument_shape",
+        "success": true,
+        "test_id": "T00_PROXY_MESSAGES_TOOL_INVALID_A"
+      },
+      "messages_malformed": {
+        "dispatched": false,
+        "rejection": "invalid_argument_shape",
+        "success": true,
+        "test_id": "T00_PROXY_MESSAGES_TOOL_MALFORMED_A"
+      },
+      "messages_unknown": {
+        "dispatched": false,
+        "rejection": "not_allowlisted",
+        "success": true,
+        "test_id": "T00_PROXY_MESSAGES_TOOL_UNKNOWN_A"
+      },
+      "responses_invalid": {
+        "dispatched": false,
+        "rejection": "invalid_json",
+        "success": true,
+        "test_id": "T00_PROXY_RESPONSES_TOOL_INVALID_A"
+      },
+      "responses_malformed": {
+        "dispatched": false,
+        "rejection": "partial_json",
+        "success": true,
+        "test_id": "T00_PROXY_RESPONSES_TOOL_MALFORMED_A"
+      },
+      "responses_unknown": {
+        "dispatched": false,
+        "rejection": "not_allowlisted",
+        "success": true,
+        "test_id": "T00_PROXY_RESPONSES_TOOL_UNKNOWN_A"
+      }
+    },
+    "messages": {
+      "stop_reason": "end_turn",
+      "success": true
+    },
+    "responses": {
+      "model_alias": "t00-chat",
+      "status": "completed",
+      "success": true
+    },
+    "responses_foreign_id_case": {
+      "continuation_in_public": false,
+      "key_in_public": false,
+      "public_output": {
+        "text": "[REDACTED_SYNTHETIC_OUTPUT_TEXT]"
+      },
+      "success": true,
+      "tool_dispatch_outcomes": [
+        "dispatched",
+        "dispatched"
+      ]
+    },
+    "stream_cases": {
+      "messages": {
+        "cancel": {
+          "active_upstream_producers_at_observation_end": 0,
+          "cancel_observation_window_ms": 2000,
+          "canceled_after_first_event": true,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": 9091326492225,
+          "event_count": 1,
+          "event_types": [
+            "message_start"
+          ],
+          "outcome": "cancelled",
+          "proxy_liveness_http_2xx_after_cancel": true,
+          "stream_complete": false,
+          "success": true,
+          "terminals": [],
+          "upstream_cancel_fixture_frames_written": 2,
+          "upstream_disconnect_delay_ms": 7.855,
+          "upstream_disconnect_monotonic_ns": 9091334346829,
+          "upstream_disconnect_observed": true,
+          "upstream_disconnect_within_observation_window": true,
+          "upstream_frames_written_after_downstream_close": 1,
+          "upstream_frames_written_at_disconnect": 3,
+          "upstream_producer_exit_delay_ms": 7.86,
+          "upstream_producer_exit_monotonic_ns": 9091334352008,
+          "upstream_producer_exit_reason": "client_disconnect",
+          "upstream_producer_exited_within_observation_window": true,
+          "upstream_stream_body_finished": false
+        },
+        "complete": {
+          "canceled_after_first_event": false,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": null,
+          "event_count": 6,
+          "event_types": [
+            "message_start",
+            "content_block_start",
+            "content_block_delta",
+            "content_block_stop",
+            "message_delta",
+            "message_stop"
+          ],
+          "outcome": "stream_consumed",
+          "stream_complete": true,
+          "success": true,
+          "terminals": [
+            "end_turn",
+            "message_stop"
+          ]
+        },
+        "eof": {
+          "canceled_after_first_event": false,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": null,
+          "event_count": 3,
+          "event_types": [
+            "message_start",
+            "content_block_start",
+            "content_block_delta"
+          ],
+          "outcome": "stream_consumed",
+          "stream_complete": true,
+          "success": true,
+          "terminals": []
+        },
+        "incomplete": {
+          "canceled_after_first_event": false,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": null,
+          "event_count": 6,
+          "event_types": [
+            "message_start",
+            "content_block_start",
+            "content_block_delta",
+            "content_block_stop",
+            "message_delta",
+            "message_stop"
+          ],
+          "outcome": "stream_consumed",
+          "stream_complete": true,
+          "success": true,
+          "terminals": [
+            "max_tokens",
+            "message_stop"
+          ]
+        },
+        "sse_error": {
+          "canceled_after_first_event": false,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": null,
+          "error_type": "APIStatusError",
+          "event_count": 3,
+          "event_types": [
+            "message_start",
+            "content_block_start",
+            "content_block_delta"
+          ],
+          "status_code": 200,
+          "success": false,
+          "terminals": []
+        }
+      },
+      "responses": {
+        "cancel": {
+          "active_upstream_producers_at_observation_end": 0,
+          "cancel_observation_window_ms": 2000,
+          "canceled_after_first_event": true,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": 9091129338112,
+          "event_count": 1,
+          "event_types": [
+            "response.created"
+          ],
+          "outcome": "cancelled",
+          "proxy_liveness_http_2xx_after_cancel": true,
+          "stream_complete": false,
+          "success": true,
+          "terminals": [],
+          "upstream_cancel_fixture_frames_written": 3,
+          "upstream_disconnect_delay_ms": 8.963,
+          "upstream_disconnect_monotonic_ns": 9091138301340,
+          "upstream_disconnect_observed": true,
+          "upstream_disconnect_within_observation_window": true,
+          "upstream_frames_written_after_downstream_close": 1,
+          "upstream_frames_written_at_disconnect": 4,
+          "upstream_producer_exit_delay_ms": 8.967,
+          "upstream_producer_exit_monotonic_ns": 9091138304670,
+          "upstream_producer_exit_reason": "client_disconnect",
+          "upstream_producer_exited_within_observation_window": true,
+          "upstream_stream_body_finished": false
+        },
+        "complete": {
+          "canceled_after_first_event": false,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": null,
+          "event_count": 3,
+          "event_types": [
+            "response.created",
+            "response.output_text.delta",
+            "response.completed"
+          ],
+          "outcome": "stream_consumed",
+          "stream_complete": true,
+          "success": true,
+          "terminals": [
+            "completed"
+          ]
+        },
+        "eof": {
+          "canceled_after_first_event": false,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": null,
+          "event_count": 2,
+          "event_types": [
+            "response.created",
+            "response.output_text.delta"
+          ],
+          "outcome": "stream_consumed",
+          "stream_complete": true,
+          "success": true,
+          "terminals": []
+        },
+        "incomplete": {
+          "canceled_after_first_event": false,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": null,
+          "event_count": 3,
+          "event_types": [
+            "response.created",
+            "response.output_text.delta",
+            "response.incomplete"
+          ],
+          "outcome": "stream_consumed",
+          "stream_complete": true,
+          "success": true,
+          "terminals": [
+            "incomplete"
+          ]
+        },
+        "sse_error": {
+          "canceled_after_first_event": false,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": null,
+          "event_count": 3,
+          "event_types": [
+            "response.created",
+            "response.output_text.delta",
+            "response.failed"
+          ],
+          "outcome": "stream_consumed",
+          "stream_complete": true,
+          "success": true,
+          "terminals": []
+        }
+      }
+    },
+    "stream_denials": [
+      {
+        "error_code": "T00_STREAMING_DISABLED",
+        "route": "chat",
+        "status_code": 400,
+        "test_id": "T00_GUARD_CHAT_STREAM_DENIED"
+      }
+    ],
+    "tool_roundtrips": {
+      "chat": {
+        "continuation_in_public": false,
+        "key_in_public": false,
+        "public_output": {
+          "text": "[REDACTED_SYNTHETIC_OUTPUT_TEXT]"
+        },
+        "success": true,
+        "tool_dispatch_outcomes": [
+          "dispatched",
+          "dispatched"
+        ]
+      },
+      "messages": {
+        "continuation_in_public": false,
+        "key_in_public": false,
+        "public_output": {
+          "text": "[REDACTED_SYNTHETIC_OUTPUT_TEXT]"
+        },
+        "success": true,
+        "tool_dispatch_outcomes": [
+          "dispatched",
+          "dispatched"
+        ]
+      },
+      "responses": {
+        "continuation_in_public": false,
+        "key_in_public": false,
+        "public_output": {
+          "text": "[REDACTED_SYNTHETIC_OUTPUT_TEXT]"
+        },
+        "success": true,
+        "tool_dispatch_outcomes": [
+          "dispatched",
+          "dispatched"
+        ]
+      }
+    },
+    "unguarded_missing_provider": {
+      "status_code": 401
+    },
+    "wrong_model": {
+      "error_type": "PermissionDeniedError",
+      "status_code": 403,
+      "success": false
+    },
+    "wrong_project": {
+      "error_type": "AuthenticationError",
+      "status_code": 401,
+      "success": false
+    }
+  },
+  "runtime_versions": {
+    "docker_compose": "5.5.1",
+    "docker_server": "29.7.2",
+    "litellm": "1.104.2",
+    "litellm_native_stream_proxy": "1.104.2"
+  },
+  "scope": "PROBE_SUBSET_ONLY",
+  "sdk_local": {
+    "chat": {
+      "complete_events": 3,
+      "complete_finish_reasons": [
+        "stop"
+      ],
+      "eof_events": 2,
+      "eof_finish_reasons": []
+    },
+    "error_cases": {
+      "chat": {
+        "http_error": {
+          "error_type": "InternalServerError",
+          "status_code": 503,
+          "success": false
+        },
+        "timeout": {
+          "error_type": "APITimeoutError",
+          "status_code": null,
+          "success": false
+        },
+        "truncated": {
+          "error_type": "APIConnectionError",
+          "status_code": null,
+          "success": false
+        }
+      },
+      "messages": {
+        "http_error": {
+          "error_type": "InternalServerError",
+          "status_code": 503,
+          "success": false
+        },
+        "timeout": {
+          "error_type": "APITimeoutError",
+          "status_code": null,
+          "success": false
+        },
+        "truncated": {
+          "error_type": "APIConnectionError",
+          "status_code": null,
+          "success": false
+        }
+      },
+      "responses": {
+        "http_error": {
+          "error_type": "InternalServerError",
+          "status_code": 503,
+          "success": false
+        },
+        "timeout": {
+          "error_type": "APITimeoutError",
+          "status_code": null,
+          "success": false
+        },
+        "truncated": {
+          "error_type": "APIConnectionError",
+          "status_code": null,
+          "success": false
+        }
+      }
+    },
+    "incomplete_cases": {
+      "chat": {
+        "success": true,
+        "terminal": "length"
+      },
+      "messages": {
+        "success": true,
+        "terminal": "max_tokens"
+      },
+      "responses": {
+        "incomplete_reason": "max_output_tokens",
+        "success": true,
+        "terminal": "incomplete"
+      }
+    },
+    "messages": {
+      "complete_events": [
+        "message_start",
+        "content_block_start",
+        "content_block_delta",
+        "text",
+        "content_block_stop",
+        "message_delta",
+        "message_stop"
+      ],
+      "complete_stop_reason": "end_turn",
+      "eof_events": [
+        "message_start",
+        "content_block_start",
+        "content_block_delta",
+        "text"
+      ],
+      "eof_stop_reason": null
+    },
+    "responses": {
+      "complete_events": [
+        "response.created",
+        "response.output_text.delta",
+        "response.completed"
+      ],
+      "complete_has_terminal": true,
+      "eof_events": [
+        "response.created",
+        "response.output_text.delta"
+      ],
+      "eof_has_terminal": false
+    },
+    "stream_cases": {
+      "chat": {
+        "cancel": {
+          "active_upstream_producers_at_observation_end": 0,
+          "cancel_observation_window_ms": 2000,
+          "canceled_after_first_event": true,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": 9087874270303,
+          "event_count": 1,
+          "event_types": [
+            "chat.chunk"
+          ],
+          "outcome": "cancelled",
+          "proxy_liveness_http_2xx_after_cancel": null,
+          "stream_complete": false,
+          "success": true,
+          "terminals": [],
+          "upstream_cancel_fixture_frames_written": 2,
+          "upstream_disconnect_delay_ms": 9.888,
+          "upstream_disconnect_monotonic_ns": 9087884158747,
+          "upstream_disconnect_observed": true,
+          "upstream_disconnect_within_observation_window": true,
+          "upstream_frames_written_after_downstream_close": 1,
+          "upstream_frames_written_at_disconnect": 3,
+          "upstream_producer_exit_delay_ms": 9.919,
+          "upstream_producer_exit_monotonic_ns": 9087884189568,
+          "upstream_producer_exit_reason": "client_disconnect",
+          "upstream_producer_exited_within_observation_window": true,
+          "upstream_stream_body_finished": false
+        },
+        "complete": {
+          "canceled_after_first_event": false,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": null,
+          "event_count": 3,
+          "event_types": [
+            "chat.chunk",
+            "chat.chunk",
+            "chat.chunk"
+          ],
+          "outcome": "stream_consumed",
+          "stream_complete": true,
+          "success": true,
+          "terminals": [
+            "stop"
+          ]
+        },
+        "eof": {
+          "canceled_after_first_event": false,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": null,
+          "event_count": 2,
+          "event_types": [
+            "chat.chunk",
+            "chat.chunk"
+          ],
+          "outcome": "stream_consumed",
+          "stream_complete": true,
+          "success": true,
+          "terminals": []
+        },
+        "incomplete": {
+          "canceled_after_first_event": false,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": null,
+          "event_count": 3,
+          "event_types": [
+            "chat.chunk",
+            "chat.chunk",
+            "chat.chunk"
+          ],
+          "outcome": "stream_consumed",
+          "stream_complete": true,
+          "success": true,
+          "terminals": [
+            "length"
+          ]
+        },
+        "sse_error": {
+          "canceled_after_first_event": false,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": null,
+          "error_type": "APIError",
+          "event_count": 2,
+          "event_types": [
+            "chat.chunk",
+            "chat.chunk"
+          ],
+          "status_code": null,
+          "success": false,
+          "terminals": []
+        }
+      },
+      "messages": {
+        "cancel": {
+          "active_upstream_producers_at_observation_end": 0,
+          "cancel_observation_window_ms": 2000,
+          "canceled_after_first_event": true,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": 9088007483664,
+          "event_count": 1,
+          "event_types": [
+            "message_start"
+          ],
+          "outcome": "cancelled",
+          "proxy_liveness_http_2xx_after_cancel": null,
+          "stream_complete": false,
+          "success": true,
+          "terminals": [],
+          "upstream_cancel_fixture_frames_written": 2,
+          "upstream_disconnect_delay_ms": 9.887,
+          "upstream_disconnect_monotonic_ns": 9088017370820,
+          "upstream_disconnect_observed": true,
+          "upstream_disconnect_within_observation_window": true,
+          "upstream_frames_written_after_downstream_close": 1,
+          "upstream_frames_written_at_disconnect": 3,
+          "upstream_producer_exit_delay_ms": 9.901,
+          "upstream_producer_exit_monotonic_ns": 9088017384648,
+          "upstream_producer_exit_reason": "client_disconnect",
+          "upstream_producer_exited_within_observation_window": true,
+          "upstream_stream_body_finished": false
+        },
+        "complete": {
+          "canceled_after_first_event": false,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": null,
+          "event_count": 6,
+          "event_types": [
+            "message_start",
+            "content_block_start",
+            "content_block_delta",
+            "content_block_stop",
+            "message_delta",
+            "message_stop"
+          ],
+          "outcome": "stream_consumed",
+          "stream_complete": true,
+          "success": true,
+          "terminals": [
+            "end_turn",
+            "message_stop"
+          ]
+        },
+        "eof": {
+          "canceled_after_first_event": false,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": null,
+          "event_count": 3,
+          "event_types": [
+            "message_start",
+            "content_block_start",
+            "content_block_delta"
+          ],
+          "outcome": "stream_consumed",
+          "stream_complete": true,
+          "success": true,
+          "terminals": []
+        },
+        "incomplete": {
+          "canceled_after_first_event": false,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": null,
+          "event_count": 6,
+          "event_types": [
+            "message_start",
+            "content_block_start",
+            "content_block_delta",
+            "content_block_stop",
+            "message_delta",
+            "message_stop"
+          ],
+          "outcome": "stream_consumed",
+          "stream_complete": true,
+          "success": true,
+          "terminals": [
+            "max_tokens",
+            "message_stop"
+          ]
+        },
+        "sse_error": {
+          "canceled_after_first_event": false,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": null,
+          "error_type": "APIStatusError",
+          "event_count": 3,
+          "event_types": [
+            "message_start",
+            "content_block_start",
+            "content_block_delta"
+          ],
+          "status_code": 200,
+          "success": false,
+          "terminals": []
+        }
+      },
+      "responses": {
+        "cancel": {
+          "active_upstream_producers_at_observation_end": 0,
+          "cancel_observation_window_ms": 2000,
+          "canceled_after_first_event": true,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": 9087942404700,
+          "event_count": 1,
+          "event_types": [
+            "response.created"
+          ],
+          "outcome": "cancelled",
+          "proxy_liveness_http_2xx_after_cancel": null,
+          "stream_complete": false,
+          "success": true,
+          "terminals": [],
+          "upstream_cancel_fixture_frames_written": 2,
+          "upstream_disconnect_delay_ms": 9.983,
+          "upstream_disconnect_monotonic_ns": 9087952387316,
+          "upstream_disconnect_observed": true,
+          "upstream_disconnect_within_observation_window": true,
+          "upstream_frames_written_after_downstream_close": 1,
+          "upstream_frames_written_at_disconnect": 3,
+          "upstream_producer_exit_delay_ms": 10.004,
+          "upstream_producer_exit_monotonic_ns": 9087952408850,
+          "upstream_producer_exit_reason": "client_disconnect",
+          "upstream_producer_exited_within_observation_window": true,
+          "upstream_stream_body_finished": false
+        },
+        "complete": {
+          "canceled_after_first_event": false,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": null,
+          "event_count": 3,
+          "event_types": [
+            "response.created",
+            "response.output_text.delta",
+            "response.completed"
+          ],
+          "outcome": "stream_consumed",
+          "stream_complete": true,
+          "success": true,
+          "terminals": [
+            "completed"
+          ]
+        },
+        "eof": {
+          "canceled_after_first_event": false,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": null,
+          "event_count": 2,
+          "event_types": [
+            "response.created",
+            "response.output_text.delta"
+          ],
+          "outcome": "stream_consumed",
+          "stream_complete": true,
+          "success": true,
+          "terminals": []
+        },
+        "incomplete": {
+          "canceled_after_first_event": false,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": null,
+          "event_count": 3,
+          "event_types": [
+            "response.created",
+            "response.output_text.delta",
+            "response.incomplete"
+          ],
+          "outcome": "stream_consumed",
+          "stream_complete": true,
+          "success": true,
+          "terminals": [
+            "incomplete"
+          ]
+        },
+        "sse_error": {
+          "canceled_after_first_event": false,
+          "client_response_closed": true,
+          "downstream_close_monotonic_ns": null,
+          "error_type": "APIError",
+          "event_count": 2,
+          "event_types": [
+            "response.created",
+            "response.output_text.delta"
+          ],
+          "status_code": null,
+          "success": false,
+          "terminals": []
+        }
+      }
+    },
+    "tool_roundtrips": {
+      "chat": {
+        "continuation_in_public": false,
+        "key_in_public": false,
+        "public_output": {
+          "text": "[REDACTED_SYNTHETIC_OUTPUT_TEXT]"
+        },
+        "success": true,
+        "tool_dispatch_outcomes": [
+          "dispatched",
+          "dispatched"
+        ]
+      },
+      "messages": {
+        "continuation_in_public": false,
+        "key_in_public": false,
+        "public_output": {
+          "text": "[REDACTED_SYNTHETIC_OUTPUT_TEXT]"
+        },
+        "success": true,
+        "tool_dispatch_outcomes": [
+          "dispatched",
+          "dispatched"
+        ]
+      },
+      "responses": {
+        "continuation_in_public": false,
+        "key_in_public": false,
+        "public_output": {
+          "text": "[REDACTED_SYNTHETIC_OUTPUT_TEXT]"
+        },
+        "success": true,
+        "tool_dispatch_outcomes": [
+          "dispatched",
+          "dispatched"
+        ]
+      }
+    }
+  },
+  "sdk_versions": {
+    "anthropic": "1.13.0",
+    "httpx2": "2.13.1",
+    "openai": "3.28.0",
+    "python": "3.14.8"
+  },
+  "status": "FAIL",
+  "temporary_resources_started": true,
+  "uncovered": [
+    "old chat/research/translation regression baseline",
+    "PROVIDER_REAL compatibility"
+  ]
+}

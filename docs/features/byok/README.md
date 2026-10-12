@@ -1,8 +1,8 @@
 # BYOK · 个人 API Key 与模型配置
 
-> 本目录记录已确认的 BYOK 产品设计和任务契约。当前功能分支基线为 feat/byok-user-api-keys@ea2ce55ae22e19e1604e88031b824b68f2666cec；本次只更新独立分支上的文档，不改业务代码、不创建或部署共享网关、不调用真实 provider。
+> 本目录记录已确认的 BYOK 产品设计和任务契约。当前功能分支基线为 feat/byok-user-api-keys@ea2ce55ae22e19e1604e88031b824b68f2666cec。T00 本地协议验真、镜像签名和现有业务 CI 均已通过；最新隔离合成复测为 407 PASS / 0 FAIL，T00 状态 PASS。新增 DeepSeek 专属参数的本地 LiteLLM 路径仅连受控合成上游；受保护 Chat streaming 路由仍关闭。用户已报告独立 DeepSeek 直连基线 PASS（1 次请求），不代表真实 LiteLLM/provider 兼容；经 LiteLLM 的真实 T00-11 仍 NOT_RUN。T00-G 运维交付与 T01 的 worker 在途提交拦截尚未验收，状态依赖见[任务总表](tasks/README.md)。当前分支不创建或部署共享生产网关，也未发起真实 provider 调用。
 
-- 设计状态：页面方向已确认；T00–T14 与 T00-G Task/Test 契约仍为 PLANNED / NOT_RUN。
+- 设计状态：页面方向已确认；T00 本地 SDK/Proxy 门槛、锁定 LiteLLM 镜像签名和现有业务 CI 均已通过，状态 PASS。Chat EOF 风险已通过拒绝该 streaming 路由隔离；真实 provider 兼容仍未运行。T00-G 是独立运维交付卡；T01 因 worker 在途提交拦截尚未集成而 BLOCKED；后续任务状态见各 Task/Test 记录。
 - 架构：业务后端经独立 LiteLLM Proxy 访问 provider；用户 provider Key、业务项目 virtual key、Proxy master key 分别隔离。
 - 首批六个 UI 预设为 OpenAI、Claude、DeepSeek、GLM、Qwen、Kimi，不构成 Proxy 支持上限；首轮 PROVIDER_REAL 只允许 DeepSeek。
 - 业务项目继续拥有网站用户、个人 Key 加密存储、任务幂等/恢复/取消、事务和用户私有结果。Proxy 负责 provider 协议、受信路由、项目级受限虚拟 Key、限制和脱敏 usage。

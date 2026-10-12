@@ -18,7 +18,7 @@
 - SDK_LOCAL：真实官方客户端 SDK 直接连接受控合成上游；只证明客户端序列化/解析。
 - PROXY_LOCAL：固定 LiteLLM Proxy + 实际客户端 + 受控合成上游；证明集成链路，不代表任何真实厂商可用。
 - PROVIDER_REAL：经共享 Proxy 对指定真实厂商、模型、地域执行有界真实调用。首轮仅 DeepSeek，其他厂商不可从 PROXY_LOCAL 推导兼容。
-- 当前所有新 SDK_LOCAL、PROXY_LOCAL、PROVIDER_REAL、独立网关运维和用户 UAT 状态均为 NOT_RUN。此前 T00 SDK 任务准备记录的旧业务回归为 219 passed / 3 warnings，只作旧测试基线，不能记作 Proxy 或 provider 验收。
+- 当前 T00 的 SDK_LOCAL / PROXY_LOCAL 有隔离合成子集证据：最新复测 L 为 407 PASS / 0 FAIL，CLI 状态 PARTIAL；T00-02、T00-06、T00-07 已通过本地验收，Chat EOF 风险仍保留在 raw 负控中，受保护路由验证为上游前拒绝。新增 `deepseek/deepseek-flash` 合成路由通过 LiteLLM v1.104.2、本地 upstream 与官方 OpenAI SDK 验证了 `thinking: disabled`、JSON 输出和请求级 Key；没有请求真实 provider。镜像由官方固定公钥验签通过，签名 digest 与运行镜像 pin 一致。当前分支最新两次 CI 均为 838 passed / 2 warnings，frontend、backend 与 release gates 全部通过，因此 T00 状态 PASS。用户报告的 DeepSeek 直连基线为 PASS（1 次），不代表真实 LiteLLM/provider 兼容；经 LiteLLM 的 T00-11 仍是可选 NOT_RUN。其他 provider、T00-G 独立运维和最终 UAT 仍为 NOT_RUN。此前 T00 SDK 任务准备记录的旧业务回归为 219 passed / 3 warnings，只作历史业务基线，不能记作当前 Proxy 或 provider 验收。
 
 ## 任务顺序与独立性
 
@@ -56,4 +56,4 @@
 
 只允许合成凭据进行 SDK_LOCAL/PROXY_LOCAL。可选早期 DeepSeek 文本冒烟须在 PROXY_LOCAL 全过后，经用户单独确认确切模型、安全合成输入、请求数/输出 token 上限和最低预算，再由用户本人终端隐藏输入 Key；不依赖 T00-G，也不替代 T13。不得把 Key 发到聊天、日志、GitHub 或提交。
 
-本轮仅更新文档，不创建服务仓库/配置、不部署或操作线上服务。后续 T00 只做本地 Proxy+SDK 技术验真；T00-G 可在隔离测试环境交付共享 Proxy 配置与运维验收，但不做生产 go-live，生产发布归 T14。T00/G、每张 Task 和 Test 分别记录精确 SHA、固定镜像/digest、SDK/Python 版本、脱敏执行日志、测试 diff、PROXY_LOCAL / PROVIDER_REAL / UAT 状态及未验证项。文档审核 PR 以 feat/byok-user-api-keys 为 base，不合并。
+此前设计文档回合只更新文档；随后 T00 独立工作区实现并运行了本地 Proxy+SDK 技术探针，未创建共享生产服务、未部署或操作线上环境。后续 T00 仍限于本地 Proxy+SDK 验真；T00-G 可在隔离测试环境交付共享 Proxy 配置与运维验收，但不做生产 go-live，生产发布归 T14。T00/G、每张 Task 和 Test 分别记录精确 SHA、固定镜像/digest、SDK/Python 版本、脱敏执行日志、测试 diff、PROXY_LOCAL / PROVIDER_REAL / UAT 状态及未验证项。文档审核 PR 以 feat/byok-user-api-keys 为 base，不合并。
