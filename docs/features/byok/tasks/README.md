@@ -1,11 +1,12 @@
 # BYOK 功能开发任务（T00–T14）
 
-**任务已拆分；全部 PLANNED，尚未实施或验收。** 一次只交给 Codex 一张业务卡。T00 是本地共享网关技术门槛；T00-G 是独立的共享网关运维子卡。T13 分为六个模型/厂商验证子卡。每张 Task 与 [同编号 Test 契约](../tests/README.md) 配对；T00-G 是新增的运维测试契约。
+**R0 是 BYOK 堆叠合并前独立修复的 SQLite worker 稳定性门槛。** 业务卡仍按一次一张推进。T00 是本地共享网关技术门槛；T00-G 是独立的共享网关运维子卡。T13 分为六个模型/厂商验证子卡。每张 Task 与 [同编号 Test 契约](../tests/README.md) 配对；T00-G 是新增的运维测试契约。
 
 基线：`feat/byok-user-api-keys@ea2ce55ae22e19e1604e88031b824b68f2666cec`（执行当天仍须核对最新远端 HEAD）。本系列 Task 尚未在该 SHA 上实施；工作分支不得从更早功能分支重置。
 
 | Task | 单次可验收的功能/门槛 | 依赖 | 体量 | 状态 |
 | --- | --- | --- | --- | --- |
+| [R0 SQLite worker 锁争用稳定性](R0-sqlite-stability.md) | 按真实 SQLite BUSY/LOCKED 错误码有限重试 DB-only 事务；保留 SSE 断连成功断言；共享缓存与文件型 WAL 回归稳定。 | 无；先于 BYOK 堆叠分支验收 | S · 可靠性门槛 | READY FOR REVIEW |
 | [T00 本地共享网关技术验真](T00-sdk-protocol.md) | 锁定的真实 LiteLLM Proxy + 官方客户端 SDK + 受控 HTTP 上游跑通三协议、原始终态、工具往返、故障、Key 隔离、关闭与无重试；本地通过后可单独申请一次 DeepSeek 早期文本冒烟。 | 无 | S·技术门槛 | PLANNED |
 | [T00-G 共享网关运维交付](T00-gateway-service.md) | 独立 Proxy/Postgres 服务配置、项目 virtual key、模型隔离、脱敏用量、第二个通用 CLI 消费者与 NewsHub 启停隔离、备份恢复、升级回退。此卡不部署于本次文档 PR。 | T00 | 运维子卡 | PLANNED |
 | [T01 个人 Key 连接增删改停](T01-credentials.md) | 在正式 /settings/ai 页面管理网站用户自己的供应商 Key，掩码、替换、停用、删除，跨刷新恢复。 | 无 | M | PLANNED |

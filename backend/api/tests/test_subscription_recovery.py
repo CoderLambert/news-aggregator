@@ -2,6 +2,8 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+import sqlite3
+import tempfile
 import threading
 import time
 import uuid
@@ -9,7 +11,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.db import OperationalError, close_old_connections
+from django.db import IntegrityError, OperationalError, close_old_connections
 from django.utils import timezone
 from rest_framework.test import APIClient, APIRequestFactory
 
@@ -100,6 +102,125 @@ def wait_for_terminal(task_id, *, timeout=5):
     return ChatGPTTranslationTask.objects.filter(pk=task_id).first()
 
 
+def test_sqlite_lock_retry_recovers_file_backed_wal_writer(monkeypatch):
+    monkeypatch.setattr(jobs, 'SQLITE_LOCK_RETRY_DELAYS', (0.08, 0.16))
+    with tempfile.TemporaryDirectory(prefix='translation-wal-lock-') as temp_dir:
+        db_path = f'{temp_dir}/production-like.sqlite3'
+        holder = sqlite3.connect(db_path, isolation_level=None, check_same_thread=False)
+        writer = sqlite3.connect(db_path, isolation_level=None, timeout=0)
+        try:
+            holder.execute('PRAGMA journal_mode=WAL')
+            holder.execute('CREATE TABLE lock_probe (value INTEGER NOT NULL)')
+            holder.execute('INSERT INTO lock_probe (value) VALUES (0)')
+            holder.execute('BEGIN IMMEDIATE')
+            holder.execute('UPDATE lock_probe SET value = value + 1')
+
+            def release_writer():
+                time.sleep(0.02)
+                holder.execute('COMMIT')
+
+            releaser = threading.Thread(target=release_writer)
+            releaser.start()
+            attempts = 0
+
+            def update_with_django_error_shape():
+                nonlocal attempts
+                attempts += 1
+                try:
+                    writer.execute('UPDATE lock_probe SET value = value + 1')
+                except sqlite3.OperationalError as sqlite_error:
+                    raise OperationalError(str(sqlite_error)) from sqlite_error
+
+            jobs._retry_sqlite_lock(update_with_django_error_shape, label='file-backed WAL test')
+            releaser.join(timeout=2)
+            assert not releaser.is_alive()
+            assert attempts == 2
+            assert writer.execute('SELECT value FROM lock_probe').fetchone()[0] == 2
+        finally:
+            if holder.in_transaction:
+                holder.execute('ROLLBACK')
+            writer.close()
+            holder.close()
+
+
+def test_sqlite_lock_retry_retries_only_explicit_busy_or_locked_codes(monkeypatch):
+    monkeypatch.setattr(jobs.time, 'sleep', lambda _delay: None)
+    lock_code = getattr(sqlite3, 'SQLITE_LOCKED_SHAREDCACHE', 262)
+    driver_error = sqlite3.OperationalError('database table is locked')
+    driver_error.sqlite_errorcode = lock_code
+    driver_error.sqlite_errorname = 'SQLITE_LOCKED_SHAREDCACHE'
+    error = OperationalError('database table is locked')
+    attempts = 0
+
+    def succeeds_after_two_lock_results():
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise error from driver_error
+        return 'committed'
+
+    assert jobs._retry_sqlite_lock(
+        succeeds_after_two_lock_results, label='explicit lock code test',
+    ) == 'committed'
+    assert attempts == 3
+
+
+@pytest.mark.parametrize(
+    'error',
+    [
+        OperationalError('database is locked without a SQLite result code'),
+        OperationalError('disk I/O error'),
+        IntegrityError('unique constraint failed'),
+    ],
+    ids=['message-only-lock', 'database-io-error', 'constraint-error'],
+)
+def test_sqlite_lock_retry_does_not_retry_non_lock_database_errors(monkeypatch, error):
+    monkeypatch.setattr(jobs.time, 'sleep', lambda _delay: None)
+    attempts = 0
+
+    def fail_once():
+        nonlocal attempts
+        attempts += 1
+        raise error
+
+    with pytest.raises(type(error)):
+        jobs._retry_sqlite_lock(fail_once, label='non-lock error test')
+    assert attempts == 1
+
+
+def test_sqlite_lock_retry_does_not_apply_to_production_database_backends(monkeypatch):
+    monkeypatch.setattr(jobs.connection, 'vendor', 'postgresql')
+    error = OperationalError('database table is locked')
+    error.sqlite_errorcode = getattr(sqlite3, 'SQLITE_LOCKED_SHAREDCACHE', 262)
+    attempts = 0
+
+    def fail_once():
+        nonlocal attempts
+        attempts += 1
+        raise error
+
+    with pytest.raises(OperationalError):
+        jobs._retry_sqlite_lock(fail_once, label='non-SQLite backend test')
+    assert attempts == 1
+
+
+def test_sqlite_lock_retry_does_not_retry_database_unavailable_errors(monkeypatch):
+    monkeypatch.setattr(jobs.time, 'sleep', lambda _delay: None)
+    error = OperationalError('unable to open database file')
+    error.sqlite_errorcode = sqlite3.SQLITE_CANTOPEN
+    error.sqlite_errorname = 'SQLITE_CANTOPEN'
+    attempts = 0
+
+    def fail_once():
+        nonlocal attempts
+        attempts += 1
+        raise error
+
+    with pytest.raises(OperationalError):
+        jobs._retry_sqlite_lock(fail_once, label='database-unavailable test')
+    assert attempts == 1
+
+
 class FakeResponse:
     def __init__(self, lines=(), status_code=200, payload=None, text=''):
         self.status_code = status_code
@@ -143,36 +264,27 @@ def test_simultaneous_database_connections_share_one_unique_task(owner, article,
 
 
 
-def test_task_attach_retries_transient_sqlite_lock_without_new_model_work(owner, article, monkeypatch):
+def test_task_attach_retries_explicit_sqlite_lock_after_atomic_rollback(owner, article, monkeypatch):
     connection = make_connection(owner)
     existing = start_queued(owner, connection, article, monkeypatch)
     manager = ChatGPTTranslationTask.objects
-    attempts = {'write': 0, 'read': 0}
-    original_filter = jobs._task_filter
+    attempts = {'write': 0}
+    original_get_or_create = manager.get_or_create
+    driver_error = sqlite3.OperationalError('database table is locked')
+    driver_error.sqlite_errorcode = sqlite3.SQLITE_LOCKED_SHAREDCACHE
+    driver_error.sqlite_errorname = 'SQLITE_LOCKED_SHAREDCACHE'
 
     def fake_get_or_create(**kwargs):
         attempts['write'] += 1
-        raise OperationalError('database table is locked: api_chatgpttranslationtask')
-
-    class TransientLockedQuery:
-        def __init__(self, queryset):
-            self.queryset = queryset
-
-        def first(self):
-            attempts['read'] += 1
-            if attempts['read'] <= 2:
-                raise OperationalError('database table is locked: api_chatgpttranslationtask')
-            return self.queryset.first()
-
-    def fake_filter(**kwargs):
-        return TransientLockedQuery(original_filter(**kwargs))
+        if attempts['write'] == 1:
+            raise OperationalError(str(driver_error)) from driver_error
+        return original_get_or_create(**kwargs)
 
     monkeypatch.setattr(manager, 'get_or_create', fake_get_or_create)
-    monkeypatch.setattr(jobs, '_task_filter', fake_filter)
     recovered = jobs.start_or_get_job(owner, connection, article)
 
     assert recovered.id == existing.id
-    assert attempts == {'write': 1, 'read': 3}
+    assert attempts == {'write': 2}
     assert ChatGPTTranslationTask.objects.filter(
         user=owner, connection=connection, news=article,
     ).count() == 1
@@ -432,8 +544,10 @@ def test_sse_disconnect_does_not_cancel_background_worker(owner, article, monkey
     connection = make_connection(owner)
     provider_entered = threading.Event()
     finish_provider = threading.Event()
+    provider_calls = []
 
     def fake_stream(**kwargs):
+        provider_calls.append(True)
         kwargs['on_delta']('visible progress')
         provider_entered.set()
         assert finish_provider.wait(5)
@@ -462,6 +576,7 @@ def test_sse_disconnect_does_not_cancel_background_worker(owner, article, monkey
     terminal = wait_for_terminal(task_id)
     assert terminal.status == 'succeeded'
     assert terminal.result['full_content_zh'] == 'complete after disconnect'
+    assert provider_calls == [True]
 
 
 def test_cancel_during_token_refresh_wait_blocks_decrypt_and_network(owner, monkeypatch):
