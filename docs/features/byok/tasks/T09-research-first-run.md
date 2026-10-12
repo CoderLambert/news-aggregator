@@ -1,6 +1,6 @@
 # T09 · 首次个人模型深度研究
 
-> **PLANNED**：本文件为未执行的实施/测试契约，所有测试当前 NOT_RUN。实施时以 `origin/feat/byok-user-api-keys` 最新 HEAD 为准，勿把设计 SHA 当作当前代码。
+> **READY FOR REVIEW**：T09 已在 T03 当前实现之上完成。合成 LiteLLM Proxy + OpenAI SDK 的工具往返和持久化报告通过；真实 provider/UAT 尚未执行。本卡对应 [Draft PR #43](https://github.com/CoderLambert/news-aggregator/pull/43)，base 为尚未合并的 T03 分支。
 
 | 属性 | 内容 |
 | --- | --- |
@@ -40,7 +40,7 @@ worker 绕过凭据/站点门禁，或工具能力/参数不可验证，禁止�
 2. 同环境记录受影响旧测试的基线；用既有 Django/React/SSE/SDK/持久任务，先验证关键假设再编码。
 3. 本次只交付这一项**可以运行的完整功能**，包括权限、正常操作与最主要的失败路径；不跨到其它 Txx。
 4. 跑最小定向单元/契约测试以及受影响旧功能回归，列出修改过的测试断言 diff；需求未变时禁止改断言迁就代码。
-5. 更新对应 Test 文档中的真实日志、环境、SHA 和 NOT_RUN 项；单张任务 PR base 指向 `feat/byok-user-api-keys`。未授权时不合并 main、不开始下一张卡。
+5. 更新对应 Test 文档中的真实日志、环境、SHA 和 NOT_RUN 项；依赖卡尚未合并时，本卡 PR 以依赖卡分支为 base（本次为 `task/byok-T03-preferences`），形成可独立审核的堆叠 PR。未授权时不合并、不开始下一张卡。
 
 **任务结束**：这条用户流程能运行、失败能清楚识别，主要不变量有自动化验证；更新同名 Test 实际证据并留下单张可审核 PR。当前任何未验证的地方明确写 NOT_RUN。
 
