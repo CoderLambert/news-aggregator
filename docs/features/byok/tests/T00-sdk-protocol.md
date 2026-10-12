@@ -22,8 +22,9 @@ SDK_LOCAL 覆盖：Chat Completions、Responses、Messages 完整终态；partia
 | --- | --- |
 | 用户报告的基线 HEAD | `ea2ce55ae22e19e1604e88031b824b68f2666cec` |
 | 本地 `origin/feat/byok-user-api-keys` 跟踪 HEAD / 本任务分支基点 | `3cd584c95acd52bc533bba0b55eab75b35c41ad5` |
-| 差异 | 本地跟踪 HEAD 比用户报告值多 4 个提交：`6440a07197dae4b43b032c782638ad97e9defb59`、`77ddc2759a17b586928c76b3fc55b6573a53319a`、`c22b5903b2c03582fb3b45d870fd50fb9857f071`、`3cd584c95acd52bc533bba0b55eab75b35c41ad5`。未重置。实时 GitHub 核对因本环境 DNS 无法解析 `github.com` 而未完成；该 SHA 是本地 remote-tracking ref，不声称为远端实时 HEAD。 |
+| 差异 | GitHub API 于 2026-10-12 实时确认分支 HEAD 为 `3cd584c95acd52bc533bba0b55eab75b35c41ad5`，与本地跟踪 ref 相同；它比用户报告值多 4 个提交：`6440a07197dae4b43b032c782638ad97e9defb59`、`77ddc2759a17b586928c76b3fc55b6573a53319a`、`c22b5903b2c03582fb3b45d870fd50fb9857f071`、`3cd584c95acd52bc533bba0b55eab75b35c41ad5`。未重置。 |
 | T00 SDK 实现 commit | `f69aeb68234fa46bd07a405f658fa36c3a9fa9e2` |
+| Draft PR | [#45](https://github.com/CoderLambert/news-aggregator/pull/45)，base `feat/byok-user-api-keys`；创建时 head `1bfd72be1dee811f95faa1d8a8f4bb8813d264af`。Open、Draft、未合并。 |
 | Python / OpenAI / Anthropic / HTTP transport | Python `3.14.8` / `openai==3.28.0` / `anthropic==1.13.0` / `httpx2==2.13.1` |
 | 后端旧测试环境 | Python `3.14.8`、Django `6.1.2`、pytest `9.1.1` |
 | 前端旧测试环境 | Node `26.8.1`、Vitest `4.1.7` |
@@ -87,4 +88,4 @@ env -i PATH=/usr/bin:/bin HOME=/tmp/byok-t00-baseline-home timeout 120s /usr/bin
 
 - 本地测试通过只证明固定 SDK 版本处理受控的 HTTP/SSE fixtures，不证明任何真实厂商兼容、线上代理行为或生产配置。
 - 真实 DeepSeek 路由证据仍为 **PROVIDER_REAL=NOT_RUN**。其他厂商未调用、未验证。
-- GitHub 实时远端 HEAD、push 和 Draft PR 需在网络恢复后完成；当前本地分支与实现已提交，未进入 T01、未合并。
+- 独立分支已推送，Draft PR #45 已创建；没有合并。本任务未进入 T01。
