@@ -2,7 +2,7 @@
 
 对应：[T01 Task](../tasks/T01-credentials.md)。
 
-> **T01 本地实现与测试证据完成；PR #34 仍为 Draft，最近完成的 head CI 全绿。** `credential_epoch` worker 消费端集成现有堆叠 PR #39 的合成 worker 证据；PR #39 尚未合并，独立 T01 PR #34 仍只包含凭据管理。两者均没有真实 provider 调用。`credential_epoch` 是授权撤销/fencing 版本；独立的 `credential_version` 标记当前密文并参与 AAD。
+> **T01 本地实现与测试证据完成；PR #34 仍为 Draft。已记录 head `dae63c42a74ee2cd24e7d06a7b240ace6c6df9c2` 的两组 CI 全绿。** `credential_epoch` worker 消费端集成现有堆叠 PR #39 的合成 worker 证据；PR #39 尚未合并，独立 T01 PR #34 仍只包含凭据管理。两者均没有真实 provider 调用。`credential_epoch` 是授权撤销/fencing 版本；独立的 `credential_version` 标记当前密文并参与 AAD。
 
 | 用例 | 场景 / 失败注入 | 结果 | 证据 |
 | --- | --- | --- | --- |
