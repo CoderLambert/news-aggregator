@@ -40,6 +40,26 @@ class ResearchRunError(Exception):
         self.status_code = status_code
 
 
+def _research_execution_error(error) -> ResearchRunError:
+    messages = {
+        'authentication_required': (403, '请登录后使用个人模型研究。'),
+        'model_not_found': (404, '所选个人模型不存在或无权访问。'),
+        'model_not_configured': (409, '请先配置深度研究模型。'),
+        'model_unavailable': (409, '个人模型连接不可用，请检查模型设置。'),
+        'model_reselection_required': (409, '模型选择已失效，请到模型设置中重新选择。'),
+        'research_tools_unverified': (409, '该模型尚未验证工具调用能力，不能用于深度研究。'),
+        'model_route_unavailable': (409, '该模型当前没有已批准的研究路由。'),
+        'gateway_unavailable': (503, '个人模型网关当前不可用，本次未发送。'),
+        'credential_storage_unavailable': (503, '个人模型凭据存储当前不可用，本次未发送。'),
+        'execution_changed': (409, '模型或凭据已变更，研究任务已停止。'),
+        'byok_disabled': (403, '个人模型研究当前已关闭。'),
+        'research_execution_missing': (409, '研究任务缺少个人模型授权快照。'),
+    }
+    code = getattr(error, 'code', 'model_unavailable')
+    status_code, message = messages.get(code, messages['model_unavailable'])
+    return ResearchRunError(code, message, status_code)
+
+
 _capacity_lock = threading.Lock()
 _admitted_runs: set[str] = set()
 _dispatching: set[str] = set()
@@ -48,7 +68,7 @@ _run_change_condition = threading.Condition()
 
 
 def _blocked_hosted_environment() -> bool:
-    return settings.DJANGO_ENV == 'production'
+    return settings.DJANGO_ENV == 'production' and not settings.AI_BYOK_ENABLED
 
 
 def validate_idempotency_key(value: str | None) -> str:
@@ -61,11 +81,20 @@ def validate_idempotency_key(value: str | None) -> str:
     return value
 
 
-def request_digest(query: str, local_only: bool, session_id: str | None) -> str:
-    canonical = json.dumps(
-        {'query': query, 'local_only': bool(local_only), 'session': str(session_id) if session_id else 'create'},
-        ensure_ascii=False, sort_keys=True, separators=(',', ':'),
-    )
+def request_digest(
+    query: str,
+    local_only: bool,
+    session_id: str | None,
+    execution_digest: str | None = None,
+) -> str:
+    values = {
+        'query': query,
+        'local_only': bool(local_only),
+        'session': str(session_id) if session_id else 'create',
+    }
+    if execution_digest:
+        values['execution_digest'] = execution_digest
+    canonical = json.dumps(values, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
     return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
 
 
@@ -166,10 +195,14 @@ def _snapshot(run_id, run_token):
     if run.lease_expires_at is None or run.lease_expires_at <= now:
         _interrupt_expired(run_id, run_token)
         raise ResearchRunError('research_lease_lost', '研究任务租约已失效。')
-    if _blocked_hosted_environment():
+    if _blocked_hosted_environment() or (settings.DJANGO_ENV == 'production' and not run.execution_snapshot):
         raise ResearchRunError(
             'hosted_integration_unapproved', '网站订阅研究集成尚未获批。', 503,
         )
+    if run.execution_snapshot and not settings.AI_BYOK_ENABLED:
+        raise ResearchRunError('byok_disabled', '个人模型研究当前已关闭。', 403)
+    if settings.AI_BYOK_ENABLED and not run.execution_snapshot:
+        raise ResearchRunError('research_execution_missing', '研究任务缺少个人模型授权快照。', 409)
     if not run.user.is_active:
         raise ResearchRunError('inactive_owner', '账号已停用，研究任务已停止。', 403)
     if run.session.user_id != run.user_id:
@@ -376,7 +409,7 @@ def _persist_tool_result(run_id, run_token, session, tool_name, args, result):
     guard()
 
 
-def _persist_success(run_id, run_token, session, messages):
+def _persist_success(run_id, run_token, session, messages, *, byok_execution=None):
     now = timezone.now()
     event_type, data = 'complete', {}
     wire = _wire_record(event_type, data)
@@ -391,7 +424,15 @@ def _persist_success(run_id, run_token, session, messages):
         )
     sequence = snapshot['last_event_sequence'] + 1
     with transaction.atomic():
-        # The run CAS is the first database write, taking SQLite's write lock.
+        if byok_execution is not None:
+            from .byok_execution import ResearchExecutionError, lock_research_execution_for_commit
+            try:
+                lock_research_execution_for_commit(byok_execution)
+            except ResearchExecutionError as exc:
+                raise _research_execution_error(exc) from None
+
+        # The conditional run CAS follows the BYOK row fence in the same
+        # transaction, so success and the complete event share its boundary.
         changed = ResearchRun.objects.filter(
             **_safe_cas_filter(run_id, run_token),
             last_event_sequence=snapshot['last_event_sequence'],
@@ -422,10 +463,22 @@ def _run_worker(run_id, query, local_only):
     token = None
     key = str(run_id)
     try:
-        if _blocked_hosted_environment():
+        queued = ResearchRun.objects.filter(pk=run_id).values('execution_snapshot').first()
+        execution_snapshot = queued['execution_snapshot'] if queued else {}
+        if _blocked_hosted_environment() or (
+            settings.DJANGO_ENV == 'production' and not execution_snapshot
+        ):
             _finish_queued_failed(
                 run_id, 'hosted_integration_unapproved',
                 '网站订阅研究集成尚未获批。',
+            )
+            return
+        if execution_snapshot and not settings.AI_BYOK_ENABLED:
+            _finish_queued_failed(run_id, 'byok_disabled', '个人模型研究当前已关闭。')
+            return
+        if settings.AI_BYOK_ENABLED and not execution_snapshot:
+            _finish_queued_failed(
+                run_id, 'research_execution_missing', '研究任务缺少个人模型授权快照。',
             )
             return
         token = _claim(run_id)
@@ -437,6 +490,32 @@ def _run_worker(run_id, query, local_only):
         session = run.session
         from .agent_loop import run_agent_loop
 
+        byok_execution = None
+        if run.execution_snapshot:
+            from .byok_execution import (
+                ResearchExecutionError,
+                assert_research_execution_current,
+                load_research_execution,
+                open_proxy_client,
+            )
+            try:
+                byok_execution = load_research_execution(
+                    run.execution_snapshot, user_id=run.user_id,
+                )
+            except ResearchExecutionError as exc:
+                raise _research_execution_error(exc) from None
+
+            base_guard = guard
+
+            def guard_byok():
+                base_guard()
+                try:
+                    assert_research_execution_current(byok_execution)
+                except ResearchExecutionError as exc:
+                    raise _research_execution_error(exc) from None
+
+            guard = guard_byok
+
         def emit(event_type, data):
             if event_type == 'complete':
                 _notify(run_id)
@@ -446,17 +525,36 @@ def _run_worker(run_id, query, local_only):
             append_event(run_id, token, event_type, data, guard)
 
         def persist_completion(messages):
-            _persist_success(run_id, token, session, messages)
+            _persist_success(
+                run_id, token, session, messages, byok_execution=byok_execution,
+            )
 
         with _heartbeat(run_id, token):
-            run_agent_loop(
-                session, query, emit, local_only=local_only,
-                execution_guard=guard,
-                persist_completion=persist_completion,
-                persist_tool_result=lambda name, args, result: _persist_tool_result(
-                    run_id, token, session, name, args, result,
-                ),
-            )
+            if byok_execution is None:
+                run_agent_loop(
+                    session, query, emit, local_only=local_only,
+                    execution_guard=guard,
+                    persist_completion=persist_completion,
+                    persist_tool_result=lambda name, args, result: _persist_tool_result(
+                        run_id, token, session, name, args, result,
+                    ),
+                )
+            else:
+                try:
+                    with open_proxy_client() as client:
+                        guard()
+                        run_agent_loop(
+                            session, query, emit, local_only=local_only,
+                            execution_guard=guard,
+                            persist_completion=persist_completion,
+                            persist_tool_result=lambda name, args, result: _persist_tool_result(
+                                run_id, token, session, name, args, result,
+                            ),
+                            byok_execution=byok_execution,
+                            byok_client=client,
+                        )
+                except ResearchExecutionError as exc:
+                    raise _research_execution_error(exc) from None
     except ResearchRunError as exc:
         if exc.error_code == 'research_lease_lost':
             _interrupt_expired(run_id, token)
@@ -512,17 +610,37 @@ def _attach_existing(run, digest, query, local_only):
     return run.session, run
 
 
-def submit_research_run(user, *, session_id, query: str, local_only: bool, idempotency_key: str):
+def submit_research_run(
+    user,
+    *,
+    session_id,
+    query: str,
+    local_only: bool,
+    idempotency_key: str,
+    execution_snapshot: dict | None = None,
+):
     """Create an owner-private run or attach only to its exact idempotent request."""
     if _blocked_hosted_environment():
         raise ResearchRunError(
             'hosted_integration_unapproved', '网站订阅研究集成尚未获批。', 503,
         )
+    if settings.AI_BYOK_ENABLED and not execution_snapshot:
+        raise ResearchRunError('research_execution_missing', '研究任务缺少个人模型授权快照。', 409)
+    if execution_snapshot and not settings.AI_BYOK_ENABLED:
+        raise ResearchRunError('byok_disabled', '个人模型研究当前已关闭。', 403)
     key = validate_idempotency_key(idempotency_key)
     if not isinstance(query, str) or not query.strip() or len(query) > 20_000:
         raise ResearchRunError('invalid_research_query', '研究问题长度不合法。', 400)
     query = query.strip()
-    digest = request_digest(query, local_only, session_id)
+    execution_digest = None
+    if execution_snapshot:
+        try:
+            execution_digest = execution_snapshot['execution']['digest']
+        except (KeyError, TypeError):
+            raise ResearchRunError('research_execution_missing', '研究任务授权快照无效。', 409) from None
+        if not isinstance(execution_digest, str) or len(execution_digest) != 64:
+            raise ResearchRunError('research_execution_missing', '研究任务授权快照无效。', 409)
+    digest = request_digest(query, local_only, session_id, execution_digest)
     if session_id is not None:
         session = ResearchSession.objects.filter(pk=session_id, user=user).first()
         if session is None:
@@ -564,6 +682,7 @@ def submit_research_run(user, *, session_id, query: str, local_only: bool, idemp
                 user=user, session=session, idempotency_key=key,
                 request_hash=digest, status='queued',
                 queued_query=query, queued_local_only=local_only,
+                execution_snapshot=execution_snapshot or {},
             )
         _rename_reservation(reservation, str(run.pk))
     except IntegrityError:
@@ -595,10 +714,6 @@ def resume_queued_run(user, session, run_id):
     A read-only GET cannot dispatch. A RUNNING (or terminal) attempt must never
     be scheduled again, even after its lease expires or the frontend loses state.
     """
-    if _blocked_hosted_environment():
-        raise ResearchRunError(
-            'hosted_integration_unapproved', '网站订阅研究集成尚未获批。', 503,
-        )
     if not user.is_active or session.user_id != user.pk:
         raise ResearchRunError('research_session_not_found', '研究会话不存在。', 404)
     try:
@@ -624,6 +739,27 @@ def resume_queued_run(user, session, run_id):
         raise ResearchRunError(
             'research_queued_input_invalid', '研究任务参数不合法。', 409,
         )
+    if _blocked_hosted_environment() or (
+        settings.DJANGO_ENV == 'production' and not run.execution_snapshot
+    ):
+        raise ResearchRunError(
+            'hosted_integration_unapproved', '网站订阅研究集成尚未获批。', 503,
+        )
+    if settings.AI_BYOK_ENABLED:
+        if not run.execution_snapshot:
+            raise ResearchRunError(
+                'research_execution_missing', '研究任务缺少个人模型授权快照。', 409,
+            )
+        from .byok_execution import ResearchExecutionError, validate_research_execution_snapshot
+        try:
+            validate_research_execution_snapshot(
+                run.execution_snapshot, user_id=run.user_id,
+            )
+        except ResearchExecutionError as exc:
+            _finish_queued_failed(run.pk, exc.code, _research_execution_error(exc).message)
+            raise _research_execution_error(exc) from None
+    elif run.execution_snapshot:
+        raise ResearchRunError('byok_disabled', '个人模型研究当前已关闭。', 403)
     _dispatch(run.pk, run.queued_query, run.queued_local_only)
     run.refresh_from_db()
     return run

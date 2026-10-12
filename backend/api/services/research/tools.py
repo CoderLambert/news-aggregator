@@ -21,6 +21,10 @@ logger = logging.getLogger(__name__)
 
 _MAX_RESULT_CHARS = 8000
 
+
+class ToolResultPersistenceError(RuntimeError):
+    """A durable run must fail if its tool result cannot be committed."""
+
 # Full conversational phrases to strip from queries
 _CN_STOP_PHRASES = [
     '是什么', '是什么？', '是啥', '有哪些', '有哪', '有什么', '有那些',
@@ -313,11 +317,18 @@ def execute_tool(
             return {'error': '研究工具暂时不可用，请稍后重试。'}
         if session is not None:
             if persist_search_result is not None:
-                persist_search_result(name, args, result)
+                try:
+                    persist_search_result(name, args, result)
+                except Exception as exc:
+                    guard()
+                    logger.info('Research result persistence failed (%s).', type(exc).__name__)
+                    raise ToolResultPersistenceError('research_tool_persistence_failed') from None
             else:
                 _save_search_result(session, name, args, result, guard=execution_guard)
         guard()
         return result
+    except ToolResultPersistenceError:
+        raise
     except Exception as exc:
         # A failed fence propagates; provider and tool details never enter events.
         guard()

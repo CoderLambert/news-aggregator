@@ -16,7 +16,7 @@
 | [T06 长文分块完整翻译](T06-long-translation.md) | 长文分块且完整合并。 | T05 | M | PLANNED |
 | [T07 翻译取消与显式重新生成](T07-translation-lifecycle.md) | 观看断开、服务端取消和重新生成语义正确。 | T05 | S-M | PLANNED |
 | [T08 译文详情、问答与朗读同源](T08-translation-readers.md) | 私有译文被详情、聊天、朗读一致读取，换 Key 不删除历史。 | T05、T07 | M | PLANNED |
-| [T09 首次个人模型深度研究](T09-research-first-run.md) | 许可工具研究、工具续接与完整持久结果；本地运行使用临时 Proxy+受控上游。 | T03、T00 本地技术门槛 | M | PLANNED |
+| [T09 首次个人模型深度研究](T09-research-first-run.md) | 许可工具研究、工具续接与完整持久结果；本地运行使用临时 Proxy+受控上游。 | T03、T00 本地技术门槛 | M | READY FOR REVIEW |
 | [T10 研究续问与安全恢复](T10-research-followup.md) | 断开后的只读恢复、取消与服务端 continuation。 | T09 | M | PLANNED |
 | [T11 文章问题推荐与缓存](T11-suggestions.md) | 显式生成三条私有问题；首次进入不收费。 | T04 | S-M | PLANNED |
 | [T12 个人 AI 使用记录](T12-usage.md) | 查看自己的调用用途、次数、已知/未知 Token。 | T02、T04、T05、T09、T11 | S-M | PLANNED |

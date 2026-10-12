@@ -13,6 +13,11 @@ from api.models import USER_AI_TASK_PREFERENCE_CHOICES, UserAIModelConfig, UserA
 
 TASK_KINDS = tuple(kind for kind, _label in USER_AI_TASK_PREFERENCE_CHOICES)
 TASK_SPECIFIC_KINDS = tuple(kind for kind in TASK_KINDS if kind != 'default')
+SNAPSHOT_FIELDS = (
+    'user_id', 'task_kind', 'selected_by_task_kind', 'model_config_id',
+    'connection_id', 'provider_id', 'endpoint_profile',
+    'endpoint_profile_version', 'credential_epoch', 'config_revision', 'model_id',
+)
 
 
 class ModelSelectionError(Exception):
@@ -57,6 +62,41 @@ def _active_config_for_user(*, user_id: int, model_config_id) -> UserAIModelConf
     return config
 
 
+def _snapshot_digest(values: dict) -> str:
+    return hashlib.sha256(
+        json.dumps(values, ensure_ascii=True, sort_keys=True, separators=(',', ':')).encode('utf-8'),
+    ).hexdigest()
+
+
+def serialize_execution_snapshot(snapshot: ExecutionSnapshot) -> dict[str, object]:
+    """Return the secret-free, JSON-safe fields used to fence one task."""
+    return {field: getattr(snapshot, field) for field in (*SNAPSHOT_FIELDS, 'digest')}
+
+
+def deserialize_execution_snapshot(payload) -> ExecutionSnapshot:
+    """Validate a persisted snapshot and reject altered or malformed fields."""
+    if not isinstance(payload, dict) or set(payload) != {*SNAPSHOT_FIELDS, 'digest'}:
+        raise ModelSelectionError('execution_changed')
+    values = {field: payload[field] for field in SNAPSHOT_FIELDS}
+    integer_fields = (
+        'user_id', 'endpoint_profile_version', 'credential_epoch', 'config_revision',
+    )
+    if any(
+        not isinstance(values[field], int) or isinstance(values[field], bool) or values[field] < 1
+        for field in integer_fields
+    ):
+        raise ModelSelectionError('execution_changed')
+    if any(not isinstance(values[field], str) or not values[field] for field in (
+        'task_kind', 'selected_by_task_kind', 'model_config_id', 'connection_id',
+        'provider_id', 'endpoint_profile', 'model_id',
+    )):
+        raise ModelSelectionError('execution_changed')
+    digest = payload['digest']
+    if not isinstance(digest, str) or digest != _snapshot_digest(values):
+        raise ModelSelectionError('execution_changed')
+    return ExecutionSnapshot(**values, digest=digest)
+
+
 def _snapshot(*, user_id: int, task_kind: str, selected_by_task_kind: str, config: UserAIModelConfig) -> ExecutionSnapshot:
     connection = config.connection
     values = {
@@ -72,9 +112,7 @@ def _snapshot(*, user_id: int, task_kind: str, selected_by_task_kind: str, confi
         'config_revision': config.config_revision,
         'model_id': config.model_id,
     }
-    digest = hashlib.sha256(
-        json.dumps(values, ensure_ascii=True, sort_keys=True, separators=(',', ':')).encode('utf-8'),
-    ).hexdigest()
+    digest = _snapshot_digest(values)
     return ExecutionSnapshot(**values, digest=digest)
 
 

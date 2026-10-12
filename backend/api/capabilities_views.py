@@ -59,6 +59,9 @@ def _feature_snapshot() -> dict[str, dict[str, object]]:
         features["semantic_search"] = _feature(False, "semantic_search_disabled")
         for name in AI_FEATURE_NAMES:
             features[name] = _feature(False, "ai_disabled")
+        # Research is also available through the separately gated, owner-bound BYOK route.
+        if settings.AI_BYOK_ENABLED:
+            features["research"] = _feature(True)
 
     if settings.CHATGPT_AUTH_MODE == "disabled":
         features["chatgpt_subscription"] = _feature(False, "chatgpt_auth_disabled")

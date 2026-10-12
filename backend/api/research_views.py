@@ -2,6 +2,7 @@
 
 import time
 
+from django.conf import settings
 from django.db import transaction
 from django.http import StreamingHttpResponse
 from rest_framework import generics, status
@@ -119,10 +120,21 @@ def _submit_response(request, *, session_id=None):
     if error is not None:
         return _no_store(error)
     raw_key = request.headers.get('Idempotency-Key')
+    execution_snapshot = None
+    if settings.AI_BYOK_ENABLED:
+        from .services.research.byok_execution import (
+            ResearchExecutionError,
+            prepare_research_execution_snapshot,
+        )
+        try:
+            execution_snapshot = prepare_research_execution_snapshot(request.user)
+        except ResearchExecutionError as exc:
+            return _run_error_response(job_manager._research_execution_error(exc))
     try:
         session, run = job_manager.submit_research_run(
             request.user, session_id=session_id, query=query,
             local_only=local_only, idempotency_key=raw_key,
+            execution_snapshot=execution_snapshot,
         )
     except job_manager.ResearchRunError as exc:
         return _run_error_response(exc)
