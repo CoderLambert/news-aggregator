@@ -4,7 +4,7 @@
 
 > **READY FOR REVIEW。** 修复捕获了 Django 包装在异常因果链中的 SQLite 锁码；原断连测试在共享缓存测试库和文件型 WAL SQLite 测试库各连续 20 次通过。全量离线回归 845 项通过。
 
-实现提交：`e7026e092b680e9bf32049859d638f590edf5009`。
+实现提交：`e7026e092b680e9bf32049859d638f590edf5009`。独立 Draft PR：[R0 #44](https://github.com/CoderLambert/news-aggregator/pull/44)。
 
 ## 诊断证据
 

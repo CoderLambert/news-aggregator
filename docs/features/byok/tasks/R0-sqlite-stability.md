@@ -1,6 +1,6 @@
 # R0 · SQLite 后台翻译锁争用稳定性
 
-> **READY FOR REVIEW（2026-10-12）**：定位并修复事务型 SQLite 下后台翻译任务的共享缓存锁竞争。原 SSE 断连成功断言保留；当前 CI 三个测试根目录全部通过。证据见 [Test R0](../tests/R0-sqlite-stability.md)。
+> **READY FOR REVIEW（2026-10-12）**：定位并修复事务型 SQLite 下后台翻译任务的共享缓存锁竞争。原 SSE 断连成功断言保留；当前 CI 三个测试根目录全部通过。证据见 [Test R0](../tests/R0-sqlite-stability.md)；独立 Draft PR 为 [#44](https://github.com/CoderLambert/news-aggregator/pull/44)。
 
 | 属性 | 内容 |
 | --- | --- |
