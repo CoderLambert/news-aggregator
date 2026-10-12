@@ -8,14 +8,14 @@
 
 | 项目 | 结果 |
 | --- | --- |
-| T03 父提交 / 父分支 | `323b6d6b6458780fca72d0bf119efd88a4118b58` / `task/byok-T03-preferences`（已同步 T02 审核修复和 T03 验收记录） |
+| T03 父提交 / 父分支 | `7d1a400a6fa48c73cad2403ef1484d5decfd8553` / `task/byok-T03-preferences`（已同步 T02 SQLite 失败分类及 T03 验收记录） |
 | T03 PR | [#37 Draft](https://github.com/CoderLambert/news-aggregator/pull/37)，未合并 |
-| T09 实现提交（重放后） | `79e882eca53e8cea2c989fa86118d732b874dc85` |
-| T09 撤销/批次修复提交 | `3d6b0369b2e18f584e3366c3e18bfb29ad5ed142` |
+| T09 实现提交（重放后） | `7f1e01e3b74e947f8712c5740147f58203871a13` |
+| T09 撤销/批次修复提交（重放后） | `885826018bb4de63bab16cb9d0c80fb7232a3b63` |
 | T09 分支 / PR base | `task/byok-T09-first-research` / `task/byok-T03-preferences` |
 | T09 PR | [#43 Draft](https://github.com/CoderLambert/news-aggregator/pull/43)，未合并 |
 | 日期 | 2026-10-12（Asia/Shanghai） |
-| 最终堆叠分支离线 CI | 895 passed，2 skipped，3 warnings，20.70s（Python 3.14.8；T02→T03→T09 当前本地栈） |
+| 最终堆叠分支离线 CI | 895 passed，2 skipped，3 warnings，20.70s（Python 3.14.8；代码快照 `d2c482e`，后续父分支同步仅改动文档） |
 | OS / 架构 | Linux 7.2.5-3-omarchy x86_64 |
 | Python / Django / DRF / pytest | 3.14.8 / 6.1.2 / 3.18.3 / 9.1.1 |
 | OpenAI SDK / httpx2 | 3.28.0 / 2.13.1 |
@@ -46,7 +46,7 @@ env -i \
 
 T09 原有定向测试 `backend/api/tests/test_research_byok.py` 曾为 `10 passed in 3.34s`。审核修复后重新运行 `test_research_byok.py` 与 `test_research_byok_proxy_local.py`：`15 passed, 1 skipped, 1 warning in 4.62s`，包含新增撤销阶段和工具批次断言。
 
-审核修复并将 T02、T03、T09 同步到最新父提交后，最终堆叠分支的关键 API 回归为 `46 passed, 1 skipped, 1 warning in 8.91s`。随后在当前 T09 HEAD 上运行仓库 CI 的三个测试根目录：`895 passed, 2 skipped, 3 warnings in 20.70s`。其中原 `test_sse_disconnect_does_not_cancel_background_worker` 通过；该测试没有删除、跳过或放宽。两个跳过项是现有本地 runner 专用用例；三条 warning 是 Chroma 弃用提示和 Category/Source 分页排序提示。
+审核修复并将 T02、T03、T09 同步到父分支后，在最新 T09 栈上复跑 T02/T03/T09 核心 API 文件：`46 passed, 1 skipped, 1 warning in 9.48s`。仓库 CI 的三个测试根目录在代码快照 `d2c482e` 上得到 `895 passed, 2 skipped, 3 warnings in 20.70s`；之后为同步 T02/T03 父分支而重放提交，并只改动验收文档，Python/前端源码与测试文件均未变化。其中原 `test_sse_disconnect_does_not_cancel_background_worker` 通过；该测试没有删除、跳过或放宽。两个跳过项是现有本地 runner 专用用例；三条 warning 是 Chroma 弃用提示和 Category/Source 分页排序提示。
 
 最终堆叠分支全量命令（所有 HOME、数据库和缓存均隔离在 `/tmp`）：
 
