@@ -1,6 +1,6 @@
 # T00 · 共享网关端到端技术验真
 
-> **PASS（2026-10-12）**：本地运行 L 为 `407 PASS / 0 FAIL / 407 checks`；T00-01 至 T00-10 和现有业务 CI 均通过。LiteLLM v1.104.2 的原始 Chat EOF 风险仍由负控复现，受保护准入路径已证明在上游前拒绝 Chat streaming；锁定镜像的官方 Cosign 签名与实际 digest 已验证。新增 DeepSeek 专属参数的模型路由只指向本地合成 upstream，缺请求级 provider Key 时仍在上游前拒绝。当前 head 两次完整 backend/frontend/release CI 均通过（backend 各 838 passed / 2 warnings）。可选真实请求 T00-11 与其他 provider 兼容性未运行，不构成本地技术门槛通过声明。精确 SHA、证据与边界见[同编号 Test](../tests/T00-sdk-protocol.md)。本任务 PASS 仅表示本地技术验真和既有业务回归通过，不表示生产网关或其他厂商功能已验收。
+> **本地技术门槛 PASS（2026-10-12）**：隔离运行 L 与当前 HEAD `ad0f14eb599ddbf8a691dc535227d7ef18298cb6` 复核均为 `407 PASS / 0 FAIL / 407 checks`。LiteLLM v1.104.2 的原始 Chat EOF 风险仍由负控复现，受保护准入路径已证明在上游前拒绝 Chat streaming；锁定镜像的官方 Cosign 签名与实际 digest 已验证。DeepSeek 专属模型路由只指向本地合成 upstream，缺请求级 provider Key 时仍在上游前拒绝。当前 PR CI 尚未全绿：run [38187821128](https://github.com/CoderLambert/news-aggregator/actions/runs/38187821128) 全过，run [38187824787](https://github.com/CoderLambert/news-aggregator/actions/runs/38187824787) 有 1 个既有 SQLite 并发用例失败。可选真实请求 T00-11 与其他 provider 兼容性未运行；本地技术 PASS 不表示生产网关或真实 provider 兼容性已验收。精确证据与边界见[同编号 Test](../tests/T00-sdk-protocol.md)。
 
 | 属性 | 内容 |
 | --- | --- |

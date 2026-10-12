@@ -1,6 +1,6 @@
 # Test T00 · 共享网关端到端技术验真
 
-> **T00 PASS / GATEWAY_ADMISSION_PROTOTYPE**：最新隔离合成运行 L（2026-10-12）为 `407 PASS / 0 FAIL / 407 checks`，CLI 标记 `PARTIAL`，因为该 CLI 不包含现有业务回归和真实 provider 兼容。T00-01 至 T00-10 的本地技术门槛和当前完整业务 CI 均通过。v1.104.2 的 unguarded Chat EOF 风险仍被原样复现：上游无协议终态而 SDK 收到 `finish_reason=stop`；受保护准入路径对此请求返回 HTTP 400 `T00_STREAMING_DISABLED`，上游计数为 0。该结果证明特定路径被关闭，不表示 LiteLLM 已修复或 Chat streaming 兼容。锁定镜像的官方 Cosign 签名和实际 digest 已验证。Responses 标准 `fc_` item / `call_` call 两轮续接严格通过；旧 `resp_item_` 仅作为独立 foreign-ID 归一化专例。SDK_LOCAL 与 native-stream Proxy 的取消传播检查在显式 2 秒本地观测窗内通过。A9 历史运行 `353 PASS / 4 FAIL` 仍以独立脱敏文件保留，不与 D/E/F/L 混合。用户已报告 DeepSeek 直连基线 PASS（1 次请求）；真实经 LiteLLM T00-11 仍为 NOT_RUN。
+> **T00 本地技术门槛 PASS / GATEWAY_ADMISSION_PROTOTYPE**：隔离合成运行 L 及当前 HEAD `ad0f14e` 的复核均为 `407 PASS / 0 FAIL / 407 checks`；CLI 标记 `PARTIAL`，因为不包含旧业务回归和真实 provider 兼容。当前 PR CI 尚未全绿：同一 HEAD 的 run [38187821128](https://github.com/CoderLambert/news-aggregator/actions/runs/38187821128) 全部通过；run [38187824787](https://github.com/CoderLambert/news-aggregator/actions/runs/38187824787) 的前端通过，后端有 847 项通过、1 项既有 SQLite `OperationalError` 失败。v1.104.2 的 unguarded Chat EOF 风险仍被原样复现：上游无协议终态而 SDK 收到 `finish_reason=stop`；受保护准入路径对此请求返回 HTTP 400 `T00_STREAMING_DISABLED`，上游计数为 0。该结果证明特定路径被关闭，不表示 LiteLLM 已修复或 Chat streaming 兼容。锁定镜像的官方 Cosign 签名和实际 digest 已验证。Responses 标准 `fc_` item / `call_` call 两轮续接严格通过；旧 `resp_item_` 仅作为独立 foreign-ID 归一化专例。SDK_LOCAL 与 native-stream Proxy 的取消传播检查在显式 2 秒本地观测窗内通过。A9 历史运行 `353 PASS / 4 FAIL` 仍以独立脱敏文件保留，不与 D/E/F/L 混合。用户已报告 DeepSeek 直连基线 PASS（1 次请求）；真实经 LiteLLM T00-11 仍为 NOT_RUN。
 
 对应：[T00 Task](../tasks/T00-sdk-protocol.md)。
 
@@ -30,11 +30,11 @@
 
 | 项目 | 结果 |
 | --- | --- |
-| 本卡状态 | **PASS**；T00-01 至 T00-10 本地验收、镜像签名校验与当前完整业务 CI 均通过。可选 T00-11 未运行 |
+| 本卡本地状态 | **PASS**；T00-01 至 T00-10 本地验收与镜像签名校验通过。当前 HEAD 的 PR CI 一组全过、另一组有 1 个既有 SQLite 并发用例失败，见下方；可选 T00-11 未运行 |
 | 功能分支目标基线 HEAD | `ea2ce55ae22e19e1604e88031b824b68f2666cec`，与用户报告一致；未重置原工作树 |
 | 本任务实现起点 HEAD | `69e084e39552c5650b930a067b6b79d09e95db34`；分支 `task/byok-T00-sdk-protocol`，独立工作区 |
-| T00 本轮实现 SHA | 当前 smoke 代码/测试 SHA `ce8bec6907a0015f14421e1cdd34e65d11c8706a`；只增加真实请求被中断时的脱敏失败记录与一致退出码，没有生产适配器或新闻业务改动 |
-| PR #33 | open / Ready for review；base `feat/byok-user-api-keys`，当前 head `ce8bec6907a0015f14421e1cdd34e65d11c8706a` |
+| T00 本轮实现 SHA | 当前工作区 HEAD `ad0f14eb599ddbf8a691dc535227d7ef18298cb6`；DeepSeek smoke 最新代码提交 `ce8bec6907a0015f14421e1cdd34e65d11c8706a`，只增加真实请求中断时的脱敏失败记录与一致退出码，没有生产适配器或新闻业务改动 |
+| PR #33 | open / Ready for review；base `feat/byok-user-api-keys`，当前 head `ad0f14eb599ddbf8a691dc535227d7ef18298cb6` |
 | Python / OpenAI SDK / Anthropic SDK / httpx2 / LiteLLM / Docker Compose | 3.14.8 / 3.28.0 / 1.13.0 / 2.13.1 / 1.104.2 / 5.5.1；Docker Server 29.7.2 |
 | LiteLLM v1.104.2 image signature | **PASS**；Cosign v3.0.2 使用官方固定提交公钥校验，签名 digest 与锁定的 `sha256:3d88…a500` 一致；[脱敏证据](../evidence/T00-litellm-v1.104.2-cosign.json) |
 | 最新 SDK_LOCAL / PROXY_LOCAL 合成运行 L | `407 PASS / 0 FAIL / 407 checks`，CLI exit 0、状态 `PARTIAL`；原始 unguarded Chat EOF 风险仍保留，受保护路径 HTTP 400 且上游 0 |
@@ -46,7 +46,7 @@
 | DeepSeek 直连基线 | **PASS（用户报告）**；1 次 SDK HTTP 请求尝试，prompt=57 / completion=19 tokens，`finish_reason=stop`，JSON 字段断言通过；执行时间未提供；未读取 Key |
 | 经 LiteLLM 的 T00-11 / 网关真实请求 | **NOT_RUN**；目前只有本地合成 PROXY_LOCAL 证据，未发送真实 provider 网关请求 |
 | 其他 provider 的 PROVIDER_REAL | **NOT_RUN** |
-| 最新 T00 PR CI（实现 SHA `ce8bec6`） | 两组 frontend、backend-and-release-gates 均通过；runs [38174225460](https://github.com/CoderLambert/news-aggregator/actions/runs/38174225460) 与 [38174228052](https://github.com/CoderLambert/news-aggregator/actions/runs/38174228052)，backend 各 `838 passed / 2 warnings`。更早 head 的一份重复 run 曾出现既有 SSE disconnect 测试 SQLite `OperationalError`，在无代码/断言变更下重跑通过 |
+| 当前 HEAD `ad0f14e` 的 PR CI | run [38187821128](https://github.com/CoderLambert/news-aggregator/actions/runs/38187821128) 的 frontend 与 backend-and-release-gates 均通过；run [38187824787](https://github.com/CoderLambert/news-aggregator/actions/runs/38187824787) 前端通过，后端 `test_simultaneous_database_connections_share_one_unique_task` 因 SQLite `OperationalError` 失败（847 passed）。因此 PR 当前 CI 未全绿；保留旧测试与断言，不用其它成功 run 覆盖该失败 |
 | T00 基线 CI 上下文（用户提供，只读） | HEAD `69e084e` 的 run `38136034042` backend-and-release-gates / frontend 均 success；较早 `38136011186` backend failure。它们不是 T00 手工网关验收结果 |
 | 旧聊天/研究/翻译测试基线 | 前一 T00 PR head `29d1fd9` 的两次 backend CI 均为 `838 passed / 2 warnings`，另有两次 frontend、release gates 均通过。早先 head `2ef40cd` 的重复 CI 曾分别出现一个订阅任务 SQLite `OperationalError`，随后在无业务代码改动的 head 上全量重跑通过；功能分支基线 `69e084e` 的 CI 也为 `838 passed / 2 warnings`。隔离工作区缺 pytest 和 frontend `node_modules`，未安装全项目依赖。历史 `219 passed / 3 warnings` 没有可恢复命令/报告；缺 chromadb 的 `82 passed / 23 failed` 不作产品基线 |
 | 旧测试断言 diff | `tests/` 与 `frontend/tests/` 无 diff；隔离探针、DeepSeek 直连及网关烟测自测最新为 57 项通过，没有放宽旧断言 |
@@ -64,7 +64,7 @@
 
 新建网关脚本另做了不调用模型的启动预检：临时 LiteLLM Proxy 健康就绪、loopback 端口绑定、内存生成受限项目 virtual key，`provider_request_count=0`，随后 Compose 清理通过。合并探针自测 `test_probe test_deepseek_smoke test_deepseek_gateway_smoke` 为 56 tests passed；`py_compile`、Compose config 和 `git diff --check` 均通过。本地全量运行的 `CLEANUP_COMPOSE_DOWN` 与 `CLEANUP_NO_PROJECT_RESOURCES_LEFT` 通过，containers=0、networks=0；日志和 CLI 输出无合成凭据。`provider_real` 仍为 `NOT_RUN`。
 
-2026-10-12 续跑同一组不联网自测，在源码 SHA `36a76c85470978bb6a2694a66e78599e648ea14c` 上结果为 `57 tests passed`。命令从 `tools/byok_t00_probe/` 执行 `python -m unittest test_probe test_deepseek_smoke test_deepseek_gateway_smoke`；三个套件仅使用 stub/mock，没有启动 Compose、读取真实 Key 或访问 Provider。当前 T00 分支 HEAD `51ee8856436c74d689d6eafa71af824d9a954437` 是证据文档更新。
+2026-10-12 在当前工作区 HEAD `ad0f14eb599ddbf8a691dc535227d7ef18298cb6` 复跑同一组不联网自测：`57 tests passed`。命令从 `tools/byok_t00_probe/` 执行 `/tmp/byok-t00-smoke-20261012/bin/python -m unittest -v test_probe test_deepseek_smoke test_deepseek_gateway_smoke`；三个套件仅使用 stub/mock，没有启动 Compose、读取真实 Key 或访问 Provider。当前 HEAD 的完整隔离合成探针也复跑为 `407 PASS / 0 FAIL / 407 checks`，退出码 0、`PROVIDER_REAL=NOT_RUN`，Compose cleanup 两项 PASS 且残留容器/网络为 0。该复核只保留本轮聚合结果；逐项脱敏机器证据仍由运行 L 的文件提供。
 
 脱敏机器结果：[T00-sdk-protocol-run-l-sanitized.json](../evidence/T00-sdk-protocol-run-l-sanitized.json)，源输出 SHA-256 `8fe6fe62c1a2808e877985492df36c65bdae2909fe56005fd48b903157492166`，脱敏副本 SHA-256 `679eff4382dd94c69c7ad39a78f4a0c650232e27426c09b8655dcaaa4344a192`。副本只保留检查 ID/状态、白名单路由事实和版本；不含 prompt、Key 或响应正文。
 
@@ -75,7 +75,7 @@
 | 路径 | 精确代码 / 环境 | 请求次数 |
 | --- | --- | --- |
 | 直连基线（已完成） | 用户报告的探针代码 SHA `02a693db37e6aed07ad3a7d46304a220a2f5a5f6`；隔离 Python 3.14.8 / OpenAI SDK 3.28.0 / httpx2 2.13.1；OpenAI Chat Completions SDK → DeepSeek 官方 API | 已观察到 1 次 SDK HTTP 尝试；结果 PASS，57 input / 19 completion tokens |
-| LiteLLM 网关（待用户执行） | 探针代码 SHA `36a76c85470978bb6a2694a66e78599e648ea14c`；LiteLLM Proxy v1.104.2 固定 image digest，Docker 29.7.2 / Compose 5.5.1；OpenAI SDK → loopback LiteLLM Proxy → DeepSeek 官方 API | SDK 到 loopback Proxy 的目标是 1 次；SDK retries=0、Proxy retries=0、fallbacks=0。真实 provider 上游尝试次数没有独立观测器 |
+| LiteLLM 网关（待用户执行） | 可执行工作区 HEAD `ad0f14eb599ddbf8a691dc535227d7ef18298cb6`（网关脚本最后改动于 `36a76c85470978bb6a2694a66e78599e648ea14c`，共享 DeepSeek smoke helper 最近改动于 `ce8bec6907a0015f14421e1cdd34e65d11c8706a`）；LiteLLM Proxy v1.104.2 固定 image digest，Docker 29.7.2 / Compose 5.5.1；OpenAI SDK → loopback LiteLLM Proxy → DeepSeek 官方 API | SDK 到 loopback Proxy 的目标是 1 次；SDK retries=0、Proxy retries=0、fallbacks=0。真实 provider 上游尝试次数没有独立观测器 |
 
 若运行待执行路径，本组累计目标为 2 次真实 provider 请求（直连已发生 1 次 + 网关计划 1 次）；本助手没有发出真实请求。网关初始化还会调用只限本机的健康检查和项目 virtual-key 管理 API，这些不访问 provider。模型为 `deepseek-flash`（DeepSeek-V4.1-Flash），协议为 OpenAI Chat Completions 非流式，官方 base URL 为 `https://api.deepseek.com`。以上模型 ID、端点与参数于 2026-10-12 依据官方模型/价格表、模型列表、Chat Completions 和 Thinking Mode 文档核对。
 
