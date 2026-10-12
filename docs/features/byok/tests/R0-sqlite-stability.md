@@ -26,7 +26,8 @@
 | 同一测试，文件型 SQLite 临时测试库 | 20/20 通过；检查 `PRAGMA database_list` 为文件路径，`PRAGMA journal_mode` 为 `wal` |
 | R0 定向锁分类与文件 WAL 写锁释放测试 | 8 passed；含共享缓存锁码、文件写锁释放、`SQLITE_CANTOPEN`、I/O、约束和非 SQLite backend 负例 |
 | `backend/api/tests/test_subscription_recovery.py` | 34 passed |
-| CI 三个测试根目录 | 845 passed，3 warnings，18.51 秒 |
+| 本地 CI 三个测试根目录 | 845 passed，3 warnings，18.51 秒 |
+| GitHub Actions（PR #44） | 两次 backend/release/frontend 检查均通过；Python 3.12.15 后端分别为 845 passed、2 warnings（31.35 秒 / 30.41 秒） |
 | Provider / 生产数据 / 发布 | NOT_RUN；全程使用临时 SQLite 与本地 fake |
 
 全量回归命令（仓库根目录；数据库、缓存、HOME 均在 `/tmp`）：
@@ -47,7 +48,7 @@ env -i \
 
 文件型 worker 回归通过仅位于 `/tmp` 的 pytest settings overlay 将 `TEST['NAME']` 指向专用 SQLite 文件；该库启用了项目同款 WAL 初始化配置。它验证生产数据库类型和锁语义，不连接、复制或改写任何运行数据库。
 
-CI 工作流使用 Python 3.12；本机验证使用共享只读 venv 的 Python 3.14.8。GitHub CI 尚待 PR 运行。首次全量测试命令遗漏 CI 的 `PYTHONPATH=backend:crawler`，在收集阶段因 `news_crawler` 不可导入而停止；修正环境后，全量结果如上。
+CI 工作流使用 Python 3.12；本机验证使用共享只读 venv 的 Python 3.14.8。PR #44 的两次 GitHub Actions 均已通过，包含 backend/release gates 与 frontend。首次全量测试命令遗漏 CI 的 `PYTHONPATH=backend:crawler`，在收集阶段因 `news_crawler` 不可导入而停止；修正环境后，全量结果如上。
 
 ## 结论边界
 
