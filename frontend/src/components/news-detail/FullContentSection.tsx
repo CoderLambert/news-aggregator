@@ -86,6 +86,7 @@ export default function FullContentSection({
       }
     : null)
   const content = showOriginal ? news.full_content : (currentText || news.full_content)
+  const privateTranslationNeedsPreference = privateTranslationError === '请先在 AI 设置中为“全文翻译”选择个人模型。'
   return (
     <div className="mb-8">
       <Toolbar
@@ -113,7 +114,12 @@ export default function FullContentSection({
       {allowTranslation && translationPaused && !translating && !translateError && (
         <TranslationPausedUI onResume={onResumeTranslation} />
       )}
-      {allowTranslation && translateError && <ErrorBanner message={translateError} onRetry={onRetryTranslate} />}
+      {allowTranslation && translateError && (
+        <section aria-label="站点翻译错误" className="mb-6">
+          <p className="mb-1 text-xs font-semibold text-red-700">站点翻译</p>
+          <ErrorBanner message={translateError} onRetry={onRetryTranslate} />
+        </section>
+      )}
 
       {allowPrivateTranslation && privateTranslationActive && (
         <section aria-label="个人模型翻译进度" className="mb-6 rounded-xl border border-violet-100 bg-violet-50/60 p-4">
@@ -134,7 +140,19 @@ export default function FullContentSection({
         </section>
       )}
       {allowPrivateTranslation && privateTranslationError && (
-        <p role="alert" className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{privateTranslationError}</p>
+        <div role="alert" aria-label="个人模型翻译错误" className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <p className="font-semibold">个人模型翻译</p>
+          {privateTranslationNeedsPreference ? (
+            <>
+              <p className="mt-1">尚未为个人模型翻译选择用途模型，本次任务未启动。</p>
+              <p className="mt-2">
+                <a href="/settings/ai" className="font-medium underline underline-offset-2">打开 AI 设置</a>
+                ，在“用途偏好”中为“全文翻译”选择模型，或选择“跟随默认”，然后点击“保存用途偏好”。
+              </p>
+              <p className="mt-1 text-xs">添加连接、添加模型或测试模型都不会自动更改用途选择。</p>
+            </>
+          ) : <p className="mt-1">{privateTranslationError}</p>}
+        </div>
       )}
       {allowPrivateTranslation && privateTranslationResult && privateTranslationResultCurrentMatch !== false
         && privateTranslationResultId !== resolvedCurrentTranslation?.resultId &&
