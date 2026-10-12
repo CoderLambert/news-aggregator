@@ -2,7 +2,7 @@
 
 > **READY FOR REVIEW（2026-10-12）**：模型目录、用户模型 CRUD、文本/工具显式探测和隔离 T00-G LiteLLM Proxy 联调均已实现。当前实现只开放服务端预批准的 DeepSeek Flash alias；手动模型 ID 可以保存，但没有预批准路由时不能测试。没有向真实供应商发请求。完整证据见 [Test T02](../tests/T02-models-and-tests.md)。
 
-本工作树基于 T01 PR #34 的提交 8eb383991e1a0b83de07dd34aa40d5721172e7df。T01 PR #34 与 T00-G PR #35 仍未合并；T02 的评审说明必须保留这两个前置依赖。T02 实现提交为 2bcf1cb22d4f0e070bedc0de14272a90cf4b325d（模型配置）和 80bc47180786071ba651ea256581dffad90c892a（显式探测）。
+本工作树已同步至 T01 PR #34 当前 HEAD `ed58afa7a72ae905e2a2ffc315d968ca3634b8f2`。T01 PR #34 与 T00-G PR #35 仍未合并；T02 的评审说明继续保留这两个前置依赖。原 T02 实现提交在重放后为 `6a4fd22c4f9f31644d0dcf37d4b99ca08bfe3946`（模型配置）和 `c6667e50be2e5509676d8bf5faf17d9e42f48d60`（显式探测）；审核修复提交为 `1540aaad1e9d08d55254832b454ac9b9701b1612`。
 
 | 属性 | 内容 |
 | --- | --- |

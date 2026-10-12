@@ -8,9 +8,10 @@
 
 | 项目 | 结果 |
 | --- | --- |
-| 父提交 / T01 PR | 8eb383991e1a0b83de07dd34aa40d5721172e7df / PR #34，Draft、未合并 |
-| T02 CRUD 提交 | 2bcf1cb22d4f0e070bedc0de14272a90cf4b325d |
-| T02 探测实现提交 | 80bc47180786071ba651ea256581dffad90c892a |
+| 父提交 / T01 PR | `ed58afa7a72ae905e2a2ffc315d968ca3634b8f2` / PR #34，Draft、未合并 |
+| T02 CRUD 提交（重放后） | `6a4fd22c4f9f31644d0dcf37d4b99ca08bfe3946` |
+| T02 探测实现提交（重放后） | `c6667e50be2e5509676d8bf5faf17d9e42f48d60` |
+| T02 审核修复提交 | `1540aaad1e9d08d55254832b454ac9b9701b1612` |
 | 分支 / PR 目标 | task/byok-T02-models-and-tests / feat/byok-user-api-keys |
 | T02 PR | [#36 Draft](https://github.com/CoderLambert/news-aggregator/pull/36) |
 | 前置网关 | T00-G PR #35，Draft、未合并；测试源码提交 89e1694f071601b85cb604d6551af7836917199a |
