@@ -10,6 +10,7 @@ from rest_framework import generics, filters, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
+from rest_framework.renderers import JSONRenderer
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django_filters import rest_framework as django_filters
@@ -147,6 +148,7 @@ def reciprocal_rank_fusion(*ranked_lists, k=60):
 
 
 class NewsListView(generics.ListAPIView):
+    renderer_classes = [JSONRenderer]
     serializer_class = NewsListSerializer
     pagination_class = StandardPagination
     filter_backends = [django_filters.DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
