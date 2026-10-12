@@ -39,6 +39,7 @@ def _import_settings(tmp_path, overrides=None, prelude=""):
         "'environment': s.DJANGO_ENV, 'debug': s.DEBUG, 'allowed_hosts': s.ALLOWED_HOSTS,\n" \
         "'csrf_origins': s.CSRF_TRUSTED_ORIGINS, 'site_mode': s.PUBLIC_SITE_MODE,\n" \
         "'signup': s.PUBLIC_SIGNUP_ENABLED, 'ai': s.PUBLIC_AI_ENABLED,\n" \
+        "'ai_byok': s.AI_BYOK_ENABLED,\n" \
         "'plan': s.CHATGPT_PLAN_USAGE_ENABLED, 'auth_mode': s.CHATGPT_AUTH_MODE,\n" \
         "'trusted_proxy': s.WAITRESS_TRUSTED_PROXY,\n" \
         "'cors_all': s.CORS_ALLOW_ALL_ORIGINS, 'cors_credentials': s.CORS_ALLOW_CREDENTIALS,\n" \
@@ -86,6 +87,7 @@ def test_production_defaults_fail_closed_and_set_browser_security(tmp_path):
     assert config["csrf_origins"] == ["https://news.lambert.host"]
     assert config["site_mode"] == "read_only"
     assert config["signup"] is config["ai"] is config["plan"] is False
+    assert config["ai_byok"] is False
     assert config["auth_mode"] == "disabled"
     assert config["trusted_proxy"] == "127.0.0.1"
     assert config["cors_all"] is config["cors_credentials"] is False
@@ -108,6 +110,7 @@ def test_production_accepts_only_explicit_fixed_origin_and_website_skeleton(tmp_
             "DJANGO_ALLOWED_HOSTS": "news.lambert.host",
             "DJANGO_CSRF_TRUSTED_ORIGINS": "https://news.lambert.host",
             "CHATGPT_AUTH_MODE": "website",
+            "AI_BYOK_ENABLED": "1",
         },
     )
     assert result.returncode == 0, result.stderr
@@ -115,6 +118,7 @@ def test_production_accepts_only_explicit_fixed_origin_and_website_skeleton(tmp_
     assert config["allowed_hosts"] == ["news.lambert.host"]
     assert config["csrf_origins"] == ["https://news.lambert.host"]
     assert config["auth_mode"] == "website"
+    assert config["ai_byok"] is True
 
 
 def test_production_does_not_import_or_call_dotenv(tmp_path):
@@ -146,6 +150,7 @@ import json, newsaggregator.settings as s
 print(json.dumps({'debug': s.DEBUG, 'hosts': s.ALLOWED_HOSTS,
 'csrf': s.CSRF_TRUSTED_ORIGINS, 'site': s.PUBLIC_SITE_MODE,
 'flags': [s.PUBLIC_SIGNUP_ENABLED, s.PUBLIC_AI_ENABLED, s.CHATGPT_PLAN_USAGE_ENABLED],
+'ai_byok': s.AI_BYOK_ENABLED,
 'auth': s.CHATGPT_AUTH_MODE, 'proxy': s.WAITRESS_TRUSTED_PROXY,
 'cors': [s.CORS_ALLOW_ALL_ORIGINS, s.CORS_ALLOW_CREDENTIALS]}))"""
     result = subprocess.run(
@@ -163,6 +168,7 @@ print(json.dumps({'debug': s.DEBUG, 'hosts': s.ALLOWED_HOSTS,
         ],
         "site": "full",
         "flags": [True, True, True],
+        "ai_byok": False,
         "auth": "local_oss",
         "proxy": None,
         "cors": [True, True],
@@ -184,6 +190,7 @@ print(json.dumps({'debug': s.DEBUG, 'hosts': s.ALLOWED_HOSTS,
         ("PUBLIC_SIGNUP_ENABLED", "true"),
         ("PUBLIC_AI_ENABLED", "false"),
         ("CHATGPT_PLAN_USAGE_ENABLED", "yes"),
+        ("AI_BYOK_ENABLED", "true"),
         ("DJANGO_ALLOWED_HOSTS", ""),
         ("DJANGO_ALLOWED_HOSTS", "*"),
         ("DJANGO_ALLOWED_HOSTS", "news.lambert.host,example.com"),

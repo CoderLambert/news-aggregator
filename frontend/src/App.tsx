@@ -22,6 +22,7 @@ const NewsDetail = lazy(() => import('@/pages/NewsDetail'))
 const FavoritesPage = lazy(() => import('@/pages/FavoritesPage'))
 const ProviderComparisons = lazy(() => import('@/pages/ProviderComparisons'))
 const ChatGPTSubscriptionSettings = lazy(() => import('@/pages/ChatGPTSubscriptionSettings'))
+const AIModelSettingsPage = lazy(() => import('@/pages/AIModelSettingsPage'))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
 const LocalSearch = lazy(() => import('@/pages/LocalSearch'))
 const CrawlerAdminPage = lazy(() => import('@/pages/admin/CrawlerAdminPage'))
@@ -74,6 +75,7 @@ export default function App() {
                         <Route path="/favorites" element={<FeatureRoute feature="favorites"><FavoritesPage /></FeatureRoute>} />
                         <Route path="/provider-comparisons" element={<FeatureRoute feature="provider_comparisons" requireSuperuser><ProviderComparisons /></FeatureRoute>} />
                         <Route path="/settings" element={<SettingsPage />} />
+                        <Route path="/settings/ai" element={<FeatureRoute feature="ai_byok"><AIModelSettingsPage /></FeatureRoute>} />
                         <Route path="/settings/chatgpt" element={<FeatureRoute feature="accounts"><FeatureRoute feature="chatgpt_subscription"><ChatGPTSubscriptionSettings /></FeatureRoute></FeatureRoute>} />
                         <Route path="/admin" element={<Navigate to="/admin/crawlers" replace />} />
                         <Route path="/admin/crawlers" element={<FeatureRoute feature="admin"><SuperuserRoute><CrawlerAdminPage /></SuperuserRoute></FeatureRoute>} />

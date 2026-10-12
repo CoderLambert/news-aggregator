@@ -26,6 +26,7 @@ export const CAPABILITY_FEATURE_NAMES = [
   'provider_comparisons',
   'admin',
   'chatgpt_subscription',
+  'ai_byok',
 ] as const
 
 export type CapabilityName = (typeof CAPABILITY_FEATURE_NAMES)[number]
@@ -37,6 +38,7 @@ export type CapabilityReason =
   | 'chatgpt_auth_disabled'
   | 'hosted_integration_unapproved'
   | 'chatgpt_plan_usage_disabled'
+  | 'byok_disabled'
   | 'capabilities_unavailable'
 
 export interface CapabilityFeature {
@@ -58,6 +60,7 @@ const CAPABILITY_REASONS = new Set<CapabilityReason>([
   'chatgpt_auth_disabled',
   'hosted_integration_unapproved',
   'chatgpt_plan_usage_disabled',
+  'byok_disabled',
   'capabilities_unavailable',
 ])
 
@@ -186,6 +189,116 @@ const apiLong = makeApi(180_000)
 export async function fetchCapabilities(): Promise<SiteCapabilities> {
   const value: unknown = (await api.get<unknown>('/capabilities/')).data
   return parseCapabilities(value)
+}
+
+export interface AIProviderProfile {
+  provider_id: string
+  provider_name: string
+  profile_id: string
+  region_name: string
+  base_url: string
+  version: number
+}
+
+export interface AIConnection {
+  id: string
+  provider_id: string
+  provider_name: string
+  endpoint_profile: string
+  region_name: string
+  display_name: string
+  key_saved: boolean
+  masked_key: string
+  is_enabled: boolean
+  verification_status: 'not_tested'
+  updated_at: string
+}
+
+export interface CreateAIConnectionInput {
+  provider_id: string
+  endpoint_profile: string
+  display_name: string
+  api_key: string
+}
+
+function parseAIProviderProfiles(value: unknown): AIProviderProfile[] {
+  if (!isRecord(value) || !Array.isArray(value.providers)) throw new TypeError('Invalid AI provider catalog')
+  return value.providers.map((entry): AIProviderProfile => {
+    if (!isRecord(entry) || typeof entry.provider_id !== 'string' || typeof entry.provider_name !== 'string' ||
+      typeof entry.profile_id !== 'string' || typeof entry.region_name !== 'string' ||
+      typeof entry.base_url !== 'string' || typeof entry.version !== 'number') {
+      throw new TypeError('Invalid AI provider catalog')
+    }
+    return {
+      provider_id: entry.provider_id,
+      provider_name: entry.provider_name,
+      profile_id: entry.profile_id,
+      region_name: entry.region_name,
+      base_url: entry.base_url,
+      version: entry.version,
+    }
+  })
+}
+
+function parseAIConnection(value: unknown): AIConnection {
+  if (!isRecord(value) || Object.keys(value).some((key) =>
+    ['api_key', 'raw_key', 'credential_ciphertext', 'encrypted_api_key'].includes(key)) ||
+    typeof value.id !== 'string' || typeof value.provider_id !== 'string' ||
+    typeof value.provider_name !== 'string' || typeof value.endpoint_profile !== 'string' ||
+    typeof value.region_name !== 'string' || typeof value.display_name !== 'string' ||
+    typeof value.key_saved !== 'boolean' || typeof value.masked_key !== 'string' ||
+    typeof value.is_enabled !== 'boolean' || value.verification_status !== 'not_tested' ||
+    typeof value.updated_at !== 'string') {
+    throw new TypeError('Invalid AI connection response')
+  }
+  return {
+    id: value.id,
+    provider_id: value.provider_id,
+    provider_name: value.provider_name,
+    endpoint_profile: value.endpoint_profile,
+    region_name: value.region_name,
+    display_name: value.display_name,
+    key_saved: value.key_saved,
+    masked_key: value.masked_key,
+    is_enabled: value.is_enabled,
+    verification_status: 'not_tested',
+    updated_at: value.updated_at,
+  }
+}
+
+export async function fetchAIProviderProfiles(signal?: AbortSignal): Promise<AIProviderProfile[]> {
+  const value: unknown = (await api.get<unknown>('/ai/providers/', { signal })).data
+  return parseAIProviderProfiles(value)
+}
+
+export async function fetchAIConnections(signal?: AbortSignal): Promise<AIConnection[]> {
+  const value: unknown = (await api.get<unknown>('/ai/connections/', { signal })).data
+  if (!isRecord(value) || !Array.isArray(value.connections)) throw new TypeError('Invalid AI connections response')
+  return value.connections.map(parseAIConnection)
+}
+
+export async function createAIConnection(input: CreateAIConnectionInput): Promise<AIConnection> {
+  const value: unknown = (await api.post<unknown>('/ai/connections/', input)).data
+  return parseAIConnection(value)
+}
+
+export async function replaceAIConnectionKey(connectionId: string, apiKey: string): Promise<AIConnection> {
+  const value: unknown = (await api.put<unknown>(`/ai/connections/${connectionId}/key/`, { api_key: apiKey })).data
+  return parseAIConnection(value)
+}
+
+export async function updateAIConnection(
+  connectionId: string,
+  patch: { display_name?: string; is_enabled?: boolean },
+): Promise<AIConnection> {
+  const value: unknown = (await api.patch<unknown>(`/ai/connections/${connectionId}/`, patch)).data
+  return parseAIConnection(value)
+}
+
+export async function deleteAIConnection(connectionId: string): Promise<{ deleted: boolean }> {
+  const value: unknown = (await api.delete<unknown>(`/ai/connections/${connectionId}/`)).data
+  if (!isRecord(value) || value.deleted !== true) throw new TypeError('Invalid AI delete response')
+  return { deleted: true }
 }
 
 // ---- News -----------------------------------------------------------------

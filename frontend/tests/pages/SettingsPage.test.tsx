@@ -30,6 +30,7 @@ describe('SettingsPage', () => {
     expect(screen.getByRole('heading', { name: '站点工具' })).toBeTruthy()
     expect(screen.getByRole('group', { name: '界面语言' })).toBeTruthy()
     expect(screen.getByRole('link', { name: '管理连接' }).getAttribute('href')).toBe('/settings/chatgpt')
+    expect(screen.getByRole('link', { name: '管理 API Key' }).getAttribute('href')).toBe('/settings/ai')
 
     fireEvent.click(screen.getByRole('button', { name: /双文/ }))
     expect(preferences.setDisplayMode).toHaveBeenCalledWith('bilingual')

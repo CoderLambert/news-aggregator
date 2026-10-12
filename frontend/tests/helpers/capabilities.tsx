@@ -11,6 +11,7 @@ const TEST_FEATURE_NAMES: CapabilityName[] = [
   'blocked_news', 'chat_history', 'fetch_full', 'translation', 'chat',
   'suggested_questions', 'tts', 'research', 'provider_comparisons', 'admin',
   'chatgpt_subscription',
+  'ai_byok',
 ]
 
 export function fullCapabilities(overrides: Partial<Record<CapabilityName, boolean>> = {}): SiteCapabilities {
