@@ -11,7 +11,7 @@
 | 对应测试 | [Test T03](../tests/T03-preferences.md) |
 | 本卡 PR | [#37 Draft](https://github.com/CoderLambert/news-aggregator/pull/37) |
 | PR base | `task/byok-T02-models-and-tests` @ `5fc323fb27da762885aa6d26f0efbca3b0b10bac`（stacked；依赖 Draft PR #36） |
-| 实现提交 | `4310d2143fe1ad748f264f421a5d500f3621abcd` |
+| 实现提交（重放后） | `b9fd6c0da76aca0bdbf82ae0864f1033b150210e` |
 
 ## 本次交付的完整功能
 
