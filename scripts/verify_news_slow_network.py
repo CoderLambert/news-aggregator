@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import time
+from unittest.mock import PropertyMock, patch
 from urllib.request import Request, urlopen
 from wsgiref.simple_server import WSGIServer, WSGIRequestHandler, make_server
 from socketserver import ThreadingMixIn
@@ -25,6 +26,10 @@ os.environ['DJANGO_SETTINGS_MODULE'] = 'newsaggregator.settings'
 os.environ['PYTEST_CURRENT_TEST'] = 'isolated_news_slow_network'
 os.environ['HF_HUB_OFFLINE'] = '1'
 os.environ['TRANSFORMERS_OFFLINE'] = '1'
+# Fail before any model load or inference, even if startup guards regress.
+preload_guard = patch('api.services.embedding.EmbeddingService.preload', side_effect=AssertionError('Model preload forbidden')).start()
+model_guard = patch('api.services.embedding.EmbeddingService.model', new_callable=PropertyMock, side_effect=AssertionError('Model load forbidden')).start()
+encode_guard = patch('api.services.embedding.EmbeddingService.encode', side_effect=AssertionError('Model inference forbidden')).start()
 
 
 def port():
@@ -50,6 +55,9 @@ with tempfile.TemporaryDirectory(prefix='news-summary-') as directory:
     settings.CHATGPT_DEPLOYMENT_INSTANCE_FILE = tmp / 'deployment-id'
     import django
     django.setup()
+    preload_guard.assert_not_called()
+    model_guard.assert_not_called()
+    encode_guard.assert_not_called()
     from django.core.management import call_command
     from django.core.wsgi import get_wsgi_application
     from django.utils import timezone
@@ -62,9 +70,24 @@ with tempfile.TemporaryDirectory(prefix='news-summary-') as directory:
             content='Synthetic article paragraph. ' * 500, content_zh='合成新闻段落。' * 500,
             full_content='complete full body ' * 1000, source=source, category=category,
             url=f'https://example.com/{i}', publish_time=timezone.now())
+    # Test-only reconstruction of the former list body, not a production legacy API.
+    from rest_framework.test import APIClient
+    from rest_framework.renderers import JSONRenderer
+    baseline_data = APIClient().get('/api/news/?page_size=20').data
+    bodies = {article.pk: article for article in News.objects.all()}
+    baseline_data['results'] = [{
+        ('content' if key == 'summary' else 'content_zh' if key == 'summary_zh' else key):
+        (bodies[item['id']].content if key == 'summary' else
+         bodies[item['id']].content_zh if key == 'summary_zh' else value)
+        for key, value in item.items()
+    } for item in baseline_data['results']]
+    legacy_fixture = JSONRenderer().render(baseline_data)
     app = get_wsgi_application()
 
     def upstream(environ, start_response):
+        if environ['PATH_INFO'] == '/api/test-baseline-news/':
+            start_response('200 OK', [('Content-Type', 'application/json')])
+            return [legacy_fixture]
         if environ['PATH_INFO'] == '/api/news/1/chat/':
             start_response('200 OK', [('Content-Type', 'text/event-stream')])
             return [b'data: synthetic\n\n']
@@ -110,11 +133,14 @@ await server.listen(); console.log('READY');
                 return response.read(), dict(response.headers)
         for attempt in range(50):
             try:
-                legacy, _ = request('/api/news/?page_size=20')
+                legacy, _ = request('/api/test-baseline-news/?page_size=20')
                 break
             except OSError:
                 time.sleep(.1)
-        compact, _ = request('/api/news/?representation=summary&page_size=20')
+        compact, _ = request('/api/news/?page_size=20')
+        explicit, _ = request('/api/news/?representation=summary&page_size=20')
+        assert explicit == compact
+        assert all(not {'content', 'content_zh', 'full_content'} & item.keys() for item in json.loads(compact)['results'])
         compressed, headers = request('/api/news/?representation=summary&page_size=20', 'gzip')
         assert headers.get('Content-Encoding') == 'gzip'
         assert 'Accept-Encoding' in headers.get('Vary', '')
@@ -147,7 +173,8 @@ await server.listen(); console.log('READY');
             cdp.send('Network.emulateNetworkConditions', {'offline':False,'latency':100,
                 'downloadThroughput':20480,'uploadThroughput':20480})
             tests = {
-                'legacy_10s_identity': "window.axios.get('/api/news/',{timeout:10000,params:{page_size:20,test_identity:1}}).then(r=>r.data)",
+                'legacy_fixture_10s_identity': "window.axios.get('/api/test-baseline-news/',{timeout:10000,params:{page_size:20,test_identity:1}}).then(r=>r.data)",
+                'default_list_10s_identity': "window.axios.get('/api/news/',{timeout:10000,params:{page_size:20,test_identity:1}}).then(r=>r.data)",
                 'summary_30s_identity': "window.api.fetchNews({page_size:20,test_identity:1})",
                 'summary_30s_gzip': "window.api.fetchNews({page_size:20})",
                 'summary_30s_delay12': "window.api.fetchNews({page_size:20,test_delay:12})",
@@ -156,13 +183,18 @@ await server.listen(); console.log('READY');
                 result = page.evaluate('''async expression => {const start=performance.now();try {const data=await eval(expression);return {outcome:'SUCCESS',ms:Math.round(performance.now()-start),count:data.results.length,hasBody:'content' in data.results[0]}} catch(e){return {outcome:'FAILURE',ms:Math.round(performance.now()-start),code:e.code,message:e.message}}}''', expression)
                 report[name] = result
                 print(name, json.dumps(result), flush=True)
-            assert report['legacy_10s_identity']['code'] == 'ECONNABORTED'
+            assert report['legacy_fixture_10s_identity']['code'] == 'ECONNABORTED'
             for name in tests:
-                if name.startswith('summary'):
+                if name.startswith('summary') or name.startswith('default_list'):
                     assert report[name]['outcome'] == 'SUCCESS'
                     assert report[name]['count'] == 20
                     assert report[name]['hasBody'] is False
             browser.close()
+        preload_guard.assert_not_called()
+        model_guard.assert_not_called()
+        encode_guard.assert_not_called()
+        report['model_preload_load_inference_guards'] = 'PASS: zero calls'
+        report['baseline_fixture'] = 'Former list reconstructed from synthetic full bodies; test-only endpoint'
         print(json.dumps(report, indent=2), flush=True)
         output = os.environ.get('NEWS_TEST_REPORT')
         if output:

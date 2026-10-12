@@ -10,12 +10,13 @@ from rest_framework import generics, filters, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django_filters import rest_framework as django_filters
 from .models import Category, Source, News, ChatSession, BlockedNews, ProviderComparison
 from .serializers import (
     CategorySerializer, SourceSerializer,
-    NewsListSerializer, NewsSummarySerializer, NewsDetailSerializer,
+    NewsListSerializer, NewsDetailSerializer,
     BlockedNewsSerializer,
     ProviderComparisonRunSerializer, ProviderComparisonSerializer,
 )
@@ -154,11 +155,6 @@ class NewsListView(generics.ListAPIView):
     ordering_fields = ['publish_time', 'created_at']
     ordering = ['-publish_time']
 
-    def get_serializer_class(self):
-        if self.request.query_params.get('representation') == 'summary':
-            return NewsSummarySerializer
-        return NewsListSerializer
-
     def get_ordering(self):
         """Map the product-level time sort without mutating DRF's request."""
         if (
@@ -183,6 +179,9 @@ class NewsListView(generics.ListAPIView):
         return qs
 
     def list(self, request, *args, **kwargs):
+        representation = request.query_params.get('representation', 'summary')
+        if representation != 'summary':
+            raise ValidationError({'representation': 'Only summary is supported; use the detail endpoint for complete content.'})
         search_query = request.query_params.get('search', '').strip()
         mode = request.query_params.get('mode', 'keyword').strip()
 

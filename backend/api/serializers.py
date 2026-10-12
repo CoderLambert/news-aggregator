@@ -20,13 +20,16 @@ class SourceSerializer(serializers.ModelSerializer):
 
 
 class NewsListSerializer(serializers.ModelSerializer):
+    """Bounded article previews; complete bodies belong to the detail endpoint."""
+    SUMMARY_LIMIT = 300
+    summary = serializers.SerializerMethodField()
+    summary_zh = serializers.SerializerMethodField()
     source_name = serializers.CharField(source='source.name', read_only=True)
     source_type = serializers.CharField(source='source.source_type', read_only=True)
     source_language = serializers.CharField(source='source.language', read_only=True)
     category_name = serializers.CharField(source='category.name', read_only=True)
     related_to = serializers.PrimaryKeyRelatedField(read_only=True)
-    # title / content are the ORIGINAL language values from DB
-    # title_zh / content_zh are Chinese translations (may be empty)
+    # Summaries preserve the original/translated language and may be empty.
     # Frontend resolves display based on displayMode (zh / original / bilingual)
     translation_status = serializers.CharField(read_only=True)
     translation_error = serializers.CharField(read_only=True)
@@ -41,7 +44,7 @@ class NewsListSerializer(serializers.ModelSerializer):
     class Meta:
         model = News
         fields = [
-            'id', 'title', 'content', 'title_zh', 'content_zh', 'author', 'publish_time',
+            'id', 'title', 'summary', 'title_zh', 'summary_zh', 'author', 'publish_time',
             'source', 'source_name', 'source_type', 'source_language',
             'category', 'category_name',
             'url', 'cover_image', 'created_at',
@@ -51,17 +54,6 @@ class NewsListSerializer(serializers.ModelSerializer):
             'full_content_fetch_provider', 'full_content_quality_score',
             'full_content_retry_count', 'last_full_content_attempt',
         ]
-
-
-class NewsSummarySerializer(NewsListSerializer):
-    """Opt-in list projection; detail and legacy list body contracts stay intact."""
-    SUMMARY_LIMIT = 300
-    summary = serializers.SerializerMethodField()
-    summary_zh = serializers.SerializerMethodField()
-
-    class Meta(NewsListSerializer.Meta):
-        fields = [field for field in NewsListSerializer.Meta.fields
-                  if field not in ('content', 'content_zh')] + ['summary', 'summary_zh']
 
     def get_summary(self, obj):
         return (obj.content or '')[:self.SUMMARY_LIMIT]

@@ -1,31 +1,39 @@
 {
   "legacy_bytes": 513599,
   "summary_bytes": 37599,
-  "nginx_gzip_bytes": 1144,
+  "nginx_gzip_bytes": 1147,
   "gzip_round_trip": "PASS",
   "detail_sse_private_uncompressed": "PASS",
-  "legacy_10s_identity": {
+  "legacy_fixture_10s_identity": {
     "outcome": "FAILURE",
-    "ms": 10001,
+    "ms": 10002,
     "code": "ECONNABORTED",
     "message": "timeout of 10000ms exceeded"
   },
+  "default_list_10s_identity": {
+    "outcome": "SUCCESS",
+    "ms": 1935,
+    "count": 20,
+    "hasBody": false
+  },
   "summary_30s_identity": {
     "outcome": "SUCCESS",
-    "ms": 1936,
+    "ms": 1975,
     "count": 20,
     "hasBody": false
   },
   "summary_30s_gzip": {
     "outcome": "SUCCESS",
-    "ms": 219,
+    "ms": 221,
     "count": 20,
     "hasBody": false
   },
   "summary_30s_delay12": {
     "outcome": "SUCCESS",
-    "ms": 12157,
+    "ms": 12155,
     "count": 20,
     "hasBody": false
-  }
+  },
+  "model_preload_load_inference_guards": "PASS: zero calls",
+  "baseline_fixture": "Former list reconstructed from synthetic full bodies; test-only endpoint"
 }

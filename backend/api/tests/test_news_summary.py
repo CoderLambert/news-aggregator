@@ -4,7 +4,7 @@ import pytest
 from django.utils import timezone
 from rest_framework.test import APIClient
 from api.models import Category, Source, News
-from api.serializers import NewsSummarySerializer
+from api.serializers import NewsListSerializer
 
 @pytest.fixture
 def articles(db):
@@ -21,7 +21,7 @@ def test_summary_boundaries(articles, body):
     article = articles[0]
     article.content = body
     article.content_zh = body
-    data = NewsSummarySerializer(article).data
+    data = NewsListSerializer(article).data
     assert data['summary'] == body[:300]
     assert data['summary_zh'] == body[:300]
     assert not {'content', 'content_zh', 'full_content', 'full_content_zh'} & data.keys()
@@ -30,16 +30,17 @@ def test_summary_boundaries(articles, body):
 def test_payload_detail_and_constant_queries(articles, django_assert_num_queries):
     client = APIClient()
     with django_assert_num_queries(2):
-        response = client.get('/api/news/?representation=summary&page_size=20')
+        response = client.get('/api/news/')
     assert response.status_code == 200
     assert response.data['count'] == 20
     assert len(response.data['results']) == 20
     with django_assert_num_queries(2):
         single = client.get('/api/news/?representation=summary&page_size=1')
     assert len(single.data['results']) == 1
-    legacy = client.get('/api/news/?page_size=20')
-    assert legacy.data['results'][0]['content'] == articles[-1].content
-    assert len(response.content) < len(legacy.content) / 5
+    explicit = client.get('/api/news/?representation=summary&page_size=20')
+    assert explicit.content == response.content
+    assert len(response.content) < 40_000
+    assert all(not {'content', 'content_zh', 'full_content'} & item.keys() for item in response.data['results'])
     assert len(gzip.compress(response.content, compresslevel=5)) < len(response.content) / 2
     detail = client.get(f'/api/news/{articles[0].pk}/')
     assert detail.data['content'] == articles[0].content
@@ -62,7 +63,8 @@ def test_summary_search_filter_pagination_and_fallback(articles):
 
 @pytest.mark.django_db
 @pytest.mark.parametrize('mode', ['semantic', 'hybrid'])
-def test_ranked_search_summary_uses_constant_queries(articles, mode, django_assert_num_queries):
+@pytest.mark.parametrize('representation', ['', '&representation=summary'])
+def test_ranked_search_summary_uses_constant_queries(articles, mode, representation, django_assert_num_queries):
     client = APIClient()
     with patch('api.services.search_index_control.index_version_is_current', return_value=True), \
          patch('api.services.embedding.EmbeddingService.is_loaded', return_value=True), \
@@ -71,8 +73,23 @@ def test_ranked_search_summary_uses_constant_queries(articles, mode, django_asse
         vector.return_value.search.return_value = [(article.pk, 0.9) for article in articles]
         expected_queries = 2 if mode == 'semantic' else 3
         with django_assert_num_queries(expected_queries):
-            response = client.get(f'/api/news/?representation=summary&search=paragraph&mode={mode}&page_size=20')
+            response = client.get(f'/api/news/?search=paragraph&mode={mode}&page_size=20{representation}')
         assert response.data['search_mode_applied'] == mode
         assert response.data['count'] == 20
         assert len(response.data['results']) == 20
         assert all('summary' in item and 'content' not in item for item in response.data['results'])
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('representation', ['', 'full', 'legacy', 'invalid', 'SUMMARY'])
+@pytest.mark.parametrize('mode', ['keyword', 'semantic', 'hybrid'])
+def test_invalid_representation_is_rejected_before_search(articles, representation, mode):
+    with patch('api.views.NewsListView._semantic_search') as semantic, \
+         patch('api.views.NewsListView._hybrid_search') as hybrid:
+        response = APIClient().get('/api/news/', {
+            'search': 'paragraph', 'mode': mode, 'representation': representation,
+        })
+    assert response.status_code == 400
+    assert 'representation' in response.data
+    semantic.assert_not_called()
+    hybrid.assert_not_called()
