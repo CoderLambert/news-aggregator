@@ -121,6 +121,7 @@ def ensure_full_content(news, execution_guard=None):
             news.url,
             expected_title=news.title,
             summary=news.content,
+            news=news,
             **({'execution_guard': execution_guard} if execution_guard is not None else {}),
         )
         if execution_guard is not None:
@@ -634,6 +635,7 @@ class NewsFetchFullView(generics.GenericAPIView):
                 url,
                 expected_title=news.title,
                 summary=news.content,
+                news=news,
             )
             if not result.markdown.strip():
                 raise FetchError('validation_failed:empty_article_body')

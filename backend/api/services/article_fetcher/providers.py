@@ -397,13 +397,6 @@ class TrustedNewsJinaProvider(JinaProvider):
     """Jina fallback restricted to explicitly reviewed public news domains."""
 
     name = 'trusted_news_jina'
-    allowed_domains = frozenset({
-        'bbc.co.uk',
-        'bbc.com',
-        'developer.chrome.com',
-        'technologyreview.com',
-        'venturebeat.com',
-    })
 
     def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None) -> FetchResult:
         try:
@@ -411,7 +404,7 @@ class TrustedNewsJinaProvider(JinaProvider):
             domain = normalize_domain(url)
             supported = (
                 parsed.scheme.lower() == 'https'
-                and domain in self.allowed_domains
+                and bool(domain)
                 and parsed.username is None
                 and parsed.password is None
                 and parsed.port in {None, 443}
@@ -420,14 +413,12 @@ class TrustedNewsJinaProvider(JinaProvider):
             domain = ''
             supported = False
         if not supported:
-            error = (
-                'not_trusted_news_article'
-                if domain not in self.allowed_domains
-                else 'unsupported_trusted_news_url'
-            )
-            return FetchResult(ok=False, provider=self.name, url=url, error=error)
+            return FetchResult(ok=False, provider=self.name, url=url, error='unsupported_trusted_news_url')
+        from api.services.article_fetch_monitor import observe_jina_candidate
+        if not observe_jina_candidate(domain):
+            return FetchResult(ok=False, provider=self.name, url=url, error='jina_policy_disabled')
         # Never disclose tracking/query values or fragments to the reader
-        # service.  The reviewed public article path is sufficient.
+        # service.  The explicitly enabled public article path is sufficient.
         target_url = parsed._replace(query='', fragment='').geturl()
         return self._fetch_jina(target_url, expected_title=expected_title, summary=summary)
 

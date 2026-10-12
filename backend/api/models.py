@@ -386,6 +386,59 @@ class ProviderComparison(models.Model):
         return f'{self.provider} {"ok" if self.ok else "failed"} {self.url}'
 
 
+class JinaFallbackPolicy(models.Model):
+    """Auditable, exact-domain allow-list for the production Jina fallback."""
+
+    domain = models.CharField(max_length=253, primary_key=True)
+    enabled = models.BooleanField(default=False, db_index=True)
+    auto_discovered = models.BooleanField(default=True)
+    failure_count = models.PositiveBigIntegerField(default=0)
+    last_failure_codes = models.JSONField(default=list, blank=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    updated_by = models.ForeignKey(
+        'auth.User', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='jina_fallback_policy_updates',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-last_seen_at', 'domain']
+        verbose_name = 'Jina 回退域名策略'
+        verbose_name_plural = 'Jina 回退域名策略'
+
+
+class ArticleFetchEvent(models.Model):
+    """Sanitized outcome for one complete full-article provider-chain run."""
+
+    OUTCOME_CHOICES = [
+        ('success', 'Success'),
+        ('failed', 'Failed'),
+    ]
+
+    news = models.ForeignKey(
+        News, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='full_content_fetch_events',
+    )
+    domain = models.CharField(max_length=253, db_index=True)
+    outcome = models.CharField(max_length=16, choices=OUTCOME_CHOICES, db_index=True)
+    provider = models.CharField(max_length=64, blank=True, default='', db_index=True)
+    failure_codes = models.JSONField(default=list, blank=True)
+    quality_score = models.FloatField(null=True, blank=True)
+    content_length = models.PositiveIntegerField(default=0)
+    elapsed_ms = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+        indexes = [
+            models.Index(fields=['domain', '-created_at'], name='idx_fetch_event_domain_time'),
+            models.Index(fields=['outcome', '-created_at'], name='idx_fetch_event_outcome_time'),
+        ]
+        verbose_name = '全文抓取事件'
+        verbose_name_plural = '全文抓取事件'
+
+
 class ChatGPTOAuthHost(models.Model):
     """Stable, opaque OAuth host identity for one deployment."""
 

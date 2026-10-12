@@ -5,6 +5,7 @@ import {
   RotateCcw, SearchCheck, Server, Square, TimerReset, XCircle,
 } from 'lucide-react'
 import AdminLayout from '@/components/admin/AdminLayout'
+import ArticleFetchMonitorSection from '@/components/admin/ArticleFetchMonitorSection'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -341,6 +342,8 @@ export default function CrawlerAdminPage() {
       </div>
 
       <SearchIndexSection />
+
+      <ArticleFetchMonitorSection />
 
       <section id="sources" className="mt-10 scroll-mt-20">
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3">

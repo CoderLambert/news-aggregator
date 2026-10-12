@@ -330,9 +330,12 @@ def test_venturebeat_jina_provider_rejects_non_https_urls_without_network():
     open_url.assert_not_called()
 
 
-def test_trusted_news_jina_provider_accepts_only_reviewed_https_article_paths():
+def test_trusted_news_jina_provider_accepts_enabled_https_article_paths():
     provider = TrustedNewsJinaProvider()
-    with patch.object(provider, '_fetch_jina', return_value=FetchResult(ok=True, provider=provider.name)) as fetch:
+    with (
+        patch('api.services.article_fetch_monitor.observe_jina_candidate', return_value=True),
+        patch.object(provider, '_fetch_jina', return_value=FetchResult(ok=True, provider=provider.name)) as fetch,
+    ):
         result = provider.fetch(
             'https://www.bbc.co.uk/news/articles/example?at_medium=RSS#section',
             expected_title='Example',
@@ -346,10 +349,9 @@ def test_trusted_news_jina_provider_accepts_only_reviewed_https_article_paths():
     )
 
 
-def test_trusted_news_jina_provider_rejects_unreviewed_or_unsafe_urls_without_network():
+def test_trusted_news_jina_provider_rejects_unsafe_urls_without_network():
     provider = TrustedNewsJinaProvider()
     urls = (
-        'https://example.com/article',
         'http://bbc.co.uk/news/article',
         'https://user:password@bbc.co.uk/news/article',
         'https://bbc.co.uk:8443/news/article',
@@ -358,11 +360,24 @@ def test_trusted_news_jina_provider_rejects_unreviewed_or_unsafe_urls_without_ne
         results = [provider.fetch(url) for url in urls]
 
     assert [result.error for result in results] == [
-        'not_trusted_news_article',
         'unsupported_trusted_news_url',
         'unsupported_trusted_news_url',
         'unsupported_trusted_news_url',
     ]
+    fetch.assert_not_called()
+
+
+def test_trusted_news_jina_provider_discovers_but_does_not_send_disabled_domain():
+    provider = TrustedNewsJinaProvider()
+    with (
+        patch('api.services.article_fetch_monitor.observe_jina_candidate', return_value=False) as observe,
+        patch.object(provider, '_fetch_jina') as fetch,
+    ):
+        result = provider.fetch('https://example.com/article')
+
+    assert result.ok is False
+    assert result.error == 'jina_policy_disabled'
+    observe.assert_called_once_with('example.com')
     fetch.assert_not_called()
 
 

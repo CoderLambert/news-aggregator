@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import socket
 import ssl
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 from django.test import override_settings
@@ -181,7 +181,10 @@ def test_production_trusted_news_jina_uses_safe_transport_and_strips_query(monke
     safe_open = Mock(return_value=StubResponse(body, {'content-type': 'text/plain; charset=utf-8'}))
     monkeypatch.setattr(providers, 'safe_urlopen', safe_open)
 
-    with override_settings(DJANGO_ENV='production'):
+    with (
+        override_settings(DJANGO_ENV='production'),
+        patch('api.services.article_fetch_monitor.observe_jina_candidate', return_value=True),
+    ):
         result = providers.TrustedNewsJinaProvider(timeout=12, retries=0).fetch(
             'https://www.bbc.co.uk/news/articles/example?at_medium=RSS#section',
             expected_title=title,

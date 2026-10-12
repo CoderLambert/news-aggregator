@@ -246,6 +246,7 @@ class TestNewsFetchFullView:
             news.url,
             expected_title=news.title,
             summary=news.content,
+            news=news,
         )
         news.refresh_from_db()
         assert news.full_content == 'FETCHED FULL BODY'

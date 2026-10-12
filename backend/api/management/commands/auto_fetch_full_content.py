@@ -85,6 +85,7 @@ def _fetch_one(news, providers_chain):
         expected_title=news.title,
         summary=news.content,
         providers=providers_chain,
+        news=news,
     )
     saved = mark_success(
         news,

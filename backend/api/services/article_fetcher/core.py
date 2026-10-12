@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from django.conf import settings
 
 from .providers import ScrapySubprocessProvider, _research_fetch_guard, default_providers
@@ -15,6 +17,7 @@ def fetch_article_markdown(
     summary: str | None = None,
     providers: list[ArticleProvider] | None = None,
     execution_guard=None,
+    news=None,
 ) -> FetchResult:
     """Fetch real article Markdown via provider chain.
 
@@ -23,13 +26,30 @@ def fetch_article_markdown(
     whether to persist; never create generated fallback content here.
     """
     chain = providers or default_providers()
+    started_at = time.monotonic()
+    news_id = getattr(news, 'pk', None)
+
+    def record(result: FetchResult | None, failures: list[FetchResult]) -> None:
+        if news_id is None:
+            return
+        from api.services.article_fetch_monitor import record_fetch_event
+        record_fetch_event(
+            url=url,
+            news_id=news_id,
+            result=result,
+            failures=failures,
+            elapsed_ms=round((time.monotonic() - started_at) * 1000),
+        )
+
     if settings.DJANGO_ENV == 'production':
         try:
             validate_public_url(url)
         except UnsafeURL as exc:
+            failures = [FetchResult(ok=False, provider='safe_http', url=url, error=str(exc))]
+            record(None, failures)
             raise FetchError(
                 '全部真实原文抓取方式失败，未写入 full_content。',
-                failures=[FetchResult(ok=False, provider='safe_http', url=url, error=str(exc))],
+                failures=failures,
             ) from None
 
     failures: list[FetchResult] = []
@@ -117,8 +137,10 @@ def fetch_article_markdown(
         result.content_length = len(result.markdown)
         if not result.extractor:
             result.extractor = result.provider
+        record(result, failures)
         return result
 
+    record(None, failures)
     raise FetchError('全部真实原文抓取方式失败，未写入 full_content。', failures=failures)
 
 

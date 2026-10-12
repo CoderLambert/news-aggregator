@@ -98,6 +98,7 @@ class Command(BaseCommand):
                     news.url,
                     expected_title=news.title,
                     summary=news.content,
+                    news=news,
                 )
                 if not mark_success(
                     news,

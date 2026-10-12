@@ -7,6 +7,7 @@ from . import search_index_views
 from . import health_views
 from . import capabilities_views
 from . import provider_credential_views
+from . import article_fetch_views
 
 urlpatterns = [
     path('capabilities/', capabilities_views.capabilities, name='capabilities'),
@@ -21,6 +22,9 @@ urlpatterns = [
     path('admin/crawler/runs/<uuid:run_id>/', crawler_views.CrawlRunDetailView.as_view(), name='crawler-admin-run-detail'),
     path('admin/crawler/runs/<uuid:run_id>/cancel/', crawler_views.CrawlRunCancelView.as_view(), name='crawler-admin-run-cancel'),
     path('admin/crawler/runs/<uuid:run_id>/retry/', crawler_views.CrawlRunRetryView.as_view(), name='crawler-admin-run-retry'),
+    path('admin/article-fetch/dashboard/', article_fetch_views.ArticleFetchDashboardView.as_view(), name='article-fetch-admin-dashboard'),
+    path('admin/article-fetch/policies/', article_fetch_views.JinaFallbackPolicyListView.as_view(), name='article-fetch-admin-policy-list'),
+    path('admin/article-fetch/policies/<str:domain>/', article_fetch_views.JinaFallbackPolicyDetailView.as_view(), name='article-fetch-admin-policy-detail'),
     path('admin/search-index/dashboard/', search_index_views.SearchIndexDashboardView.as_view(), name='search-index-admin-dashboard'),
     path('admin/search-index/settings/', search_index_views.SearchIndexSettingsView.as_view(), name='search-index-admin-settings'),
     path('admin/search-index/runs/', search_index_views.SearchIndexRunListCreateView.as_view(), name='search-index-admin-runs'),

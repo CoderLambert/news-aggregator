@@ -133,6 +133,7 @@ class Command(BaseCommand):
                     expected_title=news.title,
                     summary=news.content,
                     providers=providers_chain,
+                    news=news,
                 )
                 if not mark_success(
                     news,

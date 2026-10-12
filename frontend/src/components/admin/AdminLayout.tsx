@@ -1,10 +1,11 @@
-import { Activity, ArrowLeft, Database, History, SearchCheck } from 'lucide-react'
+import { Activity, ArrowLeft, Database, History, SearchCheck, ShieldCheck } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 const NAVIGATION = [
   { href: '#overview', label: '运行概览', icon: Activity },
   { href: '#search-index', label: '搜索索引', icon: SearchCheck },
+  { href: '#article-fetch', label: '全文监控', icon: ShieldCheck },
   { href: '#sources', label: '来源管理', icon: Database },
   { href: '#history', label: '抓取历史', icon: History },
 ] as const

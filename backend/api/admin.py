@@ -1,5 +1,12 @@
 from django.contrib import admin
-from .models import Category, LegacyChatArchive, News, Source
+from .models import (
+    ArticleFetchEvent,
+    Category,
+    JinaFallbackPolicy,
+    LegacyChatArchive,
+    News,
+    Source,
+)
 
 
 @admin.register(Category)
@@ -37,6 +44,46 @@ class LegacyChatArchiveAdmin(admin.ModelAdmin):
 
     def has_view_permission(self, request, obj=None):
         return bool(request.user.is_active and request.user.is_superuser and super().has_view_permission(request, obj))
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(JinaFallbackPolicy)
+class JinaFallbackPolicyAdmin(admin.ModelAdmin):
+    list_display = ['domain', 'enabled', 'auto_discovered', 'failure_count', 'last_seen_at', 'updated_at']
+    list_filter = ['enabled', 'auto_discovered']
+    search_fields = ['domain']
+    readonly_fields = [
+        'domain', 'auto_discovered', 'failure_count', 'last_failure_codes',
+        'last_seen_at', 'updated_by', 'created_at', 'updated_at',
+    ]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ArticleFetchEvent)
+class ArticleFetchEventAdmin(admin.ModelAdmin):
+    list_display = ['created_at', 'news_id', 'domain', 'outcome', 'provider', 'elapsed_ms', 'content_length']
+    list_filter = ['outcome', 'provider', 'created_at']
+    search_fields = ['domain', 'provider']
+    readonly_fields = [
+        'news', 'domain', 'outcome', 'provider', 'failure_codes', 'quality_score',
+        'content_length', 'elapsed_ms', 'created_at',
+    ]
 
     def has_add_permission(self, request):
         return False
