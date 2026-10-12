@@ -32,6 +32,17 @@ class SnapshotError(ValueError):
     """Raised when a snapshot or restore target is unsafe or inconsistent."""
 
 
+def _sqlite_error_details(exc: sqlite3.Error) -> str:
+    code = getattr(exc, "sqlite_errorcode", None)
+    name = getattr(exc, "sqlite_errorname", None)
+    details = [type(exc).__name__]
+    if isinstance(name, str):
+        details.append(f"name={name}")
+    if isinstance(code, int):
+        details.append(f"code={code}")
+    return ", ".join(details)
+
+
 def _regular_file(path: Path, label: str) -> Path:
     if path.is_symlink() or not path.is_file():
         raise SnapshotError(f"{label} must be a regular file")
@@ -125,14 +136,14 @@ def _open_readonly(path: Path) -> sqlite3.Connection:
         connection.execute("PRAGMA query_only=ON")
         return connection
     except sqlite3.Error as exc:
-        raise SnapshotError(f"could not open SQLite source ({type(exc).__name__})") from None
+        raise SnapshotError(f"could not open SQLite source ({_sqlite_error_details(exc)})") from None
 
 
 def _quick_check(connection: sqlite3.Connection) -> None:
     try:
         results = connection.execute("PRAGMA quick_check").fetchall()
     except sqlite3.Error as exc:
-        raise SnapshotError(f"SQLite quick_check failed ({type(exc).__name__})") from None
+        raise SnapshotError(f"SQLite quick_check failed ({_sqlite_error_details(exc)})") from None
     if results != [("ok",)]:
         raise SnapshotError("SQLite quick_check did not return exactly 'ok'")
 
@@ -365,7 +376,7 @@ def backup_database(source: Path, output: Path, release_manifest_path: Path) -> 
                     _quick_check(destination_connection)
                     migrations = _migration_rows(destination_connection)
                 except sqlite3.Error as exc:
-                    raise SnapshotError(f"SQLite online backup failed ({type(exc).__name__})") from None
+                    raise SnapshotError(f"SQLite online backup failed ({_sqlite_error_details(exc)})") from None
                 finally:
                     if destination_connection is not None:
                         destination_connection.close()
@@ -446,7 +457,7 @@ def _copy_to_temp(source: Path, directory: Path) -> Path:
         return temporary
     except sqlite3.Error as exc:
         temporary.unlink(missing_ok=True)
-        raise SnapshotError(f"SQLite restore staging failed ({type(exc).__name__})") from None
+        raise SnapshotError(f"SQLite restore staging failed ({_sqlite_error_details(exc)})") from None
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise

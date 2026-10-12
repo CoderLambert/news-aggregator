@@ -83,11 +83,16 @@ def test_complete_private_result_has_independent_public_copy_and_reuses_without_
     assert shared.get_shared_translation(article).content == public.content
 
 
-def test_anonymous_can_read_completed_public_copy_without_model_call(article):
+def test_completed_public_copy_requires_login_but_does_not_call_model(article):
     user, connection = reader('owner')
     save(user, connection, article)
+    assert APIClient().post(
+        f'/api/news/{article.pk}/translate/', {'force': False}, format='json',
+    ).status_code == 403
+    client = APIClient()
+    client.force_authenticate(user)
     with patch('api.views.get_clients', side_effect=AssertionError('must not check credentials')):
-        result = body(APIClient().post(f'/api/news/{article.pk}/translate/', {'force': False}, format='json'))
+        result = body(client.post(f'/api/news/{article.pk}/translate/', {'force': False}, format='json'))
     assert '完整的公共文章译文' in result
 
 
@@ -246,18 +251,21 @@ def test_force_request_uses_own_model_but_keeps_public_copy(article, monkeypatch
 
 @pytest.mark.parametrize('successful', [True, False])
 def test_generic_provider_only_publishes_whole_results_to_separate_table(article, successful):
-    def stream(_):
+    def stream(_, **_kwargs):
         yield '流式片段'
         if not successful:
             raise ValueError('mock interrupted response')
         yield '，完整文章的结尾。'
 
+    caller = get_user_model().objects.create_user(username=f'generic-provider-{successful}')
+    client = APIClient()
+    client.force_authenticate(caller)
     with (
         patch('api.views.get_clients', return_value=[(Mock(), 'model')]),
         patch('api.services.llm_translator.find_chinese_translation_link', return_value=None),
         patch('api.services.llm_translator._call_llm_stream', side_effect=stream),
     ):
-        result = body(APIClient().post(f'/api/news/{article.pk}/translate/', {'force': False}, format='json'))
+        result = body(client.post(f'/api/news/{article.pk}/translate/', {'force': False}, format='json'))
     article.refresh_from_db()
     assert article.full_content_zh == ''
     if successful:
@@ -288,11 +296,14 @@ def test_source_change_during_translated_link_fetch_returns_actionable_sse_error
         News.objects.filter(pk=article.pk).update(full_content='New source body')
         return '旧原文对应的中文链接内容'
 
+    caller = get_user_model().objects.create_user(username='translated-link-caller')
+    client = APIClient()
+    client.force_authenticate(caller)
     with (
         patch('api.services.llm_translator.find_chinese_translation_link', return_value='https://example.com/zh'),
         patch('api.services.llm_translator.fetch_and_verify_chinese_content', side_effect=fetched),
     ):
-        response = APIClient().post(f'/api/news/{article.pk}/translate/', {'force': False}, format='json')
+        response = client.post(f'/api/news/{article.pk}/translate/', {'force': False}, format='json')
     assert response.status_code == 200
     assert '原文已更新' in body(response)
     assert not SharedArticleTranslation.objects.exists()

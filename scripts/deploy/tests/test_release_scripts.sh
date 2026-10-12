@@ -118,6 +118,10 @@ case "$1" in
         touch "$MOCK_BACKUP_RAN_FILE"
         exit 0
         ;;
+      *'exec --user 10001:10001 mock-backup-container python /tmp/sqlite_stage.py --source-dir /source --destination-dir /tmp/source-copy'*)
+        touch "$MOCK_STAGE_RAN_FILE"
+        exit 0
+        ;;
       *'exec --user 10001:10001 mock-restore-container python /tmp/sqlite_snapshot.py restore'*)
         touch "$MOCK_RESTORE_RAN_FILE"
         exit 0
@@ -212,6 +216,7 @@ PY
 
 export MOCK_VOLUME_SNAPSHOT="$WORK_DIR/volume-snapshot.sqlite3"
 export MOCK_BACKUP_RAN_FILE="$WORK_DIR/backup-helper-ran"
+export MOCK_STAGE_RAN_FILE="$WORK_DIR/sqlite-stage-ran"
 export MOCK_RESTORE_RAN_FILE="$WORK_DIR/restore-helper-ran"
 chmod 600 "$WORK_DIR/release.json"
 "$DEPLOY_DIR/backup.sh" --execute --volume newshub-test_db-data \
@@ -219,6 +224,7 @@ chmod 600 "$WORK_DIR/release.json"
     --filename volume-copy.sqlite3 --output-dir "$WORK_DIR/out" \
     --manifest "$WORK_DIR/release.json" >/dev/null
 [[ -f "$MOCK_BACKUP_RAN_FILE" ]] || { printf 'test_release_scripts: non-root backup helper did not run.\n' >&2; exit 1; }
+[[ -f "$MOCK_STAGE_RAN_FILE" ]] || { printf 'test_release_scripts: stopped SQLite files were not staged.\n' >&2; exit 1; }
 [[ "$(stat -c '%a' "$WORK_DIR/release.json")" == 600 ]] \
     || { printf 'test_release_scripts: backup staging changed the host manifest mode.\n' >&2; exit 1; }
 [[ "$(stat -c '%a' "$WORK_DIR/out/volume-copy.sqlite3")" == 600 ]] \
@@ -229,7 +235,9 @@ grep -Eq '^create --pull=never --network none --user 10001:10001 --entrypoint py
     || { printf 'test_release_scripts: backup helper create argv is incorrect.\n' >&2; exit 1; }
 grep -Eq '^exec --user 0:0 mock-backup-container python -c .*os.chown\(path,10001,10001\).*os.chmod\(path,0o600\)' "$DOCKER_LOG" \
     || { printf 'test_release_scripts: backup manifest was not privately staged for UID 10001.\n' >&2; exit 1; }
-grep -Eq '^exec --user 10001:10001 mock-backup-container python /tmp/sqlite_snapshot.py backup --source /source/db.sqlite3 --output /tmp/snapshot.sqlite3 --release-manifest /tmp/release-manifest.json$' "$DOCKER_LOG" \
+grep -Eq '^exec --user 10001:10001 mock-backup-container python /tmp/sqlite_stage.py --source-dir /source --destination-dir /tmp/source-copy$' "$DOCKER_LOG" \
+    || { printf 'test_release_scripts: backup helper did not capture exact SQLite members as UID 10001.\n' >&2; exit 1; }
+grep -Eq '^exec --user 10001:10001 mock-backup-container python /tmp/sqlite_snapshot.py backup --source /tmp/source-copy/db.sqlite3 --output /tmp/snapshot.sqlite3 --release-manifest /tmp/release-manifest.json$' "$DOCKER_LOG" \
     || { printf 'test_release_scripts: backup helper did not run exact argv as UID 10001.\n' >&2; exit 1; }
 if grep -Eq 'python python /tmp/sqlite_snapshot.py' "$DOCKER_LOG"; then
     printf 'test_release_scripts: backup helper argv repeats the interpreter.\n' >&2

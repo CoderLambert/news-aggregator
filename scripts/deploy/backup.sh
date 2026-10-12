@@ -21,7 +21,8 @@ Usage:
   backup.sh [--execute] --volume VOLUME --image IMAGE --sha 40-HEX-SHA \
       --filename NAME.sqlite3 --output-dir DIR --manifest release.json
 
-The default is a dry run. Volume snapshots use SQLite's online backup API from a read-only mount.
+The default is a dry run. Stopped volume members are captured into private writable
+staging before SQLite's online backup API creates the verified snapshot.
 EOF
 }
 
@@ -119,6 +120,7 @@ chmod 700 "$WORK_DIR"
 container_args=(
     docker create --pull=never --network none --user 10001:10001 --entrypoint python
     --mount "type=volume,source=$VOLUME,target=/source,readonly"
+    --mount "type=bind,source=$SCRIPT_DIR/sqlite_stage.py,target=/tmp/sqlite_stage.py,readonly"
     --mount "type=bind,source=$SCRIPT_DIR/sqlite_snapshot.py,target=/tmp/sqlite_snapshot.py,readonly"
     "$IMAGE" -c 'import time; time.sleep(300)'
 )
@@ -130,8 +132,11 @@ docker cp "$MANIFEST" "$CONTAINER_ID:/tmp/release-manifest.json" >/dev/null \
 prepare_code='import os,sys; [(os.chown(path,10001,10001), os.chmod(path,0o600)) for path in sys.argv[1:]]'
 docker exec --user 0:0 "$CONTAINER_ID" python -c "$prepare_code" /tmp/release-manifest.json \
     || fail 'could not prepare the private release manifest in the isolated helper.'
+docker exec --user 10001:10001 "$CONTAINER_ID" python /tmp/sqlite_stage.py \
+    --source-dir /source --destination-dir /tmp/source-copy \
+    || fail 'could not capture stable SQLite source members in writable staging.'
 docker exec --user 10001:10001 "$CONTAINER_ID" python /tmp/sqlite_snapshot.py backup \
-    --source /source/db.sqlite3 --output /tmp/snapshot.sqlite3 \
+    --source /tmp/source-copy/db.sqlite3 --output /tmp/snapshot.sqlite3 \
     --release-manifest /tmp/release-manifest.json \
     || fail 'SQLite volume backup helper failed.'
 docker cp "$CONTAINER_ID:/tmp/snapshot.sqlite3" "$WORK_DIR/$FILENAME" >/dev/null \

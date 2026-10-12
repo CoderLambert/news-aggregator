@@ -17,6 +17,11 @@ from api.services.chat_history import (
 )
 
 
+@pytest.fixture(autouse=True)
+def configured_global_provider(monkeypatch):
+    monkeypatch.setattr('api.views.get_clients', lambda: [(object(), 'test-model')])
+
+
 @pytest.fixture
 def chat_news(db):
     category = Category.objects.create(name='Chat ownership', slug='chat-ownership')

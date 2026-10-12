@@ -25,6 +25,11 @@ from api.models import News, Source, Category
 from api.services.article_fetcher import FetchError, FetchResult
 
 
+@pytest.fixture(autouse=True)
+def configured_global_provider(monkeypatch):
+    monkeypatch.setattr('api.views.get_clients', lambda: [(object(), 'test-model')])
+
+
 @pytest.fixture
 def src(db):
     return Source.objects.create(name='TestSource', url='https://example.com')
@@ -285,7 +290,7 @@ class TestChatAutoFetch:
         fake_client = MagicMock()
         fake_client.chat.completions.create = fake_stream
 
-        def fake_stream_chat(messages, max_tokens=32000, temperature=0.3):
+        def fake_stream_chat(messages, max_tokens=32000, temperature=0.3, **_kwargs):
             yield '回答'
 
         result = FetchResult(ok=True, provider='jina', url=n.url, title=n.title, markdown='FETCHED_FULL_BODY')
@@ -319,7 +324,7 @@ class TestChatAutoFetch:
         fake_client = MagicMock()
         fake_client.chat.completions.create = fake_stream
 
-        def fake_stream_chat(messages, max_tokens=32000, temperature=0.3):
+        def fake_stream_chat(messages, max_tokens=32000, temperature=0.3, **_kwargs):
             yield '回答'
 
         result = FetchResult(ok=True, provider='jina', url=n.url, title=n.title, markdown='FETCHED_FULL_BODY')
@@ -341,6 +346,7 @@ class TestChatAutoFetch:
 class TestSuggestedQuestionsAutoFetch:
     def test_suggested_questions_auto_fetches_too(self, src, cat, client):
         n = _news(src, cat)
+        client.force_login(User.objects.create_user(username='suggested-context-user'))
 
         captured = {}
 
@@ -375,7 +381,7 @@ class TestSuggestedQuestionsAutoFetch:
         n = _news(src, cat, full_content='Some content here')
         client.force_login(User.objects.create_user(username='chat-context-fallback'))
 
-        def failing_stream_chat(messages, max_tokens=32000, temperature=0.3):
+        def failing_stream_chat(messages, max_tokens=32000, temperature=0.3, **_kwargs):
             yield '抱歉，AI 服务暂时不可用，请稍后再试。'
 
         with patch('api.views.stream_chat', side_effect=failing_stream_chat):

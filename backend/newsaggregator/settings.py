@@ -63,6 +63,12 @@ SECRET_KEY = _RUNTIME_CONFIG.secret_key
 # Subscription tokens need a stable key across process restarts. In local mode
 # this defaults only to the explicitly configured stable Django secret.
 CHATGPT_TOKEN_ENCRYPTION_KEY = _env('CHATGPT_TOKEN_ENCRYPTION_KEY') or _env('DJANGO_SECRET_KEY')
+# Personal provider API keys use an independent HKDF context. Deployments may
+# rotate them separately, while existing installs retain a stable fallback.
+PROVIDER_CREDENTIAL_ENCRYPTION_KEY = (
+    _env('PROVIDER_CREDENTIAL_ENCRYPTION_KEY')
+    or CHATGPT_TOKEN_ENCRYPTION_KEY
+)
 CHATGPT_AGENT_NAME_HINT = _env('CHATGPT_AGENT_NAME_HINT', 'News Aggregator')
 CHATGPT_DEPLOYMENT_INSTANCE_ID = _env('CHATGPT_DEPLOYMENT_INSTANCE_ID')
 CHATGPT_DEPLOYMENT_INSTANCE_FILE = Path(

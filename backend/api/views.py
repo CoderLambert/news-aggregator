@@ -700,11 +700,8 @@ class NewsTranslateFullView(generics.GenericAPIView):
     """Translate full article content to Chinese using SSE streaming."""
     queryset = News.objects.select_related('source', 'category').all()
     serializer_class = NewsDetailSerializer
-    permission_classes = []
-
-    @method_decorator(csrf_exempt)
-    def dispatch(self, *args, **kwargs):
-        return super().dispatch(*args, **kwargs)
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
         """Translate full article content to Chinese using SSE streaming."""
@@ -717,9 +714,11 @@ class NewsTranslateFullView(generics.GenericAPIView):
 
         force = request.data.get('force', False)
 
-        # Personal results take precedence; public copies are a separate fallback.
+        # A personally configured API key takes precedence over a subscription.
+        from api.services.provider_credentials import has_personal_credential
         from api.services.chatgpt_subscription import active_connection_for_user
-        if active_connection_for_user(request.user) is not None:
+        personal_configured = has_personal_credential(request.user)
+        if not personal_configured and active_connection_for_user(request.user) is not None:
             from api.subscription_views import subscription_translation_response
             return subscription_translation_response(request, news, force=force)
 
@@ -772,10 +771,28 @@ class NewsTranslateFullView(generics.GenericAPIView):
         # Keep the SSE error shape expected by the frontend, but make missing
         # provider configuration actionable instead of persisting a fallback
         # sentence as if it were translated content.
-        if not worker_in_flight and not get_clients():
+        provider_clients = []
+        if not worker_in_flight:
+            try:
+                if personal_configured:
+                    from api.services.provider_credentials import personal_clients_for_user
+                    provider_clients = personal_clients_for_user(request.user)
+                else:
+                    provider_clients = get_clients()
+            except Exception as exc:
+                from api.services.provider_credentials import ProviderCredentialError
+                if not isinstance(exc, ProviderCredentialError):
+                    raise
+                credential_error = str(exc)
+
+                def credential_error_stream():
+                    yield f"data: {json_lib.dumps({'error': credential_error}, ensure_ascii=False)}\n\n"
+                return StreamingHttpResponse(credential_error_stream(), content_type='text/event-stream')
+
+        if not worker_in_flight and not provider_clients:
             def provider_error_stream():
                 message = (
-                    '未配置全文翻译模型提供方：请前往「设置 → ChatGPT 订阅」连接当前用户自己的 ChatGPT 账号并选择模型；也可由站点管理员配置 Volcengine ARK / DashScope API Key。'
+                    '未配置全文翻译模型提供方：请前往「设置」配置当前用户自己的 Volcengine ARK / DashScope API Key。'
                 )
                 yield f"data: {json_lib.dumps({'error': message}, ensure_ascii=False)}\n\n"
             return StreamingHttpResponse(provider_error_stream(), content_type='text/event-stream')
@@ -808,7 +825,10 @@ class NewsTranslateFullView(generics.GenericAPIView):
                     provider='llm', lease=shared_lease,
                 )
 
-        job = start_or_get_job(news_pk, prompt, persist_progress, shared_lease=shared_lease)
+        job = start_or_get_job(
+            news_pk, prompt, persist_progress,
+            shared_lease=shared_lease, clients=provider_clients,
+        )
 
         def translate_stream():
             sent_len = 0
@@ -909,6 +929,28 @@ class NewsChatView(generics.GenericAPIView):
             return Response(
                 {'error_code': 'invalid_question', 'error': '问题必须是非空文本'},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from api.services.chatgpt_subscription import active_connection_for_user, stream_chat_response
+        from api.services.provider_credentials import ProviderCredentialError, personal_clients_for_user
+        try:
+            personal_clients = personal_clients_for_user(request.user)
+        except ProviderCredentialError as exc:
+            return Response(
+                {'error_code': 'provider_credential_unavailable', 'error': str(exc)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        subscription_connection = None if personal_clients else active_connection_for_user(request.user)
+        provider_clients = personal_clients
+        if not provider_clients and subscription_connection is None:
+            provider_clients = get_clients()
+        if not provider_clients and subscription_connection is None:
+            return Response(
+                {
+                    'error_code': 'provider_credential_required',
+                    'error': '请先前往「设置」配置自己的模型 API Key。',
+                },
+                status=status.HTTP_409_CONFLICT,
             )
 
         # Auto-fetch full article on first chat — so users don't have to click
@@ -1016,9 +1058,6 @@ class NewsChatView(generics.GenericAPIView):
         for msg in chat_snapshot.messages[-20:]:
             messages.append(msg)
 
-        from api.services.chatgpt_subscription import active_connection_for_user, stream_chat_response
-        subscription_connection = active_connection_for_user(request.user)
-
         def generate():
             full_response = []
             try:
@@ -1033,7 +1072,10 @@ class NewsChatView(generics.GenericAPIView):
                 chunks = (
                     stream_chat_response(subscription_connection, messages)
                     if subscription_connection is not None
-                    else stream_chat(messages, max_tokens=16000, temperature=0.7)
+                    else stream_chat(
+                        messages, max_tokens=16000, temperature=0.7,
+                        clients=provider_clients,
+                    )
                 )
                 for chunk in chunks:
                     full_response.append(chunk)
@@ -1094,11 +1136,8 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
     by NewsChatView, so there's no new API key or model to configure.
     """
     queryset = News.objects.select_related('source', 'category').all()
-    permission_classes = []
-
-    @method_decorator(csrf_exempt)
-    def dispatch(self, *args, **kwargs):
-        return super().dispatch(*args, **kwargs)
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
         import json
@@ -1139,8 +1178,18 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
         try:
             from api.services.chatgpt_subscription import active_connection_for_user, stream_chat_response
 
-            connection = active_connection_for_user(request.user)
-            if connection is not None:
+            from api.services.provider_credentials import personal_clients_for_user
+            personal_clients = personal_clients_for_user(request.user)
+            connection = None if personal_clients else active_connection_for_user(request.user)
+            if personal_clients:
+                client, model = personal_clients[0]
+                completion = client.chat.completions.create(
+                    model=model,
+                    messages=[{'role': 'user', 'content': prompt}],
+                    temperature=0.6,
+                )
+                raw = completion.choices[0].message.content or ''
+            elif connection is not None:
                 raw = ''.join(stream_chat_response(
                     connection,
                     [{'role': 'user', 'content': prompt}],
@@ -1177,7 +1226,9 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
         except Exception as e:
             # Fall back silently — UX should never show "loading questions failed"
             import logging
-            logging.getLogger(__name__).warning('suggested-questions LLM failed: %s', e)
+            logging.getLogger(__name__).warning(
+                'suggested-questions LLM failed (%s)', type(e).__name__,
+            )
             return Response({'questions': SUGGESTED_QUESTIONS_FALLBACK})
 
 
@@ -1559,7 +1610,8 @@ class NewsTTSView(generics.GenericAPIView):
     Returns audio/mpeg stream. Supports caching — repeat requests serve from cache.
     """
     queryset = News.objects.select_related('source', 'category').all()
-    permission_classes = []
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
         import asyncio

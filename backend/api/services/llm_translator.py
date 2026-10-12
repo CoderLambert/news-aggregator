@@ -306,7 +306,7 @@ def fetch_and_verify_chinese_content(url: str) -> str:
         return ''
 
 
-def _call_llm_stream(prompt: str, max_tokens: int = 32000):
+def _call_llm_stream(prompt: str, max_tokens: int = 32000, *, clients=None):
     """Call the LLM API with streaming response, using provider failover.
 
     Yields chunks of translated text.
@@ -315,17 +315,25 @@ def _call_llm_stream(prompt: str, max_tokens: int = 32000):
         {'role': 'system', 'content': TRANSLATION_SYSTEM},
         {'role': 'user', 'content': prompt}
     ]
-    yield from stream_chat(messages, max_tokens, require_completed=True)
+    yield from stream_chat(messages, max_tokens, require_completed=True, clients=clients)
 
 
-def stream_chat(messages: list, max_tokens: int = 32000, temperature: float = 0.3, enable_search: bool = False, require_completed: bool = False):
+def stream_chat(
+    messages: list,
+    max_tokens: int = 32000,
+    temperature: float = 0.3,
+    enable_search: bool = False,
+    require_completed: bool = False,
+    *,
+    clients=None,
+):
     """Generic streaming chat with provider failover + per-provider retry.
 
     Yields chunks of text.  On total failure, yields a single fallback message.
     """
     MAX_RETRIES = 2  # per provider
 
-    clients = get_clients()
+    clients = get_clients() if clients is None else clients
     if not clients:
         yield "抱歉，当前 AI 服务暂时不可用，请稍后再试。"
         return
@@ -364,7 +372,7 @@ def stream_chat(messages: list, max_tokens: int = 32000, temperature: float = 0.
                 if require_completed and got_any:
                     # Never append a second provider's output to a partial article.
                     raise ValueError('全文翻译响应中断或未完整完成，请重试。') from e
-                last_err = f"provider#{idx} ({model}) attempt {attempt}/{MAX_RETRIES} failed: {e}"
+                last_err = f"provider#{idx} ({model}) attempt {attempt}/{MAX_RETRIES} failed ({type(e).__name__})"
                 logger.warning(last_err)
                 # Retry on transient errors (SSL, timeout, connection reset)
                 is_transient = any(kw in str(e).lower() for kw in [
@@ -378,8 +386,10 @@ def stream_chat(messages: list, max_tokens: int = 32000, temperature: float = 0.
                 if stream is not None and hasattr(stream, 'close'):
                     stream.close()
 
-    logger.error(f"All LLM providers failed. Last error: {last_err}")
-    yield f"抱歉，AI 服务暂时不可用（{last_err}），请稍后再试。"
+    logger.error("All LLM providers failed. Last error: %s", last_err)
+    # Upstream exception text can contain request metadata. Record only its
+    # sanitized type above and never stream raw details to the browser.
+    yield "抱歉，AI 服务暂时不可用，请稍后再试。"
 
 
 def _call_llm(prompt: str, max_tokens: int = 32000) -> tuple:
@@ -413,7 +423,7 @@ def _call_llm(prompt: str, max_tokens: int = 32000) -> tuple:
                 last_err = f"provider#{idx} ({model}) returned empty content"
                 break  # don't retry empty content
             except Exception as e:
-                last_err = f"provider#{idx} ({model}) attempt {attempt}/{MAX_RETRIES} failed: {e}"
+                last_err = f"provider#{idx} ({model}) attempt {attempt}/{MAX_RETRIES} failed ({type(e).__name__})"
                 logger.warning(last_err)
                 is_transient = any(kw in str(e).lower() for kw in [
                     'ssl', 'eof', 'timeout', 'connection', 'reset', 'broken pipe',
@@ -423,7 +433,7 @@ def _call_llm(prompt: str, max_tokens: int = 32000) -> tuple:
                     continue
                 break
 
-    logger.error(f'All LLM providers failed. Last error: {last_err}')
+    logger.error('All LLM providers failed. Last error: %s', last_err)
     return ('', last_err or '未知错误')
 
 

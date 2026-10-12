@@ -56,6 +56,12 @@ def _feature_snapshot() -> dict[str, dict[str, object]]:
         for name in AI_FEATURE_NAMES:
             features[name] = _feature(False, "ai_disabled")
 
+    # The production research write endpoints deliberately fail closed until
+    # the hosted integration is approved. Do not advertise a launcher that can
+    # only return 503 when the other BYOK-backed AI features are enabled.
+    if settings.DJANGO_ENV == "production":
+        features["research"] = _feature(False, "hosted_integration_unapproved")
+
     if settings.CHATGPT_AUTH_MODE == "disabled":
         features["chatgpt_subscription"] = _feature(False, "chatgpt_auth_disabled")
     elif settings.CHATGPT_AUTH_MODE == "website":

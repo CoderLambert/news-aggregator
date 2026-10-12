@@ -386,6 +386,50 @@ export function fetchMe(): Promise<unknown> {
   return api.get<unknown>('/auth/me/').then(({ data }) => data)
 }
 
+// ---- Personal model provider credential ----------------------------------
+
+export type PersonalProvider = 'volcengine' | 'dashscope'
+
+export interface ProviderCredentialStatus {
+  configured: boolean
+  provider: PersonalProvider | null
+  providerLabel: string | null
+  updatedAt: string | null
+}
+
+function parseProviderCredentialStatus(value: unknown): ProviderCredentialStatus {
+  if (!isRecord(value) || typeof value.configured !== 'boolean') {
+    throw new TypeError('Invalid provider credential response')
+  }
+  const provider = value.provider === 'volcengine' || value.provider === 'dashscope'
+    ? value.provider
+    : null
+  if (value.configured && provider === null) throw new TypeError('Invalid provider credential response')
+  return {
+    configured: value.configured,
+    provider,
+    providerLabel: typeof value.provider_label === 'string' ? value.provider_label : null,
+    updatedAt: typeof value.updated_at === 'string' ? value.updated_at : null,
+  }
+}
+
+export async function fetchProviderCredentialStatus(signal?: AbortSignal): Promise<ProviderCredentialStatus> {
+  return parseProviderCredentialStatus((await api.get<unknown>('/provider-credential/', { signal })).data)
+}
+
+export async function saveProviderCredential(
+  provider: PersonalProvider,
+  apiKey: string,
+): Promise<ProviderCredentialStatus> {
+  return parseProviderCredentialStatus((await api.put<unknown>(
+    '/provider-credential/', { provider, api_key: apiKey },
+  )).data)
+}
+
+export async function deleteProviderCredential(): Promise<ProviderCredentialStatus> {
+  return parseProviderCredentialStatus((await api.delete<unknown>('/provider-credential/')).data)
+}
+
 // ---- Local ChatGPT subscription ------------------------------------------
 
 export interface ChatGPTSubscriptionConnection {

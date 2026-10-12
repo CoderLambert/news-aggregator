@@ -12,6 +12,7 @@ import threading
 from unittest.mock import patch
 
 import pytest
+from django.contrib.auth.models import User
 from django.utils import timezone
 
 from api.models import Category, Source, News
@@ -26,6 +27,11 @@ def clear_jobs():
     yield
     with translation_jobs._jobs_lock:
         translation_jobs._jobs.clear()
+
+
+@pytest.fixture(autouse=True)
+def authenticated_reader(db, client):
+    client.force_login(User.objects.create_user(username='translation-reader'))
 
 
 @pytest.fixture

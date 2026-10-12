@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import yaml
 
-from scripts.deploy import release_manifest, sqlite_snapshot
+from scripts.deploy import release_manifest, sqlite_snapshot, sqlite_stage
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -85,6 +85,53 @@ class SQLiteSnapshotTests(unittest.TestCase):
             with self.assertRaisesRegex(sqlite_snapshot.SnapshotError, "exceeded its deadline"):
                 sqlite_snapshot._online_backup(source, object(), timeout_seconds=0.5)  # type: ignore[arg-type]
         self.assertTrue(source.called)
+
+    def test_sqlite_error_details_preserve_code_and_name(self) -> None:
+        error = sqlite3.OperationalError("synthetic")
+        error.sqlite_errorcode = sqlite3.SQLITE_CANTOPEN
+        error.sqlite_errorname = "SQLITE_CANTOPEN"
+        self.assertEqual(
+            sqlite_snapshot._sqlite_error_details(error),
+            "OperationalError, name=SQLITE_CANTOPEN, code=14",
+        )
+
+    def test_stopped_wal_members_are_captured_without_mutation(self) -> None:
+        source_dir = self.root / "volume"
+        source_dir.mkdir()
+        (source_dir / "db.sqlite3").hardlink_to(self.source)
+        (source_dir / "db.sqlite3-wal").hardlink_to(Path(f"{self.source}-wal"))
+        (source_dir / "db.sqlite3-shm").hardlink_to(Path(f"{self.source}-shm"))
+        capture = self.root / "capture"
+        copied = sqlite_stage.stage(source_dir, capture)
+        self.assertEqual(set(copied), {"db.sqlite3", "db.sqlite3-wal", "db.sqlite3-shm"})
+        self.assertEqual((capture / "db.sqlite3").stat().st_mode & 0o777, 0o600)
+        self.assertEqual((capture / "db.sqlite3-wal").stat().st_mode & 0o777, 0o600)
+        self.assertEqual((capture / "db.sqlite3-shm").stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.read_rows(capture / "db.sqlite3"), ["committed row"])
+
+    def test_staging_rejects_source_change(self) -> None:
+        source_dir = self.root / "volume"
+        source_dir.mkdir()
+        (source_dir / "db.sqlite3").hardlink_to(self.source)
+        (source_dir / "db.sqlite3-wal").hardlink_to(Path(f"{self.source}-wal"))
+        (source_dir / "db.sqlite3-shm").hardlink_to(Path(f"{self.source}-shm"))
+        capture = self.root / "capture"
+        original = sqlite_stage._snapshot_state
+        calls = 0
+
+        def changed(source_fd):
+            nonlocal calls
+            calls += 1
+            state = original(source_fd)
+            if calls == 2:
+                database = state["db.sqlite3"]
+                assert database is not None
+                state["db.sqlite3"] = (*database[:2], database[2] + 1, database[3])
+            return state
+
+        with patch.object(sqlite_stage, "_snapshot_state", side_effect=changed):
+            with self.assertRaisesRegex(sqlite_stage.StageError, "writers may still be active"):
+                sqlite_stage.stage(source_dir, capture)
 
     def test_backup_and_restore_deadline_failures_close_and_clean_staging(self) -> None:
         real_connect = sqlite3.connect
