@@ -1,12 +1,17 @@
 # T03 · 用途默认模型设置
 
-> **PLANNED**：本文件为未执行的实施/测试契约，所有测试当前 NOT_RUN。实施时以 `origin/feat/byok-user-api-keys` 最新 HEAD 为准，勿把设计 SHA 当作当前代码。
+> **READY FOR REVIEW（2026-10-12）**：五种用途的用户偏好、严格保存 API、失效选择的 fail-closed 处理、只读执行快照解析和设置页已实现。`resolve_execution` 尚未接入真实业务 worker；在途 worker/历史结果的端到端验收保持 NOT_RUN，不能据此声称 T04/T05/T09/T11 已闭环。详细证据见 [Test T03](../tests/T03-preferences.md)。
+
+本工作树已重放到最新 T02 分支 `task/byok-T02-models-and-tests`，父提交为 `5fc323fb27da762885aa6d26f0efbca3b0b10bac`。T02 PR #36 仍为 Draft、未合并；本卡继续使用 stacked PR 并依赖 #36。T03 代码实现重放后提交：`b9fd6c0da76aca0bdbf82ae0864f1033b150210e`。
 
 | 属性 | 内容 |
 | --- | --- |
 | 前置任务 | [T02](T02-models-and-tests.md) |
 | 推荐规模 | S-M |
 | 对应测试 | [Test T03](../tests/T03-preferences.md) |
+| 本卡 PR | [#37 Draft](https://github.com/CoderLambert/news-aggregator/pull/37) |
+| PR base | `task/byok-T02-models-and-tests` @ `5fc323fb27da762885aa6d26f0efbca3b0b10bac`（stacked；依赖 Draft PR #36） |
+| 实现提交（重放后） | `b9fd6c0da76aca0bdbf82ae0864f1033b150210e` |
 
 ## 本次交付的完整功能
 

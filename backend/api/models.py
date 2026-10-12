@@ -973,6 +973,40 @@ class UserAIModelConfig(models.Model):
         return f'AI model {self.model_id} on {self.connection_id}'
 
 
+USER_AI_TASK_PREFERENCE_CHOICES = [
+    ('default', '全局默认'),
+    ('article_qa', '新闻问答'),
+    ('full_translation', '全文翻译'),
+    ('deep_research', '深度研究'),
+    ('question_suggestions', '问题推荐'),
+]
+
+
+class UserAITaskPreference(models.Model):
+    """One owner's explicit model choice for a BYOK task kind."""
+
+    user = models.ForeignKey(
+        'auth.User', on_delete=models.CASCADE, related_name='ai_task_preferences',
+    )
+    task_kind = models.CharField(max_length=32, choices=USER_AI_TASK_PREFERENCE_CHOICES)
+    model_config = models.ForeignKey(
+        UserAIModelConfig, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='task_preferences',
+    )
+    # A deleted model must not silently turn a task-specific choice into inheritance.
+    requires_reselection = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['task_kind']
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'task_kind'], name='unique_ai_pref_owner_task'),
+        ]
+
+    def __str__(self):
+        return f'AI preference {self.task_kind} for user {self.user_id}'
+
+
 class AICallAttempt(models.Model):
     """Secret-free accounting row for each explicit BYOK provider attempt."""
 
