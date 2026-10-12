@@ -2,9 +2,9 @@
 
 对应：[R0 Task](../tasks/R0-sqlite-stability.md)。
 
-> **READY FOR REVIEW。** 诊断确认有两类竞争：worker 状态写入，以及并发 `start_or_get_job` 唯一任务创建。两者均为 `SQLITE_LOCKED_SHAREDCACHE`（262）；后者的 `api_chatgpttranslationtask` `INSERT` 在受控 SQL trace 中复现。整笔创建/附加事务回滚重试并加入随机退避后，唯一任务并发测试连续 20/20 通过；原 SSE 断连测试仍保留原成功断言。本地完整离线回归 845 项通过。新增修复尚未推送，最新代码的 GitHub CI 待运行。
+> **READY FOR REVIEW。** 诊断确认有两类竞争：worker 状态写入，以及并发 `start_or_get_job` 唯一任务创建。两者均为 `SQLITE_LOCKED_SHAREDCACHE`（262）；后者的 `api_chatgpttranslationtask` `INSERT` 在受控 SQL trace 中复现。整笔创建/附加事务回滚重试并加入随机退避后，唯一任务并发测试连续 20/20 通过；原 SSE 断连测试仍保留原成功断言。本地完整离线回归 845 项通过。最新代码头 `64f9d10` 的两次 GitHub Actions 全绿。
 
-首轮实现提交：`e7026e092b680e9bf32049859d638f590edf5009`。独立 Draft PR：[R0 #44](https://github.com/CoderLambert/news-aggregator/pull/44)。此前 GitHub CI 通过的代码头为 `11fd0ba60b615713e45386bf17aaed2ff734b68c`，不包含本次并发创建修复；新修复提交后须以新代码头重新确认 CI。
+首轮实现提交：`e7026e092b680e9bf32049859d638f590edf5009`；并发创建事务修复：`64f9d10834f86ef22e6c9c629b88998776b2a804`。独立 Draft PR：[R0 #44](https://github.com/CoderLambert/news-aggregator/pull/44)。
 
 ## 诊断证据
 
@@ -31,7 +31,7 @@
 | R0 定向锁分类与文件 WAL 写锁释放测试 | 8 passed；含共享缓存锁码、文件写锁释放、`SQLITE_CANTOPEN`、I/O、约束和非 SQLite backend 负例 |
 | `backend/api/tests/test_subscription_recovery.py` | 34 passed |
 | 本地 CI 三个测试根目录（并发创建修复后） | 845 passed，3 warnings，18.99 秒 |
-| GitHub Actions（PR #44，旧代码头 `11fd0ba`） | 两次 backend/release/frontend 检查通过；Python 3.12.15 后端分别为 845 passed、2 warnings。此证据不覆盖新增的并发创建修复；新代码头 CI 待运行 |
+| GitHub Actions（PR #44，代码头 `64f9d10`） | push 运行 `38204883061` 与 PR 运行 `38204886786` 均全绿；Python 3.12.15 后端分别 845 passed、2 warnings。前端、release gates、非 root 镜像构建及隔离 G1 smoke 均通过 |
 | Provider / 生产数据 / 发布 | NOT_RUN；全程使用临时 SQLite 与本地 fake |
 
 全量回归命令（仓库根目录；数据库、缓存、HOME 均在 `/tmp`）：
@@ -52,7 +52,7 @@ env -i \
 
 文件型 worker 回归通过仅位于 `/tmp` 的 pytest settings overlay 将 `TEST['NAME']` 指向专用 SQLite 文件；该库启用了项目同款 WAL 初始化配置。它验证生产数据库类型和锁语义，不连接、复制或改写任何运行数据库。
 
-CI 工作流使用 Python 3.12；本机验证使用共享只读 venv 的 Python 3.14.8。此前 PR #44 两次 GitHub Actions 在旧代码头均通过，包含 backend/release gates 与 frontend。新增并发创建修复推送后须重新检查完整工作流。首次全量测试命令遗漏 CI 的 `PYTHONPATH=backend:crawler`，在收集阶段因 `news_crawler` 不可导入而停止；修正环境后，全量结果如上。
+CI 工作流使用 Python 3.12；本机验证使用共享只读 venv 的 Python 3.14.8。PR #44 最新代码头的两次 GitHub Actions 均通过，包含 backend/release gates、frontend 与隔离 G1 smoke。首次全量测试命令遗漏 CI 的 `PYTHONPATH=backend:crawler`，在收集阶段因 `news_crawler` 不可导入而停止；修正环境后，全量结果如上。
 
 ## 结论边界
 

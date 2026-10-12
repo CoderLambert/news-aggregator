@@ -1,6 +1,6 @@
 # R0 · SQLite 后台翻译锁争用稳定性
 
-> **READY FOR REVIEW（2026-10-12）**：定位到后台 worker 状态写入和并发任务创建两类 SQLite 共享缓存锁竞争。新增修复已通过本地完整回归；该修复尚未推送，最新 GitHub CI 尚待验证。此前 CI 全绿的是不包含并发创建修复的代码版本。证据见 [Test R0](../tests/R0-sqlite-stability.md)；独立 Draft PR 为 [#44](https://github.com/CoderLambert/news-aggregator/pull/44)。
+> **READY FOR REVIEW（2026-10-12）**：定位并修复后台 worker 状态写入和并发任务创建两类 SQLite 共享缓存锁竞争。最新代码头 `64f9d10` 的本地完整回归及两次 GitHub Actions 全绿；证据见 [Test R0](../tests/R0-sqlite-stability.md)。独立 Draft PR 为 [#44](https://github.com/CoderLambert/news-aggregator/pull/44)。
 
 | 属性 | 内容 |
 | --- | --- |
