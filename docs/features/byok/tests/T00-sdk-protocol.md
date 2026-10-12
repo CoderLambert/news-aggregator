@@ -64,6 +64,8 @@
 
 新建网关脚本另做了不调用模型的启动预检：临时 LiteLLM Proxy 健康就绪、loopback 端口绑定、内存生成受限项目 virtual key，`provider_request_count=0`，随后 Compose 清理通过。合并探针自测 `test_probe test_deepseek_smoke test_deepseek_gateway_smoke` 为 56 tests passed；`py_compile`、Compose config 和 `git diff --check` 均通过。本地全量运行的 `CLEANUP_COMPOSE_DOWN` 与 `CLEANUP_NO_PROJECT_RESOURCES_LEFT` 通过，containers=0、networks=0；日志和 CLI 输出无合成凭据。`provider_real` 仍为 `NOT_RUN`。
 
+2026-10-12 续跑同一组不联网自测，在源码 SHA `36a76c85470978bb6a2694a66e78599e648ea14c` 上结果为 `57 tests passed`。命令从 `tools/byok_t00_probe/` 执行 `python -m unittest test_probe test_deepseek_smoke test_deepseek_gateway_smoke`；三个套件仅使用 stub/mock，没有启动 Compose、读取真实 Key 或访问 Provider。当前 T00 分支 HEAD `51ee8856436c74d689d6eafa71af824d9a954437` 是证据文档更新。
+
 脱敏机器结果：[T00-sdk-protocol-run-l-sanitized.json](../evidence/T00-sdk-protocol-run-l-sanitized.json)，源输出 SHA-256 `8fe6fe62c1a2808e877985492df36c65bdae2909fe56005fd48b903157492166`，脱敏副本 SHA-256 `679eff4382dd94c69c7ad39a78f4a0c650232e27426c09b8655dcaaa4344a192`。副本只保留检查 ID/状态、白名单路由事实和版本；不含 prompt、Key 或响应正文。
 
 ## T00-11 用户执行准备（真实请求仍未运行）
