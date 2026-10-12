@@ -208,10 +208,11 @@ compose_call stop --timeout 45 crawler indexer app \
 running="$(docker ps --quiet --filter "volume=$DB_VOLUME")" \
     || fail 'could not verify that database volume writers stopped.'
 [[ -z "$running" ]] || fail 'database volume still has a running container; project remains stopped.'
-schema_result="$(docker run --rm --pull=never --network none --entrypoint python \
+schema_result="$(docker run --rm --pull=never --network none --user 10001:10001 --entrypoint /bin/sh \
     --mount "type=volume,source=$DB_VOLUME,target=/source,readonly" \
+    --mount "type=bind,source=$SCRIPT_DIR/sqlite_stage.py,target=/tmp/sqlite_stage.py,readonly" \
     --mount "type=bind,source=$SCRIPT_DIR/sqlite_snapshot.py,target=/tmp/sqlite_snapshot.py,readonly" \
-    "$IMAGE" /tmp/sqlite_snapshot.py inspect --source /source/db.sqlite3)" \
+    "$IMAGE" -c 'python /tmp/sqlite_stage.py --source-dir /source --destination-dir /tmp/source-copy >/dev/null && exec python /tmp/sqlite_snapshot.py inspect --source /tmp/source-copy/db.sqlite3')" \
     || fail 'could not read a valid SQLite schema from the stopped database volume.'
 python3 - "$MANIFEST" "$schema_result" <<'PY' \
     || fail 'database migrations do not exactly match the rollback target manifest.'

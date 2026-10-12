@@ -397,6 +397,8 @@ if grep -Eq ' up --no-deps --detach ' "$DOCKER_LOG"; then
     printf 'test_release_scripts: incompatible rollback started a service.\n' >&2
     exit 1
 fi
+grep -Eq 'run --rm --pull=never --network none --user 10001:10001 --entrypoint /bin/sh .*sqlite_stage.py.*target=/tmp/sqlite_stage.py,readonly.*sqlite_snapshot.py.*target=/tmp/sqlite_snapshot.py,readonly.*source-copy/db.sqlite3' "$DOCKER_LOG" \
+    || { printf 'test_release_scripts: rollback did not inspect a private writable SQLite staging copy.\n' >&2; exit 1; }
 [[ "$(readlink -- "$WORK_DIR/static/current")" == "releases/$(printf 'b%.0s' {1..40})" ]] \
     || { printf 'test_release_scripts: incompatible rollback changed static current.\n' >&2; exit 1; }
 
