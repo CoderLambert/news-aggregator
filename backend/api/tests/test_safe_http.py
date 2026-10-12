@@ -153,6 +153,19 @@ def test_validate_public_url_returns_every_public_address_without_connecting(mon
     assert network.sockets == []
 
 
+def test_validate_public_url_percent_encodes_unicode_request_target(monkeypatch):
+    FakeNetwork(monkeypatch, [], answers={'articles.example': ['93.184.216.34']})
+
+    target = safe_http.validate_public_url(
+        'https://articles.example/articles/照顾老人?topic=人工智能&already=%E6%B5%8B%E8%AF%95',
+    )
+
+    assert target.path == (
+        '/articles/%E7%85%A7%E9%A1%BE%E8%80%81%E4%BA%BA'
+        '?topic=%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD&already=%E6%B5%8B%E8%AF%95'
+    )
+
+
 @pytest.mark.parametrize(
     'url',
     [

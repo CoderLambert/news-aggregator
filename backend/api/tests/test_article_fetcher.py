@@ -13,6 +13,7 @@ from api.services.article_fetcher.providers import (
     LeiphoneFeedProvider,
     ScrapyHTTPProvider,
     ScrapySubprocessProvider,
+    TrustedNewsJinaProvider,
     VentureBeatJinaProvider,
     default_providers,
 )
@@ -327,6 +328,42 @@ def test_venturebeat_jina_provider_rejects_non_https_urls_without_network():
     assert result.ok is False
     assert result.error == 'unsupported_venturebeat_url'
     open_url.assert_not_called()
+
+
+def test_trusted_news_jina_provider_accepts_only_reviewed_https_article_paths():
+    provider = TrustedNewsJinaProvider()
+    with patch.object(provider, '_fetch_jina', return_value=FetchResult(ok=True, provider=provider.name)) as fetch:
+        result = provider.fetch(
+            'https://www.bbc.co.uk/news/articles/example?at_medium=RSS#section',
+            expected_title='Example',
+        )
+
+    assert result.ok is True
+    fetch.assert_called_once_with(
+        'https://www.bbc.co.uk/news/articles/example',
+        expected_title='Example',
+        summary=None,
+    )
+
+
+def test_trusted_news_jina_provider_rejects_unreviewed_or_unsafe_urls_without_network():
+    provider = TrustedNewsJinaProvider()
+    urls = (
+        'https://example.com/article',
+        'http://bbc.co.uk/news/article',
+        'https://user:password@bbc.co.uk/news/article',
+        'https://bbc.co.uk:8443/news/article',
+    )
+    with patch.object(provider, '_fetch_jina') as fetch:
+        results = [provider.fetch(url) for url in urls]
+
+    assert [result.error for result in results] == [
+        'not_trusted_news_article',
+        'unsupported_trusted_news_url',
+        'unsupported_trusted_news_url',
+        'unsupported_trusted_news_url',
+    ]
+    fetch.assert_not_called()
 
 
 def test_leiphone_feed_provider_preserves_real_article_structure():

@@ -36,6 +36,8 @@ _NETWORK_ERROR_KEYWORDS = (
     'dns',
     'name resolution',
     'network',
+    'transport_error',
+    'response_read_error',
     'ssl',
     'refused',
     'unreachable',

@@ -337,6 +337,17 @@ def test_fetch_error_uses_provider_failures_for_http_429_classification():
     assert classify_fetch_error(error) == 'network_error'
 
 
+def test_fetch_error_classifies_sanitized_safe_transport_failure_as_network_error():
+    error = FetchError(
+        '全部真实原文抓取方式失败，未写入 full_content。',
+        failures=[
+            FetchResult(ok=False, provider='scrapy_http', error='Safe HTTP request failed'),
+        ],
+    )
+
+    assert classify_fetch_error(error) == 'network_error'
+
+
 @pytest.mark.django_db
 def test_mark_failed_persists_bounded_provider_codes_and_last_provider(news):
     error = FetchError(

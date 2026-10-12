@@ -393,6 +393,45 @@ class VentureBeatJinaProvider(JinaProvider):
         return self._fetch_jina(target_url, expected_title=expected_title, summary=summary)
 
 
+class TrustedNewsJinaProvider(JinaProvider):
+    """Jina fallback restricted to explicitly reviewed public news domains."""
+
+    name = 'trusted_news_jina'
+    allowed_domains = frozenset({
+        'bbc.co.uk',
+        'bbc.com',
+        'developer.chrome.com',
+        'technologyreview.com',
+        'venturebeat.com',
+    })
+
+    def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None) -> FetchResult:
+        try:
+            parsed = urlparse(url)
+            domain = normalize_domain(url)
+            supported = (
+                parsed.scheme.lower() == 'https'
+                and domain in self.allowed_domains
+                and parsed.username is None
+                and parsed.password is None
+                and parsed.port in {None, 443}
+            )
+        except (TypeError, ValueError):
+            domain = ''
+            supported = False
+        if not supported:
+            error = (
+                'not_trusted_news_article'
+                if domain not in self.allowed_domains
+                else 'unsupported_trusted_news_url'
+            )
+            return FetchResult(ok=False, provider=self.name, url=url, error=error)
+        # Never disclose tracking/query values or fragments to the reader
+        # service.  The reviewed public article path is sufficient.
+        target_url = parsed._replace(query='', fragment='').geturl()
+        return self._fetch_jina(target_url, expected_title=expected_title, summary=summary)
+
+
 class ScrapyHTTPProvider:
     """Scrapy-compatible direct HTML fetcher.
 
@@ -599,5 +638,5 @@ def default_providers() -> list:
         providers.extend([JinaProvider(timeout=5, retries=0), ScrapySubprocessProvider()])
     providers.append(ScrapyHTTPProvider())
     if settings.DJANGO_ENV == 'production':
-        providers.append(VentureBeatJinaProvider(timeout=12, retries=0))
+        providers.append(TrustedNewsJinaProvider(timeout=12, retries=0))
     return providers

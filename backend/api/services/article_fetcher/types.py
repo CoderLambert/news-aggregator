@@ -60,6 +60,14 @@ def fetch_failure_code(failure: FetchResult | Exception | str) -> str:
     if status_match:
         return f'http_{status_match.group(1)}'
 
+    stable_transport_codes = {
+        'safe http request failed': 'transport_error',
+        'safe http response read failed': 'response_read_error',
+        'unable to connect to validated public address': 'connection_failed',
+    }
+    if lowered in stable_transport_codes:
+        return stable_transport_codes[lowered]
+
     reasons = getattr(failure, 'validation_reasons', None) or []
     if lowered.startswith('validation_failed') or reasons:
         safe_reasons = [
@@ -86,8 +94,10 @@ def fetch_failure_code(failure: FetchResult | Exception | str) -> str:
         'not_github_repo',
         'not_hackernews_item',
         'not_leiphone_article',
+        'not_trusted_news_article',
         'not_venturebeat_article',
         'unsafe_transport_disabled',
+        'unsupported_trusted_news_url',
         'unsupported_venturebeat_url',
     }
     if lowered in exact_codes:

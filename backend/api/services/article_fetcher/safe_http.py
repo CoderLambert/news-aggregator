@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from dataclasses import dataclass
 from email.message import Message
 from typing import Any
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import quote, urljoin, urlsplit
 
 MAX_URL_LENGTH = 8_192
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
@@ -207,9 +207,15 @@ def validate_public_url(url: str, timeout: float = MAX_TOTAL_SECONDS) -> PublicU
     if not validated_addrinfos:
         raise _failure('Unable to resolve public URL host')
 
-    path = parsed.path or '/'
+    # ``http.client`` only accepts an ASCII request target.  Feed URLs may
+    # legitimately contain Unicode article slugs, so encode them here after
+    # host validation while preserving existing percent escapes and RFC 3986
+    # delimiters.  Without this, the transport collapses the useful URL into a
+    # generic request failure before any response is received.
+    path = quote(parsed.path or '/', safe="/%:@!$&'()*+,;=-._~")
     if parsed.query:
-        path = f'{path}?{parsed.query}'
+        query = quote(parsed.query, safe="/%?:@!$&'()*+,;=-._~")
+        path = f'{path}?{query}'
     return PublicURL(
         url=url,
         scheme=scheme,
