@@ -263,7 +263,7 @@ def test_concurrent_same_idempotency_key_attaches_to_one_durable_task(monkeypatc
 def test_long_article_and_missing_idempotency_key_are_rejected_without_task():
     client, _user, csrf = _authenticated_client('t05-budget')
     _create_model(client, csrf, SYNTHETIC_PROVIDER_KEY_A, 'budget')
-    long_article = _create_news('x' * (ai_translation.MAX_TRANSLATION_SOURCE_CHARS + 1))
+    long_article = _create_news('x' * (ai_translation.MAX_TRANSLATION_SOURCE_BYTES + 1))
 
     too_long = _post_translation(client, csrf, long_article, 't05-too-long')
     assert too_long.status_code == 413
@@ -411,6 +411,8 @@ def _unit_execution():
         provider_key='sk-synthetic-provider-key',
         model_alias='news.deepseek-flash',
         model_source={'provider': 'DeepSeek', 'model': 'Synthetic Flash'},
+        context_window_tokens=1_048_576,
+        model_max_output_tokens=393_216,
     )
 
 
@@ -433,20 +435,54 @@ class _FakeResponseStream:
 
 class _FakeOpenAI:
     events = []
+    event_batches = []
+    response_factory = None
+    requests = []
+    init_options = []
 
     def __init__(self, **_kwargs):
         self.http_client = _kwargs['http_client']
+        self.init_options.append({key: value for key, value in _kwargs.items() if key != 'http_client'})
         self.responses = SimpleNamespace(
-            create=lambda **_request: _FakeResponseStream(self.events),
+            create=self._create_response,
         )
+
+    def _create_response(self, **request):
+        self.requests.append(request)
+        if type(self).response_factory is not None:
+            events = type(self).response_factory(request)
+        elif self.event_batches:
+            events = self.event_batches.pop(0)
+        else:
+            events = self.events
+        return _FakeResponseStream(events)
 
     def close(self):
         self.http_client.close()
 
 
+def _request_chunk_text(request):
+    content = request['input'][1]['content']
+    return content.split('\n', 1)[1].rsplit('\n</article-part>', 1)[0]
+
+
+def _completed_events(text):
+    return [
+        SimpleNamespace(type='response.output_text.delta', delta=text),
+        SimpleNamespace(
+            type='response.completed',
+            response=SimpleNamespace(status='completed', output_text=text),
+        ),
+    ]
+
+
 def test_provider_stream_requires_explicit_completed_terminal(monkeypatch):
     deltas = []
     monkeypatch.setattr(ai_translation, 'OpenAI', _FakeOpenAI)
+    _FakeOpenAI.requests = []
+    _FakeOpenAI.init_options = []
+    _FakeOpenAI.event_batches = []
+    _FakeOpenAI.response_factory = None
     _FakeOpenAI.events = [SimpleNamespace(type='response.output_text.delta', delta='partial')]
     with pytest.raises(BYOKTranslationError) as error:
         ai_translation.stream_byok_translation(
@@ -457,6 +493,7 @@ def test_provider_stream_requires_explicit_completed_terminal(monkeypatch):
     assert deltas == ['partial']
 
     deltas.clear()
+    _FakeOpenAI.requests = []
     _FakeOpenAI.events = [
         SimpleNamespace(type='response.output_text.delta', delta='complete'),
         SimpleNamespace(
@@ -470,6 +507,283 @@ def test_provider_stream_requires_explicit_completed_terminal(monkeypatch):
     )
     assert output == 'complete'
     assert deltas == ['complete']
+    assert len(_FakeOpenAI.requests) == 1
+    assert _FakeOpenAI.requests[0]['max_output_tokens'] == ai_translation.MAX_TRANSLATION_OUTPUT_TOKENS
+    assert _FakeOpenAI.init_options[0]['max_retries'] == 0
+
+
+def test_long_markdown_is_chunked_in_order_and_preserves_protected_blocks(monkeypatch):
+    monkeypatch.setattr(ai_translation, 'OpenAI', _FakeOpenAI)
+    monkeypatch.setattr(ai_translation, 'MAX_TRANSLATION_CHUNK_SOURCE_BYTES', 256)
+    _FakeOpenAI.requests = []
+    _FakeOpenAI.init_options = []
+    _FakeOpenAI.events = []
+    _FakeOpenAI.event_batches = []
+
+    table = '| Name | Link |\n| --- | --- |\n| Example | [target](https://example.test/path) |\n\n'
+    code = "```python\nprint('keep this code')\n```\n\n"
+    source = (
+        '# Headline\n\n'
+        + ('A paragraph with [safe link](https://example.test/a) and `inline_code`; it ends here.\n\n' * 9)
+        + table + code + 'Final paragraph stays last.'
+    )
+    _FakeOpenAI.response_factory = lambda request: _completed_events(_request_chunk_text(request))
+    deltas = []
+
+    translated = ai_translation.stream_byok_translation(
+        _unit_execution(), source, on_delta=deltas.append, execution_guard=lambda: None,
+    )
+
+    assert translated == source
+    assert ''.join(deltas) == source
+    assert len(_FakeOpenAI.requests) > 1
+    request_texts = [_request_chunk_text(request) for request in _FakeOpenAI.requests]
+    code_block = "```python\nprint('keep this code')\n```"
+    assert sum(code_block in text for text in request_texts) == 0
+    assert any('[target](https://example.test/path)' in text for text in request_texts)
+    assert any('[safe link](https://example.test/a)' in text for text in request_texts)
+    assert all(request['max_output_tokens'] == ai_translation.MAX_TRANSLATION_OUTPUT_TOKENS for request in _FakeOpenAI.requests)
+    assert all(request['store'] is False and request['stream'] is True for request in _FakeOpenAI.requests)
+    chunk_ordinals = [
+        request['input'][1]['content'].split('index="', 1)[1].split('"', 1)[0]
+        for request in _FakeOpenAI.requests
+    ]
+    assert chunk_ordinals == [
+        f'{index}/{len(_FakeOpenAI.requests)}'
+        for index in range(1, len(_FakeOpenAI.requests) + 1)
+    ]
+    assert _FakeOpenAI.init_options[0]['max_retries'] == 0
+
+
+def test_translation_budget_unknown_or_exceeded_fails_before_provider_request(monkeypatch):
+    find_model_preset = ai_translation.find_model_preset
+    monkeypatch.setattr(ai_translation, 'OpenAI', _FakeOpenAI)
+    _FakeOpenAI.requests = []
+    _FakeOpenAI.init_options = []
+    _FakeOpenAI.event_batches = []
+    _FakeOpenAI.response_factory = None
+
+    monkeypatch.setattr(ai_translation, 'MAX_TRANSLATION_CHUNK_SOURCE_BYTES', 64)
+    monkeypatch.setattr(ai_translation, 'MAX_TRANSLATION_CHUNKS', 1)
+    with pytest.raises(BYOKTranslationError) as too_many_chunks:
+        ai_translation.stream_byok_translation(
+            _unit_execution(), ('First paragraph. ' * 5) + '\n\n' + ('Second paragraph. ' * 5),
+            on_delta=lambda _delta: None, execution_guard=lambda: None,
+        )
+    assert too_many_chunks.value.code == 'translation_budget_exceeded'
+    assert _FakeOpenAI.requests == []
+
+    monkeypatch.setattr(ai_translation, 'MAX_TRANSLATION_CHUNKS', 32)
+    monkeypatch.setattr(
+        ai_translation,
+        'find_model_preset',
+        lambda *_args: {'context_window_tokens': None, 'max_output_tokens': 4096},
+    )
+    with pytest.raises(BYOKTranslationError) as unknown_budget:
+        ai_translation.preflight_byok_translation_source('Short source.', _unit_execution().snapshot)
+    assert unknown_budget.value.code == 'translation_budget_unavailable'
+    assert _FakeOpenAI.requests == []
+
+    monkeypatch.setattr(ai_translation, 'find_model_preset', find_model_preset)
+    oversized_table = (
+        '| Name | Description |\n'
+        '| --- | --- |\n'
+        + '| Example | ' + ('x' * 100) + ' |\n'
+    )
+    with pytest.raises(BYOKTranslationError) as table_budget:
+        ai_translation.preflight_byok_translation_source(
+            oversized_table, _unit_execution().snapshot,
+        )
+    assert table_budget.value.code == 'translation_budget_exceeded'
+    assert _FakeOpenAI.requests == []
+
+
+def test_empty_completed_chunk_is_rejected(monkeypatch):
+    monkeypatch.setattr(ai_translation, 'OpenAI', _FakeOpenAI)
+    _FakeOpenAI.requests = []
+    _FakeOpenAI.init_options = []
+    _FakeOpenAI.event_batches = []
+    _FakeOpenAI.response_factory = None
+    _FakeOpenAI.events = [
+        SimpleNamespace(
+            type='response.completed',
+            response=SimpleNamespace(status='completed', output_text=''),
+        ),
+    ]
+
+    with pytest.raises(BYOKTranslationError) as error:
+        ai_translation.stream_byok_translation(
+            _unit_execution(), 'A short source.',
+            on_delta=lambda _delta: None, execution_guard=lambda: None,
+        )
+
+    assert error.value.code == 'empty_response'
+    assert len(_FakeOpenAI.requests) == 1
+
+
+@pytest.mark.django_db
+@override_settings(AI_BYOK_ENABLED=True, PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_changed_markdown_structure_never_becomes_a_saved_translation(monkeypatch):
+    client, user, csrf = _authenticated_client('t06-markdown-structure')
+    _create_model(client, csrf, SYNTHETIC_PROVIDER_KEY_A, 'markdown-structure')
+    source = '# Original heading\n\nA [link](https://example.test/path) and `inline_code`.\n'
+    news = _create_news(source)
+    _FakeOpenAI.requests = []
+    _FakeOpenAI.init_options = []
+    _FakeOpenAI.event_batches = []
+    _FakeOpenAI.response_factory = lambda _request: _completed_events(
+        'Heading without its marker\n\nA missing link and changed inline code.\n'
+    )
+    monkeypatch.setattr(ai_translation, 'OpenAI', _FakeOpenAI)
+    _run_inline(monkeypatch)
+
+    response = _post_translation(client, csrf, news, 't06-markdown-structure')
+    body = b''.join(response.streaming_content).decode('utf-8')
+    task = ChatGPTTranslationTask.objects.get(pk=response['Job-ID'])
+
+    assert task.status == 'failed'
+    assert task.error_code == 'markdown_structure_changed'
+    assert task.result == {}
+    assert not ChatGPTArticleTranslation.objects.filter(user=user, news=news).exists()
+    assert 'event: complete' not in body
+
+
+@pytest.mark.django_db
+@override_settings(AI_BYOK_ENABLED=True, PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_multichunk_markdown_translation_merges_once_into_private_result(monkeypatch):
+    client, user, csrf = _authenticated_client('t06-multichunk-success')
+    _create_model(client, csrf, SYNTHETIC_PROVIDER_KEY_A, 'multichunk-success')
+    table = '| Name | Link |\n| --- | --- |\n| Example | [target](https://example.test/path) |\n\n'
+    code = "```python\nprint('preserve')\n```\n\n"
+    source = (
+        '# Long article\n\n'
+        + ('A complete paragraph with [link](https://example.test/a) and `code`.\n\n' * 5)
+        + table + code + 'Final paragraph.'
+    )
+    news = _create_news(source)
+    monkeypatch.setattr(ai_translation, 'MAX_TRANSLATION_CHUNK_SOURCE_BYTES', 96)
+    _FakeOpenAI.requests = []
+    _FakeOpenAI.init_options = []
+    _FakeOpenAI.event_batches = []
+    _FakeOpenAI.response_factory = lambda request: _completed_events(_request_chunk_text(request))
+    monkeypatch.setattr(ai_translation, 'OpenAI', _FakeOpenAI)
+    _run_inline(monkeypatch)
+
+    response = _post_translation(client, csrf, news, 't06-multichunk-success')
+    body = b''.join(response.streaming_content).decode('utf-8')
+    task = ChatGPTTranslationTask.objects.get(pk=response['Job-ID'])
+
+    assert task.status == 'succeeded'
+    assert task.result['full_content_zh'] == source
+    assert task.result['full_content_zh_scope'] == 'private'
+    assert len(_FakeOpenAI.requests) > 1
+    assert task.progress == source
+    assert all(code not in request['input'][1]['content'] for request in _FakeOpenAI.requests)
+    assert ChatGPTArticleTranslation.objects.filter(user=user, news=news, content=source).exists()
+    assert SharedArticleTranslation.objects.count() == 0
+    assert 'event: complete' in body
+
+
+@pytest.mark.django_db
+@override_settings(AI_BYOK_ENABLED=True, PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_incomplete_middle_chunk_keeps_only_partial_progress_and_never_saves_result(monkeypatch):
+    client, user, csrf = _authenticated_client('t06-incomplete')
+    _create_model(client, csrf, SYNTHETIC_PROVIDER_KEY_A, 'incomplete')
+    source = ('First source paragraph. ' * 5) + '\n\n' + ('Second source paragraph. ' * 5)
+    news = _create_news(source)
+    monkeypatch.setattr(ai_translation, 'MAX_TRANSLATION_CHUNK_SOURCE_BYTES', 64)
+    _FakeOpenAI.requests = []
+    _FakeOpenAI.init_options = []
+    _FakeOpenAI.event_batches = []
+    _FakeOpenAI.events = []
+
+    def response_for_chunk(request):
+        if len(_FakeOpenAI.requests) == 1:
+            return _completed_events(_request_chunk_text(request))
+        return [
+            SimpleNamespace(type='response.output_text.delta', delta='partial second chunk'),
+            SimpleNamespace(type='response.incomplete'),
+        ]
+
+    _FakeOpenAI.response_factory = response_for_chunk
+    monkeypatch.setattr(ai_translation, 'OpenAI', _FakeOpenAI)
+    _run_inline(monkeypatch)
+
+    response = _post_translation(client, csrf, news, 't06-middle-chunk-incomplete')
+    body = b''.join(response.streaming_content).decode('utf-8')
+    task = ChatGPTTranslationTask.objects.get(pk=response['Job-ID'])
+
+    assert task.status == 'failed'
+    assert task.error_code == 'incomplete_response'
+    assert task.result == {}
+    assert 'partial second chunk' in task.progress
+    assert len(_FakeOpenAI.requests) == 2
+    assert all(options['max_retries'] == 0 for options in _FakeOpenAI.init_options)
+    assert not ChatGPTArticleTranslation.objects.filter(user=user, news=news).exists()
+    assert 'complete' not in body
+
+
+@pytest.mark.django_db
+@override_settings(AI_BYOK_ENABLED=True, PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_queued_translation_rejects_changed_source_before_provider_dispatch(monkeypatch):
+    client, _user, csrf = _authenticated_client('t06-source-change')
+    _create_model(client, csrf, SYNTHETIC_PROVIDER_KEY_A, 'source-change')
+    news = _create_news('Original queued source.')
+    dispatched = []
+    provider_calls = []
+    monkeypatch.setattr(
+        translation_jobs,
+        '_dispatch_task',
+        lambda task_id, generation: dispatched.append((task_id, generation)),
+    )
+    monkeypatch.setattr(
+        translation_jobs,
+        'stream_byok_translation',
+        lambda *_args, **_kwargs: provider_calls.append('called'),
+    )
+
+    response = _post_translation(client, csrf, news, 't06-source-change')
+    task = ChatGPTTranslationTask.objects.get(pk=response['Job-ID'])
+    assert task.status == 'queued'
+    news.full_content = 'Changed source after queueing.'
+    news.save(update_fields=['full_content'])
+    translation_jobs._run_persistent_task(task.pk, task.generation)
+    task.refresh_from_db()
+    body = b''.join(response.streaming_content).decode('utf-8')
+
+    assert dispatched == [(task.pk, task.generation)]
+    assert task.status == 'failed'
+    assert task.error_code == 'article_source_changed'
+    assert task.provider_started is False
+    assert task.result == {}
+    assert provider_calls == []
+    assert 'complete' not in body
+
+
+@pytest.mark.django_db
+@override_settings(AI_BYOK_ENABLED=True, PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_unknown_translation_budget_is_rejected_before_task_creation(monkeypatch):
+    client, _user, csrf = _authenticated_client('t06-unknown-budget')
+    _create_model(client, csrf, SYNTHETIC_PROVIDER_KEY_A, 'unknown-budget')
+    news = _create_news('A short source with an unavailable budget profile.')
+    dispatched = []
+    monkeypatch.setattr(
+        translation_jobs,
+        '_dispatch_task',
+        lambda task_id, generation: dispatched.append((task_id, generation)),
+    )
+    monkeypatch.setattr(
+        ai_translation,
+        'find_model_preset',
+        lambda *_args: {'context_window_tokens': None, 'max_output_tokens': 4096},
+    )
+
+    response = _post_translation(client, csrf, news, 't06-unknown-budget')
+
+    assert response.status_code == 503
+    assert response.json()['error_code'] == 'translation_budget_unavailable'
+    assert ChatGPTTranslationTask.objects.count() == 0
+    assert dispatched == []
 
 
 @pytest.mark.django_db(transaction=True)

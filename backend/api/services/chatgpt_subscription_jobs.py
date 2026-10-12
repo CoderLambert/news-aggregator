@@ -46,9 +46,9 @@ from api.services.ai_execution import ExecutionSnapshot, ModelSelectionError, re
 from api.services.ai_model_registry import get_model_preset
 from api.services.ai_translation import (
     BYOKTranslationError,
-    MAX_TRANSLATION_SOURCE_CHARS,
     TRANSLATION_ERRORS,
     assert_byok_translation_snapshot_current,
+    preflight_byok_translation_source,
     prepare_byok_translation_execution,
     stream_byok_translation,
 )
@@ -307,8 +307,6 @@ def _start_or_get_byok_job_locked(user, news, idempotency_key):
             if current_news is None or not current_news.full_content:
                 raise BYOKTranslationError('article_source_missing')
             source_text = current_news.full_content
-            if len(source_text) > MAX_TRANSLATION_SOURCE_CHARS:
-                raise BYOKTranslationError('source_too_long')
 
             connection = UserAIConnection.objects.select_for_update().filter(
                 pk=snapshot.connection_id,
@@ -319,6 +317,8 @@ def _start_or_get_byok_job_locked(user, news, idempotency_key):
             ).first()
             if connection is None:
                 raise BYOKTranslationError('execution_changed')
+
+            preflight_byok_translation_source(source_text, snapshot)
 
             digest = source_hash(source_text)
             existing = ChatGPTTranslationTask.objects.filter(

@@ -42,9 +42,9 @@ def _byok_error_response(exc):
     message = TRANSLATION_ERRORS.get(code, '个人模型全文翻译失败，请稍后重试。')
     if code in {'byok_disabled', 'authentication_required'}:
         code_status = status.HTTP_403_FORBIDDEN
-    elif code in {'gateway_unavailable', 'provider_unavailable'}:
+    elif code in {'gateway_unavailable', 'provider_unavailable', 'translation_budget_unavailable'}:
         code_status = status.HTTP_503_SERVICE_UNAVAILABLE
-    elif code == 'source_too_long':
+    elif code in {'source_too_long', 'translation_budget_exceeded'}:
         code_status = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
     elif code in {'execution_changed', 'model_reselection_required', 'model_not_configured',
                   'model_not_found', 'model_unavailable', 'model_route_unavailable',
