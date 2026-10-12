@@ -33,6 +33,7 @@ BACKUP_CLI = SCRIPT_DIR / "backup.sh"
 RESTORE_CLI = SCRIPT_DIR / "restore.sh"
 MANIFEST_CLI = SCRIPT_DIR / "release_manifest.py"
 SNAPSHOT_PY = SCRIPT_DIR / "sqlite_snapshot.py"
+STAGE_PY = SCRIPT_DIR / "sqlite_stage.py"
 
 OWNER_LABEL = "org.newshub.volume-acceptance.owner"
 IMAGE_LABEL = "org.opencontainers.image.revision"
@@ -325,6 +326,7 @@ def secure_docker_argv(
     owner_token: str,
     image: str,
     snapshot_script: Path,
+    stage_script: Path | None = None,
     ledger_entries: Sequence[dict[str, Any]] = (),
 ) -> list[str]:
     """Apply the runner's Docker resource/network/mount policy to one CLI call."""
@@ -368,11 +370,17 @@ def secure_docker_argv(
                 if mount.get("source") not in owned_volumes:
                     raise AcceptanceError("Docker resource requested a volume not created by this run")
             elif kind == "bind":
-                if not (
-                    Path(mount.get("source", "")).resolve(strict=False) == snapshot_script
-                    and mount.get("target") == "/tmp/sqlite_snapshot.py"
-                    and "readonly" in mount
-                ):
+                source = Path(mount.get("source", "")).resolve(strict=False)
+                target = mount.get("target")
+                allowed_helper = (
+                    source == snapshot_script
+                    and target == "/tmp/sqlite_snapshot.py"
+                ) or (
+                    stage_script is not None
+                    and source == stage_script
+                    and target == "/tmp/sqlite_stage.py"
+                )
+                if not allowed_helper or "readonly" not in mount:
                     raise AcceptanceError("Docker bind mounts are restricted to the read-only snapshot helper")
             else:
                 raise AcceptanceError("Docker run/create mount type is unsupported")
@@ -521,6 +529,7 @@ def docker_proxy_main(argv: Sequence[str]) -> int:
     token = os.environ.get("NHVOL_OWNER_TOKEN", "")
     image = os.environ.get("NHVOL_IMAGE", "")
     snapshot = Path(os.environ.get("NHVOL_SNAPSHOT_SCRIPT", "/nonexistent"))
+    stage = Path(os.environ.get("NHVOL_STAGE_SCRIPT", "/nonexistent"))
     ledger = Path(os.environ.get("NHVOL_LEDGER", "/nonexistent"))
     command_log = Path(os.environ.get("NHVOL_COMMAND_LOG", "/nonexistent"))
     if not real_docker or not prefix.startswith(VOLUME_PREFIX) or not token or not image:
@@ -534,6 +543,7 @@ def docker_proxy_main(argv: Sequence[str]) -> int:
             owner_token=token,
             image=image,
             snapshot_script=snapshot,
+            stage_script=stage,
             ledger_entries=entries,
         )
     except AcceptanceError as exc:
@@ -683,6 +693,7 @@ class AcceptanceRunner:
             "NHVOL_OWNER_TOKEN": self.token,
             "NHVOL_IMAGE": self.options.image,
             "NHVOL_SNAPSHOT_SCRIPT": os.fspath(SNAPSHOT_PY),
+            "NHVOL_STAGE_SCRIPT": os.fspath(STAGE_PY),
             "NHVOL_LEDGER": os.fspath(self.ledger_path),
             "NHVOL_COMMAND_LOG": os.fspath(self.command_log_path),
         })

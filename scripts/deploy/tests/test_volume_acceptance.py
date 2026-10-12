@@ -114,6 +114,7 @@ def test_secure_docker_policy_names_resources_and_locks_network_image_and_mounts
     token = "0123456789abcdef01234567"
     volume = prefix + "-source"
     snapshot_script = Path("/repo/scripts/deploy/sqlite_snapshot.py").resolve()
+    stage_script = Path("/repo/scripts/deploy/sqlite_stage.py").resolve()
     ledger = [{"kind": "volume", "name": volume}]
 
     command = acceptance.secure_docker_argv(
@@ -148,6 +149,34 @@ def test_secure_docker_policy_names_resources_and_locks_network_image_and_mounts
         snapshot_script=snapshot_script,
     )
     assert readonly_bind[0] == "create"
+
+    readonly_stage_bind = acceptance.secure_docker_argv(
+        [
+            "create", "--mount",
+            f"type=bind,source={stage_script},target=/tmp/sqlite_stage.py,readonly",
+            IMAGE, "-c", "pass",
+        ],
+        run_prefix=prefix,
+        owner_token=token,
+        image=IMAGE,
+        snapshot_script=snapshot_script,
+        stage_script=stage_script,
+    )
+    assert readonly_stage_bind[0] == "create"
+
+    with pytest.raises(acceptance.AcceptanceError, match="read-only snapshot helper"):
+        acceptance.secure_docker_argv(
+            [
+                "create", "--mount",
+                f"type=bind,source={stage_script},target=/tmp/sqlite_snapshot.py,readonly",
+                IMAGE, "-c", "pass",
+            ],
+            run_prefix=prefix,
+            owner_token=token,
+            image=IMAGE,
+            snapshot_script=snapshot_script,
+            stage_script=stage_script,
+        )
 
 
 @pytest.mark.parametrize("command", ["run", "create"])
