@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { ArrowLeft, KeyRound, RotateCcw, ShieldCheck, Trash2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -20,7 +20,7 @@ import {
   updateAIConnection,
   updateAIModel,
 } from '@/services/api'
-import type { AIModelConfig, AIModelProbeKind, AIModelTestResult, CreateAIConnectionInput, CreateAIModelInput } from '@/services/api'
+import type { AIConnection, AIModelConfig, AIModelProbeKind, AIModelTestResult, CreateAIConnectionInput, CreateAIModelInput } from '@/services/api'
 
 const CONNECTIONS_KEY = 'aiConnections'
 const MODELS_KEY = 'aiModels'
@@ -37,6 +37,18 @@ type ProbeFeedbackState = 'pending' | 'succeeded' | 'failed' | 'unknown' | 'not_
 interface ProbeFeedback {
   state: ProbeFeedbackState
   message: string
+}
+
+interface ModelProbeRequest {
+  modelId: string
+  probeKind: AIModelProbeKind
+  generation: number
+  configIdentity: string
+}
+
+interface ProbeConfigSnapshot {
+  models: AIModelConfig[]
+  connections: AIConnection[]
 }
 
 const SAFE_PROBE_ERROR_MESSAGES: Record<string, ProbeFeedback> = {
@@ -59,6 +71,26 @@ const SAFE_PROBE_ERROR_MESSAGES: Record<string, ProbeFeedback> = {
 
 function probeFeedbackKey(modelId: string, probeKind: AIModelProbeKind): string {
   return `${modelId}:${probeKind}`
+}
+
+function probeConfigIdentity(modelId: string, snapshot: ProbeConfigSnapshot): string | null {
+  const model = snapshot.models.find((candidate) => candidate.id === modelId)
+  if (!model) return null
+  const connection = snapshot.connections.find((candidate) => candidate.id === model.connection_id)
+  if (!connection) return null
+
+  return JSON.stringify([
+    model.id,
+    model.connection_id,
+    model.model_id,
+    model.config_revision,
+    connection.id,
+    connection.provider_id,
+    connection.endpoint_profile,
+    connection.is_enabled,
+    connection.key_saved,
+    connection.masked_key,
+  ])
 }
 
 function feedbackForProbeResult(result: AIModelTestResult, probeKind: AIModelProbeKind): ProbeFeedback {
@@ -165,6 +197,8 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
   const [editModelDisplayName, setEditModelDisplayName] = useState('')
   const [notice, setNotice] = useState('')
   const [probeFeedback, setProbeFeedback] = useState<Record<string, ProbeFeedback>>({})
+  const probeGenerations = useRef(new Map<string, number>())
+  const probeConfigSnapshot = useRef<ProbeConfigSnapshot>({ models: [], connections: [] })
 
   const providersQuery = useQuery({
     queryKey: ['aiProviderProfiles'],
@@ -196,9 +230,55 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
   const modelPresets = modelCatalogQuery.data?.models ?? []
   const loading = providersQuery.isPending || connectionsQuery.isPending
   const providerError = providersQuery.isError || connectionsQuery.isError
+  useLayoutEffect(() => {
+    probeConfigSnapshot.current = {
+      models: modelsQuery.data ?? [],
+      connections: connectionsQuery.data ?? [],
+    }
+  }, [modelsQuery.data, connectionsQuery.data])
   const refreshConnections = () => queryClient.invalidateQueries({ queryKey: [CONNECTIONS_KEY, userId] })
   const refreshModels = () => queryClient.invalidateQueries({ queryKey: [MODELS_KEY, userId] })
+  const refreshConnectionsAndModels = () => Promise.all([refreshConnections(), refreshModels()])
   const refreshTaskPreferences = () => queryClient.invalidateQueries({ queryKey: ['aiTaskPreferences', userId] })
+  const nextProbeGeneration = (modelId: string, probeKind: AIModelProbeKind) => {
+    const key = probeFeedbackKey(modelId, probeKind)
+    const generation = (probeGenerations.current.get(key) ?? 0) + 1
+    probeGenerations.current.set(key, generation)
+    return generation
+  }
+  const invalidateModelProbes = (modelId: string) => {
+    const keys = (['text', 'tools'] as const).map((probeKind) => {
+      const key = probeFeedbackKey(modelId, probeKind)
+      probeGenerations.current.set(key, (probeGenerations.current.get(key) ?? 0) + 1)
+      return key
+    })
+    setProbeFeedback((current) => {
+      const next = { ...current }
+      keys.forEach((key) => delete next[key])
+      return next
+    })
+  }
+  const invalidateConnectionProbes = (connectionId: string) => {
+    probeConfigSnapshot.current.models
+      .filter((model) => model.connection_id === connectionId)
+      .forEach((model) => invalidateModelProbes(model.id))
+  }
+  const isCurrentProbeRequest = (request: ModelProbeRequest) => {
+    const key = probeFeedbackKey(request.modelId, request.probeKind)
+    return probeGenerations.current.get(key) === request.generation &&
+      probeConfigIdentity(request.modelId, probeConfigSnapshot.current) === request.configIdentity
+  }
+  const reportIgnoredStaleProbe = (request: ModelProbeRequest) => {
+    const key = probeFeedbackKey(request.modelId, request.probeKind)
+    if (probeGenerations.current.get(key) !== request.generation ||
+      probeConfigIdentity(request.modelId, probeConfigSnapshot.current) === request.configIdentity) return
+    setProbeFeedback((current) => current[key]?.state === 'pending'
+      ? {
+        ...current,
+        [key]: { state: 'unknown', message: '测试期间配置已变化，旧请求结果已忽略；当前能力状态未更新。' },
+      }
+      : current)
+  }
   const createMutation = useMutation({
     mutationFn: (input: CreateAIConnectionInput) => createAIConnection(input),
     onSuccess: async () => {
@@ -211,10 +291,10 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
   })
   const replaceMutation = useMutation({
     mutationFn: ({ connectionId, apiKey }: { connectionId: string; apiKey: string }) => replaceAIConnectionKey(connectionId, apiKey),
+    onMutate: ({ connectionId }) => invalidateConnectionProbes(connectionId),
     onSuccess: async () => {
       setReplacementKey('')
       setReplaceFor(null)
-      setProbeFeedback({})
       setNotice('Key 已替换，旧凭据版本已失效。本站尚未测试新 Key。')
       await refreshConnections()
     },
@@ -232,8 +312,8 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
   })
   const toggleMutation = useMutation({
     mutationFn: ({ connectionId, isEnabled }: { connectionId: string; isEnabled: boolean }) => updateAIConnection(connectionId, { is_enabled: isEnabled }),
+    onMutate: ({ connectionId }) => invalidateConnectionProbes(connectionId),
     onSuccess: async (_connection, variables) => {
-      setProbeFeedback({})
       setNotice(variables.isEnabled ? '连接已启用。' : '连接已停用，旧凭据版本已失效。')
       await Promise.all([refreshConnections(), refreshTaskPreferences()])
     },
@@ -241,8 +321,8 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
   })
   const deleteMutation = useMutation({
     mutationFn: (connectionId: string) => deleteAIConnection(connectionId),
+    onMutate: (connectionId) => invalidateConnectionProbes(connectionId),
     onSuccess: async () => {
-      setProbeFeedback({})
       setNotice('连接已删除，站点已清除保存的密文。')
       await Promise.all([refreshConnections(), refreshTaskPreferences()])
     },
@@ -262,13 +342,8 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
   })
   const deleteModelMutation = useMutation({
     mutationFn: (modelId: string) => deleteAIModel(modelId),
-    onSuccess: async (_deleted, modelId) => {
-      setProbeFeedback((current) => {
-        const next = { ...current }
-        delete next[probeFeedbackKey(modelId, 'text')]
-        delete next[probeFeedbackKey(modelId, 'tools')]
-        return next
-      })
+    onMutate: (modelId) => invalidateModelProbes(modelId),
+    onSuccess: async () => {
       setNotice('模型配置已删除。')
       await Promise.all([refreshModels(), refreshTaskPreferences()])
     },
@@ -277,13 +352,8 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
   const updateModelMutation = useMutation({
     mutationFn: ({ modelId, nextModelId, displayName }: { modelId: string; nextModelId: string; displayName: string }) =>
       updateAIModel(modelId, { model_id: nextModelId, display_name: displayName }),
-    onSuccess: async (_model, variables) => {
-      setProbeFeedback((current) => {
-        const next = { ...current }
-        delete next[probeFeedbackKey(variables.modelId, 'text')]
-        delete next[probeFeedbackKey(variables.modelId, 'tools')]
-        return next
-      })
+    onMutate: (variables) => invalidateModelProbes(variables.modelId),
+    onSuccess: async () => {
       setEditModelFor(null)
       setEditModelId('')
       setEditModelDisplayName('')
@@ -293,9 +363,13 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
     onError: () => setNotice('模型配置更新失败，请检查模型 ID 后重试。'),
   })
   const testModelMutation = useMutation({
-    mutationFn: ({ modelId, probeKind }: { modelId: string; probeKind: AIModelProbeKind }) => testAIModel(modelId, probeKind),
+    mutationFn: ({ modelId, probeKind }: ModelProbeRequest) => testAIModel(modelId, probeKind),
     retry: false,
     onSuccess: async (result, variables) => {
+      if (!isCurrentProbeRequest(variables)) {
+        reportIgnoredStaleProbe(variables)
+        return
+      }
       setProbeFeedback((current) => ({
         ...current,
         [probeFeedbackKey(variables.modelId, variables.probeKind)]: feedbackForProbeResult(result, variables.probeKind),
@@ -303,6 +377,10 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
       await refreshModels()
     },
     onError: (error, variables) => {
+      if (!isCurrentProbeRequest(variables)) {
+        reportIgnoredStaleProbe(variables)
+        return
+      }
       setProbeFeedback((current) => ({
         ...current,
         [probeFeedbackKey(variables.modelId, variables.probeKind)]: feedbackForProbeError(error),
@@ -316,6 +394,9 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
       ? '这会向服务商发送一条极短的文本请求，可能产生费用。本站不会自动重试。要继续吗？'
       : '这会向服务商发送一条极短的工具调用请求，可能产生费用。本站不会自动重试。要继续吗？'
     if (!window.confirm(prompt)) return
+    const configIdentity = probeConfigIdentity(modelId, probeConfigSnapshot.current)
+    if (!configIdentity) return
+    const generation = nextProbeGeneration(modelId, probeKind)
     setNotice('')
     setProbeFeedback((current) => ({
       ...current,
@@ -324,7 +405,7 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
         message: isText ? '正在测试文本能力…' : '正在测试工具调用能力…',
       },
     }))
-    testModelMutation.mutate({ modelId, probeKind })
+    testModelMutation.mutate({ modelId, probeKind, generation, configIdentity })
   }
 
   return (
@@ -402,8 +483,8 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
             <h2 id="saved-ai-connections" className="text-lg font-semibold">已保存的连接</h2>
             <p className="mt-1 text-sm text-muted-foreground">连接列表来自你的登录账号；Key 始终只显示掩码。</p>
           </div>
-          <Button type="button" variant="outline" className="min-h-11" onClick={() => void refreshConnections()} disabled={connectionsQuery.isFetching}>
-            <RotateCcw aria-hidden="true" />刷新
+          <Button type="button" variant="outline" className="min-h-11" onClick={() => void refreshConnectionsAndModels()} disabled={connectionsQuery.isFetching || modelsQuery.isFetching}>
+            <RotateCcw aria-hidden="true" />刷新连接和模型
           </Button>
         </div>
 
