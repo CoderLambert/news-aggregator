@@ -2,7 +2,7 @@
 
 对应：[T01 Task](../tasks/T01-credentials.md)。
 
-> **T01 本地实现与测试证据完成；PR #34 仍为 Draft，最新 head CI 全绿。** `credential_epoch` worker 消费端集成现有堆叠 PR #39 的合成 worker 证据；PR #39 尚未合并，独立 T01 PR #34 仍只包含凭据管理。两者均没有真实 provider 调用。`credential_epoch` 是授权撤销/fencing 版本；独立的 `credential_version` 标记当前密文并参与 AAD。
+> **T01 本地实现与测试证据完成；PR #34 仍为 Draft，最近完成的 head CI 全绿。** `credential_epoch` worker 消费端集成现有堆叠 PR #39 的合成 worker 证据；PR #39 尚未合并，独立 T01 PR #34 仍只包含凭据管理。两者均没有真实 provider 调用。`credential_epoch` 是授权撤销/fencing 版本；独立的 `credential_version` 标记当前密文并参与 AAD。
 
 | 用例 | 场景 / 失败注入 | 结果 | 证据 |
 | --- | --- | --- | --- |
@@ -77,8 +77,8 @@ T05 的新增后端测试文件在该 head 上为 `11 passed in 4.95s`。这验�
 
 ### PR #34 GitHub checks
 
-- 当前 head `dae63c42a74ee2cd24e7d06a7b240ace6c6df9c2` 的两组 backend-and-release-gates 与 frontend 检查全部 PASS：run [38192397347](https://github.com/CoderLambert/news-aggregator/actions/runs/38192397347) 与 [38192400399](https://github.com/CoderLambert/news-aggregator/actions/runs/38192400399)。
-- 历史 head `33ec3461eedad60c560c0f5c2b7eea447017cd90` 曾有两个 backend run 因既有 SQLite `OperationalError` 失败：run [38190564955](https://github.com/CoderLambert/news-aggregator/actions/runs/38190564955) 的 `test_sse_disconnect_does_not_cancel_background_worker`，以及 run [38190568500](https://github.com/CoderLambert/news-aggregator/actions/runs/38190568500) 的 `test_simultaneous_database_connections_share_one_unique_task`。最新 head 全绿，不删除这段历史；PR #34 按既有状态保留 Draft，测试和生产断言未调整。
+- 已验证 head `dae63c42a74ee2cd24e7d06a7b240ace6c6df9c2` 的两组 backend-and-release-gates 与 frontend 检查全部 PASS：run [38192397347](https://github.com/CoderLambert/news-aggregator/actions/runs/38192397347) 与 [38192400399](https://github.com/CoderLambert/news-aggregator/actions/runs/38192400399)。
+- 较早 head `33ec3461eedad60c560c0f5c2b7eea447017cd90` 曾有两个 backend run 因既有 SQLite `OperationalError` 失败：run [38190564955](https://github.com/CoderLambert/news-aggregator/actions/runs/38190564955) 的 `test_sse_disconnect_does_not_cancel_background_worker`，以及 run [38190568500](https://github.com/CoderLambert/news-aggregator/actions/runs/38190568500) 的 `test_simultaneous_database_connections_share_one_unique_task`。该波动保留为历史；PR #34 按既有状态保留 Draft，测试和生产断言未调整。
 
 最初用户报告的基线 `ea2ce55ae22e19e1604e88031b824b68f2666cec` 已由基线前合入的文档 PR #31 前移至以上 tracking ref。实现基于该 ref 建立的独立工作树；最终实时 `git ls-remote` 因 DNS 无法解析 `github.com` 暂不可验证。
 
