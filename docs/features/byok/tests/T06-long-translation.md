@@ -1,6 +1,6 @@
 # Test T06 · 长文分块完整翻译
 
-> **IMPLEMENTED · DRAFT PR**。实现提交 `1f719e666edc5554c16ffc1aa0b227909118a60f` 位于 `task/byok-T06-long-translation`，堆叠于 T05 PR #39 / 基线 `54df6abd70a979fee11a2c610c4fde0c35f00a15`；PR #39 尚未合并。T06 PR head `7200211b382cdbee5086ee721eec64ad5d075ee0` 的两组后端 CI 均未通过，失败在既有 SQLite worker-recovery 用例；T06 自身定向测试在两组 CI 中通过。PR 保持 Draft。真实供应商调用和浏览器 UAT 未运行，保留为 NOT_RUN。
+> **IMPLEMENTED · DRAFT PR**。实现提交 `1f719e666edc5554c16ffc1aa0b227909118a60f` 位于 `task/byok-T06-long-translation`，堆叠于 T05 PR #39 / 基线 `54df6abd70a979fee11a2c610c4fde0c35f00a15`；PR #39 尚未合并。PR #40 head `324e194a460374cc0cc148c095debd07f8b2d9cd` 的两组前端均通过，一组后端完整门禁通过，另一组因既有 SQLite 并发测试失败。T06 自身定向测试通过；因重复后端门禁结果不一致，PR 保持 Draft。真实供应商调用和浏览器 UAT 未运行，保留为 NOT_RUN。
 
 对应：[T06 Task](../tasks/T06-long-translation.md)。
 
@@ -21,7 +21,7 @@
 
 ## 如何复现
 
-以下代理检查使用 T00 PR #33 提供的锁定 LiteLLM Proxy 和内部合成 upstream。只生成临时虚拟 key，并使用 `sk-t00-provider-a-synthetic`；upstream 没有真实供应商路由。T06 探针只输出计数和布尔证据，不输出 prompt、凭据或译文。
+以下代理检查使用 T00 PR #33 head `ad0f14eb599ddbf8a691dc535227d7ef18298cb6` 提供的锁定 LiteLLM Proxy 和内部合成 upstream。只生成临时虚拟 key，并使用 `sk-t00-provider-a-synthetic`；upstream 没有真实供应商路由。T06 探针只输出计数和布尔证据，不输出 prompt、凭据或译文。
 
 ```sh
 cd /home/lambert/Documents/Codex/2026-10-11/task-2/news-aggregator-t00
@@ -66,6 +66,7 @@ PYTHONPATH=/tmp/byok-t02-test-stubs DJANGO_DB_PATH=/tmp/byok-t06-regression.sqli
 | `makemigrations --check --dry-run` | `No changes detected` |
 | PROXY_LOCAL | PASS：T06 SDK 实际发出 15 个 Responses streaming chunk，均观察到 `response_completed`；upstream 确认 provider tenant 为 `tenant-a`、项目虚拟 key 未泄漏；围栏代码精确保留、SSE progress 与合并内容一致。incomplete 负控观察到 1 次请求、`response_incomplete`，业务返回 `incomplete_response`、0 retry。真实 provider 请求数 0。 |
 | GitHub CI（head `7200211b382cdbee5086ee721eec64ad5d075ee0`） | 两组 frontend 均 PASS；两组 `backend-and-release-gates` 均 FAIL。run `38190345273`：895 passed、2 skipped，失败 `test_sse_disconnect_does_not_cancel_background_worker`（worker 持久化遇 `OperationalError`）；run `38190373196`：894 passed、2 skipped，失败该用例和 `test_simultaneous_database_connections_share_one_unique_task`（SQLite `OperationalError`）。两组均运行到 T06 测试且通过。完整检查尚未绿，不据本地回归覆盖。 |
+| GitHub CI（最新完成的 head `324e194a460374cc0cc148c095debd07f8b2d9cd`） | 两组 frontend 均 PASS。backend run `38190688778` 全部通过（含 895 项测试、2 skipped、生产镜像构建及隔离 G1 smoke）；run `38190685979` 有 895 passed、2 skipped，唯一失败为既有 `test_simultaneous_database_connections_share_one_unique_task`（SQLite `OperationalError`）。该组也运行并通过 T06 测试。重复门禁结果不一致，所以 CI 仍记为未全绿、PR 保持 Draft。 |
 | SDK_LOCAL / PROVIDER_REAL / 浏览器 UAT | SDK_LOCAL 未单独分类（SDK 已在 PROXY_LOCAL 中运行）；PROVIDER_REAL **NOT_RUN**；用户浏览器长文刷新验收 **NOT_RUN** |
 | 测试断言 diff | 旧长度护栏从字符数改为 UTF-8 字节上限；扩展 fake SDK 以记录顺序/请求数/重试参数；新增完整结构、超预算无 dispatch、中间 chunk incomplete、空输出、结构变化不保存、排队后源文变化和私有多 chunk 结果测试。未放宽既有产品断言。 |
 | 用户端操作链 | API/DB/worker/SSE 自动化覆盖通过；手动浏览器步骤保留 NOT_RUN |

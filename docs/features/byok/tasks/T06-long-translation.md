@@ -1,6 +1,6 @@
 # T06 · 长文分块完整翻译
 
-> **IMPLEMENTED · DRAFT PR**。代码提交 `1f719e666edc5554c16ffc1aa0b227909118a60f`；测试证据见 [Test T06](../tests/T06-long-translation.md)。本卡依赖 T05 私有翻译任务链，分支与 PR 堆叠于 T05 PR #39 的 head `54df6abd70a979fee11a2c610c4fde0c35f00a15`；PR #39 未合并。T06 head `7200211b382cdbee5086ee721eec64ad5d075ee0` 的 T06 定向测试在 CI 中通过，但两组后端完整门禁因既有 SQLite worker-recovery 用例失败；具体运行见 Test T06。CI 全绿前保持 Draft。
+> **IMPLEMENTED · DRAFT PR**。代码提交 `1f719e666edc5554c16ffc1aa0b227909118a60f`；测试证据见 [Test T06](../tests/T06-long-translation.md)。本卡依赖 T05 私有翻译任务链，分支与 PR 堆叠于 T05 PR #39 的 head `54df6abd70a979fee11a2c610c4fde0c35f00a15`；PR #39 未合并。PR #40 head `324e194a460374cc0cc148c095debd07f8b2d9cd` 的 T06 定向测试通过；一个完整后端门禁通过，重复门禁的另一组在既有 SQLite 并发用例失败。详见 Test T06；检查一致通过前保持 Draft。
 
 | 属性 | 内容 |
 | --- | --- |
