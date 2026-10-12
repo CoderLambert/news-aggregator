@@ -14,11 +14,11 @@ import hashlib
 from dataclasses import dataclass
 
 from api.models import News
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as utc_timezone
 from typing import TYPE_CHECKING
 
-from django.db.models import F, Q, TextField, Value
-from django.db.models.functions import Coalesce, Replace, Trim
+from django.db.models import F, Q, TextField, Value, Func
+from django.db.models.functions import Coalesce
 from django.utils.timezone import now as tz_now
 
 from api.services.article_fetcher.types import (
@@ -77,15 +77,9 @@ FETCH_IN_PROGRESS_TTL = timedelta(minutes=5)
 
 def trimmed_text_expression(field_name: str):
     """Return a database expression matching Python's common whitespace trim."""
-    expression = F(field_name)
-    for character in ('\t', '\n', '\r', '\v', '\f'):
-        expression = Replace(
-            expression,
-            Value(character),
-            Value(''),
-            output_field=TextField(),
-        )
-    return Coalesce(Trim(expression), Value(''), output_field=TextField())
+    whitespace = ' \t\n\r\v\f\x1c\x1d\x1e\x1f\x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000'
+    return Coalesce(Func(F(field_name), Value(whitespace), function='TRIM', output_field=TextField()),
+                    Value(''), output_field=TextField())
 
 
 @dataclass(frozen=True)
@@ -214,7 +208,7 @@ def mark_fetching(news: News):
 
 def _stable_provenance(provenance):
     keys = ('provider', 'source_key', 'source_item_id', 'target_url', 'body_field',
-            'source_version', 'source_modified_at', 'body_sha256', 'validator_version')
+            'source_version', 'source_modified_at', 'body_sha256', 'validator_version', 'declared_canonical_url', 'content_kind')
     return {key: provenance.get(key) for key in keys}
 
 
@@ -250,13 +244,16 @@ def commit_candidate(news, candidate, *, provider='', lease: FetchLease | None =
         return ContentCommit('rejected', validation.error_code)
     body = validation.markdown
     body_hash = hashlib.sha256(body.encode('utf-8')).hexdigest()
-    modified = candidate.source_modified_at.isoformat() if candidate.source_modified_at else None
+    from api.services.article_identity import normalize_article_url
+    canonical = normalize_article_url(candidate.declared_canonical_url, max_length=2048, require_article=False) if candidate.declared_canonical_url else None
+    modified = candidate.source_modified_at.astimezone(utc_timezone.utc).isoformat() if candidate.source_modified_at else None
     provenance = {
         'provider': provider or candidate.source_key,
         'source_key': candidate.source_key, 'source_item_id': candidate.source_item_id,
         'target_url': expected_url, 'body_field': candidate.body_field,
         'source_version': candidate.source_version, 'source_modified_at': modified,
         'body_sha256': body_hash, 'validator_version': VALIDATOR_VERSION,
+        'declared_canonical_url': canonical, 'content_kind': candidate.content_kind,
     }
     old = current.full_content_provenance or {}
     same_body = body == current.full_content
@@ -271,7 +268,7 @@ def commit_candidate(news, candidate, *, provider='', lease: FetchLease | None =
             if candidate.source_modified_at < previous or (candidate.source_modified_at == previous and not same_body):
                 return ContentCommit('rejected', 'source_version_conflict')
         # Opaque version tokens establish equality only, never ordering.
-        if old.get('source_version') and candidate.source_version == old['source_version'] and not same_body and not newer:
+        if old.get('source_version') and candidate.source_version == old['source_version'] and not same_body:
             return ContentCommit('rejected', 'source_version_conflict')
     if has_full_content(current) and not same_body and not lease and not (comparable and newer):
         return ContentCommit('rejected', 'source_version_conflict')
@@ -286,6 +283,8 @@ def commit_candidate(news, candidate, *, provider='', lease: FetchLease | None =
             full_content_provenance=provenance, full_content_quality_score=quality_score,
             full_content_fetched_at=completed,
         )
+        if current.content_kind == 'unknown':
+            updates['content_kind'] = candidate.content_kind
         if not same_body:
             updates.update(full_content_zh='', full_content_zh_fetched_at=None,
                            suggested_questions=[], suggested_questions_generated_at=None)

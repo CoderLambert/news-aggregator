@@ -324,3 +324,63 @@ def test_hn_editorial_headline_does_not_veto_exact_publisher_identity():
     assert has_full_content(news) and news.source.name == 'Hacker News'
     assert news.title == 'An editorial HN headline'
     assert news.source_items.count() == 2
+
+
+@pytest.mark.django_db
+def test_approved_short_body_equal_to_excerpt_is_still_complete(news):
+    body = candidate(news, 'A real short post.')
+    assert commit_candidate(news, body, summary=body.raw_content).saved
+
+
+@pytest.mark.django_db
+def test_fragment_keeps_semantic_header_and_subscription_demo(news):
+    body = candidate(news, '<header><h2>Introduction</h2><p>The actual opening argument.</p></header>'
+                     '<div class="subscribe"><p>A subscription programming example.</p></div>',
+                     body_field='body_html', content_format='html')
+    result = validate_candidate(body, expected_url=news.url)
+    assert result.ok and '## Introduction' in result.markdown
+    assert 'actual opening argument' in result.markdown and 'subscription programming example' in result.markdown
+
+
+@pytest.mark.django_db
+def test_same_upstream_version_cannot_be_overridden_by_new_modified_timestamp(news):
+    instant = timezone.now()
+    assert commit_candidate(news, candidate(news, source_version='v1', source_modified_at=instant)).saved
+    result = commit_candidate(news, candidate(news, 'Conflicting new body', source_version='v1', source_modified_at=instant + timedelta(days=1)))
+    assert result.reason == 'source_version_conflict'
+    assert news.full_content == 'A complete short article.'
+
+
+@pytest.mark.django_db
+def test_dev_repost_canonical_is_attribution_and_never_changes_target(news):
+    canonical = 'https://webkit.org/blog/17/original/'
+    assert commit_candidate(news, candidate(news, declared_canonical_url=canonical)).saved
+    assert news.url == 'https://dev.to/team/short-article'
+    assert news.full_content_provenance['declared_canonical_url'] == canonical
+    assert validate_candidate(candidate(news, declared_canonical_url='javascript:bad()'), expected_url=news.url).error_code == 'body_mismatch'
+
+
+@pytest.mark.django_db
+def test_equivalent_timezone_representation_is_not_a_new_body_revision(news):
+    from datetime import timezone as utc_timezone
+    instant = timezone.now()
+    assert commit_candidate(news, candidate(news, source_modified_at=instant)).saved
+    version = news.full_content_revision
+    assert commit_candidate(news, candidate(news, source_modified_at=instant.astimezone(utc_timezone(timedelta(hours=8))))).outcome == 'noop'
+    assert news.full_content_revision == version
+
+
+@pytest.mark.django_db
+def test_unicode_whitespace_availability_matches_sql(news):
+    from api.services.full_content_status import filter_readable_full_content
+    for body in ('\xa0', '\u3000\u2009\u202f', '\x85\x1c', 'Readable\u3000'):
+        News.objects.filter(pk=news.pk).update(full_content_state='legacy', full_content=body)
+        news.refresh_from_db()
+        assert has_full_content(news) == filter_readable_full_content(News.objects.filter(pk=news.pk)).exists() == bool(body.strip())
+
+
+@pytest.mark.django_db
+def test_subscription_code_example_does_not_look_like_a_paywall(news):
+    markdown = 'A subscription programming tutorial.\n\n```js\nconsole.log("subscribe to continue reading");\n```'
+    result = validate_candidate(candidate(news, markdown), expected_url=news.url)
+    assert result.ok and 'console.log' in result.markdown

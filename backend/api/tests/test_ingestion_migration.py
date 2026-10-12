@@ -29,7 +29,7 @@ if HISTORICAL:
     source = Source.objects.create(name='Synthetic publisher', url='https://example.test')
     category = Category.objects.create(name='Migration', slug='migration')
     user = apps.get_model('auth', 'User').objects.create(username='migration')
-    for i, body in enumerate(['Stored body', ' \\t\\n\\r\\v\\f ', '']):
+    for i, body in enumerate(['Stored body', ' \\t\\n\\r\\v\\f ', '', '\\u3000\\xa0']):
         news = News.objects.create(
             title='Synthetic', url=f'https://example.test/{i}', source=source,
             category=category, content='Summary', publish_time=timezone.now(),
@@ -50,11 +50,11 @@ assert apps.get_model('api', 'RequestBudget').objects.count() == 0
 assert apps.get_model('api', 'NewsSourceItem').objects.count() == 0
 if HISTORICAL:
     rows = list(News.objects.order_by('pk'))
-    assert [(r.full_content_state, r.full_content_revision) for r in rows] == [('legacy',1),('missing',0),('missing',0)]
-    assert [r.full_content for r in rows] == ['Stored body', ' \\t\\n\\r\\v\\f ', '']
+    assert [(r.full_content_state, r.full_content_revision) for r in rows] == [('legacy',1),('missing',0),('missing',0),('missing',0)]
+    assert [r.full_content for r in rows] == ['Stored body', ' \\t\\n\\r\\v\\f ', '', '\\u3000\\xa0']
     assert all(r.full_content_zh == '历史译文' and r.suggested_questions == ['Original question'] for r in rows)
-    assert apps.get_model('api', 'Favorite').objects.count() == 3
-    assert apps.get_model('api', 'ChatSession').objects.count() == 3
+    assert apps.get_model('api', 'Favorite').objects.count() == 4
+    assert apps.get_model('api', 'ChatSession').objects.count() == 4
     assert not apps.get_model('api', 'CrawlerSettings').objects.get(pk=1).scheduler_enabled
     assert not apps.get_model('api', 'CrawlerTarget').objects.get(spider_name='leiphone').enabled
 else:

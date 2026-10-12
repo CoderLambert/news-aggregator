@@ -101,7 +101,7 @@ from api.services.article_identity import InvalidIdentity, normalize_article_url
 from api.services.source_policy import candidate_contract_allows, html_candidate_contract_allows
 from .types import FullContentCandidate
 
-VALIDATOR_VERSION = 'ingestion-1'
+VALIDATOR_VERSION = 'ingestion-2'
 
 
 @dataclass(frozen=True)
@@ -123,6 +123,7 @@ def validate_candidate(candidate: FullContentCandidate, *, expected_url: str, ex
             not isinstance(candidate.request_started_at, datetime) or
             (candidate.source_modified_at is not None and not isinstance(candidate.source_modified_at, datetime)) or
             (candidate.source_version is not None and not isinstance(candidate.source_version, str)) or
+            (candidate.declared_canonical_url is not None and not isinstance(candidate.declared_canonical_url, str)) or
             (candidate.expected_revision is not None and (type(candidate.expected_revision) is not int or candidate.expected_revision < 0))):
         return CandidateValidation(False, error_code='invalid_identity')
     try:
@@ -144,7 +145,13 @@ def validate_candidate(candidate: FullContentCandidate, *, expected_url: str, ex
         return CandidateValidation(False, error_code='unsupported')
     # Inspect truncation and challenge evidence before removing page/fragment chrome.
     soup = BeautifulSoup(raw, 'html.parser') if candidate.content_format == 'html' else None
-    text = soup.get_text(' ', strip=True) if soup else raw
+    if soup:
+        for node in soup.select('pre, code, script, style'):
+            node.decompose()
+        text = soup.get_text(' ', strip=True)
+    else:
+        text = re.sub(r'(?ms)^(```|~~~)[^\n]*\n.*?^\1[ \t]*$', '', raw)
+        text = re.sub(r'`[^`]*`', '', text)
     lowered = ' '.join(text.lower().split())
     if (re.search(r'(subscribe|sign in|log in|purchase|register).{0,60}(to (continue|read|unlock)|remaining article|full article)', lowered) or
             re.search(r'(read|continue reading).{0,30}(the rest|full article|on the website)', lowered) or
@@ -154,6 +161,11 @@ def validate_candidate(candidate: FullContentCandidate, *, expected_url: str, ex
                  soup.select_one('form input[type="password"]')):
         return CandidateValidation(False, error_code='body_partial')
     canonical = candidate.declared_canonical_url
+    if canonical:
+        try:
+            normalize_article_url(canonical, max_length=2048, require_article=False)
+        except InvalidIdentity:
+            return CandidateValidation(False, error_code='body_mismatch')
     # DEV cross-publisher canonical is attribution, not a target identity change.
     if canonical and candidate.source_key != 'devto' and not same_article_identity(target, canonical, allow_host_alias=True):
         return CandidateValidation(False, error_code='body_mismatch')
@@ -173,6 +185,6 @@ def validate_candidate(candidate: FullContentCandidate, *, expected_url: str, ex
         return CandidateValidation(False, error_code='body_empty')
     if not title or (expected_title and _similarity(title, expected_title) < 0.55):
         return CandidateValidation(False, error_code='body_mismatch')
-    if summary and _normalize(summary) == _normalize(body):
+    if candidate.body_field in {'article_html', 'reader_markdown'} and summary and _normalize(summary) == _normalize(body):
         return CandidateValidation(False, error_code='body_partial')
     return CandidateValidation(True, markdown=body, score=1.0)

@@ -83,3 +83,14 @@ T04 的 transport 会返回/传播延期，Feed next_poll_at 与 receipt/checkpo
 ### 后续契约审查
 
 T05/来源适配前补充 T03 的边界：统一 Unicode 空白可用性；已审核短正文与派生摘录相同不能被摘要启发式否定；片段清理只移除非正文元素/指定页脚；DEV canonical 署名证据；矛盾的相同上游版本不能被更新时间放行。随后继续 T05–T12，不缩减原合同。
+
+
+## T03 合同边界补充
+
+已完成上节契约审查的五项修正。SQL 与 Python 使用相同的 Unicode 空白集合；未上线的 0036 数据迁移同步冻结该集合，并用文件库验证 Unicode 空白历史正文仍 missing/revision=0。审核过的 API/Feed 短正文不会因派生摘录相同而拒收；通用网页/Reader 的摘要诊断保留。HTML 片段只去除脚本、表单等非正文元素与明确指定页脚，保留正文 header、订阅技术演示等语义节点，代码里的订阅提示不当作付费墙。
+
+同一个上游版本的不同正文，即使修改时间更新也拒收；等价时区表示规范为 UTC，不单独触发 revision。合法 DEV 外站 canonical 作为署名证据保存，目标 URL 不变，非法 canonical 拒收。validator_version 为 ingestion-2；证据加入规范 canonical 与内容类型，unknown 可由合法候选确认为实际类型。
+
+实际相关回归 **140 passed**，包括 news_ingestion、状态服务/模型、迁移、crawler、article_fetcher 与 site_rules；`makemigrations --check --dry-run` 实际 No changes detected，`git diff --check` 通过。没有运行生产迁移。
+
+下一步为 T05：feedparser 6.x、公用时区日期解析、策略签名、完整枚举 receipt、Pipeline 提交后结算、FeedState CAS 与异常延期。T06–T12 仍待实施，完整开发完成定义未满足，goal 保持 active。

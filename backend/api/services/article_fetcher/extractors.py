@@ -353,7 +353,9 @@ def extract_markdown_from_html(html: str, url: str) -> ExtractedArticle:
 def html_fragment_to_markdown(html: str, base_url: str, *, remove_selectors=()) -> str:
     """Convert an approved API/Feed fragment without treating it as a webpage."""
     soup = BeautifulSoup(html or '', 'html.parser')
-    _clean_soup(soup, remove_selectors)
+    for selector in ('script', 'style', 'noscript', 'svg', 'canvas', 'iframe', 'form', *remove_selectors):
+        for node in soup.select(selector):
+            node.decompose()
     for node in soup.select('a[href], img[src], img[data-src], img[data-original]'):
         for attr in ('href', 'src', 'data-src', 'data-original'):
             value = node.get(attr)

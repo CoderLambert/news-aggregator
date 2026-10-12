@@ -7,12 +7,11 @@ from django.db import migrations, models
 
 def classify_existing_bodies(apps, schema_editor):
     # Freeze the availability trim in this migration; never import live services.
-    from django.db.models.functions import Coalesce, Replace, Trim
+    from django.db.models.functions import Coalesce
     news = apps.get_model('api', 'News').objects.using(schema_editor.connection.alias)
-    expression = models.F('full_content')
-    for char in ('\t', '\n', '\r', '\v', '\f'):
-        expression = Replace(expression, models.Value(char), models.Value(''), output_field=models.TextField())
-    expression = Coalesce(Trim(expression), models.Value(''), output_field=models.TextField())
+    whitespace = ' \t\n\r\v\f\x1c\x1d\x1e\x1f\x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000'
+    expression = Coalesce(models.Func(models.F('full_content'), models.Value(whitespace), function='TRIM', output_field=models.TextField()),
+                          models.Value(''), output_field=models.TextField())
     news.annotate(_body=expression).exclude(_body='').update(
         full_content_state='legacy', full_content_revision=1,
     )
