@@ -1,9 +1,47 @@
 {
   "legacy_bytes": 513599,
   "summary_bytes": 37599,
-  "nginx_gzip_bytes": 1151,
+  "nginx_gzip_bytes": 1152,
   "gzip_round_trip": "PASS",
   "detail_sse_private_uncompressed": "PASS",
+  "html_negotiation_probes": [
+    {
+      "scope": "anonymous",
+      "accept": "text/html",
+      "path": "/api/news/",
+      "status": 406,
+      "content_type": "application/json",
+      "content_encoding": null,
+      "result": "PASS: JSON error, no HTML"
+    },
+    {
+      "scope": "anonymous",
+      "accept": "application/json",
+      "path": "/api/news/?format=api",
+      "status": 404,
+      "content_type": "application/json",
+      "content_encoding": null,
+      "result": "PASS: JSON error, no HTML"
+    },
+    {
+      "scope": "session",
+      "accept": "text/html",
+      "path": "/api/news/",
+      "status": 406,
+      "content_type": "application/json",
+      "content_encoding": null,
+      "result": "PASS: JSON error, no HTML"
+    },
+    {
+      "scope": "session",
+      "accept": "application/json",
+      "path": "/api/news/?format=api",
+      "status": 404,
+      "content_type": "application/json",
+      "content_encoding": null,
+      "result": "PASS: JSON error, no HTML"
+    }
+  ],
   "legacy_fixture_10s_identity": {
     "outcome": "FAILURE",
     "ms": 10001,
@@ -12,13 +50,13 @@
   },
   "default_list_10s_identity": {
     "outcome": "SUCCESS",
-    "ms": 1936,
+    "ms": 1935,
     "count": 20,
     "hasBody": false
   },
   "summary_30s_identity": {
     "outcome": "SUCCESS",
-    "ms": 1977,
+    "ms": 1976,
     "count": 20,
     "hasBody": false
   },
@@ -30,7 +68,7 @@
   },
   "summary_30s_delay12": {
     "outcome": "SUCCESS",
-    "ms": 12158,
+    "ms": 12157,
     "count": 20,
     "hasBody": false
   },

@@ -7,6 +7,7 @@
 ## 范围与兼容性
 
 - 默认 `/api/news/` 与显式 `representation=summary` 只返回summary/summary_zh，各最多300个Unicode字符，不包含content/content_zh/full_content/full_content_zh。其他representation返回400；完整正文继续通过详情获取。所有前端列表入口迁移到摘要，详情类型/解析与列表缓存分离。
+- 列表view仅允许JSONRenderer，匿名/合成会话的Accept:text/html返回406 JSON，format=api返回404 JSON；本地Nginx四项探针均不返回/压缩HTML，未泄露CSRF模板或用户名。原gzip_types不能禁用默认text/html，因此这是已修正的范围缺陷，未证明可利用攻击；全局renderer、详情renderer与鉴权未改。
 - 列表请求单独30秒，其他请求时限与取消保持原行为。仅精确 `/api/news/` 开启JSON gzip，其余API不继承压缩；SSE设置、反代头、缓存头不变。
 - 采用局部hunk移植，保留NewsCard屏蔽能力开关、LocalSearch语义能力开关、api.ts能力解析器和views.py既有认证/聊天/SSE行为。Django已有ValidationError仍用于注册校验，新增DRF异常明确命名ApiValidationError。
 - Dockerfile、production target、compose.prod.yaml、入口/迁移脚本、发布/备份/回滚/manifest脚本不变。33个api迁移文件（含__init__.py）与34bbe2b0逐字节一致，保留0032_research_queued_input；没有新增迁移。
@@ -14,14 +15,14 @@
 
 ## 本地验证
 
-- 189项适用后端/配置回归通过，包括27项摘要测试（含部署read-only默认摘要/详情及AI屏障）、搜索、公共策略、生产配置、账号安全、聊天/迁移、全文、翻译/SSE、数据路径和发布manifest契约。3条既有警告（依赖弃用与Category/Source分页顺序）。
+- 193项适用后端/配置回归通过，包括31项摘要测试（含部署read-only默认摘要/详情及AI屏障）、搜索、公共策略、生产配置、账号安全、聊天/迁移、全文、翻译/SSE、数据路径和发布manifest契约。3条既有警告（依赖弃用与Category/Source分页顺序）。
 - 前端66文件469项通过，typecheck/lint/build通过。
 - 原发布/回滚/备份脚本、静态导出、local-domain参数测试通过，Docker/curl/browser等均替身；没有连接Docker daemon或修改任何现有容器。
 - 使用合成值的production `manage.py check --deploy` 成功，有既有HSTS子域和preload两条警告，未改全域TLS策略。
 - 临时SQLite已应用完整迁移至0032，makemigrations --check --dry-run无模型变更。普通列表1条/20条均2次查询，语义2次、混合3次（索引/向量替身，无模型调用）。
 - 独立用户态Nginx1.28.0在随机loopback端口测试受管配置；nginx -t、gzip头、Vary/no-store、解压一致及详情/模拟SSE/模拟私有JSON不压缩均通过。
-- 20篇大量重复英文/中文合成文章：旧正文重建载荷513,599字节 → 默认摘要37,599字节 → 实际gzip1,151字节。压缩率不代表真实新闻。
-- 20,480 bytes/s、100ms latency真实Axios/Vite/Nginx/Django：旧正文替身10.001秒超时；默认摘要10秒identity客户端1.936秒成功；前端30秒摘要identity 1.977秒、gzip0.219秒；额外12秒上游延迟12.158秒成功。
+- 20篇大量重复英文/中文合成文章：旧正文重建载荷513,599字节 → 默认摘要37,599字节 → 实际gzip1,152字节。压缩率不代表真实新闻。
+- 20,480 bytes/s、100ms latency真实Axios/Vite/Nginx/Django：旧正文替身10.001秒超时；默认摘要10秒identity客户端1.935秒成功；前端30秒摘要identity 1.976秒、gzip0.219秒；额外12秒上游延迟12.157秒成功。
 - 测试启动前显式设置PYTEST_CURRENT_TEST、NEWS_CRAWL_ONLY=1、RUN_MAIN=true与HF_HUB_OFFLINE=1/TRANSFORMERS_OFFLINE=1；慢网脚本在django.setup前禁止EmbeddingService.preload、model属性与encode调用，启动/结束均断言零调用。此兼容任务没有加载模型、调用真实模型或读取用户Key。
 - 首轮浏览器harness入口超时，清理后复跑通过；没有作为成功结果计入。最终机器可读证据：verification/news-slow-network-compatible.json。
 
@@ -96,7 +97,7 @@ deploy.sh按--image临时覆盖NEWSHUB_IMAGE，并沿用原env内容。成功后
 
 核对实际启用news vhost与基线差异，备份该文件，然后只应用受管news.lambert.host.conf中的gzip差异；保留实际root与路径，不能整套覆盖Nginx或其他vhost。先sudo nginx -t成功再按原服务方式reload。原SSE locations仍gzip off/buffering off，精确列表保持no-store及反代头。实际vhost文件路径与服务名由用户核实后再给完整操作命令。
 
-用户可在服务器本机使用curl --resolve news.lambert.host:443:127.0.0.1并沿用有效TLS证书，检查默认列表JSON无正文、摘要<=300、详情完整、Accept-Encoding:gzip对应Content-Encoding/Vary、搜索/过滤/分页和首页。不得把HTTP200或健康状态当成整个用户流程通过；不要为了验证调用AI。生产真实文章gzip字节应重新测量，不套用合成1,151字节。
+用户可在服务器本机使用curl --resolve news.lambert.host:443:127.0.0.1并沿用有效TLS证书，检查默认列表JSON无正文、摘要<=300、详情完整、Accept-Encoding:gzip对应Content-Encoding/Vary、搜索/过滤/分页和首页。不得把HTTP200或健康状态当成整个用户流程通过；不要为了验证调用AI。生产真实文章gzip字节应重新测量，不套用合成1,152字节。
 
 本热修复迁移集合未变化，正常代码回滚使用原rollback.sh；它会独立校验数据库迁移集合与旧manifest严格一致。成功更新后回滚的current-manifest应指目标新manifest：
 

@@ -114,3 +114,23 @@ def test_read_only_deployment_returns_previews_and_preserves_ai_barriers(article
             assert client.get('/api/news/', {'search': 'paragraph', 'mode': mode}).status_code == 403
     semantic.assert_not_called()
     hybrid.assert_not_called()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('authenticated', [False, True])
+@pytest.mark.parametrize('params,accept,expected_status', [
+    ({}, 'text/html', 406),
+    ({'format': 'api'}, 'application/json', 404),
+])
+def test_list_rejects_browsable_html_with_or_without_session(articles, authenticated, params, accept, expected_status):
+    client = APIClient()
+    if authenticated:
+        from django.contrib.auth import get_user_model
+        user = get_user_model().objects.create_user(username='summary-session-reader', password='synthetic-only')
+        client.force_login(user)
+    response = client.get('/api/news/', params, HTTP_ACCEPT=accept)
+    assert response.status_code == expected_status
+    assert response['Content-Type'].startswith('application/json')
+    assert b'<html' not in response.content.lower()
+    assert b'csrfmiddlewaretoken' not in response.content
+    assert b'summary-session-reader' not in response.content
