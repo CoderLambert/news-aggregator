@@ -7,9 +7,11 @@ from dataclasses import dataclass
 
 import httpx2
 from django.conf import settings
+from django.db import transaction
+from django.db.models import F
 from openai import OpenAI
 
-from api.models import UserAIModelConfig
+from api.models import UserAIConnection, UserAIModelConfig
 from api.services.ai_credentials import (
     CredentialEncryptionUnavailable,
     CredentialUnavailable,
@@ -192,6 +194,42 @@ def assert_research_execution_current(execution: ResearchExecution) -> None:
         'catalog_version': execution.catalog_version,
     }
     _validate_document(document, user_id=execution.snapshot.user_id, decrypt_key=False)
+
+
+def lock_research_execution_for_commit(execution: ResearchExecution) -> None:
+    """Serialize result commit with credential revocation and model edits.
+
+    Call inside the result transaction. The conditional no-op connection update
+    is the first SQLite write and a row lock on databases that support row
+    locking; the selected model row is then locked before the final snapshot
+    check. A revocation that commits first makes the epoch predicate fail.
+    """
+    if not transaction.get_connection().in_atomic_block:
+        raise RuntimeError('research execution commit fence requires an atomic transaction')
+    snapshot = execution.snapshot
+    changed = UserAIConnection.objects.filter(
+        pk=snapshot.connection_id,
+        user_id=snapshot.user_id,
+        is_enabled=True,
+        is_deleted=False,
+        credential_epoch=snapshot.credential_epoch,
+        credential_ciphertext__gt='',
+        encryption_key_id__gt='',
+        provider_id=snapshot.provider_id,
+        endpoint_profile=snapshot.endpoint_profile,
+        endpoint_profile_version=snapshot.endpoint_profile_version,
+    ).update(credential_epoch=F('credential_epoch'))
+    if not changed:
+        raise ResearchExecutionError('execution_changed')
+
+    config = UserAIModelConfig.objects.select_for_update().filter(
+        pk=snapshot.model_config_id,
+        connection_id=snapshot.connection_id,
+        connection__user_id=snapshot.user_id,
+    ).first()
+    if config is None:
+        raise ResearchExecutionError('execution_changed')
+    assert_research_execution_current(execution)
 
 
 @contextmanager

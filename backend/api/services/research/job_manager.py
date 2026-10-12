@@ -409,7 +409,7 @@ def _persist_tool_result(run_id, run_token, session, tool_name, args, result):
     guard()
 
 
-def _persist_success(run_id, run_token, session, messages):
+def _persist_success(run_id, run_token, session, messages, *, byok_execution=None):
     now = timezone.now()
     event_type, data = 'complete', {}
     wire = _wire_record(event_type, data)
@@ -424,7 +424,15 @@ def _persist_success(run_id, run_token, session, messages):
         )
     sequence = snapshot['last_event_sequence'] + 1
     with transaction.atomic():
-        # The run CAS is the first database write, taking SQLite's write lock.
+        if byok_execution is not None:
+            from .byok_execution import ResearchExecutionError, lock_research_execution_for_commit
+            try:
+                lock_research_execution_for_commit(byok_execution)
+            except ResearchExecutionError as exc:
+                raise _research_execution_error(exc) from None
+
+        # The conditional run CAS follows the BYOK row fence in the same
+        # transaction, so success and the complete event share its boundary.
         changed = ResearchRun.objects.filter(
             **_safe_cas_filter(run_id, run_token),
             last_event_sequence=snapshot['last_event_sequence'],
@@ -517,7 +525,9 @@ def _run_worker(run_id, query, local_only):
             append_event(run_id, token, event_type, data, guard)
 
         def persist_completion(messages):
-            _persist_success(run_id, token, session, messages)
+            _persist_success(
+                run_id, token, session, messages, byok_execution=byok_execution,
+            )
 
         with _heartbeat(run_id, token):
             if byok_execution is None:

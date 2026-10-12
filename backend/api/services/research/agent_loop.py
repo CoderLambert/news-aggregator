@@ -19,6 +19,7 @@ from .tools import TOOLS, execute_tool
 logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 15
+MAX_BYOK_TOOL_CALLS_PER_RESPONSE = 8
 
 RESEARCH_SYSTEM_PROMPT = """\
 你是一位专业的新闻研究助手，能够进行深度新闻分析、网络调研和话题追踪。
@@ -169,43 +170,32 @@ def run_agent_loop(
             if byok_execution is not None and finish_reason != 'tool_calls':
                 on_event('error', {'message': '研究服务暂时不可用，请稍后重试。'})
                 return
-            # Serialize the assistant message with tool_calls for history
-            msg_dict = _serialize_assistant_message(assistant_message)
-            messages.append(msg_dict)
             allowed_tool_names = {
                 item['function']['name'] for item in available_tools
             }
+            parsed_byok_calls = None
+            if byok_execution is not None:
+                parsed_byok_calls = _parse_byok_tool_calls(
+                    assistant_message.tool_calls, allowed_tool_names, available_tools,
+                )
+                if parsed_byok_calls is None:
+                    on_event('error', {'message': '研究服务暂时不可用，请稍后重试。'})
+                    return
+            # Only append the assistant tool-call message after the whole BYOK
+            # batch passes validation, so an invalid later call has no effects.
+            messages.append(_serialize_assistant_message(assistant_message))
 
-            for tool_call in assistant_message.tool_calls:
-                fn_name = tool_call.function.name
-                call_id = tool_call.id
-                raw_arguments = tool_call.function.arguments
-                if byok_execution is not None and (
-                    not isinstance(fn_name, str)
-                    or fn_name not in allowed_tool_names
-                    or not isinstance(call_id, str)
-                    or not call_id
-                    or len(call_id) > 128
-                    or not isinstance(raw_arguments, str)
-                    or len(raw_arguments.encode('utf-8')) > 16_384
-                ):
-                    on_event('error', {'message': '研究服务暂时不可用，请稍后重试。'})
-                    return
-                try:
-                    fn_args = json.loads(raw_arguments)
-                except json.JSONDecodeError:
-                    if byok_execution is not None:
-                        on_event('error', {'message': '研究服务暂时不可用，请稍后重试。'})
-                        return
-                    fn_args = {}
-                if byok_execution is not None and not isinstance(fn_args, dict):
-                    on_event('error', {'message': '研究服务暂时不可用，请稍后重试。'})
-                    return
-                if byok_execution is not None and not _valid_tool_arguments(
-                    fn_name, fn_args, available_tools,
-                ):
-                    on_event('error', {'message': '研究服务暂时不可用，请稍后重试。'})
-                    return
+            for index, tool_call in enumerate(assistant_message.tool_calls):
+                if parsed_byok_calls is not None:
+                    fn_name, call_id, fn_args = parsed_byok_calls[index]
+                else:
+                    fn_name = tool_call.function.name
+                    call_id = tool_call.id
+                    raw_arguments = tool_call.function.arguments
+                    try:
+                        fn_args = json.loads(raw_arguments)
+                    except json.JSONDecodeError:
+                        fn_args = {}
 
                 guard()
                 on_event('tool_call', {
@@ -424,6 +414,64 @@ def _valid_tool_arguments(name: str, arguments: dict, available_tools: list) -> 
         return True
 
     return all(valid_value(value, properties[key]) for key, value in arguments.items())
+
+
+def _parse_byok_tool_calls(tool_calls, allowed_tool_names: set[str], available_tools: list):
+    """Validate an entire provider batch before any event, tool, or write occurs."""
+    if (
+        not isinstance(tool_calls, list)
+        or not tool_calls
+        or len(tool_calls) > MAX_BYOK_TOOL_CALLS_PER_RESPONSE
+    ):
+        return None
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('duplicate JSON property')
+            result[key] = value
+        return result
+
+    def reject_constant(_value):
+        raise ValueError('non-standard JSON constant')
+
+    parsed = []
+    seen_ids = set()
+    for tool_call in tool_calls:
+        function = getattr(tool_call, 'function', None)
+        fn_name = getattr(function, 'name', None)
+        call_id = getattr(tool_call, 'id', None)
+        raw_arguments = getattr(function, 'arguments', None)
+        if (
+            getattr(tool_call, 'type', None) != 'function'
+            or not isinstance(fn_name, str)
+            or fn_name not in allowed_tool_names
+            or not isinstance(call_id, str)
+            or not call_id
+            or len(call_id) > 128
+            or call_id in seen_ids
+            or not isinstance(raw_arguments, str)
+        ):
+            return None
+        try:
+            if len(raw_arguments.encode('utf-8')) > 16_384:
+                return None
+            arguments = json.loads(
+                raw_arguments,
+                object_pairs_hook=unique_object,
+                parse_constant=reject_constant,
+            )
+        except (UnicodeEncodeError, json.JSONDecodeError, TypeError, ValueError):
+            return None
+        if (
+            not isinstance(arguments, dict)
+            or not _valid_tool_arguments(fn_name, arguments, available_tools)
+        ):
+            return None
+        seen_ids.add(call_id)
+        parsed.append((fn_name, call_id, arguments))
+    return parsed
 
 
 def _serialize_assistant_message(message) -> dict:

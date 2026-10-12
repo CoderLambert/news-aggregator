@@ -126,9 +126,13 @@ def _submit(client, *, query='Research the synthetic test topic', key='t09-idemp
     return response
 
 
-def _tool_call(name='search_news', arguments='{"query":"synthetic topic","mode":"keyword"}'):
+def _tool_call(
+    name='search_news', arguments='{"query":"synthetic topic","mode":"keyword"}',
+    call_id='tool-call-t09-1',
+):
     return SimpleNamespace(
-        id='tool-call-t09-1',
+        id=call_id,
+        type='function',
         function=SimpleNamespace(name=name, arguments=arguments),
     )
 
@@ -318,6 +322,138 @@ def test_rotated_key_stops_queued_run_before_proxy_client_or_tool(monkeypatch, q
 
 
 @pytest.mark.django_db(transaction=True)
+def test_revocation_during_provider_request_blocks_response_processing(queued_executor, monkeypatch):
+    user = User.objects.create_user(username='t09-revoked-in-request', password='synthetic-password')
+    connection, _model = _verified_research_model(user)
+    response = _submit(_client(user), key='t09-revoked-in-request')
+    assert response.status_code == 200
+    run = ResearchRun.objects.get(pk=response['Run-ID'])
+    response.close()
+    calls = []
+
+    class FakeCompletions:
+        def create(self, **_kwargs):
+            calls.append('provider-request')
+            connection.credential_epoch += 1
+            connection.save(update_fields=['credential_epoch', 'updated_at'])
+            return _completion(text='This response must not be accepted.')
+
+    @contextmanager
+    def open_fake_proxy():
+        yield SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+
+    monkeypatch.setattr(
+        'api.services.research.byok_execution.open_proxy_client', open_fake_proxy,
+    )
+    _run_submitted_worker(queued_executor)
+
+    run.refresh_from_db()
+    run.session.refresh_from_db()
+    assert calls == ['provider-request']
+    assert run.status == 'failed'
+    assert run.error_code == 'execution_changed'
+    assert run.session.messages == []
+    assert not ResearchRunEvent.objects.filter(run=run, event_type='text_delta').exists()
+    assert not ResearchRunEvent.objects.filter(run=run, event_type='complete').exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_revocation_after_tool_result_blocks_next_step_and_completion(queued_executor, monkeypatch):
+    user = User.objects.create_user(username='t09-revoked-after-tool', password='synthetic-password')
+    connection, _model = _verified_research_model(user)
+    response = _submit(_client(user), key='t09-revoked-after-tool')
+    assert response.status_code == 200
+    run = ResearchRun.objects.get(pk=response['Run-ID'])
+    response.close()
+    calls = []
+
+    class FakeCompletions:
+        def create(self, **_kwargs):
+            calls.append('provider-request')
+            return _completion(
+                tool_calls=[_tool_call()], finish_reason='tool_calls',
+            )
+
+    @contextmanager
+    def open_fake_proxy():
+        yield SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+
+    original_persist = job_manager._persist_tool_result
+
+    def persist_then_revoke(*args, **kwargs):
+        result = original_persist(*args, **kwargs)
+        connection.credential_epoch += 1
+        connection.save(update_fields=['credential_epoch', 'updated_at'])
+        return result
+
+    monkeypatch.setattr(
+        'api.services.research.byok_execution.open_proxy_client', open_fake_proxy,
+    )
+    monkeypatch.setattr(
+        'api.services.research.tools._tool_search_news',
+        lambda query, **_kwargs: {
+            'query': query, 'mode': 'keyword', 'total': 1, 'articles': [],
+        },
+    )
+    monkeypatch.setattr(job_manager, '_persist_tool_result', persist_then_revoke)
+    _run_submitted_worker(queued_executor)
+
+    run.refresh_from_db()
+    run.session.refresh_from_db()
+    assert calls == ['provider-request']
+    assert run.status == 'failed'
+    assert run.error_code == 'execution_changed'
+    assert run.session.messages == []
+    assert ResearchSearchResult.objects.filter(session=run.session).count() == 1
+    assert ResearchRunEvent.objects.filter(run=run, event_type='tool_call').exists()
+    assert not ResearchRunEvent.objects.filter(run=run, event_type='tool_result').exists()
+    assert not ResearchRunEvent.objects.filter(run=run, event_type='complete').exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_revocation_between_final_guard_and_commit_prevents_report_persistence(
+    queued_executor, monkeypatch,
+):
+    user = User.objects.create_user(username='t09-revoked-at-commit', password='synthetic-password')
+    connection, _model = _verified_research_model(user)
+    response = _submit(_client(user), key='t09-revoked-at-commit')
+    assert response.status_code == 200
+    run = ResearchRun.objects.get(pk=response['Run-ID'])
+    response.close()
+
+    class FakeCompletions:
+        def create(self, **_kwargs):
+            return _completion(text='## Must not be saved as the report')
+
+    @contextmanager
+    def open_fake_proxy():
+        yield SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+
+    original_persist = job_manager._persist_success
+    final_submission_reached = []
+
+    def revoke_after_final_guard(*args, **kwargs):
+        final_submission_reached.append(True)
+        connection.credential_epoch += 1
+        connection.save(update_fields=['credential_epoch', 'updated_at'])
+        return original_persist(*args, **kwargs)
+
+    monkeypatch.setattr(
+        'api.services.research.byok_execution.open_proxy_client', open_fake_proxy,
+    )
+    monkeypatch.setattr(job_manager, '_persist_success', revoke_after_final_guard)
+    _run_submitted_worker(queued_executor)
+
+    run.refresh_from_db()
+    run.session.refresh_from_db()
+    assert final_submission_reached == [True]
+    assert run.status == 'failed'
+    assert run.error_code == 'execution_changed'
+    assert run.session.messages == []
+    assert not ResearchRunEvent.objects.filter(run=run, event_type='complete').exists()
+
+
+@pytest.mark.django_db(transaction=True)
 def test_tool_result_write_failure_cannot_commit_succeeded(queued_executor, monkeypatch):
     user = User.objects.create_user(username='t09-tool-write-failure', password='synthetic-password')
     _verified_research_model(user)
@@ -395,6 +531,97 @@ def test_untrusted_tool_name_and_arguments_are_rejected_before_execution(
         lambda *_args, **_kwargs: executed.append('search_news'),
     )
 
+    _run_submitted_worker(queued_executor)
+
+    run.refresh_from_db()
+    assert run.status == 'failed'
+    assert executed == []
+    assert not ResearchRunEvent.objects.filter(run=run, event_type='tool_call').exists()
+    assert not ResearchRunEvent.objects.filter(run=run, event_type='complete').exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_mixed_valid_invalid_tool_batch_is_rejected_before_any_tool_runs(
+    queued_executor, monkeypatch,
+):
+    user = User.objects.create_user(username='t09-mixed-tool-batch', password='synthetic-password')
+    _verified_research_model(user)
+    response = _submit(_client(user), key='t09-mixed-tool-batch')
+    assert response.status_code == 200
+    run = ResearchRun.objects.get(pk=response['Run-ID'])
+    response.close()
+
+    class FakeCompletions:
+        def create(self, **_kwargs):
+            return _completion(
+                tool_calls=[
+                    _tool_call(call_id='tool-call-valid-first'),
+                    _tool_call(
+                        arguments='{"query":3,"mode":"keyword"}',
+                        call_id='tool-call-invalid-second',
+                    ),
+                ],
+                finish_reason='tool_calls',
+            )
+
+    @contextmanager
+    def open_fake_proxy():
+        yield SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+
+    executed = []
+    monkeypatch.setattr(
+        'api.services.research.byok_execution.open_proxy_client', open_fake_proxy,
+    )
+    monkeypatch.setattr(
+        'api.services.research.agent_loop.execute_tool',
+        lambda *args, **kwargs: executed.append((args, kwargs)),
+    )
+    _run_submitted_worker(queued_executor)
+
+    run.refresh_from_db()
+    run.session.refresh_from_db()
+    assert run.status == 'failed'
+    assert run.session.messages == []
+    assert executed == []
+    assert not ResearchSearchResult.objects.filter(session=run.session).exists()
+    assert not ResearchRunEvent.objects.filter(run=run, event_type='tool_call').exists()
+    assert not ResearchRunEvent.objects.filter(run=run, event_type='tool_result').exists()
+    assert not ResearchRunEvent.objects.filter(run=run, event_type='complete').exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_byok_tool_batch_has_a_fixed_call_count_limit(queued_executor, monkeypatch):
+    from api.services.research.agent_loop import MAX_BYOK_TOOL_CALLS_PER_RESPONSE
+
+    user = User.objects.create_user(username='t09-tool-batch-limit', password='synthetic-password')
+    _verified_research_model(user)
+    response = _submit(_client(user), key='t09-tool-batch-limit')
+    assert response.status_code == 200
+    run = ResearchRun.objects.get(pk=response['Run-ID'])
+    response.close()
+
+    class FakeCompletions:
+        def create(self, **_kwargs):
+            return _completion(
+                tool_calls=[
+                    _tool_call(call_id=f'tool-call-limit-{index}')
+                    for index in range(MAX_BYOK_TOOL_CALLS_PER_RESPONSE + 1)
+                ],
+                finish_reason='tool_calls',
+            )
+
+    @contextmanager
+    def open_fake_proxy():
+        yield SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+
+    executed = []
+    monkeypatch.setattr(
+        'api.services.research.byok_execution.open_proxy_client', open_fake_proxy,
+    )
+    monkeypatch.setattr(
+        'api.services.research.agent_loop.execute_tool',
+        lambda *args, **kwargs: executed.append((args, kwargs)),
+    )
     _run_submitted_worker(queued_executor)
 
     run.refresh_from_db()
