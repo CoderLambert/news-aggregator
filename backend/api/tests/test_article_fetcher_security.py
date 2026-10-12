@@ -146,7 +146,30 @@ def test_production_disables_jina_and_subprocess_before_any_external_action(monk
     assert scrapy.ok is False and scrapy.error == 'unsafe_transport_disabled'
     assert 'jina' not in names
     assert 'scrapy_subprocess' not in names
-    assert {'hackernews_api', 'github_readme', 'leiphone_feed', 'scrapy_http'} <= set(names)
+    assert {'hackernews_api', 'github_readme', 'leiphone_feed', 'scrapy_http', 'venturebeat_jina'} <= set(names)
+    assert names.index('venturebeat_jina') > names.index('scrapy_http')
+
+
+def test_production_venturebeat_jina_uses_safe_transport_and_validates_body(monkeypatch):
+    title = "Enterprise AI's real risk isn't autonomous agents. It's the complexity between them."
+    body = (
+        f'Title: {title}\nURL Source: https://venturebeat.com/ai/example\n'
+        'Markdown Content:\n# ' + title + '\n\n' + ('Verified article paragraph. ' * 80)
+    ).encode()
+    safe_open = Mock(return_value=StubResponse(body, {'content-type': 'text/plain; charset=utf-8'}))
+    monkeypatch.setattr(providers, 'safe_urlopen', safe_open)
+
+    with override_settings(DJANGO_ENV='production'):
+        result = providers.VentureBeatJinaProvider(timeout=12, retries=0).fetch(
+            'https://www.venturebeat.com/ai/example?utm_source=private#section',
+            expected_title=title,
+        )
+
+    assert result.ok is True
+    assert result.provider == 'venturebeat_jina'
+    request = safe_open.call_args.args[0]
+    assert request.full_url == 'https://r.jina.ai/https://www.venturebeat.com/ai/example'
+    safe_open.assert_called_once_with(request, timeout=12)
 
 
 def test_production_core_rejects_invalid_initial_url_before_provider(monkeypatch):

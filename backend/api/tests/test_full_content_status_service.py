@@ -131,7 +131,7 @@ def test_mark_failed_increments_retry_count_and_records_error(news):
 
     news.refresh_from_db()
     assert news.full_content_fetch_status == 'network_error'
-    assert news.full_content_fetch_error == 'connection reset by peer'
+    assert news.full_content_fetch_error == 'runtimeerror:connection_reset'
     assert news.full_content_fetch_provider == 'jina'
     assert news.full_content_retry_count == 2
     assert news.last_full_content_attempt is not None
@@ -323,6 +323,39 @@ def test_classify_fetch_error_uses_result_error_and_validation_reasons():
     )
 
     assert classify_fetch_error(result) == 'validation_failed'
+
+
+def test_fetch_error_uses_provider_failures_for_http_429_classification():
+    error = FetchError(
+        '全部真实原文抓取方式失败，未写入 full_content。',
+        failures=[
+            FetchResult(ok=False, provider='scrapy_http', error='HTTP 429'),
+            FetchResult(ok=False, provider='venturebeat_jina', error='HTTP 503'),
+        ],
+    )
+
+    assert classify_fetch_error(error) == 'network_error'
+
+
+@pytest.mark.django_db
+def test_mark_failed_persists_bounded_provider_codes_and_last_provider(news):
+    error = FetchError(
+        '全部真实原文抓取方式失败，未写入 full_content。',
+        failures=[
+            FetchResult(ok=False, provider='scrapy_http', error='HTTP 429: secret-url-must-not-persist'),
+            FetchResult(ok=False, provider='venturebeat_jina', error='validation_failed:title_mismatch', validation_reasons=['title_mismatch']),
+        ],
+    )
+
+    mark_failed(news, error)
+
+    news.refresh_from_db()
+    assert news.full_content_fetch_status == 'validation_failed'
+    assert news.full_content_fetch_error == (
+        'provider_failures[scrapy_http:http_429,venturebeat_jina:validation_failed:title_mismatch]'
+    )
+    assert 'secret-url' not in news.full_content_fetch_error
+    assert news.full_content_fetch_provider == 'venturebeat_jina'
 
 
 def test_classify_fetch_error_defaults_to_failed():

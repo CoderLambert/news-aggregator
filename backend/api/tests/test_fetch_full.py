@@ -272,7 +272,7 @@ class TestNewsFetchFullView:
         assert '原文抓取失败' in data['error']
         assert '可稍后重试' in data['error']
         assert data['full_content_fetch_status'] == 'failed'
-        assert data['full_content_fetch_error'] == '全部真实原文抓取方式失败'
+        assert data['full_content_fetch_error'] == 'fetcherror:provider_error'
         assert data['full_content_fetch_provider'] == ''
         assert data['full_content_quality_score'] is None
         assert data['full_content_retry_count'] == 1
@@ -282,7 +282,7 @@ class TestNewsFetchFullView:
         assert news.full_content == ''
         assert news.full_content_fetched_at is None
         assert news.full_content_fetch_status == 'failed'
-        assert news.full_content_fetch_error == '全部真实原文抓取方式失败'
+        assert news.full_content_fetch_error == 'fetcherror:provider_error'
         assert news.full_content_retry_count == 1
 
     def test_fetch_full_records_network_error_without_persisting_content(self, authenticated_client, src, cat):
@@ -294,7 +294,7 @@ class TestNewsFetchFullView:
         assert resp.status_code == 502
         data = resp.json()
         assert data['full_content_fetch_status'] == 'network_error'
-        assert data['full_content_fetch_error'] == 'connection reset by peer'
+        assert data['full_content_fetch_error'] == 'fetcherror:connection_reset'
         assert data['full_content_retry_count'] == 1
         assert data['last_full_content_attempt'] is not None
         news.refresh_from_db()

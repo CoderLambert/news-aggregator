@@ -1,8 +1,29 @@
 import scrapy
 import re
-from datetime import datetime
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from news_crawler.items import NewsItem
 from news_crawler.category_map import classify
+
+
+def parse_venturebeat_publish_time(value, *, fallback=None):
+    """Parse RSS RFC 822 dates without silently replacing valid dates with now."""
+    fallback = fallback or datetime.now(timezone.utc)
+    text = (value or '').strip()
+    if not text:
+        return fallback
+    try:
+        parsed = parsedate_to_datetime(text)
+    except (TypeError, ValueError, OverflowError):
+        parsed = None
+    if parsed is None:
+        try:
+            parsed = datetime.fromisoformat(text.replace('Z', '+00:00'))
+        except (TypeError, ValueError, OverflowError):
+            return fallback
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 class VenturebeatAiSpider(scrapy.Spider):
@@ -30,15 +51,7 @@ class VenturebeatAiSpider(scrapy.Spider):
             pub_date = item.css('pubDate::text').get('')
             cover_image = item.css('enclosure::attr(url)').get('') or ''
 
-            publish_time = datetime.now()
-            if pub_date:
-                try:
-                    publish_time = datetime.strptime(pub_date.strip()[:32], '%a, %d %b %Y %H:%M:%S').replace(tzinfo=None)
-                except ValueError:
-                    try:
-                        publish_time = datetime.fromisoformat(pub_date.strip().replace('Z', '+00:00')).replace(tzinfo=None)
-                    except (ValueError, TypeError):
-                        pass
+            publish_time = parse_venturebeat_publish_time(pub_date)
 
             url = link.strip()
             news = NewsItem()
@@ -74,7 +87,7 @@ class VenturebeatAiSpider(scrapy.Spider):
         news['title'] = title.strip()
         news['content'] = content
         news['author'] = author.strip()
-        news['publish_time'] = datetime.now()
+        news['publish_time'] = datetime.now(timezone.utc)
         news['source_name'] = 'VentureBeat AI'
         news['category_name'] = classify(title.strip(), content)
         news['url'] = response.url

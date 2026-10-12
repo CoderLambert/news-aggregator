@@ -13,6 +13,7 @@ from api.services.article_fetcher.providers import (
     LeiphoneFeedProvider,
     ScrapyHTTPProvider,
     ScrapySubprocessProvider,
+    VentureBeatJinaProvider,
     default_providers,
 )
 from api.services.article_fetcher.site_rules import get_site_rule, normalize_domain
@@ -306,6 +307,26 @@ def test_default_providers_prioritizes_hackernews_api_before_generic_jina():
     assert isinstance(providers[0], HackerNewsAPIProvider)
     assert isinstance(providers[1], GitHubReadmeProvider)
     assert isinstance(providers[2], LeiphoneFeedProvider)
+
+
+def test_venturebeat_jina_provider_rejects_non_venturebeat_urls_without_network():
+    provider = VentureBeatJinaProvider()
+    with patch('api.services.article_fetcher.providers._open_url') as open_url:
+        result = provider.fetch('https://example.com/article', expected_title='Example')
+
+    assert result.ok is False
+    assert result.error == 'not_venturebeat_article'
+    open_url.assert_not_called()
+
+
+def test_venturebeat_jina_provider_rejects_non_https_urls_without_network():
+    provider = VentureBeatJinaProvider()
+    with patch('api.services.article_fetcher.providers._open_url') as open_url:
+        result = provider.fetch('http://venturebeat.com/ai/article', expected_title='Example')
+
+    assert result.ok is False
+    assert result.error == 'unsupported_venturebeat_url'
+    open_url.assert_not_called()
 
 
 def test_leiphone_feed_provider_preserves_real_article_structure():

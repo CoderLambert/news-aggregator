@@ -68,6 +68,17 @@ SITE_RULES: tuple[SiteRule, ...] = (
         title_selectors=('article h1', 'h1', '.wp-block-post-title'),
     ),
     SiteRule(
+        name='VentureBeat',
+        domains=('venturebeat.com',),
+        selectors=('article', '.article-content', '.entry-content', '[itemprop="articleBody"]', 'main'),
+        remove_selectors=(
+            '.newsletter', '.subscribe', '.subscription', '.cookie', '.cookies', '.cookie-banner',
+            '.ad', '.advertisement', '.social-share', '.related', '.sidebar', '.comments',
+        ),
+        min_length=500,
+        title_selectors=('article h1', 'h1', '[itemprop="headline"]'),
+    ),
+    SiteRule(
         name='BBC',
         domains=('bbc.com', 'bbc.co.uk'),
         selectors=('article', 'main', '[data-component="text-block"]', '[data-testid="article"]'),

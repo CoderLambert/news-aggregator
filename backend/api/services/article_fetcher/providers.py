@@ -305,6 +305,15 @@ class JinaProvider:
     def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None) -> FetchResult:
         if settings.DJANGO_ENV == 'production':
             return FetchResult(ok=False, provider=self.name, url=url, error='unsafe_transport_disabled')
+        return self._fetch_jina(url, expected_title=expected_title, summary=summary)
+
+    def _fetch_jina(
+        self,
+        url: str,
+        *,
+        expected_title: str | None = None,
+        summary: str | None = None,
+    ) -> FetchResult:
         jina_url = f'https://r.jina.ai/{url}'
         last_error: Exception | None = None
         for attempt in range(self.retries + 1):
@@ -354,6 +363,32 @@ class JinaProvider:
                 if attempt < self.retries:
                     time.sleep(0.5 * (attempt + 1))
         return FetchResult(ok=False, provider=self.name, url=url, error=str(last_error or 'unknown error'))
+
+
+class VentureBeatJinaProvider(JinaProvider):
+    """Jina fallback restricted to public HTTPS articles on VentureBeat."""
+
+    name = 'venturebeat_jina'
+
+    def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None) -> FetchResult:
+        try:
+            parsed = urlparse(url)
+            supported = (
+                parsed.scheme.lower() == 'https'
+                and normalize_domain(url) == 'venturebeat.com'
+                and parsed.username is None
+                and parsed.password is None
+                and parsed.port in {None, 443}
+            )
+        except (TypeError, ValueError):
+            supported = False
+        if not supported:
+            error = 'not_venturebeat_article' if normalize_domain(url) != 'venturebeat.com' else 'unsupported_venturebeat_url'
+            return FetchResult(ok=False, provider=self.name, url=url, error=error)
+        # The article path is sufficient for this fallback. Do not disclose
+        # tracking or other query values to the third-party reader service.
+        target_url = parsed._replace(query='', fragment='').geturl()
+        return self._fetch_jina(target_url, expected_title=expected_title, summary=summary)
 
 
 class ScrapyHTTPProvider:
@@ -561,4 +596,6 @@ def default_providers() -> list:
     if settings.DJANGO_ENV != 'production':
         providers.extend([JinaProvider(timeout=5, retries=0), ScrapySubprocessProvider()])
     providers.append(ScrapyHTTPProvider())
+    if settings.DJANGO_ENV == 'production':
+        providers.append(VentureBeatJinaProvider(timeout=12, retries=0))
     return providers
