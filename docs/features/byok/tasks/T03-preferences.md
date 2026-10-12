@@ -2,7 +2,7 @@
 
 > **READY FOR REVIEW（2026-10-12）**：五种用途的用户偏好、严格保存 API、失效选择的 fail-closed 处理、只读执行快照解析和设置页已实现。`resolve_execution` 尚未接入真实业务 worker；在途 worker/历史结果的端到端验收保持 NOT_RUN，不能据此声称 T04/T05/T09/T11 已闭环。详细证据见 [Test T03](../tests/T03-preferences.md)。
 
-本工作树从 T02 精确提交 `78c214600dbfbc95693f21370e8e0d54ccf4a30f` 创建，父分支为 `task/byok-T02-models-and-tests`。T02 PR #36 仍为 Draft、未合并；本卡按已授权的 stacked PR 方式以该 T02 分支为 base，PR 需明确依赖 #36。代码实现提交：`4310d2143fe1ad748f264f421a5d500f3621abcd`。
+本工作树已重放到最新 T02 分支 `task/byok-T02-models-and-tests`，父提交为 `c2f50dd6a56e17dad65e78b295a13598895b4c76`。T02 PR #36 仍为 Draft、未合并；本卡继续使用 stacked PR 并依赖 #36。T03 代码实现重放后提交：`1fbd8535454d50c3d4939b4949c762fff23daa9f`。
 
 | 属性 | 内容 |
 | --- | --- |
@@ -10,7 +10,7 @@
 | 推荐规模 | S-M |
 | 对应测试 | [Test T03](../tests/T03-preferences.md) |
 | 本卡 PR | [#37 Draft](https://github.com/CoderLambert/news-aggregator/pull/37) |
-| PR base | `task/byok-T02-models-and-tests` @ `78c214600dbfbc95693f21370e8e0d54ccf4a30f`（stacked；依赖 Draft PR #36） |
+| PR base | `task/byok-T02-models-and-tests` @ `c2f50dd6a56e17dad65e78b295a13598895b4c76`（stacked；依赖 Draft PR #36） |
 | 实现提交 | `4310d2143fe1ad748f264f421a5d500f3621abcd` |
 
 ## 本次交付的完整功能
