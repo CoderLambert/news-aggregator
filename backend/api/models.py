@@ -473,6 +473,11 @@ class ChatGPTArticleTranslation(models.Model):
     user = models.ForeignKey('auth.User', on_delete=models.CASCADE, related_name='chatgpt_translations')
     connection = models.ForeignKey(
         ChatGPTSubscriptionConnection, on_delete=models.CASCADE, related_name='translations',
+        null=True, blank=True,
+    )
+    ai_connection = models.ForeignKey(
+        'api.UserAIConnection', on_delete=models.CASCADE, related_name='article_translations',
+        null=True, blank=True,
     )
     news = models.ForeignKey(News, on_delete=models.CASCADE, related_name='chatgpt_translations')
     source_hash = models.CharField(max_length=64)
@@ -488,6 +493,18 @@ class ChatGPTArticleTranslation(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=['user', 'connection', 'news'], name='unique_chatgpt_news_translation',
+            ),
+            models.UniqueConstraint(
+                fields=['user', 'ai_connection', 'news'],
+                condition=models.Q(ai_connection__isnull=False),
+                name='unique_byok_news_translation',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(connection__isnull=False, ai_connection__isnull=True)
+                    | models.Q(connection__isnull=True, ai_connection__isnull=False)
+                ),
+                name='translation_exactly_one_credential_owner',
             ),
         ]
 
@@ -510,12 +527,27 @@ class ChatGPTTranslationTask(models.Model):
     )
     connection = models.ForeignKey(
         ChatGPTSubscriptionConnection, on_delete=models.CASCADE,
-        related_name='translation_tasks',
+        related_name='translation_tasks', null=True, blank=True,
+    )
+    ai_connection = models.ForeignKey(
+        'api.UserAIConnection', on_delete=models.CASCADE,
+        related_name='translation_tasks', null=True, blank=True,
     )
     news = models.ForeignKey(News, on_delete=models.CASCADE, related_name='chatgpt_translation_tasks')
     source_hash = models.CharField(max_length=64)
     model_slug = models.CharField(max_length=255)
-    connection_generation = models.PositiveBigIntegerField()
+    connection_generation = models.PositiveBigIntegerField(null=True, blank=True)
+    credential_epoch = models.PositiveBigIntegerField(null=True, blank=True)
+    credential_version = models.PositiveBigIntegerField(null=True, blank=True)
+    model_config_id_snapshot = models.UUIDField(null=True, blank=True)
+    selected_by_task_kind = models.CharField(max_length=32, blank=True, default='')
+    config_revision = models.PositiveBigIntegerField(null=True, blank=True)
+    endpoint_profile_version = models.PositiveSmallIntegerField(null=True, blank=True)
+    provider_id_snapshot = models.CharField(max_length=32, blank=True, default='')
+    endpoint_profile_snapshot = models.CharField(max_length=48, blank=True, default='')
+    execution_digest = models.CharField(max_length=64, blank=True, default='')
+    idempotency_key = models.CharField(max_length=64, blank=True, default='')
+    source_snapshot = models.TextField(blank=True, default='')
     generation = models.PositiveBigIntegerField(default=1)
     run_token = models.UUIDField(null=True, blank=True)
     shared_lease_task_id = models.PositiveBigIntegerField(null=True, blank=True)
@@ -546,6 +578,18 @@ class ChatGPTTranslationTask(models.Model):
                     | models.Q(shared_lease_task_id__isnull=False, shared_lease_token__isnull=False)
                 ),
                 name='chatgpt_translation_task_shared_lease_pair',
+            ),
+            models.UniqueConstraint(
+                fields=['user', 'idempotency_key'],
+                condition=models.Q(ai_connection__isnull=False),
+                name='unique_byok_translation_idempotency',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(connection__isnull=False, ai_connection__isnull=True)
+                    | models.Q(connection__isnull=True, ai_connection__isnull=False)
+                ),
+                name='translation_task_exactly_one_credential',
             ),
         ]
 

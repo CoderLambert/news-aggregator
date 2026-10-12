@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
+import re
 import threading
 import time
 import uuid
@@ -11,15 +14,19 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from typing import Optional
 
-from django.db import OperationalError, close_old_connections, transaction
+from django.conf import settings
+from django.db import IntegrityError, OperationalError, close_old_connections, transaction
 from django.db.models import F, Q, Value
 from django.db.models.functions import Concat
 from django.utils import timezone
 
 from api.models import (
+    ChatGPTArticleTranslation,
     ChatGPTSubscriptionConnection,
     ChatGPTTranslationTask,
     News,
+    UserAIConnection,
+    UserAIModelConfig,
 )
 from api.services import chatgpt_subscription as subscription
 from api.services.chatgpt_subscription import (
@@ -35,6 +42,17 @@ from api.services.shared_translations import (
     keep_lease_alive,
     result_payload,
 )
+from api.services.ai_execution import ExecutionSnapshot, ModelSelectionError, resolve_execution
+from api.services.ai_model_registry import get_model_preset
+from api.services.ai_translation import (
+    BYOKTranslationError,
+    MAX_TRANSLATION_SOURCE_CHARS,
+    TRANSLATION_ERRORS,
+    assert_byok_translation_snapshot_current,
+    prepare_byok_translation_execution,
+    stream_byok_translation,
+)
+from api.services.ai_registry import get_profile
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +184,231 @@ def _task_filter(*, user_id=None, connection_id=None, news_id=None, source_diges
     if source_digest is not None:
         filters['source_hash'] = source_digest
     return ChatGPTTranslationTask.objects.filter(**filters)
+
+
+_IDEMPOTENCY_KEY_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$')
+_BYOK_SUBMISSION_LOCKS = tuple(threading.Lock() for _ in range(32))
+
+
+def _byok_snapshot_from_task(task) -> ExecutionSnapshot:
+    """Rebuild the immutable, secret-free resolver snapshot stored at submission."""
+    if (
+        task.ai_connection_id is None or task.model_config_id_snapshot is None
+        or task.credential_epoch is None or task.config_revision is None
+        or task.endpoint_profile_version is None or not task.execution_digest
+    ):
+        raise BYOKTranslationError('execution_changed')
+    values = {
+        'user_id': task.user_id,
+        'task_kind': 'full_translation',
+        'selected_by_task_kind': task.selected_by_task_kind,
+        'model_config_id': str(task.model_config_id_snapshot),
+        'connection_id': str(task.ai_connection_id),
+        'provider_id': task.provider_id_snapshot,
+        'endpoint_profile': task.endpoint_profile_snapshot,
+        'endpoint_profile_version': task.endpoint_profile_version,
+        'credential_epoch': task.credential_epoch,
+        'config_revision': task.config_revision,
+        'model_id': task.model_slug,
+    }
+    digest = hashlib.sha256(
+        json.dumps(values, ensure_ascii=True, sort_keys=True, separators=(',', ':')).encode('utf-8'),
+    ).hexdigest()
+    if digest != task.execution_digest:
+        raise BYOKTranslationError('execution_changed')
+    return ExecutionSnapshot(**values, digest=digest)
+
+
+def _validate_byok_task_snapshot(task, *, current_news=None):
+    if (
+        task.connection_id is not None or task.ai_connection_id is None
+        or task.ai_connection.user_id != task.user_id
+        or not task.ai_connection.is_enabled or task.ai_connection.is_deleted
+        or not task.ai_connection.credential_ciphertext
+        or not task.ai_connection.encryption_key_id
+        or task.ai_connection.credential_epoch != task.credential_epoch
+        or task.ai_connection.credential_version != task.credential_version
+        or task.ai_connection.provider_id != task.provider_id_snapshot
+        or task.ai_connection.endpoint_profile != task.endpoint_profile_snapshot
+        or task.ai_connection.endpoint_profile_version != task.endpoint_profile_version
+    ):
+        raise BYOKTranslationError('execution_changed')
+    if not task.user.is_active:
+        raise BYOKTranslationError('execution_changed')
+    snapshot = _byok_snapshot_from_task(task)
+    assert_byok_translation_snapshot_current(snapshot)
+    if current_news is None:
+        current_news = News.objects.only('full_content').filter(pk=task.news_id).first()
+    if (
+        current_news is None or not current_news.full_content
+        or source_hash(current_news.full_content) != task.source_hash
+        or source_hash(task.source_snapshot) != task.source_hash
+    ):
+        raise BYOKTranslationError('article_source_changed')
+    return snapshot
+
+
+def _byok_error_message(code):
+    return TRANSLATION_ERRORS.get(code, '个人模型全文翻译失败，请稍后重试。')
+
+
+def _same_byok_submission(task, *, user_id, news_id, source_text, snapshot, connection):
+    return bool(
+        task.user_id == user_id
+        and task.news_id == news_id
+        and task.ai_connection_id == connection.pk
+        and task.source_hash == source_hash(source_text)
+        and task.source_snapshot == source_text
+        and task.execution_digest == snapshot.digest
+        and task.credential_epoch == snapshot.credential_epoch
+        and task.credential_version == connection.credential_version
+        and str(task.model_config_id_snapshot) == snapshot.model_config_id
+        and task.config_revision == snapshot.config_revision
+        and task.model_slug == snapshot.model_id
+    )
+
+
+def start_or_get_byok_job(user, news, idempotency_key):
+    """Start or attach to one explicit, owner-private BYOK translation attempt."""
+    if not isinstance(idempotency_key, str) or not _IDEMPOTENCY_KEY_PATTERN.fullmatch(idempotency_key):
+        raise BYOKTranslationError('invalid_idempotency_key')
+    lock_index = hash((getattr(user, 'pk', None), idempotency_key)) % len(_BYOK_SUBMISSION_LOCKS)
+    # SQLite cannot reliably upgrade competing read transactions into writers.
+    # A fixed set of in-process stripes serializes only concurrent submissions;
+    # the database unique constraint still protects separate application workers.
+    with _BYOK_SUBMISSION_LOCKS[lock_index]:
+        return _start_or_get_byok_job_locked(user, news, idempotency_key)
+
+
+def _start_or_get_byok_job_locked(user, news, idempotency_key):
+    if not settings.AI_BYOK_ENABLED:
+        raise BYOKTranslationError('byok_disabled')
+    if not getattr(user, 'is_authenticated', False) or not getattr(user, 'is_active', False):
+        raise BYOKTranslationError('authentication_required')
+
+    try:
+        snapshot = resolve_execution(user, 'full_translation')
+    except ModelSelectionError as exc:
+        raise BYOKTranslationError(exc.args[0]) from None
+
+    try:
+        assert_byok_translation_snapshot_current(snapshot)
+    except BYOKTranslationError:
+        raise
+
+    source_text = None
+    digest = None
+    connection = None
+    try:
+        with transaction.atomic():
+            current_news = News.objects.select_for_update().only('id', 'full_content').filter(
+                pk=news.pk,
+            ).first()
+            if current_news is None or not current_news.full_content:
+                raise BYOKTranslationError('article_source_missing')
+            source_text = current_news.full_content
+            if len(source_text) > MAX_TRANSLATION_SOURCE_CHARS:
+                raise BYOKTranslationError('source_too_long')
+
+            connection = UserAIConnection.objects.select_for_update().filter(
+                pk=snapshot.connection_id,
+                user_id=user.pk,
+                is_enabled=True,
+                is_deleted=False,
+                credential_epoch=snapshot.credential_epoch,
+            ).first()
+            if connection is None:
+                raise BYOKTranslationError('execution_changed')
+
+            digest = source_hash(source_text)
+            existing = ChatGPTTranslationTask.objects.filter(
+                user_id=user.pk,
+                idempotency_key=idempotency_key,
+                ai_connection__isnull=False,
+            ).first()
+            if existing is not None:
+                if not _same_byok_submission(
+                    existing, user_id=user.pk, news_id=current_news.pk,
+                    source_text=source_text,
+                    snapshot=snapshot, connection=connection,
+                ):
+                    raise BYOKTranslationError('idempotency_key_reused')
+                task = existing
+                _recover_expired(task.pk, user_id=user.pk)
+                task.refresh_from_db()
+                dispatch = task.status == 'queued'
+            else:
+                task_values = {
+                    'user': user,
+                    'connection': None,
+                    'ai_connection': connection,
+                    'news': current_news,
+                    'source_hash': digest,
+                    'model_slug': snapshot.model_id,
+                    'connection_generation': None,
+                    'credential_epoch': snapshot.credential_epoch,
+                    'credential_version': connection.credential_version,
+                    'model_config_id_snapshot': snapshot.model_config_id,
+                    'selected_by_task_kind': snapshot.selected_by_task_kind,
+                    'config_revision': snapshot.config_revision,
+                    'endpoint_profile_version': snapshot.endpoint_profile_version,
+                    'provider_id_snapshot': snapshot.provider_id,
+                    'endpoint_profile_snapshot': snapshot.endpoint_profile,
+                    'execution_digest': snapshot.digest,
+                    'idempotency_key': idempotency_key,
+                    'source_snapshot': source_text,
+                }
+                try:
+                    with transaction.atomic():
+                        task = ChatGPTTranslationTask.objects.create(**task_values)
+                    dispatch = True
+                except IntegrityError:
+                    task = ChatGPTTranslationTask.objects.filter(
+                        user_id=user.pk,
+                        idempotency_key=idempotency_key,
+                        ai_connection__isnull=False,
+                    ).first()
+                    if task is None or not _same_byok_submission(
+                        task, user_id=user.pk, news_id=current_news.pk,
+                        source_text=source_text,
+                        snapshot=snapshot, connection=connection,
+                    ):
+                        raise BYOKTranslationError('idempotency_key_reused') from None
+                    dispatch = task.status == 'queued'
+    except OperationalError:
+        # SQLite may briefly report a busy writer for concurrent identical
+        # submissions. Retry only the owner-scoped attach; never create a
+        # second task from this fallback path.
+        if source_text is not None and digest is not None and connection is not None:
+            for delay in (0.02, 0.05, 0.10, 0.20):
+                time.sleep(delay)
+                try:
+                    task = ChatGPTTranslationTask.objects.filter(
+                        user_id=user.pk,
+                        idempotency_key=idempotency_key,
+                        ai_connection__isnull=False,
+                    ).first()
+                    if task is None:
+                        continue
+                    if not _same_byok_submission(
+                        task, user_id=user.pk, news_id=news.pk,
+                        source_text=source_text, snapshot=snapshot, connection=connection,
+                    ):
+                        raise BYOKTranslationError('idempotency_key_reused')
+                    _recover_expired(task.pk, user_id=user.pk)
+                    task.refresh_from_db()
+                    if task.status == 'queued':
+                        _dispatch_task(task.pk, task.generation)
+                    return _handle(task)
+                except OperationalError:
+                    continue
+        raise SubscriptionError(
+            '翻译任务暂时无法处理，请稍后重试。', 'task_storage_busy', 503,
+        ) from None
+
+    if dispatch:
+        _dispatch_task(task.pk, task.generation)
+    return _handle(task)
 
 
 def _recover_expired(task_id, *, user_id=None):
@@ -461,14 +704,17 @@ def _fail_queued_task(task_id, generation, *, error_code, error_message):
 
 
 def _queued_task_snapshot(task_id, generation):
-    subscription._require_network_mode()
     task = ChatGPTTranslationTask.objects.select_related(
-        'user', 'connection', 'news',
+        'user', 'connection', 'ai_connection', 'news',
     ).filter(pk=task_id, generation=generation, status='queued').first()
     if task is None:
         return None
     if not task.user.is_active:
         raise SubscriptionError('本地账号已停用，翻译任务已停止。', 'inactive_user', 403)
+    if task.ai_connection_id is not None:
+        _validate_byok_task_snapshot(task)
+        return task
+    subscription._require_network_mode()
     if (
         task.connection.user_id != task.user_id or not task.connection.is_active or
         task.connection.needs_reauth or not task.connection.connected or
@@ -510,8 +756,9 @@ def _lease_from_task(task):
 
 
 def _task_snapshot(task_id, generation, run_token, *, require_started=True):
-    subscription._require_network_mode()
-    task = ChatGPTTranslationTask.objects.select_related('user', 'connection', 'news').filter(
+    task = ChatGPTTranslationTask.objects.select_related(
+        'user', 'connection', 'ai_connection', 'news',
+    ).filter(
         pk=task_id, generation=generation, run_token=run_token, status='running',
     ).first()
     now = timezone.now()
@@ -521,6 +768,10 @@ def _task_snapshot(task_id, generation, run_token, *, require_started=True):
         raise SubscriptionError('翻译任务尚未提交上游请求状态。', 'task_not_started', 409)
     if not task.user.is_active:
         raise SubscriptionError('本地账号已停用，翻译任务已停止。', 'inactive_user', 403)
+    if task.ai_connection_id is not None:
+        _validate_byok_task_snapshot(task)
+        return task
+    subscription._require_network_mode()
     connection = task.connection
     if (
         connection.user_id != task.user_id or not connection.is_active or
@@ -544,13 +795,27 @@ def _mark_provider_started(task_id, generation, run_token):
     with transaction.atomic():
         task = _task_snapshot(task_id, generation, run_token, require_started=False)
         now = timezone.now()
-        changed = ChatGPTTranslationTask.objects.filter(
+        query = ChatGPTTranslationTask.objects.filter(
             pk=task_id, generation=generation, run_token=run_token,
             status='running', provider_started=False, lease_expires_at__gt=now,
-            connection__is_active=True,
-            connection__generation=F('connection_generation'),
-            connection__selected_model=F('model_slug'), user__is_active=True,
-        ).update(provider_started=True, updated_at=now)
+            user__is_active=True,
+        )
+        if task.ai_connection_id is not None:
+            query = query.filter(
+                ai_connection_id=task.ai_connection_id,
+                ai_connection__user_id=F('user_id'),
+                ai_connection__is_enabled=True,
+                ai_connection__is_deleted=False,
+                ai_connection__credential_epoch=F('credential_epoch'),
+                ai_connection__credential_version=F('credential_version'),
+            )
+        else:
+            query = query.filter(
+                connection__is_active=True,
+                connection__generation=F('connection_generation'),
+                connection__selected_model=F('model_slug'),
+            )
+        changed = query.update(provider_started=True, updated_at=now)
         if not changed:
             raise SubscriptionError('翻译任务已取消或租约失效。', 'task_lease_lost', 409)
 
@@ -562,18 +827,32 @@ def _append_delta(task_id, generation, run_token, delta):
     with transaction.atomic():
         task = ChatGPTTranslationTask.objects.select_for_update().filter(
             pk=task_id, generation=generation, run_token=run_token, status='running',
-        ).select_related('user', 'connection', 'news').first()
+        ).select_related('user', 'connection', 'ai_connection', 'news').first()
         if task is None:
             raise SubscriptionError('翻译任务已取消。', 'task_cancelled', 409)
         _task_snapshot(task_id, generation, run_token)
         now = timezone.now()
-        updated = ChatGPTTranslationTask.objects.filter(
+        query = ChatGPTTranslationTask.objects.filter(
             pk=task_id, generation=generation, run_token=run_token,
             status='running', provider_started=True, lease_expires_at__gt=now,
-            connection__is_active=True,
-            connection__generation=F('connection_generation'),
-            connection__selected_model=F('model_slug'), user__is_active=True,
-        ).update(progress=Concat(F('progress'), Value(delta)), updated_at=now)
+            user__is_active=True,
+        )
+        if task.ai_connection_id is not None:
+            query = query.filter(
+                ai_connection_id=task.ai_connection_id,
+                ai_connection__user_id=F('user_id'),
+                ai_connection__is_enabled=True,
+                ai_connection__is_deleted=False,
+                ai_connection__credential_epoch=F('credential_epoch'),
+                ai_connection__credential_version=F('credential_version'),
+            )
+        else:
+            query = query.filter(
+                connection__is_active=True,
+                connection__generation=F('connection_generation'),
+                connection__selected_model=F('model_slug'),
+            )
+        updated = query.update(progress=Concat(F('progress'), Value(delta)), updated_at=now)
         if not updated:
             raise SubscriptionError('翻译任务已取消或租约失效。', 'task_lease_lost', 409)
 
@@ -581,6 +860,9 @@ def _append_delta(task_id, generation, run_token, delta):
 @contextmanager
 def _task_heartbeat(task_id, generation, run_token, shared_lease=None):
     stopped = threading.Event()
+    ai_connection_id = ChatGPTTranslationTask.objects.filter(
+        pk=task_id, generation=generation, run_token=run_token, status='running',
+    ).values_list('ai_connection_id', flat=True).first()
     if shared_lease is not None and not shared_lease.current().exists():
         raise SharedTranslationError('共享翻译任务已过期，请重新开始。')
 
@@ -591,13 +873,26 @@ def _task_heartbeat(task_id, generation, run_token, shared_lease=None):
                 now = timezone.now()
                 try:
                     with transaction.atomic():
-                        updated = ChatGPTTranslationTask.objects.filter(
+                        query = ChatGPTTranslationTask.objects.filter(
                             pk=task_id, generation=generation, run_token=run_token,
-                            status='running', lease_expires_at__gt=now,
-                            connection__is_active=True,
-                            connection__generation=F('connection_generation'),
-                            connection__selected_model=F('model_slug'), user__is_active=True,
-                        ).update(lease_expires_at=now + TASK_LEASE_TTL, updated_at=now)
+                            status='running', lease_expires_at__gt=now, user__is_active=True,
+                        )
+                        if ai_connection_id is not None:
+                            query = query.filter(
+                                ai_connection_id=ai_connection_id,
+                                ai_connection__user_id=F('user_id'),
+                                ai_connection__is_enabled=True,
+                                ai_connection__is_deleted=False,
+                                ai_connection__credential_epoch=F('credential_epoch'),
+                                ai_connection__credential_version=F('credential_version'),
+                            )
+                        else:
+                            query = query.filter(
+                                connection__is_active=True,
+                                connection__generation=F('connection_generation'),
+                                connection__selected_model=F('model_slug'),
+                            )
+                        updated = query.update(lease_expires_at=now + TASK_LEASE_TTL, updated_at=now)
                         if not updated:
                             return
                         if shared_lease is not None:
@@ -625,6 +920,76 @@ def _task_heartbeat(task_id, generation, run_token, shared_lease=None):
         worker.join(timeout=2)
 
 
+def _save_byok_translation_result(task, text):
+    connection = UserAIConnection.objects.select_for_update().filter(
+        pk=task.ai_connection_id,
+        user_id=task.user_id,
+        is_enabled=True,
+        is_deleted=False,
+        credential_epoch=task.credential_epoch,
+        credential_version=task.credential_version,
+    ).first()
+    if connection is None:
+        raise BYOKTranslationError('execution_changed')
+    news = News.objects.select_for_update().only('full_content').filter(pk=task.news_id).first()
+    if news is None or source_hash(news.full_content) != task.source_hash:
+        raise BYOKTranslationError('article_source_changed')
+    if source_hash(task.source_snapshot) != task.source_hash:
+        raise BYOKTranslationError('article_source_changed')
+    config = UserAIModelConfig.objects.select_for_update().select_related('connection').filter(
+        pk=task.model_config_id_snapshot,
+        connection_id=connection.pk,
+        connection__user_id=task.user_id,
+        config_revision=task.config_revision,
+        model_id=task.model_slug,
+        catalog_version__gt='',
+    ).first()
+    if config is None:
+        raise BYOKTranslationError('execution_changed')
+    preset = get_model_preset(config.catalog_model_id, connection.provider_id)
+    profile = get_profile(connection.provider_id, connection.endpoint_profile)
+    if (
+        preset is None
+        or config.catalog_version != preset['catalog_version']
+        or config.model_id != preset['model_id']
+        or config.proxy_model_alias != preset['proxy_model_alias']
+        or connection.provider_id != task.provider_id_snapshot
+        or connection.endpoint_profile != task.endpoint_profile_snapshot
+        or connection.endpoint_profile_version != task.endpoint_profile_version
+        or profile is None
+        or profile['version'] != task.endpoint_profile_version
+    ):
+        raise BYOKTranslationError('execution_changed')
+    if not isinstance(text, str) or not text.strip():
+        raise BYOKTranslationError('empty_response')
+
+    completed_at = timezone.now()
+    record, _ = ChatGPTArticleTranslation.objects.update_or_create(
+        user_id=task.user_id,
+        ai_connection_id=connection.pk,
+        news_id=task.news_id,
+        defaults={
+            'connection': None,
+            'source_hash': task.source_hash,
+            'model_slug': task.model_slug,
+            'content': text,
+            'completed_at': completed_at,
+        },
+    )
+    return {
+        'full_content_zh': record.content,
+        'full_content_zh_fetched_at': record.completed_at.isoformat(),
+        'full_content_zh_source': 'byok',
+        'full_content_zh_scope': 'private',
+        'model_source': {
+            'provider': profile['provider_name'] if profile else connection.provider_id,
+            'model': config.display_name,
+        },
+        'result_id': str(record.pk),
+        'source_hash': task.source_hash,
+    }
+
+
 def _finalize_task(task_id, generation, run_token, text):
     now = timezone.now()
     with transaction.atomic():
@@ -637,19 +1002,24 @@ def _finalize_task(task_id, generation, run_token, text):
         ).update(updated_at=now)
         if not locked:
             raise SubscriptionError('翻译任务已取消或租约失效。', 'task_lease_lost', 409)
-        task = ChatGPTTranslationTask.objects.select_related('user', 'connection', 'news').get(pk=task_id)
+        task = ChatGPTTranslationTask.objects.select_related(
+            'user', 'connection', 'ai_connection', 'news',
+        ).get(pk=task_id)
         current = _task_snapshot(task_id, generation, run_token)
-        record = save_completed_translation(
-            user_id=task.user_id,
-            connection_id=task.connection_id,
-            news_id=task.news_id,
-            expected_generation=task.connection_generation,
-            model_slug=task.model_slug,
-            text=text,
-            source_digest=task.source_hash,
-            shared_lease=_lease_from_task(task),
-        )
-        payload = result_payload(record, 'private')
+        if task.ai_connection_id is not None:
+            payload = _save_byok_translation_result(task, text)
+        else:
+            record = save_completed_translation(
+                user_id=task.user_id,
+                connection_id=task.connection_id,
+                news_id=task.news_id,
+                expected_generation=task.connection_generation,
+                model_slug=task.model_slug,
+                text=text,
+                source_digest=task.source_hash,
+                shared_lease=_lease_from_task(task),
+            )
+            payload = result_payload(record, 'private')
         updated = ChatGPTTranslationTask.objects.filter(
             pk=task_id, generation=generation, run_token=run_token,
             status='running', lease_expires_at__gt=timezone.now(),
@@ -666,6 +1036,8 @@ def _finalize_task(task_id, generation, run_token, text):
 def _safe_error(exc):
     if isinstance(exc, SubscriptionError):
         return str(exc.error_code)[:64], str(exc)[:255]
+    if isinstance(exc, BYOKTranslationError):
+        return str(exc.code)[:64], _byok_error_message(exc.code)[:255]
     return 'translation_failed', 'ChatGPT 全文翻译失败，请稍后重试。'
 
 
@@ -719,22 +1091,41 @@ def _run_persistent_task(task_id, generation):
         if queued_task is None:
             return
         now = timezone.now()
-        claimed = ChatGPTTranslationTask.objects.filter(
+        claim_query = ChatGPTTranslationTask.objects.filter(
             pk=task_id, generation=generation, status='queued',
-            connection_id=queued_task.connection_id,
-            connection_generation=queued_task.connection_generation,
             model_slug=queued_task.model_slug,
             user__is_active=True,
-            connection__user_id=F('user_id'),
-            connection__is_active=True,
-            connection__needs_reauth=False,
-            connection__generation=F('connection_generation'),
-            connection__selected_model=F('model_slug'),
-            connection__encrypted_access_token__gt='',
-            connection__encrypted_refresh_token__gt='',
             news__full_content=queued_task.news.full_content,
             news__full_content__gt='',
-        ).update(
+        )
+        if queued_task.ai_connection_id is not None:
+            claim_query = claim_query.filter(
+                connection__isnull=True,
+                ai_connection_id=queued_task.ai_connection_id,
+                credential_epoch=queued_task.credential_epoch,
+                credential_version=queued_task.credential_version,
+                ai_connection__user_id=F('user_id'),
+                ai_connection__is_enabled=True,
+                ai_connection__is_deleted=False,
+                ai_connection__credential_epoch=F('credential_epoch'),
+                ai_connection__credential_version=F('credential_version'),
+                source_hash=queued_task.source_hash,
+                source_snapshot=queued_task.source_snapshot,
+            )
+        else:
+            claim_query = claim_query.filter(
+                connection_id=queued_task.connection_id,
+                connection_generation=queued_task.connection_generation,
+                ai_connection__isnull=True,
+                connection__user_id=F('user_id'),
+                connection__is_active=True,
+                connection__needs_reauth=False,
+                connection__generation=F('connection_generation'),
+                connection__selected_model=F('model_slug'),
+                connection__encrypted_access_token__gt='',
+                connection__encrypted_refresh_token__gt='',
+            )
+        claimed = claim_query.update(
             status='running', run_token=run_token, provider_started=False,
             started_at=now, lease_expires_at=now + TASK_LEASE_TTL,
             error_code='', error_message='', finished_at=None, updated_at=now,
@@ -742,23 +1133,35 @@ def _run_persistent_task(task_id, generation):
         if not claimed:
             return
         task = ChatGPTTranslationTask.objects.select_related(
-            'user', 'connection', 'news',
+            'user', 'connection', 'ai_connection', 'news',
         ).get(pk=task_id)
         shared_lease = _lease_from_task(task)
         _task_snapshot(task_id, generation, run_token, require_started=False)
-        _mark_provider_started(task_id, generation, run_token)
         guard = _execution_guard(task_id, generation, run_token)
         with _task_heartbeat(task_id, generation, run_token, shared_lease):
-            guard()
-            article = News.objects.only('full_content').get(pk=task.news_id)
-            output = stream_full_translation(
-                connection_id=task.connection_id,
-                expected_generation=task.connection_generation,
-                model_slug=task.model_slug,
-                article_markdown=article.full_content,
-                on_delta=lambda delta: _append_delta(task_id, generation, run_token, delta),
-                execution_guard=guard,
-            )
+            if task.ai_connection_id is not None:
+                snapshot = _byok_snapshot_from_task(task)
+                execution = prepare_byok_translation_execution(snapshot)
+                _mark_provider_started(task_id, generation, run_token)
+                guard()
+                output = stream_byok_translation(
+                    execution,
+                    task.source_snapshot,
+                    on_delta=lambda delta: _append_delta(task_id, generation, run_token, delta),
+                    execution_guard=guard,
+                )
+            else:
+                _mark_provider_started(task_id, generation, run_token)
+                guard()
+                article = News.objects.only('full_content').get(pk=task.news_id)
+                output = stream_full_translation(
+                    connection_id=task.connection_id,
+                    expected_generation=task.connection_generation,
+                    model_slug=task.model_slug,
+                    article_markdown=article.full_content,
+                    on_delta=lambda delta: _append_delta(task_id, generation, run_token, delta),
+                    execution_guard=guard,
+                )
             guard()
             _finalize_task(task_id, generation, run_token, output)
     except Exception as exc:

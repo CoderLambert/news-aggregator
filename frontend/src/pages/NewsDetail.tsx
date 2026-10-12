@@ -23,6 +23,7 @@ import SpeechStartMenu from '@/components/speech/SpeechStartMenu'
 import { useNewsDetail } from '@/hooks/useNewsDetail'
 import { useFullArticle } from '@/hooks/useFullArticle'
 import { useTranslation } from '@/hooks/useTranslation'
+import { usePrivateTranslation } from '@/hooks/usePrivateTranslation'
 import { useArticleSearch } from '@/hooks/useArticleSearch'
 import { useArticleToc } from '@/hooks/useArticleToc'
 import type { NewsDetail as NewsDetailRecord } from '@/types/news'
@@ -94,6 +95,9 @@ export default function NewsDetail() {
     handleTranslate,
     cancelTranslation,
   } = useTranslation(id ?? '', news, setNews, loading)
+  const privateTranslation = usePrivateTranslation(
+    id ?? '', news, capabilities.features.ai_byok.enabled && translationEnabled, loading,
+  )
 
   const speechPlayer = useSpeechPlayerActions()
   const { supported: speechSupported } = useSpeechPlayerCapabilities()
@@ -267,6 +271,15 @@ export default function NewsDetail() {
               onCancelRefetch={cancelFetch}
               allowFetch={fetchFullEnabled}
               allowTranslation={translationEnabled}
+              allowPrivateTranslation={Boolean(user) && capabilities.features.ai_byok.enabled && translationEnabled}
+              privateTranslationActive={privateTranslation.privateTranslationActive}
+              privateTranslationError={privateTranslation.privateTranslationError}
+              privateTranslationProgress={privateTranslation.privateTranslationProgress}
+              privateTranslationResult={privateTranslation.privateTranslationResult}
+              privateTranslationResultId={privateTranslation.privateTranslationResultId}
+              privateTranslationJobId={privateTranslation.privateTranslationJobId}
+              onStartPrivateTranslation={() => { void privateTranslation.startPrivateTranslation() }}
+              onCancelPrivateTranslation={() => { void privateTranslation.cancelPrivateTranslation() }}
             />
           )}
 

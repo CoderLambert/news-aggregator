@@ -3,6 +3,7 @@ import type { NewsId } from '@/services/api'
 export type { NewsId } from '@/services/api'
 import {
   cancelChatGPTTranslationTask as cancelTranslationTaskRequest,
+  cancelPrivateTranslationTask as cancelPrivateTranslationTaskRequest,
   chatStream as streamChat,
   clearChatHistory as clearChatHistoryRequest,
   fetchChatHistory as fetchChatHistoryRequest,
@@ -10,6 +11,8 @@ import {
   fetchFullArticle as fetchFullArticleRequest,
   fetchSuggestedQuestions as fetchSuggestedQuestionsRequest,
   getChatGPTTranslationTask as getTranslationTaskRequest,
+  getPrivateTranslationTask as getPrivateTranslationTaskRequest,
+  translatePrivateFullArticleStream as streamPrivateTranslation,
   translateFullArticleStream as streamTranslation,
 } from '@/services/api'
 import { isRecord } from '@/types/news'
@@ -63,6 +66,11 @@ export type TranslationEvent =
   | { type: 'waiting_shared' }
   | { type: 'error'; message: string }
   | { type: 'ignored' }
+
+export type PrivateTranslationEvent =
+  | { type: 'progress'; text: string }
+  | { type: 'complete'; result: Record<string, unknown> }
+  | { type: 'error'; message: string }
 
 
 export interface TranslationJobSnapshot {
@@ -257,12 +265,37 @@ export async function* translateFullArticleStream(
   }
 }
 
+export async function* translatePrivateFullArticleStream(
+  id: NewsId,
+  idempotencyKey: string,
+  options: { signal: AbortSignal; onJobId?: (jobId: string) => void },
+): AsyncGenerator<PrivateTranslationEvent> {
+  for await (const rawEvent of streamPrivateTranslation(id, idempotencyKey, options)) {
+    if (!isRecord(rawEvent) || typeof rawEvent.type !== 'string') continue
+    if (rawEvent.type === 'progress' && typeof rawEvent.text === 'string') {
+      yield { type: 'progress', text: rawEvent.text }
+    } else if (rawEvent.type === 'complete' && isRecord(rawEvent.result)) {
+      yield { type: 'complete', result: rawEvent.result }
+    } else if (rawEvent.type === 'error' && typeof rawEvent.message === 'string') {
+      yield { type: 'error', message: rawEvent.message }
+    }
+  }
+}
+
 export async function getTranslationJob(jobId: string, signal: AbortSignal): Promise<TranslationJobSnapshot> {
   return parseTranslationJob(await getTranslationTaskRequest(jobId, signal))
 }
 
 export async function cancelTranslationJob(jobId: string, generation: number): Promise<TranslationJobSnapshot> {
   return parseTranslationJob(await cancelTranslationTaskRequest(jobId, generation))
+}
+
+export async function getPrivateTranslationJob(jobId: string, signal: AbortSignal): Promise<TranslationJobSnapshot> {
+  return parseTranslationJob(await getPrivateTranslationTaskRequest(jobId, signal))
+}
+
+export async function cancelPrivateTranslationJob(jobId: string, generation: number): Promise<TranslationJobSnapshot> {
+  return parseTranslationJob(await cancelPrivateTranslationTaskRequest(jobId, generation))
 }
 
 export async function* chatStream(

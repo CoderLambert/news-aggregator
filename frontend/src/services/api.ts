@@ -718,6 +718,71 @@ export async function* translateFullArticleStream(
   if (fragments !== 0) throw new TypeError('Incomplete translation SSE fragment sequence')
 }
 
+export async function* translatePrivateFullArticleStream(
+  id: NewsId,
+  idempotencyKey: string,
+  { signal, onJobId }: { signal?: AbortSignal; onJobId?: (jobId: string) => void } = {},
+): AsyncGenerator<unknown> {
+  const response = await streamingFetch(`/api/ai/translation/news/${id}/`, {
+    body: JSON.stringify({}),
+    headers: { 'Idempotency-Key': idempotencyKey },
+    signal,
+  })
+  const jobId = response.headers.get('Job-ID')
+  if (jobId) onJobId?.(jobId)
+
+  const encoder = new TextEncoder()
+  const maxMessageBytes = 32 * 1024 * 1024
+  let fragments = 0
+  let fragmentBytes = 0
+  let fragmentPayload = ''
+  let progress = ''
+  for await (const incoming of iterSSEEvents(response)) {
+    let event: unknown = incoming
+    if (isRecord(incoming) && Object.prototype.hasOwnProperty.call(incoming, '__translation_sse_fragment_v1')) {
+      const fragment = incoming.__translation_sse_fragment_v1
+      if (typeof fragment !== 'string' || incoming.index !== fragments || typeof incoming.last !== 'boolean') {
+        throw new TypeError('Invalid private translation SSE fragment sequence')
+      }
+      fragmentBytes += encoder.encode(fragment).byteLength
+      if (fragmentBytes > maxMessageBytes) throw new RangeError('Private translation SSE message exceeded 32 MiB')
+      fragmentPayload += fragment
+      fragments += 1
+      if (!incoming.last) continue
+      try {
+        event = JSON.parse(fragmentPayload) as unknown
+      } finally {
+        fragmentPayload = ''
+        fragments = 0
+        fragmentBytes = 0
+      }
+    } else if (fragments !== 0) {
+      throw new TypeError('Interrupted private translation SSE fragment sequence')
+    }
+
+    if (!isRecord(event)) continue
+    if (typeof event.progress_delta === 'string') {
+      progress += event.progress_delta
+      yield { type: 'progress', text: progress }
+      continue
+    }
+    if (typeof event.progress === 'string') {
+      progress = event.progress
+      yield { type: 'progress', text: progress }
+      continue
+    }
+    if (typeof event.full_content_zh === 'string') {
+      yield { type: 'complete', result: event }
+      continue
+    }
+    if (typeof event.error === 'string') {
+      yield { type: 'error', message: event.error }
+      return
+    }
+  }
+  if (fragments !== 0) throw new TypeError('Incomplete private translation SSE fragment sequence')
+}
+
 export async function* chatStream(
   newsId: NewsId,
   question: string,
@@ -936,6 +1001,14 @@ export function getChatGPTTranslationTask(jobId: string, signal?: AbortSignal): 
 
 export function cancelChatGPTTranslationTask(jobId: string, generation: number): Promise<unknown> {
   return api.post<unknown>(`/chatgpt-subscription/jobs/${jobId}/cancel/`, { generation }).then(({ data }) => data)
+}
+
+export function getPrivateTranslationTask(jobId: string, signal?: AbortSignal): Promise<unknown> {
+  return api.get<unknown>(`/ai/translation/jobs/${jobId}/`, { signal }).then(({ data }) => data)
+}
+
+export function cancelPrivateTranslationTask(jobId: string, generation: number): Promise<unknown> {
+  return api.post<unknown>(`/ai/translation/jobs/${jobId}/cancel/`, { generation }).then(({ data }) => data)
 }
 // ---- Research -------------------------------------------------------------
 

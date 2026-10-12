@@ -26,6 +26,15 @@ interface FullContentSectionProps {
   onCancelRefetch: () => void
   allowFetch?: boolean
   allowTranslation?: boolean
+  allowPrivateTranslation?: boolean
+  privateTranslationActive?: boolean
+  privateTranslationError?: string
+  privateTranslationProgress?: string
+  privateTranslationResult?: string
+  privateTranslationResultId?: string
+  privateTranslationJobId?: string
+  onStartPrivateTranslation?: () => void
+  onCancelPrivateTranslation?: () => void
 }
 
 export default function FullContentSection({
@@ -46,6 +55,15 @@ export default function FullContentSection({
   onCancelRefetch,
   allowFetch = true,
   allowTranslation = true,
+  allowPrivateTranslation = false,
+  privateTranslationActive = false,
+  privateTranslationError = '',
+  privateTranslationProgress = '',
+  privateTranslationResult = '',
+  privateTranslationResultId = '',
+  privateTranslationJobId = '',
+  onStartPrivateTranslation = () => {},
+  onCancelPrivateTranslation = () => {},
 }: FullContentSectionProps) {
   const content = showOriginal ? news.full_content : (news.full_content_zh || news.full_content)
   return (
@@ -63,6 +81,10 @@ export default function FullContentSection({
         onCancelRefetch={onCancelRefetch}
         allowFetch={allowFetch}
         allowTranslation={allowTranslation}
+        allowPrivateTranslation={allowPrivateTranslation}
+        privateTranslationActive={privateTranslationActive}
+        hasPrivateTranslation={Boolean(privateTranslationResult)}
+        onStartPrivateTranslation={onStartPrivateTranslation}
       />
 
       {allowTranslation && translating && <TranslationProgressUI progress={translationProgress} waitingShared={translationWaitingShared} onStop={onStopTranslation} />}
@@ -70,6 +92,35 @@ export default function FullContentSection({
         <TranslationPausedUI onResume={onResumeTranslation} />
       )}
       {allowTranslation && translateError && <ErrorBanner message={translateError} onRetry={onRetryTranslate} />}
+
+      {allowPrivateTranslation && privateTranslationActive && (
+        <section aria-label="个人模型翻译进度" className="mb-6 rounded-xl border border-violet-100 bg-violet-50/60 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p role="status" className="text-sm font-medium text-violet-800">个人模型正在翻译，进度和结果仅你可见。</p>
+              {privateTranslationProgress && <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-violet-900">{privateTranslationProgress}</pre>}
+            </div>
+            <Button type="button" variant="outline" size="sm" onClick={onCancelPrivateTranslation} disabled={!privateTranslationJobId} className="shrink-0 rounded-full">取消</Button>
+          </div>
+        </section>
+      )}
+      {allowPrivateTranslation && privateTranslationError && (
+        <p role="alert" className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{privateTranslationError}</p>
+      )}
+      {allowPrivateTranslation && privateTranslationResult && (
+        <Card className="mb-6 border-violet-200 bg-violet-50/30 py-5">
+          <CardContent className="px-5">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-violet-900">个人模型译文 · 仅你可见</p>
+                <p className="mt-1 text-xs text-violet-700">通过个人 API Key 生成，不会发布为共享译文。</p>
+              </div>
+              {privateTranslationResultId && <span className="text-[11px] text-muted-foreground">结果 {privateTranslationResultId.slice(0, 8)}</span>}
+            </div>
+            <MarkdownContent content={privateTranslationResult} />
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="article-section-render py-5">
         <CardContent className="px-5">
@@ -80,9 +131,9 @@ export default function FullContentSection({
   )
 }
 
-type ToolbarProps = Pick<FullContentSectionProps, 'news' | 'translating' | 'translationPaused' | 'translateError' | 'showOriginal' | 'onToggleOriginal' | 'onTranslate' | 'onRefetch' | 'refetching' | 'onCancelRefetch' | 'allowFetch' | 'allowTranslation'>
+type ToolbarProps = Pick<FullContentSectionProps, 'news' | 'translating' | 'translationPaused' | 'translateError' | 'showOriginal' | 'onToggleOriginal' | 'onTranslate' | 'onRefetch' | 'refetching' | 'onCancelRefetch' | 'allowFetch' | 'allowTranslation' | 'allowPrivateTranslation' | 'privateTranslationActive' | 'onStartPrivateTranslation'> & { hasPrivateTranslation: boolean }
 
-function Toolbar({ news, translating, translationPaused, translateError, showOriginal, onToggleOriginal, onTranslate, onRefetch, refetching, onCancelRefetch, allowFetch = true, allowTranslation = true }: ToolbarProps) {
+function Toolbar({ news, translating, translationPaused, translateError, showOriginal, onToggleOriginal, onTranslate, onRefetch, refetching, onCancelRefetch, allowFetch = true, allowTranslation = true, allowPrivateTranslation = false, privateTranslationActive = false, hasPrivateTranslation, onStartPrivateTranslation = () => {} }: ToolbarProps) {
   const [copied, setCopied] = useState(false)
   const [copyMessage, setCopyMessage] = useState('')
   const [copyTimer, setCopyTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
@@ -136,6 +187,16 @@ function Toolbar({ news, translating, translationPaused, translateError, showOri
           {news.full_content_zh && <LangToggle showOriginal={showOriginal} onToggle={onToggleOriginal} />}
           {allowTranslation && !isChineseSource && !translating && !translationPaused && !translateError && (news.full_content_zh_scope !== 'shared' || news.full_translation_personal_available) && (
             <TranslateButton hasTranslation={Boolean(news.full_content_zh)} shared={news.full_content_zh_scope === 'shared'} onClick={onTranslate} />
+          )}
+          {allowPrivateTranslation && !isChineseSource && !translating && !translationPaused && !privateTranslationActive && (
+            <Button type="button" onClick={onStartPrivateTranslation} variant="outline" size="pill-sm" className="h-10 rounded-full border-violet-200 px-3 text-xs font-medium text-violet-800 hover:bg-violet-50">
+              <Languages className="size-3" />{hasPrivateTranslation ? '重新生成个人译文' : '使用个人模型翻译'}
+            </Button>
+          )}
+          {allowPrivateTranslation && privateTranslationActive && (
+            <Button type="button" disabled variant="outline" size="pill-sm" className="h-10 rounded-full px-3 text-xs">
+              <Loader2 className="size-3 animate-spin" />正在翻译个人译文
+            </Button>
           )}
         </div>
       </div>
