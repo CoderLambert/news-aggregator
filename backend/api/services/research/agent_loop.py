@@ -105,6 +105,7 @@ RESEARCH_SYSTEM_PROMPT = """\
 def run_agent_loop(
     session, user_query: str, on_event: Callable, local_only: bool = False,
     execution_guard=None, persist_completion=None, persist_tool_result=None,
+    byok_execution=None, byok_client=None,
 ):
     """Run the research agent with optional worker fences and durable writes."""
     guard = execution_guard or (lambda: None)
@@ -141,28 +142,70 @@ def run_agent_loop(
         on_event('thinking', {'iteration': iteration})
 
         # Call LLM with tools
-        response = _call_llm_with_tools(messages, tools=available_tools, execution_guard=guard)
+        response = _call_llm_with_tools(
+            messages,
+            tools=available_tools,
+            execution_guard=guard,
+            byok_execution=byok_execution,
+            byok_client=byok_client,
+        )
         guard()
         if response is None:
             on_event('error', {'message': '所有 LLM 提供商不可用，请稍后再试'})
             return
 
+        if byok_execution is not None:
+            choices = getattr(response, 'choices', None)
+            if not isinstance(choices, list) or len(choices) != 1:
+                on_event('error', {'message': '研究服务暂时不可用，请稍后重试。'})
+                return
+            finish_reason = getattr(choices[0], 'finish_reason', None)
+        else:
+            finish_reason = None
         assistant_message = response.choices[0].message
 
         # Check for tool calls
         if hasattr(assistant_message, 'tool_calls') and assistant_message.tool_calls:
+            if byok_execution is not None and finish_reason != 'tool_calls':
+                on_event('error', {'message': '研究服务暂时不可用，请稍后重试。'})
+                return
             # Serialize the assistant message with tool_calls for history
             msg_dict = _serialize_assistant_message(assistant_message)
             messages.append(msg_dict)
+            allowed_tool_names = {
+                item['function']['name'] for item in available_tools
+            }
 
             for tool_call in assistant_message.tool_calls:
                 fn_name = tool_call.function.name
-                try:
-                    fn_args = json.loads(tool_call.function.arguments)
-                except json.JSONDecodeError:
-                    fn_args = {}
-
                 call_id = tool_call.id
+                raw_arguments = tool_call.function.arguments
+                if byok_execution is not None and (
+                    not isinstance(fn_name, str)
+                    or fn_name not in allowed_tool_names
+                    or not isinstance(call_id, str)
+                    or not call_id
+                    or len(call_id) > 128
+                    or not isinstance(raw_arguments, str)
+                    or len(raw_arguments.encode('utf-8')) > 16_384
+                ):
+                    on_event('error', {'message': '研究服务暂时不可用，请稍后重试。'})
+                    return
+                try:
+                    fn_args = json.loads(raw_arguments)
+                except json.JSONDecodeError:
+                    if byok_execution is not None:
+                        on_event('error', {'message': '研究服务暂时不可用，请稍后重试。'})
+                        return
+                    fn_args = {}
+                if byok_execution is not None and not isinstance(fn_args, dict):
+                    on_event('error', {'message': '研究服务暂时不可用，请稍后重试。'})
+                    return
+                if byok_execution is not None and not _valid_tool_arguments(
+                    fn_name, fn_args, available_tools,
+                ):
+                    on_event('error', {'message': '研究服务暂时不可用，请稍后重试。'})
+                    return
 
                 guard()
                 on_event('tool_call', {
@@ -212,6 +255,13 @@ def run_agent_loop(
         else:
             # Final answer — no more tool calls
             final_text = assistant_message.content or ''
+            if byok_execution is not None and (
+                finish_reason != 'stop'
+                or not isinstance(final_text, str)
+                or not final_text.strip()
+            ):
+                on_event('error', {'message': '研究服务暂时不可用，请稍后重试。'})
+                return
 
             on_event('text_delta', {'text': final_text})
 
@@ -240,11 +290,38 @@ def run_agent_loop(
     on_event('error', {'message': 'Agent 达到最大迭代次数限制，请尝试简化问题'})
 
 
-def _call_llm_with_tools(messages: list, tools=None, execution_guard=None):
+def _call_llm_with_tools(
+    messages: list,
+    tools=None,
+    execution_guard=None,
+    byok_execution=None,
+    byok_client=None,
+):
     """Call each configured provider in the original order with guarded retries."""
     guard = execution_guard or (lambda: None)
     if tools is None:
         tools = TOOLS
+    if byok_execution is not None:
+        if byok_client is None:
+            return None
+        guard()
+        try:
+            response = byok_client.chat.completions.create(
+                model=byok_execution.model_alias,
+                messages=messages,
+                tools=tools,
+                tool_choice='auto',
+                temperature=0.3,
+                max_tokens=8000,
+                extra_body={'api_key': byok_execution.provider_key},
+            )
+        except Exception as exc:
+            guard()
+            logger.info('BYOK research provider attempt failed (%s).', type(exc).__name__)
+            return None
+        guard()
+        return response
+
     max_retries = 2
     guard()
     clients = get_clients()
@@ -282,6 +359,71 @@ def _call_llm_with_tools(messages: list, tools=None, execution_guard=None):
     guard()
     logger.info('All configured research providers failed.')
     return None
+
+
+def _valid_tool_arguments(name: str, arguments: dict, available_tools: list) -> bool:
+    """Validate provider-returned arguments against the exact offered tool schema."""
+    definition = next(
+        (
+            tool['function'] for tool in available_tools
+            if tool.get('function', {}).get('name') == name
+        ),
+        None,
+    )
+    if definition is None:
+        return False
+    parameters = definition.get('parameters')
+    if not isinstance(parameters, dict) or parameters.get('type') != 'object':
+        return False
+    properties = parameters.get('properties')
+    required = parameters.get('required', [])
+    if (
+        not isinstance(properties, dict)
+        or not isinstance(required, list)
+        or not set(required).issubset(arguments)
+        or not set(required).issubset(properties)
+        or not set(arguments).issubset(properties)
+    ):
+        return False
+
+    def valid_value(value, schema):
+        expected = schema.get('type')
+        if expected == 'string':
+            valid = isinstance(value, str)
+        elif expected == 'integer':
+            valid = isinstance(value, int) and not isinstance(value, bool)
+        elif expected == 'number':
+            valid = isinstance(value, (int, float)) and not isinstance(value, bool)
+        elif expected == 'boolean':
+            valid = isinstance(value, bool)
+        elif expected == 'array':
+            valid = isinstance(value, list)
+        elif expected == 'object':
+            valid = isinstance(value, dict)
+        else:
+            return False
+        if not valid:
+            return False
+        if 'enum' in schema and value not in schema['enum']:
+            return False
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if 'minimum' in schema and value < schema['minimum']:
+                return False
+            if 'maximum' in schema and value > schema['maximum']:
+                return False
+        if isinstance(value, list) and isinstance(schema.get('items'), dict):
+            return all(valid_value(item, schema['items']) for item in value)
+        if isinstance(value, dict):
+            nested_properties = schema.get('properties', {})
+            nested_required = schema.get('required', [])
+            if not isinstance(nested_properties, dict) or not isinstance(nested_required, list):
+                return False
+            if not set(nested_required).issubset(value) or not set(value).issubset(nested_properties):
+                return False
+            return all(valid_value(item, nested_properties[key]) for key, item in value.items())
+        return True
+
+    return all(valid_value(value, properties[key]) for key, value in arguments.items())
 
 
 def _serialize_assistant_message(message) -> dict:

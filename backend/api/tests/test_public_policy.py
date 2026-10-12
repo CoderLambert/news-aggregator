@@ -427,6 +427,7 @@ def test_closed_signup_returns_fixed_error_without_creating_user():
     PUBLIC_SITE_MODE="full",
     PUBLIC_SIGNUP_ENABLED=True,
     PUBLIC_AI_ENABLED=False,
+    AI_BYOK_ENABLED=False,
     CHATGPT_AUTH_MODE="local_oss",
     CHATGPT_PLAN_USAGE_ENABLED=True,
 )
@@ -507,6 +508,33 @@ def test_ai_disabled_still_allows_personal_chat_and_research_history(news_obj):
     assert client.get(research_path).status_code == 200
     assert client.delete(research_path).status_code == 204
     assert not ResearchSession.objects.filter(pk=research.pk).exists()
+
+
+@pytest.mark.django_db
+@override_settings(
+    PUBLIC_SITE_MODE="full",
+    PUBLIC_SIGNUP_ENABLED=False,
+    PUBLIC_AI_ENABLED=False,
+    AI_BYOK_ENABLED=True,
+    DJANGO_ENV="production",
+    CHATGPT_AUTH_MODE="website",
+    CHATGPT_PLAN_USAGE_ENABLED=False,
+)
+def test_research_capability_is_byok_only_when_public_ai_is_off():
+    client = APIClient()
+    features = client.get(reverse("capabilities")).json()["features"]
+    assert features["research"] == {"enabled": True, "reason": None}
+    assert features["ai_byok"] == {"enabled": True, "reason": None}
+    assert features["chat"] == {"enabled": False, "reason": "ai_disabled"}
+
+    user = User.objects.create_user(username="policy-byok-research", password="test-password")
+    client.force_login(user)
+    # The production policy lets this request reach the authenticated BYOK resolver.
+    # It is rejected there because the user has no verified BYOK research model.
+    response = client.post(reverse("research-create"), {"query": "no subscription fallback"}, format="json")
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "model_not_configured"
+    assert ResearchSession.objects.filter(user=user).count() == 0
 
 
 @pytest.mark.django_db

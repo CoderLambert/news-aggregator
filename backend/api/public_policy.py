@@ -109,7 +109,12 @@ class PublicPolicyMiddleware:
 
         if not settings.PUBLIC_AI_ENABLED:
             allowed_methods = AI_GATED_METHODS.get(route_name, ())
-            if request.method in allowed_methods:
+            byok_research = (
+                settings.AI_BYOK_ENABLED
+                and route_name in {'research-create', 'research-chat'}
+                and request.method == 'POST'
+            )
+            if request.method in allowed_methods and not byok_research:
                 return policy_error("ai_disabled")
 
         if route_name in {
@@ -124,6 +129,7 @@ class PublicPolicyMiddleware:
             settings.DJANGO_ENV == "production"
             and route_name in {"research-create", "research-chat"}
             and request.method == "POST"
+            and not settings.AI_BYOK_ENABLED
         ):
             return policy_error("hosted_integration_unapproved", status_code=503)
 
