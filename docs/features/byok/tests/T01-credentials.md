@@ -33,12 +33,27 @@
 | 隔离 | Python venv 和空 HOME 在 `/tmp`；测试使用 `env -i`；`chromadb` 未安装，使用仅供测试导入的 stub（若业务路径调用会立即失败） |
 | 浏览器 | Vitest DOM 测试；Codex in-app browser 对隔离本地前后端完成合成账户手工验收 |
 
-### 2026-10-12 当前提交复测
+### 2026-10-12 当前分支复测
 
-在 T01 实现代码 HEAD `5cd9bc52c8282629a724d27f22575b94a183f764` 上重跑定向回归；之后的 T01 提交仅更新了文档。后端沿用 `/tmp/byok-t01-verify-20261012` 的隔离 Python 3.14.8 环境、空 HOME、导入 stub 和全新 SQLite `/tmp/byok-t01-verification-20261012c.sqlite3`，命令仍为上文“后端实现后”七个测试文件的 `env -i ... pytest -q` 命令：
+当前分支 HEAD `33ec3461eedad60c560c0f5c2b7eea447017cd90`；最后一项 T01 业务代码/回归测试改动为 `34f5a843dbc4a9fb218ff9fadf8ed32886f46953`，之后提交只更新文档。后端沿用隔离 Python 3.14.8 环境 `/tmp/byok-t01-verify-20261012`、空 HOME `/tmp/byok-t01-empty-home`、只供导入的 ChromaDB stub `/tmp/byok-t01-preview-stubs/chromadb.py`，并使用全新 SQLite `/tmp/byok-t01-verification-20261012e.sqlite3`：
+
+```sh
+env -i PATH=/tmp/byok-t01-verify-20261012/bin:/usr/bin:/bin \
+  HOME=/tmp/byok-t01-empty-home PYTHONPATH=/tmp/byok-t01-preview-stubs \
+  DJANGO_ENV=development DJANGO_SECRET_KEY=t01-synthetic-only-not-a-secret \
+  DJANGO_DB_PATH=/tmp/byok-t01-verification-20261012e.sqlite3 \
+  /tmp/byok-t01-verify-20261012/bin/python -m pytest -q \
+    api/tests/test_account_security.py \
+    api/tests/test_chat_ownership.py \
+    api/tests/test_chatgpt_subscription.py \
+    api/tests/test_public_policy.py \
+    api/tests/test_research_csrf.py \
+    api/tests/test_production_settings.py \
+    api/tests/test_ai_connections.py
+```
 
 ```text
-154 passed, 2 warnings in 21.17s
+154 passed, 2 warnings in 20.42s
 ```
 
 两条 warning 仍是 `Category` 与 `Source` queryset 未排序的既有 DRF `UnorderedObjectListWarning`。前端在相同提交重跑上文八个定向 Vitest 文件：
@@ -60,10 +75,10 @@ T01 分支本身没有翻译 worker；T05 堆叠 PR #39 (`task/byok-T05-private-
 
 T05 的新增后端测试文件在该 head 上为 `11 passed in 4.95s`。这验证了 T01 `credential_epoch` 契约接入 worker 后的撤销栅栏；它依赖尚未合并的下游 PR #39，不能算作 T01 PR #34 单独包含 worker，也不构成真实 SDK、Proxy 或 Provider 兼容证据。
 
-### PR #34 GitHub checks（head `c328b8142a712501a1c304255ac92b4938a29ccb`）
+### PR #34 GitHub checks（head `33ec3461eedad60c560c0f5c2b7eea447017cd90`）
 
-- 前端两组检查均通过；后端重复运行中一组通过，另一组失败于既有 `test_sse_disconnect_does_not_cancel_background_worker`：SQLite `OperationalError` 导致测试 worker 未保存成功终态。[失败 job](https://github.com/CoderLambert/news-aggregator/actions/runs/38187824002/job/114613899484)；[另一组后端通过](https://github.com/CoderLambert/news-aggregator/actions/runs/38187820816/job/114613890712)。
-- 因当前 head 检查未全部通过，PR #34 保持 Draft；这条 CI 失败不会被本地测试或 T05 堆叠证据覆盖。
+- 前端两组检查均通过。两个后端 run 均失败于既有 `backend/api/tests/test_subscription_recovery.py` 并发 SQLite 用例：run [38190564955](https://github.com/CoderLambert/news-aggregator/actions/runs/38190564955) 中 `test_sse_disconnect_does_not_cancel_background_worker` 遇到 `OperationalError`，worker 未保存成功终态；run [38190568500](https://github.com/CoderLambert/news-aggregator/actions/runs/38190568500) 中 `test_simultaneous_database_connections_share_one_unique_task` 遇到 `OperationalError`。失败不位于 BYOK 连接管理路径；本地定向测试未复现，测试和生产断言均未调整。
+- 因当前 head 检查未全部通过，PR #34 保持 Draft；CI 失败不会被本地测试或 T05 堆叠证据覆盖。
 
 最初用户报告的基线 `ea2ce55ae22e19e1604e88031b824b68f2666cec` 已由基线前合入的文档 PR #31 前移至以上 tracking ref。实现基于该 ref 建立的独立工作树；最终实时 `git ls-remote` 因 DNS 无法解析 `github.com` 暂不可验证。
 

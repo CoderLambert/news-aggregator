@@ -1,6 +1,6 @@
 # T01 · 个人 Key 连接增删改停
 
-> **本地实现与测试证据完成；PR #34 仍为 Draft，CI 尚未全绿（2026-10-12）**：T01 CRUD/权限/密钥生命周期验证已完成；修复代码 SHA `34f5a843dbc4a9fb218ff9fadf8ed32886f46953`。T01-03 的排队旧 epoch 拒绝与在途撤销后不提交结果，已由堆叠 T05 PR #39 的 worker 集成测试覆盖（head `54df6ab`）；该 PR 尚未合并，T01 PR #34 本身仍不包含翻译 worker。未据此宣称真实 Provider 兼容。PR #34 前一代码 head 的两组后端 CI 一通过、一因既有 SQLite `OperationalError` 失败；详见 [Test T01](../tests/T01-credentials.md)。
+> **本地实现与测试证据完成；PR #34 仍为 Draft，CI 尚未全绿（2026-10-12）**：T01 CRUD/权限/密钥生命周期验证已完成；当前代码 SHA `34f5a843dbc4a9fb218ff9fadf8ed32886f46953`。PR #34 当前 head `33ec3461eedad60c560c0f5c2b7eea447017cd90` 的两组 frontend CI 通过；两组 backend CI 分别在既有订阅恢复测试 `test_sse_disconnect_does_not_cancel_background_worker` 与 `test_simultaneous_database_connections_share_one_unique_task` 因 SQLite `OperationalError` 失败，定向本地回归为 154 passed。T01-03 的排队旧 epoch 拒绝与在途撤销后不提交结果，已由堆叠 T05 PR #39 的 worker 集成测试覆盖（head `54df6ab`）；该 PR 尚未合并，T01 PR #34 本身仍不包含翻译 worker。未据此宣称真实 Provider 兼容；详见 [Test T01](../tests/T01-credentials.md)。
 
 | 属性 | 内容 |
 | --- | --- |
