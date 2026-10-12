@@ -1,6 +1,6 @@
 # Test T06 · 长文分块完整翻译
 
-> **IMPLEMENTED · DRAFT PR**。实现提交 `1f719e666edc5554c16ffc1aa0b227909118a60f` 位于 `task/byok-T06-long-translation`，堆叠于 T05 PR #39 / 基线 `54df6abd70a979fee11a2c610c4fde0c35f00a15`；PR #39 尚未合并。真实供应商调用和浏览器 UAT 未运行，保留为 NOT_RUN；T06 PR 的 CI 完成前保持 Draft。
+> **IMPLEMENTED · DRAFT PR**。实现提交 `1f719e666edc5554c16ffc1aa0b227909118a60f` 位于 `task/byok-T06-long-translation`，堆叠于 T05 PR #39 / 基线 `54df6abd70a979fee11a2c610c4fde0c35f00a15`；PR #39 尚未合并。T06 PR head `7200211b382cdbee5086ee721eec64ad5d075ee0` 的两组后端 CI 均未通过，失败在既有 SQLite worker-recovery 用例；T06 自身定向测试在两组 CI 中通过。PR 保持 Draft。真实供应商调用和浏览器 UAT 未运行，保留为 NOT_RUN。
 
 对应：[T06 Task](../tasks/T06-long-translation.md)。
 
@@ -65,6 +65,7 @@ PYTHONPATH=/tmp/byok-t02-test-stubs DJANGO_DB_PATH=/tmp/byok-t06-regression.sqli
 | `manage.py check` | 无错误；1 条 `staticfiles.W004`（T06 worktree 无 `frontend/dist/assets` 构建产物），启动时另有可选 embedding preload `ModuleNotFoundError` 警告 |
 | `makemigrations --check --dry-run` | `No changes detected` |
 | PROXY_LOCAL | PASS：T06 SDK 实际发出 15 个 Responses streaming chunk，均观察到 `response_completed`；upstream 确认 provider tenant 为 `tenant-a`、项目虚拟 key 未泄漏；围栏代码精确保留、SSE progress 与合并内容一致。incomplete 负控观察到 1 次请求、`response_incomplete`，业务返回 `incomplete_response`、0 retry。真实 provider 请求数 0。 |
+| GitHub CI（head `7200211b382cdbee5086ee721eec64ad5d075ee0`） | 两组 frontend 均 PASS；两组 `backend-and-release-gates` 均 FAIL。run `38190345273`：895 passed、2 skipped，失败 `test_sse_disconnect_does_not_cancel_background_worker`（worker 持久化遇 `OperationalError`）；run `38190373196`：894 passed、2 skipped，失败该用例和 `test_simultaneous_database_connections_share_one_unique_task`（SQLite `OperationalError`）。两组均运行到 T06 测试且通过。完整检查尚未绿，不据本地回归覆盖。 |
 | SDK_LOCAL / PROVIDER_REAL / 浏览器 UAT | SDK_LOCAL 未单独分类（SDK 已在 PROXY_LOCAL 中运行）；PROVIDER_REAL **NOT_RUN**；用户浏览器长文刷新验收 **NOT_RUN** |
 | 测试断言 diff | 旧长度护栏从字符数改为 UTF-8 字节上限；扩展 fake SDK 以记录顺序/请求数/重试参数；新增完整结构、超预算无 dispatch、中间 chunk incomplete、空输出、结构变化不保存、排队后源文变化和私有多 chunk 结果测试。未放宽既有产品断言。 |
 | 用户端操作链 | API/DB/worker/SSE 自动化覆盖通过；手动浏览器步骤保留 NOT_RUN |
