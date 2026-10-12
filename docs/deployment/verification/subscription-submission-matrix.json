@@ -1,0 +1,62 @@
+[
+  {
+    "database": "memory",
+    "iteration": 1,
+    "exit_code": 0,
+    "model_guards_zero": true
+  },
+  {
+    "database": "memory",
+    "iteration": 2,
+    "exit_code": 0,
+    "model_guards_zero": true
+  },
+  {
+    "database": "memory",
+    "iteration": 3,
+    "exit_code": 0,
+    "model_guards_zero": true
+  },
+  {
+    "database": "memory",
+    "iteration": 4,
+    "exit_code": 0,
+    "model_guards_zero": true
+  },
+  {
+    "database": "memory",
+    "iteration": 5,
+    "exit_code": 0,
+    "model_guards_zero": true
+  },
+  {
+    "database": "wal",
+    "iteration": 1,
+    "exit_code": 0,
+    "model_guards_zero": true
+  },
+  {
+    "database": "wal",
+    "iteration": 2,
+    "exit_code": 0,
+    "model_guards_zero": true
+  },
+  {
+    "database": "wal",
+    "iteration": 3,
+    "exit_code": 0,
+    "model_guards_zero": true
+  },
+  {
+    "database": "wal",
+    "iteration": 4,
+    "exit_code": 0,
+    "model_guards_zero": true
+  },
+  {
+    "database": "wal",
+    "iteration": 5,
+    "exit_code": 0,
+    "model_guards_zero": true
+  }
+]

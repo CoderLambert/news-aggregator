@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import random
+import sqlite3
 import threading
 import time
 import uuid
@@ -11,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from typing import Optional
 
-from django.db import OperationalError, close_old_connections, transaction
+from django.db import OperationalError, close_old_connections, connection as db_connection, transaction
 from django.db.models import F, Q, Value
 from django.db.models.functions import Concat
 from django.utils import timezone
@@ -324,6 +326,38 @@ def _reset_task(task_id, generation, *, connection, shared_lease, now, expected_
     )
 
 
+SUBMISSION_LOCK_DELAYS = (0.02, 0.04, 0.08, 0.16, 0.32)
+
+
+def _is_submission_sqlite_lock(error):
+    """Match driver result codes, never arbitrary error-message text."""
+    if db_connection.vendor != 'sqlite':
+        return False
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        code = getattr(error, 'sqlite_errorcode', None)
+        if isinstance(code, int):
+            return (code & 0xff) in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
+        error = getattr(error, '__cause__', None) or getattr(error, '__context__', None)
+    return False
+
+
+def _retry_submission_transaction(operation):
+    # Nested callers retain their outer transaction/read locks after a savepoint
+    # rollback, so only top-level submissions can safely retry a new transaction.
+    nested = db_connection.in_atomic_block
+    for attempt in range(len(SUBMISSION_LOCK_DELAYS) + 1):
+        try:
+            return operation()
+        except OperationalError as error:
+            if nested or not _is_submission_sqlite_lock(error) or attempt == len(SUBMISSION_LOCK_DELAYS):
+                raise
+            # operation's atomic block has already rolled back; no lock is held
+            # during backoff and no provider/dispatch operation is retried.
+            time.sleep(SUBMISSION_LOCK_DELAYS[attempt] * random.uniform(0.5, 1.5))
+
+
 def start_or_get_job(user, connection, news, *, force=False, shared_lease=None):
     """Create or attach to a durable owner task; only explicit force resets terminals."""
     try:
@@ -339,11 +373,13 @@ def start_or_get_job(user, connection, news, *, force=False, shared_lease=None):
     if type(force) is not bool:
         _release_unattached_lease(shared_lease)
         raise SubscriptionError('force 必须是布尔值。', 'invalid_force', 400)
-    now = timezone.now()
-    handle_task = None
-    dispatch = False
-    attached_lease = False
-    try:
+
+    def persist_task():
+        current, current_news, digest = _validate_submission(user, connection, news)
+        now = timezone.now()
+        handle_task = None
+        dispatch = False
+        attached_lease = False
         with transaction.atomic():
             if force:
                 _cancel_stale_active_tasks(user.pk, current_news.pk, digest, current, now)
@@ -403,12 +439,20 @@ def start_or_get_job(user, connection, news, *, force=False, shared_lease=None):
                 if created:
                     attached_lease = shared_lease is not None
             handle_task = task
+        return handle_task, dispatch, attached_lease
+
+    try:
+        handle_task, dispatch, attached_lease = (
+            persist_task() if force else _retry_submission_transaction(persist_task)
+        )
     except OperationalError as exc:
         _release_unattached_lease(shared_lease)
         # SQLite can still be releasing the competing transaction when we try
         # to attach to its unique task. Retry ONLY the idempotent read/attach:
         # do not create or reset a task (or call a provider) in this path.
-        for delay in (0, 0.02, 0.05, 0.10, 0.20):
+        # Force may attach after a lock, but must never replay a generation reset.
+        delays = (0, 0.02, 0.05, 0.10, 0.20) if force and _is_submission_sqlite_lock(exc) else ()
+        for delay in delays:
             if delay:
                 time.sleep(delay)
             try:
@@ -431,6 +475,10 @@ def start_or_get_job(user, connection, news, *, force=False, shared_lease=None):
         raise SubscriptionError(
             '翻译任务暂时无法处理，请稍后重试。', 'task_storage_busy', 503,
         ) from None
+
+    except Exception:
+        _release_unattached_lease(shared_lease)
+        raise
 
     if shared_lease is not None and not attached_lease:
         _release_unattached_lease(shared_lease)
