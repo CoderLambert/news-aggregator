@@ -16,3 +16,4 @@ chromadb>=0.4
 pytest>=8.0
 pytest-django>=4.8
 cryptography>=42.0
+feedparser>=6.0.12,<7.0

@@ -19,7 +19,7 @@
 | T02 | News 七字段、三表、迁移；空库与历史数据 | 已验证并提交 |
 | T03 | ingestion、候选验证、正文 CAS、admin、可用性；版本及 lease 竞态 | 核心合同已验证并提交；适配器后续接入 |
 | T04 | safe_http、Provider、Scrapy handler、诊断/研究；WAL 多进程预算 | 已验证并提交；Feed errback 持久状态在 T05 接入 |
-| T05 | Feed 解析、条件状态、receipt；失败不推进 checkpoint | 待实施 |
+| T05 | Feed 解析、条件状态、receipt；失败不推进 checkpoint | 已验证并提交 |
 | T06 | DEV/HN/首批全文 Feed；按来源契约 fixtures | 待实施 |
 | T07 | TC 与其余来源；31 来源策略及降级 | 待实施 |
 | T08 | 常驻 Worker、心跳、队列、旧命令；恢复/取消/无隐式回填 | 待实施 |
@@ -94,3 +94,16 @@ T05/来源适配前补充 T03 的边界：统一 Unicode 空白可用性；已�
 实际相关回归 **140 passed**，包括 news_ingestion、状态服务/模型、迁移、crawler、article_fetcher 与 site_rules；`makemigrations --check --dry-run` 实际 No changes detected，`git diff --check` 通过。没有运行生产迁移。
 
 下一步为 T05：feedparser 6.x、公用时区日期解析、策略签名、完整枚举 receipt、Pipeline 提交后结算、FeedState CAS 与异常延期。T06–T12 仍待实施，完整开发完成定义未满足，goal 保持 active。
+
+
+## T05 实际结果
+
+feedparser 6.x 只解析有界 bytes，不接收 URL；实际验证版本为 6.0.14。公共时间解析保留有时区的发布时间/修改时间，不把缺失时间补成抓取时间，也不让 feedparser 的 published 别名伪造 updated。RSS、Atom 完整枚举，真正空 Feed 与 HTML/损坏 Feed 分开；批准的 HTML/text 正文字段成为类型化候选，media_content 不作为正文。
+
+FeedState 保存策略签名、条件头和经过审核的有效端点。策略/正文准入变化清条件头并重放；添加别的来源不改变当前来源签名。条件头只发给已经提交表示的端点，重定向中跨 URL 移除。304 需要可靠 checkpoint 和本次条件请求，否则清头等待无条件重抓。成功时间、ETag 和 Last-Modified 在全部枚举及 Pipeline 已提交/明确策略跳过后，以 revision CAS 一起保存。
+
+receipt 区分已提交、策略跳过、延期、失败；重复信号不能把延期变成成功。中断、失败、未结算、未完全枚举及 checkpoint CAS 冲突都不会推进表示。Pipeline 通过显式 IngestResult 结算；spider_closed 等待活动 Pipeline 任务。WebKit 首先接入共享生命周期，其余来源在 T06/T07 接入。
+
+实际相关回归 **180 passed**：全部 crawler、feed_state/feed_support、news_ingestion、正文状态服务、article_fetcher/site_rules、迁移。独立 receipt 故障覆盖包含取消、重复信号、正常关闭等待与 CAS 冲突。完整 Scrapy/Pipeline 测试在临时文件数据库与受控本地 HTTP proxy 上证明：第一次第二条目入库失败不保存 ETag，第二次重放补齐且不重复正文 revision，第三次才发送 ETag 并接受 304。没有联系真实发布者。`makemigrations --check --dry-run` 实际 No changes detected；`git diff --check` 通过。
+
+T06–T12 和完整 CI/发布集合仍待完成，未操作生产来源开关、数据或部署。

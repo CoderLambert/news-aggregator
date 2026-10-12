@@ -1,7 +1,5 @@
-import hashlib
 import os
-import sys
-import django
+import asyncio
 from asgiref.sync import sync_to_async
 from django.utils import timezone
 from django.utils.timezone import now as tz_now
@@ -187,8 +185,11 @@ def _save_item_sync(item):
     result = ingest_item(item, source_defaults=SOURCE_DEFAULTS.get(item['source_name'], {}))
     if result.news_id is None:
         if result.receipt_outcome == 'deferred':
-            raise RuntimeError(result.reason)
-        raise DropItem(result.reason)
+            error = RuntimeError(result.reason)
+        else:
+            error = DropItem(result.reason)
+        error.ingest_result = result
+        raise error
     news = News.objects.get(pk=result.news_id)
     news._ingest_result = result
     if result.receipt_outcome == 'committed' and _ai_side_effects_enabled():
@@ -203,7 +204,32 @@ def _save_item(item):
 
 
 class DjangoPipeline:
-    async def process_item(self, item, spider):
+    @classmethod
+    def from_crawler(cls, crawler):
+        pipeline = cls()
+        pipeline.crawler = crawler
+        return pipeline
+
+    async def process_item(self, item, spider=None):
+        spider = spider or self.crawler.spider
         item.setdefault('source_key', spider.name)
-        await _save_item(item)
+        registry = getattr(spider, 'feed_receipts', None)
+        task = asyncio.current_task()
+        if registry:
+            registry.active_pipeline_tasks.add(task)
+        try:
+            news = await _save_item(item)
+            result = news._ingest_result
+            if registry:
+                registry.settle(item.get('feed_receipt_id'), result.receipt_outcome, result.reason,
+                                changed=result.changed, body_committed=result.body_committed)
+        except BaseException as error:
+            result = getattr(error, 'ingest_result', None)
+            if registry:
+                registry.settle(item.get('feed_receipt_id'), result.receipt_outcome if result else 'failed',
+                                result.reason if result else 'pipeline_error')
+            raise
+        finally:
+            if registry:
+                registry.active_pipeline_tasks.discard(task)
         return item

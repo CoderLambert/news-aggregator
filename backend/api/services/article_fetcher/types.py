@@ -29,6 +29,7 @@ class FullContentCandidate:
     source_version: str | None
     request_started_at: datetime
     expected_revision: int | None = None
+    request_chain: tuple[str, ...] = ()
 
 
 @dataclass

@@ -59,3 +59,6 @@ AUTOTHROTTLE_TARGET_CONCURRENCY = 1
 REMOTE_CONTROL_ENABLED = False
 
 TWISTED_REACTOR = 'twisted.internet.asyncioreactor.AsyncioSelectorReactor'
+DOWNLOADER_MIDDLEWARES = {
+    'news_crawler.middlewares.FeedConditionalHeadersMiddleware': 610,
+}

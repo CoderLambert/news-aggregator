@@ -79,7 +79,12 @@ def candidate_contract_allows(candidate) -> bool:
     if policy.feed_url:
         if field == 'content.rendered':
             return policy.key == 'techcrunch' and origin.scheme == 'https' and origin.netloc == 'techcrunch.com' and origin.path.startswith('/wp-json/wp/v2/posts/')
-        return candidate.retrieved_from_url == policy.feed_url and candidate.content_format == 'html'
+        direct = candidate.retrieved_from_url == policy.feed_url
+        observed_redirect = bool(candidate.request_chain and candidate.request_chain[0] == policy.feed_url and
+                                 candidate.request_chain[-1] == candidate.retrieved_from_url and
+                                 all(approved_feed_endpoint(policy.key, policy.feed_url, url) for url in candidate.request_chain))
+        formats = {'html', 'text'} if policy.key == 'v8' else {'html'}
+        return (direct or observed_redirect) and candidate.content_format in formats
     if policy.key == 'devto':
         return (candidate.source_item_id.isdecimal() and origin.scheme == 'https' and
                 origin.netloc == 'dev.to' and origin.path == f'/api/articles/{candidate.source_item_id}' and
@@ -116,3 +121,18 @@ def html_candidate_contract_allows(candidate) -> bool:
     if candidate.body_field == 'reader_markdown' and candidate.content_format == 'markdown':
         return candidate.retrieved_from_url == 'https://r.jina.ai/' + candidate.target_url
     return False
+
+
+REVIEWED_FEED_REDIRECT_HOSTS = {'infoq': ('feed.infoq.com',), 'deepmind': ('blog.google',)}
+
+
+def approved_feed_endpoint(source_key, feed_url, effective_url):
+    from api.services.article_identity import normalize_article_url
+    try:
+        effective_url = normalize_article_url(effective_url, max_length=1024, require_article=False)
+    except ValueError:
+        return False
+    policy = POLICIES[source_key]
+    hosts = {*policy.domains, urlsplit(feed_url).hostname, *REVIEWED_FEED_REDIRECT_HOSTS.get(source_key, ())}
+    parsed = urlsplit(effective_url)
+    return parsed.hostname in hosts and parsed.port in {None, 80, 443}

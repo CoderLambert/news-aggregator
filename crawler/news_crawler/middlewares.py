@@ -98,3 +98,12 @@ class NewsCrawlerDownloaderMiddleware:
 
     def spider_opened(self, spider):
         spider.logger.info("Spider opened: %s" % spider.name)
+
+
+class FeedConditionalHeadersMiddleware:
+    """Never forward a representation's validators to a redirected endpoint."""
+    def process_request(self, request, spider=None):
+        endpoint = request.meta.get('feed_conditional_url')
+        if endpoint and endpoint != request.url:
+            request.headers.pop('If-None-Match', None)
+            request.headers.pop('If-Modified-Since', None)

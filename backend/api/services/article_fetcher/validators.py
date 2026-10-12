@@ -126,6 +126,8 @@ def validate_candidate(candidate: FullContentCandidate, *, expected_url: str, ex
             (candidate.declared_canonical_url is not None and not isinstance(candidate.declared_canonical_url, str)) or
             (candidate.expected_revision is not None and (type(candidate.expected_revision) is not int or candidate.expected_revision < 0))):
         return CandidateValidation(False, error_code='invalid_identity')
+    if not isinstance(candidate.request_chain, tuple) or any(not isinstance(url, str) for url in candidate.request_chain):
+        return CandidateValidation(False, error_code='invalid_identity')
     try:
         target = normalize_article_url(candidate.target_url)
         validate_upstream_id(candidate.source_item_id)
