@@ -2,7 +2,7 @@
 
 对应：[T01 Task](../tasks/T01-credentials.md)。
 
-> **T01 本地实现与测试证据完成；PR #34 仍为 Draft，CI 尚未全绿。** `credential_epoch` worker 消费端集成现有堆叠 PR #39 的合成 worker 证据；PR #39 尚未合并，独立 T01 PR #34 仍只包含凭据管理。两者均没有真实 provider 调用。`credential_epoch` 是授权撤销/fencing 版本；独立的 `credential_version` 标记当前密文并参与 AAD。
+> **T01 本地实现与测试证据完成；PR #34 仍为 Draft，最新 head CI 全绿。** `credential_epoch` worker 消费端集成现有堆叠 PR #39 的合成 worker 证据；PR #39 尚未合并，独立 T01 PR #34 仍只包含凭据管理。两者均没有真实 provider 调用。`credential_epoch` 是授权撤销/fencing 版本；独立的 `credential_version` 标记当前密文并参与 AAD。
 
 | 用例 | 场景 / 失败注入 | 结果 | 证据 |
 | --- | --- | --- | --- |
@@ -75,10 +75,10 @@ T01 分支本身没有翻译 worker；T05 堆叠 PR #39 (`task/byok-T05-private-
 
 T05 的新增后端测试文件在该 head 上为 `11 passed in 4.95s`。这验证了 T01 `credential_epoch` 契约接入 worker 后的撤销栅栏；它依赖尚未合并的下游 PR #39，不能算作 T01 PR #34 单独包含 worker，也不构成真实 SDK、Proxy 或 Provider 兼容证据。
 
-### PR #34 GitHub checks（head `33ec3461eedad60c560c0f5c2b7eea447017cd90`）
+### PR #34 GitHub checks
 
-- 前端两组检查均通过。两个后端 run 均失败于既有 `backend/api/tests/test_subscription_recovery.py` 并发 SQLite 用例：run [38190564955](https://github.com/CoderLambert/news-aggregator/actions/runs/38190564955) 中 `test_sse_disconnect_does_not_cancel_background_worker` 遇到 `OperationalError`，worker 未保存成功终态；run [38190568500](https://github.com/CoderLambert/news-aggregator/actions/runs/38190568500) 中 `test_simultaneous_database_connections_share_one_unique_task` 遇到 `OperationalError`。失败不位于 BYOK 连接管理路径；本地定向测试未复现，测试和生产断言均未调整。
-- 因当前 head 检查未全部通过，PR #34 保持 Draft；CI 失败不会被本地测试或 T05 堆叠证据覆盖。
+- 当前 head `dae63c42a74ee2cd24e7d06a7b240ace6c6df9c2` 的两组 backend-and-release-gates 与 frontend 检查全部 PASS：run [38192397347](https://github.com/CoderLambert/news-aggregator/actions/runs/38192397347) 与 [38192400399](https://github.com/CoderLambert/news-aggregator/actions/runs/38192400399)。
+- 历史 head `33ec3461eedad60c560c0f5c2b7eea447017cd90` 曾有两个 backend run 因既有 SQLite `OperationalError` 失败：run [38190564955](https://github.com/CoderLambert/news-aggregator/actions/runs/38190564955) 的 `test_sse_disconnect_does_not_cancel_background_worker`，以及 run [38190568500](https://github.com/CoderLambert/news-aggregator/actions/runs/38190568500) 的 `test_simultaneous_database_connections_share_one_unique_task`。最新 head 全绿，不删除这段历史；PR #34 按既有状态保留 Draft，测试和生产断言未调整。
 
 最初用户报告的基线 `ea2ce55ae22e19e1604e88031b824b68f2666cec` 已由基线前合入的文档 PR #31 前移至以上 tracking ref。实现基于该 ref 建立的独立工作树；最终实时 `git ls-remote` 因 DNS 无法解析 `github.com` 暂不可验证。
 
