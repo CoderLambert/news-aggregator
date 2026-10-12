@@ -373,17 +373,19 @@ class VentureBeatJinaProvider(JinaProvider):
     def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None) -> FetchResult:
         try:
             parsed = urlparse(url)
+            domain = normalize_domain(url)
             supported = (
                 parsed.scheme.lower() == 'https'
-                and normalize_domain(url) == 'venturebeat.com'
+                and domain == 'venturebeat.com'
                 and parsed.username is None
                 and parsed.password is None
                 and parsed.port in {None, 443}
             )
         except (TypeError, ValueError):
+            domain = ''
             supported = False
         if not supported:
-            error = 'not_venturebeat_article' if normalize_domain(url) != 'venturebeat.com' else 'unsupported_venturebeat_url'
+            error = 'not_venturebeat_article' if domain != 'venturebeat.com' else 'unsupported_venturebeat_url'
             return FetchResult(ok=False, provider=self.name, url=url, error=error)
         # The article path is sufficient for this fallback. Do not disclose
         # tracking or other query values to the third-party reader service.

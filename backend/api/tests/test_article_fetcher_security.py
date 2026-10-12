@@ -172,6 +172,19 @@ def test_production_venturebeat_jina_uses_safe_transport_and_validates_body(monk
     safe_open.assert_called_once_with(request, timeout=12)
 
 
+@pytest.mark.parametrize('url', [None, 'https://venturebeat.com:bad/ai/example'])
+def test_production_venturebeat_jina_rejects_malformed_urls_without_external_action(monkeypatch, url):
+    safe_open = Mock(side_effect=AssertionError('malformed URL reached external transport'))
+    monkeypatch.setattr(providers, 'safe_urlopen', safe_open)
+
+    with override_settings(DJANGO_ENV='production'):
+        result = providers.VentureBeatJinaProvider().fetch(url)
+
+    assert result.ok is False
+    assert result.error in {'not_venturebeat_article', 'unsupported_venturebeat_url'}
+    safe_open.assert_not_called()
+
+
 def test_production_core_rejects_invalid_initial_url_before_provider(monkeypatch):
     class MustNotRun:
         name = 'must_not_run'

@@ -301,5 +301,5 @@ class TestNewsFetchFullView:
         assert news.full_content == ''
         assert news.full_content_fetched_at is None
         assert news.full_content_fetch_status == 'network_error'
-        assert news.full_content_fetch_error == 'connection reset by peer'
+        assert news.full_content_fetch_error == 'fetcherror:connection_reset'
         assert news.full_content_retry_count == 1
