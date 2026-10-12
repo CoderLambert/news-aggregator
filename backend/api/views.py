@@ -1158,6 +1158,7 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
         # Auto-fetch full article so suggestions are based on the real body,
         # not the short list-preview blurb. No-op if already cached.
         ensure_full_content(news)
+        expected_content_revision = news.full_content_revision
 
         # Build context (same chain as chat view)
         context = pick_chat_context(news)
@@ -1221,9 +1222,8 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
             if len(questions) < 3:
                 raise ValueError('fewer than 3 non-empty questions')
 
-            news.suggested_questions = questions
-            news.suggested_questions_generated_at = timezone.now()
-            news.save(update_fields=['suggested_questions', 'suggested_questions_generated_at'])
+            from api.services.full_content_status import save_suggested_questions
+            save_suggested_questions(news, questions, expected_revision=expected_content_revision)
             return Response({'questions': questions})
         except Exception as e:
             # Fall back silently — UX should never show "loading questions failed"

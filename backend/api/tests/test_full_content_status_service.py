@@ -5,7 +5,8 @@ import pytest
 from django.utils import timezone
 
 from api.models import Category, News, Source
-from api.services.article_fetcher import FetchError, FetchResult
+from api.services.article_fetcher import FetchError, FetchResult as _FetchResult
+from api.services.article_fetcher.types import FullContentCandidate
 from api.services.full_content_status import (
     classify_fetch_error,
     claim_fetch,
@@ -16,9 +17,24 @@ from api.services.full_content_status import (
 )
 
 
+
+def FetchResult(**values):
+    result = _FetchResult(**values)
+    if result.ok and result.url:
+        result.candidate = FullContentCandidate(
+            source_key='devto', source_item_id='17', target_url=result.url,
+            retrieved_from_url='https://dev.to/api/articles/17', declared_canonical_url=None,
+            title=result.title or 'Service status test article', content_kind='article',
+            body_field='body_markdown', content_format='markdown', declared_completeness='full',
+            raw_content=result.markdown, source_modified_at=None, source_version=None,
+            request_started_at=timezone.now(),
+        )
+    return result
+
+
 @pytest.fixture
 def source(db):
-    return Source.objects.create(name='ServiceStatusSource', url='https://example.com', language='en')
+    return Source.objects.create(name='Dev.to', url='https://dev.to', language='en')
 
 
 @pytest.fixture
@@ -34,7 +50,9 @@ def news(source, category):
         publish_time=timezone.now(),
         source=source,
         category=category,
-        url='https://example.com/service-status-test',
+        url='https://dev.to/team/service-status-test',
+        content_kind='article', full_content_fetch_status='queued',
+        full_content_next_attempt_at=timezone.now() - timedelta(days=1),
     )
 
 
@@ -65,6 +83,7 @@ def test_mark_success_records_provider_score_and_timestamp(news):
         quality_score=0.88,
     )
 
+    assert claim_fetch(news, force=True)
     mark_success(news, result)
 
     news.refresh_from_db()
@@ -90,6 +109,7 @@ def test_mark_success_clears_translation_only_when_the_original_body_changes(new
         quality_score=0.9,
     )
 
+    assert claim_fetch(news, force=True)
     mark_success(news, result, full_content='new body')
 
     news.refresh_from_db()
@@ -114,6 +134,7 @@ def test_mark_success_keeps_translation_when_the_original_body_is_unchanged(news
         quality_score=0.9,
     )
 
+    assert claim_fetch(news, force=True)
     mark_success(news, result, full_content='same body')
 
     news.refresh_from_db()
@@ -127,6 +148,7 @@ def test_mark_failed_increments_retry_count_and_records_error(news):
     news.full_content_retry_count = 1
     news.save(update_fields=['full_content_retry_count'])
 
+    assert claim_fetch(news, force=True)
     mark_failed(news, RuntimeError('connection reset by peer'), status='network_error', provider='jina')
 
     news.refresh_from_db()
@@ -188,7 +210,7 @@ def test_release_fetch_claim_resets_only_status_and_allows_immediate_reclaim(new
     news.full_content_fetch_provider = 'previous_provider'
     news.full_content_quality_score = 0.75
     news.full_content_retry_count = 4
-    news.full_content_fetch_status = 'success'
+    news.full_content_fetch_status = 'queued'
     news.save()
     lease = timezone.now()
     with patch('api.services.full_content_status.tz_now', return_value=lease):
@@ -196,7 +218,7 @@ def test_release_fetch_claim_resets_only_status_and_allows_immediate_reclaim(new
 
     assert release_fetch_claim(news)
     news.refresh_from_db()
-    assert news.full_content_fetch_status == 'pending'
+    assert news.full_content_fetch_status == 'queued'
     assert news.last_full_content_attempt == lease
     assert news.full_content == 'EXISTING_BODY'
     assert news.full_content_zh == 'EXISTING_TRANSLATION'
@@ -358,6 +380,7 @@ def test_mark_failed_persists_bounded_provider_codes_and_last_provider(news):
         ],
     )
 
+    assert claim_fetch(news, force=True)
     mark_failed(news, error)
 
     news.refresh_from_db()

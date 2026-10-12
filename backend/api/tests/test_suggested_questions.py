@@ -154,3 +154,20 @@ def test_force_regenerate_falls_back_on_llm_error(news, client):
     # Old cache untouched (failure shouldn't destroy good data)
     news.refresh_from_db()
     assert news.suggested_questions == ['old q1', 'old q2', 'old q3']
+
+
+def test_slow_questions_do_not_overwrite_a_new_content_revision(news, client):
+    class SlowClient:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    News.objects.filter(pk=news.pk).update(
+                        full_content_revision=1, suggested_questions=['New question'],
+                    )
+                    return _FakeCompletion('["old 1", "old 2", "old 3"]')
+    with patch('api.views.get_clients', return_value=[(SlowClient(), 'test-model')]):
+        response = client.post(f'/api/news/{news.pk}/suggested-questions/')
+    assert response.status_code == 200
+    news.refresh_from_db()
+    assert news.suggested_questions == ['New question']

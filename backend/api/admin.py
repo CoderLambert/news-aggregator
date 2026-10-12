@@ -28,7 +28,11 @@ class NewsAdmin(admin.ModelAdmin):
     list_display = ['title', 'source', 'category', 'publish_time', 'created_at', 'title_hash', 'related_to']
     list_filter = ['source', 'category', 'publish_time', 'related_to']
     search_fields = ['title', 'content', 'author']
-    readonly_fields = ['created_at', 'title_hash']
+    readonly_fields = [
+        'created_at', 'title_hash', 'url', 'content_kind',
+        *[field.name for field in News._meta.fields if field.name.startswith('full_content')],
+        'last_full_content_attempt',
+    ]
     date_hierarchy = 'publish_time'
     raw_id_fields = ['source', 'category']
 

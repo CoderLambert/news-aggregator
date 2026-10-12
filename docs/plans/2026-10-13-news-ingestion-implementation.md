@@ -17,7 +17,7 @@
 | --- | --- | --- |
 | T01 | 伪来源、雷峰网、Pipeline、crawler_control；身份与并发字段保护 | 已验证并提交 |
 | T02 | News 七字段、三表、迁移；空库与历史数据 | 已验证并提交 |
-| T03 | ingestion、候选验证、正文 CAS、admin、可用性；版本及 lease 竞态 | 待实施 |
+| T03 | ingestion、候选验证、正文 CAS、admin、可用性；版本及 lease 竞态 | 核心合同已验证并提交；适配器后续接入 |
 | T04 | safe_http、Provider、Scrapy handler、诊断/研究；WAL 多进程预算 | 待实施 |
 | T05 | Feed 解析、条件状态、receipt；失败不推进 checkpoint | 待实施 |
 | T06 | DEV/HN/首批全文 Feed；按来源契约 fixtures | 待实施 |
@@ -47,3 +47,17 @@ Pipeline 不再以 title_hash 合并文章，不再按摘要长度决定更新�
 统一 Python/数据库可用性 helper 按 state 与去空白正文判断，刷新失败或冷却不影响可读正文；success + 空白正文不可用。
 
 实际验证：Python 3.12 环境运行 `test_ingestion_migration.py`、`test_full_content_status_model.py` 和 `tests/crawler/` 共 **27 passed**。两个迁移场景由独立子进程使用新建临时文件库，并断言 WAL、正文/译文/收藏/聊天保留、无隐式任务、开关未变。`makemigrations --check --dry-run` 返回 **No changes detected**；`git diff --check` 通过。所有迁移命令均显式设置临时 DJANGO_DB_PATH，没有访问随带业务库。
+
+## T03 实际结果
+
+新增 article_identity、source_policy、news_ingestion。SourcePolicy 明确列出 31 个来源，字段/端点/格式准入不由响应中的 trusted 标志决定。不可变 FullContentCandidate 仍验证运行时字段类型、目标 URL、来源 ID、字段契约、完整性和容量。HTML 片段公开转换函数保留代码、图片、列表、表格；网页提取先选站点节点，再考虑通用节点，不回退整页 body。
+
+身份依来源 ID、规范真实 URL 定位；多来源映射保留主来源；只定向更新元数据。正文写入集中在 commit_candidate：URL/revision 条件更新，Worker 额外匹配 claimed_at lease；无租约 mark_success/mark_failed 不再写穿。Feed 有意义的新证据可以 fence 当前 Worker，纯同正文/证据重放不取消刷新。旧版本、同版本异内容和无序版本冲突拒收；有比较依据的新版本可变短；观察时间不触发 revision。正文变更原子清当前 legacy 译文与推荐问题，正文相同保留译文。推荐问题保存新增 revision CAS。身份修正保留旧文本供审计并标记 missing，旧执行者不能写回。
+
+正文 admin 字段及 URL 只读。enqueue/claim/release 的服务合同先建立：只领取明确、到期任务；取消返回 queued 并保留意图；force 不取消其他 lease。预算冷却、常驻 Worker、API/消费者尚需 T04/T08/T09 接入，**本阶段不是可发布的兼容集合**。旧 Provider/CLI 尚未全部产出类型化候选，未经候选验证的结果现在不能保存；将在 T04–T07/T08 完成适配，不使用不安全兼容写穿。
+
+最终相关子集实际 **140 passed**（Python 3.12.14）：test_news_ingestion、test_full_content_status_service、tests/crawler、test_full_content_status_model、test_ingestion_migration、test_article_fetcher、test_article_site_rules、test_suggested_questions。覆盖结构化短正文、长截断/挑战文本、真实 ID 冲突、同域错误路径、批准的主机别名、多来源发现、URL/revision/lease 旧结果、同正文刷新、翻译保留、慢推荐问题 fencing 和迁移。未声称这些内存库测试证明多进程预算；真实文件 WAL 多进程预算/租约测试将在 T04 增加。
+
+`manage.py check` 实际无问题；`makemigrations --check --dry-run` 实际 No changes detected；`git diff --check` 通过。初次网页提取回归发现旧雷峰 Provider 把片段送网页选择器，已改用片段函数并重跑。完整 CI、前端、发布门禁、生产来源抽样均尚未完成。
+
+后续先做 T04：类型化失败、原子共享预算、safe_http 每跳及 Scrapy handler 的真实传输准入；再推进 Feed receipt/checkpoint。保持目标 active，完成定义八项尚未全部满足。

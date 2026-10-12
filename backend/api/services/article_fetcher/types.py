@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 import re
 from typing import Protocol
 
@@ -9,6 +10,25 @@ MAX_FETCH_DIAGNOSTIC_LENGTH = 1000
 _SAFE_NAME = re.compile(r'[^a-z0-9_.-]+')
 _SAFE_REASON = re.compile(r'^[a-z0-9_:-]{1,80}$')
 _HTTP_STATUS = re.compile(r'\bHTTP\s+(\d{3})\b', re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class FullContentCandidate:
+    source_key: str
+    source_item_id: str
+    target_url: str
+    retrieved_from_url: str
+    declared_canonical_url: str | None
+    title: str
+    content_kind: str
+    body_field: str
+    content_format: str
+    declared_completeness: str
+    raw_content: str
+    source_modified_at: datetime | None
+    source_version: str | None
+    request_started_at: datetime
+    expected_revision: int | None = None
 
 
 @dataclass
@@ -26,6 +46,7 @@ class FetchResult:
     validation_reasons: list[str] = field(default_factory=list)
     content_length: int = 0
     extractor: str = ''
+    candidate: FullContentCandidate | None = None
 
 
 class ArticleProvider(Protocol):

@@ -54,24 +54,14 @@ def _clean_soup(soup: BeautifulSoup, remove_selectors: list[str] | tuple[str, ..
 
 def _pick_content_node(soup: BeautifulSoup, url: str) -> Tag:
     rule = get_site_rule(url)
-    selectors: list[str] = [*(rule.selectors if rule else ()), *GENERIC_SELECTORS]
-
-    candidates: list[Tag] = []
-    for selector in selectors:
-        candidates.extend([n for n in soup.select(selector) if isinstance(n, Tag)])
-    if not candidates and soup.body:
-        candidates = [soup.body]
-    if not candidates:
-        return soup
-
-    def score(node: Tag) -> int:
-        text = node.get_text(' ', strip=True)
-        paragraphs = len(node.find_all('p'))
-        headings = len(node.find_all(re.compile('^h[1-3]$')))
-        links = len(node.find_all('a'))
-        return len(text) + paragraphs * 120 + headings * 60 - links * 8
-
-    return max(candidates, key=score)
+    # A reviewed site node takes precedence over broader generic containers.
+    for selectors in ((rule.selectors if rule else ()), GENERIC_SELECTORS):
+        for selector in selectors:
+            for node in soup.select(selector):
+                if isinstance(node, Tag) and node.get_text(' ', strip=True):
+                    return node
+    # No body fallback: a whole page is not proof of an article container.
+    return BeautifulSoup('', 'html.parser')
 
 
 def _title_from_soup(soup: BeautifulSoup, node: Tag, rule: SiteRule | None = None) -> str:
@@ -357,3 +347,16 @@ def extract_markdown_from_html(html: str, url: str) -> ExtractedArticle:
     markdown = _node_to_markdown(node, url).strip()
     markdown = re.sub(r'\n{3,}', '\n\n', markdown).strip()
     return ExtractedArticle(markdown=markdown, title=title, canonical_url=canonical)
+
+
+
+def html_fragment_to_markdown(html: str, base_url: str, *, remove_selectors=()) -> str:
+    """Convert an approved API/Feed fragment without treating it as a webpage."""
+    soup = BeautifulSoup(html or '', 'html.parser')
+    _clean_soup(soup, remove_selectors)
+    for node in soup.select('a[href], img[src], img[data-src], img[data-original]'):
+        for attr in ('href', 'src', 'data-src', 'data-original'):
+            value = node.get(attr)
+            if value and urljoin(base_url, str(value)).split(':', 1)[0].lower() not in {'http', 'https', 'mailto'}:
+                del node[attr]
+    return _children_markdown(soup, base_url).strip()

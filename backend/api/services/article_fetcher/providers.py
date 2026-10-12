@@ -17,7 +17,7 @@ from django.conf import settings
 
 from api.services.content_cleaner import clean_content
 
-from .extractors import extract_markdown_from_html
+from .extractors import extract_markdown_from_html, html_fragment_to_markdown
 from .safe_http import safe_urlopen
 from .site_rules import get_site_rule, normalize_domain
 from .types import FetchResult
@@ -243,8 +243,7 @@ class LeiphoneFeedProvider:
             if not description_html:
                 return FetchResult(ok=False, provider=self.name, url=url, title=title, error='empty_feed_description')
 
-            extracted = extract_markdown_from_html(description_html, url)
-            markdown = clean_content(extracted.markdown, url)
+            markdown = html_fragment_to_markdown(description_html, url)
             validation = validate_markdown(
                 markdown,
                 expected_title=expected_title,

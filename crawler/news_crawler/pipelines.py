@@ -182,81 +182,18 @@ def _try_translate(news):
 
 def _save_item_sync(item):
     close_old_connections()
-
-    if item['source_name'] in {'Reuters', '机器之心', '36氪'}:
-        from scrapy.exceptions import DropItem
-        raise DropItem('unsupported_source')
-
-    source_name = item['source_name']
-    defaults = SOURCE_DEFAULTS.get(
-        source_name,
-        {'url': '', 'country': 'CN', 'language': 'zh', 'source_type': 'news'},
-    )
-    source, _ = Source.objects.get_or_create(
-        name=source_name,
-        defaults=defaults,
-    )
-    # Sync source_type and language if source already exists but fields are empty or outdated
-    source_fields = []
-    if not source.source_type:
-        source.source_type = defaults['source_type']
-        source_fields.append('source_type')
-    if not source.language or source.language != defaults['language']:
-        source.language = defaults['language']
-        source_fields.append('language')
-    if source_fields:
-        source.save(update_fields=source_fields)
-
-    category, _ = Category.objects.get_or_create(
-        name=item['category_name'],
-        defaults={'slug': item['category_name'].lower().replace(' ', '-')},
-    )
-
-    title = item['title']
-    content = item['content']
-    url = item['url']
-    thash = _title_hash(title)
-
-    # Use filter().first() instead of get(): a URL may appear more than once
-    # (e.g. duplicate dev.to articles), and get() raises MultipleObjectsReturned.
-    news = News.objects.filter(url=url).first()
-
-    if news:
-        # Exact URL is identity. A title hash cannot prove a URL correction.
-        # Targeted writes never carry stale body/translation/task fields.
-        updates = {'title': title, 'content': content, 'title_hash': thash}
-        for field in ('author', 'cover_image'):
-            if item.get(field):
-                updates[field] = item[field]
-        if item.get('publish_time') is not None:
-            updates['publish_time'] = item['publish_time']
-        News.objects.filter(pk=news.pk, url=url).update(**updates)
-        news.refresh_from_db()
-        if _ai_side_effects_enabled():
-            _index_news(news.id, news.title, news.content)
-            _try_translate(news)
-    else:
-        # Cross-source dedup: check if a similar title already exists
-        similar_id = None
-        if _ai_side_effects_enabled():
-            similar_id = _find_similar_titles(title, threshold=0.65)
-        related_to_id = similar_id if similar_id else None
-
-        news = News.objects.create(
-            url=url,
-            title=title,
-            content=content,
-            author=item.get('author', ''),
-            publish_time=item.get('publish_time') or timezone.now(),
-            source=source,
-            category=category,
-            cover_image=item.get('cover_image', ''),
-            title_hash=thash,
-            related_to_id=related_to_id,
-        )
-        if _ai_side_effects_enabled():
-            _index_news(news.id, news.title, news.content)
-            _try_translate(news)
+    from api.services.news_ingestion import ingest_item
+    from scrapy.exceptions import DropItem
+    result = ingest_item(item, source_defaults=SOURCE_DEFAULTS.get(item['source_name'], {}))
+    if result.news_id is None:
+        if result.receipt_outcome == 'deferred':
+            raise RuntimeError(result.reason)
+        raise DropItem(result.reason)
+    news = News.objects.get(pk=result.news_id)
+    news._ingest_result = result
+    if result.receipt_outcome == 'committed' and _ai_side_effects_enabled():
+        _index_news(news.id, news.title, news.content)
+        _try_translate(news)
     return news
 
 
@@ -267,5 +204,6 @@ def _save_item(item):
 
 class DjangoPipeline:
     async def process_item(self, item, spider):
+        item.setdefault('source_key', spider.name)
         await _save_item(item)
         return item

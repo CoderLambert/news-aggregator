@@ -63,22 +63,25 @@ def test_metadata_update_preserves_concurrent_full_content(monkeypatch):
         data = item('https://webkit.org/blog/1/concurrency')
         news = pipelines._save_item_sync(data)
         original_time = news.publish_time
-        original_first = QuerySet.first
+        original_update = QuerySet.update
+        interleaved = False
 
-        def interleave(query):
-            stale = original_first(query)
-            if query.model is News and stale is not None:
-                News.objects.filter(pk=stale.pk).update(
+        def interleave(query, **updates):
+            nonlocal interleaved
+            if query.model is News and 'content' in updates and not interleaved:
+                interleaved = True
+                original_update(News.objects.filter(pk=news.pk),
                     full_content='Concurrent body', full_content_zh='并发译文',
                     full_content_fetch_status='success',
                     suggested_questions=['Concurrent question'],
                 )
-            return stale
+            return original_update(query, **updates)
 
         data['content'] = 'Short'
         data['publish_time'] = None
-        with patch.object(QuerySet, 'first', interleave):
+        with patch.object(QuerySet, 'update', interleave):
             pipelines._save_item_sync(data)
+        assert interleaved
     news.refresh_from_db()
     assert news.content == 'Short'
     assert news.publish_time == original_time

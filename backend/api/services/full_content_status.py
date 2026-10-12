@@ -10,6 +10,10 @@ claim timestamp, preventing a worker with an expired lease from saving late.
 from __future__ import annotations
 
 import logging
+import hashlib
+from dataclasses import dataclass
+
+from api.models import News
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -84,191 +88,272 @@ def trimmed_text_expression(field_name: str):
     return Coalesce(Trim(expression), Value(''), output_field=TextField())
 
 
-def claim_fetch(news: News, *, force: bool = False) -> bool:
-    """Atomically claim one full-content fetch for this article.
+@dataclass(frozen=True)
+class FetchLease:
+    news_id: int
+    claimed_at: datetime
+    expected_url: str
+    expected_revision: int
 
-    A fresh ``fetching`` timestamp acts as a short lease. Concurrent callers
-    attach to that task instead of issuing another outbound fetch; stale leases
-    can be reclaimed after a worker exits unexpectedly.
-    """
+
+@dataclass(frozen=True)
+class ContentCommit:
+    outcome: str
+    reason: str = ''
+    changed: bool = False
+
+    @property
+    def saved(self):
+        return self.outcome in {'committed', 'noop'}
+
+
+def _owned_query(news):
+    lease = getattr(news, '_full_content_snapshot', None)
+    if not lease:
+        return news.__class__.objects.none()
+    return news.__class__.objects.filter(
+        pk=lease.news_id, url=lease.expected_url,
+        full_content_revision=lease.expected_revision,
+        full_content_fetch_status='fetching', last_full_content_attempt=lease.claimed_at,
+    )
+
+
+def enqueue_fetch(news, *, force=False, priority=0):
+    """Persist one task intent; duplicates and force preserve leases/cooldowns."""
+    from api.services.source_policy import policy_for_url
+    from api.services.article_fetcher.site_rules import get_site_rule
+    from api.services.article_identity import InvalidIdentity, normalize_article_url
+    try:
+        normalize_article_url(news.url)
+    except InvalidIdentity:
+        return 'rejected'
+    policy = policy_for_url(news.url)
+    if ((policy and (policy.unsupported_reason or not policy.html_allowed)) or
+            (not policy and not get_site_rule(news.url))):
+        return 'rejected'
+    if has_full_content(news) and not force:
+        return 'cached'
+    now = tz_now()
+    query = news.__class__.objects.filter(pk=news.pk, url=news.url, full_content_revision=news.full_content_revision)
+    # Already scheduled tasks, terminal policy blocks and valid leases are not
+    # reset by repeated user requests. Source fixes need an explicit new cycle.
+    if news.full_content_fetch_status in {'blocked', 'unsupported'}:
+        return 'rejected'
+    if news.full_content_next_attempt_at is not None or news.full_content_fetch_status == 'fetching':
+        return 'reused'
+    updated = query.filter(full_content_next_attempt_at__isnull=True).exclude(full_content_fetch_status='fetching').update(
+        full_content_fetch_status='queued', full_content_next_attempt_at=now,
+        full_content_priority=max(-10, min(10, priority)), full_content_retry_count=0,
+        full_content_error_code='', full_content_fetch_error='',
+    )
+    news.refresh_from_db()
+    return 'queued' if updated else 'reused'
+
+
+def claim_fetch(news: News, *, force: bool = False) -> FetchLease | None:
+    """Claim only scheduled, due work, fenced by its request-before snapshot."""
+    from api.services.source_policy import policy_for_url
+    from api.services.article_fetcher.site_rules import get_site_rule
+    from api.services.article_identity import InvalidIdentity, normalize_article_url
+    try:
+        normalize_article_url(news.url)
+    except InvalidIdentity:
+        return None
+    policy = policy_for_url(news.url)
+    if (policy and (policy.unsupported_reason or not policy.html_allowed)) or (not policy and not get_site_rule(news.url)):
+        return None
     now = tz_now()
     stale_before = now - FETCH_IN_PROGRESS_TTL
-    query = news.__class__.objects.filter(pk=news.pk).annotate(
-        _trimmed_body=trimmed_text_expression('full_content'),
-    )
-    if not force:
-        query = query.filter(_trimmed_body='')
-    active_lease = Q(full_content_fetch_status='fetching') & Q(
-        last_full_content_attempt__gte=stale_before,
-    )
-    claimed = query.exclude(active_lease).update(
-        full_content_fetch_status='fetching',
-        full_content_fetch_error='',
-        last_full_content_attempt=now,
+    due = Q(full_content_next_attempt_at__lte=now) & Q(full_content_fetch_status__in=['queued', 'rate_limited', 'network_error', 'failed'])
+    stale = Q(full_content_fetch_status='fetching') & (Q(last_full_content_attempt__lt=stale_before) | Q(last_full_content_attempt__isnull=True))
+    claimed = news.__class__.objects.filter(
+        Q(due) | Q(stale), pk=news.pk, url=news.url,
+        full_content_revision=news.full_content_revision, full_content_retry_count__lt=5,
+    ).update(
+        full_content_fetch_status='fetching', full_content_fetch_error='',
+        full_content_error_code='', last_full_content_attempt=now,
     ) == 1
-    # Keep the claimed timestamp on this in-memory instance as a fencing token.
-    # Completion writes must still own this exact lease after the network call.
+    snapshot = FetchLease(news.pk, now, news.url, news.full_content_revision) if claimed else None
+    news._full_content_snapshot = snapshot
     news._full_content_fetch_claimed = True
     news._full_content_fetch_lease = now if claimed else None
-    return claimed
+    return snapshot
 
 
-def release_fetch_claim(news: News) -> bool:
-    """Release an owned fetch lease without recording a fetch failure."""
-    if not getattr(news, '_full_content_fetch_claimed', False):
-        return False
-    lease = getattr(news, '_full_content_fetch_lease', None)
-    if lease is None:
-        return False
+def owns_fetch(news) -> bool:
+    return _owned_query(news).exists()
 
-    released = news.__class__.objects.filter(
-        pk=news.pk,
-        full_content_fetch_status='fetching',
-        last_full_content_attempt=lease,
-    ).update(full_content_fetch_status='pending') == 1
+
+def release_fetch_claim(news: News, *, next_attempt_at=None) -> bool:
+    """Cancellation preserves the durable task; never releases someone else's lease."""
+    when = max(tz_now(), next_attempt_at or tz_now(), news.full_content_next_attempt_at or tz_now())
+    released = _owned_query(news).update(
+        full_content_fetch_status='queued', full_content_next_attempt_at=when,
+    ) == 1
+    news._full_content_snapshot = None
     news._full_content_fetch_lease = None
-    if not released:
-        news.refresh_from_db()
-        return False
-    news.full_content_fetch_status = 'pending'
-    return True
+    news.refresh_from_db()
+    return released
 
 
-def mark_fetching(news: News) -> None:
-    """Mark that a full-content fetch attempt has started."""
-    news.full_content_fetch_status = 'fetching'
-    news.full_content_fetch_error = ''
-    news.last_full_content_attempt = tz_now()
-    news.save(
-        update_fields=[
-            'full_content_fetch_status',
-            'full_content_fetch_error',
-            'last_full_content_attempt',
-        ],
+def recover_stale_fetches():
+    now = tz_now()
+    stale = Q(last_full_content_attempt__lt=now - FETCH_IN_PROGRESS_TTL) | Q(last_full_content_attempt__isnull=True)
+    # Preserve an existing future retry time; recovering a process is not a retry.
+    query = News.objects.filter(stale, full_content_fetch_status='fetching')
+    immediate = query.filter(Q(full_content_next_attempt_at__isnull=True) | Q(full_content_next_attempt_at__lte=now)).update(
+        full_content_fetch_status='queued', full_content_next_attempt_at=now,
     )
+    return immediate + query.filter(full_content_next_attempt_at__gt=now).update(full_content_fetch_status='queued')
 
 
-def mark_success(
-    news: News,
-    result: FetchResult,
-    *,
-    full_content: str | None = None,
-    full_content_fetched_at: datetime | None = None,
-    full_content_backfill_source: str | None = None,
-    full_content_backfill_at: datetime | None = None,
-) -> bool:
-    """Record a successful fetch and optionally store its body in the same write.
+def mark_fetching(news: News):
+    # Compatibility name, not an unfenced write path.
+    return claim_fetch(news)
 
-    When ``news`` came from :func:`claim_fetch`, the update is fenced by the
-    lease timestamp. A worker whose lease expired while it was fetching cannot
-    overwrite a newer worker's body or success metadata. If the stored body
-    changes, its generic Chinese translation is invalidated atomically.
-    """
-    completed_at = tz_now()
-    updates = {
-        'full_content_fetch_status': 'success',
-        'full_content_fetch_error': '',
-        'full_content_fetch_provider': result.provider,
-        'full_content_quality_score': (
-            result.quality_score if result.quality_score > 0 else None
-        ),
-        'last_full_content_attempt': completed_at,
+
+def _stable_provenance(provenance):
+    keys = ('provider', 'source_key', 'source_item_id', 'target_url', 'body_field',
+            'source_version', 'source_modified_at', 'body_sha256', 'validator_version')
+    return {key: provenance.get(key) for key in keys}
+
+
+def commit_candidate(news, candidate, *, provider='', lease: FetchLease | None = None, summary=None, quality_score=1.0, backfill_source=None, backfill_at=None):
+    """The only body write: validate, compare upstream evidence, URL/revision/lease CAS."""
+    from api.services.article_fetcher.validators import validate_candidate, VALIDATOR_VERSION
+    from api.services.article_fetcher.types import FullContentCandidate
+    if not isinstance(candidate, FullContentCandidate):
+        return ContentCommit('rejected', 'invalid_identity')
+    expected_url = lease.expected_url if lease else news.url
+    expected_revision = lease.expected_revision if lease else news.full_content_revision
+    if candidate.expected_revision is not None and candidate.expected_revision != expected_revision:
+        return ContentCommit('conflict', 'persistence_conflict')
+    query = news.__class__.objects.filter(pk=news.pk, url=expected_url, full_content_revision=expected_revision)
+    if lease:
+        query = query.filter(full_content_fetch_status='fetching', last_full_content_attempt=lease.claimed_at)
+    current = query.first()
+    if current is None:
+        return ContentCommit('conflict', 'persistence_conflict')
+    identities = current.source_items.filter(source_key=candidate.source_key)
+    if identities.exists() and not identities.filter(upstream_id=candidate.source_item_id).exists():
+        return ContentCommit('rejected', 'body_mismatch')
+    from api.services.source_policy import POLICIES
+    candidate_policy = POLICIES.get(candidate.source_key)
+    structural_binding = identities.filter(upstream_id=candidate.source_item_id).exists()
+    title = current.title
+    if candidate_policy and current.source.name != candidate_policy.name and structural_binding:
+        # HN may edit the publisher's headline. Exact official ID/URL binding
+        # takes precedence over an aggregator's auxiliary title.
+        title = ''
+    validation = validate_candidate(candidate, expected_url=expected_url, expected_title=title, summary=summary)
+    if not validation.ok:
+        return ContentCommit('rejected', validation.error_code)
+    body = validation.markdown
+    body_hash = hashlib.sha256(body.encode('utf-8')).hexdigest()
+    modified = candidate.source_modified_at.isoformat() if candidate.source_modified_at else None
+    provenance = {
+        'provider': provider or candidate.source_key,
+        'source_key': candidate.source_key, 'source_item_id': candidate.source_item_id,
+        'target_url': expected_url, 'body_field': candidate.body_field,
+        'source_version': candidate.source_version, 'source_modified_at': modified,
+        'body_sha256': body_hash, 'validator_version': VALIDATOR_VERSION,
     }
-    body_changed = full_content is not None and full_content != news.full_content
-    if full_content is not None:
-        updates['full_content'] = full_content
-        updates['full_content_fetched_at'] = full_content_fetched_at or completed_at
-        if body_changed:
-            # A translation is valid only for the source body it was made from.
-            # Keep it on fetch failures and unchanged refreshes; invalidate it
-            # atomically with a successful body change.
-            updates['full_content_zh'] = ''
-            updates['full_content_zh_fetched_at'] = None
-    if full_content_backfill_source is not None:
-        updates['full_content_backfill_source'] = full_content_backfill_source
-    if full_content_backfill_at is not None:
-        updates['full_content_backfill_at'] = full_content_backfill_at
+    old = current.full_content_provenance or {}
+    same_body = body == current.full_content
+    comparable = False
+    newer = False
+    if old.get('source_key') == candidate.source_key and old.get('source_item_id') == candidate.source_item_id:
+        previous_modified = old.get('source_modified_at')
+        if previous_modified and modified:
+            previous = datetime.fromisoformat(previous_modified)
+            comparable = True
+            newer = candidate.source_modified_at > previous
+            if candidate.source_modified_at < previous or (candidate.source_modified_at == previous and not same_body):
+                return ContentCommit('rejected', 'source_version_conflict')
+        # Opaque version tokens establish equality only, never ordering.
+        if old.get('source_version') and candidate.source_version == old['source_version'] and not same_body and not newer:
+            return ContentCommit('rejected', 'source_version_conflict')
+    if has_full_content(current) and not same_body and not lease and not (comparable and newer):
+        return ContentCommit('rejected', 'source_version_conflict')
+    changed = not same_body or current.full_content_state != 'complete' or _stable_provenance(old) != _stable_provenance(provenance)
+    completed = tz_now()
+    updates = {}
+    if changed:
+        provenance['accepted_at'] = completed.isoformat()
+        updates.update(
+            full_content=body, full_content_state='complete',
+            full_content_revision=F('full_content_revision') + 1,
+            full_content_provenance=provenance, full_content_quality_score=quality_score,
+            full_content_fetched_at=completed,
+        )
+        if not same_body:
+            updates.update(full_content_zh='', full_content_zh_fetched_at=None,
+                           suggested_questions=[], suggested_questions_generated_at=None)
+    if changed or lease:
+        updates.update(
+            full_content_fetch_status='success', full_content_fetch_error='',
+            full_content_error_code='', full_content_next_attempt_at=None,
+            full_content_retry_count=0, full_content_fetch_provider=provider or candidate.source_key,
+        )
+        if lease:
+            updates['last_full_content_attempt'] = completed
+        if backfill_source is not None:
+            updates['full_content_backfill_source'] = backfill_source
+        if backfill_at is not None:
+            updates['full_content_backfill_at'] = backfill_at
+        saved = query.update(**updates) == 1
+    else:
+        # The existence check is also fenced; a no-op cannot acknowledge stale data.
+        saved = query.exists()
+    news.refresh_from_db()
+    return ContentCommit('committed' if changed and saved else 'noop' if saved else 'conflict',
+                         '' if saved else 'persistence_conflict', changed and saved)
 
-    lease = getattr(news, '_full_content_fetch_lease', None)
-    if getattr(news, '_full_content_fetch_claimed', False):
-        if lease is None:
-            return False
-        saved = news.__class__.objects.filter(
-            pk=news.pk,
-            full_content_fetch_status='fetching',
-            last_full_content_attempt=lease,
-        ).update(**updates) == 1
+
+def mark_success(news: News, result: FetchResult, *, full_content=None, full_content_fetched_at=None,
+                 full_content_backfill_source=None, full_content_backfill_at=None) -> bool:
+    lease = getattr(news, '_full_content_snapshot', None)
+    if not lease or not result.ok or result.candidate is None:
+        return False
+    if full_content is not None and full_content != result.markdown:
+        return False
+    committed = commit_candidate(
+        news, result.candidate, provider=result.provider, lease=lease,
+        quality_score=result.quality_score or 1.0,
+        backfill_source=full_content_backfill_source, backfill_at=full_content_backfill_at,
+    )
+    if committed.saved:
+        news._full_content_snapshot = None
         news._full_content_fetch_lease = None
-        if not saved:
-            news.refresh_from_db()
-            return False
-        for field, value in updates.items():
-            setattr(news, field, value)
-        return True
-
-    for field, value in updates.items():
-        setattr(news, field, value)
-    news.save(update_fields=list(updates))
-    return True
+    return committed.saved
 
 
-def mark_failed(
-    news: News,
-    error: Exception | str,
-    status: str | None = None,
-    provider: str = '',
-) -> bool:
-    """Record a failed full-content fetch attempt.
-
-    Increments retry_count.  Uses the classified status if provided,
-    otherwise defaults to 'failed'.
-    """
-    error_text = fetch_error_diagnostic(error)
-
-    if status is None:
-        status = classify_fetch_error(error)
-    if not provider:
-        provider = fetch_error_provider(error)
-
+def mark_failed(news: News, error, status=None, provider='') -> bool:
+    status = status or classify_fetch_error(error)
+    provider = provider or fetch_error_provider(error)
+    code = getattr(error, 'error_code', '') or fetch_failure_code(error)
+    retry_at = getattr(error, 'retry_after_at', None)
+    failures = news.full_content_retry_count + 1
+    retryable = status in {'network_error', 'failed', 'rate_limited'} and failures < 5
     updates = {
-        'full_content_fetch_status': status,
-        'full_content_fetch_error': error_text,
-        'full_content_retry_count': F('full_content_retry_count') + 1,
+        'full_content_fetch_status': status, 'full_content_fetch_error': fetch_error_diagnostic(error),
+        'full_content_error_code': code, 'full_content_retry_count': F('full_content_retry_count') + 1,
         'last_full_content_attempt': tz_now(),
+        'full_content_next_attempt_at': (retry_at or tz_now() + timedelta(seconds=min(3600, 60 * 2 ** (failures - 1)))) if retryable else None,
     }
     if provider:
         updates['full_content_fetch_provider'] = provider
+    saved = _owned_query(news).update(**updates) == 1
+    news._full_content_snapshot = None
+    news._full_content_fetch_lease = None
+    news.refresh_from_db()
+    return saved
 
-    lease = getattr(news, '_full_content_fetch_lease', None)
-    if getattr(news, '_full_content_fetch_claimed', False):
-        if lease is None:
-            return False
-        saved = news.__class__.objects.filter(
-            pk=news.pk,
-            full_content_fetch_status='fetching',
-            last_full_content_attempt=lease,
-        ).update(**updates) == 1
-        news._full_content_fetch_lease = None
-        if not saved:
-            news.refresh_from_db()
-            return False
-        news.refresh_from_db()
-        return True
 
-    news.full_content_fetch_status = status
-    news.full_content_fetch_error = error_text
-    if provider:
-        news.full_content_fetch_provider = provider
-    news.full_content_retry_count = news.full_content_retry_count + 1
-    news.last_full_content_attempt = updates['last_full_content_attempt']
-    news.save(update_fields=[
-        'full_content_fetch_status',
-        'full_content_fetch_error',
-        'full_content_fetch_provider',
-        'full_content_retry_count',
-        'last_full_content_attempt',
-    ])
-    return True
+def save_suggested_questions(news, questions, *, expected_revision):
+    return news.__class__.objects.filter(pk=news.pk, url=news.url, full_content_revision=expected_revision).update(
+        suggested_questions=questions, suggested_questions_generated_at=tz_now(),
+    ) == 1
 
 
 def classify_fetch_error(error_or_result) -> str:
@@ -316,3 +401,19 @@ def filter_readable_full_content(queryset):
     return queryset.annotate(
         _readable_body=trimmed_text_expression('full_content'),
     ).filter(full_content_state__in=['legacy', 'complete']).exclude(_readable_body='')
+
+
+def correct_article_identity(news, new_url, *, expected_url, expected_revision):
+    """Quarantine old text and fence every old worker when identity changes."""
+    from api.services.article_identity import normalize_article_url
+    new_url = normalize_article_url(new_url)
+    if new_url == expected_url:
+        return True
+    saved = news.__class__.objects.filter(pk=news.pk, url=expected_url, full_content_revision=expected_revision).update(
+        url=new_url, full_content_revision=F('full_content_revision') + 1,
+        full_content_state='missing', full_content_fetch_status='pending',
+        full_content_next_attempt_at=None, full_content_error_code='identity_changed',
+        suggested_questions=[], suggested_questions_generated_at=None,
+    ) == 1
+    news.refresh_from_db()
+    return saved
