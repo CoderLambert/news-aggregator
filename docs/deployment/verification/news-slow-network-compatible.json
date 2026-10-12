@@ -1,0 +1,41 @@
+{
+  "legacy_bytes": 513599,
+  "summary_bytes": 37599,
+  "nginx_gzip_bytes": 1151,
+  "gzip_round_trip": "PASS",
+  "detail_sse_private_uncompressed": "PASS",
+  "legacy_fixture_10s_identity": {
+    "outcome": "FAILURE",
+    "ms": 10001,
+    "code": "ECONNABORTED",
+    "message": "timeout of 10000ms exceeded"
+  },
+  "default_list_10s_identity": {
+    "outcome": "SUCCESS",
+    "ms": 1936,
+    "count": 20,
+    "hasBody": false
+  },
+  "summary_30s_identity": {
+    "outcome": "SUCCESS",
+    "ms": 1977,
+    "count": 20,
+    "hasBody": false
+  },
+  "summary_30s_gzip": {
+    "outcome": "SUCCESS",
+    "ms": 219,
+    "count": 20,
+    "hasBody": false
+  },
+  "summary_30s_delay12": {
+    "outcome": "SUCCESS",
+    "ms": 12158,
+    "count": 20,
+    "hasBody": false
+  },
+  "model_preload_load_inference_guards": "PASS: zero calls",
+  "api_migration_leaf": "0032_research_queued_input",
+  "migration_state": "PASS: migrations applied through 0032; no model changes",
+  "baseline_fixture": "Former list reconstructed from synthetic full bodies; test-only endpoint"
+}

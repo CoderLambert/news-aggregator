@@ -14,6 +14,7 @@ from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError as ApiValidationError
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django_filters import rest_framework as django_filters
 from .models import Category, Source, News, ChatSession, BlockedNews, ProviderComparison
@@ -230,6 +231,9 @@ class NewsListView(generics.ListAPIView):
         return qs
 
     def list(self, request, *args, **kwargs):
+        representation = request.query_params.get('representation', 'summary')
+        if representation != 'summary':
+            raise ApiValidationError({'representation': 'Only summary is supported; use the detail endpoint for complete content.'})
         search_query = request.query_params.get('search', '').strip()
         mode = request.query_params.get('mode', 'keyword').strip()
 

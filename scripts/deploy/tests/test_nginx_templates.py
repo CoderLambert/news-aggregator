@@ -178,5 +178,18 @@ def test_only_approved_sse_paths_disable_nginx_buffering_and_compression():
 
     assert production.count('proxy_buffering off;') == len(sse_markers)
     assert production.count('proxy_cache off;') == len(sse_markers)
-    assert production.count('gzip off;') == len(sse_markers)
+    assert production.count('gzip off;') == len(sse_markers) + 1
     assert '/events/' not in production
+
+
+def test_json_compression_is_scoped_to_exact_public_news_list():
+    production = (NGINX_DIR / 'news.lambert.host.conf').read_text()
+    listing = _block(production, 'location = /api/news/ {')
+    assert production.count('gzip on;') == 1
+    assert 'gzip_types application/json;' in listing
+    assert 'gzip_vary on;' in listing
+    assert 'gzip_comp_level 5;' in listing
+    assert 'gzip_min_length 1024;' in listing
+    assert 'include /etc/nginx/snippets/newshub-proxy.conf;' in listing
+    assert 'add_header Cache-Control "no-store" always;' in listing
+    assert 'gzip on;' not in _block(production, 'location /api/ {')
