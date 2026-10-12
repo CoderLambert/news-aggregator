@@ -81,18 +81,18 @@ def test_production_open_url_routes_to_safe_transport_and_ignores_supplied_conte
     safe_open.assert_called_once_with(request, timeout=9)
 
 
-def test_development_open_url_preserves_existing_urllib_mock_contract(monkeypatch):
+def test_development_open_url_also_uses_safe_budgeted_transport(monkeypatch):
     request = providers.urllib.request.Request('https://example.test/article')
     context = ssl.create_default_context()
     result = object()
     urlopen = Mock(return_value=result)
-    monkeypatch.setattr(providers.urllib.request, 'urlopen', urlopen)
+    monkeypatch.setattr(providers, 'safe_urlopen', urlopen)
 
     with override_settings(DJANGO_ENV='development'):
         actual = providers._open_url(request, timeout=7, context=context)
 
     assert actual is result
-    urlopen.assert_called_once_with(request, timeout=7, context=context)
+    urlopen.assert_called_once_with(request, timeout=7)
 
 
 def test_all_production_direct_providers_share_safe_transport(monkeypatch):
@@ -150,7 +150,10 @@ def test_production_disables_jina_and_subprocess_before_any_external_action(monk
     assert names.index('trusted_news_jina') > names.index('scrapy_http')
 
 
+@pytest.mark.django_db
 def test_production_venturebeat_jina_uses_safe_transport_and_validates_body(monkeypatch):
+    from api.models import JinaFallbackPolicy
+    JinaFallbackPolicy.objects.update_or_create(domain='venturebeat.com', defaults={'enabled': True})
     title = "Enterprise AI's real risk isn't autonomous agents. It's the complexity between them."
     body = (
         f'Title: {title}\nURL Source: https://venturebeat.com/ai/example\n'

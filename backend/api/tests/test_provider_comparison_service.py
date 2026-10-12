@@ -101,7 +101,8 @@ def test_compare_providers_persists_real_provider_results_without_touching_news(
     assert success.quality_score == 0.91
     assert success.content_length == len('REAL MARKDOWN FROM PROVIDER')
     assert success.extractor == 'mock_extractor'
-    assert success.metadata == {'note': 'ok'}
+    assert success.metadata['note'] == 'ok'
+    assert success.metadata['physical_requests'] == 0
 
     failure = ProviderComparison.objects.get(provider='failing_provider')
     assert failure.ok is False

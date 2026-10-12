@@ -6,9 +6,9 @@ from asgiref.sync import sync_to_async
 from django.utils import timezone
 from django.utils.timezone import now as tz_now
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'backend'))
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'newsaggregator.settings')
-django.setup()
+from news_crawler.django_support import initialize_django
+
+initialize_django()
 
 from django.db import close_old_connections
 from api.models import Category, News, Source

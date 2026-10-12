@@ -10,11 +10,14 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from concurrent.futures import Future, TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from email.message import Message
 from typing import Any
 from urllib.parse import quote, urljoin, urlsplit
+
+from api.services.request_budget import BudgetDeferred, claim_budget, confirm_permit, record_response, release_budget, scope_intervals
+from .execution import execution_scope, current_execution, ExecutionStopped
 
 MAX_URL_LENGTH = 8_192
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
@@ -24,20 +27,46 @@ MAX_REDIRECTS = 3
 MAX_TOTAL_SECONDS = 15.0
 _READ_CHUNK_BYTES = 64 * 1024
 _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
-_DNS_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix='safe-http-dns')
 _DNS_SLOTS = threading.BoundedSemaphore(2)
 
 AddrInfo = tuple[int, int, int, str, tuple[Any, ...]]
 
 
 class UnsafeURL(ValueError):
-    """A URL or resolved address did not meet the public-fetch policy."""
+    """A bounded transport failure with a stable control code."""
+
+    def __init__(self, message):
+        super().__init__(message)
+        self.http_status = None
+        self.scope_keys = ()
+        self.retry_after_at = None
+        if message in {'Safe HTTP request deadline exceeded', 'Public DNS resolution deadline exceeded'}:
+            self.error_code, self.retryable = 'network_timeout', True
+        elif message == 'Public DNS resolver busy':
+            from django.utils import timezone
+            from datetime import timedelta
+            self.error_code, self.retryable = 'budget_deferred', True
+            self.retry_after_at = timezone.now() + timedelta(seconds=1)
+        elif message in {'HTTP response exceeds size limit', 'Compressed HTTP responses are not supported', 'Invalid HTTP response length'}:
+            self.error_code, self.retryable = 'unsupported', False
+        elif message in {'Safe HTTP request failed', 'Safe HTTP response read failed', 'Safe HTTPS connection failed',
+                         'Unable to resolve public URL host', 'Unable to connect to validated public address'}:
+            self.error_code, self.retryable = 'network_error', True
+        else:
+            self.error_code, self.retryable = 'invalid_identity', False
 
 
 class SafeHTTPStatusError(urllib.error.HTTPError):
     """HTTPError-compatible status failure without reflecting request secrets."""
 
-    def __init__(self, code: int, headers: Message, body: bytes):
+    def __init__(self, code: int, headers: Message, body: bytes, *, retry_after_at=None, scope_keys=()):
+        self.http_status = code
+        self.error_code = ('rate_limited' if retry_after_at or code == 429 else
+                           'auth_required' if code == 401 else 'access_blocked' if code == 403 else
+                           'not_found' if code in {404, 410} else 'upstream_5xx' if code >= 500 else 'unsupported')
+        self.retry_after_at = retry_after_at
+        self.retryable = self.error_code in {'rate_limited', 'upstream_5xx'}
+        self.scope_keys = tuple(scope_keys)
         super().__init__('[redacted]', code, 'HTTP error', headers, io.BytesIO(body))
 
     def __str__(self) -> str:
@@ -116,15 +145,18 @@ def _resolve_addrinfos(host: str, port: int, timeout: float) -> list[AddrInfo]:
         raise _failure('Safe HTTP request deadline exceeded')
     if not _DNS_SLOTS.acquire(blocking=False):
         raise _failure('Public DNS resolver busy')
+    future = Future()
+    def resolve():
+        try:
+            result = socket.getaddrinfo(host, port, family=socket.AF_UNSPEC,
+                                        type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP)
+            future.set_result(result)
+        except BaseException:
+            future.set_exception(RuntimeError('public_dns_failed'))
     try:
-        future = _DNS_EXECUTOR.submit(
-            socket.getaddrinfo,
-            host,
-            port,
-            family=socket.AF_UNSPEC,
-            type=socket.SOCK_STREAM,
-            proto=socket.IPPROTO_TCP,
-        )
+        # OS resolver calls cannot be cancelled. Daemon threads remain bounded
+        # by the two slots and cannot hold a terminating worker past its grace.
+        threading.Thread(target=resolve, daemon=True, name='safe-http-dns').start()
     except RuntimeError:
         _DNS_SLOTS.release()
         raise _failure('Public DNS resolver busy') from None
@@ -489,6 +521,8 @@ def _fetch_one(
     deadline: float,
     drop_credentials: bool,
     wire_budget: _WireBudget,
+    response_observer=None,
+    before_send=None,
 ) -> tuple[int, Message, bytes]:
     connection = _connect_pinned(target, deadline)
     transport: _SocketFacade | None = None
@@ -520,11 +554,16 @@ def _fetch_one(
         if request_body is not None and not isinstance(request_body, bytes):
             request_body = bytes(request_body)
         transport.settimeout(_remaining(deadline))
+        if before_send is not None:
+            before_send()
         http_connection.endheaders(request_body)
         transport.settimeout(_remaining(deadline))
         response = http_connection.getresponse()
         try:
-            response_body = _read_body(response, transport, deadline)
+            cooling = response_observer(response.status, response.headers) if response_observer else None
+            # Cooling is committed from headers before body processing. An
+            # oversized/compressed error page cannot hide a 429 from the budget.
+            response_body = b'' if cooling is not None else _read_body(response, transport, deadline)
             return response.status, response.headers, response_body
         finally:
             response.close()
@@ -539,7 +578,7 @@ def _fetch_one(
             connection.close()
 
 
-def safe_urlopen(
+def _safe_urlopen(
     request: urllib.request.Request | str,
     timeout: float | None = None,
 ) -> CachedResponse:
@@ -551,12 +590,15 @@ def safe_urlopen(
     if request.get_method() != 'GET' or request.data is not None:
         raise _failure('Only GET requests without a body are supported')
 
-    deadline = _deadline(timeout)
+    execution = current_execution.get()
+    deadline = min(_deadline(timeout), execution.deadline)
     current_url = request.full_url
     current_request = request
     redirect_count = 0
     original_origin: tuple[str, str, int] | None = None
     wire_budget = _WireBudget()
+    reader_origin = None
+    reader_scopes = {}
 
     while True:
         target = validate_public_url(current_url, timeout=_remaining(deadline))
@@ -564,13 +606,49 @@ def safe_urlopen(
         origin = (target.scheme, target.host.lower(), target.port)
         if original_origin is None:
             original_origin = origin
-        status, headers, response_body = _fetch_one(
-            current_request,
-            target,
-            deadline,
-            drop_credentials=origin != original_origin,
-            wire_budget=wire_budget,
-        )
+        execution.check()
+        if execution.requests_remaining <= 0:
+            raise ExecutionStopped('request_limit')
+        logical = reader_origin or execution.logical_url
+        if target.host.lower() == 'r.jina.ai':
+            reader_origin = urlsplit(current_url).path.lstrip('/')
+            logical = reader_origin
+        scopes = scope_intervals(current_url, logical_url=logical, authorization=current_request.get_header('Authorization'))
+        if target.host.lower() == 'r.jina.ai' and not reader_scopes:
+            reader_scopes = dict(scopes)
+        scopes = {**reader_scopes, **scopes}
+        while True:
+            try:
+                permit = claim_budget(scopes, download_seconds=min(MAX_TOTAL_SECONDS, _remaining(deadline)))
+                break
+            except BudgetDeferred as deferred:
+                from django.utils import timezone
+                delay = max(0, (deferred.retry_after_at - timezone.now()).total_seconds())
+                if delay > 3.1 or delay >= _remaining(deadline):
+                    raise
+                execution.check()
+                time.sleep(max(0.01, delay))
+        try:
+            confirm_permit(permit, download_seconds=min(MAX_TOTAL_SECONDS, _remaining(deadline)))
+            def before_send():
+                execution.check()
+                confirm_permit(permit, download_seconds=min(MAX_TOTAL_SECONDS, _remaining(deadline)))
+                _remaining(deadline)
+                execution.charge_request()
+            retry_at = None
+            def observe_response(status, headers):
+                nonlocal retry_at
+                retry_at = record_response(permit, status, headers, host=target.host.lower())
+                return retry_at
+            status, headers, response_body = _fetch_one(
+                current_request, target, deadline,
+                drop_credentials=origin != original_origin, wire_budget=wire_budget,
+                response_observer=observe_response, before_send=before_send,
+            )
+        finally:
+            release_budget(permit)
+        if retry_at is not None:
+            raise SafeHTTPStatusError(status, headers, response_body, retry_after_at=retry_at, scope_keys=scopes)
         if status in _REDIRECT_STATUSES:
             location = headers.get('Location')
             if not location:
@@ -594,5 +672,11 @@ def safe_urlopen(
             current_url = next_url
             continue
         if status >= 400:
-            raise SafeHTTPStatusError(status, headers, response_body)
+            raise SafeHTTPStatusError(status, headers, response_body, scope_keys=scopes)
         return CachedResponse(current_url, status, headers, response_body)
+
+
+
+def safe_urlopen(request: urllib.request.Request | str, timeout: float | None = None) -> CachedResponse:
+    with execution_scope():
+        return _safe_urlopen(request, timeout=timeout)

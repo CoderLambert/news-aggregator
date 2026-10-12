@@ -1011,37 +1011,27 @@ def _tool_fetch_webpage(url: str, execution_guard=None) -> dict:
     allowed, reason = _is_url_allowed(url)
     guard()
     if not allowed:
-        logger.warning('SSRF blocked: %s (%s)', url, reason)
+        logger.warning('SSRF blocked reason=%s', reason)
         return {'url': url, 'error': f'URL not allowed: {reason}', 'content': ''}
 
     try:
-        jina_url = f'https://r.jina.ai/{url}'
-        headers = {
-            'Accept': 'text/plain',
-            'User-Agent': 'Mozilla/5.0',
-        }
-        import os
-        jina_key = os.environ.get('JINA_API_KEY', '')
-        if jina_key:
-            headers['Authorization'] = f'Bearer {jina_key}'
-
-        req = urllib.request.Request(jina_url, headers=headers)
+        from api.services.article_fetcher.execution import execution_scope
+        from api.services.article_fetcher.providers import TrustedNewsJinaProvider
+        with execution_scope(guard):
+            result = TrustedNewsJinaProvider().fetch(url)
         guard()
-        with urllib.request.urlopen(
-            req, timeout=30, context=ssl.create_default_context()
-        ) as resp:
-            content = resp.read().decode('utf-8')
-
-        return {
-            'url': url,
-            'content': content[:6000],
-            'length': len(content),
-        }
-
-    except Exception as e:
+        if not result.ok:
+            return {'url': url, 'content': '', 'scope': 'excerpt',
+                    'error_code': result.error_code or result.error, 'error': result.error}
+        return {'url': url, 'content': result.markdown[:6000], 'length': len(result.markdown), 'scope': 'excerpt'}
+    except Exception as error:
         guard()
-        logger.warning('Fetch webpage failed for %s: %s', url, e)
-        return {'url': url, 'error': str(e), 'content': ''}
+        from api.services.article_fetcher.types import fetch_failure_code
+        code = getattr(error, 'error_code', '') or fetch_failure_code(error)
+        logger.warning('Fetch webpage failed code=%s', code)
+        retry_at = getattr(error, 'retry_after_at', None)
+        return {'url': url, 'content': '', 'scope': 'excerpt', 'error': code, 'error_code': code,
+                'next_attempt_at': retry_at.isoformat() if retry_at else None}
 
 
 def _tool_analyze_topic(query: str, depth: str = 'standard', execution_guard=None) -> dict:

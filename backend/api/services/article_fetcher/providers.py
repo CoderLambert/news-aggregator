@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html as html_lib
+import os
 from contextvars import ContextVar
 import json
 import re
@@ -20,7 +21,9 @@ from api.services.content_cleaner import clean_content
 from .extractors import extract_markdown_from_html, html_fragment_to_markdown
 from .safe_http import safe_urlopen
 from .site_rules import get_site_rule, normalize_domain
-from .types import FetchResult
+from .types import FetchResult, transport_failure
+from api.services.request_budget import BudgetDeferred
+from .execution import ExecutionStopped
 from .validators import validate_markdown
 
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
@@ -36,13 +39,11 @@ _research_fetch_guard = ContextVar('research_article_fetch_guard', default=None)
 
 
 def _open_url(request, timeout, context=None):
-    """Use the pinned public transport only in the production runtime."""
+    """Every actual news request uses pinned transport and shared admission."""
     guard = _research_fetch_guard.get()
     if guard is not None:
         guard()
-    if settings.DJANGO_ENV == 'production':
-        return safe_urlopen(request, timeout=timeout)
-    return urllib.request.urlopen(request, timeout=timeout, context=context)
+    return safe_urlopen(request, timeout=timeout)
 
 
 class GitHubReadmeProvider:
@@ -70,11 +71,14 @@ class GitHubReadmeProvider:
             try:
                 markdown = self._download(readme_url)
             except urllib.error.HTTPError as exc:
-                errors.append(f'HTTP {exc.code}: {readme_url}')
+                if exc.code != 404:
+                    return transport_failure(exc, provider=self.name, url=url)
+                errors.append('not_found')
                 continue
+            except (BudgetDeferred, ExecutionStopped):
+                raise
             except Exception as exc:
-                errors.append(str(exc))
-                continue
+                return transport_failure(exc, provider=self.name, url=url)
 
             markdown = clean_content(markdown, url)
             validation = validate_markdown(
@@ -146,8 +150,10 @@ class HackerNewsAPIProvider:
             req = urllib.request.Request(api_url, headers={'Accept': 'application/json', 'User-Agent': USER_AGENT})
             with _open_url(req, timeout=self.timeout, context=ssl.create_default_context()) as resp:
                 payload = json.loads(resp.read().decode('utf-8', errors='replace') or '{}')
+        except (BudgetDeferred, ExecutionStopped):
+            raise
         except Exception as exc:
-            return FetchResult(ok=False, provider=self.name, url=url, error=str(exc))
+            return transport_failure(exc, provider=self.name, url=url)
 
         if not isinstance(payload, dict) or payload.get('deleted') or payload.get('dead'):
             return FetchResult(ok=False, provider=self.name, url=url, error='invalid_hn_item')
@@ -222,8 +228,10 @@ class LeiphoneFeedProvider:
 
         try:
             root = ET.fromstring(self._download())
+        except (BudgetDeferred, ExecutionStopped):
+            raise
         except Exception as exc:
-            return FetchResult(ok=False, provider=self.name, url=url, error=str(exc))
+            return transport_failure(exc, provider=self.name, url=url)
 
         requested_key = _article_url_key(url)
         for item in root.iter():
@@ -299,7 +307,7 @@ class JinaProvider:
 
     def __init__(self, timeout: int = 15, retries: int = 1):
         self.timeout = timeout
-        self.retries = retries
+        self.retries = 0  # Retry scheduling belongs to the persistent task, not each provider.
 
     def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None) -> FetchResult:
         if settings.DJANGO_ENV == 'production':
@@ -313,14 +321,17 @@ class JinaProvider:
         expected_title: str | None = None,
         summary: str | None = None,
     ) -> FetchResult:
+        from api.services.article_fetch_monitor import observe_jina_candidate
+        if not observe_jina_candidate(normalize_domain(url)):
+            return FetchResult(ok=False, provider=self.name, url=url, error='jina_policy_disabled', error_code='unsupported')
         jina_url = f'https://r.jina.ai/{url}'
         last_error: Exception | None = None
         for attempt in range(self.retries + 1):
             try:
-                req = urllib.request.Request(
-                    jina_url,
-                    headers={'Accept': 'text/plain', 'User-Agent': USER_AGENT},
-                )
+                headers = {'Accept': 'text/plain', 'User-Agent': USER_AGENT}
+                if os.environ.get('JINA_API_KEY'):
+                    headers['Authorization'] = 'Bearer ' + os.environ['JINA_API_KEY']
+                req = urllib.request.Request(jina_url, headers=headers)
                 with _open_url(req, timeout=self.timeout, context=ssl.create_default_context()) as resp:
                     text = resp.read().decode('utf-8', errors='replace')
                 markdown_match = re.search(r'Markdown Content:\n([\s\S]+)$', text)
@@ -356,12 +367,13 @@ class JinaProvider:
                     quality_score=validation.score,
                 )
             except urllib.error.HTTPError as exc:
-                return FetchResult(ok=False, provider=self.name, url=url, error=f'HTTP {exc.code}: {exc.reason}')
+                return transport_failure(exc, provider=self.name, url=url)
+            except (BudgetDeferred, ExecutionStopped):
+                raise
             except Exception as exc:
                 last_error = exc
-                if attempt < self.retries:
-                    time.sleep(0.5 * (attempt + 1))
-        return FetchResult(ok=False, provider=self.name, url=url, error=str(last_error or 'unknown error'))
+
+        return transport_failure(last_error or RuntimeError('provider_error'), provider=self.name, url=url)
 
 
 class VentureBeatJinaProvider(JinaProvider):
@@ -388,7 +400,10 @@ class VentureBeatJinaProvider(JinaProvider):
             return FetchResult(ok=False, provider=self.name, url=url, error=error)
         # The article path is sufficient for this fallback. Do not disclose
         # tracking or other query values to the third-party reader service.
-        target_url = parsed._replace(query='', fragment='').geturl()
+        from api.services.article_identity import normalize_article_url
+        target_url = normalize_article_url(url)
+        if urlparse(target_url).query:
+            return FetchResult(ok=False, provider=self.name, url=url, error='reader_query_not_supported', error_code='not_applicable')
         return self._fetch_jina(target_url, expected_title=expected_title, summary=summary)
 
 
@@ -415,10 +430,13 @@ class TrustedNewsJinaProvider(JinaProvider):
             return FetchResult(ok=False, provider=self.name, url=url, error='unsupported_trusted_news_url')
         from api.services.article_fetch_monitor import observe_jina_candidate
         if not observe_jina_candidate(domain):
-            return FetchResult(ok=False, provider=self.name, url=url, error='jina_policy_disabled')
+            return FetchResult(ok=False, provider=self.name, url=url, error='jina_policy_disabled', error_code='unsupported')
         # Never disclose tracking/query values or fragments to the reader
         # service.  The explicitly enabled public article path is sufficient.
-        target_url = parsed._replace(query='', fragment='').geturl()
+        from api.services.article_identity import normalize_article_url
+        target_url = normalize_article_url(url)
+        if urlparse(target_url).query:
+            return FetchResult(ok=False, provider=self.name, url=url, error='reader_query_not_supported', error_code='not_applicable')
         return self._fetch_jina(target_url, expected_title=expected_title, summary=summary)
 
 
@@ -435,7 +453,7 @@ class ScrapyHTTPProvider:
 
     def __init__(self, timeout: int = 20, retries: int = 1):
         self.timeout = timeout
-        self.retries = retries
+        self.retries = 0  # Retry scheduling belongs to the persistent task, not each provider.
 
     def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None) -> FetchResult:
         last_error: Exception | None = None
@@ -473,11 +491,12 @@ class ScrapyHTTPProvider:
                     markdown=markdown,
                     quality_score=validation.score,
                 )
+            except (BudgetDeferred, ExecutionStopped):
+                raise
             except Exception as exc:
                 last_error = exc
-                if attempt < self.retries:
-                    time.sleep(0.5 * (attempt + 1))
-        return FetchResult(ok=False, provider=self.name, url=url, error=str(last_error or 'unknown error'))
+
+        return transport_failure(last_error or RuntimeError('provider_error'), provider=self.name, url=url)
 
     def _download(self, url: str) -> str:
         req = urllib.request.Request(url, headers=DEFAULT_HEADERS)
@@ -520,8 +539,10 @@ class ScrapySubprocessProvider:
             )
         except subprocess.TimeoutExpired:
             return FetchResult(ok=False, provider=self.name, url=url, error='scrapy subprocess timeout')
+        except (BudgetDeferred, ExecutionStopped):
+            raise
         except Exception as exc:
-            return FetchResult(ok=False, provider=self.name, url=url, error=str(exc))
+            return transport_failure(exc, provider=self.name, url=url)
 
         if completed.returncode != 0:
             return FetchResult(
@@ -532,6 +553,8 @@ class ScrapySubprocessProvider:
             )
         try:
             data = json.loads(completed.stdout)
+        except (BudgetDeferred, ExecutionStopped):
+            raise
         except Exception as exc:
             return FetchResult(ok=False, provider=self.name, url=url, error=f'invalid json: {exc}')
 
@@ -624,9 +647,6 @@ def default_providers() -> list:
         GitHubReadmeProvider(),
         LeiphoneFeedProvider(),
     ]
-    if settings.DJANGO_ENV != 'production':
-        providers.extend([JinaProvider(timeout=5, retries=0), ScrapySubprocessProvider()])
     providers.append(ScrapyHTTPProvider())
-    if settings.DJANGO_ENV == 'production':
-        providers.append(TrustedNewsJinaProvider(timeout=12, retries=0))
+    providers.append(TrustedNewsJinaProvider(timeout=12, retries=0))
     return providers

@@ -47,6 +47,11 @@ class FetchResult:
     content_length: int = 0
     extractor: str = ''
     candidate: FullContentCandidate | None = None
+    error_code: str = ''
+    http_status: int | None = None
+    retry_after_at: datetime | None = None
+    retryable: bool = False
+    scope_keys: tuple[str, ...] = ()
 
 
 class ArticleProvider(Protocol):
@@ -60,6 +65,12 @@ class FetchError(Exception):
     def __init__(self, message: str, failures: list[FetchResult] | None = None):
         super().__init__(message)
         self.failures = failures or []
+        control = next((f for f in self.failures if f.error_code in {'rate_limited', 'budget_deferred', 'auth_required', 'access_blocked', 'not_found'}), self.failures[-1] if self.failures else None)
+        self.error_code = control.error_code if control else ''
+        self.http_status = control.http_status if control else None
+        self.retry_after_at = control.retry_after_at if control else None
+        self.retryable = control.retryable if control else False
+        self.scope_keys = control.scope_keys if control else ()
 
     def __str__(self) -> str:
         message = super().__str__()
@@ -75,6 +86,9 @@ def _safe_name(value: str, fallback: str) -> str:
 
 def fetch_failure_code(failure: FetchResult | Exception | str) -> str:
     """Return a bounded, non-sensitive reason code for one provider failure."""
+    code = getattr(failure, 'error_code', '')
+    if isinstance(code, str) and _SAFE_REASON.fullmatch(code):
+        return code
     error = getattr(failure, 'error', '') or str(failure)
     lowered = str(error).strip().lower()
     status_match = _HTTP_STATUS.search(lowered)
@@ -159,3 +173,19 @@ def fetch_error_provider(error: Exception | str) -> str:
     if not failures:
         return ''
     return _safe_name(getattr(failures[-1], 'provider', ''), 'provider')
+
+
+
+def transport_failure(error, *, provider, url=''):
+    status = getattr(error, 'http_status', None) or getattr(error, 'code', None)
+    code = getattr(error, 'error_code', '')
+    if not code:
+        code = ('rate_limited' if status == 429 else 'auth_required' if status == 401 else
+                'access_blocked' if status == 403 else 'not_found' if status in {404, 410} else
+                'upstream_5xx' if status and status >= 500 else
+                'network_timeout' if fetch_failure_code(error) == 'timeout' else 'network_error')
+    return FetchResult(ok=False, provider=provider, url=url, error=fetch_error_diagnostic(error),
+                       error_code=code, http_status=status,
+                       retry_after_at=getattr(error, 'retry_after_at', None),
+                       retryable=code in {'rate_limited', 'upstream_5xx', 'network_timeout', 'network_error'},
+                       scope_keys=tuple(getattr(error, 'scope_keys', ())))

@@ -171,3 +171,14 @@ def test_default_crawler_robots_setting_is_unchanged(monkeypatch):
     importlib.reload(crawler_settings)
     assert crawler_settings.ROBOTSTXT_OBEY is False
     assert crawler_settings.TELNETCONSOLE_ENABLED is True
+
+
+def test_final_politeness_is_applied_after_spider_custom_settings():
+    from scrapy.crawler import Crawler
+    from api.management.commands.crawl import _apply_crawl_only_politeness
+    from news_crawler.spiders.devto_spider import DevToSpider
+    crawler = Crawler(DevToSpider)
+    assert crawler.settings.getint('CONCURRENT_REQUESTS_PER_DOMAIN') == 3
+    _apply_crawl_only_politeness(crawler.settings)
+    assert crawler.settings.getint('CONCURRENT_REQUESTS_PER_DOMAIN') == 1
+    assert crawler.settings.getfloat('DOWNLOAD_DELAY') >= 3

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import time
+import inspect
+
+from .execution import execution_scope
+from .types import transport_failure
 import uuid
 from collections.abc import Iterable
 from uuid import UUID
@@ -85,31 +89,33 @@ def compare_providers(
     run_uuid = uuid.uuid4()
     comparisons: list[ProviderComparison] = []
 
-    for provider in chain:
-        started = time.monotonic()
-        try:
+    with execution_scope() as execution:
+        execution.logical_url = url
+        for provider in chain:
+            started = time.monotonic()
+            physical_before = execution.physical_requests
             try:
-                result = provider.fetch(url, expected_title=expected_title, summary=summary)
-            except TypeError:
-                result = provider.fetch(url, expected_title=expected_title)
-        except Exception as exc:
-            result = FetchResult(
-                ok=False,
-                provider=getattr(provider, 'name', provider.__class__.__name__),
-                url=url,
-                error=str(exc),
-            )
-        elapsed_ms = int((time.monotonic() - started) * 1000)
-        comparisons.append(_persist_result(
-            run_id=run_uuid,
-            news=news,
-            request_url=url,
-            expected_title=expected_title or '',
-            summary=summary or '',
-            result=result,
-            elapsed_ms=elapsed_ms,
-        ))
+                signature = inspect.signature(provider.fetch)
+                supports_summary = 'summary' in signature.parameters or any(p.kind == p.VAR_KEYWORD for p in signature.parameters.values())
+                result = provider.fetch(url, expected_title=expected_title, **({'summary': summary} if supports_summary else {}))
+            except Exception as exc:
+                result = transport_failure(exc, provider=getattr(provider, 'name', provider.__class__.__name__), url=url)
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+            result.metadata = {**(result.metadata or {}), 'error_code': result.error_code,
+                               'http_status': result.http_status, 'retry_after_at': result.retry_after_at.isoformat() if result.retry_after_at else None,
+                               'physical_requests': execution.physical_requests - physical_before}
+            comparisons.append(_persist_result(
+                run_id=run_uuid,
+                news=news,
+                request_url=url,
+                expected_title=expected_title or '',
+                summary=summary or '',
+                result=result,
+                elapsed_ms=elapsed_ms,
+            ))
 
+            if result.error_code in {'rate_limited', 'budget_deferred', 'auth_required', 'access_blocked', 'request_limit', 'network_timeout', 'network_error', 'upstream_5xx'}:
+                break
     return run_uuid, comparisons
 
 

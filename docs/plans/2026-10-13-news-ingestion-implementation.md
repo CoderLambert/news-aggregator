@@ -18,7 +18,7 @@
 | T01 | 伪来源、雷峰网、Pipeline、crawler_control；身份与并发字段保护 | 已验证并提交 |
 | T02 | News 七字段、三表、迁移；空库与历史数据 | 已验证并提交 |
 | T03 | ingestion、候选验证、正文 CAS、admin、可用性；版本及 lease 竞态 | 核心合同已验证并提交；适配器后续接入 |
-| T04 | safe_http、Provider、Scrapy handler、诊断/研究；WAL 多进程预算 | 待实施 |
+| T04 | safe_http、Provider、Scrapy handler、诊断/研究；WAL 多进程预算 | 已验证并提交；Feed errback 持久状态在 T05 接入 |
 | T05 | Feed 解析、条件状态、receipt；失败不推进 checkpoint | 待实施 |
 | T06 | DEV/HN/首批全文 Feed；按来源契约 fixtures | 待实施 |
 | T07 | TC 与其余来源；31 来源策略及降级 | 待实施 |
@@ -61,3 +61,25 @@ Pipeline 不再以 title_hash 合并文章，不再按摘要长度决定更新�
 `manage.py check` 实际无问题；`makemigrations --check --dry-run` 实际 No changes detected；`git diff --check` 通过。初次网页提取回归发现旧雷峰 Provider 把片段送网页选择器，已改用片段函数并重跑。完整 CI、前端、发布门禁、生产来源抽样均尚未完成。
 
 后续先做 T04：类型化失败、原子共享预算、safe_http 每跳及 Scrapy handler 的真实传输准入；再推进 Feed receipt/checkpoint。保持目标 active，完成定义八项尚未全部满足。
+
+## T04 实际结果
+
+新增 request_budget 与执行上下文。所有真实新闻 HTTP 在 safe_http 或 Scrapy 下载 handler 边界领取 host/配额组/Reader 凭据及两个 global slot；任何 scope 失败整笔回滚。SQLite 条件写取得 writer reservation 后刷新时间并续成 30 秒 permit，实际发送前复核 token/剩余期限。忙锁有界等待且 fail closed，不改变应用默认 30 秒超时、数据库路径或 WAL。释放只匹配自己的 token。Jina 的实际主机、不可逆凭据指纹和逻辑文章来源在重定向后仍共享范围。
+
+429、503+Retry-After 与已审核 GitHub 配额头持久延长冷却；秒数/HTTP 日期/非法/过去/极远日期均有测试。成功只重置失败 streak，不清冷却。safe_http 在读取错误页前保存冷却；过大/压缩 429 也不能隐藏状态。保留 DNS/IP 固定、2 MiB 正文响应限制、15 秒总期限和 3 跳上限；DNS 线程仍最多两个，改为 daemon，系统解析阻塞不会阻碍 Worker 退出。
+
+FetchResult/FetchError 新增稳定错误字段。各 Provider 移除即时重试；429、认证、站点阻断、网络及 5xx 停止该链路。跨 Provider 共享 60 秒/5 请求与取消/租约检查，嵌套不重置；额度耗尽不再启动后续 Provider 或 socket。默认链不再使用 Jina-first 或独立 subprocess。comparison、只读 fetch_article_url 和研究 Reader 同样受预算；研究输出标为 excerpt 并复用既有 JinaFallbackPolicy。Reader 不丢业务 query 后冒充相同文章；BBC at_medium 是现有样本明确的跟踪参数。
+
+Scrapy 薄包装维护的 HTTP11 handler，HTTP/HTTPS 均接入，通过异步 ORM 桥接等待并给下载加 15 秒可取消期限。公开 headers_received/bytes_received 与 StopDownload 保留过大错误页的 HTTP 状态后再记冷却；压缩前后响应有界。robots、redirect、retry 都经过 handler。最终礼貌设置在 create_crawler 后应用，429/401/403/503 不立即重试，其他受限重试最多一次。直接 Scrapy CLI 共用 Django 初始化；显式 asyncio reactor，关闭 Scrapy 2.19 新增控制监听器。
+
+接口依据实际安装 Scrapy 2.19.0 及 [官方 download handler 文档](https://docs.scrapy.org/en/latest/topics/download-handlers.html)，使用公开方法/信号，不复制 HTTP 实现。保留旧 handler 的 spider 参数兼容桥接；没有升级全项目依赖约束。
+
+最终相关子集实际 **231 passed**（Python 3.12.14），包括 request_budget、budgeted_safe_http、safe_http、article_fetcher_security、article_fetcher、full_content_status_service、research_tool_cancellation、provider_comparison_service/API/command、tests/crawler、news_ingestion、budgeted_download_handler。独立进程使用临时文件 SQLite，断言 WAL、同主机最大 1/全局最大 2、kill 后预算与 News lease 接管、旧成功/失败/token 不写回、忙锁 fail closed 与连接 timeout 恢复。受控本地滴流 HTTP server 验证总期限、socket 关闭、permit 释放及超大 429 的冷却；没有请求真实站点制造 429。
+
+`manage.py check` 实际无问题；`makemigrations --check --dry-run` 实际 No changes detected；`git diff --check` 通过。直接 `scrapy crawl reuters` 在显式临时 DJANGO_DB_PATH 下退出 0，outcome=unsupported、无 HTTP；没有操作业务库。其 Pipeline spider 参数弃用提示将在 T05 的 from_crawler/receipt 接入一并处理。
+
+T04 的 transport 会返回/传播延期，Feed next_poll_at 与 receipt/checkpoint 尚须 T05 持久结算。新 Worker/API/UI/发布集合、全部现有 CI 与来源启用抽样尚未完成；不具备生产发布条件。
+
+### 后续契约审查
+
+T05/来源适配前补充 T03 的边界：统一 Unicode 空白可用性；已审核短正文与派生摘录相同不能被摘要启发式否定；片段清理只移除非正文元素/指定页脚；DEV canonical 署名证据；矛盾的相同上游版本不能被更新时间放行。随后继续 T05–T12，不缩减原合同。

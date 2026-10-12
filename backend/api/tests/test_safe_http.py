@@ -15,6 +15,14 @@ from django.test import override_settings
 from api.services.article_fetcher import providers, safe_http
 
 
+@pytest.fixture(autouse=True)
+def isolated_transport_admission(monkeypatch):
+    monkeypatch.setattr(safe_http, 'claim_budget', lambda *args, **kwargs: object())
+    monkeypatch.setattr(safe_http, 'confirm_permit', lambda *args, **kwargs: None)
+    monkeypatch.setattr(safe_http, 'record_response', lambda *args, **kwargs: None)
+    monkeypatch.setattr(safe_http, 'release_budget', lambda *args, **kwargs: None)
+
+
 def _addrinfo(address: str, port: int):
     parsed = ipaddress.ip_address(address)
     if parsed.version == 4:

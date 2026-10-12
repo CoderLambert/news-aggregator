@@ -329,12 +329,17 @@ def mark_success(news: News, result: FetchResult, *, full_content=None, full_con
 
 
 def mark_failed(news: News, error, status=None, provider='') -> bool:
+    if getattr(error, 'error_code', '') == 'budget_deferred':
+        return release_fetch_claim(news, next_attempt_at=error.retry_after_at)
+    if getattr(error, 'error_code', '') == 'superseded':
+        return False
     status = status or classify_fetch_error(error)
     provider = provider or fetch_error_provider(error)
     code = getattr(error, 'error_code', '') or fetch_failure_code(error)
     retry_at = getattr(error, 'retry_after_at', None)
     failures = news.full_content_retry_count + 1
-    retryable = status in {'network_error', 'failed', 'rate_limited'} and failures < 5
+    typed_retryable = not getattr(error, 'error_code', '') or getattr(error, 'retryable', False)
+    retryable = status in {'network_error', 'failed', 'rate_limited'} and failures < 5 and typed_retryable
     updates = {
         'full_content_fetch_status': status, 'full_content_fetch_error': fetch_error_diagnostic(error),
         'full_content_error_code': code, 'full_content_retry_count': F('full_content_retry_count') + 1,
@@ -361,6 +366,17 @@ def classify_fetch_error(error_or_result) -> str:
 
     Returns one of: 'network_error', 'validation_failed', 'failed'.
     """
+    code = getattr(error_or_result, 'error_code', '')
+    if code == 'rate_limited':
+        return 'rate_limited'
+    if code in {'auth_required', 'access_blocked'}:
+        return 'blocked'
+    if code in {'not_found', 'unsupported', 'invalid_identity'}:
+        return 'unsupported'
+    if code in {'body_partial', 'body_mismatch', 'body_empty', 'source_version_conflict'}:
+        return 'validation_failed'
+    if code in {'network_timeout', 'upstream_5xx', 'network_error'}:
+        return 'network_error'
     failures = getattr(error_or_result, 'failures', None) or []
     candidates = failures or [error_or_result]
     diagnostic_codes = [fetch_failure_code(candidate) for candidate in candidates]

@@ -405,7 +405,7 @@ def test_leiphone_feed_provider_preserves_real_article_structure():
         def read(self):
             return feed
 
-    with patch('api.services.article_fetcher.providers.urllib.request.urlopen', return_value=Response()):
+    with patch('api.services.article_fetcher.providers.safe_urlopen', return_value=Response()):
         result = LeiphoneFeedProvider(timeout=8).fetch(
             'https://www.leiphone.com/category/ai/example.html',
             expected_title='Claude Haiku 5.5 降本背后',
@@ -432,7 +432,7 @@ def test_leiphone_feed_download_uses_feed_compatible_user_agent():
             return b'<rss />'
 
     with patch(
-        'api.services.article_fetcher.providers.urllib.request.urlopen',
+        'api.services.article_fetcher.providers.safe_urlopen',
         return_value=Response(),
     ) as urlopen:
         body = LeiphoneFeedProvider()._download()
@@ -516,7 +516,7 @@ def test_leiphone_feed_provider_does_not_accept_another_article():
         def read(self):
             return feed
 
-    with patch('api.services.article_fetcher.providers.urllib.request.urlopen', return_value=Response()):
+    with patch('api.services.article_fetcher.providers.safe_urlopen', return_value=Response()):
         result = LeiphoneFeedProvider().fetch(
             'https://www.leiphone.com/category/ai/requested.html',
             expected_title='Requested article',
@@ -537,7 +537,7 @@ def test_leiphone_feed_provider_rejects_invalid_xml():
         def read(self):
             return b'<rss><channel>'
 
-    with patch('api.services.article_fetcher.providers.urllib.request.urlopen', return_value=Response()):
+    with patch('api.services.article_fetcher.providers.safe_urlopen', return_value=Response()):
         result = LeiphoneFeedProvider().fetch(
             'https://www.leiphone.com/category/ai/requested.html',
             expected_title='Requested article',
@@ -566,7 +566,7 @@ def test_hackernews_api_provider_extracts_self_post_text_without_comments():
             import json
             return json.dumps(payload).encode('utf-8')
 
-    with patch('api.services.article_fetcher.providers.urllib.request.urlopen', return_value=Response()) as urlopen:
+    with patch('api.services.article_fetcher.providers.safe_urlopen', return_value=Response()) as urlopen:
         result = HackerNewsAPIProvider(timeout=8).fetch(
             'https://news.ycombinator.com/item?id=123',
             expected_title='Ask HN: Practical testing?',
@@ -601,7 +601,7 @@ def test_hackernews_api_provider_skips_external_link_story():
             import json
             return json.dumps(payload).encode('utf-8')
 
-    with patch('api.services.article_fetcher.providers.urllib.request.urlopen', return_value=Response()):
+    with patch('api.services.article_fetcher.providers.safe_urlopen', return_value=Response()):
         result = HackerNewsAPIProvider().fetch('https://news.ycombinator.com/item?id=456')
 
     assert result.ok is False
@@ -638,7 +638,7 @@ page = browser.new_page()
         def read(self):
             return markdown.encode('utf-8')
 
-    with patch('api.services.article_fetcher.providers.urllib.request.urlopen', return_value=Response()) as urlopen:
+    with patch('api.services.article_fetcher.providers.safe_urlopen', return_value=Response()) as urlopen:
         result = GitHubReadmeProvider(timeout=8).fetch(
             'https://github.com/CloakHQ/CloakBrowser',
             expected_title='CloakHQ/CloakBrowser',

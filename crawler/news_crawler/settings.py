@@ -40,3 +40,22 @@ FEED_EXPORT_ENCODING = "utf-8"
 # PLAYWRIGHT_LAUNCH_OPTIONS = {"headless": True}
 
 LOG_LEVEL = "INFO"
+
+# Admission wraps the maintained HTTP handler at the actual download boundary.
+DOWNLOAD_HANDLERS = {
+    'http': 'news_crawler.download_handlers.BudgetedHTTPDownloadHandler',
+    'https': 'news_crawler.download_handlers.BudgetedHTTPDownloadHandler',
+}
+DOWNLOAD_TIMEOUT = 15
+DOWNLOAD_MAXSIZE = 8 * 1024 * 1024
+RETRY_TIMES = 1
+RETRY_HTTP_CODES = [500, 502, 504, 522, 524]
+AUTOTHROTTLE_ENABLED = True
+AUTOTHROTTLE_START_DELAY = 3
+AUTOTHROTTLE_MAX_DELAY = 60
+AUTOTHROTTLE_TARGET_CONCURRENCY = 1
+
+# Do not expose the new Scrapy 2.19 control listener in ordinary crawl jobs.
+REMOTE_CONTROL_ENABLED = False
+
+TWISTED_REACTOR = 'twisted.internet.asyncioreactor.AsyncioSelectorReactor'

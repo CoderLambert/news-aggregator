@@ -142,6 +142,18 @@ class Command(BaseCommand):
         crawlers = []
         for spider in spiders:
             crawler = process.create_crawler(spider)
+            # Spider.custom_settings are applied by create_crawler. Clamp the
+            # final settings after that step, before the engine freezes them.
+            if crawl_only:
+                _apply_crawl_only_politeness(crawler.settings)
+            crawler.settings.set('DOWNLOAD_HANDLERS', {
+                'http': 'news_crawler.download_handlers.BudgetedHTTPDownloadHandler',
+                'https': 'news_crawler.download_handlers.BudgetedHTTPDownloadHandler',
+            }, priority='cmdline')
+            crawler.settings.set('DOWNLOAD_TIMEOUT', 15, priority='cmdline')
+            crawler.settings.set('DOWNLOAD_MAXSIZE', 8 * 1024 * 1024, priority='cmdline')
+            crawler.settings.set('RETRY_TIMES', 1, priority='cmdline')
+            crawler.settings.set('RETRY_HTTP_CODES', [500, 502, 504, 522, 524], priority='cmdline')
             process.crawl(crawler)
             crawlers.append((spider, crawler))
             self.stdout.write(self.style.SUCCESS(f'启动爬虫: {spider}'))

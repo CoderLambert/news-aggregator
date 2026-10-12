@@ -36,10 +36,12 @@ def normalize_article_url(value: str, *, max_length: int = 500, require_article:
     authority = f'[{host}]' if ':' in host else host
     if port is not None and (scheme, port) not in {('http', 80), ('https', 443)}:
         authority += f':{port}'
+    # BBC's existing RSS samples explicitly identify at_medium as tracking.
+    site_tracking = {'at_medium'} if host in {'bbc.com', 'www.bbc.com', 'bbc.co.uk', 'www.bbc.co.uk'} else set()
     # Keep business queries byte-for-byte, including encoding and ordering.
     query = '&'.join(part for part in parsed.query.split('&') if part and
                      not (unquote(part.split('=', 1)[0]).lower().startswith('utm_') or
-                          unquote(part.split('=', 1)[0]).lower() in TRACKING_KEYS))
+                          unquote(part.split('=', 1)[0]).lower() in TRACKING_KEYS | site_tracking))
     normalized = urlunsplit((scheme, authority, parsed.path, query, ''))
     if len(normalized) > max_length:
         raise InvalidIdentity('url_too_long')

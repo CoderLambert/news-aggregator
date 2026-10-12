@@ -5,7 +5,8 @@ from django.core.management.base import BaseCommand
 from api.services.article_fetcher.extractors import extract_markdown_from_html
 from api.services.article_fetcher.providers import DEFAULT_HEADERS
 from api.services.article_fetcher.site_rules import get_site_rule
-from api.services.article_fetcher.types import FetchResult
+from api.services.article_fetcher.types import FetchResult, transport_failure
+from api.services.article_fetcher.execution import execution_scope, current_execution
 from api.services.article_fetcher.validators import validate_markdown
 from api.services.content_cleaner import clean_content
 
@@ -20,6 +21,11 @@ class Command(BaseCommand):
         parser.add_argument('--timeout', type=int, default=45)
 
     def handle(self, *args, **options):
+        with execution_scope() as execution:
+            execution.logical_url = options['url']
+            return self._handle(*args, **options)
+
+    def _handle(self, *args, **options):
         url = options['url']
         expected_title = options['expected_title']
         summary = options['summary']
@@ -60,7 +66,7 @@ class Command(BaseCommand):
                 quality_score=validation.score,
             ))
         except Exception as exc:
-            self._emit(FetchResult(ok=False, provider='scrapy_cli', url=url, error=str(exc)))
+            self._emit(transport_failure(exc, provider='scrapy_cli', url=url))
 
     def _emit(self, result: FetchResult):
         self.stdout.write(json.dumps({
@@ -72,15 +78,19 @@ class Command(BaseCommand):
             'markdown': result.markdown,
             'quality_score': result.quality_score,
             'error': result.error,
+            'error_code': result.error_code, 'http_status': result.http_status,
+            'retry_after_at': result.retry_after_at.isoformat() if result.retry_after_at else None,
+            'retryable': result.retryable, 'scope_keys': list(result.scope_keys),
+            'physical_requests': current_execution.get().physical_requests if current_execution.get() else 0,
         }, ensure_ascii=False))
 
 
 def _download(url: str, timeout: int = 45) -> str:
-    import ssl
     import urllib.request
+    from api.services.article_fetcher.safe_http import safe_urlopen
 
     req = urllib.request.Request(url, headers=DEFAULT_HEADERS)
-    with urllib.request.urlopen(req, timeout=timeout, context=ssl.create_default_context()) as resp:
+    with safe_urlopen(req, timeout=timeout) as resp:
         raw = resp.read()
         content_type = resp.headers.get('content-type', '')
     encoding = _encoding_from_content_type(content_type) or 'utf-8'
