@@ -420,7 +420,7 @@ function SearchControls({ initialQuery, historyNavigationKey, mode, searching, b
 
 function ArticleCard({ article, returnTo }: { article: NewsSummary; returnTo: string }) {
   const title = article.title_zh || article.title
-  const snippet = article.content_zh || article.content
+  const snippet = article.summary_zh || article.summary
   const sourceType = article.source_type as SourceType
 
   return (
