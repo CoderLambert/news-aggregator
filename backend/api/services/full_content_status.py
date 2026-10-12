@@ -250,7 +250,7 @@ def commit_candidate(news, candidate, *, provider='', lease: FetchLease | None =
     provenance = {
         'provider': provider or candidate.source_key,
         'source_key': candidate.source_key, 'source_item_id': candidate.source_item_id,
-        'target_url': expected_url, 'body_field': candidate.body_field,
+        'target_url': expected_url, 'retrieved_from_url': candidate.retrieved_from_url, 'body_field': candidate.body_field,
         'source_version': candidate.source_version, 'source_modified_at': modified,
         'body_sha256': body_hash, 'validator_version': VALIDATOR_VERSION,
         'declared_canonical_url': canonical, 'content_kind': candidate.content_kind,

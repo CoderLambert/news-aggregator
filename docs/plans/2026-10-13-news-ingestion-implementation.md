@@ -20,7 +20,7 @@
 | T03 | ingestion、候选验证、正文 CAS、admin、可用性；版本及 lease 竞态 | 核心合同已验证并提交；适配器后续接入 |
 | T04 | safe_http、Provider、Scrapy handler、诊断/研究；WAL 多进程预算 | 已验证并提交；Feed errback 持久状态在 T05 接入 |
 | T05 | Feed 解析、条件状态、receipt；失败不推进 checkpoint | 已验证并提交 |
-| T06 | DEV/HN/首批全文 Feed；按来源契约 fixtures | 待实施 |
+| T06 | DEV/HN/首批全文 Feed；按来源契约 fixtures | 已验证并提交 |
 | T07 | TC 与其余来源；31 来源策略及降级 | 待实施 |
 | T08 | 常驻 Worker、心跳、队列、旧命令；恢复/取消/无隐式回填 | 待实施 |
 | T09 | API、前端、翻译/聊天/研究/TTS；排队与正文可用性 | 待实施 |
@@ -107,3 +107,16 @@ receipt 区分已提交、策略跳过、延期、失败；重复信号不能把
 实际相关回归 **180 passed**：全部 crawler、feed_state/feed_support、news_ingestion、正文状态服务、article_fetcher/site_rules、迁移。独立 receipt 故障覆盖包含取消、重复信号、正常关闭等待与 CAS 冲突。完整 Scrapy/Pipeline 测试在临时文件数据库与受控本地 HTTP proxy 上证明：第一次第二条目入库失败不保存 ETag，第二次重放补齐且不重复正文 revision，第三次才发送 ETag 并接受 304。没有联系真实发布者。`makemigrations --check --dry-run` 实际 No changes detected；`git diff --check` 通过。
 
 T06–T12 和完整 CI/发布集合仍待完成，未操作生产来源开关、数据或部署。
+
+
+## T06 实际结果
+
+雷峰网、WebKit、Smashing、V8、Mozilla、Svelte、Angular 使用共同 Feed lifecycle，正文直接成为 Pipeline 候选，不逐条请求文章 HTML。每个来源保持独立字段/格式合同、opaque ID 与链接。七来源 105 个独立本地 fixture 场景验证短正文、长正文尾部、代码/图片/列表/表格、摘要隔离、真实输入身份、日期、截断/挑战/付费墙及页脚处理。测试发现 feedparser 默认清理丢失 data-paywall 证据，已关闭 parser 的提前 sanitize，完整性验证后再执行片段清理；全部场景通过。这些 synthetic fixtures 不冒充生产抽样。
+
+DEV 保留既有选题查询范围，跨标签按数字 ID 去重。发现事务先提交元数据与符合自动准入配置的任务，再最多前移 20 个最近七天、可靠发布时间、需要正文/明确较新 edited_at 的详情请求；其余元数据和任务保留。结构化开关关闭时无详情请求。详情按请求前 URL/revision、数字 ID 验证，完整 Markdown 不截断，失败仍产出列表元数据。只有 edited_at 提供修改证据，published_at 保留发布时间；updated_at/观察时间不代替。字段/ID/路径接口依据 [Forem 官方 API 文档](https://developers.forem.com/api/v1)。
+
+专用 DEV Provider 支持已有来源数字 ID 或官方精确作者/slug 路径接口，验证响应 URL/ID/标题；DEV 默认链只访问 API。HN 自帖仅官方 item.text，短完整文本可写 discussion；外链以原始发布者 URL 保存 article，HN ID/讨论页为发现关系，不以分数或评论填正文。HN Provider 验证响应 ID/type 后再判断外链。GitHub Raw README 成为类型化 readme 候选，成功路径加入 provenance，下次优先复用并重新验证仓库绑定；共享预算和任务请求上限保留。DEV/HN/GitHub 的默认专用链不以通用 HTML 替代其阅读对象。逐篇默认链移除联网 LeiphoneFeedProvider（保留显式只读兼容类）。
+
+实际相关回归 **321 passed**（Python 3.12.14）：全部 crawler、结构化 Providers、Feed 支持/状态、ingestion/正文 CAS、article_fetcher/site_rules、budgeted_safe_http/security。DEV 测试证明 23 条发现只前移 20 详情、跨标签不重复、溢出已排队；原始正文超过 5000 字完整保存；请求前 revision 陈旧不能重写；详情错 ID/URL/429/坏 JSON 保留元数据。`manage.py check` 实际无问题，`git diff --check` 通过。
+
+T07–T12 与整体兼容发布/完整 CI 继续实施；没有真实来源开关变更或生产抽样请求。

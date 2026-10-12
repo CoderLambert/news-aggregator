@@ -1,7 +1,5 @@
 """Pure Feed parsing: bytes in, bounded metadata and typed candidates out."""
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
 import xml.etree.ElementTree as ET
 
 from bs4 import BeautifulSoup
@@ -11,6 +9,7 @@ from api.services.article_identity import normalize_article_url, validate_upstre
 from api.services.article_fetcher.types import FullContentCandidate
 from api.services.article_fetcher.extractors import html_fragment_to_markdown
 from api.services.source_policy import POLICIES
+from api.services.source_dates import parse_source_datetime
 
 MAX_FEED_BYTES = 8 * 1024 * 1024
 
@@ -19,24 +18,6 @@ class InvalidFeed(ValueError):
     error_code = 'invalid_feed'
 
 
-def parse_source_datetime(value, *, assume_utc=False):
-    if isinstance(value, datetime):
-        parsed = value
-    elif not isinstance(value, str) or not value.strip():
-        return None
-    else:
-        try:
-            parsed = datetime.fromisoformat(value.strip().replace('Z', '+00:00'))
-        except ValueError:
-            try:
-                parsed = parsedate_to_datetime(value.strip())
-            except (TypeError, ValueError, OverflowError):
-                return None
-    if parsed.tzinfo is None:
-        if not assume_utc:
-            return None
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
 
 
 @dataclass(frozen=True)
@@ -58,7 +39,9 @@ def parse_feed(body: bytes):
     if tag == 'rss' and not any(child.tag.rsplit('}', 1)[-1].lower() == 'channel' for child in root):
         raise InvalidFeed('invalid_feed')
     # Never pass a URL or a str to feedparser: it must not fetch independently.
-    result = feedparser.parse(body)
+    # Completeness checks need original attributes such as data-paywall. The
+    # validated fragment converter performs the final non-content cleanup.
+    result = feedparser.parse(body, sanitize_html=False)
     if result.bozo or not result.version.startswith(('rss', 'atom')):
         raise InvalidFeed('invalid_feed')
     return ParsedFeed(tuple(result.entries), result.version)

@@ -86,8 +86,9 @@ def candidate_contract_allows(candidate) -> bool:
         formats = {'html', 'text'} if policy.key == 'v8' else {'html'}
         return (direct or observed_redirect) and candidate.content_format in formats
     if policy.key == 'devto':
+        path_endpoint = '/api/articles/' + target.path.strip('/')
         return (candidate.source_item_id.isdecimal() and origin.scheme == 'https' and
-                origin.netloc == 'dev.to' and origin.path == f'/api/articles/{candidate.source_item_id}' and
+                origin.netloc == 'dev.to' and origin.path in {f'/api/articles/{candidate.source_item_id}', path_endpoint} and
                 not origin.query and candidate.content_format == ('markdown' if field == 'body_markdown' else 'html'))
     if policy.key == 'hackernews':
         return (candidate.source_item_id.isdecimal() and
@@ -98,7 +99,7 @@ def candidate_contract_allows(candidate) -> bool:
         # Reviewed raw README paths are bound to the repository path and identity.
         repo = target.path.strip('/').split('/')
         raw = origin.path.strip('/').split('/')
-        return (len(repo) == 2 and len(raw) >= 4 and raw[:2] == repo and
+        return (len(repo) == 2 and len(raw) >= 4 and raw[:2] == repo and candidate.source_item_id == '/'.join(repo) and
                 origin.netloc == 'raw.githubusercontent.com' and origin.scheme == 'https' and
                 raw[-1].lower().startswith('readme') and candidate.content_format == 'markdown')
     return False

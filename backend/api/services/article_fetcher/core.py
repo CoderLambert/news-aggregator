@@ -30,7 +30,7 @@ def _fetch_article_markdown(
     Raises FetchError with provider failures otherwise. The caller decides
     whether to persist; never create generated fallback content here.
     """
-    chain = providers or default_providers()
+    chain = providers or default_providers(url)
     started_at = time.monotonic()
     news_id = getattr(news, 'pk', None)
 
@@ -80,7 +80,10 @@ def _fetch_article_markdown(
             try:
                 signature = inspect.signature(provider.fetch)
                 supports_summary = 'summary' in signature.parameters or any(p.kind == p.VAR_KEYWORD for p in signature.parameters.values())
-                result = provider.fetch(url, expected_title=expected_title, **({'summary': summary} if supports_summary else {}))
+                kwargs = {'summary': summary} if supports_summary else {}
+                if 'news' in signature.parameters:
+                    kwargs['news'] = news
+                result = provider.fetch(url, expected_title=expected_title, **kwargs)
             except (BudgetDeferred, ExecutionStopped):
                 raise
             except Exception as exc:

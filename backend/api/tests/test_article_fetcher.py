@@ -11,6 +11,7 @@ from api.services.article_fetcher.providers import (
     GitHubReadmeProvider,
     HackerNewsAPIProvider,
     LeiphoneFeedProvider,
+    DevToAPIProvider,
     ScrapyHTTPProvider,
     ScrapySubprocessProvider,
     TrustedNewsJinaProvider,
@@ -307,7 +308,8 @@ def test_default_providers_prioritizes_hackernews_api_before_generic_jina():
 
     assert isinstance(providers[0], HackerNewsAPIProvider)
     assert isinstance(providers[1], GitHubReadmeProvider)
-    assert isinstance(providers[2], LeiphoneFeedProvider)
+    assert isinstance(providers[2], DevToAPIProvider)
+    assert not any(isinstance(provider, LeiphoneFeedProvider) for provider in providers)
 
 
 def test_venturebeat_jina_provider_rejects_non_venturebeat_urls_without_network():

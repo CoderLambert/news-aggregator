@@ -146,7 +146,8 @@ def test_production_disables_jina_and_subprocess_before_any_external_action(monk
     assert scrapy.ok is False and scrapy.error == 'unsafe_transport_disabled'
     assert 'jina' not in names
     assert 'scrapy_subprocess' not in names
-    assert {'hackernews_api', 'github_readme', 'leiphone_feed', 'scrapy_http', 'trusted_news_jina'} <= set(names)
+    assert {'hackernews_api', 'github_readme', 'devto_api', 'scrapy_http', 'trusted_news_jina'} <= set(names)
+    assert 'leiphone_feed' not in names
     assert names.index('trusted_news_jina') > names.index('scrapy_http')
 
 

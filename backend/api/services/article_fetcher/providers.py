@@ -21,10 +21,65 @@ from api.services.content_cleaner import clean_content
 from .extractors import extract_markdown_from_html, html_fragment_to_markdown
 from .safe_http import safe_urlopen
 from .site_rules import get_site_rule, normalize_domain
-from .types import FetchResult, transport_failure
+from .types import FetchResult, FullContentCandidate, transport_failure
 from api.services.request_budget import BudgetDeferred
 from .execution import ExecutionStopped
-from .validators import validate_markdown
+from .validators import validate_markdown, validate_candidate
+from api.services.article_identity import normalize_article_url, InvalidIdentity
+from api.services.structured_articles import dev_candidate, hn_candidate
+from django.utils import timezone
+
+
+def _candidate_result(candidate, provider, *, expected_title=None, summary=None):
+    validation = validate_candidate(candidate, expected_url=candidate.target_url,
+                                    expected_title=expected_title or candidate.title, summary=summary)
+    return FetchResult(validation.ok, provider, url=candidate.target_url, title=candidate.title,
+                       canonical_url=candidate.declared_canonical_url or '', markdown=validation.markdown,
+                       quality_score=validation.score, candidate=candidate if validation.ok else None,
+                       error='' if validation.ok else 'validation_failed:' + validation.error_code,
+                       error_code='' if validation.ok else validation.error_code,
+                       validation_reasons=[] if validation.ok else [validation.error_code], extractor=provider)
+
+
+class DevToAPIProvider:
+    name = 'devto_api'
+
+    def __init__(self, timeout=12):
+        self.timeout = timeout
+
+    def fetch(self, url, expected_title=None, summary=None, news=None):
+        parsed = urlparse(url)
+        if parsed.hostname != 'dev.to':
+            return FetchResult(False, self.name, url=url, error='not_devto_article')
+        identity = None
+        if news is not None:
+            from api.models import NewsSourceItem
+            identity = NewsSourceItem.objects.filter(news_id=news.pk, source_key='devto').values_list('upstream_id', flat=True).first()
+        path = parsed.path.strip('/').split('/')
+        if identity and identity.isdecimal():
+            api_url = f'https://dev.to/api/articles/{identity}'
+        elif len(path) == 2 and all(re.fullmatch(r'[A-Za-z0-9_-]+', part) for part in path):
+            api_url = f'https://dev.to/api/articles/{path[0]}/{path[1]}'
+        else:
+            return FetchResult(False, self.name, url=url, error='invalid_identity', error_code='invalid_identity')
+        started = timezone.now()
+        try:
+            with _open_url(urllib.request.Request(api_url, headers={'Accept': 'application/json', 'User-Agent': USER_AGENT}), timeout=self.timeout) as response:
+                payload = json.loads(response.read().decode('utf-8'))
+        except (BudgetDeferred, ExecutionStopped):
+            raise
+        except Exception as error:
+            return transport_failure(error, provider=self.name, url=url)
+        try:
+            # The documented path endpoint resolves the authoritative numeric ID.
+            # Its candidate records the exact path that supplied the payload.
+            candidate = dev_candidate(payload, target_url=url, retrieved_from_url=api_url,
+                                      request_started_at=started, source_item_id=identity)
+            return _candidate_result(candidate, self.name, expected_title=expected_title, summary=summary)
+        except (InvalidIdentity, ValueError, TypeError):
+            return FetchResult(False, self.name, url=url, error='invalid_identity', error_code='invalid_identity')
+        except Exception as error:
+            return transport_failure(error, provider=self.name, url=url)
 
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
 LEIPHONE_FEED_USER_AGENT = 'curl/8.0.0'
@@ -58,63 +113,38 @@ class GitHubReadmeProvider:
     def __init__(self, timeout: int = 12):
         self.timeout = timeout
 
-    def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None) -> FetchResult:
+    def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None, news=None) -> FetchResult:
         repo = _github_repo_path(url)
         if not repo:
             return FetchResult(ok=False, provider=self.name, url=url, error='not_github_repo')
-
         owner, name = repo
         title = expected_title or f'{owner}/{name}'
-        errors: list[str] = []
-
-        for readme_url in _github_readme_urls(owner, name):
+        paths = _github_readme_urls(owner, name)
+        preferred = (news.full_content_provenance or {}).get('retrieved_from_url') if news is not None else None
+        if preferred:
+            # A stored path is only a hint; rerun the exact repository contract.
+            probe = FullContentCandidate('github', f'{owner}/{name}', url, preferred, None, title,
+                'readme', 'readme', 'markdown', 'full', 'body', None, None, timezone.now())
+            from api.services.source_policy import candidate_contract_allows
+            if candidate_contract_allows(probe):
+                paths = [preferred, *[path for path in paths if path != preferred]]
+        for readme_url in paths:
+            started = timezone.now()
             try:
                 markdown = self._download(readme_url)
-            except urllib.error.HTTPError as exc:
-                if exc.code != 404:
-                    return transport_failure(exc, provider=self.name, url=url)
-                errors.append('not_found')
+            except urllib.error.HTTPError as error:
+                if error.code != 404:
+                    return transport_failure(error, provider=self.name, url=url)
                 continue
             except (BudgetDeferred, ExecutionStopped):
                 raise
-            except Exception as exc:
-                return transport_failure(exc, provider=self.name, url=url)
-
-            markdown = clean_content(markdown, url)
-            validation = validate_markdown(
-                markdown,
-                expected_title=expected_title,
-                extracted_title=title,
-                url=url,
-                summary=summary,
-                min_chars=_min_chars_for_url(url),
-            )
-            if not validation.ok:
-                return FetchResult(
-                    ok=False,
-                    provider=self.name,
-                    url=url,
-                    title=title,
-                    markdown=markdown,
-                    quality_score=validation.score,
-                    error='validation_failed:' + ','.join(validation.reasons),
-                    validation_reasons=list(validation.reasons),
-                    content_length=len(markdown),
-                    extractor=self.name,
-                )
-
-            return FetchResult(
-                ok=True,
-                provider=self.name,
-                url=url,
-                title=title,
-                markdown=markdown,
-                quality_score=validation.score,
-                content_length=len(markdown),
-                extractor=self.name,
-            )
-
-        return FetchResult(ok=False, provider=self.name, url=url, title=title, error='; '.join(errors) or 'readme_not_found')
+            except Exception as error:
+                return transport_failure(error, provider=self.name, url=url)
+            candidate = FullContentCandidate('github', f'{owner}/{name}', normalize_article_url(url),
+                readme_url, None, title, 'readme', 'readme', 'markdown', 'full', markdown,
+                None, None, started)
+            return _candidate_result(candidate, self.name, expected_title=expected_title, summary=summary)
+        return FetchResult(False, self.name, url=url, error='readme_not_found', error_code='not_found')
 
     def _download(self, url: str) -> str:
         req = urllib.request.Request(url, headers={**DEFAULT_HEADERS, 'Accept': 'text/plain,*/*;q=0.8'})
@@ -146,6 +176,7 @@ class HackerNewsAPIProvider:
             return FetchResult(ok=False, provider=self.name, url=url, error='not_hackernews_item')
 
         api_url = f'https://hacker-news.firebaseio.com/v0/item/{item_id}.json'
+        started = timezone.now()
         try:
             req = urllib.request.Request(api_url, headers={'Accept': 'application/json', 'User-Agent': USER_AGENT})
             with _open_url(req, timeout=self.timeout, context=ssl.create_default_context()) as resp:
@@ -155,8 +186,9 @@ class HackerNewsAPIProvider:
         except Exception as exc:
             return transport_failure(exc, provider=self.name, url=url)
 
-        if not isinstance(payload, dict) or payload.get('deleted') or payload.get('dead'):
-            return FetchResult(ok=False, provider=self.name, url=url, error='invalid_hn_item')
+        if (not isinstance(payload, dict) or payload.get('deleted') or payload.get('dead') or
+                payload.get('type') != 'story' or str(payload.get('id')) != item_id):
+            return FetchResult(ok=False, provider=self.name, url=url, error='invalid_hn_item', error_code='invalid_identity')
 
         if payload.get('url'):
             return FetchResult(
@@ -168,49 +200,12 @@ class HackerNewsAPIProvider:
                 metadata={'external_url': payload.get('url')},
             )
 
-        title = payload.get('title') or expected_title or ''
-        text_html = payload.get('text') or ''
-        if not text_html.strip():
-            return FetchResult(ok=False, provider=self.name, url=url, title=title, error='empty_hn_self_post')
-
-        extracted = extract_markdown_from_html(
-            f'<html><body><article><h1>{html_lib.escape(title)}</h1><div class="toptext">{text_html}</div></article></body></html>',
-            url,
-        )
-        markdown = clean_content(extracted.markdown, url)
-        min_chars = _min_chars_for_url(url)
-        validation = validate_markdown(
-            markdown,
-            expected_title=expected_title,
-            extracted_title=extracted.title or title,
-            url=url,
-            summary=summary,
-            min_chars=min_chars,
-        )
-        if not validation.ok:
-            return FetchResult(
-                ok=False,
-                provider=self.name,
-                url=url,
-                title=extracted.title or title,
-                markdown=markdown,
-                quality_score=validation.score,
-                error='validation_failed:' + ','.join(validation.reasons),
-                validation_reasons=list(validation.reasons),
-                content_length=len(markdown),
-                extractor=self.name,
-            )
-
-        return FetchResult(
-            ok=True,
-            provider=self.name,
-            url=url,
-            title=extracted.title or title,
-            markdown=markdown,
-            quality_score=validation.score,
-            content_length=len(markdown),
-            extractor=self.name,
-        )
+        try:
+            candidate = hn_candidate(payload, target_url=url, retrieved_from_url=api_url,
+                                     request_started_at=started, source_item_id=item_id)
+        except (InvalidIdentity, ValueError, TypeError):
+            return FetchResult(False, self.name, url=url, error='invalid_identity', error_code='invalid_identity')
+        return _candidate_result(candidate, self.name, expected_title=expected_title, summary=summary)
 
 
 class LeiphoneFeedProvider:
@@ -641,11 +636,18 @@ def _backend_dir() -> str:
     return str(Path(__file__).resolve().parents[3])
 
 
-def default_providers() -> list:
+def default_providers(url=None) -> list:
+    host = (urlparse(url).hostname or '').lower() if url else ''
+    if host == 'dev.to':
+        return [DevToAPIProvider()]
+    if host == 'news.ycombinator.com':
+        return [HackerNewsAPIProvider()]
+    if host == 'github.com' and _github_repo_path(url):
+        return [GitHubReadmeProvider()]
     providers = [
         HackerNewsAPIProvider(),
         GitHubReadmeProvider(),
-        LeiphoneFeedProvider(),
+        DevToAPIProvider(),
     ]
     providers.append(ScrapyHTTPProvider())
     providers.append(TrustedNewsJinaProvider(timeout=12, retries=0))

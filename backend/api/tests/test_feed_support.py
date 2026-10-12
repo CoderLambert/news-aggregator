@@ -78,9 +78,10 @@ def test_feedparser_receives_bytes_never_a_url(monkeypatch):
     from api.services import feed_support
     original = feed_support.feedparser.parse
     calls = []
-    def parse(data):
+    def parse(data, **kwargs):
         calls.append(type(data))
-        return original(data)
+        assert kwargs == {'sanitize_html': False}
+        return original(data, **kwargs)
     monkeypatch.setattr(feed_support.feedparser, 'parse', parse)
     parse_feed(rss())
     assert calls == [bytes]
