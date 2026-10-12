@@ -190,6 +190,53 @@ def append_completed_chat_turn(*, user_id: int, news_id: int, session_id: int,
     )
 
 
+def append_completed_chat_turn_to_locked_session(session: ChatSession, *, user_id: int,
+                                                 news_id: int, generation: int,
+                                                 question: str, answer: str,
+                                                 model_source: dict | None = None) -> ChatSnapshot:
+    """CAS-save a complete turn using a session row locked by the caller's transaction.
+
+    Callers that also fence another execution snapshot must acquire those locks
+    before the session lock and keep this update in the same short transaction.
+    """
+    if not connection.in_atomic_block:
+        raise RuntimeError('locked chat append requires an active transaction')
+    if (
+        session.user_id != user_id
+        or session.news_id != news_id
+        or session.generation != generation
+        or not isinstance(session.messages, list)
+    ):
+        raise ChatConflict('chat_conflict')
+
+    assistant_message = {'role': 'assistant', 'content': answer}
+    if model_source is not None:
+        assistant_message['model_source'] = model_source
+    updated_messages = [
+        *session.messages,
+        {'role': 'user', 'content': question},
+        assistant_message,
+    ]
+    updated = ChatSession.objects.filter(
+        pk=session.pk,
+        user_id=user_id,
+        news_id=news_id,
+        revision=session.revision,
+        generation=generation,
+    ).update(
+        messages=updated_messages,
+        revision=session.revision + 1,
+        updated_at=timezone.now(),
+    )
+    if not updated:
+        raise ChatConflict('chat_conflict')
+    return ChatSnapshot(
+        session_id=session.pk,
+        generation=generation,
+        messages=updated_messages,
+    )
+
+
 def clear_chat_history(*, user_id: int, news_id: int) -> bool:
     last_busy_error: OperationalError | None = None
 

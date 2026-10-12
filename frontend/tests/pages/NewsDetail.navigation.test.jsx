@@ -9,7 +9,15 @@ import NewsDetail from '@/pages/NewsDetail'
 import { CapabilitiesTestProvider } from '../helpers/capabilities'
 import { blockNews, checkFavoriteStatus, fetchCategories, fetchNews, fetchNewsDetail, fetchSources, unblockNews } from '@/services/api'
 
-const apiState = vi.hoisted(() => ({ blocked: false, fetchFullArticle: vi.fn(), translate: vi.fn(), translateError: '' }))
+const apiState = vi.hoisted(() => ({
+  blocked: false,
+  fetchFullArticle: vi.fn(),
+  translate: vi.fn(),
+  translateError: '',
+  privateTranslation: { privateTranslationResult: '', privateTranslationResultId: '', privateTranslationResultCurrentMatch: null },
+  speak: vi.fn(),
+  speechSupported: false,
+}))
 
 vi.mock('@/services/api', () => ({
   fetchNews: vi.fn(),
@@ -25,17 +33,18 @@ vi.mock('@/services/api', () => ({
 
 vi.mock('@/hooks/useFullArticle', () => ({ useFullArticle: () => ({ articleLoading: false, articleError: '', handleFetchFullArticle: apiState.fetchFullArticle, resumeExistingFetch: vi.fn(), cancelFetch: vi.fn() }) }))
 vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => ({ translating: false, translateError: apiState.translateError, translationProgress: '', showOriginal: false, setShowOriginal: vi.fn(), handleTranslate: apiState.translate }) }))
+vi.mock('@/hooks/usePrivateTranslation', () => ({ usePrivateTranslation: () => apiState.privateTranslation }))
 vi.mock('@/hooks/useArticleSearch', () => ({ useArticleSearch: () => ({ matchCount: 0, currentIndex: 0, goNext: vi.fn(), goPrev: vi.fn() }) }))
 vi.mock('@/hooks/useArticleToc', () => ({ useArticleToc: () => ({ headings: [], activeId: '' }) }))
 vi.mock('@/context/SpeechPlayerContext', () => ({
   useSpeechPlayer: () => ({ supported: false, speak: vi.fn() }),
-  useSpeechPlayerActions: () => ({ speak: vi.fn() }),
-  useSpeechPlayerCapabilities: () => ({ supported: false }),
+  useSpeechPlayerActions: () => ({ speak: apiState.speak }),
+  useSpeechPlayerCapabilities: () => ({ supported: apiState.speechSupported }),
   useSpeechPlayerActivity: () => false,
 }))
 vi.mock('@/components/NewsChatAssistant', () => ({
-  default: ({ open, onOpenChange }) => (
-    <div>
+  default: ({ open, onOpenChange, translationResultId }) => (
+    <div data-testid="assistant-translation-id" data-result-id={translationResultId ?? ''}>
       <output data-testid="assistant-state">{open ? 'open' : 'closed'}</output>
       {open && <button type="button" onClick={() => onOpenChange(false)}>关闭测试助手</button>}
     </div>
@@ -89,6 +98,9 @@ beforeEach(() => {
   vi.clearAllMocks()
   apiState.blocked = false
   apiState.translateError = ''
+  apiState.privateTranslation = { privateTranslationResult: '', privateTranslationResultId: '', privateTranslationResultCurrentMatch: null }
+  apiState.speak.mockReset()
+  apiState.speechSupported = false
   apiState.fetchFullArticle.mockReset()
   localStorage.removeItem('news-aggregator-filters')
   usePreferencesStore.setState({ lang: 'zh' })
@@ -180,6 +192,36 @@ describe('news list return navigation and invalidation', () => {
     expect(screen.getByText('第一段完整正文。')).toBeInTheDocument()
     expect(screen.queryByText('这段摘要不应在全文下方重复出现。')).not.toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '内容摘要' })).not.toBeInTheDocument()
+  })
+
+  it('uses the latest current private translation for the article, chat, and speech', async () => {
+    fetchNewsDetail.mockResolvedValue({
+      ...detailStory,
+      full_content: 'English source body',
+      full_content_zh: '旧的共享译文 A',
+      full_content_zh_result_id: 'shared-result-a',
+      full_content_zh_current_match: true,
+      full_content_zh_scope: 'shared',
+    })
+    apiState.privateTranslation = {
+      privateTranslationResult: '最新个人译文 B',
+      privateTranslationResultId: 'private-result-b',
+      privateTranslationResultCurrentMatch: true,
+    }
+    apiState.speechSupported = true
+    renderRoutes('/news/21')
+
+    expect(await screen.findByText('最新个人译文 B')).toBeInTheDocument()
+    expect(screen.queryByText('旧的共享译文 A')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '询问 AI 助手小闻' }))
+    await waitFor(() => expect(screen.getByTestId('assistant-translation-id')).toHaveAttribute('data-result-id', 'private-result-b'))
+
+    fireEvent.click(screen.getByRole('button', { name: '选择语音播报方式' }))
+    fireEvent.click(screen.getByRole('button', { name: '开始播放' }))
+    expect(apiState.speak).toHaveBeenCalledWith(21, expect.any(String), {
+      language: 'zh', scope: 'full', resultId: 'private-result-b',
+    })
   })
 
   it('opens the same article assistant from the header and summary action', async () => {

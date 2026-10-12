@@ -51,7 +51,8 @@ export default function NewsDetail() {
   const translationEnabled = capabilities.features.translation.enabled
   const ttsEnabled = capabilities.features.tts.enabled
   const { news, setNews, loading, error, refetch } = useNewsDetail(id)
-  const { articleLoading, articleError, handleFetchFullArticle, resumeExistingFetch, cancelFetch } = useFullArticle(id ?? '', setNews, news)
+  const refreshNewsDetail = useCallback(() => { void refetch() }, [refetch])
+  const { articleLoading, articleError, handleFetchFullArticle, resumeExistingFetch, cancelFetch } = useFullArticle(id ?? '', setNews, news, refreshNewsDetail)
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState(false)
   const assistantOpenerRef = useRef<HTMLButtonElement | null>(null)
@@ -98,6 +99,20 @@ export default function NewsDetail() {
   const privateTranslation = usePrivateTranslation(
     id ?? '', news, capabilities.features.ai_byok.enabled && translationEnabled, loading,
   )
+  const currentTranslation = privateTranslation.privateTranslationResultCurrentMatch === true
+    && privateTranslation.privateTranslationResult.trim()
+    ? {
+        text: privateTranslation.privateTranslationResult,
+        resultId: privateTranslation.privateTranslationResultId || null,
+        scope: 'private' as const,
+      }
+    : news?.full_content_zh && news.full_content_zh_current_match !== false
+      ? {
+          text: news.full_content_zh,
+          resultId: news.full_content_zh_result_id || null,
+          scope: news.full_content_zh_scope === 'private' ? 'private' as const : news.full_content_zh_scope === 'shared' ? 'shared' as const : 'legacy' as const,
+        }
+      : null
 
   const speechPlayer = useSpeechPlayerActions()
   const { supported: speechSupported } = useSpeechPlayerCapabilities()
@@ -105,13 +120,9 @@ export default function NewsDetail() {
   const handleSpeak = useCallback((language: SpeechLanguage, scope: SpeechScope) => {
     if (!ttsEnabled || !news) return
     const speechTitle = language === 'zh' ? (news.title_zh || news.title) : news.title
-    const resultId = language === 'zh' && scope === 'full'
-      ? news.full_content_zh_result_id || (privateTranslation.privateTranslationResultCurrentMatch
-        ? privateTranslation.privateTranslationResultId
-        : null)
-      : null
+    const resultId = language === 'zh' && scope === 'full' ? currentTranslation?.resultId ?? null : null
     speechPlayer.speak(news.id, speechTitle, { language, scope, resultId })
-  }, [news, privateTranslation.privateTranslationResultCurrentMatch, privateTranslation.privateTranslationResultId, speechPlayer, ttsEnabled])
+  }, [currentTranslation?.resultId, news, speechPlayer, ttsEnabled])
   const handleTranslateAndPlay = useCallback((scope: SpeechScope) => {
     if (!ttsEnabled || !translationEnabled) return
     if (!user) {
@@ -144,7 +155,7 @@ export default function NewsDetail() {
   const [searchQuery, setSearchQuery] = useState('')
   const articleRef = useRef<HTMLElement | null>(null)
   const { matchCount, currentIndex, goNext, goPrev } = useArticleSearch(articleRef, searchQuery)
-  const { headings, activeId } = useArticleToc(articleRef, [news?.full_content, news?.full_content_zh, showOriginal])
+  const { headings, activeId } = useArticleToc(articleRef, [news?.full_content, currentTranslation?.text ?? news?.full_content_zh, showOriginal])
 
   function handleGlobalKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if ((event.metaKey || event.ctrlKey) && event.key === 'f') {
@@ -233,7 +244,7 @@ export default function NewsDetail() {
                 <SpeechStartMenu
                   isEnglishSource={isEnglishSource}
                   hasOriginalFull={Boolean(news.full_content)}
-                  hasChineseFull={isEnglishSource ? Boolean(news.full_content_zh || (privateTranslation.privateTranslationResultCurrentMatch && privateTranslation.privateTranslationResult)) : Boolean(news.full_content)}
+                  hasChineseFull={isEnglishSource ? Boolean(currentTranslation) : Boolean(news.full_content)}
                   hasChineseSummary={isEnglishSource ? Boolean(news.content_zh) : Boolean(news.content)}
                   translating={translating}
                   onPlay={handleSpeak}
@@ -260,6 +271,7 @@ export default function NewsDetail() {
           {news.full_content && (
             <FullContentSection
               news={news}
+              currentTranslation={currentTranslation}
               translating={translating}
               translationWaitingShared={translationWaitingShared}
               translationPaused={translationPaused}
@@ -303,9 +315,7 @@ export default function NewsDetail() {
         </div>}
         {chatEnabled && <LazyNewsChatAssistant
           newsId={id ?? String(news.id)}
-          translationResultId={news.full_content_zh_result_id || (privateTranslation.privateTranslationResultCurrentMatch
-            ? privateTranslation.privateTranslationResultId
-            : null)}
+          translationResultId={currentTranslation?.resultId ?? null}
           open={assistantOpen}
           onOpenChange={handleAssistantOpenChange}
           articleContext={{

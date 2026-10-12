@@ -19,7 +19,6 @@ from django_filters import rest_framework as django_filters
 from .models import Category, Source, News, ChatSession, BlockedNews, ProviderComparison
 from .services.chat_history import (
     ChatConflict,
-    append_completed_chat_turn,
     append_assistant_message,
     append_user_message,
     assert_chat_turn_current,
@@ -1120,6 +1119,7 @@ class NewsChatView(generics.GenericAPIView):
                     ARTICLE_CHAT_ERRORS,
                     ArticleChatError,
                     assert_article_chat_execution_current,
+                    commit_completed_article_chat_turn,
                     stream_article_chat,
                 )
 
@@ -1160,15 +1160,14 @@ class NewsChatView(generics.GenericAPIView):
                     ):
                         answer_chunks.append(chunk)
                         yield chunk
-                    execution_guard()
-                    append_completed_chat_turn(
+                    commit_completed_article_chat_turn(
+                        article_chat_execution,
                         user_id=user_id,
                         news_id=news.pk,
                         session_id=chat_snapshot.session_id,
                         generation=chat_snapshot.generation,
                         question=user_question,
                         answer=''.join(answer_chunks),
-                        model_source=article_chat_execution.model_source,
                     )
                 except ArticleChatError as error:
                     yield emit_error(error.code)

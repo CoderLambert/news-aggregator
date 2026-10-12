@@ -15,6 +15,7 @@ interface FetchState {
 
 interface FetchRequest {
   ownerKey: string
+  sourceKey: string | null
   controller: AbortController
 }
 
@@ -82,19 +83,33 @@ export function useFullArticle(
   id: string | number | undefined,
   setNews: Dispatch<SetStateAction<NewsDetail | null>>,
   news?: NewsDetail | null,
+  onSourceChanged?: () => void,
 ) {
   const { user } = useAuth()
   const { lang } = useLanguage()
   const fullContentEnabled = useCapability('fetch_full').enabled
   const newsId = parseNewsId(id)
   const ownerKey = `${newsId ?? String(id ?? '')}:${user?.id ?? 'anonymous'}:${lang}`
+  const sourceKey = news?.full_content ?? null
   const ownerRef = useRef(ownerKey)
+  const sourceRef = useRef(sourceKey)
   const requestRef = useRef<FetchRequest | null>(null)
   const attachedOwnerRef = useRef<string | null>(null)
   const [state, setState] = useState(EMPTY_FETCH_STATE)
   const visibleState = fullContentEnabled && state.ownerKey === ownerKey ? state : EMPTY_FETCH_STATE
 
-  useLayoutEffect(() => { ownerRef.current = ownerKey }, [ownerKey])
+  useLayoutEffect(() => {
+    ownerRef.current = ownerKey
+    if (sourceRef.current === sourceKey) return
+    sourceRef.current = sourceKey
+    const request = requestRef.current
+    if (request?.ownerKey === ownerKey) {
+      requestRef.current = null
+      request.controller.abort()
+    }
+    if (attachedOwnerRef.current === ownerKey) attachedOwnerRef.current = null
+    setState((current) => current.ownerKey === ownerKey ? { ...current, loading: false, error: '' } : current)
+  }, [ownerKey, sourceKey])
 
   useEffect(() => () => {
     if (requestRef.current?.ownerKey === ownerKey) {
@@ -117,18 +132,30 @@ export function useFullArticle(
 
   const applyResult = useCallback((
     data: Awaited<ReturnType<typeof fetchFullArticle>>,
-    options: { includeBody?: boolean } = {},
+    options: { includeBody?: boolean; expectedSourceKey?: string | null } = {},
   ) => {
     if (newsId === null) return
     const includeBody = options.includeBody !== false
     setNews((previous) => {
       if (!previous || previous.id !== newsId) return previous
+      if (options.expectedSourceKey != null && previous.full_content !== options.expectedSourceKey) return previous
       const bodyChanged = includeBody && previous.full_content !== data.full_content
       return {
         ...previous,
         ...(includeBody ? { full_content: data.full_content } : {}),
         ...(includeBody && data.full_content_fetched_at !== undefined ? { full_content_fetched_at: data.full_content_fetched_at } : {}),
-        ...(bodyChanged ? { full_content_zh: '', full_content_zh_fetched_at: null } : {}),
+        ...(bodyChanged ? {
+          full_content_zh: '',
+          full_content_zh_fetched_at: null,
+          full_content_zh_source: null,
+          full_content_zh_scope: null,
+          full_content_zh_result_id: null,
+          full_content_zh_source_hash: null,
+          full_content_zh_current_match: null,
+          full_content_zh_model_source: null,
+          full_content_zh_stale_result_id: null,
+          full_content_zh_stale_model_source: null,
+        } : {}),
         ...(data.full_content_fetch_status !== undefined ? { full_content_fetch_status: data.full_content_fetch_status } : {}),
         ...(data.full_content_fetch_error !== undefined ? { full_content_fetch_error: data.full_content_fetch_error } : {}),
         ...(data.full_content_fetch_provider !== undefined ? { full_content_fetch_provider: data.full_content_fetch_provider } : {}),
@@ -145,10 +172,17 @@ export function useFullArticle(
     requestRef.current?.controller.abort()
 
     if (!attachOnly) setSessionFlag(AUTO_CANCEL_PREFIX, ownerKey, false)
-    const request: FetchRequest = { ownerKey, controller: new AbortController() }
+    const request: FetchRequest = { ownerKey, sourceKey, controller: new AbortController() }
     requestRef.current = request
-    const isCurrent = () => requestRef.current === request && ownerRef.current === ownerKey
+    const isCurrent = () => requestRef.current === request
+      && ownerRef.current === ownerKey && sourceRef.current === request.sourceKey
     setState({ ownerKey, loading: true, error: '' })
+
+    const applyFullBody = (data: Awaited<ReturnType<typeof fetchFullArticle>>) => {
+      applyResult(data, { expectedSourceKey: request.sourceKey })
+      if (request.sourceKey !== null && data.full_content !== request.sourceKey) onSourceChanged?.()
+      return true
+    }
 
     const pollExistingTask = async (): Promise<boolean> => {
       const deadline = Date.now() + SERVER_FETCH_TIMEOUT_MS
@@ -156,7 +190,7 @@ export function useFullArticle(
         const data = await fetchFullArticleStatus(newsId, request.controller.signal)
         if (!isCurrent()) return false
         if (data.full_content_fetch_status === 'fetching') {
-          applyResult(data, { includeBody: false })
+          applyResult(data, { includeBody: false, expectedSourceKey: request.sourceKey })
           await waitForNextPoll(request.controller.signal)
           continue
         }
@@ -164,11 +198,10 @@ export function useFullArticle(
         const hasSuccessfulBody = data.full_content.trim()
           && (data.full_content_fetch_status === 'success' || !data.full_content_fetch_status)
         if (hasSuccessfulBody) {
-          applyResult(data)
-          return true
+          return applyFullBody(data)
         }
 
-        applyResult(data, { includeBody: false })
+        applyResult(data, { includeBody: false, expectedSourceKey: request.sourceKey })
         setState({ ownerKey, loading: true, error: fetchFailureMessage(data) })
         return false
       }
@@ -187,16 +220,15 @@ export function useFullArticle(
       const data = await fetchFullArticle(newsId, force, request.controller.signal)
       if (!isCurrent()) return false
       if (data.full_content_fetch_status === 'fetching') {
-        applyResult(data, { includeBody: false })
+        applyResult(data, { includeBody: false, expectedSourceKey: request.sourceKey })
         return await pollExistingTask()
       }
       const hasSuccessfulBody = data.full_content.trim()
         && (data.full_content_fetch_status === 'success' || !data.full_content_fetch_status)
       if (hasSuccessfulBody) {
-        applyResult(data)
-        return true
+        return applyFullBody(data)
       }
-      applyResult(data, { includeBody: false })
+      applyResult(data, { includeBody: false, expectedSourceKey: request.sourceKey })
       setState({ ownerKey, loading: true, error: fetchFailureMessage(data) })
       return false
     } catch (error: unknown) {
@@ -204,6 +236,7 @@ export function useFullArticle(
       const failure = parseFullArticleFailure(error)
       if (Object.keys(failure.metadata).length > 0) {
         setNews((previous) => previous && previous.id === newsId
+          && (request.sourceKey === null || previous.full_content === request.sourceKey)
           ? { ...previous, ...failure.metadata }
           : previous)
       }
@@ -217,7 +250,7 @@ export function useFullArticle(
           : current)
       }
     }
-  }, [applyResult, fullContentEnabled, newsId, ownerKey, setNews])
+  }, [applyResult, fullContentEnabled, newsId, onSourceChanged, ownerKey, setNews, sourceKey])
 
   const handleFetchFullArticle = useCallback(
     (force = false) => executeFetch(force === true, false),

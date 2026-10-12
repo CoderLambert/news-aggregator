@@ -115,6 +115,107 @@ describe('usePrivateTranslation', () => {
     unmount()
   })
 
+  it.each(['GET', 'POST'])('keeps the job recoverable when cancellation %s fails and blocks a new create', async (failedStage) => {
+    vi.stubGlobal('crypto', { randomUUID: vi.fn().mockReturnValueOnce('first-key').mockReturnValueOnce('second-key') })
+    let streamSignal
+    let streamRun = 0
+    api.translatePrivateFullArticleStream.mockImplementation(async function* (_id, _key, options) {
+      streamRun += 1
+      const jobId = streamRun === 1
+        ? '123e4567-e89b-12d3-a456-426614174000'
+        : '123e4567-e89b-12d3-a456-426614174001'
+      options.onJobId(jobId)
+      if (streamRun === 1) {
+        yield { type: 'complete', result: { full_content_zh: '已有译文 A', result_id: 'result-a' } }
+        return
+      }
+      streamSignal = options.signal
+      yield { type: 'progress', text: '译文 B 正在生成' }
+      await waitForAbort(options.signal)
+    })
+    if (failedStage === 'GET') {
+      api.getPrivateTranslationJob
+        .mockRejectedValueOnce(new Error('temporary GET failure'))
+        .mockResolvedValueOnce(task({ status: 'running', generation: 7, result: {} }))
+    } else {
+      api.getPrivateTranslationJob.mockResolvedValue(task({ status: 'running', generation: 7, result: {} }))
+    }
+    if (failedStage === 'POST') {
+      api.cancelPrivateTranslationJob
+        .mockRejectedValueOnce(new Error('temporary POST failure'))
+        .mockResolvedValueOnce(task({ status: 'cancelled', generation: 7, result: {}, errorMessage: '本次个人翻译已取消。' }))
+    } else {
+      api.cancelPrivateTranslationJob.mockResolvedValue(task({ status: 'cancelled', generation: 7, result: {}, errorMessage: '本次个人翻译已取消。' }))
+    }
+
+    const { result, unmount } = renderHook(() => usePrivateTranslation(42, article(), true, false), { wrapper })
+    await act(async () => { await result.current.startPrivateTranslation() })
+    expect(result.current.privateTranslationResult).toBe('已有译文 A')
+    let secondRun
+    act(() => { secondRun = result.current.startPrivateTranslation() })
+    await waitFor(() => expect(result.current.privateTranslationProgress).toBe('译文 B 正在生成'))
+
+    await act(async () => { await result.current.cancelPrivateTranslation() })
+
+    expect(result.current.privateTranslationActive).toBe(true)
+    expect(result.current.privateTranslationCancelPending).toBe(true)
+    expect(result.current.privateTranslationJobId).toBe('123e4567-e89b-12d3-a456-426614174001')
+    expect(result.current.privateTranslationResult).toBe('已有译文 A')
+    expect(localStorage.getItem('byok_translation_recovery_v1:12:42')).toBe('123e4567-e89b-12d3-a456-426614174001')
+    expect(result.current.privateTranslationError).toMatch(/可能仍在运行/)
+
+    await act(async () => { await result.current.startPrivateTranslation() })
+    expect(api.translatePrivateFullArticleStream).toHaveBeenCalledTimes(2)
+    expect(globalThis.crypto.randomUUID).toHaveBeenCalledTimes(2)
+
+    await act(async () => { await result.current.cancelPrivateTranslation() })
+    await act(async () => { await secondRun })
+    expect(api.cancelPrivateTranslationJob).toHaveBeenCalledWith('123e4567-e89b-12d3-a456-426614174001', 7)
+    expect(result.current.privateTranslationActive).toBe(false)
+    expect(result.current.privateTranslationCancelPending).toBe(false)
+    expect(result.current.privateTranslationResult).toBe('已有译文 A')
+    expect(streamSignal.aborted).toBe(true)
+    expect(localStorage.getItem('byok_translation_recovery_v1:12:42')).toBeNull()
+    unmount()
+  })
+
+  it('keeps a succeeded result when a pending cancel races with completion', async () => {
+    let resolveCancel
+    let completeStream
+    api.getPrivateTranslationJob.mockResolvedValue(task({ status: 'running', generation: 4, result: {} }))
+    api.cancelPrivateTranslationJob.mockImplementation(() => new Promise((resolve) => { resolveCancel = resolve }))
+    api.translatePrivateFullArticleStream.mockImplementation(async function* (_id, _key, options) {
+      options.onJobId('123e4567-e89b-12d3-a456-426614174002')
+      yield { type: 'progress', text: '等待完成' }
+      await new Promise((resolve) => { completeStream = resolve })
+      yield { type: 'complete', result: { full_content_zh: '成功结果 B', result_id: 'result-b' } }
+    })
+
+    const { result, unmount } = renderHook(() => usePrivateTranslation(42, article(), true, false), { wrapper })
+    let startRun
+    act(() => { startRun = result.current.startPrivateTranslation() })
+    await waitFor(() => expect(result.current.privateTranslationProgress).toBe('等待完成'))
+    await waitFor(() => expect(result.current.privateTranslationJobId).toBe('123e4567-e89b-12d3-a456-426614174002'))
+    let cancelRun
+    act(() => { cancelRun = result.current.cancelPrivateTranslation() })
+    await waitFor(() => expect(resolveCancel).toBeDefined())
+
+    await act(async () => {
+      completeStream()
+      await startRun
+    })
+    await act(async () => {
+      resolveCancel(task({ status: 'succeeded', generation: 4, result: { full_content_zh: '成功结果 B', result_id: 'result-b' } }))
+      await cancelRun
+    })
+
+    expect(result.current.privateTranslationResult).toBe('成功结果 B')
+    expect(result.current.privateTranslationResultId).toBe('result-b')
+    expect(result.current.privateTranslationCancelPending).toBe(false)
+    expect(result.current.privateTranslationActive).toBe(false)
+    unmount()
+  })
+
   it('starts explicit regeneration with a new idempotency key and keeps the old result after failure', async () => {
     vi.stubGlobal('crypto', { randomUUID: vi.fn().mockReturnValueOnce('first-key').mockReturnValueOnce('second-key') })
     let streamRun = 0
@@ -142,6 +243,36 @@ describe('usePrivateTranslation', () => {
     expect(result.current.privateTranslationResult).toBe('旧的成功译文')
     expect(result.current.privateTranslationResultId).toBe('result-old')
     unmount()
+  })
+
+  it('ignores a late private result after the source body changes', async () => {
+    let streamSignal
+    let completeStream
+    api.translatePrivateFullArticleStream.mockImplementation(async function* (_id, _key, options) {
+      streamSignal = options.signal
+      options.onJobId('123e4567-e89b-12d3-a456-426614174003')
+      yield { type: 'progress', text: '旧原文任务进行中' }
+      await new Promise((resolve) => { completeStream = resolve })
+      yield { type: 'complete', result: { full_content_zh: '旧原文译文', result_id: 'old-source-result' } }
+    })
+
+    const { result, rerender } = renderHook(({ news }) => usePrivateTranslation(42, news, true, false), {
+      initialProps: { news: article() }, wrapper,
+    })
+    let startRun
+    act(() => { startRun = result.current.startPrivateTranslation() })
+    await waitFor(() => expect(result.current.privateTranslationProgress).toBe('旧原文任务进行中'))
+    const updatedArticle = { ...article(), full_content: 'A new body with different source text.' }
+    rerender({ news: updatedArticle })
+    await waitFor(() => expect(streamSignal.aborted).toBe(true))
+    await act(async () => {
+      completeStream()
+      await startRun
+    })
+
+    expect(result.current.privateTranslationResult).toBe('')
+    expect(result.current.privateTranslationResultId).toBe('')
+    expect(result.current.privateTranslationActive).toBe(false)
   })
 
   it('loads a saved stale result by id and keeps it separate from current content', async () => {

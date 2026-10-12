@@ -3,14 +3,16 @@ from __future__ import annotations
 import base64
 import pytest
 from django.contrib.auth.models import User
+from django.db.models import F
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from api.models import Category, ChatSession, News, Source, UserAITaskPreference
+from api.models import Category, ChatSession, News, Source, UserAIConnection, UserAITaskPreference
+from api.services import ai_chat
 from api.services.ai_chat import ArticleChatError
-from api.services.chat_history import ChatConflict
+from api.services.chat_history import ChatConflict, clear_chat_history
 
 
 ENCRYPTION_KEY = base64.urlsafe_b64encode(b't04-synthetic-app-encryption-key').decode('ascii').rstrip('=')
@@ -201,3 +203,53 @@ def test_late_result_after_clear_is_discarded(monkeypatch):
     assert session.messages == []
     assert 'late answer' in body
     assert '__ERROR__' in body
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('change', ['revocation', 'key_rotation', 'chat_generation'])
+@override_settings(AI_BYOK_ENABLED=True, PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_final_chat_commit_rechecks_locked_execution_and_generation(monkeypatch, change):
+    client, user, csrf = _authenticated_client(f't04-final-commit-{change}')
+    connection_id, model = _create_model(client, csrf)
+    news = _create_news()
+    guard_passed = []
+
+    def guarded_stream(_execution, _messages, *, execution_guard):
+        execution_guard()
+        guard_passed.append(True)
+        yield 'Answer after guard.'
+
+    monkeypatch.setattr('api.services.ai_chat.stream_article_chat', guarded_stream)
+    monkeypatch.setattr('api.views.ensure_full_content', lambda _news: None)
+    monkeypatch.setattr('api.views.stream_chat', lambda *_args, **_kwargs: pytest.fail('legacy provider fallback ran'))
+
+    original_commit = ai_chat.commit_completed_article_chat_turn
+
+    def change_snapshot_then_commit(execution, **kwargs):
+        if change == 'revocation':
+            UserAIConnection.objects.filter(pk=connection_id).update(
+                is_enabled=False,
+                credential_epoch=F('credential_epoch') + 1,
+            )
+        elif change == 'key_rotation':
+            UserAIConnection.objects.filter(pk=connection_id).update(
+                credential_epoch=F('credential_epoch') + 1,
+                credential_version=F('credential_version') + 1,
+            )
+        else:
+            assert clear_chat_history(user_id=user.pk, news_id=news.pk)
+        return original_commit(execution, **kwargs)
+
+    monkeypatch.setattr(ai_chat, 'commit_completed_article_chat_turn', change_snapshot_then_commit)
+    response = client.post(
+        f'/api/news/{news.pk}/chat/',
+        {'question': 'question after guard', 'model_config_id': model['id']},
+        format='json',
+        HTTP_X_CSRFTOKEN=csrf,
+    )
+    body = b''.join(response.streaming_content).decode('utf-8')
+
+    assert guard_passed == [True]
+    assert 'Answer after guard.' in body
+    assert '__ERROR__' in body
+    assert ChatSession.objects.get(user=user, news=news).messages == []
