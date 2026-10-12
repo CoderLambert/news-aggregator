@@ -144,39 +144,30 @@ def test_simultaneous_database_connections_share_one_unique_task(owner, article,
 
 
 def test_task_attach_retries_transient_sqlite_lock_without_new_model_work(owner, article, monkeypatch):
+    import sqlite3
     connection = make_connection(owner)
     existing = start_queued(owner, connection, article, monkeypatch)
     manager = ChatGPTTranslationTask.objects
-    attempts = {'write': 0, 'read': 0}
-    original_filter = jobs._task_filter
+    original = manager.get_or_create
+    attempts = []
 
-    def fake_get_or_create(**kwargs):
-        attempts['write'] += 1
-        raise OperationalError('database table is locked: api_chatgpttranslationtask')
+    def transient_lock(**kwargs):
+        attempts.append(1)
+        if len(attempts) <= 2:
+            driver = sqlite3.OperationalError('synthetic transient lock')
+            driver.sqlite_errorcode = sqlite3.SQLITE_LOCKED | (1 << 8)
+            raise OperationalError('wrapped SQLite lock') from driver
+        return original(**kwargs)
 
-    class TransientLockedQuery:
-        def __init__(self, queryset):
-            self.queryset = queryset
-
-        def first(self):
-            attempts['read'] += 1
-            if attempts['read'] <= 2:
-                raise OperationalError('database table is locked: api_chatgpttranslationtask')
-            return self.queryset.first()
-
-    def fake_filter(**kwargs):
-        return TransientLockedQuery(original_filter(**kwargs))
-
-    monkeypatch.setattr(manager, 'get_or_create', fake_get_or_create)
-    monkeypatch.setattr(jobs, '_task_filter', fake_filter)
+    monkeypatch.setattr(manager, 'get_or_create', transient_lock)
     recovered = jobs.start_or_get_job(owner, connection, article)
-
     assert recovered.id == existing.id
-    assert attempts == {'write': 1, 'read': 3}
+    assert len(attempts) == 3
     assert ChatGPTTranslationTask.objects.filter(
         user=owner, connection=connection, news=article,
     ).count() == 1
     assert ChatGPTTranslationTask.objects.get(pk=existing.id).status == 'queued'
+
 
 
 def test_worker_claim_is_single_and_started_state_precedes_provider(owner, article, monkeypatch):
@@ -433,7 +424,9 @@ def test_sse_disconnect_does_not_cancel_background_worker(owner, article, monkey
     provider_entered = threading.Event()
     finish_provider = threading.Event()
 
+    provider_calls = []
     def fake_stream(**kwargs):
+        provider_calls.append(1)
         kwargs['on_delta']('visible progress')
         provider_entered.set()
         assert finish_provider.wait(5)
@@ -446,22 +439,37 @@ def test_sse_disconnect_does_not_cancel_background_worker(owner, article, monkey
     assert response['Cache-Control'] == 'no-store'
     assert response['Job-ID']
     stream = iter(response.streaming_content)
+    task_id = response['Job-ID']
     try:
         first_event = next(stream)
         assert b'progress' in first_event
         assert provider_entered.wait(3)
-    finally:
         response.close()
         close = getattr(stream, 'close', None)
         if close:
             close()
-    task_id = response['Job-ID']
-    task = ChatGPTTranslationTask.objects.get(pk=task_id)
-    assert task.status == 'running'
-    finish_provider.set()
-    terminal = wait_for_terminal(task_id)
-    assert terminal.status == 'succeeded'
-    assert terminal.result['full_content_zh'] == 'complete after disconnect'
+        task = ChatGPTTranslationTask.objects.get(pk=task_id)
+        assert task.status == 'running'
+        finish_provider.set()
+        terminal = wait_for_terminal(task_id)
+        assert terminal.status == 'succeeded'
+        assert terminal.result['full_content_zh'] == 'complete after disconnect'
+        assert provider_calls == [1]
+    finally:
+        # Never leave a fake provider waiting if a success assertion fails.
+        finish_provider.set()
+        response.close()
+        close = getattr(stream, 'close', None)
+        if close:
+            close()
+        deadline = time.monotonic() + 6
+        while time.monotonic() < deadline:
+            with jobs._jobs_lock:
+                pending = (str(task_id), 1) in jobs._dispatching
+            if not pending:
+                break
+            time.sleep(0.01)
+        assert not pending, 'background test worker did not exit before cleanup'
 
 
 def test_cancel_during_token_refresh_wait_blocks_decrypt_and_network(owner, monkeypatch):
