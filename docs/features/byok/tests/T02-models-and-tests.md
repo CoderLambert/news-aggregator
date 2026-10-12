@@ -77,6 +77,26 @@
 | T02-04 | 替换 Key/配置更新会失效旧状态；迟到回执不能覆盖新版本 | PASS；epoch 竞态与 revision 失效单测 |
 | T02-05 | 用户不能将未知模型、URL 或额外参数送入路由 | PASS；未知 alias 在创建尝试前返回 409 |
 | T02-06 | 未核实 context 的模型不应自动发送整篇文章 | 防护 PASS：界面提示 context 未核实，探测接口拒绝 messages/文章正文；未来业务文章调用与长度裁剪 NOT_RUN |
+| T02-07 | 工具探测返回错误函数、畸形/重复键参数、非布尔值、多调用或非 `tool_calls` 终态 | 安全失败；不记 `tools=supported`，当前能力继续为 unknown | PASS；服务解析负例及 API unknown 状态路径 |
+
+## 工具能力误判修复复验
+
+审核发现旧解析只检查第一个返回函数名，可能将无效 arguments 或非工具调用终态记为 supported。实现现要求单 choice、单个 `function` call、有效且唯一键的标准 JSON arguments 严格为 `{"ok":true}`，并要求 `finish_reason=tool_calls`。负例覆盖错误终态、错误工具名、畸形 JSON、`ok:false`、`ok:1`、重复 JSON key、数组参数和多个工具调用。
+
+实际命令（隔离 HOME 与临时 SQLite；不连接 Provider）：
+
+```sh
+env -i \
+  HOME=/tmp/byok-r1-home \
+  PATH=/home/lambert/githubRepos/lambert/news-aggregator/backend/venv/bin:/usr/bin:/bin \
+  DJANGO_ENV=development \
+  DJANGO_DB_PATH=/tmp/newsagg-byok-r1-final-20261012.sqlite3 \
+  /home/lambert/githubRepos/lambert/news-aggregator/backend/venv/bin/python \
+  -m pytest -q api/tests/test_ai_model_test_service.py api/tests/test_ai_models.py \
+  -k 'tools_probe or explicit_text_and_tools_probes or probe_failure_is_safe'
+```
+
+结果：`11 passed, 13 deselected, 1 warning in 2.11s`。另两个 API 层已有用例覆盖探测失败后保持能力 unknown；本复验没有放宽既有断言。真实 Provider 和浏览器 UAT 仍为 NOT_RUN。
 
 ## SDK / Proxy / Provider / UAT
 
