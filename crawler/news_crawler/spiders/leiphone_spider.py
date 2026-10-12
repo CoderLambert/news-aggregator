@@ -6,7 +6,7 @@ from news_crawler.category_map import classify
 
 
 class LeiphoneSpider(scrapy.Spider):
-    """量子位 (leiphone) — Chinese AI/tech news."""
+    """雷峰网 (leiphone) — Chinese AI/tech news."""
     name = 'leiphone'
     allowed_domains = ['leiphone.com']
     start_urls = ['https://www.leiphone.com/feed']
@@ -44,9 +44,9 @@ class LeiphoneSpider(scrapy.Spider):
             news = NewsItem()
             news['title'] = title.strip()
             news['content'] = description
-            news['author'] = '量子位'
+            news['author'] = '雷峰网'
             news['publish_time'] = publish_time
-            news['source_name'] = '量子位'
+            news['source_name'] = '雷峰网'
             news['category_name'] = classify(title.strip(), description)
             news['url'] = url
             news['cover_image'] = item.css('enclosure::attr(url)').get('') or ''
@@ -71,9 +71,9 @@ class LeiphoneSpider(scrapy.Spider):
         news = NewsItem()
         news['title'] = title.strip()
         news['content'] = content
-        news['author'] = '量子位'
+        news['author'] = '雷峰网'
         news['publish_time'] = datetime.now()
-        news['source_name'] = '量子位'
+        news['source_name'] = '雷峰网'
         news['category_name'] = classify(title.strip(), content)
         news['url'] = response.url
         news['cover_image'] = response.css('article img::attr(src), .article-content img::attr(src)').get() or ''

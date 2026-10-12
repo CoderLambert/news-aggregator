@@ -51,7 +51,7 @@ SOURCE_DEFAULTS = {
     'InfoQ': {'url': 'https://www.infoq.com', 'country': 'US', 'language': 'en', 'source_type': 'news'},
     # Chinese AI News
     '机器之心': {'url': 'https://www.jiqizhixin.com', 'country': 'CN', 'language': 'zh', 'source_type': 'news'},
-    '量子位': {'url': 'https://www.leiphone.com', 'country': 'CN', 'language': 'zh', 'source_type': 'news'},
+    '雷峰网': {'url': 'https://www.leiphone.com', 'country': 'CN', 'language': 'zh', 'source_type': 'news'},
     '36氪': {'url': 'https://36kr.com', 'country': 'CN', 'language': 'zh', 'source_type': 'news'},
 }
 
@@ -183,6 +183,10 @@ def _try_translate(news):
 def _save_item_sync(item):
     close_old_connections()
 
+    if item['source_name'] in {'Reuters', '机器之心', '36氪'}:
+        from scrapy.exceptions import DropItem
+        raise DropItem('unsupported_source')
+
     source_name = item['source_name']
     defaults = SOURCE_DEFAULTS.get(
         source_name,
@@ -193,15 +197,15 @@ def _save_item_sync(item):
         defaults=defaults,
     )
     # Sync source_type and language if source already exists but fields are empty or outdated
-    needs_save = False
+    source_fields = []
     if not source.source_type:
         source.source_type = defaults['source_type']
-        needs_save = True
+        source_fields.append('source_type')
     if not source.language or source.language != defaults['language']:
         source.language = defaults['language']
-        needs_save = True
-    if needs_save:
-        source.save()
+        source_fields.append('language')
+    if source_fields:
+        source.save(update_fields=source_fields)
 
     category, _ = Category.objects.get_or_create(
         name=item['category_name'],
@@ -217,27 +221,20 @@ def _save_item_sync(item):
     # (e.g. duplicate dev.to articles), and get() raises MultipleObjectsReturned.
     news = News.objects.filter(url=url).first()
 
-    # If URL changed (e.g. Google News redirect -> real Reuters URL),
-    # fall back to matching by title_hash + source
-    if news is None and thash is not None:
-        news = News.objects.filter(title_hash=thash, source=source).first()
-
     if news:
-        # Update only if full article content is longer than existing
-        if len(content) > len(news.content):
-            # Update URL if it changed (e.g. Google News -> Reuters)
-            if news.url != url:
-                news.url = url
-            news.content = content
-            # Also update author and cover_image if newly available
-            if item.get('author') and not news.author:
-                news.author = item['author']
-            if item.get('cover_image') and not news.cover_image:
-                news.cover_image = item['cover_image']
-            news.save()
-            if _ai_side_effects_enabled():
-                _index_news(news.id, news.title, news.content)
-                _try_translate(news)
+        # Exact URL is identity. A title hash cannot prove a URL correction.
+        # Targeted writes never carry stale body/translation/task fields.
+        updates = {'title': title, 'content': content, 'title_hash': thash}
+        for field in ('author', 'cover_image'):
+            if item.get(field):
+                updates[field] = item[field]
+        if item.get('publish_time') is not None:
+            updates['publish_time'] = item['publish_time']
+        News.objects.filter(pk=news.pk, url=url).update(**updates)
+        news.refresh_from_db()
+        if _ai_side_effects_enabled():
+            _index_news(news.id, news.title, news.content)
+            _try_translate(news)
     else:
         # Cross-source dedup: check if a similar title already exists
         similar_id = None

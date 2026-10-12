@@ -15,7 +15,7 @@
 
 | 阶段 | 路径与验证边界 | 进度 |
 | --- | --- | --- |
-| T01 | 伪来源、雷峰网、Pipeline、crawler_control；身份与并发字段保护 | 待实施 |
+| T01 | 伪来源、雷峰网、Pipeline、crawler_control；身份与并发字段保护 | 已验证并提交 |
 | T02 | News 七字段、三表、迁移；空库与历史数据 | 待实施 |
 | T03 | ingestion、候选验证、正文 CAS、admin、可用性；版本及 lease 竞态 | 待实施 |
 | T04 | safe_http、Provider、Scrapy handler、诊断/研究；WAL 多进程预算 | 待实施 |
@@ -29,3 +29,13 @@
 | T12 | 指标、完整 CI 与完成定义审计 | 待实施 |
 
 未部署生产，未修改真实 scheduler/来源开关，未修复线上数据或触发回填。当前记录不代表开发完成或生产来源启用验收。
+
+## T01 实际结果
+
+删除 Reuters 搜索 URL、机器之心标题 slug 和无效 36kr Feed 获取/解析路径；运行代码报告 unsupported，不发这些入口的 HTTP。新建目标默认隔离，已有目标开关不修改。新雷峰网条目与目标显示名为雷峰网，历史来源未改。
+
+Pipeline 不再以 title_hash 合并文章，不再按摘要长度决定更新，不再整行保存 News。精确 URL 元数据更新保留并发正文、译文、状态和推荐问题；缺失发布时间不覆盖旧值。NEWS_CRAWL_ONLY 约定保留。
+
+验证命令：`PYTHONPATH=backend:crawler RUN_MAIN=true DJANGO_ENV=development DJANGO_DB_PATH=/tmp/newshub-ingestion-t01-py312.sqlite3 /tmp/newshub-ingestion-venv/bin/python -m pytest -q tests/crawler/`，实际 **20 passed**。首次运行发现 Scrapy 只在启动后提供 stats，已改为 spider_opened 信号记录并重跑通过。
+
+隔离验证环境按 CI 先安装 CPU Torch 2.14.1+cpu，再安装 requirements：Python 3.12.14、Django 6.1.2、Scrapy 2.19.0、pytest 9.1.1。没有升级仓库虚拟环境或依赖约束。后续完整 CI 尚未运行。

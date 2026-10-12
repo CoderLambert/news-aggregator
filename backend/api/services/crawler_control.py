@@ -43,18 +43,24 @@ def get_crawler_settings():
 
 
 def display_name(spider_name):
+    if spider_name == 'leiphone':
+        return '雷峰网'
     return spider_name.replace('_', ' ').title()
 
 
 def sync_crawler_targets():
     existing = set(CrawlerTarget.objects.values_list('spider_name', flat=True))
     for sort_order, spider_name in enumerate(SPIDERS):
-        CrawlerTarget.objects.update_or_create(
+        target, _ = CrawlerTarget.objects.get_or_create(
             spider_name=spider_name,
             defaults={
                 'display_name': display_name(spider_name),
                 'sort_order': sort_order,
+                'enabled': spider_name not in {'reuters', 'jiqizhixin', 'sanliu_kr'},
             },
+        )
+        CrawlerTarget.objects.filter(pk=target.pk).update(
+            display_name=display_name(spider_name), sort_order=sort_order,
         )
         existing.discard(spider_name)
     if existing:
