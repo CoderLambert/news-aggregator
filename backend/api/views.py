@@ -15,7 +15,7 @@ from django_filters import rest_framework as django_filters
 from .models import Category, Source, News, ChatSession, BlockedNews, ProviderComparison
 from .serializers import (
     CategorySerializer, SourceSerializer,
-    NewsListSerializer, NewsDetailSerializer,
+    NewsListSerializer, NewsSummarySerializer, NewsDetailSerializer,
     BlockedNewsSerializer,
     ProviderComparisonRunSerializer, ProviderComparisonSerializer,
 )
@@ -153,6 +153,11 @@ class NewsListView(generics.ListAPIView):
     search_fields = ['title', 'content', 'title_zh', 'content_zh']
     ordering_fields = ['publish_time', 'created_at']
     ordering = ['-publish_time']
+
+    def get_serializer_class(self):
+        if self.request.query_params.get('representation') == 'summary':
+            return NewsSummarySerializer
+        return NewsListSerializer
 
     def get_ordering(self):
         """Map the product-level time sort without mutating DRF's request."""

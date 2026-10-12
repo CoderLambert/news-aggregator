@@ -89,11 +89,11 @@ const apiLong = makeApi(180_000)
 // ---- News -----------------------------------------------------------------
 
 export function fetchNews(params: Partial<NewsListParams> = {}, signal?: AbortSignal): Promise<unknown> {
-  return api.get<unknown>('/news/', { params, signal }).then(({ data }) => data)
+  return api.get<unknown>('/news/', { params: { ...params, representation: 'summary' }, signal, timeout: 30_000 }).then(({ data }) => data)
 }
 
 export function fetchSemanticSearch(query: string, params: Partial<NewsListParams> = {}): Promise<unknown> {
-  return api.get<unknown>('/news/', { params: { ...params, search: query, mode: 'semantic' } }).then(({ data }) => data)
+  return api.get<unknown>('/news/', { timeout: 30_000, params: { ...params, search: query, mode: 'semantic', representation: 'summary' } }).then(({ data }) => data)
 }
 
 export function fetchNewsDetail(id: NewsId, signal?: AbortSignal): Promise<unknown> {

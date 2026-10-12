@@ -53,6 +53,23 @@ class NewsListSerializer(serializers.ModelSerializer):
         ]
 
 
+class NewsSummarySerializer(NewsListSerializer):
+    """Opt-in list projection; detail and legacy list body contracts stay intact."""
+    SUMMARY_LIMIT = 300
+    summary = serializers.SerializerMethodField()
+    summary_zh = serializers.SerializerMethodField()
+
+    class Meta(NewsListSerializer.Meta):
+        fields = [field for field in NewsListSerializer.Meta.fields
+                  if field not in ('content', 'content_zh')] + ['summary', 'summary_zh']
+
+    def get_summary(self, obj):
+        return (obj.content or '')[:self.SUMMARY_LIMIT]
+
+    def get_summary_zh(self, obj):
+        return (obj.content_zh or '')[:self.SUMMARY_LIMIT]
+
+
 class NewsDetailSerializer(serializers.ModelSerializer):
     source_name = serializers.CharField(source='source.name', read_only=True)
     source_type = serializers.CharField(source='source.source_type', read_only=True)
