@@ -53,3 +53,15 @@ python scripts/verify_subscription_submission_sqlite.py --suite worker --repetit
 ```
 
 This remains bounded task DB concurrency handling, not a change to lifecycle or permissions. Old failed and successful CI stays visible; a new pushed commit must be assessed separately before merge/deployment.
+
+## PR49 merged-line claim and polling closure
+
+Base22586f72d546a2c38c7c5e45497436e224014f2b was fetched and the owned worktree fast-forwarded; its tree1d511f49d08e401ba61c6b1da6edfcf0b89da53f equals reviewed9c131a3 (and the reported PR test merge). No merged content divergence was found. PR run38248490503/job114808336063 failed the first progress event (891 passed/1 failed), before disconnect. Push38248483757 succeeded, but does not cover that failure; neither run was manually retried.
+
+A fixed controlled reader targeted the first task UPDATE in _run_persistent_task at this exact base. Memory1/1 failed with code262 and stack_run_persistent_task, atomic=False, during call before disconnect; WAL1/1 passed. This concretely reproduced the unprotected claim CAS path. It is not proof that the old CI hit this SQL, because its log contained only OperationalError and no stage/code.
+
+The claim CAS is now a DB-only atomic operation with queued ownership/generation/connection/source revalidation on each bounded retry. A cancellation or superseding generation between attempts returns no claim/provider; failed writes roll back before retry and one run token wins. After-claim and article snapshots validate the claimed generation/run token instead of raw unprotected reads. Shared lease availability and task/job polling use bounded DB-only reads with unchanged user filters/expiry recovery predicates. No provider or whole-worker replay; no schema, permission or lifecycle redesign. Final worker exceptions now identify fixed stage/error type/SQLite code/name even outside retry wrappers; retry/error logs never include SQL/parameters/text/key/token.
+
+One intermediate four-stage matrix had23 contracts pass and1 memory progress contract fail: worker progress retry succeeded but the SSE status read returnedtask_storage_busy. That is a separately observed polling-lock symptom, not the old worker exception. The intermediate record is preserved as verification/subscription-worker-before-poll-fix.json. A direct test verifies transient polling reads retry without dispatch and another user sees no task.
+
+Final results:55 focused tests passed; offline Python suite897 passed,1 real-Docker-build test deselected,3 existing warnings; model preload/load/inference guards zero calls. Four stages (claim, provider start, progress, result commit) ×memory/WAL ×3 iterations =24 contracts passed across6 fresh processes with actual journal modes, first progress/disconnect-running/final success/one fake provider assertions intact. verification/subscription-worker-claim-matrix.json. Source/lease tests and force/cancellation/ownership checks remain present. No CI rerun, model/provider call, user DB/key, server/Docker gateway access, merge or deployment occurred. This commit is on fix/news-deployment-slow-network for PR49, not the merged PR50 branch.

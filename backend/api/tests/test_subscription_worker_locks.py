@@ -20,7 +20,7 @@ from api.tests.test_subscription_submission_locks import locked
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
-@pytest.mark.parametrize('stage', ['_mark_provider_started', '_append_delta', '_finalize_task'])
+@pytest.mark.parametrize('stage', ['_claim_persistent_task', '_mark_provider_started', '_append_delta', '_finalize_task'])
 def test_sse_success_with_temporary_task_reader(owner, article, monkeypatch, stage):
     ready, held, release, done = [threading.Event() for _ in range(4)]
     injected = []
@@ -160,3 +160,89 @@ def test_worker_non_lock_error_never_retries(owner, article, monkeypatch, code):
         jobs._mark_provider_started(handle.id, 1, token)
     assert len(calls) == 1
     assert not ChatGPTTranslationTask.objects.get(pk=handle.id).provider_started
+
+
+@pytest.mark.parametrize('change', ['cancel', 'generation'])
+def test_claim_retry_revalidates_state_before_provider(owner, article, monkeypatch, change):
+    account = make_connection(owner)
+    monkeypatch.setattr(jobs, '_dispatch_task', Mock())
+    handle = jobs.start_or_get_job(owner, account, article)
+    original = QuerySet.update
+    calls = []
+    provider = Mock(side_effect=AssertionError('provider forbidden'))
+    def update(query, **kwargs):
+        if query.model is ChatGPTTranslationTask and kwargs.get('status') == 'running':
+            calls.append(1)
+            raise locked()
+        return original(query, **kwargs)
+    def change_state(_delay):
+        if change == 'cancel':
+            original(ChatGPTTranslationTask.objects.filter(pk=handle.id), status='cancelled', run_token=None)
+        else:
+            original(ChatGPTTranslationTask.objects.filter(pk=handle.id), generation=2)
+    monkeypatch.setattr(QuerySet, 'update', update)
+    monkeypatch.setattr(jobs.time, 'sleep', change_state)
+    monkeypatch.setattr(jobs, 'stream_full_translation', provider)
+    jobs._run_persistent_task(handle.id, 1)
+    task = ChatGPTTranslationTask.objects.get(pk=handle.id)
+    assert len(calls) == 1 and task.run_token is None
+    assert task.status == 'cancelled' if change == 'cancel' else task.generation == 2
+    provider.assert_not_called()
+
+
+def test_claimed_snapshot_failure_logs_safe_stage_and_code(owner, article, monkeypatch, caplog):
+    account = make_connection(owner)
+    monkeypatch.setattr(jobs, '_dispatch_task', Mock())
+    handle = jobs.start_or_get_job(owner, account, article)
+    error = locked(13)
+    monkeypatch.setattr(jobs, '_task_snapshot', Mock(side_effect=error))
+    provider = Mock(side_effect=AssertionError('provider forbidden'))
+    monkeypatch.setattr(jobs, 'stream_full_translation', provider)
+    import logging
+    with caplog.at_level(logging.INFO):
+        jobs._run_persistent_task(handle.id, 1)
+    assert 'stage=claimed_snapshot' in caplog.text and 'sqlite_code=13' in caplog.text
+    assert article.full_content not in caplog.text
+    assert account.encrypted_access_token not in caplog.text
+    assert 'SELECT ' not in caplog.text and 'UPDATE ' not in caplog.text
+    provider.assert_not_called()
+
+
+def test_claim_write_rollback_then_one_token_wins(owner, article, monkeypatch):
+    account = make_connection(owner)
+    monkeypatch.setattr(jobs, '_dispatch_task', Mock())
+    handle = jobs.start_or_get_job(owner, account, article)
+    original = QuerySet.update
+    writes = []
+    def update(query, **kwargs):
+        result = original(query, **kwargs)
+        if query.model is ChatGPTTranslationTask and kwargs.get('status') == 'running':
+            writes.append(1)
+            if len(writes) == 1:
+                raise locked()
+        return result
+    monkeypatch.setattr(QuerySet, 'update', update)
+    token = uuid.uuid4()
+    assert jobs._claim_persistent_task(handle.id, 1, token) == 1
+    assert jobs._claim_persistent_task(handle.id, 1, uuid.uuid4()) == 0
+    task = ChatGPTTranslationTask.objects.get(pk=handle.id)
+    assert len(writes) == 2 and task.run_token == token and task.generation == 1
+    assert task.status == 'running' and not task.provider_started
+
+
+def test_sse_poll_retries_transient_read_lock_without_dispatch(owner, article, monkeypatch):
+    handle, token, _ = running(owner, article, monkeypatch)
+    original = QuerySet.first
+    calls = []
+    def first(query):
+        if query.model is ChatGPTTranslationTask:
+            calls.append(1)
+            if len(calls) == 1:
+                raise locked()
+        return original(query)
+    monkeypatch.setattr(QuerySet, 'first', first)
+    before = jobs._dispatch_task.call_count
+    task = jobs.get_task(handle.id, user_id=owner.pk)
+    assert len(calls) == 2 and task.run_token == token
+    assert jobs._dispatch_task.call_count == before
+    assert jobs.get_task(handle.id, user_id=owner.pk + 100) is None

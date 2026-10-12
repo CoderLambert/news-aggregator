@@ -59,7 +59,7 @@ for mode in ('memory', 'wal'):
         print(result.stdout, end='')
         if result.stderr:
             print(result.stderr, file=sys.stderr, end='')
-        record = {'suite': args.suite, 'tests_per_run': 3 if args.suite == 'worker' else 1, 'database': mode, 'iteration': iteration, 'exit_code': result.returncode,
+        record = {'suite': args.suite, 'tests_per_run': 4 if args.suite == 'worker' else 1, 'database': mode, 'iteration': iteration, 'exit_code': result.returncode,
             'model_guards_zero': 'MODEL_GUARDS: zero calls' in result.stdout}
         records.append(record)
         if args.output:

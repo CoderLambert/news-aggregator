@@ -202,7 +202,8 @@ def get_task(task_id, *, user_id=None):
     query = ChatGPTTranslationTask.objects.filter(pk=task_id)
     if user_id is not None:
         query = query.filter(user_id=user_id)
-    try:
+
+    def read_state():
         task = query.first()
         if task is None:
             return None
@@ -210,6 +211,9 @@ def get_task(task_id, *, user_id=None):
             _recover_expired(task.pk, user_id=user_id)
             task = query.first()
         return task
+
+    try:
+        return _retry_task_database_operation(read_state, stage="task_poll")
     except OperationalError:
         raise SubscriptionError(
             '任务状态暂时不可用，请稍后重试。', 'task_storage_busy', 503,
@@ -225,7 +229,8 @@ def get_job(user_id, connection_id, news_id, source_digest=None):
         user_id=user_id, connection_id=connection_id, news_id=news_id,
         source_digest=source_digest,
     )
-    try:
+
+    def read_state():
         task = query.order_by('-updated_at').first()
         if task is None:
             return None
@@ -233,6 +238,9 @@ def get_job(user_id, connection_id, news_id, source_digest=None):
             _recover_expired(task.pk, user_id=user_id)
             task = query.order_by('-updated_at').first()
         return _handle(task) if task is not None else None
+
+    try:
+        return _retry_task_database_operation(read_state, stage="job_lookup")
     except OperationalError:
         raise SubscriptionError(
             '任务状态暂时不可用，请稍后重试。', 'task_storage_busy', 503,
@@ -330,6 +338,20 @@ def _reset_task(task_id, generation, *, connection, shared_lease, now, expected_
 SUBMISSION_LOCK_DELAYS = (0.02, 0.04, 0.08, 0.16, 0.32)
 
 
+def _sqlite_error_details(error):
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        if isinstance(error, sqlite3.Error):
+            code = getattr(error, 'sqlite_errorcode', None)
+            name = getattr(error, 'sqlite_errorname', None)
+            if not isinstance(name, str) or not name.startswith('SQLITE_') or name.upper() != name or not name.replace('_', '').isalnum():
+                name = None
+            return code if isinstance(code, int) else None, name
+        error = getattr(error, '__cause__', None) or getattr(error, '__context__', None)
+    return None, None
+
+
 def _is_task_sqlite_lock(error):
     """Match driver result codes, never arbitrary error-message text."""
     if db_connection.vendor != 'sqlite':
@@ -352,20 +374,14 @@ def _retry_task_database_operation(operation, *, stage="submission"):
         try:
             return operation()
         except OperationalError as error:
-            if nested or not _is_task_sqlite_lock(error) or attempt == len(SUBMISSION_LOCK_DELAYS):
+            retry = not nested and _is_task_sqlite_lock(error) and attempt < len(SUBMISSION_LOCK_DELAYS)
+            code, name = _sqlite_error_details(error)
+            logger.info('Task DB error (stage=%s, sqlite_code=%s, sqlite_name=%s, attempt=%s, retry=%s).',
+                        stage, code, name, attempt + 1, retry)
+            if not retry:
                 raise
-            # operation's atomic block has already rolled back; no lock is held
-            # during backoff and no provider/dispatch operation is retried.
-            driver = error
-            seen = set()
-            while getattr(driver, 'sqlite_errorcode', None) is None and id(driver) not in seen:
-                seen.add(id(driver))
-                driver = getattr(driver, '__cause__', None) or getattr(driver, '__context__', None)
-                if driver is None:
-                    break
-            logger.info('Task DB lock retry (stage=%s, sqlite_code=%s, sqlite_name=%s, attempt=%s).',
-                        stage, getattr(driver, 'sqlite_errorcode', None),
-                        getattr(driver, 'sqlite_errorname', None), attempt + 1)
+            # The failed atomic block has rolled back before sleeping. Never
+            # replay provider calls or the whole worker.
             time.sleep(SUBMISSION_LOCK_DELAYS[attempt] * random.uniform(0.5, 1.5))
 
 
@@ -656,7 +672,9 @@ def _append_delta(task_id, generation, run_token, delta):
 @contextmanager
 def _task_heartbeat(task_id, generation, run_token, shared_lease=None):
     stopped = threading.Event()
-    if shared_lease is not None and not shared_lease.current().exists():
+    if shared_lease is not None and not _retry_task_database_operation(
+        lambda: shared_lease.current().exists(), stage="shared_lease_check",
+    ):
         raise SharedTranslationError('共享翻译任务已过期，请重新开始。')
 
     def heartbeat():
@@ -775,71 +793,78 @@ def _mark_failed(task_id, generation, run_token, exc):
         logger.info('ChatGPT translation failure state was not saved (%s).', type(finish_exc).__name__)
         return False
 
+def _claim_persistent_task(task_id, generation, run_token):
+    def persist():
+        with transaction.atomic():
+            queued_task = _queued_task_snapshot(task_id, generation)
+            if queued_task is None:
+                return 0
+            now = timezone.now()
+            return ChatGPTTranslationTask.objects.filter(
+                pk=task_id, generation=generation, status='queued',
+                connection_id=queued_task.connection_id,
+                connection_generation=queued_task.connection_generation,
+                model_slug=queued_task.model_slug,
+                user__is_active=True,
+                connection__user_id=F('user_id'),
+                connection__is_active=True,
+                connection__needs_reauth=False,
+                connection__generation=F('connection_generation'),
+                connection__selected_model=F('model_slug'),
+                connection__encrypted_access_token__gt='',
+                connection__encrypted_refresh_token__gt='',
+                news__full_content=queued_task.news.full_content,
+                news__full_content__gt='',
+            ).update(
+                status='running', run_token=run_token, provider_started=False,
+                started_at=now, lease_expires_at=now + TASK_LEASE_TTL,
+                error_code='', error_message='', finished_at=None, updated_at=now,
+            )
+    return _retry_task_database_operation(persist, stage="claim")
+
+
 def _run_persistent_task(task_id, generation):
     close_old_connections()
     key = (str(task_id), int(generation))
     run_token = uuid.uuid4()
     claimed = False
+    db_stage = "claim"
     try:
-        try:
-            queued_task = _queued_task_snapshot(task_id, generation)
-        except Exception as exc:
-            code, message = _safe_error(exc)
-            try:
-                _fail_queued_task(
-                    task_id, generation, error_code=code, error_message=message,
-                )
-            except Exception as finish_exc:
-                logger.info('ChatGPT queued translation state was not saved (%s).', type(finish_exc).__name__)
-            logger.info('ChatGPT article translation job ended before claim (%s).', type(exc).__name__)
-            return
-        if queued_task is None:
-            return
-        now = timezone.now()
-        claimed = ChatGPTTranslationTask.objects.filter(
-            pk=task_id, generation=generation, status='queued',
-            connection_id=queued_task.connection_id,
-            connection_generation=queued_task.connection_generation,
-            model_slug=queued_task.model_slug,
-            user__is_active=True,
-            connection__user_id=F('user_id'),
-            connection__is_active=True,
-            connection__needs_reauth=False,
-            connection__generation=F('connection_generation'),
-            connection__selected_model=F('model_slug'),
-            connection__encrypted_access_token__gt='',
-            connection__encrypted_refresh_token__gt='',
-            news__full_content=queued_task.news.full_content,
-            news__full_content__gt='',
-        ).update(
-            status='running', run_token=run_token, provider_started=False,
-            started_at=now, lease_expires_at=now + TASK_LEASE_TTL,
-            error_code='', error_message='', finished_at=None, updated_at=now,
-        )
+        claimed = _claim_persistent_task(task_id, generation, run_token)
         if not claimed:
             return
-        task = ChatGPTTranslationTask.objects.select_related(
-            'user', 'connection', 'news',
-        ).get(pk=task_id)
+        db_stage = "claimed_snapshot"
+        task = _retry_task_database_operation(
+            lambda: _task_snapshot(task_id, generation, run_token, require_started=False),
+            stage=db_stage,
+        )
         shared_lease = _lease_from_task(task)
-        _task_snapshot(task_id, generation, run_token, require_started=False)
+        db_stage = "provider_start"
         _mark_provider_started(task_id, generation, run_token)
         guard = _execution_guard(task_id, generation, run_token)
+        db_stage = "shared_lease_check"
         with _task_heartbeat(task_id, generation, run_token, shared_lease):
-            guard()
-            article = News.objects.only('full_content').get(pk=task.news_id)
+            db_stage = "article_snapshot"
+            source_task = _retry_task_database_operation(
+                lambda: _task_snapshot(task_id, generation, run_token), stage=db_stage,
+            )
+            db_stage = "provider_stream"
             output = stream_full_translation(
                 connection_id=task.connection_id,
                 expected_generation=task.connection_generation,
                 model_slug=task.model_slug,
-                article_markdown=article.full_content,
+                article_markdown=source_task.news.full_content,
                 on_delta=lambda delta: _append_delta(task_id, generation, run_token, delta),
                 execution_guard=guard,
             )
+            db_stage = "post_provider_guard"
             guard()
+            db_stage = "result_commit"
             _finalize_task(task_id, generation, run_token, output)
     except Exception as exc:
-        logger.info('ChatGPT article translation job ended without a saved result (%s).', type(exc).__name__)
+        code, name = _sqlite_error_details(exc)
+        logger.info('ChatGPT task ended without a saved result (stage=%s, error_type=%s, sqlite_code=%s, sqlite_name=%s).',
+                    db_stage, type(exc).__name__, code, name)
         if claimed:
             _mark_failed(task_id, generation, run_token, exc)
         else:
