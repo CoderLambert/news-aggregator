@@ -201,7 +201,7 @@ export default function NewsDetail() {
         />
       )}
 
-      <div className={`mx-auto w-full max-w-3xl overflow-x-hidden px-4 pb-28 pt-4 sm:pb-10 sm:pt-6 ${searchOpen ? 'pt-16' : ''}`}>
+      <div className={`mx-auto w-full max-w-5xl overflow-x-hidden px-4 pb-28 pt-4 sm:px-6 sm:pb-10 sm:pt-6 ${searchOpen ? 'pt-16' : ''}`}>
         <nav className="mb-8 flex items-center justify-between">
           <Link to={returnTo} className="inline-flex items-center gap-1.5 text-sm text-neutral-500 transition-colors hover:text-neutral-900">
             <ArrowLeft className="size-3.5" />{t.backToList}
@@ -275,7 +275,7 @@ export default function NewsDetail() {
           ) : null}
 
           <div className="mt-10 border-t border-neutral-100 pt-6">
-            <a href={news.url} target="_blank" rel="noreferrer" className="text-sm text-neutral-400 transition-colors hover:text-neutral-600">{t.readOriginal} →</a>
+            <a href={news.url} target="_blank" rel="noreferrer" className="text-sm text-neutral-400 transition-colors hover:text-neutral-600">{t.readOriginal}</a>
           </div>
         </article>
         {chatEnabled && <div hidden={assistantOpen}>

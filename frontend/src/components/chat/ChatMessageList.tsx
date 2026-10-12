@@ -46,14 +46,14 @@ export default function ChatMessageList({
       <div className="animate-message-pop-in flex h-full flex-col items-center justify-center px-4 text-center">
         <div className="animate-mascot-bob"><XiaowenMascot mood="happy" size={88} showShadow /></div>
         <p className="mt-4 text-base font-semibold text-neutral-900">嗨，我是小闻 👋</p>
-        <p className="mt-1.5 max-w-[240px] text-xs leading-relaxed text-neutral-500">我已经读完这篇文章了，你想聊点什么？下面是一些建议：</p>
-        <div className="mt-5 flex w-full max-w-[280px] flex-col gap-2">
+        <p className="mt-1.5 max-w-md text-sm leading-relaxed text-neutral-500">我已经读完这篇文章了，你想聊点什么？下面是一些建议：</p>
+        <div className="mt-5 grid w-full max-w-3xl grid-cols-1 gap-2 sm:grid-cols-2">
           {questions.map((question) => (
             <button
               key={question}
               type="button"
               onClick={() => onSuggestionClick?.(question)}
-              className="rounded-2xl border border-neutral-200 bg-white px-3.5 py-2.5 text-left text-xs text-neutral-700 shadow-sm transition-colors hover:border-orange-300 hover:bg-orange-50 hover:text-orange-900 focus:outline-none focus:ring-2 focus:ring-orange-200"
+              className="rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-left text-sm leading-relaxed text-neutral-700 transition-colors hover:border-orange-300 hover:bg-orange-50 hover:text-orange-900 focus:outline-none focus:ring-2 focus:ring-orange-200"
             >
               {question}
             </button>
@@ -77,7 +77,7 @@ export default function ChatMessageList({
   return (
     <>
       {messages.map((message, index) => (
-        <div key={message.id ?? `history-${index}`} className={`flex animate-message-pop-in ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+        <div key={message.id ?? `history-${index}`} className={`mx-auto flex w-full max-w-5xl animate-message-pop-in ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
           <div className={`max-w-full break-words rounded-2xl px-4 py-3 text-[15px] leading-relaxed sm:max-w-[85%] ${message.role === 'user' ? 'rounded-tr-md bg-gradient-to-br from-orange-500 to-orange-600 text-white shadow-sm' : 'rounded-tl-md border border-neutral-200 bg-white text-neutral-800 shadow-sm'}`}>
             {message.role === 'assistant' ? (
               message.content ? (

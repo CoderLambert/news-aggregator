@@ -124,7 +124,7 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
       <div
         className={`pointer-events-auto relative flex flex-col overflow-hidden bg-card border border-border shadow-2xl transition-all ${
           isFullscreen
-            ? 'h-full w-full sm:h-[90vh] sm:w-[500px] sm:rounded-2xl'
+            ? 'h-full w-full rounded-none md:h-[94dvh] md:w-[94vw] md:max-w-[1440px] md:rounded-2xl'
             : 'h-[85vh] w-full rounded-t-3xl sm:h-[640px] sm:w-[460px] sm:rounded-2xl'
         }`}
       >
@@ -138,7 +138,7 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
         />
 
         {/* Context Status Banner */}
-        <div className="border-b border-border bg-secondary/60 px-3.5 py-1.5 flex items-center justify-between text-[11px]">
+        <div className="flex items-center justify-between border-b border-border bg-secondary/60 px-4 py-2 text-[11px] md:px-6 md:text-xs">
           <div className="flex items-center gap-1.5 font-medium">
             <span className={`size-2 rounded-full ${articleContext?.hasFullContent ? 'bg-emerald-500' : 'bg-amber-400'}`} />
             <span className={articleContext?.hasFullContent ? 'text-emerald-800 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-300'}>
@@ -159,7 +159,7 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
           )}
         </div>
 
-        <div className="flex-1 space-y-4 overflow-y-auto overscroll-contain bg-secondary/10 p-3 sm:p-4">
+        <div className="flex-1 space-y-4 overflow-y-auto overscroll-contain bg-secondary/10 p-4 sm:p-5 md:p-8">
           {messages.length === 0 && (
             <div className="rounded-xl border border-border bg-secondary/30 p-3 text-xs text-muted-foreground space-y-2">
               <p className="font-medium text-foreground">💡 快速向小闻提问：</p>
