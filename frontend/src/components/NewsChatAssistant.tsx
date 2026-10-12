@@ -159,7 +159,7 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
           )}
         </div>
 
-        <div className="flex-1 space-y-4 overflow-y-auto overscroll-contain bg-secondary/10 p-4 sm:p-5 md:p-8">
+        <div className="flex-1 space-y-3 overflow-y-auto overscroll-contain bg-secondary/10 p-4 sm:p-5 md:p-8">
           {messages.length === 0 && (
             <div className="rounded-xl border border-border bg-secondary/30 p-3 text-xs text-muted-foreground space-y-2">
               <p className="font-medium text-foreground">💡 快速向小闻提问：</p>

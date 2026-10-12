@@ -78,10 +78,10 @@ export default function ChatMessageList({
     <>
       {messages.map((message, index) => (
         <div key={message.id ?? `history-${index}`} className={`mx-auto flex w-full max-w-5xl animate-message-pop-in ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-          <div className={`max-w-full break-words rounded-2xl px-4 py-3 text-[15px] leading-relaxed sm:max-w-[85%] ${message.role === 'user' ? 'rounded-tr-md bg-gradient-to-br from-orange-500 to-orange-600 text-white shadow-sm' : 'rounded-tl-md border border-neutral-200 bg-white text-neutral-800 shadow-sm'}`}>
+          <div className={`max-w-full break-words rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed sm:max-w-[85%] ${message.role === 'user' ? 'rounded-tr-md bg-gradient-to-br from-orange-500 to-orange-600 text-white shadow-sm' : 'rounded-tl-md border border-neutral-200 bg-white text-neutral-800 shadow-sm'}`}>
             {message.role === 'assistant' ? (
               message.content ? (
-                <div className="prose prose-sm max-w-none"><MarkdownContent content={message.content} /></div>
+                <div className="chat-message-markdown"><MarkdownContent content={message.content} /></div>
               ) : (
                 <div className="flex flex-col items-start gap-1 py-0.5" role="status" aria-label="小闻正在思考">
                   <div className="flex items-center gap-1.5 px-1"><span className="thinking-dot" /><span className="thinking-dot" /><span className="thinking-dot" /></div>
