@@ -12,6 +12,7 @@ import threading
 from unittest.mock import patch
 
 import pytest
+from django.contrib.auth.models import User
 from django.utils import timezone
 
 from api.models import Category, Source, News
@@ -26,6 +27,11 @@ def clear_jobs():
     yield
     with translation_jobs._jobs_lock:
         translation_jobs._jobs.clear()
+
+
+@pytest.fixture(autouse=True)
+def authenticated_reader(db, client):
+    client.force_login(User.objects.create_user(username='translation-reader'))
 
 
 @pytest.fixture
@@ -182,6 +188,6 @@ def test_missing_provider_returns_actionable_sse_error_without_starting_job(news
     assert response['Content-Type'].startswith('text/event-stream')
     assert '"error"' in body
     assert '未配置全文翻译模型提供方' in body
-    assert 'Volcengine ARK / DashScope' in body
+    assert '选择厂商、模型并配置自己的 API Key' in body
     news_obj.refresh_from_db()
     assert news_obj.full_content_zh == ''

@@ -3,18 +3,23 @@ from django.core.management import call_command
 from django.utils import timezone
 import io
 import json
+import socket
 import pytest
 from rest_framework.test import APIClient
 
 from api.models import Category, News, ProviderComparison, Source
+from api.services.article_fetcher import safe_http
 from api.services.article_fetcher.types import FetchResult
 
 
 @pytest.fixture(autouse=True)
 def mock_public_comparison_dns(monkeypatch):
     monkeypatch.setattr(
-        'api.services.article_fetcher.comparison.socket.getaddrinfo',
-        lambda host, port, *args, **kwargs: [(None, None, None, '', ('93.184.216.34', port))],
+        safe_http.socket,
+        'getaddrinfo',
+        lambda host, port, *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('93.184.216.34', port))
+        ],
     )
 
 
@@ -70,7 +75,9 @@ def test_provider_comparison_api_post_get_list_and_retest(monkeypatch, news):
         'api.services.article_fetcher.comparison.get_provider_chain',
         fake_provider_chain,
     )
-    user = User.objects.create_user(username='provider-user', password='test123')
+    user = User.objects.create_superuser(
+        username='provider-user', email='provider-user@example.test', password='test123',
+    )
     client = APIClient()
     client.force_login(user)
 
@@ -118,7 +125,9 @@ def test_provider_comparison_write_requires_authentication_and_csrf(monkeypatch,
         'api.services.article_fetcher.comparison.get_provider_chain',
         lambda provider_names=None: [ApiSuccessProvider()],
     )
-    user = User.objects.create_user(username='provider-admin', password='test123')
+    user = User.objects.create_superuser(
+        username='provider-admin', email='provider-admin@example.test', password='test123',
+    )
 
     anonymous = APIClient(enforce_csrf_checks=True)
     anonymous_response = anonymous.post(
@@ -155,7 +164,9 @@ def test_provider_comparison_rejects_private_and_unadapted_urls(monkeypatch, db)
         'api.services.article_fetcher.comparison.get_provider_chain',
         lambda provider_names=None: [ApiSuccessProvider()],
     )
-    user = User.objects.create_user(username='provider-admin', password='test123')
+    user = User.objects.create_superuser(
+        username='provider-admin', email='provider-admin@example.test', password='test123',
+    )
     client = APIClient()
     client.force_login(user)
 
@@ -181,7 +192,9 @@ def test_provider_comparison_rejects_unknown_providers(monkeypatch, news):
         'api.services.article_fetcher.comparison.get_provider_chain',
         lambda provider_names=None: [],
     )
-    user = User.objects.create_user(username='provider-admin', password='test123')
+    user = User.objects.create_superuser(
+        username='provider-admin', email='provider-admin@example.test', password='test123',
+    )
     client = APIClient()
     client.force_login(user)
 
@@ -201,7 +214,9 @@ def test_provider_comparison_api_url_only_request(monkeypatch, db):
         'api.services.article_fetcher.comparison.get_provider_chain',
         lambda provider_names=None: [ApiSuccessProvider()],
     )
-    user = User.objects.create_user(username='provider-url-user', password='test123')
+    user = User.objects.create_superuser(
+        username='provider-url-user', email='provider-url-user@example.test', password='test123',
+    )
     client = APIClient()
     client.force_login(user)
 

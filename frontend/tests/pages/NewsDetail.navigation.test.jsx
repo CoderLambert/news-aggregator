@@ -6,6 +6,7 @@ import { AuthContext } from '@/context/AuthContext'
 import { usePreferencesStore } from '@/stores/preferences'
 import NewsList from '@/pages/NewsList'
 import NewsDetail from '@/pages/NewsDetail'
+import { CapabilitiesTestProvider } from '../helpers/capabilities'
 import { blockNews, checkFavoriteStatus, fetchCategories, fetchNews, fetchNewsDetail, fetchSources, unblockNews } from '@/services/api'
 
 const apiState = vi.hoisted(() => ({ blocked: false, fetchFullArticle: vi.fn(), translate: vi.fn(), translateError: '' }))
@@ -68,15 +69,17 @@ function renderRoutes(initialEntry, user = { id: 12, username: 'reader' }) {
     client,
     ...render(
       <QueryClientProvider client={client}>
-        <AuthContext.Provider value={{ user, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
-          <MemoryRouter initialEntries={[initialEntry]}>
-            <Routes>
-              <Route path="/" element={<NewsList />} />
-              <Route path="/news/:id" element={<NewsDetail />} />
-            </Routes>
-            <RouteProbe />
-          </MemoryRouter>
-        </AuthContext.Provider>
+        <CapabilitiesTestProvider client={client}>
+          <AuthContext.Provider value={{ user, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
+            <MemoryRouter initialEntries={[initialEntry]}>
+              <Routes>
+                <Route path="/" element={<NewsList />} />
+                <Route path="/news/:id" element={<NewsDetail />} />
+              </Routes>
+              <RouteProbe />
+            </MemoryRouter>
+          </AuthContext.Provider>
+        </CapabilitiesTestProvider>
       </QueryClientProvider>,
     ),
   }

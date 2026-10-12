@@ -13,12 +13,14 @@ const api = vi.hoisted(() => ({
   createResearchStream: vi.fn(),
   researchChatStream: vi.fn(),
   openResearchSessionStream: vi.fn(),
+  cancelResearchRun: vi.fn(),
 }))
 
 vi.mock('@/services/researchApi', () => api)
 vi.mock('@gsap/react', () => ({ useGSAP: () => {} }))
 
 import ResearchLauncher from '@/components/research/ResearchLauncher'
+import { CapabilitiesTestProvider } from '../../helpers/capabilities'
 
 function waitForAbort(signal) {
   return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))
@@ -59,10 +61,12 @@ function renderPanel(route = '/', withDetailLauncher = false, user = signedInUse
         logout: vi.fn(),
         refresh: vi.fn(),
       }}>
-        <MemoryRouter initialEntries={[route]}>
-          {withDetailLauncher && <button type="button" aria-label="打开 AI 助手小闻" className="fixed bottom-6 right-6 size-16" />}
-          <ResearchLauncher />
-        </MemoryRouter>
+        <CapabilitiesTestProvider client={client}>
+          <MemoryRouter initialEntries={[route]}>
+            {withDetailLauncher && <button type="button" aria-label="打开 AI 助手小闻" className="fixed bottom-6 right-6 size-16" />}
+            <ResearchLauncher />
+          </MemoryRouter>
+        </CapabilitiesTestProvider>
       </AuthContext.Provider>
     </QueryClientProvider>,
   )
@@ -75,6 +79,7 @@ beforeEach(() => {
   api.getResearchSession.mockImplementation(async () => completedSession())
   api.getResearchResults.mockResolvedValue({ count: 0, next: null, previous: null, results: [] })
   api.deleteResearchSession.mockResolvedValue(undefined)
+  api.cancelResearchRun.mockResolvedValue({ status: 'running' })
 })
 
 describe('ResearchPanel', () => {
@@ -104,7 +109,7 @@ describe('ResearchPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
     await screen.findByRole('dialog', { name: '新闻研究助手' })
     fireEvent.click(await screen.findByRole('button', { name: '分析 AI 芯片竞争格局' }))
-    await screen.findByRole('button', { name: '停止接收当前研究进度' })
+    await screen.findByRole('button', { name: '取消研究任务' })
     await waitFor(() => expect(Object.keys(sessionStorage).some((key) => key.includes('panel-session'))).toBe(true))
 
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))
@@ -113,6 +118,7 @@ describe('ResearchPanel', () => {
     await waitFor(() => expect(launcher).toHaveFocus())
     expect(requestSignal.aborted).toBe(true)
     expect(screen.queryByRole('dialog', { name: '新闻研究助手' })).not.toBeInTheDocument()
+    expect(api.cancelResearchRun).not.toHaveBeenCalled()
   })
 
   it('closes the session menu on Escape before closing the research panel', async () => {
@@ -198,7 +204,10 @@ describe('ResearchPanel', () => {
 
   it('recovers focus when a busy control is removed and keeps outside focus from escaping the active dialog', async () => {
     const user = userEvent.setup()
-    api.createResearchStream.mockImplementation((_query, { signal }) => pausedResearch(signal))
+    api.createResearchStream.mockImplementation((_query, options) => {
+      options.onRunId('run-focus')
+      return pausedResearch(options.signal)
+    })
     api.openResearchSessionStream.mockResolvedValue({
       kind: 'events',
       events: (async function* replay() {
@@ -211,7 +220,7 @@ describe('ResearchPanel', () => {
     const dialog = await screen.findByRole('dialog', { name: '新闻研究助手' })
     await user.click(screen.getByRole('button', { name: '分析 AI 芯片竞争格局' }))
 
-    const stopButton = await screen.findByRole('button', { name: '停止接收当前研究进度' })
+    const stopButton = await screen.findByRole('button', { name: '取消研究任务' })
     stopButton.focus()
     expect(stopButton).toHaveFocus()
     await user.click(stopButton)
@@ -276,7 +285,7 @@ describe('ResearchPanel', () => {
     await waitFor(() => expect(loginButton).toHaveFocus())
   })
 
-  it('warns that retry may duplicate work after stopping before a response header', async () => {
+  it('warns about an uncertain pre-header request and resumes only with the same idempotency key', async () => {
     const user = userEvent.setup()
     api.createResearchStream.mockImplementationOnce((_query, { signal }) => (async function* firstAttempt() {
       yield { type: 'thinking' }
@@ -290,16 +299,21 @@ describe('ResearchPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
     await screen.findByRole('dialog', { name: '新闻研究助手' })
     fireEvent.click(screen.getByRole('button', { name: '分析 AI 芯片竞争格局' }))
-    fireEvent.click(await screen.findByRole('button', { name: '停止接收当前研究进度' }))
+    await screen.findByRole('button', { name: '取消研究任务' })
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent('原请求可能已到达服务器')
-    expect(screen.getByRole('status')).toHaveTextContent('可能重复计算或产生费用')
+    expect(screen.getByRole('status')).toHaveTextContent('复用原请求标识')
     expect(api.createResearchStream).toHaveBeenCalledTimes(1)
-    const retryButton = screen.getByRole('button', { name: '重新研究' })
-    retryButton.focus()
-    expect(retryButton).toHaveFocus()
-    await user.click(retryButton)
+    const resumeButton = screen.getByRole('button', { name: '继续接收' })
+    resumeButton.focus()
+    expect(resumeButton).toHaveFocus()
+    await user.click(resumeButton)
     await waitFor(() => expect(api.createResearchStream).toHaveBeenCalledTimes(2))
+    const firstKey = api.createResearchStream.mock.calls[0][1].idempotencyKey
+    const resumedKey = api.createResearchStream.mock.calls[1][1].idempotencyKey
+    expect(firstKey).toMatch(/^[0-9a-f-]{36}$/)
+    expect(resumedKey).toBe(firstKey)
     const dialog = screen.getByRole('dialog', { name: '新闻研究助手' })
     await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
   })
@@ -313,7 +327,7 @@ describe('ResearchPanel', () => {
     renderPanel()
     fireEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
     fireEvent.click(await screen.findByRole('button', { name: '分析 AI 芯片竞争格局' }))
-    await screen.findByRole('button', { name: '停止接收当前研究进度' })
+    await screen.findByRole('button', { name: '取消研究任务' })
 
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))
 
@@ -325,9 +339,10 @@ describe('ResearchPanel', () => {
 
   it('shows streaming cancellation and reconnect controls, then displays the persisted result', async () => {
     let requestSignal
-    api.createResearchStream.mockImplementation((_query, { signal }) => {
-      requestSignal = signal
-      return pausedResearch(signal)
+    api.createResearchStream.mockImplementation((_query, options) => {
+      requestSignal = options.signal
+      options.onRunId('run-streaming')
+      return pausedResearch(options.signal)
     })
     api.openResearchSessionStream.mockResolvedValue({
       kind: 'events',
@@ -342,9 +357,10 @@ describe('ResearchPanel', () => {
     expect(await screen.findByRole('dialog', { name: '新闻研究助手' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '分析 AI 芯片竞争格局' }))
 
-    const cancelButton = await screen.findByRole('button', { name: '停止接收当前研究进度' })
+    const cancelButton = await screen.findByRole('button', { name: '取消研究任务' })
     expect(requestSignal.aborted).toBe(false)
     fireEvent.click(cancelButton)
+    await waitFor(() => expect(api.cancelResearchRun).toHaveBeenCalledWith('panel-session', 'run-streaming'))
 
     const resumeButton = await screen.findByRole('button', { name: '继续接收' })
     expect(requestSignal.aborted).toBe(true)
@@ -384,13 +400,15 @@ describe('ResearchPanel', () => {
     renderPanel()
     fireEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
     await screen.findByRole('dialog', { name: '新闻研究助手' })
-    await waitFor(() => expect(api.openResearchSessionStream).toHaveBeenCalledWith(history.id, expect.any(AbortSignal)))
+    await waitFor(() => expect(api.openResearchSessionStream).toHaveBeenCalledWith(
+      history.id, expect.any(AbortSignal), expect.any(Function), false,
+    ))
 
     const input = screen.getByRole('textbox', { name: '输入研究问题' })
     fireEvent.change(input, { target: { value: '探测期间保留草稿' } })
     fireEvent.keyDown(input, { key: 'Enter', shiftKey: false })
     expect(input).toHaveValue('探测期间保留草稿')
-    expect(screen.getByRole('button', { name: '停止接收当前研究进度' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '取消研究任务' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '最近 LLM Agent 有什么新进展？' })).toBeDisabled()
     expect(api.createResearchStream).not.toHaveBeenCalled()
     expect(api.researchChatStream).not.toHaveBeenCalled()

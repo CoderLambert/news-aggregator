@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLanguage } from '@/context/useLanguage'
 import {
+  cancelResearchRun,
   createResearchStream,
   deleteResearchSession,
   openResearchSessionStream,
   researchChatStream,
+  resumeQueuedResearchRun,
 } from '@/services/researchApi'
 import {
   researchKeys,
@@ -39,6 +41,15 @@ const ERROR_MESSAGE = '研究过程中遇到了问题，请稍后再试。'
 const CANCEL_NOTICE = '已停止接收流式进度。服务器任务可能仍在运行；需要时可继续接收。'
 const RECOVERY_STORAGE_PREFIX = 'news-aggregator:research-recovery:v1'
 
+function newIdempotencyKey(): string {
+  const bytes = new Uint8Array(16)
+  globalThis.crypto.getRandomValues(bytes)
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 interface StoredResearchRecovery {
   version: 1
   taskId: string
@@ -46,6 +57,9 @@ interface StoredResearchRecovery {
   query: string
   localOnly: boolean
   startingMessageCount: number
+  idempotencyKey: string | null
+  runId: string | null
+  mode: 'create' | 'chat' | null
 }
 
 interface ResearchSelection {
@@ -57,10 +71,17 @@ interface ResearchSelection {
 
 interface ActiveConnection {
   id: string
+  viewerId: ResearchViewerId
   taskKey: string
   controller: AbortController
   selectOnCreate: boolean
+  idempotencyKey: string | null
+  runId: string | null
+  requestMode: 'create' | 'chat' | null
+  cancelRequested: boolean
+  cancelCallStarted: boolean
 }
+
 
 function selectionForViewer(selection: ResearchSelection, viewerId: ResearchViewerId | null): ResearchSelection {
   return selection.viewerId === viewerId
@@ -76,11 +97,101 @@ function draftStorageKey(viewerId: ResearchViewerId, taskId: string): string {
   return `${String(viewerId)}:draft:${taskId}`
 }
 
+
+const PENDING_CREATE_PREFIX = 'news-aggregator:research-pending-create:v1'
+
+interface PendingResearchCreate {
+  version: 1
+  taskId: string
+  idempotencyKey: string
+  query: string
+  localOnly: boolean
+  createdAt: number
+}
+
+function pendingCreateStorageKey(viewerId: ResearchViewerId): string {
+  return PENDING_CREATE_PREFIX + ':' + encodeURIComponent(String(viewerId))
+}
+
+function savePendingCreate(viewerId: ResearchViewerId, task: ResearchTaskSnapshot, key: string): void {
+  if (task.sessionId) return
+  const value: PendingResearchCreate = {
+    version: 1, taskId: task.id, idempotencyKey: key, query: task.query,
+    localOnly: task.localOnly, createdAt: Date.now(),
+  }
+  try {
+    window.sessionStorage.setItem(pendingCreateStorageKey(viewerId), JSON.stringify(value))
+  } catch {
+    // An unavailable session store cannot provide pre-header recovery.
+  }
+}
+
+function clearPendingCreate(viewerId: ResearchViewerId, expectedKey?: string): void {
+  try {
+    if (expectedKey) {
+      const current = loadPendingCreate(viewerId)
+      if (!current || current.idempotencyKey !== expectedKey) return
+    }
+    window.sessionStorage.removeItem(pendingCreateStorageKey(viewerId))
+  } catch {
+    // Browser storage is optional.
+  }
+}
+
+function loadPendingCreate(viewerId: ResearchViewerId): PendingResearchCreate | null {
+  try {
+    const raw: unknown = JSON.parse(window.sessionStorage.getItem(pendingCreateStorageKey(viewerId)) ?? 'null')
+    if (!isRecord(raw)) return null
+    const valid = raw.version === 1 && typeof raw.taskId === 'string'
+      && typeof raw.idempotencyKey === 'string' && /^[\x20-\x7e]{1,64}$/.test(raw.idempotencyKey)
+      && typeof raw.query === 'string' && raw.query.length > 0 && raw.query.length <= 20_000
+      && typeof raw.localOnly === 'boolean' && typeof raw.createdAt === 'number'
+      && Number.isFinite(raw.createdAt) && raw.createdAt <= Date.now()
+      && Date.now() - raw.createdAt <= 24 * 60 * 60 * 1000
+    if (valid) return raw as unknown as PendingResearchCreate
+    clearPendingCreate(viewerId)
+  } catch {
+    // Invalid JSON must never turn into a fresh paid request.
+  }
+  return null
+}
+
+function pendingCreateSnapshot(pending: PendingResearchCreate): ResearchTaskSnapshot {
+  return {
+    ...createResearchTask(pending.taskId, pending.query, pending.localOnly, [], null),
+    phase: 'cancelled',
+    recovery: 'resume',
+    notice: '无法确认原研究请求是否到达服务器。继续接收将使用相同请求标识，不会创建第二个不同的请求。',
+  }
+}
+
+function preserveUnknownCreate(
+  connection: ActiveConnection,
+  task: ResearchTaskSnapshot,
+): ResearchTaskSnapshot {
+  if (task.sessionId || connection.requestMode !== 'create') return task
+  const pending = loadPendingCreate(connection.viewerId)
+  if (pending?.idempotencyKey !== connection.idempotencyKey) return task
+  // An error/EOF before Session-ID cannot prove the server rejected the POST.
+  // Never replace the existing key with a fresh paid attempt automatically.
+  return {
+    ...task,
+    recovery: 'resume',
+    notice: '原请求可能已到达服务器。请继续接收原任务；将使用相同请求标识，不会自动创建新任务。',
+  }
+}
+
 function recoveryStorageKey(viewerId: ResearchViewerId, sessionId: string): string {
   return `${RECOVERY_STORAGE_PREFIX}:${encodeURIComponent(String(viewerId))}:${encodeURIComponent(sessionId)}`
 }
 
-function saveStoredRecovery(viewerId: ResearchViewerId, task: ResearchTaskSnapshot): void {
+function saveStoredRecovery(
+  viewerId: ResearchViewerId,
+  task: ResearchTaskSnapshot,
+  idempotencyKey: string | null = null,
+  runId: string | null = null,
+  mode: 'create' | 'chat' | null = null,
+): void {
   if (!task.sessionId || typeof window === 'undefined') return
   const stored: StoredResearchRecovery = {
     version: 1,
@@ -89,6 +200,9 @@ function saveStoredRecovery(viewerId: ResearchViewerId, task: ResearchTaskSnapsh
     query: task.query,
     localOnly: task.localOnly,
     startingMessageCount: task.startingMessageCount,
+    idempotencyKey,
+    runId,
+    mode,
   }
   try {
     window.sessionStorage.setItem(recoveryStorageKey(viewerId, task.sessionId), JSON.stringify(stored))
@@ -101,6 +215,23 @@ function clearStoredRecovery(viewerId: ResearchViewerId, sessionId: string): voi
   if (typeof window === 'undefined') return
   try { window.sessionStorage.removeItem(recoveryStorageKey(viewerId, sessionId)) } catch { /* storage is optional */ }
 }
+
+function clearViewerRecovery(viewerId: ResearchViewerId): void {
+  if (typeof window === 'undefined') return
+  clearPendingCreate(viewerId)
+  const prefix = `${RECOVERY_STORAGE_PREFIX}:${encodeURIComponent(String(viewerId))}:`
+  try {
+    const keys: string[] = []
+    for (let index = 0; index < window.sessionStorage.length; index += 1) {
+      const key = window.sessionStorage.key(index)
+      if (key?.startsWith(prefix)) keys.push(key)
+    }
+    keys.forEach((key) => window.sessionStorage.removeItem(key))
+  } catch {
+    // Storage is optional; viewer-scoped keys still prevent cross-owner recovery.
+  }
+}
+
 
 function loadStoredRecovery(viewerId: ResearchViewerId, sessionId: string): StoredResearchRecovery | null {
   if (typeof window === 'undefined') return null
@@ -115,7 +246,10 @@ function loadStoredRecovery(viewerId: ResearchViewerId, sessionId: string): Stor
       || typeof value.localOnly !== 'boolean'
       || typeof value.startingMessageCount !== 'number'
       || !Number.isInteger(value.startingMessageCount)
-      || value.startingMessageCount < 0) {
+      || value.startingMessageCount < 0
+      || (value.idempotencyKey !== undefined && value.idempotencyKey !== null && typeof value.idempotencyKey !== 'string')
+      || (value.runId !== undefined && value.runId !== null && typeof value.runId !== 'string')
+      || (value.mode !== undefined && value.mode !== null && value.mode !== 'create' && value.mode !== 'chat')) {
       clearStoredRecovery(viewerId, sessionId)
       return null
     }
@@ -126,6 +260,9 @@ function loadStoredRecovery(viewerId: ResearchViewerId, sessionId: string): Stor
       query: value.query,
       localOnly: value.localOnly,
       startingMessageCount: value.startingMessageCount,
+      idempotencyKey: typeof value.idempotencyKey === 'string' ? value.idempotencyKey : null,
+      runId: typeof value.runId === 'string' ? value.runId : null,
+      mode: value.mode === 'create' || value.mode === 'chat' ? value.mode : null,
     }
   } catch {
     return null
@@ -277,11 +414,12 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     enabled: viewerId !== null,
   })
   const sessions = sessionsQuery.data?.results ?? []
-  const [selection, setSelection] = useState<ResearchSelection>({
-    viewerId,
-    sessionId: null,
-    newSession: false,
-    draftKey: null,
+  const [selection, setSelection] = useState<ResearchSelection>(() => {
+    const pending = viewerId !== null ? loadPendingCreate(viewerId) : null
+    return {
+      viewerId, sessionId: null, newSession: Boolean(pending),
+      draftKey: pending && viewerId !== null ? draftStorageKey(viewerId, pending.taskId) : null,
+    }
   })
   const currentSelection = selectionForViewer(selection, viewerId)
   const activeSessionId = currentSelection.sessionId ?? (currentSelection.newSession ? null : sessions[0]?.id ?? null)
@@ -298,7 +436,12 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: researchKeys.sessions(queryViewerId, lang) }),
   })
 
-  const [taskSnapshots, setTaskSnapshots] = useState<Map<string, ResearchTaskSnapshot>>(() => new Map())
+  const [taskSnapshots, setTaskSnapshots] = useState<Map<string, ResearchTaskSnapshot>>(() => {
+    const pending = viewerId !== null ? loadPendingCreate(viewerId) : null
+    return pending && viewerId !== null
+      ? new Map([[draftStorageKey(viewerId, pending.taskId), pendingCreateSnapshot(pending)]])
+      : new Map()
+  })
   const [connectionBusy, setConnectionBusy] = useState(false)
   const taskSnapshotsRef = useRef(taskSnapshots)
   const connectionRef = useRef<ActiveConnection | null>(null)
@@ -306,6 +449,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
   const activeSessionIdRef = useRef<string | null>(activeSessionId)
   const activeDraftKeyRef = useRef<string | null>(currentSelection.draftKey)
   const probeSelectionRef = useRef<{ key: string | null; generation: number }>({ key: null, generation: 0 })
+  const currentViewerIdRef = useRef(viewerId)
   const startedProbeGenerationRef = useRef(-1)
   const skipAutoProbeKeyRef = useRef<string | null>(null)
   const sendLockRef = useRef(false)
@@ -314,12 +458,38 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     activeSessionIdRef.current = activeSessionId
     activeDraftKeyRef.current = currentSelection.draftKey
   }, [activeSessionId, currentSelection.draftKey])
+  useLayoutEffect(() => {
+    currentViewerIdRef.current = viewerId
+  }, [viewerId])
 
   useEffect(() => () => {
     const connection = connectionRef.current
     connectionRef.current = null
     connection?.controller.abort()
   }, [])
+
+  const previousViewerIdRef = useRef(viewerId)
+  useEffect(() => {
+    const previousViewerId = previousViewerIdRef.current
+    if (previousViewerId === viewerId) return
+    previousViewerIdRef.current = viewerId
+    if (previousViewerId !== null) clearViewerRecovery(previousViewerId)
+    const connection = connectionRef.current
+    connectionRef.current = null
+    connection?.controller.abort()
+    sendLockRef.current = false
+    setConnectionBusy(false)
+    const pending = viewerId !== null ? loadPendingCreate(viewerId) : null
+    const next = pending && viewerId !== null
+      ? new Map([[draftStorageKey(viewerId, pending.taskId), pendingCreateSnapshot(pending)]])
+      : new Map<string, ResearchTaskSnapshot>()
+    taskSnapshotsRef.current = next
+    setTaskSnapshots(next)
+    setSelection({
+      viewerId, sessionId: null, newSession: Boolean(pending),
+      draftKey: pending && viewerId !== null ? draftStorageKey(viewerId, pending.taskId) : null,
+    })
+  }, [viewerId])
 
   const activeTaskKey = activeSessionId
     ? taskStorageKey(queryViewerId, activeSessionId)
@@ -368,24 +538,59 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     setConnectionBusy(false)
     const current = taskSnapshotsRef.current.get(connection.taskKey)
     if (!current || current.id !== connection.id || !isActivePhase(current)) return
-    putTask(connection.taskKey, markResearchTaskCancelled(current, notice))
+    const cancelled = markResearchTaskCancelled(current, notice)
+    const pending = !current.sessionId && loadPendingCreate(connection.viewerId)
+    putTask(connection.taskKey, pending && pending.idempotencyKey === connection.idempotencyKey
+      ? { ...cancelled, recovery: 'resume' }
+      : cancelled)
   }, [putTask])
 
   const connectionIsCurrent = useCallback((connection: ActiveConnection): boolean => {
-    return connectionRef.current === connection && !connection.controller.signal.aborted
+    return connectionRef.current === connection
+      && !connection.controller.signal.aborted
+      && connection.viewerId === currentViewerIdRef.current
   }, [])
 
   const currentConnectionTask = useCallback((connection: ActiveConnection): ResearchTaskSnapshot | null => {
     const task = taskSnapshotsRef.current.get(connection.taskKey)
     return task?.id === connection.id ? task : null
   }, [])
+  const cancelConnectionOnServer = useCallback(async (connection: ActiveConnection) => {
+    if (!connection.cancelRequested || connection.cancelCallStarted) return
+    if (connection.viewerId !== currentViewerIdRef.current) return
+    const task = currentConnectionTask(connection)
+    if (!task?.sessionId || !connection.runId) return
+    connection.cancelCallStarted = true
+    let outcomeStatus = ''
+    try {
+      const response = await cancelResearchRun(task.sessionId, connection.runId)
+      if (isRecord(response) && typeof response.status === 'string') outcomeStatus = response.status
+    } catch {
+      outcomeStatus = ''
+    }
+    if (!connectionIsCurrent(connection)) return
+    const cancellationConfirmed = outcomeStatus === 'cancelled'
+    pauseCurrentConnection(cancellationConfirmed ? '研究任务已取消。' : CANCEL_NOTICE)
+    if (cancellationConfirmed) {
+      const current = taskSnapshotsRef.current.get(connection.taskKey)
+      if (current?.id === connection.id) {
+        putTask(connection.taskKey, {
+          ...current,
+          recovery: 'retry',
+          notice: '研究任务已取消。只有明确重新研究才会创建新任务。',
+        })
+      }
+    }
+  }, [connectionIsCurrent, currentConnectionTask, pauseCurrentConnection, putTask])
 
   const attachSessionId = useCallback((connection: ActiveConnection, sessionId: string) => {
     if (!connectionIsCurrent(connection)) return
     const current = currentConnectionTask(connection)
     if (!current) return
     if (current.sessionId === sessionId) {
-      saveStoredRecovery(queryViewerId, current)
+      saveStoredRecovery(queryViewerId, current, connection.idempotencyKey, connection.runId, connection.requestMode)
+      if (connection.idempotencyKey) clearPendingCreate(queryViewerId, connection.idempotencyKey)
+      void cancelConnectionOnServer(connection)
       return
     }
 
@@ -396,18 +601,17 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     if (oldKey !== sessionKey) nextTasks.delete(oldKey)
     nextTasks.set(sessionKey, nextTask)
     connection.taskKey = sessionKey
-    saveStoredRecovery(queryViewerId, nextTask)
+    saveStoredRecovery(queryViewerId, nextTask, connection.idempotencyKey, connection.runId, connection.requestMode)
+    if (connection.idempotencyKey) clearPendingCreate(queryViewerId, connection.idempotencyKey)
     publishTasks(nextTasks)
+    void cancelConnectionOnServer(connection)
     if (connection.selectOnCreate && activeDraftKeyRef.current === oldKey) {
       skipAutoProbeKeyRef.current = sessionKey
       setSelectionForSession(sessionId)
       connection.selectOnCreate = false
     }
-
-    // The backend creates the history row before returning the stream headers.
-    // Refresh here so a user can leave this task and recover it from history.
     void queryClient.invalidateQueries({ queryKey: researchKeys.sessions(queryViewerId, lang), exact: true })
-  }, [connectionIsCurrent, currentConnectionTask, lang, publishTasks, queryClient, queryViewerId, setSelectionForSession])
+  }, [cancelConnectionOnServer, connectionIsCurrent, currentConnectionTask, lang, publishTasks, queryClient, queryViewerId, setSelectionForSession])
 
   const refreshCompletedTask = useCallback(async (connection: ActiveConnection, task: ResearchTaskSnapshot) => {
     if (viewerId === null || !task.sessionId) return
@@ -450,7 +654,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
           continue
         }
 
-        const nextTask = applyResearchEvent(current, event)
+        const nextTask = preserveUnknownCreate(connection, applyResearchEvent(current, event))
         if (nextTask !== current) putTask(connection.taskKey, nextTask)
         if (nextTask.phase === 'success') {
           if (nextTask !== current) await refreshCompletedTask(connection, nextTask)
@@ -462,10 +666,10 @@ export function useResearch(viewerId: ResearchViewerId | null) {
       if (!connectionIsCurrent(connection)) return
       const finalTask = currentConnectionTask(connection)
       if (finalTask && isActivePhase(finalTask)) {
-        putTask(connection.taskKey, markResearchTaskInterrupted(
+        putTask(connection.taskKey, preserveUnknownCreate(connection, markResearchTaskInterrupted(
           finalTask,
           '连接已结束，但没有收到研究完成事件。可以继续接收已有任务，或在没有会话时重新发起。',
-        ))
+        )))
       }
     } catch (error) {
       if (!connectionIsCurrent(connection)) return
@@ -477,18 +681,23 @@ export function useResearch(viewerId: ResearchViewerId | null) {
         task,
         isAuthError ? '请先登录后再使用研究助手 🔐' : ERROR_MESSAGE,
       )
-      putTask(connection.taskKey, isAuthError
-        ? { ...interrupted, recovery: 'none' }
-        : interrupted)
+      const ownerBound = isAuthError ? { ...interrupted, recovery: 'none' as const } : interrupted
+      putTask(connection.taskKey, preserveUnknownCreate(connection, ownerBound))
     }
   }, [attachSessionId, connectionIsCurrent, currentConnectionTask, putTask, refreshCompletedTask])
 
-  const runStreamTask = useCallback((task: ResearchTaskSnapshot, mode: 'create' | 'chat'): boolean => {
+  const runStreamTask = useCallback((
+    task: ResearchTaskSnapshot,
+    mode: 'create' | 'chat',
+    existingIdempotencyKey?: string,
+  ): boolean => {
     if (connectionRef.current || sendLockRef.current || viewerId === null) return false
     const taskKey = task.sessionId
       ? taskStorageKey(queryViewerId, task.sessionId)
       : draftStorageKey(queryViewerId, task.id)
-    if (task.sessionId) saveStoredRecovery(queryViewerId, task)
+    const idempotencyKey = existingIdempotencyKey ?? newIdempotencyKey()
+    if (task.sessionId) saveStoredRecovery(queryViewerId, task, idempotencyKey, null, mode)
+    else if (mode === 'create') savePendingCreate(queryViewerId, task, idempotencyKey)
     putTask(taskKey, task)
     if (!task.sessionId) {
       activeDraftKeyRef.current = taskKey
@@ -496,28 +705,50 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     }
     const connection: ActiveConnection = {
       id: task.id,
+      viewerId,
       taskKey,
       controller: new AbortController(),
       selectOnCreate: task.sessionId === null,
+      idempotencyKey,
+      runId: null,
+      requestMode: mode,
+      cancelRequested: false,
+      cancelCallStarted: false,
     }
+
     connectionRef.current = connection
     sendLockRef.current = true
     setConnectionBusy(true)
+
+    const setRunId = (runId: string) => {
+      if (!connectionIsCurrent(connection)) return
+      connection.runId = runId
+      const current = currentConnectionTask(connection)
+      if (current?.sessionId) saveStoredRecovery(queryViewerId, current, idempotencyKey, runId, mode)
+      void cancelConnectionOnServer(connection)
+    }
 
     void (async () => {
       try {
         const events = mode === 'create'
           ? createResearchStream(task.query, {
               localOnly: task.localOnly,
+              idempotencyKey,
               signal: connection.controller.signal,
               onSessionId: (sessionId) => attachSessionId(connection, sessionId),
+              onRunId: setRunId,
             })
-          : researchChatStream(task.sessionId ?? '', task.query, { localOnly: task.localOnly, signal: connection.controller.signal })
+          : researchChatStream(task.sessionId ?? '', task.query, {
+              localOnly: task.localOnly,
+              idempotencyKey,
+              signal: connection.controller.signal,
+              onRunId: setRunId,
+            })
         await consumeResearchEvents(connection, events)
       } catch {
         if (connectionIsCurrent(connection)) {
           const current = currentConnectionTask(connection)
-          if (current) putTask(connection.taskKey, markResearchTaskInterrupted(current, ERROR_MESSAGE))
+          if (current) putTask(connection.taskKey, preserveUnknownCreate(connection, markResearchTaskInterrupted(current, ERROR_MESSAGE)))
         }
       } finally {
         if (connectionRef.current === connection) {
@@ -528,7 +759,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
       }
     })()
     return true
-  }, [attachSessionId, connectionIsCurrent, consumeResearchEvents, currentConnectionTask, putTask, queryViewerId, viewerId])
+  }, [attachSessionId, cancelConnectionOnServer, connectionIsCurrent, consumeResearchEvents, currentConnectionTask, putTask, queryViewerId, viewerId])
 
   const startSessionRecovery = useCallback(async (sessionId: string, requestedTask?: ResearchTaskSnapshot) => {
     if (viewerId === null || connectionRef.current || sendLockRef.current) return
@@ -550,23 +781,74 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     const connection: ActiveConnection = {
       id: nextTask.id,
       taskKey,
+      viewerId,
       controller: new AbortController(),
       selectOnCreate: false,
+      idempotencyKey: stored?.idempotencyKey ?? null,
+      runId: stored?.runId ?? null,
+      requestMode: stored?.mode ?? null,
+      cancelRequested: false,
+      cancelCallStarted: false,
     }
+
     connectionRef.current = connection
     sendLockRef.current = true
     setConnectionBusy(true)
     try {
-      // Recovery is a read-only probe. It either reattaches to the live SSE
-      // stream or returns the already-saved session as JSON.
-      const stream = await openResearchSessionStream(sessionId, connection.controller.signal)
+      // Read-only GET first; only a separately authorized owner POST may
+      // dispatch an existing queued run that never reached the provider.
+      const onRunId = (runId: string) => {
+        if (!connectionIsCurrent(connection)) return
+        connection.runId = runId
+        const current = currentConnectionTask(connection)
+        if (current) saveStoredRecovery(queryViewerId, current, connection.idempotencyKey, runId, connection.requestMode)
+        else if (!hasRecovery) putTask(taskKey, nextTask)
+        void cancelConnectionOnServer(connection)
+      }
+      let stream = await openResearchSessionStream(
+        sessionId, connection.controller.signal, onRunId, false,
+      )
       if (!connectionIsCurrent(connection)) return
-      if (stream.kind === 'session') {
+      if (stream.kind === 'queued') {
+        if (!stream.runId) {
+          putTask(taskKey, {
+            ...nextTask, phase: 'error', recovery: 'resume',
+            notice: '服务器暂时无法确认排队任务身份。请稍后继续接收，不会自动重新发起研究。',
+          })
+          return
+        }
+        try {
+          await resumeQueuedResearchRun(sessionId, stream.runId)
+        } catch (error) {
+          if (!connectionIsCurrent(connection)) return
+          const status = isRecord(error) && isRecord(error.response) ? error.response.status : null
+          const unavailable = status === 409 || status === 404
+          putTask(taskKey, {
+            ...nextTask, phase: 'error', recovery: unavailable ? 'retry' : 'resume',
+            notice: unavailable
+              ? '旧任务无法安全恢复。只有明确重新研究才会创建新的模型任务。'
+              : '暂时无法恢复排队中的研究；可继续尝试接收，不会自动发起新任务。',
+          })
+          return
+        }
+        if (!connectionIsCurrent(connection)) return
+        stream = await openResearchSessionStream(
+          sessionId, connection.controller.signal, onRunId, true,
+        )
+        if (!connectionIsCurrent(connection)) return
+      }
+      if (stream.kind === 'queued') {
+        putTask(taskKey, {
+          ...nextTask, phase: 'cancelled', recovery: 'resume',
+          notice: '任务仍在排队，尚未发起模型请求；可稍后继续接收。',
+        })
+      } else if (stream.kind === 'session') {
         queryClient.setQueryData(researchKeys.session(queryViewerId, lang, sessionId), stream.session)
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: researchKeys.sessions(queryViewerId, lang) }),
           queryClient.invalidateQueries({ queryKey: researchKeys.results(queryViewerId, lang, sessionId) }),
         ])
+        if (!hasRecovery) removeTask(taskKey, nextTask.id)
         if (hasRecovery) {
           if (sessionHasSavedTask(stream.session, nextTask)) {
             clearStoredRecovery(queryViewerId, sessionId)
@@ -602,12 +884,14 @@ export function useResearch(viewerId: ResearchViewerId | null) {
         setConnectionBusy(false)
       }
     }
-  }, [connectionIsCurrent, consumeResearchEvents, currentConnectionTask, lang, putTask, queryClient, queryViewerId, removeTask, viewerId])
+  }, [cancelConnectionOnServer, connectionIsCurrent, consumeResearchEvents, currentConnectionTask, lang, putTask, queryClient, queryViewerId, removeTask, viewerId])
 
   const handleSend = useCallback(async (query: string, { localOnly = false }: { localOnly?: boolean } = {}) => {
     const normalizedQuery = query.trim()
     if (!normalizedQuery || connectionRef.current || sendLockRef.current || viewerId === null) return false
-    if (activeTask?.recovery === 'resume') return false
+    // Without response headers, a prior create may already have reached Django.
+    // Never create a different request key while its fate is unknown.
+    if (loadPendingCreate(viewerId) || activeTask?.recovery === 'resume') return false
 
     const sessionId = activeSessionId
     const currentTask = activeTask
@@ -626,10 +910,30 @@ export function useResearch(viewerId: ResearchViewerId | null) {
 
   const handleNewSession = useCallback(() => {
     pauseCurrentConnection('已切换到新会话；原服务端任务可能仍在运行，可从历史会话继续接收。')
+    const pending = viewerId !== null ? loadPendingCreate(viewerId) : null
+    if (pending && viewerId !== null) {
+      const pendingDraftKey = draftStorageKey(viewerId, pending.taskId)
+      const existingTask = taskSnapshotsRef.current.get(pendingDraftKey)
+      const pendingTask = existingTask?.id === pending.taskId
+        ? {
+            ...existingTask,
+            recovery: 'resume' as const,
+            notice: '原请求结果尚未确认，请先继续接收原任务。',
+          }
+        : {
+            ...pendingCreateSnapshot(pending),
+            notice: '原请求结果尚未确认，请先继续接收原任务。',
+          }
+      putTask(pendingDraftKey, pendingTask)
+      activeSessionIdRef.current = null
+      activeDraftKeyRef.current = pendingDraftKey
+      setSelection({ viewerId, sessionId: null, newSession: true, draftKey: pendingDraftKey })
+      return
+    }
     activeSessionIdRef.current = null
     activeDraftKeyRef.current = null
     setSelection({ viewerId, sessionId: null, newSession: true, draftKey: null })
-  }, [viewerId, pauseCurrentConnection])
+  }, [viewerId, pauseCurrentConnection, putTask])
 
   const handleSelectSession = useCallback((sessionId: string) => {
     if (sessionId === activeSessionId) return
@@ -643,6 +947,8 @@ export function useResearch(viewerId: ResearchViewerId | null) {
   const handleRetry = useCallback(async () => {
     const task = activeTask
     if (!task || (task.phase !== 'error' && task.phase !== 'cancelled') || task.recovery !== 'retry' || viewerId === null) return
+    // An unanswered create POST may already have invoked a paid provider.
+    if (loadPendingCreate(viewerId)) return
     const next = createResearchTask(
       `research-${Date.now()}-${++taskSequenceRef.current}`,
       task.query,
@@ -656,13 +962,28 @@ export function useResearch(viewerId: ResearchViewerId | null) {
 
   const handleResume = useCallback(async () => {
     const task = activeTask
-    if (!task || task.recovery !== 'resume' || !task.sessionId || viewerId === null) return
+    if (!task || task.recovery !== 'resume' || viewerId === null) return
+    if (!task.sessionId) {
+      const pending = loadPendingCreate(viewerId)
+      if (!pending || pending.taskId !== task.id) return
+      // Reattach with EXACTLY the original idempotency key. No fresh paid key.
+      const retry = createResearchTask(task.id, pending.query, pending.localOnly, [], null)
+      runStreamTask(retry, 'create', pending.idempotencyKey)
+      return
+    }
     await startSessionRecovery(task.sessionId, task)
-  }, [activeTask, startSessionRecovery, viewerId])
+  }, [activeTask, runStreamTask, startSessionRecovery, viewerId])
 
-  const handleCancel = useCallback(() => {
-    pauseCurrentConnection(CANCEL_NOTICE)
+  const handleCancel = useCallback(async () => {
+    const connection = connectionRef.current
+    if (!connection) return
+    connection.cancelRequested = true
+    await cancelConnectionOnServer(connection)
+  }, [cancelConnectionOnServer])
+  const handleDisconnect = useCallback(() => {
+    pauseCurrentConnection('已关闭研究面板；原服务端任务可能仍在运行，重新打开后可继续接收。')
   }, [pauseCurrentConnection])
+
 
   const handleDeleteSession = useCallback(async (sessionId: string) => {
     try {
@@ -717,6 +1038,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     handleSelectSession,
     handleDeleteSession,
     handleCancel,
+    handleDisconnect,
     handleResume,
     handleRetry,
     loadSessions,

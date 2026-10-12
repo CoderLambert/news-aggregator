@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from .providers import default_providers
+from django.conf import settings
+
+from .providers import ScrapySubprocessProvider, _research_fetch_guard, default_providers
+from .safe_http import UnsafeURL, validate_public_url
 from .site_rules import get_site_rule
 from .types import ArticleProvider, FetchError, FetchResult
 from .validators import validate_markdown
@@ -11,6 +14,7 @@ def fetch_article_markdown(
     expected_title: str | None = None,
     summary: str | None = None,
     providers: list[ArticleProvider] | None = None,
+    execution_guard=None,
 ) -> FetchResult:
     """Fetch real article Markdown via provider chain.
 
@@ -19,23 +23,57 @@ def fetch_article_markdown(
     whether to persist; never create generated fallback content here.
     """
     chain = providers or default_providers()
+    if settings.DJANGO_ENV == 'production':
+        try:
+            validate_public_url(url)
+        except UnsafeURL as exc:
+            raise FetchError(
+                '全部真实原文抓取方式失败，未写入 full_content。',
+                failures=[FetchResult(ok=False, provider='safe_http', url=url, error=str(exc))],
+            ) from None
+
     failures: list[FetchResult] = []
 
     for provider in chain:
+        if execution_guard is not None:
+            execution_guard()
+            # A detached subprocess cannot receive this worker's cancellation
+            # fence. Keep it available to ordinary fetches, but not research.
+            if isinstance(provider, ScrapySubprocessProvider):
+                continue
+        token = _research_fetch_guard.set(execution_guard)
         try:
             try:
-                result = provider.fetch(url, expected_title=expected_title, summary=summary)
-            except TypeError:
-                # Backward-compatible for tests/simple custom providers.
-                result = provider.fetch(url, expected_title=expected_title)
-        except Exception as exc:
-            failures.append(FetchResult(ok=False, provider=provider.name, url=url, error=str(exc)))
-            continue
+                try:
+                    result = provider.fetch(url, expected_title=expected_title, summary=summary)
+                except TypeError:
+                    # Backward-compatible for tests/simple custom providers.
+                    result = provider.fetch(url, expected_title=expected_title)
+            except Exception as exc:
+                if execution_guard is not None:
+                    execution_guard()
+                failures.append(FetchResult(ok=False, provider=provider.name, url=url, error=str(exc)))
+                continue
+        finally:
+            _research_fetch_guard.reset(token)
+        if execution_guard is not None:
+            execution_guard()
 
         if not result.ok:
             if result.provider == 'hackernews_api' and result.error == 'external_hn_story':
                 external_url = (result.metadata or {}).get('external_url')
                 if external_url and external_url != url:
+                    if settings.DJANGO_ENV == 'production':
+                        try:
+                            validate_public_url(external_url)
+                        except UnsafeURL as exc:
+                            failures.append(FetchResult(
+                                ok=False,
+                                provider='safe_http',
+                                url=url,
+                                error=str(exc),
+                            ))
+                            break
                     url = external_url
                     failures.append(result)
                     continue

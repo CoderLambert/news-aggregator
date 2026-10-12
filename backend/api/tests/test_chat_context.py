@@ -16,11 +16,18 @@ Fix:
   2. ensure_full_content(news) auto-fetches via Jina if nothing is cached,
      so the user never has to click "fetch full article" before chatting.
 """
+from datetime import timedelta
 from unittest.mock import patch, MagicMock
 import pytest
+from django.contrib.auth.models import User
 from django.utils import timezone
 from api.models import News, Source, Category
 from api.services.article_fetcher import FetchError, FetchResult
+
+
+@pytest.fixture(autouse=True)
+def configured_global_provider(monkeypatch):
+    monkeypatch.setattr('api.views.get_clients', lambda: [(object(), 'test-model')])
 
 
 @pytest.fixture
@@ -85,6 +92,116 @@ class TestPickChatContext:
 # ---------------------------------------------------------------------------
 
 class TestEnsureFullContent:
+    @pytest.mark.parametrize('cancel_stage,cancel_call', [
+        ('before_request', 2),
+        ('inside_fetch', 3),
+        ('before_persist', 3),
+    ])
+    def test_execution_cancellation_releases_claim_without_marking_fetch_failed(
+        self, src, cat, cancel_stage, cancel_call,
+    ):
+        from api.views import ensure_full_content
+        from api.services.full_content_status import claim_fetch
+
+        class FetchCancelled(Exception):
+            pass
+
+        news = _news(src, cat, full_content_zh='KEEP_TRANSLATION')
+        previous_time = timezone.now() - timedelta(hours=1)
+        news.full_content_fetched_at = previous_time
+        news.full_content_zh_fetched_at = previous_time
+        news.full_content_fetch_provider = 'previous_provider'
+        news.full_content_retry_count = 2
+        news.save(update_fields=[
+            'full_content_fetched_at', 'full_content_zh_fetched_at',
+            'full_content_fetch_provider', 'full_content_retry_count',
+        ])
+        cancellation = FetchCancelled('cancelled by owner')
+        guard_calls = 0
+
+        def execution_guard():
+            nonlocal guard_calls
+            guard_calls += 1
+            if guard_calls >= cancel_call:
+                raise cancellation
+
+        result = FetchResult(
+            ok=True,
+            provider='new_provider',
+            url=news.url,
+            title=news.title,
+            markdown='BODY_MUST_NOT_BE_SAVED',
+        )
+
+        def fake_fetch(*_args, execution_guard=None, **_kwargs):
+            if cancel_stage == 'inside_fetch':
+                execution_guard()
+            return result
+
+        claim_time = timezone.now()
+        with patch('api.services.full_content_status.tz_now', return_value=claim_time):
+            with patch('api.views.fetch_article_markdown', side_effect=fake_fetch) as fetch:
+                with pytest.raises(FetchCancelled) as raised:
+                    ensure_full_content(news, execution_guard=execution_guard)
+
+        assert raised.value is cancellation
+        if cancel_stage == 'before_request':
+            fetch.assert_not_called()
+        else:
+            fetch.assert_called_once()
+
+        news.refresh_from_db()
+        assert news.full_content_fetch_status == 'pending'
+        assert news.last_full_content_attempt == claim_time
+        assert news.full_content == ''
+        assert news.full_content_zh == 'KEEP_TRANSLATION'
+        assert news.full_content_fetched_at == previous_time
+        assert news.full_content_zh_fetched_at == previous_time
+        assert news.full_content_fetch_provider == 'previous_provider'
+        assert news.full_content_retry_count == 2
+
+        # Cancellation releases the lease immediately instead of waiting for the TTL.
+        assert claim_fetch(type(news).objects.get(pk=news.pk))
+
+    @pytest.mark.parametrize('release_error', [False, RuntimeError('private cleanup detail')])
+    def test_cancellation_survives_a_failed_release_and_logs_no_exception_details(
+        self, src, cat, caplog, release_error,
+    ):
+        from api.views import ensure_full_content
+
+        class FetchCancelled(Exception):
+            pass
+
+        news = _news(src, cat)
+        cancellation = FetchCancelled('cancelled by owner')
+        guard_calls = 0
+
+        def execution_guard():
+            nonlocal guard_calls
+            guard_calls += 1
+            if guard_calls >= 2:
+                raise cancellation
+
+        if release_error:
+            release_patch = patch(
+                'api.services.full_content_status.release_fetch_claim',
+                side_effect=release_error,
+            )
+        else:
+            release_patch = patch(
+                'api.services.full_content_status.release_fetch_claim',
+                return_value=False,
+            )
+        with release_patch as release:
+            with pytest.raises(FetchCancelled) as raised:
+                ensure_full_content(news, execution_guard=execution_guard)
+
+        assert raised.value is cancellation
+        release.assert_called_once_with(news)
+        assert 'cancelled fetch claim' in caplog.text
+        assert 'cancelled by owner' not in caplog.text
+        assert 'private cleanup detail' not in caplog.text
+
     def test_skips_fetch_when_full_content_already_present(self, src, cat):
         from api.views import ensure_full_content
         n = _news(src, cat, full_content='ALREADY_HERE')
@@ -151,6 +268,7 @@ class TestEnsureFullContent:
 class TestChatAutoFetch:
     def test_chat_view_auto_fetches_full_content_on_first_call(self, src, cat, client):
         n = _news(src, cat)
+        client.force_login(User.objects.create_user(username='chat-context-auto-fetch'))
         assert n.full_content == ''
 
         # Mock both: Jina fetch + LLM stream
@@ -172,7 +290,7 @@ class TestChatAutoFetch:
         fake_client = MagicMock()
         fake_client.chat.completions.create = fake_stream
 
-        def fake_stream_chat(messages, max_tokens=32000, temperature=0.3):
+        def fake_stream_chat(messages, max_tokens=32000, temperature=0.3, **_kwargs):
             yield '回答'
 
         result = FetchResult(ok=True, provider='jina', url=n.url, title=n.title, markdown='FETCHED_FULL_BODY')
@@ -192,6 +310,7 @@ class TestChatAutoFetch:
 
     def test_chat_view_does_not_refetch_when_full_content_exists(self, src, cat, client):
         n = _news(src, cat, full_content='ALREADY_CACHED')
+        client.force_login(User.objects.create_user(username='chat-context-cached'))
 
         def fake_stream(**kwargs):
             class _Stream:
@@ -205,7 +324,7 @@ class TestChatAutoFetch:
         fake_client = MagicMock()
         fake_client.chat.completions.create = fake_stream
 
-        def fake_stream_chat(messages, max_tokens=32000, temperature=0.3):
+        def fake_stream_chat(messages, max_tokens=32000, temperature=0.3, **_kwargs):
             yield '回答'
 
         result = FetchResult(ok=True, provider='jina', url=n.url, title=n.title, markdown='FETCHED_FULL_BODY')
@@ -227,6 +346,7 @@ class TestChatAutoFetch:
 class TestSuggestedQuestionsAutoFetch:
     def test_suggested_questions_auto_fetches_too(self, src, cat, client):
         n = _news(src, cat)
+        client.force_login(User.objects.create_user(username='suggested-context-user'))
 
         captured = {}
 
@@ -259,8 +379,9 @@ class TestSuggestedQuestionsAutoFetch:
         returns it gracefully (200) and saves it to the session.
         """
         n = _news(src, cat, full_content='Some content here')
+        client.force_login(User.objects.create_user(username='chat-context-fallback'))
 
-        def failing_stream_chat(messages, max_tokens=32000, temperature=0.3):
+        def failing_stream_chat(messages, max_tokens=32000, temperature=0.3, **_kwargs):
             yield '抱歉，AI 服务暂时不可用，请稍后再试。'
 
         with patch('api.views.stream_chat', side_effect=failing_stream_chat):

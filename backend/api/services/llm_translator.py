@@ -1,21 +1,10 @@
-"""Translation service with dual-provider support: Volcengine ARK (primary) → DashScope (fallback)."""
+"""Translation helpers for user-scoped LiteLLM clients."""
 
 import logging
-import os
 import re
 import time
 
-from openai import OpenAI
-
 logger = logging.getLogger(__name__)
-
-# ============ Primary Provider: Volcengine ARK (deepseek) ============
-VOLCENGINE_BASE_URL = 'https://ark.cn-beijing.volces.com/api/coding/v3'
-VOLCENGINE_MODEL = 'deepseek-v4-pro'
-
-# ============ Fallback Provider: DashScope (kimi) ============
-DASHSCOPE_BASE_URL = 'https://coding.dashscope.aliyuncs.com/v1'
-DASHSCOPE_MODEL = 'kimi-k2.5'
 
 # ============ Translation Prompt ============
 TRANSLATION_SYSTEM = """你是一位资深的中英双语翻译专家，擅长将英文技术文章翻译成地道、流畅的中文。
@@ -76,109 +65,17 @@ def build_translation_prompt(markdown: str) -> str:
 """
 
 
-def _get_volcengine_key():
-    """Get Volcengine ARK API key from environment or Hermes config.
-
-    Volcengine ARK keys start with 'ark-'.  If the key found in Hermes
-    config starts with 'ark-', use it as the Volcengine key.
-    """
-    vk = os.environ.get('VOLCENGINE_API_KEY') or os.environ.get('ARK_API_KEY', '')
-    if vk and vk.startswith('ark-'):
-        return vk
-
-    # Fallback: read from Hermes config (user's main API key may be an ARK key)
-    try:
-        import yaml
-        config_path = os.path.expanduser('~/.hermes/config.yaml')
-        with open(config_path, 'r') as f:
-            config = yaml.safe_load(f)
-        ark_key = config.get('model', {}).get('api_key', '')
-        if ark_key and ark_key.startswith('ark-'):
-            return ark_key
-    except Exception:
-        pass
-
-    return vk
-
-
-def _get_dashscope_key():
-    """Get DashScope Coding API key from environment or Hermes config.
-
-    DashScope keys typically start with 'sk-'.  If the only available key
-    starts with 'ark-' (Volcengine ARK format) it is NOT a valid DashScope
-    key — return empty so we skip DashScope and avoid a 401 error.
-    """
-    api_key = os.environ.get('DASHSCOPE_CODING_API_KEY') or os.environ.get('DASHSCOPE_API_KEY')
-
-    # If env var is explicitly empty (user didn't set it), try Hermes config
-    if not api_key:
-        try:
-            import yaml
-            config_path = os.path.expanduser('~/.hermes/config.yaml')
-            with open(config_path, 'r') as f:
-                config = yaml.safe_load(f)
-            # Try the main model key first
-            api_key = config.get('model', {}).get('api_key', '')
-            # If that's an ark- key (Volcengine), look for a DashScope key elsewhere
-            if api_key.startswith('ark-'):
-                # Check auxiliary.title_generation (Hermes default uses dashscope-coding)
-                aux_api_key = config.get('auxiliary', {}).get('title_generation', {}).get('api_key', '')
-                if aux_api_key and aux_api_key.startswith('sk-'):
-                    api_key = aux_api_key
-                else:
-                    # Also check fallback_model for a dashscope key
-                    fb = config.get('fallback_model', {})
-                    if fb.get('provider', '').startswith('dashscope'):
-                        fb_key = fb.get('api_key', '')
-                        if fb_key and fb_key.startswith('sk-'):
-                            api_key = fb_key
-                        else:
-                            api_key = ''
-                    else:
-                        api_key = ''
-        except Exception:
-            pass
-
-    # ARK-prefixed keys are for Volcengine, not DashScope
-    if api_key and api_key.startswith('ark-'):
-        return ''
-
-    return api_key
-
-
 def get_openai_client():
-    """Get an OpenAI-compatible client.
-
-    Returns: tuple (client, model_name). Prefers DashScope; falls back to Volcengine.
-    Kept as a single-result API for backward-compat with callers that unpack 1 value:
-    callers should switch to get_clients() for full fallback chain.
-    """
+    """Return a configured hosted client, when one exists."""
     clients = get_clients()
     if not clients:
-        raise ValueError("未配置 VOLCENGINE_API_KEY 或 DASHSCOPE_CODING_API_KEY")
+        raise ValueError("未配置站点共享模型；请使用用户自己的 LiteLLM API 连接")
     return clients[0][0]
 
 
 def get_clients():
-    """Return ordered list of (client, model_name) tuples for failover.
-
-    Order: Volcengine ARK (primary, deepseek-v4-pro) → DashScope (fallback, kimi).
-    Skips providers without an API key.
-    """
-    out = []
-    vk = _get_volcengine_key()
-    if vk:
-        out.append((
-            OpenAI(api_key=vk, base_url=VOLCENGINE_BASE_URL),
-            VOLCENGINE_MODEL,
-        ))
-    dk = _get_dashscope_key()
-    if dk:
-        out.append((
-            OpenAI(api_key=dk, base_url=DASHSCOPE_BASE_URL),
-            DASHSCOPE_MODEL,
-        ))
-    return out
+    """Hosted provider keys are disabled; callers must use owner-scoped BYOK."""
+    return []
 
 
 # Known Chinese tech blog / translation platform domains
@@ -306,7 +203,7 @@ def fetch_and_verify_chinese_content(url: str) -> str:
         return ''
 
 
-def _call_llm_stream(prompt: str, max_tokens: int = 32000):
+def _call_llm_stream(prompt: str, max_tokens: int = 32000, *, clients=None):
     """Call the LLM API with streaming response, using provider failover.
 
     Yields chunks of translated text.
@@ -315,24 +212,33 @@ def _call_llm_stream(prompt: str, max_tokens: int = 32000):
         {'role': 'system', 'content': TRANSLATION_SYSTEM},
         {'role': 'user', 'content': prompt}
     ]
-    yield from stream_chat(messages, max_tokens, require_completed=True)
+    yield from stream_chat(messages, max_tokens, require_completed=True, clients=clients)
 
 
-def stream_chat(messages: list, max_tokens: int = 32000, temperature: float = 0.3, enable_search: bool = False, require_completed: bool = False):
+def stream_chat(
+    messages: list,
+    max_tokens: int = 32000,
+    temperature: float = 0.3,
+    enable_search: bool = False,
+    require_completed: bool = False,
+    *,
+    clients=None,
+):
     """Generic streaming chat with provider failover + per-provider retry.
 
     Yields chunks of text.  On total failure, yields a single fallback message.
     """
-    MAX_RETRIES = 2  # per provider
-
-    clients = get_clients()
+    clients = get_clients() if clients is None else clients
     if not clients:
         yield "抱歉，当前 AI 服务暂时不可用，请稍后再试。"
         return
 
     last_err = None
     for idx, (client, model) in enumerate(clients):
-        for attempt in range(1, MAX_RETRIES + 1):
+        configured_attempts = getattr(client, '_newshub_max_attempts', 2)
+        max_attempts = configured_attempts if type(configured_attempts) is int else 2
+        max_attempts = min(max(max_attempts, 1), 2)
+        for attempt in range(1, max_attempts + 1):
             got_any = False
             completed = False
             stream = None
@@ -364,13 +270,13 @@ def stream_chat(messages: list, max_tokens: int = 32000, temperature: float = 0.
                 if require_completed and got_any:
                     # Never append a second provider's output to a partial article.
                     raise ValueError('全文翻译响应中断或未完整完成，请重试。') from e
-                last_err = f"provider#{idx} ({model}) attempt {attempt}/{MAX_RETRIES} failed: {e}"
+                last_err = f"provider#{idx} ({model}) attempt {attempt}/{max_attempts} failed ({type(e).__name__})"
                 logger.warning(last_err)
                 # Retry on transient errors (SSL, timeout, connection reset)
                 is_transient = any(kw in str(e).lower() for kw in [
                     'ssl', 'eof', 'timeout', 'connection', 'reset', 'broken pipe',
                 ])
-                if is_transient and attempt < MAX_RETRIES:
+                if is_transient and attempt < max_attempts:
                     time.sleep(1 * attempt)  # simple backoff
                     continue
                 break  # non-transient or exhausted retries → try next provider
@@ -378,8 +284,10 @@ def stream_chat(messages: list, max_tokens: int = 32000, temperature: float = 0.
                 if stream is not None and hasattr(stream, 'close'):
                     stream.close()
 
-    logger.error(f"All LLM providers failed. Last error: {last_err}")
-    yield f"抱歉，AI 服务暂时不可用（{last_err}），请稍后再试。"
+    logger.error("All LLM providers failed. Last error: %s", last_err)
+    # Upstream exception text can contain request metadata. Record only its
+    # sanitized type above and never stream raw details to the browser.
+    yield "抱歉，AI 服务暂时不可用，请稍后再试。"
 
 
 def _call_llm(prompt: str, max_tokens: int = 32000) -> tuple:
@@ -392,7 +300,7 @@ def _call_llm(prompt: str, max_tokens: int = 32000) -> tuple:
 
     clients = get_clients()
     if not clients:
-        return ('', '未配置 VOLCENGINE_API_KEY 或 DASHSCOPE_CODING_API_KEY')
+        return ('', '未配置站点共享模型；请使用用户自己的 LiteLLM API 连接')
 
     last_err = None
     for idx, (client, model) in enumerate(clients):
@@ -413,7 +321,7 @@ def _call_llm(prompt: str, max_tokens: int = 32000) -> tuple:
                 last_err = f"provider#{idx} ({model}) returned empty content"
                 break  # don't retry empty content
             except Exception as e:
-                last_err = f"provider#{idx} ({model}) attempt {attempt}/{MAX_RETRIES} failed: {e}"
+                last_err = f"provider#{idx} ({model}) attempt {attempt}/{MAX_RETRIES} failed ({type(e).__name__})"
                 logger.warning(last_err)
                 is_transient = any(kw in str(e).lower() for kw in [
                     'ssl', 'eof', 'timeout', 'connection', 'reset', 'broken pipe',
@@ -423,7 +331,7 @@ def _call_llm(prompt: str, max_tokens: int = 32000) -> tuple:
                     continue
                 break
 
-    logger.error(f'All LLM providers failed. Last error: {last_err}')
+    logger.error('All LLM providers failed. Last error: %s', last_err)
     return ('', last_err or '未知错误')
 
 

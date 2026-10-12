@@ -7,6 +7,7 @@ POST /api/news/:id/suggested-questions/
 """
 from unittest.mock import patch
 import pytest
+from django.contrib.auth.models import User
 from django.utils import timezone
 from api.models import News, Source, Category
 from api.services.article_fetcher import FetchResult
@@ -23,6 +24,11 @@ def no_external_full_content_fetch():
     )
     with patch('api.views.fetch_article_markdown', return_value=result):
         yield
+
+
+@pytest.fixture(autouse=True)
+def authenticated_reader(db, client):
+    client.force_login(User.objects.create_user(username='suggested-reader'))
 
 
 @pytest.fixture

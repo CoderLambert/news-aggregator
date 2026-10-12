@@ -7,7 +7,7 @@
 | 模块 | 能力 |
 |------|------|
 | **新闻聚合** | Scrapy 爬虫抓取多源科技资讯，自动分类存储，支持分页浏览 |
-| **AI 翻译** | Volcengine/DashScope 双 Provider Failover，SSE 流式输出中文翻译 |
+| **AI 翻译** | 用户自带 Key，经 LiteLLM 统一路由到主流模型厂商 |
 | **智能助手** | 基于文章全文的多轮对话，自动抓取原文，推荐问题一键换批 |
 | **深度研究** | AI Research Agent — LLM 意图分析 + 本地语义搜索 + 多步骤深度分析 |
 | **本地搜索** | 关键词 / 语义 / 混合三种模式，支持结果分页 |
@@ -22,7 +22,7 @@
 ```
 Frontend:  React 19 + Vite 8 + Tailwind 4 + shadcn/ui + React Compiler
 Backend:   Django 6 + DRF + SQLite + Scrapy
-AI:        Volcengine ARK (Doubao) / DashScope (Kimi) — 双通道自动切换
+AI:        LiteLLM Gateway + 用户自带 API Key（受控的主流厂商白名单）
 向量检索:   ChromaDB（语义搜索支持）
 测试:      Vitest + Testing Library (前端) | pytest-django (后端)
 ```
@@ -31,7 +31,7 @@ AI:        Volcengine ARK (Doubao) / DashScope (Kimi) — 双通道自动切换
 
 - **Docker 部署**：Docker Engine + Compose v2 + Git LFS
 - **本地开发**：Python ≥ 3.11、Node.js ≥ 20（推荐 22+）、npm ≥ 9
-- AI 功能可使用本地 ChatGPT 订阅连接，或至少配置一个 Volcengine/DashScope API Key
+- AI 功能可使用本地 ChatGPT 订阅连接，或由登录用户在设置页配置自己的厂商 API Key 与 Model ID
 
 ## 🚀 快速开始
 
@@ -135,22 +135,12 @@ DJANGO_DEBUG=1
 # 可选：允许的主机（默认 *）
 DJANGO_ALLOWED_HOSTS=*
 
-# ====== LLM Provider 配置（至少配一个） ======
-
-# 主 Provider：火山引擎 ARK（推荐，Doubao 模型）
-# 获取方式：https://www.volcengine.com/docs/82379
-# Key 格式：ark-xxxxxxxx
-VOLCENGINE_API_KEY=ark-你的key
-
-# 备用 Provider：阿里云 DashScope Coding
-# 获取方式：https://help.aliyun.com/zh/dashscope
-# Key 格式：sk-xxxxxxxx
-DASHSCOPE_CODING_API_KEY=sk-你的key
+# ====== LiteLLM BYOK 网关 ======
+AI_BYOK_GATEWAY_URL=http://127.0.0.1:4000
+AI_BYOK_GATEWAY_PROJECT_KEY=网关为本项目签发的受限虚拟Key
 ```
 
-> **Key 格式说明：** `ark-` 开头的 key 自动走 Volcengine 通道，`sk-` 开头的走 DashScope 通道。系统会自动识别，无需额外配置。如果两个都配了，Volcengine 优先，失败自动切换 DashScope。
-
-> **兼容提示：** 如果未在 `.env` 中配置 API Key，系统会尝试读取 `~/.hermes/config.yaml` 中的 `model.api_key` 字段（Hermes Agent 用户兼容）。
+登录用户在设置页选择 OpenAI、Anthropic Claude、DeepSeek、Google Gemini、Qwen、GLM/Z.AI、Kimi/Moonshot、Mistral、Groq、xAI 或 OpenRouter，填写厂商 Model ID 和自己的 API Key。浏览器不能设置 Base URL 或 LiteLLM 路由前缀；服务端只允许受信厂商路由，Key 加密保存且不回显。
 
 ### 4. 前端构建
 
@@ -325,17 +315,16 @@ news-aggregator/
 
 ## ⚙️ 高级配置
 
-### LLM Provider 切换逻辑
+### LLM Provider 路由
 
 ```
-请求 → Volcengine (Doubao) → 成功 ✓
-                           → 失败 → DashScope (Kimi) → 成功 ✓
-                                                     → 失败 → 友好 fallback 提示
+用户请求 → NewsHub 身份/权限检查 → LiteLLM 项目路由 → 用户选择的模型厂商
 ```
 
-- 翻译和聊天均支持自动 Failover
-- `ark-` 前缀 key → Volcengine；`sk-` 前缀 key → DashScope
-- 全部失败时返回中文友好提示，不会暴露技术错误
+- 不使用站点级厂商 Key，也不跨厂商自动 fallback
+- LiteLLM 项目虚拟 Key 与用户厂商 Key 分离
+- SDK 与 Proxy 重试均关闭；结果不明时不会静默重复付费请求
+- 上游失败返回脱敏提示，不向浏览器暴露技术错误或凭据
 
 ### React Compiler
 

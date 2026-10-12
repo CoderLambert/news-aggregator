@@ -6,6 +6,7 @@ import { useGSAP } from '@gsap/react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useAuth } from '@/context/AuthContext'
+import { useCapabilities } from '@/context/CapabilitiesContext'
 
 type AuthMode = 'login' | 'register'
 
@@ -30,10 +31,15 @@ function readableError(error: unknown): string {
 
 export default function AuthModal({ onClose, onSuccess, allowRegister = true, loginTitle = '登录小闻' }: AuthModalProps) {
   const { login, register } = useAuth()
+  const { capabilities, loading: capabilitiesLoading } = useCapabilities()
+  const accountsEnabled = capabilities.features.accounts.enabled
+  const registrationEnabled = accountsEnabled && allowRegister && capabilities.features.signup.enabled
   const [mode, setMode] = useState<AuthMode>('login')
+  const visibleMode: AuthMode = registrationEnabled ? mode : 'login'
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [email, setEmail] = useState('')
+  const [inviteToken, setInviteToken] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -92,11 +98,12 @@ export default function AuthModal({ onClose, onSuccess, allowRegister = true, lo
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (!accountsEnabled || (mode === 'register' && !registrationEnabled)) return
     setError('')
     setSubmitting(true)
     try {
-      if (mode === 'login') await login(username, password)
-      else await register(username, password, email)
+      if (visibleMode === 'login') await login(username, password)
+      else await register(username, password, email, inviteToken)
       const finishAuthentication = onSuccess ?? onClose
       finishAuthentication()
     } catch (submitError) {
@@ -109,6 +116,8 @@ export default function AuthModal({ onClose, onSuccess, allowRegister = true, lo
   function handleBackdropClick(event: MouseEvent<HTMLDivElement>) {
     if (event.target === event.currentTarget) onClose()
   }
+
+  if (capabilitiesLoading || !accountsEnabled) return null
 
   return (
     <div
@@ -125,7 +134,7 @@ export default function AuthModal({ onClose, onSuccess, allowRegister = true, lo
       >
         <div className="mb-5 flex items-center justify-between gap-4">
           <h2 id="auth-modal-title" className="text-lg font-semibold">
-            {mode === 'login' ? loginTitle : '注册小闻'}
+            {visibleMode === 'login' ? loginTitle : '注册小闻'}
           </h2>
           <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="关闭登录窗口">
             <X aria-hidden="true" />
@@ -147,9 +156,9 @@ export default function AuthModal({ onClose, onSuccess, allowRegister = true, lo
             />
           </div>
 
-          {mode === 'register' && (
+          {visibleMode === 'register' && (
             <div className="space-y-1.5">
-              <label htmlFor="auth-email" className="text-sm font-medium">邮箱（可选）</label>
+              <label htmlFor="auth-email" className="text-sm font-medium">邮箱</label>
               <Input
                 id="auth-email"
                 type="email"
@@ -157,7 +166,22 @@ export default function AuthModal({ onClose, onSuccess, allowRegister = true, lo
                 onChange={(event) => setEmail(event.currentTarget.value)}
                 placeholder="user@example.com"
                 autoComplete="email"
+                required
               />
+            </div>
+          )}
+
+          {visibleMode === 'register' && (
+            <div className="space-y-1.5">
+              <label htmlFor="auth-invite-token" className="text-sm font-medium">邀请码</label>
+              <Input
+                id="auth-invite-token"
+                type="text"
+                value={inviteToken}
+                onChange={(event) => setInviteToken(event.currentTarget.value)}
+                autoComplete="off"
+              />
+              <p className="text-xs leading-5 text-muted-foreground">公网注册需要有效邀请；密码需符合安全要求。</p>
             </div>
           )}
 
@@ -168,18 +192,18 @@ export default function AuthModal({ onClose, onSuccess, allowRegister = true, lo
               type="password"
               value={password}
               onChange={(event) => setPassword(event.currentTarget.value)}
-              placeholder={mode === 'register' ? '至少 6 位' : '输入密码'}
+              placeholder={visibleMode === 'register' ? '输入符合安全要求的密码' : '输入密码'}
               required
-              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              autoComplete={visibleMode === 'login' ? 'current-password' : 'new-password'}
             />
           </div>
 
           <Button type="submit" disabled={submitting || !username || !password} className="w-full">
-            {submitting ? '处理中…' : mode === 'login' ? '登录' : '注册'}
+            {submitting ? '处理中…' : visibleMode === 'login' ? '登录' : '注册'}
           </Button>
         </form>
 
-        {allowRegister ? <p className="mt-4 text-center text-sm text-muted-foreground">
+        {registrationEnabled ? <p className="mt-4 text-center text-sm text-muted-foreground">
           {mode === 'login' ? '还没有账号？' : '已有账号？'}{' '}
           <Button
             type="button"
@@ -187,11 +211,11 @@ export default function AuthModal({ onClose, onSuccess, allowRegister = true, lo
             size="sm"
             className="h-auto p-0 text-primary"
             onClick={() => {
-              setMode((current) => current === 'login' ? 'register' : 'login')
+              setMode(visibleMode === 'login' ? 'register' : 'login')
               setError('')
             }}
           >
-            {mode === 'login' ? '立即注册' : '去登录'}
+            {visibleMode === 'login' ? '立即注册' : '去登录'}
           </Button>
         </p> : <p className="mt-4 text-center text-sm text-muted-foreground">公开注册只创建普通账号；管理员账号由部署者创建或授权。</p>}
       </section>

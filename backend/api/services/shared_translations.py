@@ -13,6 +13,7 @@ import uuid
 from django.db import close_old_connections, transaction
 from django.db.models import Q
 from django.http import StreamingHttpResponse
+from api.translation_sse import translation_sse_records
 from django.utils import timezone
 
 from api.models import News, SharedArticleTranslation, SharedArticleTranslationTask
@@ -165,8 +166,7 @@ def sse_response(stream):
 
 
 def completed_response(record, scope='shared'):
-    data = json.dumps(result_payload(record, scope), ensure_ascii=False)
-    return sse_response(iter([f'event: complete\ndata: {data}\n\n']))
+    return sse_response(translation_sse_records(result_payload(record, scope), event='complete'))
 
 
 def error_response(message):
@@ -189,8 +189,7 @@ def waiting_response(news):
                     break
                 record = SharedArticleTranslation.objects.filter(**key).first()
                 if record is not None:
-                    data = json.dumps(result_payload(record), ensure_ascii=False)
-                    yield f'event: complete\ndata: {data}\n\n'
+                    yield from translation_sse_records(result_payload(record), event='complete')
                     return
                 task = SharedArticleTranslationTask.objects.filter(**key).first()
                 now = timezone.now()

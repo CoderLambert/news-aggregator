@@ -66,8 +66,17 @@ export interface StoredResearchMessage {
   tool_call_id?: string
 }
 
+export interface ResearchLatestRunState {
+  run_id: string
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted'
+  error_code: string
+  error_message: string
+  last_event_sequence: number
+}
+
 export interface ResearchSessionDetail extends ResearchSessionSummary {
   messages: StoredResearchMessage[]
+  latest_run?: ResearchLatestRunState | null
 }
 
 export interface ResearchSearchResult {
@@ -186,7 +195,21 @@ export function parseResearchSessionDetail(value: unknown): ResearchSessionDetai
   const messages = Array.isArray(value.messages)
     ? value.messages.map(parseStoredMessage).filter((item): item is StoredResearchMessage => item !== null)
     : []
-  return { ...summary, messages }
+  let latestRun: ResearchLatestRunState | null = null
+  if (isRecord(value.latest_run) &&
+    typeof value.latest_run.run_id === 'string' &&
+    ['queued', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted'].includes(String(value.latest_run.status))) {
+    latestRun = {
+      run_id: value.latest_run.run_id,
+      status: value.latest_run.status as ResearchLatestRunState['status'],
+      error_code: optionalString(value.latest_run.error_code),
+      error_message: optionalString(value.latest_run.error_message),
+      last_event_sequence: optionalNumber(value.latest_run.last_event_sequence),
+    }
+  }
+  const detail: ResearchSessionDetail = { ...summary, messages }
+  if (Object.prototype.hasOwnProperty.call(value, 'latest_run')) detail.latest_run = latestRun
+  return detail
 }
 
 export function parseResearchSessions(value: unknown) {

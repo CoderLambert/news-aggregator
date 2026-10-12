@@ -96,6 +96,27 @@ def test_invalid_representation_is_rejected_before_search(articles, representati
 
 
 @pytest.mark.django_db
+def test_read_only_deployment_returns_previews_and_preserves_ai_barriers(articles, settings):
+    settings.PUBLIC_SITE_MODE = 'read_only'
+    settings.PUBLIC_AI_ENABLED = False
+    client = APIClient()
+    for params in ({}, {'representation': 'summary'}):
+        response = client.get('/api/news/', params)
+        assert response.status_code == 200
+        assert len(response.data['results']) == 20
+        assert all('summary' in item and 'content' not in item for item in response.data['results'])
+    detail = client.get(f'/api/news/{articles[0].pk}/')
+    assert detail.status_code == 200
+    assert detail.data['content'] == articles[0].content
+    with patch('api.views.NewsListView._semantic_search') as semantic, \
+         patch('api.views.NewsListView._hybrid_search') as hybrid:
+        for mode in ('semantic', 'hybrid'):
+            assert client.get('/api/news/', {'search': 'paragraph', 'mode': mode}).status_code == 403
+    semantic.assert_not_called()
+    hybrid.assert_not_called()
+
+
+@pytest.mark.django_db
 @pytest.mark.parametrize('authenticated', [False, True])
 @pytest.mark.parametrize('params,accept,expected_status', [
     ({}, 'text/html', 406),

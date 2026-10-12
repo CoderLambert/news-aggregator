@@ -1,6 +1,7 @@
 import uuid
 
 from django.db import models
+from django.utils import timezone
 
 
 def generate_chatgpt_host_id():
@@ -123,18 +124,112 @@ class News(models.Model):
 
 
 class ChatSession(models.Model):
-    """Stores chat history for a specific news article."""
-    news = models.OneToOneField(News, on_delete=models.CASCADE, related_name='chat_session')
+    """Stores one user's chat history for a specific news article."""
+    user = models.ForeignKey('auth.User', on_delete=models.CASCADE, related_name='news_chat_sessions')
+    news = models.ForeignKey(News, on_delete=models.CASCADE, related_name='chat_sessions')
     messages = models.JSONField('对话记录', default=list, blank=True)
     created_at = models.DateTimeField('创建时间', auto_now_add=True)
     updated_at = models.DateTimeField('更新时间', auto_now=True)
+    revision = models.PositiveBigIntegerField(default=0)
+    generation = models.PositiveBigIntegerField(default=0)
 
     class Meta:
         verbose_name = '对话会话'
         verbose_name_plural = '对话会话'
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'news'], name='unique_user_news_chat'),
+        ]
 
     def __str__(self):
-        return f"Chat for {self.news.title[:20]}"
+        return f"Chat for {self.user_id}:{self.news.title[:20]}"
+
+
+class UserProviderCredential(models.Model):
+    """One user's encrypted API key for an allow-listed LLM provider."""
+
+    PROVIDER_CHOICES = [
+        ('openai', 'OpenAI'),
+        ('anthropic', 'Anthropic Claude'),
+        ('deepseek', 'DeepSeek'),
+        ('gemini', 'Google Gemini'),
+        ('qwen', 'Qwen'),
+        ('glm', 'GLM / Z.AI'),
+        ('kimi', 'Kimi / Moonshot'),
+        ('mistral', 'Mistral AI'),
+        ('groq', 'Groq'),
+        ('xai', 'xAI'),
+        ('openrouter', 'OpenRouter'),
+    ]
+
+    user = models.OneToOneField(
+        'auth.User', primary_key=True, on_delete=models.CASCADE,
+        related_name='provider_credential',
+    )
+    provider = models.CharField(max_length=16, choices=PROVIDER_CHOICES)
+    model_id = models.CharField(max_length=128)
+    encrypted_api_key = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = '用户模型凭据'
+        verbose_name_plural = '用户模型凭据'
+
+
+class LegacyChatArchive(models.Model):
+    """Immutable, unowned snapshot of pre-account chat sessions."""
+    session_id = models.BigIntegerField(primary_key=True)
+    news_id = models.BigIntegerField()
+    title = models.CharField(max_length=500)
+    url = models.URLField(max_length=500)
+    messages = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField()
+    updated_at = models.DateTimeField()
+
+    class Meta:
+        verbose_name = '旧版对话归档'
+        verbose_name_plural = '旧版对话归档'
+        ordering = ['session_id']
+
+    def __str__(self):
+        return f"Legacy chat {self.session_id}: {self.title[:30]}"
+
+
+class AuthSecurityLock(models.Model):
+    """Singleton write fence serializing authentication security updates."""
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    revision = models.PositiveBigIntegerField(default=0)
+
+
+class AuthRateBucket(models.Model):
+    """Persistent fixed-window counter keyed by an HMAC, never a raw client ID."""
+    key = models.CharField(max_length=64)
+    kind = models.CharField(max_length=32)
+    window_start = models.DateTimeField()
+    count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['key', 'window_start'],
+                name='unique_auth_rate_key_window',
+            ),
+        ]
+
+
+class SignupInvite(models.Model):
+    """One-use, email-bound signup token; only its SHA-256 digest is stored."""
+    token_digest = models.CharField(max_length=64, unique=True)
+    email = models.EmailField(max_length=254)
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    consumed_by = models.ForeignKey(
+        'auth.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='consumed_signup_invites',
+    )
 
 
 class Favorite(models.Model):
@@ -387,6 +482,9 @@ class ChatGPTAuthAttempt(models.Model):
     session_binding_hash = models.CharField(max_length=64, blank=True, default='', db_index=True)
     handoff_origin = models.CharField(max_length=255, blank=True, default='')
     requested_client_id = models.CharField(max_length=255)
+    auth_mode = models.CharField(max_length=16, blank=True, default='')
+    protocol_snapshot = models.JSONField(default=dict, blank=True)
+    config_fingerprint = models.CharField(max_length=64, blank=True, default='')
     target_attempt_generation = models.PositiveIntegerField(default=0)
     selection_connection_id_at_start = models.UUIDField(null=True, blank=True)
     selection_generation_at_start = models.PositiveBigIntegerField(default=0)
@@ -422,6 +520,64 @@ class ChatGPTArticleTranslation(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=['user', 'connection', 'news'], name='unique_chatgpt_news_translation',
+            ),
+        ]
+
+
+class ChatGPTTranslationTask(models.Model):
+    """Durable, owner-private state for one full-article translation attempt."""
+
+    STATUS_CHOICES = [
+        ('queued', '排队中'),
+        ('running', '运行中'),
+        ('succeeded', '已完成'),
+        ('failed', '失败'),
+        ('cancelled', '已取消'),
+        ('interrupted', '已中断'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        'auth.User', on_delete=models.CASCADE, related_name='chatgpt_translation_tasks',
+    )
+    connection = models.ForeignKey(
+        ChatGPTSubscriptionConnection, on_delete=models.CASCADE,
+        related_name='translation_tasks',
+    )
+    news = models.ForeignKey(News, on_delete=models.CASCADE, related_name='chatgpt_translation_tasks')
+    source_hash = models.CharField(max_length=64)
+    model_slug = models.CharField(max_length=255)
+    connection_generation = models.PositiveBigIntegerField()
+    generation = models.PositiveBigIntegerField(default=1)
+    run_token = models.UUIDField(null=True, blank=True)
+    shared_lease_task_id = models.PositiveBigIntegerField(null=True, blank=True)
+    shared_lease_token = models.UUIDField(null=True, blank=True)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='queued', db_index=True)
+    provider_started = models.BooleanField(default=False)
+    progress = models.TextField(blank=True, default='')
+    error_code = models.CharField(max_length=64, blank=True, default='')
+    error_message = models.CharField(max_length=255, blank=True, default='')
+    result = models.JSONField(default=dict)
+    queued_at = models.DateTimeField(default=timezone.now)
+    started_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'ChatGPT 全文翻译任务'
+        verbose_name_plural = 'ChatGPT 全文翻译任务'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'connection', 'news', 'source_hash'],
+                name='unique_chatgpt_translation_task_source',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(shared_lease_task_id__isnull=True, shared_lease_token__isnull=True)
+                    | models.Q(shared_lease_task_id__isnull=False, shared_lease_token__isnull=False)
+                ),
+                name='chatgpt_translation_task_shared_lease_pair',
             ),
         ]
 
@@ -697,4 +853,72 @@ class SearchIndexRun(models.Model):
                 condition=models.Q(crawl_batch__isnull=False),
                 name='one_search_index_run_per_crawl_batch',
             ),
+        ]
+class ResearchRun(models.Model):
+    """Owner-private durable state for one explicit research attempt."""
+
+    STATUS_CHOICES = [
+        ('queued', '排队中'),
+        ('running', '运行中'),
+        ('succeeded', '已完成'),
+        ('failed', '失败'),
+        ('cancelled', '已取消'),
+        ('interrupted', '已中断'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        'auth.User', on_delete=models.CASCADE, related_name='research_runs',
+    )
+    session = models.ForeignKey(
+        ResearchSession, on_delete=models.CASCADE, related_name='runs',
+    )
+    idempotency_key = models.CharField(max_length=64)
+    request_hash = models.CharField(max_length=64)
+    # Retained only for owner-authorized recovery before any provider call.
+    # Older queued rows have no input and must never be guessed or replayed.
+    queued_query = models.TextField(default='', blank=True)
+    queued_local_only = models.BooleanField(default=False)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='queued', db_index=True)
+    run_token = models.UUIDField(null=True, blank=True)
+    heartbeat_at = models.DateTimeField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    last_event_sequence = models.PositiveBigIntegerField(default=0)
+    event_wire_bytes = models.PositiveBigIntegerField(default=0)
+    error_code = models.CharField(max_length=64, blank=True, default='')
+    error_message = models.CharField(max_length=255, blank=True, default='')
+    queued_at = models.DateTimeField(default=timezone.now)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'idempotency_key'], name='unique_research_run_user_key'),
+            models.UniqueConstraint(
+                fields=['session'],
+                condition=models.Q(status__in=['queued', 'running']),
+                name='one_active_research_run_per_session',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['session', '-queued_at'], name='research_run_session_queued'),
+        ]
+
+
+class ResearchRunEvent(models.Model):
+    """A bounded, replayable SSE event belonging to one private run."""
+
+    id = models.BigAutoField(primary_key=True)
+    run = models.ForeignKey(ResearchRun, on_delete=models.CASCADE, related_name='events')
+    sequence = models.PositiveBigIntegerField()
+    event_type = models.CharField(max_length=32)
+    data = models.JSONField(default=dict)
+    wire_bytes = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['sequence']
+        constraints = [
+            models.UniqueConstraint(fields=['run', 'sequence'], name='unique_research_event_sequence'),
         ]

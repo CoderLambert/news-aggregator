@@ -13,18 +13,40 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
+from .runtime_config import parse_runtime_config, resolve_django_environment
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load environment from .env if present (project root has highest priority,
-# then backend/). Falls back to plain os.environ if python-dotenv missing.
-try:
-    from dotenv import load_dotenv
-    for _candidate in (BASE_DIR.parent / '.env', BASE_DIR / '.env'):
-        if _candidate.exists():
-            load_dotenv(_candidate, override=False)
-except ImportError:
-    pass
+# Select the mode from the process environment before considering any dotenv
+# file. In particular, a production process never reads a workspace .env.
+DJANGO_ENV = resolve_django_environment(os.environ)
+os.environ.setdefault('DJANGO_ENV', DJANGO_ENV)
+if DJANGO_ENV == 'development':
+    try:
+        from dotenv import load_dotenv
+        for _candidate in (BASE_DIR.parent / '.env', BASE_DIR / '.env'):
+            if _candidate.exists():
+                load_dotenv(_candidate, override=False)
+    except ImportError:
+        pass
+
+_RUNTIME_CONFIG = parse_runtime_config(os.environ, environment=DJANGO_ENV)
+
+
+def _data_path(name: str, default: Path) -> Path:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        path = default
+    elif not raw_value.strip():
+        raise ImproperlyConfigured(f"{name} must not be empty.")
+    else:
+        path = Path(raw_value)
+    if DJANGO_ENV == 'production' and not path.is_absolute():
+        raise ImproperlyConfigured(f"{name} must be an absolute path in production.")
+    return path
 
 
 def _env(name: str, default: str = '') -> str:
@@ -34,27 +56,55 @@ def _env(name: str, default: str = '') -> str:
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-# Set DJANGO_SECRET_KEY in .env (see .env.example). The fallback below is
-# generated per-process for local dev only and will invalidate sessions on
-# every restart — production MUST provide a stable value via env.
-SECRET_KEY = _env('DJANGO_SECRET_KEY') or (
-    'dev-only-' + __import__('secrets').token_urlsafe(48)
-)
+# Production requires an explicitly configured stable key. Only development
+# retains the per-process fallback used by the local quick start.
+SECRET_KEY = _RUNTIME_CONFIG.secret_key
 
 # Subscription tokens need a stable key across process restarts. In local mode
 # this defaults only to the explicitly configured stable Django secret.
 CHATGPT_TOKEN_ENCRYPTION_KEY = _env('CHATGPT_TOKEN_ENCRYPTION_KEY') or _env('DJANGO_SECRET_KEY')
+# Personal provider API keys use an independent HKDF context. Deployments may
+# rotate them separately, while existing installs retain a stable fallback.
+PROVIDER_CREDENTIAL_ENCRYPTION_KEY = (
+    _env('PROVIDER_CREDENTIAL_ENCRYPTION_KEY')
+    or CHATGPT_TOKEN_ENCRYPTION_KEY
+)
+AI_BYOK_GATEWAY_URL = _env('AI_BYOK_GATEWAY_URL')
+AI_BYOK_GATEWAY_PROJECT_KEY = _env('AI_BYOK_GATEWAY_PROJECT_KEY')
+AI_BYOK_GATEWAY_PROJECT_KEY_FILE = _env('AI_BYOK_GATEWAY_PROJECT_KEY_FILE')
 CHATGPT_AGENT_NAME_HINT = _env('CHATGPT_AGENT_NAME_HINT', 'News Aggregator')
 CHATGPT_DEPLOYMENT_INSTANCE_ID = _env('CHATGPT_DEPLOYMENT_INSTANCE_ID')
 CHATGPT_DEPLOYMENT_INSTANCE_FILE = Path(
     _env('CHATGPT_DEPLOYMENT_INSTANCE_FILE') or BASE_DIR / '.runtime' / 'chatgpt-deployment-id'
 )
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = _env('DJANGO_DEBUG', '1') == '1'
+DEBUG = _RUNTIME_CONFIG.debug
+ALLOWED_HOSTS = list(_RUNTIME_CONFIG.allowed_hosts)
+PUBLIC_SITE_MODE = _RUNTIME_CONFIG.public_site_mode
+PUBLIC_SIGNUP_ENABLED = _RUNTIME_CONFIG.public_signup_enabled
+PUBLIC_AI_ENABLED = _RUNTIME_CONFIG.public_ai_enabled
+CHATGPT_PLAN_USAGE_ENABLED = _RUNTIME_CONFIG.chatgpt_plan_usage_enabled
+CHATGPT_AUTH_MODE = _RUNTIME_CONFIG.chatgpt_auth_mode
+WAITRESS_TRUSTED_PROXY = _RUNTIME_CONFIG.waitress_trusted_proxy
 
-ALLOWED_HOSTS = [h.strip() for h in _env('DJANGO_ALLOWED_HOSTS', '*').split(',') if h.strip()]
+DJANGO_DB_PATH = _data_path(
+    'DJANGO_DB_PATH',
+    Path('/var/lib/newshub/db/db.sqlite3')
+    if DJANGO_ENV == 'production'
+    else BASE_DIR / 'db.sqlite3',
+)
+CHROMA_DATA_DIR = _data_path(
+    'CHROMA_DATA_DIR',
+    Path('/var/lib/newshub/chroma')
+    if DJANGO_ENV == 'production'
+    else BASE_DIR.parent / 'chroma_data',
+)
+TTS_CACHE_DIR = _data_path(
+    'TTS_CACHE_DIR',
+    Path('/var/lib/newshub/tts')
+    if DJANGO_ENV == 'production'
+    else BASE_DIR / 'media' / 'tts_cache',
+)
 
 
 # Application definition
@@ -74,6 +124,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'api.public_policy.PublicPolicyMiddleware',
+    'api.sse_resources.SSEResourceMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -109,7 +161,7 @@ WSGI_APPLICATION = 'newsaggregator.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': DJANGO_DB_PATH,
         # WAL mode: concurrent reads + faster writes, critical for mobile/eMMC
         # storage where fsync latency is high and Scrapy pipeline writes
         # frequently during crawl.
@@ -171,19 +223,29 @@ REST_FRAMEWORK = {
     ],
 }
 
-CORS_ALLOW_ALL_ORIGINS = True
-CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = DJANGO_ENV != 'production'
+CORS_ALLOW_CREDENTIALS = DJANGO_ENV != 'production'
 
 # CSRF & Session — SPA served from same origin (Django :9527) or Vite dev proxy
-CSRF_TRUSTED_ORIGINS = [
-    'http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175',
-    'http://127.0.0.1:5173', 'http://127.0.0.1:9527', 'http://localhost:9527',
-]
+CSRF_TRUSTED_ORIGINS = list(_RUNTIME_CONFIG.csrf_trusted_origins)
 CHATGPT_HANDOFF_ALLOWED_ORIGINS = ['http://127.0.0.1:5173', 'http://127.0.0.1:9527']
 SESSION_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SECURE = DJANGO_ENV == 'production'
+SESSION_COOKIE_DOMAIN = None
 CSRF_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_HTTPONLY = False  # SPA needs to read it for X-CSRFToken header
+CSRF_COOKIE_SECURE = DJANGO_ENV == 'production'
+CSRF_COOKIE_DOMAIN = None
+
+# Only the precise internal health paths bypass the HTTPS redirect so local
+# container probes can use HTTP without weakening the rest of the API.
+SECURE_SSL_REDIRECT = DJANGO_ENV == 'production'
+SECURE_REDIRECT_EXEMPT = [r'^api/health/(live|ready)/$']
+SECURE_PROXY_SSL_HEADER = None
+SECURE_HSTS_SECONDS = 3600 if DJANGO_ENV == 'production' else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+SECURE_HSTS_PRELOAD = False
 
 # Auto-fetch full content daemon settings (override via .env)
 # How often to poll for new pending articles (seconds)

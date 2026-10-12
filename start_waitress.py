@@ -1,48 +1,53 @@
 #!/usr/bin/env python3
-"""Start Django with Waitress WSGI server for proper SSE support."""
+"""Start Django with Waitress when run as a script.
+
+The configuration helpers are import-safe so tests can validate them without
+initializing Django, reading credentials, or opening a listening socket.
+"""
+
+from __future__ import annotations
+
 import os
 import sys
 
-# Add the project to the path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'backend'))
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'newsaggregator.settings')
 
-# Ensure API key is available for LLM translation
-if not os.environ.get('DASHSCOPE_CODING_API_KEY'):
-    config_path = os.path.expanduser('~/.hermes/config.yaml')
-    if os.path.isfile(config_path):
-        try:
-            import yaml
-            with open(config_path, 'r') as f:
-                config = yaml.safe_load(f)
-            api_key = config.get('model', {}).get('api_key', '')
-            if api_key:
-                os.environ['DASHSCOPE_CODING_API_KEY'] = api_key
-                print("Loaded API key from config", flush=True)
-        except Exception as e:
-            print(f"Warning: Could not load API key from config: {e}", flush=True)
+def build_waitress_config(environ=None, *, environment=None):
+    """Build validated Waitress arguments without importing or starting it."""
+    from newsaggregator.runtime_config import build_waitress_options
 
-import django
-django.setup()
+    values = os.environ if environ is None else environ
+    return build_waitress_options(values, environment=environment)
 
-from waitress import serve
-from django.core.wsgi import get_wsgi_application
 
-application = get_wsgi_application()
+def main() -> None:
+    backend_path = os.path.join(os.path.dirname(__file__), "backend")
+    if backend_path not in sys.path:
+        sys.path.insert(0, backend_path)
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "newsaggregator.settings")
 
-# Termux / mobile optimization
-termux_mode = os.environ.get('TERMUX_MODE', '0') == '1'
-threads = int(os.environ.get('WAITRESS_THREADS', '2' if termux_mode else '4'))
-conn_limit = int(os.environ.get('WAITRESS_CONN_LIMIT', '256' if termux_mode else '1000'))
+    from newsaggregator.runtime_config import resolve_django_environment
 
-mode = 'Termux' if termux_mode else 'Server'
-print(f"Starting Waitress on 0.0.0.0:9527 ({mode} mode, threads={threads}, connections={conn_limit})...", flush=True)
+    environment = resolve_django_environment(os.environ)
+    os.environ.setdefault("DJANGO_ENV", environment)
+    import django
 
-serve(
-    application,
-    host='0.0.0.0',
-    port=9527,
-    threads=threads,
-    connection_limit=conn_limit,
-    channel_timeout=300,
-)
+    django.setup()
+
+    from django.conf import settings
+    from django.core.wsgi import get_wsgi_application
+    from waitress import serve
+
+    application = get_wsgi_application()
+    config = build_waitress_config(os.environ, environment=settings.DJANGO_ENV)
+    mode = "Termux" if os.environ.get("TERMUX_MODE", "0") == "1" else "Server"
+    print(
+        f"Starting Waitress on {config['host']}:{config['port']} "
+        f"({mode} mode, threads={config['threads']}, "
+        f"connections={config['connection_limit']})...",
+        flush=True,
+    )
+    serve(application, **config)
+
+
+if __name__ == "__main__":
+    main()

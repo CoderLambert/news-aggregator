@@ -2,12 +2,14 @@ import axios from 'axios'
 import type { NewsId } from '@/services/api'
 export type { NewsId } from '@/services/api'
 import {
+  cancelChatGPTTranslationTask as cancelTranslationTaskRequest,
   chatStream as streamChat,
   clearChatHistory as clearChatHistoryRequest,
   fetchChatHistory as fetchChatHistoryRequest,
   fetchNewsDetail as fetchNewsDetailRequest,
   fetchFullArticle as fetchFullArticleRequest,
   fetchSuggestedQuestions as fetchSuggestedQuestionsRequest,
+  getChatGPTTranslationTask as getTranslationTaskRequest,
   translateFullArticleStream as streamTranslation,
 } from '@/services/api'
 import { isRecord } from '@/types/news'
@@ -56,6 +58,39 @@ export type TranslationEvent =
   | { type: 'error'; message: string }
   | { type: 'ignored' }
 
+
+export interface TranslationJobSnapshot {
+  id: string
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted'
+  generation: number
+  progress: string
+  result: Record<string, unknown>
+  errorCode: string
+  errorMessage: string
+}
+
+function parseTranslationJob(value: unknown): TranslationJobSnapshot {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.status !== 'string' ||
+    !['queued', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted'].includes(value.status) ||
+    typeof value.generation !== 'number' ||
+    !Number.isInteger(value.generation) ||
+    value.generation < 1
+  ) {
+    throw new TypeError('Invalid translation job response')
+  }
+  return {
+    id: value.id,
+    status: value.status as TranslationJobSnapshot['status'],
+    generation: value.generation,
+    progress: typeof value.progress === 'string' ? value.progress : '',
+    result: isRecord(value.result) ? value.result : {},
+    errorCode: typeof value.error_code === 'string' ? value.error_code : '',
+    errorMessage: typeof value.error_message === 'string' ? value.error_message : '',
+  }
+}
 function optionalString(record: Record<string, unknown>, key: string): string | undefined {
   return typeof record[key] === 'string' ? record[key] : undefined
 }
@@ -200,12 +235,20 @@ export async function fetchSuggestedQuestions(id: NewsId, options: { force?: boo
 
 export async function* translateFullArticleStream(
   id: NewsId,
-  options: { force: boolean; signal: AbortSignal },
+  options: { force: boolean; signal: AbortSignal; onJobId?: (jobId: string) => void },
 ): AsyncGenerator<TranslationEvent> {
   for await (const rawEvent of streamTranslation(id, options)) {
     const event: unknown = rawEvent
     yield parseTranslationEvent(event)
   }
+}
+
+export async function getTranslationJob(jobId: string, signal: AbortSignal): Promise<TranslationJobSnapshot> {
+  return parseTranslationJob(await getTranslationTaskRequest(jobId, signal))
+}
+
+export async function cancelTranslationJob(jobId: string, generation: number): Promise<TranslationJobSnapshot> {
+  return parseTranslationJob(await cancelTranslationTaskRequest(jobId, generation))
 }
 
 export async function* chatStream(

@@ -18,6 +18,7 @@ vi.mock('@/components/research/researchPanelLoader', () => ({
 vi.mock('@/context/SpeechPlayerContext', () => ({ useSpeechPlayerActivity: () => false }))
 
 import ResearchLauncher from '@/components/research/ResearchLauncher'
+import { CapabilitiesTestProvider } from '../../helpers/capabilities'
 
 beforeEach(() => {
   loader.load.mockReset().mockResolvedValue({ default: TestPanel })
@@ -26,7 +27,7 @@ beforeEach(() => {
 
 describe('ResearchLauncher loading boundary', () => {
   it('prefetches on intent and mounts heavy UI only after activation', async () => {
-    render(<MemoryRouter><ResearchLauncher /></MemoryRouter>)
+    render(<MemoryRouter><CapabilitiesTestProvider><ResearchLauncher /></CapabilitiesTestProvider></MemoryRouter>)
     const launcher = screen.getByRole('button', { name: '打开新闻研究助手' })
 
     expect(loader.load).not.toHaveBeenCalled()

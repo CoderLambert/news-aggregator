@@ -91,6 +91,7 @@ describe('FullContentSection', () => {
     renderSection({ translating: true, translationWaitingShared: true })
     expect(screen.getByText('共享译文正在生成，完成后自动显示…')).toBeInTheDocument()
     expect(screen.getByText(/正在复用其他读者发起的翻译/)).toBeInTheDocument()
+    expect(screen.queryByText(/其他用户的私有进度：/)).not.toBeInTheDocument()
   })
 
   it('shows "重新翻译" + lang toggle when translation present', () => {
@@ -110,12 +111,12 @@ describe('FullContentSection', () => {
   it('renders the spinner card while translating with no progress yet', () => {
     renderSection({ translating: true, translationProgress: '' })
     expect(screen.getByText('正在翻译全文…')).toBeInTheDocument()
-    expect(screen.getByText(/服务端翻译仍会继续/)).toBeInTheDocument()
+    expect(screen.getByText(/取消会阻止后续请求与保存/)).toBeInTheDocument()
   })
 
-  it('stops only the browser wait while the translation worker continues', () => {
+  it('sends explicit translation cancellation rather than claiming server work was stopped by disconnect', () => {
     const { props } = renderSection({ translating: true, translationProgress: 'partial' })
-    fireEvent.click(screen.getByRole('button', { name: '停止接收翻译更新' }))
+    fireEvent.click(screen.getByRole('button', { name: '取消全文翻译' }))
     expect(props.onStopTranslation).toHaveBeenCalledOnce()
   })
 

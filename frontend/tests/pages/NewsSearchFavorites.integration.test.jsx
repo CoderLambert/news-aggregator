@@ -8,6 +8,7 @@ import * as api from '@/services/api'
 import LocalSearch from '@/pages/LocalSearch'
 import NewsDetail from '@/pages/NewsDetail'
 import FavoritesPage from '@/pages/FavoritesPage'
+import { CapabilitiesTestProvider } from '../helpers/capabilities'
 
 vi.mock('@/services/api', () => ({
   fetchNews: vi.fn(), fetchNewsDetail: vi.fn(), checkFavoriteStatus: vi.fn(), checkBlockedStatus: vi.fn(),
@@ -54,16 +55,18 @@ function renderFlow(initialEntry) {
     client,
     ...render(
       <QueryClientProvider client={client}>
-        <AuthContext.Provider value={{ user: { id: 12, username: 'reader' }, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
-          <MemoryRouter initialEntries={[initialEntry]}>
-            <Routes>
-              <Route path="/search" element={<LocalSearch />} />
-              <Route path="/news/:id" element={<NewsDetail />} />
-              <Route path="/favorites" element={<FavoritesPage />} />
-            </Routes>
-            <RouteTools />
-          </MemoryRouter>
-        </AuthContext.Provider>
+        <CapabilitiesTestProvider client={client}>
+          <AuthContext.Provider value={{ user: { id: 12, username: 'reader' }, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
+            <MemoryRouter initialEntries={[initialEntry]}>
+              <Routes>
+                <Route path="/search" element={<LocalSearch />} />
+                <Route path="/news/:id" element={<NewsDetail />} />
+                <Route path="/favorites" element={<FavoritesPage />} />
+              </Routes>
+              <RouteTools />
+            </MemoryRouter>
+          </AuthContext.Provider>
+        </CapabilitiesTestProvider>
       </QueryClientProvider>,
     ),
   }

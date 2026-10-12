@@ -9,6 +9,7 @@ import TranslationStatus from '@/components/news-detail/TranslationStatus'
 import { useBlockNews } from '@/hooks/useNewsMutations'
 import { newsDetailOptions } from '@/services/newsQueries'
 import type { DisplayMode, NewsSummary } from '@/types/news'
+import { useCapability } from '@/context/CapabilitiesContext'
 
 interface NewsCardProps {
   news: NewsSummary
@@ -68,6 +69,7 @@ function cleanSummary(rawText: string): string {
 export default function NewsCard({ news, onBlockStart, onBlocked }: NewsCardProps) {
   const { displayMode, t, lang } = useLanguage()
   const { user } = useAuth()
+  const { enabled: blockedNewsEnabled } = useCapability('blocked_news')
   const queryClient = useQueryClient()
   const location = useLocation()
   const returnTo = `${location.pathname}${location.search}${location.hash}`
@@ -83,7 +85,7 @@ export default function NewsCard({ news, onBlockStart, onBlocked }: NewsCardProp
   async function handleBlock(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault()
     event.stopPropagation()
-    if (!user) return
+    if (!user || !blockedNewsEnabled) return
     const version = onBlockStart?.(news.id, user.id) ?? 0
     try {
       await blockMutation.mutateAsync({ newsId: news.id, viewerId: user.id })
@@ -97,7 +99,7 @@ export default function NewsCard({ news, onBlockStart, onBlocked }: NewsCardProp
     <article className="news-card-render group relative overflow-hidden rounded-2xl border border-border bg-card transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-emerald-600/30 hover:shadow-md">
       <Link id={`news-card-${news.id}`} to={`/news/${news.id}`} state={{ from: returnTo }} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary" onMouseEnter={prefetchDetail} onFocus={prefetchDetail}>
         {news.cover_image && <div className="aspect-video overflow-hidden bg-muted"><img src={news.cover_image} alt="" className="h-full w-full object-cover" loading="lazy" /></div>}
-        <div className={`p-4 ${user ? 'pr-12' : ''}`}>
+        <div className={`p-4 ${user && blockedNewsEnabled ? 'pr-12' : ''}`}>
           <div className="mb-2 flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <h2 className="line-clamp-2 text-base font-semibold leading-snug text-foreground transition-colors group-hover:text-emerald-800 dark:group-hover:text-emerald-300">{title}</h2>
@@ -114,7 +116,7 @@ export default function NewsCard({ news, onBlockStart, onBlocked }: NewsCardProp
           </div>
         </div>
       </Link>
-      {user && (
+      {user && blockedNewsEnabled && (
         <div className="absolute right-2 top-2 z-10">
           <button type="button" onClick={handleBlock} disabled={blockMutation.isPending} className="flex size-8 items-center justify-center rounded-full border border-gray-200 bg-white/90 text-gray-400 backdrop-blur-sm transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-500 disabled:opacity-50" aria-label={lang === 'en' ? 'Block this news' : '屏蔽此新闻'} title={lang === 'en' ? 'Block this news' : '屏蔽此新闻'}>
             <EyeOff size={13} />

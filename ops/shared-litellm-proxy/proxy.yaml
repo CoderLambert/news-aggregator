@@ -1,0 +1,73 @@
+model_list:
+  - model_name: openai/*
+    litellm_params:
+      model: openai/*
+  - model_name: anthropic/*
+    litellm_params:
+      model: anthropic/*
+  - model_name: deepseek/*
+    litellm_params:
+      model: deepseek/*
+  - model_name: gemini/*
+    litellm_params:
+      model: gemini/*
+  - model_name: dashscope/*
+    litellm_params:
+      model: dashscope/*
+  - model_name: zai/*
+    litellm_params:
+      model: zai/*
+  - model_name: moonshot/*
+    litellm_params:
+      model: moonshot/*
+  - model_name: mistral/*
+    litellm_params:
+      model: mistral/*
+  - model_name: groq/*
+    litellm_params:
+      model: groq/*
+  - model_name: xai/*
+    litellm_params:
+      model: xai/*
+  - model_name: openrouter/*
+    litellm_params:
+      model: openrouter/*
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  allow_requests_on_db_unavailable: false
+  store_prompts_in_spend_logs: false
+  maximum_spend_logs_retention_period: 30d
+  maximum_spend_logs_retention_interval: 1d
+  store_audit_logs: true
+  disable_master_key_return: true
+  allow_client_side_credentials: true
+
+router_settings:
+  num_retries: 0
+  fallbacks: []
+
+litellm_settings:
+  callbacks: byok_gateway_policy.proxy_handler_instance
+  num_retries: 0
+  cache: false
+  turn_off_message_logging: true
+  redact_messages_in_exceptions: true
+  global_disable_no_log_param: true
+  set_verbose: false
+  json_logs: true
+  default_key_generate_params:
+    max_budget: 5.0
+    budget_duration: 1d
+    rpm_limit: 60
+    tpm_limit: 120000
+    max_parallel_requests: 4
+    duration: 90d
+  upperbound_key_generate_params:
+    max_budget: 5.0
+    budget_duration: 1d
+    rpm_limit: 60
+    tpm_limit: 120000
+    max_parallel_requests: 4
+    duration: 90d

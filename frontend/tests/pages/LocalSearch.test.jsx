@@ -6,6 +6,7 @@ import { AuthContext } from '@/context/AuthContext'
 import { usePreferencesStore } from '@/stores/preferences'
 import { fetchNews } from '@/services/api'
 import LocalSearch from '@/pages/LocalSearch'
+import { CapabilitiesTestProvider } from '../helpers/capabilities'
 
 vi.mock('@/services/api', () => ({ fetchNews: vi.fn() }))
 
@@ -35,12 +36,14 @@ function renderSearch(initialEntries, initialIndex) {
   const user = { id: 12, username: 'reader' }
   return render(
     <QueryClientProvider client={client}>
-      <AuthContext.Provider value={{ user, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
-        <MemoryRouter initialEntries={initialEntries} initialIndex={initialIndex}>
-          <LocalSearch />
-          <RouteProbe />
-        </MemoryRouter>
-      </AuthContext.Provider>
+      <CapabilitiesTestProvider client={client}>
+        <AuthContext.Provider value={{ user, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
+          <MemoryRouter initialEntries={initialEntries} initialIndex={initialIndex}>
+            <LocalSearch />
+            <RouteProbe />
+          </MemoryRouter>
+        </AuthContext.Provider>
+      </CapabilitiesTestProvider>
     </QueryClientProvider>,
   )
 }

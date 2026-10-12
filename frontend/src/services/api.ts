@@ -8,6 +8,96 @@ import type { FavoriteType } from '@/types/news'
 export type NewsId = string | number
 export type ApiQueryParams = Readonly<Record<string, string | number | boolean | undefined>>
 
+export const CAPABILITY_FEATURE_NAMES = [
+  'news',
+  'keyword_search',
+  'semantic_search',
+  'accounts',
+  'signup',
+  'favorites',
+  'blocked_news',
+  'chat_history',
+  'fetch_full',
+  'translation',
+  'chat',
+  'suggested_questions',
+  'tts',
+  'research',
+  'provider_comparisons',
+  'admin',
+  'chatgpt_subscription',
+] as const
+
+export type CapabilityName = (typeof CAPABILITY_FEATURE_NAMES)[number]
+export type CapabilityReason =
+  | 'public_read_only'
+  | 'ai_disabled'
+  | 'semantic_search_disabled'
+  | 'signup_disabled'
+  | 'chatgpt_auth_disabled'
+  | 'hosted_integration_unapproved'
+  | 'chatgpt_plan_usage_disabled'
+  | 'capabilities_unavailable'
+
+export interface CapabilityFeature {
+  enabled: boolean
+  reason: CapabilityReason | null
+}
+
+export interface SiteCapabilities {
+  site_mode: 'full' | 'read_only'
+  chatgpt_auth_mode: 'disabled' | 'local_oss' | 'website'
+  features: Record<CapabilityName, CapabilityFeature>
+}
+
+const CAPABILITY_REASONS = new Set<CapabilityReason>([
+  'public_read_only',
+  'ai_disabled',
+  'semantic_search_disabled',
+  'signup_disabled',
+  'chatgpt_auth_disabled',
+  'hosted_integration_unapproved',
+  'chatgpt_plan_usage_disabled',
+  'capabilities_unavailable',
+])
+
+export function parseCapabilities(value: unknown): SiteCapabilities {
+  if (!isRecord(value) || (value.site_mode !== 'full' && value.site_mode !== 'read_only') ||
+    (value.chatgpt_auth_mode !== 'disabled' && value.chatgpt_auth_mode !== 'local_oss' && value.chatgpt_auth_mode !== 'website') ||
+    !isRecord(value.features)) {
+    throw new TypeError('Invalid site capabilities response')
+  }
+
+  const featureNames = Object.keys(value.features)
+  if (featureNames.length !== CAPABILITY_FEATURE_NAMES.length ||
+    CAPABILITY_FEATURE_NAMES.some((name) => !Object.prototype.hasOwnProperty.call(value.features, name))) {
+    throw new TypeError('Invalid site capabilities response')
+  }
+
+  const features = {} as Record<CapabilityName, CapabilityFeature>
+  for (const name of CAPABILITY_FEATURE_NAMES) {
+    const feature: unknown = value.features[name]
+    if (!isRecord(feature) || typeof feature.enabled !== 'boolean') {
+      throw new TypeError('Invalid site capabilities response')
+    }
+    if (feature.enabled) {
+      if (feature.reason !== null) throw new TypeError('Invalid site capabilities response')
+      features[name] = { enabled: true, reason: null }
+      continue
+    }
+    if (typeof feature.reason !== 'string' || !CAPABILITY_REASONS.has(feature.reason as CapabilityReason)) {
+      throw new TypeError('Invalid site capabilities response')
+    }
+    features[name] = { enabled: false, reason: feature.reason as CapabilityReason }
+  }
+
+  return {
+    site_mode: value.site_mode,
+    chatgpt_auth_mode: value.chatgpt_auth_mode,
+    features,
+  }
+}
+
 export interface ProviderComparisonParams extends ApiQueryParams {
   page?: number
   page_size?: number
@@ -23,21 +113,28 @@ export interface ResearchResultsParams extends ApiQueryParams {
 
 export interface ResearchStreamOptions {
   localOnly?: boolean
+  idempotencyKey?: string
   signal?: AbortSignal
   onSessionId?: (sessionId: string) => void
+  onRunId?: (runId: string) => void
 }
 
 export interface ResearchChatStreamOptions {
   localOnly?: boolean
+  idempotencyKey?: string
   signal?: AbortSignal
+  onRunId?: (runId: string) => void
 }
 
 export interface OpenResearchSessionStreamOptions {
   signal?: AbortSignal
+  onRunId?: (runId: string) => void
+  waitForQueued?: boolean
 }
 
 export type OpenResearchSessionStreamResponse =
   | { kind: 'session'; data: unknown }
+  | { kind: 'queued'; runId: string | null }
   | { kind: 'stream'; events: AsyncIterable<unknown> }
 
 interface SuggestedQuestionsOptions {
@@ -85,6 +182,11 @@ function makeApi(timeout: number): AxiosInstance {
 const api = makeApi(10_000)
 const apiFetch = makeApi(120_000)
 const apiLong = makeApi(180_000)
+
+export async function fetchCapabilities(): Promise<SiteCapabilities> {
+  const value: unknown = (await api.get<unknown>('/capabilities/')).data
+  return parseCapabilities(value)
+}
 
 // ---- News -----------------------------------------------------------------
 
@@ -155,20 +257,62 @@ export function fetchSuggestedQuestions(newsId: NewsId, { force = false, signal 
 
 export async function* translateFullArticleStream(
   id: NewsId,
-  { force = false, signal }: { force?: boolean; signal?: AbortSignal } = {},
+  { force = false, signal, onJobId }: {
+    force?: boolean
+    signal?: AbortSignal
+    onJobId?: (jobId: string) => void
+  } = {},
 ): AsyncGenerator<unknown> {
   const response = await streamingFetch(`/api/news/${id}/translate/`, {
     body: JSON.stringify({ force }),
     signal,
   })
-  for await (const event of iterSSEEvents(response)) {
+  const jobId = response.headers.get('Job-ID')
+  if (jobId) onJobId?.(jobId)
+  // Only translation uses the bounded fragmented envelope. Research retains
+  // its independently limited 32-KiB/16-KiB event contract.
+  const encoder = new TextEncoder()
+  const maxMessageBytes = 32 * 1024 * 1024
+  let fragments = 0
+  let fragmentBytes = 0
+  let fragmentPayload = ''
+  let progress = ''
+  for await (const incoming of iterSSEEvents(response)) {
+    let event: unknown = incoming
+    if (isRecord(incoming) && Object.prototype.hasOwnProperty.call(incoming, '__translation_sse_fragment_v1')) {
+      const fragment = incoming.__translation_sse_fragment_v1
+      if (typeof fragment !== 'string' || incoming.index !== fragments || typeof incoming.last !== 'boolean') {
+        throw new TypeError('Invalid translation SSE fragment sequence')
+      }
+      fragmentBytes += encoder.encode(fragment).byteLength
+      if (fragmentBytes > maxMessageBytes) throw new RangeError('Translation SSE message exceeded 32 MiB')
+      fragmentPayload += fragment
+      fragments += 1
+      if (!incoming.last) continue
+      try {
+        event = JSON.parse(fragmentPayload) as unknown
+      } finally {
+        fragmentPayload = ''
+        fragments = 0
+        fragmentBytes = 0
+      }
+    } else if (fragments !== 0) {
+      throw new TypeError('Interrupted translation SSE fragment sequence')
+    }
+    if (isRecord(event) && typeof event.progress_delta === 'string') {
+      progress += event.progress_delta
+      yield { progress }
+      continue
+    }
+    if (isRecord(event) && typeof event.progress === 'string') progress = event.progress
     if (isRecord(event) && typeof event.error === 'string') {
-      // Provider failover errors are data for the UI, not transport failures.
+      // Provider errors remain data for the UI, not transport failures.
       yield { error: event.error }
       return
     }
     yield event
   }
+  if (fragments !== 0) throw new TypeError('Incomplete translation SSE fragment sequence')
 }
 
 export async function* chatStream(
@@ -223,8 +367,11 @@ export async function fetchCsrfToken(): Promise<string> {
   return response.csrfToken
 }
 
-export function registerUser(username: string, password: string, email = ''): Promise<unknown> {
-  return api.post<unknown>('/auth/register/', { username, password, email }).then(({ data }) => data)
+export function registerUser(username: string, password: string, email = '', inviteToken = ''): Promise<unknown> {
+  const payload: { username: string; password: string; email: string; invite_token?: string } = { username, password, email }
+  const normalizedInviteToken = inviteToken.trim()
+  if (normalizedInviteToken) payload.invite_token = normalizedInviteToken
+  return api.post<unknown>('/auth/register/', payload).then(({ data }) => data)
 }
 
 export function loginUser(username: string, password: string): Promise<unknown> {
@@ -237,6 +384,61 @@ export function logoutUser(): Promise<unknown> {
 
 export function fetchMe(): Promise<unknown> {
   return api.get<unknown>('/auth/me/').then(({ data }) => data)
+}
+
+// ---- Personal model provider credential ----------------------------------
+
+export type PersonalProvider =
+  | 'openai' | 'anthropic' | 'deepseek' | 'gemini' | 'qwen' | 'glm' | 'kimi'
+  | 'mistral' | 'groq' | 'xai' | 'openrouter'
+
+export interface ProviderCredentialStatus {
+  configured: boolean
+  requiresReplacement: boolean
+  provider: PersonalProvider | null
+  providerLabel: string | null
+  modelId: string | null
+  updatedAt: string | null
+}
+
+function parseProviderCredentialStatus(value: unknown): ProviderCredentialStatus {
+  if (!isRecord(value) || typeof value.configured !== 'boolean') {
+    throw new TypeError('Invalid provider credential response')
+  }
+  const provider = value.provider === 'openai' || value.provider === 'anthropic' ||
+    value.provider === 'deepseek' || value.provider === 'gemini' ||
+    value.provider === 'qwen' || value.provider === 'glm' || value.provider === 'kimi' ||
+    value.provider === 'mistral' || value.provider === 'groq' ||
+    value.provider === 'xai' || value.provider === 'openrouter'
+    ? value.provider
+    : null
+  if (value.configured && provider === null) throw new TypeError('Invalid provider credential response')
+  return {
+    configured: value.configured,
+    requiresReplacement: value.requires_replacement === true,
+    provider,
+    providerLabel: typeof value.provider_label === 'string' ? value.provider_label : null,
+    modelId: typeof value.model_id === 'string' ? value.model_id : null,
+    updatedAt: typeof value.updated_at === 'string' ? value.updated_at : null,
+  }
+}
+
+export async function fetchProviderCredentialStatus(signal?: AbortSignal): Promise<ProviderCredentialStatus> {
+  return parseProviderCredentialStatus((await api.get<unknown>('/provider-credential/', { signal })).data)
+}
+
+export async function saveProviderCredential(
+  provider: PersonalProvider,
+  modelId: string,
+  apiKey: string,
+): Promise<ProviderCredentialStatus> {
+  return parseProviderCredentialStatus((await api.put<unknown>(
+    '/provider-credential/', { provider, model_id: modelId, api_key: apiKey },
+  )).data)
+}
+
+export async function deleteProviderCredential(): Promise<ProviderCredentialStatus> {
+  return parseProviderCredentialStatus((await api.delete<unknown>('/provider-credential/')).data)
 }
 
 // ---- Local ChatGPT subscription ------------------------------------------
@@ -330,8 +532,10 @@ export async function startChatGPTSubscriptionConnect(connectionId?: string): Pr
     throw new TypeError('Invalid ChatGPT authorization handoff response')
   }
   const handoff = new URL(value.handoff_url)
-  if (handoff.protocol !== 'http:' || handoff.hostname !== '127.0.0.1' || handoff.port !== '9527' ||
-    handoff.pathname !== '/api/chatgpt-subscription/handoff/' || handoff.search || handoff.hash) {
+  if (value.handoff_url !== 'http://127.0.0.1:9527/api/chatgpt-subscription/handoff/' ||
+    handoff.protocol !== 'http:' || handoff.hostname !== '127.0.0.1' || handoff.port !== '9527' ||
+    handoff.username || handoff.password || handoff.pathname !== '/api/chatgpt-subscription/handoff/' ||
+    handoff.search || handoff.hash) {
     throw new TypeError('Invalid ChatGPT authorization handoff URL')
   }
   return { attempt_id: value.attempt_id, handoff_token: value.handoff_token, handoff_url: handoff.href }
@@ -373,6 +577,14 @@ export function disconnectChatGPTSubscription(connectionId: string): Promise<{ d
   return api.delete<{ disconnected: boolean; revocation_confirmed: boolean }>(`/chatgpt-subscription/connections/${connectionId}/`).then(({ data }) => data)
 }
 
+
+export function getChatGPTTranslationTask(jobId: string, signal?: AbortSignal): Promise<unknown> {
+  return api.get<unknown>(`/chatgpt-subscription/jobs/${jobId}/`, { signal }).then(({ data }) => data)
+}
+
+export function cancelChatGPTTranslationTask(jobId: string, generation: number): Promise<unknown> {
+  return api.post<unknown>(`/chatgpt-subscription/jobs/${jobId}/cancel/`, { generation }).then(({ data }) => data)
+}
 // ---- Research -------------------------------------------------------------
 
 export function listResearchSessions(params: ApiQueryParams = {}, signal?: AbortSignal): Promise<unknown> {
@@ -389,13 +601,16 @@ export function deleteResearchSession(sessionId: string): Promise<unknown> {
 
 export async function* createResearchStream(
   query: string,
-  { localOnly = false, signal, onSessionId }: ResearchStreamOptions = {},
+  { localOnly = false, idempotencyKey, signal, onSessionId, onRunId }: ResearchStreamOptions = {},
 ): AsyncGenerator<unknown> {
   const response = await streamingFetch('/api/research/', {
     body: JSON.stringify({ query, local_only: localOnly }),
+    headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     signal,
   })
   const sessionId = response.headers.get('Session-ID')
+  const runId = response.headers.get('Run-ID')
+  if (runId) onRunId?.(runId)
   if (sessionId) {
     onSessionId?.(sessionId)
     yield { type: 'session_created', session_id: sessionId }
@@ -415,24 +630,47 @@ export async function* createResearchStream(
 export async function* researchChatStream(
   sessionId: string,
   query: string,
-  { localOnly = false, signal }: ResearchChatStreamOptions = {},
+  { localOnly = false, idempotencyKey, signal, onRunId }: ResearchChatStreamOptions = {},
 ): AsyncGenerator<unknown> {
   const response = await streamingFetch(`/api/research/${sessionId}/chat/`, {
     body: JSON.stringify({ query, local_only: localOnly }),
+    headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     signal,
   })
+  const runId = response.headers.get('Run-ID')
+  if (runId) onRunId?.(runId)
   yield* iterSSEEvents(response)
 }
 
 export async function openResearchSessionStream(
   sessionId: string,
-  { signal }: OpenResearchSessionStreamOptions = {},
+  { signal, onRunId, waitForQueued = false }: OpenResearchSessionStreamOptions = {},
 ): Promise<OpenResearchSessionStreamResponse> {
-  const response = await streamingFetch(`/api/research/${sessionId}/stream/`, { method: 'GET', signal })
-  if (response.headers.get('content-type')?.includes('application/json')) {
-    return { kind: 'session', data: (await response.json()) as unknown }
+  let queuedPolls = 0
+  while (true) {
+    const response = await streamingFetch(`/api/research/${sessionId}/stream/`, { method: 'GET', signal })
+    const runId = response.headers.get('Run-ID')
+    if (runId) onRunId?.(runId)
+    if (response.headers.get('content-type')?.includes('application/json')) {
+      return { kind: 'session', data: (await response.json()) as unknown }
+    }
+    if (response.headers.get('Run-Status') === 'queued') {
+      await response.body?.cancel()
+      if (!waitForQueued || ++queuedPolls >= 10) return { kind: 'queued', runId }
+      await new Promise<void>((resolve) => setTimeout(resolve, 1000))
+      if (signal?.aborted) throw new Error('Research stream aborted')
+      continue
+    }
+    return { kind: 'stream', events: iterSSEEvents(response) }
   }
-  return { kind: 'stream', events: iterSSEEvents(response) }
+}
+
+export function resumeQueuedResearchRun(sessionId: string, runId: string): Promise<unknown> {
+  return api.post<unknown>('/research/' + sessionId + '/resume-queued/', { run_id: runId }).then(({ data }) => data)
+}
+
+export function cancelResearchRun(sessionId: string, runId: string): Promise<unknown> {
+  return api.post<unknown>(`/research/${sessionId}/cancel/`, { run_id: runId }).then(({ data }) => data)
 }
 
 export function getResearchResults(

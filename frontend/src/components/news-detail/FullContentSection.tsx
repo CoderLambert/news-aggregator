@@ -24,6 +24,8 @@ interface FullContentSectionProps {
   onRefetch: () => void
   refetching: boolean
   onCancelRefetch: () => void
+  allowFetch?: boolean
+  allowTranslation?: boolean
 }
 
 export default function FullContentSection({
@@ -42,6 +44,8 @@ export default function FullContentSection({
   onRefetch,
   refetching,
   onCancelRefetch,
+  allowFetch = true,
+  allowTranslation = true,
 }: FullContentSectionProps) {
   const content = showOriginal ? news.full_content : (news.full_content_zh || news.full_content)
   return (
@@ -57,13 +61,15 @@ export default function FullContentSection({
         onRefetch={onRefetch}
         refetching={refetching}
         onCancelRefetch={onCancelRefetch}
+        allowFetch={allowFetch}
+        allowTranslation={allowTranslation}
       />
 
-      {translating && <TranslationProgressUI progress={translationProgress} waitingShared={translationWaitingShared} onStop={onStopTranslation} />}
-      {translationPaused && !translating && !translateError && (
+      {allowTranslation && translating && <TranslationProgressUI progress={translationProgress} waitingShared={translationWaitingShared} onStop={onStopTranslation} />}
+      {allowTranslation && translationPaused && !translating && !translateError && (
         <TranslationPausedUI onResume={onResumeTranslation} />
       )}
-      {translateError && <ErrorBanner message={translateError} onRetry={onRetryTranslate} />}
+      {allowTranslation && translateError && <ErrorBanner message={translateError} onRetry={onRetryTranslate} />}
 
       <Card className="article-section-render py-5">
         <CardContent className="px-5">
@@ -74,9 +80,9 @@ export default function FullContentSection({
   )
 }
 
-type ToolbarProps = Pick<FullContentSectionProps, 'news' | 'translating' | 'translationPaused' | 'translateError' | 'showOriginal' | 'onToggleOriginal' | 'onTranslate' | 'onRefetch' | 'refetching' | 'onCancelRefetch'>
+type ToolbarProps = Pick<FullContentSectionProps, 'news' | 'translating' | 'translationPaused' | 'translateError' | 'showOriginal' | 'onToggleOriginal' | 'onTranslate' | 'onRefetch' | 'refetching' | 'onCancelRefetch' | 'allowFetch' | 'allowTranslation'>
 
-function Toolbar({ news, translating, translationPaused, translateError, showOriginal, onToggleOriginal, onTranslate, onRefetch, refetching, onCancelRefetch }: ToolbarProps) {
+function Toolbar({ news, translating, translationPaused, translateError, showOriginal, onToggleOriginal, onTranslate, onRefetch, refetching, onCancelRefetch, allowFetch = true, allowTranslation = true }: ToolbarProps) {
   const [copied, setCopied] = useState(false)
   const [copyMessage, setCopyMessage] = useState('')
   const [copyTimer, setCopyTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
@@ -118,15 +124,17 @@ function Toolbar({ news, translating, translationPaused, translateError, showOri
             )}
           </div>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            {isChineseSource ? '正文排版已就绪，可复制或重新获取。' : news.full_content_zh_scope === 'shared' ? '正在复用共享译文，不消耗你的模型额度。个人重新翻译会使用你的账号额度。' : news.full_content_zh_scope === 'private' ? '这是当前账号的个人译文，重新翻译不会覆盖已有共享版本。' : '正文结构已保留，可复制、重新获取或翻译。首次完整翻译后可供其他读者复用。'}
+            {allowFetch && allowTranslation
+              ? isChineseSource ? '正文排版已就绪，可复制或重新获取。' : news.full_content_zh_scope === 'shared' ? '正在复用共享译文，不消耗你的模型额度。个人重新翻译会使用你的账号额度。' : news.full_content_zh_scope === 'private' ? '这是当前账号的个人译文，重新翻译不会覆盖已有共享版本。' : '正文结构已保留，可复制、重新获取或翻译。首次完整翻译后可供其他读者复用。'
+              : isChineseSource ? '正文排版已就绪，可复制。' : news.full_content_zh_scope === 'shared' ? '正在复用共享译文。' : news.full_content_zh_scope === 'private' ? '这是当前账号的个人译文。' : '正文结构已保留，可复制或切换已缓存的语言。'}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <CopyButton copied={copied} onCopy={() => { void handleCopy() }} />
-          <RefetchButton refetching={refetching} onClick={onRefetch} onCancel={onCancelRefetch} />
+          {allowFetch && <RefetchButton refetching={refetching} onClick={onRefetch} onCancel={onCancelRefetch} />}
           {news.full_content_zh && <LangToggle showOriginal={showOriginal} onToggle={onToggleOriginal} />}
-          {!isChineseSource && !translating && !translationPaused && !translateError && (news.full_content_zh_scope !== 'shared' || news.full_translation_personal_available) && (
+          {allowTranslation && !isChineseSource && !translating && !translationPaused && !translateError && (news.full_content_zh_scope !== 'shared' || news.full_translation_personal_available) && (
             <TranslateButton hasTranslation={Boolean(news.full_content_zh)} shared={news.full_content_zh_scope === 'shared'} onClick={onTranslate} />
           )}
         </div>
@@ -191,8 +199,8 @@ function CopyButton({ copied, onCopy }: { copied: boolean; onCopy: () => void })
 
 function TranslationProgressUI({ progress, waitingShared, onStop }: { progress: string; waitingShared: boolean; onStop: () => void }) {
   const stopButton = (
-    <Button type="button" variant="outline" size="sm" onClick={onStop} aria-label="停止接收翻译更新" className="mt-3 h-7 rounded-full border-violet-200 px-2.5 text-[11px] text-violet-700">
-      停止接收
+    <Button type="button" variant="outline" size="sm" onClick={onStop} aria-label="取消全文翻译" className="mt-3 h-7 rounded-full border-violet-200 px-2.5 text-[11px] text-violet-700">
+      取消翻译
     </Button>
   )
   if (!progress) {
@@ -200,8 +208,8 @@ function TranslationProgressUI({ progress, waitingShared, onStop }: { progress: 
       <Card className="mb-6 items-center border-violet-100 bg-violet-50/60 py-8 text-center">
         <Loader2 className="size-7 animate-spin text-violet-500" />
         <div>
-          <p className="text-sm font-medium text-violet-600">{waitingShared ? '共享译文正在生成，完成后自动显示…' : '正在翻译全文…'}</p>
-          <p className="mt-1 text-xs text-violet-500">{waitingShared ? '正在复用其他读者发起的翻译，不消耗你的模型额度。' : '停止接收只会关闭本页连接，服务端翻译仍会继续。'}</p>
+          <p className="mt-1 text-sm font-medium text-violet-700">{waitingShared ? '共享译文正在生成，完成后自动显示…' : '正在翻译全文…'}</p>
+          <p className="mt-1 text-xs text-violet-500">{waitingShared ? '正在复用其他读者发起的翻译，不会显示其他用户的私有进度。' : '取消会阻止后续请求与保存；正在进行的请求可能先完成。'}</p>
           {stopButton}
         </div>
       </Card>
@@ -213,7 +221,7 @@ function TranslationProgressUI({ progress, waitingShared, onStop }: { progress: 
         <Loader2 className="size-3.5 animate-spin text-violet-500" />
         <span className="text-xs font-medium text-violet-500">AI 正在翻译…</span>
         {stopButton}
-        <span className="sr-only">停止接收只会关闭本页连接，服务端翻译仍会继续。</span>
+        <span className="sr-only">取消会阻止后续请求与保存；正在进行的请求可能先完成。</span>
       </div>
       <Card className="border-violet-100 py-5 opacity-80">
         <CardContent className="px-5">

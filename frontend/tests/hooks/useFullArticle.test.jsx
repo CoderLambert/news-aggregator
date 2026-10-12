@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
+import { QueryClient } from '@tanstack/react-query'
 import { StrictMode } from 'react'
 import { AuthContext } from '@/context/AuthContext'
 import { useFullArticle } from '@/hooks/useFullArticle'
 import { fetchFullArticle, fetchFullArticleStatus } from '@/services/newsWorkflowApi'
+import { CapabilitiesTestProvider, fullCapabilities } from '../helpers/capabilities'
 
 vi.mock('@/services/newsWorkflowApi', async (importOriginal) => ({
   ...await importOriginal(),
@@ -11,23 +13,27 @@ vi.mock('@/services/newsWorkflowApi', async (importOriginal) => ({
   fetchFullArticleStatus: vi.fn(),
 }))
 
-function makeWrapper(getUser = () => ({ id: 12, username: 'reader' })) {
+function makeWrapper(getUser = () => ({ id: 12, username: 'reader' }), capabilities = fullCapabilities()) {
   return function Wrapper({ children }) {
     return (
-      <AuthContext.Provider value={{ user: getUser(), loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
-        {children}
-      </AuthContext.Provider>
+      <CapabilitiesTestProvider value={capabilities}>
+        <AuthContext.Provider value={{ user: getUser(), loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
+          {children}
+        </AuthContext.Provider>
+      </CapabilitiesTestProvider>
     )
   }
 }
 
-function makeStrictWrapper() {
+function makeStrictWrapper(capabilities = fullCapabilities()) {
   return function StrictWrapper({ children }) {
     return (
       <StrictMode>
-        <AuthContext.Provider value={{ user: { id: 12, username: 'reader' }, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
-          {children}
-        </AuthContext.Provider>
+        <CapabilitiesTestProvider value={capabilities}>
+          <AuthContext.Provider value={{ user: { id: 12, username: 'reader' }, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
+            {children}
+          </AuthContext.Provider>
+        </CapabilitiesTestProvider>
       </StrictMode>
     )
   }
@@ -63,6 +69,43 @@ describe('useFullArticle', () => {
       full_content_quality_score: 0.92,
     })
     expect(result.current.articleError).toBe('')
+  })
+
+  it('does not fetch or attach to an active full-content task when the capability is disabled', async () => {
+    const news = { id: 7, full_content: '', full_content_fetch_status: 'fetching' }
+    const setNews = vi.fn()
+    const { result } = renderHook(() => useFullArticle(7, setNews, news), {
+      wrapper: makeWrapper(() => ({ id: 12, username: 'reader' }), fullCapabilities({ fetch_full: false })),
+    })
+
+    await act(async () => { expect(await result.current.handleFetchFullArticle()).toBe(false) })
+    expect(fetchFullArticle).not.toHaveBeenCalled()
+    expect(fetchFullArticleStatus).not.toHaveBeenCalled()
+  })
+
+  it('aborts an in-flight full-content request when its capability turns off', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    let signal
+    fetchFullArticle.mockImplementation((_id, _force, requestSignal) => {
+      signal = requestSignal
+      return new Promise(() => {})
+    })
+    function Wrapper({ children }) {
+      return (
+        <CapabilitiesTestProvider client={client}>
+          <AuthContext.Provider value={{ user: { id: 12, username: 'reader' }, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
+            {children}
+          </AuthContext.Provider>
+        </CapabilitiesTestProvider>
+      )
+    }
+    const { result } = renderHook(() => useFullArticle(7, vi.fn(), { id: 7, full_content: '' }), { wrapper: Wrapper })
+    act(() => { void result.current.handleFetchFullArticle() })
+    await waitFor(() => expect(fetchFullArticle).toHaveBeenCalledOnce())
+
+    act(() => client.setQueryData(['capabilities'], fullCapabilities({ fetch_full: false })))
+    await waitFor(() => expect(signal.aborted).toBe(true))
+    expect(result.current.articleLoading).toBe(false)
   })
 
   it('automatically fetches an empty pending article once per tab session', async () => {

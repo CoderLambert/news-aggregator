@@ -7,6 +7,7 @@ import AuthModal from '@/components/AuthModal'
 import { useAuth } from '@/context/AuthContext'
 import { useLanguage } from '@/context/useLanguage'
 import type { DisplayMode } from '@/types/news'
+import { useCapabilities } from '@/context/CapabilitiesContext'
 
 const DISPLAY_MODES = [
   { key: 'zh', label: '中文', icon: Type, color: 'text-orange-500' },
@@ -17,8 +18,13 @@ const DISPLAY_MODES = [
 export default function Header() {
   const { displayMode, setDisplayMode } = useLanguage()
   const { user, logout } = useAuth()
+  const { capabilities } = useCapabilities()
+  const accountsEnabled = capabilities.features.accounts.enabled
+  const favoritesEnabled = capabilities.features.favorites.enabled
+  const comparisonsEnabled = capabilities.features.provider_comparisons.enabled
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [logoutError, setLogoutError] = useState('')
   const menuRef = useRef<HTMLElement | null>(null)
   const menuButtonRef = useRef<HTMLButtonElement | null>(null)
   const location = useLocation()
@@ -50,6 +56,16 @@ export default function Header() {
   function cycleDisplayMode() {
     const currentIndex = DISPLAY_MODES.findIndex((mode) => mode.key === displayMode)
     setDisplayMode(DISPLAY_MODES[(currentIndex + 1) % DISPLAY_MODES.length].key)
+  }
+
+  async function handleLogout() {
+    setLogoutError('')
+    setMenuOpen(false)
+    try {
+      await logout()
+    } catch {
+      setLogoutError('退出请求未完成，服务端会话可能仍有效。请刷新后确认。')
+    }
   }
 
   const isCurrent = (path: string) => path === '/'
@@ -90,7 +106,7 @@ export default function Header() {
                 <Search className="size-3.5" aria-hidden="true" />
                 检索中心
               </Link>
-              <Link
+              {favoritesEnabled && <Link
                 to="/favorites"
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-all ${
                   isCurrent('/favorites')
@@ -100,7 +116,7 @@ export default function Header() {
               >
                 <Heart className="size-3.5" aria-hidden="true" />
                 智库收藏
-              </Link>
+              </Link>}
             </nav>
           </div>
 
@@ -122,7 +138,7 @@ export default function Header() {
               {currentMode.label}
             </Button>
 
-            {user && (
+            {accountsEnabled && user && (
               <span
                 role="img"
                 aria-label={`${user.username}，已登录`}
@@ -132,7 +148,7 @@ export default function Header() {
               </span>
             )}
 
-            {!user && (
+            {accountsEnabled && !user && (
               <Button type="button" size="pill-sm" className="min-h-11" onClick={() => setShowAuthModal(true)}>
                 登录
               </Button>
@@ -165,8 +181,8 @@ export default function Header() {
             {([
               { to: '/', label: '首页', icon: House },
               { to: '/search', label: '搜索', icon: Search },
-              { to: '/favorites', label: '内容偏好', icon: Heart },
               { to: '/settings', label: '设置', icon: Settings },
+              ...(favoritesEnabled ? [{ to: '/favorites', label: '内容偏好', icon: Heart }] : []),
             ] as const).map((item) => {
               const Icon = item.icon
               return (
@@ -180,12 +196,12 @@ export default function Header() {
 
             <div className="my-1 border-t border-border" />
             <p className="px-3 pb-1 pt-2 text-xs font-medium text-muted-foreground">工具</p>
-            <Button variant={isCurrent('/provider-comparisons') ? 'secondary' : 'ghost'} className="h-11 w-full justify-start" asChild>
+            {comparisonsEnabled && user?.isSuperuser && <Button variant={isCurrent('/provider-comparisons') ? 'secondary' : 'ghost'} className="h-11 w-full justify-start" asChild>
               <Link to="/provider-comparisons" aria-current={isCurrent('/provider-comparisons') ? 'page' : undefined} onClick={() => setMenuOpen(false)}>
                 <GitCompareArrows aria-hidden="true" />Provider 对比
               </Link>
-            </Button>
-            {user?.isSuperuser ? (
+            </Button>}
+            {accountsEnabled && capabilities.features.admin.enabled && user?.isSuperuser ? (
               <Button variant={isCurrent('/admin') ? 'secondary' : 'ghost'} className="h-11 w-full justify-start" asChild>
                 <Link to="/admin/crawlers" aria-current={isCurrent('/admin') ? 'page' : undefined} onClick={() => setMenuOpen(false)}>
                   <ShieldCheck aria-hidden="true" />管理控制台
@@ -193,14 +209,14 @@ export default function Header() {
               </Button>
             ) : null}
 
-            {user && (
+            {accountsEnabled && user && (
               <>
                 <div className="my-1 border-t border-border" />
                 <Button
                   type="button"
                   variant="ghost"
                   className="h-11 w-full justify-start text-destructive hover:text-destructive"
-                  onClick={() => { void logout(); setMenuOpen(false) }}
+                  onClick={() => { void handleLogout() }}
                 >
                   <LogOut aria-hidden="true" />退出登录
                 </Button>
@@ -210,7 +226,14 @@ export default function Header() {
         )}
       </header>
 
-      {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} />}
+      {logoutError && <p role="alert" className="mx-auto mt-3 max-w-6xl px-4 text-sm text-destructive">{logoutError}</p>}
+      {accountsEnabled && showAuthModal && <AuthModal
+        onClose={() => setShowAuthModal(false)}
+        onSuccess={() => {
+          setLogoutError('')
+          setShowAuthModal(false)
+        }}
+      />}
     </>
   )
 }

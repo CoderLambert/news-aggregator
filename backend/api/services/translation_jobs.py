@@ -93,6 +93,7 @@ def start_or_get_job(
     save_every_chars: int = 500,
     *,
     shared_lease=None,
+    clients=None,
 ) -> TranslationJob:
     """Return existing in-flight job for this news_id, or start a new one.
 
@@ -128,7 +129,7 @@ def start_or_get_job(
 
         last_saved_len = 0
         try:
-            for chunk in _call_llm_stream(prompt):
+            for chunk in _call_llm_stream(prompt, clients=clients):
                 if not chunk:
                     continue
                 # Detect provider-level errors flowing through the stream,
@@ -173,7 +174,13 @@ def start_or_get_job(
             job._finish(error='翻译任务已过期或未能完成，请重试。')
         finally:
             if shared_lease is not None:
-                shared_lease.finish('failed')
+                try:
+                    shared_lease.finish('failed')
+                except Exception:
+                    logger.warning(
+                        'Translation lease cleanup failed (news=%s)', news_id,
+                        exc_info=True,
+                    )
             close_old_connections()
 
     t = threading.Thread(target=_worker, name=f"translate-{news_id}", daemon=True)

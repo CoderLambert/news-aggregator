@@ -30,20 +30,20 @@ afterEach(() => {
 describe('SearchBar', () => {
   it('renders with initial value from props', () => {
     renderWithLang(
-      <SearchBar value="hello" onChange={() => {}} mode="hybrid" onModeChange={() => {}} />
+      <SearchBar value="hello" onChange={() => {}} mode="hybrid" onModeChange={() => {}} allowSemantic />
     )
     expect(screen.getByPlaceholderText(/搜索/)).toHaveValue('hello')
   })
 
   it('updates input immediately when external value prop changes', () => {
     const { rerender } = renderWithLang(
-      <SearchBar value="first" onChange={() => {}} mode="hybrid" onModeChange={() => {}} />
+      <SearchBar value="first" onChange={() => {}} mode="hybrid" onModeChange={() => {}} allowSemantic />
     )
     expect(screen.getByPlaceholderText(/搜索/)).toHaveValue('first')
 
     rerender(
       <MemoryRouter><LanguageProvider>
-        <SearchBar value="second" onChange={() => {}} mode="hybrid" onModeChange={() => {}} />
+        <SearchBar value="second" onChange={() => {}} mode="hybrid" onModeChange={() => {}} allowSemantic />
       </LanguageProvider></MemoryRouter>
     )
     expect(screen.getByPlaceholderText(/搜索/)).toHaveValue('second')
@@ -52,7 +52,7 @@ describe('SearchBar', () => {
   it('debounces onChange by 300ms when typing', () => {
     const onChange = vi.fn()
     renderWithLang(
-      <SearchBar value="" onChange={onChange} mode="hybrid" onModeChange={() => {}} />
+      <SearchBar value="" onChange={onChange} mode="hybrid" onModeChange={() => {}} allowSemantic />
     )
 
     const input = screen.getByPlaceholderText(/搜索/)
@@ -70,7 +70,7 @@ describe('SearchBar', () => {
   it('calls the latest onChange callback if it changes while a debounce is pending', () => {
     const oldOnChange = vi.fn()
     const latestOnChange = vi.fn()
-    const props = { value: '', mode: 'hybrid', onModeChange: () => {} }
+    const props = { value: '', mode: 'hybrid', onModeChange: () => {}, allowSemantic: true }
     const { rerender } = renderWithLang(<SearchBar {...props} onChange={oldOnChange} />)
 
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'fresh' } })
@@ -83,7 +83,7 @@ describe('SearchBar', () => {
 
   it('cancels a pending debounce when an external URL value replaces the draft', () => {
     const onChange = vi.fn()
-    const props = { mode: 'hybrid', onChange, onModeChange: () => {} }
+    const props = { mode: 'hybrid', onChange, onModeChange: () => {}, allowSemantic: true }
     const { rerender } = renderWithLang(<SearchBar {...props} value="before" />)
 
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'draft' } })
@@ -97,7 +97,7 @@ describe('SearchBar', () => {
   it('calls onModeChange when mode button is clicked', () => {
     const onModeChange = vi.fn()
     renderWithLang(
-      <SearchBar value="" onChange={() => {}} mode="hybrid" onModeChange={onModeChange} />
+      <SearchBar value="" onChange={() => {}} mode="hybrid" onModeChange={onModeChange} allowSemantic />
     )
     fireEvent.click(screen.getByText('语义'))
     expect(onModeChange).toHaveBeenCalledWith('semantic')
@@ -105,7 +105,7 @@ describe('SearchBar', () => {
 
   it('shows English mode labels when lang is en', () => {
     renderWithLang(
-      <SearchBar value="" onChange={() => {}} mode="hybrid" onModeChange={() => {}} />,
+      <SearchBar value="" onChange={() => {}} mode="hybrid" onModeChange={() => {}} allowSemantic />,
       'en'
     )
     expect(screen.getByText('Keyword')).toBeInTheDocument()
@@ -115,9 +115,22 @@ describe('SearchBar', () => {
 
   it('carries the current draft and mode into advanced search', () => {
     renderWithLang(
-      <SearchBar value="agent tools" onChange={() => {}} mode="keyword" onModeChange={() => {}} />
+      <SearchBar value="agent tools" onChange={() => {}} mode="keyword" onModeChange={() => {}} allowSemantic />
     )
 
     expect(screen.getByRole('link', { name: '高级搜索' })).toHaveAttribute('href', '/search?q=agent%20tools&mode=keyword')
+  })
+
+  it('fails closed to keyword options and advanced-search mode by default', () => {
+    const onModeChange = vi.fn()
+    renderWithLang(
+      <SearchBar value="agent tools" onChange={() => {}} mode="hybrid" onModeChange={onModeChange} />,
+    )
+
+    expect(screen.getByText('关键词')).toBeInTheDocument()
+    expect(screen.queryByText('语义')).not.toBeInTheDocument()
+    expect(screen.queryByText('混合')).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '高级搜索' })).toHaveAttribute('href', '/search?q=agent%20tools&mode=keyword')
+    expect(onModeChange).not.toHaveBeenCalled()
   })
 })

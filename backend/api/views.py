@@ -3,18 +3,40 @@ import logging
 from django.db.models import Count, Q
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
+from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.core.validators import EmailValidator
 from django.middleware.csrf import get_token
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import ensure_csrf_cookie, csrf_exempt, csrf_protect
 from rest_framework import generics, filters, status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.authentication import SessionAuthentication
+from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.renderers import JSONRenderer
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import ValidationError as ApiValidationError
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django_filters import rest_framework as django_filters
 from .models import Category, Source, News, ChatSession, BlockedNews, ProviderComparison
+from .services.chat_history import (
+    ChatConflict,
+    append_assistant_message,
+    append_user_message,
+    clear_chat_history,
+)
+from .authentication import AnonymousCsrfSessionAuthentication
+from .services.account_security import (
+    AuthSecurityBusy,
+    InvalidClientAddress,
+    RateLimitExceeded,
+    RegistrationUnavailable,
+    SignupInviteRequired,
+    create_registered_user,
+    normalize_email,
+    reserve_login_attempts,
+    reserve_registration_attempts,
+)
 from .serializers import (
     CategorySerializer, SourceSerializer,
     NewsListSerializer, NewsDetailSerializer,
@@ -25,6 +47,7 @@ from .serializers import (
 from api.services.llm_translator import get_openai_client, get_clients, stream_chat
 from api.services.article_fetcher import FetchError, fetch_article_markdown
 from api.services.chatgpt_subscription import invalidate_authorization_attempts_for_session
+from api.crawler_views import IsActiveSuperuser
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +83,7 @@ def pick_chat_context(news):
     )
 
 
-def ensure_full_content(news):
+def ensure_full_content(news, execution_guard=None):
     """Best-effort: make sure news.full_content is populated before AI sees it.
 
     No-op if full_content already exists or news has no URL.
@@ -74,21 +97,34 @@ def ensure_full_content(news):
     import logging
     from django.utils.timezone import now as tz_now
 
-    from api.services.full_content_status import claim_fetch, classify_fetch_error, mark_failed, mark_success
+    from api.services.full_content_status import (
+        claim_fetch,
+        classify_fetch_error,
+        mark_failed,
+        mark_success,
+        release_fetch_claim,
+    )
 
     if news.full_content and news.full_content.strip():
         return
     if not news.url:
         return
+    if execution_guard is not None:
+        execution_guard()
     if not claim_fetch(news):
         return
 
     try:
+        if execution_guard is not None:
+            execution_guard()
         result = fetch_article_markdown(
             news.url,
             expected_title=news.title,
             summary=news.content,
+            **({'execution_guard': execution_guard} if execution_guard is not None else {}),
         )
+        if execution_guard is not None:
+            execution_guard()
         mark_success(
             news,
             result,
@@ -96,6 +132,22 @@ def ensure_full_content(news):
             full_content_fetched_at=tz_now(),
         )
     except Exception as e:
+        if execution_guard is not None:
+            try:
+                execution_guard()
+            except Exception:
+                try:
+                    released = release_fetch_claim(news)
+                except Exception:
+                    logging.getLogger(__name__).warning(
+                        'ensure_full_content: cancelled fetch claim cleanup failed',
+                    )
+                else:
+                    if not released:
+                        logging.getLogger(__name__).warning(
+                            'ensure_full_content: cancelled fetch claim was no longer owned',
+                        )
+                raise
         try:
             classified = classify_fetch_error(e)
             mark_failed(news, e, status=classified)
@@ -183,7 +235,7 @@ class NewsListView(generics.ListAPIView):
     def list(self, request, *args, **kwargs):
         representation = request.query_params.get('representation', 'summary')
         if representation != 'summary':
-            raise ValidationError({'representation': 'Only summary is supported; use the detail endpoint for complete content.'})
+            raise ApiValidationError({'representation': 'Only summary is supported; use the detail endpoint for complete content.'})
         search_query = request.query_params.get('search', '').strip()
         mode = request.query_params.get('mode', 'keyword').strip()
 
@@ -442,7 +494,7 @@ class ProviderComparisonListCreateView(generics.ListCreateAPIView):
     queryset = ProviderComparison.objects.select_related('news', 'news__source').all()
     serializer_class = ProviderComparisonSerializer
     pagination_class = StandardPagination
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsActiveSuperuser]
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['created_at', 'provider', 'ok', 'quality_score', 'elapsed_ms']
     ordering = ['-created_at']
@@ -486,13 +538,13 @@ class ProviderComparisonListCreateView(generics.ListCreateAPIView):
 class ProviderComparisonDetailView(generics.RetrieveAPIView):
     queryset = ProviderComparison.objects.select_related('news', 'news__source').all()
     serializer_class = ProviderComparisonSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsActiveSuperuser]
 
 
 class ProviderComparisonRetestView(generics.GenericAPIView):
     queryset = ProviderComparison.objects.select_related('news').all()
     serializer_class = ProviderComparisonSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsActiveSuperuser]
 
     @method_decorator(csrf_protect)
     def post(self, request, pk):
@@ -648,25 +700,25 @@ class NewsTranslateFullView(generics.GenericAPIView):
     """Translate full article content to Chinese using SSE streaming."""
     queryset = News.objects.select_related('source', 'category').all()
     serializer_class = NewsDetailSerializer
-    permission_classes = []
-
-    @method_decorator(csrf_exempt)
-    def dispatch(self, *args, **kwargs):
-        return super().dispatch(*args, **kwargs)
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
         """Translate full article content to Chinese using SSE streaming."""
         from django.http import StreamingHttpResponse
         import json as json_lib
+        from api.translation_sse import translation_sse_records
         # _call_llm_stream is invoked inside the translation_jobs worker, not here.
 
         news = self.get_object()
 
         force = request.data.get('force', False)
 
-        # Personal results take precedence; public copies are a separate fallback.
+        # A personally configured API key takes precedence over a subscription.
+        from api.services.provider_credentials import has_personal_credential
         from api.services.chatgpt_subscription import active_connection_for_user
-        if active_connection_for_user(request.user) is not None:
+        personal_configured = has_personal_credential(request.user)
+        if not personal_configured and active_connection_for_user(request.user) is not None:
             from api.subscription_views import subscription_translation_response
             return subscription_translation_response(request, news, force=force)
 
@@ -688,11 +740,10 @@ class NewsTranslateFullView(generics.GenericAPIView):
         # If already translated AND no worker running, stream existing result.
         if news.full_content_zh and not force and not worker_in_flight:
             def existing_stream():
-                data = json_lib.dumps({
+                yield from translation_sse_records({
                     'full_content_zh': news.full_content_zh,
                     'full_content_zh_fetched_at': news.full_content_zh_fetched_at.isoformat() if news.full_content_zh_fetched_at else None
-                }, ensure_ascii=False)
-                yield f"data: {data}\n\n"
+                })
             return StreamingHttpResponse(existing_stream(), content_type='text/event-stream')
 
         if not news.full_content and not worker_in_flight:
@@ -720,10 +771,28 @@ class NewsTranslateFullView(generics.GenericAPIView):
         # Keep the SSE error shape expected by the frontend, but make missing
         # provider configuration actionable instead of persisting a fallback
         # sentence as if it were translated content.
-        if not worker_in_flight and not get_clients():
+        provider_clients = []
+        if not worker_in_flight:
+            try:
+                if personal_configured:
+                    from api.services.provider_credentials import personal_clients_for_user
+                    provider_clients = personal_clients_for_user(request.user)
+                else:
+                    provider_clients = get_clients()
+            except Exception as exc:
+                from api.services.provider_credentials import ProviderCredentialError
+                if not isinstance(exc, ProviderCredentialError):
+                    raise
+                credential_error = str(exc)
+
+                def credential_error_stream():
+                    yield f"data: {json_lib.dumps({'error': credential_error}, ensure_ascii=False)}\n\n"
+                return StreamingHttpResponse(credential_error_stream(), content_type='text/event-stream')
+
+        if not worker_in_flight and not provider_clients:
             def provider_error_stream():
                 message = (
-                    '未配置全文翻译模型提供方：请前往「设置 → ChatGPT 订阅」连接当前用户自己的 ChatGPT 账号并选择模型；也可由站点管理员配置 Volcengine ARK / DashScope API Key。'
+                    '未配置全文翻译模型提供方：请前往「设置」选择厂商、模型并配置自己的 API Key。'
                 )
                 yield f"data: {json_lib.dumps({'error': message}, ensure_ascii=False)}\n\n"
             return StreamingHttpResponse(provider_error_stream(), content_type='text/event-stream')
@@ -756,16 +825,19 @@ class NewsTranslateFullView(generics.GenericAPIView):
                     provider='llm', lease=shared_lease,
                 )
 
-        job = start_or_get_job(news_pk, prompt, persist_progress, shared_lease=shared_lease)
+        job = start_or_get_job(
+            news_pk, prompt, persist_progress,
+            shared_lease=shared_lease, clients=provider_clients,
+        )
 
         def translate_stream():
             sent_len = 0
             # If we attached to an in-progress job that already has output,
             # flush what we have immediately.
             if job.text:
-                data = json_lib.dumps({'progress': job.text}, ensure_ascii=False)
-                yield f"data: {data}\n\n"
-                sent_len = len(job.text)
+                initial = job.text
+                yield from translation_sse_records({'progress': initial})
+                sent_len = len(initial)
 
             # Poll-stream loop. Even if the client disconnects here, the
             # worker thread keeps consuming the LLM stream and saving to DB.
@@ -773,9 +845,10 @@ class NewsTranslateFullView(generics.GenericAPIView):
                 try:
                     new_len = job.wait_for_update(sent_len, timeout=1.0)
                     if new_len > sent_len:
-                        data = json_lib.dumps({'progress': job.text}, ensure_ascii=False)
-                        yield f"data: {data}\n\n"
-                        sent_len = new_len
+                        latest = job.text
+                        if len(latest) > sent_len:
+                            yield from translation_sse_records({'progress_delta': latest[sent_len:]})
+                            sent_len = len(latest)
                     if job.done:
                         break
                 except Exception:
@@ -803,10 +876,7 @@ class NewsTranslateFullView(generics.GenericAPIView):
                 }
 
             try:
-                yield (
-                    "event: complete\n"
-                    f"data: {json_lib.dumps(final_payload, ensure_ascii=False)}\n\n"
-                )
+                yield from translation_sse_records(final_payload, event='complete')
             except Exception:
                 pass
 
@@ -814,33 +884,74 @@ class NewsTranslateFullView(generics.GenericAPIView):
 
 
 class NewsChatView(generics.GenericAPIView):
-    """Chat with the AI assistant about a specific news article. Supports persistence."""
+    """Chat with the AI assistant about a news article for the authenticated user."""
     queryset = News.objects.select_related('source', 'category').all()
-    permission_classes = []
-
-    @method_decorator(csrf_exempt)
-    def dispatch(self, *args, **kwargs):
-        return super().dispatch(*args, **kwargs)
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
         """Return chat history."""
         news = self.get_object()
-        try:
-            session = ChatSession.objects.get(news=news)
-            return Response({'messages': session.messages})
-        except ChatSession.DoesNotExist:
-            return Response({'messages': []})
+        session = ChatSession.objects.filter(user=request.user, news=news).first()
+        return Response({'messages': session.messages if session else []})
 
     def delete(self, request, pk):
         """Clear chat history."""
         news = self.get_object()
-        ChatSession.objects.filter(news=news).delete()
+        try:
+            clear_chat_history(user_id=request.user.pk, news_id=news.pk)
+        except ChatConflict:
+            return Response(
+                {'error_code': 'chat_conflict', 'error': '聊天记录正在更新，请重试'},
+                status=status.HTTP_409_CONFLICT,
+            )
         return Response({'status': 'cleared'})
 
     def post(self, request, pk):
         from django.http import StreamingHttpResponse
 
         news = self.get_object()
+
+        payload = request.data
+        user_question = payload.get('question') if hasattr(payload, 'get') else None
+        if not isinstance(user_question, str):
+            return Response(
+                {'error_code': 'invalid_question', 'error': '问题必须是非空文本'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(user_question) > 8000:
+            return Response(
+                {'error_code': 'question_too_long', 'error': '问题不能超过8000个字符'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user_question = user_question.strip()
+        if not user_question:
+            return Response(
+                {'error_code': 'invalid_question', 'error': '问题必须是非空文本'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from api.services.chatgpt_subscription import active_connection_for_user, stream_chat_response
+        from api.services.provider_credentials import ProviderCredentialError, personal_clients_for_user
+        try:
+            personal_clients = personal_clients_for_user(request.user)
+        except ProviderCredentialError as exc:
+            return Response(
+                {'error_code': 'provider_credential_unavailable', 'error': str(exc)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        subscription_connection = None if personal_clients else active_connection_for_user(request.user)
+        provider_clients = personal_clients
+        if not provider_clients and subscription_connection is None:
+            provider_clients = get_clients()
+        if not provider_clients and subscription_connection is None:
+            return Response(
+                {
+                    'error_code': 'provider_credential_required',
+                    'error': '请先前往「设置」配置自己的模型 API Key。',
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
 
         # Auto-fetch full article on first chat — so users don't have to click
         # "获取原文" before chatting. No-op if already cached, swallows fetch errors.
@@ -850,10 +961,6 @@ class NewsChatView(generics.GenericAPIView):
         context = pick_chat_context(news)
         if len(context) > 10000:
             context = context[-10000:]
-
-        user_question = request.data.get('question', '').strip()
-        if not user_question:
-            return Response({'error': '问题不能为空'}, status=400)
 
         web_search = request.data.get('web_search', False)
 
@@ -906,14 +1013,17 @@ class NewsChatView(generics.GenericAPIView):
                 import logging
                 logging.getLogger(__name__).warning("Web search failed for chat")
 
-        # Load or create session
-        session, _ = ChatSession.objects.get_or_create(news=news, defaults={'messages': []})
-
-        # Ensure session.messages is a list
-        if not isinstance(session.messages, list):
-            session.messages = []
-
-        history = session.messages[-20:] # Keep last 20 turns for context
+        try:
+            chat_snapshot = append_user_message(
+                user_id=request.user.pk,
+                news_id=news.pk,
+                content=user_question,
+            )
+        except ChatConflict:
+            return Response(
+                {'error_code': 'chat_conflict', 'error': '聊天记录正在更新，请重试'},
+                status=status.HTTP_409_CONFLICT,
+            )
 
         # Build messages for LLM
         system_content = (
@@ -945,24 +1055,8 @@ class NewsChatView(generics.GenericAPIView):
             }
         ]
         
-        for msg in history:
+        for msg in chat_snapshot.messages[-20:]:
             messages.append(msg)
-        
-        messages.append({'role': 'user', 'content': user_question})
-
-        from api.services.chatgpt_subscription import active_connection_for_user, stream_chat_response
-        subscription_connection = active_connection_for_user(request.user)
-
-        # Save user message immediately
-        user_msg = {'role': 'user', 'content': user_question}
-        session.messages.append(user_msg)
-        session.save(update_fields=['messages'])
-
-        def save_ai_response(accumulated):
-            """Helper to save AI response after stream finishes"""
-            ai_msg = {'role': 'assistant', 'content': accumulated}
-            session.messages.append(ai_msg)
-            session.save(update_fields=['messages'])
 
         def generate():
             full_response = []
@@ -978,7 +1072,10 @@ class NewsChatView(generics.GenericAPIView):
                 chunks = (
                     stream_chat_response(subscription_connection, messages)
                     if subscription_connection is not None
-                    else stream_chat(messages, max_tokens=16000, temperature=0.7)
+                    else stream_chat(
+                        messages, max_tokens=16000, temperature=0.7,
+                        clients=provider_clients,
+                    )
                 )
                 for chunk in chunks:
                     full_response.append(chunk)
@@ -993,8 +1090,16 @@ class NewsChatView(generics.GenericAPIView):
                 if not full_response:
                     full_response = [fallback]
             finally:
-                # Save the full response to DB
-                save_ai_response(''.join(full_response))
+                try:
+                    append_assistant_message(
+                        user_id=request.user.pk,
+                        news_id=news.pk,
+                        session_id=chat_snapshot.session_id,
+                        generation=chat_snapshot.generation,
+                        content=''.join(full_response),
+                    )
+                except ChatConflict:
+                    logger.info('Discarded late chat response for cleared or deleted history')
 
         response = StreamingHttpResponse(generate(), content_type='text/event-stream')
         if web_search:
@@ -1031,11 +1136,8 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
     by NewsChatView, so there's no new API key or model to configure.
     """
     queryset = News.objects.select_related('source', 'category').all()
-    permission_classes = []
-
-    @method_decorator(csrf_exempt)
-    def dispatch(self, *args, **kwargs):
-        return super().dispatch(*args, **kwargs)
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
         import json
@@ -1076,8 +1178,18 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
         try:
             from api.services.chatgpt_subscription import active_connection_for_user, stream_chat_response
 
-            connection = active_connection_for_user(request.user)
-            if connection is not None:
+            from api.services.provider_credentials import personal_clients_for_user
+            personal_clients = personal_clients_for_user(request.user)
+            connection = None if personal_clients else active_connection_for_user(request.user)
+            if personal_clients:
+                client, model = personal_clients[0]
+                completion = client.chat.completions.create(
+                    model=model,
+                    messages=[{'role': 'user', 'content': prompt}],
+                    temperature=0.6,
+                )
+                raw = completion.choices[0].message.content or ''
+            elif connection is not None:
                 raw = ''.join(stream_chat_response(
                     connection,
                     [{'role': 'user', 'content': prompt}],
@@ -1114,7 +1226,9 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
         except Exception as e:
             # Fall back silently — UX should never show "loading questions failed"
             import logging
-            logging.getLogger(__name__).warning('suggested-questions LLM failed: %s', e)
+            logging.getLogger(__name__).warning(
+                'suggested-questions LLM failed (%s)', type(e).__name__,
+            )
             return Response({'questions': SUGGESTED_QUESTIONS_FALLBACK})
 
 
@@ -1314,7 +1428,7 @@ class BlockedNewsCheckView(generics.GenericAPIView):
 
 # ─── Authentication API ─────────────────────────────────────────────────
 
-@api_view(['GET'])
+@api_view(['GET', 'HEAD'])
 @permission_classes([AllowAny])
 @ensure_csrf_cookie
 def csrf_token(request):
@@ -1324,23 +1438,94 @@ def csrf_token(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@authentication_classes([AnonymousCsrfSessionAuthentication])
 @ensure_csrf_cookie
 def auth_register(request):
     """POST /api/auth/register/ — create a new user and log them in."""
-    username = request.data.get('username', '').strip()
-    password = request.data.get('password', '')
-    email = request.data.get('email', '')
+    try:
+        reserve_registration_attempts(request.META.get('REMOTE_ADDR'))
+    except InvalidClientAddress:
+        return Response(
+            {'error_code': 'invalid_client_address', 'error': '客户端地址无效'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    except RateLimitExceeded as error:
+        return Response(
+            {'error_code': 'auth_rate_limited', 'error': '请求过于频繁，请稍后重试'},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={'Retry-After': str(error.retry_after)},
+        )
+    except AuthSecurityBusy:
+        return Response(
+            {'error_code': 'auth_security_busy', 'error': '认证安全服务暂不可用'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
 
-    if not username or not password:
-        return Response({'error': '用户名和密码不能为空'}, status=status.HTTP_400_BAD_REQUEST)
-    if len(password) < 6:
-        return Response({'error': '密码至少 6 位'}, status=status.HTTP_400_BAD_REQUEST)
-    if User.objects.filter(username=username).exists():
-        return Response({'error': '用户名已被占用'}, status=status.HTTP_400_BAD_REQUEST)
+    payload = request.data
+    get_value = payload.get if hasattr(payload, 'get') else lambda _key, _default=None: None
+    raw_username = get_value('username')
+    raw_email = get_value('email')
+    password = get_value('password')
+    invite_token = get_value('invite_token')
+    try:
+        if not isinstance(raw_username, str):
+            raise ValidationError('invalid username')
+        username = User.normalize_username(raw_username.strip())
+        if not 1 <= len(username) <= 150:
+            raise ValidationError('invalid username')
+        username = User._meta.get_field('username').clean(username, None)
 
-    user = User.objects.create_user(username=username, email=email, password=password)
-    invalidate_authorization_attempts_for_session(request.session.session_key or '')
-    login(request, user)
+        if not isinstance(raw_email, str):
+            raise ValidationError('invalid email')
+        email = normalize_email(raw_email)
+        if not email:
+            raise ValidationError('invalid email')
+        email = User._meta.get_field('email').clean(email, None)
+        EmailValidator()(email)
+
+        if not isinstance(password, str) or len(password) > 1024:
+            raise ValidationError('invalid password')
+        candidate = User(username=username, email=email)
+        from django.contrib.auth.password_validation import validate_password
+        validate_password(password, user=candidate)
+    except ValidationError:
+        return Response(
+            {'error_code': 'invalid_registration', 'error': '注册信息无效'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    def establish_session(user):
+        invalidate_authorization_attempts_for_session(request.session.session_key or '')
+        login(request, user)
+        # Persist the session inside the same transaction as the invite
+        # consumption so a failed session write cannot spend an invitation.
+        request.session.save()
+
+    try:
+        user = create_registered_user(
+            username=username,
+            email=email,
+            password=password,
+            invite_token=invite_token,
+            require_invite=settings.DJANGO_ENV == 'production',
+            on_created=establish_session,
+        )
+    except SignupInviteRequired:
+        return Response(
+            {'error_code': 'invite_required', 'error': '需要有效且匹配邮箱的一次性邀请'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    except RegistrationUnavailable:
+        return Response(
+            {'error_code': 'registration_unavailable', 'error': '暂时无法使用该注册信息'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    except AuthSecurityBusy:
+        return Response(
+            {'error_code': 'auth_security_busy', 'error': '认证安全服务暂不可用'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
     return Response({
         'id': user.pk,
         'username': user.username,
@@ -1350,11 +1535,35 @@ def auth_register(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@authentication_classes([AnonymousCsrfSessionAuthentication])
 @ensure_csrf_cookie
 def auth_login(request):
     """POST /api/auth/login/ — authenticate and create a session."""
-    username = request.data.get('username', '').strip()
-    password = request.data.get('password', '')
+    payload = request.data
+    get_value = payload.get if hasattr(payload, 'get') else lambda _key, _default=None: None
+    raw_username = get_value('username')
+    raw_password = get_value('password')
+    username = raw_username.strip() if isinstance(raw_username, str) else ''
+    password = raw_password if isinstance(raw_password, str) else ''
+
+    try:
+        reserve_login_attempts(request.META.get('REMOTE_ADDR'), username)
+    except InvalidClientAddress:
+        return Response(
+            {'error_code': 'invalid_client_address', 'error': '客户端地址无效'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    except RateLimitExceeded as error:
+        return Response(
+            {'error_code': 'auth_rate_limited', 'error': '请求过于频繁，请稍后重试'},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={'Retry-After': str(error.retry_after)},
+        )
+    except AuthSecurityBusy:
+        return Response(
+            {'error_code': 'auth_security_busy', 'error': '认证安全服务暂不可用'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
 
     user = authenticate(request, username=username, password=password)
     if user is None:
@@ -1371,6 +1580,7 @@ def auth_login(request):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@authentication_classes([SessionAuthentication])
 def auth_logout(request):
     """POST /api/auth/logout/ — end the current session."""
     invalidate_authorization_attempts_for_session(request.session.session_key or '')
@@ -1400,7 +1610,8 @@ class NewsTTSView(generics.GenericAPIView):
     Returns audio/mpeg stream. Supports caching — repeat requests serve from cache.
     """
     queryset = News.objects.select_related('source', 'category').all()
-    permission_classes = []
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
         import asyncio

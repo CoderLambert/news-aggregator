@@ -17,6 +17,7 @@ vi.mock('@/components/research/researchPanelLoader', () => ({
 vi.mock('@/context/SpeechPlayerContext', () => ({ useSpeechPlayerActivity: () => false }))
 
 import ResearchLauncher from '@/components/research/ResearchLauncher'
+import { CapabilitiesTestProvider } from '../../helpers/capabilities'
 
 describe('ResearchLauncher chunk recovery', () => {
   it('contains a failed chunk and retries with a fresh lazy component', async () => {
@@ -24,7 +25,7 @@ describe('ResearchLauncher chunk recovery', () => {
     loader.load
       .mockRejectedValueOnce(new Error('chunk unavailable'))
       .mockResolvedValueOnce({ default: RecoveredPanel })
-    render(<MemoryRouter><ResearchLauncher /></MemoryRouter>)
+    render(<MemoryRouter><CapabilitiesTestProvider><ResearchLauncher /></CapabilitiesTestProvider></MemoryRouter>)
     fireEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
 
     expect(await screen.findByRole('alert')).not.toBeNull()

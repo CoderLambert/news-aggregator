@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Activity, AlertCircle, CheckCircle2, Clock, FileText, Gauge, Globe2, Loader2, RefreshCw, Send, Square } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
+import { useCapabilities } from '@/context/CapabilitiesContext'
 import { useLanguage } from '@/context/useLanguage'
 import MarkdownContent from '@/components/news-detail/MarkdownContent'
 import { Button } from '@/components/ui/button'
@@ -208,14 +209,31 @@ function statusClass(status: string): string {
 
 export default function ProviderComparisons() {
   const { user, loading: authLoading } = useAuth()
+  const { capabilities } = useCapabilities()
   const viewerId = user?.id ?? null
-  return <ProviderComparisonsPage key={viewerId ?? 'signed-out'} viewerId={viewerId} authLoading={authLoading} />
+  return <ProviderComparisonsPage
+    key={viewerId ?? 'signed-out'}
+    viewerId={viewerId}
+    authLoading={authLoading}
+    isSuperuser={user?.isSuperuser === true}
+    comparisonsEnabled={capabilities.features.provider_comparisons.enabled}
+  />
 }
 
-function ProviderComparisonsPage({ viewerId, authLoading }: { viewerId: number | null; authLoading: boolean }) {
+function ProviderComparisonsPage({
+  viewerId,
+  authLoading,
+  isSuperuser,
+  comparisonsEnabled,
+}: {
+  viewerId: number | null
+  authLoading: boolean
+  isSuperuser: boolean
+  comparisonsEnabled: boolean
+}) {
   const queryClient = useQueryClient()
   const { lang } = useLanguage()
-  const authReady = !authLoading && viewerId !== null
+  const authReady = !authLoading && viewerId !== null && isSuperuser && comparisonsEnabled
   const queryViewerId = viewerId ?? 'pending-auth'
   const comparisonsQuery = useQuery({
     ...providerComparisonsOptions(lang, queryViewerId),
@@ -247,7 +265,7 @@ function ProviderComparisonsPage({ viewerId, authLoading }: { viewerId: number |
     mountedRef.current && viewerId === operationViewerId
 
   const refreshComparisons = async () => {
-    if (!authReady) return
+    if (!authReady || !isSuperuser || !comparisonsEnabled) return
     setActionError('')
     return comparisonsQuery.refetch()
   }
@@ -263,7 +281,7 @@ function ProviderComparisonsPage({ viewerId, authLoading }: { viewerId: number |
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (submitLockRef.current) return
-    if (!authReady || viewerId === null) {
+    if (!authReady || viewerId === null || !isSuperuser || !comparisonsEnabled) {
       setActionError('请先登录后再发起 Provider 对比')
       return
     }
@@ -306,7 +324,7 @@ function ProviderComparisonsPage({ viewerId, authLoading }: { viewerId: number |
   }
 
   async function handleRetest(id: number) {
-    if (!authReady || viewerId === null) return
+    if (!authReady || viewerId === null || !isSuperuser || !comparisonsEnabled) return
     if (pendingRetestsRef.current.has(id)) return
     const operationViewerId = viewerId
     const controller = new AbortController()
@@ -365,6 +383,10 @@ function ProviderComparisonsPage({ viewerId, authLoading }: { viewerId: number |
   const loading = authLoading || (authReady && comparisonsQuery.isPending)
   const isRefreshing = authReady && comparisonsQuery.isFetching
   const visibleError = actionError || (authReady && comparisonsQuery.error ? errorMessage(comparisonsQuery.error, '加载 Provider 对比失败') : '')
+
+  if (authLoading) return <p className="mx-auto max-w-2xl px-4 py-16 text-center text-sm text-muted-foreground" role="status">正在确认登录状态...</p>
+  if (!comparisonsEnabled) return <p className="mx-auto max-w-2xl px-4 py-16 text-center text-sm text-muted-foreground" role="status">Provider 对比当前不可用。</p>
+  if (!isSuperuser) return <p className="mx-auto max-w-2xl px-4 py-16 text-center text-sm text-muted-foreground" role="status">仅管理员可查看 Provider 对比。</p>
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 sm:py-8 space-y-6 overflow-x-hidden">

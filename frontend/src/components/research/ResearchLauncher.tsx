@@ -3,10 +3,12 @@ import { ErrorBoundary } from 'react-error-boundary'
 import LazyModalState from '@/components/LazyModalState'
 import ResearchBubbleButton from './ResearchBubbleButton'
 import { loadResearchPanel, prefetchResearchPanel } from './researchPanelLoader'
+import { useCapability } from '@/context/CapabilitiesContext'
 
 const InitialLazyResearchPanel = lazy(loadResearchPanel)
 
 export default function ResearchLauncher() {
+  const { enabled } = useCapability('research')
   const [open, setOpen] = useState(false)
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [LazyResearchPanel, setLazyResearchPanel] = useState(() => InitialLazyResearchPanel)
@@ -30,6 +32,8 @@ export default function ResearchLauncher() {
     setLoadAttempt((attempt) => attempt + 1)
     resetErrorBoundary()
   }
+
+  if (!enabled) return null
 
   return (
     <>

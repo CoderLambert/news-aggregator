@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import ipaddress
-import socket
 import time
 import uuid
 from collections.abc import Iterable
-from urllib.parse import urlparse
 from uuid import UUID
 
 from django.db.models import Avg
@@ -13,6 +10,7 @@ from django.db.models import Avg
 from api.models import News, ProviderComparison
 
 from .providers import default_providers
+from .safe_http import validate_public_url
 from .site_rules import SITE_RULES, get_site_rule
 from .types import ArticleProvider, FetchResult
 
@@ -77,8 +75,7 @@ def compare_providers(
     if not url:
         raise ValueError('news_id or url is required')
 
-    if news is None:
-        validate_comparison_url(url)
+    validate_comparison_url(url, require_adapted_site=news is None)
 
     chain = list(providers) if providers is not None else get_provider_chain(provider_names)
     if not chain:
@@ -128,47 +125,12 @@ def retest_comparison(comparison: ProviderComparison) -> tuple[UUID, list[Provid
 
 def validate_comparison_url(url: str, *, require_adapted_site: bool = True) -> str:
     """Validate user-supplied comparison URLs before any provider network call."""
-    parsed = urlparse(url)
-    if parsed.scheme not in {'http', 'https'} or not parsed.hostname:
-        raise ValueError('Only http/https URLs are supported')
-
-    host = parsed.hostname.strip().lower()
-    if host in {'localhost'}:
-        raise ValueError('Private or local URLs are not allowed')
-
-    try:
-        ip = ipaddress.ip_address(host.strip('[]'))
-    except ValueError:
-        ip = None
-    if ip and (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast):
-        raise ValueError('Private or local URLs are not allowed')
-
-    if ip is None:
-        _validate_resolved_host_ips(host, parsed.port or (443 if parsed.scheme == 'https' else 80))
+    validate_public_url(url)
 
     if require_adapted_site and get_site_rule(url) is None:
         raise ValueError('URL must match an adapted Scrapy provider site')
 
     return url
-
-
-def _validate_resolved_host_ips(host: str, port: int) -> None:
-    try:
-        addrinfos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-    except socket.gaierror as exc:
-        raise ValueError('Unable to validate URL host') from exc
-
-    for addrinfo in addrinfos:
-        sockaddr = addrinfo[4]
-        if not sockaddr:
-            continue
-        raw_ip = sockaddr[0]
-        try:
-            ip = ipaddress.ip_address(raw_ip)
-        except ValueError:
-            continue
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-            raise ValueError('Private or local URLs are not allowed')
 
 
 def comparison_metrics(queryset=None) -> dict:

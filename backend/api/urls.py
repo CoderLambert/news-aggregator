@@ -4,8 +4,14 @@ from . import research_views
 from . import subscription_views
 from . import crawler_views
 from . import search_index_views
+from . import health_views
+from . import capabilities_views
+from . import provider_credential_views
 
 urlpatterns = [
+    path('capabilities/', capabilities_views.capabilities, name='capabilities'),
+    path('health/live/', health_views.health_live, name='health-live'),
+    path('health/ready/', health_views.health_ready, name='health-ready'),
     path('admin/crawler/dashboard/', crawler_views.CrawlerDashboardView.as_view(), name='crawler-admin-dashboard'),
     path('admin/crawler/settings/', crawler_views.CrawlerSettingsView.as_view(), name='crawler-admin-settings'),
     path('admin/crawler/targets/', crawler_views.CrawlerTargetListView.as_view(), name='crawler-admin-targets'),
@@ -29,6 +35,9 @@ urlpatterns = [
     path('chatgpt-subscription/connections/<uuid:connection_id>/activate/', subscription_views.ChatGPTSubscriptionActivateView.as_view(), name='chatgpt-subscription-activate'),
     path('chatgpt-subscription/connections/<uuid:connection_id>/select-model/', subscription_views.ChatGPTSubscriptionSelectModelView.as_view(), name='chatgpt-subscription-select-model'),
     path('chatgpt-subscription/connections/<uuid:connection_id>/', subscription_views.ChatGPTSubscriptionDisconnectView.as_view(), name='chatgpt-subscription-disconnect'),
+    path('chatgpt-subscription/jobs/<uuid:job_id>/', subscription_views.ChatGPTTranslationTaskView.as_view(), name='chatgpt-subscription-translation-job'),
+    path('chatgpt-subscription/jobs/<uuid:job_id>/cancel/', subscription_views.ChatGPTTranslationTaskCancelView.as_view(), name='chatgpt-subscription-translation-job-cancel'),
+    path('provider-credential/', provider_credential_views.ProviderCredentialView.as_view(), name='provider-credential'),
     path('news/', views.NewsListView.as_view(), name='news-list'),
     path('news/<int:pk>/', views.NewsDetailView.as_view(), name='news-detail'),
     path('news/<int:pk>/chat/', views.NewsChatView.as_view(), name='news-chat'),
@@ -53,6 +62,8 @@ urlpatterns = [
     path('research/sessions/', research_views.ResearchSessionListView.as_view(), name='research-session-list'),
     path('research/<uuid:pk>/', research_views.ResearchSessionDetailView.as_view(), name='research-session-detail'),
     path('research/<uuid:pk>/chat/', research_views.research_chat, name='research-chat'),
+    path('research/<uuid:pk>/resume-queued/', research_views.research_resume_queued, name='research-resume-queued'),
+    path('research/<uuid:pk>/cancel/', research_views.research_cancel, name='research-cancel'),
     path('research/<uuid:pk>/stream/', research_views.research_stream, name='research-stream'),
     path('research/<uuid:session_pk>/results/', research_views.ResearchSearchResultListView.as_view(), name='research-results'),
     # Auth

@@ -64,6 +64,14 @@ with tempfile.TemporaryDirectory(prefix='news-summary-') as directory:
     from django.utils import timezone
     from api.models import Category, Source, News
     call_command('migrate', verbosity=0)
+    from django.db import connection
+    from django.db.migrations.loader import MigrationLoader
+    loader = MigrationLoader(connection)
+    api_leaves = [name for app_label, name in loader.graph.leaf_nodes() if app_label == 'api']
+    assert api_leaves == ['0034_add_litellm_provider_fields'], api_leaves
+    assert ('api', '0034_add_litellm_provider_fields') in loader.applied_migrations
+    call_command('makemigrations', check=True, dry_run=True, verbosity=0)
+
     category = Category.objects.create(name='Synthetic', slug='synthetic')
     source = Source.objects.create(name='Synthetic', url='https://example.com')
     for i in range(20):
@@ -182,12 +190,15 @@ await server.listen(); console.log('READY');
             browser = playwright.chromium.launch(headless=True, args=['--no-sandbox'])
             page = browser.new_page()
             page.on('pageerror', lambda error: print('BROWSER_ERROR', error, flush=True))
+            page.on('console', lambda message: print('BROWSER_CONSOLE', message.text, flush=True) if message.type == 'error' else None)
+            page.on('requestfailed', lambda request: print('BROWSER_REQUEST_FAILED', request.url, request.failure, flush=True))
             for attempt in range(5):
                 try:
                     page.goto(f'http://127.0.0.1:{vite_port}/{harness.name}', timeout=3000)
                     page.wait_for_function('window.api && window.axios', timeout=3000)
                     break
-                except Exception:
+                except Exception as error:
+                    print('HARNESS_LOAD_FAILED', type(error).__name__, page.url, page.content()[:300], flush=True)
                     if vite.poll() is not None:
                         raise RuntimeError(vite.stderr.read())
                     time.sleep(.1)
@@ -218,6 +229,9 @@ await server.listen(); console.log('READY');
         model_guard.assert_not_called()
         encode_guard.assert_not_called()
         report['model_preload_load_inference_guards'] = 'PASS: zero calls'
+        report['api_migration_leaf'] = api_leaves[0]
+        report['migration_state'] = 'PASS: migrations applied through 0034; no model changes'
+
         report['baseline_fixture'] = 'Former list reconstructed from synthetic full bodies; test-only endpoint'
         print(json.dumps(report, indent=2), flush=True)
         output = os.environ.get('NEWS_TEST_REPORT')
