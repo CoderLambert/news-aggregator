@@ -28,7 +28,7 @@
 | 全后端临时依赖 | 临时 venv 补入 `waitress==3.0.2`。`chromadb` 未安装，因此迁移包装测试的子进程使用现有测试 stub；其 `PersistentClient` 会立即失败，验证迁移路径没有调用向量服务。该 stub 不在仓库中。 |
 | 旧断言 diff | `NewsChatAssistant.test.jsx` 把 `useChat` 调用断言从 3 个参数更新为 4 个（新增显式翻译 ID，未放宽产品行为）；其余新增了 6 个 Django 与 4 个 Vitest 测试。 |
 | SDK_LOCAL / PROXY_LOCAL / PROVIDER_REAL / UAT | 全部 **NOT_RUN**。结果读取、聊天和 TTS 使用合成 task、mock chat stream 和 mock Edge TTS；本次没有任何真实 Provider 请求。 |
-| GitHub CI | 推送后记录 PR #42 当前 head 的 CI；本地结果不代替 CI。 |
+| GitHub CI | PR #42 head `c8e63da` 的 push 与 pull_request 两次 CI 均通过：backend-and-release-gates、frontend；包括全后端测试、前端类型/lint/499 项测试/构建、生产镜像构建及 G1 本地域名 smoke。 |
 | 未验证项 | 手动浏览器验收、真实 DeepSeek 请求和生产部署均未执行。 |
 
 ## 可复现命令
