@@ -1,6 +1,8 @@
-# T00 · 共享网关端到端技术验真
+# T00 · 官方 SDK 本地协议验真
 
-> **PLANNED**：本卡尚未执行，SDK_LOCAL、PROXY_LOCAL 和 PROVIDER_REAL 都是 NOT_RUN。实现时先核对最新 `origin/feat/byok-user-api-keys`、独立工作树与实际 Python、Docker、Proxy 版本；本文件不代表通过验收。
+> **本次执行范围更新（2026-10-12）**：本次按用户已确认的 direct-SDK 设计实施，仅用 OpenAI/Anthropic 官方 SDK 与三个薄适配器直连受控 loopback HTTP upstream。此范围覆盖并替代下文原先关于 LiteLLM Proxy 和 PROXY_LOCAL 的实现要求；不启动 Proxy、不调用真实厂商。执行证据与 `PROVIDER_REAL=NOT_RUN` 记录见[同名 Test 文档](../tests/T00-sdk-protocol.md)。
+
+> **实施状态（2026-10-12）**：SDK_LOCAL PASS；PROXY_LOCAL N/A；PROVIDER_REAL NOT_RUN。环境、命令、旧测试基线及剩余限制见同名 Test 文档。
 
 | 属性 | 内容 |
 | --- | --- |
