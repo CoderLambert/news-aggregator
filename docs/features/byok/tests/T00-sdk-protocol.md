@@ -1,6 +1,6 @@
 # Test T00 · 共享网关端到端技术验真
 
-> **T00 本地技术门槛 PASS / GATEWAY_ADMISSION_PROTOTYPE**：隔离合成运行 L 及当前 HEAD `ad0f14e` 的复核均为 `407 PASS / 0 FAIL / 407 checks`；CLI 标记 `PARTIAL`，因为不包含旧业务回归和真实 provider 兼容。当前 PR CI 尚未全绿：同一 HEAD 的 run [38187821128](https://github.com/CoderLambert/news-aggregator/actions/runs/38187821128) 全部通过；run [38187824787](https://github.com/CoderLambert/news-aggregator/actions/runs/38187824787) 的前端通过，后端有 847 项通过、1 项既有 SQLite `OperationalError` 失败。v1.104.2 的 unguarded Chat EOF 风险仍被原样复现：上游无协议终态而 SDK 收到 `finish_reason=stop`；受保护准入路径对此请求返回 HTTP 400 `T00_STREAMING_DISABLED`，上游计数为 0。该结果证明特定路径被关闭，不表示 LiteLLM 已修复或 Chat streaming 兼容。锁定镜像的官方 Cosign 签名和实际 digest 已验证。Responses 标准 `fc_` item / `call_` call 两轮续接严格通过；旧 `resp_item_` 仅作为独立 foreign-ID 归一化专例。SDK_LOCAL 与 native-stream Proxy 的取消传播检查在显式 2 秒本地观测窗内通过。A9 历史运行 `353 PASS / 4 FAIL` 仍以独立脱敏文件保留，不与 D/E/F/L 混合。用户已报告 DeepSeek 直连基线 PASS（1 次请求）；真实经 LiteLLM T00-11 仍为 NOT_RUN。
+> **T00 本地技术门槛 PASS / GATEWAY_ADMISSION_PROTOTYPE**：隔离合成运行 L 及代码 HEAD `ad0f14e` 的复核均为 `407 PASS / 0 FAIL / 407 checks`；PR #33 当前 docs-only head `0405177` 的两组 backend/frontend CI 均通过。前一代码 head `ad0f14e` 的一次重复 backend run 曾因既有 SQLite `OperationalError` 失败，见下方历史记录。CLI 标记 `PARTIAL`，因为不包含旧业务回归和真实 provider 兼容。v1.104.2 的 unguarded Chat EOF 风险仍被原样复现：上游无协议终态而 SDK 收到 `finish_reason=stop`；受保护准入路径对此请求返回 HTTP 400 `T00_STREAMING_DISABLED`，上游计数为 0。该结果证明特定路径被关闭，不表示 LiteLLM 已修复或 Chat streaming 兼容。锁定镜像的官方 Cosign 签名和实际 digest 已验证。Responses 标准 `fc_` item / `call_` call 两轮续接严格通过；旧 `resp_item_` 仅作为独立 foreign-ID 归一化专例。SDK_LOCAL 与 native-stream Proxy 的取消传播检查在显式 2 秒本地观测窗内通过。A9 历史运行 `353 PASS / 4 FAIL` 仍以独立脱敏文件保留，不与 D/E/F/L 混合。用户已报告 DeepSeek 直连基线 PASS（1 次请求）；真实经 LiteLLM T00-11 仍为 NOT_RUN。
 
 对应：[T00 Task](../tasks/T00-sdk-protocol.md)。
 
@@ -30,11 +30,11 @@
 
 | 项目 | 结果 |
 | --- | --- |
-| 本卡本地状态 | **PASS**；T00-01 至 T00-10 本地验收与镜像签名校验通过。当前 HEAD 的 PR CI 一组全过、另一组有 1 个既有 SQLite 并发用例失败，见下方；可选 T00-11 未运行 |
+| 本卡本地状态 | **PASS**；T00-01 至 T00-10 本地验收与镜像签名校验通过。PR #33 当前 docs-only head 的两组 CI 均通过；可选 T00-11 未运行 |
 | 功能分支目标基线 HEAD | `ea2ce55ae22e19e1604e88031b824b68f2666cec`，与用户报告一致；未重置原工作树 |
 | 本任务实现起点 HEAD | `69e084e39552c5650b930a067b6b79d09e95db34`；分支 `task/byok-T00-sdk-protocol`，独立工作区 |
 | T00 本轮实现 SHA | 当前工作区 HEAD `ad0f14eb599ddbf8a691dc535227d7ef18298cb6`；DeepSeek smoke 最新代码提交 `ce8bec6907a0015f14421e1cdd34e65d11c8706a`，只增加真实请求中断时的脱敏失败记录与一致退出码，没有生产适配器或新闻业务改动 |
-| PR #33 | open / Ready for review；base `feat/byok-user-api-keys`，当前 head `ad0f14eb599ddbf8a691dc535227d7ef18298cb6` |
+| PR #33 | open / Ready for review；base `feat/byok-user-api-keys`，当前 head `04051772e0a3a52fb8d3f9dc98480c4fc2132790`（docs-only commit） |
 | Python / OpenAI SDK / Anthropic SDK / httpx2 / LiteLLM / Docker Compose | 3.14.8 / 3.28.0 / 1.13.0 / 2.13.1 / 1.104.2 / 5.5.1；Docker Server 29.7.2 |
 | LiteLLM v1.104.2 image signature | **PASS**；Cosign v3.0.2 使用官方固定提交公钥校验，签名 digest 与锁定的 `sha256:3d88…a500` 一致；[脱敏证据](../evidence/T00-litellm-v1.104.2-cosign.json) |
 | 最新 SDK_LOCAL / PROXY_LOCAL 合成运行 L | `407 PASS / 0 FAIL / 407 checks`，CLI exit 0、状态 `PARTIAL`；原始 unguarded Chat EOF 风险仍保留，受保护路径 HTTP 400 且上游 0 |
@@ -46,7 +46,7 @@
 | DeepSeek 直连基线 | **PASS（用户报告）**；1 次 SDK HTTP 请求尝试，prompt=57 / completion=19 tokens，`finish_reason=stop`，JSON 字段断言通过；执行时间未提供；未读取 Key |
 | 经 LiteLLM 的 T00-11 / 网关真实请求 | **NOT_RUN**；目前只有本地合成 PROXY_LOCAL 证据，未发送真实 provider 网关请求 |
 | 其他 provider 的 PROVIDER_REAL | **NOT_RUN** |
-| 当前 HEAD `ad0f14e` 的 PR CI | run [38187821128](https://github.com/CoderLambert/news-aggregator/actions/runs/38187821128) 的 frontend 与 backend-and-release-gates 均通过；run [38187824787](https://github.com/CoderLambert/news-aggregator/actions/runs/38187824787) 前端通过，后端 `test_simultaneous_database_connections_share_one_unique_task` 因 SQLite `OperationalError` 失败（847 passed）。因此 PR 当前 CI 未全绿；保留旧测试与断言，不用其它成功 run 覆盖该失败 |
+| PR #33 当前 head `04051772e0a3a52fb8d3f9dc98480c4fc2132790` 的 CI | run [38192387788](https://github.com/CoderLambert/news-aggregator/actions/runs/38192387788) 与 [38192390152](https://github.com/CoderLambert/news-aggregator/actions/runs/38192390152) 的 backend-and-release-gates、frontend 均 PASS。前一 head `ad0f14e` 的历史重复 run `38187824787` 有 1 项既有 SQLite 并发用例失败，另一次 `38187821128` 全过；该间歇性失败已在新 head 两组全绿，不删旧记录 |
 | T00 基线 CI 上下文（用户提供，只读） | HEAD `69e084e` 的 run `38136034042` backend-and-release-gates / frontend 均 success；较早 `38136011186` backend failure。它们不是 T00 手工网关验收结果 |
 | 旧聊天/研究/翻译测试基线 | 前一 T00 PR head `29d1fd9` 的两次 backend CI 均为 `838 passed / 2 warnings`，另有两次 frontend、release gates 均通过。早先 head `2ef40cd` 的重复 CI 曾分别出现一个订阅任务 SQLite `OperationalError`，随后在无业务代码改动的 head 上全量重跑通过；功能分支基线 `69e084e` 的 CI 也为 `838 passed / 2 warnings`。隔离工作区缺 pytest 和 frontend `node_modules`，未安装全项目依赖。历史 `219 passed / 3 warnings` 没有可恢复命令/报告；缺 chromadb 的 `82 passed / 23 failed` 不作产品基线 |
 | 旧测试断言 diff | `tests/` 与 `frontend/tests/` 无 diff；隔离探针、DeepSeek 直连及网关烟测自测最新为 57 项通过，没有放宽旧断言 |
