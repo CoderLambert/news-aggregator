@@ -51,6 +51,11 @@ interface ProbeConfigSnapshot {
   connections: AIConnection[]
 }
 
+interface ConfigChangeScope {
+  modelIds: string[]
+  connectionIds: string[]
+}
+
 const SAFE_PROBE_ERROR_MESSAGES: Record<string, ProbeFeedback> = {
   model_test_gateway_unavailable: { state: 'not_sent', message: '本次未发送：个人模型网关暂不可用，能力仍为“未测试”。' },
   model_test_route_unavailable: { state: 'not_sent', message: '本次未发送：该模型目前没有已批准的网关路由。' },
@@ -79,6 +84,7 @@ function probeConfigIdentity(modelId: string, snapshot: ProbeConfigSnapshot): st
   const connection = snapshot.connections.find((candidate) => candidate.id === model.connection_id)
   if (!connection) return null
 
+  // Credential versions are not exposed to the browser; configuration mutations advance the request generation instead.
   return JSON.stringify([
     model.id,
     model.connection_id,
@@ -88,8 +94,6 @@ function probeConfigIdentity(modelId: string, snapshot: ProbeConfigSnapshot): st
     connection.provider_id,
     connection.endpoint_profile,
     connection.is_enabled,
-    connection.key_saved,
-    connection.masked_key,
   ])
 }
 
@@ -197,8 +201,12 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
   const [editModelDisplayName, setEditModelDisplayName] = useState('')
   const [notice, setNotice] = useState('')
   const [probeFeedback, setProbeFeedback] = useState<Record<string, ProbeFeedback>>({})
+  const [pendingModelChanges, setPendingModelChanges] = useState<Record<string, number>>({})
+  const [pendingConnectionChanges, setPendingConnectionChanges] = useState<Record<string, number>>({})
   const probeGenerations = useRef(new Map<string, number>())
   const probeConfigSnapshot = useRef<ProbeConfigSnapshot>({ models: [], connections: [] })
+  const pendingModelChangeCounts = useRef(new Map<string, number>())
+  const pendingConnectionChangeCounts = useRef(new Map<string, number>())
 
   const providersQuery = useQuery({
     queryKey: ['aiProviderProfiles'],
@@ -246,22 +254,55 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
     probeGenerations.current.set(key, generation)
     return generation
   }
-  const invalidateModelProbes = (modelId: string) => {
-    const keys = (['text', 'tools'] as const).map((probeKind) => {
+  const invalidateModelProbes = (modelIds: readonly string[]) => {
+    const keys = modelIds.flatMap((modelId) => (['text', 'tools'] as const).map((probeKind) => {
       const key = probeFeedbackKey(modelId, probeKind)
       probeGenerations.current.set(key, (probeGenerations.current.get(key) ?? 0) + 1)
       return key
-    })
+    }))
     setProbeFeedback((current) => {
       const next = { ...current }
       keys.forEach((key) => delete next[key])
       return next
     })
   }
-  const invalidateConnectionProbes = (connectionId: string) => {
-    probeConfigSnapshot.current.models
+  const beginConfigurationChange = (scope: ConfigChangeScope): ConfigChangeScope => {
+    scope.modelIds.forEach((modelId) => {
+      pendingModelChangeCounts.current.set(modelId, (pendingModelChangeCounts.current.get(modelId) ?? 0) + 1)
+    })
+    scope.connectionIds.forEach((connectionId) => {
+      pendingConnectionChangeCounts.current.set(connectionId, (pendingConnectionChangeCounts.current.get(connectionId) ?? 0) + 1)
+    })
+    setPendingModelChanges(Object.fromEntries(pendingModelChangeCounts.current))
+    setPendingConnectionChanges(Object.fromEntries(pendingConnectionChangeCounts.current))
+    invalidateModelProbes(scope.modelIds)
+    return scope
+  }
+  const beginConnectionConfigurationChange = (connectionId: string) => beginConfigurationChange({
+    connectionIds: [connectionId],
+    modelIds: probeConfigSnapshot.current.models
       .filter((model) => model.connection_id === connectionId)
-      .forEach((model) => invalidateModelProbes(model.id))
+      .map((model) => model.id),
+  })
+  const finishConfigurationChange = (scope: ConfigChangeScope | undefined) => {
+    if (!scope) return
+    scope.modelIds.forEach((modelId) => {
+      const nextCount = (pendingModelChangeCounts.current.get(modelId) ?? 0) - 1
+      if (nextCount > 0) pendingModelChangeCounts.current.set(modelId, nextCount)
+      else pendingModelChangeCounts.current.delete(modelId)
+    })
+    scope.connectionIds.forEach((connectionId) => {
+      const nextCount = (pendingConnectionChangeCounts.current.get(connectionId) ?? 0) - 1
+      if (nextCount > 0) pendingConnectionChangeCounts.current.set(connectionId, nextCount)
+      else pendingConnectionChangeCounts.current.delete(connectionId)
+    })
+    setPendingModelChanges(Object.fromEntries(pendingModelChangeCounts.current))
+    setPendingConnectionChanges(Object.fromEntries(pendingConnectionChangeCounts.current))
+  }
+  const isProbeConfigurationPending = (modelId: string) => {
+    if (pendingModelChangeCounts.current.has(modelId)) return true
+    const model = probeConfigSnapshot.current.models.find((candidate) => candidate.id === modelId)
+    return model ? pendingConnectionChangeCounts.current.has(model.connection_id) : false
   }
   const isCurrentProbeRequest = (request: ModelProbeRequest) => {
     const key = probeFeedbackKey(request.modelId, request.probeKind)
@@ -291,14 +332,16 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
   })
   const replaceMutation = useMutation({
     mutationFn: ({ connectionId, apiKey }: { connectionId: string; apiKey: string }) => replaceAIConnectionKey(connectionId, apiKey),
-    onMutate: ({ connectionId }) => invalidateConnectionProbes(connectionId),
-    onSuccess: async () => {
+    onMutate: ({ connectionId }) => beginConnectionConfigurationChange(connectionId),
+    onSuccess: async (_connection, _variables, scope) => {
+      if (scope) invalidateModelProbes(scope.modelIds)
       setReplacementKey('')
       setReplaceFor(null)
       setNotice('Key 已替换，旧凭据版本已失效。本站尚未测试新 Key。')
       await refreshConnections()
     },
     onError: () => setNotice('替换失败。请检查填写内容后重试。'),
+    onSettled: (_data, _error, _variables, scope) => finishConfigurationChange(scope),
   })
   const renameMutation = useMutation({
     mutationFn: ({ connectionId, displayName }: { connectionId: string; displayName: string }) => updateAIConnection(connectionId, { display_name: displayName }),
@@ -312,21 +355,25 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
   })
   const toggleMutation = useMutation({
     mutationFn: ({ connectionId, isEnabled }: { connectionId: string; isEnabled: boolean }) => updateAIConnection(connectionId, { is_enabled: isEnabled }),
-    onMutate: ({ connectionId }) => invalidateConnectionProbes(connectionId),
-    onSuccess: async (_connection, variables) => {
+    onMutate: ({ connectionId }) => beginConnectionConfigurationChange(connectionId),
+    onSuccess: async (_connection, variables, scope) => {
+      if (scope) invalidateModelProbes(scope.modelIds)
       setNotice(variables.isEnabled ? '连接已启用。' : '连接已停用，旧凭据版本已失效。')
       await Promise.all([refreshConnections(), refreshTaskPreferences()])
     },
     onError: () => setNotice('状态更新失败，请重试。'),
+    onSettled: (_data, _error, _variables, scope) => finishConfigurationChange(scope),
   })
   const deleteMutation = useMutation({
     mutationFn: (connectionId: string) => deleteAIConnection(connectionId),
-    onMutate: (connectionId) => invalidateConnectionProbes(connectionId),
-    onSuccess: async () => {
+    onMutate: (connectionId) => beginConnectionConfigurationChange(connectionId),
+    onSuccess: async (_deleted, _connectionId, scope) => {
+      if (scope) invalidateModelProbes(scope.modelIds)
       setNotice('连接已删除，站点已清除保存的密文。')
       await Promise.all([refreshConnections(), refreshTaskPreferences()])
     },
     onError: () => setNotice('删除失败，请重试。'),
+    onSettled: (_data, _error, _connectionId, scope) => finishConfigurationChange(scope),
   })
   const createModelMutation = useMutation({
     mutationFn: (input: CreateAIModelInput) => createAIModel(input),
@@ -342,18 +389,21 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
   })
   const deleteModelMutation = useMutation({
     mutationFn: (modelId: string) => deleteAIModel(modelId),
-    onMutate: (modelId) => invalidateModelProbes(modelId),
-    onSuccess: async () => {
+    onMutate: (modelId) => beginConfigurationChange({ modelIds: [modelId], connectionIds: [] }),
+    onSuccess: async (_deleted, _modelId, scope) => {
+      if (scope) invalidateModelProbes(scope.modelIds)
       setNotice('模型配置已删除。')
       await Promise.all([refreshModels(), refreshTaskPreferences()])
     },
     onError: () => setNotice('模型删除失败，请重试。'),
+    onSettled: (_data, _error, _modelId, scope) => finishConfigurationChange(scope),
   })
   const updateModelMutation = useMutation({
     mutationFn: ({ modelId, nextModelId, displayName }: { modelId: string; nextModelId: string; displayName: string }) =>
       updateAIModel(modelId, { model_id: nextModelId, display_name: displayName }),
-    onMutate: (variables) => invalidateModelProbes(variables.modelId),
-    onSuccess: async () => {
+    onMutate: (variables) => beginConfigurationChange({ modelIds: [variables.modelId], connectionIds: [] }),
+    onSuccess: async (_model, _variables, scope) => {
+      if (scope) invalidateModelProbes(scope.modelIds)
       setEditModelFor(null)
       setEditModelId('')
       setEditModelDisplayName('')
@@ -361,6 +411,7 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
       await refreshModels()
     },
     onError: () => setNotice('模型配置更新失败，请检查模型 ID 后重试。'),
+    onSettled: (_data, _error, _variables, scope) => finishConfigurationChange(scope),
   })
   const testModelMutation = useMutation({
     mutationFn: ({ modelId, probeKind }: ModelProbeRequest) => testAIModel(modelId, probeKind),
@@ -389,11 +440,13 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
   })
 
   const startModelTest = (modelId: string, probeKind: AIModelProbeKind) => {
+    if (isProbeConfigurationPending(modelId)) return
     const isText = probeKind === 'text'
     const prompt = isText
       ? '这会向服务商发送一条极短的文本请求，可能产生费用。本站不会自动重试。要继续吗？'
       : '这会向服务商发送一条极短的工具调用请求，可能产生费用。本站不会自动重试。要继续吗？'
     if (!window.confirm(prompt)) return
+    if (isProbeConfigurationPending(modelId)) return
     const configIdentity = probeConfigIdentity(modelId, probeConfigSnapshot.current)
     if (!configIdentity) return
     const generation = nextProbeGeneration(modelId, probeKind)
@@ -593,14 +646,14 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
                                     label="测试文本能力"
                                     pendingLabel="文本测试中…"
                                     feedback={probeFeedback[probeFeedbackKey(model.id, 'text')]}
-                                    disabled={testModelMutation.isPending}
+                                    disabled={testModelMutation.isPending || Boolean(pendingModelChanges[model.id] || pendingConnectionChanges[connection.id])}
                                     onClick={() => startModelTest(model.id, 'text')}
                                   />
                                   <ProbeTestButton
                                     label="测试工具能力"
                                     pendingLabel="工具测试中…"
                                     feedback={probeFeedback[probeFeedbackKey(model.id, 'tools')]}
-                                    disabled={testModelMutation.isPending}
+                                    disabled={testModelMutation.isPending || Boolean(pendingModelChanges[model.id] || pendingConnectionChanges[connection.id])}
                                     onClick={() => startModelTest(model.id, 'tools')}
                                   />
                                 </>

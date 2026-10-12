@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -347,6 +347,111 @@ describe('AIModelSettingsPage', () => {
       expect(mocks.fetchAIModels).toHaveBeenCalledTimes(2)
     })
     expect(mocks.testAIModel).not.toHaveBeenCalled()
+  })
+
+  it('blocks probes for a changing connection while keeping another connection available', async () => {
+    const secondConnection: AIConnection = {
+      ...connection, id: 'connection-18', display_name: 'DeepSeek · 第二连接', masked_key: '••••••18',
+    }
+    const modelA = routedModelConfig('model-17', 'DeepSeek Flash A')
+    const modelB = { ...routedModelConfig('model-18', 'DeepSeek Flash B'), connection_id: secondConnection.id }
+    const replacement = deferred<AIConnection>()
+    mocks.fetchAIConnections.mockResolvedValue([connection, secondConnection])
+    mocks.fetchAIModels.mockResolvedValue([modelA, modelB])
+    mocks.replaceAIConnectionKey.mockReturnValueOnce(replacement.promise)
+    mocks.testAIModel.mockResolvedValueOnce({
+      attempt_id: 'attempt-b-during-change', probe_kind: 'text', status: 'succeeded',
+      verification_status: 'verified', capability: 'supported', stale: false,
+      safe_error_code: '', latency_ms: 120, input_tokens: 8, output_tokens: 2,
+      billing_notice: 'provider_may_bill',
+    })
+    renderPage()
+
+    const modelAItem = (await screen.findByText('DeepSeek Flash A')).closest('li') as HTMLElement
+    const modelBItem = (await screen.findByText('DeepSeek Flash B')).closest('li') as HTMLElement
+    const testAButton = within(modelAItem).getByRole('button', { name: '测试文本能力' })
+    const connectionAItem = screen.getByText(connection.display_name).closest('li') as HTMLElement
+    fireEvent.click(within(connectionAItem).getByRole('button', { name: '替换 Key' }))
+    fireEvent.change(screen.getByLabelText('输入新的 API Key'), { target: { value: 'sk-t01-pending-success-synthetic' } })
+    const confirmReplacementButton = screen.getByRole('button', { name: '确认替换' })
+    act(() => {
+      fireEvent.click(confirmReplacementButton)
+      fireEvent.click(testAButton)
+    })
+
+    expect(testAButton).toBeDisabled()
+    expect(within(modelBItem).getByRole('button', { name: '测试文本能力' })).toBeEnabled()
+    expect(mocks.testAIModel).not.toHaveBeenCalled()
+
+    fireEvent.click(within(modelBItem).getByRole('button', { name: '测试文本能力' }))
+    expect(await within(modelBItem).findByText('文本能力测试成功。')).toBeInTheDocument()
+
+    replacement.resolve({ ...connection, masked_key: '••••••88', updated_at: '2026-10-12T01:00:00Z' })
+    expect(await screen.findByText('Key 已替换，旧凭据版本已失效。本站尚未测试新 Key。')).toBeInTheDocument()
+    await waitFor(() => expect(testAButton).toBeEnabled())
+    expect(within(modelBItem).getByText('文本能力测试成功。')).toBeInTheDocument()
+
+    fireEvent.click(testAButton)
+    expect(await within(modelAItem).findByText('文本能力测试成功。')).toBeInTheDocument()
+    expect(mocks.testAIModel).toHaveBeenCalledTimes(2)
+  })
+
+  it('clears a completed test when a later key replacement succeeds', async () => {
+    const replacement = deferred<AIConnection>()
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([routedModelConfig()])
+    mocks.replaceAIConnectionKey.mockReturnValueOnce(replacement.promise)
+    renderPage()
+
+    const modelItem = (await screen.findByText('DeepSeek V4.1 Flash')).closest('li') as HTMLElement
+    const testButton = within(modelItem).getByRole('button', { name: '测试文本能力' })
+    fireEvent.click(testButton)
+    expect(await within(modelItem).findByText('文本能力测试成功。')).toBeInTheDocument()
+
+    const connectionItem = screen.getByText(connection.display_name).closest('li') as HTMLElement
+    fireEvent.click(within(connectionItem).getByRole('button', { name: '替换 Key' }))
+    fireEvent.change(screen.getByLabelText('输入新的 API Key'), { target: { value: 'sk-t01-late-success-replacement-synthetic' } })
+    fireEvent.click(screen.getByRole('button', { name: '确认替换' }))
+
+    expect(testButton).toBeDisabled()
+    expect(within(modelItem).queryByText('文本能力测试成功。')).not.toBeInTheDocument()
+    replacement.resolve({ ...connection, masked_key: '••••••88', updated_at: '2026-10-12T02:00:00Z' })
+    expect(await screen.findByText('Key 已替换，旧凭据版本已失效。本站尚未测试新 Key。')).toBeInTheDocument()
+    expect(within(modelItem).queryByText('文本能力测试成功。')).not.toBeInTheDocument()
+  })
+
+  it('keeps probes blocked until overlapping changes settle and restores them after a failed change', async () => {
+    const replacement = deferred<AIConnection>()
+    const toggle = deferred<AIConnection>()
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([routedModelConfig()])
+    mocks.replaceAIConnectionKey.mockReturnValueOnce(replacement.promise)
+    mocks.updateAIConnection.mockReturnValueOnce(toggle.promise)
+    renderPage()
+
+    const modelItem = (await screen.findByText('DeepSeek V4.1 Flash')).closest('li') as HTMLElement
+    const testButton = within(modelItem).getByRole('button', { name: '测试文本能力' })
+    const connectionItem = screen.getByText(connection.display_name).closest('li') as HTMLElement
+    fireEvent.click(within(connectionItem).getByRole('button', { name: '替换 Key' }))
+    fireEvent.change(screen.getByLabelText('输入新的 API Key'), { target: { value: 'sk-t01-overlap-replacement-synthetic' } })
+    fireEvent.click(screen.getByRole('button', { name: '确认替换' }))
+    fireEvent.click(within(connectionItem).getByRole('button', { name: '停用' }))
+
+    expect(testButton).toBeDisabled()
+    fireEvent.click(testButton)
+    expect(mocks.testAIModel).not.toHaveBeenCalled()
+
+    replacement.resolve({ ...connection, masked_key: '••••••88', updated_at: '2026-10-12T03:00:00Z' })
+    expect(await screen.findByText('Key 已替换，旧凭据版本已失效。本站尚未测试新 Key。')).toBeInTheDocument()
+    expect(testButton).toBeDisabled()
+
+    toggle.reject(new Error('synthetic connection update failure'))
+    expect(await screen.findByText('状态更新失败，请重试。')).toBeInTheDocument()
+    await waitFor(() => expect(testButton).toBeEnabled())
+
+    fireEvent.click(testButton)
+    expect(await within(modelItem).findByText('文本能力测试成功。')).toBeInTheDocument()
+    expect(mocks.testAIModel).toHaveBeenCalledOnce()
   })
 
   it('ignores an old successful test response after the model configuration changes', async () => {
