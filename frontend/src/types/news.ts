@@ -30,9 +30,9 @@ export interface Page<T> {
 export interface NewsSummary {
   id: number
   title: string
-  content: string
+  summary: string
   title_zh: string
-  content_zh: string
+  summary_zh: string
   author: string | null
   publish_time: string
   source: number
@@ -58,6 +58,8 @@ export interface NewsSummary {
 
 
 export interface NewsDetail extends NewsSummary {
+  content: string
+  content_zh: string
   source_url: string
   full_content: string
   full_content_fetched_at: string | null
@@ -108,9 +110,9 @@ export function parseNewsSummary(value: unknown): NewsSummary {
   return {
     id: requiredNumber(value, 'id'),
     title: requiredString(value, 'title'),
-    content: nullableString('content'),
+    summary: typeof value.summary === 'string' ? value.summary : nullableString('content').slice(0, 300),
     title_zh: nullableString('title_zh'),
-    content_zh: nullableString('content_zh'),
+    summary_zh: typeof value.summary_zh === 'string' ? value.summary_zh : nullableString('content_zh').slice(0, 300),
     author: typeof value.author === 'string' ? value.author : null,
     publish_time: requiredString(value, 'publish_time'),
     source: requiredNumber(value, 'source'),
@@ -166,8 +168,10 @@ export function parseNewsDetail(value: unknown): NewsDetail {
   const nullableDate = (key: string) => typeof value[key] === 'string' ? value[key] as string : null
   return {
     ...summary,
+    content: requiredString(value, 'content'),
+    content_zh: requiredString(value, 'content_zh'),
     source_url: typeof value.source_url === 'string' ? value.source_url : '',
-    full_content: typeof value.full_content === 'string' ? value.full_content : '',
+    full_content: requiredString(value, 'full_content'),
     full_content_fetched_at: nullableDate('full_content_fetched_at'),
     full_content_zh: typeof value.full_content_zh === 'string' ? value.full_content_zh : '',
     full_content_zh_fetched_at: nullableDate('full_content_zh_fetched_at'),

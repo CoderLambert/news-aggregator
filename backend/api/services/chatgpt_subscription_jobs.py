@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import random
+import sqlite3
 import threading
 import time
 import uuid
@@ -11,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from typing import Optional
 
-from django.db import OperationalError, close_old_connections, transaction
+from django.db import OperationalError, close_old_connections, connection as db_connection, transaction
 from django.db.models import F, Q, Value
 from django.db.models.functions import Concat
 from django.utils import timezone
@@ -19,6 +21,7 @@ from django.utils import timezone
 from api.models import (
     ChatGPTSubscriptionConnection,
     ChatGPTTranslationTask,
+    SharedArticleTranslationTask,
     News,
 )
 from api.services import chatgpt_subscription as subscription
@@ -199,7 +202,8 @@ def get_task(task_id, *, user_id=None):
     query = ChatGPTTranslationTask.objects.filter(pk=task_id)
     if user_id is not None:
         query = query.filter(user_id=user_id)
-    try:
+
+    def read_state():
         task = query.first()
         if task is None:
             return None
@@ -207,6 +211,9 @@ def get_task(task_id, *, user_id=None):
             _recover_expired(task.pk, user_id=user_id)
             task = query.first()
         return task
+
+    try:
+        return _retry_task_database_operation(read_state, stage="task_poll")
     except OperationalError:
         raise SubscriptionError(
             '任务状态暂时不可用，请稍后重试。', 'task_storage_busy', 503,
@@ -222,7 +229,8 @@ def get_job(user_id, connection_id, news_id, source_digest=None):
         user_id=user_id, connection_id=connection_id, news_id=news_id,
         source_digest=source_digest,
     )
-    try:
+
+    def read_state():
         task = query.order_by('-updated_at').first()
         if task is None:
             return None
@@ -230,6 +238,9 @@ def get_job(user_id, connection_id, news_id, source_digest=None):
             _recover_expired(task.pk, user_id=user_id)
             task = query.order_by('-updated_at').first()
         return _handle(task) if task is not None else None
+
+    try:
+        return _retry_task_database_operation(read_state, stage="job_lookup")
     except OperationalError:
         raise SubscriptionError(
             '任务状态暂时不可用，请稍后重试。', 'task_storage_busy', 503,
@@ -324,6 +335,56 @@ def _reset_task(task_id, generation, *, connection, shared_lease, now, expected_
     )
 
 
+SUBMISSION_LOCK_DELAYS = (0.02, 0.04, 0.08, 0.16, 0.32)
+
+
+def _sqlite_error_details(error):
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        if isinstance(error, sqlite3.Error):
+            code = getattr(error, 'sqlite_errorcode', None)
+            name = getattr(error, 'sqlite_errorname', None)
+            if not isinstance(name, str) or not name.startswith('SQLITE_') or name.upper() != name or not name.replace('_', '').isalnum():
+                name = None
+            return code if isinstance(code, int) else None, name
+        error = getattr(error, '__cause__', None) or getattr(error, '__context__', None)
+    return None, None
+
+
+def _is_task_sqlite_lock(error):
+    """Match driver result codes, never arbitrary error-message text."""
+    if db_connection.vendor != 'sqlite':
+        return False
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        code = getattr(error, 'sqlite_errorcode', None)
+        if isinstance(code, int):
+            return (code & 0xff) in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
+        error = getattr(error, '__cause__', None) or getattr(error, '__context__', None)
+    return False
+
+
+def _retry_task_database_operation(operation, *, stage="submission"):
+    # Nested callers retain their outer transaction/read locks after a savepoint
+    # rollback, so only top-level DB operations can safely retry.
+    nested = db_connection.in_atomic_block
+    for attempt in range(len(SUBMISSION_LOCK_DELAYS) + 1):
+        try:
+            return operation()
+        except OperationalError as error:
+            retry = not nested and _is_task_sqlite_lock(error) and attempt < len(SUBMISSION_LOCK_DELAYS)
+            code, name = _sqlite_error_details(error)
+            logger.info('Task DB error (stage=%s, sqlite_code=%s, sqlite_name=%s, attempt=%s, retry=%s).',
+                        stage, code, name, attempt + 1, retry)
+            if not retry:
+                raise
+            # The failed atomic block has rolled back before sleeping. Never
+            # replay provider calls or the whole worker.
+            time.sleep(SUBMISSION_LOCK_DELAYS[attempt] * random.uniform(0.5, 1.5))
+
+
 def start_or_get_job(user, connection, news, *, force=False, shared_lease=None):
     """Create or attach to a durable owner task; only explicit force resets terminals."""
     try:
@@ -339,11 +400,24 @@ def start_or_get_job(user, connection, news, *, force=False, shared_lease=None):
     if type(force) is not bool:
         _release_unattached_lease(shared_lease)
         raise SubscriptionError('force 必须是布尔值。', 'invalid_force', 400)
-    now = timezone.now()
-    handle_task = None
-    dispatch = False
-    attached_lease = False
-    try:
+
+    def persist_task():
+        current, current_news, refreshed_digest = _validate_submission(user, connection, news)
+        if refreshed_digest != digest:
+            raise SubscriptionError('原文已更新，请重新开始。', 'article_source_changed', 409)
+        if shared_lease is not None:
+            # A source may also change between claiming the shared lease and
+            # the initial validation. Check only the immutable source binding;
+            # token/expiry availability remains governed by the worker guards.
+            binding = SharedArticleTranslationTask.objects.filter(pk=shared_lease.task_id).values(
+                'news_id', 'source_hash',
+            ).first()
+            if binding and (binding['news_id'] != current_news.pk or binding['source_hash'] != digest):
+                raise SubscriptionError('原文已更新，请重新开始。', 'article_source_changed', 409)
+        now = timezone.now()
+        handle_task = None
+        dispatch = False
+        attached_lease = False
         with transaction.atomic():
             if force:
                 _cancel_stale_active_tasks(user.pk, current_news.pk, digest, current, now)
@@ -403,12 +477,20 @@ def start_or_get_job(user, connection, news, *, force=False, shared_lease=None):
                 if created:
                     attached_lease = shared_lease is not None
             handle_task = task
+        return handle_task, dispatch, attached_lease
+
+    try:
+        handle_task, dispatch, attached_lease = (
+            persist_task() if force else _retry_task_database_operation(persist_task)
+        )
     except OperationalError as exc:
         _release_unattached_lease(shared_lease)
         # SQLite can still be releasing the competing transaction when we try
         # to attach to its unique task. Retry ONLY the idempotent read/attach:
         # do not create or reset a task (or call a provider) in this path.
-        for delay in (0, 0.02, 0.05, 0.10, 0.20):
+        # Force may attach after a lock, but must never replay a generation reset.
+        delays = (0, 0.02, 0.05, 0.10, 0.20) if force and _is_task_sqlite_lock(exc) else ()
+        for delay in delays:
             if delay:
                 time.sleep(delay)
             try:
@@ -431,6 +513,10 @@ def start_or_get_job(user, connection, news, *, force=False, shared_lease=None):
         raise SubscriptionError(
             '翻译任务暂时无法处理，请稍后重试。', 'task_storage_busy', 503,
         ) from None
+
+    except Exception:
+        _release_unattached_lease(shared_lease)
+        raise
 
     if shared_lease is not None and not attached_lease:
         _release_unattached_lease(shared_lease)
@@ -536,52 +622,59 @@ def _task_snapshot(task_id, generation, run_token, *, require_started=True):
 
 def _execution_guard(task_id, generation, run_token):
     def guard():
-        _task_snapshot(task_id, generation, run_token)
+        return _retry_task_database_operation(lambda: _task_snapshot(task_id, generation, run_token), stage="execution_guard")
     return guard
 
 
 def _mark_provider_started(task_id, generation, run_token):
-    with transaction.atomic():
-        task = _task_snapshot(task_id, generation, run_token, require_started=False)
-        now = timezone.now()
-        changed = ChatGPTTranslationTask.objects.filter(
-            pk=task_id, generation=generation, run_token=run_token,
-            status='running', provider_started=False, lease_expires_at__gt=now,
-            connection__is_active=True,
-            connection__generation=F('connection_generation'),
-            connection__selected_model=F('model_slug'), user__is_active=True,
-        ).update(provider_started=True, updated_at=now)
-        if not changed:
-            raise SubscriptionError('翻译任务已取消或租约失效。', 'task_lease_lost', 409)
+    def persist():
+        with transaction.atomic():
+            task = _task_snapshot(task_id, generation, run_token, require_started=False)
+            now = timezone.now()
+            changed = ChatGPTTranslationTask.objects.filter(
+                pk=task_id, generation=generation, run_token=run_token,
+                status='running', provider_started=False, lease_expires_at__gt=now,
+                connection__is_active=True,
+                connection__generation=F('connection_generation'),
+                connection__selected_model=F('model_slug'), user__is_active=True,
+            ).update(provider_started=True, updated_at=now)
+            if not changed:
+                raise SubscriptionError('翻译任务已取消或租约失效。', 'task_lease_lost', 409)
+    return _retry_task_database_operation(persist, stage="provider_start")
 
 
 def _append_delta(task_id, generation, run_token, delta):
     if not delta:
         return
-    _task_snapshot(task_id, generation, run_token)
-    with transaction.atomic():
-        task = ChatGPTTranslationTask.objects.select_for_update().filter(
-            pk=task_id, generation=generation, run_token=run_token, status='running',
-        ).select_related('user', 'connection', 'news').first()
-        if task is None:
-            raise SubscriptionError('翻译任务已取消。', 'task_cancelled', 409)
+
+    def persist():
         _task_snapshot(task_id, generation, run_token)
-        now = timezone.now()
-        updated = ChatGPTTranslationTask.objects.filter(
-            pk=task_id, generation=generation, run_token=run_token,
-            status='running', provider_started=True, lease_expires_at__gt=now,
-            connection__is_active=True,
-            connection__generation=F('connection_generation'),
-            connection__selected_model=F('model_slug'), user__is_active=True,
-        ).update(progress=Concat(F('progress'), Value(delta)), updated_at=now)
-        if not updated:
-            raise SubscriptionError('翻译任务已取消或租约失效。', 'task_lease_lost', 409)
+        with transaction.atomic():
+            task = ChatGPTTranslationTask.objects.select_for_update().filter(
+                pk=task_id, generation=generation, run_token=run_token, status='running',
+            ).select_related('user', 'connection', 'news').first()
+            if task is None:
+                raise SubscriptionError('翻译任务已取消。', 'task_cancelled', 409)
+            _task_snapshot(task_id, generation, run_token)
+            now = timezone.now()
+            updated = ChatGPTTranslationTask.objects.filter(
+                pk=task_id, generation=generation, run_token=run_token,
+                status='running', provider_started=True, lease_expires_at__gt=now,
+                connection__is_active=True,
+                connection__generation=F('connection_generation'),
+                connection__selected_model=F('model_slug'), user__is_active=True,
+            ).update(progress=Concat(F('progress'), Value(delta)), updated_at=now)
+            if not updated:
+                raise SubscriptionError('翻译任务已取消或租约失效。', 'task_lease_lost', 409)
+    return _retry_task_database_operation(persist, stage="progress_append")
 
 
 @contextmanager
 def _task_heartbeat(task_id, generation, run_token, shared_lease=None):
     stopped = threading.Event()
-    if shared_lease is not None and not shared_lease.current().exists():
+    if shared_lease is not None and not _retry_task_database_operation(
+        lambda: shared_lease.current().exists(), stage="shared_lease_check",
+    ):
         raise SharedTranslationError('共享翻译任务已过期，请重新开始。')
 
     def heartbeat():
@@ -626,41 +719,43 @@ def _task_heartbeat(task_id, generation, run_token, shared_lease=None):
 
 
 def _finalize_task(task_id, generation, run_token, text):
-    now = timezone.now()
-    with transaction.atomic():
-        # This conditional UPDATE is deliberately the first write in the
-        # transaction. On SQLite it also takes the write reservation before
-        # publishing either private or public translation state.
-        locked = ChatGPTTranslationTask.objects.filter(
-            pk=task_id, generation=generation, run_token=run_token,
-            status='running', provider_started=True, lease_expires_at__gt=now,
-        ).update(updated_at=now)
-        if not locked:
-            raise SubscriptionError('翻译任务已取消或租约失效。', 'task_lease_lost', 409)
-        task = ChatGPTTranslationTask.objects.select_related('user', 'connection', 'news').get(pk=task_id)
-        current = _task_snapshot(task_id, generation, run_token)
-        record = save_completed_translation(
-            user_id=task.user_id,
-            connection_id=task.connection_id,
-            news_id=task.news_id,
-            expected_generation=task.connection_generation,
-            model_slug=task.model_slug,
-            text=text,
-            source_digest=task.source_hash,
-            shared_lease=_lease_from_task(task),
-        )
-        payload = result_payload(record, 'private')
-        updated = ChatGPTTranslationTask.objects.filter(
-            pk=task_id, generation=generation, run_token=run_token,
-            status='running', lease_expires_at__gt=timezone.now(),
-        ).update(
-            status='succeeded', result=payload, error_code='', error_message='',
-            finished_at=timezone.now(), run_token=None, lease_expires_at=None,
-            updated_at=timezone.now(),
-        )
-        if not updated:
-            raise SubscriptionError('翻译任务已取消或租约失效。', 'task_lease_lost', 409)
-        return payload
+    def persist():
+        now = timezone.now()
+        with transaction.atomic():
+            # This conditional UPDATE is deliberately the first write in the
+            # transaction. On SQLite it also takes the write reservation before
+            # publishing either private or public translation state.
+            locked = ChatGPTTranslationTask.objects.filter(
+                pk=task_id, generation=generation, run_token=run_token,
+                status='running', provider_started=True, lease_expires_at__gt=now,
+            ).update(updated_at=now)
+            if not locked:
+                raise SubscriptionError('翻译任务已取消或租约失效。', 'task_lease_lost', 409)
+            task = ChatGPTTranslationTask.objects.select_related('user', 'connection', 'news').get(pk=task_id)
+            current = _task_snapshot(task_id, generation, run_token)
+            record = save_completed_translation(
+                user_id=task.user_id,
+                connection_id=task.connection_id,
+                news_id=task.news_id,
+                expected_generation=task.connection_generation,
+                model_slug=task.model_slug,
+                text=text,
+                source_digest=task.source_hash,
+                shared_lease=_lease_from_task(task),
+            )
+            payload = result_payload(record, 'private')
+            updated = ChatGPTTranslationTask.objects.filter(
+                pk=task_id, generation=generation, run_token=run_token,
+                status='running', lease_expires_at__gt=timezone.now(),
+            ).update(
+                status='succeeded', result=payload, error_code='', error_message='',
+                finished_at=timezone.now(), run_token=None, lease_expires_at=None,
+                updated_at=timezone.now(),
+            )
+            if not updated:
+                raise SubscriptionError('翻译任务已取消或租约失效。', 'task_lease_lost', 409)
+            return payload
+    return _retry_task_database_operation(persist, stage="result_commit")
 
 
 def _safe_error(exc):
@@ -698,71 +793,78 @@ def _mark_failed(task_id, generation, run_token, exc):
         logger.info('ChatGPT translation failure state was not saved (%s).', type(finish_exc).__name__)
         return False
 
+def _claim_persistent_task(task_id, generation, run_token):
+    def persist():
+        with transaction.atomic():
+            queued_task = _queued_task_snapshot(task_id, generation)
+            if queued_task is None:
+                return 0
+            now = timezone.now()
+            return ChatGPTTranslationTask.objects.filter(
+                pk=task_id, generation=generation, status='queued',
+                connection_id=queued_task.connection_id,
+                connection_generation=queued_task.connection_generation,
+                model_slug=queued_task.model_slug,
+                user__is_active=True,
+                connection__user_id=F('user_id'),
+                connection__is_active=True,
+                connection__needs_reauth=False,
+                connection__generation=F('connection_generation'),
+                connection__selected_model=F('model_slug'),
+                connection__encrypted_access_token__gt='',
+                connection__encrypted_refresh_token__gt='',
+                news__full_content=queued_task.news.full_content,
+                news__full_content__gt='',
+            ).update(
+                status='running', run_token=run_token, provider_started=False,
+                started_at=now, lease_expires_at=now + TASK_LEASE_TTL,
+                error_code='', error_message='', finished_at=None, updated_at=now,
+            )
+    return _retry_task_database_operation(persist, stage="claim")
+
+
 def _run_persistent_task(task_id, generation):
     close_old_connections()
     key = (str(task_id), int(generation))
     run_token = uuid.uuid4()
     claimed = False
+    db_stage = "claim"
     try:
-        try:
-            queued_task = _queued_task_snapshot(task_id, generation)
-        except Exception as exc:
-            code, message = _safe_error(exc)
-            try:
-                _fail_queued_task(
-                    task_id, generation, error_code=code, error_message=message,
-                )
-            except Exception as finish_exc:
-                logger.info('ChatGPT queued translation state was not saved (%s).', type(finish_exc).__name__)
-            logger.info('ChatGPT article translation job ended before claim (%s).', type(exc).__name__)
-            return
-        if queued_task is None:
-            return
-        now = timezone.now()
-        claimed = ChatGPTTranslationTask.objects.filter(
-            pk=task_id, generation=generation, status='queued',
-            connection_id=queued_task.connection_id,
-            connection_generation=queued_task.connection_generation,
-            model_slug=queued_task.model_slug,
-            user__is_active=True,
-            connection__user_id=F('user_id'),
-            connection__is_active=True,
-            connection__needs_reauth=False,
-            connection__generation=F('connection_generation'),
-            connection__selected_model=F('model_slug'),
-            connection__encrypted_access_token__gt='',
-            connection__encrypted_refresh_token__gt='',
-            news__full_content=queued_task.news.full_content,
-            news__full_content__gt='',
-        ).update(
-            status='running', run_token=run_token, provider_started=False,
-            started_at=now, lease_expires_at=now + TASK_LEASE_TTL,
-            error_code='', error_message='', finished_at=None, updated_at=now,
-        )
+        claimed = _claim_persistent_task(task_id, generation, run_token)
         if not claimed:
             return
-        task = ChatGPTTranslationTask.objects.select_related(
-            'user', 'connection', 'news',
-        ).get(pk=task_id)
+        db_stage = "claimed_snapshot"
+        task = _retry_task_database_operation(
+            lambda: _task_snapshot(task_id, generation, run_token, require_started=False),
+            stage=db_stage,
+        )
         shared_lease = _lease_from_task(task)
-        _task_snapshot(task_id, generation, run_token, require_started=False)
+        db_stage = "provider_start"
         _mark_provider_started(task_id, generation, run_token)
         guard = _execution_guard(task_id, generation, run_token)
+        db_stage = "shared_lease_check"
         with _task_heartbeat(task_id, generation, run_token, shared_lease):
-            guard()
-            article = News.objects.only('full_content').get(pk=task.news_id)
+            db_stage = "article_snapshot"
+            source_task = _retry_task_database_operation(
+                lambda: _task_snapshot(task_id, generation, run_token), stage=db_stage,
+            )
+            db_stage = "provider_stream"
             output = stream_full_translation(
                 connection_id=task.connection_id,
                 expected_generation=task.connection_generation,
                 model_slug=task.model_slug,
-                article_markdown=article.full_content,
+                article_markdown=source_task.news.full_content,
                 on_delta=lambda delta: _append_delta(task_id, generation, run_token, delta),
                 execution_guard=guard,
             )
+            db_stage = "post_provider_guard"
             guard()
+            db_stage = "result_commit"
             _finalize_task(task_id, generation, run_token, output)
     except Exception as exc:
-        logger.info('ChatGPT article translation job ended without a saved result (%s).', type(exc).__name__)
+        code, name = _sqlite_error_details(exc)
+        logger.info('ChatGPT task ended without a saved result (stage=%s, error_type=%s, sqlite_code=%s, sqlite_name=%s).',
+                    db_stage, type(exc).__name__, code, name)
         if claimed:
             _mark_failed(task_id, generation, run_token, exc)
         else:

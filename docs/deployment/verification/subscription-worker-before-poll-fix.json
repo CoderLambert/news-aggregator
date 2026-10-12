@@ -1,0 +1,50 @@
+[
+  {
+    "suite": "worker",
+    "tests_per_run": 4,
+    "database": "memory",
+    "iteration": 1,
+    "exit_code": 0,
+    "model_guards_zero": true
+  },
+  {
+    "suite": "worker",
+    "tests_per_run": 4,
+    "database": "memory",
+    "iteration": 2,
+    "exit_code": 1,
+    "model_guards_zero": true
+  },
+  {
+    "suite": "worker",
+    "tests_per_run": 4,
+    "database": "memory",
+    "iteration": 3,
+    "exit_code": 0,
+    "model_guards_zero": true
+  },
+  {
+    "suite": "worker",
+    "tests_per_run": 4,
+    "database": "wal",
+    "iteration": 1,
+    "exit_code": 0,
+    "model_guards_zero": true
+  },
+  {
+    "suite": "worker",
+    "tests_per_run": 4,
+    "database": "wal",
+    "iteration": 2,
+    "exit_code": 0,
+    "model_guards_zero": true
+  },
+  {
+    "suite": "worker",
+    "tests_per_run": 4,
+    "database": "wal",
+    "iteration": 3,
+    "exit_code": 0,
+    "model_guards_zero": true
+  }
+]

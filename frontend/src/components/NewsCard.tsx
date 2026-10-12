@@ -46,10 +46,10 @@ function formatRelativeTime(dateString: string, t: ReturnType<typeof useLanguage
 
 function resolveDisplay(news: NewsSummary, displayMode: DisplayMode) {
   const hasChineseTranslation = news.source_language === 'en' && Boolean(news.title_zh)
-  if (!hasChineseTranslation) return { title: news.title, subtitle: null, content: news.content }
-  if (displayMode === 'zh') return { title: news.title_zh, subtitle: null, content: news.content_zh || news.content }
-  if (displayMode === 'bilingual') return { title: news.title, subtitle: news.title_zh, content: news.content_zh || news.content }
-  return { title: news.title, subtitle: null, content: news.content }
+  if (!hasChineseTranslation) return { title: news.title, subtitle: null, content: news.summary }
+  if (displayMode === 'zh') return { title: news.title_zh, subtitle: null, content: news.summary_zh || news.summary }
+  if (displayMode === 'bilingual') return { title: news.title, subtitle: news.title_zh, content: news.summary_zh || news.summary }
+  return { title: news.title, subtitle: null, content: news.summary }
 }
 
 function cleanSummary(rawText: string): string {
