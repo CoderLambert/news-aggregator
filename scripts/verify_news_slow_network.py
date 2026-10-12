@@ -15,6 +15,7 @@ import threading
 import time
 from unittest.mock import PropertyMock, patch
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 from wsgiref.simple_server import WSGIServer, WSGIRequestHandler, make_server
 from socketserver import ThreadingMixIn
 
@@ -126,9 +127,9 @@ await server.listen(); console.log('READY');
     vite = subprocess.Popen(['node', str(node_script)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         context = ssl._create_unverified_context()
-        def request(path, encoding='identity'):
+        def request(path, encoding='identity', accept='application/json', cookie=None):
             req = Request(f'https://127.0.0.1:{https_port}' + path,
-                headers={'Host': 'news.lambert.host', 'Accept-Encoding': encoding})
+                headers={'Host': 'news.lambert.host', 'Accept-Encoding': encoding, 'Accept': accept, **({'Cookie': cookie} if cookie else {})})
             with urlopen(req, context=context) as response:
                 return response.read(), dict(response.headers)
         for attempt in range(50):
@@ -149,9 +150,32 @@ await server.listen(); console.log('READY');
         for path in ['/api/news/1/', '/api/news/1/chat/', '/api/auth/probe/']:
             _, private_headers = request(path, 'gzip')
             assert 'Content-Encoding' not in private_headers, path
+        from django.contrib.auth import get_user_model
+        session_client = APIClient()
+        reader = get_user_model().objects.create_user(username='nginx-summary-session-reader', password='synthetic-only')
+        session_client.force_login(reader)
+        session_cookie = f'{settings.SESSION_COOKIE_NAME}={session_client.cookies[settings.SESSION_COOKIE_NAME].value}'
+        negotiation_probes = []
+        for scope, cookie in [('anonymous', None), ('session', session_cookie)]:
+            for path, accept, expected in [('/api/news/', 'text/html', 406),
+                                           ('/api/news/?format=api', 'application/json', 404)]:
+                try:
+                    request(path, 'gzip', accept, cookie)
+                    raise AssertionError('Browsable HTML unexpectedly accepted')
+                except HTTPError as error:
+                    body = error.read()
+                    assert error.code == expected
+                    assert error.headers.get('Content-Type', '').startswith('application/json')
+                    assert error.headers.get('Content-Encoding') is None
+                    assert b'<html' not in body.lower()
+                    assert b'csrfmiddlewaretoken' not in body
+                    assert reader.username.encode() not in body
+                    negotiation_probes.append({'scope': scope, 'accept': accept,
+                        'path': path, 'status': error.code, 'content_type': error.headers.get('Content-Type'),
+                        'content_encoding': None, 'result': 'PASS: JSON error, no HTML'})
         report = {'legacy_bytes': len(legacy), 'summary_bytes': len(compact),
             'nginx_gzip_bytes': len(compressed), 'gzip_round_trip': 'PASS',
-            'detail_sse_private_uncompressed': 'PASS'}
+            'detail_sse_private_uncompressed': 'PASS', 'html_negotiation_probes': negotiation_probes}
         print('PAYLOAD', json.dumps(report), flush=True)
         from playwright.sync_api import sync_playwright
         with sync_playwright() as playwright:
