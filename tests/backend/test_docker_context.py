@@ -15,6 +15,7 @@ _PRODUCTION_FLAG_DEFAULTS = {
     'PUBLIC_AI_ENABLED': '0',
     'CHATGPT_PLAN_USAGE_ENABLED': '0',
     'CHATGPT_AUTH_MODE': 'disabled',
+    'EDGE_TTS_ENDPOINT': 'default',
     'CRAWLER_SCHEDULER_ENABLED': '0',
     'CRAWL_RUN_ON_START': '0',
     'SEARCH_INDEX_ENABLED': '0',
@@ -266,6 +267,7 @@ def test_production_compose_uses_only_named_volumes_and_separate_migration():
     assert runtime_environment['PUBLIC_SITE_MODE'] == '${PUBLIC_SITE_MODE:-read_only}'
     assert runtime_environment['PUBLIC_AI_ENABLED'] == '${PUBLIC_AI_ENABLED:-0}'
     assert runtime_environment['CHATGPT_AUTH_MODE'] == '${CHATGPT_AUTH_MODE:-disabled}'
+    assert runtime_environment['EDGE_TTS_ENDPOINT'] == '${EDGE_TTS_ENDPOINT:-default}'
     assert runtime_environment['CRAWLER_SCHEDULER_ENABLED'] == '${CRAWLER_SCHEDULER_ENABLED:-0}'
     assert runtime_environment['SEARCH_INDEX_ENABLED'] == '${SEARCH_INDEX_ENABLED:-0}'
     forbidden_worker_secrets = {'OPENAI_API_KEY', 'PROVIDER_API_KEY', 'CHATGPT_ACCESS_TOKEN'}
@@ -295,6 +297,7 @@ def test_production_compose_flag_defaults_ignore_dotenv_and_allow_explicit_value
         'PUBLIC_AI_ENABLED': '1',
         'CHATGPT_PLAN_USAGE_ENABLED': '1',
         'CHATGPT_AUTH_MODE': 'website',
+        'EDGE_TTS_ENDPOINT': 'msedgeservices',
         'CRAWLER_SCHEDULER_ENABLED': '1',
         'CRAWL_RUN_ON_START': '1',
         'SEARCH_INDEX_ENABLED': '1',
@@ -349,6 +352,7 @@ def test_production_environment_template_has_absolute_data_paths_and_no_secret()
         'DJANGO_DB_PATH=/var/lib/newshub/db/db.sqlite3',
         'CHROMA_DATA_DIR=/var/lib/newshub/chroma',
         'TTS_CACHE_DIR=/var/lib/newshub/tts',
+        'EDGE_TTS_ENDPOINT=default',
         'CHATGPT_DEPLOYMENT_INSTANCE_FILE=/var/lib/newshub/runtime/chatgpt-deployment-id',
         'HF_HOME=/var/lib/newshub/model-cache',
         'CRAWLER_LOG_DIR=/var/lib/newshub/logs/crawler',

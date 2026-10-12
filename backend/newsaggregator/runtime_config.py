@@ -38,6 +38,7 @@ class RuntimeConfig:
     public_ai_enabled: bool
     chatgpt_plan_usage_enabled: bool
     chatgpt_auth_mode: str
+    edge_tts_endpoint: str
     waitress_trusted_proxy: str | None
 
 
@@ -188,6 +189,13 @@ def parse_runtime_config(
             "CHATGPT_AUTH_MODE=local_oss is forbidden in production."
         )
 
+    edge_tts_endpoint = _enum(
+        environ,
+        "EDGE_TTS_ENDPOINT",
+        "default",
+        {"default", "msedgeservices"},
+    )
+
     trusted_proxy = _production_proxy(environ) if production else None
 
     return RuntimeConfig(
@@ -201,6 +209,7 @@ def parse_runtime_config(
         public_ai_enabled=public_ai_enabled,
         chatgpt_plan_usage_enabled=chatgpt_plan_usage_enabled,
         chatgpt_auth_mode=chatgpt_auth_mode,
+        edge_tts_endpoint=edge_tts_endpoint,
         waitress_trusted_proxy=trusted_proxy,
     )
 

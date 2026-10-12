@@ -14,6 +14,9 @@ from dataclasses import dataclass
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
+
+EDGE_TTS_MSEDGESERVICES_BASE_URL = 'api.msedgeservices.com/tts/cognitiveservices'
+
 # Cache directory for generated TTS audio files
 _DEFAULT_TTS_CACHE_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
@@ -74,6 +77,29 @@ class TTSContentUnavailable(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+def configure_edge_tts_endpoint() -> str:
+    """Select one reviewed edge-tts transport endpoint for this process.
+
+    edge-tts keeps its WebSocket endpoint as a module constant rather than a
+    constructor option. All production requests use one validated setting, so
+    assigning the same value before synthesis is idempotent across Waitress
+    threads and never accepts an arbitrary operator-provided URL.
+    """
+    from edge_tts import communicate, constants
+
+    endpoint = getattr(settings, 'EDGE_TTS_ENDPOINT', 'default')
+    if endpoint == 'default':
+        return communicate.WSS_URL
+    if endpoint != 'msedgeservices':
+        raise ImproperlyConfigured('Unsupported EDGE_TTS_ENDPOINT setting.')
+
+    communicate.WSS_URL = (
+        f'wss://{EDGE_TTS_MSEDGESERVICES_BASE_URL}/websocket/v1'
+        f'?Ocp-Apim-Subscription-Key={constants.TRUSTED_CLIENT_TOKEN}'
+    )
+    return communicate.WSS_URL
 
 
 def _cache_key(news_id: int, variant: str) -> str:

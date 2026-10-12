@@ -40,6 +40,7 @@ def _import_settings(tmp_path, overrides=None, prelude=""):
         "'csrf_origins': s.CSRF_TRUSTED_ORIGINS, 'site_mode': s.PUBLIC_SITE_MODE,\n" \
         "'signup': s.PUBLIC_SIGNUP_ENABLED, 'ai': s.PUBLIC_AI_ENABLED,\n" \
         "'plan': s.CHATGPT_PLAN_USAGE_ENABLED, 'auth_mode': s.CHATGPT_AUTH_MODE,\n" \
+        "'edge_tts_endpoint': s.EDGE_TTS_ENDPOINT,\n" \
         "'trusted_proxy': s.WAITRESS_TRUSTED_PROXY,\n" \
         "'cors_all': s.CORS_ALLOW_ALL_ORIGINS, 'cors_credentials': s.CORS_ALLOW_CREDENTIALS,\n" \
         "'session_secure': s.SESSION_COOKIE_SECURE, 'session_domain': s.SESSION_COOKIE_DOMAIN,\n" \
@@ -87,6 +88,7 @@ def test_production_defaults_fail_closed_and_set_browser_security(tmp_path):
     assert config["site_mode"] == "read_only"
     assert config["signup"] is config["ai"] is config["plan"] is False
     assert config["auth_mode"] == "disabled"
+    assert config["edge_tts_endpoint"] == "default"
     assert config["trusted_proxy"] == "127.0.0.1"
     assert config["cors_all"] is config["cors_credentials"] is False
     assert config["session_secure"] is config["csrf_secure"] is True
@@ -198,6 +200,7 @@ print(json.dumps({'debug': s.DEBUG, 'hosts': s.ALLOWED_HOSTS,
         ("PUBLIC_SITE_MODE", "unexpected"),
         ("CHATGPT_AUTH_MODE", "unexpected"),
         ("CHATGPT_AUTH_MODE", "local_oss"),
+        ("EDGE_TTS_ENDPOINT", "https://untrusted.example/tts"),
     ],
 )
 def test_invalid_production_values_fail_without_echoing_secret(tmp_path, name, value):

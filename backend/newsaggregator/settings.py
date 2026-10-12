@@ -85,6 +85,7 @@ PUBLIC_SIGNUP_ENABLED = _RUNTIME_CONFIG.public_signup_enabled
 PUBLIC_AI_ENABLED = _RUNTIME_CONFIG.public_ai_enabled
 CHATGPT_PLAN_USAGE_ENABLED = _RUNTIME_CONFIG.chatgpt_plan_usage_enabled
 CHATGPT_AUTH_MODE = _RUNTIME_CONFIG.chatgpt_auth_mode
+EDGE_TTS_ENDPOINT = _RUNTIME_CONFIG.edge_tts_endpoint
 WAITRESS_TRUSTED_PROXY = _RUNTIME_CONFIG.waitress_trusted_proxy
 
 DJANGO_DB_PATH = _data_path(
