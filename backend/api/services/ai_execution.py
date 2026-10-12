@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from django.db import transaction
 
-from api.models import USER_AI_TASK_PREFERENCE_CHOICES, UserAIModelConfig, UserAITaskPreference
+from api.models import USER_AI_TASK_PREFERENCE_CHOICES, UserAIConnection, UserAIModelConfig, UserAITaskPreference
 
 
 TASK_KINDS = tuple(kind for kind, _label in USER_AI_TASK_PREFERENCE_CHOICES)
@@ -40,13 +40,25 @@ class ExecutionSnapshot:
 
 
 def _active_config_for_user(*, user_id: int, model_config_id) -> UserAIModelConfig:
-    config = UserAIModelConfig.objects.select_for_update().select_related('connection').filter(
+    connection_id = UserAIModelConfig.objects.filter(
         pk=model_config_id,
         connection__user_id=user_id,
+    ).values_list('connection_id', flat=True).first()
+    if connection_id is None:
+        raise ModelSelectionError('model_not_found')
+    connection = UserAIConnection.objects.select_for_update().filter(
+        pk=connection_id,
+        user_id=user_id,
+    ).first()
+    if connection is None:
+        raise ModelSelectionError('model_not_found')
+    config = UserAIModelConfig.objects.select_for_update().filter(
+        pk=model_config_id,
+        connection_id=connection.pk,
     ).first()
     if config is None:
         raise ModelSelectionError('model_not_found')
-    connection = config.connection
+    config.connection = connection
     if (
         connection.is_deleted
         or not connection.is_enabled
@@ -101,18 +113,22 @@ def resolve_execution(user, task_kind: str, model_config_id=None) -> ExecutionSn
                 config=config,
             )
 
-        preference = UserAITaskPreference.objects.select_for_update().filter(
-            user_id=user_id, task_kind=task_kind,
-        ).first()
+        preference_kinds = (task_kind,) if task_kind == 'default' else (task_kind, 'default')
+        preferences_by_kind = {
+            preference.task_kind: preference
+            for preference in UserAITaskPreference.objects.select_for_update().filter(
+                user_id=user_id,
+                task_kind__in=preference_kinds,
+            ).order_by('task_kind')
+        }
+        preference = preferences_by_kind.get(task_kind)
         selected_by = task_kind
         if preference is not None and preference.requires_reselection:
             raise ModelSelectionError('model_reselection_required')
 
         config = preference.model_config if preference is not None else None
         if config is None and task_kind != 'default':
-            default_preference = UserAITaskPreference.objects.select_for_update().filter(
-                user_id=user_id, task_kind='default',
-            ).first()
+            default_preference = preferences_by_kind.get('default')
             if default_preference is not None and default_preference.requires_reselection:
                 raise ModelSelectionError('model_reselection_required')
             config = default_preference.model_config if default_preference is not None else None

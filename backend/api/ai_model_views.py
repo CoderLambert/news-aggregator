@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from django.contrib.auth import get_user_model
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection as django_connection, transaction
 from django.conf import settings
 from django.utils import timezone
 from rest_framework import serializers, status
@@ -241,44 +241,44 @@ class UserAIModelListCreateView(NoStoreAPIView):
         if not serializer.is_valid():
             return _no_store(Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST))
         values = serializer.validated_data
-        connection = UserAIConnection.objects.filter(
-            pk=values['connection_id'], user=request.user, is_deleted=False,
-        ).first()
-        if connection is None:
-            return _no_store(Response({'error_code': 'not_found'}, status=status.HTTP_404_NOT_FOUND))
 
-        preset = None
-        if 'catalog_model_id' in values:
-            preset = get_model_preset(values['catalog_model_id'], connection.provider_id)
-            if preset is None:
-                return _no_store(Response({'error_code': 'catalog_model_unavailable'}, status=status.HTTP_400_BAD_REQUEST))
-            model_id = preset['model_id']
-        else:
-            model_id = values['model_id']
-            preset = find_model_preset(model_id, connection.provider_id)
-
-        if preset is None:
-            display_name = values.get('display_name') or model_id[:64]
-            metadata = _catalog_metadata(connection.provider_id, model_id=model_id)
-        else:
-            display_name = values.get('display_name') or preset['display_name']
-            metadata = _catalog_metadata(connection.provider_id, catalog_model_id=preset['catalog_model_id'])
-        _validate_display_name(display_name)
-        model = UserAIModelConfig(
-            connection=connection,
-            model_id=model_id,
-            display_name=display_name,
-            capability_snapshot=dict(UNKNOWN_CAPABILITIES),
-            **metadata,
-        )
         try:
             with transaction.atomic():
+                connection = UserAIConnection.objects.select_for_update().filter(
+                    pk=values['connection_id'], user=request.user, is_deleted=False,
+                ).first()
+                if connection is None:
+                    return _no_store(Response({'error_code': 'not_found'}, status=status.HTTP_404_NOT_FOUND))
+
+                preset = None
+                if 'catalog_model_id' in values:
+                    preset = get_model_preset(values['catalog_model_id'], connection.provider_id)
+                    if preset is None:
+                        return _no_store(Response({'error_code': 'catalog_model_unavailable'}, status=status.HTTP_400_BAD_REQUEST))
+                    model_id = preset['model_id']
+                else:
+                    model_id = values['model_id']
+                    preset = find_model_preset(model_id, connection.provider_id)
+
+                if preset is None:
+                    display_name = values.get('display_name') or model_id[:64]
+                    metadata = _catalog_metadata(connection.provider_id, model_id=model_id)
+                else:
+                    display_name = values.get('display_name') or preset['display_name']
+                    metadata = _catalog_metadata(connection.provider_id, catalog_model_id=preset['catalog_model_id'])
+                _validate_display_name(display_name)
+                model = UserAIModelConfig(
+                    connection=connection,
+                    model_id=model_id,
+                    display_name=display_name,
+                    capability_snapshot=dict(UNKNOWN_CAPABILITIES),
+                    **metadata,
+                )
                 model.save(force_insert=True)
         except IntegrityError:
             return _no_store(Response({'error_code': 'model_already_exists'}, status=status.HTTP_409_CONFLICT))
-        model.connection = connection
-        return _no_store(Response(_model_payload(model), status=status.HTTP_201_CREATED))
 
+        return _no_store(Response(_model_payload(model), status=status.HTTP_201_CREATED))
 
 class UserAIModelDetailView(NoStoreAPIView):
     authentication_classes = [AnonymousCsrfSessionAuthentication]
@@ -289,13 +289,27 @@ class UserAIModelDetailView(NoStoreAPIView):
         if denied:
             return denied
         with transaction.atomic():
-            model = UserAIModelConfig.objects.select_for_update().select_related('connection').filter(
+            connection_id = UserAIModelConfig.objects.filter(
                 pk=model_id,
                 connection__user=request.user,
                 connection__is_deleted=False,
+            ).values_list('connection_id', flat=True).first()
+            if connection_id is None:
+                return _no_store(Response({'error_code': 'not_found'}, status=status.HTTP_404_NOT_FOUND))
+            connection = UserAIConnection.objects.select_for_update().filter(
+                pk=connection_id,
+                user=request.user,
+                is_deleted=False,
+            ).first()
+            if connection is None:
+                return _no_store(Response({'error_code': 'not_found'}, status=status.HTTP_404_NOT_FOUND))
+            model = UserAIModelConfig.objects.select_for_update().filter(
+                pk=model_id,
+                connection_id=connection.pk,
             ).first()
             if model is None:
                 return _no_store(Response({'error_code': 'not_found'}, status=status.HTTP_404_NOT_FOUND))
+            model.connection = connection
             serializer = ModelPatchSerializer(data=request.data)
             if not serializer.is_valid():
                 return _no_store(Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST))
@@ -311,7 +325,7 @@ class UserAIModelDetailView(NoStoreAPIView):
                 model.last_safe_error_code = ''
                 model.capability_snapshot = dict(UNKNOWN_CAPABILITIES)
                 model.display_name = values.get('display_name') or model.model_id[:64]
-                model_metadata = _catalog_metadata(model.connection.provider_id, model_id=model.model_id)
+                model_metadata = _catalog_metadata(connection.provider_id, model_id=model.model_id)
                 for field, value in model_metadata.items():
                     setattr(model, field, value)
             if 'display_name' in values:
@@ -327,18 +341,36 @@ class UserAIModelDetailView(NoStoreAPIView):
         if denied:
             return denied
         with transaction.atomic():
-            get_user_model().objects.select_for_update().get(pk=request.user.pk)
-            model = UserAIModelConfig.objects.select_for_update().filter(
+            get_user_model().objects.select_for_update(
+                no_key=django_connection.vendor == 'postgresql',
+            ).get(pk=request.user.pk)
+            connection_id = UserAIModelConfig.objects.filter(
                 pk=model_id,
                 connection__user=request.user,
-                connection__is_deleted=False,
+            ).values_list('connection_id', flat=True).first()
+            if connection_id is None:
+                return _no_store(Response({'error_code': 'not_found'}, status=status.HTTP_404_NOT_FOUND))
+            preferences = list(UserAITaskPreference.objects.select_for_update().filter(
+                user=request.user,
+                model_config_id=model_id,
+            ).order_by('task_kind'))
+            connection = UserAIConnection.objects.select_for_update().filter(
+                pk=connection_id,
+                user=request.user,
+                is_deleted=False,
+            ).first()
+            if connection is None:
+                return _no_store(Response({'error_code': 'not_found'}, status=status.HTTP_404_NOT_FOUND))
+            model = UserAIModelConfig.objects.select_for_update().filter(
+                pk=model_id,
+                connection_id=connection.pk,
             ).first()
             if model is None:
                 return _no_store(Response({'error_code': 'not_found'}, status=status.HTTP_404_NOT_FOUND))
-            UserAITaskPreference.objects.filter(model_config=model).update(
-                model_config=None,
-                requires_reselection=True,
-                updated_at=timezone.now(),
-            )
+            for preference in preferences:
+                preference.model_config = None
+                preference.requires_reselection = True
+                preference.updated_at = timezone.now()
+                preference.save(update_fields=['model_config', 'requires_reselection', 'updated_at'])
             model.delete()
         return _no_store(Response({'deleted': True}))

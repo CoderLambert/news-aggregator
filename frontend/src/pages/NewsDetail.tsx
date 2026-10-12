@@ -290,6 +290,7 @@ export default function NewsDetail() {
               allowTranslation={translationEnabled}
               allowPrivateTranslation={Boolean(user) && capabilities.features.ai_byok.enabled && translationEnabled}
               privateTranslationActive={privateTranslation.privateTranslationActive}
+              privateTranslationCancelPending={privateTranslation.privateTranslationCancelPending}
               privateTranslationError={privateTranslation.privateTranslationError}
               privateTranslationProgress={privateTranslation.privateTranslationProgress}
               privateTranslationResult={privateTranslation.privateTranslationResult}
@@ -298,6 +299,7 @@ export default function NewsDetail() {
               privateTranslationStaleResult={privateTranslation.privateTranslationStaleResult}
               privateTranslationJobId={privateTranslation.privateTranslationJobId}
               onStartPrivateTranslation={() => { void privateTranslation.startPrivateTranslation() }}
+              onCheckPrivateTranslationStatus={() => { void privateTranslation.checkPrivateTranslationStatus() }}
               onCancelPrivateTranslation={() => { void privateTranslation.cancelPrivateTranslation() }}
             />
           )}

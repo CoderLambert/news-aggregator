@@ -30,6 +30,7 @@ interface FullContentSectionProps {
   allowTranslation?: boolean
   allowPrivateTranslation?: boolean
   privateTranslationActive?: boolean
+  privateTranslationCancelPending?: boolean
   privateTranslationError?: string
   privateTranslationProgress?: string
   privateTranslationResult?: string
@@ -38,6 +39,7 @@ interface FullContentSectionProps {
   privateTranslationStaleResult?: PrivateTranslationResult | null
   privateTranslationJobId?: string
   onStartPrivateTranslation?: () => void
+  onCheckPrivateTranslationStatus?: () => void
   onCancelPrivateTranslation?: () => void
 }
 
@@ -62,6 +64,7 @@ export default function FullContentSection({
   allowTranslation = true,
   allowPrivateTranslation = false,
   privateTranslationActive = false,
+  privateTranslationCancelPending = false,
   privateTranslationError = '',
   privateTranslationProgress = '',
   privateTranslationResult = '',
@@ -70,6 +73,7 @@ export default function FullContentSection({
   privateTranslationStaleResult = null,
   privateTranslationJobId = '',
   onStartPrivateTranslation = () => {},
+  onCheckPrivateTranslationStatus = () => {},
   onCancelPrivateTranslation = () => {},
 }: FullContentSectionProps) {
   const currentText = currentTranslation?.text
@@ -118,7 +122,14 @@ export default function FullContentSection({
               <p role="status" className="text-sm font-medium text-violet-800">个人模型正在翻译，进度和结果仅你可见。</p>
               {privateTranslationProgress && <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-violet-900">{privateTranslationProgress}</pre>}
             </div>
-            <Button type="button" variant="outline" size="sm" onClick={onCancelPrivateTranslation} disabled={!privateTranslationJobId} className="shrink-0 rounded-full">取消</Button>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={onCheckPrivateTranslationStatus} disabled={!privateTranslationJobId} className="rounded-full">
+                重新检查状态
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={onCancelPrivateTranslation} disabled={!privateTranslationJobId} className="rounded-full">
+                {privateTranslationCancelPending ? '再次取消' : '取消任务'}
+              </Button>
+            </div>
           </div>
         </section>
       )}

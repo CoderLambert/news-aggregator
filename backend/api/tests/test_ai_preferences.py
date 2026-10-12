@@ -7,6 +7,8 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 from django.contrib.auth.models import User
+from django.db import connection as django_connection
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from rest_framework.test import APIClient
 
@@ -226,6 +228,78 @@ def test_execution_snapshot_is_immutable_and_new_tasks_use_new_preferences():
     assert first_snapshot.model_id == 'vendor/first-model'
     assert second_snapshot.model_config_id == second_model['id']
     assert first_snapshot.digest != second_snapshot.digest
+
+
+@pytest.mark.django_db
+def test_resolver_locks_task_and_default_preferences_in_one_sorted_query():
+    client, user, csrf = _authenticated_client('preference-lock-order')
+    connection_id = _create_connection(client, csrf, name='Lock order connection')
+    model = _add_model(client, csrf, connection_id, 'vendor/lock-order-model')
+    assert client.patch(
+        reverse('ai-task-preferences'),
+        _patch_payload(default=model['id']),
+        format='json',
+        HTTP_X_CSRFTOKEN=csrf,
+    ).status_code == 200
+
+    with CaptureQueriesContext(django_connection) as captured:
+        snapshot = resolve_execution(user, 'full_translation')
+
+    table = UserAITaskPreference._meta.db_table.lower()
+    preference_queries = [
+        entry['sql'] for entry in captured.captured_queries
+        if table in entry['sql'].lower() and 'task_kind' in entry['sql'].lower()
+    ]
+    assert len(preference_queries) == 1
+    sql = preference_queries[0].lower()
+    assert ' in ' in sql
+    assert 'default' in sql and 'full_translation' in sql
+    assert 'order by' in sql
+    assert sql.index('order by') < sql.index('task_kind', sql.index('order by'))
+    assert snapshot.selected_by_task_kind == 'default'
+    assert snapshot.model_config_id == model['id']
+
+
+@pytest.mark.django_db
+def test_preference_patch_and_model_delete_lock_preferences_in_task_kind_order():
+    client, _user, csrf = _authenticated_client('preference-mutation-lock-order')
+    connection_id = _create_connection(client, csrf, name='Mutation lock order connection')
+    model = _add_model(client, csrf, connection_id, 'vendor/lock-order')
+    table = UserAITaskPreference._meta.db_table.lower()
+
+    with CaptureQueriesContext(django_connection) as patch_queries:
+        patched = client.patch(
+            reverse('ai-task-preferences'),
+            _patch_payload(default=model['id']),
+            format='json',
+            HTTP_X_CSRFTOKEN=csrf,
+        )
+    assert patched.status_code == 200
+    patch_locks = [
+        entry['sql'].lower() for entry in patch_queries.captured_queries
+        if table in entry['sql'].lower() and 'order by' in entry['sql'].lower()
+    ]
+    assert patch_locks
+    assert all(
+        sql.index('order by') < sql.index('task_kind', sql.index('order by'))
+        for sql in patch_locks
+    )
+
+    with CaptureQueriesContext(django_connection) as delete_queries:
+        deleted = client.delete(
+            reverse('ai-model-detail', kwargs={'model_id': model['id']}),
+            HTTP_X_CSRFTOKEN=csrf,
+        )
+    assert deleted.status_code == 200
+    delete_locks = [
+        entry['sql'].lower() for entry in delete_queries.captured_queries
+        if table in entry['sql'].lower() and 'order by' in entry['sql'].lower()
+    ]
+    assert delete_locks
+    assert all(
+        sql.index('order by') < sql.index('task_kind', sql.index('order by'))
+        for sql in delete_locks
+    )
 
 
 @pytest.mark.django_db

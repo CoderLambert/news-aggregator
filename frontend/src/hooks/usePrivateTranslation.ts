@@ -67,7 +67,7 @@ function resultFromTask(task: { result: Record<string, unknown> }): { text: stri
   const text = task.result.full_content_zh
   const id = task.result.result_id
   return typeof text === 'string' && text.trim() && typeof id === 'string'
-    ? { text, id, currentMatch: typeof task.result.current_match === 'boolean' ? task.result.current_match : true }
+    ? { text, id, currentMatch: task.result.current_match === true }
     : null
 }
 
@@ -111,7 +111,6 @@ export function usePrivateTranslation(
   const sourceKey = news?.full_content ?? ''
   const ownerRef = useRef(ownerKey)
   const sourceRef = useRef(sourceKey)
-  const recoveryStartedRef = useRef<string | null>(null)
   const requestRef = useRef<PrivateTranslationRequest | null>(null)
   const [state, setState] = useState(EMPTY_STATE)
   const [staleResult, setStaleResult] = useState<{ ownerKey: string; resultId: string; result: PrivateTranslationResult } | null>(null)
@@ -160,6 +159,30 @@ export function usePrivateTranslation(
     })
   }, [updateState])
 
+  const finishRequestFromTask = useCallback((
+    request: PrivateTranslationRequest,
+    task: Awaited<ReturnType<typeof getPrivateTranslationJob>>,
+  ) => {
+    if (newsId !== null) clearRecovery(viewerId, newsId)
+    if (requestRef.current === request) requestRef.current = null
+    request.controller.abort()
+    finishFromTask(task)
+  }, [finishFromTask, newsId, viewerId])
+
+  const getCurrentTaskRequest = useCallback(() => {
+    const current = requestRef.current
+    if (current?.ownerKey === ownerKey && current.sourceKey === sourceKey && current.jobId) return current
+    if (!visible.active || !visible.jobId) return null
+    const recovered: PrivateTranslationRequest = {
+      ownerKey,
+      sourceKey,
+      controller: new AbortController(),
+      jobId: visible.jobId,
+    }
+    requestRef.current = recovered
+    return recovered
+  }, [ownerKey, sourceKey, visible.active, visible.jobId])
+
   const followTask = useCallback(async (
     jobId: string,
     controller: AbortController,
@@ -173,33 +196,35 @@ export function usePrivateTranslation(
           || sourceRef.current !== request.sourceKey) return
         updateState({ active: ['queued', 'running'].includes(task.status), progress: task.progress, jobId: task.id })
         if (!['queued', 'running'].includes(task.status)) {
-          if (newsId !== null) clearRecovery(viewerId, newsId)
-          finishFromTask(task)
+          finishRequestFromTask(request, task)
           return
         }
         await sleep(1200, controller.signal)
       }
     } catch (error: unknown) {
-      if (controller.signal.aborted || sourceRef.current !== request.sourceKey) return
-      updateState({ active: false, error: safeErrorMessage(error, '无法读取个人翻译任务。') })
-    } finally {
-      if (requestRef.current === request) requestRef.current = null
+      if (controller.signal.aborted || requestRef.current !== request || sourceRef.current !== request.sourceKey) return
+      updateState({
+        active: true,
+        jobId: request.jobId ?? jobId,
+        error: safeErrorMessage(error, '无法读取个人翻译任务。') + ' 任务可能仍在运行；请重新检查状态或再次取消。',
+      })
     }
-  }, [finishFromTask, newsId, ownerKey, updateState, viewerId])
+  }, [finishRequestFromTask, ownerKey, updateState])
 
   useEffect(() => {
     if (!enabled || loading || !isAuthenticated || newsId === null || news?.id !== newsId) return
-    if (recoveryStartedRef.current === ownerKey) return
-    recoveryStartedRef.current = ownerKey
     const storedJobId = readRecovery(viewerId, newsId)
     if (!storedJobId) return
+    const attached = requestRef.current
+    if (attached?.ownerKey === ownerKey && attached.sourceKey === sourceKey
+      && attached.jobId === storedJobId && !attached.controller.signal.aborted) return
+    attached?.controller.abort()
     const request: PrivateTranslationRequest = {
       ownerKey,
       sourceKey,
       controller: new AbortController(),
       jobId: storedJobId,
     }
-    requestRef.current?.controller.abort()
     requestRef.current = request
     updateState({ active: true, error: '', jobId: storedJobId })
     void followTask(storedJobId, request.controller, request)
@@ -228,7 +253,7 @@ export function usePrivateTranslation(
 
   const startPrivateTranslation = useCallback(async () => {
     if (!enabled || !isAuthenticated || newsId === null || !news || news.id !== newsId || !news.full_content) return
-    if (requestRef.current?.ownerKey === ownerKey) return
+    if (requestRef.current?.ownerKey === ownerKey || (visible.active && visible.jobId)) return
     requestRef.current?.controller.abort()
     requestRef.current = null
     const controller = new AbortController()
@@ -240,8 +265,8 @@ export function usePrivateTranslation(
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`
     updateState({ active: true, cancelPending: false, error: '', progress: '', jobId: '' })
 
+    let terminal = false
     try {
-      let terminal = false
       for await (const event of translatePrivateFullArticleStream(newsId, idempotencyKey, {
         signal: controller.signal,
         onJobId: (jobId) => {
@@ -256,16 +281,54 @@ export function usePrivateTranslation(
         if (event.type === 'progress') {
           updateState({ progress: event.text })
         } else if (event.type === 'error') {
-          terminal = true
-          updateState({ active: false, cancelPending: false, error: event.message })
+          if (request.jobId) {
+            updateState({
+              active: true,
+              cancelPending: false,
+              jobId: request.jobId,
+              error: event.message + ' 任务状态尚未确认；请重新检查状态或再次取消。',
+            })
+          } else {
+            terminal = true
+            clearRecovery(viewerId, newsId)
+            if (requestRef.current === request) requestRef.current = null
+            updateState({ active: false, cancelPending: false, error: event.message })
+          }
         } else if (event.type === 'complete') {
           const result = resultFromTask({ result: event.result })
-          terminal = true
-          clearRecovery(viewerId, newsId)
           if (!result) {
+            terminal = true
+            clearRecovery(viewerId, newsId)
+            if (requestRef.current === request) requestRef.current = null
             updateState({ active: false, cancelPending: false, error: '个人翻译没有返回可保存的完整译文。' })
           } else {
-            updateState({ active: false, cancelPending: false, error: '', result: result.text, resultId: result.id, resultCurrentMatch: result.currentMatch })
+            try {
+              const verifiedResult = await getPrivateTranslationResult(result.id, controller.signal)
+              if (controller.signal.aborted || requestRef.current !== request || ownerRef.current !== ownerKey
+                || sourceRef.current !== request.sourceKey) return
+              terminal = true
+              clearRecovery(viewerId, newsId)
+              requestRef.current = null
+              updateState({
+                active: false,
+                cancelPending: false,
+                error: '',
+                result: verifiedResult.text,
+                resultId: verifiedResult.resultId,
+                resultCurrentMatch: verifiedResult.currentMatch,
+              })
+            } catch {
+              if (controller.signal.aborted || requestRef.current !== request || ownerRef.current !== ownerKey
+                || sourceRef.current !== request.sourceKey) return
+              terminal = true
+              clearRecovery(viewerId, newsId)
+              requestRef.current = null
+              updateState({
+                active: false,
+                cancelPending: false,
+                error: '个人翻译已完成，但无法确认结果是否匹配当前原文。请重新生成当前译文。',
+              })
+            }
           }
         }
       }
@@ -275,27 +338,58 @@ export function usePrivateTranslation(
         updateState({ active: false, cancelPending: false, error: '无法确认个人翻译任务状态；请查看任务后再决定是否重试。' })
       }
     } catch (error: unknown) {
-      if (!controller.signal.aborted) {
-        updateState({ active: false, cancelPending: false, error: safeErrorMessage(error, '个人翻译失败。') })
+      if (!controller.signal.aborted && requestRef.current === request
+        && ownerRef.current === ownerKey && sourceRef.current === request.sourceKey) {
+        updateState({
+          active: Boolean(request.jobId),
+          jobId: request.jobId ?? '',
+          error: safeErrorMessage(error, '个人翻译失败。') +
+            (request.jobId ? ' 任务可能仍在运行；请重新检查状态或再次取消。' : ''),
+        })
       }
     } finally {
-      if (requestRef.current === request) requestRef.current = null
+      if (requestRef.current === request && (terminal || !request.jobId)) requestRef.current = null
     }
-  }, [enabled, followTask, isAuthenticated, news, newsId, ownerKey, sourceKey, updateState, viewerId])
+  }, [enabled, followTask, isAuthenticated, news, newsId, ownerKey, sourceKey, updateState, viewerId, visible.active, visible.jobId])
 
-  const cancelPrivateTranslation = useCallback(async () => {
-    const request = requestRef.current
-    if (!request || request.ownerKey !== ownerKey || request.sourceKey !== sourceKey || !request.jobId) return
+  const checkPrivateTranslationStatus = useCallback(async () => {
+    const request = getCurrentTaskRequest()
+    if (!request?.jobId || request.ownerKey !== ownerKey || request.sourceKey !== sourceKey) return
     updateState({ cancelPending: true, error: '' })
     try {
       const current = await getPrivateTranslationJob(request.jobId, new AbortController().signal)
       if (requestRef.current !== request || ownerRef.current !== ownerKey || sourceRef.current !== request.sourceKey) return
       if (!['queued', 'running'].includes(current.status)) {
-        clearRecovery(viewerId, newsId!)
-        request.controller.abort()
-        requestRef.current = null
-        finishFromTask(current)
-        updateState({ cancelPending: false })
+        finishRequestFromTask(request, current)
+        return
+      }
+      updateState({
+        active: true,
+        cancelPending: false,
+        progress: current.progress,
+        jobId: current.id,
+        error: '',
+      })
+    } catch (error: unknown) {
+      if (requestRef.current !== request || ownerRef.current !== ownerKey || sourceRef.current !== request.sourceKey) return
+      updateState({
+        active: true,
+        cancelPending: true,
+        jobId: request.jobId,
+        error: safeErrorMessage(error, '无法确认个人翻译任务状态。') + ' 任务可能仍在运行；请重试检查或再次取消。',
+      })
+    }
+  }, [finishRequestFromTask, getCurrentTaskRequest, ownerKey, sourceKey, updateState])
+
+  const cancelPrivateTranslation = useCallback(async () => {
+    const request = getCurrentTaskRequest()
+    if (!request?.jobId || request.ownerKey !== ownerKey || request.sourceKey !== sourceKey) return
+    updateState({ cancelPending: true, error: '' })
+    try {
+      const current = await getPrivateTranslationJob(request.jobId, new AbortController().signal)
+      if (requestRef.current !== request || ownerRef.current !== ownerKey || sourceRef.current !== request.sourceKey) return
+      if (!['queued', 'running'].includes(current.status)) {
+        finishRequestFromTask(request, current)
         return
       }
       const terminal = await cancelPrivateTranslationJob(request.jobId, current.generation)
@@ -304,16 +398,12 @@ export function usePrivateTranslation(
         updateState({ active: true, cancelPending: true, jobId: request.jobId, error: '取消状态尚未确认，任务可能仍在运行。请重试取消或重新查看任务状态。' })
         return
       }
-      clearRecovery(viewerId, newsId!)
-      request.controller.abort()
-      requestRef.current = null
-      finishFromTask(terminal)
-      updateState({ cancelPending: false })
+      finishRequestFromTask(request, terminal)
     } catch (error: unknown) {
       if (requestRef.current !== request || ownerRef.current !== ownerKey || sourceRef.current !== request.sourceKey) return
-      updateState({ active: true, cancelPending: true, jobId: request.jobId, error: `${safeErrorMessage(error, '无法确认个人翻译任务状态。')} 任务可能仍在运行；请重试取消或重新查看任务状态。` })
+      updateState({ active: true, cancelPending: true, jobId: request.jobId, error: safeErrorMessage(error, '无法确认个人翻译任务状态。') + ' 任务可能仍在运行；请重试取消或重新查看任务状态。' })
     }
-  }, [finishFromTask, newsId, ownerKey, sourceKey, updateState, viewerId])
+  }, [finishRequestFromTask, getCurrentTaskRequest, ownerKey, sourceKey, updateState])
 
   useEffect(() => () => {
     if (requestRef.current?.ownerKey === ownerKey) {
@@ -333,6 +423,7 @@ export function usePrivateTranslation(
     privateTranslationStaleResult: visibleStaleResult,
     privateTranslationJobId: visible.jobId,
     startPrivateTranslation,
+    checkPrivateTranslationStatus,
     cancelPrivateTranslation,
   }
 }

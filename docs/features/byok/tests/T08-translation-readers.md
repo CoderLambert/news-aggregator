@@ -112,3 +112,57 @@ env -i PATH=/home/lambert/.local/share/vite-plus/js_runtime/node/24.21.0/bin:/us
 env -i PATH=/home/lambert/.local/share/vite-plus/js_runtime/node/24.21.0/bin:/usr/bin:/bin HOME=/tmp/byok-pr42-fixes-home XDG_CACHE_HOME=/tmp/byok-pr42-fixes-xdg node_modules/.bin/eslint .
 env -i PATH=/home/lambert/.local/share/vite-plus/js_runtime/node/24.21.0/bin:/usr/bin:/bin HOME=/tmp/byok-pr42-fixes-home XDG_CACHE_HOME=/tmp/byok-pr42-fixes-xdg node_modules/.bin/vite build
 ```
+
+## 2026-10-12 · T08 四项返修最终证据
+
+本节记录原修复分支 `task/byok-T08-reader-fixes` 上，从代码基线 `f9c233b9bd214768505e483ee240f21ae69f2835` 开始的四项返修。返修覆盖 14 个前后端生产/测试文件；本节是这次返修的最终验证记录，与前文首版 `e9e9644` 和中间阶段 `f2b0a9c` 的结果区分。独立静态审查确认相关数据库锁顺序一致；静态审查不作为并发运行验证。
+
+### 修复范围
+
+1. **私有翻译任务恢复与取消**：取得 job ID 后，查询、订阅或取消的传输错误都保留 job 身份、恢复信息和阻止重复 start 的活动状态；界面提供重新检查状态与再次取消入口，只有确认服务端终态才清除任务身份。覆盖取消 POST 失败后 stream 再失败、恢复 GET 失败后再生成、随后恢复终态。
+2. **幂等恢复与正文隔离**：移除按 owner 一次性置位的恢复闩锁，按有效 request 生命周期附着任务；StrictMode 重挂载和 loading/source 变化可恢复。迟到的旧 source 请求不能覆写当前正文的译文。
+3. **模型配置与聊天提交锁序**：聊天最终 history commit 按 connection → model config → ChatSession 锁内重验执行快照；模型创建/修改/删除、模型探测最终快照及任务偏好更新显式使用 connection → model 顺序，并在锁内校验归属与配置版本。保留 SQLite 首条写入防升级争用；没有把 provider 网络调用放入数据库锁，也没有增加自动 provider 重试。
+4. **译文消费者一致性**：用户从译文 A 生成并完成译文 B 后，详情正文、复制、聊天上下文和中文朗读都选择 B；源正文变化后失效旧结果 ID/current-match 元数据。GET 已完成任务时用文章当前正文重新计算 `current_match`。
+
+### 验证结果
+
+| 检查 | 实际结果 |
+| --- | --- |
+| 后端相关回归 | 9 个模块、`107 passed in 16.40s`；使用合成 Django secret、测试 stub 与隔离 SQLite 数据库，未调用外部模型。模块：`test_article_translation_readers.py`、`test_shared_translations.py`、`test_ai_translation_jobs.py`、`test_chat_context.py`、`test_ai_chat.py`、`test_ai_preferences.py`、`test_ai_models.py`、`test_ai_model_test_service.py`、`test_ai_connections.py`。 |
+| 前端相关回归 | 本轮修复阶段的六文件组合曾记录 `53 passed`；保留该分组结果。另见下行最终全套运行，不将这两个不同范围的计数混为一组。 |
+| 最终全前端回归 | 按默认 Vitest 套件配置、180 秒有界运行：`73 passed` 个测试文件、`513 passed` 项测试，耗时 `8.12s`，退出码 0。未跳过测试。Vitest 报告了一些既有 React `act(...)` 警告，但无失败。 |
+| TypeScript / ESLint | `tsc --noEmit` 和全前端 `eslint .` 均退出码 0。 |
+| Production build | 默认输出 `frontend/dist` 时遇到工作区写权限拒绝，不能把该次失败记为构建成功或代码错误。使用 `/tmp` 输出目录重新运行成功：4340 modules transformed，`✓ built in 540ms`。临时产物位于项目外，不纳入 Git。 |
+| Diff | 文档加入后运行 `git diff --check`；结果记录在本次本地交付检查。 |
+
+### 失败与超时记录
+
+修复过程中保留了早期失败记录：hook 定向运行曾为 `31 passed, 4 failed`，暴露 StrictMode 恢复只请求一次、`terminal` 变量作用域错误及其引发的取消竞态等待失败，以及 source-change 状态仍为 active。修复这些问题后，最终全前端 513 项均通过。页面导航相关旧序列曾在约 22 秒和 70 秒有界运行中超时（退出码 124）；此前七文件组合曾手动中断（退出码 130）。这些旧运行不记作通过，也没有跳过或放宽旧断言。最终完整 Vitest 命令已覆盖这些测试并通过。
+
+### 未运行
+
+PostgreSQL 并发测试、真实模型/Provider 请求、浏览器 E2E、手动浏览器 UAT、全量后端套件和部署均为 **NOT_RUN**。SQLite 结果与静态锁序审查不能替代 PostgreSQL 并发验证。
+
+### 本次重现命令
+
+后端相关回归（输出数据库与测试 stub 均在 `/tmp`，pytest cache provider 关闭）：
+
+```sh
+env -i PATH=/tmp/byok-t01-verify-20261012/bin:/usr/bin:/bin HOME=/tmp/byok-t01-empty-home PYTHONPATH="/tmp/byok-t02-test-stubs:$PWD/backend" DJANGO_ENV=development DJANGO_SECRET_KEY=synthetic-test-value DJANGO_DB_PATH=/tmp/byok-t08-final-related-complete-20261012.sqlite3 /tmp/byok-t01-verify-20261012/bin/python -m pytest -p no:cacheprovider backend/api/tests/test_article_translation_readers.py backend/api/tests/test_shared_translations.py backend/api/tests/test_ai_translation_jobs.py backend/api/tests/test_chat_context.py backend/api/tests/test_ai_chat.py backend/api/tests/test_ai_preferences.py backend/api/tests/test_ai_models.py backend/api/tests/test_ai_model_test_service.py backend/api/tests/test_ai_connections.py -q
+```
+
+最终全前端：
+
+```sh
+cd frontend
+timeout 180s env -i PATH=/home/lambert/.local/share/vite-plus/js_runtime/node/24.21.0/bin:/usr/bin:/bin HOME=/tmp/byok-t08-final-home XDG_CACHE_HOME=/tmp/byok-t08-final-xdg node_modules/.bin/vitest run
+```
+
+类型、lint 和项目外构建输出：
+
+```sh
+cd frontend
+env -i PATH=/home/lambert/.local/share/vite-plus/js_runtime/node/24.21.0/bin:/usr/bin:/bin HOME=/tmp/byok-t08-final-home XDG_CACHE_HOME=/tmp/byok-t08-final-xdg node_modules/.bin/tsc --noEmit
+env -i PATH=/home/lambert/.local/share/vite-plus/js_runtime/node/24.21.0/bin:/usr/bin:/bin HOME=/tmp/byok-t08-final-home XDG_CACHE_HOME=/tmp/byok-t08-final-xdg node_modules/.bin/eslint .
+env -i PATH=/home/lambert/.local/share/vite-plus/js_runtime/node/24.21.0/bin:/usr/bin:/bin HOME=/tmp/byok-t08-final-home XDG_CACHE_HOME=/tmp/byok-t08-final-xdg node_modules/.bin/vite build --outDir /tmp/byok-t08-fixes-build-f9c233b-20261012
+```

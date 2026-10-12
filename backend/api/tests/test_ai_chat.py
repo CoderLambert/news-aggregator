@@ -206,7 +206,7 @@ def test_late_result_after_clear_is_discarded(monkeypatch):
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize('change', ['revocation', 'key_rotation', 'chat_generation'])
+@pytest.mark.parametrize('change', ['revocation', 'key_rotation', 'chat_generation', 'model_config'])
 @override_settings(AI_BYOK_ENABLED=True, PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
 def test_final_chat_commit_rechecks_locked_execution_and_generation(monkeypatch, change):
     client, user, csrf = _authenticated_client(f't04-final-commit-{change}')
@@ -236,8 +236,17 @@ def test_final_chat_commit_rechecks_locked_execution_and_generation(monkeypatch,
                 credential_epoch=F('credential_epoch') + 1,
                 credential_version=F('credential_version') + 1,
             )
-        else:
+        elif change == 'chat_generation':
             assert clear_chat_history(user_id=user.pk, news_id=news.pk)
+        else:
+            response = client.patch(
+                reverse('ai-model-detail', kwargs={'model_id': model['id']}),
+                {'model_id': 'synthetic/model-after-final-guard'},
+                format='json',
+                HTTP_X_CSRFTOKEN=csrf,
+            )
+            assert response.status_code == 200, response.content
+            assert response.json()['config_revision'] == 2
         return original_commit(execution, **kwargs)
 
     monkeypatch.setattr(ai_chat, 'commit_completed_article_chat_turn', change_snapshot_then_commit)
