@@ -30,10 +30,10 @@
 
 | 项目 | 结果 |
 | --- | --- |
-| 本卡本地状态 | **PASS**；T00-01 至 T00-10 本地验收与镜像签名校验通过。PR #33 当前 docs-only head 的两组 CI 均通过；可选 T00-11 未运行 |
+| 本卡本地状态 | **PASS**；T00-01 至 T00-10 本地验收与镜像签名校验通过。PR #33 已验证 head `0405177` 的两组 CI 均通过；可选 T00-11 未运行 |
 | 功能分支目标基线 HEAD | `ea2ce55ae22e19e1604e88031b824b68f2666cec`，与用户报告一致；未重置原工作树 |
 | 本任务实现起点 HEAD | `69e084e39552c5650b930a067b6b79d09e95db34`；分支 `task/byok-T00-sdk-protocol`，独立工作区 |
-| T00 本轮实现 SHA | 当前工作区 HEAD `ad0f14eb599ddbf8a691dc535227d7ef18298cb6`；DeepSeek smoke 最新代码提交 `ce8bec6907a0015f14421e1cdd34e65d11c8706a`，只增加真实请求中断时的脱敏失败记录与一致退出码，没有生产适配器或新闻业务改动 |
+| T00 本轮实现 SHA | 本卡产品代码 HEAD `ad0f14eb599ddbf8a691dc535227d7ef18298cb6`；DeepSeek smoke 最新代码提交 `ce8bec6907a0015f14421e1cdd34e65d11c8706a`，只增加真实请求中断时的脱敏失败记录与一致退出码，没有生产适配器或新闻业务改动 |
 | PR #33 | open / Ready for review；base `feat/byok-user-api-keys`，已验证 head `04051772e0a3a52fb8d3f9dc98480c4fc2132790`（docs-only commit） |
 | Python / OpenAI SDK / Anthropic SDK / httpx2 / LiteLLM / Docker Compose | 3.14.8 / 3.28.0 / 1.13.0 / 2.13.1 / 1.104.2 / 5.5.1；Docker Server 29.7.2 |
 | LiteLLM v1.104.2 image signature | **PASS**；Cosign v3.0.2 使用官方固定提交公钥校验，签名 digest 与锁定的 `sha256:3d88…a500` 一致；[脱敏证据](../evidence/T00-litellm-v1.104.2-cosign.json) |
