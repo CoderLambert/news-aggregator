@@ -148,6 +148,7 @@ interface SuggestedQuestionsOptions {
 interface ChatStreamOptions {
   webSearch?: boolean
   modelConfigId?: string | null
+  translationResultId?: string | null
   signal?: AbortSignal
 }
 
@@ -186,6 +187,8 @@ function makeApi(timeout: number): AxiosInstance {
 const api = makeApi(10_000)
 const apiFetch = makeApi(120_000)
 const apiLong = makeApi(180_000)
+const MODEL_TEST_TIMEOUT_MS = 30_000
+const apiModelTest = makeApi(MODEL_TEST_TIMEOUT_MS)
 
 export async function fetchCapabilities(): Promise<SiteCapabilities> {
   const value: unknown = (await api.get<unknown>('/capabilities/')).data
@@ -587,7 +590,11 @@ function parseAIModelTestResult(value: unknown): AIModelTestResult {
 }
 
 export async function testAIModel(modelId: string, probeKind: AIModelProbeKind): Promise<AIModelTestResult> {
-  const value: unknown = (await api.post<unknown>(`/ai/models/${modelId}/test/`, { probe_kind: probeKind })).data
+  const value: unknown = (await apiModelTest.post<unknown>(
+    `/ai/models/${modelId}/test/`,
+    { probe_kind: probeKind },
+    { timeout: MODEL_TEST_TIMEOUT_MS },
+  )).data
   return parseAIModelTestResult(value)
 }
 
@@ -786,13 +793,14 @@ export async function* translatePrivateFullArticleStream(
 export async function* chatStream(
   newsId: NewsId,
   question: string,
-  { webSearch = false, modelConfigId = null, signal }: ChatStreamOptions = {},
+  { webSearch = false, modelConfigId = null, translationResultId = null, signal }: ChatStreamOptions = {},
 ): AsyncGenerator<string> {
   const response = await streamingFetch(`/api/news/${newsId}/chat/`, {
     body: JSON.stringify({
       question,
       web_search: webSearch,
       ...(modelConfigId ? { model_config_id: modelConfigId } : {}),
+      ...(translationResultId ? { translation_result_id: translationResultId } : {}),
     }),
     signal,
   })
@@ -1005,6 +1013,10 @@ export function cancelChatGPTTranslationTask(jobId: string, generation: number):
 
 export function getPrivateTranslationTask(jobId: string, signal?: AbortSignal): Promise<unknown> {
   return api.get<unknown>(`/ai/translation/jobs/${jobId}/`, { signal }).then(({ data }) => data)
+}
+
+export function getPrivateTranslationResult(resultId: string, signal?: AbortSignal): Promise<unknown> {
+  return api.get<unknown>(`/ai/translation/results/${resultId}/`, { signal }).then(({ data }) => data)
 }
 
 export function cancelPrivateTranslationTask(jobId: string, generation: number): Promise<unknown> {

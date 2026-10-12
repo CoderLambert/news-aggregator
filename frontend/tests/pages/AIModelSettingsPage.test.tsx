@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -59,6 +59,33 @@ const modelConfig: AIModelConfig = {
   has_trusted_context_limit: false, config_revision: 1, verification_status: 'not_tested',
   capabilities: { text: 'unknown', tools: 'unknown', structured_output: 'unknown', thinking: 'unknown', stream: 'unknown' },
   last_tested_at: null, updated_at: '2026-10-12T00:00:00Z',
+}
+
+function routedModelConfig(id = 'model-17', displayName = 'DeepSeek V4.1 Flash'): AIModelConfig {
+  return {
+    ...modelConfig,
+    id,
+    model_id: 'deepseek-flash',
+    display_name: displayName,
+    source: 'catalog',
+    catalog_model_id: 'deepseek-flash',
+    catalog_version: '2026-10-12.1',
+    catalog_source_url: modelPreset.source_url,
+    provider_claims: modelPreset.provider_claims,
+    context_window_tokens: 1_048_576,
+    max_output_tokens: 393_216,
+    has_trusted_context_limit: true,
+  }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
 }
 
 const taskKinds: AITaskKind[] = ['default', 'article_qa', 'full_translation', 'deep_research', 'question_suggestions']
@@ -253,15 +280,8 @@ describe('AIModelSettingsPage', () => {
   })
 
   it('requires a billing confirmation before testing each capability on a routed preset', async () => {
-    const routedModel: AIModelConfig = {
-      ...modelConfig, model_id: 'deepseek-flash', display_name: 'DeepSeek V4.1 Flash',
-      source: 'catalog', catalog_model_id: 'deepseek-flash', catalog_version: '2026-10-12.1',
-      catalog_source_url: modelPreset.source_url, provider_claims: modelPreset.provider_claims,
-      context_window_tokens: 1_048_576, max_output_tokens: 393_216,
-      has_trusted_context_limit: true,
-    }
     mocks.fetchAIConnections.mockResolvedValue([connection])
-    mocks.fetchAIModels.mockResolvedValue([routedModel])
+    mocks.fetchAIModels.mockResolvedValue([routedModelConfig()])
     renderPage()
 
     fireEvent.click(await screen.findByRole('button', { name: '测试文本能力' }))
@@ -272,6 +292,332 @@ describe('AIModelSettingsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '测试工具能力' }))
     await waitFor(() => expect(mocks.testAIModel).toHaveBeenCalledWith('model-17', 'tools'))
     expect(window.confirm).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps confirmation cancellation at zero requests', async () => {
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([routedModelConfig()])
+    vi.stubGlobal('confirm', vi.fn(() => false))
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: '测试文本能力' }))
+
+    expect(window.confirm).toHaveBeenCalledOnce()
+    expect(mocks.testAIModel).not.toHaveBeenCalled()
+    expect(screen.queryByText('正在测试文本能力…')).not.toBeInTheDocument()
+  })
+
+  it('shows pending feedback beside the model and restores its button after completion', async () => {
+    const request = deferred<Awaited<ReturnType<typeof mocks.testAIModel>>>()
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([routedModelConfig()])
+    mocks.testAIModel.mockReturnValueOnce(request.promise)
+    renderPage()
+
+    const button = await screen.findByRole('button', { name: '测试文本能力' })
+    fireEvent.click(button)
+
+    expect(await screen.findByText('正在测试文本能力…')).toBeInTheDocument()
+    expect(button).toBeDisabled()
+    request.resolve({
+      attempt_id: 'attempt-pending', probe_kind: 'text', status: 'succeeded',
+      verification_status: 'verified', capability: 'supported', stale: false,
+      safe_error_code: '', latency_ms: 120, input_tokens: 8, output_tokens: 2,
+      billing_notice: 'provider_may_bill',
+    })
+
+    expect(await screen.findByText('文本能力测试成功。')).toBeInTheDocument()
+    await waitFor(() => expect(button).toBeEnabled())
+    await waitFor(() => expect(mocks.fetchAIModels).toHaveBeenCalledTimes(2))
+  })
+
+  it('refreshes saved connection and model state through the visible GET-only refresh button', async () => {
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([routedModelConfig()])
+    renderPage()
+
+    expect(await screen.findByText('模型 ID：deepseek-flash')).toBeInTheDocument()
+    expect(mocks.fetchAIConnections).toHaveBeenCalledOnce()
+    expect(mocks.fetchAIModels).toHaveBeenCalledOnce()
+
+    fireEvent.click(screen.getByRole('button', { name: '刷新连接和模型' }))
+
+    await waitFor(() => {
+      expect(mocks.fetchAIConnections).toHaveBeenCalledTimes(2)
+      expect(mocks.fetchAIModels).toHaveBeenCalledTimes(2)
+    })
+    expect(mocks.testAIModel).not.toHaveBeenCalled()
+  })
+
+  it('blocks probes for a changing connection while keeping another connection available', async () => {
+    const secondConnection: AIConnection = {
+      ...connection, id: 'connection-18', display_name: 'DeepSeek · 第二连接', masked_key: '••••••18',
+    }
+    const modelA = routedModelConfig('model-17', 'DeepSeek Flash A')
+    const modelB = { ...routedModelConfig('model-18', 'DeepSeek Flash B'), connection_id: secondConnection.id }
+    const replacement = deferred<AIConnection>()
+    mocks.fetchAIConnections.mockResolvedValue([connection, secondConnection])
+    mocks.fetchAIModels.mockResolvedValue([modelA, modelB])
+    mocks.replaceAIConnectionKey.mockReturnValueOnce(replacement.promise)
+    mocks.testAIModel.mockResolvedValueOnce({
+      attempt_id: 'attempt-b-during-change', probe_kind: 'text', status: 'succeeded',
+      verification_status: 'verified', capability: 'supported', stale: false,
+      safe_error_code: '', latency_ms: 120, input_tokens: 8, output_tokens: 2,
+      billing_notice: 'provider_may_bill',
+    })
+    renderPage()
+
+    const modelAItem = (await screen.findByText('DeepSeek Flash A')).closest('li') as HTMLElement
+    const modelBItem = (await screen.findByText('DeepSeek Flash B')).closest('li') as HTMLElement
+    const testAButton = within(modelAItem).getByRole('button', { name: '测试文本能力' })
+    const connectionAItem = screen.getByText(connection.display_name).closest('li') as HTMLElement
+    fireEvent.click(within(connectionAItem).getByRole('button', { name: '替换 Key' }))
+    fireEvent.change(screen.getByLabelText('输入新的 API Key'), { target: { value: 'sk-t01-pending-success-synthetic' } })
+    const confirmReplacementButton = screen.getByRole('button', { name: '确认替换' })
+    act(() => {
+      fireEvent.click(confirmReplacementButton)
+      fireEvent.click(testAButton)
+    })
+
+    expect(testAButton).toBeDisabled()
+    expect(within(modelBItem).getByRole('button', { name: '测试文本能力' })).toBeEnabled()
+    expect(mocks.testAIModel).not.toHaveBeenCalled()
+
+    fireEvent.click(within(modelBItem).getByRole('button', { name: '测试文本能力' }))
+    expect(await within(modelBItem).findByText('文本能力测试成功。')).toBeInTheDocument()
+
+    replacement.resolve({ ...connection, masked_key: '••••••88', updated_at: '2026-10-12T01:00:00Z' })
+    expect(await screen.findByText('Key 已替换，旧凭据版本已失效。本站尚未测试新 Key。')).toBeInTheDocument()
+    await waitFor(() => expect(testAButton).toBeEnabled())
+    expect(within(modelBItem).getByText('文本能力测试成功。')).toBeInTheDocument()
+
+    fireEvent.click(testAButton)
+    expect(await within(modelAItem).findByText('文本能力测试成功。')).toBeInTheDocument()
+    expect(mocks.testAIModel).toHaveBeenCalledTimes(2)
+  })
+
+  it('clears a completed test when a later key replacement succeeds', async () => {
+    const replacement = deferred<AIConnection>()
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([routedModelConfig()])
+    mocks.replaceAIConnectionKey.mockReturnValueOnce(replacement.promise)
+    renderPage()
+
+    const modelItem = (await screen.findByText('DeepSeek V4.1 Flash')).closest('li') as HTMLElement
+    const testButton = within(modelItem).getByRole('button', { name: '测试文本能力' })
+    fireEvent.click(testButton)
+    expect(await within(modelItem).findByText('文本能力测试成功。')).toBeInTheDocument()
+
+    const connectionItem = screen.getByText(connection.display_name).closest('li') as HTMLElement
+    fireEvent.click(within(connectionItem).getByRole('button', { name: '替换 Key' }))
+    fireEvent.change(screen.getByLabelText('输入新的 API Key'), { target: { value: 'sk-t01-late-success-replacement-synthetic' } })
+    fireEvent.click(screen.getByRole('button', { name: '确认替换' }))
+
+    expect(testButton).toBeDisabled()
+    expect(within(modelItem).queryByText('文本能力测试成功。')).not.toBeInTheDocument()
+    replacement.resolve({ ...connection, masked_key: '••••••88', updated_at: '2026-10-12T02:00:00Z' })
+    expect(await screen.findByText('Key 已替换，旧凭据版本已失效。本站尚未测试新 Key。')).toBeInTheDocument()
+    expect(within(modelItem).queryByText('文本能力测试成功。')).not.toBeInTheDocument()
+  })
+
+  it('keeps probes blocked until overlapping changes settle and restores them after a failed change', async () => {
+    const replacement = deferred<AIConnection>()
+    const toggle = deferred<AIConnection>()
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([routedModelConfig()])
+    mocks.replaceAIConnectionKey.mockReturnValueOnce(replacement.promise)
+    mocks.updateAIConnection.mockReturnValueOnce(toggle.promise)
+    renderPage()
+
+    const modelItem = (await screen.findByText('DeepSeek V4.1 Flash')).closest('li') as HTMLElement
+    const testButton = within(modelItem).getByRole('button', { name: '测试文本能力' })
+    const connectionItem = screen.getByText(connection.display_name).closest('li') as HTMLElement
+    fireEvent.click(within(connectionItem).getByRole('button', { name: '替换 Key' }))
+    fireEvent.change(screen.getByLabelText('输入新的 API Key'), { target: { value: 'sk-t01-overlap-replacement-synthetic' } })
+    fireEvent.click(screen.getByRole('button', { name: '确认替换' }))
+    fireEvent.click(within(connectionItem).getByRole('button', { name: '停用' }))
+
+    expect(testButton).toBeDisabled()
+    fireEvent.click(testButton)
+    expect(mocks.testAIModel).not.toHaveBeenCalled()
+
+    replacement.resolve({ ...connection, masked_key: '••••••88', updated_at: '2026-10-12T03:00:00Z' })
+    expect(await screen.findByText('Key 已替换，旧凭据版本已失效。本站尚未测试新 Key。')).toBeInTheDocument()
+    expect(testButton).toBeDisabled()
+
+    toggle.reject(new Error('synthetic connection update failure'))
+    expect(await screen.findByText('状态更新失败，请重试。')).toBeInTheDocument()
+    await waitFor(() => expect(testButton).toBeEnabled())
+
+    fireEvent.click(testButton)
+    expect(await within(modelItem).findByText('文本能力测试成功。')).toBeInTheDocument()
+    expect(mocks.testAIModel).toHaveBeenCalledOnce()
+  })
+
+  it('ignores an old successful test response after the model configuration changes', async () => {
+    const request = deferred<Awaited<ReturnType<typeof mocks.testAIModel>>>()
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([routedModelConfig()])
+    mocks.testAIModel.mockReturnValueOnce(request.promise)
+    mocks.updateAIModel.mockResolvedValue({
+      ...routedModelConfig(), model_id: 'deepseek-flash-v2', display_name: 'Updated Flash', config_revision: 2,
+    })
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: '测试文本能力' }))
+    expect(await screen.findByText('正在测试文本能力…')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑模型' }))
+    fireEvent.change(screen.getByLabelText('模型 ID'), { target: { value: 'deepseek-flash-v2' } })
+    fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: 'Updated Flash' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存模型修改' }))
+    await screen.findByText('模型配置已更新；此前的测试结果已失效。')
+
+    request.resolve({
+      attempt_id: 'attempt-old-success', probe_kind: 'text', status: 'succeeded',
+      verification_status: 'verified', capability: 'supported', stale: false,
+      safe_error_code: '', latency_ms: 120, input_tokens: 8, output_tokens: 2,
+      billing_notice: 'provider_may_bill',
+    })
+
+    const button = await screen.findByRole('button', { name: '测试文本能力' })
+    await waitFor(() => expect(button).toBeEnabled())
+    expect(screen.queryByText('文本能力测试成功。')).not.toBeInTheDocument()
+    expect(screen.queryByText('正在测试文本能力…')).not.toBeInTheDocument()
+  })
+
+  it('ignores an old failed test response after replacing its connection key', async () => {
+    const request = deferred<Awaited<ReturnType<typeof mocks.testAIModel>>>()
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([routedModelConfig()])
+    mocks.testAIModel.mockReturnValueOnce(request.promise)
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: '测试文本能力' }))
+    expect(await screen.findByText('正在测试文本能力…')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '替换 Key' }))
+    fireEvent.change(screen.getByLabelText('输入新的 API Key'), { target: { value: 'sk-t01-delayed-test-replacement-synthetic' } })
+    fireEvent.click(screen.getByRole('button', { name: '确认替换' }))
+    expect(await screen.findByText('Key 已替换，旧凭据版本已失效。本站尚未测试新 Key。')).toBeInTheDocument()
+
+    request.reject(Object.assign(new Error('old test failure'), {
+      response: { status: 502, data: { error_code: 'gateway_rejected' } },
+    }))
+
+    const button = await screen.findByRole('button', { name: '测试文本能力' })
+    await waitFor(() => expect(button).toBeEnabled())
+    expect(screen.queryByText(/网关拒绝了本次测试/)).not.toBeInTheDocument()
+    expect(screen.queryByText('正在测试文本能力…')).not.toBeInTheDocument()
+  })
+
+  it('keeps model A pending feedback when connection B changes', async () => {
+    const secondConnection: AIConnection = {
+      ...connection, id: 'connection-18', display_name: 'DeepSeek · 第二连接', masked_key: '••••••18',
+    }
+    const firstModel = routedModelConfig('model-17', 'DeepSeek Flash A')
+    const secondModel = { ...routedModelConfig('model-18', 'DeepSeek Flash B'), connection_id: secondConnection.id }
+    const request = deferred<Awaited<ReturnType<typeof mocks.testAIModel>>>()
+    mocks.fetchAIConnections.mockResolvedValue([connection, secondConnection])
+    mocks.fetchAIModels.mockResolvedValue([firstModel, secondModel])
+    mocks.testAIModel
+      .mockResolvedValueOnce({
+        attempt_id: 'attempt-b', probe_kind: 'text', status: 'succeeded',
+        verification_status: 'verified', capability: 'supported', stale: false,
+        safe_error_code: '', latency_ms: 120, input_tokens: 8, output_tokens: 2,
+        billing_notice: 'provider_may_bill',
+      })
+      .mockReturnValueOnce(request.promise)
+    renderPage()
+
+    let modelB = (await screen.findByText('DeepSeek Flash B')).closest('li') as HTMLElement
+    fireEvent.click(within(modelB).getByRole('button', { name: '测试文本能力' }))
+    expect(await within(modelB).findByText('文本能力测试成功。')).toBeInTheDocument()
+
+    const modelA = screen.getByText('DeepSeek Flash A').closest('li') as HTMLElement
+    fireEvent.click(within(modelA).getByRole('button', { name: '测试文本能力' }))
+    expect(await within(modelA).findByText('正在测试文本能力…')).toBeInTheDocument()
+
+    fireEvent.click(screen.getAllByRole('button', { name: '停用' })[1])
+    await waitFor(() => expect(mocks.updateAIConnection).toHaveBeenCalledWith('connection-18', { is_enabled: false }))
+
+    modelB = screen.getByText('DeepSeek Flash B').closest('li') as HTMLElement
+    expect(within(modelA).getByText('正在测试文本能力…')).toBeInTheDocument()
+    expect(within(modelB).queryByText('文本能力测试成功。')).not.toBeInTheDocument()
+
+    request.resolve({
+      attempt_id: 'attempt-a', probe_kind: 'text', status: 'succeeded',
+      verification_status: 'verified', capability: 'supported', stale: false,
+      safe_error_code: '', latency_ms: 120, input_tokens: 8, output_tokens: 2,
+      billing_notice: 'provider_may_bill',
+    })
+    expect(await within(modelA).findByText('文本能力测试成功。')).toBeInTheDocument()
+  })
+
+  it('keeps a gateway precheck error on its model card and leaves capability untested', async () => {
+    const gatewayError = Object.assign(new Error('raw response must stay hidden'), {
+      response: { status: 503, data: { error_code: 'model_test_gateway_unavailable', error: 'do not display raw response' } },
+    })
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([routedModelConfig()])
+    mocks.testAIModel.mockRejectedValueOnce(gatewayError)
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: '测试文本能力' }))
+    const feedback = await screen.findByText('本次未发送：个人模型网关暂不可用，能力仍为“未测试”。')
+    const modelCard = feedback.closest('li')
+
+    expect(modelCard).not.toBeNull()
+    expect(within(modelCard as HTMLElement).getByText(/文本：unknown · 工具：unknown · 未测试/)).toBeInTheDocument()
+    expect(screen.queryByText('raw response must stay hidden')).not.toBeInTheDocument()
+    expect(screen.queryByText('do not display raw response')).not.toBeInTheDocument()
+    expect(mocks.fetchAIModels).toHaveBeenCalledOnce()
+  })
+
+  it('marks a timed out model test unconfirmed and never retries it', async () => {
+    const timeoutError = Object.assign(new Error('timeout'), { code: 'ECONNABORTED' })
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([routedModelConfig()])
+    mocks.testAIModel.mockRejectedValueOnce(timeoutError)
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: '测试文本能力' }))
+
+    expect(await screen.findByText(/无法确认是否到达服务商/)).toBeInTheDocument()
+    expect(mocks.testAIModel).toHaveBeenCalledTimes(1)
+    expect(mocks.saveAITaskPreferences).not.toHaveBeenCalled()
+  })
+
+  it('keeps feedback attached to its model when another model returns a different result', async () => {
+    const firstModel = routedModelConfig('model-17', 'DeepSeek Flash A')
+    const secondModel = routedModelConfig('model-18', 'DeepSeek Flash B')
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([firstModel, secondModel])
+    mocks.testAIModel
+      .mockResolvedValueOnce({
+        attempt_id: 'attempt-a', probe_kind: 'text', status: 'succeeded',
+        verification_status: 'verified', capability: 'supported', stale: false,
+        safe_error_code: '', latency_ms: 120, input_tokens: 8, output_tokens: 2,
+        billing_notice: 'provider_may_bill',
+      })
+      .mockResolvedValueOnce({
+        attempt_id: 'attempt-b', probe_kind: 'text', status: 'failed',
+        verification_status: 'failed', capability: 'unknown', stale: false,
+        safe_error_code: 'gateway_rejected', latency_ms: 110, input_tokens: null, output_tokens: null,
+        billing_notice: 'provider_may_bill',
+      })
+    renderPage()
+
+    let buttons = await screen.findAllByRole('button', { name: '测试文本能力' })
+    fireEvent.click(buttons[0])
+    await within(screen.getByText('DeepSeek Flash A').closest('li') as HTMLElement).findByText('文本能力测试成功。')
+
+    buttons = screen.getAllByRole('button', { name: '测试文本能力' })
+    fireEvent.click(buttons[1])
+    await within(screen.getByText('DeepSeek Flash B').closest('li') as HTMLElement).findByText(/网关拒绝了本次测试/)
+
+    expect(within(screen.getByText('DeepSeek Flash A').closest('li') as HTMLElement).getByText('文本能力测试成功。')).toBeInTheDocument()
+    expect(within(screen.getByText('DeepSeek Flash B').closest('li') as HTMLElement).queryByText('文本能力测试成功。')).not.toBeInTheDocument()
   })
 
   it('does not offer a gateway test for an unknown manual model ID', async () => {

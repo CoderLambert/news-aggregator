@@ -89,6 +89,22 @@ describe('useChat', () => {
     expect(result.current.messages[1]).toMatchObject({ role: 'assistant', content: 'answer', model_source: source })
   })
 
+  it('pins each chat turn to the explicitly selected private translation result', async () => {
+    api.chatStream.mockReturnValue((async function* () { yield 'answer' })())
+    const { result } = renderHook(
+      () => useChat('42', true, null, '11111111-1111-4111-8111-111111111111'),
+      { wrapper: makeWrapper() },
+    )
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    act(() => result.current.setInput('question'))
+
+    await act(async () => { await result.current.handleSend() })
+
+    expect(api.chatStream).toHaveBeenCalledWith(42, 'question', expect.objectContaining({
+      translationResultId: '11111111-1111-4111-8111-111111111111',
+    }))
+  })
+
   it('treats a known incomplete gateway stream as an error and never caches it as success', async () => {
     const failure = `\u200b__ERROR__${JSON.stringify({
       code: 'incomplete_response',

@@ -25,6 +25,7 @@ function phaseToMood(phase: ChatPhase): string {
 
 interface NewsChatAssistantProps {
   newsId: string | number
+  translationResultId?: string | null
   open?: boolean
   onOpenChange?: (open: boolean) => void
   articleContext?: {
@@ -34,7 +35,7 @@ interface NewsChatAssistantProps {
   }
 }
 
-export default function NewsChatAssistant({ newsId, open, onOpenChange, articleContext }: NewsChatAssistantProps) {
+export default function NewsChatAssistant({ newsId, translationResultId = null, open, onOpenChange, articleContext }: NewsChatAssistantProps) {
   const { user, loading: authLoading } = useAuth()
   const [internalOpen, setInternalOpen] = useState(false)
   const isOpen = open ?? internalOpen
@@ -69,7 +70,7 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
     confirmingClear, isClearing, clearError, requestClearChat, cancelClear, confirmClear,
     uncertainTurn, checkPendingTurn, resendUncertainTurn,
     webSearch, toggleWebSearch,
-  } = useChat(newsId, isOpen, selectedModelConfigId)
+  } = useChat(newsId, isOpen, selectedModelConfigId, translationResultId)
 
   const {
     questions: suggestedQuestions,

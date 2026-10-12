@@ -54,21 +54,23 @@ def _snapshot_digest(*, model: UserAIModelConfig, connection: UserAIConnection, 
 
 
 def _current_snapshot(model_id, connection_id, *, user_id, credential_epoch, config_revision, endpoint_profile_version):
-    model = UserAIModelConfig.objects.select_for_update().filter(
-        pk=model_id, connection__user_id=user_id,
-    ).first()
     connection = UserAIConnection.objects.select_for_update().filter(
-        pk=connection_id, user_id=user_id,
+        pk=connection_id, user_id=user_id, is_deleted=False,
     ).first()
-    if model is None or connection is None:
+    if connection is None:
+        return None
+    model = UserAIModelConfig.objects.select_for_update().filter(
+        pk=model_id, connection_id=connection.pk,
+    ).first()
+    if model is None:
         return None
     if (
-        model.connection_id != connection.pk
-        or model.config_revision != config_revision
+        model.config_revision != config_revision
         or connection.credential_epoch != credential_epoch
         or connection.endpoint_profile_version != endpoint_profile_version
     ):
         return None
+    model.connection = connection
     return model
 
 
@@ -86,20 +88,27 @@ class AIModelTestView(NoStoreAPIView):
         probe_kind = serializer.validated_data['probe_kind']
 
         with transaction.atomic():
-            model = UserAIModelConfig.objects.select_for_update().filter(
+            connection_id = UserAIModelConfig.objects.filter(
                 pk=model_id,
                 connection__user=request.user,
                 connection__is_deleted=False,
-            ).first()
-            if model is None:
+            ).values_list('connection_id', flat=True).first()
+            if connection_id is None:
                 return Response({'error_code': 'not_found'}, status=status.HTTP_404_NOT_FOUND)
             connection = UserAIConnection.objects.select_for_update().filter(
-                pk=model.connection_id,
+                pk=connection_id,
                 user=request.user,
                 is_deleted=False,
             ).first()
             if connection is None:
                 return Response({'error_code': 'connection_unavailable'}, status=status.HTTP_409_CONFLICT)
+            model = UserAIModelConfig.objects.select_for_update().filter(
+                pk=model_id,
+                connection_id=connection.pk,
+            ).first()
+            if model is None:
+                return Response({'error_code': 'not_found'}, status=status.HTTP_404_NOT_FOUND)
+            model.connection = connection
 
             preset = get_model_preset(model.catalog_model_id, connection.provider_id)
             if (
@@ -161,6 +170,14 @@ class AIModelTestView(NoStoreAPIView):
         latency_ms = min(max(int((time.monotonic() - started) * 1000), 0), 2_147_483_647)
 
         with transaction.atomic():
+            current_model = _current_snapshot(
+                snapshot['model_id'],
+                snapshot['connection_id'],
+                user_id=request.user.pk,
+                credential_epoch=snapshot['credential_epoch'],
+                config_revision=snapshot['config_revision'],
+                endpoint_profile_version=snapshot['endpoint_profile_version'],
+            )
             saved_attempt = AICallAttempt.objects.select_for_update().get(pk=attempt.pk)
             saved_attempt.status = outcome.status
             saved_attempt.provider_request_id = outcome.provider_request_id
@@ -174,14 +191,6 @@ class AIModelTestView(NoStoreAPIView):
                 'latency_ms', 'safe_error_code', 'finished_at',
             ])
 
-            current_model = _current_snapshot(
-                snapshot['model_id'],
-                snapshot['connection_id'],
-                user_id=request.user.pk,
-                credential_epoch=snapshot['credential_epoch'],
-                config_revision=snapshot['config_revision'],
-                endpoint_profile_version=snapshot['endpoint_profile_version'],
-            )
             stale = current_model is None
             if not stale:
                 capabilities = {**UNKNOWN_CAPABILITIES, **current_model.capability_snapshot}

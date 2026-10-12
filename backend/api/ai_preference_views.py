@@ -6,14 +6,14 @@ from types import SimpleNamespace
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db import transaction
+from django.db import connection as django_connection, transaction
 from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.authentication import AnonymousCsrfSessionAuthentication
-from api.models import USER_AI_TASK_PREFERENCE_CHOICES, UserAIModelConfig, UserAITaskPreference
+from api.models import USER_AI_TASK_PREFERENCE_CHOICES, UserAIConnection, UserAIModelConfig, UserAITaskPreference
 from api.public_policy import policy_error
 
 
@@ -143,23 +143,46 @@ class UserAITaskPreferencesView(APIView):
         entries = serializer.validated_data['preferences']
         model_ids = {entry['model_config_id'] for entry in entries if entry['model_config_id'] is not None}
         with transaction.atomic():
-            get_user_model().objects.select_for_update().only('pk').get(pk=request.user.pk)
-            configs = list(
-                UserAIModelConfig.objects.select_for_update().select_related('connection').filter(
-                    pk__in=model_ids,
-                    connection__user=request.user,
-                )
-            )
+            get_user_model().objects.select_for_update(
+                no_key=django_connection.vendor == 'postgresql',
+            ).only('pk').get(pk=request.user.pk)
+            for task_kind in TASK_KINDS:
+                UserAITaskPreference.objects.get_or_create(user=request.user, task_kind=task_kind)
+            preferences = list(UserAITaskPreference.objects.select_for_update().filter(
+                user=request.user,
+            ).order_by('task_kind'))
+            preferences_by_kind = {preference.task_kind: preference for preference in preferences}
+
+            model_connections = dict(UserAIModelConfig.objects.filter(
+                pk__in=model_ids,
+                connection__user=request.user,
+            ).values_list('pk', 'connection_id'))
+            if len(model_connections) != len(model_ids):
+                return _no_store(Response({'error_code': 'model_not_found'}, status=status.HTTP_404_NOT_FOUND))
+
+            connection_ids = set(model_connections.values())
+            connections = list(UserAIConnection.objects.select_for_update().filter(
+                pk__in=connection_ids,
+                user=request.user,
+            ).order_by('pk'))
+            connections_by_id = {connection.pk: connection for connection in connections}
+            if len(connections_by_id) != len(connection_ids):
+                return _no_store(Response({'error_code': 'model_not_found'}, status=status.HTTP_404_NOT_FOUND))
+
+            configs = list(UserAIModelConfig.objects.select_for_update().filter(
+                pk__in=model_ids,
+                connection_id__in=connection_ids,
+            ).order_by('pk'))
             configs_by_id = {config.pk: config for config in configs}
             if len(configs_by_id) != len(model_ids):
                 return _no_store(Response({'error_code': 'model_not_found'}, status=status.HTTP_404_NOT_FOUND))
+            for config in configs:
+                config.connection = connections_by_id[config.connection_id]
             if any(not _selected_config_is_active(config) for config in configs):
                 return _no_store(Response({'error_code': 'model_connection_unavailable'}, status=status.HTTP_409_CONFLICT))
+
             for entry in entries:
-                preference, _created = UserAITaskPreference.objects.select_for_update().get_or_create(
-                    user=request.user,
-                    task_kind=entry['task_kind'],
-                )
+                preference = preferences_by_kind[entry['task_kind']]
                 preference.model_config = configs_by_id.get(entry['model_config_id'])
                 preference.requires_reselection = False
                 preference.save(update_fields=['model_config', 'requires_reselection', 'updated_at'])

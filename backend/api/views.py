@@ -19,7 +19,6 @@ from django_filters import rest_framework as django_filters
 from .models import Category, Source, News, ChatSession, BlockedNews, ProviderComparison
 from .services.chat_history import (
     ChatConflict,
-    append_completed_chat_turn,
     append_assistant_message,
     append_user_message,
     assert_chat_turn_current,
@@ -60,7 +59,7 @@ SUGGESTED_QUESTIONS_FALLBACK = [
 ]
 
 
-def pick_chat_context(news):
+def pick_chat_context(news, user=None, result_id=None):
     """Pick the best available article body for AI consumption.
 
     Preference order (richest + Chinese first):
@@ -71,13 +70,13 @@ def pick_chat_context(news):
 
     Returns a non-empty string (empty only if every field is empty).
     """
-    from api.services.shared_translations import get_shared_translation
-    shared = get_shared_translation(news)
+    from api.services.article_translations import resolve_article_translation
+
+    translation = resolve_article_translation(news, user=user, result_id=result_id)
     return (
-        (shared.content if shared else '')
+        (translation.content if translation else '')
         or
-        news.full_content_zh
-        or news.full_content
+        news.full_content
         or news.content_zh
         or news.content
         or ''
@@ -912,6 +911,35 @@ class NewsChatView(generics.GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        translation_result_id = payload.get('translation_result_id') if hasattr(payload, 'get') else None
+        if translation_result_id is not None:
+            import uuid
+
+            if not isinstance(translation_result_id, str) or len(translation_result_id) > 64:
+                return Response(
+                    {'error_code': 'invalid_translation_result', 'error': '所选译文结果无效'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            try:
+                translation_result_id = str(uuid.UUID(translation_result_id))
+            except (ValueError, AttributeError):
+                if not translation_result_id.isdecimal() or len(translation_result_id) > 20 or int(translation_result_id) < 1:
+                    return Response(
+                        {'error_code': 'invalid_translation_result', 'error': '所选译文结果无效'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            from api.services.article_translations import get_byok_result, TranslationResultNotFound
+
+            try:
+                get_byok_result(request.user, news, translation_result_id)
+            except TranslationResultNotFound:
+                response = Response(
+                    {'error_code': 'translation_result_not_found', 'error': '译文结果不存在。'},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+                response['Cache-Control'] = 'no-store'
+                return response
+
         model_config_id = payload.get('model_config_id') if hasattr(payload, 'get') else None
         article_chat_execution = None
         if model_config_id is not None:
@@ -956,7 +984,17 @@ class NewsChatView(generics.GenericAPIView):
         ensure_full_content(news)
 
         # Pick the richest available context (full_content_zh > full_content > content_zh > content)
-        context = pick_chat_context(news)
+        from api.services.article_translations import TranslationResultNotFound
+
+        try:
+            context = pick_chat_context(news, user=request.user, result_id=translation_result_id)
+        except TranslationResultNotFound:
+            response = Response(
+                {'error_code': 'translation_result_not_found', 'error': '译文结果不存在。'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+            response['Cache-Control'] = 'no-store'
+            return response
         if len(context) > 10000:
             context = context[-10000:]
 
@@ -1081,6 +1119,7 @@ class NewsChatView(generics.GenericAPIView):
                     ARTICLE_CHAT_ERRORS,
                     ArticleChatError,
                     assert_article_chat_execution_current,
+                    commit_completed_article_chat_turn,
                     stream_article_chat,
                 )
 
@@ -1121,15 +1160,14 @@ class NewsChatView(generics.GenericAPIView):
                     ):
                         answer_chunks.append(chunk)
                         yield chunk
-                    execution_guard()
-                    append_completed_chat_turn(
+                    commit_completed_article_chat_turn(
+                        article_chat_execution,
                         user_id=user_id,
                         news_id=news.pk,
                         session_id=chat_snapshot.session_id,
                         generation=chat_snapshot.generation,
                         question=user_question,
                         answer=''.join(answer_chunks),
-                        model_source=article_chat_execution.model_source,
                     )
                 except ArticleChatError as error:
                     yield emit_error(error.code)
@@ -1243,7 +1281,7 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
         ensure_full_content(news)
 
         # Build context (same chain as chat view)
-        context = pick_chat_context(news)
+        context = pick_chat_context(news, user=request.user)
         if len(context) > 6000:
             context = context[:6000]
         title = news.title_zh or news.title
@@ -1704,16 +1742,22 @@ class NewsTTSView(generics.GenericAPIView):
             language = 'original' if request.query_params.get('displayMode') == 'original' else 'zh'
         voice_pref = request.query_params.get('voice', '')
         scope = request.query_params.get('scope', 'full')
+        result_id = request.query_params.get('result_id')
 
         try:
-            resolved = resolve_tts_content(news, request.user, language, scope)
+            resolved = resolve_tts_content(news, request.user, language, scope, result_id=result_id)
         except TTSContentUnavailable as exc:
             response_status = (
                 status.HTTP_409_CONFLICT
                 if exc.code in {'translation_required', 'source_content_required'}
+                else status.HTTP_404_NOT_FOUND
+                if exc.code == 'translation_result_not_found'
                 else status.HTTP_400_BAD_REQUEST
             )
-            return Response({'code': exc.code, 'message': exc.message}, status=response_status)
+            response = Response({'code': exc.code, 'message': exc.message}, status=response_status)
+            if result_id is not None:
+                response['Cache-Control'] = 'no-store'
+            return response
 
         voice = pick_tts_voice(
             source_language=news.source.language,

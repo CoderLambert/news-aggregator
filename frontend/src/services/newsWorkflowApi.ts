@@ -12,6 +12,7 @@ import {
   fetchSuggestedQuestions as fetchSuggestedQuestionsRequest,
   getChatGPTTranslationTask as getTranslationTaskRequest,
   getPrivateTranslationTask as getPrivateTranslationTaskRequest,
+  getPrivateTranslationResult as getPrivateTranslationResultRequest,
   translatePrivateFullArticleStream as streamPrivateTranslation,
   translateFullArticleStream as streamTranslation,
 } from '@/services/api'
@@ -81,6 +82,14 @@ export interface TranslationJobSnapshot {
   result: Record<string, unknown>
   errorCode: string
   errorMessage: string
+}
+
+export interface PrivateTranslationResult {
+  resultId: string
+  text: string
+  sourceHash: string
+  currentMatch: boolean
+  modelSource: { provider: string | null; model: string | null } | null
 }
 
 function parseTranslationJob(value: unknown): TranslationJobSnapshot {
@@ -294,6 +303,30 @@ export async function getPrivateTranslationJob(jobId: string, signal: AbortSigna
   return parseTranslationJob(await getPrivateTranslationTaskRequest(jobId, signal))
 }
 
+export async function getPrivateTranslationResult(
+  resultId: string,
+  signal?: AbortSignal,
+): Promise<PrivateTranslationResult> {
+  const value = await getPrivateTranslationResultRequest(resultId, signal)
+  if (!isRecord(value) || typeof value.result_id !== 'string' ||
+    typeof value.full_content_zh !== 'string' || typeof value.current_match !== 'boolean') {
+    throw new TypeError('Invalid private translation result response')
+  }
+  const modelSource = isRecord(value.model_source)
+    ? {
+        provider: typeof value.model_source.provider === 'string' ? value.model_source.provider : null,
+        model: typeof value.model_source.model === 'string' ? value.model_source.model : null,
+      }
+    : null
+  return {
+    resultId: value.result_id,
+    text: value.full_content_zh,
+    sourceHash: typeof value.source_hash === 'string' ? value.source_hash : '',
+    currentMatch: value.current_match,
+    modelSource,
+  }
+}
+
 export async function cancelPrivateTranslationJob(jobId: string, generation: number): Promise<TranslationJobSnapshot> {
   return parseTranslationJob(await cancelPrivateTranslationTaskRequest(jobId, generation))
 }
@@ -301,7 +334,7 @@ export async function cancelPrivateTranslationJob(jobId: string, generation: num
 export async function* chatStream(
   id: NewsId,
   question: string,
-  options: { webSearch: boolean; modelConfigId?: string | null; signal: AbortSignal },
+  options: { webSearch: boolean; modelConfigId?: string | null; translationResultId?: string | null; signal: AbortSignal },
 ): AsyncGenerator<string> {
   for await (const rawChunk of streamChat(id, question, options)) {
     if (typeof rawChunk === 'string') yield rawChunk

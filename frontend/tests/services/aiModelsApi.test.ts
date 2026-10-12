@@ -6,13 +6,17 @@ const mocks = vi.hoisted(() => ({
   patch: vi.fn(),
   delete: vi.fn(),
   interceptorUse: vi.fn(),
+  postTimeouts: [] as number[],
 }))
 
 vi.mock('axios', () => ({
   default: {
-    create: () => ({
+    create: (config: { timeout: number }) => ({
       get: mocks.get,
-      post: mocks.post,
+      post: (...args: unknown[]) => {
+        mocks.postTimeouts.push(config.timeout)
+        return mocks.post(...args)
+      },
       patch: mocks.patch,
       delete: mocks.delete,
       put: vi.fn(),
@@ -36,7 +40,10 @@ beforeAll(async () => {
   api = await import('@/services/api')
 })
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.clearAllMocks()
+  mocks.postTimeouts.length = 0
+})
 
 describe('BYOK model API boundary', () => {
   it('parses the versioned catalog and rejects internal route metadata', async () => {
@@ -85,7 +92,8 @@ describe('BYOK model API boundary', () => {
       attempt_id: 'attempt-1', status: 'succeeded', capability: 'supported',
       billing_notice: 'provider_may_bill',
     })
-    expect(mocks.post).toHaveBeenCalledWith('/ai/models/model-1/test/', { probe_kind: 'text' })
+    expect(mocks.post).toHaveBeenCalledWith('/ai/models/model-1/test/', { probe_kind: 'text' }, { timeout: 30_000 })
+    expect(mocks.postTimeouts).toEqual([30_000])
     expect(JSON.stringify(mocks.post.mock.calls)).not.toContain('api_key')
 
     mocks.post.mockResolvedValueOnce({ data: {
@@ -95,5 +103,14 @@ describe('BYOK model API boundary', () => {
       billing_notice: 'provider_may_bill', raw_response: { api_key: 'synthetic-secret' },
     } })
     await expect(api.testAIModel('model-1', 'text')).rejects.toThrow(TypeError)
+  })
+
+  it('refreshes model state through GET only', async () => {
+    mocks.get.mockResolvedValueOnce({ data: { models: [model] } })
+
+    await expect(api.fetchAIModels()).resolves.toMatchObject([{ id: 'model-1' }])
+    expect(mocks.get).toHaveBeenCalledWith('/ai/models/', { signal: undefined })
+    expect(mocks.post).not.toHaveBeenCalled()
+    expect(mocks.patch).not.toHaveBeenCalled()
   })
 })

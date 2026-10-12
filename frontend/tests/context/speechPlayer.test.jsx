@@ -67,6 +67,7 @@ function PlayerActions() {
     <div>
       <button type="button" onClick={() => player.speak(11, '第一篇虚构新闻', { language: 'zh' })}>朗读第一篇</button>
       <button type="button" onClick={() => player.speak(12, '第二篇虚构新闻', { language: 'original' })}>朗读第二篇</button>
+      <button type="button" onClick={() => player.speak(13, '个人译文新闻', { language: 'zh', resultId: 'private-result-123' })}>朗读指定个人译文</button>
       <button type="button" onClick={player.stop}>停止播放器</button>
       <output data-testid="player-status">{state.status}</output>
     </div>
@@ -147,6 +148,15 @@ describe('global speech player', () => {
     await user.click(screen.getByRole('button', { name: '摘要' }))
     expect(audioInstances.at(-1).src).toContain('scope=summary')
     expect(audioInstances.at(-1).src).toContain('/api/news/11/tts/')
+  })
+
+  it('keeps a selected private result id on the audio request', async () => {
+    const user = userEvent.setup()
+    renderPlayer()
+    await user.click(screen.getByRole('button', { name: '朗读指定个人译文' }))
+
+    expect(audioInstances[0].src).toContain('result_id=private-result-123')
+    expect(audioInstances[0].src).toContain('/api/news/13/tts/')
   })
 
   it('ignores a MediaSession play rejection after the active article changes', async () => {

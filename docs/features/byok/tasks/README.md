@@ -15,7 +15,7 @@
 | [T05 个人全文翻译最小闭环](T05-private-translation.md) | 一篇安全长度新闻持久生成、私有结果、重开恢复。 | T04 | M | PLANNED |
 | [T06 长文分块完整翻译](T06-long-translation.md) | 长文分块且完整合并。 | T05 | M | PLANNED |
 | [T07 翻译取消与显式重新生成](T07-translation-lifecycle.md) | 验证观看断开、服务端取消和重新生成语义；测试已通过，Draft PR #41 堆叠在 T06。 | T05、T06 | S-M | DRAFT PR #41 |
-| [T08 译文详情、问答与朗读同源](T08-translation-readers.md) | 私有译文被详情、聊天、朗读一致读取，换 Key 不删除历史。 | T05、T07 | M | PLANNED |
+| [T08 译文详情、问答与朗读同源](T08-translation-readers.md) | 私有译文被详情、聊天、朗读一致读取，换 Key 不删除历史。 | T05、T07 | M | DRAFT PR #42（堆叠于 T07 #41） |
 | [T09 首次个人模型深度研究](T09-research-first-run.md) | 许可工具研究、工具续接与完整持久结果；本地运行使用临时 Proxy+受控上游。 | T03、T00 本地技术门槛 | M | PLANNED |
 | [T10 研究续问与安全恢复](T10-research-followup.md) | 断开后的只读恢复、取消与服务端 continuation。 | T09 | M | PLANNED |
 | [T11 文章问题推荐与缓存](T11-suggestions.md) | 显式生成三条私有问题；首次进入不收费。 | T04 | S-M | PLANNED |

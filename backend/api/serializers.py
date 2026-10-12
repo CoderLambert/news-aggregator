@@ -71,6 +71,12 @@ class NewsDetailSerializer(serializers.ModelSerializer):
     full_content_zh_fetched_at = serializers.SerializerMethodField()
     full_content_zh_source = serializers.SerializerMethodField()
     full_content_zh_scope = serializers.SerializerMethodField()
+    full_content_zh_result_id = serializers.SerializerMethodField()
+    full_content_zh_source_hash = serializers.SerializerMethodField()
+    full_content_zh_current_match = serializers.SerializerMethodField()
+    full_content_zh_model_source = serializers.SerializerMethodField()
+    full_content_zh_stale_result_id = serializers.SerializerMethodField()
+    full_content_zh_stale_model_source = serializers.SerializerMethodField()
     full_translation_personal_available = serializers.SerializerMethodField()
     full_content_fetch_status = serializers.CharField(read_only=True)
     full_content_fetch_error = serializers.CharField(read_only=True)
@@ -92,7 +98,10 @@ class NewsDetailSerializer(serializers.ModelSerializer):
             'translation_status', 'translation_error', 'translation_retry_count',
             'full_content', 'full_content_fetched_at',
             'full_content_zh', 'full_content_zh_fetched_at', 'full_content_zh_source',
-            'full_content_zh_scope', 'full_translation_personal_available',
+            'full_content_zh_scope', 'full_content_zh_result_id',
+            'full_content_zh_source_hash', 'full_content_zh_current_match',
+            'full_content_zh_model_source', 'full_content_zh_stale_result_id',
+            'full_content_zh_stale_model_source', 'full_translation_personal_available',
             'full_content_fetch_status', 'full_content_fetch_error',
             'full_content_fetch_provider', 'full_content_quality_score',
             'full_content_retry_count', 'last_full_content_attempt',
@@ -127,38 +136,66 @@ class NewsDetailSerializer(serializers.ModelSerializer):
         return result
 
     def get_full_content_zh(self, obj):
-        connection, translation = self._subscription_translation(obj)
-        shared = self._shared_translation(obj)
-        if translation is not None:
-            return translation.content
-        if shared is not None:
-            return shared.content
-        return '' if connection is not None else obj.full_content_zh
+        result = self._article_translation(obj)
+        return result.content if result is not None else ''
 
     def get_full_content_zh_fetched_at(self, obj):
-        connection, translation = self._subscription_translation(obj)
-        shared = self._shared_translation(obj)
-        if translation is not None:
-            return translation.completed_at
-        if shared is not None:
-            return shared.completed_at
-        return None if connection is not None else obj.full_content_zh_fetched_at
+        result = self._article_translation(obj)
+        return result.fetched_at if result is not None else None
 
-    def _shared_translation(self, obj):
-        from .services.shared_translations import get_shared_translation
-        if not hasattr(self, '_shared_translation_cache'):
-            self._shared_translation_cache = {}
-        if obj.pk not in self._shared_translation_cache:
-            self._shared_translation_cache[obj.pk] = get_shared_translation(obj)
-        return self._shared_translation_cache[obj.pk]
+    def _article_translation(self, obj):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if not hasattr(self, '_article_translation_cache'):
+            self._article_translation_cache = {}
+        if obj.pk not in self._article_translation_cache:
+            from .services.article_translations import resolve_article_translation
+            self._article_translation_cache[obj.pk] = resolve_article_translation(obj, user)
+        return self._article_translation_cache[obj.pk]
 
     def get_full_content_zh_scope(self, obj):
-        connection, translation = self._subscription_translation(obj)
-        if translation is not None:
-            return 'private'
-        if self._shared_translation(obj) is not None:
-            return 'shared'
-        return 'legacy' if connection is None and obj.full_content_zh else None
+        result = self._article_translation(obj)
+        if result is None:
+            return None
+        return 'private' if result.source in {'byok', 'subscription'} else result.source
+
+    def get_full_content_zh_result_id(self, obj):
+        result = self._article_translation(obj)
+        return result.result_id if result is not None and result.source == 'byok' else None
+
+    def get_full_content_zh_source_hash(self, obj):
+        result = self._article_translation(obj)
+        return result.source_hash if result is not None else None
+
+    def get_full_content_zh_current_match(self, obj):
+        result = self._article_translation(obj)
+        return result.current_match if result is not None else None
+
+    def get_full_content_zh_model_source(self, obj):
+        result = self._article_translation(obj)
+        if result is None or not (result.provider or result.model):
+            return None
+        return {'provider': result.provider, 'model': result.model}
+
+    def _stale_byok_result(self, obj):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if not hasattr(self, '_stale_byok_cache'):
+            self._stale_byok_cache = {}
+        if obj.pk not in self._stale_byok_cache:
+            from .services.article_translations import get_stale_byok_result
+            self._stale_byok_cache[obj.pk] = get_stale_byok_result(user, obj)
+        return self._stale_byok_cache[obj.pk]
+
+    def get_full_content_zh_stale_result_id(self, obj):
+        result = self._stale_byok_result(obj)
+        return result.result_id if result is not None else None
+
+    def get_full_content_zh_stale_model_source(self, obj):
+        result = self._stale_byok_result(obj)
+        if result is None or not (result.provider or result.model):
+            return None
+        return {'provider': result.provider, 'model': result.model}
 
     def get_full_translation_personal_available(self, obj):
         connection, _ = self._subscription_translation(obj)
@@ -189,13 +226,12 @@ class NewsDetailSerializer(serializers.ModelSerializer):
 
     def get_full_content_zh_source(self, obj):
         """Expose provider provenance, without the contributing user's identity."""
-        connection, translation = self._subscription_translation(obj)
-        if translation is not None:
-            return 'chatgpt'
-        shared = self._shared_translation(obj)
-        if shared is not None:
-            return shared.provider
-        return 'llm' if connection is None and obj.full_content_zh else None
+        result = self._article_translation(obj)
+        if result is None:
+            return None
+        if result.source == 'byok':
+            return 'byok'
+        return result.provider or ('chatgpt' if result.source == 'subscription' else 'llm')
 
 
 class FavoriteNewsSerializer(serializers.Serializer):

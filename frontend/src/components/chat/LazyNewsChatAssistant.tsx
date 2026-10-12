@@ -5,6 +5,7 @@ import { loadNewsChatAssistant, reloadNewsChatPage } from './newsChatAssistantLo
 
 interface LazyNewsChatAssistantProps {
   newsId: string
+  translationResultId?: string | null
   open: boolean
   onOpenChange: (open: boolean) => void
   articleContext?: {
@@ -14,7 +15,7 @@ interface LazyNewsChatAssistantProps {
   }
 }
 
-export default function LazyNewsChatAssistant({ newsId, open, onOpenChange, articleContext }: LazyNewsChatAssistantProps) {
+export default function LazyNewsChatAssistant({ newsId, translationResultId = null, open, onOpenChange, articleContext }: LazyNewsChatAssistantProps) {
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [NewsChatAssistant, setNewsChatAssistant] = useState(() => lazy(loadNewsChatAssistant))
 
@@ -41,7 +42,7 @@ export default function LazyNewsChatAssistant({ newsId, open, onOpenChange, arti
       )}
     >
       <Suspense fallback={<LazyModalState label="AI 助手小闻" message="正在打开小闻…" onClose={() => onOpenChange(false)} variant="chat" />}>
-        <NewsChatAssistant newsId={newsId} open onOpenChange={onOpenChange} articleContext={articleContext} />
+        <NewsChatAssistant newsId={newsId} translationResultId={translationResultId} open onOpenChange={onOpenChange} articleContext={articleContext} />
       </Suspense>
     </ErrorBoundary>
   )

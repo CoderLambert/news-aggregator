@@ -418,6 +418,65 @@ describe('useFullArticle', () => {
     })
   })
 
+  it('clears every current and stale translation pointer and refetches detail after the source changes', async () => {
+    let currentNews = {
+      id: 7, source_language: 'en', full_content: 'old body', full_content_zh: 'old translation',
+      full_content_zh_fetched_at: 'old date', full_content_zh_source: 'private', full_content_zh_scope: 'private',
+      full_content_zh_result_id: 'old-result', full_content_zh_source_hash: 'old-hash', full_content_zh_current_match: true,
+      full_content_zh_model_source: { provider: 'DeepSeek', model: 'old-model' },
+      full_content_zh_stale_result_id: 'stale-result', full_content_zh_stale_model_source: { provider: 'DeepSeek', model: 'stale-model' },
+      full_content_fetch_status: 'success',
+    }
+    fetchFullArticle.mockResolvedValue({ full_content: 'updated body', full_content_fetch_status: 'success' })
+    const setNews = vi.fn((updater) => {
+      currentNews = typeof updater === 'function' ? updater(currentNews) : updater
+      return currentNews
+    })
+    const onSourceChanged = vi.fn()
+    const { result } = renderHook(() => useFullArticle(7, setNews, currentNews, onSourceChanged), { wrapper: makeWrapper() })
+
+    await act(async () => { await result.current.handleFetchFullArticle(true) })
+
+    expect(currentNews).toMatchObject({
+      full_content: 'updated body', full_content_zh: '', full_content_zh_fetched_at: null,
+      full_content_zh_source: null, full_content_zh_scope: null, full_content_zh_result_id: null,
+      full_content_zh_source_hash: null, full_content_zh_current_match: null, full_content_zh_model_source: null,
+      full_content_zh_stale_result_id: null, full_content_zh_stale_model_source: null,
+    })
+    expect(onSourceChanged).toHaveBeenCalledOnce()
+  })
+
+  it('aborts a pending full fetch and ignores its late response when the source body changes', async () => {
+    let currentNews = { id: 7, source_language: 'en', full_content: 'old body', full_content_zh: 'old translation' }
+    let resolveFetch
+    let requestSignal
+    fetchFullArticle.mockImplementation((_id, _force, signal) => new Promise((resolve) => {
+      resolveFetch = resolve
+      requestSignal = signal
+    }))
+    const setNews = vi.fn((updater) => {
+      currentNews = typeof updater === 'function' ? updater(currentNews) : updater
+      return currentNews
+    })
+    const { result, rerender } = renderHook(({ record }) => useFullArticle(7, setNews, record), {
+      initialProps: { record: currentNews }, wrapper: makeWrapper(),
+    })
+    let pendingRequest
+    act(() => { pendingRequest = result.current.handleFetchFullArticle(true) })
+    await waitFor(() => expect(resolveFetch).toBeDefined())
+
+    currentNews = { ...currentNews, full_content: 'new body', full_content_zh: 'new translation', full_content_zh_result_id: 'new-result' }
+    rerender({ record: currentNews })
+    await waitFor(() => expect(requestSignal.aborted).toBe(true))
+    await act(async () => {
+      resolveFetch({ full_content: 'late old body', full_content_fetch_status: 'success' })
+      await pendingRequest
+    })
+
+    expect(currentNews).toMatchObject({ full_content: 'new body', full_content_zh: 'new translation', full_content_zh_result_id: 'new-result' })
+    expect(setNews).not.toHaveBeenCalled()
+  })
+
   it('keeps the cached translation when a stopped forced fetch resumes to a failure', async () => {
     let currentNews = {
       id: 7, source_language: 'en', content: 'summary', full_content: 'old body',

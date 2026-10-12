@@ -985,7 +985,10 @@ def _save_byok_translation_result(task, text):
             'provider': profile['provider_name'] if profile else connection.provider_id,
             'model': config.display_name,
         },
-        'result_id': str(record.pk),
+        # The task UUID identifies this immutable successful run. The
+        # ChatGPTArticleTranslation row is an upserted current-value cache and
+        # therefore cannot provide a stable ID for historical results.
+        'result_id': str(task.pk),
         'source_hash': task.source_hash,
     }
 
