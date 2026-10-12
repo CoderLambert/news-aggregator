@@ -42,9 +42,9 @@ env -i \
 
 结果：`548 passed, 2 skipped, 2 warnings in 58.41s`。两个跳过项需要专用本地 runner；两条 warning 是现有 Category/Source 列表分页未显式排序提示。
 
-T09 定向测试 `backend/api/tests/test_research_byok.py`：`10 passed in 3.34s`。新增策略/研究回归在提交前也单独运行通过；最终全套回归包含本卡所有新测试。
+T09 原有定向测试 `backend/api/tests/test_research_byok.py` 曾为 `10 passed in 3.34s`。审核修复后重新运行 `test_research_byok.py` 与 `test_research_byok_proxy_local.py`：`15 passed, 1 skipped, 1 warning in 4.62s`，包含新增撤销阶段和工具批次断言。
 
-T03 父提交上的旧 T09 相关测试曾以 `151 passed in 30.94s` 作为实现前基线。另一次扩大到翻译恢复相关用例的基线尝试为 `166 passed, 1 failed`：未改动的 `test_sse_disconnect_does_not_cancel_background_worker` 因 SQLite `OperationalError` 首个 SSE 事件返回失败；隔离重跑仍失败。本卡实现没有修改该翻译 worker；本次完整后端套件中的对应回归通过。该单测的独立 SQLite 并发不稳定仍记录为环境/既有问题，不作为 T09 成功证据。
+T03 父提交上的旧 T09 相关测试曾以 `151 passed in 30.94s` 作为实现前基线。另一次扩大到翻译恢复相关用例的基线尝试为 `166 passed, 1 failed`。后续 SQL trace 已确认失败由 `SQLITE_LOCKED_SHAREDCACHE` 引起，具体落在任务 claim 或最终提交 CAS；这不是普通业务回归。该问题作为独立 R0 修复，不混入 T09。R0 已在独立工作树上复现并修复；由于 R0 尚未进入当前 T09 分支，此处不把它计入 T09 的验证结果。
 
 ## PROXY_LOCAL 合成端到端
 
@@ -71,9 +71,18 @@ T03 父提交上的旧 T09 相关测试曾以 `151 passed in 30.94s` 作为实�
 | --- | --- | --- |
 | T09-01 | 合法工具调用、工具结果持久化、最终报告提交；合成 Proxy 真实 SDK 联调通过 | PASS（合成 upstream） |
 | T09-02 | 生产环境 BYOK 关闭或缺模型时拒绝建任务；只允许启用开关且存在合格个人模型的路径 | PASS（策略与 worker 自动化测试） |
-| T09-03 | tools 未验证时拒绝排队；非法工具名、畸形/不匹配参数在派发前拒绝 | PASS |
-| T09-04 | 凭据 epoch 变更会在打开 Proxy 前停止任务；工具结果写入失败不会标记 succeeded；取消/最终提交回归通过 | PASS |
-| T09-05 | 同快照幂等请求只排队一次；模型变更后的同一 key 冲突；owner 私有 GET 返回已保存报告，Run/Event 顺序正确 | PASS |
+| T09-03 | tools 未验证时拒绝排队；整批工具调用在执行前校验，混合非法参数和超过 8 个调用均零工具执行/零工具结果/零工具事件 | PASS |
+| T09-04 | 排队、Provider 请求中、工具结果保存后、最终提交事务开始前撤销凭据；旧 epoch 不提交成功报告或 complete 事件 | PASS；最终事务先条件更新锁定连接行，再锁定模型配置并核验快照 |
+| T09-05 | 工具结果写入失败、任务取消、Run CAS 失败 | PASS；不能误报 succeeded |
+| T09-06 | 同快照幂等请求只排队一次；模型变更后的同一 key 冲突；owner 私有 GET 返回已保存报告，Run/Event 顺序正确 | PASS |
+
+## 凭据撤销和工具批次审核修复
+
+最终结果写入现在在同一 `atomic()` 事务内，先按 owner、连接 ID、enabled/deleted 状态、credential epoch、Provider 和 endpoint profile 条件更新连接行（SQLite 获取写锁；支持行锁的数据库同时锁定该连接行），再 `select_for_update()` 锁住模型配置并重新核验模型/验证快照。若撤销先提交，epoch 条件失败，不能写入成功 session、Run 状态或 complete 事件；若最终事务先取得锁，则撤销只能排在该事务之后提交。
+
+BYOK 每次工具响应最多允许 8 个调用。所有调用的 type、唯一 ID、工具名、UTF-8 参数长度、标准 JSON（拒绝重复键/非标准常量）、对象形状和工具 schema 都先通过后，才保存 assistant 调用消息、发工具事件或执行任何工具。测试用“第一个调用合法、第二个调用参数非法”的批次确认第一项也不会先执行。
+
+四个确定性撤销测试分别在排队后、Provider 响应生成期间、工具结果持久化后，以及最终提交入口（刚通过外部 guard、尚未开始最终事务）撤销连接。前两阶段禁止继续处理并保留空历史；工具完成阶段禁止后续工具结果事件和报告提交；最终阶段确认事务内 epoch 检查拒绝报告提交。
 
 测试代码差异：旧 `test_public_policy.py` 仅为原有 AI 关闭场景显式设置 `AI_BYOK_ENABLED=False`，使其固定覆盖原先关闭语义；旧断言没有删除或放宽。其余新增断言位于 `test_research_byok.py`、`test_research_byok_proxy_local.py` 和新增的 capability 策略用例。
 

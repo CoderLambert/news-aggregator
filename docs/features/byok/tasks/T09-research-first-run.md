@@ -26,9 +26,10 @@
 | --- | --- | --- | --- |
 | T09-01 | 新建研究→调用一个合法工具→保存结果/Run/Event | 真正上游最终完成后事务提交 | [Test 契约](../tests/T09-research-first-run.md) |
 | T09-02 | 生产环境个人合法 Key 与无 Key/未获批订阅 | 前者按 BYOK 开关鉴权；后者仍受阻断 | [Test 契约](../tests/T09-research-first-run.md) |
-| T09-03 | 未验证 tools、工具名非法、参数无效 | 拒绝派发或拒绝执行，消息仅为不受信任数据 | [Test 契约](../tests/T09-research-first-run.md) |
-| T09-04 | 工具写入失败、任务取消、最终 CAS失败 | 不能误报 succeeded | [Test 契约](../tests/T09-research-first-run.md) |
-| T09-05 | 现有研究历史/SSE/Idempotency-Key | 不复制或破坏旧 run 机制 | [Test 契约](../tests/T09-research-first-run.md) |
+| T09-03 | 未验证 tools、工具名非法、参数无效、混合合法/非法批次、批次超限 | 整批预校验；无效批次在任何工具执行、工具事件或结果写入前整体拒绝；最多 8 个调用 | [Test 契约](../tests/T09-research-first-run.md) |
+| T09-04 | 凭据在排队、模型请求中、工具完成后或最终提交前撤销 | 最终事务锁定并核验凭据 epoch 与模型快照；撤销先提交则不保存成功报告或 complete 事件 | [Test 契约](../tests/T09-research-first-run.md) |
+| T09-05 | 工具写入失败、任务取消、最终 CAS 失败 | 不能误报 succeeded | [Test 契约](../tests/T09-research-first-run.md) |
+| T09-06 | 现有研究历史/SSE/Idempotency-Key | 不复制或破坏旧 run 机制 | [Test 契约](../tests/T09-research-first-run.md) |
 
 ### 立即停止并纠偏
 
