@@ -46,6 +46,21 @@ DJANGO_DB_PATH=/tmp/byok-t05-final-new-20261012.sqlite3 \
 
 结果：`10 passed in 4.89s`。覆盖完整终态保存与 GET 恢复、幂等重复/冲突/并发、A/B 私有隔离、长度和幂等头拒绝、凭证代次变更丢弃部分输出、写入回滚、关闭 SSE 后 worker 独立完成、显式上游 completed 终态以及 `0037` 迁移保留旧 subscription 行。Provider 流用 mock SDK 事件，不构成 SDK_LOCAL 或真实 Proxy 验证。
 
+### credential epoch worker 栅栏补充复测（2026-10-12）
+
+为完成 T01-03 缺少消费端的证据，新增 `test_queued_translation_after_credential_revocation_never_starts_provider`：先创建并保留 epoch 1 的排队任务，再停用连接并递增 epoch 后运行真实持久任务入口。worker 将任务置为 `failed/execution_changed`，`provider_started` 仍为 false，合成 provider 未被调用，进度与结果均为空，SSE 没有 `complete`。原有 `test_credential_epoch_change_during_worker_discards_partial_output` 同时验证请求已开始后发生撤销时丢弃部分输出、不写译文且不发送 `complete`。
+
+在 T05 工作树后端执行完整新增测试文件：
+
+```sh
+PYTHONPATH=/tmp/byok-t02-test-stubs \
+DJANGO_DB_PATH=/tmp/byok-t05-final-new-epoch-20261012.sqlite3 \
+/tmp/byok-t01-verify-20261012/bin/python -m pytest \
+  backend/api/tests/test_ai_translation_jobs.py -q
+```
+
+结果：`11 passed in 4.95s`。两条 epoch 用例使用合成数据库状态与 mock provider 流，不发送任何 SDK、Proxy 或真实 Provider 请求。这个 worker 消费端证据位于 T05 堆叠 PR #39；T01 的独立 PR #34 本身仍不包含翻译 worker。
+
 受影响的旧订阅回归：
 
 ```sh

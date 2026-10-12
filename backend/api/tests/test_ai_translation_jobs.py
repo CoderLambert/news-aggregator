@@ -316,6 +316,53 @@ def test_credential_epoch_change_during_worker_discards_partial_output(monkeypat
 
 @pytest.mark.django_db
 @override_settings(AI_BYOK_ENABLED=True, PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_queued_translation_after_credential_revocation_never_starts_provider(monkeypatch):
+    client, user, csrf = _authenticated_client('t05-queued-epoch')
+    _create_model(client, csrf, SYNTHETIC_PROVIDER_KEY_A, 'queued-epoch')
+    news = _create_news()
+    dispatched = []
+    provider_calls = []
+
+    monkeypatch.setattr(
+        translation_jobs,
+        '_dispatch_task',
+        lambda task_id, generation: dispatched.append((task_id, generation)),
+    )
+
+    def unexpected_provider_call(*_args, **_kwargs):
+        provider_calls.append('called')
+        raise AssertionError('revoked queued work must not reach the provider')
+
+    monkeypatch.setattr(translation_jobs, 'stream_byok_translation', unexpected_provider_call)
+
+    response = _post_translation(client, csrf, news, 't05-queued-epoch-change')
+    task = ChatGPTTranslationTask.objects.get(pk=response['Job-ID'])
+    assert task.status == 'queued'
+    assert task.credential_epoch == 1
+    assert dispatched == [(task.pk, task.generation)]
+
+    from django.db.models import F
+    from api.models import UserAIConnection
+    UserAIConnection.objects.filter(pk=task.ai_connection_id).update(
+        is_enabled=False,
+        credential_epoch=F('credential_epoch') + 1,
+    )
+
+    translation_jobs._run_persistent_task(task.pk, task.generation)
+    task.refresh_from_db()
+    body = b''.join(response.streaming_content).decode('utf-8')
+
+    assert task.status == 'failed'
+    assert task.error_code == 'execution_changed'
+    assert task.provider_started is False
+    assert task.progress == ''
+    assert task.result == {}
+    assert provider_calls == []
+    assert 'complete' not in body
+
+
+@pytest.mark.django_db
+@override_settings(AI_BYOK_ENABLED=True, PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
 def test_database_failure_after_private_result_write_rolls_back_result_and_success(monkeypatch):
     client, user, csrf = _authenticated_client('t05-db-failure')
     _create_model(client, csrf, SYNTHETIC_PROVIDER_KEY_A, 'db-failure')
