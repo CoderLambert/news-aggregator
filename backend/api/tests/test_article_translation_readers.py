@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.urls import reverse
 from rest_framework.test import APIClient, APIRequestFactory
 
 from api.models import (
@@ -218,6 +219,27 @@ def test_source_changes_keep_saved_result_readable_but_mark_it_stale(article):
     assert response.json()['full_content_zh'] == '旧原文对应的译文'
     assert response.json()['source_hash'] == old_hash
     assert response.json()['current_match'] is False
+
+
+def test_recovered_completed_job_recomputes_match_against_current_article_source(article, settings):
+    settings.AI_BYOK_ENABLED = True
+    settings.PUBLIC_AI_ENABLED = True
+    owner = User.objects.create_user(username='reader-recovered-job-stale')
+    _connection, task = make_private_result(owner, article, 'Source A translation')
+    source_a = article.full_content
+
+    article.full_content = '# Source B\n\nThe article body has changed.'
+    article.save(update_fields=['full_content'])
+
+    client = APIClient()
+    client.force_authenticate(owner)
+    response = client.get(reverse('ai-translation-job', kwargs={'job_id': task.pk}))
+
+    assert response.status_code == 200
+    assert task.source_hash == source_hash(source_a)
+    assert response.json()['status'] == 'succeeded'
+    assert response.json()['result']['full_content_zh'] == 'Source A translation'
+    assert response.json()['result']['current_match'] is False
 
 
 def test_private_result_endpoint_rejects_other_owner_and_does_not_require_enabled_key(article, settings):

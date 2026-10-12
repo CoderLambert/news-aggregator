@@ -7,9 +7,11 @@ from typing import Callable, Iterator
 
 import httpx2
 from django.conf import settings
+from django.db import OperationalError, transaction
+from django.db.models import F
 from openai import APIConnectionError, APIStatusError, OpenAI
 
-from api.models import UserAIModelConfig
+from api.models import ChatSession, UserAIConnection, UserAIModelConfig
 from api.services.ai_credentials import (
     CredentialEncryptionUnavailable,
     CredentialUnavailable,
@@ -20,7 +22,13 @@ from api.services.ai_execution import ExecutionSnapshot, ModelSelectionError, re
 from api.services.ai_model_registry import get_model_preset
 from api.services.ai_model_test import gateway_is_configured
 from api.services.ai_registry import get_profile
-from api.services.chat_history import ChatConflict
+from api.services.chat_history import (
+    MAX_CAS_ATTEMPTS,
+    ChatConflict,
+    _is_sqlite_busy,
+    _pause_before_retry,
+    append_completed_chat_turn_to_locked_session,
+)
 
 
 CHAT_OUTPUT_TOKEN_LIMIT = 2048
@@ -164,6 +172,97 @@ def assert_article_chat_execution_current(execution: ArticleChatExecution) -> No
         )
     except CredentialUnavailable:
         raise ArticleChatError('execution_changed') from None
+
+
+def commit_completed_article_chat_turn(
+    execution: ArticleChatExecution,
+    *,
+    user_id: int,
+    news_id: int,
+    session_id: int,
+    generation: int,
+    question: str,
+    answer: str,
+) -> None:
+    """Revalidate the selected model and CAS-save history in one short transaction.
+
+    The ordered locks are credential connection -> selected model -> chat session.
+    The conditional no-op connection UPDATE is the first write: PostgreSQL holds
+    its row lock through the history CAS, while SQLite takes its write reservation
+    before any later snapshot reads. No lock is held while contacting the model or
+    streaming tokens to the client.
+    """
+    snapshot = execution.snapshot
+    if snapshot.user_id != user_id:
+        raise ArticleChatError('execution_changed')
+
+    last_busy_error = None
+    for attempt in range(1, MAX_CAS_ATTEMPTS + 1):
+        try:
+            with transaction.atomic():
+                connection_locked = UserAIConnection.objects.filter(
+                    pk=snapshot.connection_id,
+                    user_id=snapshot.user_id,
+                    is_enabled=True,
+                    is_deleted=False,
+                    credential_epoch=snapshot.credential_epoch,
+                    provider_id=snapshot.provider_id,
+                    endpoint_profile=snapshot.endpoint_profile,
+                    endpoint_profile_version=snapshot.endpoint_profile_version,
+                ).update(credential_epoch=F('credential_epoch'))
+                if not connection_locked:
+                    raise ArticleChatError('execution_changed')
+
+                connection = UserAIConnection.objects.select_for_update(of=('self',)).filter(
+                    pk=snapshot.connection_id,
+                    user_id=snapshot.user_id,
+                    is_enabled=True,
+                    is_deleted=False,
+                    credential_epoch=snapshot.credential_epoch,
+                ).first()
+                if connection is None or (
+                    str(connection.pk) != snapshot.connection_id
+                    or connection.provider_id != snapshot.provider_id
+                    or connection.endpoint_profile != snapshot.endpoint_profile
+                    or connection.endpoint_profile_version != snapshot.endpoint_profile_version
+                ):
+                    raise ArticleChatError('execution_changed')
+
+                config = UserAIModelConfig.objects.select_for_update(of=('self',)).filter(
+                    pk=snapshot.model_config_id,
+                    connection_id=connection.pk,
+                    connection__user_id=snapshot.user_id,
+                    config_revision=snapshot.config_revision,
+                    model_id=snapshot.model_id,
+                ).first()
+                if config is None:
+                    raise ArticleChatError('execution_changed')
+
+                session = ChatSession.objects.select_for_update(of=('self',)).filter(
+                    pk=session_id,
+                    user_id=user_id,
+                    news_id=news_id,
+                ).first()
+                if session is None or session.generation != generation:
+                    raise ChatConflict('chat_conflict')
+
+                append_completed_chat_turn_to_locked_session(
+                    session,
+                    user_id=user_id,
+                    news_id=news_id,
+                    generation=generation,
+                    question=question,
+                    answer=answer,
+                    model_source=execution.model_source,
+                )
+                return None
+        except OperationalError as error:
+            if not _is_sqlite_busy(error) or attempt >= MAX_CAS_ATTEMPTS:
+                raise
+            last_busy_error = error
+            _pause_before_retry(attempt)
+
+    raise ChatConflict('chat_conflict') from last_busy_error
 
 
 def stream_article_chat(

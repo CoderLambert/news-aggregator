@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
@@ -9,7 +9,22 @@ import NewsDetail from '@/pages/NewsDetail'
 import { CapabilitiesTestProvider } from '../helpers/capabilities'
 import { blockNews, checkFavoriteStatus, fetchCategories, fetchNews, fetchNewsDetail, fetchSources, unblockNews } from '@/services/api'
 
-const apiState = vi.hoisted(() => ({ blocked: false, fetchFullArticle: vi.fn(), translate: vi.fn(), translateError: '' }))
+const apiState = vi.hoisted(() => ({
+  blocked: false,
+  fetchFullArticle: vi.fn(),
+  translate: vi.fn(),
+  translateError: '',
+  speak: vi.fn(),
+  speechSupported: false,
+}))
+
+vi.mock('@/services/newsWorkflowApi', async (importOriginal) => ({
+  ...await importOriginal(),
+  cancelPrivateTranslationJob: vi.fn(),
+  getPrivateTranslationJob: vi.fn(),
+  getPrivateTranslationResult: vi.fn(),
+  translatePrivateFullArticleStream: vi.fn(),
+}))
 
 vi.mock('@/services/api', () => ({
   fetchNews: vi.fn(),
@@ -29,13 +44,13 @@ vi.mock('@/hooks/useArticleSearch', () => ({ useArticleSearch: () => ({ matchCou
 vi.mock('@/hooks/useArticleToc', () => ({ useArticleToc: () => ({ headings: [], activeId: '' }) }))
 vi.mock('@/context/SpeechPlayerContext', () => ({
   useSpeechPlayer: () => ({ supported: false, speak: vi.fn() }),
-  useSpeechPlayerActions: () => ({ speak: vi.fn() }),
-  useSpeechPlayerCapabilities: () => ({ supported: false }),
+  useSpeechPlayerActions: () => ({ speak: apiState.speak }),
+  useSpeechPlayerCapabilities: () => ({ supported: apiState.speechSupported }),
   useSpeechPlayerActivity: () => false,
 }))
 vi.mock('@/components/NewsChatAssistant', () => ({
-  default: ({ open, onOpenChange }) => (
-    <div>
+  default: ({ open, onOpenChange, translationResultId }) => (
+    <div data-testid="assistant-translation-id" data-result-id={translationResultId ?? ''}>
       <output data-testid="assistant-state">{open ? 'open' : 'closed'}</output>
       {open && <button type="button" onClick={() => onOpenChange(false)}>关闭测试助手</button>}
     </div>
@@ -57,7 +72,6 @@ const detailStory = {
   full_content_zh: '', full_content_zh_fetched_at: null, full_content_zh_source: null,
   full_translation_active: false,
 }
-
 function RouteProbe() {
   const location = useLocation()
   return <output data-testid="route">{`${location.pathname}${location.search}`}</output>
@@ -89,6 +103,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   apiState.blocked = false
   apiState.translateError = ''
+  apiState.speak.mockReset()
+  apiState.speechSupported = false
   apiState.fetchFullArticle.mockReset()
   localStorage.removeItem('news-aggregator-filters')
   usePreferencesStore.setState({ lang: 'zh' })
@@ -217,4 +233,8 @@ describe('news list return navigation and invalidation', () => {
     expect(await screen.findByRole('dialog', { name: '登录小闻' })).toBeInTheDocument()
     expect(apiState.fetchFullArticle).not.toHaveBeenCalled()
   })
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })

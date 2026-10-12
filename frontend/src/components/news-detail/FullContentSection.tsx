@@ -11,6 +11,7 @@ import ErrorBanner from './ErrorBanner'
 
 interface FullContentSectionProps {
   news: NewsDetail
+  currentTranslation?: { text: string; resultId: string | null; scope: 'private' | 'shared' | 'legacy' } | null
   translating: boolean
   translationWaitingShared?: boolean
   translationPaused: boolean
@@ -29,6 +30,7 @@ interface FullContentSectionProps {
   allowTranslation?: boolean
   allowPrivateTranslation?: boolean
   privateTranslationActive?: boolean
+  privateTranslationCancelPending?: boolean
   privateTranslationError?: string
   privateTranslationProgress?: string
   privateTranslationResult?: string
@@ -37,11 +39,13 @@ interface FullContentSectionProps {
   privateTranslationStaleResult?: PrivateTranslationResult | null
   privateTranslationJobId?: string
   onStartPrivateTranslation?: () => void
+  onCheckPrivateTranslationStatus?: () => void
   onCancelPrivateTranslation?: () => void
 }
 
 export default function FullContentSection({
   news,
+  currentTranslation = null,
   translating,
   translationWaitingShared = false,
   translationPaused,
@@ -60,6 +64,7 @@ export default function FullContentSection({
   allowTranslation = true,
   allowPrivateTranslation = false,
   privateTranslationActive = false,
+  privateTranslationCancelPending = false,
   privateTranslationError = '',
   privateTranslationProgress = '',
   privateTranslationResult = '',
@@ -68,13 +73,25 @@ export default function FullContentSection({
   privateTranslationStaleResult = null,
   privateTranslationJobId = '',
   onStartPrivateTranslation = () => {},
+  onCheckPrivateTranslationStatus = () => {},
   onCancelPrivateTranslation = () => {},
 }: FullContentSectionProps) {
-  const content = showOriginal ? news.full_content : (news.full_content_zh || news.full_content)
+  const currentText = currentTranslation?.text
+    || (news.full_content_zh_current_match === false ? '' : news.full_content_zh)
+  const resolvedCurrentTranslation = currentTranslation ?? (currentText
+    ? {
+        text: currentText,
+        resultId: news.full_content_zh_result_id || null,
+        scope: news.full_content_zh_scope === 'private' ? 'private' as const : news.full_content_zh_scope === 'shared' ? 'shared' as const : 'legacy' as const,
+      }
+    : null)
+  const content = showOriginal ? news.full_content : (currentText || news.full_content)
   return (
     <div className="mb-8">
       <Toolbar
         news={news}
+        currentTranslation={resolvedCurrentTranslation}
+        hasCurrentTranslation={Boolean(currentText)}
         translating={translating}
         translationPaused={translationPaused}
         translateError={translateError}
@@ -105,14 +122,22 @@ export default function FullContentSection({
               <p role="status" className="text-sm font-medium text-violet-800">个人模型正在翻译，进度和结果仅你可见。</p>
               {privateTranslationProgress && <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-violet-900">{privateTranslationProgress}</pre>}
             </div>
-            <Button type="button" variant="outline" size="sm" onClick={onCancelPrivateTranslation} disabled={!privateTranslationJobId} className="shrink-0 rounded-full">取消</Button>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={onCheckPrivateTranslationStatus} disabled={!privateTranslationJobId} className="rounded-full">
+                重新检查状态
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={onCancelPrivateTranslation} disabled={!privateTranslationJobId} className="rounded-full">
+                {privateTranslationCancelPending ? '再次取消' : '取消任务'}
+              </Button>
+            </div>
           </div>
         </section>
       )}
       {allowPrivateTranslation && privateTranslationError && (
         <p role="alert" className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{privateTranslationError}</p>
       )}
-      {allowPrivateTranslation && privateTranslationResult && privateTranslationResultCurrentMatch !== false &&
+      {allowPrivateTranslation && privateTranslationResult && privateTranslationResultCurrentMatch !== false
+        && privateTranslationResultId !== resolvedCurrentTranslation?.resultId &&
         privateTranslationResultId !== news.full_content_zh_result_id && (
         <Card className="mb-6 border-violet-200 bg-violet-50/30 py-5">
           <CardContent className="px-5">
@@ -126,6 +151,9 @@ export default function FullContentSection({
             <MarkdownContent content={privateTranslationResult} />
           </CardContent>
         </Card>
+      )}
+      {resolvedCurrentTranslation?.scope === 'private' && (
+        <p className="mb-4 text-xs text-violet-700">当前正文来自你的个人模型译文，只对你可见，不会作为共享译文发布。</p>
       )}
       {allowPrivateTranslation && privateTranslationStaleResult && (
         <Card className="mb-6 border-amber-200 bg-amber-50/40 py-5">
@@ -150,13 +178,13 @@ export default function FullContentSection({
   )
 }
 
-type ToolbarProps = Pick<FullContentSectionProps, 'news' | 'translating' | 'translationPaused' | 'translateError' | 'showOriginal' | 'onToggleOriginal' | 'onTranslate' | 'onRefetch' | 'refetching' | 'onCancelRefetch' | 'allowFetch' | 'allowTranslation' | 'allowPrivateTranslation' | 'privateTranslationActive' | 'onStartPrivateTranslation'> & { hasPrivateTranslation: boolean }
+type ToolbarProps = Pick<FullContentSectionProps, 'news' | 'currentTranslation' | 'translating' | 'translationPaused' | 'translateError' | 'showOriginal' | 'onToggleOriginal' | 'onTranslate' | 'onRefetch' | 'refetching' | 'onCancelRefetch' | 'allowFetch' | 'allowTranslation' | 'allowPrivateTranslation' | 'privateTranslationActive' | 'onStartPrivateTranslation'> & { hasPrivateTranslation: boolean; hasCurrentTranslation: boolean }
 
-function Toolbar({ news, translating, translationPaused, translateError, showOriginal, onToggleOriginal, onTranslate, onRefetch, refetching, onCancelRefetch, allowFetch = true, allowTranslation = true, allowPrivateTranslation = false, privateTranslationActive = false, hasPrivateTranslation, onStartPrivateTranslation = () => {} }: ToolbarProps) {
+function Toolbar({ news, currentTranslation = null, translating, translationPaused, translateError, showOriginal, onToggleOriginal, onTranslate, onRefetch, refetching, onCancelRefetch, allowFetch = true, allowTranslation = true, allowPrivateTranslation = false, privateTranslationActive = false, hasPrivateTranslation, hasCurrentTranslation, onStartPrivateTranslation = () => {} }: ToolbarProps) {
   const [copied, setCopied] = useState(false)
   const [copyMessage, setCopyMessage] = useState('')
   const [copyTimer, setCopyTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
-  const content = showOriginal ? news.full_content : (news.full_content_zh || news.full_content)
+  const content = showOriginal ? news.full_content : (currentTranslation?.text || (news.full_content_zh_current_match === false ? '' : news.full_content_zh) || news.full_content)
 
   useEffect(() => () => { if (copyTimer) clearTimeout(copyTimer) }, [copyTimer])
 
@@ -187,33 +215,39 @@ function Toolbar({ news, translating, translationPaused, translateError, showOri
             <Badge variant="green" className="rounded-full px-2.5 py-0.5 text-[11px] font-medium">
               <CheckCircle2 className="size-3" />正文已就绪
             </Badge>
-            {news.full_content_zh && !isChineseSource && (
+            {hasCurrentTranslation && !isChineseSource && (
               <Badge variant="violet" className="rounded-full px-2.5 py-0.5 text-[11px] font-medium">
-                <Languages className="size-3" />{news.full_content_zh_scope === 'shared' ? '共享译文' : news.full_content_zh_scope === 'private' ? '个人译文' : '已有中文译文'}
+                <Languages className="size-3" />{currentTranslation?.scope === 'shared' ? '共享译文' : currentTranslation?.scope === 'private' ? '个人译文' : '已有中文译文'}
               </Badge>
             )}
-            {news.full_content_zh_model_source?.model && (
+            {currentTranslation?.resultId === news.full_content_zh_result_id && news.full_content_zh_model_source?.model && (
               <Badge variant="secondary" className="rounded-full px-2.5 py-0.5 text-[11px] font-medium">
                 {news.full_content_zh_model_source.model}
               </Badge>
             )}
-            {news.full_content_zh_current_match === false && (
+            {!hasCurrentTranslation && news.full_content_zh_current_match === false && (
               <Badge variant="outline" className="rounded-full px-2.5 py-0.5 text-[11px] font-medium text-amber-800">原文已更新</Badge>
             )}
           </div>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            {allowFetch && allowTranslation
-              ? isChineseSource ? '正文排版已就绪，可复制或重新获取。' : news.full_content_zh_scope === 'shared' ? '正在复用共享译文，不消耗你的模型额度。个人重新翻译会使用你的账号额度。' : news.full_content_zh_scope === 'private' ? '这是当前账号的个人译文，重新翻译不会覆盖已有共享版本。' : '正文结构已保留，可复制、重新获取或翻译。首次完整翻译后可供其他读者复用。'
-              : isChineseSource ? '正文排版已就绪，可复制。' : news.full_content_zh_scope === 'shared' ? '正在复用共享译文。' : news.full_content_zh_scope === 'private' ? '这是当前账号的个人译文。' : '正文结构已保留，可复制或切换已缓存的语言。'}
+            {isChineseSource
+              ? allowFetch ? '正文排版已就绪，可复制或重新获取。' : '正文排版已就绪，可复制。'
+              : currentTranslation?.scope === 'private'
+                ? '这是当前账号的个人译文，重新翻译不会覆盖共享版本。'
+                : currentTranslation?.scope === 'shared'
+                  ? allowTranslation ? '正在复用共享译文，不消耗你的模型额度。个人重新翻译会使用你的账号额度。' : '正在复用共享译文。'
+                  : allowFetch && allowTranslation
+                    ? '正文结构已保留，可复制、重新获取或翻译。首次完整翻译后可供其他读者复用。'
+                    : '正文结构已保留，可复制或切换已缓存的语言。'}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <CopyButton copied={copied} onCopy={() => { void handleCopy() }} />
           {allowFetch && <RefetchButton refetching={refetching} onClick={onRefetch} onCancel={onCancelRefetch} />}
-          {news.full_content_zh && <LangToggle showOriginal={showOriginal} onToggle={onToggleOriginal} />}
-          {allowTranslation && !isChineseSource && !translating && !translationPaused && !translateError && (news.full_content_zh_scope !== 'shared' || news.full_translation_personal_available) && (
-            <TranslateButton hasTranslation={Boolean(news.full_content_zh)} shared={news.full_content_zh_scope === 'shared'} onClick={onTranslate} />
+          {hasCurrentTranslation && <LangToggle showOriginal={showOriginal} onToggle={onToggleOriginal} />}
+          {allowTranslation && !isChineseSource && !translating && !translationPaused && !translateError && (currentTranslation?.scope !== 'shared' || news.full_translation_personal_available) && (
+            <TranslateButton hasTranslation={hasCurrentTranslation} shared={currentTranslation?.scope === 'shared'} onClick={onTranslate} />
           )}
           {allowPrivateTranslation && !isChineseSource && !translating && !translationPaused && !privateTranslationActive && (
             <Button type="button" onClick={onStartPrivateTranslation} variant="outline" size="pill-sm" className="h-10 rounded-full border-violet-200 px-3 text-xs font-medium text-violet-800 hover:bg-violet-50">
