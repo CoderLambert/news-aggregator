@@ -4,7 +4,7 @@
  * accessible roles, key labels, and click handlers.
  */
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 
 import FetchArticleCard from '@/components/news-detail/FetchArticleCard'
 import FetchArticleSpinner from '@/components/news-detail/FetchArticleSpinner'
@@ -136,6 +136,25 @@ describe('FullContentSection', () => {
   it('shows ErrorBanner when translateError is non-empty', () => {
     renderSection({ translateError: '翻译失败：429' })
     expect(screen.getByRole('alert')).toHaveTextContent('翻译失败：429')
+  })
+
+  it('labels site and personal translation errors separately and guides missing full translation preference', () => {
+    renderSection({
+      allowPrivateTranslation: true,
+      translateError: '站点翻译暂时失败',
+      privateTranslationError: '请先在 AI 设置中为“全文翻译”选择个人模型。',
+    })
+
+    const siteError = screen.getByRole('region', { name: '站点翻译错误' })
+    expect(within(siteError).getByText('站点翻译')).toBeInTheDocument()
+    expect(within(siteError).getByRole('alert')).toHaveTextContent('站点翻译暂时失败')
+
+    const personalError = screen.getByRole('alert', { name: '个人模型翻译错误' })
+    expect(within(personalError).getByText('个人模型翻译')).toBeInTheDocument()
+    expect(within(personalError).getByRole('link', { name: '打开 AI 设置' })).toHaveAttribute('href', '/settings/ai')
+    expect(personalError).toHaveTextContent(/“全文翻译”选择模型，或选择“跟随默认”/)
+    expect(personalError).toHaveTextContent(/点击“保存用途偏好”/)
+    expect(personalError).toHaveTextContent(/添加连接、添加模型或测试模型都不会自动更改用途选择/)
   })
 
   it('lang toggle items reflect showOriginal via aria-checked', () => {

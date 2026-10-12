@@ -187,6 +187,8 @@ function makeApi(timeout: number): AxiosInstance {
 const api = makeApi(10_000)
 const apiFetch = makeApi(120_000)
 const apiLong = makeApi(180_000)
+const MODEL_TEST_TIMEOUT_MS = 30_000
+const apiModelTest = makeApi(MODEL_TEST_TIMEOUT_MS)
 
 export async function fetchCapabilities(): Promise<SiteCapabilities> {
   const value: unknown = (await api.get<unknown>('/capabilities/')).data
@@ -588,7 +590,11 @@ function parseAIModelTestResult(value: unknown): AIModelTestResult {
 }
 
 export async function testAIModel(modelId: string, probeKind: AIModelProbeKind): Promise<AIModelTestResult> {
-  const value: unknown = (await api.post<unknown>(`/ai/models/${modelId}/test/`, { probe_kind: probeKind })).data
+  const value: unknown = (await apiModelTest.post<unknown>(
+    `/ai/models/${modelId}/test/`,
+    { probe_kind: probeKind },
+    { timeout: MODEL_TEST_TIMEOUT_MS },
+  )).data
   return parseAIModelTestResult(value)
 }
 

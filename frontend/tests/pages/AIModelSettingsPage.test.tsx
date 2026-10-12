@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -59,6 +59,29 @@ const modelConfig: AIModelConfig = {
   has_trusted_context_limit: false, config_revision: 1, verification_status: 'not_tested',
   capabilities: { text: 'unknown', tools: 'unknown', structured_output: 'unknown', thinking: 'unknown', stream: 'unknown' },
   last_tested_at: null, updated_at: '2026-10-12T00:00:00Z',
+}
+
+function routedModelConfig(id = 'model-17', displayName = 'DeepSeek V4.1 Flash'): AIModelConfig {
+  return {
+    ...modelConfig,
+    id,
+    model_id: 'deepseek-flash',
+    display_name: displayName,
+    source: 'catalog',
+    catalog_model_id: 'deepseek-flash',
+    catalog_version: '2026-10-12.1',
+    catalog_source_url: modelPreset.source_url,
+    provider_claims: modelPreset.provider_claims,
+    context_window_tokens: 1_048_576,
+    max_output_tokens: 393_216,
+    has_trusted_context_limit: true,
+  }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise })
+  return { promise, resolve }
 }
 
 const taskKinds: AITaskKind[] = ['default', 'article_qa', 'full_translation', 'deep_research', 'question_suggestions']
@@ -253,15 +276,8 @@ describe('AIModelSettingsPage', () => {
   })
 
   it('requires a billing confirmation before testing each capability on a routed preset', async () => {
-    const routedModel: AIModelConfig = {
-      ...modelConfig, model_id: 'deepseek-flash', display_name: 'DeepSeek V4.1 Flash',
-      source: 'catalog', catalog_model_id: 'deepseek-flash', catalog_version: '2026-10-12.1',
-      catalog_source_url: modelPreset.source_url, provider_claims: modelPreset.provider_claims,
-      context_window_tokens: 1_048_576, max_output_tokens: 393_216,
-      has_trusted_context_limit: true,
-    }
     mocks.fetchAIConnections.mockResolvedValue([connection])
-    mocks.fetchAIModels.mockResolvedValue([routedModel])
+    mocks.fetchAIModels.mockResolvedValue([routedModelConfig()])
     renderPage()
 
     fireEvent.click(await screen.findByRole('button', { name: '测试文本能力' }))
@@ -272,6 +288,109 @@ describe('AIModelSettingsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '测试工具能力' }))
     await waitFor(() => expect(mocks.testAIModel).toHaveBeenCalledWith('model-17', 'tools'))
     expect(window.confirm).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps confirmation cancellation at zero requests', async () => {
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([routedModelConfig()])
+    vi.stubGlobal('confirm', vi.fn(() => false))
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: '测试文本能力' }))
+
+    expect(window.confirm).toHaveBeenCalledOnce()
+    expect(mocks.testAIModel).not.toHaveBeenCalled()
+    expect(screen.queryByText('正在测试文本能力…')).not.toBeInTheDocument()
+  })
+
+  it('shows pending feedback beside the model and restores its button after completion', async () => {
+    const request = deferred<Awaited<ReturnType<typeof mocks.testAIModel>>>()
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([routedModelConfig()])
+    mocks.testAIModel.mockReturnValueOnce(request.promise)
+    renderPage()
+
+    const button = await screen.findByRole('button', { name: '测试文本能力' })
+    fireEvent.click(button)
+
+    expect(await screen.findByText('正在测试文本能力…')).toBeInTheDocument()
+    expect(button).toBeDisabled()
+    request.resolve({
+      attempt_id: 'attempt-pending', probe_kind: 'text', status: 'succeeded',
+      verification_status: 'verified', capability: 'supported', stale: false,
+      safe_error_code: '', latency_ms: 120, input_tokens: 8, output_tokens: 2,
+      billing_notice: 'provider_may_bill',
+    })
+
+    expect(await screen.findByText('文本能力测试成功。')).toBeInTheDocument()
+    await waitFor(() => expect(button).toBeEnabled())
+    await waitFor(() => expect(mocks.fetchAIModels).toHaveBeenCalledTimes(2))
+  })
+
+  it('keeps a gateway precheck error on its model card and leaves capability untested', async () => {
+    const gatewayError = Object.assign(new Error('raw response must stay hidden'), {
+      response: { status: 503, data: { error_code: 'model_test_gateway_unavailable', error: 'do not display raw response' } },
+    })
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([routedModelConfig()])
+    mocks.testAIModel.mockRejectedValueOnce(gatewayError)
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: '测试文本能力' }))
+    const feedback = await screen.findByText('本次未发送：个人模型网关暂不可用，能力仍为“未测试”。')
+    const modelCard = feedback.closest('li')
+
+    expect(modelCard).not.toBeNull()
+    expect(within(modelCard as HTMLElement).getByText(/文本：unknown · 工具：unknown · 未测试/)).toBeInTheDocument()
+    expect(screen.queryByText('raw response must stay hidden')).not.toBeInTheDocument()
+    expect(screen.queryByText('do not display raw response')).not.toBeInTheDocument()
+    expect(mocks.fetchAIModels).toHaveBeenCalledOnce()
+  })
+
+  it('marks a timed out model test unconfirmed and never retries it', async () => {
+    const timeoutError = Object.assign(new Error('timeout'), { code: 'ECONNABORTED' })
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([routedModelConfig()])
+    mocks.testAIModel.mockRejectedValueOnce(timeoutError)
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: '测试文本能力' }))
+
+    expect(await screen.findByText(/无法确认是否到达服务商/)).toBeInTheDocument()
+    expect(mocks.testAIModel).toHaveBeenCalledTimes(1)
+    expect(mocks.saveAITaskPreferences).not.toHaveBeenCalled()
+  })
+
+  it('keeps feedback attached to its model when another model returns a different result', async () => {
+    const firstModel = routedModelConfig('model-17', 'DeepSeek Flash A')
+    const secondModel = routedModelConfig('model-18', 'DeepSeek Flash B')
+    mocks.fetchAIConnections.mockResolvedValue([connection])
+    mocks.fetchAIModels.mockResolvedValue([firstModel, secondModel])
+    mocks.testAIModel
+      .mockResolvedValueOnce({
+        attempt_id: 'attempt-a', probe_kind: 'text', status: 'succeeded',
+        verification_status: 'verified', capability: 'supported', stale: false,
+        safe_error_code: '', latency_ms: 120, input_tokens: 8, output_tokens: 2,
+        billing_notice: 'provider_may_bill',
+      })
+      .mockResolvedValueOnce({
+        attempt_id: 'attempt-b', probe_kind: 'text', status: 'failed',
+        verification_status: 'failed', capability: 'unknown', stale: false,
+        safe_error_code: 'gateway_rejected', latency_ms: 110, input_tokens: null, output_tokens: null,
+        billing_notice: 'provider_may_bill',
+      })
+    renderPage()
+
+    let buttons = await screen.findAllByRole('button', { name: '测试文本能力' })
+    fireEvent.click(buttons[0])
+    await within(screen.getByText('DeepSeek Flash A').closest('li') as HTMLElement).findByText('文本能力测试成功。')
+
+    buttons = screen.getAllByRole('button', { name: '测试文本能力' })
+    fireEvent.click(buttons[1])
+    await within(screen.getByText('DeepSeek Flash B').closest('li') as HTMLElement).findByText(/网关拒绝了本次测试/)
+
+    expect(within(screen.getByText('DeepSeek Flash A').closest('li') as HTMLElement).getByText('文本能力测试成功。')).toBeInTheDocument()
+    expect(within(screen.getByText('DeepSeek Flash B').closest('li') as HTMLElement).queryByText('文本能力测试成功。')).not.toBeInTheDocument()
   })
 
   it('does not offer a gateway test for an unknown manual model ID', async () => {

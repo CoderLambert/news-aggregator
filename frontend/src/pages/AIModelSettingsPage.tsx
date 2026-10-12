@@ -20,7 +20,7 @@ import {
   updateAIConnection,
   updateAIModel,
 } from '@/services/api'
-import type { AIModelConfig, AIModelProbeKind, CreateAIConnectionInput, CreateAIModelInput } from '@/services/api'
+import type { AIModelConfig, AIModelProbeKind, AIModelTestResult, CreateAIConnectionInput, CreateAIModelInput } from '@/services/api'
 
 const CONNECTIONS_KEY = 'aiConnections'
 const MODELS_KEY = 'aiModels'
@@ -30,6 +30,100 @@ function verificationLabel(status: AIModelConfig['verification_status']): string
   if (status === 'failed') return '最近测试失败'
   if (status === 'stale') return '配置已变化，测试结果过期'
   return '未测试'
+}
+
+type ProbeFeedbackState = 'pending' | 'succeeded' | 'failed' | 'unknown' | 'not_sent'
+
+interface ProbeFeedback {
+  state: ProbeFeedbackState
+  message: string
+}
+
+const SAFE_PROBE_ERROR_MESSAGES: Record<string, ProbeFeedback> = {
+  model_test_gateway_unavailable: { state: 'not_sent', message: '本次未发送：个人模型网关暂不可用，能力仍为“未测试”。' },
+  model_test_route_unavailable: { state: 'not_sent', message: '本次未发送：该模型目前没有已批准的网关路由。' },
+  endpoint_profile_unavailable: { state: 'not_sent', message: '本次未发送：服务商端点配置暂不可用。' },
+  connection_unavailable: { state: 'not_sent', message: '本次未发送：连接暂不可用。' },
+  connection_not_found: { state: 'not_sent', message: '本次未发送：连接不存在或已失效。' },
+  model_not_found: { state: 'not_sent', message: '本次未发送：模型不存在或不可用。' },
+  model_wrong_owner: { state: 'not_sent', message: '本次未发送：模型不属于当前账号。' },
+  probe_kind_invalid: { state: 'not_sent', message: '本次未发送：测试类型无效。' },
+  ai_byok_disabled: { state: 'not_sent', message: '本次未发送：个人模型功能当前未启用。' },
+  authentication_required: { state: 'not_sent', message: '本次未发送：请先登录后再测试。' },
+  gateway_unavailable: { state: 'not_sent', message: '本次未发送：个人模型网关暂不可用，能力仍为“未测试”。' },
+  invalid_probe: { state: 'not_sent', message: '本次未发送：测试请求无效。' },
+  gateway_rejected: { state: 'failed', message: '网关拒绝了本次测试。原始响应已隐藏；如需重试，请由你再次点击。' },
+  probe_not_supported: { state: 'failed', message: '本次测试未能验证该能力，能力仍为未知。' },
+  result_unknown: { state: 'unknown', message: '结果未确认；本站没有自动重试。请检查当前状态后再决定是否手动重试。' },
+}
+
+function probeFeedbackKey(modelId: string, probeKind: AIModelProbeKind): string {
+  return `${modelId}:${probeKind}`
+}
+
+function feedbackForProbeResult(result: AIModelTestResult, probeKind: AIModelProbeKind): ProbeFeedback {
+  if (result.stale || result.status === 'stale') {
+    return { state: 'unknown', message: '测试请求已返回，但模型配置期间发生变化；旧结果没有覆盖当前模型状态。' }
+  }
+  if (result.status === 'succeeded') {
+    return { state: 'succeeded', message: probeKind === 'text' ? '文本能力测试成功。' : '工具调用能力测试成功。' }
+  }
+  if (result.status === 'unknown') {
+    return SAFE_PROBE_ERROR_MESSAGES[result.safe_error_code] ?? {
+      state: 'unknown', message: '结果未确认；本站没有自动重试。请检查当前状态后再决定是否手动重试。',
+    }
+  }
+  if (result.status === 'not_sent') {
+    return SAFE_PROBE_ERROR_MESSAGES[result.safe_error_code] ?? {
+      state: 'not_sent', message: '本次未发送；能力仍为“未测试”。',
+    }
+  }
+  return SAFE_PROBE_ERROR_MESSAGES[result.safe_error_code] ?? {
+    state: 'failed', message: probeKind === 'text' ? '文本能力测试失败。' : '工具调用能力测试失败。',
+  }
+}
+
+function feedbackForProbeError(error: unknown): ProbeFeedback {
+  if (typeof error === 'object' && error !== null) {
+    const record = error as Record<string, unknown>
+    const response = typeof record.response === 'object' && record.response !== null
+      ? record.response as Record<string, unknown>
+      : null
+    const data = response && typeof response.data === 'object' && response.data !== null
+      ? response.data as Record<string, unknown>
+      : null
+    const errorCode = data && typeof data.error_code === 'string' ? data.error_code : ''
+    if (errorCode && SAFE_PROBE_ERROR_MESSAGES[errorCode]) return SAFE_PROBE_ERROR_MESSAGES[errorCode]
+    if (['ECONNABORTED', 'ETIMEDOUT', 'ERR_NETWORK'].includes(String(record.code))) {
+      return { state: 'unknown', message: '请求超时或网络中断，无法确认是否到达服务商；本站没有自动重试。请先检查当前状态。' }
+    }
+  }
+  return { state: 'unknown', message: '本次测试结果未确认；本站没有自动重试。请检查当前状态后再决定是否手动重试。' }
+}
+
+function ProbeTestButton({
+  label,
+  pendingLabel,
+  feedback,
+  disabled,
+  onClick,
+}: {
+  label: string
+  pendingLabel: string
+  feedback?: ProbeFeedback
+  disabled: boolean
+  onClick: () => void
+}) {
+  const pending = feedback?.state === 'pending'
+  const failed = feedback?.state === 'failed'
+  return (
+    <div className="flex min-w-0 flex-col items-start gap-1">
+      <Button type="button" variant="outline" className="min-h-11" disabled={disabled} onClick={onClick}>
+        {pending ? pendingLabel : label}
+      </Button>
+      {feedback && <p role={failed ? 'alert' : 'status'} aria-live="polite" className="max-w-64 text-xs leading-5 text-muted-foreground">{feedback.message}</p>}
+    </div>
+  )
 }
 
 export default function AIModelSettingsPage() {
@@ -70,6 +164,7 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
   const [editModelId, setEditModelId] = useState('')
   const [editModelDisplayName, setEditModelDisplayName] = useState('')
   const [notice, setNotice] = useState('')
+  const [probeFeedback, setProbeFeedback] = useState<Record<string, ProbeFeedback>>({})
 
   const providersQuery = useQuery({
     queryKey: ['aiProviderProfiles'],
@@ -119,6 +214,7 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
     onSuccess: async () => {
       setReplacementKey('')
       setReplaceFor(null)
+      setProbeFeedback({})
       setNotice('Key 已替换，旧凭据版本已失效。本站尚未测试新 Key。')
       await refreshConnections()
     },
@@ -137,6 +233,7 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
   const toggleMutation = useMutation({
     mutationFn: ({ connectionId, isEnabled }: { connectionId: string; isEnabled: boolean }) => updateAIConnection(connectionId, { is_enabled: isEnabled }),
     onSuccess: async (_connection, variables) => {
+      setProbeFeedback({})
       setNotice(variables.isEnabled ? '连接已启用。' : '连接已停用，旧凭据版本已失效。')
       await Promise.all([refreshConnections(), refreshTaskPreferences()])
     },
@@ -145,6 +242,7 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
   const deleteMutation = useMutation({
     mutationFn: (connectionId: string) => deleteAIConnection(connectionId),
     onSuccess: async () => {
+      setProbeFeedback({})
       setNotice('连接已删除，站点已清除保存的密文。')
       await Promise.all([refreshConnections(), refreshTaskPreferences()])
     },
@@ -164,7 +262,13 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
   })
   const deleteModelMutation = useMutation({
     mutationFn: (modelId: string) => deleteAIModel(modelId),
-    onSuccess: async () => {
+    onSuccess: async (_deleted, modelId) => {
+      setProbeFeedback((current) => {
+        const next = { ...current }
+        delete next[probeFeedbackKey(modelId, 'text')]
+        delete next[probeFeedbackKey(modelId, 'tools')]
+        return next
+      })
       setNotice('模型配置已删除。')
       await Promise.all([refreshModels(), refreshTaskPreferences()])
     },
@@ -173,7 +277,13 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
   const updateModelMutation = useMutation({
     mutationFn: ({ modelId, nextModelId, displayName }: { modelId: string; nextModelId: string; displayName: string }) =>
       updateAIModel(modelId, { model_id: nextModelId, display_name: displayName }),
-    onSuccess: async () => {
+    onSuccess: async (_model, variables) => {
+      setProbeFeedback((current) => {
+        const next = { ...current }
+        delete next[probeFeedbackKey(variables.modelId, 'text')]
+        delete next[probeFeedbackKey(variables.modelId, 'tools')]
+        return next
+      })
       setEditModelFor(null)
       setEditModelId('')
       setEditModelDisplayName('')
@@ -185,20 +295,37 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
   const testModelMutation = useMutation({
     mutationFn: ({ modelId, probeKind }: { modelId: string; probeKind: AIModelProbeKind }) => testAIModel(modelId, probeKind),
     retry: false,
-    onSuccess: async (result) => {
-      if (result.stale || result.status === 'stale') {
-        setNotice('测试请求已结束，但配置期间发生变化；旧结果没有覆盖当前状态。')
-      } else if (result.status === 'succeeded') {
-        setNotice(result.probe_kind === 'text' ? '文本能力测试成功。' : '工具调用能力测试成功。')
-      } else if (result.status === 'unknown') {
-        setNotice('无法确认请求是否到达服务商；为避免重复费用，本站没有自动重试。')
-      } else {
-        setNotice('本次模型能力测试失败。请确认 Key、模型可用性和服务状态后再决定是否重试。')
-      }
+    onSuccess: async (result, variables) => {
+      setProbeFeedback((current) => ({
+        ...current,
+        [probeFeedbackKey(variables.modelId, variables.probeKind)]: feedbackForProbeResult(result, variables.probeKind),
+      }))
       await refreshModels()
     },
-    onError: () => setNotice('模型测试服务暂不可用，本站没有自动改用其它凭据或服务。'),
+    onError: (error, variables) => {
+      setProbeFeedback((current) => ({
+        ...current,
+        [probeFeedbackKey(variables.modelId, variables.probeKind)]: feedbackForProbeError(error),
+      }))
+    },
   })
+
+  const startModelTest = (modelId: string, probeKind: AIModelProbeKind) => {
+    const isText = probeKind === 'text'
+    const prompt = isText
+      ? '这会向服务商发送一条极短的文本请求，可能产生费用。本站不会自动重试。要继续吗？'
+      : '这会向服务商发送一条极短的工具调用请求，可能产生费用。本站不会自动重试。要继续吗？'
+    if (!window.confirm(prompt)) return
+    setNotice('')
+    setProbeFeedback((current) => ({
+      ...current,
+      [probeFeedbackKey(modelId, probeKind)]: {
+        state: 'pending',
+        message: isText ? '正在测试文本能力…' : '正在测试工具调用能力…',
+      },
+    }))
+    testModelMutation.mutate({ modelId, probeKind })
+  }
 
   return (
     <section className="mx-auto w-full max-w-3xl px-4 pb-12 pt-6 sm:pt-10">
@@ -381,16 +508,20 @@ function AIModelSettingsForUser({ userId }: { userId: number }) {
                             <div className="flex flex-wrap gap-2">
                               {model.catalog_model_id ? (
                                 <>
-                                  <Button type="button" variant="outline" className="min-h-11" disabled={testModelMutation.isPending} onClick={() => {
-                                    if (window.confirm('这会向服务商发送一条极短的文本请求，可能产生费用。本站不会自动重试。要继续吗？')) {
-                                      testModelMutation.mutate({ modelId: model.id, probeKind: 'text' })
-                                    }
-                                  }}>测试文本能力</Button>
-                                  <Button type="button" variant="outline" className="min-h-11" disabled={testModelMutation.isPending} onClick={() => {
-                                    if (window.confirm('这会向服务商发送一条极短的工具调用请求，可能产生费用。本站不会自动重试。要继续吗？')) {
-                                      testModelMutation.mutate({ modelId: model.id, probeKind: 'tools' })
-                                    }
-                                  }}>测试工具能力</Button>
+                                  <ProbeTestButton
+                                    label="测试文本能力"
+                                    pendingLabel="文本测试中…"
+                                    feedback={probeFeedback[probeFeedbackKey(model.id, 'text')]}
+                                    disabled={testModelMutation.isPending}
+                                    onClick={() => startModelTest(model.id, 'text')}
+                                  />
+                                  <ProbeTestButton
+                                    label="测试工具能力"
+                                    pendingLabel="工具测试中…"
+                                    feedback={probeFeedback[probeFeedbackKey(model.id, 'tools')]}
+                                    disabled={testModelMutation.isPending}
+                                    onClick={() => startModelTest(model.id, 'tools')}
+                                  />
                                 </>
                               ) : (
                                 <p className="self-center text-xs text-muted-foreground">该手动模型尚无预批准网关路由，暂不可测试。</p>
