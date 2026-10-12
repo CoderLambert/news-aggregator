@@ -424,7 +424,9 @@ def test_sse_disconnect_does_not_cancel_background_worker(owner, article, monkey
     provider_entered = threading.Event()
     finish_provider = threading.Event()
 
+    provider_calls = []
     def fake_stream(**kwargs):
+        provider_calls.append(1)
         kwargs['on_delta']('visible progress')
         provider_entered.set()
         assert finish_provider.wait(5)
@@ -437,22 +439,37 @@ def test_sse_disconnect_does_not_cancel_background_worker(owner, article, monkey
     assert response['Cache-Control'] == 'no-store'
     assert response['Job-ID']
     stream = iter(response.streaming_content)
+    task_id = response['Job-ID']
     try:
         first_event = next(stream)
         assert b'progress' in first_event
         assert provider_entered.wait(3)
-    finally:
         response.close()
         close = getattr(stream, 'close', None)
         if close:
             close()
-    task_id = response['Job-ID']
-    task = ChatGPTTranslationTask.objects.get(pk=task_id)
-    assert task.status == 'running'
-    finish_provider.set()
-    terminal = wait_for_terminal(task_id)
-    assert terminal.status == 'succeeded'
-    assert terminal.result['full_content_zh'] == 'complete after disconnect'
+        task = ChatGPTTranslationTask.objects.get(pk=task_id)
+        assert task.status == 'running'
+        finish_provider.set()
+        terminal = wait_for_terminal(task_id)
+        assert terminal.status == 'succeeded'
+        assert terminal.result['full_content_zh'] == 'complete after disconnect'
+        assert provider_calls == [1]
+    finally:
+        # Never leave a fake provider waiting if a success assertion fails.
+        finish_provider.set()
+        response.close()
+        close = getattr(stream, 'close', None)
+        if close:
+            close()
+        deadline = time.monotonic() + 6
+        while time.monotonic() < deadline:
+            with jobs._jobs_lock:
+                pending = (str(task_id), 1) in jobs._dispatching
+            if not pending:
+                break
+            time.sleep(0.01)
+        assert not pending, 'background test worker did not exit before cleanup'
 
 
 def test_cancel_during_token_refresh_wait_blocks_decrypt_and_network(owner, monkeypatch):

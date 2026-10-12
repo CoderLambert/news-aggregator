@@ -24,3 +24,32 @@ python scripts/verify_subscription_submission_sqlite.py --repetitions 5 --output
 ```
 
 The matrix script guards all model loading and asserts the actual journal mode before each controlled test. Provider work is explicitly forbidden by the race test. Deployment and merge remain separate authorized actions.
+
+## Worker/SSE and source-lease review corrections
+
+Review found that revalidation could silently change digest A to B while retaining lease A. Submission now freezes the initially validated digest; any later source change returns article_source_changed/409, before another task write/dispatch. The provided lease’s immutable news/source binding is also checked, covering an A→B change between lease claim and initial validation without changing token/expiry lifecycle guards. It releases only its old lease token. Two tests change the source during backoff, including a same-pk/new-token successor on source A and another source-B lease: no B task/provider dispatch is created and neither other owner is released.
+
+PR-run38242291758 at b4c03cb failed the first-event progress assertion in the SSE test (880 passed/1 failed); push-run38242230999 passed. Both records remain. The failure occurred before the test's disconnect step, not because of disconnect. Its log only named OperationalError, so the exact CI SQL cannot be recovered from that log.
+
+Bounded diagnosis used zero-model guards and isolated SQLite:
+- Natural target: base e4739ce and head b4c03cb, each memory3 and WAL3 runs (12 total), all passed without captured SQL locks; this does not refute CI's failure.
+- Exact snapshot controlled probes: e4739ce and detached b4c03cb, each provider-start UPDATE and progress UPDATE in memory/WAL once (8 runs). All four memory cases failed first-event assertions; SQL trace in test call phase, on chatgpt-translation worker, reported262 / SQLITE_LOCKED_SHAREDCACHE on api_chatgpttranslationtask UPDATE inside _mark_provider_started or _append_delta. Four WAL cases passed. Another four auxiliary probes used the b4 worktree after only the digest freeze edit; these are not part of the exact-snapshot comparison.
+- The competing reader was released and joined before call completion; the reproduced SQL error preceded disconnect and teardown, so the controlled failure is not test-cleanup contention. This reproduces two possible failure stages, not proof which stage the original CI hit.
+
+Only DB steps are retried: provider-start marker, progress append, completed-result commit and execution-guard reads reuse the same bounded, explicit SQLite lock classifier. Provider calls and the whole worker are never retried; claim, heartbeat, failure-state and cancellation lifecycle logic are not rewritten. Each attempt rechecks task/connection/generation/token/lease/source predicates; result persistence stays atomic with private/shared records. Progress/result rollback tests verify no duplicated delta or record; cancellation during retry blocks stale writes. Non-lock and missing-code worker errors still fail immediately. Logs expose fixed stage, sqlite_errorcode/name and attempt only, never source/SQL parameters/token.
+
+The original SSE success assertions remain: first event progress, task running after disconnect, final succeeded result, exactly one fake provider invocation. Its finally now unconditionally releases the fake provider and waits for this job's dispatch key to clear, so assertion failure cannot leave a test worker running into later cleanup.
+
+After-fix evidence:
+- 49 focused subscription/race/worker/SSE tests passed, including the additional pre-validation source-binding case.
+- Three controlled worker stages (provider start, progress and result commit) × memory/WAL ×3 repetitions =18 calls across6 fresh processes, all passed; actual journal mode asserted, zero model calls. Each contract finishes successfully after disconnect, one fake provider invocation, no duplicated progress. verification/subscription-worker-matrix.json.
+- Final offline Python suite:891 passed,1 real-Docker-build test deselected,3 existing warnings. First collection attempt lacked crawler on PYTHONPATH and ran no tests; corrected to backend:crawler before the successful suite. Explicit model preload/load/inference guards remained zero. No manual CI rerun.
+- Local environment Python3.14.8 / Django6.1 / SQLite3.53.1 differs from CI Python3.12.15 / Django6.1.2; results are not production failure-rate estimates. No production/container/server test or user data/key/model access. Main PR51 is not modified by this correction.
+
+Re-run the worker matrix with:
+
+```sh
+python scripts/verify_subscription_submission_sqlite.py --suite worker --repetitions 3 --output /tmp/worker-matrix.json
+```
+
+This remains bounded task DB concurrency handling, not a change to lifecycle or permissions. Old failed and successful CI stays visible; a new pushed commit must be assessed separately before merge/deployment.

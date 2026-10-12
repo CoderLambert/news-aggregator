@@ -14,7 +14,10 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--repetitions', type=int, default=5, choices=range(1, 11))
 parser.add_argument('--output', type=Path)
 parser.add_argument('--worker', choices=['memory', 'wal'])
+parser.add_argument('--suite', choices=['submission', 'worker'], default='submission')
 args = parser.parse_args()
+if args.suite == 'worker':
+    TARGET = 'backend/api/tests/test_subscription_worker_locks.py::test_sse_success_with_temporary_task_reader'
 if args.worker:
     os.chdir(ROOT)
     sys.path[:0] = [str(ROOT / 'backend'), str(ROOT)]
@@ -51,12 +54,12 @@ if args.worker:
 records = []
 for mode in ('memory', 'wal'):
     for iteration in range(1, args.repetitions + 1):
-        result = subprocess.run([sys.executable, str(Path(__file__).resolve()), '--worker', mode],
+        result = subprocess.run([sys.executable, str(Path(__file__).resolve()), '--worker', mode, '--suite', args.suite],
             cwd=ROOT, capture_output=True, text=True, timeout=40)
         print(result.stdout, end='')
         if result.stderr:
             print(result.stderr, file=sys.stderr, end='')
-        record = {'database': mode, 'iteration': iteration, 'exit_code': result.returncode,
+        record = {'suite': args.suite, 'tests_per_run': 3 if args.suite == 'worker' else 1, 'database': mode, 'iteration': iteration, 'exit_code': result.returncode,
             'model_guards_zero': 'MODEL_GUARDS: zero calls' in result.stdout}
         records.append(record)
         if args.output:

@@ -96,7 +96,7 @@ def simultaneous_submission(owner, article, monkeypatch):
     assert ChatGPTTranslationTask.objects.count() == 1
     assert ChatGPTTranslationTask.objects.get().generation == 1
     assert len(dispatches) == 1
-    assert errors and all(jobs._is_submission_sqlite_lock(error) for error in errors)
+    assert errors and all(jobs._is_task_sqlite_lock(error) for error in errors)
     jobs.stream_full_translation.assert_not_called()
     return len(errors)
 
@@ -201,7 +201,7 @@ def test_non_sqlite_vendor_does_not_retry(owner, article, monkeypatch):
     monkeypatch.setattr(connection, 'vendor', 'other')
     operation = Mock(side_effect=locked())
     with pytest.raises(OperationalError):
-        jobs._retry_submission_transaction(operation)
+        jobs._retry_task_database_operation(operation)
     operation.assert_called_once()
 
 
@@ -224,3 +224,49 @@ def test_force_reset_rolls_back_without_replaying_generation(owner, article, mon
     assert task.generation == 1 and task.status == 'failed'
     # Only the original creation was dispatched, never the failed force reset.
     assert jobs._dispatch_task.call_count == 1
+
+
+@pytest.mark.parametrize('replace_original_owner', [False, True])
+def test_source_change_during_backoff_never_attaches_wrong_lease(owner, article, monkeypatch, replace_original_owner):
+    account = make_connection(owner)
+    original_lease = shared_translations.claim_task(article)
+    create = Mock(side_effect=locked())
+    dispatch = Mock()
+    successor = []
+    other_source_owner = []
+    def change_source(_delay):
+        if replace_original_owner:
+            original_lease.finish('failed')
+            successor.append(shared_translations.claim_task(article))
+        News.objects.filter(pk=article.pk).update(full_content='Different source B')
+        other_source_owner.append(shared_translations.claim_task(News.objects.get(pk=article.pk)))
+    monkeypatch.setattr(ChatGPTTranslationTask.objects, 'get_or_create', create)
+    monkeypatch.setattr(jobs, '_dispatch_task', dispatch)
+    monkeypatch.setattr(jobs.time, 'sleep', change_source)
+    with pytest.raises(subscription.SubscriptionError) as caught:
+        jobs.start_or_get_job(owner, account, article, shared_lease=original_lease)
+    assert caught.value.error_code == 'article_source_changed'
+    assert caught.value.status_code == 409
+    assert create.call_count == 1 and ChatGPTTranslationTask.objects.count() == 0
+    assert not original_lease.current().exists()
+    assert other_source_owner[0].current().exists()
+    if successor:
+        assert successor[0].task_id == original_lease.task_id
+        assert successor[0].token != original_lease.token
+        assert successor[0].current().exists()
+    dispatch.assert_not_called()
+
+
+def test_source_change_before_first_validation_rejects_old_source_lease(owner, article, monkeypatch):
+    account = make_connection(owner)
+    original_lease = shared_translations.claim_task(article)
+    News.objects.filter(pk=article.pk).update(full_content='Source B before submission')
+    other_owner = shared_translations.claim_task(News.objects.get(pk=article.pk))
+    dispatch = Mock()
+    monkeypatch.setattr(jobs, '_dispatch_task', dispatch)
+    with pytest.raises(subscription.SubscriptionError) as caught:
+        jobs.start_or_get_job(owner, account, article, shared_lease=original_lease)
+    assert caught.value.error_code == 'article_source_changed'
+    assert ChatGPTTranslationTask.objects.count() == 0
+    assert not original_lease.current().exists() and other_owner.current().exists()
+    dispatch.assert_not_called()
