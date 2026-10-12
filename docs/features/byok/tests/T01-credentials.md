@@ -2,13 +2,13 @@
 
 对应：[T01 Task](../tasks/T01-credentials.md)。
 
-> **T01 本地验证完成；T01-03 的真实在途 worker/提交端集成仍为 NOT_RUN。** 本卡没有 worker 调用方。`credential_epoch` 是授权撤销/fencing 版本；独立的 `credential_version` 标记当前密文并参与 AAD。没有据此宣称真实 provider 兼容。
+> **T01 READY FOR REVIEW。** `credential_epoch` worker 消费端集成现有堆叠 PR #39 的合成 worker 证据；PR #39 尚未合并，独立 T01 PR #34 仍只包含凭据管理。两者均没有真实 provider 调用。`credential_epoch` 是授权撤销/fencing 版本；独立的 `credential_version` 标记当前密文并参与 AAD。
 
 | 用例 | 场景 / 失败注入 | 结果 | 证据 |
 | --- | --- | --- | --- |
 | T01-01 | 新增、名称更新、替换、停用/启用、删除；列表从数据库恢复最新状态 | PASS | API CRUD/AAD 测试；本地浏览器完成新增、改名、替换、停用/启用、刷新恢复及删除 |
 | T01-02 | 其他用户、匿名、缺 CSRF、跨站 Origin 尝试访问/写入 | PASS | API 测试验证 owner 隔离、匿名拒绝、CSRF 及 Origin 检查；其他用户得到 404 |
-| T01-03 | 替换/停用/启用/删除后，旧 credential epoch 再读取 | PARTIAL | 回归测试证明 `require_active_connection` 拒绝旧授权 epoch，接受当前 epoch；在途 worker 在 T01 范围内不存在，端到端“不提交结果”集成验证为 NOT_RUN |
+| T01-03 | 替换/停用/启用/删除后，旧 credential epoch 再读取 | PASS（堆叠 PR #39） | 本卡服务测试证明旧 epoch 被拒绝；T05 worker 测试证明旧 epoch 仍在队列时 provider 不启动，且在途撤销时不保存部分结果、不发送 `complete`。PR #39 尚未合并，见下方跨卡证据 |
 | T01-04 | 读取、保存、替换、改名不触达 provider；状态不冒称已验证 | PASS | 受控 socket connect 禁止测试、状态固定 `not_tested`；本地浏览器未发 provider 请求，Key 不进入浏览器持久存储 |
 | T01-05 | 功能开关关闭、只读模式、缺加密密钥 | PASS | 缺密钥时新建/替换/重新启用拒绝 503；停用/删除仍成功撤销；重启服务检查设置默认关闭 |
 
@@ -35,7 +35,7 @@
 
 ### 2026-10-12 当前提交复测
 
-在 T01 分支当前 HEAD `5cd9bc52c8282629a724d27f22575b94a183f764` 上重跑定向回归；代码未改动。后端沿用 `/tmp/byok-t01-verify-20261012` 的隔离 Python 3.14.8 环境、空 HOME、导入 stub 和全新 SQLite `/tmp/byok-t01-verification-20261012c.sqlite3`，命令仍为上文“后端实现后”七个测试文件的 `env -i ... pytest -q` 命令：
+在 T01 实现代码 HEAD `5cd9bc52c8282629a724d27f22575b94a183f764` 上重跑定向回归；之后的 T01 提交仅更新了文档。后端沿用 `/tmp/byok-t01-verify-20261012` 的隔离 Python 3.14.8 环境、空 HOME、导入 stub 和全新 SQLite `/tmp/byok-t01-verification-20261012c.sqlite3`，命令仍为上文“后端实现后”七个测试文件的 `env -i ... pytest -q` 命令：
 
 ```text
 154 passed, 2 warnings in 21.17s
@@ -49,7 +49,16 @@ Tests       65 passed (65)
 Duration    5.62s
 ```
 
-这次复测重新确认当前提交的连接管理 API 和 UI 回归；T01-03 在途 worker/结果提交拦截仍未实现、未验证，不能由服务层 epoch gate 测试推导为端到端 PASS。
+这次复测重新确认当前提交的连接管理 API 和 UI 回归。上述 154 项和 65 项仅覆盖 T01 自身；worker 消费端由下方堆叠 T05 测试补齐，不将服务层 epoch gate 单独推导为端到端通过。
+
+### T01-03 跨卡 worker 消费端证据（2026-10-12）
+
+T01 分支本身没有翻译 worker；T05 堆叠 PR #39 (`task/byok-T05-private-translation`) 在 head `54df6ab` 增加并运行了两个合成 worker 用例：
+
+- `test_queued_translation_after_credential_revocation_never_starts_provider`：epoch 1 的任务保持排队时停用连接并递增 epoch；worker 将任务置为 `failed/execution_changed`，`provider_started=false`，没有调用 provider，结果/进度为空且没有 SSE `complete`。
+- `test_credential_epoch_change_during_worker_discards_partial_output`：在途合成流发生撤销后，worker 停止、丢弃未完成结果且不发送 SSE `complete`。
+
+T05 的新增后端测试文件在该 head 上为 `11 passed in 4.95s`。这验证了 T01 `credential_epoch` 契约接入 worker 后的撤销栅栏；它依赖尚未合并的下游 PR #39，不能算作 T01 PR #34 单独包含 worker，也不构成真实 SDK、Proxy 或 Provider 兼容证据。
 
 最初用户报告的基线 `ea2ce55ae22e19e1604e88031b824b68f2666cec` 已由基线前合入的文档 PR #31 前移至以上 tracking ref。实现基于该 ref 建立的独立工作树；最终实时 `git ls-remote` 因 DNS 无法解析 `github.com` 暂不可验证。
 
@@ -194,4 +203,4 @@ python -m py_compile api/ai_connection_views.py api/services/ai_credentials.py \
 
 登录用户打开 `/settings/ai`，选择固定官方端点，输入 API Key 并保存；成功后 Key 输入框清空，只显示掩码及“未测试”。列表支持刷新、改连接名、替换 Key、停用/启用和删除。另一个账户的列表不显示该连接；直接改其他用户 UUID 返回 404。所有更改仍由 Session/CSRF 与服务端 owner 校验保护。
 
-未验证项：worker 接入后的旧 epoch 在途提交拦截；任何官方 SDK/Proxy/真实厂商调用。以上保持 NOT_RUN，留给对应后续实现卡验证。`npm ci` 在已有锁文件下安装依赖时显示 19 个 audit findings；本卡未升级依赖或更改 lockfile。
+未验证项：真实 SDK/Proxy/厂商调用、生产部署和真实用户 UAT，均保持 NOT_RUN。旧 epoch 的 worker 消费端已在下游 T05 PR #39 用合成 worker 集成验证，但该 PR 尚未合并，且 T01 PR #34 自身不包含该 worker。`npm ci` 在已有锁文件下安装依赖时显示 19 个 audit findings；本卡未升级依赖或更改 lockfile。
