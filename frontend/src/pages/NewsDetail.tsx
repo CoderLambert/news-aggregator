@@ -105,8 +105,13 @@ export default function NewsDetail() {
   const handleSpeak = useCallback((language: SpeechLanguage, scope: SpeechScope) => {
     if (!ttsEnabled || !news) return
     const speechTitle = language === 'zh' ? (news.title_zh || news.title) : news.title
-    speechPlayer.speak(news.id, speechTitle, { language, scope })
-  }, [news, speechPlayer, ttsEnabled])
+    const resultId = language === 'zh' && scope === 'full'
+      ? news.full_content_zh_result_id || (privateTranslation.privateTranslationResultCurrentMatch
+        ? privateTranslation.privateTranslationResultId
+        : null)
+      : null
+    speechPlayer.speak(news.id, speechTitle, { language, scope, resultId })
+  }, [news, privateTranslation.privateTranslationResultCurrentMatch, privateTranslation.privateTranslationResultId, speechPlayer, ttsEnabled])
   const handleTranslateAndPlay = useCallback((scope: SpeechScope) => {
     if (!ttsEnabled || !translationEnabled) return
     if (!user) {
@@ -228,7 +233,7 @@ export default function NewsDetail() {
                 <SpeechStartMenu
                   isEnglishSource={isEnglishSource}
                   hasOriginalFull={Boolean(news.full_content)}
-                  hasChineseFull={isEnglishSource ? Boolean(news.full_content_zh) : Boolean(news.full_content)}
+                  hasChineseFull={isEnglishSource ? Boolean(news.full_content_zh || (privateTranslation.privateTranslationResultCurrentMatch && privateTranslation.privateTranslationResult)) : Boolean(news.full_content)}
                   hasChineseSummary={isEnglishSource ? Boolean(news.content_zh) : Boolean(news.content)}
                   translating={translating}
                   onPlay={handleSpeak}
@@ -277,6 +282,8 @@ export default function NewsDetail() {
               privateTranslationProgress={privateTranslation.privateTranslationProgress}
               privateTranslationResult={privateTranslation.privateTranslationResult}
               privateTranslationResultId={privateTranslation.privateTranslationResultId}
+              privateTranslationResultCurrentMatch={privateTranslation.privateTranslationResultCurrentMatch}
+              privateTranslationStaleResult={privateTranslation.privateTranslationStaleResult}
               privateTranslationJobId={privateTranslation.privateTranslationJobId}
               onStartPrivateTranslation={() => { void privateTranslation.startPrivateTranslation() }}
               onCancelPrivateTranslation={() => { void privateTranslation.cancelPrivateTranslation() }}
@@ -296,6 +303,9 @@ export default function NewsDetail() {
         </div>}
         {chatEnabled && <LazyNewsChatAssistant
           newsId={id ?? String(news.id)}
+          translationResultId={news.full_content_zh_result_id || (privateTranslation.privateTranslationResultCurrentMatch
+            ? privateTranslation.privateTranslationResultId
+            : null)}
           open={assistantOpen}
           onOpenChange={handleAssistantOpenChange}
           articleContext={{

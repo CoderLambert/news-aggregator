@@ -24,12 +24,19 @@ def _no_store(response):
 
 
 def _task_payload(task):
+    result = task.result
+    if task.ai_connection_id is not None and task.status == 'succeeded' and isinstance(result, dict):
+        from api.services.shared_translations import source_hash
+
+        result = dict(result)
+        result['result_id'] = str(task.pk)
+        result['current_match'] = task.source_hash == source_hash(task.news.full_content or '')
     return {
         'id': str(task.pk),
         'status': task.status,
         'generation': task.generation,
         'progress': task.progress,
-        'result': task.result,
+        'result': result,
         'error_code': task.error_code,
         'error_message': task.error_message,
         'updated_at': task.updated_at.isoformat(),
@@ -142,6 +149,39 @@ class PrivateTranslationTaskView(APIView):
         if task is None or task.ai_connection_id is None:
             return _no_store(Response({'error': '任务不存在。'}, status=status.HTTP_404_NOT_FOUND))
         return _no_store(Response(_task_payload(task)))
+
+
+class PrivateTranslationResultView(APIView):
+    """Read one saved BYOK result without consulting its current credential."""
+
+    authentication_classes = [AnonymousCsrfSessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, result_id):
+        from api.services.article_translations import (
+            TranslationResultNotFound,
+            get_byok_result_for_owner,
+            result_payload,
+        )
+
+        try:
+            result = get_byok_result_for_owner(request.user, str(result_id))
+        except TranslationResultNotFound:
+            return _no_store(Response(
+                {'error': '译文结果不存在。', 'error_code': 'translation_result_not_found'},
+                status=status.HTTP_404_NOT_FOUND,
+            ))
+        payload = result_payload(result)
+        return _no_store(Response({
+            'result_id': result.result_id,
+            'full_content_zh': result.content,
+            'full_content_zh_source': 'byok',
+            'full_content_zh_scope': 'private',
+            'full_content_zh_fetched_at': result.fetched_at.isoformat() if result.fetched_at else None,
+            'source_hash': result.source_hash,
+            'current_match': result.current_match,
+            'model_source': payload['model_source'],
+        }))
 
 
 class PrivateTranslationCancelView(APIView):

@@ -22,6 +22,7 @@ interface ActiveArticle {
   title: string
   language: SpeechLanguage
   scope: SpeechScope
+  resultId: string | null
 }
 
 type SpeechOptions = SpeechRequestOptions
@@ -52,8 +53,9 @@ function persist(key: string, value: string): void {
   }
 }
 
-function positionKey(article: Pick<ActiveArticle, 'id' | 'language' | 'scope'>): string {
-  return `${POSITION_KEY_PREFIX}${article.id}_${article.language}_${article.scope}`
+function positionKey(article: Pick<ActiveArticle, 'id' | 'language' | 'scope' | 'resultId'>): string {
+  const currentKey = `${POSITION_KEY_PREFIX}${article.id}_${article.language}_${article.scope}`
+  return article.resultId ? `${currentKey}_${article.resultId}` : currentKey
 }
 
 export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
@@ -193,8 +195,15 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
         : requestedVoice === 'guy' ? 'yunyang' : requestedVoice,
       scope: overrides.scope ?? scope,
       language: selectedLanguage,
+      resultId: overrides.resultId ?? null,
     }
-    const article = { id, title: articleTitle, language: selected.language, scope: selected.scope }
+    const article = {
+      id,
+      title: articleTitle,
+      language: selected.language,
+      scope: selected.scope,
+      resultId: selected.resultId ?? null,
+    }
     const audio = new Audio()
     audioRef.current = audio
     activeArticleRef.current = article
@@ -265,6 +274,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     }
 
     const query = new URLSearchParams({ language: selected.language, voice: selected.voice, scope: selected.scope })
+    if (selected.resultId) query.set('result_id', selected.resultId)
     audio.src = `/api/news/${id}/tts/?${query.toString()}`
     updateMediaSession(articleTitle, audio, requestId)
     audio.load()

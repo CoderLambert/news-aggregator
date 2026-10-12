@@ -35,6 +35,7 @@ interface PendingTurn {
   status: 'streaming' | 'uncertain'
   webSearch: boolean
   modelConfigId: string | null
+  translationResultId: string | null
   historyBoundary: ChatMessage[] | null
   historyBoundaryData: ChatHistory | undefined
   reconciliation: ReconciliationState
@@ -49,6 +50,7 @@ interface ActiveRequest {
   assistant: ChatMessage
   webSearch: boolean
   modelConfigId: string | null
+  translationResultId: string | null
   historyBoundary: ChatMessage[] | null
   historyBoundaryData: ChatHistory | undefined
 }
@@ -166,6 +168,7 @@ function snapshotActiveRequest(request: ActiveRequest): PendingTurn {
     status: 'uncertain',
     webSearch: request.webSearch,
     modelConfigId: request.modelConfigId,
+    translationResultId: request.translationResultId,
     historyBoundary: request.historyBoundary,
     historyBoundaryData: request.historyBoundaryData,
     reconciliation: 'checking',
@@ -177,6 +180,7 @@ export function useChat(
   newsId: string | number | null | undefined,
   enabled: boolean,
   selectedModelConfigId: string | null = null,
+  translationResultId: string | null = null,
 ) {
   const queryClient = useQueryClient()
   const { user, loading: authLoading } = useAuth()
@@ -371,6 +375,7 @@ export function useChat(
     text: string,
     explicitlyResending = false,
     modelConfigIdOverride?: string | null,
+    translationResultIdOverride?: string | null,
   ): Promise<boolean> => {
     const trimmed = text.trim()
     const clearInFlight = clearControllerRef.current?.ownerKey === ownerKey
@@ -396,6 +401,9 @@ export function useChat(
       : { id: `${turnId}-assistant`, role: 'assistant', content: '' }
     const webSearch = currentWebSearch
     const modelConfigId = modelConfigIdOverride === undefined ? selectedModelConfigId : modelConfigIdOverride
+    const selectedTranslationResultId = translationResultIdOverride === undefined
+      ? translationResultId
+      : translationResultIdOverride
     if (webSearch) assistantMessage.web_search = true
     const historyAtSend = queryClient.getQueryData<ChatHistory>(historyKey)
     const turn: PendingTurn = {
@@ -406,6 +414,7 @@ export function useChat(
       status: 'streaming',
       webSearch,
       modelConfigId,
+      translationResultId: selectedTranslationResultId,
       historyBoundary: copyChatHistoryBoundary(historyAtSend?.messages),
       historyBoundaryData: historyAtSend,
       reconciliation: 'idle',
@@ -422,6 +431,7 @@ export function useChat(
       assistant: assistantMessage,
       webSearch,
       modelConfigId,
+      translationResultId: selectedTranslationResultId,
       historyBoundary: turn.historyBoundary,
       historyBoundaryData: turn.historyBoundaryData,
     }
@@ -438,6 +448,7 @@ export function useChat(
         for await (const chunk of chatStream(parsedId, trimmed, {
           webSearch,
           modelConfigId: request.modelConfigId,
+          translationResultId: request.translationResultId,
           signal: request.controller.signal,
         })) {
           if (!isCurrent()) return false
@@ -521,7 +532,7 @@ export function useChat(
         if (isCurrent()) requestRef.current = null
       }
     })()
-  }, [authLoading, clearState, currentWebSearch, enabled, historyKey, isLoading, ownerKey, parsedId, pendingTurnState, queryClient, reconcileInterruptedTurn, selectedModelConfigId, setInput, setPendingTurn, updatePendingTurn, updatePhase])
+  }, [authLoading, clearState, currentWebSearch, enabled, historyKey, isLoading, ownerKey, parsedId, pendingTurnState, queryClient, reconcileInterruptedTurn, selectedModelConfigId, setInput, setPendingTurn, translationResultId, updatePendingTurn, updatePhase])
 
   const doSend = useCallback((text: string): Promise<boolean> => sendMessage(text), [sendMessage])
   const handleSend = useCallback(() => doSend(inputRef.current), [doSend])
@@ -624,7 +635,12 @@ export function useChat(
       currentPendingTurn?.status !== 'uncertain' || currentPendingTurn.serverQuestionSaved ||
       currentPendingTurn.reconciliation === 'checking'
     ) return Promise.resolve(false)
-    return sendMessage(currentPendingTurn.user.content, true, currentPendingTurn.modelConfigId)
+    return sendMessage(
+      currentPendingTurn.user.content,
+      true,
+      currentPendingTurn.modelConfigId,
+      currentPendingTurn.translationResultId,
+    )
   }, [currentPendingTurn, sendMessage])
 
   const toggleWebSearch = useCallback(() => {

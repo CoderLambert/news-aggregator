@@ -127,6 +127,22 @@ describe('chatStream', () => {
     expect(init.signal).toBe(controller.signal)
     expect(JSON.parse(init.body)).toEqual({ question: '你好', web_search: true })
   })
+
+  it('forwards an explicit private translation result for the article context', async () => {
+    globalThis.fetch.mockResolvedValueOnce(streamResponse(['Hello']))
+    const controller = new AbortController()
+    await collect(chatStream('1', '你好', {
+      webSearch: false,
+      translationResultId: '11111111-1111-4111-8111-111111111111',
+      signal: controller.signal,
+    }))
+    const [, init] = globalThis.fetch.mock.calls[0]
+    expect(JSON.parse(init.body)).toEqual({
+      question: '你好',
+      web_search: false,
+      translation_result_id: '11111111-1111-4111-8111-111111111111',
+    })
+  })
 })
 
 describe('createResearchStream', () => {

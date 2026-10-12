@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import type { NewsDetail } from '@/types/news'
+import type { PrivateTranslationResult } from '@/services/newsWorkflowApi'
 import MarkdownContent from './MarkdownContent'
 import ErrorBanner from './ErrorBanner'
 
@@ -32,6 +33,8 @@ interface FullContentSectionProps {
   privateTranslationProgress?: string
   privateTranslationResult?: string
   privateTranslationResultId?: string
+  privateTranslationResultCurrentMatch?: boolean | null
+  privateTranslationStaleResult?: PrivateTranslationResult | null
   privateTranslationJobId?: string
   onStartPrivateTranslation?: () => void
   onCancelPrivateTranslation?: () => void
@@ -61,6 +64,8 @@ export default function FullContentSection({
   privateTranslationProgress = '',
   privateTranslationResult = '',
   privateTranslationResultId = '',
+  privateTranslationResultCurrentMatch = null,
+  privateTranslationStaleResult = null,
   privateTranslationJobId = '',
   onStartPrivateTranslation = () => {},
   onCancelPrivateTranslation = () => {},
@@ -83,7 +88,7 @@ export default function FullContentSection({
         allowTranslation={allowTranslation}
         allowPrivateTranslation={allowPrivateTranslation}
         privateTranslationActive={privateTranslationActive}
-        hasPrivateTranslation={Boolean(privateTranslationResult)}
+        hasPrivateTranslation={Boolean(privateTranslationResult && privateTranslationResultCurrentMatch !== false)}
         onStartPrivateTranslation={onStartPrivateTranslation}
       />
 
@@ -107,7 +112,8 @@ export default function FullContentSection({
       {allowPrivateTranslation && privateTranslationError && (
         <p role="alert" className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{privateTranslationError}</p>
       )}
-      {allowPrivateTranslation && privateTranslationResult && (
+      {allowPrivateTranslation && privateTranslationResult && privateTranslationResultCurrentMatch !== false &&
+        privateTranslationResultId !== news.full_content_zh_result_id && (
         <Card className="mb-6 border-violet-200 bg-violet-50/30 py-5">
           <CardContent className="px-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -118,6 +124,19 @@ export default function FullContentSection({
               {privateTranslationResultId && <span className="text-[11px] text-muted-foreground">结果 {privateTranslationResultId.slice(0, 8)}</span>}
             </div>
             <MarkdownContent content={privateTranslationResult} />
+          </CardContent>
+        </Card>
+      )}
+      {allowPrivateTranslation && privateTranslationStaleResult && (
+        <Card className="mb-6 border-amber-200 bg-amber-50/40 py-5">
+          <CardContent className="px-5">
+            <details>
+              <summary className="cursor-pointer text-sm font-semibold text-amber-900">
+                上一版个人译文 · 原文已更新（{privateTranslationStaleResult.modelSource?.model || '已保存结果'}）
+              </summary>
+              <p className="mt-2 text-xs text-amber-800">这份结果仍保存在你的账号中，但它对应旧版原文，详情、问答和朗读不会将它当作当前译文。</p>
+              <div className="mt-4"><MarkdownContent content={privateTranslationStaleResult.text} /></div>
+            </details>
           </CardContent>
         </Card>
       )}
@@ -172,6 +191,14 @@ function Toolbar({ news, translating, translationPaused, translateError, showOri
               <Badge variant="violet" className="rounded-full px-2.5 py-0.5 text-[11px] font-medium">
                 <Languages className="size-3" />{news.full_content_zh_scope === 'shared' ? '共享译文' : news.full_content_zh_scope === 'private' ? '个人译文' : '已有中文译文'}
               </Badge>
+            )}
+            {news.full_content_zh_model_source?.model && (
+              <Badge variant="secondary" className="rounded-full px-2.5 py-0.5 text-[11px] font-medium">
+                {news.full_content_zh_model_source.model}
+              </Badge>
+            )}
+            {news.full_content_zh_current_match === false && (
+              <Badge variant="outline" className="rounded-full px-2.5 py-0.5 text-[11px] font-medium text-amber-800">原文已更新</Badge>
             )}
           </div>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">

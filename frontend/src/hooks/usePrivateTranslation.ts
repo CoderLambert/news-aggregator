@@ -2,8 +2,10 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useAuth } from '@/context/AuthContext'
 import {
   cancelPrivateTranslationJob,
+  getPrivateTranslationResult,
   getPrivateTranslationJob,
   translatePrivateFullArticleStream,
+  type PrivateTranslationResult,
 } from '@/services/newsWorkflowApi'
 import { parseNewsId } from '@/services/newsWorkflowQueries'
 import { isRecord, type NewsDetail } from '@/types/news'
@@ -15,6 +17,7 @@ interface PrivateTranslationState {
   progress: string
   result: string
   resultId: string
+  resultCurrentMatch: boolean | null
   jobId: string
 }
 
@@ -25,7 +28,7 @@ interface PrivateTranslationRequest {
 }
 
 const EMPTY_STATE: PrivateTranslationState = {
-  ownerKey: '', active: false, error: '', progress: '', result: '', resultId: '', jobId: '',
+  ownerKey: '', active: false, error: '', progress: '', result: '', resultId: '', resultCurrentMatch: null, jobId: '',
 }
 
 function recoveryKey(viewerId: string | number, newsId: number): string {
@@ -49,11 +52,11 @@ function saveRecovery(viewerId: string | number, newsId: number, jobId: string):
   }
 }
 
-function resultFromTask(task: { result: Record<string, unknown> }): { text: string; id: string } | null {
+function resultFromTask(task: { result: Record<string, unknown> }): { text: string; id: string; currentMatch: boolean } | null {
   const text = task.result.full_content_zh
   const id = task.result.result_id
   return typeof text === 'string' && text.trim() && typeof id === 'string'
-    ? { text, id }
+    ? { text, id, currentMatch: typeof task.result.current_match === 'boolean' ? task.result.current_match : true }
     : null
 }
 
@@ -97,7 +100,12 @@ export function usePrivateTranslation(
   const ownerRef = useRef(ownerKey)
   const requestRef = useRef<PrivateTranslationRequest | null>(null)
   const [state, setState] = useState(EMPTY_STATE)
+  const [staleResult, setStaleResult] = useState<{ ownerKey: string; resultId: string; result: PrivateTranslationResult } | null>(null)
   const visible = state.ownerKey === ownerKey ? state : EMPTY_STATE
+  const visibleStaleResult = staleResult?.ownerKey === ownerKey &&
+    staleResult.resultId === news?.full_content_zh_stale_result_id
+    ? staleResult.result
+    : null
 
   useLayoutEffect(() => { ownerRef.current = ownerKey }, [ownerKey])
 
@@ -117,9 +125,9 @@ export function usePrivateTranslation(
       progress: task.progress,
       jobId: task.id,
       ...(completedResult
-        ? { result: completedResult.text, resultId: completedResult.id, error: '' }
+        ? { result: completedResult.text, resultId: completedResult.id, resultCurrentMatch: completedResult.currentMatch, error: '' }
         : task.status === 'succeeded'
-          ? { result: '', resultId: '', error: '翻译任务结束，但没有可恢复的完整译文。' }
+          ? { result: '', resultId: '', resultCurrentMatch: null, error: '翻译任务结束，但没有可恢复的完整译文。' }
           : { error: task.errorMessage || (task.status === 'cancelled' ? '本次个人翻译已取消。' : '个人翻译任务未完成。') }),
     })
   }, [updateState])
@@ -169,6 +177,21 @@ export function usePrivateTranslation(
     }
   }, [enabled, followTask, isAuthenticated, loading, news?.id, newsId, ownerKey, updateState, viewerId])
 
+  useEffect(() => {
+    const resultId = news?.full_content_zh_stale_result_id
+    if (loading || !isAuthenticated || !resultId) return
+    const controller = new AbortController()
+    void getPrivateTranslationResult(resultId, controller.signal)
+      .then((result) => {
+        if (controller.signal.aborted || ownerRef.current !== ownerKey || result.currentMatch) return
+        setStaleResult({ ownerKey, resultId, result })
+      })
+      .catch(() => {
+        if (!controller.signal.aborted && ownerRef.current === ownerKey) setStaleResult(null)
+      })
+    return () => controller.abort()
+  }, [isAuthenticated, loading, news?.full_content_zh_stale_result_id, ownerKey])
+
   const startPrivateTranslation = useCallback(async () => {
     if (!enabled || !isAuthenticated || newsId === null || !news || news.id !== newsId || !news.full_content) return
     requestRef.current?.controller.abort()
@@ -204,7 +227,7 @@ export function usePrivateTranslation(
           if (!result) {
             updateState({ active: false, error: '个人翻译没有返回可保存的完整译文。' })
           } else {
-            updateState({ active: false, error: '', result: result.text, resultId: result.id })
+            updateState({ active: false, error: '', result: result.text, resultId: result.id, resultCurrentMatch: result.currentMatch })
           }
         }
       }
@@ -250,6 +273,8 @@ export function usePrivateTranslation(
     privateTranslationProgress: visible.progress,
     privateTranslationResult: visible.result,
     privateTranslationResultId: visible.resultId,
+    privateTranslationResultCurrentMatch: visible.resultCurrentMatch,
+    privateTranslationStaleResult: visibleStaleResult,
     privateTranslationJobId: visible.jobId,
     startPrivateTranslation,
     cancelPrivateTranslation,

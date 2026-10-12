@@ -65,6 +65,12 @@ export interface NewsDetail extends NewsSummary {
   full_content_zh_fetched_at: string | null
   full_content_zh_source: string | null
   full_content_zh_scope?: string | null
+  full_content_zh_result_id?: string | null
+  full_content_zh_source_hash?: string | null
+  full_content_zh_current_match?: boolean | null
+  full_content_zh_model_source?: { provider: string | null; model: string | null } | null
+  full_content_zh_stale_result_id?: string | null
+  full_content_zh_stale_model_source?: { provider: string | null; model: string | null } | null
   full_translation_personal_available?: boolean
   full_translation_active: boolean
 }
@@ -173,6 +179,22 @@ export function parseNewsDetail(value: unknown): NewsDetail {
     full_content_zh_fetched_at: nullableDate('full_content_zh_fetched_at'),
     full_content_zh_source: typeof value.full_content_zh_source === 'string' ? value.full_content_zh_source : null,
     full_content_zh_scope: typeof value.full_content_zh_scope === 'string' ? value.full_content_zh_scope : null,
+    full_content_zh_result_id: typeof value.full_content_zh_result_id === 'string' ? value.full_content_zh_result_id : null,
+    full_content_zh_source_hash: typeof value.full_content_zh_source_hash === 'string' ? value.full_content_zh_source_hash : null,
+    full_content_zh_current_match: typeof value.full_content_zh_current_match === 'boolean' ? value.full_content_zh_current_match : null,
+    full_content_zh_model_source: isRecord(value.full_content_zh_model_source)
+      ? {
+          provider: typeof value.full_content_zh_model_source.provider === 'string' ? value.full_content_zh_model_source.provider : null,
+          model: typeof value.full_content_zh_model_source.model === 'string' ? value.full_content_zh_model_source.model : null,
+        }
+      : null,
+    full_content_zh_stale_result_id: typeof value.full_content_zh_stale_result_id === 'string' ? value.full_content_zh_stale_result_id : null,
+    full_content_zh_stale_model_source: isRecord(value.full_content_zh_stale_model_source)
+      ? {
+          provider: typeof value.full_content_zh_stale_model_source.provider === 'string' ? value.full_content_zh_stale_model_source.provider : null,
+          model: typeof value.full_content_zh_stale_model_source.model === 'string' ? value.full_content_zh_stale_model_source.model : null,
+        }
+      : null,
     full_translation_personal_available: value.full_translation_personal_available === true,
     full_translation_active: typeof value.full_translation_active === 'boolean' ? value.full_translation_active : false,
   }

@@ -16,6 +16,7 @@ urlpatterns = [
     path('ai/preferences/', ai_preference_views.UserAITaskPreferencesView.as_view(), name='ai-task-preferences'),
     path('ai/translation/news/<int:news_id>/', ai_translation_views.PrivateTranslationStartView.as_view(), name='ai-translation-start'),
     path('ai/translation/jobs/<uuid:job_id>/', ai_translation_views.PrivateTranslationTaskView.as_view(), name='ai-translation-job'),
+    path('ai/translation/results/<str:result_id>/', ai_translation_views.PrivateTranslationResultView.as_view(), name='ai-translation-result'),
     path('ai/translation/jobs/<uuid:job_id>/cancel/', ai_translation_views.PrivateTranslationCancelView.as_view(), name='ai-translation-job-cancel'),
     path('ai/models/catalog/', ai_model_views.AIModelCatalogView.as_view(), name='ai-model-catalog'),
     path('ai/models/', ai_model_views.UserAIModelListCreateView.as_view(), name='ai-model-list'),

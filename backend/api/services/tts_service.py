@@ -107,14 +107,21 @@ def build_cache_variant(resolved: ResolvedTTSContent, scope: str, voice: str, sp
     return ':'.join((resolved.language, scope, voice, resolved.namespace, text_digest))
 
 
-def resolve_tts_content(news, user, language: str, scope: str) -> ResolvedTTSContent:
+def resolve_tts_content(
+    news, user, language: str, scope: str, result_id: str | None = None,
+) -> ResolvedTTSContent:
     """Resolve speech content using the same private translation boundary as detail serialization."""
     if language not in {'zh', 'original'}:
         raise TTSContentUnavailable('unsupported_language', '不支持的朗读语言。')
     if scope not in {'summary', 'full'}:
         raise TTSContentUnavailable('unsupported_scope', '不支持的朗读范围。')
 
+    if result_id is not None and (language != 'zh' or scope != 'full'):
+        raise TTSContentUnavailable('translation_result_not_found', '译文结果不存在。')
+
     source_language = getattr(news.source, 'language', '')
+    if result_id is not None and source_language == 'zh':
+        raise TTSContentUnavailable('translation_result_not_found', '译文结果不存在。')
     if language == 'original' or source_language == 'zh':
         content = news.full_content if scope == 'full' else news.content
         if not content:
@@ -134,41 +141,35 @@ def resolve_tts_content(news, user, language: str, scope: str) -> ResolvedTTSCon
             language='zh', title=news.title_zh, content=content, namespace='shared-summary',
         )
 
-    if not news.full_content:
+    if not news.full_content and result_id is None:
         raise TTSContentUnavailable('source_content_required', '请先获取完整原文，再翻译并朗读。')
 
-    from api.models import ChatGPTArticleTranslation
-    from api.services.chatgpt_subscription import active_connection_for_user, source_hash
+    from api.services.article_translations import (
+        TranslationResultNotFound,
+        resolve_article_translation,
+    )
 
-    connection = active_connection_for_user(user)
-    if connection is not None:
-        translation = ChatGPTArticleTranslation.objects.filter(
-            user=user,
-            connection=connection,
-            news=news,
-            source_hash=source_hash(news.full_content),
-        ).first()
-        if translation is not None and translation.content:
-            return ResolvedTTSContent(
-                language='zh',
-                title=news.title_zh,
-                content=translation.content,
-                namespace=f'subscription:{user.pk}:{connection.pk}',
-            )
-
-    from api.services.shared_translations import get_shared_translation
-    shared = get_shared_translation(news)
-    if shared is not None:
+    try:
+        translation = resolve_article_translation(news, user=user, result_id=result_id)
+    except TranslationResultNotFound:
+        raise TTSContentUnavailable('translation_result_not_found', '译文结果不存在。') from None
+    if translation is not None:
+        if translation.source == 'byok':
+            namespace = f'byok:{user.pk}:result:{translation.result_id}'
+        elif translation.source == 'subscription':
+            namespace = f'subscription:{user.pk}:result:{translation.result_id}'
+        else:
+            namespace = f'{translation.source}-full'
         return ResolvedTTSContent(
-            language='zh', title=news.title_zh, content=shared.content,
-            namespace='shared-full',
+            language='zh',
+            title=news.title_zh or news.title,
+            content=translation.content,
+            namespace=namespace,
         )
 
-    if connection is not None or not news.full_content_zh:
-        raise TTSContentUnavailable('translation_required', '请先翻译全文，再播放中文语音。')
-    return ResolvedTTSContent(
-        language='zh', title=news.title_zh, content=news.full_content_zh, namespace='shared-full',
-    )
+    if result_id is not None:
+        raise TTSContentUnavailable('translation_result_not_found', '译文结果不存在。')
+    raise TTSContentUnavailable('translation_required', '请先翻译全文，再播放中文语音。')
 
 
 # How many seconds a cached file can go untouched before considered expired.

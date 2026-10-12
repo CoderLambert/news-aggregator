@@ -148,6 +148,7 @@ interface SuggestedQuestionsOptions {
 interface ChatStreamOptions {
   webSearch?: boolean
   modelConfigId?: string | null
+  translationResultId?: string | null
   signal?: AbortSignal
 }
 
@@ -786,13 +787,14 @@ export async function* translatePrivateFullArticleStream(
 export async function* chatStream(
   newsId: NewsId,
   question: string,
-  { webSearch = false, modelConfigId = null, signal }: ChatStreamOptions = {},
+  { webSearch = false, modelConfigId = null, translationResultId = null, signal }: ChatStreamOptions = {},
 ): AsyncGenerator<string> {
   const response = await streamingFetch(`/api/news/${newsId}/chat/`, {
     body: JSON.stringify({
       question,
       web_search: webSearch,
       ...(modelConfigId ? { model_config_id: modelConfigId } : {}),
+      ...(translationResultId ? { translation_result_id: translationResultId } : {}),
     }),
     signal,
   })
@@ -1005,6 +1007,10 @@ export function cancelChatGPTTranslationTask(jobId: string, generation: number):
 
 export function getPrivateTranslationTask(jobId: string, signal?: AbortSignal): Promise<unknown> {
   return api.get<unknown>(`/ai/translation/jobs/${jobId}/`, { signal }).then(({ data }) => data)
+}
+
+export function getPrivateTranslationResult(resultId: string, signal?: AbortSignal): Promise<unknown> {
+  return api.get<unknown>(`/ai/translation/results/${resultId}/`, { signal }).then(({ data }) => data)
 }
 
 export function cancelPrivateTranslationTask(jobId: string, generation: number): Promise<unknown> {

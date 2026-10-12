@@ -9,6 +9,7 @@ vi.mock('@/services/newsWorkflowApi', async (importOriginal) => ({
   ...await importOriginal(),
   cancelPrivateTranslationJob: vi.fn(),
   getPrivateTranslationJob: vi.fn(),
+  getPrivateTranslationResult: vi.fn(),
   translatePrivateFullArticleStream: vi.fn(),
 }))
 
@@ -141,5 +142,22 @@ describe('usePrivateTranslation', () => {
     expect(result.current.privateTranslationResult).toBe('旧的成功译文')
     expect(result.current.privateTranslationResultId).toBe('result-old')
     unmount()
+  })
+
+  it('loads a saved stale result by id and keeps it separate from current content', async () => {
+    api.getPrivateTranslationResult.mockResolvedValue({
+      resultId: 'stale-result-id',
+      text: '旧版本已保存的译文',
+      sourceHash: 'old-source-hash',
+      currentMatch: false,
+      modelSource: { provider: 'DeepSeek', model: 'DeepSeek Flash' },
+    })
+    const news = { ...article(), full_content_zh_stale_result_id: 'stale-result-id' }
+
+    const { result } = renderHook(() => usePrivateTranslation(42, news, false, false), { wrapper })
+
+    await waitFor(() => expect(result.current.privateTranslationStaleResult?.text).toBe('旧版本已保存的译文'))
+    expect(api.getPrivateTranslationResult).toHaveBeenCalledWith('stale-result-id', expect.any(AbortSignal))
+    expect(result.current.privateTranslationResult).toBe('')
   })
 })

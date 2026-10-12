@@ -120,7 +120,7 @@ describe('NewsChatAssistant open state', () => {
     await waitFor(() => expect(modelSelector.querySelectorAll('option')).toHaveLength(2))
     fireEvent.change(modelSelector, { target: { value: 'model-config-a' } })
 
-    await waitFor(() => expect(useChat).toHaveBeenLastCalledWith(21, true, 'model-config-a'))
+    await waitFor(() => expect(useChat).toHaveBeenLastCalledWith(21, true, 'model-config-a', null))
     expect(screen.getByText(/不会修改长期用途偏好/)).toBeInTheDocument()
   })
 })
