@@ -890,3 +890,134 @@ class ResearchRunEvent(models.Model):
         constraints = [
             models.UniqueConstraint(fields=['run', 'sequence'], name='unique_research_event_sequence'),
         ]
+
+
+class UserAIConnection(models.Model):
+    """One user's encrypted API credential for a trusted provider endpoint."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        'auth.User', on_delete=models.CASCADE, related_name='ai_connections',
+    )
+    provider_id = models.CharField(max_length=32)
+    endpoint_profile = models.CharField(max_length=48)
+    endpoint_profile_version = models.PositiveSmallIntegerField(default=1)
+    display_name = models.CharField(max_length=64)
+    credential_ciphertext = models.TextField(blank=True, default='')
+    encryption_key_id = models.CharField(max_length=64, blank=True, default='')
+    # Authorization fencing version; status changes revoke stale queued work.
+    credential_epoch = models.PositiveBigIntegerField(default=1)
+    # Ciphertext generation bound into AAD; only key replacement changes it.
+    credential_version = models.PositiveBigIntegerField(default=1)
+    is_enabled = models.BooleanField(default=True)
+    is_deleted = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-updated_at', 'id']
+        indexes = [
+            models.Index(fields=['user', 'is_deleted'], name='user_ai_conn_owner_deleted'),
+        ]
+
+    def __str__(self):
+        return f'AI connection {self.provider_id}:{self.pk}'
+
+
+class UserAIModelConfig(models.Model):
+    """Owner-scoped model choice attached to one trusted provider connection."""
+
+    VERIFICATION_STATUS_CHOICES = [
+        ('not_tested', '未测试'),
+        ('verified', '已验证'),
+        ('failed', '测试失败'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    connection = models.ForeignKey(
+        UserAIConnection, on_delete=models.CASCADE, related_name='model_configs',
+    )
+    model_id = models.CharField(max_length=160)
+    display_name = models.CharField(max_length=64)
+    catalog_model_id = models.CharField(max_length=160, blank=True, default='')
+    catalog_version = models.CharField(max_length=48, blank=True, default='')
+    proxy_model_alias = models.CharField(max_length=128, blank=True, default='')
+    catalog_source_url = models.URLField(max_length=255, blank=True, default='')
+    catalog_claims = models.JSONField(default=dict)
+    context_window_tokens = models.PositiveIntegerField(null=True, blank=True)
+    max_output_tokens = models.PositiveIntegerField(null=True, blank=True)
+    config_revision = models.PositiveBigIntegerField(default=1)
+    capability_snapshot = models.JSONField(default=dict)
+    verification_status = models.CharField(
+        max_length=16, choices=VERIFICATION_STATUS_CHOICES, default='not_tested',
+    )
+    verified_credential_epoch = models.PositiveBigIntegerField(null=True, blank=True)
+    verified_config_revision = models.PositiveBigIntegerField(null=True, blank=True)
+    verified_endpoint_profile_version = models.PositiveSmallIntegerField(null=True, blank=True)
+    last_tested_at = models.DateTimeField(null=True, blank=True)
+    last_safe_error_code = models.CharField(max_length=64, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['created_at', 'id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['connection', 'model_id'], name='unique_ai_model_per_connection',
+            ),
+        ]
+        indexes = [models.Index(fields=['connection', 'created_at'], name='ai_model_conn_created')]
+
+    def __str__(self):
+        return f'AI model {self.model_id} on {self.connection_id}'
+
+
+class AICallAttempt(models.Model):
+    """Secret-free accounting row for each explicit BYOK provider attempt."""
+
+    PURPOSE_CHOICES = [
+        ('model_test', '模型测试'),
+    ]
+    STATUS_CHOICES = [
+        ('started', '已登记'),
+        ('succeeded', '成功'),
+        ('failed', '失败'),
+        ('unknown', '结果未知'),
+        ('not_sent', '未发送'),
+    ]
+    PROBE_KIND_CHOICES = [
+        ('text', '文本能力'),
+        ('tools', '工具调用能力'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    attempt_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    user = models.ForeignKey(
+        'auth.User', on_delete=models.CASCADE, related_name='ai_call_attempts',
+    )
+    model_config = models.ForeignKey(
+        UserAIModelConfig, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='call_attempts',
+    )
+    purpose = models.CharField(max_length=32, choices=PURPOSE_CHOICES)
+    probe_kind = models.CharField(max_length=16, choices=PROBE_KIND_CHOICES, default='text')
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='started')
+    snapshot_digest = models.CharField(max_length=64)
+    credential_epoch = models.PositiveBigIntegerField()
+    config_revision = models.PositiveBigIntegerField()
+    endpoint_profile_version = models.PositiveSmallIntegerField()
+    provider_request_id = models.CharField(max_length=128, blank=True, default='')
+    input_tokens = models.PositiveIntegerField(null=True, blank=True)
+    output_tokens = models.PositiveIntegerField(null=True, blank=True)
+    latency_ms = models.PositiveIntegerField(null=True, blank=True)
+    safe_error_code = models.CharField(max_length=64, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at', 'id']
+        indexes = [models.Index(fields=['user', 'created_at'], name='ai_attempt_owner_created')]
+
+    def __str__(self):
+        return f'AI call attempt {self.attempt_id} ({self.status})'

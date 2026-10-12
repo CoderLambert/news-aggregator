@@ -24,6 +24,7 @@ const PRIVATE_QUERY_KEYS = [
   newsWorkflowKeys.chatHistories(),
   ['private'],
   ['chatgptSubscription'],
+  ['aiConnections'],
 ] as const
 
 function clearPrivateMarkers(): void {

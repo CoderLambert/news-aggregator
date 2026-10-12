@@ -28,6 +28,7 @@ export const FAIL_CLOSED_CAPABILITIES: SiteCapabilities = {
     provider_comparisons: { enabled: false, reason: 'capabilities_unavailable' },
     admin: { enabled: false, reason: 'capabilities_unavailable' },
     chatgpt_subscription: { enabled: false, reason: 'capabilities_unavailable' },
+    ai_byok: { enabled: false, reason: 'capabilities_unavailable' },
   },
 }
 
@@ -39,6 +40,7 @@ const REASON_MESSAGES: Record<CapabilityReason, string> = {
   chatgpt_auth_disabled: 'ChatGPT 订阅连接当前已关闭',
   hosted_integration_unapproved: '网站订阅集成尚未获批',
   chatgpt_plan_usage_disabled: 'ChatGPT 订阅模型调用当前已关闭',
+  byok_disabled: '个人 API Key 管理当前已关闭',
   capabilities_unavailable: '功能状态暂不可用，请稍后重试',
 }
 

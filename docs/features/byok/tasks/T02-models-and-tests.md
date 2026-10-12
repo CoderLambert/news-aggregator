@@ -1,47 +1,42 @@
 # T02 · 录入模型并显式验证
 
-> **PLANNED**：本文件为未执行的实施/测试契约，所有测试当前 NOT_RUN。实施时以 `origin/feat/byok-user-api-keys` 最新 HEAD 为准，勿把设计 SHA 当作当前代码。
+> **READY FOR REVIEW（2026-10-12）**：模型目录、用户模型 CRUD、文本/工具显式探测和隔离 T00-G LiteLLM Proxy 联调均已实现。当前实现只开放服务端预批准的 DeepSeek Flash alias；手动模型 ID 可以保存，但没有预批准路由时不能测试。没有向真实供应商发请求。完整证据见 [Test T02](../tests/T02-models-and-tests.md)。
+
+本工作树已同步至 T01 PR #34 当前 HEAD `ed58afa7a72ae905e2a2ffc315d968ca3634b8f2`。T01 PR #34 与 T00-G PR #35 仍未合并；T02 的评审说明继续保留这两个前置依赖。原 T02 实现提交在重放后为 `6a4fd22c4f9f31644d0dcf37d4b99ca08bfe3946`（模型配置）和 `c6667e50be2e5509676d8bf5faf17d9e42f48d60`（显式探测）；审核修复提交为 `1540aaad1e9d08d55254832b454ac9b9701b1612`。
 
 | 属性 | 内容 |
 | --- | --- |
-| 前置任务 | [T01](T01-credentials.md)、[T00 本地技术门槛](T00-sdk-protocol.md) |
+| 前置任务 | [T01](T01-credentials.md)、[T00 本地技术门槛](T00-sdk-protocol.md)、T00-G 受控网关 PR #35 |
 | 推荐规模 | M |
 | 对应测试 | [Test T02](../tests/T02-models-and-tests.md) |
+| PR 目标分支 | feat/byok-user-api-keys；PR 描述需要注明依赖 T01 PR #34 与 T00-G PR #35 |
+| 本卡 PR | [#36 Draft](https://github.com/CoderLambert/news-aggregator/pull/36) |
 
-## 本次交付的完整功能
+## 交付内容
 
-用户对自己的连接添加多个模型，手工输入 ID 或选官方预置，主动点击测试文本/工具能力，得到可信的能力标记。
+用户可以在自己的可信服务商连接下添加多个目录模型或手动模型，并执行互相独立的短文本和工具能力探测。模型测试只由用户显式触发，每次调用创建独立的 AICallAttempt；界面在发送前说明可能产生供应商费用。探测请求使用固定短提示、固定服务器 alias、15 秒超时、64 KiB 响应上限，不跟随重定向、不重试、不切换凭据或供应商。响应只保存安全错误码、请求 ID、耗时和 token 数，不保存原始供应商响应或 Key。
 
-**允许修改范围**：UserAIModelConfig、版本化目录/可信端点、手动模型 ID、可选发现、模型 CRUD/测试接口、费用提示、model config revision、credential_epoch 与 endpoint profile revision 对测试结果做版本拦截。能力分 text/tools/structured output/thinking/stream/context/output 标记；未知模型可保存，但无可信 context 限制时不自动发送整篇文章。本地测试通过临时 LiteLLM Proxy 和受控 HTTP upstream；这里建立业务 AICallAttempt 记录，供后续业务调用复用。无可用网关时失败关闭。
+工具能力探测只有在恰好一个函数调用使用 `byok_probe`、工具调用 ID/type 合法、arguments 是唯一键的标准 JSON 对象且严格等于 `{"ok":true}`、`finish_reason=tool_calls` 时才记为 supported。错误终态、错误函数名、畸形/重复键 JSON、参数类型错误或多工具调用均失败并保持 unknown。
 
-**本次明确不做**：保存配置不会自动计费；测试文本成功不代表工具调用通过；不做全套使用分析页面或支持任意额外参数。
+测试结果与 credential epoch、model config revision、endpoint profile version 绑定。请求执行期间若任一版本变化，迟到结果只记入原尝试记录，不覆盖当前模型能力状态。能力分别记录；文本成功不会推断工具调用成功。
 
-### 可直接复现的验收路径
+手动录入模型没有预批准网关路由时，仍可保存和编辑，但测试接口会在发送前拒绝。T02 的显式探测接口仅接受 probe_kind，不接受 messages、文章正文、endpoint、extra_body 或其它供应商参数。上下文上限未核实的模型会在页面显示提示；本卡没有实现 BYOK 业务文章调用。
 
-保存两模型→测试其中文字成功而工具未知→换 Key 后旧测试状态过期→再次测试明确成功或失败。
+## 验收路径
 
-### 对应 Test 用例
+创建一个用户连接，添加目录中的 DeepSeek Flash 和一个手动模型；文本/工具按钮只对目录预置模型开放。文本探测可得到独立能力结果，工具探测必须单独发起和判断。替换 Key 后旧状态失效；若旧探测回执迟到，也不能覆盖新 epoch 的状态。整个测试流程使用本地隔离 Proxy 和合成上游，不需要向真实供应商发请求。
 
-| Test ID | 可操作情境 | 必须观察到 | Test 文件 |
+## 对应 Test 用例
+
+| Test ID | 可操作情境 | 必须观察到 | 状态 |
 | --- | --- | --- | --- |
-| T02-01 | 新增两模型并重新进入列表 | 按连接/用户隔离，目录失败仍允许输入模型ID | [Test 契约](../tests/T02-models-and-tests.md) |
-| T02-02 | 手动触发测试，不触发保存即测试 | 每个真实上游尝试单独记账，提示可能收费 | [Test 契约](../tests/T02-models-and-tests.md) |
-| T02-03 | 工具能力与文本能力分开显示 | 未验证/失败工具的模型不可标记研究可用 | [Test 契约](../tests/T02-models-and-tests.md) |
-| T02-04 | 换 Key、模型配置或 endpoint profile 后旧成功回执迟到 | 按 credential_epoch/config/endpoint revision fencing；迟到回执不能覆盖当前状态 | [Test 契约](../tests/T02-models-and-tests.md) |
-| T02-05 | 任意 URL/extra_body/unsupported model 参数 | 不能进入 Proxy allowlist，不自动落到管理员 Key | [Test 契约](../tests/T02-models-and-tests.md) |
-| T02-06 | 可保存的未知模型无可信 context limit，用户请求长新闻 | 配置保持未验证；拒绝自动发送全文，或应用可解释的保守输入/输出上限 | [Test 契约](../tests/T02-models-and-tests.md) |
+| T02-01 | 新增多个模型并重新读取列表 | 按用户/连接隔离；目录失败可手动录入；目录模型可编辑、删除 | PASS；未运行浏览器 E2E |
+| T02-02 | 显式触发文本/工具测试 | 每次真实 Proxy 上游尝试各自记账；页面提示可能收费；无自动重试 | PASS；合成 Proxy 联调 |
+| T02-03 | 文本与工具能力分别验证 | 文本成功不推断工具能力；工具探测必须通过函数结构、严格 JSON 参数和 `tool_calls` 终态校验，否则保持 unknown | PASS；新增畸形/错名/异常终态负例 |
+| T02-04 | 换 Key 或更新模型/端点配置，旧结果迟到 | 按 credential_epoch/config_revision/endpoint_profile_version fencing | PASS；模型测试竞态和旧配置失效测试 |
+| T02-05 | 手动未知模型、URL 或 extra 参数 | 未知模型不能进入 Proxy allowlist；用户不能提交 endpoint 或额外代理参数 | PASS；请求在创建 attempt 前拒绝 |
+| T02-06 | 未知上下文模型面对长文章 | T02 不提供文章调用路由；探测接口拒绝用户提交文章正文，页面说明 context 未核实 | 防护 PASS；未来业务调用的上下文裁剪 NOT_RUN |
 
-### 立即停止并纠偏
+## 明确边界
 
-旧测试回执覆盖新 credential_epoch/revision 或 API 泄漏原始错误、Key 时停止。
-
-### Codex 一次任务交付要求
-
-1. 查看当前工作目录 AGENTS、分支和未提交改动；读取本卡和同编号 Test、技术方案/最新相关代码。
-2. 同环境记录受影响旧测试的基线；用既有 Django/React/SSE/SDK/持久任务，先验证关键假设再编码。
-3. 本次只交付这一项**可以运行的完整功能**，包括权限、正常操作与最主要的失败路径；不跨到其它 Txx。
-4. 跑最小定向单元/契约测试以及受影响旧功能回归，列出修改过的测试断言 diff；需求未变时禁止改断言迁就代码。
-5. 更新对应 Test 文档中的真实日志、环境、SHA 和 NOT_RUN 项；单张任务 PR base 指向 `feat/byok-user-api-keys`。未授权时不合并 main、不开始下一张卡。
-
-**任务结束**：这条用户流程能运行、失败能清楚识别，主要不变量有自动化验证；更新同名 Test 实际证据并留下单张可审核 PR。当前任何未验证的地方明确写 NOT_RUN。
-
+当前目录只为 DeepSeek Flash 配置了固定 alias news.deepseek-flash。新增供应商或手动模型的真实探测需要先在运维侧批准并添加受限服务端路由。此卡不做任意模型发现、动态 alias 拼接、完整新闻/研究调用、供应商真实请求或生产迁移。详细验证命令、精确环境、联调输出和未运行项见 Test T02。

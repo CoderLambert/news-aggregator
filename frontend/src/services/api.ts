@@ -26,6 +26,7 @@ export const CAPABILITY_FEATURE_NAMES = [
   'provider_comparisons',
   'admin',
   'chatgpt_subscription',
+  'ai_byok',
 ] as const
 
 export type CapabilityName = (typeof CAPABILITY_FEATURE_NAMES)[number]
@@ -37,6 +38,7 @@ export type CapabilityReason =
   | 'chatgpt_auth_disabled'
   | 'hosted_integration_unapproved'
   | 'chatgpt_plan_usage_disabled'
+  | 'byok_disabled'
   | 'capabilities_unavailable'
 
 export interface CapabilityFeature {
@@ -58,6 +60,7 @@ const CAPABILITY_REASONS = new Set<CapabilityReason>([
   'chatgpt_auth_disabled',
   'hosted_integration_unapproved',
   'chatgpt_plan_usage_disabled',
+  'byok_disabled',
   'capabilities_unavailable',
 ])
 
@@ -186,6 +189,326 @@ const apiLong = makeApi(180_000)
 export async function fetchCapabilities(): Promise<SiteCapabilities> {
   const value: unknown = (await api.get<unknown>('/capabilities/')).data
   return parseCapabilities(value)
+}
+
+export interface AIProviderProfile {
+  provider_id: string
+  provider_name: string
+  profile_id: string
+  region_name: string
+  base_url: string
+  version: number
+}
+
+export interface AIConnection {
+  id: string
+  provider_id: string
+  provider_name: string
+  endpoint_profile: string
+  region_name: string
+  display_name: string
+  key_saved: boolean
+  masked_key: string
+  is_enabled: boolean
+  verification_status: 'not_tested'
+  updated_at: string
+}
+
+export interface CreateAIConnectionInput {
+  provider_id: string
+  endpoint_profile: string
+  display_name: string
+  api_key: string
+}
+
+export interface AIModelPreset {
+  catalog_model_id: string
+  provider_id: string
+  model_id: string
+  display_name: string
+  context_window_tokens: number | null
+  max_output_tokens: number | null
+  catalog_version: string
+  source_url: string
+  provider_claims: Record<string, unknown>
+}
+
+export interface AIModelCatalog {
+  catalog_version: string
+  models: AIModelPreset[]
+  catalog_available: boolean
+}
+
+export type AIModelCapability = 'unknown' | 'supported' | 'unsupported'
+export type AIModelVerificationStatus = 'not_tested' | 'verified' | 'failed' | 'stale'
+
+export interface AIModelConfig {
+  id: string
+  connection_id: string
+  model_id: string
+  display_name: string
+  source: 'catalog' | 'manual'
+  catalog_model_id: string
+  catalog_version: string
+  catalog_source_url: string
+  provider_claims: Record<string, unknown>
+  context_window_tokens: number | null
+  max_output_tokens: number | null
+  has_trusted_context_limit: boolean
+  config_revision: number
+  verification_status: AIModelVerificationStatus
+  capabilities: {
+    text: AIModelCapability
+    tools: AIModelCapability
+    structured_output: AIModelCapability
+    thinking: AIModelCapability
+    stream: AIModelCapability
+  }
+  last_tested_at: string | null
+  updated_at: string
+}
+
+export type CreateAIModelInput =
+  | { connection_id: string; catalog_model_id: string; display_name?: string }
+  | { connection_id: string; model_id: string; display_name?: string }
+
+export type AIModelProbeKind = 'text' | 'tools'
+
+export interface AIModelTestResult {
+  attempt_id: string
+  probe_kind: AIModelProbeKind
+  status: 'succeeded' | 'failed' | 'unknown' | 'not_sent' | 'stale'
+  verification_status: AIModelVerificationStatus
+  capability: AIModelCapability
+  stale: boolean
+  safe_error_code: string
+  latency_ms: number
+  input_tokens: number | null
+  output_tokens: number | null
+  billing_notice: 'provider_may_bill'
+}
+
+function parseAIProviderProfiles(value: unknown): AIProviderProfile[] {
+  if (!isRecord(value) || !Array.isArray(value.providers)) throw new TypeError('Invalid AI provider catalog')
+  return value.providers.map((entry): AIProviderProfile => {
+    if (!isRecord(entry) || typeof entry.provider_id !== 'string' || typeof entry.provider_name !== 'string' ||
+      typeof entry.profile_id !== 'string' || typeof entry.region_name !== 'string' ||
+      typeof entry.base_url !== 'string' || typeof entry.version !== 'number') {
+      throw new TypeError('Invalid AI provider catalog')
+    }
+    return {
+      provider_id: entry.provider_id,
+      provider_name: entry.provider_name,
+      profile_id: entry.profile_id,
+      region_name: entry.region_name,
+      base_url: entry.base_url,
+      version: entry.version,
+    }
+  })
+}
+
+function parseAIConnection(value: unknown): AIConnection {
+  if (!isRecord(value) || Object.keys(value).some((key) =>
+    ['api_key', 'raw_key', 'credential_ciphertext', 'encrypted_api_key'].includes(key)) ||
+    typeof value.id !== 'string' || typeof value.provider_id !== 'string' ||
+    typeof value.provider_name !== 'string' || typeof value.endpoint_profile !== 'string' ||
+    typeof value.region_name !== 'string' || typeof value.display_name !== 'string' ||
+    typeof value.key_saved !== 'boolean' || typeof value.masked_key !== 'string' ||
+    typeof value.is_enabled !== 'boolean' || value.verification_status !== 'not_tested' ||
+    typeof value.updated_at !== 'string') {
+    throw new TypeError('Invalid AI connection response')
+  }
+  return {
+    id: value.id,
+    provider_id: value.provider_id,
+    provider_name: value.provider_name,
+    endpoint_profile: value.endpoint_profile,
+    region_name: value.region_name,
+    display_name: value.display_name,
+    key_saved: value.key_saved,
+    masked_key: value.masked_key,
+    is_enabled: value.is_enabled,
+    verification_status: 'not_tested',
+    updated_at: value.updated_at,
+  }
+}
+
+export async function fetchAIProviderProfiles(signal?: AbortSignal): Promise<AIProviderProfile[]> {
+  const value: unknown = (await api.get<unknown>('/ai/providers/', { signal })).data
+  return parseAIProviderProfiles(value)
+}
+
+export async function fetchAIConnections(signal?: AbortSignal): Promise<AIConnection[]> {
+  const value: unknown = (await api.get<unknown>('/ai/connections/', { signal })).data
+  if (!isRecord(value) || !Array.isArray(value.connections)) throw new TypeError('Invalid AI connections response')
+  return value.connections.map(parseAIConnection)
+}
+
+export async function createAIConnection(input: CreateAIConnectionInput): Promise<AIConnection> {
+  const value: unknown = (await api.post<unknown>('/ai/connections/', input)).data
+  return parseAIConnection(value)
+}
+
+export async function replaceAIConnectionKey(connectionId: string, apiKey: string): Promise<AIConnection> {
+  const value: unknown = (await api.put<unknown>(`/ai/connections/${connectionId}/key/`, { api_key: apiKey })).data
+  return parseAIConnection(value)
+}
+
+export async function updateAIConnection(
+  connectionId: string,
+  patch: { display_name?: string; is_enabled?: boolean },
+): Promise<AIConnection> {
+  const value: unknown = (await api.patch<unknown>(`/ai/connections/${connectionId}/`, patch)).data
+  return parseAIConnection(value)
+}
+
+export async function deleteAIConnection(connectionId: string): Promise<{ deleted: boolean }> {
+  const value: unknown = (await api.delete<unknown>(`/ai/connections/${connectionId}/`)).data
+  if (!isRecord(value) || value.deleted !== true) throw new TypeError('Invalid AI delete response')
+  return { deleted: true }
+}
+
+function parseAIModelPreset(value: unknown): AIModelPreset {
+  if (!isRecord(value) || Object.keys(value).some((key) => ['proxy_model_alias', 'api_key', 'credential_ciphertext'].includes(key)) ||
+    typeof value.catalog_model_id !== 'string' || typeof value.provider_id !== 'string' ||
+    typeof value.model_id !== 'string' || typeof value.display_name !== 'string' ||
+    !(value.context_window_tokens === null || typeof value.context_window_tokens === 'number') ||
+    !(value.max_output_tokens === null || typeof value.max_output_tokens === 'number') ||
+    typeof value.catalog_version !== 'string' || typeof value.source_url !== 'string' ||
+    !isRecord(value.provider_claims)) {
+    throw new TypeError('Invalid AI model catalog')
+  }
+  return {
+    catalog_model_id: value.catalog_model_id,
+    provider_id: value.provider_id,
+    model_id: value.model_id,
+    display_name: value.display_name,
+    context_window_tokens: value.context_window_tokens,
+    max_output_tokens: value.max_output_tokens,
+    catalog_version: value.catalog_version,
+    source_url: value.source_url,
+    provider_claims: value.provider_claims,
+  }
+}
+
+function parseAIModel(value: unknown): AIModelConfig {
+  if (!isRecord(value)) throw new TypeError('Invalid AI model response')
+  const capabilityValue = value.capabilities
+  if (!isRecord(capabilityValue) || Object.keys(value).some((key) =>
+    ['api_key', 'raw_key', 'credential_ciphertext', 'encrypted_api_key', 'proxy_model_alias'].includes(key)) ||
+    typeof value.id !== 'string' || typeof value.connection_id !== 'string' ||
+    typeof value.model_id !== 'string' || typeof value.display_name !== 'string' ||
+    (value.source !== 'catalog' && value.source !== 'manual') ||
+    typeof value.catalog_model_id !== 'string' || typeof value.catalog_version !== 'string' ||
+    typeof value.catalog_source_url !== 'string' || !isRecord(value.provider_claims) ||
+    !(value.context_window_tokens === null || typeof value.context_window_tokens === 'number') ||
+    !(value.max_output_tokens === null || typeof value.max_output_tokens === 'number') ||
+    typeof value.has_trusted_context_limit !== 'boolean' || typeof value.config_revision !== 'number' ||
+    !['not_tested', 'verified', 'failed', 'stale'].includes(String(value.verification_status)) ||
+    !(['text', 'tools', 'structured_output', 'thinking', 'stream'] as const).every((name) =>
+      ['unknown', 'supported', 'unsupported'].includes(String(capabilityValue[name]))) ||
+    !(value.last_tested_at === null || typeof value.last_tested_at === 'string') ||
+    typeof value.updated_at !== 'string') {
+    throw new TypeError('Invalid AI model response')
+  }
+  return {
+    id: value.id,
+    connection_id: value.connection_id,
+    model_id: value.model_id,
+    display_name: value.display_name,
+    source: value.source,
+    catalog_model_id: value.catalog_model_id,
+    catalog_version: value.catalog_version,
+    catalog_source_url: value.catalog_source_url,
+    provider_claims: value.provider_claims,
+    context_window_tokens: value.context_window_tokens,
+    max_output_tokens: value.max_output_tokens,
+    has_trusted_context_limit: value.has_trusted_context_limit,
+    config_revision: value.config_revision,
+    verification_status: value.verification_status as AIModelVerificationStatus,
+    capabilities: {
+      text: capabilityValue.text as AIModelCapability,
+      tools: capabilityValue.tools as AIModelCapability,
+      structured_output: capabilityValue.structured_output as AIModelCapability,
+      thinking: capabilityValue.thinking as AIModelCapability,
+      stream: capabilityValue.stream as AIModelCapability,
+    },
+    last_tested_at: value.last_tested_at,
+    updated_at: value.updated_at,
+  }
+}
+
+export async function fetchAIModelCatalog(signal?: AbortSignal): Promise<AIModelCatalog> {
+  const value: unknown = (await api.get<unknown>('/ai/models/catalog/', { signal })).data
+  if (!isRecord(value) || typeof value.catalog_version !== 'string' || !Array.isArray(value.models) ||
+    (value.catalog_available !== undefined && typeof value.catalog_available !== 'boolean')) {
+    throw new TypeError('Invalid AI model catalog')
+  }
+  return {
+    catalog_version: value.catalog_version,
+    models: value.models.map(parseAIModelPreset),
+    catalog_available: value.catalog_available !== false,
+  }
+}
+
+export async function fetchAIModels(signal?: AbortSignal): Promise<AIModelConfig[]> {
+  const value: unknown = (await api.get<unknown>('/ai/models/', { signal })).data
+  if (!isRecord(value) || !Array.isArray(value.models)) throw new TypeError('Invalid AI model list')
+  return value.models.map(parseAIModel)
+}
+
+export async function createAIModel(input: CreateAIModelInput): Promise<AIModelConfig> {
+  const value: unknown = (await api.post<unknown>('/ai/models/', input)).data
+  return parseAIModel(value)
+}
+
+export async function updateAIModel(
+  modelId: string,
+  patch: { model_id?: string; display_name?: string },
+): Promise<AIModelConfig> {
+  const value: unknown = (await api.patch<unknown>(`/ai/models/${modelId}/`, patch)).data
+  return parseAIModel(value)
+}
+
+export async function deleteAIModel(modelId: string): Promise<{ deleted: boolean }> {
+  const value: unknown = (await api.delete<unknown>(`/ai/models/${modelId}/`)).data
+  if (!isRecord(value) || value.deleted !== true) throw new TypeError('Invalid AI model delete response')
+  return { deleted: true }
+}
+
+function parseAIModelTestResult(value: unknown): AIModelTestResult {
+  if (!isRecord(value) ||
+    typeof value.attempt_id !== 'string' ||
+    !['text', 'tools'].includes(String(value.probe_kind)) ||
+    !['succeeded', 'failed', 'unknown', 'not_sent', 'stale'].includes(String(value.status)) ||
+    !['not_tested', 'verified', 'failed', 'stale'].includes(String(value.verification_status)) ||
+    !['unknown', 'supported', 'unsupported'].includes(String(value.capability)) ||
+    typeof value.stale !== 'boolean' || typeof value.safe_error_code !== 'string' ||
+    typeof value.latency_ms !== 'number' ||
+    !(value.input_tokens === null || typeof value.input_tokens === 'number') ||
+    !(value.output_tokens === null || typeof value.output_tokens === 'number') ||
+    value.billing_notice !== 'provider_may_bill' ||
+    Object.keys(value).some((key) => ['api_key', 'provider_key', 'raw_response', 'response_body'].includes(key))) {
+    throw new TypeError('Invalid AI model test response')
+  }
+  return {
+    attempt_id: value.attempt_id,
+    probe_kind: value.probe_kind as AIModelProbeKind,
+    status: value.status as AIModelTestResult['status'],
+    verification_status: value.verification_status as AIModelVerificationStatus,
+    capability: value.capability as AIModelCapability,
+    stale: value.stale,
+    safe_error_code: value.safe_error_code,
+    latency_ms: value.latency_ms,
+    input_tokens: value.input_tokens,
+    output_tokens: value.output_tokens,
+    billing_notice: 'provider_may_bill',
+  }
+}
+
+export async function testAIModel(modelId: string, probeKind: AIModelProbeKind): Promise<AIModelTestResult> {
+  const value: unknown = (await api.post<unknown>(`/ai/models/${modelId}/test/`, { probe_kind: probeKind })).data
+  return parseAIModelTestResult(value)
 }
 
 // ---- News -----------------------------------------------------------------

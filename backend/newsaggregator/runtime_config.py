@@ -36,6 +36,7 @@ class RuntimeConfig:
     public_site_mode: str
     public_signup_enabled: bool
     public_ai_enabled: bool
+    ai_byok_enabled: bool
     chatgpt_plan_usage_enabled: bool
     chatgpt_auth_mode: str
     waitress_trusted_proxy: str | None
@@ -174,6 +175,7 @@ def parse_runtime_config(
         environ, "PUBLIC_SIGNUP_ENABLED", "0" if production else "1"
     )
     public_ai_enabled = _boolean(environ, "PUBLIC_AI_ENABLED", "0" if production else "1")
+    ai_byok_enabled = _boolean(environ, "AI_BYOK_ENABLED", "0")
     chatgpt_plan_usage_enabled = _boolean(
         environ, "CHATGPT_PLAN_USAGE_ENABLED", "0" if production else "1"
     )
@@ -199,6 +201,7 @@ def parse_runtime_config(
         public_site_mode=public_site_mode,
         public_signup_enabled=public_signup_enabled,
         public_ai_enabled=public_ai_enabled,
+        ai_byok_enabled=ai_byok_enabled,
         chatgpt_plan_usage_enabled=chatgpt_plan_usage_enabled,
         chatgpt_auth_mode=chatgpt_auth_mode,
         waitress_trusted_proxy=trusted_proxy,
