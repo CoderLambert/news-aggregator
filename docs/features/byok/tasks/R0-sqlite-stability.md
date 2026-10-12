@@ -1,19 +1,19 @@
 # R0 · SQLite 后台翻译锁争用稳定性
 
-> **READY FOR REVIEW（2026-10-12）**：定位并修复事务型 SQLite 下后台翻译任务的共享缓存锁竞争。原 SSE 断连成功断言保留；当前 CI 三个测试根目录全部通过。证据见 [Test R0](../tests/R0-sqlite-stability.md)；独立 Draft PR 为 [#44](https://github.com/CoderLambert/news-aggregator/pull/44)。
+> **READY FOR REVIEW（2026-10-12）**：定位到后台 worker 状态写入和并发任务创建两类 SQLite 共享缓存锁竞争。新增修复已通过本地完整回归；该修复尚未推送，最新 GitHub CI 尚待验证。此前 CI 全绿的是不包含并发创建修复的代码版本。证据见 [Test R0](../tests/R0-sqlite-stability.md)；独立 Draft PR 为 [#44](https://github.com/CoderLambert/news-aggregator/pull/44)。
 
 | 属性 | 内容 |
 | --- | --- |
 | 前置任务 | 无；独立可靠性门槛 |
 | 对应测试 | [Test R0](../tests/R0-sqlite-stability.md) |
-| 影响范围 | ChatGPT 订阅翻译的任务 claim、进度、完成和失败状态数据库操作 |
+| 影响范围 | ChatGPT 订阅翻译的提交校验、任务创建/附加、claim、进度、完成和失败状态数据库操作 |
 | 真实 Provider | 不调用；测试 Provider 为本地 fake |
 
 ## 问题与修复
 
-失败运行捕获到 SQLite 扩展错误码 `SQLITE_LOCKED_SHAREDCACHE`（262），具体 SQL 是后台 worker 对 `api_chatgpttranslationtask` 的 queued→running 条件更新，以及最终保存前的任务 CAS 更新。Django 的 `OperationalError` 将 SQLite 原始异常放在 `__cause__`，只检查外层异常会漏掉锁码。
+失败运行捕获到 SQLite 扩展错误码 `SQLITE_LOCKED_SHAREDCACHE`（262），具体 SQL 包括后台 worker 对 `api_chatgpttranslationtask` 的 queued→running 条件更新、最终保存前的任务 CAS 更新，以及 `start_or_get_job` 创建唯一任务时的 `INSERT`。Django 的 `OperationalError` 将 SQLite 原始异常放在 `__cause__`，只检查外层异常会漏掉锁码。并发创建的受控 SQL trace 曾在第 6 次重复中复现该 `INSERT` 失败。
 
-现在只沿数据库异常的 cause/context 链识别明确的 SQLite `BUSY` 或 `LOCKED` 错误码，并对 DB-only 操作有限重试。多语句写入按完整 `atomic()` 事务重跑，先回滚再尝试；Provider 请求不重试。没有 SQLite 锁错误码的数据库不可用/I/O 错误、约束错误及非 SQLite 数据库错误均直接失败，不进入锁重试路径。
+现在只沿数据库异常的 cause/context 链识别明确的 SQLite `BUSY` 或 `LOCKED` 错误码，并对 DB-only 操作有限重试。任务创建/附加会在锁冲突后先回滚完整 `atomic()` 事务，再重试整笔事务，并用随机退避错开并发写入；Provider 请求不重试。没有 SQLite 锁错误码的数据库不可用/I/O 错误、约束错误及非 SQLite 数据库错误均直接失败，不进入锁重试路径。
 
 ## 验收约束
 

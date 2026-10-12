@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import sqlite3
 import threading
 import time
@@ -41,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 TASK_LEASE_TTL = timedelta(seconds=60)
 TASK_HEARTBEAT_SECONDS = 20
-SQLITE_LOCK_RETRY_DELAYS = (0.02, 0.04, 0.08)
+SQLITE_LOCK_RETRY_DELAYS = (0.02, 0.04, 0.08, 0.16, 0.32)
 TERMINAL_STATUSES = frozenset({'succeeded', 'failed', 'cancelled', 'interrupted'})
 RESTART_ERROR = '任务已重新开始，请重新连接。'
 GENERATION_CHANGED_MESSAGE = '任务已重新开始，请刷新后重试。'
@@ -100,7 +101,10 @@ def _retry_sqlite_lock(operation, *, label):
                     label, getattr(driver_error, 'sqlite_errorname', 'SQLITE_BUSY_OR_LOCKED'),
                 )
                 raise
-            time.sleep(SQLITE_LOCK_RETRY_DELAYS[attempt])
+            # Desynchronize concurrent writers that otherwise repeat the same
+            # shared-cache read-to-write lock collision on identical delays.
+            delay = SQLITE_LOCK_RETRY_DELAYS[attempt]
+            time.sleep(delay * random.uniform(0.5, 1.5))
 
 
 class ChatGPTTranslationJob:
@@ -374,7 +378,10 @@ def _reset_task(task_id, generation, *, connection, shared_lease, now, expected_
 def start_or_get_job(user, connection, news, *, force=False, shared_lease=None):
     """Create or attach to a durable owner task; only explicit force resets terminals."""
     try:
-        current, current_news, digest = _validate_submission(user, connection, news)
+        current, current_news, digest = _retry_sqlite_lock(
+            lambda: _validate_submission(user, connection, news),
+            label='submission validation',
+        )
     except OperationalError:
         _release_unattached_lease(shared_lease)
         raise SubscriptionError(
@@ -387,10 +394,11 @@ def start_or_get_job(user, connection, news, *, force=False, shared_lease=None):
         _release_unattached_lease(shared_lease)
         raise SubscriptionError('force 必须是布尔值。', 'invalid_force', 400)
     now = timezone.now()
-    handle_task = None
-    dispatch = False
-    attached_lease = False
-    try:
+
+    def persist_task():
+        handle_task = None
+        dispatch = False
+        attached_lease = False
         with transaction.atomic():
             if force:
                 _cancel_stale_active_tasks(user.pk, current_news.pk, digest, current, now)
@@ -450,31 +458,14 @@ def start_or_get_job(user, connection, news, *, force=False, shared_lease=None):
                 if created:
                     attached_lease = shared_lease is not None
             handle_task = task
-    except OperationalError as exc:
+        return handle_task, dispatch, attached_lease
+
+    try:
+        handle_task, dispatch, attached_lease = _retry_sqlite_lock(
+            persist_task, label='task create/attach transaction',
+        )
+    except OperationalError:
         _release_unattached_lease(shared_lease)
-        # SQLite can still be releasing the competing transaction when we try
-        # to attach to its unique task. Retry ONLY the idempotent read/attach:
-        # do not create or reset a task (or call a provider) in this path.
-        for delay in (0, 0.02, 0.05, 0.10, 0.20):
-            if delay:
-                time.sleep(delay)
-            try:
-                task = _task_filter(
-                    user_id=user.pk, connection_id=current.pk, news_id=current_news.pk,
-                    source_digest=digest,
-                ).first()
-                if task is None:
-                    continue
-                if force and task.status not in {'queued', 'running'}:
-                    break
-                _recover_expired(task.pk, user_id=user.pk)
-                task.refresh_from_db()
-                if task.status == 'queued' and _snapshot_matches(task, current, current_news):
-                    _dispatch_task(task.pk, task.generation)
-                return _handle(task)
-            except OperationalError:
-                continue
-        logger.info('ChatGPT translation task storage was busy (%s).', type(exc).__name__)
         raise SubscriptionError(
             '翻译任务暂时无法处理，请稍后重试。', 'task_storage_busy', 503,
         ) from None

@@ -264,36 +264,27 @@ def test_simultaneous_database_connections_share_one_unique_task(owner, article,
 
 
 
-def test_task_attach_retries_transient_sqlite_lock_without_new_model_work(owner, article, monkeypatch):
+def test_task_attach_retries_explicit_sqlite_lock_after_atomic_rollback(owner, article, monkeypatch):
     connection = make_connection(owner)
     existing = start_queued(owner, connection, article, monkeypatch)
     manager = ChatGPTTranslationTask.objects
-    attempts = {'write': 0, 'read': 0}
-    original_filter = jobs._task_filter
+    attempts = {'write': 0}
+    original_get_or_create = manager.get_or_create
+    driver_error = sqlite3.OperationalError('database table is locked')
+    driver_error.sqlite_errorcode = sqlite3.SQLITE_LOCKED_SHAREDCACHE
+    driver_error.sqlite_errorname = 'SQLITE_LOCKED_SHAREDCACHE'
 
     def fake_get_or_create(**kwargs):
         attempts['write'] += 1
-        raise OperationalError('database table is locked: api_chatgpttranslationtask')
-
-    class TransientLockedQuery:
-        def __init__(self, queryset):
-            self.queryset = queryset
-
-        def first(self):
-            attempts['read'] += 1
-            if attempts['read'] <= 2:
-                raise OperationalError('database table is locked: api_chatgpttranslationtask')
-            return self.queryset.first()
-
-    def fake_filter(**kwargs):
-        return TransientLockedQuery(original_filter(**kwargs))
+        if attempts['write'] == 1:
+            raise OperationalError(str(driver_error)) from driver_error
+        return original_get_or_create(**kwargs)
 
     monkeypatch.setattr(manager, 'get_or_create', fake_get_or_create)
-    monkeypatch.setattr(jobs, '_task_filter', fake_filter)
     recovered = jobs.start_or_get_job(owner, connection, article)
 
     assert recovered.id == existing.id
-    assert attempts == {'write': 1, 'read': 3}
+    assert attempts == {'write': 2}
     assert ChatGPTTranslationTask.objects.filter(
         user=owner, connection=connection, news=article,
     ).count() == 1
