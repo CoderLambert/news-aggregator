@@ -1,12 +1,14 @@
 # T08 · 译文详情、问答与朗读同源
 
-> **PLANNED**：本文件为未执行的实施/测试契约，所有测试当前 NOT_RUN。实施时以 `origin/feat/byok-user-api-keys` 最新 HEAD 为准，勿把设计 SHA 当作当前代码。
+> **IMPLEMENTED · DRAFT PR #42**。本卡自动化证据见 [Test T08](../tests/T08-translation-readers.md)。真实 provider 请求和手动浏览器 UAT 保持 NOT_RUN。
 
 | 属性 | 内容 |
 | --- | --- |
 | 前置任务 | [T05](T05-private-translation.md)、[T07](T07-translation-lifecycle.md) |
 | 推荐规模 | M |
 | 对应测试 | [Test T08](../tests/T08-translation-readers.md) |
+
+本次代码提交 `e9e96444488c75b3dbd550ab51ff7d04370bfc03` 基于 T07 Draft PR #41 的固定 head `b0139e42291bc83c701a04f73f1f7fdcbf16b0a0`。T07 仍未合并，因此本 PR 暂以 T07 分支为 base，作为可独立审阅的堆叠任务提交；不代表前置 PR 已集成。
 
 ## 本次交付的完整功能
 
