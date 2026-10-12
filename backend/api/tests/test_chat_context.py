@@ -235,7 +235,7 @@ class TestEnsureFullContent:
         assert n.full_content == ''  # still empty
         assert n.content == 'SHORT_FALLBACK'  # caller can still use this
         assert n.full_content_fetch_status == 'failed'
-        assert n.full_content_fetch_error == 'fetch down'
+        assert n.full_content_fetch_error == 'fetcherror:provider_error'
         assert n.full_content_retry_count == 1
 
     def test_swallows_network_fetch_errors_and_records_status(self, src, cat):
@@ -248,7 +248,7 @@ class TestEnsureFullContent:
         assert n.full_content == ''
         assert n.content == 'SHORT_FALLBACK'
         assert n.full_content_fetch_status == 'network_error'
-        assert n.full_content_fetch_error == 'timed out while fetching'
+        assert n.full_content_fetch_error == 'fetcherror:timeout'
         assert n.full_content_retry_count == 1
 
     def test_skips_fetch_when_no_url(self, src, cat):

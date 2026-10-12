@@ -1,13 +1,13 @@
 """Auto-fetch full article content in a background daemon.
 
 Continuously polls for articles missing ``full_content`` and fetches them
-via the Scrapy-only provider chain.  Designed to run as a long-lived
+via the environment-safe default provider chain. Designed to run as a long-lived
 management command (e.g. ``python manage.py auto_fetch_full_content``) or
 as a background thread started from ``ApiConfig.ready()``.
 
 Features
 --------
-- Scrapy-only provider chain (no Jina) to avoid burning external API credits
+- Production-safe provider chain; third-party fallbacks remain domain restricted
 - Configurable interval, batch size, throttle via env vars / ``settings``
 - Graceful shutdown on SIGINT / SIGTERM
 - Survives Django dev-server autoreload
@@ -68,10 +68,10 @@ def _signal_handler(signum, frame):
 # Core loop
 # ---------------------------------------------------------------------------
 
-def _get_scrapy_providers():
-    """Return a single-provider chain: only ScrapySubprocess."""
-    from api.services.article_fetcher.providers import ScrapySubprocessProvider
-    return [ScrapySubprocessProvider()]
+def _get_fetch_providers():
+    """Return the same environment-safe chain used by authenticated fetches."""
+    from api.services.article_fetcher.providers import default_providers
+    return default_providers()
 
 
 def _fetch_one(news, providers_chain):
@@ -166,7 +166,7 @@ def run_loop():
             continue
 
         logger.info('[auto-fetch] %d pending articles in this batch', len(pending))
-        providers_chain = _get_scrapy_providers()
+        providers_chain = _get_fetch_providers()
         ok = 0
         failed = 0
         skipped = 0

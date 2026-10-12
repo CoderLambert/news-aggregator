@@ -17,6 +17,12 @@ from django.db.models import F, Q, TextField, Value
 from django.db.models.functions import Coalesce, Replace, Trim
 from django.utils.timezone import now as tz_now
 
+from api.services.article_fetcher.types import (
+    fetch_error_diagnostic,
+    fetch_error_provider,
+    fetch_failure_code,
+)
+
 if TYPE_CHECKING:
     from api.models import News
     from api.services.article_fetcher.types import FetchResult
@@ -34,6 +40,17 @@ _NETWORK_ERROR_KEYWORDS = (
     'refused',
     'unreachable',
     'temporarily unavailable',
+    'http_401',
+    'http_403',
+    'http_408',
+    'http_425',
+    'http_429',
+    'http_5',
+    'dns_error',
+    'tls_error',
+    'connection_reset',
+    'connection_refused',
+    'host_unreachable',
 )
 
 # Validation failure indicators
@@ -204,10 +221,12 @@ def mark_failed(
     Increments retry_count.  Uses the classified status if provided,
     otherwise defaults to 'failed'.
     """
-    error_text = str(error) if isinstance(error, Exception) else str(error)
+    error_text = fetch_error_diagnostic(error)
 
     if status is None:
         status = classify_fetch_error(error)
+    if not provider:
+        provider = fetch_error_provider(error)
 
     updates = {
         'full_content_fetch_status': status,
@@ -255,20 +274,21 @@ def classify_fetch_error(error_or_result) -> str:
 
     Returns one of: 'network_error', 'validation_failed', 'failed'.
     """
-    # Extract error text from FetchError or Exception
-    if hasattr(error_or_result, 'message'):
-        error_text = str(error_or_result.message)
-    else:
-        error_text = str(error_or_result)
-
-    # Also check metadata for validation reasons
+    failures = getattr(error_or_result, 'failures', None) or []
+    candidates = failures or [error_or_result]
+    diagnostic_codes = [fetch_failure_code(candidate) for candidate in candidates]
+    raw_text = ' '.join(
+        str(getattr(candidate, 'error', '') or candidate)
+        for candidate in candidates
+    )
     validation_reasons = []
-    if hasattr(error_or_result, 'metadata'):
-        validation_reasons = error_or_result.metadata.get('validation_reasons', [])
-    if hasattr(error_or_result, 'error'):
-        error_text = error_or_result.error or error_text
+    for candidate in candidates:
+        validation_reasons.extend(getattr(candidate, 'validation_reasons', None) or [])
+        metadata = getattr(candidate, 'metadata', None)
+        if isinstance(metadata, dict):
+            validation_reasons.extend(metadata.get('validation_reasons', []) or [])
 
-    text = (error_text + ' ' + ' '.join(validation_reasons)).lower()
+    text = ' '.join([raw_text, *diagnostic_codes, *validation_reasons]).lower()
 
     for keyword in _VALIDATION_KEYWORDS:
         if keyword.lower() in text:
