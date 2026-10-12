@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import threading
+import uuid
+from datetime import timedelta
 from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor
 
@@ -899,3 +901,256 @@ def test_closing_sse_reader_does_not_cancel_persistent_worker(monkeypatch):
     assert 'progress' in first_text
     assert task.status == 'succeeded'
     assert task.result['full_content_zh'] == '先到的片段后续片段'
+
+
+@pytest.mark.django_db
+@override_settings(AI_BYOK_ENABLED=True, PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_byok_sse_disconnect_and_get_reattach_do_not_create_another_attempt(monkeypatch):
+    client, _user, csrf = _authenticated_client('t07-reattach')
+    _create_model(client, csrf, SYNTHETIC_PROVIDER_KEY_A, 'reattach')
+    news = _create_news()
+    dispatches = []
+    provider_attempts = []
+    monkeypatch.setattr(
+        translation_jobs,
+        '_dispatch_task',
+        lambda task_id, generation: dispatches.append((str(task_id), generation)),
+    )
+
+    response = _post_translation(client, csrf, news, 't07-reattach-key')
+    assert response.status_code == 200
+    task_id = response['Job-ID']
+    task = ChatGPTTranslationTask.objects.get(pk=task_id)
+    ChatGPTTranslationTask.objects.filter(pk=task.pk).update(progress='已生成的片段')
+
+    stream = response.streaming_content
+    first_frame = next(stream)
+    response.close()
+    assert b'progress' in first_frame
+    task.refresh_from_db()
+    assert task.status == 'queued'
+    assert dispatches == [(str(task.pk), task.generation)]
+
+    attached = client.get(reverse('ai-translation-job', args=[task.pk]))
+    assert attached.status_code == 200
+    assert attached.json()['status'] == 'queued'
+    assert attached.json()['id'] == str(task.pk)
+    assert dispatches == [(str(task.pk), task.generation)]
+    assert provider_attempts == []
+
+    def fake_stream(_execution, _article, *, on_delta, execution_guard):
+        provider_attempts.append('one synthetic attempt')
+        execution_guard()
+        on_delta('续接后的完整译文')
+        return '已生成的片段续接后的完整译文'
+
+    monkeypatch.setattr(translation_jobs, 'stream_byok_translation', fake_stream)
+    translation_jobs._run_persistent_task(task.pk, task.generation)
+
+    restored = client.get(reverse('ai-translation-job', args=[task.pk]))
+    assert restored.status_code == 200
+    assert restored.json()['status'] == 'succeeded'
+    assert restored.json()['result']['full_content_zh'] == '已生成的片段续接后的完整译文'
+    assert provider_attempts == ['one synthetic attempt']
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(AI_BYOK_ENABLED=True, PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_byok_cancel_fences_running_worker_and_rejects_stale_owner_or_generation(monkeypatch):
+    client, user, csrf = _authenticated_client('t07-cancel')
+    _create_model(client, csrf, SYNTHETIC_PROVIDER_KEY_A, 'cancel')
+    news = _create_news()
+    monkeypatch.setattr(translation_jobs, '_dispatch_task', lambda *_args: None)
+    response = _post_translation(client, csrf, news, 't07-cancel-key')
+    task = ChatGPTTranslationTask.objects.get(pk=response['Job-ID'])
+    entered_provider = threading.Event()
+    release_provider = threading.Event()
+
+    def blocked_stream(_execution, _article, *, on_delta, execution_guard):
+        execution_guard()
+        on_delta('取消前片段')
+        entered_provider.set()
+        if not release_provider.wait(timeout=5):
+            raise AssertionError('synthetic stream was not released')
+        execution_guard()
+        on_delta('取消后不应保存')
+        return '取消后不应保存'
+
+    monkeypatch.setattr(translation_jobs, 'stream_byok_translation', blocked_stream)
+    worker = threading.Thread(
+        target=translation_jobs._run_persistent_task,
+        args=(task.pk, task.generation),
+        daemon=True,
+    )
+    worker.start()
+    try:
+        assert entered_provider.wait(timeout=5)
+        task.refresh_from_db()
+        assert task.status == 'running'
+        assert task.provider_started is True
+        run_token = task.run_token
+        assert run_token is not None
+
+        cancel_url = reverse('ai-translation-job-cancel', args=[task.pk])
+        other_client, _other_user, other_csrf = _authenticated_client('t07-cancel-other')
+        other_cancel = other_client.post(
+            cancel_url,
+            {'generation': task.generation},
+            format='json',
+            HTTP_X_CSRFTOKEN=other_csrf,
+        )
+        assert other_cancel.status_code == 404
+
+        stale_generation = client.post(
+            cancel_url,
+            {'generation': task.generation + 1},
+            format='json',
+            HTTP_X_CSRFTOKEN=csrf,
+        )
+        assert stale_generation.status_code == 409
+        assert stale_generation.json()['error_code'] == 'task_generation_changed'
+        task.refresh_from_db()
+        assert task.status == 'running'
+
+        cancelled = client.post(
+            cancel_url,
+            {'generation': task.generation},
+            format='json',
+            HTTP_X_CSRFTOKEN=csrf,
+        )
+        assert cancelled.status_code == 200
+        assert cancelled.json()['status'] == 'cancelled'
+
+        with pytest.raises(translation_jobs.SubscriptionError) as stale_finalize:
+            translation_jobs._finalize_task(
+                task.pk, task.generation, run_token, '迟到的完整译文',
+            )
+        assert stale_finalize.value.error_code == 'task_lease_lost'
+        task.refresh_from_db()
+        assert task.status == 'cancelled'
+        assert task.result == {}
+        assert not ChatGPTArticleTranslation.objects.filter(
+            user=user, ai_connection=task.ai_connection, news=news,
+        ).exists()
+    finally:
+        release_provider.set()
+        worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    task.refresh_from_db()
+    assert task.status == 'cancelled'
+    assert task.result == {}
+
+
+@pytest.mark.django_db
+@override_settings(AI_BYOK_ENABLED=True, PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_byok_explicit_regeneration_uses_new_task_and_preserves_old_success_on_failure(monkeypatch):
+    client, user, csrf = _authenticated_client('t07-regenerate')
+    _create_model(client, csrf, SYNTHETIC_PROVIDER_KEY_A, 'regenerate')
+    news = _create_news()
+    outputs = [
+        ('success', '旧成功译文'),
+        ('failure', '新任务部分进度'),
+        ('success', '新成功译文'),
+    ]
+    provider_attempts = []
+
+    def sequential_stream(_execution, _article, *, on_delta, execution_guard):
+        execution_guard()
+        outcome, text = outputs[len(provider_attempts)]
+        provider_attempts.append(outcome)
+        on_delta(text)
+        if outcome == 'failure':
+            raise BYOKTranslationError('provider_unavailable')
+        return text
+
+    monkeypatch.setattr(translation_jobs, 'stream_byok_translation', sequential_stream)
+    _run_inline(monkeypatch)
+
+    first_response = _post_translation(client, csrf, news, 't07-regenerate-first')
+    list(first_response.streaming_content)
+    first = ChatGPTTranslationTask.objects.get(pk=first_response['Job-ID'])
+    first_snapshot = first.result.copy()
+    saved = ChatGPTArticleTranslation.objects.get(
+        user=user, ai_connection=first.ai_connection, news=news,
+    )
+    assert first.status == 'succeeded'
+    assert first.result['full_content_zh'] == '旧成功译文'
+    assert saved.content == '旧成功译文'
+
+    failed_response = _post_translation(client, csrf, news, 't07-regenerate-failed')
+    list(failed_response.streaming_content)
+    failed = ChatGPTTranslationTask.objects.get(pk=failed_response['Job-ID'])
+    saved.refresh_from_db()
+    first.refresh_from_db()
+    assert failed.pk != first.pk
+    assert failed.status == 'failed'
+    assert failed.result == {}
+    assert saved.content == '旧成功译文'
+    assert first.result == first_snapshot
+
+    second_response = _post_translation(client, csrf, news, 't07-regenerate-second')
+    list(second_response.streaming_content)
+    second = ChatGPTTranslationTask.objects.get(pk=second_response['Job-ID'])
+    first.refresh_from_db()
+    latest_saved = ChatGPTArticleTranslation.objects.get(
+        user=user, ai_connection=first.ai_connection, news=news,
+    )
+    old_task_read = client.get(reverse('ai-translation-job', args=[first.pk]))
+    assert second.pk not in {first.pk, failed.pk}
+    assert second.status == 'succeeded'
+    assert second.result['full_content_zh'] == '新成功译文'
+    assert first.result == first_snapshot
+    assert old_task_read.status_code == 200
+    assert old_task_read.json()['result']['full_content_zh'] == '旧成功译文'
+    assert latest_saved.content == '新成功译文'
+    assert provider_attempts == ['success', 'failure', 'success']
+
+
+@pytest.mark.django_db
+@override_settings(AI_BYOK_ENABLED=True, PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_get_and_same_idempotency_attach_leave_started_expiry_interrupted_without_retry(monkeypatch):
+    client, _user, csrf = _authenticated_client('t07-interrupted')
+    _create_model(client, csrf, SYNTHETIC_PROVIDER_KEY_A, 'interrupted')
+    news = _create_news()
+    dispatches = []
+    provider_attempts = []
+    monkeypatch.setattr(
+        translation_jobs,
+        '_dispatch_task',
+        lambda task_id, generation: dispatches.append((str(task_id), generation)),
+    )
+    monkeypatch.setattr(
+        translation_jobs,
+        'stream_byok_translation',
+        lambda *_args, **_kwargs: provider_attempts.append('unexpected'),
+    )
+
+    response = _post_translation(client, csrf, news, 't07-interrupted-key')
+    task = ChatGPTTranslationTask.objects.get(pk=response['Job-ID'])
+    run_token = uuid.uuid4()
+    started_at = timezone.now() - timedelta(minutes=2)
+    ChatGPTTranslationTask.objects.filter(pk=task.pk).update(
+        status='running',
+        run_token=run_token,
+        provider_started=True,
+        progress='崩溃前的私有片段',
+        started_at=started_at,
+        lease_expires_at=started_at,
+    )
+
+    task_url = reverse('ai-translation-job', args=[task.pk])
+    recovered = client.get(task_url)
+    assert recovered.status_code == 200
+    assert recovered.json()['status'] == 'interrupted'
+    assert recovered.json()['error_code'] == 'worker_interrupted'
+    assert recovered.json()['progress'] == '崩溃前的私有片段'
+
+    repeated_read = client.get(task_url)
+    same_submission = _post_translation(client, csrf, news, 't07-interrupted-key')
+    task.refresh_from_db()
+    assert repeated_read.json()['status'] == 'interrupted'
+    assert same_submission['Job-ID'] == str(task.pk)
+    assert task.status == 'interrupted'
+    assert dispatches == [(str(task.pk), task.generation)]
+    assert provider_attempts == []
