@@ -90,6 +90,10 @@ class News(models.Model):
         ('failed', 'Failed'),
         ('network_error', 'Network Error'),
         ('validation_failed', 'Validation Failed'),
+        ('queued', 'Queued'),
+        ('rate_limited', 'Rate limited'),
+        ('blocked', 'Blocked'),
+        ('unsupported', 'Unsupported'),
     ]
     full_content_fetch_status = models.CharField(
         '全文抓取状态',
@@ -106,6 +110,18 @@ class News(models.Model):
     full_content_backfill_source = models.CharField('Scrapy 回填来源', max_length=64, blank=True, default='')
     full_content_backfill_at = models.DateTimeField('Scrapy 回填时间', null=True, blank=True)
 
+    CONTENT_KIND_CHOICES = [(value, value) for value in (
+        'unknown', 'article', 'discussion', 'readme', 'newsletter', 'abstract', 'product',
+    )]
+    FULL_CONTENT_STATE_CHOICES = [(value, value) for value in ('missing', 'legacy', 'complete')]
+    content_kind = models.CharField(max_length=32, choices=CONTENT_KIND_CHOICES, default='unknown')
+    full_content_state = models.CharField(max_length=16, choices=FULL_CONTENT_STATE_CHOICES, default='missing')
+    full_content_revision = models.PositiveBigIntegerField(default=0)
+    full_content_provenance = models.JSONField(default=dict, blank=True)
+    full_content_next_attempt_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    full_content_priority = models.SmallIntegerField(default=0)
+    full_content_error_code = models.CharField(max_length=64, blank=True, default='')
+
     # LLM-generated suggested questions (cached per article)
     suggested_questions = models.JSONField('AI 推荐问题', default=list, blank=True)
     suggested_questions_generated_at = models.DateTimeField('推荐问题生成时间', null=True, blank=True)
@@ -117,10 +133,56 @@ class News(models.Model):
         indexes = [
             models.Index(fields=['-publish_time']),
             models.Index(fields=['title']),
+            models.Index(fields=['full_content_fetch_status', 'full_content_next_attempt_at'], name='news_content_due_idx'),
         ]
 
     def __str__(self):
         return self.title
+
+
+class NewsSourceItem(models.Model):
+    """Publisher identity; titles and observation timestamps are not identity."""
+    source_key = models.CharField(max_length=64)
+    upstream_id = models.CharField(max_length=1024)
+    news = models.ForeignKey(News, on_delete=models.CASCADE, related_name='source_items')
+    discovery_url = models.URLField(max_length=1024)
+    first_seen_at = models.DateTimeField(auto_now_add=True)
+    last_seen_at = models.DateTimeField(default=timezone.now)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=['source_key', 'upstream_id'], name='unique_news_source_item',
+        )]
+
+
+class FeedState(models.Model):
+    """Headers refer only to a feed representation committed to the database."""
+    source_key = models.CharField(max_length=64)
+    feed_url = models.URLField(max_length=1024)
+    etag = models.TextField(blank=True, default='')
+    last_modified = models.TextField(blank=True, default='')
+    revision = models.PositiveBigIntegerField(default=0)
+    policy_version = models.CharField(max_length=64, blank=True, default='')
+    last_checked_at = models.DateTimeField(null=True, blank=True)
+    last_success_at = models.DateTimeField(null=True, blank=True)
+    next_poll_at = models.DateTimeField(null=True, blank=True)
+    validated_effective_url = models.URLField(max_length=1024, blank=True, default='')
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=['source_key', 'feed_url'], name='unique_source_feed_state',
+        )]
+
+
+class RequestBudget(models.Model):
+    """Persistent shared scope leases and cooldowns; never stores credentials."""
+    key = models.CharField(max_length=160, primary_key=True)
+    next_allowed_at = models.DateTimeField(null=True, blank=True)
+    cooldown_until = models.DateTimeField(null=True, blank=True)
+    lease_token = models.CharField(max_length=64, blank=True, default='')
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    consecutive_failures = models.PositiveIntegerField(default=0)
 
 
 class ChatSession(models.Model):

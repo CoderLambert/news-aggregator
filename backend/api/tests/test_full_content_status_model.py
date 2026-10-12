@@ -47,6 +47,7 @@ def test_full_content_fetch_status_choices_include_expected_values(news):
         'failed',
         'network_error',
         'validation_failed',
+        'queued', 'rate_limited', 'blocked', 'unsupported',
     }
 
     for status in choices:
@@ -82,3 +83,40 @@ def test_news_serializers_expose_full_content_fetch_status_fields(news):
     assert list_data['full_content_fetch_provider'] == 'scrapy_http'
     assert list_data['full_content_quality_score'] == 0.91
     assert list_data['full_content_retry_count'] == 2
+
+
+@pytest.mark.django_db
+def test_ingestion_schema_defaults_and_read_only_serializers(news):
+    assert news.content_kind == 'unknown'
+    assert news.full_content_state == 'missing'
+    assert news.full_content_revision == 0
+    assert news.full_content_provenance == {}
+    assert news.full_content_next_attempt_at is None
+    assert news.full_content_priority == 0
+    assert news.full_content_error_code == ''
+    for serializer in (NewsListSerializer, NewsDetailSerializer):
+        data = serializer(news).data
+        assert data['full_content_state'] == 'missing'
+        assert data['full_content_revision'] == 0
+        assert data['content_kind'] == 'unknown'
+        assert 'full_content_provenance' not in data
+        assert serializer().fields['full_content_state'].read_only
+    assert 'full_content' not in NewsListSerializer(news).data
+
+
+@pytest.mark.django_db
+def test_availability_matches_database_and_survives_refresh_failure(news):
+    from api.services.full_content_status import has_full_content, filter_readable_full_content
+    for state, body, status, expected in [
+        ('missing', 'Quarantined text', 'success', False),
+        ('legacy', ' \t\n\r\v\f ', 'success', False),
+        ('complete', '', 'success', False),
+        ('legacy', 'Readable', 'rate_limited', True),
+        ('complete', 'Readable', 'network_error', True),
+    ]:
+        News.objects.filter(pk=news.pk).update(
+            full_content_state=state, full_content=body, full_content_fetch_status=status,
+        )
+        news.refresh_from_db()
+        assert has_full_content(news) is expected
+        assert filter_readable_full_content(News.objects.filter(pk=news.pk)).exists() is expected

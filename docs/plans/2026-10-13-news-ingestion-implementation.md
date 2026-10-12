@@ -16,7 +16,7 @@
 | 阶段 | 路径与验证边界 | 进度 |
 | --- | --- | --- |
 | T01 | 伪来源、雷峰网、Pipeline、crawler_control；身份与并发字段保护 | 已验证并提交 |
-| T02 | News 七字段、三表、迁移；空库与历史数据 | 待实施 |
+| T02 | News 七字段、三表、迁移；空库与历史数据 | 已验证并提交 |
 | T03 | ingestion、候选验证、正文 CAS、admin、可用性；版本及 lease 竞态 | 待实施 |
 | T04 | safe_http、Provider、Scrapy handler、诊断/研究；WAL 多进程预算 | 待实施 |
 | T05 | Feed 解析、条件状态、receipt；失败不推进 checkpoint | 待实施 |
@@ -39,3 +39,11 @@ Pipeline 不再以 title_hash 合并文章，不再按摘要长度决定更新�
 验证命令：`PYTHONPATH=backend:crawler RUN_MAIN=true DJANGO_ENV=development DJANGO_DB_PATH=/tmp/newshub-ingestion-t01-py312.sqlite3 /tmp/newshub-ingestion-venv/bin/python -m pytest -q tests/crawler/`，实际 **20 passed**。首次运行发现 Scrapy 只在启动后提供 stats，已改为 spider_opened 信号记录并重跑通过。
 
 隔离验证环境按 CI 先安装 CPU Torch 2.14.1+cpu，再安装 requirements：Python 3.12.14、Django 6.1.2、Scrapy 2.19.0、pytest 9.1.1。没有升级仓库虚拟环境或依赖约束。后续完整 CI 尚未运行。
+
+## T02 实际结果
+
+迁移为 `0036_news_ingestion_contract`：News 七字段、四种兼容任务状态、status/next_attempt_at 复合索引，以及 NewsSourceItem、FeedState、RequestBudget。历史非空正文标记 legacy/revision=1，空或常见空白正文 missing/revision=0；不提升为 complete、不建立任务、不修改调度/来源开关。列表只增加轻量状态字段，证据和正文仍不进列表。
+
+统一 Python/数据库可用性 helper 按 state 与去空白正文判断，刷新失败或冷却不影响可读正文；success + 空白正文不可用。
+
+实际验证：Python 3.12 环境运行 `test_ingestion_migration.py`、`test_full_content_status_model.py` 和 `tests/crawler/` 共 **27 passed**。两个迁移场景由独立子进程使用新建临时文件库，并断言 WAL、正文/译文/收藏/聊天保留、无隐式任务、开关未变。`makemigrations --check --dry-run` 返回 **No changes detected**；`git diff --check` 通过。所有迁移命令均显式设置临时 DJANGO_DB_PATH，没有访问随带业务库。

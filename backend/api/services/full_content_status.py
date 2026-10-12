@@ -301,3 +301,18 @@ def classify_fetch_error(error_or_result) -> str:
             return 'network_error'
 
     return 'failed'
+
+
+def has_full_content(news: News) -> bool:
+    """Availability is independent of the latest refresh attempt's status."""
+    return news.full_content_state in {'legacy', 'complete'} and bool((news.full_content or '').strip())
+
+
+def get_readable_full_content(news: News) -> str:
+    return news.full_content if has_full_content(news) else ''
+
+
+def filter_readable_full_content(queryset):
+    return queryset.annotate(
+        _readable_body=trimmed_text_expression('full_content'),
+    ).filter(full_content_state__in=['legacy', 'complete']).exclude(_readable_body='')

@@ -43,6 +43,10 @@ class NewsListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = News
+        read_only_fields = [
+            'content_kind', 'full_content_state', 'full_content_revision',
+            'full_content_next_attempt_at', 'full_content_priority', 'full_content_error_code',
+        ]
         fields = [
             'id', 'title', 'summary', 'title_zh', 'summary_zh', 'author', 'publish_time',
             'source', 'source_name', 'source_type', 'source_language',
@@ -53,6 +57,8 @@ class NewsListSerializer(serializers.ModelSerializer):
             'full_content_fetch_status', 'full_content_fetch_error',
             'full_content_fetch_provider', 'full_content_quality_score',
             'full_content_retry_count', 'last_full_content_attempt',
+            'content_kind', 'full_content_state', 'full_content_revision',
+            'full_content_next_attempt_at', 'full_content_priority', 'full_content_error_code',
         ]
 
     def get_summary(self, obj):
@@ -92,6 +98,10 @@ class NewsDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = News
+        read_only_fields = [
+            'content_kind', 'full_content_state', 'full_content_revision',
+            'full_content_next_attempt_at', 'full_content_priority', 'full_content_error_code',
+        ]
         fields = [
             'id', 'title', 'content', 'title_zh', 'content_zh', 'author', 'publish_time',
             'source', 'source_name', 'source_type', 'source_url', 'source_language',
@@ -105,6 +115,8 @@ class NewsDetailSerializer(serializers.ModelSerializer):
             'full_content_fetch_status', 'full_content_fetch_error',
             'full_content_fetch_provider', 'full_content_quality_score',
             'full_content_retry_count', 'last_full_content_attempt',
+            'content_kind', 'full_content_state', 'full_content_revision',
+            'full_content_next_attempt_at', 'full_content_priority', 'full_content_error_code',
             'full_translation_active',
         ]
 
