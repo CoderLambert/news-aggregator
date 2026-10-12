@@ -38,7 +38,7 @@ class ProviderKeyGuard(CustomLogger):
 
         denied_streaming_calls = {
             item.strip()
-            for item in os.environ.get("T00_DENY_STREAMING_CALL_TYPES", "acompletion").split(",")
+            for item in os.environ.get("BYOK_DENY_STREAMING_CALL_TYPES", "acompletion").split(",")
             if item.strip()
         }
         if data.get("stream") is True and call_type in denied_streaming_calls:

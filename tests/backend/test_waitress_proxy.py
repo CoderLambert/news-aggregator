@@ -167,19 +167,7 @@ def test_wsgi_request_rejects_unlisted_host():
             _call(middleware, _environ("127.0.0.1", host="attacker.invalid"))
 
 
-def test_production_hermes_fallback_is_skipped_and_import_is_inert(monkeypatch):
-    calls = []
-
-    def unexpected_hermes_stat(path):
-        calls.append(path)
-        raise AssertionError("production tried to inspect Hermes config")
-
-    monkeypatch.setattr(start_waitress.os.path, "isfile", unexpected_hermes_stat)
-    production_env = {"DJANGO_ENV": "production"}
-    assert start_waitress.load_development_hermes_key(production_env) is False
-    assert calls == []
-    assert "DASHSCOPE_CODING_API_KEY" not in production_env
-
+def test_waitress_import_is_inert():
     script = """import sys, types
 calls = []
 waitress = types.ModuleType('waitress')

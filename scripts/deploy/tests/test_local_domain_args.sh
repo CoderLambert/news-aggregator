@@ -176,7 +176,7 @@ MOCK
 
 cat >"$task_bin/certutil" <<MOCK
 #!/usr/bin/env bash
-printf '%s HOME=%s API_KEY_PRESENT=%s\n' "\$*" "\$HOME" "\${DASHSCOPE_CODING_API_KEY:+yes}" >>"$CERTUTIL_LOG"
+printf '%s HOME=%s API_KEY_PRESENT=%s\n' "\$*" "\$HOME" "\${SYNTHETIC_API_KEY:+yes}" >>"$CERTUTIL_LOG"
 exit 0
 MOCK
 
@@ -369,7 +369,7 @@ if grep -Eq 'compose.*(config|run|up)' "$DOCKER_LOG"; then
 fi
 
 : >"$CERTUTIL_LOG"
-export DASHSCOPE_CODING_API_KEY='local-test-secret-marker'
+export SYNTHETIC_API_KEY='local-test-secret-marker'
 home_before="${HOME:-}"
 "$REAL_PYTHON" - "$PROJECT_ROOT/scripts/deploy/local_domain_acceptance.py" \
     "$task_test_root/task-browser-home" "$task_test_root/test-ca.pem" <<'PY'

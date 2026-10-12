@@ -105,9 +105,26 @@ RESEARCH_SYSTEM_PROMPT = """\
 def run_agent_loop(
     session, user_query: str, on_event: Callable, local_only: bool = False,
     execution_guard=None, persist_completion=None, persist_tool_result=None,
+    user=None, clients=None,
 ):
     """Run the research agent with optional worker fences and durable writes."""
     guard = execution_guard or (lambda: None)
+    if clients is None:
+        if user is None:
+            clients = get_clients()
+        else:
+            from api.services.provider_credentials import (
+                ProviderCredentialError,
+                personal_clients_for_user,
+            )
+            try:
+                clients = personal_clients_for_user(user)
+            except ProviderCredentialError:
+                on_event('error', {'message': '个人模型配置不可用，请前往设置重新配置'})
+                return
+        if not clients:
+            on_event('error', {'message': '请先在设置中配置自己的模型 API Key'})
+            return
     # In local-only mode, filter out web search tools so the LLM cannot call them
     logger.info('run_agent_loop: local_only=%s', local_only)
     available_tools = [
@@ -141,7 +158,12 @@ def run_agent_loop(
         on_event('thinking', {'iteration': iteration})
 
         # Call LLM with tools
-        response = _call_llm_with_tools(messages, tools=available_tools, execution_guard=guard)
+        response = _call_llm_with_tools(
+            messages,
+            tools=available_tools,
+            execution_guard=guard,
+            clients=clients,
+        )
         guard()
         if response is None:
             on_event('error', {'message': '所有 LLM 提供商不可用，请稍后再试'})
@@ -240,19 +262,21 @@ def run_agent_loop(
     on_event('error', {'message': 'Agent 达到最大迭代次数限制，请尝试简化问题'})
 
 
-def _call_llm_with_tools(messages: list, tools=None, execution_guard=None):
+def _call_llm_with_tools(messages: list, tools=None, execution_guard=None, clients=None):
     """Call each configured provider in the original order with guarded retries."""
     guard = execution_guard or (lambda: None)
     if tools is None:
         tools = TOOLS
-    max_retries = 2
     guard()
-    clients = get_clients()
+    clients = get_clients() if clients is None else clients
     if not clients:
         return None
 
     for idx, (client, model) in enumerate(clients):
-        for attempt in range(1, max_retries + 1):
+        configured_attempts = getattr(client, '_newshub_max_attempts', 2)
+        max_attempts = configured_attempts if type(configured_attempts) is int else 2
+        max_attempts = min(max(max_attempts, 1), 2)
+        for attempt in range(1, max_attempts + 1):
             guard()
             try:
                 response = client.chat.completions.create(
@@ -270,7 +294,7 @@ def _call_llm_with_tools(messages: list, tools=None, execution_guard=None):
                     keyword in str(exc).lower()
                     for keyword in ['ssl', 'eof', 'timeout', 'connection', 'reset', 'broken pipe']
                 )
-                if transient and attempt < max_retries:
+                if transient and attempt < max_attempts:
                     time.sleep(1 * attempt)
                     guard()
                     continue

@@ -61,7 +61,10 @@ curl --fail --silent http://127.0.0.1:4000/health/readiness
 
 ```json
 {
-  "models": ["news.deepseek-flash"],
+  "models": [
+    "openai/*", "anthropic/*", "deepseek/*", "gemini/*", "dashscope/*",
+    "zai/*", "moonshot/*", "mistral/*", "groq/*", "xai/*", "openrouter/*"
+  ],
   "key_alias": "newshub-prod",
   "max_budget": 5.0,
   "budget_duration": "1d",
@@ -72,7 +75,7 @@ curl --fail --silent http://127.0.0.1:4000/health/readiness
 }
 ```
 
-Generic CLI 消费者要使用另一把 key，并将 `models` 限定为 `generic-cli.deepseek-flash`。轮换时先生成新 key，将其写入对应项目的 secret manager，部署并验证新 key，再撤销旧 key。轮换不改变用户 provider key；用户 provider key 由拥有该用户连接的业务后端加密并逐请求传递。
+NewsHub 的项目 key 只允许上述白名单路由；其中 Qwen 在 LiteLLM 内部使用 `dashscope/*`，但业务层不暴露 DashScope 直连选项。其他项目必须使用另一把 key 和自己的最小 model allowlist。轮换时先生成新 key，将其写入对应项目的 secret manager，部署并验证新 key，再撤销旧 key。轮换不改变用户 provider key；用户 provider key 由拥有该用户连接的业务后端加密并逐请求传递。
 
 master key 仅用于 Proxy 管理 API，轮换它不会替换项目 virtual key。更换 Postgres 密码须先在 Postgres 内更新 role 密码，再原子替换 secret 文件并重启 Proxy。`LITELLM_SALT_KEY` 用于 LiteLLM 数据库加密材料；变更前须按版本兼容说明验证迁移和备份恢复，不能直接替换后碰运气。
 

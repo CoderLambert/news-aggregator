@@ -23,6 +23,24 @@ const DISPLAY_MODES = [
   { key: 'bilingual', label: '双文', description: '中文与原文一起阅读', icon: AlignLeft },
 ] satisfies ReadonlyArray<{ key: DisplayMode; label: string; description: string; icon: LucideIcon }>
 
+const MODEL_PROVIDERS: ReadonlyArray<{
+  id: PersonalProvider
+  label: string
+  defaultModel: string
+}> = [
+  { id: 'openai', label: 'OpenAI', defaultModel: 'gpt-5-mini' },
+  { id: 'anthropic', label: 'Anthropic Claude', defaultModel: 'claude-sonnet-4-6' },
+  { id: 'deepseek', label: 'DeepSeek', defaultModel: 'deepseek-chat' },
+  { id: 'gemini', label: 'Google Gemini', defaultModel: 'gemini-2.5-flash' },
+  { id: 'qwen', label: 'Qwen', defaultModel: 'qwen-plus' },
+  { id: 'glm', label: 'GLM / Z.AI', defaultModel: 'glm-4.7' },
+  { id: 'kimi', label: 'Kimi / Moonshot', defaultModel: 'kimi-k2.5' },
+  { id: 'mistral', label: 'Mistral AI', defaultModel: 'mistral-small-latest' },
+  { id: 'groq', label: 'Groq', defaultModel: 'llama-3.3-70b-versatile' },
+  { id: 'xai', label: 'xAI', defaultModel: 'grok-4.3' },
+  { id: 'openrouter', label: 'OpenRouter', defaultModel: 'openai/gpt-4o-mini' },
+]
+
 function requestError(error: unknown): string {
   if (axios.isAxiosError(error)) {
     const body: unknown = error.response?.data
@@ -35,7 +53,8 @@ function requestError(error: unknown): string {
 }
 
 function PersonalApiKeySettings({ userId }: { userId: number }) {
-  const [provider, setProvider] = useState<PersonalProvider>('volcengine')
+  const [provider, setProvider] = useState<PersonalProvider>('deepseek')
+  const [modelId, setModelId] = useState('deepseek-chat')
   const [apiKey, setApiKey] = useState('')
   const [credential, setCredential] = useState<ProviderCredentialStatus | null>(null)
   const [loading, setLoading] = useState(true)
@@ -48,6 +67,7 @@ function PersonalApiKeySettings({ userId }: { userId: number }) {
     void fetchProviderCredentialStatus(controller.signal).then((value) => {
       setCredential(value)
       if (value.provider) setProvider(value.provider)
+      if (value.modelId) setModelId(value.modelId)
     }).catch((reason: unknown) => {
       if (!controller.signal.aborted) setError(requestError(reason))
     }).finally(() => {
@@ -62,10 +82,10 @@ function PersonalApiKeySettings({ userId }: { userId: number }) {
     setError('')
     setNotice('')
     try {
-      const value = await saveProviderCredential(provider, apiKey)
+      const value = await saveProviderCredential(provider, modelId, apiKey)
       setCredential(value)
       setApiKey('')
-      setNotice('API Key 已加密保存。后续 AI 请求将优先使用此 Key。')
+      setNotice('API Key 与模型已加密保存。后续个人 AI 请求将通过 LiteLLM 安全路由。')
     } catch (reason) {
       setError(requestError(reason))
     } finally {
@@ -95,23 +115,40 @@ function PersonalApiKeySettings({ userId }: { userId: number }) {
         <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-orange-50 text-orange-600"><KeyRound aria-hidden="true" className="size-5" /></span>
         <div>
           <h2 id="api-key-settings" className="text-lg font-semibold">个人模型 API Key</h2>
-          <p className="mt-1 text-sm leading-6 text-muted-foreground">Key 仅供当前账号的翻译、文章问答和推荐问题使用；服务端加密保存，保存后不再回显。</p>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">Key 仅供当前账号的翻译、文章问答、推荐问题和深度研究使用；服务端加密保存，经本站 LiteLLM 路由发送到你选择的厂商，保存后不再回显。</p>
         </div>
       </div>
 
       <form className="mt-5 space-y-4" onSubmit={save}>
-        <div className="grid gap-4 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.4fr)]">
+        <div className="grid gap-4 sm:grid-cols-3">
           <label className="space-y-2 text-sm font-medium">
             <span>模型提供方</span>
             <select
               value={provider}
-              onChange={(event) => setProvider(event.target.value as PersonalProvider)}
+              onChange={(event) => {
+                const next = event.target.value as PersonalProvider
+                setProvider(next)
+                setModelId(MODEL_PROVIDERS.find((item) => item.id === next)?.defaultModel ?? '')
+              }}
               disabled={saving || loading}
               className="flex h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <option value="volcengine">Volcengine ARK</option>
-              <option value="dashscope">DashScope</option>
+              {MODEL_PROVIDERS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
             </select>
+          </label>
+          <label className="space-y-2 text-sm font-medium">
+            <span>Model ID</span>
+            <Input
+              value={modelId}
+              onChange={(event) => setModelId(event.target.value)}
+              placeholder={MODEL_PROVIDERS.find((item) => item.id === provider)?.defaultModel}
+              autoComplete="off"
+              spellCheck={false}
+              disabled={saving || loading}
+              required
+              maxLength={128}
+              className="h-11"
+            />
           </label>
           <label className="space-y-2 text-sm font-medium">
             <span>{credential?.configured ? '输入新 Key 以替换' : 'API Key'}</span>
@@ -119,7 +156,7 @@ function PersonalApiKeySettings({ userId }: { userId: number }) {
               type="password"
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
-              placeholder={provider === 'volcengine' ? 'ark-…' : 'sk-…'}
+              placeholder="请输入厂商 API Key"
               autoComplete="new-password"
               spellCheck={false}
               disabled={saving || loading}
@@ -135,11 +172,13 @@ function PersonalApiKeySettings({ userId }: { userId: number }) {
           <Button type="submit" className="h-11" disabled={saving || loading || apiKey.trim().length < 8}>
             {saving ? '正在保存…' : credential?.configured ? '替换 Key' : '保存 Key'}
           </Button>
-          {credential?.configured && <Button type="button" variant="outline" className="h-11 text-red-700" disabled={saving} onClick={() => void remove()}>
+          {(credential?.configured || credential?.requiresReplacement) && <Button type="button" variant="outline" className="h-11 text-red-700" disabled={saving} onClick={() => void remove()}>
             <Trash2 aria-hidden="true" />删除 Key
           </Button>}
           <span className="text-sm text-muted-foreground">
-            {loading ? '正在读取状态…' : credential?.configured ? `已配置：${credential.providerLabel ?? credential.provider}` : '尚未配置'}
+            {loading ? '正在读取状态…' : credential?.configured
+              ? `已配置：${credential.providerLabel ?? credential.provider} / ${credential.modelId}`
+              : credential?.requiresReplacement ? '旧版直连凭据已停用，请替换' : '尚未配置'}
           </span>
         </div>
         {notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}

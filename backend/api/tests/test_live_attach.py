@@ -188,6 +188,6 @@ def test_missing_provider_returns_actionable_sse_error_without_starting_job(news
     assert response['Content-Type'].startswith('text/event-stream')
     assert '"error"' in body
     assert '未配置全文翻译模型提供方' in body
-    assert 'Volcengine ARK / DashScope' in body
+    assert '选择厂商、模型并配置自己的 API Key' in body
     news_obj.refresh_from_db()
     assert news_obj.full_content_zh == ''

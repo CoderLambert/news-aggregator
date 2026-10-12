@@ -1,12 +1,37 @@
 model_list:
-  - model_name: news.deepseek-flash
+  - model_name: openai/*
     litellm_params:
-      model: openai/deepseek-flash
-      api_base: https://api.deepseek.com/v1
-  - model_name: generic-cli.deepseek-flash
+      model: openai/*
+  - model_name: anthropic/*
     litellm_params:
-      model: openai/deepseek-flash
-      api_base: https://api.deepseek.com/v1
+      model: anthropic/*
+  - model_name: deepseek/*
+    litellm_params:
+      model: deepseek/*
+  - model_name: gemini/*
+    litellm_params:
+      model: gemini/*
+  - model_name: dashscope/*
+    litellm_params:
+      model: dashscope/*
+  - model_name: zai/*
+    litellm_params:
+      model: zai/*
+  - model_name: moonshot/*
+    litellm_params:
+      model: moonshot/*
+  - model_name: mistral/*
+    litellm_params:
+      model: mistral/*
+  - model_name: groq/*
+    litellm_params:
+      model: groq/*
+  - model_name: xai/*
+    litellm_params:
+      model: xai/*
+  - model_name: openrouter/*
+    litellm_params:
+      model: openrouter/*
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
@@ -17,6 +42,7 @@ general_settings:
   maximum_spend_logs_retention_interval: 1d
   store_audit_logs: true
   disable_master_key_return: true
+  allow_client_side_credentials: true
 
 router_settings:
   num_retries: 0

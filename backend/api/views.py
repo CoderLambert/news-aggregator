@@ -792,7 +792,7 @@ class NewsTranslateFullView(generics.GenericAPIView):
         if not worker_in_flight and not provider_clients:
             def provider_error_stream():
                 message = (
-                    '未配置全文翻译模型提供方：请前往「设置」配置当前用户自己的 Volcengine ARK / DashScope API Key。'
+                    '未配置全文翻译模型提供方：请前往「设置」选择厂商、模型并配置自己的 API Key。'
                 )
                 yield f"data: {json_lib.dumps({'error': message}, ensure_ascii=False)}\n\n"
             return StreamingHttpResponse(provider_error_stream(), content_type='text/event-stream')

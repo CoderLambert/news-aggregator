@@ -68,15 +68,15 @@ cd ..
 cp .env.example .env
 ```
 
-至少填写一个 LLM Key。`.env` 已被 Git 忽略，不要提交真实凭据：
+`.env` 已被 Git 忽略，不要提交真实凭据。个人模型 Key 由用户登录后在设置页保存，不放在站点环境变量中：
 
 ```dotenv
 DJANGO_SECRET_KEY=请生成一个稳定的随机密钥
 DJANGO_DEBUG=1
 DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
 
-VOLCENGINE_API_KEY=
-DASHSCOPE_CODING_API_KEY=
+AI_BYOK_GATEWAY_URL=http://127.0.0.1:4000
+AI_BYOK_GATEWAY_PROJECT_KEY=本地开发网关签发的受限虚拟Key
 JINA_API_KEY=
 ```
 
@@ -88,9 +88,9 @@ backend/venv/bin/python -c "import secrets; print(secrets.token_urlsafe(60))"
 
 Provider 选择规则：
 
-- `VOLCENGINE_API_KEY`：火山引擎 ARK，优先使用
-- `DASHSCOPE_CODING_API_KEY`：DashScope，作为备用 Provider
-- 两者都配置时，主 Provider 失败会自动切换备用 Provider
+- 登录用户从 OpenAI、Anthropic Claude、DeepSeek、Google Gemini、Qwen、GLM/Z.AI、Kimi/Moonshot、Mistral、Groq、xAI 或 OpenRouter 中选择，并填写厂商 Model ID
+- 业务后端按白名单构造 LiteLLM 路由；用户不能设置任意 Base URL
+- 不配置站点级厂商 Key，不做跨厂商自动 fallback
 - `JINA_API_KEY`：研究 Agent 的联网搜索/抓取 Key，可选
 - 未配置 Key 时，基础新闻浏览仍可用，但 AI 功能会返回未配置提示
 
@@ -450,7 +450,7 @@ lsof -i :5173
 
 ### AI 功能提示未配置 Key
 
-检查根目录 `.env` 中至少一个 Provider Key 非空，然后重启后端。环境变量只在进程启动时加载。
+先确认当前用户已在「设置」中选择受支持的厂商、填写 Model ID 并保存自己的 API Key。若已配置仍失败，检查 `AI_BYOK_GATEWAY_URL`、项目虚拟 Key 文件与独立 LiteLLM 网关的 readiness；不要改为站点级厂商 Key 或直连 fallback。
 
 ### 语义搜索不可用或首次启动很慢
 

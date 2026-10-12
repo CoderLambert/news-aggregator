@@ -94,6 +94,7 @@ def test_fake_worker_commits_full_history_and_bounded_replay_events(fake_executo
 
     def fake_loop(current_session, query, on_event, **options):
         assert query == 'offline query'
+        assert options['user'].pk == owner.pk
         options['execution_guard']()
         on_event('thinking', {'iteration': 0})
         on_event('text_delta', {'text': text})

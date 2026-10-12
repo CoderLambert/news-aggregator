@@ -433,7 +433,7 @@ def _run_worker(run_id, query, local_only):
             return
         guard = execution_guard(run_id, token)
         guard()
-        run = ResearchRun.objects.select_related('session').get(pk=run_id)
+        run = ResearchRun.objects.select_related('session', 'user').get(pk=run_id)
         session = run.session
         from .agent_loop import run_agent_loop
 
@@ -456,6 +456,7 @@ def _run_worker(run_id, query, local_only):
                 persist_tool_result=lambda name, args, result: _persist_tool_result(
                     run_id, token, session, name, args, result,
                 ),
+                user=run.user,
             )
     except ResearchRunError as exc:
         if exc.error_code == 'research_lease_lost':

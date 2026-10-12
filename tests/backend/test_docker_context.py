@@ -26,6 +26,8 @@ def _production_compose_config(project, tmp_path, explicit_values):
     compose_project.mkdir(parents=True)
     app_env = compose_project / 'app.env'
     app_env.write_text('DJANGO_ENV=production\n', encoding='utf-8')
+    gateway_key = compose_project / 'gateway-project-key'
+    gateway_key.write_text('sk-compose-test-not-a-real-key\n', encoding='ascii')
 
     # A local .env must not silently override the explicit --env-file or defaults.
     (compose_project / '.env').write_text(
@@ -38,6 +40,7 @@ def _production_compose_config(project, tmp_path, explicit_values):
         'DJANGO_SECRET_KEY': 'compose-test-key-never-used-for-authentication-0123456789',
         'WAITRESS_TRUSTED_PROXY': '127.0.0.1',
         'NEWSHUB_ENV_FILE': str(app_env),
+        'AI_BYOK_GATEWAY_PROJECT_KEY_FILE': str(gateway_key),
         **explicit_values,
     }
     env_file = compose_project / 'compose.env'
@@ -265,8 +268,15 @@ def test_production_compose_uses_only_named_volumes_and_separate_migration():
     assert runtime_environment['CHATGPT_AUTH_MODE'] == '${CHATGPT_AUTH_MODE:-disabled}'
     assert runtime_environment['CRAWLER_SCHEDULER_ENABLED'] == '${CRAWLER_SCHEDULER_ENABLED:-0}'
     assert runtime_environment['SEARCH_INDEX_ENABLED'] == '${SEARCH_INDEX_ENABLED:-0}'
-    forbidden_worker_secrets = {'OPENAI_API_KEY', 'DASHSCOPE_API_KEY', 'CHATGPT_ACCESS_TOKEN'}
+    forbidden_worker_secrets = {'OPENAI_API_KEY', 'PROVIDER_API_KEY', 'CHATGPT_ACCESS_TOKEN'}
     assert forbidden_worker_secrets.isdisjoint(runtime_environment)
+
+    assert app['environment']['AI_BYOK_GATEWAY_URL'] == '${AI_BYOK_GATEWAY_URL:-}'
+    assert app['environment']['AI_BYOK_GATEWAY_PROJECT_KEY_FILE'] == (
+        '/run/secrets/ai_byok_gateway_project_key'
+    )
+    assert app['secrets'] == ['ai_byok_gateway_project_key']
+    assert set(compose['secrets']) == {'ai_byok_gateway_project_key'}
 
 
 def test_production_compose_flag_defaults_ignore_dotenv_and_allow_explicit_values(tmp_path):

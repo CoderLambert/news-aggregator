@@ -10,19 +10,22 @@ from api.services.provider_credentials import (
     PROVIDER_SPECS,
     ProviderCredentialError,
     encrypt_api_key,
-    validate_api_key,
+    validate_credential,
 )
 
 
 def _status_payload(credential=None):
+    supported = credential is not None and credential.provider in PROVIDER_SPECS
     return {
-        'configured': credential is not None,
-        'provider': credential.provider if credential is not None else None,
+        'configured': supported,
+        'requires_replacement': credential is not None and not supported,
+        'provider': credential.provider if supported else None,
         'provider_label': (
             PROVIDER_SPECS[credential.provider]['label']
-            if credential is not None and credential.provider in PROVIDER_SPECS
+            if supported
             else None
         ),
+        'model_id': credential.model_id if supported else None,
         'updated_at': credential.updated_at.isoformat() if credential is not None else None,
     }
 
@@ -39,8 +42,8 @@ class ProviderCredentialView(APIView):
 
     def put(self, request):
         try:
-            provider, api_key = validate_api_key(
-                request.data.get('provider'), request.data.get('api_key'),
+            provider, model_id, api_key = validate_credential(
+                request.data.get('provider'), request.data.get('model_id'), request.data.get('api_key'),
             )
             encrypted = encrypt_api_key(api_key, request.user.pk, provider)
         except ProviderCredentialError as exc:
@@ -52,7 +55,11 @@ class ProviderCredentialView(APIView):
         with transaction.atomic():
             credential, _ = UserProviderCredential.objects.update_or_create(
                 user=request.user,
-                defaults={'provider': provider, 'encrypted_api_key': encrypted},
+                defaults={
+                    'provider': provider,
+                    'model_id': model_id,
+                    'encrypted_api_key': encrypted,
+                },
             )
         response = Response(_status_payload(credential))
         response['Cache-Control'] = 'no-store'

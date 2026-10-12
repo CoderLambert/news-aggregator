@@ -38,6 +38,8 @@ services:
         required: true
     environment:
       <<: *runtime-environment
+      AI_BYOK_GATEWAY_URL: "${AI_BYOK_GATEWAY_URL:-}"
+      AI_BYOK_GATEWAY_PROJECT_KEY_FILE: /run/secrets/ai_byok_gateway_project_key
       WAITRESS_PORT: "9527"
       WAITRESS_THREADS: "4"
       WAITRESS_CONN_LIMIT: "1000"
@@ -49,6 +51,8 @@ services:
       - runtime-data:/var/lib/newshub/runtime
       - model-cache:/var/lib/newshub/model-cache
       - logs-data:/var/lib/newshub/logs
+    secrets:
+      - ai_byok_gateway_project_key
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -119,3 +123,7 @@ volumes:
   runtime-data:
   model-cache:
   logs-data:
+
+secrets:
+  ai_byok_gateway_project_key:
+    file: "${AI_BYOK_GATEWAY_PROJECT_KEY_FILE:?Set AI_BYOK_GATEWAY_PROJECT_KEY_FILE to the protected LiteLLM project key file}"
