@@ -8,9 +8,9 @@
 
 | 项目 | 结果 |
 | --- | --- |
-| T02 父提交 / 父分支 | `c2f50dd6a56e17dad65e78b295a13598895b4c76` / `task/byok-T02-models-and-tests`（已同步 T01 最新文档及工具探测修复） |
+| T02 父提交 / 父分支 | `5fc323fb27da762885aa6d26f0efbca3b0b10bac` / `task/byok-T02-models-and-tests`（已同步 T01 最新记录、工具探测修复和 SQLite 失败分类） |
 | T02 PR | [#36 Draft](https://github.com/CoderLambert/news-aggregator/pull/36)，未合并 |
-| T03 实现提交（重放后） | `1fbd8535454d50c3d4939b4949c762fff23daa9f` |
+| T03 实现提交（重放后） | `b9fd6c0da76aca0bdbf82ae0864f1033b150210e` |
 | T03 分支 / PR base | `task/byok-T03-preferences` / `task/byok-T02-models-and-tests` |
 | T03 PR | [#37 Draft](https://github.com/CoderLambert/news-aggregator/pull/37)，依赖 PR #36 |
 | OS / 架构 | Linux 7.2.5-3-omarchy x86_64 |
