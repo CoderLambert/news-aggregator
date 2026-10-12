@@ -1,6 +1,6 @@
 # T00 · 共享网关端到端技术验真
 
-> **本地技术门槛 PASS（2026-10-12）**：隔离运行 L 与代码 HEAD `ad0f14eb599ddbf8a691dc535227d7ef18298cb6` 复核均为 `407 PASS / 0 FAIL / 407 checks`；PR #33 当前 docs-only head `04051772e0a3a52fb8d3f9dc98480c4fc2132790` 的 backend/frontend 两组 CI 均通过。LiteLLM v1.104.2 的原始 Chat EOF 风险仍由负控复现，受保护准入路径已证明在上游前拒绝 Chat streaming；锁定镜像的官方 Cosign 签名与实际 digest 已验证。DeepSeek 专属模型路由只指向本地合成 upstream，缺请求级 provider Key 时仍在上游前拒绝。可选真实请求 T00-11 与其他 provider 兼容性未运行；本地技术 PASS 不表示生产网关或真实 provider 兼容性已验收。精确证据与边界见[同编号 Test](../tests/T00-sdk-protocol.md)。
+> **本地技术门槛 PASS（2026-10-12）**：隔离运行 L 与代码 HEAD `ad0f14eb599ddbf8a691dc535227d7ef18298cb6` 复核均为 `407 PASS / 0 FAIL / 407 checks`；PR #33 已验证的 docs-only head `04051772e0a3a52fb8d3f9dc98480c4fc2132790` 的 backend/frontend 两组 CI 均通过。LiteLLM v1.104.2 的原始 Chat EOF 风险仍由负控复现，受保护准入路径已证明在上游前拒绝 Chat streaming；锁定镜像的官方 Cosign 签名与实际 digest 已验证。DeepSeek 专属模型路由只指向本地合成 upstream，缺请求级 provider Key 时仍在上游前拒绝。可选真实请求 T00-11 与其他 provider 兼容性未运行；本地技术 PASS 不表示生产网关或真实 provider 兼容性已验收。精确证据与边界见[同编号 Test](../tests/T00-sdk-protocol.md)。
 
 | 属性 | 内容 |
 | --- | --- |
