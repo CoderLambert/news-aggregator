@@ -1,6 +1,6 @@
 # T05 · 个人全文翻译最小闭环
 
-> **PLANNED**：本文件为未执行的实施/测试契约，所有测试当前 NOT_RUN。实施时以 `origin/feat/byok-user-api-keys` 最新 HEAD 为准，勿把设计 SHA 当作当前代码。
+> **READY FOR REVIEW（2026-10-12）**：[Draft PR #39](https://github.com/CoderLambert/news-aggregator/pull/39) 中的 T05 实现已在 `task/byok-T05-private-translation` 完成，本地新用例与前端验证通过。旧订阅回归有一个 SQLite 并发用例在完整组跑中失败、隔离重跑通过；SDK_LOCAL、PROXY_LOCAL、PROVIDER_REAL 和用户浏览器 UAT 仍为 NOT_RUN。实际证据见 [Test T05](../tests/T05-private-translation.md)。
 
 | 属性 | 内容 |
 | --- | --- |
@@ -40,7 +40,9 @@ GET 派发任务、旧订阅记录迁移有损、私有内容写入公共缓存�
 2. 同环境记录受影响旧测试的基线；用既有 Django/React/SSE/SDK/持久任务，先验证关键假设再编码。
 3. 本次只交付这一项**可以运行的完整功能**，包括权限、正常操作与最主要的失败路径；不跨到其它 Txx。
 4. 跑最小定向单元/契约测试以及受影响旧功能回归，列出修改过的测试断言 diff；需求未变时禁止改断言迁就代码。
-5. 更新对应 Test 文档中的真实日志、环境、SHA 和 NOT_RUN 项；单张任务 PR base 指向 `feat/byok-user-api-keys`。未授权时不合并 main、不开始下一张卡。
+5. 更新对应 Test 文档中的真实日志、环境、SHA 和 NOT_RUN 项；单张任务 PR base 指向 `task/byok-T04-article-chat`。未授权时不合并 main、不开始下一张卡。
+
+**当前实现**：短文私有翻译、任务 GET 恢复、取消、同用户幂等、跨用户隔离、凭证代次 fencing、完整上游终态和事务回滚已有自动化覆盖。[T05 Draft PR #39](https://github.com/CoderLambert/news-aggregator/pull/39) 以 T04 分支为 base；父 PR #38 仍未合并。测试中的未验证项明确保留为 NOT_RUN。
 
 **任务结束**：这条用户流程能运行、失败能清楚识别，主要不变量有自动化验证；更新同名 Test 实际证据并留下单张可审核 PR。当前任何未验证的地方明确写 NOT_RUN。
 
