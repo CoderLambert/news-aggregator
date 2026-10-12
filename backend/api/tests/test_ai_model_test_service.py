@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import urllib.request
 
+import pytest
+
 from api.services import ai_model_test
 
 
@@ -35,9 +37,12 @@ def test_tools_probe_uses_only_the_fixed_gateway_and_scoped_headers(monkeypatch)
             captured.append((request, timeout))
             return _Response({
                 'choices': [{
+                    'finish_reason': 'tool_calls',
                     'message': {
                         'content': None,
                         'tool_calls': [{
+                            'id': 'call-probe-1',
+                            'type': 'function',
                             'function': {'name': 'byok_probe', 'arguments': '{"ok":true}'},
                         }],
                     },
@@ -70,6 +75,92 @@ def test_tools_probe_uses_only_the_fixed_gateway_and_scoped_headers(monkeypatch)
     assert payload['stream'] is False
     assert payload['max_tokens'] == 32
     assert payload['tool_choice']['function']['name'] == 'byok_probe'
+
+
+@pytest.mark.parametrize(
+    'choice',
+    [
+        {
+            'finish_reason': 'stop',
+            'message': {'tool_calls': [{
+                'id': 'call-1', 'type': 'function',
+                'function': {'name': 'byok_probe', 'arguments': '{"ok":true}'},
+            }]},
+        },
+        {
+            'finish_reason': 'tool_calls',
+            'message': {'tool_calls': [{
+                'id': 'call-1', 'type': 'function',
+                'function': {'name': 'other_tool', 'arguments': '{"ok":true}'},
+            }]},
+        },
+        {
+            'finish_reason': 'tool_calls',
+            'message': {'tool_calls': [{
+                'id': 'call-1', 'type': 'function',
+                'function': {'name': 'byok_probe', 'arguments': '{bad json'},
+            }]},
+        },
+        {
+            'finish_reason': 'tool_calls',
+            'message': {'tool_calls': [{
+                'id': 'call-1', 'type': 'function',
+                'function': {'name': 'byok_probe', 'arguments': '{"ok":false}'},
+            }]},
+        },
+        {
+            'finish_reason': 'tool_calls',
+            'message': {'tool_calls': [{
+                'id': 'call-1', 'type': 'function',
+                'function': {'name': 'byok_probe', 'arguments': '{"ok":1}'},
+            }]},
+        },
+        {
+            'finish_reason': 'tool_calls',
+            'message': {'tool_calls': [{
+                'id': 'call-1', 'type': 'function',
+                'function': {'name': 'byok_probe', 'arguments': '{"ok":false,"ok":true}'},
+            }]},
+        },
+        {
+            'finish_reason': 'tool_calls',
+            'message': {'tool_calls': [{
+                'id': 'call-1', 'type': 'function',
+                'function': {'name': 'byok_probe', 'arguments': '[]'},
+            }]},
+        },
+        {
+            'finish_reason': 'tool_calls',
+            'message': {'tool_calls': [{
+                'id': 'call-1', 'type': 'function',
+                'function': {'name': 'byok_probe', 'arguments': '{"ok":true}'},
+            }, {
+                'id': 'call-2', 'type': 'function',
+                'function': {'name': 'byok_probe', 'arguments': '{"ok":true}'},
+            }]},
+        },
+    ],
+    ids=[
+        'abnormal-finish-reason', 'wrong-tool-name', 'malformed-arguments',
+        'schema-value-mismatch', 'wrong-json-type', 'duplicate-json-key',
+        'non-object-arguments', 'multiple-tool-calls',
+    ],
+)
+def test_tools_probe_rejects_malformed_or_incomplete_tool_calls(monkeypatch, choice):
+    class _Opener:
+        def open(self, request, timeout):
+            return _Response({'choices': [choice]})
+
+    monkeypatch.setattr(ai_model_test, '_URL_OPENER', _Opener())
+    result = ai_model_test.send_model_probe(
+        gateway_url='http://127.0.0.1:44001',
+        project_key='sk-' + ('c' * 32),
+        provider_key='sk-t02-synthetic-provider-key-never-real',
+        model_alias='news.deepseek-flash',
+        probe_kind='tools',
+    )
+    assert result.status == 'failed'
+    assert result.safe_error_code == 'probe_not_supported'
 
 
 def test_text_probe_is_bounded_and_unknown_gateway_urls_fail_before_network(monkeypatch):

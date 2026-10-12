@@ -113,6 +113,54 @@ def _request_id(headers) -> str:
     return candidate if isinstance(candidate, str) and REQUEST_ID_PATTERN.fullmatch(candidate) else ''
 
 
+def _valid_tools_probe(choice: dict, message: dict) -> bool:
+    if choice.get('finish_reason') != 'tool_calls':
+        return False
+    calls = message.get('tool_calls')
+    if not isinstance(calls, list) or len(calls) != 1:
+        return False
+    call = calls[0]
+    if (
+        not isinstance(call, dict)
+        or call.get('type') != 'function'
+        or not isinstance(call.get('id'), str)
+        or not call['id']
+        or len(call['id']) > 128
+    ):
+        return False
+    function = call.get('function')
+    if not isinstance(function, dict) or function.get('name') != TOOLS_PROBE_NAME:
+        return False
+    arguments = function.get('arguments')
+    if not isinstance(arguments, str):
+        return False
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('duplicate JSON property')
+            result[key] = value
+        return result
+
+    def reject_constant(_value):
+        raise ValueError('non-standard JSON constant')
+
+    try:
+        parsed_arguments = json.loads(
+            arguments,
+            object_pairs_hook=unique_object,
+            parse_constant=reject_constant,
+        )
+    except (TypeError, ValueError):
+        return False
+    return (
+        isinstance(parsed_arguments, dict)
+        and set(parsed_arguments) == {'ok'}
+        and parsed_arguments['ok'] is True
+    )
+
+
 def _parse_success(status_code: int, headers, body: bytes, probe_kind: str) -> ProbeOutcome:
     request_id = _request_id(headers)
     if status_code < 200 or status_code >= 300 or len(body) > MAX_RESPONSE_BYTES:
@@ -124,20 +172,17 @@ def _parse_success(status_code: int, headers, body: bytes, probe_kind: str) -> P
     if not isinstance(payload, dict):
         return ProbeOutcome('failed', 'invalid_gateway_response', request_id)
     choices = payload.get('choices')
-    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+    if (
+        not isinstance(choices, list) or not choices or
+        (probe_kind == 'tools' and len(choices) != 1) or
+        not isinstance(choices[0], dict)
+    ):
         return ProbeOutcome('failed', 'invalid_gateway_response', request_id)
     message = choices[0].get('message')
     if not isinstance(message, dict):
         return ProbeOutcome('failed', 'invalid_gateway_response', request_id)
     if probe_kind == 'tools':
-        calls = message.get('tool_calls')
-        supported = (
-            isinstance(calls, list)
-            and bool(calls)
-            and isinstance(calls[0], dict)
-            and isinstance(calls[0].get('function'), dict)
-            and calls[0]['function'].get('name') == TOOLS_PROBE_NAME
-        )
+        supported = _valid_tools_probe(choices[0], message)
     else:
         supported = isinstance(message.get('content'), str) and bool(message['content'].strip())
     if not supported:
