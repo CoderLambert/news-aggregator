@@ -47,9 +47,9 @@
 
 ## 后端验证
 
-- api/tests 全量回归（最终稳定运行排除下述一个 SQLite 并发波动用例）：529 passed、1 skipped、1 deselected，51.49 秒。被跳过的是需要专用 runner 的 PROXY_LOCAL 测试；该测试已由上述 runner 单独执行。
+- api/tests 全量回归（一次运行将下述失败的并发用例排除）：529 passed、1 skipped、1 deselected，51.49 秒。被跳过的是需要专用 runner 的 PROXY_LOCAL 测试；该测试已由上述 runner 单独执行。
 - T02 定向模型 API / Proxy service 单测：16 passed，覆盖用户隔离、CSRF/no-store、预批准 alias、文章正文参数拒绝、单次尝试记账、迟到结果 fencing、无自动重试、固定 alias/请求头/请求体和重定向拒绝。
-- 新增文章正文边界断言后，无过滤的全量回归出现一个既有波动：api/tests/test_subscription_recovery.py::test_simultaneous_database_connections_share_one_unique_task 在三个重复尝试中失败，报 SQLite OperationalError / task_storage_busy；它在此前一次无过滤全量运行中通过。没有修改该订阅恢复代码；除这一个用例外，全量过滤运行通过。
+- 新增文章正文边界断言后，无过滤的全量回归中 `api/tests/test_subscription_recovery.py::test_simultaneous_database_connections_share_one_unique_task` 曾以 SQLite `OperationalError / task_storage_busy` 失败；另一次无过滤运行中该用例通过。现有记录没有定位这条用例的首个失败 SQL，也没有证明它与 R0 翻译 worker 的 `SQLITE_LOCKED_SHAREDCACHE` 具有同一根因，因此不把它归类为无害测试波动，也没有修改订阅恢复代码。独立 R0 PR #44 定位并修复的是翻译 worker 的锁错误。同步后的 T02→T03→T09 全量离线套件中，该用例通过一次；重复稳定性仍以各自的受控复现证据为准。
 - manage.py check：System check identified no issues。可选 embedding 模块因隔离 stub 未安装而记录 preload warning。
 - manage.py makemigrations --check --dry-run：No changes detected。
 - 临时 SQLite 完整应用全部 Django migrations 成功，包括 api.0034_ai_model_configs_and_attempts 和 api.0035_aicallattempt_probe_kind。
