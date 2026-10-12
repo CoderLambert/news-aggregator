@@ -1,46 +1,22 @@
 # T06 · 长文分块完整翻译
 
-> **PLANNED**：本文件为未执行的实施/测试契约，所有测试当前 NOT_RUN。实施时以 `origin/feat/byok-user-api-keys` 最新 HEAD 为准，勿把设计 SHA 当作当前代码。
+> **IMPLEMENTED · DRAFT PR**。代码提交 `1f719e666edc5554c16ffc1aa0b227909118a60f`；测试证据见 [Test T06](../tests/T06-long-translation.md)。本卡依赖 T05 私有翻译任务链，分支与 PR 堆叠于 T05 PR #39 的 head `54df6abd70a979fee11a2c610c4fde0c35f00a15`；PR #39 未合并。T06 PR 的 CI 未完成前保持 Draft。
 
 | 属性 | 内容 |
 | --- | --- |
-| 前置任务 | [T05](T05-private-translation.md) |
+| 前置任务 | [T05](T05-private-translation.md)，PR [#39](https://github.com/CoderLambert/news-aggregator/pull/39) |
+| 分支 | `task/byok-T06-long-translation` |
+| PR base | `task/byok-T05-private-translation`（明确堆叠依赖，不以未包含 T05 的 feature branch 假装独立） |
 | 推荐规模 | M |
 | 对应测试 | [Test T06](../tests/T06-long-translation.md) |
 
-## 本次交付的完整功能
+## 交付行为
 
-超过一次输出上下文预算的 Markdown 长文，也能安全分块、连续展示进度，并生成没有缺段的完整译文。
+T05 的持久化 BYOK 翻译任务现在支持受限长度的多段 Markdown 长文翻译：每个分段按原序流式展示；只有全部 chunk 收到完整终态、正文非空且 Markdown 结构校验通过后，才沿用 T05 私有事务保存完整结果。
 
-**允许修改范围**：复用 T05 任务/快照/结果，在单功能内补内容预算、Markdown 保护分块、逐块完成校验、最终合并。
+- 任务创建前读取模型目录的 context/output 元数据，拒绝未知预算、超长来源、超 chunk 数或不可安全拆开的结构；不会静默截断。
+- 模型输入按 UTF-8 字节和输出 token 限额保守界定；fenced code 不发给模型、原样回传。分段在可识别的 Markdown 原子范围外切开，最终校验标题级别、列表标记/缩进、行内代码、链接目标、引用定义、表格行列及围栏。
+- 每段使用 Responses streaming、`store=False`、0 SDK retries；执行前及每个 delta/terminal 检查 T05 凭据与任务 fence。任一段 EOF、incomplete、failed、空响应或结构损坏都会中止完整结果保存。
+- 继续复用 T05 owner/session 权限、冻结输入、凭据 epoch、任务租约、SSE、私有缓存；未改前端，没有增加队列、模型 fallback 或通用文档编译器。
 
-**本次明确不做**：不搞通用文档编译系统、不引入新的队列和模型回退，不把截断当成功。
-
-### 可直接复现的验收路径
-
-长文含代码、Markdown标题/链接/表格→显示多段进度→合并无丢段→刷新同结果。
-
-### 对应 Test 用例
-
-| Test ID | 可操作情境 | 必须观察到 | Test 文件 |
-| --- | --- | --- | --- |
-| T06-01 | 跨多 chunk 的输入正确翻译并合并 | 保留代码围栏、标题、链接、表格与顺序 | [Test 契约](../tests/T06-long-translation.md) |
-| T06-02 | 中间 chunk EOF/限长/空输出 | failed/interrupted，只有 partial progress，不能写入完整缓存 | [Test 契约](../tests/T06-long-translation.md) |
-| T06-03 | 排队后文章正文变更 | 冻结输入一致，旧结果不冒充新版源内容 | [Test 契约](../tests/T06-long-translation.md) |
-| T06-04 | 上下文/输出预算未知或超限 | 给出明确限制而非静默截断 | [Test 契约](../tests/T06-long-translation.md) |
-| T06-05 | T05 短文本路径回归 | 仍单次正常完成，旧订阅不变 | [Test 契约](../tests/T06-long-translation.md) |
-
-### 立即停止并纠偏
-
-无法证明块顺序、完整性或上下文预算时，只允许安全长度并明确失败，不伪成功。
-
-### Codex 一次任务交付要求
-
-1. 查看当前工作目录 AGENTS、分支和未提交改动；读取本卡和同编号 Test、技术方案/最新相关代码。
-2. 同环境记录受影响旧测试的基线；用既有 Django/React/SSE/SDK/持久任务，先验证关键假设再编码。
-3. 本次只交付这一项**可以运行的完整功能**，包括权限、正常操作与最主要的失败路径；不跨到其它 Txx。
-4. 跑最小定向单元/契约测试以及受影响旧功能回归，列出修改过的测试断言 diff；需求未变时禁止改断言迁就代码。
-5. 更新对应 Test 文档中的真实日志、环境、SHA 和 NOT_RUN 项；单张任务 PR base 指向 `feat/byok-user-api-keys`。未授权时不合并 main、不开始下一张卡。
-
-**任务结束**：这条用户流程能运行、失败能清楚识别，主要不变量有自动化验证；更新同名 Test 实际证据并留下单张可审核 PR。当前任何未验证的地方明确写 NOT_RUN。
-
+预算边界、真实执行日志、测试命令、断言改动和 NOT_RUN 项详见 [Test T06](../tests/T06-long-translation.md)。PROVIDER_REAL 与浏览器 UAT 仍是 NOT_RUN；本地 PROXY_LOCAL 只证明 T06 服务实际走通 OpenAI SDK、锁定 LiteLLM 和合成 upstream。
