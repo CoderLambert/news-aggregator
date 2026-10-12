@@ -2,7 +2,7 @@
 
 对应：[T01 Task](../tasks/T01-credentials.md)。
 
-> **T01 READY FOR REVIEW。** `credential_epoch` worker 消费端集成现有堆叠 PR #39 的合成 worker 证据；PR #39 尚未合并，独立 T01 PR #34 仍只包含凭据管理。两者均没有真实 provider 调用。`credential_epoch` 是授权撤销/fencing 版本；独立的 `credential_version` 标记当前密文并参与 AAD。
+> **T01 本地实现与测试证据完成；PR #34 仍为 Draft，CI 尚未全绿。** `credential_epoch` worker 消费端集成现有堆叠 PR #39 的合成 worker 证据；PR #39 尚未合并，独立 T01 PR #34 仍只包含凭据管理。两者均没有真实 provider 调用。`credential_epoch` 是授权撤销/fencing 版本；独立的 `credential_version` 标记当前密文并参与 AAD。
 
 | 用例 | 场景 / 失败注入 | 结果 | 证据 |
 | --- | --- | --- | --- |
@@ -59,6 +59,11 @@ T01 分支本身没有翻译 worker；T05 堆叠 PR #39 (`task/byok-T05-private-
 - `test_credential_epoch_change_during_worker_discards_partial_output`：在途合成流发生撤销后，worker 停止、丢弃未完成结果且不发送 SSE `complete`。
 
 T05 的新增后端测试文件在该 head 上为 `11 passed in 4.95s`。这验证了 T01 `credential_epoch` 契约接入 worker 后的撤销栅栏；它依赖尚未合并的下游 PR #39，不能算作 T01 PR #34 单独包含 worker，也不构成真实 SDK、Proxy 或 Provider 兼容证据。
+
+### PR #34 GitHub checks（head `c328b8142a712501a1c304255ac92b4938a29ccb`）
+
+- 前端两组检查均通过；后端重复运行中一组通过，另一组失败于既有 `test_sse_disconnect_does_not_cancel_background_worker`：SQLite `OperationalError` 导致测试 worker 未保存成功终态。[失败 job](https://github.com/CoderLambert/news-aggregator/actions/runs/38187824002/job/114613899484)；[另一组后端通过](https://github.com/CoderLambert/news-aggregator/actions/runs/38187820816/job/114613890712)。
+- 因当前 head 检查未全部通过，PR #34 保持 Draft；这条 CI 失败不会被本地测试或 T05 堆叠证据覆盖。
 
 最初用户报告的基线 `ea2ce55ae22e19e1604e88031b824b68f2666cec` 已由基线前合入的文档 PR #31 前移至以上 tracking ref。实现基于该 ref 建立的独立工作树；最终实时 `git ls-remote` 因 DNS 无法解析 `github.com` 暂不可验证。
 

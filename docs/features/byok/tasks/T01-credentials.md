@@ -1,6 +1,6 @@
 # T01 · 个人 Key 连接增删改停
 
-> **READY FOR REVIEW（2026-10-12）**：T01 本地实现和 CRUD/权限/密钥生命周期验证已完成；修复代码 SHA `34f5a843dbc4a9fb218ff9fadf8ed32886f46953`。T01-03 的排队旧 epoch 拒绝与在途撤销后不提交结果，已由堆叠 T05 PR #39 的 worker 集成测试覆盖（head `54df6ab`）；该 PR 尚未合并，T01 PR #34 本身仍不包含翻译 worker。未据此宣称真实 Provider 兼容。完整环境、命令和验证边界见 [Test T01](../tests/T01-credentials.md)。
+> **本地实现与测试证据完成；PR #34 仍为 Draft，CI 尚未全绿（2026-10-12）**：T01 CRUD/权限/密钥生命周期验证已完成；修复代码 SHA `34f5a843dbc4a9fb218ff9fadf8ed32886f46953`。T01-03 的排队旧 epoch 拒绝与在途撤销后不提交结果，已由堆叠 T05 PR #39 的 worker 集成测试覆盖（head `54df6ab`）；该 PR 尚未合并，T01 PR #34 本身仍不包含翻译 worker。未据此宣称真实 Provider 兼容。PR #34 前一代码 head 的两组后端 CI 一通过、一因既有 SQLite `OperationalError` 失败；详见 [Test T01](../tests/T01-credentials.md)。
 
 | 属性 | 内容 |
 | --- | --- |
