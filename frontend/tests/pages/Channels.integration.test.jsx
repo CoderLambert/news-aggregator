@@ -182,6 +182,7 @@ describe('channel management', () => {
     const heading = await screen.findByRole('heading', { name: 'DeepMind' })
     fireEvent.click(within(heading.closest('article')).getByRole('button', { name: '订阅', exact: true }))
     await waitFor(() => expect(within(heading.closest('article')).getByText('已订阅 · 未加入分组')).toBeInTheDocument())
+    fireEvent.click(within(heading.closest('article')).getByRole('button', { name: '管理分组' }))
     fireEvent.click(within(heading.closest('article')).getByRole('checkbox', { name: 'AI', exact: true }))
     await waitFor(() => expect(api.changeChannelSubscriptions).toHaveBeenLastCalledWith({ action: 'set_groups', source_ids: [2], group_ids: [11] }))
     await waitFor(() => expect(within(heading.closest('article')).getByRole('checkbox', { name: 'AI', exact: true })).toBeEnabled())
