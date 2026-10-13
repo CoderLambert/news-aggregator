@@ -24,13 +24,15 @@ export class WorkspaceError extends Error {
   readonly status: number
   constructor(message: string, status: number) { super(message); this.name = 'WorkspaceError'; this.status = status }
 }
-
+let workspaceViewer: number | null = null
+export function setWorkspaceViewer(viewer: number | null): void { workspaceViewer = viewer }
 function csrfCookie(): string {
   const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/)
   return match ? decodeURIComponent(match[1]) : ''
 }
 
 export async function workspaceRequest<T>(path: string, options: { method?: string; body?: unknown; signal?: AbortSignal } = {}): Promise<T> {
+  const viewer = workspaceViewer
   const controller = new AbortController()
   const abort = () => controller.abort()
   if (options.signal?.aborted) controller.abort()
@@ -42,10 +44,11 @@ export async function workspaceRequest<T>(path: string, options: { method?: stri
       const csrf = await fetch('/api/auth/csrf/', { credentials: 'same-origin', signal: controller.signal })
       if (!csrf.ok) throw new WorkspaceError('无法初始化安全会话，请重新登录。', csrf.status)
     }
+    if (method !== 'GET' && viewer !== workspaceViewer) throw new WorkspaceError('账号已变化，请重新操作。', 409)
     const response = await fetch('/api' + path, {
       method, credentials: 'same-origin', signal: controller.signal,
       headers: { Accept: 'application/json', ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-        ...(method !== 'GET' ? { 'X-CSRFToken': csrfCookie() } : {}) },
+        ...(method !== 'GET' ? { 'X-CSRFToken': csrfCookie(), ...(viewer !== null ? { 'X-Workspace-Viewer': String(viewer) } : {}) } : {}) },
       ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
     })
     if (response.status === 204) return undefined as T

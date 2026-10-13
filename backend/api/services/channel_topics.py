@@ -1,4 +1,4 @@
-"""Versioned editorial topics. Reading the catalog does not fetch or infer with AI."""
+"""Versioned editorial topics; catalog reads do not fetch or invoke a model."""
 import hashlib
 import json
 from django.db.models import Q
@@ -25,7 +25,6 @@ PRESETS = [
     {'key': 'developer', 'name': '开发者', 'topics': ['frontend', 'engineering', 'ai', 'security']},
     {'key': 'industry', 'name': '行业洞察', 'topics': ['energy', 'health', 'business', 'science']},
 ]
-# These describe the configured CHANNEL, not every section of its publisher.
 EDITORIAL = {
     'react_blog': ['frontend'], 'webkit': ['frontend'], 'v8': ['frontend'],
     'mozilla_hacks': ['frontend'], 'svelte_blog': ['frontend'], 'angular_blog': ['frontend'],
@@ -55,20 +54,17 @@ def channel_articles(source):
 
 def base_profile(source):
     policy = policy_for_name(source.name)
-    topics = []
-    origin = 'unknown'
+    topics, origin = [], 'unknown'
     about = source.description.strip() or (policy.description if policy else '')
     if policy:
         if policy.default_category in {'新能源', '医疗健康'}:
-            topics = ['energy' if policy.default_category == '新能源' else 'health']
-            origin = 'policy'
+            topics, origin = ['energy' if policy.default_category == '新能源' else 'health'], 'policy'
         elif policy.key in EDITORIAL:
-            topics = EDITORIAL[policy.key]
-            origin = 'catalog'
+            topics, origin = EDITORIAL[policy.key], 'catalog'
     if not about or about in {f'{source.name} 的资讯频道', f'来自 {source.name} 的资讯'}:
         about = '、'.join(TOPIC_MAP[key]['description'] for key in topics) if topics else ''
     evidence_hash = digest([TAXONOMY_VERSION, source.id, source.name, about,
-                            policy.key if policy else '', policy.contract_version if policy else '', topics])
+        policy.key if policy else '', policy.contract_version if policy else '', topics])
     return {'topics': topics, 'about': about, 'origin': origin, 'evidence_hash': evidence_hash}
 
 
@@ -76,40 +72,38 @@ def profile_data(source, stored=None):
     base = base_profile(source)
     if stored is None:
         stored = SourceTopicProfile.objects.filter(source=source).first()
-    # An administrator's editorial correction survives policy refreshes.
     if stored and (stored.origin == 'manual' or stored.evidence_hash == base['evidence_hash']):
         base.update(topics=[t for t in stored.topics if t in TOPIC_MAP], about=stored.about, origin=stored.origin)
+    # Semantic evidence changes invalidate previews, including manual corrections.
+    effective_hash = digest([base['evidence_hash'], base['topics'], base['about'], base['origin']])
     status, reason = subscription_status(source)
     policy = policy_for_name(source.name)
     return {'id': source.id, 'name': source.name, 'url': source.url, 'logo': source.logo,
-            'region': source.region, 'language': source.language, 'source_type': source.source_type,
-            'description': base['about'], 'topics': base['topics'], 'origin': base['origin'],
-            'needs_review': not base['topics'] or base['origin'] == 'ai',
-            'evidence_hash': base['evidence_hash'], 'subscription_status': status,
-            'subscription_reason': reason, 'feed_url': policy.feed_url if policy else '',
-            'policy_key': policy.key if policy else '',
-            'reading_policy': policy.reading_policy if policy else 'standard',
-            'updated_at': stored.updated_at.isoformat() if stored else None}
+        'region': source.region, 'language': source.language, 'source_type': source.source_type,
+        'description': base['about'], 'topics': base['topics'], 'origin': base['origin'],
+        'needs_review': not base['topics'] or base['origin'] == 'ai', 'evidence_hash': effective_hash,
+        'subscription_status': status, 'subscription_reason': reason, 'feed_url': policy.feed_url if policy else '',
+        'policy_key': policy.key if policy else '', 'reading_policy': policy.reading_policy if policy else 'standard',
+        'updated_at': stored.updated_at.isoformat() if stored else None}
 
 
 def evidence_for(source):
     profile = profile_data(source)
-    # Already-ingested public titles only. No private history or full-article fetch.
     titles = list(channel_articles(source).order_by('-publish_time').values_list('title', flat=True)[:12])
     return {'source_id': source.id, 'name': source.name[:100], 'about': profile['description'][:600],
-            'titles': [str(t).replace('\x00', '')[:180] for t in titles],
-            'evidence_hash': profile['evidence_hash']}
+        'titles': [str(t).replace('\x00', '')[:180] for t in titles], 'evidence_hash': profile['evidence_hash']}
 
 
 def refresh_profiles(limit=200):
     changed = 0
-    for source in Source.objects.order_by('id')[:limit]:
+    stored_profiles = {profile.source_id: profile for profile in SourceTopicProfile.objects.all()}
+    for source in Source.objects.order_by('id').iterator(chunk_size=200):
+        if changed >= limit:
+            break
         data = base_profile(source)
-        stored = SourceTopicProfile.objects.filter(source=source).first()
+        stored = stored_profiles.get(source.pk)
         if stored and (stored.origin == 'manual' or stored.evidence_hash == data['evidence_hash']):
             continue
-        SourceTopicProfile.objects.update_or_create(source=source, defaults={
-            **data, 'revision': (stored.revision + 1) if stored else 1,
-        })
+        SourceTopicProfile.objects.update_or_create(source=source, defaults={**data, 'revision': stored.revision + 1 if stored else 1})
         changed += 1
     return changed

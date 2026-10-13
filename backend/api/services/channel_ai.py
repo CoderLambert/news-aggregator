@@ -1,10 +1,12 @@
 """Bounded, durable BYOK classification. No model calls from a catalog GET."""
 import json
+import math
 import uuid
 from datetime import timedelta
 from email.utils import parsedate_to_datetime
 from django.conf import settings
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 from api.models import Source, ChannelSubscription
 from api.smart_channel_models import ChannelGroupingProposal, ChannelClassifierSettings, SourceTopicProfile
@@ -43,14 +45,13 @@ def parse_classification(raw, evidence, topic_keys):
             raise ValueError('invalid_reason')
         seen.add(source_id)
         result.append({'source_id': source_id, 'name': expected[source_id]['name'], 'topic_keys': sorted(set(topics)),
-                       'reason': reason.strip()[:200], 'origin': 'ai', 'needs_review': True})
+            'reason': reason.strip()[:200], 'origin': 'ai', 'needs_review': True})
     return result
 
 
 @transaction.atomic
 def claim_next():
     now = timezone.now()
-    # A crashed call may have reached upstream: allow at most TWO attempts total.
     stale = ChannelGroupingProposal.objects.filter(status='running', lease_until__lt=now)
     stale.filter(attempts__gte=2).update(status='failed', error_code='worker_interrupted', lease_token='')
     stale.filter(attempts__lt=2).update(status='queued', lease_token='', next_attempt_at=now)
@@ -71,8 +72,7 @@ def permitted(job):
     if credential_fingerprint(job.user) != job.credential_fingerprint:
         return False
     if job.public_source_id:
-        cfg = ChannelClassifierSettings.objects.filter(pk=1, enabled=True, owner=job.user).first()
-        return bool(cfg and job.user.is_superuser)
+        return bool(job.user.is_superuser and ChannelClassifierSettings.objects.filter(pk=1, enabled=True, owner=job.user).exists())
     return True
 
 
@@ -87,18 +87,23 @@ def retry_delay(exc):
     except (ValueError, TypeError):
         try:
             date = parsedate_to_datetime(header)
-            if date.tzinfo is None:
-                return 60
-            delay = (date - timezone.now()).total_seconds()
+            delay = (date - timezone.now()).total_seconds() if date.tzinfo is not None else 60
         except (ValueError, TypeError, OverflowError):
             delay = 60
+    # Invalid/non-finite headers never cause a spin or overflow; a wait beyond
+    # this job's lifetime fails closed rather than retrying before Retry-After.
+    if not math.isfinite(delay) or delay > 86400:
+        return None
     return max(60, delay)
 
 
 def execute_job(job):
+    if not ChannelGroupingProposal.objects.filter(pk=job.pk, status='running', lease_token=job.lease_token).exists():
+        return
     clients = []
     result, model_id, error_code, delay = None, '', '', None
     try:
+        job.user.refresh_from_db()
         if not permitted(job):
             raise ValueError('authorization_changed')
         if not job.public_source_id and snapshot(job.user, job.source_ids) != job.input_snapshot:
@@ -108,15 +113,13 @@ def execute_job(job):
             raise ValueError('model_unavailable')
         client, model_id = clients[0]
         messages = [{'role': 'system', 'content': SYSTEM_PROMPT}, {'role': 'user', 'content': json.dumps({
-            'version': PROMPT_VERSION, 'allowed_topics': [t for t in TOPICS if t['key'] in job.topic_keys],
-            'channels': job.evidence}, ensure_ascii=False)}]
+            'version': PROMPT_VERSION, 'allowed_topics': [t for t in TOPICS if t['key'] in job.topic_keys], 'channels': job.evidence}, ensure_ascii=False)}]
         response = client.chat.completions.create(model=model_id, messages=messages, stream=False,
             response_format={'type': 'json_object'}, max_tokens=6000, timeout=60)
         if not response.choices or response.choices[0].finish_reason != 'stop':
             raise ValueError('incomplete_output')
         result = parse_classification(response.choices[0].message.content, job.evidence, job.topic_keys)
     except Exception as exc:
-        # Never surface or log provider exception text: it can contain credentials.
         known = {'authorization_changed', 'configuration_changed', 'model_unavailable', 'incomplete_output',
                  'invalid_output', 'invalid_source', 'invalid_topic', 'invalid_reason'}
         error_code = str(exc) if isinstance(exc, ValueError) and str(exc) in known else 'model_request_failed'
@@ -127,6 +130,11 @@ def execute_job(job):
                 client.close()
             except Exception:
                 pass
+    job.user.refresh_from_db()
+    if not job.user.is_active:
+        ChannelGroupingProposal.objects.filter(pk=job.pk, status='running', lease_token=job.lease_token).update(
+            status='failed', error_code='authorization_changed', lease_token='', lease_until=None)
+        return
     with transaction.atomic():
         lock_user(job.user)
         current = ChannelGroupingProposal.objects.select_for_update().filter(pk=job.pk, status='running', lease_token=job.lease_token).first()
@@ -146,12 +154,10 @@ def execute_job(job):
                 else:
                     SourceTopicProfile.objects.update_or_create(source=source, defaults={
                         'topics': result[0]['topic_keys'], 'about': base_profile(source)['about'], 'origin': 'ai',
-                        'evidence_hash': job.input_snapshot, 'revision': (current_profile.revision + 1) if current_profile else 1})
+                        'evidence_hash': job.input_snapshot, 'revision': current_profile.revision + 1 if current_profile else 1})
         elif result is not None and snapshot(job.user, job.source_ids) != job.input_snapshot:
             error_code, result = 'configuration_changed', None
-        current.model_id = model_id
-        current.lease_token = ''
-        current.lease_until = None
+        current.model_id, current.lease_token, current.lease_until = model_id, '', None
         if result is not None:
             current.result, current.status, current.error_code = result, 'ready', ''
         elif delay is not None and current.attempts < 2 and timezone.now() + timedelta(seconds=delay) < current.expires_at:
@@ -172,8 +178,7 @@ def enqueue_site_sources(limit=10):
     if not fingerprint:
         return 0
     used = ChannelGroupingProposal.objects.filter(user=cfg.owner, engine='ai', created_at__date=timezone.localdate()).count()
-    remaining = min(limit, max(0, min(20, cfg.daily_limit) - used))
-    count = 0
+    remaining, count = min(limit, max(0, min(20, cfg.daily_limit) - used)), 0
     for source in Source.objects.order_by('id').iterator(chunk_size=100):
         if count >= remaining:
             break
@@ -181,7 +186,6 @@ def enqueue_site_sources(limit=10):
         if profile['topics'] or profile['origin'] == 'manual':
             continue
         evidence = evidence_for(source)
-        # A name alone is not enough evidence, even for an LLM.
         if not evidence['about'] and not evidence['titles']:
             continue
         signature = digest([PROMPT_VERSION, source.id, base_profile(source)['evidence_hash'], evidence['titles']])
@@ -198,8 +202,9 @@ def enqueue_site_sources(limit=10):
 
 def process_incremental_subscriptions(limit=100):
     count = 0
-    candidates = ChannelSubscription.objects.filter(user__channel_grouping_config__mode__in=['suggest', 'auto']).select_related('user')
-    for subscription in candidates.order_by('-created_at').iterator(chunk_size=100):
+    candidates = ChannelSubscription.objects.filter(user__channel_grouping_config__mode__in=['suggest', 'auto'],
+        created_at__gte=F('user__channel_grouping_config__active_since')).select_related('user', 'subscriptiongroupingstate')
+    for subscription in candidates.order_by('created_at').iterator(chunk_size=100):
         if count >= limit:
             break
         state = getattr(subscription, 'subscriptiongroupingstate', None)

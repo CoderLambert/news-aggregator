@@ -79,8 +79,7 @@ class SmartChannelTests(TestCase):
         self.assertEqual(self.propose(request_id=request_id, topic_keys=['ai']).status_code, 409)
 
     def test_preview_rejects_unsubscribed_source_and_other_user_group(self):
-        response = self.propose(source_ids=[self.source2.pk])
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self.propose(source_ids=[self.source2.pk]).status_code, 404)
         group = ChannelGroup.objects.create(user=self.other, name='Private')
         proposal = self.propose().data['id']
         response = self.apply(proposal, groups=[{'topic_key': 'frontend', 'group_id': group.pk, 'source_ids': [self.source.pk]}])
@@ -93,11 +92,17 @@ class SmartChannelTests(TestCase):
         self.assertEqual(self.client.get(f'/api/me/smart-channels/proposals/{proposal}/').status_code, 404)
         self.assertEqual(self.apply(proposal).status_code, 404)
 
-    def test_changed_subscription_and_group_reject_stale_preview(self):
+    def test_changed_group_rejects_stale_preview(self):
         proposal = self.propose().data['id']
         ChannelGroup.objects.create(user=self.user, name='Another group')
         self.assertEqual(self.apply(proposal).status_code, 409)
         self.assertEqual(ChannelGroupMember.objects.count(), 0)
+
+    def test_manual_metadata_edit_invalidates_old_preview(self):
+        proposal = self.propose().data['id']
+        SourceTopicProfile.objects.create(source=self.source, origin='manual', topics=['technology'], about='Changed editorial scope')
+        self.assertEqual(self.apply(proposal).status_code, 409)
+        self.assertFalse(ChannelGroupMember.objects.exists())
 
     def test_expired_and_cancelled_proposals_cannot_apply(self):
         proposal = self.propose().data['id']
@@ -232,13 +237,22 @@ class SmartChannelTests(TestCase):
         self.assertEqual(self.client.patch(f'/api/smart-channels/sources/{self.source.pk}/', {'topics': ['ai']}, format='json').status_code, 403)
 
     @override_settings(PUBLIC_SITE_MODE='read_only')
-    def test_read_only_blocks_personal_writes(self):
+    def test_read_only_blocks_personal_writes_but_keeps_public_workspace_reads(self):
         self.assertEqual(self.propose().status_code, 403)
         self.assertEqual(self.client.post('/api/me/reading-stats/', {'news_id': self.news.pk}, format='json').status_code, 403)
+        for path in ['/api/smart-channels/catalog/', '/api/smart-channels/dashboard/', f'/api/smart-channels/sources/{self.source.pk}/']:
+            self.assertEqual(self.client.get(path).status_code, 200)
 
-    def test_session_mutations_require_csrf(self):
+    def test_session_mutations_require_csrf_before_method_dispatch(self):
         browser = APIClient(enforce_csrf_checks=True)
         browser.force_login(self.user)
-        self.assertEqual(browser.post('/api/me/smart-channels/settings/', {'mode': 'auto'}, format='json').status_code, 405)
-        response = browser.patch('/api/me/smart-channels/settings/', {'mode': 'auto'}, format='json')
-        self.assertEqual(response.status_code, 403)
+        # DRF authenticates the session and enforces CSRF before deciding 405.
+        self.assertEqual(browser.post('/api/me/smart-channels/settings/', {'mode': 'auto'}, format='json').status_code, 403)
+        self.assertEqual(browser.patch('/api/me/smart-channels/settings/', {'mode': 'auto'}, format='json').status_code, 403)
+
+    def test_expected_viewer_header_rejects_a_changed_session(self):
+        browser = APIClient()
+        browser.force_login(self.other)
+        response = browser.patch('/api/me/smart-channels/settings/', {'mode': 'auto'}, format='json', HTTP_X_WORKSPACE_VIEWER=str(self.user.pk))
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(ChannelGroupingConfig.objects.filter(user=self.other).exists())

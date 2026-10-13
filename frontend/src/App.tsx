@@ -18,6 +18,7 @@ import FeatureRoute from '@/components/FeatureRoute'
 import WorkspaceShell from '@/components/workspace/WorkspaceShell'
 import FeedWorkspace from '@/components/workspace/FeedWorkspace'
 import ReadingTracker from '@/components/workspace/ReadingTracker'
+import WorkspaceSession from '@/components/workspace/WorkspaceSession'
 
 const ChannelsPage = lazy(() => import('@/pages/ChannelsPage'))
 const ChannelWorkspace = lazy(() => import('@/pages/ChannelWorkspace'))
@@ -51,6 +52,7 @@ function ResearchCapabilityGate() {
 
 export default function App() {
   return <QueryClientProvider client={queryClient}><CapabilityProvider><LanguageProvider><AuthProvider><SpeechPlayerProvider><BrowserRouter>
+    <WorkspaceSession />
     <div className="min-h-screen bg-background text-foreground">
       <a href="#main-content" className="sr-only z-[100] rounded-md bg-background px-4 py-2 text-foreground shadow focus:not-sr-only focus:fixed focus:left-4 focus:top-4">跳至主要内容</a>
       <WorkspaceShell>
