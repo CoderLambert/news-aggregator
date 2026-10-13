@@ -21,7 +21,10 @@ def test_online_backup_with_active_ingestion_writer_and_worker_manifest(tmp_path
           INSERT INTO api_requestbudget VALUES ('host:example.test', '2030-01-01');
         ''')
         release = manifest()
-        release.update(schema_version=2, capabilities={'full_content_worker': True})
+        release.update(schema_version=3, capabilities={
+            'full_content_worker': True,
+            'channel_worker': True,
+        })
         manifest_file = tmp_path / 'release.json'
         manifest_file.write_text(json.dumps(release))
         # A new process-style independent connection can read a complete commit
@@ -55,3 +58,19 @@ def test_backup_refuses_ambiguous_worker_manifest(tmp_path, capability):
         sqlite_snapshot._read_release_manifest(file)
     with pytest.raises(sqlite_snapshot.SnapshotError, match='capability'):
         sqlite_snapshot._read_release_manifest_from_value(value)
+
+
+@pytest.mark.parametrize('capabilities', [
+    {'full_content_worker': True},
+    {'channel_worker': True},
+    {'full_content_worker': True, 'channel_worker': 1},
+    {'full_content_worker': True, 'channel_worker': True, 'unknown': False},
+])
+def test_snapshot_refuses_ambiguous_v3_worker_manifest(tmp_path, capabilities):
+    value = manifest()
+    value.update(schema_version=3, capabilities=capabilities)
+    path = tmp_path / 'release.json'
+    path.write_text(json.dumps(value))
+
+    with pytest.raises(sqlite_snapshot.SnapshotError, match='capability'):
+        sqlite_snapshot._read_release_manifest(path)

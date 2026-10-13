@@ -22,7 +22,7 @@ from typing import Any, Iterator
 
 
 ARTIFACT_SCHEMA_VERSION = 1
-MANIFEST_SCHEMA_VERSION = 2
+MANIFEST_SCHEMA_VERSION = 3
 RESTORE_VERIFY_TIMEOUT_SECONDS = 120.0
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 BACKUP_TIMEOUT_SECONDS = 120.0
@@ -67,16 +67,20 @@ def _read_release_manifest(path: Path) -> dict[str, Any]:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         raise SnapshotError("release manifest is unreadable or invalid JSON") from None
+    version = value.get("schema_version") if isinstance(value, dict) else None
     if not isinstance(value, dict) or set(value) != ({
         "schema_version", "release_sha", "image", "migrations", "static_sha"
-    } | ({"capabilities"} if value.get("schema_version") == 2 else set())):
+    } | ({"capabilities"} if version in {2, 3} else set())):
         raise SnapshotError("release manifest fields are incomplete or unknown")
-    if type(value["schema_version"]) is not int or value["schema_version"] not in (1, MANIFEST_SCHEMA_VERSION):
+    if type(value["schema_version"]) is not int or value["schema_version"] not in {1, 2, MANIFEST_SCHEMA_VERSION}:
         raise SnapshotError("release manifest schema version is unsupported")
-    if value["schema_version"] == 2:
+    if value["schema_version"] in {2, 3}:
         capability = value["capabilities"]
-        if (not isinstance(capability, dict) or set(capability) != {"full_content_worker"}
-                or type(capability["full_content_worker"]) is not bool):
+        expected_capabilities = {"full_content_worker"}
+        if value["schema_version"] == 3:
+            expected_capabilities.add("channel_worker")
+        if (not isinstance(capability, dict) or set(capability) != expected_capabilities
+                or any(type(capability[name]) is not bool for name in expected_capabilities)):
             raise SnapshotError("release manifest worker capability is invalid")
     if not isinstance(value["release_sha"], str) or not SHA_RE.fullmatch(value["release_sha"]):
         raise SnapshotError("release manifest SHA is invalid")
@@ -288,17 +292,21 @@ def _validate_artifact(
 
 
 def _read_release_manifest_from_value(value: Any) -> dict[str, Any]:
+    version = value.get("schema_version") if isinstance(value, dict) else None
     if not isinstance(value, dict) or set(value) != ({
         "schema_version", "release_sha", "image", "migrations", "static_sha"
-    } | ({"capabilities"} if value.get("schema_version") == 2 else set())):
+    } | ({"capabilities"} if version in {2, 3} else set())):
         raise SnapshotError("embedded release manifest fields are invalid")
     # Use the same strict checks as the file parser without creating an artifact.
-    if type(value["schema_version"]) is not int or value["schema_version"] not in (1, MANIFEST_SCHEMA_VERSION):
+    if type(value["schema_version"]) is not int or value["schema_version"] not in {1, 2, MANIFEST_SCHEMA_VERSION}:
         raise SnapshotError("embedded release manifest schema version is unsupported")
-    if value["schema_version"] == 2:
+    if value["schema_version"] in {2, 3}:
         capability = value["capabilities"]
-        if (not isinstance(capability, dict) or set(capability) != {"full_content_worker"}
-                or type(capability["full_content_worker"]) is not bool):
+        expected_capabilities = {"full_content_worker"}
+        if value["schema_version"] == 3:
+            expected_capabilities.add("channel_worker")
+        if (not isinstance(capability, dict) or set(capability) != expected_capabilities
+                or any(type(capability[name]) is not bool for name in expected_capabilities)):
             raise SnapshotError("release manifest worker capability is invalid")
     if not isinstance(value["release_sha"], str) or not SHA_RE.fullmatch(value["release_sha"]):
         raise SnapshotError("embedded release manifest SHA is invalid")
