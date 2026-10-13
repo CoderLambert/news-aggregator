@@ -207,3 +207,27 @@ def test_unknown_chunked_body_length_is_handled_by_byte_limit():
     request = Request('https://dev.to/api/articles')
     handler._received_headers(Headers(), UNKNOWN_LENGTH, request)
     assert not request.meta.get('_budget_body_stopped')
+
+
+
+@pytest.mark.parametrize(('status', 'headers'), [(206, {}), (200, {'Content-Range': 'bytes 0-9/100'})])
+def test_partial_download_never_reaches_feed_parser(monkeypatch, status, headers):
+    released = []
+    permit = object()
+    class Inner:
+        async def download_request(self, request):
+            return Response(request.url, status=status, headers=headers, body=b'valid-looking partial feed')
+    monkeypatch.setattr(handler, 'claim_budget', lambda *args, **kwargs: permit)
+    monkeypatch.setattr(handler, 'confirm_permit', lambda *args, **kwargs: None)
+    monkeypatch.setattr(handler, 'record_response', lambda *args, **kwargs: None)
+    monkeypatch.setattr(handler, 'release_budget', lambda value: released.append(value))
+    async def db(function, *args, **kwargs):
+        return function(*args, **kwargs)
+    monkeypatch.setattr(handler, '_db', db)
+    async def scenario():
+        value = instance(Inner())
+        with pytest.raises(ValueError, match='body_partial'):
+            await value.download_request(Request('https://dev.to/api/articles'))
+        assert value.crawler.stats.values[f'budget/http_status_count/{status}'] == 1
+    asyncio.run(scenario())
+    assert released == [permit]

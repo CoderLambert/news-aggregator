@@ -229,3 +229,6 @@ full_content_stats 正文覆盖率为 complete / 符合抓取准入的 article�
 
 
 本机生产构建遇到公开PyPI文件下载约40–45KB/s，第一次原始构建仍在依赖下载阶段，未声称构建/浏览器通过。为完成本地门禁，将CPU Torch安装拆成独立缓存层（固定2.14.1+cpu、原官方CPU源），依赖安装增加可选 NEWSHUB_PYPI_INDEX，默认仍是原PyPI HTTPS，CI默认不变。本地选择公开HTTPS镜像源 mirrors.aliyun.com/pypi/simple（Django6.1.2包链接SHA与官方JSON一致，1MiB范围实测4.13s）；不禁用TLS/哈希验证，不涉及新闻来源开关或业务API。后续记录实际使用的镜像、版本与真实门禁结果。
+
+
+已知截断边界补充：safe_http 从响应头拒绝206或200+Content-Range，错误码body_partial，正文不交给候选/写入器；Scrapy也拒绝部分Feed并保留真实HTTP计数。HTTP401/403/404/5xx的压缩或过大错误页不覆盖已识别的控制状态，小型urllib.HTTPError响应仍兼容。相关safe_http/下载handler/Providers/指标/所有crawler测试实际 **391 passed**。镜像e1fffc0的真实卷验收12项及G1浏览器/HTTPS/CSRF/readonly/Mermaid/SSE已通过且清理PASS；最终传输补充后会使用新SHA缓存重建并重跑实际门禁。

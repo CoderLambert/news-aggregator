@@ -689,3 +689,33 @@ def test_safe_urlopen_http_error_remains_urllib_compatible_without_echoing_query
     assert 'secret' not in str(raised.value)
     assert raised.value.read() == b'bad'
     assert network.sockets[0].address == ('93.184.216.34', 80)
+
+
+
+@pytest.mark.parametrize(('status', 'headers'), [(206, ''), (200, 'Content-Range: bytes 0-99/1000\r\n')])
+def test_partial_response_is_rejected_from_headers_without_reading_body(monkeypatch, status, headers):
+    wire = _response(status=status, headers=headers, body=b'Partial content')
+    header_end = wire.index(b'\r\n\r\n') + 4
+    def forbidden_body_read(amount, stream):
+        if stream.tell() >= header_end:
+            raise AssertionError('known partial response must not be consumed')
+        return stream.read(min(amount, header_end - stream.tell()))
+    FakeNetwork(monkeypatch, [wire], body_read=forbidden_body_read)
+    with pytest.raises(safe_http.UnsafeURL) as caught:
+        safe_http.safe_urlopen('http://articles.example/story')
+    assert caught.value.error_code == 'body_partial' and caught.value.http_status == status
+
+
+
+@pytest.mark.parametrize(('status', 'code'), [(401, 'auth_required'), (403, 'access_blocked'), (404, 'not_found'), (503, 'upstream_5xx')])
+def test_http_error_control_survives_compressed_or_partial_error_page(monkeypatch, status, code):
+    wire = _response(status=status, headers='Content-Encoding: gzip\r\nContent-Range: bytes 0-9/100\r\n', body=b'error page')
+    header_end = wire.index(b'\r\n\r\n') + 4
+    def forbidden_body_read(amount, stream):
+        if stream.tell() >= header_end:
+            raise AssertionError('compressed error page must not be consumed')
+        return stream.read(min(amount, header_end - stream.tell()))
+    FakeNetwork(monkeypatch, [wire], body_read=forbidden_body_read)
+    with pytest.raises(safe_http.SafeHTTPStatusError) as caught:
+        safe_http.safe_urlopen('http://articles.example/story')
+    assert caught.value.http_status == status and caught.value.error_code == code

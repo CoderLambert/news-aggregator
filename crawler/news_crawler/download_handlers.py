@@ -42,6 +42,9 @@ async def _await_inner(value):
 
 
 def _received_headers(headers, body_length, request, **kwargs):
+    if headers.get('Content-Range') is not None:
+        request.meta['_budget_body_stopped'] = 'body_partial'
+        raise StopDownload(fail=False)
     if headers.get('Retry-After') is not None:
         request.meta['_budget_body_stopped'] = 'retry_after'
         raise StopDownload(fail=False)
@@ -131,6 +134,10 @@ class BudgetedHTTPDownloadHandler:
                 error.error_code = 'rate_limited'
                 error.http_status = response.status
                 raise error
+            if response.status >= 400:
+                return response
+            if response.status == 206 or response.headers.get('Content-Range') is not None:
+                raise ValueError('body_partial')
             if request.meta.get('_budget_body_stopped') or 'download_stopped' in response.flags:
                 raise ValueError(request.meta.get('_budget_body_stopped') or 'body_partial')
             return response

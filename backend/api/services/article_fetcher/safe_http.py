@@ -47,6 +47,8 @@ class UnsafeURL(ValueError):
             from datetime import timedelta
             self.error_code, self.retryable = 'budget_deferred', True
             self.retry_after_at = timezone.now() + timedelta(seconds=1)
+        elif message == 'HTTP response declares partial content':
+            self.error_code, self.retryable = 'body_partial', False
         elif message in {'HTTP response exceeds size limit', 'Compressed HTTP responses are not supported', 'Invalid HTTP response length'}:
             self.error_code, self.retryable = 'unsupported', False
         elif message in {'Safe HTTP request failed', 'Safe HTTP response read failed', 'Safe HTTPS connection failed',
@@ -563,7 +565,18 @@ def _fetch_one(
             cooling = response_observer(response.status, response.headers) if response_observer else None
             # Cooling is committed from headers before body processing. An
             # oversized/compressed error page cannot hide a 429 from the budget.
-            response_body = b'' if cooling is not None else _read_body(response, transport, deadline)
+            if cooling is None and (response.status == 206 or (response.status == 200 and response.headers.get('Content-Range') is not None)):
+                error = _failure('HTTP response declares partial content')
+                error.http_status = response.status
+                raise error
+            try:
+                response_body = b'' if cooling is not None or response.status in _REDIRECT_STATUSES else _read_body(response, transport, deadline)
+            except UnsafeURL:
+                # Invalid/oversized error pages must not replace a known HTTP
+                # control status with an unrelated body-decoding failure.
+                if response.status < 400:
+                    raise
+                response_body = b''
             return response.status, response.headers, response_body
         finally:
             response.close()
