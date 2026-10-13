@@ -300,7 +300,11 @@ function safeParseJson(value: string): JsonRecord {
 function buildToolSummary(name: string, result: JsonRecord): string {
   if (typeof result.error === 'string') return `❌ ${result.error}`
   if (name === 'search_news') return `找到 ${typeof result.total === 'number' ? result.total : 0} 篇相关文章`
-  if (name === 'fetch_article') return '已获取文章'
+  if (name === 'fetch_article') {
+    if (result.context_scope === 'full') return '已读取全文'
+    if (result.context_scope === 'excerpt') return '已读取节选'
+    return result.task_outcome === 'queued' || result.task_outcome === 'reused' ? '正文排队中，当前为摘要' : '已读取摘要'
+  }
   if (name === 'search_web') return `联网搜索到 ${Array.isArray(result.results) ? result.results.length : 0} 条结果`
   if (name === 'fetch_webpage') return '已抓取网页'
   if (name === 'analyze_topic') return `分析完成: ${typeof result.total_articles === 'number' ? result.total_articles : 0} 篇文章`

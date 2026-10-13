@@ -54,6 +54,23 @@ export interface NewsSummary {
   full_content_quality_score: number | null
   full_content_retry_count: number
   last_full_content_attempt: string | null
+  has_full_content?: boolean
+  content_kind?: string
+  full_content_state?: string
+  full_content_revision?: number
+  full_content_next_attempt_at?: string | null
+  full_content_error_code?: string
+}
+
+export function hasReadableFullContent(news: Partial<NewsDetail>): boolean {
+  if (news.full_content_state && !['legacy', 'complete'].includes(news.full_content_state)) return false
+  if (typeof news.has_full_content === 'boolean') return news.has_full_content
+  return Boolean(news.full_content?.trim())
+}
+
+export function hasPendingFullContentTask(news: Partial<NewsSummary>): boolean {
+  return ['queued', 'fetching'].includes(news.full_content_fetch_status ?? '')
+    || (Boolean(news.full_content_next_attempt_at) && ['rate_limited', 'network_error', 'failed'].includes(news.full_content_fetch_status ?? ''))
 }
 
 
@@ -134,6 +151,12 @@ export function parseNewsSummary(value: unknown): NewsSummary {
     full_content_quality_score: nullableNumber('full_content_quality_score'),
     full_content_retry_count: typeof value.full_content_retry_count === 'number' ? value.full_content_retry_count : 0,
     last_full_content_attempt: typeof value.last_full_content_attempt === 'string' ? value.last_full_content_attempt : null,
+    ...(typeof value.has_full_content === 'boolean' ? { has_full_content: value.has_full_content } : {}),
+    ...(typeof value.content_kind === 'string' ? { content_kind: value.content_kind } : {}),
+    ...(typeof value.full_content_state === 'string' ? { full_content_state: value.full_content_state } : {}),
+    ...(typeof value.full_content_revision === 'number' ? { full_content_revision: value.full_content_revision } : {}),
+    ...(value.full_content_next_attempt_at === null || typeof value.full_content_next_attempt_at === 'string' ? { full_content_next_attempt_at: value.full_content_next_attempt_at as string | null } : {}),
+    ...(typeof value.full_content_error_code === 'string' ? { full_content_error_code: value.full_content_error_code } : {}),
   }
 }
 

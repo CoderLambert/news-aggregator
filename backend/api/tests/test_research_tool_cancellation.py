@@ -45,7 +45,7 @@ def test_search_tool_stops_before_wikipedia_or_ddg_fallback(monkeypatch):
         state['cancelled'] = True
         raise OSError('simulated disconnect')
 
-    monkeypatch.setattr(tools.urllib.request, 'urlopen', fail_first_request)
+    monkeypatch.setattr(tools, '_open_search_http', fail_first_request)
     with pytest.raises(Stopped):
         tools.execute_tool(
             'search_web', {'query': 'offline example'},
@@ -73,7 +73,7 @@ def test_wikipedia_language_fallback_checks_guard_before_each_http(monkeypatch):
         calls.append(request.full_url)
         return Response()
 
-    monkeypatch.setattr(tools.urllib.request, 'urlopen', fake_urlopen)
+    monkeypatch.setattr(tools, '_open_search_http', fake_urlopen)
     with pytest.raises(Stopped):
         tools._wikipedia_search('example', 5, execution_guard=cancel_guard(state))
     assert len(calls) == 1
@@ -89,7 +89,7 @@ def test_fetch_webpage_cancellation_after_dns_check_never_starts_http(monkeypatc
         return True, ''
 
     monkeypatch.setattr(tools, '_is_url_allowed', after_dns)
-    monkeypatch.setattr(tools.urllib.request, 'urlopen', lambda *a, **k: calls.append('http'))
+    monkeypatch.setattr(tools, '_open_search_http', lambda *a, **k: calls.append('http'))
     with pytest.raises(Stopped):
         tools.execute_tool(
             'fetch_webpage', {'url': 'https://example.com'},

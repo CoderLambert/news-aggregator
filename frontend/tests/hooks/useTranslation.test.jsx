@@ -51,6 +51,44 @@ describe('useTranslation', () => {
   })
   afterEach(() => vi.restoreAllMocks())
 
+  it('does not translate or resume quarantined text even when raw fields and an active marker remain', async () => {
+    const news = article({ has_full_content: false, full_content_state: 'missing', full_translation_active: true })
+    const { result } = renderHook(() => useTranslation('42', news, vi.fn(), false), { wrapper: makeWrapper() })
+    await act(async () => { expect(await result.current.handleTranslate()).toBe(false) })
+    expect(api.translateFullArticleStream).not.toHaveBeenCalled()
+    expect(api.getTranslationJob).not.toHaveBeenCalled()
+  })
+
+  it('does not restore a translation task belonging to an older source revision', async () => {
+    localStorage.setItem('translating_recovery_v1:12:42', JSON.stringify({ viewerId: '12', newsId: 42, jobId: 'older-task', sourceRevision: 1 }))
+    const news = article({ has_full_content: true, full_content_state: 'complete', full_content_revision: 2 })
+    const { result } = renderHook(() => useTranslation('42', news, vi.fn(), false), { wrapper: makeWrapper() })
+    await act(async () => { await result.current.handleTranslate(false) })
+    expect(api.getTranslationJob).not.toHaveBeenCalled()
+    expect(api.translateFullArticleStream).toHaveBeenCalledOnce()
+  })
+
+  it('aborts only the local translation stream when the readable source revision changes', async () => {
+    let signal
+    api.translateFullArticleStream.mockImplementation(async function* (_id, { signal: currentSignal }) {
+      signal = currentSignal
+      await waitForAbort(currentSignal)
+      yield { type: 'complete', fullContentZh: 'Older body translation', fetchedAt: null }
+    })
+    const setNews = vi.fn()
+    const { result, rerender } = renderHook(({ revision }) => useTranslation('42',
+      article({ has_full_content: true, full_content_state: 'complete', full_content_revision: revision }), setNews, false),
+      { initialProps: { revision: 1 }, wrapper: makeWrapper() })
+    let pending
+    act(() => { pending = result.current.handleTranslate(false) })
+    await waitFor(() => expect(signal).toBeInstanceOf(AbortSignal))
+    rerender({ revision: 2 })
+    expect(signal.aborted).toBe(true)
+    await act(async () => { await pending })
+    expect(setNews).not.toHaveBeenCalled()
+    expect(api.cancelTranslationJob).not.toHaveBeenCalled()
+  })
+
   it('waits for a shared result and preserves its scope and source in the query data', async () => {
     let finish
     api.translateFullArticleStream.mockImplementation(async function* () {

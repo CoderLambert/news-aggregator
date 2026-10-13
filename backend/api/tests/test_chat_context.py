@@ -1,397 +1,103 @@
-"""Tests for the chat/suggested-questions context selection logic.
-
-Critical bug being fixed:
-  Both NewsChatView and NewsSuggestedQuestionsView used to pick context as:
-    context = news.full_content_zh if news.full_content_zh else news.content
-
-  This skipped news.full_content entirely. If the user had clicked "fetch
-  full article" but no Chinese translation existed yet, AI saw only the
-  short list-preview blurb (news.content).
-
-  Worse: if the user opened chat BEFORE clicking "fetch full article",
-  there was no way for chat to ever see the real article body.
-
-Fix:
-  1. Context chain: full_content_zh -> full_content -> content_zh -> content
-  2. ensure_full_content(news) auto-fetches via Jina if nothing is cached,
-     so the user never has to click "fetch full article" before chatting.
-"""
-from datetime import timedelta
-from unittest.mock import patch, MagicMock
+"""Current readable context and shared enqueue intent, without request-time fetching."""
+from unittest.mock import patch
 import pytest
 from django.contrib.auth.models import User
 from django.utils import timezone
 from api.models import News, Source, Category
-from api.services.article_fetcher import FetchError, FetchResult
-
-
-@pytest.fixture(autouse=True)
-def configured_global_provider(monkeypatch):
-    monkeypatch.setattr('api.views.get_clients', lambda: [(object(), 'test-model')])
+from api.services.article_content import pick_chat_context,request_full_content
+from api.views import ensure_full_content
 
 
 @pytest.fixture
-def src(db):
-    return Source.objects.create(name='TestSource', url='https://example.com')
+def make_news(db):
+    source=Source.objects.create(name='WebKit',url='https://webkit.org')
+    category=Category.objects.create(name='科技',slug='context')
+    def create(**extra):
+        values=dict(title='Article title',content='SHORT_PREVIEW',url='https://webkit.org/blog/12/article/',
+            source=source,category=category,publish_time=timezone.now(),content_kind='article')
+        values.update(extra)
+        return News.objects.create(**values)
+    return create
 
 
-@pytest.fixture
-def cat(db):
-    return Category.objects.create(name='科技', slug='tech')
+@pytest.mark.parametrize('values,expected', [
+    (dict(full_content='FULL_EN',full_content_zh='FULL_ZH',full_content_state='legacy'), 'FULL_ZH'),
+    (dict(full_content='FULL_EN',content_zh='SHORT_ZH',full_content_state='complete',full_content_fetch_status='rate_limited'),'FULL_EN'),
+    (dict(full_content='RETAINED_AUDIT',full_content_zh='OLD_TRANSLATION',full_content_state='missing',content_zh='SHORT_ZH'),'SHORT_ZH'),
+    (dict(content_zh='SHORT_ZH'),'SHORT_ZH'),
+    ({},'SHORT_PREVIEW'),
+])
+def test_current_context_requires_readable_body_before_full_translation_preference(make_news,values,expected):
+    assert pick_chat_context(make_news(**values)) == expected
 
 
-def _news(src, cat, **overrides):
-    defaults = dict(
-        title='测试文章',
-        content='SHORT_PREVIEW',
-        publish_time=timezone.now(),
-        source=src,
-        category=cat,
-        url='https://example.com/article',
-    )
-    defaults.update(overrides)
-    return News.objects.create(**defaults)
+def test_ensure_full_content_persists_intent_without_fetching(make_news):
+    news=make_news()
+    with patch('api.services.article_content.worker_health',return_value=True),patch('api.services.article_fetcher.fetch_article_markdown') as fetch:
+        assert ensure_full_content(news) == 'queued'
+    fetch.assert_not_called()
+    news.refresh_from_db()
+    assert news.full_content_fetch_status == 'queued' and news.full_content == ''
+    assert news.last_full_content_attempt is None
 
 
-# ---------------------------------------------------------------------------
-# pick_chat_context() — pure function, no I/O
-# ---------------------------------------------------------------------------
-
-class TestPickChatContext:
-    def test_prefers_full_content_zh_when_present(self, src, cat):
-        from api.views import pick_chat_context
-        n = _news(src, cat,
-                  content='SHORT', content_zh='SHORT_ZH',
-                  full_content='FULL_EN', full_content_zh='FULL_ZH')
-        assert pick_chat_context(n) == 'FULL_ZH'
-
-    def test_falls_back_to_full_content_when_no_zh_translation(self, src, cat):
-        from api.views import pick_chat_context
-        n = _news(src, cat,
-                  content='SHORT', content_zh='SHORT_ZH',
-                  full_content='FULL_EN', full_content_zh='')
-        assert pick_chat_context(n) == 'FULL_EN'
-
-    def test_falls_back_to_content_zh_when_no_full(self, src, cat):
-        from api.views import pick_chat_context
-        n = _news(src, cat,
-                  content='SHORT', content_zh='SHORT_ZH',
-                  full_content='', full_content_zh='')
-        assert pick_chat_context(n) == 'SHORT_ZH'
-
-    def test_falls_back_to_content_as_last_resort(self, src, cat):
-        from api.views import pick_chat_context
-        n = _news(src, cat,
-                  content='SHORT', content_zh='',
-                  full_content='', full_content_zh='')
-        assert pick_chat_context(n) == 'SHORT'
+def test_cancellation_before_enqueue_never_creates_task(make_news):
+    news=make_news()
+    def guard(): raise RuntimeError('controlled cancellation')
+    with pytest.raises(RuntimeError): ensure_full_content(news,execution_guard=guard)
+    news.refresh_from_db()
+    assert news.full_content_next_attempt_at is None and news.full_content_retry_count == 0
 
 
-# ---------------------------------------------------------------------------
-# ensure_full_content() — auto-fetch via Jina on first chat
-# ---------------------------------------------------------------------------
-
-class TestEnsureFullContent:
-    @pytest.mark.parametrize('cancel_stage,cancel_call', [
-        ('before_request', 2),
-        ('inside_fetch', 3),
-        ('before_persist', 3),
-    ])
-    def test_execution_cancellation_releases_claim_without_marking_fetch_failed(
-        self, src, cat, cancel_stage, cancel_call,
-    ):
-        from api.views import ensure_full_content
-        from api.services.full_content_status import claim_fetch
-
-        class FetchCancelled(Exception):
-            pass
-
-        news = _news(src, cat, full_content_zh='KEEP_TRANSLATION')
-        previous_time = timezone.now() - timedelta(hours=1)
-        news.full_content_fetched_at = previous_time
-        news.full_content_zh_fetched_at = previous_time
-        news.full_content_fetch_provider = 'previous_provider'
-        news.full_content_retry_count = 2
-        news.save(update_fields=[
-            'full_content_fetched_at', 'full_content_zh_fetched_at',
-            'full_content_fetch_provider', 'full_content_retry_count',
-        ])
-        cancellation = FetchCancelled('cancelled by owner')
-        guard_calls = 0
-
-        def execution_guard():
-            nonlocal guard_calls
-            guard_calls += 1
-            if guard_calls >= cancel_call:
-                raise cancellation
-
-        result = FetchResult(
-            ok=True,
-            provider='new_provider',
-            url=news.url,
-            title=news.title,
-            markdown='BODY_MUST_NOT_BE_SAVED',
-        )
-
-        def fake_fetch(*_args, execution_guard=None, **_kwargs):
-            if cancel_stage == 'inside_fetch':
-                execution_guard()
-            return result
-
-        claim_time = timezone.now()
-        with patch('api.services.full_content_status.tz_now', return_value=claim_time):
-            with patch('api.views.fetch_article_markdown', side_effect=fake_fetch) as fetch:
-                with pytest.raises(FetchCancelled) as raised:
-                    ensure_full_content(news, execution_guard=execution_guard)
-
-        assert raised.value is cancellation
-        if cancel_stage == 'before_request':
-            fetch.assert_not_called()
-        else:
-            fetch.assert_called_once()
-
-        news.refresh_from_db()
-        assert news.full_content_fetch_status == 'pending'
-        assert news.last_full_content_attempt == claim_time
-        assert news.full_content == ''
-        assert news.full_content_zh == 'KEEP_TRANSLATION'
-        assert news.full_content_fetched_at == previous_time
-        assert news.full_content_zh_fetched_at == previous_time
-        assert news.full_content_fetch_provider == 'previous_provider'
-        assert news.full_content_retry_count == 2
-
-        # Cancellation releases the lease immediately instead of waiting for the TTL.
-        assert claim_fetch(type(news).objects.get(pk=news.pk))
-
-    @pytest.mark.parametrize('release_error', [False, RuntimeError('private cleanup detail')])
-    def test_cancellation_survives_a_failed_release_and_logs_no_exception_details(
-        self, src, cat, caplog, release_error,
-    ):
-        from api.views import ensure_full_content
-
-        class FetchCancelled(Exception):
-            pass
-
-        news = _news(src, cat)
-        cancellation = FetchCancelled('cancelled by owner')
-        guard_calls = 0
-
-        def execution_guard():
-            nonlocal guard_calls
-            guard_calls += 1
-            if guard_calls >= 2:
-                raise cancellation
-
-        if release_error:
-            release_patch = patch(
-                'api.services.full_content_status.release_fetch_claim',
-                side_effect=release_error,
-            )
-        else:
-            release_patch = patch(
-                'api.services.full_content_status.release_fetch_claim',
-                return_value=False,
-            )
-        with release_patch as release:
-            with pytest.raises(FetchCancelled) as raised:
-                ensure_full_content(news, execution_guard=execution_guard)
-
-        assert raised.value is cancellation
-        release.assert_called_once_with(news)
-        assert 'cancelled fetch claim' in caplog.text
-        assert 'cancelled by owner' not in caplog.text
-        assert 'private cleanup detail' not in caplog.text
-
-    def test_skips_fetch_when_full_content_already_present(self, src, cat):
-        from api.views import ensure_full_content
-        n = _news(src, cat, full_content='ALREADY_HERE')
-        with patch('api.views.fetch_article_markdown') as m:
-            ensure_full_content(n)
-        m.assert_not_called()
-        n.refresh_from_db()
-        assert n.full_content == 'ALREADY_HERE'
-
-    def test_fetches_and_persists_when_empty(self, src, cat):
-        from api.views import ensure_full_content
-        n = _news(src, cat)
-        result = FetchResult(ok=True, provider='jina', url=n.url, title=n.title, markdown='FRESHLY_FETCHED_BODY')
-        with patch('api.views.fetch_article_markdown', return_value=result):
-            ensure_full_content(n)
-        n.refresh_from_db()
-        assert n.full_content == 'FRESHLY_FETCHED_BODY'
-        assert n.full_content_fetched_at is not None
-        assert n.full_content_fetch_status == 'success'
-        assert n.full_content_fetch_provider == 'jina'
-        assert n.last_full_content_attempt is not None
-
-    def test_swallows_fetch_errors_silently(self, src, cat):
-        """If Jina fails, chat should still work with whatever content we have."""
-        from api.views import ensure_full_content
-        n = _news(src, cat, content='SHORT_FALLBACK')
-        with patch('api.views.fetch_article_markdown', side_effect=FetchError('fetch down')):
-            # Must not raise — chat should degrade gracefully
-            ensure_full_content(n)
-        n.refresh_from_db()
-        assert n.full_content == ''  # still empty
-        assert n.content == 'SHORT_FALLBACK'  # caller can still use this
-        assert n.full_content_fetch_status == 'failed'
-        assert n.full_content_fetch_error == 'fetcherror:provider_error'
-        assert n.full_content_retry_count == 1
-
-    def test_swallows_network_fetch_errors_and_records_status(self, src, cat):
-        """Network fetch errors are recorded but never escape to chat callers."""
-        from api.views import ensure_full_content
-        n = _news(src, cat, content='SHORT_FALLBACK')
-        with patch('api.views.fetch_article_markdown', side_effect=FetchError('timed out while fetching')):
-            ensure_full_content(n)
-        n.refresh_from_db()
-        assert n.full_content == ''
-        assert n.content == 'SHORT_FALLBACK'
-        assert n.full_content_fetch_status == 'network_error'
-        assert n.full_content_fetch_error == 'fetcherror:timeout'
-        assert n.full_content_retry_count == 1
-
-    def test_skips_fetch_when_no_url(self, src, cat):
-        from api.views import ensure_full_content
-        n = _news(src, cat, url='https://example.com/x', full_content='')
-        n.url = ''  # simulate edge case
-        n.save()
-        with patch('api.views.fetch_article_markdown') as m:
-            ensure_full_content(n)
-        m.assert_not_called()
+def test_cancellation_after_enqueue_preserves_shared_durable_intent(make_news):
+    news=make_news()
+    calls=0
+    def guard():
+        nonlocal calls
+        calls+=1
+        if calls == 2: raise RuntimeError('controlled cancellation')
+    with patch('api.services.article_content.worker_health',return_value=True),pytest.raises(RuntimeError):
+        ensure_full_content(news,execution_guard=guard)
+    news.refresh_from_db()
+    assert news.full_content_fetch_status == 'queued' and news.full_content_retry_count == 0
 
 
-# ---------------------------------------------------------------------------
-# Integration: NewsChatView auto-fetches before answering
-# ---------------------------------------------------------------------------
-
-class TestChatAutoFetch:
-    def test_chat_view_auto_fetches_full_content_on_first_call(self, src, cat, client):
-        n = _news(src, cat)
-        client.force_login(User.objects.create_user(username='chat-context-auto-fetch'))
-        assert n.full_content == ''
-
-        # Mock both: Jina fetch + LLM stream
-        def fake_stream(**kwargs):
-            # Inspect the prompt to verify FULL content was passed
-            sent = kwargs['messages'][0]['content']
-            assert 'FETCHED_FULL_BODY' in sent, \
-                f'Expected fetched content in prompt, got: {sent[:200]!r}'
-            assert 'SHORT_PREVIEW' not in sent or 'FETCHED_FULL_BODY' in sent
-
-            class _Stream:
-                def __iter__(self):
-                    chunk = MagicMock()
-                    chunk.choices = [MagicMock()]
-                    chunk.choices[0].delta.content = '回答'
-                    yield chunk
-            return _Stream()
-
-        fake_client = MagicMock()
-        fake_client.chat.completions.create = fake_stream
-
-        def fake_stream_chat(messages, max_tokens=32000, temperature=0.3, **_kwargs):
-            yield '回答'
-
-        result = FetchResult(ok=True, provider='jina', url=n.url, title=n.title, markdown='FETCHED_FULL_BODY')
-        with patch('api.views.fetch_article_markdown', return_value=result) as m_fetch, \
-             patch('api.views.stream_chat', side_effect=fake_stream_chat):
-            resp = client.post(
-                f'/api/news/{n.pk}/chat/',
-                data={'question': '这文章讲啥？'},
-                content_type='application/json',
-            )
-            # Consume the stream so generator finally runs
-            list(resp.streaming_content)
-
-        m_fetch.assert_called_once()
-        n.refresh_from_db()
-        assert n.full_content == 'FETCHED_FULL_BODY'
-
-    def test_chat_view_does_not_refetch_when_full_content_exists(self, src, cat, client):
-        n = _news(src, cat, full_content='ALREADY_CACHED')
-        client.force_login(User.objects.create_user(username='chat-context-cached'))
-
-        def fake_stream(**kwargs):
-            class _Stream:
-                def __iter__(self):
-                    chunk = MagicMock()
-                    chunk.choices = [MagicMock()]
-                    chunk.choices[0].delta.content = '回答'
-                    yield chunk
-            return _Stream()
-
-        fake_client = MagicMock()
-        fake_client.chat.completions.create = fake_stream
-
-        def fake_stream_chat(messages, max_tokens=32000, temperature=0.3, **_kwargs):
-            yield '回答'
-
-        result = FetchResult(ok=True, provider='jina', url=n.url, title=n.title, markdown='FETCHED_FULL_BODY')
-        with patch('api.views.fetch_article_markdown', return_value=result) as m_fetch, \
-             patch('api.views.stream_chat', side_effect=fake_stream_chat):
-            resp = client.post(
-                f'/api/news/{n.pk}/chat/',
-                data={'question': 'x'},
-                content_type='application/json',
-            )
-            list(resp.streaming_content)
-        m_fetch.assert_not_called()
+@pytest.mark.parametrize('full', [False,True])
+def test_chat_prompt_and_stream_scope_agree_and_never_fetch_article(make_news,client,full):
+    news=make_news(**({'full_content':'READABLE_FULL_BODY','full_content_state':'legacy'} if full else {}))
+    client.force_login(User.objects.create_user(username=f'context-reader-{full}'))
+    captured={}
+    def stream(messages,**kwargs):
+        captured['prompt']=messages[0]['content']
+        yield 'Answer.'
+    with patch('api.views.get_clients',return_value=[(object(),'model')]),patch('api.views.stream_chat',side_effect=stream), \
+         patch('api.services.article_content.worker_health',return_value=True),patch('api.services.article_fetcher.fetch_article_markdown') as fetch:
+        response=client.post(f'/api/news/{news.pk}/chat/',{'question':'Question?'},content_type='application/json')
+        text=b''.join(response.streaming_content).decode()
+    fetch.assert_not_called()
+    scope='full' if full else 'summary'
+    assert f'"context_scope": "{scope}"' in text
+    assert f'可用内容范围: {scope}' in captured['prompt']
+    assert ('READABLE_FULL_BODY' if full else 'SHORT_PREVIEW') in captured['prompt']
+    news.refresh_from_db()
+    assert news.full_content_fetch_status == ('pending' if full else 'queued')
 
 
-# ---------------------------------------------------------------------------
-# Integration: suggested-questions also gets the fetched body
-# ---------------------------------------------------------------------------
-
-class TestSuggestedQuestionsAutoFetch:
-    def test_suggested_questions_auto_fetches_too(self, src, cat, client):
-        n = _news(src, cat)
-        client.force_login(User.objects.create_user(username='suggested-context-user'))
-
-        captured = {}
-
-        class _Choice:
-            def __init__(self, content):
-                self.message = type('M', (), {'content': content})()
-
-        class _Completion:
-            def __init__(self, content):
-                self.choices = [_Choice(content)]
-
-        class _FakeClient:
-            class chat:
-                class completions:
-                    @staticmethod
-                    def create(**kwargs):
-                        captured['prompt'] = kwargs['messages'][0]['content']
-                        return _Completion('["q1","q2","q3"]')
-
-        result = FetchResult(ok=True, provider='jina', url=n.url, title=n.title, markdown='FETCHED_FULL_BODY')
-        with patch('api.views.fetch_article_markdown', return_value=result), \
-             patch('api.views.get_clients', return_value=[(_FakeClient(), 'doubao-seed-2.0-pro')]):
-            resp = client.post(f'/api/news/{n.pk}/suggested-questions/')
-
-        assert resp.status_code == 200
-        assert 'FETCHED_FULL_BODY' in captured['prompt']
-
-    def test_chat_returns_fallback_on_stream_failure(self, src, cat, client):
-        """When stream_chat yields a fallback message, the chat endpoint
-        returns it gracefully (200) and saves it to the session.
-        """
-        n = _news(src, cat, full_content='Some content here')
-        client.force_login(User.objects.create_user(username='chat-context-fallback'))
-
-        def failing_stream_chat(messages, max_tokens=32000, temperature=0.3, **_kwargs):
-            yield '抱歉，AI 服务暂时不可用，请稍后再试。'
-
-        with patch('api.views.stream_chat', side_effect=failing_stream_chat):
-            resp = client.post(
-                f'/api/news/{n.pk}/chat/',
-                data={'question': '这文章讲啥？'},
-                content_type='application/json',
-            )
-            content = b''.join(resp.streaming_content).decode()
-
-        assert resp.status_code == 200
-        assert '抱歉' in content
-        assert 'AI 服务暂时不可用' in content
+def test_suggestions_use_summary_scope_without_waiting_for_article_http(make_news,client):
+    news=make_news()
+    client.force_login(User.objects.create_user(username='suggestion-context'))
+    captured={}
+    class Provider:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    captured['prompt']=kwargs['messages'][0]['content']
+                    from types import SimpleNamespace
+                    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='["q1","q2","q3"]'))])
+    with patch('api.views.get_clients',return_value=[(Provider(),'model')]),patch('api.services.article_content.worker_health',return_value=True), \
+         patch('api.services.article_fetcher.fetch_article_markdown') as fetch:
+        response=client.post(f'/api/news/{news.pk}/suggested-questions/')
+    fetch.assert_not_called()
+    assert response.status_code == 200 and response.json()['context_scope'] == 'summary'
+    assert 'SHORT_PREVIEW' in captured['prompt'] and '可用内容范围: summary' in captured['prompt']

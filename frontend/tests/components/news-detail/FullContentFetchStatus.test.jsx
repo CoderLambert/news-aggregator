@@ -5,6 +5,28 @@ import FullContentFetchStatus from '@/components/news-detail/FullContentFetchSta
 describe('FullContentFetchStatus', () => {
   const baseNews = { source_language: 'en', full_content: '' }
 
+  it('shows queued and cooling task controls as local waiting actions, never another enqueue', () => {
+    const onFetch = vi.fn()
+    const onResume = vi.fn()
+    const onCancel = vi.fn()
+    const news = { ...baseNews, full_content_fetch_status: 'rate_limited',
+      full_content_next_attempt_at: new Date(Date.now() + 60_000).toISOString() }
+    const { rerender } = render(<FullContentFetchStatus news={news} articleLoading={false} onFetch={onFetch} onResume={onResume} onCancel={onCancel} />)
+    expect(screen.getByText('正文任务等待重试')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '继续查看' }))
+    expect(onResume).toHaveBeenCalledOnce()
+    expect(onFetch).not.toHaveBeenCalled()
+    rerender(<FullContentFetchStatus news={news} articleLoading onFetch={onFetch} onResume={onResume} onCancel={onCancel} />)
+    fireEvent.click(screen.getByRole('button', { name: '停止等待' }))
+    expect(onCancel).toHaveBeenCalledOnce()
+    expect(onFetch).not.toHaveBeenCalled()
+  })
+
+  it('hides retries for blocked or unsupported tasks', () => {
+    render(<FullContentFetchStatus news={{ ...baseNews, full_content_fetch_status: 'blocked' }} articleLoading={false} onFetch={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: /重试|获取完整原文/ })).not.toBeInTheDocument()
+  })
+
   it('shows the pending CTA without presenting the summary as original article text', () => {
     const onFetch = vi.fn()
     render(

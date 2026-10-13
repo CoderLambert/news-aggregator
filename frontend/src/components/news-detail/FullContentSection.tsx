@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import type { NewsDetail } from '@/types/news'
+import { hasReadableFullContent } from '@/types/news'
 import MarkdownContent from './MarkdownContent'
 import ErrorBanner from './ErrorBanner'
 
@@ -47,6 +48,7 @@ export default function FullContentSection({
   allowFetch = true,
   allowTranslation = true,
 }: FullContentSectionProps) {
+  if (!hasReadableFullContent(news)) return null
   const content = showOriginal ? news.full_content : (news.full_content_zh || news.full_content)
   return (
     <div className="mb-8">

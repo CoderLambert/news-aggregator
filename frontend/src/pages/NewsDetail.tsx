@@ -22,6 +22,7 @@ import FavoriteButtons from '@/components/news-detail/FavoriteButtons'
 import SpeechStartMenu from '@/components/speech/SpeechStartMenu'
 import { useNewsDetail } from '@/hooks/useNewsDetail'
 import { useFullArticle } from '@/hooks/useFullArticle'
+import { hasReadableFullContent, hasPendingFullContentTask } from '@/types/news'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useArticleSearch } from '@/hooks/useArticleSearch'
 import { useArticleToc } from '@/hooks/useArticleToc'
@@ -162,8 +163,9 @@ export default function NewsDetail() {
     )
   }
 
+  const readableBody = hasReadableFullContent(news)
   const isEnglishSource = news.source_language === 'en'
-  const hasTerminalFetchFailure = ['network_error', 'validation_failed', 'failed'].includes(news.full_content_fetch_status || '')
+  const hasTerminalFetchFailure = !hasPendingFullContentTask(news) && ['network_error', 'validation_failed', 'failed', 'blocked', 'unsupported'].includes(news.full_content_fetch_status || '')
   const hasChineseTitle = isEnglishSource && Boolean(news.title_zh)
   let displayTitle: string
   let displayContent: string
@@ -223,8 +225,8 @@ export default function NewsDetail() {
               {speechSupported && ttsEnabled && (
                 <SpeechStartMenu
                   isEnglishSource={isEnglishSource}
-                  hasOriginalFull={Boolean(news.full_content)}
-                  hasChineseFull={isEnglishSource ? Boolean(news.full_content_zh) : Boolean(news.full_content)}
+                  hasOriginalFull={readableBody}
+                  hasChineseFull={readableBody && (isEnglishSource ? Boolean(news.full_content_zh) : true)}
                   hasChineseSummary={isEnglishSource ? Boolean(news.content_zh) : Boolean(news.content)}
                   translating={translating}
                   onPlay={handleSpeak}
@@ -248,7 +250,7 @@ export default function NewsDetail() {
           {fetchFullEnabled && <FullContentFetchStatus news={news} articleLoading={articleLoading} onFetch={retryFullArticle} onResume={resumeExistingFetch} onCancel={cancelFetch} />}
           {fetchFullEnabled && articleError && !hasTerminalFetchFailure && <ErrorBanner message={articleError} onRetry={retryFullArticle} />}
 
-          {news.full_content && (
+          {readableBody && (
             <FullContentSection
               news={news}
               translating={translating}
@@ -270,7 +272,7 @@ export default function NewsDetail() {
             />
           )}
 
-          {!news.full_content && displayContent ? (
+          {!readableBody && displayContent ? (
             <SummarySection content={displayContent} onAskAssistant={chatEnabled ? openAssistant : undefined} />
           ) : null}
 
@@ -286,8 +288,8 @@ export default function NewsDetail() {
           open={assistantOpen}
           onOpenChange={handleAssistantOpenChange}
           articleContext={{
-            hasFullContent: Boolean(news.full_content),
-            wordCount: news.full_content ? news.full_content.length : (news.content ? news.content.length : 0),
+            hasFullContent: readableBody,
+            wordCount: readableBody ? news.full_content.length : (news.content ? news.content.length : 0),
             title: news.title,
           }}
         />}

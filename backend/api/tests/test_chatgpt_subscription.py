@@ -84,6 +84,7 @@ def news(db):
         category=category,
         publish_time=timezone.now(),
         full_content='# Original article\n\nFull English text.',
+        full_content_state='legacy',
         full_content_zh='SHARED PUBLIC TRANSLATION',
     )
 

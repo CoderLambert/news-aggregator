@@ -59,105 +59,14 @@ SUGGESTED_QUESTIONS_FALLBACK = [
 ]
 
 
-def pick_chat_context(news):
-    """Pick the best available article body for AI consumption.
-
-    Preference order (richest + Chinese first):
-      1. full_content_zh — translated full article (best)
-      2. full_content    — original full article (Chinese readers can still parse)
-      3. content_zh      — translated list-preview blurb
-      4. content         — original list-preview blurb (last resort)
-
-    Returns a non-empty string (empty only if every field is empty).
-    """
-    from api.services.shared_translations import get_shared_translation
-    shared = get_shared_translation(news)
-    return (
-        (shared.content if shared else '')
-        or
-        news.full_content_zh
-        or news.full_content
-        or news.content_zh
-        or news.content
-        or ''
-    )
+# Compatibility import for view-level callers; services never import api.views.
+from api.services.article_content import pick_chat_context, context_scope, request_full_content
+from api.services.full_content_status import has_full_content, filter_readable_full_content, fetch_eligibility, annotate_full_content_availability
 
 
 def ensure_full_content(news, execution_guard=None):
-    """Best-effort: make sure news.full_content is populated before AI sees it.
-
-    No-op if full_content already exists or news has no URL.
-    On provider-chain failure, logs a warning and returns silently — caller falls back
-    to whatever shorter content is available via pick_chat_context().
-
-    This is what makes "open chat without clicking 'fetch full article' first"
-    work end-to-end. The first chat call may pay a 2-10s latency hit for the
-    real fetch chain; subsequent calls hit the cached field.
-    """
-    import logging
-    from django.utils.timezone import now as tz_now
-
-    from api.services.full_content_status import (
-        claim_fetch,
-        classify_fetch_error,
-        mark_failed,
-        mark_success,
-        release_fetch_claim,
-    )
-
-    if news.full_content and news.full_content.strip():
-        return
-    if not news.url:
-        return
-    if execution_guard is not None:
-        execution_guard()
-    if not claim_fetch(news):
-        return
-
-    try:
-        if execution_guard is not None:
-            execution_guard()
-        result = fetch_article_markdown(
-            news.url,
-            expected_title=news.title,
-            summary=news.content,
-            news=news,
-            **({'execution_guard': execution_guard} if execution_guard is not None else {}),
-        )
-        if execution_guard is not None:
-            execution_guard()
-        mark_success(
-            news,
-            result,
-            full_content=result.markdown,
-            full_content_fetched_at=tz_now(),
-        )
-    except Exception as e:
-        if execution_guard is not None:
-            try:
-                execution_guard()
-            except Exception:
-                try:
-                    released = release_fetch_claim(news)
-                except Exception:
-                    logging.getLogger(__name__).warning(
-                        'ensure_full_content: cancelled fetch claim cleanup failed',
-                    )
-                else:
-                    if not released:
-                        logging.getLogger(__name__).warning(
-                            'ensure_full_content: cancelled fetch claim was no longer owned',
-                        )
-                raise
-        try:
-            classified = classify_fetch_error(e)
-            mark_failed(news, e, status=classified)
-        except Exception:
-            pass  # Never let status tracking break ensure_full_content
-        logging.getLogger(__name__).warning(
-            'ensure_full_content: real fetch failed for news=%s: %s',
-            news.pk, e,
-        )
+    """Compatibility entrypoint: read or enqueue, without article network IO."""
+    return request_full_content(news, execution_guard=execution_guard)
 
 
 class CommaSeparatedIntegerFilter(django_filters.BaseInFilter, django_filters.NumberFilter):
@@ -182,7 +91,7 @@ class NewsFilter(django_filters.FilterSet):
 
     def filter_full_content(self, queryset, name, value):
         if value:
-            return queryset.filter(full_content_fetch_status='success')
+            return filter_readable_full_content(queryset)
         return queryset
 
 
@@ -220,7 +129,8 @@ class NewsListView(generics.ListAPIView):
         return super().get_ordering()
 
     def get_queryset(self):
-        qs = News.objects.select_related('source', 'category')
+        qs = annotate_full_content_availability(News.objects.select_related('source', 'category')).defer(
+            'full_content', 'full_content_zh', 'full_content_provenance')
         # Hide duplicates by default
         if self.request.query_params.get('include_dupes', 'false') != 'true':
             qs = qs.filter(related_to__isnull=True)
@@ -282,7 +192,7 @@ class NewsListView(generics.ListAPIView):
         """Apply new filter params to the base queryset before search."""
         full_content = request.query_params.get('full_content', '').strip()
         if full_content == 'true':
-            qs = qs.filter(full_content_fetch_status='success')
+            qs = filter_readable_full_content(qs)
 
         publish_after = request.query_params.get('publish_time_after', '').strip()
         if publish_after:
@@ -565,138 +475,42 @@ class NewsDetailView(generics.RetrieveAPIView):
 
 
 class NewsFetchFullView(generics.GenericAPIView):
-    """Fetch verified real article Markdown and persist to database."""
+    """Read cached content or persist one shared refresh intent."""
     queryset = News.objects.select_related('source', 'category').all()
     serializer_class = NewsDetailSerializer
     permission_classes = [IsAuthenticated]
 
     @method_decorator(csrf_protect)
     def post(self, request, pk):
-        from django.utils.timezone import now as tz_now
-        import logging
-
-        logger = logging.getLogger(__name__)
+        import math
+        from django.utils import timezone
         news = self.get_object()
-
         force = request.data.get('force') is True
-
-        # If already has full content and not forcing, return cached version
-        if news.full_content and news.full_content.strip() and not force:
-            serializer = self.get_serializer(news)
-            return Response(serializer.data)
-
-        url = news.url
-        if not url:
-            return Response(
-                {'error': 'No URL available for this article'},
-                status=400,
-            )
-
-        # Track fetch status
-        from api.services.full_content_status import (
-            claim_fetch,
-            classify_fetch_error,
-            mark_failed,
-            mark_success,
-        )
-
-        # Skip domains protected by WAF/CAPTCHA (would hang on timeouts)
-        from api.services.article_fetcher.site_rules import is_waf_blocked
-        if is_waf_blocked(url):
-            return Response(
-                {'error': '该来源受 WAF 保护，暂不支持全文抓取。'},
-                status=400,
-            )
-
-        if not claim_fetch(news, force=force):
-            news.refresh_from_db()
-            if news.full_content and news.full_content.strip() and not force:
-                return Response(self.get_serializer(news).data)
-            if news.full_content_fetch_status == 'fetching':
-                return Response(self.get_serializer(news).data, status=status.HTTP_202_ACCEPTED)
-            return Response(
-                {'error': '原文抓取状态刚刚发生变化，请稍后重试。'},
-                status=status.HTTP_409_CONFLICT,
-            )
-
+        if has_full_content(news) and not force:
+            return Response(self.get_serializer(news).data)
+        rejection = fetch_eligibility(news)
+        if rejection or news.full_content_fetch_status in {'blocked', 'unsupported'}:
+            data = dict(self.get_serializer(news).data)
+            data.update(error_code=rejection or news.full_content_error_code or 'unsupported',
+                        error='该文章身份或来源策略暂不支持正文获取。')
+            return Response(data, status=422)
+        outcome = request_full_content(news, force=force, priority=10 if force else 0)
         news.refresh_from_db()
+        data = dict(self.get_serializer(news).data)
+        if outcome == 'unavailable':
+            data.update(error_code='full_content_worker_unavailable', error='正文获取服务暂不可用，请稍后重试。')
+            return Response(data, status=503)
+        if outcome == 'rejected':
+            data.update(error_code=news.full_content_error_code or 'unsupported', error='该文章暂不支持正文获取。')
+            return Response(data, status=422)
+        if outcome == 'cached':
+            return Response(data)
+        response = Response(data, status=202)
+        response['Location'] = request.build_absolute_uri(f'/api/news/{news.pk}/')
+        wait = (news.full_content_next_attempt_at - timezone.now()).total_seconds() if news.full_content_next_attempt_at else 2
+        response['Retry-After'] = str(max(2, math.ceil(wait)))
+        return response
 
-        def current_fetch_response():
-            news.refresh_from_db()
-            data = self.get_serializer(news).data
-            if news.full_content_fetch_status == 'fetching':
-                return Response(data, status=status.HTTP_202_ACCEPTED)
-            if news.full_content_fetch_status == 'success' and news.full_content.strip():
-                return Response(data)
-            return Response(data, status=status.HTTP_409_CONFLICT)
-
-        try:
-            result = fetch_article_markdown(
-                url,
-                expected_title=news.title,
-                summary=news.content,
-                news=news,
-            )
-            if not result.markdown.strip():
-                raise FetchError('validation_failed:empty_article_body')
-
-            if not mark_success(
-                news,
-                result,
-                full_content=result.markdown,
-                full_content_fetched_at=tz_now(),
-            ):
-                return current_fetch_response()
-
-            serializer = self.get_serializer(news)
-            return Response(serializer.data)
-
-        except FetchError as e:
-            classified = classify_fetch_error(e)
-            if not mark_failed(news, e, status=classified):
-                return current_fetch_response()
-            logger.warning('Full-content fetch failed for %s [%s]: %s', url, classified, e)
-            news.refresh_from_db()
-            return Response(
-                {
-                    'error': '原文抓取失败，外部站点当前不可达，可稍后重试。',
-                    'full_content_fetch_status': news.full_content_fetch_status,
-                    'full_content_fetch_error': news.full_content_fetch_error,
-                    'full_content_fetch_provider': news.full_content_fetch_provider,
-                    'full_content_quality_score': news.full_content_quality_score,
-                    'full_content_retry_count': news.full_content_retry_count,
-                    'last_full_content_attempt': (
-                        news.last_full_content_attempt.isoformat()
-                        if news.last_full_content_attempt
-                        else None
-                    ),
-                },
-                status=502,
-            )
-        except Exception as e:
-            if not mark_failed(news, e):
-                return current_fetch_response()
-            logger.exception('Unexpected full-content fetch error for %s: %s', url, e)
-            news.refresh_from_db()
-            return Response(
-                {
-                    'error': '原文抓取失败，外部站点当前不可达，可稍后重试。',
-                    'full_content_fetch_status': news.full_content_fetch_status,
-                    'full_content_fetch_error': news.full_content_fetch_error,
-                    'full_content_fetch_provider': news.full_content_fetch_provider,
-                    'full_content_quality_score': news.full_content_quality_score,
-                    'full_content_retry_count': news.full_content_retry_count,
-                    'last_full_content_attempt': (
-                        news.last_full_content_attempt.isoformat()
-                        if news.last_full_content_attempt
-                        else None
-                    ),
-                },
-                status=502,
-            )
-
-
-import json as json_lib
 
 class NewsTranslateFullView(generics.GenericAPIView):
     """Translate full article content to Chinese using SSE streaming."""
@@ -713,6 +527,9 @@ class NewsTranslateFullView(generics.GenericAPIView):
         # _call_llm_stream is invoked inside the translation_jobs worker, not here.
 
         news = self.get_object()
+        if not has_full_content(news):
+            from api.services import shared_translations
+            return shared_translations.error_response('请先获取完整原文。', error_code='full_content_not_ready')
 
         force = request.data.get('force', False)
 
@@ -955,14 +772,13 @@ class NewsChatView(generics.GenericAPIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        # Auto-fetch full article on first chat — so users don't have to click
-        # "获取原文" before chatting. No-op if already cached, swallows fetch errors.
+        # Request shared durable work; this HTTP request uses current context.
         ensure_full_content(news)
-
-        # Pick the richest available context (full_content_zh > full_content > content_zh > content)
         context = pick_chat_context(news)
+        chat_scope = context_scope(news)
         if len(context) > 10000:
-            context = context[-10000:]
+            context = context[:10000]
+            chat_scope = 'excerpt'
 
         web_search = request.data.get('web_search', False)
 
@@ -1030,6 +846,7 @@ class NewsChatView(generics.GenericAPIView):
         # Build messages for LLM
         system_content = (
             f'你是一位专业的新闻助手。用户正在阅读一篇新闻文章，请基于以下文章内容回答用户的问题。\n\n'
+            f'## 可用内容范围: {chat_scope}（summary 仅摘要，excerpt 为节选）\n'
             f'## 文章内容:\n{context}'
         )
 
@@ -1063,6 +880,10 @@ class NewsChatView(generics.GenericAPIView):
         def generate():
             full_response = []
             try:
+                import json as _json
+                context_metadata = _json.dumps({'type': 'article_context', 'context_scope': chat_scope,
+                    'full_content_state': news.full_content_state}, ensure_ascii=False)
+                yield f"​__META__{context_metadata}__META__\n\n"
                 # Prepend web search sources as structured JSON for frontend display
                 if web_sources:
                     import json as _json
@@ -1153,12 +974,13 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
 
         # Cache hit (unless forced)
         if not force and news.suggested_questions and len(news.suggested_questions) >= 3:
-            return Response({'questions': news.suggested_questions[:3]})
+            return Response({'questions': news.suggested_questions[:3], 'context_scope': context_scope(news)})
 
         # Auto-fetch full article so suggestions are based on the real body,
         # not the short list-preview blurb. No-op if already cached.
         ensure_full_content(news)
         expected_content_revision = news.full_content_revision
+        suggestion_scope = context_scope(news)
 
         # Build context (same chain as chat view)
         context = pick_chat_context(news)
@@ -1175,7 +997,7 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
             f'4. 只输出一个 JSON 数组，形如 ["问题1", "问题2", "问题3"]，'
             f'不要有任何解释、Markdown 或其它文字。\n\n'
             f'## 标题\n{title}\n\n'
-            f'## 正文\n{context}'
+            f'## 可用内容范围: {suggestion_scope}\n{context}'
         )
 
         try:
@@ -1224,14 +1046,14 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
 
             from api.services.full_content_status import save_suggested_questions
             save_suggested_questions(news, questions, expected_revision=expected_content_revision)
-            return Response({'questions': questions})
+            return Response({'questions': questions, 'context_scope': suggestion_scope})
         except Exception as e:
             # Fall back silently — UX should never show "loading questions failed"
             import logging
             logging.getLogger(__name__).warning(
                 'suggested-questions LLM failed (%s)', type(e).__name__,
             )
-            return Response({'questions': SUGGESTED_QUESTIONS_FALLBACK})
+            return Response({'questions': SUGGESTED_QUESTIONS_FALLBACK, 'context_scope': suggestion_scope})
 
 
 # ─── Favorite / Like / Bookmark API ─────────────────────────────────────

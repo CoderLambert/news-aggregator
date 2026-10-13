@@ -23,6 +23,12 @@ export interface FullArticleResult {
   full_content_quality_score?: number | null
   full_content_retry_count?: number
   last_full_content_attempt?: string | null
+  has_full_content?: boolean
+  content_kind?: string
+  full_content_state?: string
+  full_content_revision?: number
+  full_content_next_attempt_at?: string | null
+  full_content_error_code?: string
 }
 
 export interface FullArticleFailure {
@@ -45,6 +51,7 @@ export interface ChatMessage {
   content: string
   web_search?: boolean
   web_sources?: WebSource[]
+  context_scope?: 'full' | 'summary' | 'excerpt'
 }
 
 export interface ChatHistory {
@@ -122,6 +129,13 @@ export function parseFullArticleResult(value: unknown): FullArticleResult {
   if (quality !== undefined) result.full_content_quality_score = quality
   if (retryCount !== undefined) result.full_content_retry_count = retryCount
   if (lastAttempt !== undefined) result.last_full_content_attempt = lastAttempt
+  if (typeof value.has_full_content === 'boolean') result.has_full_content = value.has_full_content
+  for (const key of ['content_kind', 'full_content_state', 'full_content_error_code'] as const) {
+    if (typeof value[key] === 'string') result[key] = value[key]
+  }
+  if (typeof value.full_content_revision === 'number') result.full_content_revision = value.full_content_revision
+  const nextAttempt = optionalDate(value, 'full_content_next_attempt_at')
+  if (nextAttempt !== undefined) result.full_content_next_attempt_at = nextAttempt
   return result
 }
 
@@ -142,6 +156,13 @@ export function parseFullArticleFailure(error: unknown): FullArticleFailure {
   if (quality !== undefined) metadata.full_content_quality_score = quality
   if (retryCount !== undefined) metadata.full_content_retry_count = retryCount
   if (lastAttempt !== undefined) metadata.last_full_content_attempt = lastAttempt
+  if (typeof body.has_full_content === 'boolean') metadata.has_full_content = body.has_full_content
+  for (const key of ['content_kind', 'full_content_state', 'full_content_error_code'] as const) {
+    if (typeof body[key] === 'string') metadata[key] = body[key]
+  }
+  if (typeof body.full_content_revision === 'number') metadata.full_content_revision = body.full_content_revision
+  const nextAttempt = optionalDate(body, 'full_content_next_attempt_at')
+  if (nextAttempt !== undefined) metadata.full_content_next_attempt_at = nextAttempt
 
   const responseMessage = optionalString(body, 'error')
   const errorMessage = error instanceof Error ? error.message : ''

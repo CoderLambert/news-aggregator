@@ -17,6 +17,7 @@ from api.translation_sse import translation_sse_records
 from django.utils import timezone
 
 from api.models import News, SharedArticleTranslation, SharedArticleTranslationTask
+from api.services.full_content_status import has_full_content
 
 logger = logging.getLogger(__name__)
 TARGET_LANGUAGE = 'zh-CN'
@@ -39,7 +40,7 @@ def cache_key(news_id, digest):
 
 
 def get_shared_translation(news):
-    if not news.full_content:
+    if not has_full_content(news):
         return None
     return SharedArticleTranslation.objects.filter(
         **cache_key(news.pk, source_hash(news.full_content)),
@@ -47,6 +48,8 @@ def get_shared_translation(news):
 
 
 def task_is_running(news):
+    if not has_full_content(news):
+        return False
     now = timezone.now()
     return SharedArticleTranslationTask.objects.filter(
         **cache_key(news.pk, source_hash(news.full_content)), status='running',
@@ -72,6 +75,8 @@ class TranslationLease:
 
 def claim_task(news):
     """An atomic CAS, rather than a process lock, elects exactly one generator."""
+    if not has_full_content(news):
+        raise SharedTranslationError('full_content_not_ready')
     digest = source_hash(news.full_content)
     if get_shared_translation(news) is not None:
         return None
@@ -138,8 +143,8 @@ def publish_translation(*, news_id, digest, text, provider, model_slug='', lease
             status='succeeded', updated_at=timezone.now(),
         ):
             raise SharedTranslationError('共享翻译任务已过期，请重新开始。')
-        news = News.objects.select_for_update().only('full_content').get(pk=news_id)
-        if source_hash(news.full_content) != digest:
+        news = News.objects.select_for_update().only('full_content', 'full_content_state').get(pk=news_id)
+        if not has_full_content(news) or source_hash(news.full_content) != digest:
             raise SharedTranslationError('原文已更新，旧译文没有发布，请重新翻译。')
         record, _ = SharedArticleTranslation.objects.get_or_create(
             **cache_key(news_id, digest),
@@ -169,8 +174,8 @@ def completed_response(record, scope='shared'):
     return sse_response(translation_sse_records(result_payload(record, scope), event='complete'))
 
 
-def error_response(message):
-    data = json.dumps({'error': message}, ensure_ascii=False)
+def error_response(message, *, error_code=''):
+    data = json.dumps({'error': message, **({'error_code': error_code} if error_code else {})}, ensure_ascii=False)
     return sse_response(iter([f'data: {data}\n\n']))
 
 
@@ -183,8 +188,8 @@ def waiting_response(news):
         try:
             deadline = time.monotonic() + MAX_RUN_TIME.total_seconds()
             while time.monotonic() < deadline:
-                current_source = News.objects.values_list('full_content', flat=True).get(pk=news.pk)
-                if source_hash(current_source) != digest:
+                current = News.objects.only('full_content', 'full_content_state').get(pk=news.pk)
+                if not has_full_content(current) or source_hash(current.full_content) != digest:
                     message = '原文已更新，请重新开始翻译。'
                     break
                 record = SharedArticleTranslation.objects.filter(**key).first()

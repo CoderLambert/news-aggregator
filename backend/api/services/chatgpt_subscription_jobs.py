@@ -262,8 +262,9 @@ def _validate_submission(user, connection, news):
         raise SubscriptionError('ChatGPT 订阅授权已失效，请重新连接账号。')
     if not current.selected_model:
         raise SubscriptionError('请先在订阅设置中选择可见模型。')
-    current_news = News.objects.filter(pk=news.pk).only('full_content').first()
-    if current_news is None or not current_news.full_content:
+    from api.services.full_content_status import has_full_content
+    current_news = News.objects.filter(pk=news.pk).only('full_content', 'full_content_state').first()
+    if current_news is None or not has_full_content(current_news):
         raise SubscriptionError('请先获取完整原文。', 'article_source_missing', 400)
     return current, current_news, source_hash(current_news.full_content)
 
@@ -286,7 +287,9 @@ def _release_unattached_lease(lease):
 
 
 def _snapshot_matches(task, connection, news):
+    from api.services.full_content_status import has_full_content
     return bool(
+        has_full_content(news) and
         task.connection_id == connection.pk and
         task.connection_generation == connection.generation and
         task.model_slug == connection.selected_model and
@@ -562,7 +565,8 @@ def _queued_task_snapshot(task_id, generation):
         task.connection.selected_model != task.model_slug
     ):
         raise subscription.ConnectionChangedError('订阅连接或模型已变化，旧任务已停止。')
-    if not task.news.full_content or source_hash(task.news.full_content) != task.source_hash:
+    from api.services.full_content_status import has_full_content
+    if not has_full_content(task.news) or source_hash(task.news.full_content) != task.source_hash:
         raise SubscriptionError('原文已更新，旧任务已停止。', 'article_source_changed', 409)
     return task
 
@@ -615,7 +619,8 @@ def _task_snapshot(task_id, generation, run_token, *, require_started=True):
         connection.selected_model != task.model_slug
     ):
         raise subscription.ConnectionChangedError('订阅连接或模型已变化，旧任务已停止。')
-    if not task.news.full_content or source_hash(task.news.full_content) != task.source_hash:
+    from api.services.full_content_status import has_full_content
+    if not has_full_content(task.news) or source_hash(task.news.full_content) != task.source_hash:
         raise SubscriptionError('原文已更新，旧任务已停止。', 'article_source_changed', 409)
     return task
 
@@ -815,6 +820,7 @@ def _claim_persistent_task(task_id, generation, run_token):
                 connection__encrypted_refresh_token__gt='',
                 news__full_content=queued_task.news.full_content,
                 news__full_content__gt='',
+                news__full_content_state__in=['legacy', 'complete'],
             ).update(
                 status='running', run_token=run_token, provider_started=False,
                 started_at=now, lease_expires_at=now + TASK_LEASE_TTL,
@@ -943,8 +949,9 @@ def _legacy_run_job(job, *, user_id, connection_id, news_id, source_digest, gene
     """Compatibility path used only by older isolated tests and no public route."""
     close_old_connections()
     try:
-        current = News.objects.only('full_content').get(pk=news_id)
-        if source_hash(current.full_content) != source_digest:
+        from api.services.full_content_status import has_full_content
+        current = News.objects.only('full_content', 'full_content_state').get(pk=news_id)
+        if not has_full_content(current) or source_hash(current.full_content) != source_digest:
             raise SubscriptionError('原文已更新，请重新开始全文翻译。')
         with keep_lease_alive(shared_lease):
             output = stream_full_translation(

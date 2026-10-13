@@ -122,8 +122,9 @@ def start_or_get_job(
             from api.models import News
             from api.services.shared_translations import source_hash
             task = shared_lease.current().first()
-            current = News.objects.only('full_content').get(pk=news_id)
-            if task is None or source_hash(current.full_content) != task.source_hash:
+            from api.services.full_content_status import has_full_content
+            current = News.objects.only('full_content', 'full_content_state').get(pk=news_id)
+            if task is None or not has_full_content(current) or source_hash(current.full_content) != task.source_hash:
                 job._finish(error='原文已更新或翻译任务已过期，请重试。')
                 return
 

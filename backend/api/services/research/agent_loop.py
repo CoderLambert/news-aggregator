@@ -57,7 +57,7 @@ RESEARCH_SYSTEM_PROMPT = """\
 2. **交叉验证**: 同一关键信息需要至少2个独立来源支持
 3. **补充网络搜索**: 对于本地库没有的信息，使用联网搜索补充
 4. **迭代扩展**: 如果初始结果不足，换用不同关键词重新搜索，不要轻易放弃
-5. **深入阅读**: 对关键文章调用 fetch_article 获取全文，不要仅依赖摘要
+5. **深入阅读**: 对关键文章调用 fetch_article，检查 context_scope 和任务状态；summary/排队结果仅提供摘要，excerpt 为节选，不能称为已读全文
 
 ### 第三步：信息质量控制
 1. **来源评估**: 优先采信权威媒体、官方发布、多方报道一致的信息
@@ -336,7 +336,11 @@ def _tool_result_summary(name: str, result: dict) -> str:
         return f'找到 {total} 篇相关文章'
     if name == 'fetch_article':
         title = result.get('title', '')[:30]
-        return f'已获取: {title}'
+        scope = result.get('context_scope', 'summary')
+        label = '已读取全文' if scope == 'full' else '已读取节选' if scope == 'excerpt' else '已读取摘要'
+        if scope == 'summary' and result.get('task_outcome') in {'queued', 'reused'}:
+            label = '正文排队中，当前为摘要'
+        return f'{label}: {title}'
     if name == 'search_web':
         count = len(result.get('results', []))
         return f'联网搜索到 {count} 条结果'

@@ -46,7 +46,7 @@ export default function ChatMessageList({
       <div className="animate-message-pop-in flex h-full flex-col items-center justify-center px-4 text-center">
         <div className="animate-mascot-bob"><XiaowenMascot mood="happy" size={88} showShadow /></div>
         <p className="mt-4 text-base font-semibold text-neutral-900">嗨，我是小闻 👋</p>
-        <p className="mt-1.5 max-w-md text-sm leading-relaxed text-neutral-500">我已经读完这篇文章了，你想聊点什么？下面是一些建议：</p>
+        <p className="mt-1.5 max-w-md text-sm leading-relaxed text-neutral-500">我会根据当前可用的文章内容回答。你想聊点什么？下面是一些建议：</p>
         <div className="mt-5 grid w-full max-w-3xl grid-cols-1 gap-2 sm:grid-cols-2">
           {questions.map((question) => (
             <button
@@ -79,6 +79,9 @@ export default function ChatMessageList({
       {messages.map((message, index) => (
         <div key={message.id ?? `history-${index}`} className={`mx-auto flex w-full max-w-5xl animate-message-pop-in ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
           <div className={`max-w-full break-words rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed sm:max-w-[85%] ${message.role === 'user' ? 'rounded-tr-md bg-gradient-to-br from-orange-500 to-orange-600 text-white shadow-sm' : 'rounded-tl-md border border-neutral-200 bg-white text-neutral-800 shadow-sm'}`}>
+            {message.role === 'assistant' && (message.context_scope === 'summary' || message.context_scope === 'excerpt') && (
+              <p className="mb-2 text-xs text-neutral-500">{message.context_scope === 'summary' ? '当前回答基于摘要' : '当前回答基于文章节选'}</p>
+            )}
             {message.role === 'assistant' ? (
               message.content ? (
                 <div className="chat-message-markdown"><MarkdownContent content={message.content} /></div>

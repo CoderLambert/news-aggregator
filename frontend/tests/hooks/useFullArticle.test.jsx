@@ -46,6 +46,60 @@ describe('useFullArticle', () => {
   })
   afterEach(() => vi.restoreAllMocks())
 
+  it('polls an already queued task without another POST and keeps source availability separate from task status', async () => {
+    const news = { id: 99, full_content: '', has_full_content: false, full_content_state: 'missing', full_content_fetch_status: 'queued' }
+    fetchFullArticleStatus.mockResolvedValue({ full_content: 'Readable completed body', has_full_content: true,
+      full_content_state: 'complete', full_content_fetch_status: 'success', full_content_revision: 1 })
+    const setNews = vi.fn((updater) => updater(news))
+    renderHook(() => useFullArticle(99, setNews, news), { wrapper: makeWrapper() })
+    await waitFor(() => expect(fetchFullArticleStatus).toHaveBeenCalledOnce())
+    expect(fetchFullArticle).not.toHaveBeenCalled()
+    expect(setNews.mock.results.at(-1).value).toMatchObject({ has_full_content: true, full_content_revision: 1 })
+  })
+
+  it('respects persisted cooldown and stops only this pages wait without canceling shared work', async () => {
+    vi.useFakeTimers()
+    try {
+      const data = { full_content: '', has_full_content: false, full_content_state: 'missing',
+        full_content_fetch_status: 'rate_limited', full_content_next_attempt_at: new Date(Date.now() + 60_000).toISOString() }
+      fetchFullArticle.mockResolvedValue(data)
+      fetchFullArticleStatus.mockResolvedValue(data)
+      const { result, unmount } = renderHook(() => useFullArticle(98, vi.fn()), { wrapper: makeWrapper() })
+      let pending
+      await act(async () => { pending = result.current.handleFetchFullArticle() })
+      expect(fetchFullArticle).toHaveBeenCalledOnce()
+      expect(fetchFullArticleStatus).toHaveBeenCalledOnce()
+      await act(async () => { await vi.advanceTimersByTimeAsync(59_000) })
+      expect(fetchFullArticleStatus).toHaveBeenCalledOnce()
+      act(() => result.current.cancelFetch())
+      await act(async () => { await pending })
+      unmount()
+      expect(fetchFullArticle).toHaveBeenCalledOnce()
+      expect(fetchFullArticleStatus).toHaveBeenCalledOnce()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('does not accept a quarantined body with a success task label', async () => {
+    fetchFullArticle.mockResolvedValue({ full_content: 'Retained audit body', has_full_content: false,
+      full_content_state: 'missing', full_content_fetch_status: 'success' })
+    const news = { id: 97, full_content: '', full_content_zh: '' }
+    const setNews = vi.fn((updater) => updater(news))
+    const { result } = renderHook(() => useFullArticle(97, setNews), { wrapper: makeWrapper() })
+    await act(async () => { expect(await result.current.handleFetchFullArticle()).toBe(false) })
+    expect(setNews.mock.results.at(-1).value.has_full_content).toBe(false)
+    expect(result.current.articleError).not.toBe('')
+  })
+
+  it('does not let an older poll response restore a quarantined newer revision', async () => {
+    const current = { id: 96, full_content: '', has_full_content: false, full_content_state: 'missing', full_content_revision: 3 }
+    fetchFullArticle.mockResolvedValue({ full_content: 'Older retained body', has_full_content: true,
+      full_content_state: 'complete', full_content_revision: 2, full_content_fetch_status: 'success' })
+    const setNews = vi.fn((updater) => updater(current))
+    const { result } = renderHook(() => useFullArticle(96, setNews), { wrapper: makeWrapper() })
+    await act(async () => { await result.current.handleFetchFullArticle() })
+    expect(setNews.mock.results.at(-1).value).toEqual(current)
+  })
+
   it('merges the fetched body and supported metadata into the matching detail', async () => {
     fetchFullArticle.mockResolvedValue({
       full_content: 'Real full article body',

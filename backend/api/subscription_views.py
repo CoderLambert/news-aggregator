@@ -317,9 +317,9 @@ def subscription_translation_response(request, news: News, force=False):
     user = request.user
     connection = subscription.active_connection_for_user(user)
 
-    def error_response(message):
+    def error_response(message, error_code=''):
         def stream():
-            yield f"data: {json.dumps({'error': message}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'error': message, **({'error_code': error_code} if error_code else {})}, ensure_ascii=False)}\n\n"
         response = StreamingHttpResponse(stream(), content_type='text/event-stream')
         response['Cache-Control'] = 'no-store'
         response['X-Accel-Buffering'] = 'no'
@@ -329,8 +329,9 @@ def subscription_translation_response(request, news: News, force=False):
         return error_response('force 必须是布尔值。')
     if not user.is_authenticated or connection is None:
         return error_response('请先登录并连接 ChatGPT 订阅账号。')
-    if not news.full_content:
-        return error_response('请先获取完整原文。')
+    from api.services.full_content_status import has_full_content
+    if not has_full_content(news):
+        return error_response('请先获取完整原文。', error_code='full_content_not_ready')
 
     digest = subscription.source_hash(news.full_content)
     try:

@@ -24,6 +24,7 @@ class NewsListSerializer(serializers.ModelSerializer):
     SUMMARY_LIMIT = 300
     summary = serializers.SerializerMethodField()
     summary_zh = serializers.SerializerMethodField()
+    has_full_content = serializers.SerializerMethodField()
     source_name = serializers.CharField(source='source.name', read_only=True)
     source_type = serializers.CharField(source='source.source_type', read_only=True)
     source_language = serializers.CharField(source='source.language', read_only=True)
@@ -49,6 +50,7 @@ class NewsListSerializer(serializers.ModelSerializer):
         ]
         fields = [
             'id', 'title', 'summary', 'title_zh', 'summary_zh', 'author', 'publish_time',
+            'has_full_content',
             'source', 'source_name', 'source_type', 'source_language',
             'category', 'category_name',
             'url', 'cover_image', 'created_at',
@@ -63,6 +65,12 @@ class NewsListSerializer(serializers.ModelSerializer):
 
     def get_summary(self, obj):
         return (obj.content or '')[:self.SUMMARY_LIMIT]
+
+    def get_has_full_content(self, obj):
+        from .services.full_content_status import has_full_content
+        if hasattr(obj, 'has_readable_body'):
+            return bool(obj.has_readable_body)
+        return has_full_content(obj)
 
     def get_summary_zh(self, obj):
         return (obj.content_zh or '')[:self.SUMMARY_LIMIT]
@@ -80,7 +88,8 @@ class NewsDetailSerializer(serializers.ModelSerializer):
     translation_error = serializers.CharField(read_only=True)
     translation_retry_count = serializers.IntegerField(read_only=True)
     # Full article content
-    full_content = serializers.CharField(read_only=True)
+    full_content = serializers.SerializerMethodField()
+    has_full_content = serializers.SerializerMethodField()
     full_content_fetched_at = serializers.DateTimeField(read_only=True)
     full_content_zh = serializers.SerializerMethodField()
     full_content_zh_fetched_at = serializers.SerializerMethodField()
@@ -110,6 +119,7 @@ class NewsDetailSerializer(serializers.ModelSerializer):
             'related_to',
             'translation_status', 'translation_error', 'translation_retry_count',
             'full_content', 'full_content_fetched_at',
+            'has_full_content',
             'full_content_zh', 'full_content_zh_fetched_at', 'full_content_zh_source',
             'full_content_zh_scope', 'full_translation_personal_available',
             'full_content_fetch_status', 'full_content_fetch_error',
@@ -121,6 +131,8 @@ class NewsDetailSerializer(serializers.ModelSerializer):
         ]
 
     def _subscription_translation(self, obj):
+        if not self.get_has_full_content(obj):
+            return None, None
         request = self.context.get('request')
         user = getattr(request, 'user', None)
         if not getattr(user, 'is_authenticated', False):
@@ -148,6 +160,8 @@ class NewsDetailSerializer(serializers.ModelSerializer):
         return result
 
     def get_full_content_zh(self, obj):
+        if not self.get_has_full_content(obj):
+            return ''
         connection, translation = self._subscription_translation(obj)
         shared = self._shared_translation(obj)
         if translation is not None:
@@ -157,6 +171,8 @@ class NewsDetailSerializer(serializers.ModelSerializer):
         return '' if connection is not None else obj.full_content_zh
 
     def get_full_content_zh_fetched_at(self, obj):
+        if not self.get_has_full_content(obj):
+            return None
         connection, translation = self._subscription_translation(obj)
         shared = self._shared_translation(obj)
         if translation is not None:
@@ -174,6 +190,8 @@ class NewsDetailSerializer(serializers.ModelSerializer):
         return self._shared_translation_cache[obj.pk]
 
     def get_full_content_zh_scope(self, obj):
+        if not self.get_has_full_content(obj):
+            return None
         connection, translation = self._subscription_translation(obj)
         if translation is not None:
             return 'private'
@@ -182,12 +200,16 @@ class NewsDetailSerializer(serializers.ModelSerializer):
         return 'legacy' if connection is None and obj.full_content_zh else None
 
     def get_full_translation_personal_available(self, obj):
+        if not self.get_has_full_content(obj):
+            return False
         connection, _ = self._subscription_translation(obj)
         return bool(connection and connection.connected and not connection.needs_reauth
                     and connection.selected_model)
 
     def get_full_translation_active(self, obj):
         """Personal workers stay scoped; shared task availability is public."""
+        if not self.get_has_full_content(obj):
+            return False
         try:
             connection, _translation = self._subscription_translation(obj)
             if connection is not None:
@@ -210,6 +232,8 @@ class NewsDetailSerializer(serializers.ModelSerializer):
 
     def get_full_content_zh_source(self, obj):
         """Expose provider provenance, without the contributing user's identity."""
+        if not self.get_has_full_content(obj):
+            return None
         connection, translation = self._subscription_translation(obj)
         if translation is not None:
             return 'chatgpt'
@@ -217,6 +241,14 @@ class NewsDetailSerializer(serializers.ModelSerializer):
         if shared is not None:
             return shared.provider
         return 'llm' if connection is None and obj.full_content_zh else None
+
+    def get_full_content(self, obj):
+        from .services.full_content_status import get_readable_full_content
+        return get_readable_full_content(obj)
+
+    def get_has_full_content(self, obj):
+        from .services.full_content_status import has_full_content
+        return has_full_content(obj)
 
 
 class FavoriteNewsSerializer(serializers.Serializer):

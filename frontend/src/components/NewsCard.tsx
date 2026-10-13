@@ -9,6 +9,7 @@ import TranslationStatus from '@/components/news-detail/TranslationStatus'
 import { useBlockNews } from '@/hooks/useNewsMutations'
 import { newsDetailOptions } from '@/services/newsQueries'
 import type { DisplayMode, NewsSummary } from '@/types/news'
+import { hasReadableFullContent, hasPendingFullContentTask } from '@/types/news'
 import { useCapability } from '@/context/CapabilitiesContext'
 
 interface NewsCardProps {
@@ -23,11 +24,11 @@ export interface BlockedNewsTarget {
   version: number
 }
 
-function ContentStatus({ status, lang }: { status: string; lang: 'zh' | 'en' }) {
-  if (status === 'success') {
+function ContentStatus({ news, lang }: { news: NewsSummary; lang: 'zh' | 'en' }) {
+  if (hasReadableFullContent(news)) {
     return <Badge variant="green" className="rounded-full"><FileText aria-hidden="true" />{lang === 'en' ? 'Full article' : '有全文'}</Badge>
   }
-  if (status === 'fetching') {
+  if (hasPendingFullContentTask(news)) {
     return <Badge variant="amber" className="rounded-full">{lang === 'en' ? 'Fetching' : '获取全文中'}</Badge>
   }
   return <Badge variant="gray" className="rounded-full">{lang === 'en' ? 'Summary' : '摘要'}</Badge>
@@ -110,7 +111,7 @@ export default function NewsCard({ news, onBlockStart, onBlocked }: NewsCardProp
           {cleanedContent && <p className="mb-4 line-clamp-3 text-xs leading-relaxed text-muted-foreground">{cleanedContent.slice(0, 180)}{cleanedContent.length > 180 ? '…' : ''}</p>}
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <Badge variant="sage" className="rounded-full px-2 py-0.5">{news.category_name}</Badge>
-            <ContentStatus status={news.full_content_fetch_status} lang={lang} />
+            <ContentStatus news={news} lang={lang} />
             <span className="ml-auto max-w-36 truncate">{news.source_name}</span>
             <span>{formatRelativeTime(news.publish_time, t)}</span>
           </div>

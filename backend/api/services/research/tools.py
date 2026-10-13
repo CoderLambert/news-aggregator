@@ -7,6 +7,7 @@ Tool results are truncated to _MAX_RESULT_CHARS to prevent context overflow.
 """
 
 import json
+import time
 import logging
 import ssl
 import urllib.parse
@@ -18,6 +19,19 @@ from django.db.models import Q
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
+
+
+def _open_search_http(request, timeout, context=None):
+    from api.services.article_fetcher.providers import _open_url
+    return _open_url(request, timeout=timeout, context=context)
+
+
+def _stop_search_fallback(error):
+    from api.services.request_budget import BudgetDeferred
+    from api.services.article_fetcher.execution import ExecutionStopped
+    return (isinstance(error, (BudgetDeferred, ExecutionStopped)) or
+            getattr(error, 'code', None) in {401, 403, 429, 503} or
+            getattr(error, 'error_code', '') in {'rate_limited', 'budget_deferred', 'auth_required', 'access_blocked', 'network_error', 'network_timeout'})
 
 _MAX_RESULT_CHARS = 8000
 
@@ -413,11 +427,14 @@ def _truncate_result(result: dict) -> dict:
             head = val[:600]
             tail = val[-200:]
             result[key] = head + '...[内容已截断]...' + tail
+            if key == 'content':
+                result['context_scope'] = 'excerpt'
+                result['content_truncated'] = True
         elif isinstance(val, list):
             result[key] = val[:20]  # Cap list length
     text = json.dumps(result, ensure_ascii=False)
     if len(text) > _MAX_RESULT_CHARS:
-        result = {'_summary': text[:_MAX_RESULT_CHARS - 20] + '...[truncated]'}
+        result = {'_summary': text[:_MAX_RESULT_CHARS - 20] + '...[truncated]', 'context_scope': 'excerpt'}
     return result
 
 
@@ -553,7 +570,8 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
 
     # Full content filter
     if full_content:
-        qs = qs.filter(full_content_fetch_status='success')
+        from api.services.full_content_status import filter_readable_full_content
+        qs = filter_readable_full_content(qs)
 
     # Category filter (by name, case-insensitive)
     if category:
@@ -614,7 +632,7 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
             time_ordered = News.objects.filter(id__in=all_ids).order_by('-publish_time').values_list('id', flat=True)
             all_ids = list(time_ordered)
 
-        news_map = News.objects.select_related('source', 'category').in_bulk(all_ids)
+        news_map = qs.in_bulk(all_ids)
         ordered = [news_map[nid] for nid in all_ids if nid in news_map]
         articles = _serialize_news_list(ordered[:limit])
 
@@ -657,7 +675,7 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
             fused_ids = list(time_ordered)
 
         fused_ids = fused_ids[:limit]
-        news_map = News.objects.select_related('source', 'category').in_bulk(fused_ids)
+        news_map = qs.in_bulk(fused_ids)
         ordered = [news_map[nid] for nid in fused_ids if nid in news_map]
         articles = _serialize_news_list(ordered)
 
@@ -672,70 +690,48 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
 
 
 def _tool_fetch_article(article_id: int, execution_guard=None) -> dict:
-    """Fetch the full content of a specific article by its database ID.
-
-    Priority:
-      1. Return existing full content from the database (if available).
-      2. If no full content yet, try to fetch it from the original URL
-         and persist to the database, then return the newly fetched text.
-    """
+    """Read current content or enqueue shared work; never fetch publishers here."""
     from api.models import News
-    from api.views import pick_chat_context, ensure_full_content
-
+    from api.services.article_content import pick_chat_context, context_scope, request_full_content
+    from api.services.full_content_status import has_full_content
+    guard = execution_guard or (lambda: None)
+    guard()
     try:
         news = News.objects.select_related('source', 'category').get(pk=article_id)
     except News.DoesNotExist:
-        return {'error': f'Article {article_id} not found'}
-
-    # If we have full content already, return it immediately
+        return {'error': f'Article {article_id} not found', 'context_scope': 'summary'}
+    outcome = 'cached' if has_full_content(news) else request_full_content(news, execution_guard=guard)
+    # A small DB-only wait may observe a resident Worker's commit. Cooling,
+    # unavailable or rejected results return immediately and consume no sockets.
+    if outcome in {'queued', 'reused'} and (not news.full_content_next_attempt_at or news.full_content_next_attempt_at <= timezone.now()):
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline and not has_full_content(news):
+            guard()
+            time.sleep(.1)
+            news.refresh_from_db()
+            if news.full_content_fetch_status not in {'queued', 'fetching', 'rate_limited', 'network_error', 'failed'}:
+                break
+    guard()
     content = pick_chat_context(news)
-    if news.full_content or news.full_content_zh:
-        max_chars = 12000
-        truncated = len(content) > max_chars
-        return {
-            'id': news.id,
-            'title': news.title,
-            'title_zh': news.title_zh,
-            'source': news.source.name,
-            'source_type': news.source.source_type,
-            'category': news.category.name,
-            'url': news.url,
-            'content': content[:max_chars],
-            'content_truncated': truncated,
-            'original_length': len(content),
-            'publish_time': news.publish_time.isoformat() if news.publish_time else None,
-        }
-
-    # No full content yet — try to fetch it from the original URL
-    if news.url:
-        if execution_guard is not None:
-            execution_guard()
-            ensure_full_content(news, execution_guard=execution_guard)
-            execution_guard()
-        else:
-            ensure_full_content(news)
-        # Refresh from DB to get the newly fetched content
-        news.refresh_from_db()
-        content = pick_chat_context(news)
-
-    max_chars = 12000
-    truncated = len(content) > max_chars
-    return {
-        'id': news.id,
-        'title': news.title,
-        'title_zh': news.title_zh,
-        'source': news.source.name,
-        'source_type': news.source.source_type,
-        'category': news.category.name,
-        'url': news.url,
-        'content': content[:max_chars],
-        'content_truncated': truncated,
-        'original_length': len(content),
-        'publish_time': news.publish_time.isoformat() if news.publish_time else None,
-    }
+    truncated = len(content) > 12000
+    scope = context_scope(news)
+    return dict(id=news.pk, title=news.title, title_zh=news.title_zh, source=news.source.name,
+        source_type=news.source.source_type, category=news.category.name, url=news.url,
+        content=content[:12000], content_truncated=truncated, original_length=len(content),
+        context_scope='excerpt' if truncated else scope, source_scope=scope,
+        full_content_state=news.full_content_state, full_content_fetch_status=news.full_content_fetch_status,
+        next_attempt_at=news.full_content_next_attempt_at.isoformat() if news.full_content_next_attempt_at else None,
+        error_code='full_content_worker_unavailable' if outcome == 'unavailable' else news.full_content_error_code,
+        task_outcome=outcome, publish_time=news.publish_time.isoformat() if news.publish_time else None)
 
 
 def _tool_search_web(query: str, count: int = 5, execution_guard=None) -> dict:
+    from api.services.article_fetcher.execution import execution_scope
+    with execution_scope(execution_guard):
+        return _search_web(query, count, execution_guard)
+
+
+def _search_web(query: str, count: int = 5, execution_guard=None) -> dict:
     """Search the web with multiple fallback sources.
 
     Try order:
@@ -763,7 +759,7 @@ def _tool_search_web(query: str, count: int = 5, execution_guard=None) -> dict:
 
         req = urllib.request.Request(search_url, headers=headers)
         guard()
-        with urllib.request.urlopen(
+        with _open_search_http(
             req, timeout=15, context=ssl.create_default_context()
         ) as resp:
             data = json.loads(resp.read().decode('utf-8'))
@@ -781,6 +777,8 @@ def _tool_search_web(query: str, count: int = 5, execution_guard=None) -> dict:
 
     except Exception as e:
         guard()
+        if _stop_search_fallback(e):
+            raise
         errors.append(f'Jina: {e}')
         logger.info('Jina search failed, trying fallbacks: %s', e)
 
@@ -792,6 +790,8 @@ def _tool_search_web(query: str, count: int = 5, execution_guard=None) -> dict:
             return {'results': wiki_results, 'query': query, 'source': 'wikipedia'}
     except Exception as e:
         guard()
+        if _stop_search_fallback(e):
+            raise
         errors.append(f'Wikipedia: {e}')
         logger.info('Wikipedia search failed: %s', e)
 
@@ -861,7 +861,7 @@ def _wikipedia_search(query: str, count: int, execution_guard=None) -> list[dict
             'User-Agent': 'NewsHub/1.0 (research agent)',
         })
         guard()
-        with urllib.request.urlopen(
+        with _open_search_http(
             req, timeout=10, context=ssl.create_default_context()
         ) as resp:
             data = json.loads(resp.read().decode('utf-8'))
@@ -911,7 +911,7 @@ def _duckduckgo_search(query: str, count: int, execution_guard=None) -> dict:
     })
     if execution_guard is not None:
         execution_guard()
-    with urllib.request.urlopen(
+    with _open_search_http(
         req, timeout=20, context=ssl.create_default_context()
     ) as resp:
         html = resp.read().decode('utf-8', errors='replace')

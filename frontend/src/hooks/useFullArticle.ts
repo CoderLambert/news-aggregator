@@ -4,6 +4,7 @@ import { useAuth } from '@/context/AuthContext'
 import { useLanguage } from '@/context/useLanguage'
 import { fetchFullArticle, fetchFullArticleStatus, parseFullArticleFailure } from '@/services/newsWorkflowApi'
 import { parseNewsId } from '@/services/newsWorkflowQueries'
+import { hasReadableFullContent, hasPendingFullContentTask } from '@/types/news'
 import type { NewsDetail } from '@/types/news'
 import { useCapability } from '@/context/CapabilitiesContext'
 
@@ -59,7 +60,7 @@ function setSessionFlag(prefix: string, ownerKey: string, enabled: boolean): voi
   }
 }
 
-function waitForNextPoll(signal: AbortSignal): Promise<void> {
+function waitForNextPoll(signal: AbortSignal, delay = SERVER_FETCH_POLL_MS): Promise<void> {
   return new Promise((resolve) => {
     if (signal.aborted) {
       resolve()
@@ -68,7 +69,7 @@ function waitForNextPoll(signal: AbortSignal): Promise<void> {
     const timer = window.setTimeout(() => {
       signal.removeEventListener('abort', onAbort)
       resolve()
-    }, SERVER_FETCH_POLL_MS)
+    }, delay)
     const onAbort = () => {
       window.clearTimeout(timer)
       signal.removeEventListener('abort', onAbort)
@@ -123,6 +124,8 @@ export function useFullArticle(
     const includeBody = options.includeBody !== false
     setNews((previous) => {
       if (!previous || previous.id !== newsId) return previous
+      if (typeof previous.full_content_revision === 'number' && typeof data.full_content_revision === 'number'
+        && data.full_content_revision < previous.full_content_revision) return previous
       const bodyChanged = includeBody && previous.full_content !== data.full_content
       return {
         ...previous,
@@ -135,6 +138,12 @@ export function useFullArticle(
         ...(data.full_content_quality_score !== undefined ? { full_content_quality_score: data.full_content_quality_score } : {}),
         ...(data.full_content_retry_count !== undefined ? { full_content_retry_count: data.full_content_retry_count } : {}),
         ...(data.last_full_content_attempt !== undefined ? { last_full_content_attempt: data.last_full_content_attempt } : {}),
+        ...(data.has_full_content !== undefined ? { has_full_content: data.has_full_content } : {}),
+        ...(data.content_kind !== undefined ? { content_kind: data.content_kind } : {}),
+        ...(data.full_content_state !== undefined ? { full_content_state: data.full_content_state } : {}),
+        ...(data.full_content_revision !== undefined ? { full_content_revision: data.full_content_revision } : {}),
+        ...(data.full_content_next_attempt_at !== undefined ? { full_content_next_attempt_at: data.full_content_next_attempt_at } : {}),
+        ...(data.full_content_error_code !== undefined ? { full_content_error_code: data.full_content_error_code } : {}),
       }
     })
   }, [newsId, setNews])
@@ -152,17 +161,26 @@ export function useFullArticle(
 
     const pollExistingTask = async (): Promise<boolean> => {
       const deadline = Date.now() + SERVER_FETCH_TIMEOUT_MS
+      let polls = 0
       while (isCurrent() && !request.controller.signal.aborted && Date.now() < deadline) {
         const data = await fetchFullArticleStatus(newsId, request.controller.signal)
         if (!isCurrent()) return false
-        if (data.full_content_fetch_status === 'fetching') {
-          applyResult(data, { includeBody: false })
-          await waitForNextPoll(request.controller.signal)
+        if (hasPendingFullContentTask(data)) {
+          applyResult(data)
+          const backoff = Math.min(10_000, SERVER_FETCH_POLL_MS * 2 ** Math.min(polls++, 4))
+          const due = data.full_content_next_attempt_at ? Date.parse(data.full_content_next_attempt_at) - Date.now() : 0
+          const delay = Math.min(Math.max(backoff, Number.isFinite(due) ? due : 0), Math.max(0, deadline - Date.now()))
+          await waitForNextPoll(request.controller.signal, delay)
           continue
         }
 
-        const hasSuccessfulBody = data.full_content.trim()
-          && (data.full_content_fetch_status === 'success' || !data.full_content_fetch_status)
+        if (['network_error', 'validation_failed', 'failed', 'blocked', 'unsupported', 'rate_limited'].includes(data.full_content_fetch_status ?? '')) {
+          applyResult(data)
+          setState({ ownerKey, loading: true, error: fetchFailureMessage(data) })
+          return false
+        }
+
+        const hasSuccessfulBody = hasReadableFullContent(data)
         if (hasSuccessfulBody) {
           applyResult(data)
           return true
@@ -176,7 +194,7 @@ export function useFullArticle(
         setState({
           ownerKey,
           loading: true,
-          error: '原文仍在服务器抓取；可稍后继续查看，当前没有重复发起抓取。',
+          error: '正文任务仍在排队或执行，可稍后继续查看。',
         })
       }
       return false
@@ -186,12 +204,11 @@ export function useFullArticle(
       if (attachOnly) return await pollExistingTask()
       const data = await fetchFullArticle(newsId, force, request.controller.signal)
       if (!isCurrent()) return false
-      if (data.full_content_fetch_status === 'fetching') {
-        applyResult(data, { includeBody: false })
+      if (hasPendingFullContentTask(data)) {
+        applyResult(data)
         return await pollExistingTask()
       }
-      const hasSuccessfulBody = data.full_content.trim()
-        && (data.full_content_fetch_status === 'success' || !data.full_content_fetch_status)
+      const hasSuccessfulBody = hasReadableFullContent(data)
       if (hasSuccessfulBody) {
         applyResult(data)
         return true
@@ -204,6 +221,8 @@ export function useFullArticle(
       const failure = parseFullArticleFailure(error)
       if (Object.keys(failure.metadata).length > 0) {
         setNews((previous) => previous && previous.id === newsId
+          && !(typeof previous.full_content_revision === 'number' && typeof failure.metadata.full_content_revision === 'number'
+            && failure.metadata.full_content_revision < previous.full_content_revision)
           ? { ...previous, ...failure.metadata }
           : previous)
       }
@@ -228,7 +247,8 @@ export function useFullArticle(
     [executeFetch],
   )
 
-  const bodyEmpty = !news?.full_content?.trim()
+  const bodyEmpty = !news || !hasReadableFullContent(news)
+  const taskPending = Boolean(news && hasPendingFullContentTask(news))
   const isCurrentNews = Boolean(news && news.id === newsId)
   const canFetchInSession = Boolean(user)
   const status = news?.full_content_fetch_status || ''
@@ -236,9 +256,9 @@ export function useFullArticle(
   const retryCount = news?.full_content_retry_count ?? 0
 
   useEffect(() => {
-    if (!fullContentEnabled || !isCurrentNews || newsId === null || !canFetchInSession || !bodyEmpty) return
+    if (!fullContentEnabled || !isCurrentNews || newsId === null || !canFetchInSession || (!bodyEmpty && !taskPending)) return
 
-    if (status === 'fetching') {
+    if (taskPending) {
       if (sessionFlag(AUTO_CANCEL_PREFIX, ownerKey) || attachedOwnerRef.current === ownerKey) return
       const timer = window.setTimeout(() => {
         if (ownerRef.current !== ownerKey || sessionFlag(AUTO_CANCEL_PREFIX, ownerKey)
@@ -271,6 +291,7 @@ export function useFullArticle(
     ownerKey,
     retryCount,
     status,
+    taskPending,
   ])
 
   const cancelFetch = useCallback(() => {

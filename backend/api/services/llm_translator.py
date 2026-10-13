@@ -173,24 +173,14 @@ def fetch_and_verify_chinese_content(url: str) -> str:
     Returns the Chinese Markdown content if verified, empty string otherwise.
     """
     try:
-        import ssl
-        import urllib.request
-        
-        jina_url = f'https://r.jina.ai/{url}'
-        req = urllib.request.Request(
-            jina_url,
-            headers={'Accept': 'text/plain', 'User-Agent': 'Mozilla/5.0'}
-        )
-        with urllib.request.urlopen(req, timeout=30, context=ssl.create_default_context()) as resp:
-            text = resp.read().decode('utf-8')
-        
-        # Extract markdown content
-        markdown_match = re.search(r'Markdown Content:\n([\s\S]+)$', text)
-        markdown = markdown_match.group(1).strip() if markdown_match else text.strip()
-        
-        if not markdown or len(markdown) < 50:
+        from api.services.article_fetcher.providers import TrustedNewsJinaProvider
+        result = TrustedNewsJinaProvider(timeout=12, retries=0).fetch(url)
+        if not result.ok or not result.markdown.strip():
             return ''
-        
+        markdown = result.markdown
+        if len(markdown) < 50:
+            return ''
+
         # Verify it contains Chinese characters
         zh_chars = sum(1 for c in markdown if '\u4e00' <= c <= '\u9fff')
         total_chars = len(markdown.replace('\n', '').replace(' ', ''))

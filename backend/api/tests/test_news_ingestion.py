@@ -39,6 +39,18 @@ def candidate(news, body='A complete short article.', **changes):
     return FullContentCandidate(**values)
 
 
+def test_reactivating_identical_audit_body_clears_questions_made_from_summary(news):
+    news.full_content = 'A complete short article.'
+    news.full_content_state = 'missing'
+    news.full_content_zh = 'Retained historical translation'
+    news.suggested_questions = ['summary one', 'summary two', 'summary three']
+    news.save(update_fields=['full_content', 'full_content_state', 'full_content_zh', 'suggested_questions'])
+    assert commit_candidate(news, candidate(news)).saved
+    news.refresh_from_db()
+    assert has_full_content(news) and news.suggested_questions == []
+    assert news.full_content_zh == 'Retained historical translation'
+
+
 def entry(body=None, **changes):
     values = dict(
         source_key='devto', upstream_id='17', title='A real short publisher article',

@@ -8,6 +8,7 @@ import { useLanguage } from '@/context/useLanguage'
 import { newsListOptions, newsListPlaceholderData } from '@/services/newsQueries'
 import { Pagination } from '@/components/Pagination'
 import type { NewsListParams, NewsSummary, SearchMode, SearchOrderBy, SourceType } from '@/types/news'
+import { hasReadableFullContent } from '@/types/news'
 import { useCapability } from '@/context/CapabilitiesContext'
 
 const PAGE_SIZE = 20
@@ -459,7 +460,7 @@ function ArticleCard({ article, returnTo }: { article: NewsSummary; returnTo: st
         {sourceType in SOURCE_TYPE_LABELS && <span className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${SOURCE_TYPE_COLORS[sourceType]}`}>{SOURCE_TYPE_LABELS[sourceType]}</span>}
         {article.category_name && <span className="rounded-md bg-secondary px-2 py-0.5 text-[11px] font-medium text-foreground">{article.category_name}</span>}
         {article.publish_time && <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground"><Clock className="size-3" />{new Date(article.publish_time).toLocaleDateString('zh-CN', { year: 'numeric', month: 'short', day: 'numeric' })}</span>}
-        {article.full_content_fetch_status === 'success' && <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-medium"><Star className="size-3" />全文可用</span>}
+        {hasReadableFullContent(article) && <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-medium"><Star className="size-3" />全文可用</span>}
       </div>
     </article>
   )

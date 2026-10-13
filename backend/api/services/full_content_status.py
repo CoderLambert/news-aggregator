@@ -17,7 +17,7 @@ from api.models import News
 from datetime import datetime, timedelta, timezone as utc_timezone
 from typing import TYPE_CHECKING
 
-from django.db.models import F, Q, TextField, Value, Func
+from django.db.models import F, Q, TextField, Value, Func, BooleanField, Case, When
 from django.db.models.functions import Coalesce
 from django.utils.timezone import now as tz_now
 
@@ -80,6 +80,12 @@ def trimmed_text_expression(field_name: str):
     whitespace = ' \t\n\r\v\f\x1c\x1d\x1e\x1f\x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000'
     return Coalesce(Func(F(field_name), Value(whitespace), function='TRIM', output_field=TextField()),
                     Value(''), output_field=TextField())
+
+
+def annotate_full_content_availability(queryset):
+    return queryset.alias(_readable_body=trimmed_text_expression('full_content')).annotate(
+        has_readable_body=Case(When(Q(full_content_state__in=('legacy', 'complete')) & Q(_readable_body__gt=''),
+                                   then=Value(True)), default=Value(False), output_field=BooleanField()))
 
 
 @dataclass(frozen=True)
@@ -302,6 +308,10 @@ def commit_candidate(news, candidate, *, provider='', lease: FetchLease | None =
         if not same_body:
             updates.update(full_content_zh='', full_content_zh_fetched_at=None,
                            suggested_questions=[], suggested_questions_generated_at=None)
+        elif not has_full_content(current):
+            # Questions made while audit text was unavailable used only summary
+            # context, even when the newly verified body has the same hash.
+            updates.update(suggested_questions=[], suggested_questions_generated_at=None)
     if changed or lease:
         updates.update(
             full_content_fetch_status='success', full_content_fetch_error='',
@@ -427,7 +437,7 @@ def get_readable_full_content(news: News) -> str:
 
 
 def filter_readable_full_content(queryset):
-    return queryset.annotate(
+    return queryset.alias(
         _readable_body=trimmed_text_expression('full_content'),
     ).filter(full_content_state__in=['legacy', 'complete']).exclude(_readable_body='')
 

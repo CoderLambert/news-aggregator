@@ -53,6 +53,18 @@ describe('useChat', () => {
     expect(historyQuery.options.retry).toBe(false)
   })
 
+  it('keeps summary scope metadata out of assistant prose and carries it with the answer', async () => {
+    api.chatStream.mockReturnValue((async function* () {
+      yield '\u200b__META__{"type":"article_context","context_scope":"summary"}__META__\n\n'
+      yield 'An answer based on the available summary.'
+    })())
+    const { result } = renderHook(() => useChat('42', true), { wrapper: makeWrapper() })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    act(() => result.current.setInput('Question'))
+    await act(async () => { await result.current.handleSend() })
+    expect(result.current.messages[1]).toMatchObject({ context_scope: 'summary', content: 'An answer based on the available summary.' })
+  })
+
   it('streams one user/assistant pair and clears the submitted draft only on success', async () => {
     api.chatStream.mockReturnValue((async function* () { yield 'Hel'; yield 'lo!' })())
     const { result } = renderHook(() => useChat('42', true), { wrapper: makeWrapper() })

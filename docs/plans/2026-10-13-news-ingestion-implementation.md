@@ -23,7 +23,7 @@
 | T06 | DEV/HN/首批全文 Feed；按来源契约 fixtures | 已验证并提交 |
 | T07 | TC 与其余来源；31 来源策略及降级 | 已验证并提交 |
 | T08 | 常驻 Worker、心跳、队列、旧命令；恢复/取消/无隐式回填 | 已验证并提交 |
-| T09 | API、前端、翻译/聊天/研究/TTS；排队与正文可用性 | 待实施 |
+| T09 | API、前端、翻译/聊天/研究/TTS；排队与正文可用性 | 已验证并提交 |
 | T10 | Compose、发布/恢复/旧版本；现有 release gates | 待实施 |
 | T11 | 有证据的修复与有限补排；dry-run/冲突/反向 CAS | 待实施 |
 | T12 | 指标、完整 CI 与完成定义审计 | 待实施 |
@@ -150,3 +150,22 @@ fetch_full_content 改为有界 enqueue/dry-run，保留来源、状态、重试
 `manage.py check` 实际无问题；`makemigrations --check --dry-run` 实际 No changes detected；`git diff --check` 通过。T09–T12、兼容部署配置及完整 CI 尚需完成，没有操作生产或隐式回填。
 
 T08 旧命令生产分支补充回归实际 **4 passed**（test_backfill_scrapy_command）；生产入口明确拒绝且不创建任务。
+
+
+## T09 实际结果
+
+fetch-full 保留原鉴权/CSRF，已有可读正文返回 200；合法新请求/复用/刷新返回现有 detail schema 的 202、Location 与 Retry-After；Worker 禁用/不健康 503 不创建任务；身份/来源/阻断不支持 422。force 只提升刷新意图，保留当前 lease、计数和冷却。GET 详情/轮询不入队、不访问来源。
+
+article_content 收口 read/enqueue/context_scope；聊天和研究普通文章工具没有 HTTP 内正文 Provider 链，services 不再反向导入 views。聊天 prompt 与 SSE article_context 范围一致；推荐问题返回 summary/full 范围并保留 revision CAS，缺正文可以使用摘要/既有 fallback。研究最多短等一秒数据库，排队/不可用返回真实 scope/state/next_attempt_at；截取标 excerpt，后续工具总容量截断仍保留范围。后端和前端研究时间线不把摘要/排队称为全文。语义/混合搜索的重新取行复用完整可用性过滤，修复脱离原过滤 queryset 的路径。
+
+普通详情 state=missing 时隐去保留审计的正文/译文，译文 available/active/source/scope 均按当前可用性判断。共享/私人翻译读取、领取、任务当前性、发布与等待同时检查可读 state 和既有 source hash；隔离保留相同 raw/hash 也不能晚发布。原有历史公/私译文、账户代际、SSE 协议与权限不变；未就绪 SSE 增加 full_content_not_ready。TTS 使用同一可读谓词，刷新失败继续使用现有正文及内容绑定缓存。列表增轻量 has_full_content，SQL 仅选择可用布尔值、defer 大正文/证据，不带正文或全 provenance。审核文本重新成为可读正文时清除在 summary 范围产生的问题缓存，即使原始字符串相同。
+
+前端新增字段与可用/任务分离，queued/rate_limited/可重试延期只 GET 轮询，按 next_attempt_at 等待并退避、最多三分钟；停止/离开页面只取消本地等待，服务端共享任务保留。已有正文刷新失败继续显示正文，同时显示本次刷新失败。卡片/搜索/全文区/朗读选项均使用可用性，不再仅看 success。慢旧 revision 的结果不能恢复更高 revision 的隔离文本。翻译的本地所有权包含正文 state/revision，恢复记录绑定 revision，旧正文任务不能恢复到新正文。聊天消费 scope 元数据并显示摘要/节选范围，移除空聊天“已读完文章”的不实文案。
+
+还发现中文来源链接的旧裸 urllib 与研究搜索 HTTP 路径：统一走受控 Reader/安全预算传输；研究搜索一次逻辑上下文共享请求限额，429/预算延期不继续另一个搜索后备。没有将搜索节选存 News.full_content。
+
+实际后端相关回归 **228 passed**：read/queue API、隔离消费者、聊天/问题、共享/订阅翻译、TTS、研究取消/HTTP路由、ingestion/正文 CAS。独立 22 场景证明同 hash 隔离仍拒绝公/私译文暴露/发布、历史保留，以及六种研究搜索组合筛选。旧测试的同步获取断言按新排队合同改写，历史正文 fixtures 显式 legacy 后，既有账户/source hash/权限回归仍通过。
+
+完整前端 Vitest 实际 **481 passed / 66 files**；typecheck、lint（无 warning/error）、production build 全部实际通过。新增 queued/cooling、不重复 POST、局部停止、旧 revision、翻译恢复与聊天 scope 测试。按两份 React 最佳实践技能检查：保留懒加载和请求 owner fencing，effect 使用稳定依赖、取消清理；修复 render 中 Date.now 与缺失 hook dependency。`manage.py check` 实际无问题；`makemigrations --check --dry-run` 实际 No changes detected；`git diff --check` 通过。
+
+T10–T12、既有全部后端 CI/release gates、兼容 Compose 与恢复测试尚需完成，当前还不具备生产发布条件。没有部署/真实开关或数据修改。

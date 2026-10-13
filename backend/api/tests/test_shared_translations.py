@@ -28,6 +28,7 @@ def article():
         source=Source.objects.create(name='Public source', url='https://example.com', language='en'),
         category=Category.objects.create(name='Tech', slug='tech'),
         full_content='# Public article\n\nOriginal English body.',
+        full_content_state='legacy',
     )
 
 

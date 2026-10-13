@@ -14,6 +14,7 @@ import {
 } from '@/services/newsWorkflowApi'
 import { parseNewsId } from '@/services/newsWorkflowQueries'
 import type { NewsDetail } from '@/types/news'
+import { hasReadableFullContent } from '@/types/news'
 import { useCapability } from '@/context/CapabilitiesContext'
 
 interface TranslationState {
@@ -42,24 +43,26 @@ function translationRecoveryKey(viewerId: string | number, newsId: number): stri
   return `translating_recovery_v1:${encodeURIComponent(String(viewerId))}:${newsId}`
 }
 
-function saveTranslationRecovery(viewerId: string | number, newsId: number, jobId: string): void {
+function saveTranslationRecovery(viewerId: string | number, newsId: number, jobId: string, sourceRevision?: number): void {
   try {
     localStorage.setItem(translationRecoveryKey(viewerId, newsId), JSON.stringify({
       viewerId: String(viewerId),
       newsId,
       jobId,
+      sourceRevision,
     }))
   } catch {
     // The active view can still recover while mounted if storage is unavailable.
   }
 }
 
-function loadTranslationRecovery(viewerId: string | number, newsId: number): string | null {
+function loadTranslationRecovery(viewerId: string | number, newsId: number, sourceRevision?: number): string | null {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(translationRecoveryKey(viewerId, newsId)) ?? 'null')
     if (typeof value === 'object' && value !== null && 'viewerId' in value && 'newsId' in value &&
       'jobId' in value && value.viewerId === String(viewerId) && value.newsId === newsId &&
-      typeof value.jobId === 'string' && value.jobId.length > 0) {
+      typeof value.jobId === 'string' && value.jobId.length > 0 &&
+      (sourceRevision === undefined || ('sourceRevision' in value && value.sourceRevision === sourceRevision))) {
       return value.jobId
     }
   } catch {
@@ -102,7 +105,8 @@ export function useTranslation(
   const translationEnabled = useCapability('translation').enabled
   const newsId = parseNewsId(id)
   const viewerId = user?.id ?? 'anonymous'
-  const ownerKey = `${newsId ?? String(id ?? '')}:${viewerId}:${lang}`
+  const sourceRevision = news?.full_content_revision
+  const ownerKey = `${newsId ?? String(id ?? '')}:${viewerId}:${lang}:${sourceRevision ?? 0}:${news?.full_content_state ?? 'legacy'}`
   const pausedKey = newsId === null ? '' : translationPausedMarkerKey(newsId, viewerId, lang)
   const ownerRef = useRef(ownerKey)
   const requestRef = useRef<TranslationRequest | null>(null)
@@ -204,11 +208,11 @@ export function useTranslation(
   }, [pausedKey, setNews, updateState])
 
   const handleTranslate = useCallback(async (force = false): Promise<boolean> => {
-    if (!translationEnabled || newsId === null || !news || news.id !== newsId || !news.full_content) return false
+    if (!translationEnabled || newsId === null || !news || news.id !== newsId || !hasReadableFullContent(news)) return false
     if (requestRef.current?.ownerKey === ownerKey) return false
     requestRef.current?.controller.abort()
 
-    const storedJobId = force ? null : loadTranslationRecovery(viewerId, newsId)
+    const storedJobId = force ? null : loadTranslationRecovery(viewerId, newsId, sourceRevision)
     if (force) clearTranslationRecovery(viewerId, newsId)
     const request: TranslationRequest = {
       ownerKey,
@@ -269,7 +273,7 @@ export function useTranslation(
         onJobId: (jobId) => {
           if (!isCurrent()) return
           request.jobId = jobId
-          saveTranslationRecovery(viewerId, newsId, jobId)
+          saveTranslationRecovery(viewerId, newsId, jobId, sourceRevision)
           if (request.cancelWhenIdentified) {
             void finishExplicitStop(request, viewerId, newsId)
           }
@@ -327,7 +331,7 @@ export function useTranslation(
     } finally {
       if (isCurrent()) requestRef.current = null
     }
-  }, [finishExplicitStop, news, newsId, ownerKey, pausedKey, setNews, translationEnabled, updateState, viewerId])
+  }, [finishExplicitStop, news, newsId, ownerKey, pausedKey, setNews, sourceRevision, translationEnabled, updateState, viewerId])
 
   const cancelTranslation = useCallback(async () => {
     const request = requestRef.current
@@ -372,10 +376,10 @@ export function useTranslation(
   }, [ownerKey, translationEnabled, updateState])
 
   useEffect(() => {
-    if (!translationEnabled || loading || !news || news.id !== newsId || autoResumeArticleRef.current === ownerKey) return
+    if (!translationEnabled || loading || !news || !hasReadableFullContent(news) || news.id !== newsId || autoResumeArticleRef.current === ownerKey) return
     autoResumeArticleRef.current = ownerKey
 
-    const storedJobId = newsId === null ? null : loadTranslationRecovery(viewerId, newsId)
+    const storedJobId = newsId === null ? null : loadTranslationRecovery(viewerId, newsId, sourceRevision)
     if (storedJobId) {
       void handleTranslate(false)
       return
@@ -414,7 +418,7 @@ export function useTranslation(
     if (news.full_translation_active) {
       void handleTranslate(false)
     }
-  }, [handleTranslate, loading, news, newsId, ownerKey, pausedKey, translationEnabled, updateState, viewerId])
+  }, [handleTranslate, loading, news, newsId, ownerKey, pausedKey, sourceRevision, translationEnabled, updateState, viewerId])
 
   return {
     translating: visibleState.translating,

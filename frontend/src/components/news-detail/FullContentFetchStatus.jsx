@@ -3,6 +3,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import FetchArticleCard from './FetchArticleCard'
 import FetchArticleSpinner from './FetchArticleSpinner'
+import { hasReadableFullContent, hasPendingFullContentTask } from '@/types/news'
 
 const STATUS_MESSAGES = {
   network_error: '网络或源站暂不可达，可稍后重试',
@@ -58,14 +59,23 @@ function StatusAlert({ message, onRetry, showRetry = true, sourceUrl, retryLabel
 export default function FullContentFetchStatus({ news, articleLoading, onFetch, onResume = onFetch, onCancel }) {
   if (!news) return null
 
-  const status = articleLoading ? 'fetching' : (news.full_content_fetch_status || 'pending')
-  const hasBody = Boolean(news.full_content?.trim())
+  const pending = hasPendingFullContentTask(news)
+  const status = articleLoading && !pending ? 'fetching' : (news.full_content_fetch_status || 'pending')
+  const hasBody = hasReadableFullContent(news)
   const helperText = hasBody
     ? '上次保存的正文仍可阅读，也可直接前往来源网站。'
     : '你仍可阅读下方摘要，或直接前往来源网站。'
   const failureTitle = hasBody ? '本次原文更新未完成' : '未能保存完整原文'
   const hasTerminalError = !articleLoading && ['network_error', 'validation_failed', 'failed'].includes(status)
-  if (hasBody && !hasTerminalError && status !== 'fetching') return null
+  if (hasBody && !hasTerminalError && !pending && !articleLoading) return null
+
+  if (pending && status !== 'fetching') {
+    const cooling = ['rate_limited', 'network_error', 'failed'].includes(status)
+    return <StatusAlert title={cooling ? '正文任务等待重试' : '正文任务已排队'}
+      message={cooling ? '来源暂时限流或任务正在等待到期；到期后服务器会继续处理。' : '服务器会按来源顺序和到期时间获取正文。'}
+      onRetry={articleLoading ? onCancel : onResume} retryLabel={articleLoading ? '停止等待' : '继续查看'}
+      sourceUrl={news.url} helperText={hasBody ? '上次保存的正文仍可阅读；停止等待不会撤销共享任务。' : '当前可阅读摘要；停止等待不会撤销共享任务。'} />
+  }
 
   if (status === 'fetching' && articleLoading) return <FetchArticleSpinner onCancel={onCancel} />
   if (status === 'fetching') {
@@ -89,6 +99,9 @@ export default function FullContentFetchStatus({ news, articleLoading, onFetch, 
   }
   if (status === 'failed') {
     return <StatusAlert title={failureTitle} message={news.full_content_fetch_error?.trim() || STATUS_MESSAGES.failed} onRetry={onFetch} sourceUrl={news.url} helperText={helperText} />
+  }
+  if (status === 'blocked' || status === 'unsupported' || status === 'rate_limited') {
+    return <StatusAlert title={failureTitle} message="该来源当前无法获取正文，请前往来源网站阅读。" showRetry={false} sourceUrl={news.url} helperText={helperText} />
   }
 
   return <FetchArticleCard onFetch={onFetch} />

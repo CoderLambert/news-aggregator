@@ -140,9 +140,10 @@ def resolve_tts_content(news, user, language: str, scope: str) -> ResolvedTTSCon
     if scope not in {'summary', 'full'}:
         raise TTSContentUnavailable('unsupported_scope', '不支持的朗读范围。')
 
+    from api.services.full_content_status import has_full_content, get_readable_full_content
     source_language = getattr(news.source, 'language', '')
     if language == 'original' or source_language == 'zh':
-        content = news.full_content if scope == 'full' else news.content
+        content = get_readable_full_content(news) if scope == 'full' else news.content
         if not content:
             raise TTSContentUnavailable('source_content_required', '所选范围暂无原文内容。')
         return ResolvedTTSContent(
@@ -160,7 +161,7 @@ def resolve_tts_content(news, user, language: str, scope: str) -> ResolvedTTSCon
             language='zh', title=news.title_zh, content=content, namespace='shared-summary',
         )
 
-    if not news.full_content:
+    if not has_full_content(news):
         raise TTSContentUnavailable('source_content_required', '请先获取完整原文，再翻译并朗读。')
 
     from api.models import ChatGPTArticleTranslation
