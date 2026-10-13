@@ -136,3 +136,13 @@ def test_background_worker_does_not_fetch_after_losing_atomic_claim(make_news):
         assert _fetch_one(news) is None
     claim.assert_called_once_with(news)
     fetch.assert_not_called()
+
+
+
+def test_force_cannot_queue_exhausted_failures_even_with_healthy_worker(client, make_news, no_publisher_io):
+    news = make_news(full_content_fetch_status='failed', full_content_retry_count=5)
+    response = client.post(f'/api/news/{news.pk}/fetch-full/', data={'force': True}, content_type='application/json')
+    assert response.status_code == 422 and response.json()['error_code'] == 'retry_exhausted'
+    no_publisher_io[0].assert_not_called()
+    news.refresh_from_db()
+    assert news.full_content_next_attempt_at is None and news.full_content_retry_count == 5

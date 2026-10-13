@@ -1,5 +1,5 @@
 import json
-from django.db.models import Count, Min, Max
+from django.db.models import Count, Min, Max, Avg, F, ExpressionWrapper, DurationField
 from django.utils import timezone
 
 from django.core.management.base import BaseCommand
@@ -103,7 +103,13 @@ class Command(BaseCommand):
             'content_kinds': dict(qs.values('content_kind').annotate(cnt=Count('pk')).values_list('content_kind', 'cnt')),
             'content_states': dict(qs.values('full_content_state').annotate(cnt=Count('pk')).values_list('full_content_state', 'cnt')),
             'queue': {'pending': queued.count(), 'due': queued.filter(full_content_next_attempt_at__lte=now).count(),
-                      'oldest_due_at': queued.aggregate(value=Min('full_content_next_attempt_at'))['value']},
+                      'oldest_due_at': queued.aggregate(value=Min('full_content_next_attempt_at'))['value'],
+                      'oldest_task_created_at': queued.aggregate(value=Min('full_content_task_created_at'))['value'],
+                      'unknown_creation_time': queued.filter(full_content_task_created_at__isnull=True).count()},
+            'queue_to_body_latency': filter_readable_full_content(qs).filter(full_content_state='complete', full_content_task_created_at__isnull=False,
+                full_content_fetched_at__gte=F('full_content_task_created_at')).aggregate(
+                    count=Count('pk'), average=Avg(ExpressionWrapper(
+                        F('full_content_fetched_at') - F('full_content_task_created_at'), output_field=DurationField()))),
             'budget': {'cooling_scopes': cooling.count(), 'latest_cooldown_until': cooling.aggregate(value=Max('cooldown_until'))['value']},
             'feeds': list(FeedState.objects.order_by('source_key', 'feed_url').values('source_key', 'last_success_at', 'last_checked_at', 'next_poll_at')),
             'attempts': dict(ArticleFetchEvent.objects.values('persistence_outcome').annotate(cnt=Count('pk')).values_list('persistence_outcome', 'cnt')),

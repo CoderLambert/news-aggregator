@@ -10,6 +10,8 @@ from news_crawler import download_handlers as handler
 class Stats:
     def __init__(self):
         self.values = {}
+    def set_value(self, key, value):
+        self.values[key] = value
     def inc_value(self, key):
         self.values[key] = self.values.get(key, 0) + 1
 

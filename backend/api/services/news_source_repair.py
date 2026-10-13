@@ -14,6 +14,7 @@ import tempfile
 from django.conf import settings
 from django.db import IntegrityError, OperationalError, transaction
 from django.db.models import F
+from django.utils import timezone
 
 from api.models import News, NewsSourceItem, Source
 from api.services.article_identity import normalize_article_url
@@ -26,11 +27,11 @@ MAX_OPERATIONS = 1000
 MAX_INPUT_BYTES = 2 * 1024 * 1024
 NEWS_FIELDS = (
     'source_id', 'url', 'full_content_revision', 'full_content_state',
-    'full_content_fetch_status', 'full_content_error_code',
-    'full_content_next_attempt_at', 'last_full_content_attempt',
+    'full_content_fetch_status', 'full_content_error_code', 'full_content_retry_count',
+    'full_content_next_attempt_at', 'full_content_task_created_at', 'last_full_content_attempt',
     'suggested_questions', 'suggested_questions_generated_at',
 )
-DATE_FIELDS = {'full_content_next_attempt_at', 'last_full_content_attempt', 'suggested_questions_generated_at'}
+DATE_FIELDS = {'full_content_task_created_at', 'full_content_next_attempt_at', 'last_full_content_attempt', 'suggested_questions_generated_at'}
 NEWS_GUARDS = ('source_id', 'url', 'full_content_revision')
 
 
@@ -251,7 +252,7 @@ def plan_operation(operation):
                 if news.source.name != policy.name:
                     raise RepairConflict('quarantine_source_evidence_mismatch')
                 after.update(full_content_state='missing', full_content_fetch_status='unsupported',
-                             full_content_error_code='invalid_identity', full_content_next_attempt_at=None,
+                             full_content_error_code='invalid_identity', full_content_next_attempt_at=None, full_content_task_created_at=None,
                              last_full_content_attempt=None)
             else:
                 source, url = _identity_target(operation, news)
@@ -266,14 +267,20 @@ def plan_operation(operation):
                     raise RepairConflict('equivalent_body_digest_evidence_required')
                 after.update(source_id=source.pk, url=url, last_full_content_attempt=None)
                 if url != news.url:
+                    # A reviewed identity correction starts a different article
+                    # attempt generation; this is never the ordinary force path.
+                    after['full_content_retry_count'] = 0
                     after.update(suggested_questions=[], suggested_questions_generated_at=None)
                     if not equivalent:
                         after['full_content_state'] = 'missing'
                 prospective = News(content_kind=news.content_kind, url=url)
                 rejection = fetch_eligibility(prospective)
+                if not rejection and after['full_content_retry_count'] >= 5:
+                    rejection = 'retry_exhausted'
                 after.update(full_content_fetch_status='unsupported' if rejection else 'queued',
                              full_content_error_code=rejection or 'identity_changed',
-                             full_content_next_attempt_at=None if rejection else _known_cooldown(url).isoformat())
+                             full_content_next_attempt_at=None if rejection else _known_cooldown(url).isoformat(),
+                             full_content_task_created_at=None if rejection else timezone.now().isoformat())
             plan['after'] = after
     except (Source.DoesNotExist, News.DoesNotExist):
         plan.update(outcome='conflict', reason='explicit_target_not_found')

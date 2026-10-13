@@ -20,7 +20,7 @@ def request_full_content(news, *, force=False, priority=0, execution_guard=None)
         execution_guard()
     if has_full_content(news) and not force:
         return 'cached'
-    if fetch_eligibility(news) or news.full_content_fetch_status in {'blocked', 'unsupported'}:
+    if fetch_eligibility(news) or news.full_content_fetch_status in {'blocked', 'unsupported'} or news.full_content_retry_count >= 5:
         return 'rejected'
     if not worker_health(require_enabled=True):
         return 'unavailable'

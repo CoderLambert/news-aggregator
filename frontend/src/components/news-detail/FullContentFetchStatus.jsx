@@ -72,6 +72,9 @@ export default function FullContentFetchStatus({ news, articleLoading, onFetch, 
   const failureTitle = hasBody ? '本次原文更新未完成' : '未能保存完整原文'
   const hasTerminalError = !articleLoading && ['network_error', 'validation_failed', 'failed'].includes(status)
   if (hasBody && !hasTerminalError && !pending && !articleLoading) return null
+  if (news.full_content_retry_count >= 5) {
+    return <StatusAlert title="正文尝试已达上限" message="来源获取连续失败，当前任务已停止。" helperText={helperText} sourceUrl={news.url} showRetry={false} />
+  }
 
   if (pending && status !== 'fetching') {
     const cooling = ['rate_limited', 'network_error', 'failed'].includes(status)

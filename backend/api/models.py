@@ -119,6 +119,7 @@ class News(models.Model):
     full_content_revision = models.PositiveBigIntegerField(default=0)
     full_content_provenance = models.JSONField(default=dict, blank=True)
     full_content_next_attempt_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    full_content_task_created_at = models.DateTimeField(null=True, blank=True)
     full_content_priority = models.SmallIntegerField(default=0)
     full_content_error_code = models.CharField(max_length=64, blank=True, default='')
 

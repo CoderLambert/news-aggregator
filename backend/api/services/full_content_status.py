@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone as utc_timezone
 from typing import TYPE_CHECKING
 
 from django.db.models import F, Q, TextField, Value, Func, BooleanField, Case, When
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, Greatest
 from django.utils.timezone import now as tz_now
 
 from api.services.article_fetcher.types import (
@@ -151,17 +151,21 @@ def enqueue_fetch(news, *, force=False, priority=0):
     query = news.__class__.objects.filter(pk=news.pk, url=news.url, full_content_revision=news.full_content_revision)
     # Already scheduled tasks, terminal policy blocks and valid leases are not
     # reset by repeated user requests. Source fixes need an explicit new cycle.
-    if news.full_content_fetch_status in {'blocked', 'unsupported'}:
+    if news.full_content_fetch_status in {'blocked', 'unsupported'} or news.full_content_retry_count >= 5:
         return 'rejected'
+    requested_priority = max(-10, min(10, 10 if force else priority))
     if news.full_content_next_attempt_at is not None or news.full_content_fetch_status == 'fetching':
-        return 'reused'
-    updated = query.filter(full_content_next_attempt_at__isnull=True).exclude(full_content_fetch_status='fetching').update(
+        if force:
+            query.update(full_content_priority=Greatest(F('full_content_priority'), Value(requested_priority)))
+            news.refresh_from_db()
+        return 'rejected' if news.full_content_retry_count >= 5 else 'reused'
+    updated = query.filter(full_content_next_attempt_at__isnull=True, full_content_retry_count__lt=5).exclude(full_content_fetch_status='fetching').update(
         full_content_fetch_status='queued', full_content_next_attempt_at=_known_cooldown(news.url),
-        full_content_priority=max(-10, min(10, priority)), full_content_retry_count=0,
+        full_content_priority=requested_priority, full_content_task_created_at=now,
         full_content_error_code='', full_content_fetch_error='',
     )
     news.refresh_from_db()
-    return 'queued' if updated else 'reused'
+    return 'queued' if updated else 'rejected' if news.full_content_retry_count >= 5 else 'reused'
 
 
 def claim_fetch(news: News, *, force: bool = False) -> FetchLease | None:

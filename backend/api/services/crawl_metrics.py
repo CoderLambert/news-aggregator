@@ -7,12 +7,15 @@ COUNT_KEYS = ('entries_seen', 'entries_committed', 'entries_changed', 'body_cand
 
 
 def crawl_result(stats):
-    http = {str(k.rsplit('/', 1)[-1]): max(0, int(v)) for k, v in stats.items()
-            if k.startswith('downloader/response_status_count/')}
+    http = {}
+    for key, value in stats.items():
+        if key.startswith(('downloader/response_status_count/', 'budget/http_status_count/')):
+            code = str(key.rsplit('/', 1)[-1])
+            http[code] = max(http.get(code, 0), max(0, int(value)))
     result = {key: max(0, int(stats.get(key, 0))) for key in COUNT_KEYS}
     result.update(finish_reason=str(stats.get('finish_reason', 'unknown'))[:64],
                   items=max(0, int(stats.get('item_scraped_count', 0))),
-                  responses=max(0, int(stats.get('downloader/response_count', 0))),
+                  responses=max(sum(http.values()), int(stats.get('downloader/response_count', 0))),
                   errors=max(0, int(stats.get('log_count/ERROR', 0))), http_statuses=http,
                   checkpoint_committed=stats.get('checkpoint_committed') is True,
                   policy_skips_by_reason=stats.get('policy_skips_by_reason', {}),

@@ -501,7 +501,7 @@ class NewsFetchFullView(generics.GenericAPIView):
             data.update(error_code='full_content_worker_unavailable', error='正文获取服务暂不可用，请稍后重试。')
             return Response(data, status=503)
         if outcome == 'rejected':
-            data.update(error_code=news.full_content_error_code or 'unsupported', error='该文章暂不支持正文获取。')
+            data.update(error_code='retry_exhausted' if news.full_content_retry_count >= 5 else news.full_content_error_code or 'unsupported', error='该文章暂不支持正文获取。')
             return Response(data, status=422)
         if outcome == 'cached':
             return Response(data)

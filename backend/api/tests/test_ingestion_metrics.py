@@ -266,3 +266,83 @@ def test_zero_exit_worker_uses_json_result_and_persists_ingestion_counters(tmp_p
 ])
 def test_claimed_success_cannot_hide_known_ingestion_failure(stats, outcome):
     assert crawl_result({'finish_reason': 'finished', **stats})['outcome'] == outcome
+
+
+
+def test_force_preserves_failures_cooldown_and_original_task_creation(article):
+    initial = timezone.now() - timedelta(hours=2)
+    future = timezone.now() + timedelta(hours=1)
+    News.objects.filter(pk=article.pk).update(full_content_retry_count=3, full_content_priority=2,
+        full_content_task_created_at=initial, full_content_next_attempt_at=future)
+    article.refresh_from_db()
+    assert enqueue_fetch(article, force=True) == 'reused'
+    assert article.full_content_retry_count == 3 and article.full_content_priority == 10
+    assert article.full_content_next_attempt_at == future and article.full_content_task_created_at == initial
+
+
+def test_force_creates_bounded_new_intent_without_erasing_old_failures(article):
+    News.objects.filter(pk=article.pk).update(full_content_retry_count=3, full_content_next_attempt_at=None,
+        full_content_fetch_status='failed')
+    article.refresh_from_db()
+    before = timezone.now()
+    assert enqueue_fetch(article, force=True) == 'queued'
+    assert article.full_content_retry_count == 3 and article.full_content_priority == 10
+    assert article.full_content_task_created_at >= before
+    created = article.full_content_task_created_at
+    assert enqueue_fetch(article, force=True) == 'reused'
+    assert article.full_content_task_created_at == created
+
+
+def test_force_does_not_recreate_exhausted_task_or_call_health(article):
+    News.objects.filter(pk=article.pk).update(full_content_retry_count=5, full_content_next_attempt_at=None,
+        full_content_fetch_status='failed')
+    article.refresh_from_db()
+    from api.services.article_content import request_full_content
+    with patch('api.services.article_content.worker_health') as health:
+        assert request_full_content(article, force=True) == 'rejected'
+    health.assert_not_called()
+    assert enqueue_fetch(article, force=True) == 'rejected'
+    article.refresh_from_db()
+    assert article.full_content_retry_count == 5 and article.full_content_next_attempt_at is None
+
+
+def test_raising_priority_keeps_owned_claim_and_queue_age(article):
+    from api.services.full_content_status import claim_fetch, owns_fetch
+    News.objects.filter(pk=article.pk).update(full_content_fetch_status='pending', full_content_next_attempt_at=None,
+        full_content_retry_count=2)
+    article.refresh_from_db()
+    assert enqueue_fetch(article) == 'queued'
+    assert claim_fetch(article)
+    created, claimed = article.full_content_task_created_at, article._full_content_snapshot.claimed_at
+    assert enqueue_fetch(article, force=True) == 'reused'
+    assert owns_fetch(article) and article.last_full_content_attempt == claimed
+    assert article.full_content_task_created_at == created and article.full_content_retry_count == 2
+
+
+def test_queue_latency_uses_creation_time_and_excludes_failed_refresh_old_body(article):
+    created = timezone.now() - timedelta(minutes=3)
+    News.objects.filter(pk=article.pk).update(full_content_task_created_at=created,
+        full_content_fetched_at=created + timedelta(seconds=20), full_content_state='complete', full_content='Known complete body.')
+    News.objects.create(title='Old refresh', content='Summary', url='https://webkit.org/blog/123/old-refresh/',
+        source=article.source, category=article.category, publish_time=timezone.now(),
+        full_content_state='complete', full_content='Old valid body.', full_content_task_created_at=created,
+        full_content_fetched_at=created-timedelta(minutes=1))
+    out = StringIO()
+    call_command('full_content_stats', '--json', stdout=out)
+    result = json.loads(out.getvalue())
+    assert result['queue']['oldest_task_created_at'] == str(created)
+    assert result['queue_to_body_latency']['count'] == 1
+    assert result['queue_to_body_latency']['average'] == '0:00:20'
+
+
+
+def test_handler_response_429_is_counted_even_when_scrapy_receives_only_control_error():
+    result = crawl_result({'finish_reason': 'finished', 'outcome': 'updated', 'entries_committed': 1,
+                          'budget/http_status_count/429': 1, 'budget/physical_requests': 1,
+                          'next_attempt_at': '2026-10-14T00:00:00+00:00'})
+    assert result['outcome'] == 'rate_limited' and result['http_statuses'] == {'429': 1}
+    assert result['responses'] == result['physical_requests'] == 1
+    assert result['next_attempt_at'] == '2026-10-14T00:00:00+00:00'
+    normal = crawl_result({'finish_reason': 'finished', 'budget/http_status_count/200': 2,
+                          'downloader/response_status_count/200': 2, 'downloader/response_count': 2})
+    assert normal['http_statuses'] == {'200': 2} and normal['responses'] == 2

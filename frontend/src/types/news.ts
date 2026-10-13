@@ -69,6 +69,7 @@ export function hasReadableFullContent(news: Partial<NewsDetail>): boolean {
 }
 
 export function hasPendingFullContentTask(news: Partial<NewsSummary>): boolean {
+  if ((news.full_content_retry_count ?? 0) >= 5) return false
   return ['queued', 'fetching'].includes(news.full_content_fetch_status ?? '')
     || (Boolean(news.full_content_next_attempt_at) && ['rate_limited', 'network_error', 'failed'].includes(news.full_content_fetch_status ?? ''))
 }

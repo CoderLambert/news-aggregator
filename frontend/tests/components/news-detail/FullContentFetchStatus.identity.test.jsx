@@ -18,3 +18,14 @@ describe('article identity pending review', () => {
     expect(onFetch).not.toHaveBeenCalled()
   })
 })
+
+
+it('offers source reading but no shared retry after the bounded attempts are exhausted', () => {
+  render(<FullContentFetchStatus news={{ url: 'https://webkit.org/blog/123/article/',
+    full_content_fetch_status: 'failed', full_content_retry_count: 5, full_content_state: 'legacy', full_content: 'Old valid body' }}
+    onFetch={vi.fn()} />)
+  expect(screen.getByText('正文尝试已达上限')).toBeInTheDocument()
+  expect(screen.getByText('上次保存的正文仍可阅读，也可直接前往来源网站。')).toBeInTheDocument()
+  expect(screen.getByRole('link', { name: '阅读原文' })).toHaveAttribute('href', 'https://webkit.org/blog/123/article/')
+  expect(screen.queryByRole('button')).not.toBeInTheDocument()
+})

@@ -113,6 +113,7 @@ class BudgetedHTTPDownloadHandler:
                     delay = max(0.01, (error.retry_after_at - timezone.now()).total_seconds())
                     if asyncio.get_running_loop().time() + delay > wait_deadline:
                         self.crawler.stats.inc_value('budget/deferred')
+                        self.crawler.stats.set_value('next_attempt_at', error.retry_after_at.isoformat())
                         raise
                     await asyncio.sleep(delay)
             await _db(confirm_permit, permit)
@@ -124,6 +125,7 @@ class BudgetedHTTPDownloadHandler:
             retry_at = await _db(record_response, permit, response.status, headers, host=urlsplit(request.url).hostname)
             self.crawler.stats.inc_value(f'budget/http_status_count/{response.status}')
             if retry_at is not None:
+                self.crawler.stats.set_value('next_attempt_at', retry_at.isoformat())
                 error = BudgetDeferred(retry_at, scopes)
                 error.error_code = 'rate_limited'
                 error.http_status = response.status

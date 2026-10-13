@@ -215,3 +215,11 @@ full_content_stats 正文覆盖率为 complete / 符合抓取准入的 article�
 实际首轮全部三根后端回归为1343 passed/62 failed，失败主要来自历史fixtures未显式legacy和旧同步API预期，并有旧Compose服务集合/精确OAuth子进程dotenv污染断言。没有放宽产品可读/认证规则：历史fixture显式legacy，API按新队列合同检验无同步HTTP，OAuth保留原严格allowlist且隔离工作区.env。修正后完整三根回归实际 **1436 passed / 2 existing pagination warnings**（71.70s）。独立指标/Provider/HTML/stats子集实际 **82 passed**，包含错文/摘要/截断不计成功、真实CAS丢失/no-op、零请求延期、302→429真实两次请求和未捕获429停止后备、矛盾成功stats不能隐藏失败。
 
 前端全套在指标改动后实际 **481 passed / 66 files**、typecheck/lint/build通过；新增独立指标/parser/隔离链接测试另有 **10 passed**。最终全量重跑、生产镜像和真实隔离门禁正在执行，下节记录实际结果。没有来源抽样上线、发布或开启真实开关。
+
+
+最终审查补充：发现 enqueue 新周期会清零历史失败数、force 复用不升级优先级的遗漏。已移除清零；force 只升级到有界优先级10，保持当前冷却、任务创建时间与 fetching lease，达到5次失败后拒绝新意图，不制造无法执行的202任务。前端耗尽次数后保留旧正文/真实原文链接且不显示重试。迁移0038只增加可空 full_content_task_created_at；首次真实入队记录时间，复用、取消、恢复不重置，历史未知不推断。指标显示真实最老任务、未知创建时间数量及已提交新正文的排队耗时，失败刷新旧正文不算新任务产物。修复审计同步保护该字段。
+
+另发现 Scrapy handler 将429转为控制异常后，原 downloader status counter 不一定接到响应。来源 JSON 现在合并 budget header-observed 与 downloader 状态（取max避免重复计数），记录冷却时间；全站或详情429不会因为 Pipeline 保存了摘要而显示 updated。
+
+
+上述边界补充相关回归实际 **139 passed**，前端新增耗尽次数场景实际 **6 passed**（含5个身份隔离状态），typecheck/lint通过。只有受审计的真实 URL 身份纠正会为新身份开启新的失败代际，并将旧计数纳入 before/after/undo CAS；普通 force、重试和旧 CLI 都不能清零。新 URL 仍遵守现有主机冷却，Source FK 单独修正若已耗尽则不制造不可执行任务。
