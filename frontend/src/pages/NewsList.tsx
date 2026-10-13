@@ -14,7 +14,6 @@ import { Pagination } from '@/components/Pagination'
 import { Button } from '@/components/ui/button'
 import { useUnblockNews } from '@/hooks/useNewsMutations'
 import { useNewsScope } from '@/hooks/useNewsScope'
-import RegionFilter from '@/components/RegionFilter'
 import NewsScopeBar from '@/components/NewsScopeBar'
 import AuthModal from '@/components/AuthModal'
 import { useCapability } from '@/context/CapabilitiesContext'
@@ -146,7 +145,7 @@ export default function NewsList() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
-      <header className="mb-6">
+      <header className="mb-4">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-800 dark:text-emerald-400 font-mono">{lang === 'en' ? 'Your news feed' : '你的资讯流'}</p>
         <div className="mt-1 flex flex-wrap items-end justify-between gap-2">
           <div>
@@ -158,8 +157,8 @@ export default function NewsList() {
       </header>
 
       <NewsScopeBar scope={reading.scope} groupId={reading.groupId} groups={reading.groups.data ?? []}
-        personal={reading.enabled} accounts={reading.accounts} onChange={reading.select} />
-      <RegionFilter value={region} onChange={value => updateParams({ region: value === 'all' ? null : value, source: null, page: null })} />
+        personal={reading.enabled} accounts={reading.accounts} onChange={reading.select}
+        region={region} onRegionChange={value => updateParams({ region: value === 'all' ? null : value, source: null, page: null })} />
       {invalidRegion && <p role="alert">无效的频道地区，请选择全部、国内或国际。</p>}
       {reading.notice && <p role="status" className="mb-3 text-sm text-muted-foreground">{reading.notice}</p>}
       {reading.configError && <div role="alert" className="mb-3 text-sm text-red-700">个人频道配置加载失败，筛选尚未应用。 <button className="underline" onClick={() => void reading.retry()}>重试</button></div>}
@@ -168,7 +167,8 @@ export default function NewsList() {
       {reading.needsLogin && <p role="status" className="mb-3">登录后查看个人频道范围。 <button className="underline" onClick={() => setShowLogin(true)}>登录</button></p>}
       {showLogin && <AuthModal onClose={() => setShowLogin(false)} />}
 
-      <div className="mb-3">
+      <div className="mt-3 rounded-2xl border border-border bg-card p-3 sm:p-4">
+        <div className="mb-2">
         <SearchBar
           value={search}
           mode={mode}
@@ -180,17 +180,17 @@ export default function NewsList() {
         {!semanticSearchEnabled && <p className="mt-1 text-xs text-muted-foreground" role="status">当前仅支持关键词搜索。</p>}
       </div>
 
-      <NewsFilters
+      <NewsFilters embedded
         categories={categoriesQuery.data ?? []}
         sources={(sourcesQuery.data ?? []).filter(s => (reading.sourceIds === null || reading.sourceIds.includes(s.id)) && (region === 'all' || s.region === region))}
         activeCategories={categories}
         activeSources={sources}
         onCategoriesChange={(values) => updateFilter('category', values)}
         onSourcesChange={(values) => updateFilter('source', values)}
-        onClear={() => updateParams({ search: null, region: null, category: null, source: null, page: null })}
+        onClear={() => updateParams({ category: null, source: null, page: null })}
       />
 
-      {activeFilterCount > 0 && (
+      {(Boolean(search.trim()) || region !== 'all') && activeFilterCount > 0 && (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-neutral-500" role="status">
           <span>{lang === 'en' ? `${activeFilterCount} active condition${activeFilterCount === 1 ? '' : 's'}` : `已启用 ${activeFilterCount} 个条件`}</span>
           <Button type="button" variant="ghost" size="sm" onClick={() => updateParams({ search: null, mode: null, region: null, category: null, source: null, page: null })} className="h-7 rounded-full px-2 text-xs">
@@ -198,6 +198,8 @@ export default function NewsList() {
           </Button>
         </div>
       )}
+
+      </div>
 
       {(categoriesQuery.isError || sourcesQuery.isError) && (
         <div role="alert" className="mb-4 flex items-center gap-3 text-sm text-red-700">
