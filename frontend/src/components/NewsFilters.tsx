@@ -15,6 +15,7 @@ interface NewsFiltersProps {
   onCategoriesChange: (ids: number[]) => void
   onSourcesChange: (ids: number[]) => void
   onClear: () => void
+  embedded?: boolean
 }
 
 function selectedOptions(options: FilterOption[], active: number[]) {
@@ -30,6 +31,7 @@ export default function NewsFilters({
   onCategoriesChange,
   onSourcesChange,
   onClear,
+  embedded = false,
 }: NewsFiltersProps) {
   const { lang } = useLanguage()
   const panelId = useId()
@@ -39,7 +41,7 @@ export default function NewsFilters({
   const activeCount = activeCategories.length + activeSources.length
 
   return (
-    <section aria-label={lang === 'en' ? 'News filters' : '新闻筛选'} className="rounded-2xl border border-neutral-200 bg-neutral-50/70 p-3">
+    <section aria-label={lang === 'en' ? 'News filters' : '新闻筛选'} className={embedded ? "border-t border-border pt-2" : "rounded-2xl border border-border bg-secondary/40 p-3"}>
       <div className="flex min-h-9 flex-wrap items-center gap-2">
         <Button
           type="button"
@@ -95,7 +97,7 @@ export default function NewsFilters({
         {activeCount > 0 && (
           <Button type="button" variant="ghost" size="sm" onClick={onClear} className="ml-auto h-11 rounded-full text-neutral-600 sm:h-8">
             <RotateCcw aria-hidden="true" />
-            {lang === 'en' ? 'Clear' : '清除筛选'}
+            {lang === 'en' ? 'Clear categories and sources' : '清除分类与来源'}
           </Button>
         )}
       </div>
