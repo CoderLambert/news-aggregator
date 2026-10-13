@@ -101,22 +101,25 @@ export default function NewsCard({ news, onBlockStart, onBlocked }: NewsCardProp
       <Link id={`news-card-${news.id}`} to={`/news/${news.id}`} state={{ from: returnTo }} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary" onMouseEnter={prefetchDetail} onFocus={prefetchDetail}>
         {news.cover_image && <div className="aspect-video overflow-hidden bg-muted"><img src={news.cover_image} alt="" className="h-full w-full object-cover" loading="lazy" /></div>}
         <div className={`p-4 ${user && blockedNewsEnabled ? 'pr-12' : ''}`}>
+          <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            <span className="max-w-48 truncate font-semibold text-primary">{news.source_name}</span>
+            <span aria-hidden="true">·</span>
+            <span>{news.publish_time_inferred ? `${new Date(news.publish_time).toLocaleDateString()}（时间推断）` : formatRelativeTime(news.publish_time, t)}</span>
+          </div>
           <div className="mb-2 flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <h2 className="line-clamp-2 text-base font-semibold leading-snug text-foreground transition-colors group-hover:text-emerald-800 dark:group-hover:text-emerald-300">{title}</h2>
               {subtitle && <p className="mt-0.5 line-clamp-1 text-xs leading-tight text-muted-foreground">{subtitle}</p>}
             </div>
-            <TranslationStatus news={news} size="compact" />
           </div>
           {!cleanedContent && <p className="mb-3 text-xs text-muted-foreground">来源未提供摘要</p>}
           {news.is_medical && <p className="mb-2 text-xs text-muted-foreground">新闻资讯，不构成医疗建议</p>}
           {(news.channel_names?.filter(name => name !== news.source_name).length ?? 0) > 0 && <p className="mb-2 text-xs text-muted-foreground">同时收录于 {news.channel_names?.filter(name => name !== news.source_name).join('、')}</p>}
-          {cleanedContent && <p className="mb-4 line-clamp-3 text-xs leading-relaxed text-muted-foreground">{cleanedContent.slice(0, 180)}{cleanedContent.length > 180 ? '…' : ''}</p>}
+          {cleanedContent && <p className="mb-4 line-clamp-3 text-sm leading-relaxed text-muted-foreground">{cleanedContent.slice(0, 180)}{cleanedContent.length > 180 ? '…' : ''}</p>}
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <Badge variant="sage" className="rounded-full px-2 py-0.5">{news.category_name}</Badge>
             <ContentStatus news={news} lang={lang} />
-            <span className="ml-auto max-w-36 truncate">{news.source_name}</span>
-            <span>{news.publish_time_inferred ? `${new Date(news.publish_time).toLocaleDateString()}（时间推断）` : formatRelativeTime(news.publish_time, t)}</span>
+            <span className="ml-auto"><TranslationStatus news={news} size="compact" /></span>
           </div>
         </div>
       </Link>

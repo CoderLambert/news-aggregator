@@ -1,0 +1,16 @@
+@import './workspace-base.css';
+
+/* Reuse the existing account/display controls without duplicating the sidebar
+   brand and navigation on desktop. Mobile retains the familiar global header. */
+@media (min-width:801px) {
+  .workspace-main > header > div > div:first-child { display:none; }
+  .workspace-main > header > div { justify-content:flex-end; }
+  .workspace-main > header > div::before { content:'阅读工作区'; margin-right:auto; font-size:11px; letter-spacing:.14em; color:var(--muted-foreground); }
+}
+@media (max-width:520px) {
+  .workspace-channel-identity > input[type=checkbox] { width:24px; height:24px; }
+  .workspace-organizer-intro .workspace-actions > label { width:100%; }
+  .workspace-organizer-intro .workspace-actions > label > select { display:block; width:100%; margin-top:5px; }
+  .workspace-group-cards { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .workspace-group-card { padding:15px; }
+}

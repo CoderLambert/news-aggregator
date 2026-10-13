@@ -1,0 +1,26 @@
+# Optional production worker overlay. Always supply the SAME project name,
+# immutable NEWSHUB_IMAGE and explicit --env-file as the existing deployment.
+services:
+  channel-worker:
+    extends:
+      file: compose.prod.yaml
+      service: app
+    command: ["python", "/app/backend/manage.py", "channel_worker"]
+    environment:
+      RUN_MAIN: "true"
+      NEWS_CRAWL_ONLY: "1"
+      CHANNEL_WORKER_HEARTBEAT: /var/lib/newshub/logs/channel-worker-heartbeat.json
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      app:
+        condition: service_healthy
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 90s
+    healthcheck:
+      test: ["CMD", "python", "/app/backend/manage.py", "channel_worker_healthcheck"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 30s
