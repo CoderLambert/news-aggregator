@@ -1,9 +1,11 @@
 """Shared RSS/Atom lifecycle with commit-after-Pipeline conditional state."""
 import asyncio
+from urllib.parse import urlsplit
 from datetime import timedelta, datetime, timezone as utc_timezone
 
 from asgiref.sync import sync_to_async
 from scrapy import Request, Spider, signals
+from scrapy.exceptions import IgnoreRequest
 
 from news_crawler.django_support import initialize_django
 initialize_django()
@@ -13,7 +15,7 @@ from api.models import News, NewsSourceItem
 from api.services.article_identity import InvalidIdentity
 from api.services.feed_state import prepare_feed_request, accept_not_modified, defer_feed
 from api.services.feed_support import parse_feed, feed_entry_item, InvalidFeed
-from api.services.source_policy import POLICIES
+from api.services.source_policy import POLICIES, approved_feed_endpoint
 from news_crawler.category_map import classify
 from news_crawler.feed_receipts import FeedReceipt, FeedReceiptRegistry
 from news_crawler.items import NewsItem
@@ -29,6 +31,13 @@ class FeedSpider(Spider):
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super().from_crawler(crawler, *args, **kwargs)
+        policy = POLICIES[spider.name]
+        feeds = spider.start_urls or [policy.feed_url]
+        # Publisher identities and feed transport hosts are different for BBC
+        # and other syndicated sources. Admit only reviewed feed endpoints.
+        hosts = [urlsplit(url).hostname for url in feeds
+                 if approved_feed_endpoint(spider.name, policy.feed_url or url, url)]
+        spider.allowed_domains = list(dict.fromkeys([*getattr(spider, 'allowed_domains', ()), *hosts]))
         spider.feed_receipts = FeedReceiptRegistry()
         spider.feed_outcomes = []
         spider.feed_errors = 0
@@ -43,7 +52,10 @@ class FeedSpider(Spider):
         for url in urls:
             context = await _database(prepare_feed_request, self.name, url, window_days=self.window_days)
             if context.next_poll_at and context.next_poll_at > timezone.now():
-                self.feed_outcomes.append('deferred')
+                paused = context.next_poll_at.year == datetime.max.year
+                self.feed_outcomes.append('blocked' if paused else 'deferred')
+                if paused:
+                    self.crawler.stats.set_value('source_paused', True)
                 self.crawler.stats.set_value('next_attempt_at', context.next_poll_at.isoformat())
                 continue
             yield Request(context.request_url, headers=dict(context.headers), callback=self.parse,
@@ -103,11 +115,16 @@ class FeedSpider(Spider):
         context = failure.request.meta.get('feed_context')
         error = failure.value
         code = getattr(error, 'error_code', '')
+        if isinstance(error, IgnoreRequest) and str(error) == 'Forbidden by robots.txt':
+            code = 'robots_disallowed'
+            self.crawler.stats.set_value('robots_disallowed', True)
         status = getattr(error, 'http_status', None)
         if status is None and getattr(error, 'response', None) is not None:
             status = error.response.status
         outcome = ('rate_limited' if code == 'rate_limited' or status == 429 else
-                   'deferred' if code == 'budget_deferred' else 'blocked' if status in {401, 403} else 'parse_failed')
+                   'deferred' if code == 'budget_deferred' else 'blocked' if code == 'robots_disallowed' or status in {401, 403} else
+                   'http_error' if status and status >= 400 else
+                   'parse_failed' if isinstance(error, ValueError) else 'network_error')
         retry_at = getattr(error, 'retry_after_at', None)
         if outcome == 'blocked':
             retry_at = datetime.max.replace(tzinfo=utc_timezone.utc)
@@ -138,13 +155,13 @@ class FeedSpider(Spider):
         totals = await _database(self.feed_receipts.finish, reason)
         totals['parse_failures'] += self.feed_errors
         all_outcomes = [totals['outcome'], *self.feed_outcomes]
-        for priority in ('partial', 'parse_failed', 'blocked', 'rate_limited', 'deferred', 'updated', 'unchanged', 'valid_empty'):
+        for priority in ('partial', 'parse_failed', 'blocked', 'http_error', 'network_error', 'rate_limited', 'deferred', 'updated', 'unchanged', 'valid_empty'):
             if priority in all_outcomes and (self.feed_receipts.receipts or priority != 'deferred' or not self.feed_outcomes):
                 totals['outcome'] = priority
                 break
         if not self.feed_receipts.receipts and self.feed_outcomes:
-            totals['outcome'] = next((o for o in ('parse_failed', 'blocked', 'rate_limited', 'deferred', 'unchanged') if o in self.feed_outcomes), 'deferred')
-        if any(o in {'partial', 'parse_failed', 'blocked', 'rate_limited', 'deferred'} for o in self.feed_outcomes):
+            totals['outcome'] = next((o for o in ('parse_failed', 'blocked', 'http_error', 'network_error', 'rate_limited', 'deferred', 'unchanged') if o in self.feed_outcomes), 'deferred')
+        if any(o in {'partial', 'parse_failed', 'blocked', 'http_error', 'network_error', 'rate_limited', 'deferred'} for o in self.feed_outcomes):
             totals['checkpoint_committed'] = False
         elif not self.feed_receipts.receipts and self.feed_outcomes and all(o == 'unchanged' for o in self.feed_outcomes):
             totals['checkpoint_committed'] = True

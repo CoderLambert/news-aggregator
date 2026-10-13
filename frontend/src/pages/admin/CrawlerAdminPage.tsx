@@ -20,6 +20,7 @@ import {
 } from '@/services/crawlerAdminApi'
 import { crawlerAdminKeys, crawlerDashboardOptions } from '@/services/crawlerAdminQueries'
 import type { CrawlBatch, CrawlerSettings, CrawlerTarget, CrawlRun } from '@/types/crawlerAdmin'
+import { crawlBatchDisplay, crawlRunDisplayStatus, crawlRunReason } from '@/services/crawlOutcome'
 import {
   cancelSearchIndexRun,
   createSearchIndexRun,
@@ -49,13 +50,16 @@ function statusLabel(status: string): string {
   return ({
     queued: '排队中', running: '运行中', succeeded: '成功', failed: '失败',
     partial: '部分成功', cancel_requested: '正在停止', cancelled: '已取消', skipped: '已跳过',
+    deferred: '等待执行', rate_limited: '限流等待', blocked: '源站拒绝',
+    network_error: '网络异常', http_error: '源站响应异常', filtered: '请求被过滤', parse_failed: '解析异常',
+    unsupported: '渠道受限',
   } as Record<string, string>)[status] ?? (status || '尚未运行')
 }
 
 function StatusBadge({ status }: { status: string }) {
   const variant = status === 'succeeded' ? 'green'
-    : ['failed', 'cancelled'].includes(status) ? 'red'
-      : ['queued', 'running', 'cancel_requested', 'partial'].includes(status) ? 'amber' : 'gray'
+    : ['failed', 'cancelled', 'blocked', 'network_error', 'http_error', 'filtered', 'parse_failed'].includes(status) ? 'red'
+      : ['queued', 'running', 'cancel_requested', 'partial', 'deferred', 'rate_limited'].includes(status) ? 'amber' : 'gray'
   return <Badge variant={variant}>{statusLabel(status)}</Badge>
 }
 
@@ -140,14 +144,14 @@ function TargetRow({ target, busy, onToggle, onRun }: {
 }) {
   return (
     <tr className="border-b last:border-0">
-      <td className="px-4 py-4"><strong className="block">{target.displayName}</strong><code className="text-xs text-muted-foreground">{target.spiderName}</code></td>
-      <td className="px-4 py-4"><StatusBadge status={target.activeRun?.status || target.lastStatus} /></td>
+      <td className="px-4 py-4"><strong className="block">{target.displayName}</strong><code className="text-xs text-muted-foreground">{target.spiderName}</code>{target.supported === false && <p className="mt-1 max-w-64 text-xs text-amber-700">{target.unsupportedReason}</p>}</td>
+      <td className="px-4 py-4"><StatusBadge status={target.supported === false ? 'unsupported' : target.activeRun?.status || target.lastResultStatus || target.lastStatus} /></td>
       <td className="px-4 py-4 text-sm tabular-nums">{target.lastItems} / {target.lastResponses} / {target.lastErrors}</td>
       <td className="px-4 py-4 text-sm text-muted-foreground">{formatDate(target.lastFinishedAt)}</td>
       <td className="px-4 py-4">
         <div className="flex justify-end gap-2">
-          <Button size="sm" variant="outline" disabled={busy || !target.enabled || Boolean(target.activeRun)} onClick={() => onRun(target.spiderName)}><Play aria-hidden="true" />运行</Button>
-          <Button size="sm" variant="ghost" disabled={busy || Boolean(target.activeRun)} onClick={() => onToggle(target)}>{target.enabled ? '停用' : '启用'}</Button>
+          <Button size="sm" variant="outline" title={target.unsupportedReason} disabled={busy || !target.enabled || target.supported === false || Boolean(target.activeRun)} onClick={() => onRun(target.spiderName)}><Play aria-hidden="true" />运行</Button>
+          <Button size="sm" variant="ghost" disabled={busy || Boolean(target.activeRun) || (!target.enabled && target.supported === false)} onClick={() => onToggle(target)}>{target.enabled ? '停用' : '启用'}</Button>
         </div>
       </td>
     </tr>
@@ -160,14 +164,15 @@ function BatchCard({ batch, busy, onRetry, onCancel }: {
   onRetry: (id: string) => void
   onCancel: (id: string) => void
 }) {
+  const display = crawlBatchDisplay(batch)
   return (
     <article className="rounded-xl border bg-background p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="flex flex-wrap items-center gap-2"><StatusBadge status={batch.status} /><span className="text-sm font-medium">{batch.trigger}</span></div>
+          <div className="flex flex-wrap items-center gap-2"><StatusBadge status={display.status} /><span className="text-sm font-medium">{batch.trigger}</span></div>
           <p className="mt-2 text-sm text-muted-foreground">{formatDate(batch.queuedAt)} · 共 {batch.total} 个来源</p>
         </div>
-        <div className="text-right text-sm tabular-nums"><span className="text-emerald-700">成功 {batch.succeeded}</span> · <span className="text-red-700">失败 {batch.failed}</span> · 取消 {batch.cancelled}</div>
+        <div className="text-right text-sm tabular-nums"><span className="text-emerald-700">成功 {display.counts.succeeded}</span> · <span className="text-amber-700">部分成功 {display.counts.partial} · 等待 {display.counts.deferred}</span> · <span className="text-red-700">失败 {display.counts.failed}</span> · 取消 {display.counts.cancelled}</div>
       </div>
       {batch.runs.map((run) => {
         const retryActive = run.latestRetryStatus && ['queued', 'running', 'cancel_requested'].includes(run.latestRetryStatus)
@@ -175,12 +180,12 @@ function BatchCard({ batch, busy, onRetry, onCancel }: {
         return (
           <div key={run.id} className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t pt-3 text-sm">
             <div>
-              <strong>{run.targetName}</strong><span className="ml-2 text-muted-foreground">{run.items} 条 · {formatDuration(run.durationSeconds)}</span>
-              {run.safeError ? <p className="mt-1 text-red-700">{run.safeError}</p> : null}
-              {run.latestRetryStatus ? <p className={`mt-1 ${retrySucceeded ? 'text-emerald-700' : 'text-amber-700'}`}>最新重试：{statusLabel(run.latestRetryStatus)}</p> : null}
+              <strong>{run.targetName}</strong><span className="ml-2 text-muted-foreground">{run.entriesCommitted ?? run.items} 条已入库{run.entriesChanged !== undefined ? ` · 新增或更新 ${run.entriesChanged}` : ''} · {formatDuration(run.durationSeconds)}</span>
+              {run.safeError ? <p className={`mt-1 ${['succeeded', 'partial', 'deferred', 'rate_limited'].includes(crawlRunDisplayStatus(run)) ? 'text-amber-700' : 'text-red-700'}`}>{crawlRunReason(run)}</p> : null}
+              {run.latestRetryStatus ? <p className={`mt-1 ${retrySucceeded ? 'text-emerald-700' : 'text-amber-700'}`}>最新重试：{statusLabel(run.latestRetryDisplayStatus || run.latestRetryStatus)}</p> : null}
             </div>
             <div className="flex items-center gap-2">
-              <StatusBadge status={run.status} />
+              <StatusBadge status={crawlRunDisplayStatus(run)} />
               {['failed', 'cancelled', 'skipped'].includes(run.status) && !retryActive && !retrySucceeded ? <Button size="sm" variant="outline" disabled={busy} onClick={() => onRetry(run.id)}><RotateCcw aria-hidden="true" />重试</Button> : null}
               {['queued', 'running'].includes(run.status) ? <Button size="sm" variant="destructive" disabled={busy} onClick={() => onCancel(run.id)}><Square aria-hidden="true" />停止</Button> : null}
             </div>
@@ -329,7 +334,7 @@ export default function CrawlerAdminPage() {
         <div className="grid gap-4 sm:grid-cols-3">
           <Card className="gap-3 py-5"><CardContent className="flex items-center gap-3"><div className={`flex size-11 items-center justify-center rounded-full ${data.settings.workerOnline ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}><Server aria-hidden="true" /></div><div><p className="font-semibold">Worker {data.settings.workerOnline ? '在线' : '离线'}</p><p className="text-xs text-muted-foreground">心跳 {formatDate(data.settings.workerHeartbeatAt)}</p></div></CardContent></Card>
           <Card className="gap-3 py-5"><CardContent className="flex items-center gap-3"><div className="flex size-11 items-center justify-center rounded-full bg-blue-50 text-blue-700"><Clock3 aria-hidden="true" /></div><div><p className="font-semibold">{Math.round(data.settings.intervalSeconds / 60)} 分钟一次</p><p className="text-xs text-muted-foreground">Docker 自动调度</p></div></CardContent></Card>
-          <Card className="gap-3 py-5"><CardContent className="flex items-center gap-3"><div className="flex size-11 items-center justify-center rounded-full bg-violet-50 text-violet-700"><CheckCircle2 aria-hidden="true" /></div><div><p className="font-semibold">{data.targets.filter((target) => target.enabled).length} 个来源启用</p><p className="text-xs text-muted-foreground">共 {data.targets.length} 个注册来源</p></div></CardContent></Card>
+          <Card className="gap-3 py-5"><CardContent className="flex items-center gap-3"><div className="flex size-11 items-center justify-center rounded-full bg-violet-50 text-violet-700"><CheckCircle2 aria-hidden="true" /></div><div><p className="font-semibold">{data.targets.filter((target) => target.enabled && target.supported !== false).length} 个来源可运行</p><p className="text-xs text-muted-foreground">共 {data.targets.length} 个注册来源 · {data.targets.filter((target) => target.supported === false).length} 个渠道受限</p></div></CardContent></Card>
         </div>
 
         {actionError ? <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"><AlertCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />{actionError}</div> : null}
@@ -347,7 +352,7 @@ export default function CrawlerAdminPage() {
 
       <section id="sources" className="mt-10 scroll-mt-20">
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-          <div><h2 className="text-xl font-semibold">来源管理</h2><p className="mt-1 text-sm text-muted-foreground">定时批次只包含已启用来源，运行中的来源不能停用。</p></div>
+          <div><h2 className="text-xl font-semibold">来源管理</h2><p className="mt-1 text-sm text-muted-foreground">定时批次只包含已启用且有受支持渠道的来源，运行中的来源不能停用。</p></div>
           <div className="flex gap-2"><Button variant="outline" disabled={dashboard.isFetching} onClick={() => void dashboard.refetch()}><RefreshCw aria-hidden="true" className={dashboard.isFetching ? 'animate-spin' : ''} />刷新</Button><Button disabled={busy || Boolean(data.activeRun)} onClick={() => runMutation.mutate(undefined)}><Play aria-hidden="true" />立即抓取全部</Button></div>
         </div>
         <div className="overflow-x-auto rounded-xl border bg-background">

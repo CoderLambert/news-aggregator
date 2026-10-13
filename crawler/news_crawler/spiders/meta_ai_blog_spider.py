@@ -17,19 +17,18 @@ class MetaAiBlogSpider(scrapy.Spider):
     custom_settings = {
         'DOWNLOAD_DELAY': 3,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 1,
-        'USER_AGENT': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'USER_AGENT': 'NewsHub/1.0 (+https://github.com/CoderLambert/news-aggregator)',
         'DEFAULT_REQUEST_HEADERS': {
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
-            'Cookie': '_js=1',
-            'Sec-Ch-Ua': '"Chromium";v="131", "Google Chrome";v="131"',
-            'Sec-Ch-Ua-Mobile': '?0',
-            'Sec-Ch-Ua-Platform': '"macOS"',
         },
         'HTTPERROR_ALLOWED_CODES': [400],
     }
 
     def parse(self, response):
+        if response.status != 200:
+            self.crawler.stats.set_value('outcome', 'http_error')
+            return
         # Extract article links from the blog listing page
         article_links = response.css('a[href*="/blog/"]')
         if not article_links:
@@ -39,6 +38,8 @@ class MetaAiBlogSpider(scrapy.Spider):
         for link in article_links:
             href = link.css('a::attr(href)').get('') or link.attrib.get('href', '')
             if not href or '/blog/' not in href:
+                continue
+            if urlsplit(href).path.rstrip('/') == '/blog':
                 continue
 
 
@@ -61,16 +62,25 @@ class MetaAiBlogSpider(scrapy.Spider):
             return
         if urlsplit(response.url).hostname not in POLICIES[self.name].domains:
             return
-        title = response.css('h1::text').get()
+        canonical = response.css('link[rel="canonical"]::attr(href)').get()
+        if canonical and not same_article_identity(response.url, response.urljoin(canonical), allow_host_alias=True):
+            parse_failure(self)
+            return
+        title = ''.join(response.css('h1 ::text').getall()).strip()
         if not title:
             title = response.css('[class*="title"]::text').get('')
         if not title:
             parse_failure(self)
             return
 
-        blocks = response.css('article p::text, .post-content p::text').getall()
+        blocks = response.css('article p, .post-content p').xpath('string(.)').getall()
         if not blocks:
-            blocks = response.css('.content p::text, main p::text').getall()
+            blocks = response.css('.content p, main p').xpath('string(.)').getall()
+        if not blocks:
+            # The publisher currently wraps the headline and prose in ordinary
+            # divs. Scope the preview to the nearest headline ancestor with
+            # paragraphs, instead of collecting unrelated footer/navigation text.
+            blocks = response.css('h1').xpath('ancestor::*[.//p][1]//p').xpath('string(.)').getall()
 
         content = '\n'.join(p.strip() for p in blocks if p.strip())
         if len(content) < 50:

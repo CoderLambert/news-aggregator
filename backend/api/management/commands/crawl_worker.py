@@ -14,6 +14,7 @@ from django.conf import settings as django_settings
 from django.core.management.base import BaseCommand, CommandError
 
 from api.models import CrawlRun
+from api.services.crawl_metrics import describe_crawl_result
 from api.services.crawler_control import (
     claim_next_run,
     finish_run,
@@ -178,10 +179,10 @@ class Command(BaseCommand):
             safe_error = 'Crawler Worker 停止，任务被中断。'
         elif exit_code == 0 and summary and summary.get('outcome', 'updated') in {'updated', 'unchanged', 'valid_empty'}:
             status = 'succeeded'
-            safe_error = ''
+            safe_error = describe_crawl_result(summary)
         elif exit_code == 0:
             status = 'failed'
-            safe_error = ('来源结果：' + summary['outcome']) if summary.get('outcome') else '爬虫退出但没有生成有效汇总。'
+            safe_error = describe_crawl_result(summary) if summary.get('outcome') else '爬虫退出但没有生成有效汇总。'
         else:
             status = 'failed'
             safe_error = f'爬虫进程退出码：{exit_code}'

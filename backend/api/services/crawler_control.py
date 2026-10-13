@@ -71,11 +71,14 @@ def sync_crawler_targets():
 def create_crawl_batch(*, trigger, requested_by=None, spider_names=None, retry_of=None):
     sync_crawler_targets()
     targets = CrawlerTarget.objects.select_for_update().filter(enabled=True)
+    from api.services.source_policy import POLICIES
+    unsupported = [key for key, policy in POLICIES.items() if policy.unsupported_reason]
+    targets = targets.exclude(spider_name__in=unsupported)
     if spider_names is not None:
         targets = targets.filter(spider_name__in=spider_names)
     targets = list(targets.order_by('sort_order', 'spider_name'))
     if not targets:
-        raise NoTargetsQueued('没有已启用的爬虫来源。')
+        raise NoTargetsQueued('没有已启用且受支持的采集渠道。')
 
     active = {
         run.target_id: run
@@ -215,7 +218,10 @@ def finish_run(run_id, *, status, exit_code, summary=None, safe_error='', log_pa
     run.errors = max(0, int(summary.get('errors', 0)))
     run.http_statuses = summary.get('http_statuses', {})
     from api.services.crawl_metrics import COUNT_KEYS
-    run.stats = {key: summary[key] for key in (*COUNT_KEYS, 'outcome', 'policy_skips_by_reason', 'checkpoint_committed', 'next_attempt_at') if key in summary}
+    detail_keys = ('outcome', 'failure_outcome', 'policy_skips_by_reason', 'checkpoint_committed', 'next_attempt_at',
+                   'primary_http_statuses', 'auxiliary_http_statuses', 'network_failures', 'auxiliary_failures',
+                   'request_failures_by_reason', 'filtered_requests', 'warnings', 'source_paused', 'robots_disallowed')
+    run.stats = {key: summary[key] for key in (*COUNT_KEYS, *detail_keys) if key in summary}
     run.stats['finish_reason'] = summary.get('finish_reason', '')
     run.safe_error = safe_error[:500]
     run.log_path = log_path[:500]

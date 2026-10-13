@@ -321,7 +321,7 @@ class _WireBudget:
 class _DeadlineFile:
     """Buffered-reader adapter that rechecks the total deadline on every read."""
 
-    def __init__(self, source: Any, connection: Any, deadline: float, budget: _WireBudget):
+    def __init__(self, source: Any, connection: Any, deadline: float, budget: _WireBudget, on_close=None):
         self._source = source
         self._connection = connection
         self._deadline = deadline
@@ -329,6 +329,7 @@ class _DeadlineFile:
         self._buffer = bytearray()
         self._eof = False
         self._closed = False
+        self._on_close = on_close
 
     def _read_source(self) -> bytes:
         if self._eof:
@@ -416,7 +417,11 @@ class _DeadlineFile:
     def close(self) -> None:
         if not self._closed:
             self._closed = True
-            self._source.close()
+            try:
+                self._source.close()
+            finally:
+                if self._on_close:
+                    self._on_close()
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._source, name)
@@ -430,6 +435,8 @@ class _SocketFacade:
         self._deadline = deadline
         self._budget = budget
         self._closed = False
+        self._close_requested = False
+        self._readers = 0
 
     def settimeout(self, _timeout: float | None) -> None:
         self._connection.settimeout(_remaining(self._deadline))
@@ -442,15 +449,21 @@ class _SocketFacade:
     def makefile(self, mode: str = 'rb') -> _DeadlineFile:
         if 'r' not in mode or 'b' not in mode:
             raise ValueError('Safe HTTP only supports binary response reads')
-        return _DeadlineFile(
-            self._connection.makefile(mode),
-            self,
-            self._deadline,
-            self._budget,
-        )
+        stream = self._connection.makefile(mode)
+        self._readers += 1
+        return _DeadlineFile(stream, self, self._deadline, self._budget, on_close=self._reader_closed)
+
+    def _reader_closed(self) -> None:
+        self._readers -= 1
+        if self._close_requested:
+            self.close()
 
     def close(self) -> None:
-        if not self._closed:
+        # HTTPConnection closes its socket immediately after headers when the
+        # response says Connection: close. The response file still owns the
+        # body, and needs a live socket for deadline updates while reading it.
+        self._close_requested = True
+        if not self._closed and self._readers == 0:
             self._closed = True
             self._connection.close()
 
@@ -501,6 +514,8 @@ def _read_body(response: http.client.HTTPResponse, connection: Any, deadline: fl
     body = bytearray()
     read_chunk = getattr(response, 'read1', response.read)
     while True:
+        if getattr(response, 'isclosed', lambda: False)():
+            break
         remaining_capacity = MAX_RESPONSE_BYTES + 1 - len(body)
         if remaining_capacity <= 0:
             raise _failure('HTTP response exceeds size limit')

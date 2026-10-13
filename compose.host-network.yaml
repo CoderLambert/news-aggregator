@@ -1,0 +1,8 @@
+# Optional Linux-only override for hosts whose VPN routes do not forward Docker
+# bridge traffic. Copy to compose.override.yaml to enable it for local commands.
+# These workers have no listening HTTP ports; the app keeps its loopback mapping.
+services:
+  crawler:
+    network_mode: host
+  full-content:
+    network_mode: host

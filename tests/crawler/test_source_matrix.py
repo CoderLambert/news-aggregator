@@ -23,8 +23,7 @@ from news_crawler.spiders.feed import FeedSpider
 
 
 NOW = datetime(2026, 10, 13, 12, tzinfo=timezone.utc)
-ARXIV_ENDPOINT = ('https://export.arxiv.org/api/query?search_query=cat:cs.AI+OR+cat:cs.LG+OR+cat:cs.CL'
-                  '&sortBy=submittedDate&sortOrder=descending&max_results=50')
+ARXIV_ENDPOINT = 'https://rss.arxiv.org/atom/cs.AI+cs.LG+cs.CL'
 SUMMARY = 'Publisher-provided discovery summary.'
 UNREVIEWED_BODY = '<p>Unreviewed long body that cannot become a full article.</p>' * 120
 FEED_SOURCES = (

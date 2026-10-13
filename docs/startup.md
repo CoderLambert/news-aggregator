@@ -252,6 +252,23 @@ CRAWL_RUN_ON_START=1
 
 若 Docker CLI 提示无法访问 daemon，请先由本机 Docker 管理员恢复该用户已有的访问权限，不要通过项目配置扩大系统权限。
 
+### 4.4 本地 VPN 出口与采集网络
+
+如果宿主机能访问来源，但 crawler/full-content 容器连接超时，先分别检查两边的 DNS 和 HTTPS 连接。在 Linux 上使用 Tailscale 出口节点时，Docker 桥接流量可能没有走通同一条出口路径。本地可使用专用覆盖配置：
+
+```bash
+cp compose.host-network.yaml compose.override.yaml
+docker compose up -d --no-build --wait app crawler full-content
+```
+
+该配置只让没有 HTTP 监听端口的 crawler 和 full-content Worker 使用宿主机网络。app 仍通过 `127.0.0.1:9527` 发布，数据库、任务锁、心跳和请求预算保持共享。`compose.override.yaml` 是忽略提交的本机配置；生产 Compose 不加载它。Docker 的网络行为参见 [host network driver](https://docs.docker.com/engine/network/drivers/host/)。
+
+手动正文获取由 `.env` 中的 `FULL_CONTENT_WORKER_ENABLED=1` 控制，`FULL_CONTENT_AUTO_ENQUEUE_ENABLED=0` 可继续保持关闭。修改后同时重建 app 和 full-content 容器，普通登录用户即可请求正文，不需要超级管理员权限。
+
+采集结果会区分主请求与 robots.txt 辅助请求，并保留入库数量、变化数量和失败原因。Feed 未到下一次轮询时间属于“等待执行”；部分条目入库后其他请求失败属于“部分成功”。源站拒绝或 robots.txt 禁止访问的入口不会反复自动请求；没有受支持入口的渠道会在管理页标明限制并排除出普通批次。
+
+当前使用的官方入口包括 [InfoQ 新闻 RSS](https://feed.infoq.com/news/)、Mistral 页面声明的 [RSS](https://mistral.ai/news/rss)，以及 arXiv 官方说明的 [多分类 Atom 订阅](https://info.arxiv.org/help/rss.html#subscribe-by-multiple-categories)。RSS 描述仍按摘要处理；论文摘要不会作为论文全文。
+
 ## 5. 服务控制和日志
 
 推荐使用统一命令，一次管理前端、后端和定时爬虫：

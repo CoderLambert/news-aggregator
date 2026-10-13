@@ -121,9 +121,20 @@ class BudgetedHTTPDownloadHandler:
                     await asyncio.sleep(delay)
             await _db(confirm_permit, permit)
             self.crawler.stats.inc_value('budget/physical_requests')
+            auxiliary = (request.meta.get('dont_obey_robotstxt') is True and
+                         urlsplit(request.url).path == '/robots.txt')
+            group = 'auxiliary' if auxiliary else 'discovery'
+            self.crawler.stats.set_value('request_classification_available', True)
+            self.crawler.stats.inc_value(f'{group}/request_count')
             method = self.inner.download_request
             args = (request, self.crawler.spider) if 'spider' in inspect.signature(method).parameters else (request,)
-            response = await asyncio.wait_for(_await_inner(method(*args)), timeout=15)
+            try:
+                response = await asyncio.wait_for(_await_inner(method(*args)), timeout=15)
+            except Exception as error:
+                reason = 'timeout' if isinstance(error, TimeoutError) else 'transport_error'
+                self.crawler.stats.inc_value(f'{group}/failures/{reason}')
+                raise
+            self.crawler.stats.inc_value(f'{group}/http_status_count/{response.status}')
             headers = {key.decode('latin1'): response.headers.get(key).decode('latin1') for key in response.headers.keys()}
             retry_at = await _db(record_response, permit, response.status, headers, host=urlsplit(request.url).hostname)
             self.crawler.stats.inc_value(f'budget/http_status_count/{response.status}')

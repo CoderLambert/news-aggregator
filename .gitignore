@@ -36,6 +36,7 @@ frontend/dist/
 # Env
 .env
 .env.local
+compose.override.yaml
 *.pem
 
 # IDE

@@ -719,3 +719,39 @@ def test_http_error_control_survives_compressed_or_partial_error_page(monkeypatc
     with pytest.raises(safe_http.SafeHTTPStatusError) as caught:
         safe_http.safe_urlopen('http://articles.example/story')
     assert caught.value.http_status == status and caught.value.error_code == code
+
+@pytest.mark.parametrize('chunked', [False, True])
+def test_connection_close_response_keeps_real_socket_alive_until_body_is_read(monkeypatch, chunked):
+    """A real socket catches premature close hidden by the fake transport."""
+    client, server = socket.socketpair()
+    body = b'Complete publisher body.'
+    headers = b'Transfer-Encoding: chunked\r\n' if chunked else f'Content-Length: {len(body)}\r\n'.encode()
+    payload = (f'{len(body):x}\r\n'.encode() + body + b'\r\n0\r\n\r\n') if chunked else body
+    wire = b'HTTP/1.1 200 OK\r\nConnection: close\r\n' + headers + b'\r\n' + payload
+    errors = []
+    def serve():
+        try:
+            server.settimeout(2)
+            request = b''
+            while b'\r\n\r\n' not in request:
+                request += server.recv(4096)
+            server.sendall(wire)
+        except Exception as error:
+            errors.append(error)
+        finally:
+            server.close()
+    thread = threading.Thread(target=serve)
+    thread.start()
+    monkeypatch.setattr(safe_http, '_connect_pinned', lambda *args: client)
+    target = safe_http.PublicURL('http://publisher.example/article', 'http', 'publisher.example', 80,
+                                '/article', 'publisher.example', ())
+    try:
+        status, _, received = safe_http._fetch_one(urllib.request.Request(target.url), target,
+            time.monotonic() + 2, False, safe_http._WireBudget())
+        assert status == 200 and received == body
+        assert client.fileno() == -1
+    finally:
+        client.close()
+        thread.join(timeout=3)
+        server.close()
+    assert not thread.is_alive() and not errors

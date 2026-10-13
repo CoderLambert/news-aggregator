@@ -1,4 +1,4 @@
-from django.db.models import Case, IntegerField, Prefetch, Value, When
+from django.db.models import Case, IntegerField, JSONField, OuterRef, Prefetch, Subquery, Value, When
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
@@ -42,7 +42,11 @@ def error_response(code, message, http_status=status.HTTP_400_BAD_REQUEST, *, fi
 
 def target_queryset():
     active_runs = CrawlRun.objects.filter(status__in=ACTIVE_RUN_STATUSES).select_related('target', 'batch')
-    return CrawlerTarget.objects.prefetch_related(
+    latest = CrawlRun.objects.filter(target_id=OuterRef('pk'), finished_at__isnull=False).order_by('-finished_at', '-queued_at')
+    return CrawlerTarget.objects.annotate(
+        last_run_stats=Subquery(latest.values('stats')[:1], output_field=JSONField()),
+        last_run_exit_code=Subquery(latest.values('exit_code')[:1], output_field=IntegerField()),
+    ).prefetch_related(
         Prefetch('runs', queryset=active_runs, to_attr='prefetched_active_runs'),
     ).order_by('sort_order', 'spider_name')
 
@@ -51,7 +55,7 @@ def batch_queryset():
     runs = CrawlRun.objects.select_related('target').prefetch_related(
         Prefetch(
             'retries',
-            queryset=CrawlRun.objects.only('id', 'status', 'retry_of_id', 'queued_at').order_by('-queued_at'),
+            queryset=CrawlRun.objects.only('id', 'status', 'retry_of_id', 'queued_at', 'exit_code', 'stats').order_by('-queued_at'),
             to_attr='prefetched_retries',
         ),
     ).order_by('queued_at')

@@ -7,13 +7,14 @@ from api.services.source_policy import POLICIES
 from api.services.source_dates import parse_source_datetime
 from news_crawler.items import NewsItem
 from news_crawler.category_map import classify
+from news_crawler.spiders.feed import FeedSpider
 
 
-class MistralBlogSpider(scrapy.Spider):
-    """Mistral AI blog — HTML scraping (no RSS feed available)."""
+class MistralBlogSpider(FeedSpider):
+    """Publisher-advertised RSS, with an HTML parser for saved legacy fixtures."""
     name = 'mistral'
     allowed_domains = ['mistral.ai']
-    start_urls = ['https://mistral.ai/news/']
+    start_urls = [POLICIES[name].feed_url]
 
     custom_settings = {
         'DOWNLOAD_DELAY': 3,
@@ -22,6 +23,11 @@ class MistralBlogSpider(scrapy.Spider):
     }
 
     def parse(self, response):
+        if 'feed_context' in response.meta:
+            return super().parse(response)
+        return self.parse_listing(response)
+
+    def parse_listing(self, response):
         # Extract article links from the news listing page
         # Links like /news/article-slug/
         article_links = response.css('a[href*="/news/"]')
@@ -35,7 +41,7 @@ class MistralBlogSpider(scrapy.Spider):
                 continue
 
             # Skip category/filter URLs and pagination
-            if href == '/news/' or '?' in href or '#' in href:
+            if urlsplit(href).path.rstrip('/') in {'/news', '/news/rss'} or '?' in href or '#' in href:
                 continue
 
 
@@ -58,7 +64,7 @@ class MistralBlogSpider(scrapy.Spider):
             return
         if urlsplit(response.url).hostname not in POLICIES[self.name].domains:
             return
-        title = response.css('h1::text').get()
+        title = ''.join(response.css('h1 ::text').getall()).strip()
         if not title:
             title = response.css('[class*="title"] h1::text, [class*="title"]::text').get('')
         if not title:
@@ -66,11 +72,11 @@ class MistralBlogSpider(scrapy.Spider):
             return
 
         # Try multiple selectors for content
-        blocks = response.css('article p::text, .prose p::text').getall()
+        blocks = response.css('article p, .prose p').xpath('string(.)').getall()
         if not blocks:
-            blocks = response.css('.content p::text').getall()
+            blocks = response.css('.content p').xpath('string(.)').getall()
         if not blocks:
-            blocks = response.css('main p::text').getall()
+            blocks = response.css('main p').xpath('string(.)').getall()
 
         content = '\n'.join(p.strip() for p in blocks if p.strip())
         if len(content) < 50:

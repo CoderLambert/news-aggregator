@@ -30,9 +30,14 @@ export interface CrawlRun {
   httpStatuses: Record<string, number>
   finishReason: string
   safeError: string
+  outcome?: string
+  entriesCommitted?: number
+  entriesChanged?: number
+  warnings?: string[]
   retryOf: string | null
   latestRetryId: string | null
   latestRetryStatus: CrawlRunStatus | null
+  latestRetryDisplayStatus?: string | null
   cancelRequestedAt: string | null
 }
 
@@ -40,8 +45,11 @@ export interface CrawlerTarget {
   spiderName: string
   displayName: string
   enabled: boolean
+  supported?: boolean
+  unsupportedReason?: string
   sortOrder: number
   lastStatus: string
+  lastResultStatus?: string
   lastStartedAt: string | null
   lastFinishedAt: string | null
   lastItems: number
