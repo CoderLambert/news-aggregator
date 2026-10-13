@@ -16,12 +16,14 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libgomp1 \
     && rm -rf /var/lib/apt/lists/*
-COPY backend/requirements.txt /app/backend/requirements.txt
 ARG TORCH_VERSION=2.14.1+cpu
 RUN pip install --no-cache-dir \
         --index-url https://download.pytorch.org/whl/cpu \
-        "torch==${TORCH_VERSION}" \
-    && pip install --no-cache-dir -r /app/backend/requirements.txt
+        "torch==${TORCH_VERSION}"
+# Keep the large CPU wheel cached across ordinary requirements/source changes.
+COPY backend/requirements.txt /app/backend/requirements.txt
+ARG NEWSHUB_PYPI_INDEX=https://pypi.org/simple
+RUN pip install --no-cache-dir -r /app/backend/requirements.txt --index-url "${NEWSHUB_PYPI_INDEX}"
 COPY backend/ /app/backend/
 COPY crawler/ /app/crawler/
 COPY start_waitress.py /app/start_waitress.py

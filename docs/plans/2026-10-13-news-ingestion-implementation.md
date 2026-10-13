@@ -226,3 +226,6 @@ full_content_stats 正文覆盖率为 complete / 符合抓取准入的 article�
 
 
 补充迁移/身份代际的独立实测 **31 passed**：0035历史库一路迁移到0038，历史事件保持success且提交未知，创建时间留空，用户记录不变；审计URL纠正后失败新代际、旧主机冷却保留，Source FK单独纠正不清耗尽计数，后来失败计数也能阻止undo。修正终止且无任务的旧failed状态允许undo恢复，不触碰持久冷却。相关迁移/修复/指标/下载handler回归实际 **74 passed**，包含经过预算识别的GitHub配额403记rate_limited（实际HTTP仍403），普通认证403仍blocked。
+
+
+本机生产构建遇到公开PyPI文件下载约40–45KB/s，第一次原始构建仍在依赖下载阶段，未声称构建/浏览器通过。为完成本地门禁，将CPU Torch安装拆成独立缓存层（固定2.14.1+cpu、原官方CPU源），依赖安装增加可选 NEWSHUB_PYPI_INDEX，默认仍是原PyPI HTTPS，CI默认不变。本地选择公开HTTPS镜像源 mirrors.aliyun.com/pypi/simple（Django6.1.2包链接SHA与官方JSON一致，1MiB范围实测4.13s）；不禁用TLS/哈希验证，不涉及新闻来源开关或业务API。后续记录实际使用的镜像、版本与真实门禁结果。
