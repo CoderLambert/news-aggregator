@@ -4,6 +4,8 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
 COMPOSE_FILE="$PROJECT_ROOT/compose.prod.yaml"
+STOP_SERVICES=(full-content crawler indexer app)
+TARGET_WORKERS=(crawler indexer)
 EXECUTE=0
 FRESH=0
 ENV_FILE=""
@@ -60,7 +62,7 @@ cleanup() {
     local status=$?
     trap - EXIT
     if ((WINDOW_STARTED && !COMPLETE)); then
-        if ! compose_call stop --timeout 45 crawler indexer app >/dev/null 2>&1; then
+        if ! compose_call stop --timeout 45 "${STOP_SERVICES[@]}" >/dev/null 2>&1; then
             printf 'deploy: failed to confirm fail-closed stop for this Compose project.\n' >&2
         fi
         if ! restore_old_static_if_needed; then
@@ -109,6 +111,9 @@ ROOT="$(realpath -m -- "$ROOT")"
 [[ -f "$MANIFEST" && ! -L "$MANIFEST" ]] || fail '--manifest must be a regular target release manifest.'
 python3 "$SCRIPT_DIR/release_manifest.py" validate --manifest "$MANIFEST" >/dev/null \
     || fail 'target release manifest is invalid.'
+target_workers_text="$(python3 "$SCRIPT_DIR/release_manifest.py" worker-services --manifest "$MANIFEST")" \
+    || fail 'could not identify target worker capabilities.'
+mapfile -t TARGET_WORKERS <<<"$target_workers_text"
 TARGET_SHA="$(python3 - "$MANIFEST" <<'PY'
 import json, sys
 with open(sys.argv[1], encoding="utf-8") as stream:
@@ -189,7 +194,7 @@ fi
 if ((FRESH)); then
     [[ ! -e "$ROOT/current" && ! -L "$ROOT/current" ]] \
         || fail '--fresh requires no existing current static release.'
-    for service in app crawler indexer; do
+    for service in app crawler indexer full-content; do
         existing="$("${COMPOSE[@]}" ps --all --quiet "$service")" \
             || fail "could not inspect existing Compose service $service."
         [[ -z "$existing" ]] || fail "--fresh requires no existing $service container in this project."
@@ -252,7 +257,7 @@ if ((FRESH)); then
     }
     run_compose_migrate || fail 'one-shot database migration failed; project remains stopped.'
 else
-    compose_call stop --timeout 45 crawler indexer app \
+    compose_call stop --timeout 45 "${STOP_SERVICES[@]}" \
         || fail 'could not stop all project writers; project remains stopped.'
     running="$(docker ps --quiet --filter "volume=$DB_VOLUME")" \
         || fail 'could not verify that database volume writers stopped.'
@@ -311,9 +316,9 @@ assert_target_service_image() {
 }
 wait_healthy app && assert_target_service_image app \
     || fail 'new app did not pass its readiness health check; project remains stopped.'
-compose_call up --no-deps --detach crawler indexer \
+compose_call up --no-deps --detach "${TARGET_WORKERS[@]}" \
     || fail 'new workers failed to start; project remains stopped.'
-for service in crawler indexer; do
+for service in "${TARGET_WORKERS[@]}"; do
     wait_healthy "$service" && assert_target_service_image "$service" \
         || fail "new $service worker did not pass its health check; project remains stopped."
 done

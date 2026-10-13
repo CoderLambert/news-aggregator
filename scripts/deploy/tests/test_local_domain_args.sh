@@ -95,6 +95,15 @@ if [[ "$1" == compose ]]; then
         grep -Fq "NEWSHUB_LOCAL_DOMAIN_IMAGE_ID: \"$MOCK_APP_IMAGE_ID\"" "$compose_file" || exit 1
         ! grep -Eq '\$\{NEWSHUB_IMAGE|\$\{NGINX_IMAGE' "$compose_file" || exit 1
         ! grep -Eq '^    ports:' "$compose_file" || exit 1
+        if [[ "${MOCK_WORKER_CAPABLE:-false}" == true ]]; then
+            grep -Fq '  full-content:' "$compose_file" || exit 1
+            grep -Fq '    network_mode: none' "$compose_file" || exit 1
+            grep -Fq '      - logs-data:/var/lib/newshub/logs' "$compose_file" || exit 1
+            grep -Fq '"full_content_healthcheck"' "$compose_file" || exit 1
+            grep -Fq '  FULL_CONTENT_WORKER_ENABLED: "0"' "$compose_file" || exit 1
+        else
+            ! grep -Fq '  full-content:' "$compose_file" || exit 1
+        fi
         if [[ -n "${MOCK_MODE_CAPTURE_LOG:-}" ]]; then
             smoke_root="$(dirname -- "$compose_file")"
             for mode_entry in \
@@ -117,12 +126,15 @@ if [[ "$1" == compose ]]; then
     fi
     if [[ "$*" == *' ps -q gateway' ]]; then
         printf 'fake-gateway-container\n'
+    elif [[ "$*" == *' ps -q full-content' ]]; then
+        printf 'fake-worker-container\n'
     elif [[ "$*" == *'manage.py shell -c'* ]]; then
         printf '1\n'
     fi
     exit 0
 fi
 if [[ "$1" == inspect ]]; then
+    if [[ "$*" == *'State.Health.Status'* ]]; then printf 'healthy\n'; exit 0; fi
     printf '172.28.0.2\n'
     exit 0
 fi
@@ -142,6 +154,10 @@ if [[ "$1" == run && " $* " == *" -d "* ]]; then
             >>"$MOCK_MODE_CAPTURE_LOG"
     fi
     printf 'fake-sse-container\n'
+    exit 0
+fi
+if [[ "$1" == run && "$*" == *'api/services/full_content_worker.py'* ]]; then
+    printf '{"full_content_worker":%s}\n' "${MOCK_WORKER_CAPABLE:-false}"
     exit 0
 fi
 if [[ "$1" == run && "$*" == *'nginx -v'* ]]; then

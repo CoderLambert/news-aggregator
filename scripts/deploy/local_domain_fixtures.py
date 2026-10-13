@@ -318,6 +318,9 @@ def fixture_database_phase():
                     "```\n"
                 ),
                 full_content_fetch_status="success", publish_time=timezone.now(),
+                **({"full_content_state": "legacy"} if any(
+                    f.name == "full_content_state" for f in News._meta.get_fields()
+                ) else {}),
                 source=source, category=category,
                 url="https://fixture.invalid/newshub-local-g2-" + run_id,
             )

@@ -4,6 +4,8 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
 COMPOSE_FILE="$PROJECT_ROOT/compose.prod.yaml"
+STOP_SERVICES=(full-content crawler indexer app)
+TARGET_WORKERS=(crawler indexer)
 EXECUTE=0
 ENV_FILE=""
 PROJECT=""
@@ -55,7 +57,7 @@ cleanup() {
     local status=$?
     trap - EXIT
     if ((WINDOW_STARTED && !COMPLETE)); then
-        if ! compose_call stop --timeout 45 crawler indexer app >/dev/null 2>&1; then
+        if ! compose_call stop --timeout 45 "${STOP_SERVICES[@]}" >/dev/null 2>&1; then
             printf 'rollback: failed to confirm fail-closed stop for this Compose project.\n' >&2
         fi
         if ! restore_current_if_needed; then
@@ -106,6 +108,9 @@ python3 "$SCRIPT_DIR/release_manifest.py" validate --manifest "$MANIFEST" >/dev/
     || fail 'target release manifest is invalid.'
 python3 "$SCRIPT_DIR/release_manifest.py" validate --manifest "$CURRENT_MANIFEST" >/dev/null \
     || fail 'current release manifest is invalid.'
+target_workers_text="$(python3 "$SCRIPT_DIR/release_manifest.py" worker-services --manifest "$MANIFEST")" \
+    || fail 'could not identify target worker capabilities.'
+mapfile -t TARGET_WORKERS <<<"$target_workers_text"
 TARGET_SHA="$(python3 - "$MANIFEST" <<'PY'
 import json, sys
 with open(sys.argv[1], encoding="utf-8") as stream:
@@ -203,7 +208,7 @@ if ((${#filtered_ids[@]} == 1)); then
 fi
 
 WINDOW_STARTED=1
-compose_call stop --timeout 45 crawler indexer app \
+compose_call stop --timeout 45 "${STOP_SERVICES[@]}" \
     || fail 'could not stop all project writers; project remains stopped.'
 running="$(docker ps --quiet --filter "volume=$DB_VOLUME")" \
     || fail 'could not verify that database volume writers stopped.'
@@ -264,9 +269,9 @@ assert_target_service_image() {
 }
 wait_healthy app && assert_target_service_image app \
     || fail 'target app did not pass its readiness health check; project remains stopped.'
-compose_call up --no-deps --detach crawler indexer \
+compose_call up --no-deps --detach "${TARGET_WORKERS[@]}" \
     || fail 'target workers failed to start; project remains stopped.'
-for service in crawler indexer; do
+for service in "${TARGET_WORKERS[@]}"; do
     wait_healthy "$service" && assert_target_service_image "$service" \
         || fail "target $service worker did not pass its health check; project remains stopped."
 done

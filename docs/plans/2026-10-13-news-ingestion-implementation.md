@@ -169,3 +169,12 @@ article_content 收口 read/enqueue/context_scope；聊天和研究普通文章�
 完整前端 Vitest 实际 **481 passed / 66 files**；typecheck、lint（无 warning/error）、production build 全部实际通过。新增 queued/cooling、不重复 POST、局部停止、旧 revision、翻译恢复与聊天 scope 测试。按两份 React 最佳实践技能检查：保留懒加载和请求 owner fencing，effect 使用稳定依赖、取消清理；修复 render 中 Date.now 与缺失 hook dependency。`manage.py check` 实际无问题；`makemigrations --check --dry-run` 实际 No changes detected；`git diff --check` 通过。
 
 T10–T12、既有全部后端 CI/release gates、兼容 Compose 与恢复测试尚需完成，当前还不具备生产发布条件。没有部署/真实开关或数据修改。
+
+
+## T10 实际结果
+
+生产和开发 Compose 增加 full-content 服务，同镜像、共享数据库及日志/lock/heartbeat、init、45 秒停止宽限和健康检查；所有新开关默认关闭。生产 release manifest schema 2 显式声明 Worker capability，以无网络、无数据库挂载的只读文件探针核对实际镜像。旧 schema 1 与无 Worker 镜像保持兼容，不能把新镜像伪装为旧 manifest 绕开新 Worker。
+
+部署/回滚迁移前及失败后停止本项目四服务，按目标能力启动并验证 Worker；不健康/缺失时不切静态版本。restore 已有通用卷占用检查拒绝任意仍运行写入者，包括新 Worker，因此沿用这一更完整的检查。在线 backup 的文件/嵌入 manifest 校验同步接受严格 schema 2，快照 artifact 版本保持不变。真实文件 WAL 在线备份测试证明未提交的 identity/Feed/budget 更新不会混入快照，恢复快照通过 quick_check。
+
+相关 Python release/volume/fixture/新 Worker/快照测试实际 **163 passed**。release_scripts mocked gates 实际通过；local-domain args/resource gates 分别以旧镜像 capability=false 和新镜像 true 实际通过（Docker/browser 替身）。隔离本地域名脚本为新镜像加入禁用 Worker、共享数据库和日志卷、无外网网络及健康门禁，旧镜像不执行不存在的命令。G1/G2 正文夹具显式 legacy，避免把纯 raw body 当作新规则完整正文。真实 Docker/浏览器与完整 CI 结果将在 T12 填入，尚未宣称通过。

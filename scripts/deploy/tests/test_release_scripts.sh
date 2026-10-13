@@ -78,6 +78,10 @@ case "$1" in
     ;;
   run)
     case "$joined" in
+      *'api/services/full_content_worker.py'*)
+        printf '%s\n' '{"full_content_worker":false}'
+        exit 0
+        ;;
       *'sqlite_snapshot.py inspect --source'*)
         printf '%s\n' '{"quick_check":"ok","migrations":[{"app":"api","name":"0002_new"}]}'
         exit 0

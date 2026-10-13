@@ -249,6 +249,14 @@ IMAGE_REVISION="${IMAGE_REVISION,,}"
 IMAGE_USER="$(docker image inspect --format='{{.Config.User}}' "$IMAGE" 2>/dev/null)" \
     || fail 'could not inspect the application image user.'
 [[ "$IMAGE_USER" == '10001:10001' ]] || fail 'application image must run as UID:GID 10001:10001.'
+WORKER_CAPABLE="$("$PYTHON_BIN" - "$PROJECT_ROOT" "$IMAGE_ID" <<'PY_CAPABILITY'
+import sys
+sys.path.insert(0, sys.argv[1])
+from scripts.deploy.release_manifest import inspect_worker_capability
+print('1' if inspect_worker_capability(sys.argv[2]) else '0')
+PY_CAPABILITY
+)" || fail 'could not inspect the frozen image worker capability.'
+[[ "$WORKER_CAPABLE" == 0 || "$WORKER_CAPABLE" == 1 ]] || fail 'invalid image worker capability.'
 NGINX_VERSION="$(docker run --rm --pull=never --network=none "$NGINX_IMAGE_ID" nginx -v 2>&1)" \
     || fail 'could not read the selected local Nginx version.'
 if [[ "$STAGE" == g2 ]]; then
@@ -395,6 +403,14 @@ x-smoke-environment: &smoke-environment
   CRAWLER_SCHEDULER_ENABLED: "0"
   CRAWL_RUN_ON_START: "0"
   SEARCH_INDEX_ENABLED: "0"
+  STRUCTURED_BODY_INGEST_ENABLED: "0"
+  STRUCTURED_BODY_SOURCE_KEYS: ""
+  FULL_CONTENT_WORKER_ENABLED: "0"
+  FULL_CONTENT_AUTO_ENQUEUE_ENABLED: "0"
+  FULL_CONTENT_AUTO_SOURCE_KEYS: ""
+  TECHCRUNCH_WP_ENABLED: "0"
+  FULL_CONTENT_WORKER_LOCK: /var/lib/newshub/logs/full-content.lock
+  FULL_CONTENT_WORKER_HEARTBEAT: /var/lib/newshub/logs/full-content-heartbeat.json
   RUN_MAIN: "true"
 EOF
     printf '  DJANGO_SECRET_KEY: "%s"\n' "$secret_key"
@@ -454,14 +470,41 @@ EOF
         condition: service_started
     volumes:
       - db-data:/var/lib/newshub/db
+      - logs-data:/var/lib/newshub/logs
     restart: "no"
-
+EOF
+    if [[ "$WORKER_CAPABLE" == 1 ]]; then
+        printf '\n  full-content:\n    image: "%s"\n' "$IMAGE_ID"
+        cat <<'EOF'
+    pull_policy: never
+    command: ["python", "/app/backend/manage.py", "auto_fetch_full_content", "--foreground"]
+    environment: *smoke-environment
+    network_mode: none
+    init: true
+    stop_grace_period: 45s
+    depends_on:
+      app:
+        condition: service_started
+    volumes:
+      - db-data:/var/lib/newshub/db
+      - logs-data:/var/lib/newshub/logs
+    healthcheck:
+      test: ["CMD", "python", "/app/backend/manage.py", "full_content_healthcheck"]
+      interval: 10s
+      timeout: 8s
+      retries: 3
+      start_period: 30s
+    restart: "no"
+EOF
+    fi
+    cat <<'EOF'
 networks:
   isolated:
     internal: true
 
 volumes:
   db-data: {}
+  logs-data: {}
 EOF
 } >"$task_compose_file"
 
@@ -469,12 +512,14 @@ docker compose --project-name "$task_compose_project" --file "$task_compose_file
     --env-file "$task_compose_env" config --quiet \
     || fail 'isolated smoke Compose configuration is invalid.'
 
+smoke_services=(gateway app)
+[[ "$WORKER_CAPABLE" == 0 ]] || smoke_services+=(full-content)
 task_compose_started=1
 docker compose --project-name "$task_compose_project" --file "$task_compose_file" \
     --env-file "$task_compose_env" run --rm migrate \
     || fail 'temporary database migration failed.'
 docker compose --project-name "$task_compose_project" --file "$task_compose_file" \
-    --env-file "$task_compose_env" up -d gateway app \
+    --env-file "$task_compose_env" up -d "${smoke_services[@]}" \
     || fail 'isolated Nginx and Waitress services failed to start.'
 
 app_container_id=""
@@ -535,9 +580,22 @@ for _attempt in {1..30}; do
     sleep 2
 done
 ((ready)) || fail 'temporary app did not pass its database readiness probe.'
+if [[ "$WORKER_CAPABLE" == 1 ]]; then
+    worker_ready=0
+    for attempt in {1..30}; do
+        worker_id="$(docker compose --project-name "$task_compose_project" --file "$task_compose_file" \
+            --env-file "$task_compose_env" ps -q full-content)" || fail 'could not identify the isolated worker.'
+        if [[ -n "$worker_id" ]] && [[ "$(docker inspect --format '{{.State.Health.Status}}' "$worker_id")" == healthy ]]; then
+            worker_ready=1
+            break
+        fi
+        sleep 2
+    done
+    ((worker_ready)) || fail 'isolated disabled worker did not pass shared database/lock/heartbeat health.'
+fi
 
 if [[ "$STAGE" == g1 ]]; then
-    seed_code="from django.utils import timezone; from api.models import Category, News, Source; category,_=Category.objects.get_or_create(name='NewsHub Local Domain Fixture', defaults={'slug':'newshub-local-domain-fixture'}); source,_=Source.objects.get_or_create(name='NewsHub Local Domain Fixture', defaults={'url':'https://fixture.invalid/news'}); flow=\"## Isolated article flow\\n\\n\"+chr(96)*3+\"mermaid\\nflowchart TD\\n  news[Fixture article] --> diagram[Mermaid flow]\\n\"+chr(96)*3+\"\\n\"; news,_=News.objects.get_or_create(url='https://fixture.invalid/newshub-local-domain-g1', defaults={'title':'NewshubLocalDomainG1Fixture','content':'isolated smoke fixture','full_content':flow,'full_content_fetch_status':'success','publish_time':timezone.now(),'source':source,'category':category}); print(news.pk)"
+    seed_code="from django.utils import timezone; from api.models import Category, News, Source; category,_=Category.objects.get_or_create(name='NewsHub Local Domain Fixture', defaults={'slug':'newshub-local-domain-fixture'}); source,_=Source.objects.get_or_create(name='NewsHub Local Domain Fixture', defaults={'url':'https://fixture.invalid/news'}); flow=\"## Isolated article flow\\n\\n\"+chr(96)*3+\"mermaid\\nflowchart TD\\n  news[Fixture article] --> diagram[Mermaid flow]\\n\"+chr(96)*3+\"\\n\"; news,_=News.objects.get_or_create(url='https://fixture.invalid/newshub-local-domain-g1', defaults={'title':'NewshubLocalDomainG1Fixture','content':'isolated smoke fixture','full_content':flow,'full_content_fetch_status':'success',**({'full_content_state':'legacy'} if any(f.name=='full_content_state' for f in News._meta.get_fields()) else {}),'publish_time':timezone.now(),'source':source,'category':category}); print(news.pk)"
     if ! docker compose --project-name "$task_compose_project" --file "$task_compose_file" \
         --env-file "$task_compose_env" exec -T app python /app/backend/manage.py shell -c "$seed_code" \
         >"$task_smoke_root/seed.stdout" 2>"$task_smoke_root/seed.stderr"; then

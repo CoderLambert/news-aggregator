@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 REVISION_LABEL = "org.opencontainers.image.revision"
 PRODUCTION_USER = "10001:10001"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -48,16 +48,26 @@ def validate_image_reference(image: str, release_sha: str) -> str:
 
 
 def validate_manifest(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict) or set(value) != {
+    if not isinstance(value, dict):
+        raise ManifestError('manifest must be an object')
+    version = value.get('schema_version')
+    if type(version) is not int or version not in {1, 2}:
+        raise ManifestError('unsupported manifest schema version')
+    fields = {
         "schema_version",
         "release_sha",
         "image",
         "migrations",
         "static_sha",
-    }:
+    }
+    if version == 2:
+        fields.add('capabilities')
+    if set(value) != fields:
         raise ManifestError("manifest fields are incomplete or unknown")
-    if type(value["schema_version"]) is not int or value["schema_version"] != SCHEMA_VERSION:
-        raise ManifestError("unsupported manifest schema version")
+    if version == 2 and (not isinstance(value['capabilities'], dict) or
+                        set(value['capabilities']) != {'full_content_worker'} or
+                        type(value['capabilities']['full_content_worker']) is not bool):
+        raise ManifestError('manifest capabilities are invalid')
     release_sha = value["release_sha"]
     if not isinstance(release_sha, str) or not SHA_RE.fullmatch(release_sha):
         raise ManifestError("manifest release_sha is invalid")
@@ -87,6 +97,24 @@ def validate_manifest(value: Any) -> dict[str, Any]:
     if migrations != sorted(migrations, key=lambda item: (item["app"], item["name"])):
         raise ManifestError("manifest migrations must be sorted")
     return value
+
+
+def full_content_capability(value):
+    return value.get('capabilities', {}).get('full_content_worker', False)
+
+
+_CAPABILITY_QUERY = """import json; from pathlib import Path; print(json.dumps({'full_content_worker': all(Path('/app/backend/' + name).is_file() for name in ('api/management/commands/auto_fetch_full_content.py', 'api/management/commands/full_content_healthcheck.py', 'api/services/full_content_worker.py', 'api/services/article_content.py'))}))"""
+
+
+def inspect_worker_capability(image):
+    try:
+        output = _docker_text('run', '--rm', '--pull=never', '--network', 'none', '--entrypoint', 'python', image, '-c', _CAPABILITY_QUERY)
+        value = json.loads(output)
+        if set(value) != {'full_content_worker'} or type(value['full_content_worker']) is not bool:
+            raise ValueError()
+        return value['full_content_worker']
+    except (ValueError, TypeError):
+        raise ManifestError('image worker capability output is invalid') from None
 
 
 def sha256_tree(root: Path) -> str:
@@ -273,6 +301,7 @@ def describe_image(image: str, release_sha: str) -> dict[str, Any]:
         "image": image,
         "migrations": image_data.get("migrations"),
         "static_sha": image_data.get("static_sha"),
+        "capabilities": {"full_content_worker": inspect_worker_capability(image)},
     }
     return validate_manifest(manifest)
 
@@ -325,6 +354,8 @@ def _parser() -> argparse.ArgumentParser:
     validate_static = subparsers.add_parser("validate-static", help="verify exported static content")
     validate_static.add_argument("--release", required=True, type=Path)
     validate_static.add_argument("--expected-sha", required=True)
+    workers = subparsers.add_parser('worker-services', help='read target worker services without Docker')
+    workers.add_argument('--manifest', required=True, type=Path)
     return parser
 
 
@@ -345,7 +376,12 @@ def main(argv: list[str] | None = None) -> int:
                 if manifest["image"] != args.image or manifest["release_sha"] != args.sha:
                     raise ManifestError("manifest does not match the requested image/SHA")
                 inspect_production_image(args.image, args.sha)
+                if inspect_worker_capability(args.image) != full_content_capability(manifest):
+                    raise ManifestError('image worker capability does not match manifest; regenerate its manifest')
             print(json.dumps(manifest, sort_keys=True))
+        elif args.command == 'worker-services':
+            manifest = load_manifest(args.manifest)
+            print('crawler\nindexer' + ('\nfull-content' if full_content_capability(manifest) else ''))
         else:
             if not re.fullmatch(r"[0-9a-f]{64}", args.expected_sha):
                 raise ManifestError("expected static SHA must be 64 lowercase hex characters")
