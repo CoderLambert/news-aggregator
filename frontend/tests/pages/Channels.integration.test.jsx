@@ -80,8 +80,10 @@ describe('personal reading scopes', () => {
     const sources = screen.getByRole('group', { name: '来源' })
     expect(within(sources).getByRole('button', { name: 'WebKit' })).toBeInTheDocument()
     expect(within(sources).queryByRole('button', { name: 'OpenAI Blog' })).toBeNull()
-    fireEvent.click(within(screen.getByRole('region', { name: '新闻筛选' })).getByRole('button', { name: '清除筛选' }))
-    await waitFor(() => expect(screen.getByTestId('url')).toHaveTextContent('?scope=ungrouped'))
+    fireEvent.click(within(screen.getByRole('region', { name: '新闻筛选' })).getByRole('button', { name: '清除分类与来源' }))
+    await waitFor(() => expect(screen.getByTestId('url')).not.toHaveTextContent('category='))
+    expect(screen.getByTestId('url')).toHaveTextContent('search=ai')
+    expect(screen.getByTestId('url')).toHaveTextContent('scope=ungrouped')
   })
   it('aborts the previous request and clears its articles when switching quickly', async () => {
     const pending = deferred()
