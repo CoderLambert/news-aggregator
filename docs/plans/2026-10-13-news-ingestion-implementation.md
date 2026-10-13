@@ -232,3 +232,65 @@ full_content_stats 正文覆盖率为 complete / 符合抓取准入的 article�
 
 
 已知截断边界补充：safe_http 从响应头拒绝206或200+Content-Range，错误码body_partial，正文不交给候选/写入器；Scrapy也拒绝部分Feed并保留真实HTTP计数。HTTP401/403/404/5xx的压缩或过大错误页不覆盖已识别的控制状态，小型urllib.HTTPError响应仍兼容。相关safe_http/下载handler/Providers/指标/所有crawler测试实际 **391 passed**。镜像e1fffc0的真实卷验收12项及G1浏览器/HTTPS/CSRF/readonly/Mermaid/SSE已通过且清理PASS；最终传输补充后会使用新SHA缓存重建并重跑实际门禁。
+
+
+## 最终实际验收与交付
+
+最终业务/运行时代码提交 **bb231b3aedfaabd4a84554357d5b5e277e75c738**。T00–T12均已实现并按阶段提交；补充修正均有专属回归。所有提交在本地main，没有push、生产发布、真实修复/回填或实际调度/来源开关调整。最终交付文档提交在代码提交之后，镜像仍明确绑定上述代码SHA。
+
+| 最终检查 | 实际结果 |
+| --- | --- |
+| 三根完整collect（tests/、backend/api/tests/、scripts/deploy/tests/） | 1487 collected |
+| 同三根完整pytest | **1487 passed**，71.96s；2个既有Category/Source分页未排序warning |
+| 完整前端Vitest | **492 passed / 69 files**，7.33s |
+| frontend typecheck、lint、production build | 全部通过，无lint warning/error |
+| 新空库migrate到0038；makemigrations --check --dry-run | 成功；No changes detected |
+| 真实历史文件SQLite WAL，0035→0038 | 通过；legacy/missing、用户关系、历史事件和未知入队时间保持，无隐式任务 |
+| production check --deploy，合成配置与临时DB | exit0；保留既有W005/W021（未自动开启HSTS子域/preload） |
+| 既有shell syntax、release_scripts、export_static、preflight、local_domain_args | 全部通过；args含旧镜像false与新Worker true两组 |
+| 不同进程/目录共享预算、WAL锁、Worker owner/心跳、SIGTERM/SIGKILL、租约接管 | 全部纳入完整pytest且通过；受控HTTP/离线Provider，无真实新闻站请求 |
+| 非root生产镜像构建 | **通过**，UID:GID10001:10001，固定代码SHA |
+| 真实Docker临时卷backup/restore门禁 | **12项PASS**，含活动卷拒绝、完整快照、错/旧/篡改快照拒绝、UID和清理 |
+| 真实G1本地域名浏览器门禁 | **PASS / cleanup PASS**；实际启动disabled full-content并检查共享DB/logs/lock/heartbeat健康 |
+| G1 HTTPS、Host、CSRF、readonly矩阵、静态、Mermaid、SSE | 全部通过；SSE首帧8ms、总1010ms，外网请求被阻断且未观察到外部主机请求 |
+| G1 WSGI REMOTE_ADDR、真实G2/G3、生产/真实来源完整性抽样 | **未执行/不作通过声明**；G1的代理echo不能证明真实WSGI地址 |
+
+实际镜像：`newshub:ingestion-t12-bb231b3aedfaabd4a84554357d5b5e277e75c738`，image ID `sha256:cf495a022e8c64dfb8702b320404e48babf7b1bad67e4f181976c50b2a765c2c`。schema2 manifest的full_content_worker=true，迁移包含0036/0037/0038，static_sha=`306cb89b8b5851f561f7450d159250502ccaa673bb9cdf288a31ee2de3f1a5db`。镜像实测Django6.1.2、Scrapy2.19.0、feedparser6.0.14、Torch2.14.1+cpu、OpenAI3.29.0；与隔离回归环境主要版本相同。默认Docker网络的镜像源访问超时，最终仅此构建使用`--network=host`和显式HTTPS包镜像参数；原始慢构建取消，未把它声称为通过。最后缓存重建复用同一依赖集合。
+
+当前机器保留的实际证据（临时路径，不保证跨机器/清理后可用）：
+
+- `/tmp/newshub-ingestion-final-collect.log`、`/tmp/newshub-ingestion-final-pytest.log`
+- `/tmp/newshub-ingestion-final-typecheck.log`、`/tmp/newshub-ingestion-final-lint.log`、`/tmp/newshub-ingestion-final-vitest.log`、`/tmp/newshub-ingestion-final-build.log`
+- `/tmp/newshub-ingestion-docker-build-verified.log`、`/tmp/newshub-ingestion-bb231b3-manifest.json`
+- `/tmp/newshub-ingestion-volume-bb231b3/report.json`、同目录受保护的命令/资源ledger与合成快照
+- `/tmp/newshub-local-domain-report-bb231b3aedfaabd4a84554357d5b5e277e75c738.TLAhjC/report.json`、`mermaid-g1.png`
+
+卷与本地域名runner均只创建/清理自身唯一前缀、经过ownership验证的资源；没有操作其他Compose项目或业务数据库。
+
+## 迁移、开启与恢复顺序
+
+新增迁移为0036（identity/FeedState/RequestBudget与正文状态）、0037（已验证/提交/HTTP/逻辑事件）、0038（可空任务创建时间）。迁移本身不开HTTP、不推断GUID、不入队历史、不改调度记录。必须先停止本项目app/crawler/indexer/full-content，复用既有online backup和manifest保存迁移前一致快照；不要复制单独主db或删除WAL/SHM。
+
+1. 在维护窗口记录实际CrawlerSettings.scheduler_enabled、interval_seconds及每个target.enabled，保存当前快照与迁移集合。环境变量默认0不会覆盖既有数据库调度记录。
+2. 使用包含Worker/API/UI/新脚本的同一不可变镜像与manifest部署；STRUCTURED_BODY_INGEST_ENABLED、FULL_CONTENT_WORKER_ENABLED、FULL_CONTENT_AUTO_ENQUEUE_ENABLED、TECHCRUNCH_WP_ENABLED均先保持0，两套SOURCE_KEYS保持空。确认共享db-data/logs-data与disabled Worker健康。
+3. 在准备开启的每个来源人工抽样10篇（不足则全部），覆盖短/长、图片/代码、旧文和更新，核对身份、首尾、结构、截断与canonical。任一错文/已知截断被complete都须修契约并重跑；本次没有执行真实站抽样，不能据离线fixture直接声称生产来源通过。
+4. 先选择2–3个抽样通过的结构化来源，仅打开结构化写入与明确keys；策略签名变化会重读以前仅摘要的Feed。再打开Worker，自动补齐继续关闭，用少量明确范围任务验证enqueue/冷却/读取；TC WP另行验证再开。
+5. 最后按已通过来源开启最近7天自动补齐与keys。先来源级同步，再有界补排，保持可靠来源日期、article/missing/无既有任务准入。例：`python backend/manage.py fetch_full_content --source webkit --recent-only --limit 20 --dry-run`，审阅后去掉dry-run；历史选择使用带时区since/until、status、limit、after-id，不全库循环、不用force清次数/冷却。修复先dry-run mapping，再独立新审计文件apply。
+6. 持续观察7天的提交率、legacy、积压年龄、429/预算延期/冷却、Feed checkpoint与冲突；该观察是后续运营步骤，不是本地开发验收的等待条件。
+
+仅来源/自动策略有问题时优先关闭相应flag或暂停Worker，保留schema、旧有效正文和冷却。迁移集合与目标manifest完全一致才使用既有rollback；旧目标capability=false不启动不存在的Worker命令。若已执行新迁移而需旧schema，停止所有写入者、先保全当前快照，再按既有restore恢复迁移前快照，并单独处理恢复点后的用户数据；这是恢复点回退，不能承诺用户数据无损。通用卷占用检查会拒绝遗漏的新Worker或其他项目写入者，不绕过它。
+
+剩余来源限制：Reuters需授权投递；机器之心和36氪当前unsupported。未复核Feed字段保持摘要；arXiv仅abstract、ProductHunt仅product，不冒充完整新闻。Frontend Focus只接整期newsletter，HN self text为discussion，GitHub为README；均不混入article覆盖率。旧nonempty是legacy，不能统计为新complete；错误Source/URL和未知日期不会靠迁移自动修好，真实修复需审查证据，冲突不合并、不删除旧Source。
+
+## 八项开发完成标准核对
+
+| 标准 | 实施与实测证据 | 结论 |
+| --- | --- | --- |
+| 1 可信API/Feed正文不丢失/二次下载，31来源策略明确 | source_policy、structured_articles、feed_support/统一FeedSpider；T06/T07矩阵和全部crawler回归，结构化正文直接提交，DEV已可读详情不重抓 | 开发完成；启用前仍需真实抽样 |
+| 2 不猜URL，元数据不覆盖并发正文/译文 | quarantine spiders、article_identity、news_ingestion、目标字段更新；同标题/多来源/并发以及真实WAL竞争测试 | 通过 |
+| 3 所有服务器新闻HTTP共享持久预算，force/Reader/重启不绕429 | request_budget、safe_http、Scrapy handler、研究搜索/比较/CLI；多进程、headers前退避、控制错误和force计数测试 | 通过 |
+| 4 只把身份/完整性验证通过且CAS提交内容置complete | typed candidate validator与commit_candidate，URL/revision/lease、来源版本；错文/摘要/长截断/200错误页/206/Content-Range故障 | 通过 |
+| 5 Feed进度与真正提交一致 | receipts等待Pipeline、revision/policy CAS、条件304；真实Scrapy局部提交→重放→304与失败/取消场景 | 通过 |
+| 6 Worker/API/UI/研究/旧命令契约闭合 | resident Worker、200/202/422/503、GET轮询、scope、翻译hash、旧正文失败可读、旧命令生产拒绝；完整前后端回归 | 通过 |
+| 7 新进程纳入发布/停机/恢复/健康/旧版本 | compose/env、capability manifest、四服务停机和失败清理、旧目标跳过、卷占用、mocked生命周期与真实G1健康/临时卷恢复 | 通过；没有生产部署 |
+| 8 基线/提交/迁移/测试/开启/恢复/限制记录齐备 | 本记录与原设计合同，真实命令结果、镜像/manifest/私有证据路径、上述分阶段操作和限制 | 通过 |
