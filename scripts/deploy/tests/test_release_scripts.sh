@@ -79,7 +79,12 @@ case "$1" in
   run)
     case "$joined" in
       *'api/services/full_content_worker.py'*)
-        printf '%s\n' '{"full_content_worker":false}'
+        case "$joined" in
+          *newshub:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb*)
+            printf '%s\n' '{"channel_worker":true,"full_content_worker":true}' ;;
+          *)
+            printf '%s\n' '{"channel_worker":false,"full_content_worker":false}' ;;
+        esac
         exit 0
         ;;
       *'sqlite_snapshot.py inspect --source'*)
@@ -174,9 +179,11 @@ manifest = {
 }
 target_manifest = {
     **manifest,
+    'schema_version': 3,
     'release_sha': target_sha,
     'image': f'newshub:{target_sha}',
     'static_sha': '1' * 64,
+    'capabilities': {'full_content_worker': True, 'channel_worker': True},
 }
 static_root = root / 'static'
 assets_root = static_root / 'assets'
@@ -377,6 +384,8 @@ fi
     || { printf 'test_release_scripts: failed deployment changed static current.\n' >&2; exit 1; }
 [[ ! -e "$WORK_DIR/out/deploy.sqlite3" ]] \
     || { printf 'test_release_scripts: failed backup left a published artifact.\n' >&2; exit 1; }
+grep -Fq -- "-f $PROJECT_ROOT/compose.prod.yaml -f $PROJECT_ROOT/compose.workspace.prod.yaml stop --timeout 45 channel-worker full-content crawler indexer app" "$DOCKER_LOG" \
+    || { printf 'test_release_scripts: deploy did not stop the workspace channel worker through its overlay.\n' >&2; exit 1; }
 
 rm -f -- "$MOCK_STOPPED_FILE" "$MOCK_MIGRATE_FILE" "$MOCK_UP_FILE"
 : >"$DOCKER_LOG"

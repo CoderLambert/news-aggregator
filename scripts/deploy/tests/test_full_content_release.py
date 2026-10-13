@@ -20,11 +20,16 @@ IMAGE = f'newshub:{SHA}'
 MIGRATIONS = [{'app': 'api', 'name': '0001_initial'}]
 
 
-def manifest(*, version=2, capability=True, sha=SHA, static_sha='c' * 64):
+def manifest(*, version=2, capability=True, channel_capability=False, sha=SHA, static_sha='c' * 64):
     result = dict(schema_version=version, release_sha=sha, image=f'newshub:{sha}',
                   migrations=copy.deepcopy(MIGRATIONS), static_sha=static_sha)
     if version == 2:
         result['capabilities'] = {'full_content_worker': capability}
+    elif version == 3:
+        result['capabilities'] = {
+            'full_content_worker': capability,
+            'channel_worker': channel_capability,
+        }
     return result
 
 
@@ -74,11 +79,15 @@ def test_development_worker_shares_app_database_directory_and_ownership_paths():
     assert worker['depends_on']['app']['condition'] == 'service_healthy'
 
 
-@pytest.mark.parametrize('version,capability', [(1, False), (2, False), (2, True)])
-def test_manifest_schema_preserves_legacy_and_explicit_worker_capability(version, capability):
-    value = manifest(version=version, capability=capability)
+@pytest.mark.parametrize('version,capability,channel', [
+    (1, False, False), (2, False, False), (2, True, False),
+    (3, False, False), (3, True, True),
+])
+def test_manifest_schema_preserves_legacy_and_explicit_worker_capability(version, capability, channel):
+    value = manifest(version=version, capability=capability, channel_capability=channel)
     assert release.validate_manifest(value) == value
     assert release.full_content_capability(value) is capability
+    assert release.channel_worker_capability(value) is channel
 
 
 @pytest.mark.parametrize('bad', [None, 0, 1, '', 'false', 'true', [], {}])
@@ -96,6 +105,19 @@ def test_v2_capability_object_is_strict(capabilities):
         release.validate_manifest(value)
 
 
+@pytest.mark.parametrize('capabilities', [
+    None, [], True, {},
+    {'full_content_worker': True},
+    {'channel_worker': True},
+    {'full_content_worker': True, 'channel_worker': True, 'unknown': True},
+])
+def test_v3_capability_object_is_strict(capabilities):
+    value = manifest(version=3)
+    value['capabilities'] = capabilities
+    with pytest.raises(release.ManifestError):
+        release.validate_manifest(value)
+
+
 def test_v1_cannot_smuggle_new_worker_capability_and_version_boolean_is_not_integer():
     value = manifest(version=1)
     value['capabilities'] = {'full_content_worker': True}
@@ -108,10 +130,13 @@ def test_v1_cannot_smuggle_new_worker_capability_and_version_boolean_is_not_inte
 
 
 def test_worker_probe_is_pinned_network_none_file_only_without_env_mount_or_database(monkeypatch):
-    docker = Mock(return_value='{"full_content_worker":true}')
+    docker = Mock(return_value='{"channel_worker":true,"full_content_worker":true}')
     monkeypatch.setattr(release, '_docker_text', docker)
 
-    assert release.inspect_worker_capability(IMAGE) is True
+    assert release.inspect_worker_capabilities(IMAGE) == {
+        'full_content_worker': True,
+        'channel_worker': True,
+    }
 
     args = docker.call_args.args
     assert args == ('run', '--rm', '--pull=never', '--network', 'none', '--entrypoint', 'python', IMAGE, '-c', release._CAPABILITY_QUERY)
@@ -121,30 +146,43 @@ def test_worker_probe_is_pinned_network_none_file_only_without_env_mount_or_data
         assert forbidden not in args[-1]
 
 
-@pytest.mark.parametrize('missing', [None, 'auto_fetch_full_content.py', 'full_content_healthcheck.py', 'full_content_worker.py', 'article_content.py'])
+@pytest.mark.parametrize('missing', [
+    None,
+    'api/management/commands/auto_fetch_full_content.py',
+    'api/management/commands/full_content_healthcheck.py',
+    'api/services/full_content_worker.py',
+    'api/services/article_content.py',
+    'api/management/commands/channel_worker.py',
+    'api/management/commands/channel_worker_healthcheck.py',
+])
 def test_actual_file_capability_query_requires_every_compatibility_component(tmp_path, missing):
     files = (
         'api/management/commands/auto_fetch_full_content.py',
         'api/management/commands/full_content_healthcheck.py',
         'api/services/full_content_worker.py', 'api/services/article_content.py',
+        'api/management/commands/channel_worker.py',
+        'api/management/commands/channel_worker_healthcheck.py',
     )
     for name in files:
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        if path.name != missing:
+        if name != missing:
             path.write_text('raise AssertionError("metadata probe must not import implementation")')
-    query = release._CAPABILITY_QUERY.replace('/app/backend/', str(tmp_path) + '/')
+    query = release._CAPABILITY_QUERY.replace('/app/backend', str(tmp_path))
     result = subprocess.run([sys.executable, '-c', query], capture_output=True, text=True, timeout=5)
 
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {'full_content_worker': missing is None}
+    assert json.loads(result.stdout) == {
+        'full_content_worker': missing not in files[:4],
+        'channel_worker': missing not in files[4:],
+    }
 
 
-@pytest.mark.parametrize('output', ['null', '[]', 'true', '{}', '{"full_content_worker":1}', '{"full_content_worker":"false"}', '{"full_content_worker":true,"extra":true}', 'invalid-json'])
+@pytest.mark.parametrize('output', ['null', '[]', 'true', '{}', '{"full_content_worker":true}', '{"full_content_worker":1,"channel_worker":true}', '{"full_content_worker":true,"channel_worker":"false"}', '{"full_content_worker":true,"channel_worker":true,"extra":true}', 'invalid-json'])
 def test_image_capability_output_cannot_forge_boolean_or_add_metadata(output, monkeypatch):
     monkeypatch.setattr(release, '_docker_text', Mock(return_value=output))
     with pytest.raises(release.ManifestError, match='capability output'):
-        release.inspect_worker_capability(IMAGE)
+        release.inspect_worker_capabilities(IMAGE)
 
 
 @pytest.mark.parametrize('version,manifest_cap,image_cap', [(1, False, True), (2, True, False), (2, False, True)])
@@ -153,7 +191,10 @@ def test_validate_image_rejects_forged_manifest_capability(tmp_path, version, ma
     path.write_text(json.dumps(manifest(version=version, capability=manifest_cap)))
     inspect = Mock()
     monkeypatch.setattr(release, 'inspect_production_image', inspect)
-    monkeypatch.setattr(release, 'inspect_worker_capability', Mock(return_value=image_cap))
+    monkeypatch.setattr(release, 'inspect_worker_capabilities', Mock(return_value={
+        'full_content_worker': image_cap,
+        'channel_worker': False,
+    }))
 
     assert release.main(['validate', '--manifest', str(path), '--image', IMAGE, '--sha', SHA]) == 2
 
@@ -161,10 +202,26 @@ def test_validate_image_rejects_forged_manifest_capability(tmp_path, version, ma
     assert 'image worker capability does not match manifest' in capsys.readouterr().err
 
 
-@pytest.mark.parametrize('version,capability', [(1, False), (2, False), (2, True)])
-def test_worker_services_is_local_read_only_and_never_runs_docker(tmp_path, version, capability):
+def test_validate_v3_rejects_channel_worker_capability_mismatch(tmp_path, monkeypatch, capsys):
     path = tmp_path / 'release.json'
-    path.write_text(json.dumps(manifest(version=version, capability=capability)))
+    path.write_text(json.dumps(manifest(version=3, channel_capability=True)))
+    monkeypatch.setattr(release, 'inspect_production_image', Mock())
+    monkeypatch.setattr(release, 'inspect_worker_capabilities', Mock(return_value={
+        'full_content_worker': True,
+        'channel_worker': False,
+    }))
+
+    assert release.main(['validate', '--manifest', str(path), '--image', IMAGE, '--sha', SHA]) == 2
+    assert 'image worker capability does not match manifest' in capsys.readouterr().err
+
+
+@pytest.mark.parametrize('version,capability,channel', [
+    (1, False, False), (2, False, False), (2, True, False),
+    (3, False, True), (3, True, True),
+])
+def test_worker_services_is_local_read_only_and_never_runs_docker(tmp_path, version, capability, channel):
+    path = tmp_path / 'release.json'
+    path.write_text(json.dumps(manifest(version=version, capability=capability, channel_capability=channel)))
     binary = tmp_path / 'docker'
     touched = tmp_path / 'docker-was-called'
     binary.write_text('#!/bin/sh\ntouch "' + str(touched) + '"\nexit 99\n')
@@ -176,7 +233,12 @@ def test_worker_services_is_local_read_only_and_never_runs_docker(tmp_path, vers
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == ['crawler', 'indexer'] + (['full-content'] if capability else [])
+    expected = ['crawler', 'indexer']
+    if capability:
+        expected.append('full-content')
+    if channel:
+        expected.append('channel-worker')
+    assert result.stdout.splitlines() == expected
     assert not touched.exists()
     assert path.read_bytes() == before
 
@@ -198,8 +260,13 @@ elif args[0] == 'image' and args[1] == 'inspect':
     print('10001:10001' if '.Config.User' in args[3] else args[-1].split(':')[-1])
 elif args[0] == 'compose':
     assert args[args.index('--project-name') + 1] == 'test_worker_release'
-    assert args[args.index('-f') + 1] == os.environ['TEST_COMPOSE_FILE']
-    command = args[args.index('-f') + 2:]
+    file_positions = [index for index, value in enumerate(args) if value == '-f']
+    compose_files = [args[index + 1] for index in file_positions]
+    expected_files = [os.environ['TEST_COMPOSE_FILE']]
+    if os.environ.get('TEST_WORKSPACE_OVERLAY') == '1':
+        expected_files.append(os.environ['TEST_WORKSPACE_COMPOSE_FILE'])
+    assert compose_files == expected_files
+    command = args[file_positions[-1] + 2:]
     if command[0] in {'config', 'stop'}:
         pass
     elif command[0] == 'up':
@@ -242,7 +309,8 @@ elif args[0] == 'run':
     if 'api/services/full_content_worker.py' in args[-1]:
         image = args[args.index('-c') - 1]
         capability = True if image.endswith(old_sha) else os.environ['TEST_TARGET_CAP'] == '1'
-        print(json.dumps({'full_content_worker': capability}))
+        channel_capability = os.environ.get('TEST_TARGET_CHANNEL_CAP') == '1' and not image.endswith(old_sha)
+        print(json.dumps({'full_content_worker': capability, 'channel_worker': channel_capability}))
     elif 'sqlite_snapshot.py inspect --source' in args[-1]:
         print(json.dumps({'quick_check': 'ok', 'migrations': [{'app':'api','name':'0001_initial'}]}))
     else:
@@ -252,7 +320,7 @@ else:
 '''
 
 
-def rollback_harness(tmp_path, *, legacy, mode):
+def rollback_harness(tmp_path, *, legacy, mode, workspace=False):
     static = tmp_path / 'static'
     assets = static / 'assets'
     assets.mkdir(parents=True)
@@ -269,7 +337,12 @@ def rollback_harness(tmp_path, *, legacy, mode):
     old_manifest = tmp_path / 'old.json'
     target_manifest = tmp_path / 'target.json'
     old_manifest.write_text(json.dumps(manifest(sha=OLD_SHA, static_sha=hashes[OLD_SHA])))
-    target_manifest.write_text(json.dumps(manifest(version=1 if legacy else 2, capability=not legacy, static_sha=hashes[SHA])))
+    target_manifest.write_text(json.dumps(manifest(
+        version=1 if legacy else (3 if workspace else 2),
+        capability=not legacy,
+        channel_capability=workspace,
+        static_sha=hashes[SHA],
+    )))
     environment = tmp_path / 'deploy.env'
     environment.write_text('DJANGO_SECRET_KEY=synthetic-test-only\nWAITRESS_TRUSTED_PROXY=127.0.0.1\n')
     binary = tmp_path / 'bin'
@@ -289,7 +362,10 @@ def rollback_harness(tmp_path, *, legacy, mode):
     ], env={**os.environ, 'PATH': str(binary) + os.pathsep + os.environ['PATH'], 'DOCKER_HOST': 'unix:///synthetic-test-only.sock',
             'TEST_DOCKER_LOG': str(log), 'TEST_HARNESS_ROOT': str(tmp_path),
             'TEST_TARGET_SHA': SHA, 'TEST_OLD_SHA': OLD_SHA, 'TEST_TARGET_CAP': str(int(not legacy)),
-            'TEST_WORKER_MODE': mode, 'TEST_COMPOSE_FILE': str(ROOT / 'compose.prod.yaml')},
+            'TEST_TARGET_CHANNEL_CAP': str(int(workspace)), 'TEST_WORKER_MODE': mode,
+            'TEST_COMPOSE_FILE': str(ROOT / 'compose.prod.yaml'),
+            'TEST_WORKSPACE_COMPOSE_FILE': str(ROOT / 'compose.workspace.prod.yaml'),
+            'TEST_WORKSPACE_OVERLAY': str(int(workspace))},
         capture_output=True, text=True, timeout=15)
     commands = [json.loads(line) for line in log.read_text().splitlines()]
     return result, commands, static
@@ -327,3 +403,20 @@ def test_legacy_rollback_stops_new_worker_but_only_starts_old_supported_workers(
     assert starts[1][-2:] == ['crawler', 'indexer']
     assert not any('full-content' in call for call in starts)
     assert not any('full-content' in call and 'ps' in call for call in commands)
+
+
+def test_workspace_rollback_loads_overlay_and_manages_channel_worker(tmp_path):
+    result, commands, static = rollback_harness(tmp_path, legacy=False, mode='healthy', workspace=True)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (static / 'current').readlink() == Path('releases/' + SHA)
+    compose_calls = [call for call in commands if call[0] == 'compose']
+    assert compose_calls
+    for call in compose_calls:
+        compose_files = [call[index + 1] for index, value in enumerate(call) if value == '-f']
+        assert compose_files == [str(ROOT / 'compose.prod.yaml'), str(ROOT / 'compose.workspace.prod.yaml')]
+    stops = [call for call in compose_calls if 'stop' in call]
+    assert stops and all(call[-5:] == ['channel-worker', 'full-content', 'crawler', 'indexer', 'app'] for call in stops)
+    worker_up = next(call for call in compose_calls if 'up' in call and 'crawler' in call)
+    assert worker_up[-4:] == ['crawler', 'indexer', 'full-content', 'channel-worker']
+    assert any('ps' in call and call[-1] == 'channel-worker' for call in compose_calls)

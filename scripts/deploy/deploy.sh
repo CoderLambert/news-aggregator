@@ -4,6 +4,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
 COMPOSE_FILE="$PROJECT_ROOT/compose.prod.yaml"
+WORKSPACE_COMPOSE_FILE="$PROJECT_ROOT/compose.workspace.prod.yaml"
 STOP_SERVICES=(full-content crawler indexer app)
 TARGET_WORKERS=(crawler indexer)
 EXECUTE=0
@@ -114,6 +115,10 @@ python3 "$SCRIPT_DIR/release_manifest.py" validate --manifest "$MANIFEST" >/dev/
 target_workers_text="$(python3 "$SCRIPT_DIR/release_manifest.py" worker-services --manifest "$MANIFEST")" \
     || fail 'could not identify target worker capabilities.'
 mapfile -t TARGET_WORKERS <<<"$target_workers_text"
+USE_WORKSPACE_OVERLAY=0
+for service in "${TARGET_WORKERS[@]}"; do
+    [[ "$service" == channel-worker ]] && USE_WORKSPACE_OVERLAY=1
+done
 TARGET_SHA="$(python3 - "$MANIFEST" <<'PY'
 import json, sys
 with open(sys.argv[1], encoding="utf-8") as stream:
@@ -152,10 +157,21 @@ with open(sys.argv[1], encoding="utf-8") as stream:
     print(json.load(stream)["image"])
 PY
 )"
+    current_workers_text="$(python3 "$SCRIPT_DIR/release_manifest.py" worker-services --manifest "$CURRENT_MANIFEST")" \
+        || fail 'could not identify current worker capabilities.'
+    while IFS= read -r service; do
+        [[ "$service" == channel-worker ]] && USE_WORKSPACE_OVERLAY=1
+    done <<<"$current_workers_text"
     [[ "$CURRENT_SHA" != "$SHA" ]] || fail 'target SHA is already the current release.'
 fi
 
 COMPOSE=(docker compose --project-name "$PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+if ((USE_WORKSPACE_OVERLAY)); then
+    [[ -f "$WORKSPACE_COMPOSE_FILE" && ! -L "$WORKSPACE_COMPOSE_FILE" ]] \
+        || fail 'workspace worker capability requires compose.workspace.prod.yaml.'
+    COMPOSE+=(-f "$WORKSPACE_COMPOSE_FILE")
+    STOP_SERVICES=(channel-worker full-content crawler indexer app)
+fi
 compose_call() {
     NEWSHUB_IMAGE="$IMAGE" NEWSHUB_ENV_FILE="$ENV_FILE" "${COMPOSE[@]}" "$@"
 }
@@ -194,7 +210,7 @@ fi
 if ((FRESH)); then
     [[ ! -e "$ROOT/current" && ! -L "$ROOT/current" ]] \
         || fail '--fresh requires no existing current static release.'
-    for service in app crawler indexer full-content; do
+    for service in app "${TARGET_WORKERS[@]}"; do
         existing="$("${COMPOSE[@]}" ps --all --quiet "$service")" \
             || fail "could not inspect existing Compose service $service."
         [[ -z "$existing" ]] || fail "--fresh requires no existing $service container in this project."

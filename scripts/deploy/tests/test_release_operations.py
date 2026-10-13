@@ -554,14 +554,14 @@ class ReleaseManifestTests(unittest.TestCase):
 
     def test_describe_image_inspects_revision_and_nonroot_user_then_uses_network_none(self) -> None:
         image_json = json.dumps({"migrations": MIGRATIONS, "static_sha": "b" * 64})
-        with patch.object(release_manifest, "_docker_text", side_effect=[RELEASE_SHA, "10001:10001", '{"full_content_worker":true}']), patch.object(
+        with patch.object(release_manifest, "_docker_text", side_effect=[RELEASE_SHA, "10001:10001", '{"channel_worker":true,"full_content_worker":true}']), patch.object(
             release_manifest.subprocess,
             "run",
             return_value=type("Result", (), {"stdout": image_json})(),
         ) as run:
             value = release_manifest.describe_image(f"newshub:{RELEASE_SHA}", RELEASE_SHA)
         self.assertEqual(value["migrations"], MIGRATIONS)
-        self.assertEqual(value['capabilities'], {'full_content_worker': True})
+        self.assertEqual(value['capabilities'], {'full_content_worker': True, 'channel_worker': True})
         command = run.call_args.args[0]
         self.assertIn("--network", command)
         self.assertIn("none", command)

@@ -41,6 +41,8 @@ scripts/deploy/deploy.sh \
 
 生产 Compose 使用 host 网络，Waitress 只监听 `127.0.0.1:9527`。安全默认值为 `PUBLIC_SITE_MODE=read_only`、signup/AI/订阅及 crawler/indexer 自动任务关闭，认证模式为 `disabled`。这些值可在显式传给 Compose 的环境文件中配置；在 G2/G3 获批前不要设置 `full` 或开启相应开关。Compose 命令必须继续显式指定 `--env-file`，不会从仓库根目录 `.env` 自动读取这些策略值。Worker 使用现有 `crawler_healthcheck` 和 `embedding_healthcheck` 检查心跳；缺少或过期的心跳会使对应容器变为 unhealthy。
 
+发布清单 schema v3 会同时记录正文 Worker 与频道 Worker 能力。`deploy.sh` 和 `rollback.sh` 只要在当前或目标清单中发现频道 Worker，就自动加载固定的 `compose.workspace.prod.yaml`：维护窗口会先停止 `channel-worker`，目标版本支持时再启动并等待其健康检查。无需也不得用发布脚本之外的临时 Compose 命令补启动该 Worker；回滚到确实不支持频道 Worker 的旧清单时只停止、不重启。
+
 数据分别存放在数据库、Chroma、TTS、runtime、model-cache 与 logs 命名卷。容器不挂载源代码或宿主 `frontend/dist`；app 从显式 `.env.production` 读取应用配置，Worker 只接收必需的 Django 设置与密钥，不继承 Provider/OAuth 环境变量。
 
 静态导出助手默认只打印 dry-run 计划，不连接 Docker。生产发布流程由 `deploy.sh` 在当前数据库快照、迁移、app 与 worker health checks 全部通过后调用它。不要单独执行导出并切换生产静态版本。每个 release 只包含自己的真实静态文件与 asset 硬链接，公共目录/文件权限固定为目录 `0755`、文件 `0644`；共享旧资源不会进入其他 release 的摘要。同名资源内容不一致时拒绝覆盖。`current` 和 `previous` 通过同目录临时 symlink 原子替换，旧 release 不删除。
