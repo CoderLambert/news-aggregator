@@ -21,20 +21,20 @@ function StatusAlert({ message, onRetry, showRetry = true, sourceUrl, retryLabel
   }
 
   return (
-    <Alert variant="default" className="mb-6 grid-cols-[2rem_minmax(0,1fr)] items-start gap-x-3 border-amber-200 bg-amber-50/70 px-4 py-4 text-amber-950 sm:px-5">
-      <span className="mt-0.5 flex size-8 items-center justify-center rounded-full bg-amber-100">
-        <AlertCircle className="size-4 text-amber-700" />
+    <Alert variant="default" className="mb-6 grid-cols-[2rem_minmax(0,1fr)] items-start gap-x-3 border-border bg-primary/10 px-4 py-4 text-primary sm:px-5">
+      <span className="mt-0.5 flex size-8 items-center justify-center rounded-full bg-primary/10">
+        <AlertCircle className="size-4 text-primary" />
       </span>
-      <AlertDescription className="min-w-0 text-amber-950">
+      <AlertDescription className="min-w-0 text-primary">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <p className="text-sm font-semibold">{title}</p>
-            <p className="mt-1 break-words text-sm leading-6 text-amber-900/80">{message}</p>
-            <p className="mt-1 text-xs text-amber-800/70">{helperText}</p>
+            <p className="mt-1 break-words text-sm leading-6 text-primary">{message}</p>
+            <p className="mt-1 text-xs text-primary">{helperText}</p>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
           {safeSourceUrl && (
-            <a href={safeSourceUrl} target="_blank" rel="noreferrer noopener" className="inline-flex h-10 items-center rounded-full border border-amber-300 bg-white px-4 text-xs font-medium text-amber-900 transition-colors hover:bg-amber-100">
+            <a href={safeSourceUrl} target="_blank" rel="noreferrer noopener" className="inline-flex h-10 items-center rounded-full border border-border bg-card px-4 text-xs font-medium text-primary transition-colors hover:bg-primary/10">
               阅读原文
             </a>
           )}
@@ -44,7 +44,7 @@ function StatusAlert({ message, onRetry, showRetry = true, sourceUrl, retryLabel
               variant="link"
               size="sm"
               onClick={() => onRetry()}
-              className="h-10 rounded-full bg-amber-900 px-4 text-xs font-medium text-white no-underline hover:bg-amber-800 hover:text-white"
+              className="h-10 rounded-full bg-primary px-4 text-xs font-medium text-primary-foreground no-underline hover:bg-primary hover:text-primary-foreground"
             >
               {retryLabel}
             </Button>
@@ -59,10 +59,10 @@ function StatusAlert({ message, onRetry, showRetry = true, sourceUrl, retryLabel
 export default function FullContentFetchStatus({ news, articleLoading, onFetch, onResume = onFetch, onCancel }) {
   if (!news) return null
 
-  if (news.reading_policy === 'rss_summary_only') {
+  if (!news.body_access_granted && news.reading_policy === 'rss_summary_only') {
     return <StatusAlert title="RSS 摘要阅读" message="该频道仅提供标题、摘要和原文链接，不在站内获取正文。" helperText="完整内容请前往来源网站，部分内容可能需要订阅。" sourceUrl={news.url} showRetry={false} />
   }
-  if (news.reading_policy === 'public_rss' && !hasReadableFullContent(news)) {
+  if (!news.body_access_granted && news.reading_policy === 'public_rss' && !hasReadableFullContent(news)) {
     return <StatusAlert title="RSS 资讯" message="当前展示来源 RSS 公开提供的内容。" helperText="更多内容请前往来源网站阅读。" sourceUrl={news.url} showRetry={false} />
   }
 
@@ -104,6 +104,7 @@ export default function FullContentFetchStatus({ news, articleLoading, onFetch, 
       />
     )
   }
+  if (news.can_fetch_full_content === false) return <StatusAlert title="当前无法获取正文" message="来源访问限制、文章类型或重试上限暂不支持获取正文。" helperText={helperText} sourceUrl={news.url} showRetry={false} />
   if (status === 'pending' || status === 'idle') return <FetchArticleCard onFetch={onFetch} />
   if (status === 'network_error') {
     return <StatusAlert title={failureTitle} message={news.full_content_fetch_error?.trim() || STATUS_MESSAGES.network_error} onRetry={onFetch} sourceUrl={news.url} helperText={helperText} />
@@ -113,6 +114,9 @@ export default function FullContentFetchStatus({ news, articleLoading, onFetch, 
   }
   if (status === 'failed') {
     return <StatusAlert title={failureTitle} message={news.full_content_fetch_error?.trim() || STATUS_MESSAGES.failed} onRetry={onFetch} sourceUrl={news.url} helperText={helperText} />
+  }
+  if (status === 'unsupported' && news.body_access_granted && news.can_fetch_full_content) {
+    return <StatusAlert title="可按需获取正文" message="你有正文查看权限，可以尝试从来源获取完整内容。" onRetry={onFetch} retryLabel="尝试获取正文" helperText="来源可能仍无法提供正文；失败时可继续阅读摘要。" />
   }
   if (status === 'blocked' || status === 'unsupported' || status === 'rate_limited') {
     return <StatusAlert title={failureTitle} message="该来源当前无法获取正文，请前往来源网站阅读。" showRetry={false} sourceUrl={news.url} helperText={helperText} />

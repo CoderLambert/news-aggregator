@@ -82,12 +82,12 @@ export default function SearchBar({ value, mode, onChange, onModeChange, history
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input type="search" value={display} onChange={(event: ChangeEvent<HTMLInputElement>) => handleChange(event.target.value)} placeholder={t.search} aria-label={t.search} className="h-10 rounded-xl pl-10" />
         </div>
         <Link
           to={`/search${display.trim() ? `?q=${encodeURIComponent(display.trim())}&mode=${effectiveMode}` : ''}`}
-          className="shrink-0 rounded-lg px-2 py-2 text-xs font-medium text-violet-700 hover:bg-violet-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+          className="shrink-0 rounded-lg px-2 py-2 text-xs font-medium text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {lang === 'en' ? 'Advanced' : '高级搜索'}
         </Link>
@@ -104,7 +104,7 @@ export default function SearchBar({ value, mode, onChange, onModeChange, history
         className="rounded-lg"
       >
         {modes[lang].filter((option) => allowSemantic || option.key === 'keyword').map((option) => (
-          <ToggleGroupItem key={option.key} value={option.key} aria-label={option.label} variant="outline" size="sm" className="text-xs font-medium data-[state=on]:bg-blue-500 data-[state=on]:text-white">
+          <ToggleGroupItem key={option.key} value={option.key} aria-label={option.label} variant="outline" size="sm" className="text-xs font-medium data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">
             {option.label}
           </ToggleGroupItem>
         ))}

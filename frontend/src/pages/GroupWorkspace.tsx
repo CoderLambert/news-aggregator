@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { FolderOpen, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
@@ -21,6 +21,9 @@ function Groups() {
   const config = useChannelConfig()
   const catalog = useQuery(workspaceCatalogOptions())
   const mutation = useChannelMutation()
+  // Query pending state is notified asynchronously. Fence the request in the
+  // same event that submits it, so fast Escape/cancel/re-submit cannot race it.
+  const submitting = useRef(false)
   const [params, setParams] = useSearchParams()
   const [login, setLogin] = useState(false)
   const [editor, setEditor] = useState<{ id: number | null; name: string } | null>(null)
@@ -38,8 +41,15 @@ function Groups() {
   const chosen = sources.filter(source => selected.includes(source.id)).map(source => source.id)
   const writable = config.enabled && config.ready && !config.error && !mutation.isPending
   const run = (perform: () => Promise<unknown>, message: string, after?: (value: unknown) => void) => {
-    mutation.mutate(perform, { onSuccess: value => { setNotice(message); after?.(value) } })
+    if (submitting.current) return
+    submitting.current = true
+    mutation.mutate(perform, {
+      onSuccess: value => { setNotice(message); after?.(value) },
+      onSettled: () => { submitting.current = false },
+    })
   }
+  const closeEditor = () => { if (!submitting.current) setEditor(null) }
+  const closeDeleting = () => { if (!submitting.current) setDeleting(null) }
   return <div className="workspace-page">
     <header className="workspace-page-heading"><div><p className="workspace-eyebrow">按你的方式阅读</p><h1>分组管理</h1><p>同一频道可以属于多个分组；移出分组不会取消订阅。</p></div>
       <div className="workspace-actions"><Link className="workspace-button secondary" to="/channels/smart"><Sparkles size={16} aria-hidden="true" />智能整理</Link>
@@ -67,19 +77,21 @@ function Groups() {
       </section> : <div className="workspace-empty"><h2>还没有分组</h2><p>创建一个分组，或使用智能整理生成可编辑的分组建议。</p></div>}
     </>}
     {login && <AuthModal onClose={() => setLogin(false)} />}
-    {editor && <WorkspaceModal title={editor.id === null ? '新建分组' : '重命名分组'} busy={mutation.isPending} onClose={() => setEditor(null)}>
+    {editor && <WorkspaceModal title={editor.id === null ? '新建分组' : '重命名分组'} busy={mutation.isPending} onClose={closeEditor}>
       <form onSubmit={event => { event.preventDefault(); const name = editor.name.trim(); if (!name) return
         run(() => editor.id === null ? createChannelGroup(name) : updateChannelGroup(editor.id, { name }), '分组已保存', value => {
           if (isRecord(value) && typeof value.id === 'number') setParams({ group: String(value.id) })
           setEditor(null); setSelected([])
         })
       }}><label>分组名称<input autoFocus required maxLength={40} value={editor.name} disabled={mutation.isPending} onChange={event => setEditor({ ...editor, name: event.target.value })} /></label>
-        {mutation.isError && <p role="alert" className="workspace-error">保存失败，名称可能已存在，请修改后重试。</p>}
-        <footer className="workspace-modal-actions"><button type="button" className="workspace-button secondary" disabled={mutation.isPending} onClick={() => setEditor(null)}>取消</button><button className="workspace-button" disabled={!writable || !editor.name.trim()}>保存</button></footer></form>
+        {mutation.isError && <p role="alert" className="workspace-error">保存请求未确认成功。结果可能已写入，请先刷新分组确认，再决定是否重试。</p>}
+        {mutation.isPending && <p role="status" className="workspace-caption">正在保存，请等待完成后关闭。</p>}
+        <footer className="workspace-modal-actions"><button type="button" className="workspace-button secondary" disabled={mutation.isPending} onClick={closeEditor}>{mutation.isError ? '关闭编辑' : '取消'}</button><button className="workspace-button" disabled={!writable || !editor.name.trim()}>{mutation.isPending ? '保存中…' : '保存'}</button></footer></form>
     </WorkspaceModal>}
-    {deleting !== null && <WorkspaceModal title="删除分组" busy={mutation.isPending} onClose={() => setDeleting(null)}><p>删除“{groups.find(item => item.id === deleting)?.name}”分组？频道订阅与其他分组均会保留。</p>
-      {mutation.isError && <p role="alert" className="workspace-error">删除失败，请重试。</p>}
-      <footer className="workspace-modal-actions"><button type="button" className="workspace-button secondary" disabled={mutation.isPending} onClick={() => setDeleting(null)}>取消</button><button type="button" className="workspace-button danger" disabled={!writable} onClick={() => run(() => deleteChannelGroup(deleting), '分组已删除，订阅保持不变', () => { setDeleting(null); setParams({}); setSelected([]) })}>确认删除</button></footer>
+    {deleting !== null && <WorkspaceModal title="删除分组" busy={mutation.isPending} onClose={closeDeleting}><p>删除“{groups.find(item => item.id === deleting)?.name}”分组？频道订阅与其他分组均会保留。</p>
+      {mutation.isError && <p role="alert" className="workspace-error">删除请求未确认成功。请先刷新分组确认结果，再决定是否重试。</p>}
+      {mutation.isPending && <p role="status" className="workspace-caption">正在删除，请等待完成后关闭。</p>}
+      <footer className="workspace-modal-actions"><button type="button" className="workspace-button secondary" disabled={mutation.isPending} onClick={closeDeleting}>{mutation.isError ? '关闭提示' : '取消'}</button><button type="button" className="workspace-button danger" disabled={!writable} onClick={() => run(() => deleteChannelGroup(deleting), '分组已删除，订阅保持不变', () => { setDeleting(null); setParams({}); setSelected([]) })}>{mutation.isPending ? '删除中…' : '确认删除'}</button></footer>
     </WorkspaceModal>}
   </div>
 }

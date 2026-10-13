@@ -10,16 +10,16 @@ import { Button } from '@/components/ui/button'
  */
 export default function ErrorBanner({ message, onRetry }) {
   return (
-    <Alert variant="destructive" className="mb-6 border-red-200 bg-red-50">
+    <Alert variant="destructive" className="mb-6 border-destructive/30 bg-destructive/10">
       <AlertCircle />
-      <AlertDescription className="flex items-center justify-between text-red-600">
+      <AlertDescription className="flex items-center justify-between text-destructive">
         <span>{message}</span>
         <Button
           type="button"
           variant="link"
           size="sm"
           onClick={() => onRetry()}
-          className="h-auto p-0 text-xs text-red-600 underline hover:no-underline"
+          className="h-auto p-0 text-xs text-destructive underline hover:no-underline"
         >
           重试
         </Button>

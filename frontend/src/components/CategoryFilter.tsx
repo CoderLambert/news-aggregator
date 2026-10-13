@@ -11,7 +11,7 @@ interface CategoryFilterProps {
 export default function CategoryFilter({ categories, active = [], onChange }: CategoryFilterProps) {
   const { lang } = useLanguage()
   const toggle = (id: number) => onChange(active.includes(id) ? active.filter((item) => item !== id) : [...active, id])
-  const activeClass = 'bg-blue-600 text-white hover:bg-blue-700'
+  const activeClass = 'bg-primary text-primary-foreground hover:bg-primary'
 
   return (
     <div className="flex flex-wrap gap-2">

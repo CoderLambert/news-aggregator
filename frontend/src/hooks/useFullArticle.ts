@@ -250,7 +250,7 @@ export function useFullArticle(
   const bodyEmpty = !news || !hasReadableFullContent(news)
   const taskPending = Boolean(news && hasPendingFullContentTask(news))
   const isCurrentNews = Boolean(news && news.id === newsId)
-  const canFetchInSession = Boolean(user)
+  const canFetchInSession = Boolean(user) && news?.can_fetch_full_content !== false
   const status = news?.full_content_fetch_status || ''
   const lastAttempt = news?.last_full_content_attempt
   const retryCount = news?.full_content_retry_count ?? 0

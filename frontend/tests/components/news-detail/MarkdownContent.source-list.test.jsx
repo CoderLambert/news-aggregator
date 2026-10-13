@@ -80,7 +80,7 @@ describe('MarkdownContent article readability', () => {
     expect(screen.getByText('第二段正文。')).toBeInTheDocument()
     expect(within(screen.getByRole('list')).getAllByRole('listitem')).toHaveLength(2)
     expect(container.querySelectorAll('br')).toHaveLength(1)
-    expect(container.querySelector('p')).toHaveClass('text-neutral-700')
+    expect(container.querySelector('p')).toHaveClass('text-foreground')
   })
 
   it('leaves full-width spaces untouched by default', () => {

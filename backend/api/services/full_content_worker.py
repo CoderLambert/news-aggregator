@@ -183,11 +183,15 @@ def execute_one(news, *, guard=None, providers=None):
     if not claim_fetch(news):
         return None
     try:
-        result = fetch_article_markdown(news.url, expected_title=news.title, summary=news.content,
-                                       news=news, providers=providers, execution_guard=guard)
+        from api.services.body_access import body_fetch_scope
+        with body_fetch_scope(news):
+            result = fetch_article_markdown(news.url, expected_title=news.title, summary=news.content,
+                                           news=news, providers=providers, execution_guard=guard)
         if guard:
             guard()
-        if mark_success(news, result):
+        with body_fetch_scope(news):
+            committed = mark_success(news, result)
+        if committed:
             record_persistence_outcome(getattr(result, 'fetch_event_id', None), 'noop' if getattr(news, '_full_content_commit_outcome', '') == 'noop' else 'committed')
             return result
         record_persistence_outcome(getattr(result, 'fetch_event_id', None), 'rejected' if getattr(news, '_full_content_commit_outcome', '') == 'rejected' else 'persistence_conflict')

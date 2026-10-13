@@ -53,27 +53,27 @@ export default function NewsFilters({
           aria-expanded={expanded}
           aria-controls={panelId}
           onClick={() => setExpanded((current) => !current)}
-          className="h-11 rounded-full bg-white sm:h-8"
+          className="h-11 rounded-full bg-card sm:h-8"
         >
           <Filter aria-hidden="true" />
           {lang === 'en' ? 'Filters' : '筛选'}
-          {activeCount > 0 && <span aria-hidden="true" className="flex size-5 items-center justify-center rounded-full bg-neutral-900 text-[11px] text-white">{activeCount}</span>}
+          {activeCount > 0 && <span aria-hidden="true" className="flex size-5 items-center justify-center rounded-full bg-primary text-[11px] text-primary-foreground">{activeCount}</span>}
         </Button>
 
         {!expanded && activeCount === 0 && (
-          <p className="text-xs text-neutral-500">
+          <p className="text-xs text-muted-foreground">
             {lang === 'en' ? 'Choose categories or sources' : '按分类或来源缩小结果'}
           </p>
         )}
 
         {!expanded && activeCategoryOptions.map((category) => (
-          <Badge key={`category-${category.id}`} variant="blue" className="min-w-0 max-w-full gap-1 rounded-full py-0.5 pl-2 pr-0.5">
+          <Badge key={`category-${category.id}`} variant="outline" className="border-border bg-secondary text-muted-foreground min-w-0 max-w-full gap-1 rounded-full py-0.5 pl-2 pr-0.5">
             <span className="max-w-48 truncate">{category.name}</span>
             <button
               type="button"
               aria-label={lang === 'en' ? `Remove category ${category.name}` : `移除分类 ${category.name}`}
               onClick={() => onCategoriesChange(activeCategories.filter((id) => id !== category.id))}
-              className="flex size-11 shrink-0 items-center justify-center rounded-full hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 sm:size-7"
+              className="flex size-11 shrink-0 items-center justify-center rounded-full hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:size-7"
             >
               <X aria-hidden="true" className="size-3" />
             </button>
@@ -81,13 +81,13 @@ export default function NewsFilters({
         ))}
 
         {!expanded && activeSourceOptions.map((source) => (
-          <Badge key={`source-${source.id}`} variant="green" className="min-w-0 max-w-full gap-1 rounded-full py-0.5 pl-2 pr-0.5">
+          <Badge key={`source-${source.id}`} variant="outline" className="border-border bg-secondary text-muted-foreground min-w-0 max-w-full gap-1 rounded-full py-0.5 pl-2 pr-0.5">
             <span className="max-w-48 truncate">{source.name}</span>
             <button
               type="button"
               aria-label={lang === 'en' ? `Remove source ${source.name}` : `移除来源 ${source.name}`}
               onClick={() => onSourcesChange(activeSources.filter((id) => id !== source.id))}
-              className="flex size-11 shrink-0 items-center justify-center rounded-full hover:bg-green-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500 sm:size-7"
+              className="flex size-11 shrink-0 items-center justify-center rounded-full hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:size-7"
             >
               <X aria-hidden="true" className="size-3" />
             </button>
@@ -95,7 +95,7 @@ export default function NewsFilters({
         ))}
 
         {activeCount > 0 && (
-          <Button type="button" variant="ghost" size="sm" onClick={onClear} className="ml-auto h-11 rounded-full text-neutral-600 sm:h-8">
+          <Button type="button" variant="ghost" size="sm" onClick={onClear} className="ml-auto h-11 rounded-full text-muted-foreground sm:h-8">
             <RotateCcw aria-hidden="true" />
             {lang === 'en' ? 'Clear categories and sources' : '清除分类与来源'}
           </Button>
@@ -103,13 +103,13 @@ export default function NewsFilters({
       </div>
 
       {expanded && (
-        <div id={panelId} className="mt-3 grid max-h-[min(28rem,60vh)] gap-4 overflow-y-auto border-t border-neutral-200 pt-3 pr-1 lg:grid-cols-2">
+        <div id={panelId} className="mt-3 grid max-h-[min(28rem,60vh)] gap-4 overflow-y-auto border-t border-border pt-3 pr-1 lg:grid-cols-2">
           <fieldset className="min-w-0">
-            <legend className="mb-2 text-xs font-semibold text-neutral-600">{lang === 'en' ? 'Categories' : '分类'}</legend>
+            <legend className="mb-2 text-xs font-semibold text-muted-foreground">{lang === 'en' ? 'Categories' : '分类'}</legend>
             <CategoryFilter categories={categories} active={activeCategories} onChange={onCategoriesChange} />
           </fieldset>
           <fieldset className="min-w-0">
-            <legend className="mb-2 text-xs font-semibold text-neutral-600">{lang === 'en' ? 'Sources' : '来源'}</legend>
+            <legend className="mb-2 text-xs font-semibold text-muted-foreground">{lang === 'en' ? 'Sources' : '来源'}</legend>
             <SourceFilter sources={sources} active={activeSources} onChange={onSourcesChange} />
           </fieldset>
         </div>

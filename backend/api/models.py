@@ -124,6 +124,7 @@ class News(models.Model):
     full_content_task_created_at = models.DateTimeField(null=True, blank=True)
     full_content_priority = models.SmallIntegerField(default=0)
     full_content_error_code = models.CharField(max_length=64, blank=True, default='')
+    full_content_requested_by = models.ForeignKey('auth.User', null=True, blank=True, on_delete=models.SET_NULL, related_name='+', editable=False)
 
     # LLM-generated suggested questions (cached per article)
     suggested_questions = models.JSONField('AI 推荐问题', default=list, blank=True)
@@ -132,6 +133,7 @@ class News(models.Model):
     class Meta:
         verbose_name = '新闻'
         verbose_name_plural = '新闻'
+        permissions = [('view_article_body', '可查看正文并按需请求获取')]
         ordering = ['-publish_time']
         indexes = [
             models.Index(fields=['-publish_time']),

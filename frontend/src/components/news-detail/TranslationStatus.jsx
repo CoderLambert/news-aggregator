@@ -23,9 +23,9 @@ export default function TranslationStatus({ news, size = 'default' }) {
   if (status === 'pending' || status === 'translating') {
     const isPending = status === 'pending'
     return (
-      <Badge variant="amber" className={padding}>
+      <Badge variant="amber" className={`${padding} border-border bg-secondary text-muted-foreground`}>
         {isPending
-          ? <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" />
+          ? <span className="size-1.5 rounded-full bg-primary animate-pulse" />
           : <Loader2 className="animate-spin" />
         }
         {isPending ? (size === 'compact' ? '待翻译' : '等待翻译') : (size === 'compact' ? '翻译中' : '正在翻译...')}
@@ -38,7 +38,7 @@ export default function TranslationStatus({ news, size = 'default' }) {
     return (
       <Badge
         variant="amber"
-        className={`${padding} border-orange-200 bg-orange-50 text-orange-600`}
+        className={`${padding} border-border bg-primary/10 text-primary`}
         title={`网络错误 (${retryCount} 次重试)`}
       >
         <WifiOff />
@@ -49,7 +49,7 @@ export default function TranslationStatus({ news, size = 'default' }) {
 
   if (status === 'failed') {
     return (
-      <Badge variant="red" className={padding} title={news.translation_error}>
+      <Badge variant="red" className={`${padding} border-destructive/30 bg-destructive/10 text-destructive`} title={news.translation_error}>
         <AlertCircle />
         {size === 'compact'
           ? '翻译失败'

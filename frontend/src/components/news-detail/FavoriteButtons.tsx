@@ -100,9 +100,9 @@ export default function FavoriteButtons({ newsId, className = '', onAuthRequired
   if (loading) {
     return (
       <div className="flex items-center gap-2 opacity-30" role="status" aria-label="加载互动状态">
-        <div className="size-10 animate-pulse rounded-full bg-gray-200" />
-        <div className="size-10 animate-pulse rounded-full bg-gray-200" />
-        <div className="size-8 animate-pulse rounded-full bg-gray-200" />
+        <div className="size-10 animate-pulse rounded-full bg-secondary" />
+        <div className="size-10 animate-pulse rounded-full bg-secondary" />
+        <div className="size-8 animate-pulse rounded-full bg-secondary" />
       </div>
     )
   }
@@ -116,7 +116,7 @@ export default function FavoriteButtons({ newsId, className = '', onAuthRequired
   return (
     <div ref={containerRef} className={`flex items-center gap-2 ${className}`}>
       {user && statusError && (
-        <div role="alert" className="flex items-center gap-2 text-xs text-red-700">
+        <div role="alert" className="flex items-center gap-2 text-xs text-destructive">
           <span>互动状态加载失败。</span>
           {favoritesEnabled && favoriteQuery.isError && <button type="button" className="underline" onClick={() => void favoriteQuery.refetch()}>重试</button>}
           {blockedNewsEnabled && blockQuery.isError && <button type="button" className="underline" onClick={() => void blockQuery.refetch()}>重试</button>}
@@ -129,10 +129,10 @@ export default function FavoriteButtons({ newsId, className = '', onAuthRequired
         onClick={() => void toggleFavorite('like')}
         disabled={Boolean(user) && (!favoriteStatusReady || favoritePending)}
         className={`group relative flex items-center gap-1.5 rounded-full px-3 py-2 transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-60 ${!user
-          ? 'cursor-pointer bg-neutral-100 text-neutral-400 hover:bg-neutral-200'
+          ? 'cursor-pointer bg-secondary text-muted-foreground hover:bg-secondary'
           : isLiked
-            ? 'bg-gradient-to-br from-orange-400 to-orange-500 text-white shadow-md shadow-orange-200'
-            : 'border border-gray-200 bg-white text-gray-500 hover:border-orange-300 hover:text-orange-500 hover:shadow-sm'}`}
+            ? 'bg-primary text-primary-foreground shadow-none'
+            : 'border border-border bg-card text-muted-foreground hover:border-border hover:text-primary hover:shadow-sm'}`}
         aria-label={isLiked ? '取消点赞' : '点赞'}
       >
         {!user && !isLiked ? <LogIn size={16} /> : <Heart size={18} fill={isLiked ? 'currentColor' : 'none'} strokeWidth={2} />}
@@ -146,10 +146,10 @@ export default function FavoriteButtons({ newsId, className = '', onAuthRequired
         onClick={() => void toggleFavorite('bookmark')}
         disabled={Boolean(user) && (!favoriteStatusReady || favoritePending)}
         className={`group relative flex items-center gap-1.5 rounded-full px-3 py-2 transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-60 ${!user
-          ? 'cursor-pointer bg-neutral-100 text-neutral-400 hover:bg-neutral-200'
+          ? 'cursor-pointer bg-secondary text-muted-foreground hover:bg-secondary'
           : isBookmarked
-            ? 'bg-gradient-to-br from-orange-400 to-orange-500 text-white shadow-md shadow-orange-200'
-            : 'border border-gray-200 bg-white text-gray-500 hover:border-orange-300 hover:text-orange-500 hover:shadow-sm'}`}
+            ? 'bg-primary text-primary-foreground shadow-none'
+            : 'border border-border bg-card text-muted-foreground hover:border-border hover:text-primary hover:shadow-sm'}`}
         aria-label={isBookmarked ? '取消收藏' : '收藏'}
       >
         {!user && !isBookmarked ? <LogIn size={16} /> : <Bookmark size={18} fill={isBookmarked ? 'currentColor' : 'none'} strokeWidth={2} />}
@@ -163,7 +163,7 @@ export default function FavoriteButtons({ newsId, className = '', onAuthRequired
           type="button"
           onClick={() => void toggleBlock()}
           disabled={!blockStatusReady || blockPending}
-          className="flex size-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 transition-all duration-200 hover:border-red-300 hover:bg-red-50 hover:text-red-500 active:scale-90 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex size-9 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-all duration-200 hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive active:scale-90 disabled:cursor-not-allowed disabled:opacity-50"
           aria-label="屏蔽此新闻"
           title="屏蔽此新闻"
         >
@@ -176,7 +176,7 @@ export default function FavoriteButtons({ newsId, className = '', onAuthRequired
           type="button"
           onClick={() => void toggleBlock()}
           disabled={!blockStatusReady || blockPending}
-          className="flex cursor-pointer items-center gap-1 rounded-full border border-red-100 bg-red-50 px-2 py-1 text-xs text-red-400 transition-all hover:bg-red-100 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex cursor-pointer items-center gap-1 rounded-full border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive transition-all hover:bg-destructive/10 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
           aria-label="取消屏蔽"
           title="点击取消屏蔽"
         >
@@ -185,8 +185,8 @@ export default function FavoriteButtons({ newsId, className = '', onAuthRequired
         </button>
       )}
 
-      {favoritesEnabled && favoriteMutation.isError && <p role="alert" className="text-xs text-red-700">操作失败，请重试。</p>}
-      {blockedNewsEnabled && (blockMutation.isError || unblockMutation.isError) && <p role="alert" className="text-xs text-red-700">屏蔽操作失败，请重试。</p>}
+      {favoritesEnabled && favoriteMutation.isError && <p role="alert" className="text-xs text-destructive">操作失败，请重试。</p>}
+      {blockedNewsEnabled && (blockMutation.isError || unblockMutation.isError) && <p role="alert" className="text-xs text-destructive">屏蔽操作失败，请重试。</p>}
     </div>
   )
 }

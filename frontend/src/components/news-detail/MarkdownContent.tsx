@@ -424,11 +424,11 @@ function SourceItem({ index, text, links }: { index: number; text: string; links
   const cleanText = text.replace(/^[\s：:—\-–]+/, '').trim()
   return (
     <div className="group flex items-start gap-2.5 px-3 py-2 rounded-lg border border-border
-                    hover:border-violet-200 hover:bg-violet-50/30 transition-all duration-150">
+                    hover:border-border hover:bg-primary/10 transition-all duration-150">
       {/* Index number */}
-      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-muted group-hover:bg-violet-100
+      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-muted group-hover:bg-primary/10
                        flex items-center justify-center text-[11px] font-medium text-muted-foreground
-                       group-hover:text-violet-500 transition-colors">
+                       group-hover:text-primary transition-colors">
         {index}
       </span>
 
@@ -450,7 +450,7 @@ function SourceItem({ index, text, links }: { index: number; text: string; links
             title={link.href}
             className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium
                        border border-border text-muted-foreground
-                       hover:text-violet-600 hover:border-violet-200 hover:bg-violet-50
+                       hover:text-primary hover:border-border hover:bg-primary/10
                        transition-all duration-150"
           >
             {link.href.startsWith('/news/')
@@ -480,10 +480,10 @@ const MD_COMPONENTS: Components = {
     <h3 className="text-lg font-semibold text-foreground mt-6 mb-2 break-words">{children}</h3>
   ),
   h4: ({ children }) => (
-    <h4 className="text-base font-semibold text-neutral-800 mt-5 mb-2 break-words">{children}</h4>
+    <h4 className="text-base font-semibold text-foreground mt-5 mb-2 break-words">{children}</h4>
   ),
   p: ({ children }) => (
-    <p className="text-base leading-[1.9] text-neutral-700 mb-5 text-left break-words">
+    <p className="text-base leading-[1.9] text-foreground mb-5 text-left break-words">
       {children}
     </p>
   ),
@@ -494,7 +494,7 @@ const MD_COMPONENTS: Components = {
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-blue-600 hover:text-blue-800 underline decoration-blue-300 hover:decoration-blue-600 underline-offset-2 transition-colors break-all inline-flex items-center gap-0.5"
+        className="text-primary hover:text-primary underline decoration-primary/40 hover:decoration-primary underline-offset-2 transition-colors break-all inline-flex items-center gap-0.5"
       >
         {children}
         {isExternal && <ExternalLink className="w-3 h-3 flex-shrink-0 opacity-60" />}
@@ -502,14 +502,14 @@ const MD_COMPONENTS: Components = {
     )
   },
   strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
-  em: ({ children }) => <em className="text-neutral-700 italic">{children}</em>,
+  em: ({ children }) => <em className="text-foreground italic">{children}</em>,
   blockquote: ({ children }) => (
-    <blockquote className="border-l-4 border-violet-300 bg-violet-50/50 rounded-r-lg pl-4 py-3 pr-3 my-4 text-neutral-700 break-words">
+    <blockquote className="border-l-4 border-border bg-primary/10 rounded-r-lg pl-4 py-3 pr-3 my-4 text-foreground break-words">
       {children}
     </blockquote>
   ),
   ul: ({ children }) => (
-    <ul className="list-disc list-outside ml-5 mb-5 space-y-1.5 text-base leading-[1.9] text-neutral-700 break-words">
+    <ul className="list-disc list-outside ml-5 mb-5 space-y-1.5 text-base leading-[1.9] text-foreground break-words">
       {children}
     </ul>
   ),
@@ -533,7 +533,7 @@ const MD_COMPONENTS: Components = {
     }
 
     return (
-      <ol className="list-decimal list-outside ml-5 mb-5 space-y-1.5 text-base leading-[1.9] text-neutral-700 break-words">
+      <ol className="list-decimal list-outside ml-5 mb-5 space-y-1.5 text-base leading-[1.9] text-foreground break-words">
         {children}
       </ol>
     )
@@ -550,12 +550,12 @@ const MD_COMPONENTS: Components = {
   ),
   thead: ({ children }) => <thead className="bg-muted">{children}</thead>,
   th: ({ children }) => (
-    <th className="px-4 py-2.5 text-left font-semibold text-neutral-700 border-b border-border">
+    <th className="px-4 py-2.5 text-left font-semibold text-foreground border-b border-border">
       {children}
     </th>
   ),
   td: ({ children }) => (
-    <td className="px-4 py-2.5 text-neutral-700 border-b border-border">{children}</td>
+    <td className="px-4 py-2.5 text-foreground border-b border-border">{children}</td>
   ),
   hr: () => <hr className="my-6 border-border" />,
   img: ({ src, alt }) => (

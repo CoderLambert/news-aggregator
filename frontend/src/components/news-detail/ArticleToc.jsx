@@ -29,13 +29,13 @@ export default function ArticleToc({ headings, activeId }) {
         onClick={() => setOpen(!open)}
         aria-label={open ? '关闭目录' : '打开目录'}
         className="fixed right-0 top-1/2 -translate-y-1/2 z-40
-                   bg-white border border-r-0 border-neutral-200 rounded-l-lg
+                   bg-card border border-r-0 border-border rounded-l-lg
                    shadow-md px-2 py-3
-                   hover:bg-neutral-50 active:scale-95
+                   hover:bg-secondary active:scale-95
                    transition-all"
       >
-        <List className="size-4 text-neutral-600" />
-        <span className="block text-[9px] text-neutral-500 mt-0.5 leading-none">目录</span>
+        <List className="size-4 text-muted-foreground" />
+        <span className="block text-[9px] text-muted-foreground mt-0.5 leading-none">目录</span>
       </button>
 
       {/* ── Panel ── */}
@@ -48,19 +48,19 @@ export default function ArticleToc({ headings, activeId }) {
           />
 
           <div className="fixed right-0 top-1/2 -translate-y-1/2 z-50
-                          w-56 max-h-[70vh] bg-white rounded-l-xl
-                          border border-r-0 border-neutral-200 shadow-xl
+                          w-56 max-h-[70vh] bg-card rounded-l-xl
+                          border border-r-0 border-border shadow-xl
                           flex flex-col overflow-hidden">
             {/* Header */}
-            <div className="flex items-center justify-between px-3 py-2.5 border-b border-neutral-100 flex-shrink-0">
-              <span className="text-xs font-semibold text-neutral-700">文章目录</span>
+            <div className="flex items-center justify-between px-3 py-2.5 border-b border-border flex-shrink-0">
+              <span className="text-xs font-semibold text-foreground">文章目录</span>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
                 aria-label="关闭目录"
-                className="p-1 rounded hover:bg-neutral-100 transition-colors"
+                className="p-1 rounded hover:bg-secondary transition-colors"
               >
-                <X className="size-3.5 text-neutral-400" />
+                <X className="size-3.5 text-muted-foreground" />
               </button>
             </div>
 
@@ -75,8 +75,8 @@ export default function ArticleToc({ headings, activeId }) {
                     block w-full text-left text-[11px] leading-snug py-1.5 rounded
                     transition-colors
                     ${h.id === activeId
-                      ? 'text-orange-600 font-semibold bg-orange-50'
-                      : 'text-neutral-500 hover:text-neutral-800 hover:bg-neutral-50'}
+                      ? 'text-primary font-semibold bg-primary/10'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-secondary'}
                   `}
                   style={{ paddingLeft: `${6 + indent(h.level)}px`, paddingRight: '6px' }}
                 >

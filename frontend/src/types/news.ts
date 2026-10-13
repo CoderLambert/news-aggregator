@@ -39,6 +39,8 @@ export interface NewsSummary {
   channel_names?: string[]
   is_medical?: boolean
   reading_policy?: ReadingPolicy
+  body_access_granted?: boolean
+  can_fetch_full_content?: boolean
   id: number
   title: string
   summary: string
@@ -74,7 +76,7 @@ export interface NewsSummary {
 }
 
 export function hasReadableFullContent(news: Partial<NewsDetail>): boolean {
-  if (news.reading_policy === 'rss_summary_only') return false
+  if (news.reading_policy === 'rss_summary_only' && !news.body_access_granted) return false
   if (news.full_content_state && !['legacy', 'complete'].includes(news.full_content_state)) return false
   if (typeof news.has_full_content === 'boolean') return news.has_full_content
   return Boolean(news.full_content?.trim())
@@ -139,6 +141,8 @@ export function parseNewsSummary(value: unknown): NewsSummary {
   const nullableString = (key: string) => typeof value[key] === 'string' ? value[key] as string : ''
   const nullableNumber = (key: string) => typeof value[key] === 'number' ? value[key] as number : null
   return {
+    body_access_granted: value.body_access_granted === true,
+    can_fetch_full_content: typeof value.can_fetch_full_content === "boolean" ? value.can_fetch_full_content : undefined,
     publish_time_inferred: value.publish_time_inferred === true,
     source_region: value.source_region === 'domestic' ? 'domestic' : 'international',
     channel_ids: Array.isArray(value.channel_ids) ? value.channel_ids.filter((id): id is number => typeof id === 'number') : [requiredNumber(value, 'source')],
