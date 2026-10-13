@@ -143,8 +143,10 @@ auto_fetch_full_content 成为独立前台常驻进程，默认 disabled 仍存�
 
 只执行 next_attempt_at 明确到期的持久任务，无历史 pending 扫描。每批最多 10 个、按来源循环且每来源优先级排序，保留已有正文的刷新任务。五分钟旧 lease（含无时间戳）通过 URL/revision/时间戳 CAS 恢复，不重置失败数，恢复及取消/新排队不早于持久 host 冷却。SIGTERM 停止领取并在下一 Provider/写正文前检查取消，释放自己的任务为 queued，保留优先级和失败数。预算延期不算真实失败，终止/耗尽不无限自动重试。
 
-fetch_full_content 改为有界 enqueue/dry-run，保留来源、状态、重试、年龄、force 等筛选；force 只增加刷新意图，不改他人 lease 或冷却。backfill_full_content_scrapy 为兼容 enqueue 别名，没有 subprocess/独立抓取。限额必须 1–500，since/until 必须带时区；recent-only 仅最近七天、可靠来源日期、自动准入、无正文且无任务，过滤在限额前完成。after-id/next_after_id 支持混合历史选择的有限分批继续。未来日期不会前移 DEV 详情或自动排队。
+fetch_full_content 改为有界 enqueue/dry-run，保留来源、状态、重试、年龄、force 等筛选；force 只增加刷新意图，不改他人 lease 或冷却。backfill_full_content_scrapy 在开发环境为兼容 enqueue 别名；生产明确 CommandError 提示统一命令，没有 subprocess/独立抓取。限额必须 1–500，since/until 必须带时区；recent-only 仅最近七天、可靠来源日期、自动准入、无正文且无任务，过滤在限额前完成。after-id/next_after_id 支持混合历史选择的有限分批继续。未来日期不会前移 DEV 详情或自动排队。
 
 实际相关回归 **436 passed**：Worker/命令、状态/ingestion、全部 crawler、真实进程 Worker、请求预算、production_settings、结构化/TC Providers、FeedState。8 个独立进程场景全部通过，显式临时文件 SQLite 断言 WAL、禁用/空队列心跳、不同 TMPDIR/cwd 的第二进程锁拒绝、损坏/过期/错 owner 心跳、不再持锁时健康失败、SIGTERM 45 秒内退出且不进第二 Provider、取消保留冷却、SIGKILL 后新 owner 与预算/正文 lease 恢复。所有 Provider/网络为受控替身，并禁止 publisher socket connect。后台失去 claim 的独立回归 **1 passed**。
 
 `manage.py check` 实际无问题；`makemigrations --check --dry-run` 实际 No changes detected；`git diff --check` 通过。T09–T12、兼容部署配置及完整 CI 尚需完成，没有操作生产或隐式回填。
+
+T08 旧命令生产分支补充回归实际 **4 passed**（test_backfill_scrapy_command）；生产入口明确拒绝且不创建任务。

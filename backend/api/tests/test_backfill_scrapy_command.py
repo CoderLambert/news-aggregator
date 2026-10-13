@@ -29,3 +29,11 @@ def test_legacy_alias_never_runs_subprocess_or_article_provider(news, dry_run):
 
 def test_legacy_unbounded_limit_is_rejected(news):
     with pytest.raises(CommandError): call_command('backfill_full_content_scrapy', limit=0)
+
+
+def test_production_legacy_command_is_explicitly_retired(news, settings):
+    settings.DJANGO_ENV = 'production'
+    with pytest.raises(CommandError, match='fetch_full_content'):
+        call_command('backfill_full_content_scrapy', limit=1)
+    news.refresh_from_db()
+    assert news.full_content_fetch_status == 'pending'
