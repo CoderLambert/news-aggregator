@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import WorkspaceModal from '@/components/workspace/WorkspaceModal'
 
 const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal')
@@ -19,6 +19,9 @@ beforeEach(() => {
   })
 })
 afterEach(() => {
+  // Unmount while native-method stubs still exist. Global RTL cleanup can run
+  // after this hook and must not be relied upon for descriptor restoration.
+  cleanup()
   if (originalShowModal) Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShowModal)
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal')
   if (originalClose) Object.defineProperty(HTMLDialogElement.prototype, 'close', originalClose)
