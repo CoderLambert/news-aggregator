@@ -11,7 +11,7 @@ interface SourceFilterProps {
 export default function SourceFilter({ sources, active = [], onChange }: SourceFilterProps) {
   const { lang } = useLanguage()
   const toggle = (id: number) => onChange(active.includes(id) ? active.filter((item) => item !== id) : [...active, id])
-  const activeClass = 'bg-emerald-600 text-white hover:bg-emerald-700'
+  const activeClass = 'bg-primary text-primary-foreground hover:bg-primary'
 
   return (
     <div className="flex flex-wrap gap-2">

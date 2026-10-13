@@ -50,6 +50,16 @@ class ChannelNewsSerializer(serializers.ModelSerializer):
     channel_names = serializers.SerializerMethodField()
     is_medical = serializers.SerializerMethodField()
     reading_policy = serializers.SerializerMethodField()
+    body_access_granted = serializers.SerializerMethodField()
+    can_fetch_full_content = serializers.SerializerMethodField()
+
+    def get_body_access_granted(self, obj):
+        from api.services.body_access import can_view_article_body
+        return can_view_article_body(getattr(self.context.get("request"), "user", None))
+
+    def get_can_fetch_full_content(self, obj):
+        from api.services.full_content_status import fetch_eligibility
+        return obj.full_content_fetch_status != "blocked" and obj.full_content_retry_count < 5 and not fetch_eligibility(obj, privileged=self.get_body_access_granted(obj))
 
     def _channel_policies(self, obj):
         from api.services.channel_articles import news_policies
@@ -90,7 +100,7 @@ class ChannelNewsSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        if data.get('reading_policy') == 'rss_summary_only':
+        if data.get('reading_policy') == 'rss_summary_only' and not self.get_body_access_granted(instance):
             data['has_full_content'] = False
             for field in ('full_content', 'full_content_zh'):
                 if field in data:
@@ -128,7 +138,7 @@ class NewsListSerializer(ChannelNewsSerializer):
             'full_content_next_attempt_at', 'full_content_priority', 'full_content_error_code',
         ]
         fields = [
-            'source_region', 'channel_ids', 'channel_names', 'is_medical', 'reading_policy', 'publish_time_inferred',
+            'source_region', 'channel_ids', 'channel_names', 'is_medical', 'reading_policy', 'body_access_granted', 'publish_time_inferred',
             'id', 'title', 'summary', 'title_zh', 'summary_zh', 'author', 'publish_time',
             'has_full_content',
             'source', 'source_name', 'source_type', 'source_language',
@@ -143,6 +153,14 @@ class NewsListSerializer(ChannelNewsSerializer):
             'full_content_next_attempt_at', 'full_content_priority', 'full_content_error_code',
         ]
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Summary previews only need the override flag when access is granted.
+        # Fetch eligibility belongs to the detail response, not every list row.
+        if not data.get('body_access_granted'):
+            data.pop('body_access_granted', None)
+        return data
+
     def get_summary(self, obj):
         return (obj.content or '')[:self.SUMMARY_LIMIT]
 
@@ -150,7 +168,7 @@ class NewsListSerializer(ChannelNewsSerializer):
         from .services.full_content_status import has_full_content
         if hasattr(obj, 'has_readable_body'):
             return bool(obj.has_readable_body)
-        return has_full_content(obj)
+        return has_full_content(obj, privileged=self.get_body_access_granted(obj))
 
     def get_summary_zh(self, obj):
         return (obj.content_zh or '')[:self.SUMMARY_LIMIT]
@@ -192,7 +210,7 @@ class NewsDetailSerializer(ChannelNewsSerializer):
             'full_content_next_attempt_at', 'full_content_priority', 'full_content_error_code',
         ]
         fields = [
-            'source_region', 'channel_ids', 'channel_names', 'is_medical', 'reading_policy', 'publish_time_inferred',
+            'source_region', 'channel_ids', 'channel_names', 'is_medical', 'reading_policy', 'body_access_granted', 'can_fetch_full_content', 'publish_time_inferred',
             'id', 'title', 'content', 'title_zh', 'content_zh', 'author', 'publish_time',
             'source', 'source_name', 'source_type', 'source_url', 'source_language',
             'category', 'category_name',
@@ -325,11 +343,11 @@ class NewsDetailSerializer(ChannelNewsSerializer):
 
     def get_full_content(self, obj):
         from .services.full_content_status import get_readable_full_content
-        return get_readable_full_content(obj)
+        return get_readable_full_content(obj, privileged=self.get_body_access_granted(obj))
 
     def get_has_full_content(self, obj):
         from .services.full_content_status import has_full_content
-        return has_full_content(obj)
+        return has_full_content(obj, privileged=self.get_body_access_granted(obj))
 
 
 class FavoriteNewsSerializer(serializers.Serializer):

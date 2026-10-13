@@ -9,7 +9,7 @@ import NewsDetail from '@/pages/NewsDetail'
 import { CapabilitiesTestProvider } from '../helpers/capabilities'
 import { blockNews, checkFavoriteStatus, fetchCategories, fetchNews, fetchNewsDetail, fetchSources, unblockNews } from '@/services/api'
 
-const apiState = vi.hoisted(() => ({ blocked: false, fetchFullArticle: vi.fn(), translate: vi.fn(), translateError: '' }))
+const apiState = vi.hoisted(() => ({ blocked: false, fetchFullArticle: vi.fn(), translate: vi.fn(), translateError: '', articleError: '' }))
 
 vi.mock('@/services/api', () => ({
   fetchChannelSubscriptions: vi.fn().mockResolvedValue([]),
@@ -27,7 +27,7 @@ vi.mock('@/services/api', () => ({
   unblockNews: vi.fn(async () => { apiState.blocked = false; return { removed: true } }),
 }))
 
-vi.mock('@/hooks/useFullArticle', () => ({ useFullArticle: () => ({ articleLoading: false, articleError: '', handleFetchFullArticle: apiState.fetchFullArticle, resumeExistingFetch: vi.fn(), cancelFetch: vi.fn() }) }))
+vi.mock('@/hooks/useFullArticle', () => ({ useFullArticle: () => ({ articleLoading: false, articleError: apiState.articleError, handleFetchFullArticle: apiState.fetchFullArticle, resumeExistingFetch: vi.fn(), cancelFetch: vi.fn() }) }))
 vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => ({ translating: false, translateError: apiState.translateError, translationProgress: '', showOriginal: false, setShowOriginal: vi.fn(), handleTranslate: apiState.translate }) }))
 vi.mock('@/hooks/useArticleSearch', () => ({ useArticleSearch: () => ({ matchCount: 0, currentIndex: 0, goNext: vi.fn(), goPrev: vi.fn() }) }))
 vi.mock('@/hooks/useArticleToc', () => ({ useArticleToc: () => ({ headings: [], activeId: '' }) }))
@@ -93,6 +93,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   apiState.blocked = false
   apiState.translateError = ''
+  apiState.articleError = ''
   apiState.fetchFullArticle.mockReset()
   localStorage.removeItem('news-aggregator-filters')
   usePreferencesStore.setState({ lang: 'zh' })
@@ -221,4 +222,15 @@ describe('news list return navigation and invalidation', () => {
     expect(await screen.findByRole('dialog', { name: '登录小闻' })).toBeInTheDocument()
     expect(apiState.fetchFullArticle).not.toHaveBeenCalled()
   })
+})
+
+
+it('shows a new fetch failure when body permission allows retrying a formerly unsupported article', async () => {
+  apiState.articleError = '正文获取服务暂不可用，请稍后重试。'
+  fetchNewsDetail.mockResolvedValue({ ...detailStory, reading_policy: 'rss_summary_only', body_access_granted: true,
+    can_fetch_full_content: true, full_content_fetch_status: 'unsupported' })
+  renderRoutes('/news/21')
+  expect(await screen.findByText('正文获取服务暂不可用，请稍后重试。')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '尝试获取正文' })).toBeInTheDocument()
+  expect(screen.getByText('尚未保存完整原文')).toBeInTheDocument()
 })

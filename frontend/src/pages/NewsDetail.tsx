@@ -149,23 +149,24 @@ export default function NewsDetail() {
 
   if (!news) {
     return (
-      <div className="py-20 text-center text-gray-400">
+      <div className="py-20 text-center text-muted-foreground">
         {error ? (
           <>
-            <p role="alert" className="text-red-700">新闻加载失败，请重试。</p>
-            <button type="button" className="mt-2 text-blue-600 underline" onClick={() => void refetch()}>重试</button>
+            <p role="alert" className="text-destructive">新闻加载失败，请重试。</p>
+            <button type="button" className="mt-2 text-primary underline" onClick={() => void refetch()}>重试</button>
           </>
         ) : (
           <p>{t.notFound}</p>
         )}
-        <Link to={returnTo} className="mt-2 inline-block text-blue-600">{t.backHome}</Link>
+        <Link to={returnTo} className="mt-2 inline-block text-primary">{t.backHome}</Link>
       </div>
     )
   }
 
   const readableBody = hasReadableFullContent(news)
   const isEnglishSource = news.source_language === 'en'
-  const hasTerminalFetchFailure = !hasPendingFullContentTask(news) && ['network_error', 'validation_failed', 'failed', 'blocked', 'unsupported'].includes(news.full_content_fetch_status || '')
+  const canRetryPolicyBlockedBody = news.full_content_fetch_status === 'unsupported' && news.body_access_granted && news.can_fetch_full_content
+  const hasTerminalFetchFailure = !canRetryPolicyBlockedBody && !hasPendingFullContentTask(news) && ['network_error', 'validation_failed', 'failed', 'blocked', 'unsupported'].includes(news.full_content_fetch_status || '')
   const hasChineseTitle = isEnglishSource && Boolean(news.title_zh)
   let displayTitle: string
   let displayContent: string
@@ -190,7 +191,7 @@ export default function NewsDetail() {
   }
 
   return (
-    <div onKeyDown={handleGlobalKeyDown}>
+    <div className="article-detail" onKeyDown={handleGlobalKeyDown}>
       {searchOpen && (
         <ArticleSearchBar
           query={searchQuery}
@@ -205,7 +206,7 @@ export default function NewsDetail() {
 
       <div className={`mx-auto w-full max-w-5xl overflow-x-hidden px-4 pb-28 pt-4 sm:px-6 sm:pb-10 sm:pt-6 ${searchOpen ? 'pt-16' : ''}`}>
         <nav className="mb-8 flex items-center justify-between">
-          <Link to={returnTo} className="inline-flex items-center gap-1.5 text-sm text-neutral-500 transition-colors hover:text-neutral-900">
+          <Link to={returnTo} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground">
             <ArrowLeft className="size-3.5" />{t.backToList}
           </Link>
           {!searchOpen && (
@@ -217,7 +218,7 @@ export default function NewsDetail() {
                 onFocus={prefetchNewsChatAssistant}
                 onPointerDown={prefetchNewsChatAssistant}
                 aria-label="询问 AI 助手小闻"
-                className="inline-flex h-10 items-center gap-1.5 rounded-xl px-2.5 text-xs font-medium text-neutral-500 transition-colors hover:bg-orange-50 hover:text-orange-700 active:bg-orange-100"
+                className="inline-flex h-10 items-center gap-1.5 rounded-xl px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary active:bg-primary/10"
               >
                 <MessageCircle aria-hidden="true" className="size-4" />
                 <span className="hidden sm:inline">问小闻</span>
@@ -233,8 +234,8 @@ export default function NewsDetail() {
                   onTranslateAndPlay={handleTranslateAndPlay}
                 />
               )}
-              <button type="button" onClick={() => setSearchOpen(true)} aria-label="搜索文章内容" className="-mr-2 flex size-10 items-center justify-center rounded-xl transition-colors hover:bg-neutral-100 active:bg-neutral-200">
-                <Search className="size-[18px] text-neutral-400" />
+              <button type="button" onClick={() => setSearchOpen(true)} aria-label="搜索文章内容" className="-mr-2 flex size-10 items-center justify-center rounded-xl transition-colors hover:bg-secondary active:bg-secondary">
+                <Search className="size-[18px] text-muted-foreground" />
               </button>
             </div>
           )}
@@ -268,17 +269,17 @@ export default function NewsDetail() {
               onRefetch={() => requestFullArticle(true)}
               refetching={articleLoading}
               onCancelRefetch={cancelFetch}
-              allowFetch={fetchFullEnabled}
+              allowFetch={fetchFullEnabled && news.can_fetch_full_content !== false}
               allowTranslation={translationEnabled}
             />
           )}
 
           {!readableBody && displayContent ? (
-            <SummarySection content={displayContent} readingPolicy={news.reading_policy} onAskAssistant={chatEnabled ? openAssistant : undefined} />
+            <SummarySection content={displayContent} readingPolicy={news.body_access_granted ? 'standard' : news.reading_policy} onAskAssistant={chatEnabled ? openAssistant : undefined} />
           ) : null}
 
-          <div className="mt-10 border-t border-neutral-100 pt-6">
-            <>{news.full_content_error_code === 'invalid_identity' ? <span className="text-sm text-neutral-400">链接待核验</span> : <a href={news.url} target="_blank" rel="noreferrer" className="text-sm text-neutral-400 transition-colors hover:text-neutral-600">{t.readOriginal}</a>}</>
+          <div className="mt-10 border-t border-border pt-6">
+            <>{news.full_content_error_code === 'invalid_identity' ? <span className="text-sm text-muted-foreground">链接待核验</span> : <a href={news.url} target="_blank" rel="noreferrer" className="text-sm text-muted-foreground transition-colors hover:text-muted-foreground">{t.readOriginal}</a>}</>
           </div>
         </article>
         {chatEnabled && <div hidden={assistantOpen}>
@@ -307,15 +308,15 @@ export default function NewsDetail() {
 
 function SummarySection({ content, onAskAssistant, readingPolicy }: { content: string; readingPolicy?: import('@/types/news').ReadingPolicy; onAskAssistant?: (event: MouseEvent<HTMLButtonElement>) => void }) {
   return (
-    <section aria-labelledby="article-summary-heading" className="article-section-render w-full overflow-x-hidden rounded-3xl border border-neutral-200 bg-white px-5 py-6 shadow-[0_18px_50px_rgba(15,23,42,0.06)] sm:px-8 sm:py-8">
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-3 border-b border-neutral-100 pb-5">
+    <section aria-labelledby="article-summary-heading" className="article-section-render w-full overflow-x-hidden rounded-3xl border border-border bg-card px-5 py-6 shadow-none sm:px-8 sm:py-8">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3 border-b border-border pb-5">
         <div>
           <div className="mb-2 flex items-center gap-2">
-            <span className="inline-flex rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-amber-700">摘要模式</span>
-            <span className="text-xs text-neutral-400">{readingPolicy === 'rss_summary_only' ? '来源仅提供标题和摘要' : '尚未保存完整原文'}</span>
+            <span className="inline-flex rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-primary">摘要模式</span>
+            <span className="text-xs text-muted-foreground">{readingPolicy === 'rss_summary_only' ? '来源仅提供标题和摘要' : '尚未保存完整原文'}</span>
           </div>
-          <h2 id="article-summary-heading" data-article-toc="ignore" className="text-lg font-semibold tracking-tight text-neutral-900">内容摘要</h2>
-          <p className="mt-1 text-sm leading-6 text-neutral-500">{readingPolicy && readingPolicy !== 'standard' ? '以下是 RSS 来源提供的公开摘要；更多内容请通过原文链接阅读。' : '快速了解文章要点；获取原文后可阅读完整段落、列表与代码。'}</p>
+          <h2 id="article-summary-heading" data-article-toc="ignore" className="text-lg font-semibold tracking-tight text-foreground">内容摘要</h2>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">{readingPolicy && readingPolicy !== 'standard' ? '以下是 RSS 来源提供的公开摘要；更多内容请通过原文链接阅读。' : '快速了解文章要点；获取原文后可阅读完整段落、列表与代码。'}</p>
         </div>
         {onAskAssistant && <button
           type="button"
@@ -323,13 +324,13 @@ function SummarySection({ content, onAskAssistant, readingPolicy }: { content: s
           onMouseEnter={prefetchNewsChatAssistant}
           onFocus={prefetchNewsChatAssistant}
           onPointerDown={prefetchNewsChatAssistant}
-          className="inline-flex h-10 items-center gap-2 rounded-full border border-orange-200 bg-orange-50 px-4 text-sm font-medium text-orange-700 transition-colors hover:bg-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2"
+          className="inline-flex h-10 items-center gap-2 rounded-full border border-border bg-primary/10 px-4 text-sm font-medium text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
           <Sparkles aria-hidden="true" className="size-4" />
           基于摘要提问
         </button>}
       </div>
-      <div className="summary-markdown w-full max-w-full overflow-hidden text-neutral-700">
+      <div className="summary-markdown w-full max-w-full overflow-hidden text-foreground">
         {content.trim() ? <MarkdownContent content={content} legacySummarySpacing /> : <p>来源未提供摘要，请前往来源网站阅读。</p>}
       </div>
     </section>
@@ -348,15 +349,15 @@ function ArticleHeader({ news, displayTitle, displaySubtitle, isEnglishSource }:
   return (
     <header className="mb-8">
       <div className="mb-4 flex flex-wrap items-center gap-1.5">
-        <span className="inline-flex h-6 items-center rounded-full bg-neutral-100 px-2.5 text-[11px] font-medium uppercase tracking-wide text-neutral-600">{news.category_name}</span>
+        <span className="inline-flex h-6 items-center rounded-full bg-secondary px-2.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{news.category_name}</span>
         {isEnglishSource && <TranslationStatus news={news} />}
       </div>
 
-      <h1 className="mb-3 text-[1.625rem] font-bold leading-snug tracking-tight text-neutral-900 sm:text-3xl">{displayTitle}</h1>
-      {displaySubtitle && <p className="mb-4 text-[13px] leading-relaxed text-neutral-400">{displaySubtitle}</p>}
+      <h1 className="mb-3 text-[1.625rem] font-bold leading-snug tracking-tight text-foreground sm:text-3xl">{displayTitle}</h1>
+      {displaySubtitle && <p className="mb-4 text-[13px] leading-relaxed text-muted-foreground">{displaySubtitle}</p>}
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-neutral-500">
-        {author && author !== sourceName && <span className="flex items-center gap-1"><span className="text-neutral-700">{author}</span></span>}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
+        {author && author !== sourceName && <span className="flex items-center gap-1"><span className="text-foreground">{author}</span></span>}
         {sourceName && <span>{sourceName}</span>}
         <span className="flex items-center gap-1">
           <time>{new Date(news.publish_time).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}{news.publish_time_inferred && '（时间推断）'}</time>

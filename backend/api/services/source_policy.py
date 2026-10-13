@@ -140,7 +140,8 @@ def html_candidate_contract_allows(candidate) -> bool:
     from api.services.article_identity import same_article_identity
     from api.services.article_fetcher.site_rules import get_site_rule
     policy = policy_for_url(candidate.target_url)
-    if policy and (not policy.html_allowed or policy.unsupported_reason):
+    from api.services.body_access import privileged_fetch
+    if policy and ((not policy.html_allowed and not privileged_fetch.get()) or policy.unsupported_reason):
         return False
     if not policy and not get_site_rule(candidate.target_url):
         return False

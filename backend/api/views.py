@@ -104,7 +104,8 @@ class NewsFilter(django_filters.FilterSet):
 
     def filter_full_content(self, queryset, name, value):
         if value:
-            return filter_readable_full_content(queryset)
+            from api.services.body_access import can_view_article_body
+            return filter_readable_full_content(queryset, privileged=can_view_article_body(getattr(self.request, "user", None)))
         return queryset
 
 
@@ -465,14 +466,19 @@ class NewsFetchFullView(generics.GenericAPIView):
         from django.utils import timezone
         news = self.get_object()
         force = request.data.get('force') is True
-        if has_full_content(news) and not force:
+        from api.services.body_access import can_view_article_body
+        privileged = can_view_article_body(request.user)
+        if has_full_content(news, privileged=privileged) and not force:
             return Response(self.get_serializer(news).data)
-        rejection = fetch_eligibility(news)
-        if rejection or news.full_content_fetch_status in {'blocked', 'unsupported'}:
+        rejection = fetch_eligibility(news, privileged=privileged)
+        if rejection or news.full_content_fetch_status == 'blocked' or (news.full_content_fetch_status == 'unsupported' and not privileged):
             data = dict(self.get_serializer(news).data)
             data.update(error_code=rejection or news.full_content_error_code or 'unsupported',
                         error='该文章身份或来源策略暂不支持正文获取。')
             return Response(data, status=422)
+        if privileged:
+            News.objects.filter(pk=news.pk, url=news.url, full_content_revision=news.full_content_revision).update(full_content_requested_by=request.user)
+            news.refresh_from_db()
         outcome = request_full_content(news, force=force, priority=10 if force else 0)
         news.refresh_from_db()
         data = dict(self.get_serializer(news).data)

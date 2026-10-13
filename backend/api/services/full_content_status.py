@@ -118,14 +118,18 @@ def _owned_query(news):
     )
 
 
-def fetch_eligibility(news):
+def fetch_eligibility(news, *, privileged=None):
+    from api.services.body_access import authorized_fetch
+    if privileged is None and news.full_content_requested_by_id and not authorized_fetch(news):
+        return "permission_revoked"
+    privileged = authorized_fetch(news) if privileged is None else privileged
     from api.services.source_policy import policy_for_url, retired_policy_for_url
     from api.services.article_fetcher.site_rules import get_site_rule
     from api.services.article_identity import InvalidIdentity, normalize_article_url
     from api.services.channel_articles import summary_only
     from api.services.source_policy import policy_for_name
     primary = policy_for_name(news.source.name) if getattr(news, 'source_id', None) else None
-    if summary_only(news) or (primary and primary.reading_policy == 'public_rss'):
+    if not privileged and (summary_only(news) or (primary and primary.reading_policy == 'public_rss')):
         return 'unsupported'
     try:
         normalize_article_url(news.url)
@@ -133,7 +137,7 @@ def fetch_eligibility(news):
         return 'invalid_identity'
     policy = policy_for_url(news.url)
     if (retired_policy_for_url(news.url) or news.content_kind in {'abstract', 'product'} or
-            (policy and (policy.unsupported_reason or not policy.html_allowed)) or
+            (policy and (policy.unsupported_reason or (not policy.html_allowed and not privileged))) or
             (not policy and not get_site_rule(news.url))):
         return 'unsupported'
     return ''
@@ -147,6 +151,7 @@ def _known_cooldown(url):
 
 
 def enqueue_fetch(news, *, force=False, priority=0):
+    from api.services.body_access import authorized_fetch
     """Persist one task intent; duplicates and force preserve leases/cooldowns."""
     if fetch_eligibility(news):
         return 'rejected'
@@ -156,7 +161,7 @@ def enqueue_fetch(news, *, force=False, priority=0):
     query = news.__class__.objects.filter(pk=news.pk, url=news.url, full_content_revision=news.full_content_revision)
     # Already scheduled tasks, terminal policy blocks and valid leases are not
     # reset by repeated user requests. Source fixes need an explicit new cycle.
-    if news.full_content_fetch_status in {'blocked', 'unsupported'} or news.full_content_retry_count >= 5:
+    if news.full_content_fetch_status == 'blocked' or (news.full_content_fetch_status == 'unsupported' and not authorized_fetch(news)) or news.full_content_retry_count >= 5:
         return 'rejected'
     requested_priority = max(-10, min(10, 10 if force else priority))
     if news.full_content_next_attempt_at is not None or news.full_content_fetch_status == 'fetching':
@@ -255,7 +260,8 @@ def commit_candidate(news, candidate, *, provider='', lease: FetchLease | None =
     if current is None:
         return ContentCommit('conflict', 'persistence_conflict')
     from api.services.channel_articles import summary_only
-    if summary_only(current):
+    from api.services.body_access import authorized_fetch
+    if (current.full_content_requested_by_id and not authorized_fetch(current)) or (summary_only(current) and not authorized_fetch(current)):
         return ContentCommit('rejected', 'unsupported')
     identities = current.source_items.filter(source_key=candidate.source_key)
     # The reviewed CMS response resolves its numeric post ID from the exact
@@ -440,19 +446,19 @@ def classify_fetch_error(error_or_result) -> str:
     return 'failed'
 
 
-def has_full_content(news: News) -> bool:
+def has_full_content(news: News, *, privileged=False) -> bool:
     """Availability is independent of the latest refresh attempt's status."""
     from api.services.channel_articles import summary_only
-    return news.full_content_state in {'legacy', 'complete'} and bool((news.full_content or '').strip()) and not summary_only(news)
+    return news.full_content_state in {'legacy', 'complete'} and bool((news.full_content or '').strip()) and (privileged or not summary_only(news))
 
 
-def get_readable_full_content(news: News) -> str:
-    return news.full_content if has_full_content(news) else ''
+def get_readable_full_content(news: News, *, privileged=False) -> str:
+    return news.full_content if has_full_content(news, privileged=privileged) else ''
 
 
-def filter_readable_full_content(queryset):
+def filter_readable_full_content(queryset, *, privileged=False):
     from api.services.channel_articles import exclude_summary_only
-    return exclude_summary_only(queryset).alias(
+    return (queryset if privileged else exclude_summary_only(queryset)).alias(
         _readable_body=trimmed_text_expression('full_content'),
     ).filter(full_content_state__in=['legacy', 'complete']).exclude(_readable_body='')
 
@@ -464,7 +470,7 @@ def correct_article_identity(news, new_url, *, expected_url, expected_revision):
     if new_url == expected_url:
         return True
     saved = news.__class__.objects.filter(pk=news.pk, url=expected_url, full_content_revision=expected_revision).update(
-        url=new_url, full_content_revision=F('full_content_revision') + 1,
+        url=new_url, full_content_revision=F('full_content_revision') + 1, full_content_requested_by=None,
         full_content_state='missing', full_content_fetch_status='pending',
         full_content_next_attempt_at=None, full_content_error_code='identity_changed',
         suggested_questions=[], suggested_questions_generated_at=None,

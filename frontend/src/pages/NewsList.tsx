@@ -146,7 +146,7 @@ export default function NewsList() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
       <header className="mb-4">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-800 dark:text-emerald-400 font-mono">{lang === 'en' ? 'Your news feed' : '你的资讯流'}</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary dark:text-primary font-mono">{lang === 'en' ? 'Your news feed' : '你的资讯流'}</p>
         <div className="mt-1 flex flex-wrap items-end justify-between gap-2">
           <div>
             <h1 id="news-list-title" tabIndex={-1} className="rounded-sm text-2xl font-bold tracking-tight text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary font-serif">{lang === 'en' ? 'Latest news' : '最新资讯'}</h1>
@@ -161,8 +161,8 @@ export default function NewsList() {
         region={region} onRegionChange={value => updateParams({ region: value === 'all' ? null : value, source: null, page: null })} />
       {invalidRegion && <p role="alert">无效的频道地区，请选择全部、国内或国际。</p>}
       {reading.notice && <p role="status" className="mb-3 text-sm text-muted-foreground">{reading.notice}</p>}
-      {reading.configError && <div role="alert" className="mb-3 text-sm text-red-700">个人频道配置加载失败，筛选尚未应用。 <button className="underline" onClick={() => void reading.retry()}>重试</button></div>}
-      {reading.saveError && <div role="alert" className="mb-3 text-sm text-red-700">上次查看范围保存失败。 <button className="underline" onClick={reading.retrySave}>重试保存</button></div>}
+      {reading.configError && <div role="alert" className="mb-3 text-sm text-destructive">个人频道配置加载失败，筛选尚未应用。 <button className="underline" onClick={() => void reading.retry()}>重试</button></div>}
+      {reading.saveError && <div role="alert" className="mb-3 text-sm text-destructive">上次查看范围保存失败。 <button className="underline" onClick={reading.retrySave}>重试保存</button></div>}
       {reading.invalidScope && <div role="alert">无效的资讯范围。 <button className="underline" onClick={() => reading.select('all')}>全部资讯</button></div>}
       {reading.needsLogin && <p role="status" className="mb-3">登录后查看个人频道范围。 <button className="underline" onClick={() => setShowLogin(true)}>登录</button></p>}
       {showLogin && <AuthModal onClose={() => setShowLogin(false)} />}
@@ -191,7 +191,7 @@ export default function NewsList() {
       />
 
       {(Boolean(search.trim()) || region !== 'all') && activeFilterCount > 0 && (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-neutral-500" role="status">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground" role="status">
           <span>{lang === 'en' ? `${activeFilterCount} active condition${activeFilterCount === 1 ? '' : 's'}` : `已启用 ${activeFilterCount} 个条件`}</span>
           <Button type="button" variant="ghost" size="sm" onClick={() => updateParams({ search: null, mode: null, region: null, category: null, source: null, page: null })} className="h-7 rounded-full px-2 text-xs">
             {lang === 'en' ? 'Clear all' : '清除全部条件'}
@@ -202,7 +202,7 @@ export default function NewsList() {
       </div>
 
       {(categoriesQuery.isError || sourcesQuery.isError) && (
-        <div role="alert" className="mb-4 flex items-center gap-3 text-sm text-red-700">
+        <div role="alert" className="mb-4 flex items-center gap-3 text-sm text-destructive">
           <span>{lang === 'en' ? 'Filters could not be loaded.' : '筛选项加载失败。'}</span>
           {categoriesQuery.isError && <button type="button" className="underline" onClick={() => void categoriesQuery.refetch()}>{lang === 'en' ? 'Retry categories' : '重试分类'}</button>}
           {sourcesQuery.isError && <button type="button" className="underline" onClick={() => void sourcesQuery.refetch()}>{lang === 'en' ? 'Retry sources' : '重试来源'}</button>}
@@ -210,7 +210,7 @@ export default function NewsList() {
       )}
 
       {newsQuery.isError && !data && (
-        <div role="alert" className="my-10 text-center text-sm text-red-700">
+        <div role="alert" className="my-10 text-center text-sm text-destructive">
           <p>{lang === 'en' ? 'News could not be loaded.' : '新闻加载失败。'}</p>
           <button type="button" className="mt-2 underline" onClick={() => void newsQuery.refetch()}>{lang === 'en' ? 'Retry' : '重试'}</button>
         </div>
@@ -218,7 +218,7 @@ export default function NewsList() {
 
       {initialLoading && <LoadingSpinner />}
       {!initialLoading && !newsQuery.isError && data?.results.length === 0 && (
-        <div className="py-20 text-center text-gray-400">
+        <div className="py-20 text-center text-muted-foreground">
           <p className="text-lg">{lang === 'en' ? 'No results found' : '未找到结果'}</p>
           {reading.scope !== 'all' && reading.sourceIds?.length === 0 ? (
             <Link to="/channels" className="mt-3 inline-block text-primary underline">{reading.scope === 'group' ? '添加频道' : '选择频道'}</Link>
@@ -241,7 +241,7 @@ export default function NewsList() {
         fetching={newsQuery.isFetching}
       />
 
-      {newsQuery.isFetching && !initialLoading && <div className="py-3 text-center text-sm text-gray-400" role="status">{lang === 'en' ? 'Updating…' : '正在更新…'}</div>}
+      {newsQuery.isFetching && !initialLoading && <div className="py-3 text-center text-sm text-muted-foreground" role="status">{lang === 'en' ? 'Updating…' : '正在更新…'}</div>}
       {!initialLoading && totalPages > 1 && (
         <Pagination
           currentPage={page}
@@ -344,15 +344,15 @@ function NewsResults({ results, viewerId, lang, fetching }: {
       </div>
 
       {blockedNewsEnabled && undoTarget !== null && (
-        <div className="fixed bottom-5 left-1/2 z-50 flex w-[min(92vw,28rem)] -translate-x-1/2 items-center gap-3 rounded-2xl bg-neutral-900 px-4 py-3 text-sm text-white shadow-2xl" role="status" aria-live="polite">
+        <div className="fixed bottom-5 left-1/2 z-50 flex w-[min(92vw,28rem)] -translate-x-1/2 items-center gap-3 rounded-2xl bg-primary px-4 py-3 text-sm text-primary-foreground shadow-2xl" role="status" aria-live="polite">
           <span className="min-w-0 flex-1">{lang === 'en' ? 'News hidden from your feed.' : '已从资讯流中屏蔽这篇新闻。'}</span>
-          <button ref={undoButtonRef} type="button" onClick={() => void undoBlock()} disabled={undoPendingVersion === undoTarget.version} className="min-h-11 shrink-0 rounded-lg px-3 py-1 font-semibold text-amber-300 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 disabled:opacity-50 sm:min-h-8">
+          <button ref={undoButtonRef} type="button" onClick={() => void undoBlock()} disabled={undoPendingVersion === undoTarget.version} className="min-h-11 shrink-0 rounded-lg px-3 py-1 font-semibold text-primary-foreground hover:bg-primary-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 sm:min-h-8">
             {undoPendingVersion === undoTarget.version ? (lang === 'en' ? 'Restoring…' : '恢复中…') : (lang === 'en' ? 'Undo' : '撤销')}
           </button>
-          <button type="button" aria-label={lang === 'en' ? 'Dismiss' : '关闭提示'} onClick={dismissUndo} className="flex size-11 shrink-0 items-center justify-center rounded-lg text-neutral-300 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:size-8">×</button>
+          <button type="button" aria-label={lang === 'en' ? 'Dismiss' : '关闭提示'} onClick={dismissUndo} className="flex size-11 shrink-0 items-center justify-center rounded-lg text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-foreground sm:size-8">×</button>
         </div>
       )}
-      {blockedNewsEnabled && undoTarget && undoErrorVersion === undoTarget.version && <p role="alert" className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 shadow">{lang === 'en' ? 'Could not restore this news.' : '恢复失败，请重试。'}</p>}
+      {blockedNewsEnabled && undoTarget && undoErrorVersion === undoTarget.version && <p role="alert" className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive shadow">{lang === 'en' ? 'Could not restore this news.' : '恢复失败，请重试。'}</p>}
     </>
   )
 }

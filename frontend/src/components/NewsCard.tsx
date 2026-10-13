@@ -26,12 +26,12 @@ export interface BlockedNewsTarget {
 
 function ContentStatus({ news, lang }: { news: NewsSummary; lang: 'zh' | 'en' }) {
   if (hasReadableFullContent(news)) {
-    return <Badge variant="green" className="rounded-full"><FileText aria-hidden="true" />{lang === 'en' ? 'Full article' : '有全文'}</Badge>
+    return <Badge variant="outline" className="border-border bg-secondary text-muted-foreground rounded-full"><FileText aria-hidden="true" />{lang === 'en' ? 'Full article' : '有全文'}</Badge>
   }
   if (hasPendingFullContentTask(news)) {
-    return <Badge variant="amber" className="rounded-full">{lang === 'en' ? 'Fetching' : '获取全文中'}</Badge>
+    return <Badge variant="outline" className="border-border bg-secondary text-muted-foreground rounded-full">{lang === 'en' ? 'Fetching' : '获取全文中'}</Badge>
   }
-  return <Badge variant="gray" className="rounded-full">{lang === 'en' ? 'Summary' : '摘要'}</Badge>
+  return <Badge variant="outline" className="border-border bg-secondary text-muted-foreground rounded-full">{lang === 'en' ? 'Summary' : '摘要'}</Badge>
 }
 
 function formatRelativeTime(dateString: string, t: ReturnType<typeof useLanguage>['t']) {
@@ -97,7 +97,7 @@ export default function NewsCard({ news, onBlockStart, onBlocked }: NewsCardProp
   }
 
   return (
-    <article className="news-card-render group relative overflow-hidden rounded-2xl border border-border bg-card transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-emerald-600/30 hover:shadow-md">
+    <article className="news-card-render group relative overflow-hidden rounded-2xl border border-border bg-card transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md">
       <Link id={`news-card-${news.id}`} to={`/news/${news.id}`} state={{ from: returnTo }} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary" onMouseEnter={prefetchDetail} onFocus={prefetchDetail}>
         {news.cover_image && <div className="aspect-video overflow-hidden bg-muted"><img src={news.cover_image} alt="" className="h-full w-full object-cover" loading="lazy" /></div>}
         <div className={`p-4 ${user && blockedNewsEnabled ? 'pr-12' : ''}`}>
@@ -108,7 +108,7 @@ export default function NewsCard({ news, onBlockStart, onBlocked }: NewsCardProp
           </div>
           <div className="mb-2 flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <h2 className="line-clamp-2 text-base font-semibold leading-snug text-foreground transition-colors group-hover:text-emerald-800 dark:group-hover:text-emerald-300">{title}</h2>
+              <h2 className="line-clamp-2 text-base font-semibold leading-snug text-foreground transition-colors group-hover:text-primary ">{title}</h2>
               {subtitle && <p className="mt-0.5 line-clamp-1 text-xs leading-tight text-muted-foreground">{subtitle}</p>}
             </div>
           </div>
@@ -117,7 +117,7 @@ export default function NewsCard({ news, onBlockStart, onBlocked }: NewsCardProp
           {(news.channel_names?.filter(name => name !== news.source_name).length ?? 0) > 0 && <p className="mb-2 text-xs text-muted-foreground">同时收录于 {news.channel_names?.filter(name => name !== news.source_name).join('、')}</p>}
           {cleanedContent && <p className="mb-4 line-clamp-3 text-sm leading-relaxed text-muted-foreground">{cleanedContent.slice(0, 180)}{cleanedContent.length > 180 ? '…' : ''}</p>}
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <Badge variant="sage" className="rounded-full px-2 py-0.5">{news.category_name}</Badge>
+            <Badge variant="outline" className="border-border bg-secondary text-muted-foreground rounded-full px-2 py-0.5">{news.category_name}</Badge>
             <ContentStatus news={news} lang={lang} />
             <span className="ml-auto"><TranslationStatus news={news} size="compact" /></span>
           </div>
@@ -125,10 +125,10 @@ export default function NewsCard({ news, onBlockStart, onBlocked }: NewsCardProp
       </Link>
       {user && blockedNewsEnabled && (
         <div className="absolute right-2 top-2 z-10">
-          <button type="button" onClick={handleBlock} disabled={blockMutation.isPending} className="flex size-8 items-center justify-center rounded-full border border-gray-200 bg-white/90 text-gray-400 backdrop-blur-sm transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-500 disabled:opacity-50" aria-label={lang === 'en' ? 'Block this news' : '屏蔽此新闻'} title={lang === 'en' ? 'Block this news' : '屏蔽此新闻'}>
+          <button type="button" onClick={handleBlock} disabled={blockMutation.isPending} className="flex size-8 items-center justify-center rounded-full border border-border bg-card/90 text-muted-foreground backdrop-blur-sm transition-colors hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive disabled:opacity-50" aria-label={lang === 'en' ? 'Block this news' : '屏蔽此新闻'} title={lang === 'en' ? 'Block this news' : '屏蔽此新闻'}>
             <EyeOff size={13} />
           </button>
-          {blockMutation.isError && <p className="absolute right-0 top-9 w-40 rounded bg-white p-2 text-xs text-red-700 shadow" role="alert">{lang === 'en' ? 'Could not block this news.' : '屏蔽失败，请重试。'}</p>}
+          {blockMutation.isError && <p className="absolute right-0 top-9 w-40 rounded bg-card p-2 text-xs text-destructive shadow" role="alert">{lang === 'en' ? 'Could not block this news.' : '屏蔽失败，请重试。'}</p>}
         </div>
       )}
     </article>

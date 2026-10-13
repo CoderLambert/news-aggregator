@@ -45,9 +45,9 @@ const SOURCE_TYPE_LABELS: Record<SourceType, string> = {
   discussion: '讨论',
 }
 const SOURCE_TYPE_COLORS: Record<SourceType, string> = {
-  news: 'bg-blue-50 text-blue-600',
-  aggregator: 'bg-amber-50 text-amber-600',
-  discussion: 'bg-green-50 text-green-600',
+  news: 'bg-primary/10 text-primary',
+  aggregator: 'bg-primary/10 text-primary',
+  discussion: 'bg-primary/10 text-primary',
 }
 
 interface PillOption {
@@ -70,7 +70,7 @@ function PillGroup({ options, value, onChange }: {
           aria-pressed={value === option.key}
           className={`cursor-pointer rounded-full px-2.5 py-1 text-xs font-medium transition-all ${value === option.key
             ? 'bg-primary text-primary-foreground shadow-xs'
-            : 'border border-border bg-card text-muted-foreground hover:border-emerald-600/30 hover:bg-accent'}`}
+            : 'border border-border bg-card text-muted-foreground hover:border-primary/30 hover:bg-accent'}`}
         >
           {option.label}
         </button>
@@ -224,8 +224,8 @@ export default function LocalSearch() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
       <header className="mb-4">
-        <h1 className="text-2xl font-bold text-neutral-900">本地搜索</h1>
-        <p className="mt-1 text-sm text-neutral-500">在本地新闻数据库中搜索相关文章</p>
+        <h1 className="text-2xl font-bold text-foreground">本地搜索</h1>
+        <p className="mt-1 text-sm text-muted-foreground">在本地新闻数据库中搜索相关文章</p>
       </header>
 
       <SearchControls
@@ -242,10 +242,10 @@ export default function LocalSearch() {
 
       {invalidRegion && <p role="alert">无效的频道地区，请选择全部、国内或国际。</p>}
       <RegionFilter value={region} onChange={value => updateFilters({ region: value === 'all' ? null : value })} />
-      <section aria-label="搜索筛选" className="mb-4 rounded-xl border border-neutral-100 bg-neutral-50/80 p-3">
+      <section aria-label="搜索筛选" className="mb-4 rounded-xl border border-border bg-secondary p-3">
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-neutral-500">排序</span>
+            <span className="text-xs font-medium text-muted-foreground">排序</span>
             <PillGroup options={ORDER_BY_OPTIONS} value={orderBy} onChange={(value) => updateFilters({ order_by: value })} />
           </div>
 
@@ -254,17 +254,17 @@ export default function LocalSearch() {
             aria-pressed={fullContentOnly}
             onClick={() => updateFilters({ full_content: fullContentOnly ? null : 'true' })}
             className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all ${fullContentOnly
-              ? 'border-violet-500 bg-violet-500 text-white shadow-sm'
-              : 'border-neutral-200 bg-white text-neutral-500 hover:border-violet-300 hover:bg-violet-50/50'}`}
+              ? 'border-primary/30 bg-primary text-primary-foreground shadow-sm'
+              : 'border-border bg-card text-muted-foreground hover:border-primary/30 hover:bg-primary/10'}`}
           >
-            <span className={`flex size-3.5 items-center justify-center rounded-sm border transition-colors ${fullContentOnly ? 'border-white/50 bg-white/30' : 'border-neutral-300'}`}>
+            <span className={`flex size-3.5 items-center justify-center rounded-sm border transition-colors ${fullContentOnly ? 'border-primary-foreground/50 bg-primary-foreground/30' : 'border-border'}`}>
               {fullContentOnly && <span aria-hidden="true" className="text-[10px] leading-none">✓</span>}
             </span>
             仅全文
           </button>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-neutral-500">时间</span>
+            <span className="text-xs font-medium text-muted-foreground">时间</span>
             <PillGroup options={TIME_RANGES} value={days} onChange={(value) => updateFilters({ days: value || null })} />
           </div>
 
@@ -272,17 +272,17 @@ export default function LocalSearch() {
             type="button"
             aria-expanded={showFilters}
             onClick={() => setShowFilters((current) => !current)}
-            className={`ml-auto inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium transition-colors ${hasActiveFilters ? 'bg-violet-100 text-violet-700' : 'text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600'}`}
+            className={`ml-auto inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium transition-colors ${hasActiveFilters ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-muted-foreground'}`}
           >
             <SlidersHorizontal className="size-3.5" />
             <span className="hidden sm:inline">筛选</span>
-            {hasActiveFilters && <span className="flex size-4 items-center justify-center rounded-full bg-violet-500 text-[10px] text-white">{activeFilterCount}</span>}
+            {hasActiveFilters && <span className="flex size-4 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground">{activeFilterCount}</span>}
           </button>
         </div>
 
         {showFilters && (
-          <div className="mt-3 border-t border-neutral-200 pt-3">
-            <p className="mb-2 text-xs font-medium text-neutral-500">来源类型:</p>
+          <div className="mt-3 border-t border-border pt-3">
+            <p className="mb-2 text-xs font-medium text-muted-foreground">来源类型:</p>
             <div className="flex flex-wrap gap-1.5">
               {SOURCE_TYPES.map((source) => {
                 const active = sourceTypeFilters.includes(source.key)
@@ -293,8 +293,8 @@ export default function LocalSearch() {
                     aria-pressed={active}
                     onClick={() => changeSourceType(source.key)}
                     className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${active
-                      ? 'bg-violet-500 text-white shadow-sm'
-                      : 'border border-neutral-200 bg-white text-neutral-600 hover:border-violet-300 hover:bg-violet-50/50'}`}
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'border border-border bg-card text-muted-foreground hover:border-primary/30 hover:bg-primary/10'}`}
                   >
                     {source.label}
                   </button>
@@ -306,14 +306,14 @@ export default function LocalSearch() {
       </section>
 
       {data?.searchWarning === 'semantic_index_unavailable' && (
-        <div role="status" className="my-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <div role="status" className="my-4 flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/10 px-4 py-3 text-sm text-primary">
           <AlertCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
           <span>语义索引正在恢复，当前显示关键词结果。</span>
         </div>
       )}
 
       {newsQuery.isError && (
-        <div role="alert" className="my-4 flex items-center justify-center gap-3 text-center text-sm text-red-700">
+        <div role="alert" className="my-4 flex items-center justify-center gap-3 text-center text-sm text-destructive">
           <span>搜索失败，请稍后重试。</span>
           <button type="button" className="underline" onClick={() => void newsQuery.refetch()}>重试</button>
         </div>
@@ -321,19 +321,19 @@ export default function LocalSearch() {
 
       {initialLoading ? (
         <div className="flex flex-col items-center justify-center py-16" role="status" aria-live="polite">
-          <Loader2 className="mb-3 size-8 animate-spin text-violet-400" />
-          <p className="text-sm text-neutral-500">正在搜索本地文章…</p>
+          <Loader2 className="mb-3 size-8 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">正在搜索本地文章…</p>
         </div>
       ) : !submittedQuery ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
-          <div className="mb-4 flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-100 to-orange-50 shadow-lg shadow-violet-100/50">
-            <FileText className="size-7 text-violet-500" />
+          <div className="mb-4 flex size-16 items-center justify-center rounded-2xl bg-primary/10">
+            <FileText className="size-7 text-primary" />
           </div>
-          <p className="text-lg font-bold text-neutral-900">本地文章搜索</p>
-          <p className="mt-1.5 max-w-[320px] text-sm leading-relaxed text-neutral-400">输入关键词或自然语言查询，搜索已收录的本地新闻文章</p>
+          <p className="text-lg font-bold text-foreground">本地文章搜索</p>
+          <p className="mt-1.5 max-w-[320px] text-sm leading-relaxed text-muted-foreground">输入关键词或自然语言查询，搜索已收录的本地新闻文章</p>
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             {['AI 芯片', '开源项目', '技术趋势', '市场竞争'].map((suggestion) => (
-              <button key={suggestion} type="button" onClick={() => startSuggestedSearch(suggestion)} className="cursor-pointer rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-600 transition-all hover:border-violet-300 hover:bg-violet-50/50 hover:text-violet-700">
+              <button key={suggestion} type="button" onClick={() => startSuggestedSearch(suggestion)} className="cursor-pointer rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground transition-all hover:border-primary/30 hover:bg-primary/10 hover:text-primary">
                 {suggestion}
               </button>
             ))}
@@ -342,15 +342,15 @@ export default function LocalSearch() {
       ) : !data?.results.length ? (
         !newsQuery.isError && !newsQuery.isFetching && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="mb-3 flex size-14 items-center justify-center rounded-2xl bg-neutral-100"><Search className="size-6 text-neutral-400" /></div>
-            <p className="text-base font-medium text-neutral-700">未找到相关文章</p>
-            <p className="mt-1 text-sm text-neutral-400">尝试更换关键词或切换搜索模式</p>
+            <div className="mb-3 flex size-14 items-center justify-center rounded-2xl bg-secondary"><Search className="size-6 text-muted-foreground" /></div>
+            <p className="text-base font-medium text-foreground">未找到相关文章</p>
+            <p className="mt-1 text-sm text-muted-foreground">尝试更换关键词或切换搜索模式</p>
           </div>
         )
       ) : (
         <>
-          <p className="mb-3 text-xs text-neutral-400">
-            找到 <span className="font-medium text-neutral-600">{totalCount}</span> 篇相关文章
+          <p className="mb-3 text-xs text-muted-foreground">
+            找到 <span className="font-medium text-muted-foreground">{totalCount}</span> 篇相关文章
             {orderBy === 'time' && '（按最新发布排序）'}
             {orderBy === 'relevance' && mode === 'semantic' && '（按语义相似度排序）'}
             {orderBy === 'relevance' && mode === 'hybrid' && '（混合排序）'}
@@ -361,7 +361,7 @@ export default function LocalSearch() {
           <div className="space-y-2" aria-busy={newsQuery.isFetching}>
             {data.results.map((article) => <ArticleCard key={article.id} article={article} returnTo={`${location.pathname}${location.search}${location.hash}`} />)}
           </div>
-          {newsQuery.isFetching && <p role="status" className="py-3 text-center text-sm text-neutral-400">正在更新…</p>}
+          {newsQuery.isFetching && <p role="status" className="py-3 text-center text-sm text-muted-foreground">正在更新…</p>}
           {totalPages > 1 && (
             <Pagination
               currentPage={page}
@@ -412,14 +412,14 @@ function SearchControls({ initialQuery, historyNavigationKey, mode, allowSemanti
     <form onSubmit={handleSubmit} className="mb-3">
       <div className="flex flex-col gap-2 sm:flex-row">
         <div className="relative flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-neutral-400" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <input
             type="search"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder={PLACEHOLDERS[0]}
             aria-label="搜索本地新闻文章"
-            className="w-full rounded-xl border border-neutral-200 bg-white py-2.5 pl-10 pr-4 text-sm text-neutral-900 shadow-sm transition-all placeholder:text-neutral-400 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-400/50"
+            className="w-full rounded-xl border border-border bg-card py-2.5 pl-10 pr-4 text-sm text-foreground shadow-sm transition-all placeholder:text-muted-foreground focus:border-primary/30 focus:outline-none focus:ring-2 focus:ring-ring/50"
           />
         </div>
         <button
@@ -450,10 +450,10 @@ function ArticleCard({ article, returnTo }: { article: NewsSummary; returnTo: st
   const sourceType = article.source_type as SourceType
 
   return (
-    <article className="group block rounded-xl border border-border bg-card p-4 transition-all duration-150 hover:border-emerald-600/30 hover:shadow-md">
+    <article className="group block rounded-xl border border-border bg-card p-4 transition-all duration-150 hover:border-primary/30 hover:shadow-md">
       <div className="flex items-start justify-between gap-3">
         <Link to={`/news/${article.id}`} state={{ from: returnTo }} className="min-w-0 flex-1 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-          <h2 className="line-clamp-2 text-sm font-semibold text-foreground transition-colors group-hover:text-emerald-800 dark:group-hover:text-emerald-300">{title}</h2>
+          <h2 className="line-clamp-2 text-sm font-semibold text-foreground transition-colors group-hover:text-primary ">{title}</h2>
           {snippet && <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{snippet}</p>}
         </Link>
         {article.full_content_error_code === 'invalid_identity' ? <span className="text-xs text-muted-foreground">链接待核验</span> : article.url && (
@@ -468,7 +468,7 @@ function ArticleCard({ article, returnTo }: { article: NewsSummary; returnTo: st
         {sourceType in SOURCE_TYPE_LABELS && <span className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${SOURCE_TYPE_COLORS[sourceType]}`}>{SOURCE_TYPE_LABELS[sourceType]}</span>}
         {article.category_name && <span className="rounded-md bg-secondary px-2 py-0.5 text-[11px] font-medium text-foreground">{article.category_name}</span>}
         {article.publish_time && <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground"><Clock className="size-3" />{new Date(article.publish_time).toLocaleDateString('zh-CN', { year: 'numeric', month: 'short', day: 'numeric' })}</span>}
-        {hasReadableFullContent(article) && <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-medium"><Star className="size-3" />全文可用</span>}
+        {hasReadableFullContent(article) && <span className="inline-flex items-center gap-1 text-[11px] text-primary font-medium"><Star className="size-3" />全文可用</span>}
       </div>
     </article>
   )
