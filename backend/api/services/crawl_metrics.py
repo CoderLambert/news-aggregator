@@ -3,7 +3,7 @@ RESULT_PREFIX = 'NEWSHUB_CRAWL_RESULT '
 SUCCESS_OUTCOMES = frozenset({'updated', 'unchanged', 'valid_empty'})
 OUTCOMES = SUCCESS_OUTCOMES | {'deferred', 'rate_limited', 'blocked', 'parse_failed', 'partial', 'unsupported'}
 COUNT_KEYS = ('entries_seen', 'entries_committed', 'entries_changed', 'body_candidates_committed',
-              'parse_failures', 'persistence_failures', 'physical_requests', 'budget_deferred')
+              'parse_failures', 'persistence_failures', 'physical_requests', 'budget_deferred', 'rate_limited_responses')
 
 
 def crawl_result(stats):
@@ -22,17 +22,20 @@ def crawl_result(stats):
                   next_attempt_at=stats.get('next_attempt_at'))
     result['entries_changed'] += max(0, int(stats.get('discovery/entries_changed', 0)))
     result['physical_requests'] = max(result['physical_requests'], int(stats.get('budget/physical_requests', 0)))
+    result['rate_limited_responses'] = max(result['rate_limited_responses'], int(stats.get('budget/rate_limited', 0)))
     result['budget_deferred'] = max(result['budget_deferred'], int(stats.get('budget/deferred', 0)))
     outcome = stats.get('outcome')
     if outcome in SUCCESS_OUTCOMES:
         outcome = ('partial' if result['persistence_failures'] or result['finish_reason'] != 'finished' else
                    'parse_failed' if result['parse_failures'] else
+                   'rate_limited' if result['rate_limited_responses'] else
                    'blocked' if any(http.get(code, 0) for code in ('401', '403')) else
                    'rate_limited' if http.get('429', 0) else
                    'deferred' if result['budget_deferred'] else outcome)
     if outcome not in OUTCOMES:
         outcome = ('partial' if result['persistence_failures'] or result['finish_reason'] != 'finished' else
                    'parse_failed' if result['parse_failures'] else
+                   'rate_limited' if result['rate_limited_responses'] else
                    'blocked' if any(http.get(code, 0) for code in ('401', '403')) else
                    'rate_limited' if http.get('429', 0) else
                    'deferred' if result['budget_deferred'] else

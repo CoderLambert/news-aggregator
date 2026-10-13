@@ -125,6 +125,7 @@ class BudgetedHTTPDownloadHandler:
             retry_at = await _db(record_response, permit, response.status, headers, host=urlsplit(request.url).hostname)
             self.crawler.stats.inc_value(f'budget/http_status_count/{response.status}')
             if retry_at is not None:
+                self.crawler.stats.inc_value('budget/rate_limited')
                 self.crawler.stats.set_value('next_attempt_at', retry_at.isoformat())
                 error = BudgetDeferred(retry_at, scopes)
                 error.error_code = 'rate_limited'

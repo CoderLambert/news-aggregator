@@ -18,7 +18,7 @@ from django.utils import timezone
 
 django.setup()
 old = [('api', '0035_article_fetch_monitoring')]
-new = [('api', '0036_news_ingestion_contract')]
+new = [('api', '0038_content_task_creation_time')]
 executor = MigrationExecutor(connection)
 executor.migrate(old)
 apps = executor.loader.project_state(old).apps
@@ -38,6 +38,7 @@ if HISTORICAL:
         )
         apps.get_model('api', 'Favorite').objects.create(news=news, user=user, type='bookmark')
         apps.get_model('api', 'ChatSession').objects.create(news=news, user=user, messages=[{'content':'History'}])
+    apps.get_model('api', 'ArticleFetchEvent').objects.create(domain='example.test', outcome='success', news=news)
     apps.get_model('api', 'CrawlerSettings').objects.create(pk=1, scheduler_enabled=False)
     apps.get_model('api', 'CrawlerTarget').objects.create(spider_name='leiphone', enabled=False)
 executor = MigrationExecutor(connection)
@@ -55,6 +56,10 @@ if HISTORICAL:
     assert all(r.full_content_zh == '历史译文' and r.suggested_questions == ['Original question'] for r in rows)
     assert apps.get_model('api', 'Favorite').objects.count() == 4
     assert apps.get_model('api', 'ChatSession').objects.count() == 4
+    event = apps.get_model('api', 'ArticleFetchEvent').objects.get()
+    assert event.outcome == 'success' and event.persistence_outcome == 'not_attempted' and event.logical_outcome == 'unknown'
+    assert event.physical_requests == 0 and event.http_statuses == []
+    assert all(row.full_content_task_created_at is None for row in rows)
     assert not apps.get_model('api', 'CrawlerSettings').objects.get(pk=1).scheduler_enabled
     assert not apps.get_model('api', 'CrawlerTarget').objects.get(spider_name='leiphone').enabled
 else:

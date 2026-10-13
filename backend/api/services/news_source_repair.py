@@ -312,6 +312,10 @@ def _assert_news_guards(plan):
 def _assert_cooldown_not_earlier(after):
     if after['full_content_fetch_status'] not in {'queued', 'fetching', 'rate_limited', 'network_error', 'failed'}:
         return
+    # A terminal failure without a scheduled intent cannot send HTTP. Undo
+    # may restore that state while the independent host cooldown remains live.
+    if after['full_content_next_attempt_at'] is None and after['full_content_fetch_status'] in {'network_error', 'failed'}:
+        return
     from api.models import RequestBudget
     from api.services.request_budget import scope_intervals
     deadlines = list(RequestBudget.objects.filter(key__in=scope_intervals(after['url']), cooldown_until__isnull=False).values_list('cooldown_until', flat=True))

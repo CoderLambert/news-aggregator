@@ -346,3 +346,11 @@ def test_handler_response_429_is_counted_even_when_scrapy_receives_only_control_
     normal = crawl_result({'finish_reason': 'finished', 'budget/http_status_count/200': 2,
                           'downloader/response_status_count/200': 2, 'downloader/response_count': 2})
     assert normal['http_statuses'] == {'200': 2} and normal['responses'] == 2
+
+
+
+def test_reviewed_quota_403_with_persistent_cooldown_is_rate_limited_not_auth_blocked():
+    result = crawl_result({'finish_reason': 'finished', 'budget/http_status_count/403': 1,
+                          'budget/rate_limited': 1, 'budget/physical_requests': 1})
+    assert result['outcome'] == 'rate_limited' and result['rate_limited_responses'] == 1
+    assert result['http_statuses'] == {'403': 1}

@@ -223,3 +223,6 @@ full_content_stats 正文覆盖率为 complete / 符合抓取准入的 article�
 
 
 上述边界补充相关回归实际 **139 passed**，前端新增耗尽次数场景实际 **6 passed**（含5个身份隔离状态），typecheck/lint通过。只有受审计的真实 URL 身份纠正会为新身份开启新的失败代际，并将旧计数纳入 before/after/undo CAS；普通 force、重试和旧 CLI 都不能清零。新 URL 仍遵守现有主机冷却，Source FK 单独修正若已耗尽则不制造不可执行任务。
+
+
+补充迁移/身份代际的独立实测 **31 passed**：0035历史库一路迁移到0038，历史事件保持success且提交未知，创建时间留空，用户记录不变；审计URL纠正后失败新代际、旧主机冷却保留，Source FK单独纠正不清耗尽计数，后来失败计数也能阻止undo。修正终止且无任务的旧failed状态允许undo恢复，不触碰持久冷却。相关迁移/修复/指标/下载handler回归实际 **74 passed**，包含经过预算识别的GitHub配额403记rate_limited（实际HTTP仍403），普通认证403仍blocked。

@@ -486,3 +486,43 @@ print(json.dumps({'wal':True,'dry_run':True,'apply':True,'undo':True}))
     }, capture_output=True, text=True, timeout=15)
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout.strip().splitlines()[-1]) == {'wal': True, 'dry_run': True, 'apply': True, 'undo': True}
+
+
+
+def test_reviewed_new_url_starts_audited_identity_cycle_but_keeps_host_cooldown(tmp_path, rows):
+    _source, news, _favorite, _translation = rows
+    News.objects.filter(pk=news.pk).update(full_content_retry_count=5, full_content_fetch_status='failed')
+    news.refresh_from_db()
+    deadline = timezone.now() + timedelta(hours=1)
+    RequestBudget.objects.create(key='host:leiphone.com', cooldown_until=deadline)
+    # www aliases use the exact host scope; cover the current URL's real key.
+    from api.services.request_budget import scope_intervals
+    for key in scope_intervals(news.url):
+        RequestBudget.objects.update_or_create(key=key, defaults={'cooldown_until': deadline})
+    _mapping, audit, _operation = repaired_url(tmp_path, rows)
+    assert news.full_content_retry_count == 0 and news.full_content_task_created_at is not None
+    assert news.full_content_next_attempt_at >= deadline and not claim_fetch(news)
+    result = command(undo_audit=str(audit), apply=True, audit_output=str(tmp_path / 'undo-cycle.json'))
+    assert result[0]['outcome'] == 'undone'
+    news.refresh_from_db()
+    assert news.full_content_retry_count == 5 and news.full_content_task_created_at is None
+
+
+def test_source_fk_only_repair_keeps_exhaustion_and_has_no_unrunnable_queue(tmp_path, rows):
+    _source, news, _favorite, _translation = rows
+    News.objects.filter(pk=news.pk).update(full_content_retry_count=5, full_content_fetch_status='failed')
+    news.refresh_from_db()
+    mapping = mapping_file(tmp_path, [news_operation(news, new={'source_id': proper_source().pk})])
+    result = command(mapping=str(mapping), apply=True, audit_output=str(tmp_path / 'source-only.json'))
+    assert result[0]['outcome'] == 'applied'
+    news.refresh_from_db()
+    assert news.full_content_retry_count == 5 and news.full_content_next_attempt_at is None
+    assert news.full_content_error_code == 'retry_exhausted' and news.full_content_state == 'legacy'
+
+
+def test_later_failure_counter_update_is_also_an_undo_fence(tmp_path, rows):
+    _mapping, audit, _operation = repaired_url(tmp_path, rows)
+    news = rows[1]
+    News.objects.filter(pk=news.pk).update(full_content_retry_count=1)
+    result = command(undo_audit=str(audit))
+    assert result[0]['outcome'] == 'conflict'
