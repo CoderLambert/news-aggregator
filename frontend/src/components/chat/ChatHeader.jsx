@@ -22,16 +22,16 @@ export default function ChatHeader({
   onClose,
 }) {
   return (
-    <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-100 bg-white/80 backdrop-blur-md">
+    <div className="flex items-center justify-between border-b border-border bg-card/95 px-4 py-3 backdrop-blur-md">
       <div className="flex items-center gap-3 min-w-0">
-        <div className="shrink-0 w-11 h-11 rounded-full bg-orange-50 ring-1 ring-orange-100 flex items-center justify-center">
+        <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/8 ring-1 ring-primary/15">
           <XiaowenMascot mood={mood} size={38} />
         </div>
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-neutral-900 leading-tight">
+          <h3 className="text-sm font-semibold leading-tight text-foreground">
             小闻
           </h3>
-          <p className="text-xs text-neutral-500 truncate">
+          <p className="truncate text-xs text-muted-foreground">
             {subtitleFor(mood)}
           </p>
         </div>
@@ -45,7 +45,7 @@ export default function ChatHeader({
           onClick={onToggleFullscreen}
           aria-label={isFullscreen ? "退出全屏" : "全屏观看"}
           title={isFullscreen ? "退出全屏" : "全屏观看"}
-          className="text-neutral-400 hover:text-orange-500 h-8 w-8 rounded-full"
+          className="size-8 rounded-full text-muted-foreground hover:bg-accent hover:text-primary"
         >
           {isFullscreen ? (
             <Minimize2 className="h-4 w-4" />
@@ -61,7 +61,7 @@ export default function ChatHeader({
           disabled={clearDisabled}
           aria-label="清空对话"
           title="清空对话"
-          className="text-neutral-400 hover:text-rose-500 h-8 w-8 rounded-full"
+          className="size-8 rounded-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
         >
           <Trash2 className="h-4 w-4" />
         </Button>
@@ -72,7 +72,7 @@ export default function ChatHeader({
           onClick={onClose}
           aria-label="关闭对话窗口"
           title="关闭"
-          className="text-neutral-500 hover:text-neutral-900 h-8 w-8 rounded-full"
+          className="size-8 rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <X className="h-5 w-5" />
         </Button>

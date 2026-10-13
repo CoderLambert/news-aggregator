@@ -76,8 +76,8 @@ export default function App() {
             <Route path="/__mascot__" element={<MascotPreview />} />
             <Route path="*" element={<div className="workspace-empty"><h1>页面不存在</h1><a href="/">返回资讯首页</a></div>} />
           </Routes></Suspense></AppErrorBoundary>
+          <Footer />
         </main>
-        <Footer />
       </WorkspaceShell>
       <ResearchCapabilityGate /><SpeechCapabilityGate />
     </div>

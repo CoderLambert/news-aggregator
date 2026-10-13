@@ -46,6 +46,13 @@ beforeEach(() => {
 })
 
 describe('NewsChatAssistant open state', () => {
+  it('uses one scrollable conversation surface without duplicating quick prompts', () => {
+    const { container } = render(<NewsChatAssistant newsId={21} open onOpenChange={vi.fn()} />)
+
+    expect(container.querySelector('.chat-panel-scroll')).toBeInTheDocument()
+    expect(screen.queryByText('💡 快速向小闻提问：')).not.toBeInTheDocument()
+  })
+
   it('keeps the floating entry working in uncontrolled mode', async () => {
     render(<NewsChatAssistant newsId={21} />)
 

@@ -3,9 +3,9 @@
 /* Reuse the existing account/display controls without duplicating the sidebar
    brand and navigation on desktop. Mobile retains the familiar global header. */
 @media (min-width:801px) {
-  .workspace-main > header > div > div:first-child { display:none; }
+  .workspace-main > header > div > div:nth-child(2) { display:none; }
   .workspace-main > header > div { justify-content:flex-end; }
-  .workspace-main > header > div::before { content:'阅读工作区'; margin-right:auto; font-size:11px; letter-spacing:.14em; color:var(--muted-foreground); }
+  .workspace-header-context { margin-right:auto; }
 }
 @media (max-width:520px) {
   .workspace-channel-identity > input[type=checkbox] { width:24px; height:24px; }

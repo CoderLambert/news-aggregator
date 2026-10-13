@@ -145,19 +145,11 @@ export default function NewsList() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
-      <header className="mb-4">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary dark:text-primary font-mono">{lang === 'en' ? 'Your news feed' : '你的资讯流'}</p>
-        <div className="mt-1 flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <h1 id="news-list-title" tabIndex={-1} className="rounded-sm text-2xl font-bold tracking-tight text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary font-serif">{lang === 'en' ? 'Latest news' : '最新资讯'}</h1>
-            <p className="mt-1 text-xs text-muted-foreground">{lang === 'en' ? 'Scan summaries, then open the stories worth your time.' : '先快速浏览摘要，再打开值得深入阅读的内容。'}</p>
-          </div>
-          {!initialLoading && data && <p className="text-xs text-muted-foreground"><span className="font-semibold text-foreground font-mono">{data.count}</span> {lang === 'en' ? 'stories' : '篇内容'}</p>}
-        </div>
-      </header>
+      <h1 id="news-list-title" tabIndex={-1} className="sr-only">{lang === 'en' ? 'Latest news' : '最新资讯'}</h1>
 
       <NewsScopeBar scope={reading.scope} groupId={reading.groupId} groups={reading.groups.data ?? []}
         personal={reading.enabled} accounts={reading.accounts} onChange={reading.select}
+        resultCount={!initialLoading && data ? data.count : undefined}
         region={region} onRegionChange={value => updateParams({ region: value === 'all' ? null : value, source: null, page: null })} />
       {invalidRegion && <p role="alert">无效的频道地区，请选择全部、国内或国际。</p>}
       {reading.notice && <p role="status" className="mb-3 text-sm text-muted-foreground">{reading.notice}</p>}

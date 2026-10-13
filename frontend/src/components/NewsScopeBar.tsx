@@ -3,12 +3,13 @@ import type { ChannelGroup, NewsScope } from '@/types/channels'
 import type { SourceRegion } from '@/types/news'
 import RegionFilter from '@/components/RegionFilter'
 
-export default function NewsScopeBar({ scope, groupId, groups, personal, accounts, onChange, region, onRegionChange }: {
+export default function NewsScopeBar({ scope, groupId, groups, personal, accounts, resultCount, onChange, region, onRegionChange }: {
   scope: NewsScope
   groupId?: number
   groups: ChannelGroup[]
   personal: boolean
   accounts: boolean
+  resultCount?: number
   onChange: (value: string) => void
   region: SourceRegion | 'all'
   onRegionChange: (value: SourceRegion | 'all') => void
@@ -44,6 +45,7 @@ export default function NewsScopeBar({ scope, groupId, groups, personal, account
         </div>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-border/70 pt-2 lg:shrink-0 lg:border-l lg:border-t-0 lg:py-0 lg:pl-3">
+        {resultCount !== undefined && <span className="shrink-0 text-xs text-muted-foreground"><strong className="font-mono font-semibold text-foreground">{resultCount}</strong> 篇内容</span>}
         <RegionFilter compact value={region} onChange={onRegionChange} />
         <Link to="/channels" state={{ newsReturnTo: location.pathname + location.search }}
           className="inline-flex min-h-10 shrink-0 items-center rounded-lg px-2 text-sm font-medium text-primary hover:bg-secondary focus-visible:outline-2 focus-visible:outline-primary">

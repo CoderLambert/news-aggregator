@@ -34,15 +34,15 @@ export default function ResearchBubbleButton({ onOpen, onIntent, buttonRef }: Re
       className={`fixed z-40 size-12 rounded-full
                  ${mobilePosition}
                  sm:bottom-6 sm:right-24 sm:size-14
-                 bg-white shadow-[0_8px_24px_rgba(139,92,246,0.2)]
+                 border border-primary/20 bg-card shadow-[0_8px_24px_rgba(139,92,246,0.2)]
                  hover:shadow-[0_12px_32px_rgba(139,92,246,0.35)]
                  hover:scale-105 active:scale-95
                  transition-all duration-300 ease-out
                  flex items-center justify-center
-                 ring-2 ring-violet-100/80 hover:ring-violet-200`}
+                 ring-2 ring-primary/10 hover:ring-primary/30`}
     >
       <div className="relative">
-        <Search className={`w-5 h-5 transition-colors duration-300 ${hover ? 'text-violet-700' : 'text-violet-500'}`} />
+        <Search className={`w-5 h-5 transition-colors duration-300 ${hover ? 'text-primary' : 'text-primary/80'}`} />
         {hover && (
           <Sparkles className="w-3 h-3 text-orange-400 absolute -top-1 -right-1.5 animate-pulse" />
         )}

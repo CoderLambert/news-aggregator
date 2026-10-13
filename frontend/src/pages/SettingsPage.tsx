@@ -198,7 +198,7 @@ export default function SettingsPage() {
 
   return (
     <section className="mx-auto w-full max-w-3xl px-4 pb-12 pt-6 sm:pt-10">
-      <Link to="/" className="inline-flex min-h-11 items-center gap-2 rounded-md text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <Link to="/" className="inline-flex min-h-11 items-center gap-2 rounded-lg px-2 text-sm text-muted-foreground transition-all hover:-translate-x-0.5 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <ArrowLeft aria-hidden="true" className="size-4" />返回首页
       </Link>
 
@@ -224,7 +224,7 @@ export default function SettingsPage() {
                   type="button"
                   aria-pressed={selected}
                   onClick={() => setDisplayMode(mode.key)}
-                  className={`relative min-h-24 rounded-xl border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selected ? 'border-orange-400 bg-orange-50 text-orange-950' : 'border-border hover:bg-muted/60'}`}
+                  className={`relative min-h-24 cursor-pointer rounded-xl border p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selected ? 'border-orange-400 bg-orange-50 text-orange-950 dark:border-orange-400/70 dark:bg-orange-500/10 dark:text-orange-100' : 'border-border hover:border-primary/30 hover:bg-muted/60'}`}
                 >
                   <span className="flex items-center gap-2 font-medium"><Icon aria-hidden="true" className="size-4" />{mode.label}</span>
                   <span className="mt-2 block text-xs leading-5 text-muted-foreground">{mode.description}</span>
@@ -240,7 +240,7 @@ export default function SettingsPage() {
             </div>
             <div className="flex rounded-lg border border-border p-1" role="group" aria-label="界面语言">
               {(['zh', 'en'] as const).map((value) => (
-                <button key={value} type="button" aria-pressed={lang === value} onClick={() => setLang(value)} className={`min-h-11 rounded-md px-4 text-sm font-medium ${lang === value ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                <button key={value} type="button" aria-pressed={lang === value} onClick={() => setLang(value)} className={`min-h-11 cursor-pointer rounded-md px-4 text-sm font-medium transition-all active:scale-[0.98] ${lang === value ? 'bg-secondary text-secondary-foreground shadow-sm' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}>
                   {value === 'zh' ? '中文' : 'English'}
                 </button>
               ))}

@@ -1,6 +1,5 @@
-import { Activity, ArrowLeft, Database, History, SearchCheck, ShieldCheck } from 'lucide-react'
-import type { ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Activity, Database, History, SearchCheck, ShieldCheck } from 'lucide-react'
+import { useEffect, useState, type ReactNode } from 'react'
 
 const NAVIGATION = [
   { href: '#overview', label: '运行概览', icon: Activity },
@@ -11,22 +10,26 @@ const NAVIGATION = [
 ] as const
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
+  const [activeSection, setActiveSection] = useState(() => window.location.hash || '#overview')
+
+  useEffect(() => {
+    const syncHash = () => setActiveSection(window.location.hash || '#overview')
+    window.addEventListener('hashchange', syncHash)
+    return () => window.removeEventListener('hashchange', syncHash)
+  }, [])
+
   return (
-    <div className="min-h-[calc(100vh-3.5rem)] bg-neutral-50/70">
-      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <div className="mb-6 flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="mb-1 text-sm font-medium text-orange-600">仅限超级管理员</p>
-            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">爬虫管理控制台</h1>
-            <p className="mt-2 text-sm text-muted-foreground">控制 Docker 自动调度，查看每个来源的真实执行结果。</p>
-          </div>
-          <Link className="inline-flex min-h-11 items-center gap-2 rounded-md px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" to="/">
-            <ArrowLeft aria-hidden="true" className="size-4" />返回新闻站点
-          </Link>
+    <div className="admin-workspace">
+      <div className="mx-auto max-w-[1480px] px-4 pb-10 sm:px-6 lg:px-8">
+        <h1 className="sr-only">爬虫管理控制台</h1>
+        <div className="admin-intro">
+          <span className="admin-access-badge"><ShieldCheck aria-hidden="true" className="size-3.5" />仅限超级管理员</span>
+          <p>控制自动调度、搜索索引与全文抓取，并查看每个来源的真实执行结果。</p>
         </div>
-        <nav aria-label="管理页面分区" className="mb-6 flex gap-2 overflow-x-auto pb-1">
+        <nav aria-label="管理页面分区" className="admin-section-nav workspace-scroll">
           {NAVIGATION.map(({ href, label, icon: Icon }) => (
-            <a key={href} href={href} className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded-full border bg-background px-4 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <a key={href} href={href} aria-current={activeSection === href ? 'location' : undefined}
+              onClick={() => setActiveSection(href)} className="admin-section-link">
               <Icon aria-hidden="true" className="size-4" />{label}
             </a>
           ))}

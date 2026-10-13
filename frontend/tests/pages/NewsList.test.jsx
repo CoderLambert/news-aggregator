@@ -151,6 +151,15 @@ beforeEach(() => {
 })
 
 describe('NewsList URL and server state', () => {
+  it('keeps the page title accessible while moving the result count into the scope bar', async () => {
+    renderList('/')
+
+    expect(await screen.findByRole('heading', { name: 'Climate technology update' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '最新资讯' })).toHaveClass('sr-only')
+    expect(screen.getByText('41')).toBeInTheDocument()
+    expect(screen.getByText('篇内容')).toBeInTheDocument()
+  })
+
   it('fetches the URL-selected page and filters, then updates URL and query when a category changes', async () => {
     renderList('/?search=climate&mode=keyword&category=2&source=8&page=2')
 

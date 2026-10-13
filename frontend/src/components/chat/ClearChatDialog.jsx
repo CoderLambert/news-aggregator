@@ -33,21 +33,21 @@ export default function ClearChatDialog({ open, onConfirm, onCancel, isClearing 
         aria-hidden="true"
       />
 
-      <div className="relative w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl ring-1 ring-neutral-100">
+      <div className="relative w-full max-w-sm rounded-3xl bg-card p-6 text-card-foreground shadow-2xl ring-1 ring-border">
         <div className="flex flex-col items-center text-center">
           <div className="animate-mascot-bob">
             <XiaowenMascot mood="confused" size={72} showShadow autoBlink={false} />
           </div>
-          <h2 id="clear-dialog-title" className="mt-3 text-base font-semibold text-neutral-900">
+          <h2 id="clear-dialog-title" className="mt-3 text-base font-semibold text-foreground">
             真的要忘掉我们刚才聊的吗？
           </h2>
-          <p className="mt-1.5 text-xs text-neutral-500 leading-relaxed">
+          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
             清空后就找不回啦，咱们要从头来过哦。
           </p>
         </div>
 
-        {error && <p role="alert" className="mt-4 rounded-lg bg-rose-50 p-2 text-sm text-rose-700">{error}</p>}
-        {isClearing && <p role="status" className="mt-4 text-center text-sm text-neutral-600">正在清空聊天记录…</p>}
+        {error && <p role="alert" className="mt-4 rounded-lg bg-destructive/10 p-2 text-sm text-destructive">{error}</p>}
+        {isClearing && <p role="status" className="mt-4 text-center text-sm text-muted-foreground">正在清空聊天记录…</p>}
 
         <div className="mt-5 flex gap-2">
           <Button

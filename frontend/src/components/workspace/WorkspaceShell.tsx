@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { BookOpen, FolderOpen, Heart, House, Menu, Moon, Plus, Rss, Search, Settings, Sparkles, Sun } from 'lucide-react'
@@ -8,6 +8,7 @@ import WorkspaceModal from './WorkspaceModal'
 import '@/styles/workspace.css'
 
 export default function WorkspaceShell({ children }: { children: ReactNode }) {
+  const shellRef = useRef<HTMLDivElement>(null)
   const config = useChannelConfig()
   const accounts = useCapability('accounts').enabled
   const favorites = useCapability('favorites').enabled
@@ -18,6 +19,33 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
     document.documentElement.classList.toggle('dark', dark)
     try { localStorage.setItem('newshub-theme', dark ? 'dark' : 'light') } catch { /* Private mode may disable storage. */ }
   }, [dark])
+  useLayoutEffect(() => {
+    const main = shellRef.current?.querySelector<HTMLElement>('.workspace-main > main')
+    if (main) main.scrollTop = 0
+    document.documentElement.scrollTop = 0
+    document.body.scrollTop = 0
+  }, [location.pathname, location.search])
+  useEffect(() => {
+    const shell = shellRef.current
+    if (!shell) return
+    const timers = new Map<HTMLElement, ReturnType<typeof setTimeout>>()
+    const handleScroll = (event: Event) => {
+      const target = event.target
+      if (!(target instanceof HTMLElement) || !target.matches('.workspace-scroll, .workspace-main > main')) return
+      target.classList.add('is-scrolling')
+      const previousTimer = timers.get(target)
+      if (previousTimer) clearTimeout(previousTimer)
+      timers.set(target, setTimeout(() => {
+        target.classList.remove('is-scrolling')
+        timers.delete(target)
+      }, 650))
+    }
+    shell.addEventListener('scroll', handleScroll, true)
+    return () => {
+      shell.removeEventListener('scroll', handleScroll, true)
+      timers.forEach(timer => clearTimeout(timer))
+    }
+  }, [])
   const readingLink = (scope: string, groupId?: number) => {
     const params = new URLSearchParams(location.pathname === '/' ? location.search : '')
     params.set('scope', scope)
@@ -58,8 +86,8 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
       <button type="button" onClick={() => setDark(value => !value)}>{dark ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}{dark ? '切换浅色' : '切换深色'}</button>
     </div>
   </>
-  return <div className="workspace-shell">
-    <aside className="workspace-sidebar">{navigation}</aside>
+  return <div ref={shellRef} className="workspace-shell">
+    <aside className="workspace-sidebar workspace-scroll">{navigation}</aside>
     <div className="workspace-main">
       <button type="button" className="workspace-mobile-navigation" onClick={() => setDrawer(true)} aria-expanded={drawer}><Menu size={17} aria-hidden="true" />工作区导航</button>
       {children}

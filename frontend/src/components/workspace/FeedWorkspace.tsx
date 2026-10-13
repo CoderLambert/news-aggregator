@@ -21,7 +21,7 @@ export default function FeedWorkspace({ children }: { children: ReactNode }) {
   const max = Math.max(1, ...(stats.data?.week.map(day => day.count) ?? []))
   return <div className="feed-workspace">
     <section className="feed-workspace-content" aria-label="资讯阅读列表">{children}</section>
-    <aside className="feed-workspace-aside">
+    <aside className="feed-workspace-aside workspace-scroll">
       <section className="workspace-panel"><header className="workspace-panel-heading"><h2>{dashboard.data?.kind === 'popular' ? '近期热读' : '最新更新'}</h2>
         <button type="button" className="workspace-link" disabled={stories.length <= 5} onClick={() => setOffset(current => current === 0 ? 5 : 0)}><RefreshCw size={13} aria-hidden="true" />换一批</button>
       </header>

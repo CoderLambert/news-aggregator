@@ -131,7 +131,7 @@ export default function ArticleFetchMonitorSection() {
         </Button>
       </div>
 
-      {actionError ? <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"><AlertCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />{actionError}</div> : null}
+      {actionError ? <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/35 dark:text-red-200"><AlertCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />{actionError}</div> : null}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Metric label="实际请求提交率" value={successRate} detail="仅统计已发出请求且可评估的尝试" />
@@ -151,7 +151,7 @@ export default function ArticleFetchMonitorSection() {
             <Input id="jina-policy-domain" placeholder="news.example.com（不含协议和路径）" value={domain} onChange={(event) => setDomain(event.target.value)} autoComplete="off" />
             <Button type="submit" variant="outline" disabled={busy || !domain.trim()}><Plus aria-hidden="true" />添加为待确认</Button>
           </form>
-          <div className="overflow-x-auto rounded-lg border">
+          <div className="workspace-scroll overflow-x-auto rounded-lg border">
             <table className="w-full min-w-[900px] text-left">
               <thead className="bg-muted/60 text-xs text-muted-foreground"><tr><th className="px-4 py-3">域名</th><th className="px-4 py-3">策略</th><th className="px-4 py-3">回退触发</th><th className="px-4 py-3">最近失败</th><th className="px-4 py-3 text-right">操作</th></tr></thead>
               <tbody>{data.policies.length ? data.policies.map((policy) => <PolicyRow key={policy.domain} policy={policy} busy={busy} onToggle={togglePolicy} />) : <tr><td className="px-4 py-8 text-center text-sm text-muted-foreground" colSpan={5}>暂无候选域名。</td></tr>}</tbody>
@@ -179,7 +179,7 @@ export default function ArticleFetchMonitorSection() {
       <Card>
         <CardHeader><CardTitle>最近抓取事件</CardTitle><CardDescription>分别显示候选验证、正文提交与实际 HTTP 请求。历史成功不代表按新规则提交。</CardDescription></CardHeader>
         <CardContent>
-          <div className="overflow-x-auto rounded-lg border">
+          <div className="workspace-scroll overflow-x-auto rounded-lg border">
             <table className="w-full min-w-[920px] text-left">
               <thead className="bg-muted/60 text-xs text-muted-foreground"><tr><th className="px-4 py-3">时间 / 文章</th><th className="px-4 py-3">域名</th><th className="px-4 py-3">结果</th><th className="px-4 py-3">Provider / 错误码</th><th className="px-4 py-3 text-right">耗时</th></tr></thead>
               <tbody>{data.recentEvents.length ? data.recentEvents.map((event) => (

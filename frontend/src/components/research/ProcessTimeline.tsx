@@ -87,7 +87,7 @@ export default function ProcessTimeline({ toolCalls, searchResults = [] }: Proce
                 ? 'border-violet-400 bg-violet-100 shadow-[0_0_0_4px_rgba(139,92,246,0.15)]'
                 : isDone
                   ? 'border-emerald-400 bg-emerald-50'
-                  : 'border-neutral-300 bg-neutral-50'
+                  : 'border-border bg-secondary'
               }
             `}>
               {isRunning ? (
@@ -95,7 +95,7 @@ export default function ProcessTimeline({ toolCalls, searchResults = [] }: Proce
               ) : isDone ? (
                 <Check className="w-3 h-3 text-emerald-500" />
               ) : (
-                <div className="w-1.5 h-1.5 rounded-full bg-neutral-300" />
+                <div className="size-1.5 rounded-full bg-muted-foreground/45" />
               )}
             </div>
 
@@ -106,12 +106,12 @@ export default function ProcessTimeline({ toolCalls, searchResults = [] }: Proce
                   const Icon = TOOL_ICONS[tc.name] || FileText
                   return (
                     <>
-                      <Icon className="w-3.5 h-3.5 text-neutral-400 flex-shrink-0" />
-                      <span className="text-[11px] font-medium text-neutral-500">
+                      <Icon className="size-3.5 flex-shrink-0 text-muted-foreground" />
+                      <span className="text-[11px] font-medium text-muted-foreground">
                         {TOOL_LABELS[tc.name] || tc.name}
                       </span>
                       {tc.args?.query && (
-                        <span className="text-[11px] text-neutral-400 truncate">
+                        <span className="truncate text-[11px] text-muted-foreground">
                           · {truncate(tc.args.query, 35)}
                         </span>
                       )}
@@ -232,7 +232,7 @@ function ToolResult({
     return <p className="text-[11px] text-amber-600">{summary}</p>
   }
   if (summary) {
-    return <p className="text-[11px] text-neutral-400">{summary}</p>
+    return <p className="text-[11px] text-muted-foreground">{summary}</p>
   }
 
   return null
@@ -249,8 +249,8 @@ function SearchNewsResult({ articles }: { articles: ResearchArticle[] }) {
       {visible.map((art, index) => (
         <div
           key={art.id ?? `${art.url ?? 'article'}-${index}`}
-          className="group relative bg-white rounded-lg border border-neutral-100
-                     hover:border-violet-200 hover:shadow-sm
+          className="group relative overflow-hidden rounded-lg border border-border bg-card
+                     hover:border-primary/35 hover:bg-accent/50 hover:shadow-sm
                      transition-all duration-150 overflow-hidden"
         >
           {/* Left accent on hover */}
@@ -263,7 +263,7 @@ function SearchNewsResult({ articles }: { articles: ResearchArticle[] }) {
               to={`/news/${art.id ?? ''}`}
               className="flex-1 min-w-0"
             >
-              <p className="text-[13px] font-medium text-neutral-800 group-hover:text-violet-800 line-clamp-2 leading-snug">
+              <p className="line-clamp-2 text-[13px] font-medium leading-snug text-foreground group-hover:text-primary">
                 {art.title || '未命名文章'}
               </p>
               <div className="flex items-center gap-1.5 mt-1 flex-wrap">
@@ -278,13 +278,13 @@ function SearchNewsResult({ articles }: { articles: ResearchArticle[] }) {
                   </span>
                 )}
                 {art.publish_time && (
-                  <span className="text-[10px] text-neutral-400">
+                  <span className="text-[10px] text-muted-foreground">
                     {formatDate(art.publish_time)}
                   </span>
                 )}
               </div>
               {art.snippet && (
-                <p className="text-[11px] text-neutral-400 line-clamp-2 mt-1 leading-relaxed">
+                <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
                   {art.snippet}
                 </p>
               )}
@@ -298,8 +298,8 @@ function SearchNewsResult({ articles }: { articles: ResearchArticle[] }) {
                 rel="noopener noreferrer"
                 title="查看原文"
                 onClick={e => e.stopPropagation()}
-                className="flex-shrink-0 mt-0.5 p-1.5 rounded-md text-neutral-300
-                           hover:text-violet-500 hover:bg-violet-50
+                className="mt-0.5 flex-shrink-0 rounded-md p-1.5 text-muted-foreground
+                           hover:bg-primary/10 hover:text-primary
                            transition-colors duration-150"
               >
                 <ArrowUpRight className="w-3.5 h-3.5" />
@@ -346,13 +346,13 @@ function SearchWebResult({ results }: { results: ResearchWebResult[] }) {
             target="_blank"
             rel="noopener noreferrer"
             className="group block rounded-lg border border-transparent
-                       hover:border-blue-200 hover:bg-blue-50/30
+                       hover:border-primary/30 hover:bg-accent/60
                        px-2.5 py-2 transition-all duration-150"
           >
             <div className="flex items-start gap-1.5">
-              <ExternalLink className="w-3 h-3 text-neutral-400 mt-0.5 flex-shrink-0 group-hover:text-blue-500" />
+              <ExternalLink className="mt-0.5 size-3 flex-shrink-0 text-muted-foreground group-hover:text-primary" />
               <div className="min-w-0 flex-1">
-                <p className="text-[12px] font-medium text-neutral-700 group-hover:text-blue-700 line-clamp-1">
+                <p className="line-clamp-1 text-[12px] font-medium text-foreground group-hover:text-primary">
                   {r.title}
                 </p>
                 <div className="flex items-center gap-1.5 mt-0.5">
@@ -361,18 +361,18 @@ function SearchWebResult({ results }: { results: ResearchWebResult[] }) {
                       {sourceInfo.label}
                     </span>
                   ) : (
-                    <span className="inline-flex items-center px-1 py-0.5 rounded bg-neutral-100 text-[9px] font-medium text-neutral-500">
+                    <span className="inline-flex items-center rounded bg-secondary px-1 py-0.5 text-[9px] font-medium text-muted-foreground">
                       Web
                     </span>
                   )}
                   {domain && (
-                    <span className="text-[10px] text-neutral-400 truncate">
+                    <span className="truncate text-[10px] text-muted-foreground">
                       {domain}
                     </span>
                   )}
                 </div>
                 {r.snippet && (
-                  <p className="text-[11px] text-neutral-400 line-clamp-2 mt-1 leading-relaxed">
+                  <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
                     {r.snippet}
                   </p>
                 )}
@@ -412,15 +412,14 @@ function FetchArticleResult({ title, id, source, url, truncated, originalLength 
       {id != null ? (
         <Link
           to={`/news/${id}`}
-          className="inline-flex items-center gap-1.5 bg-white rounded-lg border border-neutral-100
-                     px-2.5 py-1.5 hover:border-violet-200 hover:bg-violet-50/50 transition-all group"
+          className="group inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 transition-all hover:border-primary/35 hover:bg-accent"
         >
-          <FileText className="w-3 h-3 text-neutral-400 group-hover:text-violet-400" />
-          <span className="text-[12px] font-medium text-neutral-700 group-hover:text-violet-700 line-clamp-1 max-w-[200px]">
+          <FileText className="size-3 text-muted-foreground group-hover:text-primary" />
+          <span className="max-w-[200px] line-clamp-1 text-[12px] font-medium text-foreground group-hover:text-primary">
             {title}
           </span>
         </Link>
-      ) : <span className="text-[12px] font-medium text-neutral-700">{title}</span>}
+      ) : <span className="text-[12px] font-medium text-foreground">{title}</span>}
 
       {/* Source tag */}
       {source && (
@@ -436,9 +435,7 @@ function FetchArticleResult({ title, id, source, url, truncated, originalLength 
           target="_blank"
           rel="noopener noreferrer"
           title="查看原文"
-          className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-neutral-100
-                     text-[10px] text-neutral-400 hover:text-violet-500 hover:border-violet-200
-                     hover:bg-violet-50 transition-all"
+          className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground transition-all hover:border-primary/35 hover:bg-accent hover:text-primary"
         >
           <ArrowUpRight className="w-3 h-3" />
           原文
@@ -462,19 +459,18 @@ function FetchWebpageResult({ url, length }: { url: string; length: number }) {
   const domain = extractDomain(url)
 
   return (
-    <div className="mt-1 inline-flex items-center gap-2 bg-white rounded-lg border border-neutral-100
-                    px-2.5 py-1.5 group hover:border-blue-200 hover:bg-blue-50/30 transition-all">
-      <Globe className="w-3 h-3 text-neutral-400 group-hover:text-blue-500" />
+    <div className="group mt-1 inline-flex items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 transition-all hover:border-primary/30 hover:bg-accent">
+      <Globe className="size-3 text-muted-foreground group-hover:text-primary" />
       <a
         href={url}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-[12px] font-medium text-neutral-700 group-hover:text-blue-700 truncate max-w-[180px]"
+        className="max-w-[180px] truncate text-[12px] font-medium text-foreground group-hover:text-primary"
       >
         {domain || url}
       </a>
       {length > 0 && (
-        <span className="text-[10px] text-neutral-400">
+        <span className="text-[10px] text-muted-foreground">
           {formatCharCount(length)} 字符
         </span>
       )}
@@ -483,7 +479,7 @@ function FetchWebpageResult({ url, length }: { url: string; length: number }) {
         target="_blank"
         rel="noopener noreferrer"
         title="访问原网页"
-        className="p-1 rounded text-neutral-300 hover:text-blue-500 hover:bg-blue-50 transition-colors"
+        className="rounded p-1 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
       >
         <ArrowUpRight className="w-3 h-3" />
       </a>
@@ -505,7 +501,7 @@ function GenerateReportResult({ args, summary }: { args: JsonRecord; summary: st
   return (
     <div className="mt-1 space-y-1">
       {sections && (
-        <p className="text-[11px] text-neutral-400">
+        <p className="text-[11px] text-muted-foreground">
           {typeof sections === 'number'
             ? `报告结构: ${sections} 个章节`
             : `报告结构: ${Array.isArray(sections) ? sections.length : sections} 个章节`}

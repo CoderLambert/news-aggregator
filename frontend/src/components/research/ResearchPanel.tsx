@@ -196,7 +196,7 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
     <>
       {!isFullscreen && (
         <div
-          className="fixed inset-0 z-30 bg-black/10 backdrop-blur-sm transition-opacity pointer-events-auto"
+          className="fixed inset-0 z-30 bg-black/25 backdrop-blur-sm transition-opacity pointer-events-auto dark:bg-black/55"
           onClick={handleClose}
           aria-hidden="true"
         />
@@ -208,12 +208,12 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
         aria-modal="true"
         aria-label="新闻研究助手"
         tabIndex={-1}
-        className={`fixed z-40 flex flex-col bg-white rounded-t-2xl sm:rounded-2xl shadow-[0_-8px_32px_-8px_rgba(0,0,0,0.12)]
-          border border-neutral-200/50 overflow-hidden
+        className={`research-panel fixed z-40 flex flex-col overflow-hidden rounded-t-2xl border border-border bg-card text-card-foreground
+          shadow-[0_24px_80px_-24px_rgba(0,0,0,0.45)] sm:rounded-2xl
           transition-all duration-300 ease-out pointer-events-auto
           ${isFullscreen
             ? 'inset-2 rounded-2xl'
-            : 'bottom-[60px] right-0 sm:right-6 w-[600px] h-[720px] max-[640px]:inset-x-0 max-[640px]:bottom-0 max-[640px]:w-auto max-[640px]:h-[85vh]'
+            : 'bottom-[60px] right-0 h-[min(760px,calc(100dvh-7rem))] w-[min(620px,calc(100vw-3rem))] sm:right-6 max-[640px]:inset-x-0 max-[640px]:bottom-0 max-[640px]:h-[88dvh] max-[640px]:w-auto'
           }`}
       >
         <ResearchHeader
@@ -228,14 +228,14 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
           onSelectSession={handleSelectSession}
         />
 
-        <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-3 space-y-3 bg-gradient-to-b from-violet-50/30 via-neutral-50/30 to-white">
+        <div className="flex-1 space-y-3 overflow-y-auto overscroll-contain bg-gradient-to-b from-secondary/65 via-background/90 to-background px-4 py-3">
           {!user ? (
             <div className="flex flex-col items-center justify-center h-full text-center px-6">
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-100 to-orange-50 flex items-center justify-center shadow-lg shadow-violet-100/50 mb-4">
-                <LogIn className="w-7 h-7 text-violet-500" />
+              <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-primary/10 shadow-lg shadow-primary/10">
+                <LogIn className="size-7 text-primary" />
               </div>
-              <p className="text-base font-bold text-neutral-900">需要登录</p>
-              <p className="mt-1.5 text-xs text-neutral-400 max-w-[260px] leading-relaxed">
+              <p className="text-base font-bold text-foreground">需要登录</p>
+              <p className="mt-1.5 max-w-[260px] text-xs leading-relaxed text-muted-foreground">
                 研究助手需要登录后才能使用，登录即可开始深度新闻分析
               </p>
               <Button type="button" className="mt-5 rounded-full" onClick={() => setShowAuthModal(true)}>
@@ -252,7 +252,7 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
                 disabled={isBusy}
               />
               {recoveryAction === 'resume' && (
-                <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs text-amber-800">
+                <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-200">
                   <span>{!activeSessionId ? '原请求可能已到达服务器。继续接收将复用原请求标识，避免创建新的重复任务；暂时无法确认后台是否已经开始。' : '浏览器连接已停止；后台任务可能仍在执行。重新连接会回放当前任务的事件。'}</span>
                   <Button type="button" size="sm" variant="outline" onClick={() => void handleResume()}>
                     继续接收
@@ -260,7 +260,7 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
                 </div>
               )}
               {recoveryAction === 'retry' && (
-                <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-100 bg-rose-50 p-3 text-xs text-rose-800">
+                <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-500/25 bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-200">
                   <span>原请求可能已到达服务器。只有点击下方按钮才会新建任务，可能重复计算或产生费用。</span>
                   <Button type="button" size="sm" variant="outline" onClick={() => void handleRetry()}>
                     重新研究

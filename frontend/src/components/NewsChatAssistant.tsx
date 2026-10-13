@@ -124,10 +124,10 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
       )}
 
       <div
-        className={`pointer-events-auto relative flex flex-col overflow-hidden bg-card border border-border shadow-2xl transition-all ${
+        className={`news-chat-panel pointer-events-auto relative flex flex-col overflow-hidden border border-border bg-card text-card-foreground shadow-2xl transition-all ${
           isFullscreen
-            ? 'h-full w-full rounded-none md:h-[94dvh] md:w-[94vw] md:max-w-[1440px] md:rounded-2xl'
-            : 'h-[85vh] w-full rounded-t-3xl sm:h-[640px] sm:w-[460px] sm:rounded-2xl'
+            ? 'h-full w-full rounded-none md:h-[min(92dvh,980px)] md:w-[min(94vw,1600px)] md:rounded-2xl'
+            : 'h-[85dvh] w-full rounded-t-3xl sm:h-[min(78dvh,720px)] sm:w-[480px] sm:rounded-2xl'
         }`}
       >
         <ChatHeader
@@ -161,34 +161,14 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
           )}
         </div>
 
-        <div className="flex-1 space-y-3 overflow-y-auto overscroll-contain bg-secondary/10 p-4 sm:p-5 md:p-8">
-          {messages.length === 0 && (
-            <div className="rounded-xl border border-border bg-secondary/30 p-3 text-xs text-muted-foreground space-y-2">
-              <p className="font-medium text-foreground">💡 快速向小闻提问：</p>
-              <div className="flex flex-wrap gap-1.5">
-                {(suggestedQuestions.length > 0
-                  ? suggestedQuestions
-                  : ['这篇内容最重要的三个观点是什么？', '用通俗的语言解释文中核心技术', '文章提到的方案有什么优缺点？']
-                ).map((prompt) => (
-                  <button
-                    key={prompt}
-                    type="button"
-                    onClick={() => { setInput(prompt); void doSend(prompt) }}
-                    className="text-left rounded-lg border border-border bg-card px-2.5 py-1 text-[11px] text-foreground hover:bg-accent transition-colors"
-                  >
-                    {prompt}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+        <div className="chat-panel-scroll flex-1 space-y-3 overflow-y-auto overscroll-contain bg-background/55 p-4 sm:p-5 md:p-7">
           {historyError && (
-            <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/35 dark:text-red-200">
               聊天记录加载失败。<button type="button" className="ml-1 underline" onClick={() => void retryHistory()}>重试</button>
             </div>
           )}
           {uncertainTurn && (
-            <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+            <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/35 dark:text-amber-200">
               <p className="font-medium">
                 {uncertainTurn.reconciliation === 'checking'
                   ? '正在只读核对服务器记录…'

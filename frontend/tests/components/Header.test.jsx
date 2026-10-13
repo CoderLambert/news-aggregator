@@ -34,6 +34,15 @@ beforeEach(() => {
 })
 
 describe('Header navigation menu', () => {
+  it('shows the current workspace context in the desktop header', () => {
+    const subscribed = renderHeader(['/?scope=subscribed'])
+    expect(screen.getByLabelText('资讯流：我的订阅')).toBeInTheDocument()
+    subscribed.unmount()
+
+    renderHeader(['/admin/crawlers'])
+    expect(screen.getByLabelText('系统管理：爬虫管理控制台')).toBeInTheDocument()
+  })
+
   it('keeps the menu button inside while handling its real pointer toggle sequence', () => {
     renderHeader()
 

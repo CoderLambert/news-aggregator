@@ -15,6 +15,26 @@ const DISPLAY_MODES = [
   { key: 'bilingual', label: '双文', icon: AlignLeft, color: 'text-violet-500' },
 ] satisfies ReadonlyArray<{ key: DisplayMode; label: string; icon: LucideIcon; color: string }>
 
+function workspaceContextFor(pathname: string, search: string) {
+  if (pathname === '/') {
+    const scope = new URLSearchParams(search).get('scope')
+    if (scope === 'subscribed') return { section: '资讯流', title: '我的订阅' }
+    if (scope === 'ungrouped') return { section: '资讯流', title: '未加入分组' }
+    if (scope === 'group') return { section: '资讯流', title: '分组资讯' }
+    return { section: '资讯流', title: '最新资讯' }
+  }
+  if (pathname.startsWith('/admin/')) return { section: '系统管理', title: '爬虫管理控制台' }
+  if (pathname.startsWith('/channels/smart')) return { section: '频道管理', title: 'AI 智能整理' }
+  if (pathname.startsWith('/channels/groups')) return { section: '频道管理', title: '分组管理' }
+  if (pathname.startsWith('/channels/')) return { section: '频道管理', title: '频道详情' }
+  if (pathname === '/channels') return { section: '频道管理', title: '频道目录' }
+  if (pathname === '/search') return { section: '阅读工作区', title: '检索中心' }
+  if (pathname === '/favorites') return { section: '阅读工作区', title: '智库收藏' }
+  if (pathname === '/settings') return { section: '阅读工作区', title: '设置' }
+  if (pathname.startsWith('/news/')) return { section: '阅读工作区', title: '文章阅读' }
+  return { section: '阅读工作区', title: 'NewsHub' }
+}
+
 export default function Header() {
   const { displayMode, setDisplayMode } = useLanguage()
   const { user, logout } = useAuth()
@@ -72,10 +92,16 @@ export default function Header() {
     ? location.pathname === '/'
     : location.pathname === path || location.pathname.startsWith(`${path}/`)
 
+  const workspaceContext = workspaceContextFor(location.pathname, location.search)
+
   return (
     <>
       <header className="sticky top-0 z-50 border-b border-border bg-background/90 text-foreground backdrop-blur-lg">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
+          <div className="workspace-header-context" aria-label={`${workspaceContext.section}：${workspaceContext.title}`}>
+            <span>{workspaceContext.section}</span>
+            <strong>{workspaceContext.title}</strong>
+          </div>
           <div className="flex items-center gap-6">
             <Link to="/" className="flex min-h-11 items-center gap-2 rounded-sm text-lg font-bold tracking-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               <span aria-hidden="true" className="inline-flex size-7 items-center justify-center rounded-lg bg-emerald-700 text-xs font-bold text-white shadow-sm">N</span>

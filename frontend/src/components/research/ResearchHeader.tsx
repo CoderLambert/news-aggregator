@@ -125,14 +125,14 @@ export default function ResearchHeader({
   }
 
   return (
-    <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-100 bg-white/60 backdrop-blur-xl">
+    <div className="flex items-center justify-between border-b border-border bg-card/90 px-4 py-3 backdrop-blur-xl">
       <div className="flex items-center gap-3 min-w-0">
-        <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-gradient-to-br from-violet-100 to-orange-50 ring-1 ring-violet-100/50 flex items-center justify-center">
-          <Search className="w-4 h-4 text-violet-500" />
+        <div className="flex size-9 flex-shrink-0 items-center justify-center rounded-xl bg-primary/10 ring-1 ring-primary/15">
+          <Search className="size-4 text-primary" />
         </div>
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-neutral-900 leading-tight truncate">{title}</h3>
-          <p className="text-[11px] text-neutral-400 truncate">{subtitle}</p>
+          <h3 className="truncate text-sm font-semibold leading-tight text-foreground">{title}</h3>
+          <p className="truncate text-[11px] text-muted-foreground">{subtitle}</p>
         </div>
       </div>
 
@@ -151,7 +151,7 @@ export default function ResearchHeader({
               aria-expanded={showSessionMenu}
               aria-controls="research-session-menu"
               title="切换会话"
-              className="text-neutral-400 hover:text-violet-500 h-7 w-7 rounded-lg"
+              className="size-7 rounded-lg text-muted-foreground hover:bg-accent hover:text-primary"
             >
               <History className="h-3.5 w-3.5" />
             </Button>
@@ -163,11 +163,11 @@ export default function ResearchHeader({
                 role="menu"
                 aria-label="历史会话"
                 onKeyDown={handleMenuKeyDown}
-                className="fixed w-64 bg-white rounded-xl shadow-xl border border-neutral-100 py-1.5 z-[60] max-h-56 overflow-y-auto animate-message-pop-in"
+                className="fixed z-[60] max-h-56 w-64 overflow-y-auto rounded-xl border border-border bg-popover py-1.5 text-popover-foreground shadow-xl animate-message-pop-in"
                 style={{ top: `${menuPos.top}px`, right: `${menuPos.right}px` }}
               >
                 <div className="px-3 py-1.5">
-                  <p className="text-[10px] text-neutral-400 uppercase tracking-wider font-medium">历史会话</p>
+                  <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">历史会话</p>
                 </div>
                 {sessions.map((session, index) => (
                   <button
@@ -179,8 +179,8 @@ export default function ResearchHeader({
                     onFocus={() => setFocusedMenuIndex(index)}
                     aria-current={activeSessionId === session.id ? 'true' : undefined}
                     onClick={(event) => handleSelect(event, session.id)}
-                    className={`w-full text-left px-3 py-2 text-xs hover:bg-violet-50/50 transition-colors truncate
-                      ${activeSessionId === session.id ? 'text-violet-700 font-medium bg-violet-50/50' : 'text-neutral-600'}`}
+                    className={`w-full truncate px-3 py-2 text-left text-xs transition-colors hover:bg-accent
+                      ${activeSessionId === session.id ? 'bg-primary/10 font-medium text-primary' : 'text-muted-foreground'}`}
                   >
                     {session.title || `研究 · ${session.id.slice(0, 8)}`}
                   </button>
@@ -190,13 +190,13 @@ export default function ResearchHeader({
             )}
           </div>
         )}
-        <Button type="button" variant="ghost" size="icon" onClick={onNewSession} aria-label="新建研究" title="新建研究" className="text-neutral-400 hover:text-violet-500 h-7 w-7 rounded-lg">
+        <Button type="button" variant="ghost" size="icon" onClick={onNewSession} aria-label="新建研究" title="新建研究" className="size-7 rounded-lg text-muted-foreground hover:text-primary">
           <Plus className="h-4 w-4" />
         </Button>
-        <Button type="button" variant="ghost" size="icon" onClick={onToggleFullscreen} aria-label={isFullscreen ? '退出全屏' : '全屏'} title={isFullscreen ? '退出全屏' : '全屏'} className="text-neutral-400 hover:text-violet-500 h-7 w-7 rounded-lg">
+        <Button type="button" variant="ghost" size="icon" onClick={onToggleFullscreen} aria-label={isFullscreen ? '退出全屏' : '全屏'} title={isFullscreen ? '退出全屏' : '全屏'} className="size-7 rounded-lg text-muted-foreground hover:text-primary">
           {isFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
         </Button>
-        <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="关闭" title="关闭" className="text-neutral-400 hover:text-neutral-600 h-7 w-7 rounded-lg">
+        <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="关闭" title="关闭" className="size-7 rounded-lg text-muted-foreground hover:text-foreground">
           <X className="h-4 w-4" />
         </Button>
       </div>

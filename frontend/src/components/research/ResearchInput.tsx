@@ -63,15 +63,15 @@ export default function ResearchInput({
   const canSend = Boolean(value.trim()) && !isLoading && !disabled
 
   return (
-    <div className={`px-3 pt-2 pb-3 border-t transition-colors duration-200
+    <div className={`border-t px-3 pb-3 pt-2 transition-colors duration-200
       ${localOnly
-        ? 'bg-violet-50/60 backdrop-blur-xl border-violet-100/50'
-        : 'bg-white/60 backdrop-blur-xl border-neutral-100/50'
+        ? 'border-primary/20 bg-primary/5 backdrop-blur-xl'
+        : 'border-border bg-card/90 backdrop-blur-xl'
       }`}
     >
       <div className={`flex items-end gap-2 rounded-2xl p-1.5 transition-all duration-200
-        ${localOnly ? 'bg-violet-100/50' : 'bg-neutral-50'}
-        ${canSend ? (localOnly ? 'ring-2 ring-violet-400/60 bg-white' : 'ring-2 ring-violet-300/50 bg-white') : ''}`}
+        ${localOnly ? 'bg-primary/10' : 'bg-secondary/75'}
+        ${canSend ? 'bg-background ring-2 ring-primary/30' : ''}`}
       >
         <textarea
           ref={inputRef}
@@ -84,7 +84,7 @@ export default function ResearchInput({
           disabled={disabled}
           className="chat-input-scroll flex-1 bg-transparent border-none resize-none
                      focus:outline-none focus:ring-0
-                     text-sm leading-5 text-neutral-900 placeholder-neutral-400
+                     text-sm leading-5 text-foreground placeholder:text-muted-foreground
                      py-2 px-3 disabled:opacity-50"
           style={{ minHeight: '36px', maxHeight: `${MAX_HEIGHT}px` }}
         />
@@ -96,7 +96,7 @@ export default function ResearchInput({
             aria-label="取消研究任务"
             title="请求取消服务端任务；若取消请求失败，任务可能继续运行"
             className="flex-shrink-0 min-h-9 px-2 rounded-xl inline-flex items-center gap-1.5
-                       bg-rose-50 text-rose-700 border border-rose-100 hover:bg-rose-100
+                       border border-rose-500/25 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 dark:text-rose-200
                        disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
           >
             <Square className="w-3.5 h-3.5" />
@@ -111,8 +111,8 @@ export default function ResearchInput({
             className={`flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-200
               active:scale-90
               ${canSend
-                ? 'bg-gradient-to-br from-violet-500 to-violet-600 text-white shadow-md shadow-violet-200/50 hover:shadow-lg hover:shadow-violet-300/50 hover:scale-105'
-                : 'bg-neutral-200 text-neutral-400 cursor-not-allowed'
+                ? 'bg-primary text-primary-foreground shadow-md shadow-primary/15 hover:scale-105 hover:bg-primary/90 hover:shadow-lg'
+                : 'cursor-not-allowed bg-muted text-muted-foreground'
               }`}
           >
             <Send className="w-4 h-4" />
@@ -128,17 +128,17 @@ export default function ResearchInput({
           aria-pressed={localOnly}
           className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full
                      text-[11px] font-medium transition-all duration-150
-                     focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-200
+                     hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
                      active:scale-95 disabled:opacity-50"
         >
-          <Database className={`w-3 h-3 transition-colors ${localOnly ? 'text-violet-500' : 'text-neutral-300'}`} />
-          <span className={`transition-colors ${localOnly ? 'text-violet-600' : 'text-neutral-400'}`}>
+          <Database className={`size-3 transition-colors ${localOnly ? 'text-primary' : 'text-muted-foreground'}`} />
+          <span className={`transition-colors ${localOnly ? 'text-primary' : 'text-muted-foreground'}`}>
             {localOnly ? '仅本地新闻库' : '本地+联网搜索'}
           </span>
         </button>
       )}
 
-      <p className="text-[10px] text-center text-neutral-300 mt-1.5">
+      <p className="mt-1.5 text-center text-[10px] text-muted-foreground/75">
         {localOnly
           ? '仅搜索本地新闻数据库，不进行联网搜索'
           : '研究助手会调用多个工具深度分析，结果仅供参考'}

@@ -14,11 +14,12 @@ services:
     ports:
       - "127.0.0.1:9527:9527"
     volumes:
-      # Keep SQLite, its WAL sidecars, and the application source/data directory on the host.
+      # Keep SQLite, its WAL sidecars, and application data on the host. The
+      # frontend bundle stays inside the image so a rebuild cannot be masked by
+      # stale files from ./frontend/dist.
       - ./backend:/app/backend
       - ./chroma_data:/app/chroma_data
       - ./logs:/app/logs
-      - ./frontend/dist:/app/frontend/dist
       - huggingface-cache:/root/.cache/huggingface
     restart: unless-stopped
     healthcheck:
