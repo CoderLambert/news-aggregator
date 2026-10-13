@@ -31,6 +31,24 @@ function csrfCookie(): string {
   return match ? decodeURIComponent(match[1]) : ''
 }
 
+function responseErrorMessage(value: unknown, status: number): string {
+  if (status === 401) return '请先登录后再进行此操作。'
+  if (status === 403) return '当前操作没有权限，或安全会话已过期。请刷新页面后重试。'
+  if (status >= 500) return '服务暂时不可用，请稍后重试。'
+  const record = typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown> : undefined
+  // DRF validation errors may be a list, or a field error, rather than `detail`.
+  const candidate = record?.detail ?? ((status === 400 || status === 422)
+    ? record?.url ?? record?.non_field_errors ?? (Array.isArray(value) ? value : undefined) : undefined)
+  const message = typeof candidate === 'string' ? candidate
+    : Array.isArray(candidate) && candidate.every(item => typeof item === 'string') ? candidate.join('；') : ''
+  // Only plain, bounded API messages; never display HTML or server diagnostics.
+  if (message.trim() && message.length <= 300 && !/[<>]/.test(message)
+    && !Array.from(message).some(character => character.charCodeAt(0) < 32)) return message.trim()
+  if (status === 400 || status === 422) return '请求参数不正确，请检查输入后重试。'
+  return '操作未完成，请稍后重试。'
+}
+
 export async function workspaceRequest<T>(path: string, options: { method?: string; body?: unknown; signal?: AbortSignal } = {}): Promise<T> {
   const viewer = workspaceViewer
   const controller = new AbortController()
@@ -53,10 +71,11 @@ export async function workspaceRequest<T>(path: string, options: { method?: stri
     })
     if (response.status === 204) return undefined as T
     let value: unknown
-    try { value = await response.json() } catch { throw new WorkspaceError('服务器未返回有效数据，请重试。', response.status) }
+    try { value = await response.json() } catch {
+      throw new WorkspaceError(response.ok ? '服务器未返回有效数据，请重试。' : responseErrorMessage(undefined, response.status), response.status)
+    }
     if (!response.ok) {
-      const detail = typeof value === 'object' && value !== null ? (value as Record<string, unknown>).detail : null
-      throw new WorkspaceError(typeof detail === 'string' ? detail : '操作未完成，请重试或检查登录状态。', response.status)
+      throw new WorkspaceError(responseErrorMessage(value, response.status), response.status)
     }
     return value as T
   } finally {
