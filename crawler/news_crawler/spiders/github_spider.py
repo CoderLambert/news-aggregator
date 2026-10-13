@@ -1,5 +1,5 @@
 import scrapy
-from datetime import datetime
+import re
 from news_crawler.items import NewsItem
 from news_crawler.category_map import classify
 
@@ -27,6 +27,8 @@ class GithubTrendingSpider(scrapy.Spider):
                 continue
 
             repo_path = repo_path.strip().lstrip('/')
+            if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repo_path):
+                continue
             url = f'https://github.com/{repo_path}'
 
             description = article.css('p::text').get('')
@@ -59,9 +61,14 @@ class GithubTrendingSpider(scrapy.Spider):
             news['title'] = repo_path
             news['content'] = content
             news['author'] = repo_path.split('/')[0] if '/' in repo_path else ''
-            news['publish_time'] = datetime.now()
+            news['publish_time'] = None
+            news['publish_time_inferred'] = True
             news['source_name'] = 'GitHub Trending'
             news['category_name'] = language if language else classify(repo_path, content)
             news['url'] = url
             news['cover_image'] = ''
+            news['source_key'] = 'github'
+            news['upstream_id'] = repo_path
+            news['discovery_url'] = response.url
+            news['content_kind'] = 'readme'
             yield news

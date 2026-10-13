@@ -1,21 +1,15 @@
 from pathlib import Path
 
-from scrapy.http import XmlResponse
+from django.utils import timezone
+from api.services.feed_support import parse_feed, feed_entry_item
+from api.services.source_policy import POLICIES
 
-from news_crawler.items import NewsItem
-from news_crawler.spiders.bbc_spider import BbcSpider
 
-
-def test_bbc_parses_media_thumbnail_after_removing_xml_namespaces():
+def test_bbc_preserves_media_thumbnail_in_shared_namespaced_parser():
     fixture = Path(__file__).parent / 'fixtures' / 'bbc_rss_namespaced.xml'
-    response = XmlResponse(
-        url='https://feeds.example.invalid/bbc.xml',
-        body=fixture.read_bytes(),
-        encoding='utf-8',
-    )
-
-    results = list(BbcSpider().parse(response))
-    news_item = next(result for result in results if isinstance(result, NewsItem))
+    parsed = parse_feed(fixture.read_bytes())
+    news_item = feed_entry_item(parsed.entries[0], 'bbc', feed_url=POLICIES['bbc'].feed_url,
+        effective_url=POLICIES['bbc'].feed_url, version=parsed.version, request_started_at=timezone.now())
 
     assert news_item['title'] == 'Synthetic fixture title'
     assert news_item['cover_image'] == 'https://images.example.invalid/fixture-thumbnail.png'

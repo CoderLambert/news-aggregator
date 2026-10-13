@@ -21,7 +21,7 @@
 | T04 | safe_http、Provider、Scrapy handler、诊断/研究；WAL 多进程预算 | 已验证并提交；Feed errback 持久状态在 T05 接入 |
 | T05 | Feed 解析、条件状态、receipt；失败不推进 checkpoint | 已验证并提交 |
 | T06 | DEV/HN/首批全文 Feed；按来源契约 fixtures | 已验证并提交 |
-| T07 | TC 与其余来源；31 来源策略及降级 | 待实施 |
+| T07 | TC 与其余来源；31 来源策略及降级 | 已验证并提交 |
 | T08 | 常驻 Worker、心跳、队列、旧命令；恢复/取消/无隐式回填 | 待实施 |
 | T09 | API、前端、翻译/聊天/研究/TTS；排队与正文可用性 | 待实施 |
 | T10 | Compose、发布/恢复/旧版本；现有 release gates | 待实施 |
@@ -120,3 +120,18 @@ DEV 保留既有选题查询范围，跨标签按数字 ID 去重。发现事务
 实际相关回归 **321 passed**（Python 3.12.14）：全部 crawler、结构化 Providers、Feed 支持/状态、ingestion/正文 CAS、article_fetcher/site_rules、budgeted_safe_http/security。DEV 测试证明 23 条发现只前移 20 详情、跨标签不重复、溢出已排队；原始正文超过 5000 字完整保存；请求前 revision 陈旧不能重写；详情错 ID/URL/429/坏 JSON 保留元数据。`manage.py check` 实际无问题，`git diff --check` 通过。
 
 T07–T12 与整体兼容发布/完整 CI 继续实施；没有真实来源开关变更或生产抽样请求。
+
+
+## T07 实际结果
+
+其余 15 个 Feed/API-Atom 来源使用共同生命周期，不逐条立即请求 HTML。BBC 保留三个频道与 namespaced thumbnail；InfoQ/DeepMind 的审核跳转关系继续保存。Ars/MIT 等未经逐条完整性与范围准入的正文不提升；即使收到很长 content:encoded 仍仅摘要。arXiv 保存真实 ID/版本/论文链接与 abstract；Product Hunt 为 product；Frontend Focus 的批准字段只绑定该期 newsletter，不能给外链冒充全文。GitHub Trending 保留原选择语义，显式 readme 类型与仓库 ID，观察时刻不充当发布时间。
+
+Anthropic/Meta/Mistral 保留现有 HTML 发现，只跟实际页面链接，最多 20 个且严格域名/文章身份，修正相对链接解析；错误文章重定向不改变身份。只从有时区的机器可读发布时间解析可靠日期，缺失/本地文本日期明确 inferred，摘要有界。未猜 Feed/API。31 来源政策通过独立矩阵 fixtures，其中三隔离源始终 unsupported。
+
+TechCrunchWPProvider 域名限定，独立 TECHCRUNCH_WP_ENABLED 严格 0/1、默认关闭。只请求精确 slug 或已验证 numeric post ID 与必要字段，选择唯一精确 permalink，不使用列表第一项。验证 ID/title/link/protected/片段完整性；date_gmt/modified_gmt 明确按 GMT。接口不支持与已知文章删除区分；429/401/403 结束整个链路。官方 numeric ID 保存正文 provenance，Feed GUID 保留原身份。协议依据 [WordPress 官方 posts 文档](https://developer.wordpress.org/rest-api/reference/posts/)，本地 fixture 结果不代表 TC 承诺的配额/SLA 或本次生产抽样。
+
+通用 HTML 与已审核 Reader 现在也返回类型化候选：复用本条目真实来源映射 ID，实际响应端点、canonical/Reader URL Source 与标题校验，错文章 redirect 不可入库。Reader 保持现有开关/共享预算；抽象/产品描述不能升级为正文。DEV/HN/README 同样记录实际响应端点，不把 API redirect 的响应冒充原始端点。
+
+实际相关回归 **432 passed**：全部 crawler、TechCrunch/结构化 Providers、article_fetcher/security、ingestion/正文 CAS、production_settings、VentureBeat 日期兼容测试。独立 74 个矩阵场景与 12 个 HTML 发现场景全部通过。后续实际响应端点检查补充后再跑 Provider 子集 **73 passed**。`makemigrations --check --dry-run` 实际 No changes detected；`git diff --check` 通过。没有实际 TC/API/新闻站点请求，没有生产开关变更。
+
+T08–T12、Worker/API/UI/发布兼容集合与完整 CI 继续实施；goal 保持 active。

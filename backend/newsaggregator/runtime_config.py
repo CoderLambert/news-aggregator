@@ -40,6 +40,7 @@ class RuntimeConfig:
     chatgpt_auth_mode: str
     edge_tts_endpoint: str
     waitress_trusted_proxy: str | None
+    techcrunch_wp_enabled: bool
 
 
 def resolve_django_environment(environ: Mapping[str, str]) -> str:
@@ -127,6 +128,7 @@ def parse_runtime_config(
     production = mode == "production"
 
     debug = _boolean(environ, "DJANGO_DEBUG", "0" if production else "1")
+    techcrunch_wp_enabled = _boolean(environ, 'TECHCRUNCH_WP_ENABLED', '0')
     if production and debug:
         raise ImproperlyConfigured("DJANGO_DEBUG=1 is forbidden in production.")
 
@@ -199,6 +201,7 @@ def parse_runtime_config(
     trusted_proxy = _production_proxy(environ) if production else None
 
     return RuntimeConfig(
+        techcrunch_wp_enabled=techcrunch_wp_enabled,
         environment=mode,
         debug=debug,
         secret_key=secret_key,

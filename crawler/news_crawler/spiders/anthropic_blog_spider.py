@@ -1,5 +1,8 @@
 import scrapy
-from datetime import datetime
+from urllib.parse import urlsplit
+from api.services.article_identity import normalize_article_url, same_article_identity, InvalidIdentity
+from api.services.source_policy import POLICIES
+from api.services.source_dates import parse_source_datetime
 from news_crawler.items import NewsItem
 from news_crawler.category_map import classify
 
@@ -25,16 +28,26 @@ class AnthropicBlogSpider(scrapy.Spider):
             if not href or not href.startswith('/news/') and not href.startswith('/research/'):
                 continue
 
-            if not href.startswith('http'):
-                href = 'https://www.anthropic.com' + href
 
+            try:
+                href = normalize_article_url(response.urljoin(href))
+            except InvalidIdentity:
+                continue
+            if urlsplit(href).hostname not in POLICIES[self.name].domains:
+                continue
             if href in seen:
                 continue
+            if len(seen) >= 20:
+                break
             seen.add(href)
 
-            yield scrapy.Request(href, callback=self.parse_article)
+            yield scrapy.Request(href, callback=self.parse_article, meta={'discovery_target_url': href})
 
     def parse_article(self, response):
+        if not same_article_identity(response.url, response.meta.get('discovery_target_url', response.request.url), allow_host_alias=True):
+            return
+        if urlsplit(response.url).hostname not in POLICIES[self.name].domains:
+            return
         title = response.css('h1::text').get()
         if not title:
             title = response.css('[class*="title"] h1::text').get('')
@@ -50,26 +63,21 @@ class AnthropicBlogSpider(scrapy.Spider):
             return
 
         # Try to extract date
-        date_text = response.css('time::text, [class*="date"]::text').get('')
-        publish_time = datetime.now()
-        if date_text:
-            date_text = date_text.strip()
-            for fmt in ('%Y-%m-%d', '%B %d, %Y', '%d %B %Y', '%b %d, %Y'):
-                try:
-                    publish_time = datetime.strptime(date_text, fmt)
-                    break
-                except ValueError:
-                    continue
+        publish_time = parse_source_datetime(response.css('meta[property="article:published_time"]::attr(content), time[datetime]::attr(datetime)').get())
 
         author = response.css('[class*="author"]::text, .author::text').get() or ''
 
         news = NewsItem()
         news['title'] = title.strip()
-        news['content'] = content
+        news['content'] = content[:1000]
         news['author'] = author.strip()
         news['publish_time'] = publish_time
         news['source_name'] = 'Anthropic'
         news['category_name'] = classify(title.strip(), content)
+        news['source_key'] = self.name
+        news['upstream_id'] = normalize_article_url(response.url)
+        news['content_kind'] = 'article'
+        news['publish_time_inferred'] = publish_time is None
         news['url'] = response.url
         news['cover_image'] = response.css('figure img::attr(src), article img::attr(src), .hero img::attr(src)').get() or ''
         yield news

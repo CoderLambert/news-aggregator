@@ -87,6 +87,7 @@ CHATGPT_PLAN_USAGE_ENABLED = _RUNTIME_CONFIG.chatgpt_plan_usage_enabled
 CHATGPT_AUTH_MODE = _RUNTIME_CONFIG.chatgpt_auth_mode
 EDGE_TTS_ENDPOINT = _RUNTIME_CONFIG.edge_tts_endpoint
 WAITRESS_TRUSTED_PROXY = _RUNTIME_CONFIG.waitress_trusted_proxy
+TECHCRUNCH_WP_ENABLED = _RUNTIME_CONFIG.techcrunch_wp_enabled
 
 DJANGO_DB_PATH = _data_path(
     'DJANGO_DB_PATH',

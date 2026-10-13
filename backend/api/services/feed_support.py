@@ -98,6 +98,8 @@ def feed_entry_item(entry, source_key, *, feed_url, effective_url, request_start
         raise ValueError('invalid_identity')
     image = next((link.get('href') for link in entry.get('links', ()) if link.get('rel') == 'enclosure' and
                   str(link.get('type', '')).startswith('image/')), '')
+    if not image:
+        image = next((node.get('url') for node in entry.get('media_thumbnail', ()) if node.get('url')), '')
     item = dict(source_key=source_key, upstream_id=identity, discovery_url=target,
                 content_kind=policy.content_kind, title=title, summary=summary, content=summary,
                 source_name=policy.name, category_name=classify(title, summary) if classify else '科技',
@@ -105,6 +107,11 @@ def feed_entry_item(entry, source_key, *, feed_url, effective_url, request_start
                 author=entry.get('author', '') or '', url=target, cover_image=image or '')
     if modified:
         item['source_modified_at'] = modified
+    if source_key == 'arxiv_ai':
+        item['category_name'] = 'AI'
+        # Keep the actual upstream paper ID/version, never derive a URL from a
+        # guessed ID or initiate PDF fetching.
+        item['source_version'] = identity
     if candidate:
         item['body_candidate'] = candidate
     return item

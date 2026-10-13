@@ -12,7 +12,7 @@ import time
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse, urlencode
 
 from django.conf import settings
 
@@ -25,7 +25,7 @@ from .types import FetchResult, FullContentCandidate, transport_failure
 from api.services.request_budget import BudgetDeferred
 from .execution import ExecutionStopped
 from .validators import validate_markdown, validate_candidate
-from api.services.article_identity import normalize_article_url, InvalidIdentity
+from api.services.article_identity import normalize_article_url, same_article_identity, InvalidIdentity
 from api.services.structured_articles import dev_candidate, hn_candidate
 from django.utils import timezone
 
@@ -39,6 +39,23 @@ def _candidate_result(candidate, provider, *, expected_title=None, summary=None)
                        error='' if validation.ok else 'validation_failed:' + validation.error_code,
                        error_code='' if validation.ok else validation.error_code,
                        validation_reasons=[] if validation.ok else [validation.error_code], extractor=provider)
+
+
+def _publisher_identity(url, news=None):
+    from api.services.source_policy import policy_for_url
+    policy = policy_for_url(url)
+    key = policy.key if policy else 'publisher_html'
+    identity = normalize_article_url(url)
+    if news is not None:
+        identity = news.source_items.filter(source_key=key).values_list('upstream_id', flat=True).first() or identity
+    return key, identity, policy.content_kind if policy else 'article'
+
+
+class DownloadedHTML(str):
+    def __new__(cls, body, effective_url):
+        value = super().__new__(cls, body)
+        value.effective_url = effective_url
+        return value
 
 
 class DevToAPIProvider:
@@ -66,20 +83,94 @@ class DevToAPIProvider:
         try:
             with _open_url(urllib.request.Request(api_url, headers={'Accept': 'application/json', 'User-Agent': USER_AGENT}), timeout=self.timeout) as response:
                 payload = json.loads(response.read().decode('utf-8'))
+                effective = getattr(response, 'geturl', lambda: api_url)()
         except (BudgetDeferred, ExecutionStopped):
             raise
         except Exception as error:
             return transport_failure(error, provider=self.name, url=url)
+
         try:
             # The documented path endpoint resolves the authoritative numeric ID.
             # Its candidate records the exact path that supplied the payload.
-            candidate = dev_candidate(payload, target_url=url, retrieved_from_url=api_url,
+            candidate = dev_candidate(payload, target_url=url, retrieved_from_url=effective,
                                       request_started_at=started, source_item_id=identity)
             return _candidate_result(candidate, self.name, expected_title=expected_title, summary=summary)
         except (InvalidIdentity, ValueError, TypeError):
             return FetchResult(False, self.name, url=url, error='invalid_identity', error_code='invalid_identity')
         except Exception as error:
             return transport_failure(error, provider=self.name, url=url)
+
+
+class TechCrunchWPProvider:
+    """Only the reviewed TechCrunch posts endpoint; no CMS path scanning."""
+    name = 'techcrunch_wp'
+    fields = 'id,link,date_gmt,modified_gmt,title,content,excerpt'
+
+    def __init__(self, timeout=12):
+        self.timeout = timeout
+
+    def fetch(self, url, expected_title=None, summary=None, news=None):
+        from bs4 import BeautifulSoup
+        from api.services.source_dates import parse_source_datetime
+        if not getattr(settings, 'TECHCRUNCH_WP_ENABLED', False):
+            return FetchResult(False, self.name, url=url, error='provider_disabled', error_code='unsupported')
+        try:
+            target = normalize_article_url(url)
+        except InvalidIdentity:
+            return FetchResult(False, self.name, url=url, error='invalid_identity', error_code='invalid_identity')
+        parsed = urlparse(target)
+        if parsed.hostname != 'techcrunch.com' or parsed.scheme != 'https':
+            return FetchResult(False, self.name, url=url, error='not_techcrunch_article')
+        known_id = None
+        if news is not None:
+            evidence = news.full_content_provenance or {}
+            if evidence.get('source_key') == 'techcrunch':
+                known_id = evidence.get('source_item_id')
+        slug = parsed.path.strip('/').rsplit('/', 1)[-1]
+        if not re.fullmatch(r'[a-zA-Z0-9_-]+', slug):
+            return FetchResult(False, self.name, url=url, error='invalid_identity', error_code='invalid_identity')
+        by_id = isinstance(known_id, str) and known_id.isdecimal()
+        endpoint = 'https://techcrunch.com/wp-json/wp/v2/posts'
+        api_url = endpoint + (f'/{known_id}' if by_id else '') + '?' + urlencode(
+            {'_fields': self.fields} if by_id else {'slug': slug, '_fields': self.fields})
+        started = timezone.now()
+        try:
+            with _open_url(urllib.request.Request(api_url, headers={'Accept': 'application/json', 'User-Agent': USER_AGENT}), timeout=self.timeout) as response:
+                payload = json.loads(response.read().decode('utf-8'))
+                effective = getattr(response, 'geturl', lambda: api_url)()
+        except (BudgetDeferred, ExecutionStopped):
+            raise
+        except urllib.error.HTTPError as error:
+            if error.code in {404, 405}:
+                return FetchResult(False, self.name, url=url, error='post_deleted' if by_id and error.code == 404 else 'cms_unsupported',
+                                   error_code='not_found' if by_id and error.code == 404 else 'unsupported', http_status=error.code)
+            return transport_failure(error, provider=self.name, url=url)
+        except Exception as error:
+            return transport_failure(error, provider=self.name, url=url)
+        try:
+            rows = [payload] if by_id else payload
+            if not isinstance(rows, list):
+                raise InvalidIdentity('invalid_identity')
+            matches = [row for row in rows if isinstance(row, dict) and normalize_article_url(row.get('link', '')) == target]
+            if len(matches) != 1:
+                raise InvalidIdentity('invalid_identity')
+            row = matches[0]
+            identity = row.get('id')
+            if type(identity) is not int or identity <= 0 or (by_id and str(identity) != known_id):
+                raise InvalidIdentity('invalid_identity')
+            body = row.get('content') or {}
+            if body.get('protected'):
+                return FetchResult(False, self.name, url=url, error='protected_content', error_code='auth_required')
+            title = BeautifulSoup((row.get('title') or {}).get('rendered') or '', 'html.parser').get_text(' ', strip=True)
+            candidate = FullContentCandidate('techcrunch', str(identity), target, effective, row['link'], title,
+                'article', 'content.rendered', 'html', 'full', body.get('rendered') or '',
+                parse_source_datetime(row.get('modified_gmt'), assume_utc=True), None, started)
+            result = _candidate_result(candidate, self.name, expected_title=expected_title, summary=summary)
+            published = parse_source_datetime(row.get('date_gmt'), assume_utc=True)
+            result.metadata['source_publish_time'] = published.isoformat() if published else None
+            return result
+        except (InvalidIdentity, ValueError, TypeError, AttributeError):
+            return FetchResult(False, self.name, url=url, error='invalid_identity', error_code='invalid_identity')
 
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
 LEIPHONE_FEED_USER_AGENT = 'curl/8.0.0'
@@ -141,7 +232,7 @@ class GitHubReadmeProvider:
             except Exception as error:
                 return transport_failure(error, provider=self.name, url=url)
             candidate = FullContentCandidate('github', f'{owner}/{name}', normalize_article_url(url),
-                readme_url, None, title, 'readme', 'readme', 'markdown', 'full', markdown,
+                getattr(markdown, 'effective_url', readme_url), None, title, 'readme', 'readme', 'markdown', 'full', str(markdown),
                 None, None, started)
             return _candidate_result(candidate, self.name, expected_title=expected_title, summary=summary)
         return FetchResult(False, self.name, url=url, error='readme_not_found', error_code='not_found')
@@ -151,8 +242,9 @@ class GitHubReadmeProvider:
         with _open_url(req, timeout=self.timeout, context=ssl.create_default_context()) as resp:
             raw = resp.read()
             content_type = resp.headers.get('content-type', '')
+            effective = getattr(resp, 'geturl', lambda: url)()
         encoding = _encoding_from_content_type(content_type) or 'utf-8'
-        return raw.decode(encoding, errors='replace')
+        return DownloadedHTML(raw.decode(encoding, errors='replace'), effective)
 
 
 class HackerNewsAPIProvider:
@@ -181,6 +273,7 @@ class HackerNewsAPIProvider:
             req = urllib.request.Request(api_url, headers={'Accept': 'application/json', 'User-Agent': USER_AGENT})
             with _open_url(req, timeout=self.timeout, context=ssl.create_default_context()) as resp:
                 payload = json.loads(resp.read().decode('utf-8', errors='replace') or '{}')
+                effective = getattr(resp, 'geturl', lambda: api_url)()
         except (BudgetDeferred, ExecutionStopped):
             raise
         except Exception as exc:
@@ -201,7 +294,7 @@ class HackerNewsAPIProvider:
             )
 
         try:
-            candidate = hn_candidate(payload, target_url=url, retrieved_from_url=api_url,
+            candidate = hn_candidate(payload, target_url=url, retrieved_from_url=effective,
                                      request_started_at=started, source_item_id=item_id)
         except (InvalidIdentity, ValueError, TypeError):
             return FetchResult(False, self.name, url=url, error='invalid_identity', error_code='invalid_identity')
@@ -304,10 +397,10 @@ class JinaProvider:
         self.timeout = timeout
         self.retries = 0  # Retry scheduling belongs to the persistent task, not each provider.
 
-    def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None) -> FetchResult:
+    def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None, news=None) -> FetchResult:
         if settings.DJANGO_ENV == 'production':
             return FetchResult(ok=False, provider=self.name, url=url, error='unsafe_transport_disabled')
-        return self._fetch_jina(url, expected_title=expected_title, summary=summary)
+        return self._fetch_jina(url, expected_title=expected_title, summary=summary, news=news)
 
     def _fetch_jina(
         self,
@@ -315,11 +408,14 @@ class JinaProvider:
         *,
         expected_title: str | None = None,
         summary: str | None = None,
+        news=None,
     ) -> FetchResult:
         from api.services.article_fetch_monitor import observe_jina_candidate
         if not observe_jina_candidate(normalize_domain(url)):
             return FetchResult(ok=False, provider=self.name, url=url, error='jina_policy_disabled', error_code='unsupported')
+        url = normalize_article_url(url)
         jina_url = f'https://r.jina.ai/{url}'
+        started = timezone.now()
         last_error: Exception | None = None
         for attempt in range(self.retries + 1):
             try:
@@ -329,6 +425,7 @@ class JinaProvider:
                 req = urllib.request.Request(jina_url, headers=headers)
                 with _open_url(req, timeout=self.timeout, context=ssl.create_default_context()) as resp:
                     text = resp.read().decode('utf-8', errors='replace')
+                    effective = getattr(resp, 'geturl', lambda: jina_url)()
                 markdown_match = re.search(r'Markdown Content:\n([\s\S]+)$', text)
                 markdown = markdown_match.group(1).strip() if markdown_match else text.strip()
                 title = _parse_jina_title(text)
@@ -353,14 +450,13 @@ class JinaProvider:
                         quality_score=validation.score,
                         error='validation_failed:' + ','.join(validation.reasons),
                     )
-                return FetchResult(
-                    ok=True,
-                    provider=self.name,
-                    url=url,
-                    title=title,
-                    markdown=markdown,
-                    quality_score=validation.score,
-                )
+                source = re.search(r'^URL Source:\s*(\S+)', text, flags=re.M)
+                if not source or not same_article_identity(source.group(1), url, allow_host_alias=True):
+                    return FetchResult(False, self.name, url=url, error='body_mismatch', error_code='invalid_identity')
+                key, identity, kind = _publisher_identity(url, news)
+                candidate = FullContentCandidate(key, identity, url, effective, source.group(1), title,
+                    kind, 'reader_markdown', 'markdown', 'full', markdown, None, None, started)
+                return _candidate_result(candidate, self.name, expected_title=expected_title, summary=summary)
             except urllib.error.HTTPError as exc:
                 return transport_failure(exc, provider=self.name, url=url)
             except (BudgetDeferred, ExecutionStopped):
@@ -376,7 +472,7 @@ class VentureBeatJinaProvider(JinaProvider):
 
     name = 'venturebeat_jina'
 
-    def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None) -> FetchResult:
+    def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None, news=None) -> FetchResult:
         try:
             parsed = urlparse(url)
             domain = normalize_domain(url)
@@ -399,7 +495,7 @@ class VentureBeatJinaProvider(JinaProvider):
         target_url = normalize_article_url(url)
         if urlparse(target_url).query:
             return FetchResult(ok=False, provider=self.name, url=url, error='reader_query_not_supported', error_code='not_applicable')
-        return self._fetch_jina(target_url, expected_title=expected_title, summary=summary)
+        return self._fetch_jina(target_url, expected_title=expected_title, summary=summary, news=news)
 
 
 class TrustedNewsJinaProvider(JinaProvider):
@@ -407,7 +503,7 @@ class TrustedNewsJinaProvider(JinaProvider):
 
     name = 'trusted_news_jina'
 
-    def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None) -> FetchResult:
+    def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None, news=None) -> FetchResult:
         try:
             parsed = urlparse(url)
             domain = normalize_domain(url)
@@ -432,7 +528,7 @@ class TrustedNewsJinaProvider(JinaProvider):
         target_url = normalize_article_url(url)
         if urlparse(target_url).query:
             return FetchResult(ok=False, provider=self.name, url=url, error='reader_query_not_supported', error_code='not_applicable')
-        return self._fetch_jina(target_url, expected_title=expected_title, summary=summary)
+        return self._fetch_jina(target_url, expected_title=expected_title, summary=summary, news=news)
 
 
 class ScrapyHTTPProvider:
@@ -450,10 +546,11 @@ class ScrapyHTTPProvider:
         self.timeout = timeout
         self.retries = 0  # Retry scheduling belongs to the persistent task, not each provider.
 
-    def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None) -> FetchResult:
+    def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None, news=None) -> FetchResult:
         last_error: Exception | None = None
         for attempt in range(self.retries + 1):
             try:
+                started = timezone.now()
                 html = self._download(url)
                 extracted = extract_markdown_from_html(html, url)
                 markdown = clean_content(extracted.markdown, url)
@@ -477,15 +574,11 @@ class ScrapyHTTPProvider:
                         quality_score=validation.score,
                         error='validation_failed:' + ','.join(validation.reasons),
                     )
-                return FetchResult(
-                    ok=True,
-                    provider=self.name,
-                    url=url,
-                    title=extracted.title,
-                    canonical_url=extracted.canonical_url,
-                    markdown=markdown,
-                    quality_score=validation.score,
-                )
+                key, identity, kind = _publisher_identity(url, news)
+                candidate = FullContentCandidate(key, identity, normalize_article_url(url),
+                    getattr(html, 'effective_url', url), extracted.canonical_url or None, extracted.title,
+                    kind, 'article_html', 'html', 'full', str(html), None, None, started)
+                return _candidate_result(candidate, self.name, expected_title=expected_title, summary=summary)
             except (BudgetDeferred, ExecutionStopped):
                 raise
             except Exception as exc:
@@ -498,8 +591,9 @@ class ScrapyHTTPProvider:
         with _open_url(req, timeout=self.timeout, context=ssl.create_default_context()) as resp:
             raw = resp.read()
             content_type = resp.headers.get('content-type', '')
+            effective = getattr(resp, 'geturl', lambda: url)()
         encoding = _encoding_from_content_type(content_type) or 'utf-8'
-        return raw.decode(encoding, errors='replace')
+        return DownloadedHTML(raw.decode(encoding, errors='replace'), effective)
 
 
 class ScrapySubprocessProvider:
@@ -644,6 +738,8 @@ def default_providers(url=None) -> list:
         return [HackerNewsAPIProvider()]
     if host == 'github.com' and _github_repo_path(url):
         return [GitHubReadmeProvider()]
+    if host == 'techcrunch.com' and getattr(settings, 'TECHCRUNCH_WP_ENABLED', False):
+        return [TechCrunchWPProvider(), ScrapyHTTPProvider(), TrustedNewsJinaProvider(timeout=12, retries=0)]
     providers = [
         HackerNewsAPIProvider(),
         GitHubReadmeProvider(),

@@ -229,7 +229,10 @@ def commit_candidate(news, candidate, *, provider='', lease: FetchLease | None =
     if current is None:
         return ContentCommit('conflict', 'persistence_conflict')
     identities = current.source_items.filter(source_key=candidate.source_key)
-    if identities.exists() and not identities.filter(upstream_id=candidate.source_item_id).exists():
+    # The reviewed CMS response resolves its numeric post ID from the exact
+    # permalink. Feed GUIDs remain separate upstream identities of that article.
+    cms_permalink_binding = candidate.source_key == 'techcrunch' and candidate.body_field == 'content.rendered'
+    if identities.exists() and not identities.filter(upstream_id=candidate.source_item_id).exists() and not cms_permalink_binding:
         return ContentCommit('rejected', 'body_mismatch')
     from api.services.source_policy import POLICIES
     candidate_policy = POLICIES.get(candidate.source_key)

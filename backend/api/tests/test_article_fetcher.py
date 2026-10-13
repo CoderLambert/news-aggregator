@@ -348,6 +348,7 @@ def test_trusted_news_jina_provider_accepts_enabled_https_article_paths():
         'https://www.bbc.co.uk/news/articles/example',
         expected_title='Example',
         summary=None,
+        news=None,
     )
 
 
@@ -677,7 +678,7 @@ def test_fetch_article_url_command_uses_site_rule_min_length_for_short_pages(cap
     assert len(payload['markdown']) < 300
 
 
-def test_scrapy_http_provider_uses_site_rule_min_length_for_short_valid_pages():
+def test_scrapy_http_provider_does_not_upgrade_product_descriptions_to_full_content():
     html = '''
     <html><body>
       <main>
@@ -694,10 +695,10 @@ def test_scrapy_http_provider_uses_site_rule_min_length_for_short_valid_pages():
     with patch.object(provider, '_download', return_value=html):
         result = provider.fetch('https://www.producthunt.com/products/launchpad', expected_title='LaunchPad')
 
-    assert result.ok is True
+    assert result.ok is False
     assert result.provider == 'scrapy_http'
-    assert len(result.markdown) < 300
-    assert result.quality_score >= 0.8
+    assert result.error_code == 'unsupported'
+    assert result.candidate is None
 
 
 def test_deepmind_official_blog_redirect_is_an_explicit_canonical_alias():

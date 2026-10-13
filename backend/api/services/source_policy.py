@@ -1,6 +1,6 @@
 """Reviewed source contracts. Enabling flags never grants an unknown contract."""
 from dataclasses import dataclass
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
 
 
 @dataclass(frozen=True)
@@ -42,13 +42,13 @@ POLICIES = {
         SourcePolicy('mit_tech_review_ai', 'MIT Tech Review AI', ('www.technologyreview.com', 'technologyreview.com'), 'https://www.technologyreview.com/feed/'),
         SourcePolicy('hackernews', 'Hacker News', ('news.ycombinator.com',), body_fields=('text',), content_kind='discussion', request_interval=0.5),
         SourcePolicy('github', 'GitHub Trending', ('github.com',), body_fields=('readme',), content_kind='readme'),
-        SourcePolicy('arxiv_ai', 'arXiv', ('arxiv.org', 'export.arxiv.org'), content_kind='abstract', html_allowed=False),
+        SourcePolicy('arxiv_ai', 'arXiv', ('arxiv.org', 'export.arxiv.org'), 'https://export.arxiv.org/api/query?search_query=cat:cs.AI+OR+cat:cs.LG+OR+cat:cs.CL&sortBy=submittedDate&sortOrder=descending&max_results=50', content_kind='abstract', html_allowed=False),
         SourcePolicy('producthunt', 'ProductHunt', ('www.producthunt.com', 'producthunt.com'), 'https://www.producthunt.com/feed', content_kind='product', html_allowed=False),
         SourcePolicy('frontend_focus', 'Frontend Focus', ('frontendfoc.us',), 'https://frontendfoc.us/rss', ('content:encoded',), content_kind='newsletter'),
         SourcePolicy('anthropic', 'Anthropic', ('www.anthropic.com', 'anthropic.com')),
         SourcePolicy('meta_ai', 'Meta AI', ('ai.meta.com',)),
         SourcePolicy('mistral', 'Mistral', ('mistral.ai',)),
-        SourcePolicy('venturebeat_ai', 'VentureBeat AI', ('venturebeat.com',), 'https://venturebeat.com/category/ai/feed/'),
+        SourcePolicy('venturebeat_ai', 'VentureBeat AI', ('venturebeat.com', 'www.venturebeat.com'), 'https://venturebeat.com/category/ai/feed/'),
         SourcePolicy('reuters', 'Reuters', ('www.reuters.com', 'reuters.com'), html_allowed=False, unsupported_reason='authorized_delivery_required'),
         SourcePolicy('jiqizhixin', '机器之心', ('www.jiqizhixin.com',), html_allowed=False, unsupported_reason='publisher_identity_unavailable'),
         SourcePolicy('sanliu_kr', '36氪', ('36kr.com',), html_allowed=False, unsupported_reason='invalid_feed_endpoint'),
@@ -78,7 +78,13 @@ def candidate_contract_allows(candidate) -> bool:
     field = candidate.body_field
     if policy.feed_url:
         if field == 'content.rendered':
-            return policy.key == 'techcrunch' and origin.scheme == 'https' and origin.netloc == 'techcrunch.com' and origin.path.startswith('/wp-json/wp/v2/posts/')
+            if policy.key != 'techcrunch' or origin.scheme != 'https' or origin.netloc != 'techcrunch.com' or not candidate.source_item_id.isdecimal() or candidate.content_format != 'html':
+                return False
+            query = parse_qs(origin.query)
+            if origin.path == f'/wp-json/wp/v2/posts/{candidate.source_item_id}':
+                return set(query) <= {'_fields'}
+            return (origin.path == '/wp-json/wp/v2/posts' and set(query) <= {'slug', '_fields'} and
+                    query.get('slug') == [target.path.strip('/').rsplit('/', 1)[-1]])
         direct = candidate.retrieved_from_url == policy.feed_url
         observed_redirect = bool(candidate.request_chain and candidate.request_chain[0] == policy.feed_url and
                                  candidate.request_chain[-1] == candidate.retrieved_from_url and
