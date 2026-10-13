@@ -3,11 +3,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import WorkspaceModal from '@/components/workspace/WorkspaceModal'
 
+const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal')
+const originalClose = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close')
+
 beforeEach(() => {
-  vi.spyOn(HTMLDialogElement.prototype, 'showModal').mockImplementation(function (this: HTMLDialogElement) { this.setAttribute('open', '') })
-  vi.spyOn(HTMLDialogElement.prototype, 'close').mockImplementation(function (this: HTMLDialogElement) { this.removeAttribute('open') })
+  // jsdom does not implement the native dialog top layer. Model only open/close
+  // here; browser focus trapping remains an explicit manual acceptance item.
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+    configurable: true, writable: true,
+    value: vi.fn(function (this: HTMLDialogElement) { this.setAttribute('open', '') }),
+  })
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', {
+    configurable: true, writable: true,
+    value: vi.fn(function (this: HTMLDialogElement) { this.removeAttribute('open') }),
+  })
 })
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  if (originalShowModal) Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShowModal)
+  else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal')
+  if (originalClose) Object.defineProperty(HTMLDialogElement.prototype, 'close', originalClose)
+  else Reflect.deleteProperty(HTMLDialogElement.prototype, 'close')
+})
 function Example({ busy = false }: { busy?: boolean }) {
   const [open, setOpen] = useState(false)
   return <><button type="button" onClick={() => setOpen(true)}>打开整理确认</button>{open && <WorkspaceModal title="整理确认" busy={busy} onClose={() => setOpen(false)}><p>确认内容</p></WorkspaceModal>}</>
