@@ -49,6 +49,8 @@ class UnsafeURL(ValueError):
             self.retry_after_at = timezone.now() + timedelta(seconds=1)
         elif message == 'HTTP response declares partial content':
             self.error_code, self.retryable = 'body_partial', False
+        elif message == 'Source is not available for public collection':
+            self.error_code, self.retryable = 'unsupported', False
         elif message in {'HTTP response exceeds size limit', 'Compressed HTTP responses are not supported', 'Invalid HTTP response length'}:
             self.error_code, self.retryable = 'unsupported', False
         elif message in {'Safe HTTP request failed', 'Safe HTTP response read failed', 'Safe HTTPS connection failed',
@@ -217,6 +219,9 @@ def validate_public_url(url: str, timeout: float = MAX_TOTAL_SECONDS) -> PublicU
     if effective_port not in {80, 443}:
         raise _failure('Only ports 80 and 443 are supported')
 
+    from api.services.source_policy import retired_policy_for_url
+    if retired_policy_for_url(url):
+        raise _failure('Source is not available for public collection')
     raw_addrinfos = _resolve_addrinfos(host, effective_port, timeout)
     if not raw_addrinfos:
         raise _failure('Unable to resolve public URL host')

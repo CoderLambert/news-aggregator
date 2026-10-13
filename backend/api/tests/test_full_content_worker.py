@@ -33,12 +33,12 @@ def test_defaults_separate_execution_automatic_and_structured_admission():
     config=parse_runtime_config({})
     assert not config.structured_body_ingest_enabled and not config.full_content_worker_enabled and not config.full_content_auto_enqueue_enabled
     assert config.structured_body_source_keys == config.full_content_auto_source_keys == frozenset()
-    enabled=parse_runtime_config({'FULL_CONTENT_WORKER_ENABLED':'1','STRUCTURED_BODY_SOURCE_KEYS':'devto,leiphone'})
+    enabled=parse_runtime_config({'FULL_CONTENT_WORKER_ENABLED':'1','STRUCTURED_BODY_SOURCE_KEYS':'devto,svelte_blog'})
     assert enabled.full_content_worker_enabled and not enabled.full_content_auto_enqueue_enabled
-    assert enabled.structured_body_source_keys == {'devto','leiphone'}
+    assert enabled.structured_body_source_keys == {'devto','svelte_blog'}
 
 
-@pytest.mark.parametrize('env', [{'FULL_CONTENT_WORKER_ENABLED':'true'}, {'STRUCTURED_BODY_SOURCE_KEYS':'unknown'}, {'FULL_CONTENT_AUTO_SOURCE_KEYS':'reuters'}])
+@pytest.mark.parametrize('env', [{'FULL_CONTENT_WORKER_ENABLED':'true'}, {'STRUCTURED_BODY_SOURCE_KEYS':'unknown'}, {'FULL_CONTENT_AUTO_SOURCE_KEYS':'reuters'}, {'STRUCTURED_BODY_SOURCE_KEYS':'leiphone'}, {'FULL_CONTENT_AUTO_SOURCE_KEYS':'meta_ai'}])
 def test_unknown_source_or_nonboolean_configuration_is_rejected(env):
     with pytest.raises(ImproperlyConfigured): parse_runtime_config(env)
 

@@ -44,7 +44,6 @@ LONG_BODY = (
 )
 
 SOURCE_CASES = (
-    ('leiphone', 'description', 'https://www.leiphone.com/category/ai/publisher-note.html'),
     ('webkit', 'content:encoded', 'https://webkit.org/blog/17417/publisher-note/'),
     ('smashing_magazine', 'content:encoded', 'https://www.smashingmagazine.com/2026/10/publisher-note/'),
     ('v8', 'atom:content', 'https://v8.dev/blog/publisher-note'),

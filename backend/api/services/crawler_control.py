@@ -65,12 +65,16 @@ def sync_crawler_targets():
         existing.discard(spider_name)
     if existing:
         CrawlerTarget.objects.filter(spider_name__in=existing).update(enabled=False)
+        # Retain history and foreign keys, but retire work queued under an older
+        # registry. Running workers already honor cancellation requests.
+        for run_id in CrawlRun.objects.filter(target_id__in=existing, status__in=['queued', 'running']).values_list('pk', flat=True):
+            request_run_cancel(run_id, None, reason='该来源已从公开采集渠道移除。')
 
 
 @transaction.atomic
 def create_crawl_batch(*, trigger, requested_by=None, spider_names=None, retry_of=None):
     sync_crawler_targets()
-    targets = CrawlerTarget.objects.select_for_update().filter(enabled=True)
+    targets = CrawlerTarget.objects.select_for_update().filter(enabled=True, spider_name__in=SPIDERS)
     from api.services.source_policy import POLICIES
     unsupported = [key for key, policy in POLICIES.items() if policy.unsupported_reason]
     targets = targets.exclude(spider_name__in=unsupported)
@@ -119,6 +123,8 @@ def create_crawl_batch(*, trigger, requested_by=None, spider_names=None, retry_o
 
 @transaction.atomic
 def claim_next_run():
+    if CrawlRun.objects.filter(status='queued').exclude(target_id__in=SPIDERS).exists():
+        sync_crawler_targets()
     run = (
         CrawlRun.objects.select_for_update()
         .select_related('batch', 'target')
@@ -241,7 +247,7 @@ def finish_run(run_id, *, status, exit_code, summary=None, safe_error='', log_pa
 
 
 @transaction.atomic
-def request_run_cancel(run_id, user):
+def request_run_cancel(run_id, user, *, reason='任务在开始前由管理员取消。'):
     run = CrawlRun.objects.select_for_update().select_related('target').get(pk=run_id)
     if run.status == 'queued':
         now = timezone.now()
@@ -249,7 +255,7 @@ def request_run_cancel(run_id, user):
         run.cancel_requested_by = user
         run.cancel_requested_at = now
         run.finished_at = now
-        run.safe_error = '任务在开始前由管理员取消。'
+        run.safe_error = reason
         run.save(update_fields=[
             'status', 'cancel_requested_by', 'cancel_requested_at',
             'finished_at', 'safe_error',

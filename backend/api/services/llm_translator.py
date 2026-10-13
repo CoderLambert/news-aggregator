@@ -173,6 +173,9 @@ def fetch_and_verify_chinese_content(url: str) -> str:
     Returns the Chinese Markdown content if verified, empty string otherwise.
     """
     try:
+        from api.services.source_policy import retired_policy_for_url
+        if retired_policy_for_url(url):
+            return ''
         from api.services.article_fetcher.providers import TrustedNewsJinaProvider
         result = TrustedNewsJinaProvider(timeout=12, retries=0).fetch(url)
         if not result.ok or not result.markdown.strip():

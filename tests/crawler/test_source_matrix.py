@@ -121,7 +121,7 @@ def test_all_thirty_one_sources_have_explicit_and_unique_contracts():
     assert len({policy.name for policy in POLICIES.values()}) == 31
     assert all(key == policy.key for key, policy in POLICIES.items())
     assert all(policy.domains and policy.contract_version for policy in POLICIES.values())
-    assert {key for key, policy in POLICIES.items() if policy.unsupported_reason} == set(QUARANTINED)
+    assert {key for key, policy in POLICIES.items() if policy.unsupported_reason} == set(QUARANTINED) | {'leiphone', 'meta_ai'}
     assert {key: policy.content_kind for key, policy in POLICIES.items() if policy.content_kind != 'article'} == {
         'hackernews': 'discussion', 'github': 'readme', 'arxiv_ai': 'abstract',
         'producthunt': 'product', 'frontend_focus': 'newsletter',

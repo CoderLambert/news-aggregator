@@ -95,12 +95,12 @@ def test_metadata_update_preserves_concurrent_full_content(monkeypatch):
 def test_source_sync_preserves_existing_switches():
     from api.models import CrawlerTarget
     from api.services.crawler_control import sync_crawler_targets
-    leiphone = CrawlerTarget.objects.create(spider_name='leiphone', enabled=False)
+    leiphone = CrawlerTarget.objects.create(spider_name='leiphone', display_name='雷峰网', enabled=False)
     reuters = CrawlerTarget.objects.create(spider_name='reuters', enabled=True)
     sync_crawler_targets()
     leiphone.refresh_from_db()
     reuters.refresh_from_db()
     assert leiphone.display_name == '雷峰网'
     assert not leiphone.enabled
-    assert reuters.enabled  # Runtime remains quarantined even if a target is enabled.
-    assert not CrawlerTarget.objects.get(spider_name='jiqizhixin').enabled
+    assert not reuters.enabled
+    assert not CrawlerTarget.objects.filter(spider_name='jiqizhixin').exists()

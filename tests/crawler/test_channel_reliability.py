@@ -116,7 +116,7 @@ def test_batch_excludes_unsupported_channels_even_if_a_legacy_flag_is_enabled():
     CrawlerTarget.objects.create(spider_name='jiqizhixin',display_name='机器之心',enabled=True)
     batch,_ = create_crawl_batch(trigger='manual',spider_names=['bbc','jiqizhixin'])
     assert list(batch.runs.values_list('target_id',flat=True)) == ['bbc']
-    assert CrawlerTarget.objects.get(pk='jiqizhixin').enabled  # Preserve the admin's setting.
+    assert not CrawlerTarget.objects.get(pk='jiqizhixin').enabled  # Retired sources cannot resume.
 
 
 def test_arxiv_uses_the_published_subscription_host_and_keeps_abstract_kind():

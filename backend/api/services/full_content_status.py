@@ -119,7 +119,7 @@ def _owned_query(news):
 
 
 def fetch_eligibility(news):
-    from api.services.source_policy import policy_for_url
+    from api.services.source_policy import policy_for_url, retired_policy_for_url
     from api.services.article_fetcher.site_rules import get_site_rule
     from api.services.article_identity import InvalidIdentity, normalize_article_url
     try:
@@ -127,7 +127,7 @@ def fetch_eligibility(news):
     except InvalidIdentity:
         return 'invalid_identity'
     policy = policy_for_url(news.url)
-    if (news.content_kind in {'abstract', 'product'} or
+    if (retired_policy_for_url(news.url) or news.content_kind in {'abstract', 'product'} or
             (policy and (policy.unsupported_reason or not policy.html_allowed)) or
             (not policy and not get_site_rule(news.url))):
         return 'unsupported'

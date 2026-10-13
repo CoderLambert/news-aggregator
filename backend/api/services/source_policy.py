@@ -22,7 +22,7 @@ class SourcePolicy:
 POLICIES = {
     p.key: p for p in (
         SourcePolicy('devto', 'Dev.to', ('dev.to',), body_fields=('body_markdown', 'body_html'), request_interval=1.0),
-        SourcePolicy('leiphone', '雷峰网', ('www.leiphone.com', 'leiphone.com'), 'https://www.leiphone.com/feed', ('description',), poll_seconds=1800),
+        SourcePolicy('leiphone', '雷峰网', ('www.leiphone.com', 'leiphone.com'), 'https://www.leiphone.com/feed', ('description',), poll_seconds=1800, html_allowed=False, unsupported_reason='public_access_denied'),
         SourcePolicy('webkit', 'WebKit', ('webkit.org',), 'https://webkit.org/feed/', ('content:encoded',)),
         SourcePolicy('smashing_magazine', 'Smashing Magazine', ('www.smashingmagazine.com', 'smashingmagazine.com'), 'https://www.smashingmagazine.com/feed/', ('content:encoded',)),
         SourcePolicy('v8', 'V8', ('v8.dev',), 'https://v8.dev/blog.atom', ('atom:content',)),
@@ -46,7 +46,7 @@ POLICIES = {
         SourcePolicy('producthunt', 'ProductHunt', ('www.producthunt.com', 'producthunt.com'), 'https://www.producthunt.com/feed', content_kind='product', html_allowed=False),
         SourcePolicy('frontend_focus', 'Frontend Focus', ('frontendfoc.us',), 'https://frontendfoc.us/rss', ('content:encoded',), content_kind='newsletter'),
         SourcePolicy('anthropic', 'Anthropic', ('www.anthropic.com', 'anthropic.com')),
-        SourcePolicy('meta_ai', 'Meta AI', ('ai.meta.com',)),
+        SourcePolicy('meta_ai', 'Meta AI', ('ai.meta.com',), html_allowed=False, unsupported_reason='publisher_permission_required'),
         SourcePolicy('mistral', 'Mistral', ('mistral.ai',), 'https://mistral.ai/news/rss', contract_version='2'),
         SourcePolicy('venturebeat_ai', 'VentureBeat AI', ('venturebeat.com', 'www.venturebeat.com'), 'https://venturebeat.com/category/ai/feed/'),
         SourcePolicy('reuters', 'Reuters', ('www.reuters.com', 'reuters.com'), html_allowed=False, unsupported_reason='authorized_delivery_required'),
@@ -63,6 +63,15 @@ def policy_for_url(url: str):
 
 def policy_for_name(name: str):
     return next((p for p in POLICIES.values() if p.name == name), None)
+
+
+def retired_policy_for_url(url: str):
+    """Reject retired publishers' aliases without granting new domain contracts."""
+    host = (urlsplit(url).hostname or '').lower().rstrip('.')
+    return next((p for p in POLICIES.values() if p.unsupported_reason and any(
+        host == domain.removeprefix('www.') or host.endswith('.' + domain.removeprefix('www.'))
+        for domain in p.domains
+    )), None)
 
 
 def candidate_contract_allows(candidate) -> bool:

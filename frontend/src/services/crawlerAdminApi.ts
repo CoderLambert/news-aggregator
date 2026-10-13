@@ -48,6 +48,7 @@ function parseRun(value: unknown): CrawlRun {
     batchId: text(value.batch),
     spiderName: text(value.spider_name),
     targetName: text(value.target_name),
+    sourceActive: typeof value.source_active === 'boolean' ? value.source_active : undefined,
     status: text(value.status, 'failed') as CrawlRunStatus,
     queuedAt: text(value.queued_at),
     startedAt: nullableText(value.started_at),

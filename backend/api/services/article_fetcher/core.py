@@ -30,6 +30,11 @@ def _fetch_article_markdown(
     Raises FetchError with provider failures otherwise. The caller decides
     whether to persist; never create generated fallback content here.
     """
+    from api.services.source_policy import retired_policy_for_url
+    if retired_policy_for_url(url):
+        raise FetchError('该来源已停止采集。', failures=[FetchResult(
+            False, 'source_policy', url=url, error='unsupported', error_code='unsupported', retryable=False,
+        )])
     chain = providers or default_providers(url)
     started_at = time.monotonic()
     news_id = getattr(news, 'pk', None)

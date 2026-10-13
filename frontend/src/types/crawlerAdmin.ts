@@ -17,6 +17,7 @@ export interface CrawlRun {
   batchId: string
   spiderName: string
   targetName: string
+  sourceActive?: boolean
   status: CrawlRunStatus
   queuedAt: string
   startedAt: string | null

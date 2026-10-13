@@ -446,28 +446,16 @@ def test_leiphone_feed_download_uses_feed_compatible_user_agent():
     assert request.full_url == 'https://www.leiphone.com/feed'
 
 
-def test_leiphone_feed_full_article_is_not_rejected_as_its_legacy_summary():
+def test_retired_leiphone_cannot_fetch_even_with_an_explicit_provider():
     provider = LeiphoneFeedProvider()
-    markdown = '## 正文\n\n' + ('真实正文段落，来自站点公开 RSS。' * 80)
-    result = FetchResult(
-        ok=True,
-        provider=provider.name,
-        url='https://www.leiphone.com/category/ai/example.html',
-        title='真实文章',
-        markdown=markdown,
-        metadata={'trusted_full_article_source': 'rss_description'},
-    )
-
-    with patch.object(provider, 'fetch', return_value=result):
-        fetched = fetch_article_markdown(
-            result.url,
-            expected_title='真实文章',
-            summary=markdown.replace('## 正文\n\n', ''),
-            providers=[provider],
-        )
-
-    assert fetched.ok is True
-    assert fetched.provider == 'leiphone_feed'
+    with patch.object(provider, 'fetch') as fetch:
+        try:
+            fetch_article_markdown('https://www.leiphone.com/category/ai/example.html', providers=[provider])
+        except FetchError as error:
+            assert error.failures[0].error_code == 'unsupported'
+        else:
+            raise AssertionError('Retired source was accepted')
+    fetch.assert_not_called()
 
 
 def test_untrusted_provider_cannot_skip_summary_similarity_validation():

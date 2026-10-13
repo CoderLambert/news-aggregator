@@ -34,7 +34,7 @@ def test_source_translation_link_uses_reviewed_reader_instead_of_raw_http():
     body = '# 完整中文文章\n\n' + '这是本地测试的完整中文文章内容。' * 20
     with patch('api.services.article_fetcher.providers.TrustedNewsJinaProvider.fetch', return_value=FetchResult(True, 'trusted_news_jina', markdown=body)) as fetch, \
          patch('urllib.request.urlopen') as unsafe:
-        assert fetch_and_verify_chinese_content('https://www.leiphone.com/category/ai/synthetic.html') == body
+        assert fetch_and_verify_chinese_content('https://webkit.org/blog/synthetic') == body
     fetch.assert_called_once()
     unsafe.assert_not_called()
 
@@ -42,5 +42,5 @@ def test_source_translation_link_uses_reviewed_reader_instead_of_raw_http():
 def test_source_translation_link_does_not_continue_fetching_after_reader_control_failure():
     from api.services.llm_translator import fetch_and_verify_chinese_content
     with patch('api.services.article_fetcher.providers.TrustedNewsJinaProvider.fetch', return_value=FetchResult(False, 'trusted_news_jina', error_code='rate_limited')) as fetch:
-        assert fetch_and_verify_chinese_content('https://www.leiphone.com/category/ai/synthetic.html') == ''
+        assert fetch_and_verify_chinese_content('https://webkit.org/blog/synthetic') == ''
     fetch.assert_called_once()

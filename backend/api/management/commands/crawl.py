@@ -7,6 +7,7 @@ from django.core.management.base import BaseCommand
 from scrapy.crawler import CrawlerProcess
 from scrapy.settings import default_settings as scrapy_default_settings
 from scrapy.utils.project import get_project_settings
+from api.services.source_policy import POLICIES
 
 CRAWLER_DIR = os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'crawler')
 SPIDERS = {
@@ -48,6 +49,10 @@ SPIDERS = {
     'leiphone': 'leiphone',
     'sanliu_kr': 'sanliu_kr',
 }
+
+# Historical contracts remain available for reading and audited identity repairs.
+# Only public, supported sources are registered for new collection.
+SPIDERS = {key: value for key, value in SPIDERS.items() if not POLICIES[key].unsupported_reason}
 
 
 def _apply_crawl_only_politeness(settings):

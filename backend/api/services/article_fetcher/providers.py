@@ -410,6 +410,9 @@ class JinaProvider:
         summary: str | None = None,
         news=None,
     ) -> FetchResult:
+        from api.services.source_policy import retired_policy_for_url
+        if retired_policy_for_url(url):
+            return FetchResult(ok=False, provider=self.name, url=url, error='unsupported', error_code='unsupported', retryable=False)
         from api.services.article_fetch_monitor import observe_jina_candidate
         if not observe_jina_candidate(normalize_domain(url)):
             return FetchResult(ok=False, provider=self.name, url=url, error='jina_policy_disabled', error_code='unsupported')
@@ -504,6 +507,9 @@ class TrustedNewsJinaProvider(JinaProvider):
     name = 'trusted_news_jina'
 
     def fetch(self, url: str, expected_title: str | None = None, summary: str | None = None, news=None) -> FetchResult:
+        from api.services.source_policy import retired_policy_for_url
+        if retired_policy_for_url(url):
+            return FetchResult(ok=False, provider=self.name, url=url, error='unsupported', error_code='unsupported', retryable=False)
         try:
             parsed = urlparse(url)
             domain = normalize_domain(url)

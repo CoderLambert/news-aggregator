@@ -43,7 +43,7 @@ def error_response(code, message, http_status=status.HTTP_400_BAD_REQUEST, *, fi
 def target_queryset():
     active_runs = CrawlRun.objects.filter(status__in=ACTIVE_RUN_STATUSES).select_related('target', 'batch')
     latest = CrawlRun.objects.filter(target_id=OuterRef('pk'), finished_at__isnull=False).order_by('-finished_at', '-queued_at')
-    return CrawlerTarget.objects.annotate(
+    return CrawlerTarget.objects.filter(spider_name__in=SPIDERS).annotate(
         last_run_stats=Subquery(latest.values('stats')[:1], output_field=JSONField()),
         last_run_exit_code=Subquery(latest.values('exit_code')[:1], output_field=IntegerField()),
     ).prefetch_related(

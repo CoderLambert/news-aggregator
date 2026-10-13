@@ -265,7 +265,9 @@ docker compose up -d --no-build --wait app crawler full-content
 
 手动正文获取由 `.env` 中的 `FULL_CONTENT_WORKER_ENABLED=1` 控制，`FULL_CONTENT_AUTO_ENQUEUE_ENABLED=0` 可继续保持关闭。修改后同时重建 app 和 full-content 容器，普通登录用户即可请求正文，不需要超级管理员权限。
 
-采集结果会区分主请求与 robots.txt 辅助请求，并保留入库数量、变化数量和失败原因。Feed 未到下一次轮询时间属于“等待执行”；部分条目入库后其他请求失败属于“部分成功”。源站拒绝或 robots.txt 禁止访问的入口不会反复自动请求；没有受支持入口的渠道会在管理页标明限制并排除出普通批次。
+采集结果会区分主请求与 robots.txt 辅助请求，并保留入库数量、变化数量和失败原因。Feed 未到下一次轮询时间属于“等待执行”；部分条目入库后其他请求失败属于“部分成功”。源站拒绝或 robots.txt 禁止访问的入口不会反复自动请求；新采集只注册具有受支持公开入口的渠道。已移除来源不会出现在管理页渠道列表，不能启用、重试、通过 CLI 采集或重新获取正文；历史资讯、已保存正文和抓取记录保留。
+
+当前注册 26 个公开采集渠道。雷峰网因 Feed 拒绝访问而移除；Reuters 需要授权渠道，机器之心缺少可核验入口，36氪缺少有效 Feed，均不再接入。Meta AI 的 [官方抓取声明](https://ai.meta.com/robots.txt) 要求书面许可，也已移除。历史来源契约保留用于识别旧资讯和审计修复，不会授权新采集。网络超时、429 冷却与未到轮询时间不作为永久移除依据。
 
 当前使用的官方入口包括 [InfoQ 新闻 RSS](https://feed.infoq.com/news/)、Mistral 页面声明的 [RSS](https://mistral.ai/news/rss)，以及 arXiv 官方说明的 [多分类 Atom 订阅](https://info.arxiv.org/help/rss.html#subscribe-by-multiple-categories)。RSS 描述仍按摘要处理；论文摘要不会作为论文全文。
 

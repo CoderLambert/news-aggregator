@@ -185,8 +185,9 @@ function BatchCard({ batch, busy, onRetry, onCancel }: {
               {run.latestRetryStatus ? <p className={`mt-1 ${retrySucceeded ? 'text-emerald-700' : 'text-amber-700'}`}>最新重试：{statusLabel(run.latestRetryDisplayStatus || run.latestRetryStatus)}</p> : null}
             </div>
             <div className="flex items-center gap-2">
+              {run.sourceActive === false ? <span className="text-xs text-muted-foreground">来源已移除</span> : null}
               <StatusBadge status={crawlRunDisplayStatus(run)} />
-              {['failed', 'cancelled', 'skipped'].includes(run.status) && !retryActive && !retrySucceeded ? <Button size="sm" variant="outline" disabled={busy} onClick={() => onRetry(run.id)}><RotateCcw aria-hidden="true" />重试</Button> : null}
+              {run.sourceActive !== false && ['failed', 'cancelled', 'skipped'].includes(run.status) && !retryActive && !retrySucceeded ? <Button size="sm" variant="outline" disabled={busy} onClick={() => onRetry(run.id)}><RotateCcw aria-hidden="true" />重试</Button> : null}
               {['queued', 'running'].includes(run.status) ? <Button size="sm" variant="destructive" disabled={busy} onClick={() => onCancel(run.id)}><Square aria-hidden="true" />停止</Button> : null}
             </div>
           </div>
@@ -334,7 +335,7 @@ export default function CrawlerAdminPage() {
         <div className="grid gap-4 sm:grid-cols-3">
           <Card className="gap-3 py-5"><CardContent className="flex items-center gap-3"><div className={`flex size-11 items-center justify-center rounded-full ${data.settings.workerOnline ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}><Server aria-hidden="true" /></div><div><p className="font-semibold">Worker {data.settings.workerOnline ? '在线' : '离线'}</p><p className="text-xs text-muted-foreground">心跳 {formatDate(data.settings.workerHeartbeatAt)}</p></div></CardContent></Card>
           <Card className="gap-3 py-5"><CardContent className="flex items-center gap-3"><div className="flex size-11 items-center justify-center rounded-full bg-blue-50 text-blue-700"><Clock3 aria-hidden="true" /></div><div><p className="font-semibold">{Math.round(data.settings.intervalSeconds / 60)} 分钟一次</p><p className="text-xs text-muted-foreground">Docker 自动调度</p></div></CardContent></Card>
-          <Card className="gap-3 py-5"><CardContent className="flex items-center gap-3"><div className="flex size-11 items-center justify-center rounded-full bg-violet-50 text-violet-700"><CheckCircle2 aria-hidden="true" /></div><div><p className="font-semibold">{data.targets.filter((target) => target.enabled && target.supported !== false).length} 个来源可运行</p><p className="text-xs text-muted-foreground">共 {data.targets.length} 个注册来源 · {data.targets.filter((target) => target.supported === false).length} 个渠道受限</p></div></CardContent></Card>
+          <Card className="gap-3 py-5"><CardContent className="flex items-center gap-3"><div className="flex size-11 items-center justify-center rounded-full bg-violet-50 text-violet-700"><CheckCircle2 aria-hidden="true" /></div><div><p className="font-semibold">{data.targets.filter((target) => target.enabled && target.supported !== false).length} 个来源可运行</p><p className="text-xs text-muted-foreground">共 {data.targets.length} 个公开采集来源</p></div></CardContent></Card>
         </div>
 
         {actionError ? <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"><AlertCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />{actionError}</div> : null}

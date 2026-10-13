@@ -217,7 +217,18 @@ def test_url_conflict_preserves_both_rows_and_relationships(tmp_path, rows):
     assert Favorite.objects.get(pk=favorite.pk).news_id == news.pk
 
 
-def test_changed_identity_quarantines_history_queues_with_cooldown_and_fences_old_lease(tmp_path, rows):
+@pytest.fixture
+def historical_fetch_contract(monkeypatch):
+    """Exercise pre-retirement lease/CAS repairs using an offline historical contract.
+
+    Current production rejection is verified in test_source_retirement.py.
+    """
+    from dataclasses import replace
+    from api.services.source_policy import POLICIES
+    monkeypatch.setitem(POLICIES, 'leiphone', replace(POLICIES['leiphone'], html_allowed=True, unsupported_reason=''))
+
+
+def test_changed_identity_quarantines_history_queues_with_cooldown_and_fences_old_lease(tmp_path, rows, historical_fetch_contract):
     source, news, favorite, translation = rows
     News.objects.filter(pk=news.pk).update(full_content_fetch_status='queued', full_content_next_attempt_at=timezone.now())
     news.refresh_from_db()
@@ -422,7 +433,7 @@ def test_prepared_audit_can_undo_commit_even_if_final_audit_write_failed(tmp_pat
     assert news.url.endswith('/old-id.html')
 
 
-def test_late_cooldown_or_target_source_change_conflicts_before_apply(tmp_path, rows):
+def test_late_cooldown_or_target_source_change_conflicts_before_apply(tmp_path, rows, historical_fetch_contract):
     _, news, _, _ = rows
     target = proper_source()
     operation = news_operation(news, new={'source_id': target.pk, 'url': 'https://www.leiphone.com/category/ai/verified-id.html'})
@@ -489,7 +500,7 @@ print(json.dumps({'wal':True,'dry_run':True,'apply':True,'undo':True}))
 
 
 
-def test_reviewed_new_url_starts_audited_identity_cycle_but_keeps_host_cooldown(tmp_path, rows):
+def test_reviewed_new_url_starts_audited_identity_cycle_but_keeps_host_cooldown(tmp_path, rows, historical_fetch_contract):
     _source, news, _favorite, _translation = rows
     News.objects.filter(pk=news.pk).update(full_content_retry_count=5, full_content_fetch_status='failed')
     news.refresh_from_db()
@@ -508,7 +519,7 @@ def test_reviewed_new_url_starts_audited_identity_cycle_but_keeps_host_cooldown(
     assert news.full_content_retry_count == 5 and news.full_content_task_created_at is None
 
 
-def test_source_fk_only_repair_keeps_exhaustion_and_has_no_unrunnable_queue(tmp_path, rows):
+def test_source_fk_only_repair_keeps_exhaustion_and_has_no_unrunnable_queue(tmp_path, rows, historical_fetch_contract):
     _source, news, _favorite, _translation = rows
     News.objects.filter(pk=news.pk).update(full_content_retry_count=5, full_content_fetch_status='failed')
     news.refresh_from_db()

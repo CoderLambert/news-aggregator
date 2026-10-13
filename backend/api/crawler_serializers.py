@@ -25,6 +25,7 @@ class CrawlerSettingsSerializer(serializers.ModelSerializer):
 
 
 class CrawlRunSerializer(serializers.ModelSerializer):
+    source_active = serializers.SerializerMethodField()
     target_name = serializers.CharField(source='target.display_name', read_only=True)
     spider_name = serializers.CharField(source='target.spider_name', read_only=True)
     duration_seconds = serializers.SerializerMethodField()
@@ -39,8 +40,12 @@ class CrawlRunSerializer(serializers.ModelSerializer):
             'started_at', 'heartbeat_at', 'finished_at', 'duration_seconds',
             'exit_code', 'items', 'responses', 'errors', 'http_statuses',
             'stats', 'safe_error', 'retry_of', 'latest_retry_id',
-            'latest_retry_status', 'latest_retry_display_status', 'cancel_requested_at',
+            'latest_retry_status', 'latest_retry_display_status', 'cancel_requested_at', 'source_active',
         ]
+
+    def get_source_active(self, obj):
+        from api.management.commands.crawl import SPIDERS
+        return obj.target_id in SPIDERS
 
     def get_duration_seconds(self, obj):
         if not obj.started_at:
@@ -123,6 +128,8 @@ class CrawlerTargetSerializer(serializers.ModelSerializer):
         policy = POLICIES.get(obj.spider_name)
         reason = policy.unsupported_reason if policy else 'unknown_source'
         return {'authorized_delivery_required': '需要官方授权采集渠道。',
+                'public_access_denied': '来源已拒绝公开采集，已移除。',
+                'publisher_permission_required': '来源要求书面采集许可，已移除。',
                 'publisher_identity_unavailable': '当前入口无法可靠核验文章链接。',
                 'invalid_feed_endpoint': '尚未找到有效的官方 Feed。',
                 'unknown_source': '尚未配置受支持的来源。'}.get(reason, '')
