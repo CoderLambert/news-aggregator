@@ -134,8 +134,8 @@ export default function ArticleFetchMonitorSection() {
       {actionError ? <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"><AlertCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />{actionError}</div> : null}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Metric label="成功率" value={successRate} detail={`近 ${data.windowDays} 天，共 ${data.summary.total} 次`} />
-        <Metric label="成功" value={data.summary.success} detail="完整通过正文校验" />
+        <Metric label="实际请求提交率" value={successRate} detail="仅统计已发出请求且可评估的尝试" />
+        <Metric label="正文已提交" value={data.summary.success} detail="验证通过并经数据库 CAS 提交" />
         <Metric label="失败" value={data.summary.failed} detail="Provider 链全部失败" />
         <Metric label="待补全文" value={data.summary.unresolvedArticles} detail="当前数据库未解决记录" />
       </div>
@@ -177,7 +177,7 @@ export default function ArticleFetchMonitorSection() {
       </div>
 
       <Card>
-        <CardHeader><CardTitle>最近抓取事件</CardTitle><CardDescription>每个事件代表一次完整 Provider 链结果；这里不会展示或返回原始文章 URL。</CardDescription></CardHeader>
+        <CardHeader><CardTitle>最近抓取事件</CardTitle><CardDescription>分别显示候选验证、正文提交与实际 HTTP 请求。历史成功不代表按新规则提交。</CardDescription></CardHeader>
         <CardContent>
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full min-w-[920px] text-left">
@@ -186,7 +186,7 @@ export default function ArticleFetchMonitorSection() {
                 <tr key={event.id} className="border-b last:border-0">
                   <td className="px-4 py-3 text-sm"><span className="block text-muted-foreground">{formatDate(event.createdAt)}</span>{event.newsId ? <Link className="inline-flex items-center gap-1 font-medium text-orange-700 hover:underline" to={`/news/${event.newsId}`}>新闻 #{event.newsId}<ExternalLink aria-hidden="true" className="size-3" /></Link> : '—'}</td>
                   <td className="px-4 py-3 text-sm font-medium">{event.domain}</td>
-                  <td className="px-4 py-3"><Badge variant={event.outcome === 'success' ? 'green' : 'red'}>{event.outcome === 'success' ? '成功' : '失败'}</Badge></td>
+                  <td className="px-4 py-3"><Badge variant={event.persistenceOutcome === 'committed' ? 'green' : event.outcome === 'failed' ? 'red' : 'gray'}>{event.persistenceOutcome === 'committed' ? '正文已提交' : event.persistenceOutcome === 'noop' ? '正文未变' : event.persistenceOutcome === 'persistence_conflict' ? '提交冲突' : event.outcome === 'validated' ? '验证通过，未提交' : event.outcome === 'legacy_validated' ? '诊断验证通过' : event.outcome === 'success' ? '历史成功，提交未知' : event.logicalOutcome === 'budget_deferred' ? '预算延期' : '失败'}</Badge><span className="mt-1 block text-xs text-muted-foreground">HTTP {(event.httpStatuses || []).join(', ') || '—'} · {event.physicalRequests || 0} 次请求{event.retryAfterAt ? ` · 冷却至 ${formatDate(event.retryAfterAt)}` : ''}</span></td>
                   <td className="px-4 py-3 text-sm"><span className="mb-1 block font-medium">{event.provider || '—'}</span><FailureCodes values={event.failureCodes} /></td>
                   <td className="px-4 py-3 text-right text-sm tabular-nums">{event.elapsedMs.toLocaleString()} ms</td>
                 </tr>

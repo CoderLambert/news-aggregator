@@ -474,7 +474,9 @@ class ArticleFetchEvent(models.Model):
     """Sanitized outcome for one complete full-article provider-chain run."""
 
     OUTCOME_CHOICES = [
-        ('success', 'Success'),
+        ('success', 'Historical success (commit unknown)'),
+        ('validated', 'Typed candidate validated'),
+        ('legacy_validated', 'Unbound diagnostic validated'),
         ('failed', 'Failed'),
     ]
 
@@ -489,6 +491,12 @@ class ArticleFetchEvent(models.Model):
     quality_score = models.FloatField(null=True, blank=True)
     content_length = models.PositiveIntegerField(default=0)
     elapsed_ms = models.PositiveIntegerField(default=0)
+    source_key = models.CharField(max_length=64, blank=True, default='')
+    http_statuses = models.JSONField(default=list, blank=True)
+    physical_requests = models.PositiveIntegerField(default=0)
+    retry_after_at = models.DateTimeField(null=True, blank=True)
+    persistence_outcome = models.CharField(max_length=32, default='not_attempted')
+    logical_outcome = models.CharField(max_length=32, default='unknown')
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:

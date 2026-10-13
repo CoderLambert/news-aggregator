@@ -169,6 +169,7 @@ class FairQueue:
 
 def execute_one(news, *, guard=None, providers=None):
     from api.services.article_fetcher import fetch_article_markdown
+    from api.services.article_fetch_monitor import record_persistence_outcome
     if guard:
         guard()
     rejection = fetch_eligibility(news)
@@ -187,17 +188,21 @@ def execute_one(news, *, guard=None, providers=None):
         if guard:
             guard()
         if mark_success(news, result):
+            record_persistence_outcome(getattr(result, 'fetch_event_id', None), 'noop' if getattr(news, '_full_content_commit_outcome', '') == 'noop' else 'committed')
             return result
+        record_persistence_outcome(getattr(result, 'fetch_event_id', None), 'rejected' if getattr(news, '_full_content_commit_outcome', '') == 'rejected' else 'persistence_conflict')
         # Rejected validation or lost revision must not leave an owned task hung.
         if getattr(news, '_full_content_snapshot', None):
             mark_failed(news, ExecutionStopped('body_mismatch'), status='validation_failed')
         return None
     except ExecutionStopped as error:
+        record_persistence_outcome(getattr(error, 'fetch_event_id', None), 'not_attempted', logical_outcome=error.error_code)
         if error.error_code == 'canceled':
             release_fetch_claim(news)
         elif error.error_code != 'superseded':
             mark_failed(news, error)
         return None
     except Exception as error:
+        record_persistence_outcome(getattr(error, 'fetch_event_id', None), 'not_attempted', logical_outcome=getattr(error, 'error_code', '') or 'failed')
         mark_failed(news, error)
         return None

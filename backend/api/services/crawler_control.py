@@ -214,7 +214,9 @@ def finish_run(run_id, *, status, exit_code, summary=None, safe_error='', log_pa
     run.responses = max(0, int(summary.get('responses', 0)))
     run.errors = max(0, int(summary.get('errors', 0)))
     run.http_statuses = summary.get('http_statuses', {})
-    run.stats = {'finish_reason': summary.get('finish_reason', '')}
+    from api.services.crawl_metrics import COUNT_KEYS
+    run.stats = {key: summary[key] for key in (*COUNT_KEYS, 'outcome', 'policy_skips_by_reason', 'checkpoint_committed', 'next_attempt_at') if key in summary}
+    run.stats['finish_reason'] = summary.get('finish_reason', '')
     run.safe_error = safe_error[:500]
     run.log_path = log_path[:500]
     run.save(update_fields=[

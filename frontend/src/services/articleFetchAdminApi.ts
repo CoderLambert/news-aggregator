@@ -53,19 +53,28 @@ function parsePolicy(value: unknown): JinaFallbackPolicy {
   }
 }
 
+function parseOutcome(value: unknown): ArticleFetchEvent['outcome'] {
+  return value === 'success' || value === 'validated' || value === 'legacy_validated' ? value : 'failed'
+}
+
 function parseEvent(value: unknown): ArticleFetchEvent {
   if (!isRecord(value)) throw new TypeError('Invalid article fetch event response')
   return {
     id: number(value.id),
     newsId: typeof value.news_id === 'number' ? value.news_id : null,
     domain: text(value.domain),
-    outcome: value.outcome === 'success' ? 'success' : 'failed',
+    outcome: parseOutcome(value.outcome),
     provider: text(value.provider),
     failureCodes: parseFailureCodes(value.failure_codes),
     qualityScore: typeof value.quality_score === 'number' ? value.quality_score : null,
     contentLength: number(value.content_length),
     elapsedMs: number(value.elapsed_ms),
     createdAt: text(value.created_at),
+    persistenceOutcome: text(value.persistence_outcome) || 'not_attempted',
+    logicalOutcome: text(value.logical_outcome),
+    physicalRequests: number(value.physical_requests),
+    httpStatuses: Array.isArray(value.http_statuses) ? value.http_statuses.filter((status): status is number => typeof status === 'number') : [],
+    retryAfterAt: typeof value.retry_after_at === 'string' ? value.retry_after_at : null,
   }
 }
 
@@ -83,7 +92,7 @@ function parseProvider(value: unknown): ArticleFetchProviderStats {
   if (!isRecord(value)) throw new TypeError('Invalid article fetch provider response')
   return {
     provider: text(value.provider),
-    outcome: value.outcome === 'success' ? 'success' : 'failed',
+    outcome: parseOutcome(value.outcome),
     count: number(value.count),
   }
 }

@@ -211,7 +211,7 @@ def test_production_compose_uses_only_named_volumes_and_separate_migration():
     services = compose['services']
     declared_volumes = set(compose['volumes'])
 
-    assert set(services) == {'app', 'migrate', 'crawler', 'indexer'}
+    assert set(services) == {'app', 'migrate', 'crawler', 'indexer', 'full-content'}
     assert all('build' not in service for service in services.values())
     assert all('ports' not in service for service in services.values())
     assert all(service['image'].startswith('${NEWSHUB_IMAGE:?') for service in services.values())

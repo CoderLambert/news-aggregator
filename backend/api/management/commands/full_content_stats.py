@@ -1,10 +1,11 @@
 import json
-from collections import Counter
+from django.db.models import Count, Min, Max
+from django.utils import timezone
 
 from django.core.management.base import BaseCommand
 
-from api.models import News
-from api.services.full_content_status import trimmed_text_expression
+from api.models import News, RequestBudget, FeedState, ArticleFetchEvent
+from api.services.full_content_status import trimmed_text_expression, filter_readable_full_content, fetch_eligibility
 
 
 class Command(BaseCommand):
@@ -32,23 +33,28 @@ class Command(BaseCommand):
             qs = qs.filter(source__name__iexact=source_filter)
 
         total = qs.count()
-        readiness_qs = qs.annotate(
+        readiness_qs = qs.alias(
             _summary_text=trimmed_text_expression('content'),
             _body_text=trimmed_text_expression('full_content'),
         )
-        metadata_only = readiness_qs.filter(_summary_text='', _body_text='').count()
-        summary_only = readiness_qs.exclude(_summary_text='').filter(_body_text='').count()
-        with_full = readiness_qs.exclude(_body_text='').count()
-        coverage = round(with_full / total, 3) if total else 0.0
+        readable = filter_readable_full_content(qs)
+        with_full = readable.count()
+        without_body = readiness_qs.exclude(pk__in=readable.values('pk'))
+        metadata_only = without_body.filter(_summary_text='').count()
+        summary_only = without_body.exclude(_summary_text='').count()
+        # Eligibility is the same pure URL/kind contract used by queue admission.
+        eligible_ids = [row.pk for row in qs.select_related(None).filter(content_kind='article').only('pk', 'url', 'content_kind').iterator()
+                        if not fetch_eligibility(row)]
+        eligible_count = len(eligible_ids)
+        complete = sum(filter_readable_full_content(qs.filter(pk__in=eligible_ids[i:i + 500], full_content_state='complete')).count()
+                       for i in range(0, eligible_count, 500))
+        coverage = round(complete / eligible_count, 3) if eligible_count else 0.0
+        legacy = readable.filter(full_content_state='legacy').count()
+        now = timezone.now()
+        queued = qs.filter(full_content_fetch_status__in=('queued', 'rate_limited', 'network_error', 'failed'),
+                           full_content_next_attempt_at__isnull=False)
+        cooling = RequestBudget.objects.filter(cooldown_until__gt=now)
 
-        # Status distribution
-        status_dist = dict(
-            qs.values_list('full_content_fetch_status').annotate(
-                __import__('django.db.models').db.models.Count('full_content_fetch_status')
-            ).values_list('full_content_fetch_status', 'full_content_fetch_status__count')
-        )
-        # Simpler approach
-        from django.db.models import Count
         status_dist = dict(
             qs.values('full_content_fetch_status')
             .annotate(cnt=Count('full_content_fetch_status'))
@@ -72,13 +78,13 @@ class Command(BaseCommand):
 
         # Top errors
         error_rows = (
-            qs.exclude(full_content_fetch_error='')
-            .values('full_content_fetch_error')
-            .annotate(cnt=Count('full_content_fetch_error'))
+            qs.exclude(full_content_error_code='')
+            .values('full_content_error_code')
+            .annotate(cnt=Count('full_content_error_code'))
             .order_by('-cnt')[:10]
         )
         top_errors = dict(
-            (row['full_content_fetch_error'], row['cnt']) for row in error_rows
+            (row['full_content_error_code'], row['cnt']) for row in error_rows
         )
 
         # Retry count distribution
@@ -90,6 +96,18 @@ class Command(BaseCommand):
         retry_dist = {str(rc): cnt for rc, cnt in retry_rows}
 
         data = {
+            'coverage_denominator': 'eligible_article',
+            'eligible_articles': eligible_count,
+            'complete_eligible_articles': complete,
+            'legacy_body_count': legacy,
+            'content_kinds': dict(qs.values('content_kind').annotate(cnt=Count('pk')).values_list('content_kind', 'cnt')),
+            'content_states': dict(qs.values('full_content_state').annotate(cnt=Count('pk')).values_list('full_content_state', 'cnt')),
+            'queue': {'pending': queued.count(), 'due': queued.filter(full_content_next_attempt_at__lte=now).count(),
+                      'oldest_due_at': queued.aggregate(value=Min('full_content_next_attempt_at'))['value']},
+            'budget': {'cooling_scopes': cooling.count(), 'latest_cooldown_until': cooling.aggregate(value=Max('cooldown_until'))['value']},
+            'feeds': list(FeedState.objects.order_by('source_key', 'feed_url').values('source_key', 'last_success_at', 'last_checked_at', 'next_poll_at')),
+            'attempts': dict(ArticleFetchEvent.objects.values('persistence_outcome').annotate(cnt=Count('pk')).values_list('persistence_outcome', 'cnt')),
+
             'total': total,
             'with_full_content': with_full,
             'coverage': coverage,
@@ -106,11 +124,12 @@ class Command(BaseCommand):
         }
 
         if as_json:
-            self.stdout.write(json.dumps(data, indent=2, ensure_ascii=False))
+            self.stdout.write(json.dumps(data, indent=2, ensure_ascii=False, default=str))
         else:
             self.stdout.write(f'total: {total}')
             self.stdout.write(f'with_full_content: {with_full}')
-            self.stdout.write(f'coverage: {coverage:.3f}')
+            self.stdout.write(f'coverage: {coverage:.3f} (complete / eligible article: {complete}/{eligible_count})')
+            self.stdout.write(f'legacy_body_count: {legacy}')
             self.stdout.write('content_readiness:')
             self.stdout.write(f'  metadata_only: {metadata_only}')
             self.stdout.write(f'  summary_only: {summary_only}')

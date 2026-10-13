@@ -17,13 +17,18 @@ export interface ArticleFetchEvent {
   id: number
   newsId: number | null
   domain: string
-  outcome: 'success' | 'failed'
+  outcome: 'success' | 'failed' | 'validated' | 'legacy_validated'
   provider: string
   failureCodes: ArticleFetchFailureCode[]
   qualityScore: number | null
   contentLength: number
   elapsedMs: number
   createdAt: string
+  persistenceOutcome?: string
+  logicalOutcome?: string
+  physicalRequests?: number
+  httpStatuses?: number[]
+  retryAfterAt?: string | null
 }
 
 export interface ArticleFetchDomainStats {
@@ -35,7 +40,7 @@ export interface ArticleFetchDomainStats {
 
 export interface ArticleFetchProviderStats {
   provider: string
-  outcome: 'success' | 'failed'
+  outcome: 'success' | 'failed' | 'validated' | 'legacy_validated'
   count: number
 }
 

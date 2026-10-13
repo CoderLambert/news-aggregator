@@ -26,6 +26,8 @@ def _news(source, cat, **overrides):
         category=cat,
         url=f'https://{source.name.lower()}.example.com/{News.objects.count() + 1}',
     )
+    if overrides.get('full_content'):
+        defaults['full_content_state'] = 'legacy'
     defaults.update(overrides)
     return News.objects.create(**defaults)
 
@@ -34,7 +36,7 @@ def _news(source, cat, **overrides):
 def test_full_content_stats_json_output_structure(cat):
     src = _source('StatsA')
     _news(src, cat, full_content='body', full_content_fetch_status='success', full_content_fetch_provider='jina')
-    _news(src, cat, full_content_fetch_status='network_error', full_content_fetch_error='timeout', full_content_retry_count=2)
+    _news(src, cat, full_content_fetch_status='network_error', full_content_fetch_error='timeout', full_content_error_code='network_timeout', full_content_retry_count=2)
 
     out = StringIO()
     call_command('full_content_stats', '--json', stdout=out)
@@ -42,12 +44,14 @@ def test_full_content_stats_json_output_structure(cat):
 
     assert data['total'] == 2
     assert data['with_full_content'] == 1
-    assert data['coverage'] == 0.5
+    assert data['coverage'] == 0.0
+    assert data['legacy_body_count'] == 1
+    assert data['eligible_articles'] == 0
     assert data['status']['success'] == 1
     assert data['status']['network_error'] == 1
     assert data['sources']['StatsA'] == 2
     assert data['providers']['jina'] == 1
-    assert data['top_errors']['timeout'] == 1
+    assert data['top_errors']['network_timeout'] == 1
     assert data['retry_counts']['2'] == 1
 
 
@@ -96,6 +100,7 @@ def test_full_content_stats_text_output_includes_provider_distribution(cat):
 
     text = out.getvalue()
     assert 'total: 1' in text
-    assert 'coverage: 1.000' in text
+    assert 'coverage: 0.000' in text
+    assert 'legacy_body_count: 1' in text
     assert 'providers:' in text
     assert 'scrapy_http: 1' in text

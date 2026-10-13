@@ -62,6 +62,7 @@ class DevToSpider(scrapy.Spider):
             if result.receipt_outcome != 'committed':
                 self.crawler.stats.inc_value('persistence_failures')
                 continue
+            self.crawler.stats.inc_value('discovery/entries_changed', count=int(result.changed))
             yield NewsItem(item)
             if not (getattr(settings, 'STRUCTURED_BODY_INGEST_ENABLED', False) and
                     self.name in getattr(settings, 'STRUCTURED_BODY_SOURCE_KEYS', ())):

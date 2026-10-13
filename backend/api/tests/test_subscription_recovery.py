@@ -55,6 +55,7 @@ def article(db):
         ),
         category=Category.objects.create(name='Recovery', slug='recovery'),
         full_content='# Recovery article\n\nOriginal source text.',
+        full_content_state='legacy',
     )
 
 

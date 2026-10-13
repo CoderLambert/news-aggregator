@@ -1,4 +1,5 @@
 import scrapy
+from api.services.crawl_metrics import parse_failure
 from urllib.parse import urlsplit
 from api.services.article_identity import normalize_article_url, same_article_identity, InvalidIdentity
 from api.services.source_policy import POLICIES
@@ -22,6 +23,9 @@ class AnthropicBlogSpider(scrapy.Spider):
     def parse(self, response):
         # Extract article links from the news listing page
         article_links = response.css('a[href*="/news/"], a[href*="/research/"]')
+        if not article_links:
+            parse_failure(self)
+            return
         seen = set()
         for link in article_links:
             href = link.css('a::attr(href)').get('') or link.attrib.get('href', '')
@@ -52,6 +56,7 @@ class AnthropicBlogSpider(scrapy.Spider):
         if not title:
             title = response.css('[class*="title"] h1::text').get('')
         if not title:
+            parse_failure(self)
             return
 
         blocks = response.css('article p::text, .prose p::text').getall()
@@ -60,6 +65,7 @@ class AnthropicBlogSpider(scrapy.Spider):
 
         content = '\n'.join(p.strip() for p in blocks if p.strip())
         if len(content) < 50:
+            parse_failure(self)
             return
 
         # Try to extract date

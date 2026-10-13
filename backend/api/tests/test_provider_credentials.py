@@ -35,6 +35,7 @@ def owner(db):
 def article(db):
     return News.objects.create(
         title='BYOK article', content='Preview', full_content='Complete body',
+        full_content_state='legacy',
         publish_time=timezone.now(), url='https://example.test/byok',
         source=Source.objects.create(name='BYOK source', url='https://example.test', language='en'),
         category=Category.objects.create(name='BYOK category', slug='byok'),

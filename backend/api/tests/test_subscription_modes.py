@@ -514,7 +514,9 @@ def test_two_database_connections_consume_callback_state_at_most_once(tmp_path):
         from unittest.mock import patch
 
         import django
-        django.setup()
+        # Keep this identity-isolation subprocess independent of workspace dotenv.
+        with patch('dotenv.load_dotenv', return_value=False):
+            django.setup()
 
         from django.contrib.auth import get_user_model
         from django.core.management import call_command
@@ -670,6 +672,7 @@ def test_callback_view_uses_session_auth_and_clears_host_only_cookie(user, crypt
     assert cookie['secure'] == ''
 
 
+@override_settings(ALLOWED_HOSTS=['testserver', '127.0.0.1', 'news.lambert.host'])
 def test_callback_view_rejects_anonymous_and_returns_fixed_error_html(user):
     anonymous = APIClient()
     denied = anonymous.get(

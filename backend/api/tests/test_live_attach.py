@@ -45,6 +45,7 @@ def news_obj(db):
         category=cat,
         publish_time=timezone.now(),
         full_content='# Hello\n\nSome English text to translate.',
+        full_content_state='legacy',
         full_content_zh='',  # nothing saved yet
     )
 

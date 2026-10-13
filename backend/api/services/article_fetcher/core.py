@@ -33,17 +33,22 @@ def _fetch_article_markdown(
     chain = providers or default_providers(url)
     started_at = time.monotonic()
     news_id = getattr(news, 'pk', None)
+    execution = current_execution.get()
+    starting_requests = execution.physical_requests
+    starting_statuses = len(execution.http_statuses)
 
     def record(result: FetchResult | None, failures: list[FetchResult]) -> None:
         if news_id is None:
             return
         from api.services.article_fetch_monitor import record_fetch_event
-        record_fetch_event(
+        execution.fetch_event_id = record_fetch_event(
             url=url,
             news_id=news_id,
             result=result,
             failures=failures,
             elapsed_ms=round((time.monotonic() - started_at) * 1000),
+            physical_requests=execution.physical_requests - starting_requests,
+            http_statuses=execution.http_statuses[starting_statuses:],
         )
 
     if settings.DJANGO_ENV == 'production':
@@ -89,8 +94,11 @@ def _fetch_article_markdown(
             except Exception as exc:
                 if execution_guard is not None:
                     execution_guard()
-                failures.append(FetchResult(ok=False, provider=provider.name, url=url, error=str(exc)))
-                continue
+                if getattr(exc, 'error_code', '') or getattr(exc, 'http_status', None) or getattr(exc, 'code', None):
+                    result = transport_failure(exc, provider=provider.name, url=url)
+                else:
+                    failures.append(FetchResult(ok=False, provider=provider.name, url=url, error=str(exc)))
+                    continue
         finally:
             _research_fetch_guard.reset(token)
         if execution_guard is not None:
@@ -161,6 +169,7 @@ def _fetch_article_markdown(
         if not result.extractor:
             result.extractor = result.provider
         record(result, failures)
+        result.fetch_event_id = execution.fetch_event_id
         return result
 
     record(None, failures)
@@ -188,4 +197,21 @@ def fetch_article_markdown(url, expected_title=None, summary=None, providers=Non
         if execution.logical_url is None:
             execution.logical_url = url
             execution.expected_revision = news.full_content_revision if news is not None else None
-        return _fetch_article_markdown(url, expected_title, summary, providers, guard, news)
+        execution.fetch_event_id = None
+        started = time.monotonic()
+        starting_requests, starting_statuses = execution.physical_requests, len(execution.http_statuses)
+        try:
+            return _fetch_article_markdown(url, expected_title, summary, providers, guard, news)
+        except Exception as error:
+            if news is not None and execution.fetch_event_id is None:
+                from api.services.article_fetch_monitor import record_fetch_event
+                failure = transport_failure(error, provider='execution', url=url)
+                execution.fetch_event_id = record_fetch_event(
+                    url=url, news_id=news.pk, result=None, failures=[failure],
+                    elapsed_ms=round((time.monotonic() - started) * 1000),
+                    physical_requests=execution.physical_requests - starting_requests,
+                    http_statuses=execution.http_statuses[starting_statuses:],
+                    retry_after_at=getattr(error, 'retry_after_at', None),
+                    logical_outcome=getattr(error, 'error_code', '') or 'failed')
+            error.fetch_event_id = execution.fetch_event_id
+            raise

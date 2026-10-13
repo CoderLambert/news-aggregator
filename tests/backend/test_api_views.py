@@ -1,6 +1,6 @@
 """
 Tests for the NewsFetchFullView API endpoint.
-Tests the full article fetching and content cleaning flow.
+Tests cached article reads and durable full-content enqueue responses.
 """
 import json
 from unittest.mock import patch
@@ -10,8 +10,6 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, Client
 from django.urls import reverse
 from django.utils import timezone
-
-from api.services.article_fetcher import FetchResult
 
 
 class NewsFetchFullViewTest(TestCase):
@@ -48,29 +46,47 @@ class NewsFetchFullViewTest(TestCase):
         # Should not allow GET
         self.assertIn(response.status_code, [405, 404])
 
+    def test_fetch_full_content_requires_session_auth_and_csrf(self):
+        anonymous = Client()
+        response = anonymous.post(f'/api/news/{self.news.id}/fetch-full/')
+        self.assertIn(response.status_code, [401, 403])
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.user)
+        response = csrf_client.post(f'/api/news/{self.news.id}/fetch-full/')
+        self.assertEqual(response.status_code, 403)
+
     def test_fetch_full_content_with_valid_url(self):
-        """POST request with valid URL should return content."""
-        result = FetchResult(
-            ok=True,
-            provider='test',
-            url=self.news.url,
-            markdown='# Test Content\n\nFetched content.',
-            quality_score=0.9,
-        )
-        with patch('api.views.fetch_article_markdown', return_value=result) as fetch:
+        """A healthy worker accepts one intent without fetching from the API."""
+        with (
+            patch('api.services.article_content.worker_health', return_value=True),
+            patch('api.views.fetch_article_markdown') as fetch,
+        ):
             response = self.client.post(
                 f'/api/news/{self.news.id}/fetch-full/',
                 content_type='application/json'
             )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('Fetched content', response.json().get('full_content', ''))
-        fetch.assert_called_once()
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()['full_content_fetch_status'], 'queued')
+        self.assertTrue(response['Location'].endswith(f'/api/news/{self.news.id}/'))
+        self.assertGreaterEqual(int(response['Retry-After']), 2)
+        self.news.refresh_from_db()
+        self.assertEqual(self.news.full_content, '')
+        fetch.assert_not_called()
+
+    def test_fetch_full_content_disabled_worker_does_not_enqueue(self):
+        with patch('api.services.article_content.worker_health', return_value=False):
+            response = self.client.post(f'/api/news/{self.news.id}/fetch-full/')
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()['error_code'], 'full_content_worker_unavailable')
+        self.news.refresh_from_db()
+        self.assertEqual(self.news.full_content_fetch_status, 'pending')
 
     def test_fetch_full_content_caches_result(self):
         """Second request should return cached result."""
         # Set full_content manually to simulate cached state
         self.news.full_content = "# Test Content\n\nThis is cached content."
+        self.news.full_content_state = 'legacy'
         self.news.save()
         
         response = self.client.post(
@@ -90,7 +106,7 @@ class NewsFetchFullViewTest(TestCase):
             f'/api/news/{self.news.id}/fetch-full/',
             content_type='application/json'
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 422)
 
 
 class NewsTranslateFullViewTest(TestCase):
@@ -98,6 +114,8 @@ class NewsTranslateFullViewTest(TestCase):
 
     def setUp(self):
         self.client = Client()
+        self.user = get_user_model().objects.create_user(username='translation-reader')
+        self.client.force_login(self.user)
         from api.models import News, Source, Category
         self.source = Source.objects.create(
             name='GitHub Trending',
@@ -113,6 +131,7 @@ class NewsTranslateFullViewTest(TestCase):
             title='owner/test-repo',
             content='A test repository',
             full_content='# Test\n\nSome content to translate.',
+            full_content_state='legacy',
             url='https://github.com/owner/test-repo',
             source=self.source,
             category=self.category,
@@ -122,7 +141,7 @@ class NewsTranslateFullViewTest(TestCase):
     def test_translate_requires_post(self):
         """GET request should not work for translate endpoint."""
         response = self.client.get(f'/api/news/{self.news.id}/translate/')
-        self.assertIn(response.status_code, [405, 200])  # 200 if streaming works
+        self.assertEqual(response.status_code, 405)
 
     def test_translate_without_full_content(self):
         """Should error if no full_content available."""

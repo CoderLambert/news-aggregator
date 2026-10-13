@@ -345,6 +345,7 @@ def mark_success(news: News, result: FetchResult, *, full_content=None, full_con
         quality_score=result.quality_score or 1.0,
         backfill_source=full_content_backfill_source, backfill_at=full_content_backfill_at,
     )
+    news._full_content_commit_outcome = committed.outcome
     if committed.saved:
         news._full_content_snapshot = None
         news._full_content_fetch_lease = None

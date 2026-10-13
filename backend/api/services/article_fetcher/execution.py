@@ -22,6 +22,8 @@ class FetchExecution:
     deadline: float = field(default_factory=lambda: time.monotonic() + 60)
     requests_remaining: int = 5
     physical_requests: int = 0
+    http_statuses: list[int] = field(default_factory=list)
+    fetch_event_id: int | None = None
 
     def check(self):
         if self.guard:

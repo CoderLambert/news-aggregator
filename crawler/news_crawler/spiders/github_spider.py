@@ -1,4 +1,5 @@
 import scrapy
+from api.services.crawl_metrics import parse_failure
 import re
 from news_crawler.items import NewsItem
 from news_crawler.category_map import classify
@@ -20,6 +21,9 @@ class GithubTrendingSpider(scrapy.Spider):
     def parse(self, response):
         since = 'daily' if 'since' not in response.url else response.url.split('since=')[-1]
         articles = response.css('article.Box-row')
+        if not articles:
+            parse_failure(self)
+            return
 
         for article in articles:
             repo_path = article.css('h2 a::attr(href)').get()

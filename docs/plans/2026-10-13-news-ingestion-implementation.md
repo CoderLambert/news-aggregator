@@ -202,3 +202,16 @@ python backend/manage.py repair_news_sources --undo-audit /absolute/new-forward-
 ```
 
 真实链接未核验记录的详情原文跳转及补抓入口、搜索跳转显示“链接待核验”，保留摘要可读。有限历史回填复用 fetch_full_content 的 source/status/date/age/limit/after-id/dry-run 范围；force 仅提升优先级，不清除限流/租约/失败计数。来源级同步优先，不能全库循环吞掉未排队历史。
+
+
+## T12 指标与完整验证进展
+
+迁移0037扩展已有 ArticleFetchEvent，不改历史 success 的含义为“已提交”：新事件明确 typed validated / legacy diagnostic / failed，另存 persistence_outcome、logical_outcome、source_key、真实 physical_requests、每跳 HTTP status 与 retry_after_at。Worker 只有 fenced 写入后标 committed，no-op 和冲突分别记录；取消/预算延期记录逻辑结果且不虚构请求。safe_http 在实际 before_send 扣次数、响应头阶段记录状态，Reader/跳转仍同逻辑预算。通用 Provider 异常保留 typed HTTP 控制属性，未捕获429也不能继续后备。
+
+CrawlRun 保留 JSON 来源汇总：候选提交、seen/committed/changed、跳过、解析/持久化故障、checkpoint、HTTP/真实请求/延期及 outcome；机器 JSON 与旧人工汇总兼容。Worker 根据 updated/unchanged/valid_empty 判成功，partial/parse_failed/blocked/rate_limited/deferred/unsupported 即使退出0也不标成功；已知429或持久化失败不能被声称成功的 stats 隐藏。HTML列表/详情缺少预期结构记 parse failure，不冒充 valid_empty。
+
+full_content_stats 正文覆盖率为 complete / 符合抓取准入的 article；legacy 单列，raw missing、abstract/product/discussion/readme/newsletter 不混入新闻正文分母。可读数独立于任务状态，刷新失败旧正文仍可读。队列到期、冷却、最近 Feed 提交、持久化结果单列；错误只展示稳定 code，不回显原始错误 URL。管理员界面区分验证未提交/提交冲突/正文已提交/历史成功未知，显示真实HTTP请求和冷却；提交率只使用已发送且可评估尝试的分母。
+
+实际首轮全部三根后端回归为1343 passed/62 failed，失败主要来自历史fixtures未显式legacy和旧同步API预期，并有旧Compose服务集合/精确OAuth子进程dotenv污染断言。没有放宽产品可读/认证规则：历史fixture显式legacy，API按新队列合同检验无同步HTTP，OAuth保留原严格allowlist且隔离工作区.env。修正后完整三根回归实际 **1436 passed / 2 existing pagination warnings**（71.70s）。独立指标/Provider/HTML/stats子集实际 **82 passed**，包含错文/摘要/截断不计成功、真实CAS丢失/no-op、零请求延期、302→429真实两次请求和未捕获429停止后备、矛盾成功stats不能隐藏失败。
+
+前端全套在指标改动后实际 **481 passed / 66 files**、typecheck/lint/build通过；新增独立指标/parser/隔离链接测试另有 **10 passed**。最终全量重跑、生产镜像和真实隔离门禁正在执行，下节记录实际结果。没有来源抽样上线、发布或开启真实开关。

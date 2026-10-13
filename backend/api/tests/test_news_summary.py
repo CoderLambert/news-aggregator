@@ -13,6 +13,7 @@ def articles(db):
     return [News.objects.create(title=f'Synthetic article {i}', title_zh=f'合成文章{i}',
         content='Synthetic article paragraph. ' * 500, content_zh='合成新闻段落。' * 500,
         full_content='complete full body ' * 1000, category=category, source=source,
+        full_content_state='legacy',
         url=f'https://example.com/{i}', publish_time=timezone.now()) for i in range(20)]
 
 @pytest.mark.django_db
@@ -39,8 +40,13 @@ def test_payload_detail_and_constant_queries(articles, django_assert_num_queries
     assert len(single.data['results']) == 1
     explicit = client.get('/api/news/?representation=summary&page_size=20')
     assert explicit.content == response.content
-    assert len(response.content) < 40_000
+    assert len(response.content) < 45_000
     assert all(not {'content', 'content_zh', 'full_content'} & item.keys() for item in response.data['results'])
+    # The additional state fields stay small; full bodies and provenance must
+    # remain deferred even when availability is computed for every list row.
+    listed = response.renderer_context['view'].get_queryset().first()
+    assert {'full_content', 'full_content_zh', 'full_content_provenance'} <= listed.get_deferred_fields()
+    assert all(item['has_full_content'] is True for item in response.data['results'])
     assert len(gzip.compress(response.content, compresslevel=5)) < len(response.content) / 2
     detail = client.get(f'/api/news/{articles[0].pk}/')
     assert detail.data['content'] == articles[0].content

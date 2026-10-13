@@ -1,3 +1,4 @@
+import json
 import fcntl
 import os
 import re
@@ -41,6 +42,19 @@ def parse_summary(log_path):
             text = handle.read().decode('utf-8', errors='replace')
     except OSError:
         return {}
+    from api.services.crawl_metrics import RESULT_PREFIX, OUTCOMES
+    for line in reversed(text.splitlines()):
+        if not line.startswith(RESULT_PREFIX):
+            continue
+        try:
+            result = json.loads(line[len(RESULT_PREFIX):])
+            if not isinstance(result, dict) or result.get('outcome') not in OUTCOMES:
+                continue
+            if any(type(result.get(key)) is not int or result[key] < 0 for key in ('items', 'responses', 'errors')):
+                continue
+            return result
+        except (ValueError, TypeError):
+            continue
     matches = list(SUMMARY_PATTERN.finditer(text))
     if not matches:
         return {}
@@ -162,12 +176,12 @@ class Command(BaseCommand):
         elif interrupted:
             status = 'failed'
             safe_error = 'Crawler Worker 停止，任务被中断。'
-        elif exit_code == 0 and summary:
+        elif exit_code == 0 and summary and summary.get('outcome', 'updated') in {'updated', 'unchanged', 'valid_empty'}:
             status = 'succeeded'
             safe_error = ''
         elif exit_code == 0:
             status = 'failed'
-            safe_error = '爬虫退出但没有生成有效汇总。'
+            safe_error = ('来源结果：' + summary['outcome']) if summary.get('outcome') else '爬虫退出但没有生成有效汇总。'
         else:
             status = 'failed'
             safe_error = f'爬虫进程退出码：{exit_code}'

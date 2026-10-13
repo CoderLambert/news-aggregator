@@ -220,11 +220,20 @@ class DjangoPipeline:
         try:
             news = await _save_item(item)
             result = news._ingest_result
+            if not registry:
+                from api.services.crawl_metrics import count_ingest
+                count_ingest(self.crawler.stats, result)
             if registry:
                 registry.settle(item.get('feed_receipt_id'), result.receipt_outcome, result.reason,
                                 changed=result.changed, body_committed=result.body_committed)
         except BaseException as error:
             result = getattr(error, 'ingest_result', None)
+            if not registry:
+                if result:
+                    from api.services.crawl_metrics import count_ingest
+                    count_ingest(self.crawler.stats, result)
+                else:
+                    self.crawler.stats.inc_value('persistence_failures')
             if registry:
                 registry.settle(item.get('feed_receipt_id'), result.receipt_outcome if result else 'failed',
                                 result.reason if result else 'pipeline_error')

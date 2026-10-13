@@ -81,12 +81,13 @@ class JinaFallbackPolicyAdmin(admin.ModelAdmin):
 
 @admin.register(ArticleFetchEvent)
 class ArticleFetchEventAdmin(admin.ModelAdmin):
-    list_display = ['created_at', 'news_id', 'domain', 'outcome', 'provider', 'elapsed_ms', 'content_length']
+    list_display = ['created_at', 'news_id', 'domain', 'outcome', 'provider', 'persistence_outcome', 'physical_requests', 'elapsed_ms']
     list_filter = ['outcome', 'provider', 'created_at']
     search_fields = ['domain', 'provider']
     readonly_fields = [
         'news', 'domain', 'outcome', 'provider', 'failure_codes', 'quality_score',
-        'content_length', 'elapsed_ms', 'created_at',
+        'content_length', 'elapsed_ms', 'created_at', 'source_key', 'http_statuses',
+        'physical_requests', 'retry_after_at', 'persistence_outcome', 'logical_outcome',
     ]
 
     def has_add_permission(self, request):

@@ -638,6 +638,7 @@ def _safe_urlopen(
             retry_at = None
             def observe_response(status, headers):
                 nonlocal retry_at
+                execution.http_statuses.append(status)
                 retry_at = record_response(permit, status, headers, host=target.host.lower())
                 return retry_at
             status, headers, response_body = _fetch_one(

@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import sys
@@ -160,5 +161,8 @@ class Command(BaseCommand):
 
         process.start()
         for spider, crawler in crawlers:
-            self.stdout.write(_format_crawl_summary(spider, crawler.stats.get_stats()))
+            stats = crawler.stats.get_stats()
+            self.stdout.write(_format_crawl_summary(spider, stats))
+            from api.services.crawl_metrics import crawl_result, RESULT_PREFIX
+            self.stdout.write(RESULT_PREFIX + json.dumps(crawl_result(stats), ensure_ascii=True, default=str))
         self.stdout.write(self.style.SUCCESS('爬取完成'))

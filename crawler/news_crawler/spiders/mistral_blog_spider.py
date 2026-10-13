@@ -1,4 +1,5 @@
 import scrapy
+from api.services.crawl_metrics import parse_failure
 import re
 from urllib.parse import urlsplit
 from api.services.article_identity import normalize_article_url, same_article_identity, InvalidIdentity
@@ -24,6 +25,9 @@ class MistralBlogSpider(scrapy.Spider):
         # Extract article links from the news listing page
         # Links like /news/article-slug/
         article_links = response.css('a[href*="/news/"]')
+        if not article_links:
+            parse_failure(self)
+            return
         seen = set()
         for link in article_links:
             href = link.css('a::attr(href)').get('') or link.attrib.get('href', '')
@@ -58,6 +62,7 @@ class MistralBlogSpider(scrapy.Spider):
         if not title:
             title = response.css('[class*="title"] h1::text, [class*="title"]::text').get('')
         if not title:
+            parse_failure(self)
             return
 
         # Try multiple selectors for content
@@ -69,6 +74,7 @@ class MistralBlogSpider(scrapy.Spider):
 
         content = '\n'.join(p.strip() for p in blocks if p.strip())
         if len(content) < 50:
+            parse_failure(self)
             return
 
         # Try to extract date

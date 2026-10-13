@@ -53,6 +53,7 @@ class FetchResult:
     retry_after_at: datetime | None = None
     retryable: bool = False
     scope_keys: tuple[str, ...] = ()
+    fetch_event_id: int | None = None
 
 
 class ArticleProvider(Protocol):
