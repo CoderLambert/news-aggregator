@@ -15,7 +15,7 @@ from rest_framework.decorators import api_view, permission_classes, authenticati
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.renderers import JSONRenderer
-from rest_framework.exceptions import ValidationError as ApiValidationError
+from rest_framework.exceptions import APIException, ValidationError as ApiValidationError
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django_filters import rest_framework as django_filters
 from .models import Category, Source, News, ChatSession, BlockedNews, ProviderComparison
@@ -74,8 +74,9 @@ class CommaSeparatedIntegerFilter(django_filters.BaseInFilter, django_filters.Nu
 
 
 class NewsFilter(django_filters.FilterSet):
-    category = CommaSeparatedIntegerFilter(field_name='category', lookup_expr='in')
-    source = CommaSeparatedIntegerFilter(field_name='source', lookup_expr='in')
+    category = CommaSeparatedIntegerFilter(method='filter_category')
+    source = CommaSeparatedIntegerFilter(method='filter_source')
+    region = django_filters.ChoiceFilter(choices=[('domestic', '国内'), ('international', '国际')], method='filter_region')
     source__source_type = django_filters.CharFilter(field_name='source__source_type')
     full_content = django_filters.BooleanFilter(
         method='filter_full_content',
@@ -88,6 +89,18 @@ class NewsFilter(django_filters.FilterSet):
     class Meta:
         model = News
         fields = ['category', 'source', 'source__source_type']
+
+    def filter_source(self, queryset, name, value):
+        from api.services.channel_articles import channel_filter
+        return channel_filter(queryset, value)
+
+    def filter_category(self, queryset, name, value):
+        from api.services.channel_articles import category_filter
+        return category_filter(queryset, value)
+
+    def filter_region(self, queryset, name, value):
+        from api.services.channel_articles import region_filter
+        return region_filter(queryset, value)
 
     def filter_full_content(self, queryset, name, value):
         if value:
@@ -119,6 +132,12 @@ class NewsListView(generics.ListAPIView):
     ordering_fields = ['publish_time', 'created_at']
     ordering = ['-publish_time']
 
+    def finalize_response(self, request, response, *args, **kwargs):
+        response = super().finalize_response(request, response, *args, **kwargs)
+        if request.user.is_authenticated:
+            response['Cache-Control'] = 'private, no-store'
+        return response
+
     def get_ordering(self):
         """Map the product-level time sort without mutating DRF's request."""
         if (
@@ -129,7 +148,7 @@ class NewsListView(generics.ListAPIView):
         return super().get_ordering()
 
     def get_queryset(self):
-        qs = annotate_full_content_availability(News.objects.select_related('source', 'category')).defer(
+        qs = annotate_full_content_availability(News.objects.select_related('source', 'category').prefetch_related('source_items')).defer(
             'full_content', 'full_content_zh', 'full_content_provenance')
         # Hide duplicates by default
         if self.request.query_params.get('include_dupes', 'false') != 'true':
@@ -139,14 +158,30 @@ class NewsListView(generics.ListAPIView):
             blocked_ids = BlockedNews.objects.filter(
                 user=self.request.user,
             ).values_list('news_id', flat=True)
-            if blocked_ids:
-                qs = qs.exclude(pk__in=blocked_ids)
+            qs = qs.exclude(pk__in=blocked_ids)
+        from api.channel_views import scope_config, scoped_sources
+        scope = self.request.query_params.get('scope', 'all')
+        if scope != 'all':
+            from rest_framework.exceptions import NotAuthenticated, PermissionDenied
+            if settings.PUBLIC_SITE_MODE == 'read_only':
+                raise PermissionDenied('当前站点仅支持全部资讯。')
+            if not self.request.user.is_authenticated:
+                raise NotAuthenticated('请登录后使用个人资讯范围。')
+        scope, group = scope_config(self.request.query_params, self.request.user)
+        if scope != 'all':
+            from api.services.channel_articles import channel_filter
+            qs = channel_filter(qs, scoped_sources(self.request.user, scope, group))
         return qs
+
+    def visible_queryset(self):
+        # SearchFilter belongs only to the keyword arm, never the vector arm.
+        return django_filters.DjangoFilterBackend().filter_queryset(self.request, self.get_queryset(), self)
 
     def list(self, request, *args, **kwargs):
         representation = request.query_params.get('representation', 'summary')
         if representation != 'summary':
             raise ApiValidationError({'representation': 'Only summary is supported; use the detail endpoint for complete content.'})
+        self.visible_queryset()  # Validate reading conditions before service fallback.
         search_query = request.query_params.get('search', '').strip()
         mode = request.query_params.get('mode', 'keyword').strip()
 
@@ -162,6 +197,8 @@ class NewsListView(generics.ListAPIView):
                 response = self._semantic_search(request, search_query)
             else:
                 response = self._hybrid_search(request, search_query)
+        except APIException:
+            raise
         except Exception as exc:
             logger.warning(
                 'Semantic index unavailable; applying keyword fallback (%s)',
@@ -188,36 +225,6 @@ class NewsListView(generics.ListAPIView):
             warning='semantic_index_unavailable',
         )
 
-    def _apply_filters(self, qs, request):
-        """Apply new filter params to the base queryset before search."""
-        full_content = request.query_params.get('full_content', '').strip()
-        if full_content == 'true':
-            qs = filter_readable_full_content(qs)
-
-        publish_after = request.query_params.get('publish_time_after', '').strip()
-        if publish_after:
-            from datetime import datetime
-            try:
-                # Support both '2026-06-01' and ISO format
-                dt = datetime.fromisoformat(publish_after.replace('Z', '+00:00'))
-                if dt.tzinfo is None:
-                    from django.utils.timezone import make_aware
-                    dt = make_aware(dt)
-                qs = qs.filter(publish_time__gte=dt)
-            except (ValueError, TypeError):
-                pass
-
-        return qs
-
-    def _reorder_results(self, news_ids, order_by):
-        """Re-order result IDs if order_by=time, else keep original order."""
-        if order_by != 'time' or not news_ids:
-            return news_ids
-
-        # Fetch articles ordered by publish_time, preserving relevance subset
-        time_ordered = News.objects.filter(id__in=news_ids).order_by('-publish_time').values_list('id', flat=True)
-        return list(time_ordered)
-
     def _semantic_search(self, request, query):
         from .services.vector_store import VectorStoreService
         from .services.embedding import EmbeddingService
@@ -238,8 +245,7 @@ class NewsListView(generics.ListAPIView):
 
         order_by = request.query_params.get('order_by', 'relevance').strip()
 
-        page_size = int(request.query_params.get('page_size', 20))
-        page = int(request.query_params.get('page', 1))
+        page_size, page = self.search_pagination(request)
         offset = (page - 1) * page_size
 
         # Fetch enough results to cover any requested page (cap at 1000)
@@ -251,27 +257,18 @@ class NewsListView(generics.ListAPIView):
 
         news_ids = [r[0] for r in results]
 
-        # Apply filters (full_content, publish_time_after) to the ID list
-        if request.query_params.get('full_content') == 'true' or request.query_params.get('publish_time_after'):
-            base_qs = self._apply_filters(News.objects.all(), request)
-            allowed = set(base_qs.filter(id__in=news_ids).values_list('id', flat=True))
-            news_ids = [nid for nid in news_ids if nid in allowed]
+        allowed = set(self.visible_queryset().filter(id__in=news_ids).values_list('id', flat=True))
+        news_ids = list(dict.fromkeys(nid for nid in news_ids if nid in allowed))
 
         # Re-order by time if requested
         if order_by == 'time' and news_ids:
             news_ids = list(News.objects.filter(id__in=news_ids).order_by('-publish_time').values_list('id', flat=True))
 
-        # Use ORM count() for the true total — the ID list may be capped by fetch_n
-        # but the actual DB total reflects how many articles really match.
-        total = News.objects.filter(id__in=news_ids).count()
+        # Count the filtered candidate pool, bounded by the existing vector cap.
+        total = len(news_ids)
         page_ids = news_ids[offset:offset + page_size]
 
-        if not page_ids:
-            return self._empty_response(request)
-
-        news_map = News.objects.select_related(
-            'source', 'category'
-        ).in_bulk(page_ids)
+        news_map = self.visible_queryset().in_bulk(page_ids)
 
         ordered = [news_map[nid] for nid in page_ids if nid in news_map]
 
@@ -293,7 +290,7 @@ class NewsListView(generics.ListAPIView):
         order_by = request.query_params.get('order_by', 'relevance').strip()
 
         # Apply pre-search filters to base queryset
-        base_qs = self._apply_filters(self.filter_queryset(self.get_queryset()), request)
+        base_qs = self.visible_queryset()
 
         # When ordering by time, fetch more results for a better time-ordered pool
         if order_by == 'time':
@@ -304,10 +301,7 @@ class NewsListView(generics.ListAPIView):
             semantic_n = 300
 
         # Keyword search
-        keyword_results = base_qs.filter(
-            Q(title__icontains=query) | Q(content__icontains=query)
-        )[:keyword_limit]
-        keyword_ids = [n.id for n in keyword_results]
+        keyword_ids = list(filters.SearchFilter().filter_queryset(request, base_qs, self).order_by('-publish_time').values_list('id', flat=True)[:keyword_limit])
 
         # Semantic search
         vs = VectorStoreService()
@@ -315,13 +309,8 @@ class NewsListView(generics.ListAPIView):
         if vs.count() > 0:
             results = vs.search(query, n=semantic_n)
             vs_ids = [r[0] for r in results]
-            # Apply filters to the vector store results
-            if request.query_params.get('full_content') == 'true' or request.query_params.get('publish_time_after'):
-                base_qs_filter = self._apply_filters(News.objects.all(), request)
-                allowed = set(base_qs_filter.filter(id__in=vs_ids).values_list('id', flat=True))
-                semantic_ids = [nid for nid in vs_ids if nid in allowed]
-            else:
-                semantic_ids = vs_ids
+            allowed = set(base_qs.filter(id__in=vs_ids).values_list('id', flat=True))
+            semantic_ids = list(dict.fromkeys(nid for nid in vs_ids if nid in allowed))
         else:
             return self._keyword_fallback(request, 'hybrid')
 
@@ -336,32 +325,12 @@ class NewsListView(generics.ListAPIView):
             time_ordered = News.objects.filter(id__in=fused_ids).order_by('-publish_time').values_list('id', flat=True)
             fused_ids = list(time_ordered)
 
-        # Apply category/source filters to fused results
-        category = request.query_params.get('category')
-        source = request.query_params.get('source')
-        if category or source:
-            filter_qs = News.objects.filter(id__in=fused_ids)
-            if category:
-                cat_ids = [c.strip() for c in category.split(',')]
-                filter_qs = filter_qs.filter(category_id__in=cat_ids)
-            if source:
-                src_ids = [s.strip() for s in source.split(',')]
-                filter_qs = filter_qs.filter(source_id__in=src_ids)
-            allowed_ids = set(filter_qs.values_list('id', flat=True))
-            fused_ids = [fid for fid in fused_ids if fid in allowed_ids]
-
-        total = News.objects.filter(id__in=fused_ids).count()
-        page_size = int(request.query_params.get('page_size', 20))
-        page = int(request.query_params.get('page', 1))
+        total = len(fused_ids)
+        page_size, page = self.search_pagination(request)
         offset = (page - 1) * page_size
         page_ids = fused_ids[offset:offset + page_size]
 
-        if not page_ids:
-            return self._empty_response(request)
-
-        news_map = News.objects.select_related(
-            'source', 'category'
-        ).in_bulk(page_ids)
+        news_map = self.visible_queryset().in_bulk(page_ids)
 
         ordered = [news_map[nid] for nid in page_ids if nid in news_map]
 
@@ -373,6 +342,16 @@ class NewsListView(generics.ListAPIView):
             'results': serializer.data,
         })
 
+    def search_pagination(self, request):
+        from rest_framework.exceptions import NotFound
+        page_size = self.paginator.get_page_size(request)
+        try:
+            page = int(request.query_params.get('page', 1))
+            if page < 1: raise ValueError
+        except (ValueError, TypeError):
+            raise NotFound('Invalid page.')
+        return page_size, page
+
     def _empty_response(self, request):
         return Response({
             'count': 0,
@@ -382,7 +361,7 @@ class NewsListView(generics.ListAPIView):
         })
 
     def _next_url(self, request, page, total):
-        page_size = int(request.query_params.get('page_size', 20))
+        page_size = self.paginator.get_page_size(request)
         if page * page_size >= total:
             return None
         params = request.query_params.copy()
@@ -470,13 +449,13 @@ class ProviderComparisonRetestView(generics.GenericAPIView):
 
 
 class NewsDetailView(generics.RetrieveAPIView):
-    queryset = News.objects.select_related('source', 'category').all()
+    queryset = News.objects.select_related('source', 'category').prefetch_related('source_items').all()
     serializer_class = NewsDetailSerializer
 
 
 class NewsFetchFullView(generics.GenericAPIView):
     """Read cached content or persist one shared refresh intent."""
-    queryset = News.objects.select_related('source', 'category').all()
+    queryset = News.objects.select_related('source', 'category').prefetch_related('source_items').all()
     serializer_class = NewsDetailSerializer
     permission_classes = [IsAuthenticated]
 
@@ -514,7 +493,7 @@ class NewsFetchFullView(generics.GenericAPIView):
 
 class NewsTranslateFullView(generics.GenericAPIView):
     """Translate full article content to Chinese using SSE streaming."""
-    queryset = News.objects.select_related('source', 'category').all()
+    queryset = News.objects.select_related('source', 'category').prefetch_related('source_items').all()
     serializer_class = NewsDetailSerializer
     authentication_classes = [SessionAuthentication]
     permission_classes = [IsAuthenticated]
@@ -704,7 +683,7 @@ class NewsTranslateFullView(generics.GenericAPIView):
 
 class NewsChatView(generics.GenericAPIView):
     """Chat with the AI assistant about a news article for the authenticated user."""
-    queryset = News.objects.select_related('source', 'category').all()
+    queryset = News.objects.select_related('source', 'category').prefetch_related('source_items').all()
     authentication_classes = [SessionAuthentication]
     permission_classes = [IsAuthenticated]
 
@@ -939,9 +918,27 @@ class CategoryListView(generics.ListAPIView):
 
 class SourceListView(generics.ListAPIView):
     serializer_class = SourceSerializer
+    pagination_class = None
 
     def get_queryset(self):
-        return Source.objects.annotate(news_count=Count('news'))
+        qs = Source.objects.annotate(news_count=Count('news'))
+        region = self.request.query_params.get('region')
+        if region:
+            if region not in {'domestic', 'international'}:
+                raise ApiValidationError({'region': '无效的频道地区。'})
+            qs = qs.filter(region=region)
+        return qs
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        from api.models import NewsSourceItem
+        counts = {}
+        own_counts = {}
+        for row in NewsSourceItem.objects.values('source_key', 'news__source_id').annotate(n=Count('news_id', distinct=True)):
+            counts[row['source_key']] = counts.get(row['source_key'], 0) + row['n']
+            own_counts[(row['source_key'], row['news__source_id'])] = row['n']
+        context.update(channel_counts=counts, own_channel_counts=own_counts)
+        return context
 
 
 class NewsSuggestedQuestionsView(generics.GenericAPIView):
@@ -958,7 +955,7 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
     Reuses the same chat LLM client (kimi-k2.5 via Volcengine/DashScope) used
     by NewsChatView, so there's no new API key or model to configure.
     """
-    queryset = News.objects.select_related('source', 'category').all()
+    queryset = News.objects.select_related('source', 'category').prefetch_related('source_items').all()
     authentication_classes = [SessionAuthentication]
     permission_classes = [IsAuthenticated]
 
@@ -1433,7 +1430,7 @@ class NewsTTSView(generics.GenericAPIView):
     scope: 'summary' (title + short blurb) or 'full' (title + full article).
     Returns audio/mpeg stream. Supports caching — repeat requests serve from cache.
     """
-    queryset = News.objects.select_related('source', 'category').all()
+    queryset = News.objects.select_related('source', 'category').prefetch_related('source_items').all()
     authentication_classes = [SessionAuthentication]
     permission_classes = [IsAuthenticated]
 

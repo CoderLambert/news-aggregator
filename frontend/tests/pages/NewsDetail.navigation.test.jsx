@@ -12,6 +12,10 @@ import { blockNews, checkFavoriteStatus, fetchCategories, fetchNews, fetchNewsDe
 const apiState = vi.hoisted(() => ({ blocked: false, fetchFullArticle: vi.fn(), translate: vi.fn(), translateError: '' }))
 
 vi.mock('@/services/api', () => ({
+  fetchChannelSubscriptions: vi.fn().mockResolvedValue([]),
+  fetchChannelGroups: vi.fn().mockResolvedValue([]),
+  fetchNewsPreferences: vi.fn().mockResolvedValue({ scope: 'all', group_id: null }),
+  saveNewsPreferences: vi.fn().mockImplementation(value => Promise.resolve(value)),
   fetchNews: vi.fn(),
   fetchNewsDetail: vi.fn(),
   fetchCategories: vi.fn(),
@@ -121,7 +125,7 @@ describe('news list return navigation and invalidation', () => {
     fireEvent.click(screen.getByRole('link', { name: /返回列表/ }))
     await waitFor(() => expect(screen.getByTestId('route')).toHaveTextContent('/?search=climate&mode=keyword&category=2&source=8&page=2'))
     await waitFor(() => expect(fetchNews).toHaveBeenCalledTimes(2))
-    expect(fetchNews).toHaveBeenLastCalledWith({ page: 2, page_size: 20, search: 'climate', mode: 'keyword', category: '2', source: '8' }, expect.any(AbortSignal))
+    expect(fetchNews).toHaveBeenLastCalledWith({ scope: 'all', page: 2, page_size: 20, search: 'climate', mode: 'keyword', category: '2', source: '8' }, expect.any(AbortSignal))
 
     fireEvent.click(screen.getByRole('link', { name: /Climate technology update/ }))
     expect(await screen.findByRole('button', { name: '取消屏蔽' })).toBeInTheDocument()

@@ -6,6 +6,7 @@
 
 | 模块 | 能力 |
 |------|------|
+| **个人频道** | 账号同步订阅与一层分组，支持多组归属、批量操作和首页范围筛选 |
 | **新闻聚合** | Scrapy 爬虫抓取多源科技资讯，自动分类存储，支持分页浏览 |
 | **AI 翻译** | 用户自带 Key，经 LiteLLM 统一路由到主流模型厂商 |
 | **智能助手** | 基于文章全文的多轮对话，自动抓取原文，推荐问题一键换批 |
@@ -16,6 +17,33 @@
 | **语音播报** | 全局 TTS 语音播放器，支持多音色、多语速、播放范围选择 |
 | **代码块复制** | Markdown 代码块一键复制按钮 |
 | **吉祥物交互** | "小闻" 小狐狸动画表情，6 种心情状态随对话切换 |
+
+## 个人频道与首页阅读范围
+
+首页的“管理频道”打开 `/channels`。登录用户可以订阅现有来源，创建 1–40 字的个人分组，同一频道可加入多个分组。取消订阅会移除所有分组归属；删除分组和从分组移除频道均保留订阅。停用来源不能新增订阅，已有订阅仍可阅读历史文章。
+
+首页支持 `scope=all|subscribed|ungrouped|group`，分组范围还需 `group_id`。范围与 `source`、`category` 和关键词/语义/混合搜索取交集，空范围保持零结果。切换范围保留搜索与分类、清除临时来源并回到第一页；清除筛选保留范围。URL 优先于账号保存的上次范围，支持刷新与浏览器历史。检索中心和收藏页保持独立，个人订阅不会改变站点采集计划。
+
+迁移 `0039`、`0040` 添加账号配置和缺失的受支持来源，不修改已有文章、用户或来源属性，也不自动订阅。更新来源策略/爬虫注册目录后，可执行 `python backend/manage.py sync_channel_catalog` 补充缺失频道；目录 GET 只读。公开只读模式仅提供全部资讯与频道目录。
+
+个人 API 使用现有会话认证与 CSRF，每个账号只能访问自己的分组，越权返回 404：
+
+| 接口 | 方法与请求 |
+| --- | --- |
+| `/api/me/channel-subscriptions/` | GET；POST `{action: "subscribe"|"unsubscribe", source_ids: [来源 ID]}`；POST `{action: "set_groups", source_ids: [...], group_ids: [...]}` 设置频道的全部分组归属 |
+| `/api/me/channel-groups/` | GET；POST `{name: "AI"}` |
+| `/api/me/channel-groups/<id>/` | GET、DELETE；PATCH `{name?: "新名称", source_ids?: [...]}` 替换成员，或 `{add_source_ids: [...]}` / `{remove_source_ids: [...]}` 批量增减 |
+| `/api/me/news-preferences/` | GET；PATCH `{scope: "group", group_id: ID}`，其他范围的 `group_id` 可为 null |
+
+## 新能源、医疗 RSS 与频道地区
+
+频道新增独立的 `region=domestic|international`，按服务市场与版本划分；语言、内容分类和来源类型保持独立。首页、频道管理及检索中心均支持国内／国际筛选，首页地区与个人阅读范围取交集。URL 保存地区；切换地区清除临时来源并重置分页，保留搜索、分类和个人分组；清除筛选保留个人阅读范围。
+
+迁移 `0041/0042` 回填现有频道地区并增加 12 个新能源、14 个医疗来源配置，以及“新能源”“医疗健康”分类。FDA 官方 RSS 当前本机返回 404，作为待验证候选，不注册采集或开放新增订阅；其他 25 个 RSS 已通过独立 XML 解析检查，实际采集状态仍以爬虫结果为准。IT之家与爱范儿仅接收标题、摘要和标签命中新能源规则的条目。各来源的官方地址和规则集中在 `backend/api/services/sector_feeds.py`。
+
+Energy-Storage.news、Windpower Monthly 和医疗媒体、期刊仅展示 RSS 标题、摘要及真实原文链接，后端禁止正文获取；FDA、NIH 仅使用 RSS 公开提供的内容。未提供摘要时不生成占位内容。医疗资讯和相关 AI 回答标注“新闻资讯，不构成医疗建议”，单篇助手与研究助手使用实际文章 URL 展示来源链接。
+
+`/api/sources/` 支持 `region` 并返回地区和阅读策略；`/api/news/` 支持同名地区参数，并返回 `source_region`、`channel_ids`、`channel_names`、`is_medical`、`reading_policy`。同一文章在多个频道收录时保持主来源和单篇去重，按所有频道归属参与订阅、来源和分类筛选。openFDA、PubMed、ClinicalTrials.gov 数据专题不在本轮范围。
 
 ## 🛠 技术栈
 

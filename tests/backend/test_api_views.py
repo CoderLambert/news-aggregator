@@ -21,12 +21,7 @@ class NewsFetchFullViewTest(TestCase):
         self.client.force_login(self.user)
         # Create test data
         from api.models import News, Source, Category
-        self.source = Source.objects.create(
-            name='GitHub Trending',
-            url='https://github.com/trending',
-            language='en',
-            source_type='aggregator',
-        )
+        self.source = Source.objects.update_or_create(name='GitHub Trending', defaults={'url': 'https://github.com/trending', 'language': 'en', 'source_type': 'aggregator'})[0]
         self.category = Category.objects.create(
             name='Python',
             slug='python',
@@ -117,12 +112,7 @@ class NewsTranslateFullViewTest(TestCase):
         self.user = get_user_model().objects.create_user(username='translation-reader')
         self.client.force_login(self.user)
         from api.models import News, Source, Category
-        self.source = Source.objects.create(
-            name='GitHub Trending',
-            url='https://github.com/trending',
-            language='en',
-            source_type='aggregator',
-        )
+        self.source = Source.objects.update_or_create(name='GitHub Trending', defaults={'url': 'https://github.com/trending', 'language': 'en', 'source_type': 'aggregator'})[0]
         self.category = Category.objects.create(
             name='Python',
             slug='python',

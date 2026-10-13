@@ -67,7 +67,13 @@ export default function ResearchMessageList({ messages, phase, searchResults, on
 
   return (
     <div className="space-y-4">
-      {messages.map((message) => (
+      {messages.map((message) => {
+        const medicalSources = (message.toolCalls ?? []).flatMap(call => [
+          ...call.articles.filter(article => article.is_medical && article.url).map(article => ({ title: article.title ?? '原文来源', url: article.url! })),
+          ...(call.articleIsMedical && call.articleUrl ? [{ title: call.articleTitle || '原文来源', url: call.articleUrl }] : []),
+        ])
+        const sources = [...new Map(medicalSources.map(source => [source.url, source])).values()]
+        return (
         <div
           key={message.id}
           className={`flex animate-message-pop-in ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
@@ -97,10 +103,14 @@ export default function ResearchMessageList({ messages, phase, searchResults, on
                   <span className="text-xs text-neutral-400 ml-1">{phase === 'thinking' ? '思考中…' : '处理中…'}</span>
                 </div>
               ) : null}
+              {message.content && sources.length > 0 && <div className="mt-3 rounded-lg border border-border p-3 text-xs text-muted-foreground">
+                <p>新闻资讯，不构成医疗建议。</p>
+                <ul className="mt-2 space-y-1">{sources.map(source => <li key={source.url}><a className="text-primary underline" href={source.url} target="_blank" rel="noopener noreferrer">{source.title}</a></li>)}</ul>
+              </div>}
             </div>
           )}
         </div>
-      ))}
+      )})}
       <div ref={endRef} />
     </div>
   )

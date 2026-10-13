@@ -35,6 +35,14 @@ def _fetch_article_markdown(
         raise FetchError('该来源已停止采集。', failures=[FetchResult(
             False, 'source_policy', url=url, error='unsupported', error_code='unsupported', retryable=False,
         )])
+    from api.services.source_policy import policy_for_url
+    from api.services.channel_articles import summary_only
+    policy = policy_for_url(url)
+    if ((policy and policy.reading_policy != 'standard') or
+            (news is not None and summary_only(news))):
+        raise FetchError('该频道仅使用 RSS 公开内容。', failures=[FetchResult(
+            False, 'source_policy', url=url, error='rss_only', error_code='unsupported', retryable=False,
+        )])
     chain = providers or default_providers(url)
     started_at = time.monotonic()
     news_id = getattr(news, 'pk', None)

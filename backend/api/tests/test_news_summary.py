@@ -30,12 +30,12 @@ def test_summary_boundaries(articles, body):
 @pytest.mark.django_db
 def test_payload_detail_and_constant_queries(articles, django_assert_num_queries):
     client = APIClient()
-    with django_assert_num_queries(2):
+    with django_assert_num_queries(3):
         response = client.get('/api/news/')
     assert response.status_code == 200
     assert response.data['count'] == 20
     assert len(response.data['results']) == 20
-    with django_assert_num_queries(2):
+    with django_assert_num_queries(3):
         single = client.get('/api/news/?representation=summary&page_size=1')
     assert len(single.data['results']) == 1
     explicit = client.get('/api/news/?representation=summary&page_size=20')
@@ -77,7 +77,7 @@ def test_ranked_search_summary_uses_constant_queries(articles, mode, representat
          patch('api.services.vector_store.VectorStoreService') as vector:
         vector.return_value.count.return_value = len(articles)
         vector.return_value.search.return_value = [(article.pk, 0.9) for article in articles]
-        expected_queries = 2 if mode == 'semantic' else 3
+        expected_queries = 3 if mode == 'semantic' else 4
         with django_assert_num_queries(expected_queries):
             response = client.get(f'/api/news/?search=paragraph&mode={mode}&page_size=20{representation}')
         assert response.data['search_mode_applied'] == mode

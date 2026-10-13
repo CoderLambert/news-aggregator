@@ -37,7 +37,7 @@ def authenticated_reader(db, client):
 @pytest.fixture
 def news_obj(db):
     cat = Category.objects.create(name='Tech', slug='tech')
-    src = Source.objects.create(name='Hacker News', url='https://news.ycombinator.com', language='en')
+    src = Source.objects.update_or_create(name='Hacker News', defaults={'url': 'https://news.ycombinator.com', 'language': 'en'})[0]
     return News.objects.create(
         title='Sample',
         url='https://example.com/a',

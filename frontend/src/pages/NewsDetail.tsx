@@ -247,6 +247,7 @@ export default function NewsDetail() {
 
           {news.cover_image && <img src={news.cover_image} alt={displayTitle} className="mb-8 w-full rounded-2xl shadow-sm" />}
 
+          {news.is_medical && <p role="note" className="mb-4 text-sm text-muted-foreground">新闻资讯，不构成医疗建议。</p>}
           {fetchFullEnabled && <FullContentFetchStatus news={news} articleLoading={articleLoading} onFetch={retryFullArticle} onResume={resumeExistingFetch} onCancel={cancelFetch} />}
           {fetchFullEnabled && articleError && !hasTerminalFetchFailure && <ErrorBanner message={articleError} onRetry={retryFullArticle} />}
 
@@ -273,7 +274,7 @@ export default function NewsDetail() {
           )}
 
           {!readableBody && displayContent ? (
-            <SummarySection content={displayContent} onAskAssistant={chatEnabled ? openAssistant : undefined} />
+            <SummarySection content={displayContent} readingPolicy={news.reading_policy} onAskAssistant={chatEnabled ? openAssistant : undefined} />
           ) : null}
 
           <div className="mt-10 border-t border-neutral-100 pt-6">
@@ -291,6 +292,8 @@ export default function NewsDetail() {
             hasFullContent: readableBody,
             wordCount: readableBody ? news.full_content.length : (news.content ? news.content.length : 0),
             title: news.title,
+            isMedical: news.is_medical,
+            sourceUrl: news.url,
           }}
         />}
       </div>
@@ -302,17 +305,17 @@ export default function NewsDetail() {
   )
 }
 
-function SummarySection({ content, onAskAssistant }: { content: string; onAskAssistant?: (event: MouseEvent<HTMLButtonElement>) => void }) {
+function SummarySection({ content, onAskAssistant, readingPolicy }: { content: string; readingPolicy?: import('@/types/news').ReadingPolicy; onAskAssistant?: (event: MouseEvent<HTMLButtonElement>) => void }) {
   return (
     <section aria-labelledby="article-summary-heading" className="article-section-render w-full overflow-x-hidden rounded-3xl border border-neutral-200 bg-white px-5 py-6 shadow-[0_18px_50px_rgba(15,23,42,0.06)] sm:px-8 sm:py-8">
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3 border-b border-neutral-100 pb-5">
         <div>
           <div className="mb-2 flex items-center gap-2">
             <span className="inline-flex rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-amber-700">摘要模式</span>
-            <span className="text-xs text-neutral-400">尚未保存完整原文</span>
+            <span className="text-xs text-neutral-400">{readingPolicy === 'rss_summary_only' ? '来源仅提供标题和摘要' : '尚未保存完整原文'}</span>
           </div>
           <h2 id="article-summary-heading" data-article-toc="ignore" className="text-lg font-semibold tracking-tight text-neutral-900">内容摘要</h2>
-          <p className="mt-1 text-sm leading-6 text-neutral-500">快速了解文章要点；获取原文后可阅读完整段落、列表与代码。</p>
+          <p className="mt-1 text-sm leading-6 text-neutral-500">{readingPolicy && readingPolicy !== 'standard' ? '以下是 RSS 来源提供的公开摘要；更多内容请通过原文链接阅读。' : '快速了解文章要点；获取原文后可阅读完整段落、列表与代码。'}</p>
         </div>
         {onAskAssistant && <button
           type="button"
@@ -327,7 +330,7 @@ function SummarySection({ content, onAskAssistant }: { content: string; onAskAss
         </button>}
       </div>
       <div className="summary-markdown w-full max-w-full overflow-hidden text-neutral-700">
-        <MarkdownContent content={content} legacySummarySpacing />
+        {content.trim() ? <MarkdownContent content={content} legacySummarySpacing /> : <p>来源未提供摘要，请前往来源网站阅读。</p>}
       </div>
     </section>
   )
@@ -356,7 +359,7 @@ function ArticleHeader({ news, displayTitle, displaySubtitle, isEnglishSource }:
         {author && author !== sourceName && <span className="flex items-center gap-1"><span className="text-neutral-700">{author}</span></span>}
         {sourceName && <span>{sourceName}</span>}
         <span className="flex items-center gap-1">
-          <time>{new Date(news.publish_time).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}</time>
+          <time>{new Date(news.publish_time).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}{news.publish_time_inferred && '（时间推断）'}</time>
         </span>
       </div>
     </header>

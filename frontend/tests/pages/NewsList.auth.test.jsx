@@ -10,6 +10,10 @@ import { fetchCategories, fetchCsrfToken, fetchMe, fetchNews, fetchSources, logi
 import { CapabilitiesTestProvider } from '../helpers/capabilities'
 
 vi.mock('@/services/api', () => ({
+  fetchChannelSubscriptions: vi.fn().mockResolvedValue([]),
+  fetchChannelGroups: vi.fn().mockResolvedValue([]),
+  fetchNewsPreferences: vi.fn().mockResolvedValue({ scope: 'all', group_id: null }),
+  saveNewsPreferences: vi.fn().mockImplementation(value => Promise.resolve(value)),
   fetchNews: vi.fn(),
   fetchCategories: vi.fn(),
   fetchSources: vi.fn(),

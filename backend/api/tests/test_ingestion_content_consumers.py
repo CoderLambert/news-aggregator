@@ -46,7 +46,7 @@ def local_consumers(settings, monkeypatch):
 
 @pytest.fixture
 def make_news():
-    source = Source.objects.create(name='Dev.to', url='https://dev.to', language='en', source_type='news')
+    source = Source.objects.update_or_create(name='Dev.to', defaults={'url': 'https://dev.to', 'language': 'en', 'source_type': 'news'})[0]
     category = Category.objects.create(name='Consumer regression', slug='consumer-regression')
     sequence = 0
 

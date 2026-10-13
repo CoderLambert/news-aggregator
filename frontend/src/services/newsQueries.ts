@@ -7,8 +7,8 @@ export const newsKeys = {
   all: ['news'] as const,
   lists: () => [...newsKeys.all, 'list'] as const,
   viewerLists: (viewerId: number | string) => [...newsKeys.lists(), { viewerId }] as const,
-  list: (params: NewsListParams, lang: Language, viewerId: number | string) =>
-    [...newsKeys.lists(), { ...params, lang, viewerId }] as const,
+  list: (params: NewsListParams, lang: Language, viewerId: number | string, scopeSources?: number[] | null) =>
+    [...newsKeys.lists(), { ...params, lang, viewerId, scopeSources }] as const,
   details: () => [...newsKeys.all, 'detail'] as const,
   viewerDetails: (viewerId: number | string) => [...newsKeys.details(), { viewerId }] as const,
   detail: (id: number, lang: Language, viewerId: number | string) =>
@@ -17,9 +17,9 @@ export const newsKeys = {
   sources: (lang: Language) => [...newsKeys.all, 'sources', lang] as const,
 }
 
-export const newsListOptions = (params: NewsListParams, lang: Language, viewerId: number | string) =>
+export const newsListOptions = (params: NewsListParams, lang: Language, viewerId: number | string, scopeSources?: number[] | null) =>
   queryOptions({
-    queryKey: newsKeys.list(params, lang, viewerId),
+    queryKey: newsKeys.list(params, lang, viewerId, scopeSources),
     queryFn: async ({ signal }): Promise<Page<NewsSummary>> =>
       parsePage(await fetchNews(params, signal), parseNewsSummary),
   })
@@ -31,10 +31,11 @@ export const newsDetailOptions = (id: number, lang: Language, viewerId: number |
     staleTime: 15_000,
   })
 
-export const newsListPlaceholderData = (viewerId: number | string, lang: Language) =>
+export const newsListPlaceholderData = (viewerId: number | string, lang: Language, scope = 'all', groupId?: number, region = 'all') =>
   (previousData: Page<NewsSummary> | undefined, previousQuery?: { queryKey: readonly unknown[] }) => {
     const previousScope = previousQuery?.queryKey[2]
     return isRecord(previousScope) && previousScope.viewerId === viewerId && previousScope.lang === lang
+      && (previousScope.scope ?? 'all') === scope && previousScope.group_id === groupId && (previousScope.region ?? 'all') === region
       ? previousData
       : undefined
   }

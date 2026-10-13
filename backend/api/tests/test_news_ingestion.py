@@ -21,7 +21,7 @@ def news(db):
     return News.objects.create(
         title='A real short publisher article', content='Independent summary',
         url='https://dev.to/team/short-article', publish_time=timezone.now(),
-        source=Source.objects.create(name='Dev.to', url='https://dev.to'),
+        source=Source.objects.update_or_create(name='Dev.to', defaults={'url': 'https://dev.to'})[0],
         category=Category.objects.create(name='ingestion', slug='ingestion'),
         content_kind='article',
     )

@@ -55,7 +55,7 @@ CREATE_NEWS = r'''
 from api.models import News, Source, Category
 news = News.objects.create(
     title='A synthetic queued worker article', url='https://dev.to/team/worker-test',
-    content='Publisher summary', source=Source.objects.create(name='Dev.to', url='https://dev.to'),
+    content='Publisher summary', source=Source.objects.get_or_create(name='Dev.to', defaults={'url': 'https://dev.to'})[0],
     category=Category.objects.create(name='worker-test', slug='worker-test'),
     publish_time=timezone.now(), content_kind='article', full_content_fetch_status='queued',
     full_content_next_attempt_at=timezone.now(), full_content_retry_count=3, full_content_priority=7,

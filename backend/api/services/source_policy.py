@@ -16,6 +16,14 @@ class SourcePolicy:
     contract_version: str = '1'
     poll_seconds: int = 3600
     request_interval: float = 3.0
+    region: str = 'international'
+    language: str = 'en'
+    description: str = ''
+    default_category: str = ''
+    reading_policy: str = 'standard'
+    keyword_filter: str = ''
+    date_format: str = ''
+    date_timezone: str = ''
 
 
 # Body fields are explicitly approved per source, never inferred from their name.
@@ -54,6 +62,14 @@ POLICIES = {
         SourcePolicy('sanliu_kr', '36氪', ('36kr.com',), html_allowed=False, unsupported_reason='invalid_feed_endpoint'),
     )
 }
+
+
+# Channel metadata is explicit: a Chinese edition can serve the domestic market.
+from dataclasses import replace
+for _key in ('leiphone', 'jiqizhixin', 'sanliu_kr'):
+    POLICIES[_key] = replace(POLICIES[_key], region='domestic', language='zh')
+from api.services.sector_feeds import sector_policies
+POLICIES.update({policy.key: policy for policy in sector_policies(SourcePolicy)})
 
 
 def policy_for_url(url: str):

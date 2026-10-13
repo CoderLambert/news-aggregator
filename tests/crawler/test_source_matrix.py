@@ -116,15 +116,17 @@ def candidate_for(source, *, field='content:encoded', kind=None):
     )
 
 
-def test_all_thirty_one_sources_have_explicit_and_unique_contracts():
-    assert set(POLICIES) == EXPECTED_KEYS
-    assert len({policy.name for policy in POLICIES.values()}) == 31
+def test_all_sources_have_explicit_and_unique_contracts():
+    from api.services.sector_feeds import SECTOR_KEYS
+    assert set(POLICIES) == EXPECTED_KEYS | SECTOR_KEYS
+    assert len({policy.name for policy in POLICIES.values()}) == 57
     assert all(key == policy.key for key, policy in POLICIES.items())
     assert all(policy.domains and policy.contract_version for policy in POLICIES.values())
-    assert {key for key, policy in POLICIES.items() if policy.unsupported_reason} == set(QUARANTINED) | {'leiphone', 'meta_ai'}
+    assert {key for key, policy in POLICIES.items() if policy.unsupported_reason} == set(QUARANTINED) | {'leiphone', 'meta_ai', 'fda_news'}
     assert {key: policy.content_kind for key, policy in POLICIES.items() if policy.content_kind != 'article'} == {
         'hackernews': 'discussion', 'github': 'readme', 'arxiv_ai': 'abstract',
         'producthunt': 'product', 'frontend_focus': 'newsletter',
+        'nature_medicine': 'abstract', 'nejm': 'abstract', 'lancet': 'abstract',
     }
 
 

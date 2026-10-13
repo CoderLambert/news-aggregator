@@ -11,6 +11,8 @@ interface LazyNewsChatAssistantProps {
     hasFullContent?: boolean
     wordCount?: number
     title?: string
+    isMedical?: boolean
+    sourceUrl?: string
   }
 }
 

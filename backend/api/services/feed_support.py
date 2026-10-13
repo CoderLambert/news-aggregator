@@ -9,7 +9,7 @@ from api.services.article_identity import normalize_article_url, validate_upstre
 from api.services.article_fetcher.types import FullContentCandidate
 from api.services.article_fetcher.extractors import html_fragment_to_markdown
 from api.services.source_policy import POLICIES
-from api.services.source_dates import parse_source_datetime
+from api.services.source_dates import parse_source_datetime, parse_feed_datetime
 
 MAX_FEED_BYTES = 8 * 1024 * 1024
 
@@ -65,8 +65,11 @@ def feed_entry_item(entry, source_key, *, feed_url, effective_url, request_start
     title = _plain(entry.get('title', '')).strip()
     target = normalize_article_url(entry.get('link', ''))
     identity = validate_upstream_id(entry.get('id') or entry.get('guid') or target)
-    published = parse_source_datetime(dict.get(entry, 'published'))
-    modified = parse_source_datetime(dict.get(entry, 'updated'))
+    published_value = dict.get(entry, 'published')
+    if not published_value and version == 'rss10':
+        published_value = dict.get(entry, 'updated')  # RSS 1.0 dc:date is mapped here by feedparser.
+    published, inferred_clock = parse_feed_datetime(published_value, policy)
+    modified, _ = parse_feed_datetime(dict.get(entry, 'updated'), policy)
     summary_html = entry.get('summary', '') or ''
     body = field = ''
     body_format = 'html'
@@ -86,6 +89,8 @@ def feed_entry_item(entry, source_key, *, feed_url, effective_url, request_start
     # media_content is intentionally never considered an article body.
     summary = _plain(summary_html)[:3000] if field != 'description' else ''
     candidate = None
+    if policy.reading_policy == 'rss_summary_only':
+        body = ''
     if body:
         candidate = FullContentCandidate(
             source_key, identity, target, effective_url, None, title, policy.content_kind,
@@ -102,9 +107,13 @@ def feed_entry_item(entry, source_key, *, feed_url, effective_url, request_start
         image = next((node.get('url') for node in entry.get('media_thumbnail', ()) if node.get('url')), '')
     item = dict(source_key=source_key, upstream_id=identity, discovery_url=target,
                 content_kind=policy.content_kind, title=title, summary=summary, content=summary,
-                source_name=policy.name, category_name=classify(title, summary) if classify else '科技',
-                publish_time=published, publish_time_inferred=published is None,
+                source_name=policy.name, category_name=policy.default_category or (classify(title, summary) if classify else '科技'),
+                publish_time=published, publish_time_inferred=published is None or inferred_clock,
                 author=entry.get('author', '') or '', url=target, cover_image=image or '')
+    if policy.keyword_filter == 'new_energy':
+        from api.services.energy_keywords import matches_new_energy
+        if not matches_new_energy(title, summary, entry.get('tags', ())):
+            raise ValueError('keyword_filtered')
     if modified:
         item['source_modified_at'] = modified
     if source_key == 'arxiv_ai':

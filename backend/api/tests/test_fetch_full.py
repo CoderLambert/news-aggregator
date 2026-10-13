@@ -10,7 +10,7 @@ from api.management.commands.auto_fetch_full_content import _fetch_one
 
 @pytest.fixture
 def make_news(db):
-    source=Source.objects.create(name='WebKit',url='https://webkit.org',language='en')
+    source=Source.objects.update_or_create(name='WebKit', defaults={'url': 'https://webkit.org', 'language': 'en'})[0]
     category=Category.objects.create(name='科技',slug='fetch-api')
     def create(**extra):
         values=dict(title='Publisher title',url='https://webkit.org/blog/12/article/', content='A summary.',

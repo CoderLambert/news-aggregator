@@ -126,3 +126,9 @@ describe('ChatMessageList', () => {
     })
   })
 })
+
+it('keeps the verified medical article link even when the model omits citations', () => {
+  render(<ChatMessageList messages={[{ role: 'assistant', content: 'A medical news summary.' }]} phase="success" medicalSourceUrl="https://www.medtechdive.com/news/verified-story/" />)
+  expect(screen.getByText(/新闻资讯，不构成医疗建议/)).toBeInTheDocument()
+  expect(screen.getByRole('link', { name: '原文来源' })).toHaveAttribute('href', 'https://www.medtechdive.com/news/verified-story/')
+})

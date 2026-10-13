@@ -34,7 +34,7 @@ def FetchResult(**values):
 
 @pytest.fixture
 def source(db):
-    return Source.objects.create(name='Dev.to', url='https://dev.to', language='en')
+    return Source.objects.update_or_create(name='Dev.to', defaults={'url': 'https://dev.to', 'language': 'en'})[0]
 
 
 @pytest.fixture

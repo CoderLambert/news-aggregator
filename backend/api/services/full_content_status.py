@@ -122,6 +122,11 @@ def fetch_eligibility(news):
     from api.services.source_policy import policy_for_url, retired_policy_for_url
     from api.services.article_fetcher.site_rules import get_site_rule
     from api.services.article_identity import InvalidIdentity, normalize_article_url
+    from api.services.channel_articles import summary_only
+    from api.services.source_policy import policy_for_name
+    primary = policy_for_name(news.source.name) if getattr(news, 'source_id', None) else None
+    if summary_only(news) or (primary and primary.reading_policy == 'public_rss'):
+        return 'unsupported'
     try:
         normalize_article_url(news.url)
     except InvalidIdentity:
@@ -249,6 +254,9 @@ def commit_candidate(news, candidate, *, provider='', lease: FetchLease | None =
     current = query.first()
     if current is None:
         return ContentCommit('conflict', 'persistence_conflict')
+    from api.services.channel_articles import summary_only
+    if summary_only(current):
+        return ContentCommit('rejected', 'unsupported')
     identities = current.source_items.filter(source_key=candidate.source_key)
     # The reviewed CMS response resolves its numeric post ID from the exact
     # permalink. Feed GUIDs remain separate upstream identities of that article.
@@ -434,7 +442,8 @@ def classify_fetch_error(error_or_result) -> str:
 
 def has_full_content(news: News) -> bool:
     """Availability is independent of the latest refresh attempt's status."""
-    return news.full_content_state in {'legacy', 'complete'} and bool((news.full_content or '').strip())
+    from api.services.channel_articles import summary_only
+    return news.full_content_state in {'legacy', 'complete'} and bool((news.full_content or '').strip()) and not summary_only(news)
 
 
 def get_readable_full_content(news: News) -> str:
@@ -442,7 +451,8 @@ def get_readable_full_content(news: News) -> str:
 
 
 def filter_readable_full_content(queryset):
-    return queryset.alias(
+    from api.services.channel_articles import exclude_summary_only
+    return exclude_summary_only(queryset).alias(
         _readable_body=trimmed_text_expression('full_content'),
     ).filter(full_content_state__in=['legacy', 'complete']).exclude(_readable_body='')
 

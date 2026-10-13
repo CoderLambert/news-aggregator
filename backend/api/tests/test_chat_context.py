@@ -10,7 +10,7 @@ from api.views import ensure_full_content
 
 @pytest.fixture
 def make_news(db):
-    source=Source.objects.create(name='WebKit',url='https://webkit.org')
+    source=Source.objects.update_or_create(name='WebKit', defaults={'url': 'https://webkit.org'})[0]
     category=Category.objects.create(name='科技',slug='context')
     def create(**extra):
         values=dict(title='Article title',content='SHORT_PREVIEW',url='https://webkit.org/blog/12/article/',

@@ -1,3 +1,4 @@
+import RegionFilter from '@/components/RegionFilter'
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useLocation, useNavigationType, useSearchParams } from 'react-router-dom'
@@ -136,6 +137,8 @@ export default function LocalSearch() {
   const orderBy = resolveOrderBy(searchParams.get('order_by'))
   const fullContentOnly = searchParams.get('full_content') === 'true'
   const days = resolveDays(searchParams.get('days'))
+  const invalidRegion = searchParams.has('region') && !['domestic', 'international'].includes(searchParams.get('region') ?? '')
+  const region = searchParams.get('region') === 'domestic' ? 'domestic' : searchParams.get('region') === 'international' ? 'international' : 'all'
   const sourceTypeFilters = resolveSourceTypes(searchParams.get('source_types'))
   const sourceType = sourceTypeFilters[0]
   const [showFilters, setShowFilters] = useState(false)
@@ -153,6 +156,7 @@ export default function LocalSearch() {
   const params: NewsListParams = {
     page,
     page_size: PAGE_SIZE,
+    ...(region !== 'all' ? { region } : {}),
     ...(submittedQuery ? { search: submittedQuery, mode } : {}),
     order_by: orderBy,
     ...(fullContentOnly ? { full_content: 'true' as const } : {}),
@@ -161,17 +165,17 @@ export default function LocalSearch() {
   }
   const newsQuery = useQuery({
     ...newsListOptions(params, lang, viewerId),
-    enabled: !authLoading && Boolean(submittedQuery),
-    placeholderData: newsListPlaceholderData(viewerId, lang),
+    enabled: !invalidRegion && !authLoading && Boolean(submittedQuery),
+    placeholderData: newsListPlaceholderData(viewerId, lang, 'all', undefined, region),
   })
 
-  const data = newsQuery.data
+  const data = invalidRegion ? undefined : newsQuery.data
   const totalCount = data?.count ?? 0
   const totalPages = Math.ceil(totalCount / PAGE_SIZE)
-  const activeFilterCount = [orderBy !== 'relevance', fullContentOnly, Boolean(days), sourceTypeFilters.length > 0]
+  const activeFilterCount = [orderBy !== 'relevance', fullContentOnly, Boolean(days), sourceTypeFilters.length > 0, region !== 'all']
     .filter(Boolean).length
   const hasActiveFilters = activeFilterCount > 0
-  const initialLoading = Boolean(submittedQuery) && (authLoading || (newsQuery.isPending && !data))
+  const initialLoading = !invalidRegion && Boolean(submittedQuery) && (authLoading || (newsQuery.isPending && !data))
 
   function handleSubmit(draft: string) {
     const query = draft.trim()
@@ -181,6 +185,7 @@ export default function LocalSearch() {
     next.set('mode', mode)
     next.set('page', '1')
     next.set('order_by', orderBy)
+    if (region !== 'all') next.set('region', region)
     if (fullContentOnly) next.set('full_content', 'true')
     if (days) next.set('days', days)
     if (sourceTypeFilters.length) next.set('source_types', sourceTypeFilters.join(','))
@@ -207,6 +212,7 @@ export default function LocalSearch() {
     next.set('mode', mode)
     next.set('page', '1')
     next.set('order_by', orderBy)
+    if (region !== 'all') next.set('region', region)
     if (fullContentOnly) next.set('full_content', 'true')
     if (days) next.set('days', days)
     if (sourceTypeFilters.length) next.set('source_types', sourceTypeFilters.join(','))
@@ -234,6 +240,8 @@ export default function LocalSearch() {
       />
       {!semanticSearchEnabled && <p className="mb-3 text-xs text-muted-foreground" role="status">当前仅支持关键词搜索。</p>}
 
+      {invalidRegion && <p role="alert">无效的频道地区，请选择全部、国内或国际。</p>}
+      <RegionFilter value={region} onChange={value => updateFilters({ region: value === 'all' ? null : value })} />
       <section aria-label="搜索筛选" className="mb-4 rounded-xl border border-neutral-100 bg-neutral-50/80 p-3">
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2">

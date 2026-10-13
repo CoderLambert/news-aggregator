@@ -1,4 +1,6 @@
 ALL_CATEGORIES = {
+    '新能源': {'slug': 'new-energy', 'keywords': []},
+    '医疗健康': {'slug': 'medical-health', 'keywords': []},
     '科技': {'slug': 'tech', 'keywords': []},
     '国际': {'slug': 'world', 'keywords': []},
     '财经': {'slug': 'finance', 'keywords': []},

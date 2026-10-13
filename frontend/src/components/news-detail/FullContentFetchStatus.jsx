@@ -59,6 +59,13 @@ function StatusAlert({ message, onRetry, showRetry = true, sourceUrl, retryLabel
 export default function FullContentFetchStatus({ news, articleLoading, onFetch, onResume = onFetch, onCancel }) {
   if (!news) return null
 
+  if (news.reading_policy === 'rss_summary_only') {
+    return <StatusAlert title="RSS 摘要阅读" message="该频道仅提供标题、摘要和原文链接，不在站内获取正文。" helperText="完整内容请前往来源网站，部分内容可能需要订阅。" sourceUrl={news.url} showRetry={false} />
+  }
+  if (news.reading_policy === 'public_rss' && !hasReadableFullContent(news)) {
+    return <StatusAlert title="RSS 资讯" message="当前展示来源 RSS 公开提供的内容。" helperText="更多内容请前往来源网站阅读。" sourceUrl={news.url} showRetry={false} />
+  }
+
   if (news.full_content_error_code === 'invalid_identity') {
     return <StatusAlert title="链接待核验" message="来源文章身份尚未核验，当前保留摘要供阅读。" helperText="核验真实链接后才能获取原文。" showRetry={false} />
   }

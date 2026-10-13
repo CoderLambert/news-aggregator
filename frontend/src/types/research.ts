@@ -6,6 +6,7 @@ export type ResearchId = string | number
 export type JsonRecord = Record<string, unknown>
 
 export interface ResearchArticle {
+  is_medical?: boolean
   id?: ResearchId
   title?: string
   source?: string
@@ -33,6 +34,7 @@ export interface ResearchToolCall {
   articleTitle: string
   articleId: ResearchId | null
   articleSource: string
+  articleIsMedical?: boolean
   articleUrl: string
   contentTruncated: boolean
   originalLength: number
@@ -98,6 +100,7 @@ export type ResearchEvent =
   | { type: 'query_decomposed' }
   | { type: 'tool_call'; call_id: string; name: string; args: JsonRecord }
   | {
+      is_medical?: boolean
       type: 'tool_result'
       call_id: string
       summary: string
@@ -134,6 +137,7 @@ function parseArticle(value: unknown): ResearchArticle | null {
     ...(id !== null ? { id } : {}),
     ...(typeof value.title === 'string' ? { title: value.title } : {}),
     ...(typeof value.source === 'string' ? { source: value.source } : {}),
+    ...(value.is_medical === true ? { is_medical: true } : {}),
     ...(typeof value.source_type === 'string' ? { source_type: value.source_type } : {}),
     ...(typeof value.publish_time === 'string' ? { publish_time: value.publish_time } : {}),
     ...(typeof value.snippet === 'string' ? { snippet: value.snippet } : {}),
@@ -273,6 +277,7 @@ export function parseResearchEvent(value: unknown): ResearchEvent | null {
       if (typeof value.call_id !== 'string') return null
       return {
         type: value.type,
+        ...(value.is_medical === true ? { is_medical: true } : {}),
         call_id: value.call_id,
         summary: optionalString(value.summary),
         articles: parseArticleList(value.articles),

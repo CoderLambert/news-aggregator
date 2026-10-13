@@ -715,8 +715,9 @@ def _tool_fetch_article(article_id: int, execution_guard=None) -> dict:
     content = pick_chat_context(news)
     truncated = len(content) > 12000
     scope = context_scope(news)
+    from api.services.channel_articles import medical_news
     return dict(id=news.pk, title=news.title, title_zh=news.title_zh, source=news.source.name,
-        source_type=news.source.source_type, category=news.category.name, url=news.url,
+        source_type=news.source.source_type, category=news.category.name, url=news.url, is_medical=medical_news(news),
         content=content[:12000], content_truncated=truncated, original_length=len(content),
         context_scope='excerpt' if truncated else scope, source_scope=scope,
         full_content_state=news.full_content_state, full_content_fetch_status=news.full_content_fetch_status,
@@ -1159,12 +1160,14 @@ def _tool_generate_report(topic: str, sections: list | None = None,
 
 def _serialize_news_list(news_list) -> list[dict]:
     """Convert a queryset/list of News objects to a lightweight dict list."""
+    from api.services.channel_articles import medical_news
     results = []
     for n in news_list:
         snippet = (n.content_zh or n.content or '')[:200]
         results.append({
             'id': n.id,
             'title': n.title_zh or n.title,
+            **({'is_medical': True} if medical_news(n) else {}),
             'original_title': n.title if n.title_zh else '',
             'source': n.source.name,
             'source_type': n.source.source_type,

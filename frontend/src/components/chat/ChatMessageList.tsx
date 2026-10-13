@@ -12,6 +12,7 @@ const DEFAULT_SUGGESTED_QUESTIONS = [
 ]
 
 interface ChatMessageListProps {
+  medicalSourceUrl?: string
   messages: ChatMessage[]
   phase: ChatPhase
   onSuggestionClick?: (text: string) => void
@@ -21,6 +22,7 @@ interface ChatMessageListProps {
 }
 
 export default function ChatMessageList({
+  medicalSourceUrl,
   messages,
   phase,
   onSuggestionClick,
@@ -92,6 +94,7 @@ export default function ChatMessageList({
                 </div>
               )
             ) : <div className="whitespace-pre-wrap">{message.content}</div>}
+            {message.role === 'assistant' && message.content && medicalSourceUrl && <p className="mt-3 border-t border-border pt-2 text-xs text-muted-foreground">新闻资讯，不构成医疗建议。 <a className="text-primary underline" href={medicalSourceUrl} target="_blank" rel="noopener noreferrer">原文来源</a></p>}
             {message.role === 'assistant' && message.content && message.web_sources && <WebSources sources={message.web_sources} />}
             {message.role === 'assistant' && message.content && message.web_search && !message.web_sources && (
               <div className="mt-2 flex items-center gap-1 border-t border-neutral-100 pt-2"><Globe className="size-3 text-orange-400" /><span className="text-[10px] text-neutral-400">使用了联网搜索</span></div>

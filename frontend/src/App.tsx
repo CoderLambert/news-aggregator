@@ -17,6 +17,7 @@ import SuperuserRoute from '@/components/admin/SuperuserRoute'
 import FeatureRoute from '@/components/FeatureRoute'
 
 // Keep feature-heavy routes out of the initial list bundle.
+const ChannelsPage = lazy(() => import('@/pages/ChannelsPage'))
 const NewsList = lazy(() => import('@/pages/NewsList'))
 const NewsDetail = lazy(() => import('@/pages/NewsDetail'))
 const FavoritesPage = lazy(() => import('@/pages/FavoritesPage'))
@@ -69,6 +70,7 @@ export default function App() {
                     <Suspense fallback={<LoadingSpinner />}>
                       <Routes>
                         <Route path="/" element={<NewsList />} />
+                        <Route path="/channels" element={<ChannelsPage />} />
                         <Route path="/search" element={<LocalSearch />} />
                         <Route path="/news/:id" element={<NewsDetail />} />
                         <Route path="/favorites" element={<FeatureRoute feature="favorites"><FavoritesPage /></FeatureRoute>} />

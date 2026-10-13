@@ -1,3 +1,5 @@
+export type SourceRegion = 'domestic' | 'international'
+export type ReadingPolicy = 'standard' | 'public_rss' | 'rss_summary_only'
 export type SearchMode = 'keyword' | 'semantic' | 'hybrid'
 export type DisplayMode = 'zh' | 'original' | 'bilingual'
 export type Language = 'zh' | 'en'
@@ -6,6 +8,9 @@ export type SourceType = 'news' | 'aggregator' | 'discussion'
 export type SearchOrderBy = 'relevance' | 'time'
 
 export interface NewsListParams {
+  region?: SourceRegion
+  scope?: import('@/types/channels').NewsScope
+  group_id?: number
   page: number
   page_size: number
   search?: string
@@ -28,6 +33,12 @@ export interface Page<T> {
 }
 
 export interface NewsSummary {
+  publish_time_inferred?: boolean
+  source_region?: SourceRegion
+  channel_ids?: number[]
+  channel_names?: string[]
+  is_medical?: boolean
+  reading_policy?: ReadingPolicy
   id: number
   title: string
   summary: string
@@ -63,6 +74,7 @@ export interface NewsSummary {
 }
 
 export function hasReadableFullContent(news: Partial<NewsDetail>): boolean {
+  if (news.reading_policy === 'rss_summary_only') return false
   if (news.full_content_state && !['legacy', 'complete'].includes(news.full_content_state)) return false
   if (typeof news.has_full_content === 'boolean') return news.has_full_content
   return Boolean(news.full_content?.trim())
@@ -90,6 +102,7 @@ export interface NewsDetail extends NewsSummary {
 }
 
 export interface FilterOption {
+  region?: SourceRegion
   id: number
   name: string
 }
@@ -126,6 +139,12 @@ export function parseNewsSummary(value: unknown): NewsSummary {
   const nullableString = (key: string) => typeof value[key] === 'string' ? value[key] as string : ''
   const nullableNumber = (key: string) => typeof value[key] === 'number' ? value[key] as number : null
   return {
+    publish_time_inferred: value.publish_time_inferred === true,
+    source_region: value.source_region === 'domestic' ? 'domestic' : 'international',
+    channel_ids: Array.isArray(value.channel_ids) ? value.channel_ids.filter((id): id is number => typeof id === 'number') : [requiredNumber(value, 'source')],
+    channel_names: Array.isArray(value.channel_names) ? value.channel_names.filter((name): name is string => typeof name === 'string') : [],
+    is_medical: value.is_medical === true,
+    reading_policy: value.reading_policy === 'rss_summary_only' || value.reading_policy === 'public_rss' ? value.reading_policy : 'standard',
     id: requiredNumber(value, 'id'),
     title: requiredString(value, 'title'),
     summary: typeof value.summary === 'string' ? value.summary : nullableString('content').slice(0, 300),
@@ -182,7 +201,7 @@ export function parseFilterOptions(value: unknown): FilterOption[] {
   if (!values) throw new TypeError('Invalid filter response: expected an array')
   return values.flatMap((item) => {
     if (!isRecord(item) || typeof item.id !== 'number' || typeof item.name !== 'string') return []
-    return [{ id: item.id, name: item.name }]
+    return [{ id: item.id, name: item.name, ...(item.region === 'domestic' || item.region === 'international' ? { region: item.region } : {}) }]
   })
 }
 

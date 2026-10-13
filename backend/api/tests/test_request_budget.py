@@ -158,7 +158,7 @@ for worker in workers:
     assert worker.exitcode == 0
 assert counts[3] == 2 and counts[4] == 1
 news = News.objects.create(title='Synthetic lease', url='https://dev.to/team/lease', content='Summary',
-    source=Source.objects.create(name='Dev.to', url='https://dev.to'),
+    source=Source.objects.get_or_create(name='Dev.to', defaults={'url': 'https://dev.to'})[0],
     category=Category.objects.create(name='Lease', slug='lease'), publish_time=timezone.now(),
     full_content_fetch_status='queued', full_content_next_attempt_at=timezone.now())
 news_id = news.pk

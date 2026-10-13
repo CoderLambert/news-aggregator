@@ -1,0 +1,78 @@
+import { useLayoutEffect, useRef } from 'react'
+import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useAuth } from '@/context/AuthContext'
+import { useCapability } from '@/context/CapabilitiesContext'
+import { fetchSources, fetchChannelSubscriptions, fetchChannelGroups, fetchNewsPreferences, saveNewsPreferences } from '@/services/api'
+import { parseChannels, parseSubscriptions, parseGroups, parseNewsPreference } from '@/types/channels'
+import { newsKeys } from '@/services/newsQueries'
+
+export const channelKeys = {
+  all: ['channels'] as const,
+  personal: (viewer: number | string) => ['channels', 'personal', viewer] as const,
+  subscriptions: (viewer: number | string) => ['channels', 'personal', viewer, 'subscriptions'] as const,
+  groups: (viewer: number | string) => ['channels', 'personal', viewer, 'groups'] as const,
+  preferences: (viewer: number | string) => ['channels', 'personal', viewer, 'preferences'] as const,
+  directory: ['channels', 'directory'] as const,
+}
+export const channelDirectoryOptions = () => queryOptions({
+  queryKey: channelKeys.directory,
+  queryFn: async ({ signal }) => parseChannels(await fetchSources(signal)),
+})
+export function useChannelConfig() {
+  const { user, loading } = useAuth()
+  const accounts = useCapability('accounts').enabled
+  const viewer = user?.id ?? 'anonymous'
+  const enabled = !loading && accounts && !!user
+  const subscriptions = useQuery({ queryKey: channelKeys.subscriptions(viewer), enabled,
+    queryFn: async ({ signal }) => parseSubscriptions(await fetchChannelSubscriptions(signal)) })
+  const groups = useQuery({ queryKey: channelKeys.groups(viewer), enabled,
+    queryFn: async ({ signal }) => parseGroups(await fetchChannelGroups(signal)) })
+  return { subscriptions, groups, enabled, viewer, accounts,
+    ready: !enabled || (subscriptions.isSuccess && groups.isSuccess),
+    error: enabled && (subscriptions.isError || groups.isError),
+    retry: () => Promise.all([subscriptions.refetch(), groups.refetch()]) }
+}
+export function useNewsPreference(enabled: boolean, viewer: number | string) {
+  return useQuery({ queryKey: channelKeys.preferences(viewer), enabled,
+    queryFn: async ({ signal }) => parseNewsPreference(await fetchNewsPreferences(signal)) })
+}
+export function useSaveNewsPreference(viewer: number | string) {
+  const client = useQueryClient()
+  const currentViewer = useRef<number | string | null>(viewer)
+  useLayoutEffect(() => {
+    currentViewer.current = viewer
+    return () => { currentViewer.current = null }
+  }, [viewer])
+  return useMutation({ mutationFn: (payload: import('@/types/channels').NewsPreference) => {
+    if (currentViewer.current !== viewer || viewer === 'anonymous') throw new Error('账号已切换，请重试。')
+    return saveNewsPreferences(payload)
+  }, scope: { id: `news-preference-${viewer}` },
+    onSuccess: value => {
+      if (currentViewer.current === viewer) client.setQueryData(channelKeys.preferences(viewer), parseNewsPreference(value))
+    } })
+}
+export function useChannelMutation() {
+  const { user } = useAuth()
+  const viewer = user?.id ?? 'anonymous'
+  const client = useQueryClient()
+  const currentViewer = useRef<number | string | null>(viewer)
+  useLayoutEffect(() => {
+    currentViewer.current = viewer
+    return () => { currentViewer.current = null }
+  }, [viewer])
+  return useMutation({ mutationFn: (perform: () => Promise<unknown>) => {
+    if (currentViewer.current !== viewer || viewer === 'anonymous') throw new Error('账号已切换，请重试。')
+    return perform()
+  }, scope: { id: `channels-${viewer}` },
+    onSuccess: async () => {
+      if (currentViewer.current !== viewer) return
+      await client.cancelQueries({ queryKey: newsKeys.lists() })
+      await Promise.all([
+        client.invalidateQueries({ queryKey: channelKeys.personal(viewer) }),
+        client.invalidateQueries({ queryKey: channelKeys.directory }),
+        client.invalidateQueries({ queryKey: newsKeys.sources('zh') }),
+        client.invalidateQueries({ queryKey: newsKeys.sources('en') }),
+        client.resetQueries({ queryKey: newsKeys.lists() }),
+      ])
+    } })
+}

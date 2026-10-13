@@ -52,6 +52,8 @@ SPIDERS = {
 
 # Historical contracts remain available for reading and audited identity repairs.
 # Only public, supported sources are registered for new collection.
+from api.services.sector_feeds import SECTOR_KEYS
+SPIDERS.update({key: key for key in SECTOR_KEYS})
 SPIDERS = {key: value for key, value in SPIDERS.items() if not POLICIES[key].unsupported_reason}
 
 

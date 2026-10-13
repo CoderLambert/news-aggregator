@@ -680,3 +680,29 @@ export function getResearchResults(
 ): Promise<unknown> {
   return api.get<unknown>(`/research/${sessionId}/results/`, { params, signal }).then(({ data }) => data)
 }
+
+// ---- Personal channels ----------------------------------------------------
+export function fetchChannelSubscriptions(signal?: AbortSignal): Promise<unknown> {
+  return api.get<unknown>('/me/channel-subscriptions/', { signal }).then(({ data }) => data)
+}
+export function changeChannelSubscriptions(payload: { action: 'subscribe' | 'unsubscribe' | 'set_groups'; source_ids: number[]; group_ids?: number[] }): Promise<unknown> {
+  return api.post<unknown>('/me/channel-subscriptions/', payload).then(({ data }) => data)
+}
+export function fetchChannelGroups(signal?: AbortSignal): Promise<unknown> {
+  return api.get<unknown>('/me/channel-groups/', { signal }).then(({ data }) => data)
+}
+export function createChannelGroup(name: string): Promise<unknown> {
+  return api.post<unknown>('/me/channel-groups/', { name }).then(({ data }) => data)
+}
+export function updateChannelGroup(id: number, payload: { name?: string; source_ids?: number[]; add_source_ids?: number[]; remove_source_ids?: number[] }): Promise<unknown> {
+  return api.patch<unknown>(`/me/channel-groups/${id}/`, payload).then(({ data }) => data)
+}
+export function deleteChannelGroup(id: number): Promise<unknown> {
+  return api.delete<unknown>(`/me/channel-groups/${id}/`).then(({ data }) => data)
+}
+export function fetchNewsPreferences(signal?: AbortSignal): Promise<unknown> {
+  return api.get<unknown>('/me/news-preferences/', { signal }).then(({ data }) => data)
+}
+export function saveNewsPreferences(payload: import('@/types/channels').NewsPreference): Promise<unknown> {
+  return api.patch<unknown>('/me/news-preferences/', payload).then(({ data }) => data)
+}

@@ -1,4 +1,5 @@
 from django.urls import path
+from . import channel_views
 from . import views
 from . import research_views
 from . import subscription_views
@@ -10,6 +11,10 @@ from . import provider_credential_views
 from . import article_fetch_views
 
 urlpatterns = [
+    path('me/channel-subscriptions/', channel_views.ChannelSubscriptionsView.as_view(), name='channel-subscriptions'),
+    path('me/channel-groups/', channel_views.ChannelGroupsView.as_view(), name='channel-groups'),
+    path('me/channel-groups/<int:pk>/', channel_views.ChannelGroupDetailView.as_view(), name='channel-group-detail'),
+    path('me/news-preferences/', channel_views.NewsPreferencesView.as_view(), name='news-preferences'),
     path('capabilities/', capabilities_views.capabilities, name='capabilities'),
     path('health/live/', health_views.health_live, name='health-live'),
     path('health/ready/', health_views.health_ready, name='health-ready'),

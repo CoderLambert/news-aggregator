@@ -11,15 +11,94 @@ class CategorySerializer(serializers.ModelSerializer):
 
 
 class SourceSerializer(serializers.ModelSerializer):
-    news_count = serializers.IntegerField(read_only=True, default=0)
+    news_count = serializers.SerializerMethodField()
     source_type = serializers.CharField(read_only=True)
+    reading_policy = serializers.SerializerMethodField()
+    subscription_status = serializers.SerializerMethodField()
+    subscription_reason = serializers.SerializerMethodField()
+
+    def get_reading_policy(self, obj):
+        from api.services.source_policy import policy_for_name
+        policy = policy_for_name(obj.name)
+        return policy.reading_policy if policy else 'standard'
+
+    def get_news_count(self, obj):
+        from api.services.source_policy import policy_for_name
+        policy = policy_for_name(obj.name)
+        if not policy:
+            return getattr(obj, 'news_count', 0)
+        return (getattr(obj, 'news_count', 0) + self.context.get('channel_counts', {}).get(policy.key, 0)
+                - self.context.get('own_channel_counts', {}).get((policy.key, obj.id), 0))
+
+    def get_subscription_status(self, obj):
+        from api.services.channel_catalog import subscription_status
+        return subscription_status(obj)[0]
+
+    def get_subscription_reason(self, obj):
+        from api.services.channel_catalog import subscription_status
+        return subscription_status(obj)[1]
 
     class Meta:
         model = Source
-        fields = ['id', 'name', 'url', 'logo', 'country', 'language', 'source_type', 'news_count']
+        fields = ['id', 'name', 'url', 'logo', 'country', 'language', 'source_type', 'news_count', 'description', 'region', 'reading_policy', 'subscription_status', 'subscription_reason']
 
 
-class NewsListSerializer(serializers.ModelSerializer):
+class ChannelNewsSerializer(serializers.ModelSerializer):
+    publish_time_inferred = serializers.SerializerMethodField()
+    source_region = serializers.CharField(source='source.region', read_only=True)
+    channel_ids = serializers.SerializerMethodField()
+    channel_names = serializers.SerializerMethodField()
+    is_medical = serializers.SerializerMethodField()
+    reading_policy = serializers.SerializerMethodField()
+
+    def _channel_policies(self, obj):
+        from api.services.channel_articles import news_policies
+        if not hasattr(self, '_policies_cache'):
+            self._policies_cache = {}
+        if obj.pk not in self._policies_cache:
+            self._policies_cache[obj.pk] = news_policies(obj)
+        return self._policies_cache[obj.pk]
+
+    def get_channel_ids(self, obj):
+        from api.services.source_policy import policy_for_name
+        policies = self._channel_policies(obj)
+        primary = policy_for_name(obj.source.name)
+        extra_names = [p.name for p in policies if not primary or p.key != primary.key]
+        if not extra_names:
+            return [obj.source_id]
+        if not hasattr(self, '_channel_id_cache'):
+            self._channel_id_cache = dict(Source.objects.values_list('name', 'id'))
+        return sorted({obj.source_id, *[self._channel_id_cache[name] for name in extra_names if name in self._channel_id_cache]})
+
+    def get_publish_time_inferred(self, obj):
+        items = list(obj.source_items.all())
+        return bool(items) and all(item.metadata.get('publish_time_inferred', False) for item in items)
+
+    def get_channel_names(self, obj):
+        return list(dict.fromkeys([obj.source.name, *[p.name for p in self._channel_policies(obj)]]))
+
+    def get_is_medical(self, obj):
+        return obj.category.name == '医疗健康' or any(p.default_category == '医疗健康' for p in self._channel_policies(obj))
+
+    def get_reading_policy(self, obj):
+        policies = self._channel_policies(obj)
+        if any(p.reading_policy == 'rss_summary_only' for p in policies):
+            return 'rss_summary_only'
+        if any(p.reading_policy == 'public_rss' for p in policies):
+            return 'public_rss'
+        return 'standard'
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if data.get('reading_policy') == 'rss_summary_only':
+            data['has_full_content'] = False
+            for field in ('full_content', 'full_content_zh'):
+                if field in data:
+                    data[field] = ''
+        return data
+
+
+class NewsListSerializer(ChannelNewsSerializer):
     """Bounded article previews; complete bodies belong to the detail endpoint."""
     SUMMARY_LIMIT = 300
     summary = serializers.SerializerMethodField()
@@ -49,6 +128,7 @@ class NewsListSerializer(serializers.ModelSerializer):
             'full_content_next_attempt_at', 'full_content_priority', 'full_content_error_code',
         ]
         fields = [
+            'source_region', 'channel_ids', 'channel_names', 'is_medical', 'reading_policy', 'publish_time_inferred',
             'id', 'title', 'summary', 'title_zh', 'summary_zh', 'author', 'publish_time',
             'has_full_content',
             'source', 'source_name', 'source_type', 'source_language',
@@ -76,7 +156,7 @@ class NewsListSerializer(serializers.ModelSerializer):
         return (obj.content_zh or '')[:self.SUMMARY_LIMIT]
 
 
-class NewsDetailSerializer(serializers.ModelSerializer):
+class NewsDetailSerializer(ChannelNewsSerializer):
     source_name = serializers.CharField(source='source.name', read_only=True)
     source_type = serializers.CharField(source='source.source_type', read_only=True)
     source_url = serializers.URLField(source='source.url', read_only=True)
@@ -112,6 +192,7 @@ class NewsDetailSerializer(serializers.ModelSerializer):
             'full_content_next_attempt_at', 'full_content_priority', 'full_content_error_code',
         ]
         fields = [
+            'source_region', 'channel_ids', 'channel_names', 'is_medical', 'reading_policy', 'publish_time_inferred',
             'id', 'title', 'content', 'title_zh', 'content_zh', 'author', 'publish_time',
             'source', 'source_name', 'source_type', 'source_url', 'source_language',
             'category', 'category_name',

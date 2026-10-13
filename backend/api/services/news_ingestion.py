@@ -79,7 +79,7 @@ def _ingest_transaction(item, policy, url, upstream_id, discovery, kind, candida
     # This write acquires SQLite's writer reservation before identity reads,
     # avoiding select_for_update's illusory row locks on SQLite.
     NewsSourceItem.objects.filter(source_key=policy.key, upstream_id=upstream_id).update(last_seen_at=seen)
-    source, _ = Source.objects.get_or_create(name=policy.name, defaults=source_defaults)
+    source, _ = Source.objects.get_or_create(name=policy.name, defaults={**source_defaults, 'region': policy.region})
     source_updates = {}
     if source_defaults.get('language') and source.language != source_defaults['language']:
         source_updates['language'] = source_defaults['language']
@@ -129,7 +129,7 @@ def _ingest_transaction(item, policy, url, upstream_id, discovery, kind, candida
             return IngestResult(news.pk, 'deferred', 'persistence_conflict')
         news.refresh_from_db()
     metadata = dict(mapping.metadata or {}) if mapping else {}
-    metadata.update({'publish_time_inferred': bool(inferred)})
+    metadata.update({'publish_time_inferred': bool(inferred), 'category_name': item['category_name']})
     if published is not None and not inferred:
         metadata['source_publish_time'] = published.isoformat()
     if item.get('source_modified_at'):

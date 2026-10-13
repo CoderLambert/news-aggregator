@@ -11,7 +11,7 @@ from api.models import Category, News, NewsSourceItem, Source, RequestBudget
 
 @pytest.fixture
 def make_news(db):
-    source = Source.objects.create(name='WebKit', url='https://webkit.org')
+    source = Source.objects.update_or_create(name='WebKit', defaults={'url': 'https://webkit.org'})[0]
     category = Category.objects.create(name='科技', slug='tech-batch')
     def create(identity=1, **extra):
         defaults = dict(title=f'Article {identity}', content='A summary.', publish_time=timezone.now(),

@@ -1,0 +1,74 @@
+"""Channel membership and reading policies shared by every reading path."""
+from django.db.models import Q
+from api.services.source_policy import POLICIES, policy_for_name
+
+
+def channel_filter(queryset, source_ids):
+    from api.models import Source, NewsSourceItem
+    names = Source.objects.filter(pk__in=source_ids).values_list('name', flat=True)
+    keys = [policy.key for name in names if (policy := policy_for_name(name))]
+    members = NewsSourceItem.objects.filter(source_key__in=keys).values('news_id')
+    return queryset.filter(Q(source_id__in=source_ids) | Q(pk__in=members))
+
+
+def region_filter(queryset, region):
+    from api.models import NewsSourceItem
+    keys = [p.key for p in POLICIES.values() if p.region == region]
+    members = NewsSourceItem.objects.filter(source_key__in=keys).values('news_id')
+    return queryset.filter(Q(source__region=region) | Q(pk__in=members))
+
+
+def news_policies(news):
+    primary = policy_for_name(news.source.name) if getattr(news, 'source_id', None) else None
+    policies = {primary.key: primary} if primary else {}
+    prefetched = getattr(news, '_prefetched_objects_cache', {}).get('source_items')
+    items = prefetched if prefetched is not None else news.source_items.all()
+    for item in items:
+        policy = POLICIES.get(item.source_key)
+        if policy:
+            policies[policy.key] = policy
+    return tuple(policies.values())
+
+
+def summary_only(news):
+    # Only publishers with a restricted channel need an additional membership read.
+    if not getattr(news, 'source_id', None):
+        return False
+    primary = policy_for_name(news.source.name)
+    if primary and primary.reading_policy == 'rss_summary_only':
+        return True
+    from urllib.parse import urlsplit
+    host = urlsplit(news.url).hostname
+    if not any(p.reading_policy == 'rss_summary_only' and host in p.domains for p in POLICIES.values()):
+        return False
+    return any(p.reading_policy == 'rss_summary_only' for p in news_policies(news))
+
+
+def exclude_summary_only(queryset):
+    from api.models import NewsSourceItem
+    policies = [p for p in POLICIES.values() if p.reading_policy == 'rss_summary_only']
+    members = NewsSourceItem.objects.filter(source_key__in=[p.key for p in policies]).values('news_id')
+    return queryset.exclude(source__name__in=[p.name for p in policies]).exclude(pk__in=members)
+
+
+
+def category_filter(queryset, category_ids):
+    from api.models import Category, NewsSourceItem
+    names = Category.objects.filter(pk__in=category_ids).values_list('name', flat=True)
+    keys = [p.key for p in POLICIES.values() if p.default_category in names]
+    members = NewsSourceItem.objects.filter(source_key__in=keys).values('news_id')
+    return queryset.filter(Q(category_id__in=category_ids) | Q(pk__in=members))
+
+
+
+def medical_news(news):
+    if news.category.name == '医疗健康':
+        return True
+    primary = policy_for_name(news.source.name)
+    if primary and primary.default_category == '医疗健康':
+        return True
+    from urllib.parse import urlsplit
+    host = urlsplit(news.url).hostname
+    if not any(p.default_category == '医疗健康' and host in p.domains for p in POLICIES.values()):
+        return False
+    return any(p.default_category == '医疗健康' for p in news_policies(news))

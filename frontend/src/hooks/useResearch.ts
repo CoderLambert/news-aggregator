@@ -353,6 +353,7 @@ function hydrateStoredToolResult(call: ResearchToolCall, rawContent: string): Re
     articleId: event.id,
     articleSource: event.source,
     articleUrl: event.url,
+    ...(event.is_medical ? { articleIsMedical: true } : {}),
     contentTruncated: event.content_truncated,
     originalLength: event.original_length,
     contentLength: event.length,

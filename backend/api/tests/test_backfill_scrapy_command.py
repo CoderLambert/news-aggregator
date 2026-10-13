@@ -12,7 +12,7 @@ from api.models import Category, News, Source
 def news(db):
     return News.objects.create(title='Bounded article', content='A summary.', publish_time=timezone.now(),
         url='https://webkit.org/blog/12/article/', content_kind='article',
-        source=Source.objects.create(name='WebKit'), category=Category.objects.create(name='科技',slug='alias'))
+        source=Source.objects.update_or_create(name='WebKit', defaults={})[0], category=Category.objects.create(name='科技',slug='alias'))
 
 
 @pytest.mark.parametrize('dry_run', [False,True])

@@ -108,12 +108,15 @@ export default function NewsCard({ news, onBlockStart, onBlocked }: NewsCardProp
             </div>
             <TranslationStatus news={news} size="compact" />
           </div>
+          {!cleanedContent && <p className="mb-3 text-xs text-muted-foreground">来源未提供摘要</p>}
+          {news.is_medical && <p className="mb-2 text-xs text-muted-foreground">新闻资讯，不构成医疗建议</p>}
+          {(news.channel_names?.filter(name => name !== news.source_name).length ?? 0) > 0 && <p className="mb-2 text-xs text-muted-foreground">同时收录于 {news.channel_names?.filter(name => name !== news.source_name).join('、')}</p>}
           {cleanedContent && <p className="mb-4 line-clamp-3 text-xs leading-relaxed text-muted-foreground">{cleanedContent.slice(0, 180)}{cleanedContent.length > 180 ? '…' : ''}</p>}
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <Badge variant="sage" className="rounded-full px-2 py-0.5">{news.category_name}</Badge>
             <ContentStatus news={news} lang={lang} />
             <span className="ml-auto max-w-36 truncate">{news.source_name}</span>
-            <span>{formatRelativeTime(news.publish_time, t)}</span>
+            <span>{news.publish_time_inferred ? `${new Date(news.publish_time).toLocaleDateString()}（时间推断）` : formatRelativeTime(news.publish_time, t)}</span>
           </div>
         </div>
       </Link>

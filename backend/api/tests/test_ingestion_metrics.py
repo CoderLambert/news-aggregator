@@ -26,7 +26,7 @@ pytestmark = pytest.mark.django_db
 def article():
     return News.objects.create(title='Metrics article', content='Short summary.',
         url='https://webkit.org/blog/123/metrics-article/', publish_time=timezone.now(),
-        source=Source.objects.create(name='WebKit'), category=Category.objects.create(name='Metrics', slug='metrics'),
+        source=Source.objects.update_or_create(name='WebKit', defaults={})[0], category=Category.objects.create(name='Metrics', slug='metrics'),
         content_kind='article', full_content_fetch_status='queued', full_content_next_attempt_at=timezone.now())
 
 

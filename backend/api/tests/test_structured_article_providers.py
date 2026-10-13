@@ -91,7 +91,7 @@ def test_github_successful_raw_readme_path_is_reused_as_provenance():
     from api.models import Category, Source
     news = News.objects.create(title='owner/repo', url='https://github.com/owner/repo',
         publish_time=timezone.now(), category=Category.objects.create(name='Code', slug='code'),
-        source=Source.objects.create(name='GitHub Trending'), content_kind='readme')
+        source=Source.objects.update_or_create(name='GitHub Trending', defaults={})[0], content_kind='readme')
     preferred = 'https://raw.githubusercontent.com/owner/repo/master/README.md'
     news.full_content_provenance = {'retrieved_from_url': preferred}
     with patch.object(GitHubReadmeProvider, '_download', return_value='# owner/repo\n\nComplete short documentation.') as download:

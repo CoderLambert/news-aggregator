@@ -96,6 +96,7 @@ RESEARCH_SYSTEM_PROMPT = """\
 3. 保持客观中立，不偏信单一来源，呈现多方观点
 4. 如果信息不足，明确说明「暂未找到相关信息」
 5. 所有时间、数据、人名、机构名必须准确，有来源支撑
+6. 医疗健康内容标注「新闻资讯，不构成医疗建议」；摘要必须引用工具返回的原文 URL，不生成未经验证的链接，不把摘要称为全文
 6. 使用 generate_report 工具来规划报告结构，确保输出完整有深度
 
 始终使用中文回答。\
@@ -220,6 +221,7 @@ def run_agent_loop(
                     'id': result.get('id', None),
                     'source': result.get('source', ''),
                     'url': result.get('url', ''),
+                    **({'is_medical': True} if result.get('is_medical') else {}),
                     'content_truncated': result.get('content_truncated', False),
                     'original_length': result.get('original_length', 0),
                     'length': result.get('length', 0),

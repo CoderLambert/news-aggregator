@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useLocation, useNavigationType, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigationType, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { useLanguage } from '@/context/useLanguage'
-import { categoryOptions, newsListOptions, newsListPlaceholderData, sourceOptions } from '@/services/newsQueries'
+import { categoryOptions, newsListOptions, sourceOptions } from '@/services/newsQueries'
 import type { NewsListParams, NewsSummary, SearchMode } from '@/types/news'
 import NewsCard from '@/components/NewsCard'
 import type { BlockedNewsTarget } from '@/components/NewsCard'
@@ -13,6 +13,10 @@ import LoadingSpinner from '@/components/LoadingSpinner'
 import { Pagination } from '@/components/Pagination'
 import { Button } from '@/components/ui/button'
 import { useUnblockNews } from '@/hooks/useNewsMutations'
+import { useNewsScope } from '@/hooks/useNewsScope'
+import RegionFilter from '@/components/RegionFilter'
+import NewsScopeBar from '@/components/NewsScopeBar'
+import AuthModal from '@/components/AuthModal'
 import { useCapability } from '@/context/CapabilitiesContext'
 
 const PAGE_SIZE = 20
@@ -67,6 +71,8 @@ export default function NewsList() {
   const navigationType = useNavigationType()
   const historyNavigationKey = navigationType === 'POP' ? location.key : null
   const [searchParams, setSearchParams] = useSearchParams()
+  const invalidRegion = searchParams.has('region') && !['domestic', 'international'].includes(searchParams.get('region') ?? '')
+  const region = searchParams.get('region') === 'domestic' ? 'domestic' : searchParams.get('region') === 'international' ? 'international' : 'all'
   const search = searchParams.get('search') ?? ''
   const rawMode = searchParams.get('mode')
   const requestedMode: SearchMode = modes.includes(rawMode as SearchMode) ? rawMode as SearchMode : 'hybrid'
@@ -74,9 +80,12 @@ export default function NewsList() {
   const categories = selectedIds(searchParams.get('category'))
   const sources = selectedIds(searchParams.get('source'))
   const page = positiveInteger(searchParams.get('page'), 1)
-  const hasUrlFilters = ['search', 'mode', 'category', 'source', 'page'].some((key) => searchParams.has(key))
+  const hasUrlFilters = ['search', 'mode', 'category', 'source', 'page', 'scope', 'region'].some((key) => searchParams.has(key))
   const legacySignature = hasUrlFilters ? null : JSON.stringify(readLegacyFilters())
+  const [showLogin, setShowLogin] = useState(false)
   const legacyToMigrate = legacySignature && legacySignature !== 'null'
+
+  const reading = useNewsScope(searchParams, setSearchParams, Boolean(legacyToMigrate))
 
   useEffect(() => {
     if (semanticSearchEnabled || !rawMode || rawMode === 'keyword') return
@@ -100,15 +109,18 @@ export default function NewsList() {
   const query: NewsListParams = {
     page,
     page_size: PAGE_SIZE,
+    ...(region !== 'all' ? { region } : {}),
+    ...(reading.enabled || reading.scope !== 'all' ? { scope: reading.scope, ...(reading.groupId !== undefined ? { group_id: reading.groupId } : {}) } : {}),
     ...(search.trim() ? { search: search.trim(), mode } : {}),
     ...(categories.length ? { category: categories.join(',') } : {}),
     ...(sources.length ? { source: sources.join(',') } : {}),
   }
   const viewerId: number | string = user?.id ?? 'anonymous'
   const newsQuery = useQuery({
-    ...newsListOptions(query, lang, viewerId),
-    enabled: !authLoading && !legacyToMigrate,
-    placeholderData: newsListPlaceholderData(viewerId, lang),
+    ...newsListOptions(query, lang, viewerId, reading.sourceIds),
+    enabled: !invalidRegion && !authLoading && reading.ready && !reading.configError,
+    // Changing reading conditions clears old results and aborts their requests.
+    placeholderData: undefined,
   })
   const categoriesQuery = useQuery(categoryOptions(lang))
   const sourcesQuery = useQuery(sourceOptions(lang))
@@ -127,10 +139,10 @@ export default function NewsList() {
     updateParams({ [key]: values.length ? values.join(',') : null, page: null })
   }
 
-  const data = newsQuery.data
+  const data = !invalidRegion && reading.ready && !reading.configError && !authLoading ? newsQuery.data : undefined
   const totalPages = Math.ceil((data?.count ?? 0) / PAGE_SIZE)
-  const initialLoading = authLoading || newsQuery.isPending
-  const activeFilterCount = categories.length + sources.length + (search.trim() ? 1 : 0)
+  const initialLoading = !invalidRegion && !reading.configError && !reading.needsLogin && !reading.invalidScope && (authLoading || newsQuery.isPending)
+  const activeFilterCount = categories.length + sources.length + (search.trim() ? 1 : 0) + (region !== 'all' ? 1 : 0)
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
@@ -144,6 +156,17 @@ export default function NewsList() {
           {!initialLoading && data && <p className="text-xs text-muted-foreground"><span className="font-semibold text-foreground font-mono">{data.count}</span> {lang === 'en' ? 'stories' : '篇内容'}</p>}
         </div>
       </header>
+
+      <NewsScopeBar scope={reading.scope} groupId={reading.groupId} groups={reading.groups.data ?? []}
+        personal={reading.enabled} accounts={reading.accounts} onChange={reading.select} />
+      <RegionFilter value={region} onChange={value => updateParams({ region: value === 'all' ? null : value, source: null, page: null })} />
+      {invalidRegion && <p role="alert">无效的频道地区，请选择全部、国内或国际。</p>}
+      {reading.notice && <p role="status" className="mb-3 text-sm text-muted-foreground">{reading.notice}</p>}
+      {reading.configError && <div role="alert" className="mb-3 text-sm text-red-700">个人频道配置加载失败，筛选尚未应用。 <button className="underline" onClick={() => void reading.retry()}>重试</button></div>}
+      {reading.saveError && <div role="alert" className="mb-3 text-sm text-red-700">上次查看范围保存失败。 <button className="underline" onClick={reading.retrySave}>重试保存</button></div>}
+      {reading.invalidScope && <div role="alert">无效的资讯范围。 <button className="underline" onClick={() => reading.select('all')}>全部资讯</button></div>}
+      {reading.needsLogin && <p role="status" className="mb-3">登录后查看个人频道范围。 <button className="underline" onClick={() => setShowLogin(true)}>登录</button></p>}
+      {showLogin && <AuthModal onClose={() => setShowLogin(false)} />}
 
       <div className="mb-3">
         <SearchBar
@@ -159,18 +182,18 @@ export default function NewsList() {
 
       <NewsFilters
         categories={categoriesQuery.data ?? []}
-        sources={sourcesQuery.data ?? []}
+        sources={(sourcesQuery.data ?? []).filter(s => (reading.sourceIds === null || reading.sourceIds.includes(s.id)) && (region === 'all' || s.region === region))}
         activeCategories={categories}
         activeSources={sources}
         onCategoriesChange={(values) => updateFilter('category', values)}
         onSourcesChange={(values) => updateFilter('source', values)}
-        onClear={() => updateParams({ category: null, source: null, page: null })}
+        onClear={() => updateParams({ search: null, region: null, category: null, source: null, page: null })}
       />
 
       {activeFilterCount > 0 && (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-neutral-500" role="status">
           <span>{lang === 'en' ? `${activeFilterCount} active condition${activeFilterCount === 1 ? '' : 's'}` : `已启用 ${activeFilterCount} 个条件`}</span>
-          <Button type="button" variant="ghost" size="sm" onClick={() => updateParams({ search: null, mode: null, category: null, source: null, page: null })} className="h-7 rounded-full px-2 text-xs">
+          <Button type="button" variant="ghost" size="sm" onClick={() => updateParams({ search: null, mode: null, region: null, category: null, source: null, page: null })} className="h-7 rounded-full px-2 text-xs">
             {lang === 'en' ? 'Clear all' : '清除全部条件'}
           </Button>
         </div>
@@ -195,7 +218,14 @@ export default function NewsList() {
       {!initialLoading && !newsQuery.isError && data?.results.length === 0 && (
         <div className="py-20 text-center text-gray-400">
           <p className="text-lg">{lang === 'en' ? 'No results found' : '未找到结果'}</p>
-          {!search.trim() && categories.length === 0 && sources.length === 0 && (
+          {reading.scope !== 'all' && reading.sourceIds?.length === 0 ? (
+            <Link to="/channels" className="mt-3 inline-block text-primary underline">{reading.scope === 'group' ? '添加频道' : '选择频道'}</Link>
+          ) : activeFilterCount > 0 ? (
+            <button type="button" className="mt-3 text-primary underline" onClick={() => updateParams({ search: null, region: null, category: null, source: null, page: null })}>清除筛选</button>
+          ) : (
+            <Link to="/channels" className="mt-3 inline-block text-primary underline">选择频道</Link>
+          )}
+          {reading.scope === 'all' && !search.trim() && categories.length === 0 && sources.length === 0 && (
             <p className="mt-1 text-sm">{lang === 'en' ? 'Run crawler first: python manage.py crawl' : '请先运行爬虫: python manage.py crawl'}</p>
           )}
         </div>

@@ -25,7 +25,7 @@ RETIRED = ('leiphone', 'meta_ai', 'reuters', 'jiqizhixin', 'sanliu_kr')
 
 
 def test_registry_contains_only_public_supported_channels():
-    assert len(SPIDERS) == 26
+    assert len(SPIDERS) == 51
     assert set(SPIDERS) == {key for key, policy in POLICIES.items() if not policy.unsupported_reason}
     assert all(key not in SPIDERS for key in RETIRED)
 

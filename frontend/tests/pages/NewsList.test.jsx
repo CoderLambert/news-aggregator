@@ -10,6 +10,10 @@ import { CapabilitiesTestProvider } from '../helpers/capabilities'
 import { blockNews, fetchCategories, fetchNews, fetchNewsDetail, fetchSources, unblockNews } from '@/services/api'
 
 vi.mock('@/services/api', () => ({
+  fetchChannelSubscriptions: vi.fn().mockResolvedValue([]),
+  fetchChannelGroups: vi.fn().mockResolvedValue([]),
+  fetchNewsPreferences: vi.fn().mockResolvedValue({ scope: 'all', group_id: null }),
+  saveNewsPreferences: vi.fn().mockImplementation(value => Promise.resolve(value)),
   fetchNews: vi.fn(),
   fetchCategories: vi.fn(),
   fetchSources: vi.fn(),
@@ -152,6 +156,7 @@ describe('NewsList URL and server state', () => {
 
     expect(await screen.findByRole('heading', { name: 'Climate technology update' })).toBeInTheDocument()
     await waitFor(() => expect(fetchNews).toHaveBeenCalledWith({
+      scope: 'all',
       page: 2,
       page_size: 20,
       search: 'climate',
@@ -165,6 +170,7 @@ describe('NewsList URL and server state', () => {
     expect(screen.getByRole('group', { name: '来源' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Science' }))
     await waitFor(() => expect(fetchNews).toHaveBeenLastCalledWith({
+      scope: 'all',
       page: 1,
       page_size: 20,
       search: 'climate',
@@ -181,6 +187,7 @@ describe('NewsList URL and server state', () => {
     localStorage.setItem('news-aggregator-filters', JSON.stringify({ search: 'legacy query', searchMode: 'semantic', categories: [3], sources: [8] }))
     renderList('/')
     await waitFor(() => expect(fetchNews).toHaveBeenLastCalledWith({
+      scope: 'all',
       page: 1,
       page_size: 20,
       search: 'legacy query',
@@ -209,7 +216,8 @@ describe('NewsList URL and server state', () => {
       expect(screen.getByTestId('location-search')).toHaveTextContent('category=3')
       expect(screen.getByTestId('location-search')).toHaveTextContent('source=8')
       expect(fetchNews).toHaveBeenLastCalledWith({
-        page: 1,
+        scope: 'all',
+      page: 1,
         page_size: 20,
         search: 'climate',
         mode: 'semantic',
@@ -222,7 +230,7 @@ describe('NewsList URL and server state', () => {
   it('cancels a pending search when browser back or forward replaces the URL value', async () => {
     renderList(['/?search=before', '/?search=after'], { historyControls: true })
     await waitFor(() => expect(fetchNews).toHaveBeenCalledWith(
-      { page: 1, page_size: 20, search: 'after', mode: 'hybrid' },
+      { scope: 'all', page: 1, page_size: 20, search: 'after', mode: 'hybrid' },
       expect.any(AbortSignal),
     ))
 
@@ -247,6 +255,7 @@ describe('NewsList URL and server state', () => {
       '/?search=shared&mode=keyword&category=3&page=2',
     ], { historyControls: true })
     await waitFor(() => expect(fetchNews).toHaveBeenCalledWith({
+      scope: 'all',
       page: 2,
       page_size: 20,
       search: 'shared',
@@ -282,7 +291,7 @@ describe('NewsList URL and server state', () => {
     expect(await screen.findByRole('heading', { name: 'Climate technology update' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '2' }))
     await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('page=2'))
-    await waitFor(() => expect(fetchNews).toHaveBeenLastCalledWith({ page: 2, page_size: 20 }, expect.any(AbortSignal)))
+    await waitFor(() => expect(fetchNews).toHaveBeenLastCalledWith({ scope: 'all', page: 2, page_size: 20 }, expect.any(AbortSignal)))
   })
 
   it('labels summary content and prefetches article data on intent', async () => {
@@ -304,8 +313,8 @@ describe('NewsList URL and server state', () => {
     expect(await screen.findByRole('button', { name: '移除来源 Example source' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '清除全部条件' }))
-    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent(''))
-    await waitFor(() => expect(fetchNews).toHaveBeenLastCalledWith({ page: 1, page_size: 20 }, expect.any(AbortSignal)))
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('?scope=all'))
+    await waitFor(() => expect(fetchNews).toHaveBeenLastCalledWith({ scope: 'all', page: 1, page_size: 20 }, expect.any(AbortSignal)))
   })
 
   it('removes a blocked story immediately and lets the reader undo it', async () => {

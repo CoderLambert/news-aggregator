@@ -31,6 +31,8 @@ class Source(models.Model):
     ]
     name = models.CharField('来源名称', max_length=100, unique=True)
     url = models.URLField('来源网址', max_length=255)
+    region = models.CharField(max_length=16, choices=[('domestic', '国内'), ('international', '国际')], default='international', db_index=True)
+    description = models.TextField(blank=True, default='')
     logo = models.URLField('Logo', max_length=255, blank=True, default='')
     country = models.CharField('国家', max_length=50, default='CN')
     language = models.CharField('语言', max_length=50, default='zh')
@@ -1046,3 +1048,38 @@ class ResearchRunEvent(models.Model):
         constraints = [
             models.UniqueConstraint(fields=['run', 'sequence'], name='unique_research_event_sequence'),
         ]
+
+
+class ChannelSubscription(models.Model):
+    user = models.ForeignKey('auth.User', on_delete=models.CASCADE, related_name='channel_subscriptions')
+    source = models.ForeignKey(Source, on_delete=models.CASCADE, related_name='channel_subscriptions')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at', 'id']
+        constraints = [models.UniqueConstraint(fields=['user', 'source'], name='unique_user_channel_subscription')]
+
+
+class ChannelGroup(models.Model):
+    user = models.ForeignKey('auth.User', on_delete=models.CASCADE, related_name='channel_groups')
+    name = models.CharField(max_length=40)
+    subscriptions = models.ManyToManyField(ChannelSubscription, related_name='groups', through='ChannelGroupMember')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at', 'id']
+        constraints = [models.UniqueConstraint(fields=['user', 'name'], name='unique_user_channel_group_name')]
+
+
+class ChannelGroupMember(models.Model):
+    group = models.ForeignKey(ChannelGroup, on_delete=models.CASCADE)
+    subscription = models.ForeignKey(ChannelSubscription, on_delete=models.CASCADE)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['group', 'subscription'], name='unique_channel_group_member')]
+
+
+class NewsPreference(models.Model):
+    user = models.OneToOneField('auth.User', on_delete=models.CASCADE, related_name='news_preference')
+    scope = models.CharField(max_length=16, default='all', choices=[(s, s) for s in ('all', 'subscribed', 'ungrouped', 'group')])
+    group = models.ForeignKey(ChannelGroup, null=True, blank=True, on_delete=models.SET_NULL)

@@ -54,6 +54,12 @@ SOURCE_DEFAULTS = {
 }
 
 
+from api.services.source_policy import POLICIES
+from api.services.sector_feeds import SECTOR_KEYS
+from api.services.channel_catalog import catalog_defaults
+SOURCE_DEFAULTS.update({POLICIES[key].name: catalog_defaults(POLICIES[key]) for key in SECTOR_KEYS})
+
+
 def _title_hash(title):
     import hashlib
     return int(hashlib.md5(title.lower().strip().encode()).hexdigest()[:8], 16)

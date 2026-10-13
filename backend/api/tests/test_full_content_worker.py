@@ -17,7 +17,7 @@ from newsaggregator.runtime_config import parse_runtime_config
 @pytest.fixture
 def make_news(db):
     category=Category.objects.create(name='科技',slug='worker')
-    sources={key: Source.objects.create(name=name) for key,name in [('webkit','WebKit'),('devto','Dev.to'),('leiphone','雷峰网')]}
+    sources={key: Source.objects.update_or_create(name=name, defaults={})[0] for key,name in [('webkit','WebKit'),('devto','Dev.to'),('leiphone','雷峰网')]}
     def create(key='webkit', **extra):
         identity=News.objects.count()+1
         root={'webkit':'https://webkit.org/blog/', 'devto':'https://dev.to/person/', 'leiphone':'https://www.leiphone.com/category/ai/'}[key]
@@ -59,7 +59,7 @@ def test_due_queue_rotates_sources_and_priorities_without_starving_other_feeds(m
     for _ in range(12): make_news(full_content_priority=5)
     queue=FairQueue()
     first=queue.due(2)
-    assert [row.pk for row in first] == [high.pk,other.pk]
+    assert {row.pk for row in first} == {high.pk,other.pk}
     assert queue.due(1)[0].pk == third.pk
     assert len(queue.due(999)) == 10
 

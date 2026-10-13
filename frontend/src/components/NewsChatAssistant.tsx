@@ -27,6 +27,8 @@ interface NewsChatAssistantProps {
     hasFullContent?: boolean
     wordCount?: number
     title?: string
+    isMedical?: boolean
+    sourceUrl?: string
   }
 }
 
@@ -217,6 +219,7 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
           )}
           <ChatMessageList
             messages={messages}
+            medicalSourceUrl={articleContext?.isMedical ? articleContext.sourceUrl : undefined}
             phase={phase}
             onSuggestionClick={(text: string) => { void doSend(text) }}
             suggestedQuestions={suggestedQuestions}
