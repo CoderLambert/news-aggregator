@@ -59,6 +59,10 @@ function StatusAlert({ message, onRetry, showRetry = true, sourceUrl, retryLabel
 export default function FullContentFetchStatus({ news, articleLoading, onFetch, onResume = onFetch, onCancel }) {
   if (!news) return null
 
+  if (news.full_content_error_code === 'invalid_identity') {
+    return <StatusAlert title="链接待核验" message="来源文章身份尚未核验，当前保留摘要供阅读。" helperText="核验真实链接后才能获取原文。" showRetry={false} />
+  }
+
   const pending = hasPendingFullContentTask(news)
   const status = articleLoading && !pending ? 'fetching' : (news.full_content_fetch_status || 'pending')
   const hasBody = hasReadableFullContent(news)

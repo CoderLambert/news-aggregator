@@ -277,7 +277,7 @@ export default function NewsDetail() {
           ) : null}
 
           <div className="mt-10 border-t border-neutral-100 pt-6">
-            <a href={news.url} target="_blank" rel="noreferrer" className="text-sm text-neutral-400 transition-colors hover:text-neutral-600">{t.readOriginal}</a>
+            <>{news.full_content_error_code === 'invalid_identity' ? <span className="text-sm text-neutral-400">链接待核验</span> : <a href={news.url} target="_blank" rel="noreferrer" className="text-sm text-neutral-400 transition-colors hover:text-neutral-600">{t.readOriginal}</a>}</>
           </div>
         </article>
         {chatEnabled && <div hidden={assistantOpen}>

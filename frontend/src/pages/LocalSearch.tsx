@@ -448,7 +448,7 @@ function ArticleCard({ article, returnTo }: { article: NewsSummary; returnTo: st
           <h2 className="line-clamp-2 text-sm font-semibold text-foreground transition-colors group-hover:text-emerald-800 dark:group-hover:text-emerald-300">{title}</h2>
           {snippet && <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{snippet}</p>}
         </Link>
-        {article.url && (
+        {article.full_content_error_code === 'invalid_identity' ? <span className="text-xs text-muted-foreground">链接待核验</span> : article.url && (
           <a href={article.url} target="_blank" rel="noopener noreferrer" className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground" aria-label="打开原文">
             <ExternalLink className="size-3.5" />
           </a>

@@ -178,3 +178,27 @@ T10–T12、既有全部后端 CI/release gates、兼容 Compose 与恢复测试
 部署/回滚迁移前及失败后停止本项目四服务，按目标能力启动并验证 Worker；不健康/缺失时不切静态版本。restore 已有通用卷占用检查拒绝任意仍运行写入者，包括新 Worker，因此沿用这一更完整的检查。在线 backup 的文件/嵌入 manifest 校验同步接受严格 schema 2，快照 artifact 版本保持不变。真实文件 WAL 在线备份测试证明未提交的 identity/Feed/budget 更新不会混入快照，恢复快照通过 quick_check。
 
 相关 Python release/volume/fixture/新 Worker/快照测试实际 **163 passed**。release_scripts mocked gates 实际通过；local-domain args/resource gates 分别以旧镜像 capability=false 和新镜像 true 实际通过（Docker/browser 替身）。隔离本地域名脚本为新镜像加入禁用 Worker、共享数据库和日志卷、无外网网络及健康门禁，旧镜像不执行不存在的命令。G1/G2 正文夹具显式 legacy，避免把纯 raw body 当作新规则完整正文。真实 Docker/浏览器与完整 CI 结果将在 T12 填入，尚未宣称通过。
+
+
+## T11 实际结果与修复入口
+
+新增 repair_news_sources：必须显式 JSON mapping（schema_version=1, operations），默认 dry-run，逐条给 ID、旧/新值、证据和冲突；每次默认最多100条，--limit上限1000。不按标题生成链接，不改发布时间，不改正文/译文文本，不创建或删除 Source/GUID、不合并行，不修改 scheduler。支持受证据限制的旧雷峰网原位改名、已核验 News.id 的 Source FK/URL 定向修正、Reuters/机器之心未核验身份隔离。
+
+URL 更正无法证明正文属于同一文章时，保留审计文本/译文，正文 state=missing，并按准入和现有冷却排验证任务。等价链接必须提供当前 body SHA 证据才保持可读状态；两种情况 revision 均单调增加，旧成功/失败 lease 无效。审计文件0600，先 fsync prepared 意图再短事务 CAS，随后原子写实际结果；即使提交后写结果失败也能由 prepared 意图安全审查/撤销。undo 比较写入后的字段、revision、正文/译文 SHA 和 Source 元数据，不撤销后来领取或抓取的更改，不降低 revision。
+
+专属测试实际 **26 passed**：包括独立临时文件 SQLite WAL 的 CLI dry-run/apply/undo、收藏/聊天/私人及共享翻译历史保持、旧执行者 CAS 拒绝、混来源/URL占用/后续改动冲突、等价正文缺证、重跑幂等及审计结果写失败。未操作真实业务数据库；历史日期不作自动推断，历史映射只在新发现精确 URL 时补齐。
+
+操作示例（由运营者替换为经审查的映射和实际路径；本次没有执行）：
+
+```json
+{"schema_version":1,"operations":[{"action":"repair_news_identity","news_id":123,"expected":{"source_id":4,"url":"https://old.example/verified-record","full_content_revision":1},"new":{"source_id":7,"url":"https://www.leiphone.com/category/ai/real-publisher-id.html"},"evidence":{"kind":"verified_article_url","source_key":"leiphone","reference":"人工核验记录编号","verified_url":"https://www.leiphone.com/category/ai/real-publisher-id.html"}}]}
+```
+
+```bash
+python backend/manage.py repair_news_sources --mapping /absolute/reviewed-mapping.json
+python backend/manage.py repair_news_sources --mapping /absolute/reviewed-mapping.json --apply --audit-output /absolute/new-forward-audit.json
+python backend/manage.py repair_news_sources --undo-audit /absolute/new-forward-audit.json
+python backend/manage.py repair_news_sources --undo-audit /absolute/new-forward-audit.json --apply --audit-output /absolute/new-undo-audit.json
+```
+
+真实链接未核验记录的详情原文跳转及补抓入口、搜索跳转显示“链接待核验”，保留摘要可读。有限历史回填复用 fetch_full_content 的 source/status/date/age/limit/after-id/dry-run 范围；force 仅提升优先级，不清除限流/租约/失败计数。来源级同步优先，不能全库循环吞掉未排队历史。
