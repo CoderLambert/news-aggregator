@@ -65,9 +65,9 @@ function ChannelManager() {
   const selectedVisible = visible.filter(c => selected.includes(c.id)).map(c => c.id)
   const allSelected = visible.length > 0 && selectedVisible.length === visible.length
 
-  function run(perform: () => Promise<unknown>, success?: () => void) {
+  function run(perform: () => Promise<unknown>, success?: (result: unknown) => void) {
     if (!user) { setLogin(true); return }
-    mutation.mutate(perform, { onSuccess: () => { setConfirmation(null); success?.() } })
+    mutation.mutate(perform, { onSuccess: result => { setConfirmation(null); success?.(result) } })
   }
   function unsubscribe(sourceIds: number[]) {
     const affectedGroups = groups.filter(g => g.source_ids.some(id => sourceIds.includes(id)))
@@ -121,7 +121,7 @@ function ChannelManager() {
           <h2 className="font-semibold">我的分组</h2>
           <p className="mt-1 text-xs text-muted-foreground">通过分组整理已订阅频道，不影响原有订阅关系。</p>
         </div>
-        <form className="flex flex-wrap items-end gap-2" onSubmit={e => { e.preventDefault(); run(() => createChannelGroup(newName.trim()), () => setNewName('')) }}>
+        <form className="flex flex-wrap items-end gap-2" onSubmit={e => { e.preventDefault(); run(() => createChannelGroup(newName.trim()), result => { setNewName(''); if (isRecord(result) && typeof result.id === 'number') setGroupId(result.id) }) }}>
           <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-muted-foreground">新分组名称
             <input aria-label="新分组名称" placeholder="例如：人工智能" disabled={!writable} maxLength={40} required value={newName} onChange={e => setNewName(e.target.value)} className={control} />
           </label>
