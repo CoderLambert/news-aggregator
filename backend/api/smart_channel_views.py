@@ -1,0 +1,321 @@
+"""Real data endpoints for the NewsHub reading and channel workspace."""
+from datetime import timedelta
+import ipaddress
+from urllib.parse import urlsplit, parse_qsl, urlencode
+from django.conf import settings
+from django.core.validators import URLValidator
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
+from django.db.models import Count, Q
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from rest_framework.exceptions import APIException, NotFound, PermissionDenied, Throttled, ValidationError
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from rest_framework.throttling import SimpleRateThrottle
+from rest_framework.views import APIView
+from api.models import Source, News, NewsSourceItem, BlockedNews, ChannelGroup, ChannelSubscription
+from api.channel_views import PersonalChannelsView, ChannelSubscriptionsView, ChannelGroupDetailView, ids
+from api.smart_channel_models import (SourceTopicProfile, ChannelGroupingConfig, ChannelGroupingProposal,
+    ChannelClassifierSettings, ReadingDay, ChannelIntakeRequest)
+from api.services.channel_topics import TOPICS, PRESETS, TOPIC_MAP, channel_articles, profile_data, base_profile
+from api.services.channel_grouping import (lock_user, config_data, credential_fingerprint, make_proposal, apply_proposal,
+    undo_proposal, proposal_data, validated_mode, validated_topics, GroupingConflict, mark_manual, process_subscription)
+
+
+class WorkspaceThrottle(SimpleRateThrottle):
+    scope = 'channel_workspace'
+    rate = '60/min'
+    def get_cache_key(self, request, view):
+        return self.cache_format % {'scope': self.scope, 'ident': request.user.pk if request.user.is_authenticated else self.get_ident(request)}
+
+
+class PrivateWorkspaceView(PersonalChannelsView):
+    throttle_classes = [WorkspaceThrottle]
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        if settings.PUBLIC_SITE_MODE != 'full':
+            raise PermissionDenied('当前站点为只读模式。')
+
+
+class CatalogView(APIView):
+    permission_classes = [AllowAny]
+    def get(self, request):
+        profiles = {p.source_id: p for p in SourceTopicProfile.objects.all()}
+        counts = dict(News.objects.values('source_id').annotate(n=Count('id')).values_list('source_id', 'n'))
+        channel_counts = dict(NewsSourceItem.objects.values('source_key').annotate(n=Count('news_id', distinct=True)).values_list('source_key', 'n'))
+        own_counts = {(r['source_key'], r['news__source_id']): r['n'] for r in NewsSourceItem.objects.values('source_key', 'news__source_id').annotate(n=Count('news_id', distinct=True))}
+        catalog = []
+        for source in Source.objects.order_by('name'):
+            data = profile_data(source, profiles.get(source.pk, False))
+            data['news_count'] = counts.get(source.pk, 0) + channel_counts.get(data['policy_key'], 0) - own_counts.get((data['policy_key'], source.pk), 0)
+            catalog.append(data)
+        return Response({'topics': TOPICS, 'presets': PRESETS, 'sources': catalog})
+
+
+class SourceProfileView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [WorkspaceThrottle]
+    def get(self, request, pk):
+        source = get_object_or_404(Source, pk=pk)
+        data = profile_data(source)
+        articles = channel_articles(source).select_related('source')
+        if request.user.is_authenticated:
+            articles = articles.exclude(id__in=BlockedNews.objects.filter(user=request.user).values('news_id'))
+        data['news_count'] = articles.count()
+        data['recent_articles'] = list(articles.order_by('-publish_time').values('id', 'title', 'publish_time')[:8])
+        return Response(data, headers={'Cache-Control': 'private, no-store'})
+
+    @transaction.atomic
+    def patch(self, request, pk):
+        if settings.PUBLIC_SITE_MODE != 'full' or not request.user.is_authenticated or not request.user.is_superuser or not request.user.is_active:
+            raise PermissionDenied()
+        lock_user(request.user)
+        source = get_object_or_404(Source, pk=pk)
+        if not isinstance(request.data, dict):
+            raise ValidationError('请求应为 JSON 对象。')
+        topics = request.data.get('topics', [])
+        if topics:
+            topics = validated_topics(topics)
+        elif not isinstance(topics, list):
+            raise ValidationError('无效主题。')
+        about = request.data.get('description', '')
+        if not isinstance(about, str) or len(about) > 1000:
+            raise ValidationError('简介最多 1000 字。')
+        stored = SourceTopicProfile.objects.filter(source=source).first()
+        SourceTopicProfile.objects.update_or_create(source=source, defaults={
+            'about': about.strip(), 'topics': topics, 'origin': 'manual',
+            'evidence_hash': base_profile(source)['evidence_hash'], 'revision': stored.revision + 1 if stored else 1})
+        return Response(profile_data(source))
+
+
+def normalize_url(value):
+    if not isinstance(value, str) or len(value) > 1024:
+        raise ValidationError('请输入有效的网站或 RSS 地址。')
+    value = value.strip()
+    try:
+        URLValidator(schemes=['http', 'https'])(value)
+        parsed = urlsplit(value)
+        host = (parsed.hostname or '').lower().rstrip('.')
+        if parsed.username or parsed.password or parsed.fragment or parsed.port not in (None, 80, 443):
+            raise ValueError()
+        if host in {'localhost', 'metadata.google.internal'} or host.endswith(('.localhost', '.local', '.internal')):
+            raise ValueError()
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            pass
+        else:
+            raise ValueError()
+    except (ValueError, DjangoValidationError):
+        raise ValidationError('只接受不含凭据的公开 HTTP(S) 域名地址。') from None
+    return value, host.removeprefix('www.'), parsed.path.rstrip('/'), urlencode(sorted(parse_qsl(parsed.query)))
+
+
+class ResolveChannelView(PrivateWorkspaceView):
+    def post(self, request):
+        value, host, path, query = normalize_url(request.data.get('url'))
+        exact, publisher = [], []
+        for source in Source.objects.all():
+            data = profile_data(source)
+            for address in [source.url, data['feed_url']]:
+                if not address:
+                    continue
+                try:
+                    _, candidate_host, candidate_path, candidate_query = normalize_url(address)
+                except ValidationError:
+                    continue
+                if candidate_host == host:
+                    publisher.append(data)
+                    if candidate_path == path and candidate_query == query:
+                        exact.append(data)
+        # Whole-site roots can legitimately resolve to several reviewed subchannels.
+        matches = exact or (publisher if not path and not query else [])
+        unique = {item['id']: item for item in matches}
+        return Response({'matches': list(unique.values()), 'supported': bool(unique),
+            'message': '请选择要订阅的已登记频道。' if unique else '此地址尚未登记，可提交接入申请；不会立即抓取或订阅。', 'url': value})
+
+
+class IntakeView(PrivateWorkspaceView):
+    def get(self, request):
+        return Response(list(ChannelIntakeRequest.objects.filter(user=request.user).order_by('-created_at').values('id', 'url', 'status', 'created_at')[:30]))
+    @transaction.atomic
+    def post(self, request):
+        lock_user(request.user)
+        url, _, _, _ = normalize_url(request.data.get('url'))
+        if any(k.lower() in {'token', 'key', 'api_key', 'access_token', 'password'} for k, _ in parse_qsl(urlsplit(url).query)):
+            raise ValidationError('接入申请不能包含私有令牌。')
+        if ChannelIntakeRequest.objects.filter(user=request.user, created_at__date=timezone.localdate()).count() >= 10:
+            raise Throttled(3600, '已达到今日接入申请上限。')
+        item, created = ChannelIntakeRequest.objects.get_or_create(user=request.user, url=url)
+        return Response({'id': item.pk, 'url': item.url, 'status': item.status}, status=201 if created else 200)
+
+
+class GroupingConfigView(PrivateWorkspaceView):
+    def get(self, request):
+        data = config_data(request.user)
+        data['ai_available'] = settings.PUBLIC_AI_ENABLED and bool(credential_fingerprint(request.user))
+        return Response(data)
+    @transaction.atomic
+    def patch(self, request):
+        lock_user(request.user)
+        cfg, _ = ChannelGroupingConfig.objects.get_or_create(user=request.user)
+        cfg.mode = validated_mode(request.data.get('mode', cfg.mode))
+        bindings = request.data.get('bindings', cfg.bindings)
+        if not isinstance(bindings, dict) or len(bindings) > len(TOPIC_MAP):
+            raise ValidationError('无效的主题绑定。')
+        for key, group_id in bindings.items():
+            if key not in TOPIC_MAP or type(group_id) is not int:
+                raise ValidationError('无效的主题绑定。')
+            if not ChannelGroup.objects.filter(pk=group_id, user=request.user).exists():
+                raise NotFound()
+        cfg.bindings = bindings
+        cfg.revision += 1
+        cfg.active_since = timezone.now()
+        cfg.save()
+        return self.get(request)
+
+
+class ProposalsView(PrivateWorkspaceView):
+    def get(self, request):
+        items = ChannelGroupingProposal.objects.filter(user=request.user, public_source__isnull=True)[:30]
+        return Response([proposal_data(item) for item in items])
+    def post(self, request):
+        proposal = make_proposal(request.user, request.data)
+        return Response(proposal_data(proposal), status=202 if proposal.status == 'queued' else 201)
+
+
+class ProposalView(PrivateWorkspaceView):
+    def get(self, request, pk):
+        proposal = get_object_or_404(ChannelGroupingProposal, pk=pk, user=request.user, public_source__isnull=True)
+        return Response(proposal_data(proposal))
+
+
+class ApplyProposalView(PrivateWorkspaceView):
+    def post(self, request, pk):
+        return Response(proposal_data(apply_proposal(request.user, pk, request.data)))
+
+
+class CancelProposalView(PrivateWorkspaceView):
+    @transaction.atomic
+    def post(self, request, pk):
+        lock_user(request.user)
+        proposal = get_object_or_404(ChannelGroupingProposal, pk=pk, user=request.user, public_source__isnull=True)
+        if proposal.status in {'applied', 'undone'}:
+            raise GroupingConflict('已应用的建议请使用撤销。')
+        proposal.status, proposal.lease_token = 'cancelled', ''
+        proposal.save(update_fields=['status', 'lease_token'])
+        return Response(proposal_data(proposal))
+
+
+class UndoProposalView(PrivateWorkspaceView):
+    def post(self, request, pk):
+        return Response(proposal_data(undo_proposal(request.user, pk)))
+
+
+class SiteClassifierView(PrivateWorkspaceView):
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        if not request.user.is_superuser:
+            raise PermissionDenied()
+    def get(self, request):
+        cfg = ChannelClassifierSettings.objects.filter(pk=1).first()
+        jobs = ChannelGroupingProposal.objects.filter(public_source__isnull=False).order_by('-created_at')[:20]
+        return Response({'enabled': bool(cfg and cfg.enabled), 'is_owner': bool(cfg and cfg.owner_id == request.user.pk),
+            'daily_limit': cfg.daily_limit if cfg else 10,
+            'jobs': [proposal_data(j) for j in jobs],
+            'intake_requests': list(ChannelIntakeRequest.objects.order_by('-created_at').values('id', 'url', 'status', 'created_at')[:30])})
+    @transaction.atomic
+    def patch(self, request):
+        lock_user(request.user)
+        enabled, limit = request.data.get('enabled'), request.data.get('daily_limit', 10)
+        if type(enabled) is not bool or type(limit) is not int or not 1 <= limit <= 20:
+            raise ValidationError('请选择开关与每日 1–20 个任务的预算。')
+        if enabled and (request.data.get('consent') is not True or not settings.PUBLIC_AI_ENABLED or not credential_fingerprint(request.user)):
+            raise ValidationError('开启前须同意使用本管理员的模型额度，并配置有效的模型连接。')
+        ChannelClassifierSettings.objects.update_or_create(pk=1, defaults={'owner': request.user, 'enabled': enabled, 'daily_limit': limit})
+        return self.get(request)
+
+
+class SmartSubscriptionsView(ChannelSubscriptionsView):
+    @transaction.atomic
+    def post(self, request):
+        lock_user(request.user)
+        source_ids = ids(request.data, 'source_ids')
+        before = {s.source_id: set(s.groups.values_list('id', flat=True)) for s in ChannelSubscription.objects.filter(user=request.user, source_id__in=source_ids).prefetch_related('groups')}
+        response = super().post(request)
+        action = request.data.get('action', 'subscribe')
+        if action == 'set_groups':
+            for source_id in source_ids:
+                mark_manual(request.user, source_id, before.get(source_id, set()), set(request.data['group_ids']))
+        if action == 'subscribe':
+            for subscription in ChannelSubscription.objects.filter(user=request.user, source_id__in=set(source_ids) - set(before)):
+                try:
+                    process_subscription(subscription.pk)
+                except APIException:
+                    # Subscription still succeeds; the worker can retry organization.
+                    pass
+        return response
+
+
+class SmartGroupDetailView(ChannelGroupDetailView):
+    @transaction.atomic
+    def patch(self, request, pk):
+        lock_user(request.user)
+        group = get_object_or_404(ChannelGroup, pk=pk, user=request.user)
+        before = set(group.subscriptions.values_list('source_id', flat=True))
+        response = super().patch(request, pk)
+        after = set(group.subscriptions.values_list('source_id', flat=True))
+        touched = before ^ after
+        for key in ('source_ids', 'add_source_ids', 'remove_source_ids'):
+            touched.update(request.data.get(key, []))
+        for source_id in touched:
+            mark_manual(request.user, source_id, {pk} if source_id in before else set(), {pk} if source_id in after else set())
+        return response
+
+
+class ReadingStatsView(PrivateWorkspaceView):
+    def get(self, request):
+        today = timezone.localdate()
+        events = ReadingDay.objects.filter(user=request.user)
+        days = dict(events.filter(day__gte=today - timedelta(days=6)).values('day').annotate(n=Count('news_id', distinct=True)).values_list('day', 'n'))
+        cursor = today if events.filter(day=today).exists() else today - timedelta(days=1)
+        streak = 0
+        for day in events.values_list('day', flat=True).distinct().order_by('-day')[:366]:
+            if day == cursor:
+                streak += 1
+                cursor -= timedelta(days=1)
+            elif day < cursor:
+                break
+        return Response({'today': days.get(today, 0), 'total': events.values('news_id').distinct().count(), 'streak': streak,
+            'timezone': settings.TIME_ZONE, 'week': [{'day': (today - timedelta(days=i)).isoformat(), 'count': days.get(today - timedelta(days=i), 0)} for i in range(6, -1, -1)]})
+    def post(self, request):
+        news_id = request.data.get('news_id')
+        if type(news_id) is not int or news_id <= 0:
+            raise ValidationError('无效新闻 ID。')
+        if BlockedNews.objects.filter(user=request.user, news_id=news_id).exists():
+            raise NotFound()
+        news = get_object_or_404(News, pk=news_id)
+        ReadingDay.objects.get_or_create(user=request.user, news=news, day=timezone.localdate())
+        return Response({'recorded': True})
+    def delete(self, request):
+        ReadingDay.objects.filter(user=request.user).delete()
+        return Response(status=204)
+
+
+class DashboardView(APIView):
+    permission_classes = [AllowAny]
+    def get(self, request):
+        news = News.objects.filter(related_to__isnull=True, publish_time__lte=timezone.now()).select_related('source')
+        if request.user.is_authenticated:
+            news = news.exclude(id__in=BlockedNews.objects.filter(user=request.user).values('news_id'))
+        ranked = ReadingDay.objects.filter(day__gte=timezone.localdate() - timedelta(days=1), news_id__in=news.values('id')).values('news_id').annotate(readers=Count('user_id', distinct=True)).order_by('-readers', '-news_id')[:10]
+        ranks = list(ranked)
+        if ranks:
+            by_id = news.in_bulk([r['news_id'] for r in ranks])
+            articles = [by_id[r['news_id']] for r in ranks if r['news_id'] in by_id]
+        else:
+            articles = list(news.order_by('-publish_time')[:10])
+        return Response({'kind': 'popular' if ranks else 'latest', 'stories': [
+            {'id': n.pk, 'title': n.title, 'source_name': n.source.name, 'publish_time': n.publish_time} for n in articles]},
+            headers={'Cache-Control': 'private, no-store'})
