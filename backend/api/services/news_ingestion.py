@@ -161,6 +161,6 @@ def _ingest_transaction(item, policy, url, upstream_id, discovery, kind, candida
         reason = 'structured_body_disabled'
     if (getattr(settings, 'FULL_CONTENT_AUTO_ENQUEUE_ENABLED', False) and
             policy.key in getattr(settings, 'FULL_CONTENT_AUTO_SOURCE_KEYS', ()) and
-            not inferred and published is not None and published >= seen - timedelta(days=7) and kind == 'article'):
+            not inferred and published is not None and seen - timedelta(days=7) <= published <= seen and kind == 'article'):
         enqueue_fetch(news)
     return IngestResult(news.pk, 'committed', reason, changed, body_committed)

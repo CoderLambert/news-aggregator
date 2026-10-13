@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import os
 import secrets
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Mapping
 
@@ -41,6 +42,13 @@ class RuntimeConfig:
     edge_tts_endpoint: str
     waitress_trusted_proxy: str | None
     techcrunch_wp_enabled: bool
+    structured_body_ingest_enabled: bool
+    structured_body_source_keys: frozenset[str]
+    full_content_worker_enabled: bool
+    full_content_auto_enqueue_enabled: bool
+    full_content_auto_source_keys: frozenset[str]
+    full_content_worker_lock: str
+    full_content_worker_heartbeat: str
 
 
 def resolve_django_environment(environ: Mapping[str, str]) -> str:
@@ -64,6 +72,21 @@ def _boolean(environ: Mapping[str, str], name: str, default: str) -> bool:
 
 def _comma_separated(value: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in value.split(",") if part.strip())
+
+
+def _source_keys(environ, name):
+    from api.services.source_policy import POLICIES
+    keys = frozenset(_comma_separated(environ.get(name, '')))
+    if any(key not in POLICIES or POLICIES[key].unsupported_reason for key in keys):
+        raise ImproperlyConfigured(f'{name} contains an unknown or quarantined source_key.')
+    return keys
+
+
+def _worker_path(environ, name, default):
+    value = environ.get(name, default)
+    if not value or '\x00' in value:
+        raise ImproperlyConfigured(f'{name} must be a nonempty filesystem path.')
+    return value
 
 
 def _strict_comma_separated(value: str) -> tuple[str, ...]:
@@ -201,6 +224,13 @@ def parse_runtime_config(
     trusted_proxy = _production_proxy(environ) if production else None
 
     return RuntimeConfig(
+        structured_body_ingest_enabled=_boolean(environ, 'STRUCTURED_BODY_INGEST_ENABLED', '0'),
+        structured_body_source_keys=_source_keys(environ, 'STRUCTURED_BODY_SOURCE_KEYS'),
+        full_content_worker_enabled=_boolean(environ, 'FULL_CONTENT_WORKER_ENABLED', '0'),
+        full_content_auto_enqueue_enabled=_boolean(environ, 'FULL_CONTENT_AUTO_ENQUEUE_ENABLED', '0'),
+        full_content_auto_source_keys=_source_keys(environ, 'FULL_CONTENT_AUTO_SOURCE_KEYS'),
+        full_content_worker_lock=_worker_path(environ, 'FULL_CONTENT_WORKER_LOCK', '/var/lib/newshub/logs/full-content.lock' if production else str(Path(__file__).resolve().parents[1] / 'logs/full-content.lock')),
+        full_content_worker_heartbeat=_worker_path(environ, 'FULL_CONTENT_WORKER_HEARTBEAT', '/var/lib/newshub/logs/full-content-heartbeat.json' if production else str(Path(__file__).resolve().parents[1] / 'logs/full-content-heartbeat.json')),
         techcrunch_wp_enabled=techcrunch_wp_enabled,
         environment=mode,
         debug=debug,

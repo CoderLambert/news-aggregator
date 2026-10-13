@@ -22,7 +22,7 @@
 | T05 | Feed 解析、条件状态、receipt；失败不推进 checkpoint | 已验证并提交 |
 | T06 | DEV/HN/首批全文 Feed；按来源契约 fixtures | 已验证并提交 |
 | T07 | TC 与其余来源；31 来源策略及降级 | 已验证并提交 |
-| T08 | 常驻 Worker、心跳、队列、旧命令；恢复/取消/无隐式回填 | 待实施 |
+| T08 | 常驻 Worker、心跳、队列、旧命令；恢复/取消/无隐式回填 | 已验证并提交 |
 | T09 | API、前端、翻译/聊天/研究/TTS；排队与正文可用性 | 待实施 |
 | T10 | Compose、发布/恢复/旧版本；现有 release gates | 待实施 |
 | T11 | 有证据的修复与有限补排；dry-run/冲突/反向 CAS | 待实施 |
@@ -135,3 +135,16 @@ TechCrunchWPProvider 域名限定，独立 TECHCRUNCH_WP_ENABLED 严格 0/1、�
 实际相关回归 **432 passed**：全部 crawler、TechCrunch/结构化 Providers、article_fetcher/security、ingestion/正文 CAS、production_settings、VentureBeat 日期兼容测试。独立 74 个矩阵场景与 12 个 HTML 发现场景全部通过。后续实际响应端点检查补充后再跑 Provider 子集 **73 passed**。`makemigrations --check --dry-run` 实际 No changes detected；`git diff --check` 通过。没有实际 TC/API/新闻站点请求，没有生产开关变更。
 
 T08–T12、Worker/API/UI/发布兼容集合与完整 CI 继续实施；goal 保持 active。
+
+
+## T08 实际结果
+
+auto_fetch_full_content 成为独立前台常驻进程，默认 disabled 仍存活。WorkerRuntime 的 flock/心跳默认生产共享 logs-data 路径，与容器 /tmp 无关；heartbeat 原子替换，每 10 秒独立写进程 owner、循环进展与 DB 状态。健康检查验证新鲜时间、实际锁持有者、同一 owner、严格布尔字段，禁用/空队列/长冷却仍可健康；不能用旧文件或字符串 false 冒充健康。运行/结构化/自动入队开关与来源白名单通过现有 runtime_config 解析，默认关闭/空集合，未知或隔离源拒绝。没有 ApiConfig/web 内正文 Worker 线程。
+
+只执行 next_attempt_at 明确到期的持久任务，无历史 pending 扫描。每批最多 10 个、按来源循环且每来源优先级排序，保留已有正文的刷新任务。五分钟旧 lease（含无时间戳）通过 URL/revision/时间戳 CAS 恢复，不重置失败数，恢复及取消/新排队不早于持久 host 冷却。SIGTERM 停止领取并在下一 Provider/写正文前检查取消，释放自己的任务为 queued，保留优先级和失败数。预算延期不算真实失败，终止/耗尽不无限自动重试。
+
+fetch_full_content 改为有界 enqueue/dry-run，保留来源、状态、重试、年龄、force 等筛选；force 只增加刷新意图，不改他人 lease 或冷却。backfill_full_content_scrapy 为兼容 enqueue 别名，没有 subprocess/独立抓取。限额必须 1–500，since/until 必须带时区；recent-only 仅最近七天、可靠来源日期、自动准入、无正文且无任务，过滤在限额前完成。after-id/next_after_id 支持混合历史选择的有限分批继续。未来日期不会前移 DEV 详情或自动排队。
+
+实际相关回归 **436 passed**：Worker/命令、状态/ingestion、全部 crawler、真实进程 Worker、请求预算、production_settings、结构化/TC Providers、FeedState。8 个独立进程场景全部通过，显式临时文件 SQLite 断言 WAL、禁用/空队列心跳、不同 TMPDIR/cwd 的第二进程锁拒绝、损坏/过期/错 owner 心跳、不再持锁时健康失败、SIGTERM 45 秒内退出且不进第二 Provider、取消保留冷却、SIGKILL 后新 owner 与预算/正文 lease 恢复。所有 Provider/网络为受控替身，并禁止 publisher socket connect。后台失去 claim 的独立回归 **1 passed**。
+
+`manage.py check` 实际无问题；`makemigrations --check --dry-run` 实际 No changes detected；`git diff --check` 通过。T09–T12、兼容部署配置及完整 CI 尚需完成，没有操作生产或隐式回填。

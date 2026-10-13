@@ -112,18 +112,32 @@ def _owned_query(news):
     )
 
 
-def enqueue_fetch(news, *, force=False, priority=0):
-    """Persist one task intent; duplicates and force preserve leases/cooldowns."""
+def fetch_eligibility(news):
     from api.services.source_policy import policy_for_url
     from api.services.article_fetcher.site_rules import get_site_rule
     from api.services.article_identity import InvalidIdentity, normalize_article_url
     try:
         normalize_article_url(news.url)
     except InvalidIdentity:
-        return 'rejected'
+        return 'invalid_identity'
     policy = policy_for_url(news.url)
-    if ((policy and (policy.unsupported_reason or not policy.html_allowed)) or
+    if (news.content_kind in {'abstract', 'product'} or
+            (policy and (policy.unsupported_reason or not policy.html_allowed)) or
             (not policy and not get_site_rule(news.url))):
+        return 'unsupported'
+    return ''
+
+
+def _known_cooldown(url):
+    from api.services.request_budget import scope_intervals
+    from api.models import RequestBudget
+    deadlines = RequestBudget.objects.filter(key__in=scope_intervals(url), cooldown_until__isnull=False).values_list('cooldown_until', flat=True)
+    return max([tz_now(), *deadlines])
+
+
+def enqueue_fetch(news, *, force=False, priority=0):
+    """Persist one task intent; duplicates and force preserve leases/cooldowns."""
+    if fetch_eligibility(news):
         return 'rejected'
     if has_full_content(news) and not force:
         return 'cached'
@@ -136,7 +150,7 @@ def enqueue_fetch(news, *, force=False, priority=0):
     if news.full_content_next_attempt_at is not None or news.full_content_fetch_status == 'fetching':
         return 'reused'
     updated = query.filter(full_content_next_attempt_at__isnull=True).exclude(full_content_fetch_status='fetching').update(
-        full_content_fetch_status='queued', full_content_next_attempt_at=now,
+        full_content_fetch_status='queued', full_content_next_attempt_at=_known_cooldown(news.url),
         full_content_priority=max(-10, min(10, priority)), full_content_retry_count=0,
         full_content_error_code='', full_content_fetch_error='',
     )
@@ -146,15 +160,7 @@ def enqueue_fetch(news, *, force=False, priority=0):
 
 def claim_fetch(news: News, *, force: bool = False) -> FetchLease | None:
     """Claim only scheduled, due work, fenced by its request-before snapshot."""
-    from api.services.source_policy import policy_for_url
-    from api.services.article_fetcher.site_rules import get_site_rule
-    from api.services.article_identity import InvalidIdentity, normalize_article_url
-    try:
-        normalize_article_url(news.url)
-    except InvalidIdentity:
-        return None
-    policy = policy_for_url(news.url)
-    if (policy and (policy.unsupported_reason or not policy.html_allowed)) or (not policy and not get_site_rule(news.url)):
+    if fetch_eligibility(news):
         return None
     now = tz_now()
     stale_before = now - FETCH_IN_PROGRESS_TTL
@@ -180,7 +186,7 @@ def owns_fetch(news) -> bool:
 
 def release_fetch_claim(news: News, *, next_attempt_at=None) -> bool:
     """Cancellation preserves the durable task; never releases someone else's lease."""
-    when = max(tz_now(), next_attempt_at or tz_now(), news.full_content_next_attempt_at or tz_now())
+    when = max(_known_cooldown(news.url), next_attempt_at or tz_now(), news.full_content_next_attempt_at or tz_now())
     released = _owned_query(news).update(
         full_content_fetch_status='queued', full_content_next_attempt_at=when,
     ) == 1
@@ -193,12 +199,17 @@ def release_fetch_claim(news: News, *, next_attempt_at=None) -> bool:
 def recover_stale_fetches():
     now = tz_now()
     stale = Q(last_full_content_attempt__lt=now - FETCH_IN_PROGRESS_TTL) | Q(last_full_content_attempt__isnull=True)
-    # Preserve an existing future retry time; recovering a process is not a retry.
+    # Snapshot/fence recovery too; it must not release a newer owner's claim.
+    # A killed process may have observed 429 before saving its task retry time.
+    recovered = 0
     query = News.objects.filter(stale, full_content_fetch_status='fetching')
-    immediate = query.filter(Q(full_content_next_attempt_at__isnull=True) | Q(full_content_next_attempt_at__lte=now)).update(
-        full_content_fetch_status='queued', full_content_next_attempt_at=now,
-    )
-    return immediate + query.filter(full_content_next_attempt_at__gt=now).update(full_content_fetch_status='queued')
+    for news in query.only('pk', 'url', 'full_content_revision', 'last_full_content_attempt',
+                           'full_content_next_attempt_at').order_by('pk')[:500]:
+        when = max(_known_cooldown(news.url), news.full_content_next_attempt_at or now)
+        recovered += News.objects.filter(pk=news.pk, url=news.url, full_content_revision=news.full_content_revision,
+            full_content_fetch_status='fetching', last_full_content_attempt=news.last_full_content_attempt).update(
+                full_content_fetch_status='queued', full_content_next_attempt_at=when)
+    return recovered
 
 
 def mark_fetching(news: News):

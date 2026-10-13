@@ -67,7 +67,7 @@ class DevToSpider(scrapy.Spider):
                     self.name in getattr(settings, 'STRUCTURED_BODY_SOURCE_KEYS', ())):
                 continue
             published = item['publish_time']
-            if not published or published < timezone.now() - timedelta(days=7):
+            if not published or not timezone.now() - timedelta(days=7) <= published <= timezone.now():
                 continue
             news = await sync_to_async(News.objects.get, thread_sensitive=True)(pk=result.news_id)
             known_modified = parse_source_datetime(news.full_content_provenance.get('source_modified_at'))

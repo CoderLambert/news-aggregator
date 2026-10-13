@@ -88,6 +88,13 @@ CHATGPT_AUTH_MODE = _RUNTIME_CONFIG.chatgpt_auth_mode
 EDGE_TTS_ENDPOINT = _RUNTIME_CONFIG.edge_tts_endpoint
 WAITRESS_TRUSTED_PROXY = _RUNTIME_CONFIG.waitress_trusted_proxy
 TECHCRUNCH_WP_ENABLED = _RUNTIME_CONFIG.techcrunch_wp_enabled
+STRUCTURED_BODY_INGEST_ENABLED = _RUNTIME_CONFIG.structured_body_ingest_enabled
+STRUCTURED_BODY_SOURCE_KEYS = _RUNTIME_CONFIG.structured_body_source_keys
+FULL_CONTENT_WORKER_ENABLED = _RUNTIME_CONFIG.full_content_worker_enabled
+FULL_CONTENT_AUTO_ENQUEUE_ENABLED = _RUNTIME_CONFIG.full_content_auto_enqueue_enabled
+FULL_CONTENT_AUTO_SOURCE_KEYS = _RUNTIME_CONFIG.full_content_auto_source_keys
+FULL_CONTENT_WORKER_LOCK = str(_data_path('FULL_CONTENT_WORKER_LOCK', Path(_RUNTIME_CONFIG.full_content_worker_lock)))
+FULL_CONTENT_WORKER_HEARTBEAT = str(_data_path('FULL_CONTENT_WORKER_HEARTBEAT', Path(_RUNTIME_CONFIG.full_content_worker_heartbeat)))
 
 DJANGO_DB_PATH = _data_path(
     'DJANGO_DB_PATH',

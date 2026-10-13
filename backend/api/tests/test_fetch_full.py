@@ -143,12 +143,14 @@ class TestNewsFetchFullView:
 
     def test_background_worker_does_not_fetch_after_losing_the_atomic_claim(self, src, cat):
         news = _news(src, cat, content='')
+        news.url = 'https://webkit.org/blog/12/article/'
 
-        with patch('api.management.commands.auto_fetch_full_content.claim_fetch', return_value=False), \
+        with patch('api.services.full_content_worker.claim_fetch', return_value=False) as claim, \
                 patch('api.services.article_fetcher.fetch_article_markdown') as fetch:
             result = _fetch_one(news, providers_chain=[])
 
         assert result is None
+        claim.assert_called_once_with(news)
         fetch.assert_not_called()
 
     def test_whitespace_only_cached_body_is_replaced_with_readable_content(self, authenticated_client, src, cat):
