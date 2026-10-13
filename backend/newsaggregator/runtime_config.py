@@ -283,7 +283,9 @@ def build_waitress_options(
         "connection_limit": connection_limit,
         "channel_timeout": 300,
         "trusted_proxy": config.waitress_trusted_proxy,
-        "trusted_proxy_count": 1 if trusted else None,
+        # Waitress coerces explicitly supplied values to int; omit the option
+        # without a proxy so its own default can handle the untrusted mode.
+        **({"trusted_proxy_count": 1} if trusted else {}),
         "trusted_proxy_headers": (
             set(WAITRESS_TRUSTED_PROXY_HEADERS) if trusted else set()
         ),

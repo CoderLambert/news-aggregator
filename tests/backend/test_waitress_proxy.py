@@ -103,7 +103,11 @@ def test_development_waitress_does_not_trust_forwarded_headers():
     assert options["host"] == "0.0.0.0"
     assert options["port"] == 9527
     assert options["trusted_proxy"] is None
-    assert options["trusted_proxy_count"] is None
+    assert "trusted_proxy_count" not in options
+    from waitress.adjustments import Adjustments
+    adjustments = Adjustments(**options)
+    assert adjustments.trusted_proxy is None
+    assert adjustments.clear_untrusted_proxy_headers is True
     assert options["trusted_proxy_headers"] == set()
     assert options["clear_untrusted_proxy_headers"] is True
 
