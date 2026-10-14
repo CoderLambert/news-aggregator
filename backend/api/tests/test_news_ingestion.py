@@ -302,6 +302,25 @@ def test_upstream_id_target_change_keeps_news_id_and_replay_is_idempotent(news):
 
 
 @pytest.mark.django_db
+def test_invalid_title_never_corrects_url_or_advances_source_identity(news):
+    ingest_item(entry())
+    before = NewsSourceItem.objects.get(source_key='devto', upstream_id='17')
+    original_revision, original_url = news.full_content_revision, news.url
+    for malformed in ('', ' ', 'a' * 501, None, 123):
+        rejected = ingest_item(entry(url='https://dev.to/team/changed-target', title=malformed))
+        assert rejected.receipt_outcome == 'policy_skip'
+        assert rejected.reason == 'invalid_identity'
+        assert rejected.news_id is None
+        news.refresh_from_db()
+        before.refresh_from_db()
+        assert news.url == original_url
+        assert news.full_content_revision == original_revision
+        assert before.discovery_url == original_url
+    assert News.objects.count() == 1
+    assert NewsSourceItem.objects.count() == 1
+
+
+@pytest.mark.django_db
 def test_primary_publisher_recategorization_updates_list_filter_without_duplicating_article(news):
     first = ingest_item(entry())
     original_url, revision = news.url, news.full_content_revision
