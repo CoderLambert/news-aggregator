@@ -140,7 +140,6 @@ export default function LocalSearch() {
   const invalidRegion = searchParams.has('region') && !['domestic', 'international'].includes(searchParams.get('region') ?? '')
   const region = searchParams.get('region') === 'domestic' ? 'domestic' : searchParams.get('region') === 'international' ? 'international' : 'all'
   const sourceTypeFilters = resolveSourceTypes(searchParams.get('source_types'))
-  const sourceType = sourceTypeFilters[0]
   const [showFilters, setShowFilters] = useState(false)
 
   useEffect(() => {
@@ -161,7 +160,7 @@ export default function LocalSearch() {
     order_by: orderBy,
     ...(fullContentOnly ? { full_content: 'true' as const } : {}),
     ...(publishTimeAfter ? { publish_time_after: publishTimeAfter } : {}),
-    ...(sourceType ? { source__source_type: sourceType } : {}),
+    ...(sourceTypeFilters.length ? { source_types: sourceTypeFilters.join(',') } : {}),
   }
   const newsQuery = useQuery({
     ...newsListOptions(params, lang, viewerId),
