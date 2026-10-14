@@ -1,3 +1,8 @@
+"""Deterministic bounded categorization; Latin keywords match complete tokens."""
+import re
+import unicodedata
+
+RULE_VERSION = '2026-10-14-word-boundaries-v2'
 ALL_CATEGORIES = {
     '新能源': {'slug': 'new-energy', 'keywords': []},
     '医疗健康': {'slug': 'medical-health', 'keywords': []},
@@ -17,7 +22,6 @@ ALL_CATEGORIES = {
     '问答': {'slug': 'qa', 'keywords': []},
     '招聘': {'slug': 'jobs', 'keywords': []},
 }
-
 KEYWORD_MAP = {
     'AI': ['ai', 'llm', 'gpt', 'artificial intelligence', 'machine learning', 'deep learning', 'agent', 'transformer', 'neural network', 'nlp', 'computer vision', 'robotics', 'generative', 'diffusion', 'multimodal', 'llama', 'stable diffusion', 'dall-e', 'midjourney', 'rag', 'retrieval', 'prompt engineering', 'fine-tuning', 'embedding', 'reinforcement learning', 'rlhf', 'large language model', 'foundation model', 'agentic', 'mixture of experts', 'moe', 'bert', 'clip', 'whisper', 'vision-language', 'text-to-image', 'text-to-video', 'autonomous', 'self-driving', 'copilot', 'hallucination', 'alignment', 'sft', '大模型', '人工智能', '深度学习', '机器学习', '自然语言处理', '计算机视觉', '强化学习', '生成式', '多模态', '智能体'],
     '科技': ['tech', 'technology', 'software', 'computer', 'digital', 'internet', 'cyber'],
@@ -34,13 +38,23 @@ KEYWORD_MAP = {
     '招聘': ['hire', 'job', 'hiring', 'career', 'recruiting'],
     '问答': ['ask', 'question', 'how to', 'tutorial', 'explain'],
 }
-
 DEFAULT_CATEGORY = '科技'
 
 
+def keyword_pattern(keyword):
+    normalized = unicodedata.normalize('NFKC', keyword).casefold()
+    expression = r'\s+'.join(re.escape(part) for part in normalized.split())
+    if normalized.isascii():
+        expression = r'(?<![A-Za-z0-9_])' + expression + r'(?![A-Za-z0-9_])'
+    return re.compile(expression)
+
+
+_PATTERNS = [(category, tuple(keyword_pattern(word) for word in words)) for category, words in KEYWORD_MAP.items()]
+
+
 def classify(title, description=''):
-    text = f'{title} {description}'.lower()
-    for category, keywords in KEYWORD_MAP.items():
-        if any(kw in text for kw in keywords):
+    text = unicodedata.normalize('NFKC', f'{title or ""}'[:2000] + ' ' + f'{description or ""}'[:20000]).casefold()
+    for category, patterns in _PATTERNS:
+        if any(pattern.search(text) for pattern in patterns):
             return category
     return DEFAULT_CATEGORY
