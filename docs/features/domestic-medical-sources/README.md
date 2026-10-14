@@ -33,4 +33,3 @@
 迁移初始化的六个渠道中，`chinanews_health`、`china_cdc_news`、`nhsa_news`、`nmpa_udi_daily`
 为 `probed`，`nhc_news`、`nmpa_news` 为 `blocked`。它们都没有审批记录，
 `CrawlerTarget.enabled` 均为 `false`；迁移、探测和本地测试不会自动开启生产调度。
-
