@@ -25,6 +25,7 @@
 
 ## 实施与运维
 
+- [功能实现总结](feature-summary.md)
 - [实施记录](implementation.md)
 - [验收清单](acceptance.md)
 - [停用与回滚](operations.md)
