@@ -308,3 +308,51 @@ def test_source_change_during_translated_link_fetch_returns_actionable_sse_error
     assert response.status_code == 200
     assert '原文已更新' in body(response)
     assert not SharedArticleTranslation.objects.exists()
+
+
+def test_shared_translation_quota_bounds_users_and_active_work(article):
+    owner, _ = reader('capacity-first')
+    second_user, _ = reader('capacity-second')
+    another_source = article.source
+    another_category = article.category
+
+    def make_article(suffix):
+        return News.objects.create(title=f'Capacity ${suffix}',
+            url=f'https://example.com/capacity-{suffix}',
+            publish_time=timezone.now(), source=another_source, category=another_category,
+            full_content='Full article body for a safe fake provider.', full_content_state='legacy')
+
+    first_other = make_article('two')
+    third = make_article('three')
+    fourth = make_article('four')
+    first = shared.claim_task(article, user_id=owner.pk)
+    assert first is not None
+    assert shared.claim_task(article, user_id=second_user.pk) is None
+    with pytest.raises(shared.SharedTranslationBusy, match='您当前已有'):
+        shared.claim_task(first_other, user_id=owner.pk)
+    second = shared.claim_task(first_other, user_id=second_user.pk)
+    assert second is not None
+    with pytest.raises(shared.SharedTranslationBusy, match='同时处理'):
+        shared.claim_task(third, user_id=owner.pk)
+    second.finish('failed')
+    successor = shared.claim_task(third, user_id=second_user.pk)
+    assert successor is not None
+    first.finish('failed')
+    replacement = shared.claim_task(fourth, user_id=owner.pk)
+    assert replacement is not None
+    assert shared.SharedArticleTranslationTask.objects.filter(status='running').count() == 2
+    successor.finish('failed')
+    replacement.finish('failed')
+
+
+def test_expired_owner_lease_does_not_hold_capacity(article):
+    first_user, _ = reader('capacity-expired-first')
+    next_user, _ = reader('capacity-expired-next')
+    one = shared.claim_task(article, user_id=first_user.pk)
+    assert one is not None
+    SharedArticleTranslationTask.objects.filter(pk=one.task_id).update(expires_at=timezone.now() - timedelta(seconds=1))
+    takeover = shared.claim_task(article, user_id=next_user.pk)
+    assert takeover is not None and takeover.token != one.token
+    one.finish('failed')
+    assert takeover.current().exists()
+    takeover.finish('failed')
