@@ -393,36 +393,44 @@ def _inspect_g2_app(args: argparse.Namespace, gateway_id: str) -> str:
         isinstance(host_config, dict) and host_config.get('NetworkMode') == f'container:{gateway_id}',
         'G2 app does not share the exact owned gateway network namespace',
     )
-    db_root = Path('/var/lib/newshub/db')
     mounts = app.get('Mounts')
     _require(
-        isinstance(mounts, list) and len(mounts) == 1
+        isinstance(mounts, list) and len(mounts) == 2
         and all(isinstance(mount, dict) for mount in mounts),
         'G2 app mount list is invalid',
     )
-    db_mount = mounts[0]
+    expected_mounts = {
+        f'{args.compose_project}_db-data': '/var/lib/newshub/db',
+        f'{args.compose_project}_logs-data': '/var/lib/newshub/logs',
+    }
+    mounts_by_name = {mount.get('Name'): mount for mount in mounts}
     _require(
-        db_mount.get('Destination') == str(db_root)
-        and db_mount.get('Type') == 'volume'
-        and db_mount.get('Name') == f'{args.compose_project}_db-data'
-        and db_mount.get('RW') is True,
-        'G2 app database mount is not the unique owned named volume',
+        set(mounts_by_name) == set(expected_mounts),
+        'G2 app mounts are not the exact owned named volumes',
     )
-    volume_name = f'{args.compose_project}_db-data'
-    volume = _docker_inspect_object(
-        ['docker', 'volume', 'inspect', volume_name], 'database volume',
-    )
-    volume_labels = volume.get('Labels')
-    _require(
-        volume.get('Name') == volume_name
-        and volume.get('Driver') == 'local'
-        and volume.get('Scope') == 'local'
-        and volume.get('Options') in (None, {})
-        and isinstance(volume_labels, dict)
-        and volume_labels.get('com.docker.compose.project') == args.compose_project
-        and volume_labels.get('com.docker.compose.volume') == 'db-data',
-        'G2 database volume is not the owned local Compose volume',
-    )
+    for volume_name, destination in expected_mounts.items():
+        mount = mounts_by_name[volume_name]
+        _require(
+            mount.get('Destination') == destination
+            and mount.get('Type') == 'volume'
+            and mount.get('RW') is True,
+            f'G2 app {destination} mount is not the expected owned named volume',
+        )
+        volume_label = volume_name.removeprefix(f'{args.compose_project}_')
+        volume = _docker_inspect_object(
+            ['docker', 'volume', 'inspect', volume_name], f'{volume_label} volume',
+        )
+        volume_labels = volume.get('Labels')
+        _require(
+            volume.get('Name') == volume_name
+            and volume.get('Driver') == 'local'
+            and volume.get('Scope') == 'local'
+            and volume.get('Options') in (None, {})
+            and isinstance(volume_labels, dict)
+            and volume_labels.get('com.docker.compose.project') == args.compose_project
+            and volume_labels.get('com.docker.compose.volume') == volume_label,
+            f'G2 {volume_label} volume is not the owned local Compose volume',
+        )
     return app_id
 
 
@@ -1095,13 +1103,19 @@ def _check_http_api(args: argparse.Namespace, checks: dict[str, str], work_dir: 
                 isinstance(features.get(name), dict) and features[name].get('enabled') is True,
                 f'G2 capability {name} was not enabled',
             )
-        for name in ('chat', 'research', 'provider_comparisons', 'translation', 'tts'):
+        for name in ('chat', 'provider_comparisons', 'translation', 'tts'):
             _require(
                 isinstance(features.get(name), dict)
                 and features[name].get('enabled') is False
                 and features[name].get('reason') == 'ai_disabled',
                 f'G2 AI capability {name} was not explicitly disabled',
             )
+        _require(
+            isinstance(features.get('research'), dict)
+            and features['research'].get('enabled') is False
+            and features['research'].get('reason') == 'hosted_integration_unapproved',
+            'G2 research capability did not preserve its production approval barrier',
+        )
         _require(capabilities.get('chatgpt_auth_mode') == 'disabled', 'G2 smoke enabled ChatGPT authorization')
         checks['g2_capabilities'] = 'full site, accounts/signup/favorites/chat history enabled; AI features disabled'
     _require(
@@ -1417,7 +1431,10 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
                 page.locator('.article-section-render').scroll_into_view_if_needed()
                 diagram = page.locator('[role="img"][aria-label="Mermaid 图表"]')
                 diagram.wait_for(state='visible', timeout=20000)
-                chart_paint = diagram.locator('svg').first.evaluate("""(svg) => {
+                diagram_svg = diagram.locator('svg').first
+                diagram_svg.wait_for(state='visible', timeout=20000)
+                diagram_svg.locator('text').first.wait_for(state='attached', timeout=20000)
+                chart_paint = diagram_svg.evaluate("""(svg) => {
                     const texts = Array.from(svg.querySelectorAll('text'));
                     const labels = texts.map((element) => element.textContent?.trim() || '').filter(Boolean);
                     const firstLabel = texts.find((element) => (element.textContent || '').trim());
@@ -1661,10 +1678,9 @@ async def _run_g2_admin_acceptance(
     _require(admin_page is not None and _safe_http_status(admin_page) == 200, 'admin UI deep link did not load')
     dashboard_response = await dashboard_info.value
     try:
-        completion_error = await asyncio.wait_for(dashboard_response.finished(), timeout=15)
+        await asyncio.wait_for(dashboard_response.body(), timeout=15)
     except Exception:
         raise AcceptanceError('active admin dashboard response did not finish cleanly') from None
-    _require(completion_error is None, 'active admin dashboard response did not finish cleanly')
     _require(_safe_http_status(dashboard_response) == 200, 'active admin dashboard response did not return HTTP 200')
 
     _mark_g2_browser_subcheck(checks, 'g2.admin_dashboard_ready')
@@ -1684,7 +1700,9 @@ async def _run_g2_admin_acceptance(
 
     _mark_g2_browser_subcheck(checks, 'g2.admin_inactive_ui')
     await page.reload(wait_until='domcontentloaded', timeout=20000)
-    await page.get_by_role('button', name='登录', exact=True).wait_for(state='visible', timeout=15000)
+    await page.get_by_role('dialog').get_by_role(
+        'button', name='登录', exact=True,
+    ).wait_for(state='visible', timeout=15000)
     checks['g2_active_admin'] = 'active synthetic superuser reads admin/provider APIs and completes the dashboard UI before deactivation'
     checks['g2_inactive_admin_session'] = 'after deactivation, old session receives HTTP 403 from me/admin/provider endpoints and returns to logged-out UI'
 
@@ -1736,10 +1754,9 @@ async def _release_auth_race_response(page, delayed_me: dict, expected_snapshot:
         delayed_me['release'].set()
     response = await response_info.value
     try:
-        completion_error = await response.finished()
+        await response.body()
     except Exception:
         raise AcceptanceError('delayed auth response did not finish cleanly') from None
-    _require(completion_error is None, 'delayed auth response did not finish cleanly')
     _require(_safe_http_status(response) == 200, 'delayed auth response did not return HTTP 200')
     try:
         response_json = await response.json()
@@ -1796,16 +1813,12 @@ async def _logout_ui(
 
     actual_logout_status = _safe_http_status(response)
     try:
-        completion_error = await response.finished()
+        await response.body()
     except Exception as exc:
         raise _logout_failure(
             subcheck, 'g2.logout_http', 200, actual_logout_status,
             _safe_browser_exception_type(exc),
         ) from None
-    if completion_error is not None:
-        raise _logout_failure(
-            subcheck, 'g2.logout_http', 200, actual_logout_status, 'Error',
-        )
     if actual_logout_status != 200:
         raise _logout_failure(subcheck, 'g2.logout_http', 200, actual_logout_status)
 

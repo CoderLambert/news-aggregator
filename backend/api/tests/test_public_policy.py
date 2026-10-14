@@ -22,7 +22,7 @@ from api.models import (
     Source,
 )
 from api.public_policy import PublicPolicyMiddleware
-from api.views import NewsListView
+from api.views import CategoryListView, NewsListView
 
 
 ALL_HTTP_METHODS = ("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
@@ -56,6 +56,10 @@ FEATURE_NAMES = {
     "chatgpt_subscription",
 }
 TEST_UUID = uuid.UUID("00000000-0000-0000-0000-000000000123")
+
+
+def test_category_list_queryset_has_explicit_stable_ordering():
+    assert CategoryListView().get_queryset().query.order_by == ('id',)
 
 
 @pytest.fixture

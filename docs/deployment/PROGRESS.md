@@ -25,7 +25,7 @@
 候选HEAD f7371da5664fcd1c34fba76f0b8805f15fa42fd5 加本批diff；独立High里程碑审查尚NOT_RUN，任务仅TESTED。
 - NH-PUB-01：bash -n scripts/deploy/preflight.sh scripts/deploy/tests/test_preflight.sh 退出0；bash scripts/deploy/tests/test_preflight.sh退出0（离线/缺工具/公网IP参数/超时/SAN/SSH opt-in/未知参数mock负例）；bash scripts/deploy/preflight.sh --offline退出2（预期，15项NOT_RUN，零网络）。最初语法与TLS mock失败已根据证据修复并通过，不需再运行同版本用例。真实现场项仍NOT_RUN。
 - NH-PUB-03：PYTHONPATH=backend:crawler RUN_MAIN=true backend/venv/bin/python -m pytest backend/api/tests/test_production_settings.py backend/api/tests/test_health.py tests/backend/test_waitress_proxy.py -q 退出0，44 passed；仅chromadb依赖弃用警告。
-- 生产manage.py check --deploy（DJANGO_ENV=production/DJANGO_DEBUG=0/合成50+字符密钥/WAITRESS_TRUSTED_PROXY=127.0.0.1/RUN_MAIN=true）退出0；仅W005/W021，ADR005说明单域HSTS试运行不含子域/不预加载。没有SILENCED_SYSTEM_CHECKS。
+- 生产manage.py check --deploy（DJANGO_ENV=production/DJANGO_DEBUG=0/合成50+字符密钥/WAITRESS_TRUSTED_PROXY=127.0.0.1/RUN_MAIN=true）退出0且无告警；生产HSTS启用includeSubDomains与preload。没有SILENCED_SYSTEM_CHECKS。
 - 指定py_compile、env模板空Key核验、git diff --check退出0。主Agent核对health仅SELECT1/live不查库、Waitress代理洗头与WSGI scheme测试、Secure Host-only Cookie测试及生产不读dotenv/Hermes。部署网络实际smoke待04验证。
 - 角色生效证据来自调度工具的固定role/model/effort定义；两子Agent运行界面自身不提供独立查询标签，如实记录，不把TOML文件当实测日志。
 - 下一批：NH-PUB-05完整契约已存contracts/NH-PUB-05.md；独立S05-FRONTEND存contracts/S05-FRONTEND.md。03通过后执行；禁止生产资源/真实Provider/OAuth。

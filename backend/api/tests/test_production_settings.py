@@ -99,8 +99,8 @@ def test_production_defaults_fail_closed_and_set_browser_security(tmp_path):
     assert config["ssl_redirect"] is True
     assert config["redirect_exempt"] == [r"^api/health/(live|ready)/$"]
     assert config["proxy_ssl_header"] is None
-    assert config["hsts"] == 3600
-    assert config["hsts_subdomains"] is config["hsts_preload"] is False
+    assert config["hsts"] == 31536000
+    assert config["hsts_subdomains"] is config["hsts_preload"] is True
 
 
 def test_production_accepts_only_explicit_fixed_origin_and_website_skeleton(tmp_path):

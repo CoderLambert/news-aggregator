@@ -999,7 +999,7 @@ class CategoryListView(generics.ListAPIView):
     serializer_class = CategorySerializer
 
     def get_queryset(self):
-        return Category.objects.annotate(news_count=Count('news'))
+        return Category.objects.annotate(news_count=Count('news')).order_by('id')
 
 
 class SourceListView(generics.ListAPIView):

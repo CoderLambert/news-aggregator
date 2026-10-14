@@ -252,9 +252,9 @@ CSRF_COOKIE_DOMAIN = None
 SECURE_SSL_REDIRECT = DJANGO_ENV == 'production'
 SECURE_REDIRECT_EXEMPT = [r'^api/health/(live|ready)/$']
 SECURE_PROXY_SSL_HEADER = None
-SECURE_HSTS_SECONDS = 3600 if DJANGO_ENV == 'production' else 0
-SECURE_HSTS_INCLUDE_SUBDOMAINS = False
-SECURE_HSTS_PRELOAD = False
+SECURE_HSTS_SECONDS = 31536000 if DJANGO_ENV == 'production' else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = DJANGO_ENV == 'production'
+SECURE_HSTS_PRELOAD = DJANGO_ENV == 'production'
 
 # Auto-fetch full content daemon settings (override via .env)
 # How often to poll for new pending articles (seconds)

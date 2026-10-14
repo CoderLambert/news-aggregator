@@ -332,14 +332,14 @@ class _FakeLogoutResponse:
         self.leave_session = leave_session
         self.complete = False
 
-    async def finished(self):
-        self.page.events.append('response.finished.wait')
+    async def body(self):
+        self.page.events.append('response.body.wait')
         await asyncio.sleep(0)
         self.complete = True
         if self.status == 200 and not self.leave_session:
             self.page.context.session_present = False
-        self.page.events.append('response.finished.done')
-        return None
+        self.page.events.append('response.body.done')
+        return b'{}'
 
 
 class _FakeResponseExpectation:
@@ -438,20 +438,20 @@ class _FakeLogoutContext:
 async def _fake_logout_api(page, method, path):
     assert (method, path) == ('GET', '/api/auth/me/')
     page.events.append('get_me')
-    assert page.response is not None and page.response.complete, 'GET /me ran before logout response.finished()'
+    assert page.response is not None and page.response.complete, 'GET /me ran before logout response.body()'
     return {'status': page.me_status, 'body': {}}
 
 
-def test_logout_waits_for_response_finished_before_me_and_cookie_checks():
+def test_logout_waits_for_response_body_before_me_and_cookie_checks():
     page = _FakeLogoutPage()
 
     with patch.object(acceptance, '_browser_api', side_effect=_fake_logout_api):
         asyncio.run(acceptance._logout_ui(page, 'synthetic-user', page.context))
 
-    assert page.events.index('logout.click') < page.events.index('response.finished.wait')
-    assert page.events.index('avatar.detach.triggered') < page.events.index('response.finished.done')
-    assert page.events.index('response.finished.done') < page.events.index('get_me')
-    assert page.events.index('response.finished.done') < page.events.index('avatar.detached')
+    assert page.events.index('logout.click') < page.events.index('response.body.wait')
+    assert page.events.index('avatar.detach.triggered') < page.events.index('response.body.done')
+    assert page.events.index('response.body.done') < page.events.index('get_me')
+    assert page.events.index('response.body.done') < page.events.index('avatar.detached')
     assert page.events.index('get_me') < page.events.index('cookies.read')
     assert page.context.session_present is False
 
@@ -494,7 +494,7 @@ def test_logout_get_me_must_be_anonymous_and_reports_http_status():
     exc = raised.value
     assert exc.source_check_name == 'g2.logout_me'
     assert exc.expected_http_status == 403 and exc.actual_http_status == 200
-    assert page.events.index('response.finished.done') < page.events.index('get_me')
+    assert page.events.index('response.body.done') < page.events.index('get_me')
     assert 'cookies.read' not in page.events
 
 
@@ -536,7 +536,7 @@ def test_logout_200_still_fails_when_session_cookie_remains():
     exc = raised.value
     assert exc.source_check_name == 'g2.logout_cookie'
     assert exc.expected_http_status is None and exc.actual_http_status is None
-    assert page.events.index('response.finished.done') < page.events.index('get_me')
+    assert page.events.index('response.body.done') < page.events.index('get_me')
     assert 'cookies.read' in page.events
 
 
@@ -649,7 +649,7 @@ def _fake_auth_race_response_waiter(response, events):
     return FakePage(), {'release': FakeRelease()}
 
 
-def test_auth_race_release_waits_for_exact_response_finish_and_snapshot_body():
+def test_auth_race_release_waits_for_exact_response_body_and_snapshot_json():
     snapshot = {'username': 'A', 'id': 17, 'is_admin': False}
     events = []
 
@@ -658,28 +658,27 @@ def test_auth_race_release_waits_for_exact_response_finish_and_snapshot_body():
         request = SimpleNamespace(method='GET')
         status = 200
 
-        async def finished(self):
+        async def body(self):
             assert events[-1] == 'released'
-            events.append('finished')
-            return None
+            events.append('body')
+            return b'{"username":"A","id":17,"is_admin":false}'
 
         async def json(self):
-            assert events[-1] == 'finished'
+            assert events[-1] == 'body'
             events.append('json')
             return snapshot
 
     page, state = _fake_auth_race_response_waiter(FakeResponse(), events)
     asyncio.run(acceptance._release_auth_race_response(page, state, snapshot))
-    assert events == ['listener_registered', 'released', 'finished', 'json']
+    assert events == ['listener_registered', 'released', 'body', 'json']
 
 
-@pytest.mark.parametrize(('status', 'finish_error', 'finish_raises', 'body'), [
-    (200, 'request failed', False, {'username': 'A'}),
-    (200, None, True, {'username': 'A'}),
-    (503, None, False, {'username': 'A'}),
-    (200, None, False, {'username': 'A', 'private': 'synthetic-secret'}),
+@pytest.mark.parametrize(('status', 'body_raises', 'response_json'), [
+    (200, True, {'username': 'A'}),
+    (503, False, {'username': 'A'}),
+    (200, False, {'username': 'A', 'private': 'synthetic-secret'}),
 ])
-def test_auth_race_release_rejects_incomplete_or_wrong_response(status, finish_error, finish_raises, body):
+def test_auth_race_release_rejects_incomplete_or_wrong_response(status, body_raises, response_json):
     snapshot = {'username': 'A', 'id': 17, 'is_admin': False}
     events = []
 
@@ -687,16 +686,16 @@ def test_auth_race_release_rejects_incomplete_or_wrong_response(status, finish_e
         url = f'https://{acceptance.HOST}/api/auth/me/'
         request = SimpleNamespace(method='GET')
 
-        async def finished(self):
+        async def body(self):
             assert events[-1] == 'released'
-            events.append('finished')
-            if finish_raises:
+            events.append('body')
+            if body_raises:
                 raise TimeoutError('private completion detail')
-            return finish_error
+            return b'{}'
 
         async def json(self):
             events.append('json')
-            return body
+            return response_json
 
     response = FakeResponse()
     response.status = status
@@ -906,19 +905,18 @@ def test_g2_admin_dashboard_response_matcher_requires_exact_https_url_and_get(ur
 
 
 class _FakeG2AdminResponse:
-    def __init__(self, events, *, status=200, finished_error=False, finished_result=None):
+    def __init__(self, events, *, status=200, body_error=False):
         self.url = f'https://{acceptance.HOST}/api/admin/crawler/dashboard/?lang=zh'
         self.request = SimpleNamespace(method='GET')
         self.status = status
         self.events = events
-        self.finished_error = finished_error
-        self.finished_result = finished_result
+        self.body_error = body_error
 
-    async def finished(self):
-        self.events.append('dashboard.finished')
-        if self.finished_error:
+    async def body(self):
+        self.events.append('dashboard.body')
+        if self.body_error:
             raise RuntimeError('synthetic response secret')
-        return self.finished_result
+        return b'{}'
 
 
 class _FakeG2AdminExpectation:
@@ -956,6 +954,10 @@ class _FakeG2AdminLocator:
         self.role = role
         self.name = name
 
+    def get_by_role(self, role, *, name, exact):
+        assert (self.role, role, name, exact) == ('dialog', 'button', '登录', True)
+        return _FakeG2AdminLocator(self.page, role, name)
+
     async def wait_for(self, *, state, timeout):
         if self.role == 'heading':
             assert (self.name, state, timeout) == ('来源管理', 'visible', 15000)
@@ -977,8 +979,7 @@ class _FakeG2AdminPage:
         response_delay=0,
         navigation_status=200,
         dashboard_status=200,
-        finished_error=False,
-        finished_result=None,
+        body_error=False,
         content_ready=True,
     ):
         self.events = events if events is not None else []
@@ -990,8 +991,7 @@ class _FakeG2AdminPage:
         self.dashboard_response = _FakeG2AdminResponse(
             self.events,
             status=dashboard_status,
-            finished_error=finished_error,
-            finished_result=finished_result,
+            body_error=body_error,
         )
 
     def expect_response(self, predicate, *, timeout):
@@ -1006,7 +1006,12 @@ class _FakeG2AdminPage:
         self.events.append('admin.goto')
         return SimpleNamespace(status=self.navigation_status)
 
-    def get_by_role(self, role, *, name, exact):
+    def get_by_role(self, role, *, name=None, exact=None):
+        if role == 'button':
+            raise AssertionError('page-wide login button lookup is ambiguous')
+        if role == 'dialog':
+            assert name is None and exact is None
+            return _FakeG2AdminLocator(self, role, name)
         assert exact is True
         return _FakeG2AdminLocator(self, role, name)
 
@@ -1034,7 +1039,7 @@ def _fake_g2_admin_callbacks(events):
 
     async def deactivate_admin():
         assert 'dashboard.heading_visible' in events
-        assert events.index('dashboard.finished') < events.index('dashboard.heading_visible')
+        assert events.index('dashboard.body') < events.index('dashboard.heading_visible')
         events.append('admin.deactivated')
 
     return login_admin, browser_api, deactivate_admin, api_calls
@@ -1061,8 +1066,8 @@ def test_g2_admin_acceptance_waits_for_slow_dashboard_response_and_ready_content
 
     assert elapsed > 0.30
     assert events.index('dashboard.listener_registered') < events.index('admin.goto')
-    assert events.index('dashboard.response_captured') < events.index('dashboard.finished')
-    assert events.index('dashboard.finished') < events.index('dashboard.heading_visible')
+    assert events.index('dashboard.response_captured') < events.index('dashboard.body')
+    assert events.index('dashboard.body') < events.index('dashboard.heading_visible')
     assert events.index('dashboard.heading_visible') < events.index('admin.deactivated')
     assert events.index('admin.deactivated') < events.index('api:/api/auth/me/')
     assert api_calls == [
@@ -1078,8 +1083,7 @@ def test_g2_admin_acceptance_waits_for_slow_dashboard_response_and_ready_content
     ({'capture_timeout': True}, 'g2.admin_page'),
     ({'navigation_status': 503}, 'g2.admin_page'),
     ({'dashboard_status': 503}, 'g2.admin_page'),
-    ({'finished_error': True}, 'g2.admin_page'),
-    ({'finished_result': 'synthetic response completion error'}, 'g2.admin_page'),
+    ({'body_error': True}, 'g2.admin_page'),
     ({'content_ready': False}, 'g2.admin_dashboard_ready'),
 ])
 def test_g2_admin_acceptance_fails_closed_before_deactivation(failure_options, expected_subcheck):
@@ -1506,6 +1510,9 @@ def _valid_parent_inspects(project='newshub-local-g2-123-0123456789abcdef'):
         'Mounts': [{
             'Type': 'volume', 'Name': f'{project}_db-data',
             'Destination': '/var/lib/newshub/db', 'RW': True,
+        }, {
+            'Type': 'volume', 'Name': f'{project}_logs-data',
+            'Destination': '/var/lib/newshub/logs', 'RW': True,
         }],
     }
     network = {
@@ -1517,7 +1524,7 @@ def _valid_parent_inspects(project='newshub-local-g2-123-0123456789abcdef'):
             'com.docker.compose.network': 'isolated',
         },
     }
-    volume = {
+    db_volume = {
         'Name': f'{project}_db-data',
         'Driver': 'local',
         'Scope': 'local',
@@ -1527,7 +1534,17 @@ def _valid_parent_inspects(project='newshub-local-g2-123-0123456789abcdef'):
             'com.docker.compose.volume': 'db-data',
         },
     }
-    return gateway, app, network, volume
+    logs_volume = {
+        'Name': f'{project}_logs-data',
+        'Driver': 'local',
+        'Scope': 'local',
+        'Options': None,
+        'Labels': {
+            'com.docker.compose.project': project,
+            'com.docker.compose.volume': 'logs-data',
+        },
+    }
+    return gateway, app, network, db_volume, logs_volume
 
 
 def _g2_inspect_args(tmp_path):
@@ -1560,7 +1577,7 @@ def _mock_parent_docker_run(commands, objects):
         elif command[:3] == ['docker', 'network', 'inspect']:
             payload = objects['network']
         elif command[:3] == ['docker', 'volume', 'inspect']:
-            payload = objects['volume']
+            payload = objects['volumes'][command[-1]]
         else:
             raise AssertionError(f'unexpected Docker command: {command}')
         return subprocess.CompletedProcess(command, 0, json.dumps([payload]), '')
@@ -1569,7 +1586,13 @@ def _mock_parent_docker_run(commands, objects):
 
 def test_g2_parent_inspection_accepts_exact_owned_app_gateway_volume_and_network(tmp_path):
     args = _g2_inspect_args(tmp_path)
-    objects = dict(zip(('gateway', 'app', 'network', 'volume'), _valid_parent_inspects(args.compose_project)))
+    gateway, app, network, db_volume, logs_volume = _valid_parent_inspects(args.compose_project)
+    objects = {
+        'gateway': gateway,
+        'app': app,
+        'network': network,
+        'volumes': {db_volume['Name']: db_volume, logs_volume['Name']: logs_volume},
+    }
     commands = []
     with patch.object(acceptance.subprocess, 'run', side_effect=_mock_parent_docker_run(commands, objects)):
         parents = acceptance._inspect_g2_parents(args)
@@ -1586,15 +1609,23 @@ def test_g2_parent_inspection_accepts_exact_owned_app_gateway_volume_and_network
     'gateway-image', 'gateway-project', 'gateway-service', 'gateway-stopped',
     'gateway-published-port', 'network-not-internal', 'network-label',
     'app-image', 'app-project', 'app-service', 'app-user', 'app-namespace',
-    'app-bind-db', 'app-foreign-volume', 'app-overlapping-mounts',
+    'app-bind-db', 'app-foreign-volume', 'app-bind-logs', 'app-foreign-logs-volume',
+    'app-overlapping-mounts',
     'app-extra-app-bind', 'app-extra-backend-volume', 'app-extra-python-bind', 'app-extra-volume',
     'db-volume-owner', 'db-volume-label', 'db-volume-driver', 'db-volume-scope', 'db-volume-bind-options',
+    'logs-volume-owner', 'logs-volume-label', 'logs-volume-driver', 'logs-volume-scope',
+    'logs-volume-bind-options',
 ])
 def test_g2_parent_identity_failures_refuse_fixture_exec_and_private_stdin(tmp_path, mutation):
     args = _g2_inspect_args(tmp_path)
     bundle = acceptance._fixtures.create_bundle(args.private_root / 'bundle.json')
-    gateway, app, network, volume = _valid_parent_inspects(args.compose_project)
-    objects = {'gateway': gateway, 'app': app, 'network': network, 'volume': volume}
+    gateway, app, network, db_volume, logs_volume = _valid_parent_inspects(args.compose_project)
+    objects = {
+        'gateway': gateway,
+        'app': app,
+        'network': network,
+        'volumes': {db_volume['Name']: db_volume, logs_volume['Name']: logs_volume},
+    }
     if mutation == 'gateway-image': gateway['Image'] = APP_IMAGE_ID
     elif mutation == 'gateway-project': gateway['Config']['Labels']['com.docker.compose.project'] = 'other'
     elif mutation == 'gateway-service': gateway['Config']['Labels']['com.docker.compose.service'] = 'app'
@@ -1609,6 +1640,8 @@ def test_g2_parent_identity_failures_refuse_fixture_exec_and_private_stdin(tmp_p
     elif mutation == 'app-namespace': app['HostConfig']['NetworkMode'] = 'container:other'
     elif mutation == 'app-bind-db': app['Mounts'][0]['Type'] = 'bind'
     elif mutation == 'app-foreign-volume': app['Mounts'][0]['Name'] = 'user_db'
+    elif mutation == 'app-bind-logs': app['Mounts'][1]['Type'] = 'bind'
+    elif mutation == 'app-foreign-logs-volume': app['Mounts'][1]['Name'] = 'user_logs'
     elif mutation == 'app-overlapping-mounts': app['Mounts'].append({
         'Type': 'bind', 'Source': '/tmp/synthetic',
         'Destination': '/var/lib/newshub/db/db.sqlite3', 'RW': True,
@@ -1625,11 +1658,16 @@ def test_g2_parent_identity_failures_refuse_fixture_exec_and_private_stdin(tmp_p
     elif mutation == 'app-extra-volume': app['Mounts'].append({
         'Type': 'volume', 'Name': 'other_cache', 'Destination': '/var/cache/newshub', 'RW': True,
     })
-    elif mutation == 'db-volume-owner': volume['Labels']['com.docker.compose.project'] = 'other'
-    elif mutation == 'db-volume-label': volume['Labels']['com.docker.compose.volume'] = 'other'
-    elif mutation == 'db-volume-driver': volume['Driver'] = 'local-persist'
-    elif mutation == 'db-volume-scope': volume['Scope'] = 'global'
-    elif mutation == 'db-volume-bind-options': volume['Options'] = {'type': 'none', 'o': 'bind', 'device': '/tmp/foreign'}
+    elif mutation == 'db-volume-owner': db_volume['Labels']['com.docker.compose.project'] = 'other'
+    elif mutation == 'db-volume-label': db_volume['Labels']['com.docker.compose.volume'] = 'other'
+    elif mutation == 'db-volume-driver': db_volume['Driver'] = 'local-persist'
+    elif mutation == 'db-volume-scope': db_volume['Scope'] = 'global'
+    elif mutation == 'db-volume-bind-options': db_volume['Options'] = {'type': 'none', 'o': 'bind', 'device': '/tmp/foreign'}
+    elif mutation == 'logs-volume-owner': logs_volume['Labels']['com.docker.compose.project'] = 'other'
+    elif mutation == 'logs-volume-label': logs_volume['Labels']['com.docker.compose.volume'] = 'other'
+    elif mutation == 'logs-volume-driver': logs_volume['Driver'] = 'local-persist'
+    elif mutation == 'logs-volume-scope': logs_volume['Scope'] = 'global'
+    elif mutation == 'logs-volume-bind-options': logs_volume['Options'] = {'type': 'none', 'o': 'bind', 'device': '/tmp/foreign'}
     commands = []
     with patch.object(acceptance.subprocess, 'run', side_effect=_mock_parent_docker_run(commands, objects)):
         with pytest.raises(acceptance.AcceptanceError):
@@ -1638,7 +1676,7 @@ def test_g2_parent_identity_failures_refuse_fixture_exec_and_private_stdin(tmp_p
     assert not any('input' in kwargs for _command, kwargs in commands)
     if mutation.startswith('app-extra-'):
         assert not any(command[:3] == ['docker', 'volume', 'inspect'] for command, _kwargs in commands)
-    if mutation.startswith('db-volume-'):
+    if mutation.startswith(('db-volume-', 'logs-volume-')):
         assert any(command[:3] == ['docker', 'volume', 'inspect'] for command, _kwargs in commands)
 
 
@@ -1671,13 +1709,17 @@ def test_g2_http_api_matrix_requires_full_accounts_and_blocks_private_ai_anonymo
                 header_file.write_text('Set-Cookie: csrftoken=fixture; Path=/; SameSite=Lax; Secure\n', encoding='utf-8')
         elif name == 'capabilities':
             enabled = ('accounts', 'signup', 'favorites', 'blocked_news', 'chat_history')
-            disabled = ('chat', 'research', 'provider_comparisons', 'translation', 'tts')
+            disabled = ('chat', 'provider_comparisons', 'translation', 'tts')
             body = json.dumps({
                 'site_mode': 'full',
                 'chatgpt_auth_mode': 'disabled',
                 'features': {
                     **{key: {'enabled': True} for key in enabled},
                     **{key: {'enabled': False, 'reason': 'ai_disabled'} for key in disabled},
+                    'research': {
+                        'enabled': False,
+                        'reason': 'hosted_integration_unapproved',
+                    },
                 },
             })
             headers = {'cache-control': ['no-store']}
