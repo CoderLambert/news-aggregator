@@ -89,7 +89,10 @@ def test_create_probe_approve_run_and_enable_are_explicit(admin_client, medical_
 
     trial = client.post('/api/admin/crawler/sources/official_health/run/', {}, format='json')
     assert trial.status_code == 201, trial.data
-    assert CrawlRun.objects.get(target_id='official_health').requested_by_id == user.id
+    trial_run = CrawlRun.objects.get(target_id='official_health')
+    assert trial_run.requested_by_id == user.id
+    assert trial_run.config_snapshot['source_key'] == 'official_health'
+    assert trial_run.config_snapshot['config_version'] == 1
     assert CrawlerTarget.objects.get(pk='official_health').enabled is False
 
     enabled = client.post('/api/admin/crawler/sources/official_health/enable/', {'enabled': True}, format='json')
@@ -152,3 +155,25 @@ def test_admin_source_mutations_require_csrf(admin_client, medical_category):
         HTTP_X_CSRFTOKEN=token,
     )
     assert created.status_code == 201
+
+
+@pytest.mark.django_db
+def test_regulatory_data_partial_patch_cannot_cross_reading_policy(admin_client, medical_category):
+    client, _ = admin_client
+    data = payload(medical_category.pk, 'regulatory_feed')
+    data.update(content_kind='regulatory_data', reading_policy='regulatory_data')
+    assert client.post('/api/admin/crawler/sources/', data, format='json').status_code == 201
+    response = client.patch(
+        '/api/admin/crawler/sources/regulatory_feed/', {'reading_policy': 'summary_only'}, format='json',
+    )
+    assert response.status_code == 400
+    assert SourceConfig.objects.get(pk='regulatory_feed').reading_policy == 'regulatory_data'
+
+
+@pytest.mark.django_db
+def test_code_maintained_source_is_read_only_and_draft_delete_is_guarded(admin_client, medical_category):
+    client, _ = admin_client
+    assert client.patch('/api/admin/crawler/sources/bbc/', {'channel_name': 'changed'}, format='json').status_code == 409
+    assert client.post('/api/admin/crawler/sources/', payload(medical_category.pk), format='json').status_code == 201
+    assert client.delete('/api/admin/crawler/sources/official_health/').status_code == 204
+    assert not SourceConfig.objects.filter(pk='official_health').exists()

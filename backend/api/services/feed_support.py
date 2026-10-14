@@ -105,6 +105,8 @@ def feed_entry_item(entry, source_key, *, feed_url, effective_url, request_start
     summary = _plain(summary_html)[:3000] if field != 'description' and policy.summary_allowed else ''
     candidate = None
     if policy.reading_policy == 'rss_summary_only':
+        if policy.summary_allowed:
+            summary = _plain(summary_html)[:3000]
         body = ''
     if body:
         candidate = FullContentCandidate(

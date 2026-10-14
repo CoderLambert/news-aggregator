@@ -1,10 +1,11 @@
 import pytest
+from django.utils import timezone
 
 from api.models import Category, CrawlerTarget, FeedState, Source, SourceConfig, SourceEndpoint
-from api.services.crawler_control import sync_crawler_targets
+from api.services.crawler_control import create_crawl_batch, sync_crawler_targets
 from api.services.feed_state import prepare_feed_request
 from api.services.source_policy import policy_for_key
-from api.services.source_registry import CODE_SPIDERS, runtime_registry
+from api.services.source_registry import CODE_SPIDERS, runtime_registry, source_snapshot
 
 
 @pytest.fixture
@@ -17,13 +18,51 @@ def dynamic_source(db):
     config = SourceConfig.objects.create(
         source_key='test_official_health', source=source, publisher_name='测试机构',
         channel_name=source.name, category=category, status='approved',
-        probed_config_version=1, approved_config_version=1,
+        probed_config_version=1, probed_at=timezone.now(),
+        approved_config_version=1, approved_at=timezone.now(),
     )
     SourceEndpoint.objects.create(
         source_config=config, kind='rss', url='https://health.example.cn/feed.xml',
         allowed_domains=['health.example.cn'], request_interval_seconds=600,
     )
     return config
+
+
+@pytest.mark.django_db
+def test_dynamic_run_snapshot_is_complete_and_immutable(dynamic_source):
+    snapshot = source_snapshot(dynamic_source.source_key)
+    assert snapshot['source_key'] == dynamic_source.source_key
+    assert snapshot['config_version'] == 1
+    assert snapshot['endpoint']['url'] == 'https://health.example.cn/feed.xml'
+    dynamic_source.channel_name = '后续修改'
+    dynamic_source.config_version = 2
+    dynamic_source.save(update_fields=['channel_name', 'config_version'])
+    assert snapshot['policy']['name'] == '测试官方频道'
+
+
+@pytest.mark.django_db
+def test_single_run_persists_snapshot_while_target_remains_disabled(dynamic_source):
+    sync_crawler_targets()
+    batch, active = create_crawl_batch(
+        trigger='manual', spider_names=[dynamic_source.source_key], allow_disabled=True,
+    )
+    assert active == []
+    run = batch.runs.get()
+    assert run.target.enabled is False
+    assert run.config_snapshot['config_version'] == 1
+    assert run.config_snapshot['endpoint']['url'] == 'https://health.example.cn/feed.xml'
+
+
+@pytest.mark.django_db
+def test_seeded_domestic_sources_are_never_scheduler_enabled():
+    expected = {
+        'chinanews_health': ('probed', 'article'), 'china_cdc_news': ('probed', 'article'),
+        'nhc_news': ('blocked', 'article'), 'nhsa_news': ('probed', 'article'),
+        'nmpa_news': ('blocked', 'article'), 'nmpa_udi_daily': ('probed', 'regulatory_data'),
+    }
+    configs = SourceConfig.objects.in_bulk(expected)
+    assert {key: (value.status, value.content_kind) for key, value in configs.items()} == expected
+    assert not CrawlerTarget.objects.filter(pk__in=expected, enabled=True).exists()
 
 
 @pytest.mark.django_db

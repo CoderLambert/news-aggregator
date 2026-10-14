@@ -77,11 +77,11 @@ _RUNTIME_POLICIES = {}
 
 def policy_for_url(url: str):
     host = (urlsplit(url).hostname or '').lower()
-    return next((p for p in all_policies() if host in p.domains), None)
+    return next((p for p in (*POLICIES.values(), *_RUNTIME_POLICIES.values()) if host in p.domains), None)
 
 
 def policy_for_name(name: str):
-    return next((p for p in all_policies() if p.name == name), None)
+    return next((p for p in (*POLICIES.values(), *_RUNTIME_POLICIES.values()) if p.name == name), None)
 
 
 def policy_for_key(source_key: str):
@@ -160,8 +160,8 @@ def policy_from_config(config):
     )
 
 
-def all_policies(*, include_unavailable=True):
-    policies = [*POLICIES.values(), *_RUNTIME_POLICIES.values()]
+def _database_policies(*, include_unavailable=True):
+    policies = []
     try:
         from api.models import SourceConfig
         configs = SourceConfig.objects.select_related('category').prefetch_related('endpoints')
@@ -176,6 +176,11 @@ def all_policies(*, include_unavailable=True):
         if not isinstance(error, (AppRegistryNotReady, OperationalError, ProgrammingError)):
             raise
     return tuple(policies)
+
+
+def all_policies(*, include_unavailable=True):
+    return (*POLICIES.values(), *_RUNTIME_POLICIES.values(),
+            *_database_policies(include_unavailable=include_unavailable))
 
 
 def retired_policy_for_url(url: str):
@@ -236,9 +241,12 @@ def candidate_contract_allows(candidate) -> bool:
 def html_candidate_contract_allows(candidate) -> bool:
     from api.services.article_identity import same_article_identity
     from api.services.article_fetcher.site_rules import get_site_rule
-    policy = policy_for_url(candidate.target_url)
+    policy = (_RUNTIME_POLICIES.get(candidate.source_key) or POLICIES.get(candidate.source_key) or
+              policy_for_url(candidate.target_url))
     from api.services.body_access import privileged_fetch
     if policy and ((not policy.html_allowed and not privileged_fetch.get()) or policy.unsupported_reason):
+        return False
+    if policy and urlsplit(candidate.target_url).hostname not in policy.domains:
         return False
     if not policy and not get_site_rule(candidate.target_url):
         return False

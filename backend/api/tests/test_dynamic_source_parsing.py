@@ -1,8 +1,11 @@
 from datetime import datetime, timezone
 
 import pytest
+from django.test import override_settings
 
 from api.models import Category, NewsSourceItem, Source, SourceConfig, SourceEndpoint
+from api.services.article_fetcher.types import FullContentCandidate
+from api.services.article_fetcher.validators import validate_candidate
 from api.services.dynamic_source_parsing import parse_html_list, parse_json_list, structured_entry_item
 from api.services.news_ingestion import ingest_item
 from api.services.source_policy import policy_for_key
@@ -93,3 +96,32 @@ def test_dynamic_summary_ingests_through_source_mapping_without_full_body(approv
     assert mapping.news.full_content == ''
     assert mapping.metadata['publisher_name'] == '测试卫生机构'
     assert mapping.metadata['endpoint_kind'] == 'json'
+
+
+@pytest.mark.django_db
+def test_approved_official_html_candidate_can_commit_but_summary_remains_separate(approved_dynamic_source):
+    config, model = approved_dynamic_source
+    config.reading_policy = 'official_html'
+    config.official_html_full_content_allowed = True
+    config.save(update_fields=['reading_policy', 'official_html_full_content_allowed'])
+    endpoint = endpoint_dict(model, kind='html')
+    item = structured_entry_item({
+        'identity': 'official-10', 'title': '官方卫生公告', 'link': '/news/10',
+        'summary': '这是与正文分离保存的摘要。', 'published': '2026-10-15T00:00:00Z',
+    }, config.source_key, endpoint)
+    candidate = FullContentCandidate(
+        config.source_key, 'official-10', item['url'], item['url'], None, item['title'], 'article',
+        'official_html_selector', 'html', 'full',
+        '<article><p>这是经过审批和选择器边界的官方网页正文。</p><p>第二段独立内容。</p></article>',
+        None, None, datetime.now(timezone.utc), request_chain=(item['url'],),
+    )
+    assert validate_candidate(candidate, expected_url=item['url'], expected_title=item['title'],
+                              summary=item['summary']).ok
+    item['body_candidate'] = candidate
+    with override_settings(STRUCTURED_BODY_INGEST_ENABLED=True,
+                           STRUCTURED_BODY_SOURCE_KEYS=(config.source_key,)):
+        result = ingest_item(item)
+    assert result.body_committed is True
+    mapping = NewsSourceItem.objects.get(source_key=config.source_key, upstream_id='official-10')
+    assert mapping.news.content == '这是与正文分离保存的摘要。'
+    assert '第二段独立内容' in mapping.news.full_content

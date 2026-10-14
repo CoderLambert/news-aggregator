@@ -191,7 +191,7 @@ class SourceEndpointSerializer(serializers.ModelSerializer):
         data['url'] = url
         attrs['url'] = url
         domains = data.get('allowed_domains', [])
-        if host not in {value.removeprefix('www.') for value in domains}:
+        if host not in set(domains):
             raise serializers.ValidationError({'allowed_domains': '必须包含入口 URL 的官方域名。'})
         interval = data.get('request_interval_seconds', 10)
         size = data.get('max_response_bytes', 2 * 1024 * 1024)

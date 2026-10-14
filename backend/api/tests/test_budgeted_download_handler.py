@@ -91,6 +91,24 @@ def test_unapproved_feed_hrefs_never_reach_http_or_budget(monkeypatch):
     asyncio.run(scenario())
 
 
+def test_approved_host_is_dns_revalidated_at_physical_download_boundary(monkeypatch):
+    from api.services.article_fetcher import safe_http
+    class Inner:
+        async def download_request(self, request):
+            raise AssertionError('unsafe DNS answer reached the network handler')
+    calls = []
+    def reject(url, timeout):
+        calls.append((url, timeout))
+        raise safe_http.UnsafeURL('Private or local URLs are not allowed')
+    monkeypatch.setattr(safe_http, 'validate_public_url', reject)
+    monkeypatch.setattr(handler, 'claim_budget', lambda *args, **kwargs: pytest.fail('unsafe DNS answer took budget'))
+    async def scenario():
+        with pytest.raises(safe_http.UnsafeURL, match='Private or local'):
+            await instance(Inner()).download_request(Request('https://dev.to/api/articles'))
+    asyncio.run(scenario())
+    assert calls == [('https://dev.to/api/articles', 3.0)]
+
+
 def test_actual_http11_drip_download_hard_deadline_closes_socket_and_releases_permit(tmp_path):
     """A controlled local server keeps idle timeout alive; total deadline must win."""
     import os

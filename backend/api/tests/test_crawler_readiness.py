@@ -19,7 +19,10 @@ def test_readiness_get_creates_no_settings_or_targets():
     assert result.status_code == 200
     assert 'sources' in result.json()
     assert CrawlerSettings.objects.count() == 0
-    assert CrawlerTarget.objects.count() == 0
+    # The domestic medical catalog is migration-owned and disabled; the
+    # readiness GET itself must not create any additional targets.
+    assert CrawlerTarget.objects.count() == 6
+    assert not CrawlerTarget.objects.filter(enabled=True).exists()
 
 
 @pytest.mark.django_db
