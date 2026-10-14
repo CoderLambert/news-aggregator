@@ -125,8 +125,9 @@ export default function SourceConfigSection() {
     queryKey: ['crawlerAdmin', 'sourceCategories'],
     queryFn: async ({ signal }) => {
       const data = await fetchCategories(signal)
-      return Array.isArray(data) ? data.flatMap((item) => isRecord(item) && typeof item.id === 'number' && typeof item.name === 'string'
-        ? [{ id: item.id, name: item.name }] : []) : []
+      const rows = Array.isArray(data) ? data : isRecord(data) && Array.isArray(data.results) ? data.results : []
+      return rows.flatMap((item) => isRecord(item) && typeof item.id === 'number' && typeof item.name === 'string'
+        ? [{ id: item.id, name: item.name }] : [])
     },
     staleTime: 60_000,
   })

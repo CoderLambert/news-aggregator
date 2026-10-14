@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 from django.db import transaction
 from django.utils import timezone
 
-from api.models import SourceConfig
+from api.models import CrawlerTarget, SourceConfig
 from api.services.article_fetcher.safe_http import SafeHTTPStatusError, UnsafeURL, safe_urlopen
 from api.services.feed_support import InvalidFeed, parse_feed
 
@@ -186,4 +186,7 @@ def probe_source(config):
             'approved_config_version', 'approved_by', 'approved_at',
             'unavailable_reason', 'updated_at',
         ])
+        # A re-probe revokes the prior approval, so scheduling must stop even
+        # when the endpoint happens to produce another successful sample.
+        CrawlerTarget.objects.filter(pk=current.source_key).update(enabled=False)
     return current

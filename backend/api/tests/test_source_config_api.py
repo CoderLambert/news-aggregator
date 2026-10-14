@@ -124,6 +124,27 @@ def test_patch_invalidates_probe_approval_and_disables_target(admin_client, medi
 
 
 @pytest.mark.django_db
+def test_reprobe_revokes_approval_and_disables_scheduling(admin_client, medical_category):
+    client, user = admin_client
+    client.post('/api/admin/crawler/sources/', payload(medical_category.pk), format='json')
+    config = SourceConfig.objects.get(pk='official_health')
+    config.status = 'enabled'; config.probed_at = config.approved_at = config.updated_at
+    config.probed_config_version = config.approved_config_version = 1
+    config.approved_by = user
+    config.save()
+    CrawlerTarget.objects.filter(pk=config.pk).update(enabled=True)
+    headers = Message(); headers['Content-Type'] = 'application/rss+xml'
+    with patch('api.services.source_probe.safe_urlopen', return_value=CachedResponse(
+        'https://official.example.cn/feed.xml', 200, headers, RSS,
+    )):
+        response = client.post('/api/admin/crawler/sources/official_health/probe/', {}, format='json')
+    assert response.status_code == 200
+    assert response.data['status'] == 'probed'
+    assert not response.data['approval_is_current']
+    assert CrawlerTarget.objects.get(pk=config.pk).enabled is False
+
+
+@pytest.mark.django_db
 def test_source_validation_rejects_code_collision_scripts_and_unsafe_domains(admin_client, medical_category):
     client, _ = admin_client
     collision = client.post('/api/admin/crawler/sources/', payload(medical_category.pk, 'bbc'), format='json')
