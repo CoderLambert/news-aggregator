@@ -80,6 +80,21 @@ describe('LocalSearch Query and URL state', () => {
     }), expect.any(AbortSignal))
   })
 
+  it('does not display the old result set while a new query is pending', async () => {
+    let resolveNew
+    const delayed = new Promise(resolve => { resolveNew = resolve })
+    fetchNews.mockResolvedValueOnce({ count: 1, next: null, previous: null, results: [article] })
+      .mockReturnValueOnce(delayed)
+    renderSearch(['/search?q=climate&mode=keyword'])
+    expect(await screen.findByRole('heading', { name: 'Climate technology update' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '最新发布' }))
+    await waitFor(() => expect(fetchNews).toHaveBeenCalledTimes(2))
+    expect(screen.queryByRole('heading', { name: 'Climate technology update' })).not.toBeInTheDocument()
+    expect(screen.queryByText('找到 1 篇相关文章')).not.toBeInTheDocument()
+    resolveNew({ count: 1, next: null, previous: null, results: [{ ...article, id: 22, title: 'Updated results for this search' }] })
+    expect(await screen.findByRole('heading', { name: 'Updated results for this search' })).toBeInTheDocument()
+  })
+
   it('submits a new search and applies sort, paging, and browser history from the URL', async () => {
     renderSearch(['/search'])
     expect(fetchNews).not.toHaveBeenCalled()
