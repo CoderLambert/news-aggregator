@@ -62,7 +62,6 @@ describe('private history pagination', () => {
     fireEvent.click(screen.getByRole('button', { name: '第 3 页' }))
     expect(await screen.findByRole('heading', { name: 'Saved story 41' })).toBeInTheDocument()
     expect(screen.getByTestId('location')).toHaveTextContent('filter=bookmark&page=3')
-    fireEvent.click(screen.getByRole('button', { name: '收藏与点赞' }))
   })
 
   it('restores blocked entries beyond page one and goes back after removing last item', async () => {
