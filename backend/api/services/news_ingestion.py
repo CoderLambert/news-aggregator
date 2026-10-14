@@ -27,18 +27,21 @@ class IngestResult:
 
 
 def ingest_item(item, *, source_defaults=None) -> IngestResult:
-    # Reject invalid titles before *any* transaction, identity correction or
-    # candidate validation. A malformed feed item must not quarantine an
-    # already-read article or advance its source mapping.
     title = item.get('title')
     if not isinstance(title, str) or not title.strip() or len(title) > 500:
+        return IngestResult(None, 'policy_skip', 'invalid_identity')
+    category_name = item.get('category_name')
+    if not isinstance(category_name, str) or not category_name.strip() or len(category_name) > 100:
         return IngestResult(None, 'policy_skip', 'invalid_identity')
     policy = POLICIES.get(item['source_key']) if item.get('source_key') else policy_for_name(item.get('source_name', ''))
     if not policy or policy.unsupported_reason:
         return IngestResult(None, 'policy_skip', policy.unsupported_reason if policy else 'unsupported')
     try:
         url = normalize_article_url(item.get('url', ''))
-        upstream_id = validate_upstream_id(str(item.get('upstream_id') or url))
+        raw_id = item.get('upstream_id')
+        if raw_id is not None and (not isinstance(raw_id, (str, int)) or isinstance(raw_id, bool)):
+            raise InvalidIdentity('invalid_identity')
+        upstream_id = validate_upstream_id(str(raw_id if raw_id is not None else url))
         discovery = normalize_article_url(item.get('discovery_url') or url, max_length=1024, require_article=False)
         if urlsplit(url).hostname not in policy.domains and policy.key != 'hackernews':
             raise InvalidIdentity('invalid_publisher_url')
@@ -47,8 +50,6 @@ def ingest_item(item, *, source_defaults=None) -> IngestResult:
     kind = item.get('content_kind') or policy.content_kind
     if kind not in dict(News.CONTENT_KIND_CHOICES):
         return IngestResult(None, 'policy_skip', 'invalid_identity')
-    # Validate raw candidates before opening a transaction. Revalidate against
-    # resolved identity/version at the CAS boundary, never trust item booleans.
     candidate = item.get('body_candidate')
     body_reason = ''
     if candidate is not None:
@@ -66,8 +67,6 @@ def ingest_item(item, *, source_defaults=None) -> IngestResult:
             return _ingest_transaction(item, policy, url, upstream_id, discovery, kind, candidate,
                                        body_reason, source_defaults or {})
         except IntegrityError:
-            # Retry only database identity resolution, not fetching. A unique
-            # source ID or exact URL may have been created by another process.
             if attempt == 2:
                 raise
         except OperationalError as error:
@@ -79,11 +78,18 @@ def ingest_item(item, *, source_defaults=None) -> IngestResult:
     raise AssertionError('unreachable')
 
 
+def _publisher_promotion(news, policy, url):
+    """Only the registered publisher of an exact HN external URL can promote it."""
+    previous = policy_for_name(news.source.name)
+    return bool(previous and previous.key == 'hackernews' and policy.key != 'hackernews'
+                and not policy.unsupported_reason and news.url == url
+                and urlsplit(url).hostname in policy.domains
+                and urlsplit(url).hostname not in previous.domains)
+
+
 @transaction.atomic
 def _ingest_transaction(item, policy, url, upstream_id, discovery, kind, candidate, body_reason, source_defaults):
     seen = timezone.now()
-    # This write acquires SQLite's writer reservation before identity reads,
-    # avoiding select_for_update's illusory row locks on SQLite.
     NewsSourceItem.objects.filter(source_key=policy.key, upstream_id=upstream_id).update(last_seen_at=seen)
     source, _ = Source.objects.get_or_create(name=policy.name, defaults={**source_defaults, 'region': policy.region})
     source_updates = {}
@@ -99,14 +105,9 @@ def _ingest_transaction(item, policy, url, upstream_id, discovery, kind, candida
     mapping = NewsSourceItem.objects.filter(source_key=policy.key, upstream_id=upstream_id).first()
     news = mapping.news if mapping else News.objects.filter(url=url).first()
     if news and news.url != url:
-        # A shared article's URL belongs to its primary publisher, not every
-        # discovery feed which points at it. Never quarantine good publisher
-        # text because a secondary/HN editorial link changes its target.
         owns_primary = news.source_id == source.pk
         publisher_identity = policy.key != 'hackernews' or (
-            urlsplit(news.url).hostname in policy.domains and
-            urlsplit(url).hostname in policy.domains
-        )
+            urlsplit(news.url).hostname in policy.domains and urlsplit(url).hostname in policy.domains)
         if not owns_primary or not publisher_identity:
             return IngestResult(None, 'policy_skip', 'identity_conflict')
         if News.objects.filter(url=url).exclude(pk=news.pk).exists():
@@ -117,8 +118,6 @@ def _ingest_transaction(item, policy, url, upstream_id, discovery, kind, candida
     inferred = item.get('publish_time_inferred', item.get('publish_time') is None)
     published = item.get('publish_time')
     if published is not None and timezone.is_naive(published):
-        # Old spiders supplied local-naive values. Treat them conservatively as
-        # inferred until T05/T07 move each adapter to timezone-preserving parsing.
         published = timezone.make_aware(published)
         inferred = True
     summary = item.get('summary', item.get('content', '')) or ''
@@ -131,24 +130,34 @@ def _ingest_transaction(item, policy, url, upstream_id, discovery, kind, candida
     if published is not None and not inferred:
         updates['publish_time'] = published
     changed = False
+    promotion = bool(news and _publisher_promotion(news, policy, url))
+    previous_source_id = news.source_id if promotion else None
     if news is None:
         news = News.objects.create(
             **updates, **({} if 'publish_time' in updates else {'publish_time': published or seen}),
             url=url, source=source, category=category,
         )
         changed = True
-    elif news.source_id == source.pk:
-        # Follow corrections to the publisher's own category policy without
-        # modifying classifications supplied by secondary discovery sources.
+    elif news.source_id == source.pk or promotion:
         updates['category_id'] = category.pk
+        if promotion:
+            updates.update(source_id=source.pk, title_zh='', content_zh='')
         changed = any(getattr(news, key) != value for key, value in updates.items())
-        if News.objects.filter(pk=news.pk, url=news.url, full_content_revision=news.full_content_revision).update(**updates) != 1:
+        if News.objects.filter(pk=news.pk, source_id=news.source_id, url=news.url,
+                               full_content_revision=news.full_content_revision).update(**updates) != 1:
             return IngestResult(news.pk, 'deferred', 'persistence_conflict')
         news.refresh_from_db()
     metadata = dict(mapping.metadata or {}) if mapping else {}
-    metadata.update({'publish_time_inferred': bool(inferred), 'category_name': item['category_name']})
+    # Once a publisher supplied a real time, an undated replay must not erase
+    # that evidence or turn the retained timestamp into a fabricated new date.
     if published is not None and not inferred:
-        metadata['source_publish_time'] = published.isoformat()
+        metadata.update(source_publish_time=published.isoformat(), publish_time_inferred=False)
+    elif not metadata.get('source_publish_time'):
+        metadata['publish_time_inferred'] = True
+    metadata['category_name'] = item['category_name']
+    if promotion:
+        metadata['publisher_promotion'] = {'from_source_id': previous_source_id,
+                                          'to_source_id': source.pk, 'at': seen.isoformat()}
     if item.get('source_modified_at'):
         metadata['source_modified_at'] = item['source_modified_at'].isoformat()
     if item.get('source_version'):
@@ -157,9 +166,10 @@ def _ingest_transaction(item, policy, url, upstream_id, discovery, kind, candida
         metadata['feed_url'] = policy.feed_url
     if mapping:
         NewsSourceItem.objects.filter(pk=mapping.pk).update(discovery_url=discovery, metadata=metadata, last_seen_at=seen)
+        mapping.metadata = metadata
     else:
-        NewsSourceItem.objects.create(source_key=policy.key, upstream_id=upstream_id, news=news,
-                                      discovery_url=discovery, metadata=metadata, last_seen_at=seen)
+        mapping = NewsSourceItem.objects.create(source_key=policy.key, upstream_id=upstream_id, news=news,
+                                                discovery_url=discovery, metadata=metadata, last_seen_at=seen)
     body_committed = False
     reason = body_reason
     enabled = getattr(settings, 'STRUCTURED_BODY_INGEST_ENABLED', False)
@@ -167,13 +177,14 @@ def _ingest_transaction(item, policy, url, upstream_id, discovery, kind, candida
     if candidate is not None and enabled and policy.key in allowed:
         committed = commit_candidate(news, candidate, summary=item.get('summary'))
         if committed.outcome == 'conflict':
-            # Roll back metadata/mapping too. A receipt cannot acknowledge this
-            # candidate until reevaluation against the latest evidence succeeds.
             transaction.set_rollback(True)
             return IngestResult(news.pk, 'deferred', 'persistence_conflict')
         reason = committed.reason
         body_committed = committed.changed
         changed = changed or committed.changed
+        if reason == 'source_version_conflict':
+            from api.services.content_review import record_incomparable_body
+            record_incomparable_body(news, mapping, candidate)
     elif candidate is not None:
         reason = 'structured_body_disabled'
     if (getattr(settings, 'FULL_CONTENT_AUTO_ENQUEUE_ENABLED', False) and
