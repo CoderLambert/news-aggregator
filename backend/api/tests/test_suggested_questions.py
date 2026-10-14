@@ -225,3 +225,29 @@ def test_busy_suggestion_slot_never_calls_any_model(news, client):
     assert response.status_code == 429
     assert response.json()['error_code'] == 'suggestion_capacity_busy'
     assert int(response['Retry-After']) > 0
+
+
+def test_two_accounts_cannot_pay_twice_for_the_same_article_revision(news, client):
+    from api.services.account_security import RateLimitExceeded
+    payload = '["this article?", "its impact?", "what next?"]'
+    with patch('api.services.provider_credentials.personal_clients_for_user', return_value=_fake_client(payload)):
+        first = client.post(f'/api/news/{news.pk}/suggested-questions/')
+    assert first.status_code == 200
+    other = User.objects.create_user(username='other-suggested-reader')
+    client.force_login(other)
+    with patch('api.services.provider_credentials.personal_clients_for_user', return_value=_fake_client(payload)):
+        duplicate = client.post(f'/api/news/{news.pk}/suggested-questions/?force=1')
+    assert duplicate.status_code == 429
+    assert duplicate.json()['error_code'] == 'suggestion_budget_exhausted'
+    assert int(duplicate['Retry-After']) > 0
+
+
+def test_unconfigured_reader_does_not_enqueue_full_article(news, client):
+    with (
+        patch('api.views.ensure_full_content', side_effect=AssertionError('should not fetch')),
+        patch('api.services.provider_credentials.personal_clients_for_user', return_value=[]),
+        patch('api.services.chatgpt_subscription.active_connection_for_user', return_value=None),
+    ):
+        response = client.post(f'/api/news/{news.pk}/suggested-questions/')
+    assert response.status_code == 200
+    assert response.json()['generated'] is False
