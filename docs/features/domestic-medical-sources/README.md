@@ -23,3 +23,13 @@
 - 所有网络入口都限制 HTTP(S)、官方域名、公开 DNS、响应大小、超时、重定向和请求频率。
 - 运行历史、文章、收藏、订阅和聊天记录不会因来源停用而删除。
 
+## 实施与运维
+
+- [实施记录](implementation.md)
+- [验收清单](acceptance.md)
+- [停用与回滚](operations.md)
+
+迁移初始化的六个渠道中，`chinanews_health`、`china_cdc_news`、`nhsa_news`、`nmpa_udi_daily`
+为 `probed`，`nhc_news`、`nmpa_news` 为 `blocked`。它们都没有审批记录，
+`CrawlerTarget.enabled` 均为 `false`；迁移、探测和本地测试不会自动开启生产调度。
+
