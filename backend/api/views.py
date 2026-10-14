@@ -117,6 +117,20 @@ class NewsFilter(django_filters.FilterSet):
         return queryset
 
 
+class NewsKeywordSearchFilter(filters.SearchFilter):
+    """Only explicit full-body search extends the normal summary keyword fields."""
+
+    def get_search_fields(self, view, request):
+        fields = list(super().get_search_fields(view, request) or [])
+        return [*fields, 'full_content'] if request.query_params.get('search_in') == 'full' else fields
+
+
+class FullTextSearchUnavailable(APIException):
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    default_detail = '全文检索额度检查暂不可用，请稍后重试。'
+    default_code = 'full_text_budget_unavailable'
+
+
 class StandardPagination(PageNumberPagination):
     page_size = 20
     page_size_query_param = 'page_size'
@@ -135,7 +149,7 @@ class NewsListView(generics.ListAPIView):
     renderer_classes = [JSONRenderer]
     serializer_class = NewsListSerializer
     pagination_class = StandardPagination
-    filter_backends = [django_filters.DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [django_filters.DjangoFilterBackend, NewsKeywordSearchFilter, filters.OrderingFilter]
     filterset_class = NewsFilter
     search_fields = ['title', 'content', 'title_zh', 'content_zh']
     ordering_fields = ['publish_time', 'created_at']
@@ -159,6 +173,12 @@ class NewsListView(generics.ListAPIView):
     def get_queryset(self):
         qs = annotate_full_content_availability(News.objects.select_related('source', 'category').prefetch_related('source_items')).defer(
             'full_content', 'full_content_zh', 'full_content_provenance')
+        if self.request.query_params.get('search_in') == 'full':
+            # Restrict matches to the user's *readable* bodies; an archived
+            # paywalled/summary-only body is not searchable by an ordinary user.
+            from api.services.body_access import can_view_article_body
+            qs = filter_readable_full_content(
+                qs, privileged=can_view_article_body(self.request.user))
         # Hide duplicates by default
         if self.request.query_params.get('include_dupes', 'false') != 'true':
             qs = qs.filter(related_to__isnull=True)
@@ -186,7 +206,50 @@ class NewsListView(generics.ListAPIView):
         # SearchFilter belongs only to the keyword arm, never the vector arm.
         return django_filters.DjangoFilterBackend().filter_queryset(self.request, self.get_queryset(), self)
 
+    def _validate_full_body_search(self, request):
+        scope = request.query_params.get('search_in', 'summary')
+        if scope not in {'summary', 'full'}:
+            raise ApiValidationError({'search_in': 'Unsupported search scope.'})
+        if scope != 'full':
+            return
+        from rest_framework.exceptions import NotAuthenticated, Throttled
+        from api.services.account_security import _reserve_buckets
+
+        if not request.user.is_authenticated or not request.user.is_active:
+            raise NotAuthenticated('登录后才能在已保存的可阅读全文中检索。')
+        query = request.query_params.get('search', '').strip()
+        if not 2 <= len(query) <= 96 or len(query.split()) > 6:
+            raise ApiValidationError({'search': 'Full-body search requires 2–96 characters and at most six terms.'})
+        if request.query_params.get('mode', 'keyword') != 'keyword':
+            raise ApiValidationError({'mode': 'Full-body search currently supports keyword mode only.'})
+        page_size = request.query_params.get('page_size')
+        if page_size is not None:
+            try:
+                valid_size = 1 <= int(page_size) <= 20
+            except (ValueError, TypeError):
+                valid_size = False
+            if not valid_size:
+                raise ApiValidationError({'page_size': 'Full-body search page size must be 1–20.'})
+        try:
+            page = int(request.query_params.get('page', 1))
+        except (ValueError, TypeError):
+            page = 0
+        if page < 1 or page > 10:
+            raise ApiValidationError({'page': 'Full-body search supports pages 1–10.'})
+        try:
+            # Explicit opt-in queries scan stored full bodies on SQLite.
+            # Use the existing durable atomic buckets to protect a 2C/4GB VPS.
+            _reserve_buckets([
+                ('full_body_search_user', str(request.user.pk), 8, 300),
+                ('full_body_search_site', 'global', 40, 300),
+            ])
+        except RateLimitExceeded as exc:
+            raise Throttled(wait=exc.retry_after, detail='全文检索请求过于频繁，请稍后重试。') from exc
+        except AuthSecurityBusy as exc:
+            raise FullTextSearchUnavailable() from exc
+
     def list(self, request, *args, **kwargs):
+        self._validate_full_body_search(request)
         representation = request.query_params.get('representation', 'summary')
         if representation != 'summary':
             raise ApiValidationError({'representation': 'Only summary is supported; use the detail endpoint for complete content.'})

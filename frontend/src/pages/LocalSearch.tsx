@@ -132,10 +132,12 @@ export default function LocalSearch() {
   const semanticSearchEnabled = useCapability('semantic_search').enabled
   const submittedQuery = (searchParams.get('q') ?? '').trim()
   const requestedMode = resolveMode(searchParams.get('mode'))
-  const mode = semanticSearchEnabled ? requestedMode : 'keyword'
+  const mode = searchParams.get('search_in') === 'full' ? 'keyword'
+    : semanticSearchEnabled ? requestedMode : 'keyword'
   const page = positiveInteger(searchParams.get('page'), 1)
   const orderBy = resolveOrderBy(searchParams.get('order_by'))
   const fullContentOnly = searchParams.get('full_content') === 'true'
+  const searchInFullBody = searchParams.get('search_in') === 'full'
   const days = resolveDays(searchParams.get('days'))
   const invalidRegion = searchParams.has('region') && !['domestic', 'international'].includes(searchParams.get('region') ?? '')
   const region = searchParams.get('region') === 'domestic' ? 'domestic' : searchParams.get('region') === 'international' ? 'international' : 'all'
@@ -159,6 +161,7 @@ export default function LocalSearch() {
     ...(submittedQuery ? { search: submittedQuery, mode } : {}),
     order_by: orderBy,
     ...(fullContentOnly ? { full_content: 'true' as const } : {}),
+    ...(searchInFullBody ? { search_in: 'full' as const } : {}),
     ...(publishTimeAfter ? { publish_time_after: publishTimeAfter } : {}),
     ...(sourceTypeFilters.length ? { source_types: sourceTypeFilters.join(',') } : {}),
   }
@@ -173,7 +176,7 @@ export default function LocalSearch() {
   const data = invalidRegion ? undefined : newsQuery.data
   const totalCount = data?.count ?? 0
   const totalPages = Math.ceil(totalCount / PAGE_SIZE)
-  const activeFilterCount = [orderBy !== 'relevance', fullContentOnly, Boolean(days), sourceTypeFilters.length > 0, region !== 'all']
+  const activeFilterCount = [orderBy !== 'relevance', fullContentOnly, searchInFullBody, Boolean(days), sourceTypeFilters.length > 0, region !== 'all']
     .filter(Boolean).length
   const hasActiveFilters = activeFilterCount > 0
   const initialLoading = !invalidRegion && Boolean(submittedQuery) && (authLoading || (newsQuery.isPending && !data))
@@ -188,6 +191,7 @@ export default function LocalSearch() {
     next.set('order_by', orderBy)
     if (region !== 'all') next.set('region', region)
     if (fullContentOnly) next.set('full_content', 'true')
+    if (searchInFullBody) next.set('search_in', 'full')
     if (days) next.set('days', days)
     if (sourceTypeFilters.length) next.set('source_types', sourceTypeFilters.join(','))
     setSearchParams(next)
@@ -215,6 +219,7 @@ export default function LocalSearch() {
     next.set('order_by', orderBy)
     if (region !== 'all') next.set('region', region)
     if (fullContentOnly) next.set('full_content', 'true')
+    if (searchInFullBody) next.set('search_in', 'full')
     if (days) next.set('days', days)
     if (sourceTypeFilters.length) next.set('source_types', sourceTypeFilters.join(','))
     setSearchParams(next)
@@ -233,13 +238,19 @@ export default function LocalSearch() {
         initialQuery={submittedQuery}
         historyNavigationKey={historyNavigationKey}
         mode={mode}
-        allowSemantic={semanticSearchEnabled}
+        allowSemantic={semanticSearchEnabled && !searchInFullBody}
         searching={newsQuery.isFetching}
         buttonLabel={searchButtonLabel}
         onSubmit={handleSubmit}
-        onModeChange={(value) => updateFilters({ mode: value })}
+        onModeChange={(value) => updateFilters({
+          mode: value,
+          ...(value !== 'keyword' ? { search_in: null } : {}),
+        })}
       />
       {!semanticSearchEnabled && <p className="mb-3 text-xs text-muted-foreground" role="status">当前仅支持关键词搜索。</p>}
+      {searchInFullBody && <p className="mb-3 text-xs text-muted-foreground" role="status">
+        当前在有权限阅读的已存正文中执行限额关键词检索；不会加载向量索引或即时抓取源站，结果列表仍只显示摘要。
+      </p>}
 
       {invalidRegion && <p role="alert">无效的频道地区，请选择全部、国内或国际。</p>}
       <RegionFilter value={region} onChange={value => updateFilters({ region: value === 'all' ? null : value })} />
@@ -264,6 +275,17 @@ export default function LocalSearch() {
             仅全文
           </button>
 
+          <button type="button" aria-label="检索已保存全文"
+            aria-pressed={searchInFullBody}
+            disabled={!user}
+            title={!user ? '登录后可检索可阅读全文' : undefined}
+            onClick={() => updateFilters({
+              search_in: searchInFullBody ? null : 'full',
+              ...(searchInFullBody ? {} : { mode: 'keyword' }),
+            })}
+            className="rounded-full border border-border bg-card px-3 py-1 text-xs text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
+            {searchInFullBody ? '✓ ' : ''}检索已保存全文
+          </button>
           <div className="flex items-center gap-2">
             <span className="text-xs font-medium text-muted-foreground">时间</span>
             <PillGroup options={TIME_RANGES} value={days} onChange={(value) => updateFilters({ days: value || null })} />
@@ -356,7 +378,8 @@ export default function LocalSearch() {
             {orderBy === 'relevance' && mode === 'semantic' && '（按语义相似度排序）'}
             {orderBy === 'relevance' && mode === 'hybrid' && '（混合排序）'}
             {orderBy === 'relevance' && mode === 'keyword' && '（关键词匹配）'}
-            {fullContentOnly && ' · 仅全文'}
+            {fullContentOnly && ' · 仅有全文的文章'}
+            {searchInFullBody && ' · 正文内容检索'}
             {days && ` · 近 ${days} 天`}
           </p>
           <div className="space-y-2" aria-busy={newsQuery.isFetching}>

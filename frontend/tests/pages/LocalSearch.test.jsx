@@ -72,6 +72,20 @@ describe('LocalSearch Query and URL state', () => {
     expect(screen.getByText(/找到/)).toHaveTextContent('找到 61 篇相关文章')
   })
 
+
+  it('uses explicit, keyword-only full-body search when the reader opts in', async () => {
+    renderSearch(['/search?q=lantern&mode=semantic'])
+    expect(await screen.findByRole('heading', { name: 'Climate technology update' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '检索已保存全文' }))
+    await waitFor(() => expect(screen.getByTestId('route')).toHaveTextContent('search_in=full'))
+    await waitFor(() => expect(fetchNews).toHaveBeenLastCalledWith(expect.objectContaining({
+      search: 'lantern', mode: 'keyword', search_in: 'full',
+    }), expect.any(AbortSignal)))
+    expect(screen.getByText(/不会加载向量索引或即时抓取源站/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '检索已保存全文' }))
+    await waitFor(() => expect(screen.getByTestId('route')).not.toHaveTextContent('search_in=full'))
+  })
+
   it('sends every selected source type rather than only the first', async () => {
     renderSearch(['/search?q=climate&mode=keyword&source_types=news,discussion'])
     expect(await screen.findByRole('heading', { name: 'Climate technology update' })).toBeInTheDocument()

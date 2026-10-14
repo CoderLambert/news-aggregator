@@ -70,6 +70,56 @@ class ChannelsTests(TestCase):
         # Backward compatibility: historical single-value filter remains functional.
         self.assertEqual(self.client.get('/api/news/', {'source__source_type': 'discussion'}).data['count'], 1)
 
+
+    def test_opt_in_full_body_search_preserves_default_search_and_user_privacy(self):
+        from django.contrib.auth.models import Permission
+        self.first.full_content = 'An old body with unique-lantern-token, otherwise absent.'
+        self.first.full_content_state = 'complete'
+        self.first.save(update_fields=['full_content', 'full_content_state'])
+        self.second_story.full_content = 'Some other article about the same rare code.'
+        self.second_story.full_content_state = 'complete'
+        self.second_story.save(update_fields=['full_content', 'full_content_state'])
+        self.user.user_permissions.add(Permission.objects.get(codename='view_article_body'))
+        query = {'search': 'unique-lantern-token', 'mode': 'keyword'}
+        default = self.client.get('/api/news/', query)
+        self.assertEqual(default.status_code, 200)
+        self.assertEqual(default.data['count'], 0)
+        actual = self.client.get('/api/news/', {**query, 'search_in': 'full'})
+        self.assertEqual(actual.status_code, 200, actual.data)
+        self.assertEqual([row['id'] for row in actual.data['results']], [self.first.pk])
+        self.assertNotIn('full_content', actual.data['results'][0])
+        BlockedNews.objects.create(user=self.user, news=self.first)
+        blocked = self.client.get('/api/news/', {**query, 'search_in': 'full'})
+        self.assertEqual(blocked.data['count'], 0)
+        # Legacy existing only-full filter remains distinct from searching body text.
+        legacy = self.client.get('/api/news/', {**query, 'full_content': 'true'})
+        self.assertEqual(legacy.data['count'], 0)
+
+    def test_full_body_search_rejects_unbounded_and_anonymous_work(self):
+        query = {'search': 'full body', 'mode': 'keyword', 'search_in': 'full'}
+        anonymous = APIClient()
+        self.assertEqual(anonymous.get('/api/news/', query).status_code, 403)
+        for changes in (
+            {'mode': 'semantic'}, {'mode': 'hybrid'}, {'search': 'A' * 97},
+            {'search': ''}, {'page_size': '50'}, {'page': '11'},
+            {'search_in': 'unknown'},
+        ):
+            response = self.client.get('/api/news/', {**query, **changes})
+            self.assertEqual(response.status_code, 400, (changes, response.data))
+
+    def test_full_body_search_enforces_per_user_persistent_budget(self):
+        from unittest.mock import patch
+        from api.services.account_security import _reserve_buckets
+        query = {'search': 'body keyword', 'mode': 'keyword', 'search_in': 'full'}
+        self.client.get('/api/news/', query)
+        # Exercise the actual quota with a deterministic 8 attempts per user.
+        for attempt in range(7):
+            response = self.client.get('/api/news/', query)
+            self.assertEqual(response.status_code, 200, (attempt, response.data))
+        limited = self.client.get('/api/news/', query)
+        self.assertEqual(limited.status_code, 429)
+        self.assertGreater(int(limited['Retry-After']), 0)
+
     def test_membership_removal_and_group_deletion_keep_subscription(self):
         self.subscribe([self.source.id])
         a, b = self.group(), self.group('Second group')
