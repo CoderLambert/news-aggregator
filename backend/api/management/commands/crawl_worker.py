@@ -177,7 +177,7 @@ class Command(BaseCommand):
         elif interrupted:
             status = 'failed'
             safe_error = 'Crawler Worker 停止，任务被中断。'
-        elif exit_code == 0 and summary and summary.get('outcome', 'updated') in {'updated', 'unchanged', 'valid_empty'}:
+        elif exit_code == 0 and summary and summary.get('outcome', 'updated') in {'updated', 'unchanged', 'valid_empty', 'not_due'}:
             status = 'succeeded'
             safe_error = describe_crawl_result(summary)
         elif exit_code == 0:
