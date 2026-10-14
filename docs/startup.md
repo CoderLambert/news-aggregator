@@ -240,6 +240,8 @@ docker compose logs --tail=200 app crawler indexer
 docker compose exec app python backend/manage.py crawl all
 ~~~
 
+`crawl all` 会逐个来源运行，避免多个 Spider 同时争抢共享请求预算；短暂的预算延迟和网络错误最多重试两次。所有来源都取得 `updated`、`unchanged`、`valid_empty` 或 `not_due` 终态时命令才成功，任一来源仍为阻止、限流或失败状态时命令以非零状态退出并列出来源。
+
 Docker 调度参数：
 
 ~~~dotenv
@@ -330,6 +332,8 @@ cd frontend
 backend/venv/bin/python backend/manage.py crawl all
 backend/venv/bin/python backend/manage.py crawl hackernews
 ```
+
+全量命令按来源串行执行。Hacker News 等需要读取多条 API 详情的来源会明显慢于单个 RSS 请求；不要通过并行启动第二个全量命令来加速。
 
 需要由 systemd 用户服务托管时，可将仓库中的
 `scripts/news-aggregator-crawl.service` 和

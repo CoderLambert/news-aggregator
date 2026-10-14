@@ -1,8 +1,14 @@
 import json
 import logging
 import os
+from pathlib import Path
+import subprocess
 import sys
+import time
 from django.core.management.base import BaseCommand
+from django.core.management.base import CommandError
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from scrapy.crawler import CrawlerProcess
 from scrapy.settings import default_settings as scrapy_default_settings
@@ -104,6 +110,20 @@ def _format_crawl_summary(spider_name, stats):
     )
 
 
+def _parse_crawl_result(output):
+    from api.services.crawl_metrics import RESULT_PREFIX
+    for line in reversed(output.splitlines()):
+        if not line.startswith(RESULT_PREFIX):
+            continue
+        try:
+            result = json.loads(line[len(RESULT_PREFIX):])
+        except (TypeError, ValueError):
+            continue
+        if isinstance(result, dict):
+            return result
+    return {}
+
+
 class Command(BaseCommand):
     help = '运行Scrapy爬虫抓取新闻'
 
@@ -119,6 +139,10 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         sys.path.insert(0, CRAWLER_DIR)
         os.environ.setdefault('SCRAPY_SETTINGS_MODULE', 'news_crawler.settings')
+
+        spider_name = options['spider']
+        if spider_name == 'all':
+            return self._crawl_all_serially()
 
         from scrapy.crawler import CrawlerProcess
 
@@ -141,11 +165,7 @@ class Command(BaseCommand):
             # item dumps never reach persistent worker logs.
             _configure_crawl_only_logging()
 
-        spider_name = options['spider']
-        if spider_name == 'all':
-            spiders = SPIDERS.values()
-        else:
-            spiders = [SPIDERS[spider_name]]
+        spiders = [SPIDERS[spider_name]]
 
         crawlers = []
         for spider in spiders:
@@ -173,3 +193,45 @@ class Command(BaseCommand):
             from api.services.crawl_metrics import crawl_result, RESULT_PREFIX
             self.stdout.write(RESULT_PREFIX + json.dumps(crawl_result(stats), ensure_ascii=True, default=str))
         self.stdout.write(self.style.SUCCESS('爬取完成'))
+
+    def _crawl_all_serially(self):
+        """Run sources in isolated reactors so the shared budget cannot starve them."""
+        manage_py = Path(__file__).resolve().parents[3] / 'manage.py'
+        max_attempts = 3
+        max_wait = 15.0
+        failures = []
+        for index, spider in enumerate(SPIDERS.values(), 1):
+            self.stdout.write(f'批量进度 {index}/{len(SPIDERS)} source={spider}')
+            final = {}
+            return_code = 0
+            for attempt in range(1, max_attempts + 1):
+                completed = subprocess.run(
+                    [sys.executable, str(manage_py), 'crawl', spider],
+                    cwd=str(manage_py.parent), env=os.environ.copy(), text=True,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                )
+                return_code = completed.returncode
+                if completed.stdout:
+                    self.stdout.write(completed.stdout, ending='' if completed.stdout.endswith('\n') else '\n')
+                final = _parse_crawl_result(completed.stdout or '')
+                outcome = final.get('outcome')
+                if return_code == 0 and outcome in {'updated', 'unchanged', 'valid_empty', 'not_due'}:
+                    break
+                if attempt == max_attempts or outcome not in {'deferred', 'network_error'}:
+                    break
+                delay = min(2.0 * attempt, max_wait)
+                if outcome == 'deferred' and final.get('next_attempt_at'):
+                    deadline = parse_datetime(str(final['next_attempt_at']))
+                    if deadline is not None:
+                        delay = max(delay, (deadline - timezone.now()).total_seconds())
+                if delay > max_wait:
+                    break
+                self.stdout.write(
+                    f'批量重试 source={spider} attempt={attempt + 1} wait_seconds={max(0.0, delay):.1f}'
+                )
+                time.sleep(max(0.0, delay))
+            if return_code != 0 or final.get('outcome') not in {'updated', 'unchanged', 'valid_empty', 'not_due'}:
+                failures.append(f'{spider}:{final.get("outcome", "missing_result")}:{return_code}')
+        if failures:
+            raise CommandError('批量抓取未全部完成：' + ', '.join(failures))
+        self.stdout.write(self.style.SUCCESS(f'批量抓取完成：{len(SPIDERS)} 个来源均获得终态。'))

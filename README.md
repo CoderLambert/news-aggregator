@@ -241,6 +241,8 @@ python manage.py crawl all
 python manage.py crawl hackernews
 ```
 
+全量抓取会逐个来源执行并共享持久化请求预算；只有每个来源都得到健康终态时才返回成功。
+
 也可以手动执行一次全部爬虫：
 
 ```bash
