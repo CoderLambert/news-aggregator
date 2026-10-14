@@ -75,6 +75,7 @@ function BodyReviewQueue() {
     queryFn: ({ signal }) => fetchArticleBodyReviews(signal),
     staleTime: 30_000, retry: false,
   })
+  const reviews = Array.isArray(query.data?.results) ? query.data.results : null
   return <Card>
     <CardHeader>
       <CardTitle>无法比较版本的正文复核</CardTitle>
@@ -91,16 +92,17 @@ function BodyReviewQueue() {
       {query.data?.truncated && <p role="status" className="text-sm text-amber-700">
         仅显示最近 100 项，请先处理较新的记录。
       </p>}
-      {query.data && !query.data.results.length && <p className="text-sm text-muted-foreground">
+      {query.data && reviews === null && <p role="alert">复核结果格式无效，请刷新重试。</p>}
+      {reviews?.length === 0 && <p className="text-sm text-muted-foreground">
         暂无有待核对的正文版本记录。
       </p>}
-      {query.data?.results.length ? <div className="workspace-scroll max-h-96 overflow-auto rounded-lg border">
+      {reviews && reviews.length > 0 ? <div className="workspace-scroll max-h-96 overflow-auto rounded-lg border">
         <table className="w-full min-w-[700px] text-left text-sm">
           <thead className="sticky top-0 bg-muted"><tr>
             <th className="px-3 py-2">文章</th><th className="px-3 py-2">来源</th>
             <th className="px-3 py-2">状态</th><th className="px-3 py-2">发现时间</th>
           </tr></thead>
-          <tbody>{query.data.results.map((item) => <tr key={item.sourceKey + ':' + item.newsId} className="border-t">
+          <tbody>{reviews.map((item) => <tr key={item.sourceKey + ':' + item.newsId} className="border-t">
             <td className="px-3 py-2"><Link to={'/news/' + item.newsId}
               className="text-primary underline">{item.title}</Link></td>
             <td className="px-3 py-2">{item.sourceKey}</td>
