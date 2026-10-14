@@ -20,7 +20,6 @@ class GroupingConflict(APIException):
 def lock_user(user):
     if not user.is_active:
         raise PermissionDenied('账号不可用。')
-    # Also acquires SQLite's write fence BEFORE a read-modify-write transaction.
     User.objects.filter(pk=user.pk).update(last_login=F('last_login'))
     User.objects.select_for_update().get(pk=user.pk)
 
@@ -141,6 +140,10 @@ def apply_proposal(user, proposal_id, payload):
         raise GroupingConflict('预览尚未就绪、已取消或已过期，请重新整理。')
     if proposal.input_snapshot != snapshot(user, proposal.source_ids):
         raise GroupingConflict()
+    if proposal.engine == 'ai':
+        from api.services.classification_evidence import evidence_is_current
+        if not evidence_is_current(proposal):
+            raise GroupingConflict('AI 依据的文章标题或频道资料已变化，请重新生成；不会自动再次调用模型。')
     entries = payload.get('groups')
     if not isinstance(entries, list) or not 1 <= len(entries) <= len(TOPIC_MAP):
         raise ValidationError('请选择要应用的分组。')
@@ -213,7 +216,6 @@ def undo_proposal(user, proposal_id):
             group_id=change['group_id'], subscription__user=user, subscription__source_id=change['source_id']).delete()
         if deleted:
             ChannelGroupingOverride.objects.update_or_create(user=user, source_id=change['source_id'], group_id=change['group_id'], defaults={'suppressed': True})
-    # Keep group names, existing memberships, bindings and subscriptions intact.
     proposal.status = 'undone'
     proposal.save(update_fields=['status'])
     return proposal

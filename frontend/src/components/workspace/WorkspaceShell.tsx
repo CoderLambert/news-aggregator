@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import type { ReactNode, MouseEvent } from 'react'
+import { Link, useLocation, useNavigationType } from 'react-router-dom'
+import { useAuth } from '@/context/AuthContext'
+import { readingPosition, rememberReadingPosition } from '@/services/readingPosition'
 import { BookOpen, FolderOpen, Heart, House, Menu, Moon, Plus, Rss, Search, Settings, Sparkles, Sun } from 'lucide-react'
 import { useChannelConfig } from '@/services/channelQueries'
 import { useCapability } from '@/context/CapabilitiesContext'
@@ -13,6 +15,9 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
   const accounts = useCapability('accounts').enabled
   const favorites = useCapability('favorites').enabled
   const location = useLocation()
+  const navigationType = useNavigationType()
+  const { user } = useAuth()
+  const viewerKey = user?.id ?? 'anonymous'
   const [drawer, setDrawer] = useState(false)
   const [dark, setDark] = useState(() => { try { return localStorage.getItem('newshub-theme') === 'dark' } catch { return false } })
   useEffect(() => {
@@ -21,10 +26,62 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
   }, [dark])
   useLayoutEffect(() => {
     const main = shellRef.current?.querySelector<HTMLElement>('.workspace-main > main')
-    if (main) main.scrollTop = 0
+    if (!main) return
+    const previous = readingPosition(viewerKey, location.pathname, location.search)
+    const returnState = location.state
+    const requestedArticleId = typeof returnState === 'object' && returnState !== null && 'restoreArticleId' in returnState
+      ? String(returnState.restoreArticleId)
+      : null
+    const shouldRestore = Boolean(previous && (
+      (navigationType === 'POP' && !location.pathname.startsWith('/news/')) ||
+      requestedArticleId === previous.articleId
+    ))
     document.documentElement.scrollTop = 0
     document.body.scrollTop = 0
-  }, [location.pathname, location.search])
+    if (!shouldRestore || !previous) {
+      main.scrollTop = 0
+      return
+    }
+
+    // A route can return before paginated article cards finish rendering.
+    // Observe only the owned reading container, bounded by a timeout.
+    let done = false
+    const restore = () => {
+      if (done) return
+      const anchor = document.getElementById('news-card-' + previous.articleId)
+      if (!anchor || !main.contains(anchor)) return
+      main.scrollTop = Math.max(0, previous.top + anchor.getBoundingClientRect().top
+        - main.getBoundingClientRect().top - previous.offset)
+      if (anchor instanceof HTMLElement) anchor.focus({ preventScroll: true })
+      done = true
+    }
+    main.scrollTop = previous.top
+    const observer = new MutationObserver(restore)
+    observer.observe(main, { childList: true, subtree: true })
+    const expiry = window.setTimeout(() => {
+      observer.disconnect()
+    }, 10000)
+    restore()
+    return () => {
+      done = true
+      observer.disconnect()
+      window.clearTimeout(expiry)
+    }
+  }, [location.pathname, location.search, location.state, navigationType, viewerKey])
+
+  function captureArticleNavigation(event: MouseEvent<HTMLDivElement>) {
+    if (!(event.target instanceof Element)) return
+    const link = event.target.closest<HTMLAnchorElement>('a[id^="news-card-"]')
+    const main = shellRef.current?.querySelector<HTMLElement>('.workspace-main > main')
+    if (!link || !main || !main.contains(link)) return
+    const articleId = link.id.slice('news-card-'.length)
+    if (!/^[1-9]\d*$/.test(articleId)) return
+    rememberReadingPosition(viewerKey, location.pathname, location.search, {
+      top: main.scrollTop,
+      articleId,
+      offset: link.getBoundingClientRect().top - main.getBoundingClientRect().top,
+    })
+  }
   useEffect(() => {
     const shell = shellRef.current
     if (!shell) return
@@ -86,7 +143,7 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
       <button type="button" onClick={() => setDark(value => !value)}>{dark ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}{dark ? '切换浅色' : '切换深色'}</button>
     </div>
   </>
-  return <div ref={shellRef} className="workspace-shell">
+  return <div ref={shellRef} className="workspace-shell" onClickCapture={captureArticleNavigation}>
     <aside className="workspace-sidebar workspace-scroll">{navigation}</aside>
     <div className="workspace-main">
       <button type="button" className="workspace-mobile-navigation" onClick={() => setDrawer(true)} aria-expanded={drawer}><Menu size={17} aria-hidden="true" />工作区导航</button>

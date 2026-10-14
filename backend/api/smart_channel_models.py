@@ -96,6 +96,13 @@ class ChannelIntakeRequest(models.Model):
     url = models.URLField(max_length=1024)
     status = models.CharField(max_length=16, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
+    review_reason = models.CharField(max_length=500, blank=True, default='')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='reviewed_channel_intakes')
+    registered_source = models.ForeignKey('api.Source', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='intake_requests')
+    review_revision = models.PositiveIntegerField(default=0)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['user', 'url'], name='unique_channel_intake')]

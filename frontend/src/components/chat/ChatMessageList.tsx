@@ -88,6 +88,12 @@ export default function ChatMessageList({
       {messages.map((message, index) => (
         <div key={message.id ?? `history-${index}`} className={`mx-auto flex w-full max-w-5xl animate-message-pop-in ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
           <div className={`max-w-full break-words rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed sm:max-w-[85%] ${message.role === 'user' ? 'rounded-tr-md bg-primary text-primary-foreground shadow-sm' : 'rounded-tl-md border border-border bg-card text-card-foreground shadow-sm'}`}>
+            {message.role === 'assistant' && (message.status === 'failed' || message.status === 'interrupted' || message.status === 'legacy_unknown') && (
+              <p role="status" className="mb-2 text-xs text-amber-700 dark:text-amber-300">
+                {message.status === 'failed' ? '回答失败，以下内容可能不完整' :
+                  message.status === 'interrupted' ? '回答已中断，以下内容可能不完整' : '旧版回答：完成状态无法确认'}
+              </p>
+            )}
             {message.role === 'assistant' && (message.context_scope === 'summary' || message.context_scope === 'excerpt') && (
               <p className="mb-2 text-xs text-muted-foreground">{message.context_scope === 'summary' ? '当前回答基于摘要' : '当前回答基于文章节选'}</p>
             )}

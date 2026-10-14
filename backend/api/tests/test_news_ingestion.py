@@ -419,8 +419,9 @@ def test_hn_editorial_headline_does_not_veto_exact_publisher_identity():
         result = ingest_item(entry(publisher, title=publisher.title))
     assert result.body_committed
     news.refresh_from_db()
-    assert has_full_content(news) and news.source.name == 'Hacker News'
-    assert news.title == 'An editorial HN headline'
+    assert result.news_id == discovered.news_id
+    assert has_full_content(news) and news.source.name == 'Dev.to'
+    assert news.title == 'The exact publisher headline'
     assert news.source_items.count() == 2
 
 

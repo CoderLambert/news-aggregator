@@ -100,7 +100,7 @@ def test_chat_history_is_isolated_and_body_owner_fields_are_ignored(chat_news, c
     assert saved.user_id == chat_user.pk
     assert saved.messages[-2:] == [
         {'role': 'user', 'content': 'new question'},
-        {'role': 'assistant', 'content': 'assistant reply'},
+        {'role': 'assistant', 'content': 'assistant reply', 'status': 'complete'},
     ]
 
 
@@ -126,7 +126,7 @@ def test_chat_writes_require_valid_session_csrf(chat_news, chat_user):
 
     assert ChatSession.objects.get(user=chat_user, news=chat_news).messages[-2:] == [
         {'role': 'user', 'content': 'hello'},
-        {'role': 'assistant', 'content': 'answer'},
+        {'role': 'assistant', 'content': 'answer', 'status': 'complete'},
     ]
 
 

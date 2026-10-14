@@ -27,6 +27,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { useArticleSearch } from '@/hooks/useArticleSearch'
 import { useArticleToc } from '@/hooks/useArticleToc'
 import type { NewsDetail as NewsDetailRecord } from '@/types/news'
+import { formatUnverifiedNewsTime } from '@/utils/newsTime'
 import type { SpeechLanguage, SpeechScope } from '@/constants/tts'
 import { useCapabilities } from '@/context/CapabilitiesContext'
 
@@ -134,6 +135,18 @@ export default function NewsDetail() {
 
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const searchTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const returnSearchFocusRef = useRef(false)
+  const closeSearch = useCallback(() => {
+    returnSearchFocusRef.current = true
+    setSearchOpen(false)
+    setSearchQuery('')
+  }, [])
+  useEffect(() => {
+    if (searchOpen || !returnSearchFocusRef.current) return
+    returnSearchFocusRef.current = false
+    searchTriggerRef.current?.focus()
+  }, [searchOpen])
   const articleRef = useRef<HTMLElement | null>(null)
   const { matchCount, currentIndex, goNext, goPrev } = useArticleSearch(articleRef, searchQuery)
   const { headings, activeId } = useArticleToc(articleRef, [news?.full_content, news?.full_content_zh, showOriginal])
@@ -200,13 +213,13 @@ export default function NewsDetail() {
           currentIndex={currentIndex}
           onGoNext={goNext}
           onGoPrev={goPrev}
-          onClose={() => { setSearchOpen(false); setSearchQuery('') }}
+          onClose={closeSearch}
         />
       )}
 
       <div className={`mx-auto w-full max-w-5xl overflow-x-hidden px-4 pb-28 pt-4 sm:px-6 sm:pb-10 sm:pt-6 ${searchOpen ? 'pt-16' : ''}`}>
         <nav className="mb-8 flex items-center justify-between">
-          <Link to={returnTo} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground">
+          <Link to={returnTo} state={{ restoreArticleId: news.id }} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground">
             <ArrowLeft className="size-3.5" />{t.backToList}
           </Link>
           {!searchOpen && (
@@ -234,7 +247,7 @@ export default function NewsDetail() {
                   onTranslateAndPlay={handleTranslateAndPlay}
                 />
               )}
-              <button type="button" onClick={() => setSearchOpen(true)} aria-label="搜索文章内容" className="-mr-2 flex size-10 items-center justify-center rounded-xl transition-colors hover:bg-secondary active:bg-secondary">
+              <button ref={searchTriggerRef} type="button" onClick={() => setSearchOpen(true)} aria-label="搜索文章内容" className="-mr-2 flex size-10 items-center justify-center rounded-xl transition-colors hover:bg-secondary active:bg-secondary">
                 <Search className="size-[18px] text-muted-foreground" />
               </button>
             </div>
@@ -361,7 +374,9 @@ function ArticleHeader({ news, displayTitle, displaySubtitle, isEnglishSource }:
         {author && author !== sourceName && <span className="flex items-center gap-1"><span className="text-foreground">{author}</span></span>}
         {sourceName && <span>{sourceName}</span>}
         <span className="flex items-center gap-1">
-          <time>{new Date(news.publish_time).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}{news.publish_time_inferred && '（时间推断）'}</time>
+          <time dateTime={news.publish_time}>{news.publish_time_inferred
+            ? formatUnverifiedNewsTime(news.publish_time, 'full')
+            : new Date(news.publish_time).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}</time>
         </span>
       </div>
     </header>

@@ -115,12 +115,31 @@ def append_user_message(*, user_id: int, news_id: int, content: str) -> ChatSnap
     )
 
 
+CHAT_TURN_STATUSES = frozenset({'complete', 'failed', 'interrupted', 'legacy_unknown'})
+
+def normalized_chat_history(messages: list) -> list:
+    """Make legacy completion uncertainty explicit without mutating archived records."""
+    if not isinstance(messages, list):
+        return []
+    normalized = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        entry = dict(message)
+        if entry.get('role') == 'assistant' and entry.get('status') not in CHAT_TURN_STATUSES:
+            entry['status'] = 'legacy_unknown'
+        normalized.append(entry)
+    return normalized
+
+
 def append_assistant_message(*, user_id: int, news_id: int, session_id: int,
-                             generation: int, content: str) -> ChatSnapshot:
+                             generation: int, content: str, status: str = 'complete') -> ChatSnapshot:
+    if status not in {'complete', 'failed', 'interrupted'}:
+        raise ValueError('invalid assistant completion status')
     return _append_message(
         user_id=user_id,
         news_id=news_id,
-        message={'role': 'assistant', 'content': content},
+        message={'role': 'assistant', 'content': content, 'status': status},
         session_id=session_id,
         generation=generation,
         create=False,

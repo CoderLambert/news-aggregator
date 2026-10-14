@@ -211,3 +211,34 @@ def test_article_fetch_admin_rejects_unsafe_or_extra_policy_fields():
     )
     assert response.status_code == 400
     assert not JinaFallbackPolicy.objects.filter(pk='127.0.0.1').exists()
+
+
+@pytest.mark.django_db
+def test_body_review_admin_api_is_read_only_and_hides_candidate_hashes():
+    from api.models import NewsSourceItem
+    news = _news()
+    metadata = {'body_review': {'status': 'pending_review', 'candidate_sha256': 'sensitive-digest',
+                'base_revision': 1, 'detected_at': timezone.now().isoformat(),
+                'queue_result': 'operator_review_required'}}
+    record = NewsSourceItem.objects.create(source_key='devto', upstream_id='test-body-review',
+        news=news, discovery_url='https://dev.to/article', metadata=metadata)
+    admin = User.objects.create_superuser('body-review-admin', 'operator@example.test', 'synthetic')
+    normal = User.objects.create_user(username='body-review-reader')
+    client = APIClient()
+    path = '/api/admin/article-fetch/body-reviews/'
+    assert client.get(path).status_code == 403
+    client.force_authenticate(normal)
+    assert client.get(path).status_code == 403
+    client.force_authenticate(admin)
+    response = client.get(path)
+    assert response.status_code == 200
+    assert response.data['results'][0]['news_id'] == news.pk
+    assert response.data['results'][0]['status'] == 'pending_review'
+    assert 'sensitive-digest' not in str(response.data)
+    record.refresh_from_db()
+    assert record.metadata == metadata
+    news.full_content_revision = 2
+    news.save(update_fields=['full_content_revision'])
+    response = client.get(path)
+    assert response.data['results'][0]['status'] == 'reviewed'
+

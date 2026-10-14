@@ -57,6 +57,7 @@ describe('useChat', () => {
     api.chatStream.mockReturnValue((async function* () {
       yield '\u200b__META__{"type":"article_context","context_scope":"summary"}__META__\n\n'
       yield 'An answer based on the available summary.'
+      yield '\u200b__META__{"type":"chat_turn","status":"complete"}__META__\n\n'
     })())
     const { result } = renderHook(() => useChat('42', true), { wrapper: makeWrapper() })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
@@ -65,8 +66,19 @@ describe('useChat', () => {
     expect(result.current.messages[1]).toMatchObject({ context_scope: 'summary', content: 'An answer based on the available summary.' })
   })
 
+  it('does not report a bare EOF as a completed reply', async () => {
+    api.chatStream.mockReturnValue((async function* () { yield 'partial without receipt' })())
+    api.fetchChatHistory.mockResolvedValue({ messages: [] })
+    const { result } = renderHook(() => useChat('42', true), { wrapper: makeWrapper() })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    await act(async () => { await result.current.doSend('Question') })
+    expect(result.current.phase).toBe('error')
+    expect(result.current.uncertainTurn).not.toBeNull()
+    expect(result.current.messages[1].content).toContain('partial without receipt')
+  })
+
   it('streams one user/assistant pair and clears the submitted draft only on success', async () => {
-    api.chatStream.mockReturnValue((async function* () { yield 'Hel'; yield 'lo!' })())
+    api.chatStream.mockReturnValue((async function* () { yield 'Hel'; yield 'lo!'; yield '\u200b__META__{"type":"chat_turn","status":"complete"}__META__\n\n' })())
     const { result } = renderHook(() => useChat('42', true), { wrapper: makeWrapper() })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
     act(() => result.current.setInput('请问'))
@@ -90,6 +102,7 @@ describe('useChat', () => {
       yield metaFrame.slice(23)
       yield markdown.slice(0, 16)
       yield markdown.slice(16)
+      yield '\u200b__META__{"type":"chat_turn","status":"complete"}__META__\n\n'
     })())
     const { result } = renderHook(() => useChat('42', true), { wrapper: makeWrapper() })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
@@ -354,7 +367,7 @@ describe('useChat', () => {
     api.chatStream
       // eslint-disable-next-line require-yield -- simulates failure before the first token
       .mockImplementationOnce(async function* () { throw new Error('network down') })
-      .mockImplementationOnce(async function* () { yield 'recovered' })
+      .mockImplementationOnce(async function* () { yield 'recovered'; yield '\u200b__META__{"type":"chat_turn","status":"complete"}__META__\n\n' })
     const { result } = renderHook(() => useChat('42', true), { wrapper: makeWrapper() })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
     act(() => result.current.setInput('repeat once'))
@@ -450,7 +463,7 @@ describe('useChat', () => {
   it('retains messages and exposes a recoverable error when an idle clear fails', async () => {
     api.fetchChatHistory.mockResolvedValueOnce({ messages: [{ role: 'user', content: 'existing' }] })
     api.clearChatHistory.mockRejectedValueOnce(new Error('delete failed'))
-    api.chatStream.mockReturnValue((async function* () { yield 'recovered' })())
+    api.chatStream.mockReturnValue((async function* () { yield 'recovered'; yield '\u200b__META__{"type":"chat_turn","status":"complete"}__META__\n\n' })())
     const { result } = renderHook(() => useChat('42', true), { wrapper: makeWrapper() })
     await waitFor(() => expect(result.current.messages).toHaveLength(1))
     act(() => result.current.requestClearChat())

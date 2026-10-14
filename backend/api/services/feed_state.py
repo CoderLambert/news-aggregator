@@ -27,11 +27,15 @@ class FeedRequestState:
     next_poll_at: object = None
 
 
+# Only presentation and scheduling fields are excluded. New policy fields
+# participate by default so a future content/access rule cannot silently reuse
+# validators for a representation admitted under an older contract.
+PRESENTATION_FIELDS = frozenset({'description', 'poll_seconds', 'request_interval'})
+
+
 def policy_signature(source_key, *, window_days=30, admitted=True):
     policy = POLICIES[source_key]
-    contract = asdict(policy)
-    contract.pop('poll_seconds')
-    contract.pop('request_interval')
+    contract = {key: value for key, value in asdict(policy).items() if key not in PRESENTATION_FIELDS}
     contract.update(
         validator=VALIDATOR_VERSION, window_days=window_days, admitted=bool(admitted),
         structured=bool(getattr(settings, 'STRUCTURED_BODY_INGEST_ENABLED', False) and
@@ -40,6 +44,7 @@ def policy_signature(source_key, *, window_days=30, admitted=True):
                           source_key in getattr(settings, 'FULL_CONTENT_AUTO_SOURCE_KEYS', ())),
     )
     return hashlib.sha256(json.dumps(contract, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
 
 def prepare_feed_request(source_key, feed_url, *, window_days=30, admitted=True):
     feed_url = normalize_article_url(feed_url, max_length=1024, require_article=False)

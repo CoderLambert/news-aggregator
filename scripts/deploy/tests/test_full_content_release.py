@@ -420,3 +420,59 @@ def test_workspace_rollback_loads_overlay_and_manages_channel_worker(tmp_path):
     worker_up = next(call for call in compose_calls if 'up' in call and 'crawler' in call)
     assert worker_up[-4:] == ['crawler', 'indexer', 'full-content', 'channel-worker']
     assert any('ps' in call and call[-1] == 'channel-worker' for call in compose_calls)
+
+
+def test_channel_worker_minimal_permissions_and_real_gateway_compatibility():
+    """Overlay is combined with compose.prod.yaml, not inherited from app."""
+    overlay = yaml.safe_load((ROOT / 'compose.workspace.prod.yaml').read_text())
+    worker = overlay['services']['channel-worker']
+    prod = yaml.safe_load((ROOT / 'compose.prod.yaml').read_text())
+    web = prod['services']['app']
+
+    assert 'extends' not in worker and 'env_file' not in worker
+    assert worker['image'] == web['image']
+    assert worker['command'][-1] == 'channel_worker'
+    assert worker['volumes'] == ['db-data:/var/lib/newshub/db', 'logs-data:/var/lib/newshub/logs']
+    assert worker['secrets'] == ['ai_byok_gateway_project_key']
+    assert worker['network_mode'] == 'host'  # existing gateway only accepts loopback
+    assert worker['read_only'] is True
+    assert worker['cap_drop'] == ['ALL']
+    assert worker['security_opt'] == ['no-new-privileges:true']
+    assert worker['pids_limit'] <= 128
+    assert worker['mem_limit'] == '512m'
+    assert worker['tmpfs'] == ['/tmp:rw,nosuid,nodev,noexec,size=16m']
+    assert worker['depends_on']['migrate']['condition'] == 'service_completed_successfully'
+    assert worker['depends_on']['app']['condition'] == 'service_healthy'
+
+    environment = worker['environment']
+    assert environment['DJANGO_ENV'] == 'production'
+    assert environment['PUBLIC_SITE_MODE'] == '${PUBLIC_SITE_MODE:-read_only}'
+    assert environment['PUBLIC_AI_ENABLED'] == '${PUBLIC_AI_ENABLED:-0}'
+    assert environment['AI_BYOK_GATEWAY_PROJECT_KEY_FILE'] == '/run/secrets/ai_byok_gateway_project_key'
+    assert environment['CHANNEL_WORKER_HEARTBEAT'].startswith('/var/lib/newshub/logs/')
+    for web_only in ('WAITRESS_THREADS', 'WAITRESS_PORT', 'WAITRESS_CONN_LIMIT',
+                     'CHATGPT_AUTH_MODE', 'CHATGPT_PLAN_USAGE_ENABLED',
+                     'EDGE_TTS_ENDPOINT', 'TTS_CACHE_DIR', 'HF_HOME',
+                     'SEARCH_INDEX_WORKER_LOCK', 'CHROMA_DATA_DIR'):
+        assert web_only not in environment
+    assert 'chroma-data' not in repr(worker) and 'tts-data' not in repr(worker)
+    assert 'model-cache' not in repr(worker) and 'runtime-data' not in repr(worker)
+
+
+def test_channel_worker_runtime_settings_are_explicit_and_production_valid():
+    from newsaggregator.runtime_config import parse_runtime_config
+    import secrets as _secrets
+    overlay = yaml.safe_load((ROOT / 'compose.workspace.prod.yaml').read_text())
+    env = {
+        'DJANGO_ENV': 'production',
+        'DJANGO_DEBUG': '0',
+        'DJANGO_SECRET_KEY': 'A1b2C3d4E5f6' + _secrets.token_urlsafe(48),
+        'WAITRESS_TRUSTED_PROXY': '127.0.0.1',
+        'PUBLIC_SITE_MODE': 'full',
+        'PUBLIC_AI_ENABLED': '1',
+    }
+    runtime = parse_runtime_config(env, environment='production')
+    assert runtime.public_site_mode == 'full'
+    assert runtime.public_ai_enabled is True
+    assert set(('DJANGO_SECRET_KEY', 'WAITRESS_TRUSTED_PROXY')).issubset(
+        overlay['services']['channel-worker']['environment'])

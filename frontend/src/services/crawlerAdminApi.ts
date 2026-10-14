@@ -139,6 +139,74 @@ function parseDashboard(value: unknown): CrawlerDashboard {
   }
 }
 
+export type CrawlerReadinessState =
+  | 'unsupported' | 'not_registered' | 'disabled' | 'worker_offline' | 'scheduler_paused'
+  | 'running' | 'degraded' | 'waiting_poll' | 'idle' | 'no_history'
+
+export interface CrawlerReadinessSource {
+  sourceKey: string
+  displayName: string
+  registered: boolean
+  supported: boolean
+  enabled: boolean
+  state: CrawlerReadinessState
+  action: string
+  lastResult: string
+  lastFinishedAt: string | null
+  lastFeedSuccessAt: string | null
+  nextPollAt: string | null
+}
+export interface CrawlerReadinessSnapshot {
+  schedulerConfigured: boolean
+  schedulerEnabled: boolean
+  crawlerWorkerOnline: boolean
+  indexWorkerOnline: boolean
+  sources: CrawlerReadinessSource[]
+}
+
+export function parseCrawlerReadiness(value: unknown): CrawlerReadinessSnapshot {
+  if (!isRecord(value) || !isRecord(value.scheduler) || !isRecord(value.workers) ||
+    !isRecord(value.workers.crawler) || !isRecord(value.workers.search_index) ||
+    !Array.isArray(value.sources)) throw new TypeError('Invalid crawler readiness response')
+  const stateNames = new Set([
+    'unsupported', 'not_registered', 'disabled', 'worker_offline', 'scheduler_paused',
+    'running', 'degraded', 'waiting_poll', 'idle', 'no_history',
+  ])
+  return {
+    schedulerConfigured: value.scheduler.configured === true,
+    schedulerEnabled: value.scheduler.enabled === true,
+    crawlerWorkerOnline: value.workers.crawler.online === true,
+    indexWorkerOnline: value.workers.search_index.online === true,
+    sources: value.sources.flatMap((item) => {
+      if (!isRecord(item) || typeof item.source_key !== 'string' ||
+        typeof item.display_name !== 'string' || typeof item.state !== 'string' ||
+        !stateNames.has(item.state)) return []
+      return [{
+        sourceKey: item.source_key,
+        displayName: item.display_name,
+        registered: item.registered === true,
+        supported: item.supported === true,
+        enabled: item.enabled === true,
+        state: item.state as CrawlerReadinessState,
+        action: text(item.suggested_action),
+        lastResult: text(item.last_result),
+        lastFinishedAt: nullableText(item.last_finished_at),
+        lastFeedSuccessAt: nullableText(item.last_feed_success_at),
+        nextPollAt: nullableText(item.next_poll_at),
+      }]
+    }),
+  }
+}
+
+export async function fetchCrawlerReadiness(signal?: AbortSignal): Promise<CrawlerReadinessSnapshot> {
+  try {
+    const { data } = await client.get<unknown>('/readiness/', { signal })
+    return parseCrawlerReadiness(data)
+  } catch (error) {
+    normalizeError(error)
+  }
+}
+
 export class CrawlerAdminApiError extends Error {
   status: number | null
 

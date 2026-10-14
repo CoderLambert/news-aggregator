@@ -19,6 +19,7 @@ export interface NewsListParams {
   source?: string
   order_by?: SearchOrderBy
   full_content?: 'true'
+  search_in?: 'full'
   publish_time_after?: string
   source__source_type?: SourceType
   source_types?: string

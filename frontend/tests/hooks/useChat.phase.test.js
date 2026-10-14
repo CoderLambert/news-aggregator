@@ -43,6 +43,7 @@ describe('useChat phase machine', () => {
       yield 'Hello '
       await new Promise((resolve) => { releaseSecond = resolve })
       yield 'world'
+      yield '\u200b__META__{"type":"chat_turn","status":"complete"}__META__\n\n'
     })
     const { result } = renderHook(() => useChat(1, true), { wrapper: makeWrapper() })
     await waitFor(() => expect(result.current.phase).toBe('idle'))
@@ -61,7 +62,7 @@ describe('useChat phase machine', () => {
     chatStream
       // eslint-disable-next-line require-yield -- intentional: simulates a request that fails before its first token
       .mockImplementationOnce(async function* () { throw new Error('boom') })
-      .mockImplementationOnce(async function* () { yield 'ok' })
+      .mockImplementationOnce(async function* () { yield 'ok'; yield '\u200b__META__{"type":"chat_turn","status":"complete"}__META__\n\n' })
     const { result } = renderHook(() => useChat(1, true), { wrapper: makeWrapper() })
     await waitFor(() => expect(result.current.phase).toBe('idle'))
     act(() => result.current.setInput('first'))
