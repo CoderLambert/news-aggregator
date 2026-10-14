@@ -241,8 +241,10 @@ def candidate_contract_allows(candidate) -> bool:
 def html_candidate_contract_allows(candidate) -> bool:
     from api.services.article_identity import same_article_identity
     from api.services.article_fetcher.site_rules import get_site_rule
-    policy = (_RUNTIME_POLICIES.get(candidate.source_key) or POLICIES.get(candidate.source_key) or
-              policy_for_url(candidate.target_url))
+    policy = _RUNTIME_POLICIES.get(candidate.source_key) or POLICIES.get(candidate.source_key)
+    if policy is None and candidate.source_key != 'publisher_html':
+        policy = policy_for_key(candidate.source_key)
+    policy = policy or policy_for_url(candidate.target_url)
     from api.services.body_access import privileged_fetch
     if policy and ((not policy.html_allowed and not privileged_fetch.get()) or policy.unsupported_reason):
         return False
