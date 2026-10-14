@@ -1,0 +1,206 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-10-15T02:12:50+08:00",
+  "probe_policy": {
+    "user_agent": "NewsHubSourceProbe/1.0 (+https://github.com/CoderLambert/news-aggregator)",
+    "max_list_requests_per_source": 1,
+    "max_detail_requests_per_source": 3,
+    "max_response_bytes": 2097152,
+    "timeout_seconds": 20,
+    "historical_backfill": false,
+    "response_bodies_persisted": false
+  },
+  "sources": [
+    {
+      "source_key": "chinanews_health",
+      "publisher": "中国新闻网",
+      "channel": "健康",
+      "status": "SUPPORTED",
+      "endpoint": {
+        "kind": "rss",
+        "url": "https://www.chinanews.com.cn/rss/jk.xml",
+        "redirect_chain": [],
+        "http_status": 200,
+        "content_type": "text/xml",
+        "bytes": 10290,
+        "etag": "\"69aa3e2a-2832\"",
+        "last_modified": "Fri, 06 Mar 2026 02:38:34 GMT"
+      },
+      "identity_field": "guid or canonical item link",
+      "published_field": "pubDate",
+      "detail_links_checked": 3,
+      "detail_statuses": [200, 200, 200],
+      "sample_articles": [
+        {
+          "title": "全球第一不可逆致盲眼病！40岁后，这项检查务必要做→",
+          "url": "https://www.chinanews.com.cn/jk/2026/03-06/10581992.shtml",
+          "published_at": "2026-03-06T07:50:05+08:00"
+        },
+        {
+          "title": "“主动健康农业实验室”“花”落上海 构建医农融合创新体系",
+          "url": "https://www.chinanews.com.cn/jk/2026/03-05/10581565.shtml",
+          "published_at": "2026-03-05T13:56:45+08:00"
+        },
+        {
+          "title": "一种很多人天天做的小事，竟会增加肺癌风险",
+          "url": "https://www.chinanews.com.cn/jk/2026/03-05/10581560.shtml",
+          "published_at": "2026-03-05T13:42:16+08:00"
+        }
+      ],
+      "restrictions": [
+        "robots.txt permits the probed paths",
+        "the official feed was reachable but its newest entry and Last-Modified value were from 2026-03-06"
+      ]
+    },
+    {
+      "source_key": "china_cdc_news",
+      "publisher": "中国疾病预防控制中心",
+      "channel": "中心要闻",
+      "status": "SUPPORTED",
+      "endpoint": {
+        "kind": "html",
+        "url": "https://www.chinacdc.cn/zxyw/",
+        "redirect_chain": [],
+        "http_status": 200,
+        "content_type": "text/html; charset=utf-8",
+        "bytes": 37135
+      },
+      "identity_field": "article URL path",
+      "published_field": "list item span and detail .fb em",
+      "detail_links_checked": 3,
+      "detail_statuses": [200, 200, 200],
+      "sample_articles": [
+        {
+          "title": "2026年世界标准日卫生健康和疾病预防控制标准化主题宣传活动在宁波举行",
+          "url": "https://www.chinacdc.cn/zxyw/202610/t20261014_1842267.html",
+          "published_at": "2026-10-14"
+        },
+        {
+          "title": "习近平出席全国卫生与健康大会并发表重要讲话",
+          "url": "https://www.chinacdc.cn/zxyw/202610/t20261013_1842258.html",
+          "published_at": "2026-10-13"
+        },
+        {
+          "title": "加快推动疾控事业高质量发展",
+          "url": "https://www.chinacdc.cn/zxyw/202610/t20261008_1842098.html",
+          "published_at": "2026-10-08"
+        }
+      ],
+      "restrictions": [
+        "robots.txt returns 404; production crawler remains configured to obey robots responses",
+        "HTML selectors must be versioned and bounded"
+      ]
+    },
+    {
+      "source_key": "nhc_news",
+      "publisher": "国家卫生健康委员会",
+      "channel": "新闻动态",
+      "status": "BLOCKED",
+      "endpoint": {
+        "kind": "html",
+        "url": "https://www.nhc.gov.cn/wjw/xwdt/list.shtml",
+        "redirect_chain": [],
+        "http_status": 412,
+        "content_type": "text/html; charset=utf-8",
+        "bytes": 3753
+      },
+      "identity_field": "not verified",
+      "published_field": "not verified",
+      "detail_links_checked": 0,
+      "detail_statuses": [],
+      "sample_articles": [],
+      "restrictions": ["publisher WAF rejected the ordinary HTTP probe; no bypass attempted"]
+    },
+    {
+      "source_key": "nhsa_news",
+      "publisher": "国家医疗保障局",
+      "channel": "医保动态",
+      "status": "SUPPORTED",
+      "endpoint": {
+        "kind": "html",
+        "url": "https://www.nhsa.gov.cn/col/col14/index.html",
+        "redirect_chain": [],
+        "http_status": 200,
+        "content_type": "text/html",
+        "bytes": 21999,
+        "etag": "\"55ef-65dc4443bb200\"",
+        "last_modified": "Wed, 14 Oct 2026 03:10:00 GMT"
+      },
+      "identity_field": "article URL art id",
+      "published_field": "list item span and detail meta[name=PubDate]",
+      "detail_links_checked": 3,
+      "detail_statuses": [200, 200, 200],
+      "sample_articles": [
+        {
+          "title": "国家医疗保障局党组召开会议专题传达学习贯彻全国卫生与健康大会精神",
+          "url": "https://www.nhsa.gov.cn/art/2026/10/14/art_14_23143.html",
+          "published_at": "2026-10-14T10:59:00+08:00"
+        },
+        {
+          "title": "三十载跨越 十三亿心安——中国医疗保障制度建设发展综述",
+          "url": "https://www.nhsa.gov.cn/art/2026/10/11/art_14_23136.html",
+          "published_at": "2026-10-11T22:13:00+08:00"
+        },
+        {
+          "title": "很多猝死的人，是因为搞坏了这个人体最长器官",
+          "url": "https://www.nhsa.gov.cn/art/2026/10/11/art_14_23134.html",
+          "published_at": "2026-10-11T14:00:00+08:00"
+        }
+      ],
+      "restrictions": [
+        "robots.txt returns 404; production crawler remains configured to obey robots responses",
+        "pagination is disabled in the initial configuration"
+      ]
+    },
+    {
+      "source_key": "nmpa_news",
+      "publisher": "国家药品监督管理局",
+      "channel": "药监要闻",
+      "status": "BLOCKED",
+      "endpoint": {
+        "kind": "html",
+        "url": "https://www.nmpa.gov.cn/directory/web/nmpa/yaowen/index.html",
+        "redirect_chain": [],
+        "http_status": 412,
+        "content_type": "text/html; charset=utf-8",
+        "bytes": 2546
+      },
+      "identity_field": "not verified",
+      "published_field": "not verified",
+      "detail_links_checked": 0,
+      "detail_statuses": [],
+      "sample_articles": [],
+      "restrictions": ["publisher WAF rejected the ordinary HTTP probe; no bypass attempted"]
+    },
+    {
+      "source_key": "nmpa_udi_daily",
+      "publisher": "国家药品监督管理局医疗器械唯一标识数据库",
+      "channel": "UDI 每日增量发布",
+      "status": "SUPPORTED",
+      "endpoint": {
+        "kind": "rss",
+        "url": "https://udi.nmpa.gov.cn/rss/download.html?files=daily",
+        "redirect_chain": [],
+        "http_status": 200,
+        "content_type": "",
+        "sniffed_content_type": "text/xml",
+        "bytes": 3616
+      },
+      "identity_field": "download URL or item title",
+      "published_field": "pubDate",
+      "detail_links_checked": 0,
+      "detail_statuses": [],
+      "sample_articles": [
+        {
+          "title": "UDID_DAY_UPDATE_20261014.zip",
+          "url": "https://udid.nmpa.gov.cn/attachments/attachment/download.html?path=<redacted-stable-download-token>",
+          "published_at": "2026-10-14T15:35:39Z"
+        }
+      ],
+      "restrictions": [
+        "RSS entries describe regulatory data packages, not news articles",
+        "the initial integration records release notices only and never downloads or presents product master data as article text"
+      ]
+    }
+  ]
+}
