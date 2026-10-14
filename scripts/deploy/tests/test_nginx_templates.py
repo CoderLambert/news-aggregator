@@ -193,3 +193,23 @@ def test_json_compression_is_scoped_to_exact_public_news_list():
     assert 'include /etc/nginx/snippets/newshub-proxy.conf;' in listing
     assert 'add_header Cache-Control "no-store" always;' in listing
     assert 'gzip on;' not in _block(production, 'location /api/ {')
+
+
+def test_public_read_rate_limits_are_at_nginx_edge_not_django():
+    conf = (NGINX_DIR / 'news.lambert.host.conf').read_text()
+    # These directives must be in the http context, outside the server blocks.
+    assert conf.index('limit_req_zone $binary_remote_addr zone=newshub_news_read:10m rate=120r/m;') < conf.index('server {')
+    assert conf.index('limit_req_zone $binary_remote_addr zone=newshub_catalog_read:10m rate=30r/m;') < conf.index('server {')
+    https = _block(conf, 'server {\\n    listen 443 ssl;\\n    server_name news.lambert.host;')
+    assert 'limit_req_status 429;' in https
+    public_list = _block(https, 'location = /api/news/ {')
+    assert 'limit_req zone=newshub_news_read burst=16 nodelay;' in public_list
+    for route in ('/api/smart-channels/catalog/', '/api/sources/', '/api/categories/'):
+        location = _block(https, f'location = {route} {{')
+        assert 'limit_req zone=newshub_catalog_read burst=6 nodelay;' in location
+        assert 'proxy_pass http://127.0.0.1:9527;' in location
+        assert 'add_header Cache-Control "no-store" always;' in location
+    # Do not break authenticated long-lived SSE or JSON response access.
+    for marker in ('location ~ ^/api/news/[0-9]+/(?:chat|translate)/',
+                   'location = /api/research/'):
+        assert 'limit_req zone=' not in _block(https, marker)
