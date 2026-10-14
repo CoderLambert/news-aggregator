@@ -1,6 +1,6 @@
 {
-  "batch": "B-category-audit-and-publication-metadata",
-  "batches": ["batch001.py", "batch002.py", "batch003.py"],
-  "backend": ["backend/api/tests/test_metadata_corrections.py", "backend/api/tests/test_news_ingestion.py", "backend/api/tests/test_publisher_metadata_promotion.py", "backend/api/tests/test_channel_intake_review.py", "backend/api/tests/test_channel_evidence_fencing.py", "backend/api/tests/test_feed_display_signature.py"],
-  "frontend": ["tests/components/ChannelIntakePanel.test.jsx", "tests/components/NewsCard.test.jsx"]
+  "batch": "C-chat-completion-and-atomic-tts",
+  "batches": ["batch001.py", "batch002.py", "batch003.py", "batch004.py"],
+  "backend": ["backend/api/tests/test_chat_completion_status.py", "backend/api/tests/test_tts_atomic_cache.py", "backend/api/tests/test_chat_ownership.py", "backend/api/tests/test_chat_context.py", "backend/api/tests/test_metadata_corrections.py"],
+  "frontend": ["tests/services/chatDelivery.test.ts", "tests/hooks/useChat.test.js", "tests/components/NewsChatAssistant.test.jsx"]
 }
