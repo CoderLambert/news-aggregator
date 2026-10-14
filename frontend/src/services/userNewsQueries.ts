@@ -10,7 +10,13 @@ export const privateNewsKeys = {
   favorites: (viewerId: number, filter: FavoriteFilter = 'all') =>
     [...privateNewsKeys.all, 'favorites', { viewerId, filter }] as const,
   favoriteLists: (viewerId: number) => [...privateNewsKeys.all, 'favorites', { viewerId }] as const,
+  favoritesPage: (viewerId: number, filter: FavoriteFilter, page: number) =>
+    page === 1 ? privateNewsKeys.favorites(viewerId, filter)
+      : [...privateNewsKeys.favorites(viewerId, filter), { page }] as const,
   blocked: (viewerId: number) => [...privateNewsKeys.all, 'blocked', { viewerId }] as const,
+  blockedPage: (viewerId: number, page: number) =>
+    page === 1 ? privateNewsKeys.blocked(viewerId)
+      : [...privateNewsKeys.blocked(viewerId), { page }] as const,
   favoriteStatus: (viewerId: number, newsId: number) =>
     [...privateNewsKeys.all, 'favorite-status', { viewerId, newsId }] as const,
   blockStatus: (viewerId: number, newsId: number) =>
@@ -29,14 +35,17 @@ export const blockStatusOptions = (viewerId: number, newsId: number) =>
     queryFn: async ({ signal }) => parseBlockStatus(await checkBlockedStatus(newsId, signal)),
   })
 
-export const favoritesOptions = (viewerId: number, filter: FavoriteFilter) =>
+export const favoritesOptions = (viewerId: number, filter: FavoriteFilter, page = 1) =>
   queryOptions({
-    queryKey: privateNewsKeys.favorites(viewerId, filter),
-    queryFn: async ({ signal }) => parseUserFavorites(await fetchUserFavorites(filter === 'all' ? {} : { type: filter }, signal)),
+    queryKey: privateNewsKeys.favoritesPage(viewerId, filter, page),
+    queryFn: async ({ signal }) => parseUserFavorites(await fetchUserFavorites({
+      ...(filter === 'all' ? {} : { type: filter }),
+      ...(page === 1 ? {} : { page }),
+    }, signal)),
   })
 
-export const blockedNewsOptions = (viewerId: number) =>
+export const blockedNewsOptions = (viewerId: number, page = 1) =>
   queryOptions({
-    queryKey: privateNewsKeys.blocked(viewerId),
-    queryFn: async ({ signal }) => parseBlockedNewsPage(await fetchBlockedNews({}, signal)),
+    queryKey: privateNewsKeys.blockedPage(viewerId, page),
+    queryFn: async ({ signal }) => parseBlockedNewsPage(await fetchBlockedNews(page === 1 ? {} : { page }, signal)),
   })
