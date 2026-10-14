@@ -8,6 +8,9 @@ import type {
   CrawlRun,
   CrawlRunStatus,
   CrawlBatchStatus,
+  SourceConfigInput,
+  SourceConfigRecord,
+  SourceEndpointConfig,
 } from '@/types/crawlerAdmin'
 import { fetchCsrfToken } from '@/services/api'
 
@@ -32,6 +35,81 @@ function number(value: unknown, fallback = 0): number {
 
 function nullableText(value: unknown): string | null {
   return typeof value === 'string' ? value : null
+}
+
+function boolean(value: unknown, fallback = false): boolean {
+  return typeof value === 'boolean' ? value : fallback
+}
+
+function parseEndpoint(value: unknown): SourceEndpointConfig {
+  if (!isRecord(value)) throw new TypeError('Invalid source endpoint response')
+  const parserConfig = isRecord(value.parser_config) ? value.parser_config : {}
+  return {
+    id: typeof value.id === 'number' ? value.id : undefined,
+    kind: text(value.kind, 'rss') as SourceEndpointConfig['kind'],
+    url: text(value.url),
+    allowedDomains: Array.isArray(value.allowed_domains) ? value.allowed_domains.filter((item): item is string => typeof item === 'string') : [],
+    priority: number(value.priority, 100),
+    parserConfig,
+    conditionalRequests: boolean(value.conditional_requests, true),
+    requestIntervalSeconds: number(value.request_interval_seconds, 10),
+    maxResponseBytes: number(value.max_response_bytes, 2 * 1024 * 1024),
+    maxPages: number(value.max_pages, 1),
+    maxItems: number(value.max_items, 50),
+    enabled: boolean(value.enabled, true),
+  }
+}
+
+function parseSourceConfig(value: unknown): SourceConfigRecord {
+  if (!isRecord(value) || typeof value.source_key !== 'string') throw new TypeError('Invalid source configuration response')
+  const monitoring = isRecord(value.monitoring) ? value.monitoring : {}
+  const latestArticle = isRecord(monitoring.latest_article) ? monitoring.latest_article : null
+  const lastHttpStatuses: Record<string, number> = {}
+  if (isRecord(monitoring.last_http_statuses)) {
+    for (const [code, count] of Object.entries(monitoring.last_http_statuses)) {
+      if (typeof count === 'number') lastHttpStatuses[code] = count
+    }
+  }
+  return {
+    sourceKey: value.source_key,
+    sourceId: typeof value.source_id === 'number' ? value.source_id : null,
+    publisherName: text(value.publisher_name),
+    channelName: text(value.channel_name),
+    category: typeof value.category === 'number' ? value.category : null,
+    categoryName: text(value.category_name),
+    region: value.region === 'international' ? 'international' : 'domestic',
+    language: text(value.language, 'zh'),
+    contentKind: text(value.content_kind, 'article'),
+    readingPolicy: text(value.reading_policy, 'summary_only'),
+    status: text(value.status, 'draft') as SourceConfigRecord['status'],
+    configVersion: number(value.config_version, 1),
+    summaryAllowed: boolean(value.summary_allowed, true),
+    feedFullContentAllowed: boolean(value.feed_full_content_allowed),
+    officialHtmlFullContentAllowed: boolean(value.official_html_full_content_allowed),
+    probeSummary: isRecord(value.probe_summary) ? value.probe_summary : {},
+    probedAt: nullableText(value.probed_at),
+    approvedAt: nullableText(value.approved_at),
+    unavailableReason: text(value.unavailable_reason),
+    maintenance: value.maintenance === 'database' ? 'database' : 'code',
+    probeIsCurrent: boolean(value.probe_is_current),
+    approvalIsCurrent: boolean(value.approval_is_current),
+    canEnable: boolean(value.can_enable),
+    readOnly: boolean(value.read_only),
+    endpoints: Array.isArray(value.endpoints) ? value.endpoints.map(parseEndpoint) : [],
+    monitoring: {
+      lastSuccessAt: nullableText(monitoring.last_success_at),
+      lastFeedSuccessAt: nullableText(monitoring.last_feed_success_at),
+      nextPollAt: nullableText(monitoring.next_poll_at),
+      cooldownUntil: nullableText(monitoring.cooldown_until),
+      lastTargetFinishedAt: nullableText(monitoring.last_target_finished_at),
+      lastFailure: text(monitoring.last_failure),
+      lastHttpStatuses,
+      latestArticle: latestArticle ? {
+        id: number(latestArticle.id), title: text(latestArticle.title), url: text(latestArticle.url),
+        publishTime: text(latestArticle.publish_time),
+      } : null,
+    },
+  }
 }
 
 function parseRun(value: unknown): CrawlRun {
@@ -282,6 +360,68 @@ export async function retryCrawlRun(runId: string): Promise<void> {
   try {
     await fetchCsrfToken()
     await client.post(`/runs/${encodeURIComponent(runId)}/retry/`)
+  } catch (error) {
+    normalizeError(error)
+  }
+}
+
+export async function fetchSourceConfigs(signal?: AbortSignal): Promise<SourceConfigRecord[]> {
+  try {
+    const { data } = await client.get<unknown>('/sources/', { signal })
+    if (!Array.isArray(data)) throw new TypeError('Invalid source configuration list')
+    return data.map(parseSourceConfig)
+  } catch (error) {
+    normalizeError(error)
+  }
+}
+
+export async function createSourceConfig(payload: SourceConfigInput): Promise<SourceConfigRecord> {
+  try {
+    await fetchCsrfToken()
+    const { data } = await client.post<unknown>('/sources/', payload)
+    return parseSourceConfig(data)
+  } catch (error) {
+    normalizeError(error)
+  }
+}
+
+export async function updateSourceConfig(sourceKey: string, payload: Partial<SourceConfigInput>): Promise<SourceConfigRecord> {
+  try {
+    await fetchCsrfToken()
+    const { data } = await client.patch<unknown>(`/sources/${encodeURIComponent(sourceKey)}/`, payload)
+    return parseSourceConfig(data)
+  } catch (error) {
+    normalizeError(error)
+  }
+}
+
+async function sourceAction(sourceKey: string, action: 'probe' | 'approve' | 'enable', payload: Record<string, unknown> = {}): Promise<SourceConfigRecord> {
+  try {
+    await fetchCsrfToken()
+    const { data } = await client.post<unknown>(`/sources/${encodeURIComponent(sourceKey)}/${action}/`, payload)
+    return parseSourceConfig(data)
+  } catch (error) {
+    normalizeError(error)
+  }
+}
+
+export const probeSourceConfig = (sourceKey: string) => sourceAction(sourceKey, 'probe')
+export const approveSourceConfig = (sourceKey: string) => sourceAction(sourceKey, 'approve')
+export const setSourceConfigEnabled = (sourceKey: string, enabled: boolean) => sourceAction(sourceKey, 'enable', { enabled })
+
+export async function runSourceConfig(sourceKey: string): Promise<void> {
+  try {
+    await fetchCsrfToken()
+    await client.post(`/sources/${encodeURIComponent(sourceKey)}/run/`, {})
+  } catch (error) {
+    normalizeError(error)
+  }
+}
+
+export async function deleteSourceConfig(sourceKey: string): Promise<void> {
+  try {
+    await fetchCsrfToken()
+    await client.delete(`/sources/${encodeURIComponent(sourceKey)}/`)
   } catch (error) {
     normalizeError(error)
   }
