@@ -21,6 +21,7 @@ export interface NewsListParams {
   full_content?: 'true'
   publish_time_after?: string
   source__source_type?: SourceType
+  source_types?: string
 }
 export interface Page<T> {
   count: number

@@ -60,3 +60,32 @@ def test_fetch_article_markdown_records_content_length_and_extractor_on_success(
     assert result.ok is True
     assert result.content_length == len(result.markdown)
     assert result.extractor == 'quality-provider'
+
+
+def test_disabled_optional_reader_does_not_mask_real_html_validation_error():
+    from unittest.mock import patch
+    from api.services.article_fetcher.providers import TrustedNewsJinaProvider
+    from api.services.full_content_status import classify_fetch_error
+
+    class PartialHtml:
+        name = 'scrapy_http'
+
+        def fetch(self, url, expected_title=None, summary=None):
+            return FetchResult(ok=False, provider=self.name, url=url,
+                error='validation_failed:body_partial', error_code='body_partial')
+
+    provider = TrustedNewsJinaProvider()
+    with patch('api.services.article_fetch_monitor.observe_jina_candidate', return_value=False):
+        with pytest.raises(FetchError) as caught:
+            fetch_article_markdown('https://example.com/article', expected_title='Example article',
+                                   providers=[PartialHtml(), provider])
+
+    assert [failure.error_code for failure in caught.value.failures] == ['body_partial', 'not_applicable']
+    assert caught.value.error_code == 'body_partial'
+    assert classify_fetch_error(caught.value) == 'validation_failed'
+
+
+def test_retired_source_explicitly_stays_unsupported():
+    with pytest.raises(FetchError) as caught:
+        fetch_article_markdown('https://www.reuters.com/article/old-story', expected_title='Old story')
+    assert caught.value.error_code == 'unsupported'

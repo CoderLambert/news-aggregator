@@ -56,6 +56,20 @@ class ChannelsTests(TestCase):
         self.subscribe([self.second.id], action='unsubscribe')
         self.assertEqual(self.client.get('/api/news/', {'scope': 'subscribed'}).data['count'], 0)
 
+    def test_multi_source_type_filter_is_union_and_invalid_values_rejected(self):
+        Source.objects.filter(pk=self.source.pk).update(source_type='news')
+        Source.objects.filter(pk=self.second.pk).update(source_type='discussion')
+        Source.objects.filter(pk=self.outside.pk).update(source_type='aggregator')
+        for selection, count in [('news', 1), ('news,discussion', 2), ('news,discussion,aggregator', 3)]:
+            response = self.client.get('/api/news/', {'search': 'shared', 'mode': 'keyword', 'source_types': selection})
+            self.assertEqual(response.status_code, 200, response.data)
+            self.assertEqual(response.data['count'], count)
+        for invalid in ('news,invalid', 'news,news', 'discussion,aggregator,news,invalid'):
+            response = self.client.get('/api/news/', {'search': 'shared', 'source_types': invalid})
+            self.assertEqual(response.status_code, 400)
+        # Backward compatibility: historical single-value filter remains functional.
+        self.assertEqual(self.client.get('/api/news/', {'source__source_type': 'discussion'}).data['count'], 1)
+
     def test_membership_removal_and_group_deletion_keep_subscription(self):
         self.subscribe([self.source.id])
         a, b = self.group(), self.group('Second group')
