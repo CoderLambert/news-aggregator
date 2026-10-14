@@ -162,6 +162,9 @@ class SmartChannelTests(TestCase):
         self.assertEqual(ChannelGroupingProposal.objects.filter(user=self.user).count(), 1)
 
     def test_unchanged_pending_does_not_starve_new_subscription(self):
+        # Existing fixture subscription predates the grouping-mode activation.
+        ChannelSubscription.objects.filter(pk=self.subscription.pk).update(
+            created_at=timezone.now() - timedelta(days=3))
         group = ChannelGroup.objects.create(user=self.user, name='My Frontend')
         cfg = ChannelGroupingConfig.objects.create(user=self.user, mode='suggest', bindings={'frontend': group.pk},
             active_since=timezone.now() - timedelta(days=1))
