@@ -1155,10 +1155,10 @@ def _install_mock_shared_browser(monkeypatch, failure_at=None):
         def __init__(self, untrusted):
             self.untrusted = untrusted
 
-        def wait_for_function(self, script, selector, **_kwargs):
+        def wait_for_function(self, script, *, arg=None, **_kwargs):
             assert 'box.width > 0' in script
             assert 'box.height > 0' in script
-            assert selector == '[role="img"][aria-label="Mermaid 图表"] svg'
+            assert arg == '[role="img"][aria-label="Mermaid 图表"] svg'
             if failure_at == 'mermaid_ready':
                 raise Error(secret)
             return True

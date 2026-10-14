@@ -1447,7 +1447,7 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
                             && box.width > 0
                             && box.height > 0;
                     }""",
-                    '[role="img"][aria-label="Mermaid 图表"] svg',
+                    arg='[role="img"][aria-label="Mermaid 图表"] svg',
                     timeout=20000,
                 )
                 chart_paint = diagram_svg.evaluate("""(svg) => {
