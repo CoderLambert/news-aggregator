@@ -78,9 +78,30 @@ def evidence_links_for_tool(name: str, result: object) -> set[str]:
 
 
 def history_evidence_links(messages: list) -> set[str]:
+    """Validate persisted tool outcomes against preceding assistant tool-call IDs."""
+    names: dict[str, str] = {}
     links: set[str] = set()
+    allowed = {'search_news', 'analyze_topic', 'fetch_article', 'search_web', 'fetch_webpage'}
     for message in messages[-60:]:
-        if not isinstance(message, dict) or message.get('role') != 'tool':
+        if not isinstance(message, dict):
+            continue
+        if message.get('role') == 'assistant':
+            calls = message.get('tool_calls')
+            if not isinstance(calls, list):
+                continue
+            for call in calls[:20]:
+                if not isinstance(call, dict):
+                    continue
+                fn = call.get('function')
+                name = fn.get('name') if isinstance(fn, dict) else None
+                call_id = call.get('id')
+                if isinstance(call_id, str) and isinstance(name, str) and name in allowed:
+                    names[call_id] = name
+            continue
+        if message.get('role') != 'tool':
+            continue
+        name = names.get(message.get('tool_call_id'))
+        if name not in allowed:
             continue
         raw = message.get('content')
         if not isinstance(raw, str) or len(raw) > 35000:
@@ -89,12 +110,9 @@ def history_evidence_links(messages: list) -> set[str]:
             result = json.loads(raw)
         except (ValueError, TypeError):
             continue
-        # Persisted tool messages are authoritative for the session. Do not
-        # accept model prose (assistant/user) as a provenance assertion.
-        for kind in ('search_news', 'analyze_topic', 'fetch_article', 'search_web', 'fetch_webpage'):
-            links.update(evidence_links_for_tool(kind, result))
-            if len(links) >= _MAX_LINKS:
-                return set(list(links)[:_MAX_LINKS])
+        links.update(evidence_links_for_tool(name, result))
+        if len(links) >= _MAX_LINKS:
+            return set(sorted(links)[:_MAX_LINKS])
     return links
 
 

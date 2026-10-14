@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import {
   CrawlerAdminApiError,
+  fetchCrawlerReadiness,
   cancelCrawlRun,
   createCrawlBatch,
   retryCrawlRun,
@@ -278,10 +279,23 @@ function SearchIndexSection() {
   )
 }
 
+const readinessLabels: Record<string, string> = {
+  unsupported: '未获准使用', not_registered: '尚未注册', disabled: '已停用',
+  worker_offline: 'Worker 离线', scheduler_paused: '调度暂停', running: '运行中',
+  degraded: '最近抓取异常', waiting_poll: '等待轮询', idle: '待调度/空闲',
+  no_history: '暂无成功证据',
+}
+
 export default function CrawlerAdminPage() {
   const queryClient = useQueryClient()
   const { refresh: refreshAuth } = useAuth()
   const dashboard = useQuery(crawlerDashboardOptions())
+  const readiness = useQuery({
+    queryKey: ['crawlerAdmin', 'readiness'],
+    queryFn: ({ signal }) => fetchCrawlerReadiness(signal),
+    staleTime: 15000,
+    retry: false,
+  })
   const [actionError, setActionError] = useState('')
 
   useEffect(() => {
@@ -346,6 +360,37 @@ export default function CrawlerAdminPage() {
           <ActiveRunCard run={data.activeRun} busy={busy} onCancel={(id) => { if (window.confirm('确认停止当前爬虫任务？')) cancelMutation.mutate(id) }} />
         </div>
       </div>
+
+      <section aria-labelledby="source-readiness-title" className="mt-10 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div><h2 id="source-readiness-title" className="text-lg font-semibold">来源与调度实际状态</h2>
+            <p className="text-xs text-muted-foreground">只读诊断：Worker 在线不等于抓取成功；未到轮询时间不记为失败。</p></div>
+          <Button size="sm" variant="outline" disabled={readiness.isFetching} onClick={() => void readiness.refetch()}>刷新状态</Button>
+        </div>
+        {readiness.isError && <p role="alert" className="text-sm text-destructive">状态读取失败；不影响现有抓取任务。</p>}
+        {readiness.data && <>
+          <p className="text-sm text-muted-foreground">
+            调度：{readiness.data.schedulerEnabled ? '已启用' : '已暂停'} ·
+            抓取进程：{readiness.data.crawlerWorkerOnline ? '在线' : '离线'} ·
+            搜索索引进程：{readiness.data.indexWorkerOnline ? '在线' : '离线'}
+          </p>
+          <div className="workspace-scroll max-h-96 overflow-auto rounded-xl border bg-card">
+            <table className="w-full min-w-[650px] text-left text-sm">
+              <thead className="sticky top-0 bg-muted"><tr>
+                <th className="px-3 py-2">来源</th><th className="px-3 py-2">实际状态</th>
+                <th className="px-3 py-2">最近 Feed 成功</th><th className="px-3 py-2">下次轮询</th>
+              </tr></thead>
+              <tbody>{readiness.data.sources.map((source) => <tr key={source.sourceKey} className="border-t">
+                <td className="px-3 py-2">{source.displayName}</td>
+                <td className="px-3 py-2">{readinessLabels[source.state] ?? source.state}
+                  {source.lastResult && <small className="ml-1 text-muted-foreground">({source.lastResult})</small>}</td>
+                <td className="px-3 py-2 text-muted-foreground">{formatDate(source.lastFeedSuccessAt)}</td>
+                <td className="px-3 py-2 text-muted-foreground">{formatDate(source.nextPollAt)}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+        </>}
+      </section>
 
       <SearchIndexSection />
 

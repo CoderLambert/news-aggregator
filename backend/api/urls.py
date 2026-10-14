@@ -19,6 +19,7 @@ urlpatterns = [
     path('health/live/', health_views.health_live, name='health-live'),
     path('health/ready/', health_views.health_ready, name='health-ready'),
     path('admin/crawler/dashboard/', crawler_views.CrawlerDashboardView.as_view(), name='crawler-admin-dashboard'),
+    path('admin/crawler/readiness/', crawler_views.CrawlerReadinessView.as_view(), name='crawler-admin-readiness'),
     path('admin/crawler/settings/', crawler_views.CrawlerSettingsView.as_view(), name='crawler-admin-settings'),
     path('admin/crawler/targets/', crawler_views.CrawlerTargetListView.as_view(), name='crawler-admin-targets'),
     path('admin/crawler/targets/<str:spider_name>/', crawler_views.CrawlerTargetDetailView.as_view(), name='crawler-admin-target-detail'),

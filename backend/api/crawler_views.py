@@ -64,6 +64,14 @@ def batch_queryset():
     ).order_by('-queued_at')
 
 
+class CrawlerReadinessView(APIView):
+    permission_classes = [IsActiveSuperuser]
+
+    def get(self, request):
+        from api.services.crawler_readiness import readiness_snapshot
+        return Response(readiness_snapshot())
+
+
 class CrawlerDashboardView(APIView):
     permission_classes = [IsActiveSuperuser]
 
