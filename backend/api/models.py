@@ -1,6 +1,7 @@
 import uuid
 
 from django.conf import settings
+from django.core.validators import RegexValidator
 from django.db import models
 from django.utils import timezone
 
@@ -115,6 +116,7 @@ class News(models.Model):
 
     CONTENT_KIND_CHOICES = [(value, value) for value in (
         'unknown', 'article', 'discussion', 'readme', 'newsletter', 'abstract', 'product',
+        'regulatory_data',
     )]
     FULL_CONTENT_STATE_CHOICES = [(value, value) for value in ('missing', 'legacy', 'complete')]
     content_kind = models.CharField(max_length=32, choices=CONTENT_KIND_CHOICES, default='unknown')
@@ -773,12 +775,111 @@ class CrawlerSettings(models.Model):
         verbose_name_plural = '爬虫调度设置'
 
 
+class SourceConfig(models.Model):
+    """Versioned administrator-maintained collection contract."""
+
+    STATUS_CHOICES = [(value, value) for value in (
+        'draft', 'probed', 'approved', 'enabled', 'blocked', 'unsupported',
+    )]
+    READING_POLICY_CHOICES = [(value, value) for value in (
+        'summary_only', 'public_feed', 'official_html', 'regulatory_data',
+    )]
+    REGION_CHOICES = [('domestic', '国内'), ('international', '国际')]
+
+    source_key = models.CharField(
+        primary_key=True,
+        max_length=64,
+        validators=[RegexValidator(
+            regex=r'^[a-z][a-z0-9_]{2,63}$',
+            message='来源标识只能使用小写字母、数字和下划线，且必须以字母开头。',
+        )],
+    )
+    source = models.OneToOneField(
+        Source, null=True, blank=True, on_delete=models.PROTECT,
+        related_name='crawler_config',
+    )
+    publisher_name = models.CharField(max_length=128)
+    channel_name = models.CharField(max_length=128)
+    category = models.ForeignKey(Category, on_delete=models.PROTECT, related_name='source_configs')
+    region = models.CharField(max_length=16, choices=REGION_CHOICES, default='domestic')
+    language = models.CharField(max_length=16, default='zh')
+    content_kind = models.CharField(max_length=32, choices=News.CONTENT_KIND_CHOICES, default='article')
+    reading_policy = models.CharField(max_length=32, choices=READING_POLICY_CHOICES, default='summary_only')
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='draft', db_index=True)
+    config_version = models.PositiveIntegerField(default=1)
+    summary_allowed = models.BooleanField(default=True)
+    feed_full_content_allowed = models.BooleanField(default=False)
+    official_html_full_content_allowed = models.BooleanField(default=False)
+    probe_summary = models.JSONField(default=dict, blank=True)
+    probed_config_version = models.PositiveIntegerField(null=True, blank=True)
+    probed_at = models.DateTimeField(null=True, blank=True)
+    approved_config_version = models.PositiveIntegerField(null=True, blank=True)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='approved_source_configs',
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    unavailable_reason = models.CharField(max_length=500, blank=True, default='')
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='created_source_configs',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['publisher_name', 'channel_name', 'source_key']
+        verbose_name = '动态来源配置'
+        verbose_name_plural = '动态来源配置'
+
+    @property
+    def approval_is_current(self):
+        return self.approved_config_version == self.config_version and self.approved_at is not None
+
+    @property
+    def probe_is_current(self):
+        return self.probed_config_version == self.config_version and self.probed_at is not None
+
+    def __str__(self):
+        return f'{self.publisher_name} · {self.channel_name}'
+
+
+class SourceEndpoint(models.Model):
+    """Declarative, bounded endpoint; never stores executable code or secrets."""
+
+    KIND_CHOICES = [(value, value) for value in ('rss', 'atom', 'json', 'html')]
+
+    source_config = models.ForeignKey(SourceConfig, on_delete=models.CASCADE, related_name='endpoints')
+    kind = models.CharField(max_length=16, choices=KIND_CHOICES)
+    url = models.URLField(max_length=1024)
+    allowed_domains = models.JSONField(default=list)
+    priority = models.PositiveSmallIntegerField(default=100)
+    parser_config = models.JSONField(default=dict, blank=True)
+    conditional_requests = models.BooleanField(default=True)
+    request_interval_seconds = models.PositiveIntegerField(default=10)
+    max_response_bytes = models.PositiveIntegerField(default=2 * 1024 * 1024)
+    max_pages = models.PositiveSmallIntegerField(default=1)
+    max_items = models.PositiveSmallIntegerField(default=50)
+    enabled = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['priority', 'id']
+        constraints = [
+            models.UniqueConstraint(fields=['source_config', 'url'], name='unique_source_config_endpoint'),
+        ]
+
+    def __str__(self):
+        return f'{self.source_config_id}: {self.kind} {self.url}'
+
+
 class CrawlerTarget(models.Model):
     """One server-registered spider exposed to the crawler control plane."""
 
     spider_name = models.CharField(primary_key=True, max_length=64)
     display_name = models.CharField(max_length=128)
-    enabled = models.BooleanField(default=True, db_index=True)
+    enabled = models.BooleanField(default=False, db_index=True)
     sort_order = models.PositiveIntegerField(default=0)
     last_status = models.CharField(max_length=32, blank=True, default='')
     last_started_at = models.DateTimeField(null=True, blank=True)
