@@ -368,7 +368,12 @@ def subscription_translation_response(request, news: News, force=False):
                 return error_response('ChatGPT 订阅授权已失效，请重新连接账号。')
             if not connection.selected_model:
                 return error_response('请先在订阅设置中选择可见模型。')
-            shared_lease = shared_translations.claim_task(news)
+            try:
+                shared_lease = shared_translations.claim_task(news, user_id=user.pk)
+            except shared_translations.SharedTranslationBusy as exc:
+                response = error_response(str(exc), error_code='translation_capacity')
+                response['Retry-After'] = str(exc.retry_after_seconds)
+                return response
             if shared_lease is None:
                 response = shared_translations.waiting_response(news)
                 response['Cache-Control'] = 'no-store'
