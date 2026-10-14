@@ -4,6 +4,7 @@ import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Bookmark, Clock, EyeOff, Heart, LogIn, RotateCcw } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import LoadingSpinner from '@/components/LoadingSpinner'
+import { Pagination } from '@/components/Pagination'
 import { useAuth } from '@/context/AuthContext'
 import AuthModal from '@/components/AuthModal'
 import { useUnblockNews } from '@/hooks/useNewsMutations'
@@ -11,7 +12,14 @@ import { blockedNewsOptions, favoritesOptions } from '@/services/userNewsQueries
 import type { BlockedNewsItem, UserFavorite } from '@/types/userNews'
 import type { FavoriteFilter } from '@/services/userNewsQueries'
 
+const PAGE_SIZE = 20
+
 type Tab = 'favorites' | 'blocked'
+
+function readPage(value: string | null): number {
+  const number = Number(value)
+  return Number.isSafeInteger(number) && number > 0 ? number : 1
+}
 
 function parseFilter(value: string | null): FavoriteFilter {
   return value === 'like' || value === 'bookmark' ? value : 'all'
@@ -26,10 +34,12 @@ export default function FavoritesPage() {
   const unblockMutation = useUnblockNews()
   const tab: Tab = searchParams.get('view') === 'blocked' ? 'blocked' : 'favorites'
   const filter = parseFilter(searchParams.get('filter'))
+  const page = readPage(searchParams.get('page'))
   const viewerId = user?.id ?? 0
-  const favoritesQuery = useQuery({ ...favoritesOptions(viewerId, filter), enabled: Boolean(user) && tab === 'favorites' })
-  const blockedQuery = useQuery({ ...blockedNewsOptions(viewerId), enabled: Boolean(user) && tab === 'blocked' })
+  const favoritesQuery = useQuery({ ...favoritesOptions(viewerId, filter, page), enabled: Boolean(user) && tab === 'favorites' })
+  const blockedQuery = useQuery({ ...blockedNewsOptions(viewerId, page), enabled: Boolean(user) && tab === 'blocked' })
   const currentQuery = tab === 'favorites' ? favoritesQuery : blockedQuery
+  const totalPages = Math.ceil((currentQuery.data?.count ?? 0) / PAGE_SIZE)
   const favorites = favoritesQuery.data?.results ?? []
   const blocked = blockedQuery.data?.results ?? []
   const returnPath = `${location.pathname}${location.search}`
@@ -38,6 +48,14 @@ export default function FavoritesPage() {
     const next = new URLSearchParams()
     if (nextTab === 'blocked') next.set('view', 'blocked')
     if (nextFilter !== 'all') next.set('filter', nextFilter)
+    // Switching sections or filters always starts at the first page.
+    setSearchParams(next)
+  }
+
+  function goToPage(nextPage: number) {
+    const next = new URLSearchParams(searchParams)
+    if (nextPage <= 1) next.delete('page')
+    else next.set('page', String(nextPage))
     setSearchParams(next)
   }
 
@@ -48,6 +66,8 @@ export default function FavoritesPage() {
     try {
       if (!user) return
       await unblockMutation.mutateAsync({ newsId, viewerId: user.id })
+      // Restoring the only entry on a later page must not leave a dead page.
+      if (page > 1 && blocked.length === 1) goToPage(page - 1)
       window.requestAnimationFrame(() => {
         const adjacentAction = focusNewsId ? document.getElementById(`restore-blocked-${focusNewsId}`) : null
         ;(adjacentAction ?? tabRefs.current.blocked)?.focus()
@@ -140,6 +160,15 @@ export default function FavoritesPage() {
           ? <EmptyState icon={EyeOff} title="没有屏蔽内容" description="屏蔽的新闻会集中显示在这里，随时可以恢复。" />
           : <div className="space-y-3">{blocked.map((block) => <BlockedCard key={block.id} block={block} onUnblock={handleUnblock} pending={unblockMutation.isPending} />)}</div>}
       </section>
+      {!currentQuery.isPending && !currentQuery.isError && totalPages > 1 && (
+        <Pagination currentPage={page} totalPages={totalPages}
+          totalCount={currentQuery.data?.count ?? 0} onPageChange={goToPage} />
+      )}
+      {currentQuery.isError && page > 1 && (
+        <button type="button" className="mt-4 text-sm text-primary underline" onClick={() => goToPage(1)}>
+          返回第一页
+        </button>
+      )}
     </div>
   )
 }
