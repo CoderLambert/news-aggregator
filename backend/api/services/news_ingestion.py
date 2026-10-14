@@ -86,7 +86,11 @@ def _ingest_transaction(item, policy, url, upstream_id, discovery, kind, candida
     # This write acquires SQLite's writer reservation before identity reads,
     # avoiding select_for_update's illusory row locks on SQLite.
     NewsSourceItem.objects.filter(source_key=policy.key, upstream_id=upstream_id).update(last_seen_at=seen)
-    source, _ = Source.objects.get_or_create(name=policy.name, defaults={**source_defaults, 'region': policy.region})
+    from api.services.channel_catalog import catalog_defaults
+    from api.services.source_metadata import publisher_country
+    source, _ = Source.objects.get_or_create(name=policy.name, defaults={
+        **catalog_defaults(policy), **source_defaults, 'region': policy.region,
+        'country': publisher_country(policy.key)})
     source_updates = {}
     if source_defaults.get('language') and source.language != source_defaults['language']:
         source_updates['language'] = source_defaults['language']

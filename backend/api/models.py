@@ -3,6 +3,7 @@ import uuid
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
+from api.metadata_models import MetadataCorrectionAudit
 
 
 def generate_chatgpt_host_id():
@@ -35,7 +36,7 @@ class Source(models.Model):
     region = models.CharField(max_length=16, choices=[('domestic', '国内'), ('international', '国际')], default='international', db_index=True)
     description = models.TextField(blank=True, default='')
     logo = models.URLField('Logo', max_length=255, blank=True, default='')
-    country = models.CharField('国家', max_length=50, default='CN')
+    country = models.CharField('国家', max_length=50, blank=True, default='')
     language = models.CharField('语言', max_length=50, default='zh')
     source_type = models.CharField('类型', max_length=20, choices=TYPE_CHOICES, default='news')
     created_at = models.DateTimeField('创建时间', auto_now_add=True)

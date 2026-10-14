@@ -1,3 +1,8 @@
+import re
+from functools import lru_cache
+
+CLASSIFIER_VERSION = 'token-boundaries-2'
+
 ALL_CATEGORIES = {
     '新能源': {'slug': 'new-energy', 'keywords': []},
     '医疗健康': {'slug': 'medical-health', 'keywords': []},
@@ -38,9 +43,18 @@ KEYWORD_MAP = {
 DEFAULT_CATEGORY = '科技'
 
 
+@lru_cache(maxsize=512)
+def _keyword_pattern(keyword):
+    # ASCII words/phrases must not match inside Email, Main, goal, etc.
+    # Chinese phrases retain intentional substring semantics.
+    if keyword.isascii():
+        return re.compile(r'(?<![a-z0-9_])' + re.escape(keyword) + r'(?![a-z0-9_])')
+    return None
+
+
 def classify(title, description=''):
     text = f'{title} {description}'.lower()
     for category, keywords in KEYWORD_MAP.items():
-        if any(kw in text for kw in keywords):
+        if any((_keyword_pattern(kw).search(text) is not None) if kw.isascii() else kw in text for kw in keywords):
             return category
     return DEFAULT_CATEGORY

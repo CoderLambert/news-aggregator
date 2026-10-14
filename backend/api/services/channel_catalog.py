@@ -1,5 +1,6 @@
 """Explicit catalog initialization; directory reads never create sources."""
 from api.services.source_policy import POLICIES, policy_for_name
+from api.services.source_metadata import publisher_country
 
 
 def subscription_status(source):
@@ -17,7 +18,7 @@ def catalog_defaults(policy):
         'url': {'openai_blog': 'https://openai.com/news', 'github': 'https://github.com/trending', 'venturebeat_ai': 'https://venturebeat.com/category/ai/', 'ars_technica_ai': 'https://arstechnica.com/tag/artificial-intelligence/'}.get(policy.key, 'https://' + policy.domains[0]),
         'language': policy.language,
         'region': policy.region,
-        'country': 'CN' if policy.region == 'domestic' else 'UK' if policy.key in {'bbc', 'deepmind'} else 'FR' if policy.key == 'mistral' else 'US',
+        'country': publisher_country(policy.key),
         'source_type': 'discussion' if policy.key in {'hackernews', 'devto'} else (
             'aggregator' if policy.key in {'github', 'arxiv_ai', 'producthunt'} else 'news'),
         'description': policy.description or f'{policy.name} 的资讯频道',

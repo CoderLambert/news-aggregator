@@ -82,7 +82,8 @@ class ChannelNewsSerializer(serializers.ModelSerializer):
 
     def get_publish_time_inferred(self, obj):
         items = list(obj.source_items.all())
-        return bool(items) and all(item.metadata.get('publish_time_inferred', False) for item in items)
+        from api.services.source_metadata import primary_publication_evidence
+        return primary_publication_evidence(obj)['inferred']
 
     def get_channel_names(self, obj):
         return list(dict.fromkeys([obj.source.name, *[p.name for p in self._channel_policies(obj)]]))

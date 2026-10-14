@@ -419,9 +419,10 @@ def test_hn_editorial_headline_does_not_veto_exact_publisher_identity():
         result = ingest_item(entry(publisher, title=publisher.title))
     assert result.body_committed
     news.refresh_from_db()
-    assert has_full_content(news) and news.source.name == 'Hacker News'
-    assert news.title == 'An editorial HN headline'
+    assert has_full_content(news) and news.source.name == 'Dev.to'
+    assert news.title == 'The exact publisher headline'
     assert news.source_items.count() == 2
+    assert news.source_items.filter(source_key='hackernews', upstream_id='999').exists()
 
 
 @pytest.mark.django_db
