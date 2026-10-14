@@ -68,7 +68,7 @@ def _fake_client(content):
 
 def test_first_call_invokes_llm_and_caches(news, client):
     payload = '["这篇文章讲了什么？", "AI 在新闻领域怎么用？", "有什么风险？"]'
-    with patch('api.views.get_clients', return_value=_fake_client(payload)):
+    with patch('api.services.provider_credentials.personal_clients_for_user', return_value=_fake_client(payload)):
         resp = client.post(f'/api/news/{news.pk}/suggested-questions/')
     assert resp.status_code == 200
     data = resp.json()
@@ -106,7 +106,7 @@ def test_llm_error_falls_back_to_default(news, client):
 
 
 def test_invalid_json_response_falls_back(news, client):
-    with patch('api.views.get_clients', return_value=_fake_client('not json at all')):
+    with patch('api.services.provider_credentials.personal_clients_for_user', return_value=_fake_client('not json at all')):
         resp = client.post(f'/api/news/{news.pk}/suggested-questions/')
     assert resp.status_code == 200
     assert len(resp.json()['questions']) == 3
@@ -126,7 +126,7 @@ def test_force_regenerate_bypasses_cache(news, client):
     news.save()
 
     new_payload = '["new q1","new q2","new q3"]'
-    with patch('api.views.get_clients', return_value=_fake_client(new_payload)):
+    with patch('api.services.provider_credentials.personal_clients_for_user', return_value=_fake_client(new_payload)):
         resp = client.post(f'/api/news/{news.pk}/suggested-questions/?force=1')
 
     assert resp.status_code == 200
@@ -166,8 +166,89 @@ def test_slow_questions_do_not_overwrite_a_new_content_revision(news, client):
                         full_content_revision=1, suggested_questions=['New question'],
                     )
                     return _FakeCompletion('["old 1", "old 2", "old 3"]')
-    with patch('api.views.get_clients', return_value=[(SlowClient(), 'test-model')]):
+    with patch('api.services.provider_credentials.personal_clients_for_user', return_value=[(SlowClient(), 'test-model')]):
         response = client.post(f'/api/news/{news.pk}/suggested-questions/')
-    assert response.status_code == 200
+    assert response.status_code == 409
+    assert response.json()['error_code'] == 'suggestion_content_changed'
     news.refresh_from_db()
     assert news.suggested_questions == ['New question']
+
+
+def test_site_provider_is_never_charged_for_user_without_key(news, client):
+    with (
+        patch('api.views.get_clients', side_effect=AssertionError('site key must not be used')),
+        patch('api.services.provider_credentials.personal_clients_for_user', return_value=[]),
+        patch('api.services.chatgpt_subscription.active_connection_for_user', return_value=None),
+    ):
+        response = client.post(f'/api/news/{news.pk}/suggested-questions/')
+    assert response.status_code == 200
+    assert response.json()['generation'] == 'unconfigured'
+    assert len(response.json()['questions']) == 3
+    news.refresh_from_db()
+    assert news.suggested_questions == []
+
+
+def test_suggestion_budget_rejection_fences_any_billable_call(news, client):
+    from api.services.account_security import RateLimitExceeded
+    generator = _fake_client('["question a", "question b", "question c"]')
+    news.suggested_questions = ['kept 1', 'kept 2', 'kept 3']
+    news.save(update_fields=['suggested_questions'])
+    with (
+        patch('api.services.provider_credentials.personal_clients_for_user', return_value=generator),
+        patch('api.services.suggested_question_budget._reserve_buckets', side_effect=RateLimitExceeded(87)),
+    ):
+        response = client.post(f'/api/news/{news.pk}/suggested-questions/?force=1')
+    assert response.status_code == 429
+    assert response['Retry-After'] == '87'
+    assert response.json()['error_code'] == 'suggestion_budget_exhausted'
+    news.refresh_from_db()
+    assert news.suggested_questions == ['kept 1', 'kept 2', 'kept 3']
+
+
+def test_overlong_full_body_is_marked_excerpt_even_for_cached_questions(news, client):
+    news.full_content = 'Original complete paragraph. ' * 400
+    news.full_content_state = 'legacy'
+    news.suggested_questions = ['q1', 'q2', 'q3']
+    news.save(update_fields=['full_content', 'full_content_state', 'suggested_questions'])
+    response = client.post(f'/api/news/{news.pk}/suggested-questions/')
+    assert response.status_code == 200
+    assert response.json()['context_scope'] == 'excerpt'
+
+
+def test_busy_suggestion_slot_never_calls_any_model(news, client):
+    from api.services.suggested_question_budget import SuggestionCapacityBusy
+    with (
+        patch('api.services.provider_credentials.personal_clients_for_user', return_value=_fake_client('["a","b","c"]')),
+        patch('api.services.suggested_question_budget._slots') as slots,
+    ):
+        slots.acquire.return_value = False
+        response = client.post(f'/api/news/{news.pk}/suggested-questions/')
+    assert response.status_code == 429
+    assert response.json()['error_code'] == 'suggestion_capacity_busy'
+    assert int(response['Retry-After']) > 0
+
+
+def test_two_accounts_cannot_pay_twice_for_the_same_article_revision(news, client):
+    from api.services.account_security import RateLimitExceeded
+    payload = '["this article?", "its impact?", "what next?"]'
+    with patch('api.services.provider_credentials.personal_clients_for_user', return_value=_fake_client(payload)):
+        first = client.post(f'/api/news/{news.pk}/suggested-questions/')
+    assert first.status_code == 200
+    other = User.objects.create_user(username='other-suggested-reader')
+    client.force_login(other)
+    with patch('api.services.provider_credentials.personal_clients_for_user', return_value=_fake_client(payload)):
+        duplicate = client.post(f'/api/news/{news.pk}/suggested-questions/?force=1')
+    assert duplicate.status_code == 429
+    assert duplicate.json()['error_code'] == 'suggestion_budget_exhausted'
+    assert int(duplicate['Retry-After']) > 0
+
+
+def test_unconfigured_reader_does_not_enqueue_full_article(news, client):
+    with (
+        patch('api.views.ensure_full_content', side_effect=AssertionError('should not fetch')),
+        patch('api.services.provider_credentials.personal_clients_for_user', return_value=[]),
+        patch('api.services.chatgpt_subscription.active_connection_for_user', return_value=None),
+    ):
+        response = client.post(f'/api/news/{news.pk}/suggested-questions/')
+    assert response.status_code == 200
+    assert response.json()['generated'] is False

@@ -10,6 +10,7 @@ interface LazyNewsChatAssistantProps {
   articleContext?: {
     hasFullContent?: boolean
     wordCount?: number
+    contentRevision?: number
     title?: string
     isMedical?: boolean
     sourceUrl?: string

@@ -26,6 +26,7 @@ interface NewsChatAssistantProps {
   articleContext?: {
     hasFullContent?: boolean
     wordCount?: number
+    contentRevision?: number
     title?: string
     isMedical?: boolean
     sourceUrl?: string
@@ -55,9 +56,11 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
 
   const {
     questions: suggestedQuestions,
+    contextScope: suggestionContextScope,
+    generated: suggestionsGenerated,
     loading: refreshingSuggestions,
     refresh: refreshSuggestions,
-  } = useSuggestedQuestions(newsId, isOpen)
+  } = useSuggestedQuestions(newsId, isOpen, articleContext?.contentRevision ?? 0)
 
   useEffect(() => {
     if (phase === 'success' && !hasCelebratedRef.current) {
@@ -203,6 +206,8 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
             phase={phase}
             onSuggestionClick={(text: string) => { void doSend(text) }}
             suggestedQuestions={suggestedQuestions}
+            suggestionContextScope={suggestionContextScope}
+            suggestionsGenerated={suggestionsGenerated}
             onRefreshSuggestions={() => { void refreshSuggestions() }}
             refreshingSuggestions={refreshingSuggestions}
           />

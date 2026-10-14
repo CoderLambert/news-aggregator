@@ -8,6 +8,10 @@ import * as api from '@/services/newsWorkflowApi'
 
 vi.mock('@/services/newsWorkflowApi', () => ({ fetchSuggestedQuestions: vi.fn() }))
 
+function snapshot(questions, contextScope = 'summary') {
+  return { questions, contextScope, revision: 0, generated: true }
+}
+
 function makeWrapper() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   return function Wrapper({ children }) {
@@ -28,7 +32,7 @@ describe('useSuggestedQuestions', () => {
   })
 
   it('loads lazily once for a viewer/article and reuses the cached result when reopened', async () => {
-    api.fetchSuggestedQuestions.mockResolvedValueOnce(['a', 'b', 'c'])
+    api.fetchSuggestedQuestions.mockResolvedValueOnce(snapshot(['a', 'b', 'c']))
     const { result, rerender } = renderHook(({ enabled }) => useSuggestedQuestions('42', enabled), {
       initialProps: { enabled: false }, wrapper: makeWrapper(),
     })
@@ -46,7 +50,7 @@ describe('useSuggestedQuestions', () => {
   })
 
   it('uses a separate query when the article changes', async () => {
-    api.fetchSuggestedQuestions.mockResolvedValueOnce(['a']).mockResolvedValueOnce(['b'])
+    api.fetchSuggestedQuestions.mockResolvedValueOnce(snapshot(['a'])).mockResolvedValueOnce(snapshot(['b']))
     const { result, rerender } = renderHook(({ id }) => useSuggestedQuestions(id, true), {
       initialProps: { id: '1' }, wrapper: makeWrapper(),
     })
@@ -71,7 +75,7 @@ describe('useSuggestedQuestions', () => {
   })
 
   it('forces a new question request only after an explicit refresh', async () => {
-    api.fetchSuggestedQuestions.mockResolvedValueOnce(['old1', 'old2', 'old3']).mockResolvedValueOnce(['new1', 'new2', 'new3'])
+    api.fetchSuggestedQuestions.mockResolvedValueOnce(snapshot(['old1', 'old2', 'old3'])).mockResolvedValueOnce(snapshot(['new1', 'new2', 'new3']))
     const { result } = renderHook(() => useSuggestedQuestions('42', true), { wrapper: makeWrapper() })
     await waitFor(() => expect(result.current.questions).toEqual(['old1', 'old2', 'old3']))
     await result.current.refresh()
@@ -81,13 +85,29 @@ describe('useSuggestedQuestions', () => {
   })
 
   it('preserves old questions when explicit refresh fails and does nothing without an article', async () => {
-    api.fetchSuggestedQuestions.mockResolvedValueOnce(['kept1', 'kept2']).mockRejectedValueOnce(new Error('llm down'))
+    api.fetchSuggestedQuestions.mockResolvedValueOnce(snapshot(['kept1', 'kept2'])).mockRejectedValueOnce(new Error('llm down'))
     const { result } = renderHook(() => useSuggestedQuestions('42', true), { wrapper: makeWrapper() })
     await waitFor(() => expect(result.current.questions).toEqual(['kept1', 'kept2']))
     await result.current.refresh()
     expect(result.current.questions).toEqual(['kept1', 'kept2'])
     const missing = renderHook(() => useSuggestedQuestions(null, true), { wrapper: makeWrapper() })
     await missing.result.current.refresh()
+    expect(api.fetchSuggestedQuestions).toHaveBeenCalledTimes(2)
+  })
+})
+
+
+describe('suggestion metadata and revision cache boundaries', () => {
+  it('re-queries after article content revision changes', async () => {
+    api.fetchSuggestedQuestions.mockResolvedValueOnce(snapshot(['old']))
+      .mockResolvedValueOnce(snapshot(['revised'], 'excerpt'))
+    const { result, rerender } = renderHook(({ revision }) => useSuggestedQuestions('42', true, revision), {
+      initialProps: { revision: 1 }, wrapper: makeWrapper(),
+    })
+    await waitFor(() => expect(result.current.questions).toEqual(['old']))
+    rerender({ revision: 2 })
+    await waitFor(() => expect(result.current.questions).toEqual(['revised']))
+    expect(result.current.contextScope).toBe('excerpt')
     expect(api.fetchSuggestedQuestions).toHaveBeenCalledTimes(2)
   })
 })

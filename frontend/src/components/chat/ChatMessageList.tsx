@@ -17,6 +17,8 @@ interface ChatMessageListProps {
   phase: ChatPhase
   onSuggestionClick?: (text: string) => void
   suggestedQuestions?: string[]
+  suggestionContextScope?: 'full' | 'summary' | 'excerpt'
+  suggestionsGenerated?: boolean
   onRefreshSuggestions?: () => void
   refreshingSuggestions?: boolean
 }
@@ -27,6 +29,8 @@ export default function ChatMessageList({
   phase,
   onSuggestionClick,
   suggestedQuestions,
+  suggestionContextScope,
+  suggestionsGenerated,
   onRefreshSuggestions,
   refreshingSuggestions = false,
 }: ChatMessageListProps) {
@@ -49,6 +53,9 @@ export default function ChatMessageList({
         <div className="animate-mascot-bob"><XiaowenMascot mood="happy" size={72} showShadow /></div>
         <p className="mt-3 text-base font-semibold text-foreground">嗨，我是小闻 👋</p>
         <p className="mt-1.5 max-w-lg text-sm leading-relaxed text-muted-foreground">我会根据当前可用的文章内容回答。选择一个问题，或者直接在下方输入。</p>
+        {suggestionContextScope === 'excerpt' && <p className="mt-2 text-xs text-muted-foreground">推荐问题仅根据文章节选生成，可能未覆盖全文。</p>}
+        {suggestionContextScope === 'summary' && <p className="mt-2 text-xs text-muted-foreground">推荐问题依据当前可用摘要生成。</p>}
+        {suggestionsGenerated === false && <p className="mt-2 text-xs text-muted-foreground">当前为通用建议；AI 个性化推荐需要配置个人模型额度。</p>}
         <div className="mt-5 grid w-full max-w-3xl grid-cols-1 gap-2 sm:grid-cols-2">
           {questions.map((question) => (
             <button

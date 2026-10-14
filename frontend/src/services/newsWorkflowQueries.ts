@@ -9,8 +9,8 @@ export const newsWorkflowKeys = {
   chatHistories: () => [...newsWorkflowKeys.all, 'chatHistory'] as const,
   chatHistory: (newsId: number, lang: Language, viewerId: ViewerId) =>
     [...newsWorkflowKeys.all, 'chatHistory', { newsId, lang, viewerId }] as const,
-  suggestedQuestions: (newsId: number, lang: Language) =>
-    [...newsWorkflowKeys.all, 'suggestedQuestions', { newsId, lang }] as const,
+  suggestedQuestions: (newsId: number, lang: Language, viewerId: ViewerId, revision: number) =>
+    [...newsWorkflowKeys.all, 'suggestedQuestions', { newsId, lang, viewerId, revision }] as const,
 }
 
 export function chatHistoryOptions(newsId: number, lang: Language, viewerId: ViewerId) {
@@ -22,9 +22,9 @@ export function chatHistoryOptions(newsId: number, lang: Language, viewerId: Vie
   })
 }
 
-export function suggestedQuestionOptions(newsId: number, lang: Language) {
+export function suggestedQuestionOptions(newsId: number, lang: Language, viewerId: ViewerId, revision: number) {
   return queryOptions({
-    queryKey: newsWorkflowKeys.suggestedQuestions(newsId, lang),
+    queryKey: newsWorkflowKeys.suggestedQuestions(newsId, lang, viewerId, revision),
     queryFn: ({ signal }) => fetchSuggestedQuestions(newsId, { signal }),
     staleTime: Infinity,
     retry: false,
