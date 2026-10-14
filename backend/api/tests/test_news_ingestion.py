@@ -302,6 +302,32 @@ def test_upstream_id_target_change_keeps_news_id_and_replay_is_idempotent(news):
 
 
 @pytest.mark.django_db
+def test_primary_publisher_recategorization_updates_list_filter_without_duplicating_article(news):
+    first = ingest_item(entry())
+    original_url, revision = news.url, news.full_content_revision
+    changed = ingest_item(entry(category_name='New verified category'))
+    replay = ingest_item(entry(category_name='New verified category'))
+    news.refresh_from_db()
+    assert first.news_id == changed.news_id == replay.news_id == news.pk
+    assert news.category.name == 'New verified category'
+    assert changed.changed is True
+    assert replay.changed is False
+    assert news.url == original_url and news.full_content_revision == revision
+    assert News.objects.count() == 1 and news.source_items.count() == 1
+
+
+@pytest.mark.django_db
+def test_secondary_discovery_cannot_relabel_primary_publisher_category(news):
+    ingest_item(entry())
+    ingestion = ingest_item(entry(source_key='hackernews', source_name='Hacker News', upstream_id='999',
+                                  category_name='Community discussion', title='Community headline'))
+    assert ingestion.receipt_outcome == 'committed'
+    news.refresh_from_db()
+    assert news.category.name == 'ingestion'
+    assert NewsSourceItem.objects.get(source_key='hackernews', upstream_id='999').metadata['category_name'] == 'Community discussion'
+
+
+@pytest.mark.django_db
 def test_source_id_conflict_cannot_relabel_a_known_article(news):
     ingest_item(entry())
     wrong = candidate(news, source_item_id='18', retrieved_from_url='https://dev.to/api/articles/18')
