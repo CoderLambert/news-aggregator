@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query'
 import AddChannelDialog from '@/components/workspace/AddChannelDialog'
+import { AuthContext } from '@/context/AuthContext'
 
 vi.mock('@/services/channelQueries', () => ({ useChannelMutation: () => useMutation({ mutationFn: (perform: () => Promise<unknown>) => perform() }) }))
 const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal')
@@ -25,7 +26,11 @@ it('shows safe address validation and preserves the URL for correction', async (
     .mockResolvedValueOnce(new Response(JSON.stringify({ matches: [], supported: false, message: '此地址尚未登记。', url: 'https://example.org/rss' }), { status: 200 }))
   vi.stubGlobal('fetch', fetcher)
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}>
-    <AddChannelDialog topics={[]} onClose={vi.fn()} onDone={vi.fn()} />
+    <AuthContext.Provider value={{
+      user: null, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn(),
+    }}>
+      <AddChannelDialog topics={[]} onClose={vi.fn()} onDone={vi.fn()} />
+    </AuthContext.Provider>
   </QueryClientProvider>)
   const input = screen.getByRole('textbox', { name: '网站或 RSS 地址' })
   fireEvent.change(input, { target: { value: 'http://localhost/rss' } })
