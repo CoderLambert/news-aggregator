@@ -208,9 +208,24 @@ export function parseChatHistory(value: unknown): ChatHistory {
   }) }
 }
 
-export function parseSuggestedQuestions(value: unknown): string[] {
-  if (!isRecord(value) || !Array.isArray(value.questions)) return []
-  return value.questions.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+export interface SuggestedQuestionsSnapshot {
+  questions: string[]
+  contextScope: 'full' | 'summary' | 'excerpt'
+  revision: number | null
+  generated: boolean
+}
+
+export function parseSuggestedQuestions(value: unknown): SuggestedQuestionsSnapshot {
+  if (!isRecord(value) || !Array.isArray(value.questions)) {
+    return { questions: [], contextScope: 'summary', revision: null, generated: false }
+  }
+  const scope = value.context_scope
+  return {
+    questions: value.questions.filter((item): item is string => typeof item === 'string' && item.trim().length > 0),
+    contextScope: scope === 'full' || scope === 'excerpt' ? scope : 'summary',
+    revision: typeof value.full_content_revision === 'number' ? value.full_content_revision : null,
+    generated: value.generated === true,
+  }
 }
 
 export function parseTranslationEvent(value: unknown): TranslationEvent {
@@ -249,7 +264,7 @@ export async function clearChatHistory(id: NewsId, signal: AbortSignal): Promise
   await clearChatHistoryRequest(id, signal)
 }
 
-export async function fetchSuggestedQuestions(id: NewsId, options: { force?: boolean; signal: AbortSignal }): Promise<string[]> {
+export async function fetchSuggestedQuestions(id: NewsId, options: { force?: boolean; signal: AbortSignal }): Promise<SuggestedQuestionsSnapshot> {
   const data: unknown = await fetchSuggestedQuestionsRequest(id, options)
   return parseSuggestedQuestions(data)
 }
