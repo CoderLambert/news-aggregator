@@ -97,6 +97,11 @@ function parseSourceConfig(value: unknown): SourceConfigRecord {
     readOnly: boolean(value.read_only),
     endpoints: Array.isArray(value.endpoints) ? value.endpoints.map(parseEndpoint) : [],
     monitoring: {
+      workerHeartbeatAt: nullableText(monitoring.worker_heartbeat_at),
+      lastProbeAt: nullableText(monitoring.last_probe_at),
+      lastProbeStatus: text(monitoring.last_probe_status),
+      configVersion: typeof monitoring.config_version === 'number' ? monitoring.config_version : null,
+      approvedAt: nullableText(monitoring.approved_at),
       lastSuccessAt: nullableText(monitoring.last_success_at),
       lastFeedSuccessAt: nullableText(monitoring.last_feed_success_at),
       nextPollAt: nullableText(monitoring.next_poll_at),

@@ -177,7 +177,13 @@ def _source_monitoring(source_key):
         from urllib.parse import urlsplit
         host_keys = [f'host:{urlsplit(endpoint.url).hostname}' for endpoint in config.endpoints.all()]
     cooldown = RequestBudget.objects.filter(pk__in=host_keys).aggregate(value=Max('cooldown_until'))['value']
+    crawler_settings = get_crawler_settings()
     return {
+        'worker_heartbeat_at': crawler_settings.worker_heartbeat_at,
+        'last_probe_at': config.probed_at if config else None,
+        'last_probe_status': (config.probe_summary or {}).get('outcome', '') if config else '',
+        'config_version': config.config_version if config else None,
+        'approved_at': config.approved_at if config else None,
         'last_success_at': last_success,
         'latest_article': ({
             'id': latest_item.news_id, 'title': latest_item.news.title,

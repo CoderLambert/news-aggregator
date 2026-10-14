@@ -235,8 +235,11 @@ export default function SourceConfigSection() {
                 {endpoint?.url ? <p className="truncate font-mono text-xs" title={endpoint.url}>{endpoint.url}</p> : null}
                 <div className="grid grid-cols-2 gap-2 rounded-lg bg-muted/50 p-3 text-xs">
                   <span>最近探测：{formatDate(source.probedAt)}</span><span>Feed 成功：{formatDate(source.monitoring.lastFeedSuccessAt)}</span>
-                  <span>入库成功：{formatDate(source.monitoring.lastSuccessAt)}</span><span>下次轮询：{formatDate(source.monitoring.nextPollAt)}</span>
+                  <span>运行成功：{formatDate(source.monitoring.lastSuccessAt)}</span><span>下次轮询：{formatDate(source.monitoring.nextPollAt)}</span>
+                  <span>Worker 心跳：{formatDate(source.monitoring.workerHeartbeatAt)}</span><span>冷却截止：{formatDate(source.monitoring.cooldownUntil)}</span>
                 </div>
+                {source.monitoring.latestArticle ? <p className="truncate text-xs text-muted-foreground">最新入库：<a className="hover:underline" href={source.monitoring.latestArticle.url} target="_blank" rel="noreferrer">{source.monitoring.latestArticle.title}</a> · {formatDate(source.monitoring.latestArticle.publishTime)}</p> : null}
+                {Object.keys(source.monitoring.lastHttpStatuses).length ? <p className="text-xs text-muted-foreground">HTTP 状态：{Object.entries(source.monitoring.lastHttpStatuses).map(([code, count]) => `${code}:${count}`).join(' · ')}</p> : null}
                 {source.unavailableReason ? <p className="text-red-700 dark:text-red-300">不可用原因：{source.unavailableReason}</p> : null}
                 {source.monitoring.lastFailure ? <p className="text-red-700 dark:text-red-300">最近失败：{source.monitoring.lastFailure}</p> : null}
                 {samples.length ? <div><p className="mb-1 font-medium">探测样本</p><ul className="space-y-1 text-xs text-muted-foreground">{samples.map((sample) => <li key={sample.url} className="truncate"><a className="hover:underline" href={sample.url} target="_blank" rel="noreferrer">{sample.title}</a>{sample.publishedAt ? ` · ${sample.publishedAt}` : ''}</li>)}</ul></div> : null}

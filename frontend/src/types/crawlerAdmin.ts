@@ -108,6 +108,11 @@ export interface SourceProbeSample {
 }
 
 export interface SourceMonitoring {
+  workerHeartbeatAt: string | null
+  lastProbeAt: string | null
+  lastProbeStatus: string
+  configVersion: number | null
+  approvedAt: string | null
   lastSuccessAt: string | null
   lastFeedSuccessAt: string | null
   nextPollAt: string | null
