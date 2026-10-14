@@ -1,329 +1,283 @@
-"""Real data endpoints for the NewsHub reading and channel workspace."""
+import json
+import uuid
 from datetime import timedelta
-import ipaddress
-from urllib.parse import urlsplit, parse_qsl, urlencode
-from django.conf import settings
-from django.core.validators import URLValidator
-from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import transaction
-from django.db.models import Count, Q
-from django.shortcuts import get_object_or_404
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+from django.contrib.auth.models import User
+from django.core.cache import cache
+from django.core.management import call_command
+from django.test import TestCase, override_settings
 from django.utils import timezone
-from rest_framework.exceptions import APIException, NotFound, PermissionDenied, Throttled, ValidationError
-from rest_framework.permissions import AllowAny
-from rest_framework.response import Response
-from rest_framework.throttling import SimpleRateThrottle
-from rest_framework.views import APIView
-from api.models import Source, News, NewsSourceItem, BlockedNews, ChannelGroup, ChannelSubscription
-from api.channel_views import PersonalChannelsView, ChannelSubscriptionsView, ChannelGroupDetailView, ids
-from api.smart_channel_models import (SourceTopicProfile, ChannelGroupingConfig, ChannelGroupingProposal,
-    ChannelClassifierSettings, ReadingDay, ChannelIntakeRequest)
-from api.services.channel_topics import TOPICS, PRESETS, TOPIC_MAP, channel_articles, profile_data, base_profile
-from api.services.channel_grouping import (lock_user, config_data, credential_fingerprint, make_proposal, apply_proposal,
-    undo_proposal, proposal_data, validated_mode, validated_topics, GroupingConflict, mark_manual, process_subscription)
+from rest_framework.test import APIClient
+from api.models import Source, Category, News, ChannelGroup, ChannelSubscription, ChannelGroupMember, BlockedNews
+from api.smart_channel_models import SourceTopicProfile, ChannelGroupingConfig, ChannelGroupingOverride, ChannelGroupingProposal, ReadingDay
+from api.services.channel_grouping import make_proposal, process_subscription, mark_manual
+from api.services.channel_ai import parse_classification, claim_next, execute_job
 
 
-class WorkspaceThrottle(SimpleRateThrottle):
-    scope = 'channel_workspace'
-    rate = '60/min'
-    def get_cache_key(self, request, view):
-        return self.cache_format % {'scope': self.scope, 'ident': request.user.pk if request.user.is_authenticated else self.get_ident(request)}
+@override_settings(PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+class SmartChannelTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user('smart-reader', password='Test-reader-123')
+        self.other = User.objects.create_user('other-smart-reader')
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+        self.source, _ = Source.objects.get_or_create(name='React Blog', defaults={'url': 'https://react.dev', 'language': 'en'})
+        self.source2, _ = Source.objects.get_or_create(name='OpenAI Blog', defaults={'url': 'https://openai.com/news', 'language': 'en'})
+        self.subscription = ChannelSubscription.objects.create(user=self.user, source=self.source)
+        self.category = Category.objects.create(name='Workspace test', slug='workspace-test')
+        self.news = News.objects.create(title='A public title', content='Public summary', source=self.source,
+            category=self.category, url='https://example.org/workspace-story', publish_time=timezone.now())
 
+    def propose(self, **kwargs):
+        return self.client.post('/api/me/smart-channels/proposals/', {'source_ids': [self.source.pk], 'topic_keys': ['frontend'], **kwargs}, format='json')
 
-class PrivateWorkspaceView(PersonalChannelsView):
-    throttle_classes = [WorkspaceThrottle]
-    def initial(self, request, *args, **kwargs):
-        super().initial(request, *args, **kwargs)
-        if settings.PUBLIC_SITE_MODE != 'full':
-            raise PermissionDenied('当前站点为只读模式。')
+    def apply(self, proposal_id, **kwargs):
+        return self.client.post(f'/api/me/smart-channels/proposals/{proposal_id}/apply/',
+            {'groups': [{'topic_key': 'frontend', 'name': 'Web development', 'source_ids': [self.source.pk]}], **kwargs}, format='json')
 
+    def test_models_and_migrations_agree(self):
+        call_command('makemigrations', 'api', check=True, dry_run=True, verbosity=0)
 
-class CatalogView(APIView):
-    permission_classes = [AllowAny]
-    def get(self, request):
-        profiles = {p.source_id: p for p in SourceTopicProfile.objects.all()}
-        counts = dict(News.objects.values('source_id').annotate(n=Count('id')).values_list('source_id', 'n'))
-        channel_counts = dict(NewsSourceItem.objects.values('source_key').annotate(n=Count('news_id', distinct=True)).values_list('source_key', 'n'))
-        own_counts = {(r['source_key'], r['news__source_id']): r['n'] for r in NewsSourceItem.objects.values('source_key', 'news__source_id').annotate(n=Count('news_id', distinct=True))}
-        catalog = []
-        for source in Source.objects.order_by('name'):
-            data = profile_data(source, profiles.get(source.pk, False))
-            data['news_count'] = counts.get(source.pk, 0) + channel_counts.get(data['policy_key'], 0) - own_counts.get((data['policy_key'], source.pk), 0)
-            catalog.append(data)
-        return Response({'topics': TOPICS, 'presets': PRESETS, 'sources': catalog})
+    def test_catalog_read_does_not_write_profiles_or_call_a_model(self):
+        with patch('api.services.channel_ai.personal_clients_for_user', side_effect=AssertionError('must not call')):
+            response = self.client.get('/api/smart-channels/catalog/')
+        self.assertEqual(response.status_code, 200)
+        row = next(r for r in response.data['sources'] if r['id'] == self.source.pk)
+        self.assertEqual(row['topics'], ['frontend'])
+        self.assertEqual(row['news_count'], 1)
+        self.assertEqual(SourceTopicProfile.objects.count(), 0)
 
+    def test_unknown_source_has_no_fabricated_topics(self):
+        source = Source.objects.create(name='A new source', url='https://example.org')
+        response = self.client.get(f'/api/smart-channels/sources/{source.pk}/')
+        self.assertEqual(response.data['topics'], [])
+        self.assertTrue(response.data['needs_review'])
 
-class SourceProfileView(APIView):
-    permission_classes = [AllowAny]
-    throttle_classes = [WorkspaceThrottle]
-    def get(self, request, pk):
-        source = get_object_or_404(Source, pk=pk)
-        data = profile_data(source)
-        articles = channel_articles(source).select_related('source')
-        if request.user.is_authenticated:
-            articles = articles.exclude(id__in=BlockedNews.objects.filter(user=request.user).values('news_id'))
-        data['news_count'] = articles.count()
-        data['recent_articles'] = list(articles.order_by('-publish_time').values('id', 'title', 'publish_time')[:8])
-        return Response(data, headers={'Cache-Control': 'private, no-store'})
+    def test_preview_does_not_mutate_groups_or_subscriptions(self):
+        response = self.propose()
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['result'][0]['topic_keys'], ['frontend'])
+        self.assertEqual(ChannelGroup.objects.count(), 0)
+        self.assertEqual(ChannelSubscription.objects.filter(user=self.user).count(), 1)
 
-    @transaction.atomic
-    def patch(self, request, pk):
-        if settings.PUBLIC_SITE_MODE != 'full' or not request.user.is_authenticated or not request.user.is_superuser or not request.user.is_active:
-            raise PermissionDenied()
-        lock_user(request.user)
-        source = get_object_or_404(Source, pk=pk)
-        if not isinstance(request.data, dict):
-            raise ValidationError('请求应为 JSON 对象。')
-        if not any(key in request.data for key in ('topics', 'description')):
-            raise ValidationError('请提供需要修改的简介或主题。')
-        stored = SourceTopicProfile.objects.filter(source=source).first()
-        effective = profile_data(source, stored)
-        # PATCH must preserve the *effective* value of fields not supplied.
-        # Otherwise updating just one field silently erases the other.
-        topics = request.data.get('topics', effective['topics'])
-        if topics:
-            topics = validated_topics(topics)
-        elif not isinstance(topics, list):
-            raise ValidationError('无效主题。')
-        about = request.data.get('description', effective['description'])
-        if not isinstance(about, str) or len(about) > 1000:
-            raise ValidationError('简介最多 1000 字。')
-        about = about.strip()
-        if stored and stored.origin == 'manual' and stored.topics == topics and stored.about == about:
-            return Response(profile_data(source, stored))
-        SourceTopicProfile.objects.update_or_create(source=source, defaults={
-            'about': about, 'topics': topics, 'origin': 'manual',
-            'evidence_hash': base_profile(source)['evidence_hash'], 'revision': stored.revision + 1 if stored else 1})
-        return Response(profile_data(source))
+    def test_apply_is_additive_and_idempotent(self):
+        proposal = self.propose().data['id']
+        first = self.apply(proposal)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.data['applied_count'], 1)
+        self.assertEqual(self.apply(proposal).status_code, 200)
+        self.assertEqual(ChannelGroupMember.objects.count(), 1)
+        self.assertEqual(ChannelGroup.objects.count(), 1)
 
+    def test_duplicate_request_id_requires_identical_inputs(self):
+        request_id = str(uuid.uuid4())
+        first = self.propose(request_id=request_id)
+        second = self.propose(request_id=request_id)
+        self.assertEqual(first.data['id'], second.data['id'])
+        self.assertEqual(self.propose(request_id=request_id, topic_keys=['ai']).status_code, 409)
 
-def normalize_url(value):
-    if not isinstance(value, str) or len(value) > 1024:
-        raise ValidationError('请输入有效的网站或 RSS 地址。')
-    value = value.strip()
-    try:
-        URLValidator(schemes=['http', 'https'])(value)
-        parsed = urlsplit(value)
-        host = (parsed.hostname or '').lower().rstrip('.')
-        if parsed.username or parsed.password or parsed.fragment or parsed.port not in (None, 80, 443):
-            raise ValueError()
-        if host in {'localhost', 'metadata.google.internal'} or host.endswith(('.localhost', '.local', '.internal')):
-            raise ValueError()
-        try:
-            ipaddress.ip_address(host)
-        except ValueError:
-            pass
-        else:
-            raise ValueError()
-    except (ValueError, DjangoValidationError):
-        raise ValidationError('只接受不含凭据的公开 HTTP(S) 域名地址。') from None
-    return value, host.removeprefix('www.'), parsed.path.rstrip('/'), urlencode(sorted(parse_qsl(parsed.query)))
+    def test_preview_rejects_unsubscribed_source_and_other_user_group(self):
+        self.assertEqual(self.propose(source_ids=[self.source2.pk]).status_code, 404)
+        group = ChannelGroup.objects.create(user=self.other, name='Private')
+        proposal = self.propose().data['id']
+        response = self.apply(proposal, groups=[{'topic_key': 'frontend', 'group_id': group.pk, 'source_ids': [self.source.pk]}])
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(group.subscriptions.exists())
 
+    def test_private_proposal_cannot_be_read_by_another_account(self):
+        proposal = self.propose().data['id']
+        self.client.force_authenticate(self.other)
+        self.assertEqual(self.client.get(f'/api/me/smart-channels/proposals/{proposal}/').status_code, 404)
+        self.assertEqual(self.apply(proposal).status_code, 404)
 
-class ResolveChannelView(PrivateWorkspaceView):
-    def post(self, request):
-        value, host, path, query = normalize_url(request.data.get('url'))
-        exact, publisher = [], []
-        for source in Source.objects.all():
-            data = profile_data(source)
-            for address in [source.url, data['feed_url']]:
-                if not address:
-                    continue
-                try:
-                    _, candidate_host, candidate_path, candidate_query = normalize_url(address)
-                except ValidationError:
-                    continue
-                if candidate_host == host:
-                    publisher.append(data)
-                    if candidate_path == path and candidate_query == query:
-                        exact.append(data)
-        # Whole-site roots can legitimately resolve to several reviewed subchannels.
-        matches = exact or (publisher if not path and not query else [])
-        unique = {item['id']: item for item in matches}
-        return Response({'matches': list(unique.values()), 'supported': bool(unique),
-            'message': '请选择要订阅的已登记频道。' if unique else '此地址尚未登记，可提交接入申请；不会立即抓取或订阅。', 'url': value})
+    def test_changed_group_rejects_stale_preview(self):
+        proposal = self.propose().data['id']
+        ChannelGroup.objects.create(user=self.user, name='Another group')
+        self.assertEqual(self.apply(proposal).status_code, 409)
+        self.assertEqual(ChannelGroupMember.objects.count(), 0)
 
+    def test_admin_partial_metadata_patch_preserves_unsubmitted_fields(self):
+        admin = User.objects.create_superuser('metadata-editor', 'metadata@example.com', 'password123')
+        self.client.force_authenticate(admin)
+        endpoint = f'/api/smart-channels/sources/{self.source.pk}/'
+        initial = self.client.patch(endpoint, {'topics': ['frontend'], 'description': 'Publisher description'}, format='json')
+        self.assertEqual(initial.status_code, 200)
+        updated = self.client.patch(endpoint, {'topics': ['ai']}, format='json')
+        self.assertEqual(updated.status_code, 200)
+        profile = SourceTopicProfile.objects.get(source=self.source)
+        self.assertEqual(profile.topics, ['ai'])
+        self.assertEqual(profile.about, 'Publisher description')
+        revised = self.client.patch(endpoint, {'description': 'Edited description'}, format='json')
+        self.assertEqual(revised.status_code, 200)
+        profile.refresh_from_db()
+        self.assertEqual(profile.topics, ['ai'])
+        self.assertEqual(profile.about, 'Edited description')
+        version = profile.revision
+        self.assertEqual(self.client.patch(endpoint, {'description': 'Edited description'}, format='json').status_code, 200)
+        profile.refresh_from_db()
+        self.assertEqual(profile.revision, version)
+        self.assertEqual(self.client.patch(endpoint, {}, format='json').status_code, 400)
+        self.assertEqual(self.client.patch(endpoint, {'topics': 'invalid'}, format='json').status_code, 400)
+        profile.refresh_from_db()
+        self.assertEqual(profile.topics, ['ai'])
 
-class IntakeView(PrivateWorkspaceView):
-    def get(self, request):
-        return Response(list(ChannelIntakeRequest.objects.filter(user=request.user).order_by('-created_at').values('id', 'url', 'status', 'created_at')[:30]))
-    @transaction.atomic
-    def post(self, request):
-        lock_user(request.user)
-        url, _, _, _ = normalize_url(request.data.get('url'))
-        if any(k.lower() in {'token', 'key', 'api_key', 'access_token', 'password'} for k, _ in parse_qsl(urlsplit(url).query)):
-            raise ValidationError('接入申请不能包含私有令牌。')
-        if ChannelIntakeRequest.objects.filter(user=request.user, created_at__date=timezone.localdate()).count() >= 10:
-            raise Throttled(3600, '已达到今日接入申请上限。')
-        item, created = ChannelIntakeRequest.objects.get_or_create(user=request.user, url=url)
-        return Response({'id': item.pk, 'url': item.url, 'status': item.status}, status=201 if created else 200)
+    def test_manual_metadata_edit_invalidates_old_preview(self):
+        proposal = self.propose().data['id']
+        SourceTopicProfile.objects.create(source=self.source, origin='manual', topics=['technology'], about='Changed editorial scope')
+        self.assertEqual(self.apply(proposal).status_code, 409)
+        self.assertFalse(ChannelGroupMember.objects.exists())
 
+    def test_expired_and_cancelled_proposals_cannot_apply(self):
+        proposal = self.propose().data['id']
+        ChannelGroupingProposal.objects.filter(pk=proposal).update(expires_at=timezone.now() - timedelta(seconds=1))
+        self.assertEqual(self.apply(proposal).status_code, 409)
+        proposal2 = self.propose().data['id']
+        self.assertEqual(self.client.post(f'/api/me/smart-channels/proposals/{proposal2}/cancel/', {}, format='json').status_code, 200)
+        self.assertEqual(self.apply(proposal2).status_code, 409)
 
-class GroupingConfigView(PrivateWorkspaceView):
-    def get(self, request):
-        data = config_data(request.user)
-        data['ai_available'] = settings.PUBLIC_AI_ENABLED and bool(credential_fingerprint(request.user))
-        return Response(data)
-    @transaction.atomic
-    def patch(self, request):
-        lock_user(request.user)
-        cfg, _ = ChannelGroupingConfig.objects.get_or_create(user=request.user)
-        cfg.mode = validated_mode(request.data.get('mode', cfg.mode))
-        bindings = request.data.get('bindings', cfg.bindings)
-        if not isinstance(bindings, dict) or len(bindings) > len(TOPIC_MAP):
-            raise ValidationError('无效的主题绑定。')
-        for key, group_id in bindings.items():
-            if key not in TOPIC_MAP or type(group_id) is not int:
-                raise ValidationError('无效的主题绑定。')
-            if not ChannelGroup.objects.filter(pk=group_id, user=request.user).exists():
-                raise NotFound()
-        cfg.bindings = bindings
-        cfg.revision += 1
-        cfg.active_since = timezone.now()
-        cfg.save()
-        return self.get(request)
+    def test_existing_same_name_requires_explicit_existing_group(self):
+        group = ChannelGroup.objects.create(user=self.user, name='Web development')
+        proposal = self.propose().data['id']
+        self.assertEqual(self.apply(proposal).status_code, 409)
+        self.assertEqual(self.apply(proposal, groups=[{'topic_key': 'frontend', 'group_id': group.pk, 'source_ids': [self.source.pk]}]).status_code, 200)
 
+    def test_undo_preserves_subscriptions_and_empty_group(self):
+        proposal = self.propose().data['id']
+        self.apply(proposal)
+        endpoint = f'/api/me/smart-channels/proposals/{proposal}/undo/'
+        self.assertEqual(self.client.post(endpoint, {}, format='json').status_code, 200)
+        self.assertEqual(self.client.post(endpoint, {}, format='json').status_code, 200)
+        self.assertEqual(ChannelGroupMember.objects.count(), 0)
+        self.assertEqual(ChannelGroup.objects.count(), 1)
+        self.assertEqual(ChannelSubscription.objects.count(), 1)
 
-class ProposalsView(PrivateWorkspaceView):
-    def get(self, request):
-        items = ChannelGroupingProposal.objects.filter(user=request.user, public_source__isnull=True)[:30]
-        return Response([proposal_data(item) for item in items])
-    def post(self, request):
-        proposal = make_proposal(request.user, request.data)
-        return Response(proposal_data(proposal), status=202 if proposal.status == 'queued' else 201)
+    def test_undo_does_not_remove_later_manual_decision(self):
+        proposal = self.propose().data['id']
+        self.apply(proposal)
+        group = ChannelGroup.objects.get(user=self.user)
+        mark_manual(self.user, self.source.pk, set(), {group.pk})
+        self.client.post(f'/api/me/smart-channels/proposals/{proposal}/undo/', {}, format='json')
+        self.assertEqual(ChannelGroupMember.objects.count(), 1)
 
+    def test_manual_remove_through_existing_api_is_remembered(self):
+        group = ChannelGroup.objects.create(user=self.user, name='Frontend')
+        group.subscriptions.add(self.subscription)
+        response = self.client.patch(f'/api/me/channel-groups/{group.pk}/', {'remove_source_ids': [self.source.pk]}, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(ChannelGroupingOverride.objects.get(user=self.user, source=self.source, group=group).suppressed)
 
-class ProposalView(PrivateWorkspaceView):
-    def get(self, request, pk):
-        proposal = get_object_or_404(ChannelGroupingProposal, pk=pk, user=request.user, public_source__isnull=True)
-        return Response(proposal_data(proposal))
+    def test_auto_mode_only_assigns_new_subscriptions_to_bound_groups(self):
+        group = ChannelGroup.objects.create(user=self.user, name='My AI')
+        ChannelGroupingConfig.objects.create(user=self.user, mode='auto', bindings={'ai': group.pk})
+        response = self.client.post('/api/me/channel-subscriptions/', {'action': 'subscribe', 'source_ids': [self.source2.pk]}, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(group.subscriptions.values_list('source_id', flat=True)), [self.source2.pk])
+        self.assertEqual(ChannelSubscription.objects.filter(user=self.user).count(), 2)
 
+    def test_suggestion_mode_does_not_auto_apply(self):
+        group = ChannelGroup.objects.create(user=self.user, name='My AI')
+        ChannelGroupingConfig.objects.create(user=self.user, mode='suggest', bindings={'ai': group.pk})
+        new = ChannelSubscription.objects.create(user=self.user, source=self.source2)
+        process_subscription(new.pk)
+        process_subscription(new.pk)
+        self.assertFalse(group.subscriptions.exists())
+        self.assertEqual(ChannelGroupingProposal.objects.filter(user=self.user).count(), 1)
 
-class ApplyProposalView(PrivateWorkspaceView):
-    def post(self, request, pk):
-        return Response(proposal_data(apply_proposal(request.user, pk, request.data)))
+    def test_ai_requires_explicit_consent_and_credentials(self):
+        self.assertEqual(self.propose(engine='ai').status_code, 400)
+        self.assertEqual(self.propose(engine='ai', consent=True).status_code, 400)
 
+    def test_ai_job_is_queued_and_validated_before_any_group_write(self):
+        with patch('api.services.channel_grouping.credential_fingerprint', return_value='test-fingerprint'):
+            proposal = make_proposal(self.user, {'source_ids': [self.source.pk], 'topic_keys': ['frontend'], 'engine': 'ai', 'consent': True})
+        self.assertEqual(proposal.status, 'queued')
+        job = claim_next()
+        client = Mock()
+        client.chat.completions.create.return_value = SimpleNamespace(choices=[SimpleNamespace(finish_reason='stop', message=SimpleNamespace(content=json.dumps({'channels': [{'source_id': self.source.pk, 'topic_keys': ['frontend'], 'reason': '浏览器和框架技术'}]})))])
+        with patch('api.services.channel_ai.credential_fingerprint', return_value='test-fingerprint'), patch('api.services.channel_ai.personal_clients_for_user', return_value=[(client, 'test-model')]):
+            execute_job(job)
+        proposal.refresh_from_db()
+        self.assertEqual(proposal.status, 'ready')
+        self.assertEqual(proposal.result[0]['origin'], 'ai')
+        self.assertEqual(client.chat.completions.create.call_count, 1)
+        self.assertFalse(ChannelGroupMember.objects.exists())
 
-class CancelProposalView(PrivateWorkspaceView):
-    @transaction.atomic
-    def post(self, request, pk):
-        lock_user(request.user)
-        proposal = get_object_or_404(ChannelGroupingProposal, pk=pk, user=request.user, public_source__isnull=True)
-        if proposal.status in {'applied', 'undone'}:
-            raise GroupingConflict('已应用的建议请使用撤销。')
-        proposal.status, proposal.lease_token = 'cancelled', ''
-        proposal.save(update_fields=['status', 'lease_token'])
-        return Response(proposal_data(proposal))
+    def test_lease_recovery_has_bounded_attempts(self):
+        with patch('api.services.channel_grouping.credential_fingerprint', return_value='test'):
+            proposal = make_proposal(self.user, {'source_ids': [self.source.pk], 'engine': 'ai', 'consent': True})
+        first = claim_next()
+        ChannelGroupingProposal.objects.filter(pk=first.pk).update(lease_until=timezone.now() - timedelta(seconds=1))
+        second = claim_next()
+        self.assertEqual(second.attempts, 2)
+        ChannelGroupingProposal.objects.filter(pk=second.pk).update(lease_until=timezone.now() - timedelta(seconds=1))
+        self.assertIsNone(claim_next())
+        proposal.refresh_from_db()
+        self.assertEqual(proposal.status, 'failed')
 
+    def test_invalid_ai_ids_or_topics_are_rejected(self):
+        evidence = [{'source_id': self.source.pk, 'name': self.source.name}]
+        for source_id, topics in [(999999, ['frontend']), (self.source.pk, ['invented']), (True, ['frontend'])]:
+            with self.assertRaises(ValueError):
+                parse_classification(json.dumps({'channels': [{'source_id': source_id, 'topic_keys': topics, 'reason': 'test'}]}), evidence, ['frontend'])
+        with self.assertRaises(ValueError):
+            parse_classification('not json', evidence, ['frontend'])
 
-class UndoProposalView(PrivateWorkspaceView):
-    def post(self, request, pk):
-        return Response(proposal_data(undo_proposal(request.user, pk)))
+    def test_reading_stats_are_real_deduplicated_and_private(self):
+        for _ in range(2):
+            self.assertEqual(self.client.post('/api/me/reading-stats/', {'news_id': self.news.pk}, format='json').status_code, 200)
+        data = self.client.get('/api/me/reading-stats/').data
+        self.assertEqual(data['today'], 1)
+        self.assertEqual(data['total'], 1)
+        self.assertEqual(ReadingDay.objects.count(), 1)
+        self.client.force_authenticate(self.other)
+        self.assertEqual(self.client.get('/api/me/reading-stats/').data['total'], 0)
 
+    def test_no_popularity_data_uses_latest_not_fake_hotness(self):
+        self.assertEqual(self.client.get('/api/smart-channels/dashboard/').data['kind'], 'latest')
+        self.client.post('/api/me/reading-stats/', {'news_id': self.news.pk}, format='json')
+        self.assertEqual(self.client.get('/api/smart-channels/dashboard/').data['kind'], 'popular')
 
-class SiteClassifierView(PrivateWorkspaceView):
-    def initial(self, request, *args, **kwargs):
-        super().initial(request, *args, **kwargs)
-        if not request.user.is_superuser:
-            raise PermissionDenied()
-    def get(self, request):
-        cfg = ChannelClassifierSettings.objects.filter(pk=1).first()
-        jobs = ChannelGroupingProposal.objects.filter(public_source__isnull=False).order_by('-created_at')[:20]
-        return Response({'enabled': bool(cfg and cfg.enabled), 'is_owner': bool(cfg and cfg.owner_id == request.user.pk),
-            'daily_limit': cfg.daily_limit if cfg else 10,
-            'jobs': [proposal_data(j) for j in jobs],
-            'intake_requests': list(ChannelIntakeRequest.objects.order_by('-created_at').values('id', 'url', 'status', 'created_at')[:30])})
-    @transaction.atomic
-    def patch(self, request):
-        lock_user(request.user)
-        enabled, limit = request.data.get('enabled'), request.data.get('daily_limit', 10)
-        if type(enabled) is not bool or type(limit) is not int or not 1 <= limit <= 20:
-            raise ValidationError('请选择开关与每日 1–20 个任务的预算。')
-        if enabled and (request.data.get('consent') is not True or not settings.PUBLIC_AI_ENABLED or not credential_fingerprint(request.user)):
-            raise ValidationError('开启前须同意使用本管理员的模型额度，并配置有效的模型连接。')
-        ChannelClassifierSettings.objects.update_or_create(pk=1, defaults={'owner': request.user, 'enabled': enabled, 'daily_limit': limit})
-        return self.get(request)
+    def test_blocked_news_cannot_be_recorded_or_returned_as_trending(self):
+        BlockedNews.objects.create(user=self.user, news=self.news)
+        self.assertEqual(self.client.post('/api/me/reading-stats/', {'news_id': self.news.pk}, format='json').status_code, 404)
+        stories = self.client.get('/api/smart-channels/dashboard/').data['stories']
+        self.assertFalse(any(s['id'] == self.news.pk for s in stories))
 
+    def test_feed_resolution_is_catalog_only_and_has_no_network_side_effect(self):
+        response = self.client.post('/api/smart-channels/resolve/', {'url': 'https://react.dev/rss.xml'}, format='json')
+        self.assertTrue(response.data['supported'])
+        count = Source.objects.count()
+        response = self.client.post('/api/smart-channels/resolve/', {'url': 'https://unregistered.example.org/feed'}, format='json')
+        self.assertFalse(response.data['supported'])
+        self.assertEqual(Source.objects.count(), count)
 
-class SmartSubscriptionsView(ChannelSubscriptionsView):
-    @transaction.atomic
-    def post(self, request):
-        lock_user(request.user)
-        source_ids = ids(request.data, 'source_ids')
-        before = {s.source_id: set(s.groups.values_list('id', flat=True)) for s in ChannelSubscription.objects.filter(user=request.user, source_id__in=source_ids).prefetch_related('groups')}
-        response = super().post(request)
-        action = request.data.get('action', 'subscribe')
-        if action == 'set_groups':
-            for source_id in source_ids:
-                mark_manual(request.user, source_id, before.get(source_id, set()), set(request.data['group_ids']))
-        if action == 'subscribe':
-            for subscription in ChannelSubscription.objects.filter(user=request.user, source_id__in=set(source_ids) - set(before)):
-                try:
-                    process_subscription(subscription.pk)
-                except APIException:
-                    # Subscription still succeeds; the worker can retry organization.
-                    pass
-        return response
+    def test_private_or_credential_urls_are_rejected(self):
+        for url in ['http://127.0.0.1/feed', 'http://localhost/feed', 'https://secret:password@example.org/rss', 'file:///etc/passwd']:
+            self.assertEqual(self.client.post('/api/smart-channels/resolve/', {'url': url}, format='json').status_code, 400)
 
+    def test_nonadmin_cannot_enable_site_key_or_edit_metadata(self):
+        self.assertEqual(self.client.patch('/api/admin/smart-channels/', {'enabled': True, 'consent': True}, format='json').status_code, 403)
+        self.assertEqual(self.client.patch(f'/api/smart-channels/sources/{self.source.pk}/', {'topics': ['ai']}, format='json').status_code, 403)
 
-class SmartGroupDetailView(ChannelGroupDetailView):
-    @transaction.atomic
-    def patch(self, request, pk):
-        lock_user(request.user)
-        group = get_object_or_404(ChannelGroup, pk=pk, user=request.user)
-        before = set(group.subscriptions.values_list('source_id', flat=True))
-        response = super().patch(request, pk)
-        after = set(group.subscriptions.values_list('source_id', flat=True))
-        touched = before ^ after
-        for key in ('source_ids', 'add_source_ids', 'remove_source_ids'):
-            touched.update(request.data.get(key, []))
-        for source_id in touched:
-            mark_manual(request.user, source_id, {pk} if source_id in before else set(), {pk} if source_id in after else set())
-        return response
+    @override_settings(PUBLIC_SITE_MODE='read_only')
+    def test_read_only_blocks_personal_writes_but_keeps_public_workspace_reads(self):
+        self.assertEqual(self.propose().status_code, 403)
+        self.assertEqual(self.client.post('/api/me/reading-stats/', {'news_id': self.news.pk}, format='json').status_code, 403)
+        for path in ['/api/smart-channels/catalog/', '/api/smart-channels/dashboard/', f'/api/smart-channels/sources/{self.source.pk}/']:
+            self.assertEqual(self.client.get(path).status_code, 200)
 
+    def test_session_mutations_require_csrf_before_method_dispatch(self):
+        browser = APIClient(enforce_csrf_checks=True)
+        browser.force_login(self.user)
+        # DRF authenticates the session and enforces CSRF before deciding 405.
+        self.assertEqual(browser.post('/api/me/smart-channels/settings/', {'mode': 'auto'}, format='json').status_code, 403)
+        self.assertEqual(browser.patch('/api/me/smart-channels/settings/', {'mode': 'auto'}, format='json').status_code, 403)
 
-class ReadingStatsView(PrivateWorkspaceView):
-    def get(self, request):
-        today = timezone.localdate()
-        events = ReadingDay.objects.filter(user=request.user)
-        days = dict(events.filter(day__gte=today - timedelta(days=6)).values('day').annotate(n=Count('news_id', distinct=True)).values_list('day', 'n'))
-        cursor = today if events.filter(day=today).exists() else today - timedelta(days=1)
-        streak = 0
-        for day in events.values_list('day', flat=True).distinct().order_by('-day')[:366]:
-            if day == cursor:
-                streak += 1
-                cursor -= timedelta(days=1)
-            elif day < cursor:
-                break
-        return Response({'today': days.get(today, 0), 'total': events.values('news_id').distinct().count(), 'streak': streak,
-            'timezone': settings.TIME_ZONE, 'week': [{'day': (today - timedelta(days=i)).isoformat(), 'count': days.get(today - timedelta(days=i), 0)} for i in range(6, -1, -1)]})
-    def post(self, request):
-        news_id = request.data.get('news_id')
-        if type(news_id) is not int or news_id <= 0:
-            raise ValidationError('无效新闻 ID。')
-        if BlockedNews.objects.filter(user=request.user, news_id=news_id).exists():
-            raise NotFound()
-        news = get_object_or_404(News, pk=news_id)
-        ReadingDay.objects.get_or_create(user=request.user, news=news, day=timezone.localdate())
-        return Response({'recorded': True})
-    def delete(self, request):
-        ReadingDay.objects.filter(user=request.user).delete()
-        return Response(status=204)
-
-
-class DashboardView(APIView):
-    permission_classes = [AllowAny]
-    def get(self, request):
-        news = News.objects.filter(related_to__isnull=True, publish_time__lte=timezone.now()).select_related('source')
-        if request.user.is_authenticated:
-            news = news.exclude(id__in=BlockedNews.objects.filter(user=request.user).values('news_id'))
-        ranked = ReadingDay.objects.filter(day__gte=timezone.localdate() - timedelta(days=1), news_id__in=news.values('id')).values('news_id').annotate(readers=Count('user_id', distinct=True)).order_by('-readers', '-news_id')[:10]
-        ranks = list(ranked)
-        if ranks:
-            by_id = news.in_bulk([r['news_id'] for r in ranks])
-            articles = [by_id[r['news_id']] for r in ranks if r['news_id'] in by_id]
-        else:
-            articles = list(news.order_by('-publish_time')[:10])
-        return Response({'kind': 'popular' if ranks else 'latest', 'stories': [
-            {'id': n.pk, 'title': n.title, 'source_name': n.source.name, 'publish_time': n.publish_time} for n in articles]},
-            headers={'Cache-Control': 'private, no-store'})
+    def test_expected_viewer_header_rejects_a_changed_session(self):
+        browser = APIClient()
+        browser.force_login(self.other)
+        response = browser.patch('/api/me/smart-channels/settings/', {'mode': 'auto'}, format='json', HTTP_X_WORKSPACE_VIEWER=str(self.user.pk))
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(ChannelGroupingConfig.objects.filter(user=self.other).exists())
