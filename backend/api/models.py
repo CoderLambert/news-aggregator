@@ -962,6 +962,7 @@ class CrawlRun(models.Model):
     errors = models.PositiveIntegerField(default=0)
     http_statuses = models.JSONField(default=dict, blank=True)
     stats = models.JSONField(default=dict, blank=True)
+    config_snapshot = models.JSONField(default=dict, blank=True)
     safe_error = models.CharField(max_length=500, blank=True, default='')
     log_path = models.CharField(max_length=500, blank=True, default='')
     retry_of = models.ForeignKey(

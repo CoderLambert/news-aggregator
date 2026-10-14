@@ -13,6 +13,7 @@ from django.utils.dateparse import parse_datetime
 from scrapy.crawler import CrawlerProcess
 from scrapy.settings import default_settings as scrapy_default_settings
 from scrapy.utils.project import get_project_settings
+from api.services.source_policy import install_runtime_policy
 from api.services.source_registry import CODE_SPIDERS, runtime_registry
 
 CRAWLER_DIR = os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'crawler')
@@ -104,6 +105,16 @@ class Command(BaseCommand):
         if entry is None or not entry.runnable:
             raise CommandError(f'未知、未审批或不可运行的来源：{spider_name}')
 
+        source_snapshot = None
+        if entry.maintenance == 'database':
+            try:
+                source_snapshot = json.loads(os.environ.get('NEWS_SOURCE_SNAPSHOT', 'null'))
+                install_runtime_policy(source_snapshot)
+            except (TypeError, ValueError, json.JSONDecodeError) as error:
+                raise CommandError('动态来源缺少有效的任务配置快照。') from error
+            if source_snapshot.get('source_key') != spider_name:
+                raise CommandError('动态来源任务快照与运行目标不匹配。')
+
         from scrapy.crawler import CrawlerProcess
 
         settings = get_project_settings()
@@ -125,7 +136,10 @@ class Command(BaseCommand):
             # item dumps never reach persistent worker logs.
             _configure_crawl_only_logging()
 
-        spiders = [(entry.spider, {'source_key': spider_name} if entry.maintenance == 'database' else {})]
+        spiders = [(entry.spider, {
+            'source_key': spider_name,
+            'source_snapshot': source_snapshot,
+        } if entry.maintenance == 'database' else {})]
 
         crawlers = []
         for spider, spider_kwargs in spiders:

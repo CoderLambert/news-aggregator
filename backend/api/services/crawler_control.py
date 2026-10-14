@@ -6,7 +6,7 @@ from django.db.models import Count
 from django.utils import timezone
 
 from api.models import CrawlBatch, CrawlRun, CrawlerSettings, CrawlerTarget
-from api.services.source_registry import runtime_registry
+from api.services.source_registry import runtime_registry, source_snapshot
 
 
 ACTIVE_RUN_STATUSES = ('queued', 'running', 'cancel_requested')
@@ -109,6 +109,7 @@ def create_crawl_batch(*, trigger, requested_by=None, spider_names=None, retry_o
                     target=target,
                     requested_by=requested_by,
                     retry_of=retry_of if len(queue_targets) == 1 else None,
+                    config_snapshot=source_snapshot(target.spider_name),
                 )
                 for target in queue_targets
             ])

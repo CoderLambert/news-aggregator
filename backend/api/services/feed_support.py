@@ -59,20 +59,33 @@ def _excerpt(markdown):
     return markdown[:500]
 
 
+def _entry_value(entry, configured, fallback):
+    """Read the first configured feedparser key; configuration is data only."""
+    names = str(configured or fallback).split('|')
+    for name in names:
+        value = entry.get(name.strip())
+        if value not in (None, ''):
+            return value
+    return ''
+
+
 def feed_entry_item(entry, source_key, *, feed_url, effective_url, request_started_at, version,
-                    request_chain=(), classify=None):
+                    request_chain=(), classify=None, parser_config=None):
     policy = policy_for_key(source_key)
     if policy is None:
         raise ValueError('unknown_source')
-    title = _plain(entry.get('title', '')).strip()
-    target = normalize_article_url(entry.get('link', ''))
-    identity = validate_upstream_id(entry.get('id') or entry.get('guid') or target)
-    published_value = dict.get(entry, 'published')
+    config = parser_config or {}
+    title = _plain(_entry_value(entry, config.get('title_field'), 'title')).strip()
+    target = normalize_article_url(_entry_value(entry, config.get('link_field'), 'link'))
+    identity = validate_upstream_id(str(_entry_value(
+        entry, config.get('identity_field'), 'id|guid|link',
+    ) or target))
+    published_value = _entry_value(entry, config.get('published_field'), 'published')
     if not published_value and version == 'rss10':
         published_value = dict.get(entry, 'updated')  # RSS 1.0 dc:date is mapped here by feedparser.
     published, inferred_clock = parse_feed_datetime(published_value, policy)
     modified, _ = parse_feed_datetime(dict.get(entry, 'updated'), policy)
-    summary_html = entry.get('summary', '') or ''
+    summary_html = _entry_value(entry, config.get('summary_field'), 'summary') or ''
     body = field = ''
     body_format = 'html'
     if 'description' in policy.body_fields and summary_html:
@@ -89,7 +102,7 @@ def feed_entry_item(entry, source_key, *, feed_url, effective_url, request_start
                 body, field = content.get('value', ''), 'content:encoded'
                 break
     # media_content is intentionally never considered an article body.
-    summary = _plain(summary_html)[:3000] if field != 'description' else ''
+    summary = _plain(summary_html)[:3000] if field != 'description' and policy.summary_allowed else ''
     candidate = None
     if policy.reading_policy == 'rss_summary_only':
         body = ''
@@ -99,7 +112,7 @@ def feed_entry_item(entry, source_key, *, feed_url, effective_url, request_start
             field, body_format, 'full', body, modified, None, request_started_at,
             request_chain=tuple(request_chain),
         )
-        if not summary:
+        if not summary and policy.summary_allowed:
             summary = _excerpt(html_fragment_to_markdown(body, target) if body_format == 'html' else body)
     if not title:
         raise ValueError('invalid_identity')

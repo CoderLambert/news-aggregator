@@ -1,5 +1,5 @@
 """Merged read-only registry for code and administrator-maintained sources."""
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from api.services.source_policy import POLICIES, policy_for_key
 
@@ -76,3 +76,34 @@ def source_is_supported(source_key):
     entry = runtime_source(source_key, include_unavailable=True)
     policy = policy_for_key(source_key)
     return bool(entry and entry.runnable and policy and not policy.unsupported_reason)
+
+
+def source_snapshot(source_key):
+    entry = runtime_source(source_key)
+    if entry is None:
+        raise ValueError('unknown_source')
+    if entry.maintenance == 'code':
+        return {}
+    from api.models import SourceConfig
+    config = SourceConfig.objects.select_related('category').prefetch_related('endpoints').get(pk=source_key)
+    if not config.probe_is_current or not config.approval_is_current or config.status not in {'approved', 'enabled'}:
+        raise ValueError('source_not_approved')
+    endpoint = config.endpoints.filter(enabled=True).order_by('priority', 'id').first()
+    if endpoint is None:
+        raise ValueError('missing_endpoint')
+    policy = policy_for_key(source_key)
+    return {
+        'schema_version': 1,
+        'source_key': source_key,
+        'config_version': config.config_version,
+        'policy': asdict(policy),
+        'endpoint': {
+            'kind': endpoint.kind, 'url': endpoint.url,
+            'allowed_domains': endpoint.allowed_domains, 'priority': endpoint.priority,
+            'parser_config': endpoint.parser_config,
+            'conditional_requests': endpoint.conditional_requests,
+            'request_interval_seconds': endpoint.request_interval_seconds,
+            'max_response_bytes': endpoint.max_response_bytes,
+            'max_pages': endpoint.max_pages, 'max_items': endpoint.max_items,
+        },
+    }

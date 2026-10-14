@@ -93,7 +93,8 @@ class FeedSpider(Spider):
                 item = feed_entry_item(entry, self.name, feed_url=context.feed_url,
                                        effective_url=response.url, version=parsed.version,
                                        request_started_at=response.meta['feed_request_started_at'],
-                                       request_chain=chain, classify=classify)
+                                       request_chain=chain, classify=classify,
+                                       parser_config=getattr(self, 'feed_parser_config', None))
             except (InvalidIdentity, ValueError) as error:
                 receipt.settle(index, 'policy_skip', str(error))
                 continue

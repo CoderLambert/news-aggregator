@@ -131,6 +131,8 @@ class Command(BaseCommand):
         env = os.environ.copy()
         env['NEWS_CRAWL_ONLY'] = '1'
         env['PYTHONUNBUFFERED'] = '1'
+        if run.config_snapshot:
+            env['NEWS_SOURCE_SNAPSHOT'] = json.dumps(run.config_snapshot, ensure_ascii=True)
         manage_py = Path(django_settings.BASE_DIR) / 'manage.py'
         command = [sys.executable, str(manage_py), 'crawl', run.target_id]
         cancelled = False

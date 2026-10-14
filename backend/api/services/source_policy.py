@@ -10,6 +10,7 @@ class SourcePolicy:
     domains: tuple[str, ...]
     feed_url: str = ''
     body_fields: tuple[str, ...] = ()
+    summary_allowed: bool = True
     content_kind: str = 'article'
     html_allowed: bool = True
     unsupported_reason: str = ''
@@ -71,6 +72,8 @@ for _key in ('leiphone', 'jiqizhixin', 'sanliu_kr'):
 from api.services.sector_feeds import sector_policies
 POLICIES.update({policy.key: policy for policy in sector_policies(SourcePolicy)})
 
+_RUNTIME_POLICIES = {}
+
 
 def policy_for_url(url: str):
     host = (urlsplit(url).hostname or '').lower()
@@ -82,6 +85,8 @@ def policy_for_name(name: str):
 
 
 def policy_for_key(source_key: str):
+    if source_key in _RUNTIME_POLICIES:
+        return _RUNTIME_POLICIES[source_key]
     policy = POLICIES.get(source_key)
     if policy is not None:
         return policy
@@ -100,6 +105,22 @@ def policy_for_key(source_key: str):
             return None
         raise
     return policy_from_config(config)
+
+
+def install_runtime_policy(snapshot):
+    """Install one immutable worker snapshot in its isolated crawl process."""
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get('policy'), dict):
+        raise ValueError('invalid_source_snapshot')
+    allowed = set(SourcePolicy.__dataclass_fields__)
+    values = snapshot['policy']
+    if set(values) != allowed or values.get('key') != snapshot.get('source_key'):
+        raise ValueError('invalid_source_snapshot')
+    values = dict(values)
+    values['domains'] = tuple(values['domains'])
+    values['body_fields'] = tuple(values['body_fields'])
+    policy = SourcePolicy(**values)
+    _RUNTIME_POLICIES[policy.key] = policy
+    return policy
 
 
 def policy_from_config(config):
@@ -124,6 +145,7 @@ def policy_from_config(config):
         domains=domains,
         feed_url=endpoint.url if endpoint else '',
         body_fields=body_fields,
+        summary_allowed=config.summary_allowed,
         content_kind=config.content_kind,
         html_allowed=bool(config.official_html_full_content_allowed and config.approval_is_current),
         unsupported_reason=unavailable,
@@ -139,14 +161,14 @@ def policy_from_config(config):
 
 
 def all_policies(*, include_unavailable=True):
-    policies = list(POLICIES.values())
+    policies = [*POLICIES.values(), *_RUNTIME_POLICIES.values()]
     try:
         from api.models import SourceConfig
         configs = SourceConfig.objects.select_related('category').prefetch_related('endpoints')
         if not include_unavailable:
             configs = configs.filter(status__in=['approved', 'enabled'])
         for config in configs:
-            if config.source_key not in POLICIES:
+            if config.source_key not in POLICIES and config.source_key not in _RUNTIME_POLICIES:
                 policies.append(policy_from_config(config))
     except Exception as error:
         from django.core.exceptions import AppRegistryNotReady
@@ -226,6 +248,9 @@ def html_candidate_contract_allows(candidate) -> bool:
         return False
     if candidate.body_field == 'article_html' and candidate.content_format == 'html':
         return same_article_identity(candidate.target_url, candidate.retrieved_from_url, allow_host_alias=True)
+    if candidate.body_field == 'official_html_selector' and candidate.content_format == 'html':
+        return bool(policy and policy.key not in POLICIES and policy.html_allowed and
+                    same_article_identity(candidate.target_url, candidate.retrieved_from_url, allow_host_alias=True))
     if candidate.body_field == 'reader_markdown' and candidate.content_format == 'markdown':
         return candidate.retrieved_from_url == 'https://r.jina.ai/' + candidate.target_url
     return False
