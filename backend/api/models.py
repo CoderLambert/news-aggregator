@@ -737,6 +737,8 @@ class SharedArticleTranslationTask(models.Model):
     target_language = models.CharField(max_length=16, default='zh-CN')
     translation_version = models.CharField(max_length=32)
     status = models.CharField(max_length=16, default='idle')
+    initiated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='shared_translation_attempts')
     lease_token = models.UUIDField(default=uuid.uuid4)
     expires_at = models.DateTimeField(null=True)
     started_at = models.DateTimeField(null=True)
