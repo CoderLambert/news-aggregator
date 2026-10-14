@@ -138,6 +138,9 @@ def _ingest_transaction(item, policy, url, upstream_id, discovery, kind, candida
         )
         changed = True
     elif news.source_id == source.pk:
+        # Follow corrections to the publisher's own category policy without
+        # modifying classifications supplied by secondary discovery sources.
+        updates['category_id'] = category.pk
         changed = any(getattr(news, key) != value for key, value in updates.items())
         if News.objects.filter(pk=news.pk, url=news.url, full_content_revision=news.full_content_revision).update(**updates) != 1:
             return IngestResult(news.pk, 'deferred', 'persistence_conflict')
