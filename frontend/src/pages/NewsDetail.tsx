@@ -292,6 +292,7 @@ export default function NewsDetail() {
           articleContext={{
             hasFullContent: readableBody,
             wordCount: readableBody ? news.full_content.length : (news.content ? news.content.length : 0),
+            contentRevision: news.full_content_revision ?? 0,
             title: news.title,
             isMedical: news.is_medical,
             sourceUrl: news.url,
