@@ -1,0 +1,89 @@
+name: A09 isolated integration workbench
+on:
+  push:
+    branches: [work/a09-remaining-development]
+    paths: ['.a09-workbench/run.json']
+permissions:
+  contents: read
+concurrency:
+  group: a09-isolated-workbench
+  cancel-in-progress: false
+jobs:
+  apply-reviewed-edits:
+    if: github.repository == 'CoderLambert/news-aggregator' && github.ref == 'refs/heads/work/a09-remaining-development'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      source_sha: ${{ steps.apply.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: work/a09-remaining-development
+          fetch-depth: 0
+      - id: apply
+        name: Apply exact reviewed source edits to this integration branch only
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = CoderLambert/news-aggregator
+          test "$GITHUB_REF" = refs/heads/work/a09-remaining-development
+          git fetch origin work/a09-remaining-development
+          git checkout --detach FETCH_HEAD
+          python .a09-workbench/runner.py apply
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -u
+          git add .a09-workbench/state.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'feat(a09): apply reviewed integration batch source changes'
+            git push origin HEAD:refs/heads/work/a09-remaining-development
+          fi
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "SOURCE_UNDER_TEST=$(git rev-parse HEAD)"
+  focused-backend:
+    needs: apply-reviewed-edits
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: backend:crawler
+      RUN_MAIN: 'true'
+      DJANGO_ENV: development
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.apply-reviewed-edits.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: python -m venv backend/venv
+      - run: backend/venv/bin/python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.14.1+cpu'
+      - run: backend/venv/bin/python -m pip install -r backend/requirements.txt
+      - name: Check model state without touching a real database
+        env:
+          DJANGO_DB_PATH: /tmp/a09-synthetic-migration-check.sqlite3
+        run: backend/venv/bin/python backend/manage.py makemigrations --check --dry-run
+      - run: backend/venv/bin/python .a09-workbench/runner.py backend
+  focused-frontend:
+    needs: apply-reviewed-edits
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.apply-reviewed-edits.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run typecheck && npm run lint
+        working-directory: frontend
+      - run: python .a09-workbench/runner.py frontend

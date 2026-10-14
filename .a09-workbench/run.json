@@ -1,0 +1,6 @@
+{
+  "batch": "A-channel-intake-evidence-publisher-feed-contract",
+  "batches": ["batch001.py", "batch002.py"],
+  "backend": ["backend/api/tests/test_channel_intake_review.py", "backend/api/tests/test_channel_evidence_fencing.py", "backend/api/tests/test_publisher_metadata_promotion.py", "backend/api/tests/test_feed_display_signature.py", "backend/api/tests/test_smart_channel_workspace.py", "backend/api/tests/test_channel_ai_limits.py", "backend/api/tests/test_news_ingestion.py"],
+  "frontend": ["tests/components/ChannelIntakePanel.test.jsx"]
+}
