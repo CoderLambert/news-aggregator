@@ -98,6 +98,31 @@ class SmartChannelTests(TestCase):
         self.assertEqual(self.apply(proposal).status_code, 409)
         self.assertEqual(ChannelGroupMember.objects.count(), 0)
 
+    def test_admin_partial_metadata_patch_preserves_unsubmitted_fields(self):
+        admin = User.objects.create_superuser('metadata-editor', 'metadata@example.com', 'password123')
+        self.client.force_authenticate(admin)
+        endpoint = f'/api/smart-channels/sources/{self.source.pk}/'
+        initial = self.client.patch(endpoint, {'topics': ['frontend'], 'description': 'Publisher description'}, format='json')
+        self.assertEqual(initial.status_code, 200)
+        updated = self.client.patch(endpoint, {'topics': ['ai']}, format='json')
+        self.assertEqual(updated.status_code, 200)
+        profile = SourceTopicProfile.objects.get(source=self.source)
+        self.assertEqual(profile.topics, ['ai'])
+        self.assertEqual(profile.about, 'Publisher description')
+        revised = self.client.patch(endpoint, {'description': 'Edited description'}, format='json')
+        self.assertEqual(revised.status_code, 200)
+        profile.refresh_from_db()
+        self.assertEqual(profile.topics, ['ai'])
+        self.assertEqual(profile.about, 'Edited description')
+        version = profile.revision
+        self.assertEqual(self.client.patch(endpoint, {'description': 'Edited description'}, format='json').status_code, 200)
+        profile.refresh_from_db()
+        self.assertEqual(profile.revision, version)
+        self.assertEqual(self.client.patch(endpoint, {}, format='json').status_code, 400)
+        self.assertEqual(self.client.patch(endpoint, {'topics': 'invalid'}, format='json').status_code, 400)
+        profile.refresh_from_db()
+        self.assertEqual(profile.topics, ['ai'])
+
     def test_manual_metadata_edit_invalidates_old_preview(self):
         proposal = self.propose().data['id']
         SourceTopicProfile.objects.create(source=self.source, origin='manual', topics=['technology'], about='Changed editorial scope')
