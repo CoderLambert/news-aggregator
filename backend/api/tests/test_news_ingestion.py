@@ -95,6 +95,43 @@ def test_two_sources_preserve_primary_source_and_discovery(news):
     assert news.source_items.count() == 2
 
 
+@pytest.mark.django_db
+def test_secondary_hn_url_change_never_replaces_publisher_identity(news):
+    ingest_item(entry())
+    discovered = ingest_item(entry(source_key='hackernews', source_name='Hacker News',
+                                   upstream_id='999', title='Editorial link',
+                                   discovery_url='https://news.ycombinator.com/item?id=999'))
+    assert discovered.news_id == news.pk
+    before_url = news.url
+    before_revision = news.full_content_revision
+    new_target = 'https://elsewhere.example/an-unrelated-article'
+    conflict = ingest_item(entry(source_key='hackernews', source_name='Hacker News',
+                                 upstream_id='999', url=new_target, title='Edited headline',
+                                 discovery_url='https://news.ycombinator.com/item?id=999'))
+    assert conflict.receipt_outcome == 'policy_skip'
+    assert conflict.reason == 'identity_conflict'
+    news.refresh_from_db()
+    assert news.url == before_url
+    assert news.full_content_revision == before_revision
+    assert NewsSourceItem.objects.get(source_key='hackernews', upstream_id='999').news_id == news.pk
+    assert not News.objects.filter(url=new_target).exists()
+
+
+@pytest.mark.django_db
+def test_primary_hn_external_link_change_does_not_rewrite_known_article():
+    first = ingest_item(entry(source_key='hackernews', source_name='Hacker News',
+                              upstream_id='999', title='HN shared link'))
+    assert first.receipt_outcome == 'committed'
+    result = ingest_item(entry(source_key='hackernews', source_name='Hacker News',
+                               upstream_id='999', title='Changed external link',
+                               url='https://other.example/replacement'))
+    assert result.receipt_outcome == 'policy_skip'
+    assert result.reason == 'identity_conflict'
+    article = News.objects.get(pk=first.news_id)
+    assert article.url == 'https://dev.to/team/short-article'
+    assert News.objects.count() == 1
+
+
 @pytest.mark.parametrize('changes,reason', [
     ({'target_url': 'https://dev.to/team/other'}, 'body_mismatch'),
     ({'retrieved_from_url': 'https://dev.to/api/articles/18'}, 'unsupported'),
