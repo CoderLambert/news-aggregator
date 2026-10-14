@@ -5,6 +5,10 @@ import { useLanguage } from '@/context/useLanguage'
 import { fetchSuggestedQuestions, type SuggestedQuestionsSnapshot } from '@/services/newsWorkflowApi'
 import { newsWorkflowKeys, parseNewsId, suggestedQuestionOptions } from '@/services/newsWorkflowQueries'
 
+const EMPTY_SUGGESTIONS: SuggestedQuestionsSnapshot = {
+  questions: [], contextScope: 'summary', revision: null, generated: false,
+}
+
 export function useSuggestedQuestions(newsId: string | number | null | undefined, enabled: boolean, contentRevision = 0) {
   const queryClient = useQueryClient()
   const { user, loading: authLoading } = useAuth()
@@ -18,7 +22,7 @@ export function useSuggestedQuestions(newsId: string | number | null | undefined
   const query = useQuery<SuggestedQuestionsSnapshot>({
     queryKey,
     queryFn: ({ signal }) => parsedId === null
-      ? Promise.resolve([])
+      ? Promise.resolve(EMPTY_SUGGESTIONS)
       : fetchSuggestedQuestions(parsedId, { signal }),
     enabled: (currentQuery) => enabled && !authLoading && parsedId !== null && currentQuery.state.status !== 'error',
     staleTime: Infinity,

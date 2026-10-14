@@ -322,10 +322,14 @@ def test_invalid_title_never_corrects_url_or_advances_source_identity(news):
 
 @pytest.mark.django_db
 def test_primary_publisher_recategorization_updates_list_filter_without_duplicating_article(news):
-    first = ingest_item(entry())
+    # A feed replay must reuse the original publisher publish_time. A new
+    # timestamp is a distinct source update and legitimately counts as changed.
+    original_item = entry()
+    first = ingest_item(original_item)
     original_url, revision = news.url, news.full_content_revision
-    changed = ingest_item(entry(category_name='New verified category'))
-    replay = ingest_item(entry(category_name='New verified category'))
+    reclassified = {**original_item, 'category_name': 'New verified category'}
+    changed = ingest_item(reclassified)
+    replay = ingest_item(reclassified)
     news.refresh_from_db()
     assert first.news_id == changed.news_id == replay.news_id == news.pk
     assert news.category.name == 'New verified category'

@@ -200,7 +200,7 @@ def test_public_read_rate_limits_are_at_nginx_edge_not_django():
     # These directives must be in the http context, outside the server blocks.
     assert conf.index('limit_req_zone $binary_remote_addr zone=newshub_news_read:10m rate=120r/m;') < conf.index('server {')
     assert conf.index('limit_req_zone $binary_remote_addr zone=newshub_catalog_read:10m rate=30r/m;') < conf.index('server {')
-    https = _block(conf, 'server {\\n    listen 443 ssl;\\n    server_name news.lambert.host;')
+    https = _block(conf, 'server {\n    listen 443 ssl;\n    server_name news.lambert.host;')
     assert 'limit_req_status 429;' in https
     public_list = _block(https, 'location = /api/news/ {')
     assert 'limit_req zone=newshub_news_read burst=16 nodelay;' in public_list
