@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { createJinaPolicy, updateJinaPolicy } from '@/services/articleFetchAdminApi'
+import { createJinaPolicy, fetchArticleBodyReviews, updateJinaPolicy } from '@/services/articleFetchAdminApi'
 import { articleFetchAdminKeys, articleFetchDashboardOptions } from '@/services/articleFetchAdminQueries'
 import type { ArticleFetchFailureCode, JinaFallbackPolicy } from '@/types/articleFetchAdmin'
 
@@ -67,6 +67,53 @@ function PolicyRow({ policy, busy, onToggle }: {
       </td>
     </tr>
   )
+}
+
+function BodyReviewQueue() {
+  const query = useQuery({
+    queryKey: ['articleFetchAdmin', 'bodyReviews'],
+    queryFn: ({ signal }) => fetchArticleBodyReviews(signal),
+    staleTime: 30_000, retry: false,
+  })
+  return <Card>
+    <CardHeader>
+      <CardTitle>无法比较版本的正文复核</CardTitle>
+      <CardDescription>
+        来源没有可靠版本证据且正文发生变化时，保留现有有效正文并记录待复核状态；
+        不自动覆盖全文、不向未经授权的站点请求正文。
+      </CardDescription>
+    </CardHeader>
+    <CardContent className="space-y-3">
+      <Button type="button" size="sm" variant="outline" disabled={query.isFetching}
+        onClick={() => void query.refetch()}>刷新复核记录</Button>
+      {query.isPending && <p role="status">正在读取复核记录…</p>}
+      {query.isError && <p role="alert" className="text-destructive">复核记录读取失败，请重试。</p>}
+      {query.data?.truncated && <p role="status" className="text-sm text-amber-700">
+        仅显示最近 100 项，请先处理较新的记录。
+      </p>}
+      {query.data && !query.data.results.length && <p className="text-sm text-muted-foreground">
+        暂无有待核对的正文版本记录。
+      </p>}
+      {query.data?.results.length ? <div className="workspace-scroll max-h-96 overflow-auto rounded-lg border">
+        <table className="w-full min-w-[700px] text-left text-sm">
+          <thead className="sticky top-0 bg-muted"><tr>
+            <th className="px-3 py-2">文章</th><th className="px-3 py-2">来源</th>
+            <th className="px-3 py-2">状态</th><th className="px-3 py-2">发现时间</th>
+          </tr></thead>
+          <tbody>{query.data.results.map((item) => <tr key={item.sourceKey + ':' + item.newsId} className="border-t">
+            <td className="px-3 py-2"><Link to={'/news/' + item.newsId}
+              className="text-primary underline">{item.title}</Link></td>
+            <td className="px-3 py-2">{item.sourceKey}</td>
+            <td className="px-3 py-2">{item.status === 'reviewed' ? '新版本已确认' : '待人工核对'}
+              <p className="text-xs text-muted-foreground">
+                版本 {item.baseRevision} → {item.currentRevision} · {item.queueResult || '—'}
+              </p></td>
+            <td className="px-3 py-2 text-muted-foreground">{formatDate(item.detectedAt)}</td>
+          </tr>)}</tbody>
+        </table>
+      </div> : null}
+    </CardContent>
+  </Card>
 }
 
 export default function ArticleFetchMonitorSection() {
@@ -139,6 +186,8 @@ export default function ArticleFetchMonitorSection() {
         <Metric label="失败" value={data.summary.failed} detail="Provider 链全部失败" />
         <Metric label="待补全文" value={data.summary.unresolvedArticles} detail="当前数据库未解决记录" />
       </div>
+
+      <BodyReviewQueue />
 
       <Card>
         <CardHeader>

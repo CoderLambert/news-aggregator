@@ -134,6 +134,53 @@ function normalizeError(error: unknown): never {
   throw new Error(message)
 }
 
+export interface ArticleBodyReview {
+  newsId: number
+  title: string
+  sourceKey: string
+  status: 'pending_review' | 'reviewed'
+  detectedAt: string | null
+  baseRevision: number
+  currentRevision: number
+  queueResult: string
+}
+export interface ArticleBodyReviewPage {
+  results: ArticleBodyReview[]
+  truncated: boolean
+}
+
+export function parseArticleBodyReviews(value: unknown): ArticleBodyReviewPage {
+  if (!isRecord(value) || !Array.isArray(value.results)) throw new TypeError('Invalid body review response')
+  return {
+    truncated: value.truncated === true,
+    results: value.results.flatMap((item) => {
+      if (!isRecord(item) || typeof item.news_id !== 'number' || typeof item.title !== 'string'
+        || typeof item.source_key !== 'string' || typeof item.base_revision !== 'number'
+        || typeof item.current_revision !== 'number'
+        || (item.status !== 'pending_review' && item.status !== 'reviewed')) return []
+      return [{
+        newsId: item.news_id,
+        title: item.title,
+        sourceKey: item.source_key,
+        status: item.status,
+        detectedAt: nullableText(item.detected_at),
+        baseRevision: item.base_revision,
+        currentRevision: item.current_revision,
+        queueResult: text(item.queue_result),
+      }]
+    }),
+  }
+}
+
+export async function fetchArticleBodyReviews(signal?: AbortSignal): Promise<ArticleBodyReviewPage> {
+  try {
+    const { data } = await client.get<unknown>('/body-reviews/', { signal })
+    return parseArticleBodyReviews(data)
+  } catch (error) {
+    normalizeError(error)
+  }
+}
+
 export async function fetchArticleFetchDashboard(signal?: AbortSignal): Promise<ArticleFetchDashboard> {
   try {
     const { data } = await client.get<unknown>('/dashboard/?days=7', { signal })

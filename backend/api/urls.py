@@ -29,6 +29,7 @@ urlpatterns = [
     path('admin/crawler/runs/<uuid:run_id>/cancel/', crawler_views.CrawlRunCancelView.as_view(), name='crawler-admin-run-cancel'),
     path('admin/crawler/runs/<uuid:run_id>/retry/', crawler_views.CrawlRunRetryView.as_view(), name='crawler-admin-run-retry'),
     path('admin/article-fetch/dashboard/', article_fetch_views.ArticleFetchDashboardView.as_view(), name='article-fetch-admin-dashboard'),
+    path('admin/article-fetch/body-reviews/', article_fetch_views.ArticleBodyReviewListView.as_view(), name='article-body-reviews'),
     path('admin/article-fetch/policies/', article_fetch_views.JinaFallbackPolicyListView.as_view(), name='article-fetch-admin-policy-list'),
     path('admin/article-fetch/policies/<str:domain>/', article_fetch_views.JinaFallbackPolicyDetailView.as_view(), name='article-fetch-admin-policy-detail'),
     path('admin/search-index/dashboard/', search_index_views.SearchIndexDashboardView.as_view(), name='search-index-admin-dashboard'),

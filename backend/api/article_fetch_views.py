@@ -8,7 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.crawler_views import IsActiveSuperuser, error_response
-from api.models import JinaFallbackPolicy
+from api.models import JinaFallbackPolicy, NewsSourceItem
 from api.services.article_fetch_monitor import (
     monitor_dashboard,
     policy_payload,
@@ -38,6 +38,35 @@ class ArticleFetchDashboardView(APIView):
         if days not in ALLOWED_WINDOWS:
             return error_response('invalid_window', 'days 只允许 1、7 或 30。')
         return Response(monitor_dashboard(days=days))
+
+
+class ArticleBodyReviewListView(APIView):
+    """Admin-only, DB-only review of incomparable publisher revisions."""
+    permission_classes = [IsActiveSuperuser]
+
+    def get(self, request):
+        candidates = NewsSourceItem.objects.select_related('news').filter(
+            metadata__body_review__status='pending_review'
+        ).order_by('-last_seen_at', '-pk')[:101]
+        records = []
+        for item in candidates[:100]:
+            review = (item.metadata or {}).get('body_review')
+            if not isinstance(review, dict) or type(review.get('base_revision')) is not int:
+                continue
+            news = item.news
+            # A newer accepted source revision settles the pending review.
+            settled = news.full_content_revision > review['base_revision']
+            records.append({
+                'news_id': news.pk,
+                'title': news.title[:180],
+                'source_key': item.source_key,
+                'status': 'reviewed' if settled else 'pending_review',
+                'detected_at': review.get('detected_at'),
+                'base_revision': review['base_revision'],
+                'current_revision': news.full_content_revision,
+                'queue_result': review.get('queue_result', ''),
+            })
+        return Response({'results': records, 'truncated': len(candidates) > 100})
 
 
 class JinaFallbackPolicyListView(APIView):
