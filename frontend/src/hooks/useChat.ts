@@ -87,6 +87,8 @@ function readMetaContext(value: string): ChatMessage['context_scope'] {
 }
 
 /** Consume the backend's inline metadata frame without losing split markers. */
+import { parseChatDeliveryMetadata, type ChatDeliveryMetadata } from '@/services/chatDelivery'
+
 function consumeMetaFrame(
   buffered: string,
   chunk: string,
@@ -94,6 +96,7 @@ function consumeMetaFrame(
   onText: (text: string) => void,
   onSources: (sources: NonNullable<ReturnType<typeof parseWebSources>>) => void,
   onScope?: (scope: NonNullable<ChatMessage['context_scope']>) => void,
+  onDelivery?: (value: ChatDeliveryMetadata) => void,
 ): string {
   let remaining = buffered + chunk
   while (remaining) {
@@ -122,6 +125,8 @@ function consumeMetaFrame(
     if (sources) onSources(sources)
     const scope = readMetaContext(remaining.slice(META_MARKER.length, end))
     if (scope) onScope?.(scope)
+    const delivery = parseChatDeliveryMetadata(remaining.slice(META_MARKER.length, end))
+    if (delivery) onDelivery?.(delivery)
     remaining = remaining.slice(end + META_MARKER.length)
     if (remaining.startsWith('\r\n\r\n')) remaining = remaining.slice(4)
     else if (remaining.startsWith('\n\n')) remaining = remaining.slice(2)
@@ -394,6 +399,11 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       let webSources: ReturnType<typeof parseWebSources>
       let firstChunk = true
       let frameBuffer = ''
+      const delivery: { versioned: boolean; terminal: ChatMessage['status']; saved: boolean } = { versioned: false, terminal: undefined, saved: false }
+      const applyDelivery = (value: ChatDeliveryMetadata) => {
+        if (value.contract === 2) delivery.versioned = true
+        if (value.status) { delivery.terminal = value.status; delivery.saved = value.saved === true }
+      }
       const applyScope = (scope: NonNullable<ChatMessage['context_scope']>) => {
         request.assistant = { ...request.assistant, context_scope: scope }
         updatePendingTurn(turnId, (current) => ({ ...current, assistant: { ...current.assistant, context_scope: scope } }))
@@ -416,6 +426,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
               }))
             },
             applyScope,
+            applyDelivery,
           )
           request.assistant = { ...request.assistant, content: accumulated }
           updatePendingTurn(turnId, (current) => ({
@@ -435,9 +446,14 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
             }))
           },
           applyScope,
+          applyDelivery,
         )
 
-        const completedAssistant: ChatMessage = { ...request.assistant, content: accumulated }
+        if (delivery.versioned && (delivery.terminal !== 'complete' || !delivery.saved)) {
+          request.assistant = { ...request.assistant, content: accumulated, status: delivery.terminal ?? 'interrupted' }
+          throw new Error('回答未完整生成或尚未保存，请检查记录后决定是否重新提问。')
+        }
+        const completedAssistant: ChatMessage = { ...request.assistant, content: accumulated, status: delivery.versioned ? 'complete' : 'legacy_unknown' }
         if (webSources) completedAssistant.web_sources = webSources
         queryClient.setQueryData<ChatHistory>(historyKey, (current) => ({
           messages: [...(current?.messages ?? []), userMessage, completedAssistant],

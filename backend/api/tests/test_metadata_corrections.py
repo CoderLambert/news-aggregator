@@ -82,7 +82,7 @@ def test_unknown_country_and_secondary_discovery_do_not_claim_publisher_evidence
 
 @pytest.mark.django_db
 def test_country_correction_changes_only_reviewed_field_and_can_undo():
-    source = Source.objects.create(name='BBC Health', url='https://feeds.bbci.co.uk/news/health/rss.xml', country='US')
+    source, _ = Source.objects.update_or_create(name='BBC Health', defaults={'url': 'https://feeds.bbci.co.uk/news/health/rss.xml', 'country': 'US'})
     plan = preview('bbc_health', 'source_country')
     assert plan['rows'][0]['after'] == {'country': 'GB'}
     apply(plan, operator='test'); source.refresh_from_db(); assert source.country == 'GB'

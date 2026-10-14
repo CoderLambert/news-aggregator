@@ -4,6 +4,7 @@ import type { ChatPhase } from '@/hooks/useChat'
 import type { ChatMessage, WebSource } from '@/services/newsWorkflowApi'
 import MarkdownContent from '@/components/news-detail/MarkdownContent'
 import XiaowenMascot from '@/components/mascot/XiaowenMascot'
+import { completionLabel } from '@/services/chatDelivery'
 
 const DEFAULT_SUGGESTED_QUESTIONS = [
   '帮我用一句话总结这篇文章',
@@ -88,6 +89,7 @@ export default function ChatMessageList({
       {messages.map((message, index) => (
         <div key={message.id ?? `history-${index}`} className={`mx-auto flex w-full max-w-5xl animate-message-pop-in ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
           <div className={`max-w-full break-words rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed sm:max-w-[85%] ${message.role === 'user' ? 'rounded-tr-md bg-primary text-primary-foreground shadow-sm' : 'rounded-tl-md border border-border bg-card text-card-foreground shadow-sm'}`}>
+            {message.role === 'assistant' && completionLabel(message.status) && <p className="mb-2 text-xs text-muted-foreground" role="status">{completionLabel(message.status)}</p>}
             {message.role === 'assistant' && (message.context_scope === 'summary' || message.context_scope === 'excerpt') && (
               <p className="mb-2 text-xs text-muted-foreground">{message.context_scope === 'summary' ? '当前回答基于摘要' : '当前回答基于文章节选'}</p>
             )}

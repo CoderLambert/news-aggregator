@@ -872,57 +872,25 @@ class NewsChatView(generics.GenericAPIView):
             }
         ]
         
-        for msg in chat_snapshot.messages[-20:]:
-            messages.append(msg)
+        from api.services.chat_delivery import deliver_chat, prompt_history
+        messages.extend(prompt_history(chat_snapshot.messages))
 
-        def generate():
-            full_response = []
-            try:
-                import json as _json
-                context_metadata = _json.dumps({'type': 'article_context', 'context_scope': chat_scope,
-                    'full_content_state': news.full_content_state}, ensure_ascii=False)
-                yield f"​__META__{context_metadata}__META__\n\n"
-                # Prepend web search sources as structured JSON for frontend display
-                if web_sources:
-                    import json as _json
-                    meta = _json.dumps({'type': 'web_search', 'sources': web_sources}, ensure_ascii=False)
-                    yield f"​__META__{meta}__META__\n\n"
+        def chunks_factory():
+            # The subscription adapter already requires response.completed.
+            if subscription_connection is not None:
+                return stream_chat_response(subscription_connection, messages)
+            return stream_chat(messages, max_tokens=16000, temperature=0.7,
+                               clients=provider_clients, require_completed=True)
 
-                # A signed-in user's active ChatGPT subscription takes precedence.
-                # Users without one keep the existing configured-provider path.
-                chunks = (
-                    stream_chat_response(subscription_connection, messages)
-                    if subscription_connection is not None
-                    else stream_chat(
-                        messages, max_tokens=16000, temperature=0.7,
-                        clients=provider_clients,
-                    )
-                )
-                for chunk in chunks:
-                    full_response.append(chunk)
-                    yield chunk
-            except Exception:
-                fallback = (
-                    "抱歉，ChatGPT 订阅暂时不可用，请在订阅设置中刷新状态或重新连接。"
-                    if subscription_connection is not None
-                    else "抱歉，AI 服务暂时不可用，请稍后再试。"
-                )
-                yield f"\n\n[{fallback}]"
-                if not full_response:
-                    full_response = [fallback]
-            finally:
-                try:
-                    append_assistant_message(
-                        user_id=request.user.pk,
-                        news_id=news.pk,
-                        session_id=chat_snapshot.session_id,
-                        generation=chat_snapshot.generation,
-                        content=''.join(full_response),
-                    )
-                except ChatConflict:
-                    logger.info('Discarded late chat response for cleared or deleted history')
+        def persist(content, completion_status):
+            append_assistant_message(user_id=request.user.pk, news_id=news.pk,
+                session_id=chat_snapshot.session_id, generation=chat_snapshot.generation,
+                content=content, completion_status=completion_status,
+                context_scope=chat_scope, web_sources=web_sources)
 
-        response = StreamingHttpResponse(generate(), content_type='text/event-stream')
+        response = StreamingHttpResponse(deliver_chat(chunks_factory, persist,
+            context_scope=chat_scope, content_state=news.full_content_state,
+            web_sources=web_sources), content_type='text/event-stream')
         if web_search:
             response['X-Web-Search-Used'] = 'true'
         return response
@@ -1471,7 +1439,7 @@ class NewsTTSView(generics.GenericAPIView):
         from api.services.tts_service import (
             TTSContentUnavailable, build_cache_variant, clean_for_tts,
             configure_edge_tts_endpoint,
-            get_cached_audio, pick_tts_voice, resolve_tts_content, save_to_cache,
+            get_cached_audio, pick_tts_voice, resolve_tts_content, reserve_audio_writer,
         )
 
         news = self.get_object()
@@ -1502,6 +1470,10 @@ class NewsTTSView(generics.GenericAPIView):
             voice_pref=voice_pref,
         )
 
+        from api.services.tts_cache import MAX_TEXT_CHARS, AudioBusy
+        from api.services.tts_stream import BoundedAudioStream, audio_response
+        if len(resolved.content) > MAX_TEXT_CHARS * 4:
+            return Response({'code': 'tts_text_limit', 'message': '文章过长，请选择摘要朗读。'}, status=422)
         clean_content = clean_for_tts(resolved.content)
         clean_title = clean_for_tts(resolved.title)
         speech_text = '。'.join(part for part in (clean_title, clean_content) if part)
@@ -1511,6 +1483,8 @@ class NewsTTSView(generics.GenericAPIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
+        if len(speech_text) > MAX_TEXT_CHARS:
+            return Response({'code': 'tts_text_limit', 'message': '文章过长，请选择摘要朗读。'}, status=422)
         cache_variant = build_cache_variant(resolved, scope, voice, speech_text)
         cached = get_cached_audio(pk, cache_variant)
         if cached:
@@ -1533,71 +1507,20 @@ class NewsTTSView(generics.GenericAPIView):
 
         configure_edge_tts_endpoint()
 
-        # Complete the upstream handshake and receive the first audio chunk
-        # before returning a streaming response. Otherwise a WebSocket failure
-        # occurs after response construction and Waitress can only expose an
-        # opaque 500/broken audio stream to the browser.
-        audio_chunks = []
-        loop = asyncio.new_event_loop()
-
-        async def _gen():
-            communicate = edge_tts.Communicate(speech_text, voice)
-            async for chunk in communicate.stream():
-                if chunk.get('type') == 'audio' and 'data' in chunk:
-                    yield chunk['data']
-
-        gen = _gen()
+        writer = None
+        stream = None
         try:
-            first_chunk = loop.run_until_complete(gen.__anext__())
+            writer = reserve_audio_writer(pk, cache_variant)
+            stream = BoundedAudioStream(edge_tts.Communicate(speech_text, voice), writer)
+            stream.prepare()
+            return audio_response(stream)
+        except AudioBusy:
+            return Response({'code': 'tts_busy', 'message': '语音生成繁忙，请稍后重试。'},
+                            status=429, headers={'Retry-After': '15'})
         except Exception as exc:
-            try:
-                loop.run_until_complete(gen.aclose())
-            finally:
-                loop.close()
-            logging.getLogger(__name__).warning(
-                'TTS upstream unavailable endpoint=%s error=%s',
-                getattr(settings, 'EDGE_TTS_ENDPOINT', 'default'),
-                type(exc).__name__,
-            )
-            return Response(
-                {'code': 'tts_unavailable', 'message': '语音服务暂不可用，请稍后重试。'},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-
-        def generate_and_stream():
-            completed = False
-            try:
-                audio_chunks.append(first_chunk)
-                yield first_chunk
-                while True:
-                    try:
-                        chunk = loop.run_until_complete(gen.__anext__())
-                        audio_chunks.append(chunk)
-                        yield chunk
-                    except StopAsyncIteration:
-                        completed = True
-                        break
-            except Exception as exc:
-                logging.getLogger(__name__).warning(
-                    'TTS upstream stream interrupted endpoint=%s error=%s',
-                    getattr(settings, 'EDGE_TTS_ENDPOINT', 'default'),
-                    type(exc).__name__,
-                )
-            finally:
-                try:
-                    loop.run_until_complete(gen.aclose())
-                finally:
-                    loop.close()
-                # Save to cache after generation completes
-                if completed and audio_chunks:
-                    try:
-                        save_to_cache(pk, cache_variant, b''.join(audio_chunks))
-                    except Exception:
-                        pass  # Cache write failure is non-critical
-
-        response = StreamingHttpResponse(
-            generate_and_stream(),
-            content_type='audio/mpeg',
-        )
-        response['Cache-Control'] = 'private, max-age=86400'
-        return response
+            if stream is not None:
+                stream.close()
+            elif writer is not None:
+                writer.close()
+            logging.getLogger(__name__).warning('TTS startup failed (%s)', type(exc).__name__)
+            return Response({'code': 'tts_unavailable', 'message': '语音服务暂不可用，请稍后重试。'}, status=503)

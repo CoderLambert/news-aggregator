@@ -116,15 +116,19 @@ def append_user_message(*, user_id: int, news_id: int, content: str) -> ChatSnap
 
 
 def append_assistant_message(*, user_id: int, news_id: int, session_id: int,
-                             generation: int, content: str) -> ChatSnapshot:
-    return _append_message(
-        user_id=user_id,
-        news_id=news_id,
-        message={'role': 'assistant', 'content': content},
-        session_id=session_id,
-        generation=generation,
-        create=False,
-    )
+                             generation: int, content: str, completion_status=None,
+                             context_scope=None, web_sources=None) -> ChatSnapshot:
+    message = {'role': 'assistant', 'content': content}
+    if completion_status is not None:
+        if completion_status not in {'complete', 'interrupted', 'failed'}:
+            raise ValueError('invalid_chat_completion_status')
+        message['status'] = completion_status
+    if context_scope in {'full', 'summary', 'excerpt'}:
+        message['context_scope'] = context_scope
+    if web_sources:
+        message['web_sources'] = web_sources[:10]
+    return _append_message(user_id=user_id, news_id=news_id, message=message,
+        session_id=session_id, generation=generation, create=False)
 
 
 def clear_chat_history(*, user_id: int, news_id: int) -> bool:

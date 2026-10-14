@@ -52,6 +52,7 @@ export interface ChatMessage {
   web_search?: boolean
   web_sources?: WebSource[]
   context_scope?: 'full' | 'summary' | 'excerpt'
+  status?: 'complete' | 'interrupted' | 'failed' | 'legacy_unknown'
 }
 
 export interface ChatHistory {
@@ -191,6 +192,8 @@ function parseChatMessage(value: unknown): ChatMessage | null {
     return null
   }
   const message: ChatMessage = { role: value.role, content: value.content }
+  if (value.status === 'complete' || value.status === 'interrupted' || value.status === 'failed' || value.status === 'legacy_unknown') message.status = value.status
+  if (value.context_scope === 'full' || value.context_scope === 'summary' || value.context_scope === 'excerpt') message.context_scope = value.context_scope
   if (typeof value.id === 'string' || typeof value.id === 'number') message.id = value.id
   if (typeof value.web_search === 'boolean') message.web_search = value.web_search
   const sources = parseWebSources(value.web_sources)

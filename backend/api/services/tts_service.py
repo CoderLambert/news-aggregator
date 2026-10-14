@@ -112,20 +112,21 @@ def get_cached_audio(news_id: int, variant: str):
     """Return cached MP3 file path if it exists, else None."""
     key = _cache_key(news_id, variant)
     path = os.path.join(_cache_directory(), f'{key}.mp3')
-    if os.path.isfile(path) and os.path.getsize(path) > 100:
+    if not os.path.islink(path) and os.path.isfile(path) and os.path.getsize(path) > 100:
         return path
     return None
 
 
+def reserve_audio_writer(news_id: int, variant: str, *, reserve_slot=True):
+    from api.services.tts_cache import AtomicAudioWriter
+    return AtomicAudioWriter(_cache_directory(), _cache_key(news_id, variant), reserve_slot=reserve_slot)
+
+
 def save_to_cache(news_id: int, variant: str, audio_bytes: bytes) -> str:
-    """Save audio bytes to cache and return the file path."""
-    cache_directory = _cache_directory()
-    os.makedirs(cache_directory, exist_ok=True)
-    key = _cache_key(news_id, variant)
-    path = os.path.join(cache_directory, f'{key}.mp3')
-    with open(path, 'wb') as f:
-        f.write(audio_bytes)
-    return path
+    """Atomically publish complete audio while preserving any old good file."""
+    with reserve_audio_writer(news_id, variant, reserve_slot=False) as writer:
+        writer.append(audio_bytes)
+        return writer.publish()
 
 
 def build_cache_variant(resolved: ResolvedTTSContent, scope: str, voice: str, speech_text: str) -> str:

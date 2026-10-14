@@ -223,6 +223,8 @@ def stream_chat(
     """
     clients = get_clients() if clients is None else clients
     if not clients:
+        if require_completed:
+            raise ValueError("model_unavailable")
         yield "抱歉，当前 AI 服务暂时不可用，请稍后再试。"
         return
 
@@ -277,6 +279,8 @@ def stream_chat(
                 if stream is not None and hasattr(stream, 'close'):
                     stream.close()
 
+    if require_completed:
+        raise ValueError("all_chat_providers_failed")
     logger.error("All LLM providers failed. Last error: %s", last_err)
     # Upstream exception text can contain request metadata. Record only its
     # sanitized type above and never stream raw details to the browser.
