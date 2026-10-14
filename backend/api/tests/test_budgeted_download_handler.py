@@ -185,14 +185,16 @@ print(json.dumps({'hard_deadline':True,'socket_closed':True,'permit_released':Tr
     assert '"socket_closed": true' in result.stdout
 
 
-def test_error_headers_and_oversize_stream_stop_without_losing_status():
+def test_retry_after_header_does_not_override_oversize_guard():
     from scrapy.http import Headers
     from scrapy.exceptions import StopDownload
     request = Request('https://dev.to/api/articles', meta={'download_maxsize': 10})
     with pytest.raises(StopDownload) as stopped:
         handler._received_headers(Headers({'Retry-After': '120'}), 999, request)
     assert stopped.value.fail is False
-    assert request.meta['_budget_body_stopped'] == 'retry_after'
+    # Retry-After alone is not an error; the header says 999 bytes but the
+    # per-request maximum is 10, so the correct early stop is oversize.
+    assert request.meta['_budget_body_stopped'] == 'oversize'
     request.meta['_budget_body_stopped'] = ''
     handler._received_bytes(b'12345', request)
     with pytest.raises(StopDownload) as stopped:
