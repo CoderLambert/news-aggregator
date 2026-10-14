@@ -27,6 +27,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { useArticleSearch } from '@/hooks/useArticleSearch'
 import { useArticleToc } from '@/hooks/useArticleToc'
 import type { NewsDetail as NewsDetailRecord } from '@/types/news'
+import { formatUnverifiedNewsTime } from '@/utils/newsTime'
 import type { SpeechLanguage, SpeechScope } from '@/constants/tts'
 import { useCapabilities } from '@/context/CapabilitiesContext'
 
@@ -373,7 +374,9 @@ function ArticleHeader({ news, displayTitle, displaySubtitle, isEnglishSource }:
         {author && author !== sourceName && <span className="flex items-center gap-1"><span className="text-foreground">{author}</span></span>}
         {sourceName && <span>{sourceName}</span>}
         <span className="flex items-center gap-1">
-          <time>{new Date(news.publish_time).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}{news.publish_time_inferred && '（时间推断）'}</time>
+          <time dateTime={news.publish_time}>{news.publish_time_inferred
+            ? formatUnverifiedNewsTime(news.publish_time, 'full')
+            : new Date(news.publish_time).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}</time>
         </span>
       </div>
     </header>

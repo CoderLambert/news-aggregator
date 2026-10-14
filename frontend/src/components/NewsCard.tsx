@@ -9,6 +9,7 @@ import TranslationStatus from '@/components/news-detail/TranslationStatus'
 import { useBlockNews } from '@/hooks/useNewsMutations'
 import { newsDetailOptions } from '@/services/newsQueries'
 import type { DisplayMode, NewsSummary } from '@/types/news'
+import { formatUnverifiedNewsTime } from '@/utils/newsTime'
 import { hasReadableFullContent, hasPendingFullContentTask } from '@/types/news'
 import { useCapability } from '@/context/CapabilitiesContext'
 
@@ -104,7 +105,7 @@ export default function NewsCard({ news, onBlockStart, onBlocked }: NewsCardProp
           <div className="news-card-meta mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
             <span className="max-w-48 truncate font-semibold text-primary">{news.source_name}</span>
             <span aria-hidden="true">·</span>
-            <span>{news.publish_time_inferred ? `${new Date(news.publish_time).toLocaleDateString()}（时间推断）` : formatRelativeTime(news.publish_time, t)}</span>
+            <span>{news.publish_time_inferred ? formatUnverifiedNewsTime(news.publish_time, 'compact') : formatRelativeTime(news.publish_time, t)}</span>
           </div>
           <div className="mb-2 flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
