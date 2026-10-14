@@ -168,7 +168,8 @@ def test_slow_questions_do_not_overwrite_a_new_content_revision(news, client):
                     return _FakeCompletion('["old 1", "old 2", "old 3"]')
     with patch('api.services.provider_credentials.personal_clients_for_user', return_value=[(SlowClient(), 'test-model')]):
         response = client.post(f'/api/news/{news.pk}/suggested-questions/')
-    assert response.status_code == 200
+    assert response.status_code == 409
+    assert response.json()['error_code'] == 'suggestion_content_changed'
     news.refresh_from_db()
     assert news.suggested_questions == ['New question']
 
