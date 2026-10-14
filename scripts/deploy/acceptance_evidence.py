@@ -96,7 +96,10 @@ def validate_ledger(value, *, evidence_root, expected_sha):
                 raise EvidenceError('invalid evidence file for ' + name)
             if not isinstance(checksum, str) or not HEX_HASH.fullmatch(checksum):
                 raise EvidenceError('missing evidence digest for ' + name)
-            file = (root / filename).resolve(strict=True)
+            raw_file = root / filename
+            if raw_file.is_symlink():
+                raise EvidenceError('evidence symlink is not allowed for ' + name)
+            file = raw_file.resolve(strict=True)
             if not file.is_relative_to(root) or digest_file(file) != checksum:
                 raise EvidenceError('evidence checksum mismatch for ' + name)
         else:
