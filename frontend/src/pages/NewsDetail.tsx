@@ -133,6 +133,18 @@ export default function NewsDetail() {
   }, [cancelTranslation])
 
   const [searchOpen, setSearchOpen] = useState(false)
+  const searchTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const returnSearchFocusRef = useRef(false)
+  const closeSearch = useCallback(() => {
+    returnSearchFocusRef.current = true
+    setSearchOpen(false)
+    setSearchQuery('')
+  }, [])
+  useEffect(() => {
+    if (searchOpen || !returnSearchFocusRef.current) return
+    returnSearchFocusRef.current = false
+    searchTriggerRef.current?.focus()
+  }, [searchOpen])
   const [searchQuery, setSearchQuery] = useState('')
   const articleRef = useRef<HTMLElement | null>(null)
   const { matchCount, currentIndex, goNext, goPrev } = useArticleSearch(articleRef, searchQuery)
@@ -200,13 +212,13 @@ export default function NewsDetail() {
           currentIndex={currentIndex}
           onGoNext={goNext}
           onGoPrev={goPrev}
-          onClose={() => { setSearchOpen(false); setSearchQuery('') }}
+          onClose={closeSearch}
         />
       )}
 
       <div className={`mx-auto w-full max-w-5xl overflow-x-hidden px-4 pb-28 pt-4 sm:px-6 sm:pb-10 sm:pt-6 ${searchOpen ? 'pt-16' : ''}`}>
         <nav className="mb-8 flex items-center justify-between">
-          <Link to={returnTo} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground">
+          <Link to={returnTo} state={{ restoreArticleId: news.id }} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground">
             <ArrowLeft className="size-3.5" />{t.backToList}
           </Link>
           {!searchOpen && (
@@ -234,7 +246,7 @@ export default function NewsDetail() {
                   onTranslateAndPlay={handleTranslateAndPlay}
                 />
               )}
-              <button type="button" onClick={() => setSearchOpen(true)} aria-label="搜索文章内容" className="-mr-2 flex size-10 items-center justify-center rounded-xl transition-colors hover:bg-secondary active:bg-secondary">
+              <button ref={searchTriggerRef} type="button" onClick={() => setSearchOpen(true)} aria-label="搜索文章内容" className="-mr-2 flex size-10 items-center justify-center rounded-xl transition-colors hover:bg-secondary active:bg-secondary">
                 <Search className="size-[18px] text-muted-foreground" />
               </button>
             </div>
