@@ -6,7 +6,7 @@ import { AlertCircle, Clock, ExternalLink, FileText, Globe, Loader2, Search, Sli
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '@/context/AuthContext'
 import { useLanguage } from '@/context/useLanguage'
-import { newsListOptions, newsListPlaceholderData } from '@/services/newsQueries'
+import { newsListOptions } from '@/services/newsQueries'
 import { Pagination } from '@/components/Pagination'
 import type { NewsListParams, NewsSummary, SearchMode, SearchOrderBy, SourceType } from '@/types/news'
 import { hasReadableFullContent } from '@/types/news'
@@ -165,7 +165,9 @@ export default function LocalSearch() {
   const newsQuery = useQuery({
     ...newsListOptions(params, lang, viewerId),
     enabled: !invalidRegion && !authLoading && Boolean(submittedQuery),
-    placeholderData: newsListPlaceholderData(viewerId, lang, 'all', undefined, region),
+    // Different query/filter/page keys must never display previous results as if
+    // they satisfy the new search. Cached responses for an exact key still work.
+    placeholderData: undefined,
   })
 
   const data = invalidRegion ? undefined : newsQuery.data
