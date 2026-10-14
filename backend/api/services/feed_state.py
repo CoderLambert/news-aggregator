@@ -30,8 +30,10 @@ class FeedRequestState:
 def policy_signature(source_key, *, window_days=30, admitted=True):
     policy = POLICIES[source_key]
     contract = asdict(policy)
-    contract.pop('poll_seconds')
-    contract.pop('request_interval')
+    # Descriptions are presentation-only. Keep names (currently used to
+    # resolve Source identity) and every admission/body/date field semantic.
+    for field in ('poll_seconds', 'request_interval', 'description'):
+        contract.pop(field)
     contract.update(
         validator=VALIDATOR_VERSION, window_days=window_days, admitted=bool(admitted),
         structured=bool(getattr(settings, 'STRUCTURED_BODY_INGEST_ENABLED', False) and

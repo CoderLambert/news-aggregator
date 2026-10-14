@@ -15,6 +15,7 @@ from api.services.article_fetcher.types import FullContentCandidate
 from api.services.article_fetcher.validators import validate_candidate
 from api.services.full_content_status import commit_candidate, enqueue_fetch
 from api.services.source_policy import POLICIES, policy_for_name
+from api.services.article_metadata import can_promote_publisher
 
 
 @dataclass(frozen=True)
@@ -130,6 +131,8 @@ def _ingest_transaction(item, policy, url, upstream_id, discovery, kind, candida
             updates[field] = item[field]
     if published is not None and not inferred:
         updates['publish_time'] = published
+    promotion = news is not None and can_promote_publisher(news, policy, url, kind)
+    promoted_from = news.source_id if promotion else None
     changed = False
     if news is None:
         news = News.objects.create(
@@ -137,7 +140,12 @@ def _ingest_transaction(item, policy, url, upstream_id, discovery, kind, candida
             url=url, source=source, category=category,
         )
         changed = True
-    elif news.source_id == source.pk:
+    elif news.source_id == source.pk or promotion:
+        if promotion:
+            updates.update(source_id=source.pk, title_zh='', content_zh='',
+                author=item.get('author') or '', cover_image=item.get('cover_image') or '',
+                suggested_questions=[], suggested_questions_generated_at=None,
+                translation_status='pending', translation_error='', translation_retry_count=0)
         # Follow corrections to the publisher's own category policy without
         # modifying classifications supplied by secondary discovery sources.
         updates['category_id'] = category.pk
@@ -146,6 +154,8 @@ def _ingest_transaction(item, policy, url, upstream_id, discovery, kind, candida
             return IngestResult(news.pk, 'deferred', 'persistence_conflict')
         news.refresh_from_db()
     metadata = dict(mapping.metadata or {}) if mapping else {}
+    if promotion:
+        metadata['publisher_promotion'] = {'from_source_id': promoted_from, 'from_source_key': 'hackernews', 'at': seen.isoformat()}
     metadata.update({'publish_time_inferred': bool(inferred), 'category_name': item['category_name']})
     if published is not None and not inferred:
         metadata['source_publish_time'] = published.isoformat()

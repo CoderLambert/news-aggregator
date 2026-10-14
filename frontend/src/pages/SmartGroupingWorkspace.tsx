@@ -5,6 +5,7 @@ import { Check, FolderOpen, Sparkles } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import AuthModal from '@/components/AuthModal'
 import WorkspaceModal from '@/components/workspace/WorkspaceModal'
+import ChannelIntakePanel from '@/components/workspace/ChannelIntakePanel'
 import { useChannelConfig } from '@/services/channelQueries'
 import { newsKeys } from '@/services/newsQueries'
 import { workspaceCatalogOptions, workspaceConfigOptions, workspaceKeys, workspaceRequest, workspaceError,
@@ -19,6 +20,7 @@ const modeOptions: Array<{ value: GroupingMode; title: string; description: stri
 const errorMessages: Record<string, string> = {
   authorization_changed: '模型凭据或授权已变化，请检查设置后重新生成。',
   configuration_changed: '订阅或分组已变化，请重新生成预览。', metadata_changed: '频道资料已更新，请重新生成。',
+  evidence_changed: '分类依据的文章标题或频道资料已更新，结果未应用；请重新预览。',
   model_unavailable: '没有可用的模型连接。', rate_limited: '模型限流，后台将遵守等待时间进行有限重试。',
   model_request_failed: '模型请求失败，请检查模型连接；可使用规则推荐继续整理。',
   incomplete_output: '模型返回不完整，未应用任何分组。', worker_interrupted: '任务中断并已达到重试上限。',
@@ -162,7 +164,7 @@ function SiteClassifierPanel({ viewer }: { viewer: number }) {
     {save.isError && <p role="alert" className="workspace-error">{workspaceError(save.error)}</p>}
     {save.isSuccess && <p role="status" className="workspace-notice">站点分类设置已保存。</p>}
     {data.data && <><h3>最近分类任务</h3><ul className="workspace-job-list">{data.data.jobs.map(job => <li key={job.id}><span>{job.source_ids.length} 个来源 · {new Date(job.created_at).toLocaleString()}</span><span>{proposalStatus[job.status] ?? job.status}</span><small>{job.error_code && (errorMessages[job.error_code] ?? job.error_code)}</small></li>)}</ul>
-      <h3>待接入申请</h3><p className="workspace-caption">这些地址未启用抓取；需另行核验官方 API/RSS 并登记采集策略。</p><ul className="workspace-intake-list">{data.data.intake_requests.map(item => <li key={item.id}><code>{item.url}</code><span>{item.status === 'pending' ? '待审核接入' : item.status}</span></li>)}</ul></>}
+      <ChannelIntakePanel viewer={viewer} admin /></>}
   </details>
 }
 function SiteClassifierForm({ config, busy, onSave }: { config: SiteClassifier; busy: boolean; onSave: (body: unknown) => void }) {

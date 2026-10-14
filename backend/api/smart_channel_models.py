@@ -95,6 +95,10 @@ class ChannelIntakeRequest(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     url = models.URLField(max_length=1024)
     status = models.CharField(max_length=16, default='pending')
+    review_reason = models.CharField(max_length=500, blank=True, default='')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='reviewed_channel_intakes')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

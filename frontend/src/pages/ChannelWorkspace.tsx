@@ -9,6 +9,7 @@ import { useChannelConfig, useChannelMutation } from '@/services/channelQueries'
 import { workspaceCatalogOptions, workspaceKeys, type ChannelProfile } from '@/services/workspaceApi'
 import WorkspaceModal from '@/components/workspace/WorkspaceModal'
 import AddChannelDialog from '@/components/workspace/AddChannelDialog'
+import ChannelIntakePanel from '@/components/workspace/ChannelIntakePanel'
 import { Availability, ChannelMark, TopicTags } from '@/components/workspace/ChannelIdentity'
 
 export default function ChannelWorkspace() {
@@ -115,6 +116,7 @@ function Directory() {
       })}
       {!catalog.isPending && !catalog.isError && !filtered.length && <div className="workspace-empty"><h2>没有匹配的频道</h2><p>调整筛选条件，或从全部频道中选择新的来源。</p><button type="button" className="workspace-button secondary" onClick={() => setParams({})}>查看全部频道</button></div>}
     </div>
+    {user && config.enabled && <ChannelIntakePanel key={user.id} viewer={user.id} />}
     {login && <AuthModal onClose={() => setLogin(false)} />}
     {adding && <AddChannelDialog topics={topics} onClose={() => setAdding(false)} onDone={() => { setAdding(false); setNotice('订阅成功，已按你的整理设置处理。') }} />}
     {editedSource && editedSubscription && <WorkspaceModal title={editedSource.name + ' · 订阅设置'} busy={mutation.isPending} onClose={() => setEditing(null)}>

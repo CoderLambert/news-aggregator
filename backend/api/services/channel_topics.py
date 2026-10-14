@@ -89,9 +89,12 @@ def profile_data(source, stored=None):
 
 def evidence_for(source):
     profile = profile_data(source)
-    titles = list(channel_articles(source).order_by('-publish_time').values_list('title', flat=True)[:12])
+    rows = list(channel_articles(source).order_by('-publish_time', '-id').values('id', 'title', 'publish_time')[:12])
     return {'source_id': source.id, 'name': source.name[:100], 'about': profile['description'][:600],
-        'titles': [str(t).replace('\x00', '')[:180] for t in titles], 'evidence_hash': profile['evidence_hash']}
+        'titles': [str(row['title']).replace('\x00', '')[:180] for row in rows],
+        'version': 'channel-evidence-2',
+        'titles_hash': digest([[row['id'], row['publish_time'], row['title']] for row in rows]),
+        'evidence_hash': profile['evidence_hash']}
 
 
 def refresh_profiles(limit=200):

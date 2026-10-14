@@ -19,6 +19,7 @@ from api.channel_views import PersonalChannelsView, ChannelSubscriptionsView, Ch
 from api.smart_channel_models import (SourceTopicProfile, ChannelGroupingConfig, ChannelGroupingProposal,
     ChannelClassifierSettings, ReadingDay, ChannelIntakeRequest)
 from api.services.channel_topics import TOPICS, PRESETS, TOPIC_MAP, channel_articles, profile_data, base_profile
+from api.services.channel_intake import normalize_intake_url, intake_data, submit_intake
 from api.services.channel_grouping import (lock_user, config_data, credential_fingerprint, make_proposal, apply_proposal,
     undo_proposal, proposal_data, validated_mode, validated_topics, GroupingConflict, mark_manual, process_subscription)
 
@@ -98,26 +99,7 @@ class SourceProfileView(APIView):
 
 
 def normalize_url(value):
-    if not isinstance(value, str) or len(value) > 1024:
-        raise ValidationError('请输入有效的网站或 RSS 地址。')
-    value = value.strip()
-    try:
-        URLValidator(schemes=['http', 'https'])(value)
-        parsed = urlsplit(value)
-        host = (parsed.hostname or '').lower().rstrip('.')
-        if parsed.username or parsed.password or parsed.fragment or parsed.port not in (None, 80, 443):
-            raise ValueError()
-        if host in {'localhost', 'metadata.google.internal'} or host.endswith(('.localhost', '.local', '.internal')):
-            raise ValueError()
-        try:
-            ipaddress.ip_address(host)
-        except ValueError:
-            pass
-        else:
-            raise ValueError()
-    except (ValueError, DjangoValidationError):
-        raise ValidationError('只接受不含凭据的公开 HTTP(S) 域名地址。') from None
-    return value, host.removeprefix('www.'), parsed.path.rstrip('/'), urlencode(sorted(parse_qsl(parsed.query)))
+    return normalize_intake_url(value)
 
 
 class ResolveChannelView(PrivateWorkspaceView):
@@ -146,17 +128,12 @@ class ResolveChannelView(PrivateWorkspaceView):
 
 class IntakeView(PrivateWorkspaceView):
     def get(self, request):
-        return Response(list(ChannelIntakeRequest.objects.filter(user=request.user).order_by('-created_at').values('id', 'url', 'status', 'created_at')[:30]))
-    @transaction.atomic
+        return Response([intake_data(item) for item in ChannelIntakeRequest.objects.filter(
+            user=request.user).order_by('-created_at', '-pk')[:30]])
+
     def post(self, request):
-        lock_user(request.user)
-        url, _, _, _ = normalize_url(request.data.get('url'))
-        if any(k.lower() in {'token', 'key', 'api_key', 'access_token', 'password'} for k, _ in parse_qsl(urlsplit(url).query)):
-            raise ValidationError('接入申请不能包含私有令牌。')
-        if ChannelIntakeRequest.objects.filter(user=request.user, created_at__date=timezone.localdate()).count() >= 10:
-            raise Throttled(3600, '已达到今日接入申请上限。')
-        item, created = ChannelIntakeRequest.objects.get_or_create(user=request.user, url=url)
-        return Response({'id': item.pk, 'url': item.url, 'status': item.status}, status=201 if created else 200)
+        item, created = submit_intake(request.user, request.data.get('url'))
+        return Response(intake_data(item), status=201 if created else 200)
 
 
 class GroupingConfigView(PrivateWorkspaceView):
@@ -232,7 +209,7 @@ class SiteClassifierView(PrivateWorkspaceView):
         return Response({'enabled': bool(cfg and cfg.enabled), 'is_owner': bool(cfg and cfg.owner_id == request.user.pk),
             'daily_limit': cfg.daily_limit if cfg else 10,
             'jobs': [proposal_data(j) for j in jobs],
-            'intake_requests': list(ChannelIntakeRequest.objects.order_by('-created_at').values('id', 'url', 'status', 'created_at')[:30])})
+            'intake_requests': [intake_data(item) for item in ChannelIntakeRequest.objects.order_by('-created_at', '-pk')[:30]]})
     @transaction.atomic
     def patch(self, request):
         lock_user(request.user)

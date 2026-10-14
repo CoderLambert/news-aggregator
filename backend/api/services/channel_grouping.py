@@ -141,6 +141,10 @@ def apply_proposal(user, proposal_id, payload):
         raise GroupingConflict('预览尚未就绪、已取消或已过期，请重新整理。')
     if proposal.input_snapshot != snapshot(user, proposal.source_ids):
         raise GroupingConflict()
+    if proposal.engine == 'ai':
+        from api.services.channel_evidence import evidence_is_current
+        if not evidence_is_current(proposal.evidence):
+            raise GroupingConflict('文章标题或频道资料已更新，请重新生成预览。')
     entries = payload.get('groups')
     if not isinstance(entries, list) or not 1 <= len(entries) <= len(TOPIC_MAP):
         raise ValidationError('请选择要应用的分组。')

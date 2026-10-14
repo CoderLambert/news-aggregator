@@ -13,7 +13,7 @@ export default function AddChannelDialog({ topics, onClose, onDone }: { topics: 
   const subscribe = useChannelMutation()
   const resolve = useMutation({ mutationFn: (value: string) => workspaceRequest<{ matches: ChannelProfile[]; supported: boolean; message: string; url: string }>('/smart-channels/resolve/', { method: 'POST', body: { url: value } }),
     onSuccess: data => setSelectedId(data.matches.length === 1 ? data.matches[0].id : null) })
-  const intake = useMutation({ mutationFn: (value: string) => workspaceRequest('/me/smart-channels/intake/', { method: 'POST', body: { url: value } }) })
+  const intake = useMutation({ mutationFn: (value: string) => workspaceRequest('/me/smart-channels/intake/', { method: 'POST', body: { url: value } }), onSuccess: () => { void client.invalidateQueries({ queryKey: workspaceKeys.all }) } })
   const busy = resolve.isPending || subscribe.isPending || intake.isPending
   const selected = resolve.data?.matches.find(source => source.id === selectedId)
   return <WorkspaceModal title="订阅频道" busy={busy} onClose={onClose}>

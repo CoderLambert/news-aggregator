@@ -1,7 +1,12 @@
 from django.urls import path
 from . import smart_channel_views as views
 
+from .channel_intake_views import IntakeHistoryView, AdminIntakeHistoryView, IntakeReviewView
+
 urlpatterns = [
+    path('me/smart-channels/intake/history/', IntakeHistoryView.as_view(), name='smart-channel-intake-history'),
+    path('admin/smart-channels/intake/', AdminIntakeHistoryView.as_view(), name='smart-channel-intake-admin-list'),
+    path('admin/smart-channels/intake/<int:pk>/', IntakeReviewView.as_view(), name='smart-channel-intake-review'),
     path('me/channel-subscriptions/', views.SmartSubscriptionsView.as_view(), name='channel-subscriptions'),
     path('me/channel-groups/<int:pk>/', views.SmartGroupDetailView.as_view(), name='channel-group-detail'),
     path('smart-channels/catalog/', views.CatalogView.as_view(), name='smart-channel-catalog'),
