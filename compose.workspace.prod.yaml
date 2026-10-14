@@ -4,7 +4,7 @@
 # HTTP listener, and unrelated application secrets. Never use `extends: app`.
 services:
   channel-worker:
-    image: "${NEWSHUB_IMAGE:?Use the pinned deployed image}"
+    image: "${NEWSHUB_IMAGE:?Set NEWSHUB_IMAGE to an immutable SHA tag or digest using the explicit Compose --env-file}"
     command: ["python", "/app/backend/manage.py", "channel_worker"]
     # The existing BYOK gateway is explicitly loopback-only, so this single
     # worker currently requires host networking to reach it. Revisit the
