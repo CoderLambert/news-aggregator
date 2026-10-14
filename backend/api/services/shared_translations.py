@@ -24,10 +24,20 @@ TARGET_LANGUAGE = 'zh-CN'
 TRANSLATION_VERSION = 'article-v1'
 LEASE_TTL = timedelta(seconds=90)
 MAX_RUN_TIME = timedelta(minutes=30)
+# Limits include all users, processes, and active leased tasks in the same
+# production SQLite database. A deliberate capacity rejection never starts LLM IO.
+MAX_CONCURRENT_TRANSLATIONS = 2
+MAX_CONCURRENT_PER_USER = 1
 
 
 class SharedTranslationError(Exception):
     pass
+
+
+class SharedTranslationBusy(SharedTranslationError):
+    """Capacity denied before any provider call; a caller may try later."""
+
+    retry_after_seconds = 30
 
 
 def source_hash(content):
@@ -73,8 +83,13 @@ class TranslationLease:
         self.current().update(status=status, updated_at=timezone.now())
 
 
-def claim_task(news):
-    """An atomic CAS, rather than a process lock, elects exactly one generator."""
+def claim_task(news, *, user_id=None):
+    """Select one generator and enforce SQLite-wide active-work quotas.
+
+    An initial write reserves SQLite's database writer lock before counting
+    active leases, so simultaneous requests for distinct articles cannot both
+    observe an empty global budget. No network/model calls occur under this lock.
+    """
     if not has_full_content(news):
         raise SharedTranslationError('full_content_not_ready')
     digest = source_hash(news.full_content)
@@ -83,10 +98,22 @@ def claim_task(news):
     task, _ = SharedArticleTranslationTask.objects.get_or_create(**cache_key(news.pk, digest))
     now = timezone.now()
     token = uuid.uuid4()
-    won = SharedArticleTranslationTask.objects.filter(pk=task.pk).filter(
-        ~Q(status='running') | Q(expires_at__lte=now) | Q(started_at__lte=now - MAX_RUN_TIME),
-    ).update(status='running', lease_token=token, started_at=now,
-             expires_at=now + LEASE_TTL, updated_at=now)
+    with transaction.atomic():
+        # Unlike select_for_update(), an UPDATE obtains an actual SQLite writer
+        # reservation; use a short transaction across admission and CAS.
+        SharedArticleTranslationTask.objects.filter(pk=task.pk).update(updated_at=now)
+        active = SharedArticleTranslationTask.objects.filter(
+            status='running', expires_at__gt=now, started_at__gt=now - MAX_RUN_TIME)
+        if active.filter(pk=task.pk).exists():
+            return None
+        if active.count() >= MAX_CONCURRENT_TRANSLATIONS:
+            raise SharedTranslationBusy('同时处理的文章翻译过多，请稍后重试。')
+        if user_id is not None and active.filter(initiated_by_id=user_id).count() >= MAX_CONCURRENT_PER_USER:
+            raise SharedTranslationBusy('您当前已有文章翻译正在处理，请稍后重试。')
+        won = SharedArticleTranslationTask.objects.filter(pk=task.pk).filter(
+            ~Q(status='running') | Q(expires_at__lte=now) | Q(started_at__lte=now - MAX_RUN_TIME),
+        ).update(status='running', lease_token=token, initiated_by_id=user_id,
+                 started_at=now, expires_at=now + LEASE_TTL, updated_at=now)
     if not won:
         return None
     lease = TranslationLease(task.pk, token)
