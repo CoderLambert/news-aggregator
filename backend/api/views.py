@@ -1053,7 +1053,13 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
 
             from api.services.full_content_status import save_suggested_questions
             # Existing CAS fences slow, superseded suggestions against the body revision.
-            save_suggested_questions(news, questions, expected_revision=expected_content_revision)
+            if not save_suggested_questions(news, questions, expected_revision=expected_content_revision):
+                # Do not return a superseded generated answer as if it matched
+                # the latest published article. The frontend can fetch again
+                # after the news detail revision catches up.
+                return Response({'error': '文章内容已更新，请重新生成推荐问题。',
+                                 'error_code': 'suggestion_content_changed'},
+                                status=409)
             return Response({'questions': questions, 'context_scope': suggestion_scope,
                              'full_content_revision': expected_content_revision, 'generated': True})
         except RateLimitExceeded as exc:
