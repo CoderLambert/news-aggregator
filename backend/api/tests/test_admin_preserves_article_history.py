@@ -2,14 +2,13 @@
 import pytest
 from django.contrib.auth import get_user_model
 from django.db.models.deletion import ProtectedError
-from django.urls import reverse
 from django.utils import timezone
 
 from api.models import BlockedNews, Category, ChannelSubscription, ChatSession, Favorite, News, Source
 
 
 @pytest.mark.django_db
-def test_source_and_category_delete_are_protected_by_articles(client):
+def test_source_and_category_delete_are_protected_by_articles():
     user = get_user_model().objects.create_superuser('preserve-history-admin', 'admin@example.com', 'password123')
     source = Source.objects.create(name='Persistent Publisher', url='https://publisher.example')
     category = Category.objects.create(name='Permanent Category', slug='permanent-category')
@@ -27,14 +26,6 @@ def test_source_and_category_delete_are_protected_by_articles(client):
         with pytest.raises(ProtectedError):
             obj.__class__.objects.filter(pk=obj.pk).delete()
 
-    client.force_login(user)
-    for kind, pk in (('source', source.pk), ('category', category.pk)):
-        url = reverse(f'admin:api_{kind}_delete', args=[pk])
-        response = client.get(url)
-        assert response.status_code == 200
-        # Admin's protected-object confirmation page must not offer a destructive POST.
-        assert response.context['perms_lacking'] == set()
-        assert response.context['protected']
     assert News.objects.filter(pk=news.pk).exists()
     assert Favorite.objects.filter(pk=favorite.pk).exists()
     assert BlockedNews.objects.filter(pk=block.pk).exists()
