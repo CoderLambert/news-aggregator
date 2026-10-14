@@ -273,3 +273,15 @@ def test_success_resets_failure_streak_without_clearing_another_responses_cooldo
 
 def test_dns_equivalent_idna_and_hostname_case_share_scope():
     assert budget.scope_intervals('https://bücher.example/article') == budget.scope_intervals('https://XN--BCHER-KVA.EXAMPLE./article')
+
+
+@pytest.mark.django_db
+def test_200_retry_after_is_advisory_while_429_still_cools_down():
+    permit = budget.claim_budget({'host:feed-header.example': 0})
+    budget.confirm_permit(permit)
+    assert budget.record_response(permit, 200, {'Retry-After': '3600'}, host='feed-header.example') is None
+    assert RequestBudget.objects.get(pk='host:feed-header.example').cooldown_until is None
+    deadline = budget.record_response(permit, 429, {'Retry-After': '30'}, host='feed-header.example')
+    assert deadline is not None
+    assert RequestBudget.objects.get(pk='host:feed-header.example').cooldown_until is not None
+    budget.release_budget(permit)

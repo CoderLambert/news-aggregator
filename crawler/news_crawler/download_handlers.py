@@ -45,9 +45,10 @@ def _received_headers(headers, body_length, request, **kwargs):
     if headers.get('Content-Range') is not None:
         request.meta['_budget_body_stopped'] = 'body_partial'
         raise StopDownload(fail=False)
-    if headers.get('Retry-After') is not None:
-        request.meta['_budget_body_stopped'] = 'retry_after'
-        raise StopDownload(fail=False)
+    # A Retry-After header by itself is not a failure: HTTP 200 feeds can
+    # carry it as advisory metadata. At this signal boundary the status code
+    # is not yet available, so let record_response classify 429 / 503 after
+    # receiving the response instead of truncating a successful feed body.
     if isinstance(body_length, int) and body_length > request.meta.get('download_maxsize', 8 * 1024 * 1024):
         request.meta['_budget_body_stopped'] = 'oversize'
         raise StopDownload(fail=False)
