@@ -1,7 +1,10 @@
 """Sanitized ingestion results, separate from process exits and HTTP responses."""
 RESULT_PREFIX = 'NEWSHUB_CRAWL_RESULT '
 SUCCESS_OUTCOMES = frozenset({'updated', 'unchanged', 'valid_empty'})
-OUTCOMES = SUCCESS_OUTCOMES | {'deferred', 'rate_limited', 'blocked', 'parse_failed', 'partial', 'unsupported',
+# A scheduler pass that has not reached poll time is healthy, but it did not
+# fetch or checkpoint the feed. Keep it distinct from actual ingest success.
+NON_FAILURE_OUTCOMES = SUCCESS_OUTCOMES | {'not_due'}
+OUTCOMES = NON_FAILURE_OUTCOMES | {'deferred', 'rate_limited', 'blocked', 'parse_failed', 'partial', 'unsupported',
                                'network_error', 'http_error', 'filtered'}
 COUNT_KEYS = ('entries_seen', 'entries_committed', 'entries_changed', 'body_candidates_committed',
               'parse_failures', 'persistence_failures', 'physical_requests', 'budget_deferred', 'rate_limited_responses')
@@ -74,7 +77,9 @@ def crawl_result(stats):
                    'valid_empty' if result['responses'] else 'deferred')
     if result['filtered_requests'] and not result['physical_requests']:
         outcome = 'filtered'
-    result['failure_outcome'] = outcome if outcome not in SUCCESS_OUTCOMES else ''
+    if outcome == 'not_due' and result['finish_reason'] != 'finished':
+        outcome = 'partial'
+    result['failure_outcome'] = outcome if outcome not in NON_FAILURE_OUTCOMES else ''
     if result['entries_committed'] and outcome not in SUCCESS_OUTCOMES | {'rate_limited', 'deferred'}:
         outcome = 'partial'
     result['outcome'] = outcome
@@ -84,7 +89,8 @@ def crawl_result(stats):
 def describe_crawl_result(result):
     reason = result.get('failure_outcome') or result.get('outcome')
     messages = {
-        'deferred': '任务未到执行时间或正在等待请求预算。',
+        'not_due': '尚未到计划轮询时间，未请求源站；不是采集失败。',
+        'deferred': '正在等待源站或请求预算，暂未完成本轮采集。',
         'rate_limited': '源站限流，任务等待冷却后重试。',
         'blocked': '源站返回 401/403，当前渠道拒绝访问。',
         'parse_failed': '部分页面未能解析出有效文章。',

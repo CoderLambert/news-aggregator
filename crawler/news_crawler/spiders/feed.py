@@ -53,7 +53,9 @@ class FeedSpider(Spider):
             context = await _database(prepare_feed_request, self.name, url, window_days=self.window_days)
             if context.next_poll_at and context.next_poll_at > timezone.now():
                 paused = context.next_poll_at.year == datetime.max.year
-                self.feed_outcomes.append('blocked' if paused else 'deferred')
+                # A source that is simply not due is healthy: it must not
+                # masquerade as a retryable ingest or network failure.
+                self.feed_outcomes.append('blocked' if paused else 'not_due')
                 if paused:
                     self.crawler.stats.set_value('source_paused', True)
                 self.crawler.stats.set_value('next_attempt_at', context.next_poll_at.isoformat())
@@ -155,12 +157,12 @@ class FeedSpider(Spider):
         totals = await _database(self.feed_receipts.finish, reason)
         totals['parse_failures'] += self.feed_errors
         all_outcomes = [totals['outcome'], *self.feed_outcomes]
-        for priority in ('partial', 'parse_failed', 'blocked', 'http_error', 'network_error', 'rate_limited', 'deferred', 'updated', 'unchanged', 'valid_empty'):
+        for priority in ('partial', 'parse_failed', 'blocked', 'http_error', 'network_error', 'rate_limited', 'deferred', 'updated', 'unchanged', 'valid_empty', 'not_due'):
             if priority in all_outcomes and (self.feed_receipts.receipts or priority != 'deferred' or not self.feed_outcomes):
                 totals['outcome'] = priority
                 break
         if not self.feed_receipts.receipts and self.feed_outcomes:
-            totals['outcome'] = next((o for o in ('parse_failed', 'blocked', 'http_error', 'network_error', 'rate_limited', 'deferred', 'unchanged') if o in self.feed_outcomes), 'deferred')
+            totals['outcome'] = next((o for o in ('parse_failed', 'blocked', 'http_error', 'network_error', 'rate_limited', 'deferred', 'unchanged', 'not_due') if o in self.feed_outcomes), 'deferred')
         if any(o in {'partial', 'parse_failed', 'blocked', 'http_error', 'network_error', 'rate_limited', 'deferred'} for o in self.feed_outcomes):
             totals['checkpoint_committed'] = False
         elif not self.feed_receipts.receipts and self.feed_outcomes and all(o == 'unchanged' for o in self.feed_outcomes):
