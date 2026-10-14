@@ -203,13 +203,23 @@ def enqueue_site_sources(limit=10):
 def process_incremental_subscriptions(limit=100):
     count = 0
     candidates = ChannelSubscription.objects.filter(user__channel_grouping_config__mode__in=['suggest', 'auto'],
-        created_at__gte=F('user__channel_grouping_config__active_since')).select_related('user', 'subscriptiongroupingstate')
+        created_at__gte=F('user__channel_grouping_config__active_since')).select_related(
+            'user', 'source', 'user__channel_grouping_config', 'subscriptiongroupingstate')
     for subscription in candidates.order_by('created_at').iterator(chunk_size=100):
         if count >= limit:
             break
         state = getattr(subscription, 'subscriptiongroupingstate', None)
         if state and state.status in {'applied', 'suggested'}:
             continue
+        if state and state.status == 'pending':
+            # A pending subscription with unchanged evidence has already been
+            # considered. Do not repeatedly spend the batch limit on it and
+            # starve more recently subscribed channels.
+            cfg = subscription.user.channel_grouping_config
+            profile = profile_data(subscription.source)
+            signature = digest([profile['evidence_hash'], profile['topics'], profile['origin'], cfg.revision])
+            if state.profile_hash == signature:
+                continue
         process_subscription(subscription.pk)
         count += 1
     return count
