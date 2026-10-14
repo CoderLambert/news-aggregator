@@ -298,9 +298,12 @@ describe('NewsList URL and server state', () => {
   it('changes pages through URL navigation', async () => {
     renderList('/')
     expect(await screen.findByRole('heading', { name: 'Climate technology update' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '2' }))
+    // Pagination uses a localized accessible name rather than the visible digit alone.
+    const pager = screen.getByRole('navigation', { name: '分页导航' })
+    fireEvent.click(within(pager).getByRole('button', { name: '第 2 页' }))
     await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('page=2'))
     await waitFor(() => expect(fetchNews).toHaveBeenLastCalledWith({ scope: 'all', page: 2, page_size: 20 }, expect.any(AbortSignal)))
+    expect(within(screen.getByRole('navigation', { name: '分页导航' })).getByRole('button', { name: '当前页，第 2 页' })).toHaveAttribute('aria-current', 'page')
   })
 
   it('labels summary content and prefetches article data on intent', async () => {
