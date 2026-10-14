@@ -710,7 +710,8 @@ class NewsChatView(generics.GenericAPIView):
         """Return chat history."""
         news = self.get_object()
         session = ChatSession.objects.filter(user=request.user, news=news).first()
-        return Response({'messages': session.messages if session else []})
+        from api.services.chat_history import normalized_chat_history
+        return Response({'messages': normalized_chat_history(session.messages) if session else []})
 
     def delete(self, request, pk):
         """Clear chat history."""
@@ -872,11 +873,17 @@ class NewsChatView(generics.GenericAPIView):
             }
         ]
         
+        # Only explicitly complete assistant turns can be reused as factual context.
+        # Old unversioned and partial turns remain in history for the reader.
         for msg in chat_snapshot.messages[-20:]:
-            messages.append(msg)
+            if msg.get('role') == 'user' and isinstance(msg.get('content'), str):
+                messages.append({'role': 'user', 'content': msg['content']})
+            elif msg.get('role') == 'assistant' and msg.get('status') == 'complete' and isinstance(msg.get('content'), str):
+                messages.append({'role': 'assistant', 'content': msg['content']})
 
         def generate():
             full_response = []
+            turn_status = 'interrupted'
             try:
                 import json as _json
                 context_metadata = _json.dumps({'type': 'article_context', 'context_scope': chat_scope,
@@ -901,7 +908,10 @@ class NewsChatView(generics.GenericAPIView):
                 for chunk in chunks:
                     full_response.append(chunk)
                     yield chunk
+                turn_status = 'complete'
+                yield f"\u200b__META__{_json.dumps({'type': 'chat_turn', 'status': turn_status})}__META__\n\n"
             except Exception:
+                turn_status = 'failed'
                 fallback = (
                     "抱歉，ChatGPT 订阅暂时不可用，请在订阅设置中刷新状态或重新连接。"
                     if subscription_connection is not None
@@ -910,6 +920,7 @@ class NewsChatView(generics.GenericAPIView):
                 yield f"\n\n[{fallback}]"
                 if not full_response:
                     full_response = [fallback]
+                yield f"\u200b__META__{_json.dumps({'type': 'chat_turn', 'status': turn_status})}__META__\n\n"
             finally:
                 try:
                     append_assistant_message(
@@ -918,6 +929,7 @@ class NewsChatView(generics.GenericAPIView):
                         session_id=chat_snapshot.session_id,
                         generation=chat_snapshot.generation,
                         content=''.join(full_response),
+                        status=turn_status,
                     )
                 except ChatConflict:
                     logger.info('Discarded late chat response for cleared or deleted history')

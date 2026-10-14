@@ -67,7 +67,7 @@ def test_unknown_country_is_not_inferred_from_market_and_existing_values_are_pre
     assert catalog_defaults(POLICIES['bbc_health'])['country'] == 'UK'
     assert catalog_defaults(POLICIES['pv_magazine_china'])['country'] == ''
     assert catalog_defaults(POLICIES['pv_magazine_global'])['country'] == ''
-    source, _ = Source.objects.get_or_create(name='BBC Health', defaults={'url': 'https://www.bbc.com', 'country': 'CA'})
+    source, _ = Source.objects.update_or_create(name='BBC Health', defaults={'url': 'https://www.bbc.com', 'country': 'CA'})
     sync_channel_catalog()
     source.refresh_from_db()
     assert source.country == 'CA'

@@ -45,6 +45,17 @@ describe('ChatMessageList', () => {
     expect(container.querySelectorAll('.thinking-dot')).toHaveLength(3)
   })
 
+  it('distinguishes interrupted, failed and unversioned answers', () => {
+    render(<ChatMessageList phase="idle" messages={[
+      { role: 'assistant', content: 'first partial', status: 'interrupted' },
+      { role: 'assistant', content: 'failed answer', status: 'failed' },
+      { role: 'assistant', content: 'legacy answer', status: 'legacy_unknown' },
+    ]} />)
+    expect(screen.getByText(/回答已中断/)).toBeInTheDocument()
+    expect(screen.getByText(/回答失败/)).toBeInTheDocument()
+    expect(screen.getByText(/完成状态无法确认/)).toBeInTheDocument()
+  })
+
   it('renders assistant content via markdown renderer when content present', () => {
     const messages = [
       { role: 'user', content: 'hi' },

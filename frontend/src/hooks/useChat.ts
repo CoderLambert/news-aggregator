@@ -75,6 +75,17 @@ function readMetaSources(value: string): ReturnType<typeof parseWebSources> {
   return undefined
 }
 
+function readMetaTurnStatus(value: string): 'complete' | 'failed' | undefined {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (typeof parsed === 'object' && parsed !== null && 'type' in parsed && 'status' in parsed &&
+      parsed.type === 'chat_turn' && (parsed.status === 'complete' || parsed.status === 'failed')) {
+      return parsed.status
+    }
+  } catch { return undefined }
+  return undefined
+}
+
 function readMetaContext(value: string): ChatMessage['context_scope'] {
   try {
     const parsed: unknown = JSON.parse(value)
@@ -94,6 +105,7 @@ function consumeMetaFrame(
   onText: (text: string) => void,
   onSources: (sources: NonNullable<ReturnType<typeof parseWebSources>>) => void,
   onScope?: (scope: NonNullable<ChatMessage['context_scope']>) => void,
+  onTurnStatus?: (status: 'complete' | 'failed') => void,
 ): string {
   let remaining = buffered + chunk
   while (remaining) {
@@ -122,6 +134,8 @@ function consumeMetaFrame(
     if (sources) onSources(sources)
     const scope = readMetaContext(remaining.slice(META_MARKER.length, end))
     if (scope) onScope?.(scope)
+    const turnStatus = readMetaTurnStatus(remaining.slice(META_MARKER.length, end))
+    if (turnStatus) onTurnStatus?.(turnStatus)
     remaining = remaining.slice(end + META_MARKER.length)
     if (remaining.startsWith('\r\n\r\n')) remaining = remaining.slice(4)
     else if (remaining.startsWith('\n\n')) remaining = remaining.slice(2)
@@ -394,6 +408,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       let webSources: ReturnType<typeof parseWebSources>
       let firstChunk = true
       let frameBuffer = ''
+      let terminalStatus: 'complete' | 'failed' | undefined
       const applyScope = (scope: NonNullable<ChatMessage['context_scope']>) => {
         request.assistant = { ...request.assistant, context_scope: scope }
         updatePendingTurn(turnId, (current) => ({ ...current, assistant: { ...current.assistant, context_scope: scope } }))
@@ -416,6 +431,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
               }))
             },
             applyScope,
+            (status) => { terminalStatus = status },
           )
           request.assistant = { ...request.assistant, content: accumulated }
           updatePendingTurn(turnId, (current) => ({
@@ -435,9 +451,21 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
             }))
           },
           applyScope,
+          (status) => { terminalStatus = status },
         )
 
-        const completedAssistant: ChatMessage = { ...request.assistant, content: accumulated }
+        // A clean TCP EOF without the server's terminal receipt is not success.
+        if (terminalStatus !== 'complete') {
+          request.assistant = { ...request.assistant, content: accumulated,
+            status: terminalStatus === 'failed' ? 'failed' : 'interrupted' }
+          const uncertainTurn = snapshotActiveRequest(request)
+          setPendingTurn(uncertainTurn)
+          updatePhase('error')
+          await reconcileInterruptedTurn(uncertainTurn)
+          return false
+        }
+
+        const completedAssistant: ChatMessage = { ...request.assistant, content: accumulated, status: 'complete' }
         if (webSources) completedAssistant.web_sources = webSources
         queryClient.setQueryData<ChatHistory>(historyKey, (current) => ({
           messages: [...(current?.messages ?? []), userMessage, completedAssistant],
