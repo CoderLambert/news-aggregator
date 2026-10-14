@@ -93,6 +93,16 @@ def _ingest_transaction(item, policy, url, upstream_id, discovery, kind, candida
     mapping = NewsSourceItem.objects.filter(source_key=policy.key, upstream_id=upstream_id).first()
     news = mapping.news if mapping else News.objects.filter(url=url).first()
     if news and news.url != url:
+        # A shared article's URL belongs to its primary publisher, not every
+        # discovery feed which points at it. Never quarantine good publisher
+        # text because a secondary/HN editorial link changes its target.
+        owns_primary = news.source_id == source.pk
+        publisher_identity = policy.key != 'hackernews' or (
+            urlsplit(news.url).hostname in policy.domains and
+            urlsplit(url).hostname in policy.domains
+        )
+        if not owns_primary or not publisher_identity:
+            return IngestResult(None, 'policy_skip', 'identity_conflict')
         if News.objects.filter(url=url).exclude(pk=news.pk).exists():
             return IngestResult(news.pk, 'policy_skip', 'identity_conflict')
         from api.services.full_content_status import correct_article_identity
