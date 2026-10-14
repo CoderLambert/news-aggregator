@@ -317,7 +317,7 @@ def test_shared_translation_quota_bounds_users_and_active_work(article):
     another_category = article.category
 
     def make_article(suffix):
-        return News.objects.create(title=f'Capacity ${suffix}',
+        return News.objects.create(title=f'Capacity {suffix}',
             url=f'https://example.com/capacity-{suffix}',
             publish_time=timezone.now(), source=another_source, category=another_category,
             full_content='Full article body for a safe fake provider.', full_content_state='legacy')
