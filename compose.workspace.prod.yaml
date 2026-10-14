@@ -1,15 +1,44 @@
-# Optional production worker overlay. Always supply the SAME project name,
-# immutable NEWSHUB_IMAGE and explicit --env-file as the existing deployment.
+# Optional production channel classifier worker. Combine with compose.prod.yaml
+# under the SAME project name, immutable NEWSHUB_IMAGE and explicit --env-file.
+# Explicit service avoids inheriting web container's volumes, broad env_file,
+# HTTP listener, and unrelated application secrets. Never use `extends: app`.
 services:
   channel-worker:
-    extends:
-      file: compose.prod.yaml
-      service: app
+    image: "${NEWSHUB_IMAGE:?Use the pinned deployed image}"
     command: ["python", "/app/backend/manage.py", "channel_worker"]
+    # The existing BYOK gateway is explicitly loopback-only, so this single
+    # worker currently requires host networking to reach it. Revisit the
+    # gateway transport contract before switching to a bridge network.
+    network_mode: host
     environment:
+      DJANGO_ENV: production
+      DJANGO_DEBUG: "0"
+      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY using explicit --env-file}"
+      WAITRESS_TRUSTED_PROXY: "${WAITRESS_TRUSTED_PROXY:?Set verified proxy IP}"
+      DJANGO_DB_PATH: /var/lib/newshub/db/db.sqlite3
       RUN_MAIN: "true"
       NEWS_CRAWL_ONLY: "1"
+      PUBLIC_SITE_MODE: "${PUBLIC_SITE_MODE:-read_only}"
+      PUBLIC_AI_ENABLED: "${PUBLIC_AI_ENABLED:-0}"
+      PROVIDER_CREDENTIAL_ENCRYPTION_KEY: "${PROVIDER_CREDENTIAL_ENCRYPTION_KEY:-}"
+      AI_BYOK_GATEWAY_URL: "${AI_BYOK_GATEWAY_URL:-}"
+      AI_BYOK_GATEWAY_PROJECT_KEY_FILE: /run/secrets/ai_byok_gateway_project_key
       CHANNEL_WORKER_HEARTBEAT: /var/lib/newshub/logs/channel-worker-heartbeat.json
+    # Deliberately do NOT mount Chroma, model caches, TTS, runtime ID, or web
+    # app credential env_file; only the user BYOK gateway project secret is
+    # mounted, as it is required by approved classification jobs.
+    secrets:
+      - ai_byok_gateway_project_key
+    volumes:
+      - db-data:/var/lib/newshub/db
+      - logs-data:/var/lib/newshub/logs
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    mem_limit: 512m
     depends_on:
       migrate:
         condition: service_completed_successfully
