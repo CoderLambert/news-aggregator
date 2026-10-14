@@ -27,6 +27,12 @@ class IngestResult:
 
 
 def ingest_item(item, *, source_defaults=None) -> IngestResult:
+    # Reject invalid titles before *any* transaction, identity correction or
+    # candidate validation. A malformed feed item must not quarantine an
+    # already-read article or advance its source mapping.
+    title = item.get('title')
+    if not isinstance(title, str) or not title.strip() or len(title) > 500:
+        return IngestResult(None, 'policy_skip', 'invalid_identity')
     policy = POLICIES.get(item['source_key']) if item.get('source_key') else policy_for_name(item.get('source_name', ''))
     if not policy or policy.unsupported_reason:
         return IngestResult(None, 'policy_skip', policy.unsupported_reason if policy else 'unsupported')
@@ -117,8 +123,6 @@ def _ingest_transaction(item, policy, url, upstream_id, discovery, kind, candida
         inferred = True
     summary = item.get('summary', item.get('content', '')) or ''
     title = item['title']
-    if not title or len(title) > 500:
-        return IngestResult(None, 'policy_skip', 'invalid_identity')
     updates = {'title': title, 'content': summary, 'content_kind': kind,
                'title_hash': int(hashlib.md5(title.lower().strip().encode()).hexdigest()[:8], 16)}
     for field in ('author', 'cover_image'):
