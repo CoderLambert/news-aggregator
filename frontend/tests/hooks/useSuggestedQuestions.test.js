@@ -98,6 +98,9 @@ describe('useSuggestedQuestions', () => {
 
 
 describe('suggestion metadata and revision cache boundaries', () => {
+  // The previous describe block owns its own beforeEach; its mock calls
+  // must not leak into this independent revision-cache regression.
+  beforeEach(() => vi.resetAllMocks())
   it('re-queries after article content revision changes', async () => {
     api.fetchSuggestedQuestions.mockResolvedValueOnce(snapshot(['old']))
       .mockResolvedValueOnce(snapshot(['revised'], 'excerpt'))
