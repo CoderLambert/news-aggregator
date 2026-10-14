@@ -67,7 +67,14 @@ class FetchError(Exception):
     def __init__(self, message: str, failures: list[FetchResult] | None = None):
         super().__init__(message)
         self.failures = failures or []
-        control = next((f for f in self.failures if f.error_code in {'rate_limited', 'budget_deferred', 'auth_required', 'access_blocked', 'not_found'}), self.failures[-1] if self.failures else None)
+        terminal = {'rate_limited', 'budget_deferred', 'auth_required', 'access_blocked', 'not_found'}
+        control = next((f for f in self.failures if f.error_code in terminal), None)
+        if control is None:
+            # Disabled/not-applicable readers do not erase an earlier real
+            # extractor's content-quality or network failure.
+            control = next((f for f in reversed(self.failures) if f.error_code != 'not_applicable'), None)
+        if control is None:
+            control = self.failures[-1] if self.failures else None
         self.error_code = control.error_code if control else ''
         self.http_status = control.http_status if control else None
         self.retry_after_at = control.retry_after_at if control else None

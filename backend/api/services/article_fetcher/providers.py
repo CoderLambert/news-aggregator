@@ -415,7 +415,7 @@ class JinaProvider:
             return FetchResult(ok=False, provider=self.name, url=url, error='unsupported', error_code='unsupported', retryable=False)
         from api.services.article_fetch_monitor import observe_jina_candidate
         if not observe_jina_candidate(normalize_domain(url)):
-            return FetchResult(ok=False, provider=self.name, url=url, error='jina_policy_disabled', error_code='unsupported')
+            return FetchResult(ok=False, provider=self.name, url=url, error='jina_policy_disabled', error_code='not_applicable')
         url = normalize_article_url(url)
         jina_url = f'https://r.jina.ai/{url}'
         started = timezone.now()
@@ -527,7 +527,7 @@ class TrustedNewsJinaProvider(JinaProvider):
             return FetchResult(ok=False, provider=self.name, url=url, error='unsupported_trusted_news_url')
         from api.services.article_fetch_monitor import observe_jina_candidate
         if not observe_jina_candidate(domain):
-            return FetchResult(ok=False, provider=self.name, url=url, error='jina_policy_disabled', error_code='unsupported')
+            return FetchResult(ok=False, provider=self.name, url=url, error='jina_policy_disabled', error_code='not_applicable')
         # Never disclose tracking/query values or fragments to the reader
         # service.  The explicitly enabled public article path is sufficient.
         from api.services.article_identity import normalize_article_url

@@ -10,9 +10,10 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 from api.models import Source, Category, News, ChannelGroup, ChannelSubscription, ChannelGroupMember, BlockedNews
-from api.smart_channel_models import SourceTopicProfile, ChannelGroupingConfig, ChannelGroupingOverride, ChannelGroupingProposal, ReadingDay
+from api.smart_channel_models import SourceTopicProfile, ChannelGroupingConfig, ChannelGroupingOverride, ChannelGroupingProposal, ReadingDay, SubscriptionGroupingState
 from api.services.channel_grouping import make_proposal, process_subscription, mark_manual
-from api.services.channel_ai import parse_classification, claim_next, execute_job
+from api.services.channel_topics import profile_data, digest
+from api.services.channel_ai import parse_classification, claim_next, execute_job, process_incremental_subscriptions
 
 
 @override_settings(PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
@@ -98,6 +99,31 @@ class SmartChannelTests(TestCase):
         self.assertEqual(self.apply(proposal).status_code, 409)
         self.assertEqual(ChannelGroupMember.objects.count(), 0)
 
+    def test_admin_partial_metadata_patch_preserves_unsubmitted_fields(self):
+        admin = User.objects.create_superuser('metadata-editor', 'metadata@example.com', 'password123')
+        self.client.force_authenticate(admin)
+        endpoint = f'/api/smart-channels/sources/{self.source.pk}/'
+        initial = self.client.patch(endpoint, {'topics': ['frontend'], 'description': 'Publisher description'}, format='json')
+        self.assertEqual(initial.status_code, 200)
+        updated = self.client.patch(endpoint, {'topics': ['ai']}, format='json')
+        self.assertEqual(updated.status_code, 200)
+        profile = SourceTopicProfile.objects.get(source=self.source)
+        self.assertEqual(profile.topics, ['ai'])
+        self.assertEqual(profile.about, 'Publisher description')
+        revised = self.client.patch(endpoint, {'description': 'Edited description'}, format='json')
+        self.assertEqual(revised.status_code, 200)
+        profile.refresh_from_db()
+        self.assertEqual(profile.topics, ['ai'])
+        self.assertEqual(profile.about, 'Edited description')
+        version = profile.revision
+        self.assertEqual(self.client.patch(endpoint, {'description': 'Edited description'}, format='json').status_code, 200)
+        profile.refresh_from_db()
+        self.assertEqual(profile.revision, version)
+        self.assertEqual(self.client.patch(endpoint, {}, format='json').status_code, 400)
+        self.assertEqual(self.client.patch(endpoint, {'topics': 'invalid'}, format='json').status_code, 400)
+        profile.refresh_from_db()
+        self.assertEqual(profile.topics, ['ai'])
+
     def test_manual_metadata_edit_invalidates_old_preview(self):
         proposal = self.propose().data['id']
         SourceTopicProfile.objects.create(source=self.source, origin='manual', topics=['technology'], about='Changed editorial scope')
@@ -159,6 +185,30 @@ class SmartChannelTests(TestCase):
         process_subscription(new.pk)
         self.assertFalse(group.subscriptions.exists())
         self.assertEqual(ChannelGroupingProposal.objects.filter(user=self.user).count(), 1)
+
+    def test_unchanged_pending_does_not_starve_new_subscription(self):
+        # Existing fixture subscription predates the grouping-mode activation.
+        ChannelSubscription.objects.filter(pk=self.subscription.pk).update(
+            created_at=timezone.now() - timedelta(days=3))
+        group = ChannelGroup.objects.create(user=self.user, name='My Frontend')
+        cfg = ChannelGroupingConfig.objects.create(user=self.user, mode='suggest', bindings={'frontend': group.pk},
+            active_since=timezone.now() - timedelta(days=1))
+        sources = Source.objects.bulk_create([
+            Source(name=f'No-topic {i}', url=f'https://example.org/{i}') for i in range(105)
+        ])
+        subscriptions = ChannelSubscription.objects.bulk_create([
+            ChannelSubscription(user=self.user, source=s) for s in sources
+        ])
+        states = []
+        for subscription in subscriptions:
+            profile = profile_data(subscription.source)
+            signature = digest([profile['evidence_hash'], profile['topics'], profile['origin'], cfg.revision])
+            states.append(SubscriptionGroupingState(subscription=subscription, status='pending', profile_hash=signature))
+        SubscriptionGroupingState.objects.bulk_create(states)
+        newcomer = ChannelSubscription.objects.create(user=self.user, source=self.source2)
+        with patch('api.services.channel_ai.process_subscription') as processor:
+            self.assertEqual(process_incremental_subscriptions(limit=1), 1)
+        processor.assert_called_once_with(newcomer.pk)
 
     def test_ai_requires_explicit_consent_and_credentials(self):
         self.assertEqual(self.propose(engine='ai').status_code, 400)
