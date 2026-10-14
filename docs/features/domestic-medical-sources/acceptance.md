@@ -5,7 +5,7 @@
 | 验证 | 结果 |
 | --- | --- |
 | Django system check 与迁移差异检查 | PASS |
-| 全量后端 `api/tests` | PASS：1083 项，115.23 秒；1 个第三方 ChromaDB Python 3.16 弃用预警 |
+| 全量后端 `api/tests` | PASS：1084 项，114.91 秒；1 个第三方 ChromaDB Python 3.16 弃用预警 |
 | 动态 JSON Spider 独立 SQLite 全链路 | PASS：`Source → NewsSourceItem → News`，条件状态成功提交 |
 | 前端 TypeScript | PASS |
 | 前端 ESLint | PASS |
