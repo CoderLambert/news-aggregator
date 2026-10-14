@@ -69,6 +69,7 @@ def test_chat_prompt_and_stream_scope_agree_and_never_fetch_article(make_news,cl
     captured={}
     def stream(messages,**kwargs):
         captured['prompt']=messages[0]['content']
+        captured['evidence']=messages[1]['content']
         yield 'Answer.'
     with patch('api.views.get_clients',return_value=[(object(),'model')]),patch('api.views.stream_chat',side_effect=stream), \
          patch('api.services.article_content.worker_health',return_value=True),patch('api.services.article_fetcher.fetch_article_markdown') as fetch:
@@ -77,8 +78,10 @@ def test_chat_prompt_and_stream_scope_agree_and_never_fetch_article(make_news,cl
     fetch.assert_not_called()
     scope='full' if full else 'summary'
     assert f'"context_scope": "{scope}"' in text
-    assert f'可用内容范围: {scope}' in captured['prompt']
-    assert ('READABLE_FULL_BODY' if full else 'SHORT_PREVIEW') in captured['prompt']
+    assert '不可信数据' in captured['prompt']
+    assert f'"context_scope": "{scope}"' in captured['evidence']
+    assert ('READABLE_FULL_BODY' if full else 'SHORT_PREVIEW') in captured['evidence']
+    assert 'READABLE_FULL_BODY' not in captured['prompt'] and 'SHORT_PREVIEW' not in captured['prompt']
     news.refresh_from_db()
     assert news.full_content_fetch_status == ('pending' if full else 'queued')
 
