@@ -67,9 +67,17 @@ describe('LocalSearch Query and URL state', () => {
       order_by: 'time',
       full_content: 'true',
       publish_time_after: expect.any(String),
-      source__source_type: 'discussion',
+      source_types: 'discussion',
     }, expect.any(AbortSignal))
     expect(screen.getByText(/找到/)).toHaveTextContent('找到 61 篇相关文章')
+  })
+
+  it('sends every selected source type rather than only the first', async () => {
+    renderSearch(['/search?q=climate&mode=keyword&source_types=news,discussion'])
+    expect(await screen.findByRole('heading', { name: 'Climate technology update' })).toBeInTheDocument()
+    expect(fetchNews).toHaveBeenCalledWith(expect.objectContaining({
+      search: 'climate', source_types: 'news,discussion',
+    }), expect.any(AbortSignal))
   })
 
   it('submits a new search and applies sort, paging, and browser history from the URL', async () => {
