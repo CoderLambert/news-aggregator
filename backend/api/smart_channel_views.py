@@ -74,17 +74,25 @@ class SourceProfileView(APIView):
         source = get_object_or_404(Source, pk=pk)
         if not isinstance(request.data, dict):
             raise ValidationError('请求应为 JSON 对象。')
-        topics = request.data.get('topics', [])
+        if not any(key in request.data for key in ('topics', 'description')):
+            raise ValidationError('请提供需要修改的简介或主题。')
+        stored = SourceTopicProfile.objects.filter(source=source).first()
+        effective = profile_data(source, stored)
+        # PATCH must preserve the *effective* value of fields not supplied.
+        # Otherwise updating just one field silently erases the other.
+        topics = request.data.get('topics', effective['topics'])
         if topics:
             topics = validated_topics(topics)
         elif not isinstance(topics, list):
             raise ValidationError('无效主题。')
-        about = request.data.get('description', '')
+        about = request.data.get('description', effective['description'])
         if not isinstance(about, str) or len(about) > 1000:
             raise ValidationError('简介最多 1000 字。')
-        stored = SourceTopicProfile.objects.filter(source=source).first()
+        about = about.strip()
+        if stored and stored.origin == 'manual' and stored.topics == topics and stored.about == about:
+            return Response(profile_data(source, stored))
         SourceTopicProfile.objects.update_or_create(source=source, defaults={
-            'about': about.strip(), 'topics': topics, 'origin': 'manual',
+            'about': about, 'topics': topics, 'origin': 'manual',
             'evidence_hash': base_profile(source)['evidence_hash'], 'revision': stored.revision + 1 if stored else 1})
         return Response(profile_data(source))
 
