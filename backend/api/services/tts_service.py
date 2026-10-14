@@ -9,6 +9,7 @@ import hashlib
 import os
 import re
 import time
+import tempfile
 from dataclasses import dataclass
 
 from django.conf import settings
@@ -117,15 +118,67 @@ def get_cached_audio(news_id: int, variant: str):
     return None
 
 
+# Hard ceilings: never hold full audio in process memory or synthesize a whole
+# chapter in one upstream session. The UI can offer summary mode instead.
+MAX_TTS_SPEECH_CHARS = 12000
+MAX_TTS_AUDIO_BYTES = 16 * 1024 * 1024
+
+
+class TTSCacheSink:
+    """Writes a private staging file and publishes only a completed MP3."""
+    def __init__(self, news_id: int, variant: str):
+        cache_dir = _cache_directory()
+        os.makedirs(cache_dir, exist_ok=True)
+        key = _cache_key(news_id, variant)
+        self.destination = os.path.join(cache_dir, f'{key}.mp3')
+        self._file = tempfile.NamedTemporaryFile(
+            mode='wb', prefix=f'.{key}-', suffix='.part', dir=cache_dir, delete=False)
+        self._tmp = self._file.name
+        self._size = 0
+        self._closed = False
+
+    def append(self, chunk: bytes):
+        if self._closed or not isinstance(chunk, bytes):
+            raise ValueError('tts_invalid_audio_chunk')
+        if self._size + len(chunk) > MAX_TTS_AUDIO_BYTES:
+            raise ValueError('tts_audio_too_large')
+        self._file.write(chunk)
+        self._size += len(chunk)
+
+    def commit(self) -> str:
+        if self._closed:
+            raise ValueError('tts_cache_already_closed')
+        try:
+            self._file.flush()
+            os.fsync(self._file.fileno())
+            self._file.close()
+            self._closed = True
+            if self._size == 0:
+                raise ValueError('tts_empty_audio')
+            os.replace(self._tmp, self.destination)
+            return self.destination
+        except Exception:
+            self.abort()
+            raise
+
+    def abort(self):
+        if not self._closed:
+            self._file.close()
+            self._closed = True
+        try:
+            os.unlink(self._tmp)
+        except FileNotFoundError:
+            pass
+
+
 def save_to_cache(news_id: int, variant: str, audio_bytes: bytes) -> str:
-    """Save audio bytes to cache and return the file path."""
-    cache_directory = _cache_directory()
-    os.makedirs(cache_directory, exist_ok=True)
-    key = _cache_key(news_id, variant)
-    path = os.path.join(cache_directory, f'{key}.mp3')
-    with open(path, 'wb') as f:
-        f.write(audio_bytes)
-    return path
+    """Compatible helper: atomic replacement, bounded bytes, no visible partial file."""
+    sink = TTSCacheSink(news_id, variant)
+    try:
+        sink.append(audio_bytes)
+        return sink.commit()
+    finally:
+        sink.abort()
 
 
 def build_cache_variant(resolved: ResolvedTTSContent, scope: str, voice: str, speech_text: str) -> str:
@@ -216,7 +269,7 @@ def clean_expired_cache(max_age: int = TTS_CACHE_MAX_AGE) -> tuple[int, int]:
     freed = 0
 
     for name in os.listdir(cache_directory):
-        if not name.endswith('.mp3'):
+        if not name.endswith('.mp3') and not (name.startswith('.') and name.endswith('.part')):
             continue
         path = os.path.join(cache_directory, name)
         try:

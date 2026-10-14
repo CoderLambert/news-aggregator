@@ -106,3 +106,79 @@ def test_tts_streams_and_caches_audio_after_success(client, tts_news, tmp_path):
     cached_files = list(tmp_path.glob('*.mp3'))
     assert len(cached_files) == 1
     assert cached_files[0].read_bytes() == body
+
+@pytest.mark.django_db
+@override_settings(PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_tts_atomic_cache_remains_invisible_until_stream_finishes(client, tts_news, tmp_path):
+    from api.services.tts_service import get_cached_audio, build_cache_variant, resolve_tts_content, clean_for_tts, pick_tts_voice
+    user = get_user_model().objects.create_user(username='tts-atomic')
+    client.force_login(user)
+
+    class Working:
+        def __init__(self, *_a, **_kw):
+            pass
+        async def stream(self):
+            yield {'type': 'audio', 'data': b'X' * 140}
+            yield {'type': 'audio', 'data': b'Y' * 180}
+
+    with override_settings(TTS_CACHE_DIR=tmp_path), patch('edge_tts.Communicate', Working), patch(
+        'api.services.tts_service.configure_edge_tts_endpoint', return_value='wss://reviewed.invalid'
+    ):
+        response = client.get(reverse('news-tts', args=[tts_news.pk]), {'language': 'original', 'scope': 'summary'})
+        read = iter(response.streaming_content)
+        assert next(read) == b'X' * 140
+        assert list(tmp_path.glob('*.mp3')) == []
+        assert len(list(tmp_path.glob('*.part'))) == 1
+        assert b''.join(read) == b'Y' * 180
+        files = list(tmp_path.glob('*.mp3'))
+        assert len(files) == 1 and files[0].read_bytes() == b'X' * 140 + b'Y' * 180
+        assert list(tmp_path.glob('*.part')) == []
+
+
+@pytest.mark.django_db
+@override_settings(PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_tts_interrupted_stream_leaves_no_partial_audio(client, tts_news, tmp_path):
+    user = get_user_model().objects.create_user(username='tts-interrupt')
+    client.force_login(user)
+
+    class Broken:
+        def __init__(self, *_a, **_kw):
+            pass
+        async def stream(self):
+            yield {'type': 'audio', 'data': b'X' * 140}
+            raise RuntimeError('synthetic disconnect')
+
+    with override_settings(TTS_CACHE_DIR=tmp_path), patch('edge_tts.Communicate', Broken), patch(
+        'api.services.tts_service.configure_edge_tts_endpoint', return_value='wss://reviewed.invalid'
+    ):
+        response = client.get(reverse('news-tts', args=[tts_news.pk]), {'language': 'original', 'scope': 'summary'})
+        assert b''.join(response.streaming_content) == b'X' * 140
+        assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.django_db
+@override_settings(PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_tts_oversized_speech_rejected_before_connecting(client, tts_news):
+    user = get_user_model().objects.create_user(username='tts-too-long')
+    client.force_login(user)
+    tts_news.content = 'large words ' * 2400
+    tts_news.save(update_fields=['content'])
+    with patch('edge_tts.Communicate') as provider:
+        response = client.get(reverse('news-tts', args=[tts_news.pk]), {'language': 'original', 'scope': 'summary'})
+    assert response.status_code == 413
+    assert response.json()['code'] == 'tts_text_too_long'
+    provider.assert_not_called()
+
+
+def test_atomic_audio_replacement_cleans_stage_when_replace_fails(monkeypatch, tmp_path):
+    from api.services import tts_service as tts
+    with override_settings(TTS_CACHE_DIR=tmp_path):
+        prior = tts.save_to_cache(1, 'voice-variant', b'A' * 140)
+        original = open(prior, 'rb').read()
+        def fail(*_a, **_k):
+            raise OSError('synthetic replace error')
+        monkeypatch.setattr(tts.os, 'replace', fail)
+        with pytest.raises(OSError):
+            tts.save_to_cache(1, 'voice-variant', b'B' * 150)
+        assert open(prior, 'rb').read() == original
+        assert not list(tmp_path.glob('*.part'))

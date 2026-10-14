@@ -1475,7 +1475,8 @@ class NewsTTSView(generics.GenericAPIView):
         from api.services.tts_service import (
             TTSContentUnavailable, build_cache_variant, clean_for_tts,
             configure_edge_tts_endpoint,
-            get_cached_audio, pick_tts_voice, resolve_tts_content, save_to_cache,
+            get_cached_audio, pick_tts_voice, resolve_tts_content,
+            TTSCacheSink, MAX_TTS_SPEECH_CHARS, MAX_TTS_AUDIO_BYTES,
         )
 
         news = self.get_object()
@@ -1514,6 +1515,11 @@ class NewsTTSView(generics.GenericAPIView):
                 {'code': 'source_content_required', 'message': '所选范围暂无可朗读内容。'},
                 status=status.HTTP_409_CONFLICT,
             )
+        if len(speech_text) > MAX_TTS_SPEECH_CHARS:
+            return Response(
+                {'code': 'tts_text_too_long', 'message': '正文过长，请切换到摘要朗读。'},
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
 
         cache_variant = build_cache_variant(resolved, scope, voice, speech_text)
         cached = get_cached_audio(pk, cache_variant)
@@ -1541,7 +1547,6 @@ class NewsTTSView(generics.GenericAPIView):
         # before returning a streaming response. Otherwise a WebSocket failure
         # occurs after response construction and Waitress can only expose an
         # opaque 500/broken audio stream to the browser.
-        audio_chunks = []
         loop = asyncio.new_event_loop()
 
         async def _gen():
@@ -1568,16 +1573,25 @@ class NewsTTSView(generics.GenericAPIView):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
+        try:
+            cache_sink = TTSCacheSink(pk, cache_variant)
+        except OSError:
+            cache_sink = None  # Playback works even when the cache volume is read-only.
+
         def generate_and_stream():
             completed = False
+            total_bytes = 0
             try:
-                audio_chunks.append(first_chunk)
-                yield first_chunk
+                chunk = first_chunk
                 while True:
+                    if not isinstance(chunk, bytes) or total_bytes + len(chunk) > MAX_TTS_AUDIO_BYTES:
+                        raise ValueError('tts_audio_too_large')
+                    total_bytes += len(chunk)
+                    if cache_sink is not None:
+                        cache_sink.append(chunk)
+                    yield chunk
                     try:
                         chunk = loop.run_until_complete(gen.__anext__())
-                        audio_chunks.append(chunk)
-                        yield chunk
                     except StopAsyncIteration:
                         completed = True
                         break
@@ -1592,12 +1606,15 @@ class NewsTTSView(generics.GenericAPIView):
                     loop.run_until_complete(gen.aclose())
                 finally:
                     loop.close()
-                # Save to cache after generation completes
-                if completed and audio_chunks:
+                if cache_sink is not None:
                     try:
-                        save_to_cache(pk, cache_variant, b''.join(audio_chunks))
+                        if completed:
+                            cache_sink.commit()
+                        else:
+                            cache_sink.abort()
                     except Exception:
-                        pass  # Cache write failure is non-critical
+                        cache_sink.abort()
+                        logging.getLogger(__name__).warning('TTS cache staging failed; audio was not published')
 
         response = StreamingHttpResponse(
             generate_and_stream(),
