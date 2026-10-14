@@ -1155,6 +1155,14 @@ def _install_mock_shared_browser(monkeypatch, failure_at=None):
         def __init__(self, untrusted):
             self.untrusted = untrusted
 
+        def wait_for_function(self, script, selector, **_kwargs):
+            assert 'box.width > 0' in script
+            assert 'box.height > 0' in script
+            assert selector == '[role="img"][aria-label="Mermaid 图表"] svg'
+            if failure_at == 'mermaid_ready':
+                raise Error(secret)
+            return True
+
         def goto(self, url, **_kwargs):
             if self.untrusted:
                 raise Error('net::ERR_CERT_AUTHORITY_INVALID')
@@ -1259,6 +1267,7 @@ def _g2_shared_runtime_argv(tmp_path):
 @pytest.mark.parametrize(('failure_at', 'active_subcheck', 'browser_exception_type'), [
     ('initial', 'g2.shared_initial', 'BrowserExecutionError'),
     ('mermaid', 'g2.shared_mermaid', 'Error'),
+    ('mermaid_ready', 'g2.shared_mermaid', 'Error'),
     ('csrf', 'g2.shared_csrf_cookie', 'Error'),
     ('wrong_san', 'g2.shared_wrong_san', 'RuntimeError'),
 ])

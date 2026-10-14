@@ -1434,6 +1434,22 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
                 diagram_svg = diagram.locator('svg').first
                 diagram_svg.wait_for(state='visible', timeout=20000)
                 diagram_svg.locator('text').first.wait_for(state='attached', timeout=20000)
+                page.wait_for_function(
+                    """(selector) => {
+                        const svg = document.querySelector(selector);
+                        if (!svg) return false;
+                        const labels = Array.from(svg.querySelectorAll('text'))
+                            .map((element) => element.textContent?.trim() || '')
+                            .filter(Boolean);
+                        const box = svg.getBoundingClientRect();
+                        return labels.includes('Fixture article')
+                            && labels.includes('Mermaid flow')
+                            && box.width > 0
+                            && box.height > 0;
+                    }""",
+                    '[role="img"][aria-label="Mermaid 图表"] svg',
+                    timeout=20000,
+                )
                 chart_paint = diagram_svg.evaluate("""(svg) => {
                     const texts = Array.from(svg.querySelectorAll('text'));
                     const labels = texts.map((element) => element.textContent?.trim() || '').filter(Boolean);
