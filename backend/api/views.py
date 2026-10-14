@@ -78,6 +78,7 @@ class NewsFilter(django_filters.FilterSet):
     source = CommaSeparatedIntegerFilter(method='filter_source')
     region = django_filters.ChoiceFilter(choices=[('domestic', '国内'), ('international', '国际')], method='filter_region')
     source__source_type = django_filters.CharFilter(field_name='source__source_type')
+    source_types = django_filters.CharFilter(method='filter_source_types')
     full_content = django_filters.BooleanFilter(
         method='filter_full_content',
     )
@@ -88,7 +89,14 @@ class NewsFilter(django_filters.FilterSet):
 
     class Meta:
         model = News
-        fields = ['category', 'source', 'source__source_type']
+        fields = ['category', 'source', 'source__source_type', 'source_types']
+
+    def filter_source_types(self, queryset, name, value):
+        kinds = value.split(',')
+        allowed = {kind for kind, _label in Source.TYPE_CHOICES}
+        if not 1 <= len(kinds) <= len(allowed) or len(set(kinds)) != len(kinds) or any(kind not in allowed for kind in kinds):
+            raise ApiValidationError({'source_types': 'Invalid source type selection.'})
+        return queryset.filter(source__source_type__in=kinds)
 
     def filter_source(self, queryset, name, value):
         from api.services.channel_articles import channel_filter
