@@ -365,3 +365,51 @@ def test_sync_save_exposes_ingest_result_on_rejection(outcome, exception_type, m
 
     assert caught.value.ingest_result is result
     assert str(caught.value) == result.reason
+
+
+def test_not_due_feed_reports_healthy_skip_without_network_or_checkpoint(monkeypatch):
+    """A recently checked feed must not turn the scheduler batch red."""
+    from datetime import timedelta
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from api.services.crawl_metrics import crawl_result, describe_crawl_result
+
+    spider = FeedSpider(name='webkit')
+    spider.feed_receipts = FeedReceiptRegistry()
+    spider.feed_outcomes = []
+    spider.feed_errors = 0
+    stats = {}
+    spider.crawler = SimpleNamespace(stats=SimpleNamespace(set_value=lambda key, value: stats.__setitem__(key, value)))
+    future = timezone.now() + timedelta(minutes=20)
+    state = SimpleNamespace(next_poll_at=future, request_url='https://webkit.org/feed/', headers=())
+
+    async def fake_db(function, *args, **kwargs):
+        if function is feed_module.prepare_feed_request:
+            return state
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(feed_module, '_database', fake_db)
+
+    async def crawl():
+        return [request async for request in spider.start()]
+
+    assert asyncio.run(crawl()) == []
+    asyncio.run(spider._feed_closed('finished'))
+    assert stats['outcome'] == 'not_due'
+    assert stats['checkpoint_committed'] is False
+    assert stats['next_attempt_at'] == future.isoformat()
+    summary = crawl_result({'finish_reason': 'finished', **stats})
+    assert summary['outcome'] == 'not_due'
+    assert summary['failure_outcome'] == ''
+    assert '未请求源站' in describe_crawl_result(summary)
+    assert summary['physical_requests'] == 0
+
+
+def test_not_due_does_not_turn_a_real_failed_ingest_into_success(monkeypatch, checkpoint_calls):
+    from datetime import timedelta
+    spider, response, item = spider_and_item()
+    spider.feed_outcomes.append('not_due')
+    spider.feed_receipts.settle(item['feed_receipt_id'], 'deferred', 'persistence_conflict')
+    totals = spider.feed_receipts.finish('finished')
+    assert totals['outcome'] == 'partial'
+    assert not totals['checkpoint_committed']
