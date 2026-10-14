@@ -611,7 +611,12 @@ class NewsTranslateFullView(generics.GenericAPIView):
 
         shared_lease = None
         if not worker_in_flight:
-            shared_lease = shared_translations.claim_task(news)
+            try:
+                shared_lease = shared_translations.claim_task(news, user_id=request.user.pk)
+            except shared_translations.SharedTranslationBusy as exc:
+                response = shared_translations.error_response(str(exc), error_code='translation_capacity')
+                response['Retry-After'] = str(exc.retry_after_seconds)
+                return response
             if shared_lease is None:
                 return shared_translations.waiting_response(news)
 
