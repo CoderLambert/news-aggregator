@@ -14,7 +14,7 @@ from scrapy.crawler import CrawlerProcess
 from scrapy.settings import default_settings as scrapy_default_settings
 from scrapy.utils.project import get_project_settings
 from api.services.source_policy import install_runtime_policy
-from api.services.source_registry import CODE_SPIDERS, runtime_registry
+from api.services.source_registry import CODE_SPIDERS, runtime_registry, source_snapshot as current_source_snapshot
 
 CRAWLER_DIR = os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'crawler')
 # Compatibility export for code that enumerates reviewed Python spiders.
@@ -108,7 +108,8 @@ class Command(BaseCommand):
         source_snapshot = None
         if entry.maintenance == 'database':
             try:
-                source_snapshot = json.loads(os.environ.get('NEWS_SOURCE_SNAPSHOT', 'null'))
+                serialized = os.environ.get('NEWS_SOURCE_SNAPSHOT')
+                source_snapshot = json.loads(serialized) if serialized else current_source_snapshot(spider_name)
                 install_runtime_policy(source_snapshot)
             except (TypeError, ValueError, json.JSONDecodeError) as error:
                 raise CommandError('动态来源缺少有效的任务配置快照。') from error
@@ -170,7 +171,12 @@ class Command(BaseCommand):
 
     def _crawl_all_serially(self):
         """Run sources in isolated reactors so the shared budget cannot starve them."""
-        sources = tuple(runtime_registry())
+        registry = runtime_registry()
+        sources = tuple(registry)
+        snapshots = {
+            key: current_source_snapshot(key)
+            for key, entry in registry.items() if entry.maintenance == 'database'
+        }
         manage_py = Path(__file__).resolve().parents[3] / 'manage.py'
         max_attempts = 3
         max_wait = 15.0
@@ -180,9 +186,12 @@ class Command(BaseCommand):
             final = {}
             return_code = 0
             for attempt in range(1, max_attempts + 1):
+                child_env = os.environ.copy()
+                if spider in snapshots:
+                    child_env['NEWS_SOURCE_SNAPSHOT'] = json.dumps(snapshots[spider], ensure_ascii=True)
                 completed = subprocess.run(
                     [sys.executable, str(manage_py), 'crawl', spider],
-                    cwd=str(manage_py.parent), env=os.environ.copy(), text=True,
+                    cwd=str(manage_py.parent), env=child_env, text=True,
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 )
                 return_code = completed.returncode

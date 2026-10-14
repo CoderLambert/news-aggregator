@@ -1,5 +1,6 @@
 import pytest
 from django.utils import timezone
+from types import SimpleNamespace
 
 from api.models import Category, CrawlerTarget, FeedState, Source, SourceConfig, SourceEndpoint
 from api.services.crawler_control import create_crawl_batch, sync_crawler_targets
@@ -102,3 +103,23 @@ def test_crawl_command_parser_has_no_import_time_source_choices():
     parser = Command().create_parser('manage.py', 'crawl')
     assert parser.parse_args(['future_database_source']).spider == 'future_database_source'
     assert SPIDERS is CODE_SPIDERS
+
+
+def test_all_source_command_freezes_dynamic_snapshots_before_subprocesses(monkeypatch):
+    from api.management.commands import crawl
+    from api.services.source_registry import RuntimeSource
+    snapshot = {'schema_version': 1, 'source_key': 'future_database_source'}
+    captured = []
+    monkeypatch.setattr(crawl, 'runtime_registry', lambda: {
+        'future_database_source': RuntimeSource(
+            'future_database_source', 'dynamic_source', 'database', '未来来源', 1, 'approved',
+        ),
+    })
+    monkeypatch.setattr(crawl, 'current_source_snapshot', lambda key: {**snapshot, 'requested_key': key})
+    def run(*args, **kwargs):
+        captured.append(kwargs['env'])
+        return SimpleNamespace(returncode=0, stdout='NEWSHUB_CRAWL_RESULT {"outcome":"updated"}\n')
+    monkeypatch.setattr(crawl.subprocess, 'run', run)
+    crawl.Command()._crawl_all_serially()
+    assert captured[0]['NEWS_SOURCE_SNAPSHOT']
+    assert 'future_database_source' in captured[0]['NEWS_SOURCE_SNAPSHOT']

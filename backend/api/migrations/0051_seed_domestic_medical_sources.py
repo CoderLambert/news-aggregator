@@ -11,6 +11,9 @@ SOURCES = (
         'kind': 'rss', 'url': 'https://www.chinanews.com.cn/rss/jk.xml',
         'domains': ['www.chinanews.com.cn'], 'policy': 'summary_only', 'content_kind': 'article',
         'status': 'probed', 'format': 'rss20', 'http_status': 200,
+        'samples': [{'title': '全球第一不可逆致盲眼病！40岁后，这项检查务必要做→',
+                     'url': 'https://www.chinanews.com.cn/jk/2026/03-06/10581992.shtml',
+                     'published_at': '2026-03-06T07:50:05+08:00'}],
         'parser': {'identity_field': 'id|guid|link', 'title_field': 'title', 'link_field': 'link',
                    'summary_field': 'summary', 'published_field': 'published', 'full_content_fields': []},
     },
@@ -20,6 +23,9 @@ SOURCES = (
         'policy': 'official_html', 'content_kind': 'article', 'status': 'probed', 'format': 'html',
         'http_status': 200, 'parser': {'list_item': 'ul.xw_list li', 'title': 'a', 'link': 'a',
                                       'summary': 'p.zy', 'date': 'a span', 'date_format': '%Y-%m-%d'},
+        'samples': [{'title': '2026年世界标准日卫生健康和疾病预防控制标准化主题宣传活动在宁波举行',
+                     'url': 'https://www.chinacdc.cn/zxyw/202610/t20261014_1842267.html',
+                     'published_at': '2026-10-14'}],
     },
     {
         'key': 'nhc_news', 'publisher': '国家卫生健康委员会', 'channel': '国家卫健委新闻动态',
@@ -34,6 +40,9 @@ SOURCES = (
         'policy': 'official_html', 'content_kind': 'article', 'status': 'probed', 'format': 'html',
         'http_status': 200, 'parser': {'list_item': 'record li', 'title': 'a', 'link': 'a',
                                       'date': 'span', 'date_format': '%Y-%m-%d'},
+        'samples': [{'title': '国家医疗保障局党组召开会议专题传达学习贯彻全国卫生与健康大会精神',
+                     'url': 'https://www.nhsa.gov.cn/art/2026/10/14/art_14_23143.html',
+                     'published_at': '2026-10-14T10:59:00+08:00'}],
     },
     {
         'key': 'nmpa_news', 'publisher': '国家药品监督管理局', 'channel': '国家药监局要闻',
@@ -47,6 +56,9 @@ SOURCES = (
         'kind': 'rss', 'url': 'https://udi.nmpa.gov.cn/rss/download.html?files=daily',
         'domains': ['udi.nmpa.gov.cn', 'udid.nmpa.gov.cn'], 'policy': 'regulatory_data',
         'content_kind': 'regulatory_data', 'status': 'probed', 'format': 'rss20', 'http_status': 200,
+        'samples': [{'title': 'UDID_DAY_UPDATE_20261014.zip',
+                     'url': 'https://udi.nmpa.gov.cn/rss/download.html?files=daily',
+                     'published_at': '2026-10-14T15:35:39+00:00'}],
         'parser': {'identity_field': 'id|guid|link', 'title_field': 'title', 'link_field': 'link',
                    'summary_field': 'summary', 'published_field': 'published', 'full_content_fields': []},
     },
@@ -73,6 +85,7 @@ def seed_sources(apps, schema_editor):
             'http_status': row['http_status'], 'format': row['format'],
             'outcome': 'SUPPORTED' if row['status'] == 'probed' else 'BLOCKED',
             'evidence': 'docs/features/domestic-medical-sources/source-probes.json',
+            'sample_articles': row.get('samples', []),
         }
         config, created = SourceConfig.objects.get_or_create(
             source_key=row['key'],
