@@ -172,11 +172,11 @@ export default function SourceConfigSection() {
   return (
     <section id="source-configs" className="mt-10 scroll-mt-20 space-y-4" aria-labelledby="source-config-title">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <h2 id="source-config-title" className="text-xl font-semibold">动态来源配置</h2>
           <p className="mt-1 text-sm text-muted-foreground">新增来源默认不调度；当前版本必须先探测、审批，再由超级管理员启用。</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex w-full flex-wrap gap-2 sm:w-auto">
           <Button variant="outline" disabled={sources.isFetching} onClick={() => void sources.refetch()}><RefreshCw aria-hidden="true" className={sources.isFetching ? 'animate-spin' : ''} />刷新</Button>
           <Button disabled={busy} onClick={() => { setEditingKey(null); setForm({ ...emptyForm, category: categories.data?.[0] ? String(categories.data[0].id) : '' }) }}><Plus aria-hidden="true" />新建来源</Button>
         </div>
@@ -191,21 +191,21 @@ export default function SourceConfigSection() {
             <Button size="icon" variant="ghost" aria-label="关闭来源配置表单" onClick={() => { setForm(null); setEditingKey(null) }}><X aria-hidden="true" /></Button>
           </div>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-2">
-          <label className="grid gap-1 text-sm">来源标识<Input value={form.sourceKey} disabled={Boolean(editingKey)} onChange={(event) => setForm({ ...form, sourceKey: event.target.value })} placeholder="official_health_news" /></label>
-          <label className="grid gap-1 text-sm">出版者<Input value={form.publisherName} onChange={(event) => setForm({ ...form, publisherName: event.target.value })} /></label>
-          <label className="grid gap-1 text-sm">频道名称<Input value={form.channelName} onChange={(event) => setForm({ ...form, channelName: event.target.value })} /></label>
-          <label className="grid gap-1 text-sm">分类<select className="h-9 rounded-md border bg-background px-3" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>{categories.data?.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
-          <label className="grid gap-1 text-sm">入口类型<select className="h-9 rounded-md border bg-background px-3" value={form.endpointKind} onChange={(event) => setForm({ ...form, endpointKind: event.target.value as SourceEndpointKind })}><option value="rss">RSS</option><option value="atom">Atom</option><option value="json">JSON API</option><option value="html">官方 HTML</option></select></label>
-          <label className="grid gap-1 text-sm">入口 URL<Input value={form.endpointUrl} onChange={(event) => setForm({ ...form, endpointUrl: event.target.value })} placeholder="https://example.cn/feed.xml" /></label>
-          <label className="grid gap-1 text-sm md:col-span-2">许可域名（逗号分隔）<Input value={form.allowedDomains} onChange={(event) => setForm({ ...form, allowedDomains: event.target.value })} placeholder="example.cn, www.example.cn" /></label>
+        <CardContent className="grid min-w-0 gap-4 md:grid-cols-2">
+          <label className="grid min-w-0 gap-1 text-sm">来源标识<Input value={form.sourceKey} disabled={Boolean(editingKey)} onChange={(event) => setForm({ ...form, sourceKey: event.target.value })} placeholder="official_health_news" /></label>
+          <label className="grid min-w-0 gap-1 text-sm">出版者<Input value={form.publisherName} onChange={(event) => setForm({ ...form, publisherName: event.target.value })} /></label>
+          <label className="grid min-w-0 gap-1 text-sm">频道名称<Input value={form.channelName} onChange={(event) => setForm({ ...form, channelName: event.target.value })} /></label>
+          <label className="grid min-w-0 gap-1 text-sm">分类<select className="h-9 min-w-0 rounded-md border bg-background px-3" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>{categories.data?.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+          <label className="grid min-w-0 gap-1 text-sm">入口类型<select className="h-9 min-w-0 rounded-md border bg-background px-3" value={form.endpointKind} onChange={(event) => setForm({ ...form, endpointKind: event.target.value as SourceEndpointKind })}><option value="rss">RSS</option><option value="atom">Atom</option><option value="json">JSON API</option><option value="html">官方 HTML</option></select></label>
+          <label className="grid min-w-0 gap-1 text-sm">入口 URL<Input value={form.endpointUrl} onChange={(event) => setForm({ ...form, endpointUrl: event.target.value })} placeholder="https://example.cn/feed.xml" /></label>
+          <label className="grid min-w-0 gap-1 text-sm md:col-span-2">许可域名（逗号分隔）<Input value={form.allowedDomains} onChange={(event) => setForm({ ...form, allowedDomains: event.target.value })} placeholder="example.cn, www.example.cn" /></label>
           <label className="grid gap-1 text-sm">内容类型<select className="h-9 rounded-md border bg-background px-3" value={form.contentKind} onChange={(event) => setForm({ ...form, contentKind: event.target.value })}><option value="article">资讯</option><option value="abstract">科研摘要</option><option value="regulatory_data">监管数据</option></select></label>
           <label className="grid gap-1 text-sm">读取政策<select className="h-9 rounded-md border bg-background px-3" value={form.readingPolicy} onChange={(event) => setForm({ ...form, readingPolicy: event.target.value })}><option value="summary_only">仅摘要</option><option value="public_feed">公开 Feed</option><option value="official_html">官方网页</option><option value="regulatory_data">监管数据</option></select></label>
           <label className="grid gap-1 text-sm">请求间隔（秒）<Input type="number" min={3} value={form.requestIntervalSeconds} onChange={(event) => setForm({ ...form, requestIntervalSeconds: event.target.value })} /></label>
           <label className="grid gap-1 text-sm">响应上限（字节）<Input type="number" min={1024} value={form.maxResponseBytes} onChange={(event) => setForm({ ...form, maxResponseBytes: event.target.value })} /></label>
           <label className="grid gap-1 text-sm">最大页数<Input type="number" min={1} max={5} value={form.maxPages} onChange={(event) => setForm({ ...form, maxPages: event.target.value })} /></label>
           <label className="grid gap-1 text-sm">最大条目<Input type="number" min={1} max={200} value={form.maxItems} onChange={(event) => setForm({ ...form, maxItems: event.target.value })} /></label>
-          <label className="grid gap-1 text-sm md:col-span-2">受控解析配置（JSON）<textarea className="min-h-36 rounded-md border bg-background p-3 font-mono text-xs" value={form.parserConfig} onChange={(event) => setForm({ ...form, parserConfig: event.target.value })} /></label>
+          <label className="grid min-w-0 gap-1 text-sm md:col-span-2">受控解析配置（JSON）<textarea className="min-h-36 min-w-0 rounded-md border bg-background p-3 font-mono text-xs" value={form.parserConfig} onChange={(event) => setForm({ ...form, parserConfig: event.target.value })} /></label>
           <div className="flex flex-wrap gap-4 text-sm md:col-span-2">
             <label className="flex items-center gap-2"><input type="checkbox" checked={form.summaryAllowed} onChange={(event) => setForm({ ...form, summaryAllowed: event.target.checked })} />允许摘要</label>
             <label className="flex items-center gap-2"><input type="checkbox" checked={form.feedFullContentAllowed} onChange={(event) => setForm({ ...form, feedFullContentAllowed: event.target.checked })} />允许已验证 Feed 正文</label>
@@ -216,42 +216,42 @@ export default function SourceConfigSection() {
       </Card> : null}
 
       {sources.isLoading ? <div className="h-40 animate-pulse rounded-xl bg-muted" /> : sources.isError ? <Card><CardContent className="py-6 text-sm text-destructive">来源配置读取失败。</CardContent></Card> : (
-        <div className="grid gap-4 xl:grid-cols-2">
+        <div className="grid min-w-0 grid-cols-1 gap-4 2xl:grid-cols-2">
           {sources.data?.map((source) => {
             const endpoint = source.endpoints[0]
             const samples = sampleArticles(source)
-            return <Card key={source.sourceKey} className="overflow-hidden">
+            return <Card key={source.sourceKey} className="min-w-0 overflow-hidden">
               <CardHeader>
                 <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div><CardTitle className="text-base">{source.channelName}</CardTitle><CardDescription>{source.publisherName} · <code>{source.sourceKey}</code></CardDescription></div>
-                  <div className="flex gap-2"><Badge variant={statusVariant(source.status)}>{source.status}</Badge><Badge variant="gray">{source.maintenance === 'code' ? '代码维护' : '后台维护'}</Badge></div>
+                  <div className="min-w-0 flex-1"><CardTitle className="break-words text-base">{source.channelName}</CardTitle><CardDescription className="break-words">{source.publisherName} · <code className="break-all">{source.sourceKey}</code></CardDescription></div>
+                  <div className="flex shrink-0 flex-wrap gap-2"><Badge variant={statusVariant(source.status)}>{source.status}</Badge><Badge variant="gray">{source.maintenance === 'code' ? '代码维护' : '后台维护'}</Badge></div>
                 </div>
               </CardHeader>
-              <CardContent className="space-y-4 text-sm">
-                <div className="grid grid-cols-2 gap-2 text-muted-foreground">
-                  <span>入口：{endpoint?.kind?.toUpperCase() ?? '自定义'}</span><span>分类：{source.categoryName || '—'}</span>
-                  <span>读取：{source.readingPolicy}</span><span>正文：{source.feedFullContentAllowed || source.officialHtmlFullContentAllowed ? '已批准' : '仅摘要/链接'}</span>
-                  <span>版本：v{source.configVersion}</span><span>审批：{formatDate(source.approvedAt)}</span>
+              <CardContent className="min-w-0 space-y-4 text-sm">
+                <div className="grid min-w-0 grid-cols-1 gap-2 text-muted-foreground sm:grid-cols-2">
+                  <span className="min-w-0 break-words">入口：{endpoint?.kind?.toUpperCase() ?? '自定义'}</span><span className="min-w-0 break-words">分类：{source.categoryName || '—'}</span>
+                  <span className="min-w-0 break-words">读取：{source.readingPolicy}</span><span className="min-w-0 break-words">正文：{source.feedFullContentAllowed || source.officialHtmlFullContentAllowed ? '已批准' : '仅摘要/链接'}</span>
+                  <span className="min-w-0 break-words">版本：v{source.configVersion}</span><span className="min-w-0 break-words">审批：{formatDate(source.approvedAt)}</span>
                 </div>
-                {endpoint?.url ? <p className="truncate font-mono text-xs" title={endpoint.url}>{endpoint.url}</p> : null}
-                <div className="grid grid-cols-2 gap-2 rounded-lg bg-muted/50 p-3 text-xs">
-                  <span>最近探测：{formatDate(source.probedAt)}</span><span>Feed 成功：{formatDate(source.monitoring.lastFeedSuccessAt)}</span>
-                  <span>运行成功：{formatDate(source.monitoring.lastSuccessAt)}</span><span>下次轮询：{formatDate(source.monitoring.nextPollAt)}</span>
-                  <span>Worker 心跳：{formatDate(source.monitoring.workerHeartbeatAt)}</span><span>冷却截止：{formatDate(source.monitoring.cooldownUntil)}</span>
+                {endpoint?.url ? <p className="min-w-0 break-all font-mono text-xs" title={endpoint.url}>{endpoint.url}</p> : null}
+                <div className="grid min-w-0 grid-cols-1 gap-2 rounded-lg bg-muted/50 p-3 text-xs sm:grid-cols-2">
+                  <span className="min-w-0 break-words">最近探测：{formatDate(source.probedAt)}</span><span className="min-w-0 break-words">Feed 成功：{formatDate(source.monitoring.lastFeedSuccessAt)}</span>
+                  <span className="min-w-0 break-words">运行成功：{formatDate(source.monitoring.lastSuccessAt)}</span><span className="min-w-0 break-words">下次轮询：{formatDate(source.monitoring.nextPollAt)}</span>
+                  <span className="min-w-0 break-words">Worker 心跳：{formatDate(source.monitoring.workerHeartbeatAt)}</span><span className="min-w-0 break-words">冷却截止：{formatDate(source.monitoring.cooldownUntil)}</span>
                 </div>
-                {source.monitoring.latestArticle ? <p className="truncate text-xs text-muted-foreground">最新入库：<a className="hover:underline" href={source.monitoring.latestArticle.url} target="_blank" rel="noreferrer">{source.monitoring.latestArticle.title}</a> · {formatDate(source.monitoring.latestArticle.publishTime)}</p> : null}
-                {Object.keys(source.monitoring.lastHttpStatuses).length ? <p className="text-xs text-muted-foreground">HTTP 状态：{Object.entries(source.monitoring.lastHttpStatuses).map(([code, count]) => `${code}:${count}`).join(' · ')}</p> : null}
-                {source.unavailableReason ? <p className="text-red-700 dark:text-red-300">不可用原因：{source.unavailableReason}</p> : null}
-                {source.monitoring.lastFailure ? <p className="text-red-700 dark:text-red-300">最近失败：{source.monitoring.lastFailure}</p> : null}
-                {samples.length ? <div><p className="mb-1 font-medium">探测样本</p><ul className="space-y-1 text-xs text-muted-foreground">{samples.map((sample) => <li key={sample.url} className="truncate"><a className="hover:underline" href={sample.url} target="_blank" rel="noreferrer">{sample.title}</a>{sample.publishedAt ? ` · ${sample.publishedAt}` : ''}</li>)}</ul></div> : null}
-                <div className="flex flex-wrap justify-end gap-2">
-                  {!source.readOnly ? <Button size="sm" variant="outline" disabled={busy} onClick={() => { setEditingKey(source.sourceKey); setForm(recordForm(source, false)) }}><Pencil aria-hidden="true" />编辑</Button> : null}
-                  <Button size="sm" variant="outline" disabled={busy || !source.category} onClick={() => { setEditingKey(null); setForm(recordForm(source, true)) }}><Copy aria-hidden="true" />复制</Button>
-                  {!source.readOnly ? <Button size="sm" variant="outline" disabled={busy} onClick={() => mutation.mutate(() => probeSourceConfig(source.sourceKey))}><FlaskConical aria-hidden="true" />探测</Button> : null}
-                  {!source.readOnly ? <Button size="sm" variant="outline" disabled={busy || source.status !== 'probed' || !source.probeIsCurrent} onClick={() => mutation.mutate(() => approveSourceConfig(source.sourceKey))}><FileCheck2 aria-hidden="true" />审批</Button> : null}
-                  {!source.readOnly ? <Button size="sm" variant="outline" disabled={busy || !source.approvalIsCurrent} onClick={() => mutation.mutate(() => runSourceConfig(source.sourceKey))}><Play aria-hidden="true" />试运行</Button> : null}
-                  {!source.readOnly ? <Button size="sm" disabled={busy || (source.status !== 'enabled' && !source.canEnable)} variant={source.status === 'enabled' ? 'outline' : 'default'} onClick={() => mutation.mutate(() => setSourceConfigEnabled(source.sourceKey, source.status !== 'enabled'))}><Power aria-hidden="true" />{source.status === 'enabled' ? '停用' : '启用'}</Button> : null}
-                  {!source.readOnly && source.status === 'draft' ? <Button size="sm" variant="destructive" disabled={busy} onClick={() => { if (window.confirm('只允许删除没有文章、运行和订阅关系的草稿。确认删除？')) mutation.mutate(() => deleteSourceConfig(source.sourceKey)) }}><Trash2 aria-hidden="true" />删除</Button> : null}
+                {source.monitoring.latestArticle ? <p className="min-w-0 break-words text-xs text-muted-foreground">最新入库：<a className="break-words hover:underline" href={source.monitoring.latestArticle.url} target="_blank" rel="noreferrer">{source.monitoring.latestArticle.title}</a> · {formatDate(source.monitoring.latestArticle.publishTime)}</p> : null}
+                {Object.keys(source.monitoring.lastHttpStatuses).length ? <p className="break-words text-xs text-muted-foreground">HTTP 状态：{Object.entries(source.monitoring.lastHttpStatuses).map(([code, count]) => `${code}:${count}`).join(' · ')}</p> : null}
+                {source.unavailableReason ? <p className="break-words text-red-700 dark:text-red-300">不可用原因：{source.unavailableReason}</p> : null}
+                {source.monitoring.lastFailure ? <p className="break-words text-red-700 dark:text-red-300">最近失败：{source.monitoring.lastFailure}</p> : null}
+                {samples.length ? <div className="min-w-0"><p className="mb-1 font-medium">探测样本</p><ul className="min-w-0 space-y-1 text-xs text-muted-foreground">{samples.map((sample) => <li key={sample.url} className="min-w-0 break-words"><a className="break-words hover:underline" href={sample.url} target="_blank" rel="noreferrer">{sample.title}</a>{sample.publishedAt ? ` · ${sample.publishedAt}` : ''}</li>)}</ul></div> : null}
+                <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
+                  {!source.readOnly ? <Button className="w-full sm:w-auto" size="sm" variant="outline" disabled={busy} onClick={() => { setEditingKey(source.sourceKey); setForm(recordForm(source, false)) }}><Pencil aria-hidden="true" />编辑</Button> : null}
+                  <Button className="w-full sm:w-auto" size="sm" variant="outline" disabled={busy || !source.category} onClick={() => { setEditingKey(null); setForm(recordForm(source, true)) }}><Copy aria-hidden="true" />复制</Button>
+                  {!source.readOnly ? <Button className="w-full sm:w-auto" size="sm" variant="outline" disabled={busy} onClick={() => mutation.mutate(() => probeSourceConfig(source.sourceKey))}><FlaskConical aria-hidden="true" />探测</Button> : null}
+                  {!source.readOnly ? <Button className="w-full sm:w-auto" size="sm" variant="outline" disabled={busy || source.status !== 'probed' || !source.probeIsCurrent} onClick={() => mutation.mutate(() => approveSourceConfig(source.sourceKey))}><FileCheck2 aria-hidden="true" />审批</Button> : null}
+                  {!source.readOnly ? <Button className="w-full sm:w-auto" size="sm" variant="outline" disabled={busy || !source.approvalIsCurrent} onClick={() => mutation.mutate(() => runSourceConfig(source.sourceKey))}><Play aria-hidden="true" />试运行</Button> : null}
+                  {!source.readOnly ? <Button className="w-full sm:w-auto" size="sm" disabled={busy || (source.status !== 'enabled' && !source.canEnable)} variant={source.status === 'enabled' ? 'outline' : 'default'} onClick={() => mutation.mutate(() => setSourceConfigEnabled(source.sourceKey, source.status !== 'enabled'))}><Power aria-hidden="true" />{source.status === 'enabled' ? '停用' : '启用'}</Button> : null}
+                  {!source.readOnly && source.status === 'draft' ? <Button className="w-full sm:w-auto" size="sm" variant="destructive" disabled={busy} onClick={() => { if (window.confirm('只允许删除没有文章、运行和订阅关系的草稿。确认删除？')) mutation.mutate(() => deleteSourceConfig(source.sourceKey)) }}><Trash2 aria-hidden="true" />删除</Button> : null}
                 </div>
               </CardContent>
             </Card>
