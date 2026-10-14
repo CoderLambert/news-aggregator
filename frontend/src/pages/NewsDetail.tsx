@@ -134,6 +134,7 @@ export default function NewsDetail() {
   }, [cancelTranslation])
 
   const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
   const searchTriggerRef = useRef<HTMLButtonElement | null>(null)
   const returnSearchFocusRef = useRef(false)
   const closeSearch = useCallback(() => {
@@ -146,7 +147,6 @@ export default function NewsDetail() {
     returnSearchFocusRef.current = false
     searchTriggerRef.current?.focus()
   }, [searchOpen])
-  const [searchQuery, setSearchQuery] = useState('')
   const articleRef = useRef<HTMLElement | null>(null)
   const { matchCount, currentIndex, goNext, goPrev } = useArticleSearch(articleRef, searchQuery)
   const { headings, activeId } = useArticleToc(articleRef, [news?.full_content, news?.full_content_zh, showOriginal])
