@@ -74,11 +74,86 @@ POLICIES.update({policy.key: policy for policy in sector_policies(SourcePolicy)}
 
 def policy_for_url(url: str):
     host = (urlsplit(url).hostname or '').lower()
-    return next((p for p in POLICIES.values() if host in p.domains), None)
+    return next((p for p in all_policies() if host in p.domains), None)
 
 
 def policy_for_name(name: str):
-    return next((p for p in POLICIES.values() if p.name == name), None)
+    return next((p for p in all_policies() if p.name == name), None)
+
+
+def policy_for_key(source_key: str):
+    policy = POLICIES.get(source_key)
+    if policy is not None:
+        return policy
+    try:
+        from api.models import SourceConfig
+        config = SourceConfig.objects.prefetch_related('endpoints').get(pk=source_key)
+    except Exception as error:
+        # Registry reads also happen during migration/bootstrap. Only suppress
+        # database/app readiness failures; an absent row is simply unknown.
+        from django.core.exceptions import AppRegistryNotReady
+        from django.db import OperationalError, ProgrammingError
+        from api.models import SourceConfig
+        if isinstance(error, SourceConfig.DoesNotExist):
+            return None
+        if isinstance(error, (AppRegistryNotReady, OperationalError, ProgrammingError)):
+            return None
+        raise
+    return policy_from_config(config)
+
+
+def policy_from_config(config):
+    endpoints = [endpoint for endpoint in config.endpoints.all() if endpoint.enabled]
+    endpoint = min(endpoints, key=lambda value: (value.priority, value.pk)) if endpoints else None
+    domains = tuple(dict.fromkeys(
+        domain.lower().rstrip('.')
+        for current in endpoints
+        for domain in current.allowed_domains
+        if isinstance(domain, str) and domain
+    ))
+    body_fields = ()
+    if endpoint and endpoint.kind in {'rss', 'atom'} and config.feed_full_content_allowed:
+        allowed = endpoint.parser_config.get('full_content_fields', [])
+        body_fields = tuple(value for value in allowed if value in {'description', 'content:encoded', 'atom:content'})
+    unavailable = config.unavailable_reason if config.status in {'blocked', 'unsupported'} else ''
+    if config.status not in {'approved', 'enabled', 'blocked', 'unsupported'}:
+        unavailable = 'source_not_approved'
+    return SourcePolicy(
+        key=config.source_key,
+        name=config.channel_name,
+        domains=domains,
+        feed_url=endpoint.url if endpoint else '',
+        body_fields=body_fields,
+        content_kind=config.content_kind,
+        html_allowed=bool(config.official_html_full_content_allowed and config.approval_is_current),
+        unsupported_reason=unavailable,
+        contract_version=str(config.config_version),
+        poll_seconds=max(60, endpoint.request_interval_seconds if endpoint else 3600),
+        request_interval=max(3.0, float(endpoint.request_interval_seconds if endpoint else 10)),
+        region=config.region,
+        language=config.language,
+        description=f'{config.publisher_name} · {config.channel_name}',
+        default_category=config.category.name,
+        reading_policy='rss_summary_only' if config.reading_policy == 'summary_only' else config.reading_policy,
+    )
+
+
+def all_policies(*, include_unavailable=True):
+    policies = list(POLICIES.values())
+    try:
+        from api.models import SourceConfig
+        configs = SourceConfig.objects.select_related('category').prefetch_related('endpoints')
+        if not include_unavailable:
+            configs = configs.filter(status__in=['approved', 'enabled'])
+        for config in configs:
+            if config.source_key not in POLICIES:
+                policies.append(policy_from_config(config))
+    except Exception as error:
+        from django.core.exceptions import AppRegistryNotReady
+        from django.db import OperationalError, ProgrammingError
+        if not isinstance(error, (AppRegistryNotReady, OperationalError, ProgrammingError)):
+            raise
+    return tuple(policies)
 
 
 def retired_policy_for_url(url: str):
@@ -91,7 +166,7 @@ def retired_policy_for_url(url: str):
 
 
 def candidate_contract_allows(candidate) -> bool:
-    policy = POLICIES.get(candidate.source_key)
+    policy = policy_for_key(candidate.source_key)
     if not policy or policy.unsupported_reason or candidate.content_kind != policy.content_kind:
         return False
     target = urlsplit(candidate.target_url)
@@ -165,7 +240,9 @@ def approved_feed_endpoint(source_key, feed_url, effective_url):
         effective_url = normalize_article_url(effective_url, max_length=1024, require_article=False)
     except ValueError:
         return False
-    policy = POLICIES[source_key]
+    policy = policy_for_key(source_key)
+    if policy is None:
+        return False
     hosts = {*policy.domains, urlsplit(feed_url).hostname, *REVIEWED_FEED_REDIRECT_HOSTS.get(source_key, ())}
     parsed = urlsplit(effective_url)
     return parsed.hostname in hosts and parsed.port in {None, 80, 443}

@@ -8,7 +8,7 @@ import feedparser
 from api.services.article_identity import normalize_article_url, validate_upstream_id
 from api.services.article_fetcher.types import FullContentCandidate
 from api.services.article_fetcher.extractors import html_fragment_to_markdown
-from api.services.source_policy import POLICIES
+from api.services.source_policy import policy_for_key
 from api.services.source_dates import parse_source_datetime, parse_feed_datetime
 
 MAX_FEED_BYTES = 8 * 1024 * 1024
@@ -61,7 +61,9 @@ def _excerpt(markdown):
 
 def feed_entry_item(entry, source_key, *, feed_url, effective_url, request_started_at, version,
                     request_chain=(), classify=None):
-    policy = POLICIES[source_key]
+    policy = policy_for_key(source_key)
+    if policy is None:
+        raise ValueError('unknown_source')
     title = _plain(entry.get('title', '')).strip()
     target = normalize_article_url(entry.get('link', ''))
     identity = validate_upstream_id(entry.get('id') or entry.get('guid') or target)

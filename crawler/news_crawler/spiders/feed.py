@@ -15,7 +15,7 @@ from api.models import News, NewsSourceItem
 from api.services.article_identity import InvalidIdentity
 from api.services.feed_state import prepare_feed_request, accept_not_modified, defer_feed
 from api.services.feed_support import parse_feed, feed_entry_item, InvalidFeed
-from api.services.source_policy import POLICIES, approved_feed_endpoint
+from api.services.source_policy import policy_for_key, approved_feed_endpoint
 from news_crawler.category_map import classify
 from news_crawler.feed_receipts import FeedReceipt, FeedReceiptRegistry
 from news_crawler.items import NewsItem
@@ -31,7 +31,7 @@ class FeedSpider(Spider):
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super().from_crawler(crawler, *args, **kwargs)
-        policy = POLICIES[spider.name]
+        policy = policy_for_key(spider.name)
         feeds = spider.start_urls or [policy.feed_url]
         # Publisher identities and feed transport hosts are different for BBC
         # and other syndicated sources. Admit only reviewed feed endpoints.
@@ -48,7 +48,7 @@ class FeedSpider(Spider):
         return spider
 
     async def start(self):
-        urls = self.start_urls or [POLICIES[self.name].feed_url]
+        urls = self.start_urls or [policy_for_key(self.name).feed_url]
         for url in urls:
             context = await _database(prepare_feed_request, self.name, url, window_days=self.window_days)
             if context.next_poll_at and context.next_poll_at > timezone.now():

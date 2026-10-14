@@ -168,6 +168,7 @@ class FeedState(models.Model):
     """Headers refer only to a feed representation committed to the database."""
     source_key = models.CharField(max_length=64)
     feed_url = models.URLField(max_length=1024)
+    config_version = models.CharField(max_length=64, default='1')
     etag = models.TextField(blank=True, default='')
     last_modified = models.TextField(blank=True, default='')
     revision = models.PositiveBigIntegerField(default=0)
@@ -179,7 +180,7 @@ class FeedState(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(
-            fields=['source_key', 'feed_url'], name='unique_source_feed_state',
+            fields=['source_key', 'feed_url', 'config_version'], name='unique_source_feed_state_version',
         )]
 
 

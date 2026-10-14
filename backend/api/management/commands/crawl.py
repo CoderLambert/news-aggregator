@@ -13,54 +13,12 @@ from django.utils.dateparse import parse_datetime
 from scrapy.crawler import CrawlerProcess
 from scrapy.settings import default_settings as scrapy_default_settings
 from scrapy.utils.project import get_project_settings
-from api.services.source_policy import POLICIES
+from api.services.source_registry import CODE_SPIDERS, runtime_registry
 
 CRAWLER_DIR = os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'crawler')
-SPIDERS = {
-    # General tech news & aggregators
-    'bbc': 'bbc',
-    'reuters': 'reuters',
-    'hackernews': 'hackernews',
-    'github': 'github',
-    'devto': 'devto',
-    'techcrunch': 'techcrunch',
-    'producthunt': 'producthunt',
-    'infoq': 'infoq',
-    # Frontend Development
-    'css_tricks': 'css_tricks',
-    'webdev': 'webdev',
-    'chrome_dev': 'chrome_dev',
-    'smashing_magazine': 'smashing_magazine',
-    'react_blog': 'react_blog',
-    'svelte_blog': 'svelte_blog',
-    'angular_blog': 'angular_blog',
-    'webkit': 'webkit',
-    'v8': 'v8',
-    'mozilla_hacks': 'mozilla_hacks',
-    'frontend_focus': 'frontend_focus',
-    # AI Company Blogs
-    'openai_blog': 'openai_blog',
-    'anthropic': 'anthropic',
-    'deepmind': 'deepmind',
-    'meta_ai': 'meta_ai',
-    'mistral': 'mistral',
-    # AI Specialized Media
-    'venturebeat_ai': 'venturebeat_ai',
-    'ars_technica_ai': 'ars_technica_ai',
-    'mit_tech_review_ai': 'mit_tech_review_ai',
-    # AI Papers
-    'arxiv_ai': 'arxiv_ai',
-    # Chinese AI News
-    'jiqizhixin': 'jiqizhixin',
-    'leiphone': 'leiphone',
-    'sanliu_kr': 'sanliu_kr',
-}
-
-# Historical contracts remain available for reading and audited identity repairs.
-# Only public, supported sources are registered for new collection.
-from api.services.sector_feeds import SECTOR_KEYS
-SPIDERS.update({key: key for key in SECTOR_KEYS})
-SPIDERS = {key: value for key, value in SPIDERS.items() if not POLICIES[key].unsupported_reason}
+# Compatibility export for code that enumerates reviewed Python spiders.
+# Execution and admin validation use the live merged registry below.
+SPIDERS = CODE_SPIDERS
 
 
 def _apply_crawl_only_politeness(settings):
@@ -132,8 +90,7 @@ class Command(BaseCommand):
             'spider',
             nargs='?',
             default='all',
-            choices=['all'] + list(SPIDERS.keys()),
-            help='指定爬虫名称 (all=全部爬虫)',
+            help='指定来源标识 (all=全部已注册来源)',
         )
 
     def handle(self, *args, **options):
@@ -143,6 +100,9 @@ class Command(BaseCommand):
         spider_name = options['spider']
         if spider_name == 'all':
             return self._crawl_all_serially()
+        entry = runtime_registry().get(spider_name)
+        if entry is None or not entry.runnable:
+            raise CommandError(f'未知、未审批或不可运行的来源：{spider_name}')
 
         from scrapy.crawler import CrawlerProcess
 
@@ -165,10 +125,10 @@ class Command(BaseCommand):
             # item dumps never reach persistent worker logs.
             _configure_crawl_only_logging()
 
-        spiders = [SPIDERS[spider_name]]
+        spiders = [(entry.spider, {'source_key': spider_name} if entry.maintenance == 'database' else {})]
 
         crawlers = []
-        for spider in spiders:
+        for spider, spider_kwargs in spiders:
             crawler = process.create_crawler(spider)
             # Spider.custom_settings are applied by create_crawler. Clamp the
             # final settings after that step, before the engine freezes them.
@@ -182,9 +142,9 @@ class Command(BaseCommand):
             crawler.settings.set('DOWNLOAD_MAXSIZE', 8 * 1024 * 1024, priority='cmdline')
             crawler.settings.set('RETRY_TIMES', 1, priority='cmdline')
             crawler.settings.set('RETRY_HTTP_CODES', [500, 502, 504, 522, 524], priority='cmdline')
-            process.crawl(crawler)
-            crawlers.append((spider, crawler))
-            self.stdout.write(self.style.SUCCESS(f'启动爬虫: {spider}'))
+            process.crawl(crawler, **spider_kwargs)
+            crawlers.append((spider_name, crawler))
+            self.stdout.write(self.style.SUCCESS(f'启动爬虫: {spider_name}'))
 
         process.start()
         for spider, crawler in crawlers:
@@ -196,12 +156,13 @@ class Command(BaseCommand):
 
     def _crawl_all_serially(self):
         """Run sources in isolated reactors so the shared budget cannot starve them."""
+        sources = tuple(runtime_registry())
         manage_py = Path(__file__).resolve().parents[3] / 'manage.py'
         max_attempts = 3
         max_wait = 15.0
         failures = []
-        for index, spider in enumerate(SPIDERS.values(), 1):
-            self.stdout.write(f'批量进度 {index}/{len(SPIDERS)} source={spider}')
+        for index, spider in enumerate(sources, 1):
+            self.stdout.write(f'批量进度 {index}/{len(sources)} source={spider}')
             final = {}
             return_code = 0
             for attempt in range(1, max_attempts + 1):
@@ -234,4 +195,4 @@ class Command(BaseCommand):
                 failures.append(f'{spider}:{final.get("outcome", "missing_result")}:{return_code}')
         if failures:
             raise CommandError('批量抓取未全部完成：' + ', '.join(failures))
-        self.stdout.write(self.style.SUCCESS(f'批量抓取完成：{len(SPIDERS)} 个来源均获得终态。'))
+        self.stdout.write(self.style.SUCCESS(f'批量抓取完成：{len(sources)} 个来源均获得终态。'))

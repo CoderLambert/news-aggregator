@@ -19,7 +19,7 @@ initialize_django()
 from api.services.request_budget import (
     BudgetDeferred, claim_budget, confirm_permit, record_response, release_budget, scope_intervals,
 )
-from api.services.source_policy import POLICIES
+from api.services.source_policy import policy_for_key
 
 
 async def _db(function, *args, **kwargs):
@@ -78,7 +78,7 @@ class BudgetedHTTPDownloadHandler:
 
     def _allowed(self, request):
         parsed = urlsplit(request.url)
-        policy = POLICIES.get(self.crawler.spider.name)
+        policy = policy_for_key(self.crawler.spider.name)
         hosts = set(policy.domains) if policy else set()
         if policy and policy.feed_url:
             hosts.add(urlsplit(policy.feed_url).hostname)

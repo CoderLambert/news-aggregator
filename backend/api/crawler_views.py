@@ -12,7 +12,6 @@ from api.crawler_serializers import (
     CrawlerSettingsSerializer,
     CrawlerTargetSerializer,
 )
-from api.management.commands.crawl import SPIDERS
 from api.models import CrawlBatch, CrawlRun, CrawlerTarget
 from api.services.crawler_control import (
     ACTIVE_RUN_STATUSES,
@@ -23,6 +22,7 @@ from api.services.crawler_control import (
     sync_crawler_targets,
     worker_is_online,
 )
+from api.services.source_registry import runtime_registry
 
 
 class IsActiveSuperuser(BasePermission):
@@ -43,7 +43,7 @@ def error_response(code, message, http_status=status.HTTP_400_BAD_REQUEST, *, fi
 def target_queryset():
     active_runs = CrawlRun.objects.filter(status__in=ACTIVE_RUN_STATUSES).select_related('target', 'batch')
     latest = CrawlRun.objects.filter(target_id=OuterRef('pk'), finished_at__isnull=False).order_by('-finished_at', '-queued_at')
-    return CrawlerTarget.objects.filter(spider_name__in=SPIDERS).annotate(
+    return CrawlerTarget.objects.filter(spider_name__in=runtime_registry(include_unavailable=True)).annotate(
         last_run_stats=Subquery(latest.values('stats')[:1], output_field=JSONField()),
         last_run_exit_code=Subquery(latest.values('exit_code')[:1], output_field=IntegerField()),
     ).prefetch_related(
@@ -139,7 +139,7 @@ class CrawlerTargetDetailView(APIView):
     permission_classes = [IsActiveSuperuser]
 
     def patch(self, request, spider_name):
-        if spider_name not in SPIDERS:
+        if spider_name not in runtime_registry(include_unavailable=True):
             return error_response('unknown_spider', '该爬虫不在服务器白名单中。', status.HTTP_404_NOT_FOUND)
         if set(request.data) != {'enabled'} or not isinstance(request.data.get('enabled'), bool):
             return error_response('invalid_target', '只允许修改 enabled 布尔值。')
@@ -167,7 +167,7 @@ class CrawlBatchListCreateView(APIView):
         if spider_names is not None:
             if not isinstance(spider_names, list) or not spider_names or not all(isinstance(name, str) for name in spider_names):
                 return error_response('invalid_spiders', 'spider_names 必须是非空字符串数组。')
-            unknown = sorted(set(spider_names) - set(SPIDERS))
+            unknown = sorted(set(spider_names) - set(runtime_registry()))
             if unknown:
                 return error_response('unknown_spider', '包含不在服务器白名单中的爬虫。', fields={'spider_names': unknown})
             spider_names = list(dict.fromkeys(spider_names))

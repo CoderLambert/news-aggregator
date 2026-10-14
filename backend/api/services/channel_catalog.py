@@ -1,5 +1,6 @@
 """Explicit catalog initialization; directory reads never create sources."""
-from api.services.source_policy import POLICIES, policy_for_name
+from api.services.source_policy import policy_for_key, policy_for_name
+from api.services.source_registry import runtime_registry
 
 # Known publisher metadata, not a language/market inference. Unknown countries
 # remain empty; country of a Chinese edition is not automatically China.
@@ -9,11 +10,10 @@ PUBLISHER_COUNTRIES = {'bbc': 'UK', 'bbc_health': 'UK', 'deepmind': 'UK', 'mistr
 
 
 def subscription_status(source):
-    from api.management.commands.crawl import SPIDERS
     policy = policy_for_name(source.name)
     if not policy:
         return 'inactive', 'unregistered_source'
-    if policy.unsupported_reason or policy.key not in SPIDERS:
+    if policy.unsupported_reason or policy.key not in runtime_registry():
         return 'inactive', policy.unsupported_reason or 'unregistered_source'
     return 'active', ''
 
@@ -32,9 +32,8 @@ def catalog_defaults(policy):
 
 def sync_channel_catalog():
     from api.models import Source
-    from api.management.commands.crawl import SPIDERS
     from api.services.sector_feeds import SECTOR_KEYS
-    for key in dict.fromkeys([*SPIDERS, *sorted(SECTOR_KEYS)]):
-        policy = POLICIES[key]
+    for key in dict.fromkeys([*runtime_registry(), *sorted(SECTOR_KEYS)]):
+        policy = policy_for_key(key)
         # Explicit/manual existing values are never overwritten by a GET or sync.
         Source.objects.get_or_create(name=policy.name, defaults=catalog_defaults(policy))

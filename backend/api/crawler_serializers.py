@@ -44,8 +44,8 @@ class CrawlRunSerializer(serializers.ModelSerializer):
         ]
 
     def get_source_active(self, obj):
-        from api.management.commands.crawl import SPIDERS
-        return obj.target_id in SPIDERS
+        from api.services.source_registry import runtime_registry
+        return obj.target_id in runtime_registry()
 
     def get_duration_seconds(self, obj):
         if not obj.started_at:
@@ -110,8 +110,8 @@ class CrawlerTargetSerializer(serializers.ModelSerializer):
         return CrawlRunSerializer(run).data
 
     def get_supported(self, obj):
-        from api.services.source_policy import POLICIES
-        policy = POLICIES.get(obj.spider_name)
+        from api.services.source_policy import policy_for_key
+        policy = policy_for_key(obj.spider_name)
         return bool(policy and not policy.unsupported_reason)
 
     def get_last_result_status(self, obj):
@@ -124,8 +124,8 @@ class CrawlerTargetSerializer(serializers.ModelSerializer):
         return outcome if outcome in {'deferred', 'rate_limited', 'blocked', 'network_error', 'http_error', 'filtered', 'parse_failed'} else obj.last_status
 
     def get_unsupported_reason(self, obj):
-        from api.services.source_policy import POLICIES
-        policy = POLICIES.get(obj.spider_name)
+        from api.services.source_policy import policy_for_key
+        policy = policy_for_key(obj.spider_name)
         reason = policy.unsupported_reason if policy else 'unknown_source'
         return {'authorized_delivery_required': '需要官方授权采集渠道。',
                 'public_access_denied': '来源已拒绝公开采集，已移除。',

@@ -5,8 +5,8 @@ from django.db import IntegrityError, transaction
 from django.db.models import Count
 from django.utils import timezone
 
-from api.management.commands.crawl import SPIDERS
 from api.models import CrawlBatch, CrawlRun, CrawlerSettings, CrawlerTarget
+from api.services.source_registry import runtime_registry
 
 
 ACTIVE_RUN_STATUSES = ('queued', 'running', 'cancel_requested')
@@ -49,18 +49,19 @@ def display_name(spider_name):
 
 
 def sync_crawler_targets():
+    registry = runtime_registry(include_unavailable=True)
     existing = set(CrawlerTarget.objects.values_list('spider_name', flat=True))
-    for sort_order, spider_name in enumerate(SPIDERS):
+    for sort_order, (spider_name, entry) in enumerate(registry.items()):
         target, _ = CrawlerTarget.objects.get_or_create(
             spider_name=spider_name,
             defaults={
-                'display_name': display_name(spider_name),
+                'display_name': entry.display_name,
                 'sort_order': sort_order,
-                'enabled': spider_name not in {'reuters', 'jiqizhixin', 'sanliu_kr'},
+                'enabled': entry.maintenance == 'code' and spider_name not in {'reuters', 'jiqizhixin', 'sanliu_kr'},
             },
         )
         CrawlerTarget.objects.filter(pk=target.pk).update(
-            display_name=display_name(spider_name), sort_order=sort_order,
+            display_name=entry.display_name, sort_order=sort_order,
         )
         existing.discard(spider_name)
     if existing:
@@ -74,10 +75,8 @@ def sync_crawler_targets():
 @transaction.atomic
 def create_crawl_batch(*, trigger, requested_by=None, spider_names=None, retry_of=None):
     sync_crawler_targets()
-    targets = CrawlerTarget.objects.select_for_update().filter(enabled=True, spider_name__in=SPIDERS)
-    from api.services.source_policy import POLICIES
-    unsupported = [key for key, policy in POLICIES.items() if policy.unsupported_reason]
-    targets = targets.exclude(spider_name__in=unsupported)
+    registry = runtime_registry()
+    targets = CrawlerTarget.objects.select_for_update().filter(enabled=True, spider_name__in=registry)
     if spider_names is not None:
         targets = targets.filter(spider_name__in=spider_names)
     targets = list(targets.order_by('sort_order', 'spider_name'))
@@ -123,7 +122,7 @@ def create_crawl_batch(*, trigger, requested_by=None, spider_names=None, retry_o
 
 @transaction.atomic
 def claim_next_run():
-    if CrawlRun.objects.filter(status='queued').exclude(target_id__in=SPIDERS).exists():
+    if CrawlRun.objects.filter(status='queued').exclude(target_id__in=runtime_registry()).exists():
         sync_crawler_targets()
     run = (
         CrawlRun.objects.select_for_update()

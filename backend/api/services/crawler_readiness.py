@@ -3,10 +3,10 @@ from datetime import timedelta
 from django.db.models import Max, Min
 from django.utils import timezone
 
-from api.management.commands.crawl import SPIDERS
 from api.models import CrawlerSettings, CrawlerTarget, CrawlRun, FeedState, SearchIndexSettings
 from api.services.crawler_control import ACTIVE_RUN_STATUSES
-from api.services.source_policy import POLICIES
+from api.services.source_policy import policy_for_key
+from api.services.source_registry import runtime_registry
 
 _UNHEALTHY = frozenset({
     'failed', 'partial', 'rate_limited', 'blocked', 'network_error', 'http_error',
@@ -25,7 +25,7 @@ def readiness_snapshot():
     index_online = bool(index and index.worker_heartbeat_at and
                         index.worker_heartbeat_at >= now - timedelta(seconds=90))
 
-    names = sorted(SPIDERS)[:100]
+    names = sorted(runtime_registry(include_unavailable=True))[:100]
     targets = {row.spider_name: row for row in
                CrawlerTarget.objects.filter(spider_name__in=names).only(
                    'spider_name', 'display_name', 'enabled', 'last_status', 'last_finished_at')}
@@ -41,7 +41,7 @@ def readiness_snapshot():
     sources = []
     for name in names:
         target = targets.get(name)
-        policy = POLICIES.get(name)
+        policy = policy_for_key(name)
         supported = bool(policy and not policy.unsupported_reason)
         registered = target is not None
         enabled = bool(registered and target.enabled and supported)

@@ -14,7 +14,7 @@ from api.services.article_identity import InvalidIdentity, normalize_article_url
 from api.services.article_fetcher.types import FullContentCandidate
 from api.services.article_fetcher.validators import validate_candidate
 from api.services.full_content_status import commit_candidate, enqueue_fetch
-from api.services.source_policy import POLICIES, policy_for_name
+from api.services.source_policy import policy_for_key, policy_for_name
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,7 @@ def ingest_item(item, *, source_defaults=None) -> IngestResult:
     category_name = item.get('category_name')
     if not isinstance(category_name, str) or not category_name.strip() or len(category_name) > 100:
         return IngestResult(None, 'policy_skip', 'invalid_identity')
-    policy = POLICIES.get(item['source_key']) if item.get('source_key') else policy_for_name(item.get('source_name', ''))
+    policy = policy_for_key(item['source_key']) if item.get('source_key') else policy_for_name(item.get('source_name', ''))
     if not policy or policy.unsupported_reason:
         return IngestResult(None, 'policy_skip', policy.unsupported_reason if policy else 'unsupported')
     try:

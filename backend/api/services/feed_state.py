@@ -11,7 +11,7 @@ from django.utils import timezone
 from api.models import FeedState
 from api.services.article_identity import normalize_article_url
 from api.services.article_fetcher.validators import VALIDATOR_VERSION
-from api.services.source_policy import POLICIES, approved_feed_endpoint
+from api.services.source_policy import policy_for_key, approved_feed_endpoint
 
 
 @dataclass(frozen=True)
@@ -34,7 +34,9 @@ PRESENTATION_FIELDS = frozenset({'description', 'poll_seconds', 'request_interva
 
 
 def policy_signature(source_key, *, window_days=30, admitted=True):
-    policy = POLICIES[source_key]
+    policy = policy_for_key(source_key)
+    if policy is None:
+        raise ValueError('unknown_source')
     contract = {key: value for key, value in asdict(policy).items() if key not in PRESENTATION_FIELDS}
     contract.update(
         validator=VALIDATOR_VERSION, window_days=window_days, admitted=bool(admitted),
@@ -48,10 +50,15 @@ def policy_signature(source_key, *, window_days=30, admitted=True):
 
 def prepare_feed_request(source_key, feed_url, *, window_days=30, admitted=True):
     feed_url = normalize_article_url(feed_url, max_length=1024, require_article=False)
-    if not approved_feed_endpoint(source_key, POLICIES[source_key].feed_url or feed_url, feed_url):
+    policy = policy_for_key(source_key)
+    if policy is None or not approved_feed_endpoint(source_key, policy.feed_url or feed_url, feed_url):
         raise ValueError('unapproved_feed_endpoint')
     signature = policy_signature(source_key, window_days=window_days, admitted=admitted)
-    state, _ = FeedState.objects.get_or_create(source_key=source_key, feed_url=feed_url)
+    state, _ = FeedState.objects.get_or_create(
+        source_key=source_key,
+        feed_url=feed_url,
+        config_version=policy.contract_version,
+    )
     for _ in range(3):
         if state.policy_version == signature:
             break
@@ -91,7 +98,7 @@ def commit_feed_checkpoint(context, *, etag='', last_modified='', effective_url=
     return _query(context).update(
         etag=etag, last_modified=last_modified, validated_effective_url=endpoint,
         last_checked_at=now, last_success_at=now,
-        next_poll_at=now + timedelta(seconds=POLICIES[context.source_key].poll_seconds),
+        next_poll_at=now + timedelta(seconds=policy_for_key(context.source_key).poll_seconds),
         revision=F('revision') + 1,
     ) == 1
 
@@ -103,7 +110,7 @@ def accept_not_modified(context, *, effective_url):
         return False
     now = timezone.now()
     return _query(context).update(last_checked_at=now, last_success_at=now,
-                                 next_poll_at=now + timedelta(seconds=POLICIES[context.source_key].poll_seconds),
+                                 next_poll_at=now + timedelta(seconds=policy_for_key(context.source_key).poll_seconds),
                                  revision=F('revision') + 1) == 1
 
 

@@ -270,7 +270,8 @@ def commit_candidate(news, candidate, *, provider='', lease: FetchLease | None =
     if identities.exists() and not identities.filter(upstream_id=candidate.source_item_id).exists() and not cms_permalink_binding:
         return ContentCommit('rejected', 'body_mismatch')
     from api.services.source_policy import POLICIES
-    candidate_policy = POLICIES.get(candidate.source_key)
+    from api.services.source_policy import policy_for_key
+    candidate_policy = policy_for_key(candidate.source_key)
     structural_binding = identities.filter(upstream_id=candidate.source_item_id).exists()
     title = current.title
     if candidate_policy and current.source.name != candidate_policy.name and structural_binding:
