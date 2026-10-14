@@ -1,6 +1,12 @@
 from rest_framework import serializers
 
-from api.models import CrawlBatch, CrawlRun, CrawlerSettings, CrawlerTarget
+from django.db import transaction
+from urllib.parse import urlsplit
+
+from api.models import (
+    Category, CrawlBatch, CrawlRun, CrawlerSettings, CrawlerTarget, Source,
+    SourceConfig, SourceEndpoint,
+)
 
 
 class CrawlerSettingsSerializer(serializers.ModelSerializer):
@@ -138,6 +144,212 @@ class CrawlerTargetSerializer(serializers.ModelSerializer):
         if attrs.get('enabled') is True and self.instance and not self.get_supported(self.instance):
             raise serializers.ValidationError({'enabled': self.get_unsupported_reason(self.instance)})
         return attrs
+
+
+class SourceEndpointSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SourceEndpoint
+        fields = [
+            'id', 'kind', 'url', 'allowed_domains', 'priority', 'parser_config',
+            'conditional_requests', 'request_interval_seconds', 'max_response_bytes',
+            'max_pages', 'max_items', 'enabled',
+        ]
+        read_only_fields = ['id']
+
+    def validate_allowed_domains(self, value):
+        if (not isinstance(value, list) or not 1 <= len(value) <= 10 or
+                any(not isinstance(item, str) or not item or len(item) > 253 for item in value)):
+            raise serializers.ValidationError('允许域名须为 1–10 个有效域名。')
+        normalized = []
+        for item in value:
+            host = item.lower().rstrip('.')
+            if host.startswith('*.') or '/' in host or ':' in host or '@' in host or host == 'localhost':
+                raise serializers.ValidationError('不允许通配符、端口、本地域名或路径。')
+            try:
+                host = host.encode('idna').decode('ascii')
+            except UnicodeError:
+                raise serializers.ValidationError('域名无效。') from None
+            normalized.append(host)
+        return list(dict.fromkeys(normalized))
+
+    def validate_parser_config(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError('解析配置须为 JSON 对象。')
+        return value
+
+    def validate(self, attrs):
+        from api.services.channel_intake import normalize_intake_url
+        from bs4 import BeautifulSoup
+        import re
+
+        data = {**(self.instance and {
+            field: getattr(self.instance, field)
+            for field in ('kind', 'url', 'allowed_domains', 'parser_config', 'request_interval_seconds',
+                          'max_response_bytes', 'max_pages', 'max_items')
+        } or {}), **attrs}
+        url, host, _path, _query = normalize_intake_url(data['url'])
+        data['url'] = url
+        attrs['url'] = url
+        domains = data.get('allowed_domains', [])
+        if host not in {value.removeprefix('www.') for value in domains}:
+            raise serializers.ValidationError({'allowed_domains': '必须包含入口 URL 的官方域名。'})
+        interval = data.get('request_interval_seconds', 10)
+        size = data.get('max_response_bytes', 2 * 1024 * 1024)
+        pages = data.get('max_pages', 1)
+        items = data.get('max_items', 50)
+        if not 3 <= interval <= 86400:
+            raise serializers.ValidationError({'request_interval_seconds': '请求间隔须为 3 秒到 24 小时。'})
+        if not 1024 <= size <= 8 * 1024 * 1024:
+            raise serializers.ValidationError({'max_response_bytes': '响应上限须为 1 KiB 到 8 MiB。'})
+        if not 1 <= pages <= 5 or not 1 <= items <= 200:
+            raise serializers.ValidationError('分页最多 5 页，每次最多 200 条。')
+
+        config = data.get('parser_config') or {}
+        kind = data['kind']
+        allowed_keys = {
+            'rss': {'identity_field', 'title_field', 'link_field', 'summary_field', 'published_field', 'full_content_fields'},
+            'atom': {'identity_field', 'title_field', 'link_field', 'summary_field', 'published_field', 'full_content_fields'},
+            'json': {'list_path', 'fields', 'next_path'},
+            'html': {'list_item', 'title', 'link', 'summary', 'date', 'content', 'date_format'},
+        }[kind]
+        extra = set(config) - allowed_keys
+        if extra:
+            raise serializers.ValidationError({'parser_config': f'不支持的解析字段：{", ".join(sorted(extra))}'})
+        path_pattern = re.compile(r'^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$')
+        if kind == 'json':
+            if not path_pattern.fullmatch(str(config.get('list_path', ''))):
+                raise serializers.ValidationError({'parser_config': 'JSON list_path 必须是有限点路径。'})
+            fields = config.get('fields')
+            required = {'identity', 'title', 'link', 'published'}
+            if not isinstance(fields, dict) or not required <= set(fields) or set(fields) - (required | {'summary', 'content', 'author', 'image'}):
+                raise serializers.ValidationError({'parser_config': 'JSON fields 缺少必需映射或包含未知映射。'})
+            if any(not path_pattern.fullmatch(str(value)) for value in fields.values()):
+                raise serializers.ValidationError({'parser_config': 'JSON 字段映射必须是有限点路径。'})
+            if config.get('next_path') and not path_pattern.fullmatch(str(config['next_path'])):
+                raise serializers.ValidationError({'parser_config': 'JSON next_path 必须是有限点路径。'})
+        elif kind == 'html':
+            for key in ('list_item', 'title', 'link', 'date'):
+                if not isinstance(config.get(key), str) or not config[key].strip():
+                    raise serializers.ValidationError({'parser_config': f'HTML 配置缺少 {key}。'})
+            for key in ('list_item', 'title', 'link', 'summary', 'date', 'content'):
+                selector = config.get(key)
+                if not selector:
+                    continue
+                if not isinstance(selector, str) or len(selector) > 200:
+                    raise serializers.ValidationError({'parser_config': f'{key} 选择器过长或无效。'})
+                try:
+                    BeautifulSoup('<div></div>', 'html.parser').select(selector)
+                except Exception:
+                    raise serializers.ValidationError({'parser_config': f'{key} 不是有效 CSS 选择器。'}) from None
+        else:
+            full_fields = config.get('full_content_fields', [])
+            if (not isinstance(full_fields, list) or
+                    any(value not in {'description', 'content:encoded', 'atom:content'} for value in full_fields)):
+                raise serializers.ValidationError({'parser_config': 'RSS/Atom 正文字段不在允许列表中。'})
+        return attrs
+
+
+class SourceConfigSerializer(serializers.ModelSerializer):
+    endpoints = SourceEndpointSerializer(many=True)
+    category_name = serializers.CharField(source='category.name', read_only=True)
+    source_id = serializers.IntegerField(source='source.id', read_only=True)
+    maintenance = serializers.SerializerMethodField()
+    probe_is_current = serializers.BooleanField(read_only=True)
+    approval_is_current = serializers.BooleanField(read_only=True)
+    can_enable = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SourceConfig
+        fields = [
+            'source_key', 'source_id', 'publisher_name', 'channel_name', 'category', 'category_name',
+            'region', 'language', 'content_kind', 'reading_policy', 'status', 'config_version',
+            'summary_allowed', 'feed_full_content_allowed', 'official_html_full_content_allowed',
+            'probe_summary', 'probed_config_version', 'probed_at', 'approved_config_version',
+            'approved_at', 'unavailable_reason', 'maintenance', 'probe_is_current',
+            'approval_is_current', 'can_enable', 'endpoints', 'created_at', 'updated_at',
+        ]
+        read_only_fields = [
+            'status', 'config_version', 'probe_summary', 'probed_config_version', 'probed_at',
+            'approved_config_version', 'approved_at', 'unavailable_reason', 'created_at', 'updated_at',
+        ]
+
+    def get_maintenance(self, obj):
+        return 'database'
+
+    def get_can_enable(self, obj):
+        return obj.probe_is_current and obj.approval_is_current and obj.status in {'approved', 'enabled'}
+
+    def validate_source_key(self, value):
+        from api.services.source_policy import POLICIES
+        if self.instance is None and value in POLICIES:
+            raise serializers.ValidationError('该 source_key 由代码维护，不能被后台覆盖。')
+        return value
+
+    def validate(self, attrs):
+        if self.instance is None and not attrs.get('endpoints'):
+            raise serializers.ValidationError({'endpoints': '至少需要一个入口。'})
+        if attrs.get('content_kind') == 'regulatory_data' and attrs.get('reading_policy') not in {None, 'regulatory_data'}:
+            raise serializers.ValidationError({'reading_policy': '监管数据必须使用 regulatory_data 读取政策。'})
+        if attrs.get('official_html_full_content_allowed') and attrs.get('reading_policy') == 'summary_only':
+            raise serializers.ValidationError({'official_html_full_content_allowed': '摘要模式不能批准网页正文。'})
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        endpoints = validated_data.pop('endpoints')
+        user = self.context['request'].user
+        primary_url = endpoints[0]['url']
+        source, created = Source.objects.get_or_create(
+            name=validated_data['channel_name'],
+            defaults={
+                'url': primary_url, 'region': validated_data.get('region', 'domestic'),
+                'country': 'CN' if validated_data.get('region', 'domestic') == 'domestic' else '',
+                'language': validated_data.get('language', 'zh'), 'source_type': 'news',
+                'description': f"{validated_data['publisher_name']} · {validated_data['channel_name']}",
+            },
+        )
+        if not created and hasattr(source, 'crawler_config'):
+            raise serializers.ValidationError({'channel_name': '该频道已经绑定来源配置。'})
+        config = SourceConfig.objects.create(source=source, created_by=user, **validated_data)
+        SourceEndpoint.objects.bulk_create([SourceEndpoint(source_config=config, **data) for data in endpoints])
+        CrawlerTarget.objects.update_or_create(
+            spider_name=config.source_key,
+            defaults={'display_name': config.channel_name, 'enabled': False},
+        )
+        return config
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        endpoints = validated_data.pop('endpoints', None)
+        current_endpoints = list(instance.endpoints.order_by('priority', 'id').values(
+            'kind', 'url', 'allowed_domains', 'priority', 'parser_config', 'conditional_requests',
+            'request_interval_seconds', 'max_response_bytes', 'max_pages', 'max_items', 'enabled',
+        ))
+        endpoint_changed = endpoints is not None and current_endpoints != endpoints
+        field_changed = any(getattr(instance, key) != value for key, value in validated_data.items())
+        if not endpoint_changed and not field_changed:
+            return instance
+        for key, value in validated_data.items():
+            setattr(instance, key, value)
+        instance.config_version += 1
+        instance.status = 'draft'
+        instance.probe_summary = {}
+        instance.probed_config_version = None
+        instance.probed_at = None
+        instance.approved_config_version = None
+        instance.approved_by = None
+        instance.approved_at = None
+        instance.unavailable_reason = ''
+        instance.save()
+        if endpoints is not None:
+            instance.endpoints.all().delete()
+            SourceEndpoint.objects.bulk_create([SourceEndpoint(source_config=instance, **data) for data in endpoints])
+        CrawlerTarget.objects.filter(pk=instance.source_key).update(enabled=False, display_name=instance.channel_name)
+        if instance.source_id:
+            Source.objects.filter(pk=instance.source_id).update(
+                name=instance.channel_name, region=instance.region, language=instance.language,
+            )
+        return instance
 
 
 class CrawlBatchSerializer(serializers.ModelSerializer):

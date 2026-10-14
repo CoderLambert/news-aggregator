@@ -6,6 +6,8 @@ from .models import (
     LegacyChatArchive,
     News,
     Source,
+    SourceConfig,
+    SourceEndpoint,
 )
 
 
@@ -21,6 +23,50 @@ class SourceAdmin(admin.ModelAdmin):
     list_display = ['name', 'url', 'country', 'language', 'source_type', 'created_at']
     list_filter = ['source_type']
     search_fields = ['name']
+
+
+class SourceEndpointInline(admin.TabularInline):
+    model = SourceEndpoint
+    extra = 0
+    can_delete = False
+    fields = [
+        'kind', 'url', 'allowed_domains', 'priority', 'parser_config', 'conditional_requests',
+        'request_interval_seconds', 'max_response_bytes', 'max_pages', 'max_items', 'enabled',
+    ]
+    readonly_fields = fields
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(SourceConfig)
+class SourceConfigAdmin(admin.ModelAdmin):
+    list_display = ['source_key', 'publisher_name', 'channel_name', 'status', 'config_version', 'probed_at', 'approved_at']
+    list_filter = ['status', 'region', 'content_kind', 'reading_policy']
+    search_fields = ['source_key', 'publisher_name', 'channel_name']
+    inlines = [SourceEndpointInline]
+    readonly_fields = [field.name for field in SourceConfig._meta.fields]
+
+    def has_module_permission(self, request):
+        return bool(request.user.is_active and request.user.is_superuser and super().has_module_permission(request))
+
+    def has_view_permission(self, request, obj=None):
+        return bool(request.user.is_active and request.user.is_superuser and super().has_view_permission(request, obj))
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(News)

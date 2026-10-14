@@ -73,10 +73,12 @@ def sync_crawler_targets():
 
 
 @transaction.atomic
-def create_crawl_batch(*, trigger, requested_by=None, spider_names=None, retry_of=None):
+def create_crawl_batch(*, trigger, requested_by=None, spider_names=None, retry_of=None, allow_disabled=False):
     sync_crawler_targets()
     registry = runtime_registry()
-    targets = CrawlerTarget.objects.select_for_update().filter(enabled=True, spider_name__in=registry)
+    targets = CrawlerTarget.objects.select_for_update().filter(spider_name__in=registry)
+    if not allow_disabled:
+        targets = targets.filter(enabled=True)
     if spider_names is not None:
         targets = targets.filter(spider_name__in=spider_names)
     targets = list(targets.order_by('sort_order', 'spider_name'))

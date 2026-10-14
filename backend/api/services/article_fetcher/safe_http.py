@@ -614,6 +614,7 @@ def _fetch_one(
 def _safe_urlopen(
     request: urllib.request.Request | str,
     timeout: float | None = None,
+    allowed_hosts: frozenset[str] | None = None,
 ) -> CachedResponse:
     """Open a bounded HTTP(S) request without proxy or post-validation DNS."""
     if isinstance(request, str):
@@ -635,6 +636,8 @@ def _safe_urlopen(
 
     while True:
         target = validate_public_url(current_url, timeout=_remaining(deadline))
+        if allowed_hosts is not None and target.host.lower().rstrip('.') not in allowed_hosts:
+            raise _failure('Redirect target is outside allowed domains')
         _remaining(deadline)
         origin = (target.scheme, target.host.lower(), target.port)
         if original_origin is None:
@@ -711,6 +714,11 @@ def _safe_urlopen(
 
 
 
-def safe_urlopen(request: urllib.request.Request | str, timeout: float | None = None) -> CachedResponse:
+def safe_urlopen(
+    request: urllib.request.Request | str,
+    timeout: float | None = None,
+    *,
+    allowed_hosts: frozenset[str] | None = None,
+) -> CachedResponse:
     with execution_scope():
-        return _safe_urlopen(request, timeout=timeout)
+        return _safe_urlopen(request, timeout=timeout, allowed_hosts=allowed_hosts)

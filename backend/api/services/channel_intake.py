@@ -14,7 +14,7 @@ from api.services.channel_grouping import lock_user, GroupingConflict
 from api.services.source_policy import policy_for_name
 
 # A narrow public-query contract, rather than a forever-incomplete blacklist.
-PUBLIC_QUERY_KEYS = frozenset({'feed', 'format', 'lang', 'language', 'category', 'tag', 'page', 'id', 'output', 'topic'})
+PUBLIC_QUERY_KEYS = frozenset({'feed', 'files', 'format', 'lang', 'language', 'category', 'tag', 'page', 'id', 'output', 'topic'})
 VALUE_PATTERN = re.compile(r'^[\w .,\-]{0,80}$', re.UNICODE)
 OPAQUE_PATH = re.compile(r'(?:^|/)[A-Za-z0-9_\-]{40,}(?:/|$)')
 SECRET_PATH = re.compile(r'(?:^|/)(?:token|apikey|api-key|api_key|password|signature|credential|authorization)(?:/|$)', re.I)
