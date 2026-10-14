@@ -55,8 +55,8 @@ class News(models.Model):
     content_zh = models.TextField('中文内容', blank=True, default='')
     author = models.CharField('作者', max_length=100, blank=True, default='')
     publish_time = models.DateTimeField('发布时间', db_index=True)
-    source = models.ForeignKey(Source, on_delete=models.CASCADE, verbose_name='来源')
-    category = models.ForeignKey(Category, on_delete=models.CASCADE, verbose_name='分类')
+    source = models.ForeignKey(Source, on_delete=models.PROTECT, verbose_name='来源')
+    category = models.ForeignKey(Category, on_delete=models.PROTECT, verbose_name='分类')
     url = models.URLField('原文链接', max_length=500, unique=True, db_index=True)
     cover_image = models.URLField('封面图', max_length=500, blank=True, default='')
     title_hash = models.BigIntegerField('标题哈希', null=True, blank=True, db_index=True)
@@ -1054,7 +1054,7 @@ class ResearchRunEvent(models.Model):
 
 class ChannelSubscription(models.Model):
     user = models.ForeignKey('auth.User', on_delete=models.CASCADE, related_name='channel_subscriptions')
-    source = models.ForeignKey(Source, on_delete=models.CASCADE, related_name='channel_subscriptions')
+    source = models.ForeignKey(Source, on_delete=models.PROTECT, related_name='channel_subscriptions')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
