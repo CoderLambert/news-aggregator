@@ -63,14 +63,20 @@ def _feed_samples(body, endpoint):
 def _html_samples(body, endpoint):
     soup = BeautifulSoup(body, 'html.parser')
     config = endpoint.parser_config
+    nodes = list(soup.select(config['list_item']))
+    for script in soup.select('script[type="text/xml"]'):
+        markup = (script.string or script.decode_contents()).replace('<![CDATA[', '').replace(']]>', '')
+        nodes.extend(BeautifulSoup(markup, 'html.parser').select(config['list_item']))
     samples = []
-    for node in soup.select(config['list_item'])[:min(endpoint.max_items, 3)]:
+    for node in nodes[:min(endpoint.max_items, 3)]:
         title_node = node.select_one(config['title'])
         link_node = node.select_one(config['link'])
         date_node = node.select_one(config['date'])
         link = _allowed_url(link_node.get('href') if link_node else '', endpoint.url, set(endpoint.allowed_domains))
         title = title_node.get_text(' ', strip=True) if title_node else ''
         published = date_node.get_text(' ', strip=True) if date_node else ''
+        if published and title.endswith(published):
+            title = title[:-len(published)].strip()
         if title and link:
             samples.append({'title': title[:500], 'url': link, 'identity': urlsplit(link).path[:200], 'published_at': published[:100]})
     return 'html', 'article URL path', config['date'], samples

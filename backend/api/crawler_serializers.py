@@ -210,7 +210,7 @@ class SourceEndpointSerializer(serializers.ModelSerializer):
             'rss': {'identity_field', 'title_field', 'link_field', 'summary_field', 'published_field', 'full_content_fields'},
             'atom': {'identity_field', 'title_field', 'link_field', 'summary_field', 'published_field', 'full_content_fields'},
             'json': {'list_path', 'fields', 'next_path'},
-            'html': {'list_item', 'title', 'link', 'summary', 'date', 'content', 'date_format'},
+            'html': {'list_item', 'title', 'link', 'summary', 'date', 'content', 'date_format', 'next'},
         }[kind]
         extra = set(config) - allowed_keys
         if extra:
@@ -231,7 +231,7 @@ class SourceEndpointSerializer(serializers.ModelSerializer):
             for key in ('list_item', 'title', 'link', 'date'):
                 if not isinstance(config.get(key), str) or not config[key].strip():
                     raise serializers.ValidationError({'parser_config': f'HTML 配置缺少 {key}。'})
-            for key in ('list_item', 'title', 'link', 'summary', 'date', 'content'):
+            for key in ('list_item', 'title', 'link', 'summary', 'date', 'content', 'next'):
                 selector = config.get(key)
                 if not selector:
                     continue
@@ -288,9 +288,13 @@ class SourceConfigSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         if self.instance is None and not attrs.get('endpoints'):
             raise serializers.ValidationError({'endpoints': '至少需要一个入口。'})
-        if attrs.get('content_kind') == 'regulatory_data' and attrs.get('reading_policy') not in {None, 'regulatory_data'}:
+        content_kind = attrs.get('content_kind', getattr(self.instance, 'content_kind', None))
+        reading_policy = attrs.get('reading_policy', getattr(self.instance, 'reading_policy', None))
+        html_body = attrs.get('official_html_full_content_allowed',
+                              getattr(self.instance, 'official_html_full_content_allowed', False))
+        if content_kind == 'regulatory_data' and reading_policy != 'regulatory_data':
             raise serializers.ValidationError({'reading_policy': '监管数据必须使用 regulatory_data 读取政策。'})
-        if attrs.get('official_html_full_content_allowed') and attrs.get('reading_policy') == 'summary_only':
+        if html_body and reading_policy == 'summary_only':
             raise serializers.ValidationError({'official_html_full_content_allowed': '摘要模式不能批准网页正文。'})
         return attrs
 

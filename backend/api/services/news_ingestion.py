@@ -164,6 +164,9 @@ def _ingest_transaction(item, policy, url, upstream_id, discovery, kind, candida
         metadata['source_version'] = str(item['source_version'])
     if policy.feed_url:
         metadata['feed_url'] = policy.feed_url
+    for field in ('publisher_name', 'channel_name', 'endpoint_kind', 'endpoint_url'):
+        if item.get(field):
+            metadata[field] = str(item[field])[:1024]
     if mapping:
         NewsSourceItem.objects.filter(pk=mapping.pk).update(discovery_url=discovery, metadata=metadata, last_seen_at=seen)
         mapping.metadata = metadata

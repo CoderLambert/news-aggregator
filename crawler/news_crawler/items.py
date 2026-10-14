@@ -21,3 +21,7 @@ class NewsItem(scrapy.Item):
     source_modified_at = scrapy.Field()
     source_version = scrapy.Field()
     publish_time_inferred = scrapy.Field()
+    publisher_name = scrapy.Field()
+    channel_name = scrapy.Field()
+    endpoint_kind = scrapy.Field()
+    endpoint_url = scrapy.Field()

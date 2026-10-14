@@ -92,6 +92,12 @@ class BudgetedHTTPDownloadHandler:
     async def download_request(self, request, spider=None):
         if not self._allowed(request):
             raise ValueError('unapproved_discovery_host')
+        # Re-resolve and reject every request/redirect target at the physical
+        # download boundary. This catches private literals, metadata hosts and
+        # DNS answers that changed after an administrator probe.
+        if self.__class__ is BudgetedHTTPDownloadHandler:
+            from api.services.article_fetcher.safe_http import validate_public_url
+            await asyncio.to_thread(validate_public_url, request.url, 3.0)
         request.meta['_budget_received_bytes'] = 0
         request.meta['_budget_body_stopped'] = ''
         request.meta['download_timeout'] = min(15, request.meta.get('download_timeout', 15))
