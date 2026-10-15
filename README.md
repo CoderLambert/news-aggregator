@@ -152,7 +152,11 @@ python manage.py createsuperuser
 
 ### 3. 配置环境变量
 
-在项目根目录创建 `.env` 文件（参考 `.env.example`）：
+本机源码部署推荐直接复制 `.env.local.example`；它默认打开本机支持的功能。通用或容器配置继续参考 `.env.example`：
+
+```bash
+cp .env.local.example .env
+```
 
 ```bash
 # 必填：Django 密钥（生产环境务必自定义）

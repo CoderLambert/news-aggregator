@@ -15,21 +15,17 @@ npm run build
 cd ..
 ```
 
-新实例从 `.env.example` 复制 `.env`，设置长期不变的 `DJANGO_SECRET_KEY`；接管旧实例时复制旧密钥配置，否则原有会话、订阅令牌或用户提供的模型 Key 可能无法解密。`.env` 不进入 Git。此处使用 `DJANGO_ENV=development` 配合本机监听；项目的 `production` 配置要求指定正式域名及可信代理，应按容器生产部署文档使用。
+新实例使用本机推荐模板，并将占位密钥替换为命令生成的稳定随机值：
 
-为正文服务在 `.env` 加入：
-
-```dotenv
-FULL_CONTENT_WORKER_ENABLED=1
-FULL_CONTENT_AUTO_ENQUEUE_ENABLED=1
-# 仅填写 backend/api/services/source_policy.py 中已审查、允许 HTML 正文的来源键。
-FULL_CONTENT_AUTO_SOURCE_KEYS=devto,webkit,smashing_magazine,v8,mozilla_hacks,svelte_blog,angular_blog,bbc,techcrunch,css_tricks,webdev,chrome_dev,react_blog,openai_blog,deepmind,infoq,ars_technica_ai,mit_tech_review_ai,anthropic,mistral,venturebeat_ai
-# 支持经校验的 Feed/API 正文字段时可同时开启结构化正文写入。
-STRUCTURED_BODY_INGEST_ENABLED=1
-STRUCTURED_BODY_SOURCE_KEYS=devto,webkit,smashing_magazine,v8,mozilla_hacks,svelte_blog,angular_blog,techcrunch
+```bash
+cp .env.local.example .env
+python3 -c "from secrets import token_urlsafe; print(token_urlsafe(60))"
+# 把输出填入 .env 的 DJANGO_SECRET_KEY。
 ```
 
-Worker 的锁文件和心跳文件必须位于当前实例可写的持久目录。可在 `.env` 中把 `FULL_CONTENT_WORKER_LOCK` 与 `FULL_CONTENT_WORKER_HEARTBEAT` 分别设为 `<项目绝对路径>/.runtime/full-content.lock` 和 `<项目绝对路径>/.runtime/full-content-heartbeat.json`。替换为真实绝对路径；同一数据库只运行一个全文 Worker。
+`.env.local.example` 默认开启本机完整站点、注册、AI 入口、ChatGPT 本地授权、全文获取、结构化正文、爬虫调度、语义索引、智能频道后台任务和 TTS，并使用本机已验证的 `EDGE_TTS_ENDPOINT=msedgeservices`。ChatGPT 或其他模型功能仍需要各用户连接自己的订阅，或者通过设置页提供自己的厂商 Key；使用厂商 Key 时还需运行 `.env` 中配置的 LiteLLM BYOK 网关。Jina Key 可选。
+
+接管旧实例时必须复制旧密钥配置，否则原有会话、订阅令牌或用户提供的模型 Key 可能无法解密。`.env` 不进入 Git。模板中的相对数据、锁和心跳路径要求所有命令都从项目根目录启动；同一数据库的每类 Worker 只运行一个。此处使用 `DJANGO_ENV=development` 配合本机监听；项目的 `production` 配置要求指定正式域名及可信代理，应按容器生产部署文档使用。
 
 ## 2. 数据库与前端构建
 
@@ -54,7 +50,7 @@ backend/venv/bin/python backend/manage.py check
 
 旧 ChromaDB 如需保留，停旧索引写入者后复制整个目录；其 SQLite 文件也应使用 backup API 取一致快照。新实例可以先使用空目录，之后按项目的索引同步命令重建。
 
-## 3. 启动两个进程
+## 3. 启动 Web 与后台进程
 
 两个终端都导出相同的 `DJANGO_DB_PATH` 和 `CHROMA_DATA_DIR`。第一个终端在项目根目录启动 Web 服务，明确绑定本机地址：
 
@@ -77,6 +73,14 @@ export NEWS_CRAWL_ONLY=1
 backend/venv/bin/python backend/manage.py auto_fetch_full_content --foreground
 ```
 
+推荐模板同时开启爬虫调度、语义索引和智能频道任务。分别再启动三个常驻进程：
+
+```bash
+NEWS_CRAWL_ONLY=1 backend/venv/bin/python backend/manage.py crawl_worker
+backend/venv/bin/python backend/manage.py embedding_worker
+NEWS_CRAWL_ONLY=1 backend/venv/bin/python backend/manage.py channel_worker
+```
+
 Worker 和爬虫需要访问来源站点。若进程继承的代理地址不可达，先确认目标站点可直连，再在这两个进程的启动命令中清除失效的 `http_proxy`、`https_proxy`、`HTTP_PROXY`、`HTTPS_PROXY` 和 `ALL_PROXY`；保留 TLS 证书校验。本机当前实例采用直连运行这两个进程。
 
 可用现有进程管理器托管这两个前台命令，并设置故障重启。启动后验证：
@@ -85,6 +89,9 @@ Worker 和爬虫需要访问来源站点。若进程继承的代理地址不可�
 curl -f http://127.0.0.1:9527/
 curl -f http://127.0.0.1:9527/api/health/ready/
 backend/venv/bin/python backend/manage.py full_content_healthcheck
+backend/venv/bin/python backend/manage.py crawler_healthcheck
+backend/venv/bin/python backend/manage.py embedding_healthcheck
+backend/venv/bin/python backend/manage.py channel_worker_healthcheck
 ```
 
 ## 4. 入队、进度和定时爬虫
@@ -99,4 +106,4 @@ backend/venv/bin/python backend/manage.py full_content_stats --json
 
 Worker 会按来源公平轮询，并保留限流、重试和正文校验状态。不要对全部历史文章使用 `--force`；已得到可读正文的文章会跳过。来源不允许抓取、被站点拦截、只提供摘要，或原文内容无法通过校验时，正文可能仍为空。
 
-如果另有 cron 或爬虫服务，更新它们的代码目录及 `DJANGO_DB_PATH`，确保与 Web 和 Worker 使用同一数据库；旧写入者应停用。手动运行新代码的爬虫可使用 `NEWS_CRAWL_ONLY=1 backend/venv/bin/python backend/manage.py crawl all`。这种模式跳过 AI 侧效应，但经校验的结构化正文仍可写入。只保留一套定时调度，并用 `flock -n` 防止相邻轮次重叠。更新时先备份数据库，再停两个进程、构建前端、执行迁移并重启；回退代码前核对迁移版本，不能把已升级的数据库直接交给旧代码。
+如果使用推荐的 `crawl_worker`，不要再同时保留 cron 爬虫。若改用已有 cron，更新其代码目录及 `DJANGO_DB_PATH`，确保与 Web 和 Worker 使用同一数据库，并停用 `crawl_worker`。手动运行新代码的爬虫可使用 `NEWS_CRAWL_ONLY=1 backend/venv/bin/python backend/manage.py crawl all`。这种模式跳过 AI 侧效应，但经校验的结构化正文仍可写入。只保留一套定时调度，并用 `flock -n` 防止相邻轮次重叠。更新时先备份数据库，再停止 Web 和全部 Worker、构建前端、执行迁移并重启；回退代码前核对迁移版本，不能把已升级的数据库直接交给旧代码。
