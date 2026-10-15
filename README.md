@@ -65,11 +65,13 @@ AI:        LiteLLM Gateway + 用户自带 API Key（受控的主流厂商白名�
 
 > 完整的初始化、开发/生产启动、爬虫、测试、数据和故障排查说明见 [启动与运维说明](./docs/startup.md)。
 
+不安装 Docker 的单机部署（前端构建、Waitress、SQLite 数据迁移与全文 Worker）见 [源码部署说明](./docs/deployment/local-source.md)。
+
 ### Docker 一键部署（推荐）
 
 语义索引的同步、恢复和管理方案见 [docs/semantic-index-sync-design.md](docs/semantic-index-sync-design.md)。
 
-从克隆到健康服务只需要准备 `.env`，Compose 会构建前端和后端、自动执行数据库迁移，并启动 Waitress、爬虫 Worker 与语义索引 Worker：
+从克隆到健康服务只需要准备 `.env`，Compose 会构建前端和后端、自动执行数据库迁移，并启动 Waitress、爬虫 Worker、全文 Worker 与语义索引 Worker：
 
 ```bash
 git clone https://github.com/CoderLambert/news-aggregator.git
@@ -215,7 +217,7 @@ npm run dev
 # 访问 http://127.0.0.1:5173
 ```
 
-**方式 B：生产模式（Waitress + 静态文件）**
+**方式 B：本机源码部署（Waitress + 静态文件）**
 
 ```bash
 # 构建前端
@@ -227,6 +229,8 @@ cd /path/to/news-aggregator
 python start_waitress.py
 # 访问 http://127.0.0.1:9527
 ```
+
+此方式需要另起一个进程运行全文 Worker；已有数据库的迁移、端口切换和定时爬虫路径见[源码部署说明](./docs/deployment/local-source.md)。
 
 ### 6. 抓取新闻数据
 

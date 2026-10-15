@@ -167,7 +167,9 @@ cd frontend
 npm run dev -- --host 0.0.0.0
 ```
 
-### 4.2 生产模式：Waitress + 静态文件
+### 4.2 源码单机模式：Waitress + 静态文件
+
+不使用 Docker 时，前端先执行 `npm ci && npm run build`，再由 Waitress 从源码启动 Django；`frontend/dist/` 和 API 由同一端口提供。已有数据接管、独立全文 Worker、健康检查及回退步骤见[源码部署说明](deployment/local-source.md)。
 
 ```bash
 cd frontend
@@ -176,24 +178,18 @@ cd ..
 backend/venv/bin/python start_waitress.py
 ```
 
-访问 <http://127.0.0.1:9527>。生产环境建议：
-
-- 设置 `DJANGO_DEBUG=0`
-- 使用稳定且保密的 `DJANGO_SECRET_KEY`
-- 将 `DJANGO_ALLOWED_HOSTS` 改为实际域名
-- 在反向代理或防火墙层限制访问来源
-- 通过 systemd、容器编排或进程管理器托管 Waitress
+访问 <http://127.0.0.1:9527>。本机长期运行建议设置 `DJANGO_DEBUG=0`、保留稳定的 `DJANGO_SECRET_KEY`，并由进程管理器托管 Waitress 与独立 Worker。直接执行 `start_waitress.py` 会监听所有网卡；仅本机访问时请使用[源码部署说明](deployment/local-source.md)中的 `127.0.0.1` 启动命令。
 
 ### 4.3 Docker 单机模式
 
-Compose 启动 Waitress Web 服务、独立 crawler Worker 和独立 indexer Worker。前端会先构建并由 Django 同源提供，crawler 默认启动后抓取一次，之后每小时抓取；indexer 周期核对 SQLite 与 ChromaDB。Web 服务仅绑定到本机 `127.0.0.1:9527`。容器每次启动时会先执行幂等的 `migrate --noinput`，新克隆和代码升级无需单独运行迁移命令。
+Compose 启动 Waitress Web 服务、独立 crawler Worker、全文 Worker 和 indexer Worker。前端会先构建并由 Django 同源提供，crawler 默认启动后抓取一次，之后每小时抓取；indexer 周期核对 SQLite 与 ChromaDB。全文 Worker 是否执行任务由 `FULL_CONTENT_WORKER_ENABLED` 控制。Web 服务仅绑定到本机 `127.0.0.1:9527`。容器每次启动时会先执行幂等的 `migrate --noinput`，新克隆和代码升级无需单独运行迁移命令。
 
 Web、crawler 与 indexer 共享 `backend/`（包括 SQLite、WAL、SHM、TTS 缓存），并持久化 `chroma_data/`、`logs/` 和 Hugging Face 模型缓存卷。不要让容器和另一套本地后端或爬虫同时写同一份 SQLite 数据。
 
 ~~~bash
 docker compose up -d --build --wait
 docker compose ps
-docker compose logs -f app crawler indexer
+docker compose logs -f app crawler full-content indexer
 docker compose down
 ~~~
 
@@ -352,15 +348,15 @@ journalctl --user -u news-aggregator-crawl.service -g '爬虫汇总'
 unit 文件中的项目绝对路径应与实际 checkout 一致。`TimeoutStartSec=2h`
 只是单轮最长运行时间，不是调度频率。
 
-全文抓取：
+全文获取需要单独启动 Worker。`fetch_full_content` 只把文章放进持久队列，不会在命令进程内下载正文；先按[源码部署说明](deployment/local-source.md)启用并检查 `auto_fetch_full_content`，再入队：
 
 ```bash
-./scripts/fetch_full_content_cron.sh dry-run
-./scripts/fetch_full_content_cron.sh
-FULL_CONTENT_FETCH_LIMIT=50 ./scripts/fetch_full_content_cron.sh
+backend/venv/bin/python backend/manage.py fetch_full_content --limit 20 --dry-run
+backend/venv/bin/python backend/manage.py fetch_full_content --limit 20
+backend/venv/bin/python backend/manage.py full_content_stats --json
 ```
 
-脚本默认使用 `backend/venv/bin/python`，并把日志写到 `logs/full_content_fetch.log`。
+用 `full_content_stats --json` 查看实际完成数和失败原因；源站拒绝、身份不符或来源策略不允许时，不会生成伪正文。
 
 需要 Playwright 浏览器时：
 
