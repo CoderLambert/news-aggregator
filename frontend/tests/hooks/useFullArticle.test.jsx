@@ -46,14 +46,15 @@ describe('useFullArticle', () => {
   })
   afterEach(() => vi.restoreAllMocks())
 
-  it('polls an already queued task without another POST and keeps source availability separate from task status', async () => {
+  it('promotes an already queued task before polling and keeps source availability separate from task status', async () => {
     const news = { id: 99, full_content: '', has_full_content: false, full_content_state: 'missing', full_content_fetch_status: 'queued' }
+    fetchFullArticle.mockResolvedValue(news)
     fetchFullArticleStatus.mockResolvedValue({ full_content: 'Readable completed body', has_full_content: true,
       full_content_state: 'complete', full_content_fetch_status: 'success', full_content_revision: 1 })
     const setNews = vi.fn((updater) => updater(news))
     renderHook(() => useFullArticle(99, setNews, news), { wrapper: makeWrapper() })
     await waitFor(() => expect(fetchFullArticleStatus).toHaveBeenCalledOnce())
-    expect(fetchFullArticle).not.toHaveBeenCalled()
+    expect(fetchFullArticle).toHaveBeenCalledWith(99, false, expect.any(AbortSignal))
     expect(setNews.mock.results.at(-1).value).toMatchObject({ has_full_content: true, full_content_revision: 1 })
   })
 
@@ -221,7 +222,8 @@ describe('useFullArticle', () => {
     expect(fetchFullArticle).not.toHaveBeenCalled()
   })
 
-  it('reattaches to an active server fetch without posting another fetch request', async () => {
+  it('promotes and reattaches to an active server fetch', async () => {
+    fetchFullArticle.mockResolvedValue({ full_content: '', full_content_fetch_status: 'fetching' })
     fetchFullArticleStatus
       .mockResolvedValueOnce({ full_content: '', full_content_fetch_status: 'fetching' })
       .mockResolvedValueOnce({ full_content: 'Server result', full_content_fetch_status: 'success' })
@@ -231,7 +233,7 @@ describe('useFullArticle', () => {
     renderHook(() => useFullArticle(2341, setNews, news), { wrapper: makeWrapper() })
 
     await waitFor(() => expect(fetchFullArticleStatus).toHaveBeenCalledTimes(2), { timeout: 3000 })
-    expect(fetchFullArticle).not.toHaveBeenCalled()
+    expect(fetchFullArticle).toHaveBeenCalledWith(2341, false, expect.any(AbortSignal))
     expect(setNews.mock.results.at(-1).value).toMatchObject({
       id: 2341, full_content: 'Server result', full_content_fetch_status: 'success',
     })

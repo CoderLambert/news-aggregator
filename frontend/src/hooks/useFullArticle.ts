@@ -265,7 +265,9 @@ export function useFullArticle(
           || attachedOwnerRef.current === ownerKey) return
         attachedOwnerRef.current = ownerKey
         setSessionFlag(AUTO_ATTEMPT_PREFIX, ownerKey, true)
-        void attachToExistingFetch()
+        // Reuse the durable task through the POST endpoint so an article the
+        // reader is actively viewing is promoted ahead of bulk backfill.
+        void handleFetchFullArticle()
       }, 0)
       return () => window.clearTimeout(timer)
     }
@@ -280,7 +282,6 @@ export function useFullArticle(
     }, 0)
     return () => window.clearTimeout(timer)
   }, [
-    attachToExistingFetch,
     bodyEmpty,
     fullContentEnabled,
     handleFetchFullArticle,
