@@ -169,12 +169,14 @@ export default function SourceConfigSection() {
   }
 
   const busy = mutation.isPending
+  const configurableSources = sources.data?.filter((source) => !source.readOnly) ?? []
+  const codeSources = sources.data?.filter((source) => source.readOnly) ?? []
   return (
     <section id="source-configs" className="mt-10 scroll-mt-20 space-y-4" aria-labelledby="source-config-title">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
           <h2 id="source-config-title" className="text-xl font-semibold">动态来源配置</h2>
-          <p className="mt-1 text-sm text-muted-foreground">新增来源默认不调度；当前版本必须先探测、审批，再由超级管理员启用。</p>
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">这里仅展开可编辑的来源。新增来源默认不调度，必须先探测、审批，再由超级管理员启用。</p>
         </div>
         <div className="flex w-full flex-wrap gap-2 sm:w-auto">
           <Button variant="outline" disabled={sources.isFetching} onClick={() => void sources.refetch()}><RefreshCw aria-hidden="true" className={sources.isFetching ? 'animate-spin' : ''} />刷新</Button>
@@ -216,8 +218,8 @@ export default function SourceConfigSection() {
       </Card> : null}
 
       {sources.isLoading ? <div className="h-40 animate-pulse rounded-xl bg-muted" /> : sources.isError ? <Card><CardContent className="py-6 text-sm text-destructive">来源配置读取失败。</CardContent></Card> : (
-        <div className="grid min-w-0 grid-cols-1 gap-4 2xl:grid-cols-2">
-          {sources.data?.map((source) => {
+        <div className="grid min-w-0 grid-cols-1 gap-4">
+          {configurableSources.map((source) => {
             const endpoint = source.endpoints[0]
             const samples = sampleArticles(source)
             return <Card key={source.sourceKey} className="min-w-0 overflow-hidden">
@@ -256,8 +258,30 @@ export default function SourceConfigSection() {
               </CardContent>
             </Card>
           })}
+          {!configurableSources.length ? <Card><CardContent className="py-8 text-center text-sm text-muted-foreground">暂无可编辑的来源配置。</CardContent></Card> : null}
         </div>
       )}
+
+      {!sources.isLoading && !sources.isError && codeSources.length ? (
+        <details className="group overflow-hidden rounded-xl border bg-card">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 font-medium marker:content-none">
+            <span>代码维护来源 <span className="ml-1 text-sm font-normal text-muted-foreground">{codeSources.length} 个，只读</span></span>
+            <span aria-hidden="true" className="text-muted-foreground transition-transform group-open:rotate-180">⌄</span>
+          </summary>
+          <div className="workspace-scroll overflow-x-auto border-t">
+            <table className="w-full min-w-[680px] text-left text-sm">
+              <thead className="bg-muted/60 text-xs text-muted-foreground"><tr><th className="px-4 py-3">来源</th><th className="px-4 py-3">标识</th><th className="px-4 py-3">分类</th><th className="px-4 py-3">区域</th><th className="px-4 py-3 text-right">操作</th></tr></thead>
+              <tbody>{codeSources.map((source) => <tr key={source.sourceKey} className="border-t">
+                <td className="max-w-72 break-words px-4 py-3 font-medium">{source.channelName}</td>
+                <td className="max-w-64 break-all px-4 py-3 font-mono text-xs text-muted-foreground">{source.sourceKey}</td>
+                <td className="px-4 py-3 text-muted-foreground">{source.categoryName || '—'}</td>
+                <td className="px-4 py-3 text-muted-foreground">{source.region === 'domestic' ? '国内' : '国际'}</td>
+                <td className="px-4 py-3 text-right"><Button size="sm" variant="outline" disabled={busy || !source.category} onClick={() => { setEditingKey(null); setForm(recordForm(source, true)) }}><Copy aria-hidden="true" />复制为配置</Button></td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+        </details>
+      ) : null}
     </section>
   )
 }
