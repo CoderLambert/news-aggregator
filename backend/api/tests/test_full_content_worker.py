@@ -53,7 +53,7 @@ def test_due_queue_never_scans_unscheduled_history_or_future_or_exhausted(make_n
 
 def test_due_queue_rotates_sources_and_priorities_without_starving_other_feeds(make_news):
     low=make_news(full_content_priority=0)
-    high=make_news(full_content_priority=10)
+    high=make_news(full_content_priority=9)
     other=make_news('devto')
     third=make_news('leiphone')
     for _ in range(12): make_news(full_content_priority=5)
@@ -62,6 +62,14 @@ def test_due_queue_rotates_sources_and_priorities_without_starving_other_feeds(m
     assert {row.pk for row in first} == {high.pk,other.pk}
     assert queue.due(1)[0].pk == third.pk
     assert len(queue.due(999)) == 10
+
+
+def test_reader_priority_is_selected_before_older_background_sources(make_news):
+    old = timezone.now() - timedelta(hours=1)
+    for key in ('webkit', 'devto'):
+        make_news(key, full_content_next_attempt_at=old, full_content_priority=0)
+    urgent = make_news('leiphone', full_content_priority=10)
+    assert FairQueue().due(1)[0].pk == urgent.pk
 
 
 def test_recovery_uses_five_minutes_and_includes_missing_timestamp_without_resetting_failures(make_news):

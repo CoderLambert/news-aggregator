@@ -165,7 +165,7 @@ def enqueue_fetch(news, *, force=False, priority=0):
         return 'rejected'
     requested_priority = max(-10, min(10, 10 if force else priority))
     if news.full_content_next_attempt_at is not None or news.full_content_fetch_status == 'fetching':
-        if force:
+        if requested_priority > news.full_content_priority:
             query.update(full_content_priority=Greatest(F('full_content_priority'), Value(requested_priority)))
             news.refresh_from_db()
         return 'rejected' if news.full_content_retry_count >= 5 else 'reused'

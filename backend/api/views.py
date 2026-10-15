@@ -550,7 +550,10 @@ class NewsFetchFullView(generics.GenericAPIView):
         if privileged:
             News.objects.filter(pk=news.pk, url=news.url, full_content_revision=news.full_content_revision).update(full_content_requested_by=request.user)
             news.refresh_from_db()
-        outcome = request_full_content(news, force=force, priority=10 if force else 0)
+        # Requests reaching this endpoint come from an article reader. Keep
+        # them ahead of automatic backfill work, including when the same task
+        # was already queued at background priority.
+        outcome = request_full_content(news, force=force, priority=10)
         news.refresh_from_db()
         data = dict(self.get_serializer(news).data)
         if outcome == 'unavailable':

@@ -46,6 +46,18 @@ def test_post_queues_detail_schema_and_location_without_network(client,make_news
     assert response['Location'].endswith(f'/api/news/{news.pk}/') and int(response['Retry-After']) >= 2
     news.refresh_from_db()
     assert news.full_content == '' and news.full_content_retry_count == 0
+    assert news.full_content_priority == 10
+
+
+def test_reader_request_promotes_existing_background_task(client, make_news):
+    due = timezone.now() - timedelta(minutes=1)
+    news = make_news(full_content_fetch_status='queued', full_content_next_attempt_at=due,
+                     full_content_priority=0)
+    response = client.post(f'/api/news/{news.pk}/fetch-full/')
+    assert response.status_code == 202
+    news.refresh_from_db()
+    assert news.full_content_priority == 10
+    assert news.full_content_next_attempt_at == due
 
 
 @pytest.mark.parametrize('state',['legacy','complete'])

@@ -42,10 +42,17 @@ def run_loop(*, stop_event=None, interval=10, batch_limit=10):
                     close_old_connections()
                     try:
                         recover_stale_fetches()
-                        pending = queue.due(batch_limit)
-                        for news in pending:
+                        # Re-read the queue after every article so an article
+                        # opened by a reader can run immediately after the
+                        # current network request instead of waiting for a
+                        # stale preselected batch.
+                        for _ in range(batch_limit):
                             if stop.is_set():
                                 break
+                            pending = queue.due(1)
+                            if not pending:
+                                break
+                            news = pending[0]
                             execute_one(news, guard=runtime.guard)
                     except Exception:
                         logger.exception('full_content_worker_iteration_failed')

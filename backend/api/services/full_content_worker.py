@@ -153,11 +153,30 @@ class FairQueue:
         present = set(query.order_by().values_list('source_id', flat=True).distinct())
         self.sources = deque(key for key in self.sources if key in present)
         self.sources.extend(sorted(present - set(self.sources)))
-        result, selected = [], set()
+        result, selected, urgent_sources = [], set(), set()
+        # Reader initiated work must not sit behind a large automatic
+        # backfill. Preserve source fairness by taking at most one urgent item
+        # per source in a single selection pass.
+        for row in query.filter(full_content_priority=10).order_by(
+                '-full_content_priority', 'full_content_next_attempt_at', 'pk')[:limit * 4]:
+            if row.source_id in urgent_sources:
+                continue
+            selected.add(row.pk)
+            urgent_sources.add(row.source_id)
+            result.append(row)
+            if row.source_id in self.sources:
+                while self.sources[0] != row.source_id:
+                    self.sources.rotate(-1)
+                self.sources.rotate(-1)
+            if len(result) >= limit:
+                return result
         exhausted = set()
         while self.sources and len(result) < limit and len(exhausted) < len(self.sources):
             key = self.sources[0]
             self.sources.rotate(-1)
+            if key in urgent_sources:
+                exhausted.add(key)
+                continue
             row = query.filter(source_id=key).exclude(pk__in=selected).order_by('-full_content_priority', 'full_content_next_attempt_at', 'pk').first()
             if row is None:
                 exhausted.add(key)
