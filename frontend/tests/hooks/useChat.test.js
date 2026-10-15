@@ -38,6 +38,15 @@ describe('useChat', () => {
   })
   afterEach(() => vi.restoreAllMocks())
 
+  it('does not replace the message list while editing the next question', async () => {
+    api.fetchChatHistory.mockResolvedValueOnce({ messages: [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }] })
+    const { result } = renderHook(() => useChat('42', true), { wrapper: makeWrapper() })
+    await waitFor(() => expect(result.current.messages).toHaveLength(2))
+    const messages = result.current.messages
+    act(() => result.current.setInput('Next question'))
+    expect(result.current.messages).toBe(messages)
+  })
+
   it('loads the saved history through a cancellable viewer-scoped query', async () => {
     api.fetchChatHistory.mockResolvedValueOnce({ messages: [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }] })
     let queryClient

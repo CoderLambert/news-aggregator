@@ -199,10 +199,11 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     enabled: enabled && !authLoading && parsedId !== null,
   })
   const currentPendingTurn = pendingTurnState?.ownerKey === ownerKey ? pendingTurnState : null
-  const messages = [
-    ...(historyQuery.data?.messages ?? []),
+  const historyMessages = historyQuery.data?.messages
+  const messages = useMemo(() => [
+    ...(historyMessages ?? []),
     ...(currentPendingTurn ? chatHistoryTurnOverlay(currentPendingTurn) : []),
-  ]
+  ], [historyMessages, currentPendingTurn])
   const phase = enabled && historyQuery.isFetching
     ? 'loading-history'
     : phaseState.ownerKey === ownerKey ? phaseState.value : 'idle'

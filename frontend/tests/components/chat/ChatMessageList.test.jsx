@@ -4,6 +4,12 @@ import userEvent from '@testing-library/user-event'
 import ChatMessageList from '@/components/chat/ChatMessageList'
 
 describe('ChatMessageList', () => {
+  it('keeps existing messages visible while history refreshes', () => {
+    render(<ChatMessageList messages={[{ role: 'assistant', content: 'Keep my reading position' }]} phase="loading-history" />)
+    expect(screen.getByText('Keep my reading position')).toBeInTheDocument()
+    expect(screen.queryByLabelText('小闻 AI 助手')).not.toBeInTheDocument()
+  })
+
   it('shows mascot loader while loading-history', () => {
     const { container } = render(
       <ChatMessageList messages={[]} phase="loading-history" onSuggestionClick={() => {}} />,

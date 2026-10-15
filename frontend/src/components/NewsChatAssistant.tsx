@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useChat, type ChatPhase } from '@/hooks/useChat'
 import { useSuggestedQuestions } from '@/hooks/useSuggestedQuestions'
+import { useChatScroll } from '@/hooks/useChatScroll'
 import ChatBubbleButton from '@/components/chat/ChatBubbleButton'
 import ChatHeader from '@/components/chat/ChatHeader'
 import ChatMessageList from '@/components/chat/ChatMessageList'
@@ -53,6 +54,7 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
     uncertainTurn, checkPendingTurn, resendUncertainTurn,
     webSearch, toggleWebSearch,
   } = useChat(newsId, isOpen)
+  const { scrollRef: chatScrollRef, onScroll: onChatScroll, onWheel: onChatWheel } = useChatScroll(messages, phase, isOpen)
 
   const {
     questions: suggestedQuestions,
@@ -164,7 +166,7 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
           )}
         </div>
 
-        <div className="chat-panel-scroll flex-1 space-y-3 overflow-y-auto overscroll-contain bg-background/55 p-4 sm:p-5 md:p-7">
+        <div ref={chatScrollRef} onScroll={onChatScroll} onWheel={onChatWheel} className="chat-panel-scroll min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-background/55 p-4 sm:p-5 md:p-7">
           {historyError && (
             <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/35 dark:text-red-200">
               聊天记录加载失败。<button type="button" className="ml-1 underline" onClick={() => void retryHistory()}>重试</button>

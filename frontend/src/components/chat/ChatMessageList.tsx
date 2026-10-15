@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { ChevronDown, ChevronRight, ExternalLink, Globe, RefreshCw } from 'lucide-react'
 import type { ChatPhase } from '@/hooks/useChat'
 import type { ChatMessage, WebSource } from '@/services/newsWorkflowApi'
@@ -34,16 +34,9 @@ export default function ChatMessageList({
   onRefreshSuggestions,
   refreshingSuggestions = false,
 }: ChatMessageListProps) {
-  const endRef = useRef<HTMLDivElement>(null)
   const questions = suggestedQuestions && suggestedQuestions.length > 0 ? suggestedQuestions : DEFAULT_SUGGESTED_QUESTIONS
 
-  useEffect(() => {
-    if (typeof endRef.current?.scrollIntoView === 'function') {
-      endRef.current.scrollIntoView({ behavior: 'smooth' })
-    }
-  }, [messages])
-
-  if (phase === 'loading-history') {
+  if (phase === 'loading-history' && messages.length === 0) {
     return <div className="flex h-full items-center justify-center"><XiaowenMascot mood="idle" size={56} /></div>
   }
 
@@ -115,7 +108,6 @@ export default function ChatMessageList({
           </div>
         </div>
       ))}
-      <div ref={endRef} />
     </>
   )
 }
