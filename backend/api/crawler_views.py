@@ -98,11 +98,15 @@ class CrawlerDashboardView(APIView):
             .first()
         )
         recent_batches = batch_queryset()[:8]
+        context = {
+            'active_source_keys': frozenset(runtime_registry()),
+            'dashboard_summary': True,
+        }
         return Response({
             'settings': settings_data,
-            'active_run': CrawlRunSerializer(active_run).data if active_run else None,
-            'targets': CrawlerTargetSerializer(target_queryset(), many=True).data,
-            'recent_batches': CrawlBatchSerializer(recent_batches, many=True).data,
+            'active_run': CrawlRunSerializer(active_run, context=context).data if active_run else None,
+            'targets': CrawlerTargetSerializer(target_queryset(), many=True, context=context).data,
+            'recent_batches': CrawlBatchSerializer(recent_batches, many=True, context=context).data,
             'server_time': timezone.now(),
         })
 

@@ -51,7 +51,22 @@ class CrawlRunSerializer(serializers.ModelSerializer):
 
     def get_source_active(self, obj):
         from api.services.source_registry import runtime_registry
-        return obj.target_id in runtime_registry()
+        # Nested serializers share their root context. Snapshot once per response,
+        # rather than querying every dynamic source for every historical run.
+        if 'active_source_keys' not in self.context:
+            self.context['active_source_keys'] = frozenset(runtime_registry())
+        return obj.target_id in self.context['active_source_keys']
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if self.context.get('dashboard_summary'):
+            # The dashboard uses these outcome fields; full counters remain on
+            # the run and batch detail endpoints.
+            data['stats'] = {
+                key: value for key, value in data['stats'].items()
+                if key in {'finish_reason', 'outcome', 'entries_committed', 'entries_changed', 'warnings'}
+            }
+        return data
 
     def get_duration_seconds(self, obj):
         if not obj.started_at:
@@ -113,7 +128,7 @@ class CrawlerTargetSerializer(serializers.ModelSerializer):
         run = runs[0] if runs else None
         if run is None:
             return None
-        return CrawlRunSerializer(run).data
+        return CrawlRunSerializer(run, context=self.context).data
 
     def get_supported(self, obj):
         from api.services.source_policy import policy_for_key

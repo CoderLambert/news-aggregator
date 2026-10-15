@@ -50,22 +50,28 @@ def display_name(spider_name):
 
 def sync_crawler_targets():
     registry = runtime_registry(include_unavailable=True)
-    existing = set(CrawlerTarget.objects.values_list('spider_name', flat=True))
+    targets = CrawlerTarget.objects.in_bulk()
+    existing = set(targets)
     for sort_order, (spider_name, entry) in enumerate(registry.items()):
-        target, _ = CrawlerTarget.objects.get_or_create(
-            spider_name=spider_name,
-            defaults={
-                'display_name': entry.display_name,
-                'sort_order': sort_order,
-                'enabled': entry.maintenance == 'code' and spider_name not in {'reuters', 'jiqizhixin', 'sanliu_kr'},
-            },
-        )
-        CrawlerTarget.objects.filter(pk=target.pk).update(
-            display_name=entry.display_name, sort_order=sort_order,
-        )
+        target = targets.get(spider_name)
+        if target is None:
+            target, _ = CrawlerTarget.objects.get_or_create(
+                spider_name=spider_name,
+                defaults={
+                    'display_name': entry.display_name,
+                    'sort_order': sort_order,
+                    'enabled': entry.maintenance == 'code' and spider_name not in {'reuters', 'jiqizhixin', 'sanliu_kr'},
+                },
+            )
+        if target.display_name != entry.display_name or target.sort_order != sort_order:
+            CrawlerTarget.objects.filter(pk=target.pk).update(
+                display_name=entry.display_name, sort_order=sort_order,
+            )
         existing.discard(spider_name)
     if existing:
-        CrawlerTarget.objects.filter(spider_name__in=existing).update(enabled=False)
+        enabled_retired = [key for key in existing if targets[key].enabled]
+        if enabled_retired:
+            CrawlerTarget.objects.filter(spider_name__in=enabled_retired).update(enabled=False)
         # Retain history and foreign keys, but retire work queued under an older
         # registry. Running workers already honor cancellation requests.
         for run_id in CrawlRun.objects.filter(target_id__in=existing, status__in=['queued', 'running']).values_list('pk', flat=True):
