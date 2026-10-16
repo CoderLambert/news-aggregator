@@ -95,7 +95,13 @@ class SelfHostedCIContract(unittest.TestCase):
         dind_command = svc["docker"]["command"][0]
         # The Compose interpolation layer must preserve the shell variable.
         # A single $group would be eagerly expanded by Compose to empty.
-        self.assertIn('--group="$$group"', dind_command)
+        self.assertIn('--group="$group"', dind_command)
+        # Health/readiness must validate the same non-root account that runs
+        # GitHub Actions jobs; root Docker access is not sufficient.
+        backend_health = svc["runner"]["healthcheck"]["test"][1]
+        self.assertIn("/usr/sbin/gosu runner docker info", backend_health)
+        self.assertIn("/usr/sbin/gosu runner docker info", MANAGE.read_text())
+        self.assertIn("stat -c 'DinD socket mode=", CI.read_text())
         self.assertIn("--dns=${CI_DIND_DNS_PRIMARY:-1.1.1.1}", dind_command)
         self.assertIn("--dns=${CI_DIND_DNS_SECONDARY:-8.8.8.8}", dind_command)
         self.assertNotIn("dns", svc["runner"])
