@@ -16,6 +16,7 @@ class Handler(BaseHTTPRequestHandler):
             handle.write(json.dumps({'path': self.path, 'host': self.headers.get('Host'), 'time': time.time()}) + '\n')
         zero = self.headers.get('Host', '').startswith('zero.publisher.example')
         path = self.path
+        base = 'https://restricted.publisher.example:8443' if self.headers.get('Host', '').startswith('restricted.publisher.example') else BASE
         if zero and path not in {'/', '/zero'}:
             self.send_error(404)
             return
@@ -24,7 +25,7 @@ class Handler(BaseHTTPRequestHandler):
             title = {'public': 'T27 Public Code Table', 'private-a': 'T27 A ONLY SECRET',
                 'private-b': 'T27 B ONLY SECRET', 'restricted': 'T27 Summary Restricted'}.get(name, 'T27 Connected ' + name)
             html = '<p>Restricted summary only.</p>' if name == 'restricted' else '<p>Short synthetic summary.</p>' if name == 'auto-summary' else BODY
-            body = f'<rss version="2.0"><channel><title>{title}</title><link>{BASE}</link><description>Synthetic</description><item><title>{title}</title><guid>t27-{name}</guid><link>{BASE}/article/{name}</link><pubDate>Fri, 16 Oct 2026 00:00:00 GMT</pubDate><description><![CDATA[{html}]]></description></item></channel></rss>'
+            body = f'<rss version="2.0"><channel><title>{title}</title><link>{base}</link><description>Synthetic</description><item><title>{title}</title><guid>t27-{name}</guid><link>{base}/article/{name}</link><pubDate>Fri, 16 Oct 2026 00:00:00 GMT</pubDate><description><![CDATA[{html}]]></description></item></channel></rss>'
             kind = 'application/rss+xml'
         elif path.startswith('/article/'):
             body = '<html><head><title>T27 canonical article</title></head><body><article>' + BODY + '<p>' + ('Expanded synthetic content. ' * 80) + '</p></article></body></html>'

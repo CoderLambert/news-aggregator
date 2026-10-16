@@ -25,12 +25,13 @@ config = EngineConfig.from_environment()
 control = ControlWorker(config)
 sources = {}
 for name, publication, user in [('public', 'public', None), ('private-a', 'personal', a), ('private-b', 'personal', b), ('restricted', 'public', None)]:
-    source = Source.objects.create(name='T27 ' + name, url='https://publisher.example:8443/')
+    publisher = 'restricted.publisher.example' if name == 'restricted' else 'publisher.example'
+    source = Source.objects.create(name='T27 ' + name, url=f'https://{publisher}:8443/')
     SourceConfig.objects.create(source_key='t27_'+name.replace('-', '_'), source=source, publisher_name='Synthetic', channel_name=name, category=category, status='enabled', approved_config_version=1, approved_at=timezone.now(), approved_by=a, feed_full_content_allowed=name!='restricted', official_html_full_content_allowed=name!='restricted', reading_policy='summary_only' if name=='restricted' else 'public_feed')
     SourcePublication.objects.create(source=source, publication=publication, owner='miniflux',
         display_name='T27 ' + name, reading_policy='summary_only' if name == 'restricted' else 'public_feed')
     binding = FeedBinding.objects.create(engine_instance_uuid=config.engine_instance_uuid, account_id=2,
-        canonical_feed_url='https://publisher.example:8443/feed/' + name, desired_mode='feed', desired_enabled=True)
+        canonical_feed_url=f'https://{publisher}:8443/feed/' + name, desired_mode='feed', desired_enabled=True)
     SourceFeedLink.objects.create(source=source, binding=binding, enabled=True, editorial_pin=user is None)
     for subscriber in ([user] if user else [a, b]):
         ChannelSubscription.objects.create(user=subscriber, source=source)
