@@ -1,3 +1,7 @@
+import hashlib
+import threading
+
+from django.core.cache import cache
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
@@ -20,6 +24,24 @@ from api.services.search_index_control import (
 )
 
 
+_audit_lock = threading.Lock()
+
+
+def dashboard_index_audit(settings):
+    # Sharing the result avoids scanning every article/vector on every poll.
+    # A completed worker run or collection switch immediately changes the key.
+    version = repr((settings.active_collection, settings.model_name, settings.schema_version, settings.last_success_at))
+    key = 'crawler:index-audit:' + hashlib.sha256(version.encode()).hexdigest()
+    audit = cache.get(key)
+    if audit is None:
+        with _audit_lock:
+            audit = cache.get(key)
+            if audit is None:
+                audit = audit_search_index(include_changed=True)
+                cache.set(key, audit, timeout=60 if audit.available else 5)
+    return audit
+
+
 class SearchIndexDashboardView(APIView):
     permission_classes = [IsActiveSuperuser]
 
@@ -32,7 +54,7 @@ class SearchIndexDashboardView(APIView):
             .order_by('queued_at')
             .first()
         )
-        audit = audit_search_index(include_changed=True)
+        audit = dashboard_index_audit(settings)
         recent_runs = SearchIndexRun.objects.order_by('-queued_at')[:8]
         return Response({
             'settings': settings_data,

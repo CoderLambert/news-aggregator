@@ -20,7 +20,7 @@ import {
   updateCrawlerSettings,
   updateCrawlerTarget,
 } from '@/services/crawlerAdminApi'
-import { crawlerAdminKeys, crawlerDashboardOptions } from '@/services/crawlerAdminQueries'
+import { crawlerAdminKeys, crawlerDashboardOptions, crawlerHistoryOptions } from '@/services/crawlerAdminQueries'
 import type { CrawlBatch, CrawlerSettings, CrawlerTarget, CrawlRun } from '@/types/crawlerAdmin'
 import { crawlBatchDisplay, crawlRunDisplayStatus, crawlRunReason } from '@/services/crawlOutcome'
 import {
@@ -32,13 +32,15 @@ import { searchIndexAdminKeys, searchIndexDashboardOptions } from '@/services/se
 import type { SearchIndexRun, SearchIndexSettings } from '@/types/searchIndexAdmin'
 import { useAuth } from '@/context/AuthContext'
 
+const dateFormatter = new Intl.DateTimeFormat('zh-CN', {
+  month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+})
+
 function formatDate(value: string | null): string {
   if (!value) return '—'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '—'
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
-  }).format(date)
+  return dateFormatter.format(date)
 }
 
 function formatDuration(seconds: number | null): string {
@@ -263,7 +265,7 @@ function SearchIndexSection() {
   return (
     <section id="search-index" className="mt-10 scroll-mt-20 space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div><h2 className="flex items-center gap-2 text-xl font-semibold"><SearchCheck aria-hidden="true" />搜索索引</h2><p className="mt-1 text-sm text-muted-foreground">SQLite 是事实来源，ChromaDB 会自动修复新增、变化和删除。</p></div>
+        <div><h2 className="flex items-center gap-2 text-xl font-semibold"><SearchCheck aria-hidden="true" />搜索索引</h2><p className="mt-1 text-sm text-muted-foreground">自动修复新增、变化和删除；每分钟刷新，核对统计最多缓存 60 秒。</p></div>
         <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy || dashboard.isFetching} onClick={() => void dashboard.refetch()}><RefreshCw aria-hidden="true" />刷新</Button><Button variant="outline" disabled={busy || Boolean(data.activeRun)} onClick={() => runMutation.mutate('sync')}>立即同步</Button><Button disabled={busy || Boolean(data.activeRun)} onClick={() => { if (window.confirm('确认构建新的完整索引？当前索引会持续服务，校验成功后才切换。')) runMutation.mutate('rebuild') }}><RotateCcw aria-hidden="true" />完整重建</Button></div>
       </div>
       {actionError ? <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/35 dark:text-red-200"><AlertCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />{actionError}</div> : null}
@@ -291,6 +293,8 @@ export default function CrawlerAdminPage() {
   const queryClient = useQueryClient()
   const { refresh: refreshAuth } = useAuth()
   const dashboard = useQuery(crawlerDashboardOptions())
+  const [showHistory, setShowHistory] = useState(false)
+  const history = useQuery({ ...crawlerHistoryOptions(), enabled: showHistory })
   const readiness = useQuery({
     queryKey: ['crawlerAdmin', 'readiness'],
     queryFn: ({ signal }) => fetchCrawlerReadiness(signal),
@@ -414,7 +418,8 @@ export default function CrawlerAdminPage() {
 
       <section id="history" className="mt-10 scroll-mt-20">
         <div className="mb-4"><h2 className="text-xl font-semibold">最近抓取历史</h2><p className="mt-1 text-sm text-muted-foreground">展示最近 8 个批次及脱敏后的失败原因。历史结果不会被删除，修复后的状态显示在对应记录的“最新重试”中。</p></div>
-        <div className="space-y-3">{data.recentBatches.length ? data.recentBatches.map((batch) => <BatchCard key={batch.id} batch={batch} busy={busy} onRetry={(id) => retryMutation.mutate(id)} onCancel={(id) => { if (window.confirm('确认停止这个爬虫任务？')) cancelMutation.mutate(id) }} />) : <Card><CardContent className="py-8 text-center text-sm text-muted-foreground">暂无抓取历史。</CardContent></Card>}</div>
+        <Button variant="outline" className="mb-4" aria-expanded={showHistory} onClick={() => setShowHistory((value) => !value)}>{showHistory ? '收起抓取历史' : '查看最近抓取历史'}</Button>
+        {showHistory && (history.isPending ? <p role="status">正在加载抓取历史…</p> : history.isError ? <div role="alert">抓取历史加载失败。<Button variant="outline" onClick={() => void history.refetch()}>重试</Button></div> : <div className="space-y-3">{history.data.length ? history.data.map((batch) => <BatchCard key={batch.id} batch={batch} busy={busy} onRetry={(id) => retryMutation.mutate(id)} onCancel={(id) => { if (window.confirm('确认停止这个爬虫任务？')) cancelMutation.mutate(id) }} />) : <Card><CardContent className="py-8 text-center text-sm text-muted-foreground">暂无抓取历史。</CardContent></Card>}</div>)}
       </section>
     </AdminLayout>
   )

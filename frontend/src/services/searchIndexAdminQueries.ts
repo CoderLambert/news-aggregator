@@ -9,5 +9,6 @@ export const searchIndexAdminKeys = {
 export const searchIndexDashboardOptions = () => queryOptions({
   queryKey: searchIndexAdminKeys.dashboard(),
   queryFn: ({ signal }) => fetchSearchIndexDashboard(signal),
-  refetchInterval: () => typeof document !== 'undefined' && document.hidden ? false : 15_000,
+  staleTime: 60_000,
+  refetchInterval: () => typeof document !== 'undefined' && document.hidden ? false : 60_000,
 })

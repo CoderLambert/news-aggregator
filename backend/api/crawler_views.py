@@ -1,5 +1,6 @@
 from django.db import transaction
-from django.db.models import Case, IntegerField, JSONField, Max, Min, OuterRef, Prefetch, Subquery, Value, When
+from django.db.models import Case, IntegerField, JSONField, Max, Min, OuterRef, Prefetch, Subquery, Value, When, Window, F
+from django.db.models.functions import RowNumber
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
@@ -97,7 +98,7 @@ class CrawlerDashboardView(APIView):
             .order_by('active_order', 'queued_at')
             .first()
         )
-        recent_batches = batch_queryset()[:8]
+        recent_batches = batch_queryset()[:8] if request.query_params.get('include_history') != '0' else []
         context = {
             'active_source_keys': frozenset(runtime_registry()),
             'dashboard_summary': True,
@@ -162,57 +163,71 @@ class CrawlerTargetDetailView(APIView):
         return Response(CrawlerTargetSerializer(target).data)
 
 
-def _source_monitoring(source_key):
-    target = CrawlerTarget.objects.filter(pk=source_key).first()
-    feed = FeedState.objects.filter(source_key=source_key).aggregate(
-        last_success_at=Max('last_success_at'), next_poll_at=Min('next_poll_at'),
-    )
-    latest_item = (
-        NewsSourceItem.objects.filter(source_key=source_key)
-        .select_related('news').order_by('-news__publish_time', '-last_seen_at').first()
-    )
-    last_success = (
-        CrawlRun.objects.filter(target_id=source_key, status='succeeded')
-        .order_by('-finished_at').values_list('finished_at', flat=True).first()
-    )
-    host_keys = []
-    config = SourceConfig.objects.filter(pk=source_key).prefetch_related('endpoints').first()
-    if config:
-        from urllib.parse import urlsplit
-        host_keys = [f'host:{urlsplit(endpoint.url).hostname}' for endpoint in config.endpoints.all()]
-    cooldown = RequestBudget.objects.filter(pk__in=host_keys).aggregate(value=Max('cooldown_until'))['value']
-    crawler_settings = get_crawler_settings()
-    return {
-        'worker_heartbeat_at': crawler_settings.worker_heartbeat_at,
-        'last_probe_at': config.probed_at if config else None,
-        'last_probe_status': (config.probe_summary or {}).get('outcome', '') if config else '',
-        'config_version': config.config_version if config else None,
-        'approved_at': config.approved_at if config else None,
-        'last_success_at': last_success,
-        'latest_article': ({
-            'id': latest_item.news_id, 'title': latest_item.news.title,
-            'publish_time': latest_item.news.publish_time, 'url': latest_item.news.url,
-        } if latest_item else None),
-        'last_failure': target.last_safe_error if target and target.last_status == 'failed' else '',
-        'last_http_statuses': (
-            CrawlRun.objects.filter(target_id=source_key).order_by('-queued_at')
-            .values_list('http_statuses', flat=True).first() or {}
-        ),
-        'cooldown_until': cooldown,
-        'next_poll_at': feed['next_poll_at'],
-        'last_feed_success_at': feed['last_success_at'],
-        'last_target_finished_at': target.last_finished_at if target else None,
+def _source_monitoring_many(source_keys, configs):
+    """Load monitoring in a fixed number of queries, without article bodies."""
+    from urllib.parse import urlsplit
+
+    targets = CrawlerTarget.objects.filter(pk__in=source_keys).in_bulk()
+    feeds = {row['source_key']: row for row in
+             FeedState.objects.filter(source_key__in=source_keys).values('source_key').annotate(
+                 last_success_at=Max('last_success_at'), next_poll_at=Min('next_poll_at'))}
+    latest_items = {
+        row['source_key']: row for row in NewsSourceItem.objects.filter(source_key__in=source_keys)
+        .annotate(position=Window(RowNumber(), partition_by=[F('source_key')],
+                                 order_by=[F('news__publish_time').desc(), F('last_seen_at').desc(), F('pk').desc()]))
+        .filter(position=1).values('source_key', 'news_id', 'news__title', 'news__publish_time', 'news__url')
     }
+    successes = {row['target_id']: row['last_success_at'] for row in
+                 CrawlRun.objects.filter(target_id__in=source_keys, status='succeeded')
+                 .values('target_id').annotate(last_success_at=Max('finished_at'))}
+    latest_statuses = {
+        row['target_id']: row['http_statuses'] for row in CrawlRun.objects.filter(target_id__in=source_keys)
+        .annotate(position=Window(RowNumber(), partition_by=[F('target_id')],
+                                 order_by=[F('queued_at').desc(), F('pk').desc()]))
+        .filter(position=1).values('target_id', 'http_statuses')
+    }
+    hosts = {key: [f'host:{urlsplit(endpoint.url).hostname}' for endpoint in config.endpoints.all()]
+             for key, config in configs.items()}
+    cooldowns = dict(RequestBudget.objects.filter(pk__in={host for values in hosts.values() for host in values})
+                     .values_list('pk', 'cooldown_until'))
+    settings = get_crawler_settings()
+    result = {}
+    for key in source_keys:
+        target, config, feed, item = targets.get(key), configs.get(key), feeds.get(key, {}), latest_items.get(key)
+        deadlines = [cooldowns[host] for host in hosts.get(key, []) if cooldowns.get(host)]
+        result[key] = {
+            'worker_heartbeat_at': settings.worker_heartbeat_at,
+            'last_probe_at': config.probed_at if config else None,
+            'last_probe_status': (config.probe_summary or {}).get('outcome', '') if config else '',
+            'config_version': config.config_version if config else None,
+            'approved_at': config.approved_at if config else None,
+            'last_success_at': successes.get(key),
+            'latest_article': ({'id': item['news_id'], 'title': item['news__title'],
+                                'publish_time': item['news__publish_time'], 'url': item['news__url']} if item else None),
+            'last_failure': target.last_safe_error if target and target.last_status == 'failed' else '',
+            'last_http_statuses': latest_statuses.get(key) or {},
+            'cooldown_until': max(deadlines) if deadlines else None,
+            'next_poll_at': feed.get('next_poll_at'),
+            'last_feed_success_at': feed.get('last_success_at'),
+            'last_target_finished_at': target.last_finished_at if target else None,
+        }
+    return result
 
 
-def _dynamic_source_data(config, request=None):
+def _source_monitoring(source_key):
+    configs = {config.source_key: config for config in
+               SourceConfig.objects.filter(pk=source_key).prefetch_related('endpoints')}
+    return _source_monitoring_many([source_key], configs)[source_key]
+
+
+def _dynamic_source_data(config, request=None, *, monitoring=None):
     data = SourceConfigSerializer(config, context={'request': request} if request else {}).data
-    data['monitoring'] = _source_monitoring(config.source_key)
+    data['monitoring'] = monitoring if monitoring is not None else _source_monitoring(config.source_key)
     data['read_only'] = False
     return data
 
 
-def _code_source_data(source_key, entry):
+def _code_source_data(source_key, entry, *, monitoring=None):
     from api.services.source_policy import policy_for_key
     policy = policy_for_key(source_key)
     return {
@@ -223,7 +238,7 @@ def _code_source_data(source_key, entry):
         'probe_is_current': True, 'approval_is_current': True, 'can_enable': False,
         'endpoints': ([{'kind': 'rss', 'url': policy.feed_url, 'allowed_domains': list(policy.domains)}]
                       if policy.feed_url else []),
-        'monitoring': _source_monitoring(source_key), 'read_only': True,
+        'monitoring': monitoring if monitoring is not None else _source_monitoring(source_key), 'read_only': True,
     }
 
 
@@ -231,13 +246,15 @@ class SourceConfigListCreateView(APIView):
     permission_classes = [IsActiveSuperuser]
 
     def get(self, request):
-        dynamic = {
-            config.source_key: _dynamic_source_data(config, request)
-            for config in SourceConfig.objects.select_related('category', 'source').prefetch_related('endpoints')
-        }
-        rows = []
-        for key, entry in runtime_registry(include_unavailable=True).items():
-            rows.append(dynamic.get(key) or _code_source_data(key, entry))
+        configs = {config.source_key: config for config in
+                   SourceConfig.objects.select_related('category', 'source').prefetch_related('endpoints')}
+        registry = runtime_registry(include_unavailable=True)
+        monitoring = _source_monitoring_many(registry, configs)
+        rows = [
+            _dynamic_source_data(configs[key], request, monitoring=monitoring[key]) if key in configs
+            else _code_source_data(key, entry, monitoring=monitoring[key])
+            for key, entry in registry.items()
+        ]
         return Response(rows)
 
     def post(self, request):
@@ -390,8 +407,12 @@ class CrawlBatchListCreateView(APIView):
     def get(self, request):
         paginator = PageNumberPagination()
         paginator.page_size = 20
+        paginator.page_size_query_param = 'page_size'
+        paginator.max_page_size = 20
         page = paginator.paginate_queryset(batch_queryset(), request)
-        return paginator.get_paginated_response(CrawlBatchSerializer(page, many=True).data)
+        return paginator.get_paginated_response(CrawlBatchSerializer(
+            page, many=True, context={'dashboard_summary': request.query_params.get('summary') == '1'},
+        ).data)
 
     def post(self, request):
         spider_names = request.data.get('spider_names')

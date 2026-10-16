@@ -17,7 +17,7 @@ CODE_SPIDERS = {
     'jiqizhixin': 'jiqizhixin', 'leiphone': 'leiphone', 'sanliu_kr': 'sanliu_kr',
 }
 from api.services.sector_feeds import SECTOR_KEYS
-CODE_SPIDERS.update({key: key for key in SECTOR_KEYS})
+CODE_SPIDERS.update({key: key for key in sorted(SECTOR_KEYS)})
 CODE_SPIDERS = {
     key: spider for key, spider in CODE_SPIDERS.items()
     if key in POLICIES and not POLICIES[key].unsupported_reason

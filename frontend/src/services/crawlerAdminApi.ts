@@ -311,7 +311,7 @@ function normalizeError(error: unknown): never {
 
 export async function fetchCrawlerDashboard(signal?: AbortSignal): Promise<CrawlerDashboard> {
   try {
-    const { data } = await client.get<unknown>('/dashboard/', { signal })
+    const { data } = await client.get<unknown>('/dashboard/', { signal, params: { include_history: 0 } })
     return parseDashboard(data)
   } catch (error) {
     normalizeError(error)
@@ -427,6 +427,16 @@ export async function deleteSourceConfig(sourceKey: string): Promise<void> {
   try {
     await fetchCsrfToken()
     await client.delete(`/sources/${encodeURIComponent(sourceKey)}/`)
+  } catch (error) {
+    normalizeError(error)
+  }
+}
+
+export async function fetchRecentCrawlBatches(signal?: AbortSignal): Promise<CrawlBatch[]> {
+  try {
+    const { data } = await client.get<unknown>('/batches/', { signal, params: { page_size: 8, summary: 1 } })
+    if (!isRecord(data) || !Array.isArray(data.results)) throw new TypeError('Invalid crawl history response')
+    return data.results.map(parseBatch)
   } catch (error) {
     normalizeError(error)
   }

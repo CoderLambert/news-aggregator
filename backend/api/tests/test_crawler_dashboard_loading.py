@@ -74,3 +74,87 @@ def test_dashboard_summarizes_stats_but_run_details_keep_full_counters():
     assert result['source_active'] is True
     assert result['stats'] == {key: value for key, value in stats.items() if key != 'request_failures_by_reason'}
     assert CrawlRunSerializer(run).data['stats'] == stats
+
+
+def admin_request(path):
+    request = APIRequestFactory().get(path)
+    force_authenticate(request, user=SimpleNamespace(is_authenticated=True, is_active=True, is_superuser=True))
+    return request
+
+
+def test_light_dashboard_does_not_load_history():
+    sync_crawler_targets()
+    with patch('api.crawler_views.batch_queryset', side_effect=AssertionError('history queried')):
+        response = CrawlerDashboardView.as_view()(admin_request('/?include_history=0'))
+    assert response.status_code == 200
+    assert response.data['recent_batches'] == []
+    assert response.data['targets']
+
+
+def test_recent_history_is_bounded_and_summarized():
+    from api.crawler_views import CrawlBatchListCreateView
+    target = CrawlerTarget.objects.create(spider_name='webkit', display_name='WebKit')
+    for _ in range(10):
+        batch = CrawlBatch.objects.create(trigger='manual')
+        CrawlRun.objects.create(batch=batch, target=target, status='succeeded',
+                                stats={'outcome': 'updated', 'unused_large_counter': 'x' * 1000})
+    response = CrawlBatchListCreateView.as_view()(admin_request('/?page_size=8&summary=1'))
+    assert response.status_code == 200
+    assert response.data['count'] == 10
+    assert len(response.data['results']) == 8
+    assert response.data['results'][0]['runs'][0]['stats'] == {'outcome': 'updated'}
+
+
+def test_source_monitoring_queries_are_bounded_and_keep_latest_values():
+    from datetime import timedelta
+    from django.utils import timezone
+    from api.models import Category, Source, News, NewsSourceItem, FeedState
+    from api.crawler_views import SourceConfigListCreateView
+    from api.services.crawler_control import get_crawler_settings
+    get_crawler_settings()
+    sync_crawler_targets()
+    source = Source.objects.create(name='Perf fixture', url='https://example.com')
+    category = Category.objects.first()
+    now = timezone.now()
+    target = CrawlerTarget.objects.get(pk='webkit')
+    batch = CrawlBatch.objects.create(trigger='manual')
+    CrawlRun.objects.create(batch=batch, target=target, status='succeeded', finished_at=now - timedelta(hours=1))
+    CrawlRun.objects.create(batch=batch, target=target, status='failed', http_statuses={'503': 2}, finished_at=now)
+    for i in range(2):
+        article = News.objects.create(title=f'Article {i}', content='summary', full_content='body' * 1000,
+                                      publish_time=now + timedelta(minutes=i), source=source, category=category,
+                                      url=f'https://example.com/{i}')
+        NewsSourceItem.objects.create(source_key='webkit', upstream_id=str(i), news=article,
+                                     discovery_url=article.url)
+    FeedState.objects.create(source_key='webkit', feed_url='https://webkit.org/feed/',
+                             last_success_at=now, next_poll_at=now + timedelta(hours=2))
+    with CaptureQueriesContext(connection) as queries:
+        response = SourceConfigListCreateView.as_view()(admin_request('/'))
+    assert response.status_code == 200
+    assert len(response.data) > 30
+    assert len(queries) <= 12
+    monitoring = next(row['monitoring'] for row in response.data if row['source_key'] == 'webkit')
+    assert monitoring['latest_article']['title'] == 'Article 1'
+    assert monitoring['last_success_at'] == now - timedelta(hours=1)
+    assert monitoring['last_http_statuses'] == {'503': 2}
+    assert monitoring['last_feed_success_at'] == now
+    assert not any('"api_news"."full_content"' in query['sql'] for query in queries)
+
+
+
+def test_index_dashboard_reuses_audit_until_worker_completes():
+    from datetime import timedelta
+    from django.core.cache import cache
+    from django.utils import timezone
+    from api.search_index_views import dashboard_index_audit
+    cache.clear()
+    settings = SimpleNamespace(active_collection='test', model_name='model', schema_version='1', last_success_at=None)
+    audit = SimpleNamespace(available=True)
+    with patch('api.search_index_views.audit_search_index', return_value=audit) as scan:
+        assert dashboard_index_audit(settings).available
+        assert dashboard_index_audit(settings).available
+        assert scan.call_count == 1
+        settings.last_success_at = timezone.now() + timedelta(seconds=1)
+        dashboard_index_audit(settings)
+        assert scan.call_count == 2
+    cache.clear()
