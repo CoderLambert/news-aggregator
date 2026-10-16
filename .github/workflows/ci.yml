@@ -2,23 +2,34 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# Avoid duplicate PR push runs and discard obsolete checks on new commits.
+concurrency:
+  group: newshub-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   frontend:
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft)
+    runs-on: [self-hosted, linux, x64, newshub-ci]
+    timeout-minutes: 30
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          persist-credentials: false
+      - name: Verify runner Node.js 22
+        run: |
+          node --version
+          npm --version
+          test "$(node -p 'process.versions.node.split(".")[0]')" = 22
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
@@ -36,21 +47,34 @@ jobs:
         run: npm run build
 
   backend-and-release-gates:
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft)
+    runs-on: [self-hosted, linux, x64, newshub-ci]
+    timeout-minutes: 90
     env:
       PYTHONPATH: backend:crawler
       RUN_MAIN: 'true'
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.12'
-          cache: pip
-          cache-dependency-path: backend/requirements.txt
+          persist-credentials: false
+      - name: Verify isolated Docker daemon and shared workspace
+        run: |
+          python3 --version
+          test "$(python3 -c 'import sys; print(".".join(map(str,sys.version_info[:2])))')" = 3.12
+          test "$DOCKER_HOST" = unix:///ci-docker/docker.sock
+          test -x "$CHROMIUM_EXECUTABLE"
+          test -w "$TMPDIR"
+          docker info >/dev/null
+          docker compose version
+          docker run --rm --network none \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/ci-src,readonly" \
+            alpine:3.22 test -f /ci-src/.github/workflows/ci.yml
+          docker run --rm --network none \
+            --mount "type=bind,source=$TMPDIR,target=/ci-tmp,readonly" \
+            alpine:3.22 test -d /ci-tmp
       - name: Create isolated backend environment
-        run: python -m venv backend/venv
+        run: python3 -m venv backend/venv
       - name: Install CPU-only PyTorch first
         run: backend/venv/bin/python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.14.1+cpu'
       - name: Install backend and test dependencies
@@ -82,21 +106,16 @@ jobs:
           bash scripts/deploy/tests/test_export_static.sh
           bash scripts/deploy/tests/test_preflight.sh
           bash scripts/deploy/tests/test_local_domain_args.sh
-      - name: Install isolated browser smoke tools
+      - name: Verify preinstalled Playwright browser
         run: |
           backend/venv/bin/python -m pip install 'playwright==1.62.0'
-          backend/venv/bin/python -m playwright install chromium
-          sudo backend/venv/bin/python -m playwright install-deps chromium
-          sudo apt-get update
-          sudo apt-get install --yes libnss3-tools
-          browser_path="$(find "$HOME/.cache/ms-playwright" -type f -name chrome -perm /111 -print -quit)"
-          test -n "$browser_path"
-          echo "CHROMIUM_EXECUTABLE=$browser_path" >> "$GITHUB_ENV"
+          backend/venv/bin/python -m playwright --version
+          test -x "$CHROMIUM_EXECUTABLE"
       - name: Build the non-root production image
         env:
           RELEASE_SHA: ${{ github.sha }}
           NEWSHUB_IMAGE: newshub:ci-${{ github.sha }}
-        run: docker build --target production --build-arg "RELEASE_SHA=${RELEASE_SHA}" --tag "${NEWSHUB_IMAGE}" .
+        run: docker build --target production --build-arg "RELEASE_SHA=$RELEASE_SHA" --tag "$NEWSHUB_IMAGE" .
       - name: Preload isolated smoke Nginx image
         run: docker pull nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
       - name: Run isolated G1 local-domain smoke
@@ -104,4 +123,4 @@ jobs:
           RELEASE_SHA: ${{ github.sha }}
           NEWSHUB_IMAGE: newshub:ci-${{ github.sha }}
           PYTHON_BIN: ${{ github.workspace }}/backend/venv/bin/python
-        run: scripts/deploy/local-domain-smoke.sh --execute --image "${NEWSHUB_IMAGE}" --sha "${RELEASE_SHA}" --nginx-image nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
+        run: scripts/deploy/local-domain-smoke.sh --execute --image "$NEWSHUB_IMAGE" --sha "$RELEASE_SHA" --nginx-image nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
