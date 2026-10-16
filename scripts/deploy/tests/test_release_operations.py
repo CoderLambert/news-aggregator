@@ -628,7 +628,7 @@ class CollectionAndWorkflowTests(unittest.TestCase):
         self.assertLess(runs.index("bash ops/ci/install-backend-deps.sh"), runs.index("pytest -q"))
         backend_install = (ROOT / "ops/ci/install-backend-deps.sh").read_text(encoding="utf-8")
         self.assertIn("2.14.1+cpu", backend_install)
-        self.assertLess(backend_install.index('"torch==$TORCH_PIN"'), backend_install.index('-r "$REQ"'))
+        self.assertLess(backend_install.index('"torch==$TORCH_PIN"'), backend_install.index('-r "$LOCK"'))
         self.assertIn("tests/ backend/api/tests/ scripts/deploy/tests/", runs)
         self.assertIn("--target production", runs)
         self.assertIn("local-domain-smoke.sh --execute", runs)
