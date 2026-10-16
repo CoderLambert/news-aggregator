@@ -141,4 +141,6 @@ def build_inventory(repo_root, baseline_sha, *, snapshot=None, targets=None):
             'environment': 'inventory_only', 'production_ready': False,
             'snapshot_status': 'provided_unverified' if snapshot else 'BLOCKED',
             'sources': sorted(merged, key=lambda row: row['inventory_key']),
+            'unbound_source_configs': snapshot.get('unbound_source_configs', []) if snapshot else [],
+            'table_fingerprints': snapshot.get('table_fingerprints', {}) if snapshot else {},
             'switch_groups': switch_groups, 'backup_ref': None, 'compatible_release_ref': None}

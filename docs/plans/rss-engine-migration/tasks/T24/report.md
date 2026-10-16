@@ -18,4 +18,6 @@ RUN_MAIN=true DJANGO_DB_PATH=/tmp/newshub-rss-coordinator-unused.sqlite3 PYTHONP
 # 57 sources; snapshot=BLOCKED; production_ready=false，退出0。
 ```
 
-未完成：从授权一致性副本导出真实source/endpoint/关系/hash；逐源确认目标Feed、覆盖差异和停更决定；核对完整共享采集引用。以上阻塞 T24 实际盘点完成和生产范围，不能阻塞 T25 合成工具或无关开发。后续需补充副本导出器，当前工具只消费显式脱敏证据，不声称完成自动数据库盘点。
+未完成：从授权一致性副本导出真实source/endpoint/关系/hash；逐源确认目标Feed、覆盖差异和停更决定；核对完整共享采集引用。以上阻塞 T24 实际盘点完成和生产范围，不能阻塞 T25 合成工具或无关开发。现已补充只读副本导出器；真实副本运行仍未执行。
+
+副本模式：`scripts/rss-inventory.py --snapshot-db /explicit/standalone-copy.sqlite3 --snapshot-sha256 EXPECTED --output NEW_PATH`。只接受显式路径与预期SHA，拒绝有非空WAL的活动主文件；SQLite mode=ro/query_only及读事务，前后hash核对。输出全表行数/确定顺序hash（不输出正文/译文/凭据），SourceConfig FK与既有频道精确政策名关联，未绑定动态配置单列不丢失；公共旧来源的public/legacy初始化与当前迁移合同一致。只有合成文件运行，未读取用户库。扩展后6专项通过。
