@@ -188,6 +188,7 @@ print('restored available/ACL PASS')
                 '-e','DJANGO_DB_PATH=/var/lib/newshub/db/synthetic.sqlite3','-e','RSS_ENGINE_INSTANCE_UUID='+instance,
                 '-e','RSS_ENGINE_ACCOUNT_ID='+str(account['id']),'-e','RSS_ENGINE_BASE_URL=http://miniflux:8080',
                 '-e','RSS_ENGINE_TOKEN_FILE=/run/secrets/t26-token',
+                '-e','RSS_FULL_CONTENT_ENABLED=1',  # Isolated synthetic publisher only.
                 '--mount','type=bind,source='+str(dbdir)+',target=/var/lib/newshub/db',
                 '--mount','type=bind,source='+str(tokenpath)+',target=/run/secrets/t26-token,readonly',
                 '--mount','type=bind,source='+str(ROOT/'ops/rss/T26/reconcile_restored.py')+',target=/reconcile.py,readonly',

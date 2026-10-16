@@ -21,7 +21,8 @@ pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
-def setup():
+def setup(settings):
+    settings.RSS_FULL_CONTENT_ENABLED = True
     source = Source.objects.create(name='sync-source', url='https://publisher.example/')
     Category.objects.create(name='科技', slug='technology')
     binding = FeedBinding.objects.create(engine_instance_uuid=uuid.uuid4(), account_id=2, engine_feed_id=5,
@@ -30,7 +31,8 @@ def setup():
     SourcePublication.objects.create(source=source, owner='miniflux', publication='public', reading_policy='public_feed')
     SourceFeedLink.objects.create(source=source, binding=binding, enabled=True)
     lease = acquire_lease(binding.engine_instance_uuid, 2)
-    config = EngineConfig(str(binding.engine_instance_uuid), 2, 'http://engine:8080', 'synthetic')
+    config = EngineConfig(str(binding.engine_instance_uuid), 2, 'http://engine:8080', 'synthetic',
+                          full_content_enabled=True)
     dto = EntryDTO(str(binding.engine_instance_uuid), 2, 5, 10, 'First title',
         'https://publisher.example/story', 'https://publisher.example/discussion', 'Author',
         '<p>A readable article.</p>', '2020-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
