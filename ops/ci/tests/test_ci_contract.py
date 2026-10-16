@@ -20,6 +20,9 @@ FRONT_DEPS = ROOT / "ops/ci/install-frontend-deps.sh"
 BACK_DEPS = ROOT / "ops/ci/install-backend-deps.sh"
 WATCH = ROOT / "ops/ci/watch.py"
 WATCH_SERVICE = ROOT / "ops/ci/watch-service.sh"
+CHECK_LOCK = ROOT / "ops/ci/check-backend-lock.py"
+CACHE_SUMMARY = ROOT / "ops/ci/cache-summary.sh"
+CI_LOCK = ROOT / "backend/requirements-ci.lock"
 
 
 def load(path):
@@ -181,7 +184,7 @@ class SelfHostedCIContract(unittest.TestCase):
         self.assertIn("runner-state:/runner/data", svc["runner"]["volumes"])
 
     def test_script_syntax(self):
-        for script in (MANAGE, ENTRYPOINT, FRONT_DEPS, BACK_DEPS, WATCH_SERVICE):
+        for script in (MANAGE, ENTRYPOINT, FRONT_DEPS, BACK_DEPS, WATCH_SERVICE, CACHE_SUMMARY):
             with self.subTest(file=script.name):
                 result = subprocess.run(
                     ["bash", "-n", str(script)],
@@ -223,6 +226,15 @@ class SelfHostedCIContract(unittest.TestCase):
         self.assertIn("sha256sum", back)
         self.assertIn("pip check", back)
         self.assertIn("pip freeze", back)
+        self.assertIn('cat "$REQ" "$LOCK"', back)
+        self.assertIn('-r "$LOCK"', back)
+        self.assertTrue(CI_LOCK.is_file())
+        self.assertIn('docker builder du', CACHE_SUMMARY.read_text())
+        check = subprocess.run(
+            ["python3", str(CHECK_LOCK), str(ROOT / "backend/requirements.txt"), str(CI_LOCK)],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(check.returncode, 0, check.stderr)
         self.assertIn("npm_config_cache", cfg["services"]["runner-frontend"]["environment"])
         self.assertIn("PIP_CACHE_DIR", cfg["services"]["runner"]["environment"])
         self.assertIn("docker-data:/var/lib/docker", cfg["services"]["docker"]["volumes"])

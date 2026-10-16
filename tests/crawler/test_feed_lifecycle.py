@@ -5,7 +5,7 @@ import subprocess
 import sys
 
 
-def test_failed_pipeline_replays_without_checkpoint_then_304_uses_committed_feed(tmp_path):
+def test_failed_pipeline_replays_without_checkpoint_then_304_uses_committed_feed(tmp_path, copy_synthetic_db):
     root = Path(__file__).resolve().parents[2]
     script = tmp_path / 'feed_lifecycle_probe.py'
     script.write_text(r'''
@@ -14,12 +14,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from dataclasses import replace
 from datetime import timedelta
 from email.utils import format_datetime
-from django.core.management import call_command
 from django.test import override_settings
 from django.utils import timezone
 
 django.setup()
-call_command('migrate', verbosity=0)
 from api.services.source_policy import POLICIES
 from api.services.article_fetcher import safe_http
 def synthetic_dns(url, timeout):
@@ -129,6 +127,7 @@ proxy.shutdown()
 assert not errors, '\n'.join(errors)
 print(json.dumps(report))
 ''', encoding='utf-8')
+    copy_synthetic_db(tmp_path / 'feed.sqlite3')
     result = subprocess.run([sys.executable, str(script)], cwd=root, env={
         **os.environ, 'PYTHONPATH': f'{root / "backend"}:{root / "crawler"}',
         'DJANGO_ENV': 'development', 'DJANGO_SETTINGS_MODULE': 'newsaggregator.settings',

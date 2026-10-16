@@ -155,3 +155,6 @@ jobs:
           PYTHON_BIN: ${{ github.workspace }}/backend/venv/bin/python
           LOCAL_DOMAIN_G1_PROBE_IMAGE: newshub:ci-g1-probe
         run: scripts/deploy/local-domain-smoke.sh --execute --image "$NEWSHUB_IMAGE" --sha "$RELEASE_SHA" --nginx-image nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
+      - name: Report bounded cache usage
+        if: always()
+        run: bash ops/ci/cache-summary.sh

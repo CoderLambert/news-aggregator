@@ -133,6 +133,15 @@ bash ops/ci/manage.sh disable-watch   # 只停用本项目的 user timer，不�
 
 请注意：重启过程中**已经在执行**的 Job 不能从中断处恢复，只能在 GitHub 重新运行。系统自启/自动恢复不等于测试自动续跑。若检测到手动 stop 标记，watchdog **不会自动启动** Runner。
 
+## 锁定 CI Python 依赖与监控（CI-P04）
+
+- `backend/requirements-ci.lock` 锁定 CPython 3.12 / Linux x86_64 的完整解析结果（包含传递依赖），来源为首次成功的真实 CI 安装记录。与生产 `backend/requirements.txt` 分离，不更改生产发布依赖。
+- `ops/ci/check-backend-lock.py` 检查重复/未锁定项目、直接依赖覆盖和缓存环境内 158 个版本。PyTorch CPU 固定版本仍先从官方 CPU Index 安装。
+- `ops/ci/install-backend-deps.sh` 的缓存指纹同时包含 `requirements.txt` 和完整的 CI lock。修改任一文件才会自动重建环境；日常代码提交仍复用已安装依赖。
+- `ops/ci/cache-summary.sh` 在工作流结束时输出后端缓存占用和 DinD BuildKit 占用概要，仅用于诊断；执行超时也不阻断业务检查。
+- 首次部署锁文件会出现一次正常 `MISS`（缓存键升级），以后 `HIT`。**不自动清理任何 Docker 镜像或卷，不触碰生产数据**。
+- 依赖升级流程：在隔离环境中明确升级并运行全套检查后，重新生成 `pip freeze`，同步到 CI lock 并审核变更差异；不要自动选择最新的 `>=` 范围版本。
+
 ## PR 快速反馈（CI-P03）
 
 - 前端 Runner 在依赖缓存检查之前执行 Python `compileall` 与 shell `bash -n`，不接入 DinD 或后端数据卷。

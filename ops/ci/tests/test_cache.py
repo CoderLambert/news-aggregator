@@ -29,6 +29,7 @@ class DependencyCacheTests(unittest.TestCase):
             "PATH": f"{self.bin}:{os.environ['PATH']}",
             "XDG_CACHE_HOME": str(self.root / "cache"),
             "CI_TEST_LOG": str(self.log),
+            "CI_TEST_REAL_PYTHON": shutil.which("python3"),
             "HOME": str(self.root),
         })
 
@@ -87,9 +88,15 @@ exit 71
         backend.mkdir()
         req = backend / "requirements.txt"
         req.write_text("pytest>=8\n")
+        lock = backend / "requirements-ci.lock"
+        lock.write_text("pytest==8.0\ntorch==2.14.1+cpu\nplaywright==1.62.0\n")
+        shutil.copyfile(REPO_ROOT / "ops/ci/check-backend-lock.py", self.ops / "check-backend-lock.py")
         executable(self.bin / "python3", r"""#!/usr/bin/env bash
 set -eu
 if [[ "$1" == -c ]]; then echo 'cpython-312 x86_64'; exit 0; fi
+if [[ "$1" == */check-backend-lock.py ]]; then
+    exec "$CI_TEST_REAL_PYTHON" "$@"
+fi
 if [[ "$1" == -m && "$2" == venv ]]; then
     mkdir -p "$3/bin"
     cat > "$3/bin/python" <<'PY'
@@ -102,7 +109,7 @@ if [[ "$1" == -m && "$2" == pip ]]; then
         freeze) echo 'test==1.0'; exit 0 ;;
     esac
 fi
-if [[ "$1" == -c ]]; then exit 0; fi
+if [[ "$1" == -c || "$1" == */check-backend-lock.py ]]; then exit 0; fi
 exit 72
 PY
     chmod +x "$3/bin/python"
@@ -120,6 +127,10 @@ exit 73
         req.write_text("pytest>=9\n")
         self.run_script(script)
         self.assertEqual(self.install_count(), 6)
+        # A changed exact-resolution lock must invalidate the cached venv too.
+        lock.write_text("pytest==9.0\ntorch==2.14.1+cpu\nplaywright==1.62.0\n")
+        self.run_script(script)
+        self.assertEqual(self.install_count(), 9)
 
 
 if __name__ == "__main__":
