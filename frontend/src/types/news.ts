@@ -43,6 +43,7 @@ export interface NewsSummary {
   reading_policy?: ReadingPolicy
   body_access_granted?: boolean
   can_fetch_full_content?: boolean
+  can_rss_refetch?: boolean
   id: number
   title: string
   summary: string
@@ -147,6 +148,7 @@ export function parseNewsSummary(value: unknown): NewsSummary {
   return {
     body_access_granted: value.body_access_granted === true,
     can_fetch_full_content: typeof value.can_fetch_full_content === "boolean" ? value.can_fetch_full_content : undefined,
+    can_rss_refetch: typeof value.can_rss_refetch === 'boolean' ? value.can_rss_refetch : undefined,
     publish_time_inferred: value.publish_time_inferred === true,
     source_region: value.source_region === 'domestic' ? 'domestic' : 'international',
     channel_ids: Array.isArray(value.channel_ids) ? value.channel_ids.filter((id): id is number => typeof id === 'number') : [requiredNumber(value, 'source')],

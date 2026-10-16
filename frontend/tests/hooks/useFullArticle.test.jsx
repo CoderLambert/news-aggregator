@@ -5,12 +5,16 @@ import { StrictMode } from 'react'
 import { AuthContext } from '@/context/AuthContext'
 import { useFullArticle } from '@/hooks/useFullArticle'
 import { fetchFullArticle, fetchFullArticleStatus } from '@/services/newsWorkflowApi'
+import { fetchRssOperation, requestRssRefetch } from '@/services/api'
 import { CapabilitiesTestProvider, fullCapabilities } from '../helpers/capabilities'
 
 vi.mock('@/services/newsWorkflowApi', async (importOriginal) => ({
   ...await importOriginal(),
   fetchFullArticle: vi.fn(),
   fetchFullArticleStatus: vi.fn(),
+}))
+vi.mock('@/services/api', async (importOriginal) => ({
+  ...await importOriginal(), requestRssRefetch: vi.fn(), fetchRssOperation: vi.fn(),
 }))
 
 function makeWrapper(getUser = () => ({ id: 12, username: 'reader' }), capabilities = fullCapabilities()) {
@@ -45,6 +49,32 @@ describe('useFullArticle', () => {
     window.sessionStorage.clear()
   })
   afterEach(() => vi.restoreAllMocks())
+
+  it('repairs engine-owned content only after an explicit click and committed operation', async () => {
+    const news = { id: 41, body_owner: 'miniflux', can_rss_refetch: true, full_content: 'old' }
+    requestRssRefetch.mockResolvedValue('op-41')
+    fetchRssOperation.mockResolvedValue({ id: 'op-41', state: 'succeeded', result: { pending_sync: false, sync_status: 'accepted' } })
+    fetchFullArticleStatus.mockResolvedValue({ full_content: 'updated', has_full_content: true, full_content_state: 'available', full_content_revision: 2 })
+    const setNews = vi.fn((update) => update(news))
+    const { result } = renderHook(() => useFullArticle(41, setNews, news), { wrapper: makeWrapper() })
+    expect(requestRssRefetch).not.toHaveBeenCalled()
+    await act(async () => { expect(await result.current.handleFetchFullArticle(true)).toBe(true) })
+    expect(requestRssRefetch).toHaveBeenCalledWith(41, 12, expect.any(AbortSignal))
+    expect(fetchFullArticle).not.toHaveBeenCalled()
+    expect(setNews.mock.results.at(-1).value.full_content).toBe('updated')
+  })
+
+  it('does not claim a quarantined engine repair replaced the existing body', async () => {
+    const news = { id: 42, body_owner: 'miniflux', can_rss_refetch: true, full_content: 'keep' }
+    requestRssRefetch.mockResolvedValue('op-42')
+    fetchRssOperation.mockResolvedValue({ id: 'op-42', state: 'succeeded', result: { pending_sync: false, sync_status: 'quarantined' } })
+    const setNews = vi.fn()
+    const { result } = renderHook(() => useFullArticle(42, setNews, news), { wrapper: makeWrapper() })
+    await act(async () => { expect(await result.current.handleFetchFullArticle()).toBe(false) })
+    expect(result.current.articleError).toContain('未替换')
+    expect(fetchFullArticleStatus).not.toHaveBeenCalled()
+    expect(setNews).not.toHaveBeenCalled()
+  })
 
   it('reads an already queued task without posting or promoting work', async () => {
     const news = { id: 99, full_content: '', has_full_content: false, full_content_state: 'missing', full_content_fetch_status: 'queued' }

@@ -7,6 +7,7 @@ import { parseNewsId } from '@/services/newsWorkflowQueries'
 import { hasReadableFullContent, hasPendingFullContentTask } from '@/types/news'
 import type { NewsDetail } from '@/types/news'
 import { useCapability } from '@/context/CapabilitiesContext'
+import { fetchRssOperation, requestRssRefetch } from '@/services/api'
 
 interface FetchState {
   ownerKey: string
@@ -87,6 +88,8 @@ export function useFullArticle(
   const { lang } = useLanguage()
   const fullContentEnabled = useCapability('fetch_full').enabled
   const newsId = parseNewsId(id)
+  const engineOwned = news?.body_owner === 'miniflux' || news?.can_rss_refetch === true
+  const viewerId = user?.id
   const ownerKey = `${newsId ?? String(id ?? '')}:${user?.id ?? 'anonymous'}:${lang}`
   const ownerRef = useRef(ownerKey)
   const requestRef = useRef<FetchRequest | null>(null)
@@ -201,6 +204,32 @@ export function useFullArticle(
 
     try {
       if (attachOnly) return await pollExistingTask()
+      if (engineOwned) {
+        if (!viewerId) return false
+        const operationId = await requestRssRefetch(newsId, viewerId, request.controller.signal)
+        const deadline = Date.now() + SERVER_FETCH_TIMEOUT_MS
+        while (isCurrent() && !request.controller.signal.aborted && Date.now() < deadline) {
+          const operation = await fetchRssOperation(operationId, request.controller.signal)
+          if (!isCurrent()) return false
+          if (['failed', 'cancelled', 'manual_blocked'].includes(operation.state)) {
+            setState({ ownerKey, loading: true, error: '正文修复未完成，请稍后重试。' })
+            return false
+          }
+          if (operation.state === 'succeeded' && operation.result.pending_sync === false) {
+            if (!['accepted', 'unchanged'].includes(String(operation.result.sync_status))) {
+              setState({ ownerKey, loading: true, error: '修复结果未替换当前正文，请稍后查看。' })
+              return false
+            }
+            const data = await fetchFullArticleStatus(newsId, request.controller.signal)
+            if (!isCurrent()) return false
+            applyResult(data)
+            return hasReadableFullContent(data)
+          }
+          await waitForNextPoll(request.controller.signal, 1500)
+        }
+        if (isCurrent()) setState({ ownerKey, loading: true, error: '正文修复仍在处理中，可稍后继续查看。' })
+        return false
+      }
       const data = await fetchFullArticle(newsId, force, request.controller.signal)
       if (!isCurrent()) return false
       if (hasPendingFullContentTask(data)) {
@@ -235,7 +264,7 @@ export function useFullArticle(
           : current)
       }
     }
-  }, [applyResult, fullContentEnabled, newsId, ownerKey, setNews])
+  }, [applyResult, engineOwned, fullContentEnabled, newsId, ownerKey, setNews, viewerId])
 
   const handleFetchFullArticle = useCallback(
     (force = false) => executeFetch(force === true, false),
