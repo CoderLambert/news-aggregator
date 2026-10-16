@@ -88,6 +88,24 @@ class WatchdogSafetyTests(unittest.TestCase):
             self.assertEqual(watch.read_state(dest)["runner"]["attempts"], 2)
             self.assertEqual(dest.stat().st_mode & 0o777, 0o600)
 
+    def test_crash_loop_quarantined_only_after_grace(self):
+        state = {}
+        remote = {"omarchy-newshub-frontend": {"status": "offline", "busy": False}}
+        with mock.patch.object(watch, "command", return_value=(0, "")) as command:
+            watch.consider_restart("runner-frontend", "cid", "restarting", "none", remote, state, 1000, False)
+            command.assert_not_called()
+            watch.consider_restart("runner-frontend", "cid", "restarting", "none", remote, state, 1301, False)
+            command.assert_called_once_with(["docker", "stop", "--time", "20", "cid"], timeout=45)
+            self.assertEqual(state["runner-frontend"]["attempts"], 3)
+
+    def test_busy_backend_not_quarantined_during_dind_crashloop(self):
+        state = {}
+        remote = {"omarchy-newshub": {"status": "online", "busy": True}}
+        with mock.patch.object(watch, "command") as command:
+            watch.consider_restart("docker", "cid", "restarting", "none", remote, state, 1000, False)
+            watch.consider_restart("docker", "cid", "restarting", "none", remote, state, 1301, False)
+            command.assert_not_called()
+
     def test_busy_local_worker_blocks_running_runner_recovery(self):
         remote = {"omarchy-newshub": {"status": "offline", "busy": False}}
         with mock.patch.object(watch, "worker_activity", return_value=True), mock.patch.object(watch, "command") as cmd:
