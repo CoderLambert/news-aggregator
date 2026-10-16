@@ -25,8 +25,17 @@ def run(args, **kwargs):
 
 def main():
     parser = argparse.ArgumentParser(); parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--supplement-github', action='store_true'); args = parser.parse_args()
+    parser.add_argument('--supplement-github', action='store_true')
+    parser.add_argument('--manual-repeat', action='store_true')
+    parser.add_argument('--retain-bodies', type=Path); args = parser.parse_args()
+    assert not (args.supplement_github and args.manual_repeat)
+    if args.manual_repeat:
+        assert args.retain_bodies and str(args.retain_bodies).startswith('/tmp/newshub-rss-t27-quality-')
+        args.retain_bodies.mkdir(mode=0o700, parents=False, exist_ok=False)
     selected_feeds = [('summary_blog', 'GitHub Blog', 'https://github.blog/feed/', 1)] if args.supplement_github else FEEDS
+    repeat_urls = {'Julia Evans':'https://jvns.ca/blog/2024/11/18/how-to-import-a-javascript-library/', 'Martin Fowler':'https://martinfowler.com/articles/orchestrator-tax.html'}
+    if args.manual_repeat:
+        selected_feeds = [(kind,name,url,1) for kind,name,url,_ in FEEDS if name in repeat_urls]
     endpoint = (None if os.environ.get('DOCKER_CONTEXT') else os.environ.get('DOCKER_HOST')) or run(['docker','context','inspect','--format','{{.Endpoints.docker.Host}}']).stdout.strip()
     assert endpoint.startswith('unix://')
     project='newshub-rss-t27-public-'+uuid.uuid4().hex[:10]
@@ -39,7 +48,7 @@ def main():
         path=state/'overlay.json';path.write_text(json.dumps(overlay))
         compose=['docker','compose','-p',project,'-f',str(ROOT/'ops/rss/T00/compose.yaml'),'-f',str(path)]
         def call(*args):return run(compose+list(args)).stdout.strip()
-        evidence={'project':project,'feeds':[],'private_network_guard':True,'sample_limits':({'summary_blog':1} if args.supplement_github else {'native':4,'summary_blog':4,'dev':2,'hn':5}),'tested_sha':run(['git','rev-parse','HEAD'],cwd=ROOT).stdout.strip()}
+        evidence={'project':project,'feeds':[],'private_network_guard':True,'sample_limits':({'native':1,'summary_blog':1} if args.manual_repeat else {'summary_blog':1} if args.supplement_github else {'native':4,'summary_blog':4,'dev':2,'hn':5}),'tested_sha':run(['git','rev-parse','HEAD'],cwd=ROOT).stdout.strip()}
         try:
             call('up','-d','--wait','guarded')
             address=call('port','guarded','8080');assert address.startswith('127.0.0.1:')
@@ -81,6 +90,7 @@ def main():
                             match=next((entry for entry in entries if subtype(entry)==subtype_name),None)
                             if match:selected.append(match)
                         row['subtypes_missing']=[name for name in ['article','github','video','self_post'] if not any(subtype(entry)==name for entry in selected)]
+                    elif args.manual_repeat:selected=[entry for entry in entries if entry.url==repeat_urls[name]][:1]
                     else:selected=entries[:limit]
                     for entry in selected[:limit]:
                         item={'id':str(entry.id),'url':entry.url,'title':entry.title,'published_at':entry.published_at,'scope':'feed_content','subtype':subtype(entry),'manual_completeness':'not_confirmed'}
@@ -101,6 +111,12 @@ def main():
                         item.update(markdown_chars=len(converted.markdown),canonical_hash=converted.canonical_hash,nonempty_readable=bool(converted.markdown.strip()),
                             pre_blocks=len(soup.find_all('pre')),tables=len(soup.find_all('table')),images=len(soup.find_all('img')),
                             heading_count=len(soup.find_all(['h1','h2','h3','h4'])))
+                        if args.manual_repeat:
+                            slug = 'julia' if name=='Julia Evans' else 'fowler'
+                            retained = args.retain_bodies / (slug+'-engine.html')
+                            retained.write_text(entry.content); retained.chmod(0o600)
+                            (args.retain_bodies / (slug+'-engine.md')).write_text(converted.markdown)
+                            item['retained_body_file'] = retained.name
                         row['entries'].append(item)
                     row['status']='sampled' if row['entries'] else 'no_entries'
                 except Exception as error:

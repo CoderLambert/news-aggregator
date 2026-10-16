@@ -73,3 +73,55 @@ def test_fresh_real_browser_and_engine(tmp_path):
                     '--output', str(tmp_path / 'browser')], cwd=ROOT, check=True, timeout=900)
     result = json.loads((tmp_path / 'browser/browser-evidence.json').read_text())
     assert result['status'] == 'passed'
+
+
+def test_automatic_summary_precedes_first_read_without_refetch():
+    folder = EVIDENCE / 'automatic'
+    result = json.loads((folder / 'automatic-evidence.json').read_text())
+    assert result['status'] == 'passed'
+    assert result['actor'] == 'non_admin_bob'
+    assert result['default_mode'] == 'full_content' and result['gate_enabled'] is True
+    assert result['no_explicit_policy_or_refetch'] and result['expanded_body_visible']
+    assert result['private_subscription'] and result['page_errors'] == []
+    assert result['theme_code_exact'] and result['toc_navigation']['passed']
+    assert set(result['theme_code_layout']) == {'dark', 'light'}
+    assert all(row['visible'] and row['no_page_overflow'] for row in result['theme_code_layout'].values())
+    requests = json.loads((folder / 'automatic-network.json').read_text())
+    assert sum(row['method'] == 'POST' and '/me/rss-subscriptions/' in row['url'] for row in requests) == 1
+    assert not any(path in row['url'] for row in requests for path in ('/rss-refetch/', '/fetch-full/', '/policy/'))
+    first_read = min(row['time'] for row in requests if '/api/news/' in row['url'] and 'auto-summary' in row['url'])
+    publisher = [json.loads(line) for line in (folder / 'publisher-requests.jsonl').read_text().splitlines()]
+    fetched = [row for row in publisher if row['path'] == '/article/auto-summary']
+    assert len(fetched) == 1 and fetched[0]['time'] < first_read
+    assert not any(row['path'] == '/article/restricted' for row in publisher)
+    assert json.loads((folder / 'cleanup.json').read_text()) == {
+        'project': result['project'], 'resources_removed': True}
+
+
+def test_public_supplement_remains_one_article_and_unknown_completeness():
+    result = read('github-supplement.json')
+    assert result['resources_removed'] and result['private_network_guard']
+    assert len(result['feeds']) == 1
+    feed = result['feeds'][0]
+    assert feed['feed_url'] == 'https://github.blog/feed/' and feed['mode'] == 'feed'
+    assert feed['full_content_gate_enabled'] and len(feed['entries']) == 1
+    article = feed['entries'][0]
+    assert article['manual_completeness'] == 'not_confirmed'
+    assert article['subtype'] == 'article' and article['extraction_elapsed_seconds'] > 0
+
+
+def test_limited_quality_review_preserves_failure_and_original_identity():
+    review = read('quality-review.json')
+    assert review['existing_samples_reviewed'] == 2 and review['new_articles_added'] == 0
+    assert review['production_verified_flags_changed'] is False
+    assert all(row['same_hash_as_initial_sample'] and row['title_matches_source'] for row in review['articles'])
+    native, extracted = review['articles']
+    assert native['normalized_main_text_equal'] and native['every_code_block_exact']
+    assert native['code_blocks'] == 10 and native['paragraphs'] == 60
+    assert extracted['all_core_paragraphs_retained'] and extracted['core_paragraph_order_retained']
+    assert not extracted['normalized_main_text_equal']
+    assert extracted['manual_outcome'] == 'core_readable_but_incomplete_and_acknowledgments_reordered'
+    assert 'related_work' in extracted['omissions'] and extracted['reordered']
+    repeated = read('quality-repeat.json')
+    assert repeated['resources_removed'] is True
+    assert sum(len(row['entries']) for row in repeated['feeds']) == 2
