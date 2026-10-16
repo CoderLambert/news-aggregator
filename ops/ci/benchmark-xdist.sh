@@ -60,30 +60,45 @@ REPORT="$(mktemp -d "${TMPDIR}/newshub-xdist-benchmark.XXXXXX")"
 printf 'xdist-benchmark: repeats=%s workers=2 dist=loadfile report=%s\n' "$REPEATS" "$REPORT"
 for i in $(seq 1 "$REPEATS"); do
     start="$(date +%s)"
-    # No xdist plugin in this command. Serial files must still run every time.
+    # No xdist plugin in this command. State-sensitive files stay serial.
     "$PYTHON" -m pytest -q --durations=10 \
-        --junitxml="$REPORT/serial-$i.xml" "${SERIAL_FILES[@]}"
+        --junitxml="$REPORT/serial-$i.xml" "${SERIAL_FILES[@]}" \
+        2>&1 | tee "$REPORT/serial-$i.log"
     PYTHONPATH="$CACHE:${PYTHONPATH:-}" "$PYTHON" -m pytest \
         -q -n 2 --dist=loadfile --max-worker-restart=0 \
         --durations=25 --junitxml="$REPORT/parallel-$i.xml" \
-        "${EXCLUDE_ARGS[@]}" tests/ backend/api/tests/ scripts/deploy/tests/
-    # Fail closed if coverage is accidentally lost by changing the file split.
-    "$PYTHON" - "$REPORT/serial-$i.xml" "$REPORT/parallel-$i.xml" <<'PY'
+        "${EXCLUDE_ARGS[@]}" tests/ backend/api/tests/ scripts/deploy/tests/ \
+        2>&1 | tee "$REPORT/parallel-$i.log"
+    # pytest's final terminal summary is authoritative for passed/skipped.
+    # Some pytest/unittest combinations count XML testcase entries differently
+    # than terminal outcomes; JUnit is still checked for real failures.
+    "$PYTHON" - "$REPORT/serial-$i.log" "$REPORT/parallel-$i.log" \
+        "$REPORT/serial-$i.xml" "$REPORT/parallel-$i.xml" <<'PY'
+import re
 import sys
+from pathlib import Path
 from xml.etree import ElementTree as ET
-total = 0
-skipped = 0
-for file in sys.argv[1:]:
-    tree = ET.parse(file)
-    roots = [tree.getroot()] if tree.getroot().tag == 'testsuite' else tree.findall('.//testsuite')
-    for node in roots:
-        total += int(node.get('tests', '0'))
-        skipped += int(node.get('skipped', '0'))
-        if int(node.get('errors', '0')) or int(node.get('failures', '0')):
-            raise SystemExit('xdist benchmark JUnit recorded a failure')
-if total != 2424 or skipped != 16:
-    raise SystemExit(f'xdist benchmark coverage mismatch: total={total} skipped={skipped}; expected 2424/16')
-print(f'xdist benchmark coverage PASS: total={total}, skipped={skipped}')
+
+summary = re.compile(r'=+\s*(\d+) passed(?:, (\d+) skipped)? in [\d.]+s\s*=+')
+passed = skipped = 0
+for filename in sys.argv[1:3]:
+    matches = [summary.search(line) for line in Path(filename).read_text(encoding="utf-8").splitlines()]
+    matches = [match for match in matches if match is not None]
+    if len(matches) != 1:
+        raise SystemExit(f"xdist benchmark terminal summary missing or ambiguous: {filename}")
+    passed += int(matches[0].group(1))
+    skipped += int(matches[0].group(2) or "0")
+for filename in sys.argv[3:]:
+    document = ET.parse(filename)
+    root = document.getroot()
+    if any(root.iter("failure")) or any(root.iter("error")):
+        raise SystemExit(f"xdist benchmark JUnit recorded an error or failure: {filename}")
+if passed != 2408 or skipped != 16:
+    raise SystemExit(
+        f"xdist benchmark coverage mismatch: passed={passed} skipped={skipped}; "
+        "expected 2408/16"
+    )
+print(f"xdist benchmark coverage PASS: passed={passed}, skipped={skipped}")
 PY
     elapsed=$(( $(date +%s) - start ))
     printf 'xdist-benchmark: hybrid round %s/%s PASS elapsed=%ss\n' "$i" "$REPEATS" "$elapsed"
