@@ -92,11 +92,23 @@ wait_for_registration() {
 }
 require_idle() {
     command -v gh >/dev/null 2>&1 || die "gh required to verify Runner idle state"
-    local n
-    n="$(gh api "repos/$REPO/actions/runners?per_page=100" \
-        --jq '[.runners[] | select(.name=="omarchy-newshub" or .name=="omarchy-newshub-frontend") | select(.busy==true)] | length')" \
+    local count busy service cid output
+    count="$(gh api "repos/$REPO/actions/runners?per_page=100" \
+        --jq '[.runners[] | select(.name=="omarchy-newshub" or .name=="omarchy-newshub-frontend")] | length')" \
         || die "GitHub Runner API unavailable; refusing to interrupt active CI"
-    [[ "$n" == 0 ]] || die "One or more CI jobs are running. Retry when idle."
+    [[ "$count" == 2 ]] || die "Cannot confirm both GitHub runner identities; refusing destructive operation"
+    busy="$(gh api "repos/$REPO/actions/runners?per_page=100" \
+        --jq '[.runners[] | select(.name=="omarchy-newshub" or .name=="omarchy-newshub-frontend") | select(.busy==true)] | length')" \
+        || die "GitHub Runner busy state unavailable"
+    [[ "$busy" == 0 ]] || die "At least one CI job is running; retry when both are idle"
+    for service in runner runner-frontend; do
+        cid="$(compose ps --all --quiet "$service" | head -n 1)" || die "Failed to query container $service"
+        [[ -n "$cid" ]] || continue
+        if [[ "$(docker inspect --format '{{.State.Running}}' "$cid" 2>/dev/null || true)" == true ]]; then
+            output="$(docker top "$cid")" || die "Cannot confirm local worker idleness for $service"
+            [[ "$output" != *Runner.Worker* ]] || die "Local worker active on $service; refusing interruption"
+        fi
+    done
 }
 confirm_both_online() {
     local n i
@@ -139,6 +151,9 @@ case "$COMMAND" in
     install)
         preflight
         rm -f -- "$MANUAL_STOP_FLAG"
+        # Avoid rewriting a Runner or its image while an earlier job is busy.
+        # On a first install the identities do not exist, so skip this guard.
+        if configured runner && configured runner-frontend; then require_idle; fi
         # Build once: runner-frontend reuses the exact same local image.
         compose build runner
         trap clear_tokens EXIT
@@ -168,6 +183,7 @@ case "$COMMAND" in
     start)
         preflight
         configured runner && configured runner-frontend || die "Both runners must be registered; run install"
+        require_idle
         rm -f -- "$MANUAL_STOP_FLAG"
         compose up -d --no-build
         report_status
