@@ -169,6 +169,42 @@ docker exec newshub-ci-docker-1 docker -H unix:///ci-docker/docker.sock system d
 - 自托管计算分钟通常不按 GitHub-hosted Runner 计费，但工件/缓存可能产生其他使用费。如果 GitHub Billing 全局限制阻止调度，需要单独处理，本脚本不修改预算或支付方式。
 - CI 只处理仓库合成环境，绝不接入生产 SQLite、PostgreSQL、Gitea 或 Tailscale 服务。
 
+## 8. 首次真实 CI 发现的 DinD DNS 问题
+
+首次并行验收：[GitHub Actions #38957249484](https://github.com/CoderLambert/news-aggregator/actions/runs/38957249484)。
+前端全部通过（Node/缓存恢复/类型/Lint/Vitest/Build）；后端在独立 Docker 预检首次拉取 alpine:3.22 时失败：
+
+~~~text
+lookup registry-1.docker.io on 127.0.0.11:53: server misbehaving
+~~~
+
+说明 DinD 本身 healthy、Docker CLI 可连接，但 **Docker Hub 外部域名解析尚不可用**，不能把它当作应用代码测试失败。本分支已为独立的 DinD 服务及其子容器添加可配置 DNS，默认 1.1.1.1 与 8.8.8.8；不修改 Omarchy 宿主 Docker DNS 或其他 Compose 项目。Docker Compose 支持服务级 dns，Docker Engine 支持 dockerd --dns 设置默认容器 DNS。
+
+从本分支更新，并在**两个 Runner 都空闲**时刷新当前容器配置：
+
+~~~bash
+git fetch origin
+git -c merge.autoStash=false merge --ff-only origin/feat/docker-self-hosted-actions-20261017
+bash ops/ci/manage.sh update
+bash ops/ci/manage.sh status
+
+# DNS 必须在 DinD 容器内测试，不是在 Omarchy 宿主上。
+docker exec newshub-ci-docker-1 nslookup registry-1.docker.io
+
+# 测试独立 Docker daemon 镜像拉取；首次下载后会缓存。
+docker exec newshub-ci-runner-1 docker pull alpine:3.22
+~~~
+
+如果默认公共 DNS 在本地网络被阻断，应先确认 Omarchy 可使用的真实上游 DNS，再设置可访问的地址。例如（只是语法示例，**不要猜测内网 IP**）：
+
+~~~bash
+CI_DIND_DNS_PRIMARY=1.1.1.1 CI_DIND_DNS_SECONDARY=9.9.9.9 bash ops/ci/manage.sh update
+~~~
+
+仍失败时检查：`docker exec newshub-ci-docker-1 cat /etc/resolv.conf`、`nslookup`、网络策略、Clash/Tailscale/UDP 53 是否可达以及 DinD 日志。Compose 自定义网络容器内部可能仍显示 127.0.0.11；这是 Docker 嵌入式转发器，**要以 nslookup/pull 实际结果判断**。仅改 DNS 不保证公司/家庭网络上的外部网络策略全部通畅。切勿直接改为挂载宿主 `/var/run/docker.sock` 绕过限制。
+
+在以上检查通过后，将 PR 从 Draft 改为 Ready for review 再次运行完整 CI。**不要**为了跳过 DNS 问题而删除 Docker 构建、浏览器烟测或其他验收步骤。
+
 ## English quick reference
 
 Install **two repository-scoped Docker self-hosted Runners** on Omarchy without mounting the host Docker socket. Run bash ops/ci/manage.sh doctor and bash ops/ci/manage.sh install. Confirm **both** backend and frontend Runners are Online in GitHub runner settings, review concurrent PR checks, then merge. The separate privileged DinD daemon shares a CI-only workspace for the real NewsHub Docker/browser smoke test. Do not run untrusted pull requests or unrelated repositories on this persistent Runner. Deployment and GitHub CI verification are pending until this configuration is executed on the user host.
