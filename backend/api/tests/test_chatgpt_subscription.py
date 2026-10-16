@@ -1,4 +1,5 @@
 """Mock-only coverage for local ChatGPT subscription auth and translation."""
+from api.tests.rss.reader_fixtures import public_legacy_article
 
 import base64
 import hashlib
@@ -76,7 +77,7 @@ def user(db):
 def news(db):
     category = Category.objects.create(name='Tech', slug='tech')
     source = Source.objects.create(name='Example', url='https://example.com', language='en')
-    return News.objects.create(
+    return public_legacy_article(News.objects.create(
         title='Full article',
         content='Short body',
         url='https://example.com/article',
@@ -86,7 +87,7 @@ def news(db):
         full_content='# Original article\n\nFull English text.',
         full_content_state='legacy',
         full_content_zh='SHARED PUBLIC TRANSLATION',
-    )
+    ))
 
 
 def make_connection(user, *, active=True, subject='provider-subject', generation=0, client_id='issued-client-id'):

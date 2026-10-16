@@ -1,3 +1,4 @@
+from api.tests.rss.reader_fixtures import public_legacy_article
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -33,13 +34,13 @@ def owner(db):
 
 @pytest.fixture
 def article(db):
-    return News.objects.create(
+    return public_legacy_article(News.objects.create(
         title='BYOK article', content='Preview', full_content='Complete body',
         full_content_state='legacy',
         publish_time=timezone.now(), url='https://example.test/byok',
         source=Source.objects.create(name='BYOK source', url='https://example.test', language='en'),
         category=Category.objects.create(name='BYOK category', slug='byok'),
-    )
+    ))
 
 
 def _store_credential(user, provider='deepseek', model_id='deepseek-chat', key=SYNTHETIC_PROVIDER_KEY):
@@ -294,7 +295,6 @@ def test_personal_key_is_used_for_chat_suggestions_and_translation(owner, articl
     with (
         patch('httpx.Client', return_value=fake_http),
         patch('openai.OpenAI', return_value=base_client),
-        patch('api.services.llm_translator.find_chinese_translation_link', return_value=None),
         patch('api.services.translation_jobs.start_or_get_job', return_value=completed_job) as start,
         patch('api.services.chatgpt_subscription.active_connection_for_user', side_effect=AssertionError('subscription must not be used')),
     ):

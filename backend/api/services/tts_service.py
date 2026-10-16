@@ -71,6 +71,7 @@ class ResolvedTTSContent:
     title: str
     content: str
     namespace: str
+    snapshot: object = None
 
 
 class TTSContentUnavailable(Exception):
@@ -193,62 +194,33 @@ def resolve_tts_content(news, user, language: str, scope: str) -> ResolvedTTSCon
     if scope not in {'summary', 'full'}:
         raise TTSContentUnavailable('unsupported_scope', '不支持的朗读范围。')
 
-    from api.services.full_content_status import has_full_content, get_readable_full_content
-    source_language = getattr(news.source, 'language', '')
-    if language == 'original' or source_language == 'zh':
-        content = get_readable_full_content(news) if scope == 'full' else news.content
-        if not content:
-            raise TTSContentUnavailable('source_content_required', '所选范围暂无原文内容。')
-        return ResolvedTTSContent(
-            language='zh' if source_language == 'zh' else 'original',
-            title=news.title,
-            content=content,
-            namespace='source',
-        )
-
-    if scope == 'summary':
-        content = news.content_zh
-        if not content:
-            raise TTSContentUnavailable('translation_required', '当前文章暂无中文摘要。')
-        return ResolvedTTSContent(
-            language='zh', title=news.title_zh, content=content, namespace='shared-summary',
-        )
-
-    if not has_full_content(news):
-        raise TTSContentUnavailable('source_content_required', '请先获取完整原文，再翻译并朗读。')
-
-    from api.models import ChatGPTArticleTranslation
-    from api.services.chatgpt_subscription import active_connection_for_user, source_hash
-
-    connection = active_connection_for_user(user)
-    if connection is not None:
-        translation = ChatGPTArticleTranslation.objects.filter(
-            user=user,
-            connection=connection,
-            news=news,
-            source_hash=source_hash(news.full_content),
-        ).first()
-        if translation is not None and translation.content:
-            return ResolvedTTSContent(
-                language='zh',
-                title=news.title_zh,
-                content=translation.content,
-                namespace=f'subscription:{user.pk}:{connection.pk}',
-            )
-
-    from api.services.shared_translations import get_shared_translation
-    shared = get_shared_translation(news)
-    if shared is not None:
-        return ResolvedTTSContent(
-            language='zh', title=news.title_zh, content=shared.content,
-            namespace='shared-full',
-        )
-
-    if connection is not None or not news.full_content_zh:
-        raise TTSContentUnavailable('translation_required', '请先翻译全文，再播放中文语音。')
-    return ResolvedTTSContent(
-        language='zh', title=news.title_zh, content=news.full_content_zh, namespace='shared-full',
-    )
+    from api.services.stored_readers import article_snapshot, current_translation, legacy_translation
+    from api.rss.access import article_sources
+    stored = article_snapshot(news, user)
+    if scope == 'full' and stored.scope != 'full':
+        raise TTSContentUnavailable('source_content_required', '当前仅可读取摘要。')
+    source = article_sources(user, news).first()
+    source_language = source.language if source else ''
+    content = stored.markdown if scope == 'full' else stored.summary
+    namespace = f'source:{stored.canonical_hash}:{stored.revision}'
+    if language == 'zh' and source_language != 'zh':
+        # Summary/title compatibility columns have no version proof. Never infer it.
+        if scope == 'full':
+            record, visibility = current_translation(user, stored)
+        else:
+            legacy = legacy_translation(stored.news_id, 'content', stored.summary)
+            from types import SimpleNamespace
+            record = SimpleNamespace(content=legacy.translated_text) if legacy else None
+            visibility = 'legacy-summary'
+        if record is None:
+            raise TTSContentUnavailable('translation_required', '当前版本暂无已匹配的中文译文。')
+        content = record.content
+        namespace = f'{visibility}:{getattr(user, "pk", "anonymous")}:{getattr(record, "connection_id", "shared")}:{stored.canonical_hash}'
+    if not content.strip():
+        raise TTSContentUnavailable('source_content_required', '所选范围暂无原文内容。')
+    translated_title = legacy_translation(stored.news_id, 'title', stored.title) if language == 'zh' else None
+    return ResolvedTTSContent(language='zh' if source_language == 'zh' else language,
+        title=translated_title.translated_text if translated_title else stored.title, content=content, namespace=namespace, snapshot=stored)
 
 
 # How many seconds a cached file can go untouched before considered expired.

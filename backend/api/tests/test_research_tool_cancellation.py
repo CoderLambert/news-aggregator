@@ -80,21 +80,13 @@ def test_wikipedia_language_fallback_checks_guard_before_each_http(monkeypatch):
     assert calls[0].startswith('https://en.wikipedia.org/')
 
 
-def test_fetch_webpage_cancellation_after_dns_check_never_starts_http(monkeypatch):
-    state = {'cancelled': False}
+def test_fetch_webpage_cancellation_before_stored_lookup_never_starts_http(monkeypatch):
+    state = {'cancelled': True}
     calls = []
-
-    def after_dns(url):
-        state['cancelled'] = True
-        return True, ''
-
-    monkeypatch.setattr(tools, '_is_url_allowed', after_dns)
+    monkeypatch.setattr(tools, '_is_url_allowed', lambda *a: pytest.fail('stored lookup resolved DNS'))
     monkeypatch.setattr(tools, '_open_search_http', lambda *a, **k: calls.append('http'))
     with pytest.raises(Stopped):
-        tools.execute_tool(
-            'fetch_webpage', {'url': 'https://example.com'},
-            execution_guard=cancel_guard(state),
-        )
+        tools.execute_tool('fetch_webpage', {'url': 'https://example.com'}, execution_guard=cancel_guard(state))
     assert calls == []
 
 

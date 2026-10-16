@@ -5,6 +5,7 @@ POST /api/news/:id/suggested-questions/
   - On subsequent calls: returns cached questions without invoking LLM
   - On LLM error: falls back to the 3-question hardcoded list (always returns 200)
 """
+from api.tests.rss.reader_fixtures import public_legacy_article
 from unittest.mock import patch
 import pytest
 from django.contrib.auth.models import User
@@ -35,14 +36,14 @@ def authenticated_reader(db, client):
 def news(db):
     cat = Category.objects.create(name='科技', slug='tech')
     src = Source.objects.create(name='TestSource', url='https://example.com')
-    return News.objects.create(
+    return public_legacy_article(News.objects.create(
         title='测试文章',
         content='这是一篇关于人工智能的文章，讨论了大模型在新闻领域的应用。',
         publish_time=timezone.now(),
         source=src,
         category=cat,
         url='https://example.com/test',
-    )
+    ))
 
 
 class _FakeChoice:
@@ -78,12 +79,15 @@ def test_first_call_invokes_llm_and_caches(news, client):
 
     # Cached on the News row
     news.refresh_from_db()
-    assert len(news.suggested_questions) == 3
+    assert len(news.suggested_questions['questions']) == 3
     assert news.suggested_questions_generated_at is not None
 
 
 def test_second_call_uses_cache(news, client):
-    news.suggested_questions = ['cached q1', 'cached q2', 'cached q3']
+    from api.rss.access import get_stored_article
+    from api.services.stored_readers import snapshot_metadata
+    news.suggested_questions = {'questions': ['cached q1', 'cached q2', 'cached q3'],
+        'article_context': snapshot_metadata(get_stored_article(None, news.pk))}
     news.suggested_questions_generated_at = timezone.now()
     news.save()
 
@@ -134,7 +138,7 @@ def test_force_regenerate_bypasses_cache(news, client):
 
     # Cache was overwritten, not appended
     news.refresh_from_db()
-    assert news.suggested_questions == ['new q1', 'new q2', 'new q3']
+    assert news.suggested_questions['questions'] == ['new q1', 'new q2', 'new q3']
 
 
 def test_force_regenerate_falls_back_on_llm_error(news, client):

@@ -1606,6 +1606,10 @@ def save_completed_translation(
             ).first()
             if connection is None:
                 raise ConnectionChangedError('订阅账号已切换或断开，翻译没有保存。')
+            from api.rss.access import get_stored_article
+            stored = get_stored_article(connection.user, news_id)
+            if stored.scope != 'full' or stored.canonical_hash != source_digest:
+                raise SubscriptionError('原文或读取权限已变化，旧译文没有发布。')
             from api.services.shared_translations import publish_translation, SharedTranslationError
             try:
                 publish_translation(
@@ -1617,9 +1621,8 @@ def save_completed_translation(
             record, _ = ChatGPTArticleTranslation.objects.update_or_create(
                 user_id=user_id,
                 connection=connection,
-                news_id=news_id,
+                news_id=news_id, source_hash=source_digest,
                 defaults={
-                    'source_hash': source_digest,
                     'model_slug': model_slug,
                     'content': text,
                     'completed_at': timezone.now(),

@@ -1,3 +1,4 @@
+from api.tests.rss.reader_fixtures import public_legacy_article, without_article_context
 import threading
 
 import pytest
@@ -26,7 +27,7 @@ def configured_global_provider(monkeypatch):
 def chat_news(db):
     category = Category.objects.create(name='Chat ownership', slug='chat-ownership')
     source = Source.objects.create(name='Chat ownership source', url='https://source.example.test')
-    return News.objects.create(
+    return public_legacy_article(News.objects.create(
         title='Chat ownership article',
         content='A test article.',
         full_content='Cached article content.',
@@ -34,7 +35,7 @@ def chat_news(db):
         source=source,
         category=category,
         url='https://article.example.test/chat-ownership',
-    )
+    ))
 
 
 @pytest.fixture
@@ -98,7 +99,7 @@ def test_chat_history_is_isolated_and_body_owner_fields_are_ignored(chat_news, c
 
     saved.refresh_from_db()
     assert saved.user_id == chat_user.pk
-    assert saved.messages[-2:] == [
+    assert [without_article_context(m) for m in saved.messages[-2:]] == [
         {'role': 'user', 'content': 'new question'},
         {'role': 'assistant', 'content': 'assistant reply', 'status': 'complete'},
     ]
@@ -124,7 +125,7 @@ def test_chat_writes_require_valid_session_csrf(chat_news, chat_user):
         assert response.status_code == 200
         list(response.streaming_content)
 
-    assert ChatSession.objects.get(user=chat_user, news=chat_news).messages[-2:] == [
+    assert [without_article_context(m) for m in ChatSession.objects.get(user=chat_user, news=chat_news).messages[-2:]] == [
         {'role': 'user', 'content': 'hello'},
         {'role': 'assistant', 'content': 'answer', 'status': 'complete'},
     ]

@@ -1,4 +1,5 @@
 """NH-20: streamed chat completion evidence and owner fenced interruption."""
+from api.tests.rss.reader_fixtures import public_legacy_article, without_article_context
 import pytest
 from django.contrib.auth.models import User
 from django.test import override_settings
@@ -12,9 +13,9 @@ def chat_case(db, monkeypatch):
     author = User.objects.create_user(username='stream-owner', password='synthetic-test')
     source = Source.objects.create(name='Synthetic publisher', url='https://example.test')
     cat = Category.objects.create(name='synthetic', slug='synthetic')
-    news = News.objects.create(
+    news = public_legacy_article(News.objects.create(
         title='A synthetic story', url='https://example.test/story', source=source,
-        category=cat, publish_time=timezone.now(), content='safe summary')
+        category=cat, publish_time=timezone.now(), content='safe summary'))
     monkeypatch.setattr('api.views.get_clients', lambda: [(object(), 'test')])
     monkeypatch.setattr('api.views.ensure_full_content', lambda _: None)
     monkeypatch.setattr('api.services.chatgpt_subscription.active_connection_for_user', lambda _: None)
@@ -31,7 +32,7 @@ def test_completed_turn_has_terminal_receipt_and_history_status(chat_case, monke
     response = client.post(f'/api/news/{news.pk}/chat/', {'question': 'Explain'}, format='json')
     wire = b''.join(response.streaming_content).decode('utf-8')
     assert '"type": "chat_turn"' in wire and '"status": "complete"' in wire
-    assert ChatSession.objects.get(news=news, user=author).messages[-1] == {
+    assert without_article_context(ChatSession.objects.get(news=news, user=author).messages[-1]) == {
         'role': 'assistant', 'content': 'finished answer', 'status': 'complete'}
 
 
@@ -47,7 +48,7 @@ def test_provider_error_after_partial_stream_cannot_claim_complete(chat_case, mo
     wire = b''.join(response.streaming_content).decode('utf-8')
     assert '"status": "failed"' in wire
     session = ChatSession.objects.get(news=news, user=author)
-    assert session.messages[-1] == {'role': 'assistant', 'content': 'verified beginning', 'status': 'failed'}
+    assert without_article_context(session.messages[-1]) == {'role': 'assistant', 'content': 'verified beginning', 'status': 'failed'}
     assert client.get(f'/api/news/{news.pk}/chat/').json()['messages'][-1]['status'] == 'failed'
 
 
@@ -65,7 +66,7 @@ def test_disconnect_preserves_partial_as_interrupted(chat_case, monkeypatch):
     assert b'first partial' in next(output)
     response.close()  # Django closes the underlying generator on disconnect.
     stored = ChatSession.objects.get(news=news, user=author).messages
-    assert stored[-1] == {'role': 'assistant', 'content': 'first partial', 'status': 'interrupted'}
+    assert without_article_context(stored[-1]) == {'role': 'assistant', 'content': 'first partial', 'status': 'interrupted'}
 
 
 @pytest.mark.django_db
@@ -76,7 +77,7 @@ def test_old_turn_remains_unknown_and_is_not_promoted_to_verified_context(chat_c
         {'role': 'user', 'content': 'Old question'},
         {'role': 'assistant', 'content': 'Old answer without receipt'},
     ])
-    assert client.get(f'/api/news/{news.pk}/chat/').json()['messages'][-1]['status'] == 'legacy_unknown'
+    assert client.get(f'/api/news/{news.pk}/chat/').json()['messages'] == [{'role': 'user', 'content': 'Old question'}]
     snapshots = []
     def capture(messages, **_kwargs):
         snapshots.append(messages)
