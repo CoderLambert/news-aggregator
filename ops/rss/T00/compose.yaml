@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    environment:
+      POSTGRES_DB: rss_contract
+      POSTGRES_USER: rss_contract
+      POSTGRES_PASSWORD: synthetic-t00-only
+    tmpfs: [/var/lib/postgresql/data]
+    volumes: [./init.sql:/docker-entrypoint-initdb.d/init.sql:ro]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U rss_contract -d rss_contract]
+      interval: 1s
+      retries: 60
+    networks: [isolated]
+  fixture:
+    image: python:3.12.12-alpine3.22@sha256:848ba4413eb897e225159b8fc1b02094576cbae4aa73fc13142608ae2c8c0e32
+    command: [python, /fixture/server.py]
+    volumes: [./server.py:/fixture/server.py:ro]
+    ports: [127.0.0.1::8000]
+    networks:
+      isolated:
+        aliases: [fixture-other]
+  engine:
+    image: miniflux/miniflux:2.3.3@sha256:49d7b60987616387c306a8023087b31f2c9b7b21288b523026cb04058e8b6dbb
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment: &engine_environment
+      DATABASE_URL: postgres://rss_contract:synthetic-t00-only@postgres/rss_contract?sslmode=disable
+      RUN_MIGRATIONS: '1'
+      CREATE_ADMIN: '1'
+      ADMIN_USERNAME: t00_admin
+      ADMIN_PASSWORD: synthetic-t00-admin
+      CLEANUP_ARCHIVE_READ_DAYS: '90'
+      CLEANUP_ARCHIVE_UNREAD_DAYS: '90'
+      POLLING_FREQUENCY: '999999'
+      FETCHER_ALLOW_PRIVATE_NETWORKS: '1'
+      LOG_LEVEL: error
+    ports: [127.0.0.1::8080]
+    networks: [isolated]
+  guarded:
+    image: miniflux/miniflux:2.3.3@sha256:49d7b60987616387c306a8023087b31f2c9b7b21288b523026cb04058e8b6dbb
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      <<: *engine_environment
+      DATABASE_URL: postgres://rss_contract:synthetic-t00-only@postgres/rss_guard?sslmode=disable
+      FETCHER_ALLOW_PRIVATE_NETWORKS: '0'
+    ports: [127.0.0.1::8080]
+    networks: [isolated]
+networks:
+  isolated:
+    driver: bridge
