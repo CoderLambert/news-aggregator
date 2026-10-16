@@ -47,9 +47,10 @@ jobs:
           test -x "$CHROMIUM_EXECUTABLE"
           test -w "$TMPDIR"
           docker info >/dev/null
-          docker run --rm --network none \
+          docker image inspect alpine:3.22 >/dev/null 2>&1 || docker pull alpine:3.22
+          docker run --rm --pull=never --network none \
             --mount "type=bind,source=$GITHUB_WORKSPACE,target=/ci-src,readonly" \
             alpine:3.22 test -f /ci-src/.github/workflows/ci.yml
-          docker run --rm --network none \
+          docker run --rm --pull=never --network none \
             --mount "type=bind,source=$TMPDIR,target=/ci-tmp,readonly" \
             alpine:3.22 test -d /ci-tmp
