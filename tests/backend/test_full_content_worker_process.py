@@ -45,11 +45,20 @@ command.WorkerRuntime = lambda stop: WorkerRuntime(stop, heartbeat_interval=.05)
 command.run_loop(interval=.05)
 '''
 HOLDER = r'''
+from api.services.article_fetcher.execution import ExecutionStopped
 stop = threading.Event()
 signal.signal(signal.SIGTERM, lambda *_: stop.set())
 with WorkerRuntime(stop, heartbeat_interval=60) as runtime:
     while not stop.wait(.02):
-        runtime.guard()
+        try:
+            runtime.guard()
+        except ExecutionStopped as error:
+            # SIGTERM may arrive between the wait returning and guard().
+            # A cancelled guard is the normal shutdown path; other failures
+            # must still terminate this test subprocess with an error.
+            if error.error_code != 'canceled' or not stop.is_set():
+                raise
+            break
 '''
 CREATE_NEWS = r'''
 from api.models import News, Source, Category
