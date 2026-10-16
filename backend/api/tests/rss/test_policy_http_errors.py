@@ -22,3 +22,10 @@ def test_collection_policy_refusals_are_safe_forbidden_responses(code):
         'code': code, 'message': '当前策略不允许此操作。', 'retryable': False,
     }
     assert response['Cache-Control'] == 'private, no-store'
+
+
+def test_disabled_full_content_hides_repair_without_reading_article_or_database(settings):
+    from api.serializers import NewsDetailSerializer
+
+    settings.RSS_FULL_CONTENT_ENABLED = False
+    assert NewsDetailSerializer().get_can_rss_refetch(object()) is False
