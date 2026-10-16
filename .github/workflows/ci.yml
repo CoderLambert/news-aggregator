@@ -33,9 +33,9 @@ jobs:
           test "$(node -p 'process.versions.node.split(".")[0]')" = 22
           test -z "${DOCKER_HOST:-}"
           test ! -S /ci-docker/docker.sock
-      - name: Install frontend dependencies
+      - name: Install frontend dependencies using persistent npm tarball cache
         working-directory: frontend
-        run: npm ci
+        run: npm ci --prefer-offline --no-audit
       - name: Check frontend types
         working-directory: frontend
         run: npm run typecheck
@@ -76,12 +76,8 @@ jobs:
           docker run --rm --network none \
             --mount "type=bind,source=$TMPDIR,target=/ci-tmp,readonly" \
             alpine:3.22 test -d /ci-tmp
-      - name: Create isolated backend environment
-        run: python3 -m venv --clear backend/venv
-      - name: Install CPU-only PyTorch first
-        run: backend/venv/bin/python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.14.1+cpu'
-      - name: Install backend and test dependencies
-        run: backend/venv/bin/python -m pip install -r backend/requirements.txt
+      - name: Reuse checked backend environment from persistent cache
+        run: bash ops/ci/install-backend-deps.sh
       - name: Verify private self-hosted CI contract
         run: backend/venv/bin/python -m unittest discover -s ops/ci/tests -p 'test_*.py'
       - name: Collect all three test roots
@@ -111,9 +107,8 @@ jobs:
           bash scripts/deploy/tests/test_export_static.sh
           bash scripts/deploy/tests/test_preflight.sh
           bash scripts/deploy/tests/test_local_domain_args.sh
-      - name: Verify preinstalled Playwright browser
+      - name: Verify cached Playwright package and preinstalled Chromium
         run: |
-          backend/venv/bin/python -m pip install 'playwright==1.62.0'
           backend/venv/bin/python -m playwright --version
           test -x "$CHROMIUM_EXECUTABLE"
       - name: Build the non-root production image
@@ -121,8 +116,10 @@ jobs:
           RELEASE_SHA: ${{ github.sha }}
           NEWSHUB_IMAGE: newshub:ci-${{ github.sha }}
         run: docker build --target production --build-arg "RELEASE_SHA=$RELEASE_SHA" --tag "$NEWSHUB_IMAGE" .
-      - name: Preload isolated smoke Nginx image
-        run: docker pull nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
+      - name: Reuse cached smoke Nginx image or pull first time
+        run: |
+          image=nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
+          docker image inspect "$image" >/dev/null 2>&1 || docker pull "$image"
       - name: Run isolated G1 local-domain smoke
         env:
           RELEASE_SHA: ${{ github.sha }}
