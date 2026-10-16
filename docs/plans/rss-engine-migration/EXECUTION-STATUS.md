@@ -18,19 +18,19 @@
 | T11 | rss_t04 / gpt-6-astra high | integrated | b9d717c→da2365c | access、现有读取入口 | 非作者审查；72专项直接回归通过；空正文旧修复状态缺口由T14集成修正 |
 | T08 | rss_t00 / gpt-6.1-sol high | integrated | ea7221e→1af2f2c | operations/control_worker/runtime | 48专项与最终轻量镜像真实六动作、0/1/3发现、20actor→1Feed通过；unknown配置缺DTO规则证据保持门禁 |
 | T25 | rss_t05 / gpt-6-astra high | integrated | 8317854→efe5f09；cf2faa0→3e42cd8 | legacy_fencing/source_migration、旧写入口 | 非作者审查；397直接组合、最终35专项；显式获取前token和可恢复切换；生产未执行 |
-| T19 | 主调度 | integrated / batch review | 9305fd3及0f1f00d | subscriptions、HTTP控制、旧订阅委托 | 20并发、幂等/用户隔离；T14非作者发现缺header重放校验已修；真实组合待T09 |
+| T19 | 主调度、rss_t00 / gpt-6.1-sol high | integrated / gate-off candidate | 9305fd3、0f1f00d、a9fb061→c9173c3 | subscriptions、HTTP控制、旧订阅委托 | 20并发、幂等/用户隔离；统一来源准入/首次规则/发送前fence；全文门禁默认关闭，真实direct拒绝与redirect负向证据已审 |
 | T17 | 主调度 | integrated | 5b756cf | discovery、resolve路由 | 23专项；T08真实发现0/1/3与timeout通过；浏览器待T27 |
-| T13 | 主调度 | integrated / browser pending | 081a19a、2e58353、9149e54 | 0056、read-state、读取/显式修复前端 | 自动抓取移除；个人已读+操作轮询；早期580前端、75后端组合；新UI组合36通过 |
+| T13 | 主调度 | integrated / synthetic browser accepted | 081a19a、2e58353、9149e54 | 0056、read-state、读取/显式修复前端 | 自动抓取移除；个人已读+操作轮询；早期580前端、75后端组合；新UI组合36通过 |
 | CI基线修复 | 主调度 | integrated | 7f79671 | 两个旧测试文件 | 10专项通过；registry夹具与HOLDER SIGTERM竞态最小修复，CI待跑 |
-| T24 | 主调度 | running / 真实副本 blocked | 集成分支 | migration_inventory.py、scripts/rss-inventory.py、自有测试 | 57静态来源；6专项通过；显式SQLite副本只读hash导出器已实现；真实副本和覆盖处置待补 |
+| T24 | 主调度 | integrated tooling / 真实副本 blocked | 集成分支 | migration_inventory.py、scripts/rss-inventory.py、自有测试 | 57静态来源；6专项通过；显式SQLite副本只读hash导出器已实现；真实副本和覆盖处置待补 |
 | T14 | rss_t04 / gpt-6-astra high | integrated | a0482ed→7654371；15f1bdc→ba73437 | stored_readers、translation/speech/research | 当前ACL/hash/revision与旧译文保留；0058/0059根已合；隔离hash相同及SSE临时锁已补最小修正并独立审查 |
 | T03 | rss_t00 / gpt-6.1-sol high | integrated | 3cae565→4b32468；845789d→4ac939e | scripts/rss/recovery、rollback最小扩展、ops/T03 | 非作者审查；117专项、25最终专项与真实PG+SQLite fresh/overwrite/replay通过，证据截至0058；0059及app兼容T26 |
 | T09 | rss_t05 / gpt-6-astra high | integrated | b980399→f03da66；a93f1bf→9043a99 | sync/reconciliation/runtime、ops/T09 | 固定H/full retained、独立lease、双GET前fence、T08/T21交接；62最终专项/150关联回归及真实engine故障PASS；health DTO已接线，额外分类按当前授权过滤 |
-| T21 | 主调度 | integrated partial | 94baab7、9f6671b、0f1f00d、f03da66 | 0057、opml/API/UI/worker | 预览确认、逐项队列重试、本人多组导出和恢复UI；T09每10秒推进，浏览器待T27 |
-| T20 | 主调度 | integrated partial | 0f1f00d及当前批次 | 发现/目录/频道与连接健康 | health读取匹配instance/account/mode的60秒heartbeat；14相关UI与typecheck/lint/build通过，真实浏览器待T27 |
+| T21 | 主调度 | integrated partial | 94baab7、9f6671b、0f1f00d、f03da66 | 0057、opml/API/UI/worker | 预览确认、逐项队列重试、本人多组导出和恢复UI；T09每10秒推进；T27真实浏览器选择/跳过/多组/进度/导出PASS |
+| T20 | 主调度 | integrated partial | 0f1f00d及当前批次 | 发现/目录/频道与连接健康 | health读取匹配instance/account/mode的60秒heartbeat；14相关UI与typecheck/lint/build通过，T27真实浏览器PASS |
 | T18 | rss_t00 / gpt-6.1-sol high | integrated partial / live blocked | 2210e16→e4e62fd | routes.py、默认关闭gateway/ops/T18 | 85专项；实际RSSHub health与合成TLS/Nginx认证/重定向/凭据边界PASS；公网DNS/TLS/token及publisher认证/redirect仍BLOCKED |
 | T26 | rss_t04 / gpt-6-astra high | integrated synthetic candidate / seal blocked | b39d8a9→53003f2 | ops/T26工具/候选证据 | 56旧表34非空保留、两完整app镜像往返、0059真实两库恢复及恢复后T09同步PASS；主调度独立审查，真实副本及完整wrapper host权限BLOCKED |
-| T27 | rss_t05 / gpt-6-astra high | integrated synthetic browser / public partial | 87c47fc→60a421d | ops/T27、自有浏览器/真实来源验收 | fresh真实浏览器全链PASS，10截图/网络审计；11篇公开取样保留Uber失败与人工完整性未知；新默认政策联动待补 |
+| T27 | rss_t05 / gpt-6-astra high | integrated synthetic browser / public partial | 87c47fc→60a421d；0f86dee→e768f2e | ops/T27、自有浏览器/真实来源验收 | fresh真实浏览器全链与gate1自动摘要/主题/TOC PASS；12篇公开取样，Julia原站对照PASS、Fowler完整性FAIL，保留Uber失败及其它未知，不宣称总体成功率 |
 
 后续 T29/T30/T31/T33生产与退出阶段未授权，禁止提前激活删除。
 
@@ -65,3 +65,12 @@ Python 3.12 独立环境 `/tmp/newshub-rss-coordinator-venv`；测试指定独�
 
 - 72a193e远端前端CI通过；两次后端运行在collection停留超过20分钟，本地同命令2318 tests collected/1.03s。下一批为collection加120秒栈转储及5分钟超时以获取实际阻塞证据，未把异常标为通过。
 - 生产全文门禁待集成：RSS_FULL_CONTENT_ENABLED默认0、web/sync同值，避免未验证redirect目标政策时自动或显式抓取；当前HTTP政策403/Compose专项9 passed（5.72s）。
+
+- 最终政策补丁独立审查通过（仅gate0候选）；作者199专项/38同步非refetch通过，根合入后包含全部refetch的三root全量 **2397 passed、16 live skipped，240.62s**（业务SHA23de733），日志`/tmp/newshub-rss-final-batch-tests.log`。隔离夹具显式gate1，生产app/sync默认gate0，UI隐藏不可执行修复。
+- CI停滞根因证据：7082d2b日志已显示2326项收集完成，停在OPML超大参数名前；本地该单行长1,048,643字符。7128ba3为4个参数赋短名称，收集总输出由约1.3MB降至262KB，新远端已进入真正后端测试。保留120秒栈诊断与5分钟收集上限；不把取消运行计为通过。
+- 最终完整Dockerfile `production` image build（业务23de733）PASS，Node22 frontend-build PASS；image `sha256:34233ab97c4f39570dfa1993df2d5327324a21811d32760279e8fd64aabb7dbe`、UID/GID10001。未推镜像或部署。
+- 完整镜像本地G1 TLS/CSRF/只读API/匿名搜索/静态资源/Mermaid/深链/SSE PASS，cleanup PASS，证据`ops/rss/integration/g1-report.json`与截图。首次失败是G1旧seed缺SourcePublication，1796192补明确public/legacy/owner；9夹具专项PASS（3.44s），之后fresh项目通过。Playwright1.62.0独立smoke venv，不改变共享测试解释器。
+
+- T27 最终证据 e768f2e 已集成：普通用户默认自动摘要链在首次 News GET 前仅采集一次，订阅→可见29.944s（单例非p95）；实际主题/TOC PASS。原站逐项对照 Julia 原生正文 PASS、Fowler 主体可读但导语/Related Work 缺失且致谢前移，完整性 FAIL；未添加自定义提取器。合成浏览器范围已回填T13/T20/T21。
+- 1796192 远端前端、后端全量测试和生产设置检查通过；发布脚本阶段失败于旧 G1 seed 测试的单行 literal_eval。随新版 heredoc 修正 AST 提取，保持原 Mermaid 内容断言；最终提交重新执行全部 CI。最终 CI 状态以 PR78 当前 head 检查为准，不用历史 head 代替。
+- 最后受影响验证：发布语法与release/export-static/preflight四组shell行为检查全部PASS；G1 shell显式使用独立解释器后PASS，日志`/tmp/newshub-rss-final-shell-g1.log`。T27证据审计+G1/G2夹具组合15 passed、1 live skipped（3.34s）。

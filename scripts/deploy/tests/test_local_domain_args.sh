@@ -411,14 +411,18 @@ import ast
 import sys
 from pathlib import Path
 
-line = next(
-    line for line in Path(sys.argv[1]).read_text(encoding='utf-8').splitlines()
-    if line.lstrip().startswith('seed_code=')
-)
-seed_code = ast.literal_eval(line.split('=', 1)[1])
+script = Path(sys.argv[1]).read_text(encoding='utf-8')
+seed_code = script.split("<<'G1_SEED_PY'\n", 1)[1].split('\nG1_SEED_PY', 1)[0]
 compile(seed_code, '<local-domain-fixture-seed>', 'exec')
-flow_expression = seed_code.split('flow=', 1)[1].split('; news,_=', 1)[0]
-flow = eval(flow_expression, {'__builtins__': {'chr': chr}})
+flow_node = next(
+    node for node in ast.parse(seed_code).body
+    if isinstance(node, ast.Assign)
+    and any(isinstance(target, ast.Name) and target.id == 'flow' for target in node.targets)
+)
+flow = eval(
+    compile(ast.Expression(body=flow_node.value), '<g1-flow>', 'eval'),
+    {'__builtins__': {'chr': chr}},
+)
 assert '```mermaid\nflowchart TD' in flow
 assert 'Fixture article' in flow and 'Mermaid flow' in flow
 PY
