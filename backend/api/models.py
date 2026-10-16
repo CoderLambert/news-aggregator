@@ -6,6 +6,11 @@ from django.db import models
 from django.utils import timezone
 
 from api.rss.directory_models import FeedDirectoryEntry, FeedDirectorySnapshot  # noqa: F401
+from api.rss.models import (  # noqa: F401
+    BodyCandidate, EngineEntryMap, FeedBinding, FeedOperation, FeedRejection,
+    FeedSyncState, IdentityConflict, LegacyTranslationSnapshot, SourceFeedLink,
+    SourcePublication,
+)
 
 
 def generate_chatgpt_host_id():
@@ -120,10 +125,24 @@ class News(models.Model):
         'unknown', 'article', 'discussion', 'readme', 'newsletter', 'abstract', 'product',
         'regulatory_data',
     )]
-    FULL_CONTENT_STATE_CHOICES = [(value, value) for value in ('missing', 'legacy', 'complete')]
+    FULL_CONTENT_STATE_CHOICES = [(value, value) for value in ('missing', 'legacy', 'complete', 'available')]
     content_kind = models.CharField(max_length=32, choices=CONTENT_KIND_CHOICES, default='unknown')
     full_content_state = models.CharField(max_length=16, choices=FULL_CONTENT_STATE_CHOICES, default='missing')
     full_content_revision = models.PositiveBigIntegerField(default=0)
+    # Both null means unclaimed: no writer is authorized until an explicit claim.
+    # Existing rows are assigned their original legacy source by migration 0054.
+    body_owner_source = models.ForeignKey(
+        Source, null=True, blank=True, on_delete=models.PROTECT, related_name='owned_bodies',
+    )
+    body_owner_binding = models.ForeignKey(
+        'api.FeedBinding', null=True, blank=True, on_delete=models.PROTECT, related_name='owned_bodies',
+    )
+    body_owner_version = models.PositiveBigIntegerField(default=1)
+    full_content_hash = models.CharField(max_length=64, blank=True, default='')
+    full_content_completeness = models.CharField(
+        max_length=16, default='unknown',
+        choices=[(value, value) for value in ('unknown', 'summary', 'verified')],
+    )
     full_content_provenance = models.JSONField(default=dict, blank=True)
     full_content_next_attempt_at = models.DateTimeField(null=True, blank=True, db_index=True)
     full_content_task_created_at = models.DateTimeField(null=True, blank=True)
@@ -139,6 +158,13 @@ class News(models.Model):
         verbose_name = '新闻'
         verbose_name_plural = '新闻'
         permissions = [('view_article_body', '可查看正文并按需请求获取')]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(body_owner_source__isnull=True) | models.Q(body_owner_binding__isnull=True),
+                name='rss_news_single_body_owner',
+            ),
+            models.CheckConstraint(condition=models.Q(body_owner_version__gte=1), name='rss_news_owner_version_positive'),
+        ]
         ordering = ['-publish_time']
         indexes = [
             models.Index(fields=['-publish_time']),
