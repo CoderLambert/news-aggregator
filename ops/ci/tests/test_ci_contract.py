@@ -16,6 +16,10 @@ SMOKE = ROOT / ".github/workflows/ci-runner-smoke.yml"
 COMPOSE = ROOT / "ops/ci/compose.yaml"
 ENTRYPOINT = ROOT / "ops/ci/runner-entrypoint.sh"
 MANAGE = ROOT / "ops/ci/manage.sh"
+FRONT_DEPS = ROOT / "ops/ci/install-frontend-deps.sh"
+BACK_DEPS = ROOT / "ops/ci/install-backend-deps.sh"
+WATCH = ROOT / "ops/ci/watch.py"
+WATCH_SERVICE = ROOT / "ops/ci/watch-service.sh"
 
 
 def load(path):
@@ -125,7 +129,7 @@ class SelfHostedCIContract(unittest.TestCase):
         self.assertIn("runner-state:/runner/data", svc["runner"]["volumes"])
 
     def test_script_syntax(self):
-        for script in (MANAGE, ENTRYPOINT):
+        for script in (MANAGE, ENTRYPOINT, FRONT_DEPS, BACK_DEPS, WATCH_SERVICE):
             with self.subTest(file=script.name):
                 result = subprocess.run(
                     ["bash", "-n", str(script)],
@@ -141,9 +145,50 @@ class SelfHostedCIContract(unittest.TestCase):
         self.assertIn("registration-token-frontend", script)
         self.assertIn("registration-token-frontend", COMPOSE.read_text())
         self.assertIn("runner-frontend", script)
+        self.assertIn("require_idle", script)
+        self.assertIn("confirm_both_online", script)
+        self.assertIn('MANUAL_STOP_FLAG="$DATA_DIR/maintenance-disabled"', script)
+        self.assertIn("watch-service.sh", script)
         self.assertNotIn("docker system prune", script)
         self.assertNotIn("docker volume prune", script)
         self.assertNotIn("down --volumes", script)
+
+    def test_dependency_cache_is_persistent_and_keyed(self):
+        ci = CI.read_text(encoding="utf-8")
+        front = FRONT_DEPS.read_text(encoding="utf-8")
+        back = BACK_DEPS.read_text(encoding="utf-8")
+        cfg = load(COMPOSE)
+        self.assertIn("bash ops/ci/install-frontend-deps.sh", ci)
+        self.assertIn("bash ops/ci/install-backend-deps.sh", ci)
+        self.assertNotIn("python3 -m venv --clear backend/venv", ci)
+        self.assertNotIn("run: npm ci", ci)
+        self.assertIn("package-lock.json", front)
+        self.assertIn("sha256sum", front)
+        self.assertIn("npm ci --prefix", front)
+        self.assertIn("npm ls --prefix", front)
+        self.assertIn("PLAYWRIGHT_PIN=\"1.62.0\"", back)
+        self.assertIn("TORCH_PIN=\"2.14.1+cpu\"", back)
+        self.assertIn("sha256sum", back)
+        self.assertIn("pip check", back)
+        self.assertIn("pip freeze", back)
+        self.assertIn("npm_config_cache", cfg["services"]["runner-frontend"]["environment"])
+        self.assertIn("PIP_CACHE_DIR", cfg["services"]["runner"]["environment"])
+        self.assertIn("docker-data:/var/lib/docker", cfg["services"]["docker"]["volumes"])
+
+    def test_boot_watchdog_is_safe_and_opt_in_for_linger(self):
+        ci = CI.read_text(encoding="utf-8")
+        watch = WATCH.read_text(encoding="utf-8")
+        timer = WATCH_SERVICE.read_text(encoding="utf-8")
+        script = MANAGE.read_text(encoding="utf-8")
+        self.assertIn("OnStartupSec=2min", timer)
+        self.assertIn("OnUnitActiveSec=5min", timer)
+        self.assertIn("loginctl enable-linger", timer)
+        self.assertIn("maintenance-disabled", watch)
+        self.assertIn("Runner.Worker", watch)
+        self.assertIn("PERSISTENT_FAILURES = 3", watch)
+        self.assertIn("COOLDOWN_SECONDS = 15 * 60", watch)
+        self.assertIn('require_idle', script)
+        self.assertNotIn("ubuntu-latest", ci)
 
 
 if __name__ == "__main__":
