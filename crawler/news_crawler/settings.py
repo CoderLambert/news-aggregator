@@ -12,9 +12,9 @@ CRAWL_ONLY_MODE = os.environ.get("NEWS_CRAWL_ONLY") == "1"
 ROBOTSTXT_OBEY = CRAWL_ONLY_MODE
 TELNETCONSOLE_ENABLED = not CRAWL_ONLY_MODE
 
-# Tuned for Termux/mobile: lower concurrency to avoid CPU/IO contention.
+# Tuned for Termux/mobile: keep one request in flight to limit CPU/IO contention.
 # On a server/desktop, set CONCURRENT_REQUESTS=16 and CONCURRENT_REQUESTS_PER_DOMAIN=4.
-CONCURRENT_REQUESTS = 4
+CONCURRENT_REQUESTS = 1
 CONCURRENT_REQUESTS_PER_DOMAIN = 1
 DOWNLOAD_DELAY = 3
 
