@@ -1221,3 +1221,4 @@ class NewsPreference(models.Model):
     group = models.ForeignKey(ChannelGroup, null=True, blank=True, on_delete=models.SET_NULL)
 
 from api.rss.reading_models import NewsReadState  # noqa: E402,F401
+from api.rss.import_models import RssImportBatch, RssImportItem  # noqa: E402,F401

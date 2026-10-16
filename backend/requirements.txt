@@ -23,3 +23,7 @@ markdownify==1.2.3
 
 # Official Miniflux SDK; contract laboratory ops/rss/T00/versions.json.
 miniflux==1.1.6
+
+# OPML uploads are parsed as bytes after a bounded XML safety check.
+listparser==0.20
+defusedxml==0.7.1
