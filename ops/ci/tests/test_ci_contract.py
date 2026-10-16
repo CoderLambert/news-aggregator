@@ -71,6 +71,23 @@ class SelfHostedCIContract(unittest.TestCase):
         self.assertIn("docker run --rm --pull=never", content)
         self.assertIn("CI_DIND_DNS_PRIMARY/SECONDARY", content)
         self.assertIn("backend/api/tests/", content)
+        frontend_steps = wf["jobs"]["frontend"]["steps"]
+        frontend_fast = next(i for i, step in enumerate(frontend_steps)
+                             if step["name"] == "Fast cross-stack syntax preflight")
+        frontend_deps = next(i for i, step in enumerate(frontend_steps)
+                             if step["name"].startswith("Restore installed frontend deps"))
+        self.assertLess(frontend_fast, frontend_deps)
+        self.assertIn("python3 -m compileall", frontend_steps[frontend_fast]["run"])
+        self.assertNotIn("docker", frontend_steps[frontend_fast]["run"].lower())
+        backend_steps = wf["jobs"]["backend-and-release-gates"]["steps"]
+        security_fast = next(i for i, step in enumerate(backend_steps)
+                             if step["name"] == "Fast backend security regressions")
+        full_suite = next(i for i, step in enumerate(backend_steps)
+                          if step["name"] == "Run backend and offline deployment tests")
+        self.assertLess(security_fast, full_suite)
+        self.assertIn("--maxfail=1", backend_steps[security_fast]["run"])
+        self.assertIn("tests/ backend/api/tests/ scripts/deploy/tests/",
+                      backend_steps[full_suite]["run"])
 
     def test_manual_smoke_also_uses_only_dedicated_runner(self):
         wf = load(SMOKE)
