@@ -17,7 +17,8 @@ services:
         chown 1001:121 /runner/data /ci-work/_work /ci-work/_work/.ci-tmp /ci-work/_work/.cache
         chmod 0750 /runner/data /ci-work/_work
         chmod 0770 /ci-work/_work/.ci-tmp /ci-work/_work/.cache
-        chmod 0750 /ci-docker
+        chgrp 121 /ci-docker
+        chmod 0770 /ci-docker
 
   docker:
     image: docker:29-dind
