@@ -1,28 +1,30 @@
-# T27：专项验收
+# T27 专项验收
 
-状态：NOT_RUN。以下为待交付测试，文件/命令存在与通过结果均不得预先声明。
+2026-10-16：合成真实浏览器全链 PASS；公开来源有限取样已运行，部分来源/完整性仍未封存。具体范围见 [report.md](report.md)。
 
-- T27-A1：首访/GET/hover 不触发旧 fetch。预期按对应合同断言成功及失败边界。
-- T27-A2：两用户/匿名在搜索/AI/TTS/缓存隔离。预期按对应合同断言成功及失败边界。
-- T27-A3：代码/表格/图片及原生全文保真。预期按对应合同断言成功及失败边界。
-- T27-A4：分来源完整性/覆盖和 p95 如实统计。预期按对应合同断言成功及失败边界。
-
-## 执行与证据
+- A1：实际 Chromium 首访、GET、hover、搜索全部 GET，无隐式采集；publisher audit 无被动原文请求。
+- A2：A/B/匿名与切换账号、已读/收藏、退订重载通过；越权详情/AI/TTS 404；真实付费 provider 未使用。
+- A3：真实 Miniflux→worker→SQLite→SPA，代码 DOM/clipboard 精确相同；表格、合成图片、移动端键盘与显式修复通过。
+- A4：6 个公开 feed 尝试，5 sampled、Uber failed；11 篇结构取样，逐 URL 与延迟已保存；人工完整性、第二摘要博客成功、HN self_post、RSSHub 和旧 DEV 8555 仍有限制。
 
 ```bash
-# PLANNED：测试文件与产品尚未实现。
-test -f tests/rss_engine_contract/test_product_acceptance.py
-RSS_TEST_ALLOW_LIVE=1 RSS_TEST_CONFIG=/absolute/path/to/isolated-test-config.json \
-  RUN_MAIN=true PYTHONPATH=backend:crawler \
-  backend/venv/bin/python -m pytest -q tests/rss_engine_contract/test_product_acceptance.py -m rss_live
+/tmp/newshub-rss-coordinator-venv/bin/python ops/rss/T27/run_browser.py \
+  --output /tmp/rss-t27-browser-final2
+# exit 0，真实引擎/浏览器，资源已清理
+/tmp/newshub-rss-coordinator-venv/bin/python ops/rss/T27/sample_public.py \
+  --output /tmp/rss-t27-public-evidence.json
+# exit 0；业务失败保留于输出，不代表所有来源通过
+/tmp/newshub-rss-coordinator-venv/bin/python -m pytest -q \
+  tests/rss_engine_contract/test_product_acceptance.py
+# 3 passed, 1 skipped：已保存证据一致性；fresh live 包装器默认跳过。
 ```
 
-真实来源/浏览器缺失阻塞产品上线，不追溯阻塞已验收独立模块；RSSHub 使用范围额外依赖 T18，未通过不能宣称该来源完成
+显式重新运行 fresh live 包装器时，先准备隔离 allowlist JSON：
 
-Python/Node 版本沿现有 CI（Python 3.12、Node 22），依赖由所属任务锁定。涉及数据库用临时合成库；live 测试检查明确隔离 allowlist，不连接活动工作区/生产库。前端改动补 typecheck/lint/相关组件测试；数据库改动补迁移/契约测试。实际引擎、浏览器、恢复和运行证据只在本任务承担该风险时要求，见 [验收矩阵](../../ACCEPTANCE-MATRIX.md)。
+```json
+{"allow_project_prefix":"newshub-rss-t27-","allow_loopback_app":true,"allow_synthetic_publisher":true,"allow_public_sampling":false}
+```
 
-任务专项证明模块行为，批次验证组合；同版本/配置公共证据可复用。环境缺失写明具体门禁 BLOCKED，不伪造 PASS，也不把无关模块开发冻结。测试失败先修受影响路径，必要时重跑关联集成。
+然后 `RSS_TEST_ALLOW_LIVE=1 RSS_TEST_CONFIG=/absolute/path/to/config.json` 运行上述 pytest 的 `-m rss_live`。该包装器没有在第一条命令已成功后重复执行；真实浏览器证据来自第一条命令。脚本每次创建唯一项目与临时 DB，不复用生产资源。公共来源另行显式运行 sample_public.py，固定允许 feed 清单与每类最多 5 篇。
 
-## 完成条件
-
-记录命令/退出码、版本/环境及实际案例结果；通过相关 PR 必需检查和实现评审。可在生产门禁未开始时完成独立模块，但本任务明确承担的真实运行证据缺失则不能 DONE。没有统一的“所有任务必须独立 Agent 审核”要求；关键身份/权限/迁移/恢复变更须独立复核。
+可复用 T00/T03/T08/T09 已有故障证据，但各自 SHA/配置范围不变。T26 和最终 CI 由协调者独立完成。本任务不运行全仓测试，也不把真实用户副本缺失写成通过。
