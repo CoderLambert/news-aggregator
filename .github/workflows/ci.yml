@@ -97,6 +97,13 @@ jobs:
         run: bash ops/ci/install-backend-deps.sh
       - name: Verify private self-hosted CI contract
         run: backend/venv/bin/python -m unittest discover -s ops/ci/tests -p 'test_*.py'
+      - name: Validate release shell syntax and mocked script behavior
+        run: |
+          bash -n scripts/deploy/smoke.sh scripts/deploy/deploy.sh scripts/deploy/rollback.sh scripts/deploy/backup.sh scripts/deploy/restore.sh scripts/deploy/tests/test_release_scripts.sh
+          bash scripts/deploy/tests/test_release_scripts.sh
+          bash scripts/deploy/tests/test_export_static.sh
+          bash scripts/deploy/tests/test_preflight.sh
+          bash scripts/deploy/tests/test_local_domain_args.sh
       - name: Collect all three test roots
         timeout-minutes: 5
         run: |
@@ -117,13 +124,6 @@ jobs:
           WAITRESS_TRUSTED_PROXY: 127.0.0.1
           DJANGO_DB_PATH: /tmp/newshub-ci-check.sqlite3
         run: backend/venv/bin/python backend/manage.py check --deploy
-      - name: Validate release shell syntax and mocked script behavior
-        run: |
-          bash -n scripts/deploy/smoke.sh scripts/deploy/deploy.sh scripts/deploy/rollback.sh scripts/deploy/backup.sh scripts/deploy/restore.sh scripts/deploy/tests/test_release_scripts.sh
-          bash scripts/deploy/tests/test_release_scripts.sh
-          bash scripts/deploy/tests/test_export_static.sh
-          bash scripts/deploy/tests/test_preflight.sh
-          bash scripts/deploy/tests/test_local_domain_args.sh
       - name: Verify cached Playwright package and preinstalled Chromium
         run: |
           backend/venv/bin/python -m playwright --version

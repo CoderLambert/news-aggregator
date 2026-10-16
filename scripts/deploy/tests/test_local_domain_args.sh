@@ -506,8 +506,8 @@ import json, sys
 from pathlib import Path
 report = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
 assert report['status'] == 'PASS' and report['cleanup_status'] == 'PASS'
-assert report['g1_probe_image'] == sys.argv[2]
-assert report['g1_probe_image_id'] == sys.argv[3]
+assert report['g1_probe_image'] == sys.argv[2], (report['g1_probe_image'], sys.argv[2])
+assert report['g1_probe_image_id'] == sys.argv[3], (report['g1_probe_image_id'], sys.argv[3])
 assert report['checks']['browser_homepage'] == 'HTTP 200'
 assert report['checks']['sse_first_frame_ms'] == '1'
 PY
