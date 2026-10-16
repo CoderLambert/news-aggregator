@@ -8,15 +8,17 @@ services:
     volumes:
       - runner-work:/ci-work/_work
       - runner-state:/runner/data
+      - frontend-state:/ci-frontend/state
+      - frontend-work:/ci-frontend/_work
       - runner-socket:/ci-docker
     command:
       - /bin/sh
       - -ec
       - |
-        mkdir -p /ci-work/_work/.ci-tmp /ci-work/_work/.cache
-        chown 1001:121 /runner/data /ci-work/_work /ci-work/_work/.ci-tmp /ci-work/_work/.cache
-        chmod 0750 /runner/data /ci-work/_work
-        chmod 0770 /ci-work/_work/.ci-tmp /ci-work/_work/.cache
+        mkdir -p /ci-work/_work/.ci-tmp /ci-work/_work/.cache /ci-frontend/_work/.ci-tmp /ci-frontend/_work/.cache
+        chown 1001:121 /runner/data /ci-work/_work /ci-work/_work/.ci-tmp /ci-work/_work/.cache /ci-frontend/state /ci-frontend/_work /ci-frontend/_work/.ci-tmp /ci-frontend/_work/.cache
+        chmod 0750 /runner/data /ci-work/_work /ci-frontend/state /ci-frontend/_work
+        chmod 0770 /ci-work/_work/.ci-tmp /ci-work/_work/.cache /ci-frontend/_work/.ci-tmp /ci-frontend/_work/.cache
         chgrp 121 /ci-docker
         chmod 0770 /ci-docker
 
@@ -99,8 +101,50 @@ services:
       retries: 4
       start_period: 40s
 
+  runner-frontend:
+    # Same immutable tooling image, different GitHub identity and work directory.
+    # This runner has NO access to Docker, the private daemon socket or backend volumes.
+    image: newshub/ci-runner:local
+    entrypoint: ["/opt/ci/runner-entrypoint.sh"]
+    restart: unless-stopped
+    init: true
+    environment:
+      REPO_URL: https://github.com/CoderLambert/news-aggregator
+      RUNNER_SCOPE: repo
+      RUNNER_NAME: omarchy-newshub-frontend
+      LABELS: newshub-frontend
+      RUNNER_WORKDIR: /ci-frontend/_work
+      CONFIGURED_ACTIONS_RUNNER_FILES_DIR: /runner/data
+      DISABLE_AUTOMATIC_DEREGISTRATION: "true"
+      RUN_AS_ROOT: "false"
+      UNSET_CONFIG_VARS: "true"
+      TMPDIR: /ci-frontend/_work/.ci-tmp
+      XDG_CACHE_HOME: /ci-frontend/_work/.cache
+      npm_config_cache: /ci-frontend/_work/.cache/npm
+    volumes:
+      - frontend-state:/runner/data
+      - frontend-work:/ci-frontend/_work
+      - type: bind
+        source: ${CI_DATA_DIR:?Set CI_DATA_DIR using manage.sh}/registration-token-frontend
+        target: /run/ci-registration-token
+        read_only: true
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    cpus: ${CI_FRONTEND_CPUS:-2.0}
+    mem_limit: ${CI_FRONTEND_MEMORY:-4g}
+    stop_grace_period: 120s
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /runner/data/.runner"]
+      interval: 30s
+      timeout: 8s
+      retries: 4
+      start_period: 40s
+
 volumes:
   runner-work:
   runner-state:
+  frontend-work:
+  frontend-state:
   runner-socket:
   docker-data:
