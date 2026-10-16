@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 
 from django.db.models import Case, CharField, Exists, F, OuterRef, Q, Value, When
-from django.db.models.functions import Cast, Replace, Trim
+from django.db.models.functions import Cast, Replace
 from django.http import Http404
 
 from api.models import News, Source, NewsSourceItem
@@ -73,6 +73,7 @@ def article_sources(user, news):
 
 def body_authorized_news(user, queryset=None):
     """SQL counterpart of stored-body readability, suitable before text search."""
+    from api.services.full_content_status import trimmed_text_expression
     qs = authorized_news(user, queryset)
     body_sources = authorized_sources(user, body=True)
     links = SourceFeedLink.objects.filter(binding_id=OuterRef('body_owner_binding_id'),
@@ -88,7 +89,7 @@ def body_authorized_news(user, queryset=None):
                   _rss_owner_binding=Replace(Cast('body_owner_binding_id', CharField()), Value('-'), Value('')),
                   _rss_origin_instance=Replace(Cast('full_content_provenance__engine_instance_uuid', CharField()), Value('-'), Value('')),
                   _rss_binding_instance=Replace(Cast('body_owner_binding__engine_instance_uuid', CharField()), Value('-'), Value('')),
-                  _rss_body_text=Trim('full_content'))
+                  _rss_body_text=trimmed_text_expression('full_content'))
     engine_origin = Q(full_content_provenance__owner='miniflux', _rss_origin_link=True,
                       _rss_origin_entry=True, _rss_origin_binding=F('_rss_owner_binding'),
                       _rss_origin_instance=F('_rss_binding_instance'),
@@ -99,7 +100,7 @@ def body_authorized_news(user, queryset=None):
     legacy_owner = Q(body_owner_source_id__in=body_sources.values('pk')) | Q(
         body_owner_binding__isnull=False, _rss_body_link=True, source_id__in=body_sources.values('pk'))
     qs = qs.filter(engine_origin | (legacy_origin & legacy_owner)).filter(
-        full_content_state__in=('legacy', 'complete', 'available')).exclude(_rss_body_text='')
+        full_content_state__in=('legacy', 'complete', 'available')).exclude(_rss_body_text='').exclude(full_content_completeness='summary')
     # Retained legacy provenance can name a different publisher from the primary
     # channel. Require its current grant too; a privileged fetch cannot bypass ACL.
     qs = qs.alias(_rss_legacy_origin_name=Case(
@@ -117,6 +118,8 @@ class AccessContext:
     source_ids: tuple[int, ...]
     scope: str
     policy_versions: dict[str, int]
+    completeness: str = 'unknown'
+    body_owner: str | None = None
 
 
 @dataclass(frozen=True)
@@ -137,23 +140,106 @@ class StoredArticle:
     access: AccessContext
 
 
-def get_stored_article(user, news_id):
-    """Always re-read grants and content. Anonymous/inactive users get public only."""
+def _snapshot(user, news_id, *, include_body):
     try:
-        news = authorized_news(user).get(pk=news_id)
+        body_grant = body_authorized_news(user, News.objects.filter(pk=OuterRef('pk')))
+        query = authorized_news(user).annotate(_rss_body_grant=Exists(body_grant)).defer('full_content_zh')
+        if not include_body:
+            query = query.defer('full_content', 'full_content_provenance')
+        # Body grant and bytes are selected in the same database snapshot.
+        news = query.get(pk=news_id)
     except (News.DoesNotExist, ValueError, TypeError):
         raise Http404 from None
     sources = list(article_sources(user, news).select_related('publication'))
-    body = body_authorized_news(user, News.objects.filter(pk=news.pk)).exists()
-    scope = 'full' if body and news.full_content_completeness != 'summary' else 'summary'
-    markdown = news.full_content if scope == 'full' else news.content
-    versions = {str(s.pk): s.publication.policy_version for s in sources}
-    if body and news.body_owner_binding_id:
+    if not sources:
+        raise Http404
+    scope = 'full' if news._rss_body_grant else 'summary'
+    versions = {str(source.pk): source.publication.policy_version for source in sources}
+    if news._rss_body_grant and news.body_owner_binding_id:
         versions['binding:' + str(news.body_owner_binding_id)] = news.body_owner_binding.policy_version
-    context = AccessContext(user.pk if _active_user(user) else None, tuple(s.pk for s in sources), scope, versions)
-    # Provenance is server-side evidence; public serializers expose no arbitrary JSON.
-    return StoredArticle(news.pk, news.title, news.url, news.content, markdown, scope,
-        news.full_content_revision, sha256(markdown.encode('utf-8')).hexdigest(), news.content_kind,
+    context = AccessContext(user.pk if _active_user(user) else None, tuple(source.pk for source in sources), scope, versions,
         news.full_content_completeness if scope == 'full' else 'summary',
-        dict(news.full_content_provenance or {}) if scope == 'full' else {}, versions,
-        ('miniflux' if news.body_owner_binding_id else 'legacy') if scope == 'full' else None, context)
+        ('miniflux' if news.body_owner_binding_id else 'legacy') if scope == 'full' else None)
+    return news, context
+
+
+def get_article_access(user, news_id):
+    """Preview grant/metadata without loading full body or provenance into Python."""
+    return _snapshot(user, news_id, include_body=False)[1]
+
+
+def get_stored_article(user, news_id):
+    """Always re-read grants and bytes together. No network or permission cache."""
+    news, context = _snapshot(user, news_id, include_body=True)
+    markdown = news.full_content if context.scope == 'full' else news.content
+    # Provenance is server-side evidence; public serializers expose no arbitrary JSON.
+    return StoredArticle(news.pk, news.title, news.url, news.content, markdown, context.scope,
+        news.full_content_revision, sha256(markdown.encode('utf-8')).hexdigest(), news.content_kind,
+        context.completeness, dict(news.full_content_provenance or {}) if context.scope == 'full' else {},
+        context.policy_versions, context.body_owner, context)
+
+
+def annotate_article_access(user, queryset):
+    """Select the body grant with page rows; no body transfer to the application."""
+    from django.db.models import IntegerField
+    return queryset.annotate(
+        _rss_body_grant=Exists(body_authorized_news(user, News.objects.filter(pk=OuterRef('pk')))),
+        _rss_access_actor=Value(user.pk if _active_user(user) else None, output_field=IntegerField()),
+    )
+
+
+def prepare_article_previews(user, articles):
+    """Two bounded batch reads for a page's engine memberships and source grants.
+
+    Returned snapshots belong to one serialization call only. They must never be
+    placed in a cross-request cache. Page rows already contain their SQL body grant.
+    """
+    if not articles:
+        return {}
+    ids = [article.pk for article in articles]
+    actor = user.pk if _active_user(user) else None
+    grants = None
+    if any(not hasattr(article, '_rss_access_actor') or article._rss_access_actor != actor for article in articles):
+        grants = dict(annotate_article_access(user, authorized_news(user).filter(pk__in=ids)).values_list('pk', '_rss_body_grant'))
+    engine_sources = {}
+    source_ids = {article.source_id for article in articles}
+    for news_id, source_id in EngineEntryMap.objects.filter(news_id__in=ids, disposition='linked',
+            binding__source_links__association_policy=ALL_ENTRIES).values_list('news_id', 'binding__source_links__source_id'):
+        engine_sources.setdefault(news_id, set()).add(source_id)
+        source_ids.add(source_id)
+    keys_by_news = {article.pk: {item.source_key for item in article.source_items.all()} for article in articles}
+    all_keys = set().union(*keys_by_news.values())
+    names = [policy.name for policy in POLICIES.values() if policy.key in all_keys]
+    sources = list(authorized_sources(user).filter(Q(pk__in=source_ids) | Q(name__in=names)).select_related('publication'))
+    policy_keys = {policy.name: policy.key for policy in POLICIES.values()}
+    snapshots = {}
+    for article in articles:
+        visible = [source for source in sources if source.pk == article.source_id
+                   or source.pk in engine_sources.get(article.pk, set())
+                   or policy_keys.get(source.name) in keys_by_news[article.pk]]
+        if not visible or (grants is not None and article.pk not in grants):
+            raise Http404
+        visible.sort(key=lambda source: source.pk)
+        body = grants[article.pk] if grants is not None else article._rss_body_grant
+        context = AccessContext(actor, tuple(source.pk for source in visible), 'full' if body else 'summary',
+            {str(source.pk): source.publication.policy_version for source in visible},
+            article.full_content_completeness if body else 'summary',
+            ('miniflux' if article.body_owner_binding_id else 'legacy') if body else None)
+        snapshots[article.pk] = (context, visible)
+    return snapshots
+
+
+def with_authorized_source_counts(user, sources):
+    """Count authorized members in SQL without a per-source application query."""
+    from django.db.models import Count, IntegerField, Subquery
+    from django.db.models.functions import Coalesce
+    sources = sources.annotate(_rss_count_source_key=Case(
+        *[When(name=policy.name, then=Value(policy.key)) for policy in POLICIES.values()],
+        default=Value(None), output_field=CharField(),
+    ))
+    members = authorized_news(user).filter(
+        Q(source_id=OuterRef('pk')) | Q(source_items__source_key=OuterRef('_rss_count_source_key')) |
+        Q(engine_entries__disposition='linked', engine_entries__binding__source_links__source_id=OuterRef('pk'),
+          engine_entries__binding__source_links__association_policy=ALL_ENTRIES)
+    ).order_by().values(_group=Value(1)).annotate(n=Count('pk', distinct=True)).values('n')
+    return sources.annotate(rss_news_count=Coalesce(Subquery(members, output_field=IntegerField()), Value(0)))
