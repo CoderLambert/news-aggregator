@@ -93,6 +93,9 @@ class SelfHostedCIContract(unittest.TestCase):
             ["${CI_DIND_DNS_PRIMARY:-1.1.1.1}", "${CI_DIND_DNS_SECONDARY:-8.8.8.8}"],
         )
         dind_command = svc["docker"]["command"][0]
+        # The Compose interpolation layer must preserve the shell variable.
+        # A single $group would be eagerly expanded by Compose to empty.
+        self.assertIn('--group="$$group"', dind_command)
         self.assertIn("--dns=${CI_DIND_DNS_PRIMARY:-1.1.1.1}", dind_command)
         self.assertIn("--dns=${CI_DIND_DNS_SECONDARY:-8.8.8.8}", dind_command)
         self.assertNotIn("dns", svc["runner"])
