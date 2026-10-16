@@ -52,7 +52,8 @@ def test_preview_bytes_no_network_dedup_union_and_no_subscriptions(people):
 
 
 @pytest.mark.parametrize('raw', [b'http://example.com/feed', b'<!DOCTYPE opml [<!ENTITY x SYSTEM "file:///etc/passwd">]><opml><body>&x;</body></opml>',
-    b'<opml>' + b'<outline>' * 18 + b'</outline>' * 18 + b'</opml>', b'x' * (MAX_BYTES + 1)])
+    b'<opml>' + b'<outline>' * 18 + b'</outline>' * 18 + b'</opml>', b'x' * (MAX_BYTES + 1)],
+    ids=['not-xml', 'external-entity', 'excessive-depth', 'oversized'])
 def test_malicious_or_oversized_file_rejected(people, raw):
     assert preview(people[0], raw).status_code in (400, 413)
     assert not RssImportBatch.objects.exists()
