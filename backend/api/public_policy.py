@@ -28,7 +28,7 @@ def rss_policy_envelope(request, response):
 
 READ_ONLY_ROUTES = frozenset({
     'news-list', 'news-detail', 'category-list', 'source-list', 'auth-csrf',
-    'capabilities', 'health-live', 'health-ready',
+    'capabilities', 'health-live', 'health-ready', 'rss-directory',
     'smart-channel-catalog', 'smart-channel-profile', 'smart-channel-dashboard',
 })
 READ_ONLY_METHODS = frozenset({'GET', 'HEAD'})

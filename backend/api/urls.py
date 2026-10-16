@@ -13,8 +13,10 @@ from .rss.reading import NewsReadStateView
 from .rss.discovery import ResolveFeedView
 from .rss import subscription_views as rss_views
 from .rss import opml_views
+from .rss.directory_http import DirectoryView
 
 urlpatterns = [
+    path('rss/directory/', DirectoryView.as_view(), name='rss-directory'),
     path('me/rss-imports/preview/', opml_views.OpmlPreviewView.as_view(), name='rss-opml-preview'),
     path('me/rss-imports/confirm/', opml_views.OpmlConfirmView.as_view(), name='rss-opml-confirm'),
     path('me/rss-imports/<uuid:pk>/', opml_views.OpmlBatchView.as_view(), name='rss-opml-batch'),

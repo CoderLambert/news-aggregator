@@ -11,7 +11,7 @@ from rest_framework.exceptions import PermissionDenied, Throttled, ValidationErr
 from rest_framework.response import Response
 
 from api.models import ChannelSubscription
-from api.rss.access import authorized_news, authorized_sources
+from api.rss.access import authorized_news, authorized_sources, ALL_ENTRIES
 from api.rss.discovery import discovery_operation_result
 from api.rss.http import RssAPIView
 from api.rss.models import EngineEntryMap, FeedBinding, FeedOperation, SourceFeedLink
@@ -48,7 +48,7 @@ class OperationView(RssAPIView):
 def _authorized_binding(user, pk):
     return get_object_or_404(FeedBinding.objects.filter(pk=pk, source_links__source_id__in=
         authorized_sources(user).values('pk'), source_links__enabled=True,
-        source_links__source__publication__owner='miniflux').distinct())
+        source_links__source__publication__owner='miniflux', source_links__association_policy=ALL_ENTRIES).distinct())
 
 
 def _key(request, prefix):
@@ -86,11 +86,12 @@ class RefetchArticleView(RssAPIView):
         binding = _authorized_binding(request.user, news.body_owner_binding_id)
         source_ids = authorized_sources(request.user, body=True).values('pk')
         link = SourceFeedLink.objects.filter(binding=binding, enabled=True,
-            source_id__in=source_ids, source__publication__owner='miniflux').order_by('pk').first()
+            source_id__in=source_ids, source__publication__owner='miniflux', association_policy=ALL_ENTRIES).order_by('pk').first()
         entry = EngineEntryMap.objects.filter(binding=binding, news=news, source_url=news.url,
                                              disposition='linked').order_by('engine_entry_id').first()
         if link is None or entry is None:
             raise Http404
+        key = _key(request, 'refetch')
         recent = FeedOperation.objects.filter(binding=binding, entry=entry, kind='refetch_entry',
             created_at__gte=timezone.now()-timedelta(seconds=60)).order_by('-created_at').first()
         if recent and recent.actor_id != request.user.pk:
@@ -99,7 +100,7 @@ class RefetchArticleView(RssAPIView):
                 and recent.safe_input.get('fence', {}).get('expected_revision') == news.full_content_revision):
             return Response({'operation_id': str(recent.pk), 'state': recent.state}, status=202)
         operation = enqueue_operation('refetch_entry', actor=request.user, binding=binding, entry=entry,
-            source_id=link.source_id, dedupe_key=_key(request, 'refetch'))
+            source_id=link.source_id, dedupe_key=key)
         return Response({'operation_id': str(operation.pk), 'state': operation.state}, status=202)
 
 

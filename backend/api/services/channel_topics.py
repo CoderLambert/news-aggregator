@@ -78,12 +78,13 @@ def profile_data(source, stored=None):
     effective_hash = digest([base['evidence_hash'], base['topics'], base['about'], base['origin']])
     status, reason = subscription_status(source)
     policy = policy_for_name(source.name)
-    return {'id': source.id, 'name': source.name, 'url': source.url, 'logo': source.logo,
+    publication = getattr(source, 'publication', None)
+    return {'id': source.id, 'name': (publication.display_name if publication else '') or source.name, 'url': source.url, 'logo': source.logo,
         'region': source.region, 'language': source.language, 'source_type': source.source_type,
         'description': base['about'], 'topics': base['topics'], 'origin': base['origin'],
         'needs_review': not base['topics'] or base['origin'] == 'ai', 'evidence_hash': effective_hash,
         'subscription_status': status, 'subscription_reason': reason, 'feed_url': policy.feed_url if policy else '',
-        'policy_key': policy.key if policy else '', 'reading_policy': policy.reading_policy if policy else 'standard',
+        'policy_key': policy.key if policy else '', 'reading_policy': publication.reading_policy if publication else 'summary_only',
         'updated_at': stored.updated_at.isoformat() if stored else None}
 
 
