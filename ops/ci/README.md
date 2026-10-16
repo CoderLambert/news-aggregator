@@ -94,7 +94,7 @@ Runner Online 后，PR 保持 Draft 时两项 CI 会被 Skipped。改为 Ready f
 
 ## 5. 开机恢复及健康自愈
 
-**已集成开机用户级 systemd 定时器**。首次成功执行 manage.sh install、且 GitHub 确认两个 Runner Online 后，安装脚本自动尝试启用 newshub-ci-watch.timer。可手动重新启用：
+**已集成开机用户级 systemd 定时器**。首次成功执行 manage.sh install、且 GitHub 确认两个 Runner Online 后，安装脚本自动尝试启用 newshub-ci-watch.timer。可手动重新启用： 监控程序会被单独复制到私有目录 `$CI_DATA_DIR/bin/watch.py`（默认 `~/.local/share/newshub-ci/bin/watch.py`），并通过 Docker Compose 项目标签发现容器，因此切换 Git 分支后**仍可在开机时运行**。更新监控程序时重新执行 `enable-watch` 即可刷新这份副本。
 
 ~~~bash
 bash ops/ci/manage.sh enable-watch
@@ -164,6 +164,7 @@ docker exec newshub-ci-docker-1 docker -H unix:///ci-docker/docker.sock system d
 - 预装 Chromium，后端 venv 仍安装原工作流指定版本 playwright==1.62.0。
 - 若 docker compose 无法启动 DinD，请检查当前 Omarchy 的内核、cgroup/overlay2、iptables 和资源。不要未经审核直接改为挂宿主 Docker Socket。
 - 如果 DinD 内的 Docker bind mount 找不到 NewsHub 工作目录，检查后端 Runner 和 DinD 挂载的 /ci-work/_work 路径一致及 TMPDIR 是否共享；前端 Runner 不需要 DinD 或共享后端目录。
+- 如果两个 Runner 在 GitHub 注册页 Online 但任务一直排队，确认仓库 Actions 仍有调度权限（账单/预算限制可能独立阻断任务），并检查 PR 是否仍为 Draft；Draft 的 CI 会 Skipped，不能当成测试通过。
 - 你当前 Omarchy 可用内存约 20GiB。本配置两 Runner + DinD 默认 6GB+4GB+5GB，避免长期工作时抢占其他开发程序内存；内存峰值需实际测量。
 - 自托管计算分钟通常不按 GitHub-hosted Runner 计费，但工件/缓存可能产生其他使用费。如果 GitHub Billing 全局限制阻止调度，需要单独处理，本脚本不修改预算或支付方式。
 - CI 只处理仓库合成环境，绝不接入生产 SQLite、PostgreSQL、Gitea 或 Tailscale 服务。
