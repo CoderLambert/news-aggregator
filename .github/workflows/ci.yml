@@ -18,18 +18,21 @@ concurrency:
 jobs:
   frontend:
     if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft)
-    runs-on: [self-hosted, linux, x64, newshub-ci]
+    # Dedicated frontend listener: no Docker daemon access and no backend cache.
+    runs-on: [self-hosted, linux, x64, newshub-frontend]
     timeout-minutes: 30
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Verify runner Node.js 22
+      - name: Verify isolated frontend runner and Node.js 22
         run: |
           node --version
           npm --version
           test "$(node -p 'process.versions.node.split(".")[0]')" = 22
+          test -z "${DOCKER_HOST:-}"
+          test ! -S /ci-docker/docker.sock
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
