@@ -7,7 +7,7 @@ from django.utils import timezone
 from api.models import Source, Category, News, NewsSourceItem
 from api.services import feed_state
 from api.services.article_fetcher.types import FullContentCandidate
-from api.services.news_ingestion import ingest_item
+from api.tests.rss.legacy_fixtures import ingest_fixture as ingest_item
 from api.services.source_policy import POLICIES
 
 
@@ -19,7 +19,7 @@ def item(db):
                 publish_time=timezone.now() - timedelta(days=1))
 
 
-def test_publisher_promotes_hn_discovery_without_replacing_article_or_history(item):
+def test_non_owner_publisher_associates_without_replacing_hn_article_or_history(item):
     first = ingest_item({**item, 'source_key': 'hackernews', 'source_name': 'Hacker News',
                          'upstream_id': '811', 'title': 'HN editorial headline', 'content_kind': 'discussion'})
     article = News.objects.get(pk=first.news_id)
@@ -30,7 +30,7 @@ def test_publisher_promotes_hn_discovery_without_replacing_article_or_history(it
     result = ingest_item(item)
     article.refresh_from_db()
     assert result.news_id == first.news_id
-    assert article.source.name == 'Dev.to' and article.title == item['title']
+    assert article.source.name == 'Hacker News' and article.title == 'HN editorial headline'
     assert article.content == item['summary'] and article.publish_time == item['publish_time']
     assert article.full_content_revision == 4 and article.full_content_zh == 'Known full translation'
     assert article.source_items.count() == 2

@@ -1,3 +1,4 @@
+from api.tests.rss.legacy_fixtures import legacy_news, public_legacy
 import pytest
 from django.utils import timezone
 
@@ -17,7 +18,7 @@ def category(db):
 
 @pytest.fixture
 def news(source, category):
-    return News.objects.create(
+    return legacy_news(
         title='Status test article',
         content='Short summary',
         publish_time=timezone.now(),

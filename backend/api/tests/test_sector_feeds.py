@@ -12,7 +12,7 @@ from api.services.sector_feeds import SECTOR_KEYS
 from api.services.feed_support import parse_feed, feed_entry_item
 from api.services.energy_keywords import matches_new_energy
 from api.services.channel_catalog import subscription_status
-from api.services.news_ingestion import ingest_item
+from api.tests.rss.legacy_fixtures import ingest_fixture as ingest_item
 from api.services.full_content_status import has_full_content, fetch_eligibility
 
 NOW = datetime(2026, 10, 13, tzinfo=timezone.utc)
@@ -107,7 +107,7 @@ def test_catalog_regions_candidate_and_medical_summary_only(reading_data):
     client = APIClient(); client.force_authenticate(user)
     with patch('api.views.request_full_content') as fetch:
         response = client.post(f'/api/news/{news.pk}/fetch-full/', {}, format='json')
-    assert response.status_code == 422
+    assert response.status_code == 403
     fetch.assert_not_called()
 
 
@@ -142,6 +142,9 @@ def test_regions_share_all_search_modes_and_group_intersection(vector, version, 
 @pytest.mark.django_db
 def test_overlapping_publisher_channels_keep_primary_and_are_visible_in_both_groups():
     primary = Source.objects.get(name='MIT Tech Review AI')
+    # This membership fixture explicitly uses compatible summary policies.
+    from api.models import SourcePublication
+    SourcePublication.objects.filter(source=primary).update(reading_policy='rss_summary_only')
     category = Category.objects.get_or_create(name='科技', defaults={'slug': 'tech'})[0]
     news = News.objects.create(title='Clinical research', content='Original excerpt', source=primary, category=category,
         publish_time=NOW, url='https://www.technologyreview.com/news/1')

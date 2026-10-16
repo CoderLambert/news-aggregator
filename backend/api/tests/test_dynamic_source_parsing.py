@@ -7,7 +7,7 @@ from api.models import Category, NewsSourceItem, Source, SourceConfig, SourceEnd
 from api.services.article_fetcher.types import FullContentCandidate
 from api.services.article_fetcher.validators import validate_candidate
 from api.services.dynamic_source_parsing import parse_html_list, parse_json_list, structured_entry_item
-from api.services.news_ingestion import ingest_item
+from api.tests.rss.legacy_fixtures import ingest_fixture as ingest_item
 from api.services.source_policy import policy_for_key
 
 

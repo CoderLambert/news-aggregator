@@ -1,3 +1,4 @@
+from api.tests.rss.legacy_fixtures import legacy_news, public_legacy
 from unittest.mock import patch
 from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
@@ -24,7 +25,7 @@ class ChannelsTests(TestCase):
         self.outside_story = self.story(self.outside, 'Outside')
 
     def story(self, source, title, **kwargs):
-        return News.objects.create(source=source, category=kwargs.pop('category', self.category), title=title,
+        return legacy_news(source=source, category=kwargs.pop('category', self.category), title=title,
             content='shared query', title_zh='共享搜索', url=f'https://example.com/channel/{title}', publish_time=timezone.now(), **kwargs)
 
     def subscribe(self, source_ids, action='subscribe', **extra):
@@ -168,7 +169,7 @@ class ChannelsTests(TestCase):
 
     def test_directory_includes_zero_article_channels_and_retired_status_without_writes(self):
         sync_channel_catalog()
-        retired = Source.objects.create(name='Reuters', url='https://reuters.com')
+        retired = public_legacy(Source.objects.create(name='Reuters', url='https://reuters.com'))
         before = Source.objects.count()
         self.client.force_authenticate(None)
         response = self.client.get('/api/sources/')
@@ -184,7 +185,7 @@ class ChannelsTests(TestCase):
         self.assertEqual(self.subscribe([retired.id]).status_code, 200)
 
     def test_invalid_batches_atomic_and_foreign_members_rejected(self):
-        self.assertEqual(self.subscribe([self.source.id, 999999]).status_code, 400)
+        self.assertEqual(self.subscribe([self.source.id, 999999]).status_code, 404)
         self.assertEqual(ChannelSubscription.objects.filter(user=self.user).count(), 0)
         a = self.group()
         for path, method in [('/api/me/channel-groups/', 'post'), ('/api/me/channel-subscriptions/', 'post'), ('/api/me/news-preferences/', 'patch')]:

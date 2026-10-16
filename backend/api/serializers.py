@@ -102,7 +102,7 @@ class ChannelNewsSerializer(serializers.ModelSerializer):
         from api.services.full_content_status import fetch_eligibility
         user = getattr(self.context.get('request'), 'user', None)
         if obj.body_owner_binding_id or not authorized_sources(user, body=True).filter(
-                pk=obj.body_owner_source_id, publication__owner='legacy').exists():
+                pk=obj.body_owner_source_id or obj.source_id, publication__owner='legacy').exists():
             return False
         return obj.full_content_fetch_status != 'blocked' and obj.full_content_retry_count < 5 and not fetch_eligibility(obj, privileged=self.get_body_access_granted(obj))
 
