@@ -5,6 +5,8 @@ from django.core.validators import RegexValidator
 from django.db import models
 from django.utils import timezone
 
+from api.rss.directory_models import FeedDirectoryEntry, FeedDirectorySnapshot  # noqa: F401
+
 
 def generate_chatgpt_host_id():
     return f'urn:uuid:{uuid.uuid4()}'
