@@ -90,7 +90,7 @@ export default function DiscoverDialog({ viewer, groups, onClose, onDone }: { vi
         {discovering && <p role="status">后台正在发现订阅…可以关闭窗口后重新查询此地址。</p>}
         {result?.state === 'succeeded' && !result.candidates?.length && <>
           <p role="status">未发现网站声明的订阅源。可以粘贴网站公布的 RSS 地址，或明确尝试将此地址作为 Feed 添加。</p>
-          <button type="button" className="workspace-button secondary" onClick={() => { setMode('feed'); choose({ feed_url: input.trim() }) }}>
+          <button type="button" className="workspace-button secondary" onClick={() => { setMode('feed'); choose({ feed_url: /^https?:\/\//i.test(input.trim()) ? input.trim() : 'https://' + input.trim() }) }}>
             尝试直接添加此 Feed
           </button>
         </>}
