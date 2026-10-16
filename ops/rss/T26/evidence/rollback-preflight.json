@@ -1,0 +1,19 @@
+{
+  "actual_docker_running_volume_users": [
+    "6dcb875015dceae1daff6d8aa406abe8d34d5215b5e3ea6753ceaa6ccf46bfcc"
+  ],
+  "actual_recovery_sqlite_target_check": "RecoveryError: explicit real SQLite target parent required",
+  "explicit_volume": "newshub-rss-t26-1c84d51d54ba_db-data",
+  "host_permissions_changed": false,
+  "inspected_source": "/var/lib/docker/volumes/newshub-rss-t26-1c84d51d54ba_db-data/_data",
+  "port_9527_free_at_check": true,
+  "project": "newshub-rss-t26-1c84d51d54ba",
+  "quiesce_implication": "helper is an active volume user; unchanged T03/rollback.sh must refuse it",
+  "required_condition": "Authorized host runner able to read the named-volume Source without an active container mounting it",
+  "resources_removed": true,
+  "sealed": false,
+  "status": "BLOCKED",
+  "sudo_or_nsenter_used": false,
+  "uid": 1000,
+  "wrapper_chain_executed": false
+}

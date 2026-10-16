@@ -4,7 +4,7 @@ Lease expiry/future timeout never frees a running slot or proves remote cancella
 Unknown create/refetch operations only reconcile; absence never authorizes reissue.
 """
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 import re
 import time
@@ -39,6 +39,7 @@ class Request:
     inputs: dict
     cancelled: bool
     applied: bool
+    entry_url_block_rules: str = ''
 
 
 @dataclass
@@ -51,7 +52,7 @@ class Outcome:
 class ControlWorker:
     def __init__(self, config, *, adapter_factory=None, lease_seconds=90, max_attempts=5):
         self.config = config
-        self.adapter_factory = adapter_factory or (lambda: EngineAdapter(config))
+        self.adapter_factory = adapter_factory
         self.lease_seconds = lease_seconds
         self.max_attempts = max_attempts
         self._control = ThreadPoolExecutor(max_workers=1, thread_name_prefix='rss-control')
@@ -126,20 +127,57 @@ class ControlWorker:
                 current = refetch_fence(operation.entry, operation.safe_input['fence']['source_id'], operation.actor_id)
                 if current != operation.safe_input['fence']:
                     raise OperationError('stale_fence')
+            from api.rss.feed_policy import assert_binding_policy
+            assert_binding_policy(binding, enabled=binding.desired_enabled)
             policy = PolicyBinding(str(binding.engine_instance_uuid), binding.account_id,
                 binding.engine_feed_id, binding.policy_version, binding.desired_mode, binding.desired_enabled)
             applied = binding.applied_policy_version == binding.policy_version and binding.connection_state == (
                 'ready' if binding.desired_enabled else 'paused')
         else:
             policy, applied = None, False
+        from api.rss.feed_policy import required_entry_url_block_rules
         return Request(claim, operation.kind, binding.pk if binding else None, policy,
             binding.canonical_feed_url if binding else operation.safe_input['url'],
             operation.entry.engine_entry_id if operation.entry_id else None,
-            operation.safe_input, cancelled, applied)
+            operation.safe_input, cancelled, applied, required_entry_url_block_rules(include_database=True,
+                include_html=bool(binding and binding.desired_mode == 'full_content')))
+
+    def _dispatch(self, request):
+        """Last main-thread ORM fence; executor receives immutable data only.
+
+        No queue behind a busy control slot, no publisher request inside a DB
+        transaction. After dispatch, a policy change cannot retract remote I/O.
+        """
+        if request.binding_id:
+            from api.rss.feed_policy import assert_binding_policy
+            binding = FeedBinding.objects.get(pk=request.binding_id)
+            if (binding.policy_version != request.policy.policy_version
+                    or binding.desired_mode != request.policy.desired_mode
+                    or binding.desired_enabled != request.policy.desired_enabled
+                    or binding.canonical_feed_url != request.url):
+                raise OperationError('stale_policy')
+            assert_binding_policy(binding, enabled=binding.desired_enabled)
+            if request.kind == 'refetch_entry' and not request.claim.reconcile:
+                operation = FeedOperation.objects.select_related('entry').get(pk=request.claim.operation_id)
+                if refetch_fence(operation.entry, request.inputs['fence']['source_id'], operation.actor_id) != request.inputs['fence']:
+                    raise OperationError('stale_fence')
+        from api.rss.feed_policy import required_entry_url_block_rules
+        return replace(request, entry_url_block_rules=required_entry_url_block_rules(include_database=True,
+            include_html=bool(request.policy and request.policy.desired_mode == 'full_content')))
+
+    def _dispatch_or_finish(self, request):
+        try:
+            return self._dispatch(request)
+        except OperationError as error:
+            if request.claim.reconcile:
+                error = EngineError('stale_remote_outcome_unknown', unknown_result=True)
+            self.complete(request, Outcome(error=error))
+            return None
 
     def network(self, request):
         # Only plain immutable request data crosses into the network thread.
-        adapter = self.adapter_factory()
+        adapter = self.adapter_factory() if self.adapter_factory else EngineAdapter(
+            replace(self.config, server_entry_url_block_rules=request.entry_url_block_rules))
         try:
             if request.kind == 'discover':
                 try:
@@ -201,6 +239,15 @@ class ControlWorker:
                 if request.claim.reconcile:
                     adapter.get_entry(request.engine_entry_id)
                     raise EngineError('refetch_outcome_unproven', unknown_result=True)
+                # The publisher target may have changed remotely since enqueue.
+                # GET is safe; never issue fetch-content for an unapproved URL.
+                current = adapter.get_entry(request.engine_entry_id)
+                from api.services.article_identity import normalize_article_url
+                if (current.feed_id != policy.engine_feed_id or current.id != request.engine_entry_id
+                        or str(current.engine_instance_uuid) != policy.engine_instance_uuid
+                        or current.account_id != policy.account_id
+                        or normalize_article_url(current.url) != request.inputs['fence']['news_url']):
+                    raise OperationError('stale_fence')
                 entry = adapter.refetch_entry(request.engine_entry_id)
                 if (entry.feed_id != policy.engine_feed_id or entry.id != request.engine_entry_id
                         or str(entry.engine_instance_uuid) != policy.engine_instance_uuid
@@ -300,6 +347,7 @@ class ControlWorker:
         if claim is None:
             return False
         request = self._prepare_or_finish(claim)
+        request = self._dispatch_or_finish(request) if request else None
         if request:
             self.complete(request, self.network(request))
         return True
@@ -314,6 +362,7 @@ class ControlWorker:
         if self._future is None:
             claim = self.claim_next()
             request = self._prepare_or_finish(claim) if claim else None
+            request = self._dispatch_or_finish(request) if request else None
             if request:
                 self._request, self._started = request, time.monotonic()
                 self._future = self._control.submit(self.network, request)
@@ -324,7 +373,7 @@ class ControlWorker:
         if self._read_future is not None and not self._read_future.done():
             return None
         def read():
-            adapter = self.adapter_factory()
+            adapter = self.adapter_factory() if self.adapter_factory else EngineAdapter(self.config)
             try:
                 return callback(adapter)
             finally:

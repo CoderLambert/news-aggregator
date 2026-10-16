@@ -16,6 +16,7 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def people(settings, monkeypatch):
     settings.PUBLIC_SITE_MODE = 'full'
+    settings.RSS_FULL_CONTENT_ENABLED = True  # Positive controls; default-off cases live in test_feed_policy.
     monkeypatch.setenv('RSS_ENGINE_INSTANCE_UUID', str(uuid.uuid4()))
     monkeypatch.setenv('RSS_ENGINE_ACCOUNT_ID', '7')
     return get_user_model().objects.create_user('sub-a'), get_user_model().objects.create_user('sub-b')
@@ -42,7 +43,7 @@ def test_shared_feed_and_source_have_personal_subscriptions_and_actor_operation_
     source = Source.objects.get(pk=first.data['subscription']['source_id'])
     assert source.publication.publication == 'personal'
     assert source.publication.owner == 'miniflux'
-    assert source.publication.reading_policy == 'public_feed'
+    assert source.publication.reading_policy == 'standard'
     assert client(b).get(f"/api/me/rss-operations/{first.data['operation_id']}/").status_code == 404
     assert client(a).get(f"/api/me/rss-operations/{first.data['operation_id']}/").status_code == 200
     assert subscription_status(source) == ('inactive', 'connecting')

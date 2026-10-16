@@ -1,0 +1,47 @@
+# Optional overlay only. Never included/activated by native compose.rss.prod.yaml.
+# The public gateway remains closed by rsshub.gateway.conf.disabled until T18 live
+# gates pass; a healthy process does not make templates executable.
+services:
+  rsshub:
+    profiles: [rsshub]
+    image: diygod/rsshub@sha256:1945d3162e0a6a38399bed540b623bbb06829ad3dc9160de7e7dfbaac60854ff
+    user: '1000:1000'
+    entrypoint: [dumb-init, --, /bin/sh, /run/config/rsshub-entrypoint.sh]
+    command: [node, --max-http-header-size=32768, dist/index.mjs]
+    environment:
+      NODE_ENV: production
+      HOME: /tmp
+      CACHE_TYPE: memory
+      MEMORY_MAX: '64' # LRU item count, not MiB; container memory is a separate cap.
+      CACHE_EXPIRE: '300'
+      REQUEST_RETRY: '1'
+      REQUEST_TIMEOUT: '20000'
+      LOGGER_LEVEL: error
+      NO_LOGFILES: 'true'
+      DEBUG_INFO: 'false'
+      DISALLOW_ROBOT: 'true'
+      ALLOW_USER_SUPPLY_UNSAFE_DOMAIN: 'false'
+    secrets: [rsshub_github_token]
+    volumes: ['${RSSHUB_ENTRYPOINT_FILE:?Set the absolute reviewed ops/rss/T18/rsshub-entrypoint.sh path}:/run/config/rsshub-entrypoint.sh:ro']
+    ports: ['127.0.0.1:${RSSHUB_LOOPBACK_PORT:-1200}:1200']
+    networks: [rsshub-egress]
+    read_only: true
+    tmpfs: ['/tmp:rw,nosuid,nodev,noexec,size=64m,uid=1000,gid=1000']
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    pids_limit: 128
+    mem_limit: 512m
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:1200/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+networks:
+  rsshub-egress:
+    driver: bridge
+secrets:
+  rsshub_github_token:
+    file: '${RSSHUB_GITHUB_TOKEN_FILE:?Select an explicit protected public-only service token file}'

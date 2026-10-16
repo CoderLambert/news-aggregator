@@ -76,6 +76,11 @@ def _utc(value):
         raise EngineError("invalid_response") from None
 
 
+def _server_entry_url_rules(*, include_html=False):
+    from api.rss.feed_policy import required_entry_url_block_rules
+    return required_entry_url_block_rules(include_html=include_html)  # Pure, no ORM/settings read.
+
+
 @dataclass(frozen=True)
 class EngineConfig:
     engine_instance_uuid: str
@@ -90,6 +95,10 @@ class EngineConfig:
     max_retry_delay: float = 10.0
     # Named, operator-approved (name, blocklist_rules, keeplist_rules) only.
     link_filters: tuple = ()
+    # Server-owned immutable snapshot only, never a browser/API field. Mandatory
+    # static restrictions are also merged in _policy and cannot be cleared.
+    server_entry_url_block_rules: str = field(default_factory=_server_entry_url_rules)
+    full_content_enabled: bool = False
 
     @classmethod
     def from_environment(cls):
@@ -99,8 +108,11 @@ class EngineConfig:
                 token = handle.read(65537).strip()
             if not token or len(token) > 65536:
                 raise ValueError
+            enabled = os.environ.get('RSS_FULL_CONTENT_ENABLED', '0')
+            if enabled not in {'0', '1'}:
+                raise ValueError
             return cls(os.environ["RSS_ENGINE_INSTANCE_UUID"], int(os.environ["RSS_ENGINE_ACCOUNT_ID"]),
-                       os.environ["RSS_ENGINE_BASE_URL"], token)
+                       os.environ["RSS_ENGINE_BASE_URL"], token, full_content_enabled=enabled == '1')
         except (OSError, KeyError, ValueError):
             raise EngineError("invalid_config") from None
 
@@ -115,6 +127,12 @@ class EngineConfig:
             if not self.api_token or not 1 <= self.read_attempts <= 5 or self.max_response_bytes < 1:
                 raise ValueError
             if min(self.read_timeout, self.control_timeout, self.connect_timeout, self.max_retry_delay) <= 0:
+                raise ValueError
+            rule = self.server_entry_url_block_rules
+            if type(self.full_content_enabled) is not bool:
+                raise ValueError
+            if (not isinstance(rule, str) or len(rule) > 65536 or (rule and not rule.startswith('EntryURL='))
+                    or any(c in rule for c in '\r\n\x00')):
                 raise ValueError
         except (ValueError, TypeError):
             raise EngineError("invalid_config") from None
@@ -317,6 +335,9 @@ class EngineAdapter:
         return result
 
     def create_feed(self, canonical_url, *, desired_mode="feed", disabled=False):
+        # 2.3.3 processes initial entries even when disabled=True on creation.
+        if desired_mode == 'full_content' and not self.config.full_content_enabled:
+            raise EngineError('full_content_disabled')
         canonical_url = _url(canonical_url)
         policy = self._policy(desired_mode, disabled, None)
         self._identity()
@@ -325,19 +346,19 @@ class EngineAdapter:
         if len(matches) > 1:
             raise EngineError("identity_conflict")
         if matches:
-            return matches[0]
+            return self._confirm_policy(matches[0].id, policy)
         created = False
         try:
             feed_id = self._call(lambda: self._client.create_feed(canonical_url, **policy), control=True)
             created = True
-            return self.get_feed(_id(feed_id))
+            return self._confirm_policy(_id(feed_id), policy)
         except EngineError as exc:
             if not (created or exc.unknown_result or exc.code in {"invalid_response", "network"}):
                 raise
             try:
                 matches = [feed for feed in self.list_feeds() if feed.feed_url == canonical_url]
                 if len(matches) == 1:
-                    return matches[0]
+                    return self._confirm_policy(matches[0].id, policy)
             except EngineError:
                 pass
             raise EngineError("create_unknown", unknown_result=True) from None
@@ -345,11 +366,23 @@ class EngineAdapter:
     def _policy(self, mode, disabled, filter_key):
         if mode not in {"feed", "full_content"} or type(disabled) is not bool:
             raise EngineError("invalid_policy")
+        if mode == 'full_content' and not disabled and not self.config.full_content_enabled:
+            raise EngineError('full_content_disabled')
         filters = {key: (block, keep) for key, block, keep in self.config.link_filters}
         if filter_key is not None and filter_key not in filters:
             raise EngineError("invalid_policy")
         block, keep = filters.get(filter_key, ("", ""))
-        return dict(crawler=mode == "full_content", disabled=disabled, blocklist_rules=block, keeplist_rules=keep)
+        rules = list(dict.fromkeys(filter(None, (_server_entry_url_rules(include_html=mode == 'full_content'),
+                                                 self.config.server_entry_url_block_rules))))
+        return dict(crawler=mode == "full_content", disabled=disabled, blocklist_rules=block, keeplist_rules=keep,
+                    block_filter_entry_rules='\n'.join(rules))
+
+    def _confirm_policy(self, feed_id, fields):
+        row = self._call(lambda: self._client.get_feed(feed_id))
+        feed = self._feed(row)
+        if feed.id != feed_id or any(row.get(key) != value for key, value in fields.items()):
+            raise EngineError("policy_unconfirmed", unknown_result=True)
+        return feed
 
     def _update(self, feed_id, fields):
         self.get_feed(feed_id)
@@ -359,17 +392,15 @@ class EngineAdapter:
             if not exc.unknown_result:
                 raise
         try:
-            row = self._call(lambda: self._client.get_feed(feed_id))
-            feed = self._feed(row)
-            if feed.id != feed_id or any(row.get(key) != value for key, value in fields.items()):
-                raise EngineError("policy_unconfirmed", unknown_result=True)
-            return feed
+            return self._confirm_policy(feed_id, fields)
         except EngineError:
             raise EngineError("policy_unconfirmed", unknown_result=True) from None
 
     def set_enabled(self, feed_id, *, disabled):
         if type(disabled) is not bool:
             raise EngineError("invalid_policy")
+        if not disabled and not self.config.full_content_enabled and self.get_feed(feed_id).crawler:
+            raise EngineError('full_content_disabled')
         return self._update(_id(feed_id), {"disabled": disabled})
 
     def update_feed_policy(self, binding, expected_policy_version):
@@ -384,7 +415,9 @@ class EngineAdapter:
         return PolicyReceipt(feed, expected_policy_version)  # caller must CAS current policy and lease
 
     def refresh_feed(self, feed_id):
-        self.get_feed(feed_id)
+        feed = self.get_feed(feed_id)
+        if feed.crawler and not self.config.full_content_enabled:
+            raise EngineError('full_content_disabled')
         self._call(lambda: self._client.refresh_feed(feed_id), control=True)
 
     def read_upper_bound(self):
@@ -430,6 +463,8 @@ class EngineAdapter:
         return entry
 
     def refetch_entry(self, entry_id):
+        if not self.config.full_content_enabled:
+            raise EngineError('full_content_disabled')
         before = self.get_entry(entry_id)
 
         def persist():

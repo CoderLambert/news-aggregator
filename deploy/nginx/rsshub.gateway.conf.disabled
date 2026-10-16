@@ -1,0 +1,66 @@
+# Candidate only; excluded from *.conf includes. No DNS/certificate is provisioned.
+# Replace the example host/TLS paths only for a reviewed deployment. Keep live=0
+# until real public DNS/TLS/hairpin, Miniflux private-network/redirect protection,
+# exact auth, logs/DTO/OPML and real public-only GitHub-token route tests pass.
+# Include in the existing host Nginx http {} context, never in the native profile.
+limit_req_zone $binary_remote_addr zone=newshub_rsshub:1m rate=30r/m;
+
+# Raw request_uri deliberately excludes query, percent encoding, extra slashes,
+# optional wildcard labels and all unapproved RSSHub endpoints/global parameters.
+map $request_uri $newshub_rsshub_route {
+    default 0;
+    ~^/github/trending/(daily|weekly|monthly)/(any|python|javascript|typescript|rust|go|java|c|ruby|swift|kotlin|css|html|dart|zig|php|shell)(/(en|zh|ja|ko|de|fr|es|pt|ru))?$ 1;
+    # Only this explicitly approved PUBLIC repository; add others after review.
+    ~^/github/issue/DIYgod/RSSHub/(open|closed|all)$ 1;
+}
+
+server {
+    listen 443 ssl;
+    server_name rsshub.example.com;
+    ssl_certificate /etc/letsencrypt/live/rsshub.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/rsshub.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    if ($http_host !~ "^rsshub[.]example[.]com(:443)?$") { return 421; }
+    set $newshub_rsshub_live 0;
+    if ($newshub_rsshub_live = 0) { return 503; }
+    if ($newshub_rsshub_route = 0) { return 404; }
+    if ($request_method !~ ^(GET|HEAD)$) { return 405; }
+
+    # Do not log credentials, rejected query strings, or raw upstream diagnostics.
+    access_log off;
+    error_log /dev/stderr crit;
+    gzip off;
+    client_max_body_size 1k;
+    limit_req_status 429;
+    add_header Cache-Control "private, no-store" always;
+
+    location / {
+        auth_basic "NewsHub RSSHub";
+        auth_basic_user_file /etc/nginx/rsshub.htpasswd;
+        limit_req zone=newshub_rsshub burst=10 nodelay;
+        proxy_pass http://127.0.0.1:1200;
+        # Gateway Basic Auth never reaches RSSHub or GitHub; the source token is
+        # an independent RSSHub secret, not a client-supplied query/header.
+        proxy_pass_request_headers off;
+        proxy_pass_request_body off;
+        proxy_set_header Host rsshub;
+        proxy_set_header User-Agent NewsHub-RSSHub-Gateway;
+        proxy_set_header Authorization "";
+        proxy_set_header Proxy-Authorization "";
+        proxy_set_header Cookie "";
+        proxy_set_header Content-Length "";
+        proxy_hide_header Set-Cookie;
+        proxy_hide_header Location;
+        proxy_hide_header Refresh;
+        proxy_hide_header WWW-Authenticate;
+        proxy_redirect off;
+        proxy_intercept_errors on;
+        # Nginx does not follow upstream redirects. Strip Location regardless and
+        # convert redirect/server-error responses into a generic local failure.
+        error_page 300 301 302 303 305 307 308 500 501 502 503 504 = @newshub_rsshub_failure;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 30s;
+        proxy_send_timeout 10s;
+    }
+    location @newshub_rsshub_failure { return 502; }
+}

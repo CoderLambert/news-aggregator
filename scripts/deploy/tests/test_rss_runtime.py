@@ -82,7 +82,8 @@ def test_optional_overlay_has_private_pg_scoped_secrets_and_loopback_api():
     assert set(services) == {'app', 'rss-db', 'miniflux', 'rss-sync'}
     assert all(services[name]['profiles'] == ['rss'] for name in ('rss-db', 'miniflux', 'rss-sync'))
     assert services['app']['volumes'] == ['rss-runtime-data:/var/lib/newshub/rss-runtime:ro']
-    assert set(services['app']['environment']) == {'RSS_ENGINE_INSTANCE_UUID', 'RSS_ENGINE_ACCOUNT_ID', 'RSS_RUNTIME_DIR'}
+    assert set(services['app']['environment']) == {'RSS_ENGINE_INSTANCE_UUID', 'RSS_ENGINE_ACCOUNT_ID', 'RSS_RUNTIME_DIR', 'RSS_FULL_CONTENT_ENABLED'}
+    assert services['app']['environment']['RSS_FULL_CONTENT_ENABLED'] == '${RSS_FULL_CONTENT_ENABLED:-0}'
     assert 'secrets' not in services['app']
     assert 'ports' not in services['rss-db']
     assert config['networks']['rss-db-net']['internal'] is True
@@ -98,6 +99,7 @@ def test_optional_overlay_has_private_pg_scoped_secrets_and_loopback_api():
     assert sync['secrets'] == ['rss_engine_token']
     assert set(sync['volumes']) == {'db-data:/var/lib/newshub/db', 'rss-runtime-data:/var/lib/newshub/rss-runtime'}
     assert sync['environment']['NEWSHUB_RUNTIME_ROLE'] == 'rss_sync'
+    assert sync['environment']['RSS_FULL_CONTENT_ENABLED'] == services['app']['environment']['RSS_FULL_CONTENT_ENABLED']
     assert 'env_file' not in sync and 'ports' not in sync
     assert sync['read_only'] and sync['cap_drop'] == ['ALL']
     # No replacement of host app, BYOK gateway, legacy workers, or channel overlay.

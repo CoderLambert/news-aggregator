@@ -1,0 +1,33 @@
+{
+  "actual_wsgi_http_available_and_acl": true,
+  "all_table_fingerprint": "aae24a08604fa559cc60e249e4351340485717bbd5a219c7708c76f739d084c3",
+  "application_sha": "32a340a0e0535543a52321488a899b8c313f23f9",
+  "no_database_restore_or_reverse_migration": true,
+  "old_hash_translation_not_current": true,
+  "personal_paused_a_only": true,
+  "public_available_body": true,
+  "read_state_preserved": true,
+  "schema": [
+    [
+      "admin",
+      "0003_logentry_add_action_flag_choices"
+    ],
+    [
+      "api",
+      "0059_bind_retained_legacy_translations"
+    ],
+    [
+      "auth",
+      "0012_alter_user_first_name_max_length"
+    ],
+    [
+      "contenttypes",
+      "0002_remove_content_type_name"
+    ],
+    [
+      "sessions",
+      "0001_initial"
+    ]
+  ],
+  "subscription_opml_read_state_api_compatibility": true
+}

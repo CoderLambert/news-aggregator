@@ -60,6 +60,7 @@ def main():
                     'WAITRESS_TRUSTED_PROXY': '127.0.0.1', 'RSS_ENGINE_INSTANCE_UUID': str(uuid.uuid4()),
                     'RSS_ENGINE_ACCOUNT_ID': '2', 'RSS_ENGINE_BASE_URL': 'http://engine:8080',
                     'RSS_ENGINE_TOKEN_FILE': '/run/secrets/collector-token',
+                    'RSS_FULL_CONTENT_ENABLED': '1',  # Isolated synthetic publisher only.
                     'DJANGO_DB_PATH': '/var/lib/newshub/db/db.sqlite3'},
                 'read_only': True, 'volumes': [str(token) + ':/run/secrets/collector-token:ro'],
                 'tmpfs': ['/var/lib/newshub/db:uid=10001,gid=10001',

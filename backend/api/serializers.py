@@ -89,6 +89,9 @@ class ChannelNewsSerializer(serializers.ModelSerializer):
     can_rss_refetch = serializers.SerializerMethodField()
 
     def get_can_rss_refetch(self, obj):
+        from django.conf import settings
+        if not getattr(settings, 'RSS_FULL_CONTENT_ENABLED', False):
+            return False
         from api.rss.access import authorized_sources, ALL_ENTRIES
         from api.rss.models import EngineEntryMap, SourceFeedLink
         from django.db.models import F

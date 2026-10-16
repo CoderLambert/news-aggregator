@@ -56,7 +56,15 @@ jobs:
       - name: Install backend and test dependencies
         run: backend/venv/bin/python -m pip install -r backend/requirements.txt
       - name: Collect all three test roots
-        run: backend/venv/bin/python -m pytest --collect-only -q tests/ backend/api/tests/ scripts/deploy/tests/
+        timeout-minutes: 5
+        run: |
+          backend/venv/bin/python -u - <<'PY'
+          import faulthandler
+          import sys
+          faulthandler.dump_traceback_later(120, repeat=True)
+          import pytest
+          sys.exit(pytest.main(['--collect-only', '-q', 'tests/', 'backend/api/tests/', 'scripts/deploy/tests/']))
+          PY
       - name: Run backend and offline deployment tests
         run: backend/venv/bin/python -m pytest -q tests/ backend/api/tests/ scripts/deploy/tests/
       - name: Check production Django settings with synthetic values
