@@ -174,6 +174,8 @@ def _snapshot(run_id, run_token):
         raise ResearchRunError('inactive_owner', '账号已停用，研究任务已停止。', 403)
     if run.session.user_id != run.user_id:
         raise ResearchRunError('research_session_changed', '研究会话归属已更改。')
+    from .access import require_session_evidence
+    require_session_evidence(run.session, run.user)
     return run
 
 

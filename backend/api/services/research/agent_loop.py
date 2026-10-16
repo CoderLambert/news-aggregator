@@ -58,7 +58,7 @@ RESEARCH_SYSTEM_PROMPT = """\
 2. **交叉验证**: 同一关键信息需要至少2个独立来源支持
 3. **补充网络搜索**: 对于本地库没有的信息，使用联网搜索补充
 4. **迭代扩展**: 如果初始结果不足，换用不同关键词重新搜索，不要轻易放弃
-5. **深入阅读**: 对关键文章调用 fetch_article，检查 context_scope 和任务状态；summary/排队结果仅提供摘要，excerpt 为节选，不能称为已读全文
+5. **深入阅读**: 对关键文章调用 fetch_article，检查 context_scope、hash 和完整性；summary 仅提供摘要，excerpt 为节选，不能称为已读全文
 
 ### 第三步：信息质量控制
 1. **来源评估**: 优先采信权威媒体、官方发布、多方报道一致的信息
@@ -136,6 +136,8 @@ def run_agent_loop(
         if not local_only or t['function']['name'] not in ('search_web', 'fetch_webpage')
     ]
 
+    from .access import require_session_evidence
+    require_session_evidence(session, user)
     messages = list(session.messages)  # Copy existing history
     evidence_links = history_evidence_links(messages)
     messages.append({'role': 'user', 'content': user_query})
@@ -206,7 +208,7 @@ def run_agent_loop(
                         'execution_guard': guard,
                         'persist_search_result': persist_tool_result,
                     }
-                result = execute_tool(fn_name, fn_args, session=session, **tool_kwargs)
+                result = execute_tool(fn_name, fn_args, session=session, user=user, **tool_kwargs)
                 guard()
                 evidence_links.update(evidence_links_for_tool(fn_name, result))
 

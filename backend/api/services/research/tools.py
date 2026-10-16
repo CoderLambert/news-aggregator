@@ -22,13 +22,13 @@ logger = logging.getLogger(__name__)
 
 
 def _open_search_http(request, timeout, context=None):
-    from api.services.article_fetcher.providers import _open_url
-    return _open_url(request, timeout=timeout, context=context)
+    from api.services.safe_http import safe_urlopen
+    return safe_urlopen(request, timeout=timeout)
 
 
 def _stop_search_fallback(error):
     from api.services.request_budget import BudgetDeferred
-    from api.services.article_fetcher.execution import ExecutionStopped
+    from api.services.http_execution import ExecutionStopped
     return (isinstance(error, (BudgetDeferred, ExecutionStopped)) or
             getattr(error, 'code', None) in {401, 403, 429, 503} or
             getattr(error, 'error_code', '') in {'rate_limited', 'budget_deferred', 'auth_required', 'access_blocked', 'network_error', 'network_timeout'})
@@ -175,7 +175,7 @@ TOOLS = [
         "function": {
             "name": "fetch_article",
             "description": (
-                "获取指定新闻文章的完整内容。返回文章标题、来源、URL 和正文（Markdown）。"
+                "读取已同步且获授权的文章，明确返回全文或摘要 scope。不会触发抓取。"
             ),
             "parameters": {
                 "type": "object",
@@ -219,7 +219,7 @@ TOOLS = [
         "function": {
             "name": "fetch_webpage",
             "description": (
-                "抓取并提取指定 URL 的文本内容。适用于阅读通过搜索找到的完整文章。"
+                "只读取已同步且获授权的 URL。未收录网页只能使用搜索摘要和链接，不抓取网页。"
             ),
             "parameters": {
                 "type": "object",
@@ -301,7 +301,7 @@ TOOLS = [
 
 def execute_tool(
     name: str, args: dict, session=None, execution_guard=None,
-    persist_search_result=None,
+    persist_search_result=None, user=None,
 ) -> dict:
     """Run one guarded research tool and persist its successful result."""
     tool_map = {
@@ -319,6 +319,8 @@ def execute_tool(
     guard()
     try:
         tool_args = dict(args)
+        if name in {"search_news", "fetch_article", "fetch_webpage", "analyze_topic"}:
+            tool_args["user"] = user if user is not None else getattr(session, "user", None)
         if execution_guard is not None:
             tool_args['execution_guard'] = guard
         result = _truncate_result(handler(**tool_args))
@@ -547,7 +549,7 @@ def _generate_query_variations(query: str) -> list[str]:
 def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
                       source_type: str | None = None, days: int | None = None,
                       order_by: str = 'relevance', full_content: bool = False,
-                      category: str | None = None, execution_guard=None) -> dict:
+                      category: str | None = None, execution_guard=None, user=None) -> dict:
     """Search the local news database using keyword, semantic, or hybrid mode.
 
     Uses multiple query variations for broader coverage.
@@ -558,7 +560,8 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
 
     guard = execution_guard or (lambda: None)
     limit = min(limit, 30)
-    qs = News.objects.select_related('source', 'category')
+    from api.rss.access import authorized_news, authorized_sources, news_in_sources, body_authorized_news
+    qs = authorized_news(user).select_related('source', 'category')
 
     # Time filter
     if days:
@@ -566,12 +569,11 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
 
     # Source type filter
     if source_type:
-        qs = qs.filter(source__source_type=source_type)
+        qs = news_in_sources(qs, authorized_sources(user).filter(source_type=source_type))
 
     # Full content filter
     if full_content:
-        from api.services.full_content_status import filter_readable_full_content
-        qs = filter_readable_full_content(qs)
+        qs = body_authorized_news(user, qs)
 
     # Category filter (by name, case-insensitive)
     if category:
@@ -587,10 +589,8 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
         seen_ids = set()
         for q in query_variations:
             guard()
-            filtered = qs.filter(
-                Q(title__icontains=q) | Q(content__icontains=q)
-                | Q(title_zh__icontains=q) | Q(content_zh__icontains=q)
-            )[:fetch_limit]
+            from api.services.stored_readers import filter_current_keyword
+            filtered = filter_current_keyword(qs, q)[:fetch_limit]
             for art in filtered:
                 if art.id not in seen_ids:
                     seen_ids.add(art.id)
@@ -605,7 +605,7 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
             id_to_article = {a.id: a for a in all_articles}
             all_articles = [id_to_article[n.id] for n in ordered_qs if n.id in id_to_article]
 
-        articles = _serialize_news_list(all_articles[:limit])
+        articles = _serialize_news_list(all_articles[:limit], user)
 
     elif mode == 'semantic':
         vs = VectorStoreService()
@@ -634,7 +634,7 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
 
         news_map = qs.in_bulk(all_ids)
         ordered = [news_map[nid] for nid in all_ids if nid in news_map]
-        articles = _serialize_news_list(ordered[:limit])
+        articles = _serialize_news_list(ordered[:limit], user)
 
     else:  # hybrid
         # Keyword branch with variations
@@ -642,10 +642,8 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
         keyword_seen = set()
         for q in query_variations:
             guard()
-            keyword_qs = qs.filter(
-                Q(title__icontains=q) | Q(content__icontains=q)
-                | Q(title_zh__icontains=q) | Q(content_zh__icontains=q)
-            )[:100]
+            from api.services.stored_readers import filter_current_keyword
+            keyword_qs = filter_current_keyword(qs, q)[:100]
             for n in keyword_qs:
                 if n.id not in keyword_seen:
                     keyword_seen.add(n.id)
@@ -677,7 +675,7 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
         fused_ids = fused_ids[:limit]
         news_map = qs.in_bulk(fused_ids)
         ordered = [news_map[nid] for nid in fused_ids if nid in news_map]
-        articles = _serialize_news_list(ordered)
+        articles = _serialize_news_list(ordered, user)
 
     return {
         'articles': articles,
@@ -689,45 +687,34 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
     }
 
 
-def _tool_fetch_article(article_id: int, execution_guard=None) -> dict:
-    """Read current content or enqueue shared work; never fetch publishers here."""
+def _tool_fetch_article(article_id: int, execution_guard=None, user=None) -> dict:
+    """Read an authorized synchronized snapshot; never queue publisher work."""
+    from django.http import Http404
+    from api.rss.access import get_stored_article, article_sources
     from api.models import News
-    from api.services.article_content import pick_chat_context, context_scope, request_full_content
-    from api.services.full_content_status import has_full_content
+    from api.services.stored_readers import snapshot_metadata
     guard = execution_guard or (lambda: None)
     guard()
     try:
-        news = News.objects.select_related('source', 'category').get(pk=article_id)
-    except News.DoesNotExist:
-        return {'error': f'Article {article_id} not found', 'context_scope': 'summary'}
-    outcome = 'cached' if has_full_content(news) else request_full_content(news, execution_guard=guard)
-    # A small DB-only wait may observe a resident Worker's commit. Cooling,
-    # unavailable or rejected results return immediately and consume no sockets.
-    if outcome in {'queued', 'reused'} and (not news.full_content_next_attempt_at or news.full_content_next_attempt_at <= timezone.now()):
-        deadline = time.monotonic() + 1
-        while time.monotonic() < deadline and not has_full_content(news):
-            guard()
-            time.sleep(.1)
-            news.refresh_from_db()
-            if news.full_content_fetch_status not in {'queued', 'fetching', 'rate_limited', 'network_error', 'failed'}:
-                break
+        stored = get_stored_article(user, article_id)
+    except Http404:
+        return {'error': 'Article not found', 'context_scope': 'summary'}
+    news = News.objects.get(pk=stored.news_id)
+    source = article_sources(user, news).select_related('publication').first()
+    if source is None:
+        return {'error': 'Article not found', 'context_scope': 'summary'}
     guard()
-    content = pick_chat_context(news)
-    truncated = len(content) > 12000
-    scope = context_scope(news)
-    from api.services.channel_articles import medical_news
-    return dict(id=news.pk, title=news.title, title_zh=news.title_zh, source=news.source.name,
-        source_type=news.source.source_type, category=news.category.name, url=news.url, is_medical=medical_news(news),
-        content=content[:12000], content_truncated=truncated, original_length=len(content),
-        context_scope='excerpt' if truncated else scope, source_scope=scope,
-        full_content_state=news.full_content_state, full_content_fetch_status=news.full_content_fetch_status,
-        next_attempt_at=news.full_content_next_attempt_at.isoformat() if news.full_content_next_attempt_at else None,
-        error_code='full_content_worker_unavailable' if outcome == 'unavailable' else news.full_content_error_code,
-        task_outcome=outcome, publish_time=news.publish_time.isoformat() if news.publish_time else None)
+    truncated = len(stored.markdown) > 12000
+    return dict(id=stored.news_id, title=stored.title, title_zh='', url=stored.url,
+        source=source.publication.display_name or source.name, source_type=source.source_type,
+        content=stored.markdown[:12000], content_truncated=truncated, original_length=len(stored.markdown),
+        **{**snapshot_metadata(stored), 'context_scope': 'excerpt' if truncated else stored.scope},
+        source_scope=stored.scope, task_outcome='stored',
+        publish_time=news.publish_time.isoformat() if news.publish_time else None)
 
 
 def _tool_search_web(query: str, count: int = 5, execution_guard=None) -> dict:
-    from api.services.article_fetcher.execution import execution_scope
+    from api.services.http_execution import execution_scope
     with execution_scope(execution_guard):
         return _search_web(query, count, execution_guard)
 
@@ -1004,38 +991,20 @@ def _duckduckgo_search(query: str, count: int, execution_guard=None) -> dict:
     return {'results': results, 'query': query, 'source': 'duckduckgo'}
 
 
-def _tool_fetch_webpage(url: str, execution_guard=None) -> dict:
-    """Fetch and extract text content from a URL using Jina Reader."""
-    # SSRF protection: validate URL before fetching
+def _tool_fetch_webpage(url: str, execution_guard=None, user=None) -> dict:
+    """Resolve an already stored URL. Unknown pages retain search snippets/links."""
+    from api.rss.access import authorized_news
     guard = execution_guard or (lambda: None)
     guard()
-    allowed, reason = _is_url_allowed(url)
-    guard()
-    if not allowed:
-        logger.warning('SSRF blocked reason=%s', reason)
-        return {'url': url, 'error': f'URL not allowed: {reason}', 'content': ''}
-
-    try:
-        from api.services.article_fetcher.execution import execution_scope
-        from api.services.article_fetcher.providers import TrustedNewsJinaProvider
-        with execution_scope(guard):
-            result = TrustedNewsJinaProvider().fetch(url)
-        guard()
-        if not result.ok:
-            return {'url': url, 'content': '', 'scope': 'excerpt',
-                    'error_code': result.error_code or result.error, 'error': result.error}
-        return {'url': url, 'content': result.markdown[:6000], 'length': len(result.markdown), 'scope': 'excerpt'}
-    except Exception as error:
-        guard()
-        from api.services.article_fetcher.types import fetch_failure_code
-        code = getattr(error, 'error_code', '') or fetch_failure_code(error)
-        logger.warning('Fetch webpage failed code=%s', code)
-        retry_at = getattr(error, 'retry_after_at', None)
-        return {'url': url, 'content': '', 'scope': 'excerpt', 'error': code, 'error_code': code,
-                'next_attempt_at': retry_at.isoformat() if retry_at else None}
+    news_id = authorized_news(user).filter(url=url).values_list('pk', flat=True).first()
+    if news_id is None:
+        return {'url': url, 'content': '', 'scope': 'summary', 'context_scope': 'summary',
+                'capability': 'stored_articles_only',
+                'message': '此网页尚未收录；请使用已有搜索摘要与原文链接。'}
+    return _tool_fetch_article(news_id, execution_guard=guard, user=user)
 
 
-def _tool_analyze_topic(query: str, depth: str = 'standard', execution_guard=None) -> dict:
+def _tool_analyze_topic(query: str, depth: str = 'standard', execution_guard=None, user=None) -> dict:
     """Analyze a topic across multiple articles with timeline generation."""
     from api.models import News
     from api.services.vector_store import VectorStoreService
@@ -1060,10 +1029,9 @@ def _tool_analyze_topic(query: str, depth: str = 'standard', execution_guard=Non
                 all_ids.add(nid)
 
     # Also try keyword match
-    keyword_news = News.objects.filter(
-        Q(title__icontains=query) | Q(content__icontains=query)
-        | Q(title_zh__icontains=query) | Q(content_zh__icontains=query)
-    ).values_list('id', flat=True)[:limit]
+    from api.rss.access import authorized_news
+    from api.services.stored_readers import filter_current_keyword
+    keyword_news = filter_current_keyword(authorized_news(user), query).values_list('id', flat=True)[:limit]
     all_ids.update(keyword_news)
 
     if not all_ids:
@@ -1076,21 +1044,21 @@ def _tool_analyze_topic(query: str, depth: str = 'standard', execution_guard=Non
         }
 
     # Fetch articles and build timeline
-    articles_qs = News.objects.select_related('source', 'category').filter(
+    articles_qs = authorized_news(user).select_related('source', 'category').filter(
         id__in=all_ids
     ).order_by('-publish_time')[:limit]
 
-    articles = _serialize_news_list(articles_qs)
+    articles = _serialize_news_list(articles_qs, user)
 
     # Group by date for timeline
     time_groups = defaultdict(list)
-    for art in articles_qs:
-        if art.publish_time:
-            day_key = art.publish_time.strftime('%Y-%m-%d')
+    for art in articles:
+        if art['publish_time']:
+            day_key = art['publish_time'][:10]
             time_groups[day_key].append({
-                'title': art.title_zh or art.title,
-                'article_id': art.id,
-                'source': art.source.name,
+                'title': art['title'],
+                'article_id': art['id'],
+                'source': art['source'],
             })
 
     timeline = []
@@ -1158,22 +1126,20 @@ def _tool_generate_report(topic: str, sections: list | None = None,
 
 # ── Serialization helpers ───────────────────────────────────────────────────
 
-def _serialize_news_list(news_list) -> list[dict]:
-    """Convert a queryset/list of News objects to a lightweight dict list."""
-    from api.services.channel_articles import medical_news
+def _serialize_news_list(news_list, user=None) -> list[dict]:
+    from api.rss.access import get_stored_article, article_sources
+    from django.http import Http404
     results = []
-    for n in news_list:
-        snippet = (n.content_zh or n.content or '')[:200]
-        results.append({
-            'id': n.id,
-            'title': n.title_zh or n.title,
-            **({'is_medical': True} if medical_news(n) else {}),
-            'original_title': n.title if n.title_zh else '',
-            'source': n.source.name,
-            'source_type': n.source.source_type,
-            'category': n.category.name,
-            'url': n.url,
-            'snippet': snippet,
-            'publish_time': n.publish_time.isoformat() if n.publish_time else None,
-        })
+    for news in news_list:
+        try:
+            stored = get_stored_article(user, news.pk)
+        except Http404:
+            continue
+        source = article_sources(user, news).select_related('publication').first()
+        if source is None:
+            continue
+        results.append(dict(id=stored.news_id, title=stored.title, original_title='',
+            source=source.publication.display_name or source.name, source_type=source.source_type,
+            category=news.category.name, url=stored.url, snippet=stored.summary[:200],
+            publish_time=news.publish_time.isoformat() if news.publish_time else None))
     return results

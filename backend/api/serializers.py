@@ -58,10 +58,18 @@ class AccessNewsListSerializer(serializers.ListSerializer):
         items = list(data)
         user = getattr(self.context.get('request'), 'user', None)
         self.child._preview_snapshots = prepare_article_previews(user, items)
+        from api.models import LegacyTranslationSnapshot
+        from hashlib import sha256
+        self.child._legacy_batch = {(r.news_id, r.field, r.source_hash, r.source_text): r.translated_text
+            for r in LegacyTranslationSnapshot.objects.filter(news_id__in=[item.pk for item in items],
+                field__in=('title', 'content'), origin__in=('legacy', 'legacy-bound'),
+                source_hash__in=[sha256(value.encode()).hexdigest()
+                    for item in items for value in (item.title, item.content)]).order_by('captured_at', 'pk')}
         try:
             return super().to_representation(items)
         finally:
             self.child._preview_snapshots = None
+            self.child._legacy_batch = None
 
 
 class ChannelNewsSerializer(serializers.ModelSerializer):
@@ -160,15 +168,35 @@ class ChannelNewsSerializer(serializers.ModelSerializer):
     def get_body_owner(self, obj):
         return self._stored(obj).body_owner
 
+    def _legacy_text(self, obj, field, original):
+        from hashlib import sha256
+        digest = sha256(original.encode('utf-8')).hexdigest()
+        batch = getattr(self, '_legacy_batch', None)
+        if batch is not None:
+            return batch.get((obj.pk, field, digest, original), '')
+        from api.services.stored_readers import legacy_translation
+        record = legacy_translation(obj.pk, field, original)
+        return record.translated_text if record else ''
+
     def to_representation(self, instance):
         from api.rss.access import article_sources, authorized_news, get_stored_article
         user = getattr(self.context.get('request'), 'user', None)
         # Bound only to this synchronous representation, never across requests.
+        self._translation_key = None
         self._current_stored = self._load_stored(user, instance)
         snapshots = getattr(self, '_preview_snapshots', None)
         self._current_sources = snapshots[instance.pk][1] if snapshots is not None else list(article_sources(user, instance).select_related('publication'))
         try:
             data = super().to_representation(instance)
+            stored = self._current_stored
+            for key, attr in [('title', 'title'), ('content', 'summary'), ('url', 'url'),
+                              ('full_content_revision', 'revision'), ('content_kind', 'content_kind')]:
+                if key in data and hasattr(stored, attr):
+                    data[key] = getattr(stored, attr)
+            for field in ('title', 'content'):
+                if field + '_zh' in data:
+                    original = getattr(stored, 'summary' if field == 'content' else field, getattr(instance, field))
+                    data[field + '_zh'] = self._legacy_text(instance, field, original)
             visible = self._current_sources
             if not visible:
                 from django.http import Http404
@@ -184,19 +212,33 @@ class ChannelNewsSerializer(serializers.ModelSerializer):
                 data['related_to'] = None
             if self._current_stored.scope != 'full':
                 data['has_full_content'] = False
-                for key in ('full_content', 'full_content_zh', 'full_content_fetch_error', 'full_content_fetch_provider', 'full_content_error_code'):
+                for key in ('full_content', 'full_content_zh'):
                     if key in data:
                         data[key] = ''
-                for key in ('full_content_fetched_at', 'full_content_zh_fetched_at', 'full_content_quality_score', 'last_full_content_attempt', 'full_content_next_attempt_at'):
-                    if key in data:
-                        data[key] = None
-                for key in ('full_content_revision', 'full_content_retry_count', 'full_content_priority'):
-                    if key in data:
-                        data[key] = 0
-                if 'full_content_state' in data:
-                    data['full_content_state'] = 'missing'
-                if 'full_content_fetch_status' in data:
-                    data['full_content_fetch_status'] = 'unsupported'
+                from api.rss.access import BODY_POLICIES
+                from api.services.source_policy import policy_for_name
+                owner_source = instance.body_owner_source_id or (instance.source_id if instance.body_owner_binding_id is None else None)
+                origin = next((source for source in visible if source.pk == owner_source), None)
+                policy = policy_for_name(origin.name) if origin else None
+                readable_origin = bool(origin and origin.publication.owner == 'legacy'
+                    and origin.publication.reading_policy in BODY_POLICIES
+                    and (not policy or policy.reading_policy != 'rss_summary_only' or self.get_body_access_granted(instance)))
+                if 'can_rss_refetch' in self.fields:
+                    readable_origin |= getattr(self, 'get_can_rss_refetch', lambda obj: False)(instance)
+                if not readable_origin:
+                    for key in ('full_content_fetch_error', 'full_content_fetch_provider', 'full_content_error_code'):
+                        if key in data:
+                            data[key] = ''
+                    for key in ('full_content_fetched_at', 'full_content_zh_fetched_at', 'full_content_quality_score', 'last_full_content_attempt', 'full_content_next_attempt_at'):
+                        if key in data:
+                            data[key] = None
+                    for key in ('full_content_revision', 'full_content_retry_count', 'full_content_priority'):
+                        if key in data:
+                            data[key] = 0
+                    if 'full_content_state' in data:
+                        data['full_content_state'] = 'missing'
+                    if 'full_content_fetch_status' in data:
+                        data['full_content_fetch_status'] = 'unsupported'
             return data
         finally:
             self._current_stored = self._current_sources = None
@@ -272,7 +314,7 @@ class NewsListSerializer(ChannelNewsSerializer):
         return self._stored(obj).scope == 'full'
 
     def get_summary_zh(self, obj):
-        return (obj.content_zh or '')[:self.SUMMARY_LIMIT]
+        return self._legacy_text(obj, 'content', obj.content)[:self.SUMMARY_LIMIT]
 
 
 class NewsDetailSerializer(ChannelNewsSerializer):
@@ -331,117 +373,54 @@ class NewsDetailSerializer(ChannelNewsSerializer):
             'full_translation_active',
         ]
 
-    def _subscription_translation(self, obj):
-        if not self.get_has_full_content(obj):
-            return None, None
-        request = self.context.get('request')
-        user = getattr(request, 'user', None)
-        if not getattr(user, 'is_authenticated', False):
-            return None, None
-        cache = getattr(self, '_subscription_translation_cache', None)
-        if cache is None:
-            cache = self._subscription_translation_cache = {}
-        if obj.pk in cache:
-            return cache[obj.pk]
-        from .services.chatgpt_subscription import active_connection_for_user, source_hash
-        connection = active_connection_for_user(user)
-        if connection is None:
-            result = (None, None)
-        else:
-            result = (
-                connection,
-                ChatGPTArticleTranslation.objects.filter(
-                    user=user,
-                    connection=connection,
-                    news=obj,
-                    source_hash=source_hash(obj.full_content),
-                ).first(),
-            )
-        cache[obj.pk] = result
-        return result
+    def _translation(self, obj):
+        from api.services.stored_readers import current_translation
+        stored = self._stored(obj)
+        key = (stored.news_id, stored.canonical_hash, stored.scope)
+        if getattr(self, '_translation_key', None) != key:
+            self._translation_key = key
+            self._translation_value = current_translation(getattr(self.context.get('request'), 'user', None), stored)
+        return self._translation_value
 
     def get_full_content_zh(self, obj):
-        if not self.get_has_full_content(obj):
-            return ''
-        connection, translation = self._subscription_translation(obj)
-        shared = self._shared_translation(obj)
-        if translation is not None:
-            return translation.content
-        if shared is not None:
-            return shared.content
-        return '' if connection is not None else obj.full_content_zh
+        record, _ = self._translation(obj)
+        return record.content if record else ''
 
     def get_full_content_zh_fetched_at(self, obj):
-        if not self.get_has_full_content(obj):
-            return None
-        connection, translation = self._subscription_translation(obj)
-        shared = self._shared_translation(obj)
-        if translation is not None:
-            return translation.completed_at
-        if shared is not None:
-            return shared.completed_at
-        return None if connection is not None else obj.full_content_zh_fetched_at
-
-    def _shared_translation(self, obj):
-        from .services.shared_translations import get_shared_translation
-        if not hasattr(self, '_shared_translation_cache'):
-            self._shared_translation_cache = {}
-        if obj.pk not in self._shared_translation_cache:
-            self._shared_translation_cache[obj.pk] = get_shared_translation(obj)
-        return self._shared_translation_cache[obj.pk]
+        record, _ = self._translation(obj)
+        return record.completed_at if record else None
 
     def get_full_content_zh_scope(self, obj):
-        if not self.get_has_full_content(obj):
-            return None
-        connection, translation = self._subscription_translation(obj)
-        if translation is not None:
-            return 'private'
-        if self._shared_translation(obj) is not None:
-            return 'shared'
-        return 'legacy' if connection is None and obj.full_content_zh else None
+        return self._translation(obj)[1]
 
     def get_full_translation_personal_available(self, obj):
-        if not self.get_has_full_content(obj):
-            return False
-        connection, _ = self._subscription_translation(obj)
-        return bool(connection and connection.connected and not connection.needs_reauth
-                    and connection.selected_model)
+        from api.services.chatgpt_subscription import active_connection_for_user
+        user = getattr(self.context.get('request'), 'user', None)
+        connection = active_connection_for_user(user) if getattr(user, 'is_authenticated', False) else None
+        return bool(self.get_has_full_content(obj) and connection and connection.connected
+                    and not connection.needs_reauth and connection.selected_model)
 
     def get_full_translation_active(self, obj):
-        """Personal workers stay scoped; shared task availability is public."""
         if not self.get_has_full_content(obj):
             return False
-        try:
-            connection, _translation = self._subscription_translation(obj)
-            if connection is not None:
-                from .services import chatgpt_subscription_jobs
-                from .services.chatgpt_subscription import source_hash
-                job = chatgpt_subscription_jobs.get_job(
-                    connection.user_id, connection.pk, obj.pk, source_hash(obj.full_content),
-                )
-            else:
-                from .services.translation_jobs import get_job
-                job = get_job(obj.pk)
-            if job and not job.done:
+        from api.services.translation_jobs import get_job
+        user = getattr(self.context.get('request'), 'user', None)
+        from api.services.chatgpt_subscription import active_connection_for_user
+        from api.services import chatgpt_subscription_jobs
+        connection = active_connection_for_user(user) if getattr(user, 'is_authenticated', False) else None
+        if connection is not None:
+            private = chatgpt_subscription_jobs.get_job(user.pk, connection.pk, obj.pk, self._stored(obj).canonical_hash)
+            if private and not private.done:
                 return True
-            if self.get_full_content_zh(obj):
-                return False
-            from .services.shared_translations import task_is_running
-            return task_is_running(obj)
-        except Exception:
-            return False
+        job = get_job(obj.pk, user_id=getattr(user, 'pk', None), source_digest=self._stored(obj).canonical_hash)
+        if job and not job.done:
+            return True
+        from api.services.shared_translations import task_is_running
+        return task_is_running(obj, getattr(self.context.get('request'), 'user', None), stored=self._stored(obj))
 
     def get_full_content_zh_source(self, obj):
-        """Expose provider provenance, without the contributing user's identity."""
-        if not self.get_has_full_content(obj):
-            return None
-        connection, translation = self._subscription_translation(obj)
-        if translation is not None:
-            return 'chatgpt'
-        shared = self._shared_translation(obj)
-        if shared is not None:
-            return shared.provider
-        return 'llm' if connection is None and obj.full_content_zh else None
+        record, scope = self._translation(obj)
+        return ('chatgpt' if scope == 'private' else getattr(record, 'provider', 'legacy')) if record else None
 
     def get_full_content(self, obj):
         stored = self._stored(obj)
@@ -474,6 +453,9 @@ class FavoriteNewsSerializer(serializers.Serializer):
             raise Http404
         source = next((source for source in sources if source.pk == instance.source_id), sources[0])
         data['source_name'] = source.publication.display_name or source.name
+        from api.services.stored_readers import legacy_translation
+        translation = legacy_translation(instance.pk, 'title', instance.title)
+        data['title_zh'] = translation.translated_text if translation else ''
         return data
 
 
@@ -594,6 +576,11 @@ class ResearchSessionSerializer(serializers.ModelSerializer):
         model = ResearchSession
         fields = ['id', 'title', 'messages', 'is_archived', 'message_count', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def to_representation(self, instance):
+        from api.services.research.access import require_session_evidence
+        require_session_evidence(instance, getattr(self.context.get('request'), 'user', None))
+        return super().to_representation(instance)
 
     def get_message_count(self, obj):
         return len(obj.messages) if obj.messages else 0

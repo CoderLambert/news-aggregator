@@ -1,3 +1,4 @@
+from api.tests.rss.reader_fixtures import public_legacy_article
 from unittest.mock import patch
 
 import pytest
@@ -19,7 +20,7 @@ def tts_news(db):
         source_type='news',
     )
     category = Category.objects.create(name='TTS', slug='tts')
-    return News.objects.create(
+    return public_legacy_article(News.objects.create(
         title='语音测试标题',
         content='语音测试摘要。',
         full_content='语音测试完整正文。',
@@ -27,7 +28,7 @@ def tts_news(db):
         source=source,
         category=category,
         publish_time=timezone.now(),
-    )
+    ))
 
 
 @override_settings(EDGE_TTS_ENDPOINT='msedgeservices')

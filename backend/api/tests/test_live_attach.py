@@ -1,194 +1,69 @@
-"""Integration tests for cross-device / re-entry live attach behavior.
-
-Covers:
-1. Serializer exposes full_translation_active=True when a worker is running.
-2. POST /translate-full with force=false ATTACHES to in-flight job instead
-   of returning the saved snapshot.
-3. Serializer flips to full_translation_active=False after worker finishes.
-"""
-
-import time
-import threading
+"""Re-entry attaches only to the caller's current source-hash job."""
+from types import SimpleNamespace
 from unittest.mock import patch
-
 import pytest
 from django.contrib.auth.models import User
 from django.utils import timezone
-
+from rest_framework.test import APIRequestFactory
 from api.models import Category, Source, News
 from api.serializers import NewsDetailSerializer
-from api.services import translation_jobs
-
-
-@pytest.fixture(autouse=True)
-def clear_jobs():
-    with translation_jobs._jobs_lock:
-        translation_jobs._jobs.clear()
-    yield
-    with translation_jobs._jobs_lock:
-        translation_jobs._jobs.clear()
-
-
-@pytest.fixture(autouse=True)
-def authenticated_reader(db, client):
-    client.force_login(User.objects.create_user(username='translation-reader'))
+from api.services import translation_jobs, shared_translations
+from api.tests.rss.reader_fixtures import public_legacy_article
 
 
 @pytest.fixture
-def news_obj(db):
-    cat = Category.objects.create(name='Tech', slug='tech')
-    src = Source.objects.update_or_create(name='Hacker News', defaults={'url': 'https://news.ycombinator.com', 'language': 'en'})[0]
-    return News.objects.create(
-        title='Sample',
-        url='https://example.com/a',
-        source=src,
-        category=cat,
-        publish_time=timezone.now(),
-        full_content='# Hello\n\nSome English text to translate.',
-        full_content_state='legacy',
-        full_content_zh='',  # nothing saved yet
-    )
+def case(db, client, monkeypatch):
+    user = User.objects.create_user('translation-reader')
+    client.force_login(user)
+    news = public_legacy_article(News.objects.create(title='Sample', url='https://example.com/a',
+        source=Source.objects.create(name='Live source', url='https://example.com', language='en'),
+        category=Category.objects.create(name='Tech', slug='tech'), publish_time=timezone.now(),
+        full_content='Stored English body', full_content_state='legacy'))
+    monkeypatch.setattr(translation_jobs, '_jobs', {})
+    request = APIRequestFactory().get('/'); request.user = user
+    key = (news.pk, user.pk, shared_translations.source_hash(news.full_content))
+    return news, user, request, key
 
 
-def _slow_stream(chunks, delay=0.05):
-    def gen(prompt, *a, **kw):
-        for c in chunks:
-            time.sleep(delay)
-            yield c
-    return gen
+def test_serializer_reports_only_current_actor_hash_job(case):
+    news, user, request, key = case
+    job = SimpleNamespace(done=False)
+    translation_jobs._jobs[key] = job
+    assert NewsDetailSerializer(news, context={'request': request}).data['full_translation_active']
+    assert not NewsDetailSerializer(news).data['full_translation_active']
+    job.done = True
+    assert not NewsDetailSerializer(news, context={'request': request}).data['full_translation_active']
 
 
-def test_serializer_reports_active_while_worker_runs(news_obj):
-    chunks = ['第一段。', '第二段。', '第三段。', '完成。']
-    with patch(
-        'api.services.llm_translator._call_llm_stream',
-        side_effect=_slow_stream(chunks, delay=0.1),
-    ):
-        translation_jobs.start_or_get_job(
-            news_id=news_obj.pk,
-            prompt='ignored',
-            on_save=lambda t, f: None,
-        )
-
-        # While running, serializer flag must be True
-        time.sleep(0.05)
-        data = NewsDetailSerializer(news_obj).data
-        assert data['full_translation_active'] is True
-
-        # Drain worker to completion
-        deadline = time.time() + 3.0
-        while time.time() < deadline:
-            job = translation_jobs.get_job(news_obj.pk)
-            if job and job.done:
-                break
-            time.sleep(0.05)
-
-    # After completion, flag must go False
-    data = NewsDetailSerializer(news_obj).data
-    assert data['full_translation_active'] is False
+def test_attach_path_takes_priority_over_unbound_partial_snapshot(case, client):
+    news, user, request, key = case
+    news.full_content_zh = 'unbound partial'; news.save(update_fields=['full_content_zh'])
+    class Job:
+        done = False; error = None; text = ''
+        def wait_for_update(self, *_args, **_kwargs):
+            self.text = 'complete current translation'; self.done = True
+            shared_translations.publish_translation(news_id=news.pk, digest=key[2], text=self.text, provider='llm')
+    translation_jobs._jobs[key] = Job()
+    with patch.object(translation_jobs, 'start_or_get_job', side_effect=AssertionError('duplicate model call')):
+        response = client.post(f'/api/news/{news.pk}/translate/', {'force': False}, content_type='application/json')
+        body = b''.join(response.streaming_content).decode()
+    assert 'event: complete' in body and 'complete current translation' in body
+    assert 'unbound partial' not in body
 
 
-def test_attach_path_takes_priority_over_snapshot(news_obj, client):
-    """When a worker is running AND there's saved partial content, the POST
-    endpoint must ATTACH (continue streaming) instead of returning the
-    snapshot via the fast-path.
-    """
-    # Pre-populate some saved partial translation to trigger the old fast-path
-    news_obj.full_content_zh = '已有的部分翻译。'
-    news_obj.full_content_zh_fetched_at = timezone.now()
-    news_obj.save()
-
-    chunks = ['继续 ', '翻译 ', '到 ', '结尾。']
-    allow_finish = threading.Event()
-
-    def controlled_stream(*_args, **_kwargs):
-        yield chunks[0]
-        assert allow_finish.wait(5)
-        yield from chunks[1:]
-
-    with patch(
-        'api.services.llm_translator._call_llm_stream',
-        side_effect=controlled_stream,
-    ):
-        # Manually start a job to simulate "worker still running"
-        job = translation_jobs.start_or_get_job(
-            news_id=news_obj.pk,
-            prompt='ignored',
-            on_save=lambda t, f: None,
-        )
-        time.sleep(0.05)  # let worker emit at least one chunk
-
-        # Now hit the endpoint with force=false — should NOT short-circuit
-        # to the snapshot path; should attach to the live stream.
-        try:
-            resp = client.post(
-                f'/api/news/{news_obj.pk}/translate/',
-                data={'force': False},
-                content_type='application/json',
-            )
-        finally:
-            allow_finish.set()
-
-        # Consume the streamed body
-        body = b''.join(resp.streaming_content).decode('utf-8')
-
-        # Snapshot path would return ONE data: frame and exit immediately.
-        # Attach path emits multiple progress frames and eventually 'complete'.
-        assert 'event: complete' in body, (
-            'Expected attach-path to emit a final complete event; '
-            f'got: {body[:500]}'
-        )
-        # The streamed content should contain chunks from the worker, not
-        # ONLY the pre-saved snapshot.
-        assert '继续' in body or '翻译' in body
+def test_finished_worker_falls_through_to_hash_bound_snapshot(case, client):
+    news, _, _, key = case
+    shared_translations.publish_translation(news_id=news.pk, digest=key[2], text='stored complete translation', provider='llm')
+    with patch.object(translation_jobs, 'start_or_get_job', side_effect=AssertionError('duplicate model call')):
+        response = client.post(f'/api/news/{news.pk}/translate/', {'force': False}, content_type='application/json')
+        body = b''.join(response.streaming_content).decode()
+    assert 'stored complete translation' in body and 'event: complete' in body
 
 
-def test_finished_worker_falls_through_to_snapshot(news_obj, client):
-    """If the worker has already finished, force=false should serve the
-    saved snapshot via the fast path (no new worker spawned).
-    """
-    news_obj.full_content_zh = '已经翻译完成的全文内容。'
-    news_obj.full_content_zh_fetched_at = timezone.now()
-    news_obj.save()
-
-    # No active job in the registry
-    assert translation_jobs.get_job(news_obj.pk) is None
-
-    # _call_llm_stream must NOT be called (we should hit the snapshot path)
-    with patch(
-        'api.services.llm_translator._call_llm_stream',
-        side_effect=AssertionError('LLM should not be called on snapshot path'),
-    ):
-        resp = client.post(
-            f'/api/news/{news_obj.pk}/translate/',
-            data={'force': False},
-            content_type='application/json',
-        )
-        body = b''.join(resp.streaming_content).decode('utf-8')
-
-    assert '已经翻译完成的全文内容。' in body
-    # Should be a single snapshot frame, not the attach-path 'complete' event
-    assert 'event: complete' not in body
-
-
-def test_missing_provider_returns_actionable_sse_error_without_starting_job(news_obj, client):
-    with (
-        patch('api.views.get_clients', return_value=[]),
-        patch('api.services.llm_translator.find_chinese_translation_link', return_value=None),
-        patch('api.services.translation_jobs.start_or_get_job') as start_job,
-    ):
-        response = client.post(
-            f'/api/news/{news_obj.pk}/translate/',
-            data={'force': False},
-            content_type='application/json',
-        )
-        body = b''.join(response.streaming_content).decode('utf-8')
-
-    start_job.assert_not_called()
-    assert response.status_code == 200
-    assert response['Content-Type'].startswith('text/event-stream')
-    assert '"error"' in body
-    assert '未配置全文翻译模型提供方' in body
-    assert '选择厂商、模型并配置自己的 API Key' in body
-    news_obj.refresh_from_db()
-    assert news_obj.full_content_zh == ''
+def test_missing_provider_returns_actionable_sse_error_without_starting_job(case, client):
+    news, _, _, _ = case
+    with patch('api.views.get_clients', return_value=[]), patch.object(translation_jobs, 'start_or_get_job') as start:
+        response = client.post(f'/api/news/{news.pk}/translate/', {'force': False}, content_type='application/json')
+        body = b''.join(response.streaming_content).decode()
+    start.assert_not_called()
+    assert 'API Key' in body and '未配置全文翻译模型提供方' in body

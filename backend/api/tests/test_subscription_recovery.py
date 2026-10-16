@@ -22,6 +22,7 @@ from api.models import (
     SharedArticleTranslation,
     Source,
 )
+from api.tests.rss.reader_fixtures import public_legacy_article
 from api.services import chatgpt_subscription as subscription
 from api.services import chatgpt_subscription_jobs as jobs
 from api.services import shared_translations
@@ -46,7 +47,7 @@ def owner(db, local_mode):
 
 @pytest.fixture
 def article(db):
-    return News.objects.create(
+    return public_legacy_article(News.objects.create(
         title='Recovery article',
         url='https://example.test/article',
         publish_time=timezone.now(),
@@ -56,7 +57,7 @@ def article(db):
         category=Category.objects.create(name='Recovery', slug='recovery'),
         full_content='# Recovery article\n\nOriginal source text.',
         full_content_state='legacy',
-    )
+    ))
 
 
 def make_connection(user):
