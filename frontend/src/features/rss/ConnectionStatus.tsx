@@ -19,7 +19,7 @@ export default function ConnectionStatus({ viewer, admin }: { viewer: number; ad
     {errors && <p role="alert">{workspaceError(errors)}<button type="button" className="workspace-link" onClick={() => { void subscriptions.refetch(); if (admin) void health.refetch() }}>重新加载</button></p>}
     {subscriptions.data?.results.map(subscription => <p key={subscription.id}><strong>{subscription.name}</strong> · {subscription.feeds.map(feed => labels[feed.connection_state] ?? '等待确认').join('、')}</p>)}
     {health.data && <dl className="workspace-caption">
-      <dt>初始同步</dt><dd>{health.data.initial_sync ? '进行中' : '已有同步完成记录'}</dd>
+      <dt>初始同步</dt><dd>{health.data.initial_sync ? '尚未完成' : '已有同步完成记录'}</dd>
       <dt>最近增量同步完成</dt><dd>{timeLabel(health.data.last_successful_incremental)}</dd>
       <dt>最近全保留条目对账完成</dt><dd>{timeLabel(health.data.last_successful_full_reconcile)}</dd>
       <dt>已观测 ID 距离</dt><dd>{health.data.lag ?? '未知'}（不等于待处理文章数量）</dd>
