@@ -1371,6 +1371,39 @@ def _browser_environment(task_browser_home: Path) -> dict[str, str]:
     return _local_tool_environment(task_browser_home)
 
 
+
+def _read_mermaid_chart_paint(diagram_svg, *, layout_timeout: float = 4.0) -> dict:
+    """Wait for a nonzero SVG box after reactive layout; never relax paint checks.
+
+    A Mermaid SVG can momentarily become zero-sized between the DOM readiness
+    check and this next paint read during React re-layout. Retrying *only* the
+    layout measurement prevents a false negative while still failing closed if
+    the diagram never becomes visible.
+    """
+    deadline = time.monotonic() + layout_timeout
+    while True:
+        paint = diagram_svg.evaluate("""(svg) => {
+                    const texts = Array.from(svg.querySelectorAll('text'));
+                    const labels = texts.map((element) => element.textContent?.trim() || '').filter(Boolean);
+                    const firstLabel = texts.find((element) => (element.textContent || '').trim());
+                    const node = firstLabel?.closest('.node');
+                    const shape = node?.querySelector('rect, polygon, path, ellipse');
+                    const box = svg.getBoundingClientRect();
+                    return {
+                        labels,
+                        nodeFill: shape ? getComputedStyle(shape).fill : null,
+                        textFill: firstLabel ? getComputedStyle(firstLabel).fill : null,
+                        width: box.width,
+                        height: box.height,
+                    };
+                }""")
+        if paint['width'] > 0 and paint['height'] > 0:
+            return paint
+        if time.monotonic() >= deadline:
+            return paint
+        time.sleep(0.05)
+
+
 def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_dir: Path) -> None:
     def mark_shared_subcheck(subcheck: str) -> None:
         if args.stage == 'g2':
@@ -1486,21 +1519,7 @@ def _run_browser_checks(args: argparse.Namespace, checks: dict[str, str], work_d
                     arg='[role="img"][aria-label="Mermaid 图表"] svg',
                     timeout=20000,
                 )
-                chart_paint = diagram_svg.evaluate("""(svg) => {
-                    const texts = Array.from(svg.querySelectorAll('text'));
-                    const labels = texts.map((element) => element.textContent?.trim() || '').filter(Boolean);
-                    const firstLabel = texts.find((element) => (element.textContent || '').trim());
-                    const node = firstLabel?.closest('.node');
-                    const shape = node?.querySelector('rect, polygon, path, ellipse');
-                    const box = svg.getBoundingClientRect();
-                    return {
-                        labels,
-                        nodeFill: shape ? getComputedStyle(shape).fill : null,
-                        textFill: firstLabel ? getComputedStyle(firstLabel).fill : null,
-                        width: box.width,
-                        height: box.height,
-                    };
-                }""")
+                chart_paint = _read_mermaid_chart_paint(diagram_svg)
                 _require(
                     'Fixture article' in chart_paint['labels'] and 'Mermaid flow' in chart_paint['labels'],
                     'Mermaid labels are missing from the rendered SVG',
