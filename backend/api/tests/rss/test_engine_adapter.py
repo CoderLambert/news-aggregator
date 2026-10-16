@@ -338,3 +338,22 @@ def test_malformed_response_is_safe_failure_not_empty_page(server):
     routes, _, config = server
     routes["/v1/entries"].append(ok(b"{incomplete-" + SECRET.encode()))
     assert_error("invalid_response", lambda: EngineAdapter(config).read_upper_bound())
+
+
+def test_http_article_and_comments_preserve_long_urls_for_business_rejection(server):
+    routes, _, config = server
+    row = {**entry(), "url": "http://publisher.example/" + "a" * 1200,
+           "comments_url": "http://forum.example/thread/12"}
+    routes["/v1/entries"].append(ok({"entries": [row]}))
+    result = EngineAdapter(config).list_entries(11, 12)[0]
+    assert result.url == row["url"]  # T09 owns News.url 500-character rejection
+    assert result.comments_url == row["comments_url"]
+
+
+@pytest.mark.parametrize("status,code", [(401, "authentication"), (403, "forbidden"), (500, "upstream_http")])
+def test_mutation_http_errors_classify_unknown_and_hide_body(server, status, code):
+    routes, calls, config = server
+    routes["/v1/feeds/7"].append(ok(feed()))
+    routes["/v1/feeds/7/refresh"].append((status, SECRET.encode(), {}))
+    assert_error(code, lambda: EngineAdapter(config).refresh_feed(7), unknown=status >= 500)
+    assert [call[0] for call in calls].count("PUT") == 1
