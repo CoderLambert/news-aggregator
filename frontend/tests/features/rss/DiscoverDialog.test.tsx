@@ -61,6 +61,19 @@ describe('RSS discovery and subscription', () => {
     expect(screen.getByRole('button', { name: '确认订阅' })).toBeEnabled()
     expect(request.mock.calls.every(([path]) => path !== '/me/rss-subscriptions/')).toBe(true)
   })
+  it('normalizes a bare domain for the explicit fallback only after confirmation', async () => {
+    request.mockImplementation(async path => path.startsWith('/rss/directory/') ? { results: [], next_cursor: null } :
+      path === '/me/rss-subscriptions/' ? { operation_id: 'op', state: 'pending', subscription: { name: 'Feed' } } :
+        { operation_id: 'discover', state: 'succeeded', candidates: [] })
+    setup()
+    fireEvent.change(screen.getByLabelText('搜索订阅源、网站或 RSS 地址'), { target: { value: 'example.com/writings' } })
+    fireEvent.click(screen.getByRole('button', { name: '查找订阅' }))
+    fireEvent.click(await screen.findByRole('button', { name: '尝试直接添加此 Feed' }))
+    expect(request.mock.calls.some(([path]) => path === '/me/rss-subscriptions/')).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: '确认订阅' }))
+    await waitFor(() => expect(request).toHaveBeenCalledWith('/me/rss-subscriptions/',
+      expect.objectContaining({ body: { feed_url: 'https://example.com/writings', group_ids: [] } })))
+  })
   it('keeps unconfigured route templates non-executable', async () => {
     request.mockResolvedValue({ results: [{ id: 'route', name: 'Template', description: 'Needs account', kind: 'route_template', public_url: '', executable: false, subscribed: false, cached_articles: [] }], next_cursor: null })
     setup()
