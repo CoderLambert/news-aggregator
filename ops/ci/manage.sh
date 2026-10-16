@@ -10,20 +10,26 @@ DATA_DIR="${CI_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/newshub-ci}"
 BACKEND_TOKEN_FILE="$DATA_DIR/registration-token"
 FRONTEND_TOKEN_FILE="$DATA_DIR/registration-token-frontend"
 COMMAND="${1:-help}"
+MANUAL_STOP_FLAG="$DATA_DIR/maintenance-disabled"
 
 die() { printf 'newshub-ci: %s\n' "$*" >&2; exit 2; }
 usage() {
     cat <<'HELP'
-Usage: bash ops/ci/manage.sh <install|start|stop|status|logs|update|doctor|uninstall>
-  install   Build one runner image + DinD, register two independent runners.
+Usage: bash ops/ci/manage.sh <install|start|stop|status|logs|update|doctor|watch|enable-watch|disable-watch|watch-logs|uninstall>
+  install   Build/register two runners; enable the boot/watchdog timer.
   start     Start both registered runners without requesting new tokens.
   stop      Stop runner and its private DinD (does not delete volumes).
   status    Display Compose and both GitHub runner statuses.
   logs      Follow both runners and the isolated Docker daemon.
-  update    Rebuild and restart the registered runner; keep volumes.
+  update    Safely rebuild/restart idle runners; keep volumes.
   doctor    Read-only host/Compose validation and resource checks.
+  watch     Run one conservative health check (no worker interruptions).
+  enable-watch   Install the user-systemd health timer.
+  disable-watch  Disable this user-systemd health timer.
+  watch-logs     Show recent health timer logs.
   uninstall Stop/delete only this Compose project's containers and networks.
             Does NOT remove volumes or unregister the GitHub-side runner.
+  Unattended before-login watchdog: sudo loginctl enable-linger "$USER"
 HELP
 }
 compose() {
@@ -84,6 +90,24 @@ wait_for_registration() {
     done
     return 1
 }
+require_idle() {
+    command -v gh >/dev/null 2>&1 || die "gh required to verify Runner idle state"
+    local n
+    n="$(gh api "repos/$REPO/actions/runners?per_page=100" \
+        --jq '[.runners[] | select(.name=="omarchy-newshub" or .name=="omarchy-newshub-frontend") | select(.busy==true)] | length')" \
+        || die "GitHub Runner API unavailable; refusing to interrupt active CI"
+    [[ "$n" == 0 ]] || die "One or more CI jobs are running. Retry when idle."
+}
+confirm_both_online() {
+    local n i
+    for ((i=0; i<30; i++)); do
+        n="$(gh api "repos/$REPO/actions/runners?per_page=100" \
+            --jq '[.runners[] | select(.status=="online" and (.name=="omarchy-newshub" or .name=="omarchy-newshub-frontend"))] | length' 2>/dev/null)" || n=0
+        if [[ "$n" == 2 ]]; then return 0; fi
+        sleep 3
+    done
+    return 1
+}
 issue_registration_token() {
     local destination="$1" token
     command -v gh >/dev/null 2>&1 || die "Install gh and authenticate: gh auth login"
@@ -114,6 +138,7 @@ case "$COMMAND" in
         ;;
     install)
         preflight
+        rm -f -- "$MANUAL_STOP_FLAG"
         # Build once: runner-frontend reuses the exact same local image.
         compose build runner
         trap clear_tokens EXIT
@@ -133,16 +158,24 @@ case "$COMMAND" in
             die "One of two runners did not become ready within the registration window"
         fi
         clear_tokens
+        if ! confirm_both_online; then
+            compose logs --tail=80 runner runner-frontend
+            die "Two Runner files exist but GitHub has not reported both Online"
+        fi
         report_status
+        CI_DATA_DIR="$DATA_DIR" bash "$CI_DIR/watch-service.sh" install || printf "WARNING: health timer not enabled; use enable-watch.\n" >&2
         ;;
     start)
         preflight
         configured runner && configured runner-frontend || die "Both runners must be registered; run install"
+        rm -f -- "$MANUAL_STOP_FLAG"
         compose up -d --no-build
         report_status
         ;;
     stop)
         preflight
+        require_idle
+        : > "$MANUAL_STOP_FLAG"
         compose stop runner runner-frontend docker
         ;;
     status)
@@ -155,13 +188,29 @@ case "$COMMAND" in
         ;;
     update)
         preflight
+        require_idle
         configured runner && configured runner-frontend || die "Both runners must be registered; run install"
         compose up -d --build
         wait_for_registration runner && wait_for_registration runner-frontend || die "One of two runners not ready after update"
         report_status
         ;;
+    watch)
+        CI_DATA_DIR="$DATA_DIR" python3 "$CI_DIR/watch.py"
+        ;;
+    enable-watch)
+        CI_DATA_DIR="$DATA_DIR" bash "$CI_DIR/watch-service.sh" install
+        ;;
+    disable-watch)
+        CI_DATA_DIR="$DATA_DIR" bash "$CI_DIR/watch-service.sh" uninstall
+        ;;
+    watch-logs)
+        journalctl --user -u newshub-ci-watch.service --no-pager -n 100
+        ;;
     uninstall)
         preflight
+        require_idle
+        : > "$MANUAL_STOP_FLAG"
+        CI_DATA_DIR="$DATA_DIR" bash "$CI_DIR/watch-service.sh" uninstall
         compose down --remove-orphans
         printf 'Project stopped; volumes and GitHub runner registration remain intact.\n'
         ;;
