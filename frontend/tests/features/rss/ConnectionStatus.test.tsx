@@ -27,7 +27,7 @@ it('keeps unknown health separate from completed synchronization', async () => {
   } : { results: [] }) as never)
   setup(true)
   await waitFor(() => expect(screen.getByText(/引擎状态待确认/)).toBeInTheDocument())
-  expect(screen.getByText('进行中')).toBeInTheDocument()
+  expect(screen.getByText('尚未完成')).toBeInTheDocument()
   expect(screen.getByText(/不等于待处理文章数量/)).toHaveTextContent('未知')
   expect(screen.getByText('network')).toBeInTheDocument()
 })
