@@ -6,6 +6,8 @@ services:
       RSS_ENGINE_INSTANCE_UUID: '${RSS_ENGINE_INSTANCE_UUID:?Persist the engine UUID in the protected manifest}'
       RSS_ENGINE_ACCOUNT_ID: '${RSS_ENGINE_ACCOUNT_ID:?Set the dedicated non-admin account ID}'
       RSS_RUNTIME_DIR: /var/lib/newshub/rss-runtime
+      # Keep closed until publisher redirect/rewrite policy gates pass.
+      RSS_FULL_CONTENT_ENABLED: '${RSS_FULL_CONTENT_ENABLED:-0}'
     volumes:
       - rss-runtime-data:/var/lib/newshub/rss-runtime:ro
 
@@ -63,6 +65,7 @@ services:
       WAITRESS_TRUSTED_PROXY: '${WAITRESS_TRUSTED_PROXY:?Set verified proxy IP}'
       DJANGO_DB_PATH: /var/lib/newshub/db/db.sqlite3
       NEWSHUB_RUNTIME_ROLE: rss_sync
+      RSS_FULL_CONTENT_ENABLED: '${RSS_FULL_CONTENT_ENABLED:-0}'
       RSS_RUNTIME_DIR: /var/lib/newshub/rss-runtime
       RSS_ENGINE_INSTANCE_UUID: '${RSS_ENGINE_INSTANCE_UUID:?Persist the engine UUID in the protected manifest}'
       RSS_ENGINE_ACCOUNT_ID: '${RSS_ENGINE_ACCOUNT_ID:?Set the dedicated non-admin account ID}'

@@ -28,15 +28,15 @@
 | T09 | rss_t05 / gpt-6-astra high | integrated | b980399→f03da66；a93f1bf→9043a99 | sync/reconciliation/runtime、ops/T09 | 固定H/full retained、独立lease、双GET前fence、T08/T21交接；62最终专项/150关联回归及真实engine故障PASS；health DTO已接线，额外分类按当前授权过滤 |
 | T21 | 主调度 | integrated partial | 94baab7、9f6671b、0f1f00d、f03da66 | 0057、opml/API/UI/worker | 预览确认、逐项队列重试、本人多组导出和恢复UI；T09每10秒推进，浏览器待T27 |
 | T20 | 主调度 | integrated partial | 0f1f00d及当前批次 | 发现/目录/频道与连接健康 | health读取匹配instance/account/mode的60秒heartbeat；14相关UI与typecheck/lint/build通过，真实浏览器待T27 |
-| T18 | rss_t00 / gpt-6.1-sol high | running / live blocked | task/rss-T18-gateway / 4ac939e | routes.py、自有gateway配置/ops/T18 | 默认关闭声明式模板；DNS/TLS/token缺失，仅阻塞网关live |
-| T26 | rss_t04 / gpt-6-astra high | running / production seal blocked | task/rss-T26-rehearsal / 7654371+T03/T09 | ops/T26工具/候选证据 | 合成0051→0059旧列/PK/FK/译文保持首轮PASS，真实完整app候选与两库恢复进行中；真实副本缺失 |
-| T27 | rss_t05 / gpt-6-astra high | running | task/rss-T27-product-acceptance / 9043a99 | ops/T27、自有浏览器/真实来源验收 | 独立临时DB/端口/引擎；合成产品链路及有限公开来源，生产副本与RSSHub单独门禁 |
+| T18 | rss_t00 / gpt-6.1-sol high | integrated partial / live blocked | 2210e16→e4e62fd | routes.py、默认关闭gateway/ops/T18 | 85专项；实际RSSHub health与合成TLS/Nginx认证/重定向/凭据边界PASS；公网DNS/TLS/token及publisher认证/redirect仍BLOCKED |
+| T26 | rss_t04 / gpt-6-astra high | integrated synthetic candidate / seal blocked | b39d8a9→53003f2 | ops/T26工具/候选证据 | 56旧表34非空保留、两完整app镜像往返、0059真实两库恢复及恢复后T09同步PASS；主调度独立审查，真实副本及完整wrapper host权限BLOCKED |
+| T27 | rss_t05 / gpt-6-astra high | integrated synthetic browser / public partial | 87c47fc→60a421d | ops/T27、自有浏览器/真实来源验收 | fresh真实浏览器全链PASS，10截图/网络审计；11篇公开取样保留Uber失败与人工完整性未知；新默认政策联动待补 |
 
 后续 T29/T30/T31/T33生产与退出阶段未授权，禁止提前激活删除。
 
 ## 验证环境与证据规则
 
-Python 3.12 独立环境 `/tmp/newshub-rss-coordinator-venv`；测试指定独立合成DB路径。Agent各自隔离环境/DB/端口，主调度做跨模块验证，不重复专项。CI逐集成批次核对。T00真实引擎及T02隔离镜像已有证据；真实副本/浏览器尚无通过证据；两库恢复已有T03真实隔离0058证据，T26最终0059进行中。
+Python 3.12 独立环境 `/tmp/newshub-rss-coordinator-venv`；测试指定独立合成DB路径。Agent各自隔离环境/DB/端口，主调度做跨模块验证，不重复专项。CI逐集成批次核对。T00真实引擎及T02隔离镜像已有证据；真实副本尚无通过证据；T27合成真实浏览器全链已通过，T26合成最终0059配对恢复已通过但未封存。
 
 分支保护查询 GitHub API 返回403（账号/仓库计划限制），保护规则 UNKNOWN；仍执行仓库CI，不推断无要求。
 
@@ -59,3 +59,9 @@ Python 3.12 独立环境 `/tmp/newshub-rss-coordinator-venv`；测试指定独�
 
 - 第三批全后端：2210 passed、2 failed、13 live skipped（225.08s）。两个失败仅旧SSE测试仍期待异常；产品已按安全错误event返回且不含译文。修正断言后AI读者/争用/同步专项67 passed（6.46s），覆盖当前分类ACL小修；日志`/tmp/newshub-rss-b3-tests.log`、`/tmp/newshub-rss-final-reader-tests.log`。当前完整结果由新push CI再确认。
 - 最终schema makemigrations --check --dry-run无变更；base+workspace+RSS三Compose显式合成环境config --quiet退出0（未启动服务）。
+
+- T18/T26集成后工具/路由/Nginx组合94 passed、2 live skipped（0.25s），`/tmp/newshub-rss-candidate-tools-tests.log`；T26 live cleanup5pass及完整演练复用精确image/harness证据。G2生成fixture补显式public/legacy/body_owner，8专项通过（3.29s）。
+- 发现新增Feed采集默认与ARCH4.1缺口：统一feed模式及缺少worker发送前来源政策复核。rss_t00在`task/rss-feed-admission-policy`修正，rss_t04只读独立审查未知/mixed Feed受限目标的Miniflux规则边界；无DDL/生产动作。T27继续合成浏览器与实际来源取样，后补受影响默认模式联动。
+
+- 72a193e远端前端CI通过；两次后端运行在collection停留超过20分钟，本地同命令2318 tests collected/1.03s。下一批为collection加120秒栈转储及5分钟超时以获取实际阻塞证据，未把异常标为通过。
+- 生产全文门禁待集成：RSS_FULL_CONTENT_ENABLED默认0、web/sync同值，避免未验证redirect目标政策时自动或显式抓取；当前HTTP政策403/Compose专项9 passed（5.72s）。
