@@ -1,0 +1,39 @@
+{
+  "files": {
+    "Dockerfile": {
+      "sha256": "46203ebf0188dcac1a9b5d62d9c1f46f16a1fdd43573843671d5b31dbc3abe51",
+      "url": "https://github.com/DIYgod/RSSHub/blob/8e94b949479ba3295ee9653806f59b2be6559158/Dockerfile"
+    },
+    "lib/config.ts": {
+      "sha256": "f04718090ba4d2c852dae2712e439df28de087b3ce64cc5ffb18de485bfea456",
+      "url": "https://github.com/DIYgod/RSSHub/blob/8e94b949479ba3295ee9653806f59b2be6559158/lib/config.ts"
+    },
+    "lib/routes/github/issue.ts": {
+      "sha256": "ddb181a68a07e053952dca6bf6911023350a595818c1447a044e6a4dbebd9312",
+      "url": "https://github.com/DIYgod/RSSHub/blob/8e94b949479ba3295ee9653806f59b2be6559158/lib/routes/github/issue.ts"
+    },
+    "lib/routes/github/trending.tsx": {
+      "sha256": "286a3f35c63a9449cd8f0b5f1460b29aad4492684e71f1cd868b964b06b2318c",
+      "url": "https://github.com/DIYgod/RSSHub/blob/8e94b949479ba3295ee9653806f59b2be6559158/lib/routes/github/trending.tsx"
+    },
+    "package.json": {
+      "sha256": "fd97df4a48f0929be71ed1f398253dd191468ac54a78b942ed0be975a49b7020",
+      "url": "https://github.com/DIYgod/RSSHub/blob/8e94b949479ba3295ee9653806f59b2be6559158/package.json"
+    }
+  },
+  "license": "AGPL-3.0-only",
+  "license_file": "../../../backend/api/rss/directory_data/rsshub-AGPL-3.0.txt",
+  "nginx_lab_image": "nginx@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236",
+  "release_gate": "BLOCKED: public DNS/TLS/hairpin, real token scope/objects, publisher no-redirect and secret isolation absent",
+  "rsshub": {
+    "image": "diygod/rsshub@sha256:1945d3162e0a6a38399bed540b623bbb06829ad3dc9160de7e7dfbaac60854ff",
+    "image_id": "sha256:1945d3162e0a6a38399bed540b623bbb06829ad3dc9160de7e7dfbaac60854ff",
+    "platform": "linux/amd64",
+    "revision_label": "8e94b949479ba3295ee9653806f59b2be6559158",
+    "tag_lookup_only": "diygod/rsshub:latest; runtime always immutable digest"
+  },
+  "schema_version": 1,
+  "source_commit": "8e94b949479ba3295ee9653806f59b2be6559158",
+  "source_repository": "https://github.com/DIYgod/RSSHub",
+  "verified_date": "2026-10-16"
+}
