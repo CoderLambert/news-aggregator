@@ -308,6 +308,10 @@ def fixture_database_phase():
             source = Source.objects.create(
                 name=bundle["news"]["source"], url="https://fixture.invalid/" + run_id,
             )
+            publication = getattr(__import__("api.models", fromlist=["SourcePublication"]), "SourcePublication", None)
+            if publication is not None:
+                publication.objects.create(source=source, publication="public", owner="legacy", reading_policy="standard")
+            news_fields = {field.name for field in News._meta.get_fields()}
             news = News.objects.create(
                 title=bundle["news"]["title"], content="Synthetic G2 account ownership fixture.",
                 full_content=(
@@ -321,6 +325,7 @@ def fixture_database_phase():
                 **({"full_content_state": "legacy"} if any(
                     f.name == "full_content_state" for f in News._meta.get_fields()
                 ) else {}),
+                **({"body_owner_source": source} if "body_owner_source" in news_fields else {}),
                 source=source, category=category,
                 url="https://fixture.invalid/newshub-local-g2-" + run_id,
             )
