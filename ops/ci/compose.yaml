@@ -1,0 +1,169 @@
+name: newshub-ci
+
+services:
+  volume-init:
+    image: alpine:3.22
+    restart: "no"
+    user: "0:0"
+    volumes:
+      - runner-work:/ci-work/_work
+      - runner-state:/runner/data
+      - frontend-state:/ci-frontend/state
+      - frontend-work:/ci-frontend/_work
+      - runner-socket:/ci-docker
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        mkdir -p /ci-work/_work/.ci-tmp /ci-work/_work/.cache /ci-frontend/_work/.ci-tmp /ci-frontend/_work/.cache
+        chown 1001:121 /runner/data /ci-work/_work /ci-work/_work/.ci-tmp /ci-work/_work/.cache /ci-frontend/state /ci-frontend/_work /ci-frontend/_work/.ci-tmp /ci-frontend/_work/.cache
+        chmod 0750 /runner/data /ci-work/_work /ci-frontend/state /ci-frontend/_work
+        chmod 0770 /ci-work/_work/.ci-tmp /ci-work/_work/.cache /ci-frontend/_work/.ci-tmp /ci-frontend/_work/.cache
+        chgrp 121 /ci-docker
+        chmod 0770 /ci-docker
+
+  docker:
+    image: docker:29-dind
+    privileged: true
+    restart: unless-stopped
+    # Omarchy's embedded Docker DNS (127.0.0.11) could not resolve
+    # registry-1.docker.io during the first real CI run. Explicit upstream
+    # resolvers are scoped to DinD only, not the host or unrelated services.
+    # Override with CI_DIND_DNS_PRIMARY/SECONDARY when public DNS is blocked.
+    dns:
+      - ${CI_DIND_DNS_PRIMARY:-1.1.1.1}
+      - ${CI_DIND_DNS_SECONDARY:-8.8.8.8}
+    # Privileged DinD has no host Docker socket and no published TCP ports.
+    # It is not a VM security boundary; only reviewed source may run here.
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        group="$$(getent group 121 | cut -d: -f1 || true)"
+        if [ -z "$$group" ]; then
+          addgroup -g 121 ci-runner
+          group=ci-runner
+        fi
+        exec dockerd --host=unix:///ci-docker/docker.sock --group="$$group" \
+          --dns=${CI_DIND_DNS_PRIMARY:-1.1.1.1} \
+          --dns=${CI_DIND_DNS_SECONDARY:-8.8.8.8} \
+          --storage-driver=overlay2
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    volumes:
+      - runner-socket:/ci-docker
+      - runner-work:/ci-work/_work
+      - docker-data:/var/lib/docker
+    cpus: ${CI_DIND_CPUS:-2.0}
+    mem_limit: ${CI_DIND_MEMORY:-5g}
+    healthcheck:
+      test: ["CMD", "docker", "-H", "unix:///ci-docker/docker.sock", "info"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+
+  runner:
+    build:
+      context: ../..
+      dockerfile: ops/ci/Dockerfile
+    image: newshub/ci-runner:local
+    entrypoint: ["/opt/ci/runner-entrypoint.sh"]
+    # Compose discards the image CMD when entrypoint is overridden. Keep the
+    # upstream listener command explicit, or gosu runs with zero arguments.
+    command: ["./bin/Runner.Listener", "run", "--startuptype", "service"]
+    restart: unless-stopped
+    init: true
+    environment:
+      REPO_URL: https://github.com/CoderLambert/news-aggregator
+      RUNNER_SCOPE: repo
+      RUNNER_NAME: omarchy-newshub
+      LABELS: newshub-ci
+      RUNNER_WORKDIR: /ci-work/_work
+      CONFIGURED_ACTIONS_RUNNER_FILES_DIR: /runner/data
+      DISABLE_AUTOMATIC_DEREGISTRATION: "true"
+      RUN_AS_ROOT: "false"
+      UNSET_CONFIG_VARS: "true"
+      DOCKER_HOST: unix:///ci-docker/docker.sock
+      TMPDIR: /ci-work/_work/.ci-tmp
+      XDG_CACHE_HOME: /ci-work/_work/.cache
+      PIP_CACHE_DIR: /ci-work/_work/.cache/pip
+      CI_BACKEND_CACHE_REV: ${CI_BACKEND_CACHE_REV:-1}
+      npm_config_cache: /ci-work/_work/.cache/npm
+      PLAYWRIGHT_BROWSERS_PATH: /opt/ci-browsers
+      CHROMIUM_EXECUTABLE: /usr/local/bin/ci-chromium
+    volumes:
+      - runner-state:/runner/data
+      - runner-work:/ci-work/_work
+      - runner-socket:/ci-docker
+      - type: bind
+        source: ${CI_DATA_DIR:?Set CI_DATA_DIR using manage.sh}/registration-token
+        target: /run/ci-registration-token
+        read_only: true
+    depends_on:
+      docker:
+        condition: service_healthy
+      volume-init:
+        condition: service_completed_successfully
+    cpus: ${CI_RUNNER_CPUS:-3.0}
+    mem_limit: ${CI_RUNNER_MEMORY:-6g}
+    stop_grace_period: 120s
+    healthcheck:
+      # Health must check Docker access AS the job execution user, not root.
+      test: ["CMD-SHELL", "test -s /runner/data/.runner && /usr/sbin/gosu runner docker info >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 8s
+      retries: 4
+      start_period: 40s
+
+  runner-frontend:
+    # Same immutable tooling image, different GitHub identity and work directory.
+    # This runner has NO access to Docker, the private daemon socket or backend volumes.
+    image: newshub/ci-runner:local
+    entrypoint: ["/opt/ci/runner-entrypoint.sh"]
+    # Compose discards the image CMD when entrypoint is overridden. Keep the
+    # upstream listener command explicit, or gosu runs with zero arguments.
+    command: ["./bin/Runner.Listener", "run", "--startuptype", "service"]
+    restart: unless-stopped
+    init: true
+    environment:
+      REPO_URL: https://github.com/CoderLambert/news-aggregator
+      RUNNER_SCOPE: repo
+      RUNNER_NAME: omarchy-newshub-frontend
+      LABELS: newshub-frontend
+      RUNNER_WORKDIR: /ci-frontend/_work
+      CONFIGURED_ACTIONS_RUNNER_FILES_DIR: /runner/data
+      DISABLE_AUTOMATIC_DEREGISTRATION: "true"
+      RUN_AS_ROOT: "false"
+      UNSET_CONFIG_VARS: "true"
+      TMPDIR: /ci-frontend/_work/.ci-tmp
+      XDG_CACHE_HOME: /ci-frontend/_work/.cache
+      CI_FRONTEND_CACHE_REV: ${CI_FRONTEND_CACHE_REV:-1}
+      npm_config_cache: /ci-frontend/_work/.cache/npm
+    volumes:
+      - frontend-state:/runner/data
+      - frontend-work:/ci-frontend/_work
+      - type: bind
+        source: ${CI_DATA_DIR:?Set CI_DATA_DIR using manage.sh}/registration-token-frontend
+        target: /run/ci-registration-token
+        read_only: true
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    cpus: ${CI_FRONTEND_CPUS:-2.0}
+    mem_limit: ${CI_FRONTEND_MEMORY:-4g}
+    stop_grace_period: 120s
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /runner/data/.runner"]
+      interval: 30s
+      timeout: 8s
+      retries: 4
+      start_period: 40s
+
+volumes:
+  runner-work:
+  runner-state:
+  frontend-work:
+  frontend-state:
+  runner-socket:
+  docker-data:

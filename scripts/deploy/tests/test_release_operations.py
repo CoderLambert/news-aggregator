@@ -595,24 +595,40 @@ class CollectionAndWorkflowTests(unittest.TestCase):
             (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"),
             Loader=yaml.BaseLoader,
         )
-        self.assertEqual(set(workflow["on"]), {"push", "pull_request"})
+        # Dual self-hosted Runner architecture: manual dispatch is allowed, but
+        # never the privileged pull_request_target trigger.
+        self.assertEqual(set(workflow["on"]), {"push", "pull_request", "workflow_dispatch"})
         self.assertNotIn("pull_request_target", workflow["on"])
         self.assertEqual(workflow["permissions"], {"contents": "read"})
         jobs = workflow["jobs"]
         self.assertEqual(set(jobs), {"frontend", "backend-and-release-gates"})
+        for job in jobs.values():
+            # Self-hosted jobs must never run for fork PRs.
+            self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", job["if"])
+            checkout = next(step for step in job["steps"] if step.get("uses", "").startswith("actions/checkout@"))
+            self.assertEqual(checkout["with"]["persist-credentials"], "false")
         frontend_job = jobs["frontend"]
-        node_setup = next(step for step in frontend_job["steps"] if step.get("uses", "").startswith("actions/setup-node@"))
-        self.assertEqual(node_setup["with"]["node-version"], "22")
+        self.assertEqual(frontend_job["runs-on"], ["self-hosted", "linux", "x64", "newshub-frontend"])
         frontend_runs = "\n".join(step.get("run", "") for step in frontend_job["steps"])
-        for command in ("npm ci", "npm run typecheck", "npm run lint", "npm run test:run", "npm run build"):
+        self.assertIn('test "$(node -p \'process.versions.node.split(".")[0]\')" = 22', frontend_runs)
+        self.assertIn("test ! -S /ci-docker/docker.sock", frontend_runs)
+        self.assertIn("bash ops/ci/install-frontend-deps.sh", frontend_runs)
+        frontend_install = (ROOT / "ops/ci/install-frontend-deps.sh").read_text(encoding="utf-8")
+        self.assertIn("npm ci", frontend_install)
+        for command in ("npm run typecheck", "npm run lint", "npm run test:run", "npm run build"):
             self.assertIn(command, frontend_runs)
+        self.assertLess(frontend_runs.index("install-frontend-deps.sh"), frontend_runs.index("npm run typecheck"))
         backend_job = jobs["backend-and-release-gates"]
+        self.assertEqual(backend_job["runs-on"], ["self-hosted", "linux", "x64", "newshub-ci"])
         self.assertEqual(backend_job["env"]["RUN_MAIN"], "true")
         self.assertEqual(backend_job["env"]["PYTHONPATH"], "backend:crawler")
-        python_setup = next(step for step in backend_job["steps"] if step.get("uses", "").startswith("actions/setup-python@"))
-        self.assertEqual(python_setup["with"]["python-version"], "3.12")
         runs = "\n".join(step.get("run", "") for step in backend_job["steps"])
-        self.assertLess(runs.index("torch==2.14.1+cpu"), runs.index("pip install -r backend/requirements.txt"))
+        self.assertIn("= 3.12", runs)
+        self.assertIn('test "$DOCKER_HOST" = unix:///ci-docker/docker.sock', runs)
+        self.assertLess(runs.index("bash ops/ci/install-backend-deps.sh"), runs.index("pytest -q"))
+        backend_install = (ROOT / "ops/ci/install-backend-deps.sh").read_text(encoding="utf-8")
+        self.assertIn("2.14.1+cpu", backend_install)
+        self.assertLess(backend_install.index('"torch==$TORCH_PIN"'), backend_install.index('-r "$REQ"'))
         self.assertIn("tests/ backend/api/tests/ scripts/deploy/tests/", runs)
         self.assertIn("--target production", runs)
         self.assertIn("local-domain-smoke.sh --execute", runs)
@@ -622,14 +638,7 @@ class CollectionAndWorkflowTests(unittest.TestCase):
         )
         self.assertNotIn("nginx:stable-alpine", runs)
         uses = [step["uses"] for job in jobs.values() for step in job["steps"] if "uses" in step]
-        self.assertEqual(
-            set(uses),
-            {
-                "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-                "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
-                "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
-            },
-        )
+        self.assertEqual(set(uses), {"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"})
         self.assertFalse(any("secrets." in value for value in _walk_strings(workflow)))
 
 

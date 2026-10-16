@@ -2,26 +2,39 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# Avoid duplicate PR push runs and discard obsolete checks on new commits.
+concurrency:
+  group: newshub-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   frontend:
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft)
+    # Dedicated frontend listener: no Docker daemon access and no backend cache.
+    runs-on: [self-hosted, linux, x64, newshub-frontend]
+    timeout-minutes: 30
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm ci
+          persist-credentials: false
+      - name: Verify isolated frontend runner and Node.js 22
+        run: |
+          node --version
+          npm --version
+          test "$(node -p 'process.versions.node.split(".")[0]')" = 22
+          test -z "${DOCKER_HOST:-}"
+          test ! -S /ci-docker/docker.sock
+      - name: Restore installed frontend deps from lockfile-keyed local cache
+        run: bash ops/ci/install-frontend-deps.sh
       - name: Check frontend types
         working-directory: frontend
         run: npm run typecheck
@@ -36,37 +49,65 @@ jobs:
         run: npm run build
 
   backend-and-release-gates:
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft)
+    runs-on: [self-hosted, linux, x64, newshub-ci]
+    timeout-minutes: 90
     env:
       PYTHONPATH: backend:crawler
       RUN_MAIN: 'true'
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.12'
-          cache: pip
-          cache-dependency-path: backend/requirements.txt
-      - name: Create isolated backend environment
-        run: python -m venv backend/venv
-      - name: Install CPU-only PyTorch first
-        run: backend/venv/bin/python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.14.1+cpu'
-      - name: Install backend and test dependencies
-        run: backend/venv/bin/python -m pip install -r backend/requirements.txt
-      - name: Collect all three test roots
-        timeout-minutes: 5
+          persist-credentials: false
+      - name: Verify isolated Docker daemon and shared workspace
         run: |
-          backend/venv/bin/python -u - <<'PY'
-          import faulthandler
-          import sys
-          faulthandler.dump_traceback_later(120, repeat=True)
-          import pytest
-          sys.exit(pytest.main(['--collect-only', '-q', 'tests/', 'backend/api/tests/', 'scripts/deploy/tests/']))
-          PY
+          python3 --version
+          test "$(python3 -c 'import sys; print(".".join(map(str,sys.version_info[:2])))')" = 3.12
+          test "$DOCKER_HOST" = unix:///ci-docker/docker.sock
+          test -x "$CHROMIUM_EXECUTABLE"
+          test -w "$TMPDIR"
+          echo "CI job identity: $(id)"
+          stat -c 'DinD socket mode=%a owner-uid=%u group-gid=%g' /ci-docker/docker.sock
+          if ! docker info >/dev/null; then
+            echo 'Runner cannot access private DinD. Check Docker Socket group 121, dockerd --group, and non-root gosu runner permissions.' >&2
+            exit 1
+          fi
+          docker compose version
+          # Private DinD stores the Alpine probe image between CI runs. A
+          # missing image must be fetched exactly once; DNS failures must
+          # report an actionable error rather than obscure a mount check.
+          if ! docker image inspect alpine:3.22 >/dev/null 2>&1; then
+            for attempt in 1 2 3; do
+              docker pull alpine:3.22 && break
+              if [ "$attempt" -eq 3 ]; then
+                echo 'Private DinD cannot pull Alpine. Verify CI_DIND_DNS_PRIMARY/SECONDARY and the host outbound DNS/proxy.' >&2
+                exit 1
+              fi
+              sleep "$((attempt * 3))"
+            done
+          fi
+          docker run --rm --pull=never --network none \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/ci-src,readonly" \
+            alpine:3.22 test -f /ci-src/.github/workflows/ci.yml
+          docker run --rm --pull=never --network none \
+            --mount "type=bind,source=$TMPDIR,target=/ci-tmp,readonly" \
+            alpine:3.22 test -d /ci-tmp
+      - name: Reuse checked backend environment from persistent cache
+        run: bash ops/ci/install-backend-deps.sh
+      - name: Verify private self-hosted CI contract
+        run: backend/venv/bin/python -m unittest discover -s ops/ci/tests -p 'test_*.py'
+      - name: Validate release shell syntax and mocked script behavior
+        run: |
+          bash -n scripts/deploy/smoke.sh scripts/deploy/deploy.sh scripts/deploy/rollback.sh scripts/deploy/backup.sh scripts/deploy/restore.sh scripts/deploy/tests/test_release_scripts.sh
+          bash scripts/deploy/tests/test_release_scripts.sh
+          bash scripts/deploy/tests/test_export_static.sh
+          bash scripts/deploy/tests/test_preflight.sh
+          bash scripts/deploy/tests/test_local_domain_args.sh
       - name: Run backend and offline deployment tests
-        run: backend/venv/bin/python -m pytest -q tests/ backend/api/tests/ scripts/deploy/tests/
+        # Pytest already collects all three explicitly named roots. Avoid a
+        # second --collect-only pass; report slow setup/call/teardown phases.
+        run: backend/venv/bin/python -m pytest -q --durations=40 --durations-min=0.5 tests/ backend/api/tests/ scripts/deploy/tests/
       - name: Check production Django settings with synthetic values
         env:
           DJANGO_ENV: production
@@ -75,33 +116,28 @@ jobs:
           WAITRESS_TRUSTED_PROXY: 127.0.0.1
           DJANGO_DB_PATH: /tmp/newshub-ci-check.sqlite3
         run: backend/venv/bin/python backend/manage.py check --deploy
-      - name: Validate release shell syntax and mocked script behavior
+      - name: Verify cached Playwright package and preinstalled Chromium
         run: |
-          bash -n scripts/deploy/smoke.sh scripts/deploy/deploy.sh scripts/deploy/rollback.sh scripts/deploy/backup.sh scripts/deploy/restore.sh scripts/deploy/tests/test_release_scripts.sh
-          bash scripts/deploy/tests/test_release_scripts.sh
-          bash scripts/deploy/tests/test_export_static.sh
-          bash scripts/deploy/tests/test_preflight.sh
-          bash scripts/deploy/tests/test_local_domain_args.sh
-      - name: Install isolated browser smoke tools
-        run: |
-          backend/venv/bin/python -m pip install 'playwright==1.62.0'
-          backend/venv/bin/python -m playwright install chromium
-          sudo backend/venv/bin/python -m playwright install-deps chromium
-          sudo apt-get update
-          sudo apt-get install --yes libnss3-tools
-          browser_path="$(find "$HOME/.cache/ms-playwright" -type f -name chrome -perm /111 -print -quit)"
-          test -n "$browser_path"
-          echo "CHROMIUM_EXECUTABLE=$browser_path" >> "$GITHUB_ENV"
+          backend/venv/bin/python -m playwright --version
+          test -x "$CHROMIUM_EXECUTABLE"
       - name: Build the non-root production image
         env:
           RELEASE_SHA: ${{ github.sha }}
           NEWSHUB_IMAGE: newshub:ci-${{ github.sha }}
-        run: docker build --target production --build-arg "RELEASE_SHA=${RELEASE_SHA}" --tag "${NEWSHUB_IMAGE}" .
-      - name: Preload isolated smoke Nginx image
-        run: docker pull nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
+        run: docker build --target production --build-arg "RELEASE_SHA=$RELEASE_SHA" --tag "$NEWSHUB_IMAGE" .
+      - name: Build cached isolated G1 probe image
+        # G1 HTTP, Chromium and SSE must run inside DinD's gateway network.
+        # A persistent DinD Docker volume caches browser and Python image layers.
+        run: docker build --file ops/ci/g1-probe.Dockerfile --tag newshub:ci-g1-probe .
+
+      - name: Reuse cached smoke Nginx image or pull first time
+        run: |
+          image=nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
+          docker image inspect "$image" >/dev/null 2>&1 || docker pull "$image"
       - name: Run isolated G1 local-domain smoke
         env:
           RELEASE_SHA: ${{ github.sha }}
           NEWSHUB_IMAGE: newshub:ci-${{ github.sha }}
           PYTHON_BIN: ${{ github.workspace }}/backend/venv/bin/python
-        run: scripts/deploy/local-domain-smoke.sh --execute --image "${NEWSHUB_IMAGE}" --sha "${RELEASE_SHA}" --nginx-image nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
+          LOCAL_DOMAIN_G1_PROBE_IMAGE: newshub:ci-g1-probe
+        run: scripts/deploy/local-domain-smoke.sh --execute --image "$NEWSHUB_IMAGE" --sha "$RELEASE_SHA" --nginx-image nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94

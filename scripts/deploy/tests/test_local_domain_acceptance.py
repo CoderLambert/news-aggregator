@@ -29,6 +29,58 @@ APP_CONTAINER_ID = 'e' * 64
 NETWORK_ID = 'f' * 64
 
 
+@pytest.mark.parametrize(('exit_code', 'category'), [
+    (6, 'DNS resolution failure'),
+    (7, 'connection failure'),
+    (28, 'connection or response timeout'),
+    (35, 'TLS handshake failure'),
+    (60, 'TLS certificate verification failure'),
+])
+def test_curl_zero_status_preserves_safe_transport_failure(exit_code, category):
+    response = subprocess.CompletedProcess(
+        ['curl'], exit_code, f'{acceptance.STATUS_MARKER}000',
+        'private-token-and-url-must-never-reach-report',
+    )
+    with (
+        patch.object(acceptance, '_curl_command', return_value=['curl']),
+        patch.object(acceptance.subprocess, 'run', return_value=response),
+    ):
+        with pytest.raises(acceptance.AcceptanceError) as raised:
+            acceptance._curl(SimpleNamespace(), '/')
+    message = str(raised.value)
+    assert f'exit {exit_code}' in message and category in message
+    assert 'HTTP 000' in message
+    assert 'private-token' not in message
+
+
+def test_http_status_wrapper_keeps_check_identity_for_transport_errors():
+    response = subprocess.CompletedProcess(
+        ['curl'], 28, f'{acceptance.STATUS_MARKER}000', 'private-curl-stderr',
+    )
+    with (
+        patch.object(acceptance, '_curl_command', return_value=['curl']),
+        patch.object(acceptance.subprocess, 'run', return_value=response),
+    ):
+        with pytest.raises(acceptance.AcceptanceError) as raised:
+            acceptance._expect_status(SimpleNamespace(), {}, 'http_redirect', '/', 301)
+    assert raised.value.source_check_name == 'http_redirect'
+    assert raised.value.expected_http_status == 301
+    assert raised.value.actual_http_status == 0
+    assert 'exit 28' in str(raised.value)
+    assert 'private-curl-stderr' not in str(raised.value)
+
+
+def test_curl_rejects_successful_exit_with_zero_http_code():
+    with (
+        patch.object(acceptance, '_curl_command', return_value=['curl']),
+        patch.object(acceptance.subprocess, 'run', return_value=subprocess.CompletedProcess(
+            ['curl'], 0, f'{acceptance.STATUS_MARKER}000', '',
+        )),
+    ):
+        with pytest.raises(acceptance.AcceptanceError, match='HTTP 000'):
+            acceptance._curl(SimpleNamespace(), '/')
+
+
 @pytest.mark.parametrize(('scheme', 'request_target'), [
     ('http', 'http://news.lambert.host/'),
     ('https', 'https://news.lambert.host/'),

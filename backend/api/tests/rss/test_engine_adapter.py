@@ -72,7 +72,14 @@ def server():
                 pass
 
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    # BaseServer.serve_forever defaults to a 0.5s shutdown poll. This fixture
+    # starts a fresh server for every parameterized case; a short poll retains
+    # the real HTTP lifecycle while avoiding up to 0.5s per teardown.
+    thread = threading.Thread(
+        target=httpd.serve_forever,
+        kwargs={"poll_interval": 0.02},
+        daemon=True,
+    )
     thread.start()
     config = EngineConfig(INSTANCE, 3, f"http://127.0.0.1:{httpd.server_port}", SECRET,
                           read_timeout=.1, control_timeout=.1, read_attempts=1, full_content_enabled=True)
