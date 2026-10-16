@@ -9,8 +9,10 @@ from . import health_views
 from . import capabilities_views
 from . import provider_credential_views
 from . import article_fetch_views
+from .rss.reading import NewsReadStateView
 
 urlpatterns = [
+    path('me/news/<int:pk>/read-state/', NewsReadStateView.as_view(), name='news-read-state'),
     path('me/channel-subscriptions/', channel_views.ChannelSubscriptionsView.as_view(), name='channel-subscriptions'),
     path('me/channel-groups/', channel_views.ChannelGroupsView.as_view(), name='channel-groups'),
     path('me/channel-groups/<int:pk>/', channel_views.ChannelGroupDetailView.as_view(), name='channel-group-detail'),

@@ -202,6 +202,29 @@ export function fetchNewsDetail(id: NewsId, signal?: AbortSignal): Promise<unkno
   return api.get<unknown>(`/news/${id}/`, { signal }).then(({ data }) => data)
 }
 
+export interface NewsReadState {
+  is_read: boolean
+  version: number
+}
+
+function parseReadState(value: unknown): NewsReadState {
+  if (!isRecord(value) || typeof value.is_read !== 'boolean' ||
+    !Number.isSafeInteger(value.version) || Number(value.version) < 0) {
+    throw new TypeError('Invalid read state response')
+  }
+  return { is_read: value.is_read, version: Number(value.version) }
+}
+
+export async function fetchReadState(id: NewsId, signal?: AbortSignal): Promise<NewsReadState> {
+  return parseReadState((await api.get<unknown>(`/me/news/${id}/read-state/`, { signal })).data)
+}
+
+export async function updateReadState(id: NewsId, isRead: boolean, expectedVersion: number, viewerId: number): Promise<NewsReadState> {
+  return parseReadState((await api.patch<unknown>(`/me/news/${id}/read-state/`, {
+    is_read: isRead, expected_version: expectedVersion,
+  }, { headers: { 'X-Workspace-Viewer': String(viewerId) } })).data)
+}
+
 export function fetchFullArticle(id: NewsId, force = false, signal?: AbortSignal): Promise<unknown> {
   return apiFetch.post<unknown>(`/news/${id}/fetch-full/`, force === true ? { force: true } : undefined, { signal }).then(({ data }) => data)
 }

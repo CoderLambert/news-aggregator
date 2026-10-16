@@ -97,6 +97,13 @@ def _route_path(pattern, *, news_id=None):
 
 def _assert_policy_response(response, code="public_read_only", status=403):
     assert response.status_code == status
+    from api.public_policy import RSS_API_PATH
+    if RSS_API_PATH.match(response.wsgi_request.path_info):
+        assert response['Cache-Control'] == 'private, no-store'
+        if response.wsgi_request.method != 'HEAD':
+            assert response.json()['error']['code'] == code
+            assert response.json()['request_id']
+        return
     assert response["Cache-Control"] == "no-store"
     if response.wsgi_request.method == "HEAD":
         assert response.content == b""

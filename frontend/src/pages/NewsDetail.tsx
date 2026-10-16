@@ -19,6 +19,7 @@ import ArticleSearchBar from '@/components/news-detail/ArticleSearchBar'
 import ArticleToc from '@/components/news-detail/ArticleToc'
 import ScrollToTop from '@/components/news-detail/ScrollToTop'
 import FavoriteButtons from '@/components/news-detail/FavoriteButtons'
+import ReadStateButton from '@/components/news-detail/ReadStateButton'
 import SpeechStartMenu from '@/components/speech/SpeechStartMenu'
 import { useNewsDetail } from '@/hooks/useNewsDetail'
 import { useFullArticle } from '@/hooks/useFullArticle'
@@ -257,7 +258,10 @@ export default function NewsDetail() {
         <article ref={articleRef} className="w-full min-w-0 break-words">
           <ArticleHeader news={news} displayTitle={displayTitle} displaySubtitle={displaySubtitle} isEnglishSource={isEnglishSource} />
 
-          <FavoriteButtons newsId={news.id} className="mb-6 mt-4" onAuthRequired={() => setAuthModalOpen(true)} />
+          <div className="mb-6 mt-4 flex flex-wrap items-center gap-3">
+            <FavoriteButtons newsId={news.id} onAuthRequired={() => setAuthModalOpen(true)} />
+            <ReadStateButton key={news.id} newsId={news.id} />
+          </div>
 
           {news.cover_image && <img src={news.cover_image} alt={displayTitle} className="mb-8 w-full rounded-2xl shadow-sm" />}
 
