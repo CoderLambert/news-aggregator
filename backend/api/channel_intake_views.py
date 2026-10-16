@@ -6,6 +6,7 @@ from rest_framework.exceptions import PermissionDenied, Throttled, ValidationErr
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from api.models import Source
+from api.rss.access import authorized_sources
 from api.smart_channel_models import ChannelIntakeRequest
 from api.smart_channel_views import PrivateWorkspaceView, SiteClassifierView
 from api.services.channel_grouping import lock_user
@@ -39,7 +40,7 @@ class ResolveChannelView(PrivateWorkspaceView):
     def post(self, request):
         value, host, path, query = normalize_intake_url(request.data.get('url'))
         exact, publisher = [], []
-        for source in Source.objects.all():
+        for source in authorized_sources(request.user):
             data = profile_data(source)
             for address in (source.url, data['feed_url']):
                 if not address:

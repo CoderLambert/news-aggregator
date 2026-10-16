@@ -14,6 +14,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView
+from api.rss.access import authorized_news, authorized_sources, news_in_sources, article_sources, with_authorized_source_counts
 from api.models import Source, News, NewsSourceItem, BlockedNews, ChannelGroup, ChannelSubscription
 from api.channel_views import PersonalChannelsView, ChannelSubscriptionsView, ChannelGroupDetailView, ids
 from api.smart_channel_models import (SourceTopicProfile, ChannelGroupingConfig, ChannelGroupingProposal,
@@ -42,24 +43,23 @@ class CatalogView(APIView):
     permission_classes = [AllowAny]
     def get(self, request):
         profiles = {p.source_id: p for p in SourceTopicProfile.objects.all()}
-        counts = dict(News.objects.values('source_id').annotate(n=Count('id')).values_list('source_id', 'n'))
-        channel_counts = dict(NewsSourceItem.objects.values('source_key').annotate(n=Count('news_id', distinct=True)).values_list('source_key', 'n'))
-        own_counts = {(r['source_key'], r['news__source_id']): r['n'] for r in NewsSourceItem.objects.values('source_key', 'news__source_id').annotate(n=Count('news_id', distinct=True))}
         catalog = []
-        for source in Source.objects.order_by('name'):
+        for source in with_authorized_source_counts(request.user, authorized_sources(request.user)).select_related('publication').order_by('name'):
             data = profile_data(source, profiles.get(source.pk, False))
-            data['news_count'] = counts.get(source.pk, 0) + channel_counts.get(data['policy_key'], 0) - own_counts.get((data['policy_key'], source.pk), 0)
+            data.update(name=source.publication.display_name or source.name, reading_policy=source.publication.reading_policy)
+            data['news_count'] = source.rss_news_count
             catalog.append(data)
-        return Response({'topics': TOPICS, 'presets': PRESETS, 'sources': catalog})
+        return Response({'topics': TOPICS, 'presets': PRESETS, 'sources': catalog}, headers={'Cache-Control': 'private, no-store'})
 
 
 class SourceProfileView(APIView):
     permission_classes = [AllowAny]
     throttle_classes = [WorkspaceThrottle]
     def get(self, request, pk):
-        source = get_object_or_404(Source, pk=pk)
+        source = get_object_or_404(authorized_sources(request.user).select_related('publication'), pk=pk)
         data = profile_data(source)
-        articles = channel_articles(source).select_related('source')
+        data.update(name=source.publication.display_name or source.name, reading_policy=source.publication.reading_policy)
+        articles = news_in_sources(authorized_news(request.user), Source.objects.filter(pk=source.pk)).select_related('source')
         if request.user.is_authenticated:
             articles = articles.exclude(id__in=BlockedNews.objects.filter(user=request.user).values('news_id'))
         data['news_count'] = articles.count()
@@ -124,7 +124,7 @@ class ResolveChannelView(PrivateWorkspaceView):
     def post(self, request):
         value, host, path, query = normalize_url(request.data.get('url'))
         exact, publisher = [], []
-        for source in Source.objects.all():
+        for source in authorized_sources(request.user):
             data = profile_data(source)
             for address in [source.url, data['feed_url']]:
                 if not address:
@@ -285,7 +285,7 @@ class SmartGroupDetailView(ChannelGroupDetailView):
 class ReadingStatsView(PrivateWorkspaceView):
     def get(self, request):
         today = timezone.localdate()
-        events = ReadingDay.objects.filter(user=request.user)
+        events = ReadingDay.objects.filter(user=request.user, news_id__in=authorized_news(request.user).values('pk'))
         days = dict(events.filter(day__gte=today - timedelta(days=6)).values('day').annotate(n=Count('news_id', distinct=True)).values_list('day', 'n'))
         cursor = today if events.filter(day=today).exists() else today - timedelta(days=1)
         streak = 0
@@ -303,7 +303,7 @@ class ReadingStatsView(PrivateWorkspaceView):
             raise ValidationError('无效新闻 ID。')
         if BlockedNews.objects.filter(user=request.user, news_id=news_id).exists():
             raise NotFound()
-        news = get_object_or_404(News, pk=news_id)
+        news = get_object_or_404(authorized_news(request.user), pk=news_id)
         ReadingDay.objects.get_or_create(user=request.user, news=news, day=timezone.localdate())
         return Response({'recorded': True})
     def delete(self, request):
@@ -314,7 +314,7 @@ class ReadingStatsView(PrivateWorkspaceView):
 class DashboardView(APIView):
     permission_classes = [AllowAny]
     def get(self, request):
-        news = News.objects.filter(related_to__isnull=True, publish_time__lte=timezone.now()).select_related('source')
+        news = authorized_news(request.user).filter(related_to__isnull=True, publish_time__lte=timezone.now()).select_related('source')
         if request.user.is_authenticated:
             news = news.exclude(id__in=BlockedNews.objects.filter(user=request.user).values('news_id'))
         ranked = ReadingDay.objects.filter(day__gte=timezone.localdate() - timedelta(days=1), news_id__in=news.values('id')).values('news_id').annotate(readers=Count('user_id', distinct=True)).order_by('-readers', '-news_id')[:10]
@@ -324,6 +324,11 @@ class DashboardView(APIView):
             articles = [by_id[r['news_id']] for r in ranks if r['news_id'] in by_id]
         else:
             articles = list(news.order_by('-publish_time')[:10])
-        return Response({'kind': 'popular' if ranks else 'latest', 'stories': [
-            {'id': n.pk, 'title': n.title, 'source_name': n.source.name, 'publish_time': n.publish_time} for n in articles]},
+        stories = []
+        for article in articles:
+            source = article_sources(request.user, article).select_related('publication').first()
+            if source is not None:
+                stories.append({'id': article.pk, 'title': article.title,
+                    'source_name': source.publication.display_name or source.name, 'publish_time': article.publish_time})
+        return Response({'kind': 'popular' if ranks else 'latest', 'stories': stories},
             headers={'Cache-Control': 'private, no-store'})

@@ -4,11 +4,9 @@ from api.services.source_policy import POLICIES, policy_for_name
 
 
 def channel_filter(queryset, source_ids):
-    from api.models import Source, NewsSourceItem
-    names = Source.objects.filter(pk__in=source_ids).values_list('name', flat=True)
-    keys = [policy.key for name in names if (policy := policy_for_name(name))]
-    members = NewsSourceItem.objects.filter(source_key__in=keys).values('news_id')
-    return queryset.filter(Q(source_id__in=source_ids) | Q(pk__in=members))
+    from api.models import Source
+    from api.rss.access import news_in_sources
+    return news_in_sources(queryset, Source.objects.filter(pk__in=source_ids))
 
 
 def region_filter(queryset, region):

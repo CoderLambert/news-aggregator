@@ -1,6 +1,7 @@
 import logging
 
 from django.db.models import Count, Q
+from api.rss.access import authorized_news, authorized_sources, body_authorized_news, get_stored_article, get_article_access, annotate_article_access, with_authorized_source_counts
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
 from django.conf import settings
@@ -69,6 +70,25 @@ def ensure_full_content(news, execution_guard=None):
     return request_full_content(news, execution_guard=execution_guard)
 
 
+class PolicyNoStoreMixin:
+    def finalize_response(self, request, response, *args, **kwargs):
+        response = super().finalize_response(request, response, *args, **kwargs)
+        response['Cache-Control'] = 'private, no-store'
+        return response
+
+
+class ArticleAccessMixin(PolicyNoStoreMixin):
+    """Authorize IDs before object/cache/provider access; responses are never shared."""
+    def get_queryset(self):
+        return authorized_news(self.request.user, super().get_queryset())
+
+    def get_object(self):
+        news = super().get_object()
+        news._rss_access_user = self.request.user
+        return news
+
+
+
 class CommaSeparatedIntegerFilter(django_filters.BaseInFilter, django_filters.NumberFilter):
     pass
 
@@ -77,7 +97,7 @@ class NewsFilter(django_filters.FilterSet):
     category = CommaSeparatedIntegerFilter(method='filter_category')
     source = CommaSeparatedIntegerFilter(method='filter_source')
     region = django_filters.ChoiceFilter(choices=[('domestic', '国内'), ('international', '国际')], method='filter_region')
-    source__source_type = django_filters.CharFilter(field_name='source__source_type')
+    source__source_type = django_filters.CharFilter(method='filter_source_type')
     source_types = django_filters.CharFilter(method='filter_source_types')
     full_content = django_filters.BooleanFilter(
         method='filter_full_content',
@@ -96,24 +116,27 @@ class NewsFilter(django_filters.FilterSet):
         allowed = {kind for kind, _label in Source.TYPE_CHOICES}
         if not 1 <= len(kinds) <= len(allowed) or len(set(kinds)) != len(kinds) or any(kind not in allowed for kind in kinds):
             raise ApiValidationError({'source_types': 'Invalid source type selection.'})
-        return queryset.filter(source__source_type__in=kinds)
+        from api.rss.access import news_in_sources
+        return news_in_sources(queryset, authorized_sources(self.request.user).filter(source_type__in=kinds))
+
+    def filter_source_type(self, queryset, name, value):
+        return self.filter_source_types(queryset, name, value)
 
     def filter_source(self, queryset, name, value):
         from api.services.channel_articles import channel_filter
-        return channel_filter(queryset, value)
+        return channel_filter(queryset, authorized_sources(self.request.user).filter(pk__in=value).values("pk"))
 
     def filter_category(self, queryset, name, value):
         from api.services.channel_articles import category_filter
         return category_filter(queryset, value)
 
     def filter_region(self, queryset, name, value):
-        from api.services.channel_articles import region_filter
-        return region_filter(queryset, value)
+        from api.rss.access import news_in_sources
+        return news_in_sources(queryset, authorized_sources(self.request.user).filter(region=value))
 
     def filter_full_content(self, queryset, name, value):
         if value:
-            from api.services.body_access import can_view_article_body
-            return filter_readable_full_content(queryset, privileged=can_view_article_body(getattr(self.request, "user", None)))
+            return body_authorized_news(getattr(self.request, "user", None), queryset)
         return queryset
 
 
@@ -157,8 +180,7 @@ class NewsListView(generics.ListAPIView):
 
     def finalize_response(self, request, response, *args, **kwargs):
         response = super().finalize_response(request, response, *args, **kwargs)
-        if request.user.is_authenticated:
-            response['Cache-Control'] = 'private, no-store'
+        response['Cache-Control'] = 'private, no-store'
         return response
 
     def get_ordering(self):
@@ -171,14 +193,12 @@ class NewsListView(generics.ListAPIView):
         return super().get_ordering()
 
     def get_queryset(self):
-        qs = annotate_full_content_availability(News.objects.select_related('source', 'category').prefetch_related('source_items')).defer(
+        qs = annotate_article_access(self.request.user, authorized_news(self.request.user, News.objects.select_related('source', 'category').prefetch_related('source_items'))).defer(
             'full_content', 'full_content_zh', 'full_content_provenance')
         if self.request.query_params.get('search_in') == 'full':
             # Restrict matches to the user's *readable* bodies; an archived
             # paywalled/summary-only body is not searchable by an ordinary user.
-            from api.services.body_access import can_view_article_body
-            qs = filter_readable_full_content(
-                qs, privileged=can_view_article_body(self.request.user))
+            qs = body_authorized_news(self.request.user, qs)
         # Hide duplicates by default
         if self.request.query_params.get('include_dupes', 'false') != 'true':
             qs = qs.filter(related_to__isnull=True)
@@ -520,12 +540,12 @@ class ProviderComparisonRetestView(generics.GenericAPIView):
         )
 
 
-class NewsDetailView(generics.RetrieveAPIView):
+class NewsDetailView(ArticleAccessMixin, generics.RetrieveAPIView):
     queryset = News.objects.select_related('source', 'category').prefetch_related('source_items').all()
     serializer_class = NewsDetailSerializer
 
 
-class NewsFetchFullView(generics.GenericAPIView):
+class NewsFetchFullView(ArticleAccessMixin, generics.GenericAPIView):
     """Read cached content or persist one shared refresh intent."""
     queryset = News.objects.select_related('source', 'category').prefetch_related('source_items').all()
     serializer_class = NewsDetailSerializer
@@ -536,11 +556,16 @@ class NewsFetchFullView(generics.GenericAPIView):
         import math
         from django.utils import timezone
         news = self.get_object()
+        if news.body_owner_binding_id:
+            return Response({'error_code': 'rss_refetch_required', 'error': '请使用RSS正文修复操作。'}, status=410)
         force = request.data.get('force') is True
         from api.services.body_access import can_view_article_body
         privileged = can_view_article_body(request.user)
-        if has_full_content(news, privileged=privileged) and not force:
+        if get_stored_article(request.user, news.pk).scope == 'full' and not force:
             return Response(self.get_serializer(news).data)
+        if not authorized_sources(request.user, body=True).filter(
+                pk=news.body_owner_source_id, publication__owner='legacy').exists():
+            return Response({'error_code': 'reading_policy', 'error': '当前来源政策不允许获取正文。'}, status=403)
         rejection = fetch_eligibility(news, privileged=privileged)
         if rejection or news.full_content_fetch_status == 'blocked' or (news.full_content_fetch_status == 'unsupported' and not privileged):
             data = dict(self.get_serializer(news).data)
@@ -571,7 +596,7 @@ class NewsFetchFullView(generics.GenericAPIView):
         return response
 
 
-class NewsTranslateFullView(generics.GenericAPIView):
+class NewsTranslateFullView(ArticleAccessMixin, generics.GenericAPIView):
     """Translate full article content to Chinese using SSE streaming."""
     queryset = News.objects.select_related('source', 'category').prefetch_related('source_items').all()
     serializer_class = NewsDetailSerializer
@@ -586,7 +611,7 @@ class NewsTranslateFullView(generics.GenericAPIView):
         # _call_llm_stream is invoked inside the translation_jobs worker, not here.
 
         news = self.get_object()
-        if not has_full_content(news):
+        if get_stored_article(request.user, news.pk).scope != 'full':
             from api.services import shared_translations
             return shared_translations.error_response('请先获取完整原文。', error_code='full_content_not_ready')
 
@@ -766,7 +791,7 @@ class NewsTranslateFullView(generics.GenericAPIView):
         return StreamingHttpResponse(translate_stream(), content_type='text/event-stream')
 
 
-class NewsChatView(generics.GenericAPIView):
+class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
     """Chat with the AI assistant about a news article for the authenticated user."""
     queryset = News.objects.select_related('source', 'category').prefetch_related('source_items').all()
     authentication_classes = [SessionAuthentication]
@@ -837,10 +862,9 @@ class NewsChatView(generics.GenericAPIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        # Request shared durable work; this HTTP request uses current context.
-        ensure_full_content(news)
-        context = pick_chat_context(news)
-        chat_scope = context_scope(news)
+        # Reader actions consume stored content; subscription/sync owns collection.
+        stored = get_stored_article(request.user, news.pk)
+        context, chat_scope = stored.markdown, stored.scope
         if len(context) > 10000:
             context = context[:10000]
             chat_scope = 'excerpt'
@@ -998,19 +1022,19 @@ class NewsChatView(generics.GenericAPIView):
         return response
 
 
-class CategoryListView(generics.ListAPIView):
+class CategoryListView(PolicyNoStoreMixin, generics.ListAPIView):
     serializer_class = CategorySerializer
 
     def get_queryset(self):
-        return Category.objects.annotate(news_count=Count('news')).order_by('id')
+        return Category.objects.annotate(news_count=Count('news', filter=Q(news__pk__in=authorized_news(self.request.user).values('pk')), distinct=True)).order_by('id')
 
 
-class SourceListView(generics.ListAPIView):
+class SourceListView(PolicyNoStoreMixin, generics.ListAPIView):
     serializer_class = SourceSerializer
     pagination_class = None
 
     def get_queryset(self):
-        qs = Source.objects.annotate(news_count=Count('news'))
+        qs = with_authorized_source_counts(self.request.user, authorized_sources(self.request.user)).select_related('publication')
         region = self.request.query_params.get('region')
         if region:
             if region not in {'domestic', 'international'}:
@@ -1018,19 +1042,9 @@ class SourceListView(generics.ListAPIView):
             qs = qs.filter(region=region)
         return qs
 
-    def get_serializer_context(self):
-        context = super().get_serializer_context()
-        from api.models import NewsSourceItem
-        counts = {}
-        own_counts = {}
-        for row in NewsSourceItem.objects.values('source_key', 'news__source_id').annotate(n=Count('news_id', distinct=True)):
-            counts[row['source_key']] = counts.get(row['source_key'], 0) + row['n']
-            own_counts[(row['source_key'], row['news__source_id'])] = row['n']
-        context.update(channel_counts=counts, own_channel_counts=own_counts)
-        return context
 
 
-class NewsSuggestedQuestionsView(generics.GenericAPIView):
+class NewsSuggestedQuestionsView(ArticleAccessMixin, generics.GenericAPIView):
     """User-authorized, bounded suggested questions with a safe no-model fallback.
 
     Cached public questions are free to read. A new inference requires an
@@ -1045,8 +1059,8 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
 
     @staticmethod
     def _context_and_scope(news):
-        context = pick_chat_context(news)
-        scope = context_scope(news)
+        stored = get_stored_article(getattr(news, '_rss_access_user', None), news.pk)
+        context, scope = stored.markdown, stored.scope
         if len(context) > 6000:
             return context[:6000], 'excerpt' if scope == 'full' else scope
         return context, scope
@@ -1061,7 +1075,8 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
         news = self.get_object()
         force = request.query_params.get('force') in ('1', 'true', 'True')
         # Cache hits must never consume another user's model allowance.
-        if not force and news.suggested_questions and len(news.suggested_questions) >= 3:
+        if (not force and news.suggested_questions and len(news.suggested_questions) >= 3
+                and get_stored_article(request.user, news.pk).scope == 'full'):
             _, cached_scope = self._context_and_scope(news)
             return Response({'questions': news.suggested_questions[:3], 'context_scope': cached_scope,
                              'full_content_revision': news.full_content_revision, 'generated': True})
@@ -1081,9 +1096,7 @@ class NewsSuggestedQuestionsView(generics.GenericAPIView):
                                  'context_scope': suggestion_scope, 'generation': 'unconfigured',
                                  'full_content_revision': news.full_content_revision, 'generated': False})
 
-            # Queue a permitted durable article fetch only for authorized AI;
-            # never synchronously contact a publisher from this endpoint.
-            ensure_full_content(news)
+            # Suggestions use saved content and never enqueue publisher work.
             expected_content_revision = news.full_content_revision
             context, suggestion_scope = self._context_and_scope(news)
             title = news.title_zh or news.title
@@ -1161,7 +1174,7 @@ from .serializers import FavoriteSerializer
 from .models import Favorite
 
 
-class FavoriteListView(generics.ListCreateAPIView):
+class FavoriteListView(PolicyNoStoreMixin, generics.ListCreateAPIView):
     """
     GET  /api/favorites/           — list authenticated user's favorites
     POST /api/favorites/           — like or bookmark a news article
@@ -1173,7 +1186,7 @@ class FavoriteListView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        qs = Favorite.objects.filter(user=self.request.user).select_related(
+        qs = Favorite.objects.filter(user=self.request.user, news_id__in=authorized_news(self.request.user).values('pk')).select_related(
             'news', 'news__source', 'news__category',
         )
         fav_type = self.request.query_params.get('type')
@@ -1191,6 +1204,8 @@ class FavoriteListView(generics.ListCreateAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        get_article_access(request.user, news_id)
+
         # Check if already exists → toggle (remove)
         existing = Favorite.objects.filter(
             user=request.user, news_id=news_id, type=fav_type,
@@ -1204,7 +1219,7 @@ class FavoriteListView(generics.ListCreateAPIView):
                 'title_zh': existing.news.title_zh or '',
                 'url': existing.news.url,
                 'cover_image': existing.news.cover_image or '',
-                'source': {'name': existing.news.source.name},
+                'source': {'name': self.get_serializer(existing).data['news']['source_name']},
                 'category': {'name': existing.news.category.name},
                 'publish_time': existing.news.publish_time,
             }
@@ -1238,7 +1253,7 @@ class FavoriteDestroyView(generics.DestroyAPIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class FavoriteCheckView(generics.GenericAPIView):
+class FavoriteCheckView(PolicyNoStoreMixin, generics.GenericAPIView):
     """
     GET /api/favorites/check/?news_id=123
     Returns like/bookmark status and counts for the given news article.
@@ -1253,6 +1268,7 @@ class FavoriteCheckView(generics.GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        get_article_access(request.user, news_id)
         user_favs = Favorite.objects.filter(
             user=request.user, news_id=news_id,
         )
@@ -1273,7 +1289,7 @@ class FavoriteCheckView(generics.GenericAPIView):
 
 # ─── Blocked News API ──────────────────────────────────────────────────
 
-class BlockedNewsListView(generics.ListCreateAPIView):
+class BlockedNewsListView(PolicyNoStoreMixin, generics.ListCreateAPIView):
     """
     GET    /api/blocked/   — list authenticated user's blocked news
     POST   /api/blocked/   — block a news article (idempotent)
@@ -1284,7 +1300,7 @@ class BlockedNewsListView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         return BlockedNews.objects.filter(
-            user=self.request.user,
+            user=self.request.user, news_id__in=authorized_news(self.request.user).values('pk'),
         ).select_related('news', 'news__source', 'news__category')
 
     def create(self, request, *args, **kwargs):
@@ -1294,7 +1310,7 @@ class BlockedNewsListView(generics.ListCreateAPIView):
                 {'error': 'news_id is required'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if not News.objects.filter(pk=news_id).exists():
+        if not authorized_news(request.user).filter(pk=news_id).exists():
             return Response(
                 {'error': 'News not found'},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -1330,7 +1346,7 @@ class BlockedNewsListView(generics.ListCreateAPIView):
         return Response({'removed': deleted > 0})
 
 
-class BlockedNewsCheckView(generics.GenericAPIView):
+class BlockedNewsCheckView(PolicyNoStoreMixin, generics.GenericAPIView):
     """GET /api/blocked/check/?news_id=123 — check if news is blocked."""
     permission_classes = [IsAuthenticated]
 
@@ -1341,6 +1357,7 @@ class BlockedNewsCheckView(generics.GenericAPIView):
                 {'error': 'news_id is required'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        get_article_access(request.user, news_id)
         is_blocked = BlockedNews.objects.filter(
             user=request.user, news_id=news_id,
         ).exists()
@@ -1522,7 +1539,7 @@ def auth_me(request):
 
 # ─── TTS (Text-to-Speech) API ──────────────────────────────────────────
 
-class NewsTTSView(generics.GenericAPIView):
+class NewsTTSView(ArticleAccessMixin, generics.GenericAPIView):
     """Stream TTS audio for a news article using Edge TTS (Microsoft Natural voices).
 
     GET /api/news/<pk>/tts/?language=zh&voice=yunyang&scope=full
@@ -1555,6 +1572,9 @@ class NewsTTSView(generics.GenericAPIView):
             language = 'original' if request.query_params.get('displayMode') == 'original' else 'zh'
         voice_pref = request.query_params.get('voice', '')
         scope = request.query_params.get('scope', 'full')
+
+        if scope == 'full' and get_stored_article(request.user, news.pk).scope != 'full':
+            return Response({'code': 'source_content_required', 'message': '当前仅可读取摘要。'}, status=409)
 
         try:
             resolved = resolve_tts_content(news, request.user, language, scope)

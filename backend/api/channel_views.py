@@ -94,9 +94,11 @@ class ChannelSubscriptionsView(PersonalChannelsView):
         if action == 'unsubscribe':
             ChannelSubscription.objects.filter(user=request.user, source_id__in=source_ids).delete()
         elif action == 'subscribe':
-            sources = list(Source.objects.filter(pk__in=source_ids))
+            from api.rss.access import authorized_sources
+            sources = list(authorized_sources(request.user).filter(pk__in=source_ids))
             if len(sources) != len(source_ids):
-                raise ValidationError({'source_ids': '频道不存在。'})
+                from rest_framework.exceptions import NotFound
+                raise NotFound()
             existing = set(ChannelSubscription.objects.filter(user=request.user, source_id__in=source_ids).values_list('source_id', flat=True))
             if any(subscription_status(s)[0] != 'active' for s in sources if s.id not in existing):
                 raise ValidationError({'source_ids': '停用频道不能新增订阅。'})

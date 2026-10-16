@@ -2,6 +2,7 @@ from django.test import TestCase
 from django.contrib.auth.models import User
 from rest_framework.test import APIClient
 from api.models import News, Category, Source, Favorite
+from api.rss.models import SourcePublication
 from django.utils import timezone
 
 
@@ -12,6 +13,7 @@ class FavoriteModelTest(TestCase):
         self.user = User.objects.create_user(username='testuser', password='test123')
         self.category = Category.objects.create(name='Test', slug='test')
         self.source = Source.objects.create(name='Test Source', url='https://test.com')
+        SourcePublication.objects.create(source=self.source, publication='public', reading_policy='standard', owner='legacy')
         self.news = News.objects.create(
             title='Test News',
             content='Content',
@@ -54,6 +56,7 @@ class FavoriteAPITest(TestCase):
         self.user = User.objects.create_user(username='testuser', password='test123')
         self.category = Category.objects.create(name='Test', slug='test')
         self.source = Source.objects.create(name='Test Source', url='https://test.com')
+        SourcePublication.objects.create(source=self.source, publication='public', reading_policy='standard', owner='legacy')
         self.news1 = News.objects.create(
             title='News 1', content='Content 1',
             publish_time=timezone.now(), source=self.source,
@@ -97,7 +100,7 @@ class FavoriteAPITest(TestCase):
     def test_create_nonexistent_news(self):
         self._login()
         resp = self.client.post('/api/favorites/', {'news_id': 99999, 'type': 'like'}, format='json')
-        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.status_code, 404)
 
     def test_duplicate_like_returns_existing(self):
         self._login()
