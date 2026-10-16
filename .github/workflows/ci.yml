@@ -79,6 +79,8 @@ jobs:
         run: backend/venv/bin/python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.14.1+cpu'
       - name: Install backend and test dependencies
         run: backend/venv/bin/python -m pip install -r backend/requirements.txt
+      - name: Verify private self-hosted CI contract
+        run: backend/venv/bin/python -m unittest discover -s ops/ci/tests -p 'test_*.py'
       - name: Collect all three test roots
         timeout-minutes: 5
         run: |
