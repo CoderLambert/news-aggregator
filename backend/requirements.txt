@@ -20,3 +20,6 @@ feedparser>=6.0.12,<7.0
 # RSS HTML conversion: changing these pins requires a conversion-version bump.
 nh3==0.3.7
 markdownify==1.2.3
+
+# Official Miniflux SDK; contract laboratory ops/rss/T00/versions.json.
+miniflux==1.1.6
