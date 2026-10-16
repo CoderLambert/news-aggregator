@@ -6,6 +6,7 @@ from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 from api.models import Category, News, NewsSourceItem
+from api.rss.legacy_fencing import legacy_admin_guard, assert_legacy_admin_guard
 from api.services.source_policy import POLICIES
 
 
@@ -35,7 +36,8 @@ def build_plan(source_key, *, limit=100, after_id=0):
         if target == news.category.name:
             continue
         rows.append({'news_id': news.pk, 'source_item_id': mapping.pk, 'old_category_id': news.category_id,
-                     'target_category': target, 'fingerprint': fingerprint(news)})
+                     'target_category': target, 'fingerprint': fingerprint(news),
+                     'rss_guard': legacy_admin_guard(news.source_id, [news.pk])})
     return {'schema': 1, 'batch_id': str(uuid.uuid4()), 'rule_version': RULE_VERSION,
             'source_key': source_key, 'created_at': timezone.now().isoformat(), 'rows': rows}
 
@@ -61,6 +63,7 @@ def execute_plan(plan, *, undo=False):
         if mapping is None or mapping.news.source.name != policy.name:
             raise CorrectionConflict('primary publisher changed')
         news = mapping.news
+        assert_legacy_admin_guard(row.get('rss_guard'))
         history = list((mapping.metadata or {}).get('category_corrections') or [])
         prior = next((event for event in history if event.get('batch_id') == batch_id), None)
         if prior and ((undo and prior.get('undone_at')) or not undo):

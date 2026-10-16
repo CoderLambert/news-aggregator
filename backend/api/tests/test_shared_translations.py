@@ -23,13 +23,18 @@ pytestmark = pytest.mark.django_db(transaction=True)
 
 @pytest.fixture
 def article():
-    return News.objects.create(
+    article = News.objects.create(
         title='Public article', url='https://example.com/shared', publish_time=timezone.now(),
         source=Source.objects.create(name='Public source', url='https://example.com', language='en'),
         category=Category.objects.create(name='Tech', slug='tech'),
         full_content='# Public article\n\nOriginal English body.',
         full_content_state='legacy',
     )
+    from api.rss.models import SourcePublication
+    SourcePublication.objects.create(source=article.source, publication='public', owner='legacy', reading_policy='standard')
+    article.body_owner_source = article.source
+    article.save(update_fields=['body_owner_source'])
+    return article
 
 
 def reader(name):
@@ -130,7 +135,7 @@ def test_source_changes_invalidate_both_scopes_and_prevent_late_publication(arti
     article.save()
     assert serialize(article, owner)['full_content_zh'] == ''
     assert shared.get_shared_translation(article) is None
-    with pytest.raises(subscription.SubscriptionError, match='原文已更新'):
+    with pytest.raises(subscription.SubscriptionError, match='原文'):
         subscription.save_completed_translation(
             user_id=owner.pk, connection_id=connection.pk, news_id=article.pk,
             expected_generation=0, model_slug='selected-model', text='迟到结果', source_digest=old_hash,
@@ -263,7 +268,6 @@ def test_generic_provider_only_publishes_whole_results_to_separate_table(article
     client.force_authenticate(caller)
     with (
         patch('api.views.get_clients', return_value=[(Mock(), 'model')]),
-        patch('api.services.llm_translator.find_chinese_translation_link', return_value=None),
         patch('api.services.llm_translator._call_llm_stream', side_effect=stream),
     ):
         result = body(client.post(f'/api/news/{article.pk}/translate/', {'force': False}, format='json'))
@@ -292,22 +296,16 @@ def test_expired_queued_job_does_not_call_model(article):
     assert not SharedArticleTranslation.objects.exists()
 
 
-def test_source_change_during_translated_link_fetch_returns_actionable_sse_error(article):
-    def fetched(_):
-        News.objects.filter(pk=article.pk).update(full_content='New source body')
-        return '旧原文对应的中文链接内容'
+def test_translation_does_not_follow_chinese_links(article):
+    user, _ = reader('no-link')
+    article.full_content += '\n[中文译文](https://example.com/zh)'
+    article.save(update_fields=['full_content'])
+    client = APIClient(); client.force_authenticate(user)
+    with patch('api.services.chatgpt_subscription.active_connection_for_user', return_value=None), \
+         patch('api.views.get_clients', return_value=[]):
+        result = body(client.post(f'/api/news/{article.pk}/translate/', {}, format='json'))
+    assert 'API Key' in result
 
-    caller = get_user_model().objects.create_user(username='translated-link-caller')
-    client = APIClient()
-    client.force_authenticate(caller)
-    with (
-        patch('api.services.llm_translator.find_chinese_translation_link', return_value='https://example.com/zh'),
-        patch('api.services.llm_translator.fetch_and_verify_chinese_content', side_effect=fetched),
-    ):
-        response = client.post(f'/api/news/{article.pk}/translate/', {'force': False}, format='json')
-    assert response.status_code == 200
-    assert '原文已更新' in body(response)
-    assert not SharedArticleTranslation.objects.exists()
 
 
 def test_shared_translation_quota_bounds_users_and_active_work(article):
@@ -320,7 +318,7 @@ def test_shared_translation_quota_bounds_users_and_active_work(article):
         return News.objects.create(title=f'Capacity {suffix}',
             url=f'https://example.com/capacity-{suffix}',
             publish_time=timezone.now(), source=another_source, category=another_category,
-            full_content='Full article body for a safe fake provider.', full_content_state='legacy')
+            full_content='Full article body for a safe fake provider.', full_content_state='legacy', body_owner_source=another_source)
 
     first_other = make_article('two')
     third = make_article('three')

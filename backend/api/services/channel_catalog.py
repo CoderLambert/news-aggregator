@@ -10,6 +10,14 @@ PUBLISHER_COUNTRIES = {'bbc': 'UK', 'bbc_health': 'UK', 'deepmind': 'UK', 'mistr
 
 
 def subscription_status(source):
+    publication = getattr(source, 'publication', None)
+    if publication is not None and publication.owner != 'legacy':
+        if publication.owner == 'paused':
+            return 'inactive', publication.pause_reason or 'paused'
+        links = source.feed_links.filter(enabled=True)
+        if links.filter(binding__connection_state='ready').exists():
+            return 'active', ''
+        return 'inactive', 'connecting' if links.exists() else 'unconfigured_source'
     policy = policy_for_name(source.name)
     if not policy:
         return 'inactive', 'unregistered_source'

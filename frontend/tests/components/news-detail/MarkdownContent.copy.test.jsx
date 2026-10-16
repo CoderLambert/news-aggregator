@@ -86,7 +86,7 @@ describe('MarkdownContent — code block copy button', () => {
   })
 
   it('repairs token-per-line code blocks from extracted GitHub README content', async () => {
-    render(<MarkdownContent content={'```\nfrom\ncloakbrowser\nimport\nlaunch\nbrowser\n=\nlaunch\n(\n)\n\npage\n=\nbrowser\n.\nnew_page\n(\n)\n```'} />)
+    render(<MarkdownContent legacyCodeRepair content={'```\nfrom\ncloakbrowser\nimport\nlaunch\nbrowser\n=\nlaunch\n(\n)\n\npage\n=\nbrowser\n.\nnew_page\n(\n)\n```'} />)
 
     fireEvent.click(screen.getByRole('button', { name: /复制代码/ }))
 
@@ -94,6 +94,13 @@ describe('MarkdownContent — code block copy button', () => {
     expect(writeText.mock.calls[0][0]).toContain('from cloakbrowser import launch')
     expect(writeText.mock.calls[0][0]).toContain('browser = launch()')
     expect(writeText.mock.calls[0][0]).toContain('page = browser.new_page()')
+  })
+
+  it('copies new engine code exactly without legacy token repair', async () => {
+    const code = 'from\ncloakbrowser\nimport\nlaunch\nbrowser\n=\nlaunch\n(\n)'
+    render(<MarkdownContent content={'```\n' + code + '\n```'} />)
+    fireEvent.click(screen.getByRole('button', { name: /复制代码/ }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(code))
   })
 
 })

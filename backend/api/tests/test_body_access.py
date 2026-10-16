@@ -1,3 +1,6 @@
+from api.tests.rss.legacy_fixtures import legacy_news, public_legacy
+from api.tests.rss.reader_fixtures import public_legacy_article
+from django.http import Http404
 from types import SimpleNamespace
 from unittest.mock import patch
 import pytest
@@ -15,9 +18,9 @@ def story(db):
     p = POLICIES['energy_storage_news']
     source = Source.objects.update_or_create(name=p.name, defaults={'url':'https://'+p.domains[0]})[0]
     category = Category.objects.create(name='Body access test', slug='body-access-test')
-    return News.objects.create(title='Body access article', content='Public summary', source=source, category=category,
+    return public_legacy_article(legacy_news(title='Body access article', content='Public summary', source=source, category=category,
         url='https://'+p.domains[0]+'/body-access-story/', publish_time=timezone.now(), content_kind='article',
-        full_content='Existing real body', full_content_zh='Existing translated body', full_content_state='complete')
+        full_content='Existing real body', full_content_zh='Existing translated body', full_content_state='complete'))
 
 def data(story, user, cls=NewsDetailSerializer):
     return cls(story, context={'request':SimpleNamespace(user=user)}).data
@@ -25,7 +28,7 @@ def data(story, user, cls=NewsDetailSerializer):
 def test_superuser_reads_existing_body(story):
     user=User.objects.create(username='admin',is_superuser=True)
     d=data(story,user)
-    assert d['reading_policy']=='rss_summary_only'
+    assert d['reading_policy']=='standard'
     assert d['body_access_granted'] and d['can_fetch_full_content'] and d['has_full_content']
     assert d['full_content']=='Existing real body' and d['full_content_zh']=='Existing translated body'
     assert data(story,user,NewsListSerializer)['has_full_content']
@@ -33,6 +36,10 @@ def test_superuser_reads_existing_body(story):
 @pytest.mark.parametrize('kind',['anonymous','ordinary','staff','inactive'])
 def test_restricted_body_remains_hidden(story,kind):
     user=AnonymousUser() if kind=='anonymous' else User.objects.create(username=kind,is_staff=kind=='staff',is_superuser=kind=='inactive',is_active=kind!='inactive')
+    if kind == 'inactive':
+        with pytest.raises(Http404):
+            data(story, user)
+        return
     d=data(story,user)
     assert not d['body_access_granted'] and not d['has_full_content'] and not d['can_fetch_full_content']
     assert d['full_content']==d['full_content_zh']==''
@@ -85,7 +92,9 @@ def test_ordinary_cannot_forge_access_or_reuse_admin_fetch_intent(story):
     client=APIClient();client.force_authenticate(ordinary)
     with patch('api.views.request_full_content') as enqueue:
         response=client.post(f'/api/news/{story.pk}/fetch-full/',{'body_access_granted':True,'full_content_requested_by':admin.pk},format='json')
-    assert response.status_code==422 and response.data['full_content']==''
+    assert response.status_code==403
+    story.refresh_from_db()
+    assert story.full_content_requested_by_id == admin.pk
     enqueue.assert_not_called()
 
 def test_missing_body_request_records_actor_and_can_queue(story):

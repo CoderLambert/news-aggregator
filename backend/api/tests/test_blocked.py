@@ -1,3 +1,4 @@
+from api.tests.rss.legacy_fixtures import legacy_news, public_legacy
 from django.test import TestCase
 from django.contrib.auth.models import User
 from rest_framework.test import APIClient
@@ -13,12 +14,12 @@ class BlockedNewsModelTest(TestCase):
         self.other_user = User.objects.create_user(username='other', password='test123')
         self.category = Category.objects.create(name='Tech', slug='tech')
         self.source = Source.objects.create(name='Src', url='https://src.com')
-        self.news1 = News.objects.create(
+        self.news1 = legacy_news(
             title='Blocked News', content='c1',
             publish_time=timezone.now(), source=self.source, category=self.category,
             url='https://src.com/1',
         )
-        self.news2 = News.objects.create(
+        self.news2 = legacy_news(
             title='Visible News', content='c2',
             publish_time=timezone.now(), source=self.source, category=self.category,
             url='https://src.com/2',
@@ -59,12 +60,12 @@ class BlockedNewsAPITest(TestCase):
         self.user = User.objects.create_user(username='blocker', password='test123')
         self.category = Category.objects.create(name='Tech', slug='tech')
         self.source = Source.objects.create(name='Src', url='https://src.com')
-        self.news1 = News.objects.create(
+        self.news1 = legacy_news(
             title='Blocked News', content='c1',
             publish_time=timezone.now(), source=self.source, category=self.category,
             url='https://src.com/1',
         )
-        self.news2 = News.objects.create(
+        self.news2 = legacy_news(
             title='Visible News', content='c2',
             publish_time=timezone.now(), source=self.source, category=self.category,
             url='https://src.com/2',

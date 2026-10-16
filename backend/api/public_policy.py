@@ -2,10 +2,33 @@
 from django.conf import settings
 from django.http import HttpResponseNotFound, JsonResponse
 from django.urls import Resolver404, resolve
+import json
+import re
+import uuid
+
+RSS_API_PATH = re.compile(r'^/api/(?:rss/|me/rss-|admin/rss/|news/\d+/rss-refetch/|me/news/\d+/read-state/)')
+
+
+def rss_policy_envelope(request, response):
+    """Keep the new API contract even when policy rejects before view dispatch."""
+    if not RSS_API_PATH.match(request.path_info) or response.status_code < 400:
+        return response
+    try:
+        payload = json.loads(response.content)
+    except (ValueError, AttributeError):
+        return response
+    if isinstance(payload.get('error'), dict):
+        return response
+    code = payload.get('error_code', 'stale' if response.status_code == 409 else 'forbidden')
+    message = payload.get('error') or payload.get('detail') or '请求无法完成。'
+    response.content = json.dumps({'error': {'code': code, 'message': message, 'retryable': False},
+                                   'request_id': str(uuid.uuid4())}, ensure_ascii=False).encode()
+    response['Cache-Control'] = 'private, no-store'
+    return response
 
 READ_ONLY_ROUTES = frozenset({
     'news-list', 'news-detail', 'category-list', 'source-list', 'auth-csrf',
-    'capabilities', 'health-live', 'health-ready',
+    'capabilities', 'health-live', 'health-ready', 'rss-directory',
     'smart-channel-catalog', 'smart-channel-profile', 'smart-channel-dashboard',
 })
 READ_ONLY_METHODS = frozenset({'GET', 'HEAD'})
@@ -43,8 +66,8 @@ class PublicPolicyMiddleware:
                 resolve(request.path_info)
             except Resolver404:
                 return HttpResponseNotFound()
-            return policy_error('public_read_only')
-        return self.get_response(request)
+            return rss_policy_envelope(request, policy_error('public_read_only'))
+        return rss_policy_envelope(request, self.get_response(request))
 
     def process_view(self, request, view_func, view_args, view_kwargs):
         if not request.path_info.startswith('/api/'):

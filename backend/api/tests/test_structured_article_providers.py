@@ -7,7 +7,7 @@ from django.utils import timezone
 from api.services.article_fetcher.providers import DevToAPIProvider, GitHubReadmeProvider, HackerNewsAPIProvider, default_providers
 from api.services.structured_articles import dev_article_item, dev_candidate
 from api.services.article_fetcher import fetch_article_markdown
-from api.services.news_ingestion import ingest_item
+from api.tests.rss.legacy_fixtures import ingest_fixture as ingest_item
 from api.services.full_content_status import enqueue_fetch, claim_fetch, mark_success
 from api.models import News
 

@@ -9,6 +9,8 @@ import { useChannelConfig, useChannelMutation } from '@/services/channelQueries'
 import { workspaceCatalogOptions, workspaceKeys, type ChannelProfile } from '@/services/workspaceApi'
 import WorkspaceModal from '@/components/workspace/WorkspaceModal'
 import AddChannelDialog from '@/components/workspace/AddChannelDialog'
+import OpmlDialog from '@/features/rss/OpmlDialog'
+import ConnectionStatus from '@/features/rss/ConnectionStatus'
 import { Availability, ChannelMark, TopicTags } from '@/components/workspace/ChannelIdentity'
 
 export default function ChannelWorkspace() {
@@ -28,6 +30,7 @@ function Directory() {
   const [selected, setSelected] = useState<number[]>([])
   const [login, setLogin] = useState(false)
   const [adding, setAdding] = useState(false)
+  const [importing, setImporting] = useState(false)
   const [editing, setEditing] = useState<number | null>(null)
   const [cancelIds, setCancelIds] = useState<number[] | null>(null)
   const [bulkGroup, setBulkGroup] = useState('')
@@ -68,9 +71,10 @@ function Directory() {
   const allSelected = filtered.length > 0 && selectedVisible.length === filtered.length
   return <div className="workspace-page">
     <header className="workspace-page-heading"><div><p className="workspace-eyebrow">你的信息来源</p><h1>频道管理</h1><p>发现并订阅优质来源，用主题与分组构建自己的资讯流。</p></div>
-      <div className="workspace-actions">{config.accounts && <Link className="workspace-button secondary" to="/channels/smart"><Sparkles size={16} aria-hidden="true" />智能整理</Link>}
+      <div className="workspace-actions">{config.enabled && <button type="button" className="workspace-button secondary" onClick={() => setImporting(true)}>导入 / 导出</button>}{config.accounts && <Link className="workspace-button secondary" to="/channels/smart"><Sparkles size={16} aria-hidden="true" />智能整理</Link>}
         {config.accounts && <button type="button" className="workspace-button" onClick={() => user ? setAdding(true) : setLogin(true)}><Plus size={16} aria-hidden="true" />添加频道</button>}</div>
     </header>
+    {config.enabled && user && <ConnectionStatus viewer={user.id} admin={user.isSuperuser} />}
     <div className="workspace-tabs" role="group" aria-label="频道范围">{[
       { key: 'all', label: '全部频道', count: sources.length },
       ...(config.enabled ? [{ key: 'subscribed', label: '已订阅', count: subscriptions.size }, { key: 'unsubscribed', label: '未订阅', count: sources.filter(source => !subscriptions.has(source.id)).length }] : []),
@@ -116,7 +120,8 @@ function Directory() {
       {!catalog.isPending && !catalog.isError && !filtered.length && <div className="workspace-empty"><h2>没有匹配的频道</h2><p>调整筛选条件，或从全部频道中选择新的来源。</p><button type="button" className="workspace-button secondary" onClick={() => setParams({})}>查看全部频道</button></div>}
     </div>
     {login && <AuthModal onClose={() => setLogin(false)} />}
-    {adding && <AddChannelDialog topics={topics} onClose={() => setAdding(false)} onDone={() => { setAdding(false); setNotice('订阅成功，已按你的整理设置处理。') }} />}
+    {importing && user && <OpmlDialog viewer={user.id} groups={groups} onClose={() => setImporting(false)} />}
+    {adding && <AddChannelDialog topics={topics} onClose={() => setAdding(false)} onDone={() => { setAdding(false); setNotice('订阅已保存，可在频道列表查看连接状态。') }} />}
     {editedSource && editedSubscription && <WorkspaceModal title={editedSource.name + ' · 订阅设置'} busy={mutation.isPending} onClose={() => setEditing(null)}>
       <p className="workspace-muted">一个频道可以加入多个分组，手动移出后不会被自动加回。</p>
       <fieldset className="workspace-group-checkboxes"><legend>所属分组</legend>{groups.map(group => <label key={group.id}><input type="checkbox" disabled={!writable} checked={editedSubscription.group_ids.includes(group.id)} onChange={event => {

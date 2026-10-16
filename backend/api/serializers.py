@@ -11,24 +11,33 @@ class CategorySerializer(serializers.ModelSerializer):
 
 
 class SourceSerializer(serializers.ModelSerializer):
+    name = serializers.SerializerMethodField()
     news_count = serializers.SerializerMethodField()
     source_type = serializers.CharField(read_only=True)
     reading_policy = serializers.SerializerMethodField()
     subscription_status = serializers.SerializerMethodField()
     subscription_reason = serializers.SerializerMethodField()
 
+    def get_name(self, obj):
+        from api.rss.models import SourcePublication
+        try:
+            return obj.publication.display_name or obj.name
+        except SourcePublication.DoesNotExist:
+            return obj.name
+
     def get_reading_policy(self, obj):
-        from api.services.source_policy import policy_for_name
-        policy = policy_for_name(obj.name)
-        return policy.reading_policy if policy else 'standard'
+        from api.rss.models import SourcePublication
+        try:
+            return obj.publication.reading_policy
+        except SourcePublication.DoesNotExist:
+            return 'summary_only'
 
     def get_news_count(self, obj):
-        from api.services.source_policy import policy_for_name
-        policy = policy_for_name(obj.name)
-        if not policy:
-            return getattr(obj, 'news_count', 0)
-        return (getattr(obj, 'news_count', 0) + self.context.get('channel_counts', {}).get(policy.key, 0)
-                - self.context.get('own_channel_counts', {}).get((policy.key, obj.id), 0))
+        if hasattr(obj, 'rss_news_count'):
+            return obj.rss_news_count
+        from api.rss.access import authorized_news, news_in_sources
+        user = getattr(self.context.get('request'), 'user', None)
+        return news_in_sources(authorized_news(user), Source.objects.filter(pk=obj.pk)).count()
 
     def get_subscription_status(self, obj):
         from api.services.channel_catalog import subscription_status
@@ -41,6 +50,26 @@ class SourceSerializer(serializers.ModelSerializer):
     class Meta:
         model = Source
         fields = ['id', 'name', 'url', 'logo', 'country', 'language', 'source_type', 'news_count', 'description', 'region', 'reading_policy', 'subscription_status', 'subscription_reason']
+
+
+class AccessNewsListSerializer(serializers.ListSerializer):
+    def to_representation(self, data):
+        from api.rss.access import prepare_article_previews
+        items = list(data)
+        user = getattr(self.context.get('request'), 'user', None)
+        self.child._preview_snapshots = prepare_article_previews(user, items)
+        from api.models import LegacyTranslationSnapshot
+        from hashlib import sha256
+        self.child._legacy_batch = {(r.news_id, r.field, r.source_hash, r.source_text): r.translated_text
+            for r in LegacyTranslationSnapshot.objects.filter(news_id__in=[item.pk for item in items],
+                field__in=('title', 'content'), origin__in=('legacy', 'legacy-bound'),
+                source_hash__in=[sha256(value.encode()).hexdigest()
+                    for item in items for value in (item.title, item.content)]).order_by('captured_at', 'pk')}
+        try:
+            return super().to_representation(items)
+        finally:
+            self.child._preview_snapshots = None
+            self.child._legacy_batch = None
 
 
 class ChannelNewsSerializer(serializers.ModelSerializer):
@@ -57,55 +86,170 @@ class ChannelNewsSerializer(serializers.ModelSerializer):
         from api.services.body_access import can_view_article_body
         return can_view_article_body(getattr(self.context.get("request"), "user", None))
 
+    can_rss_refetch = serializers.SerializerMethodField()
+
+    def get_can_rss_refetch(self, obj):
+        from django.conf import settings
+        if not getattr(settings, 'RSS_FULL_CONTENT_ENABLED', False):
+            return False
+        from api.rss.access import authorized_sources, ALL_ENTRIES
+        from api.rss.models import EngineEntryMap, SourceFeedLink
+        from django.db.models import F
+        user = getattr(self.context.get('request'), 'user', None)
+        if not user or not user.is_authenticated or not user.is_active or not obj.body_owner_binding_id:
+            return False
+        return (EngineEntryMap.objects.filter(news_id=obj.pk, binding_id=obj.body_owner_binding_id,
+                    disposition='linked', source_url=obj.url).exists()
+            and SourceFeedLink.objects.filter(binding_id=obj.body_owner_binding_id, enabled=True,
+                association_policy=ALL_ENTRIES, source__in=authorized_sources(user, body=True),
+                source__publication__owner='miniflux', binding__desired_mode='full_content',
+                binding__desired_enabled=True, binding__connection_state='ready',
+                binding__applied_policy_version=F('binding__policy_version')).exists())
+
     def get_can_fetch_full_content(self, obj):
+        if obj.body_owner_binding_id:
+            return self.get_can_rss_refetch(obj)
+        from api.rss.access import authorized_sources
         from api.services.full_content_status import fetch_eligibility
-        return obj.full_content_fetch_status != "blocked" and obj.full_content_retry_count < 5 and not fetch_eligibility(obj, privileged=self.get_body_access_granted(obj))
+        user = getattr(self.context.get('request'), 'user', None)
+        if obj.body_owner_binding_id or not authorized_sources(user, body=True).filter(
+                pk=obj.body_owner_source_id or obj.source_id, publication__owner='legacy').exists():
+            return False
+        return obj.full_content_fetch_status != 'blocked' and obj.full_content_retry_count < 5 and not fetch_eligibility(obj, privileged=self.get_body_access_granted(obj))
+
+    full_content_completeness = serializers.SerializerMethodField()
+    content_completeness = serializers.SerializerMethodField()
+    has_readable_content = serializers.SerializerMethodField()
+    body_owner = serializers.SerializerMethodField()
+
+    def _load_stored(self, user, obj):
+        from api.rss.access import get_stored_article
+        return get_stored_article(user, obj.pk)
+
+    def _stored(self, obj):
+        from api.rss.access import get_stored_article
+        current = getattr(self, '_current_stored', None)
+        return current if current and current.news_id == obj.pk else get_stored_article(
+            getattr(self.context.get('request'), 'user', None), obj.pk)
+
+    def _sources(self, obj):
+        from api.rss.access import article_sources
+        current = getattr(self, '_current_sources', None)
+        return current if current is not None else list(article_sources(
+            getattr(self.context.get('request'), 'user', None), obj).select_related('publication'))
 
     def _channel_policies(self, obj):
-        from api.services.channel_articles import news_policies
-        if not hasattr(self, '_policies_cache'):
-            self._policies_cache = {}
-        if obj.pk not in self._policies_cache:
-            self._policies_cache[obj.pk] = news_policies(obj)
-        return self._policies_cache[obj.pk]
+        from api.services.source_policy import policy_for_name
+        return [p for source in self._sources(obj) if (p := policy_for_name(source.name))]
 
     def get_channel_ids(self, obj):
-        from api.services.source_policy import policy_for_name
-        policies = self._channel_policies(obj)
-        primary = policy_for_name(obj.source.name)
-        extra_names = [p.name for p in policies if not primary or p.key != primary.key]
-        if not extra_names:
-            return [obj.source_id]
-        if not hasattr(self, '_channel_id_cache'):
-            self._channel_id_cache = dict(Source.objects.values_list('name', 'id'))
-        return sorted({obj.source_id, *[self._channel_id_cache[name] for name in extra_names if name in self._channel_id_cache]})
-
-    def get_publish_time_inferred(self, obj):
-        items = list(obj.source_items.all())
-        return bool(items) and all(item.metadata.get('publish_time_inferred', False) for item in items)
+        return [source.pk for source in self._sources(obj)]
 
     def get_channel_names(self, obj):
-        return list(dict.fromkeys([obj.source.name, *[p.name for p in self._channel_policies(obj)]]))
+        return [source.publication.display_name or source.name for source in self._sources(obj)]
+
+    def get_publish_time_inferred(self, obj):
+        inferred = getattr(obj, '_rss_publish_time_inferred', None)
+        if inferred is None and 'full_content_provenance' not in obj.get_deferred_fields():
+            inferred = (obj.full_content_provenance or {}).get('_sync_metadata', {}).get('publish_time_inferred')
+        if isinstance(inferred, bool):
+            return inferred
+        items = list(obj.source_items.all())
+        return bool(items) and all(item.metadata.get('publish_time_inferred', False) for item in items)
 
     def get_is_medical(self, obj):
         return obj.category.name == '医疗健康' or any(p.default_category == '医疗健康' for p in self._channel_policies(obj))
 
     def get_reading_policy(self, obj):
-        policies = self._channel_policies(obj)
-        if any(p.reading_policy == 'rss_summary_only' for p in policies):
+        if self._stored(obj).scope == 'summary':
             return 'rss_summary_only'
-        if any(p.reading_policy == 'public_rss' for p in policies):
-            return 'public_rss'
         return 'standard'
 
+    def get_full_content_completeness(self, obj):
+        return self._stored(obj).completeness
+
+    get_content_completeness = get_full_content_completeness
+
+    def get_has_readable_content(self, obj):
+        return self._stored(obj).scope == 'full' or bool(self._stored(obj).markdown.strip())
+
+    def get_body_owner(self, obj):
+        return self._stored(obj).body_owner
+
+    def _legacy_text(self, obj, field, original):
+        from hashlib import sha256
+        digest = sha256(original.encode('utf-8')).hexdigest()
+        batch = getattr(self, '_legacy_batch', None)
+        if batch is not None:
+            return batch.get((obj.pk, field, digest, original), '')
+        from api.services.stored_readers import legacy_translation
+        record = legacy_translation(obj.pk, field, original)
+        return record.translated_text if record else ''
+
     def to_representation(self, instance):
-        data = super().to_representation(instance)
-        if data.get('reading_policy') == 'rss_summary_only' and not self.get_body_access_granted(instance):
-            data['has_full_content'] = False
-            for field in ('full_content', 'full_content_zh'):
-                if field in data:
-                    data[field] = ''
-        return data
+        from api.rss.access import article_sources, authorized_news, get_stored_article
+        user = getattr(self.context.get('request'), 'user', None)
+        # Bound only to this synchronous representation, never across requests.
+        self._translation_key = None
+        self._current_stored = self._load_stored(user, instance)
+        snapshots = getattr(self, '_preview_snapshots', None)
+        self._current_sources = snapshots[instance.pk][1] if snapshots is not None else list(article_sources(user, instance).select_related('publication'))
+        try:
+            data = super().to_representation(instance)
+            stored = self._current_stored
+            for key, attr in [('title', 'title'), ('content', 'summary'), ('url', 'url'),
+                              ('full_content_revision', 'revision'), ('content_kind', 'content_kind')]:
+                if key in data and hasattr(stored, attr):
+                    data[key] = getattr(stored, attr)
+            for field in ('title', 'content'):
+                if field + '_zh' in data:
+                    original = getattr(stored, 'summary' if field == 'content' else field, getattr(instance, field))
+                    data[field + '_zh'] = self._legacy_text(instance, field, original)
+            visible = self._current_sources
+            if not visible:
+                from django.http import Http404
+                raise Http404
+            primary = next((s for s in visible if s.pk == instance.source_id), visible[0])
+            replacements = dict(source=primary.pk, source_name=primary.publication.display_name or primary.name,
+                source_type=primary.source_type, source_region=primary.region, source_url=primary.url,
+                source_language=primary.language)
+            for key, value in replacements.items():
+                if key in data:
+                    data[key] = value
+            if data.get('related_to') and not authorized_news(user).filter(pk=data['related_to']).exists():
+                data['related_to'] = None
+            if self._current_stored.scope != 'full':
+                data['has_full_content'] = False
+                for key in ('full_content', 'full_content_zh'):
+                    if key in data:
+                        data[key] = ''
+                from api.rss.access import BODY_POLICIES
+                from api.services.source_policy import policy_for_name
+                owner_source = instance.body_owner_source_id or (instance.source_id if instance.body_owner_binding_id is None else None)
+                origin = next((source for source in visible if source.pk == owner_source), None)
+                policy = policy_for_name(origin.name) if origin else None
+                readable_origin = bool(origin and origin.publication.owner == 'legacy'
+                    and origin.publication.reading_policy in BODY_POLICIES
+                    and (not policy or policy.reading_policy != 'rss_summary_only' or self.get_body_access_granted(instance)))
+                if 'can_rss_refetch' in self.fields:
+                    readable_origin |= getattr(self, 'get_can_rss_refetch', lambda obj: False)(instance)
+                if not readable_origin:
+                    for key in ('full_content_fetch_error', 'full_content_fetch_provider', 'full_content_error_code'):
+                        if key in data:
+                            data[key] = ''
+                    for key in ('full_content_fetched_at', 'full_content_zh_fetched_at', 'full_content_quality_score', 'last_full_content_attempt', 'full_content_next_attempt_at'):
+                        if key in data:
+                            data[key] = None
+                    for key in ('full_content_revision', 'full_content_retry_count', 'full_content_priority'):
+                        if key in data:
+                            data[key] = 0
+                    if 'full_content_state' in data:
+                        data['full_content_state'] = 'missing'
+                    if 'full_content_fetch_status' in data:
+                        data['full_content_fetch_status'] = 'unsupported'
+            return data
+        finally:
+            self._current_stored = self._current_sources = None
 
 
 class NewsListSerializer(ChannelNewsSerializer):
@@ -132,6 +276,7 @@ class NewsListSerializer(ChannelNewsSerializer):
     last_full_content_attempt = serializers.DateTimeField(read_only=True)
 
     class Meta:
+        list_serializer_class = AccessNewsListSerializer
         model = News
         read_only_fields = [
             'content_kind', 'full_content_state', 'full_content_revision',
@@ -139,6 +284,7 @@ class NewsListSerializer(ChannelNewsSerializer):
         ]
         fields = [
             'source_region', 'channel_ids', 'channel_names', 'is_medical', 'reading_policy', 'body_access_granted', 'publish_time_inferred',
+            'full_content_completeness', 'content_completeness', 'has_readable_content', 'body_owner',
             'id', 'title', 'summary', 'title_zh', 'summary_zh', 'author', 'publish_time',
             'has_full_content',
             'source', 'source_name', 'source_type', 'source_language',
@@ -153,6 +299,14 @@ class NewsListSerializer(ChannelNewsSerializer):
             'full_content_next_attempt_at', 'full_content_priority', 'full_content_error_code',
         ]
 
+    def _load_stored(self, user, obj):
+        from types import SimpleNamespace
+        from api.rss.access import get_article_access
+        snapshots = getattr(self, '_preview_snapshots', None)
+        context = snapshots[obj.pk][0] if snapshots is not None else get_article_access(user, obj.pk)
+        return SimpleNamespace(news_id=obj.pk, scope=context.scope, markdown=obj.content,
+                               completeness=context.completeness, body_owner=context.body_owner)
+
     def to_representation(self, instance):
         data = super().to_representation(instance)
         # Summary previews only need the override flag when access is granted.
@@ -165,13 +319,10 @@ class NewsListSerializer(ChannelNewsSerializer):
         return (obj.content or '')[:self.SUMMARY_LIMIT]
 
     def get_has_full_content(self, obj):
-        from .services.full_content_status import has_full_content
-        if hasattr(obj, 'has_readable_body'):
-            return bool(obj.has_readable_body)
-        return has_full_content(obj, privileged=self.get_body_access_granted(obj))
+        return self._stored(obj).scope == 'full'
 
     def get_summary_zh(self, obj):
-        return (obj.content_zh or '')[:self.SUMMARY_LIMIT]
+        return self._legacy_text(obj, 'content', obj.content)[:self.SUMMARY_LIMIT]
 
 
 class NewsDetailSerializer(ChannelNewsSerializer):
@@ -210,7 +361,8 @@ class NewsDetailSerializer(ChannelNewsSerializer):
             'full_content_next_attempt_at', 'full_content_priority', 'full_content_error_code',
         ]
         fields = [
-            'source_region', 'channel_ids', 'channel_names', 'is_medical', 'reading_policy', 'body_access_granted', 'can_fetch_full_content', 'publish_time_inferred',
+            'source_region', 'channel_ids', 'channel_names', 'is_medical', 'reading_policy', 'body_access_granted', 'can_fetch_full_content', 'can_rss_refetch', 'publish_time_inferred',
+            'full_content_completeness', 'content_completeness', 'has_readable_content', 'body_owner',
             'id', 'title', 'content', 'title_zh', 'content_zh', 'author', 'publish_time',
             'source', 'source_name', 'source_type', 'source_url', 'source_language',
             'category', 'category_name',
@@ -229,125 +381,61 @@ class NewsDetailSerializer(ChannelNewsSerializer):
             'full_translation_active',
         ]
 
-    def _subscription_translation(self, obj):
-        if not self.get_has_full_content(obj):
-            return None, None
-        request = self.context.get('request')
-        user = getattr(request, 'user', None)
-        if not getattr(user, 'is_authenticated', False):
-            return None, None
-        cache = getattr(self, '_subscription_translation_cache', None)
-        if cache is None:
-            cache = self._subscription_translation_cache = {}
-        if obj.pk in cache:
-            return cache[obj.pk]
-        from .services.chatgpt_subscription import active_connection_for_user, source_hash
-        connection = active_connection_for_user(user)
-        if connection is None:
-            result = (None, None)
-        else:
-            result = (
-                connection,
-                ChatGPTArticleTranslation.objects.filter(
-                    user=user,
-                    connection=connection,
-                    news=obj,
-                    source_hash=source_hash(obj.full_content),
-                ).first(),
-            )
-        cache[obj.pk] = result
-        return result
+    def _translation(self, obj):
+        from api.services.stored_readers import current_translation
+        stored = self._stored(obj)
+        key = (stored.news_id, stored.canonical_hash, stored.scope)
+        if getattr(self, '_translation_key', None) != key:
+            self._translation_key = key
+            self._translation_value = current_translation(getattr(self.context.get('request'), 'user', None), stored)
+        return self._translation_value
 
     def get_full_content_zh(self, obj):
-        if not self.get_has_full_content(obj):
-            return ''
-        connection, translation = self._subscription_translation(obj)
-        shared = self._shared_translation(obj)
-        if translation is not None:
-            return translation.content
-        if shared is not None:
-            return shared.content
-        return '' if connection is not None else obj.full_content_zh
+        record, _ = self._translation(obj)
+        return record.content if record else ''
 
     def get_full_content_zh_fetched_at(self, obj):
-        if not self.get_has_full_content(obj):
-            return None
-        connection, translation = self._subscription_translation(obj)
-        shared = self._shared_translation(obj)
-        if translation is not None:
-            return translation.completed_at
-        if shared is not None:
-            return shared.completed_at
-        return None if connection is not None else obj.full_content_zh_fetched_at
-
-    def _shared_translation(self, obj):
-        from .services.shared_translations import get_shared_translation
-        if not hasattr(self, '_shared_translation_cache'):
-            self._shared_translation_cache = {}
-        if obj.pk not in self._shared_translation_cache:
-            self._shared_translation_cache[obj.pk] = get_shared_translation(obj)
-        return self._shared_translation_cache[obj.pk]
+        record, _ = self._translation(obj)
+        return record.completed_at if record else None
 
     def get_full_content_zh_scope(self, obj):
-        if not self.get_has_full_content(obj):
-            return None
-        connection, translation = self._subscription_translation(obj)
-        if translation is not None:
-            return 'private'
-        if self._shared_translation(obj) is not None:
-            return 'shared'
-        return 'legacy' if connection is None and obj.full_content_zh else None
+        return self._translation(obj)[1]
 
     def get_full_translation_personal_available(self, obj):
-        if not self.get_has_full_content(obj):
-            return False
-        connection, _ = self._subscription_translation(obj)
-        return bool(connection and connection.connected and not connection.needs_reauth
-                    and connection.selected_model)
+        from api.services.chatgpt_subscription import active_connection_for_user
+        user = getattr(self.context.get('request'), 'user', None)
+        connection = active_connection_for_user(user) if getattr(user, 'is_authenticated', False) else None
+        return bool(self.get_has_full_content(obj) and connection and connection.connected
+                    and not connection.needs_reauth and connection.selected_model)
 
     def get_full_translation_active(self, obj):
-        """Personal workers stay scoped; shared task availability is public."""
         if not self.get_has_full_content(obj):
             return False
-        try:
-            connection, _translation = self._subscription_translation(obj)
-            if connection is not None:
-                from .services import chatgpt_subscription_jobs
-                from .services.chatgpt_subscription import source_hash
-                job = chatgpt_subscription_jobs.get_job(
-                    connection.user_id, connection.pk, obj.pk, source_hash(obj.full_content),
-                )
-            else:
-                from .services.translation_jobs import get_job
-                job = get_job(obj.pk)
-            if job and not job.done:
+        from api.services.translation_jobs import get_job
+        user = getattr(self.context.get('request'), 'user', None)
+        from api.services.chatgpt_subscription import active_connection_for_user
+        from api.services import chatgpt_subscription_jobs
+        connection = active_connection_for_user(user) if getattr(user, 'is_authenticated', False) else None
+        if connection is not None:
+            private = chatgpt_subscription_jobs.get_job(user.pk, connection.pk, obj.pk, self._stored(obj).canonical_hash)
+            if private and not private.done:
                 return True
-            if self.get_full_content_zh(obj):
-                return False
-            from .services.shared_translations import task_is_running
-            return task_is_running(obj)
-        except Exception:
-            return False
+        job = get_job(obj.pk, user_id=getattr(user, 'pk', None), source_digest=self._stored(obj).canonical_hash)
+        if job and not job.done:
+            return True
+        from api.services.shared_translations import task_is_running
+        return task_is_running(obj, getattr(self.context.get('request'), 'user', None), stored=self._stored(obj))
 
     def get_full_content_zh_source(self, obj):
-        """Expose provider provenance, without the contributing user's identity."""
-        if not self.get_has_full_content(obj):
-            return None
-        connection, translation = self._subscription_translation(obj)
-        if translation is not None:
-            return 'chatgpt'
-        shared = self._shared_translation(obj)
-        if shared is not None:
-            return shared.provider
-        return 'llm' if connection is None and obj.full_content_zh else None
+        record, scope = self._translation(obj)
+        return ('chatgpt' if scope == 'private' else getattr(record, 'provider', 'legacy')) if record else None
 
     def get_full_content(self, obj):
-        from .services.full_content_status import get_readable_full_content
-        return get_readable_full_content(obj, privileged=self.get_body_access_granted(obj))
+        stored = self._stored(obj)
+        return stored.markdown if stored.scope == 'full' else ''
 
     def get_has_full_content(self, obj):
-        from .services.full_content_status import has_full_content
-        return has_full_content(obj, privileged=self.get_body_access_granted(obj))
+        return self._stored(obj).scope == 'full'
 
 
 class FavoriteNewsSerializer(serializers.Serializer):
@@ -361,6 +449,22 @@ class FavoriteNewsSerializer(serializers.Serializer):
     category_name = serializers.CharField(source='category.name')
     publish_time = serializers.DateTimeField()
     created_at = serializers.DateTimeField()
+
+    def to_representation(self, instance):
+        from api.rss.access import article_sources, get_article_access
+        user = getattr(self.context.get('request'), 'user', None)
+        get_article_access(user, instance.pk)
+        data = super().to_representation(instance)
+        sources = list(article_sources(user, instance).select_related('publication'))
+        if not sources:
+            from django.http import Http404
+            raise Http404
+        source = next((source for source in sources if source.pk == instance.source_id), sources[0])
+        data['source_name'] = source.publication.display_name or source.name
+        from api.services.stored_readers import legacy_translation
+        translation = legacy_translation(instance.pk, 'title', instance.title)
+        data['title_zh'] = translation.translated_text if translation else ''
+        return data
 
 
 class FavoriteSerializer(serializers.ModelSerializer):
@@ -378,7 +482,8 @@ class FavoriteSerializer(serializers.ModelSerializer):
         news_id = validated_data.pop('news_id')
 
         from .models import News
-        if not News.objects.filter(pk=news_id).exists():
+        from api.rss.access import authorized_news
+        if not authorized_news(request.user).filter(pk=news_id).exists():
             raise serializers.ValidationError({'news_id': 'News not found'})
 
         fav, created = Favorite.objects.get_or_create(
@@ -449,7 +554,8 @@ class BlockedNewsSerializer(serializers.ModelSerializer):
         news_id = validated_data.pop('news_id')
 
         from .models import News as _News
-        if not _News.objects.filter(pk=news_id).exists():
+        from api.rss.access import authorized_news
+        if not authorized_news(request.user).filter(pk=news_id).exists():
             raise serializers.ValidationError({'news_id': 'News not found'})
 
         block, created = BlockedNews.objects.get_or_create(
@@ -478,6 +584,11 @@ class ResearchSessionSerializer(serializers.ModelSerializer):
         model = ResearchSession
         fields = ['id', 'title', 'messages', 'is_archived', 'message_count', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def to_representation(self, instance):
+        from api.services.research.access import require_session_evidence
+        require_session_evidence(instance, getattr(self.context.get('request'), 'user', None))
+        return super().to_representation(instance)
 
     def get_message_count(self, obj):
         return len(obj.messages) if obj.messages else 0

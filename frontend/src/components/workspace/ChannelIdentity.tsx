@@ -13,5 +13,6 @@ export function TopicTags({ keys, topics }: { keys: string[]; topics: Topic[] })
 }
 export function Availability({ source }: { source: ChannelProfile }) {
   if (source.subscription_status === 'active') return null
-  return <span className="workspace-caption">{source.subscription_reason === 'feed_verification_pending' ? 'RSS 待验证，暂不开放订阅' : '来源已停用，可阅读历史内容'}</span>
+  const reasons: Record<string, string> = { feed_verification_pending: 'RSS 待验证，暂不开放订阅', connecting: '正在连接来源', error: '连接失败，请查看订阅状态', unknown: '连接结果待核对', paused: '采集已暂停，可阅读历史内容' }
+  return <span className="workspace-caption">{reasons[source.subscription_reason] ?? '来源已停用，可阅读历史内容'}</span>
 }

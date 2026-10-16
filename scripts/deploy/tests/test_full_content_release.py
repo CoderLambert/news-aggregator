@@ -320,7 +320,7 @@ else:
 '''
 
 
-def rollback_harness(tmp_path, *, legacy, mode, workspace=False):
+def rollback_harness(tmp_path, *, legacy, mode, workspace=False, worker_services=None):
     static = tmp_path / 'static'
     assets = static / 'assets'
     assets.mkdir(parents=True)
@@ -359,7 +359,7 @@ def rollback_harness(tmp_path, *, legacy, mode, workspace=False):
         '--env-file', str(environment), '--project', 'test_worker_release',
         '--sha', SHA, '--image', IMAGE, '--root', str(static), '--manifest', str(target_manifest),
         '--current-manifest', str(old_manifest), '--db-volume', 'test_worker_release_db-data',
-    ], env={**os.environ, 'PATH': str(binary) + os.pathsep + os.environ['PATH'], 'DOCKER_HOST': 'unix:///synthetic-test-only.sock',
+    ] + ([] if worker_services is None else ['--worker-services', worker_services]), env={**os.environ, 'PATH': str(binary) + os.pathsep + os.environ['PATH'], 'DOCKER_HOST': 'unix:///synthetic-test-only.sock',
             'TEST_DOCKER_LOG': str(log), 'TEST_HARNESS_ROOT': str(tmp_path),
             'TEST_TARGET_SHA': SHA, 'TEST_OLD_SHA': OLD_SHA, 'TEST_TARGET_CAP': str(int(not legacy)),
             'TEST_TARGET_CHANNEL_CAP': str(int(workspace)), 'TEST_WORKER_MODE': mode,
@@ -367,8 +367,26 @@ def rollback_harness(tmp_path, *, legacy, mode, workspace=False):
             'TEST_WORKSPACE_COMPOSE_FILE': str(ROOT / 'compose.workspace.prod.yaml'),
             'TEST_WORKSPACE_OVERLAY': str(int(workspace))},
         capture_output=True, text=True, timeout=15)
-    commands = [json.loads(line) for line in log.read_text().splitlines()]
+    commands = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
     return result, commands, static
+
+
+@pytest.mark.parametrize('workers', ['', 'indexer', 'indexer,channel-worker'])
+def test_rss_rollback_explicit_subset_does_not_start_legacy_collectors(tmp_path, workers):
+    result, commands, _ = rollback_harness(tmp_path, legacy=False, mode='healthy', workspace=True,
+                                         worker_services=workers)
+    assert result.returncode == 0, result.stdout + result.stderr
+    starts = [call for call in commands if call[0] == 'compose' and 'up' in call]
+    assert starts and starts[0][-1] == 'app'
+    assert not any('crawler' in call or 'full-content' in call for call in starts)
+    assert len(starts) == (2 if workers else 1)
+
+
+@pytest.mark.parametrize('workers', ['channel-worker', 'rss-sync', 'indexer,indexer', ',indexer', 'indexer,'])
+def test_rss_rollback_rejects_unsupported_or_ambiguous_subset_before_docker(tmp_path, workers):
+    result, commands, static = rollback_harness(tmp_path, legacy=False, mode='healthy', worker_services=workers)
+    assert result.returncode == 2 and '--worker-services' in result.stderr
+    assert not commands and (static / 'current').readlink() == Path('releases/' + OLD_SHA)
 
 
 @pytest.mark.parametrize('mode', ['missing', 'unhealthy'])

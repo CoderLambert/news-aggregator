@@ -1,4 +1,5 @@
 from __future__ import annotations
+from api.tests.rss.legacy_fixtures import legacy_news
 
 import uuid
 from unittest.mock import Mock, patch
@@ -35,6 +36,7 @@ READ_ONLY_ROUTE_NAMES = {
     "capabilities",
     "health-live",
     "health-ready",
+    "rss-directory",
 }
 FEATURE_NAMES = {
     "news",
@@ -59,7 +61,11 @@ TEST_UUID = uuid.UUID("00000000-0000-0000-0000-000000000123")
 
 
 def test_category_list_queryset_has_explicit_stable_ordering():
-    assert CategoryListView().get_queryset().query.order_by == ('id',)
+    from types import SimpleNamespace
+    from django.contrib.auth.models import AnonymousUser
+    view = CategoryListView()
+    view.request = SimpleNamespace(user=AnonymousUser())
+    assert view.get_queryset().query.order_by == ('id',)
 
 
 @pytest.fixture
@@ -68,7 +74,7 @@ def news_obj(db):
     source = Source.objects.create(
         name="Policy test source", url="https://source.example.test/news"
     )
-    return News.objects.create(
+    return legacy_news(
         title="PolicyKeyword marker article",
         content="A local keyword-search fixture.",
         publish_time=timezone.now(),
@@ -97,6 +103,13 @@ def _route_path(pattern, *, news_id=None):
 
 def _assert_policy_response(response, code="public_read_only", status=403):
     assert response.status_code == status
+    from api.public_policy import RSS_API_PATH
+    if RSS_API_PATH.match(response.wsgi_request.path_info):
+        assert response['Cache-Control'] == 'private, no-store'
+        if response.wsgi_request.method != 'HEAD':
+            assert response.json()['error']['code'] == code
+            assert response.json()['request_id']
+        return
     assert response["Cache-Control"] == "no-store"
     if response.wsgi_request.method == "HEAD":
         assert response.content == b""

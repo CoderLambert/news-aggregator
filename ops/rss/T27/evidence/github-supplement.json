@@ -1,0 +1,45 @@
+{
+  "project": "newshub-rss-t27-public-1fc2278d25",
+  "feeds": [
+    {
+      "class": "summary_blog",
+      "name": "GitHub Blog",
+      "feed_url": "https://github.blog/feed/",
+      "sample_limit": 1,
+      "entries": [
+        {
+          "id": "1",
+          "url": "https://github.blog/engineering/architecture-optimization/building-git-infrastructure-for-agent-scale-development/",
+          "title": "Building Git infrastructure for agent-scale development",
+          "published_at": "2026-10-06T20:57:56Z",
+          "scope": "engine_extracted_unknown",
+          "subtype": "article",
+          "manual_completeness": "not_confirmed",
+          "feed_html_chars": 12942,
+          "feed_markdown_chars": 11866,
+          "feed_canonical_hash": "8319b84731853cff1d4009dc08e9f5743c9e108d27e0f6a18cb007685d8d11d3",
+          "extraction_elapsed_seconds": 0.92,
+          "markdown_chars": 16301,
+          "canonical_hash": "79deb63b0fc0ada768d20786c44ecd904a43dc5b069f543f09c8bf0221634f22",
+          "nonempty_readable": true,
+          "pre_blocks": 0,
+          "tables": 0,
+          "images": 9,
+          "heading_count": 19
+        }
+      ],
+      "mode": "feed",
+      "full_content_gate_enabled": true,
+      "feed_id": "1",
+      "feed_elapsed_seconds": 1.471,
+      "observed_feed_entries": 10,
+      "status": "sampled"
+    }
+  ],
+  "private_network_guard": true,
+  "sample_limits": {
+    "summary_blog": 1
+  },
+  "tested_sha": "294c7b13e42bae7b3418354a5560154981735ab3",
+  "resources_removed": true
+}

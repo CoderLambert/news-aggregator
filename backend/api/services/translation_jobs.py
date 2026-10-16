@@ -81,9 +81,9 @@ def _gc_jobs() -> None:
         _jobs.pop(nid, None)
 
 
-def get_job(news_id: int) -> Optional[TranslationJob]:
+def get_job(news_id: int, *, user_id=None, source_digest=None) -> Optional[TranslationJob]:
     with _jobs_lock:
-        return _jobs.get(news_id)
+        return _jobs.get((news_id, user_id, source_digest))
 
 
 def start_or_get_job(
@@ -94,6 +94,7 @@ def start_or_get_job(
     *,
     shared_lease=None,
     clients=None,
+    source_digest=None, user_id=None, execution_guard=None,
 ) -> TranslationJob:
     """Return existing in-flight job for this news_id, or start a new one.
 
@@ -104,7 +105,8 @@ def start_or_get_job(
     """
     with _jobs_lock:
         _gc_jobs()
-        existing = _jobs.get(news_id)
+        key = (news_id, user_id, source_digest)
+        existing = _jobs.get(key)
         if existing and not existing.done and (
             shared_lease is None or getattr(existing, 'shared_lease', None) == shared_lease
         ):
@@ -113,20 +115,16 @@ def start_or_get_job(
 
         job = TranslationJob(news_id)
         job.shared_lease = shared_lease
-        _jobs[news_id] = job
+        _jobs[key] = job
 
     def _run_worker() -> None:
         # Import here to avoid Django app-loading order surprises
         from api.services.llm_translator import _call_llm_stream
-        if shared_lease is not None:
-            from api.models import News
-            from api.services.shared_translations import source_hash
-            task = shared_lease.current().first()
-            from api.services.full_content_status import has_full_content
-            current = News.objects.only('full_content', 'full_content_state').get(pk=news_id)
-            if task is None or not has_full_content(current) or source_hash(current.full_content) != task.source_hash:
-                job._finish(error='原文已更新或翻译任务已过期，请重试。')
-                return
+        if execution_guard is not None:
+            execution_guard()
+        if shared_lease is not None and not shared_lease.current().exists():
+            job._finish(error='翻译任务已过期，请重试。')
+            return
 
         last_saved_len = 0
         try:
@@ -140,6 +138,8 @@ def start_or_get_job(
                     job._finish(error=chunk)
                     return
 
+                if execution_guard is not None:
+                    execution_guard()
                 job._append(chunk)
 
                 if len(job.text) - last_saved_len >= save_every_chars:

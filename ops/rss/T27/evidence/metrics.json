@@ -1,0 +1,41 @@
+{
+  "native": {
+    "feeds_attempted": 2,
+    "feeds_failed": 0,
+    "articles_sampled": 4,
+    "nonempty_converted": 4,
+    "manual_complete_confirmed": 0,
+    "extract_p95_seconds_nearest_rank": null
+  },
+  "summary_blog": {
+    "feeds_attempted": 2,
+    "feeds_failed": 1,
+    "articles_sampled": 2,
+    "nonempty_converted": 2,
+    "manual_complete_confirmed": 0,
+    "extract_p95_seconds_nearest_rank": 1.133
+  },
+  "dev": {
+    "feeds_attempted": 1,
+    "feeds_failed": 0,
+    "articles_sampled": 2,
+    "nonempty_converted": 2,
+    "manual_complete_confirmed": 0,
+    "extract_p95_seconds_nearest_rank": 1.698
+  },
+  "hn": {
+    "feeds_attempted": 1,
+    "feeds_failed": 0,
+    "articles_sampled": 3,
+    "nonempty_converted": 3,
+    "manual_complete_confirmed": 0,
+    "extract_p95_seconds_nearest_rank": 1.428
+  },
+  "directory": {
+    "n": 20,
+    "p50_ms": 25.361,
+    "p95_ms": 156.424,
+    "max_ms": 177.559,
+    "measurement": "actual browser same-origin API fetch, local Vite proxy, warm and cold requests included"
+  }
+}

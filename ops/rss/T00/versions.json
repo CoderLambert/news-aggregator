@@ -1,0 +1,41 @@
+{
+  "evidence_date": "2026-10-16",
+  "scope": "isolated synthetic engine experiment; not a production approval",
+  "host_python": "3.14.8",
+  "docker": "29.7.2",
+  "compose": "5.5.1",
+  "images": [
+    {
+      "tag": "miniflux/miniflux:2.3.3",
+      "repo_digests": [
+        "miniflux/miniflux@sha256:49d7b60987616387c306a8023087b31f2c9b7b21288b523026cb04058e8b6dbb"
+      ],
+      "image_id": "sha256:49d7b60987616387c306a8023087b31f2c9b7b21288b523026cb04058e8b6dbb",
+      "platform": "linux/amd64"
+    },
+    {
+      "tag": "postgres:17.6-alpine",
+      "repo_digests": [
+        "postgres@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94"
+      ],
+      "image_id": "sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94",
+      "platform": "linux/amd64"
+    },
+    {
+      "tag": "python:3.12.12-alpine3.22",
+      "repo_digests": [
+        "python@sha256:848ba4413eb897e225159b8fc1b02094576cbae4aa73fc13142608ae2c8c0e32"
+      ],
+      "image_id": "sha256:848ba4413eb897e225159b8fc1b02094576cbae4aa73fc13142608ae2c8c0e32",
+      "platform": "linux/amd64"
+    }
+  ],
+  "sdk": {
+    "package": "miniflux",
+    "version": "1.1.6",
+    "license": "MIT",
+    "wheel": "miniflux-1.1.6-py3-none-any.whl",
+    "sha256": "ec5a941ecc8a7534519a7fb1868e1718c1fff3b350ee5d6e119e060a36ac0026",
+    "source": "https://pypi.org/pypi/miniflux/1.1.6/json"
+  }
+}

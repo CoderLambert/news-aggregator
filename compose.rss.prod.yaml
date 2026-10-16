@@ -1,0 +1,114 @@
+# Optional RSS overlay. Add to compose.prod.yaml under the SAME project.
+# Explicit --profile rss activation preserves all existing app/worker services.
+services:
+  app:
+    environment:
+      RSS_ENGINE_INSTANCE_UUID: '${RSS_ENGINE_INSTANCE_UUID:?Persist the engine UUID in the protected manifest}'
+      RSS_ENGINE_ACCOUNT_ID: '${RSS_ENGINE_ACCOUNT_ID:?Set the dedicated non-admin account ID}'
+      RSS_RUNTIME_DIR: /var/lib/newshub/rss-runtime
+      # Keep closed until publisher redirect/rewrite policy gates pass.
+      RSS_FULL_CONTENT_ENABLED: '${RSS_FULL_CONTENT_ENABLED:-0}'
+    volumes:
+      - rss-runtime-data:/var/lib/newshub/rss-runtime:ro
+
+  rss-db:
+    profiles: [rss]
+    image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    environment:
+      POSTGRES_DB: miniflux
+      POSTGRES_USER: miniflux
+      POSTGRES_PASSWORD_FILE: /run/secrets/rss_pg_password
+    secrets: [rss_pg_password]
+    volumes: [rss-pg-data:/var/lib/postgresql/data]
+    networks: [rss-db-net]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U miniflux -d miniflux]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
+  miniflux:
+    profiles: [rss]
+    image: miniflux/miniflux:2.3.3@sha256:49d7b60987616387c306a8023087b31f2c9b7b21288b523026cb04058e8b6dbb
+    environment:
+      DATABASE_URL_FILE: /run/secrets/rss_database_url
+      RUN_MIGRATIONS: '1'
+      CREATE_ADMIN: '1'
+      ADMIN_USERNAME: newshub-engine-admin
+      ADMIN_PASSWORD_FILE: /run/secrets/rss_engine_admin_password
+      CLEANUP_ARCHIVE_READ_DAYS: '90'
+      CLEANUP_ARCHIVE_UNREAD_DAYS: '90'
+      FETCHER_ALLOW_PRIVATE_NETWORKS: '0'
+      LOG_LEVEL: error
+    secrets: [rss_database_url, rss_engine_admin_password]
+    ports: ['127.0.0.1:${RSS_ENGINE_PORT:-18080}:8080']
+    networks: [rss-db-net, rss-engine]
+    depends_on:
+      rss-db: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, /usr/bin/miniflux, -healthcheck, auto]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped
+
+  rss-sync:
+    profiles: [rss]
+    command: [python, /app/backend/manage.py, rss_sync_worker]
+    image: '${NEWSHUB_RSS_IMAGE:?Set immutable independently built rss-sync image}'
+    environment:
+      DJANGO_ENV: production
+      DJANGO_DEBUG: '0'
+      DJANGO_SECRET_KEY: '${DJANGO_SECRET_KEY:?Set explicit production Django key}'
+      WAITRESS_TRUSTED_PROXY: '${WAITRESS_TRUSTED_PROXY:?Set verified proxy IP}'
+      DJANGO_DB_PATH: /var/lib/newshub/db/db.sqlite3
+      NEWSHUB_RUNTIME_ROLE: rss_sync
+      RSS_FULL_CONTENT_ENABLED: '${RSS_FULL_CONTENT_ENABLED:-0}'
+      RSS_RUNTIME_DIR: /var/lib/newshub/rss-runtime
+      RSS_ENGINE_INSTANCE_UUID: '${RSS_ENGINE_INSTANCE_UUID:?Persist the engine UUID in the protected manifest}'
+      RSS_ENGINE_ACCOUNT_ID: '${RSS_ENGINE_ACCOUNT_ID:?Set the dedicated non-admin account ID}'
+      RSS_ENGINE_BASE_URL: http://miniflux:8080
+      RSS_ENGINE_TOKEN_FILE: /run/secrets/rss_engine_token
+    secrets: [rss_engine_token]
+    volumes:
+      - db-data:/var/lib/newshub/db
+      - rss-runtime-data:/var/lib/newshub/rss-runtime
+    networks: [rss-engine]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      miniflux: {condition: service_healthy}
+    read_only: true
+    tmpfs: ['/tmp:rw,nosuid,nodev,noexec,size=16m']
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    pids_limit: 64
+    mem_limit: 256m
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: [CMD, python, /app/backend/manage.py, rss_sync_worker, --healthcheck]
+      interval: 20s
+      timeout: 8s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  rss-pg-data:
+  rss-runtime-data:
+networks:
+  rss-db-net:
+    internal: true
+  rss-engine:
+    driver: bridge
+secrets:
+  rss_pg_password:
+    file: '${RSS_PG_PASSWORD_FILE:?Set a protected PostgreSQL password file}'
+  rss_database_url:
+    file: '${RSS_DATABASE_URL_FILE:?Set matching dedicated PostgreSQL URL file}'
+  rss_engine_admin_password:
+    file: '${RSS_ENGINE_ADMIN_PASSWORD_FILE:?Set separate engine admin password file}'
+  rss_engine_token:
+    file: '${RSS_ENGINE_TOKEN_FILE:?Set dedicated non-admin collector token file}'

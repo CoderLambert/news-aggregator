@@ -1,0 +1,1286 @@
+[
+  {
+    "phase": "passive_anonymous",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/capabilities/?lang=zh",
+    "time": 1792149781.9752803
+  },
+  {
+    "phase": "passive_anonymous",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/auth/me/?lang=zh",
+    "time": 1792149781.9990983
+  },
+  {
+    "phase": "passive_anonymous",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/smart-channels/dashboard/",
+    "time": 1792149782.2224298
+  },
+  {
+    "phase": "passive_anonymous",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/smart-channels/dashboard/",
+    "time": 1792149782.2226949
+  },
+  {
+    "phase": "passive_anonymous",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/?page=1&page_size=20&representation=summary&lang=zh",
+    "time": 1792149782.222907
+  },
+  {
+    "phase": "passive_anonymous",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/categories/?lang=zh",
+    "time": 1792149782.2230978
+  },
+  {
+    "phase": "passive_anonymous",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/sources/?lang=zh",
+    "time": 1792149782.2232716
+  },
+  {
+    "phase": "passive_anonymous",
+    "method": "GET",
+    "url": "https://publisher.example:8443/pixel.png",
+    "time": 1792149782.4081016
+  },
+  {
+    "phase": "passive_anonymous",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/1/?lang=zh",
+    "time": 1792149782.993118
+  },
+  {
+    "phase": "passive_anonymous",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/?page=1&page_size=20&search=T27+Public&mode=keyword&representation=summary&lang=zh",
+    "time": 1792149783.3811748
+  },
+  {
+    "phase": "passive_anonymous",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/capabilities/?lang=zh",
+    "time": 1792149783.9394522
+  },
+  {
+    "phase": "passive_anonymous",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/auth/me/?lang=zh",
+    "time": 1792149783.9575238
+  },
+  {
+    "phase": "passive_anonymous",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/1/?lang=zh",
+    "time": 1792149784.2353578
+  },
+  {
+    "phase": "passive_anonymous",
+    "method": "GET",
+    "url": "https://publisher.example:8443/pixel.png",
+    "time": 1792149784.379192
+  },
+  {
+    "phase": "passive_anonymous",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/2/",
+    "time": 1792149785.1512177
+  },
+  {
+    "phase": "passive_anonymous",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/3/",
+    "time": 1792149785.1641753
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/auth/csrf/?lang=zh",
+    "time": 1792149785.2485554
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "POST",
+    "url": "http://127.0.0.1:35663/api/auth/login/?lang=zh",
+    "time": 1792149785.2625806
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/1/?lang=zh",
+    "time": 1792149785.4423316
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-subscriptions/?lang=zh",
+    "time": 1792149785.4424415
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-groups/?lang=zh",
+    "time": 1792149785.442536
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/favorites/check/?news_id=1&lang=zh",
+    "time": 1792149785.6143837
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/blocked/check/?news_id=1&lang=zh",
+    "time": 1792149785.6144917
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/news/1/read-state/?lang=zh",
+    "time": 1792149785.6146464
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "PATCH",
+    "url": "http://127.0.0.1:35663/api/me/news/1/read-state/?lang=zh",
+    "time": 1792149785.7606862
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "POST",
+    "url": "http://127.0.0.1:35663/api/favorites/?lang=zh",
+    "time": 1792149786.7108424
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/favorites/check/?news_id=1&lang=zh",
+    "time": 1792149786.8177204
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/capabilities/?lang=zh",
+    "time": 1792149787.050818
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/auth/me/?lang=zh",
+    "time": 1792149787.0709105
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-subscriptions/?lang=zh",
+    "time": 1792149787.105443
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-groups/?lang=zh",
+    "time": 1792149787.1056075
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/1/?lang=zh",
+    "time": 1792149787.346376
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "https://publisher.example:8443/pixel.png",
+    "time": 1792149787.480337
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/favorites/check/?news_id=1&lang=zh",
+    "time": 1792149787.4807017
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/blocked/check/?news_id=1&lang=zh",
+    "time": 1792149787.4808915
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/news/1/read-state/?lang=zh",
+    "time": 1792149787.4809573
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/capabilities/?lang=zh",
+    "time": 1792149788.2545404
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/auth/me/?lang=zh",
+    "time": 1792149788.2743602
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-subscriptions/?lang=zh",
+    "time": 1792149788.2907
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-groups/?lang=zh",
+    "time": 1792149788.290817
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/2/?lang=zh",
+    "time": 1792149788.5503893
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "https://publisher.example:8443/pixel.png",
+    "time": 1792149788.6797352
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/favorites/check/?news_id=2&lang=zh",
+    "time": 1792149788.680193
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/blocked/check/?news_id=2&lang=zh",
+    "time": 1792149788.6804674
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/news/2/read-state/?lang=zh",
+    "time": 1792149788.680559
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/2/chat/?lang=zh",
+    "time": 1792149789.4896011
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "POST",
+    "url": "http://127.0.0.1:35663/api/news/2/suggested-questions/?lang=zh",
+    "time": 1792149789.4898503
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "POST",
+    "url": "http://127.0.0.1:35663/api/news/2/chat/?lang=zh",
+    "time": 1792149789.608681
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/auth/csrf/?lang=zh",
+    "time": 1792149790.0009944
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "POST",
+    "url": "http://127.0.0.1:35663/api/auth/logout/?lang=zh",
+    "time": 1792149790.0097368
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/2/?lang=zh",
+    "time": 1792149790.023821
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "POST",
+    "url": "http://127.0.0.1:35663/api/auth/login/?lang=zh",
+    "time": 1792149790.0688167
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/2/?lang=zh",
+    "time": 1792149790.2459817
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-subscriptions/?lang=zh",
+    "time": 1792149790.2462234
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-groups/?lang=zh",
+    "time": 1792149790.2464566
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/2/",
+    "time": 1792149790.2568765
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "POST",
+    "url": "http://127.0.0.1:35663/api/news/2/chat/",
+    "time": 1792149790.2770295
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/2/tts/",
+    "time": 1792149790.2917197
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/?mode=keyword&search=T27%20A%20ONLY%20SECRET&representation=summary",
+    "time": 1792149790.3062165
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/capabilities/?lang=zh",
+    "time": 1792149790.5242069
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/auth/me/?lang=zh",
+    "time": 1792149790.5454788
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-subscriptions/?lang=zh",
+    "time": 1792149790.5660384
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-groups/?lang=zh",
+    "time": 1792149790.566172
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/1/?lang=zh",
+    "time": 1792149790.8178253
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "https://publisher.example:8443/pixel.png",
+    "time": 1792149790.9818444
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/favorites/check/?news_id=1&lang=zh",
+    "time": 1792149790.9822972
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/blocked/check/?news_id=1&lang=zh",
+    "time": 1792149790.982489
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/news/1/read-state/?lang=zh",
+    "time": 1792149790.982566
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/capabilities/?lang=zh",
+    "time": 1792149791.740268
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/auth/me/?lang=zh",
+    "time": 1792149791.7829306
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-subscriptions/?lang=zh",
+    "time": 1792149791.7962356
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-groups/?lang=zh",
+    "time": 1792149791.7966168
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/3/?lang=zh",
+    "time": 1792149792.0361848
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "https://publisher.example:8443/pixel.png",
+    "time": 1792149792.1975286
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/favorites/check/?news_id=3&lang=zh",
+    "time": 1792149792.1982245
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/blocked/check/?news_id=3&lang=zh",
+    "time": 1792149792.1986127
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/news/3/read-state/?lang=zh",
+    "time": 1792149792.198784
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/auth/csrf/?lang=zh",
+    "time": 1792149792.8840475
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "POST",
+    "url": "http://127.0.0.1:35663/api/auth/logout/?lang=zh",
+    "time": 1792149792.891991
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/3/?lang=zh",
+    "time": 1792149792.9035952
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "POST",
+    "url": "http://127.0.0.1:35663/api/auth/login/?lang=zh",
+    "time": 1792149792.9446964
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/3/?lang=zh",
+    "time": 1792149793.1188273
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-subscriptions/?lang=zh",
+    "time": 1792149793.1189382
+  },
+  {
+    "phase": "alice_read_state_and_ai",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-groups/?lang=zh",
+    "time": 1792149793.1190093
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/capabilities/?lang=zh",
+    "time": 1792149793.2812245
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/auth/me/?lang=zh",
+    "time": 1792149793.299982
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-subscriptions/?lang=zh",
+    "time": 1792149793.3212857
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-groups/?lang=zh",
+    "time": 1792149793.32143
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-subscriptions/",
+    "time": 1792149793.5790315
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/admin/rss/health/",
+    "time": 1792149793.5791333
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/smart-channels/catalog/",
+    "time": 1792149793.5792067
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-subscriptions/",
+    "time": 1792149793.5792718
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/admin/rss/health/",
+    "time": 1792149793.57933
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/smart-channels/catalog/",
+    "time": 1792149793.579389
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=",
+    "time": 1792149794.3311784
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=",
+    "time": 1792149794.3313618
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=Coding%20Horror",
+    "time": 1792149794.337071
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=Coding%20Horror",
+    "time": 1792149794.4924488
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=Coding%20Horror",
+    "time": 1792149794.6209671
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=Coding%20Horror",
+    "time": 1792149794.798957
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=Coding%20Horror",
+    "time": 1792149794.9283996
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=Coding%20Horror",
+    "time": 1792149795.0869038
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=Coding%20Horror",
+    "time": 1792149795.1123133
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=Coding%20Horror",
+    "time": 1792149795.1657214
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=Coding%20Horror",
+    "time": 1792149795.1880264
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=Coding%20Horror",
+    "time": 1792149795.2155023
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=Coding%20Horror",
+    "time": 1792149795.2390656
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=Coding%20Horror",
+    "time": 1792149795.264255
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=Coding%20Horror",
+    "time": 1792149795.2903504
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=Coding%20Horror",
+    "time": 1792149795.3118281
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=Coding%20Horror",
+    "time": 1792149795.3330622
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=Coding%20Horror",
+    "time": 1792149795.3539646
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=Coding%20Horror",
+    "time": 1792149795.3750124
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=Coding%20Horror",
+    "time": 1792149795.396644
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=Coding%20Horror",
+    "time": 1792149795.4217408
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=Coding%20Horror",
+    "time": 1792149795.444236
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=Coding%20Horror",
+    "time": 1792149795.5700853
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "POST",
+    "url": "http://127.0.0.1:35663/api/rss/discovery/resolve/",
+    "time": 1792149795.669405
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-operations/9e425824-d414-4950-946a-12b52b974e9b/",
+    "time": 1792149795.6899621
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-operations/9e425824-d414-4950-946a-12b52b974e9b/",
+    "time": 1792149797.2044795
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "POST",
+    "url": "http://127.0.0.1:35663/api/rss/discovery/resolve/",
+    "time": 1792149797.6221974
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-operations/5c456370-2d84-47da-805c-aaf9732b2821/",
+    "time": 1792149797.634278
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-operations/5c456370-2d84-47da-805c-aaf9732b2821/",
+    "time": 1792149799.142274
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "POST",
+    "url": "http://127.0.0.1:35663/api/rss/discovery/resolve/",
+    "time": 1792149799.4636393
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-operations/16410f79-3a48-4ee6-afbb-84727edd447a/",
+    "time": 1792149799.4964476
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-operations/16410f79-3a48-4ee6-afbb-84727edd447a/",
+    "time": 1792149801.0051556
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-operations/16410f79-3a48-4ee6-afbb-84727edd447a/",
+    "time": 1792149802.5146372
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "POST",
+    "url": "http://127.0.0.1:35663/api/me/rss-subscriptions/",
+    "time": 1792149803.110274
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/smart-channels/catalog/",
+    "time": 1792149803.1427233
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-subscriptions/",
+    "time": 1792149803.1428552
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-subscriptions/?lang=zh",
+    "time": 1792149803.14312
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-groups/?lang=zh",
+    "time": 1792149803.1432247
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-operations/9bd9ad8e-f51f-4195-9105-674b01b43186/",
+    "time": 1792149803.144876
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-operations/9bd9ad8e-f51f-4195-9105-674b01b43186/",
+    "time": 1792149804.7390852
+  },
+  {
+    "phase": "directory_and_discovery",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-operations/9bd9ad8e-f51f-4195-9105-674b01b43186/",
+    "time": 1792149806.2476642
+  },
+  {
+    "phase": "opml_preview_confirm_export",
+    "method": "POST",
+    "url": "http://127.0.0.1:35663/api/me/rss-imports/preview/",
+    "time": 1792149806.9278336
+  },
+  {
+    "phase": "opml_preview_confirm_export",
+    "method": "POST",
+    "url": "http://127.0.0.1:35663/api/me/rss-imports/confirm/",
+    "time": 1792149807.1931074
+  },
+  {
+    "phase": "opml_preview_confirm_export",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/smart-channels/catalog/",
+    "time": 1792149807.222092
+  },
+  {
+    "phase": "opml_preview_confirm_export",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-subscriptions/?lang=zh",
+    "time": 1792149807.2223265
+  },
+  {
+    "phase": "opml_preview_confirm_export",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-groups/?lang=zh",
+    "time": 1792149807.22255
+  },
+  {
+    "phase": "opml_preview_confirm_export",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-imports/fe2c5445-eb98-4fb4-8e83-496ef06f2397/",
+    "time": 1792149807.2365005
+  },
+  {
+    "phase": "opml_preview_confirm_export",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/admin/rss/health/",
+    "time": 1792149808.6090796
+  },
+  {
+    "phase": "opml_preview_confirm_export",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-imports/fe2c5445-eb98-4fb4-8e83-496ef06f2397/",
+    "time": 1792149809.270511
+  },
+  {
+    "phase": "opml_preview_confirm_export",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-imports/fe2c5445-eb98-4fb4-8e83-496ef06f2397/",
+    "time": 1792149811.2786872
+  },
+  {
+    "phase": "opml_preview_confirm_export",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-imports/fe2c5445-eb98-4fb4-8e83-496ef06f2397/",
+    "time": 1792149813.2858958
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "PATCH",
+    "url": "http://127.0.0.1:35663/api/admin/rss/feeds/0a4e8352-8d1c-44f5-bc81-45d39af80fc2/policy/",
+    "time": 1792149813.9824374
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-operations/677aca11-5519-4669-ae24-febbb63d43e4/",
+    "time": 1792149813.9924629
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-operations/677aca11-5519-4669-ae24-febbb63d43e4/",
+    "time": 1792149814.251967
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-operations/677aca11-5519-4669-ae24-febbb63d43e4/",
+    "time": 1792149814.5117486
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-operations/677aca11-5519-4669-ae24-febbb63d43e4/",
+    "time": 1792149814.7710502
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-operations/677aca11-5519-4669-ae24-febbb63d43e4/",
+    "time": 1792149815.031444
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-operations/677aca11-5519-4669-ae24-febbb63d43e4/",
+    "time": 1792149815.2934237
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-operations/677aca11-5519-4669-ae24-febbb63d43e4/",
+    "time": 1792149815.553933
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/capabilities/?lang=zh",
+    "time": 1792149815.7296538
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/auth/me/?lang=zh",
+    "time": 1792149815.7488413
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-subscriptions/?lang=zh",
+    "time": 1792149815.7687998
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-groups/?lang=zh",
+    "time": 1792149815.7689197
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/1/?lang=zh",
+    "time": 1792149816.0244186
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "https://publisher.example:8443/pixel.png",
+    "time": 1792149816.1574724
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/favorites/check/?news_id=1&lang=zh",
+    "time": 1792149816.1582007
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/blocked/check/?news_id=1&lang=zh",
+    "time": 1792149816.15853
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/news/1/read-state/?lang=zh",
+    "time": 1792149816.1586704
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "POST",
+    "url": "http://127.0.0.1:35663/api/news/1/rss-refetch/?lang=zh",
+    "time": 1792149816.8383148
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-operations/debb0762-8595-4503-a8f6-f4114056f37f/?lang=zh",
+    "time": 1792149816.859823
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-operations/debb0762-8595-4503-a8f6-f4114056f37f/?lang=zh",
+    "time": 1792149818.367896
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "POST",
+    "url": "http://127.0.0.1:35663/api/me/reading-stats/",
+    "time": 1792149819.1450632
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-operations/debb0762-8595-4503-a8f6-f4114056f37f/?lang=zh",
+    "time": 1792149819.8799243
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/1/?lang=zh",
+    "time": 1792149819.8874547
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/capabilities/?lang=zh",
+    "time": 1792149820.4064121
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/auth/me/?lang=zh",
+    "time": 1792149820.4264793
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-subscriptions/?lang=zh",
+    "time": 1792149820.4513645
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-groups/?lang=zh",
+    "time": 1792149820.4514754
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-subscriptions/",
+    "time": 1792149820.703146
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/admin/rss/health/",
+    "time": 1792149820.7032459
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/smart-channels/catalog/",
+    "time": 1792149820.7033112
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-subscriptions/",
+    "time": 1792149820.7033741
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/admin/rss/health/",
+    "time": 1792149820.7034314
+  },
+  {
+    "phase": "explicit_repair",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/smart-channels/catalog/",
+    "time": 1792149820.703569
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "POST",
+    "url": "http://127.0.0.1:35663/api/me/channel-subscriptions/?lang=zh",
+    "time": 1792149821.458115
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-subscriptions/?lang=zh",
+    "time": 1792149821.4800582
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-groups/?lang=zh",
+    "time": 1792149821.480146
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/smart-channels/catalog/",
+    "time": 1792149821.4907455
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/capabilities/?lang=zh",
+    "time": 1792149821.6560395
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/auth/me/?lang=zh",
+    "time": 1792149821.6755507
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-subscriptions/?lang=zh",
+    "time": 1792149821.6959367
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-groups/?lang=zh",
+    "time": 1792149821.696205
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/2/?lang=zh",
+    "time": 1792149821.9516158
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/2/",
+    "time": 1792149822.4849665
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/capabilities/?lang=zh",
+    "time": 1792149822.656904
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/auth/me/?lang=zh",
+    "time": 1792149822.6763413
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-subscriptions/?lang=zh",
+    "time": 1792149822.6948428
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-groups/?lang=zh",
+    "time": 1792149822.694939
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/2/?lang=zh",
+    "time": 1792149822.9501557
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/capabilities/?lang=zh",
+    "time": 1792149823.6300576
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/auth/me/?lang=zh",
+    "time": 1792149823.6503375
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-subscriptions/?lang=zh",
+    "time": 1792149823.674114
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-groups/?lang=zh",
+    "time": 1792149823.6742718
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-subscriptions/",
+    "time": 1792149823.927963
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/admin/rss/health/",
+    "time": 1792149823.9280698
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/smart-channels/catalog/",
+    "time": 1792149823.928144
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/rss-subscriptions/",
+    "time": 1792149823.928226
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/admin/rss/health/",
+    "time": 1792149823.9282904
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/smart-channels/catalog/",
+    "time": 1792149823.928374
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=",
+    "time": 1792149824.594058
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/rss/directory/?q=",
+    "time": 1792149824.5942554
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/capabilities/?lang=zh",
+    "time": 1792149825.1348984
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/auth/me/?lang=zh",
+    "time": 1792149825.1542306
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-subscriptions/?lang=zh",
+    "time": 1792149825.2185075
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/channel-groups/?lang=zh",
+    "time": 1792149825.2186341
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/news/1/?lang=zh",
+    "time": 1792149825.4303675
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "https://publisher.example:8443/pixel.png",
+    "time": 1792149825.5710351
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/favorites/check/?news_id=1&lang=zh",
+    "time": 1792149825.5718918
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/blocked/check/?news_id=1&lang=zh",
+    "time": 1792149825.5720885
+  },
+  {
+    "phase": "unsubscribe_and_mobile",
+    "method": "GET",
+    "url": "http://127.0.0.1:35663/api/me/news/1/read-state/?lang=zh",
+    "time": 1792149825.5721552
+  }
+]

@@ -1,4 +1,5 @@
 """Current readable context and shared enqueue intent, without request-time fetching."""
+from api.tests.rss.reader_fixtures import public_legacy_article
 from unittest.mock import patch
 import pytest
 from django.contrib.auth.models import User
@@ -16,15 +17,15 @@ def make_news(db):
         values=dict(title='Article title',content='SHORT_PREVIEW',url='https://webkit.org/blog/12/article/',
             source=source,category=category,publish_time=timezone.now(),content_kind='article')
         values.update(extra)
-        return News.objects.create(**values)
+        return public_legacy_article(News.objects.create(**values))
     return create
 
 
 @pytest.mark.parametrize('values,expected', [
-    (dict(full_content='FULL_EN',full_content_zh='FULL_ZH',full_content_state='legacy'), 'FULL_ZH'),
+    (dict(full_content='FULL_EN',full_content_zh='FULL_ZH',full_content_state='legacy'), 'FULL_EN'),
     (dict(full_content='FULL_EN',content_zh='SHORT_ZH',full_content_state='complete',full_content_fetch_status='rate_limited'),'FULL_EN'),
-    (dict(full_content='RETAINED_AUDIT',full_content_zh='OLD_TRANSLATION',full_content_state='missing',content_zh='SHORT_ZH'),'SHORT_ZH'),
-    (dict(content_zh='SHORT_ZH'),'SHORT_ZH'),
+    (dict(full_content='RETAINED_AUDIT',full_content_zh='OLD_TRANSLATION',full_content_state='missing',content_zh='SHORT_ZH'),'SHORT_PREVIEW'),
+    (dict(content_zh='SHORT_ZH'),'SHORT_PREVIEW'),
     ({},'SHORT_PREVIEW'),
 ])
 def test_current_context_requires_readable_body_before_full_translation_preference(make_news,values,expected):
@@ -83,7 +84,7 @@ def test_chat_prompt_and_stream_scope_agree_and_never_fetch_article(make_news,cl
     assert ('READABLE_FULL_BODY' if full else 'SHORT_PREVIEW') in captured['evidence']
     assert 'READABLE_FULL_BODY' not in captured['prompt'] and 'SHORT_PREVIEW' not in captured['prompt']
     news.refresh_from_db()
-    assert news.full_content_fetch_status == ('pending' if full else 'queued')
+    assert news.full_content_fetch_status == 'pending'
 
 
 def test_suggestions_use_summary_scope_without_waiting_for_article_http(make_news,client):

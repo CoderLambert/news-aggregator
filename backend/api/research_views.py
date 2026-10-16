@@ -66,6 +66,16 @@ def _sse_stream(run_id):
     last_sequence = 0
     last_heartbeat = time.monotonic()
     while True:
+        from .services.research.access import require_session_evidence
+        from django.http import Http404
+        run = ResearchRun.objects.select_related('user', 'session').filter(pk=run_id).first()
+        if run is None:
+            return
+        try:
+            require_session_evidence(run.session, run.user)
+        except Http404:
+            yield job_manager.serialize_event('error', {'message': '研究资料的读取权限或内容已变化。'})
+            return
         events = list(job_manager.get_run_events(run_id, after_sequence=last_sequence, limit=100))
         for event in events:
             yield job_manager.serialize_event(event.event_type, event.data)
@@ -158,7 +168,7 @@ def research_stream(request, pk):
     run = job_manager.active_run_for_session(request.user, session)
     if run is not None:
         return _stream_response(run)
-    serializer = ResearchSessionSerializer(session)
+    serializer = ResearchSessionSerializer(session, context={"request": request})
     data = dict(serializer.data)
     data['latest_run'] = job_manager.latest_run_state(request.user, session)
     response = _no_store(Response(data))
@@ -229,6 +239,8 @@ class ResearchSearchResultListView(ResearchNoStoreMixin, generics.ListAPIView):
         session_pk = self.kwargs['session_pk']
         if not _user_sessions(self.request.user).filter(pk=session_pk).exists():
             return ResearchSearchResult.objects.none()
+        from .services.research.access import require_session_evidence
+        require_session_evidence(_user_sessions(self.request.user).get(pk=session_pk), self.request.user)
         queryset = ResearchSearchResult.objects.filter(session_id=session_pk)
         result_type = self.request.query_params.get('result_type')
         if result_type:

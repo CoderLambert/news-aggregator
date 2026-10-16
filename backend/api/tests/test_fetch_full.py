@@ -1,3 +1,4 @@
+from api.tests.rss.legacy_fixtures import legacy_news, public_legacy
 from datetime import timedelta
 from unittest.mock import patch
 import pytest
@@ -16,7 +17,7 @@ def make_news(db):
         values=dict(title='Publisher title',url='https://webkit.org/blog/12/article/', content='A summary.',
                     source=source,category=category,publish_time=timezone.now(),content_kind='article')
         values.update(extra)
-        return News.objects.create(**values)
+        return legacy_news(**values)
     return create
 
 

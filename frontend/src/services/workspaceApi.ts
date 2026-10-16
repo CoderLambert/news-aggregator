@@ -38,7 +38,8 @@ function responseErrorMessage(value: unknown, status: number): string {
   const record = typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown> : undefined
   // DRF validation errors may be a list, or a field error, rather than `detail`.
-  const candidate = record?.detail ?? ((status === 400 || status === 422)
+  const envelope = record?.error && typeof record.error === 'object' ? record.error as Record<string, unknown> : undefined
+  const candidate = envelope?.message ?? record?.detail ?? ((status === 400 || status === 422)
     ? record?.url ?? record?.non_field_errors ?? (Array.isArray(value) ? value : undefined) : undefined)
   const message = typeof candidate === 'string' ? candidate
     : Array.isArray(candidate) && candidate.every(item => typeof item === 'string') ? candidate.join('；') : ''
@@ -49,8 +50,8 @@ function responseErrorMessage(value: unknown, status: number): string {
   return '操作未完成，请稍后重试。'
 }
 
-export async function workspaceRequest<T>(path: string, options: { method?: string; body?: unknown; signal?: AbortSignal } = {}): Promise<T> {
-  const viewer = workspaceViewer
+export async function workspaceRequest<T>(path: string, options: { method?: string; body?: unknown; signal?: AbortSignal; viewer?: number; idempotencyKey?: string } = {}): Promise<T> {
+  const viewer = options.viewer ?? workspaceViewer
   const controller = new AbortController()
   const abort = () => controller.abort()
   if (options.signal?.aborted) controller.abort()
@@ -65,9 +66,10 @@ export async function workspaceRequest<T>(path: string, options: { method?: stri
     if (method !== 'GET' && viewer !== workspaceViewer) throw new WorkspaceError('账号已变化，请重新操作。', 409)
     const response = await fetch('/api' + path, {
       method, credentials: 'same-origin', signal: controller.signal,
-      headers: { Accept: 'application/json', ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      headers: { Accept: 'application/json', ...(options.body !== undefined && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
+        ...(options.idempotencyKey ? { 'Idempotency-Key': options.idempotencyKey } : {}),
         ...(method !== 'GET' ? { 'X-CSRFToken': csrfCookie(), ...(viewer !== null ? { 'X-Workspace-Viewer': String(viewer) } : {}) } : {}) },
-      ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
+      ...(options.body !== undefined ? { body: options.body instanceof FormData ? options.body : JSON.stringify(options.body) } : {}),
     })
     if (response.status === 204) return undefined as T
     let value: unknown

@@ -202,8 +202,53 @@ export function fetchNewsDetail(id: NewsId, signal?: AbortSignal): Promise<unkno
   return api.get<unknown>(`/news/${id}/`, { signal }).then(({ data }) => data)
 }
 
+export interface NewsReadState {
+  is_read: boolean
+  version: number
+}
+
+function parseReadState(value: unknown): NewsReadState {
+  if (!isRecord(value) || typeof value.is_read !== 'boolean' ||
+    !Number.isSafeInteger(value.version) || Number(value.version) < 0) {
+    throw new TypeError('Invalid read state response')
+  }
+  return { is_read: value.is_read, version: Number(value.version) }
+}
+
+export async function fetchReadState(id: NewsId, signal?: AbortSignal): Promise<NewsReadState> {
+  return parseReadState((await api.get<unknown>(`/me/news/${id}/read-state/`, { signal })).data)
+}
+
+export async function updateReadState(id: NewsId, isRead: boolean, expectedVersion: number, viewerId: number): Promise<NewsReadState> {
+  return parseReadState((await api.patch<unknown>(`/me/news/${id}/read-state/`, {
+    is_read: isRead, expected_version: expectedVersion,
+  }, { headers: { 'X-Workspace-Viewer': String(viewerId) } })).data)
+}
+
 export function fetchFullArticle(id: NewsId, force = false, signal?: AbortSignal): Promise<unknown> {
   return apiFetch.post<unknown>(`/news/${id}/fetch-full/`, force === true ? { force: true } : undefined, { signal }).then(({ data }) => data)
+}
+
+export interface RssOperation {
+  id: string
+  state: string
+  result: Record<string, unknown>
+}
+
+export async function requestRssRefetch(id: NewsId, viewerId: number, signal?: AbortSignal): Promise<string> {
+  const value: unknown = (await api.post<unknown>(`/news/${id}/rss-refetch/`, {}, {
+    signal, headers: { 'Idempotency-Key': crypto.randomUUID(), 'X-Workspace-Viewer': String(viewerId) },
+  })).data
+  if (!isRecord(value) || typeof value.operation_id !== 'string') throw new TypeError('Invalid RSS operation response')
+  return value.operation_id
+}
+
+export async function fetchRssOperation(id: string, signal?: AbortSignal): Promise<RssOperation> {
+  const value: unknown = (await api.get<unknown>(`/me/rss-operations/${encodeURIComponent(id)}/`, { signal })).data
+  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.state !== 'string' || !isRecord(value.result)) {
+    throw new TypeError('Invalid RSS operation response')
+  }
+  return { id: value.id, state: value.state, result: value.result }
 }
 
 export function translateFullArticle(id: NewsId): Promise<unknown> {

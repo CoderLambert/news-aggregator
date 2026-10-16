@@ -52,6 +52,8 @@ class SmartChannelTests(TestCase):
 
     def test_unknown_source_has_no_fabricated_topics(self):
         source = Source.objects.create(name='A new source', url='https://example.org')
+        from api.tests.rss.legacy_fixtures import public_legacy
+        public_legacy(source)
         response = self.client.get(f'/api/smart-channels/sources/{source.pk}/')
         self.assertEqual(response.data['topics'], [])
         self.assertTrue(response.data['needs_review'])

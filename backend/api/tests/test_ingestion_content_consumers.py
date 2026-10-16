@@ -14,9 +14,10 @@ from rest_framework.test import APIClient, APIRequestFactory
 
 from api.models import (
     Category, ChatGPTArticleTranslation, ChatGPTSubscriptionConnection, News,
-    RequestBudget, SharedArticleTranslation, SharedArticleTranslationTask, Source,
+    RequestBudget, SharedArticleTranslation, SharedArticleTranslationTask, Source, SourcePublication,
 )
 from api.serializers import NewsDetailSerializer
+from api.tests.rss.reader_fixtures import public_legacy_article
 from api.services import article_content, shared_translations as shared
 from api.services.full_content_status import correct_article_identity
 from api.services.research import tools
@@ -47,6 +48,7 @@ def local_consumers(settings, monkeypatch):
 @pytest.fixture
 def make_news():
     source = Source.objects.update_or_create(name='Dev.to', defaults={'url': 'https://dev.to', 'language': 'en', 'source_type': 'news'})[0]
+    SourcePublication.objects.update_or_create(source=source, defaults={'owner': 'legacy', 'reading_policy': 'standard'})
     category = Category.objects.create(name='Consumer regression', slug='consumer-regression')
     sequence = 0
 
@@ -54,7 +56,7 @@ def make_news():
         nonlocal sequence
         sequence += 1
         defaults = dict(
-            source=source, category=category, title='availability corpus article',
+            source=source, body_owner_source=source, category=category, title='availability corpus article',
             content=SUMMARY, content_zh=SUMMARY_ZH, title_zh='可读性测试文章',
             url=f'https://dev.to/team/consumer-{sequence}', publish_time=timezone.now(),
             content_kind='article', full_content=BODY, full_content_state='complete',
@@ -62,7 +64,7 @@ def make_news():
             full_content_zh_fetched_at=timezone.now(),
         )
         defaults.update(changes)
-        return News.objects.create(**defaults)
+        return public_legacy_article(News.objects.create(**defaults))
 
     return create
 
@@ -94,8 +96,10 @@ def quarantined(make_news):
         **shared.cache_key(news.pk, digest), status='running',
         started_at=timezone.now(), expires_at=timezone.now() + timedelta(minutes=1),
     )
+    from api.rss.legacy_fencing import capture_legacy_article
+    token = capture_legacy_article(news, initialize=True)
     assert correct_article_identity(news, news.url + '-corrected', expected_url=news.url,
-                                    expected_revision=news.full_content_revision)
+                                    expected_revision=news.full_content_revision, legacy_token=token)
     news.refresh_from_db()
     assert news.full_content == BODY
     assert shared.source_hash(news.full_content) == digest
@@ -126,7 +130,7 @@ def test_quarantine_hides_original_and_all_translation_scopes_with_identical_sou
     assert data['has_full_content'] is False
     assert data['full_translation_personal_available'] is False
     assert data['full_translation_active'] is False
-    assert article_content.pick_chat_context(record.news) == SUMMARY_ZH
+    assert article_content.pick_chat_context(record.news) == SUMMARY
     assert article_content.context_scope(record.news) == 'summary'
     assert shared.get_shared_translation(record.news) is None
     assert not shared.task_is_running(record.news)
@@ -147,7 +151,7 @@ def test_shared_publication_rejects_quarantine_even_when_raw_body_hash_is_unchan
     record.task.refresh_from_db()
     assert record.history.content == '历史共享译文'
     assert SharedArticleTranslation.objects.count() == 1
-    assert record.task.status == 'running'  # Lease mutation rolls back with rejection.
+    assert record.task.status == ('succeeded' if with_lease else 'running')  # Historical completion does not publish a current body.
     assert record.news.full_content == BODY
     assert record.news.full_content_zh == LEGACY_ZH
 
@@ -171,7 +175,7 @@ def test_translation_endpoints_return_existing_sse_error_with_code_without_provi
     personal = sse_payload(subscription_translation_response(request, quarantined.news, force=True))
 
     for payload in (public, personal):
-        assert payload['error'] == '请先获取完整原文。'
+        assert payload['error'] == '当前仅可读取摘要。'
         assert payload['error_code'] == 'full_content_not_ready'
         assert 'full_content_zh' not in payload
     public_start.assert_not_called()
@@ -209,7 +213,7 @@ def test_refresh_failure_keeps_valid_body_readable_for_detail_chat_and_speech(ma
     assert data['full_content'] == BODY
     assert data['full_content_zh'] == LEGACY_ZH
     assert data['full_content_fetch_status'] == status
-    assert article_content.pick_chat_context(news) == LEGACY_ZH
+    assert article_content.pick_chat_context(news) == BODY
     assert article_content.context_scope(news) == 'full'
     assert resolve_tts_content(news, user, 'original', 'full').content == BODY
     assert resolve_tts_content(news, user, 'zh', 'full').content == LEGACY_ZH
@@ -248,40 +252,30 @@ def test_research_search_full_content_filter_applies_after_all_search_modes(avai
     assert report['total'] == 2
 
 
-def test_research_fetch_uses_common_enqueue_and_returns_truthful_queued_summary(make_news, monkeypatch):
+def test_research_read_does_not_enqueue_a_quarantined_body(make_news, monkeypatch):
     news = make_news(full_content_state='missing', full_content_fetch_status='pending', full_content_zh='')
-    deadline = timezone.now() + timedelta(minutes=10)
-    RequestBudget.objects.create(key='host:dev.to', cooldown_until=deadline)
-    monkeypatch.setattr(article_content, 'worker_health', Mock(return_value=True))
-    common_request = Mock(wraps=article_content.request_full_content)
+    common_request = Mock(side_effect=AssertionError('research reads must not enqueue'))
     monkeypatch.setattr(article_content, 'request_full_content', common_request)
-
     report = tools._tool_fetch_article(news.pk)
-
-    common_request.assert_called_once()
+    common_request.assert_not_called()
     news.refresh_from_db()
-    assert report['task_outcome'] == 'queued'
+    assert report['task_outcome'] == 'stored'
     assert report['context_scope'] == report['source_scope'] == 'summary'
-    assert report['content'] == SUMMARY_ZH
-    assert report['full_content_state'] == 'missing'
-    assert report['full_content_fetch_status'] == 'queued'
-    assert report['next_attempt_at'] == news.full_content_next_attempt_at.isoformat()
-    assert news.full_content_next_attempt_at >= deadline
-    assert news.full_content == BODY  # Quarantine history remains, but was not read.
+    assert report['content'] == SUMMARY
+    assert news.full_content_fetch_status == 'pending'
+    assert news.full_content_next_attempt_at is None
+    assert news.full_content == BODY
 
 
-def test_research_fetch_unavailable_worker_returns_summary_without_false_success(make_news, monkeypatch):
+def test_research_read_is_independent_of_legacy_worker_health(make_news, monkeypatch):
     news = make_news(full_content_state='missing', full_content_fetch_status='pending')
-    health = Mock(return_value=False)
+    health = Mock(side_effect=AssertionError('research reads do not use legacy workers'))
     monkeypatch.setattr(article_content, 'worker_health', health)
-
     report = tools._tool_fetch_article(news.pk)
-
-    health.assert_called_once_with(require_enabled=True)
-    assert report['task_outcome'] == 'unavailable'
-    assert report['error_code'] == 'full_content_worker_unavailable'
+    health.assert_not_called()
+    assert report['task_outcome'] == 'stored'
     assert report['context_scope'] == report['source_scope'] == 'summary'
-    assert report['content'] == SUMMARY_ZH
+    assert report['content'] == SUMMARY
     news.refresh_from_db()
     assert news.full_content_fetch_status == 'pending'
     assert news.full_content_next_attempt_at is None
@@ -302,7 +296,7 @@ def test_research_fetch_caps_excerpt_and_distinguishes_original_scope(make_news,
     assert report['original_length'] == len(text)
     assert report['context_scope'] == 'excerpt'
     assert report['source_scope'] == source_scope
-    assert report['task_outcome'] == ('cached' if state == 'complete' else 'unavailable')
+    assert report['task_outcome'] == 'stored'
 
 
 def test_research_service_has_no_reverse_import_of_api_views():

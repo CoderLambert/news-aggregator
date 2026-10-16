@@ -276,9 +276,9 @@ function resolveCodeLanguage(children: ReactNode, code: string) {
  * flips to "已复制" for ~1.5s on success. Inline code is unaffected —
  * react-markdown only routes fenced blocks through `pre`.
  */
-function CodeBlock({ children }: { children?: ReactNode }) {
+function CodeBlock({ children, legacyCodeRepair = false }: { children?: ReactNode; legacyCodeRepair?: boolean }) {
   const rawCode = extractCodeText(children).replace(/\n$/, '')
-  const code = repairExplodedCodeBlock(rawCode)
+  const code = legacyCodeRepair ? repairExplodedCodeBlock(rawCode) : rawCode
   const language = resolveCodeLanguage(children, code)
 
   if (language === 'mermaid') {
@@ -571,6 +571,11 @@ const MD_COMPONENTS: Components = {
   ),
 }
 
+function LegacyCodeBlock({ children }: { children?: ReactNode }) {
+  return <CodeBlock legacyCodeRepair>{children}</CodeBlock>
+}
+const LEGACY_MD_COMPONENTS: Components = { ...MD_COMPONENTS, pre: LegacyCodeBlock }
+
 const REMARK_PLUGINS = [remarkGfm]
 const LEGACY_SUMMARY_REMARK_PLUGINS = [remarkGfm, remarkLegacySummaryParagraphs]
 
@@ -582,13 +587,15 @@ const LEGACY_SUMMARY_REMARK_PLUGINS = [remarkGfm, remarkLegacySummaryParagraphs]
 export default function MarkdownContent({
   content,
   legacySummarySpacing = false,
+  legacyCodeRepair = false,
 }: {
   content: string
   legacySummarySpacing?: boolean
+  legacyCodeRepair?: boolean
 }) {
   return (
     <div className="article-markdown prose prose-gray mx-auto w-full max-w-[86ch] overflow-hidden">
-      <ReactMarkdown skipHtml remarkPlugins={legacySummarySpacing ? LEGACY_SUMMARY_REMARK_PLUGINS : REMARK_PLUGINS} components={MD_COMPONENTS}>
+      <ReactMarkdown skipHtml remarkPlugins={legacySummarySpacing ? LEGACY_SUMMARY_REMARK_PLUGINS : REMARK_PLUGINS} components={legacyCodeRepair ? LEGACY_MD_COMPONENTS : MD_COMPONENTS}>
         {content}
       </ReactMarkdown>
     </div>

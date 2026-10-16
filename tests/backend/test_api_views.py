@@ -1,3 +1,4 @@
+from api.tests.rss.legacy_fixtures import legacy_news
 """
 Tests for the NewsFetchFullView API endpoint.
 Tests cached article reads and durable full-content enqueue responses.
@@ -26,7 +27,7 @@ class NewsFetchFullViewTest(TestCase):
             name='Python',
             slug='python',
         )
-        self.news = News.objects.create(
+        self.news = legacy_news(
             title='owner/test-repo',
             content='A test repository',
             url='https://github.com/owner/test-repo',
@@ -117,7 +118,7 @@ class NewsTranslateFullViewTest(TestCase):
             name='Python',
             slug='python',
         )
-        self.news = News.objects.create(
+        self.news = legacy_news(
             title='owner/test-repo',
             content='A test repository',
             full_content='# Test\n\nSome content to translate.',
@@ -150,4 +151,4 @@ class NewsTranslateFullViewTest(TestCase):
         # The error message is JSON escaped, so check for the decoded content
         import json as json_mod
         data = json_mod.loads(content.split('data: ')[1].strip())
-        self.assertIn('获取完整原文', data.get('error', ''))
+        self.assertEqual('当前仅可读取摘要。', data.get('error'))

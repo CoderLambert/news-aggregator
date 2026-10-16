@@ -595,7 +595,26 @@ if [[ "$WORKER_CAPABLE" == 1 ]]; then
 fi
 
 if [[ "$STAGE" == g1 ]]; then
-    seed_code="from django.utils import timezone; from api.models import Category, News, Source; category,_=Category.objects.get_or_create(name='NewsHub Local Domain Fixture', defaults={'slug':'newshub-local-domain-fixture'}); source,_=Source.objects.get_or_create(name='NewsHub Local Domain Fixture', defaults={'url':'https://fixture.invalid/news'}); flow=\"## Isolated article flow\\n\\n\"+chr(96)*3+\"mermaid\\nflowchart TD\\n  news[Fixture article] --> diagram[Mermaid flow]\\n\"+chr(96)*3+\"\\n\"; news,_=News.objects.get_or_create(url='https://fixture.invalid/newshub-local-domain-g1', defaults={'title':'NewshubLocalDomainG1Fixture','content':'isolated smoke fixture','full_content':flow,'full_content_fetch_status':'success',**({'full_content_state':'legacy'} if any(f.name=='full_content_state' for f in News._meta.get_fields()) else {}),'publish_time':timezone.now(),'source':source,'category':category}); print(news.pk)"
+    seed_code="$(cat <<'G1_SEED_PY'
+from django.apps import apps
+from django.utils import timezone
+from api.models import Category, News, Source
+category, _ = Category.objects.get_or_create(name='NewsHub Local Domain Fixture', defaults={'slug': 'newshub-local-domain-fixture'})
+source, _ = Source.objects.get_or_create(name='NewsHub Local Domain Fixture', defaults={'url': 'https://fixture.invalid/news'})
+publication = apps.all_models['api'].get('sourcepublication')
+if publication is not None:
+    publication.objects.update_or_create(source=source, defaults={'publication': 'public', 'owner': 'legacy', 'reading_policy': 'standard'})
+flow = '## Isolated article flow\n\n' + chr(96)*3 + 'mermaid\nflowchart TD\n  news[Fixture article] --> diagram[Mermaid flow]\n' + chr(96)*3 + '\n'
+fields = {field.name for field in News._meta.get_fields()}
+extra = {'full_content_state': 'legacy'} if 'full_content_state' in fields else {}
+if 'body_owner_source' in fields:
+    extra['body_owner_source'] = source
+news, _ = News.objects.get_or_create(url='https://fixture.invalid/newshub-local-domain-g1', defaults={
+    'title': 'NewshubLocalDomainG1Fixture', 'content': 'isolated smoke fixture', 'full_content': flow,
+    'full_content_fetch_status': 'success', 'publish_time': timezone.now(), 'source': source, 'category': category, **extra})
+print(news.pk)
+G1_SEED_PY
+)"
     if ! docker compose --project-name "$task_compose_project" --file "$task_compose_file" \
         --env-file "$task_compose_env" exec -T app python /app/backend/manage.py shell -c "$seed_code" \
         >"$task_smoke_root/seed.stdout" 2>"$task_smoke_root/seed.stderr"; then

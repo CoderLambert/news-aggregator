@@ -6,7 +6,7 @@ import pytest
 from django.utils import timezone
 from django.core.exceptions import ImproperlyConfigured
 
-from api.models import Category, News, Source, RequestBudget
+from api.models import Category, News, Source, RequestBudget, SourcePublication
 from api.services.full_content_worker import FairQueue, execute_one
 from api.services.article_fetcher.types import FetchResult, FullContentCandidate
 from api.services.article_fetcher.execution import ExecutionStopped
@@ -18,11 +18,13 @@ from newsaggregator.runtime_config import parse_runtime_config
 def make_news(db):
     category=Category.objects.create(name='科技',slug='worker')
     sources={key: Source.objects.update_or_create(name=name, defaults={})[0] for key,name in [('webkit','WebKit'),('devto','Dev.to'),('leiphone','雷峰网')]}
+    for source in sources.values():
+        SourcePublication.objects.update_or_create(source=source, defaults={'owner': 'legacy', 'reading_policy': 'standard'})
     def create(key='webkit', **extra):
         identity=News.objects.count()+1
         root={'webkit':'https://webkit.org/blog/', 'devto':'https://dev.to/person/', 'leiphone':'https://www.leiphone.com/category/ai/'}[key]
         values=dict(title=f'Article {identity}', url=root+f'article-{identity}', publish_time=timezone.now(),
-            source=sources[key], category=category, content_kind='article', full_content_fetch_status='queued',
+            source=sources[key], body_owner_source=sources[key], category=category, content_kind='article', full_content_fetch_status='queued',
             full_content_next_attempt_at=timezone.now())
         values.update(extra)
         return News.objects.create(**values)

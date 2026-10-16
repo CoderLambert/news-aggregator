@@ -1,0 +1,81 @@
+{
+  "project": "newshub-rss-t27-public-a4ee2dc1a3",
+  "feeds": [
+    {
+      "class": "native",
+      "name": "Julia Evans",
+      "feed_url": "https://jvns.ca/atom.xml",
+      "sample_limit": 1,
+      "entries": [
+        {
+          "id": "1",
+          "url": "https://jvns.ca/blog/2024/11/18/how-to-import-a-javascript-library/",
+          "title": "Importing a frontend Javascript library without a build system",
+          "published_at": "2024-11-18T09:35:42Z",
+          "scope": "feed_content",
+          "subtype": "article",
+          "manual_completeness": "not_confirmed",
+          "feed_html_chars": 24681,
+          "feed_markdown_chars": 18931,
+          "feed_canonical_hash": "38e53b12ff83a142561e714d04fb50e5f641eb6d1c550b028d5ed9e98aa78153",
+          "markdown_chars": 18931,
+          "canonical_hash": "38e53b12ff83a142561e714d04fb50e5f641eb6d1c550b028d5ed9e98aa78153",
+          "nonempty_readable": true,
+          "pre_blocks": 10,
+          "tables": 0,
+          "images": 0,
+          "heading_count": 20,
+          "retained_body_file": "julia-engine.html"
+        }
+      ],
+      "mode": "feed",
+      "full_content_gate_enabled": true,
+      "feed_id": "1",
+      "feed_elapsed_seconds": 2.722,
+      "observed_feed_entries": 20,
+      "status": "sampled"
+    },
+    {
+      "class": "summary_blog",
+      "name": "Martin Fowler",
+      "feed_url": "https://martinfowler.com/feed.atom",
+      "sample_limit": 1,
+      "entries": [
+        {
+          "id": "21",
+          "url": "https://martinfowler.com/articles/orchestrator-tax.html",
+          "title": "The Orchestrator's Tax",
+          "published_at": "2026-07-28T13:10:00Z",
+          "scope": "engine_extracted_unknown",
+          "subtype": "article",
+          "manual_completeness": "not_confirmed",
+          "feed_html_chars": 725,
+          "feed_markdown_chars": 567,
+          "feed_canonical_hash": "9564dd833230dbf5d031fc4ed857fc9016cc097242df76b82ff406aacb03c0f2",
+          "extraction_elapsed_seconds": 1.083,
+          "markdown_chars": 16170,
+          "canonical_hash": "79f61a6382f6598545c09bda6abab2682ddca8cf7d1288c04e7870aa5c816de0",
+          "nonempty_readable": true,
+          "pre_blocks": 0,
+          "tables": 0,
+          "images": 4,
+          "heading_count": 8,
+          "retained_body_file": "fowler-engine.html"
+        }
+      ],
+      "mode": "feed",
+      "full_content_gate_enabled": true,
+      "feed_id": "2",
+      "feed_elapsed_seconds": 4.531,
+      "observed_feed_entries": 30,
+      "status": "sampled"
+    }
+  ],
+  "private_network_guard": true,
+  "sample_limits": {
+    "native": 1,
+    "summary_blog": 1
+  },
+  "tested_sha": "294c7b13e42bae7b3418354a5560154981735ab3",
+  "resources_removed": true
+}

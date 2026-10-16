@@ -1,0 +1,42 @@
+{
+  "tested_sha": "80ed9e465b1062567bb4aca87c5bc1b8c4c4f5ca",
+  "project": "newshub-rss-t27-eeb51bcc2c75",
+  "checks": {
+    "passive_no_collection": true,
+    "exact_code_clipboard_table_image": true,
+    "passive_ended_at": 1792149785.1786137,
+    "account_switch_cache_and_private_acl": true,
+    "read_favorite_reload_user_isolation": true,
+    "fake_ai_authorized_context_and_b_denied": true,
+    "directory_http_ms": [
+      156.424,
+      128.584,
+      177.559,
+      129.848,
+      155.172,
+      28.676,
+      53.581,
+      22.34,
+      26.905,
+      24.153,
+      25.361,
+      26.156,
+      21.285,
+      21.436,
+      20.887,
+      21.035,
+      21.612,
+      24.988,
+      22.664,
+      50.197
+    ],
+    "directory_local_discovery_0_1_3_direct_multigroup": true,
+    "opml_selection_multigroup_progress_export": true,
+    "explicit_repair_durable_sync_visible": true,
+    "unsubscribe_reload_revokes_private_access": true,
+    "mobile_keyboard_focus_escape_no_overflow": true,
+    "browser_errors": []
+  },
+  "browser": "152.0.7977.82",
+  "status": "passed"
+}

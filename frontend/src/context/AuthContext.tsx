@@ -18,7 +18,10 @@ const PRIVATE_MARKER_PREFIXES = [
 ]
 
 const PRIVATE_QUERY_KEYS = [
-  ['channels', 'personal'],
+  ['channels'],
+  ['workspace'],
+  ['news', 'sources'],
+  ['news', 'categories'],
   ['providerComparisons'],
   newsKeys.lists(),
   newsKeys.details(),

@@ -9,8 +9,28 @@ from . import health_views
 from . import capabilities_views
 from . import provider_credential_views
 from . import article_fetch_views
+from .rss.reading import NewsReadStateView
+from .rss.discovery import ResolveFeedView
+from .rss import subscription_views as rss_views
+from .rss import opml_views
+from .rss.directory_http import DirectoryView
+from .rss.health_http import RssHealthView
 
 urlpatterns = [
+    path('admin/rss/health/', RssHealthView.as_view(), name='rss-health'),
+    path('rss/directory/', DirectoryView.as_view(), name='rss-directory'),
+    path('me/rss-imports/preview/', opml_views.OpmlPreviewView.as_view(), name='rss-opml-preview'),
+    path('me/rss-imports/confirm/', opml_views.OpmlConfirmView.as_view(), name='rss-opml-confirm'),
+    path('me/rss-imports/<uuid:pk>/', opml_views.OpmlBatchView.as_view(), name='rss-opml-batch'),
+    path('me/rss-subscriptions/export/', opml_views.OpmlExportView.as_view(), name='rss-opml-export'),
+    path('me/rss-subscriptions/', rss_views.SubscriptionsView.as_view(), name='rss-subscriptions'),
+    path('me/rss-subscriptions/<int:pk>/', rss_views.SubscriptionDetailView.as_view(), name='rss-subscription-detail'),
+    path('me/rss-operations/<uuid:pk>/', rss_views.OperationView.as_view(), name='rss-operation'),
+    path('rss/feeds/<uuid:pk>/refresh/', rss_views.RefreshFeedView.as_view(), name='rss-feed-refresh'),
+    path('news/<int:pk>/rss-refetch/', rss_views.RefetchArticleView.as_view(), name='rss-refetch'),
+    path('admin/rss/feeds/<uuid:pk>/policy/', rss_views.FeedPolicyView.as_view(), name='rss-feed-policy'),
+    path('rss/discovery/resolve/', ResolveFeedView.as_view(), name='rss-discovery-resolve'),
+    path('me/news/<int:pk>/read-state/', NewsReadStateView.as_view(), name='news-read-state'),
     path('me/channel-subscriptions/', channel_views.ChannelSubscriptionsView.as_view(), name='channel-subscriptions'),
     path('me/channel-groups/', channel_views.ChannelGroupsView.as_view(), name='channel-groups'),
     path('me/channel-groups/<int:pk>/', channel_views.ChannelGroupDetailView.as_view(), name='channel-group-detail'),

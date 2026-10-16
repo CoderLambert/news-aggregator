@@ -7,6 +7,7 @@ import { parseNewsId } from '@/services/newsWorkflowQueries'
 import { hasReadableFullContent, hasPendingFullContentTask } from '@/types/news'
 import type { NewsDetail } from '@/types/news'
 import { useCapability } from '@/context/CapabilitiesContext'
+import { fetchRssOperation, requestRssRefetch } from '@/services/api'
 
 interface FetchState {
   ownerKey: string
@@ -20,7 +21,6 @@ interface FetchRequest {
 }
 
 const EMPTY_FETCH_STATE: FetchState = { ownerKey: '', loading: false, error: '' }
-const AUTO_ATTEMPT_PREFIX = 'newshub:full-article-auto:v1:'
 const AUTO_CANCEL_PREFIX = 'newshub:full-article-cancel:v1:'
 const fallbackFlags = new Set<string>()
 const SERVER_FETCH_TIMEOUT_MS = 180_000
@@ -88,6 +88,8 @@ export function useFullArticle(
   const { lang } = useLanguage()
   const fullContentEnabled = useCapability('fetch_full').enabled
   const newsId = parseNewsId(id)
+  const engineOwned = news?.body_owner === 'miniflux' || news?.can_rss_refetch === true
+  const viewerId = user?.id
   const ownerKey = `${newsId ?? String(id ?? '')}:${user?.id ?? 'anonymous'}:${lang}`
   const ownerRef = useRef(ownerKey)
   const requestRef = useRef<FetchRequest | null>(null)
@@ -202,6 +204,32 @@ export function useFullArticle(
 
     try {
       if (attachOnly) return await pollExistingTask()
+      if (engineOwned) {
+        if (!viewerId) return false
+        const operationId = await requestRssRefetch(newsId, viewerId, request.controller.signal)
+        const deadline = Date.now() + SERVER_FETCH_TIMEOUT_MS
+        while (isCurrent() && !request.controller.signal.aborted && Date.now() < deadline) {
+          const operation = await fetchRssOperation(operationId, request.controller.signal)
+          if (!isCurrent()) return false
+          if (['failed', 'cancelled', 'manual_blocked'].includes(operation.state)) {
+            setState({ ownerKey, loading: true, error: '正文修复未完成，请稍后重试。' })
+            return false
+          }
+          if (operation.state === 'succeeded' && operation.result.pending_sync === false) {
+            if (!['accepted', 'unchanged'].includes(String(operation.result.sync_status))) {
+              setState({ ownerKey, loading: true, error: '修复结果未替换当前正文，请稍后查看。' })
+              return false
+            }
+            const data = await fetchFullArticleStatus(newsId, request.controller.signal)
+            if (!isCurrent()) return false
+            applyResult(data)
+            return hasReadableFullContent(data)
+          }
+          await waitForNextPoll(request.controller.signal, 1500)
+        }
+        if (isCurrent()) setState({ ownerKey, loading: true, error: '正文修复仍在处理中，可稍后继续查看。' })
+        return false
+      }
       const data = await fetchFullArticle(newsId, force, request.controller.signal)
       if (!isCurrent()) return false
       if (hasPendingFullContentTask(data)) {
@@ -236,7 +264,7 @@ export function useFullArticle(
           : current)
       }
     }
-  }, [applyResult, fullContentEnabled, newsId, ownerKey, setNews])
+  }, [applyResult, engineOwned, fullContentEnabled, newsId, ownerKey, setNews, viewerId])
 
   const handleFetchFullArticle = useCallback(
     (force = false) => executeFetch(force === true, false),
@@ -247,53 +275,20 @@ export function useFullArticle(
     [executeFetch],
   )
 
-  const bodyEmpty = !news || !hasReadableFullContent(news)
+  // Opening a reader never creates or promotes collection work. Only attach
+  // to an existing durable task through its read-only status endpoint.
   const taskPending = Boolean(news && hasPendingFullContentTask(news))
   const isCurrentNews = Boolean(news && news.id === newsId)
-  const canFetchInSession = Boolean(user) && news?.can_fetch_full_content !== false
-  const status = news?.full_content_fetch_status || ''
-  const lastAttempt = news?.last_full_content_attempt
-  const retryCount = news?.full_content_retry_count ?? 0
-
   useEffect(() => {
-    if (!fullContentEnabled || !isCurrentNews || newsId === null || !canFetchInSession || (!bodyEmpty && !taskPending)) return
-
-    if (taskPending) {
-      if (sessionFlag(AUTO_CANCEL_PREFIX, ownerKey) || attachedOwnerRef.current === ownerKey) return
-      const timer = window.setTimeout(() => {
-        if (ownerRef.current !== ownerKey || sessionFlag(AUTO_CANCEL_PREFIX, ownerKey)
-          || attachedOwnerRef.current === ownerKey) return
-        attachedOwnerRef.current = ownerKey
-        setSessionFlag(AUTO_ATTEMPT_PREFIX, ownerKey, true)
-        // Reuse the durable task through the POST endpoint so an article the
-        // reader is actively viewing is promoted ahead of bulk backfill.
-        void handleFetchFullArticle()
-      }, 0)
-      return () => window.clearTimeout(timer)
-    }
-
-    const shouldAutoFetch = status === 'pending' && !lastAttempt && retryCount === 0
-    if (!shouldAutoFetch || sessionFlag(AUTO_ATTEMPT_PREFIX, ownerKey) || sessionFlag(AUTO_CANCEL_PREFIX, ownerKey)) return
+    if (!fullContentEnabled || !isCurrentNews || !taskPending || newsId === null) return
+    if (sessionFlag(AUTO_CANCEL_PREFIX, ownerKey) || attachedOwnerRef.current === ownerKey) return
     const timer = window.setTimeout(() => {
-      if (ownerRef.current !== ownerKey || sessionFlag(AUTO_ATTEMPT_PREFIX, ownerKey)
-        || sessionFlag(AUTO_CANCEL_PREFIX, ownerKey)) return
-      setSessionFlag(AUTO_ATTEMPT_PREFIX, ownerKey, true)
-      void handleFetchFullArticle()
+      if (ownerRef.current !== ownerKey || sessionFlag(AUTO_CANCEL_PREFIX, ownerKey)) return
+      attachedOwnerRef.current = ownerKey
+      void attachToExistingFetch()
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [
-    bodyEmpty,
-    fullContentEnabled,
-    handleFetchFullArticle,
-    isCurrentNews,
-    canFetchInSession,
-    lastAttempt,
-    newsId,
-    ownerKey,
-    retryCount,
-    status,
-    taskPending,
-  ])
+  }, [attachToExistingFetch, fullContentEnabled, isCurrentNews, newsId, ownerKey, taskPending])
 
   const cancelFetch = useCallback(() => {
     const request = requestRef.current

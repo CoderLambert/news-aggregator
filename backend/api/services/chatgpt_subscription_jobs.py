@@ -199,7 +199,7 @@ def _expired_running_task(task, now):
 
 def get_task(task_id, *, user_id=None):
     """Read a durable task and reconcile only an expired local lease; never call a provider."""
-    query = ChatGPTTranslationTask.objects.filter(pk=task_id)
+    query = ChatGPTTranslationTask.objects.select_related('user', 'connection', 'news').filter(pk=task_id)
     if user_id is not None:
         query = query.filter(user_id=user_id)
 
@@ -210,6 +210,14 @@ def get_task(task_id, *, user_id=None):
         if _expired_running_task(task, timezone.now()):
             _recover_expired(task.pk, user_id=user_id)
             task = query.first()
+        if task is not None:
+            try:
+                _authorize_task_source(task)
+                if (not task.connection.is_active or task.connection.needs_reauth
+                        or task.connection.generation != task.connection_generation):
+                    return None
+            except Exception:
+                return None
         return task
 
     try:
@@ -262,11 +270,15 @@ def _validate_submission(user, connection, news):
         raise SubscriptionError('ChatGPT 订阅授权已失效，请重新连接账号。')
     if not current.selected_model:
         raise SubscriptionError('请先在订阅设置中选择可见模型。')
-    from api.services.full_content_status import has_full_content
-    current_news = News.objects.filter(pk=news.pk).only('full_content', 'full_content_state').first()
-    if current_news is None or not has_full_content(current_news):
-        raise SubscriptionError('请先获取完整原文。', 'article_source_missing', 400)
-    return current, current_news, source_hash(current_news.full_content)
+    from api.services.stored_readers import article_snapshot
+    stored = article_snapshot(news, user)
+    if stored.scope != 'full':
+        raise SubscriptionError('当前仅可读取摘要。', 'article_source_missing', 400)
+    # A fresh snapshot supplies both hash and the exact bytes submitted to the model.
+    current_news = News.objects.get(pk=news.pk)
+    current_news.full_content = stored.markdown
+    current_news._rss_stored = stored
+    return current, current_news, stored.canonical_hash
 
 
 def _shared_lease_snapshot(lease):
@@ -287,14 +299,20 @@ def _release_unattached_lease(lease):
 
 
 def _snapshot_matches(task, connection, news):
-    from api.services.full_content_status import has_full_content
-    return bool(
-        has_full_content(news) and
-        task.connection_id == connection.pk and
-        task.connection_generation == connection.generation and
-        task.model_slug == connection.selected_model and
-        source_hash(news.full_content) == task.source_hash
-    )
+    from api.services.stored_readers import article_snapshot
+    stored = article_snapshot(news, task.user)
+    return bool(stored.scope == 'full' and stored.canonical_hash == task.source_hash
+        and task.connection_id == connection.pk and task.connection_generation == connection.generation
+        and task.model_slug == connection.selected_model)
+
+
+def _authorize_task_source(task):
+    from api.services.stored_readers import article_snapshot
+    stored = article_snapshot(task.news, task.user)
+    if stored.scope != 'full' or stored.canonical_hash != task.source_hash:
+        raise SubscriptionError('原文或权限已变化，旧任务已停止。', 'article_source_changed', 409)
+    task._rss_stored = stored
+    return stored
 
 
 def _cancel_stale_active_tasks(user_id, news_id, digest, connection, now):
@@ -565,9 +583,7 @@ def _queued_task_snapshot(task_id, generation):
         task.connection.selected_model != task.model_slug
     ):
         raise subscription.ConnectionChangedError('订阅连接或模型已变化，旧任务已停止。')
-    from api.services.full_content_status import has_full_content
-    if not has_full_content(task.news) or source_hash(task.news.full_content) != task.source_hash:
-        raise SubscriptionError('原文已更新，旧任务已停止。', 'article_source_changed', 409)
+    _authorize_task_source(task)
     return task
 
 
@@ -619,9 +635,7 @@ def _task_snapshot(task_id, generation, run_token, *, require_started=True):
         connection.selected_model != task.model_slug
     ):
         raise subscription.ConnectionChangedError('订阅连接或模型已变化，旧任务已停止。')
-    from api.services.full_content_status import has_full_content
-    if not has_full_content(task.news) or source_hash(task.news.full_content) != task.source_hash:
-        raise SubscriptionError('原文已更新，旧任务已停止。', 'article_source_changed', 409)
+    _authorize_task_source(task)
     return task
 
 
@@ -859,7 +873,7 @@ def _run_persistent_task(task_id, generation):
                 connection_id=task.connection_id,
                 expected_generation=task.connection_generation,
                 model_slug=task.model_slug,
-                article_markdown=source_task.news.full_content,
+                article_markdown=source_task._rss_stored.markdown,
                 on_delta=lambda delta: _append_delta(task_id, generation, run_token, delta),
                 execution_guard=guard,
             )
@@ -949,10 +963,12 @@ def _legacy_run_job(job, *, user_id, connection_id, news_id, source_digest, gene
     """Compatibility path used only by older isolated tests and no public route."""
     close_old_connections()
     try:
-        from api.services.full_content_status import has_full_content
-        current = News.objects.only('full_content', 'full_content_state').get(pk=news_id)
-        if not has_full_content(current) or source_hash(current.full_content) != source_digest:
-            raise SubscriptionError('原文已更新，请重新开始全文翻译。')
+        from django.contrib.auth import get_user_model
+        from api.rss.access import get_stored_article
+        user = get_user_model().objects.get(pk=user_id, is_active=True)
+        stored = get_stored_article(user, news_id)
+        if stored.scope != 'full' or stored.canonical_hash != source_digest or stored.markdown != article_markdown:
+            raise SubscriptionError('原文或权限已更新，请重新开始全文翻译。')
         with keep_lease_alive(shared_lease):
             output = stream_full_translation(
                 connection_id=connection_id,

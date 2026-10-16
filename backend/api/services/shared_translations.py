@@ -10,14 +10,14 @@ import threading
 import time
 import uuid
 
-from django.db import close_old_connections, transaction
+from django.db import OperationalError, close_old_connections, transaction
 from django.db.models import Q
-from django.http import StreamingHttpResponse
+from django.http import Http404, StreamingHttpResponse
 from api.translation_sse import translation_sse_records
 from django.utils import timezone
 
 from api.models import News, SharedArticleTranslation, SharedArticleTranslationTask
-from api.services.full_content_status import has_full_content
+from api.services.stored_readers import StoredContentChanged, article_snapshot, require_current
 
 logger = logging.getLogger(__name__)
 TARGET_LANGUAGE = 'zh-CN'
@@ -49,20 +49,24 @@ def cache_key(news_id, digest):
                 translation_version=TRANSLATION_VERSION)
 
 
-def get_shared_translation(news):
-    if not has_full_content(news):
+def get_shared_translation(news, user=None, *, stored=None):
+    stored = stored or article_snapshot(news, user)
+    require_current(user if user is not None else getattr(news, '_rss_access_user', None), stored)
+    if stored.scope != 'full':
         return None
     return SharedArticleTranslation.objects.filter(
-        **cache_key(news.pk, source_hash(news.full_content)),
+        **cache_key(news.pk, stored.canonical_hash),
     ).first()
 
 
-def task_is_running(news):
-    if not has_full_content(news):
+def task_is_running(news, user=None, *, stored=None):
+    stored = stored or article_snapshot(news, user)
+    require_current(user if user is not None else getattr(news, '_rss_access_user', None), stored)
+    if stored.scope != 'full':
         return False
     now = timezone.now()
     return SharedArticleTranslationTask.objects.filter(
-        **cache_key(news.pk, source_hash(news.full_content)), status='running',
+        **cache_key(news.pk, stored.canonical_hash), status='running',
         expires_at__gt=now, started_at__gt=now - MAX_RUN_TIME,
     ).exists()
 
@@ -83,17 +87,21 @@ class TranslationLease:
         self.current().update(status=status, updated_at=timezone.now())
 
 
-def claim_task(news, *, user_id=None):
+def claim_task(news, *, user_id=None, stored=None):
     """Select one generator and enforce SQLite-wide active-work quotas.
 
     An initial write reserves SQLite's database writer lock before counting
     active leases, so simultaneous requests for distinct articles cannot both
     observe an empty global budget. No network/model calls occur under this lock.
     """
-    if not has_full_content(news):
+    from django.contrib.auth import get_user_model
+    user = get_user_model().objects.filter(pk=user_id, is_active=True).first() if user_id else None
+    current = article_snapshot(news, user)
+    if current.scope != 'full' or (stored is not None and current != stored):
         raise SharedTranslationError('full_content_not_ready')
-    digest = source_hash(news.full_content)
-    if get_shared_translation(news) is not None:
+    stored = current
+    digest = stored.canonical_hash
+    if get_shared_translation(news, user, stored=stored) is not None:
         return None
     task, _ = SharedArticleTranslationTask.objects.get_or_create(**cache_key(news.pk, digest))
     now = timezone.now()
@@ -118,7 +126,7 @@ def claim_task(news, *, user_id=None):
         return None
     lease = TranslationLease(task.pk, token)
     # The previous owner may have completed between our initial read and CAS.
-    if get_shared_translation(news) is not None:
+    if get_shared_translation(news, user, stored=stored) is not None:
         lease.finish('succeeded')
         return None
     return lease
@@ -170,15 +178,20 @@ def publish_translation(*, news_id, digest, text, provider, model_slug='', lease
             status='succeeded', updated_at=timezone.now(),
         ):
             raise SharedTranslationError('共享翻译任务已过期，请重新开始。')
-        news = News.objects.select_for_update().only('full_content', 'full_content_state').get(pk=news_id)
-        if not has_full_content(news) or source_hash(news.full_content) != digest:
-            raise SharedTranslationError('原文已更新，旧译文没有发布，请重新翻译。')
+        # Versioned records are immutable history; current readers select by hash.
+        # Do not overwrite News compatibility fields or a newer source version.
         record, _ = SharedArticleTranslation.objects.get_or_create(
             **cache_key(news_id, digest),
             defaults=dict(content=text, provider=provider, model_slug=model_slug,
                           completed_at=timezone.now()),
         )
-        return record
+        current_text, current_state = News.objects.filter(pk=news_id).values_list('full_content', 'full_content_state').get()
+        stale = (source_hash(current_text) != digest or not current_text.strip()
+                 or current_state not in {'legacy', 'complete', 'available'})
+    if stale:
+        # The immutable old-hash result remains history; it is never a current result.
+        raise SharedTranslationError('原文已更新，旧译文已保存为历史，请重新翻译。')
+    return record
 
 
 def result_payload(record, scope='shared'):
@@ -192,13 +205,25 @@ def result_payload(record, scope='shared'):
 
 def sse_response(stream):
     response = StreamingHttpResponse(stream, content_type='text/event-stream')
-    response['Cache-Control'] = 'no-cache'
+    response['Cache-Control'] = 'private, no-store'
     response['X-Accel-Buffering'] = 'no'
     return response
 
 
-def completed_response(record, scope='shared'):
-    return sse_response(translation_sse_records(result_payload(record, scope), event='complete'))
+def completed_response(record, scope='shared', *, user=None, stored=None):
+    def stream():
+        try:
+            if stored is not None:
+                require_current(user, stored, full=True)
+                if scope == 'private':
+                    from api.services.chatgpt_subscription import active_connection_for_user
+                    connection = active_connection_for_user(user)
+                    if connection is None or connection.pk != record.connection_id:
+                        raise SharedTranslationError('翻译连接已变化。')
+            yield from translation_sse_records(result_payload(record, scope), event='complete')
+        except (Http404, StoredContentChanged, SharedTranslationError, OperationalError):
+            yield 'data: {"error":"当前正文或译文暂不可用，请重试。"}\n\n'
+    return sse_response(stream())
 
 
 def error_response(message, *, error_code=''):
@@ -206,19 +231,17 @@ def error_response(message, *, error_code=''):
     return sse_response(iter([f'data: {data}\n\n']))
 
 
-def waiting_response(news):
+def waiting_response(news, user=None, *, stored=None):
     """Other readers see only the completed public copy, never private chunks."""
-    digest = source_hash(news.full_content)
+    stored = stored or article_snapshot(news, user)
+    digest = stored.canonical_hash
     key = cache_key(news.pk, digest)
 
     def stream():
         try:
             deadline = time.monotonic() + MAX_RUN_TIME.total_seconds()
             while time.monotonic() < deadline:
-                current = News.objects.only('full_content', 'full_content_state').get(pk=news.pk)
-                if not has_full_content(current) or source_hash(current.full_content) != digest:
-                    message = '原文已更新，请重新开始翻译。'
-                    break
+                require_current(user, stored, full=True)
                 record = SharedArticleTranslation.objects.filter(**key).first()
                 if record is not None:
                     yield from translation_sse_records(result_payload(record), event='complete')
@@ -236,5 +259,7 @@ def waiting_response(news):
             yield f'data: {json.dumps({"error": message}, ensure_ascii=False)}\n\n'
         except GeneratorExit:
             return
+        except Exception:
+            yield 'data: {"error":"原文或读取权限已变化。"}\n\n'
 
     return sse_response(stream())

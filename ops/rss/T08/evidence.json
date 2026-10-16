@@ -1,0 +1,29 @@
+{
+  "discoveries": {
+    "many": 3,
+    "one": 1,
+    "zero": 0
+  },
+  "image_id": "sha256:d6ebb1e889d6bd4adea17d98ccd3c46c4c62900c8098bd26d9af474e66ed80b1",
+  "last_reference_disabled": true,
+  "local_news_unchanged": true,
+  "physical_feeds": 1,
+  "policy_verified": true,
+  "project": "newshub-rss-t08-829dfd8e12b0",
+  "publisher": "synthetic HTTPS + temporary test CA; private fetch allowed ONLY here",
+  "python": "3.12.12",
+  "refetch_pending_fenced_sync": true,
+  "registered_actor_operations": 20,
+  "resources_removed": true,
+  "runtime_health": {
+    "control_worker_integrated": true,
+    "mode": "control_worker",
+    "orm_available": true,
+    "role": "rss_sync",
+    "sync_ready": false,
+    "worker_integrated": false
+  },
+  "sync_ready": false,
+  "timeout_code": "upstream_http",
+  "timeout_state": "unknown"
+}

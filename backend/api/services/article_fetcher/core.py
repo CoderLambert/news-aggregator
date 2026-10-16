@@ -200,7 +200,18 @@ __all__ = ['FetchError', 'FetchResult', 'fetch_article_markdown']
 
 
 def fetch_article_markdown(url, expected_title=None, summary=None, providers=None, execution_guard=None, news=None):
+    legacy_token = None
+    if news is not None:
+        from api.rss.legacy_fencing import capture_legacy_article
+        legacy_token = capture_legacy_article(news)
     def guard():
+        if legacy_token is not None:
+            from api.rss.content_store import fenced_article, StaleWrite
+            try:
+                with fenced_article(legacy_token):
+                    pass
+            except StaleWrite:
+                raise ExecutionStopped('superseded') from None
         if execution_guard:
             execution_guard()
         if news is not None and getattr(news, '_full_content_snapshot', None):

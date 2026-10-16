@@ -1,20 +1,23 @@
+from api.tests.rss.reader_fixtures import public_legacy_article
 import gzip
 from unittest.mock import patch
 import pytest
 from django.utils import timezone
 from rest_framework.test import APIClient
 from api.models import Category, Source, News
+from api.rss.models import SourcePublication
 from api.serializers import NewsListSerializer
 
 @pytest.fixture
 def articles(db):
     category = Category.objects.create(name='Synthetic', slug='synthetic')
     source = Source.objects.create(name='Synthetic', url='https://example.com')
-    return [News.objects.create(title=f'Synthetic article {i}', title_zh=f'合成文章{i}',
+    SourcePublication.objects.create(source=source, publication='public', reading_policy='standard', owner='legacy')
+    return [public_legacy_article(News.objects.create(title=f'Synthetic article {i}', title_zh=f'合成文章{i}',
         content='Synthetic article paragraph. ' * 500, content_zh='合成新闻段落。' * 500,
         full_content='complete full body ' * 1000, category=category, source=source,
-        full_content_state='legacy',
-        url=f'https://example.com/{i}', publish_time=timezone.now()) for i in range(20)]
+        full_content_state='legacy', body_owner_source=source,
+        url=f'https://example.com/{i}', publish_time=timezone.now())) for i in range(20)]
 
 @pytest.mark.django_db
 @pytest.mark.parametrize('body', ['', 'a' * 299, 'a' * 300, 'a' * 301, '新闻🙂' * 200])
@@ -22,6 +25,8 @@ def test_summary_boundaries(articles, body):
     article = articles[0]
     article.content = body
     article.content_zh = body
+    from api.tests.rss.test_ai_readers import archive
+    archive(article, 'content', body, body)
     data = NewsListSerializer(article).data
     assert data['summary'] == body[:300]
     assert data['summary_zh'] == body[:300]
@@ -30,17 +35,19 @@ def test_summary_boundaries(articles, body):
 @pytest.mark.django_db
 def test_payload_detail_and_constant_queries(articles, django_assert_num_queries):
     client = APIClient()
-    with django_assert_num_queries(3):
+    # Fixed ACL batch reads plus one exact-hash legacy translation batch.
+    with django_assert_num_queries(6):
         response = client.get('/api/news/')
     assert response.status_code == 200
     assert response.data['count'] == 20
     assert len(response.data['results']) == 20
-    with django_assert_num_queries(3):
+    with django_assert_num_queries(6):
         single = client.get('/api/news/?representation=summary&page_size=1')
     assert len(single.data['results']) == 1
     explicit = client.get('/api/news/?representation=summary&page_size=20')
     assert explicit.content == response.content
-    assert len(response.content) < 45_000
+    # C04 adds four bounded ownership/readability/completeness fields per row.
+    assert len(response.content) < 50_000
     assert all(not {'content', 'content_zh', 'full_content'} & item.keys() for item in response.data['results'])
     # The additional state fields stay small; full bodies and provenance must
     # remain deferred even when availability is computed for every list row.
@@ -77,7 +84,7 @@ def test_ranked_search_summary_uses_constant_queries(articles, mode, representat
          patch('api.services.vector_store.VectorStoreService') as vector:
         vector.return_value.count.return_value = len(articles)
         vector.return_value.search.return_value = [(article.pk, 0.9) for article in articles]
-        expected_queries = 3 if mode == 'semantic' else 4
+        expected_queries = 6 if mode == 'semantic' else 7
         with django_assert_num_queries(expected_queries):
             response = client.get(f'/api/news/?search=paragraph&mode={mode}&page_size=20{representation}')
         assert response.data['search_mode_applied'] == mode

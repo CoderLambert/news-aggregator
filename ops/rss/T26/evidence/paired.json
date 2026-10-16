@@ -1,0 +1,371 @@
+{
+  "active_app_writer": "REFUSED",
+  "app_image_id": "sha256:b0104a5800dc6537d9f04ad86bf7c9ad0bfc9e9462072ec5e20fd06b0e5fd680",
+  "app_sha": "32a340a0e0535543a52321488a899b8c313f23f9",
+  "dataset": "0051-upgraded-T26-synthetic",
+  "engine_image": "miniflux/miniflux:2.3.3@sha256:49d7b60987616387c306a8023087b31f2c9b7b21288b523026cb04058e8b6dbb",
+  "engine_schema": 132,
+  "mapping_sha256": "1eeec6eedb8aa394beb710ad4160ba162ffb1674a427c660d603415a9d729c62",
+  "paired_restore": "PASS",
+  "pg_logical_sha256": "238bc3a3d4f2904f06b5e7e4ac56b9b32fc37b23e033262c6d085dc5b1536790",
+  "postgres_image": "postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94",
+  "production": "NOT_RUN",
+  "project": "newshub-rss-t26-aaa2a1a0249c",
+  "relationships": {
+    "api_blockednews": 1,
+    "api_channelgroupingconfig": 1,
+    "api_channelgroupingoverride": 1,
+    "api_channelgroupingproposal": 1,
+    "api_channelgroupmember": 1,
+    "api_channelintakerequest": 1,
+    "api_channelsubscription": 2,
+    "api_chatgptarticletranslation": 1,
+    "api_chatgptsubscriptionselection": 1,
+    "api_chatsession": 1,
+    "api_favorite": 1,
+    "api_feedstate": 1,
+    "api_legacytranslationsnapshot": 4,
+    "api_news": 4,
+    "api_newspreference": 1,
+    "api_newsreadstate": 1,
+    "api_readingday": 1,
+    "api_researchsearchresult": 1,
+    "api_researchsession": 1,
+    "api_sharedarticletranslation": 1,
+    "api_subscriptiongroupingstate": 1,
+    "api_userprovidercredential": 1,
+    "auth_user": 2
+  },
+  "release_manifest_sha256": "4f1f7ddf5f8f9696d5514fd12778bc73d84934d14deb448bb66ac11a64de1790",
+  "resources_removed": true,
+  "restore_points": {
+    "postgres": "2026-10-16T11:15:58.874303+00:00",
+    "sqlite": "2026-10-16T11:15:58.760053+00:00"
+  },
+  "restored_engine_reconciliation": {
+    "after_articles": 7,
+    "before_articles": 4,
+    "cursor": "4",
+    "full_reconciliation_complete": true,
+    "incremental_complete": true,
+    "private_paused_preserved": true
+  },
+  "restored_full_app_acl": "restored available/ACL PASS",
+  "restored_writers_remain_stopped": true,
+  "schema": [
+    {
+      "app": "admin",
+      "name": "0001_initial"
+    },
+    {
+      "app": "admin",
+      "name": "0002_logentry_remove_auto_add"
+    },
+    {
+      "app": "admin",
+      "name": "0003_logentry_add_action_flag_choices"
+    },
+    {
+      "app": "api",
+      "name": "0001_initial"
+    },
+    {
+      "app": "api",
+      "name": "0002_news_related_to_news_title_hash_source_source_type"
+    },
+    {
+      "app": "api",
+      "name": "0003_news_content_zh_news_title_zh"
+    },
+    {
+      "app": "api",
+      "name": "0004_translation_status"
+    },
+    {
+      "app": "api",
+      "name": "0005_full_content"
+    },
+    {
+      "app": "api",
+      "name": "0006_full_content_zh"
+    },
+    {
+      "app": "api",
+      "name": "0007_chatsession"
+    },
+    {
+      "app": "api",
+      "name": "0008_news_suggested_questions_and_more"
+    },
+    {
+      "app": "api",
+      "name": "0009_favorite"
+    },
+    {
+      "app": "api",
+      "name": "0010_blocked_news"
+    },
+    {
+      "app": "api",
+      "name": "0011_news_full_content_fetch_error_and_more"
+    },
+    {
+      "app": "api",
+      "name": "0012_provider_comparison"
+    },
+    {
+      "app": "api",
+      "name": "0013_news_full_content_backfill_at_and_more"
+    },
+    {
+      "app": "api",
+      "name": "0014_researchsession"
+    },
+    {
+      "app": "api",
+      "name": "0015_researchsession_user"
+    },
+    {
+      "app": "api",
+      "name": "0016_researchsearchresult"
+    },
+    {
+      "app": "api",
+      "name": "0017_chatgpt_subscription"
+    },
+    {
+      "app": "api",
+      "name": "0018_chatgpt_auth_binding_and_selection"
+    },
+    {
+      "app": "api",
+      "name": "0019_subscription_selection_generation"
+    },
+    {
+      "app": "api",
+      "name": "0020_crawler_control"
+    },
+    {
+      "app": "api",
+      "name": "0021_search_index_control"
+    },
+    {
+      "app": "api",
+      "name": "0022_searchindexrun_worker_instance_id"
+    },
+    {
+      "app": "api",
+      "name": "0023_chatgpt_user_oauth_hosts"
+    },
+    {
+      "app": "api",
+      "name": "0024_chatgpt_deployment_oauth_host"
+    },
+    {
+      "app": "api",
+      "name": "0025_chatgpt_connection_id_token"
+    },
+    {
+      "app": "api",
+      "name": "0026_shared_article_translations"
+    },
+    {
+      "app": "api",
+      "name": "0027_chat_ownership"
+    },
+    {
+      "app": "api",
+      "name": "0028_account_security"
+    },
+    {
+      "app": "api",
+      "name": "0029_oauth_attempt_snapshot"
+    },
+    {
+      "app": "api",
+      "name": "0030_subscription_translation_task"
+    },
+    {
+      "app": "api",
+      "name": "0031_research_run_recovery"
+    },
+    {
+      "app": "api",
+      "name": "0032_research_queued_input"
+    },
+    {
+      "app": "api",
+      "name": "0033_user_provider_credential"
+    },
+    {
+      "app": "api",
+      "name": "0034_add_litellm_provider_fields"
+    },
+    {
+      "app": "api",
+      "name": "0035_article_fetch_monitoring"
+    },
+    {
+      "app": "api",
+      "name": "0036_news_ingestion_contract"
+    },
+    {
+      "app": "api",
+      "name": "0037_ingestion_outcomes"
+    },
+    {
+      "app": "api",
+      "name": "0038_content_task_creation_time"
+    },
+    {
+      "app": "api",
+      "name": "0039_personal_channels"
+    },
+    {
+      "app": "api",
+      "name": "0040_initialize_channel_catalog"
+    },
+    {
+      "app": "api",
+      "name": "0041_source_region"
+    },
+    {
+      "app": "api",
+      "name": "0042_sector_channels"
+    },
+    {
+      "app": "api",
+      "name": "0043_smart_channel_workspace"
+    },
+    {
+      "app": "api",
+      "name": "0044_article_body_access"
+    },
+    {
+      "app": "api",
+      "name": "0045_preserve_publisher_history"
+    },
+    {
+      "app": "api",
+      "name": "0046_shared_translation_owner"
+    },
+    {
+      "app": "api",
+      "name": "0047_channel_intake_review"
+    },
+    {
+      "app": "api",
+      "name": "0048_dynamic_source_configs"
+    },
+    {
+      "app": "api",
+      "name": "0049_version_feed_state_by_source_config"
+    },
+    {
+      "app": "api",
+      "name": "0050_crawlrun_config_snapshot"
+    },
+    {
+      "app": "api",
+      "name": "0051_seed_domestic_medical_sources"
+    },
+    {
+      "app": "api",
+      "name": "0052_feed_directory"
+    },
+    {
+      "app": "api",
+      "name": "0053_rss_core_schema"
+    },
+    {
+      "app": "api",
+      "name": "0054_rss_legacy_compatibility"
+    },
+    {
+      "app": "api",
+      "name": "0055_rss_system_operation_actor"
+    },
+    {
+      "app": "api",
+      "name": "0056_rss_personal_read_state"
+    },
+    {
+      "app": "api",
+      "name": "0057_rss_import_batches"
+    },
+    {
+      "app": "api",
+      "name": "0058_private_translation_versions"
+    },
+    {
+      "app": "api",
+      "name": "0059_bind_retained_legacy_translations"
+    },
+    {
+      "app": "auth",
+      "name": "0001_initial"
+    },
+    {
+      "app": "auth",
+      "name": "0002_alter_permission_name_max_length"
+    },
+    {
+      "app": "auth",
+      "name": "0003_alter_user_email_max_length"
+    },
+    {
+      "app": "auth",
+      "name": "0004_alter_user_username_opts"
+    },
+    {
+      "app": "auth",
+      "name": "0005_alter_user_last_login_null"
+    },
+    {
+      "app": "auth",
+      "name": "0006_require_contenttypes_0002"
+    },
+    {
+      "app": "auth",
+      "name": "0007_alter_validators_add_error_messages"
+    },
+    {
+      "app": "auth",
+      "name": "0008_alter_user_username_max_length"
+    },
+    {
+      "app": "auth",
+      "name": "0009_alter_user_last_name_max_length"
+    },
+    {
+      "app": "auth",
+      "name": "0010_alter_group_name_max_length"
+    },
+    {
+      "app": "auth",
+      "name": "0011_update_proxy_permissions"
+    },
+    {
+      "app": "auth",
+      "name": "0012_alter_user_first_name_max_length"
+    },
+    {
+      "app": "contenttypes",
+      "name": "0001_initial"
+    },
+    {
+      "app": "contenttypes",
+      "name": "0002_remove_content_type_name"
+    },
+    {
+      "app": "sessions",
+      "name": "0001_initial"
+    }
+  ],
+  "sealed": false,
+  "sqlite_logical_sha256": "6b3d8e33d8ef708d4d125eccedb23b3660febfee8abd22a38333fccf3bc85631",
+  "static_sha256": "e3a206b42fce0011334c1bdfc102632cfe7db0ee136bdac6c52df4a704be69db",
+  "status": "SYNTHETIC_CANDIDATE_NOT_SEALED",
+  "synthetic_identity_alignment": true,
+  "wrong_instance": "REFUSED_WITHOUT_WRITES"
+}

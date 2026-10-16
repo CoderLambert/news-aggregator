@@ -3,6 +3,7 @@ from collections.abc import Mapping
 
 from django.contrib.auth.models import User
 from django.db import transaction
+from django.db.models import F
 from django.shortcuts import get_object_or_404
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -78,7 +79,7 @@ class PersonalChannelsView(APIView):
         return response
 
     def lock(self, user):
-        User.objects.select_for_update().get(pk=user.pk)
+        User.objects.filter(pk=user.pk).update(last_login=F('last_login'))
 
 
 class ChannelSubscriptionsView(PersonalChannelsView):
@@ -92,16 +93,23 @@ class ChannelSubscriptionsView(PersonalChannelsView):
         source_ids = ids(request.data, 'source_ids')
         action = request.data.get('action', 'subscribe')
         if action == 'unsubscribe':
-            ChannelSubscription.objects.filter(user=request.user, source_id__in=source_ids).delete()
+            from api.rss.subscriptions import unsubscribe
+            for subscription_id in list(ChannelSubscription.objects.filter(user=request.user, source_id__in=source_ids).values_list('pk', flat=True)):
+                unsubscribe(request.user, subscription_id)
         elif action == 'subscribe':
-            sources = list(Source.objects.filter(pk__in=source_ids))
+            from api.rss.access import authorized_sources
+            sources = list(authorized_sources(request.user).filter(pk__in=source_ids))
             if len(sources) != len(source_ids):
-                raise ValidationError({'source_ids': '频道不存在。'})
+                from rest_framework.exceptions import NotFound
+                raise NotFound()
             existing = set(ChannelSubscription.objects.filter(user=request.user, source_id__in=source_ids).values_list('source_id', flat=True))
             if any(subscription_status(s)[0] != 'active' for s in sources if s.id not in existing):
                 raise ValidationError({'source_ids': '停用频道不能新增订阅。'})
             for source in sources:
                 ChannelSubscription.objects.get_or_create(user=request.user, source=source)
+                from api.rss.operations import reconcile_binding
+                for binding_id in source.feed_links.values_list('binding_id', flat=True):
+                    reconcile_binding(binding_id)
         elif action == 'set_groups':
             group_ids = ids(request.data, 'group_ids')
             groups = list(ChannelGroup.objects.filter(user=request.user, pk__in=group_ids))

@@ -1,0 +1,40 @@
+{
+  "bootstrap": {
+    "dedicated_collector": true,
+    "engine_entries": 4
+  },
+  "cleanup": {
+    "engine_empty": true,
+    "local_articles_preserved": 5
+  },
+  "image_id": "sha256:3ae4135b142cecc266e2b0407aea46604315a69fff85e2517f139c930b2cf4b9",
+  "initial": {
+    "articles": 3,
+    "busy_cursor_unchanged": true,
+    "killed_after_commit_exit": 73,
+    "new_cursor": 4,
+    "response_discard_replayed": true
+  },
+  "outage": {
+    "cursor_preserved": true,
+    "engine_stopped": true,
+    "error_class": "network"
+  },
+  "project": "newshub-rss-t09-2341d2ed9d2b",
+  "publisher": "synthetic HTTPS + temporary test CA; private fetch allowed ONLY here",
+  "reconcile": {
+    "articles": 5,
+    "low_id_late_imported": true,
+    "old_body_updated": true,
+    "old_date_high_id_imported": true
+  },
+  "resources_removed": true,
+  "runtime_health": {
+    "control_worker_integrated": true,
+    "mode": "sync_worker",
+    "orm_available": true,
+    "role": "rss_sync",
+    "sync_ready": true,
+    "worker_integrated": true
+  }
+}

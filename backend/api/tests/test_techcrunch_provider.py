@@ -10,7 +10,7 @@ from api.models import News
 from api.services.article_fetcher import fetch_article_markdown, FetchError
 from api.services.article_fetcher.providers import TechCrunchWPProvider, ScrapyHTTPProvider, default_providers, DownloadedHTML
 from api.services.article_fetcher.types import FetchResult
-from api.services.news_ingestion import ingest_item
+from api.tests.rss.legacy_fixtures import ingest_fixture as ingest_item
 from api.services.full_content_status import enqueue_fetch, claim_fetch, mark_success
 from newsaggregator.runtime_config import parse_runtime_config
 from django.core.exceptions import ImproperlyConfigured

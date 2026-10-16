@@ -1,0 +1,39 @@
+{
+  "tested_at": "2026-10-17",
+  "base_commit": "7dc6f220e5dadea6d82847ee0185e39818d068b5",
+  "working_tree_included": [
+    "backend/api/rss/directory_data/seed-v1.json",
+    "backend/api/rss/directory_data/seed-v1.lock.json"
+  ],
+  "flow": "Chromium directory search -> subscribe -> Miniflux fetch -> sync worker -> SQLite",
+  "upstream_alias": "https://feeds.feedburner.com/codinghorror",
+  "observed_redirect_count": 2,
+  "directory_subscription_url": "https://blog.codinghorror.com/rss/",
+  "engine": {
+    "miniflux": "2.3.3 pinned digest",
+    "FETCHER_ALLOW_PRIVATE_NETWORKS": "0",
+    "full_content_enabled": "0",
+    "crawler": false,
+    "entries": 15
+  },
+  "result": {
+    "directory_http": 200,
+    "subscribe_http": 202,
+    "operation": "succeeded",
+    "binding_state": "ready",
+    "linked_entries": 15,
+    "pending_entries": 0,
+    "rejected_entries": 0,
+    "browser_page_errors": 0
+  },
+  "isolation": {
+    "temporary_sqlite": true,
+    "temporary_postgres_volume": true,
+    "synthetic_site_user": true,
+    "production_data_or_credentials_used": false,
+    "compose_project": "newshub-rss-t27-public-ui-dd98bda623",
+    "compose_resources_cleaned": true,
+    "remaining_project_containers_networks_volumes": 0
+  },
+  "scope_limit": "This accepts the reviewed directory entry at its observed final URL; arbitrary user-entered redirect aliases and the public RSSHub gateway remain untested."
+}

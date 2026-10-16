@@ -17,6 +17,45 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(fixtures)
 
 
+@pytest.mark.django_db
+def test_g1_seed_has_explicit_public_article_access(capsys):
+    from django.contrib.auth.models import AnonymousUser
+    from api.models import News
+    from api.rss.access import get_stored_article, authorized_news
+
+    script = (PROJECT / 'scripts/deploy/local-domain-smoke.sh').read_text()
+    code = script.split("<<'G1_SEED_PY'\n", 1)[1].split('\nG1_SEED_PY', 1)[0]
+    exec(compile(code, '<g1-seed>', 'exec'), {})
+    news = News.objects.get(url='https://fixture.invalid/newshub-local-domain-g1')
+    assert capsys.readouterr().out.strip() == str(news.pk)
+    assert authorized_news(AnonymousUser()).filter(pk=news.pk).exists()
+    stored = get_stored_article(AnonymousUser(), news.pk)
+    assert stored.scope == 'full'
+    assert 'flowchart TD' in stored.markdown
+
+
+@pytest.mark.django_db
+def test_generated_seed_has_explicit_public_body_grant(tmp_path, capsys):
+    import ast
+    import hashlib
+    from django.contrib.auth.models import AnonymousUser
+    from api.models import News
+    from api.rss.access import get_stored_article
+
+    bundle = fixtures.create_bundle(tmp_path / 'fixtures.json')
+    tree = ast.parse(fixtures.render_app_program(bundle, 'seed'))
+    phase = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'fixture_database_phase')
+    namespace = {'_FIXTURE_BUNDLE': bundle, '_FIXTURE_PHASE': 'seed', 'hashlib': hashlib, 'json': json, 'sys': sys}
+    exec(compile(ast.Module(body=[phase], type_ignores=[]), '<isolated-seed-test>', 'exec'), namespace)
+    namespace['fixture_database_phase']()
+    news = News.objects.get(title=bundle['news']['title'])
+    stored = get_stored_article(AnonymousUser(), news.pk)
+    assert stored.scope == 'full' and '```mermaid' in stored.markdown
+    assert news.body_owner_source_id == news.source_id
+    output = capsys.readouterr().out
+    assert bundle['users']['admin']['password'] not in output
+
+
 def test_create_bundle_is_private_synthetic_and_does_not_print_credentials(tmp_path, capsys):
     bundle_path = tmp_path / 'fixtures.json'
     bundle = fixtures.create_bundle(bundle_path)

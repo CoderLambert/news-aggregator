@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "source": {
+    "id": "DIYgod/RSSHub",
+    "commit": "140f27c701b499703cb3e22cb4541d50b1406c40",
+    "license": "AGPL-3.0-only",
+    "url": "https://github.com/DIYgod/RSSHub"
+  },
+  "namespaces": {
+    "github": {
+      "name": "GitHub",
+      "description": "::: tip\nGitHub provides some official RSS feeds:\n\n- Repo releases: `https://github.com/:owner/:repo/releases.atom`\n- Repo commits: `https://github.com/:owner/:repo/commits.atom`\n- User activities: `https://github.com/:user.atom`\n- Private feed: `https://github.com/:user.private.atom?token=:secret` (Note: You can ONLY obtain this url via an [API](https://docs.github.com/en/rest/activity/feeds?apiVersion=2022-11-28) call with a [Personal Access Token](https://github.com/settings/tokens/new) with **ENOUGH** scopes now.)\n- Wiki history: `https://github.com/:owner/:repo/wiki.atom`\n\n:::",
+      "lang": "en",
+      "routes": {
+        "/issue/:user/:repo/:state?/:labels?": {
+          "path": "/issue/:user/:repo/:state?/:labels?",
+          "categories": [
+            "programming"
+          ],
+          "parameters": {
+            "user": "GitHub username",
+            "repo": "GitHub repo name",
+            "state": {
+              "description": "the state of the issues.",
+              "default": "open",
+              "options": [
+                {
+                  "label": "Open",
+                  "value": "open"
+                },
+                {
+                  "label": "Closed",
+                  "value": "closed"
+                },
+                {
+                  "label": "All",
+                  "value": "all"
+                }
+              ]
+            },
+            "labels": "a list of comma separated label names"
+          },
+          "name": "Repo Issues"
+        }
+      }
+    }
+  }
+}

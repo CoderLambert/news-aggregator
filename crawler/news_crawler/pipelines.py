@@ -123,6 +123,12 @@ def _index_news(news_id, title, content):
         pass
 
 
+def _save_translation_fields(news, fields):
+    from api.rss.legacy_fencing import legacy_translation_update
+    return legacy_translation_update(news, {field: getattr(news, field) for field in fields},
+                                     title=news.title, content=news.content)
+
+
 def _try_translate(news):
     """Try to translate English news to Chinese if not already translated.
     Records translation status on the news object.
@@ -131,18 +137,18 @@ def _try_translate(news):
         return
     if not news.title or is_chinese(news.title):
         news.translation_status = 'success'
-        news.save(update_fields=['translation_status'])
+        _save_translation_fields(news, ['translation_status'])
         return
 
     if news.title_zh:
         news.translation_status = 'success'
-        news.save(update_fields=['translation_status'])
+        _save_translation_fields(news, ['translation_status'])
         return  # Already translated
 
     # Mark as translating
     news.translation_status = 'translating'
     news.last_translation_attempt = tz_now()
-    news.save(update_fields=['translation_status', 'last_translation_attempt'])
+    _save_translation_fields(news, ['translation_status', 'last_translation_attempt'])
 
     try:
         title_zh, err_type, err_msg = translate(news.title, src="en", tgt="zh-CN")
@@ -157,15 +163,16 @@ def _try_translate(news):
 
             news.translation_status = 'success'
             news.translation_error = ''
-            news.save(update_fields=[
-                'title_zh', 'content_zh', 'translation_status', 'translation_error'
-            ])
+            from api.rss.legacy_fencing import legacy_translation_update
+            legacy_translation_update(news, {field: getattr(news, field) for field in
+                ['title_zh', 'content_zh', 'translation_status', 'translation_error']},
+                title=news.title, content=news.content)
         else:
             # Translation returned empty result with error
             # Map 'unknown' error type to 'failed' status
             news.translation_status = 'failed' if err_type == 'unknown' else err_type
             news.translation_error = err_msg or 'Translation returned empty result'
-            news.save(update_fields=['translation_status', 'translation_error'])
+            _save_translation_fields(news, ['translation_status', 'translation_error'])
 
     except Exception as e:
         import logging
@@ -181,7 +188,7 @@ def _try_translate(news):
         else:
             news.translation_status = 'failed'
         news.translation_error = str(e)
-        news.save(update_fields=['translation_status', 'translation_error'])
+        _save_translation_fields(news, ['translation_status', 'translation_error'])
 
 
 def _save_item_sync(item):
@@ -219,6 +226,7 @@ class DjangoPipeline:
     async def process_item(self, item, spider=None):
         spider = spider or self.crawler.spider
         item.setdefault('source_key', spider.name)
+        item.setdefault('legacy_source_token', getattr(spider, '_legacy_source_token', None))
         registry = getattr(spider, 'feed_receipts', None)
         task = asyncio.current_task()
         if registry:

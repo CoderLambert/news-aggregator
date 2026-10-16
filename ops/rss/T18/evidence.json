@@ -1,0 +1,24 @@
+{
+  "basic_auth_and_header_stripping": "PASS: synthetic",
+  "default_closed": "PASS",
+  "exact_paths_and_host": "PASS",
+  "miniflux_publisher_no_redirect_auth": "BLOCKED: adapter extension and real gateway proof absent",
+  "nginx_config": "PASS",
+  "nginx_image": "nginx@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236",
+  "project": "newshub-rss-t18-ad699db3742c",
+  "public_dns_tls_hairpin": "BLOCKED: no deployment configuration",
+  "real_github_token_route_objects": "BLOCKED: no service token",
+  "resources_removed": true,
+  "rsshub_image": "diygod/rsshub@sha256:1945d3162e0a6a38399bed540b623bbb06829ad3dc9160de7e7dfbaac60854ff",
+  "rsshub_nonroot_health": "PASS",
+  "runtime": {
+    "browserCache": [],
+    "node": "v24.22.0",
+    "uid": 1000
+  },
+  "scope": "local synthetic TLS/header/redirect tests; public live gate remains BLOCKED",
+  "selected_logs_secret_free": "PASS: synthetic",
+  "source_commit": "8e94b949479ba3295ee9653806f59b2be6559158",
+  "upstream_error_redacted": "PASS: synthetic",
+  "upstream_redirect_refused": "PASS: synthetic"
+}

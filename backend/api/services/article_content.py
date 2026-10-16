@@ -1,18 +1,16 @@
 """Read current article context and request durable work without publisher IO."""
-from api.services.full_content_status import has_full_content, get_readable_full_content, enqueue_fetch, fetch_eligibility
+from api.services.full_content_status import has_full_content, enqueue_fetch, fetch_eligibility
 from api.services.full_content_worker import worker_health
 
 
-def pick_chat_context(news):
-    if has_full_content(news):
-        from api.services.shared_translations import get_shared_translation
-        shared = get_shared_translation(news)
-        return (shared.content if shared else '') or news.full_content_zh or get_readable_full_content(news)
-    return news.content_zh or news.content or ''
+def pick_chat_context(news, user=None):
+    from api.services.stored_readers import article_snapshot
+    return article_snapshot(news, user).markdown
 
 
-def context_scope(news):
-    return 'full' if has_full_content(news) else 'summary'
+def context_scope(news, user=None):
+    from api.services.stored_readers import article_snapshot
+    return article_snapshot(news, user).scope
 
 
 def request_full_content(news, *, force=False, priority=0, execution_guard=None):

@@ -18,7 +18,6 @@ from api.services.news_ingestion import ingest_item
 from api.services.full_content_status import enqueue_fetch, claim_fetch, has_full_content
 from api.services.full_content_worker import execute_one
 from api.services.article_fetcher import fetch_article_markdown, FetchError
-from api.services.llm_translator import fetch_and_verify_chinese_content
 from news_crawler.download_handlers import BudgetedHTTPDownloadHandler
 
 RETIRED = ('leiphone', 'meta_ai', 'reuters', 'jiqizhixin', 'sanliu_kr')
@@ -42,9 +41,6 @@ def test_retired_channel_blocks_transport_provider_and_reader_before_any_request
         fetch_article_markdown(url, providers=[provider])
     assert error.value.failures[0].error_code == 'unsupported'
     provider.fetch.assert_not_called()
-    with patch('api.services.article_fetcher.providers.TrustedNewsJinaProvider.fetch') as reader:
-        assert fetch_and_verify_chinese_content(url) == ''
-    reader.assert_not_called()
     assert ingest_item({'source_key': key}).receipt_outcome == 'policy_skip'
     from api.services.article_fetcher.providers import TrustedNewsJinaProvider
     with patch('api.services.article_fetcher.providers._open_url') as opened:
@@ -115,8 +111,10 @@ def test_running_retired_crawl_is_cancelled_without_changing_finished_history():
 @pytest.mark.django_db
 def test_previously_queued_body_is_terminal_without_fetching():
     source = Source.objects.create(name='Meta AI')
+    from api.models import SourcePublication
+    SourcePublication.objects.create(source=source, owner='legacy')
     category = Category.objects.create(name='AI', slug='ai')
-    news = News.objects.create(source=source, category=category, title='Old queued article',
+    news = News.objects.create(source=source, body_owner_source=source, category=category, title='Old queued article',
         url='https://ai.meta.com/blog/example/', publish_time=timezone.now(),
         full_content_fetch_status='queued', full_content_next_attempt_at=timezone.now())
     provider = Mock()

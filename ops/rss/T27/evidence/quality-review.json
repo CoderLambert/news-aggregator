@@ -1,0 +1,60 @@
+{
+  "review_date": "2026-10-16",
+  "existing_samples_reviewed": 2,
+  "new_articles_added": 0,
+  "production_verified_flags_changed": false,
+  "articles": [
+    {
+      "source": "Julia Evans",
+      "url": "https://jvns.ca/blog/2024/11/18/how-to-import-a-javascript-library/",
+      "canonical_hash": "38e53b12ff83a142561e714d04fb50e5f641eb6d1c550b028d5ed9e98aa78153",
+      "same_hash_as_initial_sample": true,
+      "title_matches_source": true,
+      "reviewed_existing_sample": true,
+      "new_sample_denominator": 0,
+      "source_body_selector": "main",
+      "source_tables": 0,
+      "normalized_main_text_equal": true,
+      "heading_sequence_equal": true,
+      "headings": 20,
+      "paragraphs": 60,
+      "paragraph_sequence_equal": true,
+      "code_blocks": 10,
+      "every_code_block_exact": true,
+      "manual_outcome": "main_body_retained_in_this_sample"
+    },
+    {
+      "source": "Martin Fowler",
+      "url": "https://martinfowler.com/articles/orchestrator-tax.html",
+      "canonical_hash": "79f61a6382f6598545c09bda6abab2682ddca8cf7d1288c04e7870aa5c816de0",
+      "same_hash_as_initial_sample": true,
+      "title_matches_source": true,
+      "reviewed_existing_sample": true,
+      "new_sample_denominator": 0,
+      "source_body_selector": "main",
+      "source_tables": 0,
+      "core_body_selector": "main .paperBody",
+      "core_nonempty_paragraphs": 42,
+      "all_core_paragraphs_retained": true,
+      "core_paragraph_order_retained": true,
+      "source_core_headings": 7,
+      "source_core_images": 4,
+      "image_sequence_equal": true,
+      "normalized_main_text_equal": false,
+      "manual_outcome": "core_readable_but_incomplete_and_acknowledgments_reordered",
+      "omissions": [
+        "introductory_dek",
+        "author_biography",
+        "related_work",
+        "page_date_and_revision_metadata"
+      ],
+      "reordered": [
+        "acknowledgments_precedes_main_narrative_in_extracted_body"
+      ],
+      "date_observation": {
+        "feed_published_at": "2026-07-28T13:10:00Z",
+        "source_visible_date": "2026-07-16"
+      }
+    }
+  ]
+}

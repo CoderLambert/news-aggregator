@@ -15,7 +15,7 @@ vi.mock('@/services/channelQueries', () => ({
 vi.mock('@/services/workspaceApi', async importOriginal => {
   const original = await importOriginal()
   const common = { logo: '', region: 'international', language: 'en', source_type: 'news', topics: ['frontend'], news_count: 3, subscription_reason: '', origin: 'catalog', needs_review: false, url: 'https://react.dev', feed_url: '', reading_policy: 'standard', updated_at: null, evidence_hash: 'test' }
-  return { ...original, workspaceCatalogOptions: () => ({ queryKey: ['workspace', 'catalog'], queryFn: async () => ({ topics: [{ key: 'frontend', name: '前端开发', description: 'Web' }], presets: [], sources: [
+  return { ...original, workspaceRequest: vi.fn().mockResolvedValue({ results: [] }), workspaceCatalogOptions: () => ({ queryKey: ['workspace', 'catalog'], queryFn: async () => ({ topics: [{ key: 'frontend', name: '前端开发', description: 'Web' }], presets: [], sources: [
     { ...common, id: 1, name: 'React Blog', description: 'React framework', subscription_status: 'active' },
     { ...common, id: 2, name: 'Retired Channel', description: 'Historical source', subscription_status: 'inactive' },
   ] }) }) }

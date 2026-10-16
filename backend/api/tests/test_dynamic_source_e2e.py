@@ -42,6 +42,10 @@ class FixtureHandler:
     @classmethod
     def from_crawler(cls, crawler): return cls(crawler)
     async def download_request(self, request, spider=None):
+        from asgiref.sync import sync_to_async
+        from api.rss.legacy_fencing import capture_source_token
+        spider = spider or self.crawler.spider
+        spider._legacy_source_token = await sync_to_async(capture_source_token, thread_sensitive=True)(spider.name)
         body = (b'{"data":{"items":[{"id":"notice-1","title":"Official health notice",'
                 b'"url":"/news/notice-1","summary":"Publisher summary only",'
                 b'"published":"2026-10-15T00:00:00Z"}]}}')
