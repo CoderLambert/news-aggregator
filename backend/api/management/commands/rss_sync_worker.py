@@ -1,9 +1,9 @@
-"""Single RSS process: control execution now, incremental synchronization in T09."""
+"""Single RSS process: control and bounded incremental/retained synchronization."""
 from django.core.management.base import BaseCommand
 
 
 class Command(BaseCommand):
-    help = 'Execute persistent RSS controls; full synchronization remains not ready.'
+    help = 'Execute RSS controls, incremental sync and retained reconciliation.'
     requires_system_checks = []
     requires_migrations_checks = False
 
@@ -13,4 +13,4 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         from api.rss.runtime import run
-        self.stdout.write(run(once=options['once'], healthcheck=options['healthcheck'], control=True))
+        self.stdout.write(run(once=options['once'], healthcheck=options['healthcheck'], control=True, sync=True))
