@@ -53,7 +53,7 @@ bash ops/ci/manage.sh uninstall
 ## 3. 仓库启用和验收步骤
 
 1. **先在 Omarchy 安装并确认 omarchy-newshub 为 Online**。
-2. 在本 PR 等待 frontend 和 backend-and-release-gates 自托管检查通过。Runner 未注册之前 Job 会一直排队，不是代码测试成功。
+2. 当前 PR **保持 Draft**，所以两项 CI 暂时显示 Skipped（不是通过）。Runner Online 后，先把 PR 标记为 Ready for review，触发 frontend 与 backend-and-release-gates 的自托管检查；若 Runner 离线，Job 才会排队。
 3. 检查隔离 daemon、共享文件路径、Python/Node、Chromium、前后端测试、生产 Docker 构建及 G1 浏览器烟测。
 4. 所有必要检查通过，才将本 PR 合并 main；随后可手动运行已添加的 smoke 工作流。
 
