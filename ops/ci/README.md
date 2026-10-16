@@ -92,7 +92,73 @@ docker logs --tail 100 newshub-ci-runner-frontend-1
 
 Runner Online 后，PR 保持 Draft 时两项 CI 会被 Skipped。改为 Ready for review，再检查 PR 的两个 Job 是否实际运行；此时重点核对前端 Node 工具链、后端 DinD/共享 TMPDIR/Playwright、整套测试的真实结果。仅当全部通过才合并。
 
-## 5. 环境和故障
+## 5. 开机恢复及健康自愈
+
+**已集成开机用户级 systemd 定时器**。首次成功执行 manage.sh install、且 GitHub 确认两个 Runner Online 后，安装脚本自动尝试启用 newshub-ci-watch.timer。可手动重新启用：
+
+~~~bash
+bash ops/ci/manage.sh enable-watch
+systemctl --user list-timers newshub-ci-watch.timer
+bash ops/ci/manage.sh watch-logs
+~~~
+
+若想 Omarchy **开机但尚未登录桌面**时也运行定时器，额外执行一次（需要 sudo）：
+
+~~~bash
+sudo systemctl enable --now docker.service
+sudo loginctl enable-linger "$USER"
+~~~
+
+如果不启用 linger，用户 systemd 通常仅在用户登录后启动，不能保证登录前恢复。执行命令前确认自己允许 user manager 后台常驻。本仓库代码不会静默打开 linger，也不会修改其他 systemd units。
+
+定时器启动时等待约 2 分钟，然后每 5 分钟检查：
+
+- 宿主 Docker daemon 是否可用、两个 Runner 是否存在及运行状态、独立 DinD 是否健康。
+- 能访问 GitHub API 时核对两台 Runner 的 Online/Busy 状态；容器还在运行时用 docker top 查验有无 Runner.Worker。
+- GitHub 报告 Busy、检测到本地工作进程、或无法确定是否安全时，**不重启运行中的 CI**；只在明确无活动作业时尝试恢复异常容器。
+- 同一服务的恢复间隔至少 15 分钟，每 6 小时最多主动尝试 3 次；连续处于 Docker Restarting 状态且无活动作业时，二次检查后停止崩溃循环容器，留下日志，避免无休止重启。
+- 如果 GitHub API 不可用，运行中的 Runner 不被强制重启；恢复采取保守策略。判定错误/无法访问不能自动“修复”注册身份和 GitHub 付款限制。
+
+手动管理：
+
+~~~bash
+bash ops/ci/manage.sh status
+bash ops/ci/manage.sh watch           # 立即执行一次检查，可能对明确异常的空闲容器恢复
+bash ops/ci/manage.sh watch-logs
+bash ops/ci/manage.sh stop            # 会拒绝在 Busy 时停止，且放置手动停止标记
+bash ops/ci/manage.sh start           # 移除手动停止标记
+bash ops/ci/manage.sh disable-watch   # 只停用本项目的 user timer，不改 linger
+~~~
+
+请注意：重启过程中**已经在执行**的 Job 不能从中断处恢复，只能在 GitHub 重新运行。系统自启/自动恢复不等于测试自动续跑。若检测到手动 stop 标记，watchdog **不会自动启动** Runner。
+
+## 6. 长期持久缓存
+
+本 PR 在独立 Runner 工作卷与 DinD 数据卷中保存缓存，重启和 GitHub checkout **不会删除**。安装器不会每次重建 Runner 镜像；依赖无变化时不必重新下载大型 Python wheels、PyTorch 和 npm 包。
+
+| 缓存 | 命中条件 | 命中后行为 |
+|---|---|---|
+| 前端 node_modules | package.json、package-lock.json、Node/npm 版本、CPU 架构指纹一致且 npm ls 验证通过 | 直接复用完整已安装目录，**不运行 npm ci** |
+| npm 下载缓存 | npm integrity cache，随 frontend-work 卷保留 | 首次缺包时 npm ci --prefer-offline，已有 tarballs 不重复下载 |
+| 后端 Python venv | requirements.txt 内容、Python ABI、架构、PyTorch 2.14.1+cpu、Playwright 1.62.0 指纹一致且 pip check 通过 | 直接复用 venv，**不重复执行 pip install** |
+| pip 下载缓存 | 持久 PIP_CACHE_DIR | 首次/依赖变化时尽量重用 wheels 和包元数据 |
+| 浏览器 Chromium | 在自定义 Runner 镜像的构建阶段安装 | 后续 CI 直接使用，无需每次 playwright install |
+| Docker build 镜像层 | 独立 DinD 的 docker-data 卷 | 未修改的生产构建层复用；不需要每次完整下载/构建 |
+| Nginx smoke 镜像 | DinD 本地镜像存在 | 检查 image inspect；首次才 docker pull |
+
+首次冷启动或锁文件发生变更仍可能下载依赖。**后端 requirements.txt 中有不少 >= 范围依赖**，相同内容指纹会复用首次解析的已安装版本；需要有意识地升级依赖时，运行 install-backend-deps.sh --refresh 或提高 CI_BACKEND_CACHE_REV，并建议后续补严格 lock 文件以提升可复现性。缓存命中始终进行结构及依赖检查，而不是无条件跳过验证。
+
+缓存不会自动无限清理其他项目；用下面的只读命令查看大小：
+
+~~~bash
+docker exec newshub-ci-runner-1 du -sh /ci-work/_work/.cache
+docker exec newshub-ci-runner-frontend-1 du -sh /ci-frontend/_work/.cache
+docker exec newshub-ci-docker-1 docker -H unix:///ci-docker/docker.sock system df
+~~~
+
+**不要**在 Job 正在运行时删除缓存，不要使用 docker system prune、docker volume prune 或删除 newshub-ci 的状态卷。缓存需要回收时先确认 Runner 空闲，删除指定过期的 keyed cache 目录，并保留当前使用的条目。
+
+## 7. 环境和故障
 
 - Runner 与 DinD 都需要联网拉镜像和工具；不需要公网入站端口。
 - 预装 Chromium，后端 venv 仍安装原工作流指定版本 playwright==1.62.0。
