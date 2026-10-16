@@ -5,11 +5,13 @@ from pathlib import Path
 import subprocess
 import sys
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[3]
 
 
 def runtime_env(directory):
-    return {**os.environ, 'PYTHONPATH': str(ROOT / 'backend'),
+    env = {**os.environ, 'PYTHONPATH': str(ROOT / 'backend'),
             'DJANGO_SETTINGS_MODULE': 'newsaggregator.settings',
             'DJANGO_ENV': 'production', 'DJANGO_DEBUG': '0',
             'DJANGO_SECRET_KEY': 'synthetic-t02-ORM-only-key-abcdefghijklmnopqrstuvwxyz-0123456789',
@@ -19,6 +21,8 @@ def runtime_env(directory):
             'RSS_RUNTIME_DIR': str(directory / 'runtime'),
             'NEWSHUB_RUNTIME_ROLE': 'rss_sync', 'RUN_MAIN': '',
             'NEWS_CRAWL_ONLY': '0'}
+    env.pop('PYTEST_CURRENT_TEST', None)
+    return env
 
 
 def test_orm_shell_never_attempts_heavy_imports_or_url_checks(tmp_path):
@@ -61,7 +65,55 @@ def test_runtime_refuses_missing_role(tmp_path):
 
 
 def test_runtime_health_requires_live_heartbeat(tmp_path):
+    migration = subprocess.run([sys.executable, str(ROOT / 'backend/manage.py'),
+        'migrate', '--noinput', '--skip-checks'], env=runtime_env(tmp_path),
+        capture_output=True, text=True, timeout=60)
+    assert migration.returncode == 0, migration.stderr
     result = subprocess.run([sys.executable, str(ROOT / 'backend/manage.py'),
         'rss_runtime', '--healthcheck'], env=runtime_env(tmp_path),
         capture_output=True, text=True, timeout=30)
     assert result.returncode != 0
+    assert 'heartbeat is missing or stale' in result.stderr
+
+
+def test_optional_overlay_has_private_pg_scoped_secrets_and_loopback_api():
+    config = yaml.safe_load((ROOT / 'compose.rss.prod.yaml').read_text())
+    services = config['services']
+    assert set(services) == {'rss-db', 'miniflux', 'rss-sync'}
+    assert all(service['profiles'] == ['rss'] for service in services.values())
+    assert 'ports' not in services['rss-db']
+    assert config['networks']['rss-db-net']['internal'] is True
+    engine = services['miniflux']
+    assert engine['ports'] == ['127.0.0.1:${RSS_ENGINE_PORT:-18080}:8080']
+    assert engine['environment']['FETCHER_ALLOW_PRIVATE_NETWORKS'] == '0'
+    for name in ('CLEANUP_ARCHIVE_READ_DAYS', 'CLEANUP_ARCHIVE_UNREAD_DAYS'):
+        assert engine['environment'][name] == '90'
+    for name in ('rss-db', 'miniflux'):
+        assert '@sha256:' in services[name]['image']
+    sync = services['rss-sync']
+    assert sync['secrets'] == ['rss_engine_token']
+    assert set(sync['volumes']) == {'db-data:/var/lib/newshub/db', 'rss-runtime-data:/var/lib/newshub/rss-runtime'}
+    assert sync['environment']['NEWSHUB_RUNTIME_ROLE'] == 'rss_sync'
+    assert 'env_file' not in sync and 'ports' not in sync
+    assert sync['read_only'] and sync['cap_drop'] == ['ALL']
+    # No replacement of host app, BYOK gateway, legacy workers, or channel overlay.
+    base = yaml.safe_load((ROOT / 'compose.prod.yaml').read_text())['services']
+    assert base['app']['network_mode'] == 'host'
+    assert base['app']['secrets'] == ['ai_byok_gateway_project_key']
+    assert {'crawler', 'indexer', 'full-content'} <= set(base)
+    workspace = yaml.safe_load((ROOT / 'compose.workspace.prod.yaml').read_text())
+    assert workspace['services']['channel-worker']['network_mode'] == 'host'
+
+
+def test_rss_image_is_an_independent_target_with_its_own_lock():
+    dockerfile = (ROOT / 'Dockerfile').read_text()
+    lightweight = dockerfile.split(' AS rss-sync', 1)[1].split('\nFROM ', 1)[0]
+    assert 'requirements-rss.lock' in lightweight
+    assert 'backend/requirements.txt' not in lightweight
+    assert 'frontend' not in lightweight and 'torch' not in lightweight.lower()
+    assert 'USER 10001:10001' in lightweight
+    assert dockerfile.rstrip().endswith('USER root')
+    requirements = (ROOT / 'backend/requirements-rss.lock').read_text().splitlines()
+    pins = [line for line in requirements if line and not line.startswith('#')]
+    assert all('==' in line and '>=' not in line for line in pins)
+    assert not any(word in '\n'.join(pins).lower() for word in ('torch', 'scrapy', 'feedparser', 'playwright', 'chromadb'))
