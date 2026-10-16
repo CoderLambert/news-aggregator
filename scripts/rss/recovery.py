@@ -166,10 +166,10 @@ def validate_manifest(value, environment, project):
     return value
 
 
-def command(args, *, input=None, output=None, stdin=None):
+def command(args, *, input=None, output=None, stdin=None, timeout=180):
     try:
         result = subprocess.run(args, input=input, stdin=stdin, stdout=output if output else subprocess.PIPE,
-                                stderr=subprocess.PIPE, timeout=180, check=True)
+                                stderr=subprocess.PIPE, timeout=timeout, check=True)
         return result.stdout if output is None else b''
     except (OSError, subprocess.SubprocessError):
         # SQL errors and commands may contain protected data. Never echo stderr.
@@ -555,7 +555,10 @@ def rollback(manifest, docker, *, prior_backup, execute=False, stop_writers=Fals
         current.write_text(json.dumps(manifest['release']))
         os.chmod(current, 0o600)
         arguments = rollback_command(manifest, current)
-        command(arguments + ['--execute'])
+        # rollback.sh owns its 300s-per-service readiness and fail-closed traps.
+        # A shorter subprocess.run timeout would SIGKILL its shell mid-switch,
+        # bypass those traps and leave newly started app writers running.
+        command(arguments + ['--execute'], timeout=None)
     return result
 
 

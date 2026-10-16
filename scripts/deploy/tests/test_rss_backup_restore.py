@@ -199,6 +199,7 @@ def test_application_rollback_delegates_without_restore_or_legacy_collectors(tar
     result = rss.rollback(target, lab, prior_backup=prior, execute=True)
     assert not result['databases_restored'] and lab.restore_calls == 0
     call = rss.command.call_args.args[0]
+    assert rss.command.call_args.kwargs['timeout'] is None  # delegate readiness/cleanup, never kill its shell at180s
     assert call[-3:] == ['--worker-services', 'indexer,channel-worker', '--execute']
     assert 'restore' not in call and 'crawler' not in call and 'rss-sync' not in call
     target['environment'] = 'production'
