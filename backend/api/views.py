@@ -128,7 +128,7 @@ class NewsFilter(django_filters.FilterSet):
 
     def filter_category(self, queryset, name, value):
         from api.services.channel_articles import category_filter
-        return category_filter(queryset, value)
+        return category_filter(queryset, value, actor=self.request.user)
 
     def filter_region(self, queryset, name, value):
         from api.rss.access import news_in_sources

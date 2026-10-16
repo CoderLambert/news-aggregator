@@ -437,3 +437,59 @@ def test_expired_lease_cannot_authorize_old_response_after_reacquisition(setup):
     assert task.lease.epoch > setup[2].epoch
     assert not News.objects.exists() and FeedSyncState.objects.get().page_cursor == 0
     task.close()
+
+
+def test_category_and_region_membership_do_not_reveal_other_users_private_source(setup):
+    from types import SimpleNamespace
+    from django.contrib.auth.models import AnonymousUser, User
+    from api.models import ChannelSubscription, SourceConfig
+    from api.rss.access import authorized_news
+    from api.services.channel_articles import category_filter, region_filter
+    from api.views import NewsFilter
+    commit(setup)
+    news = News.objects.get()
+    owner = User.objects.create_user('private-category-owner')
+    other = User.objects.create_user('private-category-other')
+    category = Category.objects.create(name='Private classification', slug='private-classification')
+    source = Source.objects.create(name='Private classification source', url='https://publisher.example/private', region='domestic')
+    SourcePublication.objects.create(source=source, publication='personal', owner='miniflux', reading_policy='public_feed')
+    SourceConfig.objects.create(source_key='private_classification', source=source, category=category,
+        publisher_name='Synthetic', channel_name='Private', status='approved', approved_config_version=1)
+    ChannelSubscription.objects.create(user=owner, source=source)
+    SourceFeedLink.objects.create(source=source, binding=setup[1], enabled=True)
+    # The binding also has the original PUBLIC source. Authorization and category
+    # must constrain the SAME joined SourceFeedLink, not two different links.
+    for actor, permitted in [(owner, True), (other, False), (AnonymousUser(), False), (None, False)]:
+        queryset = authorized_news(actor)
+        assert queryset.filter(pk=news.pk).exists()
+        assert category_filter(queryset, [category.pk], actor=actor).exists() is permitted
+        assert region_filter(queryset, 'domestic', actor=actor).exists() is permitted
+        assert category_filter(queryset, [news.category_id], actor=actor).exists()
+        if actor is not None:
+            filters = NewsFilter({'category': str(category.pk)}, queryset=queryset,
+                                 request=SimpleNamespace(user=actor))
+            assert filters.is_valid(), filters.errors
+            assert filters.qs.exists() is permitted
+    ChannelSubscription.objects.filter(user=owner, source=source).delete()
+    assert not category_filter(authorized_news(owner), [category.pk], actor=owner).exists()
+
+
+def test_legacy_category_membership_requires_authorized_source(setup):
+    from django.contrib.auth.models import User
+    from api.models import ChannelSubscription, NewsSourceItem
+    from api.services.channel_articles import category_filter
+    from api.services.source_policy import POLICIES
+    commit(setup)
+    news = News.objects.get()
+    policy = next(p for p in POLICIES.values() if p.default_category and p.default_category != news.category.name)
+    category, _ = Category.objects.get_or_create(name=policy.default_category, defaults={'slug': 'legacy-extra-category'})
+    source, _ = Source.objects.get_or_create(name=policy.name, defaults={'url': 'https://publisher.example/legacy'})
+    SourcePublication.objects.update_or_create(source=source, defaults={'publication': 'personal', 'owner': 'legacy'})
+    owner = User.objects.create_user('legacy-category-owner')
+    other = User.objects.create_user('legacy-category-other')
+    ChannelSubscription.objects.create(user=owner, source=source)
+    NewsSourceItem.objects.create(source_key=policy.key, upstream_id='private-classification',
+        news=news, discovery_url=news.url)
+    assert category_filter(News.objects.all(), [category.pk], actor=owner).exists()
+    assert not category_filter(News.objects.all(), [category.pk], actor=other).exists()
+    assert not category_filter(News.objects.all(), [category.pk]).exists()

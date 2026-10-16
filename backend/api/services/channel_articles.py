@@ -9,14 +9,18 @@ def channel_filter(queryset, source_ids):
     return news_in_sources(queryset, Source.objects.filter(pk__in=source_ids))
 
 
-def region_filter(queryset, region):
+def region_filter(queryset, region, *, actor=None):
     from api.models import NewsSourceItem
     keys = [p.key for p in POLICIES.values() if p.region == region]
-    members = NewsSourceItem.objects.filter(source_key__in=keys).values('news_id')
+    from api.rss.access import authorized_sources, _legacy_keys
+    sources = authorized_sources(actor)
+    members = NewsSourceItem.objects.filter(source_key__in=keys).filter(
+        source_key__in=_legacy_keys(sources)).values('news_id')
     from api.models import EngineEntryMap
     engine_members = EngineEntryMap.objects.filter(disposition='linked',
         binding__source_links__association_policy={'version': 1, 'mode': 'all'},
-        binding__source_links__source__region=region).values('news_id')
+        binding__source_links__source__region=region,
+        binding__source_links__source_id__in=sources.values('pk')).values('news_id')
     return queryset.filter(Q(source__region=region) | Q(pk__in=members) | Q(pk__in=engine_members))
 
 
@@ -54,17 +58,21 @@ def exclude_summary_only(queryset):
 
 
 
-def category_filter(queryset, category_ids):
+def category_filter(queryset, category_ids, *, actor=None):
     from api.models import Category, NewsSourceItem
     names = Category.objects.filter(pk__in=category_ids).values_list('name', flat=True)
     keys = [p.key for p in POLICIES.values() if p.default_category in names]
-    members = NewsSourceItem.objects.filter(source_key__in=keys).values('news_id')
+    from api.rss.access import authorized_sources, _legacy_keys
+    sources = authorized_sources(actor)
+    members = NewsSourceItem.objects.filter(source_key__in=keys).filter(
+        source_key__in=_legacy_keys(sources)).values('news_id')
     from api.models import EngineEntryMap
     engine_members = EngineEntryMap.objects.filter(
         Q(binding__source_links__source__crawler_config__category_id__in=category_ids) |
         Q(binding__source_links__source__name__in=[p.name for p in POLICIES.values() if p.key in keys]),
         disposition='linked',
-        binding__source_links__association_policy={'version': 1, 'mode': 'all'}).values('news_id')
+        binding__source_links__association_policy={'version': 1, 'mode': 'all'},
+        binding__source_links__source_id__in=sources.values('pk')).values('news_id')
     return queryset.filter(Q(category_id__in=category_ids) | Q(pk__in=members) | Q(pk__in=engine_members))
 
 
