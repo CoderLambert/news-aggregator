@@ -20,7 +20,6 @@ NAMES = {
     "runner": "omarchy-newshub",
     "runner-frontend": "omarchy-newshub-frontend",
 }
-CI_DIR = Path(__file__).resolve().parent
 PROJECT = "newshub-ci"
 WINDOW_SECONDS = 6 * 3600
 COOLDOWN_SECONDS = 15 * 60
@@ -43,15 +42,15 @@ def command(argv: list[str], *, timeout: int = 20) -> tuple[int, str]:
         return 125, ""
 
 
-def compose(*args: str) -> tuple[int, str]:
-    return command([
-        "docker", "compose", "--project-name", PROJECT, "-f",
-        str(CI_DIR / "compose.yaml"), *args,
-    ])
-
-
 def docker_state(service: str) -> tuple[str | None, str | None, str]:
-    rc, cid = compose("ps", "--all", "--quiet", service)
+    # Use Docker's exact Compose labels rather than referencing a mutable Git
+    # checkout. The monitor is installed outside the repository so it remains
+    # functional if the user switches branches or moves the source tree.
+    rc, cid = command([
+        "docker", "ps", "--all", "--quiet",
+        "--filter", f"label=com.docker.compose.project={PROJECT}",
+        "--filter", f"label=com.docker.compose.service={service}",
+    ])
     if rc or not cid:
         return None, None, "missing"
     cid = cid.splitlines()[0].strip()
