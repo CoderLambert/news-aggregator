@@ -226,16 +226,23 @@ def test_round_trip_increments_epochs_and_body_versions_without_aba(old):
     assert ingest_item(item(news), legacy_token=token).receipt_outcome == 'deferred'
 
 
-def test_shared_active_reference_preserves_physical_feed_when_returning_legacy(old):
+@pytest.mark.parametrize('subscribed,pinned,enabled', [(True, False, True), (False, False, False), (False, True, True)])
+def test_shared_active_reference_preserves_physical_feed_when_returning_legacy(old, subscribed, pinned, enabled):
     source, news, binding = old
     assert execute(old)['verified']
     other = Source.objects.create(name='rss:other', url='https://other.example/')
     SourcePublication.objects.create(source=other, owner='miniflux')
-    SourceFeedLink.objects.create(source=other, binding=binding, enabled=True)
+    SourceFeedLink.objects.create(source=other, binding=binding, enabled=True, editorial_pin=pinned)
+    if subscribed:
+        from django.contrib.auth import get_user_model
+        from api.models import ChannelSubscription
+        user = get_user_model().objects.create_user(username='shared-feed-subscriber')
+        ChannelSubscription.objects.create(user=user, source=other)
     news.refresh_from_db()
     assert execute(old, manifest(old, target='legacy'))['verified']
     binding.refresh_from_db()
-    assert binding.desired_enabled and binding.connection_state == 'ready'
+    assert binding.desired_enabled == enabled
+    assert binding.connection_state == ('ready' if enabled else 'paused')
 
 
 def test_live_old_process_blocks_after_pause_without_body_takeover(old):

@@ -30,7 +30,7 @@ manifest 是 `schema_version=1, kind=rss_source_migration` 的明确操作映射
 - `body_takeover[]` 明确 `news_id/expected_url/expected_body_owner_version`、唯一旧 `expected_owner_source_id` 或 `expected_owner_binding_id`、目标 `target_binding_id`（miniflux）。plan 只读验证，apply 不推断或批量抢占未列文章。
 - `drain.fenced_version=app_sha` 与 `old_processes[{pid,start_ticks,role}]`。使用 `/proc/PID/stat` 的启动代数核验排空，不杀进程；旧无 fence 进程仍活着时保持 paused，不移交主写。生产必须包括 app/legacy 角色快照。操作者须在部署同机 PID 命名空间中提供完整旧进程清单；不能把自报清单当成部署编排证明。
 
-执行过程：共享旧来源最小组检查 → Source paused/epoch+1 → 排空检查 → 显式主写 CAS/version+1 → 按有效引用计算物理 Feed 政策 → 事务外 EngineAdapter PUT+GET 确认 → 再验所有 source/政策/主写/operation/receipt → 激活目标 owner/epoch+1。引擎失败保持 paused，同 manifest 可恢复或只读 verify；往返 epoch 和主写版本单调增加。既有未完成 FeedOperation 阻止切换，控制期间新 operation/版本变化阻止激活。移除的旧链接也纳入物理 Binding 对账；其他有效 miniflux 来源或 miniflux editorial_pin 保持引擎采集，legacy/paused pin 不启用引擎。
+执行过程：共享旧来源最小组检查 → Source paused/epoch+1 → 排空检查 → 显式主写 CAS/version+1 → 按有效引用计算物理 Feed 政策 → 事务外 EngineAdapter PUT+GET 确认 → 再验所有 source/政策/主写/operation/receipt → 激活目标 owner/epoch+1。引擎失败保持 paused，同 manifest 可恢复或只读 verify；往返 epoch 和主写版本单调增加。既有未完成 FeedOperation 阻止切换，控制期间新 operation/版本变化阻止激活。移除的旧链接也纳入物理 Binding 对账；其他已启用且有 ChannelSubscription 的 miniflux 来源或 miniflux editorial_pin 保持引擎采集，legacy/paused pin 不启用引擎。
 
 生产 execute 还检查批准环境/来源范围/时间窗/change_reference、封存 SHA/digest/实际 schema exact-match、配对 SQLite/PG 备份身份与 allowlist 路径/hash；开发合成测试不要求生产封存。verify 是本地已确认结果与不变量的只读核查，不谎称每次 verify 都重新访问引擎。所有实际生产授权/部署排空/备份获取仍属于后续受批流程。
 
@@ -77,3 +77,7 @@ T25 专项覆盖晚到 RSS/全文拒写、真实下载 handler 获取前捕获�
 - 未连接真实 Miniflux、未操作生产、未执行旧生产服务排空/重启、未取得或恢复生产配对备份、未封存最终兼容镜像；T26/T29/T30 门禁仍待各自任务。
 - 全仓 CI/构建未本地重复；提交后 CI 结果另由主调度记录。T11 读取 guard 在本分支缺其模块时不会被未标记的内部对象触发；完整 API 集成由主调度验证。
 - 首个独立审查已由主调度完成 source_migration，按意见修复 pin；最终补丁和全任务仍需主调度独立复核。失败只暂停，不删正文/译文/关系，不反向迁移、不恢复整库，不自动回旧进程。
+
+独立复核补丁：其它来源普通引用必须同时 `enabled=True + owner=miniflux + ChannelSubscription 存在`；有 miniflux editorial_pin 可无订阅保活，legacy/paused pin 仍不启用。当前 manifest 明确目标 miniflux 按批准映射启用。增加订阅/无订阅/有效 pin 三种返回 legacy 专项。
+
+复核补丁验证：上述命令前缀加 `backend/api/tests/rss/test_owner_fencing.py`，35 passed，7.07s，退出 0；`git diff --check` 通过。

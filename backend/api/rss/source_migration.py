@@ -268,7 +268,8 @@ def _prepare_bindings(manifest, rows):
         binding = FeedBinding.objects.get(pk=pk)
         target_enabled = (any(row['target_owner'] == 'miniflux' and pk in _binding_ids(row) for row in rows)
             or SourceFeedLink.objects.filter(binding=binding, editorial_pin=True, source__publication__owner='miniflux').exists()
-            or SourceFeedLink.objects.filter(binding=binding, enabled=True, source__publication__owner='miniflux').exists())
+            or SourceFeedLink.objects.filter(binding=binding, enabled=True, source__publication__owner='miniflux',
+                source__channel_subscriptions__isnull=False).exists())
         if binding.last_error != marker:
             FeedBinding.objects.filter(pk=pk).update(desired_enabled=target_enabled, policy_version=F('policy_version') + 1,
                 connection_state='paused', last_error=marker)
