@@ -679,7 +679,7 @@ class ChatGPTArticleTranslation(models.Model):
         verbose_name_plural = 'ChatGPT 全文翻译'
         constraints = [
             models.UniqueConstraint(
-                fields=['user', 'connection', 'news'], name='unique_chatgpt_news_translation',
+                fields=['user', 'connection', 'news', 'source_hash'], name='unique_chatgpt_news_translation',
             ),
         ]
 
