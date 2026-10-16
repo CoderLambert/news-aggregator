@@ -1,0 +1,41 @@
+{
+  "git_head": "287cbea",
+  "github_public_routes": [
+    {
+      "items": 13,
+      "path": "/github/trending/daily/any",
+      "status": 200,
+      "title": "Trending repositories on GitHub today · GitHub"
+    },
+    {
+      "items": 20,
+      "path": "/github/issue/DIYgod/RSSHub/open",
+      "status": 200,
+      "title": "DIYgod/RSSHub Open Issues"
+    }
+  ],
+  "health": "healthy; /healthz returns ok",
+  "image": "diygod/rsshub@sha256:1945d3162e0a6a38399bed540b623bbb06829ad3dc9160de7e7dfbaac60854ff",
+  "network_bind": "127.0.0.1:1200",
+  "resources": {
+    "cap_drop": ["ALL"],
+    "memory_limit": "512m",
+    "no_new_privileges": true,
+    "read_only_rootfs": true,
+    "uid": 1000
+  },
+  "rsshub_source_revision": "8e94b949479ba3295ee9653806f59b2be6559158",
+  "secret_handling": {
+    "file_mode": "0600",
+    "parent_directory_mode": "0700",
+    "material_recorded": false,
+    "pat_shaped_value_found_in_container_logs": false
+  },
+  "synthetic_gateway": {
+    "live_config_default_closed": true,
+    "local_tls_auth_header_redirect_and_redaction_checks": "PASS",
+    "resources_cleaned": true
+  },
+  "production_gate": "BLOCKED: public DNS/TLS/hairpin and Miniflux publisher fixed auth/no-redirect proof remain untested",
+  "scope": "Local public GitHub route validation; not production authorization"
+}

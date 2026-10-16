@@ -28,7 +28,7 @@
 | T09 | rss_t05 / gpt-6-astra high | integrated | b980399→f03da66；a93f1bf→9043a99 | sync/reconciliation/runtime、ops/T09 | 固定H/full retained、独立lease、双GET前fence、T08/T21交接；62最终专项/150关联回归及真实engine故障PASS；health DTO已接线，额外分类按当前授权过滤 |
 | T21 | 主调度 | integrated partial | 94baab7、9f6671b、0f1f00d、f03da66 | 0057、opml/API/UI/worker | 预览确认、逐项队列重试、本人多组导出和恢复UI；T09每10秒推进；T27真实浏览器选择/跳过/多组/进度/导出PASS |
 | T20 | 主调度 | integrated partial | 0f1f00d及当前批次 | 发现/目录/频道与连接健康 | health读取匹配instance/account/mode的60秒heartbeat；14相关UI与typecheck/lint/build通过，T27真实浏览器PASS |
-| T18 | rss_t00 / gpt-6.1-sol high | integrated partial / live blocked | 2210e16→e4e62fd | routes.py、默认关闭gateway/ops/T18 | 85专项；实际RSSHub health与合成TLS/Nginx认证/重定向/凭据边界PASS；公网DNS/TLS/token及publisher认证/redirect仍BLOCKED |
+| T18 | rss_t00 / gpt-6.1-sol high | integrated partial / production gate blocked | 2210e16→e4e62fd；本机验收 287cbea | routes.py、默认关闭gateway/ops/T18 | RSSHub真实本机token验证Trending 13项、Issue 20项；85 route contracts与合成TLS/Nginx边界PASS；公网网关与Miniflux publisher auth/no-redirect仍BLOCKED |
 | T26 | rss_t04 / gpt-6-astra high | integrated synthetic candidate / seal blocked | b39d8a9→53003f2 | ops/T26工具/候选证据 | 56旧表34非空保留、两完整app镜像往返、0059真实两库恢复及恢复后T09同步PASS；主调度独立审查，真实副本及完整wrapper host权限BLOCKED |
 | T27 | rss_t05 / gpt-6-astra high | integrated synthetic browser / public partial | 87c47fc→60a421d；0f86dee→e768f2e | ops/T27、自有浏览器/真实来源验收 | fresh真实浏览器全链与gate1自动摘要/主题/TOC PASS；12篇公开取样，Julia原站对照PASS、Fowler完整性FAIL，保留Uber失败及其它未知，不宣称总体成功率 |
 
@@ -74,3 +74,5 @@ Python 3.12 独立环境 `/tmp/newshub-rss-coordinator-venv`；测试指定独�
 - T27 最终证据 e768f2e 已集成：普通用户默认自动摘要链在首次 News GET 前仅采集一次，订阅→可见29.944s（单例非p95）；实际主题/TOC PASS。原站逐项对照 Julia 原生正文 PASS、Fowler 主体可读但导语/Related Work 缺失且致谢前移，完整性 FAIL；未添加自定义提取器。合成浏览器范围已回填T13/T20/T21。
 - 1796192 远端前端、后端全量测试和生产设置检查通过；发布脚本阶段失败于旧 G1 seed 测试的单行 literal_eval。随新版 heredoc 修正 AST 提取，保持原 Mermaid 内容断言；最终提交重新执行全部 CI。最终 CI 状态以 PR78 当前 head 检查为准，不用历史 head 代替。
 - 最后受影响验证：发布语法与release/export-static/preflight四组shell行为检查全部PASS；G1 shell显式使用独立解释器后PASS，日志`/tmp/newshub-rss-final-shell-g1.log`。T27证据审计+G1/G2夹具组合15 passed、1 live skipped（3.34s）。
+- PR #79已合入main，PR #80已合入集成分支。集成worktree快进同步c23db6c（#80）并cherry-pick #79修复为287cbea；其中crawler registry修复此前已存在，只新增worker SIGTERM竞态断言。当前本地分支领先origin一提交，尚未push。
+- 同步后本机验收：`tests/crawler/test_crawl_all_serialization.py tests/backend/test_full_content_worker_process.py` 10 passed/29.01s；`DiscoverDialog`与`AddChannelDialog.validation` 9 passed；frontend typecheck、lint、build PASS。实际RSSHub fine-grained public-only Token下Trending HTTP200/13项、Issue HTTP200/20项；容器healthy且仅127.0.0.1:1200，文件0600/目录0700，日志没有PAT格式字符串。证据`ops/rss/T18/local-acceptance.json`；真实公网gateway/Miniflux publisher认证重定向门禁仍BLOCKED。PR #80 push CI通过；PR CI第一次完整通过，自动重试产生一个无步骤/无日志的2秒后端失败记录；本地受影响测试均通过。
