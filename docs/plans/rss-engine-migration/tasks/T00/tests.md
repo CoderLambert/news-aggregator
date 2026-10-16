@@ -1,6 +1,6 @@
 # T00：专项验收
 
-状态：NOT_RUN。以下为待交付测试，文件/命令存在与通过结果均不得预先声明。
+状态：2026-10-16 已执行隔离专项。A1/A2/A3 PASS；A4 本地私网、跨主机凭据跳转、正文凭据隔离及异常响应 PASS，公网 HTTPS 重定向与完整网关防护仍 BLOCKED，不能标 T00 DONE。
 
 - T00-A1：API/分页上下界和空库可复现。预期按对应合同断言成功及失败边界。
 - T00-A2：read/unread 90 天配置与 created_at 语义核对。预期按对应合同断言成功及失败边界。
@@ -10,12 +10,17 @@
 ## 执行与证据
 
 ```bash
-# PLANNED：测试文件与产品尚未实现。
-test -f tests/rss_engine_contract/test_engine_contract.py
-RSS_TEST_ALLOW_LIVE=1 RSS_TEST_CONFIG=/absolute/path/to/isolated-test-config.json \
-  RUN_MAIN=true PYTHONPATH=backend:crawler \
-  backend/venv/bin/python -m pytest -q tests/rss_engine_contract/test_engine_contract.py -m rss_live
+python3 -m venv /tmp/newshub-rss-t00-venv
+/tmp/newshub-rss-t00-venv/bin/python -m pip install -r ops/rss/T00/requirements.txt
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /tmp/newshub-rss-t00-venv/bin/python -m pytest \
+  -c tests/rss_engine_contract/pytest.ini --confcutdir tests/rss_engine_contract \
+  tests/rss_engine_contract/test_engine_contract.py -m 'not rss_live' -q
+/tmp/newshub-rss-t00-venv/bin/python ops/rss/T00/run_live.py
 ```
+
+run_live.py 生成一次性明确隔离配置，设置 RSS_TEST_ALLOW_LIVE/RSS_TEST_CONFIG；不接受外部引擎/数据库地址。独立 pytest 配置与 confcutdir 避免初始化 Django。真实实验按整体顺序运行，不单独运行依赖已建条目的下游阶段。资源边界和接口见 [实验说明](../../../../../ops/rss/T00/README.md)。
+
+最新有效真实命令退出码0：13 passed, 16 deselected in 18.34s。镜像实际 digest 与 SDK 校验值见 [versions.json](../../../../../ops/rss/T00/versions.json)。fixture 是合成发布者，引擎和 PG 是真实进程；不代表真实来源质量或生产网络已通过。
 
 真实引擎与镜像 digest 缺失时仅此运行证据 BLOCKED，T05/T06/T16 仍可开发
 
