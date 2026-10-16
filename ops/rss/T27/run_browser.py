@@ -40,10 +40,10 @@ def main():
         state = Path(directory); state.chmod(0o700)
         tls = state / 'tls'; tls.mkdir()
         audit = state / 'audit'; audit.mkdir(); audit.chmod(0o777)
-        run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-keyout', str(tls / 'key.pem'), '-out', str(tls / 'cert.pem'), '-subj', '/CN=publisher.example', '-addext', 'subjectAltName=DNS:publisher.example,DNS:zero.publisher.example'])
+        run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-keyout', str(tls / 'key.pem'), '-out', str(tls / 'cert.pem'), '-subj', '/CN=publisher.example', '-addext', 'subjectAltName=DNS:publisher.example,DNS:zero.publisher.example,DNS:restricted.publisher.example'])
         overlay = {'services': {'fixture': {'command': ['python', '/fixture/server.py'],
             'volumes': [str(ROOT / 'ops/rss/T27/publisher.py') + ':/fixture/server.py:ro', str(tls) + ':/fixture/tls:ro', str(audit) + ':/fixture/audit'],
-            'networks': {'isolated': {'aliases': ['publisher.example', 'zero.publisher.example']}}},
+            'networks': {'isolated': {'aliases': ['publisher.example', 'zero.publisher.example', 'restricted.publisher.example']}}},
             'engine': {'environment': {'SSL_CERT_FILE': '/fixture-ca.pem', 'HTTP_CLIENT_TIMEOUT': '3'},
                 'volumes': [str(tls / 'cert.pem') + ':/fixture-ca.pem:ro'],
                 'healthcheck': {'test': ['CMD', '/usr/bin/miniflux', '-healthcheck', 'auto'], 'interval': '1s', 'timeout': '5s', 'retries': 60}}}}
