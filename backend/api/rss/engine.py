@@ -35,13 +35,13 @@ def _id(value, *, zero=False):
     return value
 
 
-def _url(value):
+def _url(value, *, feed=True):
     # Syntax gate only; engine/deployment must enforce DNS and redirect SSRF rules.
     try:
-        if not isinstance(value, str) or len(value) > 1024 or any(ord(c) <= 32 for c in value) or "\\" in value:
+        if not isinstance(value, str) or (feed and len(value) > 1024) or any(ord(c) <= 32 for c in value) or "\\" in value:
             raise ValueError
         p = urlsplit(value)
-        if p.scheme != "https" or not p.hostname or p.username is not None or p.password is not None:
+        if p.scheme not in ({"https"} if feed else {"http", "https"}) or not p.hostname or p.username is not None or p.password is not None:
             raise ValueError
         p.port
         host = p.hostname.rstrip(".").lower()
@@ -246,7 +246,7 @@ class EngineAdapter:
                 return fn()
             except EngineError as exc:
                 error = EngineError(exc.code, retryable=exc.retryable,
-                                    unknown_result=control and (exc.unknown_result or exc.code == "response_too_large"),
+                                    unknown_result=control and (exc.unknown_result or exc.code in {"response_too_large", "invalid_response"}),
                                     retry_after=exc.retry_after)
             except requests.exceptions.JSONDecodeError:
                 error = EngineError("invalid_response", unknown_result=control)
@@ -284,12 +284,12 @@ class EngineAdapter:
         comments = row.get("comments_url")
         if comments:
             try:
-                comments = _url(comments)
+                comments = _url(comments, feed=False)
             except EngineError:
                 comments = None
         return EntryDTO(str(self.config.engine_instance_uuid), self.config.account_id,
                         _id(row.get("feed_id")), _id(row.get("id")), _text(row.get("title")),
-                        _url(row.get("url")), comments or None, _text(row.get("author", "")),
+                        _url(row.get("url"), feed=False), comments or None, _text(row.get("author", "")),
                         _text(row.get("content")), _utc(row.get("published_at")), _utc(row.get("created_at")))
 
     def discover(self, url):
