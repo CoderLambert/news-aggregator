@@ -104,18 +104,10 @@ jobs:
           bash scripts/deploy/tests/test_export_static.sh
           bash scripts/deploy/tests/test_preflight.sh
           bash scripts/deploy/tests/test_local_domain_args.sh
-      - name: Collect all three test roots
-        timeout-minutes: 5
-        run: |
-          backend/venv/bin/python -u - <<'PY'
-          import faulthandler
-          import sys
-          faulthandler.dump_traceback_later(120, repeat=True)
-          import pytest
-          sys.exit(pytest.main(['--collect-only', '-q', 'tests/', 'backend/api/tests/', 'scripts/deploy/tests/']))
-          PY
       - name: Run backend and offline deployment tests
-        run: backend/venv/bin/python -m pytest -q tests/ backend/api/tests/ scripts/deploy/tests/
+        # Pytest already collects all three explicitly named roots. Avoid a
+        # second --collect-only pass; report slow setup/call/teardown phases.
+        run: backend/venv/bin/python -m pytest -q --durations=40 --durations-min=0.5 tests/ backend/api/tests/ scripts/deploy/tests/
       - name: Check production Django settings with synthetic values
         env:
           DJANGO_ENV: production

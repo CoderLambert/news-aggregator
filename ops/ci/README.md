@@ -133,6 +133,16 @@ bash ops/ci/manage.sh disable-watch   # 只停用本项目的 user timer，不�
 
 请注意：重启过程中**已经在执行**的 Job 不能从中断处恢复，只能在 GitHub 重新运行。系统自启/自动恢复不等于测试自动续跑。若检测到手动 stop 标记，watchdog **不会自动启动** Runner。
 
+## CI 性能调优基线（2026-10-17）
+
+PR #81 自托管 Runner 的一次热缓存验收中，后端 pytest 测试为 2408 passed / 16 skipped / 264 秒。CI 仍完整执行三个测试根目录、生产镜像构建和 G1 Smoke，没有降低合并门槛。
+
+- 实际 pytest 运行已包含三个根目录的收集过程，移除单独的重复 `--collect-only` 步骤；缺失任何显式目录仍会使 pytest 失败。
+- 测试输出保留 `--durations=40 --durations-min=0.5`，按 setup/call/teardown 排序显示慢用例，便于持续排查。
+- RSS EngineAdapter 本地 HTTP server 的测试关闭轮询由默认 0.5 秒降为 0.02 秒，仍使用真实 HTTP 和标准 `shutdown()`。
+- 全文 Worker 的 SQLite 迁移只在模块级子进程执行一次，各测试通过独立临时数据库副本运行，不共享数据库、锁、心跳或持久进程。
+- 暂不默认启用 `pytest-xdist`。SQLite 事务测试、心跳/锁、端口和 subprocess 测试并行安全性需单独审核及重复验收；不能仅为速度跳过测试。
+
 ## 6. 长期持久缓存
 
 本 PR 在独立 Runner 工作卷与 DinD 数据卷中保存缓存，重启和 GitHub checkout **不会删除**。安装器不会每次重建 Runner 镜像；依赖无变化时不必重新下载大型 Python wheels、PyTorch 和 npm 包。

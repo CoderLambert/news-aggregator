@@ -59,7 +59,7 @@ class Proxy(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 proxy = ThreadingHTTPServer(('127.0.0.1',0),Proxy)
-threading.Thread(target=proxy.serve_forever,daemon=True).start()
+threading.Thread(target=lambda: proxy.serve_forever(poll_interval=.02),daemon=True).start()
 fail_once = True
 class FaultPipeline(DjangoPipeline):
     async def process_item(self,item,spider=None):

@@ -161,7 +161,7 @@ class Server(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             closed.set()
 server = ThreadingHTTPServer(('127.0.0.1', 0), Server)
-threading.Thread(target=server.serve_forever, daemon=True).start()
+threading.Thread(target=lambda: server.serve_forever(poll_interval=.02), daemon=True).start()
 class LocalHandler(BudgetedHTTPDownloadHandler):
     def _allowed(self, request):
         # Test-only route. Production continues to reject local/private URLs.
