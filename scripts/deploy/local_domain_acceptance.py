@@ -27,6 +27,23 @@ from urllib.parse import urlparse, urlsplit
 HOST = 'news.lambert.host'
 PLAYWRIGHT_VERSION = '1.62.0'
 STATUS_MARKER = '\n__NEWSHUB_HTTP_STATUS__='
+# Fixed error categories; curl stderr may carry sensitive request content.
+CURL_FAILURE_KINDS = {
+    5: 'proxy resolution failure',
+    6: 'DNS resolution failure',
+    7: 'connection failure',
+    28: 'connection or response timeout',
+    35: 'TLS handshake failure',
+    52: 'empty server response',
+    56: 'connection reset',
+    60: 'TLS certificate verification failure',
+}
+
+
+def _curl_failure_label(code: int) -> str:
+    return CURL_FAILURE_KINDS.get(code, 'transport error')
+
+
 CONTAINER_ID_PATTERN = re.compile(r'[a-f0-9]{64}')
 IMAGE_ID_PATTERN = re.compile(r'sha256:[a-f0-9]{64}')
 FORWARDED_SPOOF_HEADERS = (
@@ -554,13 +571,22 @@ def _curl(args: argparse.Namespace, path: str, **kwargs) -> tuple[int, str, subp
         check=False,
     )
     body, marker, raw_status = result.stdout.rpartition(STATUS_MARKER)
-    _require(bool(marker), 'curl did not return an HTTP status code')
+    if not marker:
+        if result.returncode != 0:
+            raise AcceptanceError(
+                f'curl transport failure (exit {result.returncode}: '
+                f'{_curl_failure_label(result.returncode)}; no HTTP status)'
+            )
+        raise AcceptanceError('curl did not return an HTTP status code')
     try:
         status = int(raw_status)
     except ValueError as exc:
         raise AcceptanceError('curl returned an invalid HTTP status code') from exc
-    if result.returncode != 0 and status != 0:
-        raise AcceptanceError(f'curl request failed (exit {result.returncode})')
+    if result.returncode != 0 or status == 0:
+        raise AcceptanceError(
+            f'curl transport failure (exit {result.returncode}: '
+            f'{_curl_failure_label(result.returncode)}; HTTP {status:03d})'
+        )
     return status, body, result
 
 
@@ -592,7 +618,17 @@ def _headers(path: Path) -> dict[str, list[str]]:
 def _expect_status(args: argparse.Namespace, checks: dict[str, str], name: str, path: str,
                    expected: int, **kwargs) -> tuple[str, dict[str, list[str]]]:
     header_file = kwargs.pop('header_file', None)
-    status, body, _ = _curl(args, path, header_file=header_file, **kwargs)
+    try:
+        status, body, _ = _curl(args, path, header_file=header_file, **kwargs)
+    except AcceptanceError as exc:
+        # Preserve the fixed check name while keeping stderr, URLs and headers
+        # out of both the G1 diagnosis and G2's structured failure metadata.
+        raise AcceptanceError(
+            f'{name}: {exc}',
+            source_check_name=name,
+            expected_http_status=expected,
+            actual_http_status=0,
+        ) from exc
     if status != expected:
         raise AcceptanceError(
             f'{name} expected HTTP {expected}, got {status}',
@@ -2246,7 +2282,11 @@ def _run_sse_check(args: argparse.Namespace, checks: dict[str, str]) -> None:
         raise AcceptanceError('fake SSE stream did not finish within its deadline') from exc
     total_elapsed = time.monotonic() - started
     body = first_line + remaining
-    _require(process.returncode == 0, 'curl could not read the fake SSE stream')
+    _require(
+        process.returncode == 0,
+        f'fake SSE curl transport failure (exit {process.returncode}: '
+        f'{_curl_failure_label(process.returncode)})',
+    )
     _require(b'data: first-frame' in body and b'data: final-frame' in body, 'fake SSE frames are missing')
     _require(total_elapsed - first_elapsed >= 0.5, 'first SSE frame did not arrive before the delayed final frame')
 

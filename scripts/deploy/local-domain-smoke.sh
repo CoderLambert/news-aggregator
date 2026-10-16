@@ -10,6 +10,9 @@ SHA=""
 STAGE="g1"
 NGINX_IMAGE="${NGINX_IMAGE:-nginx:stable-alpine}"
 G2_CURL_IMAGE="${LOCAL_DOMAIN_CURL_IMAGE:-curlimages/curl:8.10.1}"
+# Optional preloaded G1 probe for remote DinD. Empty preserves local execution.
+G1_PROBE_IMAGE="${LOCAL_DOMAIN_G1_PROBE_IMAGE:-}"
+G1_PROBE_IMAGE_ID=""
 NGINX_IMAGE_ID=""
 NGINX_REPO_DIGESTS=""
 NGINX_VERSION=""
@@ -42,6 +45,8 @@ Without --execute, this validates arguments and prints a no-resource dry-run pla
 G1 runs the read-only smoke; G2 runs the synthetic account acceptance matrix.
 Stage g3 is explicitly reserved and returns NOT_RUN without creating resources.
 The smoke never pulls images. Preload the selected app and Nginx images first.
+For remote DinD, LOCAL_DOMAIN_G1_PROBE_IMAGE selects a prebuilt G1 probe image.
+G1 HTTP, browser and SSE requests then run inside the gateway namespace.
 EOF
 }
 
@@ -205,6 +210,11 @@ fi
 [[ "$IMAGE" =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$ ]] || fail '--image must be a single valid image reference.'
 [[ "$NGINX_IMAGE" =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$ ]] || fail '--nginx-image must be a single valid image reference.'
 [[ "$G2_CURL_IMAGE" =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$ ]] || fail 'LOCAL_DOMAIN_CURL_IMAGE must be a single valid image reference.'
+if [[ -n "$G1_PROBE_IMAGE" ]]; then
+    [[ "$STAGE" == g1 ]] || fail 'LOCAL_DOMAIN_G1_PROBE_IMAGE is only supported for G1.'
+    [[ "$G1_PROBE_IMAGE" =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$ ]] \
+        || fail 'LOCAL_DOMAIN_G1_PROBE_IMAGE must be a single valid image reference.'
+fi
 [[ "$SHA" =~ ^[[:xdigit:]]{40}$ ]] || fail '--sha must be exactly 40 hexadecimal characters.'
 SHA="${SHA,,}"
 
@@ -259,6 +269,13 @@ PY_CAPABILITY
 [[ "$WORKER_CAPABLE" == 0 || "$WORKER_CAPABLE" == 1 ]] || fail 'invalid image worker capability.'
 NGINX_VERSION="$(docker run --rm --pull=never --network=none "$NGINX_IMAGE_ID" nginx -v 2>&1)" \
     || fail 'could not read the selected local Nginx version.'
+if [[ "$STAGE" == g1 && -n "$G1_PROBE_IMAGE" ]]; then
+    if ! G1_PROBE_IMAGE_ID="$(docker image inspect --format='{{.Id}}' "$G1_PROBE_IMAGE" 2>/dev/null)"; then
+        not_run "G1 probe image $G1_PROBE_IMAGE is not present locally; build or preload it explicitly."
+    fi
+    [[ "$G1_PROBE_IMAGE_ID" =~ ^sha256:[[:xdigit:]]{64}$ ]] \
+        || fail 'G1 probe image ID is invalid.'
+fi
 if [[ "$STAGE" == g2 ]]; then
     if ! CURL_IMAGE_ID="$(docker image inspect --format='{{.Id}}' "$G2_CURL_IMAGE" 2>/dev/null)"; then
         not_run "G2 curl sidecar image $G2_CURL_IMAGE is not present locally; preload it explicitly."
@@ -649,6 +666,37 @@ PY
 fi
 
 mkdir -p -- "$task_report_root"
+
+# Immutable, preloaded probe image with no Docker socket, private app secrets or
+# published ports. The report directory is shared only with this invocation.
+# A gateway network namespace is needed when Docker is a separate DinD daemon.
+run_g1_probe() {
+    local report_file=$1
+    local sse_only=$2
+    local -a probe_args=(
+        --gateway-ip 127.0.0.1
+        --ca-cert /smoke/ca.crt
+        --work-dir "$task_report_root"
+        --news-id "$news_id"
+        --chromium-executable /usr/local/bin/ci-chromium
+        --image-revision "$SHA"
+        --nginx-image "$NGINX_IMAGE"
+        --stage g1
+        --report "$report_file"
+    )
+    if [[ "$sse_only" == 1 ]]; then
+        probe_args+=(--sse-only)
+    fi
+    docker run --rm --pull=never --network "container:$gateway_id" \
+        --user "$(id -u):$(id -g)" \
+        --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+        --tmpfs /tmp:rw,nosuid,size=512m --shm-size=256m \
+        --mount "type=bind,source=$task_smoke_root/certs/ca.crt,target=/smoke/ca.crt,readonly" \
+        --mount "type=bind,source=$task_report_root,target=$task_report_root" \
+        --entrypoint python "$G1_PROBE_IMAGE_ID" \
+        /opt/newshub-smoke/local_domain_acceptance.py "${probe_args[@]}"
+}
+
 http_report="$task_report_root/http-browser.json"
 sse_report="$task_report_root/sse.json"
 acceptance_args=(
@@ -676,7 +724,12 @@ if [[ "$STAGE" == g2 ]]; then
         --private-root "$task_smoke_root"
     )
 fi
-if ! "$PYTHON_BIN" "$PROJECT_ROOT/scripts/deploy/local_domain_acceptance.py" \
+if [[ "$STAGE" == g1 && -n "$G1_PROBE_IMAGE_ID" ]]; then
+    if ! run_g1_probe "$http_report" 0; then
+        printf 'local-domain-smoke: G1 sidecar HTTP/browser checks failed; report: %s\n' "$http_report" >&2
+        exit 1
+    fi
+elif ! "$PYTHON_BIN" "$PROJECT_ROOT/scripts/deploy/local_domain_acceptance.py" \
     "${acceptance_args[@]}"; then
     printf 'local-domain-smoke: HTTP/browser checks failed; report: %s\n' "$http_report" >&2
     exit 1
@@ -741,17 +794,24 @@ for _attempt in {1..20}; do
     sleep 0.1
 done
 ((fake_ready)) || fail 'fake SSE upstream did not listen on the isolated loopback port.'
-"$PYTHON_BIN" "$PROJECT_ROOT/scripts/deploy/local_domain_acceptance.py" \
-    --gateway-ip "$gateway_ip" --ca-cert "$task_smoke_root/certs/ca.crt" \
-    --work-dir "$task_report_root" --sse-only --news-id "$news_id" --image-revision "$SHA" \
-    --nginx-image "$NGINX_IMAGE" --stage "$STAGE" --report "$sse_report" \
-    || fail 'isolated Nginx SSE first-frame timing check failed.'
+if [[ "$STAGE" == g1 && -n "$G1_PROBE_IMAGE_ID" ]]; then
+    run_g1_probe "$sse_report" 1 \
+        || fail 'isolated G1 sidecar SSE first-frame timing check failed.'
+else
+    "$PYTHON_BIN" "$PROJECT_ROOT/scripts/deploy/local_domain_acceptance.py" \
+        --gateway-ip "$gateway_ip" --ca-cert "$task_smoke_root/certs/ca.crt" \
+        --work-dir "$task_report_root" --sse-only --news-id "$news_id" --image-revision "$SHA" \
+        --nginx-image "$NGINX_IMAGE" --stage "$STAGE" --report "$sse_report" \
+        || fail 'isolated Nginx SSE first-frame timing check failed.'
+fi
+
 docker rm -f "$task_fake_server_id" >/dev/null
 task_fake_server_id=""
 
 "$PYTHON_BIN" - "$http_report" "$sse_report" "$task_report_root/report.json" \
     "$IMAGE" "$SHA" "$NGINX_IMAGE" "$NGINX_IMAGE_ID" "$NGINX_REPO_DIGESTS" "$NGINX_VERSION" \
-    "$IMAGE_ID" "$IMAGE_USER" "$STAGE" "$CURL_IMAGE_ID" "$CURL_REPO_DIGESTS" "$CURL_IMAGE_TAG" <<'PY'
+    "$IMAGE_ID" "$IMAGE_USER" "$STAGE" "$CURL_IMAGE_ID" "$CURL_REPO_DIGESTS" "$CURL_IMAGE_TAG" \
+    "$G1_PROBE_IMAGE" "$G1_PROBE_IMAGE_ID" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -774,6 +834,8 @@ result = {
     'curl_image': sys.argv[15] or None,
     'curl_image_id': sys.argv[13] or None,
     'curl_repo_digests': json.loads(sys.argv[14]) if sys.argv[14] else [],
+    'g1_probe_image': sys.argv[16] or None,
+    'g1_probe_image_id': sys.argv[17] or None,
     'checks': {
         'compose_config': 'PASS (docker compose config --quiet exit 0)',
         'nginx_bootstrap_config': 'PASS (nginx -t exit 0)',

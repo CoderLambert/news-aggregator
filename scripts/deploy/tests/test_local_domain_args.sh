@@ -47,6 +47,9 @@ if [[ "$1" == image && "$2" == inspect ]]; then
     if [[ "$image" == "$APP_IMAGE" && "${MOCK_APP_MISSING:-0}" == 1 ]]; then
         exit 1
     fi
+    if [[ "$image" == "${G1_PROBE_MOCK_IMAGE:-}" && "${MOCK_PROBE_MISSING:-0}" == 1 ]]; then
+        exit 1
+    fi
     if [[ "$*" == *org.opencontainers.image.revision* ]]; then
         printf '%s\n' "$MOCK_IMAGE_SHA"
     elif [[ "$*" == *'.Config.User'* ]]; then
@@ -58,6 +61,7 @@ if [[ "$1" == image && "$2" == inspect ]]; then
             "$APP_IMAGE") printf '%s\n' "$MOCK_APP_IMAGE_ID" ;;
             "$NGINX_IMAGE") printf '%s\n' "$MOCK_NGINX_IMAGE_ID" ;;
             "$G2_CURL_IMAGE") printf '%s\n' "$MOCK_CURL_IMAGE_ID" ;;
+            "$G1_PROBE_MOCK_IMAGE") printf '%s\n' "$MOCK_PROBE_IMAGE_ID" ;;
             *) exit 1 ;;
         esac
     else
@@ -136,6 +140,35 @@ fi
 if [[ "$1" == inspect ]]; then
     if [[ "$*" == *'State.Health.Status'* ]]; then printf 'healthy\n'; exit 0; fi
     printf '172.28.0.2\n'
+    exit 0
+fi
+if [[ "$1" == run && "$*" == *'/opt/newshub-smoke/local_domain_acceptance.py'* ]]; then
+    [[ " $* " == *' --pull=never '* ]] || exit 1
+    [[ " $* " == *' --network container:fake-gateway-container '* ]] || exit 1
+    [[ " $* " == *' --read-only '* && " $* " == *' --cap-drop=ALL '* ]] || exit 1
+    [[ " $* " == *' --gateway-ip 127.0.0.1 '* ]] || exit 1
+    [[ "$*" == *'target=/smoke/ca.crt,readonly'* ]] || exit 1
+    [[ "$*" == *"$MOCK_PROBE_IMAGE_ID"* ]] || exit 1
+    report=""
+    mode=http
+    for ((index = 1; index <= $#; index++)); do
+        if [[ "${!index}" == --report ]]; then
+            next=$((index + 1))
+            report="${!next}"
+        elif [[ "${!index}" == --sse-only ]]; then
+            mode=sse
+        fi
+    done
+    [[ -n "$report" && "$report" == "$TMPDIR"/newshub-local-domain-report-* ]] || exit 1
+    if [[ "${MOCK_G1_PROBE_FAIL:-0}" == 1 ]]; then
+        printf '{"stage":"g1","status":"FAIL","failure":"http_redirect: curl transport failure (exit 28: connection or response timeout; HTTP 000)"}\n' >"$report"
+        exit 1
+    fi
+    if [[ "$mode" == sse ]]; then
+        printf '{"stage":"g1","status":"PASS","checks":{"sse_first_frame_ms":"1","sse_total_ms":"1001"}}\n' >"$report"
+    else
+        printf '{"stage":"g1","status":"PASS","checks":{"browser_homepage":"HTTP 200"}}\n' >"$report"
+    fi
     exit 0
 fi
 if [[ "$1" == run && " $* " == *" -d "* ]]; then
@@ -328,10 +361,12 @@ export ARGV_VALIDATION_LOG
 export APP_IMAGE='newshub:test'
 export NGINX_IMAGE='nginx:test'
 export G2_CURL_IMAGE='curlimages/curl:8.10.1'
+export G1_PROBE_MOCK_IMAGE='newshub:g1-probe-test'
 export LOCAL_DOMAIN_CURL_IMAGE="$G2_CURL_IMAGE"
 export MOCK_APP_IMAGE_ID="sha256:$(printf 'a%.0s' {1..64})"
 export MOCK_NGINX_IMAGE_ID="sha256:$(printf 'b%.0s' {1..64})"
 export MOCK_CURL_IMAGE_ID="sha256:$(printf 'c%.0s' {1..64})"
+export MOCK_PROBE_IMAGE_ID="sha256:$(printf 'f%.0s' {1..64})"
 export MOCK_IMAGE_SHA='0123456789abcdef0123456789abcdef01234567'
 export REAL_PYTHON="${PYTHON_BIN:-$PROJECT_ROOT/backend/venv/bin/python}"
 export PYTHON_BIN="$task_bin/python-task"
@@ -448,6 +483,51 @@ report_path="$(printf '%s\n' "$output" | sed -n 's/.*report //p' | tail -n 1)"
 [[ -f "$report_path" ]] || fail 'the report artifact was not retained outside the cleaned work directory.'
 "$REAL_PYTHON" -c 'import json,sys; report=json.load(open(sys.argv[1], encoding="utf-8")); assert report["cleanup_status"] == "PASS" and report["status"] == "PASS" and report["image_revision"] == sys.argv[2] and report["application_image_id"] == "sha256:" + "a" * 64 and report["application_image_user"] == "10001:10001" and report["nginx_image_id"] == "sha256:" + "b" * 64 and report["nginx_repo_digests"] == ["nginx@sha256:mock"] and report["nginx_version"] == "nginx version: nginx/1.30.5"' "$report_path" "$MOCK_IMAGE_SHA" \
     || fail 'the final report did not record the image revision and cleanup result.'
+
+
+: >"$DOCKER_LOG"
+expect_exit 3 env LOCAL_DOMAIN_G1_PROBE_IMAGE="$G1_PROBE_MOCK_IMAGE" MOCK_PROBE_MISSING=1 \
+    "$SMOKE_SCRIPT" --execute --image "$APP_IMAGE" --sha "$MOCK_IMAGE_SHA"
+! grep -Eq '(^|[[:space:]])pull([[:space:]]|$)' "$DOCKER_LOG" \
+    || fail 'missing G1 probe triggered an implicit pull.'
+! grep -Eq 'compose.*(config|run|up)' "$DOCKER_LOG" \
+    || fail 'missing G1 probe started the smoke stack.'
+
+: >"$DOCKER_LOG"
+output="$(env LOCAL_DOMAIN_G1_PROBE_IMAGE="$G1_PROBE_MOCK_IMAGE" \
+    "$SMOKE_SCRIPT" --execute --image "$APP_IMAGE" --sha "$MOCK_IMAGE_SHA")" \
+    || fail 'mocked G1 probe smoke did not complete successfully.'
+[[ "$output" == *'G1 local-domain smoke PASS'* ]] || fail 'G1 sidecar smoke did not pass.'
+[[ "$(grep -c 'local_domain_acceptance.py' "$DOCKER_LOG")" -eq 2 ]] \
+    || fail 'G1 HTTP/browser and SSE did not both run in sidecars.'
+report_path="$(printf '%s\n' "$output" | sed -n 's/.*report //p' | tail -n 1)"
+"$REAL_PYTHON" - "$report_path" "$G1_PROBE_MOCK_IMAGE" "$MOCK_PROBE_IMAGE_ID" <<'PY'
+import json, sys
+from pathlib import Path
+report = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+assert report['status'] == 'PASS' and report['cleanup_status'] == 'PASS'
+assert report['g1_probe_image'] == sys.argv[2]
+assert report['g1_probe_image_id'] == sys.argv[3]
+assert report['checks']['browser_homepage'] == 'HTTP 200'
+assert report['checks']['sse_first_frame_ms'] == '1'
+PY
+
+: >"$DOCKER_LOG"
+failure_output=""
+failure_exit=0
+failure_output="$(env LOCAL_DOMAIN_G1_PROBE_IMAGE="$G1_PROBE_MOCK_IMAGE" MOCK_G1_PROBE_FAIL=1 \
+    "$SMOKE_SCRIPT" --execute --image "$APP_IMAGE" --sha "$MOCK_IMAGE_SHA" 2>&1)" \
+    || failure_exit=$?
+[[ "$failure_exit" != 0 && "$failure_output" == *'G1 local-domain smoke NOT PASS'* ]] \
+    || fail 'G1 sidecar transport failure was masked by cleanup.'
+failure_report_root="$(printf '%s\n' "$failure_output" | sed -n 's/.*report directory //p' | tail -n 1)"
+"$REAL_PYTHON" - "$failure_report_root/http-browser.json" <<'PY'
+import json, sys
+from pathlib import Path
+report = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+assert report['status'] == 'FAIL' and report['cleanup_status'] == 'PASS'
+assert 'exit 28' in report['failure']
+PY
 
 : >"$DOCKER_LOG"
 : >"$OPENSSL_LOG"

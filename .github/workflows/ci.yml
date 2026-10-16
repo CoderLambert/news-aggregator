@@ -133,6 +133,11 @@ jobs:
           RELEASE_SHA: ${{ github.sha }}
           NEWSHUB_IMAGE: newshub:ci-${{ github.sha }}
         run: docker build --target production --build-arg "RELEASE_SHA=$RELEASE_SHA" --tag "$NEWSHUB_IMAGE" .
+      - name: Build cached isolated G1 probe image
+        # G1 HTTP, Chromium and SSE must run inside DinD's gateway network.
+        # A persistent DinD Docker volume caches browser and Python image layers.
+        run: docker build --file ops/ci/g1-probe.Dockerfile --tag newshub:ci-g1-probe .
+
       - name: Reuse cached smoke Nginx image or pull first time
         run: |
           image=nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
@@ -142,4 +147,5 @@ jobs:
           RELEASE_SHA: ${{ github.sha }}
           NEWSHUB_IMAGE: newshub:ci-${{ github.sha }}
           PYTHON_BIN: ${{ github.workspace }}/backend/venv/bin/python
+          LOCAL_DOMAIN_G1_PROBE_IMAGE: newshub:ci-g1-probe
         run: scripts/deploy/local-domain-smoke.sh --execute --image "$NEWSHUB_IMAGE" --sha "$RELEASE_SHA" --nginx-image nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94

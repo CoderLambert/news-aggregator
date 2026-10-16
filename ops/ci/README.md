@@ -11,6 +11,7 @@
 - 单独运行 docker:29-dind，以私有 Unix socket 通信。不挂载 Omarchy 宿主 /var/run/docker.sock；不发布 DinD 端口。
 - 后端 runner-work 卷同时挂在后端 Runner 和 DinD 中的 **相同绝对路径** /ci-work/_work。这是为了让原有 Docker bind mount、Compose 和 G1 浏览器烟测正确找到工作目录。
 - 前端的 frontend-work 卷仅挂在前端 Runner 中，路径为 /ci-frontend/_work；两个 Job 分别 checkout，互不覆盖。
+- G1 HTTP/浏览器/SSE 探针：CI 从 `ops/ci/g1-probe.Dockerfile` 构建并在 DinD 持久卷中缓存专用 Chromium + Playwright 镜像；设置 `LOCAL_DOMAIN_G1_PROBE_IMAGE=newshub:ci-g1-probe` 时，所有 G1 网络请求通过 `--network container:<gateway-id>` 在网关命名空间内运行，不需对外发布端口，也不向探针提供 Docker socket。探针仅挂载测试 CA（只读）和本次报告目录（可写）；未设置变量则保留原有本地直连模式。
 - TMPDIR=/ci-work/_work/.ci-tmp 同样共享，避免源目录只存在于 Runner 容器而 DinD 看不到。
 - runner-state 和 frontend-state 分别保存两个 Runner 的 GitHub 注册身份；docker-data 保存后端 DinD 构建缓存；状态和缓存均与其他 Docker 项目隔离。
 - 默认资源：后端 Runner 3 vCPU/6GB、前端 Runner 2 vCPU/4GB、DinD 2 vCPU/5GB。三者各有资源上限，峰值总计上限约 15GB，CPU 约 7 vCPU。一个 Runner 只执行一个 Job，但**两个 Runner 同时执行两个 Job**。对于目前可用内存约 20GiB 的 Omarchy，建议先保持这些保守限额，观察高峰资源。
