@@ -58,6 +58,22 @@ def check(req: Path, lock: Path, installed: bool = False) -> dict[str, str]:
     if missing:
         raise ValueError("CI lock missing direct dependencies: " + ", ".join(sorted(missing)))
     if installed:
+        # An exact lock must also satisfy each direct requirement's version
+        # constraints. Import packaging only from the fully installed venv:
+        # the runner's system Python used for early lint needs no packages.
+        from packaging.requirements import Requirement
+
+        for raw in req.read_text(encoding="utf-8").splitlines():
+            entry = raw.partition("#")[0].strip()
+            if not entry:
+                continue
+            direct = Requirement(entry)
+            name = canonical(direct.name)
+            if direct.specifier and not direct.specifier.contains(versions[name], prereleases=True):
+                raise ValueError(
+                    f"CI lock {name}=={versions[name]} does not satisfy "
+                    f"direct requirement {direct.specifier}"
+                )
         for name, expected in versions.items():
             try:
                 actual = version(name)
