@@ -61,7 +61,7 @@ export default function DiscoverDialog({ viewer, groups, onClose, onDone }: { vi
           setMode('directory')
           resolve.reset()
           setQuery(value)
-        } else if (looksLikeFeedAddress(value)) {
+        } else if (value.startsWith('https://') && looksLikeFeedAddress(value)) {
           setMode('feed')
           resolve.reset()
           choose({ feed_url: value })
