@@ -43,7 +43,7 @@ services:
           addgroup -g 121 ci-runner
           group=ci-runner
         fi
-        exec dockerd --host=unix:///ci-docker/docker.sock --group="$group" \
+        exec dockerd --host=unix:///ci-docker/docker.sock --group="$$group" \
           --dns=${CI_DIND_DNS_PRIMARY:-1.1.1.1} \
           --dns=${CI_DIND_DNS_SECONDARY:-8.8.8.8} \
           --storage-driver=overlay2
