@@ -69,10 +69,23 @@ jobs:
           test -w "$TMPDIR"
           docker info >/dev/null
           docker compose version
-          docker run --rm --network none \
+          # Private DinD stores the Alpine probe image between CI runs. A
+          # missing image must be fetched exactly once; DNS failures must
+          # report an actionable error rather than obscure a mount check.
+          if ! docker image inspect alpine:3.22 >/dev/null 2>&1; then
+            for attempt in 1 2 3; do
+              docker pull alpine:3.22 && break
+              if [ "$attempt" -eq 3 ]; then
+                echo 'Private DinD cannot pull Alpine. Verify CI_DIND_DNS_PRIMARY/SECONDARY and the host outbound DNS/proxy.' >&2
+                exit 1
+              fi
+              sleep "$((attempt * 3))"
+            done
+          fi
+          docker run --rm --pull=never --network none \
             --mount "type=bind,source=$GITHUB_WORKSPACE,target=/ci-src,readonly" \
             alpine:3.22 test -f /ci-src/.github/workflows/ci.yml
-          docker run --rm --network none \
+          docker run --rm --pull=never --network none \
             --mount "type=bind,source=$TMPDIR,target=/ci-tmp,readonly" \
             alpine:3.22 test -d /ci-tmp
       - name: Reuse checked backend environment from persistent cache
