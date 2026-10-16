@@ -16,7 +16,9 @@ from django.db import IntegrityError, OperationalError, transaction
 from django.db.models import F
 from django.utils import timezone
 
-from api.models import News, NewsSourceItem, Source
+from api.models import News, NewsSourceItem, Source, SourcePublication
+from api.rss.legacy_fencing import legacy_admin_guard, assert_legacy_admin_guard
+from api.rss.content_store import StaleWrite
 from api.services.article_identity import normalize_article_url
 from api.services.full_content_status import _known_cooldown, fetch_eligibility
 from api.services.source_dates import parse_source_datetime
@@ -274,7 +276,7 @@ def plan_operation(operation):
                     if not equivalent:
                         after['full_content_state'] = 'missing'
                 prospective = News(content_kind=news.content_kind, url=url)
-                rejection = fetch_eligibility(prospective)
+                rejection = fetch_eligibility(prospective, check_owner=False)
                 if not rejection and after['full_content_retry_count'] >= 5:
                     rejection = 'retry_exhausted'
                 after.update(full_content_fetch_status='unsupported' if rejection else 'queued',
@@ -282,6 +284,11 @@ def plan_operation(operation):
                              full_content_next_attempt_at=None if rejection else _known_cooldown(url).isoformat(),
                              full_content_task_created_at=None if rejection else timezone.now().isoformat())
             plan['after'] = after
+        if plan['outcome'] == 'proposed':
+            plan['rss_guard'] = legacy_admin_guard(plan.get('source_id', plan.get('before', {}).get('source_id')),
+                [guard['news_id'] for guard in plan.get('news_guards', [])] if 'source_id' in plan else [plan['news_id']])
+            if 'target_source' in plan:
+                plan['rss_target_guard'] = legacy_admin_guard(plan['target_source']['source_id'])
     except (Source.DoesNotExist, News.DoesNotExist):
         plan.update(outcome='conflict', reason='explicit_target_not_found')
     except (RepairConflict, ValueError) as error:
@@ -335,10 +342,12 @@ def apply_plan(plan, *, undo=False):
                 if Source.objects.filter(pk=plan['source_id'], **plan['before']).update(name=plan['before']['name']) != 1:
                     raise RepairConflict('expected_source_values_changed')
                 _assert_news_guards(plan)
+                assert_legacy_admin_guard(plan.get('rss_guard'))
                 if Source.objects.filter(name=plan['after']['name']).exclude(pk=plan['source_id']).exists():
                     raise RepairConflict('target_source_exists_no_automatic_merge')
                 if Source.objects.filter(pk=plan['source_id'], **plan['before']).update(**plan['after']) != 1:
                     raise RepairConflict('source_compare_and_swap_lost')
+                SourcePublication.objects.filter(source_id=plan['source_id']).update(epoch=F('epoch') + 1)
             else:
                 before = plan['before']
                 query = News.objects.filter(pk=plan['news_id'], **_decode(before))
@@ -348,14 +357,20 @@ def apply_plan(plan, *, undo=False):
                 if _news_snapshot(news) != before:
                     raise RepairConflict('body_or_translation_evidence_changed')
                 _assert_source_guard(plan)
+                assert_legacy_admin_guard(plan.get('rss_guard'))
+                if 'rss_target_guard' in plan:
+                    assert_legacy_admin_guard(plan['rss_target_guard'])
                 _assert_cooldown_not_earlier(plan['after'])
                 if News.objects.filter(url=plan['after']['url']).exclude(pk=news.pk).exists():
                     raise RepairConflict('target_url_exists_no_automatic_merge')
-                if query.update(**_decode(plan['after'])) != 1:
+                updates = _decode(plan['after'])
+                if news.source_id != updates['source_id']:
+                    updates.update(body_owner_source_id=updates['source_id'], body_owner_version=F('body_owner_version') + 1)
+                if query.update(**updates) != 1:
                     raise RepairConflict('news_compare_and_swap_lost')
             result['outcome'] = 'undone' if undo else 'applied'
-    except (RepairConflict, IntegrityError, OperationalError) as error:
-        result.update(outcome='conflict', reason=str(error) if isinstance(error, RepairConflict) else 'database_write_conflict')
+    except (RepairConflict, StaleWrite, IntegrityError, OperationalError) as error:
+        result.update(outcome='conflict', reason=str(error) if isinstance(error, (RepairConflict, StaleWrite)) else 'database_write_conflict')
     return result
 
 
@@ -454,5 +469,13 @@ def plan_undo(value, *, limit=100):
             plan.update(outcome='conflict', reason='undo_target_not_found')
         except RepairConflict as error:
             plan.update(outcome='conflict', reason=str(error))
+        if plan.get('outcome') == 'proposed':
+            try:
+                plan['rss_guard'] = legacy_admin_guard(plan.get('source_id', plan.get('before', {}).get('source_id')),
+                    [guard['news_id'] for guard in plan.get('news_guards', [])] if 'source_id' in plan else [plan['news_id']])
+                if 'target_source' in plan:
+                    plan['rss_target_guard'] = legacy_admin_guard(plan['target_source']['source_id'])
+            except StaleWrite as error:
+                plan.update(outcome='conflict', reason=error.reason)
         plans.append(plan)
     return plans

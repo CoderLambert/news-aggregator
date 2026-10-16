@@ -15,7 +15,7 @@ from django.core.management import call_command, CommandError
 from django.utils import timezone
 
 from api.models import (Category, ChatSession, ChatGPTArticleTranslation, ChatGPTSubscriptionConnection,
-                        Favorite, News, NewsSourceItem, RequestBudget, SharedArticleTranslation, Source)
+                        Favorite, News, NewsSourceItem, RequestBudget, SharedArticleTranslation, Source, SourcePublication)
 from api.services import news_source_repair as repair
 from api.services.full_content_status import claim_fetch, mark_failed, mark_success, owns_fetch
 from api.services.article_fetcher.types import FetchResult, FullContentCandidate
@@ -30,9 +30,10 @@ def rows(monkeypatch):
     from api.services import article_fetcher
     monkeypatch.setattr(article_fetcher, 'fetch_article_markdown', Mock(side_effect=AssertionError('repair must never fetch')))
     source = Source.objects.create(name='量子位', url='https://www.leiphone.com', language='zh')
+    SourcePublication.objects.create(source=source, owner='legacy', reading_policy='standard')
     category = Category.objects.create(name='Repair tests', slug='repair-tests')
     news = News.objects.create(
-        source=source, category=category, title='Historical publisher title',
+        source=source, body_owner_source=source, category=category, title='Historical publisher title',
         content='Historical summary', content_zh='历史摘要',
         url='https://www.leiphone.com/category/ai/old-id.html', publish_time=timezone.now(),
         full_content='Historical original body', full_content_zh='历史完整译文',
@@ -92,7 +93,9 @@ def command(**options):
 
 
 def proper_source():
-    return Source.objects.create(name='雷峰网', url='https://www.leiphone.com', language='zh')
+    source = Source.objects.create(name='雷峰网', url='https://www.leiphone.com', language='zh')
+    SourcePublication.objects.create(source=source, owner='legacy', reading_policy='standard')
+    return source
 
 
 def repaired_url(tmp_path, rows, *, equivalent=False):
@@ -181,7 +184,7 @@ def test_source_rename_refuses_ambiguous_scope_and_never_merges_or_deletes(tmp_p
 
 def test_explicit_fk_repair_moves_only_verified_news_and_preserves_old_source(tmp_path, rows):
     source, news, favorite, _ = rows
-    other = News.objects.create(source=source, category=news.category, title='Mixed article', content='Other summary',
+    other = News.objects.create(source=source, body_owner_source=source, category=news.category, title='Mixed article', content='Other summary',
                                 url='https://webkit.org/blog/18/other/', publish_time=timezone.now())
     target = proper_source()
     operation = news_operation(news, new={'source_id': target.pk})
@@ -232,7 +235,12 @@ def test_changed_identity_quarantines_history_queues_with_cooldown_and_fences_ol
     source, news, favorite, translation = rows
     News.objects.filter(pk=news.pk).update(full_content_fetch_status='queued', full_content_next_attempt_at=timezone.now())
     news.refresh_from_db()
-    old_lease = claim_fetch(news)
+    from api.services.source_policy import POLICIES
+    from dataclasses import replace
+    from unittest.mock import patch
+    legacy_policy = replace(POLICIES['leiphone'], name=source.name)
+    with patch.dict(POLICIES, leiphone=legacy_policy):
+        old_lease = claim_fetch(news)
     assert old_lease
     published = news.publish_time
     cooldown = timezone.now() + timedelta(minutes=10)
@@ -306,7 +314,7 @@ def test_equivalence_cannot_preserve_body_without_matching_explicit_digest(tmp_p
 def test_undo_url_collision_preserves_new_occupant_and_original_rows(tmp_path, rows):
     source, news, favorite, _ = rows
     _, audit, operation = repaired_url(tmp_path, rows)
-    occupant = News.objects.create(source=source, category=news.category, title='Later valid occupant', content='Later summary',
+    occupant = News.objects.create(source=source, body_owner_source=source, category=news.category, title='Later valid occupant', content='Later summary',
         url=operation['expected']['url'], publish_time=timezone.now())
 
     result = command(undo_audit=str(audit), apply=True, audit_output=str(tmp_path / 'undo-collision.json'))
@@ -362,7 +370,8 @@ def test_undo_checks_source_rename_news_body_versions(tmp_path, rows):
 def test_explicit_unverified_record_keeps_metadata_but_disables_body_and_never_guesses_url(tmp_path, rows, source_key, name, url):
     _, news, favorite, _ = rows
     source = Source.objects.create(name=name, url='https://' + ('www.reuters.com' if source_key == 'reuters' else 'www.jiqizhixin.com'))
-    News.objects.filter(pk=news.pk).update(source=source, url=url)
+    SourcePublication.objects.create(source=source, owner='legacy', reading_policy='standard')
+    News.objects.filter(pk=news.pk).update(source=source, body_owner_source=source, url=url)
     news.refresh_from_db()
     operation = {'action': 'quarantine_unverified_identity', 'news_id': news.pk,
                  'expected': {'source_id': source.pk, 'url': url, 'full_content_revision': 0},
@@ -460,13 +469,14 @@ django.setup()
 from django.core.management import call_command
 from django.db import connection
 from django.utils import timezone
-from api.models import News, Source, Category
+from api.models import News, Source, Category, SourcePublication
 call_command('migrate', verbosity=0)
 with connection.cursor() as cursor:
     cursor.execute('PRAGMA journal_mode')
     assert cursor.fetchone()[0] == 'wal'
 source = Source.objects.create(name='量子位', url='https://www.leiphone.com')
-news = News.objects.create(title='Explicit old article', content='Summary', source=source,
+SourcePublication.objects.create(source=source, owner='legacy', reading_policy='standard')
+news = News.objects.create(title='Explicit old article', content='Summary', source=source, body_owner_source=source,
     category=Category.objects.create(name='Temporary repair', slug='temporary-repair'),
     url='https://www.leiphone.com/category/ai/old-id.html', publish_time=timezone.now(),
     full_content='Preserved historical body', full_content_state='legacy')

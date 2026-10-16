@@ -33,7 +33,9 @@ def test_unverified_sources_neither_request_nor_accept_articles(module, class_na
 
 
 def item(url):
+    from api.rss.legacy_fencing import capture_source_token
     return {
+        'legacy_source_token': capture_source_token('webkit'),
         'title': 'Same publisher title', 'content': 'A summary.',
         'url': url, 'author': '', 'cover_image': '',
         'publish_time': timezone.now(), 'source_name': 'WebKit',
@@ -77,6 +79,8 @@ def test_metadata_update_preserves_concurrent_full_content(monkeypatch):
                 )
             return original_update(query, **updates)
 
+        from api.rss.legacy_fencing import capture_source_token
+        data['legacy_source_token'] = capture_source_token('webkit')
         data['content'] = 'Short'
         data['publish_time'] = None
         with patch.object(QuerySet, 'update', interleave):

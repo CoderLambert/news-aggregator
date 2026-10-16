@@ -14,7 +14,7 @@ from rest_framework.test import APIClient, APIRequestFactory
 
 from api.models import (
     Category, ChatGPTArticleTranslation, ChatGPTSubscriptionConnection, News,
-    RequestBudget, SharedArticleTranslation, SharedArticleTranslationTask, Source,
+    RequestBudget, SharedArticleTranslation, SharedArticleTranslationTask, Source, SourcePublication,
 )
 from api.serializers import NewsDetailSerializer
 from api.services import article_content, shared_translations as shared
@@ -47,6 +47,7 @@ def local_consumers(settings, monkeypatch):
 @pytest.fixture
 def make_news():
     source = Source.objects.update_or_create(name='Dev.to', defaults={'url': 'https://dev.to', 'language': 'en', 'source_type': 'news'})[0]
+    SourcePublication.objects.update_or_create(source=source, defaults={'owner': 'legacy', 'reading_policy': 'standard'})
     category = Category.objects.create(name='Consumer regression', slug='consumer-regression')
     sequence = 0
 
@@ -54,7 +55,7 @@ def make_news():
         nonlocal sequence
         sequence += 1
         defaults = dict(
-            source=source, category=category, title='availability corpus article',
+            source=source, body_owner_source=source, category=category, title='availability corpus article',
             content=SUMMARY, content_zh=SUMMARY_ZH, title_zh='可读性测试文章',
             url=f'https://dev.to/team/consumer-{sequence}', publish_time=timezone.now(),
             content_kind='article', full_content=BODY, full_content_state='complete',
@@ -94,8 +95,10 @@ def quarantined(make_news):
         **shared.cache_key(news.pk, digest), status='running',
         started_at=timezone.now(), expires_at=timezone.now() + timedelta(minutes=1),
     )
+    from api.rss.legacy_fencing import capture_legacy_article
+    token = capture_legacy_article(news, initialize=True)
     assert correct_article_identity(news, news.url + '-corrected', expected_url=news.url,
-                                    expected_revision=news.full_content_revision)
+                                    expected_revision=news.full_content_revision, legacy_token=token)
     news.refresh_from_db()
     assert news.full_content == BODY
     assert shared.source_hash(news.full_content) == digest

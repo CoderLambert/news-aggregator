@@ -10,10 +10,23 @@ from api.services.article_fetcher.types import FullContentCandidate, FetchResult
 from api.services.article_fetcher.validators import validate_candidate
 from api.services.article_identity import InvalidIdentity, normalize_article_url
 from api.services.full_content_status import (
-    claim_fetch, commit_candidate, correct_article_identity, enqueue_fetch,
+    claim_fetch, commit_candidate as _commit_candidate, correct_article_identity as _correct_article_identity, enqueue_fetch,
     has_full_content, mark_failed, mark_success, release_fetch_claim, save_suggested_questions,
 )
-from api.services.news_ingestion import ingest_item
+from api.services.news_ingestion import ingest_item as _ingest_item
+from api.rss.legacy_fencing import capture_source_token, capture_legacy_article
+
+
+def ingest_item(item, **kwargs):
+    return _ingest_item(item, legacy_token=capture_source_token(item['source_key'] if item['source_key'] != 'unknown_key' else 'devto'), **kwargs)
+
+
+def commit_candidate(news, body, **kwargs):
+    return _commit_candidate(news, body, legacy_token=capture_legacy_article(news, initialize=True), **kwargs)
+
+
+def correct_article_identity(news, url, **kwargs):
+    return _correct_article_identity(news, url, legacy_token=capture_legacy_article(news, initialize=True), **kwargs)
 
 
 @pytest.fixture
@@ -39,7 +52,7 @@ def candidate(news, body='A complete short article.', **changes):
     return FullContentCandidate(**values)
 
 
-def test_reactivating_identical_audit_body_clears_questions_made_from_summary(news):
+def test_identical_audit_body_preserves_state_and_questions(news):
     news.full_content = 'A complete short article.'
     news.full_content_state = 'missing'
     news.full_content_zh = 'Retained historical translation'
@@ -47,7 +60,8 @@ def test_reactivating_identical_audit_body_clears_questions_made_from_summary(ne
     news.save(update_fields=['full_content', 'full_content_state', 'full_content_zh', 'suggested_questions'])
     assert commit_candidate(news, candidate(news)).saved
     news.refresh_from_db()
-    assert has_full_content(news) and news.suggested_questions == []
+    assert not has_full_content(news)
+    assert news.suggested_questions == ['summary one', 'summary two', 'summary three']
     assert news.full_content_zh == 'Retained historical translation'
 
 
@@ -189,7 +203,7 @@ def test_feed_newer_shorter_body_fences_worker_and_clears_only_current_derivativ
 
 
 @pytest.mark.django_db
-def test_feed_same_body_new_version_preserves_translation_and_fences_old_lease(news):
+def test_feed_same_body_new_version_preserves_translation_revision_and_lease(news):
     old = timezone.now() - timedelta(days=2)
     assert commit_candidate(news, candidate(news, source_modified_at=old)).saved
     News.objects.filter(pk=news.pk).update(full_content_zh='有效译文')
@@ -197,12 +211,12 @@ def test_feed_same_body_new_version_preserves_translation_and_fences_old_lease(n
     enqueue_fetch(news, force=True)
     worker = News.objects.get(pk=news.pk)
     assert claim_fetch(worker)
-    assert commit_candidate(news, candidate(news, source_modified_at=old + timedelta(days=1))).changed
-    assert not release_fetch_claim(worker)
+    assert commit_candidate(news, candidate(news, source_modified_at=old + timedelta(days=1))).outcome == 'noop'
+    assert release_fetch_claim(worker)
     news.refresh_from_db()
-    assert news.full_content_revision == 2
+    assert news.full_content_revision == 1
     assert news.full_content_zh == '有效译文'
-    assert news.full_content_fetch_status == 'success'
+    assert news.full_content_fetch_status == 'queued'
 
 
 @pytest.mark.django_db
@@ -255,7 +269,7 @@ def test_url_correction_fences_success_failure_and_slow_questions(news):
     current.refresh_from_db()
     assert current.full_content == body.raw_content  # preserved for audit
     assert current.full_content_state == 'missing' and not has_full_content(current)
-    assert commit_candidate(current, candidate(current)).saved
+    assert commit_candidate(current, candidate(current, 'A corrected complete article.')).saved
     assert has_full_content(current)
 
 
@@ -409,7 +423,7 @@ def test_typed_candidate_still_validates_runtime_field_types(news, changes):
 
 
 @pytest.mark.django_db
-def test_hn_editorial_headline_does_not_veto_exact_publisher_identity():
+def test_publisher_association_does_not_implicitly_transfer_hn_body_owner():
     discovered = ingest_item(entry(source_key='hackernews', source_name='Hacker News', upstream_id='999',
                                     discovery_url='https://news.ycombinator.com/item?id=999',
                                     title='An editorial HN headline'))
@@ -417,11 +431,11 @@ def test_hn_editorial_headline_does_not_veto_exact_publisher_identity():
     publisher = candidate(news, title='The exact publisher headline')
     with override_settings(STRUCTURED_BODY_INGEST_ENABLED=True, STRUCTURED_BODY_SOURCE_KEYS={'devto'}):
         result = ingest_item(entry(publisher, title=publisher.title))
-    assert result.body_committed
+    assert not result.body_committed
     news.refresh_from_db()
     assert result.news_id == discovered.news_id
-    assert has_full_content(news) and news.source.name == 'Dev.to'
-    assert news.title == 'The exact publisher headline'
+    assert not has_full_content(news) and news.source.name == 'Hacker News'
+    assert news.title == 'An editorial HN headline'
     assert news.source_items.count() == 2
 
 

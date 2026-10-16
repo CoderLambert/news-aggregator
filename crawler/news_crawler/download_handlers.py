@@ -98,6 +98,13 @@ class BudgetedHTTPDownloadHandler:
         if self.__class__ is BudgetedHTTPDownloadHandler:
             from api.services.article_fetcher.safe_http import validate_public_url
             await asyncio.to_thread(validate_public_url, request.url, 3.0)
+        from api.rss.legacy_fencing import capture_source_token, validate_source_token
+        spider = self.crawler.spider
+        if not hasattr(spider, '_legacy_token_task'):
+            spider._legacy_token_task = asyncio.create_task(_db(capture_source_token, spider.name))
+        spider._legacy_source_token = await asyncio.shield(spider._legacy_token_task)
+        await _db(validate_source_token, spider._legacy_source_token)
+        request.meta['legacy_source_token'] = spider._legacy_source_token
         request.meta['_budget_received_bytes'] = 0
         request.meta['_budget_body_stopped'] = ''
         request.meta['download_timeout'] = min(15, request.meta.get('download_timeout', 15))
@@ -127,6 +134,7 @@ class BudgetedHTTPDownloadHandler:
                         raise
                     await asyncio.sleep(delay)
             await _db(confirm_permit, permit)
+            await _db(validate_source_token, spider._legacy_source_token)
             self.crawler.stats.inc_value('budget/physical_requests')
             auxiliary = (request.meta.get('dont_obey_robotstxt') is True and
                          urlsplit(request.url).path == '/robots.txt')

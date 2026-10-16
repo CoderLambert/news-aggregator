@@ -2,6 +2,7 @@ import scrapy
 
 
 class NewsItem(scrapy.Item):
+    legacy_source_token = scrapy.Field()
     title = scrapy.Field()
     content = scrapy.Field()
     author = scrapy.Field()
