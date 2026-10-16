@@ -1,5 +1,7 @@
 """Current stored snapshots shared by AI, translation and speech readers."""
 from django.http import Http404
+from django.db import OperationalError
+from api.rss.operations import sqlite_retry
 from api.rss.access import get_stored_article
 
 
@@ -12,6 +14,16 @@ def article_snapshot(news, user=None):
 
 
 def require_current(user, stored, *, full=False):
+    try:
+        return _require_current(user, stored, full=full)
+    except OperationalError:
+        # Exhausted DB contention is a safe unavailable read, never permission
+        # to return a stale snapshot or leak a database exception into SSE.
+        raise StoredContentChanged('读取暂不可用，请重试。') from None
+
+
+@sqlite_retry
+def _require_current(user, stored, *, full=False):
     if getattr(user, 'is_authenticated', False):
         from django.contrib.auth import get_user_model
         user = get_user_model().objects.filter(pk=user.pk, is_active=True).first()

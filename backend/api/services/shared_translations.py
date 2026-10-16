@@ -10,14 +10,14 @@ import threading
 import time
 import uuid
 
-from django.db import close_old_connections, transaction
+from django.db import OperationalError, close_old_connections, transaction
 from django.db.models import Q
-from django.http import StreamingHttpResponse
+from django.http import Http404, StreamingHttpResponse
 from api.translation_sse import translation_sse_records
 from django.utils import timezone
 
 from api.models import News, SharedArticleTranslation, SharedArticleTranslationTask
-from api.services.stored_readers import article_snapshot, require_current
+from api.services.stored_readers import StoredContentChanged, article_snapshot, require_current
 
 logger = logging.getLogger(__name__)
 TARGET_LANGUAGE = 'zh-CN'
@@ -185,8 +185,9 @@ def publish_translation(*, news_id, digest, text, provider, model_slug='', lease
             defaults=dict(content=text, provider=provider, model_slug=model_slug,
                           completed_at=timezone.now()),
         )
-        current_text = News.objects.filter(pk=news_id).values_list('full_content', flat=True).get()
-        stale = source_hash(current_text) != digest
+        current_text, current_state = News.objects.filter(pk=news_id).values_list('full_content', 'full_content_state').get()
+        stale = (source_hash(current_text) != digest or not current_text.strip()
+                 or current_state not in {'legacy', 'complete', 'available'})
     if stale:
         # The immutable old-hash result remains history; it is never a current result.
         raise SharedTranslationError('原文已更新，旧译文已保存为历史，请重新翻译。')
@@ -211,14 +212,17 @@ def sse_response(stream):
 
 def completed_response(record, scope='shared', *, user=None, stored=None):
     def stream():
-        if stored is not None:
-            require_current(user, stored, full=True)
-            if scope == 'private':
-                from api.services.chatgpt_subscription import active_connection_for_user
-                connection = active_connection_for_user(user)
-                if connection is None or connection.pk != record.connection_id:
-                    raise SharedTranslationError('翻译连接已变化。')
-        yield from translation_sse_records(result_payload(record, scope), event='complete')
+        try:
+            if stored is not None:
+                require_current(user, stored, full=True)
+                if scope == 'private':
+                    from api.services.chatgpt_subscription import active_connection_for_user
+                    connection = active_connection_for_user(user)
+                    if connection is None or connection.pk != record.connection_id:
+                        raise SharedTranslationError('翻译连接已变化。')
+            yield from translation_sse_records(result_payload(record, scope), event='complete')
+        except (Http404, StoredContentChanged, SharedTranslationError, OperationalError):
+            yield 'data: {"error":"当前正文或译文暂不可用，请重试。"}\n\n'
     return sse_response(stream())
 
 
