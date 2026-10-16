@@ -157,7 +157,8 @@ class FeedSyncState(models.Model):
 class FeedOperation(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     kind = models.CharField(max_length=24, choices=choices('register', 'set_enabled', 'update_feed_policy', 'discover', 'refresh_feed', 'refetch_entry'))
-    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='feed_operations')
+    # Null is an internal system intent, never a public API actor or service user.
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name='feed_operations')
     binding = models.ForeignKey(FeedBinding, null=True, blank=True, on_delete=models.PROTECT, related_name='operations')
     entry = models.ForeignKey(EngineEntryMap, null=True, blank=True, on_delete=models.PROTECT, related_name='operations')
     # Only fixed action parameters; validation/redaction belongs to the service.
@@ -178,6 +179,7 @@ class FeedOperation(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(fields=['actor', 'dedupe_key'], name='rss_operation_actor_dedupe'),
+            models.UniqueConstraint(fields=['dedupe_key'], condition=models.Q(actor__isnull=True), name='rss_operation_system_dedupe'),
             models.CheckConstraint(condition=models.Q(kind__in=['register', 'set_enabled', 'update_feed_policy', 'discover', 'refresh_feed', 'refetch_entry']), name='rss_operation_kind_valid'),
             models.CheckConstraint(condition=models.Q(state__in=['pending', 'running', 'retry_wait', 'unknown', 'manual_blocked', 'succeeded', 'failed', 'cancelled']), name='rss_operation_state_valid'),
         ]
