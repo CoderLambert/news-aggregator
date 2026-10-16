@@ -7,6 +7,7 @@ PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 cd "$PROJECT_ROOT"
 REQ="$PROJECT_ROOT/backend/requirements.txt"
 TORCH_PIN="2.14.1+cpu"
+PLAYWRIGHT_PIN="1.62.0"
 CACHE_ROOT="${CI_BACKEND_CACHE_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/newshub-venvs}"
 REFRESH="${1:-}"
 
@@ -24,7 +25,7 @@ flock -x 9
 
 # Requirements content, Python ABI, architecture and torch pin form cache key.
 # Bump CI_BACKEND_CACHE_REV to invalidate old environments deliberately.
-VERSION="backend-cache-v2|${CI_BACKEND_CACHE_REV:-1}|$TORCH_PIN|$(python3 -c 'import sys,platform;print(sys.implementation.cache_tag,platform.machine())')"
+VERSION="backend-cache-v3|${CI_BACKEND_CACHE_REV:-1}|$TORCH_PIN|$PLAYWRIGHT_PIN|$(python3 -c 'import sys,platform;print(sys.implementation.cache_tag,platform.machine())')"
 KEY="$({ printf '%s\n' "$VERSION"; cat "$REQ"; } | sha256sum | cut -d' ' -f1)"
 [[ "$KEY" =~ ^[a-f0-9]{64}$ ]] || { echo "invalid backend cache key" >&2; exit 2; }
 ENV_DIR="$CACHE_ROOT/$KEY"
@@ -35,7 +36,7 @@ cache_healthy() {
     [[ -f "$STAMP" && ! -L "$ENV_DIR" && -x "$ENV_DIR/bin/python" ]] || return 1
     [[ "$(cat "$STAMP")" == "$KEY" ]] || return 1
     "$ENV_DIR/bin/python" -m pip check >/dev/null 2>&1 || return 1
-    "$ENV_DIR/bin/python" -c 'from importlib.metadata import version; assert version("torch")=="2.14.1+cpu"' >/dev/null 2>&1
+    "$ENV_DIR/bin/python" -c 'from importlib.metadata import version; assert version("torch")=="2.14.1+cpu" and version("playwright")=="1.62.0"' >/dev/null 2>&1
 }
 
 if [[ "$REFRESH" == --refresh ]] || ! cache_healthy; then
@@ -46,8 +47,9 @@ if [[ "$REFRESH" == --refresh ]] || ! cache_healthy; then
     "$ENV_DIR/bin/python" -m pip install --disable-pip-version-check \
         --index-url https://download.pytorch.org/whl/cpu "torch==$TORCH_PIN"
     "$ENV_DIR/bin/python" -m pip install --disable-pip-version-check -r "$REQ"
+    "$ENV_DIR/bin/python" -m pip install --disable-pip-version-check "playwright==$PLAYWRIGHT_PIN"
     "$ENV_DIR/bin/python" -m pip check
-    "$ENV_DIR/bin/python" -c 'from importlib.metadata import version; assert version("torch")=="2.14.1+cpu"'
+    "$ENV_DIR/bin/python" -c 'from importlib.metadata import version; assert version("torch")=="2.14.1+cpu" and version("playwright")=="1.62.0"'
     "$ENV_DIR/bin/python" -m pip freeze > "$ENV_DIR/newshub-freeze.txt"
     printf '%s\n' "$KEY" > "$STAMP"
 else
