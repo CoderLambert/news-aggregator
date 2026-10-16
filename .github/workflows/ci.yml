@@ -74,7 +74,7 @@ jobs:
             --mount "type=bind,source=$TMPDIR,target=/ci-tmp,readonly" \
             alpine:3.22 test -d /ci-tmp
       - name: Create isolated backend environment
-        run: python3 -m venv backend/venv
+        run: python3 -m venv --clear backend/venv
       - name: Install CPU-only PyTorch first
         run: backend/venv/bin/python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.14.1+cpu'
       - name: Install backend and test dependencies
