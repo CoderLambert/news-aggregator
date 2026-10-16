@@ -80,7 +80,9 @@ configured() {
 wait_for_registration() {
     local service="$1" check='test -s /runner/data/.runner' i
     if [[ "$service" == runner ]]; then
-        check="$check && docker info >/dev/null 2>&1"
+        # A root-run Docker probe can succeed while CI jobs (gosu runner)
+        # fail with permission denied. Check as the actual job UID/GID.
+        check="$check && /usr/sbin/gosu runner docker info >/dev/null 2>&1"
     fi
     for ((i=0; i<90; i++)); do
         if compose exec -T "$service" /bin/sh -c "$check" >/dev/null 2>&1; then
