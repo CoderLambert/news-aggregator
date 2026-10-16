@@ -208,7 +208,9 @@ case "$COMMAND" in
         configured runner && configured runner-frontend || die "Both runners must be registered; run install"
         compose up -d --build
         wait_for_registration runner && wait_for_registration runner-frontend || die "One of two runners not ready after update"
+        confirm_both_online || die "GitHub has not reported both Runners Online after update"
         report_status
+        CI_DATA_DIR="$DATA_DIR" bash "$CI_DIR/watch-service.sh" install || printf "WARNING: watchdog was not refreshed; use enable-watch.\n" >&2
         ;;
     watch)
         CI_DATA_DIR="$DATA_DIR" python3 "$CI_DIR/watch.py"
