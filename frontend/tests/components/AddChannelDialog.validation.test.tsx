@@ -37,10 +37,10 @@ it('shows safe address validation and preserves the URL for correction', async (
     </AuthContext.Provider>
   </QueryClientProvider>)
   const input = screen.getByRole('textbox', { name: '搜索订阅源、网站或 RSS 地址' })
-  fireEvent.change(input, { target: { value: 'http://localhost' } })
+  fireEvent.change(input, { target: { value: 'http://localhost/rss' } })
   fireEvent.click(screen.getByRole('button', { name: '查找订阅' }))
   expect(await screen.findByRole('alert')).toHaveTextContent('只接受不含凭据的公开 HTTPS 域名地址。')
-  expect(input).toHaveValue('http://localhost')
+  expect(input).toHaveValue('http://localhost/rss')
   expect(screen.getByRole('button', { name: '确认订阅' })).toBeDisabled()
   fireEvent.change(input, { target: { value: 'https://example.org' } })
   expect(screen.queryByRole('alert')).toBeNull()
