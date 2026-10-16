@@ -18,6 +18,23 @@ SPEC.loader.exec_module(fixtures)
 
 
 @pytest.mark.django_db
+def test_g1_seed_has_explicit_public_article_access(capsys):
+    from django.contrib.auth.models import AnonymousUser
+    from api.models import News
+    from api.rss.access import get_stored_article, authorized_news
+
+    script = (PROJECT / 'scripts/deploy/local-domain-smoke.sh').read_text()
+    code = script.split("<<'G1_SEED_PY'\n", 1)[1].split('\nG1_SEED_PY', 1)[0]
+    exec(compile(code, '<g1-seed>', 'exec'), {})
+    news = News.objects.get(url='https://fixture.invalid/newshub-local-domain-g1')
+    assert capsys.readouterr().out.strip() == str(news.pk)
+    assert authorized_news(AnonymousUser()).filter(pk=news.pk).exists()
+    stored = get_stored_article(AnonymousUser(), news.pk)
+    assert stored.scope == 'full'
+    assert 'flowchart TD' in stored.markdown
+
+
+@pytest.mark.django_db
 def test_generated_seed_has_explicit_public_body_grant(tmp_path, capsys):
     import ast
     import hashlib
