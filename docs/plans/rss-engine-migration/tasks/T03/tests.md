@@ -1,6 +1,6 @@
 # T03：专项验收
 
-状态：NOT_RUN。以下为待交付测试，文件/命令存在与通过结果均不得预先声明。
+状态：2026-10-16执行。T03-A1–A4工具专项与隔离真实两库恢复通过；最终生产schema/app兼容封存仍由T26承担。
 
 - T03-A1：隔离真实两库备份恢复且实例/映射匹配。预期按对应合同断言成功及失败边界。
 - T03-A2：未知 schema/目标及未停 writer 拒绝。预期按对应合同断言成功及失败边界。
@@ -10,11 +10,20 @@
 ## 执行与证据
 
 ```bash
-# PLANNED：测试文件与产品尚未实现。
-test -f scripts/deploy/tests/test_rss_backup_restore.py
-RUN_MAIN=true PYTHONPATH=backend:crawler \
-  backend/venv/bin/python -m pytest -q scripts/deploy/tests/test_rss_backup_restore.py
+RUN_MAIN=true NEWSHUB_RUNTIME_ROLE=rss_sync \
+  DJANGO_DB_PATH=/tmp/newshub-rss-t03-tests.sqlite3 PYTHONPATH=backend:crawler \
+  /tmp/newshub-rss-coordinator-venv/bin/python -m pytest -q \
+  scripts/deploy/tests/test_rss_backup_restore.py \
+  scripts/deploy/tests/test_release_operations.py \
+  scripts/deploy/tests/test_full_content_release.py
+bash scripts/deploy/tests/test_release_scripts.sh
+bash -n scripts/deploy/rollback.sh
+python3 ops/rss/T03/verify_isolated.py \
+  --python /tmp/newshub-rss-coordinator-venv/bin/python \
+  --output /tmp/t03-evidence.json
 ```
+
+117 passed in8.36s（退出0，Python3.12.14）；release shell回归PASS；真实演练最终退出0。固定Miniflux2.3.3/schema132、PG17.6；完整Django迁移集含0057/0058，未含后来的0059。实际配对覆盖恢复、重复恢复与fresh恢复、活跃writer与错实例/schema/hash/prior拒绝、FK/关系/映射/非admin账号核对及项目清理见[evidence.json](../../../../../ops/rss/T03/evidence.json)。六writer为合成sleep容器；普通app rollback为真实现有脚本的fake-Docker subprocess回归，不是最终app兼容封存。secret副本保护、allowlist异常、PID重用等为独立合成专项。详见[README](../../../../../ops/rss/T03/README.md)。
 
 工具开发不依赖 T11；自身 DONE 需隔离真实恢复。生产兼容基点由 T26 演练后封存
 
