@@ -24,17 +24,20 @@
 | CI基线修复 | 主调度 | integrated | 7f79671 | 两个旧测试文件 | 10专项通过；registry夹具与HOLDER SIGTERM竞态最小修复，CI待跑 |
 | T24 | 主调度 | running / 真实副本 blocked | 集成分支 | migration_inventory.py、scripts/rss-inventory.py、自有测试 | 57静态来源；6专项通过；显式SQLite副本只读hash导出器已实现；真实副本和覆盖处置待补 |
 
-| T14 | rss_t04复用 / gpt-6-astra high | running | task/rss-T14-ai-readers / da2365c+0058 | translation/shared/speech/research、views/serializer译文 | 当前hash+ACL快照、旧译文保留、无隐式抓取；0058私有译文版本DDL根已合37b6e03；修相关旧读者回归 |
-| T03 | rss_t00复用 / gpt-6.1-sol high | running | task/rss-T03-recovery / 1af2f2c+0058 | scripts/rss/recovery、rollback最小扩展、ops/T03 | 成对两库工具与真实隔离恢复；无真实生产副本 |
-| T09 | rss_t05复用 / gpt-6-astra high | running | task/rss-T09-sync / efe5f09 | sync/reconciliation/runtime、ops/T09 | 固定H增量+全保留对账、T08交接/T21队列、真实故障集成；健康DTO已稳定 |
-| T21 | 主调度 | integrated partial | 94baab7、9f6671b、0f1f00d | 0057、opml/API/UI | 预览确认、逐项队列重试、本人多组导出和恢复UI；T09推进及浏览器待验 |
-| T20 | 主调度 | integrated partial | 0f1f00d | RSS发现UI/目录HTTP/频道入口 | 目录/URL/0/1/多候选接普通订阅校验；36前端与129后端组合通过；健康/浏览器待接 |
+| T14 | rss_t04 / gpt-6-astra high | integrated / final corrections | a0482ed→7654371 | stored_readers、translation/speech/research | 当前ACL/hash/revision与旧译文保留；0058/0059根已合；全量发现隔离hash相同及SSE临时锁两边界，作者补最小修正 |
+| T03 | rss_t00 / gpt-6.1-sol high | integrated | 3cae565→4b32468；845789d→4ac939e | scripts/rss/recovery、rollback最小扩展、ops/T03 | 非作者审查；117专项、25最终专项与真实PG+SQLite fresh/overwrite/replay通过，证据截至0058；0059及app兼容T26 |
+| T09 | rss_t05 / gpt-6-astra high | integrated / category ACL correction | b980399→f03da66 | sync/reconciliation/runtime、ops/T09 | 固定H/full retained、独立lease、双GET前fence、T08/T21交接；62最终专项/150关联回归及真实engine故障PASS；health DTO已接线 |
+| T21 | 主调度 | integrated partial | 94baab7、9f6671b、0f1f00d、f03da66 | 0057、opml/API/UI/worker | 预览确认、逐项队列重试、本人多组导出和恢复UI；T09每10秒推进，浏览器待T27 |
+| T20 | 主调度 | integrated partial | 0f1f00d及当前批次 | 发现/目录/频道与连接健康 | health读取匹配instance/account/mode的60秒heartbeat；14相关UI与typecheck/lint/build通过，真实浏览器待T27 |
 
-继续可开发：T18 网关单独门禁；T26候选→隔离演练→封存必须含0058；T27真实来源/浏览器待后续。T29/T30/T31/T33生产与退出阶段未授权，禁止提前激活删除。
+| T18 | rss_t00 / gpt-6.1-sol high | running / live blocked | task/rss-T18-gateway / 4ac939e | routes.py、自有gateway配置/ops/T18 | 默认关闭声明式模板；DNS/TLS/token缺失，仅阻塞网关live |
+| T26 | rss_t04 / gpt-6-astra high | running / production seal blocked | task/rss-T26-rehearsal / 7654371+T03/T09 | ops/T26工具/候选证据 | 合成0051→0059旧列/PK/FK/译文保持首轮PASS，真实完整app候选与两库恢复进行中；真实副本缺失 |
+
+继续可开发：T27真实来源/浏览器。T29/T30/T31/T33生产与退出阶段未授权，禁止提前激活删除。
 
 ## 验证环境与证据规则
 
-Python 3.12 独立环境 `/tmp/newshub-rss-coordinator-venv`；测试指定独立合成DB路径。Agent各自隔离环境/DB/端口，主调度做跨模块验证，不重复专项。CI逐集成批次核对。T00真实引擎及T02隔离镜像已有证据；真实副本/浏览器/两库恢复尚无通过证据。
+Python 3.12 独立环境 `/tmp/newshub-rss-coordinator-venv`；测试指定独立合成DB路径。Agent各自隔离环境/DB/端口，主调度做跨模块验证，不重复专项。CI逐集成批次核对。T00真实引擎及T02隔离镜像已有证据；真实副本/浏览器尚无通过证据；两库恢复已有T03真实隔离0058证据，T26最终0059进行中。
 
 分支保护查询 GitHub API 返回403（账号/仓库计划限制），保护规则 UNKNOWN；仍执行仓库CI，不推断无要求。
 
@@ -49,3 +52,6 @@ Python 3.12 独立环境 `/tmp/newshub-rss-coordinator-venv`；测试指定独�
 - PR78在2e58353的前端/后端/release/image/隔离G1 smoke均通过（push与PR运行），不代表后续head。
 - 第二集成批backend：119 failed、1639 passed、13 skipped，162.23s，日志`/tmp/newshub-rss-b2-tests.log`。大部分是旧测试未显式创建publication/owner/token，T14相关60余项由任务作者处理，根修其它读取/旧ingestion夹具；也发现合法legacy空正文提前403和排队状态误隐藏，修产品而非放宽ACL。修后目录/OPML/旧读取组合129 passed（19.35s）；更广fixture组合初轮193 passed/15 failed，12项为测试helper机械拼写已修，另3项按正文主写/来源政策新合同明确测试。
 - OPML/发现UI36 passed、typecheck/lint通过；全前端/构建第二批运行中。真实生产副本仍未提供，仅阻塞真实演练/上线。
+
+- 第二批扩大回归：删除已移除中文外链抓取函数的旧测试引用后，2107 passed、19 failed、13 skipped，212.33s；日志`/tmp/newshub-rss-b2-final2-tests.log`。19项含旧fixture/行为断言、0059归档预期、Compose新增web身份，以及2个产品边界；逐项修复并验证，不用旧绿色CI冒充当前head。
+- 连接健康UI：14 passed（957ms），typecheck/lint/build通过；`/tmp/newshub-rss-health-ui.log`、`/tmp/newshub-rss-health-lint.log`、`/tmp/newshub-rss-health-build.log`。当前健康不联网，过期/错误身份heartbeat显示unknown。

@@ -18,7 +18,6 @@ from api.services.news_ingestion import ingest_item
 from api.services.full_content_status import enqueue_fetch, claim_fetch, has_full_content
 from api.services.full_content_worker import execute_one
 from api.services.article_fetcher import fetch_article_markdown, FetchError
-from api.services.llm_translator import fetch_and_verify_chinese_content
 from news_crawler.download_handlers import BudgetedHTTPDownloadHandler
 
 RETIRED = ('leiphone', 'meta_ai', 'reuters', 'jiqizhixin', 'sanliu_kr')
@@ -42,9 +41,6 @@ def test_retired_channel_blocks_transport_provider_and_reader_before_any_request
         fetch_article_markdown(url, providers=[provider])
     assert error.value.failures[0].error_code == 'unsupported'
     provider.fetch.assert_not_called()
-    with patch('api.services.article_fetcher.providers.TrustedNewsJinaProvider.fetch') as reader:
-        assert fetch_and_verify_chinese_content(url) == ''
-    reader.assert_not_called()
     assert ingest_item({'source_key': key}).receipt_outcome == 'policy_skip'
     from api.services.article_fetcher.providers import TrustedNewsJinaProvider
     with patch('api.services.article_fetcher.providers._open_url') as opened:

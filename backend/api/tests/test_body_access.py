@@ -1,4 +1,6 @@
 from api.tests.rss.legacy_fixtures import legacy_news, public_legacy
+from api.tests.rss.reader_fixtures import public_legacy_article
+from django.http import Http404
 from types import SimpleNamespace
 from unittest.mock import patch
 import pytest
@@ -16,9 +18,9 @@ def story(db):
     p = POLICIES['energy_storage_news']
     source = Source.objects.update_or_create(name=p.name, defaults={'url':'https://'+p.domains[0]})[0]
     category = Category.objects.create(name='Body access test', slug='body-access-test')
-    return legacy_news(title='Body access article', content='Public summary', source=source, category=category,
+    return public_legacy_article(legacy_news(title='Body access article', content='Public summary', source=source, category=category,
         url='https://'+p.domains[0]+'/body-access-story/', publish_time=timezone.now(), content_kind='article',
-        full_content='Existing real body', full_content_zh='Existing translated body', full_content_state='complete')
+        full_content='Existing real body', full_content_zh='Existing translated body', full_content_state='complete'))
 
 def data(story, user, cls=NewsDetailSerializer):
     return cls(story, context={'request':SimpleNamespace(user=user)}).data
@@ -34,6 +36,10 @@ def test_superuser_reads_existing_body(story):
 @pytest.mark.parametrize('kind',['anonymous','ordinary','staff','inactive'])
 def test_restricted_body_remains_hidden(story,kind):
     user=AnonymousUser() if kind=='anonymous' else User.objects.create(username=kind,is_staff=kind=='staff',is_superuser=kind=='inactive',is_active=kind!='inactive')
+    if kind == 'inactive':
+        with pytest.raises(Http404):
+            data(story, user)
+        return
     d=data(story,user)
     assert not d['body_access_granted'] and not d['has_full_content'] and not d['can_fetch_full_content']
     assert d['full_content']==d['full_content_zh']==''

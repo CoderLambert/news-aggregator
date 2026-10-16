@@ -275,7 +275,12 @@ def test_upgrade_preserves_all_old_columns_relationships_and_text(baseline):
         assert migrated.body_owner_source_id == source.pk and migrated.body_owner_binding_id is None
         assert migrated.body_owner_version == 1 and migrated.full_content_revision == 17
         assert migrated.full_content_completeness == 'unknown'
-        assert not LegacyTranslationSnapshot.objects.exists()  # T07 archives before replacement.
+        snapshots = LegacyTranslationSnapshot.objects.filter(news_id=news.pk)
+        assert set(snapshots.values_list('field', flat=True)) == {'title', 'content', 'full_content'}
+        body_snapshot = snapshots.get(field='full_content')
+        assert body_snapshot.source_text == body and body_snapshot.translated_text == '唯一兼容全文译文'
+        assert body_snapshot.origin == 'legacy'
+        assert LegacyTranslationSnapshot.objects.count() == 4  # 0059 binds existing compatibility bytes without changing old columns.
         publication = SourcePublication.objects.get(source_id=source.pk)
         assert (publication.publication, publication.owner, publication.display_name) == ('public', 'legacy', source.name)
         assert SourcePublication.objects.get(source_id=restricted.pk).reading_policy == 'rss_summary_only'
