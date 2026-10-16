@@ -17,7 +17,7 @@ from django.db import OperationalError, connection, transaction
 from django.db.models import F
 from django.utils import timezone
 
-from api.models import BodyCandidate, EngineEntryMap, FeedBinding, News, SourceFeedLink, SourcePublication
+from api.models import BodyCandidate, EngineEntryMap, News, SourceFeedLink, SourcePublication
 from api.rss.content import ConvertedContent, MAX_CONTENT_BYTES
 from api.rss.legacy_translation import archive_changed_translations, exact_hash
 
@@ -137,7 +137,9 @@ def fenced_article(token: WriteToken):
     """Yield fresh News after acquiring SQLite's writer reservation and all checks.
 
     T09/legacy callers can archive_changed_translations(news, replacements), then
-    update source strings and returned clearing fields here. Do not do network I/O
+    update source strings and returned clearing fields here with an explicit-field
+    QuerySet.update (do not save a stale whole News after a nested body commit).
+    Do not do network I/O
     or hand this object to another thread. No cursor is advanced by this helper.
     """
     if connection.vendor != 'sqlite':
@@ -243,7 +245,9 @@ def _commit_checked(news, token, candidate, *, accept_shortening=False):
         full_content_completeness=candidate.completeness, content_kind=candidate.content_kind,
         full_content_fetched_at=timezone.now(), full_content_fetch_status='success',
         full_content_fetch_error='', full_content_error_code='',
-        full_content_provenance=dict(owner='miniflux', **_identity_evidence(token), raw_hash=candidate.raw_hash,
+        full_content_provenance=dict(owner='miniflux', binding_id=str(token.body_owner_binding_id),
+            engine_instance_uuid=str(token.engine_instance_uuid), account_id=token.account_id,
+            engine_feed_id=token.engine_feed_id, engine_entry_id=token.engine_entry_id, raw_hash=candidate.raw_hash,
             canonical_hash=candidate.canonical_hash, conversion_version=candidate.conversion_version,
             source_id=token.source_id, source_epoch=token.source_epoch,
             body_owner_version=token.body_owner_version, source_policy_version=token.source_policy_version,
