@@ -54,7 +54,9 @@ preflight() {
     endpoint="$(docker context inspect "$(docker context show)" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)"
     [[ "$endpoint" == unix://* || "${DOCKER_HOST:-}" == unix://* ]] \
         || die "Refusing to mutate a non-Unix/remote Docker daemon"
-    prepare_paths
+    if [[ "$COMMAND" != doctor ]]; then
+        prepare_paths
+    fi
     compose config --quiet || die "Compose configuration invalid"
 }
 configured() {
