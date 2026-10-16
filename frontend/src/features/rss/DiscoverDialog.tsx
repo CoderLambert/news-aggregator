@@ -14,10 +14,10 @@ const terminal = new Set(['succeeded', 'failed', 'cancelled', 'manual_blocked'])
 
 // Free text searches the reviewed local directory; URLs use the engine or the
 // normal feed subscription path. No browser-side fetching of publisher pages.
-export const looksLikeFeedAddress = (value: string): boolean =>
+const looksLikeFeedAddress = (value: string): boolean =>
   /(?:\/(?:feed|rss|atom)(?:[/?#.]|$)|\.(?:xml|rss|atom)(?:[?#]|$)|[?&](?:format|output)=(?:rss|atom|xml)(?:[&#]|$))/i.test(value)
 
-export const looksLikeWebAddress = (value: string): boolean =>
+const looksLikeWebAddress = (value: string): boolean =>
   /^https?:\/\//i.test(value) || /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(?::\d+)?(?:[/?#]|$)/i.test(value)
 
 export default function DiscoverDialog({ viewer, groups, onClose, onDone }: { viewer: number; groups: ChannelGroup[]; onClose: () => void; onDone: () => void }) {
