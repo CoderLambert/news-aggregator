@@ -1,0 +1,36 @@
+name: Self-hosted runner smoke
+
+# Intentionally manual. This is the first job to dispatch after registering
+# the runner, before accepting full NewsHub CI in the PR.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runner-smoke:
+    runs-on: [self-hosted, linux, x64, newshub-ci]
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify toolchain and private Docker daemon
+        run: |
+          set -euo pipefail
+          python3 --version
+          node --version
+          npm --version
+          docker compose version
+          test "$DOCKER_HOST" = unix:///ci-docker/docker.sock
+          test -x "$CHROMIUM_EXECUTABLE"
+          test -w "$TMPDIR"
+          docker info >/dev/null
+          docker run --rm --network none \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/ci-src,readonly" \
+            alpine:3.22 test -f /ci-src/.github/workflows/ci.yml
+          docker run --rm --network none \
+            --mount "type=bind,source=$TMPDIR,target=/ci-tmp,readonly" \
+            alpine:3.22 test -d /ci-tmp
