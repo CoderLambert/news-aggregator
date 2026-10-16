@@ -9,7 +9,26 @@ permissions:
   contents: read
 
 jobs:
-  runner-smoke:
+  runner-smoke-frontend:
+    runs-on: [self-hosted, linux, x64, newshub-frontend]
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify frontend toolchain and strict Docker isolation
+        run: |
+          set -euo pipefail
+          node --version
+          npm --version
+          test "$(node -p 'process.versions.node.split(".")[0]')" = 22
+          test -z "${DOCKER_HOST:-}"
+          test ! -S /ci-docker/docker.sock
+          test -w "$TMPDIR"
+          test -f frontend/package.json
+
+  runner-smoke-backend:
     runs-on: [self-hosted, linux, x64, newshub-ci]
     timeout-minutes: 10
     steps:
