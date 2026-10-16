@@ -13,7 +13,9 @@ def _output(outcome, **extra):
 
 
 def test_crawl_all_runs_each_source_serially_and_retries_deferred(monkeypatch):
-    monkeypatch.setattr(crawl, 'SPIDERS', {'first': 'first', 'second': 'second'})
+    monkeypatch.setattr(crawl, 'runtime_registry', lambda: {
+        key: SimpleNamespace(maintenance='code') for key in ('first', 'second')
+    })
     calls = []
     responses = iter([
         SimpleNamespace(returncode=0, stdout=_output('deferred')),
@@ -34,7 +36,9 @@ def test_crawl_all_runs_each_source_serially_and_retries_deferred(monkeypatch):
 
 
 def test_crawl_all_fails_closed_when_a_source_has_no_success_terminal_state(monkeypatch):
-    monkeypatch.setattr(crawl, 'SPIDERS', {'broken': 'broken'})
+    monkeypatch.setattr(crawl, 'runtime_registry', lambda: {
+        'broken': SimpleNamespace(maintenance='code')
+    })
     monkeypatch.setattr(crawl.subprocess, 'run', lambda *args, **kwargs: SimpleNamespace(
         returncode=0, stdout=_output('blocked'),
     ))
