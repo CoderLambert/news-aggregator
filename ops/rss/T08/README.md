@@ -127,6 +127,10 @@ random new project. It creates a synthetic HTTPS publisher with a temporary test
 CA, only this experiment's private-enabled content engine, temporary PG/SQLite and
 a non-admin collector token. It starts no existing app or database and always
 removes its project resources/secrets. Test images/cache remain for review.
+The harness explicitly sets RSS_FULL_CONTENT_ENABLED=1 for its isolated positive
+extraction cases; production defaults to 0. This is not approval of publisher
+redirect/rewrite safety. See ops/rss/feed-policy for the later admission fix and
+synthetic negative redirect evidence.
 The runtime/adapter still accepts public HTTPS URLs; internal DNS/TLS mapping is
 only test infrastructure and is explicitly not production SSRF/gateway evidence.
 

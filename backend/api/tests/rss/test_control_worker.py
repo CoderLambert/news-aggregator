@@ -26,7 +26,8 @@ from api.rss.operations import (OperationError, cancel_operation, change_policy,
 pytestmark = pytest.mark.django_db(transaction=True)
 INSTANCE = 'be22a55a-11c1-4ae4-9038-c919ec75aa42'
 URL = 'https://publisher.example/Feed?tag=AI'
-CONFIG = EngineConfig(INSTANCE, 3, 'http://127.0.0.1:8080', 'synthetic-token', read_attempts=1)
+CONFIG = EngineConfig(INSTANCE, 3, 'http://127.0.0.1:8080', 'synthetic-token', read_attempts=1,
+    full_content_enabled=True)
 
 
 class FakeEngine:
@@ -93,7 +94,8 @@ class FakeEngine:
 
 
 @pytest.fixture
-def lab():
+def lab(settings):
+    settings.RSS_FULL_CONTENT_ENABLED = True  # Existing positive extraction/fence cases.
     remote = FakeEngine()
     worker = ControlWorker(CONFIG, adapter_factory=lambda: remote)
     yield worker, remote

@@ -16,6 +16,7 @@ from api.models import ChannelGroup, ChannelGroupMember, ChannelSubscription, So
 from api.rss.directory_models import FeedDirectoryEntry
 from api.rss.discovery import resolve_candidate_token
 from api.rss.http import RssConflict
+from api.rss.feed_policy import approved_feed_policy, assert_binding_policy
 from api.rss.models import FeedBinding, FeedOperation, SourceFeedLink, SourcePublication
 from api.rss.operations import (canonicalize_feed_url, cancel_operation, enqueue_operation,
                                 get_or_create_binding, reconcile_binding, sqlite_retry)
@@ -103,6 +104,7 @@ def subscribe(user, data, idempotency_key):
         if old.request_hash != request_hash or 'subscription' not in old.safe_input:
             raise RssConflict('幂等键已用于不同的请求。', code='idempotency_conflict')
         return 200, _subscription_result(user, old)
+    admission = approved_feed_policy(url)
     groups = list(ChannelGroup.objects.filter(user=user, pk__in=group_ids))
     if len(groups) != len(group_ids):
         raise Http404
@@ -111,7 +113,8 @@ def subscribe(user, data, idempotency_key):
                                          canonical_feed_url=url).first()
     if binding is None:
         binding = get_or_create_binding(instance, account, url,
-            desired_mode=getattr(settings, 'RSS_DEFAULT_FEED_MODE', 'feed'))
+            desired_mode=admission.desired_mode)
+    assert_binding_policy(binding)
     if binding.source_links.filter(source__publication__owner='legacy').exists():
         raise RssConflict('此来源正在迁移，请稍后订阅。', code='source_migration_required')
     link = binding.source_links.filter(association_policy={'version': 1, 'mode': 'all'}).select_related('source__publication').order_by('pk').first()
@@ -121,7 +124,7 @@ def subscribe(user, data, idempotency_key):
         source = Source.objects.create(name=f'{name[:60]} · {binding.pk}',
             url=f'https://{parsed.netloc}', country='', language='')
         SourcePublication.objects.create(source=source, publication='personal', owner='miniflux',
-                                         reading_policy='public_feed', display_name=name[:255])
+                                         reading_policy=admission.reading_policy, display_name=name[:255])
         link = SourceFeedLink.objects.create(source=source, binding=binding, enabled=True)
     else:
         source = link.source

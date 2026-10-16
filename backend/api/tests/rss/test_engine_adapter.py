@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 
 from api.rss.engine import EngineAdapter, EngineConfig, EngineError, MAX_ID, PolicyBinding
+from api.rss.feed_policy import required_entry_url_block_rules
 
 INSTANCE = "be22a55a-11c1-4ae4-9038-c919ec75aa42"
 SECRET = "never-print-api-secret"
@@ -20,6 +21,7 @@ SECRET = "never-print-api-secret"
 def feed(**kw):
     return dict(id=7, user_id=3, feed_url="https://publisher.example/feed", title="Feed",
                 crawler=False, disabled=False, blocklist_rules="", keeplist_rules="",
+                block_filter_entry_rules=required_entry_url_block_rules(),
                 username="private-user", password="private-pass", **kw)
 
 
@@ -73,7 +75,7 @@ def server():
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     config = EngineConfig(INSTANCE, 3, f"http://127.0.0.1:{httpd.server_port}", SECRET,
-                          read_timeout=.1, control_timeout=.1, read_attempts=1)
+                          read_timeout=.1, control_timeout=.1, read_attempts=1, full_content_enabled=True)
     yield routes, calls, config
     httpd.shutdown()
     httpd.server_close()
@@ -130,6 +132,7 @@ def test_wrong_row_account_or_identity(server):
 def test_create_ambiguous_result_reconciles_without_second_post(server):
     routes, calls, config = server
     routes["/v1/feeds"].extend([ok([]), (503, b"secret upstream details", {}), ok([feed()])])
+    routes["/v1/feeds/7"].append(ok(feed()))
     result = EngineAdapter(config).create_feed("https://publisher.example/feed")
     assert result.id == 7
     assert [c[0] for c in calls].count("POST") == 1
@@ -145,19 +148,22 @@ def test_create_unknown_remains_unknown_when_absent(server):
 def test_replay_does_not_create_again(server):
     routes, calls, config = server
     routes["/v1/feeds"].append(ok([feed()]))
+    routes["/v1/feeds/7"].append(ok(feed()))
     assert EngineAdapter(config).create_feed("https://publisher.example/feed").id == 7
     assert not any(c[0] == "POST" for c in calls)
 
 
 def test_policy_get_verification_and_local_version_receipt(server):
     routes, calls, config = server
-    updated = {**feed(), "crawler": True, "disabled": True}
+    rules = required_entry_url_block_rules(include_html=True) + '\n' + required_entry_url_block_rules()
+    updated = {**feed(), "crawler": True, "disabled": True, 'block_filter_entry_rules': rules}
     routes["/v1/feeds/7"].extend([ok(feed()), (503, b"unknown write", {}), ok(updated)])
     binding = PolicyBinding(INSTANCE, 3, 7, 9, "full_content", False)
     result = EngineAdapter(config).update_feed_policy(binding, 9)
     assert result.applied_policy_version == 9 and result.feed.disabled
     assert [c[0] for c in calls] == ["GET", "GET", "PUT", "GET"]
-    assert calls[2][2] == dict(crawler=True, disabled=True, blocklist_rules="", keeplist_rules="")
+    assert calls[2][2] == dict(crawler=True, disabled=True, blocklist_rules="", keeplist_rules="",
+        block_filter_entry_rules=rules)
 
 
 def test_policy_unconfirmed_and_stale(server):
@@ -273,6 +279,7 @@ def test_mutating_entrances_and_identity_are_bounded(server):
     routes["/v1/feeds/7"].extend([ok(feed()), ok(b"x" * 2048), ok({**feed(), "disabled": True})])
     assert adapter.set_enabled(7, disabled=True).disabled
     routes["/v1/feeds"].extend([ok([]), ok(b"x" * 2048), ok([feed()])])
+    routes["/v1/feeds/7"].append(ok(feed()))
     assert adapter.create_feed("https://publisher.example/feed").id == 7
     routes["/v1/entries/12"].extend([ok(entry()), ok(entry())])
     routes["/v1/entries/12/fetch-content"].append(ok(b"x" * 2048))
@@ -330,8 +337,69 @@ def test_create_socket_timeout_still_reconciles_without_reposting(server):
         return 201, {"feed_id": 7}, {}
 
     routes["/v1/feeds"].extend([ok([]), delayed_ack, ok([feed()])])
+    routes["/v1/feeds/7"].append(ok(feed()))
     assert EngineAdapter(config).create_feed("https://publisher.example/feed").id == 7
     assert [c[0] for c in calls].count("POST") == 1
+
+
+def test_gate_off_blocks_full_create_even_disabled_and_refetch_before_http(server):
+    routes, calls, config = server
+    adapter = EngineAdapter(replace(config, full_content_enabled=False))
+    for disabled in (False, True):
+        assert_error('full_content_disabled', lambda: adapter.create_feed(
+            'https://publisher.example/feed', desired_mode='full_content', disabled=disabled))
+    assert_error('full_content_disabled', lambda: adapter.refetch_entry(12))
+    assert_error('full_content_disabled', lambda: adapter.update_feed_policy(
+        PolicyBinding(INSTANCE, 3, 7, 1, 'full_content', True), 1))
+    assert not calls
+
+
+def test_gate_off_reads_current_crawler_before_refresh_or_reenable(server):
+    routes, calls, config = server
+    adapter = EngineAdapter(replace(config, full_content_enabled=False))
+    routes['/v1/feeds/7'].extend([ok({**feed(), 'crawler': True})] * 2)
+    assert_error('full_content_disabled', lambda: adapter.refresh_feed(7))
+    assert_error('full_content_disabled', lambda: adapter.set_enabled(7, disabled=False))
+    assert all(call[0] == 'GET' for call in calls)
+
+
+def test_gate_off_still_allows_disable_without_clearing_historical_mode(server):
+    routes, calls, config = server
+    adapter = EngineAdapter(replace(config, full_content_enabled=False))
+    expected = {**feed(), 'crawler': True, 'disabled': True}
+    routes['/v1/feeds/7'].extend([ok({**feed(), 'crawler': True}), ok(expected), ok(expected)])
+    assert adapter.set_enabled(7, disabled=True).disabled
+    assert calls[2][2] == {'disabled': True}
+
+
+def test_existing_feed_missing_required_rule_is_unknown_and_never_recreated(server):
+    routes, calls, config = server
+    routes['/v1/feeds'].append(ok([feed()]))
+    routes['/v1/feeds/7'].append(ok({**feed(), 'block_filter_entry_rules': ''}))
+    assert_error('policy_unconfirmed', lambda: EngineAdapter(config).create_feed(
+        'https://publisher.example/feed'), unknown=True)
+    assert not any(call[0] == 'POST' for call in calls)
+
+
+def test_created_feed_unproven_rule_never_reposts_after_read_only_reconcile(server):
+    routes, calls, config = server
+    missing = {**feed(), 'block_filter_entry_rules': ''}
+    routes['/v1/feeds'].extend([ok([]), (201, {'feed_id': 7}, {}), ok([missing])])
+    routes['/v1/feeds/7'].extend([ok(missing), ok(missing)])
+    assert_error('create_unknown', lambda: EngineAdapter(config).create_feed(
+        'https://publisher.example/feed'), unknown=True)
+    assert sum(call[0] == 'POST' for call in calls) == 1
+
+
+@pytest.mark.parametrize('value', ['', 'true', 'false', 'yes', '2', ' 1'])
+def test_full_content_environment_gate_is_strict(server, monkeypatch, tmp_path, value):
+    _, _, config = server
+    token = tmp_path / 'synthetic-token'
+    token.write_text(SECRET)
+    for name, setting in dict(RSS_ENGINE_INSTANCE_UUID=INSTANCE, RSS_ENGINE_ACCOUNT_ID='3',
+        RSS_ENGINE_BASE_URL=config.base_url, RSS_ENGINE_TOKEN_FILE=str(token), RSS_FULL_CONTENT_ENABLED=value).items():
+        monkeypatch.setenv(name, setting)
+    assert_error('invalid_config', EngineConfig.from_environment)
 
 
 def test_malformed_response_is_safe_failure_not_empty_page(server):

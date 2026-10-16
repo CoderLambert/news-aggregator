@@ -111,6 +111,9 @@ def refetch_fence(entry, source_id, actor_id):
             or binding.connection_state != 'ready' or binding.applied_policy_version != binding.policy_version
             or news.body_owner_binding_id != binding.id or news.url != entry.source_url):
         raise OperationError('refetch_not_allowed')
+    from api.rss.feed_policy import assert_article_fetch_allowed, assert_binding_policy
+    assert_binding_policy(binding)
+    assert_article_fetch_allowed(news.url)
     return {'source_id': source_id, 'source_epoch': publication.epoch,
             'source_policy_version': publication.policy_version,
             'body_owner_version': news.body_owner_version,
@@ -252,6 +255,10 @@ def change_policy(binding_id, *, expected_policy_version, desired_mode, actor=No
             if old.request_hash != fingerprint:
                 raise OperationError('idempotency_conflict')
             return old
+        from api.rss.feed_policy import assert_binding_policy
+        current = FeedBinding.objects.get(pk=binding_id)
+        # No privilege, including admin, overrides publisher/source restrictions.
+        assert_binding_policy(current, desired_mode=desired_mode)
         query = FeedBinding.objects.filter(pk=binding_id, policy_version=expected_policy_version)
         if not query.update(desired_mode=desired_mode, policy_version=F('policy_version') + 1,
                             connection_state='paused', updated_at=timezone.now()):

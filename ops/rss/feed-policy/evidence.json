@@ -1,0 +1,28 @@
+{
+  "direct_forbidden_entries_excluded": true,
+  "engine_image": "miniflux/miniflux:2.3.3@sha256:49d7b60987616387c306a8023087b31f2c9b7b21288b523026cb04058e8b6dbb",
+  "feed_only_abstract_preserved": true,
+  "gate_off_admin_full_refused": true,
+  "gate_off_feed_downgrade_allowed": true,
+  "gate_off_normal_default_feed": true,
+  "gate_off_sdk_full_create_refetch_refresh_refused": true,
+  "initial_extracted_body": true,
+  "normal_subscribe_initial_crawler": true,
+  "project": "newshub-rss-feed-policy-5fa638238d8c",
+  "publisher_counters": {
+    "publisher.example:8443/": 6,
+    "publisher.example:8443/allowed": 1,
+    "publisher.example:8443/favicon.ico": 3,
+    "publisher.example:8443/feed": 2,
+    "publisher.example:8443/feed-only": 1,
+    "publisher.example:8443/feed-redirect": 1,
+    "publisher.example:8443/redirect": 1,
+    "www.reuters.com:8443/redirect-target": 1
+  },
+  "redirect_gate": "BLOCKED: allowed URL redirected to denied synthetic publisher; no public DNS was used",
+  "refresh_requested": true,
+  "resources_removed": true,
+  "runtime_image_id": "sha256:d6ebb1e889d6bd4adea17d98ccd3c46c4c62900c8098bd26d9af474e66ed80b1",
+  "runtime_source": "current task backend mounted read-only; existing locked lightweight dependencies",
+  "scope": "synthetic publisher only; no public request or production state"
+}
