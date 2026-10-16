@@ -110,7 +110,13 @@ shell_failed = sys.argv[3] != "0"
 report["cleanup_status"] = "PASS" if clean else "FAIL"
 if shell_failed:
     failure = report.get("failure")
-    if not isinstance(failure, dict) or not failure:
+    # G1 intentionally reports human-readable acceptance failures, while G2
+    # emits structured/redacted objects. Keep either original diagnosis.
+    has_failure = (
+        (isinstance(failure, dict) and bool(failure))
+        or (report.get("stage") == "g1" and isinstance(failure, str) and bool(failure.strip()))
+    )
+    if not has_failure:
         report["failure"] = {
             "stage": report.get("stage", "shell"),
             "check": "shell_failure",
