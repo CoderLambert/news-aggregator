@@ -67,7 +67,12 @@ jobs:
           test "$DOCKER_HOST" = unix:///ci-docker/docker.sock
           test -x "$CHROMIUM_EXECUTABLE"
           test -w "$TMPDIR"
-          docker info >/dev/null
+          echo "CI job identity: $(id)"
+          stat -c 'DinD socket mode=%a owner-uid=%u group-gid=%g' /ci-docker/docker.sock
+          if ! docker info >/dev/null; then
+            echo 'Runner cannot access private DinD. Check Docker Socket group 121, dockerd --group, and non-root gosu runner permissions.' >&2
+            exit 1
+          fi
           docker compose version
           # Private DinD stores the Alpine probe image between CI runs. A
           # missing image must be fetched exactly once; DNS failures must
