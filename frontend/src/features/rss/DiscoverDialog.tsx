@@ -12,11 +12,20 @@ interface SubscriptionResult { operation_id: string; state: string; subscription
 type Selection = { feed_url: string } | { candidate_token: string } | { directory_entry_id: string }
 const terminal = new Set(['succeeded', 'failed', 'cancelled', 'manual_blocked'])
 
+// Free text searches the reviewed local directory; URLs use the engine or the
+// normal feed subscription path. No browser-side fetching of publisher pages.
+const looksLikeFeedAddress = (value: string): boolean =>
+  /(?:\/(?:feed|rss|atom)(?:[/?#.]|$)|\.(?:xml|rss|atom)(?:[?#]|$)|[?&](?:format|output)=(?:rss|atom|xml)(?:[&#]|$))/i.test(value)
+
+const looksLikeWebAddress = (value: string): boolean =>
+  /^https?:\/\//i.test(value) || /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(?::\d+)?(?:[/?#]|$)/i.test(value)
+
 export default function DiscoverDialog({ viewer, groups, onClose, onDone }: { viewer: number; groups: ChannelGroup[]; onClose: () => void; onDone: () => void }) {
   const client = useQueryClient()
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
   const [mode, setMode] = useState<'directory' | 'website' | 'feed'>('directory')
+  const [submittedInput, setSubmittedInput] = useState('')
   const [selection, setSelection] = useState<Selection | null>(null)
   const [groupIds, setGroupIds] = useState<number[]>([])
   const idempotency = useRef(crypto.randomUUID())
@@ -37,23 +46,38 @@ export default function DiscoverDialog({ viewer, groups, onClose, onDone }: { vi
     queryFn: ({ signal }) => workspaceRequest<Operation>(`/me/rss-operations/${subscribe.data!.operation_id}/`, { signal }),
     refetchInterval: result => result.state.data && terminal.has(result.state.data.state) ? false : 1500 })
   const busy = resolve.isPending || subscribe.isPending
-  const error = directory.error ?? resolve.error ?? discovery.error ?? subscribe.error ?? connection.error
+  const error = (mode === 'directory' ? directory.error : null) ?? resolve.error ?? discovery.error ?? subscribe.error ?? connection.error
   const discovering = !!resolve.data && !terminal.has(result?.state ?? 'pending')
   return <WorkspaceModal title="添加订阅" onClose={subscribe.data ? onDone : onClose} busy={busy}>
-    <p className="workspace-muted">搜索公开目录，发现网站订阅，或直接添加公开 RSS 地址。</p>
+    <p className="workspace-muted">输入关键词、网站或公开 RSS 地址，自动查找可订阅来源。无需选择接入方式。</p>
     {!subscribe.data && <>
-      <div className="workspace-tabs" role="group" aria-label="添加订阅方式">{([['directory', '搜索目录'], ['website', '发现网站'], ['feed', 'RSS 地址']] as const).map(([value, label]) => <button type="button" key={value} disabled={busy} aria-pressed={mode === value} onClick={() => { setMode(value); setSelection(null); resolve.reset(); setInput('') }}>{label}</button>)}</div>
       <form className="workspace-inline-form" onSubmit={event => {
-        event.preventDefault(); setSelection(null)
-        if (mode === 'directory') setQuery(input.trim())
-        else if (mode === 'website') resolve.mutate(input.trim())
-        else choose({ feed_url: input.trim() })
+        event.preventDefault()
+        const value = input.trim()
+        if (!value) return
+        setSubmittedInput(value)
+        setSelection(null)
+        if (!looksLikeWebAddress(value)) {
+          setMode('directory')
+          resolve.reset()
+          setQuery(value)
+        } else if (value.startsWith('https://') && looksLikeFeedAddress(value)) {
+          setMode('feed')
+          resolve.reset()
+          choose({ feed_url: value })
+        } else {
+          setMode('website')
+          resolve.mutate(value)
+        }
       }}>
-        <label className="workspace-grow">{mode === 'directory' ? '来源名称或关键词' : mode === 'website' ? '网站地址' : '公开 RSS 地址'}
-          <input type="text" required value={input} disabled={busy} placeholder={mode === 'directory' ? '例如：技术、科学' : 'https://example.com/feed'} onChange={event => { setInput(event.target.value); setSelection(null); resolve.reset(); subscribe.reset() }} />
-        </label><button className="workspace-button" disabled={busy || !input.trim()}>{mode === 'directory' ? '搜索' : mode === 'website' ? '发现订阅' : '选择地址'}</button>
+        <label className="workspace-grow">搜索订阅源、网站或 RSS 地址
+          <input type="text" required value={input} disabled={busy} placeholder="GitHub、react.dev 或 https://example.com/feed.xml" onChange={event => {
+            setInput(event.target.value); setSubmittedInput(''); setSelection(null); resolve.reset(); subscribe.reset()
+          }} />
+        </label><button className="workspace-button" disabled={busy || !input.trim()}>查找订阅</button>
       </form>
-      {mode === 'directory' && <section aria-label="目录搜索结果">
+      {mode === 'feed' && selection && <p className="workspace-caption">已识别为 RSS 地址。确认后由服务器校验公开 HTTPS 来源并交给 Miniflux 订阅，不会在浏览器抓取网页。</p>}
+      {mode === 'directory' && (submittedInput === input.trim()) && <section aria-label="目录搜索结果">
         {directory.isPending && <p role="status">正在读取目录…</p>}
         {directory.data?.results.length === 0 && <p role="status">没有匹配的来源。可以尝试网站地址或直接添加 RSS。</p>}
         {directory.data?.results.map(entry => <label className="workspace-resolved-choice" key={entry.id}>
@@ -64,7 +88,12 @@ export default function DiscoverDialog({ viewer, groups, onClose, onDone }: { vi
       </section>}
       {mode === 'website' && <section aria-label="网站发现结果">
         {discovering && <p role="status">后台正在发现订阅…可以关闭窗口后重新查询此地址。</p>}
-        {result?.state === 'succeeded' && !result.candidates?.length && <p role="status">未发现订阅。可以输入网站公布的 RSS 地址。</p>}
+        {result?.state === 'succeeded' && !result.candidates?.length && <>
+          <p role="status">未发现网站声明的订阅源。可以粘贴网站公布的 RSS 地址，或明确尝试将此地址作为 Feed 添加。</p>
+          <button type="button" className="workspace-button secondary" onClick={() => { setMode('feed'); choose({ feed_url: /^https?:\/\//i.test(input.trim()) ? input.trim() : 'https://' + input.trim() }) }}>
+            尝试直接添加此 Feed
+          </button>
+        </>}
         {result && ['failed', 'manual_blocked', 'cancelled'].includes(result.state) && <p role="alert">发现未完成，请稍后重试。{result.error_code ? `（${result.error_code}）` : ''}</p>}
         {result?.candidates?.map(candidate => <label className="workspace-resolved-choice" key={candidate.url}>
           <input type="radio" name="rss-selection" checked={!!selection && 'candidate_token' in selection && selection.candidate_token === candidate.candidate_token} onChange={() => choose({ candidate_token: candidate.candidate_token })} />
