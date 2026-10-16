@@ -205,6 +205,45 @@ CI_DIND_DNS_PRIMARY=1.1.1.1 CI_DIND_DNS_SECONDARY=9.9.9.9 bash ops/ci/manage.sh 
 
 在以上检查通过后，将 PR 从 Draft 改为 Ready for review 再次运行完整 CI。**不要**为了跳过 DNS 问题而删除 Docker 构建、浏览器烟测或其他验收步骤。
 
+## 9. 第二轮 CI：非 root Runner 的 Docker Socket 权限
+
+在 DinD 网络修复后，用户本机已通过以下检查：
+
+- `docker exec newshub-ci-docker-1 nslookup registry-1.docker.io`：解析成功（代理可能使用 198.18.0.0/15 Fake-IP）。
+- `docker exec newshub-ci-runner-1 docker pull alpine:3.22`：镜像下载成功。
+
+但是该 `docker exec` 默认以容器配置的 **root 用户**运行，与 GitHub Job 通过 `gosu runner` 启动的 **UID 1001 / GID 121** 不同。因此此命令不能证明正式 CI 的 Docker 权限。
+
+[第二轮 CI #38959085183](https://github.com/CoderLambert/news-aggregator/actions/runs/38959085183) 后端日志：
+
+~~~text
+permission denied while trying to connect to the docker API at unix:///ci-docker/docker.sock
+~~~
+
+原因：运行中的 DinD 尚未应用 Compose `$group` 转义修复，Daemon 可能以不匹配的 Socket 组创建 `docker.sock`。在仓库中新补齐的解决方案：
+
+1. Compose 命令使用 `--group="$group"`，使容器 Shell 收到 `--group="$group"`，并指向 GID 121 对应的组。
+2. Runner healthcheck 和安装等待检查以 `/usr/sbin/gosu runner docker info` 运行，避免 root 正常而 GitHub Job 无权限的假阳性。
+3. GitHub CI 预检查会记录实际 Job `id` 和 Socket 的数字 UID/GID/权限（不打印凭据），出错时给出准确诊断。
+
+**两个 Job 空闲后**，在 Omarchy 拉取当前分支并使用 `update` 重新创建 DinD：
+
+~~~bash
+git fetch origin
+git -c merge.autoStash=false merge --ff-only origin/feat/docker-self-hosted-actions-20261017
+bash ops/ci/manage.sh update
+bash ops/ci/manage.sh status
+
+# 核实 Unix Socket 权限以及实际非 root CI 用户访问：
+docker exec -u runner newshub-ci-runner-1 id
+docker exec -u runner newshub-ci-runner-1 ls -ln /ci-docker/docker.sock
+docker exec -u runner newshub-ci-runner-1 docker info --format '{{.ServerVersion}}'
+~~~
+
+最后一条以普通用户打印 Docker Engine 版本即证明授权成功；若仍 `permission denied`，不要执行 chmod 666，也不要把宿主 Docker Socket 挂进来。检查 DinD daemon 命令、Socket GID 与 Runner 的组，并提供日志定位。
+
+检查都通过后，再将 PR 标记为 Ready for review。完整后端 CI 仍需实际运行并通过才能合并。注意：2026-10-16 第二轮前端 Job 因后续推送触发的并发取消机制中断，**不能将取消当作通过**；之前第一轮前端完整通过的结果仍有效，但最终必须核查当前 HEAD。
+
 ## English quick reference
 
 Install **two repository-scoped Docker self-hosted Runners** on Omarchy without mounting the host Docker socket. Run bash ops/ci/manage.sh doctor and bash ops/ci/manage.sh install. Confirm **both** backend and frontend Runners are Online in GitHub runner settings, review concurrent PR checks, then merge. The separate privileged DinD daemon shares a CI-only workspace for the real NewsHub Docker/browser smoke test. Do not run untrusted pull requests or unrelated repositories on this persistent Runner. Deployment and GitHub CI verification are pending until this configuration is executed on the user host.
