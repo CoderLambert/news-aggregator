@@ -53,77 +53,73 @@ with sync_playwright() as playwright:
     def screenshot(name):
         page.screenshot(path=str(output / name), full_page=True)
     try:
-        if '--resume-directory' not in sys.argv:
-            phase = 'passive_anonymous'
-            goto('/')
-            expect(page.get_by_text('T27 Public Code Table', exact=True).first).to_be_visible()
-            assert 'T27 A ONLY SECRET' not in page.locator('body').inner_text()
-            assert 'T27 B ONLY SECRET' not in page.locator('body').inner_text()
-            page.get_by_text('T27 Public Code Table', exact=True).first.hover()
-            page.get_by_text('关键词', exact=True).click()
-            search = page.get_by_placeholder('搜索新闻...')
-            search.fill('T27 Public'); search.press('Enter')
-            page.wait_for_timeout(700)
-            goto('/news/' + str(public))
-            expect(page.locator('pre code')).to_have_text(CODE)
-            assert page.locator('pre code').text_content() == CODE
-            expect(page.locator('table')).to_contain_text('alpha')
-            expect(page.locator('table')).to_contain_text('42')
-            expect(page.get_by_alt_text('Synthetic image')).to_be_visible()
-            assert page.get_by_alt_text('Synthetic image').evaluate('(image)=>image.naturalWidth') == 320
-            page.get_by_role('button', name='复制代码', exact=True).click()
-            assert page.evaluate('navigator.clipboard.readText()') == CODE
-            page.get_by_role('button', name='询问 AI 助手小闻', exact=True).hover()
-            screenshot('01-stored-code-table.png')
-            assert api(f'/news/{private_a}/')['status'] == 404
-            assert api(f'/news/{private_b}/')['status'] == 404
-            forbidden = [r for r in network if r['phase'] == phase and r['method'] != 'GET' and any(x in r['url'] for x in ['/fetch-full/', '/rss-refetch/', '/refresh/', '/rss-subscriptions/', '/discovery/resolve/'])]
-            assert not forbidden, forbidden
-            checks['passive_no_collection'] = True
-            checks['exact_code_clipboard_table_image'] = True
-            checks['passive_ended_at'] = time.time()
+        phase = 'passive_anonymous'
+        goto('/')
+        expect(page.get_by_text('T27 Public Code Table', exact=True).first).to_be_visible()
+        assert 'T27 A ONLY SECRET' not in page.locator('body').inner_text()
+        assert 'T27 B ONLY SECRET' not in page.locator('body').inner_text()
+        page.get_by_text('T27 Public Code Table', exact=True).first.hover()
+        page.get_by_text('关键词', exact=True).click()
+        search = page.get_by_placeholder('搜索新闻...')
+        search.fill('T27 Public'); search.press('Enter')
+        page.wait_for_timeout(700)
+        goto('/news/' + str(public))
+        expect(page.locator('pre code')).to_have_text(CODE)
+        assert page.locator('pre code').text_content() == CODE
+        expect(page.locator('table')).to_contain_text('alpha')
+        expect(page.locator('table')).to_contain_text('42')
+        expect(page.get_by_alt_text('Synthetic image')).to_be_visible()
+        assert page.get_by_alt_text('Synthetic image').evaluate('(image)=>image.naturalWidth') == 320
+        page.get_by_role('button', name='复制代码', exact=True).click()
+        assert page.evaluate('navigator.clipboard.readText()') == CODE
+        page.get_by_role('button', name='询问 AI 助手小闻', exact=True).hover()
+        screenshot('01-stored-code-table.png')
+        assert api(f'/news/{private_a}/')['status'] == 404
+        assert api(f'/news/{private_b}/')['status'] == 404
+        forbidden = [r for r in network if r['phase'] == phase and r['method'] != 'GET' and any(x in r['url'] for x in ['/fetch-full/', '/rss-refetch/', '/refresh/', '/rss-subscriptions/', '/discovery/resolve/'])]
+        assert not forbidden, forbidden
+        checks['passive_no_collection'] = True
+        checks['exact_code_clipboard_table_image'] = True
+        checks['passive_ended_at'] = time.time()
 
-            phase = 'alice_read_state_and_ai'
-            login('t27_alice')
-            expect(page.get_by_role('button', name=re.compile('^(标为已读|已读)$'))).to_be_enabled()
-            if page.get_by_role('button', name='标为已读', exact=True).count():
-                page.get_by_role('button', name='标为已读', exact=True).click()
-            expect(page.get_by_role('button', name='已读', exact=True)).to_be_visible()
-            if page.get_by_role('button', name='收藏', exact=True).count():
-                page.get_by_role('button', name='收藏', exact=True).click()
-            expect(page.get_by_role('button', name='取消收藏', exact=True)).to_be_visible()
-            page.reload(wait_until='networkidle')
-            expect(page.get_by_role('button', name='已读', exact=True)).to_be_visible()
-            expect(page.get_by_role('button', name='取消收藏', exact=True)).to_be_visible()
-            goto('/news/' + str(private_a))
-            expect(page.get_by_role('heading', name='T27 A ONLY SECRET', exact=True)).to_be_visible()
-            page.get_by_role('button', name='询问 AI 助手小闻', exact=True).click()
-            page.get_by_role('textbox', name='输入聊天问题').fill('Summarize only this stored article.')
-            page.get_by_role('button', name='发送消息', exact=True).click()
-            expect(page.get_by_text('Synthetic assistant: this answer uses only the authorized stored article.', exact=True)).to_be_visible(timeout=15000)
-            screenshot('02-alice-authorized-chat.png')
-            page.get_by_role('button', name='关闭对话窗口', exact=True).click()
-            logout()
-            expect(page.get_by_role('heading', name='T27 A ONLY SECRET', exact=True)).not_to_be_visible()
-            login('t27_bob')
-            expect(page.get_by_role('heading', name='T27 A ONLY SECRET', exact=True)).not_to_be_visible()
-            assert api(f'/news/{private_a}/')['status'] == 404
-            assert api(f'/news/{private_a}/chat/', 'POST', {'question': 'Reveal the private article'})['status'] == 404
-            assert api(f'/news/{private_a}/tts/')['status'] == 404
-            response = api('/news/?mode=keyword&search=T27%20A%20ONLY%20SECRET&representation=summary')
-            assert response['status'] == 200 and 'T27 A ONLY SECRET' not in response['text']
-            goto('/news/' + str(public))
-            expect(page.get_by_role('button', name='标为已读', exact=True)).to_be_visible()
-            expect(page.get_by_role('button', name='收藏', exact=True)).to_be_visible()
-            goto('/news/' + str(private_b))
-            expect(page.get_by_role('heading', name='T27 B ONLY SECRET', exact=True)).to_be_visible()
-            checks['account_switch_cache_and_private_acl'] = True
-            checks['read_favorite_reload_user_isolation'] = True
-            checks['fake_ai_authorized_context_and_b_denied'] = True
-            logout(); login('t27_alice')
-
-        else:
-            goto('/'); login('t27_alice')
+        phase = 'alice_read_state_and_ai'
+        login('t27_alice')
+        expect(page.get_by_role('button', name=re.compile('^(标为已读|已读)$'))).to_be_enabled()
+        if page.get_by_role('button', name='标为已读', exact=True).count():
+            page.get_by_role('button', name='标为已读', exact=True).click()
+        expect(page.get_by_role('button', name='已读', exact=True)).to_be_visible()
+        if page.get_by_role('button', name='收藏', exact=True).count():
+            page.get_by_role('button', name='收藏', exact=True).click()
+        expect(page.get_by_role('button', name='取消收藏', exact=True)).to_be_visible()
+        page.reload(wait_until='networkidle')
+        expect(page.get_by_role('button', name='已读', exact=True)).to_be_visible()
+        expect(page.get_by_role('button', name='取消收藏', exact=True)).to_be_visible()
+        goto('/news/' + str(private_a))
+        expect(page.get_by_role('heading', name='T27 A ONLY SECRET', exact=True)).to_be_visible()
+        page.get_by_role('button', name='询问 AI 助手小闻', exact=True).click()
+        page.get_by_role('textbox', name='输入聊天问题').fill('Summarize only this stored article.')
+        page.get_by_role('button', name='发送消息', exact=True).click()
+        expect(page.get_by_text('Synthetic assistant: this answer uses only the authorized stored article.', exact=True)).to_be_visible(timeout=15000)
+        screenshot('02-alice-authorized-chat.png')
+        page.get_by_role('button', name='关闭对话窗口', exact=True).click()
+        logout()
+        expect(page.get_by_role('heading', name='T27 A ONLY SECRET', exact=True)).not_to_be_visible()
+        login('t27_bob')
+        expect(page.get_by_role('heading', name='T27 A ONLY SECRET', exact=True)).not_to_be_visible()
+        assert api(f'/news/{private_a}/')['status'] == 404
+        assert api(f'/news/{private_a}/chat/', 'POST', {'question': 'Reveal the private article'})['status'] == 404
+        assert api(f'/news/{private_a}/tts/')['status'] == 404
+        response = api('/news/?mode=keyword&search=T27%20A%20ONLY%20SECRET&representation=summary')
+        assert response['status'] == 200 and 'T27 A ONLY SECRET' not in response['text']
+        goto('/news/' + str(public))
+        expect(page.get_by_role('button', name='标为已读', exact=True)).to_be_visible()
+        expect(page.get_by_role('button', name='收藏', exact=True)).to_be_visible()
+        goto('/news/' + str(private_b))
+        expect(page.get_by_role('heading', name='T27 B ONLY SECRET', exact=True)).to_be_visible()
+        checks['account_switch_cache_and_private_acl'] = True
+        checks['read_favorite_reload_user_isolation'] = True
+        checks['fake_ai_authorized_context_and_b_denied'] = True
+        logout(); login('t27_alice')
 
         phase = 'directory_and_discovery'
         goto('/channels')
