@@ -7,6 +7,8 @@ COMPOSE_FILE="$PROJECT_ROOT/compose.prod.yaml"
 WORKSPACE_COMPOSE_FILE="$PROJECT_ROOT/compose.workspace.prod.yaml"
 STOP_SERVICES=(full-content crawler indexer app)
 TARGET_WORKERS=(crawler indexer)
+WORKER_SERVICES_OVERRIDE=""
+WORKER_SERVICES_EXPLICIT=0
 EXECUTE=0
 ENV_FILE=""
 PROJECT=""
@@ -26,12 +28,14 @@ usage() {
 Usage: rollback.sh [--execute] --env-file ABSOLUTE-FILE --project NAME \
     --sha 40-HEX-SHA --image IMAGE --root ABSOLUTE-STATIC-ROOT \
     --manifest TARGET-OLD-MANIFEST --current-manifest CURRENT-MANIFEST \
-    --db-volume PROJECT_db-data
+    --db-volume PROJECT_db-data [--worker-services COMMA-SEPARATED-SUBSET]
 
 Without --execute this validates local release/static inputs and prints a plan.
 Execution stops only the selected project's app/workers, requires an exact database
 migration-set match for the target manifest, starts and health-checks that release,
 then atomically points static current at the existing target release.
+--worker-services selects only supported target workers; an empty value starts
+only app. RSS recovery uses this to keep legacy collectors stopped.
 EOF
 }
 
@@ -76,6 +80,7 @@ trap 'exit 143' TERM
 while (($#)); do
     case "$1" in
         --execute) EXECUTE=1; shift ;;
+        --worker-services) (($# >= 2)) || fail '--worker-services requires a value (possibly empty).'; WORKER_SERVICES_OVERRIDE=$2; WORKER_SERVICES_EXPLICIT=1; shift 2 ;;
         --env-file) (($# >= 2)) || fail '--env-file requires a value.'; ENV_FILE=$2; shift 2 ;;
         --project) (($# >= 2)) || fail '--project requires a value.'; PROJECT=$2; shift 2 ;;
         --sha) (($# >= 2)) || fail '--sha requires a value.'; SHA=$2; shift 2 ;;
@@ -112,10 +117,29 @@ python3 "$SCRIPT_DIR/release_manifest.py" validate --manifest "$CURRENT_MANIFEST
 target_workers_text="$(python3 "$SCRIPT_DIR/release_manifest.py" worker-services --manifest "$MANIFEST")" \
     || fail 'could not identify target worker capabilities.'
 mapfile -t TARGET_WORKERS <<<"$target_workers_text"
+TARGET_WORKER_CAPABILITIES=("${TARGET_WORKERS[@]}")
+if ((WORKER_SERVICES_EXPLICIT)); then
+    selected_workers=()
+    if [[ -n "$WORKER_SERVICES_OVERRIDE" ]]; then
+        [[ "$WORKER_SERVICES_OVERRIDE" != ,* && "$WORKER_SERVICES_OVERRIDE" != *, && "$WORKER_SERVICES_OVERRIDE" != *,,* ]] \
+            || fail '--worker-services contains an empty service.'
+        IFS=, read -r -a selected_workers <<<"$WORKER_SERVICES_OVERRIDE"
+        declare -A selected_seen=()
+        for service in "${selected_workers[@]}"; do
+            [[ "$service" =~ ^(crawler|indexer|full-content|channel-worker)$ ]] || fail '--worker-services contains an invalid worker.'
+            [[ -z "${selected_seen[$service]:-}" ]] || fail '--worker-services contains a duplicate.'
+            selected_seen[$service]=1
+            supported=0
+            for available in "${TARGET_WORKERS[@]}"; do [[ "$service" == "$available" ]] && supported=1; done
+            ((supported)) || fail '--worker-services includes an unsupported target worker.'
+        done
+    fi
+    TARGET_WORKERS=("${selected_workers[@]}")
+fi
 current_workers_text="$(python3 "$SCRIPT_DIR/release_manifest.py" worker-services --manifest "$CURRENT_MANIFEST")" \
     || fail 'could not identify current worker capabilities.'
 USE_WORKSPACE_OVERLAY=0
-for service in "${TARGET_WORKERS[@]}"; do
+for service in "${TARGET_WORKER_CAPABILITIES[@]}"; do
     [[ "$service" == channel-worker ]] && USE_WORKSPACE_OVERLAY=1
 done
 while IFS= read -r service; do
@@ -285,8 +309,10 @@ assert_target_service_image() {
 }
 wait_healthy app && assert_target_service_image app \
     || fail 'target app did not pass its readiness health check; project remains stopped.'
-compose_call up --no-deps --detach "${TARGET_WORKERS[@]}" \
-    || fail 'target workers failed to start; project remains stopped.'
+if ((${#TARGET_WORKERS[@]})); then
+    compose_call up --no-deps --detach "${TARGET_WORKERS[@]}" \
+        || fail 'target workers failed to start; project remains stopped.'
+fi
 for service in "${TARGET_WORKERS[@]}"; do
     wait_healthy "$service" && assert_target_service_image "$service" \
         || fail "target $service worker did not pass its health check; project remains stopped."
