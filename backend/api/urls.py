@@ -12,8 +12,13 @@ from . import article_fetch_views
 from .rss.reading import NewsReadStateView
 from .rss.discovery import ResolveFeedView
 from .rss import subscription_views as rss_views
+from .rss import opml_views
 
 urlpatterns = [
+    path('me/rss-imports/preview/', opml_views.OpmlPreviewView.as_view(), name='rss-opml-preview'),
+    path('me/rss-imports/confirm/', opml_views.OpmlConfirmView.as_view(), name='rss-opml-confirm'),
+    path('me/rss-imports/<uuid:pk>/', opml_views.OpmlBatchView.as_view(), name='rss-opml-batch'),
+    path('me/rss-subscriptions/export/', opml_views.OpmlExportView.as_view(), name='rss-opml-export'),
     path('me/rss-subscriptions/', rss_views.SubscriptionsView.as_view(), name='rss-subscriptions'),
     path('me/rss-subscriptions/<int:pk>/', rss_views.SubscriptionDetailView.as_view(), name='rss-subscription-detail'),
     path('me/rss-operations/<uuid:pk>/', rss_views.OperationView.as_view(), name='rss-operation'),

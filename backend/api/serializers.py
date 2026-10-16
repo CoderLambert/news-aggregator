@@ -78,7 +78,26 @@ class ChannelNewsSerializer(serializers.ModelSerializer):
         from api.services.body_access import can_view_article_body
         return can_view_article_body(getattr(self.context.get("request"), "user", None))
 
+    can_rss_refetch = serializers.SerializerMethodField()
+
+    def get_can_rss_refetch(self, obj):
+        from api.rss.access import authorized_sources, ALL_ENTRIES
+        from api.rss.models import EngineEntryMap, SourceFeedLink
+        from django.db.models import F
+        user = getattr(self.context.get('request'), 'user', None)
+        if not user or not user.is_authenticated or not user.is_active or not obj.body_owner_binding_id:
+            return False
+        return (EngineEntryMap.objects.filter(news_id=obj.pk, binding_id=obj.body_owner_binding_id,
+                    disposition='linked', source_url=obj.url).exists()
+            and SourceFeedLink.objects.filter(binding_id=obj.body_owner_binding_id, enabled=True,
+                association_policy=ALL_ENTRIES, source__in=authorized_sources(user, body=True),
+                source__publication__owner='miniflux', binding__desired_mode='full_content',
+                binding__desired_enabled=True, binding__connection_state='ready',
+                binding__applied_policy_version=F('binding__policy_version')).exists())
+
     def get_can_fetch_full_content(self, obj):
+        if obj.body_owner_binding_id:
+            return self.get_can_rss_refetch(obj)
         from api.rss.access import authorized_sources
         from api.services.full_content_status import fetch_eligibility
         user = getattr(self.context.get('request'), 'user', None)
@@ -292,7 +311,7 @@ class NewsDetailSerializer(ChannelNewsSerializer):
             'full_content_next_attempt_at', 'full_content_priority', 'full_content_error_code',
         ]
         fields = [
-            'source_region', 'channel_ids', 'channel_names', 'is_medical', 'reading_policy', 'body_access_granted', 'can_fetch_full_content', 'publish_time_inferred',
+            'source_region', 'channel_ids', 'channel_names', 'is_medical', 'reading_policy', 'body_access_granted', 'can_fetch_full_content', 'can_rss_refetch', 'publish_time_inferred',
             'full_content_completeness', 'content_completeness', 'has_readable_content', 'body_owner',
             'id', 'title', 'content', 'title_zh', 'content_zh', 'author', 'publish_time',
             'source', 'source_name', 'source_type', 'source_url', 'source_language',
