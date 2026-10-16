@@ -13,7 +13,11 @@ def region_filter(queryset, region):
     from api.models import NewsSourceItem
     keys = [p.key for p in POLICIES.values() if p.region == region]
     members = NewsSourceItem.objects.filter(source_key__in=keys).values('news_id')
-    return queryset.filter(Q(source__region=region) | Q(pk__in=members))
+    from api.models import EngineEntryMap
+    engine_members = EngineEntryMap.objects.filter(disposition='linked',
+        binding__source_links__association_policy={'version': 1, 'mode': 'all'},
+        binding__source_links__source__region=region).values('news_id')
+    return queryset.filter(Q(source__region=region) | Q(pk__in=members) | Q(pk__in=engine_members))
 
 
 def news_policies(news):
@@ -55,7 +59,13 @@ def category_filter(queryset, category_ids):
     names = Category.objects.filter(pk__in=category_ids).values_list('name', flat=True)
     keys = [p.key for p in POLICIES.values() if p.default_category in names]
     members = NewsSourceItem.objects.filter(source_key__in=keys).values('news_id')
-    return queryset.filter(Q(category_id__in=category_ids) | Q(pk__in=members))
+    from api.models import EngineEntryMap
+    engine_members = EngineEntryMap.objects.filter(
+        Q(binding__source_links__source__crawler_config__category_id__in=category_ids) |
+        Q(binding__source_links__source__name__in=[p.name for p in POLICIES.values() if p.key in keys]),
+        disposition='linked',
+        binding__source_links__association_policy={'version': 1, 'mode': 'all'}).values('news_id')
+    return queryset.filter(Q(category_id__in=category_ids) | Q(pk__in=members) | Q(pk__in=engine_members))
 
 
 
