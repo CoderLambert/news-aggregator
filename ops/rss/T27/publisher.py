@@ -28,7 +28,7 @@ class Handler(BaseHTTPRequestHandler):
             body = f'<rss version="2.0"><channel><title>{title}</title><link>{base}</link><description>Synthetic</description><item><title>{title}</title><guid>t27-{name}</guid><link>{base}/article/{name}</link><pubDate>Fri, 16 Oct 2026 00:00:00 GMT</pubDate><description><![CDATA[{html}]]></description></item></channel></rss>'
             kind = 'application/rss+xml'
         elif path.startswith('/article/'):
-            body = '<html><head><title>T27 canonical article</title></head><body><article>' + BODY + '<p>' + ('Expanded synthetic content. ' * 80) + '</p></article></body></html>'
+            body = '<html><head><title>T27 canonical article</title></head><body><article>' + BODY + '<h2>Expanded section</h2><p>' + ('Expanded synthetic content. ' * 80) + '</p><h2>Closing section</h2><p>End of synthetic article.</p></article></body></html>'
             kind = 'text/html'
         elif path in {'/', '/zero', '/one', '/many'}:
             count = 0 if zero else {'/one': 1, '/many': 3}.get(path, 0)

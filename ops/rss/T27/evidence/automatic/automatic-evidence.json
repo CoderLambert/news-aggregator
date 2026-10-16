@@ -1,0 +1,39 @@
+{
+  "tested_sha": "294c7b13e42bae7b3418354a5560154981735ab3",
+  "project": "newshub-rss-t27-eec566b89bb8",
+  "status": "passed",
+  "actor": "non_admin_bob",
+  "default_mode": "full_content",
+  "gate_enabled": true,
+  "no_explicit_policy_or_refetch": true,
+  "article_requests_before_first_news_read": 1,
+  "article_id": 5,
+  "private_subscription": true,
+  "expanded_body_visible": true,
+  "theme_code_layout": {
+    "dark": {
+      "width": 266.890625,
+      "height": 129.171875,
+      "color": "rgb(225, 228, 232)",
+      "visible": true,
+      "no_page_overflow": true
+    },
+    "light": {
+      "width": 266.890625,
+      "height": 129.171875,
+      "color": "rgb(36, 41, 46)",
+      "visible": true,
+      "no_page_overflow": true
+    }
+  },
+  "theme_code_exact": true,
+  "toc_navigation": {
+    "heading": "Closing section",
+    "before_y": 1631.40625,
+    "after_y": 957.40625,
+    "passed": true
+  },
+  "subscribe_to_connected_seconds": 4.013,
+  "subscribe_to_visible_seconds": 29.944,
+  "page_errors": []
+}
