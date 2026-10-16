@@ -26,6 +26,13 @@ services:
     image: docker:29-dind
     privileged: true
     restart: unless-stopped
+    # Omarchy's embedded Docker DNS (127.0.0.11) could not resolve
+    # registry-1.docker.io during the first real CI run. Explicit upstream
+    # resolvers are scoped to DinD only, not the host or unrelated services.
+    # Override with CI_DIND_DNS_PRIMARY/SECONDARY when public DNS is blocked.
+    dns:
+      - ${CI_DIND_DNS_PRIMARY:-1.1.1.1}
+      - ${CI_DIND_DNS_SECONDARY:-8.8.8.8}
     # Privileged DinD has no host Docker socket and no published TCP ports.
     # It is not a VM security boundary; only reviewed source may run here.
     entrypoint: ["/bin/sh", "-ec"]
@@ -36,7 +43,10 @@ services:
           addgroup -g 121 ci-runner
           group=ci-runner
         fi
-        exec dockerd --host=unix:///ci-docker/docker.sock --group="$$group" --storage-driver=overlay2
+        exec dockerd --host=unix:///ci-docker/docker.sock --group="$group" \
+          --dns=${CI_DIND_DNS_PRIMARY:-1.1.1.1} \
+          --dns=${CI_DIND_DNS_SECONDARY:-8.8.8.8} \
+          --storage-driver=overlay2
     depends_on:
       volume-init:
         condition: service_completed_successfully
