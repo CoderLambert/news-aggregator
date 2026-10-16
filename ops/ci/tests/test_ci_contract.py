@@ -78,6 +78,14 @@ class SelfHostedCIContract(unittest.TestCase):
         svc = cfg["services"]
         self.assertTrue(svc["docker"]["privileged"])
         self.assertNotIn("ports", svc["docker"])
+        # Overriding image ENTRYPOINT in Compose suppresses its default CMD.
+        # Without these explicit arguments upstream gosu prints its usage and
+        # runner restarts forever even when registration files exist.
+        for runner_name in ("runner", "runner-frontend"):
+            self.assertEqual(
+                svc[runner_name]["command"],
+                ["./bin/Runner.Listener", "run", "--startuptype", "service"],
+            )
         self.assertNotIn("ports", svc["runner"])
         self.assertNotIn("ports", svc["runner-frontend"])
         self.assertNotIn("privileged", svc["runner"])
