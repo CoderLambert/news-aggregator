@@ -1,27 +1,29 @@
 # T06：专项验收
 
-状态：NOT_RUN。以下为待交付测试，文件/命令存在与通过结果均不得预先声明。
+状态：PASS（30 项纯函数测试）；集成/CI/浏览器验收未运行。实现与具体风险见 [report.md](report.md)。
 
-- T06-A1：脚本/event/危险 scheme/内部媒体拒绝。预期按对应合同断言成功及失败边界。
-- T06-A2：标题表格列表引用代码保真。预期按对应合同断言成功及失败边界。
-- T06-A3：单条超限明确拒收。预期按对应合同断言成功及失败边界。
-- T06-A4：同输入/版本确定 hash 且不改历史正文。预期按对应合同断言成功及失败边界。
+- T06-A1：脚本/event/style/嵌入文档清理；危险 scheme、内部媒体与凭据 URL 拒绝；相对 URL、HTTPS 图片和 Markdown 注入边界。
+- T06-A2：标题、表格、嵌套列表、引用及代码字符/空格/tab/空行/反引号围栏保真。
+- T06-A3：HTML/Markdown 各默认 2MiB；UTF-8 字节边界和转义膨胀明确抛 `ConversionError`，不截断。
+- T06-A4：同输入/版本确定 raw/canonical hash、LF；输入字符串不变且返回结果冻结。历史正文写库/保护由 T07 测试。
 
 ## 执行与证据
 
+独立 Python 3.12.14 环境解析安装了以下版本。下列前两条可复现环境，后两条为实测验证命令：
+
 ```bash
-# PLANNED：测试文件与产品尚未实现。
-test -f backend/api/tests/rss/test_content_conversion.py
-RUN_MAIN=true PYTHONPATH=backend:crawler \
-  backend/venv/bin/python -m pytest -q backend/api/tests/rss/test_content_conversion.py
+uv venv --python 3.12 /tmp/newshub-rss-T06-venv
+uv pip install --python /tmp/newshub-rss-T06-venv/bin/python \
+  nh3==0.3.7 markdownify==1.2.3 beautifulsoup4==4.15.0 pytest==9.1.1
+PYTHONPATH=backend /tmp/newshub-rss-T06-venv/bin/python -m pytest \
+  -c /dev/null -p no:cacheprovider -q backend/api/tests/rss/test_content_conversion.py
+git diff --check
 ```
 
-纯函数专项即可验收；无需生产授权、引擎、重启/租约/跨用户等通用反例。浏览器渲染在 T13/T27 验证
+专项及 diff 检查退出码 0，30 passed。无需 Django 配置/插件/数据库；`-c /dev/null` 避免仓库级 Django 启动。依赖安装使用网络，转换函数和专项用例不访问网络。没有修改主工作区 venv 或使用用户数据库。
 
-Python/Node 版本沿现有 CI（Python 3.12、Node 22），依赖由所属任务锁定。涉及数据库用临时合成库；live 测试检查明确隔离 allowlist，不连接活动工作区/生产库。前端改动补 typecheck/lint/相关组件测试；数据库改动补迁移/契约测试。实际引擎、浏览器、恢复和运行证据只在本任务承担该风险时要求，见 [验收矩阵](../../ACCEPTANCE-MATRIX.md)。
-
-任务专项证明模块行为，批次验证组合；同版本/配置公共证据可复用。环境缺失写明具体门禁 BLOCKED，不伪造 PASS，也不把无关模块开发冻结。测试失败先修受影响路径，必要时重跑关联集成。
+纯函数专项即可验证本任务；浏览器渲染交由 T13/T27，候选 CAS/历史正文交由 T07。公共域名 DNS/可达性由部署/渲染侧保证，本模块只做词法地址检查，不声称网络认证。真实引擎、上线与完整回滚证据未运行。
 
 ## 完成条件
 
-记录命令/退出码、版本/环境及实际案例结果；通过相关 PR 必需检查和实现评审。可在生产门禁未开始时完成独立模块，但本任务明确承担的真实运行证据缺失则不能 DONE。没有统一的“所有任务必须独立 Agent 审核”要求；关键身份/权限/迁移/恢复变更须独立复核。
+专项已通过，等待实现评审、集成及 PR 必需检查。任务模块实现不等于产品集成或生产放行。
