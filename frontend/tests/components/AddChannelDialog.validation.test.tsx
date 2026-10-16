@@ -40,7 +40,7 @@ it('shows safe address validation and preserves the URL for correction', async (
   fireEvent.change(input, { target: { value: 'http://localhost' } })
   fireEvent.click(screen.getByRole('button', { name: '查找订阅' }))
   expect(await screen.findByRole('alert')).toHaveTextContent('只接受不含凭据的公开 HTTPS 域名地址。')
-  expect(input).toHaveValue('http://localhost/rss')
+  expect(input).toHaveValue('http://localhost')
   expect(screen.getByRole('button', { name: '确认订阅' })).toBeDisabled()
   fireEvent.change(input, { target: { value: 'https://example.org' } })
   expect(screen.queryByRole('alert')).toBeNull()
