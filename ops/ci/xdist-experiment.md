@@ -9,8 +9,12 @@ The current benchmark tests a fail-closed hybrid:
   their migration and database fixture behavior.
 - The remaining files execute on `-n 2 --dist=loadfile`, using normal
   per-worker database isolation. Both parts run three times.
-- Each repetition checks the exact combined count: **2424 collected,
-  16 explicitly skipped**; failures are never reclassified as skipped.
+- Each repetition checks the authoritative pytest terminal totals:
+  **2408 passed / 16 explicitly skipped** across serial and parallel roots.
+  JUnit XML is independently inspected for failures/errors. We avoid counting
+  JUnit test-suite summary attributes that disagreed with pytest's actual
+  terminal outcomes during the first hybrid experiment.
+- Failures are never reclassified as skipped; normal CI still runs serially.
 - Tooling versions are frozen (`pytest-xdist==3.8.0`,
   `execnet==2.1.1`) and installed into a separate private cache, not the
   backend venv or production dependencies.
