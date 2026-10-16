@@ -34,6 +34,17 @@ class RssAPIView(APIView):
                 raise ValidationError('请求内容须为 JSON 对象。')
 
     def handle_exception(self, exc):
+        from api.rss.operations import OperationError
+        if isinstance(exc, OperationError):
+            if exc.code == 'not_found':
+                from rest_framework.exceptions import NotFound
+                exc = NotFound()
+            elif exc.code in {'refetch_not_allowed', 'invalid_actor'}:
+                exc = PermissionDenied('当前策略不允许此操作。', code=exc.code)
+            elif exc.code in {'idempotency_conflict', 'policy_conflict', 'stale_policy'}:
+                exc = RssConflict(code=exc.code)
+            else:
+                exc = ValidationError('RSS 请求无效。', code=exc.code)
         response = super().handle_exception(exc)
         if isinstance(exc, NotAuthenticated):
             response.status_code = 401

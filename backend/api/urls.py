@@ -11,8 +11,15 @@ from . import provider_credential_views
 from . import article_fetch_views
 from .rss.reading import NewsReadStateView
 from .rss.discovery import ResolveFeedView
+from .rss import subscription_views as rss_views
 
 urlpatterns = [
+    path('me/rss-subscriptions/', rss_views.SubscriptionsView.as_view(), name='rss-subscriptions'),
+    path('me/rss-subscriptions/<int:pk>/', rss_views.SubscriptionDetailView.as_view(), name='rss-subscription-detail'),
+    path('me/rss-operations/<uuid:pk>/', rss_views.OperationView.as_view(), name='rss-operation'),
+    path('rss/feeds/<uuid:pk>/refresh/', rss_views.RefreshFeedView.as_view(), name='rss-feed-refresh'),
+    path('news/<int:pk>/rss-refetch/', rss_views.RefetchArticleView.as_view(), name='rss-refetch'),
+    path('admin/rss/feeds/<uuid:pk>/policy/', rss_views.FeedPolicyView.as_view(), name='rss-feed-policy'),
     path('rss/discovery/resolve/', ResolveFeedView.as_view(), name='rss-discovery-resolve'),
     path('me/news/<int:pk>/read-state/', NewsReadStateView.as_view(), name='news-read-state'),
     path('me/channel-subscriptions/', channel_views.ChannelSubscriptionsView.as_view(), name='channel-subscriptions'),
