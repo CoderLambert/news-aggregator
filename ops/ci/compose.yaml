@@ -59,6 +59,9 @@ services:
       dockerfile: ops/ci/Dockerfile
     image: newshub/ci-runner:local
     entrypoint: ["/opt/ci/runner-entrypoint.sh"]
+    # Compose discards the image CMD when entrypoint is overridden. Keep the
+    # upstream listener command explicit, or gosu runs with zero arguments.
+    command: ["./bin/Runner.Listener", "run", "--startuptype", "service"]
     restart: unless-stopped
     init: true
     environment:
@@ -106,6 +109,9 @@ services:
     # This runner has NO access to Docker, the private daemon socket or backend volumes.
     image: newshub/ci-runner:local
     entrypoint: ["/opt/ci/runner-entrypoint.sh"]
+    # Compose discards the image CMD when entrypoint is overridden. Keep the
+    # upstream listener command explicit, or gosu runs with zero arguments.
+    command: ["./bin/Runner.Listener", "run", "--startuptype", "service"]
     restart: unless-stopped
     init: true
     environment:
