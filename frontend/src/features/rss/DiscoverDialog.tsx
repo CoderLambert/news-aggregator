@@ -50,7 +50,7 @@ export default function DiscoverDialog({ viewer, groups, onClose, onDone }: { vi
         else choose({ feed_url: input.trim() })
       }}>
         <label className="workspace-grow">{mode === 'directory' ? '来源名称或关键词' : mode === 'website' ? '网站地址' : '公开 RSS 地址'}
-          <input type="text" required value={input} disabled={busy} placeholder={mode === 'directory' ? '例如：技术、科学' : 'https://example.com/feed'} onChange={event => { setInput(event.target.value); setSelection(null) }} />
+          <input type="text" required value={input} disabled={busy} placeholder={mode === 'directory' ? '例如：技术、科学' : 'https://example.com/feed'} onChange={event => { setInput(event.target.value); setSelection(null); resolve.reset(); subscribe.reset() }} />
         </label><button className="workspace-button" disabled={busy || !input.trim()}>{mode === 'directory' ? '搜索' : mode === 'website' ? '发现订阅' : '选择地址'}</button>
       </form>
       {mode === 'directory' && <section aria-label="目录搜索结果">
