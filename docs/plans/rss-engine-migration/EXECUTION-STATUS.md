@@ -18,6 +18,7 @@
 | T11 | rss_t04复用 / gpt-6-astra high | running | task/rss-T11-access / 21bbd10 | access.py、views/serializers/channel_articles等读取入口 | SQL ACL和StoredArticle开发，根负责独立审查 |
 | T08 | rss_t00复用 / gpt-6.1-sol high | running | task/rss-T08-operations / 21bbd10 | operations/runtime、worker命令 | 幂等控制、租约和真实引擎操作集成 |
 | T25 | rss_t05复用 / gpt-6-astra high | running | task/rss-T25-owner-fencing / 6601948 | 旧ingestion/full_content_status/crawler网络及pipeline、迁移工具 | 旧获取前token/晚写拒绝与合成切换，真实副本/生产切换未执行 |
+| T17 | 主调度 | running / API integrated | 2505faf后续 | discovery.py、resolve路由 | 23发现/控制接口测试通过，真实worker组合待T08 |
 | T13 | 主调度 | running / 阅读与DDL integrated | 081a19a | 前端阅读、reading.py、http.py、api.urls、0056 | 首访自动抓取移除/代码保真；个人已读API/UI及0056已实现；580前端与75后端组合通过；显式修复待T08，浏览器待T27 |
 | CI基线修复 | 主调度 | integrated | 7f79671 | 两个旧测试文件 | 10专项通过；registry夹具与HOLDER SIGTERM竞态最小修复，CI待跑 |
 | T24 | 主调度 | running / 真实副本 blocked | 集成分支 | migration_inventory.py、scripts/rss-inventory.py、自有测试 | 57静态来源；6专项通过；显式SQLite副本只读hash导出器已实现；真实副本和覆盖处置待补 |

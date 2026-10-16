@@ -10,8 +10,10 @@ from . import capabilities_views
 from . import provider_credential_views
 from . import article_fetch_views
 from .rss.reading import NewsReadStateView
+from .rss.discovery import ResolveFeedView
 
 urlpatterns = [
+    path('rss/discovery/resolve/', ResolveFeedView.as_view(), name='rss-discovery-resolve'),
     path('me/news/<int:pk>/read-state/', NewsReadStateView.as_view(), name='news-read-state'),
     path('me/channel-subscriptions/', channel_views.ChannelSubscriptionsView.as_view(), name='channel-subscriptions'),
     path('me/channel-groups/', channel_views.ChannelGroupsView.as_view(), name='channel-groups'),

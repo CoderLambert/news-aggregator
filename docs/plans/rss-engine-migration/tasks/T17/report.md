@@ -1,16 +1,13 @@
-# T17：完成报告
+# T17 网址发现进度
 
-实现状态：NOT_STARTED。验收结果：NOT_RUN。本文件是待填模板，不表示已实现、已运行或已发布。
+状态：接口与持久意图集成，实际引擎发现组合等待 T08 worker。所有请求仅排队/查询本地数据，无网站 HTTP、临时订阅或 XML 解析。
 
-| 记录 | 结果 |
-| --- | --- |
-| 实现 SHA / PR / CI | 未开始 |
-| 专项用例 T17-A1、T17-A2、T17-A3、T17-A4 | NOT_RUN |
-| 环境、版本/配置、命令和退出码 | NOT_RUN |
-| 本任务实际运行证据/复用证据链接 | NOT_RUN；仅填写适用项 |
-| 实现评审/关键风险独立复核 | 未执行 |
-| 失败、未决门禁及解除条件 | 见 task.md；未开始不等于失败 |
-| 数据/权限/资源副作用及恢复方式 | 尚未实现 |
-| 生产批准/执行结果（仅执行任务） | NOT_RUN，不适用于普通开发任务 |
+`normalize_input` 支持域名和 HTTPS Feed/网站网址；复用 T08 canonicalizer 保留业务 query/path，拒绝用户凭据、私网字面地址及凭据 query。resolve 按本人+URL 合并在途请求，复用15分钟成功结果（包括零候选），默认20次/小时持久配额。签名候选绑定本人/规范URL/成功发现操作/15分钟；订阅仍需再次准入。预览不返回未授权文章，本阶段 cached_articles 为空。
 
-开发完成、集成验收和生产放行分别记录。缺必需运行结果不能标 DONE；其他任务可依已审合同继续开发。详见 [task.md](task.md)、[tests.md](tests.md) 和 [全局验收矩阵](../../ACCEPTANCE-MATRIX.md)。
+`POST /api/rss/discovery/resolve/` 返回缓存200或异步202，操作轮询后用 `discovery_operation_result` 生成本人候选token。`resolve_candidate_token` 给 T19/OPML 复用。既有session/CSRF、只读和v1错误协议保留。
+
+Python3.12.14、独立合成SQLite：
+
+`RUN_MAIN=true DJANGO_DB_PATH=/tmp/newshub-rss-discovery-tests.sqlite3 PYTHONPATH=backend:crawler /tmp/newshub-rss-coordinator-venv/bin/python -m pytest -q backend/api/tests/rss/test_discovery.py backend/api/tests/rss/test_operations.py`
+
+23 passed/3.02s，日志 `/tmp/newshub-rss-t17-tests.log`。覆盖危险输入、0/1/多候选、user/token/expiry、成功状态绑定、在途合并、缓存过期、配额、无网络/无订阅。真实发现超时、最终worker与HTTP轮询组合未验证，不以fixtures声称通过。
