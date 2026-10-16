@@ -165,6 +165,33 @@ def consider_restart(
         log(f"{service}: no container; requires explicit manage.sh install/start")
         return
 
+    # Docker's restart: unless-stopped can itself create an endless crash loop.
+    # Once a container has been in Restarting state across two timer ticks,
+    # stop THAT container and leave it for manual repair, rather than retrying.
+    # A Restarting container is not running an active worker. For DinD, still
+    # refuse to touch it if backend job activity is positive or unknown.
+    if status == "restarting":
+        record = state.setdefault(service, {})
+        first = int(record.setdefault("first_unhealthy", now))
+        if now - first < OFFLINE_GRACE_SECONDS:
+            log(f"{service}: Docker crash loop observed; waiting for second check")
+            return
+        if (is_backend_docker and (remote is None
+                or remote.get(NAMES["runner"], {}).get("busy")
+                or backend_worker is not False)):
+            log("docker: backend job may still be busy; crash loop not modified")
+            return
+        if not is_backend_docker and remote_busy:
+            log(f"{service}: remote job marked Busy; crash loop not modified")
+            return
+        rc, _ = command(["docker", "stop", "--time", "20", cid], timeout=45)
+        record["window_start"] = now
+        record["attempts"] = PERSISTENT_FAILURES
+        record["last_attempt"] = now
+        log(f"{service}: crash-loop quarantine {'OK' if rc == 0 else 'FAILED'}; "
+            "manual investigation required; no auto-retry for 6h")
+        return
+
     # If it is still running, do not assume that a failing Docker healthcheck
     # means the workflow has stopped; require positive external idle evidence.
     if is_running or status == "restarting":
