@@ -24,7 +24,9 @@ def run(args, **kwargs):
     return subprocess.run(args, check=True, capture_output=True, text=True, timeout=180, **kwargs)
 
 def main():
-    parser = argparse.ArgumentParser(); parser.add_argument('--output', type=Path, required=True); args = parser.parse_args()
+    parser = argparse.ArgumentParser(); parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--supplement-github', action='store_true'); args = parser.parse_args()
+    selected_feeds = [('summary_blog', 'GitHub Blog', 'https://github.blog/feed/', 1)] if args.supplement_github else FEEDS
     endpoint = (None if os.environ.get('DOCKER_CONTEXT') else os.environ.get('DOCKER_HOST')) or run(['docker','context','inspect','--format','{{.Endpoints.docker.Host}}']).stdout.strip()
     assert endpoint.startswith('unix://')
     project='newshub-rss-t27-public-'+uuid.uuid4().hex[:10]
@@ -37,7 +39,7 @@ def main():
         path=state/'overlay.json';path.write_text(json.dumps(overlay))
         compose=['docker','compose','-p',project,'-f',str(ROOT/'ops/rss/T00/compose.yaml'),'-f',str(path)]
         def call(*args):return run(compose+list(args)).stdout.strip()
-        evidence={'project':project,'feeds':[],'private_network_guard':True,'sample_limits':{'native':4,'summary_blog':4,'dev':2,'hn':5},'tested_sha':run(['git','rev-parse','HEAD'],cwd=ROOT).stdout.strip()}
+        evidence={'project':project,'feeds':[],'private_network_guard':True,'sample_limits':({'summary_blog':1} if args.supplement_github else {'native':4,'summary_blog':4,'dev':2,'hn':5}),'tested_sha':run(['git','rev-parse','HEAD'],cwd=ROOT).stdout.strip()}
         try:
             call('up','-d','--wait','guarded')
             address=call('port','guarded','8080');assert address.startswith('127.0.0.1:')
@@ -53,10 +55,10 @@ def main():
             from api.rss.content import convert_html
             from bs4 import BeautifulSoup
             from urllib.parse import urlsplit
-            config=EngineConfig(str(uuid.uuid4()),2,'http://'+address,token,control_timeout=20,read_timeout=10,read_attempts=1)
+            config=EngineConfig(str(uuid.uuid4()),2,'http://'+address,token,control_timeout=20,read_timeout=10,read_attempts=1,full_content_enabled=True)
             adapter=EngineAdapter(config)
-            for kind,name,url,limit in FEEDS:
-                row={'class':kind,'name':name,'feed_url':url,'sample_limit':limit,'entries':[]}
+            for kind,name,url,limit in selected_feeds:
+                row={'class':kind,'name':name,'feed_url':url,'sample_limit':limit,'entries':[],'mode':'feed','full_content_gate_enabled':True}
                 started=time.monotonic()
                 print('sampling',name,flush=True)
                 try:
@@ -85,7 +87,7 @@ def main():
                         raw=entry.content
                         before=convert_html(raw,base_url=entry.url)
                         item.update(feed_html_chars=len(raw),feed_markdown_chars=len(before.markdown),feed_canonical_hash=before.canonical_hash)
-                        if kind!='native':
+                        if kind!='native' and item['subtype']=='article':
                             started=time.monotonic()
                             try:
                                 entry=adapter.refetch_entry(entry.id)

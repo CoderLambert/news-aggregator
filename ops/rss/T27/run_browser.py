@@ -27,6 +27,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--hold', action='store_true')
+    parser.add_argument('--automatic-summary', action='store_true')
     args = parser.parse_args()
     endpoint = (None if os.environ.get('DOCKER_CONTEXT') else os.environ.get('DOCKER_HOST')) or run(['docker', 'context', 'inspect', '--format', '{{.Endpoints.docker.Host}}']).stdout.strip()
     assert endpoint.startswith('unix://'), 'local Docker only'
@@ -73,7 +74,8 @@ def main():
                 'DJANGO_CSRF_TRUSTED_ORIGINS': f'http://127.0.0.1:{ui_port},http://127.0.0.1:{app_port}',
                 'RSS_ENGINE_INSTANCE_UUID': str(uuid.uuid4()), 'RSS_ENGINE_ACCOUNT_ID': '2',
                 'RSS_RUNTIME_DIR': str(state / 'runtime'), 'T27_STATE_DIR': str(state),
-                'T27_APP_ADDRESS': f'127.0.0.1:{app_port}', 'CHATGPT_AUTH_MODE': 'disabled'}
+                'T27_APP_ADDRESS': f'127.0.0.1:{app_port}', 'CHATGPT_AUTH_MODE': 'disabled',
+                'RSS_FULL_CONTENT_ENABLED': '1'}
             worker_env = {**common, 'NEWSHUB_RUNTIME_ROLE': 'rss_sync', 'RSS_ENGINE_BASE_URL': 'http://' + engine, 'RSS_ENGINE_TOKEN_FILE': str(secret)}
             fixture = json.loads(run([PYTHON, str(ROOT / 'ops/rss/T27/bootstrap.py')], env=worker_env, cwd=ROOT).stdout)
             config = {**fixture, 'origin': f'http://127.0.0.1:{ui_port}', 'app_origin': f'http://127.0.0.1:{app_port}',
@@ -104,11 +106,13 @@ def main():
             print('T27_CONFIG=' + str(config_path), flush=True)
             if args.hold:
                 while True: time.sleep(1)
-            result = run([PYTHON, str(ROOT / 'ops/rss/T27/browser.py'), str(config_path)], cwd=ROOT, timeout=600)
+            browser_script = 'browser_automatic.py' if args.automatic_summary else 'browser.py'
+            result = run([PYTHON, str(ROOT / 'ops/rss/T27' / browser_script), str(config_path)], cwd=ROOT, timeout=600)
             print(result.stdout, flush=True)
-            chats = [json.loads(line) for line in (state / 'ai-contexts.jsonl').read_text().splitlines()]
-            assert chats and all('T27 B ONLY SECRET' not in json.dumps(chat) for chat in chats)
-            (args.output / 'ai-boundary.json').write_text(json.dumps({'fake_provider_calls':len(chats),'bob_private_title_absent':True,'real_paid_provider_calls':0}))
+            if not args.automatic_summary:
+                chats = [json.loads(line) for line in (state / 'ai-contexts.jsonl').read_text().splitlines()]
+                assert chats and all('T27 B ONLY SECRET' not in json.dumps(chat) for chat in chats)
+                (args.output / 'ai-boundary.json').write_text(json.dumps({'fake_provider_calls':len(chats),'bob_private_title_absent':True,'real_paid_provider_calls':0}))
             (args.output / 'fixture-metrics.json').write_text(json.dumps({'collection_to_visible_seconds':fixture['collection_to_visible_seconds'],'native_mode':'feed','restricted_mode':'feed'}))
             (args.output / 'publisher-requests.jsonl').write_text((audit / 'requests.jsonl').read_text())
         finally:
