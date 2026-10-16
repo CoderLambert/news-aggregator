@@ -109,6 +109,9 @@ existing rollback script. **It never calls either database restore.** The new
 `rollback.sh --worker-services CSV` option selects a capability-checked subset;
 empty means app only. Existing non-RSS default behavior is unchanged. After an
 application switch, further RSS activation requires the coordinated verification.
+The wrapper does not impose its ordinary180s subprocess timeout on rollback.sh:
+that script owns its300s-per-service readiness and fail-closed signal/exit traps.
+A shorter outer timeout would kill its shell and bypass that cleanup.
 
 ## Reproduction and limits
 
