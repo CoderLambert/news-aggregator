@@ -21,6 +21,7 @@ const PRIVATE_QUERY_KEYS = [
   ['channels'],
   ['workspace'],
   ['news', 'sources'],
+  ['news', 'categories'],
   ['providerComparisons'],
   newsKeys.lists(),
   newsKeys.details(),

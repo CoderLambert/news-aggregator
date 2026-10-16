@@ -1,6 +1,14 @@
 # Optional RSS overlay. Add to compose.prod.yaml under the SAME project.
 # Explicit --profile rss activation preserves all existing app/worker services.
 services:
+  app:
+    environment:
+      RSS_ENGINE_INSTANCE_UUID: '${RSS_ENGINE_INSTANCE_UUID:?Persist the engine UUID in the protected manifest}'
+      RSS_ENGINE_ACCOUNT_ID: '${RSS_ENGINE_ACCOUNT_ID:?Set the dedicated non-admin account ID}'
+      RSS_RUNTIME_DIR: /var/lib/newshub/rss-runtime
+    volumes:
+      - rss-runtime-data:/var/lib/newshub/rss-runtime:ro
+
   rss-db:
     profiles: [rss]
     image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
@@ -46,6 +54,7 @@ services:
 
   rss-sync:
     profiles: [rss]
+    command: [python, /app/backend/manage.py, rss_sync_worker]
     image: '${NEWSHUB_RSS_IMAGE:?Set immutable independently built rss-sync image}'
     environment:
       DJANGO_ENV: production
@@ -77,7 +86,7 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     healthcheck:
-      test: [CMD, python, /app/backend/manage.py, rss_runtime, --healthcheck]
+      test: [CMD, python, /app/backend/manage.py, rss_sync_worker, --healthcheck]
       interval: 20s
       timeout: 8s
       retries: 3

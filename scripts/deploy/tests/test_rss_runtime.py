@@ -79,8 +79,11 @@ def test_runtime_health_requires_live_heartbeat(tmp_path):
 def test_optional_overlay_has_private_pg_scoped_secrets_and_loopback_api():
     config = yaml.safe_load((ROOT / 'compose.rss.prod.yaml').read_text())
     services = config['services']
-    assert set(services) == {'rss-db', 'miniflux', 'rss-sync'}
-    assert all(service['profiles'] == ['rss'] for service in services.values())
+    assert set(services) == {'app', 'rss-db', 'miniflux', 'rss-sync'}
+    assert all(services[name]['profiles'] == ['rss'] for name in ('rss-db', 'miniflux', 'rss-sync'))
+    assert services['app']['volumes'] == ['rss-runtime-data:/var/lib/newshub/rss-runtime:ro']
+    assert set(services['app']['environment']) == {'RSS_ENGINE_INSTANCE_UUID', 'RSS_ENGINE_ACCOUNT_ID', 'RSS_RUNTIME_DIR'}
+    assert 'secrets' not in services['app']
     assert 'ports' not in services['rss-db']
     assert config['networks']['rss-db-net']['internal'] is True
     engine = services['miniflux']
@@ -91,6 +94,7 @@ def test_optional_overlay_has_private_pg_scoped_secrets_and_loopback_api():
     for name in ('rss-db', 'miniflux'):
         assert '@sha256:' in services[name]['image']
     sync = services['rss-sync']
+    assert sync['command'] == ['python', '/app/backend/manage.py', 'rss_sync_worker']
     assert sync['secrets'] == ['rss_engine_token']
     assert set(sync['volumes']) == {'db-data:/var/lib/newshub/db', 'rss-runtime-data:/var/lib/newshub/rss-runtime'}
     assert sync['environment']['NEWSHUB_RUNTIME_ROLE'] == 'rss_sync'

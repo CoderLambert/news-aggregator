@@ -183,6 +183,7 @@ def annotate_article_access(user, queryset):
     """Select the body grant with page rows; no body transfer to the application."""
     from django.db.models import IntegerField
     return queryset.annotate(
+        _rss_publish_time_inferred=F('full_content_provenance___sync_metadata__publish_time_inferred'),
         _rss_body_grant=Exists(body_authorized_news(user, News.objects.filter(pk=OuterRef('pk')))),
         _rss_access_actor=Value(user.pk if _active_user(user) else None, output_field=IntegerField()),
     )

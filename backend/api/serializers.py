@@ -146,6 +146,11 @@ class ChannelNewsSerializer(serializers.ModelSerializer):
         return [source.publication.display_name or source.name for source in self._sources(obj)]
 
     def get_publish_time_inferred(self, obj):
+        inferred = getattr(obj, '_rss_publish_time_inferred', None)
+        if inferred is None and 'full_content_provenance' not in obj.get_deferred_fields():
+            inferred = (obj.full_content_provenance or {}).get('_sync_metadata', {}).get('publish_time_inferred')
+        if isinstance(inferred, bool):
+            return inferred
         items = list(obj.source_items.all())
         return bool(items) and all(item.metadata.get('publish_time_inferred', False) for item in items)
 

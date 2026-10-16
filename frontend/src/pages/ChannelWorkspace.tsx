@@ -10,6 +10,7 @@ import { workspaceCatalogOptions, workspaceKeys, type ChannelProfile } from '@/s
 import WorkspaceModal from '@/components/workspace/WorkspaceModal'
 import AddChannelDialog from '@/components/workspace/AddChannelDialog'
 import OpmlDialog from '@/features/rss/OpmlDialog'
+import ConnectionStatus from '@/features/rss/ConnectionStatus'
 import { Availability, ChannelMark, TopicTags } from '@/components/workspace/ChannelIdentity'
 
 export default function ChannelWorkspace() {
@@ -73,6 +74,7 @@ function Directory() {
       <div className="workspace-actions">{config.enabled && <button type="button" className="workspace-button secondary" onClick={() => setImporting(true)}>导入 / 导出</button>}{config.accounts && <Link className="workspace-button secondary" to="/channels/smart"><Sparkles size={16} aria-hidden="true" />智能整理</Link>}
         {config.accounts && <button type="button" className="workspace-button" onClick={() => user ? setAdding(true) : setLogin(true)}><Plus size={16} aria-hidden="true" />添加频道</button>}</div>
     </header>
+    {config.enabled && user && <ConnectionStatus viewer={user.id} admin={user.isSuperuser} />}
     <div className="workspace-tabs" role="group" aria-label="频道范围">{[
       { key: 'all', label: '全部频道', count: sources.length },
       ...(config.enabled ? [{ key: 'subscribed', label: '已订阅', count: subscriptions.size }, { key: 'unsubscribed', label: '未订阅', count: sources.filter(source => !subscriptions.has(source.id)).length }] : []),
