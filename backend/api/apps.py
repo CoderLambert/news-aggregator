@@ -13,6 +13,9 @@ class ApiConfig(AppConfig):
         import_module('api.smart_channel_models')
 
     def ready(self):
+        # rss-sync uses ORM and stored HTML only; never preload model services.
+        if os.environ.get('NEWSHUB_RUNTIME_ROLE') == 'rss_sync':
+            return
         is_test_process = ('pytest' in sys.modules or 'PYTEST_CURRENT_TEST' in os.environ or 'test' in sys.argv)
         crawl_only_mode = os.environ.get('NEWS_CRAWL_ONLY') == '1'
         if (not is_test_process and not crawl_only_mode
