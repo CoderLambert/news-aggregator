@@ -75,7 +75,7 @@ export default function FullContentSection({
 
       <Card className="article-section-render py-5">
         <CardContent className="px-5">
-          <MarkdownContent content={content} />
+          <MarkdownContent content={content} legacyCodeRepair={news.full_content_state === 'legacy'} />
         </CardContent>
       </Card>
     </div>

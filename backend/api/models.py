@@ -1219,3 +1219,5 @@ class NewsPreference(models.Model):
     user = models.OneToOneField('auth.User', on_delete=models.CASCADE, related_name='news_preference')
     scope = models.CharField(max_length=16, default='all', choices=[(s, s) for s in ('all', 'subscribed', 'ungrouped', 'group')])
     group = models.ForeignKey(ChannelGroup, null=True, blank=True, on_delete=models.SET_NULL)
+
+from api.rss.reading_models import NewsReadState  # noqa: E402,F401

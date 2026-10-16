@@ -46,7 +46,7 @@ describe('useFullArticle', () => {
   })
   afterEach(() => vi.restoreAllMocks())
 
-  it('promotes an already queued task before polling and keeps source availability separate from task status', async () => {
+  it('reads an already queued task without posting or promoting work', async () => {
     const news = { id: 99, full_content: '', has_full_content: false, full_content_state: 'missing', full_content_fetch_status: 'queued' }
     fetchFullArticle.mockResolvedValue(news)
     fetchFullArticleStatus.mockResolvedValue({ full_content: 'Readable completed body', has_full_content: true,
@@ -54,7 +54,7 @@ describe('useFullArticle', () => {
     const setNews = vi.fn((updater) => updater(news))
     renderHook(() => useFullArticle(99, setNews, news), { wrapper: makeWrapper() })
     await waitFor(() => expect(fetchFullArticleStatus).toHaveBeenCalledOnce())
-    expect(fetchFullArticle).toHaveBeenCalledWith(99, false, expect.any(AbortSignal))
+    expect(fetchFullArticle).not.toHaveBeenCalled()
     expect(setNews.mock.results.at(-1).value).toMatchObject({ has_full_content: true, full_content_revision: 1 })
   })
 
@@ -163,52 +163,20 @@ describe('useFullArticle', () => {
     expect(result.current.articleLoading).toBe(false)
   })
 
-  it('automatically fetches an empty pending article once per tab session', async () => {
-    fetchFullArticle.mockResolvedValue({
-      full_content: 'Automatically fetched body',
-      full_content_fetch_status: 'success',
-      full_content_retry_count: 1,
-    })
-    const news = {
-      id: 2341, source_language: 'zh', content: '', full_content: '', full_content_fetch_status: 'pending',
-      full_content_retry_count: 0, last_full_content_attempt: null,
-    }
-    const setNews = vi.fn((updater) => updater(news))
-    const { rerender } = renderHook(({ record }) => useFullArticle(record.id, setNews, record), {
-      initialProps: { record: news }, wrapper: makeWrapper(),
-    })
-
-    await waitFor(() => expect(fetchFullArticle).toHaveBeenCalledTimes(1))
-    rerender({ record: { ...news } })
-    expect(fetchFullArticle).toHaveBeenCalledTimes(1)
-    expect(fetchFullArticle).toHaveBeenCalledWith(2341, false, expect.any(AbortSignal))
-  })
-
-  it('still starts one auto-fetch under React StrictMode effect replay', async () => {
-    fetchFullArticle.mockResolvedValue({ full_content: 'StrictMode body', full_content_fetch_status: 'success' })
-    const news = {
-      id: 2351, source_language: 'zh', content: '', full_content: '', full_content_fetch_status: 'pending',
-      full_content_retry_count: 0, last_full_content_attempt: null,
-    }
-    const setNews = vi.fn((updater) => updater(news))
-
-    renderHook(() => useFullArticle(2351, setNews, news), { wrapper: makeStrictWrapper() })
-
-    await waitFor(() => expect(fetchFullArticle).toHaveBeenCalledTimes(1))
-  })
-
-  it('auto-fetches a pending full body even when a summary already exists', async () => {
-    fetchFullArticle.mockResolvedValue({ full_content: 'Full body', full_content_fetch_status: 'success' })
-    const news = {
-      id: 3033, source_language: 'zh', content: 'Existing summary', full_content: '',
-      full_content_fetch_status: 'pending', full_content_retry_count: 0, last_full_content_attempt: null,
-    }
-    const setNews = vi.fn((updater) => updater(news))
-
-    renderHook(() => useFullArticle(news.id, setNews, news), { wrapper: makeWrapper() })
-
-    await waitFor(() => expect(fetchFullArticle).toHaveBeenCalledOnce())
-    expect(fetchFullArticle).toHaveBeenCalledWith(3033, false, expect.any(AbortSignal))
+  it.each(['', 'Existing summary'])('never starts collection when opening a pending article with summary %s', async (content) => {
+    vi.useFakeTimers()
+    try {
+      const news = { id: 2341, content, full_content: '', full_content_fetch_status: 'pending',
+        full_content_retry_count: 0, last_full_content_attempt: null }
+      const { rerender } = renderHook(({ record }) => useFullArticle(record.id, vi.fn(), record), {
+        initialProps: { record: news }, wrapper: makeStrictWrapper(),
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      rerender({ record: { ...news } })
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      expect(fetchFullArticle).not.toHaveBeenCalled()
+      expect(fetchFullArticleStatus).not.toHaveBeenCalled()
+    } finally { vi.useRealTimers() }
   })
 
   it('does not auto-fetch when the article already has a full body', () => {
@@ -222,7 +190,7 @@ describe('useFullArticle', () => {
     expect(fetchFullArticle).not.toHaveBeenCalled()
   })
 
-  it('promotes and reattaches to an active server fetch', async () => {
+  it('reattaches read-only to an active server fetch', async () => {
     fetchFullArticle.mockResolvedValue({ full_content: '', full_content_fetch_status: 'fetching' })
     fetchFullArticleStatus
       .mockResolvedValueOnce({ full_content: '', full_content_fetch_status: 'fetching' })
@@ -233,7 +201,7 @@ describe('useFullArticle', () => {
     renderHook(() => useFullArticle(2341, setNews, news), { wrapper: makeWrapper() })
 
     await waitFor(() => expect(fetchFullArticleStatus).toHaveBeenCalledTimes(2), { timeout: 3000 })
-    expect(fetchFullArticle).toHaveBeenCalledWith(2341, false, expect.any(AbortSignal))
+    expect(fetchFullArticle).not.toHaveBeenCalled()
     expect(setNews.mock.results.at(-1).value).toMatchObject({
       id: 2341, full_content: 'Server result', full_content_fetch_status: 'success',
     })
@@ -251,6 +219,7 @@ describe('useFullArticle', () => {
     }
     const setNews = vi.fn()
     const { result, rerender } = renderHook(() => useFullArticle(2342, setNews, news), { wrapper: makeWrapper() })
+    act(() => { void result.current.handleFetchFullArticle() })
 
     await waitFor(() => expect(requestSignal).toBeInstanceOf(AbortSignal))
     act(() => result.current.cancelFetch())

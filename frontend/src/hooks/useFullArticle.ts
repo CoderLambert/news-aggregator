@@ -20,7 +20,6 @@ interface FetchRequest {
 }
 
 const EMPTY_FETCH_STATE: FetchState = { ownerKey: '', loading: false, error: '' }
-const AUTO_ATTEMPT_PREFIX = 'newshub:full-article-auto:v1:'
 const AUTO_CANCEL_PREFIX = 'newshub:full-article-cancel:v1:'
 const fallbackFlags = new Set<string>()
 const SERVER_FETCH_TIMEOUT_MS = 180_000
@@ -247,53 +246,20 @@ export function useFullArticle(
     [executeFetch],
   )
 
-  const bodyEmpty = !news || !hasReadableFullContent(news)
+  // Opening a reader never creates or promotes collection work. Only attach
+  // to an existing durable task through its read-only status endpoint.
   const taskPending = Boolean(news && hasPendingFullContentTask(news))
   const isCurrentNews = Boolean(news && news.id === newsId)
-  const canFetchInSession = Boolean(user) && news?.can_fetch_full_content !== false
-  const status = news?.full_content_fetch_status || ''
-  const lastAttempt = news?.last_full_content_attempt
-  const retryCount = news?.full_content_retry_count ?? 0
-
   useEffect(() => {
-    if (!fullContentEnabled || !isCurrentNews || newsId === null || !canFetchInSession || (!bodyEmpty && !taskPending)) return
-
-    if (taskPending) {
-      if (sessionFlag(AUTO_CANCEL_PREFIX, ownerKey) || attachedOwnerRef.current === ownerKey) return
-      const timer = window.setTimeout(() => {
-        if (ownerRef.current !== ownerKey || sessionFlag(AUTO_CANCEL_PREFIX, ownerKey)
-          || attachedOwnerRef.current === ownerKey) return
-        attachedOwnerRef.current = ownerKey
-        setSessionFlag(AUTO_ATTEMPT_PREFIX, ownerKey, true)
-        // Reuse the durable task through the POST endpoint so an article the
-        // reader is actively viewing is promoted ahead of bulk backfill.
-        void handleFetchFullArticle()
-      }, 0)
-      return () => window.clearTimeout(timer)
-    }
-
-    const shouldAutoFetch = status === 'pending' && !lastAttempt && retryCount === 0
-    if (!shouldAutoFetch || sessionFlag(AUTO_ATTEMPT_PREFIX, ownerKey) || sessionFlag(AUTO_CANCEL_PREFIX, ownerKey)) return
+    if (!fullContentEnabled || !isCurrentNews || !taskPending || newsId === null) return
+    if (sessionFlag(AUTO_CANCEL_PREFIX, ownerKey) || attachedOwnerRef.current === ownerKey) return
     const timer = window.setTimeout(() => {
-      if (ownerRef.current !== ownerKey || sessionFlag(AUTO_ATTEMPT_PREFIX, ownerKey)
-        || sessionFlag(AUTO_CANCEL_PREFIX, ownerKey)) return
-      setSessionFlag(AUTO_ATTEMPT_PREFIX, ownerKey, true)
-      void handleFetchFullArticle()
+      if (ownerRef.current !== ownerKey || sessionFlag(AUTO_CANCEL_PREFIX, ownerKey)) return
+      attachedOwnerRef.current = ownerKey
+      void attachToExistingFetch()
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [
-    bodyEmpty,
-    fullContentEnabled,
-    handleFetchFullArticle,
-    isCurrentNews,
-    canFetchInSession,
-    lastAttempt,
-    newsId,
-    ownerKey,
-    retryCount,
-    status,
-    taskPending,
-  ])
+  }, [attachToExistingFetch, fullContentEnabled, isCurrentNews, newsId, ownerKey, taskPending])
 
   const cancelFetch = useCallback(() => {
     const request = requestRef.current

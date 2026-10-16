@@ -73,13 +73,15 @@ export interface NewsSummary {
   content_kind?: string
   full_content_state?: string
   full_content_revision?: number
+  full_content_completeness?: 'unknown' | 'summary' | 'verified'
+  body_owner?: 'legacy' | 'miniflux' | 'paused'
   full_content_next_attempt_at?: string | null
   full_content_error_code?: string
 }
 
 export function hasReadableFullContent(news: Partial<NewsDetail>): boolean {
   if (news.reading_policy === 'rss_summary_only' && !news.body_access_granted) return false
-  if (news.full_content_state && !['legacy', 'complete'].includes(news.full_content_state)) return false
+  if (news.full_content_state && !['legacy', 'complete', 'available'].includes(news.full_content_state)) return false
   if (typeof news.has_full_content === 'boolean') return news.has_full_content
   return Boolean(news.full_content?.trim())
 }
@@ -180,6 +182,8 @@ export function parseNewsSummary(value: unknown): NewsSummary {
     ...(typeof value.has_full_content === 'boolean' ? { has_full_content: value.has_full_content } : {}),
     ...(typeof value.content_kind === 'string' ? { content_kind: value.content_kind } : {}),
     ...(typeof value.full_content_state === 'string' ? { full_content_state: value.full_content_state } : {}),
+    ...(value.full_content_completeness === 'unknown' || value.full_content_completeness === 'summary' || value.full_content_completeness === 'verified' ? { full_content_completeness: value.full_content_completeness } : {}),
+    ...(value.body_owner === 'legacy' || value.body_owner === 'miniflux' || value.body_owner === 'paused' ? { body_owner: value.body_owner } : {}),
     ...(typeof value.full_content_revision === 'number' ? { full_content_revision: value.full_content_revision } : {}),
     ...(value.full_content_next_attempt_at === null || typeof value.full_content_next_attempt_at === 'string' ? { full_content_next_attempt_at: value.full_content_next_attempt_at as string | null } : {}),
     ...(typeof value.full_content_error_code === 'string' ? { full_content_error_code: value.full_content_error_code } : {}),
