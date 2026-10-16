@@ -1,34 +1,32 @@
 # T17：通过引擎发现网址中的 Feed 候选
 
-状态：PLANNED / 等待规划审核；实现尚未开始。基线：`878b69081f8d5b3ae965bcf1c855390b059caa33`。
+状态：PLANNED，产品未实现。代码基线：878b690。交付单元：URL 发现。
 
-## 目标、范围和合同
+## 目标与范围
 
-识别域名/网站/FeedURL，拒绝凭据私网危险参数；POST创建有配额的discover操作，缓存可200、执行中202。由引擎发现，返回0/1/多候选与过期的用户绑定token，不自行解析XML/HTML。
+输入规范化和配额后提交 discover；返回 0/1/多候选和用户绑定 token，仅使用引擎发现，无临时订阅/自建 XML 解析。
 
-修改范围：backend/api/rss/discovery.py；resolve endpoint。目标追踪：ARCHITECTURE.md 第 7–8 节；详细合同 [C03](../../INTERFACE-CONTRACTS.md#c03)、[C05](../../INTERFACE-CONTRACTS.md#c05)、[C07](../../INTERFACE-CONTRACTS.md#c07)；附加决议见 [ARCHITECTURE-DECISIONS.md](../../ARCHITECTURE-DECISIONS.md)。
+修改范围：backend/api/rss/discovery.py、resolve endpoint。行为以 [C01–C11](../../INTERFACE-CONTRACTS.md) 为准，架构方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md)。
 
-## 依赖与阻塞
+## 依赖与执行条件
 
-前置：[T04](../T04/task.md)、[T08](../T08/task.md)、[T11](../T11/task.md)。前置任务必须验收并合并，基线以主控记录的集成 SHA 为准，不能仅依赖未合并分支。RSSHub相关前置只适用于实际RSSHub来源，native路径按DEPENDENCIES中的条件门禁执行。
+集成前置：[T04](../T04/task.md)、[T08](../T08/task.md)。
 
-阻塞：规划未审核；对应 C03/C05/C07 未冻结；缺测试依赖/必要运行条件则 BLOCKED。发现新模型需求或合同冲突时，提交独立ADR并暂停依赖任务，不在本任务顺带改模型或增加服务。
+表中前置约束本交付的集成验收/完成，不禁止按已审接口和 fixture 独立开发。复用现有用户鉴权，候选基本 API 不依赖全文 T11；有文章缓存预览时调用 T11，T20 集成
 
-## 实施与并发边界
+同一关键写入函数/迁移串行修改；公共路由、依赖、types 和 Compose 使用协调后的串行合并，不因共享文件冻结整个任务。独立工作可从已验收基线开分支，合入前 rebase/解决冲突并跑受影响契约；不得把 fixture 通过写成真实运行通过。
 
-从前置合并后的已验收 SHA 建立 `rss/t17` 分支，只包含本任务。互斥资源：`discovery-api`。schema/model/migration仅T05所有，后续新DDL先立独立合同变更任务；API全局路由/公共types由主控串行集成，不允许多任务同时修改。最多3项开发任务，同文件重叠即串行。
+## 专项验收
 
-先确认 tests.md 的验收fixture和反例，再实现；不得新增爬虫/XML解析器/原网页提取器/通用任务平台。任务级专项通过后做独立审核；P0/P1修复后才提交合并。
+1. 域名/Feed URL/业务 query 正确。
+2. 凭据/危险输入拒绝。
+3. 0/1/多候选与超时错误真实。
+4. 候选 token 不跨用户，预览仅授权已有缓存。
 
-## 独立验收
+专项反例与命令见 [tests.md](tests.md)。只验证本任务风险，不复制无关的重启/权限/生产授权测试。上线门禁和批次全量见 [ACCEPTANCE-MATRIX.md](../../ACCEPTANCE-MATRIX.md)。
 
-1. HTTPS规范化保留业务query和大小写路径，重定向/DNS由引擎安全策略约束。
-2. 0/1/多Feed、取消/超时/限额错误可操作，不虚构成功。
-3. 无订阅时候选preview仅用已有缓存，不注册临时Feed采文章。
-4. 200/202/404/413/429 DTO与前端契约一致。
+## 交付与恢复
 
-## 交付、审核和回滚
+在 [report.md](report.md) 记录实现/环境/命令/实际结果、SHA/PR/CI、风险和相关证据；同 SHA/配置的公共证据可链接复用。产品仍 NOT_RUN。实质架构/权限语义变化补 ADR，字段/参数调整走普通评审。
 
-实现、测试及必要的实际运行证据归档于本目录的 report.md（大日志使用校验和及受控工件链接）。记录提交/PR/CI、基线与目标SHA、独立审核人和问题修复SHA。满足全部完成定义后才改DONE；缺真实条件不能PASS。
-
-回滚：优先关闭本任务新增入口或回退本PR的应用行为，保留兼容字段、已接收数据和用户关系；不执行reverse migration/生产恢复。 通用审核、批次回归和生产闸门见 [TASKS.md](../../TASKS.md) 与 [ROLLBACK.md](../../ROLLBACK.md)。
+恢复遵循 [ROLLBACK.md](../../ROLLBACK.md)：暂停受影响动作或回受测兼容版本，保留数据，不默认 reverse migration/恢复全库。生产切换/恢复/发布只按具体批准范围执行，本规划修订不授权生产操作。

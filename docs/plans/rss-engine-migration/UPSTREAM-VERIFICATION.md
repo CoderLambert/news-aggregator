@@ -1,5 +1,7 @@
 # 上游能力核验与尚待运行的边界
 
+> 证据版本说明：本文保留对 878b690 / 上游候选版本的静态审计事实，不是运行证明。514410b 之后的任务编号、并行/审批/DDL/transport 和验收建议由修订后的 [决议](ARCHITECTURE-DECISIONS.md)、[接口合同](INTERFACE-CONTRACTS.md)、[任务](TASKS.md) 覆盖；不得把历史建议当作额外前置。
+
 核验日期：2026-10-16。证据类型为官方文档及上游源码静态阅读；本轮没有启动引擎、抓取目标文章、部署服务或变更生产。本文辅助接口冻结，不改变 `ARCHITECTURE.md` 的技术方向，也不充当实际运行验收报告。
 
 ## 1. 版本与证据效力
@@ -32,7 +34,7 @@ RSSHub 与 Python SDK 的 `master` / `main` 链接只证明核验时可见实现
 
 ### 2.3 单篇重试存在 SDK 参数缺口
 
-API 的 `update_content` 默认 false；2.3.3 handler 仅在显式 true 时持久更新标题与正文。核验时官方 Python SDK 的 `fetch_entry_content(entry_id)` 未暴露此参数，只获取返回结果。必须在实施前冻结最小 SDK 包装扩展及重新读取策略，不能假定 SDK 方法已经更新上游数据库。包装仍只请求固定引擎 API，不能改为自己请求发布者 HTML。[SDK 方法](https://github.com/miniflux/python-client/blob/main/miniflux.py)、[单篇重试 handler](https://github.com/miniflux/v2/blob/2.3.3/internal/api/entry_handlers.go)
+API 的 `update_content` 默认 false；2.3.3 handler 仅在显式 true 时持久更新标题与正文。核验时官方 Python SDK 的 `fetch_entry_content(entry_id)` 未暴露此参数，只获取返回结果。必须在引擎集成前验证最小 SDK 包装扩展及重新读取策略，不能假定 SDK 方法已经更新上游数据库。包装仍只请求固定引擎 API，不能改为自己请求发布者 HTML。[SDK 方法](https://github.com/miniflux/python-client/blob/main/miniflux.py)、[单篇重试 handler](https://github.com/miniflux/v2/blob/2.3.3/internal/api/entry_handlers.go)
 
 单篇成功响应不代表完整性已验证；结果仍经同一内容保护合同接收。页面 GET、搜索、预览不得调用这个具有副作用的引擎 GET。
 

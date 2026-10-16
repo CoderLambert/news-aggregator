@@ -1,17 +1,6 @@
-# T36：专项与运行验收
+# T36：已合并到 T26
 
-当前NOT_RUN。下列测试文件尚未实现，命令为规划要求。必须在隔离allowlist运行，不能连接活动业务库或生产。
+规划状态：MERGED_INTO T26，不是产品 DONE。产品实现/运行结果仍 NOT_RUN。
 
-- T36-A1：兼容镜像读取legacy/complete/available和个人源授权正确。预期逐项断言通过且附真实工件。
-- T36-A2：真实旧任务开始于切换前、完成于回滚后时仍被fence拒绝。预期逐项断言通过且附真实工件。
-- T36-A3：manifest schema精确匹配、服务角色符合暂停owner，不能无条件启旧crawler。预期逐项断言通过且附真实工件。
-- T36-A4：隔离应用回滚保留新News/译文历史/用户关系；记录SHA/digest/CI与恢复证据。预期逐项断言通过且附真实工件。
-- T36-N1：未知schema/实例/角色必须失败关闭，拒绝冒用真实生产配置。
-- T36-N2：环境或证据不足标BLOCKED，不能skip后PASS。
 
-```bash
-test -f tests/rss_engine_contract/test_compatibility_seal.py
-RSS_TEST_ALLOW_LIVE=1 RSS_TEST_CONFIG=/absolute/path/to/isolated-test-config.json RUN_MAIN=true PYTHONPATH=backend:crawler backend/venv/bin/python -m pytest -q tests/rss_engine_contract/test_compatibility_seal.py -m rss_live
-```
-
-预期：测试存在、退出0且全部用例通过；实际镜像/进程/故障恢复工件与SHA/digest/schema对应。独立审核Agent校验diff、输出及无额外依赖，修P0/P1；API/DB契约、必要运行、必需CI全部通过才可验收。
+实际交付、依赖和验收见 [T26/task.md](../T26/task.md)、[tests.md](../T26/tests.md)、[report.md](../T26/report.md)。本目录只保留历史编号引用，不另建分支、PR、重复测试或前置节点。统一清单见 [TASKS.md](../../TASKS.md)。

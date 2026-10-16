@@ -1,36 +1,32 @@
-# T00：验证 Miniflux 原生引擎合同并锁定版本
+# T00：验证最小引擎合同并锁定运行版本
 
-状态：PLANNED / 等待规划审核；实现尚未开始。基线：`878b69081f8d5b3ae965bcf1c855390b059caa33`。
+状态：PLANNED，产品未实现。代码基线：878b690。交付单元：引擎验证。
 
-## 目标、范围和合同
+## 目标与范围
 
-在一次隔离容器实验中验证候选 Miniflux 2.3.3、兼容 PG、官方 SDK；锁定可重现版本/digest、响应限制及超时。留存原生全文、摘要提取、失败回退、受限源、分页、清理、凭据与重定向证据。不得用本文源码核验代替运行。
+候选 Miniflux/PG/SDK 的 API、分页、持久修复、清理和私网防护做最小隔离实验。大范围真实来源质量归 T27；不验证自建 transport 框架。
 
-修改范围：tests/rss_engine_contract/；版本证据；不改产品实现。目标追踪：ARCHITECTURE.md 第 10 节；详细合同 [C01](../../INTERFACE-CONTRACTS.md#c01)、[C03](../../INTERFACE-CONTRACTS.md#c03)、[C06](../../INTERFACE-CONTRACTS.md#c06)；附加决议见 [ARCHITECTURE-DECISIONS.md](../../ARCHITECTURE-DECISIONS.md)。
+修改范围：tests/rss_engine_contract/、ops/rss 版本证据。行为以 [C01–C11](../../INTERFACE-CONTRACTS.md) 为准，架构方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md)。
 
-## 依赖与阻塞
+## 依赖与执行条件
 
-前置：规划审核及接口冻结，无开发前置。前置任务必须验收并合并，基线以主控记录的集成 SHA 为准，不能仅依赖未合并分支。RSSHub相关前置只适用于实际RSSHub来源，native路径按DEPENDENCIES中的条件门禁执行。
+集成前置：无。
 
-阻塞：规划未审核；对应 C01/C03/C06 未冻结；缺隔离运行环境/来源样本/服务端凭据则实际验收 BLOCKED。发现新模型需求或合同冲突时，提交独立ADR并暂停依赖任务，不在本任务顺带改模型或增加服务。
+表中前置约束本交付的集成验收/完成，不禁止按已审接口和 fixture 独立开发。真实引擎与镜像 digest 缺失时仅此运行证据 BLOCKED，T05/T06/T16 仍可开发
 
-## 实施与并发边界
+同一关键写入函数/迁移串行修改；公共路由、依赖、types 和 Compose 使用协调后的串行合并，不因共享文件冻结整个任务。独立工作可从已验收基线开分支，合入前 rebase/解决冲突并跑受影响契约；不得把 fixture 通过写成真实运行通过。
 
-从前置合并后的已验收 SHA 建立 `rss/t00` 分支，只包含本任务。互斥资源：`engine-probe`、`test-harness`。schema/model/migration仅T05所有，后续新DDL先立独立合同变更任务；API全局路由/公共types由主控串行集成，不允许多任务同时修改。最多3项开发任务，同文件重叠即串行。
+## 专项验收
 
-先确认 tests.md 的验收fixture和反例，再实现；不得新增爬虫/XML解析器/原网页提取器/通用任务平台。任务级专项通过后做独立审核；P0/P1修复后才提交合并。
+1. API/分页上下界和空库可复现。
+2. read/unread 90 天配置与 created_at 语义核对。
+3. 普通刷新与 update_content=true 持久修复区别。
+4. 受控私网/重定向/凭据与异常响应拒绝。
 
-## 独立验收
+专项反例与命令见 [tests.md](tests.md)。只验证本任务风险，不复制无关的重启/权限/生产授权测试。上线门禁和批次全量见 [ACCEPTANCE-MATRIX.md](../../ACCEPTANCE-MATRIX.md)。
 
-1. 证明 read/unread 都按显式90天配置且按created_at清理；实际保留记录仍全部可枚举。
-2. 证明普通refresh与单篇fetch-content差异、SDK持久化扩展可行。
-3. 受控原生全文/提取失败样本各5–10篇，记录分母、原文/Feed/采集时刻及人工判断。
-4. SSRF IPv4/IPv6/DNS/重定向和响应大小边界通过；digest通过实际拉取核实。
+## 交付与恢复
 
-5. SDK最小受限transport通过slow-drip/巨大JSON/压缩膨胀；不能只让future超时而底层仍占槽。
+在 [report.md](report.md) 记录实现/环境/命令/实际结果、SHA/PR/CI、风险和相关证据；同 SHA/配置的公共证据可链接复用。产品仍 NOT_RUN。实质架构/权限语义变化补 ADR，字段/参数调整走普通评审。
 
-## 交付、审核和回滚
-
-实现、测试及必要的实际运行证据归档于本目录的 report.md（大日志使用校验和及受控工件链接）。记录提交/PR/CI、基线与目标SHA、独立审核人和问题修复SHA。满足全部完成定义后才改DONE；缺真实条件不能PASS。
-
-回滚：优先关闭本任务新增入口或回退本PR的应用行为，保留兼容字段、已接收数据和用户关系；不执行reverse migration/生产恢复。 通用审核、批次回归和生产闸门见 [TASKS.md](../../TASKS.md) 与 [ROLLBACK.md](../../ROLLBACK.md)。
+恢复遵循 [ROLLBACK.md](../../ROLLBACK.md)：暂停受影响动作或回受测兼容版本，保留数据，不默认 reverse migration/恢复全库。生产切换/恢复/发布只按具体批准范围执行，本规划修订不授权生产操作。

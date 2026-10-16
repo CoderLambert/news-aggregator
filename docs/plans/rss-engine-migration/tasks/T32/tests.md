@@ -1,30 +1,6 @@
-# T32：验收与执行证据要求
+# T32：已合并到 T31
 
-状态：NOT_RUN。以下命令是后续任务必须交付的测试入口，当前尚未创建这些测试；不能把测试计划当实现或PASS。当前只校验规划文档。
+规划状态：MERGED_INTO T31，不是产品 DONE。产品实现/运行结果仍 NOT_RUN。
 
-## 案例与预期
 
-- T32-A1：sync导入和镜像中无torch/embedding/browser，app AI仍运行。预期：断言满足且保存失败反例及实际结果。
-- T32-A2：所有支持Compose/本机入口重启均不启动旧角色。预期：断言满足且保存失败反例及实际结果。
-- T32-A3：manifest新旧解析和CI测试根匹配，镜像digest可追溯。预期：断言满足且保存失败反例及实际结果。
-- T32-A4：license/SBOM/依赖扫描与文档一致，无额外服务。预期：断言满足且保存失败反例及实际结果。
-
-- T32-N1：关闭/重启/权限拒绝/上游错误与重复提交不会产生未声明的写入；预期无错误覆盖、串用户或隐藏旧抓取。
-- T32-N2：前置缺失、无运行环境或未获生产授权；预期标BLOCKED并停止依赖动作，不能skip后报告PASS。
-
-## 命令和环境
-
-工作目录为仓库根；Python 3.12、Node 22，以锁定依赖及隔离测试数据库运行。环境配置仅包含合成/隔离资源；测试库不得指向当前工作区或生产库。live测试必须验证目标在隔离allowlist，未显式允许即拒绝运行，不能仅凭环境变量名认为安全。
-
-```bash
-# 规划命令：测试文件尚未交付，不能当作已通过证据。
-test -f scripts/deploy/tests/test_rss_final_packaging.py
-RUN_MAIN=true PYTHONPATH=backend:crawler \
-  backend/venv/bin/python -m pytest -q scripts/deploy/tests/test_rss_final_packaging.py
-```
-
-预期：测试文件存在；专项进程退出0；断言数与用例逐项记录；要求实际引擎/浏览器/恢复的条目另附运行证据。前端修改执行typecheck/lint；数据变更执行schema/API契约；所有PR满足实际必需CI。批次级全量按ACCEPTANCE-MATRIX，避免无变更重复全量。
-
-## 独立审核与完成门禁
-
-审核Agent必须未参与本任务实现，检查合同、diff、实际测试输出和副作用；留下可追溯结论。P0/P1必须修复，不接受“限制说明”代替实现缺陷修复。report.md覆盖本任务所有A/N条目、API/DB合同、实际运行、SHA/PR/CI、风险和回滚。缺任何必需证据均非DONE。
+实际交付、依赖和验收见 [T31/task.md](../T31/task.md)、[tests.md](../T31/tests.md)、[report.md](../T31/report.md)。本目录只保留历史编号引用，不另建分支、PR、重复测试或前置节点。统一清单见 [TASKS.md](../../TASKS.md)。

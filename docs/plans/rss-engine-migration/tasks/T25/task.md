@@ -1,34 +1,32 @@
-# T25：切换单一来源所有者并隔离旧任务晚写
+# T25：实现共享来源切换与全部旧写入 fencing
 
-状态：PLANNED / 等待规划审核；实现尚未开始。基线：`878b69081f8d5b3ae965bcf1c855390b059caa33`。
+状态：PLANNED，产品未实现。代码基线：878b690。交付单元：切换与 fence。
 
-## 目标、范围和合同
+## 目标与范围
 
-实现legacy|miniflux|paused与monotonic owner_epoch；暂停/排空旧任务后激活绑定。所有旧RSS/HTML/backfill/manual/全文写入验证owner epoch，网络外快照不能越过CAS。
+实现 C11 plan/apply/verify 和来源组切换，覆盖旧采集/手动/backfill/全文及元数据写入。获取前捕获令牌、提交短事务重验 source/主写/政策；排空不带令牌的旧进程。
 
-修改范围：所有旧采集入口的owner检查；迁移控制命令。目标追踪：ARCHITECTURE.md 第 7 节；详细合同 [C02](../../INTERFACE-CONTRACTS.md#c02)、[C11](../../INTERFACE-CONTRACTS.md#c11)；附加决议见 [ARCHITECTURE-DECISIONS.md](../../ARCHITECTURE-DECISIONS.md)。
+修改范围：旧采集入口、通用提交、rss_migration 命令。行为以 [C01–C11](../../INTERFACE-CONTRACTS.md) 为准，架构方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md)。
 
-## 依赖与阻塞
+## 依赖与执行条件
 
-前置：[T03](../T03/task.md)、[T10](../T10/task.md)、[T14](../T14/task.md)、[T19](../T19/task.md)、[T24](../T24/task.md)。前置任务必须验收并合并，基线以主控记录的集成 SHA 为准，不能仅依赖未合并分支。RSSHub相关前置只适用于实际RSSHub来源，native路径按DEPENDENCIES中的条件门禁执行。
+集成前置：[T05](../T05/task.md)、[T07](../T07/task.md)。
 
-阻塞：规划未审核；对应 C02/C11 未冻结；缺测试依赖/必要运行条件则 BLOCKED。发现新模型需求或合同冲突时，提交独立ADR并暂停依赖任务，不在本任务顺带改模型或增加服务。
+表中前置约束本交付的集成验收/完成，不禁止按已审接口和 fixture 独立开发。开发仅依赖核心数据和提交服务；实际生产 apply 才要求 T24 实际范围、T26 封存、备份及批准。测试不得自我要求已封存生产基点
 
-## 实施与并发边界
+同一关键写入函数/迁移串行修改；公共路由、依赖、types 和 Compose 使用协调后的串行合并，不因共享文件冻结整个任务。独立工作可从已验收基线开分支，合入前 rebase/解决冲突并跑受影响契约；不得把 fixture 通过写成真实运行通过。
 
-从前置合并后的已验收 SHA 建立 `rss/t25` 分支，只包含本任务。互斥资源：`ownership-fence`、`legacy-ingestion`。schema/model/migration仅T05所有，后续新DDL先立独立合同变更任务；API全局路由/公共types由主控串行集成，不允许多任务同时修改。最多3项开发任务，同文件重叠即串行。
+## 专项验收
 
-先确认 tests.md 的验收fixture和反例，再实现；不得新增爬虫/XML解析器/原网页提取器/通用任务平台。任务级专项通过后做独立审核；P0/P1修复后才提交合并。
+1. 切换前开始/切换后完成的旧结果拒绝。
+2. 同 Feed 多 Source 不双采集。
+3. 主写移交后其他 legacy source 不能覆写同 News。
+4. 失败 paused/往返 epoch 递增/合成 dry-run 零写。
 
-## 独立验收
+专项反例与命令见 [tests.md](tests.md)。只验证本任务风险，不复制无关的重启/权限/生产授权测试。上线门禁和批次全量见 [ACCEPTANCE-MATRIX.md](../../ACCEPTANCE-MATRIX.md)。
 
-1. 旧任务开始于切换前、结束于切换后时拒绝写入。
-2. 同来源任何时刻最多一个采集所有者，暂停后无新请求。
-3. 切换失败保持paused且不丢数据；原生历史ID/分组不重建。
-4. 源清单dry-run不改库；生产执行必须单独授权。
+## 交付与恢复
 
-## 交付、审核和回滚
+在 [report.md](report.md) 记录实现/环境/命令/实际结果、SHA/PR/CI、风险和相关证据；同 SHA/配置的公共证据可链接复用。产品仍 NOT_RUN。实质架构/权限语义变化补 ADR，字段/参数调整走普通评审。
 
-实现、测试及必要的实际运行证据归档于本目录的 report.md（大日志使用校验和及受控工件链接）。记录提交/PR/CI、基线与目标SHA、独立审核人和问题修复SHA。满足全部完成定义后才改DONE；缺真实条件不能PASS。
-
-回滚：优先关闭本任务新增入口或回退本PR的应用行为，保留兼容字段、已接收数据和用户关系；不执行reverse migration/生产恢复。 通用审核、批次回归和生产闸门见 [TASKS.md](../../TASKS.md) 与 [ROLLBACK.md](../../ROLLBACK.md)。
+恢复遵循 [ROLLBACK.md](../../ROLLBACK.md)：暂停受影响动作或回受测兼容版本，保留数据，不默认 reverse migration/恢复全库。生产切换/恢复/发布只按具体批准范围执行，本规划修订不授权生产操作。

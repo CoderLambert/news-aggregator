@@ -1,21 +1,13 @@
-# ADR-006：以受测兼容 schema 和角色定义回滚
+# ADR-006：演练后封存兼容回滚版本
 
-状态：PROPOSED，待本规划PR独立审核及T03真实演练。
+状态：修订提案，等待规划审核；用户已确认的产品语义保持。本文件不授权生产切换、恢复或删除数据。
 
-## 问题与证据
+现有脚本要求 schema exact-match 且角色默认含 crawler。T03 适配工具、服务角色和两库恢复；不依赖阅读 ACL 开发完成，不提供未经演练的生产基点。
 
-现有rollback要求migration exact-match，manifest无RSS角色且会启动crawler；additive并不能证明旧镜像可回滚。
+T26 合并原 T36：选包含完整 fence、available/ACL/译文读取的候选镜像，在隔离副本完成迁移/应用回滚/两库恢复，通过后封存 SHA/digest/schema/manifest。候选测试不要求先有封存证明；生产 T29 必须已有封存产物。
 
-证据：[BASELINE-AUDIT.md](../BASELINE-AUDIT.md)、[OPERATIONS-AUDIT.md](../OPERATIONS-AUDIT.md)、[UPSTREAM-VERIFICATION.md](../UPSTREAM-VERIFICATION.md)。原始方向见[ARCHITECTURE.md](../ARCHITECTURE.md)，不改变Miniflux/PG/RSSHub分工。
+默认同 schema 最简单。T05 只交付核心 DDL，目录/已读/OPML 随所属功能迁移；后续 schema 变化重新验证兼容目标，不一概要求 ADR，不以 migration 子集当证明。普通回滚保留新数据、不 reverse migration、不恢复库；灾难恢复另决定恢复点/RPO。
 
-## 决议与影响
+复用同版本演练证据，删除旧栈后的最终镜像仍需恢复/重启复验。执行权限沿用已有部署和变更记录，不自建审批文件协议。
 
-T05集中DDL；T03只扩展工具/严格版本化角色，不产出可用回滚SHA。T25完整旧入口fence完成后，T36封存同schema、能读available/新ACL/fence的过渡镜像并实测；T26必须依赖T36。禁止把旧迁移集合子集当兼容证明。
-
-回滚保留新数据/新表；普通回滚只回应用与owner，不做全库恢复。未来DDL重新批准兼容基点。
-
-## 验收与回滚
-
-故障回滚/恢复真实演练；schema不符拒绝、writer失败关闭、不会复活旧进程；旧main基线不自动成为回滚点。
-
-对应任务与合同见[ARCHITECTURE-DECISIONS.md](../ARCHITECTURE-DECISIONS.md)、[INTERFACE-CONTRACTS.md](../INTERFACE-CONTRACTS.md)。任何新的架构变更须另立ADR审核；本ADR不授予生产修改、数据删除或批量回填权限。
+事实依据：[BASELINE-AUDIT.md](../BASELINE-AUDIT.md)、[OPERATIONS-AUDIT.md](../OPERATIONS-AUDIT.md)、[UPSTREAM-VERIFICATION.md](../UPSTREAM-VERIFICATION.md)。实施入口：[接口合同](../INTERFACE-CONTRACTS.md)、[任务清单](../TASKS.md)、[验收矩阵](../ACCEPTANCE-MATRIX.md)。

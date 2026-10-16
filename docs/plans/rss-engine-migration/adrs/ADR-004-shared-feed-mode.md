@@ -1,21 +1,11 @@
-# ADR-004：共享 Feed 使用统一采集模式
+# ADR-004：统一采集模式与政策收敛
 
-状态：用户本轮Q3明确同意，覆盖原文4.1的个人关闭语义。
+状态：修订提案，等待规划审核；用户已确认的产品语义保持。本文件不授权生产切换、恢复或删除数据。
 
-## 问题与证据
+用户已确认：一个物理 Feed 的模式由管理员/站点政策决定，V1 没有个人模式开关。取消个人订阅不能停止其他有效引用或 editorial_pin 的采集。
 
-一个Miniflux物理Feed只有一个crawler设置，个人开关会改变其他用户的网络行为。
+C03 补齐已有 Feed 的 update_feed_policy，复用官方 SDK update_feed，GET 核对 applied_policy_version。政策收紧先限制本地读取/操作并暂停绑定，旧版本修复取消、在途结果提交重验；不能声称禁用能撤回已发网络请求。按统一批准模式恢复，冲突未解决不启用。
 
-证据：[BASELINE-AUDIT.md](../BASELINE-AUDIT.md)、[OPERATIONS-AUDIT.md](../OPERATIONS-AUDIT.md)、[UPSTREAM-VERIFICATION.md](../UPSTREAM-VERIFICATION.md)。原始方向见[ARCHITECTURE.md](../ARCHITECTURE.md)，不改变Miniflux/PG/RSSHub分工。
+T08 测政策变更中旧操作和响应丢失；T11 测即时授权；跨来源共享绑定的暂停/切换由 T25 验证。普通用户的 read/star/group 不写共享采集账号。
 
-## 决议与影响
-
-mode由站点来源政策和管理员统一决定；V1不提供个人采集模式开关。个人取消不改变仍有他人或editorial_pin引用的Feed。
-
-用户可决定是否订阅，不能以个人权限绕过来源政策。最后引用取消先暂停，不删除本地内容或个人记录。
-
-## 验收与回滚
-
-并发注册/取消的引用收敛；受限源即使管理员也不绕发布者政策；共享状态只采集不承载个人read/star。
-
-对应任务与合同见[ARCHITECTURE-DECISIONS.md](../ARCHITECTURE-DECISIONS.md)、[INTERFACE-CONTRACTS.md](../INTERFACE-CONTRACTS.md)。任何新的架构变更须另立ADR审核；本ADR不授予生产修改、数据删除或批量回填权限。
+事实依据：[BASELINE-AUDIT.md](../BASELINE-AUDIT.md)、[OPERATIONS-AUDIT.md](../OPERATIONS-AUDIT.md)、[UPSTREAM-VERIFICATION.md](../UPSTREAM-VERIFICATION.md)。实施入口：[接口合同](../INTERFACE-CONTRACTS.md)、[任务清单](../TASKS.md)、[验收矩阵](../ACCEPTANCE-MATRIX.md)。

@@ -1,21 +1,13 @@
-# ADR-007：区分刷新与持久单篇正文修复
+# ADR-007：以最小扩展持久修复单篇正文
 
-状态：PROPOSED，G0条件批准协议/隔离验证方案，G1再以T00实际契约验证冻结运行可行性。
+状态：修订提案，等待规划审核；用户已确认的产品语义保持。本文件不授权生产切换、恢复或删除数据。
 
-## 问题与证据
+普通 Feed refresh 不承诺修复旧正文。官方 SDK 未暴露 update_content 时，允许仅扩展固定引擎 fetch-content?update_content=true 并重新 GET 核对；不请求发布者或自建抓取器。
 
-2.3.3普通refresh非force，SDK fetch_entry_content默认update_content=false；容易虚构修复成功/上游持久化。
+修复是显式 POST 入队的独立动作，与刷新分开；页面 GET/首访/预览不调用副作用引擎 GET。执行前及提交时检查用户访问和最新政策，未知结果先核对。
 
-证据：[BASELINE-AUDIT.md](../BASELINE-AUDIT.md)、[OPERATIONS-AUDIT.md](../OPERATIONS-AUDIT.md)、[UPSTREAM-VERIFICATION.md](../UPSTREAM-VERIFICATION.md)。原始方向见[ARCHITECTURE.md](../ARCHITECTURE.md)，不改变Miniflux/PG/RSSHub分工。
+删除旧提案强制的 TransportRequest/TransportResult、绝对 deadline/可取消 I/O 框架。采用成熟 HTTP timeout、分页、有限重试、资源限制和必要的小型响应边界封装；不将 socket timeout/future 超时称作总期限/真实取消，卡死进程通过监督终止并按租约恢复。T04 证明所选边界实际有效；未解决运行风险阻塞相关上线，不冻结纯转换/目录开发。
 
-## 决议与影响
+T00/T04/T08 验证真正持久化、未知结果核对、限额/脱敏及授权。单篇修复失败不改变架构方向。
 
-官方SDK优先，允许最小注入受限session/transport落实总deadline与wire/解压后字节预算，仅最小扩展固定fetch-content的update_content=true参数，随后重新GET验证；刷新与修复为独立FeedOperation动作。
-
-不自建爬虫或完整客户端。副作用GET仅由显式POST入队执行，页面GET/预览不触发。SDK扩展不满足则BLOCKED并更新ADR。
-
-## 验收与回滚
-
-T00/T04/T08验证持久结果、失败/未知结果核对、配额和授权；API文档/SDK/源码参考UPSTREAM-VERIFICATION。
-
-对应任务与合同见[ARCHITECTURE-DECISIONS.md](../ARCHITECTURE-DECISIONS.md)、[INTERFACE-CONTRACTS.md](../INTERFACE-CONTRACTS.md)。任何新的架构变更须另立ADR审核；本ADR不授予生产修改、数据删除或批量回填权限。
+事实依据：[BASELINE-AUDIT.md](../BASELINE-AUDIT.md)、[OPERATIONS-AUDIT.md](../OPERATIONS-AUDIT.md)、[UPSTREAM-VERIFICATION.md](../UPSTREAM-VERIFICATION.md)。实施入口：[接口合同](../INTERFACE-CONTRACTS.md)、[任务清单](../TASKS.md)、[验收矩阵](../ACCEPTANCE-MATRIX.md)。

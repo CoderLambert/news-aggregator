@@ -1,15 +1,6 @@
-# T35：完成报告
+# T35：已合并到 T02
 
-状态：NOT_STARTED。结果：NOT_RUN。尚无实现/提交/PR/CI/真实运行，不能PASS。
+规划状态：MERGED_INTO T02，不是产品 DONE。产品实现/运行结果仍 NOT_RUN。
 
-| 证据项 | 结果 |
-| --- | --- |
-| 基线SHA / 实现与修复SHA / PR / merge SHA | 未执行 |
-| 合同版本 / ADR / schema / digest | 待规划审核 |
-| T35-A1 / T35-A2 / T35-A3 / T35-A4 | NOT_RUN |
-| T35-N1 / T35-N2 | NOT_RUN |
-| 专项命令 / 时间 / 环境 / 退出码 / 工件hash | NOT_RUN |
-| API/DB契约及必须的实际镜像/回滚运行 | NOT_RUN |
-| 独立审核 / CI / 副作用 / 额外依赖 / 遗留 | 未开始 |
 
-缺运行条件时填写BLOCKED和解除条件，不以已写代码或单测代替全部验收。完成定义见[TASKS.md](../../TASKS.md)。
+实际交付、依赖和验收见 [T02/task.md](../T02/task.md)、[tests.md](../T02/tests.md)、[report.md](../T02/report.md)。本目录只保留历史编号引用，不另建分支、PR、重复测试或前置节点。统一清单见 [TASKS.md](../../TASKS.md)。

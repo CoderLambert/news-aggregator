@@ -1,11 +1,13 @@
-# NewsHub RSS 架构迁移规划审核入口
+# RSS 架构迁移规划审核入口
 
-本PR只提交规划文档；没有产品实现、迁移、生产配置或来源切换。最新代码审计基线：`878b69081f8d5b3ae965bcf1c855390b059caa33`。规划状态：REVIEW_REQUIRED。
+本 PR 只修订 docs/plans/rss-engine-migration/ 下规划文档，代码审计基线为 878b69081f8d5b3ae965bcf1c855390b059caa33；没有产品实现、数据库操作或生产切换。状态：REVIEW_REQUIRED。
 
-建议阅读顺序：[架构原文](ARCHITECTURE.md) → [审计事实](BASELINE-AUDIT.md) / [运维](OPERATIONS-AUDIT.md) / [上游](UPSTREAM-VERIFICATION.md) → [独立决议](ARCHITECTURE-DECISIONS.md) → [接口合同](INTERFACE-CONTRACTS.md) → [数据迁移](DATA-MIGRATION.md) → [任务](TASKS.md) / [DAG](DEPENDENCIES.md) → [验收](ACCEPTANCE-MATRIX.md) / [回滚](ROLLBACK.md)。
+用户确认的 [ARCHITECTURE.md](ARCHITECTURE.md) 原文保留。对 514410b 的审核修订补齐共享来源/文章所有权、政策更新、历史译文、基础元数据及停更权限；收敛 SDK 包装、审批、任务依赖和验收成本。细节见 [修订报告](PLANNING-REPORT.md)。
 
-37个已定义主节点，每项含task/tests/report；T29是汇总门禁，实际单源工单N须授权盘点后实例化，因此最终节点数37+N。所有产品报告仍NOT_STARTED/NOT_RUN。首批建议T00/T15/T24证据工作；T00后可安排T02/T04/T06首组实现，最多3项且文件不重叠。
+建议入口：[决议](ARCHITECTURE-DECISIONS.md) → [接口](INTERFACE-CONTRACTS.md) → [数据迁移](DATA-MIGRATION.md) → [任务](TASKS.md) / [依赖](DEPENDENCIES.md) → [验收](ACCEPTANCE-MATRIX.md) / [回滚](ROLLBACK.md)。历史源码/运维/上游证据保留为审计参考，其旧流程建议由修订合同覆盖。
 
-用户已确认：采用审核原文；研究只读同步正文/保留联网搜索；新增独立已读状态；共享Feed模式统一管理。其余技术ADR/初始参数/详细计划等待本PR审核。完成定义不降低，真实条件缺失标BLOCKED，规划审核不代表生产授权。
+26 个有效交付单元，11 个合并索引；T00–T36 历史编号均保留，合并不代表产品 DONE。来源迁移使用统一 manifest 和逐源结果，不再扩成 37+N 工单。首批建议 T00/T06/T16；T05 核心合同确认后尽早进入，T24 静态盘点可独立推进。
 
-本轮验证、独立审核与PR信息见[PLANNING-REPORT.md](PLANNING-REPORT.md)。
+研究本地正文/保留联网搜索、独立已读/保留 ReadingDay、共享 Feed 管理员统一模式等已确认方向保持。实际运行均 NOT_RUN；缺 DNS/Token/副本/生产授权只阻塞对应运行或上线门禁，不冻结无关开发。本次文档/PR 修订不包含合并或后续产品实现。
+
+校验命令见 [VALIDATION.md](VALIDATION.md)。

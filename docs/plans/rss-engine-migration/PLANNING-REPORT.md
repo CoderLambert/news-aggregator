@@ -1,41 +1,39 @@
-# 规划 PR 的证据、审核结论与未决门禁
+# 规划修订、审核问题处理与验证记录
 
-日期：2026-10-16。审计代码基线：`878b69081f8d5b3ae965bcf1c855390b059caa33`。交付状态：规划待用户审核；没有进入连续开发。
+日期：2026-10-16。代码基线：878b69081f8d5b3ae965bcf1c855390b059caa33。被审核规划：514410b；关联 [PR #77](https://github.com/CoderLambert/news-aggregator/pull/77)。状态：修订后待审核，未开始产品实现。
 
-## 交付与范围
+## 本次范围
 
-按用户确认原文新增ARCHITECTURE.md（578行，SHA256 `a4614cd812d5e0d66a9211e88ecf72500513d0ccafce3aeb046633f2abee99e1`），以及七份核心合同、三份证据审计、七份独立ADR、37项主任务的111份task/tests/report、逐来源工单模板及校验说明。T29是汇总门禁，实际N份单源工单必须T24在授权副本盘点后生成并另行审核；最终37+N，不猜测生产来源数量。
+用户要求按上一轮“修改后批准”的意见修订对应文档和 PR。所有修改限定本规划目录；原工作区 backend/db.sqlite3 和两份未跟踪文档未纳入。没有读取业务行、修改产品、执行迁移/恢复/来源切换或合并 PR。
 
-所有改动位于docs/plans/rss-engine-migration/。原工作区本地SQLite与未跟踪文件未暂存；本轮不修改产品功能、模型、迁移、线上配置，不执行数据回填/来源切换。规划文档提交SHA/PR以本分支Git历史及关联PR元数据为准，避免自引用SHA。
+ARCHITECTURE.md 为用户确认原文，578 行、SHA256 a4614cd812d5e0d66a9211e88ecf72500513d0ccafce3aeb046633f2abee99e1，字节保持。原 T00–T36 保留引用，26 个有效单元、11 个合并索引；111 个任务文件仍存在，其中索引只跳转，不重复交付。
 
-## 已执行证据与静态校验
+## 审核问题与修订
 
-git fetch origin、status、rev-parse origin/main和ls-remote核实基线；git/源码/CI定义和官方上游资料已读取。原文cmp字节一致。完整可重复检查命令见[VALIDATION.md](VALIDATION.md)：任务数量和文件、依赖表/各任务/图的一致性与无环、全部本地链接和C01–C11锚点、架构hash、纯Markdown范围、diff whitespace。实际执行退出码0，37个主节点、111份任务文档、369个本地链接通过，依赖无环且表/图/任务一致；G0后初始队列为T00/T15/T24。静态校验PASS不覆盖任何产品运行门禁。
+| 审核问题 | 对应修订 |
+| --- | --- |
+| 关联/读取/主写权及共享 Feed 切换不完整 | C02/C11、T05/T07/T09/T25：主写版本与来源 epoch 分离，旧正文接管不改 provenance，成员查询明确，共享旧来源按最小组切换 |
+| history_only 混入可见性 | C02/DATA-MIGRATION：public/personal 不变，paused+原因表达停更 |
+| 已有 Feed 无配置更新路径 | C03/C05/T04/T08：update_feed_policy、GET 核对、政策版本/旧操作失效 |
+| 旧兼容字段译文可能丢失或错配 | C02/C04/T07/T14：LegacyTranslationSnapshot、替换前事务归档、当前 hash 校验和旧任务 CAS |
+| 文章元数据职责遗漏 | C04/T09：source/category/title/summary/time/comments/索引及译文更新权表 |
+| transport 过度建设 | ADR-007/C03：最小 SDK 参数扩展保留，取消通用 transport/精确取消框架；成熟 HTTP 和有证据的小型响应边界 |
+| 人工 verified、固定阈值与通用测试过重 | C04/T06/T07/验收矩阵：unknown 可读，有限人工抽样，阈值可配，测试对应真实风险 |
+| 重复审批与逐源三文件膨胀 | C09/C11/T29：已有部署授权+明确批次，统一来源 manifest/逐源结果，特殊情况才独立工单 |
+| 全量 DDL 冻结及假依赖 | T05 只核心；领域 DDL 随功能，T03 不等 ACL、T14 不等 UI/对账、T25 合成开发提前 |
+| 封存/恢复交付重复 | T26 合并 T36，候选先演练再封存；T29 生产前要求受测基点 |
+| OPML 预览绑定尚未提交选择 | C05/T21：预览绑定 user/file/expiry，确认保存选择/组与幂等 hash |
 
-GitHub保护与rules查询实际HTTP403，不能确认必需检查/保护配置；没有更改或绕过它们。关联PR的CI状态以GitHub当前结果为准，未完成时不称已通过。
+旧事实审计保留代码/上游证据，并注明旧流程建议的版本效力。514410b 报告中的“三个独立 Agent 已通过”和旧静态计数仅属于旧规划历史，不是本次修订的独立复核；本次未启动子 Agent，不宣称已经获得新批准。
 
-## 独立审核与修复
+## 验证记录
 
-三个独立审核Agent分别检查数据/用户兼容、部署回滚、上游契约。首轮未通过，发现的规划P1已全部修复后复核通过：
+修订静态校验已实际执行，退出码 0：26 个有效单元、11 个合并索引、111 个任务文件、44 条 DAG 边、553 个本地链接全部通过；依赖表/任务/图一致且无环，原文 hash、纯 Markdown 范围及 whitespace 检查通过。命令见 [VALIDATION.md](VALIDATION.md)，覆盖任务/别名/表/DAG、链接、原文 hash、纯 Markdown 范围和 whitespace。
 
-| 问题 | 实际修复 | 复核 |
-| --- | --- | --- |
-| 私网防护措辞反向 | 明确FETCHER_ALLOW_PRIVATE_NETWORKS=0，禁止私网访问且防护启用 | 数据/运维/上游通过 |
-| G0要求T00运行结果导致闭环 | G0条件批准验证方案，G1冻结运行字段 | 数据/上游通过 |
-| 轻量runtime拖到迁移后 | 新增T35，T08前置该任务 | 运维通过 |
-| 回滚fence隐含循环 | T03仅工具，T25后新增T36封存，T26依赖T36 | 数据/运维通过 |
-| 运维CLI/多候选选择未定义 | C09完整签名及拒绝语义，逐候选user-bound token | 数据/运维通过 |
-| SDK总期限/响应预算与H入口缺失 | 受限transport、绝对deadline、wire/decoded预算、read_upper_bound | 上游通过 |
-| 网关凭据范围/超限恢复不完整 | 精确origin/route禁跳转；身份不明时保留cursor并BLOCKED | 上游通过 |
+产品测试、真实引擎/网关、数据副本迁移/恢复、浏览器、性能和生产操作全部 NOT_RUN。真实条件缺失按具体运行门禁标 BLOCKED，不能用文档检查替代。
 
-审核身份：audit_data、audit_operations、verify_upstream；它们未编写主控七份合同和任务设计，独立检查后报告修复关闭。它们分别编写过对应的事实审计文档；本轮复核结论仅针对规划一致性，不是产品代码独立审核或实际验收。
+修订前核对 514410b 的 [CI 运行 38876447321](https://github.com/CoderLambert/news-aggregator/actions/runs/38876447321)：frontend 通过；backend-and-release-gates 为 1792 passed、2 failed，均在 tests/crawler/test_crawl_all_serialization.py 经 runtime_registry 访问数据库时缺 pytest-django 数据库许可。本次不修改该既有代码/测试。新提交的 CI 另以 GitHub 实际结果为准，不继承旧 PASS/FAIL，也不预先称全部通过。既有保护 API 403 是旧审计事实，不推断目前没有保护、不绕过门禁；本次不合并 PR。
 
-## 未通过的实际门禁
+## 后续入口
 
-T00/T01真实引擎/安全/网关、T24实际数据副本盘点、T26/T27迁移与浏览器、T33资源/最终回归均未运行。网关DNS/证书/公网回流、GitHub路由Token、实际源可用性/字段、版本/digest和模型状态须实测。产品报告全部NOT_STARTED/NOT_RUN，所需环境缺失标BLOCKED。
-
-生产迁移/批量回填/来源切换/宿主停运/数据恢复/最终发布均没有本轮授权；须精确工单批准。本PR只供规划审核，不合并、不执行后续开发。
-
-## 建议队列
-
-规划审核后：T00/T15/T24（证据）；T00验收后：T02/T04/T06首组实现候选。最多3项，公共schema/文件严格串行。T05统一DDL，T35轻量runtime在worker前，T36完整fence兼容基点在迁移演练前。详细图见[DEPENDENCIES.md](DEPENDENCIES.md)。
+规划复核后首组 T00/T06/T16，T05 尽早进入下一组；T24 缺副本不阻塞其他独立开发。按 [TASKS.md](TASKS.md) 区分开发、集成和上线；生产切源、恢复及发布仍需针对实际范围的授权。

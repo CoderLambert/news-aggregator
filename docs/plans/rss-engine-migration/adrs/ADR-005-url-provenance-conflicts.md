@@ -1,21 +1,13 @@
-# ADR-005：保留 URL 唯一约束并隔离来源冲突
+# ADR-005：分开文章关联、读取和主写权
 
-状态：PROPOSED，待本规划PR独立审核。
+状态：修订提案，等待规划审核；用户已确认的产品语义保持。本文件不授权生产切换、恢复或删除数据。
 
-## 问题与证据
+保留 News.url 唯一与旧 PK/FK；复合 EngineEntryMap 防止跨实例数字 ID 碰撞。完全相同规范 URL、身份和政策兼容时允许增加频道关联，不需要授予第二 Feed 主写权；无法证明兼容的冲突留记录，不覆写或扩大权限。
 
-News.url全局唯一且多个逻辑频道可收同文；不同政策的正文可能借复用News扩大可见范围。
+C02 明确唯一正文主写者及 body_owner_version；Source epoch、政策版本、任务 lease 分开。旧正文接管只转换写入权，不改历史文本/provenance/hash。新旧写入都检查文章级主写权，不能仅凭自己来源仍为 legacy 覆盖已接管文章。
 
-证据：[BASELINE-AUDIT.md](../BASELINE-AUDIT.md)、[OPERATIONS-AUDIT.md](../OPERATIONS-AUDIT.md)、[UPSTREAM-VERIFICATION.md](../UPSTREAM-VERIFICATION.md)。原始方向见[ARCHITECTURE.md](../ARCHITECTURE.md)，不改变Miniflux/PG/RSSHub分工。
+publication=public/personal 与 paused/停更独立。历史只读不是第三种可见性；共享 Feed 的旧来源按最小切换组处理，成员查询保留旧关系并接入新映射。
 
-## 决议与影响
+T05/T07/T09/T11/T25/T26 分别验证约束、提交、成员、权限、切换和往返保留。没有为迁移拆分文章主表、重建用户关系或建设通用冲突审核平台。
 
-保留旧PK与URL唯一；增加复合EngineEntryMap及body主写绑定。仅身份/政策均证明兼容时复用News；否则隔离冲突并记录阻塞，不覆盖正文或提升权限。
-
-不为RSS换底层顺带拆文章表或重建用户FK；某些跨Feed冲突会等待人工审查，这是明确边界。
-
-## 验收与回滚
-
-T05唯一键及原FK、T07正文CAS、T11跨来源/用户泄漏、T26副本迁移共同通过；政策证据不足即BLOCKED。
-
-对应任务与合同见[ARCHITECTURE-DECISIONS.md](../ARCHITECTURE-DECISIONS.md)、[INTERFACE-CONTRACTS.md](../INTERFACE-CONTRACTS.md)。任何新的架构变更须另立ADR审核；本ADR不授予生产修改、数据删除或批量回填权限。
+事实依据：[BASELINE-AUDIT.md](../BASELINE-AUDIT.md)、[OPERATIONS-AUDIT.md](../OPERATIONS-AUDIT.md)、[UPSTREAM-VERIFICATION.md](../UPSTREAM-VERIFICATION.md)。实施入口：[接口合同](../INTERFACE-CONTRACTS.md)、[任务清单](../TASKS.md)、[验收矩阵](../ACCEPTANCE-MATRIX.md)。

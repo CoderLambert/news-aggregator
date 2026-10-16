@@ -1,5 +1,7 @@
 # NewsHub RSS 重构代码基线与数据兼容审计
 
+> 证据版本说明：本文保留对 878b690 / 上游候选版本的静态审计事实，不是运行证明。514410b 之后的任务编号、并行/审批/DDL/transport 和验收建议由修订后的 [决议](ARCHITECTURE-DECISIONS.md)、[接口合同](INTERFACE-CONTRACTS.md)、[任务](TASKS.md) 覆盖；不得把历史建议当作额外前置。
+
 审计日期：2026-10-16。固定代码基线：`878b69081f8d5b3ae965bcf1c855390b059caa33`。本报告描述该提交的源码事实及迁移合同要求，不证明线上已实现目标架构，也不构成生产迁移授权。
 
 ## 审计范围与证据边界
@@ -63,7 +65,7 @@
 
 ## 身份、来源政策与可见性风险
 
-1. `News.url` 全局唯一，而 `News.source` 为单值。相同 URL 出现在多个 Feed 时，必须先验证身份、政策和历史 provenance 是否兼容，再附加映射。不能以 Feed 创建时间、名称、内容长度或引擎 ID 决定覆盖权；无法确定时拒收该冲突并留下可审核记录，暂停依赖该来源的迁移验收。
+1. `News.url` 全局唯一，而 `News.source` 为单值。相同 URL 出现在多个 Feed 时，必须先验证身份和政策是否兼容，再附加映射；关联权不授予正文主写权，历史 provenance 不因附加映射改写。不能以 Feed 创建时间、名称、内容长度或引擎 ID 决定覆盖权；无法确定时拒收该冲突并留下可审核记录，暂停依赖该来源的迁移验收。
 2. 来源名称唯一不是 Feed 身份。同名新 Feed 不能命中旧 `Source` 后静默改写其订阅对象。旧发布者 `upstream_id` 与 Miniflux entry ID 命名空间不同；引擎重建时 ID 也不能当作稳定发布者身份。
 3. 现有文章 URL 规范化要求文章路径、最大 500 字符，保留业务 query 编码/顺序并去除部分跟踪参数；不能直接用于 Feed URL 规范化，也不能新增猜测性 canonical 合并。超限、URL 变更与已有唯一 URL 冲突需要明确拒收结果。证据：[`article_identity.py:13`](https://github.com/CoderLambert/news-aggregator/blob/878b69081f8d5b3ae965bcf1c855390b059caa33/backend/api/services/article_identity.py#L13)。
 4. 当前 `channel_filter`、地区和分类成员资格依赖旧政策 key 和 `NewsSourceItem`。新 Feed 绑定必须先覆盖这些关系查询，历史成员继续有效。证据：[`channel_articles.py:6`](https://github.com/CoderLambert/news-aggregator/blob/878b69081f8d5b3ae965bcf1c855390b059caa33/backend/api/services/channel_articles.py#L6)。
@@ -121,4 +123,4 @@
 | 最新基线升级、用户关系/译文 hash 保留及回滚 | NOT_RUN | 临时测试库和经批准快照演练；前后对账 |
 | 功能、迁移、浏览器、部署测试 | NOT_RUN | 各开发任务及批次的真实测试报告 |
 
-缺少上述真实测试条件时，开发任务的实际验收门禁应标记 `BLOCKED`，不能写 `PASS`。规划 PR 可审核合同的完整性，但不能代替任何生产授权或开发完成验收。
+缺少上述真实测试条件时，仅相应实际运行门禁标记 `BLOCKED`，不能写 `PASS`；按接口/fixture 的独立开发继续。规划 PR 可审核合同的完整性，但不能代替任何生产授权或开发完成验收。

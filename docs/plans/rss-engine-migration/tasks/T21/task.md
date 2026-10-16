@@ -1,34 +1,32 @@
-# T21：安全预览并导入导出当前用户 OPML
+# T21：交付 OPML 预览、确认、导出与恢复界面
 
-状态：PLANNED / 等待规划审核；实现尚未开始。基线：`878b69081f8d5b3ae965bcf1c855390b059caa33`。
+状态：PLANNED，产品未实现。代码基线：878b690。交付单元：OPML（含 T22）。
 
-## 目标、范围和合同
+## 目标与范围
 
-listparser只接收有界上传字节；禁止网络实体/远端URL获取，解析仅标准订阅清单。一次性user-bound预览token绑定文件hash/所选项/分组，确认调用普通订阅服务，逐项进度。
+listparser 只读上传字节，预览 token 绑定 user/file/expiry；确认校验所选项/本人组后保存 request_hash。领域模型、API、UI 同一交付。
 
-修改范围：backend/api/rss/opml.py；preview/confirm/export。目标追踪：ARCHITECTURE.md 第 6 节；详细合同 [C07](../../INTERFACE-CONTRACTS.md#c07)、[C05](../../INTERFACE-CONTRACTS.md#c05)；附加决议见 [ARCHITECTURE-DECISIONS.md](../../ARCHITECTURE-DECISIONS.md)。
+修改范围：backend/api/rss/opml.py、导入迁移、frontend RSS 导入组件。行为以 [C01–C11](../../INTERFACE-CONTRACTS.md) 为准，架构方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md)。
 
-## 依赖与阻塞
+## 依赖与执行条件
 
-前置：[T19](../T19/task.md)。前置任务必须验收并合并，基线以主控记录的集成 SHA 为准，不能仅依赖未合并分支。RSSHub相关前置只适用于实际RSSHub来源，native路径按DEPENDENCIES中的条件门禁执行。
+集成前置：[T19](../T19/task.md)。
 
-阻塞：规划未审核；对应 C07/C05 未冻结；缺测试依赖/必要运行条件则 BLOCKED。发现新模型需求或合同冲突时，提交独立ADR并暂停依赖任务，不在本任务顺带改模型或增加服务。
+表中前置约束本交付的集成验收/完成，不禁止按已审接口和 fixture 独立开发。组件可先独立于发现页实现，公共入口串行接线；真实上传浏览器在本任务或 T27 复用同版本证据
 
-## 实施与并发边界
+同一关键写入函数/迁移串行修改；公共路由、依赖、types 和 Compose 使用协调后的串行合并，不因共享文件冻结整个任务。独立工作可从已验收基线开分支，合入前 rebase/解决冲突并跑受影响契约；不得把 fixture 通过写成真实运行通过。
 
-从前置合并后的已验收 SHA 建立 `rss/t21` 分支，只包含本任务。互斥资源：`opml-api`。schema/model/migration仅T05所有，后续新DDL先立独立合同变更任务；API全局路由/公共types由主控串行集成，不允许多任务同时修改。最多3项开发任务，同文件重叠即串行。
+## 专项验收
 
-先确认 tests.md 的验收fixture和反例，再实现；不得新增爬虫/XML解析器/原网页提取器/通用任务平台。任务级专项通过后做独立审核；P0/P1修复后才提交合并。
+1. 恶意 XML/深度/大小和凭据拒绝且预览零网络。
+2. 确认后幂等、不同选择重放 409。
+3. 部分失败只重试失败项。
+4. 本人多组导出/再导入幂等，无账号全量/secret。
 
-## 独立验收
+专项反例与命令见 [tests.md](tests.md)。只验证本任务风险，不复制无关的重启/权限/生产授权测试。上线门禁和批次全量见 [ACCEPTANCE-MATRIX.md](../../ACCEPTANCE-MATRIX.md)。
 
-1. 预览零引擎操作，确认只处理用户所选项。
-2. 重复项、部分失败、重试只失败项，已成功不重复注册。
-3. 恶意XML/深嵌套/超大/凭据URL拒绝，无SSRF。
-4. 导出只本人关系/组，无Miniflux账号全量或网关凭据。
+## 交付与恢复
 
-## 交付、审核和回滚
+在 [report.md](report.md) 记录实现/环境/命令/实际结果、SHA/PR/CI、风险和相关证据；同 SHA/配置的公共证据可链接复用。产品仍 NOT_RUN。实质架构/权限语义变化补 ADR，字段/参数调整走普通评审。
 
-实现、测试及必要的实际运行证据归档于本目录的 report.md（大日志使用校验和及受控工件链接）。记录提交/PR/CI、基线与目标SHA、独立审核人和问题修复SHA。满足全部完成定义后才改DONE；缺真实条件不能PASS。
-
-回滚：优先关闭本任务新增入口或回退本PR的应用行为，保留兼容字段、已接收数据和用户关系；不执行reverse migration/生产恢复。 通用审核、批次回归和生产闸门见 [TASKS.md](../../TASKS.md) 与 [ROLLBACK.md](../../ROLLBACK.md)。
+恢复遵循 [ROLLBACK.md](../../ROLLBACK.md)：暂停受影响动作或回受测兼容版本，保留数据，不默认 reverse migration/恢复全库。生产切换/恢复/发布只按具体批准范围执行，本规划修订不授权生产操作。

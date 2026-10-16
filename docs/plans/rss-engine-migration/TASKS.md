@@ -1,71 +1,76 @@
-# 可验收任务、合并顺序与完成证据
+# RSS 迁移交付清单与完成条件
 
-状态：REVIEW_REQUIRED。当前仅完成规划审计；产品任务均NOT_STARTED，不存在已验收开发基线/任务PR。
+状态：REVIEW_REQUIRED；代码基线 878b69081f8d5b3ae965bcf1c855390b059caa33，产品均未实现。修订规划共有 26 个有效交付单元；保留 T00–T36 共 37 个历史编号，其中 11 个为合并索引。来源数量不影响开发节点数量，不再要求 37+N 独立工单。
 
-代码审核基线：`878b69081f8d5b3ae965bcf1c855390b059caa33`。共37个主任务节点（T00–T36，含证据任务、开发任务及T29汇总门禁）；实际逐源切换工单数量N须T24在授权副本盘点后确定。最终执行图为37+N节点，不能将未知N写成0或宣称已全部拆完生产来源。N未知阻塞T29冻结及执行，不阻塞其他已定义接口的实现。每个来源工单只处理一个source_id，不在一个PR机械按目录或一次迁移全站。
+## 有效交付单元
 
-## 任务队列
+“集成前置”表示本单元合入集成验收和宣告 DONE 所需的模块/证据；已审合同/fixture 足够时可先独立开发。真实环境条件另列在任务文件，不能把生产 DNS/Token/数据副本/授权一概变成开发前置。
 
-| ID | 独立交付 | 前置 | 合同 | 当前状态 |
-| --- | --- | --- | --- | --- |
-| [T00](tasks/T00/task.md) | 验证 Miniflux 原生引擎合同并锁定版本 | G0 | C01, C03, C06 | NOT_STARTED / G0待审 |
-| [T01](tasks/T01/task.md) | 验证 RSSHub HTTPS 网关与受支持路由 | T00 | C01, C03, C07 | NOT_STARTED / G0待审 |
-| [T02](tasks/T02/task.md) | 部署隔离的原生 Miniflux 与 PostgreSQL | T00 | C01 | NOT_STARTED / G0待审 |
-| [T03](tasks/T03/task.md) | 交付两库备份恢复工具与严格发布协议 | T02, T05, T11 | C01, C02, C09 | NOT_STARTED / G0待审 |
-| [T04](tasks/T04/task.md) | 封装官方 Miniflux SDK 与受控单篇修复 | T00 | C03 | NOT_STARTED / G0待审 |
-| [T05](tasks/T05/task.md) | 建立唯一身份、来源所有权及兼容扩展模型 | T00 | C02, C04, C05, C06, C08 | NOT_STARTED / G0待审 |
-| [T06](tasks/T06/task.md) | 转换已有 HTML 并保持代码与安全边界 | T00 | C04 | NOT_STARTED / G0待审 |
-| [T07](tasks/T07/task.md) | 接收正文版本并阻止内容退化覆盖 | T05, T06 | C04 | NOT_STARTED / G0待审 |
-| [T08](tasks/T08/task.md) | 执行持久控制意图与幂等引擎连接 | T04, T05, T35 | C02, C03, C05 | NOT_STARTED / G0待审 |
-| [T09](tasks/T09/task.md) | 同步新条目并持久化每页检查点 | T07, T08 | C02, C06 | NOT_STARTED / G0待审 |
-| [T10](tasks/T10/task.md) | 对账所有保留条目并恢复长时间故障 | T09 | C06 | NOT_STARTED / G0待审 |
-| [T11](tasks/T11/task.md) | 统一个人来源可见性与正文读取权限 | T05, T07 | C05, C04 | NOT_STARTED / G0待审 |
-| [T12](tasks/T12/task.md) | 提供用户隔离的已读与未读状态 | T11 | C05, C08 | NOT_STARTED / G0待审 |
-| [T13](tasks/T13/task.md) | 保留阅读体验并移除首访自动抓取 | T09, T11 | C04, C05 | NOT_STARTED / G0待审 |
-| [T14](tasks/T14/task.md) | 让翻译、问答、研究和 TTS 只消费授权内容 | T10, T11, T13 | C04, C05, C10 | NOT_STARTED / G0待审 |
-| [T15](tasks/T15/task.md) | 核验来源目录快照格式与许可证 | G0 | C07 | NOT_STARTED / G0待审 |
-| [T16](tasks/T16/task.md) | 导入版本化目录并提供关键词搜索 | T05, T15 | C07, C05 | NOT_STARTED / G0待审 |
-| [T17](tasks/T17/task.md) | 通过引擎发现网址中的 Feed 候选 | T04, T08, T11 | C03, C05, C07 | NOT_STARTED / G0待审 |
-| [T18](tasks/T18/task.md) | 解析批准的 RSSHub 参数并部署可选网关 | T01, T02, T16, T17 | C03, C07 | NOT_STARTED / G0待审 |
-| [T19](tasks/T19/task.md) | 直接订阅公开 Feed 并复用个人分组 | T08, T11, T16, T17 | C02, C05, C07 | NOT_STARTED / G0待审 |
-| [T20](tasks/T20/task.md) | 交付关键词与网址发现的一键订阅界面 | T13, T16, T17, T19 | C07, C05 | NOT_STARTED / G0待审 |
-| [T21](tasks/T21/task.md) | 安全预览并导入导出当前用户 OPML | T19 | C07, C05 | NOT_STARTED / G0待审 |
-| [T22](tasks/T22/task.md) | 提供 OPML 选择确认和部分失败恢复界面 | T20, T21 | C07 | NOT_STARTED / G0待审 |
-| [T23](tasks/T23/task.md) | 显示真实连接健康与同步落后状态 | T10, T19, T20 | C06, C07 | NOT_STARTED / G0待审 |
-| [T24](tasks/T24/task.md) | 盘点来源覆盖差异并形成逐源迁移清单 | G0 | C02, C05, C11 | NOT_STARTED / G0待审 |
-| [T25](tasks/T25/task.md) | 切换单一来源所有者并隔离旧任务晚写 | T03, T10, T14, T19, T24 | C02, C11 | NOT_STARTED / G0待审 |
-| [T26](tasks/T26/task.md) | 在备份副本演练迁移与兼容回滚 | T12, T14, T22, T23, T25, T36 | C09, C11 | NOT_STARTED / G0待审 |
-| [T27](tasks/T27/task.md) | 完成预生产真实来源与浏览器联合验收 | T26 | C04, C05, C06, C07, C11 | NOT_STARTED / G0待审 |
-| [T28](tasks/T28/task.md) | 执行一个获批来源的生产试点 | T27 | C09, C11 | NOT_STARTED / G0待审 |
-| [T29](tasks/T29/task.md) | 逐源审核其余切换结果并汇总放行 | T28 | C09, C11 | NOT_STARTED / G0待审 |
-| [T30](tasks/T30/task.md) | 退出旧进程并验证重启不会复活 | T29 | C11, C09 | NOT_STARTED / G0待审 |
-| [T31](tasks/T31/task.md) | 删除旧采集代码并拆出仍需的安全工具 | T30 | C10, C11 | NOT_STARTED / G0待审 |
-| [T32](tasks/T32/task.md) | 瘦身依赖并完成唯一部署入口 | T31 | C01, C10, C11 | NOT_STARTED / G0待审 |
-| [T33](tasks/T33/task.md) | 验证最终单栈回归、资源与恢复合同 | T32 | C01, C04, C05, C06, C09, C11 | NOT_STARTED / G0待审 |
-| [T34](tasks/T34/task.md) | 执行获批最终发布并封存迁移证据 | T33 | C09, C11 | NOT_STARTED / G0待审 |
-| [T35](tasks/T35/task.md) | 交付轻量同步运行时并验证无模型预加载 | T00, T04, T05 | C01, C03 | NOT_STARTED / G0待审 |
-| [T36](tasks/T36/task.md) | 封存具备完整来源隔离的兼容回滚版本 | T03, T13, T25 | C02, C04, C05, C09, C11 | NOT_STARTED / G0待审 |
+| ID | 交付 | 集成前置 | 状态 |
+| --- | --- | --- | --- |
+| [T00](tasks/T00/task.md) | 验证最小引擎合同并锁定运行版本 | 无 | NOT_STARTED |
+| [T02](tasks/T02/task.md) | 部署原生引擎及轻量同步运行时 | T00 | NOT_STARTED |
+| [T03](tasks/T03/task.md) | 扩展发布角色与两库备份恢复工具 | T02, T05 | NOT_STARTED |
+| [T04](tasks/T04/task.md) | 封装 SDK、配置更新与持久单篇修复 | T00 | NOT_STARTED |
+| [T05](tasks/T05/task.md) | 建立核心身份、权限和同步兼容模型 | 无 | NOT_STARTED |
+| [T06](tasks/T06/task.md) | 安全转换已有 HTML 并保持代码文本 | 无 | NOT_STARTED |
+| [T07](tasks/T07/task.md) | 提交正文并保护旧兼容译文与版本 | T05, T06 | NOT_STARTED |
+| [T08](tasks/T08/task.md) | 执行幂等控制意图与政策收敛 | T02, T04, T05 | NOT_STARTED |
+| [T09](tasks/T09/task.md) | 同步元数据、正文并完成全保留条目对账 | T07, T08 | NOT_STARTED |
+| [T11](tasks/T11/task.md) | 统一文章、来源和正文授权读取 | T05 | NOT_STARTED |
+| [T13](tasks/T13/task.md) | 保留阅读体验并提供个人已读状态 | T11 | NOT_STARTED |
+| [T14](tasks/T14/task.md) | 统一 AI/TTS 本地上下文与译文版本读取 | T11 | NOT_STARTED |
+| [T16](tasks/T16/task.md) | 验证并导入来源目录及本地搜索 | 无 | NOT_STARTED |
+| [T17](tasks/T17/task.md) | 通过引擎发现网址中的 Feed 候选 | T04, T08 | NOT_STARTED |
+| [T18](tasks/T18/task.md) | 验证并接入可选 RSSHub 网关与标准路由 | T00, T02, T04, T16 | NOT_STARTED |
+| [T19](tasks/T19/task.md) | 直接订阅 Feed 并复用个人分组 | T05, T08, T11 | NOT_STARTED |
+| [T20](tasks/T20/task.md) | 交付发现订阅界面与连接健康展示 | T11, T16, T17, T19 | NOT_STARTED |
+| [T21](tasks/T21/task.md) | 交付 OPML 预览、确认、导出与恢复界面 | T19 | NOT_STARTED |
+| [T24](tasks/T24/task.md) | 盘点来源差异和共享切换组 | 无 | NOT_STARTED |
+| [T25](tasks/T25/task.md) | 实现共享来源切换与全部旧写入 fencing | T05, T07 | NOT_STARTED |
+| [T26](tasks/T26/task.md) | 演练迁移恢复并封存兼容回滚版本 | T03, T09, T11, T13, T14, T24, T25 | NOT_STARTED |
+| [T27](tasks/T27/task.md) | 完成真实来源与浏览器产品联合验收 | T20, T21, T26 | NOT_STARTED |
+| [T29](tasks/T29/task.md) | 执行来源试点与后续迁移批次 | T27 | NOT_STARTED |
+| [T30](tasks/T30/task.md) | 停止旧运行入口并验证重启 | T29 | NOT_STARTED |
+| [T31](tasks/T31/task.md) | 删除旧采集代码、依赖并统一部署入口 | T30 | NOT_STARTED |
+| [T33](tasks/T33/task.md) | 验证最终单栈并执行获批发布 | T31 | NOT_STARTED |
 
-每项的目标/范围/技术方案见task.md，专项案例/命令/预期见tests.md；report.md目前均是未执行模板，不能把文件存在视为完成。
+T17 的授权缓存预览在 T20 联合接入 T11；T19 的目录/token 分支在 T20 联合接入 T16/T17；T13 的真实修复、T20 的真实健康和原生后台预获取在 T27 联合验证。这些是条件接线，不让基本 UI/直接 URL 功能等待整个后端完成。
 
-## 开发与合并规程
+## 合并索引
 
-1. G0通过后，主控只选前置任务已验收合并、合同已冻结且无互斥文件的任务。上游验证任务先取得隔离环境及所需凭据；实际运行缺失标BLOCKED。
-2. 从主控登记的已验收集成SHA创建独立分支与worktree。当前规划分支不是未来开发基线，不从未验收的兄弟PR堆叠开发。
-3. 先编写/确认验收及反例，限定文件和资源锁；schema/model/migration由T05串行拥有，新增需求先ADR，不在下游偷偷增加列。
-4. 专项、类型/静态/契约、必要实际运行通过；由独立Agent检查实现与冻结合同。P0/P1修复，证据关联修复SHA。
-5. 填report.md的真实环境/命令/退出码/样本/CI/PR/风险/回滚，PR关联任务ID和验收文档。
-6. 主控检查分支保护和必需CI后按依赖合并，不使用admin绕过；更新任务状态/集成SHA，重新计算ready集。查询保护API403只意味着未知，不是允许省略检查。
-7. 每批按ACCEPTANCE-MATRIX回归；失败立即停止依赖开发，先修复，再重算队列。
+| 历史编号 | 实际交付所有者 |
+| --- | --- |
+| [T01](tasks/T01/task.md) | T18 |
+| [T10](tasks/T10/task.md) | T09 |
+| [T12](tasks/T12/task.md) | T13 |
+| [T15](tasks/T15/task.md) | T16 |
+| [T22](tasks/T22/task.md) | T21 |
+| [T23](tasks/T23/task.md) | T09（后台）；T20（界面） |
+| [T28](tasks/T28/task.md) | T29 |
+| [T32](tasks/T32/task.md) | T31 |
+| [T34](tasks/T34/task.md) | T33 |
+| [T35](tasks/T35/task.md) | T02 |
+| [T36](tasks/T36/task.md) | T26 |
 
-状态：NOT_STARTED→READY→IN_PROGRESS→REVIEW→DONE；条件缺失为BLOCKED并明确解除项。DONE必须满足代码/专项/API或DB契约/必要实际验收/独立审核/PR提交CI/文档/无未声明副作用全部要求。不以mock、编译或单测替代实际验收。
+合并不是完成。原 task/tests/report 改为链接索引，不再独立开 PR 或复制验收。T29 内保留“试点通过再扩大”的运行门禁；T33 内保留“最终验证后另核对发布授权”的阶段。T26 在同次演练中先测试候选，再封存兼容基点。
 
-## 首批建议
+## 工作与合并规则
 
-G0后证据批次：T00（引擎真实合同及版本）、T15（目录快照/许可证）、T24（来源及数据兼容盘点），至多3项；各自独立，但T24的实际计数需要获授权副本，没有时只完成静态部分并保留BLOCKED。
+1. 规划审核后从受审基线建立独立分支/worktree；合同明确即可编写模块和 fixture，不必等所有上游任务 DONE 才开始。
+2. 前置集成、共享文件和环境门禁分别管理。共同 urls/types/依赖清单/Compose 通过小型公共接口提交或串行合并解决，必要时 rebase 并跑相关契约；同一写入函数、迁移文件串行修改。
+3. T05 仅核心 DDL；T13/T16/T21 拥有各自领域 DDL，迁移编号由集成人串行协调。普通字段/索引/限额变化不另立 ADR；架构、权限语义和兼容边界变化须复核决议。
+4. 每项按风险跑专项和适用契约；PR 遵守实际必需 CI。实现均评审，身份/ACL/迁移/恢复等关键风险独立复核；不机械要求每个纯函数/文档任务再启动一个 Agent。
+5. 报告记录真实命令/退出码、环境、SHA/PR/CI 和适用工件。公共验收证据在 SHA/配置和相关代码未改变时链接复用；没有真实运行就标 NOT_RUN/BLOCKED。
+6. 按 [验收矩阵](ACCEPTANCE-MATRIX.md) 在集成节点跑全量。失败只冻结受影响合入/上线路径，无关开发继续；修复后重跑相关测试。
+7. 不绕过分支保护，不自动合并。保护 API 不可见时标未知，不能据此推断无要求。本次授权仅修订文档和 PR。
 
-T00验收后第一组实现候选：T02（原生隔离部署）、T04（SDK适配）、T06（纯内容转换）。T00已经锁定版本及公共契约，三个任务各自在不同文件/测试范围工作；依赖声明集中由主控串行集成。T05模型迁移另开串行任务，不能与任何模型写任务并行。RSSHub验证T01可用空闲名额推进，不阻断native路径。
+状态：NOT_STARTED→IN_PROGRESS→REVIEW→DONE；独立记录集成/运行门禁 BLOCKED 及原因。模块可先完成开发测试，任务明确要求的实际运行验收缺失则不能 DONE；它也不自动阻断只依赖接口的独立开发。
 
-## 变更记录
+## 首批并行建议
 
-本轮只有规划文档。三项用户明确确认已记录ADR-002/003/004，其他技术合同/参数/任务拆分等待规划PR审核及T00证据。实际来源工单未实例化是公开阻塞，不是允许依赖未知接口；C11已定义它们的输入、测试、锁、输出和回滚，T24补实际ID后须审核更新任务清单再运行。
+首组最多 3 项：T00 最小引擎实验、T06 纯转换、T16 目录/搜索。T05 在核心数据合同确认后应尽早进入下一组，可与 SDK/部署工作并行；T24 静态清单可利用空闲时间推进，副本缺失不冻结其他任务。
+
+T02/T04 可先按候选版本/契约实现，T00 完成后锁定实际制品并集成。T07 与 T11 可在 T05 后独立推进；T14 不依赖阅读 UI/对账；T25 在核心模型/提交服务后用合成数据开发，真实切源在 T29 才要求完整上线门禁。
+
+逐源迁移使用一份 manifest 和逐源结果，按共享 Feed 最小切换组串行执行；特殊政策/失败才单独工单，普通来源不要求独立 task/tests/report/PR。
