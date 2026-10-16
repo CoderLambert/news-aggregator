@@ -49,12 +49,16 @@ from api.services.article_fetcher.execution import ExecutionStopped
 stop = threading.Event()
 signal.signal(signal.SIGTERM, lambda *_: stop.set())
 with WorkerRuntime(stop, heartbeat_interval=60) as runtime:
-    try:
-        while not stop.wait(.02):
+    while not stop.wait(.02):
+        try:
             runtime.guard()
-    except ExecutionStopped as error:
-        # SIGTERM can arrive between the wait and the guard.
-        assert stop.is_set() and error.error_code == 'canceled'
+        except ExecutionStopped as error:
+            # SIGTERM may arrive between the wait returning and guard().
+            # A cancelled guard is the normal shutdown path; other failures
+            # must still terminate this test subprocess with an error.
+            if error.error_code != 'canceled' or not stop.is_set():
+                raise
+            break
 '''
 CREATE_NEWS = r'''
 from api.models import News, Source, Category
