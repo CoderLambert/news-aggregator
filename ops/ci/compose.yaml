@@ -78,6 +78,7 @@ services:
       TMPDIR: /ci-work/_work/.ci-tmp
       XDG_CACHE_HOME: /ci-work/_work/.cache
       PIP_CACHE_DIR: /ci-work/_work/.cache/pip
+      CI_BACKEND_CACHE_REV: ${CI_BACKEND_CACHE_REV:-1}
       npm_config_cache: /ci-work/_work/.cache/npm
       PLAYWRIGHT_BROWSERS_PATH: /opt/ci-browsers
       CHROMIUM_EXECUTABLE: /usr/local/bin/ci-chromium
@@ -126,6 +127,7 @@ services:
       UNSET_CONFIG_VARS: "true"
       TMPDIR: /ci-frontend/_work/.ci-tmp
       XDG_CACHE_HOME: /ci-frontend/_work/.cache
+      CI_FRONTEND_CACHE_REV: ${CI_FRONTEND_CACHE_REV:-1}
       npm_config_cache: /ci-frontend/_work/.cache/npm
     volumes:
       - frontend-state:/runner/data
