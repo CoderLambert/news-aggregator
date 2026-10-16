@@ -1,0 +1,34 @@
+{
+  "sha256": "0bafd1dae4d456e5e907c98e80aba03061a0e68b346a1b8e8c1c9038190ee7c4",
+  "schema_version": 1,
+  "metadata_revision": "newshub-curated-v1",
+  "provenance_commit": "17d48915bbacd6a448578c64676a6dac4c2f263e",
+  "license": "CC0-1.0 AND AGPL-3.0-only",
+  "upstream": {
+    "id": "plenaryapp/awesome-rss-feeds",
+    "commit": "9ab2482cae9031a5a39635c887fcfc8ece7e130a",
+    "license": "CC0-1.0",
+    "url": "https://github.com/plenaryapp/awesome-rss-feeds",
+    "files": {
+      "recommended/with_category/Programming.opml": {
+        "sha256": "0c3e43dc3fdecf2d8f99e4192d85d4a0d35ccbed2db9c9ef01bd357e85745333",
+        "url": "https://github.com/plenaryapp/awesome-rss-feeds/blob/9ab2482cae9031a5a39635c887fcfc8ece7e130a/recommended/with_category/Programming.opml"
+      },
+      "recommended/with_category/Web%20Development.opml": {
+        "sha256": "687624b4102e35b2a2231ae41f2c6ccecec4c8c3ce0f930d357be312a9695f39",
+        "url": "https://github.com/plenaryapp/awesome-rss-feeds/blob/9ab2482cae9031a5a39635c887fcfc8ece7e130a/recommended/with_category/Web%20Development.opml"
+      }
+    },
+    "license_sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "included_entries": 38,
+    "excluded_insecure_http_urls": [
+      "http://feeds.codenewbie.org/cnpodcast.xml",
+      "http://feeds.feedburner.com/GDBcode",
+      "http://feeds.feedburner.com/ProgrammingThrowdown",
+      "http://feeds.hanselman.com/ScottHanselman",
+      "http://scripting.com/rss.xml",
+      "http://feeds.feedburner.com/se-radio",
+      "http://6figuredev.com/feed/rss/"
+    ]
+  }
+}

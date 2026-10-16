@@ -1,0 +1,522 @@
+{
+  "schema_version": 1,
+  "source": {
+    "id": "newshub-curated-v1",
+    "commit": "17d48915bbacd6a448578c64676a6dac4c2f263e",
+    "license": "CC0-1.0 AND AGPL-3.0-only",
+    "url": "https://github.com/CoderLambert/news-aggregator"
+  },
+  "collections": [
+    {
+      "source": {
+        "id": "plenaryapp/awesome-rss-feeds",
+        "commit": "9ab2482cae9031a5a39635c887fcfc8ece7e130a",
+        "license": "CC0-1.0",
+        "url": "https://github.com/plenaryapp/awesome-rss-feeds"
+      },
+      "entries": [
+        {
+          "key": "https://medium.com/feed/better-programming",
+          "name": "Better Programming - Medium",
+          "description": "Advice for programmers. - Medium",
+          "public_url": "https://medium.com/feed/better-programming",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://feeds.feedburner.com/codinghorror",
+          "name": "Coding Horror",
+          "description": "programming and human factors",
+          "public_url": "https://feeds.feedburner.com/codinghorror",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://feeds.simplecast.com/dLRotFGk",
+          "name": "Developer Tea",
+          "description": "Developer Tea exists to help driven developers connect to their ultimate purpose and excel at their work so that they can positively impact the people they influence. With over 17 million downloads to date, Developer Tea is a short podcast hosted by Jonathan Cutrell, engineering leader with over 15 years of industry experience. We hope you'll take the topics from this podcast and continue the conversation, either online or in person with your peers. Email: developertea@gmail.com",
+          "public_url": "https://feeds.simplecast.com/dLRotFGk",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://engineering.fb.com/feed/",
+          "name": "Engineering at Meta",
+          "description": "Engineering at Meta Blog",
+          "public_url": "https://engineering.fb.com/feed/",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://slack.engineering/feed",
+          "name": "Engineering at Slack",
+          "description": "Hear directly from Slack's engineers about what we build, why and how we build it, and how you can use it.",
+          "public_url": "https://slack.engineering/feed",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://codeascraft.com/feed/atom/",
+          "name": "Etsy Engineering | Code as Craft",
+          "description": "The engineers who make Etsy make our living with a craft we love: software. This is where we'll write about our craft and our collective experience building and running the world's most vibrant handmade marketplace.",
+          "public_url": "https://codeascraft.com/feed/atom/",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://feeds.twit.tv/floss.xml",
+          "name": "FLOSS Weekly (Audio)",
+          "description": "We're not talking dentistry here; FLOSS is all about Free Libre Open Source Software. Join host Doc Searls and his rotating panel of co-hosts as they talk with the most interesting and important people in the Open Source and Free Software community. Although the show is no longer in production at TWiT, you can enjoy episodes from our archives.",
+          "public_url": "https://feeds.twit.tv/floss.xml",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://about.gitlab.com/atom.xml",
+          "name": "GitLab",
+          "description": "GitLab Blog RSS feed",
+          "public_url": "https://about.gitlab.com/atom.xml",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://www.youtube.com/feeds/videos.xml?user=GoogleTechTalks",
+          "name": "Google TechTalks",
+          "description": "",
+          "public_url": "https://www.youtube.com/feeds/videos.xml?user=GoogleTechTalks",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://medium.com/feed/hackernoon",
+          "name": "HackerNoon.com - Medium",
+          "description": "Elijah McClain, George Floyd, Eric Garner, Breonna Taylor, Ahmaud Arbery, Michael Brown, Oscar Grant, Atatiana Jefferson, Tamir Rice, Bettie Jones, Botham Jean - Medium",
+          "public_url": "https://medium.com/feed/hackernoon",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://feeds.simplecast.com/gvtxUiIf",
+          "name": "Hanselminutes with Scott Hanselman",
+          "description": "Hanselminutes is Fresh Air for Developers. A weekly commute-time podcast that promotes fresh technology and fresh voices. Talk and Tech for Developers, Life-long Learners, and Technologists.",
+          "public_url": "https://feeds.simplecast.com/gvtxUiIf",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://feed.infoq.com",
+          "name": "InfoQ",
+          "description": "InfoQ feed",
+          "public_url": "https://feed.infoq.com",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://blog.jooq.org/feed",
+          "name": "Java, SQL and jOOQ.",
+          "description": "Best Practices and Lessons Learned from Writing Awesome Java and SQL Code. Get some hands-on insight on what's behind developing jOOQ.",
+          "public_url": "https://blog.jooq.org/feed",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://www.joelonsoftware.com/feed/",
+          "name": "Joel on Software",
+          "description": "",
+          "public_url": "https://www.joelonsoftware.com/feed/",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://martinfowler.com/feed.atom",
+          "name": "Martin Fowler",
+          "description": "Master feed of news and updates from martinfowler.com",
+          "public_url": "https://martinfowler.com/feed.atom",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://buffer.com/resources/overflow/rss/",
+          "name": "Overflow - Buffer Resources",
+          "description": "In-depth ideas and guides to social media & online marketing strategy, published by the team at Buffer",
+          "public_url": "https://buffer.com/resources/overflow/rss/",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://softwareengineeringdaily.com/category/podcast/feed",
+          "name": "Podcast Archives - Software Engineering Daily",
+          "description": "",
+          "public_url": "https://softwareengineeringdaily.com/category/podcast/feed",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://www.thecrazyprogrammer.com/category/programming/feed",
+          "name": "Programming Archives - The Crazy Programmer",
+          "description": "Programming, Design and Development",
+          "public_url": "https://www.thecrazyprogrammer.com/category/programming/feed",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://robertheaton.com/feed.xml",
+          "name": "Robert Heaton | Blog",
+          "description": "Software engineer. One-track lover down a two-way lane",
+          "public_url": "https://robertheaton.com/feed.xml",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://feeds.fireside.fm/sdt/rss",
+          "name": "Software Defined Talk",
+          "description": "Get ready for a weekly dose of all things Enterprise Software and Cloud Computing! Join us as we dive into topics including Kubernetes, DevOps, Serverless, Security and Coding. Plus, we’ll keep you entertained with plenty of off-topic banter and nonsense. Don’t worry if you miss the latest industry conference - we’ve got you covered with recaps of all the latest news from AWS, Microsoft Azure, Google Cloud Platform (GCP) and the Cloud Native Computing Foundation (CNCF).",
+          "public_url": "https://feeds.fireside.fm/sdt/rss",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://developers.soundcloud.com/blog/blog.rss",
+          "name": "SoundCloud Backstage Blog",
+          "description": "SoundCloud's developer blog.",
+          "public_url": "https://developers.soundcloud.com/blog/blog.rss",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://labs.spotify.com/feed/",
+          "name": "Spotify Engineering",
+          "description": "Spotify’s official technology blog",
+          "public_url": "https://labs.spotify.com/feed/",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://stackabuse.com/rss/",
+          "name": "Stack Abuse",
+          "description": "Learn Python, Java, JavaScript/Node, Machine Learning, and Web Development through articles, code examples, and tutorials for developers of all skill levels.",
+          "public_url": "https://stackabuse.com/rss/",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://stackoverflow.blog/feed/",
+          "name": "Stack Overflow Blog",
+          "description": "Essays, opinions, and advice on the act of computer programming from Stack Overflow.",
+          "public_url": "https://stackoverflow.blog/feed/",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://medium.com/feed/airbnb-engineering",
+          "name": "The Airbnb Tech Blog - Medium",
+          "description": "Creative engineers and data scientists building a world where you can belong anywhere. http://airbnb.io - Medium",
+          "public_url": "https://medium.com/feed/airbnb-engineering",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://cynicaldeveloper.com/feed/podcast",
+          "name": "The Cynical Developer",
+          "description": "A UK based Technology and Software Developer Podcast that helps you to improve your development knowledge and career, through explaining the latest and greatest in development technology and providing you with what you need to succeed as a developer.",
+          "public_url": "https://cynicaldeveloper.com/feed/podcast",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://github.blog/feed/",
+          "name": "The GitHub Blog",
+          "description": "Updates, ideas, and inspiration from GitHub to help developers build and design software.",
+          "public_url": "https://github.blog/feed/",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://blog.jetbrains.com/feed",
+          "name": "The JetBrains Blog",
+          "description": "Developer Tools for Professionals and Teams",
+          "public_url": "https://blog.jetbrains.com/feed",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://feeds.transistor.fm/productivity-in-tech-podcast",
+          "name": "The PIT Show: Reflections and Interviews in the Tech World",
+          "description": "This is the show where I sit down with people in the tech space and talk about what they are doing and how they get it all done.",
+          "public_url": "https://feeds.transistor.fm/productivity-in-tech-podcast",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://feeds.simplecast.com/XA_851k3",
+          "name": "The Stack Overflow Podcast",
+          "description": "<p>For well over a decade, the Stack Overflow Podcast has been exploring what it means to be a developer and how the art and practice of software engineering is changing our world. From creating code to running it in production, we host important conversations and fascinating guests that will help you understand how technology is made and where it’s headed. Hosted by Ryan Donovan, the Stack Overflow Podcast is your home for all things software.</p>",
+          "public_url": "https://feeds.simplecast.com/XA_851k3",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://thewomenintechshow.com/category/podcast/feed/",
+          "name": "The Women in Tech Show: A Technical Podcast",
+          "description": "A podcast about what we work on, not what it feels like to be a woman in tech. Hosted by Edaena Salinas, Software Engineer at Microsoft. Website: wit.fm",
+          "public_url": "https://thewomenintechshow.com/category/podcast/feed/",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://overreacted.io/rss.xml",
+          "name": "overreacted — A blog by Dan Abramov",
+          "description": "A blog by Dan Abramov",
+          "public_url": "https://overreacted.io/rss.xml",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://www.reddit.com/r/programming/.rss",
+          "name": "programming",
+          "description": "Computer Programming",
+          "public_url": "https://www.reddit.com/r/programming/.rss",
+          "tags": [
+            "Programming"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://alistapart.com/main/feed/",
+          "name": "A List Apart: The Full Feed",
+          "description": "Articles for people who make web sites.",
+          "public_url": "https://alistapart.com/main/feed/",
+          "tags": [
+            "Web Development"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://css-tricks.com/feed/",
+          "name": "CSS-Tricks",
+          "description": "Tips, Tricks, and Techniques on using Cascading Style Sheets.",
+          "public_url": "https://css-tricks.com/feed/",
+          "tags": [
+            "Web Development"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://www.codewall.co.uk/feed/",
+          "name": "Code Wall",
+          "description": "",
+          "public_url": "https://www.codewall.co.uk/feed/",
+          "tags": [
+            "Web Development"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://davidwalsh.name/feed",
+          "name": "David Walsh Blog",
+          "description": "A blog featuring tutorials about JavaScript, HTML5, AJAX, PHP, CSS, WordPress, and everything else development.",
+          "public_url": "https://davidwalsh.name/feed",
+          "tags": [
+            "Web Development"
+          ],
+          "language": "en",
+          "region": "international"
+        },
+        {
+          "key": "https://gosink.in/rss/",
+          "name": "Sink In - Tech Learnings",
+          "description": "Sink In - Tech Learnings (Shah Code Exporters - FZCO)",
+          "public_url": "https://gosink.in/rss/",
+          "tags": [
+            "Web Development"
+          ],
+          "language": "en",
+          "region": "international"
+        }
+      ]
+    },
+    {
+      "source": {
+        "id": "newshub-curated-v1",
+        "commit": "17d48915bbacd6a448578c64676a6dac4c2f263e",
+        "license": "CC0-1.0",
+        "url": "https://github.com/CoderLambert/news-aggregator"
+      },
+      "entries": [
+        {
+          "key": "react-releases",
+          "name": "React releases",
+          "description": "React library releases on GitHub",
+          "language": "en",
+          "region": "international",
+          "tags": [
+            "React",
+            "JavaScript",
+            "github"
+          ],
+          "public_url": "https://github.com/facebook/react/releases.atom"
+        },
+        {
+          "key": "chinanews-health",
+          "name": "中新网健康",
+          "description": "中国新闻社健康资讯",
+          "language": "zh",
+          "region": "domestic",
+          "tags": [
+            "中文",
+            "健康",
+            "医疗"
+          ],
+          "public_url": "https://www.chinanews.com.cn/rss/jk.xml"
+        }
+      ]
+    },
+    {
+      "source": {
+        "id": "DIYgod/RSSHub",
+        "commit": "140f27c701b499703cb3e22cb4541d50b1406c40",
+        "license": "AGPL-3.0-only",
+        "url": "https://github.com/DIYgod/RSSHub"
+      },
+      "namespaces": {
+        "github": {
+          "name": "GitHub",
+          "description": "::: tip\nGitHub provides some official RSS feeds:\n\n- Repo releases: `https://github.com/:owner/:repo/releases.atom`\n- Repo commits: `https://github.com/:owner/:repo/commits.atom`\n- User activities: `https://github.com/:user.atom`\n- Private feed: `https://github.com/:user.private.atom?token=:secret` (Note: You can ONLY obtain this url via an [API](https://docs.github.com/en/rest/activity/feeds?apiVersion=2022-11-28) call with a [Personal Access Token](https://github.com/settings/tokens/new) with **ENOUGH** scopes now.)\n- Wiki history: `https://github.com/:owner/:repo/wiki.atom`\n\n:::",
+          "lang": "en",
+          "routes": {
+            "/issue/:user/:repo/:state?/:labels?": {
+              "path": "/issue/:user/:repo/:state?/:labels?",
+              "categories": [
+                "programming"
+              ],
+              "parameters": {
+                "user": "GitHub username",
+                "repo": "GitHub repo name",
+                "state": {
+                  "description": "the state of the issues.",
+                  "default": "open",
+                  "options": [
+                    {
+                      "label": "Open",
+                      "value": "open"
+                    },
+                    {
+                      "label": "Closed",
+                      "value": "closed"
+                    },
+                    {
+                      "label": "All",
+                      "value": "all"
+                    }
+                  ]
+                },
+                "labels": "a list of comma separated label names"
+              },
+              "name": "Repo Issues"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

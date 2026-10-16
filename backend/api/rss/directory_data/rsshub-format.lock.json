@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/DIYgod/RSSHub",
+  "commit": "8e94b949479ba3295ee9653806f59b2be6559158",
+  "license": "AGPL-3.0-only",
+  "files": {
+    "LICENSE": {
+      "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+      "url": "https://github.com/DIYgod/RSSHub/blob/8e94b949479ba3295ee9653806f59b2be6559158/LICENSE"
+    },
+    "lib/types.ts": {
+      "sha256": "f9eb3ea3c2df0154b5c8a5be3483f11f775ddc3a06437bb43ebd78650ada0745",
+      "url": "https://github.com/DIYgod/RSSHub/blob/8e94b949479ba3295ee9653806f59b2be6559158/lib/types.ts"
+    }
+  },
+  "artifact_commit": "140f27c701b499703cb3e22cb4541d50b1406c40",
+  "artifact_path": "build/routes.json",
+  "artifact_sha256": "ae596859ee4b2f75907d9a19b54c4341bd895fad473019fe9305f7a8fab9b14d",
+  "subset_sha256": "e708f6e676fb634d06797caedd9f6fea679649746e6210768227c61265186777",
+  "coverage": [
+    "github: /issue/:user/:repo/:state?/:labels?"
+  ]
+}
