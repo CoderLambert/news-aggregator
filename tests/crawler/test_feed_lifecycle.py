@@ -21,6 +21,10 @@ from django.utils import timezone
 django.setup()
 call_command('migrate', verbosity=0)
 from api.services.source_policy import POLICIES
+from api.services.article_fetcher import safe_http
+def synthetic_dns(url, timeout):
+    assert url == 'http://webkit.org/feed/' and timeout == 3.0
+safe_http.validate_public_url = synthetic_dns
 POLICIES['webkit'] = replace(POLICIES['webkit'], feed_url='http://webkit.org/feed/')
 from scrapy.crawler import CrawlerProcess
 from scrapy.utils.reactor import install_reactor

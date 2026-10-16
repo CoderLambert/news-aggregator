@@ -7,6 +7,14 @@ from scrapy.http import Request, Response
 from news_crawler import download_handlers as handler
 
 
+@pytest.fixture(autouse=True)
+def synthetic_dns(monkeypatch):
+    # These unit downloads never use a socket. The DNS rejection test below
+    # installs its own rejecting validator; the actual HTTP test is subprocess-isolated.
+    from api.services.article_fetcher import safe_http
+    monkeypatch.setattr(safe_http, 'validate_public_url', lambda url, timeout: None)
+
+
 class Stats:
     def __init__(self):
         self.values = {}
@@ -44,7 +52,7 @@ def test_cancel_closes_underlying_download_and_releases_own_token(monkeypatch):
     async def scenario():
         value = instance(Inner())
         pending = asyncio.create_task(value.download_request(Request('https://dev.to/api/articles')))
-        await started.wait()
+        await asyncio.wait_for(started.wait(), timeout=5)
         pending.cancel()
         with pytest.raises(asyncio.CancelledError):
             await pending
