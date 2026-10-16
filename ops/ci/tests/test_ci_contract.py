@@ -56,6 +56,9 @@ class SelfHostedCIContract(unittest.TestCase):
         self.assertIn("cancel-in-progress: true", content)
         self.assertIn("workflow_dispatch:", content)
         self.assertIn("scripts/deploy/local-domain-smoke.sh", content)
+        self.assertIn("docker image inspect alpine:3.22", content)
+        self.assertIn("docker run --rm --pull=never", content)
+        self.assertIn("CI_DIND_DNS_PRIMARY/SECONDARY", content)
         self.assertIn("backend/api/tests/", content)
 
     def test_manual_smoke_also_uses_only_dedicated_runner(self):
@@ -82,6 +85,18 @@ class SelfHostedCIContract(unittest.TestCase):
         svc = cfg["services"]
         self.assertTrue(svc["docker"]["privileged"])
         self.assertNotIn("ports", svc["docker"])
+        # The outer Docker DNS 127.0.0.11 failed Docker Hub resolution on
+        # the first real backend CI. Configure only isolated DinD DNS, both
+        # for DinD itself and for child containers created by its dockerd.
+        self.assertEqual(
+            svc["docker"]["dns"],
+            ["${CI_DIND_DNS_PRIMARY:-1.1.1.1}", "${CI_DIND_DNS_SECONDARY:-8.8.8.8}"],
+        )
+        dind_command = svc["docker"]["command"][0]
+        self.assertIn("--dns=${CI_DIND_DNS_PRIMARY:-1.1.1.1}", dind_command)
+        self.assertIn("--dns=${CI_DIND_DNS_SECONDARY:-8.8.8.8}", dind_command)
+        self.assertNotIn("dns", svc["runner"])
+        self.assertNotIn("dns", svc["runner-frontend"])
         # Overriding image ENTRYPOINT in Compose suppresses its default CMD.
         # Without these explicit arguments upstream gosu prints its usage and
         # runner restarts forever even when registration files exist.
