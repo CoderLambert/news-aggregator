@@ -23,3 +23,5 @@
 - teardown后仅该项目的ps为空，合成PG数据销毁；无用户数据库、现有服务、生产秘密、切源或部署操作。
 
 仅修改自有实验/证据文件，未改应用模型、共享依赖、部署Compose或集成状态。T04可采用实测的SDK最小参数扩展及独立GET确认；T09依排他边界及全保留对账实现，不以published_at过滤。生产响应大小/DTO脱敏由T04，真实网关由T18继续验证。低ID晚提交/并发清理及重启恢复没有在本任务重复宣称通过。
+
+主调度追加验证：集成72ab3a1上的测试代码在独立Python3.12.14环境 `/tmp/newshub-rss-t00-py312` 运行 `python ops/rss/T00/run_live.py`，真实13 passed / 18.49s（退出0）；日志 `/tmp/newshub-rss-t00-py312.log`。该结果补齐runner/SDK Python3.12兼容证据，不改变A4公网门禁。
