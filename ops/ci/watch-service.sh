@@ -31,7 +31,10 @@ case "$ACTION" in
                 || fail "unsupported CI path for systemd unit"
         done
         [[ "$DATA_DIR" == /* ]] || fail "CI_DATA_DIR must be absolute"
-        PYTHON="$(command -v python3)"
+        # systemd --user does not load interactive zsh/mise/pyenv startup files.
+        # Omarchy/Arch provides /usr/bin/python3 from the system packages.
+        [[ -x /usr/bin/python3 ]] || fail "System python3 is required at /usr/bin/python3"
+        PYTHON=/usr/bin/python3
         {
             printf '%s\n' "$MARKER"
             cat <<'UNIT'
