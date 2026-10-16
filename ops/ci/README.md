@@ -70,7 +70,29 @@ gh run list --repo CoderLambert/news-aggregator --workflow ci-runner-smoke.yml -
 
 现有 CI 工作流调整为：PR（同仓库、非 Draft）、main Push、手动 dispatch。移除了其他分支 Push 造成的 PR/Push 双重运行；更新提交时会取消过时 CI；工作流中没有 GitHub 托管 Runner 的回退标签。
 
-## 4. 环境和故障
+## 4. 安装完成后的实际验收
+
+先不要凭 `The runner has already been configured` 判断成功。旧版配置曾缺少显式 Listener CMD，导致 `gosu user-spec command [args]` 循环、3 分钟超时。已在修复提交中为两个 Runner 均补充 `./bin/Runner.Listener run --startuptype service` 并添加静态回归测试。
+
+在 Omarchy 上执行：
+
+~~~bash
+git fetch origin
+git switch feat/docker-self-hosted-actions-20261017
+git pull --ff-only
+bash ops/ci/manage.sh install
+bash ops/ci/manage.sh status
+docker logs --tail 100 newshub-ci-runner-1
+docker logs --tail 100 newshub-ci-runner-frontend-1
+~~~
+
+请使用 `bash ops/ci/manage.sh status` 检查 Compose 状态；它会自动设置 `CI_DATA_DIR`。
+
+**通过标准**：两个 Runner 都显示 Online，前后端 Runner 日志分别出现类似 `Listening for Jobs` 的就绪信息，而不是不断重启；`docker` sidecar 健康。单靠注册文件存在不代表 Runner 在线。
+
+Runner Online 后，PR 保持 Draft 时两项 CI 会被 Skipped。改为 Ready for review，再检查 PR 的两个 Job 是否实际运行；此时重点核对前端 Node 工具链、后端 DinD/共享 TMPDIR/Playwright、整套测试的真实结果。仅当全部通过才合并。
+
+## 5. 环境和故障
 
 - Runner 与 DinD 都需要联网拉镜像和工具；不需要公网入站端口。
 - 预装 Chromium，后端 venv 仍安装原工作流指定版本 playwright==1.62.0。
