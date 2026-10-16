@@ -39,5 +39,5 @@ jobs:
           docker info >/dev/null
       - name: Reuse backend venv
         run: bash ops/ci/install-backend-deps.sh
-      - name: Three full xdist loadfile runs
+      - name: Three full hybrid serial/xdist coverage runs
         run: bash ops/ci/benchmark-xdist.sh

@@ -1,19 +1,21 @@
-# CI-P01 — conservative pytest-xdist feasibility gate
+# CI-P01 — isolated pytest-xdist feasibility gate
 
-This is **not** an unconditional switch to parallel pytest.
+Initial **full** `-n 2 --dist=loadfile` experiment ran 2424 tests in
+125.48 seconds, but failed 16 seed-dependent Django tests. That configuration
+is **not safe** to enable as the normal release gate.
 
-- Dedicated opt-in workflow runs only on trusted same-repo PR changes to these
-  experiment files or when explicitly invoked on the default branch.
-- The backend Runner (3 vCPU / 6GB) runs `-n 2 --dist=loadfile` three times,
-  exercising every existing Python test root on each run.
-- Pinned `pytest-xdist==3.8.0` and `execnet==2.1.1` are installed into
-  their **own persistent XDG cache**, never into the production venv or
-  `backend/requirements.txt`.
-- Failures block benchmark completion; never convert failures to skips, rerun
-  failing tests automatically, or erase existing Docker/venv caches.
-- A passing benchmark is necessary but not sufficient to make xdist the
-  default. Compare against the 235.37s serial baseline; confirm test counts,
-  zero additional skips, memory, and repeatability. Only then move the xdist
-  command into the required full CI in a separate approved change.
-- Default CI (complete Python tests, production build, G1 smoke, frontend)
-  remains untouched while running this experiment.
+The current benchmark tests a fail-closed hybrid:
+- Seven state/seed-sensitive Django modules always run **serial**, retaining
+  their migration and database fixture behavior.
+- The remaining files execute on `-n 2 --dist=loadfile`, using normal
+  per-worker database isolation. Both parts run three times.
+- Each repetition checks the exact combined count: **2424 collected,
+  16 explicitly skipped**; failures are never reclassified as skipped.
+- Tooling versions are frozen (`pytest-xdist==3.8.0`,
+  `execnet==2.1.1`) and installed into a separate private cache, not the
+  backend venv or production dependencies.
+- CI-P01 remains opt-in and keeps the required serial backend/G1 CI intact.
+  Default parallel adoption requires all three hybrid runs to pass, and an
+  independently green default CI run after switching.
+
+No live RSS opt-in, external ports, secrets or production data are used.
