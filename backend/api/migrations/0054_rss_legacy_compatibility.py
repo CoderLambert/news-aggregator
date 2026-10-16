@@ -28,6 +28,7 @@ STATIC_READING_POLICIES = {
     'BBC Health': 'rss_summary_only', 'ScienceDaily 健康': 'rss_summary_only',
 }
 BATCH_SIZE = 200
+BODY_BATCH_SIZE = 20
 
 
 def initialize_legacy(apps, schema_editor):
@@ -38,7 +39,7 @@ def initialize_legacy(apps, schema_editor):
     News = apps.get_model('api', 'News')
     last_id = 0
     while True:
-        sources = list(Source.objects.using(alias).filter(pk__gt=last_id).order_by('pk')[:BATCH_SIZE])
+        sources = list(Source.objects.using(alias).filter(pk__gt=last_id).order_by('pk')[:BODY_BATCH_SIZE])
         if not sources:
             break
         configs = dict(SourceConfig.objects.using(alias).filter(
@@ -58,7 +59,7 @@ def initialize_legacy(apps, schema_editor):
         rows = list(News.objects.using(alias).filter(pk__gt=last_id).order_by('pk').only(
             'pk', 'source_id', 'full_content', 'body_owner_source_id', 'body_owner_binding_id',
             'full_content_hash',
-        )[:BATCH_SIZE])
+        )[:BODY_BATCH_SIZE])
         if not rows:
             break
         for row in rows:
