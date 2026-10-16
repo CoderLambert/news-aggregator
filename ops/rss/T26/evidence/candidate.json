@@ -1,0 +1,148 @@
+{
+  "app_sha": "32a340a0e0535543a52321488a899b8c313f23f9",
+  "artifacts": {
+    ".rss-migration-cb99068da7a904f4.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "SYNTHETIC_ONLY": "55b2cf4112fa01896d903e6761335e763b5fb07aacfc94180460fa598b600f36",
+    "current.json": "7d52bdcc062aaeec006729983902d4b51001beb311f3ec89dbe7126a8d42a2c0",
+    "current.log": "504d7496d39c5272600b90b3b5e3e2996cf46e2de136f5e70f4e5a5bb63df547",
+    "exercise.json": "606d540be3929946af7d886891080144240e18c849801016bd7cfd873a2d8f8e",
+    "exercise.log": "bd5585eecca4188da58ef39930c74b4b2ff03d90164a1df00bc68db14430a78d",
+    "forward.json": "7d52bdcc062aaeec006729983902d4b51001beb311f3ec89dbe7126a8d42a2c0",
+    "forward.log": "6ff175c2a73189af0b2789f178fbbfa648ff697332b5627fa269ca485f3dd1db",
+    "rollback.json": "7592c1882aa6c25fbf1d42da549f6d7edf9997117ff1bf38285a6e9a3c9d5fb7",
+    "rollback.log": "f804a74e13f746388b819c75dd445be35766601a24fb2cde22fb7785d8fc992e",
+    "seed.json": "ec8b7d66efb47dd1fd1f84dee126971e509c0dc37a90d395c8af7ac3755e34d8",
+    "seed.log": "1172d953df7a4ec4101b0d4f4224473fab5ef3235531f4b004257dacbe923afa",
+    "switch_manifest.json": "da1218c974671cf53e0cb08c3e684cffee84d1e1e3b8efe5c95a6b22c66915fb",
+    "synthetic.sqlite3": "ca5105820d2510bb5ebc3a98fe2ecdb4c3f0bb95c8aeebbac9f5fd681439e9cf",
+    "upgrade.json": "54527055e37440a27d0086362456a37611a04da1779e3caa16e1b9af88a99341",
+    "upgrade.log": "5c052575266e101eeab4b6f7686d5cf45eb02a71c0026461544512ebfe4bf290"
+  },
+  "build_bases": {
+    "news-aggregator:local": {
+      "id": "sha256:d593f000671099a3bdcede08379c2e2ce5738f14a4586632d173a7d4ebc0894b",
+      "repo_digests": [
+        "news-aggregator@sha256:d593f000671099a3bdcede08379c2e2ce5738f14a4586632d173a7d4ebc0894b"
+      ],
+      "revision": null
+    },
+    "newshub-rss-t09:isolated-check": {
+      "id": "sha256:3ae4135b142cecc266e2b0407aea46604315a69fff85e2517f139c930b2cf4b9",
+      "repo_digests": [
+        "newshub-rss-t09@sha256:3ae4135b142cecc266e2b0407aea46604315a69fff85e2517f139c930b2cf4b9"
+      ],
+      "revision": null
+    }
+  },
+  "dataset": "synthetic",
+  "dependency_site": "/tmp/newshub-rss-coordinator-venv/lib/python3.12/site-packages",
+  "extra_dependency_pins": {
+    "defusedxml": "0.7.1",
+    "listparser": "0.20"
+  },
+  "harness_sha256": "e3fdb6b899ac252229c2c1abc9fcd8c9447528a5ff1ff608944c8e285d422cc0",
+  "images": {
+    "newshub-rss-t26:candidate-3035c6bb4fd2": {
+      "id": "sha256:202474a1e685a29684c070e78c6a4d065970d78153349a02d791c3ad220ab26d",
+      "repo_digests": [
+        "newshub-rss-t26@sha256:202474a1e685a29684c070e78c6a4d065970d78153349a02d791c3ad220ab26d"
+      ],
+      "revision": "3035c6bb4fd2dc15a3b40f61a7e9432211d93e60",
+      "size_bytes": 613097533
+    },
+    "newshub-rss-t26:candidate-d4d5169bac2f-32a340a0e0535543a52321488a899b8c313f23f9": {
+      "id": "sha256:b0104a5800dc6537d9f04ad86bf7c9ad0bfc9e9462072ec5e20fd06b0e5fd680",
+      "repo_digests": [
+        "newshub-rss-t26@sha256:b0104a5800dc6537d9f04ad86bf7c9ad0bfc9e9462072ec5e20fd06b0e5fd680"
+      ],
+      "revision": "32a340a0e0535543a52321488a899b8c313f23f9",
+      "size_bytes": 613154889
+    }
+  },
+  "isolation": {
+    "bind_allowlist": [
+      "/tmp/newshub-rss-t26-complete",
+      "/tmp/newshub-rss-T26/ops/rss/T26/probe.py"
+    ],
+    "containers_removed": true,
+    "network": "none",
+    "published_ports": [],
+    "real_provider_calls": false,
+    "volumes": []
+  },
+  "limitations": [
+    "No authorized production backup copy; production compatibility NOT sealed.",
+    "Source switch policy receipts are synthetic; real sync and paired restore are separate evidence.",
+    "Cached full-app dependency/frontend base is reused; this is not a release Dockerfile rebuild.",
+    "Same-schema rollback candidate may be identical code; distinct target must be recorded when supplied."
+  ],
+  "project": "newshub-rss-t26-d4d5169bac2f",
+  "runs": [
+    {
+      "app_sha": "32a340a0e0535543a52321488a899b8c313f23f9",
+      "image": "newshub-rss-t26:candidate-d4d5169bac2f-32a340a0e0535543a52321488a899b8c313f23f9",
+      "image_id": "sha256:b0104a5800dc6537d9f04ad86bf7c9ad0bfc9e9462072ec5e20fd06b0e5fd680",
+      "stage": "seed",
+      "stdout": "{\"stage\": \"seed\", \"status\": \"PASS\", \"digest\": \"1fdd2e47141ff9985bdbab611d34784cfa4846cbe62c0115314d3c3e21817e70\"}"
+    },
+    {
+      "app_sha": "32a340a0e0535543a52321488a899b8c313f23f9",
+      "image": "newshub-rss-t26:candidate-d4d5169bac2f-32a340a0e0535543a52321488a899b8c313f23f9",
+      "image_id": "sha256:b0104a5800dc6537d9f04ad86bf7c9ad0bfc9e9462072ec5e20fd06b0e5fd680",
+      "stage": "upgrade",
+      "stdout": "{\"stage\": \"upgrade\", \"status\": \"PASS\", \"digest\": \"90cb838a4cd877a903dcf738d7de26d3b39cb2585fe75bcfbc1b54334cb0d64f\"}"
+    },
+    {
+      "app_sha": "32a340a0e0535543a52321488a899b8c313f23f9",
+      "image": "newshub-rss-t26:candidate-d4d5169bac2f-32a340a0e0535543a52321488a899b8c313f23f9",
+      "image_id": "sha256:b0104a5800dc6537d9f04ad86bf7c9ad0bfc9e9462072ec5e20fd06b0e5fd680",
+      "stage": "exercise",
+      "stdout": "{\"stage\": \"switch_manifest\", \"status\": \"PASS\", \"digest\": \"d4f7e83872f3fa1770c8d3a00c6e6ca01d084a8d161c5167735325e32134d03f\"}\n{\"stage\": \"exercise\", \"status\": \"PASS\", \"digest\": \"8c50b3413cd9839391de49d4dbeebb7b03e9d18eae2317d820c48e35ae16337d\"}"
+    },
+    {
+      "app_sha": "32a340a0e0535543a52321488a899b8c313f23f9",
+      "image": "newshub-rss-t26:candidate-d4d5169bac2f-32a340a0e0535543a52321488a899b8c313f23f9",
+      "image_id": "sha256:b0104a5800dc6537d9f04ad86bf7c9ad0bfc9e9462072ec5e20fd06b0e5fd680",
+      "stage": "current",
+      "stdout": "{\"stage\": \"current\", \"status\": \"PASS\", \"digest\": \"6d793d7e3b9bb203b119393ce01303b75f063fa1eabf2625ba8f15ba5bf45b0f\"}"
+    },
+    {
+      "app_sha": "3035c6bb4fd2dc15a3b40f61a7e9432211d93e60",
+      "image": "newshub-rss-t26:candidate-3035c6bb4fd2",
+      "image_id": "sha256:202474a1e685a29684c070e78c6a4d065970d78153349a02d791c3ad220ab26d",
+      "stage": "rollback",
+      "stdout": "{\"stage\": \"rollback\", \"status\": \"PASS\", \"digest\": \"a67ccccf079187b736cf5188cee969ff3d36036ebbbd857495f306dd8be13837\"}"
+    },
+    {
+      "app_sha": "32a340a0e0535543a52321488a899b8c313f23f9",
+      "image": "newshub-rss-t26:candidate-d4d5169bac2f-32a340a0e0535543a52321488a899b8c313f23f9",
+      "image_id": "sha256:b0104a5800dc6537d9f04ad86bf7c9ad0bfc9e9462072ec5e20fd06b0e5fd680",
+      "stage": "forward",
+      "stdout": "{\"stage\": \"forward\", \"status\": \"PASS\", \"digest\": \"6d793d7e3b9bb203b119393ce01303b75f063fa1eabf2625ba8f15ba5bf45b0f\"}"
+    }
+  ],
+  "schema": [
+    [
+      "admin",
+      "0003_logentry_add_action_flag_choices"
+    ],
+    [
+      "api",
+      "0059_bind_retained_legacy_translations"
+    ],
+    [
+      "auth",
+      "0012_alter_user_first_name_max_length"
+    ],
+    [
+      "contenttypes",
+      "0002_remove_content_type_name"
+    ],
+    [
+      "sessions",
+      "0001_initial"
+    ]
+  ],
+  "sealed": false,
+  "status": "SYNTHETIC_CANDIDATE_NOT_SEALED"
+}

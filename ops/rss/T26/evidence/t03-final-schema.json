@@ -1,0 +1,348 @@
+{
+  "active_writers": "REFUSED",
+  "baseline_sha": "3035c6bb4fd2dc15a3b40f61a7e9432211d93e60",
+  "engine_image": "miniflux/miniflux:2.3.3@sha256:49d7b60987616387c306a8023087b31f2c9b7b21288b523026cb04058e8b6dbb",
+  "engine_schema": 132,
+  "foreign_keys": "PASS",
+  "fresh_pair_restore": "PASS",
+  "full_app_rollback": "NOT_RUN: application compatibility is T26; command path tested separately",
+  "mapping_sha256": "b85e8034467ca9f9aa125b9e37a410c2617e118974fbf585282951e523525a92",
+  "overwrite_replay": "PASS",
+  "paired_restore": "PASS",
+  "postgres_image": "postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94",
+  "production": "NOT_RUN",
+  "project": "newshub-rss-t03-ddb1e1390b40",
+  "python": "Python 3.12.14",
+  "relationships": {
+    "api_channelgroupmember": 1,
+    "api_channelsubscription": 1,
+    "api_engineentrymap": 1,
+    "api_favorite": 1,
+    "api_feedoperation": 1,
+    "api_legacytranslationsnapshot": 1,
+    "api_newsreadstate": 1,
+    "auth_user": 1
+  },
+  "resources_removed": true,
+  "scope": "synthetic isolated recovery; no production compatibility seal",
+  "service_account": "verified_non_admin",
+  "sqlite_migrations": [
+    {
+      "app": "admin",
+      "name": "0001_initial"
+    },
+    {
+      "app": "admin",
+      "name": "0002_logentry_remove_auto_add"
+    },
+    {
+      "app": "admin",
+      "name": "0003_logentry_add_action_flag_choices"
+    },
+    {
+      "app": "api",
+      "name": "0001_initial"
+    },
+    {
+      "app": "api",
+      "name": "0002_news_related_to_news_title_hash_source_source_type"
+    },
+    {
+      "app": "api",
+      "name": "0003_news_content_zh_news_title_zh"
+    },
+    {
+      "app": "api",
+      "name": "0004_translation_status"
+    },
+    {
+      "app": "api",
+      "name": "0005_full_content"
+    },
+    {
+      "app": "api",
+      "name": "0006_full_content_zh"
+    },
+    {
+      "app": "api",
+      "name": "0007_chatsession"
+    },
+    {
+      "app": "api",
+      "name": "0008_news_suggested_questions_and_more"
+    },
+    {
+      "app": "api",
+      "name": "0009_favorite"
+    },
+    {
+      "app": "api",
+      "name": "0010_blocked_news"
+    },
+    {
+      "app": "api",
+      "name": "0011_news_full_content_fetch_error_and_more"
+    },
+    {
+      "app": "api",
+      "name": "0012_provider_comparison"
+    },
+    {
+      "app": "api",
+      "name": "0013_news_full_content_backfill_at_and_more"
+    },
+    {
+      "app": "api",
+      "name": "0014_researchsession"
+    },
+    {
+      "app": "api",
+      "name": "0015_researchsession_user"
+    },
+    {
+      "app": "api",
+      "name": "0016_researchsearchresult"
+    },
+    {
+      "app": "api",
+      "name": "0017_chatgpt_subscription"
+    },
+    {
+      "app": "api",
+      "name": "0018_chatgpt_auth_binding_and_selection"
+    },
+    {
+      "app": "api",
+      "name": "0019_subscription_selection_generation"
+    },
+    {
+      "app": "api",
+      "name": "0020_crawler_control"
+    },
+    {
+      "app": "api",
+      "name": "0021_search_index_control"
+    },
+    {
+      "app": "api",
+      "name": "0022_searchindexrun_worker_instance_id"
+    },
+    {
+      "app": "api",
+      "name": "0023_chatgpt_user_oauth_hosts"
+    },
+    {
+      "app": "api",
+      "name": "0024_chatgpt_deployment_oauth_host"
+    },
+    {
+      "app": "api",
+      "name": "0025_chatgpt_connection_id_token"
+    },
+    {
+      "app": "api",
+      "name": "0026_shared_article_translations"
+    },
+    {
+      "app": "api",
+      "name": "0027_chat_ownership"
+    },
+    {
+      "app": "api",
+      "name": "0028_account_security"
+    },
+    {
+      "app": "api",
+      "name": "0029_oauth_attempt_snapshot"
+    },
+    {
+      "app": "api",
+      "name": "0030_subscription_translation_task"
+    },
+    {
+      "app": "api",
+      "name": "0031_research_run_recovery"
+    },
+    {
+      "app": "api",
+      "name": "0032_research_queued_input"
+    },
+    {
+      "app": "api",
+      "name": "0033_user_provider_credential"
+    },
+    {
+      "app": "api",
+      "name": "0034_add_litellm_provider_fields"
+    },
+    {
+      "app": "api",
+      "name": "0035_article_fetch_monitoring"
+    },
+    {
+      "app": "api",
+      "name": "0036_news_ingestion_contract"
+    },
+    {
+      "app": "api",
+      "name": "0037_ingestion_outcomes"
+    },
+    {
+      "app": "api",
+      "name": "0038_content_task_creation_time"
+    },
+    {
+      "app": "api",
+      "name": "0039_personal_channels"
+    },
+    {
+      "app": "api",
+      "name": "0040_initialize_channel_catalog"
+    },
+    {
+      "app": "api",
+      "name": "0041_source_region"
+    },
+    {
+      "app": "api",
+      "name": "0042_sector_channels"
+    },
+    {
+      "app": "api",
+      "name": "0043_smart_channel_workspace"
+    },
+    {
+      "app": "api",
+      "name": "0044_article_body_access"
+    },
+    {
+      "app": "api",
+      "name": "0045_preserve_publisher_history"
+    },
+    {
+      "app": "api",
+      "name": "0046_shared_translation_owner"
+    },
+    {
+      "app": "api",
+      "name": "0047_channel_intake_review"
+    },
+    {
+      "app": "api",
+      "name": "0048_dynamic_source_configs"
+    },
+    {
+      "app": "api",
+      "name": "0049_version_feed_state_by_source_config"
+    },
+    {
+      "app": "api",
+      "name": "0050_crawlrun_config_snapshot"
+    },
+    {
+      "app": "api",
+      "name": "0051_seed_domestic_medical_sources"
+    },
+    {
+      "app": "api",
+      "name": "0052_feed_directory"
+    },
+    {
+      "app": "api",
+      "name": "0053_rss_core_schema"
+    },
+    {
+      "app": "api",
+      "name": "0054_rss_legacy_compatibility"
+    },
+    {
+      "app": "api",
+      "name": "0055_rss_system_operation_actor"
+    },
+    {
+      "app": "api",
+      "name": "0056_rss_personal_read_state"
+    },
+    {
+      "app": "api",
+      "name": "0057_rss_import_batches"
+    },
+    {
+      "app": "api",
+      "name": "0058_private_translation_versions"
+    },
+    {
+      "app": "api",
+      "name": "0059_bind_retained_legacy_translations"
+    },
+    {
+      "app": "auth",
+      "name": "0001_initial"
+    },
+    {
+      "app": "auth",
+      "name": "0002_alter_permission_name_max_length"
+    },
+    {
+      "app": "auth",
+      "name": "0003_alter_user_email_max_length"
+    },
+    {
+      "app": "auth",
+      "name": "0004_alter_user_username_opts"
+    },
+    {
+      "app": "auth",
+      "name": "0005_alter_user_last_login_null"
+    },
+    {
+      "app": "auth",
+      "name": "0006_require_contenttypes_0002"
+    },
+    {
+      "app": "auth",
+      "name": "0007_alter_validators_add_error_messages"
+    },
+    {
+      "app": "auth",
+      "name": "0008_alter_user_username_max_length"
+    },
+    {
+      "app": "auth",
+      "name": "0009_alter_user_last_name_max_length"
+    },
+    {
+      "app": "auth",
+      "name": "0010_alter_group_name_max_length"
+    },
+    {
+      "app": "auth",
+      "name": "0011_update_proxy_permissions"
+    },
+    {
+      "app": "auth",
+      "name": "0012_alter_user_first_name_max_length"
+    },
+    {
+      "app": "contenttypes",
+      "name": "0001_initial"
+    },
+    {
+      "app": "contenttypes",
+      "name": "0002_remove_content_type_name"
+    },
+    {
+      "app": "sessions",
+      "name": "0001_initial"
+    }
+  ],
+  "synthetic_writer_roles": [
+    "app",
+    "channel-worker",
+    "crawler",
+    "full-content",
+    "indexer",
+    "rss-sync"
+  ],
+  "wrong_pair_instance_schema_prior": "REFUSED"
+}

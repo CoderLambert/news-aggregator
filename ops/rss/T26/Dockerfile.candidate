@@ -1,0 +1,17 @@
+# Offline synthetic candidate only: full application cache + exact source overlay.
+# This is not the production release build or a sealed rollback image.
+ARG FULL_APP_BASE=news-aggregator:local
+ARG RSS_DEP_BASE=newshub-rss-t09:isolated-check
+FROM ${RSS_DEP_BASE} AS rss-deps
+FROM ${FULL_APP_BASE}
+ARG RELEASE_SHA
+LABEL org.opencontainers.image.revision="${RELEASE_SHA}" org.newshub.rehearsal="synthetic-candidate-unsealed"
+USER root
+# Overlay the pinned RSS dependency set while retaining full app AI/crawler packages.
+COPY --from=rss-deps /usr/local/lib/python3.12/site-packages/ /usr/local/lib/python3.12/site-packages/
+COPY --from=rss-extra / /usr/local/lib/python3.12/site-packages/
+COPY backend /app/backend
+COPY crawler /app/crawler
+COPY ops/rss/T26 /app/ops/rss/T26
+ENV RUN_MAIN=true PYTHONPATH=/app/backend:/app/crawler DJANGO_ENV=development DJANGO_DEBUG=0
+ENTRYPOINT ["python", "/app/ops/rss/T26/probe.py"]
