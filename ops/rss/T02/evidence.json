@@ -1,0 +1,82 @@
+{
+  "absent_modules": [
+    "torch",
+    "sentence_transformers",
+    "chromadb",
+    "scrapy",
+    "feedparser",
+    "playwright",
+    "selenium",
+    "trafilatura",
+    "newspaper",
+    "readability"
+  ],
+  "collector_is_admin": false,
+  "duplicate_worker_rejected": true,
+  "image_id": "sha256:44b31d66e0d38f3bc6f8670abc27ef87d38dbd197a10f7dd375b6bde99f23718",
+  "image_size_bytes": 58168581,
+  "miniflux_version": "2.3.3",
+  "packages": {
+    "Django": "6.1.2",
+    "asgiref": "3.12.1",
+    "beautifulsoup4": "4.15.0",
+    "certifi": "2026.7.22",
+    "charset-normalizer": "3.5.2",
+    "django-cors-headers": "4.9.0",
+    "django-filter": "26.2",
+    "djangorestframework": "3.18.3",
+    "idna": "3.20",
+    "markdownify": "1.2.3",
+    "miniflux": "1.1.6",
+    "nh3": "0.3.7",
+    "pip": "25.0.1",
+    "python-dotenv": "1.2.4",
+    "requests": "2.34.2",
+    "six": "1.17.0",
+    "soupsieve": "3.0.3",
+    "sqlparse": "0.6.0",
+    "typing_extensions": "4.16.0",
+    "urllib3": "2.8.0"
+  },
+  "production_services_started": false,
+  "project": "newshub-rss-t02-dc695472a62e",
+  "python": "3.12.12",
+  "resources_removed": true,
+  "runtime_health": {
+    "mode": "orm_shell",
+    "orm_available": true,
+    "role": "rss_sync",
+    "sync_ready": false,
+    "worker_integrated": false
+  },
+  "schema": [
+    [
+      "admin",
+      "0003_logentry_add_action_flag_choices"
+    ],
+    [
+      "api",
+      "0054_rss_legacy_compatibility"
+    ],
+    [
+      "auth",
+      "0012_alter_user_first_name_max_length"
+    ],
+    [
+      "contenttypes",
+      "0002_remove_content_type_name"
+    ],
+    [
+      "sessions",
+      "0001_initial"
+    ]
+  ],
+  "status": {
+    "mode": "orm_shell",
+    "orm_available": true,
+    "role": "rss_sync",
+    "sync_ready": false,
+    "worker_integrated": false
+  },
+  "uid": 10001
+}

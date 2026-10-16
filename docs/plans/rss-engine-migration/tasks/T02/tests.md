@@ -1,6 +1,6 @@
 # T02：专项验收
 
-状态：NOT_RUN。以下为待交付测试，文件/命令存在与通过结果均不得预先声明。
+状态：2026-10-16 已实现并运行隔离专项。A1/A2/A4 PASS；A3 配置与直接部署兼容回归 PASS，完整 app/indexer/channel-worker 本轮 live 启动 NOT_RUN。同步 worker 尚未接线，运行壳 sync_ready=false。
 
 - T02-A1：PG 无宿主公开端口且引擎 API 受限。预期按对应合同断言成功及失败边界。
 - T02-A2：真实镜像无 Torch/Scrapy/feedparser/browser 且不预加载 embedding。预期按对应合同断言成功及失败边界。
@@ -10,11 +10,20 @@
 ## 执行与证据
 
 ```bash
-# PLANNED：测试文件与产品尚未实现。
-test -f scripts/deploy/tests/test_rss_runtime.py
-RUN_MAIN=true PYTHONPATH=backend:crawler \
-  backend/venv/bin/python -m pytest -q scripts/deploy/tests/test_rss_runtime.py
+python3 -m venv /tmp/newshub-rss-t02-venv
+/tmp/newshub-rss-t02-venv/bin/python -m pip install \
+  -r backend/requirements-rss.lock pytest==8.4.2 PyYAML==6.0.3
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=backend:. \
+  /tmp/newshub-rss-t02-venv/bin/python -m pytest -c /dev/null -p no:cacheprovider \
+  scripts/deploy/tests/test_rss_runtime.py -q
+docker build --target rss-sync -t newshub-rss-t02:isolated-check .
+/tmp/newshub-rss-t02-venv/bin/python ops/rss/T02/verify_isolated.py \
+  --image newshub-rss-t02:isolated-check --output /tmp/rss-t02-evidence.json
 ```
+
+隔离验证器拒绝远端 Docker daemon/已有同名资源，生成新项目、合成 secrets、独立 named volumes 和随机环回 API 端口；只启动自己的 migration/rss-sync/miniflux/rss-db，finally 删除该项目容器/网络/卷。真实镜像证据见 [evidence.json](../../../../../ops/rss/T02/evidence.json)，运行接口和未验证项见 [README](../../../../../ops/rss/T02/README.md)。
+
+最终 T02 专项5 passed in5.72s；此前与直接部署兼容回归组合65 passed in14.22s，最终只增强 T02 测试后复验5项。独立轻量镜像实际 Python3.12.12，证据中的 schema leaf为api0054；这是该基线的实验，不宣称覆盖后续集成schema/最终发布镜像。
 
 构建文件可先按候选版本开发；T00 后锁 digest 并真实构建/启动，轻量镜像是 T08 容器验收前置
 
