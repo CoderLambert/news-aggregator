@@ -38,15 +38,54 @@ if ! healthy; then
     touch "$CACHE/.ready"
 fi
 flock -u 9
+# These modules assume the serial Django migration/seed-state lifecycle.
+# The initial full xdist run failed 16 cases across them on separate workers.
+# Never relax the assertions; keep these files serial until their fixtures are
+# independently proven safe with per-worker databases.
+SERIAL_FILES=(
+    backend/api/tests/test_smart_channel_workspace.py
+    backend/api/tests/test_channels.py
+    backend/api/tests/test_fetch_full_command.py
+    backend/api/tests/test_crawler_dashboard_loading.py
+    backend/api/tests/test_source_registry.py
+    backend/api/tests/test_backfill_scrapy_command.py
+    backend/api/tests/test_crawler_readiness.py
+)
+EXCLUDE_ARGS=()
+for file in "${SERIAL_FILES[@]}"; do
+    [[ -f "$file" ]] || { echo "missing serial-only safety test: $file" >&2; exit 2; }
+    EXCLUDE_ARGS+=(--ignore="$file")
+done
 REPORT="$(mktemp -d "${TMPDIR}/newshub-xdist-benchmark.XXXXXX")"
 printf 'xdist-benchmark: repeats=%s workers=2 dist=loadfile report=%s\n' "$REPEATS" "$REPORT"
 for i in $(seq 1 "$REPEATS"); do
     start="$(date +%s)"
+    # No xdist plugin in this command. Serial files must still run every time.
+    "$PYTHON" -m pytest -q --durations=10 \
+        --junitxml="$REPORT/serial-$i.xml" "${SERIAL_FILES[@]}"
     PYTHONPATH="$CACHE:${PYTHONPATH:-}" "$PYTHON" -m pytest \
         -q -n 2 --dist=loadfile --max-worker-restart=0 \
-        --durations=25 --junitxml="$REPORT/round-$i.xml" \
-        tests/ backend/api/tests/ scripts/deploy/tests/
+        --durations=25 --junitxml="$REPORT/parallel-$i.xml" \
+        "${EXCLUDE_ARGS[@]}" tests/ backend/api/tests/ scripts/deploy/tests/
+    # Fail closed if coverage is accidentally lost by changing the file split.
+    "$PYTHON" - "$REPORT/serial-$i.xml" "$REPORT/parallel-$i.xml" <<'PY'
+import sys
+from xml.etree import ElementTree as ET
+total = 0
+skipped = 0
+for file in sys.argv[1:]:
+    tree = ET.parse(file)
+    roots = [tree.getroot()] if tree.getroot().tag == 'testsuite' else tree.findall('.//testsuite')
+    for node in roots:
+        total += int(node.get('tests', '0'))
+        skipped += int(node.get('skipped', '0'))
+        if int(node.get('errors', '0')) or int(node.get('failures', '0')):
+            raise SystemExit('xdist benchmark JUnit recorded a failure')
+if total != 2424 or skipped != 16:
+    raise SystemExit(f'xdist benchmark coverage mismatch: total={total} skipped={skipped}; expected 2424/16')
+print(f'xdist benchmark coverage PASS: total={total}, skipped={skipped}')
+PY
     elapsed=$(( $(date +%s) - start ))
-    printf 'xdist-benchmark: round %s/%s PASS elapsed=%ss\n' "$i" "$REPEATS" "$elapsed"
+    printf 'xdist-benchmark: hybrid round %s/%s PASS elapsed=%ss\n' "$i" "$REPEATS" "$elapsed"
 done
-echo 'xdist-benchmark: all complete test roots passed without retries'
+echo 'xdist-benchmark: three-root hybrid test matrix passed without retries'
