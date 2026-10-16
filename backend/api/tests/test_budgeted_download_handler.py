@@ -13,6 +13,9 @@ def synthetic_dns(monkeypatch):
     # installs its own rejecting validator; the actual HTTP test is subprocess-isolated.
     from api.services.article_fetcher import safe_http
     monkeypatch.setattr(safe_http, 'validate_public_url', lambda url, timeout: None)
+    from api.rss import legacy_fencing
+    monkeypatch.setattr(legacy_fencing, 'capture_source_token', lambda key: object())
+    monkeypatch.setattr(legacy_fencing, 'validate_source_token', lambda token: None)
 
 
 class Stats:

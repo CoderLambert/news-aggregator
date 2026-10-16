@@ -1,7 +1,7 @@
 import copy
 import pytest
 from django.utils import timezone
-from api.models import Source, Category, News, NewsSourceItem
+from api.models import Source, Category, News, NewsSourceItem, SourcePublication
 from api.services.category_corrections import build_plan, execute_plan, CorrectionConflict
 from api.services.channel_catalog import catalog_defaults, sync_channel_catalog
 from api.services.source_policy import POLICIES
@@ -19,8 +19,9 @@ def test_latin_keywords_do_not_match_inside_unrelated_words(title, expected):
 @pytest.fixture
 def article(db):
     source, _ = Source.objects.get_or_create(name='Dev.to', defaults={'url': 'https://dev.to'})
+    SourcePublication.objects.update_or_create(source=source, defaults={'owner': 'legacy'})
     category, _ = Category.objects.get_or_create(name='AI', defaults={'slug': 'ai'})
-    news = News.objects.create(source=source, category=category, title='Email from Main', content='A routine update',
+    news = News.objects.create(source=source, body_owner_source=source, category=category, title='Email from Main', content='A routine update',
         url='https://dev.to/reader/email', publish_time=timezone.now(), full_content='retain body', full_content_zh='retain translation')
     mapping = NewsSourceItem.objects.create(news=news, source_key='devto', upstream_id='audit-1', discovery_url=news.url)
     return news, mapping

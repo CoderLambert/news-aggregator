@@ -110,7 +110,9 @@ def test_crawl_only_short_circuits_ai_helpers(monkeypatch):
 def test_crawl_only_stores_new_items_without_ai_helpers(monkeypatch):
     pipelines = _pipeline()
     monkeypatch.setenv('NEWS_CRAWL_ONLY', '1')
+    from api.rss.legacy_fencing import capture_source_token
     item = {
+        'legacy_source_token': capture_source_token('webdev'),
         'title': 'Crawl-only mode preserves the original article',
         'content': 'Public article body from the configured web.dev source.',
         'author': '',

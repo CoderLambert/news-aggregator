@@ -25,9 +25,12 @@ def response(payload, url, meta=None, status=200):
     return TextResponse(url, request=request, body=json.dumps(payload).encode(), encoding='utf-8', status=status)
 
 
-def spider(cls):
+def spider(cls, *, capture=True):
     value = cls()
     value.crawler = Mock()
+    if capture:
+        from api.rss.legacy_fencing import capture_source_token
+        value._legacy_source_token = capture_source_token(value.name)
     return value
 
 
@@ -70,7 +73,7 @@ def test_dev_disabled_or_unreliable_old_publication_never_frontloads_detail(sett
 
 
 @pytest.mark.django_db(transaction=True)
-def test_dev_detail_preserves_entire_markdown_and_snapshot_fences_changed_body(settings):
+def test_dev_new_detail_preserves_markdown_but_cannot_capture_token_after_discovery(settings):
     settings.STRUCTURED_BODY_INGEST_ENABLED = True
     settings.STRUCTURED_BODY_SOURCE_KEYS = {'devto'}
     value = spider(DevToSpider)
@@ -81,12 +84,11 @@ def test_dev_detail_preserves_entire_markdown_and_snapshot_fences_changed_body(s
     assert len(item['body_candidate'].raw_content) > 5000
     assert item['content'] == payload['description']
     result = ingest_item(item)
-    assert result.body_committed
+    assert not result.body_committed and result.reason == 'not_body_owner'
     news = News.objects.get(pk=result.news_id)
-    assert news.full_content == payload['body_markdown'].strip()
-    assert news.full_content_revision == 1
-    assert ingest_item(item).receipt_outcome == 'deferred'
-    assert News.objects.get(pk=news.pk).full_content_revision == 1
+    assert news.full_content == '' and news.full_content_revision == 0
+    assert ingest_item(item).receipt_outcome == 'committed'
+    assert News.objects.get(pk=news.pk).full_content_revision == 0
 
 
 @pytest.mark.django_db(transaction=True)
@@ -131,11 +133,11 @@ def test_hn_self_post_and_external_story_have_separate_body_contracts(settings, 
         assert item['url'] == payload['url'] and 'body_candidate' not in item
     else:
         assert validate_candidate(item['body_candidate'], expected_url=item['url']).ok
-    result = ingest_item(item)
+    result = ingest_item(item, legacy_token=value._legacy_source_token)
     assert result.body_committed is not external
 
 
 def test_hn_mismatched_api_id_cannot_create_discovery():
-    value = spider(HackerNewsSpider)
+    value = spider(HackerNewsSpider, capture=False)
     assert list(value.parse_item(response(dict(id=99, type='story', title='Other'),
         'https://hacker-news.firebaseio.com/v0/item/12.json', {'hn_id': '12'}))) == []

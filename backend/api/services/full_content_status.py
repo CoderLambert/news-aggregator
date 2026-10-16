@@ -14,6 +14,9 @@ import hashlib
 from dataclasses import dataclass
 
 from api.models import News
+from api.rss.content_store import StaleWrite, fenced_article
+from api.rss.legacy_translation import archive_changed_translations
+from api.rss.legacy_fencing import capture_legacy_article, legacy_news_queryset, capture_article_source_token, validate_source_token, legacy_body_policy_allows
 from datetime import datetime, timedelta, timezone as utc_timezone
 from typing import TYPE_CHECKING
 
@@ -94,6 +97,8 @@ class FetchLease:
     claimed_at: datetime
     expected_url: str
     expected_revision: int
+    legacy_token: object = None
+    source_token: object = None
 
 
 @dataclass(frozen=True)
@@ -109,16 +114,37 @@ class ContentCommit:
 
 def _owned_query(news):
     lease = getattr(news, '_full_content_snapshot', None)
-    if not lease:
+    if not lease or not lease.legacy_token:
         return news.__class__.objects.none()
-    return news.__class__.objects.filter(
+    try:
+        validate_source_token(lease.source_token)
+    except StaleWrite:
+        return news.__class__.objects.none()
+    query = news.__class__.objects.filter(
         pk=lease.news_id, url=lease.expected_url,
         full_content_revision=lease.expected_revision,
         full_content_fetch_status='fetching', last_full_content_attempt=lease.claimed_at,
+        body_owner_source_id=lease.legacy_token.source_id, body_owner_binding__isnull=True,
+        body_owner_version=lease.legacy_token.body_owner_version,
+        source__publication__owner='legacy', source__publication__epoch=lease.legacy_token.source_epoch,
+        source__publication__policy_version=lease.legacy_token.source_policy_version,
     )
+    if lease.source_token.config_version is None:
+        return query.filter(source__crawler_config__isnull=True)
+    return query.filter(source__crawler_config__config_version=lease.source_token.config_version,
+        source__crawler_config__status__in=['approved', 'enabled'],
+        source__crawler_config__approved_config_version=lease.source_token.config_version,
+        source__crawler_config__approved_at__isnull=False)
 
 
-def fetch_eligibility(news, *, privileged=None):
+
+def fetch_eligibility(news, *, privileged=None, check_owner=True):
+    if check_owner and not news.__class__.objects.filter(
+            Q(body_owner_source_id=F('source_id')) | Q(body_owner_source__isnull=True),
+            pk=news.pk, source__publication__owner='legacy', body_owner_binding__isnull=True).exists():
+        return 'source_not_legacy'
+    if check_owner and not legacy_body_policy_allows(news, html=True):
+        return 'unsupported'
     from api.services.body_access import authorized_fetch
     if privileged is None and news.full_content_requested_by_id and not authorized_fetch(news):
         return "permission_revoked"
@@ -151,6 +177,15 @@ def _known_cooldown(url):
 
 
 def enqueue_fetch(news, *, force=False, priority=0):
+    try:
+        token = capture_legacy_article(news, initialize=True)
+        with fenced_article(token):
+            return _enqueue_fetch_unfenced(news, force=force, priority=priority)
+    except StaleWrite:
+        return 'rejected'
+
+
+def _enqueue_fetch_unfenced(news, *, force=False, priority=0):
     from api.services.body_access import authorized_fetch
     """Persist one task intent; duplicates and force preserve leases/cooldowns."""
     if fetch_eligibility(news):
@@ -178,7 +213,7 @@ def enqueue_fetch(news, *, force=False, priority=0):
     return 'queued' if updated else 'rejected' if news.full_content_retry_count >= 5 else 'reused'
 
 
-def claim_fetch(news: News, *, force: bool = False) -> FetchLease | None:
+def _claim_fetch_unfenced(news: News, legacy_token, source_token, *, force: bool = False) -> FetchLease | None:
     """Claim only scheduled, due work, fenced by its request-before snapshot."""
     if fetch_eligibility(news):
         return None
@@ -193,11 +228,22 @@ def claim_fetch(news: News, *, force: bool = False) -> FetchLease | None:
         full_content_fetch_status='fetching', full_content_fetch_error='',
         full_content_error_code='', last_full_content_attempt=now,
     ) == 1
-    snapshot = FetchLease(news.pk, now, news.url, news.full_content_revision) if claimed else None
+    snapshot = FetchLease(news.pk, now, news.url, news.full_content_revision, legacy_token, source_token) if claimed else None
     news._full_content_snapshot = snapshot
     news._full_content_fetch_claimed = True
     news._full_content_fetch_lease = now if claimed else None
     return snapshot
+
+
+def claim_fetch(news: News, *, force: bool = False) -> FetchLease | None:
+    try:
+        token = capture_legacy_article(news, initialize=True)
+        source_token = capture_article_source_token(news)
+        with fenced_article(token):
+            validate_source_token(source_token)
+            return _claim_fetch_unfenced(news, token, source_token, force=force)
+    except StaleWrite:
+        return None
 
 
 def owns_fetch(news) -> bool:
@@ -222,12 +268,12 @@ def recover_stale_fetches():
     # Snapshot/fence recovery too; it must not release a newer owner's claim.
     # A killed process may have observed 429 before saving its task retry time.
     recovered = 0
-    query = News.objects.filter(stale, full_content_fetch_status='fetching')
+    query = legacy_news_queryset(News.objects.filter(stale, full_content_fetch_status='fetching'))
     for news in query.only('pk', 'url', 'full_content_revision', 'last_full_content_attempt',
                            'full_content_next_attempt_at').order_by('pk')[:500]:
         when = max(_known_cooldown(news.url), news.full_content_next_attempt_at or now)
-        recovered += News.objects.filter(pk=news.pk, url=news.url, full_content_revision=news.full_content_revision,
-            full_content_fetch_status='fetching', last_full_content_attempt=news.last_full_content_attempt).update(
+        recovered += legacy_news_queryset(News.objects.filter(pk=news.pk, url=news.url, full_content_revision=news.full_content_revision,
+            full_content_fetch_status='fetching', last_full_content_attempt=news.last_full_content_attempt)).update(
                 full_content_fetch_status='queued', full_content_next_attempt_at=when)
     return recovered
 
@@ -237,13 +283,22 @@ def mark_fetching(news: News):
     return claim_fetch(news)
 
 
-def _stable_provenance(provenance):
-    keys = ('provider', 'source_key', 'source_item_id', 'target_url', 'body_field',
-            'source_version', 'source_modified_at', 'body_sha256', 'validator_version', 'declared_canonical_url', 'content_kind')
-    return {key: provenance.get(key) for key in keys}
+def commit_candidate(news, candidate, *, provider='', lease=None, summary=None, quality_score=1.0,
+                     backfill_source=None, backfill_at=None, legacy_token=None):
+    token = legacy_token or (lease.legacy_token if lease else None)
+    if token is None:
+        return ContentCommit('conflict', 'legacy_token_missing')
+    try:
+        with fenced_article(token):
+            if lease:
+                validate_source_token(lease.source_token)
+            return _commit_candidate_unfenced(news, candidate, provider=provider, lease=lease, summary=summary,
+                quality_score=quality_score, backfill_source=backfill_source, backfill_at=backfill_at)
+    except StaleWrite as error:
+        return ContentCommit('conflict', error.reason)
 
 
-def commit_candidate(news, candidate, *, provider='', lease: FetchLease | None = None, summary=None, quality_score=1.0, backfill_source=None, backfill_at=None):
+def _commit_candidate_unfenced(news, candidate, *, provider='', lease: FetchLease | None = None, summary=None, quality_score=1.0, backfill_source=None, backfill_at=None):
     """The only body write: validate, compare upstream evidence, URL/revision/lease CAS."""
     from api.services.article_fetcher.validators import validate_candidate, VALIDATOR_VERSION
     from api.services.article_fetcher.types import FullContentCandidate
@@ -259,6 +314,8 @@ def commit_candidate(news, candidate, *, provider='', lease: FetchLease | None =
     current = query.first()
     if current is None:
         return ContentCommit('conflict', 'persistence_conflict')
+    if not legacy_body_policy_allows(current):
+        return ContentCommit('rejected', 'unsupported')
     from api.services.channel_articles import summary_only
     from api.services.body_access import authorized_fetch
     if (current.full_content_requested_by_id and not authorized_fetch(current)) or (summary_only(current) and not authorized_fetch(current)):
@@ -311,26 +368,22 @@ def commit_candidate(news, candidate, *, provider='', lease: FetchLease | None =
             return ContentCommit('rejected', 'source_version_conflict')
     if has_full_content(current) and not same_body and not lease and not (comparable and newer):
         return ContentCommit('rejected', 'source_version_conflict')
-    changed = not same_body or current.full_content_state != 'complete' or _stable_provenance(old) != _stable_provenance(provenance)
+    changed = not same_body
     completed = tz_now()
     updates = {}
     if changed:
         provenance['accepted_at'] = completed.isoformat()
         updates.update(
-            full_content=body, full_content_state='complete',
+            full_content=body, full_content_state='complete', full_content_hash=body_hash,
+            full_content_completeness='unknown',
             full_content_revision=F('full_content_revision') + 1,
             full_content_provenance=provenance, full_content_quality_score=quality_score,
             full_content_fetched_at=completed,
         )
         if current.content_kind == 'unknown':
             updates['content_kind'] = candidate.content_kind
-        if not same_body:
-            updates.update(full_content_zh='', full_content_zh_fetched_at=None,
-                           suggested_questions=[], suggested_questions_generated_at=None)
-        elif not has_full_content(current):
-            # Questions made while audit text was unavailable used only summary
-            # context, even when the newly verified body has the same hash.
-            updates.update(suggested_questions=[], suggested_questions_generated_at=None)
+        updates.update(archive_changed_translations(current, {'full_content': body}))
+        updates.update(suggested_questions=[], suggested_questions_generated_at=None)
     if changed or lease:
         updates.update(
             full_content_fetch_status='success', full_content_fetch_error='',
@@ -449,6 +502,9 @@ def classify_fetch_error(error_or_result) -> str:
 
 def has_full_content(news: News, *, privileged=False) -> bool:
     """Availability is independent of the latest refresh attempt's status."""
+    if hasattr(news, '_rss_access_user'):
+        from api.rss.access import body_authorized_news
+        return body_authorized_news(news._rss_access_user, News.objects.filter(pk=news.pk)).exists()
     from api.services.channel_articles import summary_only
     return news.full_content_state in {'legacy', 'complete'} and bool((news.full_content or '').strip()) and (privileged or not summary_only(news))
 
@@ -464,7 +520,7 @@ def filter_readable_full_content(queryset, *, privileged=False):
     ).filter(full_content_state__in=['legacy', 'complete']).exclude(_readable_body='')
 
 
-def correct_article_identity(news, new_url, *, expected_url, expected_revision):
+def _correct_article_identity_unfenced(news, new_url, *, expected_url, expected_revision):
     """Quarantine old text and fence every old worker when identity changes."""
     from api.services.article_identity import normalize_article_url
     new_url = normalize_article_url(new_url)
@@ -478,3 +534,13 @@ def correct_article_identity(news, new_url, *, expected_url, expected_revision):
     ) == 1
     news.refresh_from_db()
     return saved
+
+
+def correct_article_identity(news, new_url, *, expected_url, expected_revision, legacy_token=None):
+    if legacy_token is None:
+        return False
+    try:
+        with fenced_article(legacy_token):
+            return _correct_article_identity_unfenced(news, new_url, expected_url=expected_url, expected_revision=expected_revision)
+    except StaleWrite:
+        return False

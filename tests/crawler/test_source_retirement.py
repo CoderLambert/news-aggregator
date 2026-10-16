@@ -115,8 +115,10 @@ def test_running_retired_crawl_is_cancelled_without_changing_finished_history():
 @pytest.mark.django_db
 def test_previously_queued_body_is_terminal_without_fetching():
     source = Source.objects.create(name='Meta AI')
+    from api.models import SourcePublication
+    SourcePublication.objects.create(source=source, owner='legacy')
     category = Category.objects.create(name='AI', slug='ai')
-    news = News.objects.create(source=source, category=category, title='Old queued article',
+    news = News.objects.create(source=source, body_owner_source=source, category=category, title='Old queued article',
         url='https://ai.meta.com/blog/example/', publish_time=timezone.now(),
         full_content_fetch_status='queued', full_content_next_attempt_at=timezone.now())
     provider = Mock()

@@ -58,6 +58,7 @@ class DevToSpider(scrapy.Spider):
             self.seen_ids.add(identity)
             # Persist discovery before the optional HTTP request. A failed detail
             # must never erase a legitimate discovered article or durable intent.
+            item['legacy_source_token'] = getattr(self, '_legacy_source_token', None)
             result = await sync_to_async(ingest_item, thread_sensitive=True)(item)
             if result.receipt_outcome != 'committed':
                 self.crawler.stats.inc_value('persistence_failures')

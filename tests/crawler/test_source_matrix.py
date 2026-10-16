@@ -187,7 +187,8 @@ def test_abstract_and_product_cannot_write_full_content_even_when_switches_allow
         STRUCTURED_BODY_INGEST_ENABLED=True, STRUCTURED_BODY_SOURCE_KEYS=[source],
         FULL_CONTENT_AUTO_ENQUEUE_ENABLED=True, FULL_CONTENT_AUTO_SOURCE_KEYS=[source],
     ):
-        result = ingest_item(item)
+        from api.rss.legacy_fencing import capture_source_token
+        result = ingest_item(item, legacy_token=capture_source_token(source))
 
     news = News.objects.get(pk=result.news_id)
     assert result.receipt_outcome == 'committed'

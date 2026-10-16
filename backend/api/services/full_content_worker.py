@@ -193,9 +193,10 @@ def execute_one(news, *, guard=None, providers=None):
         guard()
     rejection = fetch_eligibility(news)
     if rejection:
-        News.objects.filter(pk=news.pk, url=news.url, full_content_revision=news.full_content_revision,
+        from api.rss.legacy_fencing import legacy_news_queryset
+        legacy_news_queryset(News.objects.filter(pk=news.pk, url=news.url, full_content_revision=news.full_content_revision,
                             full_content_fetch_status__in=('queued', 'rate_limited', 'network_error', 'failed'),
-                            full_content_next_attempt_at__lte=timezone.now()).update(
+                            full_content_next_attempt_at__lte=timezone.now())).update(
             full_content_fetch_status='unsupported', full_content_next_attempt_at=None,
             full_content_error_code=rejection)
         return None
