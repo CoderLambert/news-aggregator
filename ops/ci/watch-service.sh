@@ -31,6 +31,10 @@ case "$ACTION" in
                 || fail "unsupported CI path for systemd unit"
         done
         [[ "$DATA_DIR" == /* ]] || fail "CI_DATA_DIR must be absolute"
+        # Keep the watchdog executable independent of the current git branch.
+        # No secrets are copied; only the static monitor code is installed.
+        install -d -m 0700 "$DATA_DIR/bin"
+        install -m 0600 "$CI_DIR/watch.py" "$DATA_DIR/bin/watch.py"
         # systemd --user does not load interactive zsh/mise/pyenv startup files.
         # Omarchy/Arch provides /usr/bin/python3 from the system packages.
         [[ -x /usr/bin/python3 ]] || fail "System python3 is required at /usr/bin/python3"
@@ -47,7 +51,7 @@ TimeoutStartSec=120
 NoNewPrivileges=true
 UNIT
             printf 'Environment="CI_DATA_DIR=%s"\n' "$DATA_DIR"
-            printf 'ExecStart=%s "%s/watch.py"\n' "$PYTHON" "$CI_DIR"
+            printf 'ExecStart=%s "%s/bin/watch.py"\n' "$PYTHON" "$DATA_DIR"
         } > "$SERVICE"
         {
             printf '%s\n' "$MARKER"
