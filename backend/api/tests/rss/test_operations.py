@@ -37,7 +37,8 @@ def test_per_actor_dedupe_conflict_and_private_operation_view():
     assert FeedOperation.objects.count() == 2
 
 
-def test_policy_change_is_atomic_and_idempotent():
+def test_policy_change_is_atomic_and_idempotent(settings):
+    settings.RSS_FULL_CONTENT_ENABLED = True
     binding = get_or_create_binding(INSTANCE, 3, 'https://example.test/Feed')
     operation = change_policy(binding.pk, expected_policy_version=1, desired_mode='full_content', dedupe_key='mode')
     assert change_policy(binding.pk, expected_policy_version=1, desired_mode='full_content', dedupe_key='mode').pk == operation.pk

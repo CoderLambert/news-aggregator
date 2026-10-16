@@ -230,7 +230,9 @@ def commit_entry(dto, fence, *, reserve):
         from api.services.source_policy import policy_for_name
         from api.models import Source
         policy = policy_for_name(Source.objects.get(pk=source[0]).name)
-        kind = config.content_kind if config else (policy.content_kind if policy else 'article')
+        from api.rss.feed_policy import known_feed_content_kind
+        kind = config.content_kind if config else (policy.content_kind if policy else
+            known_feed_content_kind(binding.canonical_feed_url))
         result = commit_body(token, converted, content_kind=kind,
             completeness='summary' if source[6] in {'summary_only', 'rss_summary_only'} else 'unknown')
         if result.status == 'stale':

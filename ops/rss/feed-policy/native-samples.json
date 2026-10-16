@@ -1,0 +1,109 @@
+{
+  "scope": "T27 reviewed mode decision only; no completeness badge; no whole-feed coverage claim",
+  "source": "T27 isolated public native samples /tmp/rss-t27-public-evidence.json",
+  "tested_sha": "80ed9e465b1062567bb4aca87c5bc1b8c4c4f5ca",
+  "project": "newshub-rss-t27-public-5b426547ef",
+  "resources_removed": true,
+  "feeds": [
+    {
+      "class": "native",
+      "name": "Julia Evans",
+      "feed_url": "https://jvns.ca/atom.xml",
+      "sample_limit": 2,
+      "entries": [
+        {
+          "id": "1",
+          "url": "https://jvns.ca/blog/2024/11/18/how-to-import-a-javascript-library/",
+          "title": "Importing a frontend Javascript library without a build system",
+          "published_at": "2024-11-18T09:35:42Z",
+          "scope": "feed_content",
+          "subtype": "article",
+          "manual_completeness": "not_confirmed",
+          "feed_html_chars": 24681,
+          "feed_markdown_chars": 18931,
+          "feed_canonical_hash": "38e53b12ff83a142561e714d04fb50e5f641eb6d1c550b028d5ed9e98aa78153",
+          "markdown_chars": 18931,
+          "canonical_hash": "38e53b12ff83a142561e714d04fb50e5f641eb6d1c550b028d5ed9e98aa78153",
+          "nonempty_readable": true,
+          "pre_blocks": 10,
+          "tables": 0,
+          "images": 0,
+          "heading_count": 20
+        },
+        {
+          "id": "2",
+          "url": "https://jvns.ca/blog/2024/11/29/why-pipes-get-stuck-buffering/",
+          "title": "Why pipes sometimes get \"stuck\": buffering",
+          "published_at": "2024-11-29T08:23:31Z",
+          "scope": "feed_content",
+          "subtype": "article",
+          "manual_completeness": "not_confirmed",
+          "feed_html_chars": 14125,
+          "feed_markdown_chars": 11318,
+          "feed_canonical_hash": "7e483333b41069a6c5c28ae1cdfea152099d4cbb1a5f2d2c20c565bab12daa7a",
+          "markdown_chars": 11318,
+          "canonical_hash": "7e483333b41069a6c5c28ae1cdfea152099d4cbb1a5f2d2c20c565bab12daa7a",
+          "nonempty_readable": true,
+          "pre_blocks": 11,
+          "tables": 0,
+          "images": 0,
+          "heading_count": 16
+        }
+      ],
+      "feed_id": "1",
+      "feed_elapsed_seconds": 2.643,
+      "observed_feed_entries": 20,
+      "status": "sampled"
+    },
+    {
+      "class": "native",
+      "name": "WebKit",
+      "feed_url": "https://webkit.org/feed/",
+      "sample_limit": 2,
+      "entries": [
+        {
+          "id": "21",
+          "url": "https://webkit.org/blog/18178/webkit-features-for-safari-26-6/",
+          "title": "WebKit Features for Safari 26.6",
+          "published_at": "2026-07-27T18:00:52Z",
+          "scope": "feed_content",
+          "subtype": "article",
+          "manual_completeness": "not_confirmed",
+          "feed_html_chars": 5124,
+          "feed_markdown_chars": 3845,
+          "feed_canonical_hash": "017746030361ffa244d60478ef06de79b91825d3a58b42d6e39cd055cf541d87",
+          "markdown_chars": 3845,
+          "canonical_hash": "017746030361ffa244d60478ef06de79b91825d3a58b42d6e39cd055cf541d87",
+          "nonempty_readable": true,
+          "pre_blocks": 1,
+          "tables": 0,
+          "images": 0,
+          "heading_count": 9
+        },
+        {
+          "id": "22",
+          "url": "https://webkit.org/blog/18182/release-notes-for-safari-technology-preview-249/",
+          "title": "Release Notes for Safari Technology Preview 249",
+          "published_at": "2026-07-29T21:46:12Z",
+          "scope": "feed_content",
+          "subtype": "article",
+          "manual_completeness": "not_confirmed",
+          "feed_html_chars": 17320,
+          "feed_markdown_chars": 10926,
+          "feed_canonical_hash": "4136d64112e05c3bf730b55f9f4c8a2bf3f69ab8ba02d2a0d4494f1615b4129d",
+          "markdown_chars": 10926,
+          "canonical_hash": "4136d64112e05c3bf730b55f9f4c8a2bf3f69ab8ba02d2a0d4494f1615b4129d",
+          "nonempty_readable": true,
+          "pre_blocks": 0,
+          "tables": 0,
+          "images": 0,
+          "heading_count": 40
+        }
+      ],
+      "feed_id": "2",
+      "feed_elapsed_seconds": 3.262,
+      "observed_feed_entries": 10,
+      "status": "sampled"
+    }
+  ]
+}
