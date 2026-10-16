@@ -66,7 +66,7 @@ def test_accept_updates_revision_and_archives_only_changed_full_text(story):
     snapshot = LegacyTranslationSnapshot.objects.get(news=news)
     assert (snapshot.source_text, snapshot.translated_text, snapshot.origin) == (old, '唯一旧全文译文', 'legacy')
     assert snapshot.source_hash == exact_hash(old) and snapshot.translation_hash == exact_hash('唯一旧全文译文')
-    assert news.full_content_provenance['entry_id'] == 42
+    assert news.full_content_provenance['engine_entry_id'] == 42
     assert entry.raw_hash == news.full_content_provenance['raw_hash']
 
 
@@ -311,3 +311,61 @@ def test_sqlite_writer_reservation_prevents_policy_change_during_archive(story):
         assert commit_body(token, converted('late result')).status == 'stale'
     finally:
         competitor.close()
+
+
+def test_quarantine_captures_engine_identity_for_later_resolution(story):
+    news, _, feed, _, _, _, _ = story
+    pending = quarantine(story)
+    FeedBinding.objects.filter(pk=feed.pk).update(engine_instance_uuid=uuid.uuid4())
+    result = resolve_candidate(pending.candidate_id, decision='accept')
+    assert result.status == 'stale' and result.reason == 'engine_identity_changed'
+    news.refresh_from_db()
+    assert news.full_content == 'a' * 1000 and news.full_content_zh == '唯一旧全文译文'
+
+
+def test_explicit_rejection_remains_rejected_on_identical_replay(story):
+    news, *_, token = story
+    pending = quarantine(story)
+    assert resolve_candidate(pending.candidate_id, decision='reject').reason == 'operator_rejected'
+    replay = commit_body(token, converted('b' * 499))
+    assert replay.status == 'rejected' and replay.reason == 'operator_rejected'
+    assert replay.candidate_id == pending.candidate_id and BodyCandidate.objects.count() == 1
+    news.refresh_from_db()
+    assert news.full_content_revision == 8
+
+
+def test_verified_evidence_is_bound_to_current_hash_and_not_inherited(story):
+    news, source, _, _, _, entry, token = story
+    first = converted('Verified body with retained evidence.')
+    assert commit_body(token, first, completeness='verified', evidence={'verified_canonical_hash': first.canonical_hash}).status == 'accepted'
+    news.refresh_from_db()
+    assert news.full_content_completeness == 'verified'
+    current = capture_write_token(news_id=news.pk, source_id=source.pk, entry_id=entry.pk)
+    assert commit_body(current, converted('Next changed unknown readable body.')).status == 'accepted'
+    news.refresh_from_db()
+    assert news.full_content_completeness == 'unknown' and news.full_content_revision == 10
+
+
+def test_summary_never_replaces_verified_available_body(story):
+    news, *_, token = story
+    News.objects.filter(pk=news.pk).update(full_content_state='available', full_content_completeness='verified')
+    result = commit_body(token, converted('Summary must not overwrite verified body'), completeness='summary')
+    assert result.reason == 'summary_cannot_replace_complete'
+    news.refresh_from_db()
+    assert news.full_content_revision == 8 and news.full_content_completeness == 'verified'
+
+
+def test_outer_transaction_can_roll_back_accepted_body_with_caller_cursor(story):
+    from django.db import transaction
+    news, _, feed, _, _, _, token = story
+    state = FeedSyncState.objects.create(engine_instance_uuid=feed.engine_instance_uuid, account_id=7, new_cursor=41)
+    with pytest.raises(RuntimeError):
+        with transaction.atomic():
+            assert commit_body(token, converted()).status == 'accepted'
+            FeedSyncState.objects.filter(pk=state.pk).update(new_cursor=42)
+            raise RuntimeError('caller page failed')
+    news.refresh_from_db()
+    state.refresh_from_db()
+    assert state.new_cursor == 41 and news.full_content_revision == 8
+    assert news.full_content_zh == '唯一旧全文译文'
+    assert not BodyCandidate.objects.exists() and not LegacyTranslationSnapshot.objects.exists()
