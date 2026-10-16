@@ -114,8 +114,8 @@ def test_waiting_and_completed_cache_reauthorize_before_bytes(world):
     SourcePublication.objects.filter(source=source).update(reading_policy='summary_only')
     assert b'secret' not in b''.join(response.streaming_content)
     response = shared.completed_response(record, user=a, stored=stored)
-    with pytest.raises(StoredContentChanged):
-        b''.join(response.streaming_content)
+    payload = b''.join(response.streaming_content)
+    assert b'error' in payload and b'secret' not in payload and b'full_content_zh' not in payload
 
 
 def test_tts_cache_identity_and_subscription_revocation(world):
@@ -175,8 +175,8 @@ def test_private_versions_preserved_and_connection_switch_rechecked(world):
     record = ChatGPTArticleTranslation.objects.get(user=user, news=news, source_hash=stored.canonical_hash)
     response = shared.completed_response(record, 'private', user=user, stored=stored)
     connection.is_active = False; connection.save(update_fields=['is_active'])
-    with pytest.raises(shared.SharedTranslationError):
-        b''.join(response.streaming_content)
+    payload = b''.join(response.streaming_content)
+    assert b'error' in payload and b'private revision two' not in payload and b'full_content_zh' not in payload
     assert current_translation(user, stored)[0].content == 'new shared result'
 
 

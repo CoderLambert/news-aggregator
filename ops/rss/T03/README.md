@@ -145,3 +145,10 @@ termination and compatibility/ACL checks remain NOT_RUN. This evidence ends at
 schema rehearsal/seal. No migration subset is accepted as compatible. Large
 production databases and restore time/RPO budgets need that measured rehearsal;
 the current logical fingerprint queries buffer per-table results.
+
+The rollback environment file must retain the same non-secret
+`RSS_ENGINE_INSTANCE_UUID` and `RSS_ENGINE_ACCOUNT_ID` as the target manifest.
+The base app receives that explicit file through its existing `env_file`.
+The application-only rollback deliberately keeps Miniflux and rss-sync stopped;
+without a current sync heartbeat its administrative engine status is unknown.
+Successful application startup alone does not establish live synchronization.

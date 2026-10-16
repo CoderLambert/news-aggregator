@@ -1,6 +1,6 @@
 # T13 阅读与个人已读交付进度
 
-状态：部分集成，显式 Miniflux 修复接线待 T08/T19；浏览器联合验收待 T27。未进行生产操作。
+状态：代码已集成，显式 Miniflux 修复已接 T08/T09/T19；浏览器联合验收待 T27。未进行生产操作。
 
 已实现：0056 NewsReadState 领域表；GET/PATCH `/api/me/news/{id}/read-state/`，缺记录 false/version0，显式写入用当前用户和文章 ACL，SQLite 首写保留后检查 expected_version。相同状态幂等，不推断 ReadingDay、不修改统计、不因正文更新或退订清除历史。接口使用 session/CSRF、个人 no-store、v1 错误格式，原站点只读和账号切换保护保留。
 
@@ -14,3 +14,5 @@
 - 日志：`/tmp/newshub-rss-t13-backend.log`、`/tmp/newshub-rss-t13-readstate-frontend.log`、`/tmp/newshub-rss-t13-readstate-build.log`。
 
 未验证：真实浏览器移动端/主题/TOC、用户实际数据、完整后台预获取与显式修复操作。T11入口集成与后续 T08 操作接线后补受影响测试，不将组件测试当浏览器证据。
+
+后续集成：显式修复仅当前授权且owner/binding/full_content模式已就绪时显示，POST refetch后轮询actor操作，pending_sync直到T09按fence接受或拒绝才结束；GET/打开/hover不入队。服务端查询full_content_provenance的时间推断字段采用SQL投影，列表仍不加载正文/provenance大字段。
