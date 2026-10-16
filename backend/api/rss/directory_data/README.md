@@ -12,10 +12,13 @@ requested to prepare these artifacts. All `verified_at` values remain null.
 - The first collection is **38 actual HTTPS entries** from
   [plenaryapp/awesome-rss-feeds at 9ab2482](https://github.com/plenaryapp/awesome-rss-feeds/tree/9ab2482cae9031a5a39635c887fcfc8ece7e130a),
   specifically `recommended/with_category/Programming.opml` and
-  `recommended/with_category/Web Development.opml`. Title, description and xmlUrl
-  were copied directly; the enclosing outline becomes a category tag. URL is the
-  stable local key. Seven HTTP URLs were excluded, without rewriting them to
-  HTTPS. The lock records source-file hashes, paths, and every exclusion.
+  `recommended/with_category/Web Development.opml`. The Coding Horror record
+  preserves its upstream FeedBurner URL as the stable key, while `public_url`
+  uses the final HTTPS feed URL observed after the alias redirected twice during
+  live acceptance. Other entries retain their upstream xmlUrl. The enclosing
+  outline becomes a category tag. Seven HTTP URLs were excluded, without
+  rewriting them to HTTPS. The lock records source-file hashes, paths, and every
+  exclusion.
   Upstream's CC0-1.0 license is preserved as `plenary-CC0-1.0.txt`.
 - The second collection contains two newly authored CC0-1.0 metadata records:
   React's GitHub release Atom URL and 中新网健康's RSS URL. This collection carries

@@ -66,7 +66,7 @@
 ## 仍未封存的门禁
 
 - DEV 旧 `/news/8555` 的真实 URL：没有授权的真实 DB 副本，NOT_VERIFIED。
-- RSSHub GitHub Trending：缺可用 TLS/token 和维护路由实例，BLOCKED。
+- RSSHub GitHub Trending：本机 RSSHub 的 GitHub Token 路由已通过；2026-10-17 复核 health 为 200，本周 Trending 为 200、返回 11 项。NewsHub 目录当前不暴露该模板。`rsshub.news.lambert.host` 尚未部署，公网 TLS/回流及 Miniflux 发布者认证/拒绝重定向端到端验收为 **NOT_RUN（待部署）**，不是失败。见 [`rsshub-local-followup.json`](../../../../../ops/rss/T27/evidence/rsshub-local-followup.json)。
 - 真实 AI/TTS provider：未提供凭据，未计费；只证明 fake provider 正文路径及越权 HTTP 拒绝，实际语音/模型输出质量 NOT_RUN。
 - T26 双库/完整 app 恢复由协调者单独封存；此前 T00/T03/T08/T09 的故障证据只能按各自报告版本引用，不能冒充本次 SHA 全套重演。
 - Node 22、生产 bundle、真实手机软键盘和真实用户手动验收未运行；此处是 Chromium viewport + 实际键盘事件。
@@ -128,3 +128,42 @@
 合成原文增加两个真实 h2，实际“打开目录”显示文章标题层级；点击 Closing section 后目标 y 从 1631.41 移至 957.41、进入 1000px 视窗，[目录截图](../../../../../ops/rss/T27/evidence/automatic/automatic-toc.png)包含目标标题与真实控件。未伪造 TOC 按钮，未改业务代码，也未因此增加公网实验。
 
 调试中两次节点滚动失败来自异步代码高亮替换 DOM，改为重取 locator 同步滚动；一次 20 秒轮询边界早于 worker 下一轮，调至有界 60 秒。最终 fresh 项目一次完整通过上述最小路径；失败项目亦清理。最终证据审计 **6 passed, 1 skipped**，`py_compile` 与 `git diff --check` 通过；skip 是未重复的全链 live pytest 包装器，真实浏览器由所列命令执行。
+
+## 目录 FeedBurner 重定向补验
+
+2026-10-17，真实公开 GET 显示 Plenary 目录原 Coding Horror FeedBurner URL 会跳转两次，最终为 `https://blog.codinghorror.com/rss/`；旧目录订阅因此在严格 URL 身份核对下进入 `create_outcome_unproven`。目录保留上游 FeedBurner key，将订阅 URL 改为最终地址并更新锁定 SHA256。全新隔离 Miniflux 2.3.3/PostgreSQL/SQLite + Chromium 真实界面再次搜索并从目录订阅：POST 202 后 operation succeeded，binding ready，Miniflux 返回 15 entries，worker 链接 15 篇，0 pending/0 rejected，crawler=false，pageerror=0。配置 `FETCHER_ALLOW_PRIVATE_NETWORKS=0`、全文门禁关闭；临时 Compose 项目跑完清理。证据见 [`codinghorror-redirect-followup.json`](../../../../../ops/rss/T27/evidence/codinghorror-redirect-followup.json)。
+
+这修正只覆盖已知目录项。任意用户输入的重定向别名仍没有被普遍接纳；引擎创建结果和绑定 URL 的安全身份协议仍需单独设计与验收。RSSHub 本机真实 GitHub Trending 路由已通过；公网网关尚未部署，因此公网 TLS/回流和 Miniflux 固定发布者认证/拒绝重定向端到端验收仍为 NOT_RUN，不记为失败。
+
+## 2026-10-17 续测：回归修复与人工完整性补验
+
+### 回归测试修复
+
+`test_real_0051_to_0052_migration` 在子进程里因 `PYTHONPATH` 未含 `backend/` 导致 `ModuleNotFoundError`，使结果由 19→18 passed。修复：`test_directory.py` 第 233 行从 `__file__` 反推 `backend/` 绝对路径并注入 `PYTHONPATH`，补 `import pathlib`。修复后**19 passed**，`git diff --check` 通过，工作树已修改文件集与交接一致。
+
+```bash
+cd /tmp/newshub-rss-integration-20261016
+/tmp/newshub-rss-coordinator-venv/bin/python -m pytest -q backend/api/tests/rss/test_directory.py
+# 19 passed in 4.57s
+```
+
+### 目录 API 状态确认（只读）
+
+目录端点 `GET /api/rss/directory/`，当前 snapshot_version `5834f66ea0cd...`（稳定），基线 20 条目：
+
+- `q=github+trending` → **0 条**：RSSHub 模板当前不向用户开放，符合公网网关门禁关闭预期，不是失败。
+- `q=coding+horror` → **1 条**，`public_url=https://blog.codinghorror.com/rss/`：FeedBurner 重定向修复已生效。
+- `q=github` → **3 条**（GitHub Blog、React releases、Repo Issues 模板）：普通 feed 与现有模板正常。
+
+### WebKit / DEV 人工完整性补验
+
+对首轮取样中 `manual_completeness=not_confirmed` 的 4 篇文章做原站只读对照（curl 抓取 HTML，Python 解析 `<article>` 结构，未登录、未保存正文全文）：
+
+| 来源 | 文章 | headings 原站/引擎 | pre_blocks | tables | 结论 |
+| --- | --- | --- | --- | --- | --- |
+| WebKit（feed_content） | [Safari 26.6](https://webkit.org/blog/18178/webkit-features-for-safari-26-6/) | 10 / 9（差1，页面级h1）| 1/1 ✅ | 0/0 ✅ | **pass_limited** |
+| WebKit（feed_content） | [Tech Preview 249](https://webkit.org/blog/18182/release-notes-for-safari-technology-preview-249/) | 41 / 40（差1，同上）| 0/0 ✅ | 0/0 ✅ | **pass_limited** |
+| DEV（engine_extracted）| [JSON parse error](https://dev.to/head_of_david/unexpected-token-in-json-at-position-0-what-it-means-and-how-to-fix-it-2efo) | 5/5 ✅ | 5/5 ✅ | 1/1 ✅ | **pass_limited** |
+| DEV（engine_extracted）| [Firefox for iOS](https://dev.to/weatherclockdash/firefox-for-ios-the-webkit-limitation-what-it-offers-and-when-to-use-it-instead-of-safari-n26) | 9 / 8（±1，H1计数口径）| 0/0 ✅ | 0/0 ✅ | **pass_limited** |
+
+四篇均 **pass_limited**：原站可正常访问、主体内容存在、结构计数量级吻合，无明显正文缺失。headings 差 ±1 均来自页面级 h1 是否纳入计数的口径差异，不是内容丢失。此为 Agent 原站对照，非最终用户签收；HN self_post 缺样本、旧 DEV/8555 URL、公网 RSSHub 端到端等限制不变。

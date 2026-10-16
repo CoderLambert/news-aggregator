@@ -1,0 +1,35 @@
+{
+  "tested_at": "2026-10-17",
+  "scope": "local RSSHub route and NewsHub directory visibility only",
+  "rsshub_local": {
+    "origin": "http://127.0.0.1:1200",
+    "health": {
+      "status": 200,
+      "body": "ok"
+    },
+    "github_trending_weekly_any": {
+      "status": 200,
+      "content_type": "application/xml; charset=utf-8",
+      "title": "Trending repositories on GitHub this week · GitHub",
+      "item_count": 11
+    }
+  },
+  "newshub_directory": {
+    "query": "github trending",
+    "status": 200,
+    "result_count": 0
+  },
+  "public_gateway": {
+    "host": "rsshub.news.lambert.host",
+    "deployment_status": "not_deployed",
+    "predeployment_probe": {
+      "https": "TLS handshake unavailable",
+      "http": "empty reply"
+    },
+    "acceptance_status": "NOT_RUN_PENDING_DEPLOYMENT"
+  },
+  "miniflux_registration_attempted": false,
+  "private_network_bypass": false,
+  "secret_values_recorded": false,
+  "scope_limit": "Local RSSHub route PASS; public gateway and Miniflux-to-gateway end-to-end acceptance were not run. The predeployment probe is not a failed product acceptance."
+}

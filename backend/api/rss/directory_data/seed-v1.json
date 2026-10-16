@@ -30,7 +30,7 @@
           "key": "https://feeds.feedburner.com/codinghorror",
           "name": "Coding Horror",
           "description": "programming and human factors",
-          "public_url": "https://feeds.feedburner.com/codinghorror",
+          "public_url": "https://blog.codinghorror.com/rss/",
           "tags": [
             "Programming"
           ],

@@ -3,6 +3,7 @@ import copy
 import hashlib
 import json
 import os
+import pathlib
 import socket
 import subprocess
 import sys
@@ -64,6 +65,10 @@ def test_real_seed_queries_are_local_and_deterministic(monkeypatch):
     native = next(row for row in github if row['name'] == 'The GitHub Blog')
     assert native['origin']['id'] == 'plenaryapp/awesome-rss-feeds'
     assert native['origin']['license'] == 'CC0-1.0'
+    coding_horror = next(row for row in search_directory('Coding Horror')['results']
+                         if row['name'] == 'Coding Horror')
+    assert coding_horror['origin']['key'] == 'https://feeds.feedburner.com/codinghorror'
+    assert coding_horror['public_url'] == 'https://blog.codinghorror.com/rss/'
     template = next(row for row in github if row['kind'] == 'route_template')
     assert template['public_url'] == '/github/issue/:user/:repo/:state?/:labels?'
     assert template['required_parameters'] == ['repo', 'user']
@@ -226,6 +231,11 @@ else:
 assert Entry.objects.count() == 1
 connection.close()
 '''
-    environment = dict(os.environ, DJANGO_SETTINGS_MODULE='newsaggregator.settings', DJANGO_ENV='development', RUN_MAIN='true', DJANGO_DB_PATH=str(tmp_path / 'directory-migration.sqlite3'))
+    # backend/ must be on PYTHONPATH so the subprocess can import `newsaggregator`.
+    # Derive it from __file__: test_directory.py → rss/ → tests/ → api/ → backend/
+    _backend_dir = str(pathlib.Path(__file__).resolve().parents[3])
+    _existing_pypath = os.environ.get('PYTHONPATH', '')
+    _pythonpath = _backend_dir if not _existing_pypath else f'{_backend_dir}{os.pathsep}{_existing_pypath}'
+    environment = dict(os.environ, DJANGO_SETTINGS_MODULE='newsaggregator.settings', DJANGO_ENV='development', RUN_MAIN='true', DJANGO_DB_PATH=str(tmp_path / 'directory-migration.sqlite3'), PYTHONPATH=_pythonpath)
     result = subprocess.run([sys.executable, '-c', program], env=environment, capture_output=True, text=True, timeout=90)
     assert result.returncode == 0, result.stdout + result.stderr

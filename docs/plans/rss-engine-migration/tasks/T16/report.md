@@ -7,7 +7,7 @@
 - DDL 小提交 `81ad293`，已推 `origin/task/rss-T16-directory`；迁移 `0052_feed_directory` 依赖 `0051_seed_domestic_medical_sources`。已释放公共 `models.py` 写入权，T05 从0053继续。
 - 独立 `api/rss/directory_models.py` 注册 `FeedDirectorySnapshot/Entry`，唯一 active 快照、snapshot/entry_id 唯一，稳定展示 UUID 与内部行 PK 分离。
 - `api/rss/directory.py`：固定 hash/格式验证、有界声明式 JSON 导入、全量校验后原子快照切换、旧快照保留、仅本地确定排序搜索、绑定版本/关键词的签名分页。
-- 默认种子 41 项：Plenary 实际 38 个 HTTPS Feed（两份固定 OPML、7个 HTTP 明确排除），2个单独归属的原创建议，RSSHub 实际 GitHub issue 路由1个模板。
+- 默认种子 41 项：Plenary 实际 38 个 HTTPS Feed（两份固定 OPML、7个 HTTP 明确排除），2个单独归属的原创建议，RSSHub 实际 GitHub issue 路由1个模板。Coding Horror 保留上游 FeedBurner URL 作为来源 key，目录订阅 URL 改为公网实测两跳后的最终 HTTPS 地址；详见 directory_data/README.md。
 - 固定上游提交、输入与投影 SHA256、完整许可文本、格式/覆盖范围/接口说明见 [directory_data/README.md](../../../../../backend/api/rss/directory_data/README.md)。Plenary为CC0-1.0；RSSHub为AGPL-3.0-only。没有把上游描述重新标成CC0。
 
 ## 实测
