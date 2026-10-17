@@ -123,7 +123,7 @@ def run_agent_loop(
             )
             try:
                 clients = personal_clients_for_user(user)
-            except ProviderCredentialError:
+            except PersonalAIUnavailable:
                 on_event('error', {'message': '个人模型配置不可用，请前往设置重新配置'})
                 return
         if not clients:
