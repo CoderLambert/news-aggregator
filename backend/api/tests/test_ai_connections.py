@@ -322,8 +322,7 @@ def test_atomic_forward_schema_imports_and_disables_legacy_key():
         assert row.endpoint_profile == 'deepseek_default'
         assert decrypt_credential(row) == KEY
         assert 'api_userprovidercredential' not in connection.introspection.table_names()
-        with pytest.raises(PersonalAIUnavailable):
-            personal_clients_for_user(owner)
+        assert personal_clients_for_user(owner) == []
     finally:
         MigrationExecutor(connection).migrate(targets)
 
