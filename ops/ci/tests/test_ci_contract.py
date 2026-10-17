@@ -89,8 +89,19 @@ class SelfHostedCIContract(unittest.TestCase):
                           if step["name"] == "Run backend and offline deployment tests")
         self.assertLess(security_fast, full_suite)
         self.assertIn("--maxfail=1", backend_steps[security_fast]["run"])
-        self.assertIn("tests/ backend/api/tests/ scripts/deploy/tests/",
-                      backend_steps[full_suite]["run"])
+        # Default backend tests must invoke the same previously validated
+        # hybrid as the opt-in benchmark, with only one CI round.
+        self.assertEqual(backend_steps[full_suite]["run"], "bash ops/ci/benchmark-xdist.sh")
+        self.assertEqual(backend_steps[full_suite]["env"]["CI_XDIST_REPEATS"], "1")
+        hybrid = (ROOT / "ops/ci/benchmark-xdist.sh").read_text(encoding="utf-8")
+        self.assertIn("tests/ backend/api/tests/ scripts/deploy/tests/", hybrid)
+        self.assertIn('SERIAL_FILES=(', hybrid)
+        self.assertIn('--ignore="$file"', hybrid)
+        self.assertIn("--max-worker-restart=0", hybrid)
+        self.assertIn("ops/ci/xdist_summary.py", hybrid)
+        self.assertIn("CI_XDIST_REPEATS", hybrid)
+        benchmark = load(ROOT / ".github/workflows/ci-pytest-benchmark.yml")
+        self.assertEqual(benchmark["jobs"]["pytest-xdist-lab"]["env"]["CI_XDIST_REPEATS"], "3")
 
     def test_manual_smoke_also_uses_only_dedicated_runner(self):
         wf = load(SMOKE)

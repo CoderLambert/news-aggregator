@@ -629,7 +629,16 @@ class CollectionAndWorkflowTests(unittest.TestCase):
         backend_install = (ROOT / "ops/ci/install-backend-deps.sh").read_text(encoding="utf-8")
         self.assertIn("2.14.1+cpu", backend_install)
         self.assertLess(backend_install.index('"torch==$TORCH_PIN"'), backend_install.index('-r "$LOCK"'))
-        self.assertIn("tests/ backend/api/tests/ scripts/deploy/tests/", runs)
+        # The default workflow invokes the pinned hybrid matrix indirectly;
+        # keep asserting all three roots instead of requiring inline pytest.
+        self.assertIn("bash ops/ci/benchmark-xdist.sh", runs)
+        hybrid = (ROOT / "ops/ci/benchmark-xdist.sh").read_text(encoding="utf-8")
+        self.assertIn("tests/ backend/api/tests/ scripts/deploy/tests/", hybrid)
+        self.assertIn("SERIAL_FILES=(", hybrid)
+        self.assertIn('--ignore="$file"', hybrid)
+        self.assertIn("ops/ci/xdist_summary.py", hybrid)
+        full_step = next(s for s in backend_job["steps"] if s["name"] == "Run backend and offline deployment tests")
+        self.assertEqual(full_step["env"]["CI_XDIST_REPEATS"], "1")
         self.assertIn("--target production", runs)
         self.assertIn("local-domain-smoke.sh --execute", runs)
         self.assertIn(

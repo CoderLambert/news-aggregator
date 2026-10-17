@@ -157,7 +157,7 @@ PR #81 自托管 Runner 的一次热缓存验收中，后端 pytest 测试为 24
 - 测试输出保留 `--durations=40 --durations-min=0.5`，按 setup/call/teardown 排序显示慢用例，便于持续排查。
 - RSS EngineAdapter 本地 HTTP server 的测试关闭轮询由默认 0.5 秒降为 0.02 秒，仍使用真实 HTTP 和标准 `shutdown()`。
 - 全文 Worker 的 SQLite 迁移只在模块级子进程执行一次，各测试通过独立临时数据库副本运行，不共享数据库、锁、心跳或持久进程。
-- 暂不默认启用 `pytest-xdist`。SQLite 事务测试、心跳/锁、端口和 subprocess 测试并行安全性需单独审核及重复验收；不能仅为速度跳过测试。
+- 默认 CI 后端测试拟改为**受限混合并行**：7 个种子/状态敏感模块保持串行，其余三测试根目录通过固定 `pytest-xdist==3.8.0` / `execnet==2.1.1`、`-n 2 --dist=loadfile --max-worker-restart=0` 执行。每轮严格核对 `2410 passed / 16 skipped`、JUnit 零失败，禁止把失败转为跳过。主 CI `CI_XDIST_REPEATS=1`，独立实验仍重复 3 次。该修改是否正式可用须以本变更 SHA 的完整 CI（包括镜像构建及 G1）全绿为准；此处不是发布或生产验收结论。
 
 ## 6. 长期持久缓存
 

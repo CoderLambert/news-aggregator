@@ -119,9 +119,14 @@ jobs:
           bash scripts/deploy/tests/test_preflight.sh
           bash scripts/deploy/tests/test_local_domain_args.sh
       - name: Run backend and offline deployment tests
-        # Pytest already collects all three explicitly named roots. Avoid a
-        # second --collect-only pass; report slow setup/call/teardown phases.
-        run: backend/venv/bin/python -m pytest -q --durations=40 --durations-min=0.5 tests/ backend/api/tests/ scripts/deploy/tests/
+        # Fail-closed hybrid: seven seed/state-sensitive modules stay serial;
+        # remaining files use two isolated xdist workers. All three test roots
+        # are covered and the authoritative terminal/JUnit totals are checked.
+        # One round is sufficient for normal CI; the separate benchmark still
+        # runs three repeated rounds for safety experiments.
+        env:
+          CI_XDIST_REPEATS: '1'
+        run: bash ops/ci/benchmark-xdist.sh
       - name: Check production Django settings with synthetic values
         env:
           DJANGO_ENV: production
