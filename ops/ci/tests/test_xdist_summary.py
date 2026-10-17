@@ -61,7 +61,7 @@ class XdistSummaryTests(unittest.TestCase):
         serial = folder / "serial.json"
         parallel = folder / "parallel.json"
         def row(nodeid, outcome, when="call"):
-            return {"nodeid": nodeid, "outcome": outcome, "when": when, "wasxfail": False}
+            return {"nodeid": nodeid, "outcome": outcome, "when": when, "wasxfail": False, "is_subtest": False}
         a = [row(nodeids[0], "passed")]
         b = [row(nodeids[1], "passed")]
         b.extend(row(n, "skipped", "setup") for n in nodeids[2:])
@@ -95,6 +95,28 @@ class XdistSummaryTests(unittest.TestCase):
         with TemporaryDirectory() as name:
             paths = self._files(Path(name), unexpected="tests/test_extra.py::test_extra")
             with self.assertRaisesRegex(ValueError, "identity mismatch"):
+                xdist_summary.validate_execution(*(str(p) for p in paths))
+
+    def test_marked_unittest_subtests_share_parent_identity_but_duplicate_parent_fails(self):
+        with TemporaryDirectory() as name:
+            paths = self._files(Path(name))
+            parallel = paths[2]
+            value = json.loads(parallel.read_text())
+            parent = value["reports"][0]
+            value["reports"].extend([
+                {**parent, "is_subtest": True} for _ in range(6)
+            ])
+            parallel.write_text(json.dumps(value))
+            counts = xdist_summary.validate_execution(*(str(p) for p in paths))
+            self.assertEqual((counts["passed"], counts["skipped"]), (2, 16))
+            value["reports"].append(parent)
+            parallel.write_text(json.dumps(value))
+            with self.assertRaisesRegex(ValueError, "duplicate/incomplete"):
+                xdist_summary.validate_execution(*(str(p) for p in paths))
+            value["reports"].pop()
+            value["reports"][-1]["outcome"] = "failed"
+            parallel.write_text(json.dumps(value))
+            with self.assertRaisesRegex(ValueError, "failing subtest"):
                 xdist_summary.validate_execution(*(str(p) for p in paths))
 
     def test_junit_rejects_failure_duplicates_and_skip_mismatch(self):
