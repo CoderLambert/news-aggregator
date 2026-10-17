@@ -231,7 +231,7 @@ def test_chat_stream_stops_after_policy_revocation(world, monkeypatch):
     a, _, make = world
     source, news = make('stream', subscriber=a)
     monkeypatch.setattr('api.views.get_clients', lambda: [(object(), 'fake')])
-    monkeypatch.setattr('api.services.provider_credentials.personal_clients_for_user', lambda user: [])
+    monkeypatch.setattr('api.services.ai_execution.personal_clients_for_user', lambda user: [])
     monkeypatch.setattr('api.services.chatgpt_subscription.active_connection_for_user', lambda user: None)
     def chunks(*args, **kwargs):
         yield 'allowed first chunk'
