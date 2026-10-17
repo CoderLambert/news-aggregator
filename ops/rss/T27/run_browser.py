@@ -28,6 +28,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--hold', action='store_true')
     parser.add_argument('--automatic-summary', action='store_true')
+    parser.add_argument('--browser-script', choices=('browser.py', 'browser_automatic.py', 'browser_followup.py'), default=None)
     args = parser.parse_args()
     endpoint = (None if os.environ.get('DOCKER_CONTEXT') else os.environ.get('DOCKER_HOST')) or run(['docker', 'context', 'inspect', '--format', '{{.Endpoints.docker.Host}}']).stdout.strip()
     assert endpoint.startswith('unix://'), 'local Docker only'
@@ -106,10 +107,10 @@ def main():
             print('T27_CONFIG=' + str(config_path), flush=True)
             if args.hold:
                 while True: time.sleep(1)
-            browser_script = 'browser_automatic.py' if args.automatic_summary else 'browser.py'
+            browser_script = args.browser_script or ('browser_automatic.py' if args.automatic_summary else 'browser.py')
             result = run([PYTHON, str(ROOT / 'ops/rss/T27' / browser_script), str(config_path)], cwd=ROOT, timeout=600)
             print(result.stdout, flush=True)
-            if not args.automatic_summary:
+            if not args.automatic_summary and browser_script == 'browser.py':
                 chats = [json.loads(line) for line in (state / 'ai-contexts.jsonl').read_text().splitlines()]
                 assert chats and all('T27 B ONLY SECRET' not in json.dumps(chat) for chat in chats)
                 (args.output / 'ai-boundary.json').write_text(json.dumps({'fake_provider_calls':len(chats),'bob_private_title_absent':True,'real_paid_provider_calls':0}))

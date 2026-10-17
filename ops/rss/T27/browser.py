@@ -134,22 +134,24 @@ with sync_playwright() as playwright:
             assert api('/rss/directory/?q=Coding%20Horror')['status'] == 200
             directory_times.append(round(1000*(time.monotonic()-started), 3))
         checks['directory_http_ms'] = directory_times
-        dialog.get_by_label('来源名称或关键词').fill('Coding Horror')
-        dialog.get_by_role('button', name='搜索', exact=True).click()
+        # Unified DiscoverDialog (since #80/#94): one input + "查找订阅" for
+        # keyword (directory), website (discovery) and direct-feed modes.
+        search_input = dialog.get_by_label('搜索订阅源、网站或 RSS 地址')
+        search_input.fill('Coding Horror')
+        dialog.get_by_role('button', name='查找订阅', exact=True).click()
         expect(dialog.get_by_text('Coding Horror', exact=True)).to_be_visible()
         assert not [r for r in network if r['phase'] == phase and r['method'] == 'POST']
-        dialog.get_by_role('button', name='发现网站', exact=True).click()
         for website, count in [('https://zero.publisher.example:8443/zero', 0), ('https://publisher.example:8443/one', 1), ('https://publisher.example:8443/many', 3)]:
-            dialog.get_by_label('网站地址').fill(website)
-            dialog.get_by_role('button', name='发现订阅', exact=True).click()
+            search_input.fill(website)
+            dialog.get_by_role('button', name='查找订阅', exact=True).click()
             if count:
                 expect(dialog.get_by_role('radio')).to_have_count(count, timeout=20000)
             else:
-                expect(dialog.get_by_text('未发现订阅。可以输入网站公布的 RSS 地址。', exact=True)).to_be_visible(timeout=20000)
+                expect(dialog.get_by_text('未发现网站声明的订阅源。可以粘贴网站公布的 RSS 地址，或明确尝试将此地址作为 Feed 添加。', exact=True)).to_be_visible(timeout=20000)
         screenshot('04-discovery-three-candidates.png')
-        dialog.get_by_role('button', name='RSS 地址', exact=True).click()
-        dialog.get_by_label('公开 RSS 地址').fill('https://publisher.example:8443/feed/direct')
-        dialog.get_by_role('button', name='选择地址', exact=True).click()
+        search_input.fill('https://publisher.example:8443/feed/direct')
+        dialog.get_by_role('button', name='查找订阅', exact=True).click()
+        expect(dialog.get_by_text('已选择订阅，请确认分组。', exact=True)).to_be_visible()
         dialog.get_by_label('T27 Reading', exact=True).check()
         dialog.get_by_label('T27 Research', exact=True).check()
         dialog.get_by_role('button', name='确认订阅', exact=True).click()
@@ -214,8 +216,7 @@ with sync_playwright() as playwright:
         goto('/channels')
         page.get_by_role('button', name='添加频道', exact=True).click()
         dialog = page.get_by_role('dialog', name='添加订阅')
-        dialog.get_by_role('button', name='RSS 地址', exact=True).click()
-        dialog.get_by_label('公开 RSS 地址').focus()
+        dialog.get_by_label('搜索订阅源、网站或 RSS 地址').focus()
         page.keyboard.type('https://publisher.example:8443/feed/mobile')
         page.keyboard.press('Enter')
         expect(dialog.get_by_text('已选择订阅，请确认分组。', exact=True)).to_be_visible()
