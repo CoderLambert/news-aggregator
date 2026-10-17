@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { AlignLeft, ArrowLeft, Bot, GitCompareArrows, Languages, LockKeyhole, Type } from 'lucide-react'
+import { AlignLeft, ArrowLeft, Bot, Check, GitCompareArrows, Languages, LockKeyhole, Type } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/context/AuthContext'
