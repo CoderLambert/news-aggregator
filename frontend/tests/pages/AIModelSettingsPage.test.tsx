@@ -66,10 +66,11 @@ describe('BYOK T01 connection settings', () => {
     expect(api.patchAIConnection).not.toHaveBeenCalled()
     expect(screen.queryByText(KEY)).toBeNull()
   })
-  it('explains that legacy settings are unchanged and exposes a separate entry', async () => {
+  it('shows the single personal Key manager and no retired settings entry', async () => {
     setup(); await ready()
-    expect(screen.getByRole('link', { name: '查看现有单 Key 设置' })).toHaveAttribute('href', '/settings')
-    expect(screen.getByText(/不会覆盖原来的单 Key 设置/)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '个人 AI 连接' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '查看现有单 Key 设置' })).not.toBeInTheDocument()
+    expect(screen.getByText(/尚无个人 AI 连接/)).toBeInTheDocument()
   })
   it('creates only after explicit submit with viewer and a stable request id', async () => {
     setup(); await openCreate()
