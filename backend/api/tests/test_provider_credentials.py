@@ -47,6 +47,8 @@ def test_new_connection_never_becomes_a_legacy_or_site_funded_default(owner):
         display_name='test-only-connection', request_hash='test-only',
         credential_ciphertext='synthetic-no-decrypt', is_enabled=False,
     )
+    assert not has_personal_connection(owner)
+    UserAIConnection.objects.filter(user=owner).update(is_enabled=True)
     assert has_personal_connection(owner)
     with (
         patch('openai.OpenAI', side_effect=AssertionError('model was called')) as upstream,
