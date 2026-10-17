@@ -86,7 +86,7 @@ def seed():
     get('SubscriptionGroupingState').objects.create(subscription=sub,status='ready')
     get('ChannelClassifierSettings').objects.create(owner=a,enabled=False)
     get('ChannelIntakeRequest').objects.create(user=a,url='https://intake.example/feed',status='approved',registered_source=source,reviewed_by=a)
-    get('UserProviderCredential').objects.create(user=a,provider='openai',model_id='synthetic-never-called',encrypted_api_key='unused-synthetic-ciphertext')
+    # T01 retires the legacy Key table; do not seed deliberately invalid v1 ciphertext.
     get('ChatGPTSubscriptionSelection').objects.create(user=a,generation=3)
     get('FeedState').objects.create(source_key='devto',feed_url='https://dev.to/feed',etag='synthetic-retained-etag',revision=8)
 
@@ -114,8 +114,11 @@ def upgrade():
     executor = MigrationExecutor(connection)
     leaves = executor.loader.graph.leaf_nodes()
     executor.migrate(leaves)
-    after = tables(before['tables'])
-    assert before['tables'] == after, 'old-column/PK/FK/text relationship fingerprint changed'
+    retained = {name: data for name, data in before['tables'].items()
+                if name != 'api_userprovidercredential'}
+    after = tables(retained)
+    assert retained == after, 'retained old-column/PK/FK/text relationship fingerprint changed'
+    assert 'api_userprovidercredential' not in connection.introspection.table_names()
     from api.models import News, LegacyTranslationSnapshot, NewsReadState
     from api.services.stored_readers import legacy_translation
     news = News.objects.get(pk=before['news_id'])
