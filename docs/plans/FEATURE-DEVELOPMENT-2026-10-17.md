@@ -2,7 +2,7 @@
 
 > **当前唯一的跨项目任务协调入口**。这是任务索引、优先级和状态交接，不替代各项目的原始设计/测试合同，也**不新增任务编号体系**。
 >
-> 代码基线：`main@48f29568d279852be903ab11f4a2e1d588f342a5`（PR #76、#77/#78、#90、#91 已合并）；合成 CI 后端最近基线为 **2429 passed / 16 skipped**。跳过不算通过。更新开发状态时必须指向实际 SHA、PR 与测试证据。
+> 本轮开发基线：`main@2e3254c890f52af626aa7d2400097301bf550d14`（含原任务权威校正 #93）；合成 CI 后端基线为 **2429 passed / 16 skipped**。跳过不算通过。本批 RSS T20 / BYOK T00 的实际提交、PR 和验证见第 7 节；合并后的 main 以对应 PR 的 merge SHA 为准。
 >
 > **用户确定的阶段边界**：先继续功能开发与必需的单元/合成集成测试；真实浏览器手工验收、真实付费模型/厂商矩阵、公网 DNS/TLS、真实数据库副本恢复、容量/降级、生产切源/上线 **最后统一验收**。延期不代表门禁通过或永久取消。
 
@@ -38,7 +38,7 @@
 
 | 原任务 | 原有交付 | 原依赖 | 当前主线判定 |
 | --- | --- | --- | --- |
-| T00 | LiteLLM + SDK + 受控 upstream 三协议、本地终态/工具/隔离技术验真 | 无 | **历史实验与旧 PR 存在，待按 main 整合核验**；#91 仅属于终态防护局部修复 |
+| T00 | LiteLLM + SDK + 受控 upstream 三协议、本地终态/工具/隔离技术验真 | 无 | **PARTIAL**；[本轮 #95](https://github.com/CoderLambert/news-aggregator/pull/95) 补官方 SDK 与 LiteLLM 1.105.0 隔离进程验证，`SDK_LOCAL` / `PROXY_PROCESS_LOCAL` PASS；原 1.104.2 镜像、digest/签名与历史 EOF 对照仍 `NOT_RUN`，不等同于镜像级 `PROXY_LOCAL` 或任务 DONE。见[运行与合同映射](../../tools/byok_t00_probe/README.md) |
 | T00-G | 独立 Proxy/Postgres、项目 virtual key/配额/日志/备份回滚运维交付 | T00 | [旧 #35](https://github.com/CoderLambert/news-aggregator/pull/35) 可选择性复用；业务开发阶段只做隔离实现/测试，不生产部署 |
 | T01 | 个人 Key 连接的增删改停、掩码、恢复与隐私隔离 | 无 | main 有基础 `UserProviderCredential`，但原连接合同**未证完整** |
 | T02 | 添加模型/可信预设；文本与工具能力显式探针 | T01、T00 | 旧 [#36](https://github.com/CoderLambert/news-aggregator/pull/36) 待审差量 |
@@ -92,9 +92,23 @@ AG 项只能标 **`代码已有/待核对/待开发/待真实验收`**，不因�
 
 旧 [PR/Issue 审计快照](MAIN-PR-ISSUE-AUDIT-2026-10-17.md)只保存历史取证，原来的 F52-R/F55-R 或建议优先级**不再作为当前计划**。
 
+## 7. 2026-10-17 双任务交付记录
+
+开工及提交前重新核对的 main 为 `2e3254c890f52af626aa7d2400097301bf550d14`。本批只实施 RSS T20 与 BYOK T00；原任务合同和最终验收边界保持有效。
+
+| 原任务 | 实际代码与 PR | 本次验证及状态 |
+| --- | --- | --- |
+| RSS T20 | [PR #94](https://github.com/CoderLambert/news-aggregator/pull/94)，功能提交 [`add9d64`](https://github.com/CoderLambert/news-aggregator/commit/add9d64e695d74c3edc4841b6dd54a943efbaa1f)。按目录、发现、订阅保存和连接查询的失败阶段恢复；固定订阅重试参数与幂等 key，隔离账号切换和旧响应，停止错误/终态轮询 | 本次错误恢复差额 IMPLEMENTED / TESTED。RSS 专项 26 passed；频道/API 关联回归 32 passed，两组有重叠。独立审核 PASS；[PR CI 39020535285](https://github.com/CoderLambert/news-aggregator/actions/runs/39020535285) 成功：前端 609 passed、后端 2429 passed / 16 skipped、隔离 G1 合成 smoke PASS。原 [Task/Test/report](rss-engine-migration/tasks/T20/report.md) 已更新；真实浏览器/来源/人工验收仍 NOT_RUN |
+| BYOK T00 | [PR #95](https://github.com/CoderLambert/news-aggregator/pull/95)，功能提交 [`b414ffd`](https://github.com/CoderLambert/news-aggregator/commit/b414ffd836cab032e48131fcac460f4772e60cc2)。新增可复跑的官方 SDK → 真实 LiteLLM → 合成上游探针，临时 PostgreSQL 发放真实项目 virtual key；在现有 CI 中增加独立验证步骤 | **PARTIAL**。24 单元测试 PASS；207 项协议/收据检查 PASS、0 FAIL，含 root + 0700 venv + asyncio。实际/预期上游请求均 86；93 个 SDK 客户端全部关闭。独立审核 PASS；完整 PR CI 与合并状态以 #95 实际检查为准，成功前不合并。命令、版本和原 T00-01–10 映射见 [README](../../tools/byok_t00_probe/README.md) |
+
+T00 的 207 项包含 106 项请求计数/收据检查，不是 207 个单元测试。当前 Proxy Chat 流式按已有 guard 返回 400 且零上游请求，记录的是失败关闭，不是流式成功兼容；Responses / Messages 流式和三协议非流式分别核验。原 1.104.2 镜像、digest/签名、历史 EOF 对照均 **NOT_RUN**，1.105.0 的进程证据不能替代它们。T00-G 完整运维交付、真实厂商/用户 Key、真实数据库、生产部署与最终验收未在本批执行。
+
+下一批候选仍是 **RSS T21 + BYOK T01**。仅在本批 PR 审核和 CI 阻塞清零后，重新读取最新 main 与原依赖再选择具体差额；T00 的未验证项继续跟踪，不将本次局部通过自动转为 T02/T04/T09 的完整依赖放行。BYOK T10 研究续问、T11 问题推荐、T12 个人用量记录保持原独立任务。
+
 ## 7. 代码开发的质量门禁与交付格式
 
 - 每次开工先查最新 `main`、既有实现、原 Task/Test 合同和相关旧 PR patch，产出 **`原 ID → 现存代码 → 真正缺口 → 修改文件 → 专项测试 → PR/SHA`**，禁止临时发明新编号或把小的可选优化插队。
 - 原任务可按文件边界并行；每项先专项单测/类型检查，再按批次集成。避免无必要地在每个小提交重复全量 CI；但不能跳过仓库实际要求的 PR 合并门禁。全部开发完成后的统一验收仍包含最终全量 CI、人工 UAT、真实厂商和生产环境证据。
 - 区分 `IMPLEMENTED`（代码存在）、`TESTED`（指定 SHA 的自动化通过）、`ACCEPTED`（原合同与必要环境全部满足）、`NOT_RUN`、`BLOCKED`。上一轮两批 PR #90/#91 是**附加兼容改进**，不冲销原 RSS/BYOK/AG 的未完成任务。
 - 不自动更新真实发布开关、生产数据库、用户 API Key、OAuth hosted 模式、站点服务或公网来源；原归属与权限模型不因为计划重排而被修改。
+
