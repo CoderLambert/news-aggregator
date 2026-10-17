@@ -27,11 +27,11 @@ class XdistSummaryTests(unittest.TestCase):
                 ("serial.log", "79 passed in 22.37s\n"),
                 (
                     "parallel.log",
-                    "2337 passed, 16 skipped in 105.55s (0:01:45)\n",
+                    "2338 passed, 16 skipped in 105.55s (0:01:45)\n",
                 ),
             ]
         )
-        self.assertEqual(totals["passed"], 2416)
+        self.assertEqual(totals["passed"], 2417)
         self.assertEqual(totals["skipped"], 16)
 
     def test_reported_bare_serial_format_is_supported(self):
