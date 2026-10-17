@@ -84,12 +84,12 @@ def validate_execution(expected_path: str, serial_path: str, parallel_path: str)
             raise ValueError(f"missing execution reports: {path}")
         for report in reports:
             if not isinstance(report, dict) or set(report) != {
-                "nodeid", "when", "outcome", "wasxfail"
+                "nodeid", "when", "outcome", "wasxfail", "is_subtest"
             } or not isinstance(report["nodeid"], str):
                 raise ValueError(f"invalid test report: {path}")
             if report["when"] not in ("setup", "call", "teardown") or (
                 report["outcome"] not in ("passed", "failed", "skipped")
-            ) or type(report["wasxfail"]) is not bool:
+            ) or type(report["wasxfail"]) is not bool or type(report["is_subtest"]) is not bool:
                 raise ValueError(f"unknown test report outcome: {path}")
             recorded[report["nodeid"]].append(report)
     missing = sorted(set(expected) - set(recorded))
@@ -102,12 +102,19 @@ def validate_execution(expected_path: str, serial_path: str, parallel_path: str)
 
     totals = Counter()
     for nodeid, reports in recorded.items():
-        # The hook records a call, a non-passing setup, and any teardown
-        # failure. No rerun, duplicated call, or partially executed test may
-        # turn into an apparent success.
-        if len(reports) != 1 or reports[0]["wasxfail"]:
-            raise ValueError(f"duplicate/incomplete or xfail test reports: {nodeid}: {reports!r}")
-        report = reports[0]
+        # unittest.TestCase.subTest emits additional call reports sharing the
+        # collected parent nodeid. They are valid only when explicitly marked
+        # by pytest as subtest reports and *every* one passed.
+        parents = [r for r in reports if not r["is_subtest"]]
+        children = [r for r in reports if r["is_subtest"]]
+        if len(parents) != 1 or any(
+            r["when"] != "call" or r["outcome"] != "passed" or r["wasxfail"]
+            for r in children
+        ):
+            raise ValueError(f"duplicate/incomplete or failing subtest reports: {nodeid}: {reports!r}")
+        report = parents[0]
+        if report["wasxfail"]:
+            raise ValueError(f"unexpected xfail report: {nodeid}")
         if report["when"] == "call" and report["outcome"] == "passed":
             totals["passed"] += 1
         elif report["outcome"] == "skipped" and report["when"] in ("setup", "call"):
@@ -157,9 +164,10 @@ def main(argv: list[str] | None = None) -> int:
         # and outcomes for each lane, while the overall union is checked above.
         for audit, xml in ((args[1], args[5]), (args[2], args[6])):
             lane = _read_manifest(audit, "execution")["reports"]
-            validate_junit(xml, expected_cases=len({
-                row["nodeid"] for row in lane
-            }), expected_skips=sum(row["outcome"] == "skipped" for row in lane))
+            validate_junit(xml, expected_cases=sum(
+                row["when"] == "call" or row["outcome"] == "skipped"
+                for row in lane
+            ), expected_skips=sum(row["outcome"] == "skipped" for row in lane))
     except (OSError, ET.ParseError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
         raise SystemExit(str(exc)) from exc
     print(f"xdist coverage PASS: {totals['passed']} passed, {totals['skipped']} skipped; "
