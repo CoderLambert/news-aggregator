@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import axios from 'axios'
 import type { LucideIcon } from 'lucide-react'
@@ -42,14 +42,15 @@ const MODEL_PROVIDERS: ReadonlyArray<{
 ]
 
 function requestError(error: unknown): string {
+  // Credential failures can include the submitted Key in a proxy response or
+  // an exception message. Only classify status; never render response bodies.
   if (axios.isAxiosError(error)) {
-    const body: unknown = error.response?.data
-    if (typeof body === 'object' && body !== null && !Array.isArray(body) && 'error' in body) {
-      const message = (body as { error?: unknown }).error
-      if (typeof message === 'string') return message
-    }
+    const status = error.response?.status
+    if (status === 401 || status === 403) return '安全会话已过期或当前操作没有权限，请重新登录后重试。'
+    if (status === 400 || status === 422) return '提供方、模型或 Key 格式不正确，请检查后重试。'
+    if (status === 429) return '操作过于频繁，请稍后重试。'
   }
-  return error instanceof Error ? error.message : '请求失败，请稍后重试。'
+  return '请求未确认，请检查网络后重新读取状态。'
 }
 
 function PersonalApiKeySettings({ userId }: { userId: number }) {
@@ -61,61 +62,97 @@ function PersonalApiKeySettings({ userId }: { userId: number }) {
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
+  const [loadAttempt, setLoadAttempt] = useState(0)
+  const lifetime = useRef<AbortController | null>(null)
+  const mutationPending = useRef(false)
 
   useEffect(() => {
     const controller = new AbortController()
+    lifetime.current = controller
     void fetchProviderCredentialStatus(controller.signal).then((value) => {
+      if (controller.signal.aborted) return
       setCredential(value)
       if (value.provider) setProvider(value.provider)
       if (value.modelId) setModelId(value.modelId)
     }).catch((reason: unknown) => {
-      if (!controller.signal.aborted) setError(requestError(reason))
+      if (!controller.signal.aborted) {
+        setCredential(null)
+        setError(requestError(reason))
+      }
     }).finally(() => {
       if (!controller.signal.aborted) setLoading(false)
     })
-    return () => controller.abort()
-  }, [userId])
+    return () => { controller.abort(); lifetime.current = null }
+  }, [userId, loadAttempt])
+
+  const reload = () => {
+    if (loading || mutationPending.current) return
+    setLoading(true)
+    setError('')
+    setNotice('')
+    setLoadAttempt(attempt => attempt + 1)
+  }
 
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    const controller = lifetime.current
+    if (!controller || controller.signal.aborted || mutationPending.current || loading || !credential || apiKey.trim().length < 8) return
+    mutationPending.current = true
     setSaving(true)
     setError('')
     setNotice('')
+    const submittedKey = apiKey
+    // The input must not retain a submitted secret, including failed requests.
+    setApiKey('')
     try {
-      const value = await saveProviderCredential(provider, modelId, apiKey)
+      const value = await saveProviderCredential(provider, modelId, submittedKey)
+      if (controller.signal.aborted) return
       setCredential(value)
-      setApiKey('')
-      setNotice('API Key 与模型已加密保存。后续个人 AI 请求将通过 LiteLLM 安全路由。')
+      setNotice('API Key 与模型已加密保存，尚未验证可用性。')
     } catch (reason) {
+      if (controller.signal.aborted) return
+      // A timeout may mean the write committed. Do not replay it or pretend the
+      // previous status is still authoritative; an explicit GET reconciles it.
+      setCredential(null)
       setError(requestError(reason))
     } finally {
-      setSaving(false)
+      mutationPending.current = false
+      if (!controller.signal.aborted) setSaving(false)
     }
   }
 
   const remove = async () => {
+    const controller = lifetime.current
+    if (!controller || controller.signal.aborted || mutationPending.current || loading || !credential) return
     if (!window.confirm('确定删除当前用户保存的 API Key？')) return
+    mutationPending.current = true
     setSaving(true)
     setError('')
     setNotice('')
+    setApiKey('')
     try {
-      setCredential(await deleteProviderCredential())
-      setApiKey('')
+      const value = await deleteProviderCredential()
+      if (controller.signal.aborted) return
+      setCredential(value)
       setNotice('已删除保存的 API Key。')
     } catch (reason) {
+      if (controller.signal.aborted) return
+      setCredential(null)
       setError(requestError(reason))
     } finally {
-      setSaving(false)
+      mutationPending.current = false
+      if (!controller.signal.aborted) setSaving(false)
     }
   }
 
+  const formDisabled = saving || loading || credential === null
   return (
     <section aria-labelledby="api-key-settings" className="rounded-2xl border border-border bg-card p-5 sm:p-6">
       <div className="flex gap-3">
         <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-orange-50 text-orange-600"><KeyRound aria-hidden="true" className="size-5" /></span>
         <div>
           <h2 id="api-key-settings" className="text-lg font-semibold">个人模型 API Key</h2>
-          <p className="mt-1 text-sm leading-6 text-muted-foreground">Key 仅供当前账号的翻译、文章问答、推荐问题和深度研究使用；服务端加密保存，经本站 LiteLLM 路由发送到你选择的厂商，保存后不再回显。</p>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">Key 仅供当前账号的翻译、文章问答、推荐问题和深度研究使用；服务端加密保存，经本站 LiteLLM 路由发送到你选择的厂商，保存后不再回显。读取与保存设置不会进行模型验证或计费调用。</p>
         </div>
       </div>
 
@@ -129,8 +166,10 @@ function PersonalApiKeySettings({ userId }: { userId: number }) {
                 const next = event.target.value as PersonalProvider
                 setProvider(next)
                 setModelId(MODEL_PROVIDERS.find((item) => item.id === next)?.defaultModel ?? '')
+                setApiKey('')
+                setNotice('')
               }}
-              disabled={saving || loading}
+              disabled={formDisabled}
               className="flex h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
             >
               {MODEL_PROVIDERS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
@@ -144,7 +183,7 @@ function PersonalApiKeySettings({ userId }: { userId: number }) {
               placeholder={MODEL_PROVIDERS.find((item) => item.id === provider)?.defaultModel}
               autoComplete="off"
               spellCheck={false}
-              disabled={saving || loading}
+              disabled={formDisabled}
               required
               maxLength={128}
               className="h-11"
@@ -159,7 +198,7 @@ function PersonalApiKeySettings({ userId }: { userId: number }) {
               placeholder="请输入厂商 API Key"
               autoComplete="new-password"
               spellCheck={false}
-              disabled={saving || loading}
+              disabled={formDisabled}
               required
               minLength={8}
               maxLength={512}
@@ -169,16 +208,19 @@ function PersonalApiKeySettings({ userId }: { userId: number }) {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" className="h-11" disabled={saving || loading || apiKey.trim().length < 8}>
+          <Button type="submit" className="h-11" disabled={formDisabled || apiKey.trim().length < 8}>
             {saving ? '正在保存…' : credential?.configured ? '替换 Key' : '保存 Key'}
           </Button>
-          {(credential?.configured || credential?.requiresReplacement) && <Button type="button" variant="outline" className="h-11 text-red-700" disabled={saving} onClick={() => void remove()}>
+          {(credential?.configured || credential?.requiresReplacement) && <Button type="button" variant="outline" className="h-11 text-red-700" disabled={formDisabled} onClick={() => void remove()}>
             <Trash2 aria-hidden="true" />删除 Key
           </Button>}
-          <span className="text-sm text-muted-foreground">
-            {loading ? '正在读取状态…' : credential?.configured
+          {!loading && credential === null && <Button type="button" variant="outline" className="h-11" disabled={saving} onClick={reload}>
+            重新读取 Key 状态
+          </Button>}
+          <span role="status" className="text-sm text-muted-foreground">
+            {loading ? '正在读取状态…' : credential === null ? '凭据状态未知，请重新读取。' : credential.configured
               ? `已配置：${credential.providerLabel ?? credential.provider} / ${credential.modelId}`
-              : credential?.requiresReplacement ? '旧版直连凭据已停用，请替换' : '尚未配置'}
+              : credential.requiresReplacement ? '旧版直连凭据已停用，请替换' : '尚未配置'}
           </span>
         </div>
         {notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}
