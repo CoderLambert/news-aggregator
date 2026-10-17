@@ -677,7 +677,7 @@ class NewsTranslateFullView(ArticleAccessMixin, generics.GenericAPIView):
         if shared.task_is_running(news, request.user, stored=stored):
             return shared.waiting_response(news, request.user, stored=stored)
         try:
-            clients = personal_clients_for_user(request.user) if personal else get_clients()
+            clients = personal_clients_for_user(request.user)
         except PersonalAIUnavailable as exc:
             return shared.error_response(str(exc))
         if not clients:
@@ -759,18 +759,16 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
             )
 
         from api.services.chatgpt_subscription import active_connection_for_user, stream_chat_response
-        from api.services.provider_credentials import ProviderCredentialError, personal_clients_for_user
+        from api.services.ai_execution import PersonalAIUnavailable, personal_clients_for_user, has_personal_connection
         try:
             personal_clients = personal_clients_for_user(request.user)
-        except ProviderCredentialError as exc:
+        except PersonalAIUnavailable as exc:
             return Response(
                 {'error_code': 'provider_credential_unavailable', 'error': str(exc)},
                 status=status.HTTP_409_CONFLICT,
             )
-        subscription_connection = None if personal_clients else active_connection_for_user(request.user)
+        subscription_connection = None if has_personal_connection(request.user) else active_connection_for_user(request.user)
         provider_clients = personal_clients
-        if not provider_clients and subscription_connection is None:
-            provider_clients = get_clients()
         if not provider_clients and subscription_connection is None:
             return Response(
                 {
@@ -1009,9 +1007,14 @@ class NewsSuggestedQuestionsView(ArticleAccessMixin, generics.GenericAPIView):
 
         try:
             from api.services.chatgpt_subscription import active_connection_for_user, stream_chat_response
-            from api.services.provider_credentials import personal_clients_for_user
-            personal_clients = personal_clients_for_user(request.user)
-            connection = None if personal_clients else active_connection_for_user(request.user)
+            from api.services.ai_execution import personal_clients_for_user, PersonalAIUnavailable, has_personal_connection
+            try:
+                personal_clients = personal_clients_for_user(request.user)
+            except PersonalAIUnavailable:
+                return Response({'questions': SUGGESTED_QUESTIONS_FALLBACK,
+                    'context_scope': suggestion_scope, 'generation': 'unavailable',
+                    'full_content_revision': news.full_content_revision, 'generated': False})
+            connection = None if has_personal_connection(request.user) else active_connection_for_user(request.user)
             if not personal_clients and connection is None:
                 # No site-funded fallback, even when a site provider key exists.
                 return Response({'questions': SUGGESTED_QUESTIONS_FALLBACK,
