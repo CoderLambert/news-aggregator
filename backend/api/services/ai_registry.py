@@ -3,7 +3,7 @@
 This is not a new provider adapter. Region-specific profiles remain a T01 follow-up; model capability
 receipts belong to T02; a default route must not claim a verified region/model.
 """
-from api.services.provider_credentials import PROVIDER_SPECS
+from api.services.ai_gateway import PROVIDER_SPECS
 
 
 def provider_catalog():
