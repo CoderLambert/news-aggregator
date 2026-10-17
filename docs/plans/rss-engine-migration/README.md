@@ -1,5 +1,7 @@
 # NewsHub RSS 引擎迁移：合同、实现与验收入口
 
+> **2026-10-17 执行入口更新**：规划 PR #77 与实现 PR #78 **均已合并 main**，该目录的旧「PR #78 集成分支」表述属于当时的开发记录。后续任务编号、26 个有效交付及 11 个合并索引仍以本目录 [TASKS.md](TASKS.md)、[EXECUTION-STATUS.md](EXECUTION-STATUS.md) 为准；跨 BYOK/智能分组的优先级只从 [统一开发计划](../FEATURE-DEVELOPMENT-2026-10-17.md) 读取。生产切源/停旧栈/移除旧抓取/发布 T29–T33，以及真实数据库、公网、来源正文和操作人验收，按用户要求**延期到功能全部开发后的统一验收**，但原门禁绝不取消。旧 Spider 直写全文 Issue #52 不再另立实施路线。
+
 > 当前文档对应开发集成分支 [PR #78](https://github.com/CoderLambert/news-aggregator/pull/78)，不是生产发布记录。
 > 规划合同来自 [PR #77](https://github.com/CoderLambert/news-aggregator/pull/77)，审计基线为 main@878b690。
 > **唯一实时执行来源是 [EXECUTION-STATUS.md](EXECUTION-STATUS.md) 与各任务 report.md；[TASKS.md](TASKS.md) 是依赖/交付清单，不代表生产门禁已通过。**
