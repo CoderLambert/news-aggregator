@@ -78,10 +78,18 @@ def validate_execution(expected_path: str, serial_path: str, parallel_path: str)
         raise ValueError("collection contains no identities, invalid names or duplicates")
 
     recorded = defaultdict(list)
+    executed = []
     for path in (serial_path, parallel_path):
-        reports = _read_manifest(path, "execution").get("reports")
-        if not isinstance(reports, list):
-            raise ValueError(f"missing execution reports: {path}")
+        manifest = _read_manifest(path, "execution")
+        reports = manifest.get("reports")
+        started, finished = manifest.get("started"), manifest.get("finished")
+        if not isinstance(reports, list) or not isinstance(started, list) or not isinstance(finished, list):
+            raise ValueError(f"missing execution reports or protocol receipts: {path}")
+        if any(not isinstance(nodeid, str) or not nodeid for nodeid in started + finished):
+            raise ValueError(f"invalid execution protocol identities: {path}")
+        if Counter(started) != Counter(finished) or len(started) != len(set(started)):
+            raise ValueError(f"duplicate/incomplete execution protocols: {path}")
+        executed.extend(started)
         for report in reports:
             if not isinstance(report, dict) or set(report) != {
                 "nodeid", "when", "outcome", "wasxfail", "is_subtest"
@@ -92,35 +100,37 @@ def validate_execution(expected_path: str, serial_path: str, parallel_path: str)
             ) or type(report["wasxfail"]) is not bool or type(report["is_subtest"]) is not bool:
                 raise ValueError(f"unknown test report outcome: {path}")
             recorded[report["nodeid"]].append(report)
-    missing = sorted(set(expected) - set(recorded))
-    extra = sorted(set(recorded) - set(expected))
-    if missing or extra:
+    missing = sorted(set(expected) - set(executed))
+    extra = sorted(set(executed) - set(expected))
+    if missing or extra or len(executed) != len(expected):
         raise ValueError(
             f"xdist test identity mismatch missing={missing[:8]} extra={extra[:8]} "
-            f"(missing_count={len(missing)}, extra_count={len(extra)})"
+            f"(missing_count={len(missing)}, extra_count={len(extra)}, "
+            f"collected={len(expected)}, executed={len(executed)})"
         )
+    report_missing = set(expected) - set(recorded)
+    report_extra = set(recorded) - set(expected)
+    if report_missing or report_extra:
+        raise ValueError(f"missing/uncollected runtest reports: "
+                         f"{sorted(report_missing)[:8]} / {sorted(report_extra)[:8]}")
 
     totals = Counter()
     for nodeid, reports in recorded.items():
-        # unittest.TestCase.subTest emits additional call reports sharing the
-        # collected parent nodeid. They are valid only when explicitly marked
-        # by pytest as subtest reports and *every* one passed.
-        parents = [r for r in reports if not r["is_subtest"]]
-        children = [r for r in reports if r["is_subtest"]]
-        if len(parents) != 1 or any(
-            r["when"] != "call" or r["outcome"] != "passed" or r["wasxfail"]
-            for r in children
-        ):
-            raise ValueError(f"duplicate/incomplete or failing subtest reports: {nodeid}: {reports!r}")
-        report = parents[0]
-        if report["wasxfail"]:
-            raise ValueError(f"unexpected xfail report: {nodeid}")
-        if report["when"] == "call" and report["outcome"] == "passed":
-            totals["passed"] += 1
-        elif report["outcome"] == "skipped" and report["when"] in ("setup", "call"):
+        # Native unittest.TestCase.subTest produces several call reports for
+        # one pytest protocol start/finish, *without* a subtest flag. These
+        # are not duplicate executions: repeated protocols are checked above.
+        if any(r["outcome"] == "failed" or r["wasxfail"] for r in reports):
+            raise ValueError(f"failed, xfailed or unexpected report for {nodeid}")
+        call = [r for r in reports if r["when"] == "call"]
+        skipped = [r for r in reports if r["outcome"] == "skipped"]
+        if skipped:
+            if len(reports) != 1 or len(skipped) != 1 or skipped[0]["when"] not in ("setup", "call"):
+                raise ValueError(f"unexpected skip report sequence: {nodeid}")
             totals["skipped"] += 1
+        elif call and len(call) == len(reports) and all(r["outcome"] == "passed" for r in call):
+            totals["passed"] += 1
         else:
-            raise ValueError(f"failed or unexpected report for {nodeid}")
+            raise ValueError(f"missing terminal call or unexpected phase: {nodeid}")
     if totals["skipped"] != _ALLOWED_SKIPS:
         raise ValueError(f"unexpected skipped test identities: {totals['skipped']}")
     return totals
