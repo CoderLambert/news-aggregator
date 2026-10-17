@@ -190,7 +190,9 @@ def main(argv: list[str] | None = None) -> int:
                 expect_receipt(source, marker, 0)
                 # EOF-named raw variants: if either reached upstream, its
                 # EOF-without-terminal would surface as stop/[DONE].
-                for variant, flag in (("STRING", "true"), ("NUMERIC", 1)):
+                for variant, flag in (("STRING", "true"), ("NUMERIC", 1),
+                                      ("SHORT_T", "t"), ("SHORT_Y", "y"),
+                                      ("UPPER_T", "T"), ("UPPER_Y", "Y")):
                     raw_marker = f"T00_PROXY_CHAT_STREAM_EOF_{variant}_A"
                     status = raw_chat_stream_status(url, sdk_key, raw_marker, keys["tenant-a"], flag)
                     check("T00-02", f"PROXY_CHAT_STREAM_EOF_{variant}_FAIL_CLOSED", status == 400, {"status_code": status})

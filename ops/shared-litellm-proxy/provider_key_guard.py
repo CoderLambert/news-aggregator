@@ -28,26 +28,28 @@ BYOK_CALL_TYPES = frozenset({"acompletion", "completion", "aresponses", "anthrop
 # empty, missing, misscased, or Chat-omitting value must not reopen Chat.
 ALWAYS_DENIED_STREAMING_CALL_TYPES = frozenset({"acompletion", "completion"})
 
-_STREAM_TRUE_STRINGS = frozenset({"1", "true", "yes", "on"})
+# Allow only unambiguously false values to pass a Chat stream guard.
+# Pydantic accepts additional truthy aliases ("t", "y"), and future typed
+# parsers may accept more. An unknown shape must never reopen Chat streaming.
+_STREAM_FALSE_STRINGS = frozenset({"0", "false", "f", "no", "n", "off"})
 
 
 def _stream_requested(value: object) -> bool:
-    """Whether a raw pre-validation ``stream`` value asks for streaming.
+    """Conservatively detect streaming before LiteLLM coerces raw JSON.
 
-    The hook runs on the request dict before LiteLLM's typed parsing
-    coerces values, so a JSON ``"true"``/``1`` that the parser would
-    turn into ``True`` must be treated as streaming here, not waved
-    through because it is not the ``True`` singleton.
+    Missing/null/explicitly false values are non-streaming. For Chat, all
+    other values are fail-closed, including Pydantic bool aliases ("t"/"y")
+    and malformed or as-yet-unknown stream flag shapes.
     """
-    if value is True:
-        return True
-    if isinstance(value, str):
-        return value.strip().lower() in _STREAM_TRUE_STRINGS
-    if isinstance(value, bool):
+    if value is None or value is False:
         return False
-    if isinstance(value, (int, float)):
-        return value == 1
-    return False
+    if isinstance(value, str):
+        return value.strip().lower() not in _STREAM_FALSE_STRINGS
+    if isinstance(value, bool):
+        return True
+    if isinstance(value, (int, float)) and value == 0:
+        return False
+    return True
 
 
 def _denied_streaming_call_types() -> frozenset[str]:
@@ -79,7 +81,8 @@ class ProviderKeyGuard(CustomLogger):
         if _stream_requested(data.get("stream")) and normalized_call_type in _denied_streaming_call_types():
             raise HTTPException(
                 status_code=400,
-                detail={"code": "T00_CHAT_STREAMING_DISABLED"},
+                detail={"code": ("T00_CHAT_STREAMING_DISABLED" if normalized_call_type
+                                 in ALWAYS_DENIED_STREAMING_CALL_TYPES else "T00_STREAMING_DISABLED")},
             )
 
         return data

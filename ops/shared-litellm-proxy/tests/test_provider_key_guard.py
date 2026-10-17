@@ -112,6 +112,12 @@ class ChatStreamingFailClosed(unittest.TestCase):
                 result = run_hook({**CHAT, "stream": flag}, "acompletion")
                 self.assertEqual(result, ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
 
+    def test_short_boolean_aliases_and_unknown_shapes_fail_closed(self):
+        for flag in ("t", "T", "y", "Y", "unknown", "", -1, 2, 0.5, [], {}):
+            with self.subTest(flag=flag):
+                result = run_hook({**CHAT, "stream": flag}, "acompletion")
+                self.assertEqual(result, ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
+
     def test_chat_stream_numeric_flag_rejected(self):
         self.assertEqual(run_hook({**CHAT, "stream": 1}, "acompletion"), ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
 
@@ -122,7 +128,9 @@ class ChatStreamingFailClosed(unittest.TestCase):
 class UnaffectedPaths(unittest.TestCase):
     def test_non_streaming_chat_allowed(self):
         for data in ({"api_key": "sk-synthetic-provider"}, {"api_key": "sk-synthetic-provider", "stream": False},
-                     {"api_key": "sk-synthetic-provider", "stream": "false"}, {"api_key": "sk-synthetic-provider", "stream": 0}):
+                     {"api_key": "sk-synthetic-provider", "stream": "false"}, {"api_key": "sk-synthetic-provider", "stream": 0},
+                     *({"api_key": "sk-synthetic-provider", "stream": value}
+                       for value in ("f", "F", "n", "N", "no", "off", "0", 0.0, None))):
             with self.subTest(data=data):
                 self.assertEqual(run_hook(data, "acompletion")[0], "allowed")
 
@@ -133,7 +141,7 @@ class UnaffectedPaths(unittest.TestCase):
 
     def test_extra_env_denied_types_still_denied(self):
         result = run_hook(CHAT, "aresponses", env={"BYOK_DENY_STREAMING_CALL_TYPES": "aresponses"})
-        self.assertEqual(result, ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
+        self.assertEqual(result, ("rejected", 400, "T00_STREAMING_DISABLED"))
 
     def test_missing_provider_key_still_rejected_first(self):
         self.assertEqual(run_hook({"stream": False}, "acompletion"), ("rejected", 400, "BYOK_PROVIDER_KEY_REQUIRED"))

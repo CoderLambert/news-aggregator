@@ -265,6 +265,16 @@ class ProviderKeyGuardFailClosed(unittest.TestCase):
         self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider", "stream": True}, "completion"),
                          ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
 
+    def test_chat_short_truth_aliases_and_unknown_shapes_are_denied(self):
+        for flag in ("t", "T", "y", "Y", "unknown", "", 2, -1, {}, []):
+            with self.subTest(flag=flag):
+                self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider", "stream": flag}, "acompletion"),
+                                 ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
+        for flag in ("f", "n", "no", "off", "0", 0, False, None):
+            with self.subTest(non_stream_flag=flag):
+                self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider", "stream": flag}, "acompletion")[0],
+                                 "allowed")
+
     def test_non_streaming_chat_and_other_protocol_streams_unchanged(self):
         self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider"}, "acompletion")[0], "allowed")
         self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider", "stream": False}, "acompletion")[0], "allowed")
