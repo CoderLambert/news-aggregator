@@ -103,6 +103,18 @@ def _forward(apps, schema_editor):
         )
 
 
+def _reverse_empty_only(apps, schema_editor):
+    """Permit synthetic schema-history rehearsals, never discard imported Keys.
+
+    Django recreates the legacy table before this reverse callback. Reversal
+    is safe only when there are no imported credentials. A real downgrade must
+    instead use the reviewed pre-migration snapshot and maintenance procedure.
+    """
+    Connection = apps.get_model('api', 'UserAIConnection')
+    if Connection.objects.using(schema_editor.connection.alias).exclude(imported_model_id='').exists():
+        raise RuntimeError('BYOK downgrade refused: imported credentials require snapshot restore')
+
+
 class Migration(migrations.Migration):
     atomic = True
     dependencies = [('api', '0060_user_ai_connection')]
@@ -111,6 +123,6 @@ class Migration(migrations.Migration):
             model_name='useraiconnection', name='imported_model_id',
             field=models.CharField(blank=True, default='', max_length=128),
         ),
-        migrations.RunPython(_forward),
+        migrations.RunPython(_forward, _reverse_empty_only),
         migrations.DeleteModel(name='UserProviderCredential'),
     ]
