@@ -7,9 +7,9 @@ from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 from rest_framework.exceptions import APIException, NotFound, PermissionDenied, Throttled, ValidationError
-from api.models import ChannelGroup, ChannelGroupMember, ChannelSubscription, Source, UserProviderCredential
+from api.models import ChannelGroup, ChannelGroupMember, ChannelSubscription, Source
 from api.smart_channel_models import ChannelGroupingConfig, ChannelGroupingOverride, ChannelGroupingProposal, SubscriptionGroupingState
-from api.services.channel_topics import TOPIC_MAP, digest, evidence_for, profile_data
+from api.ai_connection_models import UserAIConnection\nfrom api.services.channel_topics import TOPIC_MAP, digest, evidence_for, profile_data
 from api.services.channel_topic_hints import infer_title_topics
 
 
