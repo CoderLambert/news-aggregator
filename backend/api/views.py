@@ -649,7 +649,7 @@ class NewsTranslateFullView(ArticleAccessMixin, generics.GenericAPIView):
     def post(self, request, pk):
         from api.services import shared_translations as shared
         from api.services.stored_readers import require_current, current_translation, snapshot_metadata
-        from api.services.provider_credentials import has_personal_credential, personal_clients_for_user, ProviderCredentialError
+        from api.services.ai_execution import has_personal_connection, personal_clients_for_user, PersonalAIUnavailable
         from api.services.chatgpt_subscription import active_connection_for_user
         from api.services.llm_translator import build_translation_prompt
         from api.services.translation_jobs import start_or_get_job
@@ -667,7 +667,7 @@ class NewsTranslateFullView(ArticleAccessMixin, generics.GenericAPIView):
         own_job = get_job(news.pk, user_id=request.user.pk, source_digest=stored.canonical_hash)
         if own_job is not None and not own_job.done:
             return _translation_job_response(request, news, stored, own_job)
-        personal = has_personal_credential(request.user)
+        personal = has_personal_connection(request.user)
         if not personal and active_connection_for_user(request.user) is not None:
             from api.subscription_views import subscription_translation_response
             return subscription_translation_response(request, news, force=force)
@@ -678,7 +678,7 @@ class NewsTranslateFullView(ArticleAccessMixin, generics.GenericAPIView):
             return shared.waiting_response(news, request.user, stored=stored)
         try:
             clients = personal_clients_for_user(request.user) if personal else get_clients()
-        except ProviderCredentialError as exc:
+        except PersonalAIUnavailable as exc:
             return shared.error_response(str(exc))
         if not clients:
             return shared.error_response('未配置全文翻译模型提供方：请前往设置配置自己的 API Key。')
