@@ -117,8 +117,8 @@ def run_agent_loop(
         if user is None:
             clients = get_clients()
         else:
-            from api.services.provider_credentials import (
-                ProviderCredentialError,
+            from api.services.ai_execution import (
+                PersonalAIUnavailable,
                 personal_clients_for_user,
             )
             try:
