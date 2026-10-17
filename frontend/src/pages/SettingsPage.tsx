@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { AlignLeft, ArrowLeft, Bot, Check, GitCompareArrows, Languages, LockKeyhole, Type } from 'lucide-react'
+import { AlignLeft, ArrowLeft, Bot, Check, Cpu, GitCompareArrows, Languages, LockKeyhole, Type } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/context/AuthContext'
@@ -17,6 +17,7 @@ export default function SettingsPage() {
   const { lang, setLang, displayMode, setDisplayMode, t } = useLanguage()
   const { user } = useAuth()
   const { capabilities } = useCapabilities()
+  const canManageAI = capabilities.features.accounts.enabled && Boolean(user)
   const canManageChatGPT = capabilities.features.accounts.enabled && capabilities.features.chatgpt_subscription.enabled
   const canCompareProviders = capabilities.features.provider_comparisons.enabled && Boolean(user?.isSuperuser)
   const canManageAdmin = capabilities.features.admin.enabled && Boolean(user?.isSuperuser)
@@ -74,10 +75,22 @@ export default function SettingsPage() {
         </section>
 
 
-        {canManageChatGPT && <section aria-labelledby="account-settings" className="rounded-2xl border border-border bg-card p-5 sm:p-6">
+        {(canManageAI || canManageChatGPT) && <section aria-labelledby="account-settings" className="rounded-2xl border border-border bg-card p-5 sm:p-6">
           <h2 id="account-settings" className="text-lg font-semibold">账号与连接</h2>
-          <p className="mt-1 text-sm text-muted-foreground">ChatGPT 订阅连接只属于当前 NewsHub 用户。</p>
-          <div className="mt-5 flex flex-col gap-4 rounded-xl bg-muted/50 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="mt-1 text-sm text-muted-foreground">个人 API Key 与独立 ChatGPT 订阅采用不同的授权路径。</p>
+          {canManageAI && <div className="mt-5 flex flex-col gap-4 rounded-xl bg-muted/50 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex gap-3">
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-background text-orange-600"><Cpu aria-hidden="true" className="size-5" /></span>
+              <div>
+                <h3 className="font-medium">个人 AI 连接</h3>
+                <p className="mt-1 text-sm text-muted-foreground">统一管理服务商和 Key；模型配置及用途设置将在后续批次开放。</p>
+              </div>
+            </div>
+            <Button variant="outline" className="h-11" asChild>
+              <Link to="/settings/ai">管理个人 AI 连接</Link>
+            </Button>
+          </div>}
+          {canManageChatGPT && <div className="mt-5 flex flex-col gap-4 rounded-xl bg-muted/50 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex gap-3">
               <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-background text-orange-600"><Bot aria-hidden="true" className="size-5" /></span>
               <div>
@@ -88,7 +101,7 @@ export default function SettingsPage() {
             <Button variant="outline" className="h-11" asChild>
               <Link to="/settings/chatgpt">{user ? '管理连接' : '查看说明'}</Link>
             </Button>
-          </div>
+          </div>}
         </section>}
 
         {(canCompareProviders || canManageAdmin) && <section aria-labelledby="tool-settings" className="rounded-2xl border border-border bg-card p-5 sm:p-6">
