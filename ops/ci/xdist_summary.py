@@ -5,9 +5,9 @@ import sys
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-# Baseline: 2417 passing feature baseline + 12 isolated BYOK terminal regressions.
+# Baseline: 2429 previously passing tests + 42 BYOK T01 connection regressions.
 # Explicit skipped tests remain 16, and failures are never counted as skips.
-_EXPECTED = {"passed": 2429, "skipped": 16}
+_EXPECTED = {"passed": 2471, "skipped": 16}
 _SUMMARY = re.compile(
     r"^\s*=*\s*"
     r"(?P<outcomes>\d+\s+[A-Za-z][A-Za-z_-]*"
@@ -42,7 +42,7 @@ def parse_terminal_summary(contents: str, *, source: str = "<log>") -> Counter:
 
 
 def validate_terminal_coverage(logs: list[tuple[str, str]]) -> Counter:
-    """Require the updated 2429 passed / 16 skipped baseline and no failures."""
+    """Require the updated 2471 passed / 16 skipped baseline and no failures."""
     total = Counter()
     for source, contents in logs:
         total.update(parse_terminal_summary(contents, source=source))
@@ -57,7 +57,7 @@ def validate_terminal_coverage(logs: list[tuple[str, str]]) -> Counter:
         raise ValueError(
             "xdist benchmark coverage mismatch: "
             f"passed={total['passed']} skipped={total['skipped']} "
-            f"other={unexpected}; expected 2429/16 with zero failures"
+            f"other={unexpected}; expected 2471/16 with zero failures"
         )
     return total
 

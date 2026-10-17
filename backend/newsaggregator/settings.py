@@ -69,6 +69,11 @@ PROVIDER_CREDENTIAL_ENCRYPTION_KEY = (
     _env('PROVIDER_CREDENTIAL_ENCRYPTION_KEY')
     or CHATGPT_TOKEN_ENCRYPTION_KEY
 )
+# New connection management is explicitly opt-in; legacy routing is unchanged.
+_ai_byok_enabled = _env('AI_BYOK_ENABLED', '0')
+if _ai_byok_enabled not in {'0', '1'}:
+    raise ImproperlyConfigured('AI_BYOK_ENABLED must be 0 or 1.')
+AI_BYOK_ENABLED = _ai_byok_enabled == '1'
 AI_BYOK_GATEWAY_URL = _env('AI_BYOK_GATEWAY_URL')
 AI_BYOK_GATEWAY_PROJECT_KEY = _env('AI_BYOK_GATEWAY_PROJECT_KEY')
 AI_BYOK_GATEWAY_PROJECT_KEY_FILE = _env('AI_BYOK_GATEWAY_PROJECT_KEY_FILE')
