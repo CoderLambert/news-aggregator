@@ -1,7 +1,10 @@
-"""Regression tests for real pytest -q terminal output shapes."""
+"""Regression tests for dynamic, fail-closed hybrid pytest coverage auditing."""
 import importlib.util
+import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
+from xml.etree import ElementTree as ET
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "xdist_summary.py"
 SPEC = importlib.util.spec_from_file_location("xdist_summary", MODULE_PATH)
@@ -10,73 +13,123 @@ SPEC.loader.exec_module(xdist_summary)
 
 
 class XdistSummaryTests(unittest.TestCase):
-    def test_actual_failed_run_logs_parse_to_original_terminal_total(self):
-        serial = xdist_summary.parse_terminal_summary("79 passed in 22.37s\n")
-        parallel = xdist_summary.parse_terminal_summary(
-            "================= 2329 passed, 16 skipped in 105.55s "
-            "(0:01:45) =================\n"
+    def test_real_terminal_shapes(self):
+        self.assertEqual(
+            xdist_summary.parse_terminal_summary("79 passed in 22.37s\n")["passed"], 79
         )
-        self.assertEqual(serial["passed"], 79)
-        self.assertEqual(parallel["passed"], 2329)
-        self.assertEqual(parallel["skipped"], 16)
-        self.assertEqual(serial["passed"] + parallel["passed"], 2408)
-
-    def test_current_coverage_includes_byok_connection_regressions(self):
-        totals = xdist_summary.validate_terminal_coverage(
-            [
-                ("serial.log", "79 passed in 22.37s\n"),
-                (
-                    "parallel.log",
-                    "2392 passed, 16 skipped in 105.55s (0:01:45)\n",
-                ),
-            ]
+        counts = xdist_summary.parse_terminal_summary(
+            "==== 2329 passed, 16 skipped in 105.55s (0:01:45) ===\n"
         )
-        self.assertEqual(totals["passed"], 2471)
-        self.assertEqual(totals["skipped"], 16)
+        self.assertEqual((counts["passed"], counts["skipped"]), (2329, 16))
 
-    def test_reported_bare_serial_format_is_supported(self):
-        totals = xdist_summary.parse_terminal_summary("79 passed in 24.11s\n")
-        self.assertEqual(totals["passed"], 79)
-        self.assertEqual(totals["skipped"], 0)
+    def test_new_passed_tests_do_not_require_a_hardcoded_count(self):
+        old = xdist_summary.validate_terminal_coverage([
+            ("serial", "1 passed in 0.1s"),
+            ("parallel", "2 passed, 16 skipped in 0.1s"),
+        ])
+        new = xdist_summary.validate_terminal_coverage([
+            ("serial", "1 passed in 0.1s"),
+            ("parallel", "27 passed, 16 skipped in 0.1s"),
+        ])
+        self.assertEqual(new["passed"] - old["passed"], 25)
 
-    def test_parenthesized_elapsed_time_without_equals_is_supported(self):
-        totals = xdist_summary.parse_terminal_summary(
-            "2329 passed, 16 skipped in 105.55s (0:01:45)\n"
-        )
-        self.assertEqual(totals["passed"], 2329)
-        self.assertEqual(totals["skipped"], 16)
+    def test_skip_count_is_still_a_gate(self):
+        with self.assertRaisesRegex(ValueError, "unexpected skips"):
+            xdist_summary.validate_terminal_coverage([
+                ("serial", "1 passed in 0.1s"),
+                ("parallel", "2 passed, 17 skipped in 0.1s"),
+            ])
 
-    def test_multiple_summaries_fail_as_ambiguous(self):
+    def test_failure_xfail_xpass_and_duplicate_summaries_are_rejected(self):
+        for summary in (
+            "1 failed, 2 passed, 16 skipped in 1.0s",
+            "1 xfailed, 2 passed, 16 skipped in 1.0s",
+            "1 xpassed, 2 passed, 16 skipped in 1.0s",
+        ):
+            with self.subTest(summary=summary), self.assertRaisesRegex(ValueError, "unexpected outcomes"):
+                xdist_summary.validate_terminal_coverage([
+                    ("serial", "1 passed in 0.1s"), ("parallel", summary),
+                ])
         with self.assertRaisesRegex(ValueError, "missing or ambiguous"):
-            xdist_summary.parse_terminal_summary(
-                "79 passed in 22.37s\n79 passed in 22.37s\n"
-            )
+            xdist_summary.parse_terminal_summary("1 passed in 0.1s\n1 passed in 0.1s")
 
-    def test_failure_counts_are_never_ignored(self):
-        with self.assertRaisesRegex(ValueError, "coverage mismatch"):
-            xdist_summary.validate_terminal_coverage(
-                [
-                    ("serial.log", "79 passed in 22.37s\n"),
-                    (
-                        "parallel.log",
-                        "1 failed, 2330 passed, 16 skipped in 105.55s "
-                        "(0:01:45)\n",
-                    ),
-                ]
-            )
+    def _files(self, folder, *, omit=None, duplicate=False, unexpected=None):
+        nodeids = ["tests/test_ci.py::test_first", "tests/test_ci.py::test_second"]
+        nodeids.extend(f"tests/test_skip.py::test_skip_{i}" for i in range(16))
+        collection = folder / "collection.json"
+        collection.write_text(json.dumps({"kind": "collection", "nodeids": nodeids}))
+        serial = folder / "serial.json"
+        parallel = folder / "parallel.json"
+        def row(nodeid, outcome, when="call"):
+            return {"nodeid": nodeid, "outcome": outcome, "when": when, "wasxfail": False}
+        a = [row(nodeids[0], "passed")]
+        b = [row(nodeids[1], "passed")]
+        b.extend(row(n, "skipped", "setup") for n in nodeids[2:])
+        if omit:
+            b = [report for report in b if report["nodeid"] != omit]
+        if duplicate:
+            b.append(b[0])
+        if unexpected:
+            b.append(row(unexpected, "passed"))
+        serial.write_text(json.dumps({"kind": "execution", "reports": a}))
+        parallel.write_text(json.dumps({"kind": "execution", "reports": b}))
+        return collection, serial, parallel
 
-    def test_wrong_expected_counts_fail_closed(self):
-        with self.assertRaisesRegex(ValueError, "coverage mismatch"):
-            xdist_summary.validate_terminal_coverage(
-                [
-                    ("serial.log", "79 passed in 22.37s\n"),
-                    (
-                        "parallel.log",
-                        "2331 passed, 15 skipped in 105.55s "
-                        "(0:01:45)\n",
-                    ),
-                ]
-            )
+    def test_all_collected_nodeids_are_reconciled(self):
+        with TemporaryDirectory() as name:
+            paths = self._files(Path(name))
+            counts = xdist_summary.validate_execution(*(str(p) for p in paths))
+            self.assertEqual((counts["passed"], counts["skipped"]), (2, 16))
+
+    def test_missing_collected_test_fails_even_if_total_was_faked(self):
+        with TemporaryDirectory() as name:
+            paths = self._files(Path(name), omit="tests/test_ci.py::test_second")
+            with self.assertRaisesRegex(ValueError, "identity mismatch"):
+                xdist_summary.validate_execution(*(str(p) for p in paths))
+
+    def test_duplicate_or_uncollected_execution_fails(self):
+        with TemporaryDirectory() as name:
+            paths = self._files(Path(name), duplicate=True)
+            with self.assertRaisesRegex(ValueError, "duplicate/incomplete"):
+                xdist_summary.validate_execution(*(str(p) for p in paths))
+        with TemporaryDirectory() as name:
+            paths = self._files(Path(name), unexpected="tests/test_extra.py::test_extra")
+            with self.assertRaisesRegex(ValueError, "identity mismatch"):
+                xdist_summary.validate_execution(*(str(p) for p in paths))
+
+    def test_junit_rejects_failure_duplicates_and_skip_mismatch(self):
+        with TemporaryDirectory() as name:
+            xml = Path(name) / "report.xml"
+            root = ET.Element("testsuite")
+            ET.SubElement(root, "testcase", classname="tests.ci", name="first")
+            ET.SubElement(root, "testcase", classname="tests.ci", name="second")
+            ET.ElementTree(root).write(xml)
+            xdist_summary.validate_junit(str(xml), expected_cases=2, expected_skips=0)
+            with self.assertRaisesRegex(ValueError, "lost or duplicated"):
+                xdist_summary.validate_junit(str(xml), expected_cases=3, expected_skips=0)
+            ET.SubElement(root, "testcase", classname="tests.ci", name="second")
+            ET.ElementTree(root).write(xml)
+            with self.assertRaisesRegex(ValueError, "duplicate case"):
+                xdist_summary.validate_junit(str(xml), expected_cases=3, expected_skips=0)
+            root.remove(root[-1])
+            ET.SubElement(root[0], "error")
+            ET.ElementTree(root).write(xml)
+            with self.assertRaisesRegex(ValueError, "error or failure"):
+                xdist_summary.validate_junit(str(xml), expected_cases=2, expected_skips=0)
+
+    def test_main_rejects_terminal_and_audit_disagreement(self):
+        with TemporaryDirectory() as name:
+            folder = Path(name)
+            collection, serial, parallel = self._files(folder)
+            serial_log = folder / "serial.log"
+            parallel_log = folder / "parallel.log"
+            serial_log.write_text("1 passed in 0.1s\n")
+            parallel_log.write_text("3 passed, 16 skipped in 0.1s\n")
+            with self.assertRaisesRegex(SystemExit, "terminal/identity mismatch"):
+                xdist_summary.main([
+                    *(str(p) for p in (collection, serial, parallel, serial_log, parallel_log)),
+                    "unused-serial.xml", "unused-parallel.xml"
+                ])
 
 
 if __name__ == "__main__":
