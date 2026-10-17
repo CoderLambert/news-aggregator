@@ -111,6 +111,18 @@ jobs:
             scripts/deploy/tests/test_nginx_templates.py
       - name: Verify private self-hosted CI contract
         run: backend/venv/bin/python -m unittest discover -s ops/ci/tests -p 'test_*.py'
+      - name: Verify BYOK T00 isolated SDK and Proxy contracts
+        timeout-minutes: 12
+        run: |
+          t00_env="$(mktemp -d "${TMPDIR:?}/newshub-t00.XXXXXX")"
+          trap 'rm -rf "$t00_env"' EXIT
+          python3 -m venv "$t00_env/sdk"
+          python3 -m venv "$t00_env/proxy"
+          "$t00_env/sdk/bin/python" -m pip install --disable-pip-version-check --no-input -r tools/byok_t00_probe/requirements-sdk.lock
+          "$t00_env/proxy/bin/python" -m pip install --disable-pip-version-check --no-input -r tools/byok_t00_probe/requirements-proxy.lock
+          "$t00_env/proxy/bin/python" tools/byok_t00_probe/prepare_proxy.py
+          "$t00_env/sdk/bin/python" -m unittest discover -s tools/byok_t00_probe -p 'test_*.py'
+          "$t00_env/sdk/bin/python" tools/byok_t00_probe/probe.py --proxy-python "$t00_env/proxy/bin/python" --report "$t00_env/report.json"
       - name: Validate release shell syntax and mocked script behavior
         run: |
           bash -n scripts/deploy/smoke.sh scripts/deploy/deploy.sh scripts/deploy/rollback.sh scripts/deploy/backup.sh scripts/deploy/restore.sh scripts/deploy/tests/test_release_scripts.sh
