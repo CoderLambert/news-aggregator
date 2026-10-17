@@ -23,7 +23,7 @@ from django.db.models import F
 
 from api.ai_connection_models import UserAIConnection
 from api.services.ai_registry import get_profile
-from api.services.provider_credentials import _key_material as _legacy_key_material, ProviderCredentialError
+from api.services.ai_crypto import key_material, CredentialKeyUnavailable
 
 
 class CredentialEncryptionUnavailable(RuntimeError):
@@ -38,8 +38,8 @@ def _key_material():
     # Reuse the installation's existing stable key and HKDF implementation.
     # The v2 AAD domain separates connection ciphertext from the legacy format.
     try:
-        return _legacy_key_material()
-    except (ProviderCredentialError, TypeError, ValueError):
+        return key_material()
+    except (CredentialKeyUnavailable, TypeError, ValueError):
         raise CredentialEncryptionUnavailable('credential_storage_unavailable') from None
 
 
