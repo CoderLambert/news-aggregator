@@ -8,6 +8,13 @@ from pathlib import Path
 
 import pytest
 
+def _canonical_nodeid(nodeid):
+    # Passing individual serial modules changes pytest's inferred rootdir
+    # from repository root to backend/. The identity still names the same
+    # collected test; normalize only this known safe path prefix.
+    return "backend/" + nodeid if nodeid.startswith("api/tests/") else nodeid
+
+
 _collected = []
 _reports = []
 
@@ -20,7 +27,7 @@ def pytest_addoption(parser):
 
 def pytest_collection_finish(session):
     if session.config.getoption("--ci-audit-output") and session.config.option.collectonly:
-        _collected.extend(item.nodeid for item in session.items)
+        _collected.extend(_canonical_nodeid(item.nodeid) for item in session.items)
 
 
 def pytest_runtest_logreport(report):
@@ -28,7 +35,7 @@ def pytest_runtest_logreport(report):
     # when the test call itself passed. The controller receives xdist reports.
     if report.when == "call" or report.failed or report.skipped:
         _reports.append({
-            "nodeid": report.nodeid,
+            "nodeid": _canonical_nodeid(report.nodeid),
             "when": report.when,
             "outcome": report.outcome,
             "wasxfail": bool(getattr(report, "wasxfail", False)),
