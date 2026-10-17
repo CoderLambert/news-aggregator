@@ -16,6 +16,8 @@ def _canonical_nodeid(nodeid):
 
 
 _collected = []
+_started = []
+_finished = []
 _reports = []
 
 
@@ -28,6 +30,16 @@ def pytest_addoption(parser):
 def pytest_collection_finish(session):
     if session.config.getoption("--ci-audit-output") and session.config.option.collectonly:
         _collected.extend(_canonical_nodeid(item.nodeid) for item in session.items)
+
+
+def pytest_runtest_logstart(nodeid, location):
+    # A protocol start is emitted once per pytest item, unlike the multiple
+    # call reports emitted by unittest.TestCase.subTest.
+    _started.append(_canonical_nodeid(nodeid))
+
+
+def pytest_runtest_logfinish(nodeid, location):
+    _finished.append(_canonical_nodeid(nodeid))
 
 
 def pytest_runtest_logreport(report):
@@ -51,7 +63,8 @@ def pytest_sessionfinish(session, exitstatus):
     if config.option.collectonly:
         manifest = {"kind": "collection", "nodeids": _collected}
     else:
-        manifest = {"kind": "execution", "reports": _reports}
+        manifest = {"kind": "execution", "started": _started,
+                    "finished": _finished, "reports": _reports}
     # The parent runner owns a private TMPDIR. Never emit secrets, test output,
     # tracebacks or request payloads into the audit manifest.
     Path(target).write_text(
