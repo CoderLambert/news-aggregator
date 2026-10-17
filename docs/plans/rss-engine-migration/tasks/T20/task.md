@@ -1,6 +1,6 @@
 # T20：交付发现订阅界面与连接健康展示
 
-状态：PLANNED，产品未实现。代码基线：878b690。交付单元：发现 UI（含 T23 展示）。
+状态：IMPLEMENTED；2026-10-17 错误恢复差额已通过专项自动化，见 [report.md](report.md) 与 [PR #94](https://github.com/CoderLambert/news-aggregator/pull/94)。本轮真实浏览器、实际来源与生产验收 NOT_RUN。交付单元：发现 UI（含 T23 展示）。
 
 ## 目标与范围
 
