@@ -392,3 +392,12 @@ def test_connection_gate_environment_defaults_off_and_rejects_non_boolean(value,
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == expected
     assert not (tmp_path / 'unused.sqlite3').exists()
+
+def test_reverse_legacy_migration_rejects_any_preserved_new_connection(client):
+    from importlib import import_module
+    from types import SimpleNamespace
+    from django.apps import apps
+    create(client)
+    migration = import_module('api.migrations.0061_retire_legacy_byok')
+    with pytest.raises(RuntimeError, match='snapshot restore'):
+        migration._reverse_empty_only(apps, SimpleNamespace(connection=connection))

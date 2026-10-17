@@ -4,8 +4,9 @@ Historical migrations 0033/0034 remain unchanged and runnable. If any source
 row cannot be decrypted/verified, Django rolls back this entire migration,
 including DeleteModel: no legacy ciphertext is silently discarded.
 The old model selection is staging metadata for T02, not executable routing.
-This migration is intentionally irreversible; restore a reviewed database
-snapshot for rollback rather than resurrecting deprecated Key routes.
+This migration rejects reversal whenever a connection exists. Restore a
+reviewed pre-migration snapshot for rollback; only an empty synthetic schema
+rehearsal may reverse the model operations.
 """
 import base64
 import hashlib
@@ -111,8 +112,8 @@ def _reverse_empty_only(apps, schema_editor):
     instead use the reviewed pre-migration snapshot and maintenance procedure.
     """
     Connection = apps.get_model('api', 'UserAIConnection')
-    if Connection.objects.using(schema_editor.connection.alias).exclude(imported_model_id='').exists():
-        raise RuntimeError('BYOK downgrade refused: imported credentials require snapshot restore')
+    if Connection.objects.using(schema_editor.connection.alias).exists():
+        raise RuntimeError('BYOK downgrade refused: preserved connections require snapshot restore')
 
 
 class Migration(migrations.Migration):
