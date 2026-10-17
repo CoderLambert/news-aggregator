@@ -10,7 +10,7 @@ class UserAIConnection(models.Model):
     endpoint_profile = models.CharField(max_length=48)
     endpoint_profile_version = models.PositiveSmallIntegerField(default=1)
     display_name = models.CharField(max_length=64)
-    credential_ciphertext = models.TextField(blank=True, default='')
+    # One-time preserved model selection; T02 converts it into UserAIModelConfig.\n    # Never consulted by inference in the T01 transition.\n    imported_model_id = models.CharField(max_length=128, blank=True, default='')\n    credential_ciphertext = models.TextField(blank=True, default='')
     encryption_key_id = models.CharField(max_length=64, blank=True, default='')
     credential_epoch = models.PositiveBigIntegerField(default=1)
     credential_version = models.PositiveBigIntegerField(default=1)
