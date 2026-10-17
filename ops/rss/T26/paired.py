@@ -124,7 +124,7 @@ def main():
                     'api_readingday','api_newsreadstate','api_chatsession','api_researchsession','api_researchsearchresult',
                     'api_chatgptarticletranslation','api_sharedarticletranslation','api_legacytranslationsnapshot','api_newspreference',
                     'api_channelgroupingconfig','api_channelgroupingoverride','api_channelgroupingproposal','api_subscriptiongroupingstate',
-                    'api_channelintakerequest','api_userprovidercredential','api_chatgptsubscriptionselection','api_feedstate')}
+                    'api_channelintakerequest','api_useraiconnection','api_chatgptsubscriptionselection','api_feedstate')}
             call('start','app')
             pg_id=call('ps','-q','rss-db'); engine_id=call('ps','-q','miniflux'); app_container=call('ps','-q','app')
             pg_schema=int(run(['docker','exec',pg_id,'psql','-U','rss_contract','-d','rss_contract','-Atc','SELECT max(version) FROM schema_version']).stdout)
