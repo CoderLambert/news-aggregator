@@ -71,8 +71,12 @@ class XdistSummaryTests(unittest.TestCase):
             b.append(b[0])
         if unexpected:
             b.append(row(unexpected, "passed"))
-        serial.write_text(json.dumps({"kind": "execution", "reports": a}))
-        parallel.write_text(json.dumps({"kind": "execution", "reports": b}))
+        serial.write_text(json.dumps({"kind": "execution", "reports": a,
+            "started": [row["nodeid"] for row in a],
+            "finished": [row["nodeid"] for row in a]}))
+        parallel.write_text(json.dumps({"kind": "execution", "reports": b,
+            "started": [row["nodeid"] for row in b],
+            "finished": [row["nodeid"] for row in b]}))
         return collection, serial, parallel
 
     def test_all_collected_nodeids_are_reconciled(self):
@@ -90,33 +94,31 @@ class XdistSummaryTests(unittest.TestCase):
     def test_duplicate_or_uncollected_execution_fails(self):
         with TemporaryDirectory() as name:
             paths = self._files(Path(name), duplicate=True)
-            with self.assertRaisesRegex(ValueError, "duplicate/incomplete"):
+            with self.assertRaisesRegex(ValueError, "duplicate/incomplete execution protocols"):
                 xdist_summary.validate_execution(*(str(p) for p in paths))
         with TemporaryDirectory() as name:
             paths = self._files(Path(name), unexpected="tests/test_extra.py::test_extra")
             with self.assertRaisesRegex(ValueError, "identity mismatch"):
                 xdist_summary.validate_execution(*(str(p) for p in paths))
 
-    def test_marked_unittest_subtests_share_parent_identity_but_duplicate_parent_fails(self):
+    def test_unflagged_native_subtests_share_one_unique_pytest_protocol(self):
         with TemporaryDirectory() as name:
             paths = self._files(Path(name))
             parallel = paths[2]
             value = json.loads(parallel.read_text())
             parent = value["reports"][0]
-            value["reports"].extend([
-                {**parent, "is_subtest": True} for _ in range(6)
-            ])
+            value["reports"].extend([dict(parent) for _ in range(6)])
             parallel.write_text(json.dumps(value))
             counts = xdist_summary.validate_execution(*(str(p) for p in paths))
             self.assertEqual((counts["passed"], counts["skipped"]), (2, 16))
-            value["reports"].append(parent)
+            value["started"].append(parent["nodeid"])
             parallel.write_text(json.dumps(value))
-            with self.assertRaisesRegex(ValueError, "duplicate/incomplete"):
+            with self.assertRaisesRegex(ValueError, "duplicate/incomplete execution protocols"):
                 xdist_summary.validate_execution(*(str(p) for p in paths))
-            value["reports"].pop()
+            value["started"].pop()
             value["reports"][-1]["outcome"] = "failed"
             parallel.write_text(json.dumps(value))
-            with self.assertRaisesRegex(ValueError, "failing subtest"):
+            with self.assertRaisesRegex(ValueError, "failed, xfailed"):
                 xdist_summary.validate_execution(*(str(p) for p in paths))
 
     def test_junit_rejects_failure_duplicates_and_skip_mismatch(self):
