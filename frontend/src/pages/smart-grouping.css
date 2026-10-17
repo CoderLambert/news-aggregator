@@ -1,0 +1,15 @@
+.workspace-smart { min-width: 0; overflow-wrap: anywhere; }
+.workspace-smart .smart-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .75rem; padding: 0; list-style: none; }
+.workspace-smart .smart-steps li { display: flex; align-items: center; gap: .5rem; padding: .75rem; border: 1px solid var(--border); border-radius: .75rem; }
+.workspace-smart .smart-steps [aria-current="step"] { font-weight: 700; outline: 2px solid var(--ring); outline-offset: 1px; }
+.workspace-smart .workspace-organizer-intro > div,
+.workspace-smart .workspace-preview-group,
+.workspace-smart .workspace-preview-members label > span { min-width: 0; }
+.workspace-smart input, .workspace-smart select { max-width: 100%; }
+.workspace-smart h2[tabindex="-1"]:focus-visible { outline: 2px solid var(--ring); outline-offset: .3rem; }
+@media (max-width: 640px) {
+  .workspace-smart .smart-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .workspace-smart .workspace-organizer-hero { grid-template-columns: minmax(0, 1fr); }
+  .workspace-smart .workspace-preview-actions { position: static; flex-wrap: wrap; }
+  .workspace-smart .workspace-actions, .workspace-smart .workspace-job-list li { flex-wrap: wrap; }
+}
