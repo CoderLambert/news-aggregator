@@ -1,5 +1,7 @@
 # RSS 迁移交付清单与完成条件
 
+> **2026-10-17 更新**：本表的历史集成证据来自已经合入 `main` 的 PR #77/#78；它是 **RSS 原编号的唯一任务清单**，不得重编号成 F52-R/RSS-R 并创建重复 Issue。近期只补当前 T20/T21、T09/T11/T14/T27 等已集成能力的代码差额和自动化测试；真实来源、迁移恢复、生产试点/旧栈退出与发布 T29/T30/T31/T33 留在[统一开发计划](../FEATURE-DEVELOPMENT-2026-10-17.md)所述的最后验收阶段。
+
 状态：集成开发候选（非生产验收）；审核基线 main@878b690，当前实现见 [PR #78](https://github.com/CoderLambert/news-aggregator/pull/78) 和 [EXECUTION-STATUS.md](EXECUTION-STATUS.md)。本表状态从实际执行证据同步，INTEGRATED 表示已进入开发集成分支，不等于 DONE/发布；带 BLOCKED/PARTIAL 的项保留真实门禁。修订规划有 26 个有效交付单元、11 个合并索引，来源数量不影响开发节点数量。
 
 ## 有效交付单元
