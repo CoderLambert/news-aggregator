@@ -39,6 +39,7 @@ def pytest_runtest_logreport(report):
             "when": report.when,
             "outcome": report.outcome,
             "wasxfail": bool(getattr(report, "wasxfail", False)),
+            "is_subtest": hasattr(report, "subtest"),
         })
 
 
