@@ -126,7 +126,7 @@ def validate_junit(path: str, *, expected_cases: int, expected_skips: int) -> No
     cases = list(root.iter("testcase"))
     if len(cases) != expected_cases:
         raise ValueError(f"xdist JUnit lost or duplicated cases: {path}")
-    if any(root.iter("failure")) or any(root.iter("error")):
+    if next(root.iter("failure"), None) is not None or next(root.iter("error"), None) is not None:
         raise ValueError(f"xdist JUnit recorded error or failure: {path}")
     identities = [
         (item.get("classname"), item.get("name")) for item in cases
