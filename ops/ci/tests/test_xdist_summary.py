@@ -141,6 +141,36 @@ class XdistSummaryTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "error or failure"):
                 xdist_summary.validate_junit(str(xml), expected_cases=2, expected_skips=0)
 
+    def test_main_reconciles_junit_parent_cases_not_unittest_subtest_reports(self):
+        with TemporaryDirectory() as name:
+            folder = Path(name)
+            collection, serial, parallel = self._files(folder)
+            payload = json.loads(parallel.read_text())
+            payload["reports"].extend([dict(payload["reports"][0]) for _ in range(6)])
+            parallel.write_text(json.dumps(payload))
+            serial_log, parallel_log = folder / "s.log", folder / "p.log"
+            serial_log.write_text("1 passed in 0.1s")
+            parallel_log.write_text("1 passed, 16 skipped in 0.1s")
+            serial_xml, parallel_xml = folder / "s.xml", folder / "p.xml"
+            root = ET.Element("testsuite")
+            ET.SubElement(root, "testcase", classname="tests.test_ci", name="test_first")
+            ET.ElementTree(root).write(serial_xml)
+            root = ET.Element("testsuite")
+            ET.SubElement(root, "testcase", classname="tests.test_ci", name="test_second")
+            for i in range(16):
+                item = ET.SubElement(root, "testcase", classname="tests.test_skip",
+                                     name=f"test_skip_{i}")
+                ET.SubElement(item, "skipped")
+            ET.ElementTree(root).write(parallel_xml)
+            args = [str(p) for p in (collection, serial, parallel,
+                     serial_log, parallel_log, serial_xml, parallel_xml)]
+            self.assertEqual(xdist_summary.main(args), 0)
+            # Missing JUnit parent test is still forbidden.
+            root.remove(root[0])
+            ET.ElementTree(root).write(parallel_xml)
+            with self.assertRaisesRegex(SystemExit, "lost or duplicated cases"):
+                xdist_summary.main(args)
+
     def test_main_rejects_terminal_and_audit_disagreement(self):
         with TemporaryDirectory() as name:
             folder = Path(name)

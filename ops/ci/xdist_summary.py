@@ -173,11 +173,15 @@ def main(argv: list[str] | None = None) -> int:
         # Per-lane XML must also agree. Execution manifests capture nodeids
         # and outcomes for each lane, while the overall union is checked above.
         for audit, xml in ((args[1], args[5]), (args[2], args[6])):
-            lane = _read_manifest(audit, "execution")["reports"]
-            validate_junit(xml, expected_cases=sum(
-                row["when"] == "call" or row["outcome"] == "skipped"
-                for row in lane
-            ), expected_skips=sum(row["outcome"] == "skipped" for row in lane))
+            lane = _read_manifest(audit, "execution")
+            # unittest.subTest emits extra call reports for one collected pytest
+            # item. JUnit contains one testcase per pytest protocol, not one
+            # testcase per emitted call report.
+            validate_junit(xml, expected_cases=len(lane["started"]),
+                           expected_skips=sum(
+                               row["outcome"] == "skipped"
+                               for row in lane["reports"]
+                           ))
     except (OSError, ET.ParseError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
         raise SystemExit(str(exc)) from exc
     print(f"xdist coverage PASS: {totals['passed']} passed, {totals['skipped']} skipped; "
