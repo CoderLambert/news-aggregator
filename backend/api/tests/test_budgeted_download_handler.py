@@ -120,7 +120,7 @@ def test_approved_host_is_dns_revalidated_at_physical_download_boundary(monkeypa
     assert calls == [('https://dev.to/api/articles', 3.0)]
 
 
-def test_actual_http11_drip_download_hard_deadline_closes_socket_and_releases_permit(tmp_path):
+def test_actual_http11_drip_download_hard_deadline_closes_socket_and_releases_permit(tmp_path, copy_synthetic_db):
     """A controlled local server keeps idle timeout alive; total deadline must win."""
     import os
     from pathlib import Path
@@ -131,11 +131,9 @@ def test_actual_http11_drip_download_hard_deadline_closes_socket_and_releases_pe
     script.write_text(r'''
 import django, json, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from django.core.management import call_command
 from django.db import connection
 
 django.setup()
-call_command('migrate', verbosity=0)
 from scrapy import Spider, Request
 from scrapy.crawler import CrawlerProcess
 from news_crawler.download_handlers import BudgetedHTTPDownloadHandler
@@ -205,6 +203,7 @@ with connection.cursor() as cursor:
 server.shutdown()
 print(json.dumps({'hard_deadline':True,'socket_closed':True,'permit_released':True}))
 ''', encoding='utf-8')
+    copy_synthetic_db(tmp_path / 'handler.sqlite3')
     result = subprocess.run([sys.executable, str(script)], cwd=root, env={
         **os.environ, 'PYTHONPATH': f'{root / "backend"}:{root / "crawler"}',
         'DJANGO_ENV': 'development', 'DJANGO_SETTINGS_MODULE': 'newsaggregator.settings',

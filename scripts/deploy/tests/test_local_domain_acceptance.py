@@ -1373,6 +1373,45 @@ def test_g2_shared_browser_success_keeps_checks_and_clears_internal_marker(tmp_p
     assert checks['browser_external_egress'] == 'blocked; no external host request observed'
 
 
+
+def test_mermaid_chart_paint_retries_transient_zero_size_without_loosening_checks():
+    class Locator:
+        def __init__(self):
+            self.calls = 0
+
+        def evaluate(self, code):
+            assert 'getBoundingClientRect' in code
+            self.calls += 1
+            return {
+                'labels': ['Fixture article', 'Mermaid flow'],
+                'nodeFill': 'rgb(244, 240, 255)',
+                'textFill': 'rgb(17, 24, 39)',
+                'width': 0 if self.calls <= 2 else 171,
+                'height': 0 if self.calls <= 2 else 166,
+            }
+
+    node = Locator()
+    paint = acceptance._read_mermaid_chart_paint(node, layout_timeout=1)
+    assert node.calls == 3
+    assert paint['width'] == 171 and paint['height'] == 166
+
+
+def test_mermaid_chart_paint_does_not_fabricate_visibility_after_timeout():
+    class NeverPainted:
+        calls = 0
+
+        def evaluate(self, code):
+            self.calls += 1
+            return {'labels': ['Fixture article', 'Mermaid flow'],
+                    'nodeFill': '#f4f0ff', 'textFill': '#111827',
+                    'width': 0, 'height': 0}
+
+    node = NeverPainted()
+    paint = acceptance._read_mermaid_chart_paint(node, layout_timeout=0)
+    assert node.calls == 1
+    assert paint['width'] == 0 and paint['height'] == 0
+
+
 def test_g1_shared_browser_output_contract_does_not_add_g2_metadata(tmp_path, capsys, monkeypatch):
     work_dir = tmp_path / 'work'
     work_dir.mkdir()

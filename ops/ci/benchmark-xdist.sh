@@ -69,38 +69,11 @@ for i in $(seq 1 "$REPEATS"); do
         --durations=25 --junitxml="$REPORT/parallel-$i.xml" \
         "${EXCLUDE_ARGS[@]}" tests/ backend/api/tests/ scripts/deploy/tests/ \
         2>&1 | tee "$REPORT/parallel-$i.log"
-    # pytest's final terminal summary is authoritative for passed/skipped.
-    # Some pytest/unittest combinations count XML testcase entries differently
-    # than terminal outcomes; JUnit is still checked for real failures.
-    "$PYTHON" - "$REPORT/serial-$i.log" "$REPORT/parallel-$i.log" \
-        "$REPORT/serial-$i.xml" "$REPORT/parallel-$i.xml" <<'PY'
-import re
-import sys
-from pathlib import Path
-from xml.etree import ElementTree as ET
-
-summary = re.compile(r'=+\s*(\d+) passed(?:, (\d+) skipped)? in [\d.]+s\s*=+')
-passed = skipped = 0
-for filename in sys.argv[1:3]:
-    matches = [summary.search(line) for line in Path(filename).read_text(encoding="utf-8").splitlines()]
-    matches = [match for match in matches if match is not None]
-    if len(matches) != 1:
-        raise SystemExit(f"xdist benchmark terminal summary missing or ambiguous: {filename}")
-    passed += int(matches[0].group(1))
-    skipped += int(matches[0].group(2) or "0")
-for filename in sys.argv[3:]:
-    document = ET.parse(filename)
-    root = document.getroot()
-    if any(root.iter("failure")) or any(root.iter("error")):
-        raise SystemExit(f"xdist benchmark JUnit recorded an error or failure: {filename}")
-if passed != 2408 or skipped != 16:
-    raise SystemExit(
-        f"xdist benchmark coverage mismatch: passed={passed} skipped={skipped}; "
-        "expected 2408/16"
-    )
-print(f"xdist benchmark coverage PASS: passed={passed}, skipped={skipped}")
-PY
+    "$PYTHON" ops/ci/xdist_summary.py \
+        "$REPORT/serial-$i.log" "$REPORT/parallel-$i.log" \
+        "$REPORT/serial-$i.xml" "$REPORT/parallel-$i.xml"
     elapsed=$(( $(date +%s) - start ))
     printf 'xdist-benchmark: hybrid round %s/%s PASS elapsed=%ss\n' "$i" "$REPEATS" "$elapsed"
 done
 echo 'xdist-benchmark: three-root hybrid test matrix passed without retries'
+

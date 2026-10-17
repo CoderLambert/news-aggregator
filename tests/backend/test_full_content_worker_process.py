@@ -5,8 +5,6 @@ connects are forbidden and providers are synthetic; no publisher is contacted.
 """
 import json
 import os
-import sqlite3
-from contextlib import closing
 from pathlib import Path
 import signal
 import subprocess
@@ -154,29 +152,12 @@ class ProcessSandbox:
                     process.wait(timeout=3)
 
 
-@pytest.fixture(scope="module")
-def migrated_worker_template(tmp_path_factory):
-    """Build the SQLite schema once in a subprocess, never using the test DB."""
-    template = ProcessSandbox(tmp_path_factory.mktemp("worker-schema"))
-    template.run(
-        "from django.core.management import call_command\n"
-        "call_command('migrate', verbosity=0)\n"
-        "from django.db import connection\n"
-        "connection.close()\n"
-    )
-    return template.database
-
-
 @pytest.fixture
-def sandbox(tmp_path, migrated_worker_template):
+def sandbox(tmp_path, copy_synthetic_db):
     box = ProcessSandbox(tmp_path)
-    # Consistent SQLite online backup includes any committed WAL contents.
-    # Every test receives an independent database; no shared mutable SQLite
-    # state, lock file, heartbeat, or worker process survives between cases.
-    # Migrations and every ORM write still run only inside subprocesses.
-    with closing(sqlite3.connect(migrated_worker_template.as_uri() + "?mode=ro", uri=True)) as source:
-        with closing(sqlite3.connect(box.database)) as target:
-            source.backup(target)
+    # Migration schema is prepared by a separate subprocess and backed up to
+    # a fresh private file; no test shares worker locks or live SQLite state.
+    copy_synthetic_db(box.database)
     with override_settings(
         FULL_CONTENT_WORKER_ENABLED=True,
         FULL_CONTENT_WORKER_LOCK=str(box.lock),
