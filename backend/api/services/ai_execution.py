@@ -3,6 +3,7 @@
 T02 and T03 will bind verified models and task preferences. Until then, an
 account with an enabled connection never silently falls back to a site-admin key.
 """
+from django.conf import settings
 from api.ai_connection_models import UserAIConnection
 
 
@@ -11,7 +12,10 @@ class PersonalAIUnavailable(RuntimeError):
 
 
 def has_personal_connection(user) -> bool:
-    return bool(user and getattr(user, 'is_authenticated', False)
+    # Disabled BYOK cannot shadow an independent ChatGPT subscription.
+    return bool(getattr(settings, 'AI_BYOK_ENABLED', False)
+                and settings.PUBLIC_SITE_MODE == 'full'
+                and user and getattr(user, 'is_authenticated', False)
                 and UserAIConnection.objects.filter(user_id=user.pk,
                     is_deleted=False, is_enabled=True).exists())
 

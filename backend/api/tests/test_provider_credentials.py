@@ -90,3 +90,19 @@ def test_chat_with_unbound_personal_connection_fails_before_history_or_model(own
     assert not owner.news_chat_sessions.exists()
     site.assert_not_called()
     paid.assert_not_called()
+
+@pytest.mark.django_db
+def test_disabled_byok_gate_never_shadows_independent_subscription(owner):
+    UserAIConnection.objects.create(
+        user=owner, provider_id='deepseek', endpoint_profile='deepseek_default',
+        display_name='synthetic-only', request_hash='synthetic-only',
+        credential_ciphertext='synthetic-not-a-key', is_enabled=True,
+    )
+    for enabled, mode in ((False, 'full'), (True, 'read_only')):
+        with override_settings(AI_BYOK_ENABLED=enabled, PUBLIC_SITE_MODE=mode):
+            assert has_personal_connection(owner) is False
+            assert personal_clients_for_user(owner) == []
+    with override_settings(AI_BYOK_ENABLED=True, PUBLIC_SITE_MODE='full'):
+        assert has_personal_connection(owner) is True
+        with pytest.raises(PersonalAIUnavailable):
+            personal_clients_for_user(owner)
