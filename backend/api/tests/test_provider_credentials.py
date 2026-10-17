@@ -106,3 +106,43 @@ def test_disabled_byok_gate_never_shadows_independent_subscription(owner):
         assert has_personal_connection(owner) is True
         with pytest.raises(PersonalAIUnavailable):
             personal_clients_for_user(owner)
+
+@pytest.mark.django_db
+@override_settings(AI_BYOK_ENABLED=True, PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_chatgpt_subscription_works_even_with_enabled_unbound_byok_connection(owner):
+    from api.models import Category, News, Source
+    from api.tests.rss.reader_fixtures import public_legacy_article
+    from django.utils import timezone
+    from rest_framework.response import Response
+
+    news = public_legacy_article(News.objects.create(
+        title='Subscription Priority', content='summary', full_content='complete',
+        full_content_state='legacy',
+        publish_time=timezone.now(), url='https://example.test/byok-subscription',
+        source=Source.objects.create(name='Subscription Source', url='https://example.test/sub'),
+        category=Category.objects.create(name='Subscription Category', slug='byok-subscription'),
+    ))
+    UserAIConnection.objects.create(
+        user=owner, provider_id='deepseek', endpoint_profile='deepseek_default',
+        display_name='unbound Key', request_hash='synthetic-only',
+        credential_ciphertext='synthetic-not-a-key', is_enabled=True,
+    )
+    client = APIClient()
+    client.force_login(owner)
+    selected = object()
+    with (
+        patch('api.services.chatgpt_subscription.active_connection_for_user', return_value=selected),
+        patch('api.services.ai_execution.personal_clients_for_user',
+              side_effect=AssertionError('unbound BYOK must not shadow subscription')) as byok,
+        patch('api.services.chatgpt_subscription.stream_chat_response',
+              return_value=iter(['subscription synthetic answer'])) as subscription,
+        patch('api.views.get_clients',
+              side_effect=AssertionError('no site-Key fallback')) as site,
+    ):
+        result = client.post(f'/api/news/{news.pk}/chat/',
+                             {'question': 'Explain'}, format='json')
+        assert result.status_code == 200
+        assert 'subscription synthetic answer' in b''.join(result.streaming_content).decode()
+    subscription.assert_called_once()
+    byok.assert_not_called()
+    site.assert_not_called()
