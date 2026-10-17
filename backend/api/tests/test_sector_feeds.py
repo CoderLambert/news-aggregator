@@ -11,7 +11,7 @@ from api.services.source_policy import POLICIES
 from api.services.sector_feeds import SECTOR_KEYS
 from api.services.feed_support import parse_feed, feed_entry_item
 from api.services.energy_keywords import matches_new_energy
-from api.services.channel_catalog import subscription_status
+from api.services.channel_catalog import subscription_status, catalog_defaults
 from api.tests.rss.legacy_fixtures import ingest_fixture as ingest_item
 from api.services.full_content_status import has_full_content, fetch_eligibility
 
@@ -78,7 +78,23 @@ def test_rss10_dc_date_and_two_digit_year_are_not_replaced_by_crawl_time():
 
 
 @pytest.fixture
-def reading_data(db):
+def sector_catalog(db):
+    # Transactional tests flush data-migration rows. Reader tests must create
+    # their own reviewed metadata and access grants, regardless of worker order.
+    from api.models import SourcePublication
+    Category.objects.get_or_create(name='医疗健康', defaults={'slug': 'sector-test-health'})
+    names = {'PV Magazine 中文版', 'MedTech Dive', 'FDA 新闻稿',
+             'MIT Tech Review AI', 'MIT 科技评论·生物技术'}
+    policies = {policy.name: policy for policy in POLICIES.values()}
+    for name in sorted(names):
+        policy = policies[name]
+        source, _ = Source.objects.get_or_create(name=name, defaults=catalog_defaults(policy))
+        SourcePublication.objects.update_or_create(source=source, defaults={
+            'publication': 'public', 'owner': 'legacy', 'reading_policy': policy.reading_policy})
+
+
+@pytest.fixture
+def reading_data(sector_catalog):
     category = Category.objects.get(name='医疗健康')
     domestic = Source.objects.get(name='PV Magazine 中文版')
     medical = Source.objects.get(name='MedTech Dive')
@@ -140,7 +156,7 @@ def test_regions_share_all_search_modes_and_group_intersection(vector, version, 
 
 
 @pytest.mark.django_db
-def test_overlapping_publisher_channels_keep_primary_and_are_visible_in_both_groups():
+def test_overlapping_publisher_channels_keep_primary_and_are_visible_in_both_groups(sector_catalog):
     primary = Source.objects.get(name='MIT Tech Review AI')
     # This membership fixture explicitly uses compatible summary policies.
     from api.models import SourcePublication
