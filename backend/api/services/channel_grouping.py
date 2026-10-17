@@ -10,6 +10,7 @@ from rest_framework.exceptions import APIException, NotFound, PermissionDenied, 
 from api.models import ChannelGroup, ChannelGroupMember, ChannelSubscription, Source, UserProviderCredential
 from api.smart_channel_models import ChannelGroupingConfig, ChannelGroupingOverride, ChannelGroupingProposal, SubscriptionGroupingState
 from api.services.channel_topics import TOPIC_MAP, digest, evidence_for, profile_data
+from api.services.channel_topic_hints import infer_title_topics
 
 
 class GroupingConflict(APIException):
@@ -116,12 +117,24 @@ def make_proposal(user, payload):
     sources = list(Source.objects.filter(id__in=source_ids).order_by('id'))
     evidence = [evidence_for(source) for source in sources]
     result = []
-    for source in sources:
+    for source, source_evidence in zip(sources, evidence, strict=True):
         profile = profile_data(source)
         topics = [key for key in profile['topics'] if key in topic_keys]
+        origin, needs_review = profile['origin'], profile['needs_review']
+        reason = '根据已登记频道的主题资料' if topics else '资料不足，保留待确认'
+        # Only an explicit, user-triggered *rules* preview receives weak hints.
+        # A manually emptied profile is authoritative; AI and the public
+        # catalog/auto-subscribe paths must not turn these into trusted topics.
+        if engine == 'rules' and not topics and origin == 'unknown':
+            hints = [hint for hint in infer_title_topics(source_evidence['titles'])
+                     if hint['topic_key'] in topic_keys]
+            if hints:
+                topics = [hint['topic_key'] for hint in hints]
+                origin, needs_review = 'title_evidence', True
+                matches = '、'.join(f"{TOPIC_MAP[hint['topic_key']]['name']} {hint['matched_titles']} 篇" for hint in hints)
+                reason = f"最近 {hints[0]['total_titles']} 篇不同文章标题：{matches}；仅供人工确认。"
         result.append({'source_id': source.id, 'name': source.name, 'topic_keys': topics,
-                       'origin': profile['origin'], 'needs_review': profile['needs_review'],
-                       'reason': ('根据已登记频道的主题资料' if topics else '资料不足，保留待确认')})
+                       'origin': origin, 'needs_review': needs_review, 'reason': reason})
     return ChannelGroupingProposal.objects.create(user=user, request_id=request_id, engine=engine,
         status='queued' if engine == 'ai' else 'ready', source_ids=source_ids, topic_keys=topic_keys,
         input_snapshot=snapshot(user, source_ids), request_hash=request_hash, evidence=evidence,
@@ -140,10 +153,10 @@ def apply_proposal(user, proposal_id, payload):
         raise GroupingConflict('预览尚未就绪、已取消或已过期，请重新整理。')
     if proposal.input_snapshot != snapshot(user, proposal.source_ids):
         raise GroupingConflict()
-    if proposal.engine == 'ai':
+    if proposal.engine == 'ai' or any(item.get('origin') == 'title_evidence' for item in proposal.result):
         from api.services.classification_evidence import evidence_is_current
         if not evidence_is_current(proposal):
-            raise GroupingConflict('AI 依据的文章标题或频道资料已变化，请重新生成；不会自动再次调用模型。')
+            raise GroupingConflict('频道标题证据或资料已变化，请重新生成预览；不会自动调用模型。')
     entries = payload.get('groups')
     if not isinstance(entries, list) or not 1 <= len(entries) <= len(TOPIC_MAP):
         raise ValidationError('请选择要应用的分组。')
