@@ -27,6 +27,7 @@ describe('SettingsPage', () => {
     render(<MemoryRouter><CapabilitiesTestProvider><SettingsPage /></CapabilitiesTestProvider></MemoryRouter>)
     expect(screen.getByRole('heading', { name: '阅读偏好' })).toBeTruthy()
     expect(screen.getByRole('heading', { name: '账号与连接' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: '管理个人 AI 连接' })).toHaveAttribute('href', '/settings/ai')
     expect(screen.getByRole('heading', { name: '站点工具' })).toBeTruthy()
     expect(screen.getByRole('group', { name: '界面语言' })).toBeTruthy()
     expect(screen.getByRole('link', { name: '管理连接' }).getAttribute('href')).toBe('/settings/chatgpt')
