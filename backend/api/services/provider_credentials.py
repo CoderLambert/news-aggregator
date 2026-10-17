@@ -88,15 +88,24 @@ class _OneShotCompletionStream:
     """Expose one verified non-streaming completion to existing SSE callers."""
 
     def __init__(self, response):
-        choices = getattr(response, 'choices', None) or []
-        if not choices:
-            self._chunks = []
-            return
+        # Our configured LiteLLM gateway does not safely expose a streamed
+        # Chat Completions terminal yet. A non-streaming upstream response must
+        # be fully terminal BEFORE any text becomes visible downstream.
+        choices = getattr(response, 'choices', None)
+        if not isinstance(choices, (list, tuple)) or len(choices) != 1:
+            raise ProviderCredentialError('个人模型回复不完整，未接收有效结束状态。')
         choice = choices[0]
+        if getattr(choice, 'finish_reason', None) != 'stop':
+            # length, content_filter, tool_calls, EOF and unknown terminal
+            # states must never masquerade as a completed text-only stream.
+            raise ProviderCredentialError('个人模型回复未完整完成，未使用截断内容。')
         message = getattr(choice, 'message', None)
+        content = getattr(message, 'content', None)
+        if not isinstance(content, str) or not content.strip():
+            raise ProviderCredentialError('个人模型回复内容为空或格式不正确。')
         self._chunks = [SimpleNamespace(choices=[SimpleNamespace(
-            delta=SimpleNamespace(content=getattr(message, 'content', None)),
-            finish_reason=getattr(choice, 'finish_reason', None),
+            delta=SimpleNamespace(content=content),
+            finish_reason='stop',
         )])]
 
     def __iter__(self):
