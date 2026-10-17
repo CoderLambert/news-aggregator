@@ -9,7 +9,8 @@ from django.utils import timezone
 from rest_framework.exceptions import APIException, NotFound, PermissionDenied, Throttled, ValidationError
 from api.models import ChannelGroup, ChannelGroupMember, ChannelSubscription, Source
 from api.smart_channel_models import ChannelGroupingConfig, ChannelGroupingOverride, ChannelGroupingProposal, SubscriptionGroupingState
-from api.ai_connection_models import UserAIConnection\nfrom api.services.channel_topics import TOPIC_MAP, digest, evidence_for, profile_data
+from api.ai_connection_models import UserAIConnection
+from api.services.channel_topics import TOPIC_MAP, digest, evidence_for, profile_data
 from api.services.channel_topic_hints import infer_title_topics
 
 
@@ -34,10 +35,10 @@ def config_data(user):
 
 
 def credential_fingerprint(user):
-    credential = UserProviderCredential.objects.filter(user=user).first()
-    if not credential:
-        return ''
-    return digest([credential.provider, credential.model_id, credential.updated_at, credential.encrypted_api_key])
+    active = list(UserAIConnection.objects.filter(
+        user=user, is_deleted=False, is_enabled=True
+    ).order_by('id').values_list('id', 'credential_epoch'))
+    return digest([[str(identity), epoch] for identity, epoch in active]) if active else ''
 
 
 def snapshot(user, source_ids):
