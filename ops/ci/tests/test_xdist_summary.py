@@ -21,17 +21,17 @@ class XdistSummaryTests(unittest.TestCase):
         self.assertEqual(parallel["skipped"], 16)
         self.assertEqual(serial["passed"] + parallel["passed"], 2408)
 
-    def test_current_coverage_includes_two_new_g1_regressions(self):
+    def test_current_coverage_includes_title_hint_regressions(self):
         totals = xdist_summary.validate_terminal_coverage(
             [
                 ("serial.log", "79 passed in 22.37s\n"),
                 (
                     "parallel.log",
-                    "2331 passed, 16 skipped in 105.55s (0:01:45)\n",
+                    "2338 passed, 16 skipped in 105.55s (0:01:45)\n",
                 ),
             ]
         )
-        self.assertEqual(totals["passed"], 2410)
+        self.assertEqual(totals["passed"], 2417)
         self.assertEqual(totals["skipped"], 16)
 
     def test_reported_bare_serial_format_is_supported(self):

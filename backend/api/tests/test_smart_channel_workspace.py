@@ -58,6 +58,64 @@ class SmartChannelTests(TestCase):
         self.assertEqual(response.data['topics'], [])
         self.assertTrue(response.data['needs_review'])
 
+    def _unclassified_subscription(self):
+        from api.tests.rss.legacy_fixtures import public_legacy
+        source = Source.objects.create(name='Independent Browser Weekly', url='https://example.org')
+        public_legacy(source)
+        subscription = ChannelSubscription.objects.create(user=self.user, source=source)
+        for index, title in enumerate([
+            'React server components in the browser',
+            'TypeScript language services for applications',
+            'CSS grid and browser rendering improvements',
+            'Weekend editorial roundup',
+        ]):
+            News.objects.create(source=source, category=self.category, title=title,
+                content='A summary only', url=f'https://example.org/posts/{index}',
+                publish_time=timezone.now() + timedelta(seconds=index))
+        return source, subscription
+
+    def test_unknown_source_uses_unverified_title_hints_only_in_rules_preview(self):
+        source, _ = self._unclassified_subscription()
+        # Catalog and source profile remain truthful: no invented trusted tag,
+        # no model call, and no public metadata write.
+        catalog = self.client.get(f'/api/smart-channels/sources/{source.pk}/')
+        self.assertEqual(catalog.status_code, 200)
+        self.assertEqual(catalog.data['topics'], [])
+        with patch('api.services.channel_ai.personal_clients_for_user', side_effect=AssertionError('no model')):
+            proposal = self.propose(source_ids=[source.pk], topic_keys=['frontend', 'ai'])
+        self.assertEqual(proposal.status_code, 201)
+        hint = proposal.data['result'][0]
+        self.assertEqual(hint['topic_keys'], ['frontend'])
+        self.assertEqual(hint['origin'], 'title_evidence')
+        self.assertTrue(hint['needs_review'])
+        self.assertIn('人工确认', hint['reason'])
+        self.assertFalse(SourceTopicProfile.objects.filter(source=source).exists())
+        self.assertFalse(ChannelGroupMember.objects.exists())
+        confirmed = self.apply(proposal.data['id'], groups=[{'topic_key': 'frontend',
+            'source_ids': [source.pk], 'name': 'My Frontend'}])
+        self.assertEqual(confirmed.status_code, 200)
+        self.assertEqual(ChannelGroupMember.objects.filter(subscription__source=source).count(), 1)
+
+    def test_unverified_title_hints_expire_when_articles_change(self):
+        source, _ = self._unclassified_subscription()
+        proposal = self.propose(source_ids=[source.pk], topic_keys=['frontend']).data['id']
+        News.objects.create(source=source, category=self.category, title='A brand new article',
+            content='A summary only', url='https://example.org/posts/new',
+            publish_time=timezone.now() + timedelta(hours=1))
+        response = self.apply(proposal, groups=[{'topic_key': 'frontend',
+            'source_ids': [source.pk], 'name': 'My Frontend'}])
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(ChannelGroupMember.objects.filter(subscription__source=source).exists())
+
+    def test_title_hints_do_not_authorize_automatic_grouping(self):
+        source, subscription = self._unclassified_subscription()
+        group = ChannelGroup.objects.create(user=self.user, name='Unreviewed Frontend')
+        ChannelGroupingConfig.objects.create(user=self.user, mode='auto',
+            bindings={'frontend': group.pk}, active_since=timezone.now() - timedelta(days=1))
+        process_subscription(subscription.pk)
+        self.assertFalse(group.subscriptions.filter(source=source).exists())
+        self.assertFalse(SourceTopicProfile.objects.filter(source=source).exists())
+
     def test_preview_does_not_mutate_groups_or_subscriptions(self):
         response = self.propose()
         self.assertEqual(response.status_code, 201)

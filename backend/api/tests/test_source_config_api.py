@@ -102,6 +102,36 @@ def test_create_probe_approve_run_and_enable_are_explicit(admin_client, medical_
 
 
 @pytest.mark.django_db
+def test_probe_enforces_endpoint_byte_cap_before_parsing(admin_client, medical_category):
+    client, _ = admin_client
+    created = client.post('/api/admin/crawler/sources/', payload(medical_category.pk), format='json')
+    assert created.status_code == 201
+    config = SourceConfig.objects.get(pk='official_health')
+    endpoint = config.endpoints.first()
+    # Direct DB fixture models an older approved endpoint limit, rather than
+    # relying on API validation or contacting any real publisher.
+    endpoint.max_response_bytes = len(RSS) - 1
+    endpoint.save(update_fields=['max_response_bytes'])
+    sizes = []
+
+    class TrackingResponse(CachedResponse):
+        def read(self, amount=None):
+            sizes.append(amount)
+            return super().read(amount)
+
+    headers = Message()
+    headers['Content-Type'] = 'application/rss+xml'
+    response = TrackingResponse('https://official.example.cn/feed.xml', 200, headers, RSS)
+    with patch('api.services.source_probe.safe_urlopen', return_value=response):
+        result = client.post('/api/admin/crawler/sources/official_health/probe/', {}, format='json')
+    assert result.status_code == 200
+    assert sizes == [len(RSS)]
+    assert result.data['status'] == 'unsupported'
+    assert result.data['probe_summary']['error_code'] == 'response_too_large'
+    assert CrawlerTarget.objects.get(pk='official_health').enabled is False
+
+
+@pytest.mark.django_db
 def test_patch_invalidates_probe_approval_and_disables_target(admin_client, medical_category):
     client, user = admin_client
     client.post('/api/admin/crawler/sources/', payload(medical_category.pk), format='json')

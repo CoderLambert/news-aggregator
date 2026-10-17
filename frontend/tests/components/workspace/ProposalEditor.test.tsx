@@ -37,6 +37,21 @@ describe('editable grouping preview', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认应用分组' }))
     expect(onApply.mock.calls[0][0].groups[0].source_ids).toEqual([1, 2])
   })
+  it('labels title-evidence matches as unverified and never applies them automatically', () => {
+    const inferred: Proposal = {
+      ...proposal,
+      result: [{ source_id: 1, name: 'Unlisted source', topic_keys: ['frontend'],
+        origin: 'title_evidence', needs_review: true,
+        reason: '最近 4 篇不同文章标题：前端开发 3 篇；仅供人工确认。' }],
+    }
+    const onApply = vi.fn()
+    render(<ProposalEditor proposal={inferred} topics={topics} groups={[]}
+      mode="suggest" busy={false} onApply={onApply} onCancel={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '调整频道归属' }))
+    expect(screen.getByText(/标题证据推测·待确认/)).toBeInTheDocument()
+    expect(screen.getByText(/仅供人工确认/)).toBeInTheDocument()
+    expect(onApply).not.toHaveBeenCalled()
+  })
   it('cancels without invoking apply and never shows a fabricated confidence percentage', () => {
     const { onApply, onCancel } = setup()
     fireEvent.click(screen.getByRole('button', { name: '取消预览' }))

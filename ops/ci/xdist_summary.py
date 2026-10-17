@@ -5,9 +5,9 @@ import sys
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-# Two paint regression tests were added by merged PR #86 to the previous
-# 2408-passed baseline. The 16 explicit skips remain unchanged.
-_EXPECTED = {"passed": 2410, "skipped": 16}
+# Baseline: 2410 passing main tests + six title-hint regressions + one source-probe bound test.
+# Explicit skipped tests remain 16, and failures are never counted as skips.
+_EXPECTED = {"passed": 2417, "skipped": 16}
 _SUMMARY = re.compile(
     r"^\s*=*\s*"
     r"(?P<outcomes>\d+\s+[A-Za-z][A-Za-z_-]*"
@@ -42,7 +42,7 @@ def parse_terminal_summary(contents: str, *, source: str = "<log>") -> Counter:
 
 
 def validate_terminal_coverage(logs: list[tuple[str, str]]) -> Counter:
-    """Require the updated 2410 passed / 16 skipped baseline and no failures."""
+    """Require the updated 2417 passed / 16 skipped baseline and no failures."""
     total = Counter()
     for source, contents in logs:
         total.update(parse_terminal_summary(contents, source=source))
@@ -57,7 +57,7 @@ def validate_terminal_coverage(logs: list[tuple[str, str]]) -> Counter:
         raise ValueError(
             "xdist benchmark coverage mismatch: "
             f"passed={total['passed']} skipped={total['skipped']} "
-            f"other={unexpected}; expected 2410/16 with zero failures"
+            f"other={unexpected}; expected 2417/16 with zero failures"
         )
     return total
 

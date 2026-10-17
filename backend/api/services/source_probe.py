@@ -16,6 +16,11 @@ class ProbeConflict(RuntimeError):
     pass
 
 
+class ProbeInputRejected(ValueError):
+    """Known non-sensitive probe rejection suitable for operator diagnostics."""
+    error_code = 'response_too_large'
+
+
 def _nested(value, path):
     current = value
     for part in path.split('.'):
@@ -135,10 +140,13 @@ def probe_source(config):
     }, method='GET')
     try:
         with safe_urlopen(request, timeout=15, allowed_hosts=allowed_hosts) as response:
-            body = response.read()
+            # Read at most one byte beyond this *endpoint's* configured cap.
+            # The transport has a global wire budget, but a small source policy
+            # must not buffer or parse a larger publisher response.
+            body = response.read(endpoint.max_response_bytes + 1)
             content_type = response.headers.get('Content-Type', '')[:200]
             if len(body) > endpoint.max_response_bytes:
-                raise ValueError('oversize')
+                raise ProbeInputRejected('oversize')
             if endpoint.kind in {'rss', 'atom'}:
                 format_name, identity_field, published_field, samples = _feed_samples(body, endpoint)
             elif endpoint.kind == 'html':
