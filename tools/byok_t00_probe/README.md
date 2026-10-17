@@ -41,7 +41,7 @@ PostgreSQL 必须以非 root 运行。root 场景使用系统已有的 `nobody`�
 | 原 Test | 本次进程验证与明确边界 |
 | --- | --- |
 | T00-01 | 三协议非流式完整文字和两轮工具终态；SDK 直连三协议流式完整终态；经 Proxy 的 Responses / Messages 流式完整终态。 |
-| T00-02 | SDK 三协议及 Proxy Responses / Messages 的 EOF、原生不完整终态；Proxy Chat 流式沿用现有 guard 返回 400，且上游请求为 0。这是失败关闭通过，不是 Chat 流式成功兼容。 |
+| T00-02 | SDK 三协议及 Proxy Responses / Messages 的 EOF、原生不完整终态；Proxy Chat 流式沿用现有 guard 返回 400，且上游请求为 0（含原始 JSON 字符串/数字 `stream` 标志的 EOF 命名变体；`"t"`/`"y"` 大小写别名亦强制拒绝）。这是失败关闭通过，不是 Chat 流式成功兼容。 |
 | T00-03 | HTTP 503、超时、截断 body；可用流式路径的流内 error / `response.failed`；仅记录错误类型、状态码和终态，不输出正文。 |
 | T00-04 | 半截参数、非法 JSON、非法参数形状及非白名单工具；以实际 dispatch 计数为 0 证明拒绝，失败发生在已经派发之后不能通过。 |
 | T00-05 | 三协议两轮工具往返与完整最终回答；原始 Chat assistant / reasoning、Responses output items、Messages thinking / signature 回送事实；公开输出不包含私有 continuation 或 Key。 |

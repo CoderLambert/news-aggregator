@@ -1,7 +1,9 @@
 """Negative controls for the T00 runner; no provider, Docker, or DB required."""
 from __future__ import annotations
 
+import asyncio
 import importlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -10,7 +12,7 @@ import subprocess
 import signal
 import sys
 import tempfile
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -192,6 +194,93 @@ class ProbeContracts(unittest.TestCase):
                     client.close.assert_called_once()
                     if stage == "iterate":
                         stream.close.assert_called_once()
+
+
+class ProviderKeyGuardFailClosed(unittest.TestCase):
+    """Chat streaming must stay fail-closed (report §12 EOF defect).
+
+    The guard file lives in ops/shared-litellm-proxy; LiteLLM/FastAPI are
+    stubbed when absent (SDK venv) so this runs in the CI T00 step.
+    An "allowed" hook result would have reached the synthetic upstream,
+    whose EOF-without-terminal the proxy turns into stop/[DONE].
+    """
+
+    @staticmethod
+    def _load_guard():
+        guard_path = Path(__file__).resolve().parents[2] / "ops/shared-litellm-proxy/provider_key_guard.py"
+        fastapi = ModuleType("fastapi")
+
+        class HTTPException(Exception):
+            def __init__(self, status_code, detail):
+                super().__init__(detail)
+                self.status_code, self.detail = status_code, detail
+
+        fastapi.HTTPException = HTTPException
+        custom_logger = ModuleType("litellm.integrations.custom_logger")
+        custom_logger.CustomLogger = type("CustomLogger", (), {})
+        integrations = ModuleType("litellm.integrations")
+        integrations.custom_logger = custom_logger
+        litellm = ModuleType("litellm")
+        litellm.integrations = integrations
+        stubs = {"fastapi": fastapi, "litellm": litellm, "litellm.integrations": integrations,
+                 "litellm.integrations.custom_logger": custom_logger}
+        spec = importlib.util.spec_from_file_location("provider_key_guard_t00_test", guard_path)
+        module = importlib.util.module_from_spec(spec)
+        with patch.dict(sys.modules, stubs):
+            spec.loader.exec_module(module)
+        return module
+
+    @classmethod
+    def setUpClass(cls):
+        cls.guard = cls._load_guard()
+
+    def run_hook(self, data, call_type, env=None):
+        hook = self.guard.ProviderKeyGuard().async_pre_call_hook(
+            user_api_key_dict=SimpleNamespace(), cache=None, data=dict(data), call_type=call_type)
+        with patch.dict(os.environ, env or {}):
+            try:
+                asyncio.run(hook)
+            except Exception as exc:
+                detail = getattr(exc, "detail", {})
+                return ("rejected", getattr(exc, "status_code", None),
+                        detail.get("code") if isinstance(detail, dict) else None)
+        return ("allowed", None, None)
+
+    def test_chat_stream_eof_request_rejected_before_upstream(self):
+        data = {"api_key": "sk-synthetic-provider", "stream": True}
+        self.assertEqual(self.run_hook(data, "acompletion"), ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
+
+    def test_chat_stream_rejected_despite_empty_or_omitting_deny_env(self):
+        data = {"api_key": "sk-synthetic-provider", "stream": True}
+        for env in ({"BYOK_DENY_STREAMING_CALL_TYPES": ""}, {"BYOK_DENY_STREAMING_CALL_TYPES": "aresponses"},
+                    {"BYOK_DENY_STREAMING_CALL_TYPES": "ACOMPLETION"}):
+            with self.subTest(env=env):
+                self.assertEqual(self.run_hook(data, "acompletion", env), ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
+
+    def test_chat_stream_string_and_numeric_flags_rejected(self):
+        for flag in ("true", "True", "1", 1):
+            with self.subTest(flag=flag):
+                result = self.run_hook({"api_key": "sk-synthetic-provider", "stream": flag}, "acompletion")
+                self.assertEqual(result, ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
+        self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider", "stream": True}, "completion"),
+                         ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
+
+    def test_chat_short_truth_aliases_and_unknown_shapes_are_denied(self):
+        for flag in ("t", "T", "y", "Y", "unknown", "", 2, -1, {}, []):
+            with self.subTest(flag=flag):
+                self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider", "stream": flag}, "acompletion"),
+                                 ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
+        for flag in ("f", "n", "no", "off", "0", 0, False, None):
+            with self.subTest(non_stream_flag=flag):
+                self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider", "stream": flag}, "acompletion")[0],
+                                 "allowed")
+
+    def test_non_streaming_chat_and_other_protocol_streams_unchanged(self):
+        self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider"}, "acompletion")[0], "allowed")
+        self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider", "stream": False}, "acompletion")[0], "allowed")
+        for call_type in ("aresponses", "anthropic_messages"):
+            self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider", "stream": True}, call_type)[0], "allowed")
+
 
 
 class RuntimeCleanup(unittest.TestCase):

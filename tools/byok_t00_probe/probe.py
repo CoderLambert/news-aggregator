@@ -143,6 +143,24 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             client.close()
 
+    def raw_chat_stream_status(url: str, project_key: str, marker: str, provider_key: str, stream_value) -> int:
+        # Raw JSON (not the typed SDK) so a string/number stream flag that
+        # typed parsing would coerce to True is exercised end-to-end.
+        import http.client
+        from urllib.parse import urlsplit
+        parts = urlsplit(url)
+        body = json.dumps({"model": "t00-chat", "messages": [{"role": "user", "content": marker}],
+                           "stream": stream_value, "api_key": provider_key}).encode()
+        conn = http.client.HTTPConnection(parts.hostname, parts.port, timeout=10)
+        try:
+            conn.request("POST", "/v1/chat/completions", body=body,
+                         headers={"Content-Type": "application/json", "Authorization": "Bearer " + project_key})
+            response = conn.getresponse()
+            response.read()
+            return response.status
+        finally:
+            conn.close()
+
     def suite(source: str, url: str, project_keys: dict | None = None):
         via_proxy = project_keys is not None
         sdk_key = project_keys["tenant-a"] if via_proxy else keys["tenant-a"]
@@ -170,6 +188,15 @@ def main(argv: list[str] | None = None) -> int:
                 result = call(protocol, url, sdk_key, marker, via_proxy=True, provider_key=keys["tenant-a"], stream=True)
                 check("T00-02", "PROXY_CHAT_STREAM_FAIL_CLOSED", result.get("status_code") == 400, result)
                 expect_receipt(source, marker, 0)
+                # EOF-named raw variants: if either reached upstream, its
+                # EOF-without-terminal would surface as stop/[DONE].
+                for variant, flag in (("STRING", "true"), ("NUMERIC", 1),
+                                      ("SHORT_T", "t"), ("SHORT_Y", "y"),
+                                      ("UPPER_T", "T"), ("UPPER_Y", "Y")):
+                    raw_marker = f"T00_PROXY_CHAT_STREAM_EOF_{variant}_A"
+                    status = raw_chat_stream_status(url, sdk_key, raw_marker, keys["tenant-a"], flag)
+                    check("T00-02", f"PROXY_CHAT_STREAM_EOF_{variant}_FAIL_CLOSED", status == 400, {"status_code": status})
+                    expect_receipt(source, raw_marker, 0)
             else:
                 for kind in ("COMPLETE", "EOF", "INCOMPLETE", "SSE_ERROR", "CANCEL"):
                     result = cases.run_protocol_stream_case(base, protocol, kind, sdk_key, provider_key=keys["tenant-a"], via_proxy=via_proxy, upstream_url=upstream_url, proxy_health_url=url + "/health/liveliness" if via_proxy else None)

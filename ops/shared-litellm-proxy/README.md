@@ -6,7 +6,7 @@
 
 当前配置固定 `ghcr.io/berriai/litellm:v1.105.0@sha256:60947db020b57e204823d3fbc8bb295c85be890d7c9adcc77fb4f5fc2fe410b2`。版本在 2026-10-12 从 [官方 latest release](https://github.com/BerriAI/litellm/releases/latest) 解析为 v1.105.0；该 [官方 release](https://github.com/BerriAI/litellm/releases/tag/v1.105.0) 说明发行镜像用 Cosign 签名。OCI index 的实际 digest、平台 manifest、固定公钥验证和透明日志结果见 [T00-G 镜像证据](../../docs/features/byok/evidence/T00-gateway-v1.105.0-cosign.json)。同一镜像的 T00 受控 upstream 兼容探针为 `396 PASS / 0 FAIL`；该探针的整体状态仍是 `PARTIAL`，因为它不含旧业务回归和真实 provider 调用。
 
-当前 T00 兼容探针仍复现 Chat streaming 正常 EOF 后缺少协议终态的原始风险。`provider_key_guard.py` 因此在到达 upstream 前拒绝 Chat streaming；其他请求路径不会因这个限制被暗中切到其他模型。响应、Messages 和非流 Chat 的 T00 证据也不代表任何真实 provider 兼容。
+当前 T00 兼容探针仍复现 Chat streaming 正常 EOF 后缺少协议终态的原始风险（报告 §12：LiteLLM v1.104.2 与 v1.105.0 镜像均在 upstream 无终态 EOF 时合成 `finish_reason=stop` + `[DONE]`，与完整流不可区分）。`provider_key_guard.py` 因此在到达 upstream 前以 HTTP 400 `T00_CHAT_STREAMING_DISABLED` 拒绝 Chat streaming。**这是产品策略上的 fail-closed，不是 Chat 流式兼容**：Chat（`acompletion`/`completion`）流式拒绝是代码内写死的，`BYOK_DENY_STREAMING_CALL_TYPES` 为空、漏写 Chat 或大小写错误都不能重新开启它，该变量只能追加拒绝其他调用类型；原始 JSON 中的字符串/数字真值（如 `"true"`/`1`/`"t"`/`"y"`，经类型解析会变成 `True`）同样按流式拒绝；仅明确的非流式 `stream` 值放行，其余未知值失败关闭。其他请求路径不会因这个限制被暗中切到其他模型。响应、Messages 和非流 Chat 的 T00 证据也不代表任何真实 provider 兼容。
 
 ## 部署边界
 
