@@ -33,6 +33,12 @@ jobs:
           test "$(node -p 'process.versions.node.split(".")[0]')" = 22
           test -z "${DOCKER_HOST:-}"
           test ! -S /ci-docker/docker.sock
+      - name: Fast cross-stack syntax preflight
+        # Run without fetching Python or npm dependencies. The frontend Runner
+        # has Python 3.12, but NO DinD access or backend cache.
+        run: |
+          python3 -m compileall -q backend/api backend/newsaggregator crawler scripts/deploy ops/ci
+          bash -n ops/ci/*.sh scripts/deploy/*.sh scripts/deploy/tests/*.sh
       - name: Restore installed frontend deps from lockfile-keyed local cache
         run: bash ops/ci/install-frontend-deps.sh
       - name: Check frontend types
@@ -95,6 +101,14 @@ jobs:
             alpine:3.22 test -d /ci-tmp
       - name: Reuse checked backend environment from persistent cache
         run: bash ops/ci/install-backend-deps.sh
+      - name: Fast backend security regressions
+        # Fail on relevant security regressions before the full 2400+ suite.
+        # The complete suite below still runs all three test roots.
+        run: |
+          backend/venv/bin/python -m pytest -q --maxfail=1 --tb=short \
+            backend/api/tests/test_article_fetcher_security.py \
+            backend/api/tests/test_research_csrf.py \
+            scripts/deploy/tests/test_nginx_templates.py
       - name: Verify private self-hosted CI contract
         run: backend/venv/bin/python -m unittest discover -s ops/ci/tests -p 'test_*.py'
       - name: Validate release shell syntax and mocked script behavior

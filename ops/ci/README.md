@@ -142,6 +142,13 @@ bash ops/ci/manage.sh disable-watch   # 只停用本项目的 user timer，不�
 - 首次部署锁文件会出现一次正常 `MISS`（缓存键升级），以后 `HIT`。**不自动清理任何 Docker 镜像或卷，不触碰生产数据**。
 - 依赖升级流程：在隔离环境中明确升级并运行全套检查后，重新生成 `pip freeze`，同步到 CI lock 并审核变更差异；不要自动选择最新的 `>=` 范围版本。
 
+## PR 快速反馈（CI-P03）
+
+- 前端 Runner 在依赖缓存检查之前执行 Python `compileall` 与 shell `bash -n`，不接入 DinD 或后端数据卷。
+- 后端 Runner 在完整回归测试之前执行一组安全/部署关键用例，并使用 `--maxfail=1` 快速暴露失败。
+- 现有的 Python 全量测试、前端 typecheck/lint/Vitest/build、Docker 生产镜像和 G1 Smoke **全部保留**。快速用例可能在全量阶段再次运行，这是有意的早期反馈，不是减少门禁。
+- 新步骤只检查源码，不能访问生产服务、生产数据或任何秘密。
+
 ## CI 性能调优基线（2026-10-17）
 
 PR #81 自托管 Runner 的一次热缓存验收中，后端 pytest 测试为 2408 passed / 16 skipped / 264 秒。CI 仍完整执行三个测试根目录、生产镜像构建和 G1 Smoke，没有降低合并门槛。
