@@ -4,7 +4,10 @@ import { ConnectionRequestError, createAIConnection, patchAIConnection, replaceA
 vi.mock('@/services/workspaceApi', async original => ({ ...await original<typeof import('@/services/workspaceApi')>(), workspaceRequest: vi.fn() }))
 const request = vi.mocked(workspaceRequest)
 const row = { id: 'connection-id', revision: 9 } as AIConnection
-beforeEach(() => request.mockReset().mockResolvedValue({ connections: [] }))
+beforeEach(() => {
+  // A returned function is a cleanup hook; never return the request mock.
+  request.mockReset().mockResolvedValue({ connections: [] })
+})
 describe('connection request boundary', () => {
   it('carries immutable expected revision and explicit viewer on every write', async () => {
     await patchAIConnection(row, { is_enabled: false }, 7)
