@@ -106,7 +106,7 @@ def validate_execution(expected_path: str, serial_path: str, parallel_path: str)
         # failure. No rerun, duplicated call, or partially executed test may
         # turn into an apparent success.
         if len(reports) != 1 or reports[0]["wasxfail"]:
-            raise ValueError(f"duplicate/incomplete or xfail test reports: {nodeid}")
+            raise ValueError(f"duplicate/incomplete or xfail test reports: {nodeid}: {reports!r}")
         report = reports[0]
         if report["when"] == "call" and report["outcome"] == "passed":
             totals["passed"] += 1
