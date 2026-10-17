@@ -105,5 +105,5 @@ export function safeExternalUrl(value: string): string | undefined {
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url.href : undefined } catch { return undefined }
 }
 export function workspaceError(error: unknown): string { return error instanceof WorkspaceError ? error.message : '操作未完成，请检查网络后重试。' }
-export const originLabel: Record<string, string> = { catalog: '目录规则', policy: '专题资料', manual: '人工确认', ai: 'AI 建议·待确认', unknown: '信息不足', rules: '规则推荐' }
+export const originLabel: Record<string, string> = { catalog: '目录规则', policy: '专题资料', manual: '人工确认', ai: 'AI 建议·待确认', unknown: '信息不足', title_evidence: '标题证据推测·待确认', rules: '规则推荐' }
 export const proposalStatus: Record<string, string> = { queued: '等待后台处理', running: 'AI 分析中', ready: '待确认', applied: '已应用', cancelled: '已取消', undone: '已撤销', failed: '处理失败' }
