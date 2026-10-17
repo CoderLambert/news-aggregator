@@ -1,7 +1,7 @@
 """T01 transitional consumer fence: new personal connections, no inference yet.
 
 T02 and T03 will bind verified models and task preferences. Until then, an
-account with any connection never silently falls back to a site-admin key.
+account with an enabled connection never silently falls back to a site-admin key.
 """
 from api.ai_connection_models import UserAIConnection
 
@@ -13,7 +13,7 @@ class PersonalAIUnavailable(RuntimeError):
 def has_personal_connection(user) -> bool:
     return bool(user and getattr(user, 'is_authenticated', False)
                 and UserAIConnection.objects.filter(user_id=user.pk,
-                    is_deleted=False).exists())
+                    is_deleted=False, is_enabled=True).exists())
 
 
 def personal_clients_for_user(user):
