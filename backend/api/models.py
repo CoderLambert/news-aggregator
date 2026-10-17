@@ -243,38 +243,6 @@ class ChatSession(models.Model):
         return f"Chat for {self.user_id}:{self.news.title[:20]}"
 
 
-class UserProviderCredential(models.Model):
-    """One user's encrypted API key for an allow-listed LLM provider."""
-
-    PROVIDER_CHOICES = [
-        ('openai', 'OpenAI'),
-        ('anthropic', 'Anthropic Claude'),
-        ('deepseek', 'DeepSeek'),
-        ('gemini', 'Google Gemini'),
-        ('qwen', 'Qwen'),
-        ('glm', 'GLM / Z.AI'),
-        ('kimi', 'Kimi / Moonshot'),
-        ('mistral', 'Mistral AI'),
-        ('groq', 'Groq'),
-        ('xai', 'xAI'),
-        ('openrouter', 'OpenRouter'),
-    ]
-
-    user = models.OneToOneField(
-        'auth.User', primary_key=True, on_delete=models.CASCADE,
-        related_name='provider_credential',
-    )
-    provider = models.CharField(max_length=16, choices=PROVIDER_CHOICES)
-    model_id = models.CharField(max_length=128)
-    encrypted_api_key = models.TextField()
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = '用户模型凭据'
-        verbose_name_plural = '用户模型凭据'
-
-
 class LegacyChatArchive(models.Model):
     """Immutable, unowned snapshot of pre-account chat sessions."""
     session_id = models.BigIntegerField(primary_key=True)
