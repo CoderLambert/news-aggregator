@@ -5,6 +5,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 cd "$ROOT"
+export PYTHONPATH="$ROOT/ops/ci:${PYTHONPATH:-}"
 PYTHON="$ROOT/backend/venv/bin/python"
 CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/newshub-xdist"
 [[ "$CACHE_ROOT" == /* && "$CACHE_ROOT" != / && ! -L "$CACHE_ROOT" ]] || {
@@ -58,18 +59,30 @@ for file in "${SERIAL_FILES[@]}"; do
 done
 REPORT="$(mktemp -d "${TMPDIR}/newshub-xdist-benchmark.XXXXXX")"
 printf 'xdist-benchmark: repeats=%s workers=2 dist=loadfile report=%s\n' "$REPEATS" "$REPORT"
+# Dynamic authoritative denominator. Collection errors fail before any tests run.
+"$PYTHON" -m pytest -q -p coverage_audit \
+    --ci-audit-output="$REPORT/collection.json" \
+    --collect-only tests/ backend/api/tests/ scripts/deploy/tests/ \
+    >"$REPORT/collection.log" 2>&1 || {
+        cat "$REPORT/collection.log" >&2
+        exit 1
+    }
 for i in $(seq 1 "$REPEATS"); do
     start="$(date +%s)"
     # No xdist plugin in this command. State-sensitive files stay serial.
-    "$PYTHON" -m pytest -q --durations=10 \
+    "$PYTHON" -m pytest -q -p coverage_audit \
+        --ci-audit-output="$REPORT/serial-$i-audit.json" --durations=10 \
         --junitxml="$REPORT/serial-$i.xml" "${SERIAL_FILES[@]}" \
         2>&1 | tee "$REPORT/serial-$i.log"
     PYTHONPATH="$CACHE:${PYTHONPATH:-}" "$PYTHON" -m pytest \
-        -q -n 2 --dist=loadfile --max-worker-restart=0 \
+        -q -p coverage_audit -n 2 --dist=loadfile --max-worker-restart=0 \
+        --ci-audit-output="$REPORT/parallel-$i-audit.json" \
         --durations=25 --junitxml="$REPORT/parallel-$i.xml" \
         "${EXCLUDE_ARGS[@]}" tests/ backend/api/tests/ scripts/deploy/tests/ \
         2>&1 | tee "$REPORT/parallel-$i.log"
     "$PYTHON" ops/ci/xdist_summary.py \
+        "$REPORT/collection.json" \
+        "$REPORT/serial-$i-audit.json" "$REPORT/parallel-$i-audit.json" \
         "$REPORT/serial-$i.log" "$REPORT/parallel-$i.log" \
         "$REPORT/serial-$i.xml" "$REPORT/parallel-$i.xml"
     elapsed=$(( $(date +%s) - start ))
