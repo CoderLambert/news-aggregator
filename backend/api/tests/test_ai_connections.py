@@ -286,8 +286,7 @@ def test_new_connections_never_become_implicit_billable_clients(client, users):
         personal_clients_for_user(users[0])
     disabled = edit(client, row, is_enabled=False)
     assert disabled.status_code == 200
-    with pytest.raises(PersonalAIUnavailable):
-        personal_clients_for_user(users[0])
+    assert personal_clients_for_user(users[0]) == []
     assert client.delete(BASE + row['id'] + '/',
         {'revision': disabled.data['revision']}, format='json').status_code == 200
     assert personal_clients_for_user(users[0]) == []
@@ -346,8 +345,9 @@ def test_failed_legacy_import_leaves_original_table_and_ciphertext_unchanged():
             cursor.execute('SELECT encrypted_api_key FROM api_userprovidercredential WHERE user_id=%s', [owner.pk])
             assert cursor.fetchone()[0] == 'unreadable-old-ciphertext'
     finally:
-        with connection.cursor() as cursor:
-            cursor.execute('DELETE FROM api_userprovidercredential WHERE user_id=%s', [owner.pk])
+        if 'owner' in locals() and 'api_userprovidercredential' in connection.introspection.table_names():
+            with connection.cursor() as cursor:
+                cursor.execute('DELETE FROM api_userprovidercredential WHERE user_id=%s', [owner.pk])
         MigrationExecutor(connection).migrate(targets)
 
 
