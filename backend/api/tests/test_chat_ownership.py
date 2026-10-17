@@ -20,7 +20,7 @@ from api.services.chat_history import (
 
 @pytest.fixture(autouse=True)
 def configured_global_provider(monkeypatch):
-    monkeypatch.setattr('api.services.ai_execution.personal_clients_for_user', lambda: [(object(), 'test-model')])
+    monkeypatch.setattr('api.services.ai_execution.personal_clients_for_user', lambda _user: [(object(), 'test-model')])
 
 
 @pytest.fixture

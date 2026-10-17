@@ -13,7 +13,6 @@ import logging
 import time
 from typing import Callable
 
-from api.services.llm_translator import get_clients
 from .tools import TOOLS, execute_tool
 from .evidence import evidence_links_for_tool, history_evidence_links, scrub_unverified_links
 
@@ -115,7 +114,8 @@ def run_agent_loop(
     guard = execution_guard or (lambda: None)
     if clients is None:
         if user is None:
-            clients = get_clients()
+            on_event('error', {'message': '缺少个人 AI 授权上下文'})
+            return
         else:
             from api.services.ai_execution import (
                 PersonalAIUnavailable,
@@ -277,7 +277,9 @@ def _call_llm_with_tools(messages: list, tools=None, execution_guard=None, clien
     if tools is None:
         tools = TOOLS
     guard()
-    clients = get_clients() if clients is None else clients
+    # No implicit site-funded provider fallback; callers supply authorized clients.
+    if clients is None:
+        return None
     if not clients:
         return None
 

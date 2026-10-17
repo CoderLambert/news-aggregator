@@ -16,7 +16,7 @@ def chat_case(db, monkeypatch):
     news = public_legacy_article(News.objects.create(
         title='A synthetic story', url='https://example.test/story', source=source,
         category=cat, publish_time=timezone.now(), content='safe summary'))
-    monkeypatch.setattr('api.services.ai_execution.personal_clients_for_user', lambda: [(object(), 'test')])
+    monkeypatch.setattr('api.services.ai_execution.personal_clients_for_user', lambda _user: [(object(), 'test')])
     monkeypatch.setattr('api.views.ensure_full_content', lambda _: None)
     monkeypatch.setattr('api.services.chatgpt_subscription.active_connection_for_user', lambda _: None)
     client = APIClient()

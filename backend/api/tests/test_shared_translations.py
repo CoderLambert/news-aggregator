@@ -267,7 +267,7 @@ def test_generic_provider_only_publishes_whole_results_to_separate_table(article
     client = APIClient()
     client.force_authenticate(caller)
     with (
-        patch('api.views.get_clients', return_value=[(Mock(), 'model')]),
+        patch('api.services.ai_execution.personal_clients_for_user', return_value=[(Mock(), 'model')]),
         patch('api.services.llm_translator._call_llm_stream', side_effect=stream),
     ):
         result = body(client.post(f'/api/news/{article.pk}/translate/', {'force': False}, format='json'))
