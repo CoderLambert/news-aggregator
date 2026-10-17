@@ -10,7 +10,7 @@ The current benchmark tests a fail-closed hybrid:
 - The remaining files execute on `-n 2 --dist=loadfile`, using normal
   per-worker database isolation. Both parts run three times.
 - Each repetition checks the authoritative pytest terminal totals:
-  **2410 passed / 16 explicitly skipped** across serial and parallel roots. The two additional passing cases are the G1 paint regressions merged in PR #86; the 16 skips and all other failure checks are unchanged.
+  **2416 expected passes / 16 explicitly skipped** for the new title-hint feature branch (2410 previous baseline + six new tests). The historical 128/126/126-second experiments apply only to the prior 2410-pass baseline; this branch must run its own full CI before acceptance.
   JUnit XML is independently inspected for failures/errors. We avoid counting
   JUnit test-suite summary attributes that disagreed with pytest's actual
   terminal outcomes during the first hybrid experiment.
