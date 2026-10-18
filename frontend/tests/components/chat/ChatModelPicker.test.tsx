@@ -79,6 +79,14 @@ describe('T04 owner-only per-turn model picker', () => {
     await act(async () => finish([connection]))
     expect(screen.getByRole('combobox', { name: '本轮聊天模型' })).toHaveValue('')
   })
+  it('hides the BYOK controls without an error when the site is read-only', async () => {
+    vi.mocked(api.listAIConnections).mockRejectedValue(new api.ConnectionRequestError(403))
+    render(<Harness />)
+    await waitFor(() => expect(screen.queryByRole('region', { name: '个人聊天模型' })).not.toBeInTheDocument())
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(api.listAIModels).not.toHaveBeenCalled()
+  })
+
   it('keeps previous viewer models unavailable when GET fails', async () => {
     vi.mocked(api.listAIConnections).mockRejectedValue(new api.ConnectionRequestError(0))
     render(<Harness />)
