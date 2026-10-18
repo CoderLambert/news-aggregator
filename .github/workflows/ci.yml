@@ -103,6 +103,7 @@ jobs:
         run: |
           python3 -m compileall -q backend/api backend/newsaggregator crawler scripts/deploy ops/ci
           bash -n ops/ci/*.sh scripts/deploy/*.sh scripts/deploy/tests/*.sh
+          python3 ops/ci/agent_rules.py
       - name: Restore installed frontend deps from lockfile-keyed local cache
         run: bash ops/ci/install-frontend-deps.sh
       - name: Check frontend types
