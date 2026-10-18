@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  listAIConnections, listAIModels,
+  ConnectionRequestError, listAIConnections, listAIModels,
   type AIConnection, type AIModel,
 } from '@/services/aiConnectionsApi'
 
@@ -34,6 +34,7 @@ function ChatModelSession({
 }) {
   const [choices, setChoices] = useState<Choice[] | null>(null)
   const [error, setError] = useState(false)
+  const [disabledBySite, setDisabledBySite] = useState(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -47,16 +48,20 @@ function ChatModelSession({
         setChoices(connections.flatMap((connection, index) => models[index]
           .filter(model => model.has_trusted_route && model.capabilities.text === 'supported')
           .map(model => ({ connection, model }))))
-      } catch {
+      } catch (reason) {
         if (!controller.signal.aborted) {
           setChoices(null)
-          setError(true)
+          // A read-only site or disabled BYOK feature is normal; do not show
+          // an account-error banner on every user's existing chat dialog.
+          setDisabledBySite(reason instanceof ConnectionRequestError && reason.status === 403)
+          setError(!(reason instanceof ConnectionRequestError && reason.status === 403))
         }
       }
     })()
     return () => controller.abort()
   }, [viewer])
 
+  if (disabledBySite) return null
   return <section aria-label="个人聊天模型" className="border-b border-border bg-card px-4 py-2 text-xs md:px-6">
     <div className="flex min-w-0 flex-wrap items-center gap-2">
       <label className="flex min-w-0 flex-1 items-center gap-2">
