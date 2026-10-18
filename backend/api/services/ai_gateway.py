@@ -1,7 +1,8 @@
-"""Neutral, trusted LiteLLM Proxy transport for forthcoming T02–T09 consumers.
+"""Neutral trusted LiteLLM Proxy transport for explicit BYOK consumers.
 
 No legacy user credential lookup, provider fallback, or implicit model selection.
-Chat Completions streaming retains the #101 fail-closed one-shot guard.
+The only enabled Chat streaming route is the separately guarded DeepSeek T04
+alias; every other alias remains fail-closed.
 """
 import ipaddress
 import re
@@ -75,37 +76,6 @@ PROJECT_KEY_PATTERN = re.compile(r'^sk-[A-Za-z0-9_-]{16,256}$')
 GATEWAY_TIMEOUT_SECONDS = 180
 
 
-class _OneShotCompletionStream:
-    """Expose one verified non-streaming completion to existing SSE callers."""
-
-    def __init__(self, response):
-        # Our configured LiteLLM gateway does not safely expose a streamed
-        # Chat Completions terminal yet. A non-streaming upstream response must
-        # be fully terminal BEFORE any text becomes visible downstream.
-        choices = getattr(response, 'choices', None)
-        if not isinstance(choices, (list, tuple)) or len(choices) != 1:
-            raise AIGatewayError('个人模型回复不完整，未接收有效结束状态。')
-        choice = choices[0]
-        if getattr(choice, 'finish_reason', None) != 'stop':
-            # length, content_filter, tool_calls, EOF and unknown terminal
-            # states must never masquerade as a completed text-only stream.
-            raise AIGatewayError('个人模型回复未完整完成，未使用截断内容。')
-        message = getattr(choice, 'message', None)
-        content = getattr(message, 'content', None)
-        if not isinstance(content, str) or not content.strip():
-            raise AIGatewayError('个人模型回复内容为空或格式不正确。')
-        self._chunks = [SimpleNamespace(choices=[SimpleNamespace(
-            delta=SimpleNamespace(content=content),
-            finish_reason='stop',
-        )])]
-
-    def __iter__(self):
-        return iter(self._chunks)
-
-    def close(self):
-        return None
-
-
 class _GatewayCompletions:
     def __init__(self, completions, provider_key: str):
         self._completions = completions
@@ -115,13 +85,12 @@ class _GatewayCompletions:
         if kwargs.pop('extra_body', None) not in (None, {}):
             raise AIGatewayError('个人模型请求包含不受支持的额外参数。')
         requested_stream = kwargs.get('stream') is True
-        if requested_stream:
-            # The pinned gateway intentionally blocks Chat Completions streaming
-            # while its upstream EOF terminal ambiguity remains unresolved.
-            kwargs['stream'] = False
+        if requested_stream and kwargs.get('model') != 'deepseek/deepseek-chat':
+            raise AIGatewayError('个人模型流式路由不可用。')
         kwargs['extra_body'] = {'api_key': self._provider_key}
-        response = self._completions.create(**kwargs)
-        return _OneShotCompletionStream(response) if requested_stream else response
+        # OpenAI's SDK starts the HTTP request here and returns a closeable
+        # iterator. Do not buffer, defer, retry, or convert an uncertain stream.
+        return self._completions.create(**kwargs)
 
 
 class _GatewayClient:

@@ -46,7 +46,7 @@ function ChatModelSession({
         const models = await Promise.all(connections.map(connection => listAIModels(connection, controller.signal)))
         if (controller.signal.aborted) return
         setChoices(connections.flatMap((connection, index) => models[index]
-          .filter(model => model.has_trusted_route && model.capabilities.text === 'supported')
+          .filter(model => model.has_trusted_route && model.capabilities.text === 'supported' && model.article_chat_supported === true)
           .map(model => ({ connection, model }))))
       } catch (reason) {
         if (!controller.signal.aborted) {
@@ -84,12 +84,12 @@ function ChatModelSession({
       <Link to="/settings/ai" className="shrink-0 text-primary underline">模型设置</Link>
     </div>
     {error && <p role="alert" className="mt-1">暂时无法读取个人模型，仍可使用原有聊天方式；请重新打开助手重试。</p>}
-    {choices?.length === 0 && <p className="mt-1 text-muted-foreground">没有已验证文本能力的个人模型。添加模型后，须主动运行并完成能力验证。</p>}
+    {choices?.length === 0 && <p className="mt-1 text-muted-foreground">当前没有可用于文章聊天的个人模型。此用途暂只支持已验证的 DeepSeek Chat 流式路径，其他模型尚未开放。</p>}
     {selected && <label className="mt-2 flex items-start gap-2">
       <input type="checkbox" checked={consent} disabled={disabled || !choices?.some(choice => choice.model.id === selected)}
         onChange={event => onConsent(event.target.checked)} />
       <span>我确认这次个人模型问答可能产生服务商费用。模型选择仅适用于之后发送的问题，不会自动重发或改写历史。</span>
     </label>}
-    {selected && <p className="mt-1 text-muted-foreground">个人模型暂不支持联网搜索；服务端仅接受已确认终态的回答。</p>}
+    {selected && <p className="mt-1 text-muted-foreground">个人模型暂不支持联网搜索；文章聊天只开放服务端明确标记支持的流式模型，其他模型不会发送请求。</p>}
   </section>
 }

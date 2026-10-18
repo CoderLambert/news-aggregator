@@ -942,21 +942,41 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
                     yield f"​__META__{meta}__META__\n\n"
 
                 if personal_selection is not None:
-                    # Only a verified terminal result is committed, under the
-                    # T01 credential/owner and T03 model/version/reader fences.
+                    # The service yields verified deltas as they arrive and a
+                    # separate completion receipt only after the terminal/CAS.
                     from api.services.ai_article_chat import complete_article_chat
-                    answer, model_source = complete_article_chat(
+                    personal_stream = complete_article_chat(
                         user=request.user, stored=stored, chat_snapshot=chat_snapshot,
                         messages=messages, selection=personal_selection,
                         turn_id=personal_turn_id,
                     )
-                    model_meta = _json.dumps({'type': 'chat_model', 'model_source': model_source},
-                                             ensure_ascii=False)
-                    yield f"\u200b__META__{model_meta}__META__\n\n"
-                    yield answer
-                    turn_status = 'complete'
-                    yield f"\u200b__META__{_json.dumps({'type': 'chat_turn', 'status': turn_status})}__META__\n\n"
-                    return
+                    saw_completion = False
+                    try:
+                        for event in personal_stream:
+                            if not isinstance(event, dict):
+                                raise RuntimeError('invalid personal chat event')
+                            if event.get('type') == 'delta':
+                                content = event.get('content')
+                                if not isinstance(content, str):
+                                    raise RuntimeError('invalid personal chat delta')
+                                full_response.append(content)
+                                yield content
+                            elif event.get('type') == 'complete' and not saw_completion:
+                                model_meta = _json.dumps(
+                                    {'type': 'chat_model', 'model_source': event.get('model_source')},
+                                    ensure_ascii=False,
+                                )
+                                yield f"\u200b__META__{model_meta}__META__\n\n"
+                                saw_completion = True
+                                turn_status = 'complete'
+                                yield f"\u200b__META__{_json.dumps({'type': 'chat_turn', 'status': turn_status})}__META__\n\n"
+                                return
+                            else:
+                                raise RuntimeError('invalid personal chat event')
+                        if not saw_completion:
+                            raise RuntimeError('personal chat stream ended without completion')
+                    finally:
+                        personal_stream.close()
                 # Existing ChatGPT subscription path is independent of BYOK.
                 chunks = (
                     stream_chat_response(subscription_connection, messages)

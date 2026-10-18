@@ -19,13 +19,17 @@ const connection: api.AIConnection = {
 const good: api.AIModel = {
   id: '22222222-2222-4222-8222-222222222222', connection_id: connection.id, model_id: 'deepseek-chat',
   display_name: 'Verified model', catalog_model_id: 'deepseek-chat', config_revision: 1,
-  has_trusted_route: true, context_window_tokens: null,
+  has_trusted_route: true, article_chat_supported: true, context_window_tokens: null,
   capabilities: { text: 'supported', tools: 'unknown' },
   updated_at: '2026-10-18T00:00:00Z',
 }
 const unverified: api.AIModel = {
   ...good, id: '33333333-3333-4333-8333-333333333333', display_name: 'Not verified',
-  capabilities: { text: 'unknown', tools: 'unknown' },
+  capabilities: { text: 'unknown', tools: 'unknown' }, article_chat_supported: false,
+}
+const unsupportedForArticleChat: api.AIModel = {
+  ...good, id: '44444444-4444-4444-8444-444444444444', display_name: 'Verified but not for article chat',
+  article_chat_supported: false,
 }
 function Harness({ viewer = 7 }: { viewer?: number }) {
   const [choice, setChoice] = useState<{ viewer: number; id: string | null; consent: boolean } | null>(null)
@@ -40,7 +44,7 @@ function Harness({ viewer = 7 }: { viewer?: number }) {
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(api.listAIConnections).mockReset().mockResolvedValue([connection])
-  vi.mocked(api.listAIModels).mockReset().mockResolvedValue([good, unverified])
+  vi.mocked(api.listAIModels).mockReset().mockResolvedValue([good, unverified, unsupportedForArticleChat])
 })
 afterEach(cleanup)
 describe('T04 owner-only per-turn model picker', () => {
@@ -49,6 +53,7 @@ describe('T04 owner-only per-turn model picker', () => {
     expect((await screen.findByRole('combobox', { name: '本轮聊天模型' }))).toHaveValue('')
     await screen.findByRole('option', { name: 'My BYOK · Verified model' })
     expect(screen.queryByRole('option', { name: /Not verified/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /Verified but not for article chat/ })).not.toBeInTheDocument()
     expect(api.listAIConnections).toHaveBeenCalledOnce()
     expect(api.listAIModels).toHaveBeenCalledWith(connection, expect.any(AbortSignal))
     expect(api.probeAIModel).not.toHaveBeenCalled()

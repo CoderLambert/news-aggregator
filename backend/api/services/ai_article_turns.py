@@ -109,6 +109,19 @@ def mark_dispatched(*, user_id, news_id, turn_id):
         raise ArticleChatTurnError('chat_turn_cancelled')
 
 
+def require_dispatched(*, user_id, news_id, turn_id):
+    """Reject work after owner/article-scoped cancellation or terminalization."""
+    try:
+        status = ArticleChatTurn.objects.filter(
+            pk=turn_id, user_id=user_id, news_id=news_id,
+        ).values_list('status', flat=True).first()
+    except OperationalError:
+        raise ArticleChatTurnError('chat_turn_unavailable') from None
+    if status != 'dispatched':
+        raise ArticleChatTurnError('chat_turn_cancelled')
+    return True
+
+
 def mark_complete(*, user_id, news_id, turn_id):
     """Called INSIDE commit_result's transaction before appending the answer."""
     updated = ArticleChatTurn.objects.filter(

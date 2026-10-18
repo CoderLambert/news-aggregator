@@ -21,6 +21,7 @@ from api.services.ai_credentials import (
 from api.services.ai_worker_fencing import dispatch_once, SNAPSHOT_SCHEMA_VERSION
 from api.services.ai_model_registry import (
     CATALOG_VERSION, catalog_for, get_trusted_preset, normalize_model_id,
+    supports_article_chat,
 )
 from api.services.ai_model_probe import ProbeOutcome, send_model_probe
 from api.services.ai_model_capabilities import current_capabilities as _effective_capabilities
@@ -83,6 +84,7 @@ def model_payload(model):
         'catalog_model_id': model.catalog_model_id,
         'config_revision': model.config_revision, 'capabilities': capabilities,
         'has_trusted_route': get_trusted_preset(model.connection, model.model_id) is not None,
+        'article_chat_supported': supports_article_chat(model.connection, model.model_id),
         'context_window_tokens': None,  # unknown until separately evidenced
         'updated_at': model.updated_at.isoformat(),
     }

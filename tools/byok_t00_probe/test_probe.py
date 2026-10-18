@@ -197,12 +197,11 @@ class ProbeContracts(unittest.TestCase):
 
 
 class ProviderKeyGuardFailClosed(unittest.TestCase):
-    """Chat streaming must stay fail-closed (report §12 EOF defect).
+    """Only the exact raw-terminal DeepSeek route may pass the stream guard.
 
     The guard file lives in ops/shared-litellm-proxy; LiteLLM/FastAPI are
     stubbed when absent (SDK venv) so this runs in the CI T00 step.
-    An "allowed" hook result would have reached the synthetic upstream,
-    whose EOF-without-terminal the proxy turns into stop/[DONE].
+    All other aliases and protocol bridges remain fail-closed.
     """
 
     @staticmethod
@@ -237,7 +236,9 @@ class ProviderKeyGuardFailClosed(unittest.TestCase):
     def run_hook(self, data, call_type, env=None):
         hook = self.guard.ProviderKeyGuard().async_pre_call_hook(
             user_api_key_dict=SimpleNamespace(), cache=None, data=dict(data), call_type=call_type)
-        with patch.dict(os.environ, env or {}):
+        values = {"BYOK_TERMINAL_STREAMING_MODELS": "", "BYOK_DENY_STREAMING_CALL_TYPES": ""}
+        values.update(env or {})
+        with patch.dict(os.environ, values, clear=False):
             try:
                 asyncio.run(hook)
             except Exception as exc:
@@ -246,23 +247,26 @@ class ProviderKeyGuardFailClosed(unittest.TestCase):
                         detail.get("code") if isinstance(detail, dict) else None)
         return ("allowed", None, None)
 
-    def test_chat_stream_eof_request_rejected_before_upstream(self):
-        data = {"api_key": "sk-synthetic-provider", "stream": True}
-        self.assertEqual(self.run_hook(data, "acompletion"), ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
+    def test_chat_stream_unknown_route_rejected_before_upstream(self):
+        data = {"api_key": "sk-synthetic-provider", "model": "t00-chat", "stream": True}
+        self.assertEqual(self.run_hook(data, "acompletion", {"BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat"}),
+                         ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
 
     def test_chat_stream_rejected_despite_empty_or_omitting_deny_env(self):
-        data = {"api_key": "sk-synthetic-provider", "stream": True}
-        for env in ({"BYOK_DENY_STREAMING_CALL_TYPES": ""}, {"BYOK_DENY_STREAMING_CALL_TYPES": "aresponses"},
-                    {"BYOK_DENY_STREAMING_CALL_TYPES": "ACOMPLETION"}):
+        data = {"api_key": "sk-synthetic-provider", "model": "deepseek/deepseek-chat", "stream": True}
+        allow = {"BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat"}
+        for env in (
+                    {**allow, "BYOK_DENY_STREAMING_CALL_TYPES": "acompletion"},
+                    {**allow, "BYOK_DENY_STREAMING_CALL_TYPES": "ACOMPLETION"}):
             with self.subTest(env=env):
                 self.assertEqual(self.run_hook(data, "acompletion", env), ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
 
     def test_chat_stream_string_and_numeric_flags_rejected(self):
         for flag in ("true", "True", "1", 1):
             with self.subTest(flag=flag):
-                result = self.run_hook({"api_key": "sk-synthetic-provider", "stream": flag}, "acompletion")
+                result = self.run_hook({"api_key": "sk-synthetic-provider", "model": "deepseek/deepseek-chat", "stream": flag}, "acompletion", {"BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat"})
                 self.assertEqual(result, ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
-        self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider", "stream": True}, "completion"),
+        self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider", "model": "deepseek/deepseek-chat", "stream": True}, "completion", {"BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat"}),
                          ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
 
     def test_chat_short_truth_aliases_and_unknown_shapes_are_denied(self):
@@ -275,11 +279,143 @@ class ProviderKeyGuardFailClosed(unittest.TestCase):
                 self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider", "stream": flag}, "acompletion")[0],
                                  "allowed")
 
-    def test_non_streaming_chat_and_other_protocol_streams_unchanged(self):
+    def test_only_exact_deepseek_route_without_overrides_is_allowlisted(self):
+        allow = {"BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat"}
+        valid = {"api_key": "sk-synthetic-provider", "model": "deepseek/deepseek-chat", "stream": True}
+        self.assertEqual(self.run_hook(valid, "acompletion", allow), ("allowed", None, None))
+        for invalid in (
+            {**valid, "model": "deepseek/another-model"},
+            {**valid, "model": "deepseek/*"},
+            {**valid, "api_base": "http://127.0.0.1:9999"},
+            {**valid, "base_url": "http://127.0.0.1:9999"},
+            {**valid, "n": 2},
+            {**valid, "tools": [{"type": "function"}]},
+        ):
+            with self.subTest(invalid=invalid):
+                self.assertEqual(self.run_hook(invalid, "acompletion", allow)[0], "rejected")
+        self.assertEqual(
+            self.run_hook(valid, "acompletion", {"BYOK_TERMINAL_STREAMING_MODELS": "deepseek/*"})[0],
+            "rejected",
+        )
+        self.assertEqual(
+            self.run_hook(valid, "completion", allow),
+            ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"),
+        )
+
+    def test_non_streaming_other_protocols_remain_available_but_streaming_is_denied(self):
         self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider"}, "acompletion")[0], "allowed")
         self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider", "stream": False}, "acompletion")[0], "allowed")
         for call_type in ("aresponses", "anthropic_messages"):
-            self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider", "stream": True}, call_type)[0], "allowed")
+            self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider", "stream": False}, call_type)[0], "allowed")
+            self.assertEqual(
+                self.run_hook({"api_key": "sk-synthetic-provider", "stream": True}, call_type),
+                ("rejected", 400, "T00_STREAMING_DISABLED"),
+            )
+
+
+
+    def _iterator_guard(self, *, source_reason="stop", response_kind="boundary", version="1.105.0", post_terminal_error=False, tool_calls=False):
+        guard = self.guard
+        class FakeCustomStreamWrapper:
+            def __init__(self):
+                self.custom_llm_provider = "deepseek"
+                self.received_finish_reason = None
+                self.raw_finish_reason = source_reason
+                self.failure = None
+                self.closed = False
+                delta = SimpleNamespace(content="hello", tool_calls=[{"id": "call"}] if tool_calls else None, refusal=None)
+                self.chunks = [
+                    SimpleNamespace(choices=[SimpleNamespace(finish_reason=None, delta=delta)], usage=None),
+                    SimpleNamespace(choices=[SimpleNamespace(finish_reason="stop", delta=SimpleNamespace(content=None, tool_calls=None, refusal=None))], usage=None),
+                ]
+            def __aiter__(self):
+                async def iterate():
+                    for item in self.chunks:
+                        choices = getattr(item, "choices", None) or []
+                        if choices and getattr(choices[0], "finish_reason", None) is not None:
+                            self.received_finish_reason = self.raw_finish_reason
+                        yield item
+                    if post_terminal_error:
+                        raise RuntimeError("synthetic error after provider stop")
+                return iterate()
+            async def aclose(self):
+                self.closed = True
+
+        class FakeBoundary:
+            def __init__(self, source):
+                self._source = source
+            def __getattr__(self, name):
+                return getattr(self._source, name)
+            def __aiter__(self):
+                return self._source.__aiter__()
+            async def aclose(self):
+                await self._source.aclose()
+
+        class UnknownBoundary(FakeBoundary):
+            pass
+
+        proxy_pkg = ModuleType("litellm.proxy")
+        proxy_utils = ModuleType("litellm.proxy.utils")
+        proxy_utils._UpstreamStreamBoundary = FakeBoundary
+        streaming_pkg = ModuleType("litellm.litellm_core_utils")
+        streaming_handler = ModuleType("litellm.litellm_core_utils.streaming_handler")
+        streaming_handler.CustomStreamWrapper = FakeCustomStreamWrapper
+        source = FakeCustomStreamWrapper()
+        boundary_class = UnknownBoundary if response_kind == "unknown" else FakeBoundary
+        response = boundary_class(source)
+        patch_modules = {
+            "litellm.proxy": proxy_pkg,
+            "litellm.proxy.utils": proxy_utils,
+            "litellm.litellm_core_utils": streaming_pkg,
+            "litellm.litellm_core_utils.streaming_handler": streaming_handler,
+        }
+
+        async def collect():
+            result = []
+            async for item in guard.ProviderKeyGuard().async_post_call_streaming_iterator_hook(
+                response=response, user_api_key_dict=SimpleNamespace(),
+                request_data={"model": "deepseek/deepseek-chat", "stream": True},
+            ):
+                result.append(item)
+            return result
+
+        with patch.dict(sys.modules, patch_modules), patch.object(
+            guard.importlib.metadata, "version", return_value=version,
+        ):
+            try:
+                output = asyncio.run(collect())
+                error = None
+            except Exception as exc:
+                output, error = [], exc
+        return output, error, source
+
+    def test_whole_iterator_releases_only_verified_raw_stop_after_clean_eof(self):
+        output, error, source = self._iterator_guard(source_reason="stop")
+        self.assertIsNone(error)
+        self.assertEqual(len(output), 2)
+        self.assertTrue(source.closed)
+
+    def test_whole_iterator_rejects_synthetic_stop_unknown_wrapper_and_version_drift(self):
+        cases = (
+            {"source_reason": None},
+            {"source_reason": "stop", "response_kind": "unknown"},
+            {"source_reason": "stop", "version": "1.106.0"},
+        )
+        for case in cases:
+            with self.subTest(case=case):
+                output, error, source = self._iterator_guard(**case)
+                self.assertEqual(output, [])
+                self.assertEqual(getattr(error, "status_code", None), 502)
+                self.assertEqual(getattr(error, "detail", {}).get("code"), "T00_STREAM_TERMINAL_UNVERIFIED")
+                self.assertTrue(source.closed)
+
+    def test_whole_iterator_never_releases_stop_if_source_errors_or_emits_tools(self):
+        for case in ({"post_terminal_error": True}, {"tool_calls": True}):
+            with self.subTest(case=case):
+                output, error, source = self._iterator_guard(**case)
+                self.assertEqual(output, [])
+                self.assertIsNotNone(error)
+                self.assertTrue(source.closed)
 
 
 

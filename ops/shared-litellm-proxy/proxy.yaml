@@ -5,6 +5,9 @@ model_list:
   - model_name: anthropic/*
     litellm_params:
       model: anthropic/*
+  - model_name: deepseek/deepseek-chat
+    litellm_params:
+      model: deepseek/deepseek-chat
   - model_name: deepseek/*
     litellm_params:
       model: deepseek/*

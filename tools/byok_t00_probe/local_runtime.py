@@ -180,7 +180,8 @@ class LocalProxy:
             "PRISMA_BINARY_CACHE_DIR": str(self.prefix / "t00-prisma/binaries"),
             "PRISMA_NODEENV_CACHE_DIR": str(self.prefix / "t00-prisma/nodeenv"),
             "PYTHONPATH": str(ROOT / "ops/shared-litellm-proxy"),
-            "BYOK_DENY_STREAMING_CALL_TYPES": "acompletion",
+            "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat",
+            "BYOK_DENY_STREAMING_CALL_TYPES": "",
         })
         # prepare_proxy.py generated this offline-ready Prisma toolchain.
         prisma_schema = self.prefix / "t00-prisma/schema.prisma"
@@ -196,7 +197,14 @@ class LocalProxy:
             [str(self.python), "-m", "prisma", "db", "push", "--skip-generate", "--schema", str(prisma_schema)],
             env, stage="TEMP_SCHEMA",
         )
-        model_list = []
+        model_list = [{
+            "model_name": "deepseek/deepseek-chat",
+            "litellm_params": {
+                "model": "deepseek/deepseek-chat",
+                "api_base": self.upstream_url + "/v1",
+                "timeout": 20.0,
+            },
+        }]
         for suffix, model in (("", "test-model"), ("-other", "other-test-model")):
             for protocol, provider in (("chat", "openai"), ("messages", "anthropic")):
                 model_list.append({"model_name": f"t00{suffix}-{protocol}", "litellm_params": {
@@ -239,7 +247,7 @@ class LocalProxy:
         else:
             raise RuntimeError("T00_PROXY_START_TIMEOUT")
         for tenant, models in {
-            "tenant-a": ["t00-chat", "t00-messages"],
+            "tenant-a": ["t00-chat", "t00-messages", "deepseek/deepseek-chat"],
             "tenant-b": ["t00-other-chat", "t00-other-messages"],
         }.items():
             result = post_json(self.url + "/key/generate", {"models": models, "key_alias": "t00-" + tenant}, self.master)

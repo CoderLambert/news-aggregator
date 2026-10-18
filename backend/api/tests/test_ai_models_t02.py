@@ -55,6 +55,7 @@ class AIModelT02Tests(TestCase):
         row = self.create_model('deepseek/deepseek-chat')
         self.assertEqual(row['model_id'], MODEL)
         self.assertEqual(row['capabilities'], {'text': 'unknown', 'tools': 'unknown'})
+        self.assertTrue(row['article_chat_supported'])
         before = AIModelProbeAttempt.objects.count()
         with patch('api.ai_model_views.send_model_probe', side_effect=AssertionError('paid GET')):
             catalog = self.api.get(BASE + self.connection['id'] + '/model-catalog/')
@@ -76,6 +77,7 @@ class AIModelT02Tests(TestCase):
     def test_unknown_user_model_may_be_saved_but_cannot_enter_proxy(self):
         manual = self.create_model('user-manual-model')
         self.assertFalse(manual['has_trusted_route'])
+        self.assertFalse(manual['article_chat_supported'])
         with patch('api.ai_model_views.send_model_probe') as sender:
             self.assertEqual(self.probe(manual).status_code, 409)
         sender.assert_not_called()
