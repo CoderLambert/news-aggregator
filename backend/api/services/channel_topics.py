@@ -48,7 +48,9 @@ def digest(value):
 
 
 def channel_articles(source):
-    policy = policy_for_name(source.name)
+    # Match cross-source publisher articles only after verifying the current
+    # source's canonical publisher domain. A name alone is not source identity.
+    policy = verified_source_policy(source)
     query = Q(source=source)
     if policy:
         query |= Q(source_items__source_key=policy.key)
