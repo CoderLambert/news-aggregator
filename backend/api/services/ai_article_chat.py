@@ -110,6 +110,11 @@ def complete_article_chat(*, user, stored, chat_snapshot, messages, selection):
     """
     if selection.task_kind != 'article_qa' or selection.user_id != user.pk:
         raise ArticleChatError('model_unavailable')
+    if (not isinstance(messages, list) or len(messages) > 24
+            or any(not isinstance(msg, dict) or msg.get('role') not in {'system', 'user', 'assistant'}
+                   or not isinstance(msg.get('content'), str) for msg in messages)
+            or sum(len(msg['content']) for msg in messages) > 48000):
+        raise ArticleChatError('context_unavailable')
     try:
         require_current(user, stored)
         require_task_model_snapshot(selection, owner_id=user.pk)
@@ -124,10 +129,16 @@ def complete_article_chat(*, user, stored, chat_snapshot, messages, selection):
     def send(provider_key):
         gateway = None
         try:
+            # Recheck T02 model/probe immediately before the only billable send,
+            # after T01 dispatch_once admitted the connection credential.
+            require_task_model_snapshot(selection, owner_id=user.pk)
+            require_current(user, stored)
             gateway = build_gateway_client(provider_key)
             return _verified_answer(gateway, selection.proxy_alias, messages)
         except ArticleChatError:
             raise
+        except (ModelSelectionError, StoredContentChanged, Http404):
+            raise ArticleChatError('execution_changed') from None
         except AIGatewayError:
             raise ArticleChatError('incomplete_response') from None
         except Exception:
