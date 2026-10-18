@@ -87,6 +87,39 @@ describe('RSS T21 recovery and owner isolation', () => {
     expect(screen.queryByRole('button', { name: /确认导入/ })).not.toBeInTheDocument()
   })
 
+  it('recovers an ambiguous confirm using the original preview batch ID and GET, not another POST', async () => {
+    request.mockImplementation(async path => {
+      if (path.endsWith('/preview/')) return previewBatch
+      if (path.endsWith('/confirm/')) throw new Error('response lost after server accepted confirmation')
+      return { ...previewBatch, status: 'confirmed',
+        items: previewBatch.items.map(item => ({ ...item, status: 'pending' })) }
+    })
+    setup()
+    await preview()
+    expect(screen.getByText(A, { selector: 'code' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '确认导入 2 项' }))
+    await screen.findByRole('button', { name: '核对确认结果' })
+    fireEvent.click(screen.getByRole('button', { name: '核对确认结果' }))
+    await waitFor(() => expect(reads()).toHaveLength(1))
+    expect(posts('/me/rss-imports/confirm/')).toHaveLength(1)
+    expect(await screen.findByText('One')).toBeInTheDocument()
+  })
+
+  it('returns to the same preview if GET proves the confirmation was not accepted', async () => {
+    request.mockImplementation(async path => {
+      if (path.endsWith('/preview/')) return previewBatch
+      if (path.endsWith('/confirm/')) throw new Error('lost confirmation')
+      return previewBatch
+    })
+    setup(); await preview()
+    fireEvent.click(screen.getByRole('button', { name: '确认导入 2 项' }))
+    fireEvent.click(await screen.findByRole('button', { name: '核对确认结果' }))
+    fireEvent.click(await screen.findByRole('button', { name: '返回预览继续确认' }))
+    expect(screen.getByRole('button', { name: '确认导入 2 项' })).toBeEnabled()
+    expect(posts('/me/rss-imports/confirm/')).toHaveLength(1)
+    expect(reads()).toHaveLength(1)
+  })
+
   it('freezes a failed confirmation and replays precisely the same token, choices and groups', async () => {
     request.mockImplementation(async path => {
       if (path.endsWith('/preview/')) return previewBatch
