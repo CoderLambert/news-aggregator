@@ -29,6 +29,7 @@ class AIModelT02Tests(TestCase):
         self.owner = User.objects.create_user('t02-model-owner', password='SyntheticPassword123')
         self.other = User.objects.create_user('t02-model-other', password='SyntheticPassword123')
         self.api = APIClient()
+        self.test_atomic_depth = len(connection.atomic_blocks)  # TestCase itself owns test transactions.
         self.api.force_authenticate(self.owner)
         response = self.api.post(BASE, {
             'provider_id': 'deepseek', 'endpoint_profile': 'deepseek_default',
@@ -104,7 +105,8 @@ class AIModelT02Tests(TestCase):
         row = self.create_model()
         request_id = str(uuid.uuid4())
         def sender(**kwargs):
-            self.assertFalse(connection.in_atomic_block, 'external request under DB transaction')
+            self.assertEqual(len(connection.atomic_blocks), self.test_atomic_depth,
+                             'external request is inside a view-owned DB transaction')
             self.assertEqual(kwargs['model_alias'], 'deepseek/deepseek-chat')
             self.assertEqual(kwargs['provider_key'], KEY)
             return ProbeOutcome('succeeded', provider_request_id='synthetic-provider-ref')
