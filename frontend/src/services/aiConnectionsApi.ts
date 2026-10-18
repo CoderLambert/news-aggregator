@@ -88,3 +88,26 @@ export function probeAIModel(connection: AIConnection, model: AIModel, probe_kin
 export function listAIModelAttempts(connection: AIConnection, model: AIModel, signal?: AbortSignal) {
   return call<{ attempts: AIModelProbeReceipt[] }>(modelUrl(connection, model) + 'attempts/', { signal })
 }
+
+export type AITaskKind = 'default' | 'article_qa' | 'full_translation' | 'deep_research' | 'question_suggestions'
+export type AITaskSelectionState = 'unset' | 'inherit_default' | 'available' | 'needs_reselection' | 'needs_verification'
+export interface AITaskPreference {
+  task_kind: AITaskKind
+  model_config_id: string | null
+  selection_state: AITaskSelectionState
+  model: { id: string; connection_id: string; model_id: string; display_name: string } | null
+}
+export interface AITaskPreferences {
+  revision: number
+  preferences: AITaskPreference[]
+}
+export type AITaskPreferenceInput = Pick<AITaskPreference, 'task_kind' | 'model_config_id'>
+const TASK_PREFERENCES_PATH = '/me/ai/task-preferences/'
+export function listAITaskPreferences(signal?: AbortSignal) {
+  return call<AITaskPreferences>(TASK_PREFERENCES_PATH, { signal })
+}
+export function saveAITaskPreferences(revision: number, preferences: AITaskPreferenceInput[], viewer: number, signal?: AbortSignal) {
+  return call<AITaskPreferences>(TASK_PREFERENCES_PATH, {
+    method: 'PATCH', body: { revision, preferences }, viewer, signal,
+  })
+}
