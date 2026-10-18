@@ -89,7 +89,9 @@ class SourceProfileView(APIView):
         if not isinstance(about, str) or len(about) > 1000:
             raise ValidationError('简介最多 1000 字。')
         about = about.strip()
-        if stored and stored.origin == 'manual' and stored.topics == topics and stored.about == about:
+        # An unchanged PATCH explicitly reaffirms metadata after a source identity change.
+        if (stored and stored.origin == 'manual' and stored.topics == topics and
+                stored.about == about and stored.evidence_hash == base_profile(source)['evidence_hash']):
             return Response(profile_data(source, stored))
         SourceTopicProfile.objects.update_or_create(source=source, defaults={
             'about': about, 'topics': topics, 'origin': 'manual',
