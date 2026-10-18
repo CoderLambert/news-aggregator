@@ -445,7 +445,8 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       }
       try {
         for await (const chunk of chatStream(parsedId, trimmed, {
-          webSearch, modelConfigId: selectedForTurn, signal: request.controller.signal,
+          webSearch, ...(selectedForTurn ? { modelConfigId: selectedForTurn } : {}),
+          signal: request.controller.signal,
         })) {
           if (!isCurrent()) return false
           if (firstChunk) {
