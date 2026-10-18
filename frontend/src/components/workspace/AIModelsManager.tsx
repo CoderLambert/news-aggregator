@@ -29,7 +29,6 @@ export default function AIModelsManager({ connection, viewer }: { connection: AI
   useEffect(() => {
     const controller = new AbortController()
     alive.current = controller
-    setLoading(true)
     void Promise.all([listAIModels(connection, controller.signal), listAIModelCatalog(connection, controller.signal)])
       .then(([rows, known]) => {
         if (controller.signal.aborted) return
@@ -44,11 +43,11 @@ export default function AIModelsManager({ connection, viewer }: { connection: AI
       })
       .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => { controller.abort(); alive.current = null }
-  }, [connection.id, viewer, revision])
+  }, [connection, viewer, revision])
 
   const reload = () => {
     if (writing.current || loading) return
-    setError(''); setNotice(''); setRevision(value => value + 1)
+    setLoading(true); setError(''); setNotice(''); setRevision(value => value + 1)
   }
   const perform = async (action: (signal: AbortSignal) => Promise<unknown>, note: string) => {
     const controller = alive.current
