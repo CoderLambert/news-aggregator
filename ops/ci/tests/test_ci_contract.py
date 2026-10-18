@@ -34,7 +34,7 @@ class SelfHostedCIContract(unittest.TestCase):
         wf = load(CI)
         self.assertEqual(
             set(wf["jobs"]),
-            {"frontend", "backend-and-release-gates"},
+            {"changes", "frontend", "backend-and-release-gates"},
         )
         self.assertEqual(
             wf["jobs"]["frontend"]["runs-on"],
@@ -44,10 +44,30 @@ class SelfHostedCIContract(unittest.TestCase):
             wf["jobs"]["backend-and-release-gates"]["runs-on"],
             ["self-hosted", "linux", "x64", "newshub-ci"],
         )
-        self.assertNotIn("needs", wf["jobs"]["frontend"])
-        self.assertNotIn("needs", wf["jobs"]["backend-and-release-gates"])
+        self.assertEqual(
+            wf["jobs"]["changes"]["runs-on"],
+            ["self-hosted", "linux", "x64", "newshub-frontend"],
+        )
+        self.assertIn(
+            "github.event.pull_request.head.repo.full_name",
+            wf["jobs"]["changes"]["if"],
+        )
+        self.assertEqual(wf["jobs"]["changes"]["steps"][0]["with"]["fetch-depth"], 0)
+        route = wf["jobs"]["changes"]["steps"][-1]
+        self.assertIn("change_scope.py", route["run"])
+        self.assertIn("CI_BEFORE_SHA", route["env"])
+        self.assertIn("CI_BASE_SHA", route["env"])
+        self.assertIn("CI_HEAD_SHA", route["env"])
+        for name, scope in (
+            ("frontend", "frontend"),
+            ("backend-and-release-gates", "backend"),
+        ):
+            job = wf["jobs"][name]
+            self.assertEqual(job["needs"], "changes")
+            self.assertIn("!cancelled()", job["if"])
+            self.assertIn("github.event_name == 'workflow_dispatch'", job["if"])
+            self.assertIn(f"needs.changes.outputs.{scope}", job["if"])
         for job in wf["jobs"].values():
-            self.assertIn("github.event.pull_request.head.repo.full_name", job["if"])
             self.assertTrue(any(
                 "actions/checkout@" in step.get("uses", "")
                 and step.get("with", {}).get("persist-credentials") is False
