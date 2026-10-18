@@ -40,3 +40,51 @@ export function replaceAIConnectionKey(connection: AIConnection, apiKey: string,
 export function deleteAIConnection(connection: AIConnection, viewer: number, signal?: AbortSignal) {
   return call<{ deleted: true }>(`/me/ai/connections/${connection.id}/`, { method: 'DELETE', body: { revision: connection.revision }, viewer, signal })
 }
+
+export type AIModelCapability = 'unknown' | 'supported' | 'unsupported'
+export interface AIModel {
+  id: string; connection_id: string; model_id: string; display_name: string; catalog_model_id: string
+  config_revision: number; capabilities: { text: AIModelCapability; tools: AIModelCapability }
+  has_trusted_route: boolean; context_window_tokens: number | null; updated_at: string
+}
+export interface AIModelCatalogEntry {
+  model_id: string; display_name: string; catalog_version: string; context_window_tokens: number | null
+  text: 'unknown'; tools: 'unknown'
+}
+export interface AIModelProbeReceipt {
+  attempt_id: string; request_id: string; model_id: string; probe_kind: 'text' | 'tools'
+  status: 'started' | 'succeeded' | 'unsupported' | 'unknown' | 'not_sent' | 'stale'
+  capability?: AIModelCapability; stale?: boolean; safe_error_code: string
+  input_tokens: number | null; output_tokens: number | null; latency_ms: number | null
+  billing_notice: 'provider_may_bill'
+}
+
+const modelRoot = (connection: AIConnection) => `/me/ai/connections/${connection.id}/models/`
+const modelUrl = (connection: AIConnection, model: AIModel) => `${modelRoot(connection)}${model.id}/`
+
+export function listAIModelCatalog(connection: AIConnection, signal?: AbortSignal) {
+  return call<{ catalog_version: string; models: AIModelCatalogEntry[] }>(
+    `/me/ai/connections/${connection.id}/model-catalog/`, { signal })
+}
+export async function listAIModels(connection: AIConnection, signal?: AbortSignal) {
+  return (await call<{ models: AIModel[] }>(modelRoot(connection), { signal })).models
+}
+export function createAIModel(connection: AIConnection, model_id: string, viewer: number, signal?: AbortSignal) {
+  return call<AIModel>(modelRoot(connection), { method: 'POST', body: { model_id }, viewer, signal })
+}
+export function patchAIModel(connection: AIConnection, model: AIModel, values: { model_id?: string; display_name?: string }, viewer: number, signal?: AbortSignal) {
+  return call<AIModel>(modelUrl(connection, model), {
+    method: 'PATCH', body: { revision: model.config_revision, ...values }, viewer, signal })
+}
+export function deleteAIModel(connection: AIConnection, model: AIModel, viewer: number, signal?: AbortSignal) {
+  return call<{ deleted: true }>(modelUrl(connection, model), {
+    method: 'DELETE', body: { revision: model.config_revision }, viewer, signal })
+}
+export function probeAIModel(connection: AIConnection, model: AIModel, probe_kind: 'text' | 'tools',
+  request_id: string, viewer: number, signal?: AbortSignal) {
+  return call<AIModelProbeReceipt>(modelUrl(connection, model) + 'probe/', {
+    method: 'POST', body: { revision: model.config_revision, request_id, probe_kind }, viewer, signal })
+}
+export function listAIModelAttempts(connection: AIConnection, model: AIModel, signal?: AbortSignal) {
+  return call<{ attempts: AIModelProbeReceipt[] }>(modelUrl(connection, model) + 'attempts/', { signal })
+}
