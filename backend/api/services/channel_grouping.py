@@ -264,7 +264,7 @@ def process_subscription(subscription_id):
         state.status = 'pending'
         state.save()
         return
-    if cfg.mode == 'auto' and profile['origin'] in {'policy', 'catalog', 'manual'}:
+    if cfg.mode == 'auto' and not profile['needs_review'] and profile['origin'] in {'policy', 'catalog', 'manual'}:
         changes = []
         for key in topic_keys:
             group_id = cfg.bindings[key]
