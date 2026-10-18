@@ -258,3 +258,18 @@ def test_corrupted_ciphertext_after_admission_cannot_commit_inflight_result(user
     with pytest.raises(CredentialUnavailable):
         commit_result(queued, task_owner_id=owner.pk, persist=persist)
     persist.assert_not_called()
+
+
+def test_revocation_after_key_read_but_before_send_stops_new_request(users):
+    owner, _ = users
+    client, row = make_connection(owner)
+    queued = snapshot(owner, row)
+    def revoke_after_decrypt(_snapshot):
+        disable(client, row)
+        return KEY
+    transport = Mock()
+    with patch('api.services.ai_worker_fencing.read_execution_credential',
+               side_effect=revoke_after_decrypt):
+        with pytest.raises(CredentialUnavailable):
+            dispatch_once(queued, task_owner_id=owner.pk, send=transport)
+    transport.assert_not_called()
