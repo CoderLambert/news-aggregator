@@ -33,6 +33,7 @@ interface PendingTurn {
   assistant: ChatMessage
   status: 'streaming' | 'uncertain'
   webSearch: boolean
+  modelConfigId: string | null
   historyBoundary: ChatMessage[] | null
   historyBoundaryData: ChatHistory | undefined
   reconciliation: ReconciliationState
@@ -46,6 +47,7 @@ interface ActiveRequest {
   user: ChatMessage
   assistant: ChatMessage
   webSearch: boolean
+  modelConfigId: string | null
   historyBoundary: ChatMessage[] | null
   historyBoundaryData: ChatHistory | undefined
 }
@@ -86,6 +88,21 @@ function readMetaTurnStatus(value: string): 'complete' | 'failed' | undefined {
   return undefined
 }
 
+function readMetaModel(value: string): ChatMessage['model_source'] {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (typeof parsed !== 'object' || parsed === null || !('type' in parsed) ||
+        parsed.type !== 'chat_model' || !('model_source' in parsed)) return undefined
+    const source = parsed.model_source
+    if (typeof source === 'object' && source !== null && 'provider' in source && 'model' in source &&
+        typeof source.provider === 'string' && typeof source.model === 'string' &&
+        source.provider.length <= 32 && source.model.length <= 64) {
+      return { provider: source.provider, model: source.model }
+    }
+  } catch { /* malformed model metadata never authorizes a completed turn */ }
+  return undefined
+}
+
 function readMetaContext(value: string): ChatMessage['context_scope'] {
   try {
     const parsed: unknown = JSON.parse(value)
@@ -106,6 +123,7 @@ function consumeMetaFrame(
   onSources: (sources: NonNullable<ReturnType<typeof parseWebSources>>) => void,
   onScope?: (scope: NonNullable<ChatMessage['context_scope']>) => void,
   onTurnStatus?: (status: 'complete' | 'failed') => void,
+  onModelSource?: (source: NonNullable<ChatMessage['model_source']>) => void,
 ): string {
   let remaining = buffered + chunk
   while (remaining) {
@@ -136,6 +154,8 @@ function consumeMetaFrame(
     if (scope) onScope?.(scope)
     const turnStatus = readMetaTurnStatus(remaining.slice(META_MARKER.length, end))
     if (turnStatus) onTurnStatus?.(turnStatus)
+    const model = readMetaModel(remaining.slice(META_MARKER.length, end))
+    if (model) onModelSource?.(model)
     remaining = remaining.slice(end + META_MARKER.length)
     if (remaining.startsWith('\r\n\r\n')) remaining = remaining.slice(4)
     else if (remaining.startsWith('\n\n')) remaining = remaining.slice(2)
@@ -151,6 +171,7 @@ function snapshotActiveRequest(request: ActiveRequest): PendingTurn {
     assistant: request.assistant,
     status: 'uncertain',
     webSearch: request.webSearch,
+    modelConfigId: request.modelConfigId,
     historyBoundary: request.historyBoundary,
     historyBoundaryData: request.historyBoundaryData,
     reconciliation: 'checking',
@@ -158,7 +179,8 @@ function snapshotActiveRequest(request: ActiveRequest): PendingTurn {
   }
 }
 
-export function useChat(newsId: string | number | null | undefined, enabled: boolean) {
+export function useChat(newsId: string | number | null | undefined, enabled: boolean,
+  modelConfigId: string | null = null, billingConsent = false) {
   const queryClient = useQueryClient()
   const { user, loading: authLoading } = useAuth()
   const { lang } = useLanguage()
@@ -365,6 +387,11 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     if (successTimerRef.current) clearTimeout(successTimerRef.current)
     const previousTurn = currentTurn
     const reuseTurn = Boolean(explicitlyResending && previousTurn?.status === 'uncertain')
+    const selectedForTurn = reuseTurn ? previousTurn?.modelConfigId ?? null : modelConfigId
+    // Never switch the model for a paid ambiguous request while replaying it.
+    if ((reuseTurn && selectedForTurn !== modelConfigId) || (selectedForTurn && !billingConsent)) {
+      return Promise.resolve(false)
+    }
     const turnId = reuseTurn && previousTurn ? previousTurn.id : `chat-turn-${++nextTurnId}`
     const userMessage: ChatMessage = reuseTurn && previousTurn
       ? previousTurn.user
@@ -372,7 +399,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     const assistantMessage: ChatMessage = reuseTurn && previousTurn
       ? { ...previousTurn.assistant, content: '', web_sources: undefined }
       : { id: `${turnId}-assistant`, role: 'assistant', content: '' }
-    const webSearch = currentWebSearch
+    const webSearch = Boolean(currentWebSearch && !selectedForTurn)
     if (webSearch) assistantMessage.web_search = true
     const historyAtSend = queryClient.getQueryData<ChatHistory>(historyKey)
     const turn: PendingTurn = {
@@ -382,6 +409,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       assistant: assistantMessage,
       status: 'streaming',
       webSearch,
+      modelConfigId: selectedForTurn,
       historyBoundary: copyChatHistoryBoundary(historyAtSend?.messages),
       historyBoundaryData: historyAtSend,
       reconciliation: 'idle',
@@ -397,6 +425,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       user: userMessage,
       assistant: assistantMessage,
       webSearch,
+      modelConfigId: selectedForTurn,
       historyBoundary: turn.historyBoundary,
       historyBoundaryData: turn.historyBoundaryData,
     }
@@ -415,7 +444,9 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
         updatePendingTurn(turnId, (current) => ({ ...current, assistant: { ...current.assistant, context_scope: scope } }))
       }
       try {
-        for await (const chunk of chatStream(parsedId, trimmed, { webSearch, signal: request.controller.signal })) {
+        for await (const chunk of chatStream(parsedId, trimmed, {
+          webSearch, modelConfigId: selectedForTurn, signal: request.controller.signal,
+        })) {
           if (!isCurrent()) return false
           if (firstChunk) {
             firstChunk = false
@@ -433,6 +464,12 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
             },
             applyScope,
             (status) => { terminalStatus = status },
+            (source) => {
+              request.assistant = { ...request.assistant, model_source: source }
+              updatePendingTurn(turnId, (current) => ({
+                ...current, assistant: { ...current.assistant, model_source: source },
+              }))
+            },
           )
           request.assistant = { ...request.assistant, content: accumulated }
           updatePendingTurn(turnId, (current) => ({
@@ -453,6 +490,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
           },
           applyScope,
           (status) => { terminalStatus = status },
+          (source) => { request.assistant = { ...request.assistant, model_source: source } },
         )
 
         // A clean TCP EOF without the server's terminal receipt is not success.
@@ -495,7 +533,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
         if (isCurrent()) requestRef.current = null
       }
     })()
-  }, [authLoading, clearState, currentWebSearch, enabled, historyKey, isLoading, ownerKey, parsedId, pendingTurnState, queryClient, reconcileInterruptedTurn, setInput, setPendingTurn, updatePendingTurn, updatePhase])
+  }, [authLoading, billingConsent, clearState, currentWebSearch, enabled, historyKey, isLoading, modelConfigId, ownerKey, parsedId, pendingTurnState, queryClient, reconcileInterruptedTurn, setInput, setPendingTurn, updatePendingTurn, updatePhase])
 
   const doSend = useCallback((text: string): Promise<boolean> => sendMessage(text), [sendMessage])
   const handleSend = useCallback(() => doSend(inputRef.current), [doSend])
