@@ -763,19 +763,36 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
 
         from api.services.chatgpt_subscription import active_connection_for_user, stream_chat_response
         from api.services.ai_execution import PersonalAIUnavailable, personal_clients_for_user
-        subscription_connection = active_connection_for_user(request.user)
-        if subscription_connection is None:
+        from api.services.ai_article_chat import ArticleChatError, prepare_article_chat
+        # A personal model is billable only after explicit per-turn selection.
+        # Missing selection preserves the existing ChatGPT subscription path,
+        # never silently promoting a saved T03 preference to inference.
+        personal_selection = None
+        if 'model_config_id' in payload:
+            if payload.get('web_search', False):
+                return Response({'error_code': 'byok_web_search_not_enabled'},
+                                status=status.HTTP_409_CONFLICT)
             try:
-                personal_clients = personal_clients_for_user(request.user)
-            except PersonalAIUnavailable as exc:
-                return Response(
-                    {'error_code': 'provider_credential_unavailable', 'error': str(exc)},
-                    status=status.HTTP_409_CONFLICT,
-                )
+                personal_selection = prepare_article_chat(request.user, payload.get('model_config_id'))
+            except ArticleChatError as exc:
+                http_status = 400 if exc.code == 'invalid_model_selection' else (
+                    404 if exc.code == 'model_not_found' else 409)
+                return Response({'error_code': exc.code}, status=http_status)
+            subscription_connection, personal_clients = None, []
         else:
-            personal_clients = []
+            subscription_connection = active_connection_for_user(request.user)
+            if subscription_connection is None:
+                try:
+                    personal_clients = personal_clients_for_user(request.user)
+                except PersonalAIUnavailable as exc:
+                    return Response(
+                        {'error_code': 'provider_credential_unavailable', 'error': str(exc)},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+            else:
+                personal_clients = []
         provider_clients = personal_clients
-        if not provider_clients and subscription_connection is None:
+        if personal_selection is None and not provider_clients and subscription_connection is None:
             return Response(
                 {
                     'error_code': 'provider_credential_required',
@@ -903,8 +920,22 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
                     meta = _json.dumps({'type': 'web_search', 'sources': web_sources}, ensure_ascii=False)
                     yield f"​__META__{meta}__META__\n\n"
 
-                # A signed-in user's active ChatGPT subscription takes precedence.
-                # Users without one keep the existing configured-provider path.
+                if personal_selection is not None:
+                    # Only a verified terminal result is committed, under the
+                    # T01 credential/owner and T03 model/version/reader fences.
+                    from api.services.ai_article_chat import complete_article_chat
+                    answer, model_source = complete_article_chat(
+                        user=request.user, stored=stored, chat_snapshot=chat_snapshot,
+                        messages=messages, selection=personal_selection,
+                    )
+                    model_meta = _json.dumps({'type': 'chat_model', 'model_source': model_source},
+                                             ensure_ascii=False)
+                    yield f"\u200b__META__{model_meta}__META__\n\n"
+                    yield answer
+                    turn_status = 'complete'
+                    yield f"\u200b__META__{_json.dumps({'type': 'chat_turn', 'status': turn_status})}__META__\n\n"
+                    return
+                # Existing ChatGPT subscription path is independent of BYOK.
                 chunks = (
                     stream_chat_response(subscription_connection, messages)
                     if subscription_connection is not None
@@ -931,17 +962,20 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
                     full_response = [fallback]
                 yield f"\u200b__META__{_json.dumps({'type': 'chat_turn', 'status': turn_status})}__META__\n\n"
             finally:
-                try:
-                    append_assistant_message(
-                        user_id=request.user.pk,
-                        news_id=news.pk,
-                        session_id=chat_snapshot.session_id,
-                        generation=chat_snapshot.generation,
-                        content=''.join(full_response),
-                        status=turn_status, article_context=snapshot_metadata(stored),
-                    )
-                except ChatConflict:
-                    logger.info('Discarded late chat response for cleared or deleted history')
+                if personal_selection is None:
+                    try:
+                        append_assistant_message(
+                            user_id=request.user.pk,
+                            news_id=news.pk,
+                            session_id=chat_snapshot.session_id,
+                            generation=chat_snapshot.generation,
+                            content=''.join(full_response),
+                            status=turn_status, article_context=snapshot_metadata(stored),
+                        )
+                    except ChatConflict:
+                        logger.info('Discarded late chat response for cleared or deleted history')
+                # BYOK persistence is exclusive to the fenced terminal commit;
+                # failures may retain the user's question, never a fake answer.
 
         response = StreamingHttpResponse(generate(), content_type='text/event-stream')
         if web_search:
