@@ -1,5 +1,6 @@
 """Shared T02 capability receipts used by T03 without importing API views."""
 from api.services.ai_model_registry import get_trusted_preset
+from api.ai_model_models import AIModelProbeAttempt
 
 CAPABILITY_KINDS = ('text', 'tools')
 
@@ -28,7 +29,22 @@ def current_capabilities(model):
 
 
 def verified_for_task(model, task_kind):
+    """T03 requires an actual current successful T02 audit receipt for each capability."""
+    required = ('text', 'tools') if task_kind == 'deep_research' else ('text',)
     capabilities = current_capabilities(model)
-    return capabilities['text'] == 'supported' and (
-        task_kind != 'deep_research' or capabilities['tools'] == 'supported'
-    )
+    for kind in required:
+        if capabilities[kind] != 'supported':
+            return False
+        attempt_id = getattr(model, f'last_{kind}_attempt')
+        if not AIModelProbeAttempt.objects.filter(
+            pk=attempt_id, user_id=model.connection.user_id,
+            model_config_id=model.pk, connection_id=model.connection_id,
+            model_id=model.model_id, model_revision=model.config_revision,
+            credential_epoch=model.connection.credential_epoch,
+            credential_version=model.connection.credential_version,
+            endpoint_profile=model.connection.endpoint_profile,
+            endpoint_profile_version=model.connection.endpoint_profile_version,
+            probe_kind=kind, status='succeeded',
+        ).exists():
+            return False
+    return True
