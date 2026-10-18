@@ -8,6 +8,7 @@ vi.mock('@/services/aiConnectionsApi', async importOriginal => ({
   ...await importOriginal<typeof import('@/services/aiConnectionsApi')>(),
   listAIProviders: vi.fn(), listAIConnections: vi.fn(), createAIConnection: vi.fn(),
   patchAIConnection: vi.fn(), replaceAIConnectionKey: vi.fn(), deleteAIConnection: vi.fn(),
+  listAIModels: vi.fn(), listAIModelCatalog: vi.fn(),
 }))
 const profile = { provider_id: 'deepseek', provider_name: 'DeepSeek', profile_id: 'deepseek_default', region_name: '默认路由', version: 1 }
 const profiles = [profile, { ...profile, provider_id: 'qwen', provider_name: 'Qwen', profile_id: 'qwen_default' }]
@@ -25,6 +26,8 @@ beforeEach(() => {
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function (this: HTMLDialogElement) { this.setAttribute('open', '') } })
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function (this: HTMLDialogElement) { this.removeAttribute('open') } })
   rows = []
+  vi.mocked(api.listAIModels).mockReset().mockResolvedValue([])
+  vi.mocked(api.listAIModelCatalog).mockReset().mockResolvedValue({ catalog_version: 'synthetic', models: [] })
   vi.mocked(api.listAIProviders).mockReset().mockResolvedValue(profiles)
   vi.mocked(api.listAIConnections).mockReset().mockImplementation(async () => rows)
   vi.mocked(api.createAIConnection).mockReset().mockImplementation(async body => {
