@@ -102,7 +102,7 @@ describe('RSS T21 recovery and owner isolation', () => {
     fireEvent.click(screen.getByRole('button', { name: '核对确认结果' }))
     await waitFor(() => expect(reads()).toHaveLength(1))
     expect(posts('/me/rss-imports/confirm/')).toHaveLength(1)
-    expect(screen.getByText('One')).toBeInTheDocument()
+    expect(await screen.findByText('One')).toBeInTheDocument()
   })
 
   it('returns to the same preview if GET proves the confirmation was not accepted', async () => {
