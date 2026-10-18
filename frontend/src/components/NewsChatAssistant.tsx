@@ -62,6 +62,14 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
     webSearch, toggleWebSearch,
   } = useChat(newsId, isOpen, selectedModelId, modelConsent)
   const { scrollRef: chatScrollRef, onScroll: onChatScroll, onWheel: onChatWheel } = useChatScroll(messages, phase, isOpen)
+  const submitChatTurn = (send: () => Promise<boolean>) => {
+    // Consume the opt-in once for this explicit billable attempt; a later
+    // question, failed reply, or deliberate resend needs fresh confirmation.
+    void send()
+    if (selectedModelId && user) {
+      setSelection({ viewer: user.id, modelId: selectedModelId, consent: false })
+    }
+  }
 
   const {
     questions: suggestedQuestions,
@@ -219,7 +227,7 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
             messages={messages}
             medicalSourceUrl={articleContext?.isMedical ? articleContext.sourceUrl : undefined}
             phase={phase}
-            onSuggestionClick={(text: string) => { void doSend(text) }}
+            onSuggestionClick={(text: string) => submitChatTurn(() => doSend(text))}
             suggestedQuestions={suggestedQuestions}
             suggestionContextScope={suggestionContextScope}
             suggestionsGenerated={suggestionsGenerated}
@@ -231,7 +239,7 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
         <ChatInput
           value={input}
           onChange={setInput}
-          onSend={() => { void handleSend() }}
+          onSend={() => submitChatTurn(handleSend)}
           onStop={phase === 'thinking' || phase === 'streaming' ? stopWaiting : undefined}
           isLoading={isLoading}
           sendDisabled={Boolean(uncertainTurn) || confirmingClear || Boolean(selectedModelId && !modelConsent)}
