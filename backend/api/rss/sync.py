@@ -26,7 +26,11 @@ def _binding_snapshot(binding):
     links = list(SourceFeedLink.objects.filter(binding=binding).order_by('source_id').values_list(
         'source_id', 'enabled', 'association_policy', 'source__publication__owner',
         'source__publication__epoch', 'source__publication__policy_version',
-        'source__publication__reading_policy', 'source__publication__publication'))
+        'source__publication__reading_policy', 'source__publication__publication',
+        # The source is used to derive catalog/category/content policy below.
+        # Do not let a later rename, URL change or region edit silently refresh
+        # the authority captured before the second engine GET.
+        'source__name', 'source__url', 'source__region'))
     configs = list(SourceConfig.objects.filter(source_id__in=[x[0] for x in links]).order_by('source_id').values_list(
         'source_id', 'config_version', 'approved_config_version', 'status', 'category_id', 'content_kind'))
     return (binding.pk, binding.policy_version, binding.applied_policy_version,
@@ -37,7 +41,10 @@ def _binding_snapshot(binding):
 def _news_snapshot(news):
     return None if news is None else (news.pk, news.url, news.full_content_revision,
         news.body_owner_version, news.body_owner_source_id, news.body_owner_binding_id,
-        news.title, news.content, news.publish_time, news.author)
+        news.title, news.content, news.publish_time, news.author,
+        # News.source/category are stable article ownership and membership,
+        # even when a local edit forgets to increment full_content_revision.
+        news.source_id, news.category_id)
 
 
 def _map_snapshot(entry):
