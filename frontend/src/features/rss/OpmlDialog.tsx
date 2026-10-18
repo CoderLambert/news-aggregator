@@ -100,6 +100,8 @@ function OpmlSession({ viewer, groups, onClose }: OpmlDialogProps) {
     {file && file.size > 1024 * 1024 && <p role="alert">文件超过1MiB，请缩小后重试。</p>}
     {preview.isPending && <p role="status">正在预览文件，不会订阅或抓取来源…</p>}
     {preview.error && <p role="alert" className="workspace-error">文件预览失败：{workspaceError(preview.error)} 可点击「预览文件」重试。</p>}
+    {!batchId && preview.data && validBatchId(preview.data.id) &&
+      <p className="workspace-caption">本次预览记录编号：<code>{preview.data.id}</code>。确认结果不明确时，可按此编号只读核对。</p>}
     <p><a className="workspace-link" href="/api/me/rss-subscriptions/export/" download="subscriptions.opml">导出我的订阅</a></p>
     <form className="workspace-inline-form" onSubmit={event => {
       event.preventDefault()
@@ -114,9 +116,17 @@ function OpmlSession({ viewer, groups, onClose }: OpmlDialogProps) {
     </form>
     {batchId && <p role="status">导入记录：<code>{batchId}</code>。关闭窗口后仍会继续，可用此编号恢复查看。</p>}
     {batchId && progress.isPending && <p role="status">正在读取导入进度…</p>}
-    {confirm.error && !batchId && <p role="alert" className="workspace-error">导入确认结果未确认：{workspaceError(confirm.error)} 重试会保留原预览、选择和分组；修改选择请重新预览文件。
+    {confirm.error && !batchId && <p role="alert" className="workspace-error">导入确认结果未确认：{workspaceError(confirm.error)} 优先通过原预览编号 GET 核对是否已经确认；重试只使用相同预览、选择和分组。
+      {preview.data && validBatchId(preview.data.id) &&
+        <button type="button" className="workspace-button secondary" disabled={busy}
+          onClick={() => { setResumeId(preview.data!.id); setBatchId(preview.data!.id) }}>核对确认结果</button>}
       <button type="button" className="workspace-link" disabled={busy} onClick={() => { if (confirm.variables) confirm.mutate(confirm.variables) }}>重试确认导入</button>
     </p>}
+    {batchId && batch?.status === 'preview' && preview.data?.id === batchId &&
+      <p role="status">此记录仍处于预览状态，确认可能未提交。
+        <button type="button" className="workspace-button secondary" disabled={busy}
+          onClick={() => { setBatchId(null); confirm.reset() }}>返回预览继续确认</button>
+      </p>}
     {batchId && (progress.error || retry.error) && <p role="alert" className="workspace-error">
       {retry.error ? '重试提交结果未确认，请先重新读取进度，避免重复提交。' : '导入进度读取失败，后台任务不受影响。'}
       {workspaceError(progress.error ?? retry.error)}
