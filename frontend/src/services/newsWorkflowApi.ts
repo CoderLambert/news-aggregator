@@ -5,6 +5,7 @@ import {
   cancelChatGPTTranslationTask as cancelTranslationTaskRequest,
   chatStream as streamChat,
   clearChatHistory as clearChatHistoryRequest,
+  cancelPersonalChatTurn as cancelPersonalChatTurnRequest,
   fetchChatHistory as fetchChatHistoryRequest,
   fetchNewsDetail as fetchNewsDetailRequest,
   fetchFullArticle as fetchFullArticleRequest,
@@ -278,6 +279,10 @@ export async function clearChatHistory(id: NewsId, signal: AbortSignal): Promise
   await clearChatHistoryRequest(id, signal)
 }
 
+export async function cancelChatTurn(id: NewsId, turnId: string): Promise<'cancelled' | 'already_completed'> {
+  return cancelPersonalChatTurnRequest(id, turnId)
+}
+
 export async function fetchSuggestedQuestions(id: NewsId, options: { force?: boolean; signal: AbortSignal }): Promise<SuggestedQuestionsSnapshot> {
   const data: unknown = await fetchSuggestedQuestionsRequest(id, options)
   return parseSuggestedQuestions(data)
@@ -304,7 +309,8 @@ export async function cancelTranslationJob(jobId: string, generation: number): P
 export async function* chatStream(
   id: NewsId,
   question: string,
-  options: { webSearch: boolean; modelConfigId?: string | null; signal: AbortSignal },
+  options: { webSearch: boolean; modelConfigId?: string | null; billingConsent?: boolean;
+    turnId?: string; signal: AbortSignal },
 ): AsyncGenerator<string> {
   for await (const rawChunk of streamChat(id, question, options)) {
     if (typeof rawChunk === 'string') yield rawChunk

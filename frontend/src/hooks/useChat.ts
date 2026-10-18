@@ -9,6 +9,7 @@ import {
 } from '@/services/chatHistoryReconciliation'
 import {
   chatStream,
+  cancelChatTurn,
   clearChatHistory,
   fetchChatHistory,
   parseWebSources,
@@ -34,6 +35,7 @@ interface PendingTurn {
   status: 'streaming' | 'uncertain'
   webSearch: boolean
   modelConfigId: string | null
+  serverTurnId: string | null
   historyBoundary: ChatMessage[] | null
   historyBoundaryData: ChatHistory | undefined
   reconciliation: ReconciliationState
@@ -48,6 +50,7 @@ interface ActiveRequest {
   assistant: ChatMessage
   webSearch: boolean
   modelConfigId: string | null
+  serverTurnId: string | null
   historyBoundary: ChatMessage[] | null
   historyBoundaryData: ChatHistory | undefined
 }
@@ -172,6 +175,7 @@ function snapshotActiveRequest(request: ActiveRequest): PendingTurn {
     status: 'uncertain',
     webSearch: request.webSearch,
     modelConfigId: request.modelConfigId,
+    serverTurnId: request.serverTurnId,
     historyBoundary: request.historyBoundary,
     historyBoundaryData: request.historyBoundaryData,
     reconciliation: 'checking',
@@ -392,6 +396,8 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     if ((reuseTurn && selectedForTurn !== modelConfigId) || (selectedForTurn && !billingConsent)) {
       return Promise.resolve(false)
     }
+    // An explicitly retried billable attempt receives a new one-shot UUID.
+    const serverTurnId = selectedForTurn ? crypto.randomUUID() : null
     const turnId = reuseTurn && previousTurn ? previousTurn.id : `chat-turn-${++nextTurnId}`
     const userMessage: ChatMessage = reuseTurn && previousTurn
       ? previousTurn.user
@@ -410,6 +416,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       status: 'streaming',
       webSearch,
       modelConfigId: selectedForTurn,
+      serverTurnId,
       historyBoundary: copyChatHistoryBoundary(historyAtSend?.messages),
       historyBoundaryData: historyAtSend,
       reconciliation: 'idle',
@@ -426,6 +433,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       assistant: assistantMessage,
       webSearch,
       modelConfigId: selectedForTurn,
+      serverTurnId,
       historyBoundary: turn.historyBoundary,
       historyBoundaryData: turn.historyBoundaryData,
     }
@@ -445,7 +453,8 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       }
       try {
         for await (const chunk of chatStream(parsedId, trimmed, {
-          webSearch, ...(selectedForTurn ? { modelConfigId: selectedForTurn, billingConsent } : {}),
+          webSearch, ...(selectedForTurn ? { modelConfigId: selectedForTurn, billingConsent,
+            turnId: serverTurnId ?? undefined } : {}),
           signal: request.controller.signal,
         })) {
           if (!isCurrent()) return false
@@ -554,8 +563,28 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     setPendingTurn(uncertainTurn)
     if (!inputRef.current) setInput(request.user.content)
     updatePhase('error')
-    void reconcileInterruptedTurn(uncertainTurn)
-  }, [ownerKey, reconcileInterruptedTurn, setInput, setPendingTurn, updatePhase])
+    // A browser AbortSignal alone cannot fence the backend one-shot send.
+    // Request a durable server acknowledgement before reconciling history.
+    void (async () => {
+      if (request.serverTurnId && parsedId !== null) {
+        try {
+          const outcome = await cancelChatTurn(parsedId, request.serverTurnId)
+          if (ownerRef.current === ownerKey) {
+            updatePendingTurn(request.turnId, current => ({
+              ...current,
+              assistant: {
+                ...current.assistant,
+                content: outcome === 'cancelled'
+                  ? '服务端已确认取消本轮；已经发送的请求仍可能产生费用。'
+                  : '服务端已完成本轮；正在核对已保存的回答。',
+              },
+            }))
+          }
+        } catch { /* Failed/unknown cancellation is never assumed successful. */ }
+      }
+      await reconcileInterruptedTurn(uncertainTurn)
+    })()
+  }, [ownerKey, parsedId, reconcileInterruptedTurn, setInput, setPendingTurn, updatePendingTurn, updatePhase])
 
   const requestClearChat = useCallback(() => {
     if (

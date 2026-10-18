@@ -15,11 +15,13 @@ describe('T04 personal chat request billing consent transport', () => {
   it('serializes explicit per-turn billing approval only for selected BYOK models', async () => {
     for await (const chunk of chatStream(71, 'Question', {
       modelConfigId: '11111111-1111-4111-8111-111111111111', billingConsent: true,
+      turnId: '22222222-2222-4222-8222-222222222222',
     })) { expect(chunk).toBe('synthetic') }
     expect(wire.streamingFetch).toHaveBeenCalledTimes(1)
     expect(JSON.parse(wire.streamingFetch.mock.calls[0][1].body)).toEqual({
       question: 'Question', web_search: false,
       model_config_id: '11111111-1111-4111-8111-111111111111', billing_consent: true,
+      turn_id: '22222222-2222-4222-8222-222222222222',
     })
   })
 

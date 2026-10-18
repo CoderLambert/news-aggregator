@@ -140,6 +140,8 @@ def complete_article_chat(*, user, stored, chat_snapshot, messages, selection, t
             return _verified_answer(gateway, selection.proxy_alias, messages)
         except ArticleChatError:
             raise
+        except ArticleChatTurnError as error:
+            raise ArticleChatError(error.code) from None
         except (ModelSelectionError, StoredContentChanged, Http404):
             raise ArticleChatError('execution_changed') from None
         except AIGatewayError:

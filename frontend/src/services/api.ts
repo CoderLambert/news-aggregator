@@ -146,6 +146,7 @@ interface ChatStreamOptions {
   webSearch?: boolean
   modelConfigId?: string | null
   billingConsent?: boolean
+  turnId?: string
   signal?: AbortSignal
 }
 
@@ -365,14 +366,25 @@ export async function* translateFullArticleStream(
 export async function* chatStream(
   newsId: NewsId,
   question: string,
-  { webSearch = false, modelConfigId, billingConsent = false, signal }: ChatStreamOptions = {},
+  { webSearch = false, modelConfigId, billingConsent = false, turnId, signal }: ChatStreamOptions = {},
 ): AsyncGenerator<string> {
   const response = await streamingFetch(`/api/news/${newsId}/chat/`, {
     body: JSON.stringify({ question, web_search: webSearch,
-      ...(modelConfigId ? { model_config_id: modelConfigId, billing_consent: billingConsent === true } : {}) }),
+      ...(modelConfigId ? { model_config_id: modelConfigId, billing_consent: billingConsent === true,
+        turn_id: turnId } : {}) }),
     signal,
   })
   yield* iterTextChunks(response)
+}
+
+/** Separate authenticated CAS request; closing SSE alone never proves cancellation. */
+export async function cancelPersonalChatTurn(newsId: NewsId, turnId: string):
+  Promise<'cancelled' | 'already_completed'> {
+  const { data } = await api.post<unknown>(`/news/${newsId}/chat/${turnId}/cancel/`, {})
+  if (!isRecord(data) || (data.status !== 'cancelled' && data.status !== 'already_completed')) {
+    throw new TypeError('Invalid personal chat cancellation receipt')
+  }
+  return data.status
 }
 
 // ---- Favorites and blocks -------------------------------------------------
