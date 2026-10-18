@@ -132,9 +132,11 @@ class SourceMetadataContractTests(TestCase):
         from api.tests.rss.legacy_fixtures import public_legacy
         public_legacy(self.source)
         client = APIClient()
-        with patch('api.services.channel_ai.personal_clients_for_user',
-                   side_effect=AssertionError('GET invoked model')), \\
-             patch('socket.socket.connect', side_effect=AssertionError('GET invoked network')):
+        with (
+            patch('api.services.channel_ai.personal_clients_for_user',
+                  side_effect=AssertionError('GET invoked model')),
+            patch('socket.socket.connect', side_effect=AssertionError('GET invoked network')),
+        ):
             response = client.get('/api/smart-channels/catalog/')
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(SourceTopicProfile.objects.count(), 0)
