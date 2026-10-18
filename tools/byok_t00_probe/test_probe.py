@@ -403,14 +403,43 @@ class ProviderKeyGuardFailClosed(unittest.TestCase):
         raw_source="valid",
         fallback_activated=False,
         fallback_activated_after_first=False,
+        raw_json_stop=None,
+        parser_invalid=False,
+        parser_provenance="valid",
+        parser_kind="exact",
     ):
         guard = self.guard
+
+        class FakeParser:
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+        FakeParser.__module__ = "litellm.llms.openai.chat.gpt_transformation"
+        FakeParser.__qualname__ = "OpenAIChatCompletionStreamingHandler"
+        if parser_kind == "unknown":
+            class UnknownFakeParser(FakeParser):
+                pass
+            parser_type_for_instance = UnknownFakeParser
+        else:
+            parser_type_for_instance = FakeParser
 
         class FakeCustomStreamWrapper:
             def __init__(self):
                 self.custom_llm_provider = "deepseek"
                 self.received_finish_reason = None
                 self.raw_finish_reason = source_reason
+                self.completion_stream = parser_type_for_instance()
+                if parser_provenance == "valid":
+                    self.completion_stream._byok_raw_terminal_parser_token = guard._PARSER_PROVENANCE_TOKEN
+                elif parser_provenance == "wrong":
+                    self.completion_stream._byok_raw_terminal_parser_token = object()
+                self.completion_stream._byok_raw_json_stop = (
+                    source_reason == "stop" if raw_json_stop is None else raw_json_stop
+                )
+                self.completion_stream._byok_terminal_invalid = parser_invalid
+                self.completion_stream._byok_exact_sse_done = False
+                self.completion_stream._byok_terminal_usage_seen = False
+                self.completion_stream._byok_terminal_usage_allowed = False
                 self.failure = None
                 self.closed = False
                 delta = SimpleNamespace(
@@ -504,6 +533,18 @@ class ProviderKeyGuardFailClosed(unittest.TestCase):
 
         litellm = ModuleType("litellm")
         litellm.__path__ = []
+        llms_pkg = ModuleType("litellm.llms")
+        llms_pkg.__path__ = []
+        openai_pkg = ModuleType("litellm.llms.openai")
+        openai_pkg.__path__ = []
+        chat_pkg = ModuleType("litellm.llms.openai.chat")
+        chat_pkg.__path__ = []
+        parser_module = ModuleType("litellm.llms.openai.chat.gpt_transformation")
+        parser_module.OpenAIChatCompletionStreamingHandler = FakeParser
+        litellm.llms = llms_pkg
+        llms_pkg.openai = openai_pkg
+        openai_pkg.chat = chat_pkg
+        chat_pkg.gpt_transformation = parser_module
         proxy_pkg = ModuleType("litellm.proxy")
         proxy_pkg.__path__ = []
         proxy_utils = ModuleType("litellm.proxy.utils")
@@ -524,6 +565,10 @@ class ProviderKeyGuardFailClosed(unittest.TestCase):
         response = boundary_class(router_source)
         patch_modules = {
             "litellm": litellm,
+            "litellm.llms": llms_pkg,
+            "litellm.llms.openai": openai_pkg,
+            "litellm.llms.openai.chat": chat_pkg,
+            "litellm.llms.openai.chat.gpt_transformation": parser_module,
             "litellm.proxy": proxy_pkg,
             "litellm.proxy.utils": proxy_utils,
             "litellm.router": router_module,
@@ -542,6 +587,8 @@ class ProviderKeyGuardFailClosed(unittest.TestCase):
 
         with patch.dict(sys.modules, patch_modules), patch.object(
             guard.importlib.metadata, "version", return_value=version,
+        ), patch.object(guard, "_PARSER_PATCHED_CLASS", FakeParser), patch.object(
+            guard, "_PARSER_PATCHED_ANEXT", FakeParser.__dict__["__anext__"],
         ):
             try:
                 asyncio.run(collect())
@@ -567,6 +614,11 @@ class ProviderKeyGuardFailClosed(unittest.TestCase):
     def test_whole_iterator_rejects_missing_provenance_and_fallbacks(self):
         cases = (
             {"source_reason": None},
+            {"source_reason": "stop", "raw_json_stop": False},
+            {"parser_invalid": True},
+            {"parser_provenance": "missing"},
+            {"parser_provenance": "wrong"},
+            {"parser_kind": "unknown"},
             {"response_kind": "unknown"},
             {"version": "1.106.0"},
             {"provenance_token": "missing"},

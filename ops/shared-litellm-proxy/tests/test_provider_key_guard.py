@@ -189,7 +189,9 @@ class UnaffectedPaths(unittest.TestCase):
         outputs["b"] = FallbackWrapper()
         raw_a, raw_b = CustomStreamWrapper(), CustomStreamWrapper()
         router = Router()
-        with patch.object(guard.importlib.metadata, "version", return_value="1.105.0"):
+        with patch.object(guard.importlib.metadata, "version", return_value="1.105.0"), patch.object(
+            guard, "_ensure_deepseek_parser_patch", return_value=True,
+        ), patch.object(guard, "_attach_parser_provenance", return_value=True):
             with patch.object(
                 guard.inspect, "getsourcefile", return_value="/fake/site-packages/litellm/router.py",
             ):
@@ -226,7 +228,9 @@ class UnaffectedPaths(unittest.TestCase):
         original.__qualname__ = "Router._acompletion_streaming_iterator"
         modules, Router, _, _ = self._fake_router_modules(original)
         untouched = Router._acompletion_streaming_iterator
-        with patch.object(guard.importlib.metadata, "version", return_value="1.106.0"):
+        with patch.object(guard.importlib.metadata, "version", return_value="1.106.0"), patch.object(
+            guard, "_ensure_deepseek_parser_patch", return_value=True,
+        ):
             with patch.dict(sys.modules, modules):
                 self.assertFalse(guard._ensure_router_provenance_patch())
                 self.assertIs(Router._acompletion_streaming_iterator, untouched)
@@ -238,7 +242,9 @@ class UnaffectedPaths(unittest.TestCase):
         mismatched.__qualname__ = "Router._acompletion_streaming_iterator"
         modules, Router, _, _ = self._fake_router_modules(mismatched)
         untouched = Router._acompletion_streaming_iterator
-        with patch.object(guard.importlib.metadata, "version", return_value="1.105.0"):
+        with patch.object(guard.importlib.metadata, "version", return_value="1.105.0"), patch.object(
+            guard, "_ensure_deepseek_parser_patch", return_value=True,
+        ):
             with patch.object(guard.inspect, "getsourcefile", return_value="/tmp/foreign/router.py"):
                 with patch.dict(sys.modules, modules):
                     self.assertFalse(guard._ensure_router_provenance_patch())
@@ -372,6 +378,190 @@ class UnaffectedPaths(unittest.TestCase):
     def test_missing_provider_key_still_rejected_first(self):
         self.assertEqual(run_hook({"stream": False}, "acompletion"), ("rejected", 400, "BYOK_PROVIDER_KEY_REQUIRED"))
         self.assertEqual(run_hook({"api_key": "  ", "stream": True}, "acompletion"), ("rejected", 400, "BYOK_PROVIDER_KEY_REQUIRED"))
+
+
+class ParserRawTerminalEvidence(unittest.TestCase):
+    def parser(self, allow_usage=False):
+        return SimpleNamespace(
+            _byok_raw_json_stop=False,
+            _byok_exact_sse_done=False,
+            _byok_terminal_invalid=False,
+            _byok_terminal_usage_seen=False,
+            _byok_terminal_usage_allowed=allow_usage,
+        )
+
+    @staticmethod
+    def chunk(finish=None, *, index=0, content=None):
+        return {
+            "choices": [{
+                "index": index,
+                "finish_reason": finish,
+                "delta": {"content": content} if content is not None else {},
+            }],
+        }
+
+    def test_exact_raw_stop_and_done_are_independent_evidence(self):
+        parser = self.parser()
+        guard._record_raw_json_chunk(parser, self.chunk("stop"))
+        self.assertTrue(parser._byok_raw_json_stop)
+        self.assertFalse(parser._byok_exact_sse_done)
+        guard._observe_sse_line(parser, "data: [DONE]")
+        self.assertTrue(parser._byok_exact_sse_done)
+        self.assertFalse(parser._byok_terminal_invalid)
+
+    def test_done_without_raw_stop_is_invalid_and_cannot_prove_terminal(self):
+        parser = self.parser()
+        guard._observe_sse_line(parser, "data: [DONE]")
+        self.assertFalse(parser._byok_raw_json_stop)
+        self.assertTrue(parser._byok_terminal_invalid)
+
+    def test_done_substring_inside_json_content_is_never_a_transport_marker(self):
+        parser = self.parser()
+        guard._observe_sse_line(
+            parser,
+            'data: {"choices":[{"index":0,"finish_reason":null,"delta":{"content":"literal [DONE]"}}]}',
+        )
+        self.assertFalse(parser._byok_exact_sse_done)
+        self.assertTrue(parser._byok_terminal_invalid)
+
+    def test_one_requested_usage_chunk_may_precede_or_follow_raw_stop(self):
+        usage = {"choices": [], "usage": {"prompt_tokens": 2, "completion_tokens": 1}}
+        for before_stop in (True, False):
+            with self.subTest(before_stop=before_stop):
+                parser = self.parser(allow_usage=True)
+                if before_stop:
+                    guard._record_raw_json_chunk(parser, usage)
+                guard._record_raw_json_chunk(parser, self.chunk("stop"))
+                if not before_stop:
+                    guard._record_raw_json_chunk(parser, usage)
+                self.assertTrue(parser._byok_raw_json_stop)
+                self.assertFalse(parser._byok_terminal_invalid)
+
+    def test_malformed_post_stop_json_is_rejected(self):
+        parser = self.parser()
+        guard._record_raw_json_chunk(parser, self.chunk("stop"))
+        guard._observe_sse_line(parser, "data: {malformed-json")
+        self.assertTrue(parser._byok_terminal_invalid)
+
+    def test_only_exact_data_done_is_a_transport_marker(self):
+        parser = self.parser()
+        guard._record_raw_json_chunk(parser, self.chunk("stop"))
+        guard._observe_sse_line(parser, "[DONE]")
+        self.assertFalse(parser._byok_exact_sse_done)
+        self.assertTrue(parser._byok_terminal_invalid)
+
+    def test_rejects_unrequested_duplicate_or_nonusage_frames_after_stop(self):
+        usage = {"choices": [], "usage": {"prompt_tokens": 2}}
+        cases = (
+            ([usage], False),
+            ([usage, usage], True),
+            ([self.chunk("stop"), usage, self.chunk(None, content="late content")], True),
+            ([self.chunk("stop"), self.chunk("stop")], False),
+            ([self.chunk("stop", index=1)], False),
+            ([self.chunk("length")], False),
+        )
+        for sequence, allow_usage in cases:
+            with self.subTest(sequence=sequence, allow_usage=allow_usage):
+                parser = self.parser(allow_usage=allow_usage)
+                for item in sequence:
+                    guard._record_raw_json_chunk(parser, item)
+                self.assertTrue(parser._byok_terminal_invalid)
+
+
+
+
+class NativeParserPatch(unittest.TestCase):
+    def test_exact_native_parser_patch_is_idempotent_and_token_gated(self):
+        litellm = ModuleType("litellm")
+        litellm.__path__ = []
+        llms = ModuleType("litellm.llms")
+        llms.__path__ = []
+        openai = ModuleType("litellm.llms.openai")
+        openai.__path__ = []
+        chat = ModuleType("litellm.llms.openai.chat")
+        chat.__path__ = []
+        base_llm = ModuleType("litellm.llms.base_llm")
+        base_llm.__path__ = []
+        base_module = ModuleType("litellm.llms.base_llm.base_model_iterator")
+        parser_module = ModuleType("litellm.llms.openai.chat.gpt_transformation")
+
+        class BaseModelResponseIterator:
+            async def __anext__(self):
+                return "ordinary"
+
+            def _handle_string_chunk(self, str_line):
+                return str_line
+
+            async def aclose(self):
+                self.closed = True
+
+        class OpenAIChatCompletionStreamingHandler(BaseModelResponseIterator):
+            def chunk_parser(self, chunk):
+                return chunk
+
+        BaseModelResponseIterator.__module__ = "litellm.llms.base_llm.base_model_iterator"
+        BaseModelResponseIterator._handle_string_chunk.__module__ = BaseModelResponseIterator.__module__
+        BaseModelResponseIterator._handle_string_chunk.__qualname__ = "BaseModelResponseIterator._handle_string_chunk"
+        BaseModelResponseIterator.__anext__.__module__ = BaseModelResponseIterator.__module__
+        BaseModelResponseIterator.__anext__.__qualname__ = "BaseModelResponseIterator.__anext__"
+        OpenAIChatCompletionStreamingHandler.__module__ = "litellm.llms.openai.chat.gpt_transformation"
+        OpenAIChatCompletionStreamingHandler.__qualname__ = "OpenAIChatCompletionStreamingHandler"
+        OpenAIChatCompletionStreamingHandler.chunk_parser.__module__ = OpenAIChatCompletionStreamingHandler.__module__
+        OpenAIChatCompletionStreamingHandler.chunk_parser.__qualname__ = (
+            "OpenAIChatCompletionStreamingHandler.chunk_parser"
+        )
+        base_module.BaseModelResponseIterator = BaseModelResponseIterator
+        parser_module.OpenAIChatCompletionStreamingHandler = OpenAIChatCompletionStreamingHandler
+        litellm.llms = llms
+        llms.openai = openai
+        llms.base_llm = base_llm
+        openai.chat = chat
+        chat.gpt_transformation = parser_module
+        base_llm.base_model_iterator = base_module
+        modules = {
+            "litellm": litellm,
+            "litellm.llms": llms,
+            "litellm.llms.openai": openai,
+            "litellm.llms.openai.chat": chat,
+            "litellm.llms.openai.chat.gpt_transformation": parser_module,
+            "litellm.llms.base_llm": base_llm,
+            "litellm.llms.base_llm.base_model_iterator": base_module,
+        }
+
+        def source_file(method):
+            if method.__module__ == OpenAIChatCompletionStreamingHandler.__module__:
+                return "/fake/site-packages/litellm/llms/openai/chat/gpt_transformation.py"
+            return "/fake/site-packages/litellm/llms/base_llm/base_model_iterator.py"
+
+        with patch.object(guard.importlib.metadata, "version", return_value="1.105.0"), patch.object(
+            guard.inspect, "getsourcefile", side_effect=source_file,
+        ), patch.dict(sys.modules, modules):
+            self.assertTrue(guard._ensure_deepseek_parser_patch())
+            patched = OpenAIChatCompletionStreamingHandler.__dict__["__anext__"]
+            self.assertIs(patched, guard._PARSER_PATCHED_ANEXT)
+            self.assertTrue(guard._ensure_deepseek_parser_patch())
+            self.assertIs(OpenAIChatCompletionStreamingHandler.__dict__["__anext__"], patched)
+
+            ordinary = OpenAIChatCompletionStreamingHandler()
+            self.assertEqual(asyncio.run(ordinary.__anext__()), "ordinary")
+
+            done = OpenAIChatCompletionStreamingHandler()
+            done._byok_raw_terminal_parser_token = guard._PARSER_PROVENANCE_TOKEN
+            done._byok_terminal_invalid = False
+            done._byok_exact_sse_done = True
+            with self.assertRaises(StopAsyncIteration):
+                asyncio.run(done.__anext__())
+            self.assertTrue(done.closed)
+
+            async def replacement(self):
+                return "replaced"
+
+            OpenAIChatCompletionStreamingHandler.__anext__ = replacement
+            try:
+                self.assertFalse(guard._ensure_deepseek_parser_patch())
+            finally:
+                OpenAIChatCompletionStreamingHandler.__anext__ = patched
+
 
 
 if __name__ == "__main__":

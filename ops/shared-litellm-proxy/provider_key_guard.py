@@ -31,6 +31,18 @@ _ROUTER_PROVENANCE_TOKEN = object()
 _ROUTER_PATCH_LOCK = threading.Lock()
 _ROUTER_PATCHED_CLASS = None
 _ROUTER_PATCHED_METHOD = None
+_PARSER_PROVENANCE_TOKEN = object()
+_PARSER_PROVENANCE_ATTR = "_byok_raw_terminal_parser_token"
+_PARSER_STOP_ATTR = "_byok_raw_json_stop"
+_PARSER_DONE_ATTR = "_byok_exact_sse_done"
+_PARSER_INVALID_ATTR = "_byok_terminal_invalid"
+_PARSER_USAGE_ATTR = "_byok_terminal_usage_seen"
+_PARSER_ALLOW_USAGE_ATTR = "_byok_terminal_usage_allowed"
+_PARSER_CLOSED_ATTR = "_byok_terminal_response_closed"
+_PARSER_PATCH_MARKER = "_byok_deepseek_parser_patch"
+_PARSER_PATCHED_CLASS = None
+_PARSER_ORIGINAL_ANEXT = None
+_PARSER_PATCHED_ANEXT = None
 TERMINAL_DIAGNOSTICS_ENV = "BYOK_T00_SYNTHETIC_GUARD_DIAGNOSTICS"
 _TERMINAL_DIAGNOSTIC_REASONS = frozenset({
     "version_unavailable",
@@ -45,6 +57,10 @@ _TERMINAL_DIAGNOSTIC_REASONS = frozenset({
     "source_provider_mismatch",
     "source_provider_unavailable",
     "fallback_activated",
+    "parser_patch_unavailable",
+    "parser_provenance_missing",
+    "raw_json_terminal_missing",
+    "raw_stream_invalid",
 })
 
 
@@ -189,6 +205,318 @@ def _router_method_has_pinned_shape(method) -> bool:
     )
 
 
+
+def _parser_method_has_pinned_shape(method, module: str, qualname: str, source_tail, names, *, coroutine=None):
+    if (
+        getattr(method, "__module__", None) != module
+        or getattr(method, "__qualname__", None) != qualname
+        or getattr(method, "__wrapped__", None) is not None
+        or (coroutine is not None and inspect.iscoroutinefunction(method) is not coroutine)
+    ):
+        return False
+    try:
+        source_file = inspect.getsourcefile(method)
+        normalized_source = source_file.replace("\\", "/") if isinstance(source_file, str) else ""
+        if normalized_source.split("/")[-len(source_tail):] != list(source_tail):
+            return False
+        parameters = list(inspect.signature(method).parameters.values())
+    except (OSError, TypeError, ValueError):
+        return False
+    return (
+        tuple(parameter.name for parameter in parameters) == tuple(names)
+        and all(parameter.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD for parameter in parameters)
+        and all(parameter.default is inspect.Parameter.empty for parameter in parameters)
+    )
+
+
+def _parser_invalid(parser) -> bool:
+    return bool(getattr(parser, _PARSER_INVALID_ATTR, True))
+
+
+def _raw_usage_only_event(chunk) -> bool:
+    return (
+        isinstance(chunk, dict)
+        and not chunk.get("error")
+        and isinstance(chunk.get("choices"), list)
+        and not chunk["choices"]
+        and isinstance(chunk.get("usage"), dict)
+    )
+
+
+def _record_raw_json_chunk(parser, chunk) -> None:
+    if not isinstance(chunk, dict) or chunk.get("error"):
+        setattr(parser, _PARSER_INVALID_ATTR, True)
+        return
+    choices = chunk.get("choices")
+    if not isinstance(choices, list):
+        setattr(parser, _PARSER_INVALID_ATTR, True)
+        return
+    raw_stop = bool(getattr(parser, _PARSER_STOP_ATTR, False))
+    usage_seen = bool(getattr(parser, _PARSER_USAGE_ATTR, False))
+    if not choices:
+        usage = chunk.get("usage")
+        if (
+            not isinstance(usage, dict)
+            or usage_seen
+            or getattr(parser, _PARSER_ALLOW_USAGE_ATTR, False) is not True
+        ):
+            setattr(parser, _PARSER_INVALID_ATTR, True)
+            return
+        setattr(parser, _PARSER_USAGE_ATTR, True)
+        return
+    if len(choices) != 1 or not isinstance(choices[0], dict):
+        setattr(parser, _PARSER_INVALID_ATTR, True)
+        return
+    choice = choices[0]
+    if type(choice.get("index")) is not int or choice["index"] != 0:
+        setattr(parser, _PARSER_INVALID_ATTR, True)
+        return
+    delta = choice.get("delta")
+    if not isinstance(delta, dict):
+        setattr(parser, _PARSER_INVALID_ATTR, True)
+        return
+    if any(delta.get(name) for name in ("tool_calls", "function_call", "refusal")):
+        setattr(parser, _PARSER_INVALID_ATTR, True)
+        return
+    finish_reason = choice.get("finish_reason")
+    if finish_reason is not None:
+        if (
+            finish_reason != "stop"
+            or raw_stop
+            or any(delta.get(name) for name in ("content", "reasoning", "reasoning_content"))
+        ):
+            setattr(parser, _PARSER_INVALID_ATTR, True)
+            return
+        setattr(parser, _PARSER_STOP_ATTR, True)
+        return
+    if raw_stop:
+        # Once the provider declared stop, only a single usage-only JSON event
+        # or the exact SSE [DONE] record may follow.
+        setattr(parser, _PARSER_INVALID_ATTR, True)
+
+
+def _observe_sse_line(parser, line) -> None:
+    if not isinstance(line, str):
+        setattr(parser, _PARSER_INVALID_ATTR, True)
+        return
+    stripped = line.strip()
+    if not stripped or stripped.startswith(":"):
+        return
+    if not stripped.startswith("data:"):
+        if (
+            "[DONE]" in stripped
+            or getattr(parser, _PARSER_STOP_ATTR, False)
+        ):
+            setattr(parser, _PARSER_INVALID_ATTR, True)
+        return
+    payload = stripped[5:].strip()
+    if payload == "[DONE]":
+        setattr(parser, _PARSER_DONE_ATTR, True)
+        if getattr(parser, _PARSER_STOP_ATTR, False) is not True:
+            setattr(parser, _PARSER_INVALID_ATTR, True)
+        return
+    if "[DONE]" in payload:
+        # LiteLLM 1.105.0 searches for this substring, so reject ambiguous
+        # content instead of letting a JSON string truncate the stream.
+        setattr(parser, _PARSER_INVALID_ATTR, True)
+        return
+    try:
+        import json
+        chunk = json.loads(payload)
+    except Exception:
+        setattr(parser, _PARSER_INVALID_ATTR, True)
+        return
+    if not isinstance(chunk, dict):
+        setattr(parser, _PARSER_INVALID_ATTR, True)
+        return
+    if getattr(parser, _PARSER_STOP_ATTR, False):
+        if (
+            not _raw_usage_only_event(chunk)
+            or getattr(parser, _PARSER_ALLOW_USAGE_ATTR, False) is not True
+        ):
+            setattr(parser, _PARSER_INVALID_ATTR, True)
+
+
+def _parser_is_guarded(parser) -> bool:
+    return (
+        _PARSER_PATCHED_CLASS is not None
+        and type(parser) is _PARSER_PATCHED_CLASS
+        and getattr(parser, _PARSER_PROVENANCE_ATTR, None) is _PARSER_PROVENANCE_TOKEN
+        and _PARSER_PATCHED_CLASS.__dict__.get("__anext__") is _PARSER_PATCHED_ANEXT
+    )
+
+
+def _ensure_deepseek_parser_patch() -> bool:
+    """Install a token-gated patch on the exact pinned native Chat parser only."""
+    global _PARSER_PATCHED_CLASS, _PARSER_ORIGINAL_ANEXT, _PARSER_PATCHED_ANEXT
+    try:
+        if importlib.metadata.version("litellm") != "1.105.0":
+            return False
+        from litellm.llms.base_llm.base_model_iterator import BaseModelResponseIterator
+        from litellm.llms.openai.chat.gpt_transformation import OpenAIChatCompletionStreamingHandler
+
+        parser_class = OpenAIChatCompletionStreamingHandler
+        if (
+            parser_class.__module__ != "litellm.llms.openai.chat.gpt_transformation"
+            or parser_class.__qualname__ != "OpenAIChatCompletionStreamingHandler"
+            or parser_class.__bases__ != (BaseModelResponseIterator,)
+        ):
+            return False
+        chunk_parser = parser_class.__dict__.get("chunk_parser")
+        handle_line = BaseModelResponseIterator.__dict__.get("_handle_string_chunk")
+        original_anext = BaseModelResponseIterator.__dict__.get("__anext__")
+        if not (
+            _parser_method_has_pinned_shape(
+                chunk_parser,
+                "litellm.llms.openai.chat.gpt_transformation",
+                "OpenAIChatCompletionStreamingHandler.chunk_parser",
+                ("litellm", "llms", "openai", "chat", "gpt_transformation.py"),
+                ("self", "chunk"),
+                coroutine=False,
+            )
+            and _parser_method_has_pinned_shape(
+                handle_line,
+                "litellm.llms.base_llm.base_model_iterator",
+                "BaseModelResponseIterator._handle_string_chunk",
+                ("litellm", "llms", "base_llm", "base_model_iterator.py"),
+                ("self", "str_line"),
+                coroutine=False,
+            )
+            and _parser_method_has_pinned_shape(
+                original_anext,
+                "litellm.llms.base_llm.base_model_iterator",
+                "BaseModelResponseIterator.__anext__",
+                ("litellm", "llms", "base_llm", "base_model_iterator.py"),
+                ("self",),
+                coroutine=True,
+            )
+        ):
+            return False
+        current = parser_class.__dict__.get("__anext__")
+        if current is not None:
+            marker = getattr(current, _PARSER_PATCH_MARKER, None)
+            if marker is _PARSER_PROVENANCE_TOKEN:
+                return (
+                    _PARSER_PATCHED_CLASS is parser_class
+                    and _PARSER_PATCHED_ANEXT is current
+                    and _PARSER_ORIGINAL_ANEXT is original_anext
+                )
+            return False
+        with _ROUTER_PATCH_LOCK:
+            current = parser_class.__dict__.get("__anext__")
+            if current is not None:
+                return (
+                    getattr(current, _PARSER_PATCH_MARKER, None) is _PARSER_PROVENANCE_TOKEN
+                    and _PARSER_PATCHED_CLASS is parser_class
+                    and _PARSER_PATCHED_ANEXT is current
+                    and _PARSER_ORIGINAL_ANEXT is original_anext
+                )
+
+            @functools.wraps(original_anext)
+            async def terminal_aware_anext(self):
+                if _parser_is_guarded(self):
+                    if _parser_invalid(self):
+                        raise RuntimeError("T00_STREAM_TERMINAL_UNVERIFIED")
+                    if getattr(self, _PARSER_DONE_ATTR, False):
+                        if not getattr(self, _PARSER_CLOSED_ATTR, False):
+                            await self.aclose()
+                            setattr(self, _PARSER_CLOSED_ATTR, True)
+                        raise StopAsyncIteration
+                try:
+                    return await original_anext(self)
+                except StopAsyncIteration:
+                    if _parser_is_guarded(self) and getattr(self, _PARSER_DONE_ATTR, False):
+                        await self.aclose()
+                    raise
+
+            setattr(terminal_aware_anext, _PARSER_PATCH_MARKER, _PARSER_PROVENANCE_TOKEN)
+            parser_class.__anext__ = terminal_aware_anext
+            _PARSER_PATCHED_CLASS = parser_class
+            _PARSER_ORIGINAL_ANEXT = original_anext
+            _PARSER_PATCHED_ANEXT = terminal_aware_anext
+        return True
+    except Exception:
+        return False
+
+
+def _attach_parser_provenance(source, request_data) -> bool:
+    if not _ensure_deepseek_parser_patch():
+        return False
+    parser = getattr(source, "completion_stream", None)
+    if not _parser_is_exact_type(parser):
+        return False
+    namespace = getattr(parser, "__dict__", None)
+    http_response = getattr(parser, "http_response", None)
+    if (
+        not isinstance(namespace, dict)
+        or _PARSER_PROVENANCE_ATTR in namespace
+        or http_response is None
+        or not callable(getattr(http_response, "aclose", None))
+    ):
+        return False
+    try:
+        parser._byok_original_chunk_parser = parser.chunk_parser
+        parser._byok_original_handle_line = parser._handle_string_chunk
+        parser._byok_parser_state = True
+        setattr(parser, _PARSER_PROVENANCE_ATTR, _PARSER_PROVENANCE_TOKEN)
+        setattr(parser, _PARSER_STOP_ATTR, False)
+        setattr(parser, _PARSER_DONE_ATTR, False)
+        setattr(parser, _PARSER_INVALID_ATTR, False)
+        setattr(parser, _PARSER_USAGE_ATTR, False)
+        stream_options = request_data.get("stream_options") if isinstance(request_data, dict) else None
+        allow_usage = isinstance(stream_options, dict) and stream_options.get("include_usage") is True
+        setattr(parser, _PARSER_ALLOW_USAGE_ATTR, allow_usage)
+        setattr(parser, _PARSER_CLOSED_ATTR, False)
+
+        original_chunk_parser = parser._byok_original_chunk_parser
+        original_handle_line = parser._byok_original_handle_line
+
+        def guarded_chunk_parser(chunk):
+            if _parser_is_guarded(parser):
+                _record_raw_json_chunk(parser, chunk)
+                if _parser_invalid(parser):
+                    raise RuntimeError("T00_STREAM_TERMINAL_UNVERIFIED")
+            return original_chunk_parser(chunk)
+
+        def guarded_handle_line(line):
+            if _parser_is_guarded(parser):
+                _observe_sse_line(parser, line)
+                if _parser_invalid(parser):
+                    raise RuntimeError("T00_STREAM_TERMINAL_UNVERIFIED")
+            return original_handle_line(line)
+
+        parser.chunk_parser = guarded_chunk_parser
+        parser._handle_string_chunk = guarded_handle_line
+        return True
+    except Exception:
+        _clear_parser_provenance(parser)
+        return False
+
+
+def _is_parser_exact_type(parser) -> bool:
+    return (
+        _PARSER_PATCHED_CLASS is not None
+        and type(parser) is _PARSER_PATCHED_CLASS
+    )
+
+
+def _clear_parser_provenance(source_or_parser) -> None:
+    parser = source_or_parser
+    if not _is_parser_exact_type(parser):
+        parser = getattr(source_or_parser, "completion_stream", None)
+    if not _is_parser_exact_type(parser):
+        return
+    namespace = getattr(parser, "__dict__", {})
+    for name in (
+        "chunk_parser", "_handle_string_chunk",
+        "_byok_original_chunk_parser", "_byok_original_handle_line",
+        "_byok_parser_state", _PARSER_PROVENANCE_ATTR, _PARSER_STOP_ATTR,
+        _PARSER_DONE_ATTR, _PARSER_INVALID_ATTR, _PARSER_USAGE_ATTR,
+        _PARSER_ALLOW_USAGE_ATTR, _PARSER_CLOSED_ATTR,
+    ):
+        namespace.pop(name, None)
+
+
 def _ensure_router_provenance_patch() -> bool:
     """Pin and patch only LiteLLM 1.105.0's router wrapper construction boundary."""
     global _ROUTER_PATCHED_CLASS, _ROUTER_PATCHED_METHOD
@@ -198,6 +526,8 @@ def _ensure_router_provenance_patch() -> bool:
         from litellm.router import FallbackAwareStreamWrapper, Router
         from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
 
+        if not _ensure_deepseek_parser_patch():
+            return False
         method = Router._acompletion_streaming_iterator
         marker = getattr(method, _ROUTER_PATCH_MARKER, None)
         if marker is _ROUTER_PROVENANCE_TOKEN:
@@ -220,16 +550,26 @@ def _ensure_router_provenance_patch() -> bool:
             async def preserve_raw_source(
                 self, model_response, messages, initial_kwargs, deployment_slot=None,
             ):
-                wrapped = await original(
-                    self, model_response, messages, initial_kwargs, deployment_slot,
-                )
-                if (
+                exact_route = (
                     type(model_response) is CustomStreamWrapper
                     and getattr(model_response, "custom_llm_provider", None) == "deepseek"
                     and isinstance(initial_kwargs, dict)
                     and initial_kwargs.get("model") == TERMINAL_STREAM_MODEL
                     and initial_kwargs.get("stream") is True
                     and _request_has_no_retry_or_fallback_override(initial_kwargs)
+                )
+                parser_attached = _attach_parser_provenance(model_response, initial_kwargs) if exact_route else False
+                try:
+                    wrapped = await original(
+                        self, model_response, messages, initial_kwargs, deployment_slot,
+                    )
+                except BaseException:
+                    if parser_attached:
+                        _clear_parser_provenance(model_response)
+                    raise
+                if (
+                    exact_route
+                    and parser_attached
                     and _is_pinned_router_fallback_wrapper(wrapped, FallbackAwareStreamWrapper)
                 ):
                     try:
@@ -238,7 +578,9 @@ def _ensure_router_provenance_patch() -> bool:
                     except Exception:
                         # The streaming hook will fail closed if provenance is
                         # unavailable; never replace the Router's response.
-                        pass
+                        _clear_parser_provenance(model_response)
+                elif parser_attached:
+                    _clear_parser_provenance(model_response)
                 return wrapped
 
             setattr(preserve_raw_source, _ROUTER_PATCH_MARKER, _ROUTER_PROVENANCE_TOKEN)
@@ -355,7 +697,7 @@ class ProviderKeyGuard(CustomLogger):
         if reason is None and version != "1.105.0":
             reason = "version_mismatch"
 
-        boundary_type = fallback_base = custom_stream_type = None
+        boundary_type = fallback_base = custom_stream_type = parser_type = None
         if reason is None:
             try:
                 # LiteLLM 1.105.0's Proxy hook receives this boundary. Router
@@ -363,10 +705,12 @@ class ProviderKeyGuard(CustomLogger):
                 from litellm.proxy.utils import _UpstreamStreamBoundary
                 from litellm.router import FallbackAwareStreamWrapper
                 from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
+                from litellm.llms.openai.chat.gpt_transformation import OpenAIChatCompletionStreamingHandler
 
                 boundary_type = _UpstreamStreamBoundary
                 fallback_base = FallbackAwareStreamWrapper
                 custom_stream_type = CustomStreamWrapper
+                parser_type = OpenAIChatCompletionStreamingHandler
             except Exception:
                 reason = "wrapper_types_unavailable"
 
@@ -386,6 +730,14 @@ class ProviderKeyGuard(CustomLogger):
                 if type(raw_source) is not custom_stream_type:
                     reason = "raw_source_type_mismatch"
                 else:
+                    parser = getattr(raw_source, "completion_stream", None)
+                    if (
+                        parser_type is None
+                        or type(parser) is not parser_type
+                        or not _parser_is_guarded(parser)
+                        or _parser_invalid(parser)
+                    ):
+                        reason = "parser_provenance_missing"
                     try:
                         if (
                             raw_source.custom_llm_provider != "deepseek"
@@ -403,18 +755,25 @@ class ProviderKeyGuard(CustomLogger):
             except Exception:
                 pass
             finally:
-                _clear_router_provenance(router_source)
+                _clear_parser_provenance(raw_source)
+            _clear_router_provenance(router_source)
             raise HTTPException(
                 status_code=502,
                 detail=_terminal_error_detail(reason, response, router_source, version),
             ) from None
 
+        parser = raw_source.completion_stream
         tail = []
         saw_terminal = False
         usage_seen = False
         closed = False
         try:
             async for chunk in response:
+                if _parser_invalid(parser):
+                    raise HTTPException(
+                        status_code=502,
+                        detail=_terminal_error_detail("raw_stream_invalid", response, router_source, version),
+                    )
                 if getattr(router_source, "fallback_headers_adopted", None) is not False:
                     raise HTTPException(
                         status_code=502,
@@ -423,18 +782,16 @@ class ProviderKeyGuard(CustomLogger):
                         ),
                     )
                 raw_reason = raw_source.received_finish_reason
+                verified_json_stop = getattr(parser, _PARSER_STOP_ATTR, False) is True
                 reason = _finish_reason(chunk)
                 if reason is not None:
-                    if reason != "stop" or raw_reason != "stop" or saw_terminal:
+                    if (
+                        reason != "stop"
+                        or raw_reason != "stop"
+                        or not verified_json_stop
+                        or saw_terminal
+                    ):
                         raise HTTPException(status_code=502, detail=_TERMINAL_ERROR)
-                    saw_terminal = True
-                    tail.append(chunk)
-                    continue
-
-                # Some provider parsers expose the raw reason only on the source
-                # while omitting it from the normalized frame. Cache that frame
-                # as the terminal candidate and release it only after clean EOF.
-                if raw_reason == "stop" and not saw_terminal:
                     saw_terminal = True
                     tail.append(chunk)
                     continue
@@ -443,10 +800,18 @@ class ProviderKeyGuard(CustomLogger):
                     if usage_seen:
                         raise HTTPException(status_code=502, detail=_TERMINAL_ERROR)
                     usage_seen = True
-                    if saw_terminal:
+                    if saw_terminal or (raw_reason == "stop" and verified_json_stop):
                         tail.append(chunk)
                     else:
                         yield chunk
+                    continue
+
+                # Some provider parsers expose the raw reason only on the source
+                # while omitting it from the normalized frame. Cache that frame
+                # as the terminal candidate and release it only after clean EOF.
+                if raw_reason == "stop" and verified_json_stop and not saw_terminal:
+                    saw_terminal = True
+                    tail.append(chunk)
                     continue
 
                 choices = getattr(chunk, "choices", None) or []
@@ -463,6 +828,8 @@ class ProviderKeyGuard(CustomLogger):
             if (
                 not saw_terminal
                 or raw_source.received_finish_reason != "stop"
+                or getattr(parser, _PARSER_STOP_ATTR, False) is not True
+                or _parser_invalid(parser)
                 or getattr(router_source, "fallback_headers_adopted", None) is not False
                 or getattr(response, "failure", None) is not None
                 or getattr(raw_source, "failure", None) is not None
@@ -484,8 +851,9 @@ class ProviderKeyGuard(CustomLogger):
                     await _aclose_stream(response)
                 except Exception:
                     pass
-            # Drop the retained provider iterator once verification is over so
-            # client disconnects and completed streams don't extend its lifetime.
+            # Drop the retained parser and provider iterator once verification is
+            # over so client disconnects and completed streams don't extend lifetime.
+            _clear_parser_provenance(raw_source)
             _clear_router_provenance(router_source)
 
 
