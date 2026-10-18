@@ -5,6 +5,8 @@ import NewsChatAssistant from '@/components/NewsChatAssistant'
 
 const chatState = vi.hoisted(() => ({ stopWaiting: vi.fn() }))
 
+// Open-state tests intentionally isolate auth/provider settings from the modal.
+vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ user: null, loading: false }) }))
 vi.mock('@/hooks/useChat', () => ({
   useChat: vi.fn(() => ({
     messages: [], input: '', setInput: vi.fn(), isLoading: false, phase: 'idle',
