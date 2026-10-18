@@ -179,6 +179,7 @@ class SelfHostedCIContract(unittest.TestCase):
                         if step["name"] == "Verify BYOK T00 isolated SDK and Proxy contracts")
         t00_run = t00_step["run"]
         self.assertIn("tools/byok_t00_probe/probe.py", t00_run)
+        self.assertIn("unittest discover -s ops/shared-litellm-proxy/tests -p 'test_provider_key_guard.py'", t00_run)
         self.assertIn("tools/byok_t00_probe/t04_django_localproxy.py", t00_run)
         self.assertIn("env -i", t00_run)
         self.assertIn("DJANGO_ENV=production", t00_run)

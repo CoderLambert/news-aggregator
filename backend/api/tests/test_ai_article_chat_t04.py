@@ -340,20 +340,24 @@ class PersonalArticleChatTests(TestCase):
         self.assertIn('"status": "failed"', wire)
         self.assertEqual(len(ChatSession.objects.get(user=self.owner, news=self.news).messages), 1)
 
-    def test_incomplete_unknown_and_empty_terminal_never_publish_or_save(self):
-        for result in (
-            [gateway_frame('Partial text', finish=None)],
-            [gateway_frame('Truncated text', finish='length')],
-            [gateway_frame('  ')],
+    def test_incomplete_unknown_and_empty_terminal_may_show_partial_but_never_complete_or_save(self):
+        for result, visible in (
+            ([gateway_frame('Partial text', finish=None)], 'Partial text'),
+            ([gateway_frame('Truncated text', finish='length')], 'Truncated text'),
+            ([gateway_frame('  ')], None),
         ):
             ChatSession.objects.all().delete()
             gateway = FakeGateway(result)
-            with patch('api.services.ai_article_chat.build_gateway_client', return_value=gateway):
+            with patch('api.services.ai_article_chat.build_gateway_client', return_value=gateway) as build:
                 response = self._chat(model=self.model)
                 wire = self._wire(response)
             self.assertIn('"status": "failed"', wire)
-            self.assertNotIn('Partial text', wire)
-            self.assertNotIn('Truncated text', wire)
+            self.assertNotIn('"status": "complete"', wire)
+            self.assertNotIn('"type": "chat_model"', wire)
+            if visible:
+                self.assertIn(visible, wire)
+            self.assertEqual(build.call_count, 1)
+            self.assertEqual(len(gateway.sent), 1)
             messages = ChatSession.objects.get(user=self.owner, news=self.news).messages
             self.assertEqual(len(messages), 1)
             self.assertEqual(messages[0]['role'], 'user')

@@ -126,6 +126,47 @@ class ChatStreamingFailClosed(unittest.TestCase):
 
 
 class UnaffectedPaths(unittest.TestCase):
+    def test_only_exact_deepseek_chat_stream_alias_is_exceptionally_allowed(self):
+        exact = {
+            "api_key": "sk-synthetic-provider",
+            "model": "deepseek/deepseek-chat",
+            "stream": True,
+            "n": 1,
+        }
+        allowed = run_hook(
+            exact, "acompletion",
+            env={
+                "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat",
+                "BYOK_DENY_STREAMING_CALL_TYPES": "",
+            },
+        )
+        self.assertEqual(allowed[0], "allowed")
+        for value in ("deepseek/other", "other/deepseek-chat", "deepseek/*"):
+            with self.subTest(model=value):
+                result = run_hook(
+                    {**exact, "model": value}, "acompletion",
+                    env={
+                        "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat",
+                        "BYOK_DENY_STREAMING_CALL_TYPES": "",
+                    },
+                )
+                self.assertEqual(result, ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
+
+    def test_explicit_deny_still_overrides_exact_chat_stream_allowlist(self):
+        exact = {
+            "api_key": "sk-synthetic-provider",
+            "model": "deepseek/deepseek-chat",
+            "stream": True,
+        }
+        result = run_hook(
+            exact, "acompletion",
+            env={
+                "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat",
+                "BYOK_DENY_STREAMING_CALL_TYPES": "acompletion",
+            },
+        )
+        self.assertEqual(result, ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
+
     def test_non_streaming_chat_allowed(self):
         for data in ({"api_key": "sk-synthetic-provider"}, {"api_key": "sk-synthetic-provider", "stream": False},
                      {"api_key": "sk-synthetic-provider", "stream": "false"}, {"api_key": "sk-synthetic-provider", "stream": 0},

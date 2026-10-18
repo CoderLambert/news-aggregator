@@ -259,6 +259,7 @@ jobs:
           "$t00_env/proxy/bin/python" -m pip install --disable-pip-version-check --no-input -r tools/byok_t00_probe/requirements-proxy.lock
           "$t00_env/proxy/bin/python" tools/byok_t00_probe/prepare_proxy.py
           "$t00_env/sdk/bin/python" -m unittest discover -s tools/byok_t00_probe -p 'test_*.py'
+          "$t00_env/sdk/bin/python" -m unittest discover -s ops/shared-litellm-proxy/tests -p 'test_provider_key_guard.py'
           "$t00_env/sdk/bin/python" tools/byok_t00_probe/probe.py --proxy-python "$t00_env/proxy/bin/python" --report "$t00_env/report.json"
           # Run the Django/API end-to-end proof only in this full, non-Draft
           # backend gate. The child receives no ambient provider or DB secrets.

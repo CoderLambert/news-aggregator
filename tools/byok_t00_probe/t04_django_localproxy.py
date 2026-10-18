@@ -238,10 +238,10 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
                 sdk.close()
 
             # Read the real Django StreamingHttpResponse incrementally. The
-            # fixture withholds its terminal for 0.6 seconds after the first
-            # content delta, which proves this is not a buffered one-shot answer.
+            # fixture holds the terminal behind an explicit barrier after the
+            # first content delta, proving this is not buffered.
             turn = uuid.uuid4()
-            success_marker = "T00_T04_E2E_SUCCESS_A"
+            success_marker = "T00_T04_E2E_SUCCESS_STREAM_HOLD_A"
             response = client.post(chat_url, {
                 "question": success_marker, "model_config_id": str(model.pk),
                 "billing_consent": True, "turn_id": str(turn),
@@ -255,11 +255,20 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
                 received.append(text)
                 if "synthetic t00 stream" in text:
                     break
-            partial = _wait_record(
+            held_delta = _wait_record(
                 upstream_url, success_marker,
-                lambda row: row.get("upstream_stream_events_written", 0) >= 2,
+                lambda row: row.get("stream_hold_waiting") is True,
             )
-            assert partial["upstream_stream_body_finished"] is False
+            assert held_delta["upstream_stream_events_written"] >= 2
+            assert held_delta["upstream_stream_body_finished"] is False
+            release_delta = urllib.request.Request(
+                upstream_url + "/test/release",
+                data=json.dumps({"test_id": success_marker}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with OPENER.open(release_delta, timeout=3) as released:
+                assert json.load(released)["released"] is True
             wire = "".join(received) + _consume(iterator)
             assert '"status": "complete"' in wire
             assert '"type": "chat_model"' in wire
@@ -269,6 +278,7 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
                 _records(upstream_url, success_marker), marker=success_marker,
                 stream=True, terminal="finish_reason_stop",
             )
+            assert success_row["stream_hold_released"] is True
             assert success_row["upstream_stream_body_finished"] is True
             turn_row = ArticleChatTurn.objects.get(pk=turn)
             assert turn_row.status == "complete"
@@ -309,8 +319,10 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
             assert client.delete(chat_url).data["status"] == "cleared"
 
             # Cancel from a second authenticated tab while the upstream
-            # connection is held. The request is already dispatched once; a
-            # cancel receipt closes the stream and prevents terminal commit.
+            # request is in flight. The durable receipt fences terminal commit;
+            # after the controlled provider response resumes, the next read
+            # boundary observes cancellation and closes the stream. Already-
+            # dispatched provider work may still incur a charge.
             cancel_turn = uuid.uuid4()
             cancel_marker = "T00_T04_E2E_CANCEL_HOLD_A"
             cancel_response = client.post(chat_url, {
@@ -368,6 +380,10 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
             assert AIModelProbeAttempt.objects.count() == probe_receipt_count
             assert _stats(upstream_url)["active_stream_producers"] == 0
     finally:
+        with upstream.LOCK:
+            pending_releases = list(upstream.RELEASE_EVENTS.values())
+        for release_event in pending_releases:
+            release_event.set()
         if proxy is not None:
             proxy.close()
             assert proxy.cleanup_complete

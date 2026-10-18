@@ -115,16 +115,24 @@ class ProviderKeyGuard(CustomLogger):
 
         if _stream_requested(data.get("stream")):
             extra_denies = _extra_denied_streaming_call_types()
-            if normalized_call_type in BYOK_CALL_TYPES and (
-                normalized_call_type in extra_denies
-                or not _terminal_stream_allowlisted(data, normalized_call_type)
-            ):
+            if normalized_call_type in extra_denies:
                 code = (
                     "T00_CHAT_STREAMING_DISABLED"
                     if normalized_call_type in ALWAYS_DENIED_STREAMING_CALL_TYPES
                     else "T00_STREAMING_DISABLED"
                 )
                 raise HTTPException(status_code=400, detail={"code": code})
+            # Preserve the existing native Responses/Messages stream contracts.
+            # Chat Completions remains denied unless this request uses the one
+            # exact route whose raw upstream terminal is verified below.
+            if (
+                normalized_call_type in ALWAYS_DENIED_STREAMING_CALL_TYPES
+                and not _terminal_stream_allowlisted(data, normalized_call_type)
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail={"code": "T00_CHAT_STREAMING_DISABLED"},
+                )
         return data
 
     async def async_post_call_streaming_iterator_hook(

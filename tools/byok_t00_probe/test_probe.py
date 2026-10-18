@@ -302,13 +302,18 @@ class ProviderKeyGuardFailClosed(unittest.TestCase):
             ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"),
         )
 
-    def test_non_streaming_other_protocols_remain_available_but_streaming_is_denied(self):
+    def test_native_responses_and_messages_streaming_keep_existing_behavior(self):
         self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider"}, "acompletion")[0], "allowed")
         self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider", "stream": False}, "acompletion")[0], "allowed")
         for call_type in ("aresponses", "anthropic_messages"):
             self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider", "stream": False}, call_type)[0], "allowed")
+            self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider", "stream": True}, call_type)[0], "allowed")
             self.assertEqual(
-                self.run_hook({"api_key": "sk-synthetic-provider", "stream": True}, call_type),
+                self.run_hook(
+                    {"api_key": "sk-synthetic-provider", "stream": True},
+                    call_type,
+                    {"BYOK_DENY_STREAMING_CALL_TYPES": call_type},
+                ),
                 ("rejected", 400, "T00_STREAMING_DISABLED"),
             )
 

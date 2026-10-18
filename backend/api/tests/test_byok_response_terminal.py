@@ -1,27 +1,14 @@
-"""Fail-closed, offline BYOK gateway terminal contracts.
+"""Offline BYOK gateway transport regressions.
 
-Only a verified non-streaming Chat Completions text response may be exposed
-through the compatibility SSE adapter. These synthetic fixtures never contact
-a real provider or consume user keys.
+This adapter forwards the true OpenAI SDK stream only for the exact T04
+DeepSeek alias. Raw terminal verification belongs to LiteLLM's pinned Proxy
+hook. All values are synthetic and no provider key is sent to a real service.
 """
 from types import SimpleNamespace
 
 import pytest
 
-from api.services.ai_gateway import (
-    AIGatewayError,
-    _GatewayCompletions,
-)
-
-
-def _completion(*, reason='stop', content='complete reply', choices=1):
-    return SimpleNamespace(choices=[
-        SimpleNamespace(
-            finish_reason=reason,
-            message=SimpleNamespace(content=content),
-        )
-        for _ in range(choices)
-    ])
+from api.services.ai_gateway import AIGatewayError, _GatewayCompletions
 
 
 class SyntheticGateway:
@@ -34,60 +21,62 @@ class SyntheticGateway:
         return self.reply
 
 
-@pytest.mark.parametrize(('reason', 'content', 'count'), [
-    ('length', 'partial text', 1),
-    ('content_filter', 'filtered content', 1),
-    ('tool_calls', 'unexpected tool stream', 1),
-    (None, 'terminal missing', 1),
-    ('stop', None, 1),
-    ('stop', '', 1),
-    ('stop', [{'type': 'text', 'text': 'multimodal'}], 1),
-    ('stop', 'could be complete', 0),
-    ('stop', 'ambiguous multi-choice', 2),
-])
-def test_gateway_stream_rejects_unverified_terminal_without_yielding_text(reason, content, count):
-    fake = SyntheticGateway(_completion(reason=reason, content=content, choices=count))
-    adapter = _GatewayCompletions(fake, 'only-synthetic-provider-key')
-    with pytest.raises(AIGatewayError):
-        adapter.create(stream=True, model='deepseek/deepseek-chat', messages=[])
-    assert len(fake.calls) == 1
-    assert fake.calls[0]['stream'] is False
-    assert fake.calls[0]['extra_body'] == {'api_key': 'only-synthetic-provider-key'}
+class SyntheticStream:
+    def __init__(self):
+        self.closed = False
+
+    def __iter__(self):
+        yield SimpleNamespace(choices=[SimpleNamespace(
+            delta=SimpleNamespace(content="synthetic delta"),
+            finish_reason=None,
+        )])
+
+    def close(self):
+        self.closed = True
 
 
-def test_complete_gateway_terminal_exposes_exactly_one_text_chunk_and_close():
-    fake = SyntheticGateway(_completion())
-    adapter = _GatewayCompletions(fake, 'only-synthetic-provider-key')
-    stream = adapter.create(stream=True, model='deepseek/deepseek-chat', messages=[])
-    chunks = list(stream)
-    assert len(chunks) == 1
-    assert chunks[0].choices[0].delta.content == 'complete reply'
-    assert chunks[0].choices[0].finish_reason == 'stop'
-    assert stream.close() is None
-
-
-def test_non_streaming_tool_calls_remain_available_for_research():
-    reply = _completion(reason='tool_calls', content=None)
-    fake = SyntheticGateway(reply)
-    adapter = _GatewayCompletions(fake, 'only-synthetic-provider-key')
-    assert adapter.create(model='deepseek/deepseek-chat', messages=[]) is reply
-    assert 'stream' not in fake.calls[0]
-    assert fake.calls[0]['extra_body'] == {'api_key': 'only-synthetic-provider-key'}
-
-
-def test_incomplete_gateway_stream_never_leaks_partial_text_into_chat():
-    from api.services.llm_translator import stream_chat
-
-    fake = SyntheticGateway(_completion(reason='length', content='PARTIAL_NEVER_DISPLAY'))
-    wrapped = _GatewayCompletions(fake, 'only-synthetic-provider-key')
-    client = SimpleNamespace(
-        chat=SimpleNamespace(completions=wrapped),
-        _newshub_max_attempts=1,
+def test_exact_deepseek_stream_is_forwarded_without_buffering_or_retry():
+    stream = SyntheticStream()
+    fake = SyntheticGateway(stream)
+    adapter = _GatewayCompletions(fake, "only-synthetic-provider-key")
+    returned = adapter.create(
+        stream=True, model="deepseek/deepseek-chat",
+        messages=[{"role": "user", "content": "synthetic"}],
     )
-    result = list(stream_chat(
-        [{'role': 'user', 'content': 'synthetic request'}],
-        clients=[(client, 'deepseek/deepseek-chat')],
-        require_completed=False,
-    ))
-    assert not any('PARTIAL_NEVER_DISPLAY' in chunk for chunk in result)
-    assert len(fake.calls) == 1
+    assert returned is stream
+    assert fake.calls == [{
+        "stream": True,
+        "model": "deepseek/deepseek-chat",
+        "messages": [{"role": "user", "content": "synthetic"}],
+        "extra_body": {"api_key": "only-synthetic-provider-key"},
+    }]
+    assert next(iter(returned)).choices[0].delta.content == "synthetic delta"
+    assert not stream.closed
+    returned.close()
+    assert stream.closed
+
+
+@pytest.mark.parametrize("model", [
+    "deepseek/other", "openai/gpt-test", "deepseek/*",
+])
+def test_other_model_stream_is_rejected_before_dispatch(model):
+    fake = SyntheticGateway(SyntheticStream())
+    adapter = _GatewayCompletions(fake, "only-synthetic-provider-key")
+    with pytest.raises(AIGatewayError):
+        adapter.create(stream=True, model=model, messages=[])
+    assert fake.calls == []
+
+
+def test_exact_alias_non_stream_tool_calls_remain_available():
+    tool_reply = SimpleNamespace(choices=[SimpleNamespace(
+        finish_reason="tool_calls",
+        message=SimpleNamespace(content=None, tool_calls=[]),
+    )])
+    fake = SyntheticGateway(tool_reply)
+    adapter = _GatewayCompletions(fake, "only-synthetic-provider-key")
+    assert adapter.create(model="deepseek/deepseek-chat", messages=[]) is tool_reply
+    assert fake.calls == [{
+        "model": "deepseek/deepseek-chat",
+        "messages": [],
+        "extra_body": {"api_key": "only-synthetic-provider-key"},
+    }]

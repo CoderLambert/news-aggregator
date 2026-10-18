@@ -476,6 +476,7 @@ class Handler(BaseHTTPRequestHandler):
             "stop-clean-eof" if "_STOP_EOF_" in test_id
             else "eof-no-terminal" if "_EOF_" in test_id
             else "done-no-finish" if "_NO_STOP_DONE_" in test_id
+            else "stream-held" if "_STREAM_HOLD_" in test_id
             else "held" if "_HOLD_" in test_id
             else "incomplete" if "_INCOMPLETE_" in test_id
             else "http-error" if "_HTTP_ERROR_" in test_id
@@ -544,6 +545,8 @@ class Handler(BaseHTTPRequestHandler):
             "cancel_fixture_frames_written": 0,
             "held_waiting": False,
             "held_released": False,
+            "stream_hold_waiting": False,
+            "stream_hold_released": False,
             "post_done_socket_held": False,
             "post_done_probe_write_attempted": False,
             "post_done_probe_write_succeeded": False,
@@ -601,6 +604,7 @@ class Handler(BaseHTTPRequestHandler):
                     model, eof, scenario == "sse-error", "_INCOMPLETE_" in test_id,
                     record, "_CANCEL_" in test_id, stop_clean_eof=stop_clean_eof,
                     no_stop_done=no_stop_done,
+                    stream_hold=scenario == "stream-held",
                 )
             else:
                 if "_TOOL_R1_" in test_id or "_TOOL_R2_" in test_id or "_TOOL_MALFORMED_" in test_id or "_TOOL_INVALID_" in test_id or "_TOOL_UNKNOWN_" in test_id:
@@ -806,7 +810,7 @@ class Handler(BaseHTTPRequestHandler):
             self._finish_stream_producer(record)
 
     def _chat_stream(self, model, eof=False, error=False, incomplete=False, record=None,
-                     cancel=False, *, stop_clean_eof=False, no_stop_done=False):
+                     cancel=False, *, stop_clean_eof=False, no_stop_done=False, stream_hold=False):
         def chunk(delta, finish=None):
             return {"id": "chatcmpl_t00_synthetic", "object": "chat.completion.chunk", "created": 1, "model": model, "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
 
@@ -832,13 +836,21 @@ class Handler(BaseHTTPRequestHandler):
             for index, (_name, payload) in enumerate(events):
                 if not self._write_event(self._chat_sse_bytes(payload), record):
                     return
-                if "_T04_E2E_" in (record or {}).get("test_id", "") and any(
+                if stream_hold and any(
                     choice.get("delta", {}).get("content")
                     for choice in payload.get("choices", [])
                 ):
-                    # Give the Django client a real first-delta window before
-                    # the terminal event so buffering cannot pass the check.
-                    time.sleep(0.6)
+                    with LOCK:
+                        event = RELEASE_EVENTS.setdefault(
+                            (record or {}).get("test_id", ""), threading.Event(),
+                        )
+                        record["stream_hold_waiting"] = True
+                    # The API test observes this explicit barrier only after it
+                    # has received the first delta, then releases the terminal.
+                    if not event.wait(timeout=10.0):
+                        record["stream_hold_timed_out"] = True
+                        return
+                    record["stream_hold_released"] = True
                 if cancel and index == 0:
                     if record is not None:
                         record["downstream_cancel_fixture_started_monotonic_ns"] = time.monotonic_ns()
