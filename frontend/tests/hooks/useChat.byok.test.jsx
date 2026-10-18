@@ -81,6 +81,7 @@ describe('T04 explicit BYOK turns in useChat', () => {
     const cancellation = deferred()
     api.cancelChatTurn.mockReturnValue(cancellation.promise)
     api.chatStream.mockImplementation(async function* (_id, _question, options) {
+      yield ''
       await new Promise((resolve) => {
         if (options.signal.aborted) resolve()
         else options.signal.addEventListener('abort', resolve, { once: true })
@@ -111,7 +112,11 @@ describe('T04 explicit BYOK turns in useChat', () => {
     const model = '22222222-2222-4222-8222-222222222222'
     api.cancelChatTurn.mockRejectedValueOnce(new Error('network lost'))
     api.chatStream.mockImplementation(async function* (_id, _question, options) {
-      await new Promise((resolve) => options.signal.addEventListener('abort', resolve, { once: true }))
+      yield ''
+      await new Promise((resolve) => {
+        if (options.signal.aborted) resolve()
+        else options.signal.addEventListener('abort', resolve, { once: true })
+      })
     })
     const hook = renderHook(() => useChat(81, true, model, true), { wrapper: wrapper() })
     await waitFor(() => expect(hook.result.current.isLoading).toBe(false))
@@ -133,7 +138,11 @@ describe('T04 explicit BYOK turns in useChat', () => {
   it('best-effort cancels an in-flight personal turn when the hook unmounts', async () => {
     const model = '22222222-2222-4222-8222-222222222222'
     api.chatStream.mockImplementation(async function* (_id, _question, options) {
-      await new Promise((resolve) => options.signal.addEventListener('abort', resolve, { once: true }))
+      yield ''
+      await new Promise((resolve) => {
+        if (options.signal.aborted) resolve()
+        else options.signal.addEventListener('abort', resolve, { once: true })
+      })
     })
     const hook = renderHook(() => useChat(81, true, model, true), { wrapper: wrapper() })
     await waitFor(() => expect(hook.result.current.isLoading).toBe(false))
@@ -149,6 +158,7 @@ describe('T04 explicit BYOK turns in useChat', () => {
   it('does not send an old viewer turn cancellation after a viewer switch', async () => {
     const model = '22222222-2222-4222-8222-222222222222'
     api.chatStream.mockImplementation(async function* (_id, _question, options) {
+      yield ''
       await new Promise((resolve) => {
         if (options.signal.aborted) resolve()
         else options.signal.addEventListener('abort', resolve, { once: true })
