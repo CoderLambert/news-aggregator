@@ -443,7 +443,7 @@ def _attach_parser_provenance(source, request_data) -> bool:
     if not _ensure_deepseek_parser_patch():
         return False
     parser = getattr(source, "completion_stream", None)
-    if not _parser_is_exact_type(parser):
+    if not _is_parser_exact_type(parser):
         return False
     namespace = getattr(parser, "__dict__", None)
     http_response = getattr(parser, "http_response", None)

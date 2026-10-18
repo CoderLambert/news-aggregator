@@ -542,6 +542,28 @@ class NativeParserPatch(unittest.TestCase):
             self.assertTrue(guard._ensure_deepseek_parser_patch())
             self.assertIs(OpenAIChatCompletionStreamingHandler.__dict__["__anext__"], patched)
 
+            real_source = SimpleNamespace(
+                custom_llm_provider="deepseek",
+                completion_stream=OpenAIChatCompletionStreamingHandler(),
+            )
+            real_source.completion_stream.http_response = SimpleNamespace(aclose=lambda: None)
+            original_chunk_parser = real_source.completion_stream.chunk_parser
+            self.assertTrue(guard._attach_parser_provenance(
+                real_source, {"stream_options": {"include_usage": True}},
+            ))
+            parser = real_source.completion_stream
+            self.assertTrue(guard._parser_is_guarded(parser))
+            parser.chunk_parser({
+                "choices": [{"index": 0, "finish_reason": "stop", "delta": {}}],
+            })
+            parser._handle_string_chunk("data: [DONE]")
+            self.assertTrue(getattr(parser, guard._PARSER_STOP_ATTR))
+            self.assertTrue(getattr(parser, guard._PARSER_DONE_ATTR))
+            self.assertIsNot(parser.chunk_parser, original_chunk_parser)
+            guard._clear_parser_provenance(real_source)
+            self.assertFalse(guard._parser_is_guarded(parser))
+            self.assertFalse(hasattr(parser, guard._PARSER_PROVENANCE_ATTR))
+
             ordinary = OpenAIChatCompletionStreamingHandler()
             self.assertEqual(asyncio.run(ordinary.__anext__()), "ordinary")
 
