@@ -6,6 +6,8 @@ import ChatBubbleButton from '@/components/chat/ChatBubbleButton'
 import ChatHeader from '@/components/chat/ChatHeader'
 import ChatMessageList from '@/components/chat/ChatMessageList'
 import ChatInput from '@/components/chat/ChatInput'
+import ChatModelPicker from '@/components/chat/ChatModelPicker'
+import { useAuth } from '@/context/AuthContext'
 import ClearChatDialog from '@/components/chat/ClearChatDialog'
 import Confetti from '@/components/chat/Confetti'
 import { Button } from '@/components/ui/button'
@@ -35,6 +37,11 @@ interface NewsChatAssistantProps {
 }
 
 export default function NewsChatAssistant({ newsId, open, onOpenChange, articleContext }: NewsChatAssistantProps) {
+  const { user } = useAuth()
+  // Never let a previous viewer's selected billable model cross account changes.
+  const [selection, setSelection] = useState<{ viewer: number; modelId: string | null; consent: boolean } | null>(null)
+  const selectedModelId = selection?.viewer === user?.id ? selection.modelId : null
+  const modelConsent = Boolean(selectedModelId && selection?.viewer === user?.id && selection.consent)
   const [internalOpen, setInternalOpen] = useState(false)
   const isOpen = open ?? internalOpen
   const setIsOpen = useCallback((nextOpen: boolean) => {
@@ -53,7 +60,7 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
     confirmingClear, isClearing, clearError, requestClearChat, cancelClear, confirmClear,
     uncertainTurn, checkPendingTurn, resendUncertainTurn,
     webSearch, toggleWebSearch,
-  } = useChat(newsId, isOpen)
+  } = useChat(newsId, isOpen, selectedModelId, modelConsent)
   const { scrollRef: chatScrollRef, onScroll: onChatScroll, onWheel: onChatWheel } = useChatScroll(messages, phase, isOpen)
 
   const {
@@ -143,6 +150,12 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
           clearDisabled={confirmingClear}
           onClose={closePanel}
         />
+        {user && <ChatModelPicker key={user.id} viewer={user.id}
+          selected={selectedModelId} consent={modelConsent}
+          disabled={isLoading || confirmingClear || isClearing}
+          onSelect={modelId => setSelection({ viewer: user.id, modelId, consent: false })}
+          onConsent={consent => setSelection({ viewer: user.id, modelId: selectedModelId, consent })}
+        />}
 
         {/* Context Status Banner */}
         <div className="flex items-center justify-between border-b border-border bg-secondary/60 px-4 py-2 text-[11px] md:px-6 md:text-xs">
@@ -221,11 +234,11 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
           onSend={() => { void handleSend() }}
           onStop={phase === 'thinking' || phase === 'streaming' ? stopWaiting : undefined}
           isLoading={isLoading}
-          sendDisabled={Boolean(uncertainTurn) || confirmingClear}
+          sendDisabled={Boolean(uncertainTurn) || confirmingClear || Boolean(selectedModelId && !modelConsent)}
           disabled={confirmingClear || isClearing}
           autoFocus={isOpen}
-          webSearch={webSearch}
-          onWebSearchToggle={toggleWebSearch}
+          webSearch={selectedModelId ? false : webSearch}
+          onWebSearchToggle={selectedModelId ? undefined : toggleWebSearch}
         />
 
         <Confetti fire={confettiFired} />
