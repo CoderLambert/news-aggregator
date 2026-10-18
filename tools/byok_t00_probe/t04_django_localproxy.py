@@ -290,6 +290,54 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
 
             assert client.delete(chat_url).data["status"] == "cleared"
 
+            # Closing the Django response after an early delta must propagate
+            # GeneratorExit through the API/service to close the SDK stream.
+            close_turn = uuid.uuid4()
+            close_marker = "T00_T04_E2E_CLIENT_CLOSE_STREAM_HOLD_A"
+            close_response = client.post(chat_url, {
+                "question": close_marker, "model_config_id": str(model.pk),
+                "billing_consent": True, "turn_id": str(close_turn),
+            }, format="json")
+            assert close_response.status_code == 200
+            close_iterator = iter(close_response.streaming_content)
+            close_chunks = []
+            while True:
+                chunk = next(close_iterator)
+                text = chunk.decode("utf-8", errors="replace") if isinstance(chunk, bytes) else str(chunk)
+                close_chunks.append(text)
+                if "synthetic t00 stream" in text:
+                    break
+            held_close = _wait_record(
+                upstream_url, close_marker,
+                lambda row: row.get("stream_hold_waiting") is True,
+            )
+            assert held_close["upstream_stream_body_finished"] is False
+            close_response.close()
+            release_close = urllib.request.Request(
+                upstream_url + "/test/release",
+                data=json.dumps({"test_id": close_marker}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with OPENER.open(release_close, timeout=3) as released:
+                assert json.load(released)["released"] is True
+            closed_row = _wait_record(
+                upstream_url, close_marker,
+                lambda row: row.get("client_disconnected") is True,
+            )
+            assert closed_row["client_disconnected"] is True
+            assert '"status": "complete"' not in "".join(close_chunks)
+            assert '"type": "chat_model"' not in "".join(close_chunks)
+            assert provider_key not in "".join(close_chunks)
+            assert ArticleChatTurn.objects.get(pk=close_turn).status == "cancelled"
+            session.refresh_from_db()
+            assert [message["role"] for message in session.messages] == ["user"]
+            deadline = time.monotonic() + 3
+            while _stats(upstream_url)["active_stream_producers"] and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert _stats(upstream_url)["active_stream_producers"] == 0
+            assert client.delete(chat_url).data["status"] == "cleared"
+
             # Raw EOF without an upstream finish_reason is rejected by the
             # pinned whole-iterator hook, even though the SDK/Proxy may have
             # emitted partial text before discovering the incomplete stream.
