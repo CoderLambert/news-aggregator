@@ -14,7 +14,15 @@ import subprocess
 import sys
 
 _SHA = re.compile(r"[a-fA-F0-9]{40,64}\Z")
-_ROOT_DOCUMENTS = {"README.md", "TESTING.md", "DEVLOG.md", "CHANGELOG.md"}
+# Keep aligned with `on.push/pull_request.paths-ignore` in ci.yml.
+# Only non-executable docs and repository communication metadata belong here.
+_ROOT_DOCUMENTS = {
+    "README.md", "TESTING.md", "DEVLOG.md", "CHANGELOG.md",
+    "frontend/README.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md",
+    "SECURITY.md", "LICENSE", "LICENSE.md", "NOTICE", "NOTICE.md",
+    ".github/PULL_REQUEST_TEMPLATE.md", ".github/FUNDING.yml",
+}
+_DOCUMENT_PREFIXES = ("docs/", ".github/ISSUE_TEMPLATE/", ".github/PULL_REQUEST_TEMPLATE/")
 _SHARED_FILES = {"Dockerfile", ".dockerignore", ".gitignore", ".gitattributes", "AGENTS.md"}
 _BACKEND_FILES = {"pytest.ini", "conftest.py", "start_waitress.py"}
 _SHARED_PREFIXES = (".github/", "ops/ci/", "deploy/", ".agents/", ".codex/")
@@ -32,7 +40,7 @@ def classify_path(path: str) -> str:
     """Return 'frontend', 'backend', 'both', or 'docs' (no business suites)."""
     if not path or path.startswith("/") or "\\" in path or ".." in Path(path).parts:
         return "both"
-    if path.startswith("docs/") or path in _ROOT_DOCUMENTS or path == "frontend/README.md":
+    if path.startswith(_DOCUMENT_PREFIXES) or path in _ROOT_DOCUMENTS:
         return "docs"
     if path in _SHARED_FILES or path.startswith(_SHARED_PREFIXES):
         return "both"
