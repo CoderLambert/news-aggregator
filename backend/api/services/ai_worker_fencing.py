@@ -14,7 +14,7 @@ from django.db import transaction
 
 from api.ai_connection_models import UserAIConnection
 from api.services.ai_credentials import (
-    ConnectionSnapshot, CredentialUnavailable, decrypt_credential,
+    ConnectionSnapshot, CredentialUnavailable,
     lock_owner, locked_active_connection, read_execution_credential,
     require_active_snapshot, snapshot_connection,
 )
@@ -59,7 +59,6 @@ def capture_at_enqueue(*, owner, connection_id) -> dict:
             raise CredentialUnavailable('credential_unavailable')
         snapshot = snapshot_connection(connection)
         require_active_snapshot(snapshot)
-        decrypt_credential(connection)
         return {'schema_version': SNAPSHOT_SCHEMA_VERSION, **asdict(snapshot)}
 
 
