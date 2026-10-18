@@ -626,6 +626,13 @@ class CollectionAndWorkflowTests(unittest.TestCase):
         self.assertIn("always()", gate["if"])
         self.assertIn("!github.event.pull_request.draft", gate["if"])
         self.assertIn("true:success|false:skipped", gate["steps"][0]["run"])
+        # A lone backend test change in a Draft PR must never schedule the
+        # expensive release matrix or its frontend counterpart.
+        self.assertIn("github.event.pull_request.draft", jobs["dev-backend"]["if"])
+        self.assertIn("!github.event.pull_request.draft", jobs["backend-and-release-gates"]["if"])
+        draft_runs = "\n".join(step.get("run", "") for step in jobs["dev-backend"]["steps"])
+        for expensive in ("benchmark-xdist.sh", "local-domain-smoke.sh", "docker build"):
+            self.assertNotIn(expensive, draft_runs)
         self.assertEqual(router["runs-on"], ["self-hosted", "linux", "x64", "newshub-frontend"])
         for name, scope in (("frontend", "frontend"), ("backend-and-release-gates", "backend")):
             job = jobs[name]
