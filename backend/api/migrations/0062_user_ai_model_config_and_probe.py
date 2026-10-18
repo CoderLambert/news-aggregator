@@ -46,6 +46,7 @@ class Migration(migrations.Migration):
             name='AIModelProbeAttempt',
             fields=[
                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                ('request_id', models.UUIDField()),
                 ('model_id', models.CharField(max_length=160)),
                 ('model_revision', models.PositiveBigIntegerField()),
                 ('probe_kind', models.CharField(max_length=8)),
@@ -70,6 +71,7 @@ class Migration(migrations.Migration):
                     to=settings.AUTH_USER_MODEL)),
             ],
             options={'ordering': ['-created_at', 'id'],
-                'indexes': [models.Index(fields=['user', 'created_at'], name='ai_probe_owner_created')]},
+                'indexes': [models.Index(fields=['user', 'created_at'], name='ai_probe_owner_created')],
+                'constraints': [models.UniqueConstraint(fields=('user', 'request_id'), name='ai_probe_request_unique')]},
         ),
     ]
