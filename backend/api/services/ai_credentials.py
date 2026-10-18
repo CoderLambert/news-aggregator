@@ -11,12 +11,14 @@ import hashlib
 import hmac
 import json
 import secrets
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import F
@@ -106,31 +108,86 @@ def require_active_connection(*, user_id, connection_id, expected_epoch):
 
 @dataclass(frozen=True)
 class ConnectionSnapshot:
+    """Secret-free, immutable per-connection authorization captured at enqueue."""
     user_id: int
     connection_id: str
     credential_epoch: int
+    credential_version: int
+    provider_id: str
+    endpoint_profile: str
+    endpoint_profile_version: int
 
 
 def snapshot_connection(connection):
-    return ConnectionSnapshot(connection.user_id, str(connection.pk), connection.credential_epoch)
+    """Construct a snapshot; worker enqueue must additionally lock and recheck DB."""
+    return ConnectionSnapshot(
+        user_id=connection.user_id, connection_id=str(connection.pk),
+        credential_epoch=connection.credential_epoch,
+        credential_version=connection.credential_version,
+        provider_id=connection.provider_id,
+        endpoint_profile=connection.endpoint_profile,
+        endpoint_profile_version=connection.endpoint_profile_version,
+    )
+
+
+def require_active_snapshot(snapshot):
+    """Fail closed on obsolete, malformed, cross-owner or altered worker identity."""
+    if type(snapshot) is not ConnectionSnapshot:
+        raise CredentialUnavailable('execution_snapshot_invalid')
+    if (type(snapshot.user_id) is not int or snapshot.user_id < 1 or
+            type(snapshot.connection_id) is not str or
+            type(snapshot.credential_epoch) is not int or snapshot.credential_epoch < 1 or
+            type(snapshot.credential_version) is not int or snapshot.credential_version < 1 or
+            type(snapshot.provider_id) is not str or not snapshot.provider_id or
+            type(snapshot.endpoint_profile) is not str or not snapshot.endpoint_profile or
+            type(snapshot.endpoint_profile_version) is not int or snapshot.endpoint_profile_version < 1):
+        raise CredentialUnavailable('execution_snapshot_invalid')
+    try:
+        if str(uuid.UUID(snapshot.connection_id)) != snapshot.connection_id:
+            raise CredentialUnavailable('execution_snapshot_invalid')
+        connection = require_active_connection(
+            user_id=snapshot.user_id,
+            connection_id=snapshot.connection_id,
+            expected_epoch=snapshot.credential_epoch,
+        )
+    except (ValueError, TypeError, ValidationError):
+        raise CredentialUnavailable('execution_snapshot_invalid') from None
+    if (connection.credential_version != snapshot.credential_version or
+            connection.provider_id != snapshot.provider_id or
+            connection.endpoint_profile != snapshot.endpoint_profile or
+            connection.endpoint_profile_version != snapshot.endpoint_profile_version):
+        raise CredentialUnavailable('execution_snapshot_stale')
+    # A corrupted ciphertext must not authorize a claim or a late result commit,
+    # even when an out-of-band DB write omitted the epoch increment.
+    try:
+        decrypt_credential(connection)
+    except CredentialEncryptionUnavailable:
+        raise CredentialUnavailable('credential_unavailable') from None
+    return connection
 
 
 def read_execution_credential(snapshot):
-    """Recheck immediately before dispatch. A key is never stored in a snapshot."""
-    connection = require_active_connection(user_id=snapshot.user_id,
-        connection_id=snapshot.connection_id, expected_epoch=snapshot.credential_epoch)
-    return decrypt_credential(connection)
+    """Serialize request admission against revocation, without network in the lock.
+
+    The caller must invoke upstream immediately after admission. Admission
+    predating revocation is already in flight; only a final fenced DB commit
+    can prevent its late result from being accepted.
+    """
+    if type(snapshot) is not ConnectionSnapshot or type(snapshot.user_id) is not int:
+        raise CredentialUnavailable('execution_snapshot_invalid')
+    with transaction.atomic():
+        lock_owner(snapshot.user_id)
+        return decrypt_credential(require_active_snapshot(snapshot))
 
 
 @contextmanager
 def locked_active_connection(snapshot):
-    """Fence a final database-only commit against credential revocation.
+    """Fence a result-only transaction against concurrent credential revocation.
 
-    Consumers must also check before dispatch. This helper does not claim to
-    cancel an upstream request already sent or revoke its billing.
+    Never perform upstream I/O or lengthy computation inside this context.
     """
+    if type(snapshot) is not ConnectionSnapshot or type(snapshot.user_id) is not int:
+        raise CredentialUnavailable('execution_snapshot_invalid')
     with transaction.atomic():
         lock_owner(snapshot.user_id)
-        connection = require_active_connection(user_id=snapshot.user_id,
-            connection_id=snapshot.connection_id, expected_epoch=snapshot.credential_epoch)
-        yield connection
+        yield require_active_snapshot(snapshot)
