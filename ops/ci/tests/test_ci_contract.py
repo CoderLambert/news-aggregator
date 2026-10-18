@@ -34,7 +34,7 @@ class SelfHostedCIContract(unittest.TestCase):
         wf = load(CI)
         self.assertEqual(
             set(wf["jobs"]),
-            {"changes", "frontend", "backend-and-release-gates"},
+            {"changes", "dev-frontend", "dev-backend", "frontend", "backend-and-release-gates", "merge-gate"},
         )
         self.assertEqual(
             wf["jobs"]["frontend"]["runs-on"],
@@ -52,12 +52,21 @@ class SelfHostedCIContract(unittest.TestCase):
             "github.event.pull_request.head.repo.full_name",
             wf["jobs"]["changes"]["if"],
         )
+        self.assertNotIn("!github.event.pull_request.draft", wf["jobs"]["changes"]["if"])
+        self.assertIn("github.event.pull_request.draft", wf["jobs"]["dev-frontend"]["if"])
+        self.assertIn("github.event.pull_request.draft", wf["jobs"]["dev-backend"]["if"])
+        for stage in ("frontend", "backend-and-release-gates"):
+            self.assertIn("!github.event.pull_request.draft", wf["jobs"][stage]["if"])
+        for event in ("ready_for_review", "converted_to_draft", "synchronize"):
+            self.assertIn(event, yaml.load(CI.read_text(), Loader=yaml.BaseLoader)["on"]["pull_request"]["types"])
         self.assertEqual(wf["jobs"]["changes"]["steps"][0]["with"]["fetch-depth"], 0)
         route = wf["jobs"]["changes"]["steps"][-1]
         self.assertIn("change_scope.py", route["run"])
         self.assertIn("CI_BEFORE_SHA", route["env"])
         self.assertIn("CI_BASE_SHA", route["env"])
         self.assertIn("CI_HEAD_SHA", route["env"])
+        for name in ("CI_PR_BEFORE_SHA", "CI_PR_ACTION", "CI_DEV_MODE"):
+            self.assertIn(name, route["env"])
         # Trigger-level ignore: docs/metadata-only PRs do not start a Runner.
         # Mixed changes still run: GitHub skips only when ALL paths are ignored.
         # BaseLoader preserves the YAML key 'on' rather than coercing it to True.
@@ -99,7 +108,11 @@ class SelfHostedCIContract(unittest.TestCase):
             self.assertIn("!cancelled()", job["if"])
             self.assertIn("github.event_name == 'workflow_dispatch'", job["if"])
             self.assertIn(f"needs.changes.outputs.{scope}", job["if"])
-        for job in wf["jobs"].values():
+        for name, job in wf["jobs"].items():
+            # The result-only merge gate has no need to download PR code.
+            if name == "merge-gate":
+                self.assertFalse(any("uses" in step for step in job["steps"]))
+                continue
             self.assertTrue(any(
                 "actions/checkout@" in step.get("uses", "")
                 and step.get("with", {}).get("persist-credentials") is False
@@ -126,6 +139,33 @@ class SelfHostedCIContract(unittest.TestCase):
         self.assertIn("docker run --rm --pull=never", content)
         self.assertIn("CI_DIND_DNS_PRIMARY/SECONDARY", content)
         self.assertIn("backend/api/tests/", content)
+        # Draft jobs do not run whole frontend/backend matrices or paid SDK
+        # probes, G1, release images, or any production action.
+        dev_front = wf["jobs"]["dev-frontend"]
+        dev_back = wf["jobs"]["dev-backend"]
+        self.assertEqual(dev_front["needs"], "changes")
+        self.assertEqual(dev_back["needs"], "changes")
+        self.assertEqual(dev_front["runs-on"], ["self-hosted", "linux", "x64", "newshub-frontend"])
+        self.assertEqual(dev_back["runs-on"], ["self-hosted", "linux", "x64", "newshub-ci"])
+        dev_front_runs = "\n".join(step.get("run", "") for step in dev_front["steps"])
+        dev_back_runs = "\n".join(step.get("run", "") for step in dev_back["steps"])
+        for line in ("npm run typecheck", "npm run lint", "install-frontend-deps.sh"):
+            self.assertIn(line, dev_front_runs)
+        for forbidden in ("npm run test:run", "npm run build", "local-domain-smoke.sh", "docker build"):
+            self.assertNotIn(forbidden, dev_front_runs + dev_back_runs)
+        for required in ("install-backend-deps.sh", "--maxfail=1", "unittest discover"):
+            self.assertIn(required, dev_back_runs)
+        for forbidden in ("benchmark-xdist.sh", "tools/byok_t00_probe", "docker pull", "--target production"):
+            self.assertNotIn(forbidden, dev_front_runs + dev_back_runs)
+        # Fail-closed final gate explicitly checks success of each selected
+        # full job; skipped/missing selected tests cannot count as PASS.
+        gate = wf["jobs"]["merge-gate"]
+        self.assertEqual(set(gate["needs"]), {"changes", "frontend", "backend-and-release-gates"})
+        self.assertIn("always()", gate["if"])
+        self.assertIn("!github.event.pull_request.draft", gate["if"])
+        self.assertIn("needs.frontend.result", str(gate["steps"]))
+        self.assertIn("needs.backend-and-release-gates.result", str(gate["steps"]))
+        self.assertIn("true:success|false:skipped", gate["steps"][0]["run"])
         frontend_steps = wf["jobs"]["frontend"]["steps"]
         frontend_fast = next(i for i, step in enumerate(frontend_steps)
                              if step["name"] == "Fast cross-stack syntax preflight")
