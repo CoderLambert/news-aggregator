@@ -4,9 +4,11 @@ from api.ai_connection_views import (AIProviderCatalogView, UserAIConnectionList
     UserAIConnectionDetailView, UserAIConnectionKeyView)
 from api.ai_model_views import (AIModelCatalogView, AIModelListCreateView,
     AIModelDetailView, AIModelProbeView, AIModelAttemptListView)
+from api.ai_preference_views import AITaskPreferencesView
 
 urlpatterns = [
     path('providers/', AIProviderCatalogView.as_view(), name='ai-provider-catalog'),
+    path('task-preferences/', AITaskPreferencesView.as_view(), name='ai-task-preferences'),
     path('connections/', UserAIConnectionListCreateView.as_view(), name='ai-connection-list'),
     path('connections/<uuid:connection_id>/', UserAIConnectionDetailView.as_view(), name='ai-connection-detail'),
     path('connections/<uuid:connection_id>/key/', UserAIConnectionKeyView.as_view(), name='ai-connection-key'),
