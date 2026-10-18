@@ -341,10 +341,18 @@ class PersonalArticleChatTests(TestCase):
         self.assertEqual(len(ChatSession.objects.get(user=self.owner, news=self.news).messages), 1)
 
     def test_incomplete_unknown_and_empty_terminal_may_show_partial_but_never_complete_or_save(self):
-        for result, visible in (
-            ([gateway_frame('Partial text', finish=None)], 'Partial text'),
-            ([gateway_frame('Truncated text', finish='length')], 'Truncated text'),
-            ([gateway_frame('  ')], None),
+        for result, visible, hidden in (
+            ([gateway_frame('Partial text', finish=None)], 'Partial text', None),
+            ([gateway_frame('Truncated text', finish='length')], None, 'Truncated text'),
+            (
+                [
+                    gateway_frame('Visible partial', finish=None),
+                    gateway_frame('Truncated tail', finish='length'),
+                ],
+                'Visible partial',
+                'Truncated tail',
+            ),
+            ([gateway_frame('  ')], None, None),
         ):
             ChatSession.objects.all().delete()
             gateway = FakeGateway(result)
@@ -356,6 +364,8 @@ class PersonalArticleChatTests(TestCase):
             self.assertNotIn('"type": "chat_model"', wire)
             if visible:
                 self.assertIn(visible, wire)
+            if hidden:
+                self.assertNotIn(hidden, wire)
             self.assertEqual(build.call_count, 1)
             self.assertEqual(len(gateway.sent), 1)
             messages = ChatSession.objects.get(user=self.owner, news=self.news).messages
