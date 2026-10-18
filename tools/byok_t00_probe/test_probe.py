@@ -261,7 +261,9 @@ class ProviderKeyGuardFailClosed(unittest.TestCase):
 
     The guard file lives in ops/shared-litellm-proxy; LiteLLM/FastAPI are
     stubbed when absent (SDK venv) so this runs in the CI T00 step.
-    All other aliases and protocol bridges remain fail-closed.
+    Other Chat aliases remain fail-closed; native Responses/Messages preserve
+    their prior behavior. Runtime router provenance is verified only by the
+    disposable real LocalProxy integration, not by this unit fixture.
     """
 
     @staticmethod
@@ -293,12 +295,14 @@ class ProviderKeyGuardFailClosed(unittest.TestCase):
     def setUpClass(cls):
         cls.guard = cls._load_guard()
 
-    def run_hook(self, data, call_type, env=None):
+    def run_hook(self, data, call_type, env=None, *, patch_ready=True):
         hook = self.guard.ProviderKeyGuard().async_pre_call_hook(
             user_api_key_dict=SimpleNamespace(), cache=None, data=dict(data), call_type=call_type)
         values = {"BYOK_TERMINAL_STREAMING_MODELS": "", "BYOK_DENY_STREAMING_CALL_TYPES": ""}
         values.update(env or {})
-        with patch.dict(os.environ, values, clear=False):
+        with patch.dict(os.environ, values, clear=False), patch.object(
+            self.guard, "_ensure_router_provenance_patch", return_value=patch_ready,
+        ):
             try:
                 asyncio.run(hook)
             except Exception as exc:
@@ -359,6 +363,14 @@ class ProviderKeyGuardFailClosed(unittest.TestCase):
         )
         self.assertEqual(
             self.run_hook(valid, "completion", allow),
+            ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"),
+        )
+
+    def test_exact_route_rejected_if_router_provenance_patch_is_unavailable(self):
+        data = {"api_key": "sk-synthetic-provider", "model": "deepseek/deepseek-chat", "stream": True}
+        allow = {"BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat"}
+        self.assertEqual(
+            self.run_hook(data, "acompletion", allow, patch_ready=False),
             ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"),
         )
 
