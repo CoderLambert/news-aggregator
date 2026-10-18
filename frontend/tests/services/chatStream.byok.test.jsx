@@ -13,9 +13,9 @@ beforeEach(() => vi.clearAllMocks())
 
 describe('T04 personal chat request billing consent transport', () => {
   it('serializes explicit per-turn billing approval only for selected BYOK models', async () => {
-    for await (const _chunk of chatStream(71, 'Question', {
+    for await (const chunk of chatStream(71, 'Question', {
       modelConfigId: '11111111-1111-4111-8111-111111111111', billingConsent: true,
-    })) { /* drain synthetic response */ }
+    })) { expect(chunk).toBe('synthetic') }
     expect(wire.streamingFetch).toHaveBeenCalledTimes(1)
     expect(JSON.parse(wire.streamingFetch.mock.calls[0][1].body)).toEqual({
       question: 'Question', web_search: false,
@@ -24,11 +24,11 @@ describe('T04 personal chat request billing consent transport', () => {
   })
 
   it('cannot turn model selection into implicit consent, and omits consent in legacy chat', async () => {
-    for await (const _chunk of chatStream(71, 'Not approved', {
+    for await (const chunk of chatStream(71, 'Not approved', {
       modelConfigId: '11111111-1111-4111-8111-111111111111',
-    })) { /* drain synthetic response */ }
+    })) { expect(chunk).toBe('synthetic') }
     expect(JSON.parse(wire.streamingFetch.mock.calls[0][1].body).billing_consent).toBe(false)
-    for await (const _chunk of chatStream(71, 'Existing route')) { /* drain synthetic response */ }
+    for await (const chunk of chatStream(71, 'Existing route')) { expect(chunk).toBe('synthetic') }
     expect(JSON.parse(wire.streamingFetch.mock.calls[1][1].body)).toEqual({
       question: 'Existing route', web_search: false,
     })
