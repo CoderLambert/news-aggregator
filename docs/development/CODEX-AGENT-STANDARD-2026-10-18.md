@@ -186,3 +186,17 @@ codex --cd backend/api/rss "只读：列出根、backend、RSS 规则的来源�
 - https://developers.openai.com/codex/skills/
 
 这些官方规则描述产品能力，不代替本机加载测试；CI 结构检查也不等于开发效率已经提升。
+
+## 10. 选择性吸收 pstack 的工程方法（2026-10-18）
+
+上游参考：[pstack 镜像](https://github.com/backnotprop/pstack)（其 `MIRROR.md` 说明来源于 [Cursor pstack](https://github.com/cursor/plugins/tree/main/pstack)；本次参照镜像 `v0.15.25` 的 [Blast Radius](https://github.com/backnotprop/pstack/blob/main/skills/blast-radius/SKILL.md)、[TDD](https://github.com/backnotprop/pstack/blob/main/skills/tdd/SKILL.md) 和 [Benchmark Checklist](https://github.com/backnotprop/pstack/blob/main/skills/benchmark-checklist/SKILL.md) 思路）。
+
+**范围：仅修改现有两份 NewsHub Skills 的工作步骤，不复制上游文件、脚本、Playbook、模型角色配置或其 Agent 框架。** 不增加新项目 Skills、依赖、Hook、MCP、CI Job 或默认模型。保留仓库自己的 Owner/CSRF、正文版本、credential_epoch、Miniflux、SQLite 事务、真实/合成验证边界；项目实际规则始终优先于外部通用建议。
+
+| 场景 | NewsHub 内的触发规则 | 应交付的证据 | 不需要做什么 |
+|---|---|---|---|
+| 跨模块、权限、版本、Worker 等高风险变更 | `newshub-impact-analysis` 列出 1–2 个真正决定安全性的可证伪假设，并追踪 DTO/DB/重试/跨端消费者 | 源码路径、已有测试结果及最小可执行负例；`PROVEN` / `SOURCE_ONLY` / `UNPROVEN` / `NOT_RUN` | 只读方案阶段不为了“证明”擅自修改文件或调用生产 |
+| 廉价且确定可复现的 Bug 修复 | `newshub-verify` 记录修复前失败、修复后通过；否则说明为什么没有修复前证据，采用最接近的可安全执行的回归 | 相同缺陷的 red/green、实际命令、退出码 | 不为小问题强造昂贵的全链路测试或模拟错误结论 |
+| 宣称响应时间、负载或资源优化 | `newshub-verify` 先定义用户侧指标及基线，核对实际工作量、错误率、冷热缓存与真实瓶颈，用可比的多轮样本验证 | 环境/样本量、median/range、错误计数、端到端收益；无法核实则 `INCONCLUSIVE` | 不对生产做压力测试，也不把缓存偶然命中或失败快速返回记为性能提升 |
+
+对于廉价可复现 Bug 和性能对比，可在**改动前**调用验证 Skill 建立失败复现/基线，并在改动后复测；不得为了补造修复前证据而重置有未提交内容的工作区。这三项均按**实际任务需要**启用。普通单组件小改动维持现有最小测试策略，GitHub Actions 调度仍由 `.github/workflows/ci.yml` 与 `ops/ci/change_scope.py` 唯一决定。结构校验器只验证 Skills 格式，不能证明模型按建议执行；后续可用对照任务核查代码差异与测试证据，不以输出篇幅或 Token 猜测效果。
