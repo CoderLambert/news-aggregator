@@ -867,21 +867,23 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
                 import logging
                 logging.getLogger(__name__).warning("Web search failed for chat")
 
-        # Reserve the one-shot UUID BEFORE storing the user's question. A
-        # previously acknowledged cancellation (including cancel-before-POST)
-        # rejects this attempt without any external provider request.
-        if personal_selection is not None:
-            from api.services.ai_article_turns import reserve_turn, ArticleChatTurnError
-            try:
-                reserve_turn(user_id=request.user.pk, news_id=news.pk, turn_id=personal_turn_id)
-            except ArticleChatTurnError as exc:
-                return Response({'error_code': exc.code}, status=status.HTTP_409_CONFLICT)
+        from api.services.ai_article_turns import ArticleChatTurnError, reserve_turn_with_question
         try:
-            chat_snapshot = append_user_message(
-                user_id=request.user.pk,
-                news_id=news.pk,
-                content=user_question,
-            )
+            if personal_selection is not None:
+                # Reservation and the initial user append are one short DB
+                # transaction; clear-history cannot slip between those writes.
+                chat_snapshot = reserve_turn_with_question(
+                    user_id=request.user.pk, news_id=news.pk,
+                    turn_id=personal_turn_id, question=user_question,
+                )
+            else:
+                chat_snapshot = append_user_message(
+                    user_id=request.user.pk,
+                    news_id=news.pk,
+                    content=user_question,
+                )
+        except ArticleChatTurnError as exc:
+            return Response({'error_code': exc.code}, status=status.HTTP_409_CONFLICT)
         except ChatConflict:
             return Response(
                 {'error_code': 'chat_conflict', 'error': '聊天记录正在更新，请重试'},

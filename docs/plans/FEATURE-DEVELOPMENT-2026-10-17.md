@@ -1,6 +1,6 @@
 # NewsHub 现行开发任务与合同索引
 
-> **更新于 2026-10-18**；第 7 批功能合并基线为 `main@c51dceb3d10a22e8164d35cea256395b3fd165a4`（本状态同步提交晚于该 SHA）。每次开工仍必须重新读取最新 main。**本文件是当前任务状态唯一入口**；[2026-10-17 原计划和旧批次记录已完整归档](archive/FEATURE-DEVELOPMENT-SNAPSHOT-2026-10-17.md)，其中的“下一批/T01 待完成/旧凭据并存”属于历史快照，不再指导开发。
+> **更新于 2026-10-19**；已通过最新主线全量 CI 的代码基线：`main@3e7d80d2b24c0a22ef7104b637e203e24a16b976`（[CI #39167643161](https://github.com/CoderLambert/news-aggregator/actions/runs/39167643161) 全部 SUCCESS；随后纯文档提交无需自动 CI）。每次开工仍必须重新读取最新 main。**本文件是当前任务状态唯一入口**；[2026-10-17 原计划和旧批次记录已完整归档](archive/FEATURE-DEVELOPMENT-SNAPSHOT-2026-10-17.md)，其中的“下一批/T01 待完成/旧凭据并存”属于历史快照，不再指导开发。
 
 ## 1. 当前已验证交付与未完成边界
 
@@ -24,12 +24,23 @@
 
 第 7 批交付门禁：RSS T21 [main CI #39138781175](https://github.com/CoderLambert/news-aggregator/actions/runs/39138781175) PASS；BYOK T03 [PR CI #39138340014](https://github.com/CoderLambert/news-aggregator/actions/runs/39138340014) PASS，合并 `main@c51dceb3d10a22e8164d35cea256395b3fd165a4` 的 [push CI #39138991501](https://github.com/CoderLambert/news-aggregator/actions/runs/39138991501) 已 PASS（changes、frontend、backend-and-release-gates 三个 Job 均成功）。这仍不是真实供应商、生产、浏览器或模型业务端到端验收。
 
-## 2. 第 7 批后的下一批候选（最多两个独立写入目标）
+## 1.1 第 8 批实际交付与明确未完成边界（2026-10-19）
+
+| 项目（保留原编号） | 状态 | HEAD、CI、风险与验收 |
+|---|---|---|
+| **RSS T09** 正文/元数据同步两次读取围栏差额 | `IMPLEMENTED / TESTED`（已合并的差额） | [PR #117](https://github.com/CoderLambert/news-aggregator/pull/117) head `dbbde844e1656b78f020e838742398b3c9ac5757`，Squash `538185bc4b6e2723c9f64545f1fad71c84b6206e`；[PR CI #39152816747](https://github.com/CoderLambert/news-aggregator/actions/runs/39152816747) 后端 2517 passed/16 skipped、生产镜像/隔离 G1 PASS（前端因后端单域变更被正确跳过），[main CI #39161898261](https://github.com/CoderLambert/news-aggregator/actions/runs/39161898261) SUCCESS。补充 Source 名称/URL/地区及 News 来源/分类快照的陈旧写入拒绝；原 T09 的真实 RSS 与发布验收 `NOT_RUN` |
+| **BYOK T04** 个人模型新闻问答 | `IMPLEMENTED / TESTED`（局部）· `BLOCKED`（取消围栏），尚未合并 | [PR #118](https://github.com/CoderLambert/news-aggregator/pull/118) head `d82c7c404ea9a79396a8940fd675e5299df96696`，[CI #39162538478](https://github.com/CoderLambert/news-aggregator/actions/runs/39162538478) changes/frontend/backend-and-release-gates 全部 SUCCESS。个人模型显式选择、可信 T02/T03 绑定与 T01 Worker 围栏、服务端逐次 `billing_consent is True`、拒绝缺失/伪造确认及离线负例已实现；**HTTP 中断仍可能在同步网关请求完成后写入终态**，由 [Issue #121](https://github.com/CoderLambert/news-aggregator/issues/121) 跟进，在证明取消提交围栏前不合并。真实收费 API/并发账户/浏览器 UAT `NOT_RUN`，不能声明 `ACCEPTED` |
+| **CI 开发/合并双阶段**（CI 规范，非新业务编号） | `IMPLEMENTED / TESTED`（离线与 GitHub Actions 实测） | [PR #123](https://github.com/CoderLambert/news-aggregator/pull/123)，head `373b67383cf1201ec5a020519b447c60cda93c0e`，Squash `3e7d80d2b24c0a22ef7104b637e203e24a16b976`。Draft [首次快检 #39166918371](https://github.com/CoderLambert/news-aggregator/actions/runs/39166918371) 49 秒、changes/dev-frontend/dev-backend SUCCESS，完整 Job SKIPPED；只改后端单文件的 Draft [增量 #39167054338](https://github.com/CoderLambert/news-aggregator/actions/runs/39167054338) 42 秒，`frontend=false/backend=true`、仅 dev-backend 通过。Ready [PR 完整 CI #39167139417](https://github.com/CoderLambert/news-aggregator/actions/runs/39167139417) 全部适用全量 Job 和 `merge-gate` SUCCESS（前端 667 passed / 96 files，后端 2517 passed / 16 skipped、合成生产镜像与隔离 G1 PASS）；[main Push CI #39167643161](https://github.com/CoderLambert/news-aggregator/actions/runs/39167643161) 再次 SUCCESS。新 PR 默认 Draft；准备合并转 Ready，修改后退回 Draft。**未启用 branch protection 必需检查的硬门禁**，合并操作者仍需确认最新 HEAD/BASE、全量 SUCCESS 和 review；真实生产、收费上游与主机网络变更 `NOT_RUN` |
+| **CI 基础设施故障恢复**（不新增业务编号） | `IMPLEMENTED / TESTED`（代码/离线）；宿主机 `NOT_RUN` | 两个 Omarchy Runner 的 MTU=1500 Bridge TLS 握手超时已用容器 eth0=1280 临时验证恢复；[PR #120](https://github.com/CoderLambert/news-aggregator/pull/120) head `0711d55cdb19c42fa4d560764f2fbaa994ef4600`，Squash `e5599a3698899eab4cf0dfbdde50b69cece3d243`，[PR CI #39162978737](https://github.com/CoderLambert/news-aggregator/actions/runs/39162978737) 全部门禁 SUCCESS。现仅源码默认 Bridge MTU=1280；在 Omarchy 空闲状态应用新 Compose 网络、复核真实两台 Runner Online 和精确 CI 为 `NOT_RUN`，禁止 CI Busy 时重建 |
+
+**本批风险边界：** RSS #117 仅完成同步一致性最小差额；BYOK #118 尚不能合并或开展收费 API 验收；#120 仅提交独立 CI 网络设置及离线门禁，没有远程操作生产、宿主 Docker 或 Runner 重启。此处 `TESTED` 均指真实执行的合成/离线 CI，不代表生产验收。
+
+## 2. 第 8 批实施状态与后续候选（最多两个独立写入目标）
 
 | 顺序 | 原编号与目标 | 需要完成的真正差额 | 阶段验收 |
 |---|---|---|---|
-| 第 8 批候选 A | **BYOK T04 个人模型新闻问答** | 以现行 T03 `resolve_task_model` + T01 Worker 围栏接入文章阅读器与 per-turn 问答；核查旧 PR #38 只提取真实差额；不得绕过 SSE 终态与文章 ACL | 用户/文章版本/模型尝试/取消/重试负例 + 合成网关，无真实付费上游 |
-| 第 8 批候选 B | **RSS T09 正文/元数据写入一致性差额** | 先核对当前正文版本、主来源/非主写入、同正文元数据变化与重试提交围栏；仅补实际代码与合成回归 | SQLite 版本/内容读取/安全负例、RSS 原验收矩阵 A09；不提前切源 |
+| 第 8 批 A（审核阻塞） | **BYOK T04 个人模型新闻问答** | 以现行 T03 `resolve_task_model` + T01 Worker 围栏接入文章阅读器与 per-turn 问答；核查旧 PR #38 只提取真实差额；不得绕过 SSE 终态与文章 ACL | 用户/文章版本/模型尝试/取消/重试负例 + 合成网关，无真实付费上游 |
+| 第 8 批 B（差额已合并） | **RSS T09 正文/元数据写入一致性差额** | 先核对当前正文版本、主来源/非主写入、同正文元数据变化与重试提交围栏；仅补实际代码与合成回归 | SQLite 版本/内容读取/安全负例、RSS 原验收矩阵 A09；不提前切源 |
 | 后续 | BYOK T05–T12 | `NOT_COMPLETE/NEEDS_AUDIT`；T04 稳定集成后再分别实现私人翻译、研究、恢复、推荐与用量 | 不将旧 PR #33–#45 直接合入；保留业务授权与终态 |
 | 后续 | RSS T11/T14/T27 | `NEEDS_AUDIT`；已有引擎同步/正文权限/AI 消费代码，待核对依赖与最小差额，不重新发明编号 | 正文版本、权限、消费一致性、任务恢复及相关测试 |
 | 后续 | AG-03–AG-07 | `NEEDS_AUDIT`；已有 UI、人工审核和队列等部分代码，不能因存在组件就声明完成 | 按 AG 合同逐项核查 |

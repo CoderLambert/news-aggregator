@@ -1,11 +1,13 @@
 """T04 explicit owner-selected personal news Q&A: no real provider requests."""
+from threading import Barrier, Thread
 from types import SimpleNamespace
 from unittest.mock import patch
 import uuid
 
 from django.contrib.auth import get_user_model
+from django.db import close_old_connections
 from django.db.models import F
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -257,6 +259,56 @@ class PersonalArticleChatTests(TestCase):
         self.assertEqual(denied.status_code, 404)
         self.assertEqual(ArticleChatTurn.objects.get(pk=turn).user_id, self.owner.pk)
 
+    def test_clear_from_another_tab_cancels_active_turn_and_old_generation_cannot_restore_answer(self):
+        from api.services.ai_article_turns import (
+            ArticleChatTurnError, mark_complete, mark_dispatched, reserve_turn_with_question,
+        )
+        from api.services.chat_history import ChatConflict, append_assistant_message
+
+        turn = uuid.uuid4()
+        snapshot = reserve_turn_with_question(
+            user_id=self.owner.pk, news_id=self.news.pk,
+            turn_id=turn, question='Question being cleared',
+        )
+        mark_dispatched(user_id=self.owner.pk, news_id=self.news.pk, turn_id=turn)
+
+        # A separate authenticated client represents another tab. Clearing is
+        # owner/article-wide and fences already registered in-flight turns.
+        other_tab = APIClient()
+        other_tab.force_login(self.owner)
+        response = other_tab.delete(self.url)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.data['status'], 'cleared')
+        row = ArticleChatTurn.objects.get(pk=turn)
+        self.assertEqual(row.status, 'cancelled')
+        session = ChatSession.objects.get(user=self.owner, news=self.news)
+        self.assertEqual(session.messages, [])
+        self.assertEqual(session.generation, snapshot.generation + 1)
+
+        with self.assertRaises(ArticleChatTurnError) as cancelled:
+            mark_complete(user_id=self.owner.pk, news_id=self.news.pk, turn_id=turn)
+        self.assertEqual(cancelled.exception.code, 'chat_turn_cancelled')
+        with self.assertRaises(ChatConflict):
+            append_assistant_message(
+                user_id=self.owner.pk, news_id=self.news.pk,
+                session_id=snapshot.session_id, generation=snapshot.generation,
+                content='Late answer must not resurrect cleared history',
+            )
+        session.refresh_from_db()
+        self.assertEqual(session.messages, [])
+
+    def test_clear_cancels_registered_turn_even_if_no_history_session_exists(self):
+        turn = uuid.uuid4()
+        ArticleChatTurn.objects.create(
+            id=turn, user=self.owner, news=self.news, status='pending',
+        )
+        self.assertFalse(ChatSession.objects.exists())
+
+        response = self.client.delete(self.url)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(ArticleChatTurn.objects.get(pk=turn).status, 'cancelled')
+        self.assertFalse(ChatSession.objects.exists())
+
     def test_missing_invalid_or_not_v4_turn_id_cannot_start_billable_turn(self):
         for value in (None, 'invalid', '00000000-0000-0000-0000-000000000001'):
             body = {'question': 'No valid turn id', 'model_config_id': str(self.model.pk),
@@ -288,7 +340,7 @@ class PersonalArticleChatTests(TestCase):
             self.assertEqual(messages[0]['role'], 'user')
             self.assertTrue(gateway.closed)
 
-    def test_late_key_revocation_and_article_change_cannot_save_answer(self):
+    def test_late_key_revocation_article_change_and_acl_revocation_cannot_save_answer(self):
         def revoke():
             UserAIConnection.objects.filter(pk=self.connection.pk).update(
                 is_enabled=False, credential_epoch=F('credential_epoch') + 1,
@@ -314,3 +366,120 @@ class PersonalArticleChatTests(TestCase):
         self.assertIn('"status": "failed"', wire)
         self.assertNotIn('Also cannot be saved', wire)
         self.assertEqual(len(ChatSession.objects.get().messages), 1)
+
+        from api.rss.models import SourcePublication
+        ChatSession.objects.all().delete()
+
+        def revoke_article_body():
+            SourcePublication.objects.filter(source=self.news.source).update(
+                reading_policy='summary_only', policy_version=F('policy_version') + 1,
+            )
+        gateway = FakeGateway([gateway_frame('Revoked article body must not be saved')],
+                              on_send=revoke_article_body)
+        with patch('api.services.ai_article_chat.build_gateway_client', return_value=gateway):
+            wire = self._wire(self._chat(model=self.model))
+        self.assertIn('"status": "failed"', wire)
+        self.assertNotIn('Revoked article body must not be saved', wire)
+        self.assertEqual(len(ChatSession.objects.get().messages), 1)
+        self.assertEqual(ChatSession.objects.get().messages[0]['role'], 'user')
+
+class ArticleChatTurnDatabaseRaceTests(TransactionTestCase):
+    """Use separate Django connections to exercise real turn CAS interleavings."""
+
+    reset_sequences = True
+
+    def setUp(self):
+        User = get_user_model()
+        self.owner = User.objects.create_user('t04-race-owner', password='synthetic-only')
+        source = Source.objects.create(name='T04 race publisher', url='https://publisher.example/')
+        category = Category.objects.create(name='T04 race category', slug='t04-race-category')
+        self.news = public_legacy_article(News.objects.create(
+            title='Synthetic race story', url='https://publisher.example/race',
+            source=source, category=category, content='Synthetic body',
+            publish_time=timezone.now(),
+        ))
+
+    def _parallel(self, operations):
+        barrier = Barrier(len(operations))
+        results = [None] * len(operations)
+
+        def worker(index, operation):
+            close_old_connections()
+            try:
+                barrier.wait(timeout=10)
+                results[index] = operation()
+            except BaseException as error:
+                results[index] = error
+            finally:
+                close_old_connections()
+
+        threads = [
+            Thread(target=worker, args=(index, operation), daemon=True)
+            for index, operation in enumerate(operations)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=15)
+        self.assertFalse(any(thread.is_alive() for thread in threads), 'database race worker timed out')
+        return results
+
+    def test_duplicate_inflight_uuid_on_separate_connections_appends_once(self):
+        from api.services.ai_article_turns import ArticleChatTurnError, reserve_turn_with_question
+
+        turn = uuid.uuid4()
+
+        def reserve(question):
+            return reserve_turn_with_question(
+                user_id=self.owner.pk, news_id=self.news.pk, turn_id=turn, question=question,
+            )
+
+        results = self._parallel([
+            lambda: reserve('Concurrent one'),
+            lambda: reserve('Concurrent two'),
+        ])
+        successes = [result for result in results if not isinstance(result, BaseException)]
+        failures = [result for result in results if isinstance(result, BaseException)]
+        self.assertEqual(len(successes), 1, results)
+        self.assertEqual(len(failures), 1, results)
+        self.assertIsInstance(failures[0], ArticleChatTurnError)
+        self.assertEqual(failures[0].code, 'duplicate_chat_turn')
+        self.assertEqual(ArticleChatTurn.objects.get(pk=turn).status, 'pending')
+        session = ChatSession.objects.get(user=self.owner, news=self.news)
+        self.assertEqual(len(session.messages), 1)
+
+    def test_independent_connection_cancel_race_never_lies_about_commit(self):
+        from api.services.ai_article_turns import (
+            ArticleChatTurnError, cancel_turn, mark_complete,
+        )
+
+        turn = uuid.uuid4()
+        ArticleChatTurn.objects.create(
+            id=turn, user=self.owner, news=self.news, status='dispatched',
+        )
+
+        def cancel():
+            return ('cancel', cancel_turn(
+                user_id=self.owner.pk, news_id=self.news.pk, turn_id=turn,
+            ))
+
+        def complete():
+            from django.db import transaction
+            try:
+                with transaction.atomic():
+                    mark_complete(user_id=self.owner.pk, news_id=self.news.pk, turn_id=turn)
+                return ('complete', 'complete')
+            except ArticleChatTurnError as error:
+                return ('complete', error.code)
+
+        results = self._parallel([cancel, complete])
+        self.assertFalse(any(isinstance(result, BaseException) for result in results), results)
+        cancel_result, complete_result = results
+        row = ArticleChatTurn.objects.get(pk=turn)
+        if cancel_result == ('cancel', 'cancelled'):
+            self.assertEqual(row.status, 'cancelled')
+            self.assertEqual(complete_result, ('complete', 'chat_turn_cancelled'))
+        else:
+            self.assertEqual(cancel_result, ('cancel', 'already_completed'))
+            self.assertEqual(row.status, 'complete')
+            self.assertEqual(complete_result, ('complete', 'complete'))

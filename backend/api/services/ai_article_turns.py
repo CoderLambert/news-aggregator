@@ -6,9 +6,11 @@ admitted, it can never be replayed on the same UUID. A cancellation that wins
 the terminal CAS prevents a completed history write. Cancellation cannot
 guarantee that an already-dispatched provider request was not billed.
 """
+import sqlite3
+import time
 from uuid import UUID
 
-from django.db import IntegrityError, OperationalError, transaction
+from django.db import IntegrityError, OperationalError, connection, transaction
 
 from api.models import ArticleChatTurn
 
@@ -31,8 +33,23 @@ def parse_turn_id(value):
     return turn_id
 
 
-def reserve_turn(*, user_id, news_id, turn_id):
-    """First use only. A pre-cancelled or duplicate ID never causes a send."""
+MAX_TURN_CAS_ATTEMPTS = 10
+
+
+def _is_sqlite_busy(error):
+    if connection.vendor != 'sqlite':
+        return False
+    code = getattr(error, 'sqlite_errorcode', None)
+    if isinstance(code, int) and (code & 0xFF) in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}:
+        return True
+    message = str(error).lower()
+    return any(text in message for text in (
+        'database is locked', 'database table is locked', 'database is busy',
+    ))
+
+
+def _create_turn(*, user_id, news_id, turn_id):
+    """Create in a savepoint so a duplicate can be read inside an outer tx."""
     try:
         with transaction.atomic():
             ArticleChatTurn.objects.create(
@@ -47,8 +64,42 @@ def reserve_turn(*, user_id, news_id, turn_id):
         raise ArticleChatTurnError(
             'chat_turn_cancelled' if row['status'] == 'cancelled' else 'duplicate_chat_turn',
         ) from None
-    except OperationalError:
-        raise ArticleChatTurnError('chat_turn_unavailable') from None
+
+
+def reserve_turn(*, user_id, news_id, turn_id):
+    """First use only. A pre-cancelled or duplicate ID never causes a send."""
+    for attempt in range(1, MAX_TURN_CAS_ATTEMPTS + 1):
+        try:
+            with transaction.atomic():
+                _create_turn(user_id=user_id, news_id=news_id, turn_id=turn_id)
+            return
+        except OperationalError as error:
+            if _is_sqlite_busy(error) and attempt < MAX_TURN_CAS_ATTEMPTS:
+                time.sleep(0.005 * attempt)
+                continue
+            raise ArticleChatTurnError('chat_turn_unavailable') from None
+
+
+def reserve_turn_with_question(*, user_id, news_id, turn_id, question):
+    """Reserve the UUID and append its question atomically, before provider I/O.
+
+    Clear-history cannot interleave between the reservation and initial append:
+    it either cancels this committed turn or runs before this whole transaction.
+    """
+    from api.services.chat_history import append_user_message
+
+    for attempt in range(1, MAX_TURN_CAS_ATTEMPTS + 1):
+        try:
+            with transaction.atomic():
+                _create_turn(user_id=user_id, news_id=news_id, turn_id=turn_id)
+                return append_user_message(
+                    user_id=user_id, news_id=news_id, content=question,
+                )
+        except OperationalError as error:
+            if _is_sqlite_busy(error) and attempt < MAX_TURN_CAS_ATTEMPTS:
+                time.sleep(0.005 * attempt)
+                continue
+            raise ArticleChatTurnError('chat_turn_unavailable') from None
 
 
 def mark_dispatched(*, user_id, news_id, turn_id):
@@ -79,7 +130,7 @@ def cancel_turn(*, user_id, news_id, turn_id):
     wins, do not falsely acknowledge cancellation. Never persist credentials,
     prompts or answers in this control row.
     """
-    for _ in range(5):
+    for attempt in range(1, MAX_TURN_CAS_ATTEMPTS + 1):
         try:
             row = ArticleChatTurn.objects.filter(pk=turn_id).values(
                 'user_id', 'news_id', 'status',
@@ -104,6 +155,9 @@ def cancel_turn(*, user_id, news_id, turn_id):
                 status__in=('pending', 'dispatched'),
             ).update(status='cancelled') == 1:
                 return 'cancelled'
-        except OperationalError:
+        except OperationalError as error:
+            if _is_sqlite_busy(error) and attempt < MAX_TURN_CAS_ATTEMPTS:
+                time.sleep(0.005 * attempt)
+                continue
             raise ArticleChatTurnError('chat_turn_unavailable') from None
     raise ArticleChatTurnError('chat_turn_unavailable')

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from django.db import IntegrityError, OperationalError, connection, transaction
 from django.utils import timezone
 
-from api.models import ChatSession
+from api.models import ArticleChatTurn, ChatSession
 
 
 MAX_CAS_ATTEMPTS = 5
@@ -150,25 +150,38 @@ def append_assistant_message(*, user_id: int, news_id: int, session_id: int,
 
 
 def clear_chat_history(*, user_id: int, news_id: int) -> bool:
+    """Clear one owner's history and fence their already-reserved article turns.
+
+    The conditional turn update and generation/revision CAS share a short
+    transaction. Turn rows are updated before ChatSession to match completion's
+    turn-then-history write order and avoid a lock-order inversion.
+    """
     last_busy_error: OperationalError | None = None
 
     for attempt in range(1, MAX_CAS_ATTEMPTS + 1):
         try:
-            session = ChatSession.objects.filter(user_id=user_id, news_id=news_id).first()
-            if session is None:
-                return False
-            updated = ChatSession.objects.filter(
-                pk=session.pk,
-                user_id=user_id,
-                news_id=news_id,
-                revision=session.revision,
-                generation=session.generation,
-            ).update(
-                messages=[],
-                revision=session.revision + 1,
-                generation=session.generation + 1,
-                updated_at=timezone.now(),
-            )
+            with transaction.atomic():
+                ArticleChatTurn.objects.filter(
+                    user_id=user_id, news_id=news_id,
+                    status__in=('pending', 'dispatched'),
+                ).update(status='cancelled')
+                session = ChatSession.objects.filter(user_id=user_id, news_id=news_id).first()
+                if session is None:
+                    return False
+                updated = ChatSession.objects.filter(
+                    pk=session.pk,
+                    user_id=user_id,
+                    news_id=news_id,
+                    revision=session.revision,
+                    generation=session.generation,
+                ).update(
+                    messages=[],
+                    revision=session.revision + 1,
+                    generation=session.generation + 1,
+                    updated_at=timezone.now(),
+                )
+                if updated:
+                    return True
         except OperationalError as error:
             if not _is_sqlite_busy(error):
                 raise
@@ -177,8 +190,6 @@ def clear_chat_history(*, user_id: int, news_id: int) -> bool:
                 _pause_before_retry(attempt)
             continue
 
-        if updated:
-            return True
         if attempt < MAX_CAS_ATTEMPTS:
             _pause_before_retry(attempt)
 

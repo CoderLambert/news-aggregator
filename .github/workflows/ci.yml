@@ -22,7 +22,7 @@ on:
       - '.github/PULL_REQUEST_TEMPLATE/**'
       - '.github/FUNDING.yml'
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     paths-ignore:
       - 'docs/**'
       - 'README.md'
@@ -46,17 +46,18 @@ on:
 permissions:
   contents: read
 
-# Avoid duplicate PR push runs and discard obsolete checks on new commits.
+# One PR event cancels its previous run. Draft gets quick checks; Ready gets full gates.
+# Main pushes and workflow_dispatch always retain full verification.
 concurrency:
   group: newshub-ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # Cheap routing only: run on the frontend listener, with no Docker or caches.
-  # A missing Git commit, unexpected path or detection failure runs both suites.
+  # Route every trusted same-repository PR, including Draft development.
+  # Missing/unknown diff runs both selected scopes at the CURRENT stage.
   changes:
     if: >-
-      ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft) }}
+      ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: [self-hosted, linux, x64, newshub-frontend]
     timeout-minutes: 10
     outputs:
@@ -76,12 +77,81 @@ jobs:
           CI_BEFORE_SHA: ${{ github.event.before }}
           CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           CI_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          CI_PR_BEFORE_SHA: ${{ github.event.before }}
+          CI_PR_ACTION: ${{ github.event.action }}
+          CI_DEV_MODE: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft && 'true' || 'false' }}
         run: python3 ops/ci/change_scope.py
+
+
+  # Stage 1 — Draft PR: fast feedback only. No full Vitest, whole pytest,
+  # provider SDK/Proxy probe, production image or G1. Author runs focused
+  # feature tests locally; merge stage is mandatory for whole-PR acceptance.
+  dev-frontend:
+    needs: changes
+    if: >-
+      ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.draft && needs.changes.result == 'success' && needs.changes.outputs.frontend == 'true' }}
+    runs-on: [self-hosted, linux, x64, newshub-frontend]
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify isolated frontend listener and fast syntax
+        run: |
+          test "$(node -p 'process.versions.node.split(".")[0]')" = 22
+          test -z "${DOCKER_HOST:-}"
+          test ! -S /ci-docker/docker.sock
+          python3 -m compileall -q backend/api backend/newsaggregator crawler scripts/deploy ops/ci
+          bash -n ops/ci/*.sh scripts/deploy/*.sh scripts/deploy/tests/*.sh
+          python3 ops/ci/agent_rules.py
+      - name: Restore cached frontend dependencies
+        run: bash ops/ci/install-frontend-deps.sh
+      - name: Fast frontend types
+        working-directory: frontend
+        run: npm run typecheck
+      - name: Fast frontend lint
+        working-directory: frontend
+        run: npm run lint
+
+  dev-backend:
+    needs: changes
+    if: >-
+      ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.draft && needs.changes.result == 'success' && needs.changes.outputs.backend == 'true' }}
+    runs-on: [self-hosted, linux, x64, newshub-ci]
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: backend:crawler
+      RUN_MAIN: 'true'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Fast Python and shell syntax
+        run: |
+          test "$(python3 -c 'import sys; print(".".join(map(str,sys.version_info[:2])))')" = 3.12
+          python3 -m compileall -q backend/api backend/newsaggregator crawler scripts/deploy ops/ci
+          bash -n ops/ci/*.sh scripts/deploy/*.sh scripts/deploy/tests/*.sh
+          python3 ops/ci/agent_rules.py
+      - name: Reuse cached backend dependencies
+        run: bash ops/ci/install-backend-deps.sh
+      - name: Fast backend security regressions
+        run: |
+          backend/venv/bin/python -m pytest -q --maxfail=1 --tb=short \
+            backend/api/tests/test_article_fetcher_security.py \
+            backend/api/tests/test_research_csrf.py \
+            scripts/deploy/tests/test_nginx_templates.py
+      - name: Verify scoped CI contracts
+        run: backend/venv/bin/python -m unittest discover -s ops/ci/tests -p 'test_*.py'
+
+  # Stage 2 — non-Draft PR / main / manual: full whole-PR checks.
+  # Changes after Ready run the full suite again; return to Draft to iterate.
 
   frontend:
     needs: changes
     if: >-
-      ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (needs.changes.result == 'success' && needs.changes.outputs.frontend == 'true')) }}
+      ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event_name == 'workflow_dispatch' || (needs.changes.result == 'success' && needs.changes.outputs.frontend == 'true')) }}
     # Dedicated frontend listener: no Docker daemon access and no backend cache.
     runs-on: [self-hosted, linux, x64, newshub-frontend]
     timeout-minutes: 30
@@ -122,7 +192,7 @@ jobs:
   backend-and-release-gates:
     needs: changes
     if: >-
-      ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (needs.changes.result == 'success' && needs.changes.outputs.backend == 'true')) }}
+      ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event_name == 'workflow_dispatch' || (needs.changes.result == 'success' && needs.changes.outputs.backend == 'true')) }}
     runs-on: [self-hosted, linux, x64, newshub-ci]
     timeout-minutes: 90
     env:
@@ -242,3 +312,31 @@ jobs:
       - name: Report bounded cache usage
         if: always()
         run: bash ops/ci/cache-summary.sh
+
+  # A single final status for a complete, selected-scope, latest-head run.
+  # Draft PRs never get a merge-gate result; skipped Draft jobs are NOT accepted.
+  merge-gate:
+    needs: [changes, frontend, backend-and-release-gates]
+    if: >-
+      ${{ always() && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft)) }}
+    runs-on: [self-hosted, linux, x64, newshub-frontend]
+    timeout-minutes: 5
+    steps:
+      - name: Verify full selected jobs succeeded
+        env:
+          ROUTE_RESULT: ${{ needs.changes.result }}
+          FRONTEND_SCOPE: ${{ needs.changes.outputs.frontend }}
+          BACKEND_SCOPE: ${{ needs.changes.outputs.backend }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          BACKEND_RESULT: ${{ needs.backend-and-release-gates.result }}
+        run: |
+          test "$ROUTE_RESULT" = success
+          case "$FRONTEND_SCOPE:$FRONTEND_RESULT" in
+            true:success|false:skipped) ;;
+            *) echo 'Full frontend result missing or failed' >&2; exit 1 ;;
+          esac
+          case "$BACKEND_SCOPE:$BACKEND_RESULT" in
+            true:success|false:skipped) ;;
+            *) echo 'Full backend result missing or failed' >&2; exit 1 ;;
+          esac
+          echo "Full CI gate PASS for ${GITHUB_SHA}; selected scopes: frontend=$FRONTEND_SCOPE backend=$BACKEND_SCOPE"

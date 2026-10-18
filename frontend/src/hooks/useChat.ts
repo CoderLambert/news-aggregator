@@ -64,6 +64,7 @@ interface ClearChatState {
 const ASSISTANT_ERROR = '抱歉，我遇到了一些问题，请稍后再试。'
 const STOPPED_MESSAGE = '已停止接收本页更新。正在只读核对服务器记录。'
 const CLEAR_ERROR = '清空失败，原有聊天记录仍保留。请检查网络后重试。'
+const CLEAR_CANCEL_UNKNOWN_ERROR = '无法确认服务端是否已停止本轮，因此未清空聊天记录；请求可能仍在处理或已产生费用。请先核对本轮状态。'
 const SUCCESS_DURATION_MS = 1500
 const META_MARKER = '__META__'
 let nextTurnId = 0
@@ -272,6 +273,11 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       const request = requestRef.current
       requestRef.current = null
       request.controller.abort()
+      // Unmounting only stops browser receive. Best-effort server cancellation
+      // fences a paid turn when this tab disappears; failure remains unknown.
+      if (request.serverTurnId && parsedId !== null && ownerRef.current === ownerKey) {
+        void cancelChatTurn(parsedId, request.serverTurnId).catch(() => {})
+      }
       const interrupted = snapshotActiveRequest(request)
       interrupted.reconciliation = 'unconfirmed'
       const pending = pendingTurnRef.current
@@ -302,7 +308,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       }
     }
     if (successTimerRef.current) clearTimeout(successTimerRef.current)
-  }, [ownerKey])
+  }, [ownerKey, parsedId])
 
   // Apply both explicit rechecks and later Query snapshots against the original turn boundary.
   const applyHistoryReconciliation = useCallback((snapshot: PendingTurn, history: ChatHistory) => {
@@ -625,8 +631,34 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     }
 
     let cleared = false
+    let cancelOutcomeUnknown = false
     try {
       await queryClient.cancelQueries({ queryKey: historyKey })
+      if (clearRequest.controller.signal.aborted || ownerRef.current !== ownerKey || clearControllerRef.current !== clearRequest) {
+        return false
+      }
+      // Clear only after a durable receipt for a known personal-model turn.
+      // Unknown never means cancelled: leave history and the uncertain turn intact.
+      if (interruptedTurn?.serverTurnId) {
+        try {
+          const outcome = await cancelChatTurn(parsedId, interruptedTurn.serverTurnId)
+          if (clearRequest.controller.signal.aborted || ownerRef.current !== ownerKey ||
+            clearControllerRef.current !== clearRequest) return false
+          interruptedTurn = {
+            ...interruptedTurn,
+            assistant: {
+              ...interruptedTurn.assistant,
+              content: outcome === 'cancelled'
+                ? '服务端已确认取消本轮；已发送请求仍可能产生费用。'
+                : '服务端已完成本轮；正在清空已保存记录。',
+            },
+          }
+          setPendingTurn(interruptedTurn)
+        } catch {
+          cancelOutcomeUnknown = true
+          throw new Error('chat_turn_cancel_unknown')
+        }
+      }
       if (clearRequest.controller.signal.aborted || ownerRef.current !== ownerKey || clearControllerRef.current !== clearRequest) {
         return false
       }
@@ -638,7 +670,8 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       cleared = true
     } catch {
       if (ownerRef.current === ownerKey && clearControllerRef.current === clearRequest) {
-        setClearState({ ownerKey, value: { open: true, clearing: false, error: CLEAR_ERROR } })
+        setClearState({ ownerKey, value: { open: true, clearing: false,
+          error: cancelOutcomeUnknown ? CLEAR_CANCEL_UNKNOWN_ERROR : CLEAR_ERROR } })
         if (interruptedTurn) updatePhase('error')
       }
     } finally {

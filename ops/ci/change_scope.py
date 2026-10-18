@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Route NewsHub CI jobs from the complete Git change range, fail-closed on uncertainty.
+"""Route NewsHub CI jobs safely across development and merge stages.
 
-No third-party dependencies, GitHub token, network access or business configuration.
-Missing history or an unknown path executes both suites instead of silently skipping.
+Draft synchronize uses an ancestor-verified before..head incremental diff when
+available; Ready/main/manual uses the whole PR/push range. Missing/invalid
+history or unknown paths never silently exclude a needed test scope.
+No third-party dependencies, GitHub token, network or business configuration.
 """
 
 from __future__ import annotations
@@ -73,8 +75,9 @@ def _git(*args: str) -> bytes:
     return subprocess.run(["git", *args], check=True, capture_output=True).stdout
 
 
-def changed_paths(event: str, before: str, base: str, head: str) -> list[str]:
-    """Use merge-base for PRs; include every commit of a push (not HEAD^)."""
+def changed_paths(event: str, before: str, base: str, head: str, *,
+                  dev_mode: bool = False, pr_action: str = '', pr_before: str = '') -> list[str]:
+    """Keep full PR coverage for merge, use proven incremental range for Draft."""
     if not _SHA.fullmatch(head):
         raise ValueError("missing/invalid head SHA")
     if event == "pull_request":
@@ -83,6 +86,16 @@ def changed_paths(event: str, before: str, base: str, head: str) -> list[str]:
         old = _git("merge-base", base, head).decode("ascii").strip()
         if not _SHA.fullmatch(old):
             raise ValueError("unable to resolve PR merge-base")
+        if dev_mode and pr_action == "synchronize" and _SHA.fullmatch(pr_before):
+            # GitHub's PR synchronize event exposes before+after. Use the
+            # previous head only when it is an actual ancestor of this head;
+            # force-push, missing history or rebase fall back to full PR diff.
+            try:
+                ancestor = _git("merge-base", pr_before, head).decode("ascii").strip()
+                if ancestor == pr_before and pr_before != head:
+                    old = pr_before
+            except subprocess.CalledProcessError:
+                pass
     elif event == "push":
         if not _SHA.fullmatch(before) or set(before) == {"0"}:
             raise ValueError("missing/invalid push before SHA")
@@ -111,10 +124,14 @@ def main() -> None:
             os.getenv("CI_BEFORE_SHA", ""),
             os.getenv("CI_BASE_SHA", ""),
             os.getenv("CI_HEAD_SHA", ""),
+            dev_mode=os.getenv("CI_DEV_MODE") == 'true',
+            pr_action=os.getenv("CI_PR_ACTION", ""),
+            pr_before=os.getenv("CI_PR_BEFORE_SHA", ""),
         )
         frontend, backend = route_paths(paths)
         scopes = {classify_path(path) for path in paths}
-        print(f"Change routing: {len(paths)} paths; categories={sorted(scopes)}", file=sys.stderr)
+        stage = 'development' if event == 'pull_request' and os.getenv('CI_DEV_MODE') == 'true' else 'merge'
+        print(f"Change routing ({stage}): {len(paths)} paths; categories={sorted(scopes)}", file=sys.stderr)
     except (OSError, ValueError, subprocess.CalledProcessError, UnicodeError) as error:
         # No silent bypass when Git history, event metadata or git itself fails.
         frontend = backend = True
