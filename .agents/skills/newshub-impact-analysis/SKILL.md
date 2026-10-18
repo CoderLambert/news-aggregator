@@ -1,11 +1,11 @@
 ---
 name: newshub-impact-analysis
-description: "Analyze impact before a NewsHub cross-module, API/schema, RSS/BYOK, concurrency or security change. Not for read-only Q&A, documentation-only edits or an obvious single-component fix."
+description: "Analyze complex NewsHub architecture and change impact, including read-only cross-module design reviews, API/schema, RSS/BYOK, concurrency and security; exclude trivial lookups and simple edits."
 ---
 
 # NewsHub impact analysis
 
-Read [root rules](../../../AGENTS.md), then only applicable module rules. All code paths below are repository-relative.
+Reuse unchanged rules already loaded; otherwise read [root rules](../../../AGENTS.md) and the relevant module rules. Complex read-only review is allowed but never authorizes writes. Paths are repository-relative.
 
 1. Confirm the requested goal/authorization, actual base SHA and existing dirty work. Preserve task IDs; do not open a replacement planning system.
 2. Inspect relevant entry points, callers, consumers and existing tests. Code/tests show current behavior; the approved task contract supplies the desired behavior. Do not treat old completion tables as current facts.

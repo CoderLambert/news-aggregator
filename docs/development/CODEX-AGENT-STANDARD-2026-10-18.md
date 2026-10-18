@@ -58,7 +58,7 @@ T01 连接与通用 Worker 撤销围栏已有代码和合成回归；T02/T03 未
 
 AG-01 的来源身份/可信主题证据已实现；其余 AG 项不能只因文件或测试存在就标完成。RSS 已有 Miniflux 适配与同步/订阅，但最终生产切源、旧链退出和真实来源质量有单独验收。保留原 RSS T00–T36、BYOK T00–T14/T00-G 和 AG-00–AG-07 编号，不建立重复任务体系。
 
-任务入口：`docs/plans/FEATURE-DEVELOPMENT-2026-10-17.md`、RSS `ARCHITECTURE.md`/`TASKS.md`、BYOK `T01-WORKER-FENCING-2026-10-18.md`、AG-01 交付文档和 Issue #55。历史状态表与注释可能落后，以当前代码与最新获批合同分别判断“已实现”与“应实现”，不要混用。
+当前任务唯一入口：`docs/plans/FEATURE-DEVELOPMENT-2026-10-17.md`；2026-10-17 的状态快照移入 `docs/plans/archive/FEATURE-DEVELOPMENT-SNAPSHOT-2026-10-17.md`，其旧“当前/下一批”文字不具执行权。RSS `ARCHITECTURE.md`/`TASKS.md`、BYOK T01 Worker 合同及 AG-01 合同/Issue #55 保留目标定义。当前源码与合同分别回答“已实现”和“应该实现”。
 
 ## 3. 实际配置层次
 
@@ -144,7 +144,7 @@ SKIPPED、NOT_RUN、BLOCKED 与 PASS 分开。G1/受控 Proxy 是合成环境；
 
 ## 7. 配置验收与使用
 
-结构检查会验证文件存在/类型/UTF-8/体积、Skill 唯一字段与名称、局部链接及 Markdown 围栏、祖先链预算；测试另覆盖负例和现有 CI 路由。它**不能**证明模型服从规则、隐式正确触发、开发正确率或节省 Token。
+结构检查会验证文件存在/类型/UTF-8/体积、**额外未登记规则与 Skills**、Skill 唯一字段与名称、局部链接及 Markdown 围栏、祖先链预算；测试另覆盖负例和现有 CI 路由。它**不能**证明模型服从规则、隐式正确触发、开发正确率或节省 Token。
 
 本机更新到包含这些文件的分支后，在真实 Codex CLI 中做只读验收；保留个人模型和权限配置，不添加绕过审批参数。规则变更后开启新会话：
 
@@ -154,7 +154,7 @@ codex "只读：列出本会话生效规则来源，并说明修改 frontend/src
 codex --cd backend/api/rss "只读：列出根、backend、RSS 规则的来源，并说明 RSS 写入与网络事务的边界。"
 ```
 
-在 Codex 内使用 `/skills` 查看，或明确输入 `$newshub-verify`、`$newshub-impact-analysis`、`$newshub-pr-handoff`。项目根与子目录应都能发现根 Skills；若缺失，检查真实 CLI 版本、目录、同名 Skill、用户配置与 override，而非覆盖用户设置。
+无需模型请求可使用 `codex -C <repo-or-subdir> debug prompt-input` 比较根目录、frontend、backend/api/rss 的祖先规则及 Skill 元数据是否注入/被发现；不要把完整 prompt 输出保存到共享日志。该检查只证明提示构建，**不证明自动选择 Skill 或实际遵守**。在 Codex 内可用 `/skills` 查看，或明确输入 `$newshub-verify`、`$newshub-impact-analysis`、`$newshub-pr-handoff`。项目根与子目录应都能发现根 Skills；若缺失，检查真实 CLI 版本、目录、同名 Skill、用户配置与 override，而非覆盖用户设置。
 
 | 只读/可回滚验收情景 | 期望 |
 |---|---|
@@ -173,7 +173,7 @@ codex --cd backend/api/rss "只读：列出根、backend、RSS 规则的来源�
 
 实际规则文件是操作约束的唯一正文，不将全文复制进本说明或其他 Skill。修改架构时同步相应规则与相关测试；阶段状态在当前任务合同更新。常规小改动不要求修改 AGENTS。
 
-新增规则/Skill 时更新 `ops/ci/agent_rules.py` 的项目文件清单与预算（不是 CI 分类器），补充负例和相关链接；仅在能力确实需要时扩展元数据格式。纯说明留在 docs，执行规则与代码不可伪装成可忽略文档。
+配置校验器会扫描项目源码中的 `AGENTS.md` / `AGENTS.override.md` 和 `.agents/skills/` 目录，并拒绝未登记的新增规则或 Skill；它排除依赖与生成目录，但不排除未知业务目录。新增合法规则/Skill 时更新 `ops/ci/agent_rules.py` 的项目允许清单与回归测试；只有确实需要时再扩展元数据格式。纯说明留在 docs，执行规则与代码不可伪装成可忽略文档。
 
 回滚恢复/移除本 PR 的规则、Skills、检查器、测试及前端新增预检行，重新启动 Codex。不会触及用户 `~/.codex/config.toml`、认证/MCP、业务数据或生产服务。GitHub PR/CI 证据记录当前提交，文档不把待验证项提前标 PASS。
 

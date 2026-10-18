@@ -9,7 +9,7 @@ Read [root rules](../../AGENTS.md). These rules also apply to `.github/**`, root
 - Update classifier tests, CI contracts, release-operation workflow contracts and the routing guide together only when the routing contract actually changes. Do not change CI for ordinary feature development.
 - Keep manual `workflow_dispatch` as full verification. A skipped/missing job is not PASS; distinguish intentional path suppression from detection/Runner failure. A failure in the changes job cannot be reported as successful routing fallback.
 - For review, verify all required selected jobs for the exact head SHA and current base; if the base moved, revalidate the merged result. Do not merge merely because GitHub says mergeable or one job is green.
-- Validate Agent files with `python3 ops/ci/agent_rules.py`; regression checks: `python3 -m unittest discover -s ops/ci/tests -p 'test_agent_rules.py'`. These checks are structural, not proof of model compliance or token savings.
+- Validate Agent files with `python3 ops/ci/agent_rules.py`; regressions: `python3 -m unittest discover -s ops/ci/tests -p 'test_agent_rules.py'`. New owned rules/Skills must be registered and covered by negative tests. These checks are structural, not proof of model compliance or token savings.
 
 ## Code Review Rules
 Flag loss of coverage, unsafe skip rules, untrusted Runner execution, leaked secrets or weakened gate semantics. Reuse the existing Actions workflow and dependencies rather than adding a separate Agent CI service.

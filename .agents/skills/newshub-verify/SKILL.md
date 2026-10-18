@@ -5,7 +5,7 @@ description: "Verify changed NewsHub code, tests, migrations, dependencies, CI o
 
 # NewsHub verification
 
-Read [root rules](../../../AGENTS.md), [test rules](../../../tests/AGENTS.md), relevant module rules and the [CI guide](../../../ops/ci/change-routing.md). Paths in commands are relative to the repository root unless a subshell changes directory.
+Reuse unchanged rules already loaded; otherwise read [root rules](../../../AGENTS.md), [test rules](../../../tests/AGENTS.md), relevant module rules and the [CI guide](../../../ops/ci/change-routing.md). Commands are repository-relative unless a subshell changes directory.
 
 1. Determine the real diff: PR merge-base to head plus staged, unstaged and untracked edits (`git status --short`, `git diff`, `git diff --cached`, `git ls-files --others --exclude-standard`). Include deleted/renamed paths. Local edits do not appear in remote CI until committed/pushed.
 2. Check Python/Node/venv/dependency availability against CI and lockfiles. Use a credential-free worktree with disposable DB/ports; do not read/print secrets, copy real `.env`, install over shared caches or trigger real network/model/production work.

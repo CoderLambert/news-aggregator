@@ -5,7 +5,7 @@ description: "Prepare a requested NewsHub PR review or implementation handoff wi
 
 # NewsHub PR handoff
 
-Read [root rules](../../../AGENTS.md) and the applicable module review rules. Reuse existing task/PR IDs instead of creating duplicates.
+Reuse unchanged rules already loaded; otherwise read [root rules](../../../AGENTS.md) and applicable module review rules. Reuse task/PR IDs; do not duplicate them.
 
 1. Inspect the final diff, base/head and dirty state. Exclude unrelated edits, runtime databases, credentials and generated output. Recheck base movement before any authorized merge.
 2. Review concrete owner/CSRF/feature, version/lease/epoch, API/DTO/SSE, network, migration and rollback failure scenarios. Cite file paths, impact and minimal reproduction for findings; avoid style-only bot churn.
