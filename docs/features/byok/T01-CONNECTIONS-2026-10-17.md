@@ -1,5 +1,7 @@
 # 原 BYOK T01：多连接管理差量交付
 
+> **后续整合状态（2026-10-18）**：本报告记录的是当时“旧单 Key 与新连接并存”的局部交付历史，当前实现已由 [PR #103](https://github.com/CoderLambert/news-aggregator/pull/103) 取代。正式 `main@13584bc` 已移除旧 UserProviderCredential 的业务模型/API/UI/服务；旧密钥通过 `0061` 原子转换为停用的 `UserAIConnection`，失败整批回滚。仅新 `/settings/ai` 负责 Key 管理，ChatGPT 订阅保持独立。PR 级自动化为 2454 passed / 16 skipped，frontend/G1 成功。原 T01 worker 全量 epoch 撤销仍在第 5 批；真实数据库/模型/浏览器人工/生产环境 NOT_RUN。详见[统一计划](../../plans/FEATURE-DEVELOPMENT-2026-10-17.md)。以下保留原始工作记录，**不能当作当前架构说明**。
+
 基线 main `53370185430f0bc7e83534263088a4155f836ed3`。原 Task/Test 继续有效，复用旧 #34 的连接身份、两种凭据版本和 AEAD 设计，不重放旧迁移。原 T01 保持 **PARTIAL**，本次交付连接 CRUD，不假称已完成所有 worker 消费端。
 
 ## 实际改动

@@ -1,5 +1,11 @@
 # NewsHub 开发计划与原任务合同索引（2026-10-17 校正）
 
+> **第 4 批交付更新（2026-10-18，取代本文件较早的“下一批候选/旧连接并存”状态说明）**：正式功能代码已合并至 `main@13584bcbf3cee7a3787e64bab0da786f8fd8ee47`。CI 门禁 [#102](https://github.com/CoderLambert/news-aggregator/pull/102) 已 squash 合并于 `85994f7`，BYOK T01 旧单 Key 退出 [#103](https://github.com/CoderLambert/news-aggregator/pull/103) 合并于 `13584bc`。T01 单连接架构的前端、后端及 G1 合成 CI 均已在 PR SHA `cd4bbae` [成功验证](https://github.com/CoderLambert/news-aggregator/actions/runs/39053903501)：后端 **2454 passed / 16 skipped**，包含动态身份对账；[#102 三轮独立 CI](https://github.com/CoderLambert/news-aggregator/actions/runs/39052392960) 全绿。最终合并后的 [main CI](https://github.com/CoderLambert/news-aggregator/actions/runs/39098969386) 以实际结果为准，不能把 PR CI 替代为该结果。
+>
+> **当前架构**：唯一个人 Key 入口 `/settings/ai` 与 `UserAIConnection`；`UserProviderCredential` 运行模型、旧 API/UI/服务已退出。新增 `0061` 对旧密文做一次性原子迁移（不可解密则整个事务回滚），迁入连接默认停用，保留 model ID 提示供 T02 使用；不得在未经授权的生产数据库执行。ChatGPT 订阅独立保留。业务尚无 T02/T03 模型+用途绑定时 fail-closed，不恢复旧调用或站点 Key。**原 T01 的真实后台 worker 全量 credential_epoch 围栏**按原计划在第 5 批继续；真实厂商、真实用户 Key、生产迁移和人工验收均 NOT_RUN。
+>
+> **后续顺序**：第 5 批仅 BYOK T01 worker 撤销围栏 + AG-01 来源元信息。其余仍按原任务合同、每批最多两个独立目标推进。本文件旧章节均保留为 2026-10-17 历史审计快照，不代表最新未完成任务清单。
+
 > **当前唯一的跨项目任务协调入口**。这是任务索引、优先级和状态交接，不替代各项目的原始设计/测试合同，也**不新增任务编号体系**。
 >
 > 本轮开发基线：`main@2e3254c890f52af626aa7d2400097301bf550d14`（含原任务权威校正 #93）；合成 CI 后端基线为 **2429 passed / 16 skipped**。跳过不算通过。本批 RSS T20 / BYOK T00 的实际提交、PR 和验证见第 7 节；合并后的 main 以对应 PR 的 merge SHA 为准。

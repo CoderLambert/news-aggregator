@@ -1,5 +1,7 @@
 # BYOK T01：现有密钥设置安全恢复（2026-10-17）
 
+> **历史记录说明（2026-10-18）**：此文件记录 #97 曾经存在的旧单 Key 页面恢复工作；旧入口及其专属测试已随 [PR #103](https://github.com/CoderLambert/news-aggregator/pull/103) 删除，新连接的回显掩码、响应未知时显式 GET 对账、清空输入、切换账号隔离等行为以 `/settings/ai` 和 `frontend/tests/pages/AIModelSettingsPage.test.tsx` 为准。新架构已合并 `main@13584bc`；下一项原 T01 的真实 worker epoch 接线仍未完成，生产数据迁移/真实模型/人工 UAT 仍 NOT_RUN。下面为先前单独 PR 的历史验收结果，而非当前代码运行说明。
+
 原任务仍为 **PARTIAL**。本文件是原 T01 的局部交付报告，不是新任务/另一套编号；[原 Task](https://github.com/CoderLambert/news-aggregator/blob/ed58afa7a72ae905e2a2ffc315d968ca3634b8f2/docs/features/byok/tasks/T01-credentials.md)、[原 Test](https://github.com/CoderLambert/news-aggregator/blob/ed58afa7a72ae905e2a2ffc315d968ca3634b8f2/docs/features/byok/tests/T01-credentials.md) 和[统一计划](../../plans/FEATURE-DEVELOPMENT-2026-10-17.md)继续有效。
 
 ## 差异与本轮代码
