@@ -29,7 +29,7 @@ Details: [engineering standard](docs/development/CODEX-AGENT-STANDARD-2026-10-18
 - Article readers, translations and research replay must recheck owner/content revision. A closed connection/EOF is not successful SSE completion; cancellation/retry/commit must respect current leases and fences.
 
 ## Validation and delivery
-- Use [$newshub-impact-analysis](.agents/skills/newshub-impact-analysis/SKILL.md) for complex cross-module/risky design; [$newshub-verify](.agents/skills/newshub-verify/SKILL.md) after changes; [$newshub-pr-handoff](.agents/skills/newshub-pr-handoff/SKILL.md) for a requested handoff. Do not invoke all Skills for trivial edits.
+- Use [$newshub-impact-analysis](.agents/skills/newshub-impact-analysis/SKILL.md) for complex/risky design; [$newshub-verify](.agents/skills/newshub-verify/SKILL.md) before a cheap bug repro or perf baseline, and after edits for verification; [$newshub-pr-handoff](.agents/skills/newshub-pr-handoff/SKILL.md) for a requested handoff. Skip irrelevant steps; do not invoke all Skills for trivial edits.
 - Inspect whole PR diff plus staged, unstaged and untracked edits. Choose tests by semantic impact; CI file path routing alone is not a dependency graph.
 - CI truth: `.github/workflows/ci.yml`, `ops/ci/change_scope.py`, `ops/ci/benchmark-xdist.sh`. `scripts/run_tests.sh` is still a legacy partial test entry. Agent structure: `python3 ops/ci/agent_rules.py`.
 - Report scope/files, commands/results, head/base, actual CI, risks and rollback. SKIPPED/NOT_RUN/BLOCKED are not PASS; synthetic G1/Proxy does not prove live provider/production/UAT.
