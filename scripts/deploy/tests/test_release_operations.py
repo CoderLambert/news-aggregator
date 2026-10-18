@@ -601,10 +601,22 @@ class CollectionAndWorkflowTests(unittest.TestCase):
         self.assertNotIn("pull_request_target", workflow["on"])
         self.assertEqual(workflow["permissions"], {"contents": "read"})
         jobs = workflow["jobs"]
-        self.assertEqual(set(jobs), {"frontend", "backend-and-release-gates"})
+        self.assertEqual(set(jobs), {"changes", "frontend", "backend-and-release-gates"})
+        # The trusted same-repo/non-Draft gate runs before any product job.
+        # Product jobs must depend on its successful completion, while a
+        # deliberate manual dispatch still runs both full suites.
+        router = jobs["changes"]
+        self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", router["if"])
+        self.assertIn("!github.event.pull_request.draft", router["if"])
+        self.assertEqual(router["runs-on"], ["self-hosted", "linux", "x64", "newshub-frontend"])
+        for name, scope in (("frontend", "frontend"), ("backend-and-release-gates", "backend")):
+            job = jobs[name]
+            self.assertEqual(job["needs"], "changes")
+            self.assertIn("needs.changes.result == 'success'", job["if"])
+            self.assertIn(f"needs.changes.outputs.{scope} == 'true'", job["if"])
+            self.assertIn("github.event_name == 'workflow_dispatch'", job["if"])
+            self.assertIn("!cancelled()", job["if"])
         for job in jobs.values():
-            # Self-hosted jobs must never run for fork PRs.
-            self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", job["if"])
             checkout = next(step for step in job["steps"] if step.get("uses", "").startswith("actions/checkout@"))
             self.assertEqual(checkout["with"]["persist-credentials"], "false")
         frontend_job = jobs["frontend"]
