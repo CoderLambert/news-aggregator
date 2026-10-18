@@ -133,14 +133,16 @@ def normalized_chat_history(messages: list) -> list:
 
 
 def append_assistant_message(*, user_id: int, news_id: int, session_id: int,
-                             generation: int, content: str, status: str = 'complete', article_context=None) -> ChatSnapshot:
+                             generation: int, content: str, status: str = 'complete',
+                             article_context=None, model_source=None) -> ChatSnapshot:
     if status not in {'complete', 'failed', 'interrupted'}:
         raise ValueError('invalid assistant completion status')
     return _append_message(
         user_id=user_id,
         news_id=news_id,
         message={'role': 'assistant', 'content': content, 'status': status,
-                 **({'article_context': article_context} if article_context is not None else {})},
+                 **({'article_context': article_context} if article_context is not None else {}),
+                 **({'model_source': model_source} if model_source is not None else {})},
         session_id=session_id,
         generation=generation,
         create=False,
