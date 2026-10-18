@@ -37,6 +37,7 @@ class UserAIModelConfig(models.Model):
 class AIModelProbeAttempt(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    request_id = models.UUIDField()
     connection = models.ForeignKey('api.UserAIConnection', on_delete=models.CASCADE)
     model_config = models.ForeignKey(UserAIModelConfig, on_delete=models.CASCADE, related_name='probe_attempts')
     model_id = models.CharField(max_length=160)
@@ -59,3 +60,4 @@ class AIModelProbeAttempt(models.Model):
     class Meta:
         ordering = ['-created_at', 'id']
         indexes = [models.Index(fields=['user', 'created_at'], name='ai_probe_owner_created')]
+        constraints = [models.UniqueConstraint(fields=['user', 'request_id'], name='ai_probe_request_unique')]
