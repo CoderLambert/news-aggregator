@@ -74,7 +74,7 @@ def test_same_html_updates_metadata_and_archives_title_and_summary(setup):
     assert set(LegacyTranslationSnapshot.objects.values_list('field', flat=True)) == {'title', 'content'}
 
 
-@pytest.mark.parametrize('mutation', ['source_epoch', 'policy', 'owner', 'body_owner', 'revision', 'unapplied', 'link', 'map', 'instance', 'account', 'feed'])
+@pytest.mark.parametrize('mutation', ['source_epoch', 'policy', 'owner', 'source_name', 'source_url', 'source_region', 'news_source', 'news_category', 'body_owner', 'revision', 'unapplied', 'link', 'map', 'instance', 'account', 'feed'])
 def test_second_get_cannot_refresh_authorization(setup, mutation):
     commit(setup)
     fence = capture(setup)
@@ -85,6 +85,18 @@ def test_second_get_cannot_refresh_authorization(setup, mutation):
         SourcePublication.objects.filter(source=source).update(policy_version=2)
     elif mutation == 'owner':
         SourcePublication.objects.filter(source=source).update(owner='legacy')
+    elif mutation == 'source_name':
+        Source.objects.filter(pk=source.pk).update(name='Renamed source after discovery')
+    elif mutation == 'source_url':
+        Source.objects.filter(pk=source.pk).update(url='https://changed.example/')
+    elif mutation == 'source_region':
+        Source.objects.filter(pk=source.pk).update(region='domestic')
+    elif mutation == 'news_source':
+        unrelated = Source.objects.create(name='Unrelated source after discovery', url='https://other.example/')
+        News.objects.update(source=unrelated)
+    elif mutation == 'news_category':
+        category = Category.objects.create(name='Reclassified after discovery', slug='reclassified-after-discovery')
+        News.objects.update(category=category)
     elif mutation == 'body_owner':
         News.objects.update(body_owner_binding=None, body_owner_source=source, body_owner_version=2)
     elif mutation == 'revision':
