@@ -177,6 +177,14 @@ class SelfHostedCIContract(unittest.TestCase):
     def test_private_dind_and_bind_mount_paths(self):
         cfg = load(COMPOSE)
         svc = cfg["services"]
+        # The existing private bridge's MTU=1500 caused GitHub TLS timeout.
+        # Scope 1280 to this Compose project and preserve network isolation.
+        self.assertEqual(cfg["networks"]["default"], {
+            "driver": "bridge",
+            "driver_opts": {"com.docker.network.driver.mtu": "${CI_BRIDGE_MTU:-1280}"},
+        })
+        for name in ("docker", "runner", "runner-frontend"):
+            self.assertNotIn("network_mode", svc[name])
         self.assertTrue(svc["docker"]["privileged"])
         self.assertNotIn("ports", svc["docker"])
         # The outer Docker DNS 127.0.0.11 failed Docker Hub resolution on

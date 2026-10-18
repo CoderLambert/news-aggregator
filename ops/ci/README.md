@@ -189,6 +189,30 @@ docker exec newshub-ci-docker-1 docker -H unix:///ci-docker/docker.sock system d
 
 ## 7. 环境和故障
 
+### GitHub Runner TLS 超时与项目级 Bridge MTU
+
+2026-10-19 Omarchy 实证：两个 Runner 同时 Offline，TCP 443 通而 api.github.com 的 TLS 握手在项目 Bridge MTU=1500 下超时。同一 Runner 镜像在 Host 网络正常；临时将两个容器的 eth0 调整到 MTU=1280 后 HTTPS 返回 200、Runner 恢复 Online 并领取排队 CI。此结果**支持 MTU/PMTU 路径问题**，尚未确定具体的丢包设备。
+
+Compose 为 **newshub-ci 项目自身**的默认 Bridge 网络设置 MTU=${CI_BRIDGE_MTU:-1280}，不改宿主机 Docker 全局设置，不授予前端 Runner Docker socket，也不自动改动现有正在运行的容器。仓库配置更新后旧网络不会自动应用新 MTU。DinD 内部新建网络如另有 MTU 异常应独立验证，不预先删除镜像和缓存。
+
+仅在**当前 PR/main CI 全部完成**、两个 GitHub Runner Online/Idle 且本地没有 Runner.Worker 时，才在 Omarchy 上运行：
+
+~~~bash
+git fetch origin && git switch main && git pull --ff-only
+bash ops/ci/manage.sh status
+# stop 使用 GitHub Busy 和本地 Worker 双重保护；失败就不要 down。
+bash ops/ci/manage.sh stop || exit 1
+export CI_DATA_DIR="${CI_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/newshub-ci}"
+# 仅删除该 CI 项目容器和网络；不加 -v，保留注册身份、工作卷和 DinD 缓存。
+CI_DATA_DIR="$CI_DATA_DIR" docker compose -p newshub-ci -f ops/ci/compose.yaml down || exit 1
+bash ops/ci/manage.sh start
+bash ops/ci/manage.sh status
+docker exec newshub-ci-runner-1 cat /sys/class/net/eth0/mtu
+docker exec newshub-ci-runner-frontend-1 cat /sys/class/net/eth0/mtu
+~~~
+
+通过条件：两个 eth0 均为 1280，GitHub 两个 Runner 均 Online，随后适用的精确 PR head CI 实际运行成功。**真实 Omarchy 持久化操作在执行前为 NOT_RUN**。若需要回退，设置 `CI_BRIDGE_MTU=1500` 并在空闲状态按同一受保护流程重建网络；1500 可能重新触发本故障。不得在 CI Busy 时执行 down，不使用全局 prune，不删数据卷。
+
 - Runner 与 DinD 都需要联网拉镜像和工具；不需要公网入站端口。
 - 预装 Chromium，后端 venv 仍安装原工作流指定版本 playwright==1.62.0。
 - 若 docker compose 无法启动 DinD，请检查当前 Omarchy 的内核、cgroup/overlay2、iptables 和资源。不要未经审核直接改为挂宿主 Docker Socket。

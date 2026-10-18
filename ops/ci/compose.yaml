@@ -160,6 +160,15 @@ services:
       retries: 4
       start_period: 40s
 
+# Keep this project's Docker bridge below tunnel path MTU. GitHub TLS
+# handshakes on Omarchy failed at 1500 and passed at 1280; host networking
+# or modifying the global Docker daemon is not required.
+networks:
+  default:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: "${CI_BRIDGE_MTU:-1280}"
+
 volumes:
   runner-work:
   runner-state:
