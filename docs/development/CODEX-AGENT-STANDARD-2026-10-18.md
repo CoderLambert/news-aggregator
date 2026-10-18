@@ -105,9 +105,10 @@ Django 6 / DRF 入口与 PublicPolicy/Feature Gate
 news-aggregator/
 ├── AGENTS.md                         # 全仓库：高价值不变量与门禁
 ├── backend/
-│   └── AGENTS.md                     # Django/SQLite/API/AI 共通约束
-│   └── api/rss/
-│       └── AGENTS.md                 # RSS/Miniflux/正文独有规则
+│   ├── AGENTS.md                     # Django/SQLite/API/AI 共通约束
+│   └── api/
+│       └── rss/
+│           └── AGENTS.md                 # RSS/Miniflux/正文独有规则
 ├── frontend/
 │   └── AGENTS.md                     # 状态/路由/API/测试约束
 ├── ops/ci/
@@ -122,7 +123,7 @@ news-aggregator/
 
 **只提交规则，不在首轮提交 `.codex/config.toml`。** 现有个人模型、登录方式、审批、沙盒与 MCP 留在用户配置 `~/.codex/config.toml`；不要把本机绝对路径、凭据、个人 Provider 设置写入仓库。
 
-官方 AGENTS.md 加载规则：Codex 从 Git 根到当前目录依次读取，较深目录覆盖较浅约定；同目录可使用 `AGENTS.override.md`，但本项目不建议滥用。Skills 以 `.agents/skills/<name>/SKILL.md` 供按需发现。不要把所有模块文档粘贴进根 AGENTS，避免每次会话重复消耗上下文。
+官方 AGENTS.md 加载规则：Codex **启动会话时**从 Git 根到**当前工作目录**依次读取，较深目录覆盖较浅约定；同目录可使用 `AGENTS.override.md`，但本项目不建议滥用。**注意：若 Codex 从仓库根目录启动，`frontend/AGENTS.md`、`backend/AGENTS.md` 等不应被假定自动加载；动手修改子模块前须明确读取适用的子目录规则，或从对应子目录启动新会话。** Skills 以 `.agents/skills/<name>/SKILL.md` 供按需发现。不要把所有模块文档粘贴进根 AGENTS，避免每次会话重复消耗上下文。
 
 建议根 `AGENTS.md` 控制在约 100–150 行以内，四个子文件分别约 20–50 行；内容没有实际不变量或命令的，不要写入规则。建议三项 Skills 首先以**纯指令**落地，验证确有重复操作再增加脚本。
 
@@ -133,6 +134,7 @@ news-aggregator/
 
 ## Source of truth
 - Check git status, branch, origin/main and the affected source/tests before modifying code.
+- Before editing frontend/, backend/, backend/api/rss/ or ops/ci/, explicitly read applicable nested AGENTS.md files if present; launching Codex at repo root does not automatically include deeper directory rules.
 - Read docs/plans/FEATURE-DEVELOPMENT-2026-10-17.md only for task identity and current relevant decisions; earlier historical snapshots are not current implementation evidence.
 - Read ops/ci/change-routing.md before changing CI. Do not use README.md or scripts/run_tests.sh alone to assert full test coverage.
 
@@ -285,7 +287,7 @@ Rollback (revert code or feature flag; do not mutate production database):
 ~~~
 
 阶段：
-1. 读 `git status`、`origin/main`、当前 Issue/PR 和**已存在**测试，列出文件所有者。
+1. 读 `git status`、`origin/main`、当前 Issue/PR 和**已存在**测试，列出文件所有者；从仓库根启动时，先显式读取本任务适用的子目录 AGENTS.md。
 2. 仅独立写入目标可采用不同 Worktree 并行；涉及 `models.py`、URL、迁移、共享配置、公共测试夹具时先串行整合。
 3. 修改前选定跨层合同和负例，优先最小实现+必要回归；新依赖必须说明成熟替代方案和升级/回滚。
 4. 先局部验证，再根据改动风险/依赖运行更大范围；绝不能通过“删除用例、更新固定数量、修改期望值”掩盖真实错误。
