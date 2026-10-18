@@ -1,6 +1,7 @@
 """Versioned editorial topics; catalog reads do not fetch or invoke a model."""
 import hashlib
 import json
+from urllib.parse import urlsplit
 from django.db.models import Q
 from api.models import News, Source
 from api.services.source_policy import policy_for_name
@@ -8,6 +9,8 @@ from api.services.channel_catalog import subscription_status
 from api.smart_channel_models import SourceTopicProfile
 
 TAXONOMY_VERSION = '2026-10-13.1'
+# Bump this when public source identity/provenance fields in the digest change.
+PROFILE_EVIDENCE_VERSION = 2
 TOPICS = [
     {'key': 'ai', 'name': '人工智能', 'description': '模型、机器学习与 AI 应用'},
     {'key': 'frontend', 'name': '前端开发', 'description': '浏览器、Web 平台与前端框架'},
@@ -52,8 +55,30 @@ def channel_articles(source):
     return News.objects.filter(query).distinct()
 
 
-def base_profile(source):
+def verified_source_policy(source):
+    """Trust an editorial mapping only when its reviewed publisher domain agrees.
+
+    Source names and summaries are not publisher authentication. A similarly
+    named dynamic source must not inherit a known publisher's trusted topics.
+    No DNS resolution or network request is performed.
+    """
     policy = policy_for_name(source.name)
+    if policy is None:
+        return None
+    try:
+        parsed = urlsplit(source.url)
+        host = (parsed.hostname or '').lower().rstrip('.')
+    except (TypeError, ValueError):
+        return None
+    if (parsed.scheme not in {'http', 'https'} or not host or
+            parsed.username is not None or parsed.password is not None or
+            host not in policy.domains):
+        return None
+    return policy
+
+
+def base_profile(source):
+    policy = verified_source_policy(source)
     topics, origin = [], 'unknown'
     about = source.description.strip() or (policy.description if policy else '')
     if policy:
@@ -63,8 +88,22 @@ def base_profile(source):
             topics, origin = EDITORIAL[policy.key], 'catalog'
     if not about or about in {f'{source.name} 的资讯频道', f'来自 {source.name} 的资讯'}:
         about = '、'.join(TOPIC_MAP[key]['description'] for key in topics) if topics else ''
-    evidence_hash = digest([TAXONOMY_VERSION, source.id, source.name, about,
-        policy.key if policy else '', policy.contract_version if policy else '', topics])
+    publication = getattr(source, 'publication', None)
+    # Bind evidence to public publisher identity and approved directory changes.
+    # Private subscriptions and groups must never become public source metadata.
+    evidence_hash = digest({
+        'schema': PROFILE_EVIDENCE_VERSION, 'taxonomy': TAXONOMY_VERSION,
+        'source_id': source.id, 'name': source.name, 'website': source.url,
+        'description': source.description, 'logo': source.logo,
+        'language': source.language, 'region': source.region,
+        'country': source.country, 'source_type': source.source_type,
+        'display_name': publication.display_name if publication else '',
+        'reading_policy': publication.reading_policy if publication else '',
+        'publication_owner': publication.owner if publication else '',
+        'policy_key': policy.key if policy else '',
+        'policy_version': policy.contract_version if policy else '',
+        'about': about, 'topics': topics,
+    })
     return {'topics': topics, 'about': about, 'origin': origin, 'evidence_hash': evidence_hash}
 
 
@@ -72,17 +111,24 @@ def profile_data(source, stored=None):
     base = base_profile(source)
     if stored is None:
         stored = SourceTopicProfile.objects.filter(source=source).first()
-    if stored and (stored.origin == 'manual' or stored.evidence_hash == base['evidence_hash']):
+    stale = bool(stored and stored.evidence_hash != base['evidence_hash'])
+    if stored and (stored.origin == 'manual' or not stale):
         base.update(topics=[t for t in stored.topics if t in TOPIC_MAP], about=stored.about, origin=stored.origin)
-    # Semantic evidence changes invalidate previews, including manual corrections.
-    effective_hash = digest([base['evidence_hash'], base['topics'], base['about'], base['origin']])
+    # Keep manual corrections visible for review, never silently authorize
+    # automatic grouping after public publisher identity changed.
+    stale_manual = bool(stale and stored and stored.origin == 'manual')
+    needs_review = not base['topics'] or base['origin'] in {'ai', 'unknown'} or stale_manual
+    effective_hash = digest([base['evidence_hash'], base['topics'], base['about'], base['origin'], stale_manual])
     status, reason = subscription_status(source)
     policy = policy_for_name(source.name)
     publication = getattr(source, 'publication', None)
     return {'id': source.id, 'name': (publication.display_name if publication else '') or source.name, 'url': source.url, 'logo': source.logo,
         'region': source.region, 'language': source.language, 'source_type': source.source_type,
         'description': base['about'], 'topics': base['topics'], 'origin': base['origin'],
-        'needs_review': not base['topics'] or base['origin'] == 'ai', 'evidence_hash': effective_hash,
+        'needs_review': needs_review, 'evidence_hash': effective_hash,
+        'taxonomy_version': TAXONOMY_VERSION, 'evidence_version': PROFILE_EVIDENCE_VERSION,
+        'metadata_status': ('stale_manual' if stale_manual else
+            'needs_review' if needs_review else 'trusted'),
         'subscription_status': status, 'subscription_reason': reason, 'feed_url': policy.feed_url if policy else '',
         'policy_key': policy.key if policy else '', 'reading_policy': publication.reading_policy if publication else 'summary_only',
         'updated_at': stored.updated_at.isoformat() if stored else None}
