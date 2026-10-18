@@ -119,7 +119,7 @@ function OpmlSession({ viewer, groups, onClose }: OpmlDialogProps) {
     {confirm.error && !batchId && <p role="alert" className="workspace-error">导入确认结果未确认：{workspaceError(confirm.error)} 优先通过原预览编号 GET 核对是否已经确认；重试只使用相同预览、选择和分组。
       {preview.data && validBatchId(preview.data.id) &&
         <button type="button" className="workspace-button secondary" disabled={busy}
-          onClick={() => { setResumeId(preview.data!.id); setBatchId(preview.data!.id) }}>核对确认结果</button>}
+          onClick={() => { const id = preview.data?.id; if (id && validBatchId(id)) { setResumeId(id); setBatchId(id) } }}>核对确认结果</button>}
       <button type="button" className="workspace-link" disabled={busy} onClick={() => { if (confirm.variables) confirm.mutate(confirm.variables) }}>重试确认导入</button>
     </p>}
     {batchId && batch?.status === 'preview' && preview.data?.id === batchId &&
