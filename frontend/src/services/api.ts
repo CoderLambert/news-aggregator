@@ -431,61 +431,6 @@ export function fetchMe(): Promise<unknown> {
   return api.get<unknown>('/auth/me/').then(({ data }) => data)
 }
 
-// ---- Personal model provider credential ----------------------------------
-
-export type PersonalProvider =
-  | 'openai' | 'anthropic' | 'deepseek' | 'gemini' | 'qwen' | 'glm' | 'kimi'
-  | 'mistral' | 'groq' | 'xai' | 'openrouter'
-
-export interface ProviderCredentialStatus {
-  configured: boolean
-  requiresReplacement: boolean
-  provider: PersonalProvider | null
-  providerLabel: string | null
-  modelId: string | null
-  updatedAt: string | null
-}
-
-function parseProviderCredentialStatus(value: unknown): ProviderCredentialStatus {
-  if (!isRecord(value) || typeof value.configured !== 'boolean') {
-    throw new TypeError('Invalid provider credential response')
-  }
-  const provider = value.provider === 'openai' || value.provider === 'anthropic' ||
-    value.provider === 'deepseek' || value.provider === 'gemini' ||
-    value.provider === 'qwen' || value.provider === 'glm' || value.provider === 'kimi' ||
-    value.provider === 'mistral' || value.provider === 'groq' ||
-    value.provider === 'xai' || value.provider === 'openrouter'
-    ? value.provider
-    : null
-  if (value.configured && provider === null) throw new TypeError('Invalid provider credential response')
-  return {
-    configured: value.configured,
-    requiresReplacement: value.requires_replacement === true,
-    provider,
-    providerLabel: typeof value.provider_label === 'string' ? value.provider_label : null,
-    modelId: typeof value.model_id === 'string' ? value.model_id : null,
-    updatedAt: typeof value.updated_at === 'string' ? value.updated_at : null,
-  }
-}
-
-export async function fetchProviderCredentialStatus(signal?: AbortSignal): Promise<ProviderCredentialStatus> {
-  return parseProviderCredentialStatus((await api.get<unknown>('/provider-credential/', { signal })).data)
-}
-
-export async function saveProviderCredential(
-  provider: PersonalProvider,
-  modelId: string,
-  apiKey: string,
-): Promise<ProviderCredentialStatus> {
-  return parseProviderCredentialStatus((await api.put<unknown>(
-    '/provider-credential/', { provider, model_id: modelId, api_key: apiKey },
-  )).data)
-}
-
-export async function deleteProviderCredential(): Promise<ProviderCredentialStatus> {
-  return parseProviderCredentialStatus((await api.delete<unknown>('/provider-credential/')).data)
-}
-
 // ---- Local ChatGPT subscription ------------------------------------------
 
 export interface ChatGPTSubscriptionConnection {

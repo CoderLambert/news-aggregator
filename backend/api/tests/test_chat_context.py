@@ -72,7 +72,7 @@ def test_chat_prompt_and_stream_scope_agree_and_never_fetch_article(make_news,cl
         captured['prompt']=messages[0]['content']
         captured['evidence']=messages[1]['content']
         yield 'Answer.'
-    with patch('api.views.get_clients',return_value=[(object(),'model')]),patch('api.views.stream_chat',side_effect=stream), \
+    with patch('api.services.ai_execution.personal_clients_for_user',return_value=[(object(),'model')]),patch('api.views.stream_chat',side_effect=stream), \
          patch('api.services.article_content.worker_health',return_value=True),patch('api.services.article_fetcher.fetch_article_markdown') as fetch:
         response=client.post(f'/api/news/{news.pk}/chat/',{'question':'Question?'},content_type='application/json')
         text=b''.join(response.streaming_content).decode()
@@ -99,7 +99,7 @@ def test_suggestions_use_summary_scope_without_waiting_for_article_http(make_new
                     captured['prompt']=kwargs['messages'][0]['content']
                     from types import SimpleNamespace
                     return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='["q1","q2","q3"]'))])
-    with patch('api.services.provider_credentials.personal_clients_for_user',return_value=[(Provider(),'model')]), \
+    with patch('api.services.ai_execution.personal_clients_for_user',return_value=[(Provider(),'model')]), \
          patch('api.views.get_clients',side_effect=AssertionError('site model must not be used')), \
          patch('api.services.article_content.worker_health',return_value=True), \
          patch('api.services.article_fetcher.fetch_article_markdown') as fetch:

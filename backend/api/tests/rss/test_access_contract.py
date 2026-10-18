@@ -271,7 +271,7 @@ def test_body_derived_question_cache_not_exposed_after_policy_restriction(world,
     news.suggested_questions = ['secret from body one', 'secret from body two', 'secret from body three']
     news.save(update_fields=['suggested_questions'])
     SourcePublication.objects.filter(source=source).update(reading_policy='summary_only')
-    monkeypatch.setattr('api.services.provider_credentials.personal_clients_for_user', lambda user: [])
+    monkeypatch.setattr('api.services.ai_execution.personal_clients_for_user', lambda user: [])
     monkeypatch.setattr('api.services.chatgpt_subscription.active_connection_for_user', lambda user: None)
     monkeypatch.setattr('api.views.ensure_full_content', lambda *args: pytest.fail('reader initiated fetching'))
     response = api_client(a).post(f'/api/news/{news.pk}/suggested-questions/')

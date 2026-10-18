@@ -263,7 +263,15 @@ def test_upgrade_preserves_all_old_columns_relationships_and_text(baseline):
         executor = MigrationExecutor(connection)
         executor.migrate(latest)
         with connection.cursor() as cursor:
+            # BYOK T01 explicitly retires only this storage table. All
+            # unrelated historical article, subscription and auth tables
+            # retain their original columns, values and relationships.
+            assert 'api_userprovidercredential' in before
+            assert 'api_userprovidercredential' not in connection.introspection.table_names()
+            assert 'api_useraiconnection' in connection.introspection.table_names()
             for table, (columns, rows) in before.items():
+                if table == 'api_userprovidercredential':
+                    continue
                 quoted = ','.join(connection.ops.quote_name(column) for column in columns)
                 cursor.execute(f'SELECT {quoted} FROM {connection.ops.quote_name(table)}')
                 assert sorted(cursor.fetchall(), key=repr) == rows, table

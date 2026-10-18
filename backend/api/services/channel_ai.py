@@ -13,7 +13,7 @@ from api.smart_channel_models import ChannelGroupingProposal, ChannelClassifierS
 from api.services.channel_grouping import credential_fingerprint, lock_user, process_subscription, snapshot
 from api.services.channel_topics import TOPICS, TOPIC_MAP, digest, evidence_for, profile_data, base_profile
 from api.services.classification_evidence import evidence_is_current
-from api.services.provider_credentials import personal_clients_for_user
+from api.services.ai_execution import personal_clients_for_user
 
 PROMPT_VERSION = 'channel-topics-2'
 SYSTEM_PROMPT = '''Classify public news CHANNELS using only their supplied public metadata.

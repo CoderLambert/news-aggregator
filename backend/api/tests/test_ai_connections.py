@@ -1,5 +1,7 @@
 """Synthetic-only regressions for original BYOK T01; never use real keys."""
 import copy
+import base64
+import secrets
 import json
 import socket
 import uuid
@@ -7,6 +9,7 @@ from dataclasses import asdict
 from unittest.mock import patch
 
 import pytest
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.db import connection
@@ -14,11 +17,12 @@ from django.db.migrations.executor import MigrationExecutor
 from rest_framework.test import APIClient
 
 from api.ai_connection_models import UserAIConnection
-from api.models import UserProviderCredential
 from api.services.ai_credentials import (CredentialUnavailable, decrypt_credential,
     locked_active_connection, read_execution_credential, require_active_connection, snapshot_connection)
 from api.services.ai_registry import provider_catalog
-from api.services.provider_credentials import encrypt_api_key, personal_clients_for_user
+from api.services.ai_crypto import key_material
+from api.services.ai_execution import personal_clients_for_user, PersonalAIUnavailable
+from api.services.ai_gateway import PROVIDER_SPECS
 
 pytestmark = pytest.mark.django_db
 BASE = '/api/me/ai/connections/'
@@ -77,7 +81,6 @@ def test_create_multiple_connections_and_read_masked_status(client):
 
 
 def test_catalog_retains_all_current_provider_choices(client):
-    from api.services.provider_credentials import PROVIDER_SPECS
     response = client.get('/api/me/ai/providers/')
     assert response.status_code == 200
     assert {row['provider_id'] for row in response.data['providers']} == set(PROVIDER_SPECS)
@@ -276,39 +279,75 @@ def test_csrf_origin_and_anonymous_requests_are_denied(users):
     assert session.post(BASE, body(), format='json', HTTP_X_CSRFTOKEN=csrf, HTTP_X_WORKSPACE_VIEWER=str(users[0].pk)).status_code == 201
 
 
-def test_connections_do_not_mutate_legacy_credentials(client, users):
-    encrypted = encrypt_api_key(KEY, users[0].pk, 'deepseek')
-    legacy = UserProviderCredential.objects.create(user=users[0], provider='deepseek', model_id='deepseek-chat', encrypted_api_key=encrypted)
-    before = legacy.encrypted_api_key
+def test_new_connections_never_become_implicit_billable_clients(client, users):
     row = create(client)
+    assert row["verification_status"] == "not_tested"
+    with pytest.raises(PersonalAIUnavailable):
+        personal_clients_for_user(users[0])
     disabled = edit(client, row, is_enabled=False)
     assert disabled.status_code == 200
-    assert client.delete(BASE + row['id'] + '/', {'revision': disabled.data['revision']}, format='json').status_code == 200
-    legacy.refresh_from_db()
-    assert legacy.encrypted_api_key == before and legacy.model_id == 'deepseek-chat'
+    assert personal_clients_for_user(users[0]) == []
+    assert client.delete(BASE + row['id'] + '/',
+        {'revision': disabled.data['revision']}, format='json').status_code == 200
+    assert personal_clients_for_user(users[0]) == []
 
 
 def test_model_state_matches_forward_migration():
     call_command('makemigrations', 'api', check=True, dry_run=True, verbosity=0)
 
 
+def _legacy_ciphertext(secret, owner_id, provider):
+    nonce = secrets.token_bytes(12)
+    aad = f'provider-api-key:v1:{owner_id}:{provider}'.encode()
+    value = nonce + AESGCM(key_material()).encrypt(nonce, secret.encode(), aad)
+    return base64.urlsafe_b64encode(value).decode('ascii').rstrip('=')
+
+
 @pytest.mark.django_db(transaction=True)
-def test_forward_schema_preserves_existing_legacy_ciphertext():
-    executor = MigrationExecutor(connection)
-    targets = executor.loader.graph.leaf_nodes()
+def test_atomic_forward_schema_imports_and_disables_legacy_key():
+    targets = MigrationExecutor(connection).loader.graph.leaf_nodes()
     try:
-        executor.migrate([('api', '0059_bind_retained_legacy_translations')])
-        old = executor.loader.project_state([('api', '0059_bind_retained_legacy_translations')]).apps
-        owner = old.get_model('auth', 'User').objects.create(username='legacy-migration-t01')
-        legacy = old.get_model('api', 'UserProviderCredential').objects.create(user_id=owner.pk,
-            provider='deepseek', model_id='deepseek-chat', encrypted_api_key='unchanged-synthetic-ciphertext')
         executor = MigrationExecutor(connection)
-        executor.migrate(targets)
-        restored = UserProviderCredential.objects.get(pk=legacy.pk)
-        assert restored.encrypted_api_key == 'unchanged-synthetic-ciphertext'
-        assert restored.model_id == 'deepseek-chat' and restored.user_id == owner.pk
-        assert not UserAIConnection.objects.filter(user_id=owner.pk).exists()
+        executor.migrate([('api', '0060_user_ai_connection')])
+        old = executor.loader.project_state([('api', '0060_user_ai_connection')]).apps
+        owner = old.get_model('auth', 'User').objects.create(username='legacy-migration-t01')
+        old.get_model('api', 'UserProviderCredential').objects.create(
+            user_id=owner.pk, provider='deepseek', model_id='deepseek-chat',
+            encrypted_api_key=_legacy_ciphertext(KEY, owner.pk, 'deepseek'),
+        )
+        MigrationExecutor(connection).migrate(targets)
+        row = UserAIConnection.objects.get(user_id=owner.pk, imported_model_id='deepseek-chat')
+        assert not row.is_enabled and row.provider_id == 'deepseek'
+        assert row.endpoint_profile == 'deepseek_default'
+        assert decrypt_credential(row) == KEY
+        assert 'api_userprovidercredential' not in connection.introspection.table_names()
+        assert personal_clients_for_user(owner) == []
     finally:
+        MigrationExecutor(connection).migrate(targets)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_failed_legacy_import_leaves_original_table_and_ciphertext_unchanged():
+    targets = MigrationExecutor(connection).loader.graph.leaf_nodes()
+    try:
+        executor = MigrationExecutor(connection)
+        executor.migrate([('api', '0060_user_ai_connection')])
+        old = executor.loader.project_state([('api', '0060_user_ai_connection')]).apps
+        owner = old.get_model('auth', 'User').objects.create(username='bad-legacy-migration-t01')
+        old.get_model('api', 'UserProviderCredential').objects.create(
+            user_id=owner.pk, provider='deepseek', model_id='deepseek-chat',
+            encrypted_api_key='unreadable-old-ciphertext',
+        )
+        with pytest.raises(RuntimeError, match='invalid encrypted legacy credential'):
+            MigrationExecutor(connection).migrate(targets)
+        # RunPython and DeleteModel are one transaction; no ciphertext destroyed.
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT encrypted_api_key FROM api_userprovidercredential WHERE user_id=%s', [owner.pk])
+            assert cursor.fetchone()[0] == 'unreadable-old-ciphertext'
+    finally:
+        if 'owner' in locals() and 'api_userprovidercredential' in connection.introspection.table_names():
+            with connection.cursor() as cursor:
+                cursor.execute('DELETE FROM api_userprovidercredential WHERE user_id=%s', [owner.pk])
         MigrationExecutor(connection).migrate(targets)
 
 
@@ -353,3 +392,12 @@ def test_connection_gate_environment_defaults_off_and_rejects_non_boolean(value,
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == expected
     assert not (tmp_path / 'unused.sqlite3').exists()
+
+def test_reverse_legacy_migration_rejects_any_preserved_new_connection(client):
+    from importlib import import_module
+    from types import SimpleNamespace
+    from django.apps import apps
+    create(client)
+    migration = import_module('api.migrations.0061_retire_legacy_byok')
+    with pytest.raises(RuntimeError, match='snapshot restore'):
+        migration._reverse_empty_only(apps, SimpleNamespace(connection=connection))

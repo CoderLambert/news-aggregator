@@ -7,7 +7,6 @@ from . import crawler_views
 from . import search_index_views
 from . import health_views
 from . import capabilities_views
-from . import provider_credential_views
 from . import article_fetch_views
 from .rss.reading import NewsReadStateView
 from .rss.discovery import ResolveFeedView
@@ -74,7 +73,6 @@ urlpatterns = [
     path('chatgpt-subscription/connections/<uuid:connection_id>/', subscription_views.ChatGPTSubscriptionDisconnectView.as_view(), name='chatgpt-subscription-disconnect'),
     path('chatgpt-subscription/jobs/<uuid:job_id>/', subscription_views.ChatGPTTranslationTaskView.as_view(), name='chatgpt-subscription-translation-job'),
     path('chatgpt-subscription/jobs/<uuid:job_id>/cancel/', subscription_views.ChatGPTTranslationTaskCancelView.as_view(), name='chatgpt-subscription-translation-job-cancel'),
-    path('provider-credential/', provider_credential_views.ProviderCredentialView.as_view(), name='provider-credential'),
     path('news/', views.NewsListView.as_view(), name='news-list'),
     path('news/<int:pk>/', views.NewsDetailView.as_view(), name='news-detail'),
     path('news/<int:pk>/chat/', views.NewsChatView.as_view(), name='news-chat'),

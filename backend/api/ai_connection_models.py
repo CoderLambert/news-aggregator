@@ -1,4 +1,4 @@
-"""Original BYOK T01 connection identity; legacy credentials remain unchanged."""
+"""Sole BYOK T01 connection identity; historical Keys migrate once in 0061."""
 import uuid
 from django.db import models
 
@@ -10,6 +10,9 @@ class UserAIConnection(models.Model):
     endpoint_profile = models.CharField(max_length=48)
     endpoint_profile_version = models.PositiveSmallIntegerField(default=1)
     display_name = models.CharField(max_length=64)
+    # One-time preserved model selection; T02 converts it into UserAIModelConfig.
+    # Never consulted by inference in the T01 transition.
+    imported_model_id = models.CharField(max_length=128, blank=True, default='')
     credential_ciphertext = models.TextField(blank=True, default='')
     encryption_key_id = models.CharField(max_length=64, blank=True, default='')
     credential_epoch = models.PositiveBigIntegerField(default=1)

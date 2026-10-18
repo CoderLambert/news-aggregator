@@ -8,8 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from api.services.provider_credentials import (
-    ProviderCredentialError,
+from api.services.ai_gateway import (
+    AIGatewayError,
     _GatewayCompletions,
 )
 
@@ -48,7 +48,7 @@ class SyntheticGateway:
 def test_gateway_stream_rejects_unverified_terminal_without_yielding_text(reason, content, count):
     fake = SyntheticGateway(_completion(reason=reason, content=content, choices=count))
     adapter = _GatewayCompletions(fake, 'only-synthetic-provider-key')
-    with pytest.raises(ProviderCredentialError):
+    with pytest.raises(AIGatewayError):
         adapter.create(stream=True, model='deepseek/deepseek-chat', messages=[])
     assert len(fake.calls) == 1
     assert fake.calls[0]['stream'] is False

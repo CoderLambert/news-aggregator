@@ -649,7 +649,7 @@ class NewsTranslateFullView(ArticleAccessMixin, generics.GenericAPIView):
     def post(self, request, pk):
         from api.services import shared_translations as shared
         from api.services.stored_readers import require_current, current_translation, snapshot_metadata
-        from api.services.provider_credentials import has_personal_credential, personal_clients_for_user, ProviderCredentialError
+        from api.services.ai_execution import has_personal_connection, personal_clients_for_user, PersonalAIUnavailable
         from api.services.chatgpt_subscription import active_connection_for_user
         from api.services.llm_translator import build_translation_prompt
         from api.services.translation_jobs import start_or_get_job
@@ -667,8 +667,11 @@ class NewsTranslateFullView(ArticleAccessMixin, generics.GenericAPIView):
         own_job = get_job(news.pk, user_id=request.user.pk, source_digest=stored.canonical_hash)
         if own_job is not None and not own_job.done:
             return _translation_job_response(request, news, stored, own_job)
-        personal = has_personal_credential(request.user)
-        if not personal and active_connection_for_user(request.user) is not None:
+        # A separately authorized ChatGPT subscription remains usable even
+        # while a BYOK connection is waiting for its T02/T03 model binding.
+        subscription = active_connection_for_user(request.user)
+        personal = has_personal_connection(request.user)
+        if subscription is not None:
             from api.subscription_views import subscription_translation_response
             return subscription_translation_response(request, news, force=force)
         record, visibility = current_translation(request.user, stored, include_private=not personal)
@@ -677,8 +680,8 @@ class NewsTranslateFullView(ArticleAccessMixin, generics.GenericAPIView):
         if shared.task_is_running(news, request.user, stored=stored):
             return shared.waiting_response(news, request.user, stored=stored)
         try:
-            clients = personal_clients_for_user(request.user) if personal else get_clients()
-        except ProviderCredentialError as exc:
+            clients = personal_clients_for_user(request.user)
+        except PersonalAIUnavailable as exc:
             return shared.error_response(str(exc))
         if not clients:
             return shared.error_response('未配置全文翻译模型提供方：请前往设置配置自己的 API Key。')
@@ -759,18 +762,19 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
             )
 
         from api.services.chatgpt_subscription import active_connection_for_user, stream_chat_response
-        from api.services.provider_credentials import ProviderCredentialError, personal_clients_for_user
-        try:
-            personal_clients = personal_clients_for_user(request.user)
-        except ProviderCredentialError as exc:
-            return Response(
-                {'error_code': 'provider_credential_unavailable', 'error': str(exc)},
-                status=status.HTTP_409_CONFLICT,
-            )
-        subscription_connection = None if personal_clients else active_connection_for_user(request.user)
+        from api.services.ai_execution import PersonalAIUnavailable, personal_clients_for_user
+        subscription_connection = active_connection_for_user(request.user)
+        if subscription_connection is None:
+            try:
+                personal_clients = personal_clients_for_user(request.user)
+            except PersonalAIUnavailable as exc:
+                return Response(
+                    {'error_code': 'provider_credential_unavailable', 'error': str(exc)},
+                    status=status.HTTP_409_CONFLICT,
+                )
+        else:
+            personal_clients = []
         provider_clients = personal_clients
-        if not provider_clients and subscription_connection is None:
-            provider_clients = get_clients()
         if not provider_clients and subscription_connection is None:
             return Response(
                 {
@@ -1009,9 +1013,17 @@ class NewsSuggestedQuestionsView(ArticleAccessMixin, generics.GenericAPIView):
 
         try:
             from api.services.chatgpt_subscription import active_connection_for_user, stream_chat_response
-            from api.services.provider_credentials import personal_clients_for_user
-            personal_clients = personal_clients_for_user(request.user)
-            connection = None if personal_clients else active_connection_for_user(request.user)
+            from api.services.ai_execution import personal_clients_for_user, PersonalAIUnavailable
+            connection = active_connection_for_user(request.user)
+            if connection is None:
+                try:
+                    personal_clients = personal_clients_for_user(request.user)
+                except PersonalAIUnavailable:
+                    return Response({'questions': SUGGESTED_QUESTIONS_FALLBACK,
+                        'context_scope': suggestion_scope, 'generation': 'unavailable',
+                        'full_content_revision': news.full_content_revision, 'generated': False})
+            else:
+                personal_clients = []
             if not personal_clients and connection is None:
                 # No site-funded fallback, even when a site provider key exists.
                 return Response({'questions': SUGGESTED_QUESTIONS_FALLBACK,

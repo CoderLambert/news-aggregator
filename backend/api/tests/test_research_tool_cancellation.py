@@ -28,11 +28,11 @@ def test_llm_fallback_and_retry_do_not_call_a_second_provider_after_cancel(monke
             raise TimeoutError('first provider already timed out')
         return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
 
-    monkeypatch.setattr(agent_loop, 'get_clients', lambda: [
+    authorized_clients = [
         (provider('first'), 'first-model'), (provider('second'), 'second-model'),
-    ])
+    ]
     with pytest.raises(Stopped):
-        agent_loop._call_llm_with_tools([], tools=[], execution_guard=cancel_guard(state))
+        agent_loop._call_llm_with_tools([], tools=[], execution_guard=cancel_guard(state), clients=authorized_clients)
     assert calls == ['first']
 
 
