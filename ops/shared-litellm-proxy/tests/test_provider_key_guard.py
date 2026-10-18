@@ -33,6 +33,7 @@ def _load_guard():
 
     fastapi.HTTPException = HTTPException
     litellm = ModuleType("litellm")
+    litellm.__path__ = []
     integrations = ModuleType("litellm.integrations")
     custom_logger = ModuleType("litellm.integrations.custom_logger")
 
@@ -58,30 +59,28 @@ def _load_guard():
 guard = _load_guard()
 
 
-def run_hook(data, call_type, env=None):
+def run_hook(data, call_type, env=None, *, patch_ready=True):
     """Return ("allowed", data) or ("rejected", status, code)."""
     hook = guard.ProviderKeyGuard().async_pre_call_hook(
         user_api_key_dict=SimpleNamespace(), cache=None, data=dict(data), call_type=call_type
     )
     with patch.dict(os.environ, env or {}, clear=False):
-        # The hook reads the deny-list env var at call time; ensure a
-        # caller-supplied empty value really reaches it.
         if env is not None and "BYOK_DENY_STREAMING_CALL_TYPES" in env:
             os.environ["BYOK_DENY_STREAMING_CALL_TYPES"] = env["BYOK_DENY_STREAMING_CALL_TYPES"]
-        try:
-            result = asyncio.run(hook)
-        except guard.HTTPException as exc:  # stub or real FastAPI exception
-            detail = exc.detail if isinstance(exc.detail, dict) else {}
-            return ("rejected", exc.status_code, detail.get("code"))
-        except Exception as exc:  # real FastAPI HTTPException class differs
-            status = getattr(exc, "status_code", None)
-            detail = getattr(exc, "detail", {})
-            code = detail.get("code") if isinstance(detail, dict) else None
-            if status is not None:
-                return ("rejected", status, code)
-            raise
+        with patch.object(guard, "_ensure_router_provenance_patch", return_value=patch_ready):
+            try:
+                result = asyncio.run(hook)
+            except guard.HTTPException as exc:
+                detail = exc.detail if isinstance(exc.detail, dict) else {}
+                return ("rejected", exc.status_code, detail.get("code"))
+            except Exception as exc:
+                status = getattr(exc, "status_code", None)
+                detail = getattr(exc, "detail", {})
+                code = detail.get("code") if isinstance(detail, dict) else None
+                if status is not None:
+                    return ("rejected", status, code)
+                raise
     return ("allowed", result)
-
 
 CHAT = {"api_key": "sk-synthetic-provider", "stream": True}
 # The EOF defect scenario: this exact request, if allowed, is the one the
@@ -126,6 +125,192 @@ class ChatStreamingFailClosed(unittest.TestCase):
 
 
 class UnaffectedPaths(unittest.TestCase):
+    def _fake_router_modules(self, original_method):
+        litellm = ModuleType("litellm")
+        litellm.__path__ = []
+        router_module = ModuleType("litellm.router")
+        streaming_package = ModuleType("litellm.litellm_core_utils")
+        streaming_package.__path__ = []
+        streaming_module = ModuleType("litellm.litellm_core_utils.streaming_handler")
+
+        class CustomStreamWrapper:
+            def __init__(self, provider="deepseek"):
+                self.custom_llm_provider = provider
+
+        class FallbackAwareStreamWrapper(CustomStreamWrapper):
+            fallback_headers_adopted = False
+
+        CustomStreamWrapper.__module__ = "litellm.litellm_core_utils.streaming_handler"
+        FallbackAwareStreamWrapper.__module__ = "litellm.router"
+        FallbackWrapper = type(
+            "FallbackStreamWrapper",
+            (FallbackAwareStreamWrapper,),
+            {
+                "__module__": "litellm.router",
+                "__qualname__": "Router._acompletion_streaming_iterator.<locals>.FallbackStreamWrapper",
+            },
+        )
+        Router = type(
+            "Router",
+            (),
+            {
+                "__module__": "litellm.router",
+                "_acompletion_streaming_iterator": original_method,
+            },
+        )
+        router_module.FallbackAwareStreamWrapper = FallbackAwareStreamWrapper
+        router_module.Router = Router
+        streaming_module.CustomStreamWrapper = CustomStreamWrapper
+        return (
+            {
+                "litellm": litellm,
+                "litellm.router": router_module,
+                "litellm.litellm_core_utils": streaming_package,
+                "litellm.litellm_core_utils.streaming_handler": streaming_module,
+            },
+            Router,
+            CustomStreamWrapper,
+            FallbackWrapper,
+        )
+
+    def test_router_patch_keeps_raw_source_per_request_and_is_idempotent(self):
+        outputs = {}
+        calls = []
+
+        async def original(self, model_response, messages, initial_kwargs, deployment_slot=None):
+            calls.append((model_response, initial_kwargs["request_label"]))
+            await asyncio.sleep(0)
+            return outputs[initial_kwargs["request_label"]]
+
+        original.__module__ = "litellm.router"
+        original.__qualname__ = "Router._acompletion_streaming_iterator"
+        modules, Router, CustomStreamWrapper, FallbackWrapper = self._fake_router_modules(original)
+        outputs["a"] = FallbackWrapper()
+        outputs["b"] = FallbackWrapper()
+        raw_a, raw_b = CustomStreamWrapper(), CustomStreamWrapper()
+        router = Router()
+        with patch.object(guard.importlib.metadata, "version", return_value="1.105.0"):
+            with patch.object(
+                guard.inspect, "getsourcefile", return_value="/fake/site-packages/litellm/router.py",
+            ):
+                with patch.dict(sys.modules, modules):
+                    self.assertTrue(guard._ensure_router_provenance_patch())
+                    patched = Router._acompletion_streaming_iterator
+                    self.assertTrue(guard._ensure_router_provenance_patch())
+                    self.assertIs(Router._acompletion_streaming_iterator, patched)
+
+                    async def invoke(raw, label):
+                        return await router._acompletion_streaming_iterator(
+                            raw, [], {
+                                "model": "deepseek/deepseek-chat",
+                                "stream": True,
+                                "request_label": label,
+                            },
+                        )
+
+                    async def invoke_both():
+                        return await asyncio.gather(invoke(raw_a, "a"), invoke(raw_b, "b"))
+
+                    wrapped_a, wrapped_b = asyncio.run(invoke_both())
+                    self.assertIs(wrapped_a._byok_raw_terminal_source, raw_a)
+                    self.assertIs(wrapped_b._byok_raw_terminal_source, raw_b)
+                    self.assertIs(wrapped_a._byok_terminal_provenance_token, guard._ROUTER_PROVENANCE_TOKEN)
+                    self.assertIs(wrapped_b._byok_terminal_provenance_token, guard._ROUTER_PROVENANCE_TOKEN)
+                    self.assertEqual([label for _, label in calls], ["a", "b"])
+
+    def test_router_patch_refuses_version_or_method_shape_drift(self):
+        async def original(self, model_response, messages, initial_kwargs, deployment_slot=None):
+            return object()
+
+        original.__module__ = "litellm.router"
+        original.__qualname__ = "Router._acompletion_streaming_iterator"
+        modules, Router, _, _ = self._fake_router_modules(original)
+        untouched = Router._acompletion_streaming_iterator
+        with patch.object(guard.importlib.metadata, "version", return_value="1.106.0"):
+            with patch.dict(sys.modules, modules):
+                self.assertFalse(guard._ensure_router_provenance_patch())
+                self.assertIs(Router._acompletion_streaming_iterator, untouched)
+
+        async def mismatched(self, model_response, messages, initial_kwargs):
+            return object()
+
+        mismatched.__module__ = "litellm.router"
+        mismatched.__qualname__ = "Router._acompletion_streaming_iterator"
+        modules, Router, _, _ = self._fake_router_modules(mismatched)
+        untouched = Router._acompletion_streaming_iterator
+        with patch.object(guard.importlib.metadata, "version", return_value="1.105.0"):
+            with patch.object(guard.inspect, "getsourcefile", return_value="/tmp/foreign/router.py"):
+                with patch.dict(sys.modules, modules):
+                    self.assertFalse(guard._ensure_router_provenance_patch())
+                    self.assertIs(Router._acompletion_streaming_iterator, untouched)
+
+    def test_exact_stream_fails_closed_when_router_provenance_patch_is_unavailable(self):
+        exact = {
+            "api_key": "sk-synthetic-provider",
+            "model": "deepseek/deepseek-chat",
+            "stream": True,
+        }
+        result = run_hook(
+            exact, "acompletion", patch_ready=False,
+            env={
+                "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat",
+                "BYOK_DENY_STREAMING_CALL_TYPES": "",
+            },
+        )
+        self.assertEqual(result, ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
+
+    def test_exact_stream_rejects_request_level_retry_and_fallback_overrides(self):
+        exact = {
+            "api_key": "sk-synthetic-provider",
+            "model": "deepseek/deepseek-chat",
+            "stream": True,
+        }
+        env = {
+            "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat",
+            "BYOK_DENY_STREAMING_CALL_TYPES": "",
+        }
+        for override in (
+            {"num_retries": 1},
+            {"num_retries": "0"},
+            {"fallbacks": ["other/model"]},
+            {"context_window_fallbacks": ["other/model"]},
+            {"content_policy_fallbacks": ["other/model"]},
+            {"silent_model": "other/model"},
+        ):
+            with self.subTest(override=override):
+                result = run_hook({**exact, **override}, "acompletion", env=env)
+                self.assertEqual(result, ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
+        for harmless in (
+            {"num_retries": 0},
+            {"num_retries": None},
+            {"fallbacks": []},
+            {"fallbacks": None},
+            {"context_window_fallbacks": []},
+            {"content_policy_fallbacks": None},
+        ):
+            with self.subTest(harmless=harmless):
+                result = run_hook({**exact, **harmless}, "acompletion", env=env)
+                self.assertEqual(result[0], "allowed")
+
+    def test_terminal_guard_diagnostics_are_opt_in_and_finitely_allowlisted(self):
+        response = SimpleNamespace()
+        source = SimpleNamespace(custom_llm_provider="arbitrary-provider-label")
+        with patch.dict(os.environ, {}, clear=True):
+            detail = guard._terminal_error_detail("boundary_type_mismatch", response, source, "1.105.0")
+        self.assertEqual(detail, {"code": "T00_STREAM_TERMINAL_UNVERIFIED"})
+
+        with patch.dict(
+            os.environ, {"BYOK_T00_SYNTHETIC_GUARD_DIAGNOSTICS": "1"}, clear=True,
+        ):
+            detail = guard._terminal_error_detail("boundary_type_mismatch", response, source, "1.105.0")
+        self.assertEqual(detail["code"], "T00_STREAM_TERMINAL_UNVERIFIED")
+        self.assertEqual(detail["diagnostic"]["reason"], "boundary_type_mismatch")
+        self.assertEqual(detail["diagnostic"]["litellm_version"], "1.105.0")
+        self.assertEqual(detail["diagnostic"]["response_type"], "types.SimpleNamespace")
+        self.assertEqual(detail["diagnostic"]["source_type"], "types.SimpleNamespace")
+        self.assertEqual(detail["diagnostic"]["source_provider"], "other")
+        self.assertNotIn("arbitrary-provider-label", repr(detail))
+
     def test_only_exact_deepseek_chat_stream_alias_is_exceptionally_allowed(self):
         exact = {
             "api_key": "sk-synthetic-provider",

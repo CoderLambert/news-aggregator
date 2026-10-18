@@ -126,6 +126,66 @@ class ProbeContracts(unittest.TestCase):
         client.chat.completions.create.assert_called_once()
         client.close.assert_called_once()
 
+    def test_safe_terminal_guard_diagnostic_is_limited_to_synthetic_allowlisted_fields(self):
+        body = {
+            "detail": {
+                "code": "T00_STREAM_TERMINAL_UNVERIFIED",
+                "diagnostic": {
+                    "reason": "router_wrapper_type_mismatch",
+                    "litellm_version": "1.105.0",
+                    "response_type": "litellm.proxy.utils._UpstreamStreamBoundary",
+                    "source_type": "litellm.router.Router._acompletion_streaming_iterator.<locals>.FallbackStreamWrapper",
+                    "source_provider": "deepseek",
+                    "provider_key": "sk-synthetic-secret",
+                    "prompt": "private prompt",
+                },
+            },
+            "private": "must not escape",
+        }
+        error = SimpleNamespace(response=SimpleNamespace(status_code=502, json=lambda: body))
+        self.assertEqual(probe._safe_terminal_guard_diagnostic(error), {
+            "reason": "router_wrapper_type_mismatch",
+            "litellm_version": "1.105.0",
+            "response_type": "litellm.proxy.utils._UpstreamStreamBoundary",
+            "source_type": "litellm.router.Router._acompletion_streaming_iterator.<locals>.FallbackStreamWrapper",
+            "source_provider": "deepseek",
+        })
+        wrong_status = SimpleNamespace(response=SimpleNamespace(status_code=400, json=lambda: body))
+        self.assertIsNone(probe._safe_terminal_guard_diagnostic(wrong_status))
+        unknown_reason_body = {
+            "detail": {"code": "T00_STREAM_TERMINAL_UNVERIFIED", "diagnostic": {
+                "reason": "arbitrary provider exception",
+                "litellm_version": "1.105.0",
+                "response_type": "types.SimpleNamespace",
+                "source_type": "types.SimpleNamespace",
+                "source_provider": "deepseek",
+            }},
+        }
+        unknown_reason = SimpleNamespace(response=SimpleNamespace(
+            status_code=502, json=lambda: unknown_reason_body,
+        ))
+        self.assertIsNone(probe._safe_terminal_guard_diagnostic(unknown_reason))
+        unknown_provider_body = {
+            "detail": {"code": "T00_STREAM_TERMINAL_UNVERIFIED", "diagnostic": {
+                "reason": "router_wrapper_type_mismatch",
+                "litellm_version": "1.105.0",
+                "response_type": "types.SimpleNamespace",
+                "source_type": "types.SimpleNamespace",
+                "source_provider": "arbitrary-provider-name",
+            }},
+        }
+        unknown_provider = SimpleNamespace(response=SimpleNamespace(
+            status_code=502, json=lambda: unknown_provider_body,
+        ))
+        self.assertIsNone(probe._safe_terminal_guard_diagnostic(unknown_provider))
+        malformed = SimpleNamespace(response=SimpleNamespace(status_code=502, json=lambda: {
+            "detail": {"code": "T00_STREAM_TERMINAL_UNVERIFIED", "diagnostic": {
+                "reason": "router_wrapper_type_mismatch", "litellm_version": "1.105.0",
+                "response_type": "x\nsk-secret", "source_type": "litellm.router.Router._acompletion_streaming_iterator.<locals>.FallbackStreamWrapper",
+            }},
+        }))
+        self.assertIsNone(probe._safe_terminal_guard_diagnostic(malformed))
+
     def test_exception_report_excludes_body_keys_and_continuation(self):
         error = RuntimeError("synthetic-secret-and-private-continuation")
         result = protocol_cases.safe_exception(error)

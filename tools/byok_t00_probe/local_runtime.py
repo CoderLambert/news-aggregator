@@ -182,6 +182,9 @@ class LocalProxy:
             "PYTHONPATH": str(ROOT / "ops/shared-litellm-proxy"),
             "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat",
             "BYOK_DENY_STREAMING_CALL_TYPES": "",
+            # Safe stream-hook diagnostics are enabled only in this disposable,
+            # synthetic local proxy; production configuration omits this flag.
+            "BYOK_T00_SYNTHETIC_GUARD_DIAGNOSTICS": "1",
         })
         # prepare_proxy.py generated this offline-ready Prisma toolchain.
         prisma_schema = self.prefix / "t00-prisma/schema.prisma"

@@ -27,6 +27,52 @@ class QuietServer(ThreadingHTTPServer):
         return
 
 
+def _safe_terminal_guard_diagnostic(exc: Exception) -> dict | None:
+    """Read only our fixed, synthetic-only guard diagnostic fields from a 502."""
+    response = getattr(exc, "response", None)
+    if getattr(response, "status_code", None) != 502:
+        return None
+    try:
+        payload = response.json()
+    except Exception:
+        return None
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    if not isinstance(detail, dict) or detail.get("code") != "T00_STREAM_TERMINAL_UNVERIFIED":
+        return None
+    diagnostic = detail.get("diagnostic")
+    if not isinstance(diagnostic, dict):
+        return None
+    allowed_reasons = {
+        "version_unavailable",
+        "version_mismatch",
+        "router_provenance_patch_unavailable",
+        "router_method_mismatch",
+        "wrapper_types_unavailable",
+        "boundary_type_mismatch",
+        "router_wrapper_type_mismatch",
+        "router_provenance_missing",
+        "raw_source_type_mismatch",
+        "source_provider_mismatch",
+        "source_provider_unavailable",
+        "fallback_activated",
+        "internal_guard_failure",
+    }
+    allowed = ("reason", "litellm_version", "response_type", "source_type", "source_provider")
+    safe = {}
+    for key in allowed:
+        value = diagnostic.get(key)
+        if not isinstance(value, str) or not value or len(value) > 192:
+            return None
+        if not all(character.isalnum() or character in "._:<>" for character in value):
+            return None
+        if key == "reason" and value not in allowed_reasons:
+            return None
+        if key == "source_provider" and value not in {"deepseek", "openai", "missing", "other"}:
+            return None
+        safe[key] = value
+    return safe
+
+
 def stream_complete(protocol: str, result: dict) -> bool:
     events, terminals = result.get("event_types", []), result.get("terminals", [])
     if protocol == "chat":
@@ -257,6 +303,9 @@ def main(argv: list[str] | None = None) -> int:
             result = {"success": True}
         except Exception as exc:
             result = cases.safe_exception(exc)
+            diagnostic = _safe_terminal_guard_diagnostic(exc)
+            if diagnostic is not None:
+                result["guard_diagnostic"] = diagnostic
         finally:
             response = getattr(stream, "response", None)
             if stream is not None:

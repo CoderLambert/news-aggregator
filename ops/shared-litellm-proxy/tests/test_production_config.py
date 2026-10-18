@@ -39,6 +39,7 @@ def test_production_routes_are_fixed_provider_aliases_without_credentials_or_bas
     assert config['router_settings']['num_retries'] == 0
     assert config['router_settings']['fallbacks'] == []
     assert config['litellm_settings']['turn_off_message_logging'] is True
+    assert config['litellm_settings']['num_retries'] == 0
 
 
 def test_chat_streaming_guard_is_wired_and_fail_closed_in_production_config():
@@ -55,9 +56,13 @@ def test_chat_streaming_guard_is_wired_and_fail_closed_in_production_config():
     # denied by default, and an explicit deny env still overrides the allowlist.
     assert proxy['environment']['BYOK_TERMINAL_STREAMING_MODELS'] == 'deepseek/deepseek-chat'
     assert 'BYOK_DENY_STREAMING_CALL_TYPES' not in proxy['environment']
+    assert 'BYOK_T00_SYNTHETIC_GUARD_DIAGNOSTICS' not in proxy['environment']
 
     guard = (root / 'provider_key_guard.py').read_text(encoding='utf-8')
     assert 'ALWAYS_DENIED_STREAMING_CALL_TYPES' in guard
     assert 'T00_CHAT_STREAMING_DISABLED' in guard
     assert '_UpstreamStreamBoundary' in guard
+    assert '_acompletion_streaming_iterator' in guard
+    assert '_byok_raw_terminal_source' in guard
+    assert 'fallback_headers_adopted' in guard
     assert 'received_finish_reason' in guard
