@@ -58,6 +58,38 @@ class SelfHostedCIContract(unittest.TestCase):
         self.assertIn("CI_BEFORE_SHA", route["env"])
         self.assertIn("CI_BASE_SHA", route["env"])
         self.assertIn("CI_HEAD_SHA", route["env"])
+        # Trigger-level ignore: docs/metadata-only PRs do not start a Runner.
+        # Mixed changes still run: GitHub skips only when ALL paths are ignored.
+        # BaseLoader preserves the YAML key 'on' rather than coercing it to True.
+        events = yaml.load(CI.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)["on"]
+        push_ignore = events["push"]["paths-ignore"]
+        pr_ignore = events["pull_request"]["paths-ignore"]
+        self.assertEqual(push_ignore, pr_ignore)
+        self.assertEqual(set(push_ignore), {
+            "docs/**",
+            "README.md",
+            "TESTING.md",
+            "DEVLOG.md",
+            "CHANGELOG.md",
+            "frontend/README.md",
+            "CONTRIBUTING.md",
+            "CODE_OF_CONDUCT.md",
+            "SECURITY.md",
+            "LICENSE",
+            "LICENSE.md",
+            "NOTICE",
+            "NOTICE.md",
+            ".github/ISSUE_TEMPLATE/**",
+            ".github/PULL_REQUEST_TEMPLATE.md",
+            ".github/PULL_REQUEST_TEMPLATE/**",
+            ".github/FUNDING.yml",
+        })
+        for event in ("push", "pull_request"):
+            self.assertNotIn("paths", events[event])
+        self.assertNotIn("paths-ignore", events.get("workflow_dispatch") or {})
+        self.assertNotIn("**/*.md", push_ignore)
+        self.assertNotIn(".github/**", push_ignore)
+        self.assertNotIn("ops/ci/**", push_ignore)
         for name, scope in (
             ("frontend", "frontend"),
             ("backend-and-release-gates", "backend"),

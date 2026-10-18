@@ -3,8 +3,44 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      - 'TESTING.md'
+      - 'DEVLOG.md'
+      - 'CHANGELOG.md'
+      - 'frontend/README.md'
+      - 'CONTRIBUTING.md'
+      - 'CODE_OF_CONDUCT.md'
+      - 'SECURITY.md'
+      - 'LICENSE'
+      - 'LICENSE.md'
+      - 'NOTICE'
+      - 'NOTICE.md'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
+      - '.github/PULL_REQUEST_TEMPLATE/**'
+      - '.github/FUNDING.yml'
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      - 'TESTING.md'
+      - 'DEVLOG.md'
+      - 'CHANGELOG.md'
+      - 'frontend/README.md'
+      - 'CONTRIBUTING.md'
+      - 'CODE_OF_CONDUCT.md'
+      - 'SECURITY.md'
+      - 'LICENSE'
+      - 'LICENSE.md'
+      - 'NOTICE'
+      - 'NOTICE.md'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
+      - '.github/PULL_REQUEST_TEMPLATE/**'
+      - '.github/FUNDING.yml'
   workflow_dispatch:
 
 permissions:

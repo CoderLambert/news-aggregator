@@ -602,6 +602,15 @@ class CollectionAndWorkflowTests(unittest.TestCase):
         self.assertEqual(workflow["permissions"], {"contents": "read"})
         jobs = workflow["jobs"]
         self.assertEqual(set(jobs), {"changes", "frontend", "backend-and-release-gates"})
+        # Docs-only and approved non-runtime metadata must skip the entire
+        # automatic workflow, not merely schedule an empty routing job.
+        push_ignore = workflow["on"]["push"]["paths-ignore"]
+        self.assertEqual(push_ignore, workflow["on"]["pull_request"]["paths-ignore"])
+        self.assertIn("docs/**", push_ignore)
+        self.assertIn("frontend/README.md", push_ignore)
+        self.assertIn(".github/ISSUE_TEMPLATE/**", push_ignore)
+        self.assertNotIn(".github/**", push_ignore)
+        self.assertNotIn("**/*.md", push_ignore)
         # The trusted same-repo/non-Draft gate runs before any product job.
         # Product jobs must depend on its successful completion, while a
         # deliberate manual dispatch still runs both full suites.
