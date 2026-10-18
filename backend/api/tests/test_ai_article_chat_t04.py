@@ -12,7 +12,7 @@ from rest_framework.test import APIClient
 from api.ai_connection_models import UserAIConnection
 from api.ai_model_models import AIModelProbeAttempt, UserAIModelConfig
 from api.ai_preference_models import UserAITaskPreference
-from api.models import Category, ChatSession, News, Source
+from api.models import ArticleChatTurn, Category, ChatSession, News, Source
 from api.tests.rss.reader_fixtures import public_legacy_article
 
 
@@ -107,7 +107,13 @@ class PersonalArticleChatTests(TestCase):
         if model is not None:
             body['model_config_id'] = str(model.pk)
             body.setdefault('billing_consent', True)
+            body.setdefault('turn_id', str(uuid.uuid4()))
         return self.client.post(self.url, body, format='json')
+
+    def _cancel(self, turn_id, client=None):
+        return (client or self.client).post(
+            f'/api/news/{self.news.pk}/chat/{turn_id}/cancel/', {}, format='json',
+        )
 
     def _wire(self, response):
         return b''.join(response.streaming_content).decode('utf-8')
@@ -145,6 +151,7 @@ class PersonalArticleChatTests(TestCase):
             denied = other_client.post(self.url, {
                 'question': 'Can I use someone else’s model?',
                 'model_config_id': str(self.model.pk), 'billing_consent': True,
+                'turn_id': str(uuid.uuid4()),
             }, format='json')
         self.assertEqual(denied.status_code, 404)
         self.assertEqual(denied.data['error_code'], 'model_not_found')
@@ -156,6 +163,7 @@ class PersonalArticleChatTests(TestCase):
             self.assertEqual(self._chat(model=self.model, web_search=True).status_code, 409)
             invalid = self.client.post(self.url, {
                 'question': 'Hello', 'model_config_id': 'not-a-uuid', 'billing_consent': True,
+                'turn_id': str(uuid.uuid4()),
             }, format='json')
             self.assertEqual(invalid.status_code, 400)
             self.model.capability_results = {}
@@ -181,6 +189,85 @@ class PersonalArticleChatTests(TestCase):
                 prepare.assert_not_called()
                 gateway.assert_not_called()
                 self.assertFalse(ChatSession.objects.exists())
+
+    def test_cancel_before_post_rejects_attempt_without_history_or_gateway(self):
+        turn = uuid.uuid4()
+        self.assertEqual(self._cancel(turn).data['status'], 'cancelled')
+        self.assertEqual(self._cancel(turn).data['status'], 'cancelled')
+        with patch('api.services.ai_article_chat.build_gateway_client') as build:
+            response = self._chat(model=self.model, turn_id=str(turn))
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data['error_code'], 'chat_turn_cancelled')
+        self.assertFalse(ChatSession.objects.exists())
+        build.assert_not_called()
+
+    def test_cancel_after_question_before_dispatch_prevents_network(self):
+        turn = uuid.uuid4()
+        from api.services.chat_history import append_user_message as original_append
+        def cancel_after_save(**kwargs):
+            snapshot = original_append(**kwargs)
+            reply = self._cancel(turn)
+            self.assertEqual(reply.status_code, 200)
+            self.assertEqual(reply.data['status'], 'cancelled')
+            return snapshot
+        with patch('api.views.append_user_message', side_effect=cancel_after_save), \
+             patch('api.services.ai_article_chat.build_gateway_client') as build:
+            wire = self._wire(self._chat(model=self.model, turn_id=str(turn)))
+        self.assertIn('"status": "failed"', wire)
+        self.assertEqual(ArticleChatTurn.objects.get(pk=turn).status, 'cancelled')
+        self.assertEqual(len(ChatSession.objects.get().messages), 1)
+        build.assert_not_called()
+
+    def test_cancel_during_provider_call_fences_terminal_history_commit(self):
+        turn = uuid.uuid4()
+        def cancel_after_dispatch():
+            reply = self._cancel(turn)
+            self.assertEqual(reply.status_code, 200)
+            self.assertEqual(reply.data['status'], 'cancelled')
+        gateway = FakeGateway([gateway_frame('Paid but uncommitted answer')], on_send=cancel_after_dispatch)
+        with patch('api.services.ai_article_chat.build_gateway_client', return_value=gateway):
+            wire = self._wire(self._chat(model=self.model, turn_id=str(turn)))
+        self.assertIn('"status": "failed"', wire)
+        self.assertNotIn('Paid but uncommitted answer', wire)
+        self.assertEqual(ArticleChatTurn.objects.get(pk=turn).status, 'cancelled')
+        self.assertEqual(len(ChatSession.objects.get().messages), 1)
+        self.assertTrue(gateway.closed)
+
+    def test_cancel_after_complete_reports_truth_and_duplicate_never_resends(self):
+        turn = uuid.uuid4()
+        gateway = FakeGateway([gateway_frame('Completed synthetic answer')])
+        with patch('api.services.ai_article_chat.build_gateway_client', return_value=gateway):
+            wire = self._wire(self._chat(model=self.model, turn_id=str(turn)))
+        self.assertIn('Completed synthetic answer', wire)
+        self.assertEqual(self._cancel(turn).data['status'], 'already_completed')
+        self.assertEqual(ArticleChatTurn.objects.get(pk=turn).status, 'complete')
+        self.assertEqual(ChatSession.objects.get().messages[-1]['status'], 'complete')
+        with patch('api.services.ai_article_chat.build_gateway_client') as build:
+            denied = self._chat(model=self.model, turn_id=str(turn))
+        self.assertEqual(denied.status_code, 409)
+        self.assertEqual(denied.data['error_code'], 'duplicate_chat_turn')
+        build.assert_not_called()
+
+    def test_owner_and_article_scope_of_cancel_receipts(self):
+        turn = uuid.uuid4()
+        other_client = APIClient()
+        other_client.force_login(self.other)
+        self.assertEqual(self._cancel(turn).data['status'], 'cancelled')
+        denied = self._cancel(turn, other_client)
+        self.assertEqual(denied.status_code, 404)
+        self.assertEqual(ArticleChatTurn.objects.get(pk=turn).user_id, self.owner.pk)
+
+    def test_missing_invalid_or_not_v4_turn_id_cannot_start_billable_turn(self):
+        for value in (None, 'invalid', '00000000-0000-0000-0000-000000000001'):
+            body = {'question': 'No valid turn id', 'model_config_id': str(self.model.pk),
+                    'billing_consent': True}
+            if value is not None:
+                body['turn_id'] = value
+            denied = self.client.post(self.url, body, format='json')
+            self.assertEqual(denied.status_code, 400, denied.content)
+            self.assertEqual(denied.data['error_code'], 'invalid_chat_turn')
+        self.assertFalse(ChatSession.objects.exists())
+        self.assertFalse(ArticleChatTurn.objects.exists())
 
     def test_incomplete_unknown_and_empty_terminal_never_publish_or_save(self):
         for result in (
