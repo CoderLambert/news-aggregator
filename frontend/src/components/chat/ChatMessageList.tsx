@@ -100,6 +100,8 @@ export default function ChatMessageList({
                 </div>
               )
             ) : <div className="whitespace-pre-wrap">{message.content}</div>}
+            {message.role === 'assistant' && message.model_source &&
+              <p className="mt-2 text-xs text-muted-foreground">个人模型：{message.model_source.provider} · {message.model_source.model}</p>}
             {message.role === 'assistant' && message.content && medicalSourceUrl && <p className="mt-3 border-t border-border pt-2 text-xs text-muted-foreground">新闻资讯，不构成医疗建议。 <a className="text-primary underline" href={medicalSourceUrl} target="_blank" rel="noopener noreferrer">原文来源</a></p>}
             {message.role === 'assistant' && message.content && message.web_sources && <WebSources sources={message.web_sources} />}
             {message.role === 'assistant' && message.content && message.web_search && !message.web_sources && (
