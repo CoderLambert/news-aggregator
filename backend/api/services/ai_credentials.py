@@ -157,6 +157,12 @@ def require_active_snapshot(snapshot):
             connection.endpoint_profile != snapshot.endpoint_profile or
             connection.endpoint_profile_version != snapshot.endpoint_profile_version):
         raise CredentialUnavailable('execution_snapshot_stale')
+    # A corrupted ciphertext must not authorize a claim or a late result commit,
+    # even when an out-of-band DB write omitted the epoch increment.
+    try:
+        decrypt_credential(connection)
+    except CredentialEncryptionUnavailable:
+        raise CredentialUnavailable('credential_unavailable') from None
     return connection
 
 
