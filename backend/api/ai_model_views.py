@@ -23,6 +23,7 @@ from api.services.ai_model_registry import (
     CATALOG_VERSION, catalog_for, get_trusted_preset, normalize_model_id,
 )
 from api.services.ai_model_probe import ProbeOutcome, send_model_probe
+from api.services.ai_model_capabilities import current_capabilities as _effective_capabilities
 
 
 MODEL_LIMIT = 30
@@ -72,30 +73,6 @@ def _model(user, connection_id, model_id):
         pk=model_id, connection_id=connection_id,
         connection__user=user, connection__is_deleted=False, is_deleted=False,
     ).first()
-
-
-def _effective_capabilities(model):
-    connection = model.connection
-    results = {}
-    for kind in _KINDS:
-        receipt = model.capability_results.get(kind)
-        expected_attempt = getattr(model, f'last_{kind}_attempt')
-        valid = (
-            isinstance(receipt, dict) and
-            receipt.get('attempt_id') == str(expected_attempt) and
-            receipt.get('config_revision') == model.config_revision and
-            receipt.get('credential_epoch') == connection.credential_epoch and
-            receipt.get('credential_version') == connection.credential_version and
-            receipt.get('endpoint_profile') == connection.endpoint_profile and
-            receipt.get('endpoint_profile_version') == connection.endpoint_profile_version and
-            connection.is_enabled and not connection.is_deleted and
-            get_trusted_preset(connection, model.model_id) is not None
-        )
-        # Unknown is *not* equivalent to unsupported. A stale supported
-        # receipt cannot silently become newly verified on key replacement.
-        status = receipt.get('status') if valid else 'unknown'
-        results[kind] = status if status in ('supported', 'unsupported') else 'unknown'
-    return results
 
 
 def model_payload(model):

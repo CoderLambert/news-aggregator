@@ -4,6 +4,7 @@ import { useAuth } from '@/context/AuthContext'
 import AuthModal from '@/components/AuthModal'
 import WorkspaceModal from '@/components/workspace/WorkspaceModal'
 import AIModelsManager from '@/components/workspace/AIModelsManager'
+import AITaskPreferencesSection from '@/components/workspace/AITaskPreferencesSection'
 import { ConnectionRequestError, createAIConnection, deleteAIConnection, listAIConnections, listAIProviders,
   patchAIConnection, replaceAIConnectionKey, type AIConnection, type AIProviderProfile } from '@/services/aiConnectionsApi'
 
@@ -68,7 +69,7 @@ export function AIConnectionsManager({ viewer }: { viewer: number }) {
   return <div className="workspace-page min-w-0 break-words">
     <Link to="/settings" className="workspace-link">返回设置</Link>
     <header className="workspace-page-heading"><div><h1>个人 AI 连接</h1><p>分别保存和管理多家服务商的 Key；名称、启停、替换和删除均只影响当前账号。</p></div></header>
-    <p className="workspace-soft-panel">本页是唯一个人 API Key 设置入口，不发送模型请求。可以在连接下管理模型并主动验证文本或工具能力；不会在页面打开或保存时收费。用途选择将在下一阶段提供，完成前个人业务调用仍失败关闭。</p>
+    <p className="workspace-soft-panel">本页是唯一个人 API Key 设置入口，不发送模型请求。可以在连接下管理模型并主动验证文本或工具能力；不会在页面打开或保存时收费。可继续在下方明确保存五种用途偏好；当前个人业务调用仍然失败关闭，待 T04 等业务接入后才逐项开放。</p>
     {loading && <p role="status">正在读取连接…</p>}
     {error && <p role="alert" className="workspace-error">{error}</p>}
     {notice && <p role="status" className="workspace-notice">{notice}</p>}
@@ -88,6 +89,7 @@ export function AIConnectionsManager({ viewer }: { viewer: number }) {
       </div>
       <AIModelsManager key={connection.id} connection={connection} viewer={viewer} />
     </section>)}</div>
+    {data && <AITaskPreferencesSection viewer={viewer} connections={data.connections} />}
     {editor && data && <ConnectionEditor key={editor.kind + ('connection' in editor ? editor.connection.id : '')}
       editor={editor} profiles={data.providers} busy={busy} onClose={() => setEditor(null)}
       onSave={(name, profile, key, requestId) => {

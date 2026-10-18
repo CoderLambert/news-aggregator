@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AIConnectionsManager } from '@/pages/AIModelSettingsPage'
 import * as api from '@/services/aiConnectionsApi'
 
+// T01 connection behavior is unit-tested separately from the T03 preferences panel.
+vi.mock('@/components/workspace/AITaskPreferencesSection', () => ({ default: () => null }))
 vi.mock('@/services/aiConnectionsApi', async importOriginal => ({
   ...await importOriginal<typeof import('@/services/aiConnectionsApi')>(),
   listAIProviders: vi.fn(), listAIConnections: vi.fn(), createAIConnection: vi.fn(),
