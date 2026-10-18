@@ -131,6 +131,59 @@ class ChangeScopeTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+
+    def test_draft_sync_incremental_and_merge_stage_full_pr_diff(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+
+            def git(*args):
+                return subprocess.check_output(["git", *args], cwd=root, stderr=subprocess.DEVNULL).decode().strip()
+
+            git("init", "-q")
+            git("config", "user.name", "CI Test")
+            git("config", "user.email", "ci@example.invalid")
+            (root / "README.md").write_text("seed")
+            git("add", ".")
+            git("commit", "-qm", "base")
+            base = git("rev-parse", "HEAD")
+            git("checkout", "-qb", "work")
+            (root / "frontend").mkdir()
+            (root / "frontend/src.ts").write_text("export {}")
+            git("add", ".")
+            git("commit", "-qm", "frontend")
+            previous = git("rev-parse", "HEAD")
+            (root / "backend").mkdir()
+            (root / "backend/service.py").write_text("pass")
+            git("add", ".")
+            git("commit", "-qm", "backend")
+            head = git("rev-parse", "HEAD")
+            old_cwd = os.getcwd()
+            try:
+                os.chdir(root)
+                self.assertEqual(route_paths(changed_paths(
+                    "pull_request", "", base, head,
+                    dev_mode=True, pr_action="synchronize", pr_before=previous,
+                )), (False, True))
+                self.assertEqual(route_paths(changed_paths(
+                    "pull_request", "", base, head,
+                    dev_mode=False, pr_action="synchronize", pr_before=previous,
+                )), (True, True))
+                self.assertEqual(route_paths(changed_paths(
+                    "pull_request", "", base, head,
+                    dev_mode=True, pr_action="ready_for_review", pr_before=previous,
+                )), (True, True))
+                # Missing or orphaned 'before' never hides earlier PR edits.
+                self.assertEqual(route_paths(changed_paths(
+                    "pull_request", "", base, head,
+                    dev_mode=True, pr_action="synchronize", pr_before="f" * 40,
+                )), (True, True))
+                self.assertEqual(route_paths(changed_paths(
+                    "pull_request", "", base, head,
+                    dev_mode=True, pr_action="synchronize", pr_before="",
+                )), (True, True))
+            finally:
+                os.chdir(old_cwd)
+
     def test_rename_between_scopes_runs_both(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

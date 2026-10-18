@@ -601,7 +601,7 @@ class CollectionAndWorkflowTests(unittest.TestCase):
         self.assertNotIn("pull_request_target", workflow["on"])
         self.assertEqual(workflow["permissions"], {"contents": "read"})
         jobs = workflow["jobs"]
-        self.assertEqual(set(jobs), {"changes", "frontend", "backend-and-release-gates"})
+        self.assertEqual(set(jobs), {"changes", "dev-frontend", "dev-backend", "frontend", "backend-and-release-gates", "merge-gate"})
         # Docs-only and approved non-runtime metadata must skip the entire
         # automatic workflow, not merely schedule an empty routing job.
         push_ignore = workflow["on"]["push"]["paths-ignore"]
@@ -611,12 +611,21 @@ class CollectionAndWorkflowTests(unittest.TestCase):
         self.assertIn(".github/ISSUE_TEMPLATE/**", push_ignore)
         self.assertNotIn(".github/**", push_ignore)
         self.assertNotIn("**/*.md", push_ignore)
-        # The trusted same-repo/non-Draft gate runs before any product job.
-        # Product jobs must depend on its successful completion, while a
-        # deliberate manual dispatch still runs both full suites.
+        # Same-repo gate permits Draft's safe fast checks; full job access
+        # requires Ready (non-Draft), main push or manual dispatch.
         router = jobs["changes"]
         self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", router["if"])
-        self.assertIn("!github.event.pull_request.draft", router["if"])
+        self.assertNotIn("!github.event.pull_request.draft", router["if"])
+        self.assertIn("converted_to_draft", workflow["on"]["pull_request"]["types"])
+        self.assertIn("ready_for_review", workflow["on"]["pull_request"]["types"])
+        for stage in ("dev-frontend", "dev-backend"):
+            self.assertEqual(jobs[stage]["needs"], "changes")
+            self.assertIn("github.event.pull_request.draft", jobs[stage]["if"])
+        gate = jobs["merge-gate"]
+        self.assertEqual(set(gate["needs"]), {"changes", "frontend", "backend-and-release-gates"})
+        self.assertIn("always()", gate["if"])
+        self.assertIn("!github.event.pull_request.draft", gate["if"])
+        self.assertIn("true:success|false:skipped", gate["steps"][0]["run"])
         self.assertEqual(router["runs-on"], ["self-hosted", "linux", "x64", "newshub-frontend"])
         for name, scope in (("frontend", "frontend"), ("backend-and-release-gates", "backend")):
             job = jobs[name]
@@ -624,8 +633,12 @@ class CollectionAndWorkflowTests(unittest.TestCase):
             self.assertIn("needs.changes.result == 'success'", job["if"])
             self.assertIn(f"needs.changes.outputs.{scope} == 'true'", job["if"])
             self.assertIn("github.event_name == 'workflow_dispatch'", job["if"])
+            self.assertIn("!github.event.pull_request.draft", job["if"])
             self.assertIn("!cancelled()", job["if"])
-        for job in jobs.values():
+        for name, job in jobs.items():
+            if name == "merge-gate":
+                self.assertFalse(any("uses" in step for step in job["steps"]))
+                continue
             checkout = next(step for step in job["steps"] if step.get("uses", "").startswith("actions/checkout@"))
             self.assertEqual(checkout["with"]["persist-credentials"], "false")
         frontend_job = jobs["frontend"]
