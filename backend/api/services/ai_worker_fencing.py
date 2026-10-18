@@ -87,7 +87,11 @@ def dispatch_once(snapshot_data: dict, *, task_owner_id: int,
     revocation may still reach upstream; no unbounded transaction surrounds I/O.
     """
     snapshot = _decode(snapshot_data, task_owner_id)
-    return send(read_execution_credential(snapshot))
+    secret = read_execution_credential(snapshot)
+    # The network send has not started: catch revocation that completed in the
+    # gap between decrypt/admission and invoking the callback.
+    check_at_claim(snapshot_data, task_owner_id=task_owner_id)
+    return send(secret)
 
 
 def commit_result(snapshot_data: dict, *, task_owner_id: int,
