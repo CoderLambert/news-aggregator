@@ -40,8 +40,9 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
   const { user } = useAuth()
   // Never let a previous viewer's selected billable model cross account changes.
   const [selection, setSelection] = useState<{ viewer: number; modelId: string | null; consent: boolean } | null>(null)
-  const selectedModelId = selection?.viewer === user?.id ? selection.modelId : null
-  const modelConsent = Boolean(selectedModelId && selection?.viewer === user?.id && selection.consent)
+  const activeSelection = selection && user && selection.viewer === user.id ? selection : null
+  const selectedModelId = activeSelection?.modelId ?? null
+  const modelConsent = Boolean(selectedModelId && activeSelection?.consent)
   const [internalOpen, setInternalOpen] = useState(false)
   const isOpen = open ?? internalOpen
   const setIsOpen = useCallback((nextOpen: boolean) => {
