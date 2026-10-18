@@ -145,6 +145,7 @@ interface SuggestedQuestionsOptions {
 interface ChatStreamOptions {
   webSearch?: boolean
   modelConfigId?: string | null
+  billingConsent?: boolean
   signal?: AbortSignal
 }
 
@@ -364,11 +365,11 @@ export async function* translateFullArticleStream(
 export async function* chatStream(
   newsId: NewsId,
   question: string,
-  { webSearch = false, modelConfigId, signal }: ChatStreamOptions = {},
+  { webSearch = false, modelConfigId, billingConsent = false, signal }: ChatStreamOptions = {},
 ): AsyncGenerator<string> {
   const response = await streamingFetch(`/api/news/${newsId}/chat/`, {
     body: JSON.stringify({ question, web_search: webSearch,
-      ...(modelConfigId ? { model_config_id: modelConfigId } : {}) }),
+      ...(modelConfigId ? { model_config_id: modelConfigId, billing_consent: billingConsent === true } : {}) }),
     signal,
   })
   yield* iterTextChunks(response)

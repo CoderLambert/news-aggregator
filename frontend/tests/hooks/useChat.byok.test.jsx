@@ -48,7 +48,7 @@ describe('T04 explicit BYOK turns in useChat', () => {
     const args = api.chatStream.mock.calls[0]
     expect(args[0]).toBe(81)
     expect(args[1]).toBe('Explicit personal model question')
-    expect(args[2]).toMatchObject({ modelConfigId: model, webSearch: false, signal: expect.any(AbortSignal) })
+    expect(args[2]).toMatchObject({ modelConfigId: model, billingConsent: true, webSearch: false, signal: expect.any(AbortSignal) })
     expect(result.result.current.messages[1]).toMatchObject({
       status: 'complete', content: 'A verified complete answer',
       model_source: { provider: 'deepseek', model: 'Verified' },

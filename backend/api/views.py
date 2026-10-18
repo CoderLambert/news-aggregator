@@ -769,6 +769,11 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
         # never silently promoting a saved T03 preference to inference.
         personal_selection = None
         if 'model_config_id' in payload:
+            # Per-turn billing approval is an authorization input, not merely
+            # a client-side checkbox. Reject missing/string/numeric truthiness.
+            if payload.get('billing_consent') is not True:
+                return Response({'error_code': 'billing_consent_required'},
+                                status=status.HTTP_400_BAD_REQUEST)
             if payload.get('web_search', False):
                 return Response({'error_code': 'byok_web_search_not_enabled'},
                                 status=status.HTTP_409_CONFLICT)

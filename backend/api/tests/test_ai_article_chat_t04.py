@@ -106,6 +106,7 @@ class PersonalArticleChatTests(TestCase):
         body = {'question': question, **extra}
         if model is not None:
             body['model_config_id'] = str(model.pk)
+            body.setdefault('billing_consent', True)
         return self.client.post(self.url, body, format='json')
 
     def _wire(self, response):
@@ -143,7 +144,7 @@ class PersonalArticleChatTests(TestCase):
         with patch('api.services.ai_article_chat.build_gateway_client') as gateway:
             denied = other_client.post(self.url, {
                 'question': 'Can I use someone else’s model?',
-                'model_config_id': str(self.model.pk),
+                'model_config_id': str(self.model.pk), 'billing_consent': True,
             }, format='json')
         self.assertEqual(denied.status_code, 404)
         self.assertEqual(denied.data['error_code'], 'model_not_found')
@@ -154,7 +155,7 @@ class PersonalArticleChatTests(TestCase):
         with patch('api.services.ai_article_chat.build_gateway_client') as gateway:
             self.assertEqual(self._chat(model=self.model, web_search=True).status_code, 409)
             invalid = self.client.post(self.url, {
-                'question': 'Hello', 'model_config_id': 'not-a-uuid',
+                'question': 'Hello', 'model_config_id': 'not-a-uuid', 'billing_consent': True,
             }, format='json')
             self.assertEqual(invalid.status_code, 400)
             self.model.capability_results = {}
@@ -162,6 +163,24 @@ class PersonalArticleChatTests(TestCase):
             self.assertEqual(self._chat(model=self.model).status_code, 409)
         gateway.assert_not_called()
         self.assertFalse(ChatSession.objects.exists())
+
+    def test_missing_or_malformed_billing_consent_rejected_before_model_resolution_and_network(self):
+        from api.services.ai_article_chat import prepare_article_chat
+
+        for consent in ('missing', None, False, 1, 0, 'true', {}, []):
+            with self.subTest(consent=consent):
+                payload = {'question': 'No unconfirmed provider charge',
+                           'model_config_id': str(self.model.pk)}
+                if consent != 'missing':
+                    payload['billing_consent'] = consent
+                with patch('api.services.ai_article_chat.prepare_article_chat', wraps=prepare_article_chat) as prepare, \
+                     patch('api.services.ai_article_chat.build_gateway_client') as gateway:
+                    response = self.client.post(self.url, payload, format='json')
+                self.assertEqual(response.status_code, 400, response.content)
+                self.assertEqual(response.data['error_code'], 'billing_consent_required')
+                prepare.assert_not_called()
+                gateway.assert_not_called()
+                self.assertFalse(ChatSession.objects.exists())
 
     def test_incomplete_unknown_and_empty_terminal_never_publish_or_save(self):
         for result in (
