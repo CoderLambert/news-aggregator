@@ -87,6 +87,60 @@ class ValidatorUnitTests(unittest.TestCase):
             self.assertTrue(any('missing document' in error for error in rules.check_repository(root)))
 
 
+    def synthetic_repository(self, root):
+        for relative in rules.RULE_PATHS:
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('# Rules\n')
+        for name in rules.SKILL_NAMES:
+            path = root / f'.agents/skills/{name}/SKILL.md'
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(self.metadata(name))
+
+    def test_unregistered_nested_agent_and_override_are_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.synthetic_repository(root)
+            self.assertEqual(rules.check_repository(root), [])
+            nested = root / 'backend/api/AGENTS.md'
+            nested.parent.mkdir(parents=True, exist_ok=True)
+            nested.write_text('# New rule\n')
+            self.assertTrue(any('unregistered Agent rule: backend/api/AGENTS.md' in err
+                                for err in rules.check_repository(root)))
+            nested.unlink()
+            override = root / 'frontend/AGENTS.override.md'
+            override.write_text('# New override\n')
+            self.assertTrue(any('unregistered Agent rule: frontend/AGENTS.override.md' in err
+                                for err in rules.check_repository(root)))
+            override.unlink()
+            self.assertEqual(rules.check_repository(root), [])
+
+    def test_unregistered_skill_directory_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.synthetic_repository(root)
+            extra = root / '.agents/skills/newshub-database'
+            extra.mkdir()
+            self.assertTrue(any('unregistered project Skill: newshub-database' in err
+                                for err in rules.check_repository(root)))
+            (extra / 'SKILL.md').write_text(self.metadata('newshub-database'))
+            self.assertTrue(any('unregistered project Skill: newshub-database' in err
+                                for err in rules.check_repository(root)))
+            (extra / 'SKILL.md').unlink()
+            extra.rmdir()
+            self.assertEqual(rules.check_repository(root), [])
+
+    def test_generated_dependencies_do_not_create_false_positive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.synthetic_repository(root)
+            third_party = root / 'frontend/node_modules/third_party/AGENTS.md'
+            third_party.parent.mkdir(parents=True)
+            third_party.write_text('# Third party\n')
+            self.assertEqual(rules.check_repository(root), [])
+
+
+
 class RepositoryAgentContractTests(unittest.TestCase):
     def test_actual_repository_rules_and_skills(self):
         self.assertEqual(rules.check_repository(ROOT), [])

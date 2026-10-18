@@ -9,6 +9,7 @@ YAML parser or Codex discovery emulator; broader formats need an explicit review
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import re
 import sys
@@ -31,6 +32,46 @@ SKILL_LIMIT = 4 * 1024
 CHAIN_LIMIT = 16 * 1024
 LOCAL_LINK = re.compile(r'\[[^\]\n]+\]\(([^)\s]+)\)')
 SLUG = re.compile(r'[a-z0-9]+(?:-[a-z0-9]+)*\Z')
+
+# These are dependency/cache outputs, not project-owned instructions.
+# Unknown source directories are deliberately NOT excluded from discovery.
+IGNORED_SCAN_DIRS = frozenset({
+    '.git', '.hg', '.svn', 'node_modules', '.venv', 'venv', 'env',
+    '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache',
+    '.tox', '.cache', 'dist', 'build', 'coverage', '.next',
+    'site-packages', 'chroma_data', '.runtime',
+})
+
+
+def discover_rule_paths(root: Path) -> set[str]:
+    """Find all project AGENTS files, including untracked/unregistered files."""
+    found: set[str] = set()
+    for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+        directories[:] = [
+            name for name in directories
+            if name not in IGNORED_SCAN_DIRS and not (Path(current) / name).is_symlink()
+        ]
+        for name in ('AGENTS.md', 'AGENTS.override.md'):
+            if name in files:
+                found.add((Path(current) / name).relative_to(root).as_posix())
+    return found
+
+
+def discover_skill_names(root: Path) -> set[str]:
+    """Find immediate Skill directories, including incomplete new Skills."""
+    base = root / '.agents/skills'
+    if not base.exists():
+        return set()
+    if base.is_symlink() or not base.is_dir():
+        raise ValueError('project skill root must be a real directory')
+    found: set[str] = set()
+    for child in base.iterdir():
+        if child.is_symlink():
+            raise ValueError(f'Skill directory may not be a symlink: {child.name}')
+        if child.is_dir():
+            found.add(child.name)
+    return found
+
 
 
 def read_document(path: Path, root: Path, limit: int) -> str:
@@ -112,6 +153,17 @@ def check_repository(root: Path = ROOT) -> list[str]:
     sizes = {}
     owned = [(p, ROOT_LIMIT if p == 'AGENTS.md' else MODULE_LIMIT, None) for p in RULE_PATHS]
     owned += [(f'.agents/skills/{n}/SKILL.md', SKILL_LIMIT, n) for n in SKILL_NAMES]
+    # The allowlist defines reviewed project instructions. Discovery prevents
+    # a new Agent/Skill from silently bypassing that review and validation.
+    try:
+        found_rules = discover_rule_paths(root)
+        for relative in sorted(found_rules - set(RULE_PATHS)):
+            errors.append(f'unregistered Agent rule: {relative}; add to RULE_PATHS')
+        found_skills = discover_skill_names(root)
+        for name in sorted(found_skills - set(SKILL_NAMES)):
+            errors.append(f'unregistered project Skill: {name}; add to SKILL_NAMES')
+    except (OSError, ValueError) as exc:
+        errors.append(f'Agent discovery failed: {exc}')
     for relative, limit, name in owned:
         try:
             text = read_document(root / relative, root, limit)
