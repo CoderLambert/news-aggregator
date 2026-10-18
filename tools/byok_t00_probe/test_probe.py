@@ -379,8 +379,21 @@ class ProviderKeyGuardFailClosed(unittest.TestCase):
 
 
 
-    def _iterator_guard(self, *, source_reason="stop", response_kind="boundary", version="1.105.0", post_terminal_error=False, tool_calls=False):
+    def _iterator_guard(
+        self,
+        *,
+        source_reason="stop",
+        response_kind="boundary",
+        version="1.105.0",
+        post_terminal_error=False,
+        tool_calls=False,
+        provenance_token="valid",
+        raw_source="valid",
+        fallback_activated=False,
+        fallback_activated_after_first=False,
+    ):
         guard = self.guard
+
         class FakeCustomStreamWrapper:
             def __init__(self):
                 self.custom_llm_provider = "deepseek"
@@ -388,11 +401,22 @@ class ProviderKeyGuardFailClosed(unittest.TestCase):
                 self.raw_finish_reason = source_reason
                 self.failure = None
                 self.closed = False
-                delta = SimpleNamespace(content="hello", tool_calls=[{"id": "call"}] if tool_calls else None, refusal=None)
+                delta = SimpleNamespace(
+                    content="hello",
+                    tool_calls=[{"id": "call"}] if tool_calls else None,
+                    refusal=None,
+                )
                 self.chunks = [
                     SimpleNamespace(choices=[SimpleNamespace(finish_reason=None, delta=delta)], usage=None),
-                    SimpleNamespace(choices=[SimpleNamespace(finish_reason="stop", delta=SimpleNamespace(content=None, tool_calls=None, refusal=None))], usage=None),
+                    SimpleNamespace(
+                        choices=[SimpleNamespace(
+                            finish_reason="stop",
+                            delta=SimpleNamespace(content=None, tool_calls=None, refusal=None),
+                        )],
+                        usage=None,
+                    ),
                 ]
+
             def __aiter__(self):
                 async def iterate():
                     for item in self.chunks:
@@ -403,84 +427,162 @@ class ProviderKeyGuardFailClosed(unittest.TestCase):
                     if post_terminal_error:
                         raise RuntimeError("synthetic error after provider stop")
                 return iterate()
+
             async def aclose(self):
                 self.closed = True
+
+        class FakeFallbackAwareStreamWrapper(FakeCustomStreamWrapper):
+            pass
+
+        FakeCustomStreamWrapper.__module__ = "litellm.litellm_core_utils.streaming_handler"
+        FakeFallbackAwareStreamWrapper.__module__ = "litellm.router"
+
+        class FakeRouterFallbackStreamWrapper(FakeFallbackAwareStreamWrapper):
+            def __init__(self, source):
+                self.custom_llm_provider = "deepseek"
+                self.failure = None
+                self.fallback_headers_adopted = bool(fallback_activated)
+                self._test_source = source
+                if raw_source == "valid":
+                    setattr(self, guard._ROUTER_RAW_SOURCE_ATTR, source)
+                elif raw_source == "missing":
+                    setattr(self, guard._ROUTER_RAW_SOURCE_ATTR, None)
+                if provenance_token == "valid":
+                    setattr(
+                        self,
+                        guard._ROUTER_PROVENANCE_TOKEN_ATTR,
+                        guard._ROUTER_PROVENANCE_TOKEN,
+                    )
+                elif provenance_token == "wrong":
+                    setattr(self, guard._ROUTER_PROVENANCE_TOKEN_ATTR, object())
+
+            def __aiter__(self):
+                async def iterate():
+                    count = 0
+                    async for item in self._test_source:
+                        yield item
+                        if count == 0 and fallback_activated_after_first:
+                            self.fallback_headers_adopted = True
+                        count += 1
+                return iterate()
+
+            async def aclose(self):
+                await self._test_source.aclose()
+
+        FakeRouterFallbackStreamWrapper.__module__ = "litellm.router"
+        FakeRouterFallbackStreamWrapper.__qualname__ = (
+            "Router._acompletion_streaming_iterator.<locals>.FallbackStreamWrapper"
+        )
 
         class FakeBoundary:
             def __init__(self, source):
                 self._source = source
+
             def __getattr__(self, name):
                 return getattr(self._source, name)
+
             def __aiter__(self):
                 return self._source.__aiter__()
+
             async def aclose(self):
                 await self._source.aclose()
 
         class UnknownBoundary(FakeBoundary):
             pass
 
+        litellm = ModuleType("litellm")
+        litellm.__path__ = []
         proxy_pkg = ModuleType("litellm.proxy")
+        proxy_pkg.__path__ = []
         proxy_utils = ModuleType("litellm.proxy.utils")
         proxy_utils._UpstreamStreamBoundary = FakeBoundary
+        proxy_pkg.utils = proxy_utils
+        router_module = ModuleType("litellm.router")
+        router_module.FallbackAwareStreamWrapper = FakeFallbackAwareStreamWrapper
         streaming_pkg = ModuleType("litellm.litellm_core_utils")
+        streaming_pkg.__path__ = []
         streaming_handler = ModuleType("litellm.litellm_core_utils.streaming_handler")
         streaming_handler.CustomStreamWrapper = FakeCustomStreamWrapper
+        litellm.proxy = proxy_pkg
+        litellm.router = router_module
+        litellm.litellm_core_utils = streaming_pkg
         source = FakeCustomStreamWrapper()
+        router_source = FakeRouterFallbackStreamWrapper(source)
         boundary_class = UnknownBoundary if response_kind == "unknown" else FakeBoundary
-        response = boundary_class(source)
+        response = boundary_class(router_source)
         patch_modules = {
+            "litellm": litellm,
             "litellm.proxy": proxy_pkg,
             "litellm.proxy.utils": proxy_utils,
+            "litellm.router": router_module,
             "litellm.litellm_core_utils": streaming_pkg,
             "litellm.litellm_core_utils.streaming_handler": streaming_handler,
         }
+        yielded = []
 
         async def collect():
-            result = []
             async for item in guard.ProviderKeyGuard().async_post_call_streaming_iterator_hook(
-                response=response, user_api_key_dict=SimpleNamespace(),
+                response=response,
+                user_api_key_dict=SimpleNamespace(),
                 request_data={"model": "deepseek/deepseek-chat", "stream": True},
             ):
-                result.append(item)
-            return result
+                yielded.append(item)
 
         with patch.dict(sys.modules, patch_modules), patch.object(
             guard.importlib.metadata, "version", return_value=version,
         ):
             try:
-                output = asyncio.run(collect())
+                asyncio.run(collect())
                 error = None
             except Exception as exc:
-                output, error = [], exc
-        return output, error, source
+                error = exc
+        return yielded, error, source
+
+    @staticmethod
+    def _has_stop_frame(output):
+        return any(
+            choices and getattr(choices[0], "finish_reason", None) == "stop"
+            for choices in (getattr(item, "choices", None) or [] for item in output)
+        )
 
     def test_whole_iterator_releases_only_verified_raw_stop_after_clean_eof(self):
         output, error, source = self._iterator_guard(source_reason="stop")
         self.assertIsNone(error)
         self.assertEqual(len(output), 2)
+        self.assertTrue(self._has_stop_frame(output))
         self.assertTrue(source.closed)
 
-    def test_whole_iterator_rejects_synthetic_stop_unknown_wrapper_and_version_drift(self):
+    def test_whole_iterator_rejects_missing_provenance_and_fallbacks(self):
         cases = (
             {"source_reason": None},
-            {"source_reason": "stop", "response_kind": "unknown"},
-            {"source_reason": "stop", "version": "1.106.0"},
+            {"response_kind": "unknown"},
+            {"version": "1.106.0"},
+            {"provenance_token": "missing"},
+            {"provenance_token": "wrong"},
+            {"raw_source": "missing"},
+            {"raw_source": "absent"},
+            {"fallback_activated": True},
+            {"fallback_activated_after_first": True},
         )
         for case in cases:
             with self.subTest(case=case):
                 output, error, source = self._iterator_guard(**case)
-                self.assertEqual(output, [])
+                self.assertFalse(self._has_stop_frame(output))
                 self.assertEqual(getattr(error, "status_code", None), 502)
-                self.assertEqual(getattr(error, "detail", {}).get("code"), "T00_STREAM_TERMINAL_UNVERIFIED")
+                self.assertEqual(
+                    getattr(error, "detail", {}).get("code"),
+                    "T00_STREAM_TERMINAL_UNVERIFIED",
+                )
                 self.assertTrue(source.closed)
 
     def test_whole_iterator_never_releases_stop_if_source_errors_or_emits_tools(self):
         for case in ({"post_terminal_error": True}, {"tool_calls": True}):
             with self.subTest(case=case):
                 output, error, source = self._iterator_guard(**case)
-                self.assertEqual(output, [])
+                self.assertFalse(self._has_stop_frame(output))
                 self.assertIsNotNone(error)
                 self.assertTrue(source.closed)
+
 
 
 
