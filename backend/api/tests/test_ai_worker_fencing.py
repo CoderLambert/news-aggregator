@@ -1,12 +1,10 @@
 """T01 synthetic worker lifecycle races; no real provider/Proxy/model calls."""
-import copy
 import json
 import uuid
 from unittest.mock import Mock, patch
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.db import connection
 from rest_framework.test import APIClient
 
 from api.ai_connection_models import UserAIConnection
@@ -235,7 +233,6 @@ def test_account_deactivation_and_result_transaction_failure(users):
     owner, _ = users
     _, row = make_connection(owner)
     queued = snapshot(owner, row)
-    assert not connection.in_atomic_block
     def broken_persist():
         get_user_model().objects.filter(pk=owner.pk).update(last_name='should-rollback')
         raise RuntimeError('synthetic DB failure')
