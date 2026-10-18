@@ -13,6 +13,7 @@ class ApiConfig(AppConfig):
         import_module('api.smart_channel_models')
         import_module('api.ai_connection_models')
         import_module('api.ai_model_models')
+        import_module('api.ai_preference_models')
 
     def ready(self):
         # rss-sync uses ORM and stored HTML only; never preload model services.
