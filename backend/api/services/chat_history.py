@@ -29,10 +29,11 @@ class ChatSnapshot:
 def _is_sqlite_busy(error: OperationalError) -> bool:
     if connection.vendor != 'sqlite':
         return False
-    code = getattr(error, 'sqlite_errorcode', None)
-    if isinstance(code, int) and (code & 0xFF) in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}:
-        return True
-    message = str(error).lower()
+    driver_error = error.__cause__ or error
+    code = getattr(driver_error, 'sqlite_errorcode', None)
+    if isinstance(code, int):
+        return (code & 0xFF) in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
+    message = str(driver_error).lower()
     return any(text in message for text in ('database is locked', 'database table is locked', 'database is busy'))
 
 

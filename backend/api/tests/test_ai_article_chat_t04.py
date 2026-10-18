@@ -1,11 +1,12 @@
 """T04 explicit owner-selected personal news Q&A: no real provider requests."""
+import sqlite3
 from threading import Barrier, Thread
 from types import SimpleNamespace
 from unittest.mock import patch
 import uuid
 
 from django.contrib.auth import get_user_model
-from django.db import close_old_connections
+from django.db import OperationalError, close_old_connections
 from django.db.models import F
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
@@ -212,7 +213,7 @@ class PersonalArticleChatTests(TestCase):
             self.assertEqual(reply.status_code, 200)
             self.assertEqual(reply.data['status'], 'cancelled')
             return snapshot
-        with patch('api.views.append_user_message', side_effect=cancel_after_save), \
+        with patch('api.services.chat_history.append_user_message', side_effect=cancel_after_save), \
              patch('api.services.ai_article_chat.build_gateway_client') as build:
             wire = self._wire(self._chat(model=self.model, turn_id=str(turn)))
         self.assertIn('"status": "failed"', wire)
@@ -320,6 +321,24 @@ class PersonalArticleChatTests(TestCase):
             self.assertEqual(denied.data['error_code'], 'invalid_chat_turn')
         self.assertFalse(ChatSession.objects.exists())
         self.assertFalse(ArticleChatTurn.objects.exists())
+
+    def test_ambiguous_provider_failure_is_not_retried(self):
+        gateway = FakeGateway([])
+        provider_attempts = []
+
+        def ambiguous_failure(**kwargs):
+            provider_attempts.append(kwargs)
+            raise TimeoutError('synthetic ambiguous provider outcome')
+
+        gateway.chat.completions.create = ambiguous_failure
+        with patch('api.services.ai_article_chat.build_gateway_client', return_value=gateway) as build:
+            wire = self._wire(self._chat(model=self.model))
+
+        self.assertEqual(build.call_count, 1)
+        self.assertEqual(len(provider_attempts), 1)
+        self.assertTrue(gateway.closed)
+        self.assertIn('"status": "failed"', wire)
+        self.assertEqual(len(ChatSession.objects.get(user=self.owner, news=self.news).messages), 1)
 
     def test_incomplete_unknown_and_empty_terminal_never_publish_or_save(self):
         for result in (
@@ -447,6 +466,115 @@ class ArticleChatTurnDatabaseRaceTests(TransactionTestCase):
         self.assertEqual(ArticleChatTurn.objects.get(pk=turn).status, 'pending')
         session = ChatSession.objects.get(user=self.owner, news=self.news)
         self.assertEqual(len(session.messages), 1)
+
+    def test_reservation_retries_wrapped_sqlite_busy_but_not_other_db_errors(self):
+        import api.services.ai_article_turns as turns
+        from api.services.ai_article_turns import ArticleChatTurnError
+
+        turn = uuid.uuid4()
+        original_create = turns._create_turn
+        attempts = []
+
+        def fail_once_with_wrapped_busy(**kwargs):
+            attempts.append(1)
+            if len(attempts) == 1:
+                driver = sqlite3.OperationalError('synthetic wrapped lock')
+                driver.sqlite_errorcode = sqlite3.SQLITE_LOCKED | (1 << 8)
+                wrapped = OperationalError('wrapped Django database error')
+                wrapped.__cause__ = driver
+                raise wrapped
+            return original_create(**kwargs)
+
+        with patch.object(turns, '_create_turn', side_effect=fail_once_with_wrapped_busy), \
+             patch.object(turns.time, 'sleep') as sleep:
+            turns.reserve_turn(user_id=self.owner.pk, news_id=self.news.pk, turn_id=turn)
+
+        self.assertEqual(len(attempts), 2)
+        sleep.assert_called_once_with(0.005)
+        self.assertEqual(ArticleChatTurn.objects.get(pk=turn).status, 'pending')
+
+        other_turn = uuid.uuid4()
+        non_busy_attempts = []
+
+        def fail_once_with_non_busy(**_kwargs):
+            non_busy_attempts.append(1)
+            driver = sqlite3.OperationalError('synthetic non-lock failure')
+            driver.sqlite_errorcode = sqlite3.SQLITE_IOERR
+            wrapped = OperationalError('wrapped Django database error')
+            wrapped.__cause__ = driver
+            raise wrapped
+
+        with patch.object(turns, '_create_turn', side_effect=fail_once_with_non_busy), \
+             patch.object(turns.time, 'sleep') as sleep:
+            with self.assertRaises(ArticleChatTurnError) as unavailable:
+                turns.reserve_turn(
+                    user_id=self.owner.pk, news_id=self.news.pk, turn_id=other_turn,
+                )
+
+        self.assertEqual(unavailable.exception.code, 'chat_turn_unavailable')
+        self.assertEqual(len(non_busy_attempts), 1)
+        sleep.assert_not_called()
+        self.assertFalse(ArticleChatTurn.objects.filter(pk=other_turn).exists())
+
+    def test_independent_connection_clear_races_terminal_assistant_commit(self):
+        from api.services.ai_article_turns import (
+            ArticleChatTurnError, mark_complete, mark_dispatched, reserve_turn_with_question,
+        )
+        from api.services.chat_history import (
+            ChatConflict, append_assistant_message, clear_chat_history,
+        )
+
+        turn = uuid.uuid4()
+        snapshot = reserve_turn_with_question(
+            user_id=self.owner.pk, news_id=self.news.pk,
+            turn_id=turn, question='Question being cleared',
+        )
+        mark_dispatched(user_id=self.owner.pk, news_id=self.news.pk, turn_id=turn)
+
+        def clear():
+            return ('clear', clear_chat_history(
+                user_id=self.owner.pk, news_id=self.news.pk,
+            ))
+
+        def commit_terminal():
+            from django.db import transaction
+            try:
+                with transaction.atomic():
+                    mark_complete(user_id=self.owner.pk, news_id=self.news.pk, turn_id=turn)
+                    append_assistant_message(
+                        user_id=self.owner.pk, news_id=self.news.pk,
+                        session_id=snapshot.session_id, generation=snapshot.generation,
+                        content='Answer racing clear', status='complete',
+                    )
+                return ('commit', 'complete')
+            except ArticleChatTurnError as error:
+                return ('commit', error.code)
+            except ChatConflict:
+                return ('commit', 'chat_conflict')
+
+        clear_result, commit_result = self._parallel([clear, commit_terminal])
+        self.assertFalse(isinstance(clear_result, BaseException), clear_result)
+        self.assertFalse(isinstance(commit_result, BaseException), commit_result)
+        self.assertEqual(clear_result, ('clear', True))
+
+        row = ArticleChatTurn.objects.get(pk=turn)
+        session = ChatSession.objects.get(user=self.owner, news=self.news)
+        self.assertEqual(session.generation, snapshot.generation + 1)
+        self.assertEqual(session.messages, [])
+        if row.status == 'cancelled':
+            self.assertEqual(commit_result, ('commit', 'chat_turn_cancelled'))
+        else:
+            self.assertEqual(row.status, 'complete')
+            self.assertEqual(commit_result, ('commit', 'complete'))
+
+        with self.assertRaises(ChatConflict):
+            append_assistant_message(
+                user_id=self.owner.pk, news_id=self.news.pk,
+                session_id=snapshot.session_id, generation=snapshot.generation,
+                content='Stale post-clear completion must not reappear', status='complete',
+            )
+        session.refresh_from_db()
+        self.assertEqual(session.messages, [])
 
     def test_independent_connection_cancel_race_never_lies_about_commit(self):
         from api.services.ai_article_turns import (

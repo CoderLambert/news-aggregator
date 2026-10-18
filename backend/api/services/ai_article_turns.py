@@ -6,11 +6,10 @@ admitted, it can never be replayed on the same UUID. A cancellation that wins
 the terminal CAS prevents a completed history write. Cancellation cannot
 guarantee that an already-dispatched provider request was not billed.
 """
-import sqlite3
 import time
 from uuid import UUID
 
-from django.db import IntegrityError, OperationalError, connection, transaction
+from django.db import IntegrityError, OperationalError, transaction
 
 from api.models import ArticleChatTurn
 
@@ -37,15 +36,11 @@ MAX_TURN_CAS_ATTEMPTS = 10
 
 
 def _is_sqlite_busy(error):
-    if connection.vendor != 'sqlite':
-        return False
-    code = getattr(error, 'sqlite_errorcode', None)
-    if isinstance(code, int) and (code & 0xFF) in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}:
-        return True
-    message = str(error).lower()
-    return any(text in message for text in (
-        'database is locked', 'database table is locked', 'database is busy',
-    ))
+    # Reuse chat-history's SQLite classifier so all short turn/history
+    # transactions recognize Django-wrapped driver error codes consistently.
+    from api.services.chat_history import _is_sqlite_busy as classify_sqlite_busy
+
+    return classify_sqlite_busy(error)
 
 
 def _create_turn(*, user_id, news_id, turn_id):
