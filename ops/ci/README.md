@@ -1,6 +1,6 @@
 # NewsHub 自托管 CI：Omarchy + Docker
 
-> **当前文件变更分流**：日常 PR/main Push 已按路径选择前端、后端；只有文档及批准的非运行时元信息发生变化时，触发器直接跳过 CI Workflow（零 Runner）。共享配置和未知路径仍全跑；`workflow_dispatch` 始终可强制全量验证。完整的路径白名单、风险边界与验收命令见 [CI 变更范围分流说明](change-routing.md)。不要把跳过检查视为成功验收。
+> **开发/合并双阶段 CI**：Draft PR 的每次提交只跑按增量选择的快检（前端 TypeScript/Lint，后端 Python/少量关键回归）；Ready for review 后按整个 PR 累计差异执行完整 Vitest/pytest、生产镜像和隔离 G1，`merge-gate` 汇总结果。main Push 与 `workflow_dispatch` 保留完整检查。批准的文档/非运行时白名单零 Runner。规则详见 [CI 双阶段分流说明](change-routing.md)。`SKIPPED` / `NOT_RUN` 均不得冒充 PASS。
 
 状态：**仓库配置已准备；尚未在用户 Omarchy 主机部署或实际验收**。不会修改新闻网站或生产数据库。无需 KVM 和虚拟机。
 
@@ -55,12 +55,12 @@ bash ops/ci/manage.sh uninstall
 - install 可重跑，分别检查两个 Runner 的持久身份；如果此前已安装过单 Runner，会保留原后端 Runner 并新增前端 Runner。
 - stop 只停止 newshub-ci 项目；uninstall 只移除该项目的容器和网络，不删除 Runner 身份、Docker 数据卷，不操作其他 Docker 项目，也不从 GitHub 自动注销 Runner。
 - 永久删除 Runner：在 GitHub 仓库设置中先手动删除两个对应 Runner，确认无需旧缓存后再有针对性地删除明确命名的 newshub-ci 卷。禁止全局 prune。
-- 同时启动两个 Runner 后，GitHub 的 frontend 和 backend-and-release-gates Job 在**同一次 PR CI 内并行执行**；只有同类多个 PR 同时提交时，同一 Runner 对应的任务才需要排队。
+- 两个 Runner 的快检或完整任务均可并行；Draft 每次修改**不跑完整测试/构建/G1**，Ready 才对同一 PR 启动完整前后端检查；同一 Runner 仍只能同时处理一个 Job，排队由 GitHub 控制。
 
 ## 3. 仓库启用和验收步骤
 
 1. **先在 Omarchy 安装并确认 omarchy-newshub 与 omarchy-newshub-frontend 都是 Online**。
-2. 当前 PR **保持 Draft**，因此两项 CI 暂时显示 Skipped（不是通过）。两个 Runner 均 Online 后，将 PR 标记为 Ready for review，触发前后端并行自托管 CI；若任一 Runner 离线，只有相应 Job 会等待。
+2. 开发中的 PR **保持 Draft**，只运行按影响范围选中的 `dev-frontend` / `dev-backend` 快检；未选中业务 Job 显示 Skipped **不是全量通过**。实现/专项测试准备好后转换为 Ready for review，自动运行原前后端完整 CI 与 `merge-gate`；任一 Runner 离线会导致对应 Job 排队。
 3. 检查隔离 daemon、共享文件路径、Python/Node、Chromium、前后端测试、生产 Docker 构建及 G1 浏览器烟测。
 4. 所有必要检查通过，才将本 PR 合并 main；随后可手动运行已添加的 smoke 工作流。
 
@@ -71,7 +71,7 @@ gh run list --repo CoderLambert/news-aggregator --workflow ci-runner-smoke.yml -
 
 注意：新建的 workflow_dispatch 工作流通常必须存在于仓库默认分支上，才能按文件名手动触发。PR 阶段先用其自动 CI 测试，不要为了触发手动 smoke 提前绕过审核合并。
 
-现有 CI 工作流调整为：PR（同仓库、非 Draft）、main Push、手动 dispatch。移除了其他分支 Push 造成的 PR/Push 双重运行；更新提交时会取消过时 CI；工作流中没有 GitHub 托管 Runner 的回退标签。
+现有 CI 工作流调整为：**同仓库 Draft PR 仅快检**，Ready PR / main Push / 手动 dispatch 全检；外部 fork 不领取自托管 Runner。移除了非 main 分支 Push 造成的重复 PR/Push CI；新提交取消过时检查。为保持效率，完整检查阶段出错后需继续修复时，先将 PR 改回 Draft，再提交迭代，最后再次 Ready。没有 GitHub 托管 Runner 的回退标签。
 
 ## 4. 安装完成后的实际验收
 
@@ -93,7 +93,7 @@ docker logs --tail 100 newshub-ci-runner-frontend-1
 
 **通过标准**：两个 Runner 都显示 Online，前后端 Runner 日志分别出现类似 `Listening for Jobs` 的就绪信息，而不是不断重启；`docker` sidecar 健康。单靠注册文件存在不代表 Runner 在线。
 
-Runner Online 后，PR 保持 Draft 时两项 CI 会被 Skipped。改为 Ready for review，再检查 PR 的两个 Job 是否实际运行；此时重点核对前端 Node 工具链、后端 DinD/共享 TMPDIR/Playwright、整套测试的真实结果。仅当全部通过才合并。
+Runner Online 后，Draft 仅执行轻量 `changes` 与受影响的 `dev-frontend` / `dev-backend`。将 PR 改为 Ready for review，再检查 `frontend`、`backend-and-release-gates` 和 `merge-gate` 的实际结果；重点核对 Node、DinD/共享 TMPDIR/Playwright、整套测试是否针对最新 head SHA。任一选中 Job 非 SUCCESS 不得合并。
 
 ## 5. 开机恢复及健康自愈
 
