@@ -19,6 +19,7 @@ from api.services.ai_worker_fencing import (
     SNAPSHOT_SCHEMA_VERSION, commit_result, dispatch_once,
 )
 from api.services.chat_history import ChatConflict, append_assistant_message
+from api.services.ai_article_turns import ArticleChatTurnError, mark_dispatched, mark_complete
 from api.services.stored_readers import StoredContentChanged, require_current, snapshot_metadata
 
 
@@ -101,7 +102,7 @@ def _verified_answer(gateway, model_alias, messages):
     return text
 
 
-def complete_article_chat(*, user, stored, chat_snapshot, messages, selection):
+def complete_article_chat(*, user, stored, chat_snapshot, messages, selection, turn_id):
     """Exactly one approved send then fenced, version-bound successful history.
 
     Called by the existing NewsChatView only when an explicit model_config_id
@@ -133,6 +134,8 @@ def complete_article_chat(*, user, stored, chat_snapshot, messages, selection):
             # after T01 dispatch_once admitted the connection credential.
             require_task_model_snapshot(selection, owner_id=user.pk)
             require_current(user, stored)
+            # A cancel acknowledged before dispatch admission forbids any send.
+            mark_dispatched(user_id=user.pk, news_id=stored.news_id, turn_id=turn_id)
             gateway = build_gateway_client(provider_key)
             return _verified_answer(gateway, selection.proxy_alias, messages)
         except ArticleChatError:
@@ -157,6 +160,10 @@ def complete_article_chat(*, user, stored, chat_snapshot, messages, selection):
             model = require_task_model_snapshot(selection, owner_id=user.pk)
             require_current(user, stored)
             source = {'provider': model.connection.provider_id, 'model': model.display_name}
+            # The cancellation CAS and assistant write share commit_result's
+            # owner-credential transaction; a concurrent cancel cannot ACK
+            # first and then allow this attempt to persist as complete.
+            mark_complete(user_id=user.pk, news_id=stored.news_id, turn_id=turn_id)
             append_assistant_message(
                 user_id=user.pk, news_id=stored.news_id,
                 session_id=chat_snapshot.session_id, generation=chat_snapshot.generation,
@@ -167,5 +174,7 @@ def complete_article_chat(*, user, stored, chat_snapshot, messages, selection):
 
         source = commit_result(connection_data, task_owner_id=user.pk, persist=persist)
         return answer, source
+    except ArticleChatTurnError as error:
+        raise ArticleChatError(error.code) from None
     except (CredentialUnavailable, ModelSelectionError, StoredContentChanged, Http404, ChatConflict):
         raise ArticleChatError('execution_changed') from None

@@ -768,6 +768,7 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
         # Missing selection preserves the existing ChatGPT subscription path,
         # never silently promoting a saved T03 preference to inference.
         personal_selection = None
+        personal_turn_id = None
         if 'model_config_id' in payload:
             # Per-turn billing approval is an authorization input, not merely
             # a client-side checkbox. Reject missing/string/numeric truthiness.
@@ -778,7 +779,11 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
                 return Response({'error_code': 'byok_web_search_not_enabled'},
                                 status=status.HTTP_409_CONFLICT)
             try:
+                from api.services.ai_article_turns import parse_turn_id, ArticleChatTurnError
+                personal_turn_id = parse_turn_id(payload.get('turn_id'))
                 personal_selection = prepare_article_chat(request.user, payload.get('model_config_id'))
+            except ArticleChatTurnError as exc:
+                return Response({'error_code': exc.code}, status=status.HTTP_400_BAD_REQUEST)
             except ArticleChatError as exc:
                 http_status = 400 if exc.code == 'invalid_model_selection' else (
                     404 if exc.code == 'model_not_found' else 409)
@@ -862,6 +867,15 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
                 import logging
                 logging.getLogger(__name__).warning("Web search failed for chat")
 
+        # Reserve the one-shot UUID BEFORE storing the user's question. A
+        # previously acknowledged cancellation (including cancel-before-POST)
+        # rejects this attempt without any external provider request.
+        if personal_selection is not None:
+            from api.services.ai_article_turns import reserve_turn, ArticleChatTurnError
+            try:
+                reserve_turn(user_id=request.user.pk, news_id=news.pk, turn_id=personal_turn_id)
+            except ArticleChatTurnError as exc:
+                return Response({'error_code': exc.code}, status=status.HTTP_409_CONFLICT)
         try:
             chat_snapshot = append_user_message(
                 user_id=request.user.pk,
@@ -932,6 +946,7 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
                     answer, model_source = complete_article_chat(
                         user=request.user, stored=stored, chat_snapshot=chat_snapshot,
                         messages=messages, selection=personal_selection,
+                        turn_id=personal_turn_id,
                     )
                     model_meta = _json.dumps({'type': 'chat_model', 'model_source': model_source},
                                              ensure_ascii=False)
@@ -986,6 +1001,24 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
         if web_search:
             response['X-Web-Search-Used'] = 'true'
         return response
+
+
+class NewsChatCancelView(ArticleAccessMixin, generics.GenericAPIView):
+    """Authenticated, idempotent cancellation receipt for a private BYOK turn."""
+
+    queryset = News.objects.all()
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk, turn_id):
+        news = self.get_object()
+        from api.services.ai_article_turns import cancel_turn, ArticleChatTurnError
+        try:
+            result = cancel_turn(user_id=request.user.pk, news_id=news.pk, turn_id=turn_id)
+        except ArticleChatTurnError:
+            # Foreign-user or foreign-article IDs cannot be enumerated.
+            return Response({'error_code': 'chat_turn_not_found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'status': result})
 
 
 class CategoryListView(PolicyNoStoreMixin, generics.ListAPIView):

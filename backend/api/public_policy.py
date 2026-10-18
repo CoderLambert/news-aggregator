@@ -33,7 +33,8 @@ READ_ONLY_ROUTES = frozenset({
 })
 READ_ONLY_METHODS = frozenset({'GET', 'HEAD'})
 AI_GATED_METHODS = {
-    'news-chat': frozenset({'POST'}), 'news-translate': frozenset({'POST'}),
+    'news-chat': frozenset({'POST'}), 'news-chat-cancel': frozenset({'POST'}),
+    'news-translate': frozenset({'POST'}),
     'news-suggested-questions': frozenset({'POST'}), 'research-create': frozenset({'POST'}),
     'research-chat': frozenset({'POST'}), 'news-tts': frozenset({'GET', 'HEAD'}),
     'provider-comparison-list': frozenset({'POST'}), 'provider-comparison-retest': frozenset({'POST'}),

@@ -243,6 +243,20 @@ class ChatSession(models.Model):
         return f"Chat for {self.user_id}:{self.news.title[:20]}"
 
 
+class ArticleChatTurn(models.Model):
+    """Private, one-shot T04 dispatch and cancellation CAS; never store keys."""
+
+    id = models.UUIDField(primary_key=True, editable=False)
+    user = models.ForeignKey('auth.User', on_delete=models.CASCADE, related_name='article_chat_turns')
+    news = models.ForeignKey(News, on_delete=models.CASCADE, related_name='article_chat_turns')
+    status = models.CharField(max_length=16, choices=[
+        ('pending', 'pending'), ('dispatched', 'dispatched'),
+        ('cancelled', 'cancelled'), ('complete', 'complete'),
+    ], default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
 class LegacyChatArchive(models.Model):
     """Immutable, unowned snapshot of pre-account chat sessions."""
     session_id = models.BigIntegerField(primary_key=True)
