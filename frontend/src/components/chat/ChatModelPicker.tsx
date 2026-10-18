@@ -8,7 +8,21 @@ import {
 interface Choice { connection: AIConnection; model: AIModel }
 
 /** GET-only personal model list. Selecting does not grant billing consent. */
-export default function ChatModelPicker({
+interface PickerProps {
+  viewer: number
+  selected: string | null
+  consent: boolean
+  onSelect: (modelId: string | null) => void
+  onConsent: (confirmed: boolean) => void
+  disabled: boolean
+}
+
+/** A new viewer always gets an entirely new component state and GET cache. */
+export default function ChatModelPicker(props: PickerProps) {
+  return <ChatModelSession key={props.viewer} {...props} />
+}
+
+function ChatModelSession({
   viewer, selected, consent, onSelect, onConsent, disabled,
 }: {
   viewer: number
