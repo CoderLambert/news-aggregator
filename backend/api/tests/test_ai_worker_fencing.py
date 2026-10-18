@@ -245,3 +245,16 @@ def test_account_deactivation_and_result_transaction_failure(users):
         check_at_claim(queued, task_owner_id=owner.pk)
     with pytest.raises(CredentialUnavailable):
         commit_result(queued, task_owner_id=owner.pk, persist=Mock())
+
+
+def test_corrupted_ciphertext_after_admission_cannot_commit_inflight_result(users):
+    owner, _ = users
+    _, row = make_connection(owner)
+    queued = snapshot(owner, row)
+    assert dispatch_once(queued, task_owner_id=owner.pk, send=lambda secret: 'sent') == 'sent'
+    # Even a broken administrative write without an epoch bump fails closed.
+    UserAIConnection.objects.filter(pk=row['id']).update(credential_ciphertext='v2.broken')
+    persist = Mock()
+    with pytest.raises(CredentialUnavailable):
+        commit_result(queued, task_owner_id=owner.pk, persist=persist)
+    persist.assert_not_called()
