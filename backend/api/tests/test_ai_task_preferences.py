@@ -199,11 +199,7 @@ class AITaskPreferenceTests(TestCase):
 
     def test_changed_default_only_affects_new_snapshots_but_rekey_revokes_both(self):
         self.grant(self.model, ('text',))
-        second = UserAIModelConfig.objects.create(
-            connection=self.model.connection, model_id='manual-model-id', display_name='Other',
-        )
-        # Trusted routing requires the same approved ID; second config uses
-        # another independent connection so duplicate model IDs are allowed.
+        # Independent connections may each use the same trusted model ID.
         alternative_conn = self.create_connection(self.owner)
         self.api.force_authenticate(self.owner)
         alternative = self.create_model(alternative_conn)
