@@ -1,13 +1,35 @@
 """Reauthorize persisted local evidence before research replay or continuation."""
 from django.http import Http404
-from api.rss.access import authorized_news, get_stored_article
+from api.rss.access import get_stored_article
 from api.services.stored_readers import snapshot_metadata
 
 
+def _search_article_is_current(user, row):
+    if not isinstance(row, dict) or type(row.get('id')) is not int:
+        return False
+    try:
+        stored = get_stored_article(user, row['id'])
+    except (Http404, ValueError, TypeError):
+        return False
+    expected = snapshot_metadata(stored)
+    return (
+        all(row.get(key) == value for key, value in expected.items())
+        and row.get('source_scope') == stored.scope
+        and row.get('policy_versions') == stored.policy_versions
+        and row.get('title') == stored.title
+        and row.get('snippet') == stored.summary[:200]
+        and row.get('url') == stored.url
+    )
+
+
 def result_is_current(user, tool_name, data):
+    if not isinstance(data, dict):
+        return False
     if tool_name in ('search_news', 'analyze_topic'):
-        ids = {row.get('id') for row in data.get('articles', []) if isinstance(row, dict)}
-        return set(authorized_news(user).filter(pk__in=ids).values_list('pk', flat=True)) == ids
+        articles = data.get('articles')
+        return isinstance(articles, list) and all(
+            _search_article_is_current(user, row) for row in articles
+        )
     if tool_name in ('fetch_article', 'fetch_webpage'):
         if data.get('capability') == 'stored_articles_only':
             return True
