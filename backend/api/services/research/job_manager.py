@@ -459,12 +459,13 @@ def _run_worker(run_id, query, local_only):
     token = None
     key = str(run_id)
     try:
-        if _blocked_hosted_environment():
+        if _blocked_hosted_environment() or not settings.PUBLIC_AI_ENABLED:
             queued = ResearchRun.objects.filter(pk=run_id, status='queued').first()
             if queued is None or not queued.execution_snapshot:
                 _finish_queued_failed(
-                    run_id, 'hosted_integration_unapproved',
-                    '网站订阅研究集成尚未获批。',
+                    run_id,
+                    'ai_disabled' if not settings.PUBLIC_AI_ENABLED else 'hosted_integration_unapproved',
+                    '此 AI 功能当前已关闭。' if not settings.PUBLIC_AI_ENABLED else '网站订阅研究集成尚未获批。',
                 )
                 return
         token = _claim(run_id)
@@ -551,6 +552,16 @@ def _attach_existing(run, digest, query, local_only):
         raise ResearchRunError('idempotency_key_reused', 'Idempotency-Key 已用于不同的研究请求。', 409)
     run = _expire_run_if_needed(run)
     if run.status == 'queued':
+        if run.execution_snapshot:
+            from .byok_execution import ResearchBYOKError, verify_snapshot
+            try:
+                verify_snapshot(run.execution_snapshot, owner_id=run.user_id)
+            except ResearchBYOKError as exc:
+                raise ResearchRunError(
+                    'research_authorization_changed', exc.message, 403,
+                ) from None
+        elif not settings.PUBLIC_AI_ENABLED:
+            raise ResearchRunError('ai_disabled', '此 AI 功能当前已关闭。', 403)
         _dispatch(run.pk, query, local_only)
     return run.session, run
 
@@ -567,6 +578,8 @@ def submit_research_run(
             '选择个人研究模型并明确同意服务商计费后才能发起。',
             400,
         )
+    if not settings.PUBLIC_AI_ENABLED and not byok_requested:
+        raise ResearchRunError('ai_disabled', '此 AI 功能当前已关闭。', 403)
     if _blocked_hosted_environment() and not byok_requested:
         raise ResearchRunError(
             'hosted_integration_unapproved', '网站订阅研究集成尚未获批。', 503,
@@ -680,6 +693,8 @@ def resume_queued_run(user, session, run_id):
             raise ResearchRunError(
                 'research_authorization_changed', exc.message, 403,
             ) from None
+    elif not settings.PUBLIC_AI_ENABLED:
+        raise ResearchRunError('ai_disabled', '此 AI 功能当前已关闭。', 403)
     elif _blocked_hosted_environment():
         raise ResearchRunError(
             'hosted_integration_unapproved', '网站订阅研究集成尚未获批。', 503,

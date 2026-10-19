@@ -290,6 +290,17 @@ def expected_tenant(test_id):
 
 def terminal_for(path, request, eof):
     marker = extract_marker(request)
+    if "_T09_RESEARCH_TOOL_" in marker:
+        messages = request.get("messages", [])
+        if any(isinstance(message, dict) and message.get("role") == "tool" for message in messages):
+            return "finish_reason_stop"
+        return "tool_call_turn"
+    if "_NO_FINISH_" in marker:
+        return "missing_finish_reason"
+    if "_TRUNCATED_" in marker:
+        return "truncated_http_body"
+    if "_HTTP_ERROR_" in marker:
+        return "http_503_no_completion"
     if "_NO_STOP_DONE_" in marker:
         return "protocol_done_without_finish_reason"
     if "_STOP_EOF_" in marker:
@@ -513,6 +524,7 @@ class Handler(BaseHTTPRequestHandler):
             else "http-error" if "_HTTP_ERROR_" in test_id
             else "timeout" if "_TIMEOUT_" in test_id
             else "truncated-body" if "_TRUNCATED_" in test_id
+            else "no-finish-reason" if "_NO_FINISH_" in test_id
             else "sse-error" if "_SSE_ERROR_" in test_id
             else "normal"
         )
@@ -566,6 +578,16 @@ class Handler(BaseHTTPRequestHandler):
                 value == "sk-t00-deployment-default-synthetic" for value in candidates
             ),
             "upstream_terminal": upstream_terminal,
+            "upstream_raw_http_status": 503 if scenario == "http-error" else 200,
+            "upstream_raw_body_complete": scenario != "truncated-body",
+            "upstream_raw_finish_reason": (
+                "tool_calls" if upstream_terminal == "tool_call_turn"
+                else "stop" if upstream_terminal == "finish_reason_stop"
+                else None
+            ),
+            "upstream_raw_terminal_present": upstream_terminal in {
+                "tool_call_turn", "finish_reason_stop",
+            },
             "continuation_facts": history_facts(self.path, request),
             "upstream_stream_events_written": 0,
             "upstream_stream_write_attempts": 0,
@@ -643,6 +665,56 @@ class Handler(BaseHTTPRequestHandler):
                     stream_hold=scenario == "stream-held",
                 )
             else:
+                if "_T09_RESEARCH_TOOL_" in test_id:
+                    messages = request.get("messages", [])
+                    has_tool_result = any(
+                        isinstance(message, dict) and message.get("role") == "tool"
+                        for message in messages
+                    )
+                    if not has_tool_result:
+                        self._json(200, {
+                            "id": "chatcmpl_t09_tool",
+                            "object": "chat.completion",
+                            "created": 1,
+                            "model": model,
+                            "choices": [{
+                                "index": 0,
+                                "message": {
+                                    "role": "assistant",
+                                    "content": None,
+                                    "tool_calls": [{
+                                        "id": "t09_call_search",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "search_news",
+                                            "arguments": json.dumps(
+                                                {"query": "synthetic local research", "limit": 5},
+                                                separators=(",", ":"),
+                                            ),
+                                        },
+                                    }],
+                                },
+                                "finish_reason": "tool_calls",
+                            }],
+                            "usage": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
+                        })
+                        return
+                if "_NO_FINISH_" in test_id:
+                    self._json(200, {
+                        "id": "chatcmpl_t09_missing_finish",
+                        "object": "chat.completion",
+                        "created": 1,
+                        "model": model,
+                        "choices": [{
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": "synthetic response missing raw terminal",
+                            },
+                        }],
+                        "usage": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
+                    })
+                    return
                 if "_TOOL_R1_" in test_id or "_TOOL_R2_" in test_id or "_TOOL_MALFORMED_" in test_id or "_TOOL_INVALID_" in test_id or "_TOOL_UNKNOWN_" in test_id:
                     self._chat_tool_response(model, test_id)
                     return

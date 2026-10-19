@@ -11,6 +11,7 @@ from rest_framework.test import APIClient
 
 from api.models import ResearchRun, ResearchSession
 from api.public_policy import PublicPolicyMiddleware
+from api.services.research import job_manager
 from api.services.research import agent_loop
 from api.services.research.byok_execution import (
     ResearchBYOKError, decode_snapshot, validate_tool_batch,
@@ -25,6 +26,31 @@ def _request_for_route(url_name, path='/api/research/'):
     request.resolver_match = SimpleNamespace(url_name=url_name)
     return request
 
+
+
+def test_research_byok_create_capability_is_narrow_and_independent_of_public_ai():
+    from api.capabilities_views import _feature_snapshot
+
+    with override_settings(
+        PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=False, AI_BYOK_ENABLED=True,
+        DJANGO_ENV='production',
+    ):
+        features = _feature_snapshot()
+        assert features['research']['enabled'] is False
+        assert features['research_byok_create']['enabled'] is True
+        assert features['translation']['enabled'] is False
+
+    with override_settings(
+        PUBLIC_SITE_MODE='read_only', PUBLIC_AI_ENABLED=False, AI_BYOK_ENABLED=True,
+        DJANGO_ENV='production',
+    ):
+        assert _feature_snapshot()['research_byok_create']['enabled'] is False
+
+    with override_settings(
+        PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=False, AI_BYOK_ENABLED=False,
+        DJANGO_ENV='development',
+    ):
+        assert _feature_snapshot()['research_byok_create']['enabled'] is False
 
 def test_t09_public_policy_has_only_full_byok_research_create_exception():
     middleware = PublicPolicyMiddleware(lambda request: None)
@@ -105,6 +131,64 @@ def test_t09_production_requires_literal_consent_and_current_verified_model():
         assert shared_path.status_code == 503
         assert shared_path.data['error_code'] == 'hosted_integration_unapproved'
         assert not ResearchRun.objects.exists()
+
+
+
+@pytest.mark.django_db(transaction=True)
+def test_t09_public_ai_disabled_without_byok_is_rejected_in_development():
+    owner = User.objects.create_user(username='t09-disabled-owner', password='not-used')
+    client = APIClient()
+    client.force_authenticate(owner)
+    with override_settings(
+        PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=False, AI_BYOK_ENABLED=True,
+        DJANGO_ENV='development',
+    ):
+        response = client.post('/api/research/', {
+            'query': 'must not use shared research',
+        }, format='json')
+    assert response.status_code == 403
+    assert response.data['error_code'] == 'ai_disabled'
+    assert not ResearchRun.objects.exists()
+    assert not ResearchSession.objects.exists()
+
+
+@pytest.mark.django_db
+def test_t09_idempotent_replay_keeps_saved_run_and_fences_stale_queued_snapshot(monkeypatch):
+    owner = User.objects.create_user(username='t09-replay-owner', password='not-used')
+    session = ResearchSession.objects.create(
+        user=owner, title='Saved result', messages=[{'role': 'assistant', 'content': 'Saved report'}],
+    )
+    terminal = ResearchRun.objects.create(
+        user=owner, session=session, idempotency_key='same-key', request_hash='same-request',
+        status='succeeded', execution_snapshot={'schema_version': 1},
+    )
+    monkeypatch.setattr(
+        'api.services.research.byok_execution.verify_snapshot',
+        lambda *args, **kwargs: pytest.fail('terminal readback must not reauthorize or redispatch'),
+    )
+    attached_session, attached_run = job_manager._attach_existing(
+        terminal, 'same-request', 'same query', False,
+    )
+    assert attached_session.pk == session.pk
+    assert attached_run.pk == terminal.pk
+    with pytest.raises(job_manager.ResearchRunError) as changed:
+        job_manager._attach_existing(terminal, 'changed-model-or-consent', 'same query', False)
+    assert changed.value.error_code == 'idempotency_key_reused'
+
+    queued = ResearchRun.objects.create(
+        user=owner, session=session, idempotency_key='queued-key', request_hash='queued-request',
+        status='queued', queued_query='same query', execution_snapshot={'schema_version': 1},
+    )
+    def stale_snapshot(*args, **kwargs):
+        raise ResearchBYOKError('authorization_changed')
+    monkeypatch.setattr('api.services.research.byok_execution.verify_snapshot', stale_snapshot)
+    monkeypatch.setattr(
+        job_manager, '_dispatch',
+        lambda *args, **kwargs: pytest.fail('stale stored authorization must never be redispatched'),
+    )
+    with pytest.raises(job_manager.ResearchRunError) as stale:
+        job_manager._attach_existing(queued, 'queued-request', 'same query', False)
+    assert stale.value.error_code == 'research_authorization_changed'
 
 
 def _tool_call(name, raw_arguments, call_id='call-1'):
