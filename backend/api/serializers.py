@@ -424,6 +424,10 @@ class NewsDetailSerializer(ChannelNewsSerializer):
         record, _ = self._translation(obj)
         if record is None or not hasattr(record, 'source_hash'):
             return None
+        if getattr(record, 'api_connection_id', None) is not None:
+            # BYOK result currentness was proven against its frozen article
+            # identity (hash, title, revision, and news ID) by stored_readers.
+            return getattr(record, 'current_match', False)
         return record.source_hash == self._stored(obj).canonical_hash
 
     def get_full_content_zh_private_history(self, obj):

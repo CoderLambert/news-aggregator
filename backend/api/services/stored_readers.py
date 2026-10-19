@@ -39,12 +39,22 @@ def _require_current(user, stored, *, full=False):
     return current
 
 
-def snapshot_metadata(stored):
+def snapshot_metadata(stored, translation_context=None):
     import json
     from hashlib import sha256
-    return dict(context_scope=stored.scope, full_content_revision=stored.revision,
-                canonical_hash=stored.canonical_hash, content_completeness=stored.completeness,
-                provenance_hash=sha256(json.dumps(stored.provenance, sort_keys=True).encode()).hexdigest())
+    metadata = dict(context_scope=stored.scope, full_content_revision=stored.revision,
+                    canonical_hash=stored.canonical_hash, content_completeness=stored.completeness,
+                    provenance_hash=sha256(json.dumps(stored.provenance, sort_keys=True).encode()).hexdigest())
+    if translation_context and translation_context.get('source') != 'original':
+        # Persist an exact, non-secret evidence identity beside the article
+        # snapshot so later chat reads cannot relabel a historical answer.
+        metadata['translation_context'] = {
+            key: translation_context[key]
+            for key in ('source', 'result_id', 'task_id', 'model', 'source_hash',
+                        'source_revision', 'source_title', 'current_match', 'content_hash')
+            if key in translation_context
+        }
+    return metadata
 
 
 class PrivateTranslationNotFound(Exception):
@@ -69,9 +79,21 @@ def _valid_private_translation(record, user, stored):
         return False
     snapshot = task.execution_snapshot if isinstance(task.execution_snapshot, dict) else {}
     article = snapshot.get('article') if isinstance(snapshot.get('article'), dict) else {}
-    record.current_match = record.source_hash == stored.canonical_hash
-    record.source_title = article.get('title') if isinstance(article.get('title'), str) else ''
-    record.source_revision = article.get('revision')
+    frozen_news_id = article.get('news_id')
+    frozen_hash = article.get('canonical_hash')
+    frozen_revision = article.get('revision')
+    frozen_title = article.get('title')
+    # The result is still readable as saved history under the current ACL, but
+    # it is current only when its frozen source identity is complete and exact.
+    record.current_match = (
+        frozen_news_id == stored.news_id
+        and frozen_hash == record.source_hash == stored.canonical_hash
+        and isinstance(frozen_revision, int) and not isinstance(frozen_revision, bool)
+        and frozen_revision == stored.revision
+        and isinstance(frozen_title, str) and frozen_title == stored.title
+    )
+    record.source_title = frozen_title if isinstance(frozen_title, str) else ''
+    record.source_revision = frozen_revision if isinstance(frozen_revision, int) and not isinstance(frozen_revision, bool) else None
     return True
 
 
@@ -105,8 +127,13 @@ def _private_translation_for_hash(user, stored, source_hash=None, result_id=None
     if source_hash is not None:
         query = query.filter(source_hash=source_hash)
     for record in query.order_by('-completed_at', '-pk'):
-        if _valid_private_translation(record, user, stored):
-            return record
+        if not _valid_private_translation(record, user, stored):
+            continue
+        # An exact body hash alone is insufficient for the current fallback:
+        # a saved result whose title/revision identity drifted stays history.
+        if source_hash is not None and not getattr(record, 'current_match', False):
+            continue
+        return record
     return None
 
 
@@ -185,11 +212,21 @@ def legacy_translation(news_id, field, source_text):
         origin__in=('legacy', 'legacy-bound')).order_by('-captured_at', '-pk').first()
 
 
-def readable_chat_messages(messages, stored):
+def readable_chat_messages(messages, stored, translation_context=None):
     if not isinstance(messages, list):
         return []
-    return [message for message in messages if isinstance(message, dict) and (
-        message.get('role') == 'user' or message.get('article_context') == snapshot_metadata(stored))]
+    expected = snapshot_metadata(stored, translation_context)
+    readable = []
+    for message in messages:
+        if not isinstance(message, dict) or message.get('role') not in {'user', 'assistant'}:
+            continue
+        context = message.get('article_context')
+        if context == expected:
+            entry = dict(message)
+            if isinstance(context, dict) and isinstance(context.get('translation_context'), dict):
+                entry['translation_context'] = dict(context['translation_context'])
+            readable.append(entry)
+    return readable
 
 
 def filter_current_keyword(queryset, term, *, full=False):

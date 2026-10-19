@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { SpeechPlayerActionsContext, SpeechPlayerActivityContext, SpeechPlayerCapabilitiesContext, SpeechPlayerStateContext } from './SpeechPlayerContext'
 import {
@@ -16,6 +16,7 @@ import type { PlaybackRate, SpeechLanguage, SpeechScope, VoiceKey } from '@/cons
 import type { NewsId } from '@/services/api'
 import type { SpeechRequestOptions, SpeechStatus } from './SpeechPlayerContext'
 import { isRecord } from '@/types/news'
+import { useAuth } from '@/context/AuthContext'
 
 interface ActiveArticle {
   id: NewsId
@@ -23,6 +24,7 @@ interface ActiveArticle {
   language: SpeechLanguage
   scope: SpeechScope
   translationResultId?: number | null
+  viewerId: string
 }
 
 type SpeechOptions = SpeechRequestOptions
@@ -53,11 +55,15 @@ function persist(key: string, value: string): void {
   }
 }
 
-function positionKey(article: Pick<ActiveArticle, 'id' | 'language' | 'scope' | 'translationResultId'>): string {
-  return `${POSITION_KEY_PREFIX}${article.id}_${article.language}_${article.scope}_result_${article.translationResultId ?? 'current'}`
+function positionKey(article: Pick<ActiveArticle, 'id' | 'language' | 'scope' | 'translationResultId' | 'viewerId'>): string {
+  return `${POSITION_KEY_PREFIX}viewer_${article.viewerId}_${article.id}_${article.language}_${article.scope}_result_${article.translationResultId ?? 'current'}`
 }
 
 export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth()
+  const viewerId = user ? String(user.id) : 'anonymous'
+  const viewerIdRef = useRef(viewerId)
+  viewerIdRef.current = viewerId
   const [status, setStatus] = useState<SpeechStatus>('idle')
   const [progress, setProgress] = useState(0)
   const [duration, setDuration] = useState(0)
@@ -95,7 +101,8 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
   }, [savePosition, status])
 
   const isCurrentAudio = useCallback((audio: HTMLAudioElement, requestId: number) =>
-    requestIdRef.current === requestId && audioRef.current === audio, [])
+    requestIdRef.current === requestId && audioRef.current === audio &&
+    activeArticleRef.current?.viewerId === viewerIdRef.current, [])
 
   const restorePosition = useCallback((article: ActiveArticle, audio: HTMLAudioElement) => {
     try {
@@ -139,6 +146,10 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     setNewsId(null)
     setErrorMessage(null)
   }, [clearMediaSession, savePosition, updateStatus])
+
+  useLayoutEffect(() => {
+    if (activeArticleRef.current && activeArticleRef.current.viewerId !== viewerId) stop()
+  }, [stop, viewerId])
 
   const updateMediaSession = useCallback((articleTitle: string, audio: HTMLAudioElement, requestId: number) => {
     if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return
@@ -197,7 +208,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     }
     const translationResultId = selected.language === 'zh' && selected.scope === 'full'
       ? overrides.translationResultId ?? null : null
-    const article = { id, title: articleTitle, language: selected.language, scope: selected.scope, translationResultId }
+    const article = { id, title: articleTitle, language: selected.language, scope: selected.scope, translationResultId, viewerId }
     const audio = new Audio()
     audioRef.current = audio
     activeArticleRef.current = article
@@ -272,7 +283,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     audio.src = `/api/news/${id}/tts/?${query.toString()}`
     updateMediaSession(articleTitle, audio, requestId)
     audio.load()
-  }, [clearMediaSession, isCurrentAudio, language, rate, restorePosition, savePosition, scope, supported, updateMediaSession, updateStatus, voice])
+  }, [clearMediaSession, isCurrentAudio, language, rate, restorePosition, savePosition, scope, supported, updateMediaSession, updateStatus, viewerId, voice])
 
   const pause = useCallback(() => {
     const audio = audioRef.current

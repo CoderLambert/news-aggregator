@@ -51,10 +51,6 @@ export default function NewsDetail() {
   const privateSelectionKey = `${id ?? ''}:${user?.id ?? 'anonymous'}`
   const [privateSelection, setPrivateSelection] = useState<{ key: string; resultId: number | null } | null>(null)
   const selectedPrivateResultId = privateSelection?.key === privateSelectionKey ? privateSelection.resultId : null
-  const selectPrivateResult = (resultId: number | null) => {
-    setPrivateSelection({ key: privateSelectionKey, resultId })
-    if (resultId !== null) setShowOriginal(false)
-  }
   const toggleOriginal = (showOriginal: boolean) => {
     if (showOriginal) setPrivateSelection({ key: privateSelectionKey, resultId: null })
     setShowOriginal(showOriginal)
@@ -96,7 +92,7 @@ export default function NewsDetail() {
     }
     if (force) void handleFetchFullArticle(true)
     else void handleFetchFullArticle()
-  }, [fetchFullEnabled, handleFetchFullArticle, user])
+  }, [fetchFullEnabled, handleFetchFullArticle, setAuthModalOpen, user])
   const retryFullArticle = useCallback(() => requestFullArticle(), [requestFullArticle])
   const {
     translating,
@@ -109,6 +105,19 @@ export default function NewsDetail() {
     handleTranslate,
     cancelTranslation,
   } = useTranslation(id ?? '', news, setNews, loading)
+  const selectPrivateResult = useCallback((resultId: number | null) => {
+    setPrivateSelection({ key: privateSelectionKey, resultId })
+    if (resultId !== null) setShowOriginal(false)
+  }, [privateSelectionKey, setShowOriginal])
+  const selectedPrivateResult = selectedPrivateResultId === null
+    ? undefined
+    : news?.full_content_zh_private_history?.find((item) => item.result_id === selectedPrivateResultId)
+  const chatTranslationMode = showOriginal ? 'original' : selectedPrivateResultId !== null ? 'result' : 'current'
+  const chatTranslationLabel = showOriginal
+    ? '基于原文'
+    : selectedPrivateResult
+      ? '基于' + (selectedPrivateResult.current_match ? '当前个人译文' : '历史个人译文（' + (selectedPrivateResult.source_title || '旧版') + '）')
+      : news?.full_content_zh ? '基于当前中文译文' : '基于原文'
 
   const speechPlayer = useSpeechPlayerActions()
   const { supported: speechSupported } = useSpeechPlayerCapabilities()
@@ -142,7 +151,7 @@ export default function NewsDetail() {
       pendingSpeechScopeRef.current = null
       handleSpeak('zh', pendingScope, null)
     })
-  }, [handleSpeak, handleTranslate, selectPrivateResult, translationEnabled, ttsEnabled, user])
+  }, [handleSpeak, handleTranslate, selectPrivateResult, setAuthModalOpen, translationEnabled, ttsEnabled, user])
   useEffect(() => {
     const pendingScope = pendingSpeechScopeRef.current
     if (!pendingScope || !news?.full_content_zh) return
@@ -336,6 +345,8 @@ export default function NewsDetail() {
           open={assistantOpen}
           onOpenChange={handleAssistantOpenChange}
           translationResultId={selectedPrivateResultId}
+          translationMode={chatTranslationMode}
+          translationLabel={chatTranslationLabel}
           articleContext={{
             hasFullContent: readableBody,
             wordCount: readableBody ? news.full_content.length : (news.content ? news.content.length : 0),

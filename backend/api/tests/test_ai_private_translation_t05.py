@@ -14,7 +14,7 @@ from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from api.models import (ChatGPTTranslationTask, ChatGPTArticleTranslation,
+from api.models import (ChatGPTTranslationTask, ChatGPTArticleTranslation, ChatSession,
                         ChatGPTSubscriptionConnection, SharedArticleTranslation)
 from api.services import ai_private_translation as service
 from api.services import chatgpt_subscription_jobs as subscription_jobs
@@ -1402,7 +1402,7 @@ class PrivateTranslationTests(TransactionTestCase):
                     'model_config_id': str(self.model.pk), 'billing_consent': True,
                     'turn_id': str(uuid.uuid4()),
                 }, format='json')
-                self.assertEqual(chat_response.status_code, 200, chat_response.content)
+                self.assertEqual(chat_response.status_code, 200)
                 chat_wire = b''.join(chat_response.streaming_content)
             self.assertIn(b'synthetic chat response', chat_wire)
             import json
@@ -1585,7 +1585,7 @@ class PrivateTranslationTests(TransactionTestCase):
                 'model_config_id': str(self.model.pk), 'billing_consent': True,
                 'turn_id': str(uuid.uuid4()),
             }, format='json')
-            self.assertEqual(chat_response.status_code, 200, chat_response.content)
+            self.assertEqual(chat_response.status_code, 200)
             b''.join(chat_response.streaming_content)
         import json
         evidence = json.loads(chat_call['messages'][1]['content'].split('\n', 1)[1])
@@ -1593,6 +1593,72 @@ class PrivateTranslationTests(TransactionTestCase):
         self.assertEqual(evidence['title'], old_title)
         self.assertEqual(evidence['article_url'], '')
         self.assertFalse(evidence['translation']['current_match'])
+        self.assertEqual(
+            chat_call['article_context']['translation_context']['result_id'], old_id,
+        )
+        self.assertEqual(
+            chat_call['article_context']['translation_context']['source_title'], old_title,
+        )
+
+        # Persisted factual turns are visible/replayed only with their exact
+        # selected result; changing to current or original cannot relabel them.
+        from api.services.stored_readers import snapshot_metadata
+        from api.services.chat_history import append_assistant_message
+        _, current_context = article_content.pick_chat_context(
+            self.news, self.owner, stored=current, with_metadata=True,
+        )
+        old_article_context = snapshot_metadata(current, metadata)
+        current_article_context = snapshot_metadata(current, current_context)
+        session = ChatSession.objects.get(user=self.owner, news=self.news)
+        append_assistant_message(
+            user_id=self.owner.pk, news_id=self.news.pk, session_id=session.pk,
+            generation=session.generation, content='历史结果对应的助手回答。',
+            status='complete', article_context=old_article_context,
+        )
+        append_assistant_message(
+            user_id=self.owner.pk, news_id=self.news.pk, session_id=session.pk,
+            generation=session.generation, content='当前结果对应的助手回答。',
+            status='complete', article_context=current_article_context,
+        )
+        history_url = f'/api/news/{self.news.pk}/chat/'
+        old_history = self.client.get(
+            history_url, {'translation_mode': 'result', 'translation_result_id': old_id},
+        )
+        current_history = self.client.get(
+            history_url, {'translation_mode': 'result', 'translation_result_id': new.result['result_id']},
+        )
+        original_history = self.client.get(history_url, {'translation_mode': 'original'})
+        self.assertIn('历史结果对应的助手回答。', [m['content'] for m in old_history.data['messages']])
+        self.assertNotIn('当前结果对应的助手回答。', [m['content'] for m in old_history.data['messages']])
+        self.assertIn('当前结果对应的助手回答。', [m['content'] for m in current_history.data['messages']])
+        self.assertNotIn('历史结果对应的助手回答。', [m['content'] for m in current_history.data['messages']])
+        self.assertNotIn('历史结果对应的助手回答。', [m['content'] for m in original_history.data['messages']])
+        self.assertNotIn('当前结果对应的助手回答。', [m['content'] for m in original_history.data['messages']])
+        # Pre-T08 history without evidence metadata is retained only in the
+        # explicit original mode, never attached to a translated result.
+        legacy_original_context = snapshot_metadata(current)
+        append_assistant_message(
+            user_id=self.owner.pk, news_id=self.news.pk, session_id=session.pk,
+            generation=session.generation, content='兼容保留的原文模式回答。',
+            status='complete', article_context=legacy_original_context,
+        )
+        old_history = self.client.get(
+            history_url, {'translation_mode': 'result', 'translation_result_id': old_id},
+        )
+        current_history = self.client.get(
+            history_url, {'translation_mode': 'result', 'translation_result_id': new.result['result_id']},
+        )
+        original_history = self.client.get(history_url, {'translation_mode': 'original'})
+        self.assertNotIn('兼容保留的原文模式回答。', [m['content'] for m in old_history.data['messages']])
+        self.assertNotIn('兼容保留的原文模式回答。', [m['content'] for m in current_history.data['messages']])
+        self.assertIn('兼容保留的原文模式回答。', [m['content'] for m in original_history.data['messages']])
+
+        invalid_mode = self.client.get(history_url, {'translation_mode': 'unknown'})
+        self.assertEqual(invalid_mode.status_code, 400, invalid_mode.content)
+        mode_conflict = self.client.get(
+            history_url, {'translation_mode': 'original', 'translation_result_id': old_id},
+        )
+        self.assertEqual(mode_conflict.status_code, 400, mode_conflict.content)
 
         old_tts = tts_service.resolve_tts_content(
             self.news, self.owner, 'zh', 'full', translation_result_id=old_id,
@@ -1607,6 +1673,41 @@ class PrivateTranslationTests(TransactionTestCase):
             self.news, self.owner, 'zh', 'full',
         ).content, new.result['content'])
 
+    def test_t08_title_only_change_keeps_saved_result_stale_and_prevents_current_fallback(self):
+        task = self.complete_synthetic_private('同一正文的历史个人译文。')
+        original_hash = task.source_hash
+        self.news.title = 'Updated title only'
+        self.news.save(update_fields=['title'])
+        current = service.article_snapshot(self.news, self.owner)
+        self.assertEqual(current.canonical_hash, original_hash)
+
+        detail = self.client.get(f'/api/news/{self.news.pk}/')
+        self.assertEqual(detail.status_code, 200, detail.content)
+        history = {item['result_id']: item for item in detail.data['full_content_zh_private_history']}
+        self.assertFalse(history[task.result['result_id']]['current_match'])
+        self.assertEqual(history[task.result['result_id']]['source_title'], task.execution_snapshot['article']['title'])
+        self.assertNotEqual(detail.data['full_content_zh'], task.result['content'])
+        from api.services.article_content import pick_chat_context
+        translated_text, metadata = pick_chat_context(self.news, self.owner, stored=current, with_metadata=True)
+        self.assertEqual(translated_text, current.markdown)
+        self.assertEqual(metadata['source'], 'original')
+
+    def test_t08_revision_only_change_does_not_mark_body_hash_only_result_current(self):
+        task = self.complete_synthetic_private('同一正文修订号变化时的历史译文。')
+        original_hash = task.source_hash
+        self.news.full_content_revision += 1
+        self.news.save(update_fields=['full_content_revision'])
+        current = service.article_snapshot(self.news, self.owner)
+        self.assertEqual(current.canonical_hash, original_hash)
+
+        detail = self.client.get(f'/api/news/{self.news.pk}/')
+        self.assertEqual(detail.status_code, 200, detail.content)
+        history = {item['result_id']: item for item in detail.data['full_content_zh_private_history']}
+        self.assertFalse(history[task.result['result_id']]['current_match'])
+        self.assertEqual(history[task.result['result_id']]['source_revision'],
+                         task.execution_snapshot['article']['revision'])
+        self.assertNotEqual(detail.data['full_content_zh'], task.result['content'])
+
     def test_t08_soft_deleted_key_keeps_own_history_readable_and_invalid_chat_selection_fails_closed(self):
         task = self.complete_synthetic_private('软删除后仍可读取的历史译文。')
         result_id = task.result['result_id']
@@ -1620,6 +1721,29 @@ class PrivateTranslationTests(TransactionTestCase):
             'turn_id': str(uuid.uuid4()),
         }, format='json')
         self.assertEqual(invalid_chat.status_code, 404, invalid_chat.content)
+        invalid_history = self.client.get(
+            f'/api/news/{self.news.pk}/chat/',
+            {'translation_mode': 'result', 'translation_result_id': result_id + 999},
+        )
+        self.assertEqual(invalid_history.status_code, 404, invalid_history.content)
+        invalid_mode = self.client.post(f'/api/news/{self.news.pk}/chat/', {
+            'question': '请解释这段译文', 'translation_mode': 'unknown',
+            'model_config_id': str(self.model.pk), 'billing_consent': True,
+            'turn_id': str(uuid.uuid4()),
+        }, format='json')
+        self.assertEqual(invalid_mode.status_code, 400, invalid_mode.content)
+        mode_conflict = self.client.post(f'/api/news/{self.news.pk}/chat/', {
+            'question': '请解释这段译文', 'translation_mode': 'original',
+            'translation_result_id': result_id, 'model_config_id': str(self.model.pk),
+            'billing_consent': True, 'turn_id': str(uuid.uuid4()),
+        }, format='json')
+        self.assertEqual(mode_conflict.status_code, 400, mode_conflict.content)
+        from api.services.article_content import pick_chat_context
+        original_context, original_metadata = pick_chat_context(
+            self.news, self.owner, translation_mode='original', with_metadata=True,
+        )
+        self.assertEqual(original_context, service.article_snapshot(self.news, self.owner).markdown)
+        self.assertEqual(original_metadata['source'], 'original')
 
         self.connection.is_deleted = True
         self.connection.is_enabled = False

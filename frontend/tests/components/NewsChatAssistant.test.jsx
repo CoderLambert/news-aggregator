@@ -95,7 +95,13 @@ describe('NewsChatAssistant open state', () => {
   })
   it('binds chat sends to the explicitly selected private translation result', () => {
     render(<NewsChatAssistant newsId={21} open onOpenChange={vi.fn()} translationResultId={88} />)
-    expect(vi.mocked(useChat)).toHaveBeenLastCalledWith(21, true, null, false, 88)
+    expect(vi.mocked(useChat)).toHaveBeenLastCalledWith(21, true, null, false, 88, 'result')
+  })
+
+  it('preserves explicit original-mode selection for chat', () => {
+    render(<NewsChatAssistant newsId={21} open onOpenChange={vi.fn()} translationMode="original" translationLabel="基于原文" />)
+    expect(vi.mocked(useChat)).toHaveBeenLastCalledWith(21, true, null, false, undefined, 'original')
+    expect(screen.getByRole('status')).toHaveTextContent('基于原文')
   })
 
 })

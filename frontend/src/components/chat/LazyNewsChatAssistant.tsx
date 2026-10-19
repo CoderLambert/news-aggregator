@@ -8,6 +8,8 @@ interface LazyNewsChatAssistantProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   translationResultId?: number | null
+  translationMode?: 'current' | 'original' | 'result'
+  translationLabel?: string
   articleContext?: {
     hasFullContent?: boolean
     wordCount?: number
@@ -18,7 +20,7 @@ interface LazyNewsChatAssistantProps {
   }
 }
 
-export default function LazyNewsChatAssistant({ newsId, open, onOpenChange, translationResultId, articleContext }: LazyNewsChatAssistantProps) {
+export default function LazyNewsChatAssistant({ newsId, open, onOpenChange, translationResultId, translationMode, translationLabel, articleContext }: LazyNewsChatAssistantProps) {
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [NewsChatAssistant, setNewsChatAssistant] = useState(() => lazy(loadNewsChatAssistant))
 

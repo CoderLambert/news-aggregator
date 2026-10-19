@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { NewsId } from '@/services/api'
+import type { ChatTranslationMode, NewsId } from '@/services/api'
 export type { NewsId } from '@/services/api'
 import {
   cancelChatGPTTranslationTask as cancelTranslationTaskRequest,
@@ -46,6 +46,18 @@ export interface WebSource {
   source?: string
 }
 
+export interface ChatTranslationContext {
+  source: 'original' | 'byok' | 'subscription' | 'private' | 'shared' | 'legacy'
+  current_match: boolean
+  result_id?: number | null
+  task_id?: string | null
+  model?: string | null
+  source_hash?: string
+  source_revision?: number | null
+  source_title?: string
+  content_hash?: string
+}
+
 export interface ChatMessage {
   id?: string | number
   role: 'user' | 'assistant'
@@ -53,6 +65,7 @@ export interface ChatMessage {
   web_search?: boolean
   web_sources?: WebSource[]
   context_scope?: 'full' | 'summary' | 'excerpt'
+  translation_context?: ChatTranslationContext
   status?: 'complete' | 'failed' | 'interrupted' | 'legacy_unknown'
   model_source?: { provider: string; model: string }
 }
@@ -203,6 +216,22 @@ function parseChatMessage(value: unknown): ChatMessage | null {
   if (value.context_scope === 'full' || value.context_scope === 'summary' || value.context_scope === 'excerpt') {
     message.context_scope = value.context_scope
   }
+  if (isRecord(value.translation_context) &&
+      ['original', 'byok', 'subscription', 'private', 'shared', 'legacy'].includes(String(value.translation_context.source)) &&
+      typeof value.translation_context.current_match === 'boolean') {
+    const context = value.translation_context
+    message.translation_context = {
+      source: context.source as ChatTranslationContext['source'],
+      current_match: context.current_match,
+      ...(typeof context.result_id === 'number' && Number.isInteger(context.result_id) ? { result_id: context.result_id } : {}),
+      ...(typeof context.task_id === 'string' ? { task_id: context.task_id } : {}),
+      ...(typeof context.model === 'string' ? { model: context.model } : {}),
+      ...(typeof context.source_hash === 'string' ? { source_hash: context.source_hash } : {}),
+      ...(typeof context.source_revision === 'number' ? { source_revision: context.source_revision } : {}),
+      ...(typeof context.source_title === 'string' ? { source_title: context.source_title } : {}),
+      ...(typeof context.content_hash === 'string' ? { content_hash: context.content_hash } : {}),
+    }
+  }
   const sources = parseWebSources(value.web_sources)
   if (sources) message.web_sources = sources
   if (message.role === 'assistant' && isRecord(value.model_source) &&
@@ -270,8 +299,11 @@ export async function fetchFullArticleStatus(id: NewsId, signal: AbortSignal): P
   return parseFullArticleResult(data)
 }
 
-export async function fetchChatHistory(id: NewsId, signal: AbortSignal): Promise<ChatHistory> {
-  const data: unknown = await fetchChatHistoryRequest(id, signal)
+export async function fetchChatHistory(id: NewsId, signal: AbortSignal, selection: {
+  translationResultId?: number | null
+  translationMode?: ChatTranslationMode
+} = {}): Promise<ChatHistory> {
+  const data: unknown = await fetchChatHistoryRequest(id, signal, selection)
   return parseChatHistory(data)
 }
 
@@ -310,7 +342,7 @@ export async function* chatStream(
   id: NewsId,
   question: string,
   options: { webSearch: boolean; modelConfigId?: string | null; billingConsent?: boolean;
-    turnId?: string; signal: AbortSignal },
+    turnId?: string; translationResultId?: number | null; translationMode?: ChatTranslationMode; signal: AbortSignal },
 ): AsyncGenerator<string> {
   for await (const rawChunk of streamChat(id, question, options)) {
     if (typeof rawChunk === 'string') yield rawChunk

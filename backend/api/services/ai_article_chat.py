@@ -99,7 +99,7 @@ def _check_execution(user, stored, selection, turn_id, *, dispatched=True):
     require_task_model_snapshot(selection, owner_id=user.pk)
 
 
-def complete_article_chat(*, user, stored, chat_snapshot, messages, selection, turn_id):
+def complete_article_chat(*, user, stored, chat_snapshot, messages, selection, turn_id, article_context=None):
     """Return a generator of delta events followed by one durable completion.
 
     The send callback opens the SDK stream synchronously inside dispatch_once,
@@ -186,7 +186,7 @@ def complete_article_chat(*, user, stored, chat_snapshot, messages, selection, t
                     user_id=user.pk, news_id=stored.news_id,
                     session_id=chat_snapshot.session_id, generation=chat_snapshot.generation,
                     content=answer, status='complete',
-                    article_context=snapshot_metadata(stored), model_source=source,
+                    article_context=article_context if article_context is not None else snapshot_metadata(stored), model_source=source,
                 )
                 return source
 

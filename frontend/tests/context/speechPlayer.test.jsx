@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { useState } from 'react'
+import { AuthContext } from '@/context/AuthContext'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SpeechPlayerProvider } from '@/context/SpeechPlayerProvider'
@@ -6,6 +8,7 @@ import { useSpeechPlayerActions, useSpeechPlayerState } from '@/context/SpeechPl
 import GlobalSpeechPlayer from '@/components/speech/GlobalSpeechPlayer'
 
 const audioInstances = []
+let deferNextAudioMetadata = false
 const mediaSession = {
   actionHandlers: new Map(),
   metadata: null,
@@ -52,7 +55,12 @@ class MockAudio {
   }
 
   load() {
-    if (this.src) this.onloadedmetadata?.()
+    if (!this.src) return
+    if (deferNextAudioMetadata) {
+      deferNextAudioMetadata = false
+      return
+    }
+    this.onloadedmetadata?.()
   }
 
   removeAttribute(name) {
@@ -75,17 +83,33 @@ function PlayerActions() {
   )
 }
 
+function TestAuthProvider({ children }) {
+  const [user, setUser] = useState({ id: 101, username: 'viewer-a', isSuperuser: false })
+  return (
+    <AuthContext.Provider value={{
+      user, loading: false, login: async () => user, register: async () => user,
+      logout: async () => setUser(null), refresh: async () => {},
+    }}>
+      <button type="button" onClick={() => setUser({ id: 202, username: 'viewer-b', isSuperuser: false })}>切换用户</button>
+      {children}
+    </AuthContext.Provider>
+  )
+}
+
 function renderPlayer() {
   return render(
-    <SpeechPlayerProvider>
-      <PlayerActions />
-      <GlobalSpeechPlayer />
-    </SpeechPlayerProvider>,
+    <TestAuthProvider>
+      <SpeechPlayerProvider>
+        <PlayerActions />
+        <GlobalSpeechPlayer />
+      </SpeechPlayerProvider>
+    </TestAuthProvider>,
   )
 }
 
 beforeEach(() => {
   audioInstances.length = 0
+  deferNextAudioMetadata = false
   localStorage.clear()
   vi.stubGlobal('Audio', MockAudio)
   previousMediaSessionDescriptor = Object.getOwnPropertyDescriptor(navigator, 'mediaSession')
@@ -197,6 +221,57 @@ describe('global speech player', () => {
 
     expect(screen.getByTestId('player-status')).toHaveTextContent('idle')
   })
+  it('stops and clears viewer A audio when the authenticated viewer changes', async () => {
+    const user = userEvent.setup()
+    renderPlayer()
+    await user.click(screen.getByRole('button', { name: '朗读译文 A' }))
+    const privateAudio = audioInstances.at(-1)
+    privateAudio.currentTime = 37
+    expect(screen.getByTestId('player-status')).toHaveTextContent('playing')
+
+    await user.click(screen.getByRole('button', { name: '切换用户' }))
+    expect(privateAudio.src).toBe('')
+    expect(screen.getByTestId('player-status')).toHaveTextContent('idle')
+    expect(mediaSession.metadata).toBeNull()
+    const savedPositionKey = Object.keys(localStorage).find((key) =>
+      key.includes('viewer_101') && key.endsWith('11_zh_full_result_41'))
+    expect(savedPositionKey).toBeTruthy()
+    expect(localStorage.getItem(savedPositionKey)).toContain('"time":37')
+
+    act(() => {
+      privateAudio.onplay?.()
+      privateAudio.ontimeupdate?.()
+      privateAudio.onloadedmetadata?.()
+      privateAudio.onended?.()
+    })
+    expect(screen.getByTestId('player-status')).toHaveTextContent('idle')
+    expect(screen.queryByText('译文版本 A')).not.toBeInTheDocument()
+  })
+
+  it('invalidates viewer A pending metadata and play promises after an account switch', async () => {
+    const user = userEvent.setup()
+    renderPlayer()
+    deferNextAudioMetadata = true
+    await user.click(screen.getByRole('button', { name: '朗读译文 A' }))
+    const oldAudio = audioInstances.at(-1)
+    expect(screen.getByTestId('player-status')).toHaveTextContent('loading')
+
+    const pendingPlay = deferred()
+    vi.spyOn(oldAudio, 'play').mockReturnValue(pendingPlay.promise)
+    act(() => oldAudio.onloadedmetadata?.())
+    await user.click(screen.getByRole('button', { name: '切换用户' }))
+    expect(oldAudio.src).toBe('')
+    expect(screen.getByTestId('player-status')).toHaveTextContent('idle')
+    expect(mediaSession.metadata).toBeNull()
+
+    await act(async () => {
+      pendingPlay.reject(new Error('viewer A play completed after viewer switch'))
+      await pendingPlay.promise.catch(() => {})
+    })
+    expect(screen.getByTestId('player-status')).toHaveTextContent('idle')
+    expect(screen.queryByText('译文版本 A')).not.toBeInTheDocument()
+  })
+
   it('keeps explicit saved result identity when replaying and switching versions', async () => {
     const user = userEvent.setup()
     renderPlayer()
