@@ -9,7 +9,7 @@ from django.db import IntegrityError, OperationalError, transaction, connection,
 from django.db.migrations.executor import MigrationExecutor
 from django.core.management import call_command
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier
+from threading import Barrier, Event
 from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -559,6 +559,487 @@ class PrivateTranslationTests(TransactionTestCase):
         send.assert_called_once()
         task.refresh_from_db()
         self.assertEqual(task.status, 'failed')
+
+
+    def retry(self, task, *, request_id=None, consent=True, model_id=None):
+        return self.client.post(
+            f'/api/me/ai/translations/{task.pk}/retry/',
+            {'model_config_id': str(model_id or self.model.pk), 'billing_consent': consent,
+             'target_language': 'zh'},
+            format='json', HTTP_IDEMPOTENCY_KEY=request_id or str(uuid.uuid4()),
+        )
+
+    def cancel(self, task, *, generation=None):
+        return self.client.post(
+            f'/api/me/ai/translations/{task.pk}/cancel/',
+            {'generation': task.generation if generation is None else generation},
+            format='json',
+        )
+
+    def test_t07_cancel_cas_wins_before_provider_result_and_is_idempotent(self):
+        task = self.queued()
+        stale = self.cancel(task, generation=task.generation + 1)
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(task.status, 'queued')
+
+        responses = []
+        gateway = FakeGateway([gateway_frame('不应持久化的译文')], on_send=lambda: responses.append(self.cancel(task)))
+        with patch.object(service, 'build_gateway_client', return_value=gateway):
+            service.run_translation(task.pk, task.generation)
+        task.refresh_from_db()
+        self.assertEqual(len(gateway.sent), 1)
+        self.assertEqual(responses[0].status_code, 200, responses[0].content)
+        self.assertEqual(responses[0].data['status'], 'cancelled')
+        self.assertEqual(task.status, 'cancelled')
+        self.assertTrue(task.provider_started)
+        self.assertFalse(task.result)
+        self.assertFalse(ChatGPTArticleTranslation.objects.filter(task=task).exists())
+
+        repeated = self.cancel(task)
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(repeated.data['status'], 'cancelled')
+        with patch.object(service, 'build_gateway_client') as build:
+            service.run_translation(task.pk, task.generation)
+        build.assert_not_called()
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'cancelled')
+
+    def test_t07_cancel_after_finish_does_not_replace_success(self):
+        task = self.queued()
+        self.execute(task)
+        result_before = dict(task.result)
+        response = self.cancel(task)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'succeeded')
+        task.refresh_from_db()
+        self.assertEqual(task.result, result_before)
+        self.assertTrue(ChatGPTArticleTranslation.objects.filter(task=task).exists())
+
+    def test_t07_cancel_receipt_is_redacted_and_remains_available_after_source_change(self):
+        task = self.queued()
+        ChatGPTTranslationTask.objects.filter(pk=task.pk).update(
+            progress='private partial text',
+        )
+        task.refresh_from_db()
+        self.news.full_content = 'Changed source before cancellation.'
+        self.news.save(update_fields=['full_content'])
+        response = self.cancel(task)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.data['status'], 'cancelled')
+        self.assertEqual(response.data['task_id'], str(task.pk))
+        self.assertEqual(set(response.data), {'task_id', 'status', 'error_code'})
+        self.assertNotIn('private partial text', response.content.decode())
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'cancelled')
+        self.assertEqual(task.progress, 'private partial text')
+        # Reads remain denied by the source fence; the cancel receipt reveals no
+        # cached private text even though it still lets the owner stop the task.
+        denied = self.client.get(f'/api/me/ai/translations/{task.pk}/')
+        self.assertEqual(denied.status_code, 409)
+
+    def test_t07_explicit_retry_creates_new_attempt_and_keeps_old_result_after_failure(self):
+        original = self.queued()
+        self.execute(original)
+        original.refresh_from_db()
+        original_result = dict(original.result)
+        old_row = ChatGPTArticleTranslation.objects.get(task=original)
+
+        retry_key = str(uuid.uuid4())
+        with patch.object(service, '_dispatch') as dispatch:
+            accepted = self.retry(original, request_id=retry_key)
+            repeated = self.retry(original, request_id=retry_key)
+            conflicting = self.retry(original, request_id=str(uuid.uuid4()))
+        self.assertEqual(accepted.status_code, 202, accepted.content)
+        retry_id = accepted.data['task_id']
+        self.assertNotEqual(retry_id, str(original.pk))
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(repeated.data['task_id'], retry_id)
+        self.assertEqual(conflicting.status_code, 409)
+        # The duplicate explicit POST may recover the same queued attempt;
+        # both dispatches still pass through the worker's one-shot claim CAS.
+        self.assertEqual(dispatch.call_count, 2)
+        self.assertEqual(dispatch.call_args[0], (uuid.UUID(retry_id), 1))
+        current = ChatGPTTranslationTask.objects.get(pk=retry_id)
+        self.assertEqual(current.execution_snapshot['retry_of'], str(original.pk))
+        self.assertEqual(original.result, original_result)
+        self.assertEqual(ChatGPTArticleTranslation.objects.get(pk=old_row.pk).content, original_result['content'])
+
+        latest = self.client.get(self.url)
+        self.assertEqual(latest.status_code, 200)
+        self.assertEqual(latest.data['task']['task_id'], retry_id)
+        self.assertEqual(latest.data['task']['previous_result'], original_result)
+        reopened = self.client.get(f'/api/me/ai/translations/{original.pk}/')
+        self.assertEqual(reopened.data['result'], original_result)
+
+        # An ambiguous post-marker transport failure is terminal and never
+        # overwrites the prior immutable result.
+        with patch.object(service, 'build_gateway_client', side_effect=OSError('synthetic transport')):
+            service.run_translation(current.pk, current.generation)
+        current.refresh_from_db()
+        self.assertEqual(current.status, 'failed')
+        self.assertFalse(current.result)
+        latest_after_failure = self.client.get(self.url)
+        self.assertEqual(latest_after_failure.data['task']['task_id'], retry_id)
+        self.assertEqual(latest_after_failure.data['task']['previous_result'], original_result)
+        self.assertEqual(ChatGPTArticleTranslation.objects.get(pk=old_row.pk).content, original_result['content'])
+
+        # A later, explicit fresh retry is a separate attempt/result; the old
+        # successful row remains addressable and is still surfaced on recovery.
+        second_key = str(uuid.uuid4())
+        with patch.object(service, '_dispatch') as dispatch2:
+            second = self.retry(current, request_id=second_key)
+        self.assertEqual(second.status_code, 202, second.content)
+        second_task = ChatGPTTranslationTask.objects.get(pk=second.data['task_id'])
+        self.execute(second_task, frames=[gateway_frame('再次生成的新译文')])
+        second_task.refresh_from_db()
+        self.assertEqual(second_task.status, 'succeeded')
+        self.assertNotEqual(second_task.result['result_id'], original_result['result_id'])
+        self.assertEqual(ChatGPTArticleTranslation.objects.filter(
+            user=self.owner, api_connection=self.connection, news=self.news,
+            source_hash=original.source_hash,
+        ).count(), 2)
+        self.assertEqual(self.client.get(self.url).data['task']['previous_result'], original_result)
+        self.assertEqual(self.client.get(f'/api/me/ai/translations/{original.pk}/').data['result'], original_result)
+
+    def test_t07_retry_requires_fresh_consent_current_model_and_unchanged_source(self):
+        original = self.queued()
+        self.execute(original)
+        with patch.object(service, '_dispatch') as dispatch:
+            no_consent = self.retry(original, request_id=str(uuid.uuid4()), consent=False)
+            unproved_model = self.retry(original, request_id=str(uuid.uuid4()), model_id=uuid.uuid4())
+        self.assertEqual(no_consent.status_code, 400)
+        self.assertEqual(unproved_model.status_code, 409)
+        self.assertEqual(ChatGPTTranslationTask.objects.count(), 1)
+        dispatch.assert_not_called()
+
+        self.news.full_content = 'Changed synthetic full text.'
+        self.news.save(update_fields=['full_content'])
+        changed = self.retry(original, request_id=str(uuid.uuid4()))
+        self.assertEqual(changed.status_code, 409)
+        self.assertEqual(changed.data['error_code'], 'article_source_changed')
+        self.assertEqual(ChatGPTTranslationTask.objects.count(), 1)
+
+    def test_t07_retry_same_key_only_recovers_queued_unstarted_via_explicit_post(self):
+        original = self.queued()
+        self.execute(original)
+        key = str(uuid.uuid4())
+        with patch.object(service, '_dispatch') as initial_dispatch:
+            accepted = self.retry(original, request_id=key)
+        self.assertEqual(accepted.status_code, 202)
+        child = ChatGPTTranslationTask.objects.get(pk=accepted.data['task_id'])
+        initial_dispatch.assert_called_once_with(child.pk, child.generation)
+        with patch.object(service, '_dispatch') as recovery_dispatch:
+            recovered = self.retry(original, request_id=key)
+        self.assertEqual(recovered.status_code, 200)
+        self.assertEqual(recovered.data['task_id'], str(child.pk))
+        recovery_dispatch.assert_called_once_with(child.pk, child.generation)
+
+        ChatGPTTranslationTask.objects.filter(pk=child.pk).update(
+            status='running', provider_started=True, run_token=uuid.uuid4(),
+            lease_expires_at=timezone.now() + timedelta(minutes=1),
+        )
+        with patch.object(service, '_dispatch') as started_dispatch:
+            repeated = self.retry(original, request_id=key)
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(repeated.data['task_id'], str(child.pk))
+        started_dispatch.assert_not_called()
+
+    def test_t07_retry_of_expired_started_task_is_explicit_and_get_remains_read_only(self):
+        original = self.queued()
+        token = uuid.uuid4()
+        ChatGPTTranslationTask.objects.filter(pk=original.pk).update(
+            status='running', provider_started=True, run_token=token,
+            lease_expires_at=timezone.now() - timedelta(seconds=1),
+        )
+        with patch.object(service, '_dispatch') as dispatch:
+            observed = self.client.get(f'/api/me/ai/translations/{original.pk}/')
+            latest = self.client.get(self.url)
+        self.assertEqual(observed.status_code, 200)
+        self.assertEqual(observed.data['status'], 'interrupted')
+        self.assertEqual(latest.data['task']['status'], 'interrupted')
+        original.refresh_from_db()
+        self.assertEqual(original.status, 'running')
+        dispatch.assert_not_called()
+
+        with patch.object(service, '_dispatch') as dispatch_retry:
+            response = self.retry(original, request_id=str(uuid.uuid4()))
+        self.assertEqual(response.status_code, 202, response.content)
+        dispatch_retry.assert_called_once()
+        original.refresh_from_db()
+        self.assertEqual(original.status, 'interrupted')
+        self.assertEqual(ChatGPTTranslationTask.objects.filter(news=self.news, status='queued').count(), 1)
+
+    def test_t07_migration_links_results_and_fences_preexisting_cross_key_active_tasks(self):
+        from api.ai_connection_models import UserAIConnection
+
+        other_connection = UserAIConnection.objects.create(
+            user=self.owner, provider_id=self.connection.provider_id,
+            endpoint_profile=self.connection.endpoint_profile,
+            display_name='T07 second synthetic key', request_hash='b' * 64,
+        )
+        targets = MigrationExecutor(connection).loader.graph.leaf_nodes()
+        try:
+            MigrationExecutor(connection).migrate([('api', '0065_byok_private_translation')])
+            old = MigrationExecutor(connection).loader.project_state(
+                [('api', '0065_byok_private_translation')]
+            ).apps
+            old_task_model = old.get_model('api', 'ChatGPTTranslationTask')
+            old_result_model = old.get_model('api', 'ChatGPTArticleTranslation')
+            task = old_task_model.objects.create(
+                user_id=self.owner.pk, api_connection_id=self.connection.pk, news_id=self.news.pk,
+                source_hash='t07-migration-source', model_slug='deepseek-flash',
+                request_id=uuid.uuid4(), status='succeeded',
+            )
+            result = old_result_model.objects.create(
+                user_id=self.owner.pk, api_connection_id=self.connection.pk, news_id=self.news.pk,
+                source_hash='t07-migration-source', model_slug='deepseek-flash',
+                content='历史私有译文', completed_at=timezone.now(),
+            )
+            old_task_model.objects.filter(pk=task.pk).update(result={'result_id': result.pk, 'content': result.content})
+            now = timezone.now()
+            old_running = old_task_model.objects.create(
+                user_id=self.owner.pk, api_connection_id=self.connection.pk, news_id=self.news.pk,
+                source_hash='t07-migration-active-source', model_slug='deepseek-flash',
+                request_id=uuid.uuid4(), status='running', provider_started=True,
+                run_token=uuid.uuid4(), lease_expires_at=now + timedelta(minutes=2),
+                progress='保留的不完整私有进度', queued_at=now - timedelta(seconds=2),
+            )
+            newest_queued = old_task_model.objects.create(
+                user_id=self.owner.pk, api_connection_id=other_connection.pk, news_id=self.news.pk,
+                source_hash='t07-migration-active-source', model_slug='deepseek-flash',
+                request_id=uuid.uuid4(), status='queued', queued_at=now,
+            )
+            original_running_token = old_running.run_token
+            with patch.object(service, '_dispatch') as dispatch:
+                MigrationExecutor(connection).migrate(targets)
+            dispatch.assert_not_called()
+            result_after = ChatGPTArticleTranslation.objects.get(pk=result.pk)
+            self.assertEqual(result_after.task_id, task.pk)
+            self.assertEqual(result_after.content, '历史私有译文')
+            self.assertEqual(result_after.api_connection_id, self.connection.pk)
+            old_running.refresh_from_db()
+            newest_queued.refresh_from_db()
+            self.assertEqual(old_running.status, 'interrupted')
+            self.assertTrue(old_running.provider_started)
+            self.assertIsNone(old_running.run_token)
+            self.assertIsNone(old_running.lease_expires_at)
+            self.assertEqual(old_running.progress, '保留的不完整私有进度')
+            self.assertEqual(old_running.error_code, 'worker_interrupted')
+            self.assertIn('仍可能计费', old_running.error_message)
+            self.assertEqual(newest_queued.status, 'queued')
+            self.assertEqual(newest_queued.api_connection_id, other_connection.pk)
+            self.assertEqual(ChatGPTTranslationTask.objects.count(), 3)
+            self.assertEqual(ChatGPTTranslationTask.objects.filter(
+                news=self.news, source_hash='t07-migration-active-source',
+            ).count(), 2)
+            self.assertNotEqual(original_running_token, old_running.run_token)
+            stale_commit = ChatGPTTranslationTask.objects.filter(
+                pk=old_running.pk, generation=old_running.generation,
+                status='running', run_token=original_running_token,
+            ).update(status='succeeded', progress='过期工作进程不得写入')
+            self.assertEqual(stale_commit, 0)
+            old_running.refresh_from_db()
+            self.assertEqual(old_running.status, 'interrupted')
+            self.assertEqual(old_running.progress, '保留的不完整私有进度')
+        finally:
+            MigrationExecutor(connection).migrate(targets)
+
+    def test_t07_cancel_and_finish_race_never_publishes_a_cancelled_result(self):
+        task = self.queued()
+        barrier = Barrier(2)
+        real_finish = service._finish
+        gateway = FakeGateway([gateway_frame('并发完成或取消')])
+        def finish_at_barrier(*args, **kwargs):
+            barrier.wait(timeout=5)
+            return real_finish(*args, **kwargs)
+        with patch.object(service, '_finish', side_effect=finish_at_barrier), \
+                patch.object(service, 'build_gateway_client', return_value=gateway), \
+                ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(service.run_translation, task.pk, task.generation)
+            barrier.wait(timeout=5)
+            cancel_response = self.cancel(task)
+            if cancel_response.status_code == 200:
+                self.assertEqual(set(cancel_response.data), {'task_id', 'status', 'error_code'})
+                self.assertEqual(cancel_response.data['task_id'], str(task.pk))
+                self.assertIn(cancel_response.data['status'], {'cancelled', 'succeeded'})
+                expected_code = 'translation_cancelled' if cancel_response.data['status'] == 'cancelled' else ''
+                self.assertEqual(cancel_response.data['error_code'], expected_code)
+            elif cancel_response.status_code == 409:
+                self.assertEqual(cancel_response.data, {'error_code': 'translation_request_conflict'})
+            elif cancel_response.status_code == 503:
+                # Storage/auth contention means cancellation is NOT_CONFIRMED.
+                # Never count this as a successful cancel or replay the POST.
+                self.assertEqual(set(cancel_response.data), {'error_code'})
+                self.assertIn(cancel_response.data['error_code'],
+                              {'task_storage_busy', 'credential_unavailable'})
+            else:
+                self.fail(f'unexpected cancellation response: {cancel_response.status_code} {cancel_response.data!r}')
+            future.result(timeout=10)
+        task.refresh_from_db()
+        if task.status == 'cancelled':
+            self.assertFalse(task.result)
+            self.assertFalse(ChatGPTArticleTranslation.objects.filter(task=task).exists())
+            if cancel_response.status_code == 200:
+                self.assertEqual(cancel_response.data['status'], 'cancelled')
+        else:
+            self.assertEqual(task.status, 'succeeded')
+            self.assertTrue(task.result)
+            result = ChatGPTArticleTranslation.objects.get(task=task)
+            self.assertEqual(task.result['result_id'], result.pk)
+            self.assertEqual(result.content, '并发完成或取消')
+            if cancel_response.status_code == 200:
+                self.assertEqual(cancel_response.data['status'], 'succeeded')
+        observed = self.client.get(f'/api/me/ai/translations/{task.pk}/')
+        self.assertEqual(observed.status_code, 200, observed.content)
+        self.assertEqual(observed.data['task_id'], str(task.pk))
+        self.assertEqual(observed.data['status'], task.status)
+        if task.status == 'cancelled':
+            self.assertIsNone(observed.data['result'])
+            self.assertFalse(ChatGPTArticleTranslation.objects.filter(task=task).exists())
+        else:
+            self.assertEqual(observed.data['result']['result_id'], task.result['result_id'])
+            self.assertEqual(observed.data['result']['content'], '并发完成或取消')
+        self.assertEqual(len(gateway.sent), 1)
+
+    def test_t07_cancel_wins_racing_finish_prevents_result_commit(self):
+        task = self.queued()
+        finish_entered = Event()
+        release_finish = Event()
+        real_finish = service._finish
+        gateway = FakeGateway([gateway_frame('取消胜出的私有译文')])
+
+        def pause_before_finish_commit(*args, **kwargs):
+            # The worker has received a complete synthetic response, but has not
+            # entered its terminal DB transaction. Let cancel win the CAS first.
+            finish_entered.set()
+            if not release_finish.wait(timeout=5):
+                raise TimeoutError('finish test gate timed out')
+            return real_finish(*args, **kwargs)
+
+        with patch.object(service, '_finish', side_effect=pause_before_finish_commit), \
+                patch.object(service, 'build_gateway_client', return_value=gateway), \
+                ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(service.run_translation, task.pk, task.generation)
+            try:
+                self.assertTrue(finish_entered.wait(timeout=5))
+                cancel_response = self.cancel(task)
+                self.assertEqual(cancel_response.status_code, 200, cancel_response.content)
+                self.assertEqual(set(cancel_response.data), {'task_id', 'status', 'error_code'})
+                self.assertEqual(cancel_response.data, {
+                    'task_id': str(task.pk), 'status': 'cancelled',
+                    'error_code': 'translation_cancelled',
+                })
+            finally:
+                release_finish.set()
+            future.result(timeout=10)
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'cancelled')
+        self.assertFalse(task.result)
+        self.assertFalse(ChatGPTArticleTranslation.objects.filter(task=task).exists())
+        self.assertFalse(SharedArticleTranslation.objects.exists())
+        observed = self.client.get(f'/api/me/ai/translations/{task.pk}/')
+        self.assertEqual(observed.status_code, 200, observed.content)
+        self.assertEqual(observed.data['status'], 'cancelled')
+        self.assertIsNone(observed.data['result'])
+        self.assertEqual(len(gateway.sent), 1)
+
+    def test_t07_finish_winner_racing_cancel_retains_private_result(self):
+        task = self.queued()
+        gateway = FakeGateway([gateway_frame('完成胜出的私有译文')])
+        cancel_entered = Event()
+        release_cancel = Event()
+        real_cancel = service.cancel_translation
+
+        def pause_cancel_before_cas(*args, **kwargs):
+            cancel_entered.set()
+            if not release_cancel.wait(timeout=5):
+                raise TimeoutError('cancel test gate timed out')
+            return real_cancel(*args, **kwargs)
+
+        with patch.object(service, 'cancel_translation', side_effect=pause_cancel_before_cas), \
+                patch.object(service, 'build_gateway_client', return_value=gateway), \
+                ThreadPoolExecutor(max_workers=1) as pool:
+            cancel_future = pool.submit(self.cancel, task)
+            self.assertTrue(cancel_entered.wait(timeout=5))
+            try:
+                service.run_translation(task.pk, task.generation)
+            finally:
+                release_cancel.set()
+            response = cancel_future.result(timeout=10)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(set(response.data), {'task_id', 'status', 'error_code'})
+        self.assertEqual(response.data['status'], 'succeeded')
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'succeeded')
+        self.assertTrue(task.result)
+        result = ChatGPTArticleTranslation.objects.get(task=task)
+        self.assertEqual(result.content, '完成胜出的私有译文')
+        self.assertEqual(task.result['result_id'], result.pk)
+        self.assertEqual(len(gateway.sent), 1)
+
+    def test_t07_parallel_same_key_retry_and_worker_claim_send_once(self):
+        original = self.queued()
+        self.execute(original)
+        barrier = Barrier(2)
+        def retry_same_key():
+            close_old_connections()
+            try:
+                from django.contrib.auth import get_user_model
+                owner = get_user_model().objects.get(pk=self.owner.pk)
+                barrier.wait(timeout=5)
+                task, created = service.retry_translation(
+                    owner, original.pk, model_config_id=str(self.model.pk),
+                    request_id=self.retry_request_id, billing_consent=True,
+                )
+                return str(task.pk), created
+            finally:
+                close_old_connections()
+        self.retry_request_id = str(uuid.uuid4())
+        with patch.object(service, '_dispatch'), ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(lambda _: retry_same_key(), range(2)))
+        self.assertEqual(outcomes[0][0], outcomes[1][0])
+        self.assertEqual(sum(created for _, created in outcomes), 1)
+        self.assertEqual(ChatGPTTranslationTask.objects.count(), 2)
+        retry = ChatGPTTranslationTask.objects.get(pk=outcomes[0][0])
+        gateway = FakeGateway([gateway_frame('并发重试只保存一次')])
+        with patch.object(service, 'build_gateway_client', return_value=gateway), ThreadPoolExecutor(max_workers=2) as pool:
+            list(pool.map(lambda _: service.run_translation(retry.pk, retry.generation), range(2)))
+        retry.refresh_from_db()
+        self.assertEqual(retry.status, 'succeeded')
+        self.assertEqual(len(gateway.sent), 1)
+        self.assertEqual(ChatGPTArticleTranslation.objects.filter(task=retry).count(), 1)
+
+    def test_t07_parallel_different_retry_keys_create_only_one_active_attempt(self):
+        original = self.queued()
+        self.execute(original)
+        barrier = Barrier(2)
+        keys = [str(uuid.uuid4()), str(uuid.uuid4())]
+        def retry_with_key(request_id):
+            close_old_connections()
+            try:
+                from django.contrib.auth import get_user_model
+                owner = get_user_model().objects.get(pk=self.owner.pk)
+                barrier.wait(timeout=5)
+                return service.retry_translation(
+                    owner, original.pk, model_config_id=str(self.model.pk),
+                    request_id=request_id, billing_consent=True,
+                )
+            except service.TranslationError as exc:
+                return exc.code
+            finally:
+                close_old_connections()
+        with patch.object(service, '_dispatch'), ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(retry_with_key, keys))
+        created = [item for item in outcomes if isinstance(item, tuple) and item[1] is True]
+        errors = [item for item in outcomes if isinstance(item, str)]
+        self.assertEqual(len(created), 1, outcomes)
+        self.assertEqual(errors, ['translation_request_conflict'])
+        self.assertEqual(ChatGPTTranslationTask.objects.filter(
+            user=self.owner, news=self.news, source_hash=original.source_hash,
+            status__in=['queued', 'running'],
+        ).count(), 1)
 
     def test_model_state_matches_migration(self):
         call_command('makemigrations', 'api', check=True, dry_run=True, verbosity=0)

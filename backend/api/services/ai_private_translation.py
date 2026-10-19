@@ -4,6 +4,7 @@ Only explicit POST admission schedules work. Reads and SSE observers cannot
 dispatch, renew a lease, reset a terminal, or repeat an ambiguous provider call.
 """
 from dataclasses import asdict
+from datetime import timedelta
 from hashlib import sha256
 import json
 import re
@@ -285,8 +286,22 @@ def _query(user_id=None):
 
 
 def _readable(task):
-    if task is not None:
-        _authorize(task)
+    if task is None:
+        return None
+    # Completed/terminal private history remains readable for its owner after a
+    # credential/model change. Keep the article-content fence, but do not make
+    # an already-persisted result disappear when its credential is revoked.
+    if task.status in {'succeeded', 'failed', 'cancelled', 'interrupted'}:
+        _enabled()
+        if (not task.user.is_active or task.api_connection_id is None
+                or task.api_connection.user_id != task.user_id):
+            raise TranslationError('execution_changed')
+        stored = article_snapshot(task.news, task.user)
+        require_current(task.user, stored, full=True)
+        if _identity(stored) != task.execution_snapshot.get('article') or stored.markdown != task.execution_snapshot.get('markdown'):
+            raise TranslationError('article_source_changed')
+        return task
+    _authorize(task)
     return task
 
 
@@ -322,10 +337,28 @@ def payload(task):
     if 'long_translation' in task.execution_snapshot:
         limits = {'input_chars': T06_MAX_INPUT_CHARS, 'input_bytes': T06_MAX_INPUT_BYTES,
                   'max_chunks': T06_MAX_CHUNKS, 'max_output_chars': T06_MAX_OUTPUT_CHARS}
+    previous_result = None
+    if task.api_connection_id is not None:
+        previous = ChatGPTArticleTranslation.objects.select_related('task').filter(
+            user_id=task.user_id, api_connection__isnull=False, news_id=task.news_id,
+            source_hash=task.source_hash, task__status='succeeded',
+        ).exclude(task_id=task.pk).order_by('-completed_at', '-pk').first()
+        if previous is not None and previous.task_id is not None:
+            try:
+                # Recheck the old task's owner and frozen source before exposing
+                # its private result through a newer attempt's recovery DTO.
+                _readable(previous.task)
+            except TranslationError:
+                previous_result = None
+            else:
+                previous_result = previous.task.result
     return {
-        'task_id': str(task.pk), 'request_id': str(task.request_id), 'news_id': task.news_id, 'status': status,
-        'progress': task.progress,
+        'task_id': str(task.pk), 'request_id': str(task.request_id), 'news_id': task.news_id,
+        'generation': task.generation,
+        'retry_of': task.execution_snapshot.get('retry_of'),
+        'status': status, 'progress': task.progress,
         'result': task.result if status == 'succeeded' else None,
+        'previous_result': previous_result,
         'error_code': 'worker_interrupted' if expired else task.error_code,
         'model_config_id': task.execution_snapshot['model']['model_config_id'],
         'target_language': 'zh',
@@ -383,6 +416,11 @@ def start_translation(user, news_id, *, model_config_id, request_id, billing_con
                 if existing.status == 'queued' and not existing.provider_started:
                     transaction.on_commit(lambda: _dispatch(existing.pk, existing.generation))
                 return existing, False
+            if _query(user.pk).filter(
+                news_id=news_id, source_hash=stored.canonical_hash,
+                status__in=['queued', 'running'],
+            ).exists():
+                raise TranslationError('translation_request_conflict')
             active = _query().filter(Q(status='queued') | Q(status='running', lease_expires_at__gt=timezone.now()))
             if (active.filter(user=user).count() >= MAX_ACTIVE_PER_OWNER
                     or active.count() >= MAX_ACTIVE_TOTAL):
@@ -398,6 +436,170 @@ def start_translation(user, news_id, *, model_config_id, request_id, billing_con
             transaction.on_commit(lambda: _dispatch(task.pk, task.generation))
             return task, True
     return durable._retry_task_database_operation(admit, stage='byok_admission')
+
+
+def _translation_fingerprint(frozen):
+    fingerprint_data = dict(frozen)
+    fingerprint_data['model'] = {
+        key: value for key, value in frozen['model'].items()
+        if key not in {'preference_revision', 'selected_by'}
+    }
+    return sha256(json.dumps(
+        fingerprint_data, sort_keys=True, ensure_ascii=False,
+    ).encode()).hexdigest()
+
+
+def cancel_translation(user, task_id, *, generation):
+    if type(generation) is not int or generation < 1:
+        raise TranslationError('invalid_request', 400)
+
+    def persist():
+        with transaction.atomic():
+            lock_owner(user.pk)
+            task = _query(user.pk).filter(pk=task_id).first()
+            if task is None:
+                raise TranslationError('not_found', 404)
+            if task.generation != generation:
+                raise TranslationError('translation_request_conflict')
+            if task.status not in {'queued', 'running'}:
+                # A repeat cancel is idempotent; if commit won the race, return
+                # its terminal state rather than falsely reporting cancellation.
+                return task
+            now = timezone.now()
+            changed = _query(user.pk).filter(
+                pk=task.pk, generation=generation, status=task.status,
+                run_token=task.run_token,
+            ).update(
+                status='cancelled', run_token=None, lease_expires_at=None,
+                shared_lease_task_id=None, shared_lease_token=None,
+                error_code='translation_cancelled',
+                error_message='已取消；已派发的供应商请求仍可能产生费用。',
+                finished_at=now, updated_at=now,
+            )
+            if not changed:
+                current = _query(user.pk).filter(pk=task.pk).first()
+                if current is None:
+                    raise TranslationError('not_found', 404)
+                if current.generation == generation and current.status not in {'queued', 'running'}:
+                    return current
+                raise TranslationError('translation_request_conflict')
+            return _query(user.pk).get(pk=task.pk)
+    try:
+        # Cancellation is an owner-scoped write. The HTTP endpoint returns only
+        # a redacted receipt, never the task's private progress or result.
+        return durable._retry_task_database_operation(persist, stage='byok_cancel')
+    except OperationalError as exc:
+        if durable._is_task_sqlite_lock(exc):
+            raise TranslationError('task_storage_busy', 503) from None
+        raise
+
+
+def retry_translation(user, task_id, *, model_config_id, request_id, billing_consent):
+    _enabled()
+    if billing_consent is not True:
+        raise TranslationError('billing_consent_required', 400)
+    try:
+        if not isinstance(model_config_id, str) or str(uuid.UUID(model_config_id)) != model_config_id:
+            raise ValueError
+        if not isinstance(request_id, str) or str(uuid.UUID(request_id)) != request_id:
+            raise ValueError
+    except (ValueError, TypeError, AttributeError):
+        raise TranslationError('invalid_request', 400) from None
+
+    def admit():
+        with transaction.atomic():
+            lock_owner(user.pk)
+            previous = _query(user.pk).filter(pk=task_id).first()
+            if previous is None:
+                raise TranslationError('not_found', 404)
+            now = timezone.now()
+            if previous.status == 'running' and (
+                previous.lease_expires_at is None or previous.lease_expires_at <= now
+            ):
+                stale = _query(user.pk).filter(
+                    pk=previous.pk, generation=previous.generation, status='running',
+                    run_token=previous.run_token,
+                ).filter(
+                    Q(lease_expires_at__isnull=True) | Q(lease_expires_at__lte=now)
+                ).update(
+                    status='interrupted', run_token=None, lease_expires_at=None,
+                    error_code='worker_interrupted',
+                    error_message='工作进程状态未知；不会自动重复收费请求。',
+                    finished_at=now, updated_at=now,
+                )
+                if stale:
+                    previous.refresh_from_db()
+                else:
+                    previous = _query(user.pk).get(pk=previous.pk)
+            if previous.status in {'queued', 'running'}:
+                raise TranslationError('translation_request_conflict')
+            if not user.is_active or previous.api_connection_id is None:
+                raise TranslationError('execution_changed')
+
+            news = News.objects.get(pk=previous.news_id)
+            stored = article_snapshot(news, user)
+            require_current(user, stored, full=True)
+            if (stored.canonical_hash != previous.source_hash
+                    or stored.markdown != previous.execution_snapshot.get('markdown')):
+                raise TranslationError('article_source_changed')
+            if (not stored.markdown.strip() or len(stored.markdown) > T06_MAX_INPUT_CHARS
+                    or len(stored.markdown.encode('utf-8')) > T06_MAX_INPUT_BYTES):
+                raise TranslationError('translation_input_budget', 400)
+            selection = resolve_task_model(user, 'full_translation', explicit_model_id=model_config_id)
+            if selection.proxy_alias != ARTICLE_CHAT_SUPPORTED_ALIAS:
+                raise TranslationError('model_unavailable')
+            require_task_model_snapshot(selection, owner_id=user.pk)
+            long_plan = _new_t06_plan(selection, stored.markdown)
+            credential = capture_at_enqueue(owner=user, connection_id=selection.connection.connection_id)
+            frozen = {
+                'model': asdict(selection), 'credential': credential,
+                'article': _identity(stored), 'markdown': stored.markdown,
+                'target_language': 'zh', 'retry_of': str(previous.pk),
+            }
+            if long_plan is not None:
+                frozen['long_translation'] = long_plan
+            fingerprint = _translation_fingerprint(frozen)
+
+            existing = _query(user.pk).filter(request_id=request_id).first()
+            if existing is not None:
+                if existing.request_hash != fingerprint:
+                    raise TranslationError('translation_request_conflict')
+                # Resolve a repeated idempotency key before the latest-attempt
+                # guard. An explicit repeat may recover a committed queued task
+                # whose post-commit dispatch was lost, but only before its
+                # provider-start marker. Worker claim remains a CAS.
+                if existing.status == 'queued' and not existing.provider_started:
+                    transaction.on_commit(lambda: _dispatch(existing.pk, existing.generation))
+                return existing, False
+
+            latest = _query(user.pk).filter(news_id=previous.news_id).order_by('-queued_at', '-id').first()
+            if latest is None or latest.pk != previous.pk:
+                raise TranslationError('translation_request_conflict')
+
+            if _query(user.pk).filter(
+                news_id=previous.news_id, source_hash=previous.source_hash,
+                status__in=['queued', 'running'],
+            ).exists():
+                raise TranslationError('translation_request_conflict')
+            active = _query().filter(Q(status='queued') | Q(status='running', lease_expires_at__gt=now))
+            if (active.filter(user=user).count() >= MAX_ACTIVE_PER_OWNER
+                    or active.count() >= MAX_ACTIVE_TOTAL):
+                raise TranslationError('translation_queue_full', 429)
+            task = ChatGPTTranslationTask.objects.create(
+                user=user, news=news, api_connection_id=selection.connection.connection_id,
+                connection=None, connection_generation=None,
+                source_hash=stored.canonical_hash, model_slug=selection.model_id,
+                request_id=request_id, request_hash=fingerprint, execution_snapshot=frozen,
+                queued_at=max(now, previous.queued_at + timedelta(microseconds=1)),
+            )
+            transaction.on_commit(lambda: _dispatch(task.pk, task.generation))
+            return task, True
+    try:
+        return durable._retry_task_database_operation(admit, stage='byok_retry_admission')
+    except OperationalError as exc:
+        if durable._is_task_sqlite_lock(exc):
+            raise TranslationError('task_storage_busy', 503) from None
+        raise
 
 
 def _dispatch(task_id, generation):
@@ -491,7 +693,7 @@ def _finish(task_id, generation, token, text, credential, owner_id):
         model = require_task_model_snapshot(_selection(task.execution_snapshot['model']), owner_id=owner_id)
         record = ChatGPTArticleTranslation.objects.create(
             user_id=owner_id, api_connection_id=task.api_connection_id, connection=None,
-            news_id=task.news_id, source_hash=task.source_hash, model_slug=task.model_slug,
+            task=task, news_id=task.news_id, source_hash=task.source_hash, model_slug=task.model_slug,
             content=text, completed_at=timezone.now(),
         )
         result = {'result_id': record.pk, 'task_id': str(task.pk), 'content': text,

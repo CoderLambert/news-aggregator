@@ -50,6 +50,37 @@ class PrivateTranslationTaskView(TranslationView):
         return Response(translation.payload(task))
 
 
+class PrivateTranslationCancelView(TranslationView):
+    def post(self, request, task_id):
+        body = request.data
+        if not isinstance(body, dict) or set(body) != {'generation'} or type(body.get('generation')) is not int:
+            return error('invalid_request')
+        task = translation.cancel_translation(
+            request.user, task_id, generation=body['generation'],
+        )
+        # A cancellation receipt confirms only lifecycle state. Never echo
+        # progress or a private result from this write endpoint.
+        return Response({
+            'task_id': str(task.pk), 'status': task.status,
+            'error_code': task.error_code,
+        })
+
+
+class PrivateTranslationRetryView(TranslationView):
+    def post(self, request, task_id):
+        body = request.data
+        if (not isinstance(body, dict)
+                or set(body) != {'model_config_id', 'billing_consent', 'target_language'}
+                or body.get('target_language') != 'zh'):
+            return error('invalid_request')
+        task, created = translation.retry_translation(
+            request.user, task_id, model_config_id=body.get('model_config_id'),
+            request_id=request.headers.get('Idempotency-Key'),
+            billing_consent=body.get('billing_consent'),
+        )
+        return Response(translation.payload(task), status=202 if created else 200)
+
+
 class PrivateTranslationEventsView(TranslationView):
     def get(self, request, task_id):
         task = translation.get_task(request.user, task_id)
