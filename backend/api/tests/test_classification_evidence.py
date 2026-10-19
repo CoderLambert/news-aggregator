@@ -1,4 +1,5 @@
 import json
+import uuid
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -6,6 +7,10 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.test import override_settings
 from django.utils import timezone
+from rest_framework.test import APIClient
+from api.ai_model_models import UserAIModelConfig
+from api.services.ai_model_probe import ProbeOutcome
+from api.services.channel_model import capture_model
 from api.models import Source, Category, News, ChannelSubscription
 from api.smart_channel_models import ChannelGroupingProposal, ChannelClassifierSettings, SourceTopicProfile
 from api.services.channel_ai import execute_job
@@ -15,7 +20,11 @@ from api.services.classification_evidence import evidence_is_current
 
 
 @pytest.fixture
-def example(db):
+def example(db, settings):
+    settings.PUBLIC_SITE_MODE = "full"
+    settings.PUBLIC_AI_ENABLED = True
+    settings.AI_BYOK_ENABLED = True
+    settings.PROVIDER_CREDENTIAL_ENCRYPTION_KEY = "synthetic-evidence-encryption-only"
     user = get_user_model().objects.create_superuser('evidence-admin', 'evidence@example.test', 'test-only')
     source = Source.objects.create(name='Evidence Source', url='https://example.test')
     category = Category.objects.create(name='evidence category', slug='evidence-category')
@@ -23,12 +32,34 @@ def example(db):
         content='summary', url='https://example.test/article', publish_time=timezone.now())
     ChannelSubscription.objects.create(user=user, source=source)
     ChannelClassifierSettings.objects.create(pk=1, owner=user, enabled=True)
+    client = APIClient()
+    client.force_authenticate(user)
+    connection = client.post('/api/me/ai/connections/', {
+        'provider_id': 'deepseek', 'endpoint_profile': 'deepseek_default',
+        'display_name': 'Evidence test', 'api_key': 'synthetic-evidence-key-never-real',
+        'request_id': str(uuid.uuid4()),
+    }, format='json')
+    assert connection.status_code == 201, connection.content
+    model_base = f"/api/me/ai/connections/{connection.data['id']}/models/"
+    model = client.post(model_base, {'model_id': 'deepseek-chat'}, format='json')
+    assert model.status_code == 201, model.content
+    with patch('api.ai_model_views.send_model_probe', return_value=ProbeOutcome('succeeded')):
+        proof = client.post(model_base + model.data['id'] + '/probe/', {
+            'probe_kind': 'text', 'revision': model.data['config_revision'],
+            'request_id': str(uuid.uuid4()),
+        }, format='json')
+    assert proof.status_code == 200, proof.content
     return user, source, article
 
 
 def job_for(example, public=True):
     user, source, _ = example
+    model = UserAIModelConfig.objects.get(connection__user=user)
+    selection = capture_model(user, scope='site' if public else 'personal', model_config_id=str(model.pk))
+    if public:
+        ChannelClassifierSettings.objects.filter(pk=1).update(execution_snapshot=selection)
     return ChannelGroupingProposal.objects.create(user=user, public_source=source if public else None,
+        execution_snapshot=selection,
         source_ids=[source.pk], topic_keys=['ai'], engine='ai', status='running', attempts=1,
         lease_token='lease', lease_until=timezone.now() + timedelta(minutes=2),
         credential_fingerprint='fixture', input_snapshot=base_profile(source)['evidence_hash'] if public else snapshot(user, [source.pk]),
@@ -40,8 +71,7 @@ def job_for(example, public=True):
 def test_changed_title_before_inference_rejects_without_model_call(example, public):
     job = job_for(example, public)
     News.objects.filter(pk=example[2].pk).update(title='A new title')
-    with patch('api.services.channel_ai.credential_fingerprint', return_value='fixture'), \
-         patch('api.services.channel_ai.personal_clients_for_user') as clients:
+    with patch('api.services.channel_ai.build_gateway_client') as clients:
         execute_job(job)
     job.refresh_from_db()
     assert job.status == 'failed' and job.error_code == 'metadata_changed'
@@ -55,11 +85,10 @@ def test_changed_title_during_inference_cannot_commit_stale_classification(examp
     client = Mock()
     def completion(**kwargs):
         News.objects.filter(pk=example[2].pk).update(title='Changed while model ran')
-        return SimpleNamespace(choices=[SimpleNamespace(finish_reason='stop', message=SimpleNamespace(content=json.dumps({
+        return SimpleNamespace(usage=None, choices=[SimpleNamespace(finish_reason='stop', message=SimpleNamespace(content=json.dumps({
             'channels': [{'source_id': example[1].pk, 'topic_keys': ['ai'], 'reason': 'fixture'}]})))])
     client.chat.completions.create.side_effect = completion
-    with patch('api.services.channel_ai.credential_fingerprint', return_value='fixture'), \
-         patch('api.services.channel_ai.personal_clients_for_user', return_value=[(client, 'fake')]):
+    with patch('api.services.channel_ai.build_gateway_client', return_value=client):
         execute_job(job)
     job.refresh_from_db()
     assert job.status == 'failed' and job.error_code == 'metadata_changed'

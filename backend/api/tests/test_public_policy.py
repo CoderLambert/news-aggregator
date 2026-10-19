@@ -53,6 +53,7 @@ FEATURE_NAMES = {
     "suggested_questions",
     "tts",
     "research",
+    "research_byok_create",
     "provider_comparisons",
     "admin",
     "chatgpt_subscription",

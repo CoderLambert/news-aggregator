@@ -49,7 +49,7 @@ class AIModelProbeAttempt(models.Model):
     credential_version = models.PositiveBigIntegerField()
     endpoint_profile = models.CharField(max_length=48)
     endpoint_profile_version = models.PositiveSmallIntegerField()
-    proxy_alias = models.CharField(max_length=80)
+    proxy_alias = models.CharField(max_length=240)
     provider_request_id = models.CharField(max_length=128, blank=True, default='')
     input_tokens = models.PositiveIntegerField(null=True, blank=True)
     output_tokens = models.PositiveIntegerField(null=True, blank=True)
