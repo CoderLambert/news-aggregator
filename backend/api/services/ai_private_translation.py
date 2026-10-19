@@ -29,8 +29,12 @@ MAX_INPUT_CHARS = 8000
 MAX_INPUT_BYTES = 32000
 MAX_OUTPUT_TOKENS = 8192
 MAX_OUTPUT_CHARS = 32768
-# T06-only capability from DeepSeek's official pricing and Chat API docs.
-# UTF-8 bytes are a conservative request-size guard, not a provider-token guarantee.
+# T06-only capability pinned to DeepSeek's official `deepseek-flash` route.
+# Pricing documents 1M context / 384K output; Chat API docs define total context.
+# Token-usage docs warn character/token ratios vary, so byte and token guards stay separate.
+# Sources: https://api-docs.deepseek.com/quick_start/pricing/
+# https://api-docs.deepseek.com/api/create-chat-completion/
+# https://api-docs.deepseek.com/quick_start/token_usage/
 T06_PROFILE_VERSION = 'deepseek-flash-2026-10-19-v1'
 T06_CHUNKER_VERSION = 'markdown-block-v1'
 T06_PROVIDER_ID = 'deepseek'
@@ -229,7 +233,8 @@ def _markdown_signature(markdown):
         else:
             fenced.append(line)
             if re.match(r'^ {0,3}' + re.escape(marker_char) + r'{' + str(marker_width) + r',}[ \t]*$', line.rstrip('\r\n')):
-                code.append(''.join(fenced))
+                # Ignore only line endings after the closing fence; code payload stays exact.
+                code.append(''.join(fenced).rstrip('\\r\\n'))
                 fenced, marker_char, marker_width = None, None, 0
     if fenced is not None:
         raise TranslationError('incomplete_response')
