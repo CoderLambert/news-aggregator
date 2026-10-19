@@ -1,6 +1,6 @@
 # NewsHub 现行开发任务与合同索引
 
-> **更新于 2026-10-19**；已通过最新主线全量 CI 的代码基线：`main@35017836a4260904bf4c6d0c67d26704cf613322`（[CI #39191215473](https://github.com/CoderLambert/news-aggregator/actions/runs/39191215473) 全部 SUCCESS；随后纯文档提交无需自动 CI）。每次开工仍必须重新读取最新 main。**本文件是当前任务状态唯一入口**；[2026-10-17 原计划和旧批次记录已完整归档](archive/FEATURE-DEVELOPMENT-SNAPSHOT-2026-10-17.md)，其中的“下一批/T01 待完成/旧凭据并存”属于历史快照，不再指导开发。
+> **更新于 2026-10-19**；最新已通过主线适用全量门禁的代码基线：`main@c35d10379684383363f20d9d12abd43168bcb560`（[PR #126 全量 CI #39192213193](https://github.com/CoderLambert/news-aggregator/actions/runs/39192213193) 与 [main Push CI #39192796936](https://github.com/CoderLambert/news-aggregator/actions/runs/39192796936) 均 SUCCESS；`changes`、`backend-and-release-gates`、`merge-gate` 成功；前端作业因后端单域变更被跳过，未计为 PASS；主线隔离 G1 的实际镜像 revision 为 `c35d10379684383363f20d9d12abd43168bcb560`）。每次开工仍必须重新读取最新 main。**本文件是当前任务状态唯一入口**；[2026-10-17 原计划和旧批次记录已完整归档](archive/FEATURE-DEVELOPMENT-SNAPSHOT-2026-10-17.md)，其中的“下一批/T01 待完成/旧凭据并存”属于历史快照，不再指导开发。
 
 ## 1. 当前已验证交付与未完成边界
 
@@ -42,6 +42,12 @@
 - 已确认取消先于最终提交时禁止成功助手记录；已提交则如实返回 `already_completed`。客户端停止等待、服务端确认取消、结果未知必须区分；已经派发的请求不能承诺撤销供应商计费，未知结果不能自动重发。
 - 文章权限/内容及 `policy_versions` 在提交时重查。SQLite BUSY/LOCKED 仅在整笔终态事务已回滚后作有限 DB-only 重试，重查 owner/凭据/文章围栏，不重放 SDK/网络调用；真实逻辑冲突与外层事务不重试。
 
+## 1.2 RSS T11 已合并的最小授权差额（2026-10-19）
+
+[PR #126](https://github.com/CoderLambert/news-aggregator/pull/126) 将 Miniflux 正文来源映射绑定到当前文章 URL：仅当 `EngineEntryMap.source_url = News.url` 且原有 entry/binding 身份均匹配时，当前正文来源才授权读取。新增负例先证明经标准化的有效 URL 仍返回全文；随后只改 `News.url`、保留旧 entry 映射与已接受正文来源，访问被拒并退化为 summary（无 provenance/body owner）。legacy-origin 读取保持不变；仅修改 `backend/api/rss/access.py` 与 `backend/api/tests/rss/test_access_contract.py`，无模型或迁移变更。head `e845f06e511433701f90bf1affa15cff924a4376`，Squash 合并为 `c35d10379684383363f20d9d12abd43168bcb560`。
+
+验证：[PR 全量 CI #39192213193](https://github.com/CoderLambert/news-aggregator/actions/runs/39192213193) 与 [main Push CI #39192796936](https://github.com/CoderLambert/news-aggregator/actions/runs/39192796936) 均 SUCCESS；主线后端 xdist 覆盖 `2538 passed / 16 skipped`（2554 个测试身份对账、无重试），T00 SDK/Proxy `239/239 PASS`，生产镜像与隔离 G1 PASS，G1 核实实际 revision 为 `c35d10379684383363f20d9d12abd43168bcb560`。两次 run 的前端作业均为 SKIPPED，不能记作前端 PASS。真实 RSS/Miniflux、生产切源及真实浏览器/来源 UAT `NOT_RUN`；此项仅证明最小 URL 绑定差额，不代表 T11 全部合同已验收。
+
 ## 2. 第 8 批实施状态与后续候选（最多两个独立写入目标）
 
 | 顺序 | 原编号与目标 | 需要完成的真正差额 | 阶段验收 |
@@ -49,7 +55,7 @@
 | 第 8 批 A（离线交付已合并） | **BYOK T04 个人模型新闻问答** | T03 + T01 已接入文章阅读器和 per-turn 问答；取消/流式与提交围栏差额由 #118 完成，证据见上；真实验收仍独立保留 | 用户/文章版本/模型尝试/取消/重试负例及 SDK→本地 Proxy→合成上游通过；真实付费上游/UAT `NOT_RUN` |
 | 第 8 批 B（差额已合并） | **RSS T09 正文/元数据写入一致性差额** | 先核对当前正文版本、主来源/非主写入、同正文元数据变化与重试提交围栏；仅补实际代码与合成回归 | SQLite 版本/内容读取/安全负例、RSS 原验收矩阵 A09；不提前切源 |
 | 后续 | BYOK T05–T12 | `NOT_COMPLETE/NEEDS_AUDIT`；T04 稳定集成后再分别实现私人翻译、研究、恢复、推荐与用量 | 不将旧 PR #33–#45 直接合入；保留业务授权与终态 |
-| 后续 | RSS T11/T14/T27 | `NEEDS_AUDIT`；已有引擎同步/正文权限/AI 消费代码，待核对依赖与最小差额，不重新发明编号 | 正文版本、权限、消费一致性、任务恢复及相关测试 |
+| 后续 | RSS T11/T14/T27 | T11 的 Miniflux URL 来源绑定最小差额 `IMPLEMENTED / TESTED`（#126）；原 T11/A08 全面授权矩阵与 T14 AI/TTS 本地上下文和译文版本读回仍 `NEEDS_AUDIT`；T27 真实来源/浏览器联合最终验收 `NOT_RUN` | 按原 T11/A08、T14/A11 与 T27/A15 合同继续核验权限、版本、撤权、消费一致性、真实来源与浏览器流；合成 CI/G1 不等于正式验收 |
 | 后续 | AG-03–AG-07 | `NEEDS_AUDIT`；已有 UI、人工审核和队列等部分代码，不能因存在组件就声明完成 | 按 AG 合同逐项核查 |
 | 统一最终验收 | RSS T18/T24/T26/T27/T29–T33、BYOK T13/T14、AG-00/07、NH28–NH31 | `NOT_RUN` 的真实厂商、生产数据迁移、真实来源、容量、浏览器/移动端 UAT | 不以合成 G1/SSE 冒充正式生产与真实流式验收 |
 
