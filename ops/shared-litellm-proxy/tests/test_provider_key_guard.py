@@ -610,5 +610,67 @@ class NativeParserPatch(unittest.TestCase):
 
 
 
+class NonstreamRawTerminalEvidence(unittest.TestCase):
+    def invoke(self, raw, *, normalized='stop', version='1.105.0', forged=False,
+               log_event='post_api_call', native=False, stream=False):
+        class ModelResponse:
+            def __init__(self):
+                self.choices = [SimpleNamespace(finish_reason=normalized)]
+
+        class Logging:
+            def __init__(self):
+                self.model_call_details = {'original_response': raw, 'log_event_type': log_event}
+
+        litellm = ModuleType('litellm')
+        litellm.__path__ = []
+        litellm.ModelResponse = ModelResponse
+        core = ModuleType('litellm.litellm_core_utils')
+        core.__path__ = []
+        logging_module = ModuleType('litellm.litellm_core_utils.litellm_logging')
+        logging_module.Logging = Logging
+        response = SimpleNamespace() if native else ModelResponse()
+        logging_object = {'original_response': raw} if forged else Logging()
+        modules = {'litellm': litellm, 'litellm.litellm_core_utils': core,
+                   'litellm.litellm_core_utils.litellm_logging': logging_module}
+        with patch.dict(sys.modules, modules), patch.object(guard.importlib.metadata, 'version', return_value=version):
+            callback = getattr(guard.ProviderKeyGuard(), 'async_post_call_success_hook', None)
+            if callback is None:  # CustomLogger's existing default is a pass-through.
+                return response
+            result = asyncio.run(callback(data={'stream': stream, 'litellm_logging_obj': logging_object},
+                user_api_key_dict=SimpleNamespace(), response=response))
+            self.assertIs(result, response)
+            return result
+
+    def test_explicit_raw_stop_and_tool_terminal_are_preserved(self):
+        self.invoke('{"choices":[{"finish_reason":"stop"}]}')
+        self.invoke('{"choices":[{"finish_reason":"tool_calls"}]}', normalized='tool_calls')
+        self.invoke('{"choices":[{"finish_reason":"length"}]}', normalized='length')
+
+    def test_missing_or_invalid_raw_terminal_cannot_be_normalized_into_success(self):
+        for raw in (
+            None, 'not-json', '{}', '[]', '{"choices":[]}',
+            '{"choices":[{}]}', '{"choices":[{"finish_reason":null}]}',
+            '{"choices":[{"finish_reason":"length"}]}',
+            '{"choices":[{"finish_reason":"tool_calls"}]}',
+            '{"choices":[{"finish_reason":"stop"},{"finish_reason":"stop"}]}',
+            '{"error":{"code":"synthetic"},"choices":[{"finish_reason":"stop"}]}',
+            '{"choices":[{"finish_reason":"stop","finish_reason":null}]}',
+        ):
+            with self.subTest(raw=raw):
+                with self.assertRaises(guard.HTTPException) as raised:
+                    self.invoke(raw)
+                self.assertEqual(raised.exception.status_code, 502)
+
+    def test_unknown_version_forged_log_or_unfinished_call_has_no_proof(self):
+        raw = '{"choices":[{"finish_reason":"stop"}]}'
+        for extra in ({'version': 'other'}, {'forged': True}, {'log_event': 'pre_api_call'}):
+            with self.subTest(extra=extra), self.assertRaises(guard.HTTPException):
+                self.invoke(raw, **extra)
+
+    def test_native_protocols_and_existing_stream_guard_are_unchanged(self):
+        self.invoke(None, native=True)
+        self.invoke(None, stream=True)
+
+
 if __name__ == "__main__":
     unittest.main()

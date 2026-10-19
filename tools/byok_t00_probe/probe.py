@@ -225,6 +225,14 @@ def main(argv: list[str] | None = None) -> int:
             check("T00-02", f"{source}_{upper}_INCOMPLETE", result.get("terminal") == expected, result)
             expect_receipt(source, f"T00_{source}_{upper}_INCOMPLETE_A", 1)
 
+            if via_proxy and protocol == "chat":
+                marker = "T00_PROXY_CHAT_NO_FINISH_A"
+                result = call(protocol, url, sdk_key, marker, via_proxy=True,
+                              provider_key=keys["tenant-a"])
+                check("T00-02", "PROXY_CHAT_RAW_TERMINAL_MISSING",
+                      result.get("success") is False and result.get("status_code") == 502, result)
+                expect_receipt(source, marker, 1, terminal="missing_finish_reason")
+
             errors = cases.run_protocol_error_cases(base, protocol, f"T00_{source}_{upper}", sdk_key, provider_key=keys["tenant-a"], via_proxy=via_proxy, cases=("HTTP_ERROR", "TIMEOUT", "TRUNCATED"))
             for kind, result in errors.items():
                 check("T00-03", f"{source}_{upper}_{kind.upper()}", result.get("success") is False, result)

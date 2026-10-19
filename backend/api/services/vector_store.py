@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import chromadb
+from chromadb.errors import NotFoundError
 
 from .embedding import EmbeddingService
 
@@ -189,4 +190,11 @@ class VectorStoreService:
 
     def count(self, *, collection_name=None):
         with self._data_lock():
-            return self.get_collection(collection_name, create=False).count()
+            try:
+                return self.get_collection(collection_name, create=False).count()
+            except NotFoundError:
+                # Cold readers can use the authorized keyword branch before an
+                # index exists. Explicit rebuild/management identities stay strict.
+                if collection_name is not None:
+                    raise
+                return 0

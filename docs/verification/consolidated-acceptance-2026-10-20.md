@@ -29,8 +29,44 @@
 
 ## 后续验收边界
 
-最终镜像、隔离 G1 与新授权的 DeepSeek 有界调用尚待完成。其他厂商真实 Key、来源质量/许可判断、人工产品体验与延期的生产门禁仍须分别列明，不能以此报告替代。生产切换、停止旧角色及依赖该前置的旧栈删除继续延期。
+最终镜像与隔离 G1 已通过（见下），Django/Proxy 联合检查及新授权的 DeepSeek 有界调用仍待完成。其他厂商真实 Key、来源质量/许可判断、人工产品体验与延期的生产门禁仍须分别列明，不能以此报告替代。生产切换、停止旧角色及依赖该前置的旧栈删除继续延期。
 
 缓存浏览器来源固定为现有 CI 镜像 `sha256:666633c9799531b12f4be1525bf6679040a89b52fe0d1efa3e0e9a33923faae6`；缓存版 probe 镜像 ID 为 `sha256:10be5998a22e7b6ee23692f46f63a8e3be267af67d9f3f887ab17935864ee775`。临时 Dockerfile 和构建日志保留在验收目录，仓库正式构建入口不变。
 
 T00 使用独立新建的 Python 3.12.14 SDK/Proxy 环境，按原两份锁文件安装，未修改共享依赖。依赖准备完成后以 Node 22.23.3 重新生成并确认 Prisma；协议运行清空继承环境，只连接临时本地服务。原始结果为 `/tmp/newshub-t00-acceptance-20261020/report.json`，日志 `t00-full.log`。原报告明确保留历史镜像/验签、真实 Provider 和 UAT 为 NOT_RUN，239 项通过不替代这些门禁。
+
+## 合并后候选与隔离浏览器验收
+
+修复已由 [PR #152](https://github.com/CoderLambert/news-aggregator/pull/152) 合并，运行时验收 SHA 为 `36c24dc65bff80679ea6ad14d8741969a29b6929`。该合并树与已运行完整后端及 T00 检查的 PR head `68f6e00a9f9af9ccf6358e6643d31e0b824124c8` 无文件差异。原工作区仅合并更新代码，原 SQLite 与两份独立文档保留。
+
+- 生产目标镜像 `newshub:accept-36c24dc` 构建退出 0，镜像 ID `sha256:60e7db9e521e33b23d44019229fd1ead1ceb3257ac95af32592b4dd870d7cfe3`，revision 为上述精确 SHA，运行用户 `10001:10001`。日志 `production-image-36c24dc.log`。
+- 原 `scripts/deploy/local-domain-smoke.sh --execute` 使用该镜像、固定 Nginx digest 和前述缓存版 probe，退出 0。实际浏览器首页/新闻深链、Mermaid、TLS 错误证书拒绝、CSRF、只读权限、静态资源/404、数据库迁移及健康检查通过；合成 SSE 首帧 9ms、总耗时 1010ms，不能当作真实模型流式指标。
+- 最终报告 `/tmp/newshub-acceptance-703af0f/fixed-tmp/newshub-local-domain-report-36c24dc65bff80679ea6ad14d8741969a29b6929.ILcTS4/report.json` 在脚本退出后确认 `status=PASS`、`cleanup_status=PASS`。按本次随机 Compose project 查询，容器、网络和卷均已清理。
+- G1 为隔离合成环境，不能替代 full 模式账户/新功能 UAT、Django WSGI 实际客户端地址、真实 Provider 或生产验收。正式 CI 的标准浏览器下载问题仍保留，缓存版通过没有改记该次标准构建为 PASS。
+
+## 联合链路发现的流式统计尾帧差额
+
+`36c24dc` 的 G1 只证明只读/合成 SSE；另跑原 `t04_django_localproxy.py` 时，正常问答先收到文字却最终失败。定向只记录帧结构/异常类型，确认固定 Proxy 在 `stop` 后发送 `choices=[{index:0, delta:空, finish_reason:null}]` 的 usage 帧；业务验证器只接受 `choices=[]` 的 usage 帧，在后续空 choice 处拒绝。原失败日志 `t04-proxy-36c24dc-mounted-python.log` 与结构诊断 `t04-diagnostic-frames.log` 保留，没有输出提示/Key。
+
+- 新官方 SDK frame 回归修复前 1 failed / 11 passed（`stream-trailer-red.log`）；修复后该组 12 passed（`stream-trailer-green.log`）。另补统计尾帧后发生传输错误仍须失败的用例，共 13 项已纳入下述完整矩阵。仅接受已见严格 stop、index=0、无内容/角色/工具/拒绝/思考字段的一次统计尾帧；继续消费到干净 EOF，缺 stop、重复统计、后续文字/工具/思考、错误 index/终态继续拒绝。原 Proxy guard、路由限制和取消/提交围栏未改。
+- 联合流程随后暴露旧研究夹具把字符串 UUID 直接传给期望 serializer 已解析数据的内部保存函数。夹具现走实际偏好 PATCH，保留原授权与响应断言，没有扩大服务层接受范围。
+- 同一联合流程曾在翻译进度 GET 返回 503；单独验证原 pytest 环境实际为 `memory / journal=memory`（`t04-database-mode.log`），不符合应用文件 WAL 的并发运行方式。该联合测试现独占临时文件库，并强制断言文件存在、journal_mode=wal；不改应用数据库配置或为 503 增加忽略/重试。原失败记录保留，不能把切换测试数据库记作已定位所有可能的 SQLite 竞争。
+
+本节的修复尚在验证，不能由先前的完整矩阵/G1 成功推导当前联合链路已通过。
+
+研究工具往返进一步复现未建向量索引时的 `NotFoundError`：默认 hybrid 的关键词分支已有结果逻辑，但 `count()` 在集合尚不存在时抛错，中止整次工具调用。使用实际 Chroma 1.5.9 新目录复现，修复前 1 failed / 1 passed，修复后 2 passed；集合始终未被读取创建。默认 count 对缺集合返回 0，显式指定的管理/重建集合仍抛 NotFoundError，其他存储错误仍传播。关键词/semantic/hybrid 和索引恢复的既有授权逻辑未替换，后续完整回归必须覆盖这些消费者。日志 `vector-cold-red.log`、`vector-cold-green.log`。
+
+后续使用文件 WAL 的完整联合流程已越过问答、取消、T05/T06 翻译与 T09 正常工具往返；但在原 T09 `NO_FINISH` 负例中，原始上游 JSON 没有 finish_reason，研究却被记为 succeeded。该轮仍为 **FAIL：1 failed / 2 passed**，日志 `t04-file-wal-cold-index-green.log`。这是待修复的原始终态证明问题，不能修改预期为成功、仅依赖 LiteLLM 归一化后的 stop，或以其它矩阵通过覆盖。新的 DeepSeek 真实调用继续等待这条负例修复。
+
+上述统计尾帧/冷索引修复后的三根完整矩阵退出 0：串行 85 passed，并行 2601 passed / 16 skipped；总计 **2686 passed / 16 skipped，2702 个收集/执行身份完全对账**。原始日志 `backend-stream-vector-full.log`，单轮 187 秒，无测试重试。它证明这批源代码回归范围；独立 Django/Proxy 联合负例仍 FAIL，尚不能 Ready/发布或宣称研究终态合同通过。
+
+## 原始非流式终态修复与复核
+
+在后续批次中，现有 `ProviderKeyGuard.async_post_call_success_hook` 验证固定 LiteLLM 1.105.0 的实际请求私有 `Logging` 对象与其原始响应 JSON；拒绝缺失/空终态、重复 JSON 字段、错误响应、多候选、与归一化结果不一致的终态，以及未知版本、伪造字典或未完成调用记录。只返回静态错误代码，不记录原文/Key。明确的 length/content_filter 等原始非成功终态保留，由原业务层拒绝；不新增厂商 adapter、直连或付费重试。
+
+- Guard 定向单元：修复前 31 个测试中有 15 个负例 subtest 失败；修复后 31 个测试通过。日志 `raw-completion-guard-red.log`、`raw-completion-guard-preserve-length.log`。整个 shared gateway 静态/CLI/guard pytest 共 35 passed，日志 `shared-gateway-tests-final.log`。
+- 第一版 guard 过度拒绝已明确给出 length 的响应，原 T00 检查如实报 238 passed / 1 failed（`t00-raw-terminal-proof.log`）。修正为保留已证明的非成功终态后，原 239 项全部通过，没有改旧截断断言。新增通用 Chat alias 的缺原始终态拒绝及上游恰好一次派发验证，最终 **241 / 241 PASS**，日志 `t00-raw-terminal-generic.log`，报告 `/tmp/newshub-t00-acceptance-20261020/raw-terminal-generic-report.json`。
+- 原 Django/SDK/Proxy 联合流程 **3 passed**；再新增明确 length 的研究负例，验证真实 raw finish_reason=length 存在、SDK保留该状态、研究仍失败且无完成事件/会话报告，最终 **3 passed in 30.07s**（`t04-raw-terminal-length-evidence.log`）。原上游脱敏 recorder 补齐 length 的事实字段；缺终态等旧负例断言不变。
+- 固定 digest 的真实容器镜像已跑原 T00-G 合成运维流程，**26 checks PASS**，包含两项目 Key、路由隔离、日志、重启、备份恢复与清理；零真实 Provider。日志 `t00g-fixed-image-raw-terminal.log`。新增该镜像缺原始终态/恰好一次请求/错误不泄密的用例后，**28 checks PASS、退出 0、cleanup=0**（`t00g-fixed-image-negative-terminal.log`）：HTTP 502，上游从 2 次变 3 次，确认为恰好一次派发，无秘密/提示泄漏。没有以 Python Proxy 进程结果代替镜像级结果。
+
+上述当前结果修复了前节 NO_FINISH 的误成功；最终合并后镜像/G1 与有界 DeepSeek 真实调用仍待继续。正式 GitHub CI、生产和人工 UAT 继续分别保留状态。

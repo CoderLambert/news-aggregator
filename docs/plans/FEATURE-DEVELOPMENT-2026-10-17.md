@@ -183,6 +183,18 @@ RSS T14 已合并 [#142](https://github.com/CoderLambert/news-aggregator/pull/14
 - 五项 AG 老 fixture 改为真实连接/显式探针/选择快照，并在当前 gateway 边界注入合成响应；保留标题证据更新前零调用、更新中不得提交与目录 GET 无副作用断言。公共 capability schema 和研究关闭/hosted 双门禁分别按现行合同补齐，未放宽授权。
 - 完整前端 105 文件/730 用例、typecheck/lint/build，CI 工具 50 用例与依赖锁 160 项通过；完整后端 2671 passed / 16 skipped（2687 个身份对账）、T00 SDK/Proxy 合成 239/239 通过；最终镜像和隔离 G1 的当前状态、首轮失败及环境修正见[集中验收记录](../verification/consolidated-acceptance-2026-10-20.md)。GitHub 两个 runner 当前 offline，实际 CI 不能记为通过。真实 Provider、生产和人工结论继续独立记录。
 
+### BYOK T04/T05/T09 联合验收的统计尾帧与冷索引差额（2026-10-20）
+
+- 继续在 `main@36c24dc` 上运行原 Django→SDK→固定 LiteLLM→合成上游联合流程，发现正常 stop 后的空 choice usage 帧被业务验证器误拒绝。官方 SDK frame 回归先失败复现后修正；仅允许已验证 stop 后的一次精确空统计尾帧，仍消费到干净 EOF，不放宽 Proxy guard、收费次数或路由。
+- 研究工具默认 hybrid 在无向量集合的首次启动抛 NotFoundError；实际新 Chroma 目录先失败复现，现默认读取按 0 计数，继续已有授权关键词路径。显式管理/重建集合缺失及其他存储故障继续报错，不自动创建集合或新增搜索服务。
+- 联合夹具改走真实用途偏好 PATCH，并使用独占文件 WAL 库、明确断言文件与 journal_mode；原进度/工具往返/取消/截断/零重发断言保留。当前修复与失败/通过证据见[集中验收记录](../verification/consolidated-acceptance-2026-10-20.md)，此批三根完整回归 2686 passed / 16 skipped、2702 身份对账通过；独立联合流程发现缺失原始 finish_reason 被误判成功，后续按下节修复并保留首次 FAIL，真实 Provider 尚未开始。
+
+### BYOK T00/T09 原始非流式终态证明（2026-10-20）
+
+- 现有 LiteLLM 归一化会给缺原始 finish_reason 的 Chat 响应补默认 stop，联合研究负例已真实复现误成功。复用固定版本的成功回调与请求私有原始响应记录，在归一化结果进入业务前校验原始终态、来源、单候选和一致性；未知/伪造记录、重复 JSON 字段与缺终态失败关闭，错误只含静态代码。
+- 明确 length 等非成功终态原样保留，业务继续拒绝保存；不修改旧 T00 截断期望、不扩展厂商适配器或放宽流式 guard。通用 Chat alias 缺终态、DeepSeek 研究缺终态与 length 均有实际 SDK/Proxy 负例。
+- 最新 T00 SDK/Proxy 241/241、Django 联合 3 项、共享网关 35 项通过；固定 digest 镜像 T00-G 含缺终态/恰好一次派发/错误脱敏共 28 项通过；后续最终候选与真实验收见[集中记录](../verification/consolidated-acceptance-2026-10-20.md)。GitHub CI 与生产未执行。
+
 | 顺序 | 原编号与目标 | 需要完成的真正差额 | 阶段验收 |
 |---|---|---|---|
 | 第 8 批 A（离线交付已合并） | **BYOK T04 个人模型新闻问答** | T03 + T01 已接入文章阅读器和 per-turn 问答；取消/流式与提交围栏差额由 #118 完成，证据见上；真实验收仍独立保留 | 用户/文章版本/模型尝试/取消/重试负例及 SDK→本地 Proxy→合成上游通过；真实付费上游/UAT `NOT_RUN` |

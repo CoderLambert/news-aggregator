@@ -34,6 +34,19 @@ def verified_text_deltas(stream, *, check, max_chars):
         if any(getattr(delta, name, None) for name in ('tool_calls', 'function_call', 'refusal')):
             raise IncompleteStream('incomplete_response')
         content = getattr(delta, 'content', None)
+        # The pinned Proxy can normalize its usage-only trailer into one empty
+        # choice. It is metadata only after a real stop, never a new terminal.
+        index = getattr(choice, 'index', None)
+        if (saw_stop and reason is None and getattr(frame, 'usage', None) is not None
+                and type(index) is int and index == 0 and delta is not None
+                and all(getattr(delta, name, None) is None for name in (
+                    'content', 'role', 'tool_calls', 'function_call', 'refusal',
+                    'reasoning_content', 'reasoning',
+                ))):
+            if usage_seen:
+                raise IncompleteStream('incomplete_response')
+            usage_seen = True
+            continue
         if content is not None:
             if saw_stop or not isinstance(content, str):
                 raise IncompleteStream('incomplete_response')
