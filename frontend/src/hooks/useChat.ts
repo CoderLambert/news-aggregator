@@ -9,6 +9,7 @@ import {
 } from '@/services/chatHistoryReconciliation'
 import {
   chatStream,
+  cancelChatTurn,
   clearChatHistory,
   fetchChatHistory,
   parseWebSources,
@@ -33,6 +34,8 @@ interface PendingTurn {
   assistant: ChatMessage
   status: 'streaming' | 'uncertain'
   webSearch: boolean
+  modelConfigId: string | null
+  serverTurnId: string | null
   historyBoundary: ChatMessage[] | null
   historyBoundaryData: ChatHistory | undefined
   reconciliation: ReconciliationState
@@ -46,6 +49,8 @@ interface ActiveRequest {
   user: ChatMessage
   assistant: ChatMessage
   webSearch: boolean
+  modelConfigId: string | null
+  serverTurnId: string | null
   historyBoundary: ChatMessage[] | null
   historyBoundaryData: ChatHistory | undefined
 }
@@ -59,6 +64,7 @@ interface ClearChatState {
 const ASSISTANT_ERROR = '抱歉，我遇到了一些问题，请稍后再试。'
 const STOPPED_MESSAGE = '已停止接收本页更新。正在只读核对服务器记录。'
 const CLEAR_ERROR = '清空失败，原有聊天记录仍保留。请检查网络后重试。'
+const CLEAR_CANCEL_UNKNOWN_ERROR = '无法确认服务端是否已停止本轮，因此未清空聊天记录；请求可能仍在处理或已产生费用。请先核对本轮状态。'
 const SUCCESS_DURATION_MS = 1500
 const META_MARKER = '__META__'
 let nextTurnId = 0
@@ -86,6 +92,21 @@ function readMetaTurnStatus(value: string): 'complete' | 'failed' | undefined {
   return undefined
 }
 
+function readMetaModel(value: string): ChatMessage['model_source'] {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (typeof parsed !== 'object' || parsed === null || !('type' in parsed) ||
+        parsed.type !== 'chat_model' || !('model_source' in parsed)) return undefined
+    const source = parsed.model_source
+    if (typeof source === 'object' && source !== null && 'provider' in source && 'model' in source &&
+        typeof source.provider === 'string' && typeof source.model === 'string' &&
+        source.provider.length <= 32 && source.model.length <= 64) {
+      return { provider: source.provider, model: source.model }
+    }
+  } catch { /* malformed model metadata never authorizes a completed turn */ }
+  return undefined
+}
+
 function readMetaContext(value: string): ChatMessage['context_scope'] {
   try {
     const parsed: unknown = JSON.parse(value)
@@ -106,6 +127,7 @@ function consumeMetaFrame(
   onSources: (sources: NonNullable<ReturnType<typeof parseWebSources>>) => void,
   onScope?: (scope: NonNullable<ChatMessage['context_scope']>) => void,
   onTurnStatus?: (status: 'complete' | 'failed') => void,
+  onModelSource?: (source: NonNullable<ChatMessage['model_source']>) => void,
 ): string {
   let remaining = buffered + chunk
   while (remaining) {
@@ -136,6 +158,8 @@ function consumeMetaFrame(
     if (scope) onScope?.(scope)
     const turnStatus = readMetaTurnStatus(remaining.slice(META_MARKER.length, end))
     if (turnStatus) onTurnStatus?.(turnStatus)
+    const model = readMetaModel(remaining.slice(META_MARKER.length, end))
+    if (model) onModelSource?.(model)
     remaining = remaining.slice(end + META_MARKER.length)
     if (remaining.startsWith('\r\n\r\n')) remaining = remaining.slice(4)
     else if (remaining.startsWith('\n\n')) remaining = remaining.slice(2)
@@ -151,6 +175,8 @@ function snapshotActiveRequest(request: ActiveRequest): PendingTurn {
     assistant: request.assistant,
     status: 'uncertain',
     webSearch: request.webSearch,
+    modelConfigId: request.modelConfigId,
+    serverTurnId: request.serverTurnId,
     historyBoundary: request.historyBoundary,
     historyBoundaryData: request.historyBoundaryData,
     reconciliation: 'checking',
@@ -158,7 +184,8 @@ function snapshotActiveRequest(request: ActiveRequest): PendingTurn {
   }
 }
 
-export function useChat(newsId: string | number | null | undefined, enabled: boolean) {
+export function useChat(newsId: string | number | null | undefined, enabled: boolean,
+  modelConfigId: string | null = null, billingConsent = false) {
   const queryClient = useQueryClient()
   const { user, loading: authLoading } = useAuth()
   const { lang } = useLanguage()
@@ -246,6 +273,11 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       const request = requestRef.current
       requestRef.current = null
       request.controller.abort()
+      // Unmounting only stops browser receive. Best-effort server cancellation
+      // fences a paid turn when this tab disappears; failure remains unknown.
+      if (request.serverTurnId && parsedId !== null && ownerRef.current === ownerKey) {
+        void cancelChatTurn(parsedId, request.serverTurnId).catch(() => {})
+      }
       const interrupted = snapshotActiveRequest(request)
       interrupted.reconciliation = 'unconfirmed'
       const pending = pendingTurnRef.current
@@ -276,7 +308,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       }
     }
     if (successTimerRef.current) clearTimeout(successTimerRef.current)
-  }, [ownerKey])
+  }, [ownerKey, parsedId])
 
   // Apply both explicit rechecks and later Query snapshots against the original turn boundary.
   const applyHistoryReconciliation = useCallback((snapshot: PendingTurn, history: ChatHistory) => {
@@ -365,6 +397,13 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     if (successTimerRef.current) clearTimeout(successTimerRef.current)
     const previousTurn = currentTurn
     const reuseTurn = Boolean(explicitlyResending && previousTurn?.status === 'uncertain')
+    const selectedForTurn = reuseTurn ? previousTurn?.modelConfigId ?? null : modelConfigId
+    // Never switch the model for a paid ambiguous request while replaying it.
+    if ((reuseTurn && selectedForTurn !== modelConfigId) || (selectedForTurn && !billingConsent)) {
+      return Promise.resolve(false)
+    }
+    // An explicitly retried billable attempt receives a new one-shot UUID.
+    const serverTurnId = selectedForTurn ? crypto.randomUUID() : null
     const turnId = reuseTurn && previousTurn ? previousTurn.id : `chat-turn-${++nextTurnId}`
     const userMessage: ChatMessage = reuseTurn && previousTurn
       ? previousTurn.user
@@ -372,7 +411,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     const assistantMessage: ChatMessage = reuseTurn && previousTurn
       ? { ...previousTurn.assistant, content: '', web_sources: undefined }
       : { id: `${turnId}-assistant`, role: 'assistant', content: '' }
-    const webSearch = currentWebSearch
+    const webSearch = Boolean(currentWebSearch && !selectedForTurn)
     if (webSearch) assistantMessage.web_search = true
     const historyAtSend = queryClient.getQueryData<ChatHistory>(historyKey)
     const turn: PendingTurn = {
@@ -382,6 +421,8 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       assistant: assistantMessage,
       status: 'streaming',
       webSearch,
+      modelConfigId: selectedForTurn,
+      serverTurnId,
       historyBoundary: copyChatHistoryBoundary(historyAtSend?.messages),
       historyBoundaryData: historyAtSend,
       reconciliation: 'idle',
@@ -397,6 +438,8 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       user: userMessage,
       assistant: assistantMessage,
       webSearch,
+      modelConfigId: selectedForTurn,
+      serverTurnId,
       historyBoundary: turn.historyBoundary,
       historyBoundaryData: turn.historyBoundaryData,
     }
@@ -415,7 +458,11 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
         updatePendingTurn(turnId, (current) => ({ ...current, assistant: { ...current.assistant, context_scope: scope } }))
       }
       try {
-        for await (const chunk of chatStream(parsedId, trimmed, { webSearch, signal: request.controller.signal })) {
+        for await (const chunk of chatStream(parsedId, trimmed, {
+          webSearch, ...(selectedForTurn ? { modelConfigId: selectedForTurn, billingConsent,
+            turnId: serverTurnId ?? undefined } : {}),
+          signal: request.controller.signal,
+        })) {
           if (!isCurrent()) return false
           if (firstChunk) {
             firstChunk = false
@@ -433,6 +480,12 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
             },
             applyScope,
             (status) => { terminalStatus = status },
+            (source) => {
+              request.assistant = { ...request.assistant, model_source: source }
+              updatePendingTurn(turnId, (current) => ({
+                ...current, assistant: { ...current.assistant, model_source: source },
+              }))
+            },
           )
           request.assistant = { ...request.assistant, content: accumulated }
           updatePendingTurn(turnId, (current) => ({
@@ -453,6 +506,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
           },
           applyScope,
           (status) => { terminalStatus = status },
+          (source) => { request.assistant = { ...request.assistant, model_source: source } },
         )
 
         // A clean TCP EOF without the server's terminal receipt is not success.
@@ -495,7 +549,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
         if (isCurrent()) requestRef.current = null
       }
     })()
-  }, [authLoading, clearState, currentWebSearch, enabled, historyKey, isLoading, ownerKey, parsedId, pendingTurnState, queryClient, reconcileInterruptedTurn, setInput, setPendingTurn, updatePendingTurn, updatePhase])
+  }, [authLoading, billingConsent, clearState, currentWebSearch, enabled, historyKey, isLoading, modelConfigId, ownerKey, parsedId, pendingTurnState, queryClient, reconcileInterruptedTurn, setInput, setPendingTurn, updatePendingTurn, updatePhase])
 
   const doSend = useCallback((text: string): Promise<boolean> => sendMessage(text), [sendMessage])
   const handleSend = useCallback(() => doSend(inputRef.current), [doSend])
@@ -515,8 +569,28 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     setPendingTurn(uncertainTurn)
     if (!inputRef.current) setInput(request.user.content)
     updatePhase('error')
-    void reconcileInterruptedTurn(uncertainTurn)
-  }, [ownerKey, reconcileInterruptedTurn, setInput, setPendingTurn, updatePhase])
+    // A browser AbortSignal alone cannot fence the backend one-shot send.
+    // Request a durable server acknowledgement before reconciling history.
+    void (async () => {
+      if (request.serverTurnId && parsedId !== null) {
+        try {
+          const outcome = await cancelChatTurn(parsedId, request.serverTurnId)
+          if (ownerRef.current === ownerKey) {
+            updatePendingTurn(request.turnId, current => ({
+              ...current,
+              assistant: {
+                ...current.assistant,
+                content: outcome === 'cancelled'
+                  ? '服务端已确认取消本轮；已经发送的请求仍可能产生费用。'
+                  : '服务端已完成本轮；正在核对已保存的回答。',
+              },
+            }))
+          }
+        } catch { /* Failed/unknown cancellation is never assumed successful. */ }
+      }
+      await reconcileInterruptedTurn(uncertainTurn)
+    })()
+  }, [ownerKey, parsedId, reconcileInterruptedTurn, setInput, setPendingTurn, updatePendingTurn, updatePhase])
 
   const requestClearChat = useCallback(() => {
     if (
@@ -557,8 +631,34 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     }
 
     let cleared = false
+    let cancelOutcomeUnknown = false
     try {
       await queryClient.cancelQueries({ queryKey: historyKey })
+      if (clearRequest.controller.signal.aborted || ownerRef.current !== ownerKey || clearControllerRef.current !== clearRequest) {
+        return false
+      }
+      // Clear only after a durable receipt for a known personal-model turn.
+      // Unknown never means cancelled: leave history and the uncertain turn intact.
+      if (interruptedTurn?.serverTurnId) {
+        try {
+          const outcome = await cancelChatTurn(parsedId, interruptedTurn.serverTurnId)
+          if (clearRequest.controller.signal.aborted || ownerRef.current !== ownerKey ||
+            clearControllerRef.current !== clearRequest) return false
+          interruptedTurn = {
+            ...interruptedTurn,
+            assistant: {
+              ...interruptedTurn.assistant,
+              content: outcome === 'cancelled'
+                ? '服务端已确认取消本轮；已发送请求仍可能产生费用。'
+                : '服务端已完成本轮；正在清空已保存记录。',
+            },
+          }
+          setPendingTurn(interruptedTurn)
+        } catch {
+          cancelOutcomeUnknown = true
+          throw new Error('chat_turn_cancel_unknown')
+        }
+      }
       if (clearRequest.controller.signal.aborted || ownerRef.current !== ownerKey || clearControllerRef.current !== clearRequest) {
         return false
       }
@@ -570,7 +670,8 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       cleared = true
     } catch {
       if (ownerRef.current === ownerKey && clearControllerRef.current === clearRequest) {
-        setClearState({ ownerKey, value: { open: true, clearing: false, error: CLEAR_ERROR } })
+        setClearState({ ownerKey, value: { open: true, clearing: false,
+          error: cancelOutcomeUnknown ? CLEAR_CANCEL_UNKNOWN_ERROR : CLEAR_ERROR } })
         if (interruptedTurn) updatePhase('error')
       }
     } finally {

@@ -259,7 +259,25 @@ jobs:
           "$t00_env/proxy/bin/python" -m pip install --disable-pip-version-check --no-input -r tools/byok_t00_probe/requirements-proxy.lock
           "$t00_env/proxy/bin/python" tools/byok_t00_probe/prepare_proxy.py
           "$t00_env/sdk/bin/python" -m unittest discover -s tools/byok_t00_probe -p 'test_*.py'
+          "$t00_env/sdk/bin/python" -m unittest discover -s ops/shared-litellm-proxy/tests -p 'test_provider_key_guard.py'
           "$t00_env/sdk/bin/python" tools/byok_t00_probe/probe.py --proxy-python "$t00_env/proxy/bin/python" --report "$t00_env/report.json"
+          # Run the Django/API end-to-end proof only in this full, non-Draft
+          # backend gate. The child receives no ambient provider credentials or DB configuration.
+          # Bootstrap obeys production host validation; APIClient test hosts are
+          # scoped by override_settings inside the synthetic test only.
+          mkdir -m 700 "$t00_env/home"
+          env -i PATH="$PATH" HOME="$t00_env/home" TMPDIR="$t00_env" LANG=C.UTF-8 \
+            PYTHONPATH="$GITHUB_WORKSPACE/backend:$GITHUB_WORKSPACE/crawler:$GITHUB_WORKSPACE/tools/byok_t00_probe" \
+            DJANGO_ENV=production DJANGO_DEBUG=0 RUN_MAIN=true \
+            DJANGO_SECRET_KEY=CI-only-synthetic-strong-secret-not-a-credential-9876543210-abcdef \
+            WAITRESS_TRUSTED_PROXY=127.0.0.1 \
+            DJANGO_ALLOWED_HOSTS=news.lambert.host \
+            DJANGO_DB_PATH="$t00_env/t04-django.sqlite3" AI_BYOK_ENABLED=1 \
+            PROVIDER_CREDENTIAL_ENCRYPTION_KEY=CI-only-synthetic-provider-key-material \
+            T00_PROXY_PYTHON="$t00_env/proxy/bin/python" PYTHONDONTWRITEBYTECODE=1 \
+            backend/venv/bin/python -m pytest -c backend/pytest.ini \
+            -o 'python_files=t04_*.py' -q \
+            tools/byok_t00_probe/t04_django_localproxy.py
       - name: Validate release shell syntax and mocked script behavior
         run: |
           bash -n scripts/deploy/smoke.sh scripts/deploy/deploy.sh scripts/deploy/rollback.sh scripts/deploy/backup.sh scripts/deploy/restore.sh scripts/deploy/tests/test_release_scripts.sh

@@ -45,7 +45,8 @@ export type AIModelCapability = 'unknown' | 'supported' | 'unsupported'
 export interface AIModel {
   id: string; connection_id: string; model_id: string; display_name: string; catalog_model_id: string
   config_revision: number; capabilities: { text: AIModelCapability; tools: AIModelCapability }
-  has_trusted_route: boolean; context_window_tokens: number | null; updated_at: string
+  has_trusted_route: boolean; article_chat_supported: boolean
+  context_window_tokens: number | null; updated_at: string
 }
 export interface AIModelCatalogEntry {
   model_id: string; display_name: string; catalog_version: string; context_window_tokens: number | null
@@ -66,8 +67,22 @@ export function listAIModelCatalog(connection: AIConnection, signal?: AbortSigna
   return call<{ catalog_version: string; models: AIModelCatalogEntry[] }>(
     `/me/ai/connections/${connection.id}/model-catalog/`, { signal })
 }
+function parseAIModelList(value: unknown): AIModel[] {
+  if (typeof value !== 'object' || value === null) throw new ConnectionRequestError(0)
+  const models = (value as { models?: unknown }).models
+  if (!Array.isArray(models) || models.some(model => typeof model !== 'object' || model === null)) {
+    throw new ConnectionRequestError(0)
+  }
+  // Older T02 payloads remain usable for model settings/probes, but cannot
+  // opt into T04 unless the server explicitly returns the boolean capability.
+  return models.map(model => ({
+    ...model,
+    article_chat_supported: (model as { article_chat_supported?: unknown })
+      .article_chat_supported === true,
+  })) as AIModel[]
+}
 export async function listAIModels(connection: AIConnection, signal?: AbortSignal) {
-  return (await call<{ models: AIModel[] }>(modelRoot(connection), { signal })).models
+  return parseAIModelList(await call<unknown>(modelRoot(connection), { signal }))
 }
 export function createAIModel(connection: AIConnection, model_id: string, viewer: number, signal?: AbortSignal) {
   return call<AIModel>(modelRoot(connection), { method: 'POST', body: { model_id }, viewer, signal })

@@ -9,6 +9,8 @@ retained. Credentials and request text are never written to records or stdout.
 import hashlib
 import json
 import re
+import select
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -24,10 +26,34 @@ PROJECT_KEY_HASHES = set()
 RECORDS = []
 LOCK = threading.Lock()
 ACTIVE_STREAM_PRODUCERS = 0
+RELEASE_EVENTS = {}
 TEST_ID_PATTERN = re.compile(r"T00_[A-Z0-9_]{3,80}")
 CANCEL_FIXTURE_MAX_SECONDS = 8.0
 CANCEL_FIXTURE_CHUNK_BYTES = 32 * 1024
 CANCEL_FIXTURE_INTERVAL_SECONDS = 0.005
+POST_DONE_PEER_OBSERVE_SECONDS = 4.0
+
+
+def observe_peer_close(connection, timeout):
+    """Return only a direct EOF/reset signal as proof that the peer closed."""
+    if not hasattr(socket, "MSG_DONTWAIT"):
+        return "unsupported"
+    try:
+        readable, _, _ = select.select([connection], [], [], max(0.0, timeout))
+    except (OSError, ValueError):
+        return "socket_error"
+    if not readable:
+        return "timeout"
+    try:
+        payload = connection.recv(1, socket.MSG_PEEK | socket.MSG_DONTWAIT)
+    except ConnectionResetError:
+        return "reset"
+    except BlockingIOError:
+        return "timeout"
+    except OSError:
+        return "socket_error"
+    return "eof" if payload == b"" else "data"
+
 
 # Opaque fixture fields are synthetic continuity markers, not model reasoning.
 CHAT_TOOL_MESSAGES = [
@@ -263,6 +289,19 @@ def expected_tenant(test_id):
 
 
 def terminal_for(path, request, eof):
+    marker = extract_marker(request)
+    if "_NO_STOP_DONE_" in marker:
+        return "protocol_done_without_finish_reason"
+    if "_STOP_EOF_" in marker:
+        return "finish_reason_stop_without_done"
+    if "_USAGE_SAME_FRAME_" in marker:
+        return "finish_reason_stop_with_usage_same_frame"
+    if "_USAGE_DONE_" in marker:
+        return "finish_reason_stop_with_usage"
+    if "_CONTENT_FILTER_" in marker:
+        return "finish_reason_content_filter"
+    if "_SSE_ERROR_" in marker:
+        return "stream_error_no_terminal"
     if eof:
         return "normal_eof_without_protocol_terminal"
     if "_INCOMPLETE_" in extract_marker(request):
@@ -415,6 +454,21 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": {"type": "invalid_request_error"}})
             return
 
+        if self.path == "/test/release":
+            marker = request.get("test_id")
+            with LOCK:
+                event = RELEASE_EVENTS.get(marker)
+                if event is not None and isinstance(marker, str) and "_OPEN_AFTER_DONE_" in marker:
+                    for record in RECORDS:
+                        if record.get("test_id") == marker:
+                            record["post_done_barrier_release_monotonic_ns"] = time.monotonic_ns()
+            if event is None:
+                self._json(404, {"released": False})
+            else:
+                event.set()
+                self._json(200, {"released": True})
+            return
+
         if self.path == "/test/expectations":
             hashes = request.get("project_key_sha256", [])
             if not isinstance(hashes, list) or any(
@@ -450,7 +504,11 @@ class Handler(BaseHTTPRequestHandler):
             test_id = "T00_PROXY_CHAT_SMOKE_A"
         expected = expected_tenant(test_id)
         scenario = (
-            "eof-no-terminal" if "_EOF_" in test_id
+            "stop-clean-eof" if "_STOP_EOF_" in test_id
+            else "eof-no-terminal" if "_EOF_" in test_id
+            else "done-no-finish" if "_NO_STOP_DONE_" in test_id
+            else "stream-held" if "_STREAM_HOLD_" in test_id
+            else "held" if "_HOLD_" in test_id
             else "incomplete" if "_INCOMPLETE_" in test_id
             else "http-error" if "_HTTP_ERROR_" in test_id
             else "timeout" if "_TIMEOUT_" in test_id
@@ -484,8 +542,11 @@ class Handler(BaseHTTPRequestHandler):
             "test_id": test_id,
             "request_service_started_monotonic_ns": request_started_ns,
             "protocol": route,
+            "path": self.path,
+            "stream": bool(request.get("stream")),
             "scenario": scenario,
             "model": request.get("model"),
+            "thinking_disabled": request.get("thinking") == {"type": "disabled"},
             "tenant": credential_label,
             "expected_tenant": expected or "none",
             "provider_key_match": credential_label == expected if expected else False,
@@ -514,6 +575,17 @@ class Handler(BaseHTTPRequestHandler):
             "upstream_protocol_done_sentinel_written": False,
             "client_disconnected": False,
             "cancel_fixture_frames_written": 0,
+            "held_waiting": False,
+            "held_released": False,
+            "stream_hold_waiting": False,
+            "stream_hold_released": False,
+            "post_done_socket_held": False,
+            "post_done_peer_close_state": None,
+            "post_done_peer_observation_monotonic_ns": None,
+            "post_done_peer_observation_complete": False,
+            "post_done_barrier_release_monotonic_ns": None,
+            "post_done_probe_write_attempted": False,
+            "post_done_probe_write_succeeded": False,
         }
         with LOCK:
             RECORDS.append(record)
@@ -529,8 +601,18 @@ class Handler(BaseHTTPRequestHandler):
             self._json(401, {"error": {"type": "authentication_error"}})
             return
 
+        if scenario == "held":
+            with LOCK:
+                event = RELEASE_EVENTS.setdefault(test_id, threading.Event())
+                record["held_waiting"] = True
+            if not event.wait(timeout=10.0):
+                record["hold_timed_out"] = True
+                self._json(504, {"error": {"type": "synthetic_hold_timeout"}})
+                return
+            record["held_released"] = True
+
         model = request.get("model", "test-model")
-        eof = scenario == "eof-no-terminal"
+        eof = scenario in {"eof-no-terminal", "done-no-finish"}
         if scenario == "http-error":
             self._json(503, {"error": {"type": "synthetic_upstream_error", "message": "synthetic-key-and-private-prompt-must-not-leak"}})
             return
@@ -552,7 +634,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path.endswith("/chat/completions"):
             if request.get("stream"):
-                self._chat_stream(model, eof, scenario == "sse-error", "_INCOMPLETE_" in test_id, record, "_CANCEL_" in test_id)
+                stop_clean_eof = scenario == "stop-clean-eof"
+                no_stop_done = scenario == "done-no-finish"
+                self._chat_stream(
+                    model, eof, scenario == "sse-error", "_INCOMPLETE_" in test_id,
+                    record, "_CANCEL_" in test_id, stop_clean_eof=stop_clean_eof,
+                    no_stop_done=no_stop_done,
+                    stream_hold=scenario == "stream-held",
+                )
             else:
                 if "_TOOL_R1_" in test_id or "_TOOL_R2_" in test_id or "_TOOL_MALFORMED_" in test_id or "_TOOL_INVALID_" in test_id or "_TOOL_UNKNOWN_" in test_id:
                     self._chat_tool_response(model, test_id)
@@ -756,13 +845,37 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             self._finish_stream_producer(record)
 
-    def _chat_stream(self, model, eof=False, error=False, incomplete=False, record=None, cancel=False):
+    def _chat_stream(self, model, eof=False, error=False, incomplete=False, record=None,
+                     cancel=False, *, stop_clean_eof=False, no_stop_done=False, stream_hold=False):
         def chunk(delta, finish=None):
-            return {"id": "chatcmpl_t00_synthetic", "object": "chat.completion.chunk", "created": 1, "model": model, "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
+            payload = {
+                "id": "chatcmpl_t00_synthetic", "object": "chat.completion.chunk",
+                "created": 1, "model": model,
+                "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+            }
+            if model == "deepseek-flash":
+                # The pinned native route may send null usage on ordinary
+                # deltas; only the final same-frame fixture supplies usage.
+                payload["usage"] = None
+            return payload
 
         events = [("message", chunk({"role": "assistant"})), ("message", chunk({"content": "synthetic t00 stream"}))]
-        if not eof and not error:
-            events.append(("message", chunk({}, "length" if incomplete else "stop")))
+        if (not eof or stop_clean_eof) and not error and not no_stop_done:
+            finish = "content_filter" if "_CONTENT_FILTER_" in (record or {}).get("test_id", "") else (
+                "length" if incomplete else "stop"
+            )
+            terminal_chunk = chunk({}, finish)
+            if "_USAGE_SAME_FRAME_" in (record or {}).get("test_id", ""):
+                terminal_chunk["usage"] = {
+                    "prompt_tokens": 4, "completion_tokens": 5, "total_tokens": 9,
+                }
+            events.append(("message", terminal_chunk))
+            if "_USAGE_DONE_" in (record or {}).get("test_id", ""):
+                events.append(("message", {
+                    "id": "chatcmpl_t00_synthetic", "object": "chat.completion.chunk",
+                    "created": 1, "model": model, "choices": [],
+                    "usage": {"prompt_tokens": 4, "completion_tokens": 5, "total_tokens": 9},
+                }))
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
@@ -773,6 +886,34 @@ class Handler(BaseHTTPRequestHandler):
             for index, (_name, payload) in enumerate(events):
                 if not self._write_event(self._chat_sse_bytes(payload), record):
                     return
+                if stream_hold and any(
+                    choice.get("delta", {}).get("content")
+                    for choice in payload.get("choices", [])
+                ):
+                    with LOCK:
+                        event = RELEASE_EVENTS.setdefault(
+                            (record or {}).get("test_id", ""), threading.Event(),
+                        )
+                        record["stream_hold_waiting"] = True
+                    # Success still requires explicit release after the first
+                    # delta. A close must be proved before terminal writes: small
+                    # writes after peer FIN can succeed in local TCP buffers.
+                    hold_deadline = time.monotonic() + 10.0
+                    while not event.is_set():
+                        peer_state = observe_peer_close(self.connection, timeout=0.05)
+                        if peer_state in {"eof", "reset"}:
+                            record["stream_hold_peer_close_monotonic_ns"] = time.monotonic_ns()
+                            record["client_disconnected"] = True
+                            record["upstream_disconnect_monotonic_ns"] = time.monotonic_ns()
+                            record["producer_exit_reason"] = "client_disconnect"
+                            self.close_connection = True
+                            record["stream_hold_peer_close_state"] = peer_state
+                            return
+                        record["stream_hold_peer_close_state"] = peer_state
+                        if time.monotonic() >= hold_deadline:
+                            record["stream_hold_timed_out"] = True
+                            return
+                    record["stream_hold_released"] = True
                 if cancel and index == 0:
                     if record is not None:
                         record["downstream_cancel_fixture_started_monotonic_ns"] = time.monotonic_ns()
@@ -782,7 +923,7 @@ class Handler(BaseHTTPRequestHandler):
                 error_payload = {"error": {"type": "server_error", "code": "synthetic_sse_error", "message": "synthetic-key-and-private-prompt-must-not-leak"}}
                 if not self._write_event(self._chat_sse_bytes(error_payload), record):
                     return
-            if not eof and not error:
+            if ((not eof and not stop_clean_eof) or no_stop_done) and not error:
                 if not self._write_event(b"data: [DONE]\n\n", record):
                     return
                 if record is not None:
@@ -791,6 +932,42 @@ class Handler(BaseHTTPRequestHandler):
                 record["client_disconnected"] = False
             if record is not None:
                 record["upstream_stream_body_finished"] = True
+            if "_OPEN_AFTER_DONE_" in (record or {}).get("test_id", ""):
+                with LOCK:
+                    record["post_done_socket_held"] = True
+                    release_event = RELEASE_EVENTS.setdefault(
+                        record["test_id"], threading.Event(),
+                    )
+                # Keep the upstream response open while directly observing the
+                # peer's TCP read side. A successful write after FIN is not a
+                # reliable closure signal, so only EOF/reset may prove closure.
+                observe_deadline = time.monotonic() + POST_DONE_PEER_OBSERVE_SECONDS
+                observation_state = None
+                while not release_event.is_set():
+                    observation_state = observe_peer_close(self.connection, timeout=0.05)
+                    if observation_state != "timeout":
+                        break
+                    if time.monotonic() >= observe_deadline:
+                        break
+                if observation_state is None:
+                    observation_state = "released_before_observed"
+                elif observation_state == "timeout" and release_event.is_set():
+                    observation_state = "released_before_observed"
+                with LOCK:
+                    record["post_done_peer_close_state"] = observation_state
+                    record["post_done_peer_observation_monotonic_ns"] = time.monotonic_ns()
+                    record["post_done_peer_observation_complete"] = True
+                if not release_event.wait(timeout=8.0):
+                    record["post_done_hold_timed_out"] = True
+                record["post_done_probe_write_attempted"] = True
+                try:
+                    # Diagnostic only: TCP can accept a small write after FIN.
+                    self.wfile.write(b": post-done close probe\n\n")
+                    self.wfile.flush()
+                    record["post_done_probe_write_succeeded"] = True
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    record["client_disconnected"] = True
+                    record["post_done_probe_write_succeeded"] = False
             self.close_connection = True
         finally:
             self._finish_stream_producer(record)

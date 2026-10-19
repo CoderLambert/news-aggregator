@@ -5,6 +5,7 @@ import {
   cancelChatGPTTranslationTask as cancelTranslationTaskRequest,
   chatStream as streamChat,
   clearChatHistory as clearChatHistoryRequest,
+  cancelPersonalChatTurn as cancelPersonalChatTurnRequest,
   fetchChatHistory as fetchChatHistoryRequest,
   fetchNewsDetail as fetchNewsDetailRequest,
   fetchFullArticle as fetchFullArticleRequest,
@@ -53,6 +54,7 @@ export interface ChatMessage {
   web_sources?: WebSource[]
   context_scope?: 'full' | 'summary' | 'excerpt'
   status?: 'complete' | 'failed' | 'interrupted' | 'legacy_unknown'
+  model_source?: { provider: string; model: string }
 }
 
 export interface ChatHistory {
@@ -203,6 +205,11 @@ function parseChatMessage(value: unknown): ChatMessage | null {
   }
   const sources = parseWebSources(value.web_sources)
   if (sources) message.web_sources = sources
+  if (message.role === 'assistant' && isRecord(value.model_source) &&
+      typeof value.model_source.provider === 'string' && typeof value.model_source.model === 'string' &&
+      value.model_source.provider.length <= 32 && value.model_source.model.length <= 64) {
+    message.model_source = { provider: value.model_source.provider, model: value.model_source.model }
+  }
   return message
 }
 
@@ -272,6 +279,10 @@ export async function clearChatHistory(id: NewsId, signal: AbortSignal): Promise
   await clearChatHistoryRequest(id, signal)
 }
 
+export async function cancelChatTurn(id: NewsId, turnId: string): Promise<'cancelled' | 'already_completed'> {
+  return cancelPersonalChatTurnRequest(id, turnId)
+}
+
 export async function fetchSuggestedQuestions(id: NewsId, options: { force?: boolean; signal: AbortSignal }): Promise<SuggestedQuestionsSnapshot> {
   const data: unknown = await fetchSuggestedQuestionsRequest(id, options)
   return parseSuggestedQuestions(data)
@@ -298,7 +309,8 @@ export async function cancelTranslationJob(jobId: string, generation: number): P
 export async function* chatStream(
   id: NewsId,
   question: string,
-  options: { webSearch: boolean; signal: AbortSignal },
+  options: { webSearch: boolean; modelConfigId?: string | null; billingConsent?: boolean;
+    turnId?: string; signal: AbortSignal },
 ): AsyncGenerator<string> {
   for await (const rawChunk of streamChat(id, question, options)) {
     if (typeof rawChunk === 'string') yield rawChunk

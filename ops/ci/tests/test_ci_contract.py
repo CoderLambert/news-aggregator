@@ -175,6 +175,29 @@ class SelfHostedCIContract(unittest.TestCase):
         self.assertIn("python3 -m compileall", frontend_steps[frontend_fast]["run"])
         self.assertNotIn("docker", frontend_steps[frontend_fast]["run"].lower())
         backend_steps = wf["jobs"]["backend-and-release-gates"]["steps"]
+        t00_step = next(step for step in backend_steps
+                        if step["name"] == "Verify BYOK T00 isolated SDK and Proxy contracts")
+        t00_run = t00_step["run"]
+        self.assertIn("tools/byok_t00_probe/probe.py", t00_run)
+        self.assertIn("unittest discover -s ops/shared-litellm-proxy/tests -p 'test_provider_key_guard.py'", t00_run)
+        self.assertIn("tools/byok_t00_probe/t04_django_localproxy.py", t00_run)
+        self.assertIn("env -i", t00_run)
+        self.assertIn("DJANGO_ENV=production", t00_run)
+        # pytest-django imports settings before function-level overrides run.
+        # Keep the isolated bootstrap valid without relaxing production hosts.
+        self.assertIn("DJANGO_ALLOWED_HOSTS=news.lambert.host ", t00_run)
+        self.assertNotIn("DJANGO_ALLOWED_HOSTS=testserver", t00_run)
+        self.assertIn('T00_PROXY_PYTHON="$t00_env/proxy/bin/python"', t00_run)
+        self.assertIn('trap \'rm -rf "$t00_env"\' EXIT', t00_run)
+        self.assertNotIn("|| true", t00_run)
+        self.assertNotIn("continue-on-error", str(t00_step))
+        t04_source = (ROOT / "tools/byok_t00_probe/t04_django_localproxy.py").read_text(
+            encoding="utf-8",
+        )
+        self.assertNotIn("pytest.skip", t04_source)
+        self.assertNotIn("skipif", t04_source)
+        self.assertNotIn("tools/byok_t00_probe/t04_django_localproxy.py",
+                         dev_front_runs + dev_back_runs)
         security_fast = next(i for i, step in enumerate(backend_steps)
                              if step["name"] == "Fast backend security regressions")
         full_suite = next(i for i, step in enumerate(backend_steps)

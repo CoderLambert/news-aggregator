@@ -19,7 +19,7 @@ const model: api.AIModel = {
   id: 'model-synthetic-id', connection_id: connection.id, model_id: 'deepseek-chat',
   display_name: 'DeepSeek Chat', catalog_model_id: 'deepseek-chat',
   config_revision: 1, capabilities: { text: 'unknown', tools: 'unknown' },
-  has_trusted_route: true, context_window_tokens: null, updated_at: '2026-10-18T00:00:00Z',
+  has_trusted_route: true, article_chat_supported: true, context_window_tokens: null, updated_at: '2026-10-18T00:00:00Z',
 }
 beforeEach(() => {
   vi.clearAllMocks()

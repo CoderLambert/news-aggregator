@@ -27,6 +27,52 @@ class QuietServer(ThreadingHTTPServer):
         return
 
 
+def _safe_terminal_guard_diagnostic(exc: Exception) -> dict | None:
+    """Read only our fixed, synthetic-only guard diagnostic fields from a 502."""
+    response = getattr(exc, "response", None)
+    if getattr(response, "status_code", None) != 502:
+        return None
+    try:
+        payload = response.json()
+    except Exception:
+        return None
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    if not isinstance(detail, dict) or detail.get("code") != "T00_STREAM_TERMINAL_UNVERIFIED":
+        return None
+    diagnostic = detail.get("diagnostic")
+    if not isinstance(diagnostic, dict):
+        return None
+    allowed_reasons = {
+        "version_unavailable",
+        "version_mismatch",
+        "router_provenance_patch_unavailable",
+        "router_method_mismatch",
+        "wrapper_types_unavailable",
+        "boundary_type_mismatch",
+        "router_wrapper_type_mismatch",
+        "router_provenance_missing",
+        "raw_source_type_mismatch",
+        "source_provider_mismatch",
+        "source_provider_unavailable",
+        "fallback_activated",
+        "internal_guard_failure",
+    }
+    allowed = ("reason", "litellm_version", "response_type", "source_type", "source_provider")
+    safe = {}
+    for key in allowed:
+        value = diagnostic.get(key)
+        if not isinstance(value, str) or not value or len(value) > 192:
+            return None
+        if not all(character.isalnum() or character in "._:<>" for character in value):
+            return None
+        if key == "reason" and value not in allowed_reasons:
+            return None
+        if key == "source_provider" and value not in {"deepseek", "openai", "missing", "other"}:
+            return None
+        safe[key] = value
+    return safe
+
+
 def stream_complete(protocol: str, result: dict) -> bool:
     events, terminals = result.get("event_types", []), result.get("terminals", [])
     if protocol == "chat":
@@ -59,7 +105,8 @@ def scope_status(checks: list[dict], scope: str, *, started: bool, completed: bo
 
 
 def receipt_matches(rows: list[dict], count: int, tenant: str, protocol: str, terminal: str | None = None) -> bool:
-    model = "test-model" if tenant == "tenant-a" else "other-test-model"
+    target_route = any("_DEEPSEEK_" in row.get("test_id", "") for row in rows)
+    model = "deepseek-flash" if target_route else "test-model" if tenant == "tenant-a" else "other-test-model"
     return len(rows) == count and all(
         row.get("tenant") == tenant
         and row.get("provider_key_match") is True
@@ -226,6 +273,207 @@ def main(argv: list[str] | None = None) -> int:
                     check("T00-04", f"PROXY_{upper}_TOOL_{variant}", invalid_tool_rejected(result), {k: v for k, v in result.items() if k != "test_id"})
                     expect_receipt(source, f"T00_PROXY_{upper}_TOOL_{variant}_A", 1)
 
+    def native_deepseek_stream(url: str, project_key: str, provider_key: str, marker: str, *, usage: bool = False):
+        """Use the pinned official OpenAI SDK against the exact native DeepSeek route."""
+        client = cases.openai_client(project_key, url + "/v1", timeout=10.0)
+        stream = None
+        event_types, terminals = [], []
+        usage_chunks = 0
+        started = time.monotonic()
+        result = {"success": False}
+        try:
+            kwargs = {
+                "model": "deepseek/deepseek-flash",
+                "messages": [{"role": "user", "content": marker}],
+                "stream": True,
+                "reasoning_effort": "none",
+                "extra_body": {"api_key": provider_key},
+            }
+            if usage:
+                kwargs["stream_options"] = {"include_usage": True}
+            stream = client.chat.completions.create(**kwargs)
+            with stream:
+                for event in stream:
+                    event_type, terminal = cases._stream_event_facts("chat", event)
+                    if event_type:
+                        event_types.append(event_type)
+                    if terminal:
+                        terminals.append(terminal)
+                    if getattr(event, "usage", None) is not None:
+                        usage_chunks += 1
+            result = {"success": True}
+        except Exception as exc:
+            result = cases.safe_exception(exc)
+            diagnostic = _safe_terminal_guard_diagnostic(exc)
+            if diagnostic is not None:
+                result["guard_diagnostic"] = diagnostic
+        finally:
+            response = getattr(stream, "response", None)
+            if stream is not None:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+            result.update({
+                "terminals": terminals,
+                "event_types": event_types,
+                "usage_chunks": usage_chunks,
+                "client_response_closed": bool(response is not None and response.is_closed),
+                "duration_ms": round((time.monotonic() - started) * 1000, 2),
+            })
+            client.close()
+        return result
+
+    def terminal_route_suite(url: str, project_key: str, provider_key: str):
+        cases_to_run = (
+            ("RAW_STOP", "T00_PROXY_CHAT_DEEPSEEK_RAW_STOP_A", True, False, "finish_reason_stop"),
+            ("RAW_STOP_CLEAN_EOF", "T00_PROXY_CHAT_DEEPSEEK_STOP_EOF_A", True, False, "finish_reason_stop_without_done"),
+            ("RAW_STOP_USAGE_DONE", "T00_PROXY_CHAT_DEEPSEEK_USAGE_DONE_A", True, True, "finish_reason_stop_with_usage"),
+            ("RAW_STOP_USAGE_SAME_FRAME", "T00_PROXY_CHAT_DEEPSEEK_USAGE_SAME_FRAME_A", True, True, "finish_reason_stop_with_usage_same_frame"),
+            ("DONE_WITHOUT_RAW_STOP", "T00_PROXY_CHAT_DEEPSEEK_NO_STOP_DONE_A", False, False, "protocol_done_without_finish_reason"),
+            ("EOF_WITHOUT_RAW_STOP", "T00_PROXY_CHAT_DEEPSEEK_EOF_A", False, False, "normal_eof_without_protocol_terminal"),
+            ("LENGTH_TERMINAL", "T00_PROXY_CHAT_DEEPSEEK_INCOMPLETE_A", False, False, "finish_reason_length"),
+            ("CONTENT_FILTER_TERMINAL", "T00_PROXY_CHAT_DEEPSEEK_CONTENT_FILTER_A", False, False, "finish_reason_content_filter"),
+            ("SSE_ERROR", "T00_PROXY_CHAT_DEEPSEEK_SSE_ERROR_A", False, False, "stream_error_no_terminal"),
+            ("OPEN_AFTER_DONE", "T00_PROXY_CHAT_DEEPSEEK_OPEN_AFTER_DONE_A", True, False, "finish_reason_stop"),
+        )
+        for name, marker, should_succeed, usage, terminal in cases_to_run:
+            completed_while_socket_held = None
+            if name == "OPEN_AFTER_DONE":
+                # Keep the raw upstream socket open behind an explicit barrier.
+                # The SDK stream must finish while that upstream handler is
+                # still held; release it afterward so the fixture can record
+                # whether the client had already closed the connection.
+                result_box = {}
+                request_finished = threading.Event()
+
+                def run_open_after_done():
+                    try:
+                        result_box["result"] = native_deepseek_stream(
+                            url, project_key, provider_key, marker, usage=usage,
+                        )
+                    finally:
+                        request_finished.set()
+
+                worker = threading.Thread(target=run_open_after_done, daemon=True)
+                worker.start()
+                held_seen = False
+                try:
+                    deadline = time.monotonic() + 6.0
+                    while time.monotonic() < deadline:
+                        rows = [
+                            row for row in cases.request_json(upstream_url + "/stats").get("records", [])
+                            if row.get("test_id") == marker
+                        ]
+                        held_seen = bool(rows and rows[0].get("post_done_socket_held"))
+                        observation_complete = bool(
+                            rows and rows[0].get("post_done_peer_observation_complete")
+                        )
+                        if held_seen and request_finished.is_set() and observation_complete:
+                            break
+                        time.sleep(0.02)
+                    completed_while_socket_held = (
+                        held_seen
+                        and request_finished.is_set()
+                        and bool(rows and not rows[0].get("post_done_barrier_release_monotonic_ns"))
+                    )
+                finally:
+                    # Always release the fixture, including when polling fails.
+                    try:
+                        cases.request_json(
+                            upstream_url + "/test/release", {"test_id": marker},
+                        )
+                    except Exception:
+                        pass
+                    worker.join(timeout=12)
+                result = result_box.get("result", {"success": False})
+                result["completed_while_socket_held"] = completed_while_socket_held is True
+                result["request_thread_terminated"] = not worker.is_alive()
+                rows = [
+                    row for row in cases.request_json(upstream_url + "/stats").get("records", [])
+                    if row.get("test_id") == marker
+                ]
+                if name == "OPEN_AFTER_DONE":
+                    producer_deadline = time.monotonic() + 3.0
+                    while time.monotonic() < producer_deadline:
+                        rows = [
+                            row for row in cases.request_json(upstream_url + "/stats").get("records", [])
+                            if row.get("test_id") == marker
+                        ]
+                        if rows and rows[0].get("upstream_stream_producer_exit_monotonic_ns") is not None:
+                            break
+                        time.sleep(0.02)
+            else:
+                result = native_deepseek_stream(
+                    url, project_key, provider_key, marker, usage=usage,
+                )
+                rows = [
+                    row for row in cases.request_json(upstream_url + "/stats").get("records", [])
+                    if row.get("test_id") == marker
+                ]
+            row = rows[0] if len(rows) == 1 else {}
+            terminal_ok = (
+                result.get("terminals") == ["stop"]
+                if should_succeed else "stop" not in result.get("terminals", [])
+            )
+            predicates = {
+                "expected_success": result.get("success") is should_succeed,
+                "client_response_closed": result.get("client_response_closed") is True,
+                "expected_terminal": terminal_ok,
+                "usage_count": result.get("usage_chunks") == 1 if usage else True,
+                "single_upstream_request": len(rows) == 1,
+                "native_deepseek_route": row.get("path") == "/v1/chat/completions"
+                    and row.get("model") == "deepseek-flash"
+                    and row.get("stream") is True
+                    and row.get("thinking_disabled") is True,
+                "synthetic_key_isolation": row.get("tenant") == "tenant-a"
+                    and row.get("provider_key_match") is True
+                    and row.get("project_key_match") is False,
+                "upstream_terminal_receipt": row.get("upstream_terminal") == terminal,
+                "request_key_redaction": provider_key not in json.dumps(result, sort_keys=True)
+                    and project_key not in json.dumps(result, sort_keys=True),
+            }
+            fixture_facts = {
+                key: row.get(key) for key in (
+                    "path", "model", "stream", "thinking_disabled", "tenant",
+                    "provider_key_match", "project_key_match", "upstream_terminal",
+                    "post_done_socket_held", "post_done_peer_close_state",
+                    "post_done_peer_observation_monotonic_ns",
+                    "post_done_peer_observation_complete",
+                    "post_done_barrier_release_monotonic_ns",
+                    "post_done_probe_write_attempted",
+                    "post_done_probe_write_succeeded", "client_disconnected",
+                    "upstream_stream_producer_exit_monotonic_ns",
+                )
+            }
+            if name == "OPEN_AFTER_DONE":
+                close_state = row.get("post_done_peer_close_state")
+                close_ns = row.get("post_done_peer_observation_monotonic_ns")
+                release_ns = row.get("post_done_barrier_release_monotonic_ns")
+                producer_exit_ns = row.get("upstream_stream_producer_exit_monotonic_ns")
+                predicates.update({
+                    "sdk_finished_while_barrier_held": completed_while_socket_held is True,
+                    "held_socket_barrier_reached": row.get("post_done_socket_held") is True,
+                    "peer_eof_or_reset_observed": close_state in {"eof", "reset"},
+                    "peer_close_precedes_release": (
+                        isinstance(close_ns, int) and isinstance(release_ns, int)
+                        and close_ns < release_ns
+                    ),
+                    "peer_observation_completed": row.get("post_done_peer_observation_complete") is True,
+                    "sdk_request_thread_terminated": result.get("request_thread_terminated") is True,
+                    "producer_exited_after_release": (
+                        isinstance(producer_exit_ns, int) and isinstance(release_ns, int)
+                        and producer_exit_ns > release_ns
+                    ),
+                })
+                result["post_done_fixture_facts"] = fixture_facts
+                result["completed_while_socket_held"] = completed_while_socket_held is True
+                result["request_thread_terminated"] = result.get("request_thread_terminated") is True
+            result["case_predicates"] = predicates
+            passed = all(predicates.values())
+            check("T00-10", "NATIVE_DEEPSEEK_" + name, passed, result)
+            expect_receipt("PROXY", marker, 1, terminal=terminal)
+
     try:
         started_scopes.add("SDK")
         suite("SDK", upstream_url)
@@ -238,6 +486,7 @@ def main(argv: list[str] | None = None) -> int:
                 upstream.KEY_LABELS[proxy.master] = "master"
                 upstream.PROJECT_KEY_HASHES.update(hashlib.sha256(key.encode()).hexdigest() for key in proxy.project_keys.values())
                 suite("PROXY", proxy.url, proxy.project_keys)
+                terminal_route_suite(proxy.url, proxy.project_keys["tenant-a"], keys["tenant-a"])
                 for protocol in ("chat", "responses", "messages"):
                     upper = protocol.upper()
                     for variant, sdk_key, provider_key, model in (
