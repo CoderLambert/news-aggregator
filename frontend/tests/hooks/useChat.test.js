@@ -55,11 +55,37 @@ describe('useChat', () => {
     })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
     expect(result.current.messages).toHaveLength(2)
-    expect(api.fetchChatHistory).toHaveBeenCalledWith(42, expect.any(AbortSignal))
+    expect(api.fetchChatHistory).toHaveBeenCalledWith(42, expect.any(AbortSignal), {
+      translationResultId: null,
+      translationMode: 'current',
+    })
     const historyQuery = queryClient.getQueryCache().getAll().find((query) => query.queryKey[1] === 'chatHistory')
     expect(historyQuery.queryKey[2]).toMatchObject({ newsId: 42, viewerId: 5 })
     expect(historyQuery.options.staleTime).toBe(30_000)
     expect(historyQuery.options.retry).toBe(false)
+  })
+
+  it('loads saved history for the exact selected translation without dispatching chat', async () => {
+    api.fetchChatHistory.mockResolvedValueOnce({ messages: [{ role: 'user', content: 'history for result 41' }] })
+    let queryClient
+    const { result } = renderHook(
+      () => useChat('42', true, null, false, 41, 'result'),
+      { wrapper: makeWrapper(undefined, (client) => { queryClient = client }) },
+    )
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.messages).toEqual([{ role: 'user', content: 'history for result 41' }])
+    expect(api.fetchChatHistory).toHaveBeenCalledWith(42, expect.any(AbortSignal), {
+      translationResultId: 41,
+      translationMode: 'result',
+    })
+    const historyQuery = queryClient.getQueryCache().getAll().find((query) => query.queryKey[1] === 'chatHistory')
+    expect(historyQuery.queryKey[2]).toMatchObject({
+      newsId: 42,
+      viewerId: 5,
+      translationResultId: 41,
+      translationMode: 'result',
+    })
+    expect(api.chatStream).not.toHaveBeenCalled()
   })
 
   it('keeps summary scope metadata out of assistant prose and carries it with the answer', async () => {
