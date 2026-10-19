@@ -435,7 +435,7 @@ class PrivateTranslationTests(TransactionTestCase):
         self.assertEqual(len(gateway.sent), 1)
         self.assertEqual(task.status, 'succeeded')
         self.assertTrue(task.provider_started)
-        self.assertIsNone(task.error_code)
+        self.assertEqual(task.error_code, '')
         self.assertEqual(ChatGPTArticleTranslation.objects.count(), 1)
 
     def test_pre_send_contention_retry_rechecks_credential_revocation(self):

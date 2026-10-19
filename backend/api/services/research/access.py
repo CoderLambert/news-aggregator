@@ -22,6 +22,44 @@ def _search_article_is_current(user, row, *, id_key='id', require_snippet=True, 
     )
 
 
+def _fetch_article_payload_is_current(user, data, stored):
+    from api.models import News
+    from api.rss.access import article_sources
+
+    try:
+        news = News.objects.get(pk=stored.news_id)
+    except News.DoesNotExist:
+        return False
+    source = article_sources(user, news).select_related('publication').first()
+    if source is None:
+        return False
+    truncated = len(stored.markdown) > 12000
+    expected = dict(
+        id=stored.news_id,
+        title=stored.title,
+        title_zh='',
+        url=stored.url,
+        source=source.publication.display_name or source.name,
+        source_type=source.source_type,
+        content=stored.markdown[:12000],
+        content_truncated=truncated,
+        original_length=len(stored.markdown),
+        **{
+            **snapshot_metadata(stored),
+            'context_scope': 'excerpt' if truncated else stored.scope,
+        },
+        source_scope=stored.scope,
+        policy_versions=stored.policy_versions,
+        task_outcome='stored',
+        publish_time=news.publish_time.isoformat() if news.publish_time else None,
+    )
+    # Replay validates the exact post-dispatch shape. Long payloads are capped
+    # by execute_tool before storage, so compare against that same pure transform.
+    from api.services.research.tools import _truncate_result
+    expected = _truncate_result(expected)
+    return type(data.get('id')) is int and data == expected
+
+
 def result_is_current(user, tool_name, data):
     if not isinstance(data, dict):
         return False
@@ -49,14 +87,27 @@ def result_is_current(user, tool_name, data):
                 return False
         return True
     if tool_name in ('fetch_article', 'fetch_webpage'):
-        if data.get('capability') == 'stored_articles_only':
-            return True
+        if tool_name == 'fetch_webpage' and data.get('capability') == 'stored_articles_only':
+            from api.rss.access import authorized_news
+            url = data.get('url')
+            expected = {
+                'url': url,
+                'content': '',
+                'scope': 'summary',
+                'context_scope': 'summary',
+                'capability': 'stored_articles_only',
+                'message': '此网页尚未收录；请使用已有搜索摘要与原文链接。',
+            }
+            return (
+                isinstance(url, str)
+                and data == expected
+                and not authorized_news(user).filter(url=url).exists()
+            )
         try:
             stored = get_stored_article(user, data.get('id'))
         except (Http404, ValueError, TypeError):
             return False
-        expected = snapshot_metadata(stored)
-        return all(data.get(key) == value for key, value in expected.items() if key != 'context_scope') and data.get('source_scope') == stored.scope
+        return _fetch_article_payload_is_current(user, data, stored)
     return True
 
 

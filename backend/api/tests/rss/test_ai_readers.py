@@ -211,6 +211,113 @@ def test_research_history_replay_denied_after_policy_change(world):
     assert session.search_results.count() == 1
 
 
+def test_research_fetch_article_replay_rechecks_serialized_payload(world):
+    import json
+    from api.models import ResearchSession, ResearchSearchResult
+    from api.services.research.access import require_session_evidence, result_is_current
+
+    a, _, make = world
+    _, news = make('research-fetch-snapshot', subscriber=a, state='available')
+    long_body = 'body paragraph content. ' * 700
+    News.objects.filter(pk=news.pk).update(full_content=long_body)
+    before = get_stored_article(a, news.pk)
+
+    def fetch():
+        return execute_tool('fetch_article', {'article_id': news.pk}, user=a)
+
+    def persist(result, label):
+        envelope = ResearchSession.objects.create(user=a, messages=[
+            {'role': 'assistant', 'tool_calls': [
+                {'id': f'fetch-{label}', 'function': {'name': 'fetch_article', 'arguments': '{}'}}
+            ]},
+            {'role': 'tool', 'tool_call_id': f'fetch-{label}', 'content': json.dumps(result)},
+        ])
+        row = ResearchSession.objects.create(user=a)
+        ResearchSearchResult.objects.create(session=row, tool_name='fetch_article',
+            result_type='article', result_data=result)
+        return envelope, row
+
+    result = fetch()
+    assert result['task_outcome'] == 'stored'
+    assert result['full_content_revision'] == before.revision
+    assert result['canonical_hash'] == before.canonical_hash
+    assert result['policy_versions'] == before.policy_versions
+    assert result['content_truncated'] is True
+    assert result['context_scope'] == 'excerpt'
+    sessions = persist(result, 'long')
+    for session in sessions:
+        require_session_evidence(session, a)
+
+    # Metadata-only title changes must invalidate both persisted representations
+    # even though the readable body, hash, revision, and policy are unchanged.
+    News.objects.filter(pk=news.pk).update(title='updated title without body revision')
+    after_title = get_stored_article(a, news.pk)
+    assert after_title.title != before.title
+    assert after_title.revision == before.revision
+    assert after_title.canonical_hash == before.canonical_hash
+    assert after_title.policy_versions == before.policy_versions
+    assert result_is_current(a, 'fetch_article', result) is False
+    for session in sessions:
+        with pytest.raises(Http404):
+            require_session_evidence(session, a)
+
+    # Restore only the title to create a current snapshot, then change only URL.
+    News.objects.filter(pk=news.pk).update(title=before.title)
+    url_result = fetch()
+    url_sessions = persist(url_result, 'url')
+    for session in url_sessions:
+        require_session_evidence(session, a)
+    News.objects.filter(pk=news.pk).update(url=f'https://updated.example/articles/{news.pk}')
+    after_url = get_stored_article(a, news.pk)
+    assert after_url.revision == before.revision
+    assert after_url.canonical_hash == before.canonical_hash
+    assert after_url.policy_versions == before.policy_versions
+    assert result_is_current(a, 'fetch_article', url_result) is False
+    for session in url_sessions:
+        with pytest.raises(Http404):
+            require_session_evidence(session, a)
+
+
+def test_research_fetch_article_replay_rechecks_policy_version(world):
+    from django.db.models import F
+    from api.models import ResearchSession, ResearchSearchResult
+    from api.services.research.access import require_session_evidence, result_is_current
+
+    a, _, make = world
+    source, news = make('research-fetch-policy', subscriber=a, state='available')
+    result = execute_tool('fetch_article', {'article_id': news.pk}, user=a)
+    before = get_stored_article(a, news.pk)
+    assert result['policy_versions'] == before.policy_versions
+    assert result['canonical_hash'] == before.canonical_hash
+    session = ResearchSession.objects.create(user=a)
+    ResearchSearchResult.objects.create(session=session, tool_name='fetch_article',
+        result_type='article', result_data=result)
+    require_session_evidence(session, a)
+
+    # Change policy version only; keep source scope and readable bytes unchanged.
+    SourcePublication.objects.filter(source=source).update(policy_version=F('policy_version') + 1)
+    after = get_stored_article(a, news.pk)
+    assert after.scope == before.scope
+    assert after.markdown == before.markdown
+    assert after.canonical_hash == before.canonical_hash
+    assert after.policy_versions != before.policy_versions
+    assert result_is_current(a, 'fetch_article', result) is False
+    with pytest.raises(Http404):
+        require_session_evidence(session, a)
+
+
+def test_fetch_webpage_unindexed_result_rejects_mixed_content(world):
+    from api.services.research.access import result_is_current
+
+    a, _, _ = world
+    result = _tool_fetch_webpage('https://not-indexed.example/story', user=a)
+    assert result_is_current(a, 'fetch_webpage', result)
+    assert result_is_current(a, 'fetch_webpage', {
+        **result,
+        'content': 'unverified article content',
+    }) is False
+
+
 def test_research_search_result_replay_is_snapshot_and_policy_bound(world):
     import json
     from api.models import ResearchSession, ResearchSearchResult

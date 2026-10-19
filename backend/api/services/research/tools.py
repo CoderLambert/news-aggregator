@@ -709,7 +709,7 @@ def _tool_fetch_article(article_id: int, execution_guard=None, user=None) -> dic
         source=source.publication.display_name or source.name, source_type=source.source_type,
         content=stored.markdown[:12000], content_truncated=truncated, original_length=len(stored.markdown),
         **{**snapshot_metadata(stored), 'context_scope': 'excerpt' if truncated else stored.scope},
-        source_scope=stored.scope, task_outcome='stored',
+        source_scope=stored.scope, policy_versions=stored.policy_versions, task_outcome='stored',
         publish_time=news.publish_time.isoformat() if news.publish_time else None)
 
 
