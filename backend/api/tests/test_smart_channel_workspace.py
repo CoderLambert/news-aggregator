@@ -42,7 +42,7 @@ class SmartChannelTests(TestCase):
         call_command('makemigrations', 'api', check=True, dry_run=True, verbosity=0)
 
     def test_catalog_read_does_not_write_profiles_or_call_a_model(self):
-        with patch('api.services.channel_ai.personal_clients_for_user', side_effect=AssertionError('must not call')):
+        with patch('api.services.channel_ai.build_gateway_client', side_effect=AssertionError('must not call')):
             response = self.client.get('/api/smart-channels/catalog/')
         self.assertEqual(response.status_code, 200)
         row = next(r for r in response.data['sources'] if r['id'] == self.source.pk)
@@ -81,7 +81,7 @@ class SmartChannelTests(TestCase):
         catalog = self.client.get(f'/api/smart-channels/sources/{source.pk}/')
         self.assertEqual(catalog.status_code, 200)
         self.assertEqual(catalog.data['topics'], [])
-        with patch('api.services.channel_ai.personal_clients_for_user', side_effect=AssertionError('no model')):
+        with patch('api.services.channel_ai.build_gateway_client', side_effect=AssertionError('no model')):
             proposal = self.propose(source_ids=[source.pk], topic_keys=['frontend', 'ai'])
         self.assertEqual(proposal.status_code, 201)
         hint = proposal.data['result'][0]
@@ -275,13 +275,21 @@ class SmartChannelTests(TestCase):
         self.assertEqual(self.propose(engine='ai', consent=True).status_code, 400)
 
     def test_ai_job_is_queued_and_validated_before_any_group_write(self):
-        with patch('api.services.channel_grouping.credential_fingerprint', return_value='test-fingerprint'):
+        frozen = {'model': {'model_id': 'test-model'}, 'scope': 'personal'}
+        with patch('api.services.channel_grouping.credential_fingerprint', return_value='test-fingerprint'), patch('api.services.channel_model.capture_model', return_value=frozen):
             proposal = make_proposal(self.user, {'source_ids': [self.source.pk], 'topic_keys': ['frontend'], 'engine': 'ai', 'consent': True})
         self.assertEqual(proposal.status, 'queued')
         job = claim_next()
         client = Mock()
         client.chat.completions.create.return_value = SimpleNamespace(choices=[SimpleNamespace(finish_reason='stop', message=SimpleNamespace(content=json.dumps({'channels': [{'source_id': self.source.pk, 'topic_keys': ['frontend'], 'reason': '浏览器和框架技术'}]})))])
-        with patch('api.services.channel_ai.credential_fingerprint', return_value='test-fingerprint'), patch('api.services.channel_ai.personal_clients_for_user', return_value=[(client, 'test-model')]):
+        # Worker/lease/output behavior only; model/credential proofs are separately verified.
+        model = SimpleNamespace(model_id='test-model', proxy_alias='synthetic')
+        with patch('api.services.channel_ai.verify_model', return_value=model), \
+                patch('api.services.channel_ai.connection_fence', return_value={}), \
+                patch('api.services.channel_ai.commit_classification', side_effect=lambda payload, **kw: kw['persist']()), \
+                patch('api.services.channel_ai.dispatch_once', side_effect=lambda fence, **kw: kw['send']('synthetic')), \
+                patch('api.services.channel_ai.complete_with_usage', side_effect=lambda gateway, selection, task, **kw: gateway.chat.completions.create(**kw)), \
+                patch('api.services.channel_ai.build_gateway_client', return_value=client):
             execute_job(job)
         proposal.refresh_from_db()
         self.assertEqual(proposal.status, 'ready')
@@ -290,8 +298,9 @@ class SmartChannelTests(TestCase):
         self.assertFalse(ChannelGroupMember.objects.exists())
 
     def test_lease_recovery_has_bounded_attempts(self):
-        with patch('api.services.channel_grouping.credential_fingerprint', return_value='test'):
-            proposal = make_proposal(self.user, {'source_ids': [self.source.pk], 'engine': 'ai', 'consent': True})
+        proposal = ChannelGroupingProposal.objects.create(user=self.user, engine='ai', status='queued',
+            execution_snapshot={'schema_version': 1}, input_snapshot='', source_ids=[self.source.pk],
+            expires_at=timezone.now() + timedelta(hours=1))
         first = claim_next()
         ChannelGroupingProposal.objects.filter(pk=first.pk).update(lease_until=timezone.now() - timedelta(seconds=1))
         second = claim_next()

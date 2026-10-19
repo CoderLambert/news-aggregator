@@ -79,6 +79,14 @@ RSS T14 的两项本地回放差额现已合并，但仅关闭该条窄证据路
 - `GET /api/me/ai/usage/` 严格按当前 owner 查询，只读无推理，返回全部累计已知 Token/未知次数及最近最多 100 条记录；设置页展示最近 50 条、用途/模型/状态与未知 Token，不估算账户余额或费用。
 - 本地 typecheck、相关设置页/使用记录 16 项、前端生产 build PASS；实际统计函数隔离执行确认一次发送/一次记录、0 与未知分离、断线无伪完成、关闭不重复与用途不匹配拒绝。Python AST/diff PASS。后端数据库/API 回归、真实厂商、生产迁移与浏览器 UAT NOT_RUN。沿用本轮合并授权，未改 CI 工作流。
 
+### AG-05 已验证个人模型分类接线（2026-10-20）
+
+- 基线 main `8601f45`（BYOK T12 已合并 #138）。现有频道 AI 队列已退出 fail-closed 的旧 personal_clients_for_user 入口，改用 T03 已验证模型的不可变快照与 T01 enqueue/send/commit 围栏；个人请求明确展示并提交模型与本次费用同意，公开频道资料进入现有 trusted gateway，调用纳入 T12。
+- 站点后台分类使用独立保存的管理员 scope=site 模型授权与每日预算；旧 enabled 配置没有模型快照时不会派发，须重新明确保存授权。个人默认偏好后续修改不会静默替换后台模型；owner/凭据/模型、开关、来源证据与租约在发送和提交前重检。
+- 0071 新增 execution_snapshot 与 dispatch_started_at。已派发/旧未知运行租约过期后失败，不自动重新付费；重复执行者受 dispatch CAS 限制；仅明确 429 依据 Retry-After 最多再尝试一次，5xx/超时/未知不自动重发。
+- 原来源 GET 零推理、AI 主题 needs_review、人工覆盖优先及私人分组应用/撤销语义保留。JSON 全批来源、主题白名单、重复对象字段/主题、完整 stop 均须验证。
+- typecheck、既有前端 20 项、新增模型/同意场景 1 项、生产 build、实际解析/429-vs-5xx/未知输入负例与 Python AST/diff PASS。后端 DB/API 并发/迁移回归 NOT_RUN（本地 pytest/PyYAML 缺失）；真实 Provider、管理员正式授权/后台进程、生产迁移/部署和浏览器 UAT NOT_RUN。按本轮用户授权集中 CI，不重复全量门禁。
+
 ## 2. 第 8 批实施状态与后续候选（最多两个独立写入目标）
 
 | 顺序 | 原编号与目标 | 需要完成的真正差额 | 阶段验收 |

@@ -11,6 +11,7 @@ import { newsKeys } from '@/services/newsQueries'
 import { workspaceCatalogOptions, workspaceConfigOptions, workspaceKeys, workspaceRequest, workspaceError,
   originLabel, proposalStatus, type GroupingMode, type GroupingConfig, type Proposal, type Topic, type SiteClassifier } from '@/services/workspaceApi'
 import type { ChannelGroup } from '@/types/channels'
+import { listAITaskPreferences } from '@/services/aiConnectionsApi'
 
 const modeOptions: Array<{ value: GroupingMode; title: string; description: string }> = [
   { value: 'suggest', title: '推荐并确认', description: '新增订阅先生成建议，由你确认。' },
@@ -22,9 +23,20 @@ const errorMessages: Record<string, string> = {
   configuration_changed: '订阅或分组已变化，请重新生成预览。', metadata_changed: '频道资料已更新，请重新生成。',
   model_unavailable: '没有可用的模型连接。', rate_limited: '模型限流，后台将遵守等待时间进行有限重试。',
   model_request_failed: '模型请求失败，请检查模型连接；可使用规则推荐继续整理。',
-  incomplete_output: '模型返回不完整，未应用任何分组。', worker_interrupted: '任务中断并已达到重试上限。',
+  incomplete_output: '模型返回不完整，未应用任何分组。', worker_interrupted: '任务已中断或结果未知，不会自动重发；确认后可显式重新预览。',
   invalid_output: '模型输出格式无效，未修改你的分组。', invalid_topic: '模型返回了未允许的主题。',
   invalid_source: '模型返回了未知频道。', expired: '任务已过期，请重新生成。',
+}
+
+function useClassificationModel(viewer: number, enabled: boolean) {
+  const preferences = useQuery({
+    queryKey: ['ai-task-preferences', viewer], queryFn: ({ signal }) => listAITaskPreferences(signal),
+    enabled, retry: false,
+  })
+  const selected = preferences.data?.preferences.find(item => item.task_kind === 'default' && item.selection_state === 'available')
+  return { model: selected?.model ?? null, id: selected?.model_config_id ?? null,
+    consentKey: JSON.stringify([selected?.model_config_id, preferences.data?.revision]),
+    loading: enabled && preferences.isPending, error: preferences.isError }
 }
 
 export default function SmartGroupingWorkspace() {
@@ -54,7 +66,9 @@ export function Organizer({ viewer, admin, initialConfig, catalog, groups, subsc
   const [selectedTopics, setSelectedTopics] = useState<string[]>(catalog.presets[0]?.topics ?? [])
   const [scope, setScope] = useState<'all' | 'ungrouped'>('all')
   const [engine, setEngine] = useState<'rules' | 'ai'>('rules')
-  const [consent, setConsent] = useState(false)
+  const classification = useClassificationModel(viewer, engine === 'ai')
+  const [confirmedModel, setConfirmedModel] = useState<string | null>(null)
+  const consent = Boolean(classification.id && confirmedModel === classification.consentKey)
   const [mode, setMode] = useState<GroupingMode>(initialConfig.mode)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
@@ -92,6 +106,7 @@ export function Organizer({ viewer, admin, initialConfig, catalog, groups, subsc
     onSuccess: value => {
       if (!isCurrent()) return
       setPendingCreate(null)
+      setConfirmedModel(null)
       client.setQueryData(workspaceKeys.proposal(viewer, value.id), value)
       setActiveId(value.id)
       void refresh()
@@ -101,7 +116,8 @@ export function Organizer({ viewer, admin, initialConfig, catalog, groups, subsc
   const startPreview = () => {
     if (!isCurrent() || writePending.current) return
     const body = pendingCreate ?? { source_ids: [...sourceIds], topic_keys: [...selectedTopics], engine,
-      consent: engine === 'ai' && consent, request_id: crypto.randomUUID() }
+      consent: engine === 'ai' && consent, request_id: crypto.randomUUID(),
+      ...(engine === 'ai' && classification.id ? { model_config_id: classification.id } : {}) }
     setPendingCreate(body)
     writePending.current = true
     focusRequested.current = true
@@ -156,13 +172,21 @@ export function Organizer({ viewer, admin, initialConfig, catalog, groups, subsc
       <div><h2>选择范围与主题</h2><p>选择一个阅读主题包，整理已订阅来源。规则推荐无需模型调用，AI 精分仅在你明确授权后启动。</p>
         <div className="workspace-engine-options" role="group" aria-label="整理引擎"><button type="button" aria-pressed={engine === 'rules'} disabled={setupLocked} onClick={() => setEngine('rules')}>来源资料推荐</button><button type="button" aria-pressed={engine === 'ai'} disabled={!initialConfig.ai_available || setupLocked} onClick={() => setEngine('ai')}><Sparkles size={14} aria-hidden="true" />AI 精细分类</button></div>
         {!initialConfig.ai_available && <p className="workspace-caption">AI 尚不可用。<Link to="/settings">配置个人模型连接</Link>；资料推荐仍可使用。</p>}
-        {engine === 'ai' && <label className="workspace-check"><input type="checkbox" disabled={setupLocked} checked={consent} onChange={event => setConsent(event.target.checked)} />同意使用本人模型额度；仅发送公开频道资料和已收录标题，每任务最多两次尝试。</label>}
+        {engine === 'ai' && <div className="workspace-soft-panel">
+          <p>{classification.loading ? '正在读取个人默认模型…' : classification.model
+            ? `${pendingCreate ? '当前默认模型' : '本次分类模型'}：${classification.model.display_name} (${classification.model.model_id})`
+            : '请先在模型设置中配置并验证个人默认模型。'} <Link to="/settings/ai" className="workspace-link">模型设置</Link></p>
+          {pendingCreate && <p>正在恢复首次请求，保留原模型与原授权；默认模型的更改不会应用到该请求。</p>}
+          {classification.error && <p role="alert">暂时无法读取模型，不会派发分类请求。</p>}
+          <label className="workspace-check"><input type="checkbox" disabled={setupLocked || !classification.id} checked={consent}
+            onChange={event => setConfirmedModel(event.target.checked ? classification.consentKey : null)} />同意本次使用上述个人模型额度；仅发送公开频道资料和已收录标题。仅明确限流拒绝时最多重试一次，结果未知不会自动重发。</label>
+        </div>}
         <div className="workspace-actions"><label>整理范围<select aria-label="整理范围" disabled={setupLocked} value={scope} onChange={event => setScope(event.target.value === 'ungrouped' ? 'ungrouped' : 'all')}><option value="all">全部已订阅</option><option value="ungrouped">仅未分组频道</option></select></label>
 </div>
     <section className="workspace-preset-section"><header className="workspace-panel-heading"><div><h2>主题预设</h2><p className="workspace-caption">选择你关心的主题。生成的是可编辑建议，不会立即修改订阅。</p></div><div className="workspace-tabs" role="group" aria-label="主题包">{catalog.presets.map(preset => <button type="button" key={preset.key} aria-pressed={preset.topics.length === selectedTopics.length && preset.topics.every(topic => selectedTopics.includes(topic))} disabled={setupLocked} onClick={() => setSelectedTopics([...preset.topics])}>{preset.name}</button>)}</div></header>
       <div className="workspace-preset-cards">{catalog.topics.map(topic => <label key={topic.key} className="workspace-preset-card" data-selected={selectedTopics.includes(topic.key)}><input type="checkbox" disabled={setupLocked} checked={selectedTopics.includes(topic.key)} onChange={event => setSelectedTopics(current => event.target.checked ? [...current, topic.key] : current.filter(key => key !== topic.key))} /><span className="workspace-topic-symbol" data-topic={topic.key}><FolderOpen size={20} aria-hidden="true" /></span><span><strong>{topic.name}</strong><small>{topic.description}</small></span></label>)}</div>
     </section>
-          <button ref={startButton} type="button" className="workspace-button" disabled={busy || change.isError || !!processing || !sourceIds.length || !selectedTopics.length || (engine === 'ai' && (!consent || sourceIds.length > 40)) || (engine === 'rules' && sourceIds.length > 200)} onClick={startPreview}><Sparkles size={16} aria-hidden="true" />{create.isPending ? '正在准备预览…' : pendingCreate ? '重试同一次预览' : '生成分组预览'}</button>
+          <button ref={startButton} type="button" className="workspace-button" disabled={busy || change.isError || !!processing || !sourceIds.length || !selectedTopics.length || (engine === 'ai' && ((!consent && !pendingCreate) || sourceIds.length > 40)) || (engine === 'rules' && sourceIds.length > 200)} onClick={startPreview}><Sparkles size={16} aria-hidden="true" />{create.isPending ? '正在准备预览…' : pendingCreate ? '重试同一次预览' : '生成分组预览'}</button>
         {sourceIds.length > (engine === 'ai' ? 40 : 200) && <p role="status" className="workspace-caption">本次上限为 {engine === 'ai' ? 40 : 200} 个频道，请使用“仅未分组频道”缩小范围。</p>}
         {subscriptions.length === 0 && <div role="status"><p>还没有订阅频道，先添加来源再整理。</p><Link className="workspace-button secondary" to="/channels">去添加频道</Link></div>}
         {subscriptions.length > 0 && sourceIds.length === 0 && <p role="status">所有已订阅频道都已分组，可切换为“全部已订阅”。</p>}
@@ -212,7 +236,7 @@ export function Organizer({ viewer, admin, initialConfig, catalog, groups, subsc
   </div>
 }
 
-interface CreateRequest { source_ids: number[]; topic_keys: string[]; engine: 'rules' | 'ai'; consent: boolean; request_id: string }
+interface CreateRequest { model_config_id?: string; source_ids: number[]; topic_keys: string[]; engine: 'rules' | 'ai'; consent: boolean; request_id: string }
 
 interface DraftGroup { topic_key: string; group_id: string; name: string; source_ids: number[] }
 export function ProposalEditor({ proposal, topics, groups, mode, busy, onApply, onCancel }: {
@@ -249,25 +273,31 @@ export function ProposalEditor({ proposal, topics, groups, mode, busy, onApply, 
 
 function SiteClassifierPanel({ viewer }: { viewer: number }) {
   const client = useQueryClient()
+  const classification = useClassificationModel(viewer, true)
   const data = useQuery({ queryKey: ['workspace', viewer, 'site-classifier'], queryFn: ({ signal }) => workspaceRequest<SiteClassifier>('/admin/smart-channels/', { signal }) })
   const save = useMutation({ mutationFn: (body: unknown) => workspaceRequest<SiteClassifier>('/admin/smart-channels/', { method: 'PATCH', body }), onSuccess: value => client.setQueryData(['workspace', viewer, 'site-classifier'], value) })
   return <details className="workspace-panel"><summary>管理员：全站新增来源分类</summary><p className="workspace-muted">默认关闭。开启后，后台仅对信息充足但主题未知的全站来源调用本管理员的模型连接；不使用其他用户额度，不替任何人订阅。</p>
     {data.isError && <p role="alert" className="workspace-error">读取失败。<button type="button" onClick={() => void data.refetch()}>重试</button></p>}
-    {data.data && <SiteClassifierForm key={JSON.stringify([data.data.enabled, data.data.daily_limit, data.data.is_owner])} config={data.data} busy={save.isPending} onSave={body => save.mutate(body)} />}
+    {data.data && <SiteClassifierForm key={JSON.stringify([data.data.enabled, data.data.daily_limit, data.data.is_owner, data.data.model_id])} config={data.data} classification={classification} busy={save.isPending} onSave={body => save.mutate(body)} />}
     {save.isError && <p role="alert" className="workspace-error">{workspaceError(save.error)}</p>}
     {save.isSuccess && <p role="status" className="workspace-notice">站点分类设置已保存。</p>}
     {data.data && <><h3>最近分类任务</h3><ul className="workspace-job-list">{data.data.jobs.map(job => <li key={job.id}><span>{job.source_ids.length} 个来源 · {new Date(job.created_at).toLocaleString()}</span><span>{proposalStatus[job.status] ?? job.status}</span><small>{job.error_code && (errorMessages[job.error_code] ?? job.error_code)}</small></li>)}</ul>
       <h3>待接入申请</h3><p className="workspace-caption">这些地址未启用抓取；需另行核验官方 API/RSS 并登记采集策略。</p><ul className="workspace-intake-list">{data.data.intake_requests.map(item => <li key={item.id}><code>{item.url}</code><span>{item.status === 'pending' ? '待审核接入' : item.status}</span></li>)}</ul></>}
   </details>
 }
-function SiteClassifierForm({ config, busy, onSave }: { config: SiteClassifier; busy: boolean; onSave: (body: unknown) => void }) {
+function SiteClassifierForm({ config, classification, busy, onSave }: { config: SiteClassifier; classification: ReturnType<typeof useClassificationModel>; busy: boolean; onSave: (body: unknown) => void }) {
   const [enabled, setEnabled] = useState(config.enabled)
   const [limit, setLimit] = useState(config.daily_limit)
-  const [consent, setConsent] = useState(false)
-  return <form className="workspace-soft-panel" onSubmit={event => { event.preventDefault(); onSave({ enabled, daily_limit: limit, consent }) }}>
+  const [confirmedModel, setConfirmedModel] = useState<string | null>(null)
+  const consent = Boolean(classification.id && confirmedModel === classification.consentKey)
+  return <form className="workspace-soft-panel" onSubmit={event => { event.preventDefault(); onSave({ enabled, daily_limit: limit, consent, ...(enabled ? { model_config_id: classification.id } : {}) }); setConfirmedModel(null) }}>
     <label className="workspace-check"><input type="checkbox" checked={enabled} disabled={busy} onChange={event => setEnabled(event.target.checked)} />开启全站新来源 AI 分类</label>
-    <label>每日任务上限（每任务最多两次模型尝试）<input type="number" min={1} max={20} required value={limit} disabled={busy} onChange={event => setLimit(Number(event.target.value))} /></label>
-    {enabled && <label className="workspace-check"><input type="checkbox" checked={consent} disabled={busy} onChange={event => setConsent(event.target.checked)} />明确同意使用我的模型连接和额度处理公开来源资料。</label>}
+    <label>每日任务上限（仅明确限流拒绝时最多重试一次）<input type="number" min={1} max={20} required value={limit} disabled={busy} onChange={event => setLimit(Number(event.target.value))} /></label>
+    {enabled && <>
+      <p>后台分类授权模型：{classification.model ? `${classification.model.display_name} (${classification.model.model_id})` : '请先配置并验证个人默认模型'}；保存后固定本次授权，修改默认偏好不会静默更换后台模型。</p>
+      <label className="workspace-check"><input type="checkbox" checked={consent} disabled={busy || !classification.id}
+        onChange={event => setConfirmedModel(event.target.checked ? classification.consentKey : null)} />单独授权上述本人模型及本站每日预算处理公开来源；不使用其他用户额度。</label>
+    </>}
     <button className="workspace-button" disabled={busy || (enabled && !consent)}>保存站点设置</button>
   </form>
 }

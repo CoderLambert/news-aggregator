@@ -51,6 +51,8 @@ class ChannelGroupingProposal(models.Model):
     applied_at = models.DateTimeField(null=True, blank=True)
     public_source = models.ForeignKey('api.Source', null=True, blank=True, on_delete=models.CASCADE)
     credential_fingerprint = models.CharField(max_length=64, default='', blank=True)
+    execution_snapshot = models.JSONField(default=dict, blank=True)
+    dispatch_started_at = models.DateTimeField(null=True, blank=True)
     model_id = models.CharField(max_length=160, default='', blank=True)
     attempts = models.PositiveSmallIntegerField(default=0)
     lease_token = models.CharField(max_length=64, default='', blank=True)
@@ -77,6 +79,8 @@ class ChannelClassifierSettings(models.Model):
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
     enabled = models.BooleanField(default=False)
     daily_limit = models.PositiveSmallIntegerField(default=10)
+    # Separate opt-in binding for unattended public-source classification.
+    execution_snapshot = models.JSONField(default=dict, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
 
