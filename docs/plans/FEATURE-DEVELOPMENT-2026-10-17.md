@@ -135,6 +135,15 @@ RSS T14 已合并 [#142](https://github.com/CoderLambert/news-aggregator/pull/14
 - 后端实际门禁/终态函数先失败复现，修正后 4 项无数据库检查通过；相关前端 28 项、typecheck、变更文件 ESLint 与生产产物构建通过。只读复用既有 CI 依赖缓存、网络禁用并使用 dummy 数据库，没有重建环境、修改缓存或新增真实 Provider 请求。数据库/API 持久化联合验证与全量 CI 未运行。
 - 用户本轮明确“生产验证先跳过”：生产验收、真实数据切换、旧角色停止及依赖该前置的旧栈删除/最终发布保留为延期，不把未执行项记作通过，不再等待生产目标信息来阻塞当前代码迭代。
 
+### BYOK T02/T09/T10 · OpenAI 原生 Responses 开发差额（2026-10-20）
+
+- 用户明确“优先开发，跳过”剩余 DeepSeek 真实验收；生产验证已另行延期。真实厂商/生产未执行项继续记录为 NOT_RUN，不再等待 Key 或请求额度来阻塞独立代码交付。
+- 基线 `main@f2c2eec`。补上 OpenAI 官方预置 `gpt-5.4-mini`（目录能力初始 unknown），通过既有可信 Proxy 使用原生 Responses；显式文本/工具探针分别有界一次发送，研究与推荐/分类等非流式业务继续复用原 owner/版本快照、费用同意与调用记录。原生输出映射只供既有工具调度，不建立直连厂商或站点 Key 回退。
+- 请求固定 `store=false`、禁用 provider-side conversation/previous_response_id；原生 function_call、function_call_output 和 encrypted reasoning items 完整留在服务端同模型续接，公开历史仍只含可见文字。只有 completed 且无 error/incomplete_details 的响应可进入既有工具参数白名单/最终回答校验；拒绝缺失/重复/孤立工具结果和拒绝/未知输出类型。
+- 只开放上述非流式能力；文章流式问答/翻译仍受原 Flash 终态路由限制。OpenAI 预置使用官方支持的 reasoning=none，避免将 Chat 专属 temperature 默认值带入另一协议；探针最多 64/128 输出 Token，无自动重试。
+- 10 项局部离线检查通过，覆盖原生工具往返/后续回传、私有字段不公开、Gateway 单次原生派发、显式 HTTP 探针与不完整终态。复用只读现成缓存、dummy DB 和 network-none 容器；无新安装、真实 Key/Provider/生产操作，未运行全量 CI 或数据库联合回归。
+- 官方依据：[Responses 状态与回传](https://developers.openai.com/api/docs/guides/conversation-state)、[工具结果条目](https://developers.openai.com/api/docs/guides/function-calling)、[GPT-5.4 mini](https://developers.openai.com/api/docs/models/gpt-5.4-mini)。开发完成不等于 T13-A 真实验收已通过。
+
 | 顺序 | 原编号与目标 | 需要完成的真正差额 | 阶段验收 |
 |---|---|---|---|
 | 第 8 批 A（离线交付已合并） | **BYOK T04 个人模型新闻问答** | T03 + T01 已接入文章阅读器和 per-turn 问答；取消/流式与提交围栏差额由 #118 完成，证据见上；真实验收仍独立保留 | 用户/文章版本/模型尝试/取消/重试负例及 SDK→本地 Proxy→合成上游通过；真实付费上游/UAT `NOT_RUN` |

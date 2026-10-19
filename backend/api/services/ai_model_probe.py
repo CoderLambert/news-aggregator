@@ -12,6 +12,9 @@ import urllib.request
 from dataclasses import dataclass
 
 from api.services.ai_gateway import AIGatewayError, ARTICLE_CHAT_SUPPORTED_ALIAS, _gateway_configuration
+from api.services.ai_responses_protocol import (
+    OPENAI_RESPONSES_MODELS, ResponsesProtocolError, responses_completion, responses_payload,
+)
 
 MAX_RESPONSE_BYTES = 64 * 1024
 TIMEOUT_SECONDS = 15
@@ -157,14 +160,30 @@ def send_model_probe(*, provider_key: str, model_alias: str, probe_kind: str) ->
         gateway, project_key = _gateway_configuration()  # enforces local loopback
     except AIGatewayError:
         return ProbeOutcome('not_sent', 'gateway_unavailable')
-    data = json.dumps(_payload(model_alias, probe_kind, provider_key), separators=(',', ':')).encode()
+    payload = _payload(model_alias, probe_kind, provider_key)
+    native_responses = model_alias in OPENAI_RESPONSES_MODELS
+    endpoint = 'chat/completions'
+    if native_responses:
+        payload.pop('api_key')
+        payload['max_tokens'] = 64 if probe_kind == 'text' else 128
+        payload = {**responses_payload(payload), 'api_key': provider_key}
+        endpoint = 'responses'
+    data = json.dumps(payload, separators=(',', ':')).encode()
     request = urllib.request.Request(
-        f'{gateway}/v1/chat/completions', data=data, method='POST',
+        f'{gateway}/v1/{endpoint}', data=data, method='POST',
         headers={'Accept': 'application/json', 'Authorization': f'Bearer {project_key}',
                  'Content-Type': 'application/json'})
     try:
         with _OPENER.open(request, timeout=TIMEOUT_SECONDS) as response:
-            return parse_completion(response.status, response.headers, response.read(MAX_RESPONSE_BYTES + 1), probe_kind)
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+            if native_responses:
+                if response.status != 200 or len(raw) > MAX_RESPONSE_BYTES:
+                    return ProbeOutcome('unknown', 'result_unknown', _request_id(response.headers))
+                try:
+                    raw = json.dumps(responses_completion(_json_parse(raw))).encode()
+                except (ResponsesProtocolError, TypeError, ValueError, UnicodeDecodeError):
+                    return ProbeOutcome('unknown', 'incomplete_or_invalid', _request_id(response.headers))
+            return parse_completion(response.status, response.headers, raw, probe_kind)
     except urllib.error.HTTPError as exc:
         # 429, upstream validation and redirects do not prove lack of capability;
         # no error body is persisted or reflected to a user.

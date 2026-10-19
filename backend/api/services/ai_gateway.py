@@ -9,6 +9,10 @@ import re
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 from django.conf import settings
+from api.services.ai_responses_protocol import (
+    OPENAI_RESPONSES_MODELS, ResponsesProtocolError, completion_object,
+    responses_completion, responses_payload,
+)
 
 
 class AIGatewayError(RuntimeError):
@@ -79,9 +83,10 @@ ARTICLE_CHAT_SUPPORTED_ALIAS = 'deepseek/deepseek-flash'
 
 
 class _GatewayCompletions:
-    def __init__(self, completions, provider_key: str):
+    def __init__(self, completions, provider_key: str, responses=None):
         self._completions = completions
         self._provider_key = provider_key
+        self._responses = responses
 
     def create(self, **kwargs):
         if kwargs.pop('extra_body', None) not in (None, {}):
@@ -89,6 +94,16 @@ class _GatewayCompletions:
         requested_stream = kwargs.get('stream') is True
         if requested_stream and kwargs.get('model') != ARTICLE_CHAT_SUPPORTED_ALIAS:
             raise AIGatewayError('个人模型流式路由不可用。')
+        if kwargs.get('model') in OPENAI_RESPONSES_MODELS:
+            if self._responses is None:
+                raise AIGatewayError('个人模型原生协议不可用。')
+            try:
+                data = responses_payload(kwargs)
+                result = self._responses.create(**data, extra_body={'api_key': self._provider_key})
+                raw = result if isinstance(result, dict) else result.model_dump(mode='json', exclude_none=True)
+                return completion_object(responses_completion(raw))
+            except ResponsesProtocolError:
+                raise AIGatewayError('个人模型返回了不完整或无法验证的响应。') from None
         kwargs['extra_body'] = {'api_key': self._provider_key}
         # OpenAI's SDK starts the HTTP request here and returns a closeable
         # iterator. Do not buffer, defer, retry, or convert an uncertain stream.
@@ -104,7 +119,8 @@ class _GatewayClient:
         self._client = client
         self._http_client = http_client
         self.chat = SimpleNamespace(
-            completions=_GatewayCompletions(client.chat.completions, provider_key),
+            completions=_GatewayCompletions(client.chat.completions, provider_key,
+                                           responses=getattr(client, 'responses', None)),
         )
 
     def close(self):

@@ -38,7 +38,15 @@ class _ProxyStub(BaseHTTPRequestHandler):
             self.send_header('Location', 'https://example.invalid/collect')
             self.end_headers()
             return
-        if self.server.bad_terminal:
+        if self.path == '/v1/responses':
+            item = ({'type': 'function_call', 'id': 'fc_probe', 'call_id': 'call_probe',
+                     'name': 'byok_probe', 'arguments': '{"ok":true}', 'status': 'completed'}
+                    if payload.get('tools') else
+                    {'type': 'message', 'role': 'assistant', 'status': 'completed',
+                     'content': [{'type': 'output_text', 'text': 'ok', 'annotations': []}]})
+            reply = {'status': 'incomplete' if self.server.bad_terminal else 'completed',
+                     'output': [item], 'usage': {'input_tokens': 9, 'output_tokens': 1}}
+        elif self.server.bad_terminal:
             reply = {'choices': [{'finish_reason': 'length', 'message': {'content': 'partial'}}]}
         elif payload.get('tools'):
             reply = {'choices': [{'finish_reason': 'tool_calls', 'message': {
@@ -91,6 +99,21 @@ class SyntheticGatewayTransportTests(TestCase):
             self.assertEqual(payload['thinking'], {'type': 'disabled'})
             self.assertLessEqual(payload['max_tokens'], 32)
         self.assertEqual(self.server.seen[1][2]['tool_choice']['function']['name'], 'byok_probe')
+
+    def test_openai_probes_use_stateless_native_responses(self):
+        for kind in ('text', 'tools'):
+            self.assertEqual(self.send(kind, 'openai/gpt-5.4-mini').status, 'succeeded')
+        self.assertEqual(len(self.server.seen), 2)
+        for path, bearer, payload in self.server.seen:
+            self.assertEqual(path, '/v1/responses')
+            self.assertEqual(bearer, f'Bearer {PROJECT_KEY}')
+            self.assertEqual(payload['api_key'], PROVIDER_KEY)
+            self.assertFalse(payload['store'])
+            self.assertLessEqual(payload['max_output_tokens'], 128)
+        self.assertEqual(self.server.seen[1][2]['tool_choice'], {'type': 'function', 'name': 'byok_probe'})
+        self.server.bad_terminal = True
+        self.assertEqual(self.send('text', 'openai/gpt-5.4-mini').status, 'unknown')
+        self.assertEqual(len(self.server.seen), 3)
 
     def test_text_and_tool_one_shots_have_bounded_fixed_request_shapes(self):
         for kind in ('text', 'tools'):
