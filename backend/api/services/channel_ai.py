@@ -6,7 +6,7 @@ from datetime import timedelta
 from email.utils import parsedate_to_datetime
 from django.conf import settings
 from django.db import transaction
-from django.db.models import F, Q
+from django.db.models import F, Q, Count, Min
 from django.utils import timezone
 from rest_framework.exceptions import Throttled
 from api.models import Source, ChannelSubscription
@@ -253,8 +253,14 @@ def enqueue_site_sources(limit=10):
             continue
         signature = digest([PROMPT_VERSION, source.id, base_profile(source)['evidence_hash'], evidence['titles'], cfg.execution_snapshot])
         request_id = uuid.uuid5(uuid.NAMESPACE_URL, f'channel-site:{cfg.owner_id}:{signature}')
-        if ChannelGroupingProposal.objects.filter(user=cfg.owner, request_id=request_id).exists():
+        prior = ChannelGroupingProposal.objects.filter(user=cfg.owner, public_source=source, request_hash=signature)
+        # A positively never-sent cancelled/failed job may be admitted again.
+        # Retain completed/failed/uncertain attempts as a no-auto-resend barrier.
+        if prior.exclude(status__in=['cancelled', 'failed'], dispatch_started_at__isnull=True,
+                         execution_snapshot__model__isnull=False).exists():
             continue
+        if ChannelGroupingProposal.objects.filter(user=cfg.owner, request_id=request_id).exists():
+            request_id = uuid.uuid4()
         ChannelGroupingProposal.objects.create(user=cfg.owner, public_source=source, request_id=request_id,
             request_hash=signature, engine='ai', status='queued', source_ids=[source.id], topic_keys=list(TOPIC_MAP),
             input_snapshot=base_profile(source)['evidence_hash'], evidence=[evidence], credential_fingerprint=fingerprint,
@@ -294,3 +300,30 @@ def process_incremental_subscriptions(limit=100):
             continue
         count += 1
     return count
+
+
+def classifier_status(cfg):
+    """Read-only operator snapshot; no queue repair, dispatch, or Provider request."""
+    now = timezone.now()
+    jobs = ChannelGroupingProposal.objects.filter(engine='ai', public_source__isnull=False)
+    counts = {row['status']: row['total'] for row in jobs.values('status').annotate(total=Count('id'))}
+    features_enabled = bool(settings.PUBLIC_SITE_MODE == 'full' and settings.PUBLIC_AI_ENABLED
+                            and getattr(settings, 'AI_BYOK_ENABLED', False))
+    binding_valid = False
+    if cfg and cfg.owner and cfg.owner.is_active and cfg.owner.is_superuser:
+        try:
+            verify_model(cfg.execution_snapshot, owner_id=cfg.owner_id, scope='site')
+            binding_valid = True
+        except ClassificationAuthorizationChanged:
+            pass
+    used = jobs.filter(user_id=cfg.owner_id, created_at__date=timezone.localdate()).count() if cfg and cfg.owner_id else 0
+    limit = cfg.daily_limit if cfg else 10
+    next_retry = jobs.filter(status='queued', next_attempt_at__gt=now).aggregate(value=Min('next_attempt_at'))['value']
+    return {
+        'feature_enabled': features_enabled, 'model_binding_valid': binding_valid,
+        'ready_to_dispatch': bool(cfg and cfg.enabled and features_enabled and binding_valid),
+        'daily_used': used, 'daily_remaining': max(0, limit - used), 'job_counts': counts,
+        'expired_leases': jobs.filter(status='running').filter(Q(lease_until__lte=now) | Q(lease_until__isnull=True)).count(),
+        'failed_dispatched_jobs': jobs.filter(status='failed', dispatch_started_at__isnull=False).count(),
+        'next_retry_at': next_retry.isoformat() if next_retry else None,
+    }
