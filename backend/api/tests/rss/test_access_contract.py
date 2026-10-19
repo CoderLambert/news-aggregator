@@ -108,6 +108,46 @@ def test_engine_provenance_identity_and_current_origin_policy(world):
     assert get_stored_article(a, news.pk).scope == 'summary'
 
 
+def test_engine_body_origin_requires_current_entry_url_binding(world):
+    from api.services.article_identity import normalize_article_url
+
+    a, _, make = world
+    source, news = make('engine-url', subscriber=a, owner='paused', state='available')
+    normalized_url = normalize_article_url(
+        'HTTPS://Article.Example/engine-url?utm_source=feed&story=7#body')
+    assert normalized_url == 'https://article.example/engine-url?story=7'
+    news.url = normalized_url
+    news.save(update_fields=['url'])
+
+    binding = FeedBinding.objects.create(engine_instance_uuid=uuid.uuid4(), account_id=3,
+        engine_feed_id=7, canonical_feed_url='https://feed.example/e')
+    SourceFeedLink.objects.create(source=source, binding=binding, enabled=False)
+    EngineEntryMap.objects.create(binding=binding, engine_entry_id=12, news=news,
+        source_url=normalized_url, disposition='linked')
+    news.body_owner_source = None
+    news.body_owner_binding = binding
+    news.full_content_provenance = dict(owner='miniflux', binding_id=str(binding.pk),
+        source_id=source.pk, engine_instance_uuid=str(binding.engine_instance_uuid),
+        account_id=3, engine_feed_id=7, engine_entry_id=12)
+    news.save(update_fields=['body_owner_source', 'body_owner_binding', 'full_content_provenance'])
+
+    accepted = get_stored_article(a, news.pk)
+    assert accepted.scope == 'full'
+    assert accepted.url == normalized_url
+    assert accepted.markdown == news.full_content
+
+    # Simulate a stale/out-of-band News identity update while accepted bytes and
+    # the Miniflux mapping still refer to the prior normalized article URL.
+    news.url = 'https://article.example/engine-url?story=8'
+    news.save(update_fields=['url'])
+    assert not body_authorized_news(a).filter(pk=news.pk).exists()
+    summary = get_stored_article(a, news.pk)
+    assert summary.scope == 'summary'
+    assert summary.markdown == news.content
+    assert summary.provenance == {}
+    assert summary.body_owner is None
+
+
 def api_client(user=None):
     from rest_framework.test import APIClient
     client = APIClient()
