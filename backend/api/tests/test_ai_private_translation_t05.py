@@ -514,17 +514,17 @@ class PrivateTranslationTests(TransactionTestCase):
         self.assertTrue(any(separator for _, separator in prepared))
         # Synthetic translated prose omits source paragraph separators; the merge restores them.
         translated_bodies = [
-            '## 标题\\n\\n[Read](https://example.test/a)\\n\\n'
-            '| 左 | 右 |\\n| --- | --- |\\n\\n```py\\nprint(1)\\n```\\n\\n第一段中文',
+            '## 标题\n\n[Read](https://example.test/a)\n\n'
+            '| 左 | 右 |\n| --- | --- |\n\n```py\nprint(1)\n```\n\n第一段中文',
             '第二段中文',
         ]
         gateways = [FakeGateway([gateway_frame(body)]) for body in translated_bodies]
         with patch.object(service, 'build_gateway_client', side_effect=gateways) as build:
             service.run_translation(task.pk, task.generation)
         task.refresh_from_db()
-        expected = ('## 标题\\n\\n[Read](https://example.test/a)\\n\\n'
-                    '| 左 | 右 |\\n| --- | --- |\\n\\n```py\\nprint(1)\\n```\\n\\n'
-                    '第一段中文\\n\\n第二段中文')
+        expected = ('## 标题\n\n[Read](https://example.test/a)\n\n'
+                    '| 左 | 右 |\n| --- | --- |\n\n```py\nprint(1)\n```\n\n'
+                    '第一段中文\n\n第二段中文')
         self.assertEqual(task.status, 'succeeded')
         self.assertEqual(build.call_count, len(chunks))
         self.assertEqual([len(gateway.sent) for gateway in gateways], [1] * len(chunks))
