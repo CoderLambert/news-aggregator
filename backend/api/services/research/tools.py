@@ -1059,6 +1059,13 @@ def _tool_analyze_topic(query: str, depth: str = 'standard', execution_guard=Non
                 'title': art['title'],
                 'article_id': art['id'],
                 'source': art['source'],
+                'source_scope': art['source_scope'],
+                'policy_versions': art['policy_versions'],
+                'context_scope': art['context_scope'],
+                'full_content_revision': art['full_content_revision'],
+                'canonical_hash': art['canonical_hash'],
+                'content_completeness': art['content_completeness'],
+                'provenance_hash': art['provenance_hash'],
             })
 
     timeline = []
