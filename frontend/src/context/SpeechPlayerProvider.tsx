@@ -63,7 +63,6 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   const viewerId = user ? String(user.id) : 'anonymous'
   const viewerIdRef = useRef(viewerId)
-  viewerIdRef.current = viewerId
   const [status, setStatus] = useState<SpeechStatus>('idle')
   const [progress, setProgress] = useState(0)
   const [duration, setDuration] = useState(0)
@@ -148,7 +147,9 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
   }, [clearMediaSession, savePosition, updateStatus])
 
   useLayoutEffect(() => {
-    if (activeArticleRef.current && activeArticleRef.current.viewerId !== viewerId) stop()
+    const previousViewerId = viewerIdRef.current
+    viewerIdRef.current = viewerId
+    if (previousViewerId !== viewerId && activeArticleRef.current?.viewerId !== viewerId) stop()
   }, [stop, viewerId])
 
   const updateMediaSession = useCallback((articleTitle: string, audio: HTMLAudioElement, requestId: number) => {

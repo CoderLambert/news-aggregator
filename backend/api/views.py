@@ -761,7 +761,7 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
             return Response({'error_code': 'translation_result_unavailable'}, status=status.HTTP_404_NOT_FOUND)
         messages = readable_chat_messages(
             normalized_chat_history(session.messages), stored, translation_context,
-            allow_legacy_original=(mode == 'original'),
+            allow_legacy_original=(translation_context.get('source') == 'original'),
         ) if session else []
         return Response({'messages': messages, 'translation_context': translation_context})
 

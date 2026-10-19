@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AuthContext, useAuth } from '@/context/AuthContext'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -72,8 +72,10 @@ class MockAudio {
 function PlayerActions() {
   const player = useSpeechPlayerActions()
   const { user } = useAuth()
-  if (user?.id === 101 && !retainedViewerASpeak) retainedViewerASpeak = player.speak
   const state = useSpeechPlayerState()
+  useEffect(() => {
+    if (user?.id === 101 && !retainedViewerASpeak) retainedViewerASpeak = player.speak
+  }, [player.speak, user?.id])
   return (
     <div>
       <button type="button" onClick={() => player.speak(11, '第一篇虚构新闻', { language: 'zh' })}>朗读第一篇</button>
@@ -279,6 +281,7 @@ describe('global speech player', () => {
   it('rejects an old viewer callback that tries to start private audio after a switch', async () => {
     const user = userEvent.setup()
     renderPlayer()
+    await user.click(screen.getByRole('button', { name: '朗读第一篇' }))
     expect(retainedViewerASpeak).toBeTypeOf('function')
     await user.click(screen.getByRole('button', { name: '切换用户' }))
     const audioCount = audioInstances.length
