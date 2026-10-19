@@ -478,12 +478,12 @@ def _attach_parser_provenance(source, request_data) -> bool:
                     raise RuntimeError("T00_STREAM_TERMINAL_UNVERIFIED")
             return original_chunk_parser(chunk)
 
-        def guarded_handle_line(line):
+        def guarded_handle_line(str_line):
             if _parser_is_guarded(parser):
-                _observe_sse_line(parser, line)
+                _observe_sse_line(parser, str_line)
                 if _parser_invalid(parser):
                     raise RuntimeError("T00_STREAM_TERMINAL_UNVERIFIED")
-            return original_handle_line(line)
+            return original_handle_line(str_line=str_line)
 
         parser.chunk_parser = guarded_chunk_parser
         parser._handle_string_chunk = guarded_handle_line

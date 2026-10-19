@@ -487,7 +487,7 @@ class NativeParserPatch(unittest.TestCase):
 
         class BaseModelResponseIterator:
             async def __anext__(self):
-                return "ordinary"
+                return self._handle_string_chunk(str_line="data: [DONE]")
 
             def _handle_string_chunk(self, str_line):
                 return str_line
@@ -556,7 +556,7 @@ class NativeParserPatch(unittest.TestCase):
             parser.chunk_parser({
                 "choices": [{"index": 0, "finish_reason": "stop", "delta": {}}],
             })
-            parser._handle_string_chunk("data: [DONE]")
+            self.assertEqual(asyncio.run(parser.__anext__()), "data: [DONE]")
             self.assertTrue(getattr(parser, guard._PARSER_STOP_ATTR))
             self.assertTrue(getattr(parser, guard._PARSER_DONE_ATTR))
             self.assertIsNot(parser.chunk_parser, original_chunk_parser)
@@ -565,7 +565,7 @@ class NativeParserPatch(unittest.TestCase):
             self.assertFalse(hasattr(parser, guard._PARSER_PROVENANCE_ATTR))
 
             ordinary = OpenAIChatCompletionStreamingHandler()
-            self.assertEqual(asyncio.run(ordinary.__anext__()), "ordinary")
+            self.assertEqual(asyncio.run(ordinary.__anext__()), "data: [DONE]")
 
             done = OpenAIChatCompletionStreamingHandler()
             done._byok_raw_terminal_parser_token = guard._PARSER_PROVENANCE_TOKEN
