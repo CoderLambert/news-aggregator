@@ -646,7 +646,11 @@ class ChatGPTArticleTranslation(models.Model):
 
     user = models.ForeignKey('auth.User', on_delete=models.CASCADE, related_name='chatgpt_translations')
     connection = models.ForeignKey(
-        ChatGPTSubscriptionConnection, on_delete=models.CASCADE, related_name='translations',
+        ChatGPTSubscriptionConnection, null=True, blank=True, on_delete=models.CASCADE, related_name='translations',
+    )
+    api_connection = models.ForeignKey(
+        'UserAIConnection', null=True, blank=True, on_delete=models.CASCADE,
+        related_name='private_translations',
     )
     news = models.ForeignKey(News, on_delete=models.CASCADE, related_name='chatgpt_translations')
     source_hash = models.CharField(max_length=64)
@@ -660,6 +664,16 @@ class ChatGPTArticleTranslation(models.Model):
         verbose_name = 'ChatGPT 全文翻译'
         verbose_name_plural = 'ChatGPT 全文翻译'
         constraints = [
+            models.CheckConstraint(
+                condition=(models.Q(connection__isnull=False, api_connection__isnull=True) |
+                           models.Q(connection__isnull=True, api_connection__isnull=False)),
+                name='byok_translation_result_credential_xor',
+            ),
+            models.UniqueConstraint(
+                fields=['user', 'api_connection', 'news', 'source_hash'],
+                condition=models.Q(api_connection__isnull=False), name='byok_translation_result_source',
+            ),
+
             models.UniqueConstraint(
                 fields=['user', 'connection', 'news', 'source_hash'], name='unique_chatgpt_news_translation',
             ),
@@ -683,13 +697,20 @@ class ChatGPTTranslationTask(models.Model):
         'auth.User', on_delete=models.CASCADE, related_name='chatgpt_translation_tasks',
     )
     connection = models.ForeignKey(
-        ChatGPTSubscriptionConnection, on_delete=models.CASCADE,
+        ChatGPTSubscriptionConnection, null=True, blank=True, on_delete=models.CASCADE,
         related_name='translation_tasks',
+    )
+    api_connection = models.ForeignKey(
+        'UserAIConnection', null=True, blank=True, on_delete=models.CASCADE,
+        related_name='private_translation_tasks',
     )
     news = models.ForeignKey(News, on_delete=models.CASCADE, related_name='chatgpt_translation_tasks')
     source_hash = models.CharField(max_length=64)
     model_slug = models.CharField(max_length=255)
-    connection_generation = models.PositiveBigIntegerField()
+    connection_generation = models.PositiveBigIntegerField(null=True, blank=True)
+    request_id = models.UUIDField(null=True, blank=True)
+    request_hash = models.CharField(max_length=64, blank=True, default='')
+    execution_snapshot = models.JSONField(default=dict)
     generation = models.PositiveBigIntegerField(default=1)
     run_token = models.UUIDField(null=True, blank=True)
     shared_lease_task_id = models.PositiveBigIntegerField(null=True, blank=True)
@@ -710,6 +731,22 @@ class ChatGPTTranslationTask(models.Model):
         verbose_name = 'ChatGPT 全文翻译任务'
         verbose_name_plural = 'ChatGPT 全文翻译任务'
         constraints = [
+            models.CheckConstraint(
+                condition=(models.Q(connection__isnull=False, api_connection__isnull=True) |
+                           models.Q(connection__isnull=True, api_connection__isnull=False)),
+                name='byok_translation_task_credential_xor',
+            ),
+            models.UniqueConstraint(
+                fields=['user', 'api_connection', 'news', 'source_hash'],
+                condition=models.Q(api_connection__isnull=False), name='byok_translation_task_source',
+            ),
+            models.UniqueConstraint(fields=['user', 'request_id'],
+                condition=models.Q(api_connection__isnull=False), name='byok_translation_request'),
+            models.CheckConstraint(condition=(models.Q(api_connection__isnull=True) |
+                models.Q(connection_generation__isnull=True, shared_lease_task_id__isnull=True,
+                         shared_lease_token__isnull=True, request_id__isnull=False)),
+                name='byok_translation_private_only'),
+
             models.UniqueConstraint(
                 fields=['user', 'connection', 'news', 'source_hash'],
                 name='unique_chatgpt_translation_task_source',

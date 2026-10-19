@@ -10,6 +10,7 @@ from uuid import UUID
 from django.http import Http404
 from django.db import OperationalError, connection
 
+from api.services.ai_verified_stream import IncompleteStream, verified_text_deltas
 from api.services.ai_credentials import CredentialUnavailable
 from api.services.ai_model_registry import ARTICLE_CHAT_SUPPORTED_ALIAS
 from api.services.ai_gateway import AIGatewayError, build_gateway_client
@@ -163,57 +164,16 @@ def complete_article_chat(*, user, stored, chat_snapshot, messages, selection, t
             # long-lived transaction. Unknown provider outcomes are not retried.
             stream = dispatch_once(connection_data, task_owner_id=user.pk, send=send)
             pieces = []
-            total = 0
-            saw_stop = False
-            usage_seen = False
-            for frame in stream:
-                try:
-                    _check_execution(user, stored, selection, turn_id)
-                except (ArticleChatTurnError, ModelSelectionError, StoredContentChanged, Http404) as error:
-                    if isinstance(error, ArticleChatTurnError):
-                        raise ArticleChatError(error.code) from None
-                    raise ArticleChatError('execution_changed') from None
-
-                choices = getattr(frame, 'choices', None)
-                if not isinstance(choices, (list, tuple)):
-                    raise ArticleChatError('incomplete_response')
-                if not choices:
-                    # The official SDK can expose one optional usage-only chunk
-                    # either before or after the verified terminal.
-                    if getattr(frame, 'usage', None) is None or usage_seen:
-                        raise ArticleChatError('incomplete_response')
-                    usage_seen = True
-                    continue
-                if len(choices) != 1:
-                    raise ArticleChatError('incomplete_response')
-                choice = choices[0]
-                reason = getattr(choice, 'finish_reason', None)
-                if reason not in (None, 'stop'):
-                    raise ArticleChatError('incomplete_response')
-                delta = getattr(choice, 'delta', None)
-                if any(getattr(delta, name, None) for name in (
-                    'tool_calls', 'function_call', 'refusal',
-                )):
-                    raise ArticleChatError('incomplete_response')
-                content = getattr(delta, 'content', None)
-                if content is not None:
-                    if saw_stop or not isinstance(content, str):
-                        raise ArticleChatError('incomplete_response')
-                    total += len(content)
-                    if total > MAX_CHAT_ANSWER_CHARS:
-                        raise ArticleChatError('incomplete_response')
+            try:
+                for content in verified_text_deltas(
+                    stream, check=lambda: _check_execution(user, stored, selection, turn_id),
+                    max_chars=MAX_CHAT_ANSWER_CHARS,
+                ):
                     pieces.append(content)
                     yield {'type': 'delta', 'content': content}
-                if reason == 'stop':
-                    if saw_stop:
-                        raise ArticleChatError('incomplete_response')
-                    saw_stop = True
-                elif saw_stop:
-                    raise ArticleChatError('incomplete_response')
-
+            except IncompleteStream:
+                raise ArticleChatError('incomplete_response') from None
             answer = ''.join(pieces)
-            if not saw_stop or not answer.strip():
-                raise ArticleChatError('incomplete_response')
 
             def persist():
                 model = require_task_model_snapshot(selection, owner_id=user.pk)

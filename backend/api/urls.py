@@ -1,5 +1,6 @@
 from django.urls import path
 from . import channel_views
+from . import ai_translation_views
 from . import views
 from . import research_views
 from . import subscription_views
@@ -16,6 +17,9 @@ from .rss.directory_http import DirectoryView
 from .rss.health_http import RssHealthView
 
 urlpatterns = [
+    path('news/<int:news_id>/byok-translation/', ai_translation_views.PrivateTranslationStartView.as_view(), name='byok-translation-start'),
+    path('me/ai/translations/<uuid:task_id>/', ai_translation_views.PrivateTranslationTaskView.as_view(), name='byok-translation-task'),
+    path('me/ai/translations/<uuid:task_id>/events/', ai_translation_views.PrivateTranslationEventsView.as_view(), name='byok-translation-events'),
     path('admin/rss/health/', RssHealthView.as_view(), name='rss-health'),
     path('rss/directory/', DirectoryView.as_view(), name='rss-directory'),
     path('me/rss-imports/preview/', opml_views.OpmlPreviewView.as_view(), name='rss-opml-preview'),
