@@ -48,8 +48,8 @@ class ProbeContracts(unittest.TestCase):
     def test_post_done_peer_probe_rejects_open_socket_and_accepts_eof(self):
         upstream_socket, client_socket = socket.socketpair()
         try:
-            upstream_socket.sendall(b"data: [DONE]\\n\\n")
-            self.assertEqual(client_socket.recv(64), b"data: [DONE]\\n\\n")
+            upstream_socket.sendall(b"data: [DONE]\n\n")
+            self.assertEqual(client_socket.recv(64), b"data: [DONE]\n\n")
             self.assertEqual(upstream.observe_peer_close(upstream_socket, 0.02), "timeout")
             client_socket.close()
             self.assertEqual(upstream.observe_peer_close(upstream_socket, 0.5), "eof")
