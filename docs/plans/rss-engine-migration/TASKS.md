@@ -35,7 +35,7 @@
 | [T29](tasks/T29/task.md) | 执行来源试点与后续迁移批次 | T27 | NOT_STARTED · PROD GATE |
 | [T30](tasks/T30/task.md) | 停止旧运行入口并验证重启 | T29 | NOT_STARTED · PROD GATE |
 | [T31](tasks/T31/task.md) | 删除旧采集代码、依赖并统一部署入口 | T30 | IN_PROGRESS · [Draft #154](https://github.com/CoderLambert/news-aggregator/pull/154)，独立候选未合并，T30 集成门禁待执行 |
-| [T33](tasks/T33/task.md) | 验证最终单栈并执行获批发布 | T31 | NOT_STARTED · PROD GATE |
+| [T33](tasks/T33/task.md) | 验证最终单栈并执行获批发布 | T31 | IN_PROGRESS / PARTIAL · 独立验证准备，真实资源/集成/发布待执行 |
 
 T17 的授权缓存预览在 T20 联合接入 T11；T19 的目录/token 分支在 T20 联合接入 T16/T17；T13 的真实修复、T20 的真实健康和原生后台预获取在 T27 联合验证。这些是条件接线，不让基本 UI/直接 URL 功能等待整个后端完成。
 
