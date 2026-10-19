@@ -90,6 +90,21 @@ class NativeResponsesTests(TestCase):
             with self.subTest(value=value), self.assertRaises(ResponsesProtocolError):
                 responses_completion(value)
 
+    def test_classification_json_object_and_timeout_map_to_responses(self):
+        native = Mock()
+        native.create.return_value = response([{**FINAL, 'content': [
+            {'type': 'output_text', 'text': '{"channels":[]}'}]}])
+        gateway = _GatewayCompletions(Mock(), 'synthetic-key', responses=native)
+        gateway.create(model=MODEL, messages=[{'role': 'user', 'content': 'Classify as JSON'}],
+                       stream=False, response_format={'type': 'json_object'}, max_tokens=6000, timeout=60)
+        request = native.create.call_args.kwargs
+        self.assertEqual(request['text'], {'format': {'type': 'json_object'}})
+        self.assertEqual(request['timeout'], 60)
+        self.assertNotIn('response_format', request)
+        with self.assertRaises(AIGatewayError):
+            gateway.create(model=MODEL, timeout=181)
+        self.assertEqual(native.create.call_count, 1)
+
     def test_missing_duplicate_and_orphan_tool_outputs_are_rejected(self):
         assistant = {'role': 'assistant', 'responses_output': [CALL]}
         tool = {'role': 'tool', 'tool_call_id': 'call_1', 'content': '{}'}

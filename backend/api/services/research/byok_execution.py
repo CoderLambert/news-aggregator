@@ -28,6 +28,8 @@ from api.services.ai_worker_fencing import (
 from api.services.ai_gateway import AIGatewayError, build_gateway_client
 from api.services.ai_responses_protocol import OPENAI_RESPONSES_MODELS, RESPONSES_PROTOCOL
 
+from api.services.ai_messages_protocol import ANTHROPIC_MESSAGES_MODELS, MESSAGES_PROTOCOL
+
 logger = logging.getLogger(__name__)
 
 RESEARCH_SNAPSHOT_SCHEMA_VERSION = 1
@@ -406,13 +408,15 @@ def preserve_native_fields(source, target):
         if type(reasoning) is not str or len(reasoning.encode('utf-8')) > MAX_CONTINUATION_BYTES:
             raise ResearchBYOKError('invalid_response')
         target['reasoning_content'] = reasoning
-    items = _get(source, 'responses_output')
-    if items is not None:
+    for field in ('responses_output', 'anthropic_content'):
+        items = _get(source, field)
+        if items is None:
+            continue
         try:
             encoded = json.dumps(items, ensure_ascii=False, allow_nan=False)
             if type(items) is not list or len(encoded.encode('utf-8')) > MAX_CONTINUATION_BYTES:
                 raise ValueError
-            target['responses_output'] = json.loads(encoded)
+            target[field] = json.loads(encoded)
         except (TypeError, ValueError):
             raise ResearchBYOKError('invalid_response') from None
 
@@ -428,8 +432,12 @@ def visible_messages(messages):
 
 def _continuation_protocol(snapshot):
     model = snapshot.get('model') if type(snapshot) is dict else None
-    return (RESPONSES_PROTOCOL if type(model) is dict and model.get('proxy_alias') in OPENAI_RESPONSES_MODELS
-            else CONTINUATION_PROTOCOL)
+    alias = model.get('proxy_alias') if type(model) is dict else None
+    if alias in OPENAI_RESPONSES_MODELS:
+        return RESPONSES_PROTOCOL
+    if alias in ANTHROPIC_MESSAGES_MODELS:
+        return MESSAGES_PROTOCOL
+    return CONTINUATION_PROTOCOL
 
 
 def continuation_payload(snapshot, messages):

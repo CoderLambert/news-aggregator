@@ -72,7 +72,7 @@ def responses_input(messages):
 
 
 def responses_payload(kwargs):
-    allowed = {'model', 'messages', 'tools', 'tool_choice', 'max_tokens', 'temperature', 'stream'}
+    allowed = {'model', 'messages', 'tools', 'tool_choice', 'max_tokens', 'temperature', 'stream', 'response_format'}
     if (set(kwargs) - allowed or kwargs.get('model') not in OPENAI_RESPONSES_MODELS
             or (kwargs.get('stream') is not None and kwargs.get('stream') is not False)):
         raise ResponsesProtocolError('unsupported_request')
@@ -82,6 +82,10 @@ def responses_payload(kwargs):
     data = {'model': kwargs['model'], 'input': responses_input(kwargs.get('messages')),
             'store': False, 'include': ['reasoning.encrypted_content'], 'max_output_tokens': maximum,
             'reasoning': {'effort': 'none'}}
+    if kwargs.get('response_format') is not None:
+        if kwargs['response_format'] != {'type': 'json_object'}:
+            raise ResponsesProtocolError('unsupported_format')
+        data['text'] = {'format': {'type': 'json_object'}}
     tools = kwargs.get('tools')
     if tools is not None:
         if type(tools) is not list:
