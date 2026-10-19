@@ -373,7 +373,8 @@ def _send_once(provider_key, model, *, messages, tools, payload, owner_id, execu
     gateway = None
     try:
         gateway = build_gateway_client(provider_key)
-        response = gateway.chat.completions.create(
+        from api.services.ai_usage import complete_with_usage
+        response = complete_with_usage(gateway, model, 'deep_research',
             model=model.proxy_alias, messages=messages, tools=tools,
             tool_choice="auto", temperature=0.3, max_tokens=8000,
         )

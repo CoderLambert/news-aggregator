@@ -144,7 +144,8 @@ def complete_article_chat(*, user, stored, chat_snapshot, messages, selection, t
                     user_id=user.pk, news_id=stored.news_id, turn_id=turn_id,
                 )
                 gateway = build_gateway_client(provider_key)
-                stream = gateway.chat.completions.create(
+                from api.services.ai_usage import complete_with_usage
+                stream = complete_with_usage(gateway, selection, 'article_qa',
                     model=selection.proxy_alias, messages=messages,
                     stream=True, max_tokens=MAX_CHAT_OUTPUT_TOKENS,
                     temperature=0.7, reasoning_effort='none',

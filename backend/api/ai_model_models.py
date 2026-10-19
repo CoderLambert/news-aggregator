@@ -61,3 +61,23 @@ class AIModelProbeAttempt(models.Model):
         ordering = ['-created_at', 'id']
         indexes = [models.Index(fields=['user', 'created_at'], name='ai_probe_owner_created')]
         constraints = [models.UniqueConstraint(fields=['user', 'request_id'], name='ai_probe_request_unique')]
+
+
+class AICallAttempt(models.Model):
+    """One business-model send, without prompt, response, credential or raw error."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    task_kind = models.CharField(max_length=32)
+    model_config_id = models.UUIDField()
+    model_id = models.CharField(max_length=160)
+    provider_id = models.CharField(max_length=48)
+    status = models.CharField(max_length=16, default='started')
+    input_tokens = models.PositiveBigIntegerField(null=True, blank=True)
+    output_tokens = models.PositiveBigIntegerField(null=True, blank=True)
+    latency_ms = models.PositiveIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at', 'id']
+        indexes = [models.Index(fields=['user', 'created_at'], name='ai_call_owner_created')]

@@ -4,6 +4,7 @@ import { useAuth } from '@/context/AuthContext'
 import AuthModal from '@/components/AuthModal'
 import WorkspaceModal from '@/components/workspace/WorkspaceModal'
 import AIModelsManager from '@/components/workspace/AIModelsManager'
+import AIUsageSection from '@/components/workspace/AIUsageSection'
 import AITaskPreferencesSection from '@/components/workspace/AITaskPreferencesSection'
 import { ConnectionRequestError, createAIConnection, deleteAIConnection, listAIConnections, listAIProviders,
   patchAIConnection, replaceAIConnectionKey, type AIConnection, type AIProviderProfile } from '@/services/aiConnectionsApi'
@@ -90,6 +91,7 @@ export function AIConnectionsManager({ viewer }: { viewer: number }) {
       <AIModelsManager key={connection.id} connection={connection} viewer={viewer} />
     </section>)}</div>
     {data && <AITaskPreferencesSection viewer={viewer} connections={data.connections} />}
+    <AIUsageSection key={`usage-${viewer}`} viewer={viewer} />
     {editor && data && <ConnectionEditor key={editor.kind + ('connection' in editor ? editor.connection.id : '')}
       editor={editor} profiles={data.providers} busy={busy} onClose={() => setEditor(null)}
       onSave={(name, profile, key, requestId) => {
