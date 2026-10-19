@@ -354,8 +354,9 @@ def payload(task):
                 previous_result = previous.task.result
     return {
         'task_id': str(task.pk), 'request_id': str(task.request_id), 'news_id': task.news_id,
-        'generation': task.generation, 'status': status,
-        'progress': task.progress,
+        'generation': task.generation,
+        'retry_of': task.execution_snapshot.get('retry_of'),
+        'status': status, 'progress': task.progress,
         'result': task.result if status == 'succeeded' else None,
         'previous_result': previous_result,
         'error_code': 'worker_interrupted' if expired else task.error_code,
@@ -415,6 +416,11 @@ def start_translation(user, news_id, *, model_config_id, request_id, billing_con
                 if existing.status == 'queued' and not existing.provider_started:
                     transaction.on_commit(lambda: _dispatch(existing.pk, existing.generation))
                 return existing, False
+            if _query(user.pk).filter(
+                news_id=news_id, source_hash=stored.canonical_hash,
+                status__in=['queued', 'running'],
+            ).exists():
+                raise TranslationError('translation_request_conflict')
             active = _query().filter(Q(status='queued') | Q(status='running', lease_expires_at__gt=timezone.now()))
             if (active.filter(user=user).count() >= MAX_ACTIVE_PER_OWNER
                     or active.count() >= MAX_ACTIVE_TOTAL):
@@ -479,6 +485,8 @@ def cancel_translation(user, task_id, *, generation):
                 raise TranslationError('translation_request_conflict')
             return _query(user.pk).get(pk=task.pk)
     try:
+        # Cancellation is an owner-scoped write. The HTTP endpoint returns only
+        # a redacted receipt, never the task's private progress or result.
         return durable._retry_task_database_operation(persist, stage='byok_cancel')
     except OperationalError as exc:
         if durable._is_task_sqlite_lock(exc):
@@ -557,9 +565,11 @@ def retry_translation(user, task_id, *, model_config_id, request_id, billing_con
                 if existing.request_hash != fingerprint:
                     raise TranslationError('translation_request_conflict')
                 # Resolve a repeated idempotency key before the latest-attempt
-                # guard: the first accepted retry is now the latest row, but a
-                # duplicate POST must still resolve to that same attempt.
-                # Repeated keys only observe; they never redispatch.
+                # guard. An explicit repeat may recover a committed queued task
+                # whose post-commit dispatch was lost, but only before its
+                # provider-start marker. Worker claim remains a CAS.
+                if existing.status == 'queued' and not existing.provider_started:
+                    transaction.on_commit(lambda: _dispatch(existing.pk, existing.generation))
                 return existing, False
 
             latest = _query(user.pk).filter(news_id=previous.news_id).order_by('-queued_at', '-id').first()

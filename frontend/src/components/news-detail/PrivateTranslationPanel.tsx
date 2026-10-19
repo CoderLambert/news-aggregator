@@ -65,10 +65,30 @@ function TranslationSession({ viewer, newsId, sourceRevision, sourceMarkdown }: 
     setConsent(false)
     controller.current = new AbortController()
     try {
-      const result = kind === 'cancel'
-        ? await cancelPrivateTranslation(task!.task_id, task!.generation, viewer, controller.current.signal)
-        : kind === 'retry'
-          ? await retryPrivateTranslation(task!.task_id, selected, crypto.randomUUID(), viewer, controller.current.signal)
+      if (kind === 'cancel') {
+        const receipt = await cancelPrivateTranslation(
+          task!.task_id, task!.generation, viewer, controller.current.signal,
+        )
+        if (mounted.current) {
+          // Drop any cached private text immediately. A refresh may be denied
+          // after source/credential access changes; the cancel receipt itself
+          // intentionally contains no result or progress.
+          client.setQueryData(key, {
+            ...task!, status: receipt.status, error_code: receipt.error_code,
+            progress: '', result: null, previous_result: null,
+          })
+          setUnknown(false)
+          setObserving(true)
+          void recovery.refetch()
+        }
+        return
+      }
+      const result = kind === 'retry'
+        ? await retryPrivateTranslation(task!.task_id, selected, crypto.randomUUID(), viewer, controller.current.signal)
+        : recoverable && task!.retry_of
+          ? await retryPrivateTranslation(
+            task!.retry_of, task!.model_config_id, task!.request_id, viewer, controller.current.signal,
+          )
           : await startPrivateTranslation(
             newsId, recoverable ? task!.model_config_id : selected,
             recoverable ? task!.request_id : crypto.randomUUID(), viewer, controller.current.signal,

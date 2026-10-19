@@ -18,7 +18,7 @@ vi.mock('@/services/privateTranslationApi', async original => ({
 vi.mock('@/components/news-detail/MarkdownContent', () => ({ default: ({ content }: { content: string }) => <div>{content}</div> }))
 const completed: api.PrivateTranslationTask = {
   task_id: '11111111-1111-4111-8111-111111111111', request_id: '22222222-2222-4222-8222-222222222222', news_id: 1, status: 'succeeded',
-  generation: 1, progress: '私有中文', error_code: '', model_config_id: 'model', target_language: 'zh', previous_result: null,
+  generation: 1, retry_of: null, progress: '私有中文', error_code: '', model_config_id: 'model', target_language: 'zh', previous_result: null,
   result: { result_id: 4, task_id: '11111111-1111-4111-8111-111111111111',
     content: '私有中文', scope: 'private', provider: 'deepseek', model: 'Flash' },
 }
@@ -40,8 +40,14 @@ beforeEach(() => {
   ])
   vi.mocked(api.latestPrivateTranslation).mockResolvedValue(null)
   vi.mocked(api.startPrivateTranslation).mockResolvedValue(completed)
-  vi.mocked(api.cancelPrivateTranslation).mockResolvedValue({ ...completed, status: 'cancelled', result: null, progress: '' })
-  vi.mocked(api.retryPrivateTranslation).mockResolvedValue({ ...completed, task_id: '33333333-3333-4333-8333-333333333333', request_id: '44444444-4444-4444-8444-444444444444', status: 'queued', result: null, previous_result: completed.result, progress: '' })
+  vi.mocked(api.cancelPrivateTranslation).mockResolvedValue({
+    task_id: completed.task_id, status: 'cancelled', error_code: 'translation_cancelled',
+  })
+  vi.mocked(api.retryPrivateTranslation).mockResolvedValue({
+    ...completed, task_id: '33333333-3333-4333-8333-333333333333',
+    request_id: '44444444-4444-4444-8444-444444444444', retry_of: completed.task_id,
+    status: 'queued', result: null, previous_result: completed.result, progress: '',
+  })
 })
 afterEach(cleanup)
 describe('T05 private translation', () => {
@@ -160,8 +166,13 @@ describe('T05 private translation', () => {
     const running: api.PrivateTranslationTask = {
       ...completed, status: 'running', generation: 7, result: null, progress: '未完成片段',
     }
-    const cancelled: api.PrivateTranslationTask = { ...running, status: 'cancelled', error_code: 'translation_cancelled' }
-    vi.mocked(api.latestPrivateTranslation).mockResolvedValue(running)
+    const cancelled: api.PrivateTranslationCancelReceipt = {
+      task_id: running.task_id, status: 'cancelled', error_code: 'translation_cancelled',
+    }
+    const cancelledTask: api.PrivateTranslationTask = {
+      ...running, status: 'cancelled', error_code: 'translation_cancelled', progress: '',
+    }
+    vi.mocked(api.latestPrivateTranslation).mockResolvedValueOnce(running).mockResolvedValue(cancelledTask)
     vi.mocked(api.cancelPrivateTranslation).mockResolvedValue(cancelled)
     view()
     await screen.findByText('正在翻译，以下内容尚未完成')
@@ -169,6 +180,7 @@ describe('T05 private translation', () => {
     expect(screen.getByText(/取消不会保证已派发请求停止或免除费用/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '明确取消任务' }))
     await screen.findByText(/任务已取消/)
+    expect(screen.queryByText('未完成片段')).not.toBeInTheDocument()
     expect(api.cancelPrivateTranslation).toHaveBeenCalledOnce()
     expect(api.cancelPrivateTranslation).toHaveBeenCalledWith(running.task_id, 7, 7, expect.any(AbortSignal))
     expect(api.startPrivateTranslation).not.toHaveBeenCalled()
@@ -195,6 +207,25 @@ describe('T05 private translation', () => {
     expect(api.startPrivateTranslation).not.toHaveBeenCalled()
     expect(screen.getByText('此前成功的私有译文（结果 #4）')).toBeInTheDocument()
     expect(screen.getByText('私有中文')).toBeInTheDocument()
+  })
+  it('explicitly recovers a queued retry through its parent and same idempotency key', async () => {
+    const queuedRetry: api.PrivateTranslationTask = {
+      ...completed,
+      task_id: '33333333-3333-4333-8333-333333333333',
+      request_id: '44444444-4444-4444-8444-444444444444',
+      status: 'queued', retry_of: completed.task_id, result: null,
+      previous_result: completed.result, progress: '',
+    }
+    vi.mocked(api.latestPrivateTranslation).mockResolvedValue(queuedRetry)
+    view()
+    await screen.findByText('任务：33333333-3333-4333-8333-333333333333')
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: '恢复排队任务' }))
+    await waitFor(() => expect(api.retryPrivateTranslation).toHaveBeenCalledOnce())
+    expect(api.retryPrivateTranslation).toHaveBeenCalledWith(
+      completed.task_id, 'model', queuedRetry.request_id, 7, expect.any(AbortSignal),
+    )
+    expect(api.startPrivateTranslation).not.toHaveBeenCalled()
   })
   it('rejects malformed terminal and partial result DTOs', () => {
     expect(() => api.parsePrivateTranslation({ ...completed, result: null })).toThrow()

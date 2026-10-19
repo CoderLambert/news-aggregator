@@ -58,7 +58,12 @@ class PrivateTranslationCancelView(TranslationView):
         task = translation.cancel_translation(
             request.user, task_id, generation=body['generation'],
         )
-        return Response(translation.payload(task))
+        # A cancellation receipt confirms only lifecycle state. Never echo
+        # progress or a private result from this write endpoint.
+        return Response({
+            'task_id': str(task.pk), 'status': task.status,
+            'error_code': task.error_code,
+        })
 
 
 class PrivateTranslationRetryView(TranslationView):
