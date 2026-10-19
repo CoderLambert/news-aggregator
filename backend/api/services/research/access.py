@@ -49,9 +49,14 @@ def _fetch_article_payload_is_current(user, data, stored):
             'context_scope': 'excerpt' if truncated else stored.scope,
         },
         source_scope=stored.scope,
+        policy_versions=stored.policy_versions,
         task_outcome='stored',
         publish_time=news.publish_time.isoformat() if news.publish_time else None,
     )
+    # Replay validates the exact post-dispatch shape. Long payloads are capped
+    # by execute_tool before storage, so compare against that same pure transform.
+    from api.services.research.tools import _truncate_result
+    expected = _truncate_result(expected)
     return type(data.get('id')) is int and data == expected
 
 
