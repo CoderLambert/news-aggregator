@@ -4,11 +4,11 @@ from api.rss.access import get_stored_article
 from api.services.stored_readers import snapshot_metadata
 
 
-def _search_article_is_current(user, row):
-    if not isinstance(row, dict) or type(row.get('id')) is not int:
+def _search_article_is_current(user, row, *, id_key='id', require_snippet=True, require_url=True):
+    if not isinstance(row, dict) or type(row.get(id_key)) is not int:
         return False
     try:
-        stored = get_stored_article(user, row['id'])
+        stored = get_stored_article(user, row[id_key])
     except (Http404, ValueError, TypeError):
         return False
     expected = snapshot_metadata(stored)
@@ -17,19 +17,33 @@ def _search_article_is_current(user, row):
         and row.get('source_scope') == stored.scope
         and row.get('policy_versions') == stored.policy_versions
         and row.get('title') == stored.title
-        and row.get('snippet') == stored.summary[:200]
-        and row.get('url') == stored.url
+        and (not require_snippet or row.get('snippet') == stored.summary[:200])
+        and (not require_url or row.get('url') == stored.url)
     )
 
 
 def result_is_current(user, tool_name, data):
     if not isinstance(data, dict):
         return False
-    if tool_name in ('search_news', 'analyze_topic'):
+    if tool_name == 'search_news':
         articles = data.get('articles')
         return isinstance(articles, list) and all(
             _search_article_is_current(user, row) for row in articles
         )
+    if tool_name == 'analyze_topic':
+        articles = data.get('articles')
+        timeline = data.get('timeline')
+        if not isinstance(articles, list) or not isinstance(timeline, list):
+            return False
+        if not all(_search_article_is_current(user, row) for row in articles):
+            return False
+        for day in timeline:
+            if not isinstance(day, dict) or not isinstance(day.get('events'), list):
+                return False
+            if not all(_search_article_is_current(user, event, id_key='article_id',
+                    require_snippet=False, require_url=False) for event in day['events']):
+                return False
+        return True
     if tool_name in ('fetch_article', 'fetch_webpage'):
         if data.get('capability') == 'stored_articles_only':
             return True
