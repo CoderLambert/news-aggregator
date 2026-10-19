@@ -4,9 +4,11 @@ The only stream route is the pinned DeepSeek alias whose LiteLLM Proxy hook
 validates the upstream finish reason before releasing the terminal chunk.
 """
 from dataclasses import asdict
+import time
 from uuid import UUID
 
 from django.http import Http404
+from django.db import OperationalError, connection
 
 from api.services.ai_credentials import CredentialUnavailable
 from api.services.ai_model_registry import ARTICLE_CHAT_SUPPORTED_ALIAS
@@ -17,7 +19,7 @@ from api.services.ai_task_preferences import (
 from api.services.ai_worker_fencing import (
     SNAPSHOT_SCHEMA_VERSION, commit_result, dispatch_once,
 )
-from api.services.chat_history import ChatConflict, append_assistant_message
+from api.services.chat_history import ChatConflict, _is_sqlite_busy, append_assistant_message
 from api.services.ai_article_turns import (
     ArticleChatTurnError, cancel_turn, mark_dispatched, mark_complete,
     require_dispatched,
@@ -28,6 +30,33 @@ from api.services.stored_readers import StoredContentChanged, require_current, s
 MAX_CHAT_OUTPUT_TOKENS = 2048
 MAX_CHAT_ANSWER_CHARS = 32768
 SUPPORTED_STREAM_ALIAS = ARTICLE_CHAT_SUPPORTED_ALIAS
+
+
+MAX_TERMINAL_COMMIT_ATTEMPTS = 5
+
+
+def _commit_article_result(snapshot_data, *, task_owner_id, persist):
+    """Retry only a rolled-back, DB-only T04 terminal transaction.
+
+    The callback must recheck article/model/turn/generation on every attempt.
+    Provider dispatch and streaming stay outside this boundary. Never retry a
+    caller-owned transaction or a non-SQLite/non-contention database failure.
+    """
+    outer_atomic = connection.in_atomic_block
+    for attempt in range(1, MAX_TERMINAL_COMMIT_ATTEMPTS + 1):
+        try:
+            return commit_result(
+                snapshot_data, task_owner_id=task_owner_id, persist=persist,
+            )
+        except (OperationalError, ChatConflict) as error:
+            # commit_result's owner/credential transaction has exited and rolled
+            # back before this catch; the next attempt obtains a fresh fence.
+            busy_error = error.__cause__ if isinstance(error, ChatConflict) else error
+            if (outer_atomic or not isinstance(busy_error, OperationalError)
+                    or not _is_sqlite_busy(busy_error)
+                    or attempt == MAX_TERMINAL_COMMIT_ATTEMPTS):
+                raise
+            time.sleep(0.005 * attempt)
 
 
 class ArticleChatError(RuntimeError):
@@ -202,7 +231,7 @@ def complete_article_chat(*, user, stored, chat_snapshot, messages, selection, t
                 return source
 
             try:
-                source = commit_result(
+                source = _commit_article_result(
                     connection_data, task_owner_id=user.pk, persist=persist,
                 )
             except ArticleChatTurnError as error:

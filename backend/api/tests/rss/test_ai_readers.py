@@ -279,3 +279,19 @@ def test_research_keyword_retains_hash_bound_chinese_search(world, monkeypatch):
     assert [row['id'] for row in result['articles']] == [news.pk]
     News.objects.filter(pk=news.pk).update(title='different source title')
     assert _tool_search_news('中文搜索证据', mode='keyword', user=a)['articles'] == []
+
+
+def test_snapshot_guard_policy_version_change_with_identical_readable_bytes(world):
+    from django.db.models import F
+    a, _, make = world
+    source, news = make('policy-version-only', subscriber=a)
+    stored = get_stored_article(a, news.pk)
+    assert require_current(a, stored) == stored
+    SourcePublication.objects.filter(source=source).update(policy_version=F('policy_version') + 1)
+    current = get_stored_article(a, news.pk)
+    assert current.scope == stored.scope
+    assert current.canonical_hash == stored.canonical_hash
+    assert current.markdown == stored.markdown
+    assert current.policy_versions != stored.policy_versions
+    with pytest.raises(StoredContentChanged):
+        require_current(a, stored)

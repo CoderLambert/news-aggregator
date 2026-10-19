@@ -33,7 +33,8 @@ def _require_current(user, stored, *, full=False):
     if ((full and current.scope != 'full') or current.scope != stored.scope
             or current.canonical_hash != stored.canonical_hash or current.revision != stored.revision
             or current.title != stored.title or current.summary != stored.summary
-            or current.provenance != stored.provenance):
+            or current.provenance != stored.provenance
+            or current.policy_versions != stored.policy_versions):
         raise StoredContentChanged('原文或读取权限已变化，请重新打开文章。')
     return current
 

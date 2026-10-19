@@ -89,6 +89,10 @@ def _append_message(*, user_id: int, news_id: int, message: dict, session_id: in
         except OperationalError as error:
             if not _is_sqlite_busy(error):
                 raise
+            # A failed write may mark an enclosing transaction rollback-only.
+            # Its owner must unwind and retry the whole unit, not this query.
+            if connection.in_atomic_block:
+                raise
             last_busy_error = error
             if attempt < MAX_CAS_ATTEMPTS:
                 _pause_before_retry(attempt)

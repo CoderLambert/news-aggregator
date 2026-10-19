@@ -472,6 +472,8 @@ class PersonalArticleChatTests(TestCase):
         self.assertEqual(len(ChatSession.objects.get().messages), 1)
         self.assertEqual(ChatSession.objects.get().messages[0]['role'], 'user')
 
+@override_settings(PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True, AI_BYOK_ENABLED=True,
+                   PROVIDER_CREDENTIAL_ENCRYPTION_KEY='t04-race-synthetic-key-material')
 class ArticleChatTurnDatabaseRaceTests(TransactionTestCase):
     """Use separate Django connections to exercise real turn CAS interleavings."""
 
@@ -487,6 +489,33 @@ class ArticleChatTurnDatabaseRaceTests(TransactionTestCase):
             source=source, category=category, content='Synthetic body',
             publish_time=timezone.now(),
         ))
+        from api.services.ai_worker_fencing import capture_at_enqueue
+        client = APIClient()
+        client.force_login(self.owner)
+        response = client.post(CONNECTIONS, {
+            'provider_id': 'deepseek', 'endpoint_profile': 'deepseek_default',
+            'display_name': 'Race synthetic connection', 'api_key': KEY,
+            'request_id': str(uuid.uuid4()),
+        }, format='json')
+        self.assertEqual(response.status_code, 201, response.content)
+        self.connection = UserAIConnection.objects.get(pk=response.data['id'])
+        self.connection_snapshot = capture_at_enqueue(
+            owner=self.owner, connection_id=self.connection.pk,
+        )
+
+    def _commit(self, persist):
+        from api.services.ai_article_chat import _commit_article_result
+        return _commit_article_result(
+            self.connection_snapshot, task_owner_id=self.owner.pk, persist=persist,
+        )
+
+    @staticmethod
+    def _busy_error(code=sqlite3.SQLITE_LOCKED):
+        driver = sqlite3.OperationalError('synthetic wrapped database contention')
+        driver.sqlite_errorcode = code
+        wrapped = OperationalError('synthetic Django database error')
+        wrapped.__cause__ = driver
+        return wrapped
 
     def _parallel(self, operations):
         barrier = Barrier(len(operations))
@@ -607,15 +636,15 @@ class ArticleChatTurnDatabaseRaceTests(TransactionTestCase):
             ))
 
         def commit_terminal():
-            from django.db import transaction
+            def persist():
+                mark_complete(user_id=self.owner.pk, news_id=self.news.pk, turn_id=turn)
+                append_assistant_message(
+                    user_id=self.owner.pk, news_id=self.news.pk,
+                    session_id=snapshot.session_id, generation=snapshot.generation,
+                    content='Answer racing clear', status='complete',
+                )
             try:
-                with transaction.atomic():
-                    mark_complete(user_id=self.owner.pk, news_id=self.news.pk, turn_id=turn)
-                    append_assistant_message(
-                        user_id=self.owner.pk, news_id=self.news.pk,
-                        session_id=snapshot.session_id, generation=snapshot.generation,
-                        content='Answer racing clear', status='complete',
-                    )
+                self._commit(persist)
                 return ('commit', 'complete')
             except ArticleChatTurnError as error:
                 return ('commit', error.code)
@@ -662,10 +691,10 @@ class ArticleChatTurnDatabaseRaceTests(TransactionTestCase):
             ))
 
         def complete():
-            from django.db import transaction
             try:
-                with transaction.atomic():
-                    mark_complete(user_id=self.owner.pk, news_id=self.news.pk, turn_id=turn)
+                self._commit(lambda: mark_complete(
+                    user_id=self.owner.pk, news_id=self.news.pk, turn_id=turn,
+                ))
                 return ('complete', 'complete')
             except ArticleChatTurnError as error:
                 return ('complete', error.code)
@@ -681,3 +710,138 @@ class ArticleChatTurnDatabaseRaceTests(TransactionTestCase):
             self.assertEqual(cancel_result, ('cancel', 'already_completed'))
             self.assertEqual(row.status, 'complete')
             self.assertEqual(complete_result, ('complete', 'complete'))
+
+
+    def test_terminal_commit_retries_rolled_back_history_write_once(self):
+        from django.db import transaction
+        from django.db.models.query import QuerySet
+        from api.services.ai_article_turns import mark_complete, reserve_turn_with_question, mark_dispatched
+        from api.services.chat_history import append_assistant_message
+
+        turn = uuid.uuid4()
+        snapshot = reserve_turn_with_question(
+            user_id=self.owner.pk, news_id=self.news.pk, turn_id=turn, question='Retry safely',
+        )
+        mark_dispatched(user_id=self.owner.pk, news_id=self.news.pk, turn_id=turn)
+        original_update = QuerySet.update
+        failed_updates = []
+        attempts = []
+
+        def history_busy_once(queryset, **kwargs):
+            if queryset.model is ChatSession and not failed_updates:
+                failed_updates.append(True)
+                # Model Django's rollback-only flag after a failed SQL write.
+                with transaction.mark_for_rollback_on_error():
+                    raise self._busy_error(sqlite3.SQLITE_BUSY)
+            return original_update(queryset, **kwargs)
+
+        def persist():
+            attempts.append(ArticleChatTurn.objects.get(pk=turn).status)
+            mark_complete(user_id=self.owner.pk, news_id=self.news.pk, turn_id=turn)
+            return append_assistant_message(
+                user_id=self.owner.pk, news_id=self.news.pk,
+                session_id=snapshot.session_id, generation=snapshot.generation,
+                content='Only one terminal answer', status='complete',
+            )
+
+        with patch.object(QuerySet, 'update', history_busy_once), \
+             patch('api.services.ai_article_chat.time.sleep') as sleep:
+            self._commit(persist)
+        self.assertEqual(attempts, ['dispatched', 'dispatched'])
+        sleep.assert_called_once_with(0.005)
+        self.assertEqual(ArticleChatTurn.objects.get(pk=turn).status, 'complete')
+        self.assertEqual(
+            [message['role'] for message in ChatSession.objects.get().messages],
+            ['user', 'assistant'],
+        )
+
+    def test_terminal_retry_rechecks_revoked_credential_and_article_policy(self):
+        from api.services.ai_credentials import CredentialUnavailable
+        from api.rss.access import get_stored_article
+        from api.rss.models import SourcePublication
+        from api.services.stored_readers import StoredContentChanged, require_current
+
+        for revoke in ('credential', 'policy'):
+            with self.subTest(revoke=revoke):
+                stored = get_stored_article(self.owner, self.news.pk)
+                calls = []
+
+                def persist():
+                    require_current(self.owner, stored)
+                    calls.append(True)
+                    get_user_model().objects.filter(pk=self.owner.pk).update(first_name='rolled back')
+                    raise self._busy_error()
+
+                def revoke_between_attempts(_delay):
+                    self.owner.refresh_from_db()
+                    self.assertEqual(self.owner.first_name, '')
+                    if revoke == 'credential':
+                        UserAIConnection.objects.filter(pk=self.connection.pk).update(
+                            is_enabled=False, credential_epoch=F('credential_epoch') + 1,
+                        )
+                    else:
+                        SourcePublication.objects.filter(source=self.news.source).update(
+                            policy_version=F('policy_version') + 1,
+                        )
+
+                expected = CredentialUnavailable if revoke == 'credential' else StoredContentChanged
+                with patch('api.services.ai_article_chat.time.sleep', side_effect=revoke_between_attempts), \
+                     self.assertRaises(expected):
+                    self._commit(persist)
+                self.assertEqual(len(calls), 1)
+                self.owner.refresh_from_db()
+                self.assertEqual(self.owner.first_name, '')
+                if revoke == 'credential':
+                    # Restore only this synthetic connection for the next case;
+                    # capture a new snapshot rather than reviving the old epoch.
+                    from api.services.ai_worker_fencing import capture_at_enqueue
+                    UserAIConnection.objects.filter(pk=self.connection.pk).update(is_enabled=True)
+                    self.connection_snapshot = capture_at_enqueue(
+                        owner=self.owner, connection_id=self.connection.pk,
+                    )
+
+    def test_terminal_retry_is_bounded_and_rejects_nonbusy_outer_and_logical_conflicts(self):
+        from django.db import transaction
+        from api.services import ai_article_chat as chat
+        from api.services.chat_history import ChatConflict
+
+        with patch.object(chat, 'commit_result', side_effect=self._busy_error()) as commit, \
+             patch.object(chat.time, 'sleep') as sleep:
+            with self.assertRaises(OperationalError):
+                self._commit(lambda: None)
+        self.assertEqual(commit.call_count, chat.MAX_TERMINAL_COMMIT_ATTEMPTS)
+        self.assertEqual(sleep.call_count, chat.MAX_TERMINAL_COMMIT_ATTEMPTS - 1)
+
+        for failure in (self._busy_error(sqlite3.SQLITE_IOERR), ChatConflict('chat_conflict')):
+            with self.subTest(failure=type(failure).__name__), \
+                 patch.object(chat, 'commit_result', side_effect=failure) as commit, \
+                 patch.object(chat.time, 'sleep') as sleep:
+                with self.assertRaises(type(failure)):
+                    self._commit(lambda: None)
+                commit.assert_called_once()
+                sleep.assert_not_called()
+
+        with transaction.atomic():
+            with patch.object(chat, 'commit_result', side_effect=self._busy_error()) as commit, \
+                 patch.object(chat.time, 'sleep') as sleep:
+                with self.assertRaises(OperationalError):
+                    self._commit(lambda: None)
+                commit.assert_called_once()
+                sleep.assert_not_called()
+
+        from api.services import chat_history
+        with patch.object(chat_history.connection, 'vendor', 'postgresql'), \
+             patch.object(chat, 'commit_result', side_effect=self._busy_error()) as commit, \
+             patch.object(chat.time, 'sleep') as sleep:
+            with self.assertRaises(OperationalError):
+                self._commit(lambda: None)
+            commit.assert_called_once()
+            sleep.assert_not_called()
+
+        wrapped_conflict = ChatConflict('chat_conflict')
+        wrapped_conflict.__cause__ = self._busy_error()
+        with patch.object(chat, 'commit_result', side_effect=[wrapped_conflict, 'saved']) as commit, \
+             patch.object(chat.time, 'sleep') as sleep:
+            self.assertEqual(self._commit(lambda: None), 'saved')
+        self.assertEqual(commit.call_count, 2)
+        sleep.assert_called_once_with(0.005)
