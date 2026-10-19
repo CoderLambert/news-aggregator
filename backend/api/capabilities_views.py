@@ -58,7 +58,7 @@ def _feature_snapshot() -> dict[str, dict[str, object]]:
             features[name] = _feature(False, "ai_disabled")
 
     # Keep hosted/shared research closed in production. T09 has a separate,
-    # narrowly advertised BYOK first-run capability.
+    # independently advertised BYOK capability (historical create name; T10 also permits consented follow-ups).
     if settings.DJANGO_ENV == "production":
         features["research"] = _feature(False, "hosted_integration_unapproved")
     byok_create_enabled = (

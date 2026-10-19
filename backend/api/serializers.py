@@ -627,9 +627,23 @@ class ResearchSessionSerializer(serializers.ModelSerializer):
     """Full research session with message history."""
     message_count = serializers.SerializerMethodField()
 
+    research_model = serializers.SerializerMethodField()
+
+    def get_research_model(self, obj):
+        native = obj.native_continuation
+        if not isinstance(native, dict):
+            return None
+        snapshot = native.get('execution_snapshot')
+        if not isinstance(snapshot, dict):
+            return None
+        model = snapshot.get('model', {})
+        if not isinstance(model, dict) or not model.get('model_config_id'):
+            return None
+        return {key: model.get(key) for key in ('model_config_id', 'model_id')}
+
     class Meta:
         model = ResearchSession
-        fields = ['id', 'title', 'messages', 'is_archived', 'message_count', 'created_at', 'updated_at']
+        fields = ['id', 'title', 'messages', 'is_archived', 'message_count', 'created_at', 'updated_at', 'research_model']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
     def to_representation(self, instance):

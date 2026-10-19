@@ -436,9 +436,14 @@ def _persist_success(run_id, run_token, session, messages, byok_snapshot=None):
             )
             if not changed:
                 raise ResearchRunError('research_run_changed', '研究任务已取消或租约已失效。')
+            values = {'messages': messages, 'title': session.title, 'updated_at': now}
+            if byok_snapshot is not None:
+                from .byok_execution import continuation_payload, visible_messages
+                values['native_continuation'] = continuation_payload(byok_snapshot, messages)
+                values['messages'] = visible_messages(messages)
             updated = ResearchSession.objects.filter(
                 pk=session.pk, user_id=session.user_id,
-            ).update(messages=messages, title=session.title, updated_at=now)
+            ).update(**values)
             if not updated:
                 raise ResearchRunError('research_session_changed', '研究会话已删除或归属已更改。')
             ResearchRunEvent.objects.create(
@@ -614,6 +619,9 @@ def submit_research_run(
         raise ResearchRunError('research_capacity_reached', '研究任务容量已满，请稍后重试。', 503)
     try:
         with transaction.atomic():
+            if byok_requested:
+                from api.services.ai_credentials import lock_owner
+                lock_owner(user.pk)
             raced = ResearchRun.objects.select_related('session').filter(
                 user=user, idempotency_key=key,
             ).first()
@@ -627,11 +635,20 @@ def submit_research_run(
                     user=user, session=session, status__in=ACTIVE_STATUSES,
                 ).exists():
                     raise ResearchRunError('research_run_active', '此研究会话已有正在运行的任务。', 409)
+            if session_id is not None and not byok_requested and (
+                session.native_continuation or session.runs.filter(
+                    execution_snapshot__model__isnull=False,
+                ).exists()
+            ):
+                raise ResearchRunError('research_consent_required', '续问必须明确同意使用会话原模型。', 400)
             execution_snapshot = {}
             if byok_requested:
-                from .byok_execution import ResearchBYOKError, capture_snapshot
+                from .byok_execution import ResearchBYOKError, capture_snapshot, followup_snapshot
                 try:
-                    execution_snapshot = capture_snapshot(user, model_config_id)
+                    execution_snapshot = (
+                        followup_snapshot(session, user, model_config_id)
+                        if session_id is not None else capture_snapshot(user, model_config_id)
+                    )
                 except ResearchBYOKError as exc:
                     raise ResearchRunError(
                         f'research_{exc.code}', exc.message, 409,

@@ -764,6 +764,7 @@ export function useResearch(
               idempotencyKey,
               signal: connection.controller.signal,
               onRunId: setRunId,
+              authorization,
             })
         await consumeResearchEvents(connection, events)
       } catch {
@@ -925,8 +926,8 @@ export function useResearch(
   ) => {
     const normalizedQuery = query.trim()
     if (!normalizedQuery || connectionRef.current || sendLockRef.current || viewerId === null) return false
-    if (byokCreateOnly && (activeSessionId !== null || !authorization || authorization.consent !== true)) return false
-    if (authorization && (activeSessionId !== null || authorization.consent !== true)) return false
+    if (byokCreateOnly && (!authorization || authorization.consent !== true)) return false
+    if (authorization && authorization.consent !== true) return false
     // Without response headers, a prior create may already have reached Django.
     // Never create a different request key while its fate is unknown.
     if (loadPendingCreate(viewerId) || activeTask?.recovery === 'resume') return false
@@ -1065,6 +1066,7 @@ export function useResearch(
   return {
     sessions,
     activeSessionId,
+    sessionResearchModel: sessionQuery.data?.research_model ?? null,
     messages,
     phase,
     activeToolCalls,

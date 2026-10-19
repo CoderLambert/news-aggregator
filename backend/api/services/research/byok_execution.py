@@ -390,3 +390,61 @@ def _send_once(provider_key, model, *, messages, tools, payload, owner_id, execu
                 gateway.close()
             except Exception:
                 pass
+
+
+CONTINUATION_PROTOCOL = 'openai-chat-completions-v1'
+MAX_CONTINUATION_BYTES = 4 * 1024 * 1024
+
+
+def preserve_native_fields(source, target):
+    # Keep the provider's native reasoning only on the server and only on the
+    # original model's protocol. It is never translated to another provider.
+    reasoning = _get(source, 'reasoning_content')
+    if reasoning is not None:
+        if type(reasoning) is not str or len(reasoning.encode('utf-8')) > MAX_CONTINUATION_BYTES:
+            raise ResearchBYOKError('invalid_response')
+        target['reasoning_content'] = reasoning
+
+
+def visible_messages(messages):
+    return [
+        {'role': item['role'], 'content': item['content']}
+        for item in messages
+        if item.get('role') in ('user', 'assistant')
+        and type(item.get('content')) is str and item['content']
+    ]
+
+
+def continuation_payload(snapshot, messages):
+    payload = {
+        'schema_version': 1, 'protocol': CONTINUATION_PROTOCOL,
+        'execution_snapshot': snapshot, 'messages': messages,
+    }
+    if len(json.dumps(payload, ensure_ascii=False).encode('utf-8')) > MAX_CONTINUATION_BYTES:
+        raise ResearchBYOKError('invalid_response')
+    return payload
+
+
+def native_messages(session, snapshot):
+    import copy
+    native = session.native_continuation
+    if (type(native) is not dict or native.get('schema_version') != 1
+            or native.get('protocol') != CONTINUATION_PROTOCOL
+            or native.get('execution_snapshot') != snapshot
+            or type(native.get('messages')) is not list):
+        raise ResearchBYOKError('authorization_changed')
+    continuation_payload(snapshot, native['messages'])
+    return copy.deepcopy(native['messages'])
+
+
+def followup_snapshot(session, user, model_config_id):
+    if session.user_id != user.pk or not session.native_continuation:
+        raise ResearchBYOKError('authorization_changed')
+    snapshot = session.native_continuation.get('execution_snapshot')
+    model = verify_snapshot(snapshot, owner_id=user.pk)
+    if model.model_config_id != model_config_id:
+        raise ResearchBYOKError('authorization_changed')
+    native_messages(session, snapshot)
+    from .access import require_session_evidence
+    require_session_evidence(session, user)
+    return snapshot
