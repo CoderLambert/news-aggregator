@@ -22,7 +22,7 @@ services:
     volumes: [rss-pg-data:/var/lib/postgresql/data]
     networks: [rss-db-net]
     healthcheck:
-      test: [CMD-SHELL, pg_isready -U miniflux -d miniflux]
+      test: [CMD-SHELL, pg_isready -h 127.0.0.1 -U miniflux -d miniflux]
       interval: 10s
       timeout: 5s
       retries: 6

@@ -7,6 +7,7 @@ COMPOSE_FILE="$PROJECT_ROOT/compose.prod.yaml"
 WORKSPACE_COMPOSE_FILE="$PROJECT_ROOT/compose.workspace.prod.yaml"
 TARGET_WORKERS=(indexer)
 WITH_RSS=0
+LEAVE_RSS_STOPPED=0
 RSS_IMAGE=""
 WORKER_SERVICES_OVERRIDE=""
 WORKER_SERVICES_EXPLICIT=0
@@ -38,6 +39,9 @@ then atomically points static current at the existing target release.
 --with-rss includes the RSS overlay and requires an independent NEWSHUB_RSS_IMAGE
 at the target SHA and an already healthy Miniflux in this project. An explicit
 --worker-services subset must include rss-sync when --with-rss is selected.
+--leave-rss-stopped is an explicit recovery mode, exclusive with --with-rss:
+existing RSS containers must already be stopped before maintenance. It requires
+an explicit --worker-services subset and never resumes RSS or the engine.
 --worker-services selects only supported target workers; an empty value starts
 only app. RSS recovery uses this to keep legacy collectors stopped.
 EOF
@@ -85,6 +89,7 @@ while (($#)); do
     case "$1" in
         --execute) EXECUTE=1; shift ;;
         --with-rss) WITH_RSS=1; shift ;;
+        --leave-rss-stopped) LEAVE_RSS_STOPPED=1; shift ;;
         --worker-services) (($# >= 2)) || fail '--worker-services requires a value (possibly empty).'; WORKER_SERVICES_OVERRIDE=$2; WORKER_SERVICES_EXPLICIT=1; shift 2 ;;
         --env-file) (($# >= 2)) || fail '--env-file requires a value.'; ENV_FILE=$2; shift 2 ;;
         --project) (($# >= 2)) || fail '--project requires a value.'; PROJECT=$2; shift 2 ;;
@@ -98,6 +103,11 @@ while (($#)); do
         *) fail "unknown argument: $1" ;;
     esac
 done
+
+if ((LEAVE_RSS_STOPPED)); then
+    ((!WITH_RSS)) || fail '--leave-rss-stopped conflicts with --with-rss.'
+    ((WORKER_SERVICES_EXPLICIT)) || fail '--leave-rss-stopped requires explicit --worker-services.'
+fi
 
 [[ "$ENV_FILE" == /* && -f "$ENV_FILE" && ! -L "$ENV_FILE" ]] \
     || fail '--env-file must be an absolute path to a regular file.'
@@ -263,8 +273,10 @@ if ((WITH_RSS)); then
         --project "$PROJECT" --sha "$SHA" --enabled)" \
         || fail 'RSS image/engine preflight failed; no project writer was stopped.'
 else
-    python3 "$SCRIPT_DIR/release_manifest.py" rss-preflight --project "$PROJECT" --sha "$SHA" >/dev/null \
-        || fail 'existing RSS runtime requires --with-rss; no project writer was stopped.'
+    RSS_STOP_ARGUMENTS=()
+    if ((LEAVE_RSS_STOPPED)); then RSS_STOP_ARGUMENTS+=(--leave-stopped); fi
+    python3 "$SCRIPT_DIR/release_manifest.py" rss-preflight --project "$PROJECT" --sha "$SHA" "${RSS_STOP_ARGUMENTS[@]}" >/dev/null \
+        || fail 'RSS runtime preflight failed; no project writer was stopped.'
 fi
 
 app_ids_raw="$("${COMPOSE[@]}" ps --all --quiet app)" || fail 'could not inspect the current app container.'

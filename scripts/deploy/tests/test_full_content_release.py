@@ -291,7 +291,7 @@ elif args[0] == 'inspect':
     if fmt == '{{json .Config.Labels}}':
         print(json.dumps({'com.docker.compose.project':('foreign-project' if container == '1'*12 and os.environ.get('TEST_RSS_MODE') == 'foreign-engine' else 'test_worker_release'),'com.docker.compose.service':identities[container]}))
     elif fmt == '{{.State.Running}}':
-        print('false' if (root / ('stopped-' + container)).exists() else 'true')
+        print('false' if (root / ('stopped-' + container)).exists() or (container == 'f'*12 and os.environ.get('TEST_RSS_RUNNING') == '0') else 'true')
     elif fmt == '{{.State.Status}}':
         # Model an unhealthy container subsequently exiting, rather than spend
         # the real 300-second readiness deadline in this local shell test.
@@ -346,7 +346,7 @@ else:
 '''
 
 
-def rollback_harness(tmp_path, *, legacy, mode, workspace=False, worker_services=None, retired=False, has_rss=False, with_rss=False, rss_mode='healthy', action='rollback'):
+def rollback_harness(tmp_path, *, legacy, mode, workspace=False, worker_services=None, retired=False, has_rss=False, with_rss=False, rss_mode='healthy', action='rollback', leave_rss_stopped=False, rss_running=True):
     static = tmp_path / 'static'
     assets = static / 'assets'
     assets.mkdir(parents=True)
@@ -386,7 +386,7 @@ def rollback_harness(tmp_path, *, legacy, mode, workspace=False, worker_services
         '--env-file', str(environment), '--project', 'test_worker_release',
         '--sha', SHA, '--image', IMAGE, '--root', str(static), '--manifest', str(target_manifest),
         '--current-manifest', str(old_manifest), '--db-volume', 'test_worker_release_db-data',
-    ] + (['--backup-output', str(tmp_path / 'before.sqlite3')] if action == 'deploy' else []) + (['--with-rss'] if with_rss else []) + ([] if worker_services is None else ['--worker-services', worker_services]), env={**os.environ, 'PATH': str(binary) + os.pathsep + os.environ['PATH'], 'DOCKER_HOST': 'unix:///synthetic-test-only.sock',
+    ] + (['--backup-output', str(tmp_path / 'before.sqlite3')] if action == 'deploy' else []) + (['--with-rss'] if with_rss else []) + (['--leave-rss-stopped'] if leave_rss_stopped else []) + ([] if worker_services is None else ['--worker-services', worker_services]), env={**os.environ, 'PATH': str(binary) + os.pathsep + os.environ['PATH'], 'DOCKER_HOST': 'unix:///synthetic-test-only.sock',
             'TEST_DOCKER_LOG': str(log), 'TEST_HARNESS_ROOT': str(tmp_path),
             'TEST_TARGET_SHA': SHA, 'TEST_OLD_SHA': OLD_SHA, 'TEST_TARGET_CAP': str(int(not legacy and not retired)),
             'TEST_TARGET_CRAWLER_CAP': str(int(not retired)),
@@ -394,7 +394,7 @@ def rollback_harness(tmp_path, *, legacy, mode, workspace=False, worker_services
             'TEST_COMPOSE_FILE': str(ROOT / 'compose.prod.yaml'),
             'TEST_WORKSPACE_COMPOSE_FILE': str(ROOT / 'compose.workspace.prod.yaml'),
             'TEST_HAS_RSS': str(int(has_rss)),
-            'TEST_WITH_RSS': str(int(with_rss)), 'TEST_RSS_MODE': rss_mode,
+            'TEST_WITH_RSS': str(int(with_rss)), 'TEST_RSS_RUNNING': str(int(rss_running)), 'TEST_RSS_MODE': rss_mode,
             'TEST_RSS_COMPOSE_FILE': str(ROOT / 'compose.rss.prod.yaml'),
             'TEST_WORKSPACE_OVERLAY': str(int(workspace)),
             'TEST_LEGACY_OVERLAY': str(int(not retired and (worker_services is None or any(role in worker_services.split(',') for role in ('crawler', 'full-content'))))),
@@ -589,4 +589,27 @@ def test_managed_rss_cannot_be_omitted_from_explicit_worker_subset(tmp_path):
     result, commands, _ = rollback_harness(tmp_path, legacy=False, retired=True,
         mode='healthy', with_rss=True, worker_services='indexer')
     assert result.returncode == 2 and '--with-rss requires rss-sync' in result.stderr
+    assert not commands
+
+
+@pytest.mark.parametrize('running', [False, True])
+def test_explicit_rss_recovery_requires_already_stopped_sync(tmp_path, running):
+    result, commands, static = rollback_harness(tmp_path, legacy=False, retired=True,
+        mode='healthy', has_rss=True, leave_rss_stopped=True, rss_running=running, worker_services='indexer')
+    if running:
+        assert result.returncode == 2 and 'already stopped' in result.stderr
+        assert not any(call[0] == 'stop' for call in commands)
+        assert (static / 'current').readlink() == Path('releases/' + OLD_SHA)
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        starts = [call for call in commands if call[0] == 'compose' and 'up' in call]
+        assert starts[-1][-1] == 'indexer'
+        assert not any('rss-sync' in call or 'crawler' in call or 'full-content' in call for call in starts)
+
+
+@pytest.mark.parametrize('with_rss,workers', [(True, 'indexer,rss-sync'), (False, None)])
+def test_leave_rss_stopped_requires_unambiguous_explicit_recovery(tmp_path, with_rss, workers):
+    result, commands, _ = rollback_harness(tmp_path, legacy=False, retired=True, mode='healthy',
+        leave_rss_stopped=True, with_rss=with_rss, worker_services=workers)
+    assert result.returncode == 2 and '--leave-rss-stopped' in result.stderr
     assert not commands

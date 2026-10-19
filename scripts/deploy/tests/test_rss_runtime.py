@@ -123,3 +123,13 @@ def test_rss_image_is_an_independent_target_with_its_own_lock():
     pins = [line for line in requirements if line and not line.startswith('#')]
     assert all('==' in line and '>=' not in line for line in pins)
     assert not any(word in '\n'.join(pins).lower() for word in ('torch', 'scrapy', 'feedparser', 'playwright', 'chromadb'))
+
+
+def test_postgres_readiness_waits_for_tcp_before_starting_engine():
+    """The bootstrap server accepts Unix sockets before TCP is available."""
+    import shlex
+    services = yaml.safe_load((ROOT / 'compose.rss.prod.yaml').read_text())['services']
+    command = shlex.split(services['rss-db']['healthcheck']['test'][1])
+    assert '-h' in command, 'Unix bootstrap readiness must not start Miniflux'
+    assert command[command.index('-h') + 1] in {'127.0.0.1', 'localhost'}
+    assert services['miniflux']['depends_on']['rss-db']['condition'] == 'service_healthy'

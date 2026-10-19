@@ -97,3 +97,23 @@ def test_writer_selection_preserves_existing_deploy_cli_project_names(monkeypatc
     assert release.project_writers(project) == []
     assert docker.call_count == 6
     assert all(f'label=com.docker.compose.project={project}' in call.args for call in docker.call_args_list)
+
+
+@pytest.mark.parametrize('labels,running', [
+    ({'com.docker.compose.project': 'foreign', 'com.docker.compose.service': 'rss-sync'}, 'false'),
+    ({'com.docker.compose.project': 't31-fixture', 'com.docker.compose.service': 'app'}, 'false'),
+    (None, 'false'),
+    ({'com.docker.compose.project': 't31-fixture', 'com.docker.compose.service': 'rss-sync'}, 'true'),
+    ({'com.docker.compose.project': 't31-fixture', 'com.docker.compose.service': 'rss-sync'}, 'unknown'),
+])
+def test_leave_stopped_recovery_refuses_foreign_or_unconfirmed_rss(labels, running, monkeypatch):
+    def docker(*args):
+        if args[0] == 'ps':
+            return 'a' * 12
+        assert args[0] == 'inspect'
+        return json.dumps(labels) if args[2] == '{{json .Config.Labels}}' else running
+    mock = Mock(side_effect=docker)
+    monkeypatch.setattr(release, '_docker_text', mock)
+    with pytest.raises(release.ManifestError):
+        release.rss_preflight('t31-fixture', 'b' * 40, leave_stopped=True)
+    assert not any(call.args[0] == 'stop' for call in mock.call_args_list)

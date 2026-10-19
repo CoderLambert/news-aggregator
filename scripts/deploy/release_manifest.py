@@ -265,16 +265,32 @@ def project_writers(project: str, *, stop: bool = False) -> list[str]:
     return selected
 
 
-def rss_preflight(project: str, release_sha: str, *, enabled: bool = False) -> str:
+def rss_preflight(project: str, release_sha: str, *, enabled: bool = False, leave_stopped: bool = False) -> str:
     """Admit RSS lifecycle management without exposing resolved Compose secrets."""
     if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,62}', project):
         raise ManifestError('invalid Compose project')
+    if enabled and leave_stopped:
+        raise ManifestError('--with-rss and --leave-rss-stopped are mutually exclusive')
     existing = _docker_text('ps', '--all', '--quiet',
         '--filter', f'label=com.docker.compose.project={project}',
         '--filter', 'label=com.docker.compose.service=rss-sync')
     if not enabled:
-        if existing:
-            raise ManifestError('existing RSS runtime requires --with-rss')
+        if existing and not leave_stopped:
+            raise ManifestError('existing RSS runtime requires --with-rss or explicit --leave-rss-stopped recovery')
+        if leave_stopped:
+            for identity in existing.splitlines():
+                if not re.fullmatch(r'[0-9a-f]{12,64}', identity):
+                    raise ManifestError('invalid RSS container identity')
+                try:
+                    labels = json.loads(_docker_text('inspect', '--format', '{{json .Config.Labels}}', identity))
+                except (ValueError, TypeError):
+                    raise ManifestError('RSS labels are invalid') from None
+                if (not isinstance(labels, dict)
+                        or labels.get('com.docker.compose.project') != project
+                        or labels.get('com.docker.compose.service') != 'rss-sync'):
+                    raise ManifestError('RSS identity does not match this project')
+                if _docker_text('inspect', '--format', '{{.State.Running}}', identity) != 'false':
+                    raise ManifestError('--leave-rss-stopped requires RSS sync already stopped')
         return ''
     try:
         services = json.load(sys.stdin)['services']
@@ -465,6 +481,7 @@ def _parser() -> argparse.ArgumentParser:
     rss.add_argument('--project', required=True)
     rss.add_argument('--sha', required=True)
     rss.add_argument('--enabled', action='store_true')
+    rss.add_argument('--leave-stopped', action='store_true')
     return parser
 
 
@@ -472,7 +489,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         if args.command == 'rss-preflight':
-            print(rss_preflight(args.project, args.sha, enabled=args.enabled))
+            print(rss_preflight(args.project, args.sha, enabled=args.enabled, leave_stopped=args.leave_stopped))
         elif args.command == 'project-writers':
             print('\n'.join(project_writers(args.project, stop=args.stop)))
         elif args.command == "describe":

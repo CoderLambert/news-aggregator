@@ -25,7 +25,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output',type=Path,required=True,help='fresh path directly under /tmp')
     parser.add_argument('--dependency-site',type=Path,default=Path('/tmp/newshub-rss-coordinator-venv/lib/python3.12/site-packages'),help='read-only installed pinned listparser/defusedxml source')
-    parser.add_argument('--full-app-base',default='news-aggregator:local')
+    parser.add_argument('--full-app-base',help='explicit local full-app image matching the source generation; required when building')
     parser.add_argument('--rss-dep-base',default='newshub-rss-t09:isolated-check')
     parser.add_argument('--candidate',help='existing local newshub-rss-t26:* full app image')
     parser.add_argument('--rollback-candidate',help='optional separately-built compatible local newshub-rss-t26:* image')
@@ -37,14 +37,16 @@ def main():
     if os.environ.get('DOCKER_HOST') or os.environ.get('DOCKER_CONTEXT') or not endpoint.startswith('unix://'):
         parser.error('requires default local Unix Docker context, no overrides')
     sha=command(['git','rev-parse','HEAD']).strip()
-    command(['git','diff','--exit-code','HEAD','--','backend','crawler'])
+    command(['git','diff','--exit-code','HEAD','--','backend'])
     project='newshub-rss-t26-'+uuid.uuid4().hex[:12]
     image=args.candidate or 'newshub-rss-t26:candidate-'+project.rsplit('-',1)[-1]+'-'+sha
     rollback=args.rollback_candidate or image
     for value in (image,rollback):
         if not re.fullmatch(r'newshub-rss-t26:[A-Za-z0-9_.-]+',value):
             parser.error('only explicit local T26 candidate tags accepted')
-    bases={tag:json.loads(command(['docker','image','inspect',tag]))[0] for tag in (args.full_app_base,args.rss_dep_base)}
+    if not args.candidate and not args.full_app_base:
+        parser.error('building a T26 candidate requires explicit --full-app-base; no stale collector cache default')
+    bases={tag:json.loads(command(['docker','image','inspect',tag]))[0] for tag in (args.full_app_base,args.rss_dep_base)} if not args.candidate else {}
     if not args.candidate:
         print('building full application candidate',image,flush=True)
         with tempfile.TemporaryDirectory(prefix='newshub-rss-t26-deps-') as extra:

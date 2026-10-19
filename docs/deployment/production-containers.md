@@ -45,7 +45,7 @@ scripts/deploy/deploy.sh \
 
 数据分别存放在数据库、Chroma、TTS、runtime、model-cache 与 logs 命名卷。容器不挂载源代码或宿主 `frontend/dist`；app 从显式 `.env.production` 读取应用配置，Worker 只接收必需的 Django 设置与密钥，不继承 Provider/OAuth 环境变量。
 
-启用 RSS 的项目在 `deploy.sh` / `rollback.sh` 中还须显式添加 `--with-rss`，并在受保护的 `--env-file` 中设置 `NEWSHUB_RSS_IMAGE` 为独立构建、与目标应用同 SHA 的完整标签或 digest。脚本复用 `compose.rss.prod.yaml`，先核对 RSS 镜像 revision、非 root 用户和同步命令，以及同项目已运行且健康的 Miniflux；不负责创建或升级 Miniflux/PostgreSQL。未选择该参数却发现已有 `rss-sync` 容器时，在停止任何 writer 前退出，避免维护后漏恢复同步进程。选择后会恢复并检查 `rss-sync` 的独立镜像和健康状态，通过后才切换静态版本；失败则保持项目 writer 停止。回退若显式指定 `--worker-services`，必须包含 `rss-sync`，例如 `indexer,rss-sync`。引擎首次配置仍遵循 RSS T18，生产执行仍需批准窗口与恢复点。
+启用 RSS 的项目在 `deploy.sh` / `rollback.sh` 中还须显式添加 `--with-rss`，并在受保护的 `--env-file` 中设置 `NEWSHUB_RSS_IMAGE` 为独立构建、与目标应用同 SHA 的完整标签或 digest。脚本复用 `compose.rss.prod.yaml`，先核对 RSS 镜像 revision、非 root 用户和同步命令，以及同项目已运行且健康的 Miniflux；不负责创建或升级 Miniflux/PostgreSQL。未选择该参数却发现已有 `rss-sync` 容器时，在停止任何 writer 前退出，避免维护后漏恢复同步进程。选择后会恢复并检查 `rss-sync` 的独立镜像和健康状态，通过后才切换静态版本；失败则保持项目 writer 停止。回退若显式指定 `--worker-services`，必须包含 `rss-sync`，例如 `indexer,rss-sync`。引擎首次配置仍遵循 RSS T18，生产执行仍需批准窗口与恢复点。 两库恢复后若按 T03 只恢复应用读取，由 `recovery.py rollback` 显式传入 `--leave-rss-stopped` 和原 worker 子集；现有 RSS 容器必须已停止，不能与 `--with-rss` 混用。该路径不恢复 RSS/Miniflux，继续遵循恢复对账后再恢复同步的顺序。
 
 静态导出助手默认只打印 dry-run 计划，不连接 Docker。生产发布流程由 `deploy.sh` 在当前数据库快照、迁移、app 与 worker health checks 全部通过后调用它。不要单独执行导出并切换生产静态版本。每个 release 只包含自己的真实静态文件与 asset 硬链接，公共目录/文件权限固定为目录 `0755`、文件 `0644`；共享旧资源不会进入其他 release 的摘要。同名资源内容不一致时拒绝覆盖。`current` 和 `previous` 通过同目录临时 symlink 原子替换，旧 release 不删除。
 

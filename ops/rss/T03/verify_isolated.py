@@ -52,7 +52,7 @@ def main():
             'rss-db': {'image': pg_image, 'environment': {'POSTGRES_DB': 'rss_contract',
                 'POSTGRES_USER': 'rss_contract', 'POSTGRES_PASSWORD': 'synthetic-t03-only'},
                 'volumes': ['rss-pg-data:/var/lib/postgresql/data'], 'networks': ['isolated'],
-                'healthcheck': {'test': ['CMD-SHELL', 'pg_isready -U rss_contract -d rss_contract'], 'interval': '1s', 'retries': 60}},
+                'healthcheck': {'test': ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U rss_contract -d rss_contract'], 'interval': '1s', 'retries': 60}},
             'fixture': {'image': python_image, 'command': ['python', '/fixture/server.py'],
                 'volumes': [str(ROOT / 'ops/rss/T00/server.py') + ':/fixture/server.py:ro'], 'networks': ['isolated']},
             'miniflux': {'image': engine_image, 'depends_on': {'rss-db': {'condition': 'service_healthy'}},
