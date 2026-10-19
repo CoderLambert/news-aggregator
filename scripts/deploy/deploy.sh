@@ -6,6 +6,8 @@ PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
 COMPOSE_FILE="$PROJECT_ROOT/compose.prod.yaml"
 WORKSPACE_COMPOSE_FILE="$PROJECT_ROOT/compose.workspace.prod.yaml"
 TARGET_WORKERS=(indexer)
+WITH_RSS=0
+RSS_IMAGE=""
 EXECUTE=0
 FRESH=0
 ENV_FILE=""
@@ -25,14 +27,17 @@ OLD_CURRENT_TARGET=""
 usage() {
     cat <<'EOF'
 Usage:
-  deploy.sh [--execute] --env-file ABSOLUTE-FILE --project NAME --sha 40-HEX-SHA \
+  deploy.sh [--execute] [--with-rss] --env-file ABSOLUTE-FILE --project NAME --sha 40-HEX-SHA \
       --image IMAGE --root ABSOLUTE-STATIC-ROOT --manifest TARGET-MANIFEST \
       --db-volume PROJECT_db-data --current-manifest CURRENT-MANIFEST \
       --backup-output ABSOLUTE-SNAPSHOT.sqlite3
-  deploy.sh [--execute] --fresh --env-file ABSOLUTE-FILE --project NAME \
+  deploy.sh [--execute] [--with-rss] --fresh --env-file ABSOLUTE-FILE --project NAME \
       --sha 40-HEX-SHA --image IMAGE --root ABSOLUTE-STATIC-ROOT \
       --manifest TARGET-MANIFEST --db-volume PROJECT_db-data
 
+--with-rss includes the existing RSS overlay and restores rss-sync with its
+independent NEWSHUB_RSS_IMAGE at the same SHA. Miniflux must already be healthy
+in this project; this command does not provision or upgrade the engine.
 Without --execute this validates local inputs and prints the maintenance-window plan.
 An existing database is stopped, backed up against its current image manifest, migrated
 once, then started and health-checked before the static current link is switched.
@@ -80,6 +85,7 @@ trap 'exit 143' TERM
 while (($#)); do
     case "$1" in
         --execute) EXECUTE=1; shift ;;
+        --with-rss) WITH_RSS=1; shift ;;
         --fresh) FRESH=1; shift ;;
         --env-file) (($# >= 2)) || fail '--env-file requires a value.'; ENV_FILE=$2; shift 2 ;;
         --project) (($# >= 2)) || fail '--project requires a value.'; PROJECT=$2; shift 2 ;;
@@ -114,6 +120,7 @@ python3 "$SCRIPT_DIR/release_manifest.py" validate --manifest "$MANIFEST" >/dev/
 target_workers_text="$(python3 "$SCRIPT_DIR/release_manifest.py" worker-services --manifest "$MANIFEST")" \
     || fail 'could not identify target worker capabilities.'
 mapfile -t TARGET_WORKERS <<<"$target_workers_text"
+if ((WITH_RSS)); then TARGET_WORKERS+=(rss-sync); fi
 USE_WORKSPACE_OVERLAY=0
 for service in "${TARGET_WORKERS[@]}"; do
     [[ "$service" == channel-worker ]] && USE_WORKSPACE_OVERLAY=1
@@ -164,7 +171,9 @@ PY
     [[ "$CURRENT_SHA" != "$SHA" ]] || fail 'target SHA is already the current release.'
 fi
 
-COMPOSE=(docker compose --project-name "$PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+COMPOSE=(docker compose --project-name "$PROJECT" --env-file "$ENV_FILE")
+if ((WITH_RSS)); then COMPOSE+=(--profile rss); fi
+COMPOSE+=(-f "$COMPOSE_FILE")
 if ((USE_WORKSPACE_OVERLAY)); then
     [[ -f "$WORKSPACE_COMPOSE_FILE" && ! -L "$WORKSPACE_COMPOSE_FILE" ]] \
         || fail 'workspace worker capability requires compose.workspace.prod.yaml.'
@@ -179,6 +188,12 @@ if ((USE_LEGACY_OVERLAY)); then
     [[ -f "$LEGACY_COMPOSE_FILE" && ! -L "$LEGACY_COMPOSE_FILE" ]] \
         || fail 'historical worker capability requires compose.legacy-workers.prod.yaml.'
     COMPOSE+=(-f "$LEGACY_COMPOSE_FILE")
+fi
+if ((WITH_RSS)); then
+    RSS_COMPOSE_FILE="$PROJECT_ROOT/compose.rss.prod.yaml"
+    [[ -f "$RSS_COMPOSE_FILE" && ! -L "$RSS_COMPOSE_FILE" ]] \
+        || fail '--with-rss requires compose.rss.prod.yaml.'
+    COMPOSE+=(-f "$RSS_COMPOSE_FILE")
 fi
 compose_call() {
     NEWSHUB_IMAGE="$IMAGE" NEWSHUB_ENV_FILE="$ENV_FILE" "${COMPOSE[@]}" "$@"
@@ -211,6 +226,17 @@ docker_endpoint="$(docker context inspect --format '{{(index .Endpoints "docker"
 python3 "$SCRIPT_DIR/release_manifest.py" validate --manifest "$MANIFEST" --image "$IMAGE" --sha "$SHA" >/dev/null \
     || fail 'target image revision/user did not match the target manifest.'
 compose_call config --quiet || fail 'production Compose configuration is incomplete or invalid.'
+
+# Read-only admission before the SQLite maintenance window. Never stop an
+# existing RSS writer unless this invocation will restore and verify it.
+if ((WITH_RSS)); then
+    RSS_IMAGE="$(compose_call config --format json | python3 "$SCRIPT_DIR/release_manifest.py" rss-preflight \
+        --project "$PROJECT" --sha "$SHA" --enabled)" \
+        || fail 'RSS image/engine preflight failed; no project writer was stopped.'
+else
+    python3 "$SCRIPT_DIR/release_manifest.py" rss-preflight --project "$PROJECT" --sha "$SHA" >/dev/null \
+        || fail 'existing RSS runtime requires --with-rss; no project writer was stopped.'
+fi
 
 if [[ -e "$ROOT" ]]; then
     [[ -d "$ROOT" && ! -L "$ROOT" ]] || fail '--root must be a real directory when it exists.'
@@ -328,6 +354,8 @@ wait_healthy() {
 }
 assert_target_service_image() {
     local service=$1
+    local expected_image=$IMAGE
+    if [[ "$service" == rss-sync ]]; then expected_image=$RSS_IMAGE; fi
     local ids id image revision
     ids="$("${COMPOSE[@]}" ps --all --quiet "$service")" || return 1
     mapfile -t ids <<<"$ids"
@@ -337,7 +365,7 @@ assert_target_service_image() {
         count=$((count + 1))
         image="$(docker inspect --format '{{.Config.Image}}' "$id")" || return 1
         revision="$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$id")" || return 1
-        [[ "$image" == "$IMAGE" && "$revision" == "$SHA" ]] || return 1
+        [[ "$image" == "$expected_image" && "$revision" == "$SHA" ]] || return 1
     done
     ((count == 1))
 }

@@ -61,7 +61,7 @@ def test_stop_includes_retired_roles_and_checks_project_before_any_stop(monkeypa
     assert not any(args[0] == 'stop' for args, _ in calls)
 
 
-@pytest.mark.parametrize('project', ['../other', '--all', '', 'with space', 'A' * 80])
+@pytest.mark.parametrize('project', ['../other', '--all', '', 'with space', 'A' * 80, 'a' * 64])
 def test_invalid_project_never_calls_docker(monkeypatch, project):
     docker = Mock(side_effect=AssertionError('must validate first'))
     monkeypatch.setattr(release, '_docker_text', docker)
@@ -90,7 +90,7 @@ def test_local_start_dispatches_only_web_processes_and_rejects_retired_crawl(tmp
     assert not (root / 'scripts/news-aggregator-crawl.timer').exists()
 
 
-@pytest.mark.parametrize('project', ['a' * 80, 'project_01-test'])
+@pytest.mark.parametrize('project', ['a' * 63, 'project_01-test'])
 def test_writer_selection_preserves_existing_deploy_cli_project_names(monkeypatch, project):
     docker = Mock(return_value='')
     monkeypatch.setattr(release, '_docker_text', docker)

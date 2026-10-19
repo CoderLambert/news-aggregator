@@ -61,8 +61,25 @@ case "$1" in
       *'{{.Config.User}}'*) printf '10001:10001\n'; exit 0 ;;
     esac
     ;;
+  stop)
+    touch "$MOCK_STOPPED_FILE"
+    printf '%s\n' "$last"
+    exit 0
+    ;;
   inspect)
     case "$3" in
+      '{{.State.Running}}') printf 'false\n' ;;
+      '{{json .Config.Labels}}')
+        case "$last" in
+          aaaaaaaaaaaa) service=crawler ;;
+          bbbbbbbbbbbb) service=full-content ;;
+          cccccccccccc) service=indexer ;;
+          dddddddddddd) service=app ;;
+          eeeeeeeeeeee) service=channel-worker ;;
+          *) exit 8 ;;
+        esac
+        printf '{"com.docker.compose.project":"test_project","com.docker.compose.service":"%s"}\n' "$service"
+        ;;
       '{{.State.Status}}') printf 'running\n' ;;
       '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}') printf 'healthy\n' ;;
       '{{.Config.Image}}') printf '%s\n' "${MOCK_CURRENT_IMAGE:-newshub:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}" ;;
@@ -74,6 +91,16 @@ case "$1" in
   ps)
     case "$joined" in
       *'--filter volume='*) printf '%s\n' "${MOCK_RUNNING_CONTAINER:-}"; exit 0 ;;
+      *'label=com.docker.compose.project=test_project'*)
+        case "$last" in
+          *service=crawler) printf 'aaaaaaaaaaaa\n' ;;
+          *service=full-content) printf 'bbbbbbbbbbbb\n' ;;
+          *service=indexer) printf 'cccccccccccc\n' ;;
+          *service=app) printf 'dddddddddddd\n' ;;
+          *service=channel-worker) printf 'eeeeeeeeeeee\n' ;;
+        esac
+        exit 0
+        ;;
     esac
     ;;
   run)
@@ -81,9 +108,9 @@ case "$1" in
       *'api/services/full_content_worker.py'*)
         case "$joined" in
           *newshub:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb*)
-            printf '%s\n' '{"channel_worker":true,"full_content_worker":true}' ;;
+            printf '%s\n' '{"channel_worker":true,"full_content_worker":true,"crawler_worker":true}' ;;
           *)
-            printf '%s\n' '{"channel_worker":false,"full_content_worker":false}' ;;
+            printf '%s\n' '{"channel_worker":false,"full_content_worker":false,"crawler_worker":true}' ;;
         esac
         exit 0
         ;;
@@ -384,8 +411,10 @@ fi
     || { printf 'test_release_scripts: failed deployment changed static current.\n' >&2; exit 1; }
 [[ ! -e "$WORK_DIR/out/deploy.sqlite3" ]] \
     || { printf 'test_release_scripts: failed backup left a published artifact.\n' >&2; exit 1; }
-grep -Fq -- "-f $PROJECT_ROOT/compose.prod.yaml -f $PROJECT_ROOT/compose.workspace.prod.yaml stop --timeout 45 channel-worker full-content crawler indexer app" "$DOCKER_LOG" \
-    || { printf 'test_release_scripts: deploy did not stop the workspace channel worker through its overlay.\n' >&2; exit 1; }
+for identity in aaaaaaaaaaaa bbbbbbbbbbbb cccccccccccc dddddddddddd eeeeeeeeeeee; do
+    grep -Fxq -- "stop --time 45 $identity" "$DOCKER_LOG" \
+        || { printf 'test_release_scripts: deploy did not stop a verified project writer.\n' >&2; exit 1; }
+done
 
 rm -f -- "$MOCK_STOPPED_FILE" "$MOCK_MIGRATE_FILE" "$MOCK_UP_FILE"
 : >"$DOCKER_LOG"

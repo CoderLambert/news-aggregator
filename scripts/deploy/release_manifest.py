@@ -235,7 +235,7 @@ def project_writers(project: str, *, stop: bool = False) -> list[str]:
     No containers or volumes are removed. Verify every returned identity before
     stopping anything; unexpected metadata fails closed without targeting it.
     """
-    if not re.fullmatch(r'[a-z0-9][a-z0-9_-]*', project):
+    if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,62}', project):
         raise ManifestError('invalid Compose project')
     services = ('rss-sync', 'channel-worker', 'full-content', 'crawler', 'indexer', 'app')
     selected = []
@@ -263,6 +263,51 @@ def project_writers(project: str, *, stop: bool = False) -> list[str]:
             if _docker_text('inspect', '--format', '{{.State.Running}}', identity) != 'false':
                 raise ManifestError('project writer is still running')
     return selected
+
+
+def rss_preflight(project: str, release_sha: str, *, enabled: bool = False) -> str:
+    """Admit RSS lifecycle management without exposing resolved Compose secrets."""
+    if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,62}', project):
+        raise ManifestError('invalid Compose project')
+    existing = _docker_text('ps', '--all', '--quiet',
+        '--filter', f'label=com.docker.compose.project={project}',
+        '--filter', 'label=com.docker.compose.service=rss-sync')
+    if not enabled:
+        if existing:
+            raise ManifestError('existing RSS runtime requires --with-rss')
+        return ''
+    try:
+        services = json.load(sys.stdin)['services']
+        image = services['rss-sync']['image']
+        engine_image = services['miniflux']['image']
+        if not isinstance(image, str) or not isinstance(engine_image, str):
+            raise ValueError
+    except (ValueError, KeyError, TypeError):
+        raise ManifestError('resolved RSS Compose image configuration is invalid') from None
+    inspect_production_image(image, release_sha)
+    probe = "from pathlib import Path; print(Path('/app/backend/api/management/commands/rss_sync_worker.py').is_file())"
+    if _docker_text('run', '--rm', '--pull=never', '--network', 'none',
+                    '--read-only', '--entrypoint', 'python', image, '-c', probe) != 'True':
+        raise ManifestError('RSS image has no rss_sync_worker command')
+    identities = _docker_text('ps', '--all', '--quiet',
+        '--filter', f'label=com.docker.compose.project={project}',
+        '--filter', 'label=com.docker.compose.service=miniflux').splitlines()
+    if len(identities) != 1 or not re.fullmatch(r'[0-9a-f]{12,64}', identities[0]):
+        raise ManifestError('--with-rss requires one existing Miniflux container')
+    identity = identities[0]
+    try:
+        labels = json.loads(_docker_text('inspect', '--format', '{{json .Config.Labels}}', identity))
+    except (ValueError, TypeError):
+        raise ManifestError('Miniflux labels are invalid') from None
+    if (not isinstance(labels, dict)
+            or labels.get('com.docker.compose.project') != project
+            or labels.get('com.docker.compose.service') != 'miniflux'):
+        raise ManifestError('Miniflux identity does not match this project')
+    if (_docker_text('inspect', '--format', '{{.State.Status}}', identity) != 'running'
+            or _docker_text('inspect', '--format', '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}', identity) != 'healthy'
+            or _docker_text('inspect', '--format', '{{.Config.Image}}', identity) != engine_image):
+        raise ManifestError('existing Miniflux must be healthy and match the resolved engine image')
+    return image
 
 
 def inspect_production_image(image: str, release_sha: str) -> None:
@@ -416,13 +461,19 @@ def _parser() -> argparse.ArgumentParser:
     writers = subparsers.add_parser('project-writers', help='inspect or stop only this project writer containers, including retired roles')
     writers.add_argument('--project', required=True)
     writers.add_argument('--stop', action='store_true')
+    rss = subparsers.add_parser('rss-preflight', help='validate optional RSS lifecycle before stopping project writers')
+    rss.add_argument('--project', required=True)
+    rss.add_argument('--sha', required=True)
+    rss.add_argument('--enabled', action='store_true')
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        if args.command == 'project-writers':
+        if args.command == 'rss-preflight':
+            print(rss_preflight(args.project, args.sha, enabled=args.enabled))
+        elif args.command == 'project-writers':
             print('\n'.join(project_writers(args.project, stop=args.stop)))
         elif args.command == "describe":
             manifest = describe_image(args.image, args.sha)

@@ -261,9 +261,15 @@ elif args[0] == 'compose':
         expected_files.append(os.environ['TEST_WORKSPACE_COMPOSE_FILE'])
     if os.environ.get('TEST_LEGACY_OVERLAY') == '1':
         expected_files.append(os.environ['TEST_LEGACY_COMPOSE_FILE'])
+    if os.environ.get('TEST_WITH_RSS') == '1':
+        expected_files.append(os.environ['TEST_RSS_COMPOSE_FILE'])
+        assert args[args.index('--profile') + 1] == 'rss'
     assert compose_files == expected_files
     command = args[file_positions[-1] + 2:]
-    if command[0] in {'config', 'stop'}:
+    if command[0] == 'config' and '--format' in command:
+        image = 'newshub-rss:' + (old_sha if os.environ.get('TEST_RSS_MODE') == 'stale-image' else target_sha)
+        print(json.dumps({'services': {'rss-sync': {'image': image}, 'miniflux': {'image': 'miniflux:synthetic-pinned'}}}))
+    elif command[0] in {'config', 'stop'}:
         pass
     elif command[0] == 'up':
         if command[-1] == 'app':
@@ -281,23 +287,30 @@ elif args[0] == 'compose':
 elif args[0] == 'inspect':
     fmt, container = args[2], args[-1]
     sha = old_sha if container == 'app-old' else target_sha
-    identities={'a'*12:'crawler','b'*12:'full-content','c'*12:'indexer','d'*12:'app','e'*12:'channel-worker'}
+    identities={'a'*12:'crawler','b'*12:'full-content','c'*12:'indexer','d'*12:'app','e'*12:'channel-worker','f'*12:'rss-sync','1'*12:'miniflux'}
     if fmt == '{{json .Config.Labels}}':
-        print(json.dumps({'com.docker.compose.project':'test_worker_release','com.docker.compose.service':identities[container]}))
+        print(json.dumps({'com.docker.compose.project':('foreign-project' if container == '1'*12 and os.environ.get('TEST_RSS_MODE') == 'foreign-engine' else 'test_worker_release'),'com.docker.compose.service':identities[container]}))
     elif fmt == '{{.State.Running}}':
         print('false' if (root / ('stopped-' + container)).exists() else 'true')
     elif fmt == '{{.State.Status}}':
         # Model an unhealthy container subsequently exiting, rather than spend
         # the real 300-second readiness deadline in this local shell test.
-        print('exited' if container == 'full-content-new' and (root / 'unhealthy-observed').exists() else 'running')
+        print('exited' if container in {'full-content-new','rss-sync-new'} and (root / 'unhealthy-observed').exists() else 'running')
     elif '.State.Health' in fmt:
-        if container == 'full-content-new' and os.environ['TEST_WORKER_MODE'] == 'unhealthy':
+        if container == '1'*12 and os.environ.get('TEST_RSS_MODE') == 'unhealthy-engine':
+            print('unhealthy')
+        elif (container == 'full-content-new' and os.environ['TEST_WORKER_MODE'] == 'unhealthy') or (container == 'rss-sync-new' and os.environ.get('TEST_RSS_MODE') == 'unhealthy'):
             (root / 'unhealthy-observed').touch()
             print('unhealthy')
         else:
             print('healthy')
     elif fmt == '{{.Config.Image}}':
-        print('newshub:' + sha)
+        if container == '1'*12:
+            print('miniflux:wrong' if os.environ.get('TEST_RSS_MODE') == 'wrong-engine-image' else 'miniflux:synthetic-pinned')
+        elif container == 'rss-sync-new':
+            print('newshub-rss:' + (old_sha if os.environ.get('TEST_RSS_MODE') == 'wrong-started-image' else sha))
+        else:
+            print('newshub:' + sha)
     elif 'org.opencontainers.image.revision' in fmt:
         print(sha)
     elif '/var/lib/newshub/db' in fmt:
@@ -310,7 +323,9 @@ elif args[0] == 'ps':
         assert 'label=com.docker.compose.project=test_worker_release' in args
         service=args[-1].rsplit('=',1)[-1]
         identities={'crawler':'a'*12,'full-content':'b'*12,'indexer':'c'*12,'app':'d'*12,'channel-worker':'e'*12}
-        if service in identities: print(identities[service])
+        if service == 'miniflux' and os.environ.get('TEST_WITH_RSS') == '1' and os.environ.get('TEST_RSS_MODE') != 'missing-engine': print('1'*12)
+        elif service == 'rss-sync' and os.environ.get('TEST_HAS_RSS') == '1': print('f'*12)
+        elif service in identities: print(identities[service])
 elif args[0] == 'stop':
     (root / ('stopped-' + args[-1])).touch()
     print(args[-1])
@@ -320,6 +335,8 @@ elif args[0] == 'run':
         capability = True if image.endswith(old_sha) else os.environ['TEST_TARGET_CAP'] == '1'
         channel_capability = os.environ.get('TEST_TARGET_CHANNEL_CAP') == '1' and not image.endswith(old_sha)
         print(json.dumps({'full_content_worker': capability, 'channel_worker': channel_capability, 'crawler_worker': image.endswith(old_sha) or os.environ.get('TEST_TARGET_CRAWLER_CAP') == '1'}))
+    elif 'rss_sync_worker.py' in args[-1]:
+        print('False' if os.environ.get('TEST_RSS_MODE') == 'missing-command' else 'True')
     elif 'sqlite_snapshot.py inspect --source' in args[-1]:
         print(json.dumps({'quick_check': 'ok', 'migrations': [{'app':'api','name':'0001_initial'}]}))
     else:
@@ -329,7 +346,7 @@ else:
 '''
 
 
-def rollback_harness(tmp_path, *, legacy, mode, workspace=False, worker_services=None, retired=False):
+def rollback_harness(tmp_path, *, legacy, mode, workspace=False, worker_services=None, retired=False, has_rss=False, with_rss=False, rss_mode='healthy', action='rollback'):
     static = tmp_path / 'static'
     assets = static / 'assets'
     assets.mkdir(parents=True)
@@ -365,17 +382,20 @@ def rollback_harness(tmp_path, *, legacy, mode, workspace=False, worker_services
     sleep.chmod(0o700)
     log = tmp_path / 'docker.jsonl'
     result = subprocess.run([
-        'bash', str(ROOT / 'scripts/deploy/rollback.sh'), '--execute',
+        'bash', str(ROOT / f'scripts/deploy/{action}.sh'), '--execute',
         '--env-file', str(environment), '--project', 'test_worker_release',
         '--sha', SHA, '--image', IMAGE, '--root', str(static), '--manifest', str(target_manifest),
         '--current-manifest', str(old_manifest), '--db-volume', 'test_worker_release_db-data',
-    ] + ([] if worker_services is None else ['--worker-services', worker_services]), env={**os.environ, 'PATH': str(binary) + os.pathsep + os.environ['PATH'], 'DOCKER_HOST': 'unix:///synthetic-test-only.sock',
+    ] + (['--backup-output', str(tmp_path / 'before.sqlite3')] if action == 'deploy' else []) + (['--with-rss'] if with_rss else []) + ([] if worker_services is None else ['--worker-services', worker_services]), env={**os.environ, 'PATH': str(binary) + os.pathsep + os.environ['PATH'], 'DOCKER_HOST': 'unix:///synthetic-test-only.sock',
             'TEST_DOCKER_LOG': str(log), 'TEST_HARNESS_ROOT': str(tmp_path),
             'TEST_TARGET_SHA': SHA, 'TEST_OLD_SHA': OLD_SHA, 'TEST_TARGET_CAP': str(int(not legacy and not retired)),
             'TEST_TARGET_CRAWLER_CAP': str(int(not retired)),
             'TEST_TARGET_CHANNEL_CAP': str(int(workspace)), 'TEST_WORKER_MODE': mode,
             'TEST_COMPOSE_FILE': str(ROOT / 'compose.prod.yaml'),
             'TEST_WORKSPACE_COMPOSE_FILE': str(ROOT / 'compose.workspace.prod.yaml'),
+            'TEST_HAS_RSS': str(int(has_rss)),
+            'TEST_WITH_RSS': str(int(with_rss)), 'TEST_RSS_MODE': rss_mode,
+            'TEST_RSS_COMPOSE_FILE': str(ROOT / 'compose.rss.prod.yaml'),
             'TEST_WORKSPACE_OVERLAY': str(int(workspace)),
             'TEST_LEGACY_OVERLAY': str(int(not retired and (worker_services is None or any(role in worker_services.split(',') for role in ('crawler', 'full-content'))))),
             'TEST_LEGACY_COMPOSE_FILE': str(ROOT / 'compose.legacy-workers.prod.yaml')},
@@ -519,3 +539,54 @@ def test_retired_image_rollback_stops_previous_collectors_without_reviving_them(
     assert not any(str(ROOT / 'compose.legacy-workers.prod.yaml') in call for call in commands)
     stopped = {call[-1] for call in commands if call[0] == 'stop'}
     assert {'a'*12, 'b'*12, 'c'*12, 'd'*12} <= stopped
+
+
+@pytest.mark.parametrize('action', ['deploy', 'rollback'])
+def test_existing_rss_runtime_is_not_silently_stopped_by_app_only_release(tmp_path, action):
+    result, commands, static = rollback_harness(tmp_path, legacy=False, retired=True,
+        mode='healthy', has_rss=True, action=action)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert '--with-rss' in result.stderr
+    assert not any(call[0] == 'stop' for call in commands)
+    assert (static / 'current').readlink() == Path('releases/' + OLD_SHA)
+
+
+@pytest.mark.parametrize('workers', [None, 'indexer,rss-sync'])
+def test_managed_rss_rollback_resumes_independent_same_sha_image(tmp_path, workers):
+    result, commands, static = rollback_harness(tmp_path, legacy=False, retired=True,
+        mode='healthy', has_rss=True, with_rss=True, worker_services=workers)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (static / 'current').readlink() == Path('releases/' + SHA)
+    starts = [call for call in commands if call[0] == 'compose' and 'up' in call]
+    assert starts[-1][-2:] == ['indexer', 'rss-sync']
+    assert not any('crawler' in call or 'full-content' in call or 'miniflux' in call or 'rss-db' in call for call in starts)
+    assert 'f'*12 in {call[-1] for call in commands if call[0] == 'stop'}
+    assert any(call[0] == 'inspect' and call[-1] == 'rss-sync-new' and '{{.Config.Image}}' in call for call in commands)
+
+
+@pytest.mark.parametrize('action', ['deploy', 'rollback'])
+@pytest.mark.parametrize('rss_mode', ['stale-image', 'missing-engine', 'wrong-engine-image', 'missing-command', 'foreign-engine', 'unhealthy-engine'])
+def test_rss_release_preflight_failure_never_stops_writers(tmp_path, action, rss_mode):
+    result, commands, static = rollback_harness(tmp_path, legacy=False, retired=True,
+        mode='healthy', has_rss=True, with_rss=True, rss_mode=rss_mode, action=action)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert 'preflight failed' in result.stderr
+    assert not any(call[0] == 'stop' or (call[0] == 'compose' and 'up' in call) for call in commands)
+    assert (static / 'current').readlink() == Path('releases/' + OLD_SHA)
+
+
+@pytest.mark.parametrize('rss_mode', ['unhealthy', 'wrong-started-image'])
+def test_rss_resume_failure_stops_project_and_preserves_static(tmp_path, rss_mode):
+    result, commands, static = rollback_harness(tmp_path, legacy=False, retired=True,
+        mode='healthy', has_rss=True, with_rss=True, rss_mode=rss_mode)
+    assert result.returncode == 2 and 'rss-sync worker did not pass' in result.stderr
+    assert (static / 'current').readlink() == Path('releases/' + OLD_SHA)
+    assert len([call for call in commands if call[0] == 'stop' and call[-1] == 'f'*12]) == 2
+    assert not any(call[0] == 'compose' and 'down' in call for call in commands)
+
+
+def test_managed_rss_cannot_be_omitted_from_explicit_worker_subset(tmp_path):
+    result, commands, _ = rollback_harness(tmp_path, legacy=False, retired=True,
+        mode='healthy', with_rss=True, worker_services='indexer')
+    assert result.returncode == 2 and '--with-rss requires rss-sync' in result.stderr
+    assert not commands

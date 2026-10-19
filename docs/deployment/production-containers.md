@@ -37,13 +37,15 @@ scripts/deploy/deploy.sh \
 
 首次空库只能使用同一脚本的 `--fresh` 路径；脚本必须确认项目没有旧 app/worker 容器且卷内尚无 `db.sqlite3`。直接运行 Compose 不能绕开这些检查。完整维护窗口顺序和失败恢复方式见 [`release-gates.md`](release-gates.md)。
 
-`migrate` 是一次性服务，在 SQLite 所在目录创建独占非阻塞 flock，并持锁运行 `manage.py migrate --noinput`。应用和两个 Worker 只有在迁移成功后才启动；Worker 还等待应用健康。生产应用入口不会自动迁移，开发入口仍保留原有自动迁移行为。新数据库只在专用持久卷中创建，不从 Git LFS 复制数据库。
+`migrate` 是一次性服务，在 SQLite 所在目录创建独占非阻塞 flock，并持锁运行 `manage.py migrate --noinput`。应用和保留的 Worker 只有在迁移成功后才启动；索引与频道 Worker 还等待应用健康。生产应用入口不会自动迁移，开发入口仍保留原有自动迁移行为。新数据库只在专用持久卷中创建，不从 Git LFS 复制数据库。
 
-生产 Compose 使用 host 网络，Waitress 只监听 `127.0.0.1:9527`。安全默认值为 `PUBLIC_SITE_MODE=read_only`、signup/AI/订阅及 crawler/indexer 自动任务关闭，认证模式为 `disabled`。这些值可在显式传给 Compose 的环境文件中配置；在 G2/G3 获批前不要设置 `full` 或开启相应开关。Compose 命令必须继续显式指定 `--env-file`，不会从仓库根目录 `.env` 自动读取这些策略值。Worker 使用现有 `crawler_healthcheck` 和 `embedding_healthcheck` 检查心跳；缺少或过期的心跳会使对应容器变为 unhealthy。
+生产 Compose 使用 host 网络，Waitress 只监听 `127.0.0.1:9527`。安全默认值为 `PUBLIC_SITE_MODE=read_only`、signup/AI/订阅及 indexer 自动任务关闭，认证模式为 `disabled`。这些值可在显式传给 Compose 的环境文件中配置；在 G2/G3 获批前不要设置 `full` 或开启相应开关。Compose 命令必须继续显式指定 `--env-file`，不会从仓库根目录 `.env` 自动读取这些策略值。索引 Worker 使用现有 `embedding_healthcheck` 检查心跳；缺少或过期的心跳会使对应容器变为 unhealthy。
 
-发布清单 schema v3 会同时记录正文 Worker 与频道 Worker 能力。`deploy.sh` 和 `rollback.sh` 只要在当前或目标清单中发现频道 Worker，就自动加载固定的 `compose.workspace.prod.yaml`：维护窗口会先停止 `channel-worker`，目标版本支持时再启动并等待其健康检查。无需也不得用发布脚本之外的临时 Compose 命令补启动该 Worker；回滚到确实不支持频道 Worker 的旧清单时只停止、不重启。
+发布清单 schema v4 显式记录 crawler、正文和频道 Worker 能力；新镜像的前两项为 false。兼容读取 v1–v3，但只有显式恢复历史能力清单时才加载 `compose.legacy-workers.prod.yaml`，默认部署不重启旧采集角色。`deploy.sh` 和 `rollback.sh` 只要在当前或目标清单中发现频道 Worker，就自动加载固定的 `compose.workspace.prod.yaml`：维护窗口会先停止 `channel-worker`，目标版本支持时再启动并等待其健康检查。无需也不得用发布脚本之外的临时 Compose 命令补启动该 Worker；回滚到确实不支持频道 Worker 的旧清单时只停止、不重启。
 
 数据分别存放在数据库、Chroma、TTS、runtime、model-cache 与 logs 命名卷。容器不挂载源代码或宿主 `frontend/dist`；app 从显式 `.env.production` 读取应用配置，Worker 只接收必需的 Django 设置与密钥，不继承 Provider/OAuth 环境变量。
+
+启用 RSS 的项目在 `deploy.sh` / `rollback.sh` 中还须显式添加 `--with-rss`，并在受保护的 `--env-file` 中设置 `NEWSHUB_RSS_IMAGE` 为独立构建、与目标应用同 SHA 的完整标签或 digest。脚本复用 `compose.rss.prod.yaml`，先核对 RSS 镜像 revision、非 root 用户和同步命令，以及同项目已运行且健康的 Miniflux；不负责创建或升级 Miniflux/PostgreSQL。未选择该参数却发现已有 `rss-sync` 容器时，在停止任何 writer 前退出，避免维护后漏恢复同步进程。选择后会恢复并检查 `rss-sync` 的独立镜像和健康状态，通过后才切换静态版本；失败则保持项目 writer 停止。回退若显式指定 `--worker-services`，必须包含 `rss-sync`，例如 `indexer,rss-sync`。引擎首次配置仍遵循 RSS T18，生产执行仍需批准窗口与恢复点。
 
 静态导出助手默认只打印 dry-run 计划，不连接 Docker。生产发布流程由 `deploy.sh` 在当前数据库快照、迁移、app 与 worker health checks 全部通过后调用它。不要单独执行导出并切换生产静态版本。每个 release 只包含自己的真实静态文件与 asset 硬链接，公共目录/文件权限固定为目录 `0755`、文件 `0644`；共享旧资源不会进入其他 release 的摘要。同名资源内容不一致时拒绝覆盖。`current` 和 `previous` 通过同目录临时 symlink 原子替换，旧 release 不删除。
 
