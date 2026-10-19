@@ -12,7 +12,7 @@
 | T08-04 | 无当前个人结果时使用 shared/current fallback，不让 stale 私有结果覆盖 | NOT_RUN |
 | T08-05 | 软删除连接后读取自己的完成历史；跨用户/未知 result fail closed | NOT_RUN |
 | T08-06 | detail 标记 current 时同时核对冻结文章 ID、正文哈希、标题与 revision | NOT_RUN |
-| T08-07 | chat 历史/回放精确绑定 evidence；legacy 原文历史仅在原文模式可见 | NOT_RUN |
+| T08-07 | chat 历史/回放精确绑定 evidence；无上下文旧用户提问仅显式原文模式可见，未绑定 assistant 回答不重放 | NOT_RUN |
 | UI-01 | 详情选择器切换精确保存结果并标注 stale source | NOT_RUN |
 | UI-02 | 聊天请求和语音请求传递精确 result ID；播放器切换账户会清除音频与 resume state | NOT_RUN |
 

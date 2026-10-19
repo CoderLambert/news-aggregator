@@ -221,7 +221,7 @@ def readable_chat_messages(messages, stored, translation_context=None, *, allow_
         if not isinstance(message, dict) or message.get('role') not in {'user', 'assistant'}:
             continue
         context = message.get('article_context')
-        is_legacy_original = allow_legacy_original and context is None
+        is_legacy_original = allow_legacy_original and context is None and message.get('role') == 'user'
         if context == expected or is_legacy_original:
             entry = dict(message)
             if isinstance(context, dict) and isinstance(context.get('translation_context'), dict):

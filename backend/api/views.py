@@ -710,14 +710,21 @@ class NewsTranslateFullView(ArticleAccessMixin, generics.GenericAPIView):
         return _translation_job_response(request, news, stored, job)
 
 
+MAX_TRANSLATION_RESULT_ID = (1 << 63) - 1
+
+
 def _valid_translation_result_id(value):
-    """Accept only an absent ID or a canonical positive integer result key."""
+    """Accept only an absent ID or a bounded canonical positive decimal key."""
     if value is None or value == '':
         return True
     if type(value) is int:
-        return value > 0
+        return 1 <= value <= MAX_TRANSLATION_RESULT_ID
     if isinstance(value, str):
-        return value.isdigit() and value != '0' and str(int(value)) == value
+        if (not value or len(value) > 19 or not value.isascii()
+                or not value.isdecimal() or value.startswith('0')):
+            return False
+        number = int(value)
+        return 1 <= number <= MAX_TRANSLATION_RESULT_ID
     return False
 
 
@@ -739,6 +746,8 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
         stored = get_stored_article(request.user, news.pk)
         translation_result_id = request.query_params.get('translation_result_id')
         mode = request.query_params.get('translation_mode')
+        if not _valid_translation_result_id(translation_result_id):
+            return Response({'error_code': 'invalid_translation_selection'}, status=status.HTTP_400_BAD_REQUEST)
         if mode is None:
             mode = 'result' if translation_result_id not in (None, '') else 'current'
         if mode not in {'current', 'original', 'result'} or (mode == 'result' and not translation_result_id) or (mode != 'result' and translation_result_id not in (None, '')):

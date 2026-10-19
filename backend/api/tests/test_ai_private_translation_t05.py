@@ -1634,16 +1634,23 @@ class PrivateTranslationTests(TransactionTestCase):
         self.assertNotIn('历史结果对应的助手回答。', [m['content'] for m in current_history.data['messages']])
         self.assertNotIn('历史结果对应的助手回答。', [m['content'] for m in original_history.data['messages']])
         self.assertNotIn('当前结果对应的助手回答。', [m['content'] for m in original_history.data['messages']])
-        # Real pre-T08 records have no article_context. Keep them only for an
-        # explicit original-mode read; never attach them to translated evidence.
+        # Real pre-T08 user questions have no article_context. Keep those
+        # under explicit original mode; unbound old assistant text is never
+        # re-exposed because its source/evidence cannot be proven.
         from api.services.chat_history import append_user_message
         append_user_message(
             user_id=self.owner.pk, news_id=self.news.pk, content='兼容保留的旧版原文问题。',
         )
         append_assistant_message(
             user_id=self.owner.pk, news_id=self.news.pk, session_id=session.pk,
-            generation=session.generation, content='兼容保留的旧版原文回答。',
+            generation=session.generation, content='不可重放的旧版无上下文回答。',
             status='complete',
+        )
+        legacy_original_context = snapshot_metadata(current)
+        append_assistant_message(
+            user_id=self.owner.pk, news_id=self.news.pk, session_id=session.pk,
+            generation=session.generation, content='兼容保留的原文模式回答。',
+            status='complete', article_context=legacy_original_context,
         )
         old_history = self.client.get(
             history_url, {'translation_mode': 'result', 'translation_result_id': old_id},
@@ -1655,9 +1662,12 @@ class PrivateTranslationTests(TransactionTestCase):
         self.assertNotIn('兼容保留的旧版原文问题。', [m['content'] for m in old_history.data['messages']])
         self.assertNotIn('兼容保留的旧版原文问题。', [m['content'] for m in current_history.data['messages']])
         self.assertIn('兼容保留的旧版原文问题。', [m['content'] for m in original_history.data['messages']])
-        self.assertNotIn('兼容保留的旧版原文回答。', [m['content'] for m in old_history.data['messages']])
-        self.assertNotIn('兼容保留的旧版原文回答。', [m['content'] for m in current_history.data['messages']])
-        self.assertIn('兼容保留的旧版原文回答。', [m['content'] for m in original_history.data['messages']])
+        self.assertNotIn('不可重放的旧版无上下文回答。', [m['content'] for m in old_history.data['messages']])
+        self.assertNotIn('不可重放的旧版无上下文回答。', [m['content'] for m in current_history.data['messages']])
+        self.assertNotIn('不可重放的旧版无上下文回答。', [m['content'] for m in original_history.data['messages']])
+        self.assertNotIn('兼容保留的原文模式回答。', [m['content'] for m in old_history.data['messages']])
+        self.assertNotIn('兼容保留的原文模式回答。', [m['content'] for m in current_history.data['messages']])
+        self.assertIn('兼容保留的原文模式回答。', [m['content'] for m in original_history.data['messages']])
 
         invalid_mode = self.client.get(history_url, {'translation_mode': 'unknown'})
         self.assertEqual(invalid_mode.status_code, 400, invalid_mode.content)
@@ -1748,7 +1758,7 @@ class PrivateTranslationTests(TransactionTestCase):
         # They must fail before any selected model/provider path is entered.
         with patch.object(service, '_dispatch') as dispatch, \
                 patch('api.services.ai_article_chat.complete_article_chat') as complete:
-            for invalid_result_id in (0, False, [], {}):
+            for invalid_result_id in (0, False, [], {}, 1.0, '²', '9' * 5000):
                 response = self.client.post(f'/api/news/{self.news.pk}/chat/', {
                     'question': '请解释这段译文', 'translation_mode': 'result',
                     'translation_result_id': invalid_result_id,
@@ -1759,6 +1769,25 @@ class PrivateTranslationTests(TransactionTestCase):
                 self.assertEqual(response.data.get('error_code'), 'invalid_translation_selection')
         dispatch.assert_not_called()
         complete.assert_not_called()
+        for invalid_result_id in ('0', '²', '9' * 5000):
+            invalid_history = self.client.get(
+                f'/api/news/{self.news.pk}/chat/',
+                {'translation_mode': 'result', 'translation_result_id': invalid_result_id},
+            )
+            self.assertEqual(invalid_history.status_code, 400, invalid_history.content)
+
+        # Under a downgraded summary snapshot, only an unbound legacy user
+        # question is safe to retain; no-context assistant prose is excluded.
+        from api.services.stored_readers import readable_chat_messages
+        summary_snapshot = SimpleNamespace(
+            scope='summary', revision=1, canonical_hash='summary-hash',
+            completeness='summary', provenance={},
+        )
+        summary_history = readable_chat_messages([
+            {'role': 'user', 'content': '旧版问题'},
+            {'role': 'assistant', 'content': '不可证明来源的旧答案'},
+        ], summary_snapshot, {'source': 'original'}, allow_legacy_original=True)
+        self.assertEqual([message['content'] for message in summary_history], ['旧版问题'])
 
         from api.services.article_content import pick_chat_context
         original_context, original_metadata = pick_chat_context(
