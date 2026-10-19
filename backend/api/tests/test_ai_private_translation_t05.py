@@ -533,25 +533,33 @@ class PrivateTranslationTests(TransactionTestCase):
         self.assertEqual(ChatGPTArticleTranslation.objects.count(), 1)
         self.assertFalse(SharedArticleTranslation.objects.exists())
 
-    def test_t06_interrupted_middle_chunk_is_progress_only_and_never_replayed(self):
-        self.news.full_content = 'A' * 5000 + '\n\n' + 'B' * 5000
-        self.news.full_content_state = 'legacy'
-        self.news.save(update_fields=['full_content', 'full_content_state'])
-        task = self.queued()
-        first = FakeGateway([gateway_frame('translated first')])
-        second = FakeGateway([gateway_frame('partial second', finish=None)])
-        with patch.object(service, 'build_gateway_client', side_effect=[first, second]) as build:
-            service.run_translation(task.pk, task.generation)
-            service.run_translation(task.pk, task.generation)
-        task.refresh_from_db()
-        self.assertEqual(task.status, 'failed')
-        self.assertEqual(task.progress, 'translated first\n\n')
-        self.assertIsNone(task.result)
-        self.assertEqual(build.call_count, 2)
-        self.assertEqual(len(first.sent), 1)
-        self.assertEqual(len(second.sent), 1)
-        self.assertFalse(ChatGPTArticleTranslation.objects.exists())
-        self.assertFalse(SharedArticleTranslation.objects.exists())
+    def test_t06_middle_chunk_failures_are_progress_only_and_never_replayed(self):
+        cases = (
+            ('eof', gateway_frame('partial second', finish=None)),
+            ('length', gateway_frame('partial second', finish='length')),
+            ('empty', gateway_frame('', finish='stop')),
+        )
+        for index, (failure, frame) in enumerate(cases):
+            with self.subTest(failure=failure):
+                self.news.full_content = 'A' * 5000 + '\n\n' + 'B' * 5000 + f'\n\ncase {failure}'
+                self.news.full_content_state = 'legacy'
+                self.news.save(update_fields=['full_content', 'full_content_state'])
+                self.request_id = str(uuid.uuid4())
+                task = self.queued()
+                first = FakeGateway([gateway_frame('translated first')])
+                second = FakeGateway([frame])
+                with patch.object(service, 'build_gateway_client', side_effect=[first, second]) as build:
+                    service.run_translation(task.pk, task.generation)
+                    service.run_translation(task.pk, task.generation)
+                task.refresh_from_db()
+                self.assertEqual(task.status, 'failed')
+                self.assertEqual(task.progress, 'translated first\n\n')
+                self.assertIsNone(task.result)
+                self.assertEqual(build.call_count, 2)
+                self.assertEqual(len(first.sent), 1)
+                self.assertEqual(len(second.sent), 1)
+                self.assertFalse(ChatGPTArticleTranslation.objects.exists())
+                self.assertFalse(SharedArticleTranslation.objects.exists())
 
     def test_t06_oversized_indivisible_block_and_profile_mismatch_reject_before_dispatch(self):
         self.news.full_content = 'A' * 9000 + '\n\n' + 'B' * 100
