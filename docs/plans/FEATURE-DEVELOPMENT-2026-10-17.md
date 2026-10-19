@@ -1,6 +1,8 @@
 # NewsHub 现行开发任务与合同索引
 
-> **更新于 2026-10-19**；当前主线最新适用全量门禁通过基线：`main@27c5b6b2b9bf22f95c99e9b5602296236e2486d1`（[PR #131 全量 CI #39207985870](https://github.com/CoderLambert/news-aggregator/actions/runs/39207985870) 与 [main Push CI #39208921110](https://github.com/CoderLambert/news-aggregator/actions/runs/39208921110) 均 SUCCESS；`changes`、`backend-and-release-gates`、`merge-gate` 成功，前端作业因后端单域变更被跳过；后端 pytest `2483 passed / 16 skipped`、xdist 对账 `2565 passed / 16 skipped`，T00 合成 SDK/Proxy `239/239 PASS`，隔离 G1 实际镜像 revision 为 `27c5b6b2b9bf22f95c99e9b5602296236e2486d1`）。注意较早的 `main@5770062ad10d923ca28c90fe4a4f3709adc30939` 主线 Push CI #39205855011 曾因 T05 并发任务用例/SQLite 锁竞争失败；该失败仍记录为已知间歇问题，PR #130 尚未合并，不能因为后续一次主线通过就宣称已解决。每次开工仍必须重新读取最新 main。**本文件是当前任务状态唯一入口**；[2026-10-17 原计划和旧批次记录已完整归档](archive/FEATURE-DEVELOPMENT-SNAPSHOT-2026-10-17.md)，其中的“下一批/T01 待完成/旧凭据并存”属于历史快照，不再指导开发。
+> **更新于 2026-10-20**；历史全量门禁通过基线记录（非当前 main 的验收）：`main@27c5b6b2b9bf22f95c99e9b5602296236e2486d1`（[PR #131 全量 CI #39207985870](https://github.com/CoderLambert/news-aggregator/actions/runs/39207985870) 与 [main Push CI #39208921110](https://github.com/CoderLambert/news-aggregator/actions/runs/39208921110) 均 SUCCESS；`changes`、`backend-and-release-gates`、`merge-gate` 成功，前端作业因后端单域变更被跳过；后端 pytest `2483 passed / 16 skipped`、xdist 对账 `2565 passed / 16 skipped`，T00 合成 SDK/Proxy `239/239 PASS`，隔离 G1 实际镜像 revision 为 `27c5b6b2b9bf22f95c99e9b5602296236e2486d1`）。注意较早的 `main@5770062ad10d923ca28c90fe4a4f3709adc30939` 主线 Push CI #39205855011 曾因 T05 并发任务用例/SQLite 锁竞争失败；该失败仍记录为已知间歇问题，该故障记录时 PR #130 尚未合并；现 #130 已以 `b9d8f94` 合并，见第 1.4 节，本轮数据库回归未运行，不能因此宣称所有锁竞争都已消失。每次开工仍必须重新读取最新 main。**本文件是当前任务状态唯一入口**；[2026-10-17 原计划和旧批次记录已完整归档](archive/FEATURE-DEVELOPMENT-SNAPSHOT-2026-10-17.md)，其中的“下一批/T01 待完成/旧凭据并存”属于历史快照，不再指导开发。
+
+**当前代码交付已到 main `cd83d88`（#142），本轮完整 CI、真实环境和发布验收仍未通过；完整原编号核对见[当前交付与剩余执行门禁](DELIVERY-AND-REMAINING-GATES-2026-10-20.md)。下面早期批次证据不替代该边界。**
 
 ## 1. 当前已验证交付与未完成边界
 
@@ -16,7 +18,7 @@
 | BYOK T03 五用途模型偏好与快照 | `IMPLEMENTED / TESTED`（离线合成） | [PR #114](https://github.com/CoderLambert/news-aggregator/pull/114)，head `0b943da4af5031ecc16162956cd065282e21e98d`，Squash `c51dceb3d10a22e8164d35cea256395b3fd165a4`，[PR CI #39138340014](https://github.com/CoderLambert/news-aggregator/actions/runs/39138340014) 通过：后端混合 2512 passed / 16 skipped，前端 665 passed / 96 files，镜像与隔离 G1 PASS；主线 [push CI #39138991501](https://github.com/CoderLambert/news-aggregator/actions/runs/39138991501) 已通过（changes、frontend、backend-and-release-gates 均 SUCCESS）。五项完整 CAS 保存、owner/CSRF、可信模型与真实 T02 attempt 能力验证、深研工具门禁及不可变选择快照均已交付。真实调用/业务 Worker/UAT `NOT_RUN`，`ai_execution.py` 仍 fail-closed |
 | RSS T21 OPML 预览/确认/导出/恢复 UI | `IMPLEMENTED / TESTED`（差额） | **正式编号 T21 属于 OPML，不是频道发现（T20）**。现有 API/XML/owner/队列和界面保留；[PR #113](https://github.com/CoderLambert/news-aggregator/pull/113)，head `37692e07631677c219574db31564251b048cbb6a`，Squash `930d7eb1b80e9b511634ebcc1ed72eecb1509ae7`，[PR CI #39138391177](https://github.com/CoderLambert/news-aggregator/actions/runs/39138391177) 前端 662 passed / 95 files，[main CI #39138781175](https://github.com/CoderLambert/news-aggregator/actions/runs/39138781175) PASS。现在能在确认响应未知时用原预览 ID GET 对账并在未确认时返回原预览，不重复发送付费/网络请求。真实 OPML 浏览器 UAT `NOT_RUN` |
 
-**不能混淆：** T01 连接及共享 Worker 安全合同已交付，T03 已提供持久用途偏好和不可变安全选择快照，T04 文章问答与 T05 私人全文翻译均已实现并通过离线合成验证；T09 等其他业务消费者仍须分别审计/接入验证。T01 整体业务闭环仍是 `PARTIAL/BLOCKED`，并非“重新实现 T01”！`ai_execution.py` 在未完成各业务用途授权与消费前继续 fail-closed，不恢复旧 `UserProviderCredential`、站点 Key 回退；ChatGPT Subscription 独立。
+**不能混淆：** T01 连接/Worker 与 T02/T03 模型能力/选择快照已有实现；文章问答、翻译、研究、推荐及 AG 分类已分别接入现行授权路径，近期交付见第 1.4 节。整体真实业务/生产验收仍未完成，不需要重新实现 T01。旧通用 `ai_execution.py` 入口继续 fail-closed，明确业务入口使用当前快照，不恢复旧 `UserProviderCredential` 或站点 Key 回退；ChatGPT Subscription 独立。
 
 第 6 批离线代码基线与门禁：AG-02 [PR #110](https://github.com/CoderLambert/news-aggregator/pull/110) / [main CI #39124955967](https://github.com/CoderLambert/news-aggregator/actions/runs/39124955967)；T02 [PR #111](https://github.com/CoderLambert/news-aggregator/pull/111) / [PR CI #39125387435](https://github.com/CoderLambert/news-aggregator/actions/runs/39125387435)，合并 main@`a006c59a7a24fa782f3e691872d9fb02058ae4b0` 的 [push CI #39136578514](https://github.com/CoderLambert/news-aggregator/actions/runs/39136578514) 已 PASS。禁止将单测、合成 G1、Proxy 传输 stub 称为真实 Provider/浏览器验收。
 
@@ -108,6 +110,10 @@ RSS T14 的两项本地回放差额现已合并，但仅关闭该条窄证据路
 - 实测复现历史译文复制不一致：正文为所选旧译文，复制按钮却写入当前推荐译文。工具栏改用正文的同一已选内容；新生成译文不再因原文 legacy 标记套用旧代码修复，仅明确 legacy 原文/绑定 legacy 译文保留该兼容行为。
 - 两个缺陷均先失败复现再修正。类型检查、相关页面/个人译文按变更定向共 13 个用例均最终通过（包含原文章正常完成仅播放一次）、生产 build/diff PASS。无后端行为/API/迁移修改，未重复已知不可用的数据库或全量 CI。真实模型、TTS、RSS/浏览器联合产品验收仍 NOT_RUN，归 T27。
 
+### 当前交付与剩余门禁总核对（2026-10-20）
+
+RSS T14 已合并 [#142](https://github.com/CoderLambert/news-aggregator/pull/142)，main `cd83d88`。本轮代码交付、AG-03 既有功能源码复核，以及每个原编号的当前证据/未运行项目，统一见[交付与剩余执行门禁](DELIVERY-AND-REMAINING-GATES-2026-10-20.md)。代码已存在与“完成全部任务/发布验收通过”保持分开；真实六厂商/正式网关、真实数据恢复/来源/浏览器、RSS 试点与旧栈退出、最终发布仍未完成。当前没有本轮全量 CI 通过证据，未把 user 授权跳过的检查伪装成 PASS。
+
 ## 2. 第 8 批实施状态与后续候选（最多两个独立写入目标）
 
 | 顺序 | 原编号与目标 | 需要完成的真正差额 | 阶段验收 |
@@ -116,7 +122,7 @@ RSS T14 的两项本地回放差额现已合并，但仅关闭该条窄证据路
 | 第 8 批 B（差额已合并） | **RSS T09 正文/元数据写入一致性差额** | 先核对当前正文版本、主来源/非主写入、同正文元数据变化与重试提交围栏；仅补实际代码与合成回归 | SQLite 版本/内容读取/安全负例、RSS 原验收矩阵 A09；不提前切源 |
 | 后续 | BYOK T13/T14 及 T06–T12 批次验证 | T06–T09 已分别合并；T10–T12 本轮按当前主线实现并提交，前端/纯逻辑定向已验证，后端数据库回归与全量 CI 待集中验证。真实厂商矩阵、部署/人工验收未完成 | 按第 1.4 节与各任务记录区分已实现和 NOT_RUN；不重复移植旧 PR #33–#45 |
 | 后续 | RSS T11/T14/T27 | T11 Miniflux URL 来源绑定最小差额 `IMPLEMENTED / TESTED`（#126）；T14 本地搜索/正文回放新差额（#129/#131）已 `IMPLEMENTED / TESTED`，T11/T14 既有授权/本地上下文/hash 绑定读取链本轮已做源码与原合同复核，未发现需重写的后端功能；T14 前端自动朗读/所选译文复制的实测差额本轮修复，见第 1.4 节；T27 真实来源/浏览器联合最终验收 `NOT_RUN` | 继续按 T11/A08、T14/A11 与 T27/A15 合同核验权限、版本、撤权和消费者一致性；合成 CI/G1 不等于正式验收 |
-| 后续 | AG-03/04 现存行为复核及 AG-05–07 联合验收 | AG-04 已有 #99；AG-05–07 本轮补齐模型接线、增量恢复与停止/状态操作，详见第 1.4 节。AG-03 仍按既有预设/owner/幂等/撤销合同核对，后端 DB、真实 Provider/后台进程与人工验收未完成 | 保留原编号；已实现与 NOT_RUN 分开记录，不把状态页面或离线检查当正式发布 |
+| 后续 | AG-03/04 现存行为复核及 AG-05–07 联合验收 | AG-04 已有 #99；AG-05–07 本轮补齐模型接线、增量恢复与停止/状态操作，详见第 1.4 节。AG-03 的既有预设/owner/幂等/撤销实现已源码复核，当前数据库/并发回归未运行，后端 DB、真实 Provider/后台进程与人工验收未完成 | 保留原编号；已实现与 NOT_RUN 分开记录，不把状态页面或离线检查当正式发布 |
 | 统一最终验收 | RSS T18/T24/T26/T27/T29–T33、BYOK T13/T14、AG-00/07、NH28–NH31 | `NOT_RUN` 的真实厂商、生产数据迁移、真实来源、容量、浏览器/移动端 UAT | 不以合成 G1/SSE 冒充正式生产与真实流式验收 |
 
 **并行边界：** 两个独立目标可以并行，只读审计可分开；`models.py`、URL、迁移、锁文件、共享夹具的写入须由一个任务串行整合。表格只是开发建议，不等于启动新功能或授权付费/生产操作。
