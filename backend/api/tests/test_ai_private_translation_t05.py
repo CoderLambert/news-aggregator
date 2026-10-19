@@ -564,7 +564,7 @@ class PrivateTranslationTests(TransactionTestCase):
         self.assertFalse(ChatGPTTranslationTask.objects.exists())
 
     def test_t06_unknown_context_and_guard_drift_reject_before_dispatch(self):
-        self.news.full_content = 'A' * 5000 + '\\n\\n' + 'B' * 5000
+        self.news.full_content = 'A' * 5000 + '\n\n' + 'B' * 5000
         self.news.full_content_state = 'legacy'
         self.news.save(update_fields=['full_content', 'full_content_state'])
         cases = (
