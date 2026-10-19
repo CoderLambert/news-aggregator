@@ -47,6 +47,7 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, translat
   const activeSelection = selection && user && selection.viewer === user.id ? selection : null
   const selectedModelId = activeSelection?.modelId ?? null
   const modelConsent = Boolean(selectedModelId && activeSelection?.consent)
+  const [suggestionConsent, setSuggestionConsent] = useState<{ key: string; checked: boolean }>({ key: '', checked: false })
   const [internalOpen, setInternalOpen] = useState(false)
   const isOpen = open ?? internalOpen
   const setIsOpen = useCallback((nextOpen: boolean) => {
@@ -82,7 +83,19 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, translat
     generated: suggestionsGenerated,
     loading: refreshingSuggestions,
     refresh: refreshSuggestions,
+    error: suggestionError,
+    modelConfigId: suggestionModelId,
+    modelLabel: suggestionModelLabel,
+    modelSource: suggestionModelSource,
   } = useSuggestedQuestions(newsId, isOpen, articleContext?.contentRevision ?? 0)
+
+  const suggestionConsentKey = JSON.stringify([user?.id, newsId, articleContext?.contentRevision, suggestionModelId])
+  const hasSuggestionConsent = suggestionConsent.key === suggestionConsentKey && suggestionConsent.checked
+
+  const generateSuggestions = () => {
+    void refreshSuggestions(hasSuggestionConsent)
+    setSuggestionConsent({ key: '', checked: false })
+  }
 
   useEffect(() => {
     if (phase === 'success' && !hasCelebratedRef.current) {
@@ -183,15 +196,25 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, translat
           {suggestedQuestions.length > 0 && (
             <button
               type="button"
-              onClick={() => void refreshSuggestions()}
-              disabled={refreshingSuggestions}
+              onClick={generateSuggestions}
+              disabled={refreshingSuggestions || (Boolean(suggestionModelId) && !hasSuggestionConsent)}
               className="text-muted-foreground hover:text-foreground text-[10px]"
             >
-              刷新建议
+              {suggestionsGenerated ? '换一批建议' : '生成推荐问题'}
             </button>
           )}
         </div>
 
+        {suggestionModelId && suggestionModelLabel && <div className="border-b border-border px-4 py-2 text-xs">
+          <p>推荐问题模型：{suggestionModelLabel}。首次打开仅查看缓存或免费模板。</p>
+          <label className="mt-1 flex items-start gap-2">
+            <input type="checkbox" checked={hasSuggestionConsent} disabled={refreshingSuggestions}
+              onChange={event => setSuggestionConsent({ key: suggestionConsentKey, checked: event.target.checked })} />
+            <span>我同意本次生成推荐问题可能产生服务商费用。</span>
+          </label>
+        </div>}
+        {suggestionModelSource && suggestionsGenerated && <p className="px-4 py-1 text-xs text-muted-foreground">推荐来源：{suggestionModelSource.provider} · {suggestionModelSource.model}</p>}
+        {suggestionError && <p role="alert" className="px-4 py-1 text-xs text-destructive">推荐问题生成失败，未自动重试。仍可使用现有问题或免费模板。</p>}
         <div ref={chatScrollRef} onScroll={onChatScroll} onWheel={onChatWheel} className="chat-panel-scroll min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-background/55 p-4 sm:p-5 md:p-7">
           {historyError && (
             <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/35 dark:text-red-200">
@@ -237,7 +260,7 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, translat
             suggestedQuestions={suggestedQuestions}
             suggestionContextScope={suggestionContextScope}
             suggestionsGenerated={suggestionsGenerated}
-            onRefreshSuggestions={() => { void refreshSuggestions() }}
+            onRefreshSuggestions={suggestionModelId && !hasSuggestionConsent ? undefined : generateSuggestions}
             refreshingSuggestions={refreshingSuggestions}
           />
         </div>

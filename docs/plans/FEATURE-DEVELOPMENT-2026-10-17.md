@@ -64,6 +64,13 @@ RSS T14 的两项本地回放差额现已合并，但仅关闭该条窄证据路
 - BYOK T10 本批实现：同一会话锁定原模型，明确同意的续问 POST 复用服务端版本化 native continuation；原生 reasoning/tool 调用历史不进入可见消息 DTO；完成历史/native 状态/终态事件在原 run-token/lease CAS 与凭据围栏下原子提交。GET/SSE 保持只读，BYOK 队列恢复仍不自动派发；无法确认的运行不自动重发。旧无 native continuation 的会话只读保留，必须新建研究以建立安全续接。
 - 本地验证：前端 typecheck 与既有 ResearchPanel/API 定向 30 项通过；新续问场景 1 PASS，生产前端 build PASS；原生 helper 模型/协议负例 PASS（未运行 Django/数据库）。后端当前解释器缺少 pytest/PyYAML，数据库回归 NOT_RUN；不安装/重建环境，不触碰真实数据库或 Provider。真实厂商、生产迁移/部署、浏览器 UAT 仍 NOT_RUN。
 
+### BYOK T11 私有推荐问题（2026-10-20）
+
+- T10 已合并 [#136](https://github.com/CoderLambert/news-aggregator/pull/136)，main `033bfad`；沿用本轮授权按批集中 CI。
+- T11 首次加载切为 GET，仅读取 owner 私有缓存或免费模板；POST 显式携带个人模型与 consent:true 后才生成。保留旧订阅 POST API，个人输出不再写入 News 共享问题缓存。
+- 私有缓存按 owner/news/原文与元数据及权限摘要/模型执行摘要/prompt_version 隔离；模型、凭据和文章在发送前及保存时重检。沿用既有预算，个人生成窗口进一步隔离到 owner/model；GET 不占推理额度、不派发。
+- 前端用途偏好绑定、每次费用确认、生成/换批与来源、错误提示已接通；类型检查 PASS，相关前端 18 项最终 PASS（首次 hook 验证发现偏好加载状态与 mock 隔离问题，已修正并仅重跑该文件 8 项）；前端生产 build PASS；实际 JSON 解析负例与 Python 语法 PASS。后端 Django/数据库回归、真实 Provider/生产/UAT NOT_RUN。
+
 ## 2. 第 8 批实施状态与后续候选（最多两个独立写入目标）
 
 | 顺序 | 原编号与目标 | 需要完成的真正差额 | 阶段验收 |

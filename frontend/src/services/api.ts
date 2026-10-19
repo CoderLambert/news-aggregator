@@ -143,6 +143,8 @@ export type OpenResearchSessionStreamResponse =
   | { kind: 'stream'; events: AsyncIterable<unknown> }
 
 interface SuggestedQuestionsOptions {
+  modelConfigId?: string
+  consent?: true
   force?: boolean
   signal?: AbortSignal
 }
@@ -312,11 +314,17 @@ export function clearChatHistory(newsId: NewsId, signal?: AbortSignal): Promise<
   return api.delete<unknown>(`/news/${newsId}/chat/`, { signal }).then(({ data }) => data)
 }
 
-export function fetchSuggestedQuestions(newsId: NewsId, { force = false, signal }: SuggestedQuestionsOptions = {}): Promise<unknown> {
-  return api.post<unknown>(`/news/${newsId}/suggested-questions/`, null, {
-    params: force ? { force: 1 } : undefined,
-    signal,
-  }).then(({ data }) => data)
+export function fetchSuggestedQuestions(newsId: NewsId, { force = false, signal, modelConfigId, consent }: SuggestedQuestionsOptions = {}): Promise<unknown> {
+  if (!force) {
+    return api.get<unknown>(`/news/${newsId}/suggested-questions/`, {
+      params: modelConfigId ? { model_config_id: modelConfigId } : undefined, signal,
+    }).then(({ data }) => data)
+  }
+  if (modelConfigId && consent !== true) throw new TypeError('Explicit suggestion billing consent required')
+  return api.post<unknown>(`/news/${newsId}/suggested-questions/`,
+    modelConfigId ? { model_config_id: modelConfigId, consent: true } : null,
+    { params: { force: 1 }, signal },
+  ).then(({ data }) => data)
 }
 
 export async function* translateFullArticleStream(

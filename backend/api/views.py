@@ -1155,7 +1155,25 @@ class NewsSuggestedQuestionsView(ArticleAccessMixin, generics.GenericAPIView):
             return context[:6000], 'excerpt' if scope == 'full' else scope
         return context, scope
 
+    def finalize_response(self, request, response, *args, **kwargs):
+        response = super().finalize_response(request, response, *args, **kwargs)
+        response['Cache-Control'] = 'no-store'
+        return response
+
+    def get(self, request, pk):
+        from api.services.ai_suggestions import read_cache
+        news = self.get_object()
+        stored = get_stored_article(request.user, news.pk)
+        from api.services.stored_readers import StoredContentChanged
+        try:
+            return Response(read_cache(request.user, stored, request.query_params.get('model_config_id')))
+        except StoredContentChanged:
+            return Response({'error_code': 'suggestion_content_changed', 'error': '文章内容或权限已变化，请重新打开文章。'}, status=409)
+
     def post(self, request, pk):
+        body = request.data
+        if isinstance(body, dict) and ('model_config_id' in body or 'consent' in body):
+            return self._personal_post(request, pk)
         import json
         from api.services.suggested_question_budget import (
             SuggestionCapacityBusy, reserve_suggestion_generation,
@@ -1260,6 +1278,32 @@ class NewsSuggestedQuestionsView(ArticleAccessMixin, generics.GenericAPIView):
             # Do not overwrite a valid cache with a synthetic fallback.
             return Response({'questions': SUGGESTED_QUESTIONS_FALLBACK, **metadata,
                              'context_scope': suggestion_scope, 'generated': False})
+
+    def _personal_post(self, request, pk):
+        from api.services.ai_suggestions import generate, SuggestionsError
+        from api.services.stored_readers import StoredContentChanged
+        from api.services.suggested_question_budget import SuggestionCapacityBusy
+        from api.services.account_security import AuthSecurityBusy, RateLimitExceeded
+        if set(request.data) - {'model_config_id', 'consent'}:
+            return Response({'error_code': 'invalid_request', 'error': '请求字段无效。'}, status=400)
+        news = self.get_object()
+        stored = get_stored_article(request.user, news.pk)
+        try:
+            result = generate(request.user, stored, model_config_id=request.data.get('model_config_id'),
+                              consent=request.data.get('consent'))
+            return Response(result)
+        except SuggestionsError as exc:
+            return Response({'error_code': exc.code, 'error': '个人推荐问题生成失败，请检查模型、授权或返回格式。免费模板仍可使用。'}, status=exc.status)
+        except StoredContentChanged:
+            return Response({'error_code': 'suggestion_content_changed', 'error': '文章内容或权限已变化，请重新打开文章。'}, status=409)
+        except (SuggestionCapacityBusy, RateLimitExceeded) as exc:
+            return Response({'error_code': 'suggestion_budget_exhausted', 'error': '推荐问题生成繁忙或达到限额，请稍后重试。'}, status=429,
+                            headers={'Retry-After': str(getattr(exc, 'retry_after', 60))})
+        except AuthSecurityBusy:
+            return Response({'error_code': 'suggestion_budget_unavailable', 'error': '额度服务暂时不可用。'}, status=503)
+        except Exception as exc:
+            logger.info('Private suggestions failed (%s)', type(exc).__name__)
+            return Response({'error_code': 'suggestion_provider_unavailable', 'error': '个人模型响应未能确认，不会自动重试；免费模板仍可使用。'}, status=502)
 
 
 # ─── Favorite / Like / Bookmark API ─────────────────────────────────────

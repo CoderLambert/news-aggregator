@@ -257,6 +257,7 @@ export interface SuggestedQuestionsSnapshot {
   contextScope: 'full' | 'summary' | 'excerpt'
   revision: number | null
   generated: boolean
+  modelSource?: { provider: string; model: string } | null
 }
 
 export function parseSuggestedQuestions(value: unknown): SuggestedQuestionsSnapshot {
@@ -269,6 +270,8 @@ export function parseSuggestedQuestions(value: unknown): SuggestedQuestionsSnaps
     contextScope: scope === 'full' || scope === 'excerpt' ? scope : 'summary',
     revision: typeof value.full_content_revision === 'number' ? value.full_content_revision : null,
     generated: value.generated === true,
+    modelSource: isRecord(value.model_source) && typeof value.model_source.provider === 'string' && typeof value.model_source.model === 'string'
+      ? { provider: value.model_source.provider, model: value.model_source.model } : null,
   }
 }
 
@@ -315,7 +318,7 @@ export async function cancelChatTurn(id: NewsId, turnId: string): Promise<'cance
   return cancelPersonalChatTurnRequest(id, turnId)
 }
 
-export async function fetchSuggestedQuestions(id: NewsId, options: { force?: boolean; signal: AbortSignal }): Promise<SuggestedQuestionsSnapshot> {
+export async function fetchSuggestedQuestions(id: NewsId, options: { force?: boolean; modelConfigId?: string; consent?: true; signal: AbortSignal }): Promise<SuggestedQuestionsSnapshot> {
   const data: unknown = await fetchSuggestedQuestionsRequest(id, options)
   return parseSuggestedQuestions(data)
 }
