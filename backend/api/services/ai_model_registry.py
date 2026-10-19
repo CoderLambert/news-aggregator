@@ -93,3 +93,10 @@ def supports_article_chat(connection, model_id):
     """T04 is available only on a trusted route with verified stream terminal semantics."""
     preset = get_trusted_preset(connection, model_id)
     return bool(preset and preset.get('proxy_alias') == ARTICLE_CHAT_SUPPORTED_ALIAS)
+
+
+def supports_task_route(connection, model_id, task_kind):
+    """Text proof cannot enable a consumer with a stricter transport contract."""
+    return bool(get_trusted_route(connection, model_id) and (
+        task_kind not in ('article_qa', 'full_translation') or supports_article_chat(connection, model_id)
+    ))

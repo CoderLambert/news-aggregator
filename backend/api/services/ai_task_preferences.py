@@ -16,7 +16,7 @@ from api.services.ai_credentials import (
     require_active_snapshot, snapshot_connection,
 )
 from api.services.ai_model_capabilities import verified_for_task
-from api.services.ai_model_registry import get_trusted_route
+from api.services.ai_model_registry import get_trusted_route, supports_task_route
 
 
 class ModelSelectionError(RuntimeError):
@@ -51,7 +51,7 @@ def _selected_state(preference, kind, owner_id):
     connection = model.connection
     if (model.is_deleted or connection.is_deleted or not connection.is_enabled
             or not connection.credential_ciphertext or not connection.encryption_key_id
-            or get_trusted_route(connection, model.model_id) is None):
+            or not supports_task_route(connection, model.model_id, kind)):
         return 'needs_reselection', info
     if not verified_for_task(model, kind):
         return 'needs_verification', info
@@ -91,6 +91,8 @@ def _require_model(owner_id, config):
 
 def _require_for_task(owner_id, config, task_kind):
     identity, route = _require_model(owner_id, config)
+    if not supports_task_route(config.connection, config.model_id, task_kind):
+        raise ModelSelectionError('model_task_unavailable')
     if not verified_for_task(config, task_kind):
         raise ModelSelectionError('model_not_verified')
     return identity, route

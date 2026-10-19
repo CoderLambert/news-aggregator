@@ -76,6 +76,7 @@ export default function AITaskPreferencesSection({
     const connection = model && connectionsById.get(model.connection_id)
     return Boolean(model && connection?.is_enabled && connection.key_saved &&
       model.has_trusted_route && model.capabilities.text === 'supported' &&
+      (!['article_qa', 'full_translation'].includes(kind) || model.article_chat_supported === true) &&
       (kind !== 'deep_research' || model.capabilities.tools === 'supported'))
   }
   const invalid = Boolean(choices && OPTIONS.some(({ kind }) => {

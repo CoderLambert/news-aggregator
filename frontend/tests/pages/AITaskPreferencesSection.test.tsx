@@ -62,6 +62,19 @@ async function ready() {
   await screen.findByRole('combobox', { name: '全局默认模型' })
 }
 describe('T03 model purpose settings', () => {
+  it('keeps nonstream models available for research but excludes them from chat and translation', async () => {
+    available = [textModel, { ...toolsModel, article_chat_supported: false }]
+    setup(); await ready()
+    for (const label of ['新闻问答模型', '全文翻译模型']) {
+      const choices = screen.getByRole('combobox', { name: label })
+      expect(within(choices).queryByText(/Text \+ tools/)).not.toBeInTheDocument()
+      expect(within(choices).getByText(/Text only/)).toBeInTheDocument()
+    }
+    expect(within(screen.getByRole('combobox', { name: '深度研究模型' })).getByText(/Text \+ tools/)).toBeInTheDocument()
+    expect(within(screen.getByRole('combobox', { name: '问题推荐模型' })).getByText(/Text \+ tools/)).toBeInTheDocument()
+    expect(api.saveAITaskPreferences).not.toHaveBeenCalled()
+    expect(api.probeAIModel).not.toHaveBeenCalled()
+  })
   it('loads metadata read-only and only submits after an explicit save of all five kinds', async () => {
     setup()
     await ready()

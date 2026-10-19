@@ -1,5 +1,5 @@
 """Shared T02 capability receipts used by T03 without importing API views."""
-from api.services.ai_model_registry import get_trusted_route
+from api.services.ai_model_registry import get_trusted_route, supports_task_route
 from api.ai_model_models import AIModelProbeAttempt
 
 CAPABILITY_KINDS = ('text', 'tools')
@@ -30,6 +30,9 @@ def current_capabilities(model):
 
 def verified_for_task(model, task_kind):
     """T03 requires an actual current successful T02 audit receipt for each capability."""
+    route = get_trusted_route(model.connection, model.model_id)
+    if not route or not supports_task_route(model.connection, model.model_id, task_kind):
+        return False
     required = ('text', 'tools') if task_kind == 'deep_research' else ('text',)
     capabilities = current_capabilities(model)
     for kind in required:
@@ -44,6 +47,7 @@ def verified_for_task(model, task_kind):
             credential_version=model.connection.credential_version,
             endpoint_profile=model.connection.endpoint_profile,
             endpoint_profile_version=model.connection.endpoint_profile_version,
+            proxy_alias=route['proxy_alias'],
             probe_kind=kind, status='succeeded',
         ).exists():
             return False

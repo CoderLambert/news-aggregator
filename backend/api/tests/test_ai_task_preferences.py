@@ -49,7 +49,7 @@ class AITaskPreferenceTests(TestCase):
 
     def create_model(self, connection):
         path = BASE + connection['id'] + '/models/'
-        response = self.api.post(path, {'model_id': 'deepseek-chat'}, format='json')
+        response = self.api.post(path, {'model_id': 'deepseek-flash'}, format='json')
         self.assertEqual(response.status_code, 201, response.content)
         return UserAIModelConfig.objects.select_related('connection').get(pk=response.data['id'])
 
@@ -68,7 +68,7 @@ class AITaskPreferenceTests(TestCase):
                 credential_version=conn.credential_version,
                 endpoint_profile=conn.endpoint_profile,
                 endpoint_profile_version=conn.endpoint_profile_version,
-                proxy_alias='deepseek/deepseek-chat',
+                proxy_alias='deepseek/' + model.model_id,
             )
             setattr(model, f'last_{kind}_attempt', identity)
             receipts[kind] = {
@@ -103,6 +103,36 @@ class AITaskPreferenceTests(TestCase):
         self.assertEqual([row['task_kind'] for row in response.data['preferences']], list(TASK_KINDS))
         self.assertEqual(response.data['preferences'][0]['selection_state'], 'unset')
         self.assertTrue(all(row['model_config_id'] is None for row in response.data['preferences']))
+
+    def test_text_proof_alone_cannot_authorize_unsupported_streaming_tasks(self):
+        self.model.model_id = 'synthetic-nonstream-model'
+        self.model.save(update_fields=['model_id'])
+        self.grant(self.model, ('text', 'tools'))
+        for kind in ('article_qa', 'full_translation'):
+            with self.subTest(task=kind):
+                with self.assertRaises(ModelSelectionError) as rejected:
+                    resolve_task_model(self.owner, kind, explicit_model_id=str(self.model.pk))
+                self.assertEqual(rejected.exception.code, 'model_task_unavailable')
+                response = self.save(self.selection(**{kind: self.model.pk}))
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(response.data['error_code'], 'model_task_unavailable')
+                self.assertFalse(UserAITaskPreference.objects.exists())
+        # The same proof remains useful for compatible nonstream consumers.
+        snapshot = resolve_task_model(self.owner, 'deep_research', explicit_model_id=str(self.model.pk))
+        require_task_model_snapshot(snapshot, owner_id=self.owner.pk)
+        self.assertEqual(self.save(self.selection(default=self.model.pk, deep_research=self.model.pk)).status_code, 200)
+        for kind in ('article_qa', 'full_translation'):
+            UserAITaskPreference.objects.filter(user=self.owner, task_kind=kind).update(model_config=self.model)
+        states = {row['task_kind']: row['selection_state'] for row in self.api.get(PREFERENCES).data['preferences']}
+        self.assertEqual(states['article_qa'], 'needs_reselection')
+        self.assertEqual(states['full_translation'], 'needs_reselection')
+
+    def test_success_receipt_for_another_proxy_alias_cannot_authorize_a_model(self):
+        self.grant(self.model)
+        AIModelProbeAttempt.objects.filter(model_config=self.model).update(proxy_alias='deepseek/another-model')
+        with self.assertRaises(ModelSelectionError) as rejected:
+            resolve_task_model(self.owner, 'question_suggestions', explicit_model_id=str(self.model.pk))
+        self.assertEqual(rejected.exception.code, 'model_not_verified')
         self.assertFalse(UserAITaskPreference.objects.exists())
 
     def test_atomic_save_owner_scope_and_stale_revision(self):
