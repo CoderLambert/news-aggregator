@@ -26,6 +26,7 @@ from api.services.ai_worker_fencing import (
     SNAPSHOT_SCHEMA_VERSION, check_at_claim, commit_result, dispatch_once,
 )
 from api.services.ai_gateway import AIGatewayError, build_gateway_client
+from api.services.ai_responses_protocol import OPENAI_RESPONSES_MODELS, RESPONSES_PROTOCOL
 
 logger = logging.getLogger(__name__)
 
@@ -405,6 +406,15 @@ def preserve_native_fields(source, target):
         if type(reasoning) is not str or len(reasoning.encode('utf-8')) > MAX_CONTINUATION_BYTES:
             raise ResearchBYOKError('invalid_response')
         target['reasoning_content'] = reasoning
+    items = _get(source, 'responses_output')
+    if items is not None:
+        try:
+            encoded = json.dumps(items, ensure_ascii=False, allow_nan=False)
+            if type(items) is not list or len(encoded.encode('utf-8')) > MAX_CONTINUATION_BYTES:
+                raise ValueError
+            target['responses_output'] = json.loads(encoded)
+        except (TypeError, ValueError):
+            raise ResearchBYOKError('invalid_response') from None
 
 
 def visible_messages(messages):
@@ -416,9 +426,15 @@ def visible_messages(messages):
     ]
 
 
+def _continuation_protocol(snapshot):
+    model = snapshot.get('model') if type(snapshot) is dict else None
+    return (RESPONSES_PROTOCOL if type(model) is dict and model.get('proxy_alias') in OPENAI_RESPONSES_MODELS
+            else CONTINUATION_PROTOCOL)
+
+
 def continuation_payload(snapshot, messages):
     payload = {
-        'schema_version': 1, 'protocol': CONTINUATION_PROTOCOL,
+        'schema_version': 1, 'protocol': _continuation_protocol(snapshot),
         'execution_snapshot': snapshot, 'messages': messages,
     }
     if len(json.dumps(payload, ensure_ascii=False).encode('utf-8')) > MAX_CONTINUATION_BYTES:
@@ -430,7 +446,7 @@ def native_messages(session, snapshot):
     import copy
     native = session.native_continuation
     if (type(native) is not dict or native.get('schema_version') != 1
-            or native.get('protocol') != CONTINUATION_PROTOCOL
+            or native.get('protocol') != _continuation_protocol(snapshot)
             or native.get('execution_snapshot') != snapshot
             or type(native.get('messages')) is not list):
         raise ResearchBYOKError('authorization_changed')
