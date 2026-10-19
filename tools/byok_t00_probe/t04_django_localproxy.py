@@ -128,6 +128,44 @@ def _create_verified_model(client, owner, provider_key):
     return connection, model, AIModelProbeAttempt.objects.count()
 
 
+def _enable_deep_research_capability(owner, model):
+    """Create synthetic current T02 receipts and a saved T03 deep-research selection."""
+    from api.ai_preference_models import TASK_KINDS
+    from api.services.ai_task_preferences import save_preferences
+
+    connection = model.connection
+    attempt_id = uuid.uuid4()
+    AIModelProbeAttempt.objects.create(
+        id=attempt_id, request_id=uuid.uuid4(), user=owner,
+        connection=connection, model_config=model, model_id=model.model_id,
+        model_revision=model.config_revision, probe_kind="tools", status="succeeded",
+        credential_epoch=connection.credential_epoch,
+        credential_version=connection.credential_version,
+        endpoint_profile=connection.endpoint_profile,
+        endpoint_profile_version=connection.endpoint_profile_version,
+        proxy_alias=ALIAS,
+    )
+    model.last_tools_attempt = attempt_id
+    capabilities = dict(model.capability_results)
+    capabilities["tools"] = {
+        "attempt_id": str(attempt_id), "status": "supported",
+        "config_revision": model.config_revision,
+        "credential_epoch": connection.credential_epoch,
+        "credential_version": connection.credential_version,
+        "endpoint_profile": connection.endpoint_profile,
+        "endpoint_profile_version": connection.endpoint_profile_version,
+    }
+    model.capability_results = capabilities
+    model.save(update_fields=["last_tools_attempt", "capability_results"])
+    save_preferences(owner, expected_revision=0, entries=[
+        {
+            "task_kind": kind,
+            "model_config_id": str(model.pk) if kind == "deep_research" else None,
+        }
+        for kind in TASK_KINDS
+    ])
+
+
 def _wait_translation_response(read, *, timeout_seconds=12, transient_retry_seconds=12,
                                 interval=0.03, monotonic=time.monotonic, sleep=time.sleep):
     """GET-only bounded retry for classified SQLite contention; never resubmit work."""
@@ -230,7 +268,18 @@ def test_translation_poll_retries_only_classified_get_contention():
         assert len(immediate_calls) == 1
 
 
-def _assert_native_deepseek_request(rows, *, marker, stream, terminal):
+def test_provider_key_identity_hash_rejects_same_tenant_seed():
+    owner_key = "sk-t00-owner-only-synthetic-random"
+    expected_hash = upstream.provider_key_sha256(owner_key)
+
+    assert upstream.KEY_LABELS["sk-t00-provider-a-synthetic"] == "tenant-a"
+    assert upstream.provider_key_identity_matches(owner_key, expected_hash) is True
+    assert upstream.provider_key_identity_matches(
+        "sk-t00-provider-a-synthetic", expected_hash,
+    ) is False
+
+
+def _assert_native_deepseek_request(rows, *, marker, stream, terminal, owner_key_match=False):
     assert len(rows) == 1
     row = rows[0]
     assert row["test_id"] == marker
@@ -241,6 +290,8 @@ def _assert_native_deepseek_request(rows, *, marker, stream, terminal):
         assert row["thinking_disabled"] is True
     assert row["tenant"] == "tenant-a"
     assert row["provider_key_match"] is True
+    if owner_key_match:
+        assert row["provider_key_identity_match"] is True
     assert row["project_key_match"] is False
     assert row["provider_auth_scheme"] == "bearer"
     assert row["upstream_terminal"] == terminal
@@ -266,6 +317,7 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
     proxy = None
+    previous_t09_key_hashes = {}
     try:
         proxy = LocalProxy(proxy_python, upstream_url)
         proxy.start()
@@ -673,6 +725,103 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
             assert len(_records(upstream_url, t06_failure_chunk2)) == 1
             assert AIModelProbeAttempt.objects.count() == probe_receipt_count
 
+
+            # T09 first-run requests use the real SDK and the same pinned local
+            # Proxy/upstream as T04. Public AI is deliberately disabled to prove
+            # only the explicit, currently verified BYOK path reaches the model.
+            from api.models import ResearchRun
+            _enable_deep_research_capability(owner, model)
+            t09_markers = (
+                "T00_T09_RESEARCH_STOP_A",
+                "T00_T09_RESEARCH_TOOL_A",
+                "T00_T09_RESEARCH_NO_FINISH_A",
+                "T00_T09_RESEARCH_TRUNCATED_A",
+                "T00_T09_RESEARCH_HTTP_ERROR_A",
+            )
+            expected_provider_key_hash = upstream.provider_key_sha256(provider_key)
+            with upstream.LOCK:
+                previous_t09_key_hashes = {
+                    marker: upstream.EXPECTED_PROVIDER_KEY_HASHES.get(marker)
+                    for marker in t09_markers
+                }
+                upstream.EXPECTED_PROVIDER_KEY_HASHES.update({
+                    marker: expected_provider_key_hash for marker in t09_markers
+                })
+
+            def run_t09(marker, expected_status):
+                response = client.post(
+                    "/api/research/",
+                    {
+                        "query": marker,
+                        "local_only": True,
+                        "model_config_id": str(model.pk),
+                        "consent": True,
+                    },
+                    format="json",
+                    HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+                )
+                assert response.status_code == 200, response.content
+                wire = _consume(response.streaming_content)
+                run = ResearchRun.objects.get(pk=response["Run-ID"])
+                assert run.status == expected_status, {
+                    "marker": marker, "status": run.status,
+                    "error_code": run.error_code,
+                }
+                assert provider_key not in wire
+                assert proxy.project_keys["tenant-a"] not in wire
+                return run, wire
+
+            with override_settings(PUBLIC_AI_ENABLED=False):
+                stop_marker = "T00_T09_RESEARCH_STOP_A"
+                stop_run, stop_wire = run_t09(stop_marker, "succeeded")
+                stop_rows = _records(upstream_url, stop_marker)
+                stop_row = _assert_native_deepseek_request(
+                    stop_rows, marker=stop_marker, stream=False, terminal="finish_reason_stop",
+                    owner_key_match=True,
+                )
+                assert stop_row["upstream_raw_http_status"] == 200
+                assert stop_row["upstream_raw_body_complete"] is True
+                assert stop_row["upstream_raw_finish_reason"] == "stop"
+                assert stop_row["upstream_raw_terminal_present"] is True
+                assert "synthetic t00 chat pass" in stop_wire
+
+                tool_marker = "T00_T09_RESEARCH_TOOL_A"
+                tool_run, tool_wire = run_t09(tool_marker, "succeeded")
+                tool_rows = _records(upstream_url, tool_marker)
+                tool_call_row = _assert_native_deepseek_request(
+                    [row for row in tool_rows if row["upstream_terminal"] == "tool_call_turn"],
+                    marker=tool_marker, stream=False, terminal="tool_call_turn", owner_key_match=True,
+                )
+                tool_result_row = _assert_native_deepseek_request(
+                    [row for row in tool_rows if row["upstream_terminal"] == "finish_reason_stop"],
+                    marker=tool_marker, stream=False, terminal="finish_reason_stop", owner_key_match=True,
+                )
+                assert [tool_call_row["upstream_raw_finish_reason"], tool_result_row["upstream_raw_finish_reason"]] == [
+                    "tool_calls", "stop",
+                ]
+                assert all(row["upstream_raw_body_complete"] is True for row in tool_rows)
+                assert "tool_result" in tool_wire
+                assert tool_run.session.messages[-1]["role"] == "assistant"
+
+                failure_cases = [
+                    ("T00_T09_RESEARCH_NO_FINISH_A", "missing_finish_reason", True, None, "failed"),
+                    ("T00_T09_RESEARCH_TRUNCATED_A", "truncated_http_body", False, None, "failed"),
+                    ("T00_T09_RESEARCH_HTTP_ERROR_A", "http_503_no_completion", True, 503, "failed"),
+                ]
+                for marker, terminal, complete, status_code, expected in failure_cases:
+                    run, wire = run_t09(marker, expected)
+                    rows = _records(upstream_url, marker)
+                    row = _assert_native_deepseek_request(
+                        rows, marker=marker, stream=False, terminal=terminal, owner_key_match=True,
+                    )
+                    assert row["upstream_raw_body_complete"] is complete
+                    assert row["upstream_raw_http_status"] == (status_code or 200)
+                    assert row["upstream_raw_terminal_present"] is False
+                    assert row["upstream_raw_finish_reason"] is None
+                    assert run.session.messages == []
+                    assert '"type": "complete"' not in wire
+                    assert ResearchRun.objects.get(pk=run.pk).status == "failed"
+
     finally:
         with upstream.LOCK:
             pending_releases = list(upstream.RELEASE_EVENTS.values())
@@ -686,5 +835,10 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
         server_thread.join(timeout=3)
         upstream.KEY_LABELS = old_labels
         with upstream.LOCK:
+            for marker, previous_hash in previous_t09_key_hashes.items():
+                if previous_hash is None:
+                    upstream.EXPECTED_PROVIDER_KEY_HASHES.pop(marker, None)
+                else:
+                    upstream.EXPECTED_PROVIDER_KEY_HASHES[marker] = previous_hash
             upstream.RECORDS.clear()
             upstream.RELEASE_EVENTS.clear()

@@ -61,9 +61,21 @@ def validate_idempotency_key(value: str | None) -> str:
     return value
 
 
-def request_digest(query: str, local_only: bool, session_id: str | None) -> str:
+def request_digest(
+    query: str, local_only: bool, session_id: str | None,
+    model_config_id: str | None = None, consent=None,
+) -> str:
+    request = {
+        'query': query, 'local_only': bool(local_only),
+        'session': str(session_id) if session_id else 'create',
+    }
+    if model_config_id is not None or consent is not None:
+        request['research_authorization'] = {
+            'mode': 'byok_first_run', 'model_config_id': model_config_id,
+            'consent': consent is True,
+        }
     canonical = json.dumps(
-        {'query': query, 'local_only': bool(local_only), 'session': str(session_id) if session_id else 'create'},
+        request,
         ensure_ascii=False, sort_keys=True, separators=(',', ':'),
     )
     return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
@@ -166,16 +178,24 @@ def _snapshot(run_id, run_token):
     if run.lease_expires_at is None or run.lease_expires_at <= now:
         _interrupt_expired(run_id, run_token)
         raise ResearchRunError('research_lease_lost', '研究任务租约已失效。')
-    if _blocked_hosted_environment():
-        raise ResearchRunError(
-            'hosted_integration_unapproved', '网站订阅研究集成尚未获批。', 503,
-        )
     if not run.user.is_active:
         raise ResearchRunError('inactive_owner', '账号已停用，研究任务已停止。', 403)
     if run.session.user_id != run.user_id:
         raise ResearchRunError('research_session_changed', '研究会话归属已更改。')
     from .access import require_session_evidence
     require_session_evidence(run.session, run.user)
+    if run.execution_snapshot:
+        from .byok_execution import ResearchBYOKError, verify_snapshot
+        try:
+            verify_snapshot(run.execution_snapshot, owner_id=run.user_id)
+        except ResearchBYOKError as exc:
+            raise ResearchRunError(
+                'research_authorization_changed', exc.message, 403,
+            ) from None
+    elif _blocked_hosted_environment():
+        raise ResearchRunError(
+            'hosted_integration_unapproved', '网站订阅研究集成尚未获批。', 503,
+        )
     return run
 
 
@@ -365,58 +385,73 @@ def _heartbeat(run_id, run_token):
         thread.join(timeout=2)
 
 
-def _persist_tool_result(run_id, run_token, session, tool_name, args, result):
+def _persist_tool_result(run_id, run_token, session, tool_name, args, result, byok_snapshot=None):
     guard = execution_guard(run_id, run_token)
-    guard()
-    with transaction.atomic():
-        # This conditional update is intentionally the transaction's first write.
-        changed = ResearchRun.objects.filter(**_safe_cas_filter(run_id, run_token)).update(updated_at=timezone.now())
-        if not changed:
-            raise ResearchRunError('research_run_changed', '研究任务已取消或租约已失效。')
-        from .tools import _save_search_result
-        _save_search_result(session, tool_name, args, result, guard=guard)
-    guard()
+
+    def persist():
+        guard()
+        with transaction.atomic():
+            # This conditional update is intentionally the transaction's first write.
+            changed = ResearchRun.objects.filter(**_safe_cas_filter(run_id, run_token)).update(updated_at=timezone.now())
+            if not changed:
+                raise ResearchRunError('research_run_changed', '研究任务已取消或租约已失效。')
+            from .tools import _save_search_result
+            _save_search_result(session, tool_name, args, result, guard=guard)
+        guard()
+
+    if byok_snapshot is not None:
+        from .byok_execution import commit_with_snapshot
+        commit_with_snapshot(byok_snapshot, owner_id=session.user_id, persist=persist)
+    else:
+        persist()
 
 
-def _persist_success(run_id, run_token, session, messages):
-    now = timezone.now()
-    event_type, data = 'complete', {}
-    wire = _wire_record(event_type, data)
-    snapshot = ResearchRun.objects.filter(
-        pk=run_id, status='running', run_token=run_token,
-    ).values('last_event_sequence', 'event_wire_bytes').first()
-    if snapshot is None:
-        raise ResearchRunError('research_run_changed', '研究任务已取消或已更改。')
-    if len(wire) > MAX_EVENT_WIRE_BYTES or snapshot['event_wire_bytes'] + len(wire) > MAX_RUN_WIRE_BYTES:
-        raise ResearchRunError(
-            'research_event_limit_exceeded', '研究进度超过安全大小限制。', 413,
-        )
-    sequence = snapshot['last_event_sequence'] + 1
-    with transaction.atomic():
-        # The run CAS is the first database write, taking SQLite's write lock.
-        changed = ResearchRun.objects.filter(
-            **_safe_cas_filter(run_id, run_token),
-            last_event_sequence=snapshot['last_event_sequence'],
-            event_wire_bytes=snapshot['event_wire_bytes'],
-        ).update(
-            status='succeeded', run_token=None, lease_expires_at=None,
-            error_code='', error_message='', finished_at=now,
-            last_event_sequence=sequence,
-            event_wire_bytes=snapshot['event_wire_bytes'] + len(wire),
-            updated_at=now,
-        )
-        if not changed:
-            raise ResearchRunError('research_run_changed', '研究任务已取消或租约已失效。')
-        updated = ResearchSession.objects.filter(
-            pk=session.pk, user_id=session.user_id,
-        ).update(messages=messages, title=session.title, updated_at=now)
-        if not updated:
-            raise ResearchRunError('research_session_changed', '研究会话已删除或归属已更改。')
-        ResearchRunEvent.objects.create(
-            run_id=run_id, sequence=sequence, event_type=event_type,
-            data=data, wire_bytes=len(wire),
-        )
-    _notify(run_id)
+def _persist_success(run_id, run_token, session, messages, byok_snapshot=None):
+    def persist():
+        now = timezone.now()
+        event_type, data = 'complete', {}
+        wire = _wire_record(event_type, data)
+        snapshot = ResearchRun.objects.filter(
+            pk=run_id, status='running', run_token=run_token,
+        ).values('last_event_sequence', 'event_wire_bytes').first()
+        if snapshot is None:
+            raise ResearchRunError('research_run_changed', '研究任务已取消或已更改。')
+        if len(wire) > MAX_EVENT_WIRE_BYTES or snapshot['event_wire_bytes'] + len(wire) > MAX_RUN_WIRE_BYTES:
+            raise ResearchRunError(
+                'research_event_limit_exceeded', '研究进度超过安全大小限制。', 413,
+            )
+        sequence = snapshot['last_event_sequence'] + 1
+        with transaction.atomic():
+            # The run CAS is the first database write, taking SQLite's write lock.
+            changed = ResearchRun.objects.filter(
+                **_safe_cas_filter(run_id, run_token),
+                last_event_sequence=snapshot['last_event_sequence'],
+                event_wire_bytes=snapshot['event_wire_bytes'],
+            ).update(
+                status='succeeded', run_token=None, lease_expires_at=None,
+                error_code='', error_message='', finished_at=now,
+                last_event_sequence=sequence,
+                event_wire_bytes=snapshot['event_wire_bytes'] + len(wire),
+                updated_at=now,
+            )
+            if not changed:
+                raise ResearchRunError('research_run_changed', '研究任务已取消或租约已失效。')
+            updated = ResearchSession.objects.filter(
+                pk=session.pk, user_id=session.user_id,
+            ).update(messages=messages, title=session.title, updated_at=now)
+            if not updated:
+                raise ResearchRunError('research_session_changed', '研究会话已删除或归属已更改。')
+            ResearchRunEvent.objects.create(
+                run_id=run_id, sequence=sequence, event_type=event_type,
+                data=data, wire_bytes=len(wire),
+            )
+        _notify(run_id)
+
+    if byok_snapshot is not None:
+        from .byok_execution import commit_with_snapshot
+        commit_with_snapshot(byok_snapshot, owner_id=session.user_id, persist=persist)
+    else:
+        persist()
 
 
 def _run_worker(run_id, query, local_only):
@@ -424,12 +459,15 @@ def _run_worker(run_id, query, local_only):
     token = None
     key = str(run_id)
     try:
-        if _blocked_hosted_environment():
-            _finish_queued_failed(
-                run_id, 'hosted_integration_unapproved',
-                '网站订阅研究集成尚未获批。',
-            )
-            return
+        if _blocked_hosted_environment() or not settings.PUBLIC_AI_ENABLED:
+            queued = ResearchRun.objects.filter(pk=run_id, status='queued').first()
+            if queued is None or not queued.execution_snapshot:
+                _finish_queued_failed(
+                    run_id,
+                    'ai_disabled' if not settings.PUBLIC_AI_ENABLED else 'hosted_integration_unapproved',
+                    '此 AI 功能当前已关闭。' if not settings.PUBLIC_AI_ENABLED else '网站订阅研究集成尚未获批。',
+                )
+                return
         token = _claim(run_id)
         if token is None:
             return
@@ -437,6 +475,7 @@ def _run_worker(run_id, query, local_only):
         guard()
         run = ResearchRun.objects.select_related('session', 'user').get(pk=run_id)
         session = run.session
+        byok_snapshot = run.execution_snapshot or None
         from .agent_loop import run_agent_loop
 
         def emit(event_type, data):
@@ -448,7 +487,7 @@ def _run_worker(run_id, query, local_only):
             append_event(run_id, token, event_type, data, guard)
 
         def persist_completion(messages):
-            _persist_success(run_id, token, session, messages)
+            _persist_success(run_id, token, session, messages, byok_snapshot=byok_snapshot)
 
         with _heartbeat(run_id, token):
             run_agent_loop(
@@ -457,8 +496,10 @@ def _run_worker(run_id, query, local_only):
                 persist_completion=persist_completion,
                 persist_tool_result=lambda name, args, result: _persist_tool_result(
                     run_id, token, session, name, args, result,
+                    byok_snapshot=byok_snapshot,
                 ),
                 user=run.user,
+                byok_snapshot=byok_snapshot,
             )
     except ResearchRunError as exc:
         if exc.error_code == 'research_lease_lost':
@@ -511,13 +552,35 @@ def _attach_existing(run, digest, query, local_only):
         raise ResearchRunError('idempotency_key_reused', 'Idempotency-Key 已用于不同的研究请求。', 409)
     run = _expire_run_if_needed(run)
     if run.status == 'queued':
+        if run.execution_snapshot:
+            from .byok_execution import ResearchBYOKError, verify_snapshot
+            try:
+                verify_snapshot(run.execution_snapshot, owner_id=run.user_id)
+            except ResearchBYOKError as exc:
+                raise ResearchRunError(
+                    'research_authorization_changed', exc.message, 403,
+                ) from None
+        elif not settings.PUBLIC_AI_ENABLED:
+            raise ResearchRunError('ai_disabled', '此 AI 功能当前已关闭。', 403)
         _dispatch(run.pk, query, local_only)
     return run.session, run
 
 
-def submit_research_run(user, *, session_id, query: str, local_only: bool, idempotency_key: str):
-    """Create an owner-private run or attach only to its exact idempotent request."""
-    if _blocked_hosted_environment():
+def submit_research_run(
+    user, *, session_id, query: str, local_only: bool, idempotency_key: str,
+    model_config_id: str | None = None, consent=None,
+):
+    """Create an owner-private run; T09 requires explicit model + consent."""
+    byok_requested = model_config_id is not None or consent is not None
+    if byok_requested and (consent is not True or type(model_config_id) is not str):
+        raise ResearchRunError(
+            'research_consent_required',
+            '选择个人研究模型并明确同意服务商计费后才能发起。',
+            400,
+        )
+    if not settings.PUBLIC_AI_ENABLED and not byok_requested:
+        raise ResearchRunError('ai_disabled', '此 AI 功能当前已关闭。', 403)
+    if _blocked_hosted_environment() and not byok_requested:
         raise ResearchRunError(
             'hosted_integration_unapproved', '网站订阅研究集成尚未获批。', 503,
         )
@@ -525,7 +588,10 @@ def submit_research_run(user, *, session_id, query: str, local_only: bool, idemp
     if not isinstance(query, str) or not query.strip() or len(query) > 20_000:
         raise ResearchRunError('invalid_research_query', '研究问题长度不合法。', 400)
     query = query.strip()
-    digest = request_digest(query, local_only, session_id)
+    digest = request_digest(
+        query, local_only, session_id, model_config_id=model_config_id,
+        consent=True if byok_requested else None,
+    )
     if session_id is not None:
         session = ResearchSession.objects.filter(pk=session_id, user=user).first()
         if session is None:
@@ -561,12 +627,22 @@ def submit_research_run(user, *, session_id, query: str, local_only: bool, idemp
                     user=user, session=session, status__in=ACTIVE_STATUSES,
                 ).exists():
                     raise ResearchRunError('research_run_active', '此研究会话已有正在运行的任务。', 409)
-            else:
+            execution_snapshot = {}
+            if byok_requested:
+                from .byok_execution import ResearchBYOKError, capture_snapshot
+                try:
+                    execution_snapshot = capture_snapshot(user, model_config_id)
+                except ResearchBYOKError as exc:
+                    raise ResearchRunError(
+                        f'research_{exc.code}', exc.message, 409,
+                    ) from None
+            if session_id is None:
                 session = ResearchSession.objects.create(user=user, title='', messages=[])
             run = ResearchRun.objects.create(
                 user=user, session=session, idempotency_key=key,
                 request_hash=digest, status='queued',
                 queued_query=query, queued_local_only=local_only,
+                execution_snapshot=execution_snapshot,
             )
         _rename_reservation(reservation, str(run.pk))
     except IntegrityError:
@@ -598,10 +674,6 @@ def resume_queued_run(user, session, run_id):
     A read-only GET cannot dispatch. A RUNNING (or terminal) attempt must never
     be scheduled again, even after its lease expires or the frontend loses state.
     """
-    if _blocked_hosted_environment():
-        raise ResearchRunError(
-            'hosted_integration_unapproved', '网站订阅研究集成尚未获批。', 503,
-        )
     if not user.is_active or session.user_id != user.pk:
         raise ResearchRunError('research_session_not_found', '研究会话不存在。', 404)
     try:
@@ -613,6 +685,20 @@ def resume_queued_run(user, session, run_id):
     ).first()
     if run is None:
         raise ResearchRunError('research_run_not_found', '研究任务不存在。', 404)
+    if run.execution_snapshot:
+        from .byok_execution import ResearchBYOKError, verify_snapshot
+        try:
+            verify_snapshot(run.execution_snapshot, owner_id=run.user_id)
+        except ResearchBYOKError as exc:
+            raise ResearchRunError(
+                'research_authorization_changed', exc.message, 403,
+            ) from None
+    elif not settings.PUBLIC_AI_ENABLED:
+        raise ResearchRunError('ai_disabled', '此 AI 功能当前已关闭。', 403)
+    elif _blocked_hosted_environment():
+        raise ResearchRunError(
+            'hosted_integration_unapproved', '网站订阅研究集成尚未获批。', 503,
+        )
     if run.status == 'running':
         # A committed worker already owns the provider call. Do not dispatch.
         return _expire_run_if_needed(run)

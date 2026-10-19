@@ -23,6 +23,7 @@ export const CAPABILITY_FEATURE_NAMES = [
   'suggested_questions',
   'tts',
   'research',
+  'research_byok_create',
   'provider_comparisons',
   'admin',
   'chatgpt_subscription',
@@ -117,6 +118,8 @@ export interface ResearchStreamOptions {
   signal?: AbortSignal
   onSessionId?: (sessionId: string) => void
   onRunId?: (runId: string) => void
+  modelConfigId?: string
+  consent?: true
 }
 
 export interface ResearchChatStreamOptions {
@@ -620,10 +623,31 @@ export function deleteResearchSession(sessionId: string): Promise<unknown> {
 
 export async function* createResearchStream(
   query: string,
-  { localOnly = false, idempotencyKey, signal, onSessionId, onRunId }: ResearchStreamOptions = {},
+  {
+    localOnly = false,
+    idempotencyKey,
+    signal,
+    onSessionId,
+    onRunId,
+    modelConfigId,
+    consent,
+  }: ResearchStreamOptions = {},
 ): AsyncGenerator<unknown> {
+  const hasModelConfigId = modelConfigId !== undefined
+  const hasConsent = consent !== undefined
+  if (
+    hasModelConfigId !== hasConsent
+    || (hasModelConfigId && (typeof modelConfigId !== 'string' || !modelConfigId.trim() || consent !== true))
+  ) {
+    throw new TypeError('Research BYOK requests require an explicit model and literal consent')
+  }
+
   const response = await streamingFetch('/api/research/', {
-    body: JSON.stringify({ query, local_only: localOnly }),
+    body: JSON.stringify({
+      query,
+      local_only: localOnly,
+      ...(hasModelConfigId ? { model_config_id: modelConfigId, consent: true } : {}),
+    }),
     headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     signal,
   })

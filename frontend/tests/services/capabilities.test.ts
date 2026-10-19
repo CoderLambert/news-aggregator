@@ -61,6 +61,21 @@ describe('capabilities service', () => {
     expect(() => api.parseCapabilities(corrupt(validCapabilities))).toThrow(TypeError)
   })
 
+  it('keeps the narrow BYOK first-run capability distinct from hosted research', () => {
+    const features = {
+      ...(validCapabilities.features as Record<string, unknown>),
+      research: { enabled: false, reason: 'hosted_integration_unapproved' },
+      research_byok_create: { enabled: true, reason: null },
+    }
+    const parsed = api.parseCapabilities({ ...validCapabilities, features })
+
+    expect(parsed.features.research).toEqual({
+      enabled: false,
+      reason: 'hosted_integration_unapproved',
+    })
+    expect(parsed.features.research_byok_create).toEqual({ enabled: true, reason: null })
+  })
+
   it('accepts only the exact local handoff target', async () => {
     mocks.post.mockResolvedValueOnce({
       data: {

@@ -148,5 +148,44 @@ describe('createResearchStream', () => {
     expect(onSessionId).toHaveBeenCalledOnce()
     expect(onSessionId).toHaveBeenCalledWith('session-header')
     expect(await collect(events)).toEqual([{ type: 'complete' }])
+    expect(JSON.parse(globalThis.fetch.mock.calls[0][1].body)).toEqual({
+      query: 'recover me',
+      local_only: false,
+    })
+  })
+
+  it.each([
+    ['model without consent', { modelConfigId: 'verified-model' }],
+    ['consent without model', { consent: true }],
+    ['non-literal consent', { modelConfigId: 'verified-model', consent: false }],
+  ])('rejects incomplete BYOK create authorization: %s', async (_label, authorization) => {
+    const events = createResearchStream('analyze this', authorization)
+    await expect(collect(events)).rejects.toThrow(/explicit model and literal consent/)
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+  })
+
+  it('sends the explicit verified model and cost consent only on the create request', async () => {
+    const modelConfigId = 'dc8beed6-9efb-45ae-aacc-e8b8ce426b7f'
+    const controller = new AbortController()
+    globalThis.fetch.mockResolvedValueOnce(streamResponse(['data: {"type":"complete"}\n']))
+    const events = createResearchStream('analyze this', {
+      localOnly: false,
+      idempotencyKey: 'research-idempotency-key',
+      signal: controller.signal,
+      modelConfigId,
+      consent: true,
+    })
+
+    expect(await collect(events)).toEqual([{ type: 'complete' }])
+    const [url, init] = globalThis.fetch.mock.calls[0]
+    expect(url).toContain('/api/research/')
+    expect(init.signal).toBe(controller.signal)
+    expect(init.headers.get('Idempotency-Key')).toBe('research-idempotency-key')
+    expect(JSON.parse(init.body)).toEqual({
+      query: 'analyze this',
+      local_only: false,
+      model_config_id: modelConfigId,
+      consent: true,
+    })
   })
 })

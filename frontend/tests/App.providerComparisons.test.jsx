@@ -11,6 +11,7 @@ vi.mock('@/pages/NewsDetail', () => ({ default: () => <div>News Detail Page</div
 vi.mock('@/pages/FavoritesPage', () => ({ default: () => <div>Favorites Page</div> }))
 vi.mock('@/components/mascot/MascotPreview', () => ({ default: () => <div>Mascot Preview</div> }))
 vi.mock('@/pages/ProviderComparisons', () => ({ default: () => <div>Provider Comparisons Route Page</div> }))
+vi.mock('@/components/research/ResearchLauncher', () => ({ default: () => <div data-testid="research-launcher" /> }))
 vi.mock('@/components/Header', () => ({ default: () => <div>Header</div> }))
 vi.mock('@/context/AuthContext', () => ({
   AuthProvider: ({ children }) => <>{children}</>,
@@ -46,6 +47,28 @@ describe('App routes', () => {
     render(<App />)
 
     expect(await screen.findByText('Provider Comparisons Route Page')).toBeInTheDocument()
+  })
+
+  it('mounts the first-run launcher when only BYOK research create is enabled', async () => {
+    queryClient.clear()
+    queryClient.setQueryData(['capabilities'], fullCapabilities({
+      research: false,
+      research_byok_create: true,
+    }))
+    render(<App />)
+
+    expect(await screen.findByTestId('research-launcher')).toBeInTheDocument()
+  })
+
+  it('does not mount the research launcher when both hosted and BYOK create are disabled', async () => {
+    queryClient.clear()
+    queryClient.setQueryData(['capabilities'], fullCapabilities({
+      research: false,
+      research_byok_create: false,
+    }))
+    render(<App />)
+
+    expect(screen.queryByTestId('research-launcher')).not.toBeInTheDocument()
   })
 
   it('does not mount the comparisons page for an ordinary direct-route visitor', async () => {

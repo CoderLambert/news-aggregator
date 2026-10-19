@@ -7,6 +7,7 @@ Only synthetic marker IDs, tenant labels, booleans, event names, and counters ar
 retained. Credentials and request text are never written to records or stdout.
 """
 import hashlib
+import hmac
 import json
 import re
 import select
@@ -23,6 +24,7 @@ KEY_LABELS = {
     "sk-t00-admin-synthetic": "admin",
 }
 PROJECT_KEY_HASHES = set()
+EXPECTED_PROVIDER_KEY_HASHES = {}
 RECORDS = []
 LOCK = threading.Lock()
 ACTIVE_STREAM_PRODUCERS = 0
@@ -274,6 +276,18 @@ def project_key_hash(value):
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def provider_key_sha256(value):
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def provider_key_identity_matches(value, expected_sha256):
+    return (
+        isinstance(value, str)
+        and isinstance(expected_sha256, str)
+        and hmac.compare_digest(provider_key_sha256(value), expected_sha256)
+    )
+
+
 def extract_marker(payload):
     serialized = json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
     matches = list(TEST_ID_PATTERN.finditer(serialized))
@@ -290,6 +304,17 @@ def expected_tenant(test_id):
 
 def terminal_for(path, request, eof):
     marker = extract_marker(request)
+    if "_T09_RESEARCH_TOOL_" in marker:
+        messages = request.get("messages", [])
+        if any(isinstance(message, dict) and message.get("role") == "tool" for message in messages):
+            return "finish_reason_stop"
+        return "tool_call_turn"
+    if "_NO_FINISH_" in marker:
+        return "missing_finish_reason"
+    if "_TRUNCATED_" in marker:
+        return "truncated_http_body"
+    if "_HTTP_ERROR_" in marker:
+        return "http_503_no_completion"
     if "_NO_STOP_DONE_" in marker:
         return "protocol_done_without_finish_reason"
     if "_STOP_EOF_" in marker:
@@ -513,6 +538,7 @@ class Handler(BaseHTTPRequestHandler):
             else "http-error" if "_HTTP_ERROR_" in test_id
             else "timeout" if "_TIMEOUT_" in test_id
             else "truncated-body" if "_TRUNCATED_" in test_id
+            else "no-finish-reason" if "_NO_FINISH_" in test_id
             else "sse-error" if "_SSE_ERROR_" in test_id
             else "normal"
         )
@@ -532,6 +558,7 @@ class Handler(BaseHTTPRequestHandler):
         ]
         with LOCK:
             project_match = any(project_key_hash(value) in PROJECT_KEY_HASHES for value in candidates)
+            expected_provider_key_hash = EXPECTED_PROVIDER_KEY_HASHES.get(test_id)
         credential_label = KEY_LABELS.get(provider_credential or "", "missing" if not provider_credential else "unknown")
         if project_match:
             credential_label = "project"
@@ -550,6 +577,9 @@ class Handler(BaseHTTPRequestHandler):
             "tenant": credential_label,
             "expected_tenant": expected or "none",
             "provider_key_match": credential_label == expected if expected else False,
+            "provider_key_identity_match": provider_key_identity_matches(
+                provider_credential, expected_provider_key_hash,
+            ),
             "provider_credential_present": bool(provider_credential),
             "provider_auth_scheme": (
                 "x-api-key" if is_messages and x_api_key
@@ -566,6 +596,16 @@ class Handler(BaseHTTPRequestHandler):
                 value == "sk-t00-deployment-default-synthetic" for value in candidates
             ),
             "upstream_terminal": upstream_terminal,
+            "upstream_raw_http_status": 503 if scenario == "http-error" else 200,
+            "upstream_raw_body_complete": scenario != "truncated-body",
+            "upstream_raw_finish_reason": (
+                "tool_calls" if upstream_terminal == "tool_call_turn"
+                else "stop" if upstream_terminal == "finish_reason_stop"
+                else None
+            ),
+            "upstream_raw_terminal_present": upstream_terminal in {
+                "tool_call_turn", "finish_reason_stop",
+            },
             "continuation_facts": history_facts(self.path, request),
             "upstream_stream_events_written": 0,
             "upstream_stream_write_attempts": 0,
@@ -643,6 +683,56 @@ class Handler(BaseHTTPRequestHandler):
                     stream_hold=scenario == "stream-held",
                 )
             else:
+                if "_T09_RESEARCH_TOOL_" in test_id:
+                    messages = request.get("messages", [])
+                    has_tool_result = any(
+                        isinstance(message, dict) and message.get("role") == "tool"
+                        for message in messages
+                    )
+                    if not has_tool_result:
+                        self._json(200, {
+                            "id": "chatcmpl_t09_tool",
+                            "object": "chat.completion",
+                            "created": 1,
+                            "model": model,
+                            "choices": [{
+                                "index": 0,
+                                "message": {
+                                    "role": "assistant",
+                                    "content": None,
+                                    "tool_calls": [{
+                                        "id": "t09_call_search",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "search_news",
+                                            "arguments": json.dumps(
+                                                {"query": "synthetic local research", "limit": 5},
+                                                separators=(",", ":"),
+                                            ),
+                                        },
+                                    }],
+                                },
+                                "finish_reason": "tool_calls",
+                            }],
+                            "usage": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
+                        })
+                        return
+                if "_NO_FINISH_" in test_id:
+                    self._json(200, {
+                        "id": "chatcmpl_t09_missing_finish",
+                        "object": "chat.completion",
+                        "created": 1,
+                        "model": model,
+                        "choices": [{
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": "synthetic response missing raw terminal",
+                            },
+                        }],
+                        "usage": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
+                    })
+                    return
                 if "_TOOL_R1_" in test_id or "_TOOL_R2_" in test_id or "_TOOL_MALFORMED_" in test_id or "_TOOL_INVALID_" in test_id or "_TOOL_UNKNOWN_" in test_id:
                     self._chat_tool_response(model, test_id)
                     return

@@ -20,6 +20,7 @@ FEATURE_NAMES = (
     "suggested_questions",
     "tts",
     "research",
+    "research_byok_create",
     "provider_comparisons",
     "admin",
     "chatgpt_subscription",
@@ -56,11 +57,23 @@ def _feature_snapshot() -> dict[str, dict[str, object]]:
         for name in AI_FEATURE_NAMES:
             features[name] = _feature(False, "ai_disabled")
 
-    # The production research write endpoints deliberately fail closed until
-    # the hosted integration is approved. Do not advertise a launcher that can
-    # only return 503 when the other BYOK-backed AI features are enabled.
+    # Keep hosted/shared research closed in production. T09 has a separate,
+    # narrowly advertised BYOK first-run capability.
     if settings.DJANGO_ENV == "production":
         features["research"] = _feature(False, "hosted_integration_unapproved")
+    byok_create_enabled = (
+        settings.PUBLIC_SITE_MODE == "full"
+        and getattr(settings, "AI_BYOK_ENABLED", False)
+        and (settings.DJANGO_ENV == "production" or not settings.PUBLIC_AI_ENABLED)
+    )
+    features["research_byok_create"] = _feature(
+        byok_create_enabled,
+        None if byok_create_enabled else (
+            "hosted_integration_unapproved"
+            if settings.DJANGO_ENV == "production" and not getattr(settings, "AI_BYOK_ENABLED", False)
+            else "ai_disabled"
+        ),
+    )
 
     if settings.CHATGPT_AUTH_MODE == "disabled":
         features["chatgpt_subscription"] = _feature(False, "chatgpt_auth_disabled")

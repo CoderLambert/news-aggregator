@@ -124,15 +124,48 @@ def _request_data(request):
         return None, None, Response({'error': 'query is required'}, status=status.HTTP_400_BAD_REQUEST)
     return query.strip(), bool(request.data.get('local_only', False)), None
 
-def _submit_response(request, *, session_id=None):
+def _byok_create_values(request, *, allowed):
+    body = request.data
+    if not hasattr(body, 'get'):
+        return None, None, _no_store(Response({'error': 'invalid request'}, status=400))
+    has_model = 'model_config_id' in body
+    has_consent = 'consent' in body
+    if not has_model and not has_consent:
+        return None, None, None
+    if not allowed:
+        return None, None, _no_store(Response(
+            {'error': 'BYOK authorization is available only for a new research run.',
+             'error_code': 'research_byok_create_only'}, status=400,
+        ))
+    model_config_id = body.get('model_config_id')
+    if body.get('consent') is not True or type(model_config_id) is not str or len(model_config_id) != 36:
+        return None, None, _no_store(Response(
+            {'error': 'Select a verified personal research model and explicitly approve provider billing.',
+             'error_code': 'research_consent_required'}, status=400,
+        ))
+    if set(body.keys()) - {'query', 'local_only', 'model_config_id', 'consent'}:
+        return None, None, _no_store(Response(
+            {'error': 'Unsupported research request fields.', 'error_code': 'invalid_research_request'},
+            status=400,
+        ))
+    return model_config_id, True, None
+
+
+def _submit_response(request, *, session_id=None, allow_byok_create=False):
     query, local_only, error = _request_data(request)
     if error is not None:
         return _no_store(error)
+    model_config_id, consent, error = _byok_create_values(
+        request, allowed=allow_byok_create and session_id is None,
+    )
+    if error is not None:
+        return error
     raw_key = request.headers.get('Idempotency-Key')
     try:
         session, run = job_manager.submit_research_run(
             request.user, session_id=session_id, query=query,
             local_only=local_only, idempotency_key=raw_key,
+            model_config_id=model_config_id, consent=consent,
         )
     except job_manager.ResearchRunError as exc:
         return _run_error_response(exc)
@@ -143,8 +176,8 @@ def _submit_response(request, *, session_id=None):
 @permission_classes([IsAuthenticated])
 @authentication_classes([SessionAuthentication])
 def research_create(request):
-    """Create/attach a research session; request closure never cancels its run."""
-    return _submit_response(request)
+    """Create a new first-run session; request closure never cancels its run."""
+    return _submit_response(request, allow_byok_create=True)
 
 
 @api_view(['POST'])

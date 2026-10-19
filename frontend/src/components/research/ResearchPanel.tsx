@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { LogIn } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/context/AuthContext'
@@ -8,9 +9,12 @@ import AuthModal from '@/components/AuthModal'
 import ResearchHeader from './ResearchHeader'
 import ResearchMessageList from './ResearchMessageList'
 import ResearchInput from './ResearchInput'
+import { listAITaskPreferences } from '@/services/aiConnectionsApi'
+import type { ResearchCreateAuthorization } from '@/services/researchApi'
 
 interface ResearchPanelProps {
   onClose: () => void
+  byokCreateOnly?: boolean
 }
 
 const TAB_STOP_SELECTOR = [
@@ -53,17 +57,56 @@ function focusDialogEdge(dialog: HTMLElement, edge: 'first' | 'last') {
   dialog.focus()
 }
 
-export default function ResearchPanel({ onClose }: ResearchPanelProps) {
+export default function ResearchPanel({ onClose, byokCreateOnly = false }: ResearchPanelProps) {
   const { user } = useAuth()
-  return <ResearchPanelView key={user?.id ?? 'anonymous'} user={user} onClose={onClose} />
+  return (
+    <ResearchPanelView
+      key={user?.id ?? 'anonymous'}
+      user={user}
+      onClose={onClose}
+      byokCreateOnly={byokCreateOnly}
+    />
+  )
 }
 
-function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: () => void }) {
+function ResearchPanelView({
+  user,
+  onClose,
+  byokCreateOnly,
+}: {
+  user: AuthUser | null
+  onClose: () => void
+  byokCreateOnly: boolean
+}) {
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [input, setInput] = useState('')
   const [localOnly, setLocalOnly] = useState(false)
+  const [billingConsentState, setBillingConsentState] = useState({ key: '', checked: false })
+  const taskPreferences = useQuery({
+    queryKey: ['ai-task-preferences', user?.id ?? 'anonymous'],
+    queryFn: () => listAITaskPreferences(),
+    enabled: Boolean(user),
+    retry: false,
+  })
+  const researchPreference = taskPreferences.data?.preferences.find(
+    (preference) => preference.task_kind === 'deep_research',
+  )
+  const defaultPreference = taskPreferences.data?.preferences.find(
+    (preference) => preference.task_kind === 'default',
+  )
+  const effectiveResearchPreference = researchPreference?.selection_state === 'available'
+    ? researchPreference
+    : researchPreference?.selection_state === 'inherit_default'
+      && defaultPreference?.selection_state === 'available'
+      ? defaultPreference
+      : null
+  const researchModelConfigId = effectiveResearchPreference?.model_config_id ?? null
+  const researchModel = effectiveResearchPreference?.model ?? null
+  const researchModelLabel = researchModel
+    ? `${researchModel.display_name} (${researchModel.model_id})`
+    : null
   const {
     sessions,
     activeSessionId,
@@ -80,7 +123,21 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
     handleDisconnect,
     handleResume,
     handleRetry,
-  } = useResearch(user?.id ?? null)
+  } = useResearch(user?.id ?? null, { byokCreateOnly })
+
+  const billingConsentKey = JSON.stringify([
+    user?.id ?? 'anonymous',
+    researchModelConfigId ?? 'no-model',
+    activeSessionId ?? 'new-research',
+  ])
+  if (billingConsentState.key !== billingConsentKey) {
+    setBillingConsentState({ key: billingConsentKey, checked: false })
+  }
+  const billingConsent = billingConsentState.key === billingConsentKey && billingConsentState.checked
+
+  const researchAuthorization: ResearchCreateAuthorization | undefined = researchModelConfigId && billingConsent
+    ? { modelConfigId: researchModelConfigId, consent: true }
+    : undefined
 
   const isLoading = isBusy || phase === 'thinking' || phase === 'tool_calling' || phase === 'streaming'
   // Before receiving a Session-ID, a POST might already have reached Django.
@@ -103,8 +160,13 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
 
   function handleSendQuery() {
     if (!input.trim() || isLoading || hasRecoverableTask || !user) return
+    if (byokCreateOnly && (activeSessionId || recoveryAction === 'retry' || !researchModelConfigId || !researchModel)) return
     const submittedInput = input
-    void handleSend(input.trim(), { localOnly }).then((accepted) => {
+    if (!activeSessionId && researchModelConfigId && !billingConsent) return
+    void handleSend(input.trim(), {
+      localOnly,
+      ...(!activeSessionId && researchModelConfigId ? { authorization: researchAuthorization } : {}),
+    }).then((accepted) => {
       if (accepted) setInput((current) => current === submittedInput ? '' : current)
     })
   }
@@ -114,8 +176,21 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
       setShowAuthModal(true)
       return
     }
-    if (isBusy || hasRecoverableTask) return
-    void handleSend(query, { localOnly: false })
+    if (isBusy || hasRecoverableTask || (byokCreateOnly && (activeSessionId || recoveryAction === 'retry'))) return
+    if (byokCreateOnly && (!researchModelConfigId || !researchModel)) return
+    if (!activeSessionId && researchModelConfigId && !billingConsent) {
+      setInput(query)
+      return
+    }
+    void handleSend(query, {
+      localOnly: false,
+      ...(!activeSessionId && researchModelConfigId ? { authorization: researchAuthorization } : {}),
+    })
+  }
+
+  function handleStartNewSession() {
+    setBillingConsentState({ key: '', checked: false })
+    handleNewSession()
   }
 
   useLayoutEffect(() => {
@@ -221,7 +296,7 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
           phase={phase}
           isFullscreen={isFullscreen}
           onToggleFullscreen={() => setIsFullscreen((fullscreen) => !fullscreen)}
-          onNewSession={handleNewSession}
+          onNewSession={handleStartNewSession}
           onClose={handleClose}
           sessions={sessions}
           activeSessionId={activeSessionId}
@@ -244,22 +319,70 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
             </div>
           ) : (
             <>
+              {byokCreateOnly && activeSessionId && (
+                <div role="status" className="rounded-xl border border-border bg-muted/50 p-3 text-xs text-muted-foreground">
+                  已保存的研究结果仍可查看；本环境仅开放新建个人模型研究，历史会话的继续提问尚未开放。
+                </div>
+              )}
+              {byokCreateOnly && !activeSessionId && (!researchModelConfigId || !researchModel) && (
+                <div role="status" className="rounded-xl border border-border bg-muted/50 p-3 text-xs text-muted-foreground">
+                  请先到 AI 设置中配置并验证支持工具调用的个人研究模型，再返回开始研究。
+                </div>
+              )}
+              {!activeSessionId && researchModelConfigId && researchModel && (
+                <section
+                  aria-labelledby="research-model-consent-title"
+                  className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs leading-relaxed"
+                  data-testid="research-model-consent"
+                >
+                  <p id="research-model-consent-title" className="font-semibold text-foreground">
+                    本次研究模型：{researchModelLabel}
+                    {researchPreference?.selection_state === 'inherit_default' ? '（已保存的个人默认模型）' : ''}
+                  </p>
+                  <p className="mt-1 text-muted-foreground">
+                    仅在新建研究时使用此已验证工具能力的个人模型。研究问题和必要上下文会发送给该模型服务商；
+                    服务商可能按其资费计费，本站无法代为确认费用。
+                  </p>
+                  <label className="mt-2 flex cursor-pointer items-start gap-2 text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={billingConsent}
+                      onChange={(event) => setBillingConsentState({
+                        key: billingConsentKey,
+                        checked: event.currentTarget.checked,
+                      })}
+                      className="mt-0.5 accent-primary"
+                    />
+                    <span>我同意本次发送研究内容并接受服务商可能产生的费用。</span>
+                  </label>
+                </section>
+              )}
               <ResearchMessageList
                 messages={messages}
                 phase={phase}
                 searchResults={searchResults}
                 onSuggestionClick={handleSuggestionClick}
-                disabled={isBusy}
+                disabled={isBusy || (byokCreateOnly && Boolean(activeSessionId))}
               />
-              {recoveryAction === 'resume' && (
+              {recoveryAction === 'resume' && !(byokCreateOnly && !activeSessionId) && (
                 <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-200">
-                  <span>{!activeSessionId ? '原请求可能已到达服务器。继续接收将复用原请求标识，避免创建新的重复任务；暂时无法确认后台是否已经开始。' : '浏览器连接已停止；后台任务可能仍在执行。重新连接会回放当前任务的事件。'}</span>
+                  <span>{byokCreateOnly ? '只会读取此会话已有任务事件；若任务仍在排队，不会重新派发模型任务。' : !activeSessionId ? '原请求可能已到达服务器。继续接收将复用原请求标识，避免创建新的重复任务；暂时无法确认后台是否已经开始。' : '浏览器连接已停止；后台任务可能仍在执行。重新连接会回放当前任务的事件。'}</span>
                   <Button type="button" size="sm" variant="outline" onClick={() => void handleResume()}>
                     继续接收
                   </Button>
                 </div>
               )}
-              {recoveryAction === 'retry' && (
+              {byokCreateOnly && recoveryAction === 'resume' && !activeSessionId && (
+                <div role="status" className="rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-200">
+                  原请求尚未确认对应会话。为避免重新派发或重复计费，此模式不会重放新建请求；可先从历史会话中查看已保存结果。
+                </div>
+              )}
+              {byokCreateOnly && recoveryAction === 'retry' && (
+                <div role="status" className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-200">
+                  上次结果尚未确认。此模式不自动重试；请先查看历史会话，或在新研究中重新选择模型并确认费用。
+                </div>
+              )}
+              {recoveryAction === 'retry' && !byokCreateOnly && (
                 <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-500/25 bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-200">
                   <span>原请求可能已到达服务器。只有点击下方按钮才会新建任务，可能重复计算或产生费用。</span>
                   <Button type="button" size="sm" variant="outline" onClick={() => void handleRetry()}>
@@ -277,7 +400,9 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
           onSend={user ? handleSendQuery : () => setShowAuthModal(true)}
           onCancel={handleCancel}
           isLoading={isLoading}
-          disabled={!user || hasRecoverableTask}
+          disabled={!user || hasRecoverableTask
+            || (byokCreateOnly && (Boolean(activeSessionId) || recoveryAction === 'retry' || !researchModelConfigId || !researchModel))
+            || (!activeSessionId && Boolean(researchModelConfigId) && !billingConsent)}
           localOnly={localOnly}
           onToggleLocalOnly={() => setLocalOnly((enabled) => !enabled)}
         />

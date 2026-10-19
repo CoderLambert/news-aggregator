@@ -14,13 +14,19 @@ const api = vi.hoisted(() => ({
   researchChatStream: vi.fn(),
   openResearchSessionStream: vi.fn(),
   cancelResearchRun: vi.fn(),
+  resumeQueuedResearchRun: vi.fn(),
 }))
+
+const taskPreferenceApi = vi.hoisted(() => ({
+  listAITaskPreferences: vi.fn(),
+}))
+vi.mock('@/services/aiConnectionsApi', () => taskPreferenceApi)
 
 vi.mock('@/services/researchApi', () => api)
 vi.mock('@gsap/react', () => ({ useGSAP: () => {} }))
 
 import ResearchLauncher from '@/components/research/ResearchLauncher'
-import { CapabilitiesTestProvider } from '../../helpers/capabilities'
+import { CapabilitiesTestProvider, fullCapabilities } from '../../helpers/capabilities'
 
 function waitForAbort(signal) {
   return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))
@@ -49,7 +55,12 @@ function completedSession() {
 
 const signedInUser = { id: 7, username: 'tester' }
 
-function renderPanel(route = '/', withDetailLauncher = false, user = signedInUser) {
+function renderPanel(
+  route = '/',
+  withDetailLauncher = false,
+  user = signedInUser,
+  capabilityValue = fullCapabilities(),
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 } } })
   return render(
     <QueryClientProvider client={client}>
@@ -61,7 +72,7 @@ function renderPanel(route = '/', withDetailLauncher = false, user = signedInUse
         logout: vi.fn(),
         refresh: vi.fn(),
       }}>
-        <CapabilitiesTestProvider client={client}>
+        <CapabilitiesTestProvider client={client} value={capabilityValue}>
           <MemoryRouter initialEntries={[route]}>
             {withDetailLauncher && <button type="button" aria-label="打开 AI 助手小闻" className="fixed bottom-6 right-6 size-16" />}
             <ResearchLauncher />
@@ -80,9 +91,116 @@ beforeEach(() => {
   api.getResearchResults.mockResolvedValue({ count: 0, next: null, previous: null, results: [] })
   api.deleteResearchSession.mockResolvedValue(undefined)
   api.cancelResearchRun.mockResolvedValue({ status: 'running' })
+  taskPreferenceApi.listAITaskPreferences.mockResolvedValue({ revision: 0, preferences: [] })
 })
 
 describe('ResearchPanel', () => {
+
+  it('shows the actual verified research model and requires per-run cost consent before the create POST', async () => {
+    taskPreferenceApi.listAITaskPreferences.mockResolvedValue({
+      revision: 3,
+      preferences: [{
+        task_kind: 'deep_research',
+        model_config_id: 'dc8beed6-9efb-45ae-aacc-e8b8ce426b7f',
+        selection_state: 'available',
+        model: {
+          id: 'dc8beed6-9efb-45ae-aacc-e8b8ce426b7f',
+          connection_id: 'b30d6041-8f49-4f44-8e89-36e6fef9deae',
+          model_id: 'deepseek-chat',
+          display_name: 'Personal Research',
+        },
+      }],
+    })
+    api.createResearchStream.mockImplementation(async function* (_query, options) {
+      options.onSessionId?.('byok-research-session')
+      yield { type: 'session_created', session_id: 'byok-research-session' }
+      yield { type: 'complete' }
+    })
+
+    renderPanel(
+      '/',
+      false,
+      signedInUser,
+      fullCapabilities({ research: false, research_byok_create: true }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    await screen.findByTestId('research-model-consent')
+    expect(screen.getByText(/Personal Research \(deepseek-chat\)/)).toBeInTheDocument()
+
+    const input = screen.getByRole('textbox', { name: '输入研究问题' })
+    fireEvent.change(input, { target: { value: '分析本周 AI 芯片动态' } })
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
+    expect(api.createResearchStream).not.toHaveBeenCalled()
+
+    await userEvent.click(screen.getByRole('checkbox'))
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(api.createResearchStream).toHaveBeenCalledTimes(1))
+    expect(api.createResearchStream.mock.calls[0][1].authorization).toEqual({
+      modelConfigId: 'dc8beed6-9efb-45ae-aacc-e8b8ce426b7f',
+      consent: true,
+    })
+  })
+
+  it('does not offer BYOK first-run submission without a verified model preference', async () => {
+    renderPanel(
+      '/',
+      false,
+      signedInUser,
+      fullCapabilities({ research: false, research_byok_create: true }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+
+    expect(await screen.findByText(/配置并验证支持工具调用的个人研究模型/)).toBeInTheDocument()
+    const input = screen.getByRole('textbox', { name: '输入研究问题' })
+    fireEvent.change(input, { target: { value: '需要验证模型' } })
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
+    expect(api.createResearchStream).not.toHaveBeenCalled()
+  })
+
+  it('keeps saved research readable in BYOK-create-only mode and reattaches without dispatching queued work', async () => {
+    const history = completedSession()
+    api.listResearchSessions.mockResolvedValue({
+      count: 1,
+      next: null,
+      previous: null,
+      results: [{ id: history.id, title: history.title }],
+    })
+    api.getResearchSession.mockResolvedValue(history)
+    api.openResearchSessionStream.mockResolvedValue({ kind: 'queued', runId: 'queued-run' })
+
+    renderPanel(
+      '/',
+      false,
+      signedInUser,
+      fullCapabilities({ research: false, research_byok_create: true }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    await userEvent.click(await screen.findByRole('button', { name: '历史会话' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: '已完成研究' }))
+
+    expect(await screen.findByText('这是保存后的完整结果。')).toBeInTheDocument()
+    await screen.findByRole('button', { name: '继续接收' })
+    expect(screen.getByRole('textbox', { name: '输入研究问题' })).toBeDisabled()
+
+    await userEvent.click(screen.getByRole('button', { name: '继续接收' }))
+
+    await waitFor(() => expect(api.openResearchSessionStream).toHaveBeenCalledTimes(2))
+    expect(api.resumeQueuedResearchRun).not.toHaveBeenCalled()
+    expect(api.researchChatStream).not.toHaveBeenCalled()
+    expect(api.createResearchStream).not.toHaveBeenCalled()
+  })
+
+  it('does not expose research when both hosted and BYOK-create capabilities are disabled', () => {
+    renderPanel(
+      '/',
+      false,
+      signedInUser,
+      fullCapabilities({ research: false, research_byok_create: false }),
+    )
+    expect(screen.queryByRole('button', { name: '打开新闻研究助手' })).not.toBeInTheDocument()
+    expect(api.listResearchSessions).not.toHaveBeenCalled()
+  })
+
   it('keeps the closed launcher at the mobile screen edge', () => {
     renderPanel()
     const launcher = screen.getByRole('button', { name: '打开新闻研究助手' })

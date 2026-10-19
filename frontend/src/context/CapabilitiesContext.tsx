@@ -25,6 +25,7 @@ export const FAIL_CLOSED_CAPABILITIES: SiteCapabilities = {
     suggested_questions: { enabled: false, reason: 'capabilities_unavailable' },
     tts: { enabled: false, reason: 'capabilities_unavailable' },
     research: { enabled: false, reason: 'capabilities_unavailable' },
+    research_byok_create: { enabled: false, reason: 'capabilities_unavailable' },
     provider_comparisons: { enabled: false, reason: 'capabilities_unavailable' },
     admin: { enabled: false, reason: 'capabilities_unavailable' },
     chatgpt_subscription: { enabled: false, reason: 'capabilities_unavailable' },
