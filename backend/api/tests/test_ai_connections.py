@@ -87,6 +87,34 @@ def test_catalog_retains_all_current_provider_choices(client):
     assert all('base_url' not in row for row in provider_catalog())
 
 
+@pytest.mark.parametrize('provider,profile', [
+    ('glm', 'glm_cn'), ('glm', 'glm_zai'), ('qwen', 'qwen_beijing'),
+    ('qwen', 'qwen_singapore'), ('kimi', 'kimi_international'),
+])
+def test_region_connection_is_encrypted_persistent_and_cannot_switch_endpoint(client, provider, profile):
+    with patch('api.services.ai_gateway.build_gateway_client') as dispatch:
+        row = create(client, provider_id=provider, endpoint_profile=profile)
+        loaded = client.get(BASE + row['id'] + '/')
+        assert loaded.status_code == 200
+        assert loaded.data['endpoint_profile'] == profile
+        assert loaded.data['endpoint_profile_version'] == 1
+        assert KEY not in loaded.content.decode()
+        saved = UserAIConnection.objects.get(pk=row['id'])
+        assert decrypt_credential(saved) == KEY
+        # Region is authenticated AAD, not editable connection metadata.
+        original = saved.endpoint_profile
+        saved.endpoint_profile = 'qwen_singapore' if profile == 'qwen_beijing' else 'deepseek_default'
+        with pytest.raises(CredentialUnavailable):
+            decrypt_credential(saved)
+        saved.endpoint_profile = original
+        assert edit(client, row, endpoint_profile='deepseek_default').status_code == 400
+        assert edit(client, row, api_base='https://example.invalid').status_code == 400
+        saved.refresh_from_db()
+        assert saved.endpoint_profile == profile
+        assert saved.credential_epoch == row['credential_epoch']
+        dispatch.assert_not_called()
+
+
 def test_idempotent_create_reuses_same_row_but_different_payload_conflicts(client):
     request = body()
     first = client.post(BASE, request, format='json')

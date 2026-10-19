@@ -18,12 +18,32 @@ model_list:
   - model_name: gemini/*
     litellm_params:
       model: gemini/*
+  - model_name: dashscope/beijing/*
+    litellm_params:
+      model: dashscope/*
+      api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+  - model_name: dashscope/singapore/*
+    litellm_params:
+      model: dashscope/*
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
   - model_name: dashscope/*
     litellm_params:
       model: dashscope/*
+  - model_name: zai/cn/*
+    litellm_params:
+      model: zai/*
+      api_base: https://open.bigmodel.cn/api/paas/v4
+  - model_name: zai/international/*
+    litellm_params:
+      model: zai/*
+      api_base: https://api.z.ai/api/paas/v4
   - model_name: zai/*
     litellm_params:
       model: zai/*
+  - model_name: moonshot/international/*
+    litellm_params:
+      model: moonshot/*
+      api_base: https://api.moonshot.ai/v1
   - model_name: moonshot/*
     litellm_params:
       model: moonshot/*
