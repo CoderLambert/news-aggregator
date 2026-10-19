@@ -245,8 +245,10 @@ def test_research_search_result_replay_is_snapshot_and_policy_bound(world):
     row_session = persist(original, include_envelope=False)
     require_session_evidence(envelope_session, a)
     require_session_evidence(row_session, a)
-    assert result_is_current(a, 'search_news', {'error': '暂不可用'})
-    assert result_is_current(a, 'analyze_topic', {'error': '暂不可用'})
+    sanitized_error = {'error': '研究工具暂时不可用，请稍后重试。'}
+    assert result_is_current(a, 'search_news', sanitized_error)
+    assert result_is_current(a, 'analyze_topic', sanitized_error)
+    assert result_is_current(a, 'search_news', {'error': article['title']}) is False
 
     # analyze_topic duplicates article titles into a timeline. Model a truncated
     # articles list so the only retained evidence for this ID is its timeline event.
