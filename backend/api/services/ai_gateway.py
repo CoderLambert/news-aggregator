@@ -14,6 +14,10 @@ from api.services.ai_responses_protocol import (
     responses_completion, responses_payload,
 )
 
+from api.services.ai_messages_protocol import (
+    ANTHROPIC_MESSAGES_MODELS, MessagesProtocolError, messages_completion, messages_payload,
+)
+
 
 class AIGatewayError(RuntimeError):
     pass
@@ -83,10 +87,11 @@ ARTICLE_CHAT_SUPPORTED_ALIAS = 'deepseek/deepseek-flash'
 
 
 class _GatewayCompletions:
-    def __init__(self, completions, provider_key: str, responses=None):
+    def __init__(self, completions, provider_key: str, responses=None, messages_getter=None):
         self._completions = completions
         self._provider_key = provider_key
         self._responses = responses
+        self._messages_getter = messages_getter
 
     def create(self, **kwargs):
         if kwargs.pop('extra_body', None) not in (None, {}):
@@ -94,12 +99,31 @@ class _GatewayCompletions:
         requested_stream = kwargs.get('stream') is True
         if requested_stream and kwargs.get('model') != ARTICLE_CHAT_SUPPORTED_ALIAS:
             raise AIGatewayError('个人模型流式路由不可用。')
+        native_options = {}
+        if kwargs.get('model') in ANTHROPIC_MESSAGES_MODELS | OPENAI_RESPONSES_MODELS:
+            timeout = kwargs.pop('timeout', None)
+            if timeout is not None:
+                if type(timeout) not in (int, float) or not 0 < timeout <= GATEWAY_TIMEOUT_SECONDS:
+                    raise AIGatewayError('个人模型请求超时参数无效。')
+                native_options['timeout'] = timeout
+        if kwargs.get('model') in ANTHROPIC_MESSAGES_MODELS:
+            if self._messages_getter is None:
+                raise AIGatewayError('个人模型原生协议不可用。')
+            try:
+                data = messages_payload(kwargs)
+                result = self._messages_getter().create(**data, **native_options,
+                                                       extra_body={'api_key': self._provider_key})
+                raw = result if isinstance(result, dict) else result.model_dump(mode='json', exclude_none=True)
+                return completion_object(messages_completion(raw))
+            except MessagesProtocolError:
+                raise AIGatewayError('个人模型返回了不完整或无法验证的响应。') from None
         if kwargs.get('model') in OPENAI_RESPONSES_MODELS:
             if self._responses is None:
                 raise AIGatewayError('个人模型原生协议不可用。')
             try:
                 data = responses_payload(kwargs)
-                result = self._responses.create(**data, extra_body={'api_key': self._provider_key})
+                result = self._responses.create(**data, **native_options,
+                                                extra_body={'api_key': self._provider_key})
                 raw = result if isinstance(result, dict) else result.model_dump(mode='json', exclude_none=True)
                 return completion_object(responses_completion(raw))
             except ResponsesProtocolError:
@@ -115,17 +139,31 @@ class _GatewayClient:
 
     _newshub_max_attempts = 1
 
-    def __init__(self, client, http_client, provider_key: str):
+    def __init__(self, client, http_client, provider_key: str, messages_factory=None):
         self._client = client
         self._http_client = http_client
+        self._messages_factory = messages_factory
+        self._messages_client = None
         self.chat = SimpleNamespace(
             completions=_GatewayCompletions(client.chat.completions, provider_key,
-                                           responses=getattr(client, 'responses', None)),
+                                           responses=getattr(client, 'responses', None),
+                                           messages_getter=self._native_messages),
         )
+
+    def _native_messages(self):
+        if self._messages_client is None:
+            if self._messages_factory is None:
+                raise AIGatewayError('个人模型原生协议不可用。')
+            self._messages_client = self._messages_factory()
+        return self._messages_client.messages
 
     def close(self):
         try:
-            self._client.close()
+            try:
+                if self._messages_client is not None:
+                    self._messages_client.close()
+            finally:
+                self._client.close()
         finally:
             self._http_client.close()
 
@@ -184,4 +222,24 @@ def build_gateway_client(provider_key: str):
     except Exception:
         http_client.close()
         raise
-    return _GatewayClient(client, http_client, provider_key)
+    def messages_factory():
+        from anthropic import Anthropic, DefaultHttpxClient
+        import httpx2
+        native_http = DefaultHttpxClient(
+            trust_env=False, follow_redirects=False,
+            timeout=httpx2.Timeout(GATEWAY_TIMEOUT_SECONDS, connect=5),
+        )
+        try:
+            native = Anthropic(api_key=project_key, webhook_key='', base_url=gateway_url,
+                             http_client=native_http, max_retries=0,
+                             timeout=GATEWAY_TIMEOUT_SECONDS)
+            # The pinned SDK otherwise merges ANTHROPIC_CUSTOM_HEADERS into
+            # requests even with explicit auth. Only our project auth may flow
+            # to the trusted Proxy; no ambient header configuration is allowed.
+            native._custom_headers = {}
+            return native
+        except Exception:
+            native_http.close()
+            raise
+
+    return _GatewayClient(client, http_client, provider_key, messages_factory=messages_factory)

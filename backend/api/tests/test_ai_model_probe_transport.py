@@ -7,10 +7,12 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import TestCase
+from unittest.mock import patch
 
 from django.test import override_settings
 
 from api.services.ai_model_probe import send_model_probe
+from api.services.ai_gateway import build_gateway_client
 
 
 PROJECT_KEY = 'sk-' + 'syntheticprojectkey1234567890ABCD'
@@ -22,6 +24,7 @@ class _ProxyStub(BaseHTTPRequestHandler):
         raw = self.rfile.read(int(self.headers.get('Content-Length', '0')))
         payload = json.loads(raw)
         self.server.seen.append((self.path, self.headers.get('Authorization'), payload))
+        self.server.native_headers.append((self.headers.get('x-api-key'), self.headers.get('x-ambient-secret')))
         # Flash defaults to thinking: forced tool selection is rejected and a
         # tiny text budget can be spent on reasoning before any final answer.
         if (payload.get('model') == 'deepseek/deepseek-flash'
@@ -38,7 +41,15 @@ class _ProxyStub(BaseHTTPRequestHandler):
             self.send_header('Location', 'https://example.invalid/collect')
             self.end_headers()
             return
-        if self.path == '/v1/responses':
+        if self.path == '/v1/messages':
+            blocks = ([{'type': 'tool_use', 'id': 'toolu_probe', 'name': 'byok_probe', 'input': {'ok': True}}]
+                      if payload.get('tools') else [{'type': 'text', 'text': 'ok'}])
+            reply = {'id': 'msg_synthetic', 'type': 'message', 'role': 'assistant',
+                     'model': 'claude-haiku-5-5', 'content': blocks,
+                     'stop_reason': ('max_tokens' if self.server.bad_terminal else
+                                     'tool_use' if payload.get('tools') else 'end_turn'),
+                     'usage': {'input_tokens': 9, 'output_tokens': 1}}
+        elif self.path == '/v1/responses':
             item = ({'type': 'function_call', 'id': 'fc_probe', 'call_id': 'call_probe',
                      'name': 'byok_probe', 'arguments': '{"ok":true}', 'status': 'completed'}
                     if payload.get('tools') else
@@ -73,6 +84,7 @@ class SyntheticGatewayTransportTests(TestCase):
     def setUp(self):
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), _ProxyStub)
         self.server.seen = []
+        self.server.native_headers = []
         self.server.status_code = 200
         self.server.bad_terminal = False
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -114,6 +126,44 @@ class SyntheticGatewayTransportTests(TestCase):
         self.server.bad_terminal = True
         self.assertEqual(self.send('text', 'openai/gpt-5.4-mini').status, 'unknown')
         self.assertEqual(len(self.server.seen), 3)
+
+    def test_anthropic_probes_use_native_messages_and_fail_closed_on_truncation(self):
+        for kind in ('text', 'tools'):
+            self.assertEqual(self.send(kind, 'anthropic/claude-haiku-5-5').status, 'succeeded')
+        self.assertEqual(len(self.server.seen), 2)
+        for path, bearer, payload in self.server.seen:
+            self.assertEqual(path, '/v1/messages')
+            self.assertEqual(bearer, f'Bearer {PROJECT_KEY}')
+            self.assertEqual(payload['api_key'], PROVIDER_KEY)
+            self.assertEqual(payload['thinking'], {'type': 'disabled'})
+            self.assertNotIn('temperature', payload)
+            self.assertLessEqual(payload['max_tokens'], 128)
+        self.assertEqual(self.server.seen[1][2]['tool_choice'], {'type': 'tool', 'name': 'byok_probe'})
+        self.server.bad_terminal = True
+        self.assertEqual(self.send('text', 'anthropic/claude-haiku-5-5').status, 'unknown')
+        self.assertEqual(len(self.server.seen), 3)
+
+    def test_official_messages_sdk_uses_project_auth_and_ignores_ambient_headers(self):
+        with override_settings(
+                AI_BYOK_GATEWAY_URL=f'http://127.0.0.1:{self.server.server_port}',
+                AI_BYOK_GATEWAY_PROJECT_KEY=PROJECT_KEY, AI_BYOK_GATEWAY_PROJECT_KEY_FILE=''), patch.dict(
+                    'os.environ', {'ANTHROPIC_CUSTOM_HEADERS': 'x-ambient-secret: synthetic-header-secret',
+                                   'ANTHROPIC_API_KEY': 'synthetic-ambient-key',
+                                   'ANTHROPIC_AUTH_TOKEN': 'synthetic-ambient-token'}):
+            client = build_gateway_client(PROVIDER_KEY)
+            try:
+                result = client.chat.completions.create(model='anthropic/claude-haiku-5-5',
+                    messages=[{'role': 'user', 'content': 'synthetic'}], max_tokens=64)
+                self.assertEqual(result.choices[0].message.content, 'ok')
+                self.assertEqual(result.usage.prompt_tokens, 9)
+            finally:
+                client.close()
+        self.assertEqual(len(self.server.seen), 1)
+        path, auth, payload = self.server.seen[0]
+        self.assertEqual(path, '/v1/messages')
+        self.assertIsNone(auth)
+        self.assertEqual(self.server.native_headers, [(PROJECT_KEY, None)])
+        self.assertEqual(payload['api_key'], PROVIDER_KEY)
 
     def test_text_and_tool_one_shots_have_bounded_fixed_request_shapes(self):
         for kind in ('text', 'tools'):

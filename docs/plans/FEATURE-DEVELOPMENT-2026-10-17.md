@@ -2,7 +2,7 @@
 
 > **更新于 2026-10-20**；历史全量门禁通过基线记录（非当前 main 的验收）：`main@27c5b6b2b9bf22f95c99e9b5602296236e2486d1`（[PR #131 全量 CI #39207985870](https://github.com/CoderLambert/news-aggregator/actions/runs/39207985870) 与 [main Push CI #39208921110](https://github.com/CoderLambert/news-aggregator/actions/runs/39208921110) 均 SUCCESS；`changes`、`backend-and-release-gates`、`merge-gate` 成功，前端作业因后端单域变更被跳过；后端 pytest `2483 passed / 16 skipped`、xdist 对账 `2565 passed / 16 skipped`，T00 合成 SDK/Proxy `239/239 PASS`，隔离 G1 实际镜像 revision 为 `27c5b6b2b9bf22f95c99e9b5602296236e2486d1`）。注意较早的 `main@5770062ad10d923ca28c90fe4a4f3709adc30939` 主线 Push CI #39205855011 曾因 T05 并发任务用例/SQLite 锁竞争失败；该失败仍记录为已知间歇问题，该故障记录时 PR #130 尚未合并；现 #130 已以 `b9d8f94` 合并，见第 1.4 节，本轮数据库回归未运行，不能因此宣称所有锁竞争都已消失。每次开工仍必须重新读取最新 main。**本文件是当前任务状态唯一入口**；[2026-10-17 原计划和旧批次记录已完整归档](archive/FEATURE-DEVELOPMENT-SNAPSHOT-2026-10-17.md)，其中的“下一批/T01 待完成/旧凭据并存”属于历史快照，不再指导开发。
 
-**当前代码交付已到 main `cd83d88`（#142），本轮完整 CI、真实环境和发布验收仍未通过；完整原编号核对见[当前交付与剩余执行门禁](DELIVERY-AND-REMAINING-GATES-2026-10-20.md)。下面早期批次证据不替代该边界。**
+**本轮代码交付及后续差额见第 1.4 节；完整 CI、真实环境和发布验收仍未通过；完整原编号核对见[当前交付与剩余执行门禁](DELIVERY-AND-REMAINING-GATES-2026-10-20.md)。下面早期批次证据不替代该边界。**
 
 ## 1. 当前已验证交付与未完成边界
 
@@ -143,6 +143,15 @@ RSS T14 已合并 [#142](https://github.com/CoderLambert/news-aggregator/pull/14
 - 只开放上述非流式能力；文章流式问答/翻译仍受原 Flash 终态路由限制。OpenAI 预置使用官方支持的 reasoning=none，避免将 Chat 专属 temperature 默认值带入另一协议；探针最多 64/128 输出 Token，无自动重试。
 - 10 项局部离线检查通过，覆盖原生工具往返/后续回传、私有字段不公开、Gateway 单次原生派发、显式 HTTP 探针与不完整终态。复用只读现成缓存、dummy DB 和 network-none 容器；无新安装、真实 Key/Provider/生产操作，未运行全量 CI 或数据库联合回归。
 - 官方依据：[Responses 状态与回传](https://developers.openai.com/api/docs/guides/conversation-state)、[工具结果条目](https://developers.openai.com/api/docs/guides/function-calling)、[GPT-5.4 mini](https://developers.openai.com/api/docs/models/gpt-5.4-mini)。开发完成不等于 T13-A 真实验收已通过。
+
+### BYOK T13-B Claude 原生 Messages 开发（2026-10-20）
+
+- OpenAI 原生 Responses 已合并 [#147](https://github.com/CoderLambert/news-aggregator/pull/147)，main `0749fb0`。本批基于该提交，补上 Claude Haiku 5.5 可信预置与官方 Anthropic SDK 经既有 Proxy 的 Messages 非流式调用；目录能力仍初始 unknown，业务必须先取得本人/版本绑定的显式文本与工具证明。
+- 原生 tool_use / tool_result 对应、多个工具结果合并为同一 user 内容块、thinking/signature/redacted_thinking 完整保留在服务端原模型续接中。未知内容类型、截断、pause/refusal、缺失/重复/孤立工具结果拒绝；公开历史不包含原生块。现有 owner/epoch/版本/研究工具白名单/费用同意/usage 路径保留。
+- 模型固定 disabled thinking、low effort，不透传 Chat sampling 默认值；能力探针分别最多 64/128 输出 Token、一次发送。官方 SDK 仅在 Claude 路由按需创建，固定回环 Proxy、项目认证与零重试；供应商 Key 只放请求体，清除 SDK 环境自定义头，关闭请求时释放两个客户端。依赖锁加入 anthropic 1.13.0 与 docstring-parser 0.18.0，没有重建共享环境。
+- 核对实际频道分类调用时补足 native timeout 和 JSON 参数映射：OpenAI 使用 text.format=json_object；Messages 没有 Chat 的 json_object 开关，因此使用明确 JSON 指令，并继续依赖既有全响应 schema/身份校验；不声称 Claude 受 provider JSON schema 约束。其余未知参数保持拒绝。
+- 20 项定向离线检查通过，包括 OpenAI 回归、Claude 原生工具/私有续问、缺失与截断负例、实际官方 SDK→本地 HTTP、环境头隔离及分类参数。仅使用只读既有依赖缓存、既有 T00 SDK 包、network-none 容器和 dummy DB；未安装软件、未请求真实 Provider。依赖锁静态校验通过；完整安装/CI/数据库联合回归 NOT_RUN。按用户指示继续延期真实模型/生产验收，文章流与翻译仍只允许原 Flash 流式路由。
+- 官方依据：[Haiku 5.5](https://platform.claude.com/docs/en/models/haiku-5-5/overview)、[Messages 工具往返](https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview)、[思考块签名](https://platform.claude.com/docs/en/build-with-claude/thinking)、[结构化输出](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)。这是 T13-B 原生协议代码交付，不是 T13-B 真实验收通过。
 
 | 顺序 | 原编号与目标 | 需要完成的真正差额 | 阶段验收 |
 |---|---|---|---|

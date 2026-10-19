@@ -16,6 +16,10 @@ from api.services.ai_responses_protocol import (
     OPENAI_RESPONSES_MODELS, ResponsesProtocolError, responses_completion, responses_payload,
 )
 
+from api.services.ai_messages_protocol import (
+    ANTHROPIC_MESSAGES_MODELS, MessagesProtocolError, messages_completion, messages_payload,
+)
+
 MAX_RESPONSE_BYTES = 64 * 1024
 TIMEOUT_SECONDS = 15
 _REQUEST_ID = re.compile(r'^[A-Za-z0-9._:-]{1,128}$')
@@ -162,12 +166,18 @@ def send_model_probe(*, provider_key: str, model_alias: str, probe_kind: str) ->
         return ProbeOutcome('not_sent', 'gateway_unavailable')
     payload = _payload(model_alias, probe_kind, provider_key)
     native_responses = model_alias in OPENAI_RESPONSES_MODELS
+    native_messages = model_alias in ANTHROPIC_MESSAGES_MODELS
     endpoint = 'chat/completions'
     if native_responses:
         payload.pop('api_key')
         payload['max_tokens'] = 64 if probe_kind == 'text' else 128
         payload = {**responses_payload(payload), 'api_key': provider_key}
         endpoint = 'responses'
+    elif native_messages:
+        payload.pop('api_key')
+        payload['max_tokens'] = 64 if probe_kind == 'text' else 128
+        payload = {**messages_payload(payload), 'api_key': provider_key}
+        endpoint = 'messages'
     data = json.dumps(payload, separators=(',', ':')).encode()
     request = urllib.request.Request(
         f'{gateway}/v1/{endpoint}', data=data, method='POST',
@@ -176,12 +186,13 @@ def send_model_probe(*, provider_key: str, model_alias: str, probe_kind: str) ->
     try:
         with _OPENER.open(request, timeout=TIMEOUT_SECONDS) as response:
             raw = response.read(MAX_RESPONSE_BYTES + 1)
-            if native_responses:
+            if native_responses or native_messages:
                 if response.status != 200 or len(raw) > MAX_RESPONSE_BYTES:
                     return ProbeOutcome('unknown', 'result_unknown', _request_id(response.headers))
                 try:
-                    raw = json.dumps(responses_completion(_json_parse(raw))).encode()
-                except (ResponsesProtocolError, TypeError, ValueError, UnicodeDecodeError):
+                    normalize = responses_completion if native_responses else messages_completion
+                    raw = json.dumps(normalize(_json_parse(raw))).encode()
+                except (ResponsesProtocolError, MessagesProtocolError, TypeError, ValueError, UnicodeDecodeError):
                     return ProbeOutcome('unknown', 'incomplete_or_invalid', _request_id(response.headers))
             return parse_completion(response.status, response.headers, raw, probe_kind)
     except urllib.error.HTTPError as exc:
