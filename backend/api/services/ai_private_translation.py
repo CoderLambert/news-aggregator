@@ -49,7 +49,7 @@ T06_OUTPUT_TOKENS_PER_CHUNK = 8_192
 T06_MAX_OUTPUT_TOKENS = T06_MAX_CHUNKS * T06_OUTPUT_TOKENS_PER_CHUNK
 T06_MAX_OUTPUT_CHARS = 262_144
 T06_PROMPT_FRAMING_RESERVE_BYTES = 512
-T06_REQUEST_SIZE_GUARD_BYTES = 32_768
+T06_REQUEST_SIZE_GUARD_BYTES = 32_000
 T06_SYSTEM_PROMPT = (
     'Translate this Markdown block into Simplified Chinese. Preserve headings, links, tables, '
     'facts, and Markdown structure; copy fenced and inline code exactly. Return only the complete '
@@ -96,10 +96,11 @@ def _check_t06_profile(selection):
             or connection.endpoint_profile != T06_ENDPOINT_PROFILE
             or connection.endpoint_profile_version != T06_ENDPOINT_PROFILE_VERSION
             or T06_OUTPUT_TOKENS_PER_CHUNK > T06_PROVIDER_MAX_OUTPUT_TOKENS
-            or (T06_CHUNK_INPUT_BYTES + len(T06_SYSTEM_PROMPT.encode('utf-8'))
+            # Mixed byte/token units are deliberately a local conservative guard,
+            # not a claim of exact tokenizer equivalence.
+            or (T06_REQUEST_SIZE_GUARD_BYTES + len(T06_SYSTEM_PROMPT.encode('utf-8'))
                 + T06_PROMPT_FRAMING_RESERVE_BYTES + T06_OUTPUT_TOKENS_PER_CHUNK
-                > T06_CONTEXT_WINDOW_TOKENS)
-            or T06_MAX_OUTPUT_TOKENS > T06_CONTEXT_WINDOW_TOKENS):
+                > T06_CONTEXT_WINDOW_TOKENS)):
         raise TranslationError('translation_profile_unavailable')
 
 
@@ -134,7 +135,9 @@ def _split_t06_markdown(markdown):
     for unit in _markdown_units(markdown):
         unit_bytes = len(unit.encode('utf-8'))
         if (len(unit) > T06_CHUNK_INPUT_CHARS or unit_bytes > T06_CHUNK_INPUT_BYTES
-                or unit_bytes + system_bytes + T06_PROMPT_FRAMING_RESERVE_BYTES > T06_REQUEST_SIZE_GUARD_BYTES):
+                or unit_bytes > T06_REQUEST_SIZE_GUARD_BYTES
+                or unit_bytes + system_bytes + T06_PROMPT_FRAMING_RESERVE_BYTES
+                > T06_REQUEST_SIZE_GUARD_BYTES + system_bytes + T06_PROMPT_FRAMING_RESERVE_BYTES):
             raise TranslationError('translation_input_budget', 400)
         candidate = current + unit
         if current and (len(candidate) > T06_CHUNK_INPUT_CHARS
