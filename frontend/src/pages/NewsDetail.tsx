@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { KeyboardEvent, MouseEvent } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
 import { ArrowLeft, MessageCircle, Search, Sparkles } from 'lucide-react'
@@ -61,6 +61,19 @@ export default function NewsDetail() {
   const translationEnabled = capabilities.features.translation.enabled
   const ttsEnabled = capabilities.features.tts.enabled
   const { news, setNews, loading, error, refetch } = useNewsDetail(id)
+  const speechContextRef = useRef<object | null>(null)
+  const pendingSpeechRef = useRef<{ context: object; scope: SpeechScope } | null>(null)
+  // Only the committed viewer/article version may consume its waiting speech action.
+  useLayoutEffect(() => {
+    speechContextRef.current = {}
+    return () => {
+      speechContextRef.current = null
+      pendingSpeechRef.current = null
+    }
+  }, [privateSelectionKey, news?.id, news?.full_content_revision, news?.full_content,
+    news?.full_content_state, news?.body_access_granted, news?.title, news?.source_language,
+    translationEnabled, ttsEnabled])
+
   const { articleLoading, articleError, handleFetchFullArticle, resumeExistingFetch, cancelFetch } = useFullArticle(id ?? '', setNews, news)
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState(false)
@@ -106,6 +119,7 @@ export default function NewsDetail() {
     cancelTranslation,
   } = useTranslation(id ?? '', news, setNews, loading)
   const selectPrivateResult = useCallback((resultId: number | null) => {
+    pendingSpeechRef.current = null
     setPrivateSelection({ key: privateSelectionKey, resultId })
     if (resultId !== null) setShowOriginal(false)
   }, [privateSelectionKey, setShowOriginal])
@@ -121,7 +135,6 @@ export default function NewsDetail() {
 
   const speechPlayer = useSpeechPlayerActions()
   const { supported: speechSupported } = useSpeechPlayerCapabilities()
-  const pendingSpeechScopeRef = useRef<SpeechScope | null>(null)
   const handleSpeak = useCallback((language: SpeechLanguage, scope: SpeechScope, resultId: number | null = selectedPrivateResultId) => {
     if (!ttsEnabled || !news) return
     const selected = language === 'zh' && scope === 'full' && resultId !== null
@@ -143,26 +156,28 @@ export default function NewsDetail() {
       setAuthModalOpen(true)
       return
     }
-    pendingSpeechScopeRef.current = scope
     selectPrivateResult(null)
+    const context = speechContextRef.current
+    if (!context) return
+    const pending = { context, scope }
+    pendingSpeechRef.current = pending
     void handleTranslate(false).then((completed) => {
-      const pendingScope = pendingSpeechScopeRef.current
-      if (!completed || !pendingScope) return
-      pendingSpeechScopeRef.current = null
-      handleSpeak('zh', pendingScope, null)
+      if (!completed || pendingSpeechRef.current !== pending || speechContextRef.current !== context) return
+      pendingSpeechRef.current = null
+      handleSpeak('zh', pending.scope, null)
     })
   }, [handleSpeak, handleTranslate, selectPrivateResult, setAuthModalOpen, translationEnabled, ttsEnabled, user])
   useEffect(() => {
-    const pendingScope = pendingSpeechScopeRef.current
-    if (!pendingScope || !news?.full_content_zh) return
-    pendingSpeechScopeRef.current = null
-    handleSpeak('zh', pendingScope, null)
+    const pending = pendingSpeechRef.current
+    if (!pending || pending.context !== speechContextRef.current || !news?.full_content_zh) return
+    pendingSpeechRef.current = null
+    handleSpeak('zh', pending.scope, null)
   }, [handleSpeak, news?.full_content_zh])
   useEffect(() => {
-    if (translateError) pendingSpeechScopeRef.current = null
+    if (translateError) pendingSpeechRef.current = null
   }, [translateError])
   const handleStopTranslation = useCallback(() => {
-    pendingSpeechScopeRef.current = null
+    pendingSpeechRef.current = null
     cancelTranslation()
   }, [cancelTranslation])
 

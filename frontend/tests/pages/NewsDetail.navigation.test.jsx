@@ -1,15 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter, Route, Routes, useLocation, Link } from 'react-router-dom'
 import { AuthContext } from '@/context/AuthContext'
 import { usePreferencesStore } from '@/stores/preferences'
+import { newsKeys } from '@/services/newsQueries'
 import NewsList from '@/pages/NewsList'
 import NewsDetail from '@/pages/NewsDetail'
 import { CapabilitiesTestProvider } from '../helpers/capabilities'
 import { blockNews, checkFavoriteStatus, fetchCategories, fetchNews, fetchNewsDetail, fetchSources, unblockNews } from '@/services/api'
 
-const apiState = vi.hoisted(() => ({ blocked: false, fetchFullArticle: vi.fn(), translate: vi.fn(), translateError: '', articleError: '' }))
+const apiState = vi.hoisted(() => ({ blocked: false, fetchFullArticle: vi.fn(), translate: vi.fn(), translateError: '', articleError: '', speechSupported: false, speak: vi.fn() }))
 
 vi.mock('@/services/api', () => ({
   fetchChannelSubscriptions: vi.fn().mockResolvedValue([]),
@@ -33,10 +34,11 @@ vi.mock('@/hooks/useArticleSearch', () => ({ useArticleSearch: () => ({ matchCou
 vi.mock('@/hooks/useArticleToc', () => ({ useArticleToc: () => ({ headings: [], activeId: '' }) }))
 vi.mock('@/context/SpeechPlayerContext', () => ({
   useSpeechPlayer: () => ({ supported: false, speak: vi.fn() }),
-  useSpeechPlayerActions: () => ({ speak: vi.fn() }),
-  useSpeechPlayerCapabilities: () => ({ supported: false }),
+  useSpeechPlayerActions: () => ({ speak: apiState.speak }),
+  useSpeechPlayerCapabilities: () => ({ supported: apiState.speechSupported }),
   useSpeechPlayerActivity: () => false,
 }))
+vi.mock('@/components/news-detail/PrivateTranslationPanel', () => ({ default: () => null }))
 vi.mock('@/components/NewsChatAssistant', () => ({
   default: ({ open, onOpenChange }) => (
     <div>
@@ -64,7 +66,7 @@ const detailStory = {
 
 function RouteProbe() {
   const location = useLocation()
-  return <output data-testid="route">{`${location.pathname}${location.search}`}</output>
+  return <><output data-testid="route">{`${location.pathname}${location.search}`}</output><Link to="/news/22">测试下一篇</Link></>
 }
 
 function renderRoutes(initialEntry, user = { id: 12, username: 'reader' }) {
@@ -94,6 +96,7 @@ beforeEach(() => {
   apiState.blocked = false
   apiState.translateError = ''
   apiState.articleError = ''
+  apiState.speechSupported = false
   apiState.fetchFullArticle.mockReset()
   localStorage.removeItem('news-aggregator-filters')
   usePreferencesStore.setState({ lang: 'zh' })
@@ -233,4 +236,47 @@ it('shows a new fetch failure when body permission allows retrying a formerly un
   expect(await screen.findByText('正文获取服务暂不可用，请稍后重试。')).toBeInTheDocument()
   expect(screen.getByRole('button', { name: '尝试获取正文' })).toBeInTheDocument()
   expect(screen.getByText('尚未保存完整原文')).toBeInTheDocument()
+})
+
+
+it('does not autoplay the next article when a previous translate-and-play request is still pending', async () => {
+  apiState.speechSupported = true
+  let finish
+  apiState.translate.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  fetchNewsDetail.mockImplementation(async id => ({
+    ...detailStory, id: Number(id), title: Number(id) === 21 ? 'First article' : 'Second article',
+    full_content: Number(id) === 21 ? 'First original body' : 'Second original body',
+    full_content_state: 'available', full_content_revision: 1, body_access_granted: true,
+    full_content_zh: Number(id) === 21 ? '' : 'Second saved Chinese translation',
+  }))
+  renderRoutes('/news/21')
+  await screen.findByRole('heading', { name: 'First article' })
+  fireEvent.click(screen.getByRole('button', { name: '选择语音播报方式' }))
+  fireEvent.click(screen.getByRole('button', { name: '翻译全文并播放' }))
+  expect(apiState.translate).toHaveBeenCalledWith(false)
+  fireEvent.click(screen.getByRole('link', { name: '测试下一篇' }))
+  await screen.findByRole('heading', { name: 'Second article' })
+  expect(apiState.speak).not.toHaveBeenCalled()
+  await act(async () => finish(false))
+  expect(apiState.speak).not.toHaveBeenCalled()
+})
+
+
+it('autoplays the matching translated article once when cache and completion arrive together', async () => {
+  apiState.speechSupported = true
+  let finish
+  apiState.translate.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  fetchNewsDetail.mockResolvedValue({ ...detailStory, full_content: 'Original body',
+    full_content_state: 'available', full_content_revision: 1, body_access_granted: true })
+  const { client } = renderRoutes('/news/21')
+  await screen.findByRole('heading', { name: 'Climate technology update' })
+  fireEvent.click(screen.getByRole('button', { name: '选择语音播报方式' }))
+  fireEvent.click(screen.getByRole('button', { name: '翻译全文并播放' }))
+  await act(async () => {
+    client.setQueryData(newsKeys.detail(21, 'zh', 12), old => ({ ...old, full_content_zh: 'Matching Chinese translation' }))
+  })
+  await waitFor(() => expect(apiState.speak).toHaveBeenCalledTimes(1))
+  await act(async () => finish(true))
+  expect(apiState.speak).toHaveBeenCalledTimes(1)
+  expect(apiState.speak.mock.calls[0][0]).toBe(21)
 })

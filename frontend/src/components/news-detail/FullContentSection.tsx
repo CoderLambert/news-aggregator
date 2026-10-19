@@ -56,10 +56,15 @@ export default function FullContentSection({
   const privateHistory = news.full_content_zh_private_history ?? []
   const selectedPrivate = privateHistory.find((item) => item.result_id === selectedPrivateResultId) ?? null
   const content = showOriginal ? news.full_content : (selectedPrivate ? selectedPrivate.content : (news.full_content_zh || news.full_content))
+  const readingTranslation = !showOriginal && (selectedPrivate !== null || Boolean(news.full_content_zh))
+  const legacyCodeRepair = readingTranslation
+    ? selectedPrivate === null && news.full_content_zh_scope === 'legacy'
+    : news.full_content_state === 'legacy'
   return (
     <div className="mb-8">
       <Toolbar
         news={news}
+        content={content}
         translating={translating}
         translationPaused={translationPaused}
         translateError={translateError}
@@ -113,20 +118,19 @@ export default function FullContentSection({
 
       <Card className="article-section-render py-5">
         <CardContent className="px-5">
-          <MarkdownContent content={content} legacyCodeRepair={news.full_content_state === 'legacy'} />
+          <MarkdownContent content={content} legacyCodeRepair={legacyCodeRepair} />
         </CardContent>
       </Card>
     </div>
   )
 }
 
-type ToolbarProps = Pick<FullContentSectionProps, 'news' | 'translating' | 'translationPaused' | 'translateError' | 'showOriginal' | 'onToggleOriginal' | 'onTranslate' | 'onRefetch' | 'refetching' | 'onCancelRefetch' | 'allowFetch' | 'allowTranslation'> & { selectedPrivateTranslation: boolean }
+type ToolbarProps = Pick<FullContentSectionProps, 'news' | 'translating' | 'translationPaused' | 'translateError' | 'showOriginal' | 'onToggleOriginal' | 'onTranslate' | 'onRefetch' | 'refetching' | 'onCancelRefetch' | 'allowFetch' | 'allowTranslation'> & { selectedPrivateTranslation: boolean; content: string }
 
-function Toolbar({ news, translating, translationPaused, translateError, showOriginal, onToggleOriginal, onTranslate, onRefetch, refetching, onCancelRefetch, allowFetch = true, allowTranslation = true, selectedPrivateTranslation }: ToolbarProps) {
+function Toolbar({ news, content, translating, translationPaused, translateError, showOriginal, onToggleOriginal, onTranslate, onRefetch, refetching, onCancelRefetch, allowFetch = true, allowTranslation = true, selectedPrivateTranslation }: ToolbarProps) {
   const [copied, setCopied] = useState(false)
   const [copyMessage, setCopyMessage] = useState('')
   const [copyTimer, setCopyTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
-  const content = showOriginal ? news.full_content : (news.full_content_zh || news.full_content)
 
   useEffect(() => () => { if (copyTimer) clearTimeout(copyTimer) }, [copyTimer])
 
