@@ -510,7 +510,10 @@ class PrivateTranslationTests(TransactionTestCase):
         task = self.queued()
         chunks = service._task_chunks(task.execution_snapshot)
         self.assertGreater(len(chunks), 1)
-        gateways = [FakeGateway([gateway_frame(chunk)]) for chunk in chunks]
+        prepared = [service._split_trailing_separator(chunk) for chunk in chunks]
+        self.assertTrue(any(separator for _, separator in prepared))
+        # The synthetic model trims trailing paragraph separators; merge must restore them.
+        gateways = [FakeGateway([gateway_frame(body)]) for body, _ in prepared]
         with patch.object(service, 'build_gateway_client', side_effect=gateways) as build:
             service.run_translation(task.pk, task.generation)
         task.refresh_from_db()
@@ -559,3 +562,20 @@ class PrivateTranslationTests(TransactionTestCase):
         self.assertEqual(mismatch.status_code, 409, mismatch.content)
         dispatch.assert_not_called()
         self.assertFalse(ChatGPTTranslationTask.objects.exists())
+
+    def test_t06_unknown_context_and_guard_drift_reject_before_dispatch(self):
+        self.news.full_content = 'A' * 5000 + '\\n\\n' + 'B' * 5000
+        self.news.full_content_state = 'legacy'
+        self.news.save(update_fields=['full_content', 'full_content_state'])
+        cases = (
+            {'T06_CONTEXT_WINDOW_TOKENS': None},
+            {'T06_CONTEXT_WINDOW_TOKENS': 999_999},
+            {'T06_REQUEST_SIZE_GUARD_BYTES': 100},
+            {'T06_OUTPUT_TOKENS_PER_CHUNK': service.T06_PROVIDER_MAX_OUTPUT_TOKENS + 1},
+        )
+        for changes in cases:
+            with self.subTest(changes=changes), patch.multiple(service, **changes), patch.object(service, '_dispatch') as dispatch:
+                response = self.start(request_id=str(uuid.uuid4()))
+            self.assertEqual(response.status_code, 409, response.content)
+            dispatch.assert_not_called()
+            self.assertFalse(ChatGPTTranslationTask.objects.exists())
