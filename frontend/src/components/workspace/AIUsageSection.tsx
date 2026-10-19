@@ -3,7 +3,7 @@ import { listAIUsage } from '@/services/aiConnectionsApi'
 
 const PURPOSES: Record<string, string> = {
   article_qa: '文章问答', full_translation: '全文翻译', deep_research: '深度研究',
-  question_suggestions: '推荐问题', 'model_probe:text': '文本测试', 'model_probe:tools': '工具测试',
+  question_suggestions: '推荐问题', channel_classification: '频道分类', 'model_probe:text': '文本测试', 'model_probe:tools': '工具测试',
 }
 const STATUSES: Record<string, string> = {
   succeeded: '已完成', failed: '失败', unknown: '结果未知', unsupported: '不支持',

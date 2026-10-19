@@ -80,9 +80,10 @@ class _ObservedStream:
 
 def complete_with_usage(client, selection, task_kind, **kwargs):
     """One receipt per attempted upstream create, including every tool/chunk round."""
+    selection_kind = 'default' if task_kind == 'channel_classification' else task_kind
     if (selection.user_id != selection.connection.user_id
-            or selection.task_kind != task_kind
-            or task_kind not in {'article_qa', 'full_translation', 'deep_research', 'question_suggestions'}):
+            or selection.task_kind != selection_kind
+            or task_kind not in {'article_qa', 'full_translation', 'deep_research', 'question_suggestions', 'channel_classification'}):
         raise ValueError('Invalid AI usage owner or task')
     if kwargs.get('stream') is True:
         kwargs.setdefault('stream_options', {'include_usage': True})

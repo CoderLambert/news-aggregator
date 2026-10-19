@@ -94,7 +94,10 @@ def make_proposal(user, payload):
         request_id = uuid.UUID(str(payload.get('request_id', uuid.uuid4())))
     except (ValueError, TypeError, AttributeError):
         raise ValidationError('无效的请求标识。') from None
-    request_hash = digest([engine, source_ids, topic_keys])
+    request_parts = [engine, source_ids, topic_keys]
+    if engine == 'ai' and payload.get('model_config_id') is not None:
+        request_parts.append(payload['model_config_id'])
+    request_hash = digest(request_parts)
     previous = ChannelGroupingProposal.objects.filter(user=user, request_id=request_id).first()
     if previous:
         if previous.request_hash != request_hash:
@@ -105,6 +108,7 @@ def make_proposal(user, payload):
     if recent.count() >= 30:
         raise Throttled(3600, '整理请求过多，请稍后再试。')
     fingerprint = ''
+    execution_snapshot = {}
     if engine == 'ai':
         if not settings.PUBLIC_AI_ENABLED:
             raise PermissionDenied('站点 AI 功能已关闭。')
@@ -113,7 +117,12 @@ def make_proposal(user, payload):
         fingerprint = credential_fingerprint(user)
         if not fingerprint:
             raise ValidationError('请先在设置中配置自己的模型 API Key。')
-        if ChannelGroupingProposal.objects.filter(user=user, engine='ai', created_at__date=timezone.localdate()).count() >= 20:
+        from api.services.channel_model import capture_model, ClassificationAuthorizationChanged
+        try:
+            execution_snapshot = capture_model(user, scope='personal', model_config_id=payload.get('model_config_id'))
+        except ClassificationAuthorizationChanged:
+            raise ValidationError('请先配置并验证个人默认模型，再明确同意本次分类。') from None
+        if ChannelGroupingProposal.objects.filter(user=user, engine='ai', public_source__isnull=True, created_at__date=timezone.localdate()).count() >= 20:
             raise Throttled(3600, '已达到今日 AI 整理任务上限。')
     sources = list(Source.objects.filter(id__in=source_ids).order_by('id'))
     evidence = [evidence_for(source) for source in sources]
@@ -139,7 +148,9 @@ def make_proposal(user, payload):
     return ChannelGroupingProposal.objects.create(user=user, request_id=request_id, engine=engine,
         status='queued' if engine == 'ai' else 'ready', source_ids=source_ids, topic_keys=topic_keys,
         input_snapshot=snapshot(user, source_ids), request_hash=request_hash, evidence=evidence,
-        credential_fingerprint=fingerprint, result=result, expires_at=now + timedelta(hours=24))
+        credential_fingerprint=fingerprint, execution_snapshot=execution_snapshot,
+        model_id=execution_snapshot.get('model', {}).get('model_id', ''),
+        result=result, expires_at=now + timedelta(hours=24))
 
 
 @transaction.atomic

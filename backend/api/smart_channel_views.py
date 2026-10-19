@@ -164,7 +164,7 @@ class IntakeView(PrivateWorkspaceView):
 class GroupingConfigView(PrivateWorkspaceView):
     def get(self, request):
         data = config_data(request.user)
-        data['ai_available'] = settings.PUBLIC_AI_ENABLED and bool(credential_fingerprint(request.user))
+        data['ai_available'] = settings.PUBLIC_AI_ENABLED and getattr(settings, 'AI_BYOK_ENABLED', False) and bool(credential_fingerprint(request.user))
         return Response(data)
     @transaction.atomic
     def patch(self, request):
@@ -233,6 +233,7 @@ class SiteClassifierView(PrivateWorkspaceView):
         jobs = ChannelGroupingProposal.objects.filter(public_source__isnull=False).order_by('-created_at')[:20]
         return Response({'enabled': bool(cfg and cfg.enabled), 'is_owner': bool(cfg and cfg.owner_id == request.user.pk),
             'daily_limit': cfg.daily_limit if cfg else 10,
+            'model_id': cfg.execution_snapshot.get('model', {}).get('model_id') if cfg else None,
             'jobs': [proposal_data(j) for j in jobs],
             'intake_requests': list(ChannelIntakeRequest.objects.order_by('-created_at').values('id', 'url', 'status', 'created_at')[:30])})
     @transaction.atomic
@@ -243,7 +244,15 @@ class SiteClassifierView(PrivateWorkspaceView):
             raise ValidationError('请选择开关与每日 1–20 个任务的预算。')
         if enabled and (request.data.get('consent') is not True or not settings.PUBLIC_AI_ENABLED or not credential_fingerprint(request.user)):
             raise ValidationError('开启前须同意使用本管理员的模型额度，并配置有效的模型连接。')
-        ChannelClassifierSettings.objects.update_or_create(pk=1, defaults={'owner': request.user, 'enabled': enabled, 'daily_limit': limit})
+        execution_snapshot = {}
+        if enabled:
+            from api.services.channel_model import capture_model, ClassificationAuthorizationChanged
+            try:
+                execution_snapshot = capture_model(request.user, scope='site', model_config_id=request.data.get('model_config_id'))
+            except ClassificationAuthorizationChanged:
+                raise ValidationError('请先配置并验证个人默认模型，再明确授权站点后台分类；不会借用其他人的模型。') from None
+        ChannelClassifierSettings.objects.update_or_create(pk=1, defaults={
+            'owner': request.user, 'enabled': enabled, 'daily_limit': limit, 'execution_snapshot': execution_snapshot})
         return self.get(request)
 
 

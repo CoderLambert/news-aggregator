@@ -2,9 +2,11 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { listAITaskPreferences } from '@/services/aiConnectionsApi'
 import { Organizer, ProposalEditor } from '@/pages/SmartGroupingWorkspace'
 import { workspaceKeys, workspaceRequest, type Catalog, type GroupingConfig, type Proposal } from '@/services/workspaceApi'
 
+vi.mock('@/services/aiConnectionsApi', () => ({ listAITaskPreferences: vi.fn() }))
 vi.mock('@/services/workspaceApi', async importOriginal => ({
   ...await importOriginal<typeof import('@/services/workspaceApi')>(), workspaceRequest: vi.fn(),
 }))
@@ -28,11 +30,11 @@ function defaults(path: string, options?: Options): unknown {
   if (path.endsWith('/cancel/')) return { ...proposal, status: 'cancelled' }
   return { ...proposal }
 }
-function setup(subscriptions = [{ id: 1, groupIds: [] as number[] }], viewer = 1) {
+function setup(subscriptions = [{ id: 1, groupIds: [] as number[] }], viewer = 1, aiAvailable = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   clients.push(client)
   const view = render(<QueryClientProvider client={client}><MemoryRouter>
-    <Organizer viewer={viewer} admin={false} initialConfig={config} catalog={catalog} groups={[]} subscriptions={subscriptions} />
+    <Organizer viewer={viewer} admin={false} initialConfig={{ ...config, ai_available: aiAvailable }} catalog={catalog} groups={[]} subscriptions={subscriptions} />
   </MemoryRouter></QueryClientProvider>)
   return { ...view, client }
 }
@@ -42,6 +44,7 @@ async function generate() {
   await waitFor(() => expect(screen.getByRole('button', { name: '确认应用分组' })).toBeEnabled())
 }
 beforeEach(() => {
+  vi.mocked(listAITaskPreferences).mockReset().mockResolvedValue({ revision: 0, preferences: [] })
   handler = defaults
   request.mockReset()
   request.mockImplementation(async <T,>(path: string, options?: Options): Promise<T> => await handler(path, options) as T)
@@ -190,4 +193,23 @@ describe('AG-04 guided grouping', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
     expect(toggle).toHaveFocus()
   })
+})
+
+
+it('binds an explicitly consented AI preview to the displayed verified default model', async () => {
+  const id = '20adf7e7-44d7-4444-8888-105a61db3141'
+  vi.mocked(listAITaskPreferences).mockResolvedValue({ revision: 3, preferences: [{
+    task_kind: 'default', selection_state: 'available', model_config_id: id,
+    model: { id, connection_id: 'synthetic', model_id: 'deepseek-chat', display_name: '我的分类模型' },
+  }] })
+  setup(undefined, 1, true)
+  fireEvent.click(screen.getByRole('button', { name: 'AI 精细分类' }))
+  await screen.findByText(/本次分类模型：我的分类模型/)
+  expect(postCalls()).toHaveLength(0)
+  expect(screen.getByRole('button', { name: '生成分组预览' })).toBeDisabled()
+  fireEvent.click(screen.getByRole('checkbox', { name: /同意本次使用上述个人模型额度/ }))
+  fireEvent.click(screen.getByRole('button', { name: '生成分组预览' }))
+  await waitFor(() => expect(postCalls()).toHaveLength(1))
+  expect(postCalls()[0][1]?.body).toMatchObject({ engine: 'ai', model_config_id: id, consent: true })
+  expect(screen.getByRole('checkbox', { name: /同意本次使用上述个人模型额度/ })).not.toBeChecked()
 })
