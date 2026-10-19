@@ -39,6 +39,7 @@ T06_PROXY_ALIAS = 'deepseek/deepseek-flash'
 T06_ENDPOINT_PROFILE = 'deepseek_default'
 T06_ENDPOINT_PROFILE_VERSION = 1
 T06_CONTEXT_WINDOW_TOKENS = 1_000_000
+T06_MIN_CONTEXT_WINDOW_TOKENS = 1_000_000
 T06_PROVIDER_MAX_OUTPUT_TOKENS = 384_000
 T06_MAX_CHUNKS = 8
 T06_MAX_INPUT_CHARS = 64_000
@@ -97,6 +98,8 @@ def _check_t06_profile(selection):
             or connection.provider_id != T06_PROVIDER_ID
             or connection.endpoint_profile != T06_ENDPOINT_PROFILE
             or connection.endpoint_profile_version != T06_ENDPOINT_PROFILE_VERSION
+            or type(T06_CONTEXT_WINDOW_TOKENS) is not int
+            or T06_CONTEXT_WINDOW_TOKENS < T06_MIN_CONTEXT_WINDOW_TOKENS
             or T06_OUTPUT_TOKENS_PER_CHUNK > T06_PROVIDER_MAX_OUTPUT_TOKENS
             # Keep request bytes and output tokens as distinct, explicit product
             # guards; official docs do not promise a tokenizer byte/token ratio.
