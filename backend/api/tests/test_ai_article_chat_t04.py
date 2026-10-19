@@ -16,6 +16,10 @@ from api.ai_connection_models import UserAIConnection
 from api.ai_model_models import AIModelProbeAttempt, UserAIModelConfig
 from api.ai_preference_models import UserAITaskPreference
 from api.models import ArticleChatTurn, Category, ChatSession, News, Source
+from api.services.ai_gateway import (
+    AIGatewayError, ARTICLE_CHAT_SUPPORTED_ALIAS, _GatewayCompletions,
+)
+from api.services.ai_model_registry import get_trusted_preset, supports_article_chat
 from api.tests.rss.reader_fixtures import public_legacy_article
 
 
@@ -80,6 +84,8 @@ class PersonalArticleChatTests(TestCase):
     def _verify_text(self, model):
         model.refresh_from_db()
         conn = model.connection
+        preset = get_trusted_preset(conn, model.model_id)
+        self.assertIsNotNone(preset)
         attempt_id = uuid.uuid4()
         AIModelProbeAttempt.objects.create(
             id=attempt_id, request_id=uuid.uuid4(),
@@ -90,7 +96,7 @@ class PersonalArticleChatTests(TestCase):
             credential_version=conn.credential_version,
             endpoint_profile=conn.endpoint_profile,
             endpoint_profile_version=conn.endpoint_profile_version,
-            proxy_alias='deepseek/deepseek-flash',
+            proxy_alias=preset['proxy_alias'],
         )
         model.last_text_attempt = attempt_id
         model.capability_results = {
@@ -121,6 +127,33 @@ class PersonalArticleChatTests(TestCase):
     def _wire(self, response):
         return b''.join(response.streaming_content).decode('utf-8')
 
+    def test_gateway_stream_adapter_allows_only_the_exact_t04_alias(self):
+        class CompletionSpy:
+            def __init__(self):
+                self.calls = []
+
+            def create(self, **kwargs):
+                self.calls.append(kwargs)
+                return object()
+
+        completions = CompletionSpy()
+        adapter = _GatewayCompletions(completions, KEY)
+        adapter.create(
+            model=ARTICLE_CHAT_SUPPORTED_ALIAS, stream=True, messages=[],
+        )
+        self.assertEqual(len(completions.calls), 1)
+        self.assertEqual(completions.calls[0]['model'], 'deepseek/deepseek-flash')
+        self.assertEqual(completions.calls[0]['extra_body'], {'api_key': KEY})
+
+        with self.assertRaises(AIGatewayError):
+            adapter.create(model='deepseek/deepseek-chat', stream=True, messages=[])
+        self.assertEqual(len(completions.calls), 1)
+
+        # The old trusted preset remains available to T02 non-stream probes.
+        adapter.create(model='deepseek/deepseek-chat', stream=False, messages=[])
+        self.assertEqual(len(completions.calls), 2)
+        self.assertFalse(completions.calls[1]['stream'])
+
     def test_legacy_chat_alias_stays_stored_but_is_never_t04_eligible(self):
         response = self.client.post(
             f'{CONNECTIONS}{self.connection.pk}/models/',
@@ -129,6 +162,13 @@ class PersonalArticleChatTests(TestCase):
         self.assertEqual(response.status_code, 201, response.content)
         legacy = UserAIModelConfig.objects.get(pk=response.data['id'])
         self._verify_text(legacy)
+        legacy.refresh_from_db()
+        self.assertEqual(legacy.capability_results['text']['status'], 'supported')
+        self.assertEqual(
+            AIModelProbeAttempt.objects.get(pk=legacy.last_text_attempt).proxy_alias,
+            'deepseek/deepseek-chat',
+        )
+        self.assertFalse(supports_article_chat(legacy.connection, legacy.model_id))
         gateway = FakeGateway([gateway_frame('must not reach provider')])
         with patch('api.services.ai_article_chat.build_gateway_client', return_value=gateway) as build:
             response = self._chat(model=legacy)

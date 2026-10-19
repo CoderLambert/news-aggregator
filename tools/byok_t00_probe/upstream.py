@@ -269,6 +269,8 @@ def terminal_for(path, request, eof):
         return "protocol_done_without_finish_reason"
     if "_STOP_EOF_" in marker:
         return "finish_reason_stop_without_done"
+    if "_USAGE_SAME_FRAME_" in marker:
+        return "finish_reason_stop_with_usage_same_frame"
     if "_USAGE_DONE_" in marker:
         return "finish_reason_stop_with_usage"
     if "_CONTENT_FILTER_" in marker:
@@ -820,7 +822,12 @@ class Handler(BaseHTTPRequestHandler):
             finish = "content_filter" if "_CONTENT_FILTER_" in (record or {}).get("test_id", "") else (
                 "length" if incomplete else "stop"
             )
-            events.append(("message", chunk({}, finish)))
+            terminal_chunk = chunk({}, finish)
+            if "_USAGE_SAME_FRAME_" in (record or {}).get("test_id", ""):
+                terminal_chunk["usage"] = {
+                    "prompt_tokens": 4, "completion_tokens": 5, "total_tokens": 9,
+                }
+            events.append(("message", terminal_chunk))
             if "_USAGE_DONE_" in (record or {}).get("test_id", ""):
                 events.append(("message", {
                     "id": "chatcmpl_t00_synthetic", "object": "chat.completion.chunk",

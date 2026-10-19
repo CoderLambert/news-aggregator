@@ -74,6 +74,8 @@ PROVIDER_SPECS = {
 }
 PROJECT_KEY_PATTERN = re.compile(r'^sk-[A-Za-z0-9_-]{16,256}$')
 GATEWAY_TIMEOUT_SECONDS = 180
+# Keep the single verified T04 stream route shared by the registry and gateway.
+ARTICLE_CHAT_SUPPORTED_ALIAS = 'deepseek/deepseek-flash'
 
 
 class _GatewayCompletions:
@@ -85,7 +87,7 @@ class _GatewayCompletions:
         if kwargs.pop('extra_body', None) not in (None, {}):
             raise AIGatewayError('个人模型请求包含不受支持的额外参数。')
         requested_stream = kwargs.get('stream') is True
-        if requested_stream and kwargs.get('model') != 'deepseek/deepseek-chat':
+        if requested_stream and kwargs.get('model') != ARTICLE_CHAT_SUPPORTED_ALIAS:
             raise AIGatewayError('个人模型流式路由不可用。')
         kwargs['extra_body'] = {'api_key': self._provider_key}
         # OpenAI's SDK starts the HTTP request here and returns a closeable

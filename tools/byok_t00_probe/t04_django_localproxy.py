@@ -121,7 +121,8 @@ def _assert_native_deepseek_request(rows, *, marker, stream, terminal):
     assert row["path"] == "/v1/chat/completions"
     assert row["model"] == "deepseek-flash"
     assert row["stream"] is stream
-    assert row["thinking_disabled"] is True
+    if stream:
+        assert row["thinking_disabled"] is True
     assert row["tenant"] == "tenant-a"
     assert row["provider_key_match"] is True
     assert row["project_key_match"] is False

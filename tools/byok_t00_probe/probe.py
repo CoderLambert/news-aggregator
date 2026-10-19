@@ -329,6 +329,7 @@ def main(argv: list[str] | None = None) -> int:
             ("RAW_STOP", "T00_PROXY_CHAT_DEEPSEEK_RAW_STOP_A", True, False, "finish_reason_stop"),
             ("RAW_STOP_CLEAN_EOF", "T00_PROXY_CHAT_DEEPSEEK_STOP_EOF_A", True, False, "finish_reason_stop_without_done"),
             ("RAW_STOP_USAGE_DONE", "T00_PROXY_CHAT_DEEPSEEK_USAGE_DONE_A", True, True, "finish_reason_stop_with_usage"),
+            ("RAW_STOP_USAGE_SAME_FRAME", "T00_PROXY_CHAT_DEEPSEEK_USAGE_SAME_FRAME_A", True, True, "finish_reason_stop_with_usage_same_frame"),
             ("DONE_WITHOUT_RAW_STOP", "T00_PROXY_CHAT_DEEPSEEK_NO_STOP_DONE_A", False, False, "protocol_done_without_finish_reason"),
             ("EOF_WITHOUT_RAW_STOP", "T00_PROXY_CHAT_DEEPSEEK_EOF_A", False, False, "normal_eof_without_protocol_terminal"),
             ("LENGTH_TERMINAL", "T00_PROXY_CHAT_DEEPSEEK_INCOMPLETE_A", False, False, "finish_reason_length"),
