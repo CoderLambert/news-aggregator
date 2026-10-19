@@ -359,17 +359,24 @@ def main(argv: list[str] | None = None) -> int:
                 worker.start()
                 held_seen = False
                 try:
-                    deadline = time.monotonic() + 5.0
+                    deadline = time.monotonic() + 6.0
                     while time.monotonic() < deadline:
                         rows = [
                             row for row in cases.request_json(upstream_url + "/stats").get("records", [])
                             if row.get("test_id") == marker
                         ]
                         held_seen = bool(rows and rows[0].get("post_done_socket_held"))
-                        if held_seen and request_finished.is_set():
+                        observation_complete = bool(
+                            rows and rows[0].get("post_done_peer_observation_complete")
+                        )
+                        if held_seen and request_finished.is_set() and observation_complete:
                             break
                         time.sleep(0.02)
-                    completed_while_socket_held = held_seen and request_finished.is_set()
+                    completed_while_socket_held = (
+                        held_seen
+                        and request_finished.is_set()
+                        and bool(rows and not rows[0].get("post_done_barrier_release_monotonic_ns"))
+                    )
                 finally:
                     # Always release the fixture, including when polling fails.
                     try:
@@ -386,6 +393,16 @@ def main(argv: list[str] | None = None) -> int:
                     row for row in cases.request_json(upstream_url + "/stats").get("records", [])
                     if row.get("test_id") == marker
                 ]
+                if name == "OPEN_AFTER_DONE":
+                    producer_deadline = time.monotonic() + 3.0
+                    while time.monotonic() < producer_deadline:
+                        rows = [
+                            row for row in cases.request_json(upstream_url + "/stats").get("records", [])
+                            if row.get("test_id") == marker
+                        ]
+                        if rows and rows[0].get("upstream_stream_producer_exit_monotonic_ns") is not None:
+                            break
+                        time.sleep(0.02)
             else:
                 result = native_deepseek_stream(
                     url, project_key, provider_key, marker, usage=usage,
@@ -394,42 +411,66 @@ def main(argv: list[str] | None = None) -> int:
                     row for row in cases.request_json(upstream_url + "/stats").get("records", [])
                     if row.get("test_id") == marker
                 ]
-            passed = (
-                result.get("success") is should_succeed
-                and result.get("client_response_closed") is True
-                and (result.get("terminals") == ["stop"] if should_succeed else "stop" not in result.get("terminals", []))
-                and (result.get("usage_chunks") == 1 if usage else True)
-                and len(rows) == 1
-                and rows[0].get("path") == "/v1/chat/completions"
-                and rows[0].get("model") == "deepseek-flash"
-                and rows[0].get("stream") is True
-                and rows[0].get("thinking_disabled") is True
-                and rows[0].get("tenant") == "tenant-a"
-                and rows[0].get("provider_key_match") is True
-                and rows[0].get("project_key_match") is False
-                and rows[0].get("upstream_terminal") == terminal
-                and provider_key not in json.dumps(result, sort_keys=True)
-                and project_key not in json.dumps(result, sort_keys=True)
+            row = rows[0] if len(rows) == 1 else {}
+            terminal_ok = (
+                result.get("terminals") == ["stop"]
+                if should_succeed else "stop" not in result.get("terminals", [])
             )
-            if name == "OPEN_AFTER_DONE":
-                deadline = time.monotonic() + 3.0
-                while time.monotonic() < deadline:
-                    rows = [
-                        row for row in cases.request_json(upstream_url + "/stats").get("records", [])
-                        if row.get("test_id") == marker
-                    ]
-                    if rows and rows[0].get("post_done_probe_write_attempted"):
-                        break
-                    time.sleep(0.03)
-                passed = (
-                    passed
-                    and completed_while_socket_held is True
-                    and result.get("request_thread_terminated") is True
-                    and len(rows) == 1
-                    and rows[0].get("post_done_probe_write_attempted") is True
-                    and rows[0].get("client_disconnected") is True
-                    and rows[0].get("post_done_probe_write_succeeded") is False
+            predicates = {
+                "expected_success": result.get("success") is should_succeed,
+                "client_response_closed": result.get("client_response_closed") is True,
+                "expected_terminal": terminal_ok,
+                "usage_count": result.get("usage_chunks") == 1 if usage else True,
+                "single_upstream_request": len(rows) == 1,
+                "native_deepseek_route": row.get("path") == "/v1/chat/completions"
+                    and row.get("model") == "deepseek-flash"
+                    and row.get("stream") is True
+                    and row.get("thinking_disabled") is True,
+                "synthetic_key_isolation": row.get("tenant") == "tenant-a"
+                    and row.get("provider_key_match") is True
+                    and row.get("project_key_match") is False,
+                "upstream_terminal_receipt": row.get("upstream_terminal") == terminal,
+                "request_key_redaction": provider_key not in json.dumps(result, sort_keys=True)
+                    and project_key not in json.dumps(result, sort_keys=True),
+            }
+            fixture_facts = {
+                key: row.get(key) for key in (
+                    "path", "model", "stream", "thinking_disabled", "tenant",
+                    "provider_key_match", "project_key_match", "upstream_terminal",
+                    "post_done_socket_held", "post_done_peer_close_state",
+                    "post_done_peer_observation_monotonic_ns",
+                    "post_done_peer_observation_complete",
+                    "post_done_barrier_release_monotonic_ns",
+                    "post_done_probe_write_attempted",
+                    "post_done_probe_write_succeeded", "client_disconnected",
+                    "upstream_stream_producer_exit_monotonic_ns",
                 )
+            }
+            if name == "OPEN_AFTER_DONE":
+                close_state = row.get("post_done_peer_close_state")
+                close_ns = row.get("post_done_peer_observation_monotonic_ns")
+                release_ns = row.get("post_done_barrier_release_monotonic_ns")
+                producer_exit_ns = row.get("upstream_stream_producer_exit_monotonic_ns")
+                predicates.update({
+                    "sdk_finished_while_barrier_held": completed_while_socket_held is True,
+                    "held_socket_barrier_reached": row.get("post_done_socket_held") is True,
+                    "peer_eof_or_reset_observed": close_state in {"eof", "reset"},
+                    "peer_close_precedes_release": (
+                        isinstance(close_ns, int) and isinstance(release_ns, int)
+                        and close_ns < release_ns
+                    ),
+                    "peer_observation_completed": row.get("post_done_peer_observation_complete") is True,
+                    "sdk_request_thread_terminated": result.get("request_thread_terminated") is True,
+                    "producer_exited_after_release": (
+                        isinstance(producer_exit_ns, int) and isinstance(release_ns, int)
+                        and producer_exit_ns > release_ns
+                    ),
+                })
+                result["post_done_fixture_facts"] = fixture_facts
+                result["completed_while_socket_held"] = completed_while_socket_held is True
+                result["request_thread_terminated"] = result.get("request_thread_terminated") is True
+            result["case_predicates"] = predicates
+            passed = all(predicates.values())
             check("T00-10", "NATIVE_DEEPSEEK_" + name, passed, result)
             expect_receipt("PROXY", marker, 1, terminal=terminal)
 

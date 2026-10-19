@@ -21,6 +21,7 @@ import local_runtime
 import probe
 import protocol_cases
 import proxy_process
+import upstream
 
 
 class ProbeContracts(unittest.TestCase):
@@ -43,6 +44,18 @@ class ProbeContracts(unittest.TestCase):
             module = importlib.import_module("upstream")
             importlib.reload(module)
             construct.assert_not_called()
+
+    def test_post_done_peer_probe_rejects_open_socket_and_accepts_eof(self):
+        upstream_socket, client_socket = socket.socketpair()
+        try:
+            upstream_socket.sendall(b"data: [DONE]\\n\\n")
+            self.assertEqual(client_socket.recv(64), b"data: [DONE]\\n\\n")
+            self.assertEqual(upstream.observe_peer_close(upstream_socket, 0.02), "timeout")
+            client_socket.close()
+            self.assertEqual(upstream.observe_peer_close(upstream_socket, 0.5), "eof")
+        finally:
+            upstream_socket.close()
+            client_socket.close()
 
     def test_isolated_environment_drops_keys_proxy_and_database(self):
         with patch.dict(os.environ, {"OPENAI_API_KEY": "synthetic", "ANTHROPIC_API_KEY": "synthetic", "DATABASE_URL": "synthetic", "HTTPS_PROXY": "synthetic", "LITELLM_MASTER_KEY": "synthetic"}):

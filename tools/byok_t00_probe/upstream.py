@@ -9,6 +9,8 @@ retained. Credentials and request text are never written to records or stdout.
 import hashlib
 import json
 import re
+import select
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -29,6 +31,29 @@ TEST_ID_PATTERN = re.compile(r"T00_[A-Z0-9_]{3,80}")
 CANCEL_FIXTURE_MAX_SECONDS = 8.0
 CANCEL_FIXTURE_CHUNK_BYTES = 32 * 1024
 CANCEL_FIXTURE_INTERVAL_SECONDS = 0.005
+POST_DONE_PEER_OBSERVE_SECONDS = 4.0
+
+
+def observe_peer_close(connection, timeout):
+    """Return only a direct EOF/reset signal as proof that the peer closed."""
+    if not hasattr(socket, "MSG_DONTWAIT"):
+        return "unsupported"
+    try:
+        readable, _, _ = select.select([connection], [], [], max(0.0, timeout))
+    except (OSError, ValueError):
+        return "socket_error"
+    if not readable:
+        return "timeout"
+    try:
+        payload = connection.recv(1, socket.MSG_PEEK | socket.MSG_DONTWAIT)
+    except ConnectionResetError:
+        return "reset"
+    except BlockingIOError:
+        return "timeout"
+    except OSError:
+        return "socket_error"
+    return "eof" if payload == b"" else "data"
+
 
 # Opaque fixture fields are synthetic continuity markers, not model reasoning.
 CHAT_TOOL_MESSAGES = [
@@ -433,6 +458,10 @@ class Handler(BaseHTTPRequestHandler):
             marker = request.get("test_id")
             with LOCK:
                 event = RELEASE_EVENTS.get(marker)
+                if event is not None and isinstance(marker, str) and "_OPEN_AFTER_DONE_" in marker:
+                    for record in RECORDS:
+                        if record.get("test_id") == marker:
+                            record["post_done_barrier_release_monotonic_ns"] = time.monotonic_ns()
             if event is None:
                 self._json(404, {"released": False})
             else:
@@ -551,6 +580,10 @@ class Handler(BaseHTTPRequestHandler):
             "stream_hold_waiting": False,
             "stream_hold_released": False,
             "post_done_socket_held": False,
+            "post_done_peer_close_state": None,
+            "post_done_peer_observation_monotonic_ns": None,
+            "post_done_peer_observation_complete": False,
+            "post_done_barrier_release_monotonic_ns": None,
             "post_done_probe_write_attempted": False,
             "post_done_probe_write_succeeded": False,
         }
@@ -892,14 +925,30 @@ class Handler(BaseHTTPRequestHandler):
                     release_event = RELEASE_EVENTS.setdefault(
                         record["test_id"], threading.Event(),
                     )
-                # A test-controlled barrier proves the SDK observes [DONE]
-                # without waiting for TCP EOF; no wall-clock SLO is assumed.
+                # Keep the upstream response open while directly observing the
+                # peer's TCP read side. A successful write after FIN is not a
+                # reliable closure signal, so only EOF/reset may prove closure.
+                observe_deadline = time.monotonic() + POST_DONE_PEER_OBSERVE_SECONDS
+                observation_state = None
+                while not release_event.is_set():
+                    observation_state = observe_peer_close(self.connection, timeout=0.05)
+                    if observation_state != "timeout":
+                        break
+                    if time.monotonic() >= observe_deadline:
+                        break
+                if observation_state is None:
+                    observation_state = "released_before_observed"
+                elif observation_state == "timeout" and release_event.is_set():
+                    observation_state = "released_before_observed"
+                with LOCK:
+                    record["post_done_peer_close_state"] = observation_state
+                    record["post_done_peer_observation_monotonic_ns"] = time.monotonic_ns()
+                    record["post_done_peer_observation_complete"] = True
                 if not release_event.wait(timeout=8.0):
                     record["post_done_hold_timed_out"] = True
                 record["post_done_probe_write_attempted"] = True
                 try:
-                    # A comment after [DONE] is not an application frame. It
-                    # detects whether the client closed before fixture release.
+                    # Diagnostic only: TCP can accept a small write after FIN.
                     self.wfile.write(b": post-done close probe\n\n")
                     self.wfile.flush()
                     record["post_done_probe_write_succeeded"] = True
