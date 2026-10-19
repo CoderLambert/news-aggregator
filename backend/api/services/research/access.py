@@ -25,9 +25,10 @@ def _search_article_is_current(user, row, *, id_key='id', require_snippet=True, 
 def result_is_current(user, tool_name, data):
     if not isinstance(data, dict):
         return False
-    if tool_name in ('search_news', 'analyze_topic') and set(data) == {'error'}:
-        # Generic tool errors contain no local article evidence to reauthorize.
-        return isinstance(data['error'], str)
+    if tool_name in ('search_news', 'analyze_topic') and data == {
+            'error': '研究工具暂时不可用，请稍后重试。'}:
+        # execute_tool emits this exact sanitized failure without article evidence.
+        return True
     if tool_name == 'search_news':
         articles = data.get('articles')
         return isinstance(articles, list) and all(
