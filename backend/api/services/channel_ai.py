@@ -8,6 +8,7 @@ from django.conf import settings
 from django.db import transaction
 from django.db.models import F, Q
 from django.utils import timezone
+from rest_framework.exceptions import Throttled
 from api.models import Source, ChannelSubscription
 from api.smart_channel_models import ChannelGroupingProposal, ChannelClassifierSettings, SourceTopicProfile
 from api.services.channel_grouping import credential_fingerprint, lock_user, process_subscription, snapshot
@@ -265,21 +266,31 @@ def enqueue_site_sources(limit=10):
 
 def process_incremental_subscriptions(limit=100):
     count = 0
+    deferred_owners = set()
     candidates = ChannelSubscription.objects.filter(user__channel_grouping_config__mode__in=['suggest', 'auto'],
-        created_at__gte=F('user__channel_grouping_config__active_since')).select_related(
+        created_at__gte=F('user__channel_grouping_config__active_since')).exclude(
+            user__channel_grouping_config__bindings={}).select_related(
             'user', 'source', 'user__channel_grouping_config', 'subscriptiongroupingstate')
     for subscription in candidates.order_by('created_at', 'id').iterator(chunk_size=100):
         if count >= limit:
             break
-        state = getattr(subscription, 'subscriptiongroupingstate', None)
-        if state and state.status in {'applied', 'suggested'}:
+        if subscription.user_id in deferred_owners:
             continue
-        if state and state.status == 'pending':
+        state = getattr(subscription, 'subscriptiongroupingstate', None)
+        if state and state.status == 'applied':
+            continue
+        if state and state.status in {'pending', 'suggested'}:
             cfg = subscription.user.channel_grouping_config
             profile = profile_data(subscription.source)
             signature = digest([profile['evidence_hash'], profile['topics'], profile['origin'], cfg.revision])
             if state.profile_hash == signature:
                 continue
-        process_subscription(subscription.pk)
+        try:
+            process_subscription(subscription.pk)
+        except Throttled:
+            # A single owner's preview budget must not block other users or
+            # prevent the existing worker loop from reaching queued AI work.
+            deferred_owners.add(subscription.user_id)
+            continue
         count += 1
     return count
