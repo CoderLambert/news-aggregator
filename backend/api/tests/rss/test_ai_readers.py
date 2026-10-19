@@ -211,6 +211,59 @@ def test_research_history_replay_denied_after_policy_change(world):
     assert session.search_results.count() == 1
 
 
+def test_research_search_result_replay_is_snapshot_and_policy_bound(world):
+    import json
+    from api.models import ResearchSession, ResearchSearchResult
+    from api.services.research.access import require_session_evidence, result_is_current
+    from api.services.research.tools import _serialize_news_list
+
+    a, _, make = world
+    source, news = make('research-search-snapshot', subscriber=a, state='available')
+
+    def persist(result):
+        session = ResearchSession.objects.create(user=a, messages=[
+            {'role': 'assistant', 'tool_calls': [
+                {'id': 'search-1', 'function': {'name': 'search_news', 'arguments': '{}'}}
+            ]},
+            {'role': 'tool', 'tool_call_id': 'search-1', 'content': json.dumps(result)},
+        ])
+        ResearchSearchResult.objects.create(session=session, tool_name='search_news',
+            result_type='news', result_data=result)
+        return session
+
+    original = {'articles': _serialize_news_list([news], a)}
+    assert original['articles'][0]['source_scope'] == 'full'
+    assert original['articles'][0]['policy_versions']
+    current_session = persist(original)
+    require_session_evidence(current_session, a)
+
+    # The same article remains authorized, but a new revision must invalidate its
+    # previously persisted title/snippet and tool envelope before model replay.
+    news.content = 'revised summary'
+    news.full_content = 'revised body'
+    news.full_content_revision += 1
+    news.save(update_fields=['content', 'full_content', 'full_content_revision'])
+    assert get_stored_article(a, news.pk).scope == 'full'
+    with pytest.raises(Http404):
+        require_session_evidence(current_session, a)
+
+    # Old results without a snapshot cannot be treated as current merely because
+    # their article ID is still authorized.
+    legacy = {'articles': [{'id': news.pk, 'title': news.title,
+        'url': news.url, 'snippet': news.content}]}
+    assert result_is_current(a, 'search_news', legacy) is False
+
+    fresh = {'articles': _serialize_news_list([news], a)}
+    policy_session = persist(fresh)
+    require_session_evidence(policy_session, a)
+
+    # Policy version is part of the read snapshot even when scope and bytes stay
+    # unchanged; changing it invalidates a previously captured search result.
+    SourcePublication.objects.filter(source=source).update(policy_version=2)
+    with pytest.raises(Http404):
+        require_session_evidence(policy_session, a)
+
+
 def test_private_task_poll_hides_progress_after_policy_revocation(world):
     from api.models import ChatGPTTranslationTask
     from api.tests.test_shared_translations import reader
