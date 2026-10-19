@@ -159,7 +159,7 @@ class DurableTranslationJob:
 
 
 def _task_filter(*, user_id=None, connection_id=None, news_id=None, source_digest=None):
-    filters = {}
+    filters = {'connection__isnull': False}
     if user_id is not None:
         filters['user_id'] = user_id
     if connection_id is not None:
@@ -199,7 +199,7 @@ def _expired_running_task(task, now):
 
 def get_task(task_id, *, user_id=None):
     """Read a durable task and reconcile only an expired local lease; never call a provider."""
-    query = ChatGPTTranslationTask.objects.select_related('user', 'connection', 'news').filter(pk=task_id)
+    query = ChatGPTTranslationTask.objects.select_related('user', 'connection', 'news').filter(pk=task_id, connection__isnull=False)
     if user_id is not None:
         query = query.filter(user_id=user_id)
 
@@ -317,7 +317,7 @@ def _authorize_task_source(task):
 
 def _cancel_stale_active_tasks(user_id, news_id, digest, connection, now):
     candidates = ChatGPTTranslationTask.objects.filter(
-        user_id=user_id, news_id=news_id, source_hash=digest,
+        user_id=user_id, news_id=news_id, source_hash=digest, connection__isnull=False,
         status__in=['queued', 'running'],
     ).exclude(
         connection_id=connection.pk,
@@ -689,7 +689,7 @@ def _append_delta(task_id, generation, run_token, delta):
 
 
 @contextmanager
-def _task_heartbeat(task_id, generation, run_token, shared_lease=None):
+def _task_heartbeat(task_id, generation, run_token, shared_lease=None, *, authority_filter=None):
     stopped = threading.Event()
     if shared_lease is not None and not _retry_task_database_operation(
         lambda: shared_lease.current().exists(), stage="shared_lease_check",
@@ -706,9 +706,11 @@ def _task_heartbeat(task_id, generation, run_token, shared_lease=None):
                         updated = ChatGPTTranslationTask.objects.filter(
                             pk=task_id, generation=generation, run_token=run_token,
                             status='running', lease_expires_at__gt=now,
-                            connection__is_active=True,
-                            connection__generation=F('connection_generation'),
-                            connection__selected_model=F('model_slug'), user__is_active=True,
+                            **(authority_filter if authority_filter is not None else {
+                                'connection__is_active': True,
+                                'connection__generation': F('connection_generation'),
+                                'connection__selected_model': F('model_slug'), 'user__is_active': True,
+                            }),
                         ).update(lease_expires_at=now + TASK_LEASE_TTL, updated_at=now)
                         if not updated:
                             return
@@ -904,7 +906,7 @@ def _cancel_task_in_transaction(task_id, user_id, generation):
     with transaction.atomic():
         while True:
             snapshot = ChatGPTTranslationTask.objects.filter(
-                pk=task_id, user_id=user_id,
+                pk=task_id, user_id=user_id, connection__isnull=False,
             ).values(
                 'generation', 'run_token', 'status',
                 'shared_lease_task_id', 'shared_lease_token',

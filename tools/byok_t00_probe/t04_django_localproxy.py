@@ -1,4 +1,4 @@
-"""End-to-end T04 stream proof through Django, OpenAI SDK, pinned Proxy and loopback fixture.
+"""End-to-end T04/T05 proof through Django, OpenAI SDK, pinned Proxy and loopback fixture.
 
 Run only from the full CI gate after prepare_proxy.py; never use a live endpoint
 or credential. The test intentionally uses the exact native DeepSeek alias.
@@ -31,8 +31,10 @@ import upstream  # noqa: E402
 
 from api.ai_connection_models import UserAIConnection  # noqa: E402
 from api.ai_model_models import AIModelProbeAttempt, UserAIModelConfig  # noqa: E402
-from api.models import ArticleChatTurn, Category, ChatSession, News, Source  # noqa: E402
+from api.models import (ArticleChatTurn, Category, ChatSession, News, Source,
+                        ChatGPTArticleTranslation, SharedArticleTranslation)  # noqa: E402
 from api.tests.rss.reader_fixtures import public_legacy_article  # noqa: E402
+from api.services.stored_readers import article_snapshot, require_current  # noqa: E402
 
 ALIAS = "deepseek/deepseek-flash"
 CONNECTIONS = "/api/me/ai/connections/"
@@ -440,6 +442,84 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
             assert [message["role"] for message in session.messages] == ["user"]
             assert AIModelProbeAttempt.objects.count() == probe_receipt_count
             assert _stats(upstream_url)["active_stream_producers"] == 0
+
+            # T05 uses its own durable worker/admission path through this exact
+            # SDK/Proxy process, not the T04 business generator or a fake gateway.
+            def translation_article(marker):
+                article = public_legacy_article(News.objects.create(
+                    title="T05 synthetic article", url="https://publisher.example/" + marker,
+                    source=source, category=category, content="Synthetic summary",
+                    full_content="# Full Markdown\n\n" + marker,
+                    full_content_state="legacy",
+                    publish_time=timezone.now(),
+                ))
+
+                stored = article_snapshot(article, owner)
+                assert stored.scope == "full"
+                assert require_current(owner, stored, full=True).markdown == article.full_content
+                return article
+
+            def wait_translation(task_id):
+                deadline = time.monotonic() + 12
+                while time.monotonic() < deadline:
+                    state = client.get(f"/api/me/ai/translations/{task_id}/")
+                    assert state.status_code == 200, state.content
+                    if state.data["status"] not in {"queued", "running"}:
+                        return state.data
+                    time.sleep(0.03)
+                pytest.fail("T05 synthetic worker did not reach terminal state")
+
+            t05_marker = "T00_T05_E2E_SUCCESS_STREAM_HOLD_A"
+            t05_news = translation_article(t05_marker)
+            request_id = str(uuid.uuid4())
+            start = client.post(f"/api/news/{t05_news.pk}/byok-translation/", {
+                "model_config_id": str(model.pk), "billing_consent": True, "target_language": "zh",
+            }, format="json", HTTP_IDEMPOTENCY_KEY=request_id)
+            assert start.status_code == 202, start.content
+            task_id = start.data["task_id"]
+            held = _wait_record(upstream_url, t05_marker,
+                                lambda row: row.get("stream_hold_waiting") is True)
+            assert not held["upstream_stream_body_finished"]
+            observation = client.get(f"/api/me/ai/translations/{task_id}/events/")
+            first = next(iter(observation.streaming_content))
+            assert b"succeeded" not in first
+            observation.close()  # Only disconnect the observer, not the worker.
+            observed = client.get(f"/api/me/ai/translations/{task_id}/")
+            assert observed.status_code == 200, observed.content
+            assert observed.data["status"] == "running"
+            release = urllib.request.Request(upstream_url + "/test/release",
+                data=json.dumps({"test_id": t05_marker}).encode(),
+                headers={"Content-Type": "application/json"}, method="POST")
+            with OPENER.open(release, timeout=3) as released:
+                assert json.load(released)["released"] is True
+            completed = wait_translation(task_id)
+            assert completed["status"] == "succeeded", completed
+            assert completed["result"]["content"] == "synthetic t00 stream"
+            result_id = completed["result"]["result_id"]
+            assert ChatGPTArticleTranslation.objects.get(pk=result_id).user_id == owner.pk
+            again = client.get(f"/api/news/{t05_news.pk}/byok-translation/")
+            assert again.data["task"]["task_id"] == task_id
+            assert again.data["task"]["result"]["result_id"] == result_id
+            _assert_native_deepseek_request(_records(upstream_url, t05_marker),
+                marker=t05_marker, stream=True, terminal="finish_reason_stop")
+            assert provider_key not in json.dumps(completed)
+            assert proxy.project_keys["tenant-a"] not in json.dumps(completed)
+
+            t05_eof = "T00_T05_E2E_EOF_A"
+            eof_news = translation_article(t05_eof)
+            failed_start = client.post(f"/api/news/{eof_news.pk}/byok-translation/", {
+                "model_config_id": str(model.pk), "billing_consent": True, "target_language": "zh",
+            }, format="json", HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()))
+            assert failed_start.status_code == 202, failed_start.content
+            failed = wait_translation(failed_start.data["task_id"])
+            assert failed["status"] == "failed"
+            assert failed["result"] is None
+            assert not ChatGPTArticleTranslation.objects.filter(news=eof_news).exists()
+            assert not SharedArticleTranslation.objects.filter(news__in=[t05_news, eof_news]).exists()
+            _assert_native_deepseek_request(_records(upstream_url, t05_eof),
+                marker=t05_eof, stream=True, terminal="normal_eof_without_protocol_terminal")
+            assert AIModelProbeAttempt.objects.count() == probe_receipt_count
+
     finally:
         with upstream.LOCK:
             pending_releases = list(upstream.RELEASE_EVENTS.values())
