@@ -234,7 +234,7 @@ def _markdown_signature(markdown):
             fenced.append(line)
             if re.match(r'^ {0,3}' + re.escape(marker_char) + r'{' + str(marker_width) + r',}[ \t]*$', line.rstrip('\r\n')):
                 # Ignore only line endings after the closing fence; code payload stays exact.
-                code.append(''.join(fenced).rstrip('\\r\\n'))
+                code.append(''.join(fenced).rstrip('\r\n'))
                 fenced, marker_char, marker_width = None, None, 0
     if fenced is not None:
         raise TranslationError('incomplete_response')
@@ -558,7 +558,7 @@ def run_translation(task_id, generation):
                     if separator:
                         # Normalize model-added terminal whitespace, then restore
                         # the exact source boundary once in progress and final text.
-                        translated_body = translated_body.rstrip(' \\t\\r\\n')
+                        translated_body = translated_body.rstrip(' \t\r\n')
                     translated_chunk = translated_body + separator
                     if long_translation and _markdown_signature(chunk) != _markdown_signature(translated_chunk):
                         raise TranslationError('incomplete_response')
