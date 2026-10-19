@@ -811,9 +811,19 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        # Reader actions consume stored content; subscription/sync owns collection.
+        # Use the same explicitly owned result as detail/TTS; read resolution never dispatches.
         stored = get_stored_article(request.user, news.pk)
-        context, chat_scope = stored.markdown, stored.scope
+        from api.services.article_content import pick_chat_context
+        from api.services.stored_readers import PrivateTranslationNotFound
+        try:
+            context, translation_context = pick_chat_context(
+                news, request.user, translation_result_id=payload.get('translation_result_id'),
+                stored=stored, with_metadata=True,
+            )
+        except PrivateTranslationNotFound:
+            return Response({'error_code': 'translation_result_unavailable'},
+                            status=status.HTTP_404_NOT_FOUND)
+        chat_scope = stored.scope
         if len(context) > 10000:
             context = context[:10000]
             chat_scope = 'excerpt'
@@ -901,13 +911,19 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
             '只能使用结构化给出的来源 URL 作引用；无证据时明确说明，禁止编造外部链接。'
             '回答使用中文和 Markdown。'
         )
+        if translation_context.get('source') == 'byok' and translation_context.get('current_match') is False:
+            system_content += '用户明确选择了历史个人译文。必须明确说明它与当前原文不匹配，不能声称对应当前版本；应区分当前原文与历史译文。'
         import json as _chat_json
         from api.services.stored_readers import require_current, snapshot_metadata, readable_chat_messages
         article_evidence = {
             **snapshot_metadata(stored),
-            'title': stored.title,
-            'article_url': stored.url,
+            'title': (translation_context.get('source_title') or '')
+                      if translation_context.get('source') == 'byok' and translation_context.get('current_match') is False
+                      else stored.title,
+            'article_url': '' if translation_context.get('source') == 'byok' and translation_context.get('current_match') is False
+                           else stored.url,
             'context_scope': chat_scope,
+            'translation': translation_context,
             'text': context,
             'search_results': web_sources,
         }
@@ -1599,15 +1615,19 @@ class NewsTTSView(ArticleAccessMixin, generics.GenericAPIView):
             language = 'original' if request.query_params.get('displayMode') == 'original' else 'zh'
         voice_pref = request.query_params.get('voice', '')
         scope = request.query_params.get('scope', 'full')
+        translation_result_id = request.query_params.get('translation_result_id')
 
         if scope == 'full' and get_stored_article(request.user, news.pk).scope != 'full':
             return Response({'code': 'source_content_required', 'message': '当前仅可读取摘要。'}, status=409)
 
         try:
-            resolved = resolve_tts_content(news, request.user, language, scope)
+            resolved = resolve_tts_content(
+                news, request.user, language, scope, translation_result_id=translation_result_id,
+            )
         except TTSContentUnavailable as exc:
             response_status = (
-                status.HTTP_409_CONFLICT
+                status.HTTP_404_NOT_FOUND if exc.code == 'translation_result_unavailable'
+                else status.HTTP_409_CONFLICT
                 if exc.code in {'translation_required', 'source_content_required'}
                 else status.HTTP_400_BAD_REQUEST
             )
@@ -1639,7 +1659,9 @@ class NewsTTSView(ArticleAccessMixin, generics.GenericAPIView):
         def speech_guard():
             if resolved.snapshot is not None:
                 require_current(request.user, resolved.snapshot, full=scope == 'full')
-                latest = resolve_tts_content(news, request.user, language, scope)
+                latest = resolve_tts_content(
+                    news, request.user, language, scope, translation_result_id=translation_result_id,
+                )
                 if (latest.namespace, latest.content, latest.title) != (resolved.namespace, resolved.content, resolved.title):
                     from api.services.stored_readers import StoredContentChanged
                     raise StoredContentChanged('朗读译文或连接已变化。')

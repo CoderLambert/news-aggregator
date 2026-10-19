@@ -185,13 +185,13 @@ function snapshotActiveRequest(request: ActiveRequest): PendingTurn {
 }
 
 export function useChat(newsId: string | number | null | undefined, enabled: boolean,
-  modelConfigId: string | null = null, billingConsent = false) {
+  modelConfigId: string | null = null, billingConsent = false, translationResultId: number | null = null) {
   const queryClient = useQueryClient()
   const { user, loading: authLoading } = useAuth()
   const { lang } = useLanguage()
   const parsedId = parseNewsId(newsId)
   const viewerId: ViewerId = user?.id ?? 'anonymous'
-  const ownerKey = `${parsedId ?? String(newsId ?? '')}:${viewerId}:${lang}`
+  const ownerKey = `${parsedId ?? String(newsId ?? '')}:${viewerId}:${lang}:${translationResultId ?? 'current'}`
   const ownerRef = useRef(ownerKey)
   const ownerEpochRef = useRef(0)
   const automaticReconciliationRef = useRef('')
@@ -461,6 +461,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
         for await (const chunk of chatStream(parsedId, trimmed, {
           webSearch, ...(selectedForTurn ? { modelConfigId: selectedForTurn, billingConsent,
             turnId: serverTurnId ?? undefined } : {}),
+          ...(translationResultId !== null ? { translationResultId } : {}),
           signal: request.controller.signal,
         })) {
           if (!isCurrent()) return false
@@ -549,7 +550,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
         if (isCurrent()) requestRef.current = null
       }
     })()
-  }, [authLoading, billingConsent, clearState, currentWebSearch, enabled, historyKey, isLoading, modelConfigId, ownerKey, parsedId, pendingTurnState, queryClient, reconcileInterruptedTurn, setInput, setPendingTurn, updatePendingTurn, updatePhase])
+  }, [authLoading, billingConsent, clearState, currentWebSearch, enabled, historyKey, isLoading, modelConfigId, ownerKey, parsedId, pendingTurnState, queryClient, reconcileInterruptedTurn, setInput, setPendingTurn, updatePendingTurn, updatePhase, translationResultId])
 
   const doSend = useCallback((text: string): Promise<boolean> => sendMessage(text), [sendMessage])
   const handleSend = useCallback(() => doSend(inputRef.current), [doSend])

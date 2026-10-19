@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import NewsChatAssistant from '@/components/NewsChatAssistant'
+import { useChat } from '@/hooks/useChat'
 
 const chatState = vi.hoisted(() => ({ stopWaiting: vi.fn() }))
 
@@ -92,4 +93,9 @@ describe('NewsChatAssistant open state', () => {
     expect(onOpenChange).toHaveBeenCalledWith(true)
     expect(screen.queryByRole('dialog', { name: 'AI 助手小闻' })).not.toBeInTheDocument()
   })
+  it('binds chat sends to the explicitly selected private translation result', () => {
+    render(<NewsChatAssistant newsId={21} open onOpenChange={vi.fn()} translationResultId={88} />)
+    expect(vi.mocked(useChat)).toHaveBeenLastCalledWith(21, true, null, false, 88)
+  })
+
 })

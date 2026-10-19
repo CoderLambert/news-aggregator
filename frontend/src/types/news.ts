@@ -94,6 +94,18 @@ export function hasPendingFullContentTask(news: Partial<NewsSummary>): boolean {
 }
 
 
+export interface PrivateTranslationHistoryItem {
+  result_id: number
+  task_id: string
+  content: string
+  model: string
+  source_hash: string
+  current_match: boolean
+  source_title: string
+  source_revision: number | null
+  completed_at: string
+}
+
 export interface NewsDetail extends NewsSummary {
   content: string
   content_zh: string
@@ -104,6 +116,11 @@ export interface NewsDetail extends NewsSummary {
   full_content_zh_fetched_at: string | null
   full_content_zh_source: string | null
   full_content_zh_scope?: string | null
+  full_content_zh_result_id?: number | null
+  full_content_zh_task_id?: string | null
+  full_content_zh_model?: string | null
+  full_content_zh_current_match?: boolean | null
+  full_content_zh_private_history?: PrivateTranslationHistoryItem[]
   full_translation_personal_available?: boolean
   full_translation_active: boolean
 }
@@ -232,6 +249,22 @@ export function parseNewsDetail(value: unknown): NewsDetail {
     full_content_zh_fetched_at: nullableDate('full_content_zh_fetched_at'),
     full_content_zh_source: typeof value.full_content_zh_source === 'string' ? value.full_content_zh_source : null,
     full_content_zh_scope: typeof value.full_content_zh_scope === 'string' ? value.full_content_zh_scope : null,
+    full_content_zh_result_id: typeof value.full_content_zh_result_id === 'number' ? value.full_content_zh_result_id : null,
+    full_content_zh_task_id: typeof value.full_content_zh_task_id === 'string' ? value.full_content_zh_task_id : null,
+    full_content_zh_model: typeof value.full_content_zh_model === 'string' ? value.full_content_zh_model : null,
+    full_content_zh_current_match: typeof value.full_content_zh_current_match === 'boolean' ? value.full_content_zh_current_match : null,
+    full_content_zh_private_history: Array.isArray(value.full_content_zh_private_history) ? value.full_content_zh_private_history.flatMap((item) => {
+      if (!isRecord(item) || typeof item.result_id !== 'number' || !Number.isInteger(item.result_id) ||
+        typeof item.task_id !== 'string' || typeof item.content !== 'string' || typeof item.model !== 'string' ||
+        typeof item.source_hash !== 'string' || typeof item.current_match !== 'boolean') return []
+      return [{
+        result_id: item.result_id, task_id: item.task_id, content: item.content, model: item.model,
+        source_hash: item.source_hash, current_match: item.current_match,
+        source_title: typeof item.source_title === 'string' ? item.source_title : '',
+        source_revision: typeof item.source_revision === 'number' ? item.source_revision : null,
+        completed_at: typeof item.completed_at === 'string' ? item.completed_at : '',
+      }]
+    }) : [],
     full_translation_personal_available: value.full_translation_personal_available === true,
     full_translation_active: typeof value.full_translation_active === 'boolean' ? value.full_translation_active : false,
   }

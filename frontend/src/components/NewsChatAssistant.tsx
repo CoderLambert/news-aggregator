@@ -26,6 +26,7 @@ interface NewsChatAssistantProps {
   newsId: string | number
   open?: boolean
   onOpenChange?: (open: boolean) => void
+  translationResultId?: number | null
   articleContext?: {
     hasFullContent?: boolean
     wordCount?: number
@@ -36,7 +37,7 @@ interface NewsChatAssistantProps {
   }
 }
 
-export default function NewsChatAssistant({ newsId, open, onOpenChange, articleContext }: NewsChatAssistantProps) {
+export default function NewsChatAssistant({ newsId, open, onOpenChange, translationResultId, articleContext }: NewsChatAssistantProps) {
   const { user } = useAuth()
   // Never let a previous viewer's selected billable model cross account changes.
   const [selection, setSelection] = useState<{ viewer: number; modelId: string | null; consent: boolean } | null>(null)
@@ -61,7 +62,7 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, articleC
     confirmingClear, isClearing, clearError, requestClearChat, cancelClear, confirmClear,
     uncertainTurn, checkPendingTurn, resendUncertainTurn,
     webSearch, toggleWebSearch,
-  } = useChat(newsId, isOpen, selectedModelId, modelConsent)
+  } = useChat(newsId, isOpen, selectedModelId, modelConsent, translationResultId)
   const { scrollRef: chatScrollRef, onScroll: onChatScroll, onWheel: onChatWheel } = useChatScroll(messages, phase, isOpen)
   const submitChatTurn = (send: () => Promise<boolean>) => {
     // Consume the opt-in once for this explicit billable attempt; a later

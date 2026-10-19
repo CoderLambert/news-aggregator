@@ -67,6 +67,8 @@ function PlayerActions() {
     <div>
       <button type="button" onClick={() => player.speak(11, '第一篇虚构新闻', { language: 'zh' })}>朗读第一篇</button>
       <button type="button" onClick={() => player.speak(12, '第二篇虚构新闻', { language: 'original' })}>朗读第二篇</button>
+      <button type="button" onClick={() => player.speak(11, '译文版本 A', { language: 'zh', scope: 'full', translationResultId: 41 })}>朗读译文 A</button>
+      <button type="button" onClick={() => player.speak(11, '译文版本 B', { language: 'zh', scope: 'full', translationResultId: 42 })}>朗读译文 B</button>
       <button type="button" onClick={player.stop}>停止播放器</button>
       <output data-testid="player-status">{state.status}</output>
     </div>
@@ -195,4 +197,17 @@ describe('global speech player', () => {
 
     expect(screen.getByTestId('player-status')).toHaveTextContent('idle')
   })
+  it('keeps explicit saved result identity when replaying and switching versions', async () => {
+    const user = userEvent.setup()
+    renderPlayer()
+    await user.click(screen.getByRole('button', { name: '朗读译文 A' }))
+    expect(audioInstances.at(-1).src).toContain('translation_result_id=41')
+    await user.click(screen.getByRole('button', { name: '展开语音设置' }))
+    await user.click(screen.getByRole('button', { name: /晓晓亲切女声/ }))
+    expect(audioInstances.at(-1).src).toContain('translation_result_id=41')
+    await user.click(screen.getByRole('button', { name: '朗读译文 B' }))
+    expect(audioInstances.at(-1).src).toContain('translation_result_id=42')
+    expect(audioInstances.at(-1).src).not.toContain('translation_result_id=41')
+  })
+
 })

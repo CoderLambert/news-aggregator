@@ -147,6 +147,7 @@ interface ChatStreamOptions {
   modelConfigId?: string | null
   billingConsent?: boolean
   turnId?: string
+  translationResultId?: number | null
   signal?: AbortSignal
 }
 
@@ -366,10 +367,12 @@ export async function* translateFullArticleStream(
 export async function* chatStream(
   newsId: NewsId,
   question: string,
-  { webSearch = false, modelConfigId, billingConsent = false, turnId, signal }: ChatStreamOptions = {},
+  { webSearch = false, modelConfigId, billingConsent = false, turnId, translationResultId, signal }: ChatStreamOptions = {},
 ): AsyncGenerator<string> {
   const response = await streamingFetch(`/api/news/${newsId}/chat/`, {
     body: JSON.stringify({ question, web_search: webSearch,
+      ...(translationResultId !== undefined && translationResultId !== null
+        ? { translation_result_id: translationResultId } : {}),
       ...(modelConfigId ? { model_config_id: modelConfigId, billing_consent: billingConsent === true,
         turn_id: turnId } : {}) }),
     signal,

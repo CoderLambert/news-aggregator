@@ -22,6 +22,7 @@ interface ActiveArticle {
   title: string
   language: SpeechLanguage
   scope: SpeechScope
+  translationResultId?: number | null
 }
 
 type SpeechOptions = SpeechRequestOptions
@@ -52,8 +53,8 @@ function persist(key: string, value: string): void {
   }
 }
 
-function positionKey(article: Pick<ActiveArticle, 'id' | 'language' | 'scope'>): string {
-  return `${POSITION_KEY_PREFIX}${article.id}_${article.language}_${article.scope}`
+function positionKey(article: Pick<ActiveArticle, 'id' | 'language' | 'scope' | 'translationResultId'>): string {
+  return `${POSITION_KEY_PREFIX}${article.id}_${article.language}_${article.scope}_result_${article.translationResultId ?? 'current'}`
 }
 
 export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
@@ -194,7 +195,9 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
       scope: overrides.scope ?? scope,
       language: selectedLanguage,
     }
-    const article = { id, title: articleTitle, language: selected.language, scope: selected.scope }
+    const translationResultId = selected.language === 'zh' && selected.scope === 'full'
+      ? overrides.translationResultId ?? null : null
+    const article = { id, title: articleTitle, language: selected.language, scope: selected.scope, translationResultId }
     const audio = new Audio()
     audioRef.current = audio
     activeArticleRef.current = article
@@ -265,6 +268,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     }
 
     const query = new URLSearchParams({ language: selected.language, voice: selected.voice, scope: selected.scope })
+    if (translationResultId !== null) query.set('translation_result_id', String(translationResultId))
     audio.src = `/api/news/${id}/tts/?${query.toString()}`
     updateMediaSession(articleTitle, audio, requestId)
     audio.load()
@@ -301,7 +305,8 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     const article = activeArticleRef.current
     const currentStatus = statusRef.current
     if (article && (currentStatus === 'playing' || currentStatus === 'paused')) {
-      speak(article.id, article.title, { ...override, language: article.language })
+      speak(article.id, article.title, { ...override, language: article.language,
+        translationResultId: article.translationResultId })
     }
   }, [speak])
 

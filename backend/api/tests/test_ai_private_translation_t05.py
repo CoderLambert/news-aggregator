@@ -29,6 +29,8 @@ class PrivateTranslationTests(TransactionTestCase):
 
     def setUp(self):
         fixtures.PersonalArticleChatTests.setUp(self)
+        self.news.source.language = 'en'
+        self.news.source.save(update_fields=['language'])
         self.news.full_content = '# Synthetic article\n\nFull original Markdown for private translation.'
         self.news.full_content_state = 'legacy'
         self.news.save(update_fields=['full_content', 'full_content_state'])
@@ -60,6 +62,17 @@ class PrivateTranslationTests(TransactionTestCase):
             gateway.admitted_keys = [call.args[0] for call in build.call_args_list]
         task.refresh_from_db()
         return gateway
+
+    def complete_synthetic_private(self, content, request_id=None):
+        request_id = request_id or str(uuid.uuid4())
+        with patch.object(service, '_dispatch') as dispatch:
+            response = self.start(request_id=request_id)
+        self.assertEqual(response.status_code, 202, response.content)
+        dispatch.assert_called_once()
+        task = ChatGPTTranslationTask.objects.get(pk=response.data['task_id'])
+        self.execute(task, [gateway_frame(content)])
+        self.assertEqual(task.status, 'succeeded')
+        return task
 
     def test_complete_commit_and_get_reopen_same_private_result_without_dispatch(self):
         task = self.queued()
@@ -1351,3 +1364,287 @@ class PrivateTranslationTests(TransactionTestCase):
             self.assertEqual(response.status_code, 409, response.content)
             dispatch.assert_not_called()
             self.assertFalse(ChatGPTTranslationTask.objects.exists())
+
+
+    def test_t08_owner_detail_chat_and_tts_read_same_private_result_without_dispatch(self):
+        task = self.complete_synthetic_private('合成私有译文：只属于当前用户。')
+        result_id = task.result['result_id']
+        from api.services import article_content, tts_service
+        stored = service.article_snapshot(self.news, self.owner)
+        with patch.object(service, '_dispatch') as dispatch, patch.object(service, 'build_gateway_client') as build:
+            detail = self.client.get(f'/api/news/{self.news.pk}/')
+            self.assertEqual(detail.status_code, 200, detail.content)
+            matching = [item for item in detail.data['full_content_zh_private_history']
+                        if item['result_id'] == result_id]
+            self.assertEqual(len(matching), 1)
+            self.assertEqual(matching[0]['content'], task.result['content'])
+            self.assertEqual(detail.data['full_content_zh_result_id'], result_id)
+            text, metadata = article_content.pick_chat_context(
+                self.news, self.owner, translation_result_id=result_id,
+                stored=stored, with_metadata=True,
+            )
+            self.assertEqual(text, task.result['content'])
+            self.assertEqual(metadata['result_id'], result_id)
+            resolved = tts_service.resolve_tts_content(
+                self.news, self.owner, 'zh', 'full', translation_result_id=result_id,
+            )
+            self.assertEqual(resolved.content, task.result['content'])
+            self.assertIn(f':result:{result_id}:task:{task.pk}', resolved.namespace)
+
+            chat_call = {}
+            def fake_complete(**kwargs):
+                chat_call.update(kwargs)
+                yield {'type': 'delta', 'content': 'synthetic chat response'}
+                yield {'type': 'complete', 'model_source': 'synthetic'}
+            with patch('api.services.ai_article_chat.complete_article_chat', side_effect=fake_complete):
+                chat_response = self.client.post(f'/api/news/{self.news.pk}/chat/', {
+                    'question': '请解释个人译文', 'translation_result_id': result_id,
+                    'model_config_id': str(self.model.pk), 'billing_consent': True,
+                    'turn_id': str(uuid.uuid4()),
+                }, format='json')
+                self.assertEqual(chat_response.status_code, 200, chat_response.content)
+                chat_wire = b''.join(chat_response.streaming_content)
+            self.assertIn(b'synthetic chat response', chat_wire)
+            import json
+            evidence = json.loads(chat_call['messages'][1]['content'].split('\n', 1)[1])
+            self.assertEqual(evidence['text'], task.result['content'])
+            self.assertEqual(evidence['translation']['result_id'], result_id)
+        dispatch.assert_not_called()
+        build.assert_not_called()
+
+        other = APIClient()
+        other.force_login(self.other)
+        other_detail = other.get(f'/api/news/{self.news.pk}/')
+        self.assertEqual(other_detail.status_code, 200, other_detail.content)
+        self.assertEqual(other_detail.data['full_content_zh_private_history'], [])
+        response = other.get(
+            f'/api/news/{self.news.pk}/tts/?language=zh&scope=full&translation_result_id={result_id}',
+        )
+        self.assertEqual(response.status_code, 404, response.content)
+        with self.assertRaises(tts_service.TTSContentUnavailable):
+            tts_service.resolve_tts_content(
+                self.news, self.other, 'zh', 'full', translation_result_id=result_id,
+            )
+
+    def test_t08_current_subscription_result_remains_a_private_fallback_without_byok_dispatch(self):
+        from api.services import tts_service
+        stored = service.article_snapshot(self.news, self.owner)
+        subscription = ChatGPTSubscriptionConnection.objects.create(
+            user=self.owner, subject_hash='t08-subject', issuer='synthetic',
+            issued_client_id='t08-client', registration_key_hash='t08-registration',
+            generation=1, selected_model='subscription-model', is_active=True,
+        )
+        subscription_result = ChatGPTArticleTranslation.objects.create(
+            user=self.owner, connection=subscription, api_connection=None, news=self.news,
+            source_hash=stored.canonical_hash, model_slug='subscription-model',
+            content='当前订阅译文。', completed_at=timezone.now(),
+        )
+        with patch.object(service, '_dispatch') as dispatch, patch.object(service, 'build_gateway_client') as build:
+            detail = self.client.get(f'/api/news/{self.news.pk}/')
+            self.assertEqual(detail.status_code, 200, detail.content)
+            self.assertEqual(detail.data['full_content_zh'], subscription_result.content)
+            self.assertEqual(detail.data['full_content_zh_scope'], 'private')
+            self.assertEqual(detail.data['full_content_zh_source'], 'chatgpt')
+            tts_result = tts_service.resolve_tts_content(self.news, self.owner, 'zh', 'full')
+            self.assertEqual(tts_result.content, subscription_result.content)
+        dispatch.assert_not_called()
+        build.assert_not_called()
+
+    def test_t08_two_users_same_article_keep_private_text_and_audio_cache_isolated(self):
+        owner_task = self.complete_synthetic_private('A 用户专属译文。')
+        owner_result_id = owner_task.result['result_id']
+
+        from api.ai_connection_models import UserAIConnection
+        from api.ai_model_models import AIModelProbeAttempt, UserAIModelConfig
+        from api.services.ai_model_registry import get_trusted_preset
+        other = APIClient()
+        other.force_login(self.other)
+        connection_response = other.post('/api/me/ai/connections/', {
+            'provider_id': 'deepseek', 'endpoint_profile': 'deepseek_default',
+            'display_name': 'Other synthetic connection', 'api_key': fixtures.KEY + '-other',
+            'request_id': str(uuid.uuid4()),
+        }, format='json')
+        self.assertEqual(connection_response.status_code, 201, connection_response.content)
+        other_connection = UserAIConnection.objects.get(pk=connection_response.data['id'])
+        model_response = other.post(
+            f'/api/me/ai/connections/{other_connection.pk}/models/',
+            {'model_id': 'deepseek-flash'}, format='json',
+        )
+        self.assertEqual(model_response.status_code, 201, model_response.content)
+        other_model = UserAIModelConfig.objects.get(pk=model_response.data['id'])
+        preset = get_trusted_preset(other_connection, other_model.model_id)
+        self.assertIsNotNone(preset)
+        attempt_id = uuid.uuid4()
+        AIModelProbeAttempt.objects.create(
+            id=attempt_id, request_id=uuid.uuid4(), user=self.other,
+            connection=other_connection, model_config=other_model,
+            model_id=other_model.model_id, model_revision=other_model.config_revision,
+            probe_kind='text', status='succeeded',
+            credential_epoch=other_connection.credential_epoch,
+            credential_version=other_connection.credential_version,
+            endpoint_profile=other_connection.endpoint_profile,
+            endpoint_profile_version=other_connection.endpoint_profile_version,
+            proxy_alias=preset['proxy_alias'],
+        )
+        other_model.last_text_attempt = attempt_id
+        other_model.capability_results = {'text': {
+            'attempt_id': str(attempt_id), 'status': 'supported',
+            'config_revision': other_model.config_revision,
+            'credential_epoch': other_connection.credential_epoch,
+            'credential_version': other_connection.credential_version,
+            'endpoint_profile': other_connection.endpoint_profile,
+            'endpoint_profile_version': other_connection.endpoint_profile_version,
+        }}
+        other_model.save(update_fields=['last_text_attempt', 'capability_results'])
+
+        other_request_id = str(uuid.uuid4())
+        with patch.object(service, '_dispatch') as dispatch:
+            admitted = other.post(f'/api/news/{self.news.pk}/byok-translation/', {
+                'model_config_id': str(other_model.pk), 'billing_consent': True,
+                'target_language': 'zh',
+            }, format='json', HTTP_IDEMPOTENCY_KEY=other_request_id)
+        self.assertEqual(admitted.status_code, 202, admitted.content)
+        dispatch.assert_called_once()
+        other_task = ChatGPTTranslationTask.objects.get(pk=admitted.data['task_id'])
+        self.execute(other_task, [gateway_frame('B 用户专属译文。')])
+        other_result_id = other_task.result['result_id']
+
+        owner_detail = self.client.get(f'/api/news/{self.news.pk}/')
+        other_detail = other.get(f'/api/news/{self.news.pk}/')
+        self.assertEqual(owner_detail.data['full_content_zh_private_history'][0]['result_id'], owner_result_id)
+        self.assertEqual(owner_detail.data['full_content_zh_private_history'][0]['content'], 'A 用户专属译文。')
+        self.assertEqual(other_detail.data['full_content_zh_private_history'][0]['result_id'], other_result_id)
+        self.assertEqual(other_detail.data['full_content_zh_private_history'][0]['content'], 'B 用户专属译文。')
+
+        from api.services import tts_service
+        owner_tts = tts_service.resolve_tts_content(
+            self.news, self.owner, 'zh', 'full', translation_result_id=owner_result_id,
+        )
+        other_tts = tts_service.resolve_tts_content(
+            self.news, self.other, 'zh', 'full', translation_result_id=other_result_id,
+        )
+        self.assertNotEqual(owner_tts.namespace, other_tts.namespace)
+        same_speech_text = 'identical synthetic audio transcript'
+        owner_variant = tts_service.build_cache_variant(owner_tts, 'full', 'yunyang', same_speech_text)
+        other_variant = tts_service.build_cache_variant(other_tts, 'full', 'yunyang', same_speech_text)
+        self.assertNotEqual(owner_variant, other_variant)
+        with self.assertRaises(tts_service.TTSContentUnavailable):
+            tts_service.resolve_tts_content(
+                self.news, self.owner, 'zh', 'full', translation_result_id=other_result_id,
+            )
+
+    def test_t08_stale_saved_result_remains_explicit_and_current_fallback_is_not_overridden(self):
+        old = self.complete_synthetic_private('旧版本的个人译文。')
+        old_id = old.result['result_id']
+        old_title = self.news.title
+        self.news.title = 'Updated synthetic title'
+        self.news.full_content = '# Updated synthetic article\n\nA newer source body.'
+        self.news.full_content_state = 'legacy'
+        self.news.save(update_fields=['title', 'full_content', 'full_content_state'])
+        from api.services import article_content, tts_service
+        from api.services.shared_translations import cache_key
+        from api.models import SharedArticleTranslation
+        current = service.article_snapshot(self.news, self.owner)
+        SharedArticleTranslation.objects.create(
+            **cache_key(self.news.pk, current.canonical_hash),
+            content='当前版本共享译文。', provider='synthetic', model_slug='synthetic-model',
+            completed_at=timezone.now(),
+        )
+        detail_with_shared = self.client.get(f'/api/news/{self.news.pk}/')
+        self.assertEqual(detail_with_shared.status_code, 200, detail_with_shared.content)
+        self.assertEqual(detail_with_shared.data['full_content_zh'], '当前版本共享译文。')
+        self.assertEqual(detail_with_shared.data['full_content_zh_scope'], 'shared')
+        self.assertIn(old_id, [item['result_id'] for item in detail_with_shared.data['full_content_zh_private_history']])
+        default_tts = tts_service.resolve_tts_content(self.news, self.owner, 'zh', 'full')
+        self.assertEqual(default_tts.content, '当前版本共享译文。')
+
+        new = self.complete_synthetic_private('当前版本的个人译文。', request_id=str(uuid.uuid4()))
+        detail = self.client.get(f'/api/news/{self.news.pk}/')
+        self.assertEqual(detail.status_code, 200, detail.content)
+        self.assertEqual(detail.data['full_content_zh'], '当前版本的个人译文。')
+        history = {item['result_id']: item for item in detail.data['full_content_zh_private_history']}
+        self.assertIn(old_id, history)
+        self.assertFalse(history[old_id]['current_match'])
+        self.assertEqual(history[old_id]['source_title'], old_title)
+        self.assertTrue(history[new.result['result_id']]['current_match'])
+        text, metadata = article_content.pick_chat_context(
+            self.news, self.owner, translation_result_id=old_id, stored=current, with_metadata=True,
+        )
+        self.assertEqual(text, old.result['content'])
+        self.assertFalse(metadata['current_match'])
+        self.assertEqual(metadata['source_title'], old_title)
+
+        chat_call = {}
+        def fake_complete(**kwargs):
+            chat_call.update(kwargs)
+            yield {'type': 'delta', 'content': 'synthetic stale chat response'}
+            yield {'type': 'complete', 'model_source': 'synthetic'}
+        with patch('api.services.ai_article_chat.complete_article_chat', side_effect=fake_complete):
+            chat_response = self.client.post(f'/api/news/{self.news.pk}/chat/', {
+                'question': '请说明历史版本', 'translation_result_id': old_id,
+                'model_config_id': str(self.model.pk), 'billing_consent': True,
+                'turn_id': str(uuid.uuid4()),
+            }, format='json')
+            self.assertEqual(chat_response.status_code, 200, chat_response.content)
+            b''.join(chat_response.streaming_content)
+        import json
+        evidence = json.loads(chat_call['messages'][1]['content'].split('\n', 1)[1])
+        self.assertEqual(evidence['text'], old.result['content'])
+        self.assertEqual(evidence['title'], old_title)
+        self.assertEqual(evidence['article_url'], '')
+        self.assertFalse(evidence['translation']['current_match'])
+
+        old_tts = tts_service.resolve_tts_content(
+            self.news, self.owner, 'zh', 'full', translation_result_id=old_id,
+        )
+        new_tts = tts_service.resolve_tts_content(
+            self.news, self.owner, 'zh', 'full', translation_result_id=new.result['result_id'],
+        )
+        self.assertEqual(old_tts.content, old.result['content'])
+        self.assertEqual(old_tts.title, old_title)
+        self.assertNotEqual(old_tts.namespace, new_tts.namespace)
+        self.assertEqual(tts_service.resolve_tts_content(
+            self.news, self.owner, 'zh', 'full',
+        ).content, new.result['content'])
+
+    def test_t08_soft_deleted_key_keeps_own_history_readable_and_invalid_chat_selection_fails_closed(self):
+        task = self.complete_synthetic_private('软删除后仍可读取的历史译文。')
+        result_id = task.result['result_id']
+        from api.services import article_content, tts_service
+        from api.services.stored_readers import PrivateTranslationNotFound
+
+        # An unknown explicit selection is a hard error, never a current/shared fallback.
+        invalid_chat = self.client.post(f'/api/news/{self.news.pk}/chat/', {
+            'question': '请解释这段译文', 'translation_result_id': result_id + 999,
+            'model_config_id': str(self.model.pk), 'billing_consent': True,
+            'turn_id': str(uuid.uuid4()),
+        }, format='json')
+        self.assertEqual(invalid_chat.status_code, 404, invalid_chat.content)
+
+        self.connection.is_deleted = True
+        self.connection.is_enabled = False
+        self.connection.deleted_at = timezone.now()
+        self.connection.credential_ciphertext = ''
+        self.connection.credential_epoch += 1
+        self.connection.revision += 1
+        self.connection.save(update_fields=[
+            'is_deleted', 'is_enabled', 'deleted_at', 'credential_ciphertext',
+            'credential_epoch', 'revision',
+        ])
+        with patch.object(service, '_dispatch') as dispatch, patch.object(service, 'build_gateway_client') as build:
+            detail = self.client.get(f'/api/news/{self.news.pk}/')
+            self.assertEqual(detail.status_code, 200, detail.content)
+            self.assertIn(result_id, [item['result_id'] for item in detail.data['full_content_zh_private_history']])
+            self.assertEqual(article_content.pick_chat_context(
+                self.news, self.owner, translation_result_id=result_id,
+            ), task.result['content'])
+            self.assertEqual(tts_service.resolve_tts_content(
+                self.news, self.owner, 'zh', 'full', translation_result_id=result_id,
+            ).content, task.result['content'])
+            with self.assertRaises(PrivateTranslationNotFound):
+                article_content.pick_chat_context(
+                    self.news, self.owner, translation_result_id=result_id + 999,
+                )
+        dispatch.assert_not_called()
+        build.assert_not_called()
+

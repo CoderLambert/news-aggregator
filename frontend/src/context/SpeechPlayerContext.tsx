@@ -39,6 +39,7 @@ export interface SpeechRequestOptions {
   rate: PlaybackRate
   voice: VoiceKey
   scope: SpeechScope
+  translationResultId?: number | null
 }
 
 export type SpeechPlayerContextValue = SpeechPlayerState & SpeechPlayerActions & SpeechPlayerCapabilities
