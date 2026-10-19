@@ -45,3 +45,14 @@ T14-A1：available/unknown 正文被允许消费，scope/revision/hash/completen
 未运行全仓、浏览器、真实 AI/TTS/搜索外部服务或部署；T27 仍需真实阅读/AI 组合验收。流式授权检查增加短数据库读取，长研究会话还需在最终容量测试中观察性能。现有明确 legacy fetch-full 过渡入口保留，由 T25 fence 约束；T31 才整体删除旧栈。
 
 恢复可 revert 本任务应用提交；保留新增译文历史与 0058/0059 schema，不自动逆迁移或恢复数据库。未执行生产操作、main 合并、强推或数据清理。
+
+
+## 2026-10-20 阅读上下文差额
+
+基线 main `ea44ba9`。以上旧后端专项证据保留为历史，不当作本轮后端测试结果。现有 access/stored_readers/shared translation/research/TTS 的授权、scope、hash 与原 C04/C05/C10 接线已源码复核，没有重建后端或重复实现旧 Provider。
+
+本轮首先用当前页面复现：文章 A 翻译等待期间切到已有译文的 B，speak(22, ...) 被错误调用；修复后 route/viewer/source revision/body/权限状态/开关变更、卸载及个人结果选择均撤销旧等待，原 Promise 不能消费新等待。正常同文章缓存与完成通知同时到达仍只朗读一次。
+
+另外复现：历史个人译文显示“旧版本个人中文”，clipboard 却收到“当前推荐中文”。复制工具栏现直接复用正文已选内容。新生成的私有/共享译文不再继承原文 legacy 修复标记；明确旧原文或旧绑定译文仍兼容。
+
+两个缺陷均有失败→通过证据。typecheck、页面/个人译文定向 13 个用例按变更最终通过、生产 build、diff 检查 PASS。没有后端/API/迁移改动，未重复运行本地缺少依赖的 DB 测试或全量 CI；本轮按用户授权集中验证并直接合并。真实 Provider、语音、RSS 与浏览器联合产品验收仍 NOT_RUN，不声明 T27/生产通过。

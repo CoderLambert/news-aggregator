@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import FullContentSection from '@/components/news-detail/FullContentSection'
 import type { NewsDetail } from '@/types/news'
@@ -43,4 +43,19 @@ describe('saved private translation reader selection', () => {
     expect(screen.getByRole('status')).toHaveTextContent('旧版标题')
     expect(screen.getByRole('combobox', { name: '选择已保存的个人译文' })).toHaveValue('42')
   })
+})
+
+
+it('copies the selected saved translation instead of the current recommendation', async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+  const writeText = vi.fn().mockResolvedValue(undefined)
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+  try {
+    render(<FullContentSection {...props(42, vi.fn())} />)
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '复制全文' })))
+    expect(writeText).toHaveBeenCalledWith('旧版本个人中文')
+  } finally {
+    if (previous) Object.defineProperty(navigator, 'clipboard', previous)
+    else Reflect.deleteProperty(navigator, 'clipboard')
+  }
 })
