@@ -537,7 +537,7 @@ class PrivateTranslationTests(TransactionTestCase):
             service.run_translation(task.pk, task.generation)
         task.refresh_from_db()
         self.assertEqual(task.status, 'failed')
-        self.assertTrue(task.progress)
+        self.assertEqual(task.progress, 'translated first\n\n')
         self.assertIsNone(task.result)
         self.assertEqual(build.call_count, 2)
         self.assertEqual(len(first.sent), 1)
@@ -562,6 +562,26 @@ class PrivateTranslationTests(TransactionTestCase):
         self.assertEqual(mismatch.status_code, 409, mismatch.content)
         dispatch.assert_not_called()
         self.assertFalse(ChatGPTTranslationTask.objects.exists())
+
+    def test_t06_final_fence_allows_provider_closing_line_ending(self):
+        self.news.full_content = 'A' * 5000 + '\n\n' + 'B' * 4000 + '\n\n' + '```py\nprint(1)\n```'
+        self.news.full_content_state = 'legacy'
+        self.news.save(update_fields=['full_content', 'full_content_state'])
+        task = self.queued()
+        chunks = service._task_chunks(task.execution_snapshot)
+        self.assertGreater(len(chunks), 1)
+        prepared = [service._split_trailing_separator(chunk) for chunk in chunks]
+        self.assertEqual(prepared[-1][1], '')
+        gateways = []
+        for index, (body, _) in enumerate(prepared):
+            output = body + ('\n' if index == len(prepared) - 1 else '')
+            gateways.append(FakeGateway([gateway_frame(output)]))
+        with patch.object(service, 'build_gateway_client', side_effect=gateways):
+            service.run_translation(task.pk, task.generation)
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'succeeded')
+        self.assertTrue(task.result['content'].endswith('```\n'))
+        self.assertIn('print(1)', task.result['content'])
 
     def test_t06_unknown_context_and_guard_drift_reject_before_dispatch(self):
         self.news.full_content = 'A' * 5000 + '\n\n' + 'B' * 5000
