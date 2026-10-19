@@ -1,5 +1,7 @@
 # NewsHub 现行开发任务与合同索引
 
+> 2026-10-20 当前验收：远程 main `6a2cc025c338ef0308024151be4fbd796f7f3a39`；完整后端 2686 PASS / 16 SKIP、前端 730 PASS、T00 241/241、固定 Proxy 与 SDK 联合流程、隔离 G1/G2 和移动视口功能已验证，范围与历史失败见[集中记录](../verification/consolidated-acceptance-2026-10-20.md)。下文各批次 NOT_RUN 属于相应历史快照，不能覆盖最新证据。T31 已在 [Draft PR #154](https://github.com/CoderLambert/news-aggregator/pull/154) 隔离候选分支开发，真实 T30 门禁前不合并；正式 CI、生产、其他真实凭据与人工签署仍未完成，见[剩余确认清单](../verification/OWNER-ACCEPTANCE-2026-10-20.md)。
+
 > **更新于 2026-10-20**；历史全量门禁通过基线记录（非当前 main 的验收）：`main@27c5b6b2b9bf22f95c99e9b5602296236e2486d1`（[PR #131 全量 CI #39207985870](https://github.com/CoderLambert/news-aggregator/actions/runs/39207985870) 与 [main Push CI #39208921110](https://github.com/CoderLambert/news-aggregator/actions/runs/39208921110) 均 SUCCESS；`changes`、`backend-and-release-gates`、`merge-gate` 成功，前端作业因后端单域变更被跳过；后端 pytest `2483 passed / 16 skipped`、xdist 对账 `2565 passed / 16 skipped`，T00 合成 SDK/Proxy `239/239 PASS`，隔离 G1 实际镜像 revision 为 `27c5b6b2b9bf22f95c99e9b5602296236e2486d1`）。注意较早的 `main@5770062ad10d923ca28c90fe4a4f3709adc30939` 主线 Push CI #39205855011 曾因 T05 并发任务用例/SQLite 锁竞争失败；该失败仍记录为已知间歇问题，该故障记录时 PR #130 尚未合并；现 #130 已以 `b9d8f94` 合并，见第 1.4 节，本轮数据库回归未运行，不能因此宣称所有锁竞争都已消失。每次开工仍必须重新读取最新 main。**本文件是当前任务状态唯一入口**；[2026-10-17 原计划和旧批次记录已完整归档](archive/FEATURE-DEVELOPMENT-SNAPSHOT-2026-10-17.md)，其中的“下一批/T01 待完成/旧凭据并存”属于历史快照，不再指导开发。
 
 **本轮代码交付及后续差额见第 1.4 节；完整 CI、真实环境和发布验收仍未通过；完整原编号核对见[当前交付与剩余执行门禁](DELIVERY-AND-REMAINING-GATES-2026-10-20.md)。下面早期批次证据不替代该边界。**
