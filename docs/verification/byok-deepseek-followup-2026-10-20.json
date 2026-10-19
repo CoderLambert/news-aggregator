@@ -1,0 +1,270 @@
+{
+  "application_sha": "6a2cc025c338ef0308024151be4fbd796f7f3a39",
+  "cleanup": "PASS",
+  "exact_nonempty_reasoning_replay": true,
+  "guard_sha256": "e62ecde33852732c1e98ab7fb5080c3b0e069fc56a631b1771c2a726068037f7",
+  "ledger": [
+    {
+      "event": "dispatch",
+      "max_tokens": 256,
+      "model": "deepseek-flash",
+      "number": 1,
+      "previous_assistant": [],
+      "provider_key_identity_match": true,
+      "reasoning_effort": null,
+      "stream": false,
+      "thinking": {
+        "type": "disabled"
+      },
+      "timestamp": 1792442734.1190743,
+      "tool_results": 0
+    },
+    {
+      "content_chars": 0,
+      "done": false,
+      "event": "response",
+      "finishes": [
+        "tool_calls"
+      ],
+      "http_status": 200,
+      "model": "deepseek-flash",
+      "number": 1,
+      "tool_calls": 1,
+      "usage": {
+        "completion_tokens": 24,
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 299,
+        "prompt_tokens": 299,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 323
+      }
+    },
+    {
+      "event": "dispatch",
+      "max_tokens": 256,
+      "model": "deepseek-flash",
+      "number": 2,
+      "previous_assistant": [
+        {
+          "reasoning_present": false,
+          "tool_calls": 1
+        }
+      ],
+      "provider_key_identity_match": true,
+      "reasoning_effort": null,
+      "stream": false,
+      "thinking": {
+        "type": "disabled"
+      },
+      "timestamp": 1792442735.6048908,
+      "tool_results": 1
+    },
+    {
+      "content_chars": 2,
+      "done": false,
+      "event": "response",
+      "finishes": [
+        "stop"
+      ],
+      "http_status": 200,
+      "model": "deepseek-flash",
+      "number": 2,
+      "tool_calls": 0,
+      "usage": {
+        "completion_tokens": 1,
+        "prompt_cache_hit_tokens": 128,
+        "prompt_cache_miss_tokens": 208,
+        "prompt_tokens": 336,
+        "prompt_tokens_details": {
+          "cached_tokens": 128
+        },
+        "total_tokens": 337
+      }
+    },
+    {
+      "event": "dispatch",
+      "max_tokens": 256,
+      "model": "deepseek-flash",
+      "number": 3,
+      "previous_assistant": [],
+      "provider_key_identity_match": true,
+      "reasoning_effort": null,
+      "stream": false,
+      "thinking": {
+        "type": "enabled"
+      },
+      "timestamp": 1792442736.8696973,
+      "tool_results": 0
+    },
+    {
+      "content_chars": 0,
+      "done": false,
+      "event": "response",
+      "finishes": [
+        "tool_calls"
+      ],
+      "http_status": 200,
+      "model": "deepseek-flash",
+      "number": 3,
+      "tool_calls": 1,
+      "usage": {
+        "completion_tokens": 25,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 324,
+        "prompt_tokens": 324,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 349
+      }
+    },
+    {
+      "event": "dispatch",
+      "max_tokens": 256,
+      "model": "deepseek-flash",
+      "number": 4,
+      "previous_assistant": [],
+      "provider_key_identity_match": true,
+      "reasoning_effort": null,
+      "stream": true,
+      "thinking": {
+        "type": "disabled"
+      },
+      "timestamp": 1792442738.1923351,
+      "tool_results": 0
+    },
+    {
+      "done": true,
+      "event": "response",
+      "finishes": [
+        "stop"
+      ],
+      "http_status": 200,
+      "model": "deepseek-flash",
+      "number": 4,
+      "usage": {
+        "completion_tokens": 3,
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 11,
+        "prompt_tokens": 11,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 14
+      }
+    },
+    {
+      "event": "dispatch",
+      "max_tokens": 256,
+      "model": "deepseek-flash",
+      "number": 5,
+      "previous_assistant": [],
+      "provider_key_identity_match": true,
+      "reasoning_effort": null,
+      "stream": false,
+      "thinking": {
+        "type": "enabled"
+      },
+      "timestamp": 1792442848.9103184,
+      "tool_results": 0
+    },
+    {
+      "content_chars": 5,
+      "done": false,
+      "event": "response",
+      "finishes": [
+        "stop"
+      ],
+      "http_status": 200,
+      "model": "deepseek-flash",
+      "number": 5,
+      "tool_calls": 0,
+      "usage": {
+        "completion_tokens": 76,
+        "completion_tokens_details": {
+          "reasoning_tokens": 72
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 76,
+        "prompt_tokens": 76,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 152
+      }
+    },
+    {
+      "event": "dispatch",
+      "max_tokens": 256,
+      "model": "deepseek-flash",
+      "number": 6,
+      "previous_assistant": [
+        {
+          "reasoning_present": true,
+          "tool_calls": 0
+        }
+      ],
+      "provider_key_identity_match": true,
+      "reasoning_effort": null,
+      "stream": false,
+      "thinking": {
+        "type": "enabled"
+      },
+      "timestamp": 1792442850.897583,
+      "tool_results": 0
+    },
+    {
+      "content_chars": 3,
+      "done": false,
+      "event": "response",
+      "finishes": [
+        "stop"
+      ],
+      "http_status": 200,
+      "model": "deepseek-flash",
+      "number": 6,
+      "tool_calls": 0,
+      "usage": {
+        "completion_tokens": 83,
+        "completion_tokens_details": {
+          "reasoning_tokens": 79
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 106,
+        "prompt_tokens": 106,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 189
+      }
+    }
+  ],
+  "observed_input_tokens": 1152,
+  "observed_output_tokens": 212,
+  "ordinary_tool_roundtrip": "PASS",
+  "production": "NOT_RUN",
+  "provider_docs": [
+    "https://api-docs.deepseek.com/guides/thinking_mode/",
+    "https://api-docs.deepseek.com/api/create-chat-completion/"
+  ],
+  "proxy_image": "ghcr.io/berriai/litellm@sha256:60947db020b57e204823d3fbc8bb295c85be890d7c9adcc77fb4f5fc2fe410b2",
+  "requested_max_output_tokens_each": 256,
+  "requests": 6,
+  "retries": 0,
+  "scope": "DEEPSEEK_SYNTHETIC_PROVIDER_REAL_BOUNDED",
+  "sdk": "openai 3.28.0",
+  "secrets_or_prompt_in_proxy_logs": false,
+  "temporary_provider_key_removed": true,
+  "temporary_resources_remaining": 0,
+  "thinking_effort": "SDK requested low; the pinned LiteLLM outbound body omitted reasoning_effort. No low-effort passthrough claim.",
+  "thinking_text_and_followup": "PASS",
+  "thinking_text_followup_context_semantics": "No tools were sent: prior reasoning is replayed on the wire but is ignored by the provider per its documented contract.",
+  "thinking_tool_reasoning": "NOT_OBSERVED",
+  "thinking_tool_roundtrip_and_followup": "NOT_RUN: upstream returned zero reasoning tokens for tool request",
+  "verified_stream": "PASS"
+}

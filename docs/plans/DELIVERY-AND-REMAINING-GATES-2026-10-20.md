@@ -1,6 +1,6 @@
 # 当前代码交付与剩余执行门禁
 
-核对基线：`main@cd83d88c01ae2d073b8a660e795e8494d58f896e`。这是代码和剩余边界核对，不是全项目验收通过。当前任务状态仍以 [现行开发索引](FEATURE-DEVELOPMENT-2026-10-17.md) 为唯一入口。
+历史代码核对快照（后续最新结论见末节）：`main@cd83d88c01ae2d073b8a660e795e8494d58f896e`。这是代码和剩余边界核对，不是全项目验收通过。当前任务状态仍以 [现行开发索引](FEATURE-DEVELOPMENT-2026-10-17.md) 为唯一入口。
 
 本轮实际合并：BYOK T09–T12 [#135](https://github.com/CoderLambert/news-aggregator/pull/135)、[#136](https://github.com/CoderLambert/news-aggregator/pull/136)、[#137](https://github.com/CoderLambert/news-aggregator/pull/137)、[#138](https://github.com/CoderLambert/news-aggregator/pull/138)；AG-05–07 [#139](https://github.com/CoderLambert/news-aggregator/pull/139)、[#140](https://github.com/CoderLambert/news-aggregator/pull/140)、[#141](https://github.com/CoderLambert/news-aggregator/pull/141)；RSS T14 阅读选择、复制及自动朗读 [#142](https://github.com/CoderLambert/news-aggregator/pull/142)。它们已在远程 main，原工作区数据库和两份未跟踪文档保留。
 
@@ -23,7 +23,7 @@
 | RSS T11/T13/T14 | `rss/access.py` SQL/StoredArticle；`stored_readers.py` hash/owner/历史；research 本地授权证据；TTS 每段重检；T13 阅读状态保留。#142 的两个用户缺陷先失败复现再修正，13 个相关前端用例按变更最终通过，typecheck/build 通过 | 本轮只有前端变更；未重新运行后端 DB 或真实 AI/TTS。真实首访/来源/浏览器联合验收仍在 T27 |
 | RSS T16/T17/T18/T19/T20/T21 | 目录、发现、可选 RSSHub、直接订阅与 OPML 确认/恢复已集成并有局部修复 | 真实连接健康、RSSHub 公网认证/TLS/回流、任意重定向别名协议及 OPML 真实浏览器路径仍需分别验收；隐藏不满足条件的模板不是已验收支持 |
 | RSS T24/T25/T26/T27 | 已有盘点/切换 fencing/恢复工具及合成报告，入口见 `rss_migration`、`ops/rss/T26/`、`ops/rss/T27/` | 授权真实副本清单、成对备份恢复、兼容镜像封存、来源质量/浏览器联合验收没有当前完整证据 |
-| RSS T29/T30/T31/T33（含合并索引 T28/T32） | 生产试点、停止旧角色、删除旧代码及最终单栈发布合同保留 | **尚未执行**。T31 代码删除也依赖真实 T30 停止前置；不能提前删除仍被使用的旧栈来制造“开发完成” |
+| RSS T29/T30/T31/T33（含合并索引 T28/T32） | 生产试点、停止旧角色、删除旧代码及最终单栈发布合同保留 | **尚未执行**。T31 真实 T30 前置约束集成验收；允许先在隔离分支按合同开发删除候选，main 的运行兼容代码保持到门禁通过 |
 | NH28–NH31 / AG-07 发布 | [operator 门禁](../deployment/NH28-NH31-operator-acceptance.md)、备份恢复与证据工具已存在 | 真实授权/密钥恢复、源许可/质量、容量/移动端及人工发布签署未完成 |
 
 ## 本轮验证边界
@@ -48,3 +48,22 @@
 3. **准备具体生产试点**：先指定主机/项目、来源或最小共享组、窗口、允许停止的旧角色，以及受保护备份/加密材料引用；复用现有 T24/T26/T27/T29 工具准备精确 SHA 与恢复点，完成后再按原合同签署实际切源/发布。没有目标和批准范围时不操作生产。
 
 真实调用边界来自冻结 [BYOK T13 合同](https://github.com/CoderLambert/news-aggregator/blob/ed58afa7a72ae905e2a2ffc315d968ca3634b8f2/docs/features/byok/tasks/T13-providers.md)：“首轮仅 DeepSeek 获准 PROVIDER_REAL，且须在其单独子卡实际执行前获用户确认有界测试”。生产边界来自 [T29](rss-engine-migration/tasks/T29/task.md) 的具体生产批准、[T31](rss-engine-migration/tasks/T31/task.md) 的 T30 停止前置与 [operator 门禁](../deployment/NH28-NH31-operator-acceptance.md) 的明确人工签署。没有因此中断本轮已授权的开发或合并。
+
+## 集中验收后的最新更新
+
+运行时代码已交付至 `main@6a2cc025c338ef0308024151be4fbd796f7f3a39`（后续若只有报告改动，验收代码仍以该 SHA 绑定）。#147–#153 补齐原生协议、可信地域、手填模型、用途门禁及集中验收发现的 alias 宽度/统计尾帧/冷索引/原始终态差额；没有新建逐厂商直连适配器。
+
+当前实际结果：完整后端 2686 passed / 16 skipped、2702 个收集/执行身份对账；完整前端 730/105 文件及 typecheck/lint/build；T00 SDK/Proxy 241、Django 联合 3、共享网关 35、固定镜像 T00-G 28 项通过。精确 `6a2cc02` 应用镜像、隔离 G1/G2 与清理通过。两台 GitHub runner 仍 offline，真实 CI 没有改记通过。首次失败与修复过程均保留在[集中报告](../verification/consolidated-acceptance-2026-10-20.md)。
+
+用户新目标已重新批准 DeepSeek 有界验收，第二窗口实际 6 次已结束，普通工具往返/流式/思考文本续问通过；工具非空思考、真实双 Key 与其它厂商仍未完成，详见[真实报告](../verification/byok-deepseek-followup-2026-10-20.md)。这更新了上文旧批次“DeepSeek 延期”的状态，没有覆盖第一窗口或扩大生产授权。
+
+生产试点、停旧角色、依赖 T30 的 T31 代码删除及最终发布继续延期；真实来源质量/许可、真实数据恢复与容量门槛不由合成检查代替。必须由用户判断和提供条件后可自动执行的项目已分开写入[最终人工清单](../verification/OWNER-ACCEPTANCE-2026-10-20.md)。
+
+
+## 当前集中验收与候选开发
+
+当前远程主线为 `6a2cc025c338ef0308024151be4fbd796f7f3a39`（PR #152/#153 已合并）。上述未跑数据库、固定镜像、浏览器及第二次 DeepSeek 窗口的表述属于早期快照，当前实际结果以[集中验收记录](../verification/consolidated-acceptance-2026-10-20.md)为准：主线完整后端 2686 PASS / 16 SKIP、前端 730 PASS、T00 241/241、SDK/Proxy 联合 3 PASS、固定 Proxy 运维 28 PASS，隔离 G1/G2 和移动视口功能检查通过。DeepSeek 第二窗口为 6 次有界请求、无重试，普通工具与流通过；非空思考工具组合、真实双 Key 和其它厂商仍未证明。
+
+T31 已在独立分支 [Draft PR #154](https://github.com/CoderLambert/news-aggregator/pull/154)（源码 `7ff9900b5c2c6cb00c995c96f2187d5fbd64ebec`） 开发旧代码/依赖清理和统一维护入口。候选测试与 main 分开记录；真实 T30 通过前保持未合并，不以删除测试或停用产品功能冒充完成。生产阶段仍延期。
+
+必须由负责人作决定或实际体验的项目，以及提供输入后可继续交由 Agent 执行的技术验收，统一分列在[剩余确认清单](../verification/OWNER-ACCEPTANCE-2026-10-20.md)。不要求用户手工重复已自动执行的测试。

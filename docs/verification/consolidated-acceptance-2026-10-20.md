@@ -1,5 +1,9 @@
 # 开发批次集中验收记录
 
+当前主线 `6a2cc02` 的完整本地回归、SDK/Proxy、隔离浏览器及有界 DeepSeek 检查已形成证据；生产和正式 CI 没有通过结论。T31 清理候选位于未合并的 [Draft #154](https://github.com/CoderLambert/news-aggregator/pull/154)，不能将其镜像/测试计数混入主线。人工事项与可继续自动执行的条件见[剩余确认清单](OWNER-ACCEPTANCE-2026-10-20.md)。
+
+以下逐轮记录保留首次失败与修复过程；当前主线结论见末节，不能把历史中间态当成当前状态。
+
 本批基线为 `main@703af0f161119374593b79325165b3f42a69b198`。验收隔离工作树为 `/tmp/newshub-consolidated-acceptance-20261020`，原始日志保存在 `/tmp/newshub-acceptance-703af0f/reports/`。本记录不代表生产发布或六厂商真实验收完成。
 
 ## 已确认并修正的问题
@@ -70,3 +74,24 @@ T00 使用独立新建的 Python 3.12.14 SDK/Proxy 环境，按原两份锁文�
 - 固定 digest 的真实容器镜像已跑原 T00-G 合成运维流程，**26 checks PASS**，包含两项目 Key、路由隔离、日志、重启、备份恢复与清理；零真实 Provider。日志 `t00g-fixed-image-raw-terminal.log`。新增该镜像缺原始终态/恰好一次请求/错误不泄密的用例后，**28 checks PASS、退出 0、cleanup=0**（`t00g-fixed-image-negative-terminal.log`）：HTTP 502，上游从 2 次变 3 次，确认为恰好一次派发，无秘密/提示泄漏。没有以 Python Proxy 进程结果代替镜像级结果。
 
 上述当前结果修复了前节 NO_FINISH 的误成功；最终合并后镜像/G1 与有界 DeepSeek 真实调用仍待继续。正式 GitHub CI、生产和人工 UAT 继续分别保留状态。
+
+## 最终运行时代码与第二窗口
+
+[PR #153](https://github.com/CoderLambert/news-aggregator/pull/153) 已合并为 `6a2cc025c338ef0308024151be4fbd796f7f3a39`，与通过上述检查的 PR head `8238f125b8bc2f53a6c68a213fa12921cd027459` 文件树相同。生产目标候选 `newshub:accept-6a2cc02` 构建退出 0，镜像 ID `sha256:a7e8a272f550306afe4f5f73bca695328f598670bbfc02e44e37c18fa536dac8`、用户 10001:10001，revision 与该代码 SHA 一致。
+
+- G1：45 个检查字段、status/cleanup 均 PASS；报告目录 `newshub-local-domain-report-6a2cc025c338ef0308024151be4fbd796f7f3a39.7G4JdT`，日志 `g1-6a2cc02.log`。其中真实 WSGI 客户端地址直接观察仍明确为 NOT_RUN，不能把字段数理解为每项均独立通过。
+- G2：原实际双账户浏览器/HTTP 流程退出 0，67 个检查字段、status/cleanup 均 PASS；报告目录 `newshub-local-domain-report-6a2cc025c338ef0308024151be4fbd796f7f3a39.mBFtRg`，日志 `g2-6a2cc02.log`。真实邀请注册、会话切换/延迟身份响应、本人写入/历史删除、跨账号隔离、CSRF、停用账户及限流拒绝/防 XFF 欺骗均有运行证据。AI 关闭，不含真实收费 UI 流程；直接客户端地址观察的 NOT_RUN 保留。
+- 本次新授权 DeepSeek 窗口实际 6 次、每次最多请求 256 输出 Token、零重试，普通工具往返、真实流、思考文本与同模型文本续问通过。真实双 Key 和非空思考工具完整往返未证明；无 tools 的哈希一致只是原样传输，不能推导供应商使用旧思考上下文。详情及参数限制见[真实报告](byok-deepseek-followup-2026-10-20.md)。上游累计输入/输出 1152/212 Token；临时 Key、容器、卷和网络均清理。
+
+剩余人工决定、可继续自动化所需输入与延期生产任务统一列在[需你确认清单](OWNER-ACCEPTANCE-2026-10-20.md)。T31 已在隔离分支开发，当前 main 保留兼容代码；真实 T30 停止门禁通过前不合并。详见下节，不能把候选测试写成生产退役完成。
+
+
+## 当前主线与独立退役候选的边界
+
+主线 `6a2cc025c338ef0308024151be4fbd796f7f3a39` 的当前完整后端证据为 2686 PASS / 16 SKIP，2702 个收集/执行身份对账通过；前端 105 文件 / 730 测试、类型检查及构建通过，Lint 保留一条既有 warning。此前表格中的较小计数和 FAIL 是修复过程记录。T00 最终为 241/241，Django→官方 SDK→固定 Proxy 联合流程为 3 PASS，固定 Proxy 容器运维检查为 28 PASS；各自不代表生产通过。
+
+主线额外运行 390×844 Chromium 移动视口 G2，功能断言和清理通过；文章正文宽度与 viewport 同为 390，无横向溢出，真实正文/Mermaid 截图已检查。账户页截图停在加载态，不据此声称账户页面视觉已验收。日志 `g2-mobile-6a2cc02.log`，观察文件 `fixed-tmp/mobile-observations.jsonl`；真实手机声音、触摸和输入法仍需实际设备体验。
+
+T31 独立分支 [Draft PR #154](https://github.com/CoderLambert/news-aggregator/pull/154)（源码 `7ff9900b5c2c6cb00c995c96f2187d5fbd64ebec`） 已删除旧采集专属代码及依赖，复用 Miniflux 与通用安全 HTTP，保留历史数据/迁移和研究、索引、频道消费者。原任务允许独立开发，T30 前置约束集成/完成。当前候选的运行证据、首次失败及修复见候选分支的 `docs/plans/rss-engine-migration/tasks/T31/report.md`；不把候选分支的测试计数并入主线，不把未合并代码称为当前部署。
+
+2026-10-20 重新读取 GitHub runner 状态：`omarchy-newshub` 和 `omarchy-newshub-frontend` 均 offline、busy=false，正式 CI 仍 NOT_RUN。生产、真实旧数据恢复、规定资源环境、其它真实凭据矩阵及人工签署仍按[剩余清单](OWNER-ACCEPTANCE-2026-10-20.md)保留。
