@@ -441,6 +441,8 @@ EOF
         printf '  PUBLIC_SITE_MODE: "read_only"\n  PUBLIC_SIGNUP_ENABLED: "0"\n'
     else
         printf '  PUBLIC_SITE_MODE: "full"\n  PUBLIC_SIGNUP_ENABLED: "1"\n'
+        # Stored-health fixture identity only; no engine URL, Token or heartbeat.
+        printf '  RSS_ENGINE_INSTANCE_UUID: "00000000-0000-4000-8000-000000000027"\n  RSS_ENGINE_ACCOUNT_ID: "7"\n'
     fi
     printf '  NEWSHUB_LOCAL_DOMAIN_STAGE: "%s"\n' "$STAGE"
     printf '  NEWSHUB_LOCAL_DOMAIN_PROJECT: "%s"\n' "$task_compose_project"

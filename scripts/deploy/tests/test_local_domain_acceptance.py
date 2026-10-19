@@ -1088,7 +1088,8 @@ def _fake_g2_admin_callbacks(events):
         assert path in active | retired | {'/api/auth/me/'}
         if 'admin.deactivated' in events:
             return {'status': 403}
-        return {'status': 410 if path in retired else 200}
+        return {'status': 410 if path in retired else 200,
+                'body': {'engine_ready': False} if path == '/api/admin/rss/health/' else {}}
 
     async def deactivate_admin():
         assert 'dashboard.heading_visible' in events

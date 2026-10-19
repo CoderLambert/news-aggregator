@@ -1738,6 +1738,10 @@ async def _run_g2_admin_acceptance(
     _mark_g2_browser_subcheck(checks, 'g2.admin_dashboard_api')
     dashboard_api = await browser_api('GET', '/api/admin/rss/health/')
     _require(_safe_http_status(dashboard_api) == 200, 'active synthetic superuser could not read the admin dashboard')
+    health_body = dashboard_api.get('body') if isinstance(dashboard_api, dict) else None
+    _require(isinstance(health_body, dict) and health_body.get('engine_ready') is False,
+             'G2 stored-health fixture must not claim a live engine')
+    checks['g2_rss_stored_health'] = 'HTTP 200 with engine_ready=false; synthetic identity, no engine configured'
 
     _mark_g2_browser_subcheck(checks, 'g2.admin_retired_api')
     index_api = await browser_api('GET', '/api/admin/search-index/dashboard/')
