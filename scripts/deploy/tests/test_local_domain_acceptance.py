@@ -1087,7 +1087,7 @@ def _fake_g2_admin_callbacks(events):
         retired = {'/api/admin/crawler/dashboard/', '/api/provider-comparisons/'}
         assert path in active | retired | {'/api/auth/me/'}
         if 'admin.deactivated' in events:
-            return {'status': 403}
+            return {'status': 401 if path == '/api/admin/rss/health/' else 403}
         return {'status': 410 if path in retired else 200,
                 'body': {'engine_ready': False} if path == '/api/admin/rss/health/' else {}}
 
@@ -2571,3 +2571,21 @@ def test_g2_retirement_requires_live_rss_index_and_closed_collectors(path, statu
         asyncio.run(exercise())
     assert checks['_g2_active_subcheck'] == subcheck
     assert 'admin.deactivated' not in events
+
+
+def test_g2_inactive_admin_cannot_keep_rss_health_access():
+    events = []
+    page = _FakeG2AdminPage(events=events)
+    login, original_api, deactivate, _ = _fake_g2_admin_callbacks(events)
+    checks = {}
+    async def api(method, path):
+        if 'admin.deactivated' in events and path == '/api/admin/rss/health/':
+            return {'status': 200, 'body': {'engine_ready': False}}
+        return await original_api(method, path)
+    async def exercise():
+        await acceptance._run_g2_admin_acceptance(page, checks, login_admin=login,
+            browser_api=api, deactivate_admin=deactivate)
+    with pytest.raises(acceptance.AcceptanceError):
+        asyncio.run(exercise())
+    assert checks['_g2_active_subcheck'] == 'g2.admin_inactive_api'
+    assert 'admin.deactivated' in events and 'admin.reload' not in events

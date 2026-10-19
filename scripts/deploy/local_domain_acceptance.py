@@ -1780,7 +1780,8 @@ async def _run_g2_admin_acceptance(
         '/api/provider-comparisons/',
     ):
         response = await browser_api('GET', path)
-        _require(_safe_http_status(response) == 403, 'inactive admin session retained a protected API access')
+        expected = 401 if path == '/api/admin/rss/health/' else 403
+        _require(_safe_http_status(response) == expected, 'inactive admin session retained a protected API access')
 
     _mark_g2_browser_subcheck(checks, 'g2.admin_inactive_ui')
     await page.reload(wait_until='domcontentloaded', timeout=20000)
@@ -1788,7 +1789,7 @@ async def _run_g2_admin_acceptance(
         'button', name='登录', exact=True,
     ).wait_for(state='visible', timeout=15000)
     checks['g2_active_admin'] = 'active synthetic superuser reads RSS/index APIs, receives 410 from retired APIs and completes RSS UI before deactivation'
-    checks['g2_inactive_admin_session'] = 'after deactivation, old session receives HTTP 403 from me/admin/provider endpoints and returns to logged-out UI'
+    checks['g2_inactive_admin_session'] = 'after deactivation, old session receives RSS HTTP 401 and me/index/retired API HTTP 403, then returns to logged-out UI'
 
 
 def _validated_auth_me_snapshot(response: dict, expected_username: str) -> dict:
