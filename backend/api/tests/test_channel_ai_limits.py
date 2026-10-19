@@ -85,3 +85,29 @@ class ModelSnapshotTests(SimpleTestCase):
                     verify_model(payload, owner_id=owner, scope=scope)
             with self.assertRaises(ClassificationAuthorizationChanged):
                 verify_model({**payload, 'consent': False}, owner_id=1, scope='personal')
+
+
+@override_settings(PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True, AI_BYOK_ENABLED=True)
+class ClassifierShutdownTests(TestCase):
+    def test_admin_shutdown_cancels_only_unfinished_public_work(self):
+        from rest_framework.test import APIClient
+        from api.smart_channel_models import ChannelClassifierSettings
+        owner = User.objects.create_superuser('classifier-operator', password='synthetic-test-only')
+        source, _ = Source.objects.get_or_create(name='Shutdown fixture', defaults={'url': 'https://example.org'})
+        ChannelClassifierSettings.objects.create(owner=owner, enabled=True)
+        public = ChannelGroupingProposal.objects.create(user=owner, engine='ai', status='running',
+            public_source=source, input_snapshot='', lease_token='old', dispatch_started_at=timezone.now(),
+            lease_until=timezone.now() + timedelta(minutes=2), expires_at=timezone.now() + timedelta(hours=1))
+        private = ChannelGroupingProposal.objects.create(user=owner, engine='ai', status='queued',
+            input_snapshot='', expires_at=timezone.now() + timedelta(hours=1))
+        client = APIClient()
+        client.force_authenticate(owner)
+        response = client.patch('/api/admin/smart-channels/', {'enabled': False, 'daily_limit': 10}, format='json')
+        self.assertEqual(response.status_code, 200)
+        public.refresh_from_db()
+        private.refresh_from_db()
+        self.assertEqual(public.status, 'cancelled')
+        self.assertEqual(public.lease_token, '')
+        self.assertEqual(private.status, 'queued')
+        self.assertEqual(response.data['runtime']['job_counts']['cancelled'], 1)
+        self.assertFalse(response.data['runtime']['ready_to_dispatch'])

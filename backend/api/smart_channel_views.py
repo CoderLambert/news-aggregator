@@ -229,16 +229,21 @@ class SiteClassifierView(PrivateWorkspaceView):
         if not request.user.is_superuser:
             raise PermissionDenied()
     def get(self, request):
-        cfg = ChannelClassifierSettings.objects.filter(pk=1).first()
+        cfg = ChannelClassifierSettings.objects.select_related('owner').filter(pk=1).first()
+        from api.services.channel_ai import classifier_status
         jobs = ChannelGroupingProposal.objects.filter(public_source__isnull=False).order_by('-created_at')[:20]
         return Response({'enabled': bool(cfg and cfg.enabled), 'is_owner': bool(cfg and cfg.owner_id == request.user.pk),
             'daily_limit': cfg.daily_limit if cfg else 10,
             'model_id': cfg.execution_snapshot.get('model', {}).get('model_id') if cfg else None,
+            'runtime': classifier_status(cfg),
             'jobs': [proposal_data(j) for j in jobs],
             'intake_requests': list(ChannelIntakeRequest.objects.order_by('-created_at').values('id', 'url', 'status', 'created_at')[:30])})
     @transaction.atomic
     def patch(self, request):
         lock_user(request.user)
+        if not isinstance(request.data, dict):
+            raise ValidationError('请求应为 JSON 对象。')
+        previous = ChannelClassifierSettings.objects.filter(pk=1).first()
         enabled, limit = request.data.get('enabled'), request.data.get('daily_limit', 10)
         if type(enabled) is not bool or type(limit) is not int or not 1 <= limit <= 20:
             raise ValidationError('请选择开关与每日 1–20 个任务的预算。')
@@ -251,8 +256,16 @@ class SiteClassifierView(PrivateWorkspaceView):
                 execution_snapshot = capture_model(request.user, scope='site', model_config_id=request.data.get('model_config_id'))
             except ClassificationAuthorizationChanged:
                 raise ValidationError('请先配置并验证个人默认模型，再明确授权站点后台分类；不会借用其他人的模型。') from None
+        must_stop = (not enabled or previous is None or previous.owner_id != request.user.pk
+                     or previous.execution_snapshot != execution_snapshot or limit < previous.daily_limit)
         ChannelClassifierSettings.objects.update_or_create(pk=1, defaults={
             'owner': request.user, 'enabled': enabled, 'daily_limit': limit, 'execution_snapshot': execution_snapshot})
+        if must_stop:
+            # Same short transaction as the grant change: old workers lose CAS
+            # authority immediately; no private proposal or applied history changes.
+            ChannelGroupingProposal.objects.filter(engine='ai', public_source__isnull=False,
+                status__in=['queued', 'running']).update(
+                    status='cancelled', error_code='classifier_stopped', lease_token='', lease_until=None)
         return self.get(request)
 
 

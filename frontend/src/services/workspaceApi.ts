@@ -18,7 +18,12 @@ export interface Proposal {
 }
 export interface ReadingStats { today: number; total: number; streak: number; timezone: string; week: Array<{ day: string; count: number }> }
 export interface Dashboard { kind: 'latest' | 'popular'; stories: Array<{ id: number; title: string; source_name: string; publish_time: string }> }
-export interface SiteClassifier { model_id?: string | null; enabled: boolean; is_owner: boolean; daily_limit: number; jobs: Proposal[]; intake_requests: Array<{ id: number; url: string; status: string; created_at: string }> }
+export interface ClassifierRuntime {
+  feature_enabled: boolean; model_binding_valid: boolean; ready_to_dispatch: boolean
+  daily_used: number; daily_remaining: number; job_counts: Record<string, number>
+  expired_leases: number; failed_dispatched_jobs: number; next_retry_at: string | null
+}
+export interface SiteClassifier { runtime?: ClassifierRuntime; model_id?: string | null; enabled: boolean; is_owner: boolean; daily_limit: number; jobs: Proposal[]; intake_requests: Array<{ id: number; url: string; status: string; created_at: string }> }
 
 export class WorkspaceError extends Error {
   readonly status: number

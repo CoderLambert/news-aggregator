@@ -19,6 +19,7 @@ const modeOptions: Array<{ value: GroupingMode; title: string; description: stri
   { value: 'off', title: '关闭后续自动整理', description: '保留现有分组，仍可主动生成一次性预览。' },
 ]
 const errorMessages: Record<string, string> = {
+  classifier_stopped: '后台分类授权或预算已变更，任务已中止；已派发调用不会自动重发。',
   authorization_changed: '模型凭据或授权已变化，请检查设置后重新生成。',
   configuration_changed: '订阅或分组已变化，请重新生成预览。', metadata_changed: '频道资料已更新，请重新生成。',
   model_unavailable: '没有可用的模型连接。', rate_limited: '模型限流，后台将遵守等待时间进行有限重试。',
@@ -271,13 +272,24 @@ export function ProposalEditor({ proposal, topics, groups, mode, busy, onApply, 
   </>
 }
 
-function SiteClassifierPanel({ viewer }: { viewer: number }) {
+export function SiteClassifierPanel({ viewer }: { viewer: number }) {
   const client = useQueryClient()
   const classification = useClassificationModel(viewer, true)
   const data = useQuery({ queryKey: ['workspace', viewer, 'site-classifier'], queryFn: ({ signal }) => workspaceRequest<SiteClassifier>('/admin/smart-channels/', { signal }) })
   const save = useMutation({ mutationFn: (body: unknown) => workspaceRequest<SiteClassifier>('/admin/smart-channels/', { method: 'PATCH', body }), onSuccess: value => client.setQueryData(['workspace', viewer, 'site-classifier'], value) })
   return <details className="workspace-panel"><summary>管理员：全站新增来源分类</summary><p className="workspace-muted">默认关闭。开启后，后台仅对信息充足但主题未知的全站来源调用本管理员的模型连接；不使用其他用户额度，不替任何人订阅。</p>
     {data.isError && <p role="alert" className="workspace-error">读取失败。<button type="button" onClick={() => void data.refetch()}>重试</button></p>}
+    {data.data?.runtime && <div className="workspace-soft-panel" aria-label="后台分类状态">
+      <p role="status">{!data.data.enabled ? '后台分类已关闭' : !data.data.runtime.feature_enabled
+        ? '站点 AI 开关已关闭，不会派发分类' : !data.data.runtime.model_binding_valid
+          ? '后台模型授权不可用，请重新确认并保存' : '后台模型授权与开关就绪'}</p>
+      <p>今日已入队 {data.data.runtime.daily_used} / {data.data.daily_limit} 个任务，剩余 {data.data.runtime.daily_remaining} 个。</p>
+      <p>排队 {data.data.runtime.job_counts.queued ?? 0}，执行中 {data.data.runtime.job_counts.running ?? 0}，失败 {data.data.runtime.job_counts.failed ?? 0}，已取消 {data.data.runtime.job_counts.cancelled ?? 0}。</p>
+      {data.data.runtime.expired_leases > 0 && <p className="workspace-error">{data.data.runtime.expired_leases} 个任务运行已过期，等待后台核对；不会自动重发已派发的调用。</p>}
+      {data.data.runtime.failed_dispatched_jobs > 0 && <p>有 {data.data.runtime.failed_dispatched_jobs} 个已派发任务失败，请查看下方记录；此处不重新调用模型。</p>}
+      {data.data.runtime.next_retry_at && <p>下一次限流等待时间：{new Date(data.data.runtime.next_retry_at).toLocaleString()}</p>}
+      <button type="button" className="workspace-button secondary" disabled={data.isFetching || save.isPending} onClick={() => void data.refetch()}>刷新后台状态</button>
+    </div>}
     {data.data && <SiteClassifierForm key={JSON.stringify([data.data.enabled, data.data.daily_limit, data.data.is_owner, data.data.model_id])} config={data.data} classification={classification} busy={save.isPending} onSave={body => save.mutate(body)} />}
     {save.isError && <p role="alert" className="workspace-error">{workspaceError(save.error)}</p>}
     {save.isSuccess && <p role="status" className="workspace-notice">站点分类设置已保存。</p>}
@@ -291,6 +303,7 @@ function SiteClassifierForm({ config, classification, busy, onSave }: { config: 
   const [confirmedModel, setConfirmedModel] = useState<string | null>(null)
   const consent = Boolean(classification.id && confirmedModel === classification.consentKey)
   return <form className="workspace-soft-panel" onSubmit={event => { event.preventDefault(); onSave({ enabled, daily_limit: limit, consent, ...(enabled ? { model_config_id: classification.id } : {}) }); setConfirmedModel(null) }}>
+    <p className="workspace-caption">关闭、更换授权模型或降低预算会中止未完成的全站分类；在途请求可能仍产生费用，但旧任务不会再写入结果。已完成的主题和私人分组保留。</p>
     <label className="workspace-check"><input type="checkbox" checked={enabled} disabled={busy} onChange={event => setEnabled(event.target.checked)} />开启全站新来源 AI 分类</label>
     <label>每日任务上限（仅明确限流拒绝时最多重试一次）<input type="number" min={1} max={20} required value={limit} disabled={busy} onChange={event => setLimit(Number(event.target.value))} /></label>
     {enabled && <>
