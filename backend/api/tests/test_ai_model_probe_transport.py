@@ -22,6 +22,13 @@ class _ProxyStub(BaseHTTPRequestHandler):
         raw = self.rfile.read(int(self.headers.get('Content-Length', '0')))
         payload = json.loads(raw)
         self.server.seen.append((self.path, self.headers.get('Authorization'), payload))
+        # Flash defaults to thinking: forced tool selection is rejected and a
+        # tiny text budget can be spent on reasoning before any final answer.
+        if (payload.get('model') == 'deepseek/deepseek-flash'
+                and payload.get('thinking') != {'type': 'disabled'}):
+            self.send_response(400)
+            self.end_headers()
+            return
         if self.server.status_code == 429:
             self.send_response(429)
             self.end_headers()
@@ -68,12 +75,22 @@ class SyntheticGatewayTransportTests(TestCase):
         self.server.server_close()
         self.thread.join(timeout=3)
 
-    def send(self, kind):
+    def send(self, kind, model_alias='deepseek/deepseek-chat'):
         with override_settings(
                 AI_BYOK_GATEWAY_URL=f'http://127.0.0.1:{self.server.server_port}',
                 AI_BYOK_GATEWAY_PROJECT_KEY=PROJECT_KEY,
                 AI_BYOK_GATEWAY_PROJECT_KEY_FILE=''):
-            return send_model_probe(provider_key=PROVIDER_KEY, model_alias='deepseek/deepseek-chat', probe_kind=kind)
+            return send_model_probe(provider_key=PROVIDER_KEY, model_alias=model_alias, probe_kind=kind)
+
+    def test_flash_short_probes_disable_default_thinking(self):
+        for kind in ('text', 'tools'):
+            result = self.send(kind, model_alias='deepseek/deepseek-flash')
+            self.assertEqual(result.status, 'succeeded')
+        self.assertEqual(len(self.server.seen), 2)
+        for _path, _bearer, payload in self.server.seen:
+            self.assertEqual(payload['thinking'], {'type': 'disabled'})
+            self.assertLessEqual(payload['max_tokens'], 32)
+        self.assertEqual(self.server.seen[1][2]['tool_choice']['function']['name'], 'byok_probe')
 
     def test_text_and_tool_one_shots_have_bounded_fixed_request_shapes(self):
         for kind in ('text', 'tools'):
@@ -87,6 +104,7 @@ class SyntheticGatewayTransportTests(TestCase):
             self.assertEqual(payload['model'], 'deepseek/deepseek-chat')
             self.assertIs(payload['stream'], False)
             self.assertLessEqual(payload['max_tokens'], 32)
+            self.assertNotIn('thinking', payload)
         self.assertEqual(self.server.seen[1][2]['tool_choice']['function']['name'], 'byok_probe')
 
     def test_rate_limit_redirect_and_incomplete_reply_never_verify(self):

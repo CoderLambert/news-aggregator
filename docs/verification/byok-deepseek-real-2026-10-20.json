@@ -1,0 +1,461 @@
+{
+  "baseline": "976fe662c5a952086a04c9edcab0432fa3bd4fcc",
+  "provider": "DeepSeek",
+  "endpoint": "https://api.deepseek.com/chat/completions",
+  "returned_model": "deepseek-flash",
+  "deployment_region": "provider-managed; not exposed by response",
+  "requests": 6,
+  "max_requests": 6,
+  "max_output_tokens": 256,
+  "actual_completion_tokens_known": 152,
+  "actual_prompt_tokens_known": 394,
+  "request_4_usage": "unknown (HTTP 400)",
+  "real_egress": [
+    {
+      "event": "dispatch",
+      "max_tokens": 256,
+      "model": "deepseek-flash",
+      "number": 1,
+      "previous_assistant": [],
+      "reasoning_effort": null,
+      "stream": false,
+      "thinking": {
+        "type": "disabled"
+      },
+      "timestamp": 1792433572.909407,
+      "tool_results": 0
+    },
+    {
+      "content_chars": 13,
+      "done": false,
+      "event": "response",
+      "finishes": [
+        "stop"
+      ],
+      "http_status": 200,
+      "model": "deepseek-flash",
+      "number": 1,
+      "tool_calls": 0,
+      "usage": {
+        "completion_tokens": 4,
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 11,
+        "prompt_tokens": 11,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 15
+      },
+      "reasoning_present": false
+    },
+    {
+      "event": "dispatch",
+      "max_tokens": 256,
+      "model": "deepseek-flash",
+      "number": 2,
+      "previous_assistant": [],
+      "reasoning_effort": null,
+      "stream": true,
+      "thinking": {
+        "type": "disabled"
+      },
+      "timestamp": 1792433580.7107127,
+      "tool_results": 0
+    },
+    {
+      "done": true,
+      "event": "response",
+      "finishes": [
+        "stop"
+      ],
+      "http_status": 200,
+      "model": "deepseek-flash",
+      "number": 2,
+      "usage": {
+        "completion_tokens": 3,
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 11,
+        "prompt_tokens": 11,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 14
+      },
+      "reasoning_present": false
+    },
+    {
+      "event": "dispatch",
+      "max_tokens": 1,
+      "model": "deepseek-flash",
+      "number": 3,
+      "previous_assistant": [],
+      "reasoning_effort": null,
+      "stream": true,
+      "thinking": {
+        "type": "disabled"
+      },
+      "timestamp": 1792433587.355122,
+      "tool_results": 0
+    },
+    {
+      "done": true,
+      "event": "response",
+      "finishes": [
+        "length"
+      ],
+      "http_status": 200,
+      "model": "deepseek-flash",
+      "number": 3,
+      "usage": {
+        "completion_tokens": 1,
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 13,
+        "prompt_tokens": 13,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 14
+      },
+      "reasoning_present": false
+    },
+    {
+      "event": "dispatch",
+      "max_tokens": 256,
+      "model": "deepseek-flash",
+      "number": 4,
+      "previous_assistant": [],
+      "reasoning_effort": null,
+      "stream": false,
+      "thinking": {
+        "type": "enabled"
+      },
+      "timestamp": 1792433602.285512,
+      "tool_results": 0
+    },
+    {
+      "done": false,
+      "error_type": "invalid_request_error",
+      "event": "response",
+      "finishes": [],
+      "http_status": 400,
+      "model": null,
+      "number": 4,
+      "usage": null,
+      "reasoning_present": false
+    },
+    {
+      "event": "dispatch",
+      "max_tokens": 256,
+      "model": "deepseek-flash",
+      "number": 5,
+      "previous_assistant": [],
+      "reasoning_effort": null,
+      "stream": false,
+      "thinking": {
+        "type": "enabled"
+      },
+      "timestamp": 1792433624.7038221,
+      "tool_results": 0
+    },
+    {
+      "content_chars": 0,
+      "done": false,
+      "event": "response",
+      "finishes": [
+        "tool_calls"
+      ],
+      "http_status": 200,
+      "model": "deepseek-flash",
+      "number": 5,
+      "tool_calls": 1,
+      "usage": {
+        "completion_tokens": 25,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 305,
+        "prompt_tokens": 305,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 330
+      },
+      "reasoning_present": false
+    },
+    {
+      "event": "dispatch",
+      "max_tokens": 256,
+      "model": "deepseek-flash",
+      "number": 6,
+      "previous_assistant": [],
+      "reasoning_effort": null,
+      "stream": false,
+      "thinking": {
+        "type": "enabled"
+      },
+      "timestamp": 1792433675.409596,
+      "tool_results": 0
+    },
+    {
+      "content_chars": 97,
+      "done": false,
+      "event": "response",
+      "finishes": [
+        "stop"
+      ],
+      "http_status": 200,
+      "model": "deepseek-flash",
+      "number": 6,
+      "tool_calls": 0,
+      "usage": {
+        "completion_tokens": 119,
+        "completion_tokens_details": {
+          "reasoning_tokens": 80
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 54,
+        "prompt_tokens": 54,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 173
+      },
+      "reasoning_present": true
+    }
+  ],
+  "synthetic_business_terminal_checks": [
+    {
+      "check": "eof_without_stop",
+      "status": "PASS"
+    },
+    {
+      "check": "length_terminal",
+      "status": "PASS"
+    },
+    {
+      "check": "empty_after_stop",
+      "status": "PASS"
+    },
+    {
+      "check": "clean_stop",
+      "status": "PASS"
+    }
+  ],
+  "overall": "PARTIAL",
+  "tool_roundtrip": "NOT_RUN",
+  "reasoning_roundtrip": "NOT_RUN",
+  "two_distinct_provider_keys": "NOT_RUN",
+  "sdk_results_as_recorded": [
+    {
+      "httpx": "2.13.1",
+      "project_model_restricted": true,
+      "sdk": "3.28.0",
+      "stage": "project_setup",
+      "status": "PASS",
+      "timestamp": 1792433519.856313
+    },
+    {
+      "error": "InternalServerError",
+      "http_status": 500,
+      "stage": "text",
+      "status": "FAIL",
+      "timestamp": 1792433530.5716336
+    },
+    {
+      "http_status": 400,
+      "stage": "missing_provider_key",
+      "status": "PASS",
+      "timestamp": 1792433566.5441399
+    },
+    {
+      "http_status": 403,
+      "stage": "unauthorized_model",
+      "status": "PASS",
+      "timestamp": 1792433566.5491898
+    },
+    {
+      "ready": true,
+      "requests": 0,
+      "stage": "preflight_egress",
+      "status": "PASS",
+      "timestamp": 1792433566.5499308
+    },
+    {
+      "content_chars": 13,
+      "expected_text": true,
+      "finish": "stop",
+      "model": "deepseek/deepseek-flash",
+      "reasoning_present": false,
+      "stage": "text",
+      "status": "PASS",
+      "timestamp": 1792433574.4923398,
+      "tool_calls": 0,
+      "usage": {
+        "completion_tokens": 4,
+        "completion_tokens_details": null,
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 11,
+        "prompt_tokens": 11,
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cache_write_tokens": null,
+          "cached_tokens": 0,
+          "image_tokens": null,
+          "text_tokens": null
+        },
+        "total_tokens": 15
+      }
+    },
+    {
+      "content_chars": 9,
+      "error": null,
+      "finishes": [
+        "stop"
+      ],
+      "max_tokens": 256,
+      "stage": "stream",
+      "status": "PASS",
+      "timestamp": 1792433581.8533378,
+      "usage": {
+        "completion_tokens": 3,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": null,
+          "text_tokens": 3
+        },
+        "cost": 3.45e-06,
+        "prompt_tokens": 11,
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cache_write_tokens": null,
+          "cached_tokens": 0,
+          "image_tokens": null,
+          "text_tokens": null
+        },
+        "total_tokens": 14
+      }
+    },
+    {
+      "content_chars": 3,
+      "error": null,
+      "finishes": [],
+      "max_tokens": 1,
+      "stage": "length",
+      "status": "FAIL",
+      "timestamp": 1792433588.8628752,
+      "usage": null
+    },
+    {
+      "error": "BadRequestError",
+      "http_status": 400,
+      "stage": "tools",
+      "status": "FAIL",
+      "timestamp": 1792433603.0484288
+    },
+    {
+      "content_chars": 0,
+      "finish": "tool_calls",
+      "model": "deepseek/deepseek-flash",
+      "reasoning_present": false,
+      "stage": "tool_request",
+      "status": "FAIL",
+      "timestamp": 1792433626.4120204,
+      "tool_calls": 1,
+      "usage": {
+        "completion_tokens": 25,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": null,
+          "text_tokens": null
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 305,
+        "prompt_tokens": 305,
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cache_write_tokens": null,
+          "cached_tokens": 0,
+          "image_tokens": null,
+          "text_tokens": null
+        },
+        "total_tokens": 330
+      }
+    },
+    {
+      "content_chars": 97,
+      "finish": "stop",
+      "model": "deepseek/deepseek-flash",
+      "reasoning_present": true,
+      "stage": "thinking",
+      "status": "PASS",
+      "timestamp": 1792433677.3206584,
+      "tool_calls": 0,
+      "usage": {
+        "completion_tokens": 119,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 80,
+          "rejected_prediction_tokens": null,
+          "text_tokens": null
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 54,
+        "prompt_tokens": 54,
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cache_write_tokens": null,
+          "cached_tokens": 0,
+          "image_tokens": null,
+          "text_tokens": null
+        },
+        "total_tokens": 173
+      }
+    }
+  ],
+  "request_4_diagnostic": "Thinking mode does not support this tool_choice; HTTP 400; no fallback.",
+  "length_diagnostic": "Proxy logged 502 T00_STREAM_TERMINAL_UNVERIFIED; SDK emitted partial content without stop and ended without raising. Business validator rejects missing stop (four independent synthetic checks).",
+  "tool_harness_limitation": "The native tool call was valid but had no reasoning_content. The probe required nonempty reasoning and returned before dispatching the tool result; tool final and reasoning continuation are NOT_RUN.",
+  "credentials": "User-supplied temporary API key; no subscription credential used. Billing class cannot be inferred from key syntax alone.",
+  "sdk_environment": {
+    "python": "3.12.14",
+    "openai": "3.28.0",
+    "httpx2": "2.13.1",
+    "max_retries": 0,
+    "trust_env": false,
+    "follow_redirects": false
+  },
+  "proxy_image": "ghcr.io/berriai/litellm:v1.105.0@sha256:60947db020b57e204823d3fbc8bb295c85be890d7c9adcc77fb4f5fc2fe410b2",
+  "database_image": "postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea",
+  "runtime_overrides": [
+    "Disposable Compose project, generated local project key and database secrets; no application DB or production configuration used.",
+    "Only deepseek/deepseek-flash model route retained.",
+    "Proxy attached only to internal Docker networks. Request observer is its sole provider route.",
+    "api_base redirected to disposable observer; observer forwards only POST /chat/completions to https://api.deepseek.com with TLS validation and no redirect/retry.",
+    "Observer fsyncs dispatch count before send, blocks after six, enforces model and max_tokens 1..256.",
+    "SDK ingress relayed through observer because the internal-only Proxy port was not published by this Docker engine."
+  ],
+  "cleanup": {
+    "provider_key_file_removed": true,
+    "containers_remaining": [],
+    "volumes_remaining": [],
+    "networks_remaining": []
+  },
+  "harness_sha256": {
+    "client.py": "5bb29ce0c8c0774dc55696205e9d616c65de26a703e030662fdf1221c79a9da2",
+    "recorder.py": "7cc641db0117fb17eea15dbab237aa04afd4228a2fbfdb2523be726cb5287693",
+    "setup.py": "11fba452863346a1cd88ef0184f90460cd70ecbd7d3613f3b6537d122544535e",
+    "audit.py": "311b6a52cf84e644beafd387eddd985bcd2209b1b1d95c615ab2329985971553",
+    "proxy.yaml": "c667be3c9a8a4aa498eb53916b4e3506cddbb2b152ce801f39d95bc6ff9cabdd",
+    "compose.yaml": "daa6cfdb47fba0ab72da5ae08c7b3219f9cc9441afe78b7153a9c2aceeded1cc",
+    "provider_key_guard.py": "6bc413514712d7665a0b49fe1187ac50499621b2fe6f66f26baeb5eb7818f92f",
+    "entrypoint.sh": "fa59733fbdb2a2cca12a3c03054824ffc8053a521b95463905a412688231a915"
+  },
+  "local_start": "2026-10-20T02:12:52.909407+08:00",
+  "local_end": "2026-10-20T02:14:35.409596+08:00"
+}
