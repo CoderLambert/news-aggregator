@@ -1,6 +1,5 @@
 """Explicit catalog initialization; directory reads never create sources."""
-from api.services.source_policy import policy_for_key, policy_for_name
-from api.services.source_registry import runtime_registry
+from api.services.source_policy import policy_for_name, all_policies
 
 # Known publisher metadata, not a language/market inference. Unknown countries
 # remain empty; country of a Chinese edition is not automatically China.
@@ -19,11 +18,8 @@ def subscription_status(source):
             return 'active', ''
         return 'inactive', 'connecting' if links.exists() else 'unconfigured_source'
     policy = policy_for_name(source.name)
-    if not policy:
-        return 'inactive', 'unregistered_source'
-    if policy.unsupported_reason or policy.key not in runtime_registry():
-        return 'inactive', policy.unsupported_reason or 'unregistered_source'
-    return 'active', ''
+    return 'inactive', (policy.unsupported_reason if policy else '') or 'legacy_ingestion_retired'
+
 
 
 def catalog_defaults(policy):
@@ -41,7 +37,8 @@ def catalog_defaults(policy):
 def sync_channel_catalog():
     from api.models import Source
     from api.services.sector_feeds import SECTOR_KEYS
-    for key in dict.fromkeys([*runtime_registry(), *sorted(SECTOR_KEYS)]):
-        policy = policy_for_key(key)
+    for policy in all_policies():
+        if policy.unsupported_reason and policy.key not in SECTOR_KEYS:
+            continue
         # Explicit/manual existing values are never overwritten by a GET or sync.
         Source.objects.get_or_create(name=policy.name, defaults=catalog_defaults(policy))

@@ -5,8 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
 COMPOSE_FILE="$PROJECT_ROOT/compose.prod.yaml"
 WORKSPACE_COMPOSE_FILE="$PROJECT_ROOT/compose.workspace.prod.yaml"
-STOP_SERVICES=(full-content crawler indexer app)
-TARGET_WORKERS=(crawler indexer)
+TARGET_WORKERS=(indexer)
 WORKER_SERVICES_OVERRIDE=""
 WORKER_SERVICES_EXPLICIT=0
 EXECUTE=0
@@ -62,7 +61,7 @@ cleanup() {
     local status=$?
     trap - EXIT
     if ((WINDOW_STARTED && !COMPLETE)); then
-        if ! compose_call stop --timeout 45 "${STOP_SERVICES[@]}" >/dev/null 2>&1; then
+        if ! python3 "$SCRIPT_DIR/release_manifest.py" project-writers --project "$PROJECT" --stop >/dev/null 2>&1; then
             printf 'rollback: failed to confirm fail-closed stop for this Compose project.\n' >&2
         fi
         if ! restore_current_if_needed; then
@@ -182,7 +181,16 @@ if ((USE_WORKSPACE_OVERLAY)); then
     [[ -f "$WORKSPACE_COMPOSE_FILE" && ! -L "$WORKSPACE_COMPOSE_FILE" ]] \
         || fail 'workspace worker capability requires compose.workspace.prod.yaml.'
     COMPOSE+=(-f "$WORKSPACE_COMPOSE_FILE")
-    STOP_SERVICES=(channel-worker full-content crawler indexer app)
+fi
+USE_LEGACY_OVERLAY=0
+for service in "${TARGET_WORKERS[@]}"; do
+    [[ "$service" == crawler || "$service" == full-content ]] && USE_LEGACY_OVERLAY=1
+done
+if ((USE_LEGACY_OVERLAY)); then
+    LEGACY_COMPOSE_FILE="$PROJECT_ROOT/compose.legacy-workers.prod.yaml"
+    [[ -f "$LEGACY_COMPOSE_FILE" && ! -L "$LEGACY_COMPOSE_FILE" ]] \
+        || fail 'historical worker capability requires compose.legacy-workers.prod.yaml.'
+    COMPOSE+=(-f "$LEGACY_COMPOSE_FILE")
 fi
 compose_call() {
     NEWSHUB_IMAGE="$IMAGE" NEWSHUB_ENV_FILE="$ENV_FILE" "${COMPOSE[@]}" "$@"
@@ -248,7 +256,7 @@ if ((${#filtered_ids[@]} == 1)); then
 fi
 
 WINDOW_STARTED=1
-compose_call stop --timeout 45 "${STOP_SERVICES[@]}" \
+python3 "$SCRIPT_DIR/release_manifest.py" project-writers --project "$PROJECT" --stop \
     || fail 'could not stop all project writers; project remains stopped.'
 running="$(docker ps --quiet --filter "volume=$DB_VOLUME")" \
     || fail 'could not verify that database volume writers stopped.'

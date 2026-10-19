@@ -19,7 +19,7 @@ from rest_framework.renderers import JSONRenderer
 from rest_framework.exceptions import APIException, ValidationError as ApiValidationError
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django_filters import rest_framework as django_filters
-from .models import Category, Source, News, ChatSession, BlockedNews, ProviderComparison
+from .models import Category, Source, News, ChatSession, BlockedNews
 from .services.chat_history import (
     ChatConflict,
     append_assistant_message,
@@ -42,13 +42,10 @@ from .serializers import (
     CategorySerializer, SourceSerializer,
     NewsListSerializer, NewsDetailSerializer,
     BlockedNewsSerializer,
-    ProviderComparisonRunSerializer, ProviderComparisonSerializer,
 )
 # Module-level import so tests can patch `api.views.get_openai_client`
 from api.services.llm_translator import get_openai_client, get_clients, stream_chat
-from api.services.article_fetcher import FetchError, fetch_article_markdown
 from api.services.chatgpt_subscription import invalidate_authorization_attempts_for_session
-from api.crawler_views import IsActiveSuperuser
 
 logger = logging.getLogger(__name__)
 
@@ -61,13 +58,10 @@ SUGGESTED_QUESTIONS_FALLBACK = [
 
 
 # Compatibility import for view-level callers; services never import api.views.
-from api.services.article_content import pick_chat_context, context_scope, request_full_content
-from api.services.full_content_status import has_full_content, filter_readable_full_content, fetch_eligibility, annotate_full_content_availability
+from api.services.article_content import pick_chat_context, context_scope
+from api.services.article_body_state import has_full_content, filter_readable_full_content, annotate_full_content_availability
 
 
-def ensure_full_content(news, execution_guard=None):
-    """Compatibility entrypoint: read or enqueue, without article network IO."""
-    return request_full_content(news, execution_guard=execution_guard)
 
 
 class PolicyNoStoreMixin:
@@ -479,72 +473,10 @@ class NewsListView(generics.ListAPIView):
         )
 
 
-class ProviderComparisonListCreateView(generics.ListCreateAPIView):
-    queryset = ProviderComparison.objects.select_related('news', 'news__source').all()
-    serializer_class = ProviderComparisonSerializer
-    pagination_class = StandardPagination
-    permission_classes = [IsActiveSuperuser]
-    filter_backends = [filters.OrderingFilter]
-    ordering_fields = ['created_at', 'provider', 'ok', 'quality_score', 'elapsed_ms']
-    ordering = ['-created_at']
-
-    def list(self, request, *args, **kwargs):
-        response = super().list(request, *args, **kwargs)
-        from api.services.article_fetcher.comparison import adapted_sites, comparison_metrics
-        response.data['adapted_sites'] = adapted_sites()
-        response.data['metrics'] = comparison_metrics(self.filter_queryset(self.get_queryset()))
-        return response
-
-    @method_decorator(csrf_protect)
-    def post(self, request, *args, **kwargs):
-        run_serializer = ProviderComparisonRunSerializer(data=request.data)
-        run_serializer.is_valid(raise_exception=True)
-        data = run_serializer.validated_data
-
-        from api.services.article_fetcher.comparison import compare_providers, validate_comparison_url
-        try:
-            if data.get('url'):
-                validate_comparison_url(data['url'])
-            run_id, comparisons = compare_providers(
-                news_id=data.get('news_id'),
-                url=data.get('url'),
-                expected_title=data.get('expected_title'),
-                summary=data.get('summary'),
-                provider_names=data.get('providers'),
-            )
-        except News.DoesNotExist:
-            return Response({'news_id': 'News not found'}, status=status.HTTP_404_NOT_FOUND)
-        except ValueError as exc:
-            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-        result_serializer = self.get_serializer(comparisons, many=True)
-        return Response(
-            {'run_id': run_id, 'count': len(comparisons), 'results': result_serializer.data},
-            status=status.HTTP_201_CREATED,
-        )
 
 
-class ProviderComparisonDetailView(generics.RetrieveAPIView):
-    queryset = ProviderComparison.objects.select_related('news', 'news__source').all()
-    serializer_class = ProviderComparisonSerializer
-    permission_classes = [IsActiveSuperuser]
 
 
-class ProviderComparisonRetestView(generics.GenericAPIView):
-    queryset = ProviderComparison.objects.select_related('news').all()
-    serializer_class = ProviderComparisonSerializer
-    permission_classes = [IsActiveSuperuser]
-
-    @method_decorator(csrf_protect)
-    def post(self, request, pk):
-        comparison = self.get_object()
-        from api.services.article_fetcher.comparison import retest_comparison
-        run_id, comparisons = retest_comparison(comparison)
-        serializer = self.get_serializer(comparisons, many=True)
-        return Response(
-            {'run_id': run_id, 'count': len(comparisons), 'results': serializer.data},
-            status=status.HTTP_201_CREATED,
-        )
 
 
 class NewsDetailView(ArticleAccessMixin, generics.RetrieveAPIView):
@@ -553,55 +485,18 @@ class NewsDetailView(ArticleAccessMixin, generics.RetrieveAPIView):
 
 
 class NewsFetchFullView(ArticleAccessMixin, generics.GenericAPIView):
-    """Read cached content or persist one shared refresh intent."""
+    """Retired collector admission; authorize the article before reporting removal."""
     queryset = News.objects.select_related('source', 'category').prefetch_related('source_items').all()
     serializer_class = NewsDetailSerializer
     permission_classes = [IsAuthenticated]
 
     @method_decorator(csrf_protect)
     def post(self, request, pk):
-        import math
-        from django.utils import timezone
-        news = self.get_object()
-        if news.body_owner_binding_id:
-            return Response({'error_code': 'rss_refetch_required', 'error': '请使用RSS正文修复操作。'}, status=410)
-        force = request.data.get('force') is True
-        from api.services.body_access import can_view_article_body
-        privileged = can_view_article_body(request.user)
-        if get_stored_article(request.user, news.pk).scope == 'full' and not force:
-            return Response(self.get_serializer(news).data)
-        owner_source_id = news.body_owner_source_id or (news.source_id if news.body_owner_binding_id is None else None)
-        if not authorized_sources(request.user, body=True).filter(
-                pk=owner_source_id, publication__owner='legacy').exists():
-            return Response({'error_code': 'reading_policy', 'error': '当前来源政策不允许获取正文。'}, status=403)
-        rejection = fetch_eligibility(news, privileged=privileged)
-        if rejection or news.full_content_fetch_status == 'blocked' or (news.full_content_fetch_status == 'unsupported' and not privileged):
-            data = dict(self.get_serializer(news).data)
-            data.update(error_code=rejection or news.full_content_error_code or 'unsupported',
-                        error='该文章身份或来源策略暂不支持正文获取。')
-            return Response(data, status=422)
-        if privileged:
-            News.objects.filter(pk=news.pk, url=news.url, full_content_revision=news.full_content_revision).update(full_content_requested_by=request.user)
-            news.refresh_from_db()
-        # Requests reaching this endpoint come from an article reader. Keep
-        # them ahead of automatic backfill work, including when the same task
-        # was already queued at background priority.
-        outcome = request_full_content(news, force=force, priority=10)
-        news.refresh_from_db()
-        data = dict(self.get_serializer(news).data)
-        if outcome == 'unavailable':
-            data.update(error_code='full_content_worker_unavailable', error='正文获取服务暂不可用，请稍后重试。')
-            return Response(data, status=503)
-        if outcome == 'rejected':
-            data.update(error_code='retry_exhausted' if news.full_content_retry_count >= 5 else news.full_content_error_code or 'unsupported', error='该文章暂不支持正文获取。')
-            return Response(data, status=422)
-        if outcome == 'cached':
-            return Response(data)
-        response = Response(data, status=202)
-        response['Location'] = request.build_absolute_uri(f'/api/news/{news.pk}/')
-        wait = (news.full_content_next_attempt_at - timezone.now()).total_seconds() if news.full_content_next_attempt_at else 2
-        response['Retry-After'] = str(max(2, math.ceil(wait)))
-        return response
+        self.get_object()
+        return Response({
+            'error_code': 'legacy_fetch_retired',
+            'error': '文章内容现在由订阅源引擎更新，请使用订阅源刷新。',
+        }, status=410)
 
 
 def _translation_job_response(request, news, stored, job):
@@ -1249,7 +1144,7 @@ class NewsSuggestedQuestionsView(ArticleAccessMixin, generics.GenericAPIView):
             questions = [q.strip() for q in questions]
 
             require_current(request.user, stored)
-            from api.services.full_content_status import save_suggested_questions
+            from api.services.article_body_state import save_suggested_questions
             # Existing CAS fences slow, superseded suggestions against the body revision.
             if not save_suggested_questions(news, {'questions': questions, 'article_context': metadata}, expected_revision=expected_content_revision):
                 # Do not return a superseded generated answer as if it matched

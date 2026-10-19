@@ -106,7 +106,7 @@ def test_optional_overlay_has_private_pg_scoped_secrets_and_loopback_api():
     base = yaml.safe_load((ROOT / 'compose.prod.yaml').read_text())['services']
     assert base['app']['network_mode'] == 'host'
     assert base['app']['secrets'] == ['ai_byok_gateway_project_key']
-    assert {'crawler', 'indexer', 'full-content'} <= set(base)
+    assert set(base) == {'app', 'migrate', 'indexer'}
     workspace = yaml.safe_load((ROOT / 'compose.workspace.prod.yaml').read_text())
     assert workspace['services']['channel-worker']['network_mode'] == 'host'
 

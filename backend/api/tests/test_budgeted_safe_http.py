@@ -8,9 +8,8 @@ from django.utils import timezone
 
 from api.models import RequestBudget
 from api.services import request_budget as budget
-from api.services.article_fetcher import safe_http, core
-from api.services.article_fetcher.execution import execution_scope, ExecutionStopped
-from api.services.article_fetcher.types import FetchResult, FetchError
+from api.services import safe_http
+from api.services.http_execution import execution_scope, ExecutionStopped
 from api.tests.test_safe_http import FakeNetwork, _response
 
 
@@ -68,33 +67,8 @@ def test_fifth_request_can_finish_but_nested_calls_cannot_reset_counter(monkeypa
     assert not RequestBudget.objects.exclude(lease_token='').exists()
 
 
-def test_typed_429_terminates_provider_chain_before_reader():
-    calls = []
-    class Origin:
-        name = 'origin'
-        def fetch(self, *args, **kwargs):
-            calls.append('origin')
-            return FetchResult(False, self.name, error_code='rate_limited', http_status=429,
-                               retry_after_at=timezone.now() + timedelta(seconds=60), retryable=True)
-    class Reader:
-        name = 'reader'
-        def fetch(self, *args, **kwargs):
-            calls.append('reader')
-            raise AssertionError('429 must stop fallback')
-    with pytest.raises(FetchError) as error:
-        core.fetch_article_markdown('https://dev.to/team/article', providers=[Origin(), Reader()])
-    assert calls == ['origin'] and error.value.error_code == 'rate_limited'
 
 
-def test_budget_deferred_propagates_through_provider_catch_all(monkeypatch):
-    from api.services.article_fetcher.providers import ScrapyHTTPProvider
-    deferred = budget.BudgetDeferred(timezone.now() + timedelta(seconds=60), ['host:dev.to'])
-    def fail(*args, **kwargs):
-        raise deferred
-    monkeypatch.setattr(ScrapyHTTPProvider, '_download', fail)
-    with pytest.raises(budget.BudgetDeferred) as error:
-        core.fetch_article_markdown('https://dev.to/team/article', providers=[ScrapyHTTPProvider()])
-    assert error.value is deferred
 
 
 @pytest.mark.django_db
@@ -107,18 +81,6 @@ def test_oversized_compressed_429_still_commits_cooldown_from_headers(monkeypatc
     assert network.sockets[0].closed
 
 
-def test_invalid_typed_candidate_is_a_validation_failure_without_mutating_frozen_result():
-    from api.services.article_fetcher.types import FullContentCandidate
-    candidate = FullContentCandidate('devto', '17', 'https://dev.to/team/article', 'https://dev.to/api/articles/17',
-                                     None, 'Title', 'article', 'body_markdown', 'markdown', 'partial',
-                                     'Incomplete body.', None, None, timezone.now())
-    class Provider:
-        name = 'devto'
-        def fetch(self, *args, **kwargs):
-            return FetchResult(True, self.name, candidate=candidate)
-    with pytest.raises(FetchError) as error:
-        core.fetch_article_markdown(candidate.target_url, providers=[Provider()])
-    assert error.value.error_code == 'body_partial'
 
 
 @pytest.mark.django_db
@@ -141,11 +103,3 @@ def test_reader_redirect_keeps_logical_origin_scope(monkeypatch):
     assert RequestBudget.objects.filter(pk__startswith='credential:jina:', cooldown_until__isnull=False).count() == 1
     assert b'Authorization:' not in network.sockets[1].sent
     assert not RequestBudget.objects.exclude(lease_token='').exists()
-
-
-def test_deterministic_capacity_and_identity_failures_are_not_retried():
-    from api.services.article_fetcher.types import transport_failure
-    for message in ('HTTP response exceeds size limit', 'Private or local URLs are not allowed'):
-        result = transport_failure(safe_http.UnsafeURL(message), provider='safe_http')
-        assert not result.retryable
-        assert result.error_code in {'unsupported', 'invalid_identity'}

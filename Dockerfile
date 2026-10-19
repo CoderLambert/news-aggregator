@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir --only-binary=:all: -r /app/backend/requirements-
     && chown -R 10001:10001 /var/lib/newshub /home/newshub
 COPY backend/ /app/backend/
 USER 10001:10001
-CMD ["python", "/app/backend/manage.py", "rss_runtime"]
+CMD ["python", "/app/backend/manage.py", "rss_sync_worker"]
 
 FROM node:22-bookworm-slim AS frontend-build
 WORKDIR /app/frontend
@@ -44,7 +44,6 @@ COPY backend/requirements.txt /app/backend/requirements.txt
 ARG NEWSHUB_PYPI_INDEX=https://pypi.org/simple
 RUN pip install --no-cache-dir -r /app/backend/requirements.txt --index-url "${NEWSHUB_PYPI_INDEX}"
 COPY backend/ /app/backend/
-COPY crawler/ /app/crawler/
 COPY start_waitress.py /app/start_waitress.py
 COPY scripts/docker-migrate.py /app/scripts/docker-migrate.py
 COPY --chmod=755 scripts/docker-entrypoint.sh /app/docker-entrypoint.sh
@@ -68,7 +67,7 @@ RUN groupadd --gid 10001 newshub \
         /var/lib/newshub/tts \
         /var/lib/newshub/runtime \
         /var/lib/newshub/model-cache \
-        /var/lib/newshub/logs/crawler \
+        /var/lib/newshub/logs \
     && chown -R 10001:10001 /var/lib/newshub /home/newshub
 USER 10001:10001
 

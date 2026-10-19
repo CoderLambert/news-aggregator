@@ -1,12 +1,11 @@
-"""Current readable context and shared enqueue intent, without request-time fetching."""
+"""Current stored context without collector work."""
 from api.tests.rss.reader_fixtures import public_legacy_article
 from unittest.mock import patch
 import pytest
 from django.contrib.auth.models import User
 from django.utils import timezone
 from api.models import News, Source, Category
-from api.services.article_content import pick_chat_context,request_full_content
-from api.views import ensure_full_content
+from api.services.article_content import pick_chat_context
 
 
 @pytest.fixture
@@ -39,35 +38,10 @@ def test_original_context_keeps_full_body_when_current_translation_exists(make_n
     assert pick_chat_context(news, translation_mode='original') == 'FULL_EN'
 
 
-def test_ensure_full_content_persists_intent_without_fetching(make_news):
-    news=make_news()
-    with patch('api.services.article_content.worker_health',return_value=True),patch('api.services.article_fetcher.fetch_article_markdown') as fetch:
-        assert ensure_full_content(news) == 'queued'
-    fetch.assert_not_called()
-    news.refresh_from_db()
-    assert news.full_content_fetch_status == 'queued' and news.full_content == ''
-    assert news.last_full_content_attempt is None
 
 
-def test_cancellation_before_enqueue_never_creates_task(make_news):
-    news=make_news()
-    def guard(): raise RuntimeError('controlled cancellation')
-    with pytest.raises(RuntimeError): ensure_full_content(news,execution_guard=guard)
-    news.refresh_from_db()
-    assert news.full_content_next_attempt_at is None and news.full_content_retry_count == 0
 
 
-def test_cancellation_after_enqueue_preserves_shared_durable_intent(make_news):
-    news=make_news()
-    calls=0
-    def guard():
-        nonlocal calls
-        calls+=1
-        if calls == 2: raise RuntimeError('controlled cancellation')
-    with patch('api.services.article_content.worker_health',return_value=True),pytest.raises(RuntimeError):
-        ensure_full_content(news,execution_guard=guard)
-    news.refresh_from_db()
-    assert news.full_content_fetch_status == 'queued' and news.full_content_retry_count == 0
 
 
 @pytest.mark.parametrize('full', [False,True])
@@ -80,7 +54,7 @@ def test_chat_prompt_and_stream_scope_agree_and_never_fetch_article(make_news,cl
         captured['evidence']=messages[1]['content']
         yield 'Answer.'
     with patch('api.services.ai_execution.personal_clients_for_user',return_value=[(object(),'model')]),patch('api.views.stream_chat',side_effect=stream), \
-         patch('api.services.article_content.worker_health',return_value=True),patch('api.services.article_fetcher.fetch_article_markdown') as fetch:
+         patch('socket.socket.connect', side_effect=AssertionError('publisher IO')) as fetch:
         response=client.post(f'/api/news/{news.pk}/chat/',{'question':'Question?'},content_type='application/json')
         text=b''.join(response.streaming_content).decode()
     fetch.assert_not_called()
@@ -108,8 +82,7 @@ def test_suggestions_use_summary_scope_without_waiting_for_article_http(make_new
                     return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='["q1","q2","q3"]'))])
     with patch('api.services.ai_execution.personal_clients_for_user',return_value=[(Provider(),'model')]), \
          patch('api.views.get_clients',side_effect=AssertionError('site model must not be used')), \
-         patch('api.services.article_content.worker_health',return_value=True), \
-         patch('api.services.article_fetcher.fetch_article_markdown') as fetch:
+         patch('socket.socket.connect', side_effect=AssertionError('publisher IO')) as fetch:
         response=client.post(f'/api/news/{news.pk}/suggested-questions/')
     fetch.assert_not_called()
     assert response.status_code == 200 and response.json()['context_scope'] == 'summary'

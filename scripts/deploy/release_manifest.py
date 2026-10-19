@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 REVISION_LABEL = "org.opencontainers.image.revision"
 PRODUCTION_USER = "10001:10001"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -51,7 +51,7 @@ def validate_manifest(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ManifestError('manifest must be an object')
     version = value.get('schema_version')
-    if type(version) is not int or version not in {1, 2, 3}:
+    if type(version) is not int or version not in {1, 2, 3, 4}:
         raise ManifestError('unsupported manifest schema version')
     fields = {
         "schema_version",
@@ -60,14 +60,16 @@ def validate_manifest(value: Any) -> dict[str, Any]:
         "migrations",
         "static_sha",
     }
-    if version in {2, 3}:
+    if version in {2, 3, 4}:
         fields.add('capabilities')
     if set(value) != fields:
         raise ManifestError("manifest fields are incomplete or unknown")
-    if version in {2, 3}:
+    if version in {2, 3, 4}:
         expected_capabilities = {'full_content_worker'}
-        if version == 3:
+        if version >= 3:
             expected_capabilities.add('channel_worker')
+        if version >= 4:
+            expected_capabilities.add('crawler_worker')
         if (not isinstance(value['capabilities'], dict) or
                 set(value['capabilities']) != expected_capabilities or
                 any(type(value['capabilities'][name]) is not bool for name in expected_capabilities)):
@@ -107,18 +109,23 @@ def full_content_capability(value):
     return value.get('capabilities', {}).get('full_content_worker', False)
 
 
+def crawler_worker_capability(value):
+    # Historical manifests predate retirement and always included the crawler.
+    return value.get('capabilities', {}).get('crawler_worker', value['schema_version'] < 4)
+
+
 def channel_worker_capability(value):
     return value.get('capabilities', {}).get('channel_worker', False)
 
 
-_CAPABILITY_QUERY = """import json; from pathlib import Path; root=Path('/app/backend'); required={'full_content_worker': ('api/management/commands/auto_fetch_full_content.py', 'api/management/commands/full_content_healthcheck.py', 'api/services/full_content_worker.py', 'api/services/article_content.py'), 'channel_worker': ('api/management/commands/channel_worker.py', 'api/management/commands/channel_worker_healthcheck.py')}; print(json.dumps({name: all((root / path).is_file() for path in paths) for name, paths in required.items()}, sort_keys=True))"""
+_CAPABILITY_QUERY = """import json; from pathlib import Path; root=Path('/app/backend'); required={'crawler_worker': ('api/management/commands/crawl_worker.py', 'api/management/commands/crawler_healthcheck.py'), 'full_content_worker': ('api/management/commands/auto_fetch_full_content.py', 'api/management/commands/full_content_healthcheck.py', 'api/services/full_content_worker.py', 'api/services/article_content.py'), 'channel_worker': ('api/management/commands/channel_worker.py', 'api/management/commands/channel_worker_healthcheck.py')}; print(json.dumps({name: all((root / path).is_file() for path in paths) for name, paths in required.items()}, sort_keys=True))"""
 
 
 def inspect_worker_capabilities(image):
     try:
         output = _docker_text('run', '--rm', '--pull=never', '--network', 'none', '--entrypoint', 'python', image, '-c', _CAPABILITY_QUERY)
         value = json.loads(output)
-        expected = {'full_content_worker', 'channel_worker'}
+        expected = {'full_content_worker', 'channel_worker', 'crawler_worker'}
         if set(value) != expected or any(type(value[name]) is not bool for name in expected):
             raise ValueError()
         return value
@@ -212,14 +219,50 @@ def sha256_exported_release(release_root: Path) -> str:
     return digest.hexdigest()
 
 
-def _docker_text(*args: str) -> str:
+def _docker_text(*args: str, timeout: int = 30) -> str:
     try:
         result = subprocess.run(
-            ["docker", *args], check=True, capture_output=True, text=True, timeout=30
+            ["docker", *args], check=True, capture_output=True, text=True, timeout=timeout
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise ManifestError(f"Docker image inspection failed ({type(exc).__name__})") from None
     return result.stdout.strip()
+
+
+def project_writers(project: str, *, stop: bool = False) -> list[str]:
+    """Select by immutable Compose labels, including roles absent from new YAML.
+
+    No containers or volumes are removed. Verify every returned identity before
+    stopping anything; unexpected metadata fails closed without targeting it.
+    """
+    if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,62}', project):
+        raise ManifestError('invalid Compose project')
+    services = ('rss-sync', 'channel-worker', 'full-content', 'crawler', 'indexer', 'app')
+    selected = []
+    for service in services:
+        output = _docker_text('ps', '--all', '--quiet',
+            '--filter', f'label=com.docker.compose.project={project}',
+            '--filter', f'label=com.docker.compose.service={service}')
+        for identity in output.splitlines():
+            if not re.fullmatch(r'[0-9a-f]{12,64}', identity):
+                raise ManifestError('invalid project writer container identity')
+            try:
+                labels = json.loads(_docker_text('inspect', '--format', '{{json .Config.Labels}}', identity))
+            except (ValueError, TypeError):
+                raise ManifestError('project writer labels are invalid') from None
+            if (not isinstance(labels, dict)
+                    or labels.get('com.docker.compose.project') != project
+                    or labels.get('com.docker.compose.service') != service):
+                raise ManifestError('project writer labels do not match requested project/role')
+            if identity in selected:
+                raise ManifestError('duplicate project writer container identity')
+            selected.append(identity)
+    if stop:
+        for identity in selected:
+            _docker_text('stop', '--time', '45', identity, timeout=60)
+            if _docker_text('inspect', '--format', '{{.State.Running}}', identity) != 'false':
+                raise ManifestError('project writer is still running')
+    return selected
 
 
 def inspect_production_image(image: str, release_sha: str) -> None:
@@ -370,13 +413,18 @@ def _parser() -> argparse.ArgumentParser:
     validate_static.add_argument("--expected-sha", required=True)
     workers = subparsers.add_parser('worker-services', help='read target worker services without Docker')
     workers.add_argument('--manifest', required=True, type=Path)
+    writers = subparsers.add_parser('project-writers', help='inspect or stop only this project writer containers, including retired roles')
+    writers.add_argument('--project', required=True)
+    writers.add_argument('--stop', action='store_true')
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        if args.command == "describe":
+        if args.command == 'project-writers':
+            print('\n'.join(project_writers(args.project, stop=args.stop)))
+        elif args.command == "describe":
             manifest = describe_image(args.image, args.sha)
             if args.output:
                 _write_new_json(args.output, manifest)
@@ -396,12 +444,15 @@ def main(argv: list[str] | None = None) -> int:
                 }
                 if manifest['schema_version'] >= 3:
                     manifest_capabilities['channel_worker'] = channel_worker_capability(manifest)
+                manifest_capabilities['crawler_worker'] = crawler_worker_capability(manifest)
                 if any(image_capabilities[name] != enabled for name, enabled in manifest_capabilities.items()):
                     raise ManifestError('image worker capability does not match manifest; regenerate its manifest')
             print(json.dumps(manifest, sort_keys=True))
         elif args.command == 'worker-services':
             manifest = load_manifest(args.manifest)
-            services = ['crawler', 'indexer']
+            services = ['indexer']
+            if crawler_worker_capability(manifest):
+                services.insert(0, 'crawler')
             if full_content_capability(manifest):
                 services.append('full-content')
             if channel_worker_capability(manifest):

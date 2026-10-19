@@ -19,7 +19,6 @@ from api.models import (
 from api.serializers import NewsDetailSerializer
 from api.tests.rss.reader_fixtures import public_legacy_article
 from api.services import article_content, shared_translations as shared
-from api.services.full_content_status import correct_article_identity
 from api.services.research import tools
 from api.services.tts_service import resolve_tts_content, TTSContentUnavailable
 from api.subscription_views import subscription_translation_response
@@ -38,9 +37,8 @@ def local_consumers(settings, monkeypatch):
     settings.PUBLIC_AI_ENABLED = True
     settings.CHATGPT_AUTH_MODE = 'local_oss'
     settings.DJANGO_ENV = 'development'
-    from api.services import article_fetcher
     fetch = Mock(side_effect=AssertionError('consumer must not fetch a publisher'))
-    monkeypatch.setattr(article_fetcher, 'fetch_article_markdown', fetch)
+    monkeypatch.setattr('socket.socket.connect', fetch)
     yield
     fetch.assert_not_called()
 
@@ -96,10 +94,9 @@ def quarantined(make_news):
         **shared.cache_key(news.pk, digest), status='running',
         started_at=timezone.now(), expires_at=timezone.now() + timedelta(minutes=1),
     )
-    from api.rss.legacy_fencing import capture_legacy_article
-    token = capture_legacy_article(news, initialize=True)
-    assert correct_article_identity(news, news.url + '-corrected', expected_url=news.url,
-                                    expected_revision=news.full_content_revision, legacy_token=token)
+    # Historical quarantined state is an input fixture; the retired repair writer is gone.
+    News.objects.filter(pk=news.pk).update(url=news.url + '-corrected',
+        full_content_state='missing', full_content_revision=news.full_content_revision + 1)
     news.refresh_from_db()
     assert news.full_content == BODY
     assert shared.source_hash(news.full_content) == digest
@@ -256,7 +253,7 @@ def test_research_search_full_content_filter_applies_after_all_search_modes(avai
 def test_research_read_does_not_enqueue_a_quarantined_body(make_news, monkeypatch):
     news = make_news(full_content_state='missing', full_content_fetch_status='pending', full_content_zh='')
     common_request = Mock(side_effect=AssertionError('research reads must not enqueue'))
-    monkeypatch.setattr(article_content, 'request_full_content', common_request)
+    monkeypatch.setattr('socket.socket.connect', common_request)
     report = tools._tool_fetch_article(news.pk)
     common_request.assert_not_called()
     news.refresh_from_db()
@@ -268,10 +265,11 @@ def test_research_read_does_not_enqueue_a_quarantined_body(make_news, monkeypatc
     assert news.full_content == BODY
 
 
-def test_research_read_is_independent_of_legacy_worker_health(make_news, monkeypatch):
+def test_research_read_is_independent_of_retired_worker_setting(make_news, monkeypatch, settings):
+    settings.FULL_CONTENT_WORKER_ENABLED = True
     news = make_news(full_content_state='missing', full_content_fetch_status='pending')
     health = Mock(side_effect=AssertionError('research reads do not use legacy workers'))
-    monkeypatch.setattr(article_content, 'worker_health', health)
+    monkeypatch.setattr('socket.socket.connect', health)
     report = tools._tool_fetch_article(news.pk)
     health.assert_not_called()
     assert report['task_outcome'] == 'stored'
@@ -287,7 +285,6 @@ def test_research_fetch_caps_excerpt_and_distinguishes_original_scope(make_news,
     text = 'A long source paragraph. ' * 800
     news = make_news(full_content_state=state, full_content=text, content=text,
                      content_zh='', full_content_zh='', full_content_fetch_status='network_error')
-    monkeypatch.setattr(article_content, 'worker_health', Mock(return_value=False))
 
     report = tools._tool_fetch_article(news.pk)
 

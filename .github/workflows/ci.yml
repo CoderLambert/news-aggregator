@@ -102,7 +102,7 @@ jobs:
           test "$(node -p 'process.versions.node.split(".")[0]')" = 22
           test -z "${DOCKER_HOST:-}"
           test ! -S /ci-docker/docker.sock
-          python3 -m compileall -q backend/api backend/newsaggregator crawler scripts/deploy ops/ci
+          python3 -m compileall -q backend/api backend/newsaggregator scripts/deploy ops/ci
           bash -n ops/ci/*.sh scripts/deploy/*.sh scripts/deploy/tests/*.sh
           python3 ops/ci/agent_rules.py
       - name: Restore cached frontend dependencies
@@ -131,7 +131,7 @@ jobs:
       - name: Fast Python and shell syntax
         run: |
           test "$(python3 -c 'import sys; print(".".join(map(str,sys.version_info[:2])))')" = 3.12
-          python3 -m compileall -q backend/api backend/newsaggregator crawler scripts/deploy ops/ci
+          python3 -m compileall -q backend/api backend/newsaggregator scripts/deploy ops/ci
           bash -n ops/ci/*.sh scripts/deploy/*.sh scripts/deploy/tests/*.sh
           python3 ops/ci/agent_rules.py
       - name: Reuse cached backend dependencies
@@ -171,7 +171,7 @@ jobs:
         # Run without fetching Python or npm dependencies. The frontend Runner
         # has Python 3.12, but NO DinD access or backend cache.
         run: |
-          python3 -m compileall -q backend/api backend/newsaggregator crawler scripts/deploy ops/ci
+          python3 -m compileall -q backend/api backend/newsaggregator scripts/deploy ops/ci
           bash -n ops/ci/*.sh scripts/deploy/*.sh scripts/deploy/tests/*.sh
           python3 ops/ci/agent_rules.py
       - name: Restore installed frontend deps from lockfile-keyed local cache

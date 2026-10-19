@@ -43,14 +43,11 @@ flock -u 9
 # The initial full xdist run failed 16 cases across them on separate workers.
 # Never relax the assertions; keep these files serial until their fixtures are
 # independently proven safe with per-worker databases.
+# T31 removes only tests whose collector implementations were retired.
+# The remaining state-sensitive modules stay serial; coverage/skip audits are unchanged.
 SERIAL_FILES=(
     backend/api/tests/test_smart_channel_workspace.py
     backend/api/tests/test_channels.py
-    backend/api/tests/test_fetch_full_command.py
-    backend/api/tests/test_crawler_dashboard_loading.py
-    backend/api/tests/test_source_registry.py
-    backend/api/tests/test_backfill_scrapy_command.py
-    backend/api/tests/test_crawler_readiness.py
 )
 EXCLUDE_ARGS=()
 for file in "${SERIAL_FILES[@]}"; do

@@ -5,8 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
 COMPOSE_FILE="$PROJECT_ROOT/compose.prod.yaml"
 WORKSPACE_COMPOSE_FILE="$PROJECT_ROOT/compose.workspace.prod.yaml"
-STOP_SERVICES=(full-content crawler indexer app)
-TARGET_WORKERS=(crawler indexer)
+TARGET_WORKERS=(indexer)
 EXECUTE=0
 FRESH=0
 ENV_FILE=""
@@ -63,7 +62,7 @@ cleanup() {
     local status=$?
     trap - EXIT
     if ((WINDOW_STARTED && !COMPLETE)); then
-        if ! compose_call stop --timeout 45 "${STOP_SERVICES[@]}" >/dev/null 2>&1; then
+        if ! python3 "$SCRIPT_DIR/release_manifest.py" project-writers --project "$PROJECT" --stop >/dev/null 2>&1; then
             printf 'deploy: failed to confirm fail-closed stop for this Compose project.\n' >&2
         fi
         if ! restore_old_static_if_needed; then
@@ -170,7 +169,16 @@ if ((USE_WORKSPACE_OVERLAY)); then
     [[ -f "$WORKSPACE_COMPOSE_FILE" && ! -L "$WORKSPACE_COMPOSE_FILE" ]] \
         || fail 'workspace worker capability requires compose.workspace.prod.yaml.'
     COMPOSE+=(-f "$WORKSPACE_COMPOSE_FILE")
-    STOP_SERVICES=(channel-worker full-content crawler indexer app)
+fi
+USE_LEGACY_OVERLAY=0
+for service in "${TARGET_WORKERS[@]}"; do
+    [[ "$service" == crawler || "$service" == full-content ]] && USE_LEGACY_OVERLAY=1
+done
+if ((USE_LEGACY_OVERLAY)); then
+    LEGACY_COMPOSE_FILE="$PROJECT_ROOT/compose.legacy-workers.prod.yaml"
+    [[ -f "$LEGACY_COMPOSE_FILE" && ! -L "$LEGACY_COMPOSE_FILE" ]] \
+        || fail 'historical worker capability requires compose.legacy-workers.prod.yaml.'
+    COMPOSE+=(-f "$LEGACY_COMPOSE_FILE")
 fi
 compose_call() {
     NEWSHUB_IMAGE="$IMAGE" NEWSHUB_ENV_FILE="$ENV_FILE" "${COMPOSE[@]}" "$@"
@@ -210,6 +218,9 @@ fi
 if ((FRESH)); then
     [[ ! -e "$ROOT/current" && ! -L "$ROOT/current" ]] \
         || fail '--fresh requires no existing current static release.'
+    project_writer_ids="$(python3 "$SCRIPT_DIR/release_manifest.py" project-writers --project "$PROJECT")" \
+        || fail 'could not inspect existing project writer containers.'
+    [[ -z "$project_writer_ids" ]] || fail '--fresh requires no existing project writers, including retired roles.'
     for service in app "${TARGET_WORKERS[@]}"; do
         existing="$("${COMPOSE[@]}" ps --all --quiet "$service")" \
             || fail "could not inspect existing Compose service $service."
@@ -273,7 +284,7 @@ if ((FRESH)); then
     }
     run_compose_migrate || fail 'one-shot database migration failed; project remains stopped.'
 else
-    compose_call stop --timeout 45 "${STOP_SERVICES[@]}" \
+    python3 "$SCRIPT_DIR/release_manifest.py" project-writers --project "$PROJECT" --stop \
         || fail 'could not stop all project writers; project remains stopped.'
     running="$(docker ps --quiet --filter "volume=$DB_VOLUME")" \
         || fail 'could not verify that database volume writers stopped.'

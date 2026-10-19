@@ -6,6 +6,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 from api.models import Category, Source, News, BlockedNews, ChannelSubscription, ChannelGroup, NewsPreference
 from api.services.channel_catalog import sync_channel_catalog
+from api.tests.rss.reader_fixtures import public_rss_source
 
 
 @override_settings(PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
@@ -25,8 +26,11 @@ class ChannelsTests(TestCase):
         self.outside_story = self.story(self.outside, 'Outside')
 
     def story(self, source, title, **kwargs):
-        return legacy_news(source=source, category=kwargs.pop('category', self.category), title=title,
+        news = legacy_news(source=source, category=kwargs.pop('category', self.category), title=title,
             content='shared query', title_zh='共享搜索', url=f'https://example.com/channel/{title}', publish_time=timezone.now(), **kwargs)
+        if source in (self.source, self.second, self.outside):
+            public_rss_source(source)
+        return news
 
     def subscribe(self, source_ids, action='subscribe', **extra):
         return self.client.post('/api/me/channel-subscriptions/', {'source_ids': source_ids, 'action': action, **extra}, format='json')
@@ -169,6 +173,7 @@ class ChannelsTests(TestCase):
 
     def test_directory_includes_zero_article_channels_and_retired_status_without_writes(self):
         sync_channel_catalog()
+        public_rss_source(Source.objects.create(name='Connected empty fixture', url='https://feed.example/empty'))
         retired = public_legacy(Source.objects.create(name='Reuters', url='https://reuters.com'))
         before = Source.objects.count()
         self.client.force_authenticate(None)

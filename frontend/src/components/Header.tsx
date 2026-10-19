@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { AlignLeft, GitCompareArrows, Heart, House, Languages, LogOut, Menu, Search, Settings, ShieldCheck, Type, X } from 'lucide-react'
+import { AlignLeft, Heart, House, Languages, LogOut, Menu, Search, Settings, ShieldCheck, Type, X } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import AuthModal from '@/components/AuthModal'
@@ -41,7 +41,6 @@ export default function Header() {
   const { capabilities } = useCapabilities()
   const accountsEnabled = capabilities.features.accounts.enabled
   const favoritesEnabled = capabilities.features.favorites.enabled
-  const comparisonsEnabled = capabilities.features.provider_comparisons.enabled
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [logoutError, setLogoutError] = useState('')
@@ -222,14 +221,10 @@ export default function Header() {
 
             <div className="my-1 border-t border-border" />
             <p className="px-3 pb-1 pt-2 text-xs font-medium text-muted-foreground">工具</p>
-            {comparisonsEnabled && user?.isSuperuser && <Button variant={isCurrent('/provider-comparisons') ? 'secondary' : 'ghost'} className="h-11 w-full justify-start" asChild>
-              <Link to="/provider-comparisons" aria-current={isCurrent('/provider-comparisons') ? 'page' : undefined} onClick={() => setMenuOpen(false)}>
-                <GitCompareArrows aria-hidden="true" />Provider 对比
-              </Link>
-            </Button>}
+
             {accountsEnabled && capabilities.features.admin.enabled && user?.isSuperuser ? (
               <Button variant={isCurrent('/admin') ? 'secondary' : 'ghost'} className="h-11 w-full justify-start" asChild>
-                <Link to="/admin/crawlers" aria-current={isCurrent('/admin') ? 'page' : undefined} onClick={() => setMenuOpen(false)}>
+                <Link to="/admin/rss" aria-current={isCurrent('/admin') ? 'page' : undefined} onClick={() => setMenuOpen(false)}>
                   <ShieldCheck aria-hidden="true" />管理控制台
                 </Link>
               </Button>

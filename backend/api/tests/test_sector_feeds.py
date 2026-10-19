@@ -9,31 +9,15 @@ from rest_framework.test import APIClient
 from api.models import Category, Source, News, NewsSourceItem, ChannelGroup, ChannelSubscription
 from api.services.source_policy import POLICIES
 from api.services.sector_feeds import SECTOR_KEYS
-from api.services.feed_support import parse_feed, feed_entry_item
 from api.services.energy_keywords import matches_new_energy
 from api.services.channel_catalog import subscription_status, catalog_defaults
-from api.tests.rss.legacy_fixtures import ingest_fixture as ingest_item
-from api.services.full_content_status import has_full_content, fetch_eligibility
+from api.services.article_body_state import has_full_content
 
 NOW = datetime(2026, 10, 13, tzinfo=timezone.utc)
 
 
-def item(key, **overrides):
-    policy = POLICIES[key]
-    entry = {'id': 'entry-1', 'title': 'Official source story', 'link': 'https://' + policy.domains[0] + '/news/1',
-        'summary': '<p>Public RSS excerpt.</p>', 'published': 'Tue, 13 Oct 2026 00:00:00 GMT', **overrides}
-    return feed_entry_item(entry, key, feed_url=policy.feed_url, effective_url=policy.feed_url,
-        request_started_at=NOW, version='rss20')
 
 
-@pytest.mark.parametrize('key', sorted(SECTOR_KEYS - {'ithome_energy', 'ifanr_energy'}))
-def test_sector_contracts_are_explicit_and_do_not_promote_embedded_body(key):
-    policy = POLICIES[key]
-    data = item(key, content=[{'type': 'text/html', 'value': '<p>Unreviewed full body.</p>'}])
-    assert data['category_name'] == policy.default_category
-    assert data['summary'] == 'Public RSS excerpt.'
-    assert 'body_candidate' not in data
-    assert not policy.html_allowed
 
 
 @pytest.mark.parametrize('title, expected', [
@@ -47,34 +31,10 @@ def test_energy_keywords_do_not_admit_generic_technology(title, expected):
     assert matches_new_energy(title) is expected
 
 
-def test_general_feed_filters_settle_as_skips_without_admitting_unrelated_items():
-    assert item('ithome_energy', title='光伏储能政策发布')['category_name'] == '新能源'
-    with pytest.raises(ValueError, match='keyword_filtered'):
-        item('ifanr_energy', title='手机电池续航提升')
 
 
-@pytest.mark.parametrize('key, raw, hour', [
-    ('fierce_healthcare', 'Oct 12, 2026 2:48pm', 18),
-    ('nih_news', 'Fri, 10/09/2026 - 09:30', 13),
-])
-def test_source_specific_dates_keep_real_day_and_mark_assumed_clock(key, raw, hour):
-    data = item(key, published=raw)
-    assert data['publish_time'].hour == hour
-    assert data['publish_time'].year == 2026
-    assert data['publish_time_inferred']
 
 
-def test_rss10_dc_date_and_two_digit_year_are_not_replaced_by_crawl_time():
-    body = b'''<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns="http://purl.org/rss/1.0/" xmlns:dc="http://purl.org/dc/elements/1.1/">
-    <channel rdf:about="https://www.nature.com/nm.rss"><title>Nature Medicine</title><link>https://www.nature.com/</link><description>Official journal</description></channel>
-    <item rdf:about="https://www.nature.com/articles/1"><title>Clinical research</title><link>https://www.nature.com/articles/1</link><description>Public abstract</description><dc:date>2026-10-12</dc:date></item></rdf:RDF>'''
-    parsed = parse_feed(body)
-    policy = POLICIES['nature_medicine']
-    data = feed_entry_item(parsed.entries[0], policy.key, feed_url=policy.feed_url, effective_url=policy.feed_url,
-        request_started_at=NOW, version=parsed.version)
-    assert data['publish_time'].day == 12 and data['publish_time_inferred']
-    data = item('nih_news', published='Fri, 09 Oct 26 09:30:00 -0400')
-    assert data['publish_time'].year == 2026 and not data['publish_time_inferred']
 
 
 @pytest.fixture
@@ -115,15 +75,14 @@ def test_catalog_regions_candidate_and_medical_summary_only(reading_data):
     news.full_content = 'Previously saved text'
     news.full_content_state = 'legacy'; news.save()
     assert not has_full_content(news)
-    assert fetch_eligibility(news) == 'unsupported'
     response = APIClient().get(f'/api/news/{news.pk}/')
     assert response.data['is_medical'] and response.data['reading_policy'] == 'rss_summary_only'
     assert response.data['full_content'] == '' and not response.data['has_full_content']
     user = User.objects.create_user('rss-reader')
     client = APIClient(); client.force_authenticate(user)
-    with patch('api.views.request_full_content') as fetch:
+    with patch('socket.socket.connect', side_effect=AssertionError('publisher IO')) as fetch:
         response = client.post(f'/api/news/{news.pk}/fetch-full/', {}, format='json')
-    assert response.status_code == 403
+    assert response.status_code == 410
     fetch.assert_not_called()
 
 
@@ -164,9 +123,8 @@ def test_overlapping_publisher_channels_keep_primary_and_are_visible_in_both_gro
     category = Category.objects.get_or_create(name='科技', defaults={'slug': 'tech'})[0]
     news = News.objects.create(title='Clinical research', content='Original excerpt', source=primary, category=category,
         publish_time=NOW, url='https://www.technologyreview.com/news/1')
-    data = item('mit_biotechnology', link=news.url, title=news.title)
-    result = ingest_item(data)
-    assert result.news_id == news.id
+    NewsSourceItem.objects.create(news=news, source_key='mit_biotechnology',
+        upstream_id='historical-shared-item', discovery_url=news.url)
     news.refresh_from_db(); assert news.source_id == primary.id
     medical = Source.objects.get(name='MIT 科技评论·生物技术')
     client = APIClient()
@@ -181,16 +139,3 @@ def test_overlapping_publisher_channels_keep_primary_and_are_visible_in_both_gro
     client.force_authenticate(user)
     assert client.get('/api/news/', {'scope': 'subscribed'}).data['count'] == 1
     assert client.get('/api/news/', {'scope': 'subscribed', 'source': primary.id}).data['count'] == 1
-
-
-def test_every_active_sector_spider_is_registered_without_fda():
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'crawler'))
-    from scrapy.spiderloader import SpiderLoader
-    from scrapy.settings import Settings
-    from api.management.commands.crawl import SPIDERS
-    loader = SpiderLoader(Settings({'SPIDER_MODULES': ['news_crawler.spiders']}))
-    for key in SECTOR_KEYS - {'fda_news'}:
-        assert key in SPIDERS and loader.load(key).name == key
-    assert 'fda_news' not in SPIDERS

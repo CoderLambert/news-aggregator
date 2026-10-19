@@ -4,11 +4,10 @@ from . import ai_translation_views
 from . import views
 from . import research_views
 from . import subscription_views
-from . import crawler_views
 from . import search_index_views
 from . import health_views
 from . import capabilities_views
-from . import article_fetch_views
+from .retired_ingestion_views import RetiredIngestionAdminView
 from .rss.reading import NewsReadStateView
 from .rss.discovery import ResolveFeedView
 from .rss import subscription_views as rss_views
@@ -43,26 +42,26 @@ urlpatterns = [
     path('capabilities/', capabilities_views.capabilities, name='capabilities'),
     path('health/live/', health_views.health_live, name='health-live'),
     path('health/ready/', health_views.health_ready, name='health-ready'),
-    path('admin/crawler/dashboard/', crawler_views.CrawlerDashboardView.as_view(), name='crawler-admin-dashboard'),
-    path('admin/crawler/readiness/', crawler_views.CrawlerReadinessView.as_view(), name='crawler-admin-readiness'),
-    path('admin/crawler/settings/', crawler_views.CrawlerSettingsView.as_view(), name='crawler-admin-settings'),
-    path('admin/crawler/targets/', crawler_views.CrawlerTargetListView.as_view(), name='crawler-admin-targets'),
-    path('admin/crawler/targets/<str:spider_name>/', crawler_views.CrawlerTargetDetailView.as_view(), name='crawler-admin-target-detail'),
-    path('admin/crawler/sources/', crawler_views.SourceConfigListCreateView.as_view(), name='crawler-admin-sources'),
-    path('admin/crawler/sources/<str:source_key>/', crawler_views.SourceConfigDetailView.as_view(), name='crawler-admin-source-detail'),
-    path('admin/crawler/sources/<str:source_key>/probe/', crawler_views.SourceConfigProbeView.as_view(), name='crawler-admin-source-probe'),
-    path('admin/crawler/sources/<str:source_key>/approve/', crawler_views.SourceConfigApproveView.as_view(), name='crawler-admin-source-approve'),
-    path('admin/crawler/sources/<str:source_key>/enable/', crawler_views.SourceConfigEnableView.as_view(), name='crawler-admin-source-enable'),
-    path('admin/crawler/sources/<str:source_key>/run/', crawler_views.SourceConfigRunView.as_view(), name='crawler-admin-source-run'),
-    path('admin/crawler/batches/', crawler_views.CrawlBatchListCreateView.as_view(), name='crawler-admin-batches'),
-    path('admin/crawler/batches/<uuid:batch_id>/', crawler_views.CrawlBatchDetailView.as_view(), name='crawler-admin-batch-detail'),
-    path('admin/crawler/runs/<uuid:run_id>/', crawler_views.CrawlRunDetailView.as_view(), name='crawler-admin-run-detail'),
-    path('admin/crawler/runs/<uuid:run_id>/cancel/', crawler_views.CrawlRunCancelView.as_view(), name='crawler-admin-run-cancel'),
-    path('admin/crawler/runs/<uuid:run_id>/retry/', crawler_views.CrawlRunRetryView.as_view(), name='crawler-admin-run-retry'),
-    path('admin/article-fetch/dashboard/', article_fetch_views.ArticleFetchDashboardView.as_view(), name='article-fetch-admin-dashboard'),
-    path('admin/article-fetch/body-reviews/', article_fetch_views.ArticleBodyReviewListView.as_view(), name='article-body-reviews'),
-    path('admin/article-fetch/policies/', article_fetch_views.JinaFallbackPolicyListView.as_view(), name='article-fetch-admin-policy-list'),
-    path('admin/article-fetch/policies/<str:domain>/', article_fetch_views.JinaFallbackPolicyDetailView.as_view(), name='article-fetch-admin-policy-detail'),
+    path('admin/crawler/dashboard/', RetiredIngestionAdminView.as_view(), name='crawler-admin-dashboard'),
+    path('admin/crawler/readiness/', RetiredIngestionAdminView.as_view(), name='crawler-admin-readiness'),
+    path('admin/crawler/settings/', RetiredIngestionAdminView.as_view(), name='crawler-admin-settings'),
+    path('admin/crawler/targets/', RetiredIngestionAdminView.as_view(), name='crawler-admin-targets'),
+    path('admin/crawler/targets/<str:spider_name>/', RetiredIngestionAdminView.as_view(), name='crawler-admin-target-detail'),
+    path('admin/crawler/sources/', RetiredIngestionAdminView.as_view(), name='crawler-admin-sources'),
+    path('admin/crawler/sources/<str:source_key>/', RetiredIngestionAdminView.as_view(), name='crawler-admin-source-detail'),
+    path('admin/crawler/sources/<str:source_key>/probe/', RetiredIngestionAdminView.as_view(), name='crawler-admin-source-probe'),
+    path('admin/crawler/sources/<str:source_key>/approve/', RetiredIngestionAdminView.as_view(), name='crawler-admin-source-approve'),
+    path('admin/crawler/sources/<str:source_key>/enable/', RetiredIngestionAdminView.as_view(), name='crawler-admin-source-enable'),
+    path('admin/crawler/sources/<str:source_key>/run/', RetiredIngestionAdminView.as_view(), name='crawler-admin-source-run'),
+    path('admin/crawler/batches/', RetiredIngestionAdminView.as_view(), name='crawler-admin-batches'),
+    path('admin/crawler/batches/<uuid:batch_id>/', RetiredIngestionAdminView.as_view(), name='crawler-admin-batch-detail'),
+    path('admin/crawler/runs/<uuid:run_id>/', RetiredIngestionAdminView.as_view(), name='crawler-admin-run-detail'),
+    path('admin/crawler/runs/<uuid:run_id>/cancel/', RetiredIngestionAdminView.as_view(), name='crawler-admin-run-cancel'),
+    path('admin/crawler/runs/<uuid:run_id>/retry/', RetiredIngestionAdminView.as_view(), name='crawler-admin-run-retry'),
+    path('admin/article-fetch/dashboard/', RetiredIngestionAdminView.as_view(), name='article-fetch-admin-dashboard'),
+    path('admin/article-fetch/body-reviews/', RetiredIngestionAdminView.as_view(), name='article-body-reviews'),
+    path('admin/article-fetch/policies/', RetiredIngestionAdminView.as_view(), name='article-fetch-admin-policy-list'),
+    path('admin/article-fetch/policies/<str:domain>/', RetiredIngestionAdminView.as_view(), name='article-fetch-admin-policy-detail'),
     path('admin/search-index/dashboard/', search_index_views.SearchIndexDashboardView.as_view(), name='search-index-admin-dashboard'),
     path('admin/search-index/settings/', search_index_views.SearchIndexSettingsView.as_view(), name='search-index-admin-settings'),
     path('admin/search-index/runs/', search_index_views.SearchIndexRunListCreateView.as_view(), name='search-index-admin-runs'),
@@ -87,9 +86,9 @@ urlpatterns = [
     path('news/<int:pk>/suggested-questions/', views.NewsSuggestedQuestionsView.as_view(), name='news-suggested-questions'),
     path('news/<int:pk>/fetch-full/', views.NewsFetchFullView.as_view(), name='news-fetch-full'),
     path('news/<int:pk>/translate/', views.NewsTranslateFullView.as_view(), name='news-translate'),
-    path('provider-comparisons/', views.ProviderComparisonListCreateView.as_view(), name='provider-comparison-list'),
-    path('provider-comparisons/<int:pk>/', views.ProviderComparisonDetailView.as_view(), name='provider-comparison-detail'),
-    path('provider-comparisons/<int:pk>/retest/', views.ProviderComparisonRetestView.as_view(), name='provider-comparison-retest'),
+    path('provider-comparisons/', RetiredIngestionAdminView.as_view(), name='provider-comparison-list'),
+    path('provider-comparisons/<int:pk>/', RetiredIngestionAdminView.as_view(), name='provider-comparison-detail'),
+    path('provider-comparisons/<int:pk>/retest/', RetiredIngestionAdminView.as_view(), name='provider-comparison-retest'),
     path('news/<int:pk>/tts/', views.NewsTTSView.as_view(), name='news-tts'),
     path('categories/', views.CategoryListView.as_view(), name='category-list'),
     path('sources/', views.SourceListView.as_view(), name='source-list'),

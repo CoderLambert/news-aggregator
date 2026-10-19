@@ -99,14 +99,6 @@ export function parseCapabilities(value: unknown): SiteCapabilities {
   }
 }
 
-export interface ProviderComparisonParams extends ApiQueryParams {
-  page?: number
-  page_size?: number
-  search?: string
-}
-
-export type ProviderComparisonInput = { news_id: string } | { url: string }
-
 export interface ResearchResultsParams extends ApiQueryParams {
   result_type?: string
   detail?: string
@@ -275,26 +267,6 @@ export function fetchCategories(signal?: AbortSignal): Promise<unknown> {
 
 export function fetchSources(signal?: AbortSignal): Promise<unknown> {
   return api.get<unknown>('/sources/', { signal }).then(({ data }) => data)
-}
-
-// ---- Provider comparisons -------------------------------------------------
-
-export function fetchProviderComparisons(params: ProviderComparisonParams = {}, signal?: AbortSignal): Promise<unknown> {
-  return api.get<unknown>('/provider-comparisons/', { params, signal }).then(({ data }) => data)
-}
-
-export function createProviderComparison(payload: ProviderComparisonInput, signal?: AbortSignal): Promise<unknown> {
-  const request = signal
-    ? apiLong.post<unknown>('/provider-comparisons/', payload, { signal })
-    : apiLong.post<unknown>('/provider-comparisons/', payload)
-  return request.then(({ data }) => data)
-}
-
-export function retestProviderComparison(id: NewsId, signal?: AbortSignal): Promise<unknown> {
-  const request = signal
-    ? apiLong.post<unknown>(`/provider-comparisons/${id}/retest/`, undefined, { signal })
-    : apiLong.post<unknown>(`/provider-comparisons/${id}/retest/`)
-  return request.then(({ data }) => data)
 }
 
 // ---- Chat -----------------------------------------------------------------
