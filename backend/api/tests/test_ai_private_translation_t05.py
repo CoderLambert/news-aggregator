@@ -5,7 +5,11 @@ import uuid
 from unittest.mock import patch
 from types import SimpleNamespace
 
-from django.db import IntegrityError, OperationalError, transaction
+from django.db import IntegrityError, OperationalError, transaction, connection, close_old_connections
+from django.db.migrations.executor import MigrationExecutor
+from django.core.management import call_command
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -82,7 +86,7 @@ class PrivateTranslationTests(TransactionTestCase):
         self.assertEqual(same.data['task_id'], str(task.pk))
         self.assertEqual(different_key.status_code, 409)
         self.assertEqual(changed.status_code, 409)
-        dispatch.assert_not_called()
+        dispatch.assert_called_once_with(task.pk, task.generation)
 
     def test_missing_or_coerced_consent_oversize_and_unproved_model_never_create_or_send(self):
         with patch.object(service, '_dispatch') as dispatch:
@@ -254,3 +258,92 @@ class PrivateTranslationTests(TransactionTestCase):
         with override_settings(AI_BYOK_ENABLED=False):
             self.assertEqual(self.start().status_code, 403)
         self.assertFalse(ChatGPTTranslationTask.objects.exists())
+
+    def test_lost_on_commit_dispatch_recovers_only_on_explicit_identical_post(self):
+        task = self.queued()
+        with patch.object(service, '_dispatch') as dispatch:
+            self.client.get(self.url)
+            dispatch.assert_not_called()
+            response = self.start()
+        self.assertEqual(response.data['task_id'], str(task.pk))
+        dispatch.assert_called_once_with(task.pk, task.generation)
+        first = self.execute(task)
+        second = self.execute(task)
+        self.assertEqual(len(first.sent), 1)
+        self.assertEqual(len(second.sent), 0)
+        self.assertEqual(ChatGPTArticleTranslation.objects.count(), 1)
+
+    def test_executor_deduplicates_queued_recovery_submissions(self):
+        task = self.queued()
+        key = ('byok:' + str(task.pk), task.generation)
+        try:
+            with patch.object(subscription_jobs, 'submit_background_task') as submit:
+                service._dispatch(task.pk, task.generation)
+                service._dispatch(task.pk, task.generation)
+            submit.assert_called_once()
+        finally:
+            subscription_jobs._dispatching.discard(key)
+
+    def test_concurrent_identical_posts_and_worker_claims_send_once(self):
+        barrier = Barrier(2)
+        def admit():
+            close_old_connections()
+            try:
+                from django.contrib.auth import get_user_model
+                owner = get_user_model().objects.get(pk=self.owner.pk)
+                barrier.wait(timeout=5)
+                task, created = service.start_translation(
+                    owner, self.news.pk, model_config_id=str(self.model.pk),
+                    request_id=self.request_id, billing_consent=True,
+                )
+                return str(task.pk), created
+            finally:
+                close_old_connections()
+        with patch.object(service, '_dispatch'), ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _: admit(), range(2)))
+        self.assertEqual(results[0][0], results[1][0])
+        self.assertEqual(sum(created for _, created in results), 1)
+        task = ChatGPTTranslationTask.objects.get(pk=results[0][0])
+        gateway = FakeGateway([gateway_frame('并发只派发一次')])
+        with patch.object(service, 'build_gateway_client', return_value=gateway), ThreadPoolExecutor(max_workers=2) as pool:
+            list(pool.map(lambda _: service.run_translation(task.pk, task.generation), range(2)))
+        self.assertEqual(len(gateway.sent), 1)
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'succeeded')
+        self.assertEqual(ChatGPTArticleTranslation.objects.count(), 1)
+
+    def test_model_state_matches_migration(self):
+        call_command('makemigrations', 'api', check=True, dry_run=True, verbosity=0)
+
+    def test_forward_migration_preserves_existing_subscription_task_and_result(self):
+        targets = MigrationExecutor(connection).loader.graph.leaf_nodes()
+        try:
+            executor = MigrationExecutor(connection)
+            executor.migrate([('api', '0064_article_chat_turn')])
+            old = executor.loader.project_state([('api', '0064_article_chat_turn')]).apps
+            subscription = old.get_model('api', 'ChatGPTSubscriptionConnection').objects.create(
+                user_id=self.owner.pk, subject_hash='migration-subject', issuer='synthetic',
+                issued_client_id='migration-client', registration_key_hash='migration-registration',
+                generation=9, selected_model='old-model',
+            )
+            task = old.get_model('api', 'ChatGPTTranslationTask').objects.create(
+                user_id=self.owner.pk, connection_id=subscription.pk, news_id=self.news.pk,
+                source_hash='migration-source', model_slug='old-model', connection_generation=9,
+                status='succeeded', progress='保留旧译文', result={'scope': 'private', 'content': '保留旧译文'},
+            )
+            result = old.get_model('api', 'ChatGPTArticleTranslation').objects.create(
+                user_id=self.owner.pk, connection_id=subscription.pk, news_id=self.news.pk,
+                source_hash='migration-source', model_slug='old-model', content='保留旧译文',
+                completed_at=timezone.now(),
+            )
+            before_task = old.get_model('api', 'ChatGPTTranslationTask').objects.values().get(pk=task.pk)
+            before_result = old.get_model('api', 'ChatGPTArticleTranslation').objects.values().get(pk=result.pk)
+            MigrationExecutor(connection).migrate(targets)
+            after_task = ChatGPTTranslationTask.objects.values().get(pk=task.pk)
+            after_result = ChatGPTArticleTranslation.objects.values().get(pk=result.pk)
+            self.assertEqual({k: after_task[k] for k in before_task}, before_task)
+            self.assertEqual({k: after_result[k] for k in before_result}, before_result)
+            self.assertIsNone(after_task['api_connection_id'])
+            self.assertIsNone(after_result['api_connection_id'])
+        finally:
+            MigrationExecutor(connection).migrate(targets)

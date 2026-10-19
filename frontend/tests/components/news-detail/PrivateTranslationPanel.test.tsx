@@ -1,0 +1,114 @@
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import PrivateTranslationPanel from '@/components/news-detail/PrivateTranslationPanel'
+import * as models from '@/services/aiConnectionsApi'
+import * as api from '@/services/privateTranslationApi'
+
+vi.mock('@/services/aiConnectionsApi', async original => ({
+  ...await original<typeof import('@/services/aiConnectionsApi')>(),
+  listAIConnections: vi.fn(), listAIModels: vi.fn(),
+}))
+vi.mock('@/services/privateTranslationApi', async original => ({
+  ...await original<typeof import('@/services/privateTranslationApi')>(),
+  latestPrivateTranslation: vi.fn(), startPrivateTranslation: vi.fn(),
+}))
+vi.mock('@/components/news-detail/MarkdownContent', () => ({ default: ({ content }: { content: string }) => <div>{content}</div> }))
+const completed: api.PrivateTranslationTask = {
+  task_id: '11111111-1111-4111-8111-111111111111', request_id: '22222222-2222-4222-8222-222222222222', news_id: 1, status: 'succeeded',
+  progress: '私有中文', error_code: '', model_config_id: 'model', target_language: 'zh',
+  result: { result_id: 4, task_id: '11111111-1111-4111-8111-111111111111',
+    content: '私有中文', scope: 'private', provider: 'deepseek', model: 'Flash' },
+}
+function view(viewer = 7, sourceChars = 100) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  const tree = (id: number) => <QueryClientProvider client={client}><MemoryRouter>
+    <PrivateTranslationPanel viewer={id} newsId={1} sourceRevision={1} sourceChars={sourceChars} />
+  </MemoryRouter></QueryClientProvider>
+  return { ...render(tree(viewer)), tree, client }
+}
+beforeEach(() => {
+  vi.resetAllMocks()
+  vi.mocked(models.listAIConnections).mockResolvedValue([
+    { id: 'connection', is_enabled: true, key_saved: true, display_name: 'Mine' } as models.AIConnection,
+  ])
+  vi.mocked(models.listAIModels).mockResolvedValue([
+    { id: 'model', model_id: 'deepseek-flash', display_name: 'Flash', has_trusted_route: true,
+      article_chat_supported: true, capabilities: { text: 'supported', tools: 'unknown' } } as models.AIModel,
+  ])
+  vi.mocked(api.latestPrivateTranslation).mockResolvedValue(null)
+  vi.mocked(api.startPrivateTranslation).mockResolvedValue(completed)
+})
+afterEach(cleanup)
+describe('T05 private translation', () => {
+  it('never submits on mount and requires explicit model and one-call consent', async () => {
+    view()
+    await screen.findByRole('option', { name: 'Mine · Flash' })
+    const start = screen.getByRole('button', { name: '开始私有翻译' })
+    expect(start).toBeDisabled()
+    expect(api.startPrivateTranslation).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByRole('combobox', { name: '翻译模型' }), { target: { value: 'model' } })
+    const consent = screen.getByRole('checkbox')
+    fireEvent.click(consent)
+    await waitFor(() => expect(start).toBeEnabled())
+    fireEvent.click(start)
+    fireEvent.click(start)
+    await screen.findByText('私有翻译已完成')
+    expect(api.startPrivateTranslation).toHaveBeenCalledOnce()
+    expect(api.startPrivateTranslation).toHaveBeenCalledWith(1, 'model', expect.any(String), 7, expect.any(AbortSignal))
+    expect(consent).not.toBeChecked()
+    expect(screen.getByText('私有中文')).toBeInTheDocument()
+  })
+  it('recovers same result with GET only and never submits after reopening', async () => {
+    vi.mocked(api.latestPrivateTranslation).mockResolvedValue(completed)
+    const first = view()
+    await screen.findByText('私有翻译已完成')
+    first.unmount()
+    view()
+    await screen.findByText('私有翻译已完成')
+    expect(screen.getByText(/私有结果 #4/)).toBeInTheDocument()
+    expect(api.startPrivateTranslation).not.toHaveBeenCalled()
+  })
+  it('oversized article is rejected by the UI without truncation or send', async () => {
+    view(7, 8001)
+    await screen.findByRole('option', { name: 'Mine · Flash' })
+    fireEvent.change(screen.getByRole('combobox', { name: '翻译模型' }), { target: { value: 'model' } })
+    fireEvent.click(screen.getByRole('checkbox'))
+    expect(screen.getByRole('button', { name: '开始私有翻译' })).toBeDisabled()
+    expect(screen.getByText(/原文超过本次短中篇预算/)).toBeInTheDocument()
+    expect(api.startPrivateTranslation).not.toHaveBeenCalled()
+  })
+  it('unknown POST only reconciles GET and cannot automatically replay', async () => {
+    vi.mocked(api.startPrivateTranslation).mockRejectedValue(new Error('lost response'))
+    view()
+    await screen.findByRole('option', { name: 'Mine · Flash' })
+    fireEvent.change(screen.getByRole('combobox', { name: '翻译模型' }), { target: { value: 'model' } })
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: '开始私有翻译' }))
+    await screen.findByText(/提交结果未知/)
+    fireEvent.click(screen.getByRole('button', { name: '读取任务状态' }))
+    expect(api.startPrivateTranslation).toHaveBeenCalledOnce()
+    expect(screen.getByRole('button', { name: '开始私有翻译' })).toBeDisabled()
+  })
+  it('viewer switch ignores a previous late private POST result', async () => {
+    let finish!: (task: api.PrivateTranslationTask) => void
+    vi.mocked(api.startPrivateTranslation).mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const rendered = view()
+    await screen.findByRole('option', { name: 'Mine · Flash' })
+    fireEvent.change(screen.getByRole('combobox', { name: '翻译模型' }), { target: { value: 'model' } })
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: '开始私有翻译' }))
+    await waitFor(() => expect(api.startPrivateTranslation).toHaveBeenCalledOnce())
+    rendered.rerender(rendered.tree(8))
+    await act(async () => finish(completed))
+    expect(screen.queryByText('私有中文')).not.toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '翻译模型' })).toHaveValue('')
+    expect(screen.getByRole('checkbox')).not.toBeChecked()
+  })
+  it('rejects malformed terminal and partial result DTOs', () => {
+    expect(() => api.parsePrivateTranslation({ ...completed, result: null })).toThrow()
+    expect(() => api.parsePrivateTranslation({ ...completed, status: 'running' })).toThrow()
+    expect(() => api.parsePrivateTranslation({ ...completed, result: { ...completed.result, scope: 'shared' } })).toThrow()
+  })
+})

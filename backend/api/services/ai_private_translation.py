@@ -11,6 +11,7 @@ import uuid
 from django.conf import settings
 from django.db import close_old_connections, transaction
 from django.utils import timezone
+from django.db.models import Q
 
 from api.models import ChatGPTArticleTranslation, ChatGPTTranslationTask, News
 from api.services.ai_credentials import ConnectionSnapshot, lock_owner
@@ -106,7 +107,7 @@ def payload(task):
     if expired:
         status = 'interrupted'
     return {
-        'task_id': str(task.pk), 'news_id': task.news_id, 'status': status,
+        'task_id': str(task.pk), 'request_id': str(task.request_id), 'news_id': task.news_id, 'status': status,
         'progress': task.progress,
         'result': task.result if status == 'succeeded' else None,
         'error_code': 'worker_interrupted' if expired else task.error_code,
@@ -160,8 +161,10 @@ def start_translation(user, news_id, *, model_config_id, request_id, billing_con
             if existing is not None:
                 if str(existing.request_id) != request_id or existing.request_hash != fingerprint:
                     raise TranslationError('translation_request_conflict')
+                if existing.status == 'queued' and not existing.provider_started:
+                    transaction.on_commit(lambda: _dispatch(existing.pk, existing.generation))
                 return existing, False
-            active = _query().filter(status__in=['queued', 'running'])
+            active = _query().filter(Q(status='queued') | Q(status='running', lease_expires_at__gt=timezone.now()))
             if (active.filter(user=user).count() >= MAX_ACTIVE_PER_OWNER
                     or active.count() >= MAX_ACTIVE_TOTAL):
                 raise TranslationError('translation_queue_full', 429)
@@ -179,9 +182,16 @@ def start_translation(user, news_id, *, model_config_id, request_id, billing_con
 
 
 def _dispatch(task_id, generation):
+    dispatch_key = ('byok:' + str(task_id), int(generation))
+    with durable._jobs_lock:
+        if dispatch_key in durable._dispatching:
+            return
+        durable._dispatching.add(dispatch_key)
     try:
         durable.submit_background_task(run_translation, task_id, generation)
     except Exception:
+        with durable._jobs_lock:
+            durable._dispatching.discard(dispatch_key)
         ChatGPTTranslationTask.objects.filter(
             pk=task_id, generation=generation, status='queued', api_connection__isnull=False,
         ).update(status='failed', error_code='dispatch_failed', finished_at=timezone.now())
@@ -326,3 +336,5 @@ def run_translation(task_id, generation):
                 except Exception:
                     pass
         close_old_connections()
+        with durable._jobs_lock:
+            durable._dispatching.discard(('byok:' + str(task_id), int(generation)))

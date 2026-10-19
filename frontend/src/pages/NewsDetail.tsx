@@ -10,6 +10,7 @@ import AuthModal from '@/components/AuthModal'
 import ChatBubbleButton from '@/components/chat/ChatBubbleButton'
 import LazyNewsChatAssistant from '@/components/chat/LazyNewsChatAssistant'
 import { prefetchNewsChatAssistant } from '@/components/chat/newsChatAssistantLoader'
+import PrivateTranslationPanel from '@/components/news-detail/PrivateTranslationPanel'
 import TranslationStatus from '@/components/news-detail/TranslationStatus'
 import ErrorBanner from '@/components/news-detail/ErrorBanner'
 import FullContentSection from '@/components/news-detail/FullContentSection'
@@ -290,6 +291,10 @@ export default function NewsDetail() {
               allowTranslation={translationEnabled}
             />
           )}
+
+          {readableBody && translationEnabled && user && <PrivateTranslationPanel
+            viewer={user.id} newsId={news.id} sourceRevision={news.full_content_revision ?? 0}
+            sourceChars={news.full_content.length} />}
 
           {!readableBody && displayContent ? (
             <SummarySection content={displayContent} readingPolicy={news.body_access_granted ? 'standard' : news.reading_policy} onAskAssistant={chatEnabled ? openAssistant : undefined} />
