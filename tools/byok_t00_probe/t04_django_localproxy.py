@@ -128,6 +128,108 @@ def _create_verified_model(client, owner, provider_key):
     return connection, model, AIModelProbeAttempt.objects.count()
 
 
+def _wait_translation_response(read, *, timeout_seconds=12, transient_retry_seconds=12,
+                                interval=0.03, monotonic=time.monotonic, sleep=time.sleep):
+    """GET-only bounded retry for classified SQLite contention; never resubmit work."""
+    deadline = monotonic() + timeout_seconds
+    transient_deadline = None
+    retryable_503 = {"credential_unavailable", "task_storage_busy"}
+    while monotonic() < deadline:
+        response = read()
+        if monotonic() >= deadline:
+            raise AssertionError("translation GET did not reach terminal state before its deadline")
+        if response.status_code == 503:
+            data = response.data if isinstance(response.data, dict) else {}
+            if set(data) != {"error_code"} or data.get("error_code") not in retryable_503:
+                raise AssertionError("translation GET returned a non-retryable HTTP 503")
+            if transient_deadline is None:
+                transient_deadline = min(monotonic() + transient_retry_seconds, deadline)
+            remaining = transient_deadline - monotonic()
+            if remaining <= 0:
+                raise AssertionError("translation GET remained HTTP 503 past its retry deadline")
+            sleep_for = max(0.0, min(interval, remaining, deadline - monotonic()))
+            sleep(sleep_for)
+            continue
+        if response.status_code != 200:
+            raise AssertionError(f"translation GET returned HTTP {response.status_code}")
+        data = response.data
+        if data["status"] not in {"queued", "running"}:
+            return data
+        sleep(max(0.0, min(interval, deadline - monotonic())))
+    raise AssertionError("translation GET did not reach terminal state before its deadline")
+
+
+def test_translation_poll_retries_only_classified_get_contention():
+    from types import SimpleNamespace
+
+    current = [0.0]
+    clock = lambda: current[0]
+    sleep = lambda amount: current.__setitem__(0, current[0] + amount)
+    responses = [
+        SimpleNamespace(status_code=503, data={"error_code": "credential_unavailable"}),
+        SimpleNamespace(status_code=503, data={"error_code": "task_storage_busy"}),
+        SimpleNamespace(status_code=200, data={"status": "succeeded", "result": {"result_id": 3}}),
+    ]
+    calls = []
+    result = _wait_translation_response(
+        lambda: calls.append(1) or responses.pop(0),
+        monotonic=clock, sleep=sleep,
+    )
+    assert result["status"] == "succeeded"
+    assert result["result"]["result_id"] == 3
+    assert len(calls) == 3
+
+    current[0] = 0.0
+    persistent_calls = []
+    def persistent_read():
+        persistent_calls.append(1)
+        return SimpleNamespace(status_code=503, data={"error_code": "task_storage_busy"})
+    with pytest.raises(AssertionError, match="retry deadline"):
+        _wait_translation_response(
+            persistent_read, interval=1.0, transient_retry_seconds=3.0,
+            monotonic=clock, sleep=sleep,
+        )
+    assert len(persistent_calls) == 4
+
+    current[0] = 0.0
+    terminal_calls = []
+    terminal = _wait_translation_response(
+        lambda: terminal_calls.append(1) or SimpleNamespace(
+            status_code=200, data={"status": "failed", "result": None},
+        ),
+        monotonic=clock, sleep=sleep,
+    )
+    assert terminal["status"] == "failed"
+    assert len(terminal_calls) == 1
+
+    current[0] = 0.0
+    slow_calls = []
+    def slow_success():
+        slow_calls.append(1)
+        current[0] += 13.0
+        return SimpleNamespace(status_code=200, data={"status": "succeeded"})
+    with pytest.raises(AssertionError, match="deadline"):
+        _wait_translation_response(slow_success, monotonic=clock, sleep=sleep)
+    assert len(slow_calls) == 1
+
+    for status, data in (
+        (403, {"error_code": "permission_denied"}),
+        (409, {"error_code": "model_changed"}),
+        (500, {"error_code": "internal_error"}),
+        (503, {"error_code": "provider_credential_unavailable"}),
+        (503, {"error_code": "task_storage_busy", "retry_after": 1}),
+    ):
+        current[0] = 0.0
+        immediate_calls = []
+        with pytest.raises(AssertionError):
+            _wait_translation_response(
+                lambda status=status, data=data:
+                    immediate_calls.append(1) or SimpleNamespace(status_code=status, data=data),
+                monotonic=clock, sleep=sleep,
+            )
+        assert len(immediate_calls) == 1
+
+
 def _assert_native_deepseek_request(rows, *, marker, stream, terminal):
     assert len(rows) == 1
     row = rows[0]
@@ -460,14 +562,9 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
                 return article
 
             def wait_translation(task_id):
-                deadline = time.monotonic() + 12
-                while time.monotonic() < deadline:
-                    state = client.get(f"/api/me/ai/translations/{task_id}/")
-                    assert state.status_code == 200, state.content
-                    if state.data["status"] not in {"queued", "running"}:
-                        return state.data
-                    time.sleep(0.03)
-                pytest.fail("T05 synthetic worker did not reach terminal state")
+                return _wait_translation_response(
+                    lambda: client.get(f"/api/me/ai/translations/{task_id}/"),
+                )
 
             t05_marker = "T00_T05_E2E_SUCCESS_STREAM_HOLD_A"
             t05_news = translation_article(t05_marker)
