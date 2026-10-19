@@ -7,6 +7,7 @@ Only synthetic marker IDs, tenant labels, booleans, event names, and counters ar
 retained. Credentials and request text are never written to records or stdout.
 """
 import hashlib
+import hmac
 import json
 import re
 import select
@@ -23,6 +24,7 @@ KEY_LABELS = {
     "sk-t00-admin-synthetic": "admin",
 }
 PROJECT_KEY_HASHES = set()
+EXPECTED_PROVIDER_KEY_HASHES = {}
 RECORDS = []
 LOCK = threading.Lock()
 ACTIVE_STREAM_PRODUCERS = 0
@@ -272,6 +274,18 @@ def history_facts(path, request):
 
 def project_key_hash(value):
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def provider_key_sha256(value):
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def provider_key_identity_matches(value, expected_sha256):
+    return (
+        isinstance(value, str)
+        and isinstance(expected_sha256, str)
+        and hmac.compare_digest(provider_key_sha256(value), expected_sha256)
+    )
 
 
 def extract_marker(payload):
@@ -544,6 +558,7 @@ class Handler(BaseHTTPRequestHandler):
         ]
         with LOCK:
             project_match = any(project_key_hash(value) in PROJECT_KEY_HASHES for value in candidates)
+            expected_provider_key_hash = EXPECTED_PROVIDER_KEY_HASHES.get(test_id)
         credential_label = KEY_LABELS.get(provider_credential or "", "missing" if not provider_credential else "unknown")
         if project_match:
             credential_label = "project"
@@ -562,6 +577,9 @@ class Handler(BaseHTTPRequestHandler):
             "tenant": credential_label,
             "expected_tenant": expected or "none",
             "provider_key_match": credential_label == expected if expected else False,
+            "provider_key_identity_match": provider_key_identity_matches(
+                provider_credential, expected_provider_key_hash,
+            ),
             "provider_credential_present": bool(provider_credential),
             "provider_auth_scheme": (
                 "x-api-key" if is_messages and x_api_key

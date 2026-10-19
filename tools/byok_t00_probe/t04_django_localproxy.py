@@ -268,7 +268,18 @@ def test_translation_poll_retries_only_classified_get_contention():
         assert len(immediate_calls) == 1
 
 
-def _assert_native_deepseek_request(rows, *, marker, stream, terminal):
+def test_provider_key_identity_hash_rejects_same_tenant_seed():
+    owner_key = "sk-t00-owner-only-synthetic-random"
+    expected_hash = upstream.provider_key_sha256(owner_key)
+
+    assert upstream.KEY_LABELS["sk-t00-provider-a-synthetic"] == "tenant-a"
+    assert upstream.provider_key_identity_matches(owner_key, expected_hash) is True
+    assert upstream.provider_key_identity_matches(
+        "sk-t00-provider-a-synthetic", expected_hash,
+    ) is False
+
+
+def _assert_native_deepseek_request(rows, *, marker, stream, terminal, owner_key_match=False):
     assert len(rows) == 1
     row = rows[0]
     assert row["test_id"] == marker
@@ -279,6 +290,8 @@ def _assert_native_deepseek_request(rows, *, marker, stream, terminal):
         assert row["thinking_disabled"] is True
     assert row["tenant"] == "tenant-a"
     assert row["provider_key_match"] is True
+    if owner_key_match:
+        assert row["provider_key_identity_match"] is True
     assert row["project_key_match"] is False
     assert row["provider_auth_scheme"] == "bearer"
     assert row["upstream_terminal"] == terminal
@@ -304,6 +317,7 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
     proxy = None
+    previous_t09_key_hashes = {}
     try:
         proxy = LocalProxy(proxy_python, upstream_url)
         proxy.start()
@@ -717,6 +731,22 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
             # only the explicit, currently verified BYOK path reaches the model.
             from api.models import ResearchRun
             _enable_deep_research_capability(owner, model)
+            t09_markers = (
+                "T00_T09_RESEARCH_STOP_A",
+                "T00_T09_RESEARCH_TOOL_A",
+                "T00_T09_RESEARCH_NO_FINISH_A",
+                "T00_T09_RESEARCH_TRUNCATED_A",
+                "T00_T09_RESEARCH_HTTP_ERROR_A",
+            )
+            expected_provider_key_hash = upstream.provider_key_sha256(provider_key)
+            with upstream.LOCK:
+                previous_t09_key_hashes = {
+                    marker: upstream.EXPECTED_PROVIDER_KEY_HASHES.get(marker)
+                    for marker in t09_markers
+                }
+                upstream.EXPECTED_PROVIDER_KEY_HASHES.update({
+                    marker: expected_provider_key_hash for marker in t09_markers
+                })
 
             def run_t09(marker, expected_status):
                 response = client.post(
@@ -747,6 +777,7 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
                 stop_rows = _records(upstream_url, stop_marker)
                 stop_row = _assert_native_deepseek_request(
                     stop_rows, marker=stop_marker, stream=False, terminal="finish_reason_stop",
+                    owner_key_match=True,
                 )
                 assert stop_row["upstream_raw_http_status"] == 200
                 assert stop_row["upstream_raw_body_complete"] is True
@@ -759,11 +790,11 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
                 tool_rows = _records(upstream_url, tool_marker)
                 tool_call_row = _assert_native_deepseek_request(
                     [row for row in tool_rows if row["upstream_terminal"] == "tool_call_turn"],
-                    marker=tool_marker, stream=False, terminal="tool_call_turn",
+                    marker=tool_marker, stream=False, terminal="tool_call_turn", owner_key_match=True,
                 )
                 tool_result_row = _assert_native_deepseek_request(
                     [row for row in tool_rows if row["upstream_terminal"] == "finish_reason_stop"],
-                    marker=tool_marker, stream=False, terminal="finish_reason_stop",
+                    marker=tool_marker, stream=False, terminal="finish_reason_stop", owner_key_match=True,
                 )
                 assert [tool_call_row["upstream_raw_finish_reason"], tool_result_row["upstream_raw_finish_reason"]] == [
                     "tool_calls", "stop",
@@ -781,7 +812,7 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
                     run, wire = run_t09(marker, expected)
                     rows = _records(upstream_url, marker)
                     row = _assert_native_deepseek_request(
-                        rows, marker=marker, stream=False, terminal=terminal,
+                        rows, marker=marker, stream=False, terminal=terminal, owner_key_match=True,
                     )
                     assert row["upstream_raw_body_complete"] is complete
                     assert row["upstream_raw_http_status"] == (status_code or 200)
@@ -804,5 +835,10 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
         server_thread.join(timeout=3)
         upstream.KEY_LABELS = old_labels
         with upstream.LOCK:
+            for marker, previous_hash in previous_t09_key_hashes.items():
+                if previous_hash is None:
+                    upstream.EXPECTED_PROVIDER_KEY_HASHES.pop(marker, None)
+                else:
+                    upstream.EXPECTED_PROVIDER_KEY_HASHES[marker] = previous_hash
             upstream.RECORDS.clear()
             upstream.RELEASE_EVENTS.clear()
