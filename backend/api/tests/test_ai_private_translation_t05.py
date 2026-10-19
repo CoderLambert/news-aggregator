@@ -488,3 +488,74 @@ class PrivateTranslationTests(TransactionTestCase):
             self.assertFalse(SharedArticleTranslation.objects.exists())
         finally:
             self.owner, self.client = original_owner, original_client
+
+
+    def test_t06_multibyte_block_chunking_is_deterministic_and_bounded(self):
+        source = '😀' * 4000 + '\n\n' + '😃' * 4000
+        chunks = service._split_t06_markdown(source)
+        self.assertEqual(chunks, service._split_t06_markdown(source))
+        self.assertEqual(''.join(chunks), source)
+        self.assertEqual(len(chunks), 2)
+        for chunk in chunks:
+            self.assertLessEqual(len(chunk), service.T06_CHUNK_INPUT_CHARS)
+            self.assertLessEqual(len(chunk.encode('utf-8')), service.T06_CHUNK_INPUT_BYTES)
+
+    def test_t06_chunking_preserves_markdown_blocks_and_private_merge_order(self):
+        self.news.full_content = (
+            '## Heading\n\n[Read](https://example.test/a)\n\n| left | right |\n| --- | --- |\n\n'
+            '```py\nprint(1)\n```\n\n' + 'A' * 5000 + '\n\n' + 'B' * 5000
+        )
+        self.news.full_content_state = 'legacy'
+        self.news.save(update_fields=['full_content', 'full_content_state'])
+        task = self.queued()
+        chunks = service._task_chunks(task.execution_snapshot)
+        self.assertGreater(len(chunks), 1)
+        gateways = [FakeGateway([gateway_frame(chunk)]) for chunk in chunks]
+        with patch.object(service, 'build_gateway_client', side_effect=gateways) as build:
+            service.run_translation(task.pk, task.generation)
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'succeeded')
+        self.assertEqual(build.call_count, len(chunks))
+        self.assertEqual([len(gateway.sent) for gateway in gateways], [1] * len(chunks))
+        self.assertEqual(task.result['content'], self.news.full_content)
+        self.assertEqual(task.progress, self.news.full_content)
+        self.assertEqual(ChatGPTArticleTranslation.objects.count(), 1)
+        self.assertFalse(SharedArticleTranslation.objects.exists())
+
+    def test_t06_interrupted_middle_chunk_is_progress_only_and_never_replayed(self):
+        self.news.full_content = 'A' * 5000 + '\n\n' + 'B' * 5000
+        self.news.full_content_state = 'legacy'
+        self.news.save(update_fields=['full_content', 'full_content_state'])
+        task = self.queued()
+        first = FakeGateway([gateway_frame('translated first')])
+        second = FakeGateway([gateway_frame('partial second', finish=None)])
+        with patch.object(service, 'build_gateway_client', side_effect=[first, second]) as build:
+            service.run_translation(task.pk, task.generation)
+            service.run_translation(task.pk, task.generation)
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'failed')
+        self.assertTrue(task.progress)
+        self.assertIsNone(task.result)
+        self.assertEqual(build.call_count, 2)
+        self.assertEqual(len(first.sent), 1)
+        self.assertEqual(len(second.sent), 1)
+        self.assertFalse(ChatGPTArticleTranslation.objects.exists())
+        self.assertFalse(SharedArticleTranslation.objects.exists())
+
+    def test_t06_oversized_indivisible_block_and_profile_mismatch_reject_before_dispatch(self):
+        self.news.full_content = 'A' * 9000 + '\n\n' + 'B' * 100
+        self.news.full_content_state = 'legacy'
+        self.news.save(update_fields=['full_content', 'full_content_state'])
+        with patch.object(service, '_dispatch') as dispatch:
+            oversized = self.start()
+        self.assertEqual(oversized.status_code, 400, oversized.content)
+        dispatch.assert_not_called()
+        self.assertFalse(ChatGPTTranslationTask.objects.exists())
+
+        self.news.full_content = 'A' * 5000 + '\n\n' + 'B' * 5000
+        self.news.save(update_fields=['full_content'])
+        with patch.object(service, 'T06_ENDPOINT_PROFILE_VERSION', 2), patch.object(service, '_dispatch') as dispatch:
+            mismatch = self.start(request_id=str(uuid.uuid4()))
+        self.assertEqual(mismatch.status_code, 409, mismatch.content)
+        dispatch.assert_not_called()
+        self.assertFalse(ChatGPTTranslationTask.objects.exists())
