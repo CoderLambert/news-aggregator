@@ -108,11 +108,14 @@ RESEARCH_SYSTEM_PROMPT = """\
 def run_agent_loop(
     session, user_query: str, on_event: Callable, local_only: bool = False,
     execution_guard=None, persist_completion=None, persist_tool_result=None,
-    user=None, clients=None,
+    user=None, clients=None, byok_snapshot=None,
 ):
     """Run the research agent with optional worker fences and durable writes."""
     guard = execution_guard or (lambda: None)
-    if clients is None:
+    if byok_snapshot is not None and clients is not None:
+        from .byok_execution import ResearchBYOKError
+        raise ResearchBYOKError('authorization_changed')
+    if byok_snapshot is None and clients is None:
         if user is None:
             on_event('error', {'message': '缺少个人 AI 授权上下文'})
             return
@@ -165,18 +168,33 @@ def run_agent_loop(
         on_event('thinking', {'iteration': iteration})
 
         # Call LLM with tools
-        response = _call_llm_with_tools(
-            messages,
-            tools=available_tools,
-            execution_guard=guard,
-            clients=clients,
-        )
+        if byok_snapshot is not None:
+            from .byok_execution import call_model_once, validate_tool_batch
+            response = call_model_once(
+                byok_snapshot, owner_id=user.pk, messages=messages, tools=available_tools,
+                execution_guard=guard,
+            )
+        else:
+            response = _call_llm_with_tools(
+                messages,
+                tools=available_tools,
+                execution_guard=guard,
+                clients=clients,
+            )
         guard()
         if response is None:
             on_event('error', {'message': '所有 LLM 提供商不可用，请稍后再试'})
             return
 
         assistant_message = response.choices[0].message
+        raw_tool_calls = getattr(assistant_message, 'tool_calls', None) or []
+        byok_calls = None
+        if byok_snapshot is not None and raw_tool_calls:
+            # Validate the whole provider batch before the first event or tool side effect.
+            byok_calls = validate_tool_batch(raw_tool_calls, available_tools)
+        byok_args_by_id = {
+            call['id']: call for call in (byok_calls or [])
+        }
 
         # Check for tool calls
         if hasattr(assistant_message, 'tool_calls') and assistant_message.tool_calls:
@@ -185,13 +203,18 @@ def run_agent_loop(
             messages.append(msg_dict)
 
             for tool_call in assistant_message.tool_calls:
-                fn_name = tool_call.function.name
-                try:
-                    fn_args = json.loads(tool_call.function.arguments)
-                except json.JSONDecodeError:
-                    fn_args = {}
-
-                call_id = tool_call.id
+                if byok_snapshot is not None:
+                    validated_call = byok_args_by_id[tool_call.id]
+                    fn_name = validated_call['name']
+                    fn_args = validated_call['arguments']
+                    call_id = validated_call['id']
+                else:
+                    fn_name = tool_call.function.name
+                    try:
+                        fn_args = json.loads(tool_call.function.arguments)
+                    except json.JSONDecodeError:
+                        fn_args = {}
+                    call_id = tool_call.id
 
                 guard()
                 on_event('tool_call', {
@@ -210,6 +233,11 @@ def run_agent_loop(
                     }
                 result = execute_tool(fn_name, fn_args, session=session, user=user, **tool_kwargs)
                 guard()
+                if byok_snapshot is not None and (
+                    not isinstance(result, dict) or 'error' in result
+                ):
+                    from .byok_execution import ResearchBYOKError
+                    raise ResearchBYOKError('tool_failed')
                 evidence_links.update(evidence_links_for_tool(fn_name, result))
 
                 # Build a brief summary for the frontend

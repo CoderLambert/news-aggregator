@@ -56,6 +56,11 @@ export async function deleteResearchSession(sessionId: string): Promise<void> {
   await deleteResearchSessionRequest(sessionId)
 }
 
+export interface ResearchCreateAuthorization {
+  consent: true
+  modelConfigId: string
+}
+
 export function createResearchStream(
   query: string,
   options: {
@@ -64,9 +69,14 @@ export function createResearchStream(
     signal: AbortSignal
     onSessionId?: (sessionId: string) => void
     onRunId?: (runId: string) => void
+    authorization?: ResearchCreateAuthorization
   },
 ): AsyncGenerator<ResearchEvent> {
-  const source = createResearchStreamRequest(query, options) as AsyncIterable<unknown>
+  const { authorization, ...requestOptions } = options
+  const source = createResearchStreamRequest(query, {
+    ...requestOptions,
+    ...(authorization ?? {}),
+  }) as AsyncIterable<unknown>
   return typedResearchEvents(source)
 }
 

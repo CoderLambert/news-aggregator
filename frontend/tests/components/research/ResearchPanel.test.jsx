@@ -16,6 +16,11 @@ const api = vi.hoisted(() => ({
   cancelResearchRun: vi.fn(),
 }))
 
+const taskPreferenceApi = vi.hoisted(() => ({
+  listAITaskPreferences: vi.fn(),
+}))
+vi.mock('@/services/aiConnectionsApi', () => taskPreferenceApi)
+
 vi.mock('@/services/researchApi', () => api)
 vi.mock('@gsap/react', () => ({ useGSAP: () => {} }))
 
@@ -80,9 +85,50 @@ beforeEach(() => {
   api.getResearchResults.mockResolvedValue({ count: 0, next: null, previous: null, results: [] })
   api.deleteResearchSession.mockResolvedValue(undefined)
   api.cancelResearchRun.mockResolvedValue({ status: 'running' })
+  taskPreferenceApi.listAITaskPreferences.mockResolvedValue({ revision: 0, preferences: [] })
 })
 
 describe('ResearchPanel', () => {
+
+  it('shows the actual verified research model and requires per-run cost consent before the create POST', async () => {
+    taskPreferenceApi.listAITaskPreferences.mockResolvedValue({
+      revision: 3,
+      preferences: [{
+        task_kind: 'deep_research',
+        model_config_id: 'dc8beed6-9efb-45ae-aacc-e8b8ce426b7f',
+        selection_state: 'available',
+        model: {
+          id: 'dc8beed6-9efb-45ae-aacc-e8b8ce426b7f',
+          connection_id: 'b30d6041-8f49-4f44-8e89-36e6fef9deae',
+          model_id: 'deepseek-chat',
+          display_name: 'Personal Research',
+        },
+      }],
+    })
+    api.createResearchStream.mockImplementation(async function* (_query, options) {
+      options.onSessionId?.('byok-research-session')
+      yield { type: 'session_created', session_id: 'byok-research-session' }
+      yield { type: 'complete' }
+    })
+
+    renderPanel()
+    await userEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    await screen.findByTestId('research-model-consent')
+    expect(screen.getByText(/Personal Research \(deepseek-chat\)/)).toBeInTheDocument()
+
+    const input = screen.getByRole('textbox', { name: '输入研究问题' })
+    fireEvent.change(input, { target: { value: '分析本周 AI 芯片动态' } })
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
+    expect(api.createResearchStream).not.toHaveBeenCalled()
+
+    await userEvent.click(screen.getByRole('checkbox'))
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(api.createResearchStream).toHaveBeenCalledTimes(1))
+    expect(api.createResearchStream.mock.calls[0][1].authorization).toEqual({
+      modelConfigId: 'dc8beed6-9efb-45ae-aacc-e8b8ce426b7f',
+      consent: true,
+    })
+  })
   it('keeps the closed launcher at the mobile screen edge', () => {
     renderPanel()
     const launcher = screen.getByRole('button', { name: '打开新闻研究助手' })

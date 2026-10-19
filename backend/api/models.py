@@ -1160,6 +1160,8 @@ class ResearchRun(models.Model):
     # Older queued rows have no input and must never be guessed or replayed.
     queued_query = models.TextField(default='', blank=True)
     queued_local_only = models.BooleanField(default=False)
+    # Secret-free T03 model + T01 credential fence captured for explicit T09 BYOK runs.
+    execution_snapshot = models.JSONField(default=dict, blank=True)
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='queued', db_index=True)
     run_token = models.UUIDField(null=True, blank=True)
     heartbeat_at = models.DateTimeField(null=True, blank=True)

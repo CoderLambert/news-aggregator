@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { LogIn } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/context/AuthContext'
@@ -8,6 +9,8 @@ import AuthModal from '@/components/AuthModal'
 import ResearchHeader from './ResearchHeader'
 import ResearchMessageList from './ResearchMessageList'
 import ResearchInput from './ResearchInput'
+import { listAITaskPreferences } from '@/services/aiConnectionsApi'
+import type { ResearchCreateAuthorization } from '@/services/researchApi'
 
 interface ResearchPanelProps {
   onClose: () => void
@@ -64,6 +67,33 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [input, setInput] = useState('')
   const [localOnly, setLocalOnly] = useState(false)
+  const [billingConsent, setBillingConsent] = useState(false)
+  const taskPreferences = useQuery({
+    queryKey: ['ai-task-preferences', user?.id ?? 'anonymous'],
+    queryFn: () => listAITaskPreferences(),
+    enabled: Boolean(user),
+    retry: false,
+  })
+  const researchPreference = taskPreferences.data?.preferences.find(
+    (preference) => preference.task_kind === 'deep_research',
+  )
+  const defaultPreference = taskPreferences.data?.preferences.find(
+    (preference) => preference.task_kind === 'default',
+  )
+  const effectiveResearchPreference = researchPreference?.selection_state === 'available'
+    ? researchPreference
+    : researchPreference?.selection_state === 'inherit_default'
+      && defaultPreference?.selection_state === 'available'
+      ? defaultPreference
+      : null
+  const researchModelConfigId = effectiveResearchPreference?.model_config_id ?? null
+  const researchModel = effectiveResearchPreference?.model ?? null
+  const researchModelLabel = researchModel
+    ? `${researchModel.display_name} (${researchModel.model_id})`
+    : null
+  const researchAuthorization: ResearchCreateAuthorization | undefined = researchModelConfigId && billingConsent
+    ? { modelConfigId: researchModelConfigId, consent: true }
+    : undefined
   const {
     sessions,
     activeSessionId,
@@ -81,6 +111,10 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
     handleResume,
     handleRetry,
   } = useResearch(user?.id ?? null)
+
+  useEffect(() => {
+    setBillingConsent(false)
+  }, [researchModelConfigId, activeSessionId, user?.id])
 
   const isLoading = isBusy || phase === 'thinking' || phase === 'tool_calling' || phase === 'streaming'
   // Before receiving a Session-ID, a POST might already have reached Django.
@@ -104,7 +138,11 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
   function handleSendQuery() {
     if (!input.trim() || isLoading || hasRecoverableTask || !user) return
     const submittedInput = input
-    void handleSend(input.trim(), { localOnly }).then((accepted) => {
+    if (!activeSessionId && researchModelConfigId && !billingConsent) return
+    void handleSend(input.trim(), {
+      localOnly,
+      ...(!activeSessionId && researchModelConfigId ? { authorization: researchAuthorization } : {}),
+    }).then((accepted) => {
       if (accepted) setInput((current) => current === submittedInput ? '' : current)
     })
   }
@@ -115,7 +153,14 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
       return
     }
     if (isBusy || hasRecoverableTask) return
-    void handleSend(query, { localOnly: false })
+    if (!activeSessionId && researchModelConfigId && !billingConsent) {
+      setInput(query)
+      return
+    }
+    void handleSend(query, {
+      localOnly: false,
+      ...(!activeSessionId && researchModelConfigId ? { authorization: researchAuthorization } : {}),
+    })
   }
 
   useLayoutEffect(() => {
@@ -244,6 +289,31 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
             </div>
           ) : (
             <>
+              {!activeSessionId && researchModelConfigId && researchModel && (
+                <section
+                  aria-labelledby="research-model-consent-title"
+                  className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs leading-relaxed"
+                  data-testid="research-model-consent"
+                >
+                  <p id="research-model-consent-title" className="font-semibold text-foreground">
+                    本次研究模型：{researchModelLabel}
+                    {researchPreference?.selection_state === 'inherit_default' ? '（已保存的个人默认模型）' : ''}
+                  </p>
+                  <p className="mt-1 text-muted-foreground">
+                    仅在新建研究时使用此已验证工具能力的个人模型。研究问题和必要上下文会发送给该模型服务商；
+                    服务商可能按其资费计费，本站无法代为确认费用。
+                  </p>
+                  <label className="mt-2 flex cursor-pointer items-start gap-2 text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={billingConsent}
+                      onChange={(event) => setBillingConsent(event.currentTarget.checked)}
+                      className="mt-0.5 accent-primary"
+                    />
+                    <span>我同意本次发送研究内容并接受服务商可能产生的费用。</span>
+                  </label>
+                </section>
+              )}
               <ResearchMessageList
                 messages={messages}
                 phase={phase}
@@ -277,7 +347,8 @@ function ResearchPanelView({ user, onClose }: { user: AuthUser | null; onClose: 
           onSend={user ? handleSendQuery : () => setShowAuthModal(true)}
           onCancel={handleCancel}
           isLoading={isLoading}
-          disabled={!user || hasRecoverableTask}
+          disabled={!user || hasRecoverableTask
+            || (!activeSessionId && Boolean(researchModelConfigId) && !billingConsent)}
           localOnly={localOnly}
           onToggleLocalOnly={() => setLocalOnly((enabled) => !enabled)}
         />
