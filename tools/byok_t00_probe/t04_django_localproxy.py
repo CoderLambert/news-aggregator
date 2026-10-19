@@ -745,21 +745,27 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
                 stop_marker = "T00_T09_RESEARCH_STOP_A"
                 stop_run, stop_wire = run_t09(stop_marker, "succeeded")
                 stop_rows = _records(upstream_url, stop_marker)
-                assert len(stop_rows) == 1
-                assert stop_rows[0]["upstream_raw_http_status"] == 200
-                assert stop_rows[0]["upstream_raw_body_complete"] is True
-                assert stop_rows[0]["upstream_raw_finish_reason"] == "stop"
-                assert stop_rows[0]["upstream_raw_terminal_present"] is True
+                stop_row = _assert_native_deepseek_request(
+                    stop_rows, marker=stop_marker, stream=False, terminal="finish_reason_stop",
+                )
+                assert stop_row["upstream_raw_http_status"] == 200
+                assert stop_row["upstream_raw_body_complete"] is True
+                assert stop_row["upstream_raw_finish_reason"] == "stop"
+                assert stop_row["upstream_raw_terminal_present"] is True
                 assert "synthetic t00 chat pass" in stop_wire
 
                 tool_marker = "T00_T09_RESEARCH_TOOL_A"
                 tool_run, tool_wire = run_t09(tool_marker, "succeeded")
                 tool_rows = _records(upstream_url, tool_marker)
-                assert len(tool_rows) == 2
-                assert [row["upstream_terminal"] for row in tool_rows] == [
-                    "tool_call_turn", "finish_reason_stop",
-                ]
-                assert [row["upstream_raw_finish_reason"] for row in tool_rows] == [
+                tool_call_row = _assert_native_deepseek_request(
+                    [row for row in tool_rows if row["upstream_terminal"] == "tool_call_turn"],
+                    marker=tool_marker, stream=False, terminal="tool_call_turn",
+                )
+                tool_result_row = _assert_native_deepseek_request(
+                    [row for row in tool_rows if row["upstream_terminal"] == "finish_reason_stop"],
+                    marker=tool_marker, stream=False, terminal="finish_reason_stop",
+                )
+                assert [tool_call_row["upstream_raw_finish_reason"], tool_result_row["upstream_raw_finish_reason"]] == [
                     "tool_calls", "stop",
                 ]
                 assert all(row["upstream_raw_body_complete"] is True for row in tool_rows)
@@ -774,9 +780,9 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
                 for marker, terminal, complete, status_code, expected in failure_cases:
                     run, wire = run_t09(marker, expected)
                     rows = _records(upstream_url, marker)
-                    assert len(rows) == 1
-                    row = rows[0]
-                    assert row["upstream_terminal"] == terminal
+                    row = _assert_native_deepseek_request(
+                        rows, marker=marker, stream=False, terminal=terminal,
+                    )
                     assert row["upstream_raw_body_complete"] is complete
                     assert row["upstream_raw_http_status"] == (status_code or 200)
                     assert row["upstream_raw_terminal_present"] is False

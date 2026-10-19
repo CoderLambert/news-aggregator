@@ -107,9 +107,6 @@ function ResearchPanelView({
   const researchModelLabel = researchModel
     ? `${researchModel.display_name} (${researchModel.model_id})`
     : null
-  const researchAuthorization: ResearchCreateAuthorization | undefined = researchModelConfigId && billingConsent
-    ? { modelConfigId: researchModelConfigId, consent: true }
-    : undefined
   const {
     sessions,
     activeSessionId,
@@ -137,6 +134,10 @@ function ResearchPanelView({
     setBillingConsentState({ key: billingConsentKey, checked: false })
   }
   const billingConsent = billingConsentState.key === billingConsentKey && billingConsentState.checked
+
+  const researchAuthorization: ResearchCreateAuthorization | undefined = researchModelConfigId && billingConsent
+    ? { modelConfigId: researchModelConfigId, consent: true }
+    : undefined
 
   const isLoading = isBusy || phase === 'thinking' || phase === 'tool_calling' || phase === 'streaming'
   // Before receiving a Session-ID, a POST might already have reached Django.
