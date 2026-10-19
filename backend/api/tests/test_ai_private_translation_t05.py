@@ -493,6 +493,73 @@ class PrivateTranslationTests(TransactionTestCase):
         self.assertTrue(task.provider_started)
         self.assertEqual(ChatGPTArticleTranslation.objects.count(), 1)
 
+    def test_pre_send_database_errors_fail_closed_without_provider_send(self):
+        from api.services import ai_worker_fencing
+
+        original = self.news.full_content
+        try:
+            cases = (
+                ('persistent_sqlite_lock', self.storage_busy, len(subscription_jobs.SUBMISSION_LOCK_DELAYS) + 1),
+                ('non_lock_operational_error', lambda: OperationalError('synthetic non-lock error'), 1),
+            )
+            for label, make_error, expected_attempts in cases:
+                with self.subTest(error=label):
+                    self.news.full_content = f'# Synthetic source {label}\n\nPrivate article.'
+                    self.news.save(update_fields=['full_content'])
+                    self.request_id = str(uuid.uuid4())
+                    task = self.queued()
+                    calls = []
+
+                    def reject_credential_read(snapshot):
+                        calls.append(snapshot)
+                        raise make_error()
+
+                    with patch.object(ai_worker_fencing, 'read_execution_credential',
+                                      side_effect=reject_credential_read), \
+                            patch.object(service, 'build_gateway_client') as build, \
+                            patch.object(subscription_jobs.time, 'sleep'):
+                        service.run_translation(task.pk, task.generation)
+
+                    task.refresh_from_db()
+                    self.assertEqual(len(calls), expected_attempts)
+                    build.assert_not_called()
+                    self.assertEqual(task.status, 'failed')
+                    self.assertFalse(task.provider_started)
+                    self.assertFalse(task.result)
+                    self.assertFalse(ChatGPTArticleTranslation.objects.filter(news=self.news).exists())
+                    self.assertFalse(SharedArticleTranslation.objects.filter(news=self.news).exists())
+        finally:
+            self.news.full_content = original
+            self.news.save(update_fields=['full_content'])
+
+    def test_provider_transport_exception_is_single_send_and_terminal(self):
+        self.news.full_content = '# Synthetic transport failure\n\nPrivate article.'
+        self.news.save(update_fields=['full_content'])
+        self.request_id = str(uuid.uuid4())
+        task = self.queued()
+        gateway = FakeGateway([])
+        with patch.object(service, 'build_gateway_client', return_value=gateway) as build, \
+                patch.object(gateway.chat.completions, 'create',
+                             side_effect=OSError('synthetic provider transport failure')) as send, \
+                patch.object(subscription_jobs.time, 'sleep'):
+            service.run_translation(task.pk, task.generation)
+
+        task.refresh_from_db()
+        build.assert_called_once()
+        send.assert_called_once()
+        self.assertEqual(task.status, 'failed')
+        self.assertTrue(task.provider_started)
+        self.assertFalse(task.result)
+        self.assertFalse(ChatGPTArticleTranslation.objects.filter(news=self.news).exists())
+        self.assertFalse(SharedArticleTranslation.objects.filter(news=self.news).exists())
+
+        # A failed task is terminal; a new worker invocation cannot replay a
+        # transport attempt whose outcome may have been accepted upstream.
+        service.run_translation(task.pk, task.generation)
+        send.assert_called_once()
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'failed')
+
     def test_model_state_matches_migration(self):
         call_command('makemigrations', 'api', check=True, dry_run=True, verbosity=0)
 
