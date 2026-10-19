@@ -1,4 +1,5 @@
 from datetime import timedelta
+import sqlite3
 from email.utils import format_datetime
 import json
 import os
@@ -7,6 +8,8 @@ import subprocess
 import sys
 
 import pytest
+from django.db import OperationalError, connection, transaction
+from django.db.models.query import QuerySet
 from django.utils import timezone
 
 from api.models import RequestBudget
@@ -285,3 +288,140 @@ def test_200_retry_after_is_advisory_while_429_still_cools_down():
     assert deadline is not None
     assert RequestBudget.objects.get(pk='host:feed-header.example').cooldown_until is not None
     budget.release_budget(permit)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_release_retries_whole_transaction_after_rollback(monkeypatch):
+    permit = budget.claim_budget({'host:release-a.test': 0, 'host:release-b.test': 2})
+    deadline = budget.record_response(permit, 429, {'Retry-After': '120'})
+    original_timeout = None
+    with connection.cursor() as cursor:
+        cursor.execute('PRAGMA busy_timeout')
+        original_timeout = cursor.fetchone()[0]
+
+    real_update = QuerySet.update
+    release_updates = 0
+    injected = False
+
+    def fail_once_after_first_scope_write(queryset, **kwargs):
+        nonlocal release_updates, injected
+        if kwargs.get('next_allowed_at') is not None and kwargs.get('lease_token') == '':
+            release_updates += 1
+            result = real_update(queryset, **kwargs)
+            if not injected:
+                injected = True
+                error = OperationalError('synthetic SQLite lock')
+                error.sqlite_errorcode = sqlite3.SQLITE_BUSY
+                raise error
+            return result
+        return real_update(queryset, **kwargs)
+
+    monkeypatch.setattr(QuerySet, 'update', fail_once_after_first_scope_write)
+    budget.release_budget(permit)
+
+    # First attempt's partial write was rolled back; the second transaction
+    # performed all scope releases plus the shared global-slot release.
+    assert injected
+    assert release_updates == 3
+    for key in ('host:release-a.test', 'host:release-b.test'):
+        row = RequestBudget.objects.get(pk=key)
+        assert row.lease_token == ''
+        assert row.cooldown_until == deadline
+    with connection.cursor() as cursor:
+        cursor.execute('PRAGMA busy_timeout')
+        assert cursor.fetchone()[0] == original_timeout
+
+
+@pytest.mark.django_db(transaction=True)
+def test_release_retry_respects_replacement_token_and_cooldown(monkeypatch):
+    permit = budget.claim_budget({'host:replacement.test': 0, 'group:replacement': 1})
+    budget.record_response(permit, 429, {'Retry-After': '120'})
+    original_update = QuerySet.update
+    injected = False
+    replacement_token = 'replacement-token'
+    replacement_cooldown = timezone.now() + timedelta(minutes=5)
+
+    def fail_after_first_scope_write(queryset, **kwargs):
+        nonlocal injected
+        if kwargs.get('next_allowed_at') is not None and kwargs.get('lease_token') == '' and not injected:
+            original_update(queryset, **kwargs)
+            injected = True
+            error = OperationalError('synthetic extended SQLite lock')
+            error.sqlite_errorcode = getattr(sqlite3, 'SQLITE_BUSY_SNAPSHOT', sqlite3.SQLITE_BUSY)
+            raise error
+        return original_update(queryset, **kwargs)
+
+    def replace_between_attempts(delay):
+        assert delay > 0
+        row = RequestBudget.objects.get(pk='host:replacement.test')
+        RequestBudget.objects.filter(pk=row.pk).update(
+            lease_token=replacement_token,
+            lease_expires_at=timezone.now() + timedelta(minutes=1),
+            cooldown_until=replacement_cooldown,
+        )
+
+    monkeypatch.setattr(QuerySet, 'update', fail_after_first_scope_write)
+    monkeypatch.setattr(budget.time, 'sleep', replace_between_attempts)
+    budget.release_budget(permit)
+
+    host = RequestBudget.objects.get(pk='host:replacement.test')
+    group = RequestBudget.objects.get(pk='group:replacement')
+    assert injected
+    assert host.lease_token == replacement_token
+    assert host.cooldown_until == replacement_cooldown
+    assert group.lease_token == ''
+    assert group.cooldown_until is not None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_release_lock_exhaustion_and_unclassified_or_nested_errors_fail_once(monkeypatch):
+    permit = budget.claim_budget({'host:release-fail.test': 0})
+    original_update = QuerySet.update
+    attempts = 0
+    global_tokens_before = dict(
+        RequestBudget.objects.filter(pk__in=budget.GLOBAL_KEYS).values_list('pk', 'lease_token')
+    )
+    owned_global_keys = tuple(key for key in permit.scope_keys if key in budget.GLOBAL_KEYS)
+    assert len(owned_global_keys) == 1
+    assert {key for key, token in global_tokens_before.items() if token == permit.token} == set(owned_global_keys)
+
+    def always_locked(queryset, **kwargs):
+        nonlocal attempts
+        if kwargs.get('next_allowed_at') is not None and kwargs.get('lease_token') == '':
+            attempts += 1
+            error = OperationalError('synthetic SQLite lock')
+            error.sqlite_errorcode = sqlite3.SQLITE_LOCKED
+            raise error
+        return original_update(queryset, **kwargs)
+
+    monkeypatch.setattr(QuerySet, 'update', always_locked)
+    with pytest.raises(OperationalError):
+        budget.release_budget(permit)
+    assert attempts == 3
+    assert RequestBudget.objects.get(pk='host:release-fail.test').lease_token == permit.token
+    global_tokens_after = dict(
+        RequestBudget.objects.filter(pk__in=budget.GLOBAL_KEYS).values_list('pk', 'lease_token')
+    )
+    assert global_tokens_after == global_tokens_before
+    assert RequestBudget.objects.filter(pk__in=owned_global_keys, lease_token=permit.token).count() == len(owned_global_keys)
+
+    attempts = 0
+    def unclassified_locked_text(queryset, **kwargs):
+        nonlocal attempts
+        if kwargs.get('next_allowed_at') is not None and kwargs.get('lease_token') == '':
+            attempts += 1
+            raise OperationalError('database is locked without a driver code')
+        return original_update(queryset, **kwargs)
+
+    monkeypatch.setattr(QuerySet, 'update', unclassified_locked_text)
+    with pytest.raises(OperationalError):
+        budget.release_budget(permit)
+    assert attempts == 1
+    assert RequestBudget.objects.get(pk='host:release-fail.test').lease_token == permit.token
+
+    attempts = 0
+    with transaction.atomic():
+        with pytest.raises(OperationalError):
+            budget.release_budget(permit)
+    assert attempts == 1
+    assert RequestBudget.objects.get(pk='host:release-fail.test').lease_token == permit.token

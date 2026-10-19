@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone as utc_timezone
 from email.utils import parsedate_to_datetime
 import hashlib
 import random
+import sqlite3
 import time
 from urllib.parse import urlsplit
 import uuid
@@ -211,12 +212,41 @@ def record_response(permit, status, headers, *, host=''):
         return max(RequestBudget.objects.filter(pk__in=scopes).values_list('cooldown_until', flat=True))
 
 
+def _is_sqlite_contention(error):
+    """Classify only SQLite BUSY/LOCKED driver codes, including extended codes."""
+    if connection.vendor != 'sqlite':
+        return False
+    pending = [error]
+    seen = set()
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        code = getattr(current, 'sqlite_errorcode', None)
+        if isinstance(code, int) and code & 0xff in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}:
+            return True
+        pending.extend((getattr(current, '__cause__', None), getattr(current, '__context__', None)))
+    return False
+
+
 def release_budget(permit):
-    """Only the owner can release; success cannot shorten a server cooldown."""
-    with _short_busy_wait(), transaction.atomic():
-        for key, interval in permit.intervals:
-            now = timezone.now()
-            RequestBudget.objects.filter(pk=key, lease_token=permit.token).update(
-                lease_token='', lease_expires_at=None, next_allowed_at=now + timedelta(seconds=interval),
-            )
-        RequestBudget.objects.filter(pk__in=GLOBAL_KEYS, lease_token=permit.token).update(lease_token='', lease_expires_at=None)
+    """Only the owner can release; retry the whole DB transaction on SQLite contention."""
+    # A nested atomic block cannot safely retry an inner savepoint: the outer
+    # transaction may still own the lock. In that case fail/propagate once.
+    attempts = 1 if connection.in_atomic_block else 3
+    for attempt in range(attempts):
+        try:
+            with _short_busy_wait(), transaction.atomic():
+                for key, interval in permit.intervals:
+                    now = timezone.now()
+                    RequestBudget.objects.filter(pk=key, lease_token=permit.token).update(
+                        lease_token='', lease_expires_at=None, next_allowed_at=now + timedelta(seconds=interval),
+                    )
+                RequestBudget.objects.filter(pk__in=GLOBAL_KEYS, lease_token=permit.token).update(lease_token='', lease_expires_at=None)
+            return
+        except OperationalError as error:
+            # The atomic context has rolled back before we classify or retry.
+            if attempt + 1 >= attempts or not _is_sqlite_contention(error):
+                raise
+            time.sleep(0.01 * (attempt + 1))

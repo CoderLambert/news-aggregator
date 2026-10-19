@@ -100,7 +100,7 @@ class PrivateTranslationTests(TransactionTestCase):
         with patch.object(service, '_dispatch') as dispatch:
             for consent in (False, None, 'true', 1):
                 self.assertEqual(self.start(billing_consent=consent).status_code, 400)
-            with patch.object(service, 'MAX_INPUT_CHARS', 1):
+            with patch.object(service, 'T06_MAX_INPUT_CHARS', 1):
                 self.assertEqual(self.start().status_code, 400)
             self.model.last_text_attempt = None
             self.model.save(update_fields=['last_text_attempt'])
@@ -401,10 +401,164 @@ class PrivateTranslationTests(TransactionTestCase):
         gateway = FakeGateway([gateway_frame('并发只派发一次')])
         with patch.object(service, 'build_gateway_client', return_value=gateway), ThreadPoolExecutor(max_workers=2) as pool:
             list(pool.map(lambda _: service.run_translation(task.pk, task.generation), range(2)))
-        self.assertEqual(len(gateway.sent), 1)
         task.refresh_from_db()
+        self.assertEqual(len(gateway.sent), 1, {
+            'status': task.status,
+            'provider_started': task.provider_started,
+            'error_code': task.error_code,
+        })
         self.assertEqual(task.status, 'succeeded')
         self.assertEqual(ChatGPTArticleTranslation.objects.count(), 1)
+
+    def test_pre_send_sqlite_contention_retries_credential_read_before_one_send(self):
+        from api.services import ai_worker_fencing
+
+        task = self.queued()
+        real_read = ai_worker_fencing.read_execution_credential
+        calls = []
+
+        def locked_once(snapshot):
+            calls.append(snapshot)
+            if len(calls) == 1:
+                raise self.storage_busy()
+            return real_read(snapshot)
+
+        gateway = FakeGateway([gateway_frame('中文单次派发')])
+        with patch.object(ai_worker_fencing, 'read_execution_credential', side_effect=locked_once), \
+                patch.object(service, 'build_gateway_client', return_value=gateway) as build, \
+                patch.object(subscription_jobs.time, 'sleep'):
+            service.run_translation(task.pk, task.generation)
+
+        task.refresh_from_db()
+        self.assertEqual(len(calls), 2)
+        build.assert_called_once()
+        self.assertEqual(len(gateway.sent), 1)
+        self.assertEqual(task.status, 'succeeded')
+        self.assertTrue(task.provider_started)
+        self.assertEqual(task.error_code, '')
+        self.assertEqual(ChatGPTArticleTranslation.objects.count(), 1)
+
+    def test_pre_send_contention_retry_rechecks_credential_revocation(self):
+        from api.services import ai_worker_fencing
+
+        task = self.queued()
+        real_read = ai_worker_fencing.read_execution_credential
+        calls = []
+
+        def revoke_then_lock(snapshot):
+            calls.append(snapshot)
+            if len(calls) == 1:
+                self.connection.credential_epoch += 1
+                self.connection.save(update_fields=['credential_epoch'])
+                raise self.storage_busy()
+            return real_read(snapshot)
+
+        with patch.object(ai_worker_fencing, 'read_execution_credential', side_effect=revoke_then_lock), \
+                patch.object(service, 'build_gateway_client') as build, \
+                patch.object(subscription_jobs.time, 'sleep'):
+            service.run_translation(task.pk, task.generation)
+
+        task.refresh_from_db()
+        self.assertEqual(len(calls), 2)
+        build.assert_not_called()
+        self.assertEqual(task.status, 'failed')
+        self.assertFalse(task.provider_started)
+        self.assertFalse(task.result)
+        self.assertFalse(ChatGPTArticleTranslation.objects.exists())
+        self.assertFalse(SharedArticleTranslation.objects.exists())
+
+    def test_post_marker_database_lock_retries_fence_before_one_send(self):
+        task = self.queued()
+        real_live = service._live
+        locked = []
+
+        def lock_once_after_marker(task_id, generation, token, *, started=True):
+            current = ChatGPTTranslationTask.objects.get(pk=task_id)
+            if started and current.provider_started and not locked:
+                locked.append(True)
+                raise self.storage_busy()
+            return real_live(task_id, generation, token, started=started)
+
+        gateway = FakeGateway([gateway_frame('中文单次派发')])
+        with patch.object(service, '_live', side_effect=lock_once_after_marker), \
+                patch.object(service, 'build_gateway_client', return_value=gateway) as build, \
+                patch.object(subscription_jobs.time, 'sleep'):
+            service.run_translation(task.pk, task.generation)
+
+        task.refresh_from_db()
+        self.assertEqual(len(locked), 1)
+        build.assert_called_once()
+        self.assertEqual(len(gateway.sent), 1)
+        self.assertEqual(task.status, 'succeeded')
+        self.assertTrue(task.provider_started)
+        self.assertEqual(ChatGPTArticleTranslation.objects.count(), 1)
+
+    def test_pre_send_database_errors_fail_closed_without_provider_send(self):
+        from api.services import ai_worker_fencing
+
+        original = self.news.full_content
+        try:
+            cases = (
+                ('persistent_sqlite_lock', self.storage_busy, len(subscription_jobs.SUBMISSION_LOCK_DELAYS) + 1),
+                ('non_lock_operational_error', lambda: OperationalError('synthetic non-lock error'), 1),
+            )
+            for label, make_error, expected_attempts in cases:
+                with self.subTest(error=label):
+                    self.news.full_content = f'# Synthetic source {label}\n\nPrivate article.'
+                    self.news.save(update_fields=['full_content'])
+                    self.request_id = str(uuid.uuid4())
+                    task = self.queued()
+                    calls = []
+
+                    def reject_credential_read(snapshot):
+                        calls.append(snapshot)
+                        raise make_error()
+
+                    with patch.object(ai_worker_fencing, 'read_execution_credential',
+                                      side_effect=reject_credential_read), \
+                            patch.object(service, 'build_gateway_client') as build, \
+                            patch.object(subscription_jobs.time, 'sleep'):
+                        service.run_translation(task.pk, task.generation)
+
+                    task.refresh_from_db()
+                    self.assertEqual(len(calls), expected_attempts)
+                    build.assert_not_called()
+                    self.assertEqual(task.status, 'failed')
+                    self.assertFalse(task.provider_started)
+                    self.assertFalse(task.result)
+                    self.assertFalse(ChatGPTArticleTranslation.objects.filter(news=self.news).exists())
+                    self.assertFalse(SharedArticleTranslation.objects.filter(news=self.news).exists())
+        finally:
+            self.news.full_content = original
+            self.news.save(update_fields=['full_content'])
+
+    def test_provider_transport_exception_is_single_send_and_terminal(self):
+        self.news.full_content = '# Synthetic transport failure\n\nPrivate article.'
+        self.news.save(update_fields=['full_content'])
+        self.request_id = str(uuid.uuid4())
+        task = self.queued()
+        gateway = FakeGateway([])
+        with patch.object(service, 'build_gateway_client', return_value=gateway) as build, \
+                patch.object(gateway.chat.completions, 'create',
+                             side_effect=OSError('synthetic provider transport failure')) as send, \
+                patch.object(subscription_jobs.time, 'sleep'):
+            service.run_translation(task.pk, task.generation)
+
+        task.refresh_from_db()
+        build.assert_called_once()
+        send.assert_called_once()
+        self.assertEqual(task.status, 'failed')
+        self.assertTrue(task.provider_started)
+        self.assertFalse(task.result)
+        self.assertFalse(ChatGPTArticleTranslation.objects.filter(news=self.news).exists())
+        self.assertFalse(SharedArticleTranslation.objects.filter(news=self.news).exists())
+
+        # A failed task is terminal; a new worker invocation cannot replay a
+        # transport attempt whose outcome may have been accepted upstream.
+        service.run_translation(task.pk, task.generation)
+        send.assert_called_once()
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'failed')
 
     def test_model_state_matches_migration(self):
         call_command('makemigrations', 'api', check=True, dry_run=True, verbosity=0)
@@ -488,3 +642,231 @@ class PrivateTranslationTests(TransactionTestCase):
             self.assertFalse(SharedArticleTranslation.objects.exists())
         finally:
             self.owner, self.client = original_owner, original_client
+
+
+    def test_t06_multibyte_block_chunking_is_deterministic_and_bounded(self):
+        source = '😀' * 4000 + '\n\n' + '😃' * 4000
+        chunks = service._split_t06_markdown(source)
+        self.assertEqual(chunks, service._split_t06_markdown(source))
+        self.assertEqual(''.join(chunks), source)
+        self.assertEqual(len(chunks), 2)
+        for chunk in chunks:
+            self.assertLessEqual(len(chunk), service.T06_CHUNK_INPUT_CHARS)
+            self.assertLessEqual(len(chunk.encode('utf-8')), service.T06_CHUNK_INPUT_BYTES)
+
+    def test_t06_chunking_preserves_markdown_blocks_and_private_merge_order(self):
+        self.news.full_content = (
+            '## Heading\n\n[Read](https://example.test/a)\n\n| left | right |\n| --- | --- |\n\n'
+            '```py\nprint(1)\n```\n\n' + 'A' * 5000 + '\n\n' + 'B' * 5000
+        )
+        self.news.full_content_state = 'legacy'
+        self.news.save(update_fields=['full_content', 'full_content_state'])
+        task = self.queued()
+        chunks = service._task_chunks(task.execution_snapshot)
+        self.assertEqual(len(chunks), 2)
+        prepared = [service._split_trailing_separator(chunk) for chunk in chunks]
+        self.assertTrue(any(separator for _, separator in prepared))
+        # Synthetic translated prose omits source paragraph separators; the merge restores them.
+        translated_bodies = [
+            '## 标题\n\n[Read](https://example.test/a)\n\n'
+            '| 左 | 右 |\n| --- | --- |\n\n```py\nprint(1)\n```\n\n第一段中文',
+            '第二段中文',
+        ]
+        gateways = [FakeGateway([gateway_frame(body)]) for body in translated_bodies]
+        with patch.object(service, 'build_gateway_client', side_effect=gateways) as build:
+            service.run_translation(task.pk, task.generation)
+        task.refresh_from_db()
+        expected = ('## 标题\n\n[Read](https://example.test/a)\n\n'
+                    '| 左 | 右 |\n| --- | --- |\n\n```py\nprint(1)\n```\n\n'
+                    '第一段中文\n\n第二段中文')
+        self.assertEqual(task.status, 'succeeded')
+        self.assertEqual(build.call_count, len(chunks))
+        self.assertEqual([len(gateway.sent) for gateway in gateways], [1] * len(chunks))
+        self.assertEqual(task.result['content'], expected)
+        self.assertEqual(task.progress, expected)
+        self.assertEqual(ChatGPTArticleTranslation.objects.count(), 1)
+        self.assertFalse(SharedArticleTranslation.objects.exists())
+        result_id = task.result['result_id']
+        with patch.object(service, '_dispatch') as dispatch:
+            detail = self.client.get(f'/api/me/ai/translations/{task.pk}/')
+            latest = self.client.get(self.url)
+        dispatch.assert_not_called()
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(latest.status_code, 200)
+        self.assertEqual(detail.data['result']['result_id'], result_id)
+        self.assertEqual(latest.data['task']['result']['result_id'], result_id)
+        self.assertEqual(build.call_count, len(chunks))
+
+    def test_t06_queued_source_mutation_fails_closed_before_dispatch(self):
+        task = self.queued()
+        self.news.full_content += '\n\nchanged while queued'
+        self.news.save(update_fields=['full_content'])
+        with patch.object(service, 'build_gateway_client') as build:
+            service.run_translation(task.pk, task.generation)
+        build.assert_not_called()
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'failed')
+        self.assertEqual(task.progress, '')
+        self.assertFalse(task.result)
+        self.assertFalse(ChatGPTArticleTranslation.objects.exists())
+        self.assertFalse(SharedArticleTranslation.objects.exists())
+
+    def test_t06_later_chunk_rechecks_source_model_and_credential_fences(self):
+        for mutation in ('source', 'credential', 'model'):
+            with self.subTest(mutation=mutation):
+                source_markdown = 'A' * 5000 + '\n\n' + 'B' * 5000 + f'\n\ncase {mutation}'
+                self.news.full_content = source_markdown
+                self.news.full_content_state = 'legacy'
+                self.news.save(update_fields=['full_content', 'full_content_state'])
+                self.request_id = str(uuid.uuid4())
+                task = self.queued()
+                first = FakeGateway([gateway_frame('第一段中文')])
+                original_epoch = self.connection.credential_epoch
+                original_revision = self.model.config_revision
+                real_mark_dispatch = service._mark_dispatch
+
+                def mutate_before_dispatch(task_id, generation, token, chunk_index):
+                    if chunk_index == 1:
+                        if mutation == 'source':
+                            self.news.full_content += '\nchanged after first chunk'
+                            self.news.save(update_fields=['full_content'])
+                        elif mutation == 'credential':
+                            self.connection.credential_epoch += 1
+                            self.connection.save(update_fields=['credential_epoch'])
+                        else:
+                            self.model.config_revision += 1
+                            self.model.save(update_fields=['config_revision'])
+                    return real_mark_dispatch(task_id, generation, token, chunk_index)
+
+                try:
+                    with patch.object(service, '_mark_dispatch', side_effect=mutate_before_dispatch):
+                        with patch.object(service, 'build_gateway_client', return_value=first) as build:
+                            service.run_translation(task.pk, task.generation)
+                    task.refresh_from_db()
+                    self.assertEqual(task.status, 'failed')
+                    self.assertEqual(task.progress, '第一段中文\n\n')
+                    self.assertFalse(task.result)
+                    self.assertEqual(build.call_count, 1)
+                    self.assertEqual(len(first.sent), 1)
+                    self.assertFalse(ChatGPTArticleTranslation.objects.exists())
+                    self.assertFalse(SharedArticleTranslation.objects.exists())
+                finally:
+                    if mutation == 'source':
+                        self.news.full_content = source_markdown
+                        self.news.save(update_fields=['full_content'])
+                    elif mutation == 'credential':
+                        self.connection.refresh_from_db()
+                        self.connection.credential_epoch = original_epoch
+                        self.connection.save(update_fields=['credential_epoch'])
+                    elif mutation == 'model':
+                        self.model.refresh_from_db()
+                        self.model.config_revision = original_revision
+                        self.model.save(update_fields=['config_revision'])
+
+    def test_t06_middle_chunk_failures_are_progress_only_and_never_replayed(self):
+        cases = (
+            ('eof', gateway_frame('partial second', finish=None)),
+            ('length', gateway_frame('partial second', finish='length')),
+            ('empty', gateway_frame('', finish='stop')),
+        )
+        for index, (failure, frame) in enumerate(cases):
+            with self.subTest(failure=failure):
+                self.news.full_content = 'A' * 5000 + '\n\n' + 'B' * 5000 + f'\n\ncase {failure}'
+                self.news.full_content_state = 'legacy'
+                self.news.save(update_fields=['full_content', 'full_content_state'])
+                self.request_id = str(uuid.uuid4())
+                task = self.queued()
+                first = FakeGateway([gateway_frame('translated first')])
+                second = FakeGateway([frame])
+                with patch.object(service, 'build_gateway_client', side_effect=[first, second]) as build:
+                    service.run_translation(task.pk, task.generation)
+                    service.run_translation(task.pk, task.generation)
+                task.refresh_from_db()
+                self.assertEqual(task.status, 'failed')
+                self.assertEqual(task.progress, 'translated first\n\n')
+                self.assertFalse(task.result)
+                self.assertEqual(build.call_count, 2)
+                self.assertEqual(len(first.sent), 1)
+                self.assertEqual(len(second.sent), 1)
+                self.assertFalse(ChatGPTArticleTranslation.objects.exists())
+                self.assertFalse(SharedArticleTranslation.objects.exists())
+
+    def test_t06_oversized_indivisible_block_and_profile_mismatch_reject_before_dispatch(self):
+        self.news.full_content = 'A' * 9000 + '\n\n' + 'B' * 100
+        self.news.full_content_state = 'legacy'
+        self.news.save(update_fields=['full_content', 'full_content_state'])
+        with patch.object(service, '_dispatch') as dispatch:
+            oversized = self.start()
+        self.assertEqual(oversized.status_code, 400, oversized.content)
+        dispatch.assert_not_called()
+        self.assertFalse(ChatGPTTranslationTask.objects.exists())
+
+        self.news.full_content = 'A' * 5000 + '\n\n' + 'B' * 5000
+        self.news.save(update_fields=['full_content'])
+        with patch.object(service, 'T06_ENDPOINT_PROFILE_VERSION', 2), patch.object(service, '_dispatch') as dispatch:
+            mismatch = self.start(request_id=str(uuid.uuid4()))
+        self.assertEqual(mismatch.status_code, 409, mismatch.content)
+        dispatch.assert_not_called()
+        self.assertFalse(ChatGPTTranslationTask.objects.exists())
+
+    def test_t06_rejects_quoted_or_indented_fences_before_dispatch(self):
+        unsupported = (
+            '> ~~~py\n> print(1)\n> ~~~',
+            '>  ~~~py\n>  print(1)\n>  ~~~',
+            '>   ~~~py\n>   print(1)\n>   ~~~',
+            '> > ~~~md\n> > nested\n> > ~~~',
+            '- ~~~py\n  print(1)\n  ~~~',
+            '1. ```py\n   print(1)\n   ```',
+            '> - ~~~py\n>   print(1)\n>   ~~~',
+            '    ~~~py\n    print(1)\n    ~~~',
+            '    - ~~~py\n      print(1)\n      ~~~',
+        )
+        for index, fence in enumerate(unsupported):
+            with self.subTest(index=index):
+                self.news.full_content = 'A' * 5000 + '\n\n' + fence + '\n\n' + 'B' * 5000
+                self.news.full_content_state = 'legacy'
+                self.news.save(update_fields=['full_content', 'full_content_state'])
+                with patch.object(service, '_dispatch') as dispatch:
+                    response = self.start(request_id=str(uuid.uuid4()))
+                self.assertEqual(response.status_code, 400, response.content)
+                dispatch.assert_not_called()
+                self.assertFalse(ChatGPTTranslationTask.objects.exists())
+                self.assertFalse(ChatGPTArticleTranslation.objects.exists())
+                self.assertFalse(SharedArticleTranslation.objects.exists())
+
+    def test_t06_final_fence_allows_provider_closing_line_ending(self):
+        self.news.full_content = 'A' * 5000 + '\n\n' + 'B' * 4000 + '\n\n' + '```py\nprint(1)\n```'
+        self.news.full_content_state = 'legacy'
+        self.news.save(update_fields=['full_content', 'full_content_state'])
+        task = self.queued()
+        chunks = service._task_chunks(task.execution_snapshot)
+        self.assertGreater(len(chunks), 1)
+        prepared = [service._split_trailing_separator(chunk) for chunk in chunks]
+        self.assertEqual(prepared[-1][1], '')
+        gateways = []
+        for index, (body, _) in enumerate(prepared):
+            output = body + ('\n' if index == len(prepared) - 1 else '')
+            gateways.append(FakeGateway([gateway_frame(output)]))
+        with patch.object(service, 'build_gateway_client', side_effect=gateways):
+            service.run_translation(task.pk, task.generation)
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'succeeded')
+        self.assertTrue(task.result['content'].endswith('```\n'))
+        self.assertIn('print(1)', task.result['content'])
+
+    def test_t06_unknown_context_and_guard_drift_reject_before_dispatch(self):
+        self.news.full_content = 'A' * 5000 + '\n\n' + 'B' * 5000
+        self.news.full_content_state = 'legacy'
+        self.news.save(update_fields=['full_content', 'full_content_state'])
+        cases = (
+            {'T06_CONTEXT_WINDOW_TOKENS': None},
+            {'T06_CONTEXT_WINDOW_TOKENS': 999_999},
+            {'T06_REQUEST_SIZE_GUARD_BYTES': 100},
+            {'T06_OUTPUT_TOKENS_PER_CHUNK': service.T06_PROVIDER_MAX_OUTPUT_TOKENS + 1},
+        )
+        for changes in cases:
+            with self.subTest(changes=changes), patch.multiple(service, **changes), patch.object(service, '_dispatch') as dispatch:
+                response = self.start(request_id=str(uuid.uuid4()))
+            self.assertEqual(response.status_code, 409, response.content)
+            dispatch.assert_not_called()
+            self.assertFalse(ChatGPTTranslationTask.objects.exists())
