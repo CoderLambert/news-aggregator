@@ -45,12 +45,12 @@ function TranslationSession({ viewer, newsId, sourceRevision, sourceMarkdown }: 
     refetchInterval: query => observing && ['queued', 'running'].includes(query.state.data?.status ?? '') ? 1000 : false,
   })
   const task = recovery.isError ? null : recovery.data
-  const tooLong = [...sourceMarkdown].length > 8000 || new TextEncoder().encode(sourceMarkdown).length > 32000
+  const tooLarge = [...sourceMarkdown].length > 64000 || new TextEncoder().encode(sourceMarkdown).length > 256000
   const hidden = models.error instanceof ConnectionRequestError && models.error.status === 403
   const recoverable = task?.status === 'queued'
   const eligible = models.data?.some(model => model.id === selected) === true
   const start = async () => {
-    if (inFlight.current || !consent || (!recoverable && (!eligible || task || unknown || tooLong)) || recovery.isPending || recovery.isError) return
+    if (inFlight.current || !consent || (!recoverable && (!eligible || task || unknown || tooLarge)) || recovery.isPending || recovery.isError) return
     inFlight.current = true
     setSending(true)
     setRejection('')
@@ -81,7 +81,7 @@ function TranslationSession({ viewer, newsId, sourceRevision, sourceMarkdown }: 
   if (hidden) return null
   return <section aria-label="个人全文翻译" className="my-6 rounded-xl border border-border p-4">
     <h2 className="font-semibold">个人全文翻译（私有）</h2>
-    <p className="my-2 text-sm text-muted-foreground">仅限短中篇：最多 8000 字符 / 32000 UTF-8 字节，翻译为简体中文。超限会拒绝，不截断、不自动重试。结果不发布到共享译文。</p>
+    <p className="my-2 text-sm text-muted-foreground">短中篇仍使用一次请求。较长文章按完整 Markdown 块顺序拆分，每次最多 8000 字符 / 32000 UTF-8 字节，整篇最多 64000 字符 / 256000 UTF-8 字节、8 次请求和 262144 字符输出。不可拆分的大块会被拒绝，不截断、不自动重试；长文最多可能产生 8 次服务商费用。结果仅保存在你的私有翻译中。</p>
     <label>翻译模型
       <select aria-label="翻译模型" value={selected} disabled={sending || !!task}
         onChange={event => { setSelected(event.target.value); setConsent(false) }}
@@ -96,13 +96,13 @@ function TranslationSession({ viewer, newsId, sourceRevision, sourceMarkdown }: 
     <label className="my-2 block">
       <input type="checkbox" checked={consent} disabled={sending || (!recoverable && (!eligible || !!task))}
         onChange={event => setConsent(event.target.checked)} />
-      我确认这次全文翻译可能产生服务商费用。
+      我确认这次全文翻译可能产生费用；长文最多会顺序发送 8 次个人模型请求。
     </label>
-    <button type="button" onClick={() => void start()} disabled={!consent || sending || (!recoverable && (!eligible || !!task || unknown || tooLong)) || recovery.isPending || recovery.isError}
+    <button type="button" onClick={() => void start()} disabled={!consent || sending || (!recoverable && (!eligible || !!task || unknown || tooLarge)) || recovery.isPending || recovery.isError}
       className="rounded bg-primary px-3 py-2 text-primary-foreground disabled:opacity-50">
       {sending ? '正在提交…' : recoverable ? '恢复排队任务' : '开始私有翻译'}
     </button>
-    {tooLong && <p role="alert">原文超过本次短中篇预算，请保留完整原文；长文翻译尚未开放。</p>}
+    {tooLarge && <p role="alert">原文超过全文翻译上限，请保留完整原文；不会截断后发送。</p>}
     {rejection && <p role="alert">{rejection}</p>}
     {(unknown && !task) && <p role="alert">提交结果未知。请读取任务状态，不要重复发送收费请求。</p>}
     {recovery.isError && <p role="alert">无法读取当前任务，原文、权限或模型可能已变化。</p>}
