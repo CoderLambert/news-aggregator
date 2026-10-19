@@ -98,12 +98,14 @@ def error(code, status=400):
 class ConnectionView(APIView):
     authentication_classes = [AnonymousCsrfSessionAuthentication]
     permission_classes = [IsAuthenticated]
+    allow_history_reads = False
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
         if settings.PUBLIC_SITE_MODE != 'full':
             raise PermissionDenied('只读模式不允许管理个人连接。')
-        if not getattr(settings, 'AI_BYOK_ENABLED', False):
+        history_read = self.allow_history_reads and request.method in {'GET', 'HEAD'}
+        if not getattr(settings, 'AI_BYOK_ENABLED', False) and not history_read:
             raise PermissionDenied('个人连接管理尚未启用。')
 
     def finalize_response(self, request, response, *args, **kwargs):

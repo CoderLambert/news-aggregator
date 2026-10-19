@@ -22,6 +22,17 @@ const completed: api.PrivateTranslationTask = {
   result: { result_id: 4, task_id: '11111111-1111-4111-8111-111111111111',
     content: '私有中文', scope: 'private', provider: 'deepseek', model: 'Flash' },
 }
+it('keeps completed private history visible when connection management is disabled', async () => {
+  vi.mocked(models.listAIConnections).mockRejectedValue(new models.ConnectionRequestError(403))
+  vi.mocked(api.latestPrivateTranslation).mockResolvedValue(completed)
+  view()
+  expect(await screen.findByText('个人模型调用已关闭，可继续查看已保存的翻译记录。')).toBeTruthy()
+  expect(screen.getByText('私有中文')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: /重新生成|开始私有翻译|明确取消任务/ })).toBeNull()
+  expect(screen.queryByRole('checkbox')).toBeNull()
+  expect(api.startPrivateTranslation).not.toHaveBeenCalled()
+  expect(api.retryPrivateTranslation).not.toHaveBeenCalled()
+})
 function view(viewer = 7, sourceMarkdown = 'a'.repeat(100)) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const tree = (id: number) => <QueryClientProvider client={client}><MemoryRouter>

@@ -55,7 +55,7 @@ function TranslationSession({ viewer, newsId, sourceRevision, sourceMarkdown }: 
     ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(task.status)
   const eligible = models.data?.some(model => model.id === selected) === true
   const runMutation = async (kind: 'start' | 'retry' | 'cancel') => {
-    if (inFlight.current || sending || recovery.isPending || recovery.isError) return
+    if (hidden || inFlight.current || sending || recovery.isPending || recovery.isError) return
     if (kind === 'start' && (!consent || (!recoverable && (!eligible || task || unknown || tooLarge)))) return
     if (kind === 'retry' && (!task || !retryable || !consent || !eligible || unknown || tooLarge)) return
     if (kind === 'cancel' && (!task || !active)) return
@@ -123,46 +123,48 @@ function TranslationSession({ viewer, newsId, sourceRevision, sourceMarkdown }: 
     const result = await recovery.refetch()
     if (result.data) { setUnknown(false); setRejection('') }
   }
-  if (hidden) return null
+  if (hidden && !task) return null
   const canChooseConsent = recoverable || (!task && eligible) || (retryable && eligible)
   return <section aria-label="个人全文翻译" className="my-6 rounded-xl border border-border p-4">
     <h2 className="font-semibold">个人全文翻译（私有）</h2>
-    <p className="my-2 text-sm text-muted-foreground">短中篇仍使用一次请求。较长文章按完整 Markdown 块顺序拆分，每次最多 8000 字符 / 32000 UTF-8 字节，整篇最多 64000 字符 / 256000 UTF-8 字节、8 次请求和 262144 字符输出。不可拆分的大块会被拒绝，不截断、不自动重试；长文最多可能产生 8 次服务商费用。取消不会保证已派发请求停止或免除费用；重新生成会创建新的付费尝试。</p>
-    <label>翻译模型
-      <select aria-label="翻译模型" value={selected} disabled={sending || active}
-        onChange={event => { setSelected(event.target.value); setConsent(false) }}
-        className="mx-2 rounded border border-input bg-background p-2">
-        <option value="">请选择已验证的个人模型</option>
-        {models.data?.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
-      </select>
-    </label>
-    <Link to="/settings/ai" className="text-primary underline">模型设置</Link>
-    {models.isError && <p role="alert">暂时无法读取个人模型。</p>}
-    {models.data?.length === 0 && <p>此用途暂只支持已验证的 DeepSeek Flash 流式模型。</p>}
-    {canChooseConsent && <label className="my-2 block">
-      <input type="checkbox" checked={consent} disabled={sending}
-        onChange={event => setConsent(event.target.checked)} />
-      我确认这次全文翻译可能产生费用；长文最多顺序发送 8 次个人模型请求，已派发的请求即使失败也可能计费。重新生成会再次发送并可能再次计费。
-    </label>}
-    {!task || recoverable ? <button type="button" onClick={() => void runMutation('start')}
-      disabled={!consent || sending || (!recoverable && (!eligible || unknown || tooLarge)) || recovery.isPending || recovery.isError}
-      className="rounded bg-primary px-3 py-2 text-primary-foreground disabled:opacity-50">
-      {sending ? '正在提交…' : recoverable ? '恢复排队任务' : '开始私有翻译'}
-    </button> : null}
-    {task && retryable && <button type="button" onClick={() => void runMutation('retry')}
-      disabled={!consent || sending || !eligible || unknown || tooLarge || recovery.isPending || recovery.isError}
-      className="rounded bg-primary px-3 py-2 text-primary-foreground disabled:opacity-50">
-      {sending ? '正在提交…' : '重新生成（新任务）'}
-    </button>}
-    {task && active && <button type="button" onClick={() => void runMutation('cancel')}
-      disabled={sending || recovery.isPending || recovery.isError}
-      className="ml-3 rounded border px-3 py-2 disabled:opacity-50">
-      {sending ? '正在处理…' : '明确取消任务'}
-    </button>}
-    {tooLarge && <p role="alert">原文超过全文翻译上限，请保留完整原文；不会截断后发送。</p>}
-    {rejection && <p role="alert">{rejection}</p>}
-    {(unknown && !task) && <p role="alert">提交结果未知。请读取任务状态，不要重复发送收费请求。</p>}
-    {recovery.isError && <p role="alert">无法读取当前任务，原文、权限或模型可能已变化。</p>}
+    {hidden ? <p className="my-2 text-sm text-muted-foreground">个人模型调用已关闭，可继续查看已保存的翻译记录。</p> : <>
+      <p className="my-2 text-sm text-muted-foreground">短中篇仍使用一次请求。较长文章按完整 Markdown 块顺序拆分，每次最多 8000 字符 / 32000 UTF-8 字节，整篇最多 64000 字符 / 256000 UTF-8 字节、8 次请求和 262144 字符输出。不可拆分的大块会被拒绝，不截断、不自动重试；长文最多可能产生 8 次服务商费用。取消不会保证已派发请求停止或免除费用；重新生成会创建新的付费尝试。</p>
+      <label>翻译模型
+        <select aria-label="翻译模型" value={selected} disabled={sending || active}
+          onChange={event => { setSelected(event.target.value); setConsent(false) }}
+          className="mx-2 rounded border border-input bg-background p-2">
+          <option value="">请选择已验证的个人模型</option>
+          {models.data?.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
+        </select>
+      </label>
+      <Link to="/settings/ai" className="text-primary underline">模型设置</Link>
+      {models.isError && <p role="alert">暂时无法读取个人模型。</p>}
+      {models.data?.length === 0 && <p>此用途暂只支持已验证的 DeepSeek Flash 流式模型。</p>}
+      {canChooseConsent && <label className="my-2 block">
+        <input type="checkbox" checked={consent} disabled={sending}
+          onChange={event => setConsent(event.target.checked)} />
+        我确认这次全文翻译可能产生费用；长文最多顺序发送 8 次个人模型请求，已派发的请求即使失败也可能计费。重新生成会再次发送并可能再次计费。
+      </label>}
+      {!task || recoverable ? <button type="button" onClick={() => void runMutation('start')}
+        disabled={!consent || sending || (!recoverable && (!eligible || unknown || tooLarge)) || recovery.isPending || recovery.isError}
+        className="rounded bg-primary px-3 py-2 text-primary-foreground disabled:opacity-50">
+        {sending ? '正在提交…' : recoverable ? '恢复排队任务' : '开始私有翻译'}
+      </button> : null}
+      {task && retryable && <button type="button" onClick={() => void runMutation('retry')}
+        disabled={!consent || sending || !eligible || unknown || tooLarge || recovery.isPending || recovery.isError}
+        className="rounded bg-primary px-3 py-2 text-primary-foreground disabled:opacity-50">
+        {sending ? '正在提交…' : '重新生成（新任务）'}
+      </button>}
+      {task && active && <button type="button" onClick={() => void runMutation('cancel')}
+        disabled={sending || recovery.isPending || recovery.isError}
+        className="ml-3 rounded border px-3 py-2 disabled:opacity-50">
+        {sending ? '正在处理…' : '明确取消任务'}
+      </button>}
+      {tooLarge && <p role="alert">原文超过全文翻译上限，请保留完整原文；不会截断后发送。</p>}
+      {rejection && <p role="alert">{rejection}</p>}
+      {(unknown && !task) && <p role="alert">提交结果未知。请读取任务状态，不要重复发送收费请求。</p>}
+      {recovery.isError && <p role="alert">无法读取当前任务，原文、权限或模型可能已变化。</p>}
+    </>}
     <button type="button" className="ml-3 underline" onClick={() => void refresh()}>
       读取任务状态
     </button>
