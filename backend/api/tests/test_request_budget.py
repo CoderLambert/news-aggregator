@@ -378,6 +378,12 @@ def test_release_lock_exhaustion_and_unclassified_or_nested_errors_fail_once(mon
     permit = budget.claim_budget({'host:release-fail.test': 0})
     original_update = QuerySet.update
     attempts = 0
+    global_tokens_before = dict(
+        RequestBudget.objects.filter(pk__in=budget.GLOBAL_KEYS).values_list('pk', 'lease_token')
+    )
+    owned_global_keys = tuple(key for key in permit.scope_keys if key in budget.GLOBAL_KEYS)
+    assert len(owned_global_keys) == 1
+    assert {key for key, token in global_tokens_before.items() if token == permit.token} == set(owned_global_keys)
 
     def always_locked(queryset, **kwargs):
         nonlocal attempts
@@ -393,7 +399,11 @@ def test_release_lock_exhaustion_and_unclassified_or_nested_errors_fail_once(mon
         budget.release_budget(permit)
     assert attempts == 3
     assert RequestBudget.objects.get(pk='host:release-fail.test').lease_token == permit.token
-    assert RequestBudget.objects.filter(pk__in=budget.GLOBAL_KEYS, lease_token=permit.token).count() == len(budget.GLOBAL_KEYS)
+    global_tokens_after = dict(
+        RequestBudget.objects.filter(pk__in=budget.GLOBAL_KEYS).values_list('pk', 'lease_token')
+    )
+    assert global_tokens_after == global_tokens_before
+    assert RequestBudget.objects.filter(pk__in=owned_global_keys, lease_token=permit.token).count() == len(owned_global_keys)
 
     attempts = 0
     def unclassified_locked_text(queryset, **kwargs):
