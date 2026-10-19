@@ -18,7 +18,7 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.db import close_old_connections
+from django.db import close_old_connections, connection as database_connection
 from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -38,6 +38,15 @@ from api.services.stored_readers import article_snapshot, require_current  # noq
 
 ALIAS = "deepseek/deepseek-flash"
 CONNECTIONS = "/api/me/ai/connections/"
+
+
+@pytest.fixture(scope="session")
+def django_db_modify_db_settings(django_db_modify_db_settings_parallel_suffix, tmp_path_factory):
+    # Concurrent HTTP readers/workers must exercise the application's file WAL
+    # behavior. Django's default shared in-memory test DB uses table locks.
+    from django.conf import settings
+    root = tmp_path_factory.mktemp("t04-django-wal")
+    settings.DATABASES["default"].setdefault("TEST", {})["NAME"] = str(root / "test.sqlite3")
 
 
 class QuietServer(ThreadingHTTPServer):
@@ -131,7 +140,6 @@ def _create_verified_model(client, owner, provider_key):
 def _enable_deep_research_capability(owner, model):
     """Create synthetic current T02 receipts and a saved T03 deep-research selection."""
     from api.ai_preference_models import TASK_KINDS
-    from api.services.ai_task_preferences import save_preferences
 
     connection = model.connection
     attempt_id = uuid.uuid4()
@@ -157,13 +165,19 @@ def _enable_deep_research_capability(owner, model):
     }
     model.capability_results = capabilities
     model.save(update_fields=["last_tools_attempt", "capability_results"])
-    save_preferences(owner, expected_revision=0, entries=[
-        {
-            "task_kind": kind,
-            "model_config_id": str(model.pk) if kind == "deep_research" else None,
-        }
-        for kind in TASK_KINDS
-    ])
+    client = APIClient()
+    client.force_authenticate(owner)
+    response = client.patch('/api/me/ai/task-preferences/', {
+        'revision': 0,
+        'preferences': [
+            {
+                'task_kind': kind,
+                'model_config_id': str(model.pk) if kind == 'deep_research' else None,
+            }
+            for kind in TASK_KINDS
+        ],
+    }, format='json')
+    assert response.status_code == 200, response.content
 
 
 def _wait_translation_response(read, *, timeout_seconds=12, transient_retry_seconds=12,
@@ -304,6 +318,9 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
     # either repository .env. Every database and key below is synthetic.
     from django.conf import settings
     assert settings.DJANGO_ENV == "production"
+    assert Path(database_connection.settings_dict["NAME"]).is_file()
+    with database_connection.cursor() as cursor:
+        assert cursor.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     proxy_python = os.environ.get("T00_PROXY_PYTHON")
     assert proxy_python and Path(proxy_python).is_file(), "full CI must provide prepared pinned Proxy Python"
 
