@@ -211,6 +211,85 @@ def test_research_history_replay_denied_after_policy_change(world):
     assert session.search_results.count() == 1
 
 
+def test_research_search_result_replay_is_snapshot_and_policy_bound(world):
+    import json
+    from api.models import ResearchSession, ResearchSearchResult
+    from api.services.research.access import require_session_evidence, result_is_current
+    from api.services.research.tools import _serialize_news_list
+
+    a, _, make = world
+    source, news = make('research-search-snapshot', subscriber=a, state='available')
+
+    def persist(result, tool_name='search_news', *, include_envelope=True, include_result=True):
+        messages = []
+        if include_envelope:
+            messages = [
+                {'role': 'assistant', 'tool_calls': [
+                    {'id': 'search-1', 'function': {'name': tool_name, 'arguments': '{}'}}
+                ]},
+                {'role': 'tool', 'tool_call_id': 'search-1', 'content': json.dumps(result)},
+            ]
+        session = ResearchSession.objects.create(user=a, messages=messages)
+        if include_result:
+            ResearchSearchResult.objects.create(session=session, tool_name=tool_name,
+                result_type='news', result_data=result)
+        return session
+
+    original = {'articles': _serialize_news_list([news], a)}
+    article = original['articles'][0]
+    assert article['source_scope'] == 'full'
+    assert article['policy_versions']
+
+    # Exercise the persisted model envelope and DB result row independently.
+    envelope_session = persist(original, include_result=False)
+    row_session = persist(original, include_envelope=False)
+    require_session_evidence(envelope_session, a)
+    require_session_evidence(row_session, a)
+    sanitized_error = {'error': '研究工具暂时不可用，请稍后重试。'}
+    assert result_is_current(a, 'search_news', sanitized_error)
+    assert result_is_current(a, 'analyze_topic', sanitized_error)
+    assert result_is_current(a, 'search_news', {'error': article['title']}) is False
+
+    # analyze_topic duplicates article titles into a timeline. Model a truncated
+    # articles list so the only retained evidence for this ID is its timeline event.
+    metadata_fields = ('context_scope', 'full_content_revision', 'canonical_hash',
+        'content_completeness', 'provenance_hash', 'source_scope', 'policy_versions')
+    event = {key: article[key] for key in metadata_fields}
+    event.update(title=article['title'], article_id=article['id'], source=article['source'])
+    topic = {'articles': [], 'timeline': [
+        {'date': '2026-10-19', 'events': [event]},
+    ]}
+    topic_session = persist(topic, 'analyze_topic')
+    require_session_evidence(topic_session, a)
+
+    # The same article remains authorized, but a new revision must invalidate its
+    # previously persisted title/snippet and tool envelope before model replay.
+    news.content = 'revised summary'
+    news.full_content = 'revised body'
+    news.full_content_revision += 1
+    news.save(update_fields=['content', 'full_content', 'full_content_revision'])
+    assert get_stored_article(a, news.pk).scope == 'full'
+    for session in (envelope_session, row_session, topic_session):
+        with pytest.raises(Http404):
+            require_session_evidence(session, a)
+
+    # Old results without a snapshot cannot be treated as current merely because
+    # their article ID is still authorized.
+    legacy = {'articles': [{'id': news.pk, 'title': news.title,
+        'url': news.url, 'snippet': news.content}]}
+    assert result_is_current(a, 'search_news', legacy) is False
+
+    fresh = {'articles': _serialize_news_list([news], a)}
+    policy_session = persist(fresh, include_envelope=False)
+    require_session_evidence(policy_session, a)
+
+    # Policy version is part of the read snapshot even when scope and bytes stay
+    # unchanged; changing it invalidates a previously captured search result.
+    SourcePublication.objects.filter(source=source).update(policy_version=2)
+    with pytest.raises(Http404):
+        require_session_evidence(policy_session, a)
+
+
 def test_private_task_poll_hides_progress_after_policy_revocation(world):
     from api.models import ChatGPTTranslationTask
     from api.tests.test_shared_translations import reader

@@ -20,7 +20,7 @@ from api.services.ai_gateway import ARTICLE_CHAT_SUPPORTED_ALIAS, build_gateway_
 from api.services.ai_task_preferences import (
     TaskModelSnapshot, resolve_task_model, require_task_model_snapshot,
 )
-from api.services.ai_worker_fencing import capture_at_enqueue, check_at_claim, dispatch_once, commit_result
+from api.services.ai_worker_fencing import capture_at_enqueue, check_at_claim, prepare_dispatch, commit_result
 from api.services.ai_verified_stream import verified_text_deltas
 from api.services.stored_readers import article_snapshot, require_current
 from api.services import chatgpt_subscription_jobs as durable
@@ -542,8 +542,13 @@ def run_translation(task_id, generation):
                     raise TranslationError('translation_markdown_invalid', 400)
                 def send(key):
                     nonlocal gateway, stream
-                    current = _mark_dispatch(task_id, generation, token, chunk_index)
-                    _authorize(current)
+                    _mark_dispatch(task_id, generation, token, chunk_index)
+                    # Recheck owner, credential epoch, model, source, and lease immediately
+                    # before the one provider send. This is DB-only and safe to retry.
+                    current = durable._retry_task_database_operation(
+                        lambda: _live(task_id, generation, token),
+                        stage='byok_pre_send_fence',
+                    )
                     gateway = build_gateway_client(key)
                     stream = gateway.chat.completions.create(
                         model=selection.proxy_alias,
@@ -558,7 +563,11 @@ def run_translation(task_id, generation):
                     )
                     return stream
                 try:
-                    stream = dispatch_once(credential, task_owner_id=task.user_id, send=send)
+                    key = durable._retry_task_database_operation(
+                        lambda: prepare_dispatch(credential, task_owner_id=task.user_id),
+                        stage='byok_dispatch_admission',
+                    )
+                    stream = send(key)
                     for delta in verified_text_deltas(
                             stream, check=lambda: _live(task_id, generation, token),
                             max_chars=MAX_OUTPUT_CHARS):

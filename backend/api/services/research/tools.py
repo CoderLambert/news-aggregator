@@ -1059,6 +1059,13 @@ def _tool_analyze_topic(query: str, depth: str = 'standard', execution_guard=Non
                 'title': art['title'],
                 'article_id': art['id'],
                 'source': art['source'],
+                'source_scope': art['source_scope'],
+                'policy_versions': art['policy_versions'],
+                'context_scope': art['context_scope'],
+                'full_content_revision': art['full_content_revision'],
+                'canonical_hash': art['canonical_hash'],
+                'content_completeness': art['content_completeness'],
+                'provenance_hash': art['provenance_hash'],
             })
 
     timeline = []
@@ -1128,6 +1135,7 @@ def _tool_generate_report(topic: str, sections: list | None = None,
 
 def _serialize_news_list(news_list, user=None) -> list[dict]:
     from api.rss.access import get_stored_article, article_sources
+    from api.services.stored_readers import snapshot_metadata
     from django.http import Http404
     results = []
     for news in news_list:
@@ -1141,5 +1149,7 @@ def _serialize_news_list(news_list, user=None) -> list[dict]:
         results.append(dict(id=stored.news_id, title=stored.title, original_title='',
             source=source.publication.display_name or source.name, source_type=source.source_type,
             category=news.category.name, url=stored.url, snippet=stored.summary[:200],
-            publish_time=news.publish_time.isoformat() if news.publish_time else None))
+            publish_time=news.publish_time.isoformat() if news.publish_time else None,
+            **snapshot_metadata(stored), source_scope=stored.scope,
+            policy_versions=stored.policy_versions))
     return results

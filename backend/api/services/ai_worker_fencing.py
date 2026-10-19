@@ -78,6 +78,18 @@ def is_revoked(snapshot_data: dict, *, task_owner_id: int) -> bool:
         return True
 
 
+def prepare_dispatch(snapshot_data: dict, *, task_owner_id: int) -> str:
+    """Perform only the bounded, DB-only credential admission before a send.
+
+    Callers may retry this function for recognized database lock errors, but
+    must keep any network callback outside that retry boundary.
+    """
+    snapshot = _decode(snapshot_data, task_owner_id)
+    secret = read_execution_credential(snapshot)
+    check_at_claim(snapshot_data, task_owner_id=task_owner_id)
+    return secret
+
+
 def dispatch_once(snapshot_data: dict, *, task_owner_id: int,
                   send: Callable[[str], T]) -> T:
     """Authorize immediately before ONE upstream send; never retry implicitly.
@@ -86,12 +98,7 @@ def dispatch_once(snapshot_data: dict, *, task_owner_id: int,
     not persist/log the Key. A send already admitted before a concurrent
     revocation may still reach upstream; no unbounded transaction surrounds I/O.
     """
-    snapshot = _decode(snapshot_data, task_owner_id)
-    secret = read_execution_credential(snapshot)
-    # The network send has not started: catch revocation that completed in the
-    # gap between decrypt/admission and invoking the callback.
-    check_at_claim(snapshot_data, task_owner_id=task_owner_id)
-    return send(secret)
+    return send(prepare_dispatch(snapshot_data, task_owner_id=task_owner_id))
 
 
 def commit_result(snapshot_data: dict, *, task_owner_id: int,

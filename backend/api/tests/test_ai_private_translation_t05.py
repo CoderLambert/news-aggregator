@@ -100,7 +100,7 @@ class PrivateTranslationTests(TransactionTestCase):
         with patch.object(service, '_dispatch') as dispatch:
             for consent in (False, None, 'true', 1):
                 self.assertEqual(self.start(billing_consent=consent).status_code, 400)
-            with patch.object(service, 'MAX_INPUT_CHARS', 1):
+            with patch.object(service, 'T06_MAX_INPUT_CHARS', 1):
                 self.assertEqual(self.start().status_code, 400)
             self.model.last_text_attempt = None
             self.model.save(update_fields=['last_text_attempt'])
@@ -401,9 +401,96 @@ class PrivateTranslationTests(TransactionTestCase):
         gateway = FakeGateway([gateway_frame('并发只派发一次')])
         with patch.object(service, 'build_gateway_client', return_value=gateway), ThreadPoolExecutor(max_workers=2) as pool:
             list(pool.map(lambda _: service.run_translation(task.pk, task.generation), range(2)))
-        self.assertEqual(len(gateway.sent), 1)
         task.refresh_from_db()
+        self.assertEqual(len(gateway.sent), 1, {
+            'status': task.status,
+            'provider_started': task.provider_started,
+            'error_code': task.error_code,
+        })
         self.assertEqual(task.status, 'succeeded')
+        self.assertEqual(ChatGPTArticleTranslation.objects.count(), 1)
+
+    def test_pre_send_sqlite_contention_retries_credential_read_before_one_send(self):
+        from api.services import ai_worker_fencing
+
+        task = self.queued()
+        real_read = ai_worker_fencing.read_execution_credential
+        calls = []
+
+        def locked_once(snapshot):
+            calls.append(snapshot)
+            if len(calls) == 1:
+                raise self.storage_busy()
+            return real_read(snapshot)
+
+        gateway = FakeGateway([gateway_frame('中文单次派发')])
+        with patch.object(ai_worker_fencing, 'read_execution_credential', side_effect=locked_once), \
+                patch.object(service, 'build_gateway_client', return_value=gateway) as build, \
+                patch.object(subscription_jobs.time, 'sleep'):
+            service.run_translation(task.pk, task.generation)
+
+        task.refresh_from_db()
+        self.assertEqual(len(calls), 2)
+        build.assert_called_once()
+        self.assertEqual(len(gateway.sent), 1)
+        self.assertEqual(task.status, 'succeeded')
+        self.assertTrue(task.provider_started)
+        self.assertIsNone(task.error_code)
+        self.assertEqual(ChatGPTArticleTranslation.objects.count(), 1)
+
+    def test_pre_send_contention_retry_rechecks_credential_revocation(self):
+        from api.services import ai_worker_fencing
+
+        task = self.queued()
+        real_read = ai_worker_fencing.read_execution_credential
+        calls = []
+
+        def revoke_then_lock(snapshot):
+            calls.append(snapshot)
+            if len(calls) == 1:
+                self.connection.credential_epoch += 1
+                self.connection.save(update_fields=['credential_epoch'])
+                raise self.storage_busy()
+            return real_read(snapshot)
+
+        with patch.object(ai_worker_fencing, 'read_execution_credential', side_effect=revoke_then_lock), \
+                patch.object(service, 'build_gateway_client') as build, \
+                patch.object(subscription_jobs.time, 'sleep'):
+            service.run_translation(task.pk, task.generation)
+
+        task.refresh_from_db()
+        self.assertEqual(len(calls), 2)
+        build.assert_not_called()
+        self.assertEqual(task.status, 'failed')
+        self.assertFalse(task.provider_started)
+        self.assertFalse(task.result)
+        self.assertFalse(ChatGPTArticleTranslation.objects.exists())
+        self.assertFalse(SharedArticleTranslation.objects.exists())
+
+    def test_post_marker_database_lock_retries_fence_before_one_send(self):
+        task = self.queued()
+        real_live = service._live
+        locked = []
+
+        def lock_once_after_marker(task_id, generation, token, *, started=True):
+            current = ChatGPTTranslationTask.objects.get(pk=task_id)
+            if started and current.provider_started and not locked:
+                locked.append(True)
+                raise self.storage_busy()
+            return real_live(task_id, generation, token, started=started)
+
+        gateway = FakeGateway([gateway_frame('中文单次派发')])
+        with patch.object(service, '_live', side_effect=lock_once_after_marker), \
+                patch.object(service, 'build_gateway_client', return_value=gateway) as build, \
+                patch.object(subscription_jobs.time, 'sleep'):
+            service.run_translation(task.pk, task.generation)
+
+        task.refresh_from_db()
+        self.assertEqual(len(locked), 1)
+        build.assert_called_once()
+        self.assertEqual(len(gateway.sent), 1)
+        self.assertEqual(task.status, 'succeeded')
+        self.assertTrue(task.provider_started)
         self.assertEqual(ChatGPTArticleTranslation.objects.count(), 1)
 
     def test_model_state_matches_migration(self):
@@ -553,14 +640,15 @@ class PrivateTranslationTests(TransactionTestCase):
         task.refresh_from_db()
         self.assertEqual(task.status, 'failed')
         self.assertEqual(task.progress, '')
-        self.assertIsNone(task.result)
+        self.assertFalse(task.result)
         self.assertFalse(ChatGPTArticleTranslation.objects.exists())
         self.assertFalse(SharedArticleTranslation.objects.exists())
 
     def test_t06_later_chunk_rechecks_source_model_and_credential_fences(self):
         for mutation in ('source', 'credential', 'model'):
             with self.subTest(mutation=mutation):
-                self.news.full_content = 'A' * 5000 + '\n\n' + 'B' * 5000
+                source_markdown = 'A' * 5000 + '\n\n' + 'B' * 5000 + f'\n\ncase {mutation}'
+                self.news.full_content = source_markdown
                 self.news.full_content_state = 'legacy'
                 self.news.save(update_fields=['full_content', 'full_content_state'])
                 self.request_id = str(uuid.uuid4())
@@ -590,14 +678,14 @@ class PrivateTranslationTests(TransactionTestCase):
                     task.refresh_from_db()
                     self.assertEqual(task.status, 'failed')
                     self.assertEqual(task.progress, '第一段中文\n\n')
-                    self.assertIsNone(task.result)
+                    self.assertFalse(task.result)
                     self.assertEqual(build.call_count, 1)
                     self.assertEqual(len(first.sent), 1)
                     self.assertFalse(ChatGPTArticleTranslation.objects.exists())
                     self.assertFalse(SharedArticleTranslation.objects.exists())
                 finally:
                     if mutation == 'source':
-                        self.news.full_content = 'A' * 5000 + '\n\n' + 'B' * 5000
+                        self.news.full_content = source_markdown
                         self.news.save(update_fields=['full_content'])
                     elif mutation == 'credential':
                         self.connection.refresh_from_db()
@@ -629,7 +717,7 @@ class PrivateTranslationTests(TransactionTestCase):
                 task.refresh_from_db()
                 self.assertEqual(task.status, 'failed')
                 self.assertEqual(task.progress, 'translated first\n\n')
-                self.assertIsNone(task.result)
+                self.assertFalse(task.result)
                 self.assertEqual(build.call_count, 2)
                 self.assertEqual(len(first.sent), 1)
                 self.assertEqual(len(second.sent), 1)
