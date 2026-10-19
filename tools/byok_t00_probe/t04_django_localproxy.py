@@ -32,7 +32,7 @@ import upstream  # noqa: E402
 from api.ai_connection_models import UserAIConnection  # noqa: E402
 from api.ai_model_models import AIModelProbeAttempt, UserAIModelConfig  # noqa: E402
 from api.models import (ArticleChatTurn, Category, ChatSession, News, Source,
-                        ChatGPTTranslationTask, ChatGPTArticleTranslation, SharedArticleTranslation)  # noqa: E402
+                        ChatGPTArticleTranslation, SharedArticleTranslation)  # noqa: E402
 from api.tests.rss.reader_fixtures import public_legacy_article  # noqa: E402
 from api.services.stored_readers import article_snapshot, require_current  # noqa: E402
 
@@ -484,7 +484,9 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
             first = next(iter(observation.streaming_content))
             assert b"succeeded" not in first
             observation.close()  # Only disconnect the observer, not the worker.
-            assert ChatGPTTranslationTask.objects.get(pk=task_id).status == "running"
+            observed = client.get(f"/api/me/ai/translations/{task_id}/")
+            assert observed.status_code == 200, observed.content
+            assert observed.data["status"] == "running"
             release = urllib.request.Request(upstream_url + "/test/release",
                 data=json.dumps({"test_id": t05_marker}).encode(),
                 headers={"Content-Type": "application/json"}, method="POST")

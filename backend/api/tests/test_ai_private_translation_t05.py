@@ -135,6 +135,81 @@ class PrivateTranslationTests(TransactionTestCase):
         self.execute(task)
         self.assertEqual(task.status, 'succeeded')
 
+    @staticmethod
+    def storage_busy():
+        driver = sqlite3.OperationalError('synthetic contention')
+        driver.sqlite_errorcode = sqlite3.SQLITE_LOCKED
+        error = OperationalError('synthetic contention')
+        error.__cause__ = driver
+        return error
+
+    def test_read_contention_reselects_and_rechecks_fences_without_dispatch(self):
+        task = self.queued()
+        before = ChatGPTTranslationTask.objects.values().get(pk=task.pk)
+        real_authorize = service._authorize
+        for url in (f'/api/me/ai/translations/{task.pk}/', self.url):
+            calls = []
+            def authorize(current):
+                calls.append(current)
+                if len(calls) == 1:
+                    raise self.storage_busy()
+                return real_authorize(current)
+            with patch.object(service, '_authorize', side_effect=authorize), \
+                    patch.object(service, '_dispatch') as dispatch, \
+                    patch.object(service, 'build_gateway_client') as build, \
+                    patch.object(subscription_jobs.time, 'sleep'):
+                response = self.client.get(url)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(len(calls), 2)
+            self.assertIsNot(calls[0], calls[1])
+            dispatch.assert_not_called()
+            build.assert_not_called()
+        self.assertEqual(ChatGPTTranslationTask.objects.values().get(pk=task.pk), before)
+
+    def test_read_contention_budget_and_unclassified_errors_never_replay(self):
+        task = self.queued()
+        urls = (f'/api/me/ai/translations/{task.pk}/', self.url,
+                f'/api/me/ai/translations/{task.pk}/events/')
+        with patch.object(service, '_dispatch') as dispatch, \
+                patch.object(service, 'build_gateway_client') as build, \
+                patch.object(subscription_jobs.time, 'sleep'):
+            for url in urls:
+                with patch.object(service, '_query', side_effect=self.storage_busy()) as query:
+                    response = self.client.get(url)
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(response.data, {'error_code': 'task_storage_busy'})
+                self.assertEqual(query.call_count, len(subscription_jobs.SUBMISSION_LOCK_DELAYS) + 1)
+            with patch.object(service, '_query', side_effect=OperationalError('not a lock')) as query:
+                with self.assertRaises(OperationalError):
+                    service.get_task(self.owner, task.pk)
+                self.assertEqual(query.call_count, 1)
+            with transaction.atomic(), patch.object(service, '_query', side_effect=self.storage_busy()) as query:
+                with self.assertRaises(service.TranslationError) as caught:
+                    service.get_task(self.owner, task.pk)
+                self.assertEqual(caught.exception.code, 'task_storage_busy')
+                self.assertEqual(query.call_count, 1)
+        dispatch.assert_not_called()
+        build.assert_not_called()
+
+    def test_read_retry_does_not_return_snapshot_after_credential_revocation(self):
+        task = self.queued()
+        real_authorize = service._authorize
+        calls = []
+        def authorize(current):
+            calls.append(current)
+            if len(calls) == 1:
+                self.connection.credential_epoch += 1
+                self.connection.save(update_fields=['credential_epoch'])
+                raise self.storage_busy()
+            return real_authorize(current)
+        with patch.object(service, '_authorize', side_effect=authorize), \
+                patch.object(subscription_jobs.time, 'sleep'), \
+                patch.object(service, '_dispatch') as dispatch:
+            response = self.client.get(f'/api/me/ai/translations/{task.pk}/')
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(len(calls), 2)
+        dispatch.assert_not_called()
+
     def test_expired_started_job_read_is_interrupted_without_mutation_or_rebill(self):
         task = self.queued()
         task.status = 'running'

@@ -9,7 +9,7 @@ import json
 import uuid
 
 from django.conf import settings
-from django.db import close_old_connections, transaction
+from django.db import OperationalError, close_old_connections, transaction
 from django.utils import timezone
 from django.db.models import Q
 
@@ -91,13 +91,26 @@ def _readable(task):
     return task
 
 
+def _read_task(select):
+    # Retry only this read and all current authorization fences. No lease
+    # recovery, task writes, dispatch or network work is reachable here.
+    try:
+        return durable._retry_task_database_operation(
+            lambda: _readable(select()), stage='byok_read',
+        )
+    except OperationalError as exc:
+        if durable._is_task_sqlite_lock(exc):
+            raise TranslationError('task_storage_busy', 503) from None
+        raise
+
+
 def get_task(user, task_id):
     # Deliberately no durable.get_task(): subscription recovery can mutate a lease.
-    return _readable(_query(user.pk).filter(pk=task_id).first())
+    return _read_task(lambda: _query(user.pk).filter(pk=task_id).first())
 
 
 def latest_task(user, news_id):
-    return _readable(_query(user.pk).filter(news_id=news_id).order_by('-queued_at', '-id').first())
+    return _read_task(lambda: _query(user.pk).filter(news_id=news_id).order_by('-queued_at', '-id').first())
 
 
 def payload(task):
