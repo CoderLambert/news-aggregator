@@ -657,8 +657,14 @@ class PrivateTranslationTests(TransactionTestCase):
     def test_t06_rejects_quoted_or_indented_fences_before_dispatch(self):
         unsupported = (
             '> ~~~py\n> print(1)\n> ~~~',
-            '    ~~~py\n    print(1)\n    ~~~',
+            '>  ~~~py\n>  print(1)\n>  ~~~',
+            '>   ~~~py\n>   print(1)\n>   ~~~',
             '> > ~~~md\n> > nested\n> > ~~~',
+            '- ~~~py\n  print(1)\n  ~~~',
+            '1. ```py\n   print(1)\n   ```',
+            '> - ~~~py\n>   print(1)\n>   ~~~',
+            '    ~~~py\n    print(1)\n    ~~~',
+            '    - ~~~py\n      print(1)\n      ~~~',
         )
         for index, fence in enumerate(unsupported):
             with self.subTest(index=index):

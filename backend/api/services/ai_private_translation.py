@@ -121,7 +121,11 @@ def _markdown_units(markdown):
             # This bounded splitter only understands top-level fences. Reject
             # quoted/list-indented fence syntax instead of splitting it as prose.
             unsupported_fence = re.match(
-                r'^(?: {4,}|\t+|(?: {0,3}>[ \t]?)+)(?:\x60{3,}|~{3,})', line,
+                r'^(?:'
+                r'(?: {4,}|\t+)(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)?'
+                r'|(?: {0,3}>[ \t]{0,3})+(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)?'
+                r'|[ \t]*(?:[-+*]|\d{1,9}[.)])[ \t]+'
+                r')(?:\x60{3,}|~{3,})', line,
             )
             if unsupported_fence:
                 raise TranslationError('translation_markdown_invalid', 400)
