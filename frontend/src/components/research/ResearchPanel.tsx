@@ -102,14 +102,12 @@ function ResearchPanelView({
       && defaultPreference?.selection_state === 'available'
       ? defaultPreference
       : null
-  const researchModelConfigId = effectiveResearchPreference?.model_config_id ?? null
-  const researchModel = effectiveResearchPreference?.model ?? null
-  const researchModelLabel = researchModel
-    ? `${researchModel.display_name} (${researchModel.model_id})`
-    : null
+  const preferredModelConfigId = effectiveResearchPreference?.model_config_id ?? null
+  const preferredModel = effectiveResearchPreference?.model ?? null
   const {
     sessions,
     activeSessionId,
+    sessionResearchModel,
     messages,
     phase,
     searchResults,
@@ -124,6 +122,12 @@ function ResearchPanelView({
     handleResume,
     handleRetry,
   } = useResearch(user?.id ?? null, { byokCreateOnly })
+
+  const researchModelConfigId = activeSessionId ? sessionResearchModel?.model_config_id ?? null : preferredModelConfigId
+  const researchModel = activeSessionId ? sessionResearchModel : preferredModel
+  const researchModelLabel = activeSessionId
+    ? sessionResearchModel?.model_id ?? null
+    : preferredModel ? `${preferredModel.display_name} (${preferredModel.model_id})` : null
 
   const billingConsentKey = JSON.stringify([
     user?.id ?? 'anonymous',
@@ -160,14 +164,17 @@ function ResearchPanelView({
 
   function handleSendQuery() {
     if (!input.trim() || isLoading || hasRecoverableTask || !user) return
-    if (byokCreateOnly && (activeSessionId || recoveryAction === 'retry' || !researchModelConfigId || !researchModel)) return
+    if (byokCreateOnly && (recoveryAction === 'retry' || !researchModelConfigId || !researchModel)) return
     const submittedInput = input
-    if (!activeSessionId && researchModelConfigId && !billingConsent) return
+    if (researchModelConfigId && !billingConsent) return
     void handleSend(input.trim(), {
       localOnly,
-      ...(!activeSessionId && researchModelConfigId ? { authorization: researchAuthorization } : {}),
+      ...(researchModelConfigId ? { authorization: researchAuthorization } : {}),
     }).then((accepted) => {
-      if (accepted) setInput((current) => current === submittedInput ? '' : current)
+      if (accepted) {
+        setInput((current) => current === submittedInput ? '' : current)
+        setBillingConsentState({ key: '', checked: false })
+      }
     })
   }
 
@@ -176,15 +183,17 @@ function ResearchPanelView({
       setShowAuthModal(true)
       return
     }
-    if (isBusy || hasRecoverableTask || (byokCreateOnly && (activeSessionId || recoveryAction === 'retry'))) return
+    if (isBusy || hasRecoverableTask || (byokCreateOnly && recoveryAction === 'retry')) return
     if (byokCreateOnly && (!researchModelConfigId || !researchModel)) return
-    if (!activeSessionId && researchModelConfigId && !billingConsent) {
+    if (researchModelConfigId && !billingConsent) {
       setInput(query)
       return
     }
     void handleSend(query, {
       localOnly: false,
-      ...(!activeSessionId && researchModelConfigId ? { authorization: researchAuthorization } : {}),
+      ...(researchModelConfigId ? { authorization: researchAuthorization } : {}),
+    }).then((accepted) => {
+      if (accepted) setBillingConsentState({ key: '', checked: false })
     })
   }
 
@@ -321,7 +330,7 @@ function ResearchPanelView({
             <>
               {byokCreateOnly && activeSessionId && (
                 <div role="status" className="rounded-xl border border-border bg-muted/50 p-3 text-xs text-muted-foreground">
-                  已保存的研究结果仍可查看；本环境仅开放新建个人模型研究，历史会话的继续提问尚未开放。
+                  续问使用会话原模型，不能更换供应商。每次发送前请重新确认服务商计费；旧会话缺少安全续接记录时，请新建研究。
                 </div>
               )}
               {byokCreateOnly && !activeSessionId && (!researchModelConfigId || !researchModel) && (
@@ -329,7 +338,7 @@ function ResearchPanelView({
                   请先到 AI 设置中配置并验证支持工具调用的个人研究模型，再返回开始研究。
                 </div>
               )}
-              {!activeSessionId && researchModelConfigId && researchModel && (
+              {researchModelConfigId && researchModel && (
                 <section
                   aria-labelledby="research-model-consent-title"
                   className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs leading-relaxed"
@@ -337,10 +346,10 @@ function ResearchPanelView({
                 >
                   <p id="research-model-consent-title" className="font-semibold text-foreground">
                     本次研究模型：{researchModelLabel}
-                    {researchPreference?.selection_state === 'inherit_default' ? '（已保存的个人默认模型）' : ''}
+                    {!activeSessionId && researchPreference?.selection_state === 'inherit_default' ? '（已保存的个人默认模型）' : ''}
                   </p>
                   <p className="mt-1 text-muted-foreground">
-                    仅在新建研究时使用此已验证工具能力的个人模型。研究问题和必要上下文会发送给该模型服务商；
+                    仅在明确提交新研究或续问时使用此个人模型。研究问题和必要上下文会发送给该模型服务商；
                     服务商可能按其资费计费，本站无法代为确认费用。
                   </p>
                   <label className="mt-2 flex cursor-pointer items-start gap-2 text-foreground">
@@ -362,7 +371,7 @@ function ResearchPanelView({
                 phase={phase}
                 searchResults={searchResults}
                 onSuggestionClick={handleSuggestionClick}
-                disabled={isBusy || (byokCreateOnly && Boolean(activeSessionId))}
+                disabled={isBusy}
               />
               {recoveryAction === 'resume' && !(byokCreateOnly && !activeSessionId) && (
                 <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-200">
@@ -401,8 +410,8 @@ function ResearchPanelView({
           onCancel={handleCancel}
           isLoading={isLoading}
           disabled={!user || hasRecoverableTask
-            || (byokCreateOnly && (Boolean(activeSessionId) || recoveryAction === 'retry' || !researchModelConfigId || !researchModel))
-            || (!activeSessionId && Boolean(researchModelConfigId) && !billingConsent)}
+            || (byokCreateOnly && (recoveryAction === 'retry' || !researchModelConfigId || !researchModel))
+            || (Boolean(researchModelConfigId) && !billingConsent)}
           localOnly={localOnly}
           onToggleLocalOnly={() => setLocalOnly((enabled) => !enabled)}
         />

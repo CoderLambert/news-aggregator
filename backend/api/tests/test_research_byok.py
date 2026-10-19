@@ -52,7 +52,7 @@ def test_research_byok_create_capability_is_narrow_and_independent_of_public_ai(
     ):
         assert _feature_snapshot()['research_byok_create']['enabled'] is False
 
-def test_t09_public_policy_has_only_full_byok_research_create_exception():
+def test_byok_public_policy_allows_only_explicit_research_write_routes():
     middleware = PublicPolicyMiddleware(lambda request: None)
     with override_settings(
         PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=False, AI_BYOK_ENABLED=True,
@@ -67,8 +67,7 @@ def test_t09_public_policy_has_only_full_byok_research_create_exception():
             _request_for_route('research-chat', '/api/research/00000000-0000-0000-0000-000000000001/chat/'),
             lambda: None, (), {},
         )
-        assert chat.status_code == 403
-        assert json.loads(chat.content)['error_code'] == 'ai_disabled'
+        assert chat is None  # T10 validates per-turn authorization in the view/service.
 
         other_ai = middleware.process_view(
             _request_for_route('news-chat', '/api/news/1/chat/'), lambda: None, (), {},
@@ -308,3 +307,44 @@ def test_t09_execution_snapshot_is_strict_and_secret_free():
     without_consent = {**payload, 'consent': 1}
     with pytest.raises(ResearchBYOKError):
         decode_snapshot(without_consent, owner_id=17)
+
+
+def test_t10_native_continuation_is_model_bound_and_not_visible():
+    from api.services.research.byok_execution import (
+        continuation_payload, native_messages, visible_messages,
+    )
+    snapshot = {'model': {'model_config_id': 'original'}}
+    messages = [
+        {'role': 'user', 'content': 'question'},
+        {'role': 'assistant', 'content': '', 'reasoning_content': 'private reasoning',
+         'tool_calls': [{'id': 'one', 'type': 'function', 'function': {'name': 'search_news', 'arguments': '{}'}}]},
+        {'role': 'tool', 'tool_call_id': 'one', 'content': '{"articles": []}'},
+        {'role': 'assistant', 'content': 'report', 'reasoning_content': 'native tail'},
+    ]
+    session = SimpleNamespace(native_continuation=continuation_payload(snapshot, messages))
+    restored = native_messages(session, snapshot)
+    assert restored == messages
+    restored[0]['content'] = 'mutated'
+    assert messages[0]['content'] == 'question'
+    assert visible_messages(messages) == [
+        {'role': 'user', 'content': 'question'}, {'role': 'assistant', 'content': 'report'},
+    ]
+    with pytest.raises(ResearchBYOKError):
+        native_messages(session, {'model': {'model_config_id': 'different'}})
+    session.native_continuation['protocol'] = 'other-provider'
+    with pytest.raises(ResearchBYOKError):
+        native_messages(session, snapshot)
+
+
+def test_t10_followup_rechecks_owner_and_locked_model(monkeypatch):
+    from api.services.research.byok_execution import followup_snapshot, continuation_payload
+    snapshot = {'model': {'model_config_id': 'original'}}
+    session = SimpleNamespace(user_id=1, native_continuation=continuation_payload(snapshot, []))
+    monkeypatch.setattr('api.services.research.byok_execution.verify_snapshot',
+                        lambda *args, **kwargs: SimpleNamespace(model_config_id='original'))
+    monkeypatch.setattr('api.services.research.access.require_session_evidence', lambda *args: None)
+    assert followup_snapshot(session, SimpleNamespace(pk=1), 'original') == snapshot
+    with pytest.raises(ResearchBYOKError):
+        followup_snapshot(session, SimpleNamespace(pk=2), 'original')
+    with pytest.raises(ResearchBYOKError):
+        followup_snapshot(session, SimpleNamespace(pk=1), 'different')

@@ -141,7 +141,11 @@ def run_agent_loop(
 
     from .access import require_session_evidence
     require_session_evidence(session, user)
-    messages = list(session.messages)  # Copy existing history
+    if byok_snapshot is not None and session.native_continuation:
+        from .byok_execution import native_messages
+        messages = native_messages(session, byok_snapshot)
+    else:
+        messages = list(session.messages)  # Legacy history remains readable
     evidence_links = history_evidence_links(messages)
     messages.append({'role': 'user', 'content': user_query})
 
@@ -199,7 +203,7 @@ def run_agent_loop(
         # Check for tool calls
         if hasattr(assistant_message, 'tool_calls') and assistant_message.tool_calls:
             # Serialize the assistant message with tool_calls for history
-            msg_dict = _serialize_assistant_message(assistant_message)
+            msg_dict = _serialize_assistant_message(assistant_message, native=byok_snapshot is not None)
             messages.append(msg_dict)
 
             for tool_call in assistant_message.tool_calls:
@@ -274,10 +278,11 @@ def run_agent_loop(
 
             on_event('text_delta', {'text': final_text})
 
-            messages.append({
-                'role': 'assistant',
-                'content': final_text,
-            })
+            final_message = {'role': 'assistant', 'content': final_text}
+            if byok_snapshot is not None:
+                from .byok_execution import preserve_native_fields
+                preserve_native_fields(assistant_message, final_message)
+            messages.append(final_message)
 
             # Auto-generate a title in memory; the worker commits history,
             # title and terminal run state in one guarded transaction.
@@ -347,7 +352,7 @@ def _call_llm_with_tools(messages: list, tools=None, execution_guard=None, clien
     return None
 
 
-def _serialize_assistant_message(message) -> dict:
+def _serialize_assistant_message(message, *, native=False) -> dict:
     """Convert an OpenAI SDK ChatCompletionMessage to a dict for history storage."""
     msg = {'role': 'assistant'}
     if message.content:
@@ -363,6 +368,9 @@ def _serialize_assistant_message(message) -> dict:
                     'arguments': tc.function.arguments,
                 },
             })
+    if native:
+        from .byok_execution import preserve_native_fields
+        preserve_native_fields(message, msg)
     return msg
 
 

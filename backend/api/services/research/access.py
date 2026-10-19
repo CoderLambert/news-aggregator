@@ -116,7 +116,8 @@ def require_session_evidence(session, user):
     # Check the original OpenAI tool envelope as well, without changing history.
     import json
     calls = {}
-    for message in session.messages if isinstance(session.messages, list) else []:
+    history = session.native_continuation.get('messages', session.messages) if isinstance(session.native_continuation, dict) else session.messages
+    for message in history if isinstance(history, list) else []:
         if not isinstance(message, dict):
             continue
         for call in message.get('tool_calls', []) or []:

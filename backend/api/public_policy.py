@@ -95,7 +95,7 @@ class PublicPolicyMiddleware:
         if route_name == 'auth-register' and not settings.PUBLIC_SIGNUP_ENABLED:
             return policy_error('signup_disabled')
         byok_research_create = (
-            route_name == 'research-create'
+            route_name in {'research-create', 'research-chat'}
             and request.method == 'POST'
             and settings.PUBLIC_SITE_MODE == 'full'
             and getattr(settings, 'AI_BYOK_ENABLED', False)

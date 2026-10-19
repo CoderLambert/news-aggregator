@@ -134,7 +134,7 @@ def _byok_create_values(request, *, allowed):
         return None, None, None
     if not allowed:
         return None, None, _no_store(Response(
-            {'error': 'BYOK authorization is available only for a new research run.',
+            {'error': 'Explicit model authorization is required for this research run.',
              'error_code': 'research_byok_create_only'}, status=400,
         ))
     model_config_id = body.get('model_config_id')
@@ -156,7 +156,7 @@ def _submit_response(request, *, session_id=None, allow_byok_create=False):
     if error is not None:
         return _no_store(error)
     model_config_id, consent, error = _byok_create_values(
-        request, allowed=allow_byok_create and session_id is None,
+        request, allowed=allow_byok_create,
     )
     if error is not None:
         return error
@@ -187,7 +187,7 @@ def research_chat(request, pk):
     """Create/attach a follow-up run in an owner-scoped session."""
     if not _user_sessions(request.user).filter(pk=pk).exists():
         return _no_store(Response({'error': 'Session not found'}, status=status.HTTP_404_NOT_FOUND))
-    return _submit_response(request, session_id=pk)
+    return _submit_response(request, session_id=pk, allow_byok_create=True)
 
 
 @api_view(['GET'])

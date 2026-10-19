@@ -123,6 +123,8 @@ export interface ResearchStreamOptions {
 }
 
 export interface ResearchChatStreamOptions {
+  modelConfigId?: string
+  consent?: true
   localOnly?: boolean
   idempotencyKey?: string
   signal?: AbortSignal
@@ -673,10 +675,16 @@ export async function* createResearchStream(
 export async function* researchChatStream(
   sessionId: string,
   query: string,
-  { localOnly = false, idempotencyKey, signal, onRunId }: ResearchChatStreamOptions = {},
+  { localOnly = false, idempotencyKey, signal, onRunId, modelConfigId, consent }: ResearchChatStreamOptions = {},
 ): AsyncGenerator<unknown> {
+  const hasAuthorization = modelConfigId !== undefined || consent !== undefined
+  if (hasAuthorization && (typeof modelConfigId !== 'string' || !modelConfigId.trim() || consent !== true)) {
+    throw new TypeError('Research follow-up requires an explicit model and literal consent')
+  }
   const response = await streamingFetch(`/api/research/${sessionId}/chat/`, {
-    body: JSON.stringify({ query, local_only: localOnly }),
+    body: JSON.stringify({ query, local_only: localOnly,
+      ...(hasAuthorization ? { model_config_id: modelConfigId, consent: true } : {}),
+    }),
     headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     signal,
   })

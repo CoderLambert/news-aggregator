@@ -57,6 +57,13 @@ RSS T14 的两项本地回放差额现已合并，但仅关闭该条窄证据路
 
 [PR #131](https://github.com/CoderLambert/news-aggregator/pull/131) 在同一 T14 本地回放合同下补足 `fetch_article` / 已索引 `fetch_webpage` 完整序列化载荷核验，包括 `_truncate_result` 变换、标题/URL/来源/发布时间与 `policy_versions`；长正文 envelope-only、结果行-only、仅标题/URL变化及仅策略版本变化负例通过。head `2a09e39bcbdc929763f54f962bbd8b61f6aac24f`，Squash `27c5b6b2b9bf22f95c99e9b5602296236e2486d1`；[PR 全量 CI #39207985870](https://github.com/CoderLambert/news-aggregator/actions/runs/39207985870) 与 [main Push CI #39208921110](https://github.com/CoderLambert/news-aggregator/actions/runs/39208921110) 均 SUCCESS。该主线 run 的 frontend jobs 被跳过；隔离 G1 实际镜像 revision 为 `27c5b6b2b9bf22f95c99e9b5602296236e2486d1`。此证据只证明本地研究证据回放差额已实现并通过合成/离线 CI，不代表完整 T14/A11 或 T27 真实来源/浏览器验收；当前最新 main 通过也不删除前述 `main@577` 失败记录。
 
+## 1.4 2026-10-20 连续功能迭代
+
+- BYOK T06（#130 / `b9d8f94`）、T07（#133 / `ec5ae59`）、T08（#134 / `462619b`）已合入；下方旧候选列表中的 T06–T12 需据此理解为逐项差额，不能重新实现 T06–T08。
+- BYOK T09 已合并 [#135](https://github.com/CoderLambert/news-aggregator/pull/135)，main `988c4c4`。精确 head `ec7f0e1` 的 Draft 快检通过；Ready 全量 CI #39260053906 的两个实际执行作业均因 self-hosted Runner 失联失败，日志 annotations 已核实，未取得全量通过。按用户本轮明确授权跳过此已知基础设施问题并直接合并；没有将失败改称通过，也未修改 CI 门禁配置。
+- BYOK T10 本批实现：同一会话锁定原模型，明确同意的续问 POST 复用服务端版本化 native continuation；原生 reasoning/tool 调用历史不进入可见消息 DTO；完成历史/native 状态/终态事件在原 run-token/lease CAS 与凭据围栏下原子提交。GET/SSE 保持只读，BYOK 队列恢复仍不自动派发；无法确认的运行不自动重发。旧无 native continuation 的会话只读保留，必须新建研究以建立安全续接。
+- 本地验证：前端 typecheck 与既有 ResearchPanel/API 定向 30 项通过；新续问场景 1 PASS，生产前端 build PASS；原生 helper 模型/协议负例 PASS（未运行 Django/数据库）。后端当前解释器缺少 pytest/PyYAML，数据库回归 NOT_RUN；不安装/重建环境，不触碰真实数据库或 Provider。真实厂商、生产迁移/部署、浏览器 UAT 仍 NOT_RUN。
+
 ## 2. 第 8 批实施状态与后续候选（最多两个独立写入目标）
 
 | 顺序 | 原编号与目标 | 需要完成的真正差额 | 阶段验收 |

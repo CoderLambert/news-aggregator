@@ -141,6 +141,43 @@ describe('ResearchPanel', () => {
     })
   })
 
+  it('sends a consented follow-up using the stored session model without requiring current preferences', async () => {
+    const history = {
+      ...completedSession(),
+      research_model: {
+        model_config_id: 'dc8beed6-9efb-45ae-aacc-e8b8ce426b7f',
+        model_id: 'deepseek-chat',
+      },
+    }
+    api.listResearchSessions.mockResolvedValue({ count: 1, results: [history] })
+    api.getResearchSession.mockResolvedValue(history)
+    api.openResearchSessionStream.mockResolvedValue({ kind: 'session', session: history })
+    api.researchChatStream.mockImplementation(async function* () {
+      yield { type: 'text_delta', text: 'Follow-up answer' }
+      yield { type: 'complete' }
+    })
+    renderPanel('/', false, signedInUser,
+      fullCapabilities({ research: false, research_byok_create: true }))
+    await userEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    await userEvent.click(await screen.findByRole('button', { name: '历史会话' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: '已完成研究' }))
+    await screen.findByText(/本次研究模型：deepseek-chat/)
+    fireEvent.change(screen.getByRole('textbox', { name: '输入研究问题' }), {
+      target: { value: '请进一步分析' },
+    })
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
+    expect(api.researchChatStream).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('checkbox'))
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(api.researchChatStream).toHaveBeenCalledTimes(1))
+    expect(api.researchChatStream.mock.calls[0][0]).toBe(history.id)
+    expect(api.researchChatStream.mock.calls[0][2].authorization).toEqual({
+      modelConfigId: history.research_model.model_config_id, consent: true,
+    })
+    expect(api.createResearchStream).not.toHaveBeenCalled()
+    expect(screen.getByRole('checkbox')).not.toBeChecked()
+  })
+
   it('does not offer BYOK first-run submission without a verified model preference', async () => {
     renderPanel(
       '/',

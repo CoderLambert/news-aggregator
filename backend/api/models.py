@@ -370,6 +370,8 @@ class ResearchSession(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey('auth.User', on_delete=models.CASCADE, related_name='research_sessions', null=True, blank=True, verbose_name='用户')
     title = models.CharField('会话标题', max_length=200, blank=True, default='')
+    # Server-only, protocol/model-bound native history; never serialize to clients.
+    native_continuation = models.JSONField(default=dict, blank=True)
     messages = models.JSONField('对话记录', default=list, blank=True)
     is_archived = models.BooleanField('已归档', default=False)
     created_at = models.DateTimeField('创建时间', auto_now_add=True)

@@ -77,6 +77,7 @@ export interface ResearchLatestRunState {
 }
 
 export interface ResearchSessionDetail extends ResearchSessionSummary {
+  research_model?: { model_config_id: string; model_id: string } | null
   messages: StoredResearchMessage[]
   latest_run?: ResearchLatestRunState | null
 }
@@ -211,7 +212,11 @@ export function parseResearchSessionDetail(value: unknown): ResearchSessionDetai
       last_event_sequence: optionalNumber(value.latest_run.last_event_sequence),
     }
   }
-  const detail: ResearchSessionDetail = { ...summary, messages }
+  const model = value.research_model
+  const detail: ResearchSessionDetail = { ...summary, messages,
+    research_model: isRecord(model) && typeof model.model_config_id === 'string' && typeof model.model_id === 'string'
+      ? { model_config_id: model.model_config_id, model_id: model.model_id } : null,
+  }
   if (Object.prototype.hasOwnProperty.call(value, 'latest_run')) detail.latest_run = latestRun
   return detail
 }

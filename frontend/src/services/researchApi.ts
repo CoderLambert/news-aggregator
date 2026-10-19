@@ -88,9 +88,13 @@ export function researchChatStream(
     idempotencyKey: string
     signal: AbortSignal
     onRunId?: (runId: string) => void
+    authorization?: ResearchCreateAuthorization
   },
 ): AsyncGenerator<ResearchEvent> {
-  const source = researchChatStreamRequest(sessionId, query, options) as AsyncIterable<unknown>
+  const { authorization, ...requestOptions } = options
+  const source = researchChatStreamRequest(sessionId, query, {
+    ...requestOptions, ...(authorization ?? {}),
+  }) as AsyncIterable<unknown>
   return typedResearchEvents(source)
 }
 
