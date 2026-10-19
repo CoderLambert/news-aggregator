@@ -1,0 +1,41 @@
+{
+  "diagnostic": "independent project-local bridge MTU comparison",
+  "image_id": "sha256:666633c9799531b12f4be1525bf6679040a89b52fe0d1efa3e0e9a33923faae6",
+  "endpoint": "https://api.github.com",
+  "results": [
+    {
+      "mtu": 1500,
+      "exit_code": 28,
+      "http_and_tls_time": "000 0.000000",
+      "error_category": "TLS/connect timeout"
+    },
+    {
+      "mtu": 1280,
+      "exit_code": 0,
+      "http_and_tls_time": "200 0.519934",
+      "error_category": "none"
+    }
+  ],
+  "cleanup": "PASS",
+  "existing_ci_or_host_modified": false,
+  "credentials_read": false,
+  "production": "NOT_RUN",
+  "existing_ci_state": {
+    "backend_eth0_mtu": 1500,
+    "frontend_eth0_mtu": 1500,
+    "bridge_mtu_option_present": false,
+    "github_runners": "offline; both busy=false at check",
+    "listener_evidence": "HTTP request timeout; no registration credential error observed"
+  },
+  "remediation": {
+    "target_project": "newshub-ci",
+    "target_bridge_mtu": 1280,
+    "retain": [
+      "GitHub registrations",
+      "state/work volumes",
+      "DinD cache"
+    ],
+    "host_or_production_changes": false,
+    "execution": "NOT_RUN: user confirmation requested for offline repair exception to documented Online/Idle prerequisite"
+  }
+}
