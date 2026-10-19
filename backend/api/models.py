@@ -653,6 +653,10 @@ class ChatGPTArticleTranslation(models.Model):
         related_name='private_translations',
     )
     news = models.ForeignKey(News, on_delete=models.CASCADE, related_name='chatgpt_translations')
+    task = models.OneToOneField(
+        'ChatGPTTranslationTask', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='private_result',
+    )
     source_hash = models.CharField(max_length=64)
     model_slug = models.CharField(max_length=255)
     content = models.TextField()
@@ -669,11 +673,6 @@ class ChatGPTArticleTranslation(models.Model):
                            models.Q(connection__isnull=True, api_connection__isnull=False)),
                 name='byok_translation_result_credential_xor',
             ),
-            models.UniqueConstraint(
-                fields=['user', 'api_connection', 'news', 'source_hash'],
-                condition=models.Q(api_connection__isnull=False), name='byok_translation_result_source',
-            ),
-
             models.UniqueConstraint(
                 fields=['user', 'connection', 'news', 'source_hash'], name='unique_chatgpt_news_translation',
             ),
@@ -737,8 +736,9 @@ class ChatGPTTranslationTask(models.Model):
                 name='byok_translation_task_credential_xor',
             ),
             models.UniqueConstraint(
-                fields=['user', 'api_connection', 'news', 'source_hash'],
-                condition=models.Q(api_connection__isnull=False), name='byok_translation_task_source',
+                fields=['user', 'news', 'source_hash'],
+                condition=models.Q(api_connection__isnull=False, status__in=['queued', 'running']),
+                name='byok_translation_task_active_source',
             ),
             models.UniqueConstraint(fields=['user', 'request_id'],
                 condition=models.Q(api_connection__isnull=False), name='byok_translation_request'),
