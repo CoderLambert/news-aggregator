@@ -10,12 +10,12 @@ from types import SimpleNamespace
 from urllib.parse import urlsplit
 from django.conf import settings
 from api.services.ai_responses_protocol import (
-    OPENAI_RESPONSES_MODELS, ResponsesProtocolError, completion_object,
+    uses_responses_protocol, ResponsesProtocolError, completion_object,
     responses_completion, responses_payload,
 )
 
 from api.services.ai_messages_protocol import (
-    ANTHROPIC_MESSAGES_MODELS, MessagesProtocolError, messages_completion, messages_payload,
+    uses_messages_protocol, MessagesProtocolError, messages_completion, messages_payload,
 )
 
 
@@ -100,13 +100,13 @@ class _GatewayCompletions:
         if requested_stream and kwargs.get('model') != ARTICLE_CHAT_SUPPORTED_ALIAS:
             raise AIGatewayError('个人模型流式路由不可用。')
         native_options = {}
-        if kwargs.get('model') in ANTHROPIC_MESSAGES_MODELS | OPENAI_RESPONSES_MODELS:
+        if uses_messages_protocol(kwargs.get('model')) or uses_responses_protocol(kwargs.get('model')):
             timeout = kwargs.pop('timeout', None)
             if timeout is not None:
                 if type(timeout) not in (int, float) or not 0 < timeout <= GATEWAY_TIMEOUT_SECONDS:
                     raise AIGatewayError('个人模型请求超时参数无效。')
                 native_options['timeout'] = timeout
-        if kwargs.get('model') in ANTHROPIC_MESSAGES_MODELS:
+        if uses_messages_protocol(kwargs.get('model')):
             if self._messages_getter is None:
                 raise AIGatewayError('个人模型原生协议不可用。')
             try:
@@ -117,7 +117,7 @@ class _GatewayCompletions:
                 return completion_object(messages_completion(raw))
             except MessagesProtocolError:
                 raise AIGatewayError('个人模型返回了不完整或无法验证的响应。') from None
-        if kwargs.get('model') in OPENAI_RESPONSES_MODELS:
+        if uses_responses_protocol(kwargs.get('model')):
             if self._responses is None:
                 raise AIGatewayError('个人模型原生协议不可用。')
             try:

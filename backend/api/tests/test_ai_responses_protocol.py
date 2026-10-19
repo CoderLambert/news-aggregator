@@ -30,6 +30,21 @@ def response(items):
 
 
 class NativeResponsesTests(TestCase):
+    def test_manual_openai_model_uses_responses_without_borrowing_preset_options(self):
+        native = Mock()
+        native.create.return_value = response([FINAL])
+        alias = 'openai/synthetic-future-model'
+        chat = Mock()
+        gateway = _GatewayCompletions(chat, 'synthetic-key', responses=native)
+        gateway.create(model=alias, messages=[{'role': 'user', 'content': 'synthetic'}], max_tokens=128)
+        request = native.create.call_args.kwargs
+        self.assertEqual(request['model'], alias)
+        self.assertNotIn('reasoning', request)
+        self.assertFalse(request['store'])
+        chat.create.assert_not_called()
+        self.assertEqual(continuation_payload({'model': {'proxy_alias': alias}}, [])['protocol'],
+                         'openai-responses-v1')
+
     def test_tool_result_and_followup_replay_original_items(self):
         first = completion_object(responses_completion(response([REASONING, CALL])))
         assistant = {'role': 'assistant', 'tool_calls': [{'id': 'call_1'}]}

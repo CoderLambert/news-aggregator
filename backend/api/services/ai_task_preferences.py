@@ -16,7 +16,7 @@ from api.services.ai_credentials import (
     require_active_snapshot, snapshot_connection,
 )
 from api.services.ai_model_capabilities import verified_for_task
-from api.services.ai_model_registry import get_trusted_preset
+from api.services.ai_model_registry import get_trusted_route
 
 
 class ModelSelectionError(RuntimeError):
@@ -51,7 +51,7 @@ def _selected_state(preference, kind, owner_id):
     connection = model.connection
     if (model.is_deleted or connection.is_deleted or not connection.is_enabled
             or not connection.credential_ciphertext or not connection.encryption_key_id
-            or get_trusted_preset(connection, model.model_id) is None):
+            or get_trusted_route(connection, model.model_id) is None):
         return 'needs_reselection', info
     if not verified_for_task(model, kind):
         return 'needs_verification', info
@@ -83,7 +83,7 @@ def _require_model(owner_id, config):
         require_active_snapshot(identity)
     except CredentialUnavailable:
         raise ModelSelectionError('model_connection_unavailable') from None
-    route = get_trusted_preset(connection, config.model_id)
+    route = get_trusted_route(connection, config.model_id)
     if route is None:
         raise ModelSelectionError('model_not_approved')
     return identity, route
@@ -221,7 +221,7 @@ def require_task_model_snapshot(snapshot, *, owner_id):
             or (snapshot.task_kind == 'deep_research'
                 and str(model.last_tools_attempt) != snapshot.tools_attempt_id)):
         raise ModelSelectionError('execution_model_changed')
-    route = get_trusted_preset(connection, model.model_id)
+    route = get_trusted_route(connection, model.model_id)
     if route is None or route['proxy_alias'] != snapshot.proxy_alias or not verified_for_task(model, snapshot.task_kind):
         raise ModelSelectionError('execution_model_unverified')
     return model

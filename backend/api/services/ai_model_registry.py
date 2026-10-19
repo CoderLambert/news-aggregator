@@ -1,7 +1,8 @@
 """Trusted T02 model identifiers and approved LiteLLM Proxy routes.
 
-A user-supplied model ID is inert metadata unless it matches a server-owned
-preset on the connection's trusted provider/endpoint. No dynamic alias creation.
+Presets are selection suggestions. Manual IDs may be explicitly probed only
+through the connection's versioned server-owned provider/region route. Saving
+an ID never proves a capability or authorizes business inference.
 """
 import re
 
@@ -10,6 +11,7 @@ from api.services.ai_registry import profile_route_prefix
 
 CATALOG_VERSION = '2026-10-20.2'
 _MODEL_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,159}$')
+_BARE_MODEL_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._+-]{0,159}$')
 # Exact approved aliases behind the existing Proxy. A catalog entry never
 # proves a capability; owner/version-bound explicit probe receipts do that.
 _PRESETS = {
@@ -55,6 +57,28 @@ def get_trusted_preset(connection, model_id):
         return None
     original_prefix = PROVIDER_SPECS[connection.provider_id]['route_prefix'] + '/'
     return {**preset, 'proxy_alias': prefix + '/' + preset['proxy_alias'].removeprefix(original_prefix)}
+
+
+def get_trusted_route(connection, model_id):
+    """A model name cannot select another provider, region, URL or parameter."""
+    if type(model_id) is not str:
+        return None
+    preset = get_trusted_preset(connection, model_id)
+    if preset is not None:
+        return preset
+    prefix = profile_route_prefix(connection)
+    if prefix is None or normalize_model_id(connection.provider_id, model_id) != model_id:
+        return None
+    if (connection.provider_id in {'glm', 'qwen', 'kimi'}
+            and connection.endpoint_profile == connection.provider_id + '_default'):
+        # These old identities did not pin a region. Keep their saved Key
+        # inert; users must explicitly create a fixed regional connection.
+        return None
+    # OpenRouter uses provider/model names inside its own fixed route. Other
+    # trusted providers accept a bare ID, not nested router directives.
+    if connection.provider_id != 'openrouter' and not _BARE_MODEL_RE.fullmatch(model_id):
+        return None
+    return {'display_name': model_id[:64], 'proxy_alias': prefix + '/' + model_id}
 
 
 def catalog_for(connection):

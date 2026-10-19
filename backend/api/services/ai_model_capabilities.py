@@ -1,5 +1,5 @@
 """Shared T02 capability receipts used by T03 without importing API views."""
-from api.services.ai_model_registry import get_trusted_preset
+from api.services.ai_model_registry import get_trusted_route
 from api.ai_model_models import AIModelProbeAttempt
 
 CAPABILITY_KINDS = ('text', 'tools')
@@ -21,7 +21,7 @@ def current_capabilities(model):
             and receipt.get('endpoint_profile') == connection.endpoint_profile
             and receipt.get('endpoint_profile_version') == connection.endpoint_profile_version
             and connection.is_enabled and not connection.is_deleted
-            and get_trusted_preset(connection, model.model_id) is not None
+            and get_trusted_route(connection, model.model_id) is not None
         )
         value = receipt.get('status') if valid else 'unknown'
         result[kind] = value if value in ('supported', 'unsupported') else 'unknown'

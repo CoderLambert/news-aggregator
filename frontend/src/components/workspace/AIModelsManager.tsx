@@ -90,11 +90,11 @@ export default function AIModelsManager({ connection, viewer }: { connection: AI
     if (!billingConsent || !connection.is_enabled || !model.has_trusted_route) return
     const requestId = crypto.randomUUID()
     void perform(signal => probeAIModel(connection, model, kind, requestId, viewer, signal),
-      '已记录本次显式探针结果。请查看两种能力的独立状态；未知结果不会自动重试。')
+      '已记录本次测试结果。文本和工具能力分别显示；结果未知时不会自动重试。')
   }
   return <div className="mt-4 min-w-0 border-t pt-3" aria-label={`${connection.display_name}的模型配置`}>
     <h3>模型配置</h3>
-    <p className="workspace-caption">仅经过批准的模型路由可以测试。能力未验证及未设置用途时，个人 AI 业务调用仍不可用。</p>
+    <p className="workspace-caption">选择预置或填写当前连接支持的模型 ID。保存不会调用服务商；主动测试可能产生费用，验证通过后才能用于相应用途。</p>
     {error && <p role="alert" className="workspace-error">{error}</p>}
     {notice && <p role="status" className="workspace-notice">{notice}</p>}
     <button type="button" className="workspace-button secondary" disabled={busy || loading} onClick={reload}>重新读取模型</button>
@@ -102,16 +102,17 @@ export default function AIModelsManager({ connection, viewer }: { connection: AI
     {!loading && !models && <p role="status">模型状态未知。重新读取成功前无法再次提交操作或收费探针。</p>}
     {models && <>
       <form onSubmit={add} className="grid min-w-0 gap-2 py-3">
-        <label>已批准模型<select value={selected} disabled={busy} onChange={event => setSelected(event.target.value)}>
+        <label>预置模型（可选）<select value={selected} disabled={busy} onChange={event => setSelected(event.target.value)}>
           {catalog.length ? catalog.map(item => <option key={item.model_id} value={item.model_id}>{item.display_name} · {item.model_id}</option>)
-            : <option value="">当前连接无批准模型</option>}
+            : <option value="">没有预置模型，可手动填写 ID</option>}
         </select></label>
-        <label>或手动填写模型 ID<input value={manualId} disabled={busy} maxLength={160} placeholder="填写后仍需路由审核" onChange={event => setManualId(event.target.value)} /></label>
+        <label>或手动填写模型 ID<input value={manualId} disabled={busy} maxLength={160} placeholder="例如：服务商控制台显示的模型 ID" onChange={event => setManualId(event.target.value)} /></label>
         <button type="submit" className="workspace-button secondary" disabled={busy || models.length >= 30 || !(manualId.trim() || selected)}>添加模型（不调用服务商）</button>
       </form>
       {models.length === 0 && <p>尚未添加模型。</p>}
       {models.map(model => <section key={model.id} aria-label={`模型 ${model.display_name}`} className="my-3 border-t pt-3">
-        <strong>{model.display_name}</strong><p className="workspace-caption">{model.model_id} · {model.has_trusted_route ? '受信路由' : '未批准路由'}</p>
+        <strong>{model.display_name}</strong><p className="workspace-caption">{model.model_id} · {model.has_trusted_route ? '可主动测试' : '暂不可测试'}</p>
+        {!model.has_trusted_route && <p className="workspace-caption">请检查模型 ID；GLM、百炼和 Kimi 的旧默认连接需新建为对应地域连接后再测试。</p>}
         <p>文本：{stateLabel[model.capabilities.text]} · 工具调用：{stateLabel[model.capabilities.tools]}</p>
         <p className="workspace-caption">上下文上限：未核实 · 配置版本 {model.config_revision}</p>
         <div className="workspace-actions flex-wrap">

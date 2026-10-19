@@ -26,9 +26,9 @@ from api.services.ai_worker_fencing import (
     SNAPSHOT_SCHEMA_VERSION, check_at_claim, commit_result, dispatch_once,
 )
 from api.services.ai_gateway import AIGatewayError, build_gateway_client
-from api.services.ai_responses_protocol import OPENAI_RESPONSES_MODELS, RESPONSES_PROTOCOL
+from api.services.ai_responses_protocol import uses_responses_protocol, RESPONSES_PROTOCOL
 
-from api.services.ai_messages_protocol import ANTHROPIC_MESSAGES_MODELS, MESSAGES_PROTOCOL
+from api.services.ai_messages_protocol import uses_messages_protocol, MESSAGES_PROTOCOL
 
 logger = logging.getLogger(__name__)
 
@@ -433,9 +433,9 @@ def visible_messages(messages):
 def _continuation_protocol(snapshot):
     model = snapshot.get('model') if type(snapshot) is dict else None
     alias = model.get('proxy_alias') if type(model) is dict else None
-    if alias in OPENAI_RESPONSES_MODELS:
+    if uses_responses_protocol(alias):
         return RESPONSES_PROTOCOL
-    if alias in ANTHROPIC_MESSAGES_MODELS:
+    if uses_messages_protocol(alias):
         return MESSAGES_PROTOCOL
     return CONTINUATION_PROTOCOL
 

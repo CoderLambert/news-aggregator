@@ -161,6 +161,15 @@ RSS T14 已合并 [#142](https://github.com/CoderLambert/news-aggregator/pull/14
 - 使用只读现有依赖缓存、network-none 容器、临时测试库与合成 Key；未安装依赖、读取真实凭据、请求厂商或操作生产。完整 CI、真实 SDK→Proxy 请求、真实地域/模型、部署与浏览器验收 NOT_RUN。发布时需核对业务与 Proxy 配置版本和项目 key 准入，不能将代码合并等同于已部署。
 - 设计核对：冻结 [方案第 3/4 节](https://github.com/CoderLambert/news-aggregator/blob/ed58afa7a72ae905e2a2ffc315d968ca3634b8f2/docs/features/byok/BYOK_IMPLEMENTATION_PLAN.md)、[T01](https://github.com/CoderLambert/news-aggregator/blob/ed58afa7a72ae905e2a2ffc315d968ca3634b8f2/docs/features/byok/tasks/T01-credentials.md)。T13 是真实厂商验收，不再把六张子卡当成重新开发厂商适配器的顺序。
 
+### BYOK T02 手填模型的显式测试接线（2026-10-20）
+
+- 基线 `main@1904253`。对照冻结方案第 2/3/4 节和 T02，“手填模型 ID”此前只能保存，所有非内置型号的测试都被模型白名单永久拒绝。现将预置目录与可信连接路由分开：规范的手填 ID 只能按存储的 provider/profile/version 解析为固定 LiteLLM alias；保存不发送请求，文本/工具回执与 T03 业务授权仍分别检查 owner、配置版本、Key epoch/version、端点身份及实际成功审计行。
+- 不开放任意 endpoint、messages、headers、extra_body、跨 provider 或嵌套路由指令。OpenRouter 的 provider/model ID 仍限定在 OpenRouter 自己的固定前缀。旧 GLM/Qwen/Kimi 默认连接因地域不明确继续不可派发，须新建原方案明确的地域连接；不静默激活旧 Key。
+- OpenAI/Claude 的官方 SDK 入口与私有 continuation 协议按可信协议前缀选择，不再绑定单个预置型号；原型号的固定选项只保留在原预置，新型号不继承未经证实的 thinking/effort 参数。全部请求仍经 Proxy，未新增厂商适配器或直连。文章/翻译流式仍保持现有严格路由限制。
+- 工具探针采用共同支持的 auto 选择，但只有实际完整、符合 schema 的 byok_probe 调用才能证明工具能力；普通文字保留 unknown，不把未调用推断成不支持或可用于研究。原 schema、终态、无重试与输出预算保留。旧断言“所有手填 ID 禁止进 Proxy”和“未选择工具即 unsupported”按上述原产品合同纠偏，其余负例未放宽。
+- 53 项后端检查与 58 个 subtest 通过（真实临时 SQLite，包含 T02/T03、地域/手填模型、native 协议/continuation、受控 HTTP）；Node 22 下 typecheck、lint（1 个既有 warning）、前端定向 28 项及 build 通过。前端首次测试因只读 node_modules/.vite-temp 无法启动，追加容器 tmpfs 后只运行尚未执行的测试/build。依赖缓存只读，无安装、真实数据、Key 或 Provider 请求。完整 CI、真实模型与浏览器验收待最终集中执行。
+- 用户新目标已授权开发完成后集中验收，并允许使用先前 DeepSeek Key；此前的延期记录仅描述旧批次，不阻止新授权范围的有界调用。生产执行仍延期，其他厂商真实 Key/人工结论另列最终清单；本条不声称真实验收已执行。
+
 | 顺序 | 原编号与目标 | 需要完成的真正差额 | 阶段验收 |
 |---|---|---|---|
 | 第 8 批 A（离线交付已合并） | **BYOK T04 个人模型新闻问答** | T03 + T01 已接入文章阅读器和 per-turn 问答；取消/流式与提交围栏差额由 #118 完成，证据见上；真实验收仍独立保留 | 用户/文章版本/模型尝试/取消/重试负例及 SDK→本地 Proxy→合成上游通过；真实付费上游/UAT `NOT_RUN` |

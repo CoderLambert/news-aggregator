@@ -5,8 +5,14 @@ remain with the research service; this module never executes provider tools.
 """
 import copy
 import json
+import re
 
-ANTHROPIC_MESSAGES_MODELS = frozenset({'anthropic/claude-haiku-5-5'})
+ANTHROPIC_MESSAGES_PRESET = 'anthropic/claude-haiku-5-5'
+
+
+def uses_messages_protocol(alias):
+    return isinstance(alias, str) and re.fullmatch(r'anthropic/[A-Za-z0-9][A-Za-z0-9._+-]{0,159}', alias) is not None
+
 MESSAGES_PROTOCOL = 'anthropic-messages-v1'
 MAX_NATIVE_BYTES = 4 * 1024 * 1024
 
@@ -93,7 +99,7 @@ def messages_input(messages):
 
 def messages_payload(kwargs):
     allowed = {'model', 'messages', 'tools', 'tool_choice', 'max_tokens', 'temperature', 'stream', 'response_format'}
-    if (set(kwargs) - allowed or kwargs.get('model') not in ANTHROPIC_MESSAGES_MODELS
+    if (set(kwargs) - allowed or not uses_messages_protocol(kwargs.get('model'))
             or (kwargs.get('stream') is not None and kwargs.get('stream') is not False)):
         raise MessagesProtocolError('unsupported_request')
     maximum = kwargs.get('max_tokens')
@@ -106,8 +112,9 @@ def messages_payload(kwargs):
         # Messages has no Chat JSON-object switch. The existing classifier
         # already validates the full response against its server-owned schema.
         system = (system + '\n\nRespond with one valid JSON object and no other text.').strip()
-    data = {'model': kwargs['model'], 'messages': messages, 'max_tokens': maximum,
-            'thinking': {'type': 'disabled'}, 'output_config': {'effort': 'low'}}
+    data = {'model': kwargs['model'], 'messages': messages, 'max_tokens': maximum}
+    if kwargs['model'] == ANTHROPIC_MESSAGES_PRESET:
+        data.update(thinking={'type': 'disabled'}, output_config={'effort': 'low'})
     if system:
         data['system'] = system
     tools = kwargs.get('tools')
