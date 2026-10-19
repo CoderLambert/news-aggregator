@@ -9,7 +9,7 @@ from hashlib import sha256
 import json
 import re
 import time
-from urllib.parse import parse_qsl, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlsplit
 from uuid import UUID
 
 from django.db import OperationalError, connection, transaction
@@ -50,22 +50,15 @@ def sqlite_retry(fn):
 
 def canonicalize_feed_url(value):
     try:
-        _url(value)  # public HTTPS syntax; DNS/redirect safety remains engine/deployment.
+        normalized = _url(value)  # Same identity as engine FeedDTOs; DNS/redirect safety remains engine/deployment.
     except EngineError:
         raise OperationError('invalid_public_url') from None
-    parts = urlsplit(value)
+    parts = urlsplit(normalized)
     sensitive = {'token', 'access_token', 'api_key', 'apikey', 'password', 'secret',
                  'auth', 'authorization', 'cookie', 'signature', 'access-token', 'api-key'}
     if any(key.lower() in sensitive for key, _ in parse_qsl(parts.query, keep_blank_values=True)):
         raise OperationError('credential_feed_not_supported')
-    try:
-        host = parts.hostname.rstrip('.').encode('idna').decode('ascii').lower()
-    except UnicodeError:
-        raise OperationError('invalid_public_url') from None
-    if ':' in host:
-        host = '[' + host + ']'
-    netloc = host + (f':{parts.port}' if parts.port and parts.port != 443 else '')
-    return urlunsplit(('https', netloc, parts.path, parts.query, ''))
+    return normalized
 
 
 @sqlite_retry

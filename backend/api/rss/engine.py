@@ -9,7 +9,7 @@ from email.utils import parsedate_to_datetime
 from ipaddress import ip_address
 import time
 import os
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
 import miniflux
@@ -44,7 +44,7 @@ def _url(value, *, feed=True):
         if p.scheme not in ({"https"} if feed else {"http", "https"}) or not p.hostname or p.username is not None or p.password is not None:
             raise ValueError
         p.port
-        host = p.hostname.rstrip(".").lower()
+        host = p.hostname.encode('idna').decode('ascii').lower().rstrip('.')
         try:
             address = ip_address(host)
         except ValueError:
@@ -53,6 +53,15 @@ def _url(value, *, feed=True):
         else:
             if not address.is_global:
                 raise ValueError
+        if feed:
+            # Input, discovery and returned FeedDTOs must use the same URL
+            # identity. Preserve business path/query bytes and nondefault ports.
+            authority = ('[' + host + ']') if ':' in host else host
+            authority += f':{p.port}' if p.port and p.port != 443 else ''
+            canonical = urlunsplit(('https', authority, p.path, p.query, ''))
+            if len(canonical) > 1024:
+                raise ValueError
+            return canonical
         return value
     except (ValueError, TypeError):
         raise EngineError("invalid_public_url") from None
