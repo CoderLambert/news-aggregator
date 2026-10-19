@@ -88,3 +88,12 @@ def test_local_start_dispatches_only_web_processes_and_rejects_retired_crawl(tmp
     assert retired.returncode == 2 and '已退役' in retired.stderr
     assert not retired.stdout
     assert not (root / 'scripts/news-aggregator-crawl.timer').exists()
+
+
+@pytest.mark.parametrize('project', ['a' * 80, 'project_01-test'])
+def test_writer_selection_preserves_existing_deploy_cli_project_names(monkeypatch, project):
+    docker = Mock(return_value='')
+    monkeypatch.setattr(release, '_docker_text', docker)
+    assert release.project_writers(project) == []
+    assert docker.call_count == 6
+    assert all(f'label=com.docker.compose.project={project}' in call.args for call in docker.call_args_list)

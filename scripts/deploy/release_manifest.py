@@ -235,7 +235,7 @@ def project_writers(project: str, *, stop: bool = False) -> list[str]:
     No containers or volumes are removed. Verify every returned identity before
     stopping anything; unexpected metadata fails closed without targeting it.
     """
-    if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,62}', project):
+    if not re.fullmatch(r'[a-z0-9][a-z0-9_-]*', project):
         raise ManifestError('invalid Compose project')
     services = ('rss-sync', 'channel-worker', 'full-content', 'crawler', 'indexer', 'app')
     selected = []

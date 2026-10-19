@@ -50,7 +50,7 @@ echo ""
 # 3. Run RSS tests
 echo -e "${YELLOW}[3/3] Running RSS tests...${NC}"
 cd "$PROJECT"
-if PYTHONPATH="$PROJECT/backend:$PROJECT/crawler${PYTHONPATH:+:$PYTHONPATH}" \
+if PYTHONPATH="$PROJECT/backend${PYTHONPATH:+:$PYTHONPATH}" \
     "$PYTHON" -m pytest backend/api/tests/rss/ -v --tb=short; then
     echo -e "${GREEN}✓ RSS tests passed${NC}"
 else

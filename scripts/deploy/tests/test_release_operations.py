@@ -662,7 +662,7 @@ class CollectionAndWorkflowTests(unittest.TestCase):
         backend_job = jobs["backend-and-release-gates"]
         self.assertEqual(backend_job["runs-on"], ["self-hosted", "linux", "x64", "newshub-ci"])
         self.assertEqual(backend_job["env"]["RUN_MAIN"], "true")
-        self.assertEqual(backend_job["env"]["PYTHONPATH"], "backend:crawler")
+        self.assertEqual(backend_job["env"]["PYTHONPATH"], "backend")
         runs = "\n".join(step.get("run", "") for step in backend_job["steps"])
         self.assertIn("= 3.12", runs)
         self.assertIn('test "$DOCKER_HOST" = unix:///ci-docker/docker.sock', runs)
