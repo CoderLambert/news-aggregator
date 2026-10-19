@@ -6,6 +6,8 @@ import * as api from '@/services/aiConnectionsApi'
 
 // T01 connection behavior is unit-tested separately from the T03 preferences panel.
 vi.mock('@/components/workspace/AITaskPreferencesSection', () => ({ default: () => null }))
+// Usage has its own viewer-isolation and unknown-token tests.
+vi.mock('@/components/workspace/AIUsageSection', () => ({ default: () => null }))
 vi.mock('@/services/aiConnectionsApi', async importOriginal => ({
   ...await importOriginal<typeof import('@/services/aiConnectionsApi')>(),
   listAIProviders: vi.fn(), listAIConnections: vi.fn(), createAIConnection: vi.fn(),

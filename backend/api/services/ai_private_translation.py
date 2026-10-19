@@ -752,7 +752,8 @@ def run_translation(task_id, generation):
                         stage='byok_pre_send_fence',
                     )
                     gateway = build_gateway_client(key)
-                    stream = gateway.chat.completions.create(
+                    from api.services.ai_usage import complete_with_usage
+                    stream = complete_with_usage(gateway, selection, 'full_translation',
                         model=selection.proxy_alias,
                         messages=[
                             {'role': 'system', 'content': T06_SYSTEM_PROMPT if long_translation else

@@ -126,3 +126,18 @@ export function saveAITaskPreferences(revision: number, preferences: AITaskPrefe
     method: 'PATCH', body: { revision, preferences }, viewer, signal,
   })
 }
+
+
+export interface AIUsageAttempt {
+  id: string; source: 'business' | 'probe'; task_kind: string; model_id: string; provider_id: string
+  status: string; input_tokens: number | null; output_tokens: number | null
+  latency_ms: number | null; created_at: string
+}
+export interface AIUsage {
+  summary: { calls: number; input_tokens: number | null; output_tokens: number | null
+    input_tokens_unknown_calls: number; output_tokens_unknown_calls: number }
+  attempts: AIUsageAttempt[]; has_more: boolean
+}
+export function listAIUsage(signal?: AbortSignal) {
+  return call<AIUsage>('/me/ai/usage/', { signal })
+}
