@@ -127,8 +127,18 @@ def test_t09_production_requires_literal_consent_and_current_verified_model():
         shared_path = client.post('/api/research/', {
             'query': 'must not reach shared hosted execution',
         }, format='json')
+        assert shared_path.status_code == 403
+        assert shared_path.data['error_code'] == 'ai_disabled'
+        assert not ResearchRun.objects.exists()
+        assert not ResearchSession.objects.exists()
+
+        with override_settings(PUBLIC_AI_ENABLED=True):
+            shared_path = client.post('/api/research/', {
+                'query': 'must not reach unapproved hosted execution',
+            }, format='json')
         assert shared_path.status_code == 503
         assert shared_path.data['error_code'] == 'hosted_integration_unapproved'
+        assert not ResearchSession.objects.exists()
         assert not ResearchRun.objects.exists()
 
 

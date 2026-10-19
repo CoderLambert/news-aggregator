@@ -177,6 +177,12 @@ RSS T14 已合并 [#142](https://github.com/CoderLambert/news-aggregator/pull/14
 - 成功审计回执新增当前 proxy_alias 的精确核对。T03 旧成功路径 fixture 从本来不能用于 T04 的 deepseek-chat 改为实际支持的 deepseek-flash，其他 owner/版本/撤权/原子保存负例保留；新增错误 alias 回执拒绝及非流式模型跨用途反例。
 - 后端 12 项和 2 个 subtest、前端 6 项通过；Node 22 typecheck、变更文件 ESLint 和 build 通过。复用只读缓存、临时 SQLite、network-none 容器；没有安装依赖、真实 Provider/Key/生产操作。完整联合验收在后续整批统一执行。
 
+### BYOK T02 / AG / T09 集中验收发现的差额（2026-10-20）
+
+- 基线 `main@703af0f`。集中完整检查发现探测审计 alias 字段 80 字符与手填模型 160 字符/路由 240 字符合同不一致；最大合法 ID 的 API/字段回归先真实失败，再通过 `0072` 前向迁移扩为 240。不截断模型 ID，不改历史迁移或可信路由。
+- 五项 AG 老 fixture 改为真实连接/显式探针/选择快照，并在当前 gateway 边界注入合成响应；保留标题证据更新前零调用、更新中不得提交与目录 GET 无副作用断言。公共 capability schema 和研究关闭/hosted 双门禁分别按现行合同补齐，未放宽授权。
+- 完整前端 105 文件/730 用例、typecheck/lint/build，CI 工具 50 用例与依赖锁 160 项通过；完整后端 2671 passed / 16 skipped（2687 个身份对账）、T00 SDK/Proxy 合成 239/239 通过；最终镜像和隔离 G1 的当前状态、首轮失败及环境修正见[集中验收记录](../verification/consolidated-acceptance-2026-10-20.md)。GitHub 两个 runner 当前 offline，实际 CI 不能记为通过。真实 Provider、生产和人工结论继续独立记录。
+
 | 顺序 | 原编号与目标 | 需要完成的真正差额 | 阶段验收 |
 |---|---|---|---|
 | 第 8 批 A（离线交付已合并） | **BYOK T04 个人模型新闻问答** | T03 + T01 已接入文章阅读器和 per-turn 问答；取消/流式与提交围栏差额由 #118 完成，证据见上；真实验收仍独立保留 | 用户/文章版本/模型尝试/取消/重试负例及 SDK→本地 Proxy→合成上游通过；真实付费上游/UAT `NOT_RUN` |

@@ -133,7 +133,7 @@ class SourceMetadataContractTests(TestCase):
         public_legacy(self.source)
         client = APIClient()
         with (
-            patch('api.services.channel_ai.personal_clients_for_user',
+            patch('api.services.channel_ai.build_gateway_client',
                   side_effect=AssertionError('GET invoked model')),
             patch('socket.socket.connect', side_effect=AssertionError('GET invoked network')),
         ):

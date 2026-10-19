@@ -110,6 +110,17 @@ class AIModelT02Tests(TestCase):
         self.assertFalse(verified_for_task(UserAIModelConfig.objects.get(pk=manual['id']), 'deep_research'))
         self.assertEqual(AIModelProbeAttempt.objects.get().proxy_alias, 'deepseek/user-manual-model')
 
+    def test_maximum_length_manual_model_keeps_complete_probe_alias(self):
+        model_id = 'm' * UserAIModelConfig._meta.get_field('model_id').max_length
+        manual = self.create_model(model_id)
+        alias = 'deepseek/' + model_id
+        with patch('api.ai_model_views.send_model_probe', return_value=ProbeOutcome('succeeded')) as sender:
+            self.assertEqual(self.probe(manual).status_code, 200)
+        sender.assert_called_once_with(provider_key=KEY, model_alias=alias, probe_kind='text')
+        attempt = AIModelProbeAttempt.objects.get(model_config_id=manual['id'])
+        self.assertEqual(attempt.proxy_alias, alias)
+        self.assertEqual(AIModelProbeAttempt._meta.get_field('proxy_alias').clean(alias, attempt), alias)
+
     def test_regional_manual_model_requires_both_receipts_and_revocation_fences_snapshot(self):
         from api.services.ai_task_preferences import (
             ModelSelectionError, require_task_model_snapshot, resolve_task_model,
