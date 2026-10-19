@@ -29,6 +29,8 @@ class PrivateTranslationTests(TransactionTestCase):
 
     def setUp(self):
         fixtures.PersonalArticleChatTests.setUp(self)
+        self.news.full_content = '# Synthetic article\n\nFull original Markdown for private translation.'
+        self.news.save(update_fields=['full_content'])
         self.url = f'/api/news/{self.news.pk}/byok-translation/'
         self.request_id = str(uuid.uuid4())
 
@@ -347,3 +349,47 @@ class PrivateTranslationTests(TransactionTestCase):
             self.assertIsNone(after_result['api_connection_id'])
         finally:
             MigrationExecutor(connection).migrate(targets)
+
+    def test_two_owners_translate_same_article_with_own_keys_and_private_results(self):
+        from api.ai_connection_models import UserAIConnection
+        from api.ai_model_models import UserAIModelConfig
+        from api.tests.test_ai_article_chat_t04 import CONNECTIONS, KEY
+        task_a = self.queued()
+        gateway_a = self.execute(task_a)
+        original_owner, original_client = self.owner, self.client
+        self.owner = self.other
+        self.client = APIClient()
+        self.client.force_login(self.other)
+        try:
+            response = self.client.post(CONNECTIONS, {
+                'provider_id': 'deepseek', 'endpoint_profile': 'deepseek_default',
+                'display_name': 'Other private key', 'api_key': KEY + '-other',
+                'request_id': str(uuid.uuid4()),
+            }, format='json')
+            self.assertEqual(response.status_code, 201)
+            connection_b = UserAIConnection.objects.get(pk=response.data['id'])
+            response = self.client.post(f'{CONNECTIONS}{connection_b.pk}/models/',
+                                       {'model_id': 'deepseek-flash'}, format='json')
+            self.assertEqual(response.status_code, 201)
+            self.model = UserAIModelConfig.objects.get(pk=response.data['id'])
+            self._verify_text(self.model)
+            self.request_id = str(uuid.uuid4())
+            task_b = self.queued()
+            gateway_b = self.execute(task_b)
+            self.assertEqual(task_b.status, 'succeeded')
+            self.assertNotEqual(task_a.result['result_id'], task_b.result['result_id'])
+            self.assertEqual(task_a.user_id, original_owner.pk)
+            self.assertEqual(task_b.user_id, self.other.pk)
+            self.assertEqual(task_a.api_connection_id, self.connection.pk)
+            self.assertEqual(task_b.api_connection_id, connection_b.pk)
+            records = ChatGPTArticleTranslation.objects.order_by('user_id')
+            self.assertEqual(records.count(), 2)
+            self.assertEqual(set(records.values_list('api_connection_id', flat=True)),
+                             {self.connection.pk, connection_b.pk})
+            self.assertEqual(len(gateway_a.sent), 1)
+            self.assertEqual(len(gateway_b.sent), 1)
+            self.assertEqual(self.client.get(f'/api/me/ai/translations/{task_a.pk}/').status_code, 404)
+            self.assertEqual(original_client.get(f'/api/me/ai/translations/{task_b.pk}/').status_code, 404)
+            self.assertFalse(SharedArticleTranslation.objects.exists())
+        finally:
+            self.owner, self.client = original_owner, original_client

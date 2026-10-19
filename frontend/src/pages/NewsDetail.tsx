@@ -294,7 +294,7 @@ export default function NewsDetail() {
 
           {readableBody && translationEnabled && user && <PrivateTranslationPanel
             viewer={user.id} newsId={news.id} sourceRevision={news.full_content_revision ?? 0}
-            sourceChars={news.full_content.length} />}
+            sourceMarkdown={news.full_content} />}
 
           {!readableBody && displayContent ? (
             <SummarySection content={displayContent} readingPolicy={news.body_access_granted ? 'standard' : news.reading_policy} onAskAssistant={chatEnabled ? openAssistant : undefined} />

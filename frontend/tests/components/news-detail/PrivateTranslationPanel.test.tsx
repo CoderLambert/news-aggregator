@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import PrivateTranslationPanel from '@/components/news-detail/PrivateTranslationPanel'
+import { WorkspaceError } from '@/services/workspaceApi'
 import * as models from '@/services/aiConnectionsApi'
 import * as api from '@/services/privateTranslationApi'
 
@@ -21,10 +22,10 @@ const completed: api.PrivateTranslationTask = {
   result: { result_id: 4, task_id: '11111111-1111-4111-8111-111111111111',
     content: '私有中文', scope: 'private', provider: 'deepseek', model: 'Flash' },
 }
-function view(viewer = 7, sourceChars = 100) {
+function view(viewer = 7, sourceMarkdown = 'a'.repeat(100)) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const tree = (id: number) => <QueryClientProvider client={client}><MemoryRouter>
-    <PrivateTranslationPanel viewer={id} newsId={1} sourceRevision={1} sourceChars={sourceChars} />
+    <PrivateTranslationPanel viewer={id} newsId={1} sourceRevision={1} sourceMarkdown={sourceMarkdown} />
   </MemoryRouter></QueryClientProvider>
   return { ...render(tree(viewer)), tree, client }
 }
@@ -71,7 +72,7 @@ describe('T05 private translation', () => {
     expect(api.startPrivateTranslation).not.toHaveBeenCalled()
   })
   it('oversized article is rejected by the UI without truncation or send', async () => {
-    view(7, 8001)
+    view(7, 'a'.repeat(8001))
     await screen.findByRole('option', { name: 'Mine · Flash' })
     fireEvent.change(screen.getByRole('combobox', { name: '翻译模型' }), { target: { value: 'model' } })
     fireEvent.click(screen.getByRole('checkbox'))
@@ -105,6 +106,28 @@ describe('T05 private translation', () => {
     expect(screen.queryByText('私有中文')).not.toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: '翻译模型' })).toHaveValue('')
     expect(screen.getByRole('checkbox')).not.toBeChecked()
+  })
+  it('known admission rejection is actionable and allows fresh explicit consent, never auto retries', async () => {
+    vi.mocked(api.startPrivateTranslation).mockRejectedValue(new WorkspaceError('rejected', 400))
+    view()
+    await screen.findByRole('option', { name: 'Mine · Flash' })
+    fireEvent.change(screen.getByRole('combobox', { name: '翻译模型' }), { target: { value: 'model' } })
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: '开始私有翻译' }))
+    await screen.findByText(/请求未获接受/)
+    expect(screen.queryByText(/提交结果未知/)).not.toBeInTheDocument()
+    expect(api.startPrivateTranslation).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByRole('checkbox'))
+    await waitFor(() => expect(screen.getByRole('button', { name: '开始私有翻译' })).toBeEnabled())
+    expect(api.startPrivateTranslation).toHaveBeenCalledOnce()
+  })
+  it('counts Unicode codepoints consistently with backend and enforces exact boundary', async () => {
+    const boundary = view(7, '😀'.repeat(8000))
+    await screen.findByRole('option', { name: 'Mine · Flash' })
+    expect(screen.queryByText(/原文超过本次短中篇预算/)).not.toBeInTheDocument()
+    boundary.unmount()
+    view(7, '😀'.repeat(8001))
+    expect(screen.getByText(/原文超过本次短中篇预算/)).toBeInTheDocument()
   })
   it('rejects malformed terminal and partial result DTOs', () => {
     expect(() => api.parsePrivateTranslation({ ...completed, result: null })).toThrow()

@@ -3,19 +3,21 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import MarkdownContent from '@/components/news-detail/MarkdownContent'
 import { ConnectionRequestError, listAIConnections, listAIModels } from '@/services/aiConnectionsApi'
+import { WorkspaceError } from '@/services/workspaceApi'
 import { latestPrivateTranslation, startPrivateTranslation } from '@/services/privateTranslationApi'
 
-interface Props { viewer: number; newsId: number; sourceRevision: number; sourceChars: number }
+interface Props { viewer: number; newsId: number; sourceRevision: number; sourceMarkdown: string }
 export default function PrivateTranslationPanel(props: Props) {
   return <TranslationSession key={`${props.viewer}:${props.newsId}:${props.sourceRevision}`} {...props} />
 }
-function TranslationSession({ viewer, newsId, sourceRevision, sourceChars }: Props) {
+function TranslationSession({ viewer, newsId, sourceRevision, sourceMarkdown }: Props) {
   const client = useQueryClient()
   const key = ['private', 'byok-translation', viewer, newsId, sourceRevision] as const
   const [selected, setSelected] = useState('')
   const [consent, setConsent] = useState(false)
   const [sending, setSending] = useState(false)
   const [unknown, setUnknown] = useState(false)
+  const [rejection, setRejection] = useState('')
   const [observing, setObserving] = useState(true)
   const mounted = useRef(true)
   const inFlight = useRef(false)
@@ -43,7 +45,7 @@ function TranslationSession({ viewer, newsId, sourceRevision, sourceChars }: Pro
     refetchInterval: query => observing && ['queued', 'running'].includes(query.state.data?.status ?? '') ? 1000 : false,
   })
   const task = recovery.isError ? null : recovery.data
-  const tooLong = sourceChars > 8000
+  const tooLong = [...sourceMarkdown].length > 8000 || new TextEncoder().encode(sourceMarkdown).length > 32000
   const hidden = models.error instanceof ConnectionRequestError && models.error.status === 403
   const recoverable = task?.status === 'queued'
   const eligible = models.data?.some(model => model.id === selected) === true
@@ -51,17 +53,25 @@ function TranslationSession({ viewer, newsId, sourceRevision, sourceChars }: Pro
     if (inFlight.current || !consent || (!recoverable && (!eligible || task || unknown || tooLong)) || recovery.isPending || recovery.isError) return
     inFlight.current = true
     setSending(true)
+    setRejection('')
     setConsent(false)
     controller.current = new AbortController()
     const requestId = recoverable ? task.request_id : crypto.randomUUID()
     try {
       const result = await startPrivateTranslation(newsId, recoverable ? task.model_config_id : selected, requestId, viewer, controller.current.signal)
       if (mounted.current) { client.setQueryData(key, result); setObserving(true) }
-    } catch {
+    } catch (reason) {
       if (mounted.current) {
-        setUnknown(true)
-        // Reconcile with GET only. Never resubmit a timed-out/lost POST.
-        void recovery.refetch()
+        if (reason instanceof WorkspaceError && [400, 403, 404, 409, 429].includes(reason.status)) {
+          setRejection(reason.status === 429 ? '排队数量达到上限，请稍后重新确认。' :
+            reason.status === 400 ? '请求未获接受，请检查原文预算和模型，再重新确认。' :
+            '权限、模型或任务已变化，请读取最新状态后重新确认。')
+          void recovery.refetch()
+        } else {
+          setUnknown(true)
+          // Reconcile with GET only. Never resubmit a timed-out/lost POST.
+          void recovery.refetch()
+        }
       }
     } finally {
       inFlight.current = false
@@ -93,6 +103,7 @@ function TranslationSession({ viewer, newsId, sourceRevision, sourceChars }: Pro
       {sending ? '正在提交…' : recoverable ? '恢复排队任务' : '开始私有翻译'}
     </button>
     {tooLong && <p role="alert">原文超过本次短中篇预算，请保留完整原文；长文翻译尚未开放。</p>}
+    {rejection && <p role="alert">{rejection}</p>}
     {(unknown && !task) && <p role="alert">提交结果未知。请读取任务状态，不要重复发送收费请求。</p>}
     {recovery.isError && <p role="alert">无法读取当前任务，原文、权限或模型可能已变化。</p>}
     <button type="button" className="ml-3 underline" onClick={() => { setObserving(true); void recovery.refetch() }}>
