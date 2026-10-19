@@ -136,23 +136,26 @@ def _wait_translation_response(read, *, timeout_seconds=12, transient_retry_seco
     retryable_503 = {"credential_unavailable", "task_storage_busy"}
     while monotonic() < deadline:
         response = read()
+        if monotonic() >= deadline:
+            raise AssertionError("translation GET did not reach terminal state before its deadline")
         if response.status_code == 503:
             data = response.data if isinstance(response.data, dict) else {}
-            if data.get("error_code") not in retryable_503:
+            if set(data) != {"error_code"} or data.get("error_code") not in retryable_503:
                 raise AssertionError("translation GET returned a non-retryable HTTP 503")
             if transient_deadline is None:
-                transient_deadline = monotonic() + transient_retry_seconds
+                transient_deadline = min(monotonic() + transient_retry_seconds, deadline)
             remaining = transient_deadline - monotonic()
             if remaining <= 0:
                 raise AssertionError("translation GET remained HTTP 503 past its retry deadline")
-            sleep(min(interval, remaining, deadline - monotonic()))
+            sleep_for = max(0.0, min(interval, remaining, deadline - monotonic()))
+            sleep(sleep_for)
             continue
         if response.status_code != 200:
             raise AssertionError(f"translation GET returned HTTP {response.status_code}")
         data = response.data
         if data["status"] not in {"queued", "running"}:
             return data
-        sleep(min(interval, deadline - monotonic()))
+        sleep(max(0.0, min(interval, deadline - monotonic())))
     raise AssertionError("translation GET did not reach terminal state before its deadline")
 
 
@@ -199,11 +202,22 @@ def test_translation_poll_retries_only_classified_get_contention():
     assert terminal["status"] == "failed"
     assert len(terminal_calls) == 1
 
+    current[0] = 0.0
+    slow_calls = []
+    def slow_success():
+        slow_calls.append(1)
+        current[0] += 13.0
+        return SimpleNamespace(status_code=200, data={"status": "succeeded"})
+    with pytest.raises(AssertionError, match="deadline"):
+        _wait_translation_response(slow_success, monotonic=clock, sleep=sleep)
+    assert len(slow_calls) == 1
+
     for status, data in (
         (403, {"error_code": "permission_denied"}),
         (409, {"error_code": "model_changed"}),
         (500, {"error_code": "internal_error"}),
         (503, {"error_code": "provider_credential_unavailable"}),
+        (503, {"error_code": "task_storage_busy", "retry_after": 1}),
     ):
         current[0] = 0.0
         immediate_calls = []
