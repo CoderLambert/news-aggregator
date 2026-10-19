@@ -754,6 +754,7 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
                 "T00_T09_RESEARCH_NO_FINISH_A",
                 "T00_T09_RESEARCH_TRUNCATED_A",
                 "T00_T09_RESEARCH_HTTP_ERROR_A",
+                "T00_T09_RESEARCH_INCOMPLETE_A",
             )
             expected_provider_key_hash = upstream.provider_key_sha256(provider_key)
             with upstream.LOCK:
@@ -838,6 +839,22 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
                     assert run.session.messages == []
                     assert '"type": "complete"' not in wire
                     assert ResearchRun.objects.get(pk=run.pk).status == "failed"
+
+                # A proven but incomplete raw terminal must remain visibly
+                # incomplete through the Proxy and never commit a report.
+                marker = "T00_T09_RESEARCH_INCOMPLETE_A"
+                run, wire = run_t09(marker, "failed")
+                row = _assert_native_deepseek_request(
+                    _records(upstream_url, marker), marker=marker, stream=False,
+                    terminal="finish_reason_length", owner_key_match=True,
+                )
+                assert row["upstream_raw_body_complete"] is True
+                assert row["upstream_raw_http_status"] == 200
+                assert row["upstream_raw_terminal_present"] is True
+                assert row["upstream_raw_finish_reason"] == "length"
+                assert run.session.messages == []
+                assert '"type": "complete"' not in wire
+                assert ResearchRun.objects.get(pk=run.pk).status == "failed"
 
     finally:
         with upstream.LOCK:

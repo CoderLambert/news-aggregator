@@ -1,9 +1,11 @@
-"""Fail-closed request-scoped BYOK key guard and verified T04 stream boundary.
+"""Fail-closed BYOK key admission and original Chat terminal verification.
 
 Only the exact pinned DeepSeek Flash alias is stream-enabled, via the native
 DeepSeek Chat Completions parser. A pinned Router
 boundary retains the original 1.105.0 provider wrapper for the whole-iterator
 hook's terminal check; unknown routes, wrappers, or versions fail closed.
+Non-stream Chat terminals are checked against the pinned request-local original
+response before trusting LiteLLM normalization. Native protocols remain separate.
 """
 from __future__ import annotations
 
@@ -25,6 +27,7 @@ DENY_STREAM_ENV = "BYOK_DENY_STREAMING_CALL_TYPES"
 _STREAM_FALSE_STRINGS = frozenset({"0", "false", "f", "no", "n", "off"})
 _URL_OVERRIDE_FIELDS = frozenset({"api_base", "base_url", "api_url", "url"})
 _TERMINAL_ERROR = {"code": "T00_STREAM_TERMINAL_UNVERIFIED"}
+_COMPLETION_TERMINAL_ERROR = {"code": "BYOK_COMPLETION_TERMINAL_UNVERIFIED"}
 _ROUTER_RAW_SOURCE_ATTR = "_byok_raw_terminal_source"
 _ROUTER_PROVENANCE_TOKEN_ATTR = "_byok_terminal_provenance_token"
 _ROUTER_PATCH_MARKER = "_byok_terminal_provenance_patch"
@@ -639,6 +642,58 @@ async def _aclose_stream(value):
 
 
 class ProviderKeyGuard(CustomLogger):
+    async def async_post_call_success_hook(self, data, user_api_key_dict, response):
+        # Native Responses/Messages and streaming have their own terminal
+        # contracts. A normalized Chat completion can invent a default stop;
+        # verify the request-local original body retained by the pinned Proxy.
+        if _stream_requested(data.get("stream")):
+            return response
+        try:
+            from litellm import ModelResponse
+        except Exception:
+            raise HTTPException(status_code=502, detail=_COMPLETION_TERMINAL_ERROR) from None
+        if not isinstance(response, ModelResponse):
+            return response
+        try:
+            import json
+            from litellm.litellm_core_utils.litellm_logging import Logging
+
+            if importlib.metadata.version("litellm") != "1.105.0":
+                raise ValueError
+            log = data.get("litellm_logging_obj")
+            if not isinstance(log, Logging):
+                raise ValueError
+            details = log.model_call_details
+            if details.get("log_event_type") not in {"post_api_call", "successful_api_call"}:
+                raise ValueError
+
+            def unique_object(pairs):
+                result = {}
+                for name, value in pairs:
+                    if name in result:
+                        raise ValueError
+                    result[name] = value
+                return result
+
+            raw = json.loads(details["original_response"], object_pairs_hook=unique_object)
+            if type(raw) is not dict or raw.get("error") is not None:
+                raise ValueError
+            choices = raw.get("choices")
+            if type(choices) is not list or len(choices) != 1 or type(choices[0]) is not dict:
+                raise ValueError
+            reason = choices[0].get("finish_reason")
+            normalized = getattr(response, "choices", None)
+            # Preserve explicit incomplete/refusal terminals for callers to
+            # reject as such; proving a terminal is not declaring success.
+            if (reason not in ("stop", "tool_calls", "length", "content_filter", "function_call")
+                    or not isinstance(normalized, (list, tuple)) or len(normalized) != 1
+                    or getattr(normalized[0], "finish_reason", None) != reason):
+                raise ValueError
+        except Exception:
+            # Never expose original provider output, request details or Key.
+            raise HTTPException(status_code=502, detail=_COMPLETION_TERMINAL_ERROR) from None
+        return response
+
     async def async_pre_call_hook(
         self,
         user_api_key_dict,

@@ -84,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
     prompt_markers = {
         "news": f"T00G_PRIVATE_PROMPT_NEWS_{secrets.token_hex(6)}",
         "cli": f"T00G_PRIVATE_PROMPT_CLI_{secrets.token_hex(6)}",
+        "missing_raw_terminal": f"T00G_PRIVATE_PROMPT_MISSING_RAW_TERMINAL_{secrets.token_hex(6)}",
     }
 
     def check(name: str, passed: bool, facts: dict | None = None) -> None:
@@ -457,6 +458,32 @@ def main(argv: list[str] | None = None) -> int:
             }
             check("TEST_GUARD_OBSERVES_EXPECTED_PROVIDER_KEY_VALUES", all(observed_provider_key_labels.values()),
                   {"matched_project_labels": [label for label, matched in observed_provider_key_labels.items() if matched]})
+
+            before_raw = app_request("newshub-test-client", "test-upstream", "/test/records")
+            raw_count = len(before_raw.body.get("records", []))
+            missing_raw = request_call("newshub-test-client", NEWS_MODEL, provider_keys["news"],
+                prompt_markers["missing_raw_terminal"], project_keys["news"])
+            after_raw = app_request("newshub-test-client", "test-upstream", "/test/records")
+            raw_rows = after_raw.body.get("records", [])
+            raw_rejected = (
+                missing_raw.status == 502
+                and marker_in(missing_raw, "BYOK_COMPLETION_TERMINAL_UNVERIFIED")
+                and len(raw_rows) == raw_count + 1
+                and raw_rows[-1].get("raw_finish_reason_present") is False
+                and raw_rows[-1].get("provider_label") == "news-provider"
+            )
+            check("MISSING_RAW_TERMINAL_REJECTED_IN_FIXED_IMAGE", raw_rejected,
+                  {"http_status": missing_raw.status, "upstream_count_before": raw_count,
+                   "upstream_count_after": len(raw_rows)})
+            error_logs = compose("logs", "--no-color", "proxy", "test-upstream", timeout=30)
+            error_text = missing_raw.raw + error_logs.stdout.decode("utf-8", errors="replace")
+            error_text += error_logs.stderr.decode("utf-8", errors="replace")
+            error_leak = any(value in error_text for value in [
+                master_key, *project_keys.values(), *provider_keys.values(),
+                TEST_DEPLOYMENT_PLACEHOLDER_KEY, *prompt_markers.values(),
+            ])
+            check("MISSING_RAW_TERMINAL_ERROR_REDACTS_CONTENT", error_logs.returncode == 0 and not error_leak,
+                  {"credential_or_prompt_values_found": error_leak})
 
             stopped = compose("stop", "proxy", timeout=40)
             unavailable = app_request("generic-cli-consumer", "proxy", "/health/readiness")

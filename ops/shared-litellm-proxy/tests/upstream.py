@@ -140,8 +140,13 @@ class Handler(BaseHTTPRequestHandler):
                 for item in payload.get("messages", [])
                 if isinstance(item, dict)
             ]
+            missing_raw_terminal = any(
+                isinstance(value, str) and value.startswith("T00G_PRIVATE_PROMPT_MISSING_RAW_TERMINAL_")
+                for value in message_values
+            )
             record = {
                 "ordinal": len(RECORDS) + 1,
+                "raw_finish_reason_present": not missing_raw_terminal,
                 "model": payload.get("model"),
                 "provider_label": provider_label or alternate_provider_label or "unknown",
                 "authorization_class": (
@@ -203,7 +208,7 @@ class Handler(BaseHTTPRequestHandler):
                     {
                         "index": 0,
                         "message": {"role": "assistant", "content": "synthetic gateway response"},
-                        "finish_reason": "stop",
+                        **({} if missing_raw_terminal else {"finish_reason": "stop"}),
                     }
                 ],
                 "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10},

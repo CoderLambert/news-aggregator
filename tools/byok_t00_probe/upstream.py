@@ -601,10 +601,11 @@ class Handler(BaseHTTPRequestHandler):
             "upstream_raw_finish_reason": (
                 "tool_calls" if upstream_terminal == "tool_call_turn"
                 else "stop" if upstream_terminal == "finish_reason_stop"
+                else "length" if upstream_terminal == "finish_reason_length"
                 else None
             ),
             "upstream_raw_terminal_present": upstream_terminal in {
-                "tool_call_turn", "finish_reason_stop",
+                "tool_call_turn", "finish_reason_stop", "finish_reason_length",
             },
             "continuation_facts": history_facts(self.path, request),
             "upstream_stream_events_written": 0,

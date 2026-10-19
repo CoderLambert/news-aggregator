@@ -59,3 +59,14 @@ T00 使用独立新建的 Python 3.12.14 SDK/Proxy 环境，按原两份锁文�
 后续使用文件 WAL 的完整联合流程已越过问答、取消、T05/T06 翻译与 T09 正常工具往返；但在原 T09 `NO_FINISH` 负例中，原始上游 JSON 没有 finish_reason，研究却被记为 succeeded。该轮仍为 **FAIL：1 failed / 2 passed**，日志 `t04-file-wal-cold-index-green.log`。这是待修复的原始终态证明问题，不能修改预期为成功、仅依赖 LiteLLM 归一化后的 stop，或以其它矩阵通过覆盖。新的 DeepSeek 真实调用继续等待这条负例修复。
 
 上述统计尾帧/冷索引修复后的三根完整矩阵退出 0：串行 85 passed，并行 2601 passed / 16 skipped；总计 **2686 passed / 16 skipped，2702 个收集/执行身份完全对账**。原始日志 `backend-stream-vector-full.log`，单轮 187 秒，无测试重试。它证明这批源代码回归范围；独立 Django/Proxy 联合负例仍 FAIL，尚不能 Ready/发布或宣称研究终态合同通过。
+
+## 原始非流式终态修复与复核
+
+在后续批次中，现有 `ProviderKeyGuard.async_post_call_success_hook` 验证固定 LiteLLM 1.105.0 的实际请求私有 `Logging` 对象与其原始响应 JSON；拒绝缺失/空终态、重复 JSON 字段、错误响应、多候选、与归一化结果不一致的终态，以及未知版本、伪造字典或未完成调用记录。只返回静态错误代码，不记录原文/Key。明确的 length/content_filter 等原始非成功终态保留，由原业务层拒绝；不新增厂商 adapter、直连或付费重试。
+
+- Guard 定向单元：修复前 31 个测试中有 15 个负例 subtest 失败；修复后 31 个测试通过。日志 `raw-completion-guard-red.log`、`raw-completion-guard-preserve-length.log`。整个 shared gateway 静态/CLI/guard pytest 共 35 passed，日志 `shared-gateway-tests-final.log`。
+- 第一版 guard 过度拒绝已明确给出 length 的响应，原 T00 检查如实报 238 passed / 1 failed（`t00-raw-terminal-proof.log`）。修正为保留已证明的非成功终态后，原 239 项全部通过，没有改旧截断断言。新增通用 Chat alias 的缺原始终态拒绝及上游恰好一次派发验证，最终 **241 / 241 PASS**，日志 `t00-raw-terminal-generic.log`，报告 `/tmp/newshub-t00-acceptance-20261020/raw-terminal-generic-report.json`。
+- 原 Django/SDK/Proxy 联合流程 **3 passed**；再新增明确 length 的研究负例，验证真实 raw finish_reason=length 存在、SDK保留该状态、研究仍失败且无完成事件/会话报告，最终 **3 passed in 30.07s**（`t04-raw-terminal-length-evidence.log`）。原上游脱敏 recorder 补齐 length 的事实字段；缺终态等旧负例断言不变。
+- 固定 digest 的真实容器镜像已跑原 T00-G 合成运维流程，**26 checks PASS**，包含两项目 Key、路由隔离、日志、重启、备份恢复与清理；零真实 Provider。日志 `t00g-fixed-image-raw-terminal.log`。新增该镜像缺原始终态/恰好一次请求/错误不泄密的用例后，**28 checks PASS、退出 0、cleanup=0**（`t00g-fixed-image-negative-terminal.log`）：HTTP 502，上游从 2 次变 3 次，确认为恰好一次派发，无秘密/提示泄漏。没有以 Python Proxy 进程结果代替镜像级结果。
+
+上述当前结果修复了前节 NO_FINISH 的误成功；最终合并后镜像/G1 与有界 DeepSeek 真实调用仍待继续。正式 GitHub CI、生产和人工 UAT 继续分别保留状态。
