@@ -11,7 +11,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
-from api.services.ai_gateway import AIGatewayError, _gateway_configuration
+from api.services.ai_gateway import AIGatewayError, ARTICLE_CHAT_SUPPORTED_ALIAS, _gateway_configuration
 
 MAX_RESPONSE_BYTES = 64 * 1024
 TIMEOUT_SECONDS = 15
@@ -122,6 +122,10 @@ def parse_completion(status_code, headers, raw, probe_kind):
 
 
 def _payload(model_alias, probe_kind, provider_key):
+    # Flash defaults to thinking, which rejects named tool_choice and can use
+    # the probe's tiny output budget before producing a final text response.
+    # These explicit capability checks need text/tools, not private reasoning.
+    options = {'thinking': {'type': 'disabled'}} if model_alias == ARTICLE_CHAT_SUPPORTED_ALIAS else {}
     if probe_kind == 'tools':
         return {
             'model': model_alias, 'stream': False, 'max_tokens': 32,
@@ -133,11 +137,13 @@ def _payload(model_alias, probe_kind, provider_key):
                                'required': ['ok'], 'additionalProperties': False}}}],
             'tool_choice': {'type': 'function', 'function': {'name': 'byok_probe'}},
             'api_key': provider_key,
+            **options,
         }
     return {
         'model': model_alias, 'stream': False, 'max_tokens': 8,
         'messages': [{'role': 'user', 'content': 'Reply with one short word confirming text output.'}],
         'api_key': provider_key,
+        **options,
     }
 
 
