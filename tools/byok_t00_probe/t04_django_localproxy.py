@@ -53,12 +53,24 @@ def _stats(url):
 
 def _wait_record(url, marker, predicate, timeout=8):
     deadline = time.monotonic() + timeout
+    rows = []
     while time.monotonic() < deadline:
         rows = [row for row in _stats(url)["records"] if row.get("test_id") == marker]
         if rows and predicate(rows[-1]):
             return rows[-1]
         time.sleep(0.03)
-    pytest.fail("synthetic upstream did not reach the expected bounded state: " + marker)
+    # Report only synthetic lifecycle facts, never request text or credentials.
+    diagnostic_fields = (
+        "stream_hold_waiting", "stream_hold_released", "stream_hold_timed_out",
+        "stream_hold_peer_close_state", "client_disconnected", "producer_exit_reason",
+        "upstream_stream_events_written", "upstream_stream_body_finished",
+        "upstream_protocol_done_sentinel_written",
+    )
+    diagnostic = {name: rows[-1].get(name) for name in diagnostic_fields} if rows else {}
+    pytest.fail(
+        "synthetic upstream did not reach the expected bounded state: "
+        + marker + " " + json.dumps(diagnostic, sort_keys=True)
+    )
 
 
 def _records(url, marker):
@@ -281,6 +293,7 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
                 stream=True, terminal="finish_reason_stop",
             )
             assert success_row["stream_hold_released"] is True
+            assert success_row["client_disconnected"] is False
             assert success_row["upstream_stream_body_finished"] is True
             turn_row = ArticleChatTurn.objects.get(pk=turn)
             assert turn_row.status == "complete"
@@ -315,19 +328,17 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
             )
             assert held_close["upstream_stream_body_finished"] is False
             close_response.close()
-            release_close = urllib.request.Request(
-                upstream_url + "/test/release",
-                data=json.dumps({"test_id": close_marker}).encode(),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with OPENER.open(release_close, timeout=3) as released:
-                assert json.load(released)["released"] is True
+            # Do not release the terminal to infer closure from a failed write.
+            # Require direct peer EOF/reset while the provider is still held.
             closed_row = _wait_record(
                 upstream_url, close_marker,
-                lambda row: row.get("client_disconnected") is True,
+                lambda row: row.get("stream_hold_peer_close_state") in {"eof", "reset"},
             )
             assert closed_row["client_disconnected"] is True
+            assert closed_row["producer_exit_reason"] == "client_disconnect"
+            assert not closed_row.get("stream_hold_released", False)
+            assert not closed_row.get("upstream_stream_body_finished", False)
+            assert not closed_row.get("upstream_protocol_done_sentinel_written", False)
             assert '"status": "complete"' not in "".join(close_chunks)
             assert '"type": "chat_model"' not in "".join(close_chunks)
             assert provider_key not in "".join(close_chunks)

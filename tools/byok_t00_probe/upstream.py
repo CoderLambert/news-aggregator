@@ -895,11 +895,24 @@ class Handler(BaseHTTPRequestHandler):
                             (record or {}).get("test_id", ""), threading.Event(),
                         )
                         record["stream_hold_waiting"] = True
-                    # The API test observes this explicit barrier only after it
-                    # has received the first delta, then releases the terminal.
-                    if not event.wait(timeout=10.0):
-                        record["stream_hold_timed_out"] = True
-                        return
+                    # Success still requires explicit release after the first
+                    # delta. A close must be proved before terminal writes: small
+                    # writes after peer FIN can succeed in local TCP buffers.
+                    hold_deadline = time.monotonic() + 10.0
+                    while not event.is_set():
+                        peer_state = observe_peer_close(self.connection, timeout=0.05)
+                        if peer_state in {"eof", "reset"}:
+                            record["stream_hold_peer_close_monotonic_ns"] = time.monotonic_ns()
+                            record["client_disconnected"] = True
+                            record["upstream_disconnect_monotonic_ns"] = time.monotonic_ns()
+                            record["producer_exit_reason"] = "client_disconnect"
+                            self.close_connection = True
+                            record["stream_hold_peer_close_state"] = peer_state
+                            return
+                        record["stream_hold_peer_close_state"] = peer_state
+                        if time.monotonic() >= hold_deadline:
+                            record["stream_hold_timed_out"] = True
+                            return
                     record["stream_hold_released"] = True
                 if cancel and index == 0:
                     if record is not None:

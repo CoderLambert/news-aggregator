@@ -57,6 +57,19 @@ class ProbeContracts(unittest.TestCase):
             upstream_socket.close()
             client_socket.close()
 
+    def test_peer_probe_does_not_treat_readable_data_as_closure(self):
+        upstream_socket, client_socket = socket.socketpair()
+        try:
+            client_socket.sendall(b"x")
+            self.assertEqual(upstream.observe_peer_close(upstream_socket, 0.5), "data")
+            self.assertEqual(upstream_socket.recv(1), b"x")
+            self.assertEqual(upstream.observe_peer_close(upstream_socket, 0.02), "timeout")
+            client_socket.shutdown(socket.SHUT_WR)
+            self.assertEqual(upstream.observe_peer_close(upstream_socket, 0.5), "eof")
+        finally:
+            upstream_socket.close()
+            client_socket.close()
+
     def test_isolated_environment_drops_keys_proxy_and_database(self):
         with patch.dict(os.environ, {"OPENAI_API_KEY": "synthetic", "ANTHROPIC_API_KEY": "synthetic", "DATABASE_URL": "synthetic", "HTTPS_PROXY": "synthetic", "LITELLM_MASTER_KEY": "synthetic"}):
             env = local_runtime.isolated_env()
