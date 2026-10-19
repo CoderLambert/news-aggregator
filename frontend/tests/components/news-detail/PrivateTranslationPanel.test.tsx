@@ -116,7 +116,7 @@ describe('T05 private translation', () => {
     fireEvent.click(screen.getByRole('button', { name: '开始私有翻译' }))
     await screen.findByText(/请求未获接受/)
     expect(screen.queryByText(/提交结果未知/)).not.toBeInTheDocument()
-    expect(screen.getByText(/原文可能超出预算，或含暂不支持的嵌套、引用代码围栏/)).toBeInTheDocument()
+    expect(screen.getByText(/原文可能超出预算，或包含暂不支持的引用围栏、列表行内围栏或四格及以上缩进围栏/)).toBeInTheDocument()
     expect(api.startPrivateTranslation).toHaveBeenCalledOnce()
     fireEvent.click(screen.getByRole('checkbox'))
     await waitFor(() => expect(screen.getByRole('button', { name: '开始私有翻译' })).toBeEnabled())

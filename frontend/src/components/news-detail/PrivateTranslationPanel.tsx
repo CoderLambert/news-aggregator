@@ -64,7 +64,7 @@ function TranslationSession({ viewer, newsId, sourceRevision, sourceMarkdown }: 
       if (mounted.current) {
         if (reason instanceof WorkspaceError && [400, 403, 404, 409, 429].includes(reason.status)) {
           setRejection(reason.status === 429 ? '排队数量达到上限，请稍后重新确认。' :
-            reason.status === 400 ? '请求未获接受：原文可能超出预算，或含暂不支持的嵌套、引用代码围栏。请检查完整 Markdown 后重新确认。' :
+            reason.status === 400 ? '请求未获接受：原文可能超出预算，或包含暂不支持的引用围栏、列表行内围栏或四格及以上缩进围栏。请检查完整 Markdown 后重新确认。' :
             '权限、模型或任务已变化，请读取最新状态后重新确认。')
           void recovery.refetch()
         } else {
