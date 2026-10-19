@@ -81,6 +81,7 @@ def body_authorized_news(user, queryset=None):
     # A current body owner does not erase the origin of previously accepted bytes.
     origin_link = links.filter(source_id=OuterRef('full_content_provenance__source_id'))
     origin_entry = EngineEntryMap.objects.filter(news_id=OuterRef('pk'),
+        source_url=OuterRef('url'),
         binding_id=OuterRef('body_owner_binding_id'),
         engine_entry_id=OuterRef('full_content_provenance__engine_entry_id'), disposition='linked')
     qs = qs.alias(_rss_body_link=Exists(links), _rss_origin_link=Exists(origin_link),
