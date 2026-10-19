@@ -1812,13 +1812,14 @@ def test_g2_http_api_matrix_requires_full_accounts_and_blocks_private_ai_anonymo
                 header_file.write_text('Set-Cookie: csrftoken=fixture; Path=/; SameSite=Lax; Secure\n', encoding='utf-8')
         elif name == 'capabilities':
             enabled = ('accounts', 'signup', 'favorites', 'blocked_news', 'chat_history')
-            disabled = ('chat', 'provider_comparisons', 'translation', 'tts')
+            disabled = ('chat', 'translation', 'tts')
             body = json.dumps({
                 'site_mode': 'full',
                 'chatgpt_auth_mode': 'disabled',
                 'features': {
                     **{key: {'enabled': True} for key in enabled},
                     **{key: {'enabled': False, 'reason': 'ai_disabled'} for key in disabled},
+                    'provider_comparisons': {'enabled': False, 'reason': 'legacy_ingestion_retired'},
                     'research': {
                         'enabled': False,
                         'reason': 'hosted_integration_unapproved',

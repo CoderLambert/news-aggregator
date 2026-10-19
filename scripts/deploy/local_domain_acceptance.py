@@ -1139,13 +1139,17 @@ def _check_http_api(args: argparse.Namespace, checks: dict[str, str], work_dir: 
                 isinstance(features.get(name), dict) and features[name].get('enabled') is True,
                 f'G2 capability {name} was not enabled',
             )
-        for name in ('chat', 'provider_comparisons', 'translation', 'tts'):
+        for name in ('chat', 'translation', 'tts'):
             _require(
                 isinstance(features.get(name), dict)
                 and features[name].get('enabled') is False
                 and features[name].get('reason') == 'ai_disabled',
                 f'G2 AI capability {name} was not explicitly disabled',
             )
+        _require(
+            features.get('provider_comparisons') == {'enabled': False, 'reason': 'legacy_ingestion_retired'},
+            'G2 collector comparison capability was not explicitly retired',
+        )
         _require(
             isinstance(features.get('research'), dict)
             and features['research'].get('enabled') is False
