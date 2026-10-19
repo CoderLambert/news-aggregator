@@ -1245,3 +1245,21 @@ class NewsPreference(models.Model):
 
 from api.rss.reading_models import NewsReadState  # noqa: E402,F401
 from api.rss.import_models import RssImportBatch, RssImportItem  # noqa: E402,F401
+
+
+class PrivateSuggestedQuestions(models.Model):
+    user = models.ForeignKey('auth.User', on_delete=models.CASCADE)
+    news = models.ForeignKey(News, on_delete=models.CASCADE)
+    source_hash = models.CharField(max_length=64)
+    execution_digest = models.CharField(max_length=64)
+    prompt_version = models.PositiveSmallIntegerField(default=1)
+    questions = models.JSONField(default=list)
+    model_source = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=['user', 'news', 'source_hash', 'execution_digest', 'prompt_version'],
+            name='private_suggestions_identity',
+        )]

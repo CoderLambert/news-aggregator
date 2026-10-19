@@ -7,6 +7,8 @@ import { useSuggestedQuestions } from '@/hooks/useSuggestedQuestions'
 import * as api from '@/services/newsWorkflowApi'
 
 vi.mock('@/services/newsWorkflowApi', () => ({ fetchSuggestedQuestions: vi.fn() }))
+const preferences = vi.hoisted(() => ({ listAITaskPreferences: vi.fn() }))
+vi.mock('@/services/aiConnectionsApi', () => preferences)
 
 function snapshot(questions, contextScope = 'summary') {
   return { questions, contextScope, revision: 0, generated: true }
@@ -22,7 +24,10 @@ function makeWrapper() {
 }
 
 describe('useSuggestedQuestions', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.resetAllMocks()
+    preferences.listAITaskPreferences.mockResolvedValue({ revision: 0, preferences: [] })
+  })
   afterEach(() => vi.restoreAllMocks())
 
   it('does not request generated questions while the panel is closed', async () => {
@@ -74,6 +79,25 @@ describe('useSuggestedQuestions', () => {
     expect(api.fetchSuggestedQuestions).toHaveBeenCalledOnce()
   })
 
+  it('reads private suggestions without billing and requires explicit consent to generate', async () => {
+    preferences.listAITaskPreferences.mockResolvedValue({ revision: 1, preferences: [{
+      task_kind: 'question_suggestions', selection_state: 'available', model_config_id: 'own-model',
+      model: { model_id: 'deepseek-chat', display_name: 'Personal' },
+    }] })
+    api.fetchSuggestedQuestions.mockResolvedValue(snapshot(['cached']))
+    const { result } = renderHook(() => useSuggestedQuestions('42', true), { wrapper: makeWrapper() })
+    await waitFor(() => expect(result.current.questions).toEqual(['cached']))
+    expect(api.fetchSuggestedQuestions).toHaveBeenCalledWith(42, {
+      modelConfigId: 'own-model', signal: expect.any(AbortSignal),
+    })
+    await act(() => result.current.refresh())
+    expect(api.fetchSuggestedQuestions).toHaveBeenCalledTimes(1)
+    await act(() => result.current.refresh(true))
+    expect(api.fetchSuggestedQuestions).toHaveBeenLastCalledWith(42, {
+      force: true, modelConfigId: 'own-model', consent: true, signal: expect.any(AbortSignal),
+    })
+  })
+
   it('forces a new question request only after an explicit refresh', async () => {
     api.fetchSuggestedQuestions.mockResolvedValueOnce(snapshot(['old1', 'old2', 'old3'])).mockResolvedValueOnce(snapshot(['new1', 'new2', 'new3']))
     const { result } = renderHook(() => useSuggestedQuestions('42', true), { wrapper: makeWrapper() })
@@ -100,7 +124,10 @@ describe('useSuggestedQuestions', () => {
 describe('suggestion metadata and revision cache boundaries', () => {
   // The previous describe block owns its own beforeEach; its mock calls
   // must not leak into this independent revision-cache regression.
-  beforeEach(() => vi.resetAllMocks())
+  beforeEach(() => {
+    vi.resetAllMocks()
+    preferences.listAITaskPreferences.mockResolvedValue({ revision: 0, preferences: [] })
+  })
   it('re-queries after article content revision changes', async () => {
     api.fetchSuggestedQuestions.mockResolvedValueOnce(snapshot(['old']))
       .mockResolvedValueOnce(snapshot(['revised'], 'excerpt'))
