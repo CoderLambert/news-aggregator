@@ -183,6 +183,10 @@ class SelfHostedCIContract(unittest.TestCase):
         self.assertIn("tools/byok_t00_probe/t04_django_localproxy.py", t00_run)
         self.assertIn("env -i", t00_run)
         self.assertIn("DJANGO_ENV=production", t00_run)
+        # pytest-django imports settings before function-level overrides run.
+        # Keep the isolated bootstrap valid without relaxing production hosts.
+        self.assertIn("DJANGO_ALLOWED_HOSTS=news.lambert.host ", t00_run)
+        self.assertNotIn("DJANGO_ALLOWED_HOSTS=testserver", t00_run)
         self.assertIn('T00_PROXY_PYTHON="$t00_env/proxy/bin/python"', t00_run)
         self.assertIn('trap \'rm -rf "$t00_env"\' EXIT', t00_run)
         self.assertNotIn("|| true", t00_run)
