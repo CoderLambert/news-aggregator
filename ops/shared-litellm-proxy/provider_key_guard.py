@@ -1,6 +1,7 @@
 """Fail-closed request-scoped BYOK key guard and verified T04 stream boundary.
 
-Only the exact pinned DeepSeek Chat route is stream-enabled. A pinned Router
+Only the exact pinned DeepSeek Flash alias is stream-enabled, via the native
+DeepSeek Chat Completions parser. A pinned Router
 boundary retains the original 1.105.0 provider wrapper for the whole-iterator
 hook's terminal check; unknown routes, wrappers, or versions fail closed.
 """

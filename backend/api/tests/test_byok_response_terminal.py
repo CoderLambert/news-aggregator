@@ -8,7 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from api.services.ai_gateway import AIGatewayError, _GatewayCompletions
+from api.services.ai_gateway import (
+    AIGatewayError, ARTICLE_CHAT_SUPPORTED_ALIAS, _GatewayCompletions,
+)
 
 
 class SyntheticGateway:
@@ -35,18 +37,18 @@ class SyntheticStream:
         self.closed = True
 
 
-def test_exact_deepseek_stream_is_forwarded_without_buffering_or_retry():
+def test_exact_t04_flash_stream_is_forwarded_without_buffering_or_retry():
     stream = SyntheticStream()
     fake = SyntheticGateway(stream)
     adapter = _GatewayCompletions(fake, "only-synthetic-provider-key")
     returned = adapter.create(
-        stream=True, model="deepseek/deepseek-chat",
+        stream=True, model=ARTICLE_CHAT_SUPPORTED_ALIAS,
         messages=[{"role": "user", "content": "synthetic"}],
     )
     assert returned is stream
     assert fake.calls == [{
         "stream": True,
-        "model": "deepseek/deepseek-chat",
+        "model": ARTICLE_CHAT_SUPPORTED_ALIAS,
         "messages": [{"role": "user", "content": "synthetic"}],
         "extra_body": {"api_key": "only-synthetic-provider-key"},
     }]
@@ -57,7 +59,7 @@ def test_exact_deepseek_stream_is_forwarded_without_buffering_or_retry():
 
 
 @pytest.mark.parametrize("model", [
-    "deepseek/other", "openai/gpt-test", "deepseek/*",
+    "deepseek/deepseek-chat", "deepseek/other", "openai/gpt-test", "deepseek/*",
 ])
 def test_other_model_stream_is_rejected_before_dispatch(model):
     fake = SyntheticGateway(SyntheticStream())

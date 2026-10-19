@@ -815,7 +815,16 @@ class Handler(BaseHTTPRequestHandler):
     def _chat_stream(self, model, eof=False, error=False, incomplete=False, record=None,
                      cancel=False, *, stop_clean_eof=False, no_stop_done=False, stream_hold=False):
         def chunk(delta, finish=None):
-            return {"id": "chatcmpl_t00_synthetic", "object": "chat.completion.chunk", "created": 1, "model": model, "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
+            payload = {
+                "id": "chatcmpl_t00_synthetic", "object": "chat.completion.chunk",
+                "created": 1, "model": model,
+                "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+            }
+            if model == "deepseek-flash":
+                # The pinned native route may send null usage on ordinary
+                # deltas; only the final same-frame fixture supplies usage.
+                payload["usage"] = None
+            return payload
 
         events = [("message", chunk({"role": "assistant"})), ("message", chunk({"content": "synthetic t00 stream"}))]
         if (not eof or stop_clean_eof) and not error and not no_stop_done:

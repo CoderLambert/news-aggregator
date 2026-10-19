@@ -59,6 +59,13 @@ describe('T04 owner-only per-turn model picker', () => {
     expect(api.probeAIModel).not.toHaveBeenCalled()
     expect(screen.queryByRole('checkbox', { name: /产生服务商费用/ })).not.toBeInTheDocument()
   })
+  it('names the exact supported streaming model when none are eligible', async () => {
+    vi.mocked(api.listAIModels).mockResolvedValue([unsupportedForArticleChat])
+    render(<Harness />)
+    expect(await screen.findByText(/此用途暂只支持已验证的 DeepSeek Flash 流式路径/)).toBeInTheDocument()
+    expect(screen.queryByText(/DeepSeek Chat 流式路径/)).not.toBeInTheDocument()
+  })
+
   it('requires explicit consent and clears it upon model change', async () => {
     render(<Harness />)
     await screen.findByRole('option', { name: 'My BYOK · Verified model' })
