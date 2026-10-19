@@ -170,6 +170,13 @@ RSS T14 已合并 [#142](https://github.com/CoderLambert/news-aggregator/pull/14
 - 53 项后端检查与 58 个 subtest 通过（真实临时 SQLite，包含 T02/T03、地域/手填模型、native 协议/continuation、受控 HTTP）；Node 22 下 typecheck、lint（1 个既有 warning）、前端定向 28 项及 build 通过。前端首次测试因只读 node_modules/.vite-temp 无法启动，追加容器 tmpfs 后只运行尚未执行的测试/build。依赖缓存只读，无安装、真实数据、Key 或 Provider 请求。完整 CI、真实模型与浏览器验收待最终集中执行。
 - 用户新目标已授权开发完成后集中验收，并允许使用先前 DeepSeek Key；此前的延期记录仅描述旧批次，不阻止新授权范围的有界调用。生产执行仍延期，其他厂商真实 Key/人工结论另列最终清单；本条不声称真实验收已执行。
 
+### BYOK T03 用途可用状态与实际执行一致（2026-10-20）
+
+- 基线 `main@8a295a7`。对照 T03 的可用选择与 T04/T05 的严格流式入口，发现“已有文本回执但没有受支持流式路由”的模型仍能保存为问答/全文翻译用途，且旧偏好 GET 错误显示 available。先在实际 SQLite 中复现两用途解析不拒绝、旧记录回读误报，再统一设置页筛选、后端保存/解析和快照核验。
+- 现这两种用途必须满足当前业务入口的严格路由约束；不兼容的显式选择返回 model_task_unavailable、旧记录 needs_reselection。非流式研究/问题推荐仍按其各自能力证明使用同一模型；默认模型不被扩大为无条件支持所有用途。没有放宽 streaming、增加协议适配器或删除历史记录。
+- 成功审计回执新增当前 proxy_alias 的精确核对。T03 旧成功路径 fixture 从本来不能用于 T04 的 deepseek-chat 改为实际支持的 deepseek-flash，其他 owner/版本/撤权/原子保存负例保留；新增错误 alias 回执拒绝及非流式模型跨用途反例。
+- 后端 12 项和 2 个 subtest、前端 6 项通过；Node 22 typecheck、变更文件 ESLint 和 build 通过。复用只读缓存、临时 SQLite、network-none 容器；没有安装依赖、真实 Provider/Key/生产操作。完整联合验收在后续整批统一执行。
+
 | 顺序 | 原编号与目标 | 需要完成的真正差额 | 阶段验收 |
 |---|---|---|---|
 | 第 8 批 A（离线交付已合并） | **BYOK T04 个人模型新闻问答** | T03 + T01 已接入文章阅读器和 per-turn 问答；取消/流式与提交围栏差额由 #118 完成，证据见上；真实验收仍独立保留 | 用户/文章版本/模型尝试/取消/重试负例及 SDK→本地 Proxy→合成上游通过；真实付费上游/UAT `NOT_RUN` |
