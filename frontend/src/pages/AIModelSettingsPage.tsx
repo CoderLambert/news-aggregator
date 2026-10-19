@@ -70,7 +70,7 @@ export function AIConnectionsManager({ viewer }: { viewer: number }) {
   return <div className="workspace-page min-w-0 break-words">
     <Link to="/settings" className="workspace-link">返回设置</Link>
     <header className="workspace-page-heading"><div><h1>个人 AI 连接</h1><p>分别保存和管理多家服务商的 Key；名称、启停、替换和删除均只影响当前账号。</p></div></header>
-    <p className="workspace-soft-panel">本页是唯一个人 API Key 设置入口，不发送模型请求。可以在连接下管理模型并主动验证文本或工具能力；不会在页面打开或保存时收费。可继续在下方明确保存五种用途偏好；当前个人业务调用仍然失败关闭，待 T04 等业务接入后才逐项开放。</p>
+    <p className="workspace-soft-panel">在这里管理个人服务商连接、验证模型能力并保存五种用途偏好。打开页面或保存配置不会调用模型；主动验证、问答、翻译或研究可能产生费用。关闭个人模型调用后，已有调用记录仍可查看。</p>
     {loading && <p role="status">正在读取连接…</p>}
     {error && <p role="alert" className="workspace-error">{error}</p>}
     {notice && <p role="status" className="workspace-notice">{notice}</p>}

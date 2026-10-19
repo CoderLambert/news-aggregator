@@ -12,6 +12,8 @@ def _totals(rows):
 
 
 class AIUsageView(ConnectionView):
+    allow_history_reads = True
+
     def get(self, request):
         if set(request.query_params) - {'lang', 'limit'}:
             return error('invalid_query')

@@ -292,7 +292,10 @@ def _readable(task):
     # credential/model change. Keep the article-content fence, but do not make
     # an already-persisted result disappear when its credential is revoked.
     if task.status in {'succeeded', 'failed', 'cancelled', 'interrupted'}:
-        _enabled()
+        # Disabling inference does not revoke persisted private history. The
+        # site's separate public read-only policy and all content fences remain.
+        if settings.PUBLIC_SITE_MODE != 'full':
+            raise TranslationError('translation_unavailable', 403)
         if (not task.user.is_active or task.api_connection_id is None
                 or task.api_connection.user_id != task.user_id):
             raise TranslationError('execution_changed')

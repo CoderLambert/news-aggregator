@@ -14,6 +14,8 @@ from api.services import ai_private_translation as translation
 
 
 class TranslationView(ConnectionView):
+    allow_history_reads = True
+
     def handle_exception(self, exc):
         if isinstance(exc, translation.TranslationError):
             return error(exc.code, exc.status)
