@@ -1,6 +1,6 @@
 # T31：旧栈清理候选与隔离验收
 
-独立候选已实现并验证，集成状态仍为 IN_PROGRESS：[Draft PR #154](https://github.com/CoderLambert/news-aggregator/pull/154)，源码 `7ff9900b5c2c6cb00c995c96f2187d5fbd64ebec`，基线 `6a2cc025c338ef0308024151be4fbd796f7f3a39`。**真实 T30 停止/重启与关键变更独立复核未完成，不得合并或发布。** main 保留运行兼容代码。原任务允许按合同先独立开发，T30 前置约束集成/完成。
+独立候选已实现并验证，集成状态仍为 IN_PROGRESS：[Draft PR #154](https://github.com/CoderLambert/news-aggregator/pull/154)，当前源码 `8d2c2ce67c08523817a23bafb199f19d8349eaa1`，首次冻结证据源码 `7ff9900b5c2c6cb00c995c96f2187d5fbd64ebec`，基线 `6a2cc025c338ef0308024151be4fbd796f7f3a39`。**真实 T30 停止/重启与关键变更独立复核未完成，不得合并或发布。** main 保留运行兼容代码。原任务允许按合同先独立开发，T30 前置约束集成/完成。
 
 ## 实现与保留边界
 
@@ -11,7 +11,7 @@
 - 清单 v4 显式声明 crawler capability，备份校验同步支持，历史 v1–v3 语义保持。按精确项目/服务标签核对全部 writer 后才停止，包括当前 YAML 不再声明的旧角色；不删除容器或数据卷。只有显式选择历史能力清单才加载兼容角色 overlay，新清单默认不复活旧采集。
 - 部署/回退 `--with-rss` 复用现有 RSS overlay，检查独立镜像同 SHA、非 root 和同步命令，以及同项目已健康的 Miniflux。已有 RSS 却未选该参数时，停止前退出；选择后恢复 RSS 并检查独立镜像/健康，全部成功才切换静态版本。失败保持项目 writer 停止；不创建或升级 Miniflux/PostgreSQL。
 
-## 最终候选证据
+## 首次冻结候选证据（7ff9900）
 
 [机器可读记录](../../../../verification/rss-t31-retirement-2026-10-20.json)含源码/基线、镜像身份、日志摘要、浏览器清理与保留的 NOT_RUN。原始日志位于 `/tmp/newshub-t31-validation-20261020/`。检查使用无 `.env` 工作树、合成数据、Python 3.12 / Node 22、只读依赖缓存；没有复制活动库或追加真实厂商请求。
 
@@ -36,3 +36,26 @@
 - 发布回归先复现现有 RSS 被停止但没有恢复，脚本错误返回 0（`rss-release-lifecycle-red.log`）。新增显式管理与维护前检查后，原负例及恢复/失败用例通过。旧 shell 夹具仍等待已移除的 compose stop：改为验证真实项目标签筛选及每个 Docker stop，保留备份失败和不兼容 schema 拒绝断言，未降低要求。
 
 恢复仍遵循原 [ROLLBACK](../../ROLLBACK.md)，不默认逆迁移或覆盖数据。T31 的集成/完成、生产停止与最终单栈发布门禁继续保留；本报告没有批准这些操作。
+
+
+## 恢复入口补齐与当前冻结证据（8d2c2ce）
+
+复核原 ACCEPTANCE-MATRIX 中的额外 shell 命令与 T26 实际演练发现：RSS 两库恢复只接收 v3 清单、T26 仍复制/导入已删除 crawler 并断言 Scrapy 存在；此外 T03 只恢复应用的回退链必须显式保持 RSS 停止，不能被普通维护流程重新启动。已按原入口修复，不增加第二套恢复实现。
+
+- 严格恢复清单兼容 v3/v4，真实镜像能力替代硬编码旧角色。`recovery.py rollback` 委托现有脚本时显式传入 `--leave-rss-stopped`；要求准确项目/服务标签、RSS 已停止和显式 worker 子集，与 `--with-rss` 互斥。正在运行或身份未知的 RSS 在维护前拒绝，不自动停止并遗漏恢复。
+- T26 继续在历史 0051 ORM 创建合成行，再前向迁移；过渡镜像验证旧写入 fencing，最终镜像验证旧代码缺失。保留 Torch/Chroma/Waitress 与内置前端检查，不要求重装已退役的 Scrapy。现成候选不再读取无关旧构建缓存；构建候选必须明确全应用 base。
+- 实际非 root 镜像恢复后的 SQLite 是受保护文件，原夹具使用不同 UID 而失败。演练容器现在以合成文件所有者运行，未放宽 0600、修改镜像用户或宿主权限。
+- 固定 PostgreSQL 镜像入口的初始化临时服务只有 Unix socket。生产 RSS overlay 与 T00/T03/T26 夹具统一等待 `127.0.0.1` TCP 就绪再启动 Miniflux。原检查负例先 FAIL、修改后 PASS；最终配对演练实际使用该检查。首轮 Miniflux 启动 exit 1 的具体原因缺原始服务日志，仍未证明，不能将这个已证实的就绪风险直接认作该次失败原因。
+
+[本次机器记录](../../../../verification/rss-t31-recovery-followup-2026-10-20.json)包含原始日志摘要、保留失败、两套不同源码镜像及配对恢复结果：
+
+| 当前检查 | 实际结果 |
+| --- | --- |
+| 原三根完整混合矩阵 | 2018 PASS / 16 SKIP，2034 个身份收集/执行对账通过；单轮 166 秒，退出 0，无重试 |
+| 恢复定向与原 shell | 146 PASS / 2 个原 live opt-in SKIP；另 TCP 就绪负例修复后 PASS。标准 release shell、export-static、preflight、local-domain-args 均 PASS；后者的外部工具是 stub，不代替真实浏览器 |
+| 实际应用往返 | 从当前 8d 镜像派生仅改合成标签/环境的夹具，已核对与原镜像 RootFS 完全相同；6 阶段 seed→upgrade→exercise→current→main6a-compatible→current 均 PASS；迁移后的三个应用验证阶段全表指纹一致，正文/私有 ACL/订阅/OPML/阅读状态保留；容器清理通过 |
+| 实际两库恢复 | 真实固定 Miniflux/PG、全新合成目标，v4 清单 backup/restore、运行 writer 拒绝、错误实例零写入拒绝、恢复点后的写入排除、关系/hash/映射及实际应用 ACL 均通过；随后真实增量/全量引擎对账通过，临时容器/网络/卷/凭据清理通过 |
+| 当前生产/RSS 镜像 | 8d revision、非 root、旧代码/包缺失检查均 PASS，具体 image ID 见机器记录 |
+| 前端、SDK、G1/G2 复用 | 已比较 7ff→8d 的 backend/frontend/Dockerfile/基础生产 Compose/域名烟测实现均零差异；复用上表记录的 700 前端测试及 SDK/G1/G2 范围。新的 RSS overlay/恢复行为以本轮真实配对演练证明，不将旧 G1/G2 称作真实引擎/生产验收 |
+
+T33 四项原要求的证据与未满足条件已分别写入 [T33 报告](../T33/report.md)，仍为 PARTIAL。真实副本、同机完整资源窗口、真实 T30/最终集成、独立复核、正式 CI 和发布仍未完成。两台 runner 重新读取仍 offline；生产继续延期，PR 保持 Draft 未合并。
