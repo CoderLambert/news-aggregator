@@ -858,16 +858,90 @@ class PrivateTranslationTests(TransactionTestCase):
             future = pool.submit(service.run_translation, task.pk, task.generation)
             barrier.wait(timeout=5)
             cancel_response = self.cancel(task)
-            self.assertIn(cancel_response.status_code, (200, 409))
+            if cancel_response.status_code == 200:
+                self.assertEqual(set(cancel_response.data), {'task_id', 'status', 'error_code'})
+                self.assertEqual(cancel_response.data['task_id'], str(task.pk))
+                self.assertIn(cancel_response.data['status'], {'cancelled', 'succeeded'})
+                expected_code = 'translation_cancelled' if cancel_response.data['status'] == 'cancelled' else ''
+                self.assertEqual(cancel_response.data['error_code'], expected_code)
+            elif cancel_response.status_code == 409:
+                self.assertEqual(cancel_response.data, {'error_code': 'translation_request_conflict'})
+            elif cancel_response.status_code == 503:
+                # Storage/auth contention means cancellation is NOT_CONFIRMED.
+                # Never count this as a successful cancel or replay the POST.
+                self.assertEqual(set(cancel_response.data), {'error_code'})
+                self.assertIn(cancel_response.data['error_code'],
+                              {'task_storage_busy', 'credential_unavailable'})
+            else:
+                self.fail(f'unexpected cancellation response: {cancel_response.status_code} {cancel_response.data!r}')
             future.result(timeout=10)
         task.refresh_from_db()
         if task.status == 'cancelled':
             self.assertFalse(task.result)
             self.assertFalse(ChatGPTArticleTranslation.objects.filter(task=task).exists())
+            if cancel_response.status_code == 200:
+                self.assertEqual(cancel_response.data['status'], 'cancelled')
         else:
             self.assertEqual(task.status, 'succeeded')
             self.assertTrue(task.result)
-            self.assertTrue(ChatGPTArticleTranslation.objects.filter(task=task).exists())
+            result = ChatGPTArticleTranslation.objects.get(task=task)
+            self.assertEqual(task.result['result_id'], result.pk)
+            self.assertEqual(result.content, '并发完成或取消')
+            if cancel_response.status_code == 200:
+                self.assertEqual(cancel_response.data['status'], 'succeeded')
+        observed = self.client.get(f'/api/me/ai/translations/{task.pk}/')
+        self.assertEqual(observed.status_code, 200, observed.content)
+        self.assertEqual(observed.data['task_id'], str(task.pk))
+        self.assertEqual(observed.data['status'], task.status)
+        if task.status == 'cancelled':
+            self.assertIsNone(observed.data['result'])
+            self.assertFalse(ChatGPTArticleTranslation.objects.filter(task=task).exists())
+        else:
+            self.assertEqual(observed.data['result']['result_id'], task.result['result_id'])
+            self.assertEqual(observed.data['result']['content'], '并发完成或取消')
+        self.assertEqual(len(gateway.sent), 1)
+
+    def test_t07_cancel_wins_racing_finish_prevents_result_commit(self):
+        task = self.queued()
+        finish_entered = Event()
+        release_finish = Event()
+        real_finish = service._finish
+        gateway = FakeGateway([gateway_frame('取消胜出的私有译文')])
+
+        def pause_before_finish_commit(*args, **kwargs):
+            # The worker has received a complete synthetic response, but has not
+            # entered its terminal DB transaction. Let cancel win the CAS first.
+            finish_entered.set()
+            if not release_finish.wait(timeout=5):
+                raise TimeoutError('finish test gate timed out')
+            return real_finish(*args, **kwargs)
+
+        with patch.object(service, '_finish', side_effect=pause_before_finish_commit), \
+                patch.object(service, 'build_gateway_client', return_value=gateway), \
+                ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(service.run_translation, task.pk, task.generation)
+            try:
+                self.assertTrue(finish_entered.wait(timeout=5))
+                cancel_response = self.cancel(task)
+                self.assertEqual(cancel_response.status_code, 200, cancel_response.content)
+                self.assertEqual(set(cancel_response.data), {'task_id', 'status', 'error_code'})
+                self.assertEqual(cancel_response.data, {
+                    'task_id': str(task.pk), 'status': 'cancelled',
+                    'error_code': 'translation_cancelled',
+                })
+            finally:
+                release_finish.set()
+            future.result(timeout=10)
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'cancelled')
+        self.assertFalse(task.result)
+        self.assertFalse(ChatGPTArticleTranslation.objects.filter(task=task).exists())
+        self.assertFalse(SharedArticleTranslation.objects.exists())
+        observed = self.client.get(f'/api/me/ai/translations/{task.pk}/')
+        self.assertEqual(observed.status_code, 200, observed.content)
+        self.assertEqual(observed.data['status'], 'cancelled')
+        self.assertIsNone(observed.data['result'])
         self.assertEqual(len(gateway.sent), 1)
 
     def test_t07_finish_winner_racing_cancel_retains_private_result(self):
