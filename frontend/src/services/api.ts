@@ -39,6 +39,7 @@ export type CapabilityReason =
   | 'hosted_integration_unapproved'
   | 'chatgpt_plan_usage_disabled'
   | 'capabilities_unavailable'
+  | 'legacy_ingestion_retired'
 
 export interface CapabilityFeature {
   enabled: boolean
@@ -60,6 +61,7 @@ const CAPABILITY_REASONS = new Set<CapabilityReason>([
   'hosted_integration_unapproved',
   'chatgpt_plan_usage_disabled',
   'capabilities_unavailable',
+  'legacy_ingestion_retired',
 ])
 
 export function parseCapabilities(value: unknown): SiteCapabilities {
