@@ -41,7 +41,7 @@ services:
       POSTGRES_PORT: "5432"
       POSTGRES_DB: ${POSTGRES_DB:-litellm}
       POSTGRES_USER: ${POSTGRES_USER:-litellm}
-      BYOK_TERMINAL_STREAMING_MODELS: deepseek/deepseek-chat
+      BYOK_TERMINAL_STREAMING_MODELS: deepseek/deepseek-flash
     volumes:
       - ./proxy.yaml:/app/proxy.yaml:ro
       - ./entrypoint.sh:/app/entrypoint.sh:ro

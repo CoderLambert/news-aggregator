@@ -17,8 +17,8 @@ const connection: api.AIConnection = {
   updated_at: '2026-10-18T00:00:00Z',
 }
 const good: api.AIModel = {
-  id: '22222222-2222-4222-8222-222222222222', connection_id: connection.id, model_id: 'deepseek-chat',
-  display_name: 'Verified model', catalog_model_id: 'deepseek-chat', config_revision: 1,
+  id: '22222222-2222-4222-8222-222222222222', connection_id: connection.id, model_id: 'deepseek-flash',
+  display_name: 'Verified model', catalog_model_id: 'deepseek-flash', config_revision: 1,
   has_trusted_route: true, article_chat_supported: true, context_window_tokens: null,
   capabilities: { text: 'supported', tools: 'unknown' },
   updated_at: '2026-10-18T00:00:00Z',

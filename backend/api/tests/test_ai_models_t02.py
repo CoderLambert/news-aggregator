@@ -55,14 +55,14 @@ class AIModelT02Tests(TestCase):
         row = self.create_model('deepseek/deepseek-chat')
         self.assertEqual(row['model_id'], MODEL)
         self.assertEqual(row['capabilities'], {'text': 'unknown', 'tools': 'unknown'})
-        self.assertTrue(row['article_chat_supported'])
+        self.assertFalse(row['article_chat_supported'])
         before = AIModelProbeAttempt.objects.count()
         with patch('api.ai_model_views.send_model_probe', side_effect=AssertionError('paid GET')):
             catalog = self.api.get(BASE + self.connection['id'] + '/model-catalog/')
             models = self.api.get(self.model_base)
             detail = self.api.get(self.model_base + row['id'] + '/')
         self.assertEqual(catalog.status_code, 200)
-        self.assertEqual(catalog.data['models'][0]['model_id'], MODEL)
+        self.assertEqual({model['model_id'] for model in catalog.data['models']}, {'deepseek-chat', 'deepseek-flash'})
         self.assertEqual(len(models.data['models']), 1)
         self.assertEqual(detail.data['id'], row['id'])
         self.assertEqual(AIModelProbeAttempt.objects.count(), before)
@@ -73,6 +73,24 @@ class AIModelT02Tests(TestCase):
         self.assertEqual(self.api.post(self.model_base, {'model_id': MODEL}, format='json').status_code, 404)
         self.assertEqual(self.probe(row).status_code, 404)
         self.assertEqual(UserAIModelConfig.objects.count(), 1)
+
+    def test_deepseek_flash_requires_its_own_fresh_text_probe_and_legacy_chat_stays_ineligible(self):
+        legacy = self.create_model('deepseek-chat')
+        flash = self.create_model('deepseek-flash')
+        self.assertFalse(legacy['article_chat_supported'])
+        self.assertTrue(flash['article_chat_supported'])
+        self.assertEqual(flash['capabilities'], {'text': 'unknown', 'tools': 'unknown'})
+
+        with patch('api.ai_model_views.send_model_probe', return_value=ProbeOutcome('succeeded')) as send:
+            self.assertEqual(self.probe(legacy).status_code, 200)
+            self.assertEqual(self.probe(flash).status_code, 200)
+        self.assertEqual(send.call_count, 2)
+        legacy_fresh = self.api.get(self.model_base + legacy['id'] + '/').data
+        flash_fresh = self.api.get(self.model_base + flash['id'] + '/').data
+        self.assertFalse(legacy_fresh['article_chat_supported'])
+        self.assertEqual(legacy_fresh['capabilities']['text'], 'supported')
+        self.assertTrue(flash_fresh['article_chat_supported'])
+        self.assertEqual(flash_fresh['capabilities']['text'], 'supported')
 
     def test_unknown_user_model_may_be_saved_but_cannot_enter_proxy(self):
         manual = self.create_model('user-manual-model')

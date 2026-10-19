@@ -106,7 +106,7 @@ def scope_status(checks: list[dict], scope: str, *, started: bool, completed: bo
 
 def receipt_matches(rows: list[dict], count: int, tenant: str, protocol: str, terminal: str | None = None) -> bool:
     target_route = any("_DEEPSEEK_" in row.get("test_id", "") for row in rows)
-    model = "deepseek-chat" if target_route else "test-model" if tenant == "tenant-a" else "other-test-model"
+    model = "deepseek-flash" if target_route else "test-model" if tenant == "tenant-a" else "other-test-model"
     return len(rows) == count and all(
         row.get("tenant") == tenant
         and row.get("provider_key_match") is True
@@ -283,9 +283,10 @@ def main(argv: list[str] | None = None) -> int:
         result = {"success": False}
         try:
             kwargs = {
-                "model": "deepseek/deepseek-chat",
+                "model": "deepseek/deepseek-flash",
                 "messages": [{"role": "user", "content": marker}],
                 "stream": True,
+                "reasoning_effort": "none",
                 "extra_body": {"api_key": provider_key},
             }
             if usage:
@@ -399,8 +400,9 @@ def main(argv: list[str] | None = None) -> int:
                 and (result.get("usage_chunks") == 1 if usage else True)
                 and len(rows) == 1
                 and rows[0].get("path") == "/v1/chat/completions"
-                and rows[0].get("model") == "deepseek-chat"
+                and rows[0].get("model") == "deepseek-flash"
                 and rows[0].get("stream") is True
+                and rows[0].get("thinking_disabled") is True
                 and rows[0].get("tenant") == "tenant-a"
                 and rows[0].get("provider_key_match") is True
                 and rows[0].get("project_key_match") is False

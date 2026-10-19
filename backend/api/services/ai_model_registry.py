@@ -8,8 +8,8 @@ import re
 from api.services.ai_gateway import PROVIDER_SPECS
 from api.services.ai_registry import get_profile
 
-CATALOG_VERSION = '2026-10-18.1'
-ARTICLE_CHAT_SUPPORTED_ALIAS = 'deepseek/deepseek-chat'
+CATALOG_VERSION = '2026-10-19.1'
+ARTICLE_CHAT_SUPPORTED_ALIAS = 'deepseek/deepseek-flash'
 _MODEL_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,159}$')
 # The provider's deployed wildcard is deepseek/*; the same alias must exist
 # in the isolated synthetic Proxy before process-level T02 verification.
@@ -17,6 +17,10 @@ _PRESETS = {
     ('deepseek', 'deepseek-chat'): {
         'display_name': 'DeepSeek Chat',
         'proxy_alias': 'deepseek/deepseek-chat',
+    },
+    ('deepseek', 'deepseek-flash'): {
+        'display_name': 'DeepSeek Flash',
+        'proxy_alias': 'deepseek/deepseek-flash',
     },
 }
 

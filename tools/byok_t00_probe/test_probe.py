@@ -313,12 +313,12 @@ class ProviderKeyGuardFailClosed(unittest.TestCase):
 
     def test_chat_stream_unknown_route_rejected_before_upstream(self):
         data = {"api_key": "sk-synthetic-provider", "model": "t00-chat", "stream": True}
-        self.assertEqual(self.run_hook(data, "acompletion", {"BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat"}),
+        self.assertEqual(self.run_hook(data, "acompletion", {"BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-flash"}),
                          ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
 
     def test_chat_stream_rejected_despite_empty_or_omitting_deny_env(self):
-        data = {"api_key": "sk-synthetic-provider", "model": "deepseek/deepseek-chat", "stream": True}
-        allow = {"BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat"}
+        data = {"api_key": "sk-synthetic-provider", "model": "deepseek/deepseek-flash", "stream": True}
+        allow = {"BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-flash"}
         for env in (
                     {**allow, "BYOK_DENY_STREAMING_CALL_TYPES": "acompletion"},
                     {**allow, "BYOK_DENY_STREAMING_CALL_TYPES": "ACOMPLETION"}):
@@ -328,9 +328,9 @@ class ProviderKeyGuardFailClosed(unittest.TestCase):
     def test_chat_stream_string_and_numeric_flags_rejected(self):
         for flag in ("true", "True", "1", 1):
             with self.subTest(flag=flag):
-                result = self.run_hook({"api_key": "sk-synthetic-provider", "model": "deepseek/deepseek-chat", "stream": flag}, "acompletion", {"BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat"})
+                result = self.run_hook({"api_key": "sk-synthetic-provider", "model": "deepseek/deepseek-flash", "stream": flag}, "acompletion", {"BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-flash"})
                 self.assertEqual(result, ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
-        self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider", "model": "deepseek/deepseek-chat", "stream": True}, "completion", {"BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat"}),
+        self.assertEqual(self.run_hook({"api_key": "sk-synthetic-provider", "model": "deepseek/deepseek-flash", "stream": True}, "completion", {"BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-flash"}),
                          ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
 
     def test_chat_short_truth_aliases_and_unknown_shapes_are_denied(self):
@@ -344,9 +344,21 @@ class ProviderKeyGuardFailClosed(unittest.TestCase):
                                  "allowed")
 
     def test_only_exact_deepseek_route_without_overrides_is_allowlisted(self):
-        allow = {"BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat"}
-        valid = {"api_key": "sk-synthetic-provider", "model": "deepseek/deepseek-chat", "stream": True}
+        allow = {"BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-flash"}
+        valid = {"api_key": "sk-synthetic-provider", "model": "deepseek/deepseek-flash", "stream": True}
         self.assertEqual(self.run_hook(valid, "acompletion", allow), ("allowed", None, None))
+        retired = {**valid, "model": "deepseek/deepseek-chat"}
+        self.assertEqual(
+            self.run_hook(retired, "acompletion", allow),
+            ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"),
+        )
+        self.assertEqual(
+            self.run_hook(
+                retired, "acompletion",
+                {"BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat"},
+            ),
+            ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"),
+        )
         for invalid in (
             {**valid, "model": "deepseek/another-model"},
             {**valid, "model": "deepseek/*"},
@@ -367,8 +379,8 @@ class ProviderKeyGuardFailClosed(unittest.TestCase):
         )
 
     def test_exact_route_rejected_if_router_provenance_patch_is_unavailable(self):
-        data = {"api_key": "sk-synthetic-provider", "model": "deepseek/deepseek-chat", "stream": True}
-        allow = {"BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat"}
+        data = {"api_key": "sk-synthetic-provider", "model": "deepseek/deepseek-flash", "stream": True}
+        allow = {"BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-flash"}
         self.assertEqual(
             self.run_hook(data, "acompletion", allow, patch_ready=False),
             ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"),
@@ -581,7 +593,7 @@ class ProviderKeyGuardFailClosed(unittest.TestCase):
             async for item in guard.ProviderKeyGuard().async_post_call_streaming_iterator_hook(
                 response=response,
                 user_api_key_dict=SimpleNamespace(),
-                request_data={"model": "deepseek/deepseek-chat", "stream": True},
+                request_data={"model": "deepseek/deepseek-flash", "stream": True},
             ):
                 yielded.append(item)
 

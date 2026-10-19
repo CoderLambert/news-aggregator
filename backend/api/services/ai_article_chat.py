@@ -117,7 +117,7 @@ def complete_article_chat(*, user, stored, chat_snapshot, messages, selection, t
                 stream = gateway.chat.completions.create(
                     model=selection.proxy_alias, messages=messages,
                     stream=True, max_tokens=MAX_CHAT_OUTPUT_TOKENS,
-                    temperature=0.7,
+                    temperature=0.7, reasoning_effort='none',
                 )
                 return stream
             except ArticleChatTurnError as error:

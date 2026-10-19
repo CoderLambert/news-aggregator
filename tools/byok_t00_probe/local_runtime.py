@@ -180,7 +180,7 @@ class LocalProxy:
             "PRISMA_BINARY_CACHE_DIR": str(self.prefix / "t00-prisma/binaries"),
             "PRISMA_NODEENV_CACHE_DIR": str(self.prefix / "t00-prisma/nodeenv"),
             "PYTHONPATH": str(ROOT / "ops/shared-litellm-proxy"),
-            "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat",
+            "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-flash",
             "BYOK_DENY_STREAMING_CALL_TYPES": "",
             # Safe stream-hook diagnostics are enabled only in this disposable,
             # synthetic local proxy; production configuration omits this flag.
@@ -201,9 +201,9 @@ class LocalProxy:
             env, stage="TEMP_SCHEMA",
         )
         model_list = [{
-            "model_name": "deepseek/deepseek-chat",
+            "model_name": "deepseek/deepseek-flash",
             "litellm_params": {
-                "model": "deepseek/deepseek-chat",
+                "model": "deepseek/deepseek-flash",
                 "api_base": self.upstream_url + "/v1",
                 "timeout": 20.0,
             },
@@ -250,7 +250,7 @@ class LocalProxy:
         else:
             raise RuntimeError("T00_PROXY_START_TIMEOUT")
         for tenant, models in {
-            "tenant-a": ["t00-chat", "t00-messages", "deepseek/deepseek-chat"],
+            "tenant-a": ["t00-chat", "t00-messages", "deepseek/deepseek-flash"],
             "tenant-b": ["t00-other-chat", "t00-other-messages"],
         }.items():
             result = post_json(self.url + "/key/generate", {"models": models, "key_alias": "t00-" + tenant}, self.master)

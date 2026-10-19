@@ -204,7 +204,7 @@ class UnaffectedPaths(unittest.TestCase):
                     async def invoke(raw, label):
                         return await router._acompletion_streaming_iterator(
                             raw, [], {
-                                "model": "deepseek/deepseek-chat",
+                                "model": "deepseek/deepseek-flash",
                                 "stream": True,
                                 "request_label": label,
                             },
@@ -253,13 +253,13 @@ class UnaffectedPaths(unittest.TestCase):
     def test_exact_stream_fails_closed_when_router_provenance_patch_is_unavailable(self):
         exact = {
             "api_key": "sk-synthetic-provider",
-            "model": "deepseek/deepseek-chat",
+            "model": "deepseek/deepseek-flash",
             "stream": True,
         }
         result = run_hook(
             exact, "acompletion", patch_ready=False,
             env={
-                "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat",
+                "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-flash",
                 "BYOK_DENY_STREAMING_CALL_TYPES": "",
             },
         )
@@ -268,11 +268,11 @@ class UnaffectedPaths(unittest.TestCase):
     def test_exact_stream_rejects_request_level_retry_and_fallback_overrides(self):
         exact = {
             "api_key": "sk-synthetic-provider",
-            "model": "deepseek/deepseek-chat",
+            "model": "deepseek/deepseek-flash",
             "stream": True,
         }
         env = {
-            "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat",
+            "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-flash",
             "BYOK_DENY_STREAMING_CALL_TYPES": "",
         }
         for override in (
@@ -317,42 +317,66 @@ class UnaffectedPaths(unittest.TestCase):
         self.assertEqual(detail["diagnostic"]["source_provider"], "other")
         self.assertNotIn("arbitrary-provider-label", repr(detail))
 
-    def test_only_exact_deepseek_chat_stream_alias_is_exceptionally_allowed(self):
+    def test_only_exact_deepseek_flash_stream_alias_is_exceptionally_allowed(self):
         exact = {
             "api_key": "sk-synthetic-provider",
-            "model": "deepseek/deepseek-chat",
+            "model": "deepseek/deepseek-flash",
             "stream": True,
             "n": 1,
         }
         allowed = run_hook(
             exact, "acompletion",
             env={
-                "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat",
+                "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-flash",
                 "BYOK_DENY_STREAMING_CALL_TYPES": "",
             },
         )
         self.assertEqual(allowed[0], "allowed")
+        retired = {
+            **exact,
+            "model": "deepseek/deepseek-chat",
+        }
+        self.assertEqual(
+            run_hook(
+                retired, "acompletion",
+                env={
+                    "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-flash",
+                    "BYOK_DENY_STREAMING_CALL_TYPES": "",
+                },
+            ),
+            ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"),
+        )
+        self.assertEqual(
+            run_hook(
+                retired, "acompletion",
+                env={
+                    "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat",
+                    "BYOK_DENY_STREAMING_CALL_TYPES": "",
+                },
+            ),
+            ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"),
+        )
         for value in ("deepseek/other", "other/deepseek-chat", "deepseek/*"):
             with self.subTest(model=value):
                 result = run_hook(
                     {**exact, "model": value}, "acompletion",
                     env={
-                        "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat",
+                        "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-flash",
                         "BYOK_DENY_STREAMING_CALL_TYPES": "",
                     },
                 )
                 self.assertEqual(result, ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))
 
-    def test_explicit_deny_still_overrides_exact_chat_stream_allowlist(self):
+    def test_explicit_deny_still_overrides_exact_flash_stream_allowlist(self):
         exact = {
             "api_key": "sk-synthetic-provider",
-            "model": "deepseek/deepseek-chat",
+            "model": "deepseek/deepseek-flash",
             "stream": True,
         }
         result = run_hook(
             exact, "acompletion",
             env={
-                "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-chat",
+                "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-flash",
                 "BYOK_DENY_STREAMING_CALL_TYPES": "acompletion",
             },
         )

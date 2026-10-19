@@ -34,7 +34,7 @@ from api.ai_model_models import AIModelProbeAttempt, UserAIModelConfig  # noqa: 
 from api.models import ArticleChatTurn, Category, ChatSession, News, Source  # noqa: E402
 from api.tests.rss.reader_fixtures import public_legacy_article  # noqa: E402
 
-ALIAS = "deepseek/deepseek-chat"
+ALIAS = "deepseek/deepseek-flash"
 CONNECTIONS = "/api/me/ai/connections/"
 
 
@@ -83,7 +83,7 @@ def _create_verified_model(client, owner, provider_key):
     connection = UserAIConnection.objects.get(pk=response.data["id"])
     response = client.post(
         f"{CONNECTIONS}{connection.pk}/models/",
-        {"model_id": "deepseek-chat"}, format="json",
+        {"model_id": "deepseek-flash"}, format="json",
     )
     assert response.status_code == 201, response.content
     model = UserAIModelConfig.objects.get(pk=response.data["id"])
@@ -119,8 +119,9 @@ def _assert_native_deepseek_request(rows, *, marker, stream, terminal):
     row = rows[0]
     assert row["test_id"] == marker
     assert row["path"] == "/v1/chat/completions"
-    assert row["model"] == "deepseek-chat"
+    assert row["model"] == "deepseek-flash"
     assert row["stream"] is stream
+    assert row["thinking_disabled"] is True
     assert row["tenant"] == "tenant-a"
     assert row["provider_key_match"] is True
     assert row["project_key_match"] is False

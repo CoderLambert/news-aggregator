@@ -18,7 +18,7 @@ from litellm.integrations.custom_logger import CustomLogger
 
 BYOK_CALL_TYPES = frozenset({"acompletion", "completion", "aresponses", "anthropic_messages"})
 ALWAYS_DENIED_STREAMING_CALL_TYPES = frozenset({"acompletion", "completion"})
-TERMINAL_STREAM_MODEL = "deepseek/deepseek-chat"
+TERMINAL_STREAM_MODEL = "deepseek/deepseek-flash"
 TERMINAL_STREAM_ENV = "BYOK_TERMINAL_STREAMING_MODELS"
 DENY_STREAM_ENV = "BYOK_DENY_STREAMING_CALL_TYPES"
 _STREAM_FALSE_STRINGS = frozenset({"0", "false", "f", "no", "n", "off"})

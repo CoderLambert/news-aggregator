@@ -515,6 +515,7 @@ class Handler(BaseHTTPRequestHandler):
             "stream": bool(request.get("stream")),
             "scenario": scenario,
             "model": request.get("model"),
+            "thinking_disabled": request.get("thinking") == {"type": "disabled"},
             "tenant": credential_label,
             "expected_tenant": expected or "none",
             "provider_key_match": credential_label == expected if expected else False,

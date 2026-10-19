@@ -71,7 +71,7 @@ class PersonalArticleChatTests(TestCase):
         self.connection = UserAIConnection.objects.get(pk=response.data['id'])
         response = self.client.post(
             f'{CONNECTIONS}{self.connection.pk}/models/',
-            {'model_id': 'deepseek-chat'}, format='json',
+            {'model_id': 'deepseek-flash'}, format='json',
         )
         self.assertEqual(response.status_code, 201, response.content)
         self.model = UserAIModelConfig.objects.get(pk=response.data['id'])
@@ -90,7 +90,7 @@ class PersonalArticleChatTests(TestCase):
             credential_version=conn.credential_version,
             endpoint_profile=conn.endpoint_profile,
             endpoint_profile_version=conn.endpoint_profile_version,
-            proxy_alias='deepseek/deepseek-chat',
+            proxy_alias='deepseek/deepseek-flash',
         )
         model.last_text_attempt = attempt_id
         model.capability_results = {
@@ -121,6 +121,21 @@ class PersonalArticleChatTests(TestCase):
     def _wire(self, response):
         return b''.join(response.streaming_content).decode('utf-8')
 
+    def test_legacy_chat_alias_stays_stored_but_is_never_t04_eligible(self):
+        response = self.client.post(
+            f'{CONNECTIONS}{self.connection.pk}/models/',
+            {'model_id': 'deepseek-chat'}, format='json',
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        legacy = UserAIModelConfig.objects.get(pk=response.data['id'])
+        self._verify_text(legacy)
+        gateway = FakeGateway([gateway_frame('must not reach provider')])
+        with patch('api.services.ai_article_chat.build_gateway_client', return_value=gateway) as build:
+            response = self._chat(model=legacy)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['error_code'], 'model_unavailable')
+        build.assert_not_called()
+
     def test_explicit_model_completion_persists_private_source_once_and_never_alters_preferences(self):
         gateway = FakeGateway([gateway_frame('Verified synthetic answer.')])
         with patch('api.services.ai_article_chat.build_gateway_client', return_value=gateway) as build, \
@@ -134,7 +149,8 @@ class PersonalArticleChatTests(TestCase):
         self.assertIn('"type": "chat_model"', wire)
         self.assertTrue(gateway.closed)
         self.assertEqual(build.call_count, 1)
-        self.assertEqual(gateway.sent[0]['model'], 'deepseek/deepseek-chat')
+        self.assertEqual(gateway.sent[0]['model'], 'deepseek/deepseek-flash')
+        self.assertEqual(gateway.sent[0]['reasoning_effort'], 'none')
         self.assertTrue(gateway.sent[0]['stream'])
         self.assertEqual(gateway.sent[0]['max_tokens'], 2048)
         self.assertEqual(UserAITaskPreference.objects.count(), 0)
@@ -142,7 +158,7 @@ class PersonalArticleChatTests(TestCase):
         self.assertEqual(len(messages), 2)
         self.assertEqual(messages[-1]['status'], 'complete')
         self.assertEqual(messages[-1]['content'], 'Verified synthetic answer.')
-        self.assertEqual(messages[-1]['model_source'], {'provider': 'deepseek', 'model': 'deepseek-chat'})
+        self.assertEqual(messages[-1]['model_source'], {'provider': 'deepseek', 'model': 'deepseek-flash'})
         other_client = APIClient()
         other_client.force_login(self.other)
         self.assertEqual(other_client.get(self.url).data['messages'], [])
