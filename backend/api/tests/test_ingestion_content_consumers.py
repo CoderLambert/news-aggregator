@@ -213,7 +213,8 @@ def test_refresh_failure_keeps_valid_body_readable_for_detail_chat_and_speech(ma
     assert data['full_content'] == BODY
     assert data['full_content_zh'] == LEGACY_ZH
     assert data['full_content_fetch_status'] == status
-    assert article_content.pick_chat_context(news) == BODY
+    assert article_content.pick_chat_context(news, translation_mode='original') == BODY
+    assert article_content.pick_chat_context(news) == LEGACY_ZH
     assert article_content.context_scope(news) == 'full'
     assert resolve_tts_content(news, user, 'original', 'full').content == BODY
     assert resolve_tts_content(news, user, 'zh', 'full').content == LEGACY_ZH

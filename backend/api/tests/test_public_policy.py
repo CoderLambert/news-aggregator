@@ -512,7 +512,8 @@ def test_ai_disabled_still_allows_personal_chat_and_research_history(news_obj):
     chat_path = reverse("news-chat", args=[news_obj.pk])
     chat_response = client.get(chat_path)
     assert chat_response.status_code == 200
-    assert chat_response.json() == {"messages": chat.messages}
+    assert chat_response.json()["messages"] == chat.messages
+    assert chat_response.json()["translation_context"]["source"] == "original"
     assert client.delete(chat_path).status_code == 200
     chat.refresh_from_db()
     assert chat.messages == []

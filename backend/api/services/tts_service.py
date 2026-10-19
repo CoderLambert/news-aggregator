@@ -187,14 +187,19 @@ def build_cache_variant(resolved: ResolvedTTSContent, scope: str, voice: str, sp
     return ':'.join((resolved.language, scope, voice, resolved.namespace, text_digest))
 
 
-def resolve_tts_content(news, user, language: str, scope: str) -> ResolvedTTSContent:
+def resolve_tts_content(news, user, language: str, scope: str, *, translation_result_id=None) -> ResolvedTTSContent:
     """Resolve speech content using the same private translation boundary as detail serialization."""
     if language not in {'zh', 'original'}:
         raise TTSContentUnavailable('unsupported_language', '不支持的朗读语言。')
     if scope not in {'summary', 'full'}:
         raise TTSContentUnavailable('unsupported_scope', '不支持的朗读范围。')
+    if translation_result_id is not None and (language != 'zh' or scope != 'full'):
+        raise TTSContentUnavailable('translation_result_unavailable', '所选个人译文不可用于当前朗读范围。')
 
-    from api.services.stored_readers import article_snapshot, current_translation, legacy_translation
+    from api.services.stored_readers import (
+        PrivateTranslationNotFound, article_snapshot, current_translation,
+        legacy_translation, translation_for_read,
+    )
     from api.rss.access import article_sources
     stored = article_snapshot(news, user)
     if scope == 'full' and stored.scope != 'full':
@@ -203,10 +208,16 @@ def resolve_tts_content(news, user, language: str, scope: str) -> ResolvedTTSCon
     source_language = source.language if source else ''
     content = stored.markdown if scope == 'full' else stored.summary
     namespace = f'source:{stored.canonical_hash}:{stored.revision}'
+    if translation_result_id is not None and source_language == 'zh':
+        raise TTSContentUnavailable('translation_result_unavailable', '当前原文为中文，不能选择中文个人译文。')
+    selected_record = None
     if language == 'zh' and source_language != 'zh':
         # Summary/title compatibility columns have no version proof. Never infer it.
         if scope == 'full':
-            record, visibility = current_translation(user, stored)
+            try:
+                record, visibility = translation_for_read(user, stored, translation_result_id)
+            except PrivateTranslationNotFound:
+                raise TTSContentUnavailable('translation_result_unavailable', '所选个人译文不可用。') from None
         else:
             legacy = legacy_translation(stored.news_id, 'content', stored.summary)
             from types import SimpleNamespace
@@ -214,13 +225,22 @@ def resolve_tts_content(news, user, language: str, scope: str) -> ResolvedTTSCon
             visibility = 'legacy-summary'
         if record is None:
             raise TTSContentUnavailable('translation_required', '当前版本暂无已匹配的中文译文。')
+        selected_record = record
         content = record.content
-        namespace = f'{visibility}:{getattr(user, "pk", "anonymous")}:{getattr(record, "connection_id", "shared")}:{stored.canonical_hash}'
+        if getattr(record, 'api_connection_id', None) is not None and getattr(record, 'task_id', None) is not None:
+            namespace = f'byok:{user.pk}:result:{record.pk}:task:{record.task_id}'
+        else:
+            namespace = f'{visibility}:{getattr(user, "pk", "anonymous")}:{getattr(record, "connection_id", "shared")}:{stored.canonical_hash}'
     if not content.strip():
         raise TTSContentUnavailable('source_content_required', '所选范围暂无原文内容。')
     translated_title = legacy_translation(stored.news_id, 'title', stored.title) if language == 'zh' else None
+    title = translated_title.translated_text if translated_title else stored.title
+    if translation_result_id is not None and selected_record is not None and not selected_record.current_match:
+        # Never pair a saved translation with the current title. Use its frozen
+        # source title, or omit the title if an older task has no frozen title.
+        title = getattr(selected_record, 'source_title', '') or ''
     return ResolvedTTSContent(language='zh' if source_language == 'zh' else language,
-        title=translated_title.translated_text if translated_title else stored.title, content=content, namespace=namespace, snapshot=stored)
+        title=title, content=content, namespace=namespace, snapshot=stored)
 
 
 # How many seconds a cached file can go untouched before considered expired.

@@ -142,11 +142,15 @@ interface SuggestedQuestionsOptions {
   signal?: AbortSignal
 }
 
+export type ChatTranslationMode = 'current' | 'original' | 'result'
+
 interface ChatStreamOptions {
   webSearch?: boolean
   modelConfigId?: string | null
   billingConsent?: boolean
   turnId?: string
+  translationResultId?: number | null
+  translationMode?: ChatTranslationMode
   signal?: AbortSignal
 }
 
@@ -288,8 +292,15 @@ export function retestProviderComparison(id: NewsId, signal?: AbortSignal): Prom
 
 // ---- Chat -----------------------------------------------------------------
 
-export function fetchChatHistory(newsId: NewsId, signal?: AbortSignal): Promise<unknown> {
-  return api.get<unknown>(`/news/${newsId}/chat/`, { signal }).then(({ data }) => data)
+export function fetchChatHistory(newsId: NewsId, signal?: AbortSignal, selection: {
+  translationResultId?: number | null
+  translationMode?: ChatTranslationMode
+} = {}): Promise<unknown> {
+  const params = {
+    ...(selection.translationResultId != null ? { translation_result_id: selection.translationResultId } : {}),
+    ...(selection.translationMode ? { translation_mode: selection.translationMode } : {}),
+  }
+  return api.get<unknown>(`/news/${newsId}/chat/`, { signal, params }).then(({ data }) => data)
 }
 
 export function clearChatHistory(newsId: NewsId, signal?: AbortSignal): Promise<unknown> {
@@ -366,10 +377,13 @@ export async function* translateFullArticleStream(
 export async function* chatStream(
   newsId: NewsId,
   question: string,
-  { webSearch = false, modelConfigId, billingConsent = false, turnId, signal }: ChatStreamOptions = {},
+  { webSearch = false, modelConfigId, billingConsent = false, turnId, translationResultId, translationMode, signal }: ChatStreamOptions = {},
 ): AsyncGenerator<string> {
   const response = await streamingFetch(`/api/news/${newsId}/chat/`, {
     body: JSON.stringify({ question, web_search: webSearch,
+      ...(translationMode ? { translation_mode: translationMode } : {}),
+      ...(translationResultId !== undefined && translationResultId !== null
+        ? { translation_result_id: translationResultId } : {}),
       ...(modelConfigId ? { model_config_id: modelConfigId, billing_consent: billingConsent === true,
         turn_id: turnId } : {}) }),
     signal,

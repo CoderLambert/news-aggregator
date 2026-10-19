@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { useEffect, useState } from 'react'
+import { AuthContext, useAuth } from '@/context/AuthContext'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SpeechPlayerProvider } from '@/context/SpeechPlayerProvider'
@@ -6,6 +8,8 @@ import { useSpeechPlayerActions, useSpeechPlayerState } from '@/context/SpeechPl
 import GlobalSpeechPlayer from '@/components/speech/GlobalSpeechPlayer'
 
 const audioInstances = []
+let deferNextAudioMetadata = false
+let retainedViewerASpeak = null
 const mediaSession = {
   actionHandlers: new Map(),
   metadata: null,
@@ -52,7 +56,12 @@ class MockAudio {
   }
 
   load() {
-    if (this.src) this.onloadedmetadata?.()
+    if (!this.src) return
+    if (deferNextAudioMetadata) {
+      deferNextAudioMetadata = false
+      return
+    }
+    this.onloadedmetadata?.()
   }
 
   removeAttribute(name) {
@@ -62,28 +71,51 @@ class MockAudio {
 
 function PlayerActions() {
   const player = useSpeechPlayerActions()
+  const { user } = useAuth()
   const state = useSpeechPlayerState()
+  useEffect(() => {
+    if (user?.id === 101 && !retainedViewerASpeak) retainedViewerASpeak = player.speak
+  }, [player.speak, user?.id])
   return (
     <div>
       <button type="button" onClick={() => player.speak(11, '第一篇虚构新闻', { language: 'zh' })}>朗读第一篇</button>
       <button type="button" onClick={() => player.speak(12, '第二篇虚构新闻', { language: 'original' })}>朗读第二篇</button>
+      <button type="button" onClick={() => player.speak(11, '译文版本 A', { language: 'zh', scope: 'full', translationResultId: 41 })}>朗读译文 A</button>
+      <button type="button" onClick={() => player.speak(11, '译文版本 B', { language: 'zh', scope: 'full', translationResultId: 42 })}>朗读译文 B</button>
       <button type="button" onClick={player.stop}>停止播放器</button>
       <output data-testid="player-status">{state.status}</output>
     </div>
   )
 }
 
+function TestAuthProvider({ children }) {
+  const [user, setUser] = useState({ id: 101, username: 'viewer-a', isSuperuser: false })
+  return (
+    <AuthContext.Provider value={{
+      user, loading: false, login: async () => user, register: async () => user,
+      logout: async () => setUser(null), refresh: async () => {},
+    }}>
+      <button type="button" onClick={() => setUser({ id: 202, username: 'viewer-b', isSuperuser: false })}>切换用户</button>
+      {children}
+    </AuthContext.Provider>
+  )
+}
+
 function renderPlayer() {
   return render(
-    <SpeechPlayerProvider>
-      <PlayerActions />
-      <GlobalSpeechPlayer />
-    </SpeechPlayerProvider>,
+    <TestAuthProvider>
+      <SpeechPlayerProvider>
+        <PlayerActions />
+        <GlobalSpeechPlayer />
+      </SpeechPlayerProvider>
+    </TestAuthProvider>,
   )
 }
 
 beforeEach(() => {
   audioInstances.length = 0
+  deferNextAudioMetadata = false
+  retainedViewerASpeak = null
   localStorage.clear()
   vi.stubGlobal('Audio', MockAudio)
   previousMediaSessionDescriptor = Object.getOwnPropertyDescriptor(navigator, 'mediaSession')
@@ -195,4 +227,85 @@ describe('global speech player', () => {
 
     expect(screen.getByTestId('player-status')).toHaveTextContent('idle')
   })
+  it('stops and clears viewer A audio when the authenticated viewer changes', async () => {
+    const user = userEvent.setup()
+    renderPlayer()
+    await user.click(screen.getByRole('button', { name: '朗读译文 A' }))
+    const privateAudio = audioInstances.at(-1)
+    privateAudio.currentTime = 37
+    expect(screen.getByTestId('player-status')).toHaveTextContent('playing')
+
+    await user.click(screen.getByRole('button', { name: '切换用户' }))
+    expect(privateAudio.src).toBe('')
+    expect(screen.getByTestId('player-status')).toHaveTextContent('idle')
+    expect(mediaSession.metadata).toBeNull()
+    const savedPositionKey = Object.keys(localStorage).find((key) =>
+      key.includes('viewer_101') && key.endsWith('11_zh_full_result_41'))
+    expect(savedPositionKey).toBeTruthy()
+    expect(localStorage.getItem(savedPositionKey)).toContain('"time":37')
+
+    act(() => {
+      privateAudio.onplay?.()
+      privateAudio.ontimeupdate?.()
+      privateAudio.onloadedmetadata?.()
+      privateAudio.onended?.()
+    })
+    expect(screen.getByTestId('player-status')).toHaveTextContent('idle')
+    expect(screen.queryByText('译文版本 A')).not.toBeInTheDocument()
+  })
+
+  it('invalidates viewer A pending metadata and play promises after an account switch', async () => {
+    const user = userEvent.setup()
+    renderPlayer()
+    deferNextAudioMetadata = true
+    await user.click(screen.getByRole('button', { name: '朗读译文 A' }))
+    const oldAudio = audioInstances.at(-1)
+    expect(screen.getByTestId('player-status')).toHaveTextContent('loading')
+
+    const pendingPlay = deferred()
+    vi.spyOn(oldAudio, 'play').mockReturnValue(pendingPlay.promise)
+    act(() => oldAudio.onloadedmetadata?.())
+    await user.click(screen.getByRole('button', { name: '切换用户' }))
+    expect(oldAudio.src).toBe('')
+    expect(screen.getByTestId('player-status')).toHaveTextContent('idle')
+    expect(mediaSession.metadata).toBeNull()
+
+    await act(async () => {
+      pendingPlay.reject(new Error('viewer A play completed after viewer switch'))
+      await pendingPlay.promise.catch(() => {})
+    })
+    expect(screen.getByTestId('player-status')).toHaveTextContent('idle')
+    expect(screen.queryByText('译文版本 A')).not.toBeInTheDocument()
+  })
+
+  it('rejects an old viewer callback that tries to start private audio after a switch', async () => {
+    const user = userEvent.setup()
+    renderPlayer()
+    await user.click(screen.getByRole('button', { name: '朗读第一篇' }))
+    expect(retainedViewerASpeak).toBeTypeOf('function')
+    await user.click(screen.getByRole('button', { name: '切换用户' }))
+    const audioCount = audioInstances.length
+
+    act(() => retainedViewerASpeak(11, '译文版本 A', {
+      language: 'zh', scope: 'full', translationResultId: 41,
+    }))
+
+    expect(audioInstances).toHaveLength(audioCount)
+    expect(screen.getByTestId('player-status')).toHaveTextContent('idle')
+    expect(mediaSession.metadata).toBeNull()
+  })
+
+  it('keeps explicit saved result identity when replaying and switching versions', async () => {
+    const user = userEvent.setup()
+    renderPlayer()
+    await user.click(screen.getByRole('button', { name: '朗读译文 A' }))
+    expect(audioInstances.at(-1).src).toContain('translation_result_id=41')
+    await user.click(screen.getByRole('button', { name: '展开语音设置' }))
+    await user.click(screen.getByRole('button', { name: /晓晓亲切女声/ }))
+    expect(audioInstances.at(-1).src).toContain('translation_result_id=41')
+    await user.click(screen.getByRole('button', { name: '朗读译文 B' }))
+    expect(audioInstances.at(-1).src).toContain('translation_result_id=42')
+    expect(audioInstances.at(-1).src).not.toContain('translation_result_id=41')
+  })
+
 })

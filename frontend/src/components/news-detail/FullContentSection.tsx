@@ -27,6 +27,8 @@ interface FullContentSectionProps {
   onCancelRefetch: () => void
   allowFetch?: boolean
   allowTranslation?: boolean
+  selectedPrivateResultId?: number | null
+  onSelectPrivateResult?: (resultId: number | null) => void
 }
 
 export default function FullContentSection({
@@ -47,9 +49,13 @@ export default function FullContentSection({
   onCancelRefetch,
   allowFetch = true,
   allowTranslation = true,
+  selectedPrivateResultId = null,
+  onSelectPrivateResult,
 }: FullContentSectionProps) {
   if (!hasReadableFullContent(news)) return null
-  const content = showOriginal ? news.full_content : (news.full_content_zh || news.full_content)
+  const privateHistory = news.full_content_zh_private_history ?? []
+  const selectedPrivate = privateHistory.find((item) => item.result_id === selectedPrivateResultId) ?? null
+  const content = showOriginal ? news.full_content : (selectedPrivate ? selectedPrivate.content : (news.full_content_zh || news.full_content))
   return (
     <div className="mb-8">
       <Toolbar
@@ -65,7 +71,39 @@ export default function FullContentSection({
         onCancelRefetch={onCancelRefetch}
         allowFetch={allowFetch}
         allowTranslation={allowTranslation}
+        selectedPrivateTranslation={Boolean(selectedPrivate)}
       />
+
+      {privateHistory.length ? (
+        <section aria-label="已保存的个人译文" className="mb-4 rounded-xl border border-border bg-card p-3">
+          <label htmlFor="saved-private-translation" className="mb-2 block text-sm font-medium">选择已保存的个人译文</label>
+          <select
+            id="saved-private-translation"
+            aria-label="选择已保存的个人译文"
+            className="h-10 max-w-full rounded-md border border-input bg-background px-3 text-sm"
+            value={selectedPrivateResultId ?? ''}
+            onChange={(event) => onSelectPrivateResult?.(event.target.value ? Number(event.target.value) : null)}
+          >
+            <option value="">当前推荐译文</option>
+            {privateHistory.map((item) => (
+              <option key={item.result_id} value={item.result_id}>
+                {item.model} · {item.current_match ? '当前原文版本' : '旧版原文'} · 结果 #{item.result_id}
+              </option>
+            ))}
+          </select>
+          {selectedPrivate && selectedPrivate.current_match && !showOriginal && (
+            <p role="status" className="mt-2 text-sm text-muted-foreground">
+              正在查看模型 {selectedPrivate.model} 生成的个人译文，结果 #{selectedPrivate.result_id}。
+            </p>
+          )}
+          {selectedPrivate && !selectedPrivate.current_match && !showOriginal && (
+            <p role="status" className="mt-2 text-sm text-amber-700">
+              正在查看旧版原文的个人译文。对应原文标题：{selectedPrivate.source_title || '标题不可用'}。
+              切换回“当前推荐译文”可查看当前版本。
+            </p>
+          )}
+        </section>
+      ) : null}
 
       {allowTranslation && translating && <TranslationProgressUI progress={translationProgress} waitingShared={translationWaitingShared} onStop={onStopTranslation} />}
       {allowTranslation && translationPaused && !translating && !translateError && (
@@ -82,9 +120,9 @@ export default function FullContentSection({
   )
 }
 
-type ToolbarProps = Pick<FullContentSectionProps, 'news' | 'translating' | 'translationPaused' | 'translateError' | 'showOriginal' | 'onToggleOriginal' | 'onTranslate' | 'onRefetch' | 'refetching' | 'onCancelRefetch' | 'allowFetch' | 'allowTranslation'>
+type ToolbarProps = Pick<FullContentSectionProps, 'news' | 'translating' | 'translationPaused' | 'translateError' | 'showOriginal' | 'onToggleOriginal' | 'onTranslate' | 'onRefetch' | 'refetching' | 'onCancelRefetch' | 'allowFetch' | 'allowTranslation'> & { selectedPrivateTranslation: boolean }
 
-function Toolbar({ news, translating, translationPaused, translateError, showOriginal, onToggleOriginal, onTranslate, onRefetch, refetching, onCancelRefetch, allowFetch = true, allowTranslation = true }: ToolbarProps) {
+function Toolbar({ news, translating, translationPaused, translateError, showOriginal, onToggleOriginal, onTranslate, onRefetch, refetching, onCancelRefetch, allowFetch = true, allowTranslation = true, selectedPrivateTranslation }: ToolbarProps) {
   const [copied, setCopied] = useState(false)
   const [copyMessage, setCopyMessage] = useState('')
   const [copyTimer, setCopyTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
@@ -135,7 +173,7 @@ function Toolbar({ news, translating, translationPaused, translateError, showOri
         <div className="flex flex-wrap items-center gap-2">
           <CopyButton copied={copied} onCopy={() => { void handleCopy() }} />
           {allowFetch && <RefetchButton refetching={refetching} onClick={onRefetch} onCancel={onCancelRefetch} />}
-          {news.full_content_zh && <LangToggle showOriginal={showOriginal} onToggle={onToggleOriginal} />}
+          {(news.full_content_zh || selectedPrivateTranslation) && <LangToggle showOriginal={showOriginal} onToggle={onToggleOriginal} />}
           {allowTranslation && !isChineseSource && !translating && !translationPaused && !translateError && (news.full_content_zh_scope !== 'shared' || news.full_translation_personal_available) && (
             <TranslateButton hasTranslation={Boolean(news.full_content_zh)} shared={news.full_content_zh_scope === 'shared'} onClick={onTranslate} />
           )}

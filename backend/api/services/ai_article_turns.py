@@ -75,7 +75,7 @@ def reserve_turn(*, user_id, news_id, turn_id):
             raise ArticleChatTurnError('chat_turn_unavailable') from None
 
 
-def reserve_turn_with_question(*, user_id, news_id, turn_id, question):
+def reserve_turn_with_question(*, user_id, news_id, turn_id, question, article_context=None):
     """Reserve the UUID and append its question atomically, before provider I/O.
 
     Clear-history cannot interleave between the reservation and initial append:
@@ -88,7 +88,7 @@ def reserve_turn_with_question(*, user_id, news_id, turn_id, question):
             with transaction.atomic():
                 _create_turn(user_id=user_id, news_id=news_id, turn_id=turn_id)
                 return append_user_message(
-                    user_id=user_id, news_id=news_id, content=question,
+                    user_id=user_id, news_id=news_id, content=question, article_context=article_context,
                 )
         except OperationalError as error:
             if _is_sqlite_busy(error) and attempt < MAX_TURN_CAS_ATTEMPTS:

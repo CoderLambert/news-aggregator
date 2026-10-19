@@ -72,7 +72,9 @@ def test_chat_history_is_isolated_and_body_owner_fields_are_ignored(chat_news, c
     client_b.force_login(other_chat_user)
     path = f'/api/news/{chat_news.pk}/chat/'
 
-    assert client_b.get(path).json() == {'messages': []}
+    history = client_b.get(path).json()
+    assert history['messages'] == []
+    assert history['translation_context']['source'] == 'original'
     assert client_b.delete(path).status_code == 200
     saved.refresh_from_db()
     assert saved.messages == [{'role': 'user', 'content': 'private to A'}]
@@ -182,7 +184,14 @@ def test_chat_question_at_8000_characters_is_accepted(chat_news, chat_user, monk
     assert response.status_code == 200
     list(response.streaming_content)
     session = ChatSession.objects.get(user=chat_user, news=chat_news)
-    assert session.messages[0] == {'role': 'user', 'content': 'q' * 8000}
+    assert without_article_context(session.messages[0]) == {'role': 'user', 'content': 'q' * 8000}
+    from api.services.article_content import pick_chat_context
+    from api.services.stored_readers import article_snapshot, snapshot_metadata
+    stored = article_snapshot(chat_news, chat_user)
+    _, translation_context = pick_chat_context(
+        chat_news, chat_user, stored=stored, with_metadata=True,
+    )
+    assert session.messages[0]['article_context'] == snapshot_metadata(stored, translation_context)
 
 
 @pytest.mark.django_db

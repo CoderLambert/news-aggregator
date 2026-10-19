@@ -344,6 +344,11 @@ class NewsDetailSerializer(ChannelNewsSerializer):
     full_content_zh_fetched_at = serializers.SerializerMethodField()
     full_content_zh_source = serializers.SerializerMethodField()
     full_content_zh_scope = serializers.SerializerMethodField()
+    full_content_zh_result_id = serializers.SerializerMethodField()
+    full_content_zh_task_id = serializers.SerializerMethodField()
+    full_content_zh_model = serializers.SerializerMethodField()
+    full_content_zh_current_match = serializers.SerializerMethodField()
+    full_content_zh_private_history = serializers.SerializerMethodField()
     full_translation_personal_available = serializers.SerializerMethodField()
     full_content_fetch_status = serializers.CharField(read_only=True)
     full_content_fetch_error = serializers.CharField(read_only=True)
@@ -372,7 +377,9 @@ class NewsDetailSerializer(ChannelNewsSerializer):
             'full_content', 'full_content_fetched_at',
             'has_full_content',
             'full_content_zh', 'full_content_zh_fetched_at', 'full_content_zh_source',
-            'full_content_zh_scope', 'full_translation_personal_available',
+            'full_content_zh_scope', 'full_content_zh_result_id', 'full_content_zh_task_id',
+            'full_content_zh_model', 'full_content_zh_current_match', 'full_content_zh_private_history',
+            'full_translation_personal_available',
             'full_content_fetch_status', 'full_content_fetch_error',
             'full_content_fetch_provider', 'full_content_quality_score',
             'full_content_retry_count', 'last_full_content_attempt',
@@ -401,6 +408,42 @@ class NewsDetailSerializer(ChannelNewsSerializer):
     def get_full_content_zh_scope(self, obj):
         return self._translation(obj)[1]
 
+    def get_full_content_zh_result_id(self, obj):
+        record, _ = self._translation(obj)
+        return record.pk if record is not None and getattr(record, 'api_connection_id', None) is not None else None
+
+    def get_full_content_zh_task_id(self, obj):
+        record, _ = self._translation(obj)
+        return str(record.task_id) if record is not None and getattr(record, 'api_connection_id', None) is not None and record.task_id else None
+
+    def get_full_content_zh_model(self, obj):
+        record, _ = self._translation(obj)
+        return record.model_slug if record is not None and getattr(record, 'api_connection_id', None) is not None else None
+
+    def get_full_content_zh_current_match(self, obj):
+        record, _ = self._translation(obj)
+        if record is None or not hasattr(record, 'source_hash'):
+            return None
+        if getattr(record, 'api_connection_id', None) is not None:
+            # BYOK result currentness was proven against its frozen article
+            # identity (hash, title, revision, and news ID) by stored_readers.
+            return getattr(record, 'current_match', False)
+        return record.source_hash == self._stored(obj).canonical_hash
+
+    def get_full_content_zh_private_history(self, obj):
+        from api.services.stored_readers import private_translation_history
+        user = getattr(self.context.get('request'), 'user', None)
+        if not getattr(user, 'is_authenticated', False):
+            return []
+        return [{
+            'result_id': record.pk, 'task_id': str(record.task_id),
+            'content': record.content, 'model': record.model_slug,
+            'source_hash': record.source_hash, 'current_match': record.current_match,
+            'source_title': record.source_title,
+            'source_revision': record.source_revision,
+            'completed_at': record.completed_at,
+        } for record in private_translation_history(user, self._stored(obj))]
+
     def get_full_translation_personal_available(self, obj):
         from api.services.chatgpt_subscription import active_connection_for_user
         user = getattr(self.context.get('request'), 'user', None)
@@ -428,7 +471,11 @@ class NewsDetailSerializer(ChannelNewsSerializer):
 
     def get_full_content_zh_source(self, obj):
         record, scope = self._translation(obj)
-        return ('chatgpt' if scope == 'private' else getattr(record, 'provider', 'legacy')) if record else None
+        if not record:
+            return None
+        if scope == 'private':
+            return 'byok' if getattr(record, 'api_connection_id', None) is not None else 'chatgpt'
+        return getattr(record, 'provider', 'legacy')
 
     def get_full_content(self, obj):
         stored = self._stored(obj)

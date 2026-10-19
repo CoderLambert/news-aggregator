@@ -18,6 +18,7 @@ import {
 } from '@/services/newsWorkflowApi'
 import { chatHistoryOptions, parseNewsId } from '@/services/newsWorkflowQueries'
 import type { ViewerId } from '@/services/newsWorkflowQueries'
+import type { ChatTranslationMode } from '@/services/api'
 
 export type ChatPhase = 'loading-history' | 'idle' | 'thinking' | 'streaming' | 'success' | 'error'
 type ReconciliationState = 'idle' | 'checking' | 'unconfirmed' | 'partial' | 'failed'
@@ -185,13 +186,14 @@ function snapshotActiveRequest(request: ActiveRequest): PendingTurn {
 }
 
 export function useChat(newsId: string | number | null | undefined, enabled: boolean,
-  modelConfigId: string | null = null, billingConsent = false) {
+  modelConfigId: string | null = null, billingConsent = false, translationResultId: number | null = null,
+  translationMode: ChatTranslationMode = 'current') {
   const queryClient = useQueryClient()
   const { user, loading: authLoading } = useAuth()
   const { lang } = useLanguage()
   const parsedId = parseNewsId(newsId)
   const viewerId: ViewerId = user?.id ?? 'anonymous'
-  const ownerKey = `${parsedId ?? String(newsId ?? '')}:${viewerId}:${lang}`
+  const ownerKey = `${parsedId ?? String(newsId ?? '')}:${viewerId}:${lang}:${translationMode}:${translationResultId ?? 'current'}`
   const ownerRef = useRef(ownerKey)
   const ownerEpochRef = useRef(0)
   const automaticReconciliationRef = useRef('')
@@ -215,11 +217,11 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     ? clearState.value
     : { open: false, clearing: false, error: null }
   const historyOptions = useMemo(() => {
-    const options = chatHistoryOptions(parsedId ?? 0, lang, viewerId)
+    const options = chatHistoryOptions(parsedId ?? 0, lang, viewerId, translationResultId, translationMode)
     return parsedId === null
       ? { ...options, queryKey: ['newsWorkflow', 'chatHistory', 'disabled'] as unknown as typeof options.queryKey }
       : options
-  }, [lang, parsedId, viewerId])
+  }, [lang, parsedId, translationMode, translationResultId, viewerId])
   const historyKey = historyOptions.queryKey
   const historyQuery = useQuery({
     ...historyOptions,
@@ -356,7 +358,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
 
     const isCurrent = () => ownerRef.current === ownerKey && reconciliationControllerRef.current === request
     try {
-      const history = await fetchChatHistory(parsedId, controller.signal)
+      const history = await fetchChatHistory(parsedId, controller.signal, { translationResultId, translationMode })
       if (!isCurrent()) return
       const storedHistory = queryClient.setQueryData<ChatHistory>(historyKey, history) ?? history
       applyHistoryReconciliation(snapshot, storedHistory)
@@ -367,7 +369,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     } finally {
       if (reconciliationControllerRef.current === request) reconciliationControllerRef.current = null
     }
-  }, [applyHistoryReconciliation, historyKey, ownerKey, parsedId, queryClient, updatePendingTurn, updatePhase])
+  }, [applyHistoryReconciliation, historyKey, ownerKey, parsedId, queryClient, translationMode, translationResultId, updatePendingTurn, updatePhase])
 
   useEffect(() => {
     const turn = currentPendingTurn
@@ -461,6 +463,8 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
         for await (const chunk of chatStream(parsedId, trimmed, {
           webSearch, ...(selectedForTurn ? { modelConfigId: selectedForTurn, billingConsent,
             turnId: serverTurnId ?? undefined } : {}),
+          ...(translationMode === 'result' && translationResultId !== null ? { translationResultId } : {}),
+          translationMode,
           signal: request.controller.signal,
         })) {
           if (!isCurrent()) return false
@@ -549,7 +553,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
         if (isCurrent()) requestRef.current = null
       }
     })()
-  }, [authLoading, billingConsent, clearState, currentWebSearch, enabled, historyKey, isLoading, modelConfigId, ownerKey, parsedId, pendingTurnState, queryClient, reconcileInterruptedTurn, setInput, setPendingTurn, updatePendingTurn, updatePhase])
+  }, [authLoading, billingConsent, clearState, currentWebSearch, enabled, historyKey, isLoading, modelConfigId, ownerKey, parsedId, pendingTurnState, queryClient, reconcileInterruptedTurn, setInput, setPendingTurn, updatePendingTurn, updatePhase, translationMode, translationResultId])
 
   const doSend = useCallback((text: string): Promise<boolean> => sendMessage(text), [sendMessage])
   const handleSend = useCallback(() => doSend(inputRef.current), [doSend])
