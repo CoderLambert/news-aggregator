@@ -211,6 +211,54 @@ def test_research_history_replay_denied_after_policy_change(world):
     assert session.search_results.count() == 1
 
 
+def test_research_fetch_article_replay_rechecks_payload_after_title_edit(world):
+    import json
+    from api.models import ResearchSession, ResearchSearchResult
+    from api.services.research.access import require_session_evidence, result_is_current
+
+    a, _, make = world
+    _, news = make('research-fetch-snapshot', subscriber=a, state='available')
+    result = _tool_fetch_article(news.pk, user=a)
+    before = get_stored_article(a, news.pk)
+    assert result['title'] == before.title
+    assert result['full_content_revision'] == before.revision
+    assert result['canonical_hash'] == before.canonical_hash
+
+    envelope = ResearchSession.objects.create(user=a, messages=[
+        {'role': 'assistant', 'tool_calls': [
+            {'id': 'fetch-1', 'function': {'name': 'fetch_article', 'arguments': '{}'}}
+        ]},
+        {'role': 'tool', 'tool_call_id': 'fetch-1', 'content': json.dumps(result)},
+    ])
+    row = ResearchSession.objects.create(user=a)
+    ResearchSearchResult.objects.create(session=row, tool_name='fetch_article',
+        result_type='article', result_data=result)
+    for session in (envelope, row):
+        require_session_evidence(session, a)
+
+    News.objects.filter(pk=news.pk).update(title='updated title without body revision')
+    after = get_stored_article(a, news.pk)
+    assert after.title != before.title
+    assert after.revision == before.revision
+    assert after.canonical_hash == before.canonical_hash
+    assert result_is_current(a, 'fetch_article', result) is False
+    for session in (envelope, row):
+        with pytest.raises(Http404):
+            require_session_evidence(session, a)
+
+
+def test_fetch_webpage_unindexed_result_rejects_mixed_content(world):
+    from api.services.research.access import result_is_current
+
+    a, _, _ = world
+    result = _tool_fetch_webpage('https://not-indexed.example/story', user=a)
+    assert result_is_current(a, 'fetch_webpage', result)
+    assert result_is_current(a, 'fetch_webpage', {
+        **result,
+        'content': 'unverified article content',
+    }) is False
+
+
 def test_research_search_result_replay_is_snapshot_and_policy_bound(world):
     import json
     from api.models import ResearchSession, ResearchSearchResult
