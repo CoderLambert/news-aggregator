@@ -12,7 +12,7 @@ from rest_framework.test import APIClient
 from api.models import Source, Category, News, ChannelGroup, ChannelSubscription, ChannelGroupMember, BlockedNews
 from api.smart_channel_models import SourceTopicProfile, ChannelGroupingConfig, ChannelGroupingOverride, ChannelGroupingProposal, ReadingDay, SubscriptionGroupingState
 from api.services.channel_grouping import make_proposal, process_subscription, mark_manual
-from api.services.channel_topics import profile_data, digest
+from api.services.channel_topics import profile_data, digest, base_profile
 from api.services.channel_ai import parse_classification, claim_next, execute_job, process_incremental_subscriptions
 
 
@@ -245,6 +245,49 @@ class SmartChannelTests(TestCase):
         process_subscription(new.pk)
         self.assertFalse(group.subscriptions.exists())
         self.assertEqual(ChannelGroupingProposal.objects.filter(user=self.user).count(), 1)
+
+    def test_suggested_subscription_is_revisited_after_manual_topic_confirmation(self):
+        group = ChannelGroup.objects.create(user=self.user, name='Verified frontend')
+        ChannelGroupingConfig.objects.create(user=self.user, mode='auto', bindings={'frontend': group.pk})
+        SourceTopicProfile.objects.update_or_create(source=self.source2, defaults={
+            'topics': ['frontend'], 'origin': 'ai', 'about': 'Public metadata',
+            'evidence_hash': base_profile(self.source2)['evidence_hash'],
+        })
+        newcomer = ChannelSubscription.objects.create(user=self.user, source=self.source2)
+        process_subscription(newcomer.pk)
+        state = SubscriptionGroupingState.objects.get(subscription=newcomer)
+        self.assertEqual(state.status, 'suggested')
+        self.assertFalse(group.subscriptions.exists())
+        SourceTopicProfile.objects.filter(source=self.source2).update(origin='manual', revision=2)
+        self.assertEqual(process_incremental_subscriptions(limit=1), 1)
+        state.refresh_from_db()
+        self.assertEqual(state.status, 'applied')
+        self.assertEqual(list(group.subscriptions.values_list('source_id', flat=True)), [self.source2.pk])
+        self.assertEqual(process_incremental_subscriptions(limit=1), 0)
+
+    def test_subscription_removed_at_owner_lock_is_not_grouped(self):
+        group = ChannelGroup.objects.create(user=self.user, name='No stale subscription')
+        ChannelGroupingConfig.objects.create(user=self.user, mode='auto', bindings={'ai': group.pk})
+        newcomer = ChannelSubscription.objects.create(user=self.user, source=self.source2)
+        with patch('api.services.channel_grouping.lock_user', side_effect=lambda user: ChannelSubscription.objects.filter(pk=newcomer.pk).delete()):
+            process_subscription(newcomer.pk)
+        self.assertFalse(SubscriptionGroupingState.objects.filter(subscription_id=newcomer.pk).exists())
+        self.assertFalse(group.subscriptions.exists())
+
+    def test_one_owner_preview_limit_does_not_block_other_owner(self):
+        from rest_framework.exceptions import Throttled
+        group = ChannelGroup.objects.create(user=self.user, name='Busy owner')
+        ChannelGroupingConfig.objects.create(user=self.user, mode='suggest', bindings={'frontend': group.pk},
+            active_since=timezone.now() - timedelta(days=1))
+        other_group = ChannelGroup.objects.create(user=self.other, name='Other owner')
+        ChannelGroupingConfig.objects.create(user=self.other, mode='suggest', bindings={'ai': other_group.pk})
+        other_subscription = ChannelSubscription.objects.create(user=self.other, source=self.source2)
+        def process(pk):
+            if pk == self.subscription.pk:
+                raise Throttled(60)
+        with patch('api.services.channel_ai.process_subscription', side_effect=process) as processor:
+            self.assertEqual(process_incremental_subscriptions(limit=1), 1)
+        self.assertEqual([call.args[0] for call in processor.call_args_list], [self.subscription.pk, other_subscription.pk])
 
     def test_unchanged_pending_does_not_starve_new_subscription(self):
         # Existing fixture subscription predates the grouping-mode activation.

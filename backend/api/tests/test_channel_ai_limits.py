@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.contrib.auth.models import User
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
-from api.models import Source, ChannelSubscription
+from api.models import Source, ChannelSubscription, ChannelGroup
 from api.smart_channel_models import ChannelGroupingProposal, ChannelGroupingConfig
 from api.services.channel_ai import retry_delay, execute_job, process_incremental_subscriptions
 
@@ -57,7 +57,8 @@ class DurableGroupingLimitTests(TestCase):
     def test_old_subscriptions_do_not_starve_new_subscription_processing(self):
         old = ChannelSubscription.objects.create(user=self.user, source=self.source)
         ChannelSubscription.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=2))
-        ChannelGroupingConfig.objects.create(user=self.user, mode='suggest', bindings={})
+        group = ChannelGroup.objects.create(user=self.user, name='New source group')
+        ChannelGroupingConfig.objects.create(user=self.user, mode='suggest', bindings={'ai': group.pk})
         second, _ = Source.objects.get_or_create(name='OpenAI Blog', defaults={'url': 'https://openai.com/news'})
         new = ChannelSubscription.objects.create(user=self.user, source=second)
         with patch('api.services.channel_ai.process_subscription') as process:

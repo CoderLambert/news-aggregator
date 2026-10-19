@@ -259,14 +259,23 @@ def process_subscription(subscription_id):
     if not subscription or not subscription.user.is_active:
         return
     user = subscription.user
-    lock_user(user)
+    try:
+        lock_user(user)
+    except User.DoesNotExist:
+        return
+    # The subscription may have been removed while waiting for the owner lock.
+    user.refresh_from_db(fields=['is_active'])
+    subscription = ChannelSubscription.objects.select_related('source').filter(pk=subscription_id, user=user).first()
+    if subscription is None or not user.is_active:
+        return
     cfg = ChannelGroupingConfig.objects.filter(user=user).first()
     if not cfg or cfg.mode == 'off' or not cfg.bindings or subscription.created_at < cfg.active_since:
         return
     profile = profile_data(subscription.source)
     state, _ = SubscriptionGroupingState.objects.get_or_create(subscription=subscription)
     signature = digest([profile['evidence_hash'], profile['topics'], profile['origin'], cfg.revision])
-    if state.profile_hash == signature:
+    # Applied history and later manual membership changes are authoritative.
+    if state.status == 'applied' or state.profile_hash == signature:
         return
     state.profile_hash = signature
     topic_keys = [key for key in profile['topics'] if key in cfg.bindings and
