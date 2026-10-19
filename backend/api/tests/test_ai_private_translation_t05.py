@@ -30,7 +30,12 @@ class PrivateTranslationTests(TransactionTestCase):
     def setUp(self):
         fixtures.PersonalArticleChatTests.setUp(self)
         self.news.full_content = '# Synthetic article\n\nFull original Markdown for private translation.'
-        self.news.save(update_fields=['full_content'])
+        self.news.full_content_state = 'legacy'
+        self.news.save(update_fields=['full_content', 'full_content_state'])
+        stored = service.article_snapshot(self.news, self.owner)
+        self.assertEqual(stored.scope, 'full')
+        self.assertEqual(service.require_current(self.owner, stored, full=True).markdown,
+                         self.news.full_content)
         self.url = f'/api/news/{self.news.pk}/byok-translation/'
         self.request_id = str(uuid.uuid4())
 
@@ -50,8 +55,9 @@ class PrivateTranslationTests(TransactionTestCase):
 
     def execute(self, task, frames=None, on_send=None):
         gateway = FakeGateway(frames if frames is not None else [gateway_frame('完整中文译文。')], on_send)
-        with patch.object(service, 'build_gateway_client', return_value=gateway):
+        with patch.object(service, 'build_gateway_client', return_value=gateway) as build:
             service.run_translation(task.pk, task.generation)
+            gateway.admitted_keys = [call.args[0] for call in build.call_args_list]
         task.refresh_from_db()
         return gateway
 
@@ -99,6 +105,17 @@ class PrivateTranslationTests(TransactionTestCase):
             self.model.last_text_attempt = None
             self.model.save(update_fields=['last_text_attempt'])
             self.assertEqual(self.start().status_code, 409)
+        dispatch.assert_not_called()
+        self.assertFalse(ChatGPTTranslationTask.objects.exists())
+
+    def test_missing_full_body_state_rejects_before_task_or_dispatch(self):
+        self.news.full_content_state = 'missing'
+        self.news.save(update_fields=['full_content_state'])
+        self.assertNotEqual(service.article_snapshot(self.news, self.owner).scope, 'full')
+        with patch.object(service, '_dispatch') as dispatch:
+            response = self.start()
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data['error_code'], 'execution_changed')
         dispatch.assert_not_called()
         self.assertFalse(ChatGPTTranslationTask.objects.exists())
 
@@ -388,6 +405,9 @@ class PrivateTranslationTests(TransactionTestCase):
                              {self.connection.pk, connection_b.pk})
             self.assertEqual(len(gateway_a.sent), 1)
             self.assertEqual(len(gateway_b.sent), 1)
+            self.assertTrue(gateway_a.admitted_keys == [KEY])
+            self.assertTrue(gateway_b.admitted_keys == [KEY + '-other'])
+            self.assertTrue(gateway_a.admitted_keys != gateway_b.admitted_keys)
             self.assertEqual(self.client.get(f'/api/me/ai/translations/{task_a.pk}/').status_code, 404)
             self.assertEqual(original_client.get(f'/api/me/ai/translations/{task_b.pk}/').status_code, 404)
             self.assertFalse(SharedArticleTranslation.objects.exists())

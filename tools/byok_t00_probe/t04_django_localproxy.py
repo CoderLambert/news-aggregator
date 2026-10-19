@@ -34,6 +34,7 @@ from api.ai_model_models import AIModelProbeAttempt, UserAIModelConfig  # noqa: 
 from api.models import (ArticleChatTurn, Category, ChatSession, News, Source,
                         ChatGPTTranslationTask, ChatGPTArticleTranslation, SharedArticleTranslation)  # noqa: E402
 from api.tests.rss.reader_fixtures import public_legacy_article  # noqa: E402
+from api.services.stored_readers import article_snapshot, require_current  # noqa: E402
 
 ALIAS = "deepseek/deepseek-flash"
 CONNECTIONS = "/api/me/ai/connections/"
@@ -445,12 +446,18 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
             # T05 uses its own durable worker/admission path through this exact
             # SDK/Proxy process, not the T04 business generator or a fake gateway.
             def translation_article(marker):
-                return public_legacy_article(News.objects.create(
+                article = public_legacy_article(News.objects.create(
                     title="T05 synthetic article", url="https://publisher.example/" + marker,
                     source=source, category=category, content="Synthetic summary",
                     full_content="# Full Markdown\n\n" + marker,
+                    full_content_state="legacy",
                     publish_time=timezone.now(),
                 ))
+
+                stored = article_snapshot(article, owner)
+                assert stored.scope == "full"
+                assert require_current(owner, stored, full=True).markdown == article.full_content
+                return article
 
             def wait_translation(task_id):
                 deadline = time.monotonic() + 12
