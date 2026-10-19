@@ -521,7 +521,7 @@ def run_translation(task_id, generation):
             for chunk_index, chunk in enumerate(chunks):
                 gateway = stream = None
                 pieces = []
-                chunk_body, separator = _split_trailing_separator(chunk)
+                chunk_body, separator = (_split_trailing_separator(chunk) if long_translation else (chunk, ''))
                 if not chunk_body.strip():
                     raise TranslationError('translation_markdown_invalid', 400)
                 def send(key):
@@ -546,13 +546,19 @@ def run_translation(task_id, generation):
                     for delta in verified_text_deltas(
                             stream, check=lambda: _live(task_id, generation, token),
                             max_chars=MAX_OUTPUT_CHARS):
-                        _write_delta(task_id, generation, token, delta)
+                        if not long_translation:
+                            _write_delta(task_id, generation, token, delta)
                         pieces.append(delta)
-                    translated_chunk = ''.join(pieces) + separator
+                    translated_body = ''.join(pieces)
+                    if separator:
+                        # Normalize model-added terminal whitespace, then restore
+                        # the exact source boundary once in progress and final text.
+                        translated_body = translated_body.rstrip(' \\t\\r\\n')
+                    translated_chunk = translated_body + separator
                     if long_translation and _markdown_signature(chunk) != _markdown_signature(translated_chunk):
                         raise TranslationError('incomplete_response')
-                    if separator:
-                        _write_delta(task_id, generation, token, separator)
+                    if long_translation:
+                        _write_delta(task_id, generation, token, translated_chunk)
                     completed_chunks.append(translated_chunk)
                 finally:
                     for resource in (stream, gateway):
