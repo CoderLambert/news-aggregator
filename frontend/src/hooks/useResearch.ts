@@ -421,7 +421,10 @@ function querySessionMessages(
   return { messages: cached ? convertMessages(cached.messages) : [], messageCount: cached?.message_count ?? 0 }
 }
 
-export function useResearch(viewerId: ResearchViewerId | null) {
+export function useResearch(
+  viewerId: ResearchViewerId | null,
+  { byokCreateOnly = false }: { byokCreateOnly?: boolean } = {},
+) {
   const queryClient = useQueryClient()
   const { lang } = useLanguage()
   const queryViewerId = viewerId ?? 'anonymous'
@@ -828,6 +831,15 @@ export function useResearch(viewerId: ResearchViewerId | null) {
       )
       if (!connectionIsCurrent(connection)) return
       if (stream.kind === 'queued') {
+        if (byokCreateOnly) {
+          putTask(taskKey, {
+            ...nextTask,
+            phase: 'cancelled',
+            recovery: 'resume',
+            notice: '已有研究仍在等待启动。当前模式仅允许读取现有任务，不会通过恢复请求重新派发。',
+          })
+          return
+        }
         if (!stream.runId) {
           putTask(taskKey, {
             ...nextTask, phase: 'error', recovery: 'resume',
@@ -902,7 +914,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
         setConnectionBusy(false)
       }
     }
-  }, [cancelConnectionOnServer, connectionIsCurrent, consumeResearchEvents, currentConnectionTask, lang, putTask, queryClient, queryViewerId, removeTask, viewerId])
+  }, [byokCreateOnly, cancelConnectionOnServer, connectionIsCurrent, consumeResearchEvents, currentConnectionTask, lang, putTask, queryClient, queryViewerId, removeTask, viewerId])
 
   const handleSend = useCallback(async (
     query: string,
@@ -913,6 +925,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
   ) => {
     const normalizedQuery = query.trim()
     if (!normalizedQuery || connectionRef.current || sendLockRef.current || viewerId === null) return false
+    if (byokCreateOnly && (activeSessionId !== null || !authorization || authorization.consent !== true)) return false
     if (authorization && (activeSessionId !== null || authorization.consent !== true)) return false
     // Without response headers, a prior create may already have reached Django.
     // Never create a different request key while its fate is unknown.
@@ -931,7 +944,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     const taskId = `research-${Date.now()}-${++taskSequenceRef.current}`
     const task = createResearchTask(taskId, normalizedQuery, localOnly, priorMessages, sessionId, messageCount)
     return runStreamTask(task, sessionId ? 'chat' : 'create', undefined, authorization)
-  }, [activeSessionId, activeTask, lang, queryClient, queryViewerId, runStreamTask, viewerId])
+  }, [activeSessionId, activeTask, byokCreateOnly, lang, queryClient, queryViewerId, runStreamTask, viewerId])
 
   const handleNewSession = useCallback(() => {
     pauseCurrentConnection('已切换到新会话；原服务端任务可能仍在运行，可从历史会话继续接收。')
@@ -971,7 +984,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
 
   const handleRetry = useCallback(async (authorization?: ResearchCreateAuthorization) => {
     const task = activeTask
-    if (!task || (task.phase !== 'error' && task.phase !== 'cancelled') || task.recovery !== 'retry' || viewerId === null) return
+    if (byokCreateOnly || !task || (task.phase !== 'error' && task.phase !== 'cancelled') || task.recovery !== 'retry' || viewerId === null) return
     // An unanswered create POST may already have invoked a paid provider.
     if (loadPendingCreate(viewerId)) return
     const next = createResearchTask(
@@ -984,11 +997,12 @@ export function useResearch(viewerId: ResearchViewerId | null) {
     )
     await runStreamTask(next, next.sessionId ? 'chat' : 'create', undefined,
       next.sessionId ? undefined : authorization)
-  }, [activeTask, runStreamTask, viewerId])
+  }, [activeTask, byokCreateOnly, runStreamTask, viewerId])
 
   const handleResume = useCallback(async () => {
     const task = activeTask
     if (!task || task.recovery !== 'resume' || viewerId === null) return
+    if (byokCreateOnly && !task.sessionId) return
     if (!task.sessionId) {
       const pending = loadPendingCreate(viewerId)
       if (!pending || pending.taskId !== task.id) return
@@ -998,7 +1012,7 @@ export function useResearch(viewerId: ResearchViewerId | null) {
       return
     }
     await startSessionRecovery(task.sessionId, task)
-  }, [activeTask, runStreamTask, startSessionRecovery, viewerId])
+  }, [activeTask, byokCreateOnly, runStreamTask, startSessionRecovery, viewerId])
 
   const handleCancel = useCallback(async () => {
     const connection = connectionRef.current

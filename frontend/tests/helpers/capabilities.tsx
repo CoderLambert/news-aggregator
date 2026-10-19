@@ -9,7 +9,7 @@ import type { CapabilityName, SiteCapabilities } from '@/services/api'
 const TEST_FEATURE_NAMES: CapabilityName[] = [
   'news', 'keyword_search', 'semantic_search', 'accounts', 'signup', 'favorites',
   'blocked_news', 'chat_history', 'fetch_full', 'translation', 'chat',
-  'suggested_questions', 'tts', 'research', 'provider_comparisons', 'admin',
+  'suggested_questions', 'tts', 'research', 'research_byok_create', 'provider_comparisons', 'admin',
   'chatgpt_subscription',
 ]
 

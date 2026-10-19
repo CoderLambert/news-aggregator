@@ -110,7 +110,7 @@ def test_disabled_byok_gate_never_shadows_independent_subscription(owner):
 @pytest.mark.django_db
 @override_settings(AI_BYOK_ENABLED=True, PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
 def test_chatgpt_subscription_works_even_with_enabled_unbound_byok_connection(owner):
-    from api.models import Category, News, Source
+    from api.models import Category, ChatGPTSubscriptionConnection, News, Source
     from api.tests.rss.reader_fixtures import public_legacy_article
     from django.utils import timezone
     from rest_framework.response import Response
@@ -129,7 +129,14 @@ def test_chatgpt_subscription_works_even_with_enabled_unbound_byok_connection(ow
     )
     client = APIClient()
     client.force_login(owner)
-    selected = object()
+    selected = ChatGPTSubscriptionConnection.objects.create(
+        user=owner,
+        subject_hash='synthetic-subject-hash',
+        issuer='https://issuer.example',
+        issued_client_id='synthetic-client-id',
+        registration_key_hash='synthetic-registration-key-hash',
+        is_active=True,
+    )
     with (
         patch('api.services.chatgpt_subscription.active_connection_for_user', return_value=selected),
         patch('api.services.ai_execution.personal_clients_for_user',

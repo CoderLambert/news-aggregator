@@ -90,6 +90,13 @@ export default function ChatMessageList({
             {message.role === 'assistant' && (message.context_scope === 'summary' || message.context_scope === 'excerpt') && (
               <p className="mb-2 text-xs text-muted-foreground">{message.context_scope === 'summary' ? '当前回答基于摘要' : '当前回答基于文章节选'}</p>
             )}
+            {message.role === 'assistant' && message.translation_context?.source === 'byok' &&
+              message.translation_context.current_match === false && (
+                <p role="status" className="mb-2 text-xs text-amber-700 dark:text-amber-300">
+                  此回答基于历史个人译文：{message.translation_context.source_title || '旧版原文'}
+                  {message.translation_context.model ? ` · ${message.translation_context.model}` : ''}
+                </p>
+              )}
             {message.role === 'assistant' ? (
               message.content ? (
                 <div className="chat-message-markdown"><MarkdownContent content={message.content} /></div>

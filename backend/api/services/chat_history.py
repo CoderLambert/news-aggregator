@@ -111,11 +111,12 @@ def _append_message(*, user_id: int, news_id: int, message: dict, session_id: in
     raise ChatConflict('chat_conflict') from last_busy_error
 
 
-def append_user_message(*, user_id: int, news_id: int, content: str) -> ChatSnapshot:
+def append_user_message(*, user_id: int, news_id: int, content: str, article_context=None) -> ChatSnapshot:
     return _append_message(
         user_id=user_id,
         news_id=news_id,
-        message={'role': 'user', 'content': content},
+        message={'role': 'user', 'content': content,
+                 **({'article_context': article_context} if article_context is not None else {})},
         create=True,
     )
 

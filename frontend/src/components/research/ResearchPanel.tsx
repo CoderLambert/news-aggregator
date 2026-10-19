@@ -123,7 +123,7 @@ function ResearchPanelView({
     handleDisconnect,
     handleResume,
     handleRetry,
-  } = useResearch(user?.id ?? null)
+  } = useResearch(user?.id ?? null, { byokCreateOnly })
 
   const billingConsentKey = JSON.stringify([
     user?.id ?? 'anonymous',
@@ -160,7 +160,7 @@ function ResearchPanelView({
 
   function handleSendQuery() {
     if (!input.trim() || isLoading || hasRecoverableTask || !user) return
-    if (byokCreateOnly && (activeSessionId || !researchModelConfigId || !researchModel)) return
+    if (byokCreateOnly && (activeSessionId || recoveryAction === 'retry' || !researchModelConfigId || !researchModel)) return
     const submittedInput = input
     if (!activeSessionId && researchModelConfigId && !billingConsent) return
     void handleSend(input.trim(), {
@@ -176,7 +176,7 @@ function ResearchPanelView({
       setShowAuthModal(true)
       return
     }
-    if (isBusy || hasRecoverableTask || (byokCreateOnly && activeSessionId)) return
+    if (isBusy || hasRecoverableTask || (byokCreateOnly && (activeSessionId || recoveryAction === 'retry'))) return
     if (byokCreateOnly && (!researchModelConfigId || !researchModel)) return
     if (!activeSessionId && researchModelConfigId && !billingConsent) {
       setInput(query)
@@ -364,15 +364,25 @@ function ResearchPanelView({
                 onSuggestionClick={handleSuggestionClick}
                 disabled={isBusy || (byokCreateOnly && Boolean(activeSessionId))}
               />
-              {recoveryAction === 'resume' && !(byokCreateOnly && activeSessionId) && (
+              {recoveryAction === 'resume' && !(byokCreateOnly && !activeSessionId) && (
                 <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-200">
-                  <span>{!activeSessionId ? '原请求可能已到达服务器。继续接收将复用原请求标识，避免创建新的重复任务；暂时无法确认后台是否已经开始。' : '浏览器连接已停止；后台任务可能仍在执行。重新连接会回放当前任务的事件。'}</span>
+                  <span>{byokCreateOnly ? '只会读取此会话已有任务事件；若任务仍在排队，不会重新派发模型任务。' : !activeSessionId ? '原请求可能已到达服务器。继续接收将复用原请求标识，避免创建新的重复任务；暂时无法确认后台是否已经开始。' : '浏览器连接已停止；后台任务可能仍在执行。重新连接会回放当前任务的事件。'}</span>
                   <Button type="button" size="sm" variant="outline" onClick={() => void handleResume()}>
                     继续接收
                   </Button>
                 </div>
               )}
-              {recoveryAction === 'retry' && !(byokCreateOnly && activeSessionId) && (
+              {byokCreateOnly && recoveryAction === 'resume' && !activeSessionId && (
+                <div role="status" className="rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-200">
+                  原请求尚未确认对应会话。为避免重新派发或重复计费，此模式不会重放新建请求；可先从历史会话中查看已保存结果。
+                </div>
+              )}
+              {byokCreateOnly && recoveryAction === 'retry' && (
+                <div role="status" className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-200">
+                  上次结果尚未确认。此模式不自动重试；请先查看历史会话，或在新研究中重新选择模型并确认费用。
+                </div>
+              )}
+              {recoveryAction === 'retry' && !byokCreateOnly && (
                 <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-500/25 bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-200">
                   <span>原请求可能已到达服务器。只有点击下方按钮才会新建任务，可能重复计算或产生费用。</span>
                   <Button type="button" size="sm" variant="outline" onClick={() => void handleRetry()}>
@@ -391,7 +401,7 @@ function ResearchPanelView({
           onCancel={handleCancel}
           isLoading={isLoading}
           disabled={!user || hasRecoverableTask
-            || (byokCreateOnly && (Boolean(activeSessionId) || !researchModelConfigId || !researchModel))
+            || (byokCreateOnly && (Boolean(activeSessionId) || recoveryAction === 'retry' || !researchModelConfigId || !researchModel))
             || (!activeSessionId && Boolean(researchModelConfigId) && !billingConsent)}
           localOnly={localOnly}
           onToggleLocalOnly={() => setLocalOnly((enabled) => !enabled)}

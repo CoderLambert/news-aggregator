@@ -22,7 +22,7 @@ def make_news(db):
 
 
 @pytest.mark.parametrize('values,expected', [
-    (dict(full_content='FULL_EN',full_content_zh='FULL_ZH',full_content_state='legacy'), 'FULL_EN'),
+    (dict(full_content='FULL_EN',full_content_zh='FULL_ZH',full_content_state='legacy'), 'FULL_ZH'),
     (dict(full_content='FULL_EN',content_zh='SHORT_ZH',full_content_state='complete',full_content_fetch_status='rate_limited'),'FULL_EN'),
     (dict(full_content='RETAINED_AUDIT',full_content_zh='OLD_TRANSLATION',full_content_state='missing',content_zh='SHORT_ZH'),'SHORT_PREVIEW'),
     (dict(content_zh='SHORT_ZH'),'SHORT_PREVIEW'),
@@ -30,6 +30,13 @@ def make_news(db):
 ])
 def test_current_context_requires_readable_body_before_full_translation_preference(make_news,values,expected):
     assert pick_chat_context(make_news(**values)) == expected
+
+
+def test_original_context_keeps_full_body_when_current_translation_exists(make_news):
+    news = make_news(
+        full_content='FULL_EN', full_content_zh='FULL_ZH', full_content_state='legacy',
+    )
+    assert pick_chat_context(news, translation_mode='original') == 'FULL_EN'
 
 
 def test_ensure_full_content_persists_intent_without_fetching(make_news):

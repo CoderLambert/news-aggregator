@@ -35,4 +35,30 @@ describe('T04 personal chat request billing consent transport', () => {
       question: 'Existing route', web_search: false,
     })
   })
+  it('transmits explicit original and saved-result modes independently', async () => {
+    for await (const chunk of chatStream(71, 'Original question', { translationMode: 'original' })) {
+      expect(chunk).toBe('synthetic')
+    }
+    expect(JSON.parse(wire.streamingFetch.mock.calls[0][1].body)).toEqual({
+      question: 'Original question', web_search: false, translation_mode: 'original',
+    })
+
+    for await (const chunk of chatStream(71, 'Saved question', {
+      translationMode: 'result', translationResultId: 88,
+    })) { expect(chunk).toBe('synthetic') }
+    expect(JSON.parse(wire.streamingFetch.mock.calls[1][1].body)).toEqual({
+      question: 'Saved question', web_search: false, translation_mode: 'result',
+      translation_result_id: 88,
+    })
+  })
+
+  it('transmits an explicitly selected saved translation result without changing billing fields', async () => {
+    for await (const chunk of chatStream(71, 'Question', { translationResultId: 88 })) {
+      expect(chunk).toBe('synthetic')
+    }
+    expect(JSON.parse(wire.streamingFetch.mock.calls[0][1].body)).toEqual({
+      question: 'Question', web_search: false, translation_result_id: 88,
+    })
+  })
+
 })

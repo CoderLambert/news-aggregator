@@ -48,8 +48,11 @@ function SpeechCapabilityGate() {
   return enabled ? <GlobalSpeechPlayer /> : null
 }
 function ResearchCapabilityGate() {
-  const { enabled } = useCapability('research')
-  return enabled ? <ResearchLauncher key="research-enabled" /> : null
+  const { enabled: researchEnabled } = useCapability('research')
+  const { enabled: byokCreateEnabled } = useCapability('research_byok_create')
+  return researchEnabled || byokCreateEnabled
+    ? <ResearchLauncher key="research-enabled" />
+    : null
 }
 
 export default function App() {

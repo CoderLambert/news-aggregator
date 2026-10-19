@@ -23,6 +23,7 @@ export const CAPABILITY_FEATURE_NAMES = [
   'suggested_questions',
   'tts',
   'research',
+  'research_byok_create',
   'provider_comparisons',
   'admin',
   'chatgpt_subscription',
@@ -117,6 +118,8 @@ export interface ResearchStreamOptions {
   signal?: AbortSignal
   onSessionId?: (sessionId: string) => void
   onRunId?: (runId: string) => void
+  modelConfigId?: string
+  consent?: true
 }
 
 export interface ResearchChatStreamOptions {
@@ -142,11 +145,15 @@ interface SuggestedQuestionsOptions {
   signal?: AbortSignal
 }
 
+export type ChatTranslationMode = 'current' | 'original' | 'result'
+
 interface ChatStreamOptions {
   webSearch?: boolean
   modelConfigId?: string | null
   billingConsent?: boolean
   turnId?: string
+  translationResultId?: number | null
+  translationMode?: ChatTranslationMode
   signal?: AbortSignal
 }
 
@@ -288,8 +295,15 @@ export function retestProviderComparison(id: NewsId, signal?: AbortSignal): Prom
 
 // ---- Chat -----------------------------------------------------------------
 
-export function fetchChatHistory(newsId: NewsId, signal?: AbortSignal): Promise<unknown> {
-  return api.get<unknown>(`/news/${newsId}/chat/`, { signal }).then(({ data }) => data)
+export function fetchChatHistory(newsId: NewsId, signal?: AbortSignal, selection: {
+  translationResultId?: number | null
+  translationMode?: ChatTranslationMode
+} = {}): Promise<unknown> {
+  const params = {
+    ...(selection.translationResultId != null ? { translation_result_id: selection.translationResultId } : {}),
+    ...(selection.translationMode ? { translation_mode: selection.translationMode } : {}),
+  }
+  return api.get<unknown>(`/news/${newsId}/chat/`, { signal, params }).then(({ data }) => data)
 }
 
 export function clearChatHistory(newsId: NewsId, signal?: AbortSignal): Promise<unknown> {
@@ -366,10 +380,13 @@ export async function* translateFullArticleStream(
 export async function* chatStream(
   newsId: NewsId,
   question: string,
-  { webSearch = false, modelConfigId, billingConsent = false, turnId, signal }: ChatStreamOptions = {},
+  { webSearch = false, modelConfigId, billingConsent = false, turnId, translationResultId, translationMode, signal }: ChatStreamOptions = {},
 ): AsyncGenerator<string> {
   const response = await streamingFetch(`/api/news/${newsId}/chat/`, {
     body: JSON.stringify({ question, web_search: webSearch,
+      ...(translationMode ? { translation_mode: translationMode } : {}),
+      ...(translationResultId !== undefined && translationResultId !== null
+        ? { translation_result_id: translationResultId } : {}),
       ...(modelConfigId ? { model_config_id: modelConfigId, billing_consent: billingConsent === true,
         turn_id: turnId } : {}) }),
     signal,
@@ -606,10 +623,31 @@ export function deleteResearchSession(sessionId: string): Promise<unknown> {
 
 export async function* createResearchStream(
   query: string,
-  { localOnly = false, idempotencyKey, signal, onSessionId, onRunId }: ResearchStreamOptions = {},
+  {
+    localOnly = false,
+    idempotencyKey,
+    signal,
+    onSessionId,
+    onRunId,
+    modelConfigId,
+    consent,
+  }: ResearchStreamOptions = {},
 ): AsyncGenerator<unknown> {
+  const hasModelConfigId = modelConfigId !== undefined
+  const hasConsent = consent !== undefined
+  if (
+    hasModelConfigId !== hasConsent
+    || (hasModelConfigId && (typeof modelConfigId !== 'string' || !modelConfigId.trim() || consent !== true))
+  ) {
+    throw new TypeError('Research BYOK requests require an explicit model and literal consent')
+  }
+
   const response = await streamingFetch('/api/research/', {
-    body: JSON.stringify({ query, local_only: localOnly }),
+    body: JSON.stringify({
+      query,
+      local_only: localOnly,
+      ...(hasModelConfigId ? { model_config_id: modelConfigId, consent: true } : {}),
+    }),
     headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     signal,
   })

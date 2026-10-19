@@ -710,6 +710,24 @@ class NewsTranslateFullView(ArticleAccessMixin, generics.GenericAPIView):
         return _translation_job_response(request, news, stored, job)
 
 
+MAX_TRANSLATION_RESULT_ID = (1 << 63) - 1
+
+
+def _valid_translation_result_id(value):
+    """Accept only an absent ID or a bounded canonical positive decimal key."""
+    if value is None or value == '':
+        return True
+    if type(value) is int:
+        return 1 <= value <= MAX_TRANSLATION_RESULT_ID
+    if isinstance(value, str):
+        if (not value or len(value) > 19 or not value.isascii()
+                or not value.isdecimal() or value.startswith('0')):
+            return False
+        number = int(value)
+        return 1 <= number <= MAX_TRANSLATION_RESULT_ID
+    return False
+
+
 class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
     """Chat with the AI assistant about a news article for the authenticated user."""
     queryset = News.objects.select_related('source', 'category').prefetch_related('source_items').all()
@@ -717,13 +735,35 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
-        """Return chat history."""
+        """Return chat history for the exact selected evidence identity."""
         news = self.get_object()
         session = ChatSession.objects.filter(user=request.user, news=news).first()
         from api.services.chat_history import normalized_chat_history
-        from api.services.stored_readers import readable_chat_messages
+        from api.services.stored_readers import (
+            PrivateTranslationNotFound, readable_chat_messages,
+        )
+        from api.services.article_content import pick_chat_context
         stored = get_stored_article(request.user, news.pk)
-        return Response({'messages': readable_chat_messages(normalized_chat_history(session.messages), stored) if session else []})
+        translation_result_id = request.query_params.get('translation_result_id')
+        mode = request.query_params.get('translation_mode')
+        if not _valid_translation_result_id(translation_result_id):
+            return Response({'error_code': 'invalid_translation_selection'}, status=status.HTTP_400_BAD_REQUEST)
+        if mode is None:
+            mode = 'result' if translation_result_id not in (None, '') else 'current'
+        if mode not in {'current', 'original', 'result'} or (mode == 'result' and not translation_result_id) or (mode != 'result' and translation_result_id not in (None, '')):
+            return Response({'error_code': 'invalid_translation_selection'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            _, translation_context = pick_chat_context(
+                news, request.user, translation_result_id=translation_result_id or None,
+                translation_mode=mode, stored=stored, with_metadata=True,
+            )
+        except PrivateTranslationNotFound:
+            return Response({'error_code': 'translation_result_unavailable'}, status=status.HTTP_404_NOT_FOUND)
+        messages = readable_chat_messages(
+            normalized_chat_history(session.messages), stored, translation_context,
+            allow_legacy_original=(translation_context.get('source') == 'original'),
+        ) if session else []
+        return Response({'messages': messages, 'translation_context': translation_context})
 
     def delete(self, request, pk):
         """Clear chat history."""
@@ -760,6 +800,16 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
                 {'error_code': 'invalid_question', 'error': '问题必须是非空文本'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        translation_result_id = payload.get('translation_result_id')
+        translation_mode = payload.get('translation_mode')
+        if translation_mode is None:
+            translation_mode = 'result' if translation_result_id not in (None, '') else 'current'
+        if (not _valid_translation_result_id(translation_result_id)
+                or not isinstance(translation_mode, str) or translation_mode not in {'current', 'original', 'result'}
+                or (translation_mode == 'result' and translation_result_id in (None, ''))
+                or (translation_mode != 'result' and translation_result_id not in (None, ''))):
+            return Response({'error_code': 'invalid_translation_selection'},
+                            status=status.HTTP_400_BAD_REQUEST)
 
         from api.services.chatgpt_subscription import active_connection_for_user, stream_chat_response
         from api.services.ai_execution import PersonalAIUnavailable, personal_clients_for_user
@@ -811,9 +861,19 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        # Reader actions consume stored content; subscription/sync owns collection.
+        # Use the same explicitly owned result as detail/TTS; read resolution never dispatches.
         stored = get_stored_article(request.user, news.pk)
-        context, chat_scope = stored.markdown, stored.scope
+        from api.services.article_content import pick_chat_context
+        from api.services.stored_readers import PrivateTranslationNotFound
+        try:
+            context, translation_context = pick_chat_context(
+                news, request.user, translation_result_id=translation_result_id or None,
+                translation_mode=translation_mode, stored=stored, with_metadata=True,
+            )
+        except PrivateTranslationNotFound:
+            return Response({'error_code': 'translation_result_unavailable'},
+                            status=status.HTTP_404_NOT_FOUND)
+        chat_scope = stored.scope
         if len(context) > 10000:
             context = context[:10000]
             chat_scope = 'excerpt'
@@ -868,6 +928,8 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
                 logging.getLogger(__name__).warning("Web search failed for chat")
 
         from api.services.ai_article_turns import ArticleChatTurnError, reserve_turn_with_question
+        from api.services.stored_readers import snapshot_metadata
+        article_context_metadata = snapshot_metadata(stored, translation_context)
         try:
             if personal_selection is not None:
                 # Reservation and the initial user append are one short DB
@@ -875,12 +937,13 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
                 chat_snapshot = reserve_turn_with_question(
                     user_id=request.user.pk, news_id=news.pk,
                     turn_id=personal_turn_id, question=user_question,
+                    article_context=article_context_metadata,
                 )
             else:
                 chat_snapshot = append_user_message(
                     user_id=request.user.pk,
                     news_id=news.pk,
-                    content=user_question,
+                    content=user_question, article_context=article_context_metadata,
                 )
         except ArticleChatTurnError as exc:
             return Response({'error_code': exc.code}, status=status.HTTP_409_CONFLICT)
@@ -901,13 +964,19 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
             '只能使用结构化给出的来源 URL 作引用；无证据时明确说明，禁止编造外部链接。'
             '回答使用中文和 Markdown。'
         )
+        if translation_context.get('source') == 'byok' and translation_context.get('current_match') is False:
+            system_content += '用户明确选择了历史个人译文。必须明确说明它与当前原文不匹配，不能声称对应当前版本；应区分当前原文与历史译文。'
         import json as _chat_json
         from api.services.stored_readers import require_current, snapshot_metadata, readable_chat_messages
         article_evidence = {
-            **snapshot_metadata(stored),
-            'title': stored.title,
-            'article_url': stored.url,
+            **snapshot_metadata(stored, translation_context),
+            'title': (translation_context.get('source_title') or '')
+                      if translation_context.get('source') == 'byok' and translation_context.get('current_match') is False
+                      else stored.title,
+            'article_url': '' if translation_context.get('source') == 'byok' and translation_context.get('current_match') is False
+                           else stored.url,
             'context_scope': chat_scope,
+            'translation': translation_context,
             'text': context,
             'search_results': web_sources,
         }
@@ -920,7 +989,7 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
 
         # Only explicitly complete assistant turns can be reused as factual context.
         # Old unversioned and partial turns remain in history for the reader.
-        for msg in readable_chat_messages(chat_snapshot.messages, stored)[-20:]:
+        for msg in readable_chat_messages(chat_snapshot.messages, stored, translation_context)[-20:]:
             if msg.get('role') == 'user' and isinstance(msg.get('content'), str):
                 messages.append({'role': 'user', 'content': msg['content']})
             elif msg.get('role') == 'assistant' and msg.get('status') == 'complete' and isinstance(msg.get('content'), str):
@@ -932,8 +1001,8 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
             try:
                 import json as _json
                 require_current(request.user, stored)
-                context_metadata = _json.dumps({'type': 'article_context', **snapshot_metadata(stored),
-                    'context_scope': chat_scope}, ensure_ascii=False)
+                context_metadata = _json.dumps({'type': 'article_context', **snapshot_metadata(stored, translation_context),
+                    'context_scope': chat_scope, 'translation_context': translation_context}, ensure_ascii=False)
                 yield f"​__META__{context_metadata}__META__\n\n"
                 # Prepend web search sources as structured JSON for frontend display
                 if web_sources:
@@ -948,7 +1017,7 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
                     personal_stream = complete_article_chat(
                         user=request.user, stored=stored, chat_snapshot=chat_snapshot,
                         messages=messages, selection=personal_selection,
-                        turn_id=personal_turn_id,
+                        turn_id=personal_turn_id, article_context=article_context_metadata,
                     )
                     saw_completion = False
                     try:
@@ -1012,7 +1081,7 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
                             session_id=chat_snapshot.session_id,
                             generation=chat_snapshot.generation,
                             content=''.join(full_response),
-                            status=turn_status, article_context=snapshot_metadata(stored),
+                            status=turn_status, article_context=article_context_metadata,
                         )
                     except ChatConflict:
                         logger.info('Discarded late chat response for cleared or deleted history')
@@ -1599,15 +1668,19 @@ class NewsTTSView(ArticleAccessMixin, generics.GenericAPIView):
             language = 'original' if request.query_params.get('displayMode') == 'original' else 'zh'
         voice_pref = request.query_params.get('voice', '')
         scope = request.query_params.get('scope', 'full')
+        translation_result_id = request.query_params.get('translation_result_id')
 
         if scope == 'full' and get_stored_article(request.user, news.pk).scope != 'full':
             return Response({'code': 'source_content_required', 'message': '当前仅可读取摘要。'}, status=409)
 
         try:
-            resolved = resolve_tts_content(news, request.user, language, scope)
+            resolved = resolve_tts_content(
+                news, request.user, language, scope, translation_result_id=translation_result_id,
+            )
         except TTSContentUnavailable as exc:
             response_status = (
-                status.HTTP_409_CONFLICT
+                status.HTTP_404_NOT_FOUND if exc.code == 'translation_result_unavailable'
+                else status.HTTP_409_CONFLICT
                 if exc.code in {'translation_required', 'source_content_required'}
                 else status.HTTP_400_BAD_REQUEST
             )
@@ -1639,7 +1712,9 @@ class NewsTTSView(ArticleAccessMixin, generics.GenericAPIView):
         def speech_guard():
             if resolved.snapshot is not None:
                 require_current(request.user, resolved.snapshot, full=scope == 'full')
-                latest = resolve_tts_content(news, request.user, language, scope)
+                latest = resolve_tts_content(
+                    news, request.user, language, scope, translation_result_id=translation_result_id,
+                )
                 if (latest.namespace, latest.content, latest.title) != (resolved.namespace, resolved.content, resolved.title):
                     from api.services.stored_readers import StoredContentChanged
                     raise StoredContentChanged('朗读译文或连接已变化。')
