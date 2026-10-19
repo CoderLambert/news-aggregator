@@ -532,6 +532,81 @@ class PrivateTranslationTests(TransactionTestCase):
         self.assertEqual(task.progress, expected)
         self.assertEqual(ChatGPTArticleTranslation.objects.count(), 1)
         self.assertFalse(SharedArticleTranslation.objects.exists())
+        result_id = task.result['result_id']
+        with patch.object(service, '_dispatch') as dispatch:
+            detail = self.client.get(f'/api/me/ai/translations/{task.pk}/')
+            latest = self.client.get(self.url)
+        dispatch.assert_not_called()
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(latest.status_code, 200)
+        self.assertEqual(detail.data['result']['result_id'], result_id)
+        self.assertEqual(latest.data['task']['result']['result_id'], result_id)
+        self.assertEqual(build.call_count, len(chunks))
+
+    def test_t06_queued_source_mutation_fails_closed_before_dispatch(self):
+        task = self.queued()
+        self.news.full_content += '\n\nchanged while queued'
+        self.news.save(update_fields=['full_content'])
+        with patch.object(service, 'build_gateway_client') as build:
+            service.run_translation(task.pk, task.generation)
+        build.assert_not_called()
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'failed')
+        self.assertEqual(task.progress, '')
+        self.assertIsNone(task.result)
+        self.assertFalse(ChatGPTArticleTranslation.objects.exists())
+        self.assertFalse(SharedArticleTranslation.objects.exists())
+
+    def test_t06_later_chunk_rechecks_source_model_and_credential_fences(self):
+        for mutation in ('source', 'credential', 'model'):
+            with self.subTest(mutation=mutation):
+                self.news.full_content = 'A' * 5000 + '\n\n' + 'B' * 5000
+                self.news.full_content_state = 'legacy'
+                self.news.save(update_fields=['full_content', 'full_content_state'])
+                self.request_id = str(uuid.uuid4())
+                task = self.queued()
+                first = FakeGateway([gateway_frame('第一段中文')])
+                original_epoch = self.connection.credential_epoch
+                original_revision = self.model.config_revision
+                real_mark_dispatch = service._mark_dispatch
+
+                def mutate_before_dispatch(task_id, generation, token, chunk_index):
+                    if chunk_index == 1:
+                        if mutation == 'source':
+                            self.news.full_content += '\nchanged after first chunk'
+                            self.news.save(update_fields=['full_content'])
+                        elif mutation == 'credential':
+                            self.connection.credential_epoch += 1
+                            self.connection.save(update_fields=['credential_epoch'])
+                        else:
+                            self.model.config_revision += 1
+                            self.model.save(update_fields=['config_revision'])
+                    return real_mark_dispatch(task_id, generation, token, chunk_index)
+
+                try:
+                    with patch.object(service, '_mark_dispatch', side_effect=mutate_before_dispatch):
+                        with patch.object(service, 'build_gateway_client', return_value=first) as build:
+                            service.run_translation(task.pk, task.generation)
+                    task.refresh_from_db()
+                    self.assertEqual(task.status, 'failed')
+                    self.assertEqual(task.progress, '第一段中文\n\n')
+                    self.assertIsNone(task.result)
+                    self.assertEqual(build.call_count, 1)
+                    self.assertEqual(len(first.sent), 1)
+                    self.assertFalse(ChatGPTArticleTranslation.objects.exists())
+                    self.assertFalse(SharedArticleTranslation.objects.exists())
+                finally:
+                    if mutation == 'source':
+                        self.news.full_content = 'A' * 5000 + '\n\n' + 'B' * 5000
+                        self.news.save(update_fields=['full_content'])
+                    elif mutation == 'credential':
+                        self.connection.refresh_from_db()
+                        self.connection.credential_epoch = original_epoch
+                        self.connection.save(update_fields=['credential_epoch'])
+                    elif mutation == 'model':
+                        self.model.refresh_from_db()
+                        self.model.config_revision = original_revision
+                        self.model.save(update_fields=['config_revision'])
 
     def test_t06_middle_chunk_failures_are_progress_only_and_never_replayed(self):
         cases = (
@@ -578,6 +653,25 @@ class PrivateTranslationTests(TransactionTestCase):
         self.assertEqual(mismatch.status_code, 409, mismatch.content)
         dispatch.assert_not_called()
         self.assertFalse(ChatGPTTranslationTask.objects.exists())
+
+    def test_t06_rejects_quoted_or_indented_fences_before_dispatch(self):
+        unsupported = (
+            '> ~~~py\n> print(1)\n> ~~~',
+            '    ~~~py\n    print(1)\n    ~~~',
+            '> > ~~~md\n> > nested\n> > ~~~',
+        )
+        for index, fence in enumerate(unsupported):
+            with self.subTest(index=index):
+                self.news.full_content = 'A' * 5000 + '\n\n' + fence + '\n\n' + 'B' * 5000
+                self.news.full_content_state = 'legacy'
+                self.news.save(update_fields=['full_content', 'full_content_state'])
+                with patch.object(service, '_dispatch') as dispatch:
+                    response = self.start(request_id=str(uuid.uuid4()))
+                self.assertEqual(response.status_code, 400, response.content)
+                dispatch.assert_not_called()
+                self.assertFalse(ChatGPTTranslationTask.objects.exists())
+                self.assertFalse(ChatGPTArticleTranslation.objects.exists())
+                self.assertFalse(SharedArticleTranslation.objects.exists())
 
     def test_t06_final_fence_allows_provider_closing_line_ending(self):
         self.news.full_content = 'A' * 5000 + '\n\n' + 'B' * 4000 + '\n\n' + '```py\nprint(1)\n```'

@@ -116,6 +116,7 @@ describe('T05 private translation', () => {
     fireEvent.click(screen.getByRole('button', { name: '开始私有翻译' }))
     await screen.findByText(/请求未获接受/)
     expect(screen.queryByText(/提交结果未知/)).not.toBeInTheDocument()
+    expect(screen.getByText(/原文可能超出预算，或含暂不支持的嵌套、引用代码围栏/)).toBeInTheDocument()
     expect(api.startPrivateTranslation).toHaveBeenCalledOnce()
     fireEvent.click(screen.getByRole('checkbox'))
     await waitFor(() => expect(screen.getByRole('button', { name: '开始私有翻译' })).toBeEnabled())
@@ -130,7 +131,7 @@ describe('T05 private translation', () => {
     expect(screen.getByText(/原文超过全文翻译上限/)).toBeInTheDocument()
   })
   it('admits bounded long source only with explicit multi-request fee consent', async () => {
-    view(7, 'A'.repeat(10000))
+    view(7, 'A'.repeat(5000) + '\n\n' + 'B'.repeat(5000))
     await screen.findByRole('option', { name: 'Mine · Flash' })
     expect(screen.getByText(/长文最多可能产生 8 次服务商费用/)).toBeInTheDocument()
     fireEvent.change(screen.getByRole('combobox', { name: '翻译模型' }), { target: { value: 'model' } })
@@ -141,6 +142,17 @@ describe('T05 private translation', () => {
     fireEvent.click(start)
     await screen.findByText('私有翻译已完成')
     expect(api.startPrivateTranslation).toHaveBeenCalledOnce()
+  })
+  it('explains dispatched long requests may still be billed after failure and does not replay', async () => {
+    vi.mocked(api.latestPrivateTranslation).mockResolvedValue({
+      ...completed, status: 'failed', result: null, progress: '第一段已验证。\n\n',
+      error_code: 'translation_failed',
+    } as api.PrivateTranslationTask)
+    view(7, 'A'.repeat(5000) + '\n\n' + 'B'.repeat(5000))
+    await screen.findByText(/本次翻译未完成/)
+    expect(screen.getByText(/已派发的服务商请求仍可能产生费用/)).toBeInTheDocument()
+    expect(screen.getByText(/最多顺序发送 8 次个人模型请求/)).toBeInTheDocument()
+    expect(api.startPrivateTranslation).not.toHaveBeenCalled()
   })
   it('rejects malformed terminal and partial result DTOs', () => {
     expect(() => api.parsePrivateTranslation({ ...completed, result: null })).toThrow()

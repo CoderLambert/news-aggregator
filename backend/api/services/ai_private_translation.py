@@ -118,7 +118,14 @@ def _markdown_units(markdown):
     for line in markdown.splitlines(keepends=True):
         current.append(line)
         if fence_char is None:
-            opening = re.match(r'^ {0,3}(`{3,}|~{3,})', line)
+            # This bounded splitter only understands top-level fences. Reject
+            # quoted/list-indented fence syntax instead of splitting it as prose.
+            unsupported_fence = re.match(
+                r'^(?: {4,}|\t+|(?: {0,3}>[ \t]?)+)(?:\x60{3,}|~{3,})', line,
+            )
+            if unsupported_fence:
+                raise TranslationError('translation_markdown_invalid', 400)
+            opening = re.match(r'^ {0,3}(\x60{3,}|~{3,})', line)
             if opening:
                 marker = opening.group(1)
                 fence_char, fence_width = marker[0], len(marker)

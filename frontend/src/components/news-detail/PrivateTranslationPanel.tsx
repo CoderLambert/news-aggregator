@@ -64,7 +64,7 @@ function TranslationSession({ viewer, newsId, sourceRevision, sourceMarkdown }: 
       if (mounted.current) {
         if (reason instanceof WorkspaceError && [400, 403, 404, 409, 429].includes(reason.status)) {
           setRejection(reason.status === 429 ? '排队数量达到上限，请稍后重新确认。' :
-            reason.status === 400 ? '请求未获接受，请检查原文预算和模型，再重新确认。' :
+            reason.status === 400 ? '请求未获接受：原文可能超出预算，或含暂不支持的嵌套、引用代码围栏。请检查完整 Markdown 后重新确认。' :
             '权限、模型或任务已变化，请读取最新状态后重新确认。')
           void recovery.refetch()
         } else {
@@ -96,7 +96,7 @@ function TranslationSession({ viewer, newsId, sourceRevision, sourceMarkdown }: 
     <label className="my-2 block">
       <input type="checkbox" checked={consent} disabled={sending || (!recoverable && (!eligible || !!task))}
         onChange={event => setConsent(event.target.checked)} />
-      我确认这次全文翻译可能产生费用；长文最多会顺序发送 8 次个人模型请求。
+      我确认这次全文翻译可能产生费用；长文最多顺序发送 8 次个人模型请求，已派发的请求即使失败也可能计费。
     </label>
     <button type="button" onClick={() => void start()} disabled={!consent || sending || (!recoverable && (!eligible || !!task || unknown || tooLarge)) || recovery.isPending || recovery.isError}
       className="rounded bg-primary px-3 py-2 text-primary-foreground disabled:opacity-50">
@@ -112,7 +112,7 @@ function TranslationSession({ viewer, newsId, sourceRevision, sourceMarkdown }: 
     {task && <div className="mt-3">
       <p role="status">{task.status === 'succeeded' ? '私有翻译已完成' :
         task.status === 'queued' ? '任务已排队' : task.status === 'running' ? '正在翻译，以下内容尚未完成' :
-        '本次翻译未完成，不会自动重复收费请求。失败任务的显式重试尚未开放。'}</p>
+        '本次翻译未完成。已派发的服务商请求仍可能产生费用，不会自动重复收费请求；失败任务的显式重试尚未开放。'}</p>
       <p className="text-xs text-muted-foreground">任务：{task.task_id}</p>
       {['queued', 'running'].includes(task.status) && <button type="button" className="underline"
         onClick={() => setObserving(false)}>停止等待（后台任务继续）</button>}

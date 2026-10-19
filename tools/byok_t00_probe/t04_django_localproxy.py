@@ -1,4 +1,4 @@
-"""End-to-end T04/T05 proof through Django, OpenAI SDK, pinned Proxy and loopback fixture.
+"""End-to-end T04/T05/T06 proof through Django, OpenAI SDK, pinned Proxy and loopback fixture.
 
 Run only from the full CI gate after prepare_proxy.py; never use a live endpoint
 or credential. The test intentionally uses the exact native DeepSeek alias.
@@ -547,11 +547,11 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
 
             # T05 uses its own durable worker/admission path through this exact
             # SDK/Proxy process, not the T04 business generator or a fake gateway.
-            def translation_article(marker):
+            def translation_article(marker, *, full_content=None):
                 article = public_legacy_article(News.objects.create(
-                    title="T05 synthetic article", url="https://publisher.example/" + marker,
+                    title="T05/T06 synthetic article", url="https://publisher.example/" + marker,
                     source=source, category=category, content="Synthetic summary",
-                    full_content="# Full Markdown\n\n" + marker,
+                    full_content=full_content if full_content is not None else "# Full Markdown\n\n" + marker,
                     full_content_state="legacy",
                     publish_time=timezone.now(),
                 ))
@@ -615,6 +615,62 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
             assert not SharedArticleTranslation.objects.filter(news__in=[t05_news, eof_news]).exists()
             _assert_native_deepseek_request(_records(upstream_url, t05_eof),
                 marker=t05_eof, stream=True, terminal="normal_eof_without_protocol_terminal")
+
+            # T06 long translation traverses the same real OpenAI SDK + pinned
+            # Proxy path using only synthetic credentials/upstream responses.
+            t06_chunk1 = "T00_T06_E2E_SUCCESS_CHUNK1_A"
+            t06_chunk2 = "T00_T06_E2E_SUCCESS_CHUNK2_A"
+            t06_body = "a" * 5000 + " " + t06_chunk1 + "\n\n" + "b" * 5000 + " " + t06_chunk2
+            t06_news = translation_article(t06_chunk1, full_content=t06_body)
+            t06_request_id = str(uuid.uuid4())
+            t06_start = client.post(f"/api/news/{t06_news.pk}/byok-translation/", {
+                "model_config_id": str(model.pk), "billing_consent": True, "target_language": "zh",
+            }, format="json", HTTP_IDEMPOTENCY_KEY=t06_request_id)
+            assert t06_start.status_code == 202, t06_start.content
+            t06_task_id = t06_start.data["task_id"]
+            t06_result = wait_translation(t06_task_id)
+            assert t06_result["status"] == "succeeded", t06_result
+            assert t06_result["result"]["content"] == "synthetic t00 stream\n\nsynthetic t00 stream"
+            result_id = t06_result["result"]["result_id"]
+            assert ChatGPTArticleTranslation.objects.get(pk=result_id).user_id == owner.pk
+            assert not SharedArticleTranslation.objects.filter(news=t06_news).exists()
+            _assert_native_deepseek_request(_records(upstream_url, t06_chunk1),
+                marker=t06_chunk1, stream=True, terminal="finish_reason_stop")
+            _assert_native_deepseek_request(_records(upstream_url, t06_chunk2),
+                marker=t06_chunk2, stream=True, terminal="finish_reason_stop")
+            detail = client.get(f"/api/me/ai/translations/{t06_task_id}/")
+            latest = client.get(f"/api/news/{t06_news.pk}/byok-translation/")
+            assert detail.status_code == 200 and detail.data["result"]["result_id"] == result_id
+            assert latest.status_code == 200
+            assert latest.data["task"]["result"]["result_id"] == result_id
+            assert len(_records(upstream_url, t06_chunk1)) == 1
+            assert len(_records(upstream_url, t06_chunk2)) == 1
+
+            t06_failure_chunk1 = "T00_T06_E2E_LENGTH_CHUNK1_A"
+            t06_failure_chunk2 = "T00_T06_E2E_LENGTH_INCOMPLETE_CHUNK2_A"
+            t06_failure_body = "c" * 5000 + " " + t06_failure_chunk1 + "\n\n" + "d" * 5000 + " " + t06_failure_chunk2
+            t06_failure_news = translation_article(t06_failure_chunk1, full_content=t06_failure_body)
+            t06_failure_request_id = str(uuid.uuid4())
+            t06_failure_start = client.post(f"/api/news/{t06_failure_news.pk}/byok-translation/", {
+                "model_config_id": str(model.pk), "billing_consent": True, "target_language": "zh",
+            }, format="json", HTTP_IDEMPOTENCY_KEY=t06_failure_request_id)
+            assert t06_failure_start.status_code == 202, t06_failure_start.content
+            t06_failed = wait_translation(t06_failure_start.data["task_id"])
+            assert t06_failed["status"] == "failed"
+            assert t06_failed["result"] is None
+            assert t06_failed["progress"] == "synthetic t00 stream\n\n"
+            assert not ChatGPTArticleTranslation.objects.filter(news=t06_failure_news).exists()
+            assert not SharedArticleTranslation.objects.filter(news=t06_failure_news).exists()
+            _assert_native_deepseek_request(_records(upstream_url, t06_failure_chunk1),
+                marker=t06_failure_chunk1, stream=True, terminal="finish_reason_stop")
+            _assert_native_deepseek_request(_records(upstream_url, t06_failure_chunk2),
+                marker=t06_failure_chunk2, stream=True, terminal="finish_reason_length")
+            detail = client.get(f"/api/me/ai/translations/{t06_failure_start.data['task_id']}/")
+            latest = client.get(f"/api/news/{t06_failure_news.pk}/byok-translation/")
+            assert detail.status_code == 200 and detail.data["result"] is None
+            assert latest.status_code == 200 and latest.data["task"]["result"] is None
+            assert len(_records(upstream_url, t06_failure_chunk1)) == 1
+            assert len(_records(upstream_url, t06_failure_chunk2)) == 1
             assert AIModelProbeAttempt.objects.count() == probe_receipt_count
 
     finally:
