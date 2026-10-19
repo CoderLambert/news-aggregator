@@ -21,13 +21,21 @@ EXPECTED_ROUTES = {
     'openrouter/*',
 }
 
+REGIONAL_ROUTES = {
+    'zai/cn/*': ('zai/*', 'https://open.bigmodel.cn/api/paas/v4'),
+    'zai/international/*': ('zai/*', 'https://api.z.ai/api/paas/v4'),
+    'dashscope/beijing/*': ('dashscope/*', 'https://dashscope.aliyuncs.com/compatible-mode/v1'),
+    'dashscope/singapore/*': ('dashscope/*', 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1'),
+    'moonshot/international/*': ('moonshot/*', 'https://api.moonshot.ai/v1'),
+}
+
 
 def test_production_routes_use_fixed_aliases_and_only_trusted_static_base_url():
     config_path = Path(__file__).resolve().parents[1] / 'proxy.yaml'
     config = yaml.safe_load(config_path.read_text(encoding='utf-8'))
     models = config['model_list']
 
-    assert {item['model_name'] for item in models} == EXPECTED_ROUTES
+    assert {item['model_name'] for item in models} == EXPECTED_ROUTES | set(REGIONAL_ROUTES)
     assert {item['litellm_params']['model'] for item in models} == EXPECTED_ROUTES
     route_names = [item['model_name'] for item in models]
     assert route_names.index('deepseek/deepseek-chat') < route_names.index('deepseek/*')
@@ -36,6 +44,10 @@ def test_production_routes_use_fixed_aliases_and_only_trusted_static_base_url():
         if item['model_name'] == 'deepseek/deepseek-flash':
             assert set(item['litellm_params']) == {'model', 'api_base'}
             assert item['litellm_params']['api_base'] == 'https://api.deepseek.com'
+        elif item['model_name'] in REGIONAL_ROUTES:
+            native_model, endpoint = REGIONAL_ROUTES[item['model_name']]
+            assert item['litellm_params'] == {'model': native_model, 'api_base': endpoint}
+            assert route_names.index(item['model_name']) < route_names.index(native_model)
         else:
             assert set(item['litellm_params']) == {'model'}
 

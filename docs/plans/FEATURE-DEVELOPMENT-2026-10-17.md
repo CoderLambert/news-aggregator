@@ -153,6 +153,14 @@ RSS T14 已合并 [#142](https://github.com/CoderLambert/news-aggregator/pull/14
 - 20 项定向离线检查通过，包括 OpenAI 回归、Claude 原生工具/私有续问、缺失与截断负例、实际官方 SDK→本地 HTTP、环境头隔离及分类参数。仅使用只读既有依赖缓存、既有 T00 SDK 包、network-none 容器和 dummy DB；未安装软件、未请求真实 Provider。依赖锁静态校验通过；完整安装/CI/数据库联合回归 NOT_RUN。按用户指示继续延期真实模型/生产验收，文章流与翻译仍只允许原 Flash 流式路由。
 - 官方依据：[Haiku 5.5](https://platform.claude.com/docs/en/models/haiku-5-5/overview)、[Messages 工具往返](https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview)、[思考块签名](https://platform.claude.com/docs/en/build-with-claude/thinking)、[结构化输出](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)。这是 T13-B 原生协议代码交付，不是 T13-B 真实验收通过。
 
+### BYOK T01 可信地域连接差额（2026-10-20）
+
+- 基线 `main@7ab3d31`。按冻结方案第 3 节与 T01 的“可信厂商/地域端点”范围，补充智谱中国大陆、Z.AI 国际、百炼北京/新加坡及 Moonshot 国际五个独立 profile。现有连接编辑器直接读取服务端目录，因此新增地域可选择、保存并刷新恢复；没有新增厂商协议适配器、模型或依赖，也没有放开原模型白名单。
+- 旧 `*_default` profile/version/路由及密文 AAD 保留；地域变更只能新建连接并重新明确提交 Key，PATCH 不接受 endpoint/URL。服务端根据存储的 provider/profile/version 选择固定 Proxy alias；LiteLLM 继续处理其内置 provider 和模型协议。
+- 12 项定向检查通过（42 项未选，另有 5 个 subtest）：合成 SQLite 中的五地域连接创建/读取/加密、篡改地域后拒绝解密、原地改地域/URL 拒绝、旧连接目录与脱敏回归、注册表和 Proxy 配置一致性。另在固定 `1.105.0` 镜像实际运行原生 PatternMatchRouter，五个地域别名均优先于默认 wildcard，正确保留模型 ID 和固定 endpoint；该组件检查没有发 HTTP 请求，不能称作完整 Proxy E2E。
+- 使用只读现有依赖缓存、network-none 容器、临时测试库与合成 Key；未安装依赖、读取真实凭据、请求厂商或操作生产。完整 CI、真实 SDK→Proxy 请求、真实地域/模型、部署与浏览器验收 NOT_RUN。发布时需核对业务与 Proxy 配置版本和项目 key 准入，不能将代码合并等同于已部署。
+- 设计核对：冻结 [方案第 3/4 节](https://github.com/CoderLambert/news-aggregator/blob/ed58afa7a72ae905e2a2ffc315d968ca3634b8f2/docs/features/byok/BYOK_IMPLEMENTATION_PLAN.md)、[T01](https://github.com/CoderLambert/news-aggregator/blob/ed58afa7a72ae905e2a2ffc315d968ca3634b8f2/docs/features/byok/tasks/T01-credentials.md)。T13 是真实厂商验收，不再把六张子卡当成重新开发厂商适配器的顺序。
+
 | 顺序 | 原编号与目标 | 需要完成的真正差额 | 阶段验收 |
 |---|---|---|---|
 | 第 8 批 A（离线交付已合并） | **BYOK T04 个人模型新闻问答** | T03 + T01 已接入文章阅读器和 per-turn 问答；取消/流式与提交围栏差额由 #118 完成，证据见上；真实验收仍独立保留 | 用户/文章版本/模型尝试/取消/重试负例及 SDK→本地 Proxy→合成上游通过；真实付费上游/UAT `NOT_RUN` |

@@ -6,7 +6,7 @@ preset on the connection's trusted provider/endpoint. No dynamic alias creation.
 import re
 
 from api.services.ai_gateway import ARTICLE_CHAT_SUPPORTED_ALIAS, PROVIDER_SPECS
-from api.services.ai_registry import get_profile
+from api.services.ai_registry import profile_route_prefix
 
 CATALOG_VERSION = '2026-10-20.2'
 _MODEL_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,159}$')
@@ -47,10 +47,14 @@ def normalize_model_id(provider_id, raw):
 
 def get_trusted_preset(connection, model_id):
     """Versioned connection profile + exact model allowlist, not a user URL."""
-    profile = get_profile(connection.provider_id, connection.endpoint_profile)
-    if profile is None or profile['version'] != connection.endpoint_profile_version:
+    prefix = profile_route_prefix(connection)
+    if prefix is None:
         return None
-    return _PRESETS.get((connection.provider_id, model_id))
+    preset = _PRESETS.get((connection.provider_id, model_id))
+    if preset is None:
+        return None
+    original_prefix = PROVIDER_SPECS[connection.provider_id]['route_prefix'] + '/'
+    return {**preset, 'proxy_alias': prefix + '/' + preset['proxy_alias'].removeprefix(original_prefix)}
 
 
 def catalog_for(connection):

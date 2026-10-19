@@ -79,6 +79,12 @@ NewsHub 的项目 key 只允许上述白名单路由；其中 Qwen 在 LiteLLM �
 
 master key 仅用于 Proxy 管理 API，轮换它不会替换项目 virtual key。更换 Postgres 密码须先在 Postgres 内更新 role 密码，再原子替换 secret 文件并重启 Proxy。`LITELLM_SALT_KEY` 用于 LiteLLM 数据库加密材料；变更前须按版本兼容说明验证迁移和备份恢复，不能直接替换后碰运气。
 
+## 可信地域连接
+
+按 BYOK 原方案第 3 节，新增连接可明确选择 `glm_cn`、`glm_zai`、`qwen_beijing`、`qwen_singapore`、`kimi_international`。它们分别绑定 `zai/cn/*`、`zai/international/*`、`dashscope/beijing/*`、`dashscope/singapore/*`、`moonshot/international/*`。`proxy.yaml` 将这些别名交给 LiteLLM 既有 provider，并固定原方案的通用 API 端点；没有新增协议适配器、Coding/Token Plan 或任意 URL。
+
+旧 `*_default` 身份/版本与原路由保留，不将已有 Key 静默切到新端点。变更地域须新建连接并重新提交 Key；应用层仍要求原模型白名单和本人/版本绑定的能力证明。该配置交付不代表模型能力或真实地域兼容已验收。部署时应核对 Proxy 配置与业务版本一致，并单独验证项目 key 的地域 alias 准入；本批未部署或修改任何真实 key。
+
 ## 健康检查、备份、恢复和升级
 
 - 运行健康检查：`GET /health/readiness`，该 endpoint 检查 Proxy 的 readiness；Postgres 是否可连接也以启动检查和运行日志确认。业务 SDK 遇到 Proxy 不可达时应清晰失败，不能直连 provider 或回退到平台 key。
