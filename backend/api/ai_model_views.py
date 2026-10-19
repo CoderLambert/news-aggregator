@@ -20,7 +20,7 @@ from api.services.ai_credentials import (
 )
 from api.services.ai_worker_fencing import dispatch_once, SNAPSHOT_SCHEMA_VERSION
 from api.services.ai_model_registry import (
-    CATALOG_VERSION, catalog_for, get_trusted_preset, normalize_model_id,
+    CATALOG_VERSION, catalog_for, get_trusted_preset, get_trusted_route, normalize_model_id,
     supports_article_chat,
 )
 from api.services.ai_model_probe import ProbeOutcome, send_model_probe
@@ -83,7 +83,7 @@ def model_payload(model):
         'model_id': model.model_id, 'display_name': model.display_name,
         'catalog_model_id': model.catalog_model_id,
         'config_revision': model.config_revision, 'capabilities': capabilities,
-        'has_trusted_route': get_trusted_preset(model.connection, model.model_id) is not None,
+        'has_trusted_route': get_trusted_route(model.connection, model.model_id) is not None,
         'article_chat_supported': supports_article_chat(model.connection, model.model_id),
         'context_window_tokens': None,  # unknown until separately evidenced
         'updated_at': model.updated_at.isoformat(),
@@ -238,7 +238,7 @@ class AIModelProbeView(ConnectionView):
                 return error('not_found', 404)
             if model.config_revision != values['revision']:
                 return error('model_changed', 409)
-            preset = get_trusted_preset(model.connection, model.model_id)
+            preset = get_trusted_route(model.connection, model.model_id)
             if preset is None:
                 return error('model_not_approved', 409)
             snapshot = snapshot_connection(model.connection)
@@ -293,7 +293,7 @@ class AIModelProbeView(ConnectionView):
                 current.connection.endpoint_profile != snapshot.endpoint_profile or
                 current.connection.endpoint_profile_version != snapshot.endpoint_profile_version or
                 not current.connection.is_enabled or
-                get_trusted_preset(current.connection, current.model_id) is None
+                get_trusted_route(current.connection, current.model_id) is None
             )
             if not stale:
                 try:

@@ -8,7 +8,7 @@ import {
 type Draft = Record<AITaskKind, string | null>
 const OPTIONS: Array<{ kind: AITaskKind; label: string; description: string }> = [
   { kind: 'default', label: '全局默认', description: '其他用途留空时跟随默认；不自动借用站点模型。' },
-  { kind: 'article_qa', label: '新闻问答', description: '下一阶段接入新闻问答；目前仅保存用途。' },
+  { kind: 'article_qa', label: '新闻问答', description: '选择文章阅读页个人模型问答使用的模型。' },
   { kind: 'full_translation', label: '全文翻译', description: '独立选择用于私人全文翻译的模型。' },
   { kind: 'deep_research', label: '深度研究', description: '需要文本和工具调用能力均已验证。' },
   { kind: 'question_suggestions', label: '问题推荐', description: '单独指定或继承个人默认模型。' },

@@ -13,11 +13,11 @@ from dataclasses import dataclass
 
 from api.services.ai_gateway import AIGatewayError, ARTICLE_CHAT_SUPPORTED_ALIAS, _gateway_configuration
 from api.services.ai_responses_protocol import (
-    OPENAI_RESPONSES_MODELS, ResponsesProtocolError, responses_completion, responses_payload,
+    uses_responses_protocol, ResponsesProtocolError, responses_completion, responses_payload,
 )
 
 from api.services.ai_messages_protocol import (
-    ANTHROPIC_MESSAGES_MODELS, MessagesProtocolError, messages_completion, messages_payload,
+    uses_messages_protocol, MessagesProtocolError, messages_completion, messages_payload,
 )
 
 MAX_RESPONSE_BYTES = 64 * 1024
@@ -115,9 +115,9 @@ def parse_completion(status_code, headers, raw, probe_kind):
             status = 'succeeded'
         elif (finish == 'stop' and not message.get('tool_calls')
               and isinstance(message.get('content'), str) and message['content'].strip()):
-            # A *complete* text response despite forced tool_choice explicitly
-            # demonstrates this route declined the requested tool invocation.
-            status = 'unsupported'
+            # Auto selection is portable across trusted providers. Plain text
+            # does not prove lack of tools, and never authorizes research.
+            return ProbeOutcome('unknown', 'tool_call_not_observed', request_id)
         else:
             return ProbeOutcome('unknown', 'incomplete_or_invalid', request_id)
     else:
@@ -142,7 +142,7 @@ def _payload(model_alias, probe_kind, provider_key):
                 'name': 'byok_probe', 'description': 'Confirm tool invocation.',
                 'parameters': {'type': 'object', 'properties': {'ok': {'type': 'boolean'}},
                                'required': ['ok'], 'additionalProperties': False}}}],
-            'tool_choice': {'type': 'function', 'function': {'name': 'byok_probe'}},
+            'tool_choice': 'auto',
             'api_key': provider_key,
             **options,
         }
@@ -158,15 +158,15 @@ def send_model_probe(*, provider_key: str, model_alias: str, probe_kind: str) ->
     """One explicit paid-capable request; no retries, fallback or outside URLs."""
     if probe_kind not in ('text', 'tools') or not provider_key or not isinstance(provider_key, str):
         return ProbeOutcome('not_sent', 'invalid_probe')
-    if not isinstance(model_alias, str) or not model_alias or len(model_alias) > 80:
+    if not isinstance(model_alias, str) or not model_alias or len(model_alias) > 240:
         return ProbeOutcome('not_sent', 'invalid_route')
     try:
         gateway, project_key = _gateway_configuration()  # enforces local loopback
     except AIGatewayError:
         return ProbeOutcome('not_sent', 'gateway_unavailable')
     payload = _payload(model_alias, probe_kind, provider_key)
-    native_responses = model_alias in OPENAI_RESPONSES_MODELS
-    native_messages = model_alias in ANTHROPIC_MESSAGES_MODELS
+    native_responses = uses_responses_protocol(model_alias)
+    native_messages = uses_messages_protocol(model_alias)
     endpoint = 'chat/completions'
     if native_responses:
         payload.pop('api_key')

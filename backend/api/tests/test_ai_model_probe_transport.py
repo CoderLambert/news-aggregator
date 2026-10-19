@@ -110,7 +110,7 @@ class SyntheticGatewayTransportTests(TestCase):
         for _path, _bearer, payload in self.server.seen:
             self.assertEqual(payload['thinking'], {'type': 'disabled'})
             self.assertLessEqual(payload['max_tokens'], 32)
-        self.assertEqual(self.server.seen[1][2]['tool_choice']['function']['name'], 'byok_probe')
+        self.assertEqual(self.server.seen[1][2]['tool_choice'], 'auto')
 
     def test_openai_probes_use_stateless_native_responses(self):
         for kind in ('text', 'tools'):
@@ -122,7 +122,7 @@ class SyntheticGatewayTransportTests(TestCase):
             self.assertEqual(payload['api_key'], PROVIDER_KEY)
             self.assertFalse(payload['store'])
             self.assertLessEqual(payload['max_output_tokens'], 128)
-        self.assertEqual(self.server.seen[1][2]['tool_choice'], {'type': 'function', 'name': 'byok_probe'})
+        self.assertEqual(self.server.seen[1][2]['tool_choice'], 'auto')
         self.server.bad_terminal = True
         self.assertEqual(self.send('text', 'openai/gpt-5.4-mini').status, 'unknown')
         self.assertEqual(len(self.server.seen), 3)
@@ -138,7 +138,7 @@ class SyntheticGatewayTransportTests(TestCase):
             self.assertEqual(payload['thinking'], {'type': 'disabled'})
             self.assertNotIn('temperature', payload)
             self.assertLessEqual(payload['max_tokens'], 128)
-        self.assertEqual(self.server.seen[1][2]['tool_choice'], {'type': 'tool', 'name': 'byok_probe'})
+        self.assertEqual(self.server.seen[1][2]['tool_choice'], {'type': 'auto'})
         self.server.bad_terminal = True
         self.assertEqual(self.send('text', 'anthropic/claude-haiku-5-5').status, 'unknown')
         self.assertEqual(len(self.server.seen), 3)
@@ -178,7 +178,7 @@ class SyntheticGatewayTransportTests(TestCase):
             self.assertIs(payload['stream'], False)
             self.assertLessEqual(payload['max_tokens'], 32)
             self.assertNotIn('thinking', payload)
-        self.assertEqual(self.server.seen[1][2]['tool_choice']['function']['name'], 'byok_probe')
+        self.assertEqual(self.server.seen[1][2]['tool_choice'], 'auto')
 
     def test_rate_limit_redirect_and_incomplete_reply_never_verify(self):
         for status in (429, 307):

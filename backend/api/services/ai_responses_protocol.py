@@ -5,9 +5,15 @@ server-side and are replayed intact, including encrypted reasoning items.
 """
 import copy
 import json
+import re
 from types import SimpleNamespace
 
-OPENAI_RESPONSES_MODELS = frozenset({'openai/gpt-5.4-mini'})
+OPENAI_RESPONSES_PRESET = 'openai/gpt-5.4-mini'
+
+
+def uses_responses_protocol(alias):
+    return isinstance(alias, str) and re.fullmatch(r'openai/[A-Za-z0-9][A-Za-z0-9._+-]{0,159}', alias) is not None
+
 RESPONSES_PROTOCOL = 'openai-responses-v1'
 MAX_NATIVE_BYTES = 4 * 1024 * 1024
 
@@ -73,15 +79,16 @@ def responses_input(messages):
 
 def responses_payload(kwargs):
     allowed = {'model', 'messages', 'tools', 'tool_choice', 'max_tokens', 'temperature', 'stream', 'response_format'}
-    if (set(kwargs) - allowed or kwargs.get('model') not in OPENAI_RESPONSES_MODELS
+    if (set(kwargs) - allowed or not uses_responses_protocol(kwargs.get('model'))
             or (kwargs.get('stream') is not None and kwargs.get('stream') is not False)):
         raise ResponsesProtocolError('unsupported_request')
     maximum = kwargs.get('max_tokens')
     if type(maximum) is not int or not 1 <= maximum <= 8000:
         raise ResponsesProtocolError('invalid_limit')
     data = {'model': kwargs['model'], 'input': responses_input(kwargs.get('messages')),
-            'store': False, 'include': ['reasoning.encrypted_content'], 'max_output_tokens': maximum,
-            'reasoning': {'effort': 'none'}}
+            'store': False, 'include': ['reasoning.encrypted_content'], 'max_output_tokens': maximum}
+    if kwargs['model'] == OPENAI_RESPONSES_PRESET:
+        data['reasoning'] = {'effort': 'none'}
     if kwargs.get('response_format') is not None:
         if kwargs['response_format'] != {'type': 'json_object'}:
             raise ResponsesProtocolError('unsupported_format')

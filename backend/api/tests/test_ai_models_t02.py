@@ -92,14 +92,63 @@ class AIModelT02Tests(TestCase):
         self.assertTrue(flash_fresh['article_chat_supported'])
         self.assertEqual(flash_fresh['capabilities']['text'], 'supported')
 
-    def test_unknown_user_model_may_be_saved_but_cannot_enter_proxy(self):
-        manual = self.create_model('user-manual-model')
-        self.assertFalse(manual['has_trusted_route'])
-        self.assertFalse(manual['article_chat_supported'])
+    def test_manual_model_saves_without_call_and_can_only_be_explicitly_probed(self):
         with patch('api.ai_model_views.send_model_probe') as sender:
-            self.assertEqual(self.probe(manual).status_code, 409)
+            manual = self.create_model('user-manual-model')
         sender.assert_not_called()
+        self.assertTrue(manual['has_trusted_route'])
+        self.assertEqual(manual['catalog_model_id'], '')
+        self.assertEqual(manual['capabilities'], {'text': 'unknown', 'tools': 'unknown'})
+        self.assertFalse(manual['article_chat_supported'])
         self.assertFalse(AIModelProbeAttempt.objects.exists())
+        with patch('api.ai_model_views.send_model_probe', return_value=ProbeOutcome('succeeded')) as sender:
+            self.assertEqual(self.probe(manual).status_code, 200)
+        sender.assert_called_once_with(provider_key=KEY, model_alias='deepseek/user-manual-model', probe_kind='text')
+        row = self.api.get(self.model_base + manual['id'] + '/').data
+        self.assertEqual(row['capabilities'], {'text': 'supported', 'tools': 'unknown'})
+        from api.services.ai_model_capabilities import verified_for_task
+        self.assertFalse(verified_for_task(UserAIModelConfig.objects.get(pk=manual['id']), 'deep_research'))
+        self.assertEqual(AIModelProbeAttempt.objects.get().proxy_alias, 'deepseek/user-manual-model')
+
+    def test_regional_manual_model_requires_both_receipts_and_revocation_fences_snapshot(self):
+        from api.services.ai_task_preferences import (
+            ModelSelectionError, require_task_model_snapshot, resolve_task_model,
+        )
+        for provider, profile, alias in (
+            ('glm', 'glm_cn', 'zai/cn'), ('glm', 'glm_zai', 'zai/international'),
+            ('qwen', 'qwen_beijing', 'dashscope/beijing'),
+            ('qwen', 'qwen_singapore', 'dashscope/singapore'),
+            ('kimi', 'kimi_international', 'moonshot/international'),
+        ):
+            with self.subTest(profile=profile):
+                connection = self.api.post(BASE, {'provider_id': provider, 'endpoint_profile': profile,
+                    'display_name': 'regional connection', 'api_key': KEY, 'request_id': str(uuid.uuid4())}, format='json')
+                self.assertEqual(connection.status_code, 201)
+                model_base = BASE + connection.data['id'] + '/models/'
+                manual = self.api.post(model_base, {'model_id': 'synthetic-future-model'}, format='json')
+                self.assertEqual(manual.status_code, 201)
+                model_id = manual.data['id']
+                self.assertTrue(manual.data['has_trusted_route'])
+                with self.assertRaises(ModelSelectionError):
+                    resolve_task_model(self.owner, 'deep_research', explicit_model_id=model_id)
+                with patch('api.ai_model_views.send_model_probe', return_value=ProbeOutcome('succeeded')) as send:
+                    for kind in ('text', 'tools'):
+                        response = self.api.post(model_base + model_id + '/probe/', {
+                            'probe_kind': kind, 'revision': 1, 'request_id': str(uuid.uuid4())}, format='json')
+                        self.assertEqual(response.status_code, 200, response.content)
+                        if kind == 'text':
+                            with self.assertRaises(ModelSelectionError):
+                                resolve_task_model(self.owner, 'deep_research', explicit_model_id=model_id)
+                    self.assertEqual(send.call_count, 2)
+                    self.assertTrue(all(call.kwargs['model_alias'] == alias + '/synthetic-future-model'
+                                        for call in send.call_args_list))
+                snapshot = resolve_task_model(self.owner, 'deep_research', explicit_model_id=model_id)
+                self.assertEqual(snapshot.proxy_alias, alias + '/synthetic-future-model')
+                require_task_model_snapshot(snapshot, owner_id=self.owner.pk)
+                self.assertEqual(self.api.patch(BASE + connection.data['id'] + '/', {
+                    'revision': connection.data['revision'], 'is_enabled': False}, format='json').status_code, 200)
+                with self.assertRaises(ModelSelectionError):
+                    require_task_model_snapshot(snapshot, owner_id=self.owner.pk)
 
     def test_no_arbitrary_endpoint_messages_or_secret_reflection(self):
         for bad in ('https://evil.example', 'deepseek/../escape', ' sk-secret ', 'deepseek//bad'):
@@ -272,5 +321,5 @@ class ProbeTerminalTests(TestCase):
         ):
             self.assertEqual(parse_completion(200,{},json.dumps(bad).encode(),'tools').status,'unknown')
         unsupported = {'choices':[{'finish_reason':'stop','message': {'content':'I cannot call tools'}}]}
-        self.assertEqual(parse_completion(200,{},json.dumps(unsupported).encode(),'tools').status,'unsupported')
+        self.assertEqual(parse_completion(200,{},json.dumps(unsupported).encode(),'tools').status,'unknown')
         self.assertEqual(parse_completion(200,{},b'{"choices":[]}', 'tools').status,'unknown')

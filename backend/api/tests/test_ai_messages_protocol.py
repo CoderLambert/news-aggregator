@@ -30,6 +30,20 @@ def response(blocks, stop_reason='end_turn'):
 
 
 class NativeMessagesTests(TestCase):
+    def test_manual_claude_model_uses_messages_without_borrowing_preset_options(self):
+        native, chat = Mock(), Mock()
+        native.create.return_value = response([FINAL])
+        alias = 'anthropic/synthetic-future-model'
+        gateway = _GatewayCompletions(chat, 'synthetic-key', messages_getter=lambda: native)
+        gateway.create(model=alias, messages=[{'role': 'user', 'content': 'synthetic'}], max_tokens=128)
+        request = native.create.call_args.kwargs
+        self.assertEqual(request['model'], alias)
+        self.assertNotIn('thinking', request)
+        self.assertNotIn('output_config', request)
+        chat.create.assert_not_called()
+        self.assertEqual(continuation_payload({'model': {'proxy_alias': alias}}, [])['protocol'],
+                         'anthropic-messages-v1')
+
     def test_parallel_tools_results_thinking_and_followup_stay_native_and_private(self):
         blocks = [THINKING, REDACTED, CALL, {**CALL, 'id': 'toolu_2'}]
         first = completion_object(messages_completion(response(blocks, 'tool_use')))
