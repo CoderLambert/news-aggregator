@@ -710,6 +710,17 @@ class NewsTranslateFullView(ArticleAccessMixin, generics.GenericAPIView):
         return _translation_job_response(request, news, stored, job)
 
 
+def _valid_translation_result_id(value):
+    """Accept only an absent ID or a canonical positive integer result key."""
+    if value is None or value == '':
+        return True
+    if type(value) is int:
+        return value > 0
+    if isinstance(value, str):
+        return value.isdigit() and value != '0' and str(int(value)) == value
+    return False
+
+
 class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
     """Chat with the AI assistant about a news article for the authenticated user."""
     queryset = News.objects.select_related('source', 'category').prefetch_related('source_items').all()
@@ -741,6 +752,7 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
             return Response({'error_code': 'translation_result_unavailable'}, status=status.HTTP_404_NOT_FOUND)
         messages = readable_chat_messages(
             normalized_chat_history(session.messages), stored, translation_context,
+            allow_legacy_original=(mode == 'original'),
         ) if session else []
         return Response({'messages': messages, 'translation_context': translation_context})
 
@@ -783,7 +795,8 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
         translation_mode = payload.get('translation_mode')
         if translation_mode is None:
             translation_mode = 'result' if translation_result_id not in (None, '') else 'current'
-        if (not isinstance(translation_mode, str) or translation_mode not in {'current', 'original', 'result'}
+        if (not _valid_translation_result_id(translation_result_id)
+                or not isinstance(translation_mode, str) or translation_mode not in {'current', 'original', 'result'}
                 or (translation_mode == 'result' and translation_result_id in (None, ''))
                 or (translation_mode != 'result' and translation_result_id not in (None, ''))):
             return Response({'error_code': 'invalid_translation_selection'},

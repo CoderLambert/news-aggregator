@@ -212,7 +212,7 @@ def legacy_translation(news_id, field, source_text):
         origin__in=('legacy', 'legacy-bound')).order_by('-captured_at', '-pk').first()
 
 
-def readable_chat_messages(messages, stored, translation_context=None):
+def readable_chat_messages(messages, stored, translation_context=None, *, allow_legacy_original=False):
     if not isinstance(messages, list):
         return []
     expected = snapshot_metadata(stored, translation_context)
@@ -221,7 +221,8 @@ def readable_chat_messages(messages, stored, translation_context=None):
         if not isinstance(message, dict) or message.get('role') not in {'user', 'assistant'}:
             continue
         context = message.get('article_context')
-        if context == expected:
+        is_legacy_original = allow_legacy_original and context is None
+        if context == expected or is_legacy_original:
             entry = dict(message)
             if isinstance(context, dict) and isinstance(context.get('translation_context'), dict):
                 entry['translation_context'] = dict(context['translation_context'])

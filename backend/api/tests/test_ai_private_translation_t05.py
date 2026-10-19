@@ -1634,13 +1634,16 @@ class PrivateTranslationTests(TransactionTestCase):
         self.assertNotIn('历史结果对应的助手回答。', [m['content'] for m in current_history.data['messages']])
         self.assertNotIn('历史结果对应的助手回答。', [m['content'] for m in original_history.data['messages']])
         self.assertNotIn('当前结果对应的助手回答。', [m['content'] for m in original_history.data['messages']])
-        # Pre-T08 history without evidence metadata is retained only in the
-        # explicit original mode, never attached to a translated result.
-        legacy_original_context = snapshot_metadata(current)
+        # Real pre-T08 records have no article_context. Keep them only for an
+        # explicit original-mode read; never attach them to translated evidence.
+        from api.services.chat_history import append_user_message
+        append_user_message(
+            user_id=self.owner.pk, news_id=self.news.pk, content='兼容保留的旧版原文问题。',
+        )
         append_assistant_message(
             user_id=self.owner.pk, news_id=self.news.pk, session_id=session.pk,
-            generation=session.generation, content='兼容保留的原文模式回答。',
-            status='complete', article_context=legacy_original_context,
+            generation=session.generation, content='兼容保留的旧版原文回答。',
+            status='complete',
         )
         old_history = self.client.get(
             history_url, {'translation_mode': 'result', 'translation_result_id': old_id},
@@ -1649,9 +1652,12 @@ class PrivateTranslationTests(TransactionTestCase):
             history_url, {'translation_mode': 'result', 'translation_result_id': new.result['result_id']},
         )
         original_history = self.client.get(history_url, {'translation_mode': 'original'})
-        self.assertNotIn('兼容保留的原文模式回答。', [m['content'] for m in old_history.data['messages']])
-        self.assertNotIn('兼容保留的原文模式回答。', [m['content'] for m in current_history.data['messages']])
-        self.assertIn('兼容保留的原文模式回答。', [m['content'] for m in original_history.data['messages']])
+        self.assertNotIn('兼容保留的旧版原文问题。', [m['content'] for m in old_history.data['messages']])
+        self.assertNotIn('兼容保留的旧版原文问题。', [m['content'] for m in current_history.data['messages']])
+        self.assertIn('兼容保留的旧版原文问题。', [m['content'] for m in original_history.data['messages']])
+        self.assertNotIn('兼容保留的旧版原文回答。', [m['content'] for m in old_history.data['messages']])
+        self.assertNotIn('兼容保留的旧版原文回答。', [m['content'] for m in current_history.data['messages']])
+        self.assertIn('兼容保留的旧版原文回答。', [m['content'] for m in original_history.data['messages']])
 
         invalid_mode = self.client.get(history_url, {'translation_mode': 'unknown'})
         self.assertEqual(invalid_mode.status_code, 400, invalid_mode.content)
@@ -1738,6 +1744,22 @@ class PrivateTranslationTests(TransactionTestCase):
             'billing_consent': True, 'turn_id': str(uuid.uuid4()),
         }, format='json')
         self.assertEqual(mode_conflict.status_code, 400, mode_conflict.content)
+        # JSON booleans, empty collections, and zero are not valid result IDs.
+        # They must fail before any selected model/provider path is entered.
+        with patch.object(service, '_dispatch') as dispatch, \
+                patch('api.services.ai_article_chat.complete_article_chat') as complete:
+            for invalid_result_id in (0, False, [], {}):
+                response = self.client.post(f'/api/news/{self.news.pk}/chat/', {
+                    'question': '请解释这段译文', 'translation_mode': 'result',
+                    'translation_result_id': invalid_result_id,
+                    'model_config_id': str(self.model.pk), 'billing_consent': True,
+                    'turn_id': str(uuid.uuid4()),
+                }, format='json')
+                self.assertEqual(response.status_code, 400, response.content)
+                self.assertEqual(response.data.get('error_code'), 'invalid_translation_selection')
+        dispatch.assert_not_called()
+        complete.assert_not_called()
+
         from api.services.article_content import pick_chat_context
         original_context, original_metadata = pick_chat_context(
             self.news, self.owner, translation_mode='original', with_metadata=True,

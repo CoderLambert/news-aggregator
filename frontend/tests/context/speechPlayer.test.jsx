@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useState } from 'react'
-import { AuthContext } from '@/context/AuthContext'
+import { AuthContext, useAuth } from '@/context/AuthContext'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SpeechPlayerProvider } from '@/context/SpeechPlayerProvider'
@@ -9,6 +9,7 @@ import GlobalSpeechPlayer from '@/components/speech/GlobalSpeechPlayer'
 
 const audioInstances = []
 let deferNextAudioMetadata = false
+let retainedViewerASpeak = null
 const mediaSession = {
   actionHandlers: new Map(),
   metadata: null,
@@ -70,6 +71,8 @@ class MockAudio {
 
 function PlayerActions() {
   const player = useSpeechPlayerActions()
+  const { user } = useAuth()
+  if (user?.id === 101 && !retainedViewerASpeak) retainedViewerASpeak = player.speak
   const state = useSpeechPlayerState()
   return (
     <div>
@@ -110,6 +113,7 @@ function renderPlayer() {
 beforeEach(() => {
   audioInstances.length = 0
   deferNextAudioMetadata = false
+  retainedViewerASpeak = null
   localStorage.clear()
   vi.stubGlobal('Audio', MockAudio)
   previousMediaSessionDescriptor = Object.getOwnPropertyDescriptor(navigator, 'mediaSession')
@@ -270,6 +274,22 @@ describe('global speech player', () => {
     })
     expect(screen.getByTestId('player-status')).toHaveTextContent('idle')
     expect(screen.queryByText('译文版本 A')).not.toBeInTheDocument()
+  })
+
+  it('rejects an old viewer callback that tries to start private audio after a switch', async () => {
+    const user = userEvent.setup()
+    renderPlayer()
+    expect(retainedViewerASpeak).toBeTypeOf('function')
+    await user.click(screen.getByRole('button', { name: '切换用户' }))
+    const audioCount = audioInstances.length
+
+    act(() => retainedViewerASpeak(11, '译文版本 A', {
+      language: 'zh', scope: 'full', translationResultId: 41,
+    }))
+
+    expect(audioInstances).toHaveLength(audioCount)
+    expect(screen.getByTestId('player-status')).toHaveTextContent('idle')
+    expect(mediaSession.metadata).toBeNull()
   })
 
   it('keeps explicit saved result identity when replaying and switching versions', async () => {

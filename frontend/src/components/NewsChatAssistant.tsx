@@ -27,6 +27,8 @@ interface NewsChatAssistantProps {
   open?: boolean
   onOpenChange?: (open: boolean) => void
   translationResultId?: number | null
+  translationMode?: 'current' | 'original' | 'result'
+  translationLabel?: string
   articleContext?: {
     hasFullContent?: boolean
     wordCount?: number
@@ -37,7 +39,8 @@ interface NewsChatAssistantProps {
   }
 }
 
-export default function NewsChatAssistant({ newsId, open, onOpenChange, translationResultId, articleContext }: NewsChatAssistantProps) {
+export default function NewsChatAssistant({ newsId, open, onOpenChange, translationResultId, translationMode, translationLabel, articleContext }: NewsChatAssistantProps) {
+  const resolvedTranslationMode = translationMode ?? (translationResultId != null ? 'result' : 'current')
   const { user } = useAuth()
   // Never let a previous viewer's selected billable model cross account changes.
   const [selection, setSelection] = useState<{ viewer: number; modelId: string | null; consent: boolean } | null>(null)
@@ -62,7 +65,7 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, translat
     confirmingClear, isClearing, clearError, requestClearChat, cancelClear, confirmClear,
     uncertainTurn, checkPendingTurn, resendUncertainTurn,
     webSearch, toggleWebSearch,
-  } = useChat(newsId, isOpen, selectedModelId, modelConsent, translationResultId)
+  } = useChat(newsId, isOpen, selectedModelId, modelConsent, translationResultId, resolvedTranslationMode)
   const { scrollRef: chatScrollRef, onScroll: onChatScroll, onWheel: onChatWheel } = useChatScroll(messages, phase, isOpen)
   const submitChatTurn = (send: () => Promise<boolean>) => {
     // Consume the opt-in once for this explicit billable attempt; a later
@@ -225,6 +228,7 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, translat
               </div>
             </div>
           )}
+          {translationLabel && <p className="mb-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground" role="status">当前对话：{translationLabel}</p>}
           <ChatMessageList
             messages={messages}
             medicalSourceUrl={articleContext?.isMedical ? articleContext.sourceUrl : undefined}

@@ -184,7 +184,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     articleTitle: string,
     overrides: Partial<SpeechOptions> = {},
   ) => {
-    if (!supported) return
+    if (!supported || viewerIdRef.current !== viewerId) return
     savePosition()
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId

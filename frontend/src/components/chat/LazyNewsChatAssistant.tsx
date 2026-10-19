@@ -47,7 +47,7 @@ export default function LazyNewsChatAssistant({ newsId, open, onOpenChange, tran
       )}
     >
       <Suspense fallback={<LazyModalState label="AI 助手小闻" message="正在打开小闻…" onClose={() => onOpenChange(false)} variant="chat" />}>
-        <NewsChatAssistant newsId={newsId} open onOpenChange={onOpenChange} translationResultId={translationResultId} articleContext={articleContext} />
+        <NewsChatAssistant newsId={newsId} open onOpenChange={onOpenChange} translationResultId={translationResultId} translationMode={translationMode} translationLabel={translationLabel} articleContext={articleContext} />
       </Suspense>
     </ErrorBoundary>
   )

@@ -222,7 +222,7 @@ function parseChatMessage(value: unknown): ChatMessage | null {
     const context = value.translation_context
     message.translation_context = {
       source: context.source as ChatTranslationContext['source'],
-      current_match: context.current_match,
+      current_match: context.current_match === true,
       ...(typeof context.result_id === 'number' && Number.isInteger(context.result_id) ? { result_id: context.result_id } : {}),
       ...(typeof context.task_id === 'string' ? { task_id: context.task_id } : {}),
       ...(typeof context.model === 'string' ? { model: context.model } : {}),
