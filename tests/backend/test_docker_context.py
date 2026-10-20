@@ -16,8 +16,6 @@ _PRODUCTION_FLAG_DEFAULTS = {
     'CHATGPT_PLAN_USAGE_ENABLED': '0',
     'CHATGPT_AUTH_MODE': 'disabled',
     'EDGE_TTS_ENDPOINT': 'default',
-    'CRAWLER_SCHEDULER_ENABLED': '0',
-    'CRAWL_RUN_ON_START': '0',
     'SEARCH_INDEX_ENABLED': '0',
 }
 
@@ -211,7 +209,7 @@ def test_production_compose_uses_only_named_volumes_and_separate_migration():
     services = compose['services']
     declared_volumes = set(compose['volumes'])
 
-    assert set(services) == {'app', 'migrate', 'crawler', 'indexer', 'full-content'}
+    assert set(services) == {'app', 'migrate', 'indexer'}
     assert all('build' not in service for service in services.values())
     assert all('ports' not in service for service in services.values())
     assert all(service['image'].startswith('${NEWSHUB_IMAGE:?') for service in services.values())
@@ -240,7 +238,7 @@ def test_production_compose_uses_only_named_volumes_and_separate_migration():
         'logs-data',
     }
 
-    for service_name in ('crawler', 'indexer'):
+    for service_name in ('indexer',):
         assert 'env_file' not in services[service_name]
         assert services[service_name]['depends_on']['migrate']['condition'] == (
             'service_completed_successfully'
@@ -248,7 +246,6 @@ def test_production_compose_uses_only_named_volumes_and_separate_migration():
         assert services[service_name]['depends_on']['app']['condition'] == 'service_healthy'
 
     for service_name, command in (
-        ('crawler', 'crawler_healthcheck'),
         ('indexer', 'embedding_healthcheck'),
     ):
         healthcheck = services[service_name]['healthcheck']
@@ -268,7 +265,7 @@ def test_production_compose_uses_only_named_volumes_and_separate_migration():
     assert runtime_environment['PUBLIC_AI_ENABLED'] == '${PUBLIC_AI_ENABLED:-0}'
     assert runtime_environment['CHATGPT_AUTH_MODE'] == '${CHATGPT_AUTH_MODE:-disabled}'
     assert runtime_environment['EDGE_TTS_ENDPOINT'] == '${EDGE_TTS_ENDPOINT:-default}'
-    assert runtime_environment['CRAWLER_SCHEDULER_ENABLED'] == '${CRAWLER_SCHEDULER_ENABLED:-0}'
+    assert 'CRAWLER_SCHEDULER_ENABLED' not in runtime_environment
     assert runtime_environment['SEARCH_INDEX_ENABLED'] == '${SEARCH_INDEX_ENABLED:-0}'
     forbidden_worker_secrets = {'OPENAI_API_KEY', 'PROVIDER_API_KEY', 'CHATGPT_ACCESS_TOKEN'}
     assert forbidden_worker_secrets.isdisjoint(runtime_environment)
@@ -285,7 +282,7 @@ def test_production_compose_flag_defaults_ignore_dotenv_and_allow_explicit_value
     project = Path(__file__).resolve().parents[2]
 
     default_config = _production_compose_config(project, tmp_path / 'defaults', {})
-    for service_name in ('app', 'migrate', 'crawler', 'indexer'):
+    for service_name in ('app', 'migrate', 'indexer'):
         environment = default_config['services'][service_name]['environment']
         assert {key: environment[key] for key in _PRODUCTION_FLAG_DEFAULTS} == (
             _PRODUCTION_FLAG_DEFAULTS
@@ -298,8 +295,6 @@ def test_production_compose_flag_defaults_ignore_dotenv_and_allow_explicit_value
         'CHATGPT_PLAN_USAGE_ENABLED': '1',
         'CHATGPT_AUTH_MODE': 'website',
         'EDGE_TTS_ENDPOINT': 'msedgeservices',
-        'CRAWLER_SCHEDULER_ENABLED': '1',
-        'CRAWL_RUN_ON_START': '1',
         'SEARCH_INDEX_ENABLED': '1',
     }
     explicit_config = _production_compose_config(
@@ -307,7 +302,7 @@ def test_production_compose_flag_defaults_ignore_dotenv_and_allow_explicit_value
         tmp_path / 'explicit',
         explicit_values,
     )
-    for service_name in ('app', 'migrate', 'crawler', 'indexer'):
+    for service_name in ('app', 'migrate', 'indexer'):
         environment = explicit_config['services'][service_name]['environment']
         assert {key: environment[key] for key in explicit_values} == explicit_values
 
@@ -315,18 +310,7 @@ def test_production_compose_flag_defaults_ignore_dotenv_and_allow_explicit_value
 def test_worker_healthcheck_commands_fail_when_heartbeat_is_missing(monkeypatch):
     from django.core.management.base import CommandError
 
-    from api.management.commands import crawler_healthcheck, embedding_healthcheck
-
-    missing_crawler_settings = SimpleNamespace(
-        first=lambda: SimpleNamespace(worker_heartbeat_at=None)
-    )
-    monkeypatch.setattr(
-        crawler_healthcheck.CrawlerSettings.objects,
-        'filter',
-        lambda **_kwargs: missing_crawler_settings,
-    )
-    with pytest.raises(CommandError):
-        crawler_healthcheck.Command().handle()
+    from api.management.commands import embedding_healthcheck
 
     monkeypatch.setattr(
         embedding_healthcheck,
@@ -348,6 +332,7 @@ def test_production_environment_template_has_absolute_data_paths_and_no_secret()
     project = Path(__file__).resolve().parents[2]
     template = (project / '.env.production.example').read_text(encoding='utf-8')
     assert 'DJANGO_SECRET_KEY=\n' in template
+    assert 'CRAWLER_' not in template and 'FULL_CONTENT_WORKER_' not in template
     for assignment in (
         'DJANGO_DB_PATH=/var/lib/newshub/db/db.sqlite3',
         'CHROMA_DATA_DIR=/var/lib/newshub/chroma',
@@ -355,8 +340,6 @@ def test_production_environment_template_has_absolute_data_paths_and_no_secret()
         'EDGE_TTS_ENDPOINT=default',
         'CHATGPT_DEPLOYMENT_INSTANCE_FILE=/var/lib/newshub/runtime/chatgpt-deployment-id',
         'HF_HOME=/var/lib/newshub/model-cache',
-        'CRAWLER_LOG_DIR=/var/lib/newshub/logs/crawler',
-        'CRAWLER_WORKER_LOCK=/var/lib/newshub/logs/crawler-worker.lock',
         'SEARCH_INDEX_WORKER_LOCK=/var/lib/newshub/logs/search-index-worker.lock',
     ):
         assert assignment in template

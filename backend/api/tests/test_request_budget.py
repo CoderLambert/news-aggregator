@@ -122,9 +122,6 @@ django.setup()
 call_command('migrate', verbosity=0)
 from api.services import request_budget as budget
 from api.models import News, Source, Category
-from api.services.full_content_status import claim_fetch, mark_failed, FetchLease
-from api.services.article_fetcher.types import FullContentCandidate, FetchResult
-from api.services.full_content_status import mark_success
 with connection.cursor() as cursor:
     cursor.execute('PRAGMA journal_mode')
     assert cursor.fetchone()[0] == 'wal'
@@ -160,43 +157,24 @@ for worker in workers:
     worker.join(10)
     assert worker.exitcode == 0
 assert counts[3] == 2 and counts[4] == 1
-news = News.objects.create(title='Synthetic lease', url='https://dev.to/team/lease', content='Summary',
-    source=Source.objects.get_or_create(name='Dev.to', defaults={'url': 'https://dev.to'})[0],
-    category=Category.objects.create(name='Lease', slug='lease'), publish_time=timezone.now(),
-    full_content_fetch_status='queued', full_content_next_attempt_at=timezone.now())
-news_id = news.pk
 connection.close()
 queue = ctx.Queue()
 def abandoned():
-    current = News.objects.get(pk=news_id)
-    lease = claim_fetch(current)
     permit = budget.claim_budget({'host:killed.test': 0})
-    queue.put((lease, permit))
+    queue.put(permit)
     time.sleep(30)
 owner = ctx.Process(target=abandoned)
 owner.start()
-old_lease, old_permit = queue.get(timeout=5)
+old_permit = queue.get(timeout=5)
 owner.terminate()
 owner.join(5)
 assert owner.exitcode is not None
 # Controlled clock advance models expiry without changing production TTLs.
 future = timezone.now() + timedelta(minutes=6)
 budget.timezone.now = lambda: future
-from api.services import full_content_status
-full_content_status.tz_now = lambda: future
 replacement_permit = budget.claim_budget({'host:killed.test': 0})
 budget.release_budget(old_permit)
 budget.confirm_permit(replacement_permit)
-current = News.objects.get(pk=news_id)
-replacement = claim_fetch(current)
-assert replacement and replacement.claimed_at != old_lease.claimed_at
-stale = News.objects.get(pk=news_id)
-stale._full_content_snapshot = old_lease
-body = FullContentCandidate('devto', '17', stale.url, 'https://dev.to/api/articles/17', None, stale.title,
-    'article', 'body_markdown', 'markdown', 'full', 'A complete synthetic body.', None, None, future)
-assert not mark_success(stale, FetchResult(ok=True, provider='devto', markdown=body.raw_content, candidate=body))
-assert not mark_failed(stale, RuntimeError('stale failure'))
-assert mark_success(current, FetchResult(ok=True, provider='devto', markdown=body.raw_content, candidate=body))
 budget.release_budget(replacement_permit)
 print(json.dumps({'global_max':counts[3], 'host_max':counts[4], 'wal':True, 'killed_owner_recovered':True}))
 '''

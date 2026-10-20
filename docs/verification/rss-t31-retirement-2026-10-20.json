@@ -1,0 +1,149 @@
+{
+  "source_sha": "7ff9900b5c2c6cb00c995c96f2187d5fbd64ebec",
+  "base_sha": "6a2cc025c338ef0308024151be4fbd796f7f3a39",
+  "pr": "https://github.com/CoderLambert/news-aggregator/pull/154",
+  "integration": "NOT_RUN: actual T30 shutdown/restart and independent review pending; Draft, unmerged",
+  "production": "NOT_RUN: deferred by user",
+  "github_ci": "NOT_RUN: both self-hosted runners offline",
+  "backend": {
+    "result": "PASS",
+    "passed": 2005,
+    "skipped": 16,
+    "collected_executed_identities": 2021,
+    "rounds": 1,
+    "elapsed_seconds": 166,
+    "retries": 0
+  },
+  "frontend": {
+    "result": "PASS",
+    "source_sha": "c2eac3f4d31d337d004802704434b62301136427",
+    "unchanged_at_candidate": true,
+    "files": 99,
+    "tests": 700,
+    "typecheck": "PASS",
+    "lint": "PASS with one existing warning",
+    "build": "PASS"
+  },
+  "sdk_proxy_django": {
+    "result": "PASS",
+    "source_sha": "3458fb2c380a2900bb39f736973dc75e5f8f5817",
+    "unchanged_paths": [
+      "backend",
+      "ops/shared-litellm-proxy",
+      "tools/byok_t00_probe"
+    ],
+    "tests": 3,
+    "real_provider": false
+  },
+  "release_targeted": {
+    "result": "PASS",
+    "tests": 135,
+    "red_repro": "FAIL before fix: existing RSS silently stopped and not restored",
+    "shell_acceptance": "PASS"
+  },
+  "browser": [
+    {
+      "application_image_id": "sha256:5fbdb74ac2b62d73a2f78ecbf233df8a680d9e58ad575438bcefdb95620213b0",
+      "check_fields": 68,
+      "cleanup_status": "PASS",
+      "image_revision": "7ff9900b5c2c6cb00c995c96f2187d5fbd64ebec",
+      "report_directory": "newshub-local-domain-report-7ff9900b5c2c6cb00c995c96f2187d5fbd64ebec.5GqTZO",
+      "stage": "g2",
+      "status": "PASS",
+      "unverified": {
+        "real_client_address_observation": "NOT_RUN: the fake upstream echo verifies proxy headers, not Django WSGI REMOTE_ADDR"
+      }
+    },
+    {
+      "application_image_id": "sha256:5fbdb74ac2b62d73a2f78ecbf233df8a680d9e58ad575438bcefdb95620213b0",
+      "check_fields": 45,
+      "cleanup_status": "PASS",
+      "image_revision": "7ff9900b5c2c6cb00c995c96f2187d5fbd64ebec",
+      "report_directory": "newshub-local-domain-report-7ff9900b5c2c6cb00c995c96f2187d5fbd64ebec.4T2ad0",
+      "stage": "g1",
+      "status": "PASS",
+      "unverified": {
+        "real_client_address_observation": "NOT_RUN: the fake upstream echo verifies proxy headers, not Django WSGI REMOTE_ADDR"
+      }
+    }
+  ],
+  "image_audit": {
+    "source_sha": "7ff9900b5c2c6cb00c995c96f2187d5fbd64ebec",
+    "production_execution": "NOT_RUN",
+    "images": {
+      "app": {
+        "reference": "newshub:rss-t31-7ff9900",
+        "image_id": "sha256:5fbdb74ac2b62d73a2f78ecbf233df8a680d9e58ad575438bcefdb95620213b0",
+        "size_bytes": 532875584,
+        "revision": "7ff9900b5c2c6cb00c995c96f2187d5fbd64ebec",
+        "user": "10001:10001",
+        "cmd": [
+          "/app/docker-entrypoint.sh"
+        ],
+        "forbidden_installed": [],
+        "old_code_paths": [],
+        "retained_commands": {
+          "embedding_worker": true,
+          "channel_worker": true,
+          "rss_sync_worker": true
+        },
+        "package_versions": {
+          "django": "6.1.2",
+          "openai": "3.35.1",
+          "anthropic": "1.13.0",
+          "miniflux": "1.1.6",
+          "chromadb": "1.5.9",
+          "torch": "2.14.1+cpu"
+        },
+        "result": "PASS"
+      },
+      "rss_sync": {
+        "reference": "newshub:rss-sync-t31-7ff9900",
+        "image_id": "sha256:7a6e73c00d6f015190a2eeb393c5b3a449faf524a6cce8c3286e4e494f354fd6",
+        "size_bytes": 58308977,
+        "revision": "7ff9900b5c2c6cb00c995c96f2187d5fbd64ebec",
+        "user": "10001:10001",
+        "cmd": [
+          "python",
+          "/app/backend/manage.py",
+          "rss_sync_worker"
+        ],
+        "forbidden_installed": [],
+        "old_code_paths": [],
+        "retained_commands": {
+          "embedding_worker": true,
+          "channel_worker": true,
+          "rss_sync_worker": true
+        },
+        "package_versions": {
+          "django": "6.1.2",
+          "openai": null,
+          "anthropic": null,
+          "miniflux": "1.1.6",
+          "chromadb": null,
+          "torch": null
+        },
+        "result": "PASS"
+      }
+    },
+    "result": "PASS"
+  },
+  "rss_light_imports": {
+    "django_setup": "PASS",
+    "control_and_reconciliation_imports": "PASS",
+    "engine_request": "NOT_RUN",
+    "database_migrations": "NOT_RUN"
+  },
+  "raw_log_directory": "/tmp/newshub-t31-validation-20261020",
+  "log_sha256": {
+    "backend-full-7ff9900.log": "2e17e768db7504df9ebf4b7255da642c1865c160b0bc402c61be515faa3b85eb",
+    "rss-release-lifecycle-red.log": "941d0f5010b1ae7afd831ce90c251e4159a795342927e43c09d1564c08845c5d",
+    "rss-release-final-targeted.log": "64cc602150b54afe76353fbb4826cf6aa5982268374f27aab1a8d4536772d20d",
+    "release-shell-fixed.log": "4db45c7972d40007cc4f841b7843f94c862824ebb81d0d89473b25705d493214",
+    "frontend-c2eac3f.log": "4bf21cb16535a9725cee0e6e530625ba3d64003d1a5e851efe998c026c67736c",
+    "t04-3458fb2.log": "d74caae4de6423f166718858dc53f339ab87823656b509f0bb2a02212d020d88",
+    "g1-7ff9900.log": "539dba17be18a9cc044acf5314f3b47fc4b6d6b8125fa6815b4b82163fb45eae",
+    "g2-7ff9900.log": "8b0514f85400206e5b0250f8d8cbcb258fdd21bd714e8d399b5f2e3b67c6ceeb",
+    "ci-contracts-final.log": "7b93c45818f65651e3f4d89281270f286b026bea46555f55a5fa5aa8bb883a76"
+  }
+}

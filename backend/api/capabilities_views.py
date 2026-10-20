@@ -86,6 +86,8 @@ def _feature_snapshot() -> dict[str, dict[str, object]]:
             False, "chatgpt_plan_usage_disabled"
         )
 
+    features["provider_comparisons"] = _feature(False, "legacy_ingestion_retired")
+
     return features
 
 

@@ -83,7 +83,7 @@ def test_chat_history_is_isolated_and_body_owner_fields_are_ignored(chat_news, c
     client_a = APIClient()
     client_a.force_login(chat_user)
     with pytest.MonkeyPatch.context() as scoped:
-        scoped.setattr('api.views.ensure_full_content', lambda _news: None)
+        scoped.setattr('socket.socket.connect', lambda *args, **kwargs: pytest.fail('reader initiated network'))
         scoped.setattr('api.views.stream_chat', lambda *_args, **_kwargs: iter(['assistant reply']))
         scoped.setattr('api.services.chatgpt_subscription.active_connection_for_user', lambda _user: None)
         response = client_a.post(
@@ -120,7 +120,7 @@ def test_chat_writes_require_valid_session_csrf(chat_news, chat_user):
     assert client.post(path, {'question': 'hello'}, format='json', HTTP_X_CSRFTOKEN='wrong').status_code == 403
 
     with pytest.MonkeyPatch.context() as scoped:
-        scoped.setattr('api.views.ensure_full_content', lambda _news: None)
+        scoped.setattr('socket.socket.connect', lambda *args, **kwargs: pytest.fail('reader initiated network'))
         scoped.setattr('api.views.stream_chat', lambda *_args, **_kwargs: iter(['answer']))
         scoped.setattr('api.services.chatgpt_subscription.active_connection_for_user', lambda _user: None)
         response = client.post(path, {'question': 'hello'}, format='json', HTTP_X_CSRFTOKEN=token)
@@ -151,7 +151,7 @@ def test_invalid_question_is_rejected_before_fetch_search_or_provider(
     client = APIClient()
     client.force_login(chat_user)
     with pytest.MonkeyPatch.context() as scoped:
-        scoped.setattr('api.views.ensure_full_content', lambda _news: pytest.fail('fetch ran'))
+        scoped.setattr('socket.socket.connect', lambda *args, **kwargs: pytest.fail('reader initiated network'))
         scoped.setattr('api.views.stream_chat', lambda *_args, **_kwargs: pytest.fail('provider ran'))
         scoped.setattr('api.services.chatgpt_subscription.active_connection_for_user', lambda _user: None)
         from api.services.research import tools as research_tools
@@ -172,7 +172,7 @@ def test_invalid_question_is_rejected_before_fetch_search_or_provider(
 def test_chat_question_at_8000_characters_is_accepted(chat_news, chat_user, monkeypatch):
     client = APIClient()
     client.force_login(chat_user)
-    monkeypatch.setattr('api.views.ensure_full_content', lambda _news: None)
+    monkeypatch.setattr('socket.socket.connect', lambda *args, **kwargs: pytest.fail('reader initiated network'))
     monkeypatch.setattr('api.views.stream_chat', lambda *_args, **_kwargs: iter([]))
     monkeypatch.setattr('api.services.chatgpt_subscription.active_connection_for_user', lambda _user: None)
 
@@ -200,7 +200,7 @@ def test_cas_conflict_returns_409_without_discarding_existing_message(chat_news,
     saved = ChatSession.objects.create(user=chat_user, news=chat_news, messages=[{'role': 'user', 'content': 'kept'}])
     client = APIClient()
     client.force_login(chat_user)
-    monkeypatch.setattr('api.views.ensure_full_content', lambda _news: None)
+    monkeypatch.setattr('socket.socket.connect', lambda *args, **kwargs: pytest.fail('reader initiated network'))
     monkeypatch.setattr('api.views.append_user_message', lambda **_kwargs: (_ for _ in ()).throw(ChatConflict()))
 
     response = client.post(

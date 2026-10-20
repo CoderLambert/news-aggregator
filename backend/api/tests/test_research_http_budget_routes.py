@@ -6,7 +6,6 @@ import pytest
 from django.utils import timezone
 
 from api.services.research import tools
-from api.services.article_fetcher.types import FetchResult
 from api.services.request_budget import BudgetDeferred
 
 

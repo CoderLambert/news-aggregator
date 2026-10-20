@@ -11,19 +11,11 @@ import pytest
 from django.contrib.auth.models import User
 from django.utils import timezone
 from api.models import News, Source, Category
-from api.services.article_fetcher import FetchResult
 
 
 @pytest.fixture(autouse=True)
 def no_external_full_content_fetch():
-    result = FetchResult(
-        ok=True,
-        provider='test',
-        url='https://example.com/test',
-        title='测试文章',
-        markdown='测试文章\n\n这是真实抓取测试正文，用于隔离 suggested-questions 单测中的外部网络。' * 20,
-    )
-    with patch('api.views.fetch_article_markdown', return_value=result):
+    with patch('socket.socket.connect', side_effect=AssertionError('publisher IO')):
         yield
 
 
@@ -249,7 +241,7 @@ def test_two_accounts_cannot_pay_twice_for_the_same_article_revision(news, clien
 
 def test_unconfigured_reader_does_not_enqueue_full_article(news, client):
     with (
-        patch('api.views.ensure_full_content', side_effect=AssertionError('should not fetch')),
+        patch('socket.socket.connect', side_effect=AssertionError('should not fetch')),
         patch('api.services.ai_execution.personal_clients_for_user', return_value=[]),
         patch('api.services.chatgpt_subscription.active_connection_for_user', return_value=None),
     ):

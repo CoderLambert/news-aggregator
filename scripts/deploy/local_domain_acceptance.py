@@ -93,7 +93,7 @@ G2_BROWSER_SUBCHECKS = frozenset({
     'g2.auth_race_identity_b', 'g2.auth_race_favorites_b',
     'g2.owner_csrf',
     'g2.logout_a_after_owner_writes',
-    'g2.admin_login', 'g2.admin_dashboard_api', 'g2.admin_provider_api',
+    'g2.admin_login', 'g2.admin_dashboard_api', 'g2.admin_retired_api',
     'g2.admin_page', 'g2.admin_dashboard_ready', 'g2.admin_deactivate',
     'g2.admin_inactive_api', 'g2.admin_inactive_ui',
     'g2.final_audit', 'g2.anon_after_logout',
@@ -1139,13 +1139,17 @@ def _check_http_api(args: argparse.Namespace, checks: dict[str, str], work_dir: 
                 isinstance(features.get(name), dict) and features[name].get('enabled') is True,
                 f'G2 capability {name} was not enabled',
             )
-        for name in ('chat', 'provider_comparisons', 'translation', 'tts'):
+        for name in ('chat', 'translation', 'tts'):
             _require(
                 isinstance(features.get(name), dict)
                 and features[name].get('enabled') is False
                 and features[name].get('reason') == 'ai_disabled',
                 f'G2 AI capability {name} was not explicitly disabled',
             )
+        _require(
+            features.get('provider_comparisons') == {'enabled': False, 'reason': 'legacy_ingestion_retired'},
+            'G2 collector comparison capability was not explicitly retired',
+        )
         _require(
             isinstance(features.get('research'), dict)
             and features['research'].get('enabled') is False
@@ -1716,7 +1720,7 @@ def _is_g2_admin_dashboard_response(response) -> bool:
         and port in (None, 443)
         and parsed.username is None
         and parsed.password is None
-        and parsed.path == '/api/admin/crawler/dashboard/'
+        and parsed.path == '/api/admin/rss/health/'
     )
 
 
@@ -1732,17 +1736,24 @@ async def _run_g2_admin_acceptance(
     await login_admin()
 
     _mark_g2_browser_subcheck(checks, 'g2.admin_dashboard_api')
-    dashboard_api = await browser_api('GET', '/api/admin/crawler/dashboard/')
+    dashboard_api = await browser_api('GET', '/api/admin/rss/health/')
     _require(_safe_http_status(dashboard_api) == 200, 'active synthetic superuser could not read the admin dashboard')
+    health_body = dashboard_api.get('body') if isinstance(dashboard_api, dict) else None
+    _require(isinstance(health_body, dict) and health_body.get('engine_ready') is False,
+             'G2 stored-health fixture must not claim a live engine')
+    checks['g2_rss_stored_health'] = 'HTTP 200 with engine_ready=false; synthetic identity, no engine configured'
 
-    _mark_g2_browser_subcheck(checks, 'g2.admin_provider_api')
-    provider_api = await browser_api('GET', '/api/provider-comparisons/')
-    _require(_safe_http_status(provider_api) == 200, 'active synthetic superuser could not read provider comparison records')
+    _mark_g2_browser_subcheck(checks, 'g2.admin_retired_api')
+    index_api = await browser_api('GET', '/api/admin/search-index/dashboard/')
+    _require(_safe_http_status(index_api) == 200, 'active synthetic superuser could not read the retained search index')
+    for path in ('/api/admin/crawler/dashboard/', '/api/provider-comparisons/'):
+        retired_api = await browser_api('GET', path)
+        _require(_safe_http_status(retired_api) == 410, 'retired collector API remained active')
 
     _mark_g2_browser_subcheck(checks, 'g2.admin_page')
     async with page.expect_response(_is_g2_admin_dashboard_response, timeout=15000) as dashboard_info:
         admin_page = await page.goto(
-            f'https://{HOST}/admin/crawlers',
+            f'https://{HOST}/admin/rss',
             wait_until='domcontentloaded',
             timeout=15000,
         )
@@ -1755,7 +1766,7 @@ async def _run_g2_admin_acceptance(
     _require(_safe_http_status(dashboard_response) == 200, 'active admin dashboard response did not return HTTP 200')
 
     _mark_g2_browser_subcheck(checks, 'g2.admin_dashboard_ready')
-    await page.get_by_role('heading', name='来源管理', exact=True).wait_for(state='visible', timeout=15000)
+    await page.get_by_role('heading', name='RSS 与搜索管理', exact=True).wait_for(state='visible', timeout=15000)
 
     _mark_g2_browser_subcheck(checks, 'g2.admin_deactivate')
     await deactivate_admin()
@@ -1763,19 +1774,22 @@ async def _run_g2_admin_acceptance(
     _mark_g2_browser_subcheck(checks, 'g2.admin_inactive_api')
     for path in (
         '/api/auth/me/',
+        '/api/admin/rss/health/',
+        '/api/admin/search-index/dashboard/',
         '/api/admin/crawler/dashboard/',
         '/api/provider-comparisons/',
     ):
         response = await browser_api('GET', path)
-        _require(_safe_http_status(response) == 403, 'inactive admin session retained a protected API access')
+        expected = 401 if path == '/api/admin/rss/health/' else 403
+        _require(_safe_http_status(response) == expected, 'inactive admin session retained a protected API access')
 
     _mark_g2_browser_subcheck(checks, 'g2.admin_inactive_ui')
     await page.reload(wait_until='domcontentloaded', timeout=20000)
     await page.get_by_role('dialog').get_by_role(
         'button', name='登录', exact=True,
     ).wait_for(state='visible', timeout=15000)
-    checks['g2_active_admin'] = 'active synthetic superuser reads admin/provider APIs and completes the dashboard UI before deactivation'
-    checks['g2_inactive_admin_session'] = 'after deactivation, old session receives HTTP 403 from me/admin/provider endpoints and returns to logged-out UI'
+    checks['g2_active_admin'] = 'active synthetic superuser reads RSS/index APIs, receives 410 from retired APIs and completes RSS UI before deactivation'
+    checks['g2_inactive_admin_session'] = 'after deactivation, old session receives RSS HTTP 401 and me/index/retired API HTTP 403, then returns to logged-out UI'
 
 
 def _validated_auth_me_snapshot(response: dict, expected_username: str) -> dict:
@@ -2123,21 +2137,21 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
                     {'question': 'synthetic local-domain AI-disabled check'},
                 )
                 _require(b_ai_post['status'] == 403 and b_ai_post['body'].get('error_code') == 'ai_disabled', 'AI-disabled Chat POST was not blocked before a provider call')
-                for path in ('/api/admin/crawler/dashboard/', '/api/provider-comparisons/'):
+                for path in ('/api/admin/rss/health/', '/api/admin/search-index/dashboard/', '/api/admin/crawler/dashboard/', '/api/provider-comparisons/'):
                     response = await _browser_api(page, 'GET', path)
                     _require(response['status'] == 403, f'ordinary user accessed protected endpoint {path}')
                 checks['g2_b_owner_isolation'] = 'B receives no A favorites/chat/research; cross-owner DELETE returns 404; own empty chat DELETE is scoped'
                 checks['g2_ai_disabled_post'] = 'HTTP 403 ai_disabled before any model/provider request'
-                checks['g2_ordinary_admin_denied'] = 'crawler and provider-comparison APIs return HTTP 403'
+                checks['g2_ordinary_admin_denied'] = 'RSS/index and retired collector/provider APIs return HTTP 403'
 
                 mark('g2.admin_gate')
                 request_paths: list[str] = []
                 page.on('request', lambda request: request_paths.append(urlparse(request.url).path))
-                await page.goto(f'https://{HOST}/admin/crawlers', wait_until='domcontentloaded', timeout=20000)
+                await page.goto(f'https://{HOST}/admin/rss', wait_until='domcontentloaded', timeout=20000)
                 await page.wait_for_timeout(250)
                 body_text = await page.locator('body').inner_text()
                 _require('超级管理员' in body_text or '管理员' in body_text, 'ordinary-user admin route did not show its protected state')
-                _require(not any(path.startswith('/api/admin/crawler/') for path in request_paths), 'ordinary-user admin UI queried the admin API')
+                _require(not any(path.startswith('/api/admin/') for path in request_paths), 'ordinary-user admin UI queried the admin API')
                 await page.goto(f'https://{HOST}/provider-comparisons', wait_until='domcontentloaded', timeout=20000)
                 await page.wait_for_timeout(250)
                 _require(not any(path.startswith('/api/provider-comparisons') for path in request_paths), 'AI-disabled ordinary-user UI queried Provider comparison data')

@@ -47,14 +47,14 @@ else
 fi
 echo ""
 
-# 3. Run crawler tests
-echo -e "${YELLOW}[3/3] Running crawler tests...${NC}"
+# 3. Run RSS tests
+echo -e "${YELLOW}[3/3] Running RSS tests...${NC}"
 cd "$PROJECT"
-if PYTHONPATH="$PROJECT/backend:$PROJECT/crawler${PYTHONPATH:+:$PYTHONPATH}" \
-    "$PYTHON" -m pytest tests/crawler/ -v --tb=short; then
-    echo -e "${GREEN}✓ Crawler tests passed${NC}"
+if PYTHONPATH="$PROJECT/backend${PYTHONPATH:+:$PYTHONPATH}" \
+    "$PYTHON" -m pytest backend/api/tests/rss/ -v --tb=short; then
+    echo -e "${GREEN}✓ RSS tests passed${NC}"
 else
-    echo -e "${RED}✗ Crawler tests failed${NC}"
+    echo -e "${RED}✗ RSS tests failed${NC}"
     OVERALL_SUCCESS=false
 fi
 echo ""

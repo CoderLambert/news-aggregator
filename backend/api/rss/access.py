@@ -73,7 +73,7 @@ def article_sources(user, news):
 
 def body_authorized_news(user, queryset=None):
     """SQL counterpart of stored-body readability, suitable before text search."""
-    from api.services.full_content_status import trimmed_text_expression
+    from api.services.article_body_state import trimmed_text_expression
     qs = authorized_news(user, queryset)
     body_sources = authorized_sources(user, body=True)
     links = SourceFeedLink.objects.filter(binding_id=OuterRef('body_owner_binding_id'),

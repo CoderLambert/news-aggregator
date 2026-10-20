@@ -909,7 +909,7 @@ def test_g2_browser_subchecks_are_fixed_and_cover_the_account_flow():
         'g2.auth_race_login_b', 'g2.auth_race_release',
         'g2.auth_race_identity_b', 'g2.auth_race_favorites_b',
         'g2.owner_csrf',
-        'g2.admin_login', 'g2.admin_dashboard_api', 'g2.admin_provider_api',
+        'g2.admin_login', 'g2.admin_dashboard_api', 'g2.admin_retired_api',
         'g2.admin_page', 'g2.admin_dashboard_ready', 'g2.admin_deactivate',
         'g2.admin_inactive_api', 'g2.admin_inactive_ui',
         'g2.final_audit', 'g2.anon_after_logout', 'g2.cookie_attributes',
@@ -938,18 +938,19 @@ def test_g2_browser_subchecks_are_fixed_and_cover_the_account_flow():
 
 
 @pytest.mark.parametrize(('url', 'method', 'matches'), [
-    (f'https://{acceptance.HOST}/api/admin/crawler/dashboard/?lang=zh', 'GET', True),
-    (f'https://{acceptance.HOST}:443/api/admin/crawler/dashboard/', 'GET', True),
-    (f'http://{acceptance.HOST}/api/admin/crawler/dashboard/', 'GET', False),
-    ('https://evil.invalid/api/admin/crawler/dashboard/', 'GET', False),
-    (f'https://user@{acceptance.HOST}/api/admin/crawler/dashboard/', 'GET', False),
-    (f'https://{acceptance.HOST}:444/api/admin/crawler/dashboard/', 'GET', False),
-    (f'https://{acceptance.HOST}/api/admin/crawler/dashboard/extra', 'GET', False),
-    (f'https://{acceptance.HOST}/api/admin/crawler/dashboard-v2/', 'GET', False),
-    (f'https://{acceptance.HOST}/api/admin/crawler/dashboard/', 'POST', False),
-    (f'https://{acceptance.HOST}/api/admin/crawler/dashboard/', 'HEAD', False),
-    (f'https://{acceptance.HOST}/api/admin/crawler/dashboard/', 'get', False),
-    (f'https://{acceptance.HOST}:not-a-port/api/admin/crawler/dashboard/', 'GET', False),
+    (f'https://{acceptance.HOST}/api/admin/crawler/dashboard/', 'GET', False),
+    (f'https://{acceptance.HOST}/api/admin/rss/health/?lang=zh', 'GET', True),
+    (f'https://{acceptance.HOST}:443/api/admin/rss/health/', 'GET', True),
+    (f'http://{acceptance.HOST}/api/admin/rss/health/', 'GET', False),
+    ('https://evil.invalid/api/admin/rss/health/', 'GET', False),
+    (f'https://user@{acceptance.HOST}/api/admin/rss/health/', 'GET', False),
+    (f'https://{acceptance.HOST}:444/api/admin/rss/health/', 'GET', False),
+    (f'https://{acceptance.HOST}/api/admin/rss/health/extra', 'GET', False),
+    (f'https://{acceptance.HOST}/api/admin/rss/health-v2/', 'GET', False),
+    (f'https://{acceptance.HOST}/api/admin/rss/health/', 'POST', False),
+    (f'https://{acceptance.HOST}/api/admin/rss/health/', 'HEAD', False),
+    (f'https://{acceptance.HOST}/api/admin/rss/health/', 'get', False),
+    (f'https://{acceptance.HOST}:not-a-port/api/admin/rss/health/', 'GET', False),
 ])
 def test_g2_admin_dashboard_response_matcher_requires_exact_https_url_and_get(url, method, matches):
     response = SimpleNamespace(url=url, request=SimpleNamespace(method=method))
@@ -958,7 +959,7 @@ def test_g2_admin_dashboard_response_matcher_requires_exact_https_url_and_get(ur
 
 class _FakeG2AdminResponse:
     def __init__(self, events, *, status=200, body_error=False):
-        self.url = f'https://{acceptance.HOST}/api/admin/crawler/dashboard/?lang=zh'
+        self.url = f'https://{acceptance.HOST}/api/admin/rss/health/?lang=zh'
         self.request = SimpleNamespace(method='GET')
         self.status = status
         self.events = events
@@ -1012,7 +1013,7 @@ class _FakeG2AdminLocator:
 
     async def wait_for(self, *, state, timeout):
         if self.role == 'heading':
-            assert (self.name, state, timeout) == ('来源管理', 'visible', 15000)
+            assert (self.name, state, timeout) == ('RSS 与搜索管理', 'visible', 15000)
             self.page.events.append('dashboard.heading_wait')
             if not self.page.content_ready:
                 raise asyncio.TimeoutError('synthetic private content readiness detail')
@@ -1053,7 +1054,7 @@ class _FakeG2AdminPage:
 
     async def goto(self, url, *, wait_until, timeout):
         assert self.expectation_active
-        assert url == f'https://{acceptance.HOST}/admin/crawlers'
+        assert url == f'https://{acceptance.HOST}/admin/rss'
         assert (wait_until, timeout) == ('domcontentloaded', 15000)
         self.events.append('admin.goto')
         return SimpleNamespace(status=self.navigation_status)
@@ -1082,12 +1083,13 @@ def _fake_g2_admin_callbacks(events):
         assert method == 'GET'
         api_calls.append(path)
         events.append(f'api:{path}')
-        if path == '/api/admin/crawler/dashboard/':
-            return {'status': 200 if api_calls.count(path) == 1 else 403}
-        if path == '/api/provider-comparisons/':
-            return {'status': 200 if api_calls.count(path) == 1 else 403}
-        assert path == '/api/auth/me/'
-        return {'status': 403}
+        active = {'/api/admin/rss/health/', '/api/admin/search-index/dashboard/'}
+        retired = {'/api/admin/crawler/dashboard/', '/api/provider-comparisons/'}
+        assert path in active | retired | {'/api/auth/me/'}
+        if 'admin.deactivated' in events:
+            return {'status': 401 if path == '/api/admin/rss/health/' else 403}
+        return {'status': 410 if path in retired else 200,
+                'body': {'engine_ready': False} if path == '/api/admin/rss/health/' else {}}
 
     async def deactivate_admin():
         assert 'dashboard.heading_visible' in events
@@ -1123,8 +1125,10 @@ def test_g2_admin_acceptance_waits_for_slow_dashboard_response_and_ready_content
     assert events.index('dashboard.heading_visible') < events.index('admin.deactivated')
     assert events.index('admin.deactivated') < events.index('api:/api/auth/me/')
     assert api_calls == [
+        '/api/admin/rss/health/', '/api/admin/search-index/dashboard/',
         '/api/admin/crawler/dashboard/', '/api/provider-comparisons/',
-        '/api/auth/me/', '/api/admin/crawler/dashboard/', '/api/provider-comparisons/',
+        '/api/auth/me/', '/api/admin/rss/health/', '/api/admin/search-index/dashboard/',
+        '/api/admin/crawler/dashboard/', '/api/provider-comparisons/',
     ]
     assert checks['_g2_active_subcheck'] == 'g2.admin_inactive_ui'
     assert checks['g2_active_admin'].startswith('active synthetic superuser')
@@ -1809,13 +1813,14 @@ def test_g2_http_api_matrix_requires_full_accounts_and_blocks_private_ai_anonymo
                 header_file.write_text('Set-Cookie: csrftoken=fixture; Path=/; SameSite=Lax; Secure\n', encoding='utf-8')
         elif name == 'capabilities':
             enabled = ('accounts', 'signup', 'favorites', 'blocked_news', 'chat_history')
-            disabled = ('chat', 'provider_comparisons', 'translation', 'tts')
+            disabled = ('chat', 'translation', 'tts')
             body = json.dumps({
                 'site_mode': 'full',
                 'chatgpt_auth_mode': 'disabled',
                 'features': {
                     **{key: {'enabled': True} for key in enabled},
                     **{key: {'enabled': False, 'reason': 'ai_disabled'} for key in disabled},
+                    'provider_comparisons': {'enabled': False, 'reason': 'legacy_ingestion_retired'},
                     'research': {
                         'enabled': False,
                         'reason': 'hosted_integration_unapproved',
@@ -2544,3 +2549,43 @@ def test_g2_rate_matrix_uses_real_loopback_buckets_and_xff_only_as_negative(tmp_
     report_text = json.dumps(checks)
     assert all(bundle['users'][role]['password'] not in report_text for role in bundle['users'])
     assert all(invitation['token'] not in report_text for invitation in bundle['invitations'].values())
+
+
+@pytest.mark.parametrize(('path', 'status', 'subcheck'), [
+    ('/api/admin/rss/health/', 503, 'g2.admin_dashboard_api'),
+    ('/api/admin/search-index/dashboard/', 503, 'g2.admin_retired_api'),
+    ('/api/admin/crawler/dashboard/', 200, 'g2.admin_retired_api'),
+    ('/api/provider-comparisons/', 200, 'g2.admin_retired_api'),
+])
+def test_g2_retirement_requires_live_rss_index_and_closed_collectors(path, status, subcheck):
+    events = []
+    page = _FakeG2AdminPage(events=events)
+    login, original_api, deactivate, _ = _fake_g2_admin_callbacks(events)
+    checks = {}
+    async def api(method, current_path):
+        return {'status': status} if current_path == path else await original_api(method, current_path)
+    async def exercise():
+        await acceptance._run_g2_admin_acceptance(page, checks, login_admin=login,
+            browser_api=api, deactivate_admin=deactivate)
+    with pytest.raises(acceptance.AcceptanceError):
+        asyncio.run(exercise())
+    assert checks['_g2_active_subcheck'] == subcheck
+    assert 'admin.deactivated' not in events
+
+
+def test_g2_inactive_admin_cannot_keep_rss_health_access():
+    events = []
+    page = _FakeG2AdminPage(events=events)
+    login, original_api, deactivate, _ = _fake_g2_admin_callbacks(events)
+    checks = {}
+    async def api(method, path):
+        if 'admin.deactivated' in events and path == '/api/admin/rss/health/':
+            return {'status': 200, 'body': {'engine_ready': False}}
+        return await original_api(method, path)
+    async def exercise():
+        await acceptance._run_g2_admin_acceptance(page, checks, login_admin=login,
+            browser_api=api, deactivate_admin=deactivate)
+    with pytest.raises(acceptance.AcceptanceError):
+        asyncio.run(exercise())
+    assert checks['_g2_active_subcheck'] == 'g2.admin_inactive_api'
+    assert 'admin.deactivated' in events and 'admin.reload' not in events

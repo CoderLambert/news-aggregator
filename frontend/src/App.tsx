@@ -29,12 +29,11 @@ const ChannelDetailWorkspace = lazy(() => import('@/pages/ChannelDetailWorkspace
 const NewsList = lazy(() => import('@/pages/NewsList'))
 const NewsDetail = lazy(() => import('@/pages/NewsDetail'))
 const FavoritesPage = lazy(() => import('@/pages/FavoritesPage'))
-const ProviderComparisons = lazy(() => import('@/pages/ProviderComparisons'))
 const ChatGPTSubscriptionSettings = lazy(() => import('@/pages/ChatGPTSubscriptionSettings'))
 const AIModelSettingsPage = lazy(() => import('@/pages/AIModelSettingsPage'))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
 const LocalSearch = lazy(() => import('@/pages/LocalSearch'))
-const CrawlerAdminPage = lazy(() => import('@/pages/admin/CrawlerAdminPage'))
+const AdminPage = lazy(() => import('@/pages/admin/AdminPage'))
 const MascotPreview = lazy(() => import('@/components/mascot/MascotPreview'))
 
 function Footer() {
@@ -73,12 +72,13 @@ export default function App() {
             <Route path="/search" element={<LocalSearch />} />
             <Route path="/news/:id" element={<><ReadingTracker /><NewsDetail /></>} />
             <Route path="/favorites" element={<FeatureRoute feature="favorites"><FavoritesPage /></FeatureRoute>} />
-            <Route path="/provider-comparisons" element={<FeatureRoute feature="provider_comparisons" requireSuperuser><ProviderComparisons /></FeatureRoute>} />
+            <Route path="/provider-comparisons" element={<FeatureRoute feature="admin" requireSuperuser><Navigate to="/admin/rss" replace /></FeatureRoute>} />
             <Route path="/settings" element={<><SettingsPage /><AIConnectionSettingsLink /></>} />
             <Route path="/settings/ai" element={<FeatureRoute feature="accounts"><AIModelSettingsPage /></FeatureRoute>} />
             <Route path="/settings/chatgpt" element={<FeatureRoute feature="accounts"><FeatureRoute feature="chatgpt_subscription"><ChatGPTSubscriptionSettings /></FeatureRoute></FeatureRoute>} />
-            <Route path="/admin" element={<Navigate to="/admin/crawlers" replace />} />
-            <Route path="/admin/crawlers" element={<FeatureRoute feature="admin"><SuperuserRoute><CrawlerAdminPage /></SuperuserRoute></FeatureRoute>} />
+            <Route path="/admin" element={<Navigate to="/admin/rss" replace />} />
+            <Route path="/admin/rss" element={<FeatureRoute feature="admin"><SuperuserRoute><AdminPage /></SuperuserRoute></FeatureRoute>} />
+            <Route path="/admin/crawlers" element={<Navigate to="/admin/rss" replace />} />
             <Route path="/__mascot__" element={<MascotPreview />} />
             <Route path="*" element={<div className="workspace-empty"><h1>页面不存在</h1><a href="/">返回资讯首页</a></div>} />
           </Routes></Suspense></AppErrorBoundary>

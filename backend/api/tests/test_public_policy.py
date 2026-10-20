@@ -188,7 +188,7 @@ def test_read_only_cors_preflight_cannot_bypass_route_policy(news_obj, monkeypat
     with (
         patch("api.views.get_openai_client") as openai_client,
         patch("api.views.stream_chat") as stream_chat,
-        patch("api.services.article_fetcher.comparison.compare_providers") as compare,
+        patch("socket.socket.connect") as compare,
         patch("api.services.chatgpt_subscription.handoff_authorization") as handoff_auth,
     ):
         for route_name, kwargs in known_routes:
@@ -391,7 +391,7 @@ def test_read_only_precedes_authentication_for_anonymous_user_and_admin(news_obj
         patch.object(NewsListView, "_hybrid_search") as hybrid_search,
         patch("api.views.get_openai_client") as openai_client,
         patch("api.views.stream_chat") as stream_chat,
-        patch("api.services.article_fetcher.comparison.compare_providers") as compare,
+        patch("socket.socket.connect") as compare,
         patch("api.services.chatgpt_subscription.complete_authorization") as authorize,
         patch("api.services.chatgpt_subscription.discover_models") as discover,
     ):
@@ -468,7 +468,7 @@ def test_ai_disabled_rejects_only_frozen_expensive_methods_before_dispatch(
         patch.object(NewsListView, "_hybrid_search") as hybrid_search,
         patch("api.views.get_openai_client") as openai_client,
         patch("api.views.stream_chat") as stream_chat,
-        patch("api.services.article_fetcher.comparison.compare_providers") as compare,
+        patch("socket.socket.connect") as compare,
     ):
         for route_name, method, kwargs in requests:
             path = reverse(route_name, kwargs=kwargs or None)
@@ -648,8 +648,9 @@ def test_full_capabilities_match_closed_feature_error_codes():
         "enabled": False,
         "reason": "semantic_search_disabled",
     }
-    for name in ("translation", "chat", "suggested_questions", "tts", "research", "provider_comparisons"):
+    for name in ("translation", "chat", "suggested_questions", "tts", "research"):
         assert features[name] == {"enabled": False, "reason": "ai_disabled"}
+    assert features["provider_comparisons"] == {"enabled": False, "reason": "legacy_ingestion_retired"}
     assert features["chat_history"] == {"enabled": True, "reason": None}
     assert features["fetch_full"] == {"enabled": True, "reason": None}
     assert features["chatgpt_subscription"] == {

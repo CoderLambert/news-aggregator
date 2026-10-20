@@ -1,0 +1,242 @@
+{
+  "source_sha": "8d2c2ce67c08523817a23bafb199f19d8349eaa1",
+  "pr": "https://github.com/CoderLambert/news-aggregator/pull/154",
+  "status": "ISOLATED_CANDIDATE_PASS_NOT_INTEGRATED",
+  "production": "NOT_RUN: deferred by user",
+  "github_ci": "NOT_RUN: both self-hosted runners offline at last check",
+  "independent_review": "NOT_RUN",
+  "backend": {
+    "result": "PASS",
+    "passed": 2018,
+    "skipped": 16,
+    "collected_executed_identities": 2034,
+    "rounds": 1,
+    "elapsed_seconds": 166,
+    "retries": 0
+  },
+  "release_targeted": {
+    "result": "PASS",
+    "passed": 146,
+    "skipped": 2,
+    "skip_reason": "existing live-container opt-in tests not enabled in this offline run",
+    "postgres_tcp_readiness_test": "PASS",
+    "canonical_release_shell": "PASS",
+    "static_export_preflight_domain_args_shell": "PASS; stubbed external tools, not actual browser/network proof"
+  },
+  "image_audit": {
+    "source_sha": "8d2c2ce67c08523817a23bafb199f19d8349eaa1",
+    "production_execution": "NOT_RUN",
+    "images": {
+      "app": {
+        "reference": "newshub:rss-t31-8d2c2ce",
+        "image_id": "sha256:ad5b6dec4f89cab011e171ec4f2aa8f6c93de079b48bd197f8542c0db5deec7c",
+        "size_bytes": 532875583,
+        "revision": "8d2c2ce67c08523817a23bafb199f19d8349eaa1",
+        "user": "10001:10001",
+        "cmd": [
+          "/app/docker-entrypoint.sh"
+        ],
+        "forbidden_installed": [],
+        "old_code_paths": [],
+        "retained_commands": {
+          "embedding_worker": true,
+          "channel_worker": true,
+          "rss_sync_worker": true
+        },
+        "package_versions": {
+          "django": "6.1.2",
+          "openai": "3.35.1",
+          "anthropic": "1.13.0",
+          "miniflux": "1.1.6",
+          "chromadb": "1.5.9",
+          "torch": "2.14.1+cpu"
+        },
+        "result": "PASS"
+      },
+      "rss_sync": {
+        "reference": "newshub:rss-sync-t31-8d2c2ce",
+        "image_id": "sha256:4e799ddb02b6905700e9cbfd92ced1f577152c01ce6e18eea94696affb0a5661",
+        "size_bytes": 58308977,
+        "revision": "8d2c2ce67c08523817a23bafb199f19d8349eaa1",
+        "user": "10001:10001",
+        "cmd": [
+          "python",
+          "/app/backend/manage.py",
+          "rss_sync_worker"
+        ],
+        "forbidden_installed": [],
+        "old_code_paths": [],
+        "retained_commands": {
+          "embedding_worker": true,
+          "channel_worker": true,
+          "rss_sync_worker": true
+        },
+        "package_versions": {
+          "django": "6.1.2",
+          "openai": null,
+          "anthropic": null,
+          "miniflux": "1.1.6",
+          "chromadb": null,
+          "torch": null
+        },
+        "result": "PASS"
+      }
+    },
+    "result": "PASS"
+  },
+  "browser_frontend_sdk_reuse": {
+    "record": "rss-t31-retirement-2026-10-20.json",
+    "browser_source_sha": "7ff9900b5c2c6cb00c995c96f2187d5fbd64ebec",
+    "unchanged_paths_at_current_source": [
+      "backend",
+      "frontend",
+      "Dockerfile",
+      "compose.prod.yaml",
+      "scripts/deploy/local-domain-smoke.sh",
+      "scripts/deploy/local_domain_acceptance.py"
+    ],
+    "g1_g2_status": "PASS with cleanup at recorded source",
+    "frontend_tests": 700,
+    "scope_limit": "RSS overlay/recovery behavior is covered by new paired rehearsal; prior G1/G2 do not prove production engine state"
+  },
+  "application_roundtrip": {
+    "result": "PASS",
+    "sealed": false,
+    "tool_sha": "8d2c2ce67c08523817a23bafb199f19d8349eaa1",
+    "app_sha": "8d2c2ce67c08523817a23bafb199f19d8349eaa1",
+    "runs": [
+      {
+        "stage": "seed",
+        "image": "newshub-rss-t26:retired-8d2c2ce",
+        "image_id": "sha256:ea653f54b605929cc4179a4121b6ca4e6ad2aa196871787981046ee0164000c1",
+        "app_sha": "8d2c2ce67c08523817a23bafb199f19d8349eaa1"
+      },
+      {
+        "stage": "upgrade",
+        "image": "newshub-rss-t26:retired-8d2c2ce",
+        "image_id": "sha256:ea653f54b605929cc4179a4121b6ca4e6ad2aa196871787981046ee0164000c1",
+        "app_sha": "8d2c2ce67c08523817a23bafb199f19d8349eaa1"
+      },
+      {
+        "stage": "exercise",
+        "image": "newshub-rss-t26:retired-8d2c2ce",
+        "image_id": "sha256:ea653f54b605929cc4179a4121b6ca4e6ad2aa196871787981046ee0164000c1",
+        "app_sha": "8d2c2ce67c08523817a23bafb199f19d8349eaa1"
+      },
+      {
+        "stage": "current",
+        "image": "newshub-rss-t26:retired-8d2c2ce",
+        "image_id": "sha256:ea653f54b605929cc4179a4121b6ca4e6ad2aa196871787981046ee0164000c1",
+        "app_sha": "8d2c2ce67c08523817a23bafb199f19d8349eaa1"
+      },
+      {
+        "stage": "rollback",
+        "image": "newshub-rss-t26:compat-6a2cc02",
+        "image_id": "sha256:c1df18686a78b9c712a0d08806e52db27b41576f2ebc668da4eb1b9b81c53a2e",
+        "app_sha": "6a2cc025c338ef0308024151be4fbd796f7f3a39"
+      },
+      {
+        "stage": "forward",
+        "image": "newshub-rss-t26:retired-8d2c2ce",
+        "image_id": "sha256:ea653f54b605929cc4179a4121b6ca4e6ad2aa196871787981046ee0164000c1",
+        "app_sha": "8d2c2ce67c08523817a23bafb199f19d8349eaa1"
+      }
+    ],
+    "harness_sha256": "d894bc3f8245fe3d880455ce701adf0b31f08600959b4ac4c9d1b6c6e35a35d2",
+    "all_table_fingerprints_preserved": true,
+    "wrappers_share_original_image_rootfs": true,
+    "containers_removed": true
+  },
+  "paired_recovery": {
+    "app_sha": "8d2c2ce67c08523817a23bafb199f19d8349eaa1",
+    "app_image_id": "sha256:ea653f54b605929cc4179a4121b6ca4e6ad2aa196871787981046ee0164000c1",
+    "paired_restore": "PASS",
+    "wrong_instance": "REFUSED_WITHOUT_WRITES",
+    "active_app_writer": "REFUSED",
+    "resources_removed": true,
+    "synthetic_bind_user": "1000:1000",
+    "restored_engine_reconciliation": {
+      "after_articles": 7,
+      "before_articles": 4,
+      "cursor": "4",
+      "full_reconciliation_complete": true,
+      "incremental_complete": true,
+      "private_paused_preserved": true
+    },
+    "restore_points": {
+      "postgres": "2026-10-19T23:03:33.580857+00:00",
+      "sqlite": "2026-10-19T23:03:33.460980+00:00"
+    },
+    "postgres_image": "postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94",
+    "engine_image": "miniflux/miniflux:2.3.3@sha256:49d7b60987616387c306a8023087b31f2c9b7b21288b523026cb04058e8b6dbb",
+    "engine_schema": 132,
+    "restored_writers_remain_stopped": true,
+    "sqlite_logical_sha256": "8348be93e62e06c4aa7d42dfde1673ec96cff3ad17c7c5c0cfcd494cec3d306c",
+    "pg_logical_sha256": "35e4a1164d5e05379e1e0b93a6734f1cfa675480a496bb0b255b4701ba2fb104",
+    "mapping_sha256": "db0f658b540e763cee31634c20ec075cabd363b39196ec3edde2fcba059af91e",
+    "production": "NOT_RUN"
+  },
+  "postgres_readiness": {
+    "source_image": "postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94",
+    "bootstrap_listen_addresses": "",
+    "healthcheck_now_uses_tcp_host": "127.0.0.1",
+    "first_startup_failure_root_cause": "NOT_PROVEN: first failed Miniflux startup lacked server diagnostics; do not equate the source-proven readiness risk with that specific event cause"
+  },
+  "preserved_failures": [
+    {
+      "log": "rss-paired-retirement-red.log",
+      "result": "2 FAIL: v4 rejected and no explicit keep-stopped flag"
+    },
+    {
+      "log": "t26-retirement-red.log",
+      "result": "FAIL: deleted legacy module imported"
+    },
+    {
+      "log": "t26-retirement-roundtrip.log",
+      "result": "FAIL: obsolete Scrapy-presence assertion after retirement"
+    },
+    {
+      "log": "t26-retirement-paired.log",
+      "result": "FAIL: Miniflux exited at startup, exact cause unproven"
+    },
+    {
+      "log": "t26-retirement-paired-diagnostic.log",
+      "result": "FAIL: restored 0600 SQLite unreadable by mismatched synthetic container UID; fixed by matching artifact owner, not widening permissions"
+    }
+  ],
+  "t33": {
+    "A1": "PARTIAL: synthetic data/ACL proof, not all real data or content quality",
+    "A2": "NOT_RUN: full-system resource/scale window",
+    "A3": "PARTIAL: synthetic role and paired restore proof; real T30 and integration pending",
+    "A4": "NOT_RUN: final CI, approved deployment and release"
+  },
+  "raw_log_directory": "/tmp/newshub-t31-validation-20261020",
+  "log_sha256": {
+    "backend-full-8d2c2ce.log": "9ba3f91e82c140faee8411e987a8fc650831f2109336280222eb009d7109fcf0",
+    "rss-paired-retirement-red.log": "077af6a63b3c2b0711c8b0e53b93107ddac08daf879917c09716d99ffb2d614c",
+    "t26-retirement-red.log": "f4262237c34c19d125fbc97503b23806e6e0278b1ffd9473b31240b8c2780946",
+    "t26-retirement-roundtrip.log": "2e07ac8b2aece0236dc11c947f357f4fe2a9bf7f0111a7602cbed19d61f8b10e",
+    "t26-retirement-roundtrip-v2.log": "5b768b88dcd4b551a1752ddc9e282474510be7611a0213490c47696e24876f0e",
+    "t26-retirement-paired.log": "7ffd299548e3147359ce9be71d1e010e14c1cfd0e7b554eb1753fefd72875c78",
+    "t26-retirement-paired-diagnostic.log": "9110a2fcbe74efaa932c87a35179b62962d3d90453f7b7635b87b08267470166",
+    "t26-retirement-paired-fixed.log": "0b0fc9a04e169422c0fba83905bfb9383d57b3a5504c88f4131edade02142207",
+    "rss-recovery-retirement-final-targeted.log": "b0654fce0c1aa4b12746655704c4a60830187be8cc691967320acd4f6bef5b1c",
+    "rss-pg-readiness-red.log": "da6898c8ce3fa64a179a73e6a275d5e70b705c84583537c35481d5a9cbae8ca6",
+    "rss-pg-readiness-green.log": "0526eb4b17b577b87540299270d70e2665fb504057cdbe38316c027568f3e3b5",
+    "remaining-release-shell-46e38bf.log": "026da88fd347d2631167ee750617c9f8eccbbf16d766d3efeb768ae65b3bf3f2",
+    "remaining-release-shell-final.log": "d3ea8db1f1ccc9b9ce707f65d6a5b1291d1ce261903dbc7956e597d16905705f",
+    "release-shell-8d2c2ce.log": "4db45c7972d40007cc4f841b7843f94c862824ebb81d0d89473b25705d493214",
+    "t26-retirement-final-roundtrip-8d2c2ce.log": "536b481a0dda8d6284af990d0909a58392f887de5c19b630eeba6fd860fd6904",
+    "t26-retirement-final-paired-8d2c2ce.log": "0d162c796adde81914ecea062514b0a312cf37d46dc23939f223115865964995",
+    "plan-structure-8d2c2ce.log": "9d6c96864ce13820e6031d4695e4c2b067a78068d4711aff6d117ae7cb760948"
+  },
+  "plan_structure": {
+    "result": "PASS",
+    "architecture_hash_unchanged": true,
+    "original_units": 26,
+    "merged_aliases": 11,
+    "matching_acyclic_DAG_edges": 44,
+    "local_links_and_contracts": 583,
+    "scope": "implementation-phase structural check; planning-only NOT_STARTED/docs-only assertions not applied"
+  }
+}

@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { AlignLeft, ArrowLeft, Bot, Check, Cpu, GitCompareArrows, Languages, LockKeyhole, Type } from 'lucide-react'
+import { AlignLeft, ArrowLeft, Bot, Check, Cpu, Languages, LockKeyhole, Type } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/context/AuthContext'
@@ -19,7 +19,6 @@ export default function SettingsPage() {
   const { capabilities } = useCapabilities()
   const canManageAI = capabilities.features.accounts.enabled && Boolean(user)
   const canManageChatGPT = capabilities.features.accounts.enabled && capabilities.features.chatgpt_subscription.enabled
-  const canCompareProviders = capabilities.features.provider_comparisons.enabled && Boolean(user?.isSuperuser)
   const canManageAdmin = capabilities.features.admin.enabled && Boolean(user?.isSuperuser)
 
   return (
@@ -104,12 +103,10 @@ export default function SettingsPage() {
           </div>}
         </section>}
 
-        {(canCompareProviders || canManageAdmin) && <section aria-labelledby="tool-settings" className="rounded-2xl border border-border bg-card p-5 sm:p-6">
+        {canManageAdmin && <section aria-labelledby="tool-settings" className="rounded-2xl border border-border bg-card p-5 sm:p-6">
           <h2 id="tool-settings" className="text-lg font-semibold">站点工具</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            {canCompareProviders && <Button variant="outline" className="h-12 justify-start" asChild>
-              <Link to="/provider-comparisons"><GitCompareArrows aria-hidden="true" />Provider 对比</Link>
-            </Button>}
+
             {canManageAdmin && <Button variant="outline" className="h-12 justify-start" asChild>
               <a href="/admin" target="_blank" rel="noreferrer"><LockKeyhole aria-hidden="true" />{t.admin}</a>
             </Button>}

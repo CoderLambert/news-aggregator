@@ -18,10 +18,10 @@ cd /path/to/news-aggregator
 
 ## 2. 环境要求
 
-- Python 3.11 或更高版本
-- Node.js 20 或更高版本，npm 9 或更高版本
+- Python 3.12（与 CI 一致）
+- Node.js 22（与 CI 一致）
 - 至少一个 LLM Provider API Key 才能使用翻译、聊天和研究功能
-- 若使用需要浏览器渲染的抓取链路，需额外安装 Chromium
+- Chromium 用于浏览器验收；订阅源获取由 Miniflux 处理
 - Linux/macOS 使用 Bash；Windows 建议通过 WSL 执行脚本
 
 ## 3. 首次初始化
@@ -104,10 +104,7 @@ TERMUX_MODE=0
 WAITRESS_THREADS=4
 WAITRESS_CONN_LIMIT=1000
 
-# 自动抓取全文后台任务
-AUTO_FETCH_INTERVAL=300
-AUTO_FETCH_BATCH=10
-AUTO_FETCH_THROTTLE=2.0
+# RSS 连接与持久身份使用单独的受保护配置，见第 6 节。
 ```
 
 ### 3.5 初始化数据库
@@ -169,7 +166,7 @@ npm run dev -- --host 0.0.0.0
 
 ### 4.2 源码单机模式：Waitress + 静态文件
 
-不使用 Docker 时，前端先执行 `npm ci && npm run build`，再由 Waitress 从源码启动 Django；`frontend/dist/` 和 API 由同一端口提供。已有数据接管、独立全文 Worker、健康检查及回退步骤见[源码部署说明](deployment/local-source.md)。
+不使用 Docker 时，前端先执行 `npm ci && npm run build`，再由 Waitress 从源码启动 Django；`frontend/dist/` 和 API 由同一端口提供。已有数据接管、独立 RSS 同步、健康检查及回退步骤见[源码部署说明](deployment/local-source.md)。
 
 ```bash
 cd frontend
@@ -182,18 +179,18 @@ backend/venv/bin/python start_waitress.py
 
 ### 4.3 Docker 单机模式
 
-Compose 启动 Waitress Web 服务、独立 crawler Worker、全文 Worker 和 indexer Worker。前端会先构建并由 Django 同源提供，crawler 默认启动后抓取一次，之后每小时抓取；indexer 周期核对 SQLite 与 ChromaDB。全文 Worker 是否执行任务由 `FULL_CONTENT_WORKER_ENABLED` 控制。Web 服务仅绑定到本机 `127.0.0.1:9527`。容器每次启动时会先执行幂等的 `migrate --noinput`，新克隆和代码升级无需单独运行迁移命令。
+开发 Compose 启动 Waitress 和 indexer，前端先构建并由 Django 同源提供。Web 绑定本机 `127.0.0.1:9527`，开发入口启动时迁移开发库。RSS 使用单独配置的 Miniflux 和同步进程；生产布局的迁移由受控的一次性服务执行。
 
-Web、crawler 与 indexer 共享 `backend/`（包括 SQLite、WAL、SHM、TTS 缓存），并持久化 `chroma_data/`、`logs/` 和 Hugging Face 模型缓存卷。不要让容器和另一套本地后端或爬虫同时写同一份 SQLite 数据。
+Web 与 indexer 共享 `backend/`（包括 SQLite、WAL、SHM、TTS 缓存），并持久化 `chroma_data/`、`logs/` 和 Hugging Face 模型缓存卷。不要让容器和另一套本地后端或爬虫同时写同一份 SQLite 数据。
 
 ~~~bash
 docker compose up -d --build --wait
 docker compose ps
-docker compose logs -f app crawler full-content indexer
+docker compose logs -f app indexer
 docker compose down
 ~~~
 
-访问 <http://127.0.0.1:9527>，创建超级管理员后可进入 <http://127.0.0.1:9527/admin/crawlers>。验证 Web 与 API：
+访问 <http://127.0.0.1:9527>，创建超级管理员后可进入 <http://127.0.0.1:9527/admin/rss>。验证 Web 与 API：
 
 ~~~bash
 curl -f http://127.0.0.1:9527/
@@ -227,160 +224,48 @@ docker compose up -d --build --wait
 
 # 查看新容器状态和日志
 docker compose ps
-docker compose logs --tail=200 app crawler indexer
+docker compose logs --tail=200 app indexer
 ~~~
 
-`docker compose down` 只删除容器和 Compose 网络，宿主机数据库、ChromaDB、爬虫日志和模型缓存卷仍保留。crawler 服务负责自动调度；需要绕过管理控制台手动执行一次时使用：
-
-~~~bash
-docker compose exec app python backend/manage.py crawl all
-~~~
-
-`crawl all` 会逐个来源运行，避免多个 Spider 同时争抢共享请求预算；短暂的预算延迟和网络错误最多重试两次。所有来源都取得 `updated`、`unchanged`、`valid_empty` 或 `not_due` 终态时命令才成功，任一来源仍为阻止、限流或失败状态时命令以非零状态退出并列出来源。
-
-Docker 调度参数：
-
-~~~dotenv
-CRAWLER_SCHEDULER_ENABLED=1
-CRAWL_INTERVAL_SECONDS=3600
-CRAWL_RUN_ON_START=1
-~~~
-
-管理控制台的调度设置持久化在数据库中；首次初始化读取上述环境变量。宿主机 `news-aggregator-crawl.timer` 或 `scripts/news-cron` 必须保持停止，避免两套调度器同时写入。
+开发 Compose 默认启动 app 和 indexer。生产使用独立迁移、不可变镜像和发布清单；已有部署先完成 [T29/T30 门禁](plans/rss-engine-migration/TASKS.md)，不能用开发版的自动迁移流程接管生产。RSS 使用 [生产布局 overlay](../compose.rss.prod.yaml)，与 Miniflux PostgreSQL 及专用同步进程共享正确的部署身份；不要将此 overlay 叠加到开发版的源码库 bind 上。
 
 若 Docker CLI 提示无法访问 daemon，请先由本机 Docker 管理员恢复该用户已有的访问权限，不要通过项目配置扩大系统权限。
 
-### 4.4 本地 VPN 出口与采集网络
+### 4.4 RSS 出口与网络
 
-如果宿主机能访问来源，但 crawler/full-content 容器连接超时，先分别检查两边的 DNS 和 HTTPS 连接。在 Linux 上使用 Tailscale 出口节点时，Docker 桥接流量可能没有走通同一条出口路径。本地可使用专用覆盖配置：
-
-```bash
-cp compose.host-network.yaml compose.override.yaml
-docker compose up -d --no-build --wait app crawler full-content
-```
-
-该配置只让没有 HTTP 监听端口的 crawler 和 full-content Worker 使用宿主机网络。app 仍通过 `127.0.0.1:9527` 发布，数据库、任务锁、心跳和请求预算保持共享。`compose.override.yaml` 是忽略提交的本机配置；生产 Compose 不加载它。Docker 的网络行为参见 [host network driver](https://docs.docker.com/engine/network/drivers/host/)。
-
-手动正文获取由 `.env` 中的 `FULL_CONTENT_WORKER_ENABLED=1` 控制，`FULL_CONTENT_AUTO_ENQUEUE_ENABLED=0` 可继续保持关闭。修改后同时重建 app 和 full-content 容器，普通登录用户即可请求正文，不需要超级管理员权限。
-
-采集结果会区分主请求与 robots.txt 辅助请求，并保留入库数量、变化数量和失败原因。Feed 未到下一次轮询时间属于“等待执行”；部分条目入库后其他请求失败属于“部分成功”。源站拒绝或 robots.txt 禁止访问的入口不会反复自动请求；新采集只注册具有受支持公开入口的渠道。已移除来源不会出现在管理页渠道列表，不能启用、重试、通过 CLI 采集或重新获取正文；历史资讯、已保存正文和抓取记录保留。
-
-当前注册 26 个公开采集渠道。雷峰网因 Feed 拒绝访问而移除；Reuters 需要授权渠道，机器之心缺少可核验入口，36氪缺少有效 Feed，均不再接入。Meta AI 的 [官方抓取声明](https://ai.meta.com/robots.txt) 要求书面许可，也已移除。历史来源契约保留用于识别旧资讯和审计修复，不会授权新采集。网络超时、429 冷却与未到轮询时间不作为永久移除依据。
-
-当前使用的官方入口包括 [InfoQ 新闻 RSS](https://feed.infoq.com/news/)、Mistral 页面声明的 [RSS](https://mistral.ai/news/rss)，以及 arXiv 官方说明的 [多分类 Atom 订阅](https://info.arxiv.org/help/rss.html#subscribe-by-multiple-categories)。RSS 描述仍按摘要处理；论文摘要不会作为论文全文。
+沿用 RSS 引擎的 URL、DNS、重定向和请求预算限制。网络诊断应检查该进程的实际出口与证书配置，不能通过 host 网络绕过来源准入规则。`compose.host-network.yaml` 仅为保留的索引 worker 提供可选出口；来源同步按 RSS 专用部署配置运行。
 
 ## 5. 服务控制和日志
 
-推荐使用统一命令，一次管理前端、后端和定时爬虫：
+`news` 管理本机前端与后端进程，RSS 引擎和后台 worker 由各自的进程管理器托管：
 
 ```bash
 ./scripts/news start
 ./scripts/news status
 ./scripts/news stop
+./scripts/news restart
+./scripts/news build
+./scripts/news log backend
+./scripts/news log frontend
 ```
 
-`start` 默认会立即执行一次全部爬虫，之后每小时执行一次；`stop` 会停止前端、后端、定时器和当前正在运行的爬虫任务。
+日志和 PID 文件位于被 Git 忽略的 `logs/`。此命令不再启动宿主爬虫定时器。现有宿主 timer/cron 必须在 [T30](plans/rss-engine-migration/tasks/T30/task.md) 检查中单独停用和验证，删除仓库模板不能替代该检查。
 
-常用操作：
+## 6. 订阅源与 RSS 同步
+
+在频道页面添加或选择订阅源。Miniflux 负责获取，NewsHub 通过现有同步进程保存经过校验的内容；翻译、聊天、研究和朗读读取已保存数据。旧 fetch-full、网页 Provider 和 Scrapy 命令已经退役。
+
+RSS 配置需要固定的 `RSS_ENGINE_INSTANCE_UUID`、专用 `RSS_ENGINE_ACCOUNT_ID`、`RSS_ENGINE_BASE_URL`、受保护的 `RSS_ENGINE_TOKEN_FILE` 和持久的 `RSS_RUNTIME_DIR`。保持 Web 与同步进程指向相同 NewsHub 数据库。完整身份和准入要求见 [架构](plans/rss-engine-migration/ARCHITECTURE.md) 与 [Compose](../compose.rss.prod.yaml)。
+
+配置完成后，独立同步入口为：
 
 ```bash
-./scripts/news restart       # 重启全部服务
-./scripts/news build         # 构建前端生产资源
-./scripts/news crawl         # 手动执行一次全部爬虫
-./scripts/news log crawler   # 查看爬虫日志
-./scripts/news log backend   # 查看后端日志
-./scripts/news log frontend  # 查看前端日志
+NEWSHUB_RUNTIME_ROLE=rss_sync backend/venv/bin/python backend/manage.py rss_sync_worker
+# 独立检查同步进程健康；不会把 ORM 可用误报为同步完成。
+NEWSHUB_RUNTIME_ROLE=rss_sync backend/venv/bin/python backend/manage.py rss_sync_worker --healthcheck
 ```
 
-定时周期可在根目录 `.env` 中调整：
-
-```dotenv
-CRAWL_INTERVAL_SECONDS=3600
-CRAWL_RUN_ON_START=1
-```
-
-其中 `3600` 表示每小时执行一次，`CRAWL_RUN_ON_START=0` 表示启动定时器时不立即抓取。该调度器由项目自身管理，不依赖系统 `crond` 或 `crontab`。
-
-底层脚本仍可单独使用：
-
-```bash
-./scripts/news-server start|stop|restart|status|log
-./scripts/news-dev start|stop|restart|status|build|log
-./scripts/news-cron start|stop|restart|status|run|log
-```
-
-日志和 PID 文件位于项目根目录的 `logs/`，该目录被 Git 忽略。若后台脚本不适合当前容器或终端环境，改用 4.1 节的前台命令。
-
-如果需要“构建监听 + 静态预览”而不是 Vite HMR：
-
-```bash
-cd frontend
-./dev-server.sh start
-# 访问 http://localhost:5180
-./dev-server.sh stop
-```
-
-## 6. 抓取新闻和全文
-
-手动抓取：
-
-```bash
-backend/venv/bin/python backend/manage.py crawl all
-backend/venv/bin/python backend/manage.py crawl hackernews
-```
-
-全量命令按来源串行执行。Hacker News 等需要读取多条 API 详情的来源会明显慢于单个 RSS 请求；不要通过并行启动第二个全量命令来加速。
-
-需要由 systemd 用户服务托管时，可将仓库中的
-`scripts/news-aggregator-crawl.service` 和
-`scripts/news-aggregator-crawl.timer` 安装到 `~/.config/systemd/user/`。
-这套 timer 在上一轮结束一小时后再启动下一轮，并由 `flock` 阻止重叠；
-不要同时启用下方的项目级 `news-cron` 调度器。每轮强制设置
-`NEWS_CRAWL_ONLY=1`，只保存来源内容，不调用翻译、向量索引或其他 AI 功能。
-完成后日志会为每个 spider 输出一行 `爬虫汇总`，包括条目数、响应数、
-错误数和 HTTP 状态分布：
-
-```bash
-systemctl --user status news-aggregator-crawl.timer
-journalctl --user -u news-aggregator-crawl.service -g '爬虫汇总'
-```
-
-unit 文件中的项目绝对路径应与实际 checkout 一致。`TimeoutStartSec=2h`
-只是单轮最长运行时间，不是调度频率。
-
-全文获取需要单独启动 Worker。`fetch_full_content` 只把文章放进持久队列，不会在命令进程内下载正文；先按[源码部署说明](deployment/local-source.md)启用并检查 `auto_fetch_full_content`，再入队：
-
-```bash
-backend/venv/bin/python backend/manage.py fetch_full_content --limit 20 --dry-run
-backend/venv/bin/python backend/manage.py fetch_full_content --limit 20
-backend/venv/bin/python backend/manage.py full_content_stats --json
-```
-
-用 `full_content_stats --json` 查看实际完成数和失败原因；源站拒绝、身份不符或来源策略不允许时，不会生成伪正文。
-
-需要 Playwright 浏览器时：
-
-```bash
-backend/venv/bin/playwright install chromium
-```
-
-定时任务控制：
-
-```bash
-./scripts/news-cron run       # 手动抓取一次
-./scripts/news-cron start     # 启动项目级定时器，默认每小时执行
-./scripts/news-cron stop      # 停止定时器和当前爬虫
-./scripts/news-cron status
-./scripts/news-cron log
-```
-
-翻译网络恢复检查：
-
-```bash
-./scripts/check_translation_network.sh
-```
-
-本地或开发环境可直接使用 `./scripts/news start`。生产环境建议由 systemd、容器编排或其他进程管理器分别托管 Waitress 服务和 `./scripts/news-cron start`，并将 `CRAWL_INTERVAL_SECONDS` 配置在 `.env` 中。
+`rss_runtime --once` 保留为轻量 ORM 诊断，不表示同步完成。管理员可在 `/admin/rss` 查看实际连接与同步状态。暂停来源仍保留历史文章，原有来源和正文访问限制继续生效。
 
 ## 7. 测试和质量检查
 
@@ -400,8 +285,8 @@ backend/venv/bin/python -m pytest tests/backend/ -v
 backend/venv/bin/python -m pytest backend/api/tests/ -v
 
 # 爬虫测试
-PYTHONPATH="$(pwd)/backend:$(pwd)/crawler" \
-  backend/venv/bin/python -m pytest tests/crawler/ -v
+PYTHONPATH="$(pwd)/backend" \
+  backend/venv/bin/python -m pytest backend/api/tests/rss/ -v
 
 # 前端测试、Lint、构建
 cd frontend

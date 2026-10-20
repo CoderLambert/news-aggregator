@@ -108,3 +108,20 @@ describe('capabilities service', () => {
     await expect(api.startChatGPTSubscriptionConnect()).rejects.toThrow(/handoff URL/)
   })
 })
+
+it('accepts retired collection without disabling account and reader features', async () => {
+  const snapshot = {
+    ...validCapabilities,
+    features: {
+      ...(validCapabilities.features as object),
+      provider_comparisons: { enabled: false, reason: 'legacy_ingestion_retired' },
+    },
+  }
+  mocks.get.mockResolvedValueOnce({ data: snapshot })
+  const capabilities = await api.fetchCapabilities()
+  expect(capabilities.features.provider_comparisons).toEqual({
+    enabled: false, reason: 'legacy_ingestion_retired',
+  })
+  expect(capabilities.features.accounts.enabled).toBe(true)
+  expect(capabilities.features.favorites.enabled).toBe(true)
+})

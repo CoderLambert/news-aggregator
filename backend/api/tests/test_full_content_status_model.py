@@ -107,7 +107,7 @@ def test_ingestion_schema_defaults_and_read_only_serializers(news):
 
 @pytest.mark.django_db
 def test_availability_matches_database_and_survives_refresh_failure(news):
-    from api.services.full_content_status import has_full_content, filter_readable_full_content
+    from api.services.article_body_state import has_full_content, filter_readable_full_content
     for state, body, status, expected in [
         ('missing', 'Quarantined text', 'success', False),
         ('legacy', ' \t\n\r\v\f ', 'success', False),

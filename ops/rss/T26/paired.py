@@ -48,10 +48,14 @@ def main():
     app_image=candidate['runs'][-1]['image']; app_id=candidate['runs'][-1]['image_id']
     assert json.loads(run(['docker','image','inspect',app_image]).stdout)[0]['Id']==app_id
     project='newshub-rss-t26-'+uuid.uuid4().hex[:12]
+    # Synthetic bind mounts and restored 0600 files belong to this host user.
+    # Match that owner without widening permissions or changing the image user.
+    fixture_user = str(os.getuid()) + ':' + str(os.getgid())
     def container(argv,suffix,timeout=240):
         return isolated_run(argv,name=project+'-'+suffix,project=project,timeout=timeout)
     static_code='import hashlib; from pathlib import Path\n'+inspect.getsource(rss.release_manifest.sha256_tree)+"\nprint(sha256_tree(Path('/app/frontend/dist')))"
     static_sha=container(['docker','run','--rm','--network','none','--entrypoint','python',app_id,'-c',static_code],'static').stdout.strip()
+    capabilities = rss.release_manifest.inspect_worker_capabilities(app_id)
     docker=rss.Docker()
     app_image='newshub-rss-t26:pair-'+project.rsplit('-',1)[-1]+'-'+candidate['runs'][-1]['app_sha']
     run(['docker','tag',app_id,app_image])
@@ -60,7 +64,7 @@ def main():
     images=json.loads((ROOT/'ops/rss/T00/versions.json').read_text())['images']
     engine_image,pg_image,python_image=[v['tag']+'@'+v['repo_digests'][0].split('@')[1] for v in images]
     evidence={'status':'SYNTHETIC_CANDIDATE_NOT_SEALED','sealed':False,'dataset':'0051-upgraded-T26-synthetic',
-        'project':project,'app_image_id':app_id,'app_sha':candidate['runs'][-1]['app_sha']}
+        'project':project,'synthetic_bind_user':fixture_user,'app_image_id':app_id,'app_sha':candidate['runs'][-1]['app_sha']}
     with tempfile.TemporaryDirectory(prefix=project+'-') as temporary:
         path=Path(temporary); dbdir=path/'db'; dbdir.mkdir(); dbpath=dbdir/'synthetic.sqlite3'
         with sqlite3.connect('file:'+str(dataset/'synthetic.sqlite3')+'?mode=ro',uri=True) as src, sqlite3.connect(dbpath) as dst:
@@ -72,7 +76,7 @@ def main():
         services={
             'rss-db':{'image':pg_image,'environment':{'POSTGRES_DB':'rss_contract','POSTGRES_USER':'rss_contract',
                 'POSTGRES_PASSWORD':'synthetic-t26-only'},'volumes':['rss-pg-data:/var/lib/postgresql/data'],
-                'networks':['isolated'],'healthcheck':{'test':['CMD-SHELL','pg_isready -U rss_contract -d rss_contract'],'interval':'1s','retries':60}},
+                'networks':['isolated'],'healthcheck':{'test':['CMD-SHELL','pg_isready -h 127.0.0.1 -U rss_contract -d rss_contract'],'interval':'1s','retries':60}},
             'fixture':{'image':python_image,'command':['python','/fixture/server.py'],
                 'volumes':[str(ROOT/'ops/rss/T09/publisher.py')+':/fixture/server.py:ro',str(tls)+':/fixture/tls:ro'],
                 'networks':{'isolated':{'aliases':['publisher.example','zero.publisher.example']}}},
@@ -81,7 +85,7 @@ def main():
                     'ADMIN_PASSWORD':'synthetic-t26-admin','FETCHER_ALLOW_PRIVATE_NETWORKS':'1','POLLING_FREQUENCY':'999999','LOG_LEVEL':'error'},
                 'ports':['127.0.0.1::8080'],'networks':['isolated'],'volumes':[str(tls/'cert.pem')+':/fixture-ca.pem:ro'],
                 'healthcheck':{'test':['CMD','/usr/bin/miniflux','-healthcheck','auto'],'interval':'1s','retries':60}},
-            'app':{'image':app_image,'entrypoint':['python','-c'],
+            'app':{'image':app_image,'user':fixture_user,'entrypoint':['python','-c'],
                 'command':["from wsgiref.simple_server import make_server; from newsaggregator.wsgi import application; make_server('127.0.0.1',9527,application).serve_forever()"],
                 'environment':{'RUN_MAIN':'true','DJANGO_DB_PATH':'/var/lib/newshub/db/synthetic.sqlite3',
                     'DJANGO_SECRET_KEY':'synthetic-t26-app-only','DJANGO_SETTINGS_MODULE':'newsaggregator.settings'},
@@ -129,8 +133,8 @@ def main():
             pg_id=call('ps','-q','rss-db'); engine_id=call('ps','-q','miniflux'); app_container=call('ps','-q','app')
             pg_schema=int(run(['docker','exec',pg_id,'psql','-U','rss_contract','-d','rss_contract','-Atc','SELECT max(version) FROM schema_version']).stdout)
             manifest={'schema_version':1,'environment':'isolated','project':project,
-                'release':{'schema_version':3,'release_sha':evidence['app_sha'],'image':app_image,'static_sha':static_sha,
-                    'migrations':migrations,'capabilities':{'full_content_worker':True,'channel_worker':True}},
+                'release':{'schema_version':4,'release_sha':evidence['app_sha'],'image':app_image,'static_sha':static_sha,
+                    'migrations':migrations,'capabilities':capabilities},
                 'sqlite':{'path':str(dbpath)},'postgres':{'container_id':pg_id,'image':pg_image,'database':'rss_contract','user':'rss_contract','volume':project+'_rss-pg-data'},
                 'engine':{'container_id':engine_id,'image':engine_image,'instance_uuid':instance,'account_id':account['id'],
                     'username':'synthetic_collector','schema_version':pg_schema},
@@ -178,12 +182,12 @@ try:
 except Http404: pass
 print('restored available/ACL PASS')
 """
-            checked=container(['docker','run','--rm','--network','none','--entrypoint','python','-e','RUN_MAIN=true',
+            checked=container(['docker','run','--rm','--user',fixture_user,'--network','none','--entrypoint','python','-e','RUN_MAIN=true',
                 '-e','DJANGO_SETTINGS_MODULE=newsaggregator.settings','-e','DJANGO_DB_PATH=/var/lib/newshub/db/synthetic.sqlite3',
                 '--mount','type=bind,source='+str(dbdir)+',target=/var/lib/newshub/db,readonly',app_id,'-c',code],'read-acl')
             assert rss.sqlite_state(dbpath,manifest)['logical_sha256']==original['sqlite_logical_sha256']
             call('up','-d','--wait','miniflux')
-            synchronized=container(['docker','run','--rm','--network',project+'_isolated','--entrypoint','python',
+            synchronized=container(['docker','run','--rm','--user',fixture_user,'--network',project+'_isolated','--entrypoint','python',
                 '-e','RUN_MAIN=true','-e','DJANGO_SETTINGS_MODULE=newsaggregator.settings',
                 '-e','DJANGO_DB_PATH=/var/lib/newshub/db/synthetic.sqlite3','-e','RSS_ENGINE_INSTANCE_UUID='+instance,
                 '-e','RSS_ENGINE_ACCOUNT_ID='+str(account['id']),'-e','RSS_ENGINE_BASE_URL=http://miniflux:8080',
@@ -201,6 +205,10 @@ print('restored available/ACL PASS')
                 mapping_sha256=restored['mapping_sha256'],sqlite_logical_sha256=original['sqlite_logical_sha256'],
                 pg_logical_sha256=original['pg_logical_sha256'],restore_points=original['restore_points'],
                 synthetic_identity_alignment=True,production='NOT_RUN',restored_writers_remain_stopped=True)
+        except Exception:
+            diagnostics = run(compose + ['logs', '--no-color', '--tail', '40'], ok=False)
+            print(diagnostics.stdout, file=sys.stderr, flush=True)
+            raise
         finally:
             call('down','--volumes','--remove-orphans')
         for resource in ('container','network','volume'):

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 REVISION_LABEL = "org.opencontainers.image.revision"
 PRODUCTION_USER = "10001:10001"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -51,7 +51,7 @@ def validate_manifest(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ManifestError('manifest must be an object')
     version = value.get('schema_version')
-    if type(version) is not int or version not in {1, 2, 3}:
+    if type(version) is not int or version not in {1, 2, 3, 4}:
         raise ManifestError('unsupported manifest schema version')
     fields = {
         "schema_version",
@@ -60,14 +60,16 @@ def validate_manifest(value: Any) -> dict[str, Any]:
         "migrations",
         "static_sha",
     }
-    if version in {2, 3}:
+    if version in {2, 3, 4}:
         fields.add('capabilities')
     if set(value) != fields:
         raise ManifestError("manifest fields are incomplete or unknown")
-    if version in {2, 3}:
+    if version in {2, 3, 4}:
         expected_capabilities = {'full_content_worker'}
-        if version == 3:
+        if version >= 3:
             expected_capabilities.add('channel_worker')
+        if version >= 4:
+            expected_capabilities.add('crawler_worker')
         if (not isinstance(value['capabilities'], dict) or
                 set(value['capabilities']) != expected_capabilities or
                 any(type(value['capabilities'][name]) is not bool for name in expected_capabilities)):
@@ -107,18 +109,23 @@ def full_content_capability(value):
     return value.get('capabilities', {}).get('full_content_worker', False)
 
 
+def crawler_worker_capability(value):
+    # Historical manifests predate retirement and always included the crawler.
+    return value.get('capabilities', {}).get('crawler_worker', value['schema_version'] < 4)
+
+
 def channel_worker_capability(value):
     return value.get('capabilities', {}).get('channel_worker', False)
 
 
-_CAPABILITY_QUERY = """import json; from pathlib import Path; root=Path('/app/backend'); required={'full_content_worker': ('api/management/commands/auto_fetch_full_content.py', 'api/management/commands/full_content_healthcheck.py', 'api/services/full_content_worker.py', 'api/services/article_content.py'), 'channel_worker': ('api/management/commands/channel_worker.py', 'api/management/commands/channel_worker_healthcheck.py')}; print(json.dumps({name: all((root / path).is_file() for path in paths) for name, paths in required.items()}, sort_keys=True))"""
+_CAPABILITY_QUERY = """import json; from pathlib import Path; root=Path('/app/backend'); required={'crawler_worker': ('api/management/commands/crawl_worker.py', 'api/management/commands/crawler_healthcheck.py'), 'full_content_worker': ('api/management/commands/auto_fetch_full_content.py', 'api/management/commands/full_content_healthcheck.py', 'api/services/full_content_worker.py', 'api/services/article_content.py'), 'channel_worker': ('api/management/commands/channel_worker.py', 'api/management/commands/channel_worker_healthcheck.py')}; print(json.dumps({name: all((root / path).is_file() for path in paths) for name, paths in required.items()}, sort_keys=True))"""
 
 
 def inspect_worker_capabilities(image):
     try:
         output = _docker_text('run', '--rm', '--pull=never', '--network', 'none', '--entrypoint', 'python', image, '-c', _CAPABILITY_QUERY)
         value = json.loads(output)
-        expected = {'full_content_worker', 'channel_worker'}
+        expected = {'full_content_worker', 'channel_worker', 'crawler_worker'}
         if set(value) != expected or any(type(value[name]) is not bool for name in expected):
             raise ValueError()
         return value
@@ -212,14 +219,111 @@ def sha256_exported_release(release_root: Path) -> str:
     return digest.hexdigest()
 
 
-def _docker_text(*args: str) -> str:
+def _docker_text(*args: str, timeout: int = 30) -> str:
     try:
         result = subprocess.run(
-            ["docker", *args], check=True, capture_output=True, text=True, timeout=30
+            ["docker", *args], check=True, capture_output=True, text=True, timeout=timeout
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise ManifestError(f"Docker image inspection failed ({type(exc).__name__})") from None
     return result.stdout.strip()
+
+
+def project_writers(project: str, *, stop: bool = False) -> list[str]:
+    """Select by immutable Compose labels, including roles absent from new YAML.
+
+    No containers or volumes are removed. Verify every returned identity before
+    stopping anything; unexpected metadata fails closed without targeting it.
+    """
+    if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,62}', project):
+        raise ManifestError('invalid Compose project')
+    services = ('rss-sync', 'channel-worker', 'full-content', 'crawler', 'indexer', 'app')
+    selected = []
+    for service in services:
+        output = _docker_text('ps', '--all', '--quiet',
+            '--filter', f'label=com.docker.compose.project={project}',
+            '--filter', f'label=com.docker.compose.service={service}')
+        for identity in output.splitlines():
+            if not re.fullmatch(r'[0-9a-f]{12,64}', identity):
+                raise ManifestError('invalid project writer container identity')
+            try:
+                labels = json.loads(_docker_text('inspect', '--format', '{{json .Config.Labels}}', identity))
+            except (ValueError, TypeError):
+                raise ManifestError('project writer labels are invalid') from None
+            if (not isinstance(labels, dict)
+                    or labels.get('com.docker.compose.project') != project
+                    or labels.get('com.docker.compose.service') != service):
+                raise ManifestError('project writer labels do not match requested project/role')
+            if identity in selected:
+                raise ManifestError('duplicate project writer container identity')
+            selected.append(identity)
+    if stop:
+        for identity in selected:
+            _docker_text('stop', '--time', '45', identity, timeout=60)
+            if _docker_text('inspect', '--format', '{{.State.Running}}', identity) != 'false':
+                raise ManifestError('project writer is still running')
+    return selected
+
+
+def rss_preflight(project: str, release_sha: str, *, enabled: bool = False, leave_stopped: bool = False) -> str:
+    """Admit RSS lifecycle management without exposing resolved Compose secrets."""
+    if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,62}', project):
+        raise ManifestError('invalid Compose project')
+    if enabled and leave_stopped:
+        raise ManifestError('--with-rss and --leave-rss-stopped are mutually exclusive')
+    existing = _docker_text('ps', '--all', '--quiet',
+        '--filter', f'label=com.docker.compose.project={project}',
+        '--filter', 'label=com.docker.compose.service=rss-sync')
+    if not enabled:
+        if existing and not leave_stopped:
+            raise ManifestError('existing RSS runtime requires --with-rss or explicit --leave-rss-stopped recovery')
+        if leave_stopped:
+            for identity in existing.splitlines():
+                if not re.fullmatch(r'[0-9a-f]{12,64}', identity):
+                    raise ManifestError('invalid RSS container identity')
+                try:
+                    labels = json.loads(_docker_text('inspect', '--format', '{{json .Config.Labels}}', identity))
+                except (ValueError, TypeError):
+                    raise ManifestError('RSS labels are invalid') from None
+                if (not isinstance(labels, dict)
+                        or labels.get('com.docker.compose.project') != project
+                        or labels.get('com.docker.compose.service') != 'rss-sync'):
+                    raise ManifestError('RSS identity does not match this project')
+                if _docker_text('inspect', '--format', '{{.State.Running}}', identity) != 'false':
+                    raise ManifestError('--leave-rss-stopped requires RSS sync already stopped')
+        return ''
+    try:
+        services = json.load(sys.stdin)['services']
+        image = services['rss-sync']['image']
+        engine_image = services['miniflux']['image']
+        if not isinstance(image, str) or not isinstance(engine_image, str):
+            raise ValueError
+    except (ValueError, KeyError, TypeError):
+        raise ManifestError('resolved RSS Compose image configuration is invalid') from None
+    inspect_production_image(image, release_sha)
+    probe = "from pathlib import Path; print(Path('/app/backend/api/management/commands/rss_sync_worker.py').is_file())"
+    if _docker_text('run', '--rm', '--pull=never', '--network', 'none',
+                    '--read-only', '--entrypoint', 'python', image, '-c', probe) != 'True':
+        raise ManifestError('RSS image has no rss_sync_worker command')
+    identities = _docker_text('ps', '--all', '--quiet',
+        '--filter', f'label=com.docker.compose.project={project}',
+        '--filter', 'label=com.docker.compose.service=miniflux').splitlines()
+    if len(identities) != 1 or not re.fullmatch(r'[0-9a-f]{12,64}', identities[0]):
+        raise ManifestError('--with-rss requires one existing Miniflux container')
+    identity = identities[0]
+    try:
+        labels = json.loads(_docker_text('inspect', '--format', '{{json .Config.Labels}}', identity))
+    except (ValueError, TypeError):
+        raise ManifestError('Miniflux labels are invalid') from None
+    if (not isinstance(labels, dict)
+            or labels.get('com.docker.compose.project') != project
+            or labels.get('com.docker.compose.service') != 'miniflux'):
+        raise ManifestError('Miniflux identity does not match this project')
+    if (_docker_text('inspect', '--format', '{{.State.Status}}', identity) != 'running'
+            or _docker_text('inspect', '--format', '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}', identity) != 'healthy'
+            or _docker_text('inspect', '--format', '{{.Config.Image}}', identity) != engine_image):
+        raise ManifestError('existing Miniflux must be healthy and match the resolved engine image')
+    return image
 
 
 def inspect_production_image(image: str, release_sha: str) -> None:
@@ -370,13 +474,25 @@ def _parser() -> argparse.ArgumentParser:
     validate_static.add_argument("--expected-sha", required=True)
     workers = subparsers.add_parser('worker-services', help='read target worker services without Docker')
     workers.add_argument('--manifest', required=True, type=Path)
+    writers = subparsers.add_parser('project-writers', help='inspect or stop only this project writer containers, including retired roles')
+    writers.add_argument('--project', required=True)
+    writers.add_argument('--stop', action='store_true')
+    rss = subparsers.add_parser('rss-preflight', help='validate optional RSS lifecycle before stopping project writers')
+    rss.add_argument('--project', required=True)
+    rss.add_argument('--sha', required=True)
+    rss.add_argument('--enabled', action='store_true')
+    rss.add_argument('--leave-stopped', action='store_true')
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        if args.command == "describe":
+        if args.command == 'rss-preflight':
+            print(rss_preflight(args.project, args.sha, enabled=args.enabled, leave_stopped=args.leave_stopped))
+        elif args.command == 'project-writers':
+            print('\n'.join(project_writers(args.project, stop=args.stop)))
+        elif args.command == "describe":
             manifest = describe_image(args.image, args.sha)
             if args.output:
                 _write_new_json(args.output, manifest)
@@ -396,12 +512,15 @@ def main(argv: list[str] | None = None) -> int:
                 }
                 if manifest['schema_version'] >= 3:
                     manifest_capabilities['channel_worker'] = channel_worker_capability(manifest)
+                manifest_capabilities['crawler_worker'] = crawler_worker_capability(manifest)
                 if any(image_capabilities[name] != enabled for name, enabled in manifest_capabilities.items()):
                     raise ManifestError('image worker capability does not match manifest; regenerate its manifest')
             print(json.dumps(manifest, sort_keys=True))
         elif args.command == 'worker-services':
             manifest = load_manifest(args.manifest)
-            services = ['crawler', 'indexer']
+            services = ['indexer']
+            if crawler_worker_capability(manifest):
+                services.insert(0, 'crawler')
             if full_content_capability(manifest):
                 services.append('full-content')
             if channel_worker_capability(manifest):

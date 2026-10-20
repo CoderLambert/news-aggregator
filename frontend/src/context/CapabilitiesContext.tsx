@@ -41,6 +41,7 @@ const REASON_MESSAGES: Record<CapabilityReason, string> = {
   hosted_integration_unapproved: '网站订阅集成尚未获批',
   chatgpt_plan_usage_disabled: 'ChatGPT 订阅模型调用当前已关闭',
   capabilities_unavailable: '功能状态暂不可用，请稍后重试',
+  legacy_ingestion_retired: '旧采集功能已停用',
 }
 
 export function capabilityReasonMessage(reason: CapabilityReason | null | undefined): string {

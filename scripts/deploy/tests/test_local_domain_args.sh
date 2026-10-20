@@ -190,7 +190,7 @@ if [[ "$1" == run && " $* " == *" -d "* ]]; then
     exit 0
 fi
 if [[ "$1" == run && "$*" == *'api/services/full_content_worker.py'* ]]; then
-    printf '{"channel_worker":false,"full_content_worker":%s}\n' "${MOCK_WORKER_CAPABLE:-false}"
+    printf '{"channel_worker":false,"full_content_worker":%s,"crawler_worker":false}\n' "${MOCK_WORKER_CAPABLE:-false}"
     exit 0
 fi
 if [[ "$1" == run && "$*" == *'nginx -v'* ]]; then

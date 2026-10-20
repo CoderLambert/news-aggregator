@@ -26,6 +26,9 @@ class SmartChannelTests(TestCase):
         self.client.force_authenticate(self.user)
         self.source, _ = Source.objects.get_or_create(name='React Blog', defaults={'url': 'https://react.dev', 'language': 'en'})
         self.source2, _ = Source.objects.get_or_create(name='OpenAI Blog', defaults={'url': 'https://openai.com/news', 'language': 'en'})
+        from api.tests.rss.reader_fixtures import public_rss_source
+        public_rss_source(self.source)
+        public_rss_source(self.source2)
         self.subscription = ChannelSubscription.objects.create(user=self.user, source=self.source)
         self.category = Category.objects.create(name='Workspace test', slug='workspace-test')
         self.news = News.objects.create(title='A public title', content='Public summary', source=self.source,

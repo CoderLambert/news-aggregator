@@ -142,17 +142,24 @@ def exercise():
     from api.rss.content import convert_html
     from api.rss.content_store import capture_write_token, commit_body, fenced_article
     from api.rss.legacy_translation import archive_changed_translations
-    from api.services.news_ingestion import ingest_item
-    from api.services.full_content_status import enqueue_fetch, claim_fetch, mark_success
-    from api.services.article_fetcher.types import FetchResult
+    from importlib.util import find_spec
+    legacy_modules = ('api.services.news_ingestion', 'api.services.full_content_status', 'api.services.article_fetcher')
+    legacy_presence = [find_spec(name) is not None for name in legacy_modules]
+    assert all(legacy_presence) or not any(legacy_presence), 'partial legacy writer retirement'
+    legacy_present = all(legacy_presence)
+    if legacy_present:
+        from api.services.news_ingestion import ingest_item
+        from api.services.full_content_status import enqueue_fetch, claim_fetch, mark_success
+        from api.services.article_fetcher.types import FetchResult
     from api.rss.engine import FeedDTO, PolicyReceipt
     from types import SimpleNamespace
     seed = load('seed')
     news = News.objects.get(pk=seed['news_id'])
     source = news.source
-    token = capture_source_token('devto')
-    assert enqueue_fetch(news, force=True) == 'queued'
-    assert claim_fetch(news)
+    if legacy_present:
+        token = capture_source_token('devto')
+        assert enqueue_fetch(news, force=True) == 'queued'
+        assert claim_fetch(news)
     alias, _ = Source.objects.get_or_create(name='WebKit',defaults={'url':'https://webkit.org/'})
     SourcePublication.objects.update_or_create(source=alias, defaults={'owner':'legacy','publication':'public','reading_policy':'standard'})
     binding = FeedBinding.objects.create(engine_instance_uuid=uuid.uuid4(), account_id=2, engine_feed_id=26,
@@ -193,10 +200,17 @@ def exercise():
         pass
     assert apply(data,source_ids=[source.pk,alias.pk],environment='isolated',adapter=SyntheticPolicyEngine(),execute=True)['verified']
     save('switch_manifest',data)
-    late=ingest_item(dict(source_key='devto',source_name='Dev.to',upstream_id='26',title='late old title',
-        category_name='T26 synthetic',url=news.url,summary='late old summary',content_kind='article'),legacy_token=token)
-    assert late.receipt_outcome=='deferred'
-    assert not mark_success(news,FetchResult(ok=True,markdown='late old worker body',provider='synthetic'))
+    if legacy_present:
+        late=ingest_item(dict(source_key='devto',source_name='Dev.to',upstream_id='26',title='late old title',
+            category_name='T26 synthetic',url=news.url,summary='late old summary',content_kind='article'),legacy_token=token)
+        assert late.receipt_outcome=='deferred'
+        assert not mark_success(news,FetchResult(ok=True,markdown='late old worker body',provider='synthetic'))
+    else:
+        # The final image has no legacy code to dispatch. Do not resurrect it
+        # just to exercise the transition-image writer-fencing scenario.
+        assert not any(find_spec(name) for name in legacy_modules)
+        news.refresh_from_db()
+        assert news.title == 'Old title' and news.full_content_revision == 17
     entry=EngineEntryMap.objects.create(binding=binding,engine_entry_id=26,news=news,source_url=news.url,disposition='linked')
     current=capture_write_token(news_id=news.pk,source_id=source.pk,entry_id=entry.pk)
     old_title,old_content=news.title,news.content
@@ -243,7 +257,8 @@ def exercise():
     process_imports()
     save('exercise',{'new_news_id':private.pk,'old_news_id':news.pk,'opml_batch_id':preview.data['id'],'body_revision':news.full_content_revision,
         'body_owner_version':news.body_owner_version,'source_epoch':7,'shared_group_size':2,
-        'late_worker_rejected':True,'late_translation_archived_not_current':True,
+        'legacy_code_absent':not legacy_present,
+        'late_worker_rejected':True if legacy_present else 'NOT_APPLICABLE: legacy writers removed','late_translation_archived_not_current':True,
         'policy_engine':'synthetic receipt, NOT real Miniflux','tables':tables()})
 
 
@@ -288,7 +303,9 @@ def verify():
     from urllib.request import build_opener, ProxyHandler
     from urllib.error import HTTPError
     import importlib.util
-    assert all(importlib.util.find_spec(name) is not None for name in ('torch','scrapy','chromadb','waitress'))
+    assert all(importlib.util.find_spec(name) is not None for name in ('torch','chromadb','waitress'))
+    legacy_image = importlib.util.find_spec('api.services.news_ingestion') is not None
+    assert (importlib.util.find_spec('scrapy') is not None) == legacy_image, 'collector package/code mismatch'
     assert Path('/app/frontend/dist/index.html').is_file()
     with override_settings(ALLOWED_HOSTS=['127.0.0.1'], PUBLIC_SITE_MODE='full'):
         server=make_server('127.0.0.1',0,get_wsgi_application())
@@ -309,6 +326,7 @@ def verify():
             server.shutdown(); server.server_close(); thread.join(timeout=5)
     assert tables()==expected['tables'], 'read verification mutated data'
     save(os.environ.get('REHEARSAL_STAGE','verify'), {'application_sha':os.environ['REHEARSAL_APP_SHA'],
+        'legacy_collectors_present':legacy_image,
         'all_table_fingerprint':digest(tables()),'schema':MigrationExecutor(connection).loader.graph.leaf_nodes(),
         'public_available_body':True,'actual_wsgi_http_available_and_acl':True,'subscription_opml_read_state_api_compatibility':True,'personal_paused_a_only':True,'read_state_preserved':True,
         'old_hash_translation_not_current':True,'no_database_restore_or_reverse_migration':True})
