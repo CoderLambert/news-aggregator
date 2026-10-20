@@ -30,3 +30,22 @@ describe('news query definitions', () => {
     expect(data).toEqual({ count: 0, results: [], next: null, previous: null })
   })
 })
+
+
+it('keeps source data separate for two viewers and subscription versus history use', async () => {
+  const { QueryClient } = await import('@tanstack/react-query')
+  const { sourceOptions } = await import('@/services/newsQueries')
+  const { fetchSources } = await import('@/services/api')
+  const client = new QueryClient()
+  fetchSources.mockResolvedValueOnce([{ id: 1, name: 'A private source' }])
+    .mockResolvedValueOnce([{ id: 2, name: 'B private source' }])
+    .mockResolvedValueOnce([{ id: 3, name: 'Subscribe catalog' }])
+  const a = await client.fetchQuery(sourceOptions('zh', 11, 'history'))
+  const b = await client.fetchQuery(sourceOptions('zh', 12, 'history'))
+  const catalog = await client.fetchQuery(sourceOptions('zh', 11, 'subscribe'))
+  expect(a[0].name).toBe('A private source')
+  expect(b[0].name).toBe('B private source')
+  expect(catalog[0].name).toBe('Subscribe catalog')
+  expect(fetchSources.mock.calls.map(call => call[1])).toEqual(['history', 'history', 'subscribe'])
+  client.clear()
+})

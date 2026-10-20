@@ -267,8 +267,8 @@ export function fetchCategories(signal?: AbortSignal): Promise<unknown> {
   return api.get<unknown>('/categories/', { signal }).then(({ data }) => data)
 }
 
-export function fetchSources(signal?: AbortSignal): Promise<unknown> {
-  return api.get<unknown>('/sources/', { signal }).then(({ data }) => data)
+export function fetchSources(signal?: AbortSignal, purpose: 'subscribe' | 'history' = 'history'): Promise<unknown> {
+  return api.get<unknown>('/sources/', { signal, params: { purpose } }).then(({ data }) => data)
 }
 
 // ---- Chat -----------------------------------------------------------------

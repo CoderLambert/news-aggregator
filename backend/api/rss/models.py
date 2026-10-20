@@ -28,6 +28,8 @@ class FeedBinding(models.Model):
     canonical_feed_url = models.URLField(max_length=1024)
     desired_mode = models.CharField(max_length=24, choices=choices('feed', 'full_content'), default='feed')
     desired_enabled = models.BooleanField(default=False)
+    # Immutable initialization lower bound, enforced by Miniflux before extraction.
+    published_since = models.DateField(null=True, blank=True)
     connection_state = models.CharField(max_length=24, default='pending', choices=choices(
         'pending', 'connecting', 'ready', 'paused', 'error', 'unknown'))
     policy_version = models.PositiveBigIntegerField(default=1)
@@ -236,3 +238,19 @@ class LegacyTranslationSnapshot(models.Model):
             models.UniqueConstraint(fields=['news', 'field', 'source_hash', 'translation_hash'], name='rss_legacy_translation_unique'),
             models.CheckConstraint(condition=models.Q(field__in=['title', 'content', 'full_content']), name='rss_legacy_translation_field'),
         ]
+
+
+class RSSInitialization(models.Model):
+    """Retained local reset audit/idempotency record; never cleared with content."""
+    engine_instance_uuid = models.UUIDField()
+    account_id = models.PositiveBigIntegerField()
+    manifest_version = models.CharField(max_length=64)
+    manifest_sha256 = models.CharField(max_length=64)
+    cutoff_date = models.DateField()
+    reset_content = models.BooleanField(default=False)
+    backup_path = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['engine_instance_uuid', 'account_id', 'manifest_version'],
+            name='rss_initialize_once')]

@@ -122,7 +122,7 @@ export default function NewsList() {
     placeholderData: undefined,
   })
   const categoriesQuery = useQuery(categoryOptions(lang))
-  const sourcesQuery = useQuery(sourceOptions(lang))
+  const sourcesQuery = useQuery(sourceOptions(lang, viewerId, 'history'))
   const currentViewerId = user?.id ?? null
 
   function updateParams(changes: Record<string, string | null>, replace = false) {

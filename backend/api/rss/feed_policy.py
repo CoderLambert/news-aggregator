@@ -20,7 +20,10 @@ ALL = {'version': 1, 'mode': 'all'}
 # T27 public Miniflux feed-mode samples, two entries per exact endpoint (2026-10-16).
 # This is a mode decision, NOT proof every entry is complete or a verified badge.
 # Evidence: ops/rss/feed-policy/native-samples.json; never inferred from body_fields.
-NATIVE_FEEDS = frozenset({'https://jvns.ca/atom.xml', 'https://webkit.org/feed/'})
+# Additional two-entry feed-mode samples: native-default-samples-20261020.json.
+NATIVE_FEEDS = frozenset({'https://jvns.ca/atom.xml', 'https://webkit.org/feed/',
+    'https://www.ruanyifeng.com/blog/atom.xml', 'https://v8.dev/blog.atom',
+    'https://hacks.mozilla.org/feed/', 'https://github.blog/feed/'})
 MIXED_HOSTS = frozenset({'news.ycombinator.com', 'hnrss.org', 'www.hnrss.org'})
 
 

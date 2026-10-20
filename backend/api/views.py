@@ -1019,7 +1019,9 @@ class SourceListView(PolicyNoStoreMixin, generics.ListAPIView):
     pagination_class = None
 
     def get_queryset(self):
-        qs = with_authorized_source_counts(self.request.user, authorized_sources(self.request.user)).select_related('publication')
+        from api.services.channel_catalog import catalog_sources
+        qs = with_authorized_source_counts(self.request.user, catalog_sources(self.request.user,
+            self.request.query_params.get('purpose', 'history'))).select_related('publication')
         region = self.request.query_params.get('region')
         if region:
             if region not in {'domestic', 'international'}:

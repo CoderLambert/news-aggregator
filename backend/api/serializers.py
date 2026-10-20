@@ -17,6 +17,8 @@ class SourceSerializer(serializers.ModelSerializer):
     reading_policy = serializers.SerializerMethodField()
     subscription_status = serializers.SerializerMethodField()
     subscription_reason = serializers.SerializerMethodField()
+    can_subscribe = serializers.SerializerMethodField()
+    rss_status = serializers.SerializerMethodField()
 
     def get_name(self, obj):
         from api.rss.models import SourcePublication
@@ -47,9 +49,16 @@ class SourceSerializer(serializers.ModelSerializer):
         from api.services.channel_catalog import subscription_status
         return subscription_status(obj)[1]
 
+    def get_can_subscribe(self, obj):
+        return self.get_subscription_status(obj) == 'active'
+
+    def get_rss_status(self, obj):
+        from api.services.channel_catalog import rss_status
+        return rss_status(obj)
+
     class Meta:
         model = Source
-        fields = ['id', 'name', 'url', 'logo', 'country', 'language', 'source_type', 'news_count', 'description', 'region', 'reading_policy', 'subscription_status', 'subscription_reason']
+        fields = ['id', 'name', 'url', 'logo', 'country', 'language', 'source_type', 'news_count', 'description', 'region', 'reading_policy', 'subscription_status', 'subscription_reason', 'can_subscribe', 'rss_status']
 
 
 class AccessNewsListSerializer(serializers.ListSerializer):

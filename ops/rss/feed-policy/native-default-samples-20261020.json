@@ -1,0 +1,88 @@
+{
+  "engine": "Miniflux 2.3.3",
+  "environment": "isolated public feed-mode sampling",
+  "sampled_at_utc": "2026-10-20",
+  "purpose": "Avoid re-extracting known native article feeds; no completeness badge is granted.",
+  "sources": [
+    {
+      "key": "ruanyifeng",
+      "feed_url": "https://www.ruanyifeng.com/blog/atom.xml",
+      "state": "connected",
+      "feed_id": 1,
+      "samples": [
+        {
+          "entry_id": 3,
+          "url": "http://www.ruanyifeng.com/blog/2026/10/weekly-issue-415.html",
+          "published_at": "2026-10-16T00:02:56Z",
+          "html_length": 21774
+        },
+        {
+          "entry_id": 2,
+          "url": "http://www.ruanyifeng.com/blog/2026/10/weekly-issue-414.html",
+          "published_at": "2026-10-08T15:04:46Z",
+          "html_length": 22016
+        }
+      ]
+    },
+    {
+      "key": "v8",
+      "feed_url": "https://v8.dev/blog.atom",
+      "state": "connected",
+      "feed_id": 5,
+      "samples": [
+        {
+          "entry_id": 2296,
+          "url": "https://v8.dev/blog/json-stringify",
+          "published_at": "2025-08-04T00:00:00Z",
+          "html_length": 13267
+        },
+        {
+          "entry_id": 2295,
+          "url": "https://v8.dev/blog/wasm-speculative-optimizations",
+          "published_at": "2025-06-24T00:00:00Z",
+          "html_length": 36045
+        }
+      ]
+    },
+    {
+      "key": "mozilla",
+      "feed_url": "https://hacks.mozilla.org/feed/",
+      "state": "connected",
+      "feed_id": 6,
+      "samples": [
+        {
+          "entry_id": 2316,
+          "url": "https://hacks.mozilla.org/2026/08/intent-to-ship-jpeg-xl/",
+          "published_at": "2026-08-24T15:32:15Z",
+          "html_length": 6288
+        },
+        {
+          "entry_id": 2315,
+          "url": "https://hacks.mozilla.org/2026/06/pact-anonymous-credentials-for-the-web/",
+          "published_at": "2026-06-23T15:29:52Z",
+          "html_length": 32055
+        }
+      ]
+    },
+    {
+      "key": "github-blog",
+      "feed_url": "https://github.blog/feed/",
+      "state": "connected",
+      "feed_id": 7,
+      "samples": [
+        {
+          "entry_id": 2326,
+          "url": "https://github.blog/ai-and-ml/github-copilot/how-to-continue-a-github-copilot-app-session-in-vs-code/",
+          "published_at": "2026-10-19T18:47:22Z",
+          "html_length": 9233
+        },
+        {
+          "entry_id": 2325,
+          "url": "https://github.blog/news-insights/company-news/the-next-developer-interface-is-ambient-intelligence/",
+          "published_at": "2026-10-15T19:39:27Z",
+          "html_length": 6840
+        }
+      ]
+    }
+  ]
+}

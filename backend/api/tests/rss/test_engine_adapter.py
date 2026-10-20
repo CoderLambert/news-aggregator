@@ -446,3 +446,21 @@ def test_full_content_defaults_on_with_explicit_operator_opt_out(monkeypatch, tm
         monkeypatch.setenv('RSS_FULL_CONTENT_ENABLED', value)
     assert EngineConfig.from_environment().full_content_enabled is expected
     assert EngineConfig(INSTANCE, 3, 'http://127.0.0.1:8080', SECRET).full_content_enabled is True
+
+
+def test_frozen_initialization_date_is_in_create_and_future_policy_writes(server):
+    routes, calls, config = server
+    adapter = EngineAdapter(config)
+    expected = adapter._policy('feed', False, None, '2026-10-14')
+    row = {**feed(), **expected}
+    routes['/v1/feeds'].extend([(200, [], {}), (201, {'feed_id': 7}, {})])
+    routes['/v1/feeds/7'].extend([(200, row, {}), (200, row, {}), (204, b'', {}), (200, row, {})])
+    adapter.create_feed('https://publisher.example/feed', published_since='2026-10-14')
+    adapter.update_feed_policy(PolicyBinding(INSTANCE, 3, 7, 1, 'feed', True,
+        published_since='2026-10-14'), 1)
+    mutations = [body for method, _, body, _ in calls if method in {'POST', 'PUT'}]
+    assert len(mutations) == 2
+    assert all('EntryDate=before:2026-10-14' in row['block_filter_entry_rules'] for row in mutations)
+    assert all(required_entry_url_block_rules() in row['block_filter_entry_rules'] for row in mutations)
+    for invalid in ('2026-10-14T12:00:00Z', '2026-13-01', '2026-10-14\nEntryURL=.*'):
+        assert_error('invalid_policy', lambda: adapter._policy('feed', False, None, invalid))

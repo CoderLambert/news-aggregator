@@ -16,7 +16,8 @@ def test_canonical_url_preserves_business_path_query_and_rejects_credentials():
     assert canonicalize_feed_url('https://EXAMPLE.test:443/Feed/?tag=AI%20News#part') == 'https://example.test/Feed/?tag=AI%20News'
     assert canonicalize_feed_url('https://EXAMPLE.test:8443/Feed') == 'https://example.test:8443/Feed'
     assert canonicalize_feed_url('https://例子.测试./Feed') == 'https://xn--fsqu00a.xn--0zwm56d/Feed'
-    for value in ['https://example.test/feed?api%5fkey=private', 'https://u:p@example.test/feed',
+    assert canonicalize_feed_url('https://example.test/feed?author=1') == 'https://example.test/feed?author=1'
+    for value in ['https://example.test/feed?feedToken=private', 'https://example.test/private/token-feed', 'https://example.test/feed?api%5fkey=private', 'https://u:p@example.test/feed',
                   'http://example.test/feed', 'https://127.0.0.1/feed']:
         with pytest.raises(OperationError):
             canonicalize_feed_url(value)

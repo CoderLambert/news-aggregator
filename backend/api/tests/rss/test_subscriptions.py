@@ -9,8 +9,9 @@ from api.models import Category, ChannelGroup, ChannelGroupMember, ChannelSubscr
 from api.rss.models import FeedBinding, FeedOperation, SourceFeedLink
 from api.rss.reading_models import NewsReadState
 from api.services.channel_catalog import subscription_status
+from api.tests.rss.registration_fixtures import connect_pending
 
-pytestmark = pytest.mark.django_db
+pytestmark = pytest.mark.django_db(transaction=True)
 
 
 @pytest.fixture
@@ -38,16 +39,20 @@ def test_shared_feed_and_source_have_personal_subscriptions_and_actor_operation_
     first, other = subscribe(a), subscribe(b)
     assert first.status_code == other.status_code == 202
     assert FeedBinding.objects.count() == SourceFeedLink.objects.count() == 1
+    assert ChannelSubscription.objects.count() == 0
+    assert first.data['subscription'] is None
+    connect_pending()
     assert ChannelSubscription.objects.count() == 2
     assert first.data['operation_id'] != other.data['operation_id']
-    source = Source.objects.get(pk=first.data['subscription']['source_id'])
+    source = Source.objects.get(pk=first.data['source_id'])
     assert source.publication.publication == 'personal'
     assert source.publication.owner == 'miniflux'
     assert source.publication.reading_policy == 'standard'
     assert client(b).get(f"/api/me/rss-operations/{first.data['operation_id']}/").status_code == 404
     assert client(a).get(f"/api/me/rss-operations/{first.data['operation_id']}/").status_code == 200
-    assert subscription_status(source) == ('inactive', 'connecting')
-    FeedBinding.objects.update(connection_state='ready', applied_policy_version=2)
+    FeedBinding.objects.update(connection_state='connecting')
+    assert subscription_status(source) == ('inactive', 'feed_verification_pending')
+    FeedBinding.objects.update(connection_state='ready')
     assert subscription_status(source) == ('active', '')
 
 
@@ -60,6 +65,8 @@ def test_idempotency_and_group_union_with_cross_user_groups_rejected(people):
     again = subscribe(a, **body)
     assert first.status_code == 202 and again.status_code == 200
     assert again.data['operation_id'] == first.data['operation_id']
+    assert ChannelGroupMember.objects.count() == 0
+    connect_pending()
     assert ChannelGroupMember.objects.count() == 1
     response = subscribe(a, group_ids=[], feed_url=body['feed_url'])
     assert response.status_code == 409
@@ -72,16 +79,18 @@ def test_idempotency_and_group_union_with_cross_user_groups_rejected(people):
 def test_unsubscribe_during_registration_retains_other_reference_and_history(people):
     a, b = people
     first, other = subscribe(a), subscribe(b)
-    source = Source.objects.get(pk=first.data['subscription']['source_id'])
+    source = Source.objects.get(pk=first.data['source_id'])
     news = News.objects.create(source=source, category=Category.objects.create(name='Fixture', slug='fixture'),
         title='Keep', content='Summary', url='https://example.com/story', publish_time=timezone.now())
     NewsReadState.objects.create(user=a, news=news, is_read=True)
-    first_id, other_id = first.data['subscription']['id'], other.data['subscription']['id']
+    connect_pending()
+    first_id = ChannelSubscription.objects.get(user=a).pk
+    other_id = ChannelSubscription.objects.get(user=b).pk
     assert client(b).delete(f'/api/me/rss-subscriptions/{first_id}/').status_code == 404
     assert client(a).delete(f'/api/me/rss-subscriptions/{first_id}/').status_code == 204
     binding = FeedBinding.objects.get()
     assert binding.desired_enabled
-    assert FeedOperation.objects.get(pk=first.data['operation_id']).state == 'cancelled'
+    assert FeedOperation.objects.get(pk=first.data['operation_id']).state == 'succeeded'
     assert client(a).delete(f'/api/me/rss-subscriptions/{first_id}/').status_code == 204
     assert subscribe(a).data['subscription'] is None  # Replay does not resurrect a relation.
     assert client(b).delete(f'/api/me/rss-subscriptions/{other_id}/').status_code == 204
@@ -104,7 +113,7 @@ def test_new_user_can_subscribe_registered_feed_without_policy_override(people):
     second = subscribe(b)
     assert second.status_code == 201
     assert second.data['subscription']['feeds'][0]['desired_mode'] == 'full_content'
-    assert second.data['subscription']['source_id'] == first.data['subscription']['source_id']
+    assert second.data['subscription']['source_id'] == first.data['source_id']
 
 
 def test_missing_configuration_and_credential_url_leave_no_relations(people, monkeypatch):
@@ -142,7 +151,8 @@ def test_explicit_controls_require_current_article_binding_and_actor(people):
     from api.rss.models import EngineEntryMap
     a, b = people
     result = subscribe(a)
-    source = Source.objects.get(pk=result.data['subscription']['source_id'])
+    source = Source.objects.get(pk=result.data['source_id'])
+    connect_pending()
     binding = FeedBinding.objects.get()
     binding.engine_feed_id = 9
     binding.desired_mode = 'full_content'
@@ -195,5 +205,8 @@ def test_twenty_concurrent_subscription_replays_keep_one_relation_and_view(peopl
     with ThreadPoolExecutor(max_workers=20) as pool:
         ids = list(pool.map(call, range(20)))
     assert len(set(ids)) == 1
-    assert FeedBinding.objects.count() == SourceFeedLink.objects.count() == ChannelSubscription.objects.count() == ChannelGroupMember.objects.count() == 1
+    assert FeedBinding.objects.count() == SourceFeedLink.objects.count() == 1
+    assert ChannelSubscription.objects.count() == ChannelGroupMember.objects.count() == 0
+    connect_pending()
+    assert ChannelSubscription.objects.count() == ChannelGroupMember.objects.count() == 1
     assert FeedOperation.objects.filter(actor=a, kind='register').count() == 1

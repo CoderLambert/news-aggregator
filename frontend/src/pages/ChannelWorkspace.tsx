@@ -21,10 +21,11 @@ export default function ChannelWorkspace() {
 function Directory() {
   const { user } = useAuth()
   const config = useChannelConfig()
-  const catalog = useQuery(workspaceCatalogOptions())
   const mutation = useChannelMutation()
   const client = useQueryClient()
   const [params, setParams] = useSearchParams()
+  const tab = params.get('tab') ?? 'all'
+  const catalog = useQuery(workspaceCatalogOptions(config.viewer, tab === 'subscribed' ? 'history' : 'subscribe'))
   const [view, setView] = useState<'table' | 'grid'>('table')
   const [filters, setFilters] = useState(false)
   const [selected, setSelected] = useState<number[]>([])
@@ -39,17 +40,17 @@ function Directory() {
   const topics = catalog.data?.topics ?? []
   const subscriptions = new Map((config.subscriptions.data ?? []).map(subscription => [subscription.source_id, subscription]))
   const groups = config.groups.data ?? []
-  const tab = params.get('tab') ?? 'all'
   const region = params.get('region') ?? ''
   const language = params.get('language') ?? ''
   const sourceType = params.get('type') ?? ''
   const topic = params.get('topic') ?? ''
   const search = params.get('q') ?? ''
-  const invalid = !['all', 'subscribed', 'unsubscribed'].includes(tab) || !['', 'domestic', 'international'].includes(region)
+  const invalid = !['all', 'subscribed', 'unsubscribed', 'pending'].includes(tab) || !['', 'domestic', 'international'].includes(region)
   const filtered = sources.filter(source => !invalid && (!region || source.region === region) && (!language || source.language === language)
     && (!sourceType || source.source_type === sourceType) && (!topic || source.topics.includes(topic))
     && (!search.trim() || (source.name + ' ' + source.description).toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
-    && (tab === 'all' || (config.ready && !config.error && (tab === 'subscribed' ? subscriptions.has(source.id) : !subscriptions.has(source.id)))))
+    && (tab === 'pending' ? source.subscription_status !== 'active' : tab === 'subscribed' || source.subscription_status === 'active')
+    && (tab === 'all' || tab === 'pending' || (config.ready && !config.error && (tab === 'subscribed' ? subscriptions.has(source.id) : !subscriptions.has(source.id)))))
   const selectedVisible = filtered.filter(source => selected.includes(source.id))
   const writable = config.enabled && config.ready && !config.error && !mutation.isPending
   const editedSource = sources.find(source => source.id === editing)
@@ -76,7 +77,8 @@ function Directory() {
     </header>
     {config.enabled && user && <ConnectionStatus viewer={user.id} admin={user.isSuperuser} />}
     <div className="workspace-tabs" role="group" aria-label="频道范围">{[
-      { key: 'all', label: '全部频道', count: sources.length },
+      { key: 'all', label: '全部频道', count: sources.filter(source => source.subscription_status === 'active').length },
+      { key: 'pending', label: '待验证候选', count: sources.filter(source => source.subscription_status !== 'active').length },
       ...(config.enabled ? [{ key: 'subscribed', label: '已订阅', count: subscriptions.size }, { key: 'unsubscribed', label: '未订阅', count: sources.filter(source => !subscriptions.has(source.id)).length }] : []),
     ].map(item => <button key={item.key} type="button" aria-pressed={tab === item.key} onClick={() => change('tab', item.key)}>{item.label}<small>{item.count}</small></button>)}</div>
     <section className="workspace-filter-toolbar" aria-label="查找频道">

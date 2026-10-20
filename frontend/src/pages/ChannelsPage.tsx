@@ -34,9 +34,9 @@ function ChannelManager() {
   const location = useLocation()
   const returnTo = isRecord(location.state) && typeof location.state.newsReturnTo === 'string' && /^\/(?:\?|$)/.test(location.state.newsReturnTo) ? location.state.newsReturnTo : '/'
   const config = useChannelConfig()
-  const directory = useQuery(channelDirectoryOptions())
   const mutation = useChannelMutation()
   const [tab, setTab] = useState<'all' | 'subscribed' | 'groups'>('all')
+  const directory = useQuery(channelDirectoryOptions(config.viewer, tab === 'all' ? 'subscribe' : 'history'))
   const [search, setSearch] = useState('')
   const [moreFilters, setMoreFilters] = useState(false)
   const [editingMembership, setEditingMembership] = useState<number | null>(null)

@@ -44,7 +44,9 @@ class CatalogView(APIView):
     def get(self, request):
         profiles = {p.source_id: p for p in SourceTopicProfile.objects.all()}
         catalog = []
-        for source in with_authorized_source_counts(request.user, authorized_sources(request.user)).select_related('publication').order_by('name'):
+        from api.services.channel_catalog import catalog_sources
+        sources = catalog_sources(request.user, request.query_params.get('purpose', 'history'))
+        for source in with_authorized_source_counts(request.user, sources).select_related('publication').order_by('name'):
             data = profile_data(source, profiles.get(source.pk, False))
             data.update(name=source.publication.display_name or source.name, reading_policy=source.publication.reading_policy)
             data['news_count'] = source.rss_news_count

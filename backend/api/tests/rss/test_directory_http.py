@@ -10,7 +10,7 @@ from api.rss.directory_models import FeedDirectoryEntry
 from api.rss.models import FeedBinding, EngineEntryMap
 from api.rss.subscriptions import subscribe
 
-pytestmark = pytest.mark.django_db
+pytestmark = pytest.mark.django_db(transaction=True)
 
 
 def test_directory_has_only_current_user_subscriptions_and_authorized_previews(settings, monkeypatch):
@@ -21,7 +21,9 @@ def test_directory_has_only_current_user_subscriptions_and_authorized_previews(s
     entry = FeedDirectoryEntry.objects.filter(kind='feed').first()
     a, b = [get_user_model().objects.create_user(name) for name in ['dir-a', 'dir-b']]
     _, result = subscribe(a, {'directory_entry_id': str(entry.entry_id)}, 'directory')
-    news = News.objects.create(title='Private headline', content='Private summary', source_id=result['subscription']['source_id'],
+    from api.tests.rss.registration_fixtures import connect_pending
+    connect_pending()
+    news = News.objects.create(title='Private headline', content='Private summary', source_id=result['source_id'],
         category=Category.objects.create(name='Private', slug='private-dir'), url='https://example.com/private', publish_time=timezone.now())
     EngineEntryMap.objects.create(binding=FeedBinding.objects.get(), engine_entry_id=1, news=news, source_url=news.url, disposition='linked')
     api = APIClient()

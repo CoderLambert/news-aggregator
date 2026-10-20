@@ -13,6 +13,6 @@ export function TopicTags({ keys, topics }: { keys: string[]; topics: Topic[] })
 }
 export function Availability({ source }: { source: ChannelProfile }) {
   if (source.subscription_status === 'active') return null
-  const reasons: Record<string, string> = { feed_verification_pending: 'RSS 待验证，暂不开放订阅', connecting: '正在连接来源', error: '连接失败，请查看订阅状态', unknown: '连接结果待核对', paused: '采集已暂停，可阅读历史内容' }
+  const reasons: Record<string, string> = { source_policy_not_permitted: '来源授权已变更，暂不开放订阅', feed_verification_pending: 'RSS 待验证，暂不开放订阅', feed_error: 'RSS 连接失败，暂不开放订阅', feed_outcome_unknown: '连接结果待核对，暂不开放订阅', connecting: '正在连接来源', error: '连接失败，请查看订阅状态', unknown: '连接结果待核对', paused: '采集已暂停，可阅读历史内容' }
   return <span className="workspace-caption">{reasons[source.subscription_reason] ?? '来源已停用，可阅读历史内容'}</span>
 }

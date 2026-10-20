@@ -80,10 +80,11 @@ def subscription_data(subscription):
 
 
 def _subscription_result(user, operation):
-    identity = operation.safe_input['subscription']['id']
+    identity = operation.safe_input.get('subscription', {}).get('id')
     subscription = ChannelSubscription.objects.filter(pk=identity, user=user).select_related('source__publication').first()
     return {'subscription': subscription_data(subscription) if subscription else None,
-            'operation_id': str(operation.pk), 'state': operation.state}
+            'operation_id': str(operation.pk), 'state': operation.state,
+            'source_id': operation.safe_input.get('subscription_request', operation.safe_input.get('subscription', {})).get('source_id')}
 
 
 @sqlite_retry
@@ -101,7 +102,7 @@ def subscribe(user, data, idempotency_key):
     key = 'subscribe:' + sha256(idempotency_key.encode()).hexdigest()
     old = FeedOperation.objects.filter(actor=user, dedupe_key=key).first()
     if old:
-        if old.request_hash != request_hash or 'subscription' not in old.safe_input:
+        if old.request_hash != request_hash or not ({'subscription', 'subscription_request'} & old.safe_input.keys()):
             raise RssConflict('幂等键已用于不同的请求。', code='idempotency_conflict')
         return 200, _subscription_result(user, old)
     admission = approved_feed_policy(url)
@@ -133,21 +134,50 @@ def subscribe(user, data, idempotency_key):
         if not link.enabled and source.publication.owner == 'miniflux':
             link.enabled = True
             link.save(update_fields=['enabled'])
+    pending_sources = FeedOperation.objects.filter(actor=user, safe_input__subscription_request__isnull=False,
+        state__in=['pending', 'running', 'retry_wait', 'unknown', 'manual_blocked']).values_list(
+            'safe_input__subscription_request__source_id', flat=True)
     if (not ChannelSubscription.objects.filter(user=user, source=source).exists()
-            and ChannelSubscription.objects.filter(user=user).count() >= int(getattr(settings, 'RSS_SUBSCRIPTION_LIMIT', 500))):
+            and source.pk not in pending_sources
+            and ChannelSubscription.objects.filter(user=user).count() + len(set(pending_sources)) >= int(getattr(settings, 'RSS_SUBSCRIPTION_LIMIT', 500))):
         raise Throttled(detail='已达到订阅数量上限。')
-    subscription, created = ChannelSubscription.objects.get_or_create(user=user, source=source)
-    ChannelGroupMember.objects.bulk_create([ChannelGroupMember(group=g, subscription=subscription) for g in groups], ignore_conflicts=True)
-    reconcile_binding(binding.pk)
-    binding.refresh_from_db()
     operation = enqueue_operation('register' if binding.engine_feed_id is None else 'set_enabled',
         actor=user, dedupe_key=key, binding=binding)
     FeedOperation.objects.filter(pk=operation.pk).update(request_hash=request_hash,
-        safe_input={'subscription': {'id': subscription.pk, 'source_id': source.pk,
-                                     'url': url, 'group_ids': group_ids}})
+        safe_input={'subscription_request': {'source_id': source.pk, 'url': url, 'group_ids': group_ids}})
+    # The durable request holds a collection reference, but grants no article ACL.
+    reconcile_binding(binding.pk)
+    binding.refresh_from_db()
+    FeedOperation.objects.filter(pk=operation.pk).update(intent_version=binding.policy_version)
     operation.refresh_from_db()
-    ready = binding.connection_state == 'ready' and binding.applied_policy_version == binding.policy_version
-    return (201 if created and ready else 200 if ready else 202), _subscription_result(user, operation)
+    ready = (binding.engine_feed_id is not None and binding.connection_state in {'ready', 'paused'}
+             and binding.applied_policy_version == binding.policy_version)
+    if ready:
+        complete_subscription(operation)
+        operation.refresh_from_db()
+    return (201 if ready else 202), _subscription_result(user, operation)
+
+
+def complete_subscription(operation):
+    """Called only under the worker's current lease/policy transaction or a ready binding.
+
+    Unknown/failed/cancelled results never grant a relationship. Replays after
+    unsubscribe cannot recreate it because subscription_request is consumed.
+    """
+    request = operation.safe_input.get('subscription_request')
+    if not request or operation.actor_id is None or not operation.actor.is_active:
+        return
+    group_ids = request['group_ids']
+    groups = list(ChannelGroup.objects.filter(user_id=operation.actor_id, pk__in=group_ids))
+    if len(groups) != len(group_ids):
+        return
+    subscription, _ = ChannelSubscription.objects.get_or_create(user_id=operation.actor_id, source_id=request['source_id'])
+    ChannelGroupMember.objects.bulk_create([ChannelGroupMember(group=g, subscription=subscription) for g in groups], ignore_conflicts=True)
+    FeedOperation.objects.filter(pk=operation.pk).update(safe_input={
+        'subscription': {**request, 'id': subscription.pk}})
+    from api.rss.import_models import RssImportItem
+    RssImportItem.objects.filter(operation=operation).update(subscription=subscription, status='succeeded')
+
 
 
 @sqlite_retry
