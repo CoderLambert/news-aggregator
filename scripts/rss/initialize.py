@@ -237,6 +237,8 @@ for name in ('db.sqlite3','db.sqlite3-wal','db.sqlite3-shm'):
     # during this no-provider maintenance; their configuration is preserved.
     run(compose + ['up', '-d', '--no-deps', 'app'], timeout=240)
     checkpoint('resumed')
+    result['runtime'] = status
+    result['counts_after'] = json.loads(app_command(command))['counts']
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
 
 
