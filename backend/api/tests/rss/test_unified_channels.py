@@ -47,14 +47,17 @@ def test_pending_feed_grants_no_acl_until_engine_confirmation_and_cancel_leaves_
     assert FeedOperation.objects.get(pk=first['operation_id']).state == 'cancelled'
 
 
-def test_source_purposes_keep_history_and_public_candidates_without_exposing_personal_sources(settings):
+def test_source_purposes_keep_history_and_public_candidates_without_exposing_personal_sources(settings, monkeypatch):
     settings.PUBLIC_SITE_MODE = 'full'
     user = get_user_model().objects.create_user('purpose-reader')
     old = Source.objects.create(name='Historical channel', url='https://old.example')
     SourcePublication.objects.create(source=old, publication='public', owner='legacy')
+    instance = str(uuid.uuid4())
+    monkeypatch.setenv('RSS_ENGINE_INSTANCE_UUID', instance)
+    monkeypatch.setenv('RSS_ENGINE_ACCOUNT_ID', '3')
     candidate = Source.objects.create(name='Pending default', url='https://candidate.example')
     SourcePublication.objects.create(source=candidate, publication='public', owner='miniflux')
-    binding = FeedBinding.objects.create(engine_instance_uuid=uuid.uuid4(), account_id=3,
+    binding = FeedBinding.objects.create(engine_instance_uuid=instance, account_id=3,
         canonical_feed_url='https://candidate.example/feed')
     SourceFeedLink.objects.create(source=candidate, binding=binding, enabled=True, editorial_pin=True)
     private = Source.objects.create(name='Personal feed', url='https://personal.example')

@@ -124,6 +124,7 @@ class SyncWorker:
         self.read_started = None
         self.refetch_turn = True
         self.discard_read = False
+        self.public_member_turn = True
 
     def _submit(self, phase, callback):
         future = self.control.submit_short_read(callback)
@@ -135,6 +136,17 @@ class SyncWorker:
     def _choose(self):
         if not self.probed:
             return self._submit('probe', lambda adapter: adapter.read_upper_bound())
+        from api.rss.public_membership import process_approved_candidates, prepare_public_member
+        process_approved_candidates(limit=1,instance_uuid=self.config.engine_instance_uuid,account_id=self.config.account_id)
+        if self.public_member_turn:
+            self.public_member_turn = False
+            token = prepare_public_member(instance_uuid=self.config.engine_instance_uuid,account_id=self.config.account_id)
+            if token:
+                self.public_member_token = token
+                entry_id = token['entry_id']
+                return self._submit('public_member',lambda adapter: adapter.get_entry(entry_id))
+        else:
+            self.public_member_turn = True
         from api.rss.operations import refetch_handoffs
         if self.refetch_turn:
             operation = refetch_handoffs(limit=None).filter(
@@ -168,6 +180,10 @@ class SyncWorker:
         self.engine_ready = True
         if phase == 'probe':
             self.probed = True
+            return
+        if phase == 'public_member':
+            from api.rss.public_membership import finish_public_member
+            finish_public_member(self.public_member_token,result,reserve=lambda: reserve_lease(self.lease))
             return
         if phase == 'refetch':
             commit_refetch(result, self.operation_token, self.refetch_fence,
@@ -224,9 +240,13 @@ class SyncWorker:
                 try:
                     result = future.result()
                 except EngineError as error:
-                    if phase != 'refetch' or error.code != 'not_found':
+                    if phase == 'public_member' and error.code == 'not_found':
+                        from api.rss.public_membership import finish_public_member
+                        finish_public_member(self.public_member_token,None,reserve=lambda: reserve_lease(self.lease))
+                    elif phase != 'refetch' or error.code != 'not_found':
                         raise
-                    reject_missing_refetch(self.operation_token, reserve=lambda: reserve_lease(self.lease))
+                    else:
+                        reject_missing_refetch(self.operation_token, reserve=lambda: reserve_lease(self.lease))
                 else:
                     self._complete(phase, result)
                 self.failures, self.error_class = 0, None

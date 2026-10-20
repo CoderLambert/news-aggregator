@@ -20,14 +20,14 @@ it('shows connection completion without claiming article synchronization and nev
   expect(screen.getByText(/文章同步由后台继续完成/)).toBeInTheDocument()
   expect(request.mock.calls.map(call => call[0])).toEqual(['/me/rss-subscriptions/'])
 })
-it('keeps unknown health separate from completed synchronization', async () => {
+it('shows unknown engine health with aggregate anomalies and a dedicated processing entry', async () => {
   request.mockImplementation(async path => (path.includes('/health/') ? {
     engine_ready: false, initial_sync: true, lag: null, last_successful_incremental: null,
-    last_successful_full_reconcile: null, error_class: 'network',
+    last_successful_full_reconcile: null, error_class: 'network', verification_counts: { pending: 3 },
   } : { results: [] }) as never)
   setup(true)
   await waitFor(() => expect(screen.getByText(/引擎状态待确认/)).toBeInTheDocument())
-  expect(screen.getByText('尚未完成')).toBeInTheDocument()
-  expect(screen.getByText(/不等于待处理文章数量/)).toHaveTextContent('未知')
-  expect(screen.getByText('network')).toBeInTheDocument()
+  expect(screen.getByText('待处理频道：3')).toBeInTheDocument()
+  expect(screen.getByRole('link', { name: '处理待核验频道' })).toHaveAttribute('href', '/admin/rss/channels')
+  expect(request.mock.calls.map(call => call[0])).toEqual(['/admin/rss/health/'])
 })

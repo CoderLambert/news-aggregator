@@ -1,0 +1,101 @@
+{
+  "checks": {
+    "seven_original_feed_ids_preserved": true,
+    "all_original_cutoffs_and_registration_urls_preserved": true,
+    "no_original_news_deleted": true,
+    "account_security_fields_preserved": true,
+    "all_ten_public_sources_subscribable": true
+  },
+  "sources": [
+    {
+      "source_id": 66,
+      "name": "DeepMind",
+      "status": "passed",
+      "can_subscribe": true,
+      "feed_id": 4,
+      "registered_url": "https://deepmind.google/blog/rss.xml",
+      "effective_url": ""
+    },
+    {
+      "source_id": 71,
+      "name": "GitHub Blog",
+      "status": "passed",
+      "can_subscribe": true,
+      "feed_id": 8,
+      "registered_url": "https://github.blog/feed/",
+      "effective_url": ""
+    },
+    {
+      "source_id": 70,
+      "name": "Mozilla Hacks",
+      "status": "passed",
+      "can_subscribe": true,
+      "feed_id": 7,
+      "registered_url": "https://hacks.mozilla.org/feed/",
+      "effective_url": ""
+    },
+    {
+      "source_id": 67,
+      "name": "Hugging Face",
+      "status": "passed",
+      "can_subscribe": true,
+      "feed_id": 5,
+      "registered_url": "https://huggingface.co/blog/feed.xml",
+      "effective_url": ""
+    },
+    {
+      "source_id": 72,
+      "name": "Martin Fowler",
+      "status": "passed",
+      "can_subscribe": true,
+      "feed_id": 11,
+      "registered_url": "https://martinfowler.com/feed.atom",
+      "effective_url": ""
+    },
+    {
+      "source_id": 65,
+      "name": "OpenAI Blog",
+      "status": "passed",
+      "can_subscribe": true,
+      "feed_id": 3,
+      "registered_url": "https://openai.com/news/rss.xml",
+      "effective_url": ""
+    },
+    {
+      "source_id": 64,
+      "name": "美团技术团队",
+      "status": "passed",
+      "can_subscribe": true,
+      "feed_id": 9,
+      "registered_url": "https://tech.meituan.com/feed/",
+      "effective_url": "https://tech.meituan.com/rss.xml"
+    },
+    {
+      "source_id": 69,
+      "name": "V8",
+      "status": "passed",
+      "can_subscribe": true,
+      "feed_id": 6,
+      "registered_url": "https://v8.dev/blog.atom",
+      "effective_url": ""
+    },
+    {
+      "source_id": 68,
+      "name": "WebKit",
+      "status": "passed",
+      "can_subscribe": true,
+      "feed_id": 10,
+      "registered_url": "https://webkit.org/feed/",
+      "effective_url": ""
+    },
+    {
+      "source_id": 63,
+      "name": "阮一峰",
+      "status": "passed",
+      "can_subscribe": true,
+      "feed_id": 2,
+      "registered_url": "https://www.ruanyifeng.com/blog/atom.xml",
+      "effective_url": ""
+    }
+  ]
+}

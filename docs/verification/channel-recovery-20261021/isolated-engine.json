@@ -1,0 +1,24 @@
+{
+  "isolated_miniflux": "2.3.3",
+  "results": [
+    {
+      "scenario": "feed",
+      "status": "passed",
+      "operation": "succeeded",
+      "phase": "final_response",
+      "error_code": ""
+    },
+    {
+      "scenario": "reuse_old_unknown",
+      "status": "passed",
+      "remote_feed_count": 1
+    },
+    {
+      "scenario": "invalid",
+      "status": "failed",
+      "operation": "failed",
+      "phase": "final_response",
+      "error_code": "feed_parse_failed"
+    }
+  ]
+}

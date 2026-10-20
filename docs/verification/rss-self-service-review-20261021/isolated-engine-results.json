@@ -1,0 +1,15 @@
+{
+  "scope": "real isolated Miniflux 2.3.3",
+  "personal_connected": true,
+  "private_before_publication": true,
+  "public_review_published": true,
+  "shared_engine_feed_count": 1,
+  "public_members": 1,
+  "private_body_stays_private": true,
+  "invalid_feed_error": "feed_parse_failed",
+  "instance": "d4e2b12e-7117-479d-bf5f-f5767b183a5a",
+  "account": 3,
+  "candidate_id": "418cdc22-6f6c-4253-b0c8-528c57cf1e4b",
+  "public_source_id": 60,
+  "approval_version": 2
+}

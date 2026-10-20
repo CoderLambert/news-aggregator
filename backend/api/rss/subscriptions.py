@@ -12,7 +12,7 @@ from django.db.models import F
 from django.http import Http404
 from rest_framework.exceptions import APIException, Throttled, ValidationError
 
-from api.models import ChannelGroup, ChannelGroupMember, ChannelSubscription, Source
+from api.models import Category, ChannelGroup, ChannelGroupMember, ChannelSubscription, Source
 from api.rss.directory_models import FeedDirectoryEntry
 from api.rss.discovery import resolve_candidate_token
 from api.rss.http import RssConflict
@@ -42,7 +42,7 @@ def engine_identity():
 
 def _selection(user, data):
     selectors = [name for name in ('feed_url', 'candidate_token', 'directory_entry_id') if name in data]
-    if len(selectors) != 1 or set(data) - {*selectors, 'group_ids'}:
+    if len(selectors) != 1 or set(data) - {*selectors, 'group_ids', 'category_id'}:
         raise ValidationError('请选择一种订阅方式。')
     name = ''
     if selectors[0] == 'candidate_token':
@@ -73,6 +73,7 @@ def subscription_data(subscription):
     return {'id': subscription.pk, 'source_id': subscription.source_id,
             'name': publication.display_name or subscription.source.name,
             'group_ids': sorted(subscription.groups.values_list('pk', flat=True)),
+            'category_id':subscription.category_id,'category_version':subscription.category_version,
             'publication': publication.publication, 'owner': publication.owner,
             'feeds': [{'id': str(link.binding_id), 'feed_url': link.binding.canonical_feed_url,
                        'connection_state': link.binding.connection_state,
@@ -98,13 +99,20 @@ def subscribe(user, data, idempotency_key):
     get_user_model().objects.filter(pk=user.pk).update(last_login=F('last_login'))
     url, display_name = _selection(user, data)
     group_ids = _group_ids(data.get('group_ids', []))
-    request_hash = sha256(json.dumps({'url': url, 'group_ids': group_ids}, sort_keys=True).encode()).hexdigest()
+    category_id=data.get('category_id')
+    if 'category_id' in data and category_id is not None and (type(category_id) is not int or not Category.objects.filter(pk=category_id).exists()):
+        raise ValidationError('请选择有效的频道分类。')
+    digest_input={'url':url,'group_ids':group_ids}
+    if 'category_id' in data: digest_input['category_id']=category_id
+    request_hash = sha256(json.dumps(digest_input, sort_keys=True).encode()).hexdigest()
     key = 'subscribe:' + sha256(idempotency_key.encode()).hexdigest()
     old = FeedOperation.objects.filter(actor=user, dedupe_key=key).first()
     if old:
         if old.request_hash != request_hash or not ({'subscription', 'subscription_request'} & old.safe_input.keys()):
             raise RssConflict('幂等键已用于不同的请求。', code='idempotency_conflict')
         return 200, _subscription_result(user, old)
+    from api.rss.additions import check_addition_limit
+    check_addition_limit(user, url)
     admission = approved_feed_policy(url)
     groups = list(ChannelGroup.objects.filter(user=user, pk__in=group_ids))
     if len(groups) != len(group_ids):
@@ -118,10 +126,14 @@ def subscribe(user, data, idempotency_key):
     assert_binding_policy(binding)
     if binding.source_links.filter(source__publication__owner='legacy').exists():
         raise RssConflict('此来源正在迁移，请稍后订阅。', code='source_migration_required')
-    link = binding.source_links.filter(association_policy={'version': 1, 'mode': 'all'}).select_related('source__publication').order_by('pk').first()
+    link = binding.source_links.filter(association_policy={'version': 1, 'mode': 'all'}).select_related('source__publication').order_by('source__publication__requires_public_membership', 'pk').first()
     if link is None:
         parsed = urlsplit(url)
         name = display_name or parsed.hostname
+        if binding.rsshub_alias and not display_name:
+            from api.rss.rsshub_url import metadata
+            template,_,params=metadata(binding.rsshub_alias)
+            name=('Twitter @'+params['id']) if template=='twitter.user' else binding.rsshub_alias
         source = Source.objects.create(name=f'{name[:60]} · {binding.pk}',
             url=f'https://{parsed.netloc}', country='', language='')
         SourcePublication.objects.create(source=source, publication='personal', owner='miniflux',
@@ -143,14 +155,19 @@ def subscribe(user, data, idempotency_key):
         raise Throttled(detail='已达到订阅数量上限。')
     operation = enqueue_operation('register' if binding.engine_feed_id is None else 'set_enabled',
         actor=user, dedupe_key=key, binding=binding)
+    request_data={'source_id':source.pk,'url':url,'group_ids':group_ids}
+    if 'category_id' in data:
+        current=ChannelSubscription.objects.filter(user=user,source=source).first()
+        request_data.update(category_id=category_id,category_expected_version=current.category_version if current else 0)
     FeedOperation.objects.filter(pk=operation.pk).update(request_hash=request_hash,
-        safe_input={'subscription_request': {'source_id': source.pk, 'url': url, 'group_ids': group_ids}})
+        safe_input={'subscription_request':request_data})
     # The durable request holds a collection reference, but grants no article ACL.
     reconcile_binding(binding.pk)
     binding.refresh_from_db()
     FeedOperation.objects.filter(pk=operation.pk).update(intent_version=binding.policy_version)
     operation.refresh_from_db()
-    ready = (binding.engine_feed_id is not None and binding.connection_state in {'ready', 'paused'}
+    from api.rss.operations import unresolved_control_operations
+    ready = (not unresolved_control_operations(binding.pk).exists() and binding.engine_feed_id is not None and binding.connection_state in {'ready', 'paused'}
              and binding.applied_policy_version == binding.policy_version)
     if ready:
         complete_subscription(operation)
@@ -172,6 +189,12 @@ def complete_subscription(operation):
     if len(groups) != len(group_ids):
         return
     subscription, _ = ChannelSubscription.objects.get_or_create(user_id=operation.actor_id, source_id=request['source_id'])
+    if 'category_id' in request:
+        newer=FeedOperation.objects.filter(actor_id=operation.actor_id,binding_id=operation.binding_id,
+            created_at__gt=operation.created_at,safe_input__subscription_request__category_id__isnull=False).exclude(state__in=['cancelled','failed']).exists()
+        if not newer and (request['category_id'] is None or Category.objects.filter(pk=request['category_id']).exists()):
+            ChannelSubscription.objects.filter(pk=subscription.pk,category_version=request.get('category_expected_version',0)).update(
+                category_id=request['category_id'],category_version=F('category_version')+1)
     ChannelGroupMember.objects.bulk_create([ChannelGroupMember(group=g, subscription=subscription) for g in groups], ignore_conflicts=True)
     FeedOperation.objects.filter(pk=operation.pk).update(safe_input={
         'subscription': {**request, 'id': subscription.pk}})

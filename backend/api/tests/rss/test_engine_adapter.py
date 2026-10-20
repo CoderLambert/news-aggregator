@@ -464,3 +464,29 @@ def test_frozen_initialization_date_is_in_create_and_future_policy_writes(server
     assert all(required_entry_url_block_rules() in row['block_filter_entry_rules'] for row in mutations)
     for invalid in ('2026-10-14T12:00:00Z', '2026-13-01', '2026-10-14\nEntryURL=.*'):
         assert_error('invalid_policy', lambda: adapter._policy('feed', False, None, invalid))
+
+
+def test_native_final_parse_failure_is_safe_and_does_not_reconcile_or_leak_body(server):
+    routes, calls, config = server
+    routes['/v1/feeds'].append(ok([]))
+    routes['/v1/feeds'].append((500, {'error_message': 'rss: unable to parse feed: private publisher diagnostic'}, {}))
+    adapter = EngineAdapter(config)
+    error = assert_error('feed_parse_failed', lambda: adapter.create_feed('https://publisher.example/feed'), unknown=False)
+    assert 'private' not in str(error)
+    assert len([call for call in calls if call[1] == '/v1/feeds']) == 2
+    adapter.close()
+
+@pytest.mark.parametrize('message,code',[
+    ('fetcher: resource not found (404 status code)','feed_source_not_found'),
+    ('fetcher: access forbidden (403 status code)','feed_source_forbidden'),
+    ('fetcher: unauthorized (401 status code)','feed_source_auth_required'),
+    ('fetcher: service unavailable (503 status code)','feed_source_unavailable'),
+])
+def test_complete_native_fetch_failure_is_final_not_unknown(server,message,code):
+    routes,calls,config=server
+    routes['/v1/feeds'].extend([ok([]),(500,{'error_message':message},{})])
+    adapter=EngineAdapter(config)
+    try:
+        assert_error(code,lambda:adapter.create_feed('https://publisher.example/feed'),unknown=False)
+        assert len([c for c in calls if c[1]=='/v1/feeds'])==2
+    finally:adapter.close()

@@ -1,0 +1,26 @@
+{
+  "url": "http://rss-review.localhost:18084",
+  "synthetic_accounts_only": true,
+  "desktop": "PASS",
+  "reviewer_verification": "PASS",
+  "batch_completed": 1,
+  "cooldown_disabled_button": "PASS",
+  "root_intake_actual_connection": "PASS",
+  "exact_username_lookup": "PASS",
+  "role_grant_ui_submission": "NOT_RUN; no additional grants needed",
+  "personal_add_ui": "PASS",
+  "parser_failure_visible": "PASS",
+  "query_refresh_page_size_50": "PASS",
+  "account_switch": "PASS",
+  "escape_focus_restored": "PASS",
+  "narrow_screen": {
+    "innerWidth": 412,
+    "innerHeight": 892,
+    "scrollWidth": 412,
+    "dialogWidth": 412
+  },
+  "browser_quota_stress": "NOT_RUN; quotas covered in backend",
+  "local_installed_page": "PASS; 10 passed, zero pending",
+  "user_original_session_preserved": true,
+  "personal_readable_article_count": "PASS; one readable article shown"
+}

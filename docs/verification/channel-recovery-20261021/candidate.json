@@ -1,0 +1,31 @@
+{
+  "head": "b03a3dfb41911b06dfb24c31074f4faf60fe8845",
+  "base": "b03a3dfb41911b06dfb24c31074f4faf60fe8845",
+  "branch": "task/channel-recovery-20261021",
+  "dirty": true,
+  "source_digest": "9e56c9c255ae03dc8244d07705a617cfa92dd4dcaa0f6723b6de4e16c89bd1ff",
+  "image": "newshub:channel-recovery-9e56c9c255ae",
+  "image_id": "sha256:4cc722a3aa00d73979b326db7d8b30bebc423a7506f1a9c3ff561f02aec32645",
+  "runtime_manifest": {
+    "backend/api/channel_views.py": "5006eb50331277379071e9889602d9e5ba10c51e1b23653217821471f63478f0",
+    "backend/api/management/commands/rss_recovery_boundary.py": "a7bdc82ffdef9d597868bf07059634b6549fd58a62cc2979f2e774e30e7675f3",
+    "backend/api/migrations/0075_channel_verification_recovery.py": "16f65351ec89b4104e440dbbc9b9d45bb56b301b23817e91523ca2b083cbd2d9",
+    "backend/api/migrations/0076_proven_feed_redirect.py": "6c92b71125a0c103b2f1ed1963a62a7e432cb608bc71ef3fd5b7d53ab3dad94f",
+    "backend/api/rss/admin_verification.py": "d67b41020f92850938987c1548a08c17568c6043cb82aea3a2d66269d8ac27d5",
+    "backend/api/rss/control_worker.py": "06b71bedc17ca1cce7464b707fe76f3cf07b67452a26bad9df41d6d8999392ec",
+    "backend/api/rss/engine.py": "ad58565d5b657ef0b4e30605510f6cd811412be80b5c0454d727cc0e0a961eec",
+    "backend/api/rss/health_http.py": "a5339ead44d15a812d6d256b5162fbedf56926f00cca6f054a7be315a3498777",
+    "backend/api/rss/models.py": "32189db21db423336233b83a1a4256cc68c923d244e00913c3fd47eaf53449ba",
+    "backend/api/rss/operations.py": "9c0312e865e6e98b64b0595e487c8d8df825c8e63dadbaeac4ad87a20d311744",
+    "backend/api/rss/subscriptions.py": "f862ae2861853a62f02b559ff090021cd77df0f57153d215b99d3d9e69cd4095",
+    "backend/api/services/channel_catalog.py": "fc06c443ff1edbc0b0979575492740e70b4bfbd05140b354e8f89a622dcc3f26",
+    "backend/api/services/channel_topics.py": "3474b6318582f361bde613823c6f9d992006b18816664ad4f9b4a8503d641a49",
+    "backend/api/urls.py": "41d2b8291c9cfc29d89d9e98218628f2f17c3d621110737c76cc50b9b1e4a545"
+  },
+  "migrations": [
+    "0075_channel_verification_recovery",
+    "0076_proven_feed_redirect"
+  ],
+  "ci": "NOT_RUN; no push or PR requested",
+  "worktree": "/home/lambert/githubRepos/lambert/news-aggregator-channel-recovery-20261021"
+}

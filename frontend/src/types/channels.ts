@@ -8,7 +8,7 @@ export interface Channel {
   can_subscribe: boolean; rss_status: string
   subscription_status: 'active' | 'inactive'; subscription_reason: string; news_count: number
 }
-export interface ChannelSubscription { id: number; source_id: number; group_ids: number[] }
+export interface ChannelSubscription { id: number; source_id: number; group_ids: number[]; category_id?: number | null; category_version?: number }
 export interface ChannelGroup { id: number; name: string; source_ids: number[] }
 export const newsScopes: NewsScope[] = ['all', 'subscribed', 'ungrouped', 'group']
 function numberIds(value: unknown): number[] {
@@ -29,7 +29,9 @@ export function parseSubscriptions(value: unknown): ChannelSubscription[] {
   if (!Array.isArray(value)) throw new TypeError('Invalid subscriptions')
   return value.map(item => {
     if (!isRecord(item) || typeof item.id !== 'number' || typeof item.source_id !== 'number') throw new TypeError('Invalid subscription')
-    return { id: item.id, source_id: item.source_id, group_ids: numberIds(item.group_ids) }
+    if (item.category_id != null && (!Number.isSafeInteger(item.category_id) || (item.category_id as number) <= 0)) throw new TypeError('Invalid category')
+    if (item.category_version !== undefined && (!Number.isSafeInteger(item.category_version) || (item.category_version as number) < 0)) throw new TypeError('Invalid category version')
+    return { id: item.id, source_id: item.source_id, group_ids: numberIds(item.group_ids), category_id: item.category_id as number | null | undefined, category_version: (item.category_version as number | undefined) ?? 0 }
   })
 }
 export function parseGroups(value: unknown): ChannelGroup[] {

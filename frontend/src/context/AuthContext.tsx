@@ -53,6 +53,7 @@ export interface AuthUser {
   id: number
   username: string
   isSuperuser: boolean
+  rssCapabilities?: { reviewPublicRss: boolean; manageReviewers: boolean; reviewerVersion: number | null }
 }
 
 interface IdentityState {
@@ -76,7 +77,11 @@ function parseAuthUser(value: unknown): AuthUser {
   if (!isRecord(value) || typeof value.id !== 'number' || typeof value.username !== 'string') {
     throw new TypeError('Invalid authentication response')
   }
-  return { id: value.id, username: value.username, isSuperuser: value.is_superuser === true }
+  const rss = isRecord(value.rss_capabilities) ? value.rss_capabilities : {}
+  const version = Number.isSafeInteger(rss.reviewer_version) && (rss.reviewer_version as number) >= 0 ? rss.reviewer_version as number : null
+  return { id: value.id, username: value.username, isSuperuser: value.is_superuser === true,
+    rssCapabilities: { reviewPublicRss: version !== null && rss.review_public_rss === true,
+      manageReviewers: version !== null && rss.manage_rss_reviewers === true && value.is_superuser === true, reviewerVersion: version } }
 }
 
 export function useAuth(): AuthContextValue {

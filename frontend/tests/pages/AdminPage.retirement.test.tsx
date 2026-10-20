@@ -24,7 +24,7 @@ it('loads existing RSS status independently while the retained index section is 
   expect(screen.getByLabelText('正在加载搜索索引状态')).toBeInTheDocument()
   expect(await screen.findByText(/RSS 连接状态 · 引擎可用/)).toBeInTheDocument()
   expect(vi.mocked(workspaceRequest).mock.calls.map(([path]) => path).sort()).toEqual([
-    '/admin/rss/health/', '/me/rss-subscriptions/',
+    '/admin/rss/health/',
   ])
   expect(screen.queryByText('全文监控')).not.toBeInTheDocument()
   expect(screen.queryByText('抓取历史')).not.toBeInTheDocument()

@@ -1,0 +1,23 @@
+{
+  "enabled": true,
+  "verified": true,
+  "version": 1,
+  "origin": "https://rsshub.newshub.example",
+  "routes": [
+    "github.issue"
+  ],
+  "repositories": [
+    [
+      "DIYgod",
+      "RSSHub"
+    ]
+  ],
+  "capabilities": [],
+  "auth_required": false,
+  "proxy_url": "http://rsshub-proxy:3128",
+  "generic": true,
+  "generic_version": 1,
+  "blocked_namespaces": [
+    "twitter"
+  ]
+}

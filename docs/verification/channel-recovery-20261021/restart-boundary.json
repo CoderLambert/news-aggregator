@@ -1,0 +1,7 @@
+{
+  "worker_container": "ae1320a0cd363daa30d8077ecfaff337d1f5142c5def52218ddb5b681049d93a",
+  "engine_container": "9e0b9dd4eddfbce3cda96bbc6b279c5a2ab36e075357560b30f7d4d00aefe542",
+  "worker_stopped_at": "2026-10-20T18:14:36.687516441Z",
+  "engine_previous_start": "2026-10-20T16:52:13.971126489Z",
+  "engine_started_at": "2026-10-20T18:14:37.556818763Z"
+}

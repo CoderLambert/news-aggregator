@@ -1,0 +1,42 @@
+.rss-channels { display: grid; gap: 1.25rem; min-width: 0; }
+.rss-page-heading, .rss-selection, .rss-pagination { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.rss-page-heading h1 { font-size: 1.7rem; font-weight: 650; }
+.rss-page-heading p, .rss-channel-row small { color: var(--muted-foreground); font-size: .875rem; }
+.rss-counts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .75rem; }
+.rss-counts button { text-align: left; padding: .85rem 1rem; border: 1px solid var(--border); border-radius: .8rem; background: var(--card); }
+.rss-counts button[aria-pressed="true"] { border-color: var(--primary); background: var(--muted); }
+.rss-counts strong { display: block; font-size: 1.6rem; }
+.rss-filters { display: flex; flex-wrap: wrap; align-items: end; gap: .8rem; }
+.rss-filters form { display: flex; align-items: end; gap: .6rem; flex: 1 1 24rem; }
+.rss-filters form label { flex: 1; }
+.rss-filters label { display: grid; gap: .3rem; font-size: .85rem; }
+.rss-filters input, .rss-filters select { padding: .55rem .7rem; border: 1px solid var(--border); border-radius: .5rem; background: var(--background); color: var(--foreground); min-width: 0; width: 100%; }
+.rss-channel-list { display: grid; gap: .65rem; list-style: none; margin: 0; padding: 0; }
+.rss-channel-row { display: grid; grid-template-columns: 1.1rem minmax(0, 2fr) minmax(0, 1.4fr) minmax(0, 1fr) minmax(8rem, 1fr); gap: 1rem; padding: 1rem; border: 1px solid var(--border); background: var(--card); border-radius: .8rem; align-items: center; }
+.rss-channel-row .workspace-link { text-align: left; font-size: 1rem; font-weight: 600; }
+.rss-channel-identity { min-width: 0; }
+.rss-feed-url { overflow-wrap: anywhere; color: var(--muted-foreground); font-size: .8rem; margin-top: .3rem; }
+.rss-status { border-radius: 1rem; padding: .2rem .55rem; background: var(--muted); font-size: .8rem; display: inline-block; }
+.rss-status-unknown, .rss-status-failed { color: var(--destructive); }
+.rss-status-passed { color: #16805c; }
+.rss-action { display: grid; gap: .3rem; }
+.rss-selection label { display: flex; gap: .5rem; align-items: center; }
+.rss-batch { border: 1px solid var(--border); border-radius: .8rem; padding: 1rem; background: var(--muted); }
+.rss-batch h2, .rss-verification-drawer h2, .rss-verification-drawer h3, .rss-verification-drawer h4 { font-weight: 650; }
+.rss-verification-drawer { position: fixed; inset: 0 0 0 auto; margin: 0; height: 100dvh; max-height: 100dvh; width: min(38rem, 100%); max-width: 100%; padding: 1.5rem; border: 0; border-left: 1px solid var(--border); background: var(--background); color: var(--foreground); overflow: auto; }
+.rss-verification-drawer::backdrop { background: rgb(0 0 0 / .4); }
+.rss-verification-drawer > header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
+.rss-verification-drawer p { margin-block: .6rem; overflow-wrap: anywhere; }
+.rss-detail-feed { margin-top: 1.5rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+.rss-history { padding-left: 1.25rem; font-size: .85rem; }
+.rss-history li { margin: 1rem 0; }
+@media (max-width: 700px) {
+  .rss-channel-row { grid-template-columns: 1.1rem minmax(0, 1fr); gap: .65rem; }
+  .rss-channel-row > :nth-child(n+3) { grid-column: 2; }
+  .rss-counts { gap: .4rem; }
+  .rss-counts button { padding: .7rem .55rem; }
+  .rss-verification-drawer { width: 100%; padding: 1rem; border: 0; }
+  .rss-pagination { justify-content: center; font-size: .85rem; }
+}
+
+.rss-public-form{display:grid;gap:1rem;padding:1rem;min-width:0}.rss-public-form label{display:grid;gap:.4rem;min-width:0}.rss-public-form input,.rss-public-form select,.rss-public-form textarea{width:100%;min-width:0;border:1px solid var(--border);border-radius:.5rem;padding:.6rem;background:var(--background)}.rss-public-form .workspace-resolved-choice{display:flex}.rss-public-form input[type=checkbox]{width:auto}.rss-addition-row{border:1px solid var(--border);border-radius:.75rem;padding:1rem;margin:1rem 0;min-width:0}.rss-addition-row h2{font-weight:600}.rss-addition-row .workspace-actions{flex-wrap:wrap}.rss-review-search{display:flex;flex-wrap:wrap;gap:.75rem;margin:1rem 0}.rss-review-search input{min-width:0;flex:1}.rss-public-form textarea{min-height:6rem}

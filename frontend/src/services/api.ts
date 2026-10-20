@@ -718,7 +718,7 @@ export function getResearchResults(
 export function fetchChannelSubscriptions(signal?: AbortSignal): Promise<unknown> {
   return api.get<unknown>('/me/channel-subscriptions/', { signal }).then(({ data }) => data)
 }
-export function changeChannelSubscriptions(payload: { action: 'subscribe' | 'unsubscribe' | 'set_groups'; source_ids: number[]; group_ids?: number[] }): Promise<unknown> {
+export function changeChannelSubscriptions(payload: { action: 'subscribe' | 'unsubscribe' | 'set_groups' | 'set_category'; source_ids: number[]; group_ids?: number[]; category_id?: number | null; expected_version?: number }): Promise<unknown> {
   return api.post<unknown>('/me/channel-subscriptions/', payload).then(({ data }) => data)
 }
 export function fetchChannelGroups(signal?: AbortSignal): Promise<unknown> {

@@ -5,6 +5,7 @@ from django.contrib.auth.models import User
 from django.db import transaction
 from django.db.models import F
 from django.shortcuts import get_object_or_404
+from django.http import Http404
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -85,14 +86,26 @@ class PersonalChannelsView(APIView):
 class ChannelSubscriptionsView(PersonalChannelsView):
     def get(self, request):
         subscriptions = ChannelSubscription.objects.filter(user=request.user).prefetch_related('groups')
-        return Response([{'id': s.id, 'source_id': s.source_id, 'group_ids': [g.id for g in s.groups.all()]} for s in subscriptions])
+        return Response([{'id': s.id, 'source_id': s.source_id, 'category_id':s.category_id,'category_version':s.category_version,'group_ids': [g.id for g in s.groups.all()]} for s in subscriptions])
 
     @transaction.atomic
     def post(self, request):
         self.lock(request.user)
         source_ids = ids(request.data, 'source_ids')
         action = request.data.get('action', 'subscribe')
-        if action == 'unsubscribe':
+        if action == 'set_category':
+            from api.models import Category
+            from api.rss.http import RssConflict
+            if len(source_ids)!=1 or set(request.data)-{'action','source_ids','category_id','expected_version'}:
+                raise ValidationError('请选择一个频道。')
+            category_id=request.data.get('category_id');expected=request.data.get('expected_version')
+            if type(expected) is not int or expected<0 or (category_id is not None and (type(category_id) is not int or not Category.objects.filter(pk=category_id).exists())):
+                raise ValidationError('请选择有效分类并提供当前版本。')
+            subscription=ChannelSubscription.objects.filter(user=request.user,source_id=next(iter(source_ids))).first()
+            if subscription is None: raise Http404
+            if not ChannelSubscription.objects.filter(pk=subscription.pk,category_version=expected).update(category_id=category_id,category_version=F('category_version')+1):
+                raise RssConflict('频道分类已经改变，请刷新。')
+        elif action == 'unsubscribe':
             from api.rss.subscriptions import unsubscribe
             for subscription_id in list(ChannelSubscription.objects.filter(user=request.user, source_id__in=source_ids).values_list('pk', flat=True)):
                 unsubscribe(request.user, subscription_id)
@@ -108,7 +121,8 @@ class ChannelSubscriptionsView(PersonalChannelsView):
             for source in sources:
                 ChannelSubscription.objects.get_or_create(user=request.user, source=source)
                 from api.rss.operations import reconcile_binding
-                for binding_id in source.feed_links.values_list('binding_id', flat=True):
+                from api.services.channel_catalog import current_feed_links
+                for binding_id in current_feed_links(source).values_list('binding_id', flat=True):
                     reconcile_binding(binding_id)
         elif action == 'set_groups':
             group_ids = ids(request.data, 'group_ids')

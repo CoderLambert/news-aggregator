@@ -1,3 +1,6 @@
+from api.rss.review_views import (MyRecommendationsView, MyRecommendationActionView, RecommendationVerificationView, RecommendationsView, RecommendationDetailView, RecommendationDecisionView, ReviewersView, RevokeReviewerView)
+from api.rss.additions import AdditionsView, AdditionActionView
+from api.rss.admin_verification import SourceListView, SourceVerificationView, VerificationBatchesView, VerificationBatchView
 from django.urls import path
 from . import channel_views
 from . import ai_translation_views
@@ -16,11 +19,25 @@ from .rss.directory_http import DirectoryView
 from .rss.health_http import RssHealthView
 
 urlpatterns = [
+    path('me/rss-recommendations/', MyRecommendationsView.as_view(), name='rss-my-recommendations'),
+    path('me/rss-recommendations/<uuid:pk>/actions/', MyRecommendationActionView.as_view(), name='rss-recommendation-action'),
+    path('admin/rss/recommendations/', RecommendationsView.as_view(), name='rss-recommendations'),
+    path('admin/rss/recommendations/<uuid:pk>/', RecommendationDetailView.as_view(), name='rss-recommendation-detail'),
+    path('admin/rss/recommendations/<uuid:pk>/verification/', RecommendationVerificationView.as_view(), name='rss-recommendation-verification'),
+    path('admin/rss/recommendations/<uuid:pk>/decisions/', RecommendationDecisionView.as_view(), name='rss-recommendation-decision'),
+    path('admin/rss/reviewers/', ReviewersView.as_view(), name='rss-reviewers'),
+    path('admin/rss/reviewers/<int:pk>/revoke/', RevokeReviewerView.as_view(), name='rss-reviewer-revoke'),
+    path('me/rss-additions/', AdditionsView.as_view(), name='rss-additions'),
+    path('me/rss-additions/<uuid:pk>/actions/', AdditionActionView.as_view(), name='rss-addition-actions'),
     path('news/<int:news_id>/byok-translation/', ai_translation_views.PrivateTranslationStartView.as_view(), name='byok-translation-start'),
     path('me/ai/translations/<uuid:task_id>/', ai_translation_views.PrivateTranslationTaskView.as_view(), name='byok-translation-task'),
     path('me/ai/translations/<uuid:task_id>/cancel/', ai_translation_views.PrivateTranslationCancelView.as_view(), name='byok-translation-cancel'),
     path('me/ai/translations/<uuid:task_id>/retry/', ai_translation_views.PrivateTranslationRetryView.as_view(), name='byok-translation-retry'),
     path('me/ai/translations/<uuid:task_id>/events/', ai_translation_views.PrivateTranslationEventsView.as_view(), name='byok-translation-events'),
+    path('admin/rss/sources/', SourceListView.as_view(), name='rss-admin-sources'),
+    path('admin/rss/sources/<int:pk>/verification/', SourceVerificationView.as_view(), name='rss-source-verification'),
+    path('admin/rss/verification-batches/', VerificationBatchesView.as_view(), name='rss-verification-batches'),
+    path('admin/rss/verification-batches/<uuid:pk>/', VerificationBatchView.as_view(), name='rss-verification-batch'),
     path('admin/rss/health/', RssHealthView.as_view(), name='rss-health'),
     path('rss/directory/', DirectoryView.as_view(), name='rss-directory'),
     path('me/rss-imports/preview/', opml_views.OpmlPreviewView.as_view(), name='rss-opml-preview'),

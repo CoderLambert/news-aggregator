@@ -12,6 +12,7 @@ import os
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
+import json
 import miniflux
 import requests
 
@@ -231,18 +232,41 @@ class _BoundedSession(requests.Session):
 
     def _bound(self, response, **kwargs):
         try:
-            if response.status_code >= 300:
-                status = response.status_code
-                code = {401: "authentication", 403: "forbidden", 404: "not_found", 429: "rate_limited"}.get(status, "upstream_http")
-                raise EngineError(code, retryable=status == 429 or status >= 500,
-                                  unknown_result=status >= 500,
-                                  retry_after=_retry_after(response.headers.get("Retry-After")))
             chunks, size = [], 0
             for chunk in response.iter_content(chunk_size=65536):
                 size += len(chunk)
                 if size > self.limit:
                     raise EngineError("response_too_large")
                 chunks.append(chunk)
+            if response.status_code >= 300:
+                status = response.status_code
+                # Native 2.3.3 returns this fixed wrapper after CreateFeed has
+                # returned a parser error, before CreateFeed(store). A complete
+                # JSON receipt proves this request ended. Never persist its text.
+                if status == 500 and response.request.method == 'POST' and urlsplit(response.request.url).path == '/v1/feeds':
+                    try:
+                        body = json.loads(b''.join(chunks))
+                        message = body.get('error_message') if isinstance(body, dict) else None
+                        # Fixed native fetcher errors also precede Feed insertion.
+                        # Exact matches only: diagnostics, timeouts and arbitrary
+                        # 5xx bodies still require reconciliation, never resend.
+                        final_fetch = {
+                            'fetcher: resource not found (404 status code)': 'feed_source_not_found',
+                            'fetcher: access forbidden (403 status code)': 'feed_source_forbidden',
+                            'fetcher: unauthorized (401 status code)': 'feed_source_auth_required',
+                            'fetcher: not authorized (401 status code)': 'feed_source_auth_required',
+                            'fetcher: service unavailable (503 status code)': 'feed_source_unavailable',
+                        }
+                        if isinstance(message,str) and message in final_fetch:
+                            raise EngineError(final_fetch[message])
+                        if isinstance(message, str) and message.startswith('rss: unable to parse feed:'):
+                            raise EngineError('feed_parse_failed')
+                    except (ValueError, UnicodeError):
+                        pass
+                code = {401: "authentication", 403: "forbidden", 404: "not_found", 429: "rate_limited"}.get(status, "upstream_http")
+                raise EngineError(code, retryable=status == 429 or status >= 500,
+                                  unknown_result=status >= 500,
+                                  retry_after=_retry_after(response.headers.get("Retry-After")))
             response._content = b"".join(chunks)
             response._content_consumed = True
             return response
@@ -350,6 +374,9 @@ class EngineAdapter:
             raise EngineError('full_content_disabled')
         canonical_url = _url(canonical_url)
         policy = self._policy(desired_mode, disabled, None, published_since)
+        from api.rss.rsshub import credentials
+        try: policy.update(credentials(canonical_url))
+        except ValueError as exc: raise EngineError(getattr(exc,'code','rsshub_auth_unavailable')) from None
         self._identity()
         # Also handles a replay following process death before its result was saved.
         matches = [feed for feed in self.list_feeds() if feed.feed_url == canonical_url]

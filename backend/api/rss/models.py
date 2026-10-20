@@ -26,6 +26,11 @@ class FeedBinding(models.Model):
     account_id = models.PositiveBigIntegerField()
     engine_feed_id = models.PositiveBigIntegerField(null=True, blank=True)
     canonical_feed_url = models.URLField(max_length=1024)
+    # Engine-discovered same-origin redirect, independently audited. The original
+    # registration URL/instance/account remain the binding identity anchor.
+    rsshub_alias = models.CharField(max_length=1024,blank=True,default='')
+    rsshub_gateway_version = models.CharField(max_length=64,blank=True,default='')
+    effective_feed_url = models.URLField(max_length=1024, blank=True, default='')
     desired_mode = models.CharField(max_length=24, choices=choices('feed', 'full_content'), default='feed')
     desired_enabled = models.BooleanField(default=False)
     # Immutable initialization lower bound, enforced by Miniflux before extraction.
@@ -50,6 +55,7 @@ class FeedBinding(models.Model):
 
 class SourcePublication(models.Model):
     source = models.OneToOneField('api.Source', primary_key=True, on_delete=models.PROTECT, related_name='publication')
+    requires_public_membership = models.BooleanField(default=False)
     publication = models.CharField(max_length=16, choices=choices('public', 'personal'), default='personal')
     display_name = models.CharField(max_length=255, blank=True, default='')
     # Existing static/dynamic policy vocabulary is retained; policy resolution is T11.
@@ -165,6 +171,7 @@ class FeedOperation(models.Model):
     entry = models.ForeignKey(EngineEntryMap, null=True, blank=True, on_delete=models.PROTECT, related_name='operations')
     # Only fixed action parameters; validation/redaction belongs to the service.
     safe_input = models.JSONField(default=dict, blank=True)
+    user_intent_version = models.PositiveBigIntegerField(default=1)
     intent_version = models.PositiveBigIntegerField(default=1)
     dedupe_key = models.CharField(max_length=128)
     request_hash = models.CharField(max_length=64)
@@ -175,6 +182,14 @@ class FeedOperation(models.Model):
     lease_epoch = models.PositiveBigIntegerField(default=0)
     lease_until = models.DateTimeField(null=True, blank=True)
     safe_result = models.JSONField(default=dict, blank=True)
+    # Missing is deliberate: migrations cannot prove whether an old request ran.
+    execution_phase = models.CharField(max_length=24, default='missing', choices=choices(
+        'missing', 'not_sent', 'possibly_sent', 'final_response'))
+    dispatched_at = models.DateTimeField(null=True, blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolution = models.JSONField(default=dict, blank=True)
+    recovery_of = models.ForeignKey('self', null=True, blank=True, on_delete=models.PROTECT, related_name='recoveries')
+    resolved_by = models.ForeignKey('self', null=True, blank=True, on_delete=models.PROTECT, related_name='resolved_operations')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -254,3 +269,25 @@ class RSSInitialization(models.Model):
     class Meta:
         constraints = [models.UniqueConstraint(fields=['engine_instance_uuid', 'account_id', 'manifest_version'],
             name='rss_initialize_once')]
+
+
+class FeedVerificationBatch(models.Model):
+    """Owner-scoped submission audit. Progress is derived from linked operations."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    dedupe_key = models.CharField(max_length=128)
+    request_hash = models.CharField(max_length=64)
+    targets = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['actor', 'dedupe_key'], name='rss_verify_batch_dedupe')]
+
+
+class FeedVerificationItem(models.Model):
+    batch = models.ForeignKey(FeedVerificationBatch, on_delete=models.PROTECT, related_name='items')
+    source = models.ForeignKey('api.Source', null=True, on_delete=models.PROTECT)
+    binding = models.ForeignKey(FeedBinding, null=True, on_delete=models.PROTECT)
+    operation = models.ForeignKey(FeedOperation, null=True, on_delete=models.PROTECT)
+    status = models.CharField(max_length=16, default='accepted')
+    reason = models.CharField(max_length=64, blank=True)

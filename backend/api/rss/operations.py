@@ -48,7 +48,15 @@ def sqlite_retry(fn):
     return wrapped
 
 
-def canonicalize_feed_url(value):
+def canonicalize_feed_url(value, *, resolve_rsshub=True):
+    if resolve_rsshub:
+        from api.rss.rsshub import selection
+        resolved=selection(value)
+        if resolved is not None:
+            # Namespace parameters may legitimately contain opaque IDs. Generic
+            # RSSHub has its own structure/credential gate and fixed origin.
+            try: return _url(resolved.url)
+            except EngineError: raise OperationError("invalid_public_url") from None
     try:
         normalized = _url(value)  # Same identity as engine FeedDTOs; DNS/redirect safety remains engine/deployment.
     except EngineError:
@@ -67,6 +75,15 @@ def canonicalize_feed_url(value):
     return normalized
 
 
+def rsshub_fields(url):
+    from api.rss.rsshub import selection
+    chosen=selection(url)
+    if chosen is None: return {}
+    from datetime import timedelta
+    return {'rsshub_alias':chosen.alias,'rsshub_gateway_version':chosen.version,
+        'published_since':timezone.now().date()-timedelta(days=7)}
+
+
 @sqlite_retry
 def get_or_create_binding(engine_instance_uuid, account_id, feed_url, desired_mode='feed'):
     if desired_mode not in {'feed', 'full_content'} or type(account_id) is not int or not 0 < account_id <= MAX_ID:
@@ -76,7 +93,17 @@ def get_or_create_binding(engine_instance_uuid, account_id, feed_url, desired_mo
     with transaction.atomic():
         # Write first: SQLite ignores select_for_update and read→write upgrades race.
         FeedBinding.objects.filter(**identity).update(updated_at=F('updated_at'))
-        binding, _ = FeedBinding.objects.get_or_create(**identity, defaults={'desired_mode': desired_mode})
+        # A separately proven redirect is an alias of the existing physical
+        # binding, never a new subscription/visibility grant.
+        aliases = FeedBinding.objects.filter(engine_instance_uuid=identity['engine_instance_uuid'],
+            account_id=account_id, effective_feed_url=identity['canonical_feed_url'])
+        alias = aliases.first()
+        if alias:
+            if aliases.exclude(pk=alias.pk).exists() or FeedBinding.objects.filter(**identity).exclude(pk=alias.pk).exists():
+                raise OperationError('policy_conflict')
+            binding = alias
+        else:
+            binding, _ = FeedBinding.objects.get_or_create(**identity, defaults={'desired_mode': desired_mode, **rsshub_fields(identity['canonical_feed_url'])})
         if binding.desired_mode != desired_mode:
             raise OperationError('policy_conflict')
         return binding
@@ -90,6 +117,16 @@ def effective_references(binding_id):
         return True
     if links.filter(enabled=True, source__channel_subscriptions__isnull=False).exists():
         return True
+    from api.rss.review_models import PublicFeedCandidate
+    from api.rss.review_permissions import assert_review_authority
+    from rest_framework.exceptions import PermissionDenied
+    candidate = PublicFeedCandidate.objects.filter(binding_id=binding_id,state='approved').select_related('decision__actor').first()
+    if candidate and candidate.decision_id and candidate.decision.candidate_version == candidate.version:
+        try:
+            assert_review_authority(candidate.decision.actor,candidate.decision.authority)
+            return True
+        except PermissionDenied:
+            pass
     return FeedOperation.objects.filter(binding_id=binding_id, actor__is_active=True,
         safe_input__subscription_request__isnull=False,
         state__in=['pending', 'running', 'retry_wait', 'unknown', 'manual_blocked']).exists()
@@ -161,7 +198,7 @@ def enqueue_operation(kind, *, actor, dedupe_key, binding=None, entry=None, sour
             entry = EngineEntryMap.objects.get(pk=entry.pk)
             inputs = {'fence': refetch_fence(entry, source_id, actor.pk if actor else None)}
         return FeedOperation.objects.create(**scope, kind=kind, binding=binding, entry=entry,
-            safe_input=inputs, intent_version=version, request_hash=request_hash)
+            safe_input=inputs, intent_version=version, request_hash=request_hash, execution_phase='not_sent')
 
 
 def get_operation_for_actor(actor, operation_id):
@@ -215,7 +252,7 @@ def cancel_operation(actor, operation_id):
         uncertain = operation.state in {'running', 'unknown'} or operation.safe_result.get('outcome_unknown', False)
         scope.update(state='cancelled', lease_epoch=F('lease_epoch') + 1, lease_token=None,
             lease_until=None, next_attempt=timezone.now() if uncertain else None,
-            safe_result={'cancelled': True, 'outcome_unknown': bool(uncertain)})
+            safe_result={**operation.safe_result, 'cancelled': True, 'outcome_unknown': bool(uncertain)})
         updated = scope.get()
         if 'subscription_request' in updated.safe_input and updated.binding_id:
             reconcile_binding(updated.binding_id)
@@ -242,6 +279,11 @@ def reconcile_binding(binding_id):
             binding = query.get()
             _cancel_old_refetches(binding)
         if binding.applied_policy_version == binding.policy_version and binding.connection_state == ('ready' if enabled else 'paused'):
+            return None
+        # An administrative recovery owns this policy version until the next
+        # explicit submission. Never create a parallel convergence/retry loop.
+        if FeedOperation.objects.filter(binding=binding, intent_version=binding.policy_version,
+                safe_input__admin_recovery__isnull=False, resolved_at__isnull=True).exclude(state='succeeded').exists():
             return None
         return enqueue_operation('register' if binding.engine_feed_id is None and enabled else 'set_enabled',
             actor=None, binding=binding, dedupe_key=f'converge:{binding.pk}:{binding.policy_version}')
@@ -303,3 +345,9 @@ def acknowledge_refetch(operation_id, request_hash, *, sync_status='accepted', r
             result['revision'] = str(revision)
         query.update(safe_result=result)
         return True
+
+
+def unresolved_control_operations(binding_id):
+    from django.db.models import Q
+    return FeedOperation.objects.filter(binding_id=binding_id, kind__in=['register', 'set_enabled', 'update_feed_policy'],
+        resolved_at__isnull=True).filter(Q(state__in=['unknown', 'manual_blocked']) | Q(safe_result__outcome_unknown=True)).exclude(state='succeeded')

@@ -90,6 +90,10 @@ def resolve_candidate_token(user, token):
 def resolve_input(user, value):
     from api.rss.operations import enqueue_operation
     url = normalize_input(value)
+    from api.rss.rsshub import selection
+    chosen=selection(url)
+    if chosen is not None:
+        return 200, {'operation_id':'','state':'succeeded','kind':'feed','feed_url':chosen.alias}
     # Serialize quota and dedupe decisions on SQLite before reading operations.
     get_user_model().objects.filter(pk=user.pk).update(last_login=F('last_login'))
     now = timezone.now()

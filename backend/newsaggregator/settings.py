@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import json
 import os
 from pathlib import Path
 
@@ -298,3 +299,11 @@ LOGGING = {
         'django': {'level': 'WARNING', 'handlers': ['console'], 'propagate': False},
     },
 }
+
+# Operator-owned JSON, no secrets: credentials are read only by the RSS Worker.
+try:
+    RSSHUB_GATEWAY = json.loads(os.environ.get('RSSHUB_GATEWAY_CONFIG', '{}'))
+except (ValueError, TypeError):
+    raise ImproperlyConfigured('RSSHUB_GATEWAY_CONFIG must be a JSON object.') from None
+if not isinstance(RSSHUB_GATEWAY,dict):
+    raise ImproperlyConfigured('RSSHUB_GATEWAY_CONFIG must be a JSON object.')

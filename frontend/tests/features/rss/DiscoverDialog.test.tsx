@@ -5,7 +5,7 @@ import type { ComponentProps } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import DiscoverDialog from '@/features/rss/DiscoverDialog'
 import { workspaceRequest } from '@/services/workspaceApi'
-vi.mock('@/services/workspaceApi', () => ({ workspaceRequest: vi.fn(), workspaceError: () => '操作未完成，请重试。' }))
+vi.mock('@/services/workspaceApi', async importOriginal => ({ ...await importOriginal<typeof import('@/services/workspaceApi')>(), workspaceRequest: vi.fn(), workspaceError: () => '操作未完成，请重试。' }))
 const request = vi.mocked(workspaceRequest)
 beforeEach(() => {
   vi.clearAllMocks()
@@ -348,3 +348,27 @@ describe('RSS discovery and subscription', () => {
   })
 })
 
+
+it('recognizes rsshub aliases and refreshes viewer home queries after connection', async () => {
+  request.mockImplementation(async path => path.startsWith('/rss/directory/') ? {results:[],next_cursor:null} : path === '/categories/' ? [{id:3,name:'人工智能'}] : path === '/me/rss-subscriptions/' ? {operation_id:'hub-op',state:'pending',subscription:null} : {state:'succeeded',result:{}})
+  const client=new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}})
+  const invalidate=vi.spyOn(client,'invalidateQueries')
+  setup({},client)
+  search('rsshub://twitter/user/elonmusk')
+  expect(await screen.findByText(/已识别为 RSSHub/)).toBeInTheDocument()
+  await screen.findByRole('option',{name:'人工智能'})
+  fireEvent.change(await screen.findByRole('combobox',{name:'频道分类（用于首页筛选）'}),{target:{value:'3'}})
+  fireEvent.click(screen.getByRole('button',{name:'确认订阅'}))
+  await waitFor(()=>expect(request).toHaveBeenCalledWith('/me/rss-subscriptions/',expect.objectContaining({body:{feed_url:'rsshub://twitter/user/elonmusk',group_ids:[],category_id:3}})))
+  await screen.findByText('来源已连接，首次文章同步将在后台完成。')
+  await waitFor(()=>expect(invalidate.mock.calls.some(([options])=>JSON.stringify(options?.queryKey).includes('sources'))).toBe(true))
+  expect(invalidate.mock.calls.some(([options])=>JSON.stringify(options?.queryKey).includes('viewerId'))).toBe(true)
+})
+it('uses server selection for a configured HTTPS RSSHub gateway without discovery credentials', async () => {
+  request.mockImplementation(async path => path.startsWith('/rss/directory/') ? {results:[],next_cursor:null} : path === '/rss/discovery/resolve/' ? {state:'succeeded',operation_id:'',kind:'feed',feed_url:'rsshub://twitter/user/elonmusk'} : path === '/categories/' ? [] : {state:'succeeded',result:{}})
+  setup()
+  search('https://feeds.example.com/twitter/user/elonmusk')
+  expect(await screen.findByText(/已识别为 RSSHub/)).toBeInTheDocument()
+  expect(screen.getByRole('button',{name:'确认订阅'})).toBeEnabled()
+  expect(request.mock.calls.some(([path])=>path.startsWith('/me/rss-operations/'))).toBe(false)
+})

@@ -71,8 +71,9 @@ function Directory() {
   }
   const allSelected = filtered.length > 0 && selectedVisible.length === filtered.length
   return <div className="workspace-page">
+    {user?.isSuperuser && <Link className="workspace-link" to="/admin/rss/channels">处理待核验频道</Link>}
     <header className="workspace-page-heading"><div><p className="workspace-eyebrow">你的信息来源</p><h1>频道管理</h1><p>发现并订阅优质来源，用主题与分组构建自己的资讯流。</p></div>
-      <div className="workspace-actions">{config.enabled && <button type="button" className="workspace-button secondary" onClick={() => setImporting(true)}>导入 / 导出</button>}{config.accounts && <Link className="workspace-button secondary" to="/channels/smart"><Sparkles size={16} aria-hidden="true" />智能整理</Link>}
+      <div className="workspace-actions">{user && <Link className="workspace-button secondary" to="/channels/additions">添加记录</Link>}{config.enabled && <button type="button" className="workspace-button secondary" onClick={() => setImporting(true)}>导入 / 导出</button>}{config.accounts && <Link className="workspace-button secondary" to="/channels/smart"><Sparkles size={16} aria-hidden="true" />智能整理</Link>}
         {config.accounts && <button type="button" className="workspace-button" onClick={() => user ? setAdding(true) : setLogin(true)}><Plus size={16} aria-hidden="true" />添加频道</button>}</div>
     </header>
     {config.enabled && user && <ConnectionStatus viewer={user.id} admin={user.isSuperuser} />}

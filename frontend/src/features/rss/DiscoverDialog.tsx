@@ -1,16 +1,19 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import WorkspaceModal from '@/components/workspace/WorkspaceModal'
 import { workspaceRequest, workspaceError } from '@/services/workspaceApi'
+import { fetchReviewCategories, rssReviewKey } from '@/services/rssReviewApi'
+import { verificationError } from '@/services/rssAdminApi'
+import { refreshRssViews } from '@/features/rss/queryRefresh'
 import type { ChannelGroup } from '@/types/channels'
 
 interface Candidate { url: string; title: string; candidate_token: string }
-interface Discovery { operation_id: string; state: string; candidates?: Candidate[]; error_code?: string; retryable?: boolean }
+interface Discovery { kind?: 'feed'; feed_url?: string; operation_id: string; state: string; candidates?: Candidate[]; error_code?: string; retryable?: boolean }
 interface DirectoryEntry { id: string; name: string; description: string; kind: string; public_url: string; executable: boolean; subscribed: boolean; cached_articles: { id: number; title: string }[] }
 interface Operation { state: string; result: Discovery & { code?: string } }
 interface SubscriptionResult { operation_id: string; state: string; subscription: { name: string } | null }
 type Selection = { feed_url: string } | { candidate_token: string } | { directory_entry_id: string }
-interface SubscriptionRequest { selected: Selection; groupIds: number[]; idempotencyKey: string }
+interface SubscriptionRequest { selected: Selection; groupIds: number[]; categoryId?: number; idempotencyKey: string }
 interface DiscoverDialogProps { viewer: number; groups: ChannelGroup[]; onClose: () => void; onDone: () => void }
 const terminal = new Set(['succeeded', 'failed', 'cancelled', 'manual_blocked'])
 
@@ -36,15 +39,23 @@ function DiscoverySession({ viewer, groups, onClose, onDone }: DiscoverDialogPro
   const [submittedInput, setSubmittedInput] = useState('')
   const [selection, setSelection] = useState<Selection | null>(null)
   const [groupIds, setGroupIds] = useState<number[]>([])
+  const [categoryId, setCategoryId] = useState('')
+  const categories = useQuery({ queryKey: [...rssReviewKey(viewer), 'categories'], queryFn: ({ signal }) => fetchReviewCategories(signal), enabled: !!selection, retry: false })
+  const active = useRef(true)
+  const refreshed = useRef('')
+  useEffect(() => { active.current = true; return () => { active.current = false } }, [])
   const idempotency = useRef(crypto.randomUUID())
   const choose = (value: Selection) => { setSelection(value); idempotency.current = crypto.randomUUID(); subscribe.reset() }
   const directory = useQuery({ queryKey: ['private', 'rss-directory', viewer, query], enabled: mode === 'directory', retry: false,
     queryFn: ({ signal }) => workspaceRequest<{ results: DirectoryEntry[]; next_cursor: string | null }>(`/rss/directory/?q=${encodeURIComponent(query)}`, { signal }) })
-  const subscribe = useMutation({ retry: false, mutationFn: ({ selected, groupIds: chosenGroups, idempotencyKey }: SubscriptionRequest) => workspaceRequest<SubscriptionResult>('/me/rss-subscriptions/', {
-    method: 'POST', viewer, idempotencyKey, body: { ...selected, group_ids: chosenGroups },
-  }), onSuccess: () => { void client.invalidateQueries({ queryKey: ['channels'] }); void client.invalidateQueries({ queryKey: ['workspace'] }); void client.invalidateQueries({ queryKey: ['private', 'rss-subscriptions', viewer] }) } })
+  const subscribe = useMutation({ retry: false, mutationFn: ({ selected, groupIds: chosenGroups, categoryId: chosenCategory, idempotencyKey }: SubscriptionRequest) => workspaceRequest<SubscriptionResult>('/me/rss-subscriptions/', {
+    method: 'POST', viewer, idempotencyKey, body: { ...selected, group_ids: chosenGroups, ...(chosenCategory ? { category_id: chosenCategory } : {}) },
+  }), onSuccess: () => { if (active.current) void refreshRssViews(client, viewer) } })
   const resolve = useMutation({ retry: false, mutationFn: (value: string) => workspaceRequest<Discovery>('/rss/discovery/resolve/', { method: 'POST', viewer, body: { input: value } }),
-    onSuccess: () => setSelection(null) })
+    onSuccess: result => {
+      if (result.kind === 'feed' && result.feed_url) { setMode('feed'); choose({ feed_url: result.feed_url }) }
+      else setSelection(null)
+    } })
   const discovery = useQuery({ queryKey: ['private', 'rss-discovery', viewer, resolve.data?.operation_id],
     enabled: mode === 'website' && !!resolve.data?.operation_id && !terminal.has(resolve.data.state) && !subscribe.data,
     retry: false, refetchOnWindowFocus: false,
@@ -55,10 +66,18 @@ function DiscoverySession({ viewer, groups, onClose, onDone }: DiscoverDialogPro
     retry: false, refetchOnWindowFocus: false,
     queryFn: ({ signal }) => workspaceRequest<Operation>(`/me/rss-operations/${subscribe.data!.operation_id}/`, { signal }),
     refetchInterval: result => result.state.error || (result.state.data && terminal.has(result.state.data.state)) ? false : 1500 })
+  useEffect(() => {
+    const id = subscribe.data?.operation_id
+    const state = connection.data?.state ?? subscribe.data?.state
+    if (id && state && terminal.has(state) && refreshed.current !== `${id}:${state}` && active.current) {
+      refreshed.current = `${id}:${state}`
+      void refreshRssViews(client, viewer)
+    }
+  }, [connection.data?.state, subscribe.data?.state, subscribe.data?.operation_id, client, viewer])
   const busy = resolve.isPending || subscribe.isPending
   const discovering = !!resolve.data && !terminal.has(result?.state ?? 'pending')
   return <WorkspaceModal title="添加订阅" onClose={subscribe.data ? onDone : onClose} busy={busy}>
-    <p className="workspace-muted">输入关键词、网站或公开 RSS 地址，自动查找可订阅来源。无需选择接入方式。</p>
+    <p className="workspace-muted">默认仅加入我的订阅，公开推荐需要另行提交。</p><p className="workspace-muted">输入关键词、网站或公开 RSS 地址，自动查找可订阅来源。无需选择接入方式。</p>
     {!subscribe.data && <>
       <form className="workspace-inline-form" onSubmit={event => {
         event.preventDefault()
@@ -67,7 +86,9 @@ function DiscoverySession({ viewer, groups, onClose, onDone }: DiscoverDialogPro
         setSubmittedInput(value)
         setSelection(null)
         subscribe.reset()
-        if (!looksLikeWebAddress(value)) {
+        if (/^rsshub:\/\//i.test(value)) {
+          setMode('feed'); resolve.reset(); choose({ feed_url: value })
+        } else if (!looksLikeWebAddress(value)) {
           setMode('directory')
           resolve.reset()
           setQuery(value)
@@ -81,12 +102,12 @@ function DiscoverySession({ viewer, groups, onClose, onDone }: DiscoverDialogPro
         }
       }}>
         <label className="workspace-grow">搜索订阅源、网站或 RSS 地址
-          <input type="text" required value={input} disabled={busy} placeholder="GitHub、react.dev 或 https://example.com/feed.xml" onChange={event => {
+          <input type="text" required value={input} disabled={busy} placeholder="RSS 地址、rsshub://freecomputerbooks 或网站" onChange={event => {
             setInput(event.target.value); setSubmittedInput(''); setSelection(null); resolve.reset(); subscribe.reset()
           }} />
         </label><button className="workspace-button" disabled={busy || !input.trim()}>查找订阅</button>
       </form>
-      {mode === 'feed' && selection && <p className="workspace-caption">已识别为 RSS 地址。确认后由服务器校验公开 HTTPS 来源并交给 Miniflux 订阅，不会在浏览器抓取网页。</p>}
+      {mode === 'feed' && selection && <p className="workspace-caption">{'feed_url' in selection && /^rsshub:\/\//i.test(selection.feed_url) ? '已识别为 RSSHub 路由，将交给站点 RSSHub 实例连接；无需预先加入频道目录。' : '已识别为 RSS 地址。'}确认后由服务器校验公开 HTTPS 来源并交给 Miniflux 订阅，不会在浏览器抓取网页。</p>}
       {mode === 'directory' && (submittedInput === input.trim()) && <section aria-label="目录搜索结果">
         {directory.isPending && <p role="status">正在读取目录…</p>}
         {directory.data?.results.length === 0 && <p role="status">没有匹配的来源。可以尝试网站地址或直接添加 RSS。</p>}
@@ -113,11 +134,13 @@ function DiscoverySession({ viewer, groups, onClose, onDone }: DiscoverDialogPro
           <span><strong>{candidate.title || candidate.url}</strong><small className="break-all">{candidate.url}</small></span>
         </label>)}
       </section>}
+      {selection && <label>频道分类（用于首页筛选）<select aria-label="频道分类（用于首页筛选）" value={categoryId} disabled={busy} onChange={event => { setCategoryId(event.target.value); idempotency.current = crypto.randomUUID() }}><option value="">沿用原文章分类</option>{categories.data?.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}</select><small>仅影响我的频道筛选，与下方多选分组独立。</small></label>}
       {selection && <section><p role="status">已选择订阅，请确认分组。</p><fieldset><legend>加入我的分组（可多选）</legend>
         {groups.length ? groups.map(group => <label className="workspace-resolved-choice" key={group.id}><input type="checkbox" disabled={busy} checked={groupIds.includes(group.id)} onChange={event => { subscribe.reset(); idempotency.current = crypto.randomUUID(); setGroupIds(ids => event.target.checked ? [...ids, group.id] : ids.filter(id => id !== group.id)) }} />{group.name}</label>) : <p className="workspace-caption">暂无分组，订阅后可在频道管理中整理。</p>}
       </fieldset></section>}
     </>}
-    {subscribe.data && <section aria-live="polite"><p>{subscribe.data.subscription ? `已订阅：${subscribe.data.subscription.name}` : '连接请求已保存，验证成功后加入我的订阅'}</p>
+    {subscribe.data && <section aria-live="polite"><a className="workspace-link" href="/channels/additions">在添加记录中持续查看进度</a><p>{subscribe.data.subscription ? `已订阅：${subscribe.data.subscription.name}` : '连接请求已保存，验证成功后加入我的订阅'}</p>
+      {connection.data?.state === 'failed' && connection.data.result?.code && <p role="alert">{verificationError(connection.data.result.code)}</p>}
       <p>{connection.error ? '暂时无法读取连接状态，请稍后核对。' : connection.data?.state === 'succeeded' ? '来源已连接，首次文章同步将在后台完成。' : connection.data && terminal.has(connection.data.state) ? '连接尚未完成，请在频道管理查看状态。' : '正在后台连接来源…'}</p></section>}
     {!subscribe.data && mode === 'directory' && submittedInput === input.trim() && directory.error && <p role="alert" className="workspace-error">目录读取失败：{workspaceError(directory.error)}
       <button type="button" className="workspace-link" disabled={busy || directory.isFetching} onClick={() => { void directory.refetch({ cancelRefetch: false }) }}>重新加载目录</button>
@@ -135,7 +158,7 @@ function DiscoverySession({ viewer, groups, onClose, onDone }: DiscoverDialogPro
       <button type="button" className="workspace-link" disabled={connection.isFetching} onClick={() => { void connection.refetch({ cancelRefetch: false }) }}>重新读取连接状态</button>
     </p>}
     <footer className="workspace-modal-actions"><button type="button" className="workspace-button secondary" disabled={busy} onClick={subscribe.data ? onDone : onClose}>{subscribe.data ? '完成' : '取消'}</button>
-      {!subscribe.data && <button type="button" className="workspace-button" disabled={busy || !selection} onClick={() => { if (selection) subscribe.mutate({ selected: selection, groupIds, idempotencyKey: idempotency.current }) }}>{subscribe.isPending ? '保存中…' : '确认订阅'}</button>}
+      {!subscribe.data && <button type="button" className="workspace-button" disabled={busy || !selection} onClick={() => { if (selection) subscribe.mutate({ selected: selection, groupIds, ...(categoryId ? { categoryId: Number(categoryId) } : {}), idempotencyKey: idempotency.current }) }}>{subscribe.isPending ? '保存中…' : '确认订阅'}</button>}
     </footer>
   </WorkspaceModal>
 }

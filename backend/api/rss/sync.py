@@ -33,9 +33,11 @@ def _binding_snapshot(binding):
         'source__name', 'source__url', 'source__region'))
     configs = list(SourceConfig.objects.filter(source_id__in=[x[0] for x in links]).order_by('source_id').values_list(
         'source_id', 'config_version', 'approved_config_version', 'status', 'category_id', 'content_kind'))
+    from api.rss.review_models import PublicFeedCandidate
+    candidate = list(PublicFeedCandidate.objects.filter(binding=binding).values_list('pk','version','state'))
     return (binding.pk, binding.policy_version, binding.applied_policy_version,
             binding.desired_enabled, binding.connection_state, binding.desired_mode, links, configs,
-            str(binding.engine_instance_uuid), binding.account_id, binding.engine_feed_id, binding.published_since)
+            str(binding.engine_instance_uuid), binding.account_id, binding.engine_feed_id, binding.published_since, candidate,binding.rsshub_alias,binding.rsshub_gateway_version)
 
 
 def _news_snapshot(news):
@@ -152,6 +154,11 @@ def commit_entry(dto, fence, *, reserve):
             raise StaleWrite('binding_or_source_changed')
         if binding is None:
             return _issue(dto, 'unmapped_feed')
+        if binding.rsshub_alias:
+            from api.rss.rsshub import assert_binding
+            from api.rss.operations import OperationError
+            try: assert_binding(binding)
+            except OperationError: raise StaleWrite('rsshub_configuration_changed') from None
         if not binding.desired_enabled or binding.connection_state != 'ready' or binding.policy_version != binding.applied_policy_version:
             return _issue(dto, 'binding_unready')
         links = fence.binding[6]
@@ -190,6 +197,10 @@ def commit_entry(dto, fence, *, reserve):
             policy = policy_for_name(Source.objects.get(pk=source[0]).name)
             category = config.category if config else (
                 Category.objects.filter(name=policy.default_category).first() if policy else None)
+            if category is None:
+                from api.rss.review_models import PublicFeedCandidate
+                reviewed = PublicFeedCandidate.objects.filter(binding=binding,state='published').select_related('category').first()
+                category = reviewed.category if reviewed else None
             category = category or Category.objects.filter(name='科技').first() or Category.objects.order_by('pk').first()
             if category is None:
                 return _issue(dto, 'source_category_missing')
@@ -242,6 +253,9 @@ def commit_entry(dto, fence, *, reserve):
         from api.rss.feed_policy import known_feed_content_kind
         kind = config.content_kind if config else (policy.content_kind if policy else
             known_feed_content_kind(binding.canonical_feed_url))
+        if binding.rsshub_alias:
+            from api.rss.rsshub_url import metadata
+            _,kind,_=metadata(binding.rsshub_alias)
         result = commit_body(token, converted, content_kind=kind,
             completeness='summary' if source[6] in {'summary_only', 'rss_summary_only'} else 'unknown')
         if result.status == 'stale':
@@ -251,6 +265,11 @@ def commit_entry(dto, fence, *, reserve):
         News.objects.filter(pk=news.pk).update(full_content_provenance=provenance)
         if result.status == 'rejected':
             _issue(dto, result.reason)
+        from api.rss.public_membership import record_public_entry, dto_evidence
+        for candidate_id, candidate_version, candidate_state in fence.binding[12]:
+            if candidate_state == 'published':
+                record_public_entry(candidate_id,mapping.pk,expected_version=candidate_version,
+                    evidence=dto_evidence(dto,summary,published=published,inferred=inferred))
         return result
 
 

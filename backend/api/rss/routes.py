@@ -18,6 +18,8 @@ STATES = ('open', 'closed', 'all')
 ISSUE_TEMPLATE = '/github/issue/:user/:repo/:state?/:labels?'
 TRENDING_TEMPLATE = '/github/trending/:since/:language/:spoken_language?'
 TEMPLATES = MappingProxyType({
+    'twitter.user': {'path': '/twitter/user/:id', 'content_kind': 'article', 'required': ('id',),
+                     'capabilities': ('config:TWITTER_AUTH_TOKEN', 'twitter.public_only'), 'parameters': ('id',)},
     'github.issue': {'path': ISSUE_TEMPLATE, 'content_kind': 'issue', 'required': ('user', 'repo'),
                      'capabilities': (), 'parameters': ('user', 'repo', 'state')},
     'github.trending': {'path': TRENDING_TEMPLATE, 'content_kind': 'repository', 'required': ('since', 'language'),
@@ -78,7 +80,12 @@ def render_route(template_id, parameters):
     _require(set(parameters) <= set(spec['parameters']), 'unsupported_route_parameter')
     _require(all(key in parameters for key in spec['required']), 'missing_route_parameter')
     values = {key: _text(value) for key, value in parameters.items()}
-    if template_id == 'github.issue':
+    if template_id == 'twitter.user':
+        handle=values['id']
+        _require(re.fullmatch(r'[A-Za-z0-9_]{1,15}',handle), 'invalid_twitter_user')
+        path='/twitter/user/'+handle.lower()
+        canonical={'id':handle.lower()}
+    elif template_id == 'github.issue':
         user, repo = _user(values['user']), _repo(values['repo'])
         state = values.get('state', 'open')
         _require(state in STATES, 'invalid_issue_state')
@@ -99,6 +106,12 @@ def render_route(template_id, parameters):
 
 def parse_alias(value):
     value = _text(value)
+    if value.lower().startswith('rsshub://twitter/'):
+        parsed=urlsplit(value)
+        _require(parsed.netloc=='twitter' and not parsed.query and not parsed.fragment,'invalid_route_alias')
+        parts=parsed.path.split('/')
+        _require(len(parts)==3 and parts[1]=='user','unsupported_route')
+        return render_route('twitter.user',{'id':parts[2]})
     _require(value.startswith('rsshub://github/'), 'unsupported_route')
     parsed = urlsplit(value)
     _require(parsed.scheme == 'rsshub' and parsed.netloc == 'github'
@@ -143,6 +156,10 @@ class GatewayConfig:
     # must be public-only and each issue repository explicitly approved.
     approved_repositories: tuple = ()
     image: str = RSSHUB_IMAGE
+    runtime_verified: bool = False
+    runtime_version: int = 0
+    approved_routes: tuple = ()
+    verified_capabilities: tuple = ()
 
     def __post_init__(self):
         object.__setattr__(self, 'origin', _origin(self.origin))
@@ -202,6 +219,10 @@ def gateway_request(url, config):
     """
     route = match_gateway_target(url, config)
     _require(config.enabled, 'gateway_disabled')
+    if (config.runtime_verified is True and type(config.runtime_version) is int and config.runtime_version>0
+            and route.template_id in config.approved_routes
+            and set(route.public()['capability_requirements'])<=set(config.verified_capabilities)):
+        return GatewayRequest(route.alias,url,config.secret_ref)
     approved = LIVE_APPROVALS.get((config.origin, route.template_id))
     _require(approved == (SOURCE_COMMIT, config.image), 'gateway_unverified')
     return GatewayRequest(route.alias, url, config.secret_ref)

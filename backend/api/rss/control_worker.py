@@ -9,6 +9,7 @@ from datetime import timedelta
 import re
 import time
 import uuid
+from urllib.parse import urlsplit
 
 from django.db import connection, transaction
 from django.db.models import Case, F, Q, Value, When
@@ -18,6 +19,27 @@ from api.rss.engine import EngineAdapter, EngineError, PolicyBinding
 from api.rss.models import EngineEntryMap, FeedBinding, FeedOperation
 from api.rss.operations import (OperationError, effective_references, reconcile_binding,
                                refetch_fence, sqlite_retry)
+
+
+def _review_fence(operation):
+    from rest_framework.exceptions import PermissionDenied
+    from api.rss.review_permissions import assert_review_authority
+    inputs = operation.safe_input
+    recovery = inputs.get('admin_recovery', {})
+    expected = inputs.get('review_target', {}).get('authority') or recovery.get('authority')
+    try:
+        if expected:
+            assert_review_authority(operation.actor, expected)
+        elif recovery and not FeedOperation.objects.filter(pk=operation.pk,actor__is_active=True,actor__is_superuser=True).exists():
+            raise PermissionDenied()
+        target = inputs.get('review_target')
+        if target:
+            from api.rss.recommendations import candidates
+            if not candidates().filter(pk=target['candidate_id'],version=target['version'],state__in=['pending','approved']).exists():
+                raise PermissionDenied()
+    except PermissionDenied:
+        raise OperationError('review_authority_changed') from None
+
 
 
 @dataclass(frozen=True)
@@ -40,6 +62,7 @@ class Request:
     cancelled: bool
     applied: bool
     entry_url_block_rules: str = ''
+    effective_url: str = ''
 
 
 @dataclass
@@ -73,7 +96,7 @@ class ControlWorker:
         ready |= Q(state='running', lease_until__lte=now)
         scope = Q(binding__isnull=True) | Q(binding__engine_instance_uuid=self.config.engine_instance_uuid,
                                            binding__account_id=self.config.account_id)
-        candidates = list(FeedOperation.objects.filter(ready & scope).annotate(priority=Case(
+        candidates = list(FeedOperation.objects.filter(ready & scope, resolved_at__isnull=True).annotate(priority=Case(
             When(state='running', then=Value(0)), When(state__in=['unknown', 'cancelled'], then=Value(1)),
             default=Value(2))).order_by('priority', 'created_at')[:20])
         for old in candidates:
@@ -99,6 +122,7 @@ class ControlWorker:
         operation = self._owned(claim, timezone.now()).select_related('binding', 'entry').first()
         if not operation:
             return None
+        _review_fence(operation)
         binding = operation.binding
         cancelled = bool(operation.safe_result.get('cancelled'))
         if binding:
@@ -108,9 +132,9 @@ class ControlWorker:
             # A different unsettled mutation fences new physical writes.
             unsettled = FeedOperation.objects.filter(binding=binding).exclude(pk=operation.pk).filter(
                 Q(state='unknown') | Q(safe_result__outcome_unknown=True,
-                    state__in=['manual_blocked', 'cancelled'])).filter(
+                    state__in=['manual_blocked', 'cancelled'])).filter(resolved_at__isnull=True).filter(
                         kind__in=['register', 'set_enabled', 'update_feed_policy'])
-            if unsettled.exists() and not claim.reconcile:
+            if unsettled.exists() and not claim.reconcile and 'admin_recovery' not in operation.safe_input:
                 raise EngineError('binding_outcome_unknown', retryable=True)
             if operation.intent_version != binding.policy_version:
                 if (not claim.reconcile and 'subscription_request' in operation.safe_input
@@ -146,7 +170,8 @@ class ControlWorker:
             binding.canonical_feed_url if binding else operation.safe_input['url'],
             operation.entry.engine_entry_id if operation.entry_id else None,
             operation.safe_input, cancelled, applied, required_entry_url_block_rules(include_database=True,
-                include_html=bool(binding and binding.desired_mode == 'full_content')))
+                include_html=bool(binding and binding.desired_mode == 'full_content')),
+            binding.effective_feed_url if binding else '')
 
     def _dispatch(self, request):
         """Last main-thread ORM fence; executor receives immutable data only.
@@ -154,6 +179,8 @@ class ControlWorker:
         No queue behind a busy control slot, no publisher request inside a DB
         transaction. After dispatch, a policy change cannot retract remote I/O.
         """
+        if not self._owned(request.claim, timezone.now()).exists():
+            raise OperationError('stale_fence')
         if request.binding_id:
             from api.rss.feed_policy import assert_binding_policy
             binding = FeedBinding.objects.get(pk=request.binding_id)
@@ -163,11 +190,19 @@ class ControlWorker:
                     or binding.canonical_feed_url != request.url):
                 raise OperationError('stale_policy')
             assert_binding_policy(binding, enabled=binding.desired_enabled)
+            if 'admin_recovery' in request.inputs:
+                _review_fence(FeedOperation.objects.select_related('actor').get(pk=request.claim.operation_id))
+                from api.rss.admin_verification import binding_snapshot
+                if binding_snapshot(binding) != request.inputs['admin_recovery']['snapshot']:
+                    raise OperationError('stale_fence')
             if request.kind == 'refetch_entry' and not request.claim.reconcile:
                 operation = FeedOperation.objects.select_related('entry').get(pk=request.claim.operation_id)
                 if refetch_fence(operation.entry, request.inputs['fence']['source_id'], operation.actor_id) != request.inputs['fence']:
                     raise OperationError('stale_fence')
         from api.rss.feed_policy import required_entry_url_block_rules
+        if not self._owned(request.claim, timezone.now()).update(
+                execution_phase='possibly_sent', dispatched_at=timezone.now()):
+            raise OperationError('stale_fence')
         return replace(request, entry_url_block_rules=required_entry_url_block_rules(include_database=True,
             include_html=bool(request.policy and request.policy.desired_mode == 'full_content')))
 
@@ -200,11 +235,47 @@ class ControlWorker:
                     for row in rows[:20]]
                 return Outcome({'candidates': candidates})
             policy = request.policy
+            effective_url = request.effective_url or request.url
             if request.kind in {'register', 'set_enabled', 'update_feed_policy'}:
-                if request.applied and not request.claim.reconcile:
+                if request.applied and not request.claim.reconcile and 'admin_recovery' not in request.inputs:
                     return Outcome({'connected': bool(policy.engine_feed_id)})
                 feed_id = policy.engine_feed_id
-                if request.claim.reconcile:
+                if 'admin_recovery' in request.inputs:
+                    feeds = adapter.list_feeds()
+                    matches = [f for f in feeds if f.feed_url in {request.url, effective_url}]
+                    if not matches and any(urlsplit(f.feed_url).netloc == urlsplit(request.url).netloc for f in feeds):
+                        # Delegate redirect/discovery to Miniflux. Exactly one
+                        # same-origin advertised URL may explain an existing feed;
+                        # hostname resemblance alone is never evidence.
+                        try:
+                            candidates = adapter.discover(request.url)
+                        except EngineError:
+                            candidates = []  # Read-only discovery never grants creation authority.
+                        from api.rss.operations import canonicalize_feed_url
+                        urls = {canonicalize_feed_url(row['url']) for row in candidates}
+                        if len(urls) == 1:
+                            target = next(iter(urls))
+                            if urlsplit(target).netloc == urlsplit(request.url).netloc:
+                                effective_url = target
+                                matches = [f for f in feeds if f.feed_url == target]
+                    if len(matches) > 1:
+                        raise EngineError('identity_conflict', unknown_result=True)
+                    if matches:
+                        candidate = matches[0]
+                        if (str(candidate.engine_instance_uuid) != policy.engine_instance_uuid
+                                or candidate.account_id != policy.account_id
+                                or (feed_id is not None and candidate.id != feed_id)):
+                            raise EngineError('identity_mismatch', unknown_result=True)
+                        feed_id = candidate.id
+                    elif (not request.claim.reconcile and request.inputs['admin_recovery']['allow_create']
+                            and feed_id is None):
+                        kwargs = {'desired_mode': policy.desired_mode, 'disabled': not policy.desired_enabled}
+                        if policy.published_since:
+                            kwargs['published_since'] = policy.published_since
+                        feed_id = adapter.create_feed(request.url, **kwargs).id
+                    else:
+                        raise EngineError('create_outcome_unproven', unknown_result=True)
+                elif request.claim.reconcile:
                     if request.kind != 'register':
                         if feed_id:
                             adapter.get_feed(feed_id)
@@ -212,7 +283,7 @@ class ControlWorker:
                         # blocklist_rules and keeplist_rules. Matching flags
                         # alone cannot prove this complete approved policy.
                         raise EngineError('policy_outcome_unproven', unknown_result=True)
-                    matches = [f for f in adapter.list_feeds() if f.feed_url == request.url]
+                    matches = [f for f in adapter.list_feeds() if f.feed_url in {request.url, effective_url}]
                     if len(matches) != 1:
                         raise EngineError('create_outcome_unproven', retryable=True, unknown_result=True)
                     feed_id = matches[0].id
@@ -233,10 +304,11 @@ class ControlWorker:
                 if (receipt.applied_policy_version != policy.policy_version
                         or str(feed.engine_instance_uuid) != policy.engine_instance_uuid
                         or feed.account_id != policy.account_id or feed.id != feed_id
-                        or feed.feed_url != request.url or feed.disabled == policy.desired_enabled
+                        or feed.feed_url not in {request.url, effective_url} or feed.disabled == policy.desired_enabled
                         or feed.crawler != (policy.desired_mode == 'full_content')):
                     raise EngineError('policy_unconfirmed', unknown_result=True)
-                return Outcome({'connected': True, 'feed_id': str(feed.id)}, feed=feed)
+                return Outcome({'connected': True, 'feed_id': str(feed.id),
+                    **({'effective_feed_url': feed.feed_url} if feed.feed_url != request.url else {})}, feed=feed)
             if request.kind == 'refresh_feed':
                 if request.claim.reconcile:
                     adapter.get_feed(policy.engine_feed_id)
@@ -267,7 +339,7 @@ class ControlWorker:
         except (EngineError, OperationError) as exc:
             return Outcome(error=exc)
         except Exception:
-            return Outcome(error=EngineError('worker_internal'))
+            return Outcome(error=EngineError('worker_internal', unknown_result=request.kind in {'register', 'set_enabled', 'update_feed_policy', 'refetch_entry'}))
         finally:
             adapter.close()
 
@@ -281,6 +353,11 @@ class ControlWorker:
             operation = query.get()
             binding = FeedBinding.objects.get(pk=request.binding_id) if request.binding_id else None
             error = outcome.error
+            if binding and binding.rsshub_alias and (request.kind=='register' or request.policy.desired_enabled):
+                from api.rss.rsshub import assert_binding
+                try: assert_binding(binding)
+                except OperationError:
+                    error=EngineError('rsshub_configuration_changed',unknown_result=True)
             if binding and effective_references(binding.pk) != binding.desired_enabled:
                 reconcile_binding(binding.pk)
                 binding.refresh_from_db()
@@ -297,6 +374,27 @@ class ControlWorker:
                         raise OperationError('stale_fence')
                 except OperationError as exc:
                     error = exc
+            try:
+                _review_fence(operation)
+            except OperationError:
+                error = EngineError('review_authority_changed', unknown_result=True)
+            if binding and 'admin_recovery' in request.inputs:
+                from api.rss.admin_verification import binding_snapshot
+                if binding_snapshot(binding) != request.inputs['admin_recovery']['snapshot']:
+                    error = EngineError('stale_remote_outcome_unknown', unknown_result=True)
+            if not error and outcome.feed and FeedBinding.objects.filter(
+                    engine_instance_uuid=binding.engine_instance_uuid, account_id=binding.account_id,
+                    engine_feed_id=outcome.feed.id).exclude(pk=binding.pk).exists():
+                error = EngineError('identity_conflict', unknown_result=True)
+            if not error and outcome.feed and outcome.feed.feed_url != request.url:
+                from api.rss.feed_policy import approved_feed_policy, SUMMARY_POLICIES
+                try:
+                    admission = approved_feed_policy(outcome.feed.feed_url)
+                    if ((binding.desired_mode == 'full_content' and not admission.full_content_allowed)
+                            or admission.reading_policy in SUMMARY_POLICIES):
+                        raise OperationError('source_collection_not_permitted')
+                except OperationError:
+                    error = EngineError('redirect_policy_unconfirmed', unknown_result=True)
             cancelled = request.cancelled
             if error:
                 code = error.code if re.fullmatch('[a-z0-9_]{1,64}', str(error.code)) else 'upstream_error'
@@ -324,10 +422,20 @@ class ControlWorker:
                         connection_state='ready' if binding.desired_enabled else 'paused', last_error='')
                     if outcome.feed:
                         fields['engine_feed_id'] = outcome.feed.id
+                        if outcome.feed.feed_url != request.url:
+                            fields['effective_feed_url'] = outcome.feed.feed_url
                     FeedBinding.objects.filter(pk=binding.pk, policy_version=request.policy.policy_version).update(**fields)
+            if state == 'succeeded' and 'admin_recovery' in request.inputs:
+                FeedOperation.objects.filter(binding=binding, resolved_at__isnull=True,
+                    kind__in=['register', 'set_enabled', 'update_feed_policy']).exclude(pk=operation.pk).exclude(
+                        state__in=['pending', 'running', 'retry_wait', 'succeeded']).update(
+                            resolved_at=now, resolved_by=operation, resolution={'reason': 'unique_feed_confirmed'})
             if state == 'succeeded' and binding and request.kind in {'register', 'set_enabled'}:
                 from api.rss.subscriptions import complete_subscription
                 complete_subscription(operation)
+            if not error or (not request.claim.reconcile and isinstance(error, EngineError)
+                    and not error.unknown_result and error.code != 'binding_outcome_unknown'):
+                query.update(execution_phase='final_response')
             query.update(state=state, safe_result=result, next_attempt=next_attempt,
                          lease_token=None, lease_until=None, updated_at=now)
             if binding:

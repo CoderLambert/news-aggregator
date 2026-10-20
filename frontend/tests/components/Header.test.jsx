@@ -40,7 +40,7 @@ describe('Header navigation menu', () => {
     subscribed.unmount()
 
     renderHeader(['/admin/crawlers'])
-    expect(screen.getByLabelText('系统管理：爬虫管理控制台')).toBeInTheDocument()
+    expect(screen.getByLabelText('系统管理：RSS 与搜索管理')).toBeInTheDocument()
   })
 
   it('keeps the menu button inside while handling its real pointer toggle sequence', () => {

@@ -50,12 +50,16 @@ def news_in_sources(queryset, sources):
     V1 all-entry manifests are executable here. Unknown metadata filters fail
     closed until their reviewed SQL membership implementation is supplied.
     """
-    legacy = NewsSourceItem.objects.filter(news_id=OuterRef('pk'), source_key__in=_legacy_keys(sources))
+    from api.rss.public_membership import public_entries_for_sources
+    regular = sources.exclude(publication__requires_public_membership=True)
+    legacy = NewsSourceItem.objects.filter(news_id=OuterRef('pk'), source_key__in=_legacy_keys(regular))
     engine = EngineEntryMap.objects.filter(news_id=OuterRef('pk'), disposition='linked',
-        binding__source_links__source_id__in=sources.values('pk'),
+        binding__source_links__source_id__in=regular.values('pk'),
         binding__source_links__association_policy=ALL_ENTRIES)
-    return queryset.alias(_rss_legacy_member=Exists(legacy), _rss_engine_member=Exists(engine)).filter(
-        Q(source_id__in=sources.values('pk')) | Q(_rss_legacy_member=True) | Q(_rss_engine_member=True))
+    explicit = public_entries_for_sources(sources).filter(entry__news_id=OuterRef('pk'))
+    return queryset.alias(_rss_legacy_member=Exists(legacy), _rss_engine_member=Exists(engine),
+        _rss_public_member=Exists(explicit)).filter(Q(source_id__in=regular.values('pk')) |
+            Q(_rss_legacy_member=True) | Q(_rss_engine_member=True) | Q(_rss_public_member=True))
 
 
 def authorized_news(user, queryset=None):
@@ -64,11 +68,15 @@ def authorized_news(user, queryset=None):
 
 def article_sources(user, news):
     """Authorized channels only; callers must not expose a private primary source."""
+    from api.rss.public_membership import public_entries_for_sources
+    sources = authorized_sources(user)
     keys = set(news.source_items.values_list('source_key', flat=True))
     legacy_names = [p.name for p in POLICIES.values() if p.key in keys]
     links = SourceFeedLink.objects.filter(binding__entry_maps__news_id=news.pk,
         binding__entry_maps__disposition='linked', association_policy=ALL_ENTRIES).values('source_id')
-    return authorized_sources(user).filter(Q(pk=news.source_id) | Q(name__in=legacy_names) | Q(pk__in=links)).order_by('pk')
+    public = public_entries_for_sources(sources).filter(entry__news_id=news.pk).values('source_id')
+    return sources.filter(Q(publication__requires_public_membership=False) &
+        (Q(pk=news.source_id) | Q(name__in=legacy_names) | Q(pk__in=links)) | Q(pk__in=public)).order_by('pk')
 
 
 def body_authorized_news(user, queryset=None):
@@ -213,12 +221,15 @@ def prepare_article_previews(user, articles):
     all_keys = set().union(*keys_by_news.values())
     names = [policy.name for policy in POLICIES.values() if policy.key in all_keys]
     sources = list(authorized_sources(user).filter(Q(pk__in=source_ids) | Q(name__in=names)).select_related('publication'))
+    from api.rss.public_membership import public_entries_for_sources
+    explicit_pairs = set(public_entries_for_sources(authorized_sources(user)).filter(entry__news_id__in=ids).values_list('entry__news_id','source_id')) if any(source.publication.requires_public_membership for source in sources) else set()
     policy_keys = {policy.name: policy.key for policy in POLICIES.values()}
     snapshots = {}
     for article in articles:
-        visible = [source for source in sources if source.pk == article.source_id
+        visible = [source for source in sources if (article.pk, source.pk) in explicit_pairs
+                   or (not source.publication.requires_public_membership and (source.pk == article.source_id
                    or source.pk in engine_sources.get(article.pk, set())
-                   or policy_keys.get(source.name) in keys_by_news[article.pk]]
+                   or policy_keys.get(source.name) in keys_by_news[article.pk]))]
         if not visible or (grants is not None and article.pk not in grants):
             raise Http404
         visible.sort(key=lambda source: source.pk)
@@ -244,4 +255,9 @@ def with_authorized_source_counts(user, sources):
         Q(engine_entries__disposition='linked', engine_entries__binding__source_links__source_id=OuterRef('pk'),
           engine_entries__binding__source_links__association_policy=ALL_ENTRIES)
     ).order_by().values(_group=Value(1)).annotate(n=Count('pk', distinct=True)).values('n')
-    return sources.annotate(rss_news_count=Coalesce(Subquery(members, output_field=IntegerField()), Value(0)))
+    from api.rss.public_membership import public_entries_for_sources
+    public_counts = public_entries_for_sources(Source.objects.all()).filter(source_id=OuterRef('pk'),
+        entry__news_id__in=authorized_news(user).values('pk')).order_by().values(_group=Value(1)).annotate(n=Count('entry__news_id',distinct=True)).values('n')
+    return sources.annotate(rss_news_count=Case(When(publication__requires_public_membership=True,
+        then=Coalesce(Subquery(public_counts, output_field=IntegerField()), Value(0))),
+        default=Coalesce(Subquery(members, output_field=IntegerField()), Value(0)),output_field=IntegerField()))

@@ -1,0 +1,27 @@
+# Disposable only: real Miniflux and real RSSHub, no production state.
+services:
+  db:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: proxy_lab
+      POSTGRES_USER: proxy_lab
+      POSTGRES_PASSWORD: synthetic-proxy-lab-only
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U proxy_lab]
+      interval: 1s
+      retries: 40
+  miniflux:
+    image: miniflux/miniflux:2.3.3
+    depends_on:
+      db: {condition: service_healthy}
+    environment:
+      DATABASE_URL: postgres://proxy_lab:synthetic-proxy-lab-only@db/proxy_lab?sslmode=disable
+      RUN_MIGRATIONS: '1'
+      CREATE_ADMIN: '1'
+      ADMIN_USERNAME: synthetic_admin
+      ADMIN_PASSWORD: synthetic-proxy-lab-admin
+      POLLING_FREQUENCY: '999999'
+      LOG_LEVEL: error
+    networks:
+      default: {}

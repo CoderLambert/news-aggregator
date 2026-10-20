@@ -1,0 +1,16 @@
+{
+  "scope": "real RSSHub GitHub + real Miniflux2.3.3; synthetic users/DB",
+  "alias_https_single_feed": true,
+  "article_count": 1,
+  "published_since": "2026-10-13",
+  "personal_category_owner_isolation": true,
+  "feed_only": true,
+  "native_private_blocked": true,
+  "proxy_other_host_blocked": true,
+  "gateway_unapproved_path_blocked": true,
+  "upstream_redirect_blocked": true,
+  "twitter": "SKIPPED at user request",
+  "instance": "022c2659-c582-49d6-8309-70a715c43c2d",
+  "account": 3,
+  "source_id": 59
+}

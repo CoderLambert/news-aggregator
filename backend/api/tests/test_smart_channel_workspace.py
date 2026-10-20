@@ -1,3 +1,5 @@
+import os
+from unittest.mock import patch as env_patch
 import json
 import uuid
 from datetime import timedelta
@@ -19,6 +21,7 @@ from api.services.channel_ai import parse_classification, claim_next, execute_jo
 @override_settings(PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
 class SmartChannelTests(TestCase):
     def setUp(self):
+        self.enterContext(env_patch.dict(os.environ, {'RSS_ENGINE_INSTANCE_UUID': 'be22a55a-11c1-4ae4-9038-c919ec75aa42', 'RSS_ENGINE_ACCOUNT_ID': '3'}))
         cache.clear()
         self.user = User.objects.create_user('smart-reader', password='Test-reader-123')
         self.other = User.objects.create_user('other-smart-reader')
@@ -386,6 +389,8 @@ class SmartChannelTests(TestCase):
         self.assertFalse(any(s['id'] == self.news.pk for s in stories))
 
     def test_feed_resolution_is_catalog_only_and_has_no_network_side_effect(self):
+        from api.rss.models import FeedBinding
+        FeedBinding.objects.filter(source_links__source=self.source).update(canonical_feed_url='https://react.dev/rss.xml')
         response = self.client.post('/api/smart-channels/resolve/', {'url': 'https://react.dev/rss.xml'}, format='json')
         self.assertTrue(response.data['supported'])
         count = Source.objects.count()

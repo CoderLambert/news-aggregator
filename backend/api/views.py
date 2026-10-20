@@ -1,3 +1,4 @@
+from api.rss.review_permissions import rss_capabilities
 import logging
 
 from django.db.models import Count, Q
@@ -1505,6 +1506,7 @@ def auth_register(request):
         'id': user.pk,
         'username': user.username,
         'is_superuser': user.is_superuser,
+        'rss_capabilities': rss_capabilities(user),
     }, status=status.HTTP_201_CREATED)
 
 
@@ -1550,6 +1552,7 @@ def auth_login(request):
         'id': user.pk,
         'username': user.username,
         'is_superuser': user.is_superuser,
+        'rss_capabilities': rss_capabilities(user),
     })
 
 
@@ -1571,6 +1574,7 @@ def auth_me(request):
         'id': request.user.pk,
         'username': request.user.username,
         'is_superuser': request.user.is_superuser,
+        'rss_capabilities': rss_capabilities(request.user),
     })
 
 

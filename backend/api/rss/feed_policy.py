@@ -155,9 +155,19 @@ def _decide(url, policies, *, publications=()):
     return FeedAdmission(mode, reading, kind, allowed, reason)
 
 
+def _gateway_policy(url,decision):
+    from api.rss.rsshub import selection
+    chosen=selection(url)
+    if chosen is None: return decision
+    from api.rss.rsshub_url import metadata
+    template,kind,_=metadata(chosen.alias)
+    reading=decision.reading_policy if decision.reading_policy in SUMMARY_POLICIES else ('public_feed' if kind=='article' and template else 'rss_summary_only')
+    return FeedAdmission('feed',reading,kind,False,'rsshub_feed_only')
+
+
 def approved_feed_policy(feed_url):
     url = _canonical(feed_url)
-    return _decide(url, _policies_for_url(url))
+    return _gateway_policy(url,_decide(url, _policies_for_url(url)))
 
 
 def assert_binding_policy(binding, *, desired_mode=None, enabled=True):
@@ -191,7 +201,12 @@ def assert_binding_policy(binding, *, desired_mode=None, enabled=True):
             if not config.approval_is_current or config.status not in {'approved', 'enabled'}:
                 raise OperationError('source_collection_not_permitted')
             policies.append(policy_from_config(config))
-    decision = _decide(url, policies, publications=publications)
+    from api.rss.rsshub import selection
+    if binding.rsshub_alias:
+        selected=selection(binding.rsshub_alias)
+        if selected.url!=binding.canonical_feed_url or selected.version!=binding.rsshub_gateway_version:
+            raise OperationError('rsshub_configuration_changed')
+    decision = _gateway_policy(url,_decide(url, policies, publications=publications))
     if (desired_mode or binding.desired_mode) == 'full_content':
         if not full_content_enabled():
             raise OperationError('full_content_disabled')

@@ -1,3 +1,5 @@
+import os
+from unittest.mock import patch as env_patch
 from api.tests.rss.legacy_fixtures import legacy_news, public_legacy
 from unittest.mock import patch
 from django.contrib.auth.models import User
@@ -12,6 +14,7 @@ from api.tests.rss.reader_fixtures import public_rss_source
 @override_settings(PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
 class ChannelsTests(TestCase):
     def setUp(self):
+        self.enterContext(env_patch.dict(os.environ, {'RSS_ENGINE_INSTANCE_UUID': 'be22a55a-11c1-4ae4-9038-c919ec75aa42', 'RSS_ENGINE_ACCOUNT_ID': '3'}))
         self.user = User.objects.create_user('channel-reader', password='test-pass-123')
         self.other = User.objects.create_user('other-reader')
         self.client = APIClient()

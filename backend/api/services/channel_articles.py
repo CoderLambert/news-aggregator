@@ -73,7 +73,14 @@ def category_filter(queryset, category_ids, *, actor=None):
         disposition='linked',
         binding__source_links__association_policy={'version': 1, 'mode': 'all'},
         binding__source_links__source_id__in=sources.values('pk')).values('news_id')
-    return queryset.filter(Q(category_id__in=category_ids) | Q(pk__in=members) | Q(pk__in=engine_members))
+    from api.rss.public_membership import public_entries_for_sources
+    from api.models import ChannelSubscription,Source
+    from api.rss.access import news_in_sources
+    personal_ids=ChannelSubscription.objects.filter(user=actor,category_id__in=category_ids).values('source_id') if actor and actor.is_authenticated else []
+    personal_members=news_in_sources(queryset,Source.objects.filter(pk__in=personal_ids)).values('pk')
+    public_members = public_entries_for_sources(sources).filter(
+        source__public_candidate__category_id__in=category_ids).values('entry__news_id')
+    return queryset.filter(Q(category_id__in=category_ids) | Q(pk__in=members) | Q(pk__in=engine_members) | Q(pk__in=public_members) | Q(pk__in=personal_members))
 
 
 

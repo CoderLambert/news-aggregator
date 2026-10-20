@@ -36,6 +36,11 @@ class RssAPIView(APIView):
     def handle_exception(self, exc):
         from api.rss.operations import OperationError
         if isinstance(exc, OperationError):
+            from api.rss.rsshub import MESSAGES
+            if exc.code in MESSAGES:
+                exc = APIException(MESSAGES[exc.code],code=exc.code)
+                exc.status_code=400
+        if isinstance(exc, OperationError):
             if exc.code == 'not_found':
                 from rest_framework.exceptions import NotFound
                 exc = NotFound()

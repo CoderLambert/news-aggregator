@@ -1210,6 +1210,8 @@ class ResearchRunEvent(models.Model):
 
 
 class ChannelSubscription(models.Model):
+    category = models.ForeignKey(Category,null=True,blank=True,on_delete=models.SET_NULL,related_name='personal_channel_subscriptions')
+    category_version = models.PositiveBigIntegerField(default=0)
     user = models.ForeignKey('auth.User', on_delete=models.CASCADE, related_name='channel_subscriptions')
     source = models.ForeignKey(Source, on_delete=models.PROTECT, related_name='channel_subscriptions')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -1263,3 +1265,5 @@ class PrivateSuggestedQuestions(models.Model):
             fields=['user', 'news', 'source_hash', 'execution_digest', 'prompt_version'],
             name='private_suggestions_identity',
         )]
+
+from api.rss.review_models import (RssReviewerGrant, RssReviewerEvent, PublicFeedCandidate, PublicFeedSubmission, PublicFeedReviewEvent, PublicFeedEntry)  # noqa: E402,F401

@@ -6,7 +6,6 @@ import time
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from api.rss.http import RssAPIView
-from api.rss.models import FeedBinding
 from api.rss.subscriptions import engine_identity
 
 
@@ -33,6 +32,11 @@ class RssHealthView(RssAPIView):
         from api.rss.reconciliation import health_snapshot
         instance, account = engine_identity()
         health = health_snapshot(instance, account, current_runtime(instance, account))
-        health['connections'] = list(FeedBinding.objects.filter(engine_instance_uuid=instance, account_id=account)
-            .order_by('canonical_feed_url').values('id', 'canonical_feed_url', 'connection_state', 'desired_mode', 'desired_enabled')[:500])
+        from api.rss.admin_verification import source_status_queryset, STATUSES
+        from django.db.models import Count
+        counts = dict.fromkeys(STATUSES, 0)
+        for row in source_status_queryset().order_by().values('verification_status').annotate(total=Count('pk', distinct=True)):
+            counts[row['verification_status']] = row['total']
+        counts.update(pending=sum(counts[s] for s in ('unverified', 'failed', 'unknown')), all=sum(counts.values()))
+        health['verification_counts'] = counts
         return Response(health)

@@ -10,6 +10,9 @@ limit_req_zone $binary_remote_addr zone=newshub_rsshub:1m rate=30r/m;
 map $request_uri $newshub_rsshub_route {
     default 0;
     ~^/github/trending/(daily|weekly|monthly)/(any|python|javascript|typescript|rust|go|java|c|ruby|swift|kotlin|css|html|dart|zig|php|shell)(/(en|zh|ja|ko|de|fr|es|pt|ru))?$ 1;
+    # Enable Twitter in the application only after authenticating and verifying
+    # that the configured provider emits public timelines only.
+    ~^/twitter/user/[a-z0-9_]{1,15}$ 1;
     # Only this explicitly approved PUBLIC repository; add others after review.
     ~^/github/issue/DIYgod/RSSHub/(open|closed|all)$ 1;
 }

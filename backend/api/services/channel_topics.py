@@ -50,6 +50,9 @@ def digest(value):
 def channel_articles(source):
     # Match cross-source publisher articles only after verifying the current
     # source's canonical publisher domain. A name alone is not source identity.
+    if getattr(getattr(source, 'publication', None), 'requires_public_membership', False):
+        from api.rss.access import news_in_sources
+        return news_in_sources(News.objects.all(), Source.objects.filter(pk=source.pk))
     policy = verified_source_policy(source)
     query = Q(source=source)
     if policy:
@@ -132,9 +135,24 @@ def profile_data(source, stored=None):
         'metadata_status': ('stale_manual' if stale_manual else
             'needs_review' if needs_review else 'trusted'),
         'subscription_status': status, 'subscription_reason': reason, 'can_subscribe': status == 'active',
-        'rss_status': rss_status(source), 'feed_url': policy.feed_url if policy else '',
+        'rss_status': rss_status(source), 'feed_url': profile_feed_url(source, policy),
         'policy_key': policy.key if policy else '', 'reading_policy': publication.reading_policy if publication else 'summary_only',
         'updated_at': stored.updated_at.isoformat() if stored else None}
+
+
+def profile_feed_url(source, policy):
+    from api.rss.operations import canonicalize_feed_url, OperationError
+    from api.rss.subscriptions import EngineUnavailable
+    from api.services.channel_catalog import current_feed_links
+    try:
+        link = current_feed_links(source).select_related('binding').order_by('pk').first()
+    except EngineUnavailable:
+        link = None
+    value = (link.binding.effective_feed_url or link.binding.canonical_feed_url) if link else policy.feed_url if policy else ''
+    try:
+        return canonicalize_feed_url(value) if value else ''
+    except OperationError:
+        return ''
 
 
 def evidence_for(source):

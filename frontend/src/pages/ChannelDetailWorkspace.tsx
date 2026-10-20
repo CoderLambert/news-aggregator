@@ -5,6 +5,7 @@ import { ArrowLeft, ExternalLink } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { useChannelConfig, useChannelMutation } from '@/services/channelQueries'
 import { changeChannelSubscriptions } from '@/services/api'
+import { fetchReviewCategories, rssReviewKey } from '@/services/rssReviewApi'
 import AuthModal from '@/components/AuthModal'
 import { ChannelMark, TopicTags, Availability } from '@/components/workspace/ChannelIdentity'
 import { workspaceRequest, workspaceError, workspaceCatalogOptions, workspaceKeys, safeExternalUrl, originLabel, type ChannelProfile } from '@/services/workspaceApi'
@@ -30,6 +31,7 @@ function Profile({ id }: { id: number }) {
     onSuccess: () => { setEdit(null); void client.invalidateQueries({ queryKey: workspaceKeys.all }) } })
   const source = profile.data
   const subscription = (config.subscriptions.data ?? []).find(item => item.source_id === id)
+  const categories = useQuery({ queryKey: [...rssReviewKey(Number(viewer)), 'categories'], queryFn: ({ signal }) => fetchReviewCategories(signal), enabled: !!subscription })
   const memberNames = (config.groups.data ?? []).filter(group => subscription?.group_ids.includes(group.id)).map(group => group.name)
   if (!Number.isSafeInteger(id) || id <= 0) return <div className="workspace-empty"><h1>无效的频道地址</h1><Link to="/channels">返回频道管理</Link></div>
   return <div className="workspace-page">
@@ -41,9 +43,11 @@ function Profile({ id }: { id: number }) {
         {config.accounts && <button type="button" className={'workspace-button ' + (subscription ? 'subscribed' : '')} disabled={!!subscription || mutation.isPending || (!!user && (!config.ready || config.error)) || source.subscription_status !== 'active'}
           onClick={() => user ? mutation.mutate(() => changeChannelSubscriptions({ action: 'subscribe', source_ids: [id] })) : setLogin(true)}>{subscription ? '✓ 已订阅' : '+ 订阅频道'}</button>}
       </header>
+      {user?.isSuperuser && <Link className="workspace-link" to={'/admin/rss/channels?source=' + id}>查看频道核验详情</Link>}
       {mutation.isError && <p role="alert" className="workspace-error">订阅失败，请重试。</p>}
       <div className="workspace-profile-layout"><div>
         <section className="workspace-panel"><header className="workspace-panel-heading"><h2>频道资料</h2>{user?.isSuperuser && <button type="button" className="workspace-link" onClick={() => setEdit({ description: source.description, topics: [...source.topics] })}>编辑元信息</button>}</header>
+          {subscription && <label>频道分类（用于首页筛选）<select aria-label="频道分类（用于首页筛选）" value={subscription.category_id ?? ''} disabled={mutation.isPending || !categories.data} onChange={event => { const category_id = event.target.value ? Number(event.target.value) : null; mutation.mutate(() => changeChannelSubscriptions({ action: 'set_category', source_ids: [id], category_id, expected_version: subscription.category_version ?? 0 })) }}><option value="">沿用原文章分类</option>{categories.data?.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}</select><small>仅影响我的频道筛选，与我的分组独立；原文章分类保持不变。</small></label>}
           <dl className="workspace-metadata"><div><dt>地区 / 语言</dt><dd>{source.region === 'domestic' ? '国内' : '国际'} / {source.language === 'zh' ? '中文' : source.language === 'en' ? '英文' : source.language}</dd></div>
             <div><dt>来源类型</dt><dd>{{ news: '新闻媒体', aggregator: '聚合平台', discussion: '讨论社区' }[source.source_type] ?? source.source_type}</dd></div>
             <div><dt>主题依据</dt><dd>{originLabel[source.origin] ?? source.origin}</dd></div>

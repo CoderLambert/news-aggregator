@@ -6,6 +6,13 @@ PUBLISHER_COUNTRIES = {'bbc': 'UK', 'bbc_health': 'UK', 'deepmind': 'UK', 'mistr
                        'ithome_energy': 'CN', 'ifanr_energy': 'CN'}
 
 
+def current_feed_links(source):
+    from api.rss.subscriptions import engine_identity
+    instance, account = engine_identity()
+    return source.feed_links.filter(enabled=True, association_policy={'version': 1, 'mode': 'all'},
+        binding__engine_instance_uuid=instance, binding__account_id=account)
+
+
 def subscription_status(source):
     publication = getattr(source, 'publication', None)
     if publication is None or publication.owner == 'legacy':
@@ -14,7 +21,11 @@ def subscription_status(source):
         return 'inactive', (policy.unsupported_reason if policy else '') or 'legacy_ingestion_retired'
     if publication.owner != 'miniflux':
         return 'inactive', publication.pause_reason or 'paused'
-    links = source.feed_links.filter(enabled=True, association_policy={'version': 1, 'mode': 'all'})
+    from api.rss.subscriptions import EngineUnavailable
+    try:
+        links = current_feed_links(source)
+    except EngineUnavailable:
+        return 'inactive', 'engine_unavailable'
     verified = links.filter(binding__engine_feed_id__isnull=False,
         binding__connection_state__in=['ready', 'paused'],
         binding__applied_policy_version=F('binding__policy_version'))
@@ -22,7 +33,10 @@ def subscription_status(source):
     if verified.exists():
         from api.rss.feed_policy import assert_binding_policy
         from api.rss.operations import OperationError
+        from api.rss.operations import unresolved_control_operations
         for link in verified.select_related('binding'):
+            if unresolved_control_operations(link.binding_id).exists():
+                continue
             try:
                 assert_binding_policy(link.binding)
             except OperationError:
@@ -42,7 +56,7 @@ def rss_status(source):
     active, reason = subscription_status(source)
     if active == 'active':
         return 'ready'
-    return {'legacy_ingestion_retired': 'retired', 'unconfigured_source': 'unconfigured',
+    return {'legacy_ingestion_retired': 'retired', 'unconfigured_source': 'unconfigured', 'engine_unavailable': 'unconfigured',
             'feed_error': 'error', 'feed_outcome_unknown': 'unknown',
             'feed_verification_pending': 'pending'}.get(reason, 'paused')
 

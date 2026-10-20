@@ -23,7 +23,11 @@ function workspaceContextFor(pathname: string, search: string) {
     if (scope === 'group') return { section: '资讯流', title: '分组资讯' }
     return { section: '资讯流', title: '最新资讯' }
   }
-  if (pathname.startsWith('/admin/')) return { section: '系统管理', title: '爬虫管理控制台' }
+  if (pathname.startsWith('/channels/additions')) return { section: '我的订阅', title: '添加记录' }
+  if (pathname.startsWith('/admin/rss/recommendations')) return { section: '频道审核', title: '公开频道审核' }
+  if (pathname.startsWith('/admin/rss/reviewers')) return { section: '系统管理', title: '频道审核员' }
+  if (pathname.startsWith('/admin/rss/channels')) return { section: '系统管理', title: '频道核验' }
+  if (pathname.startsWith('/admin/')) return { section: '系统管理', title: 'RSS 与搜索管理' }
   if (pathname.startsWith('/channels/smart')) return { section: '频道管理', title: 'AI 智能整理' }
   if (pathname.startsWith('/channels/groups')) return { section: '频道管理', title: '分组管理' }
   if (pathname.startsWith('/channels/')) return { section: '频道管理', title: '频道详情' }
@@ -222,6 +226,7 @@ export default function Header() {
             <div className="my-1 border-t border-border" />
             <p className="px-3 pb-1 pt-2 text-xs font-medium text-muted-foreground">工具</p>
 
+            {accountsEnabled && !user?.isSuperuser && user?.rssCapabilities?.reviewPublicRss && <Button variant="ghost" className="h-11 w-full justify-start" asChild><Link to="/admin/rss/recommendations" onClick={() => setMenuOpen(false)}>频道审核</Link></Button>}
             {accountsEnabled && capabilities.features.admin.enabled && user?.isSuperuser ? (
               <Button variant={isCurrent('/admin') ? 'secondary' : 'ghost'} className="h-11 w-full justify-start" asChild>
                 <Link to="/admin/rss" aria-current={isCurrent('/admin') ? 'page' : undefined} onClick={() => setMenuOpen(false)}>

@@ -1,0 +1,61 @@
+{
+  "services": [
+    {
+      "name": "newshub-local-uat-app-1",
+      "running": true,
+      "health": "healthy",
+      "image_id": "sha256:8d5aa1fbcdc4a64aee3dc6724437db2d3b1a6508366d5ad8e45a78917f0482bf"
+    },
+    {
+      "name": "newshub-local-uat-rss-sync-1",
+      "running": true,
+      "health": "healthy",
+      "image_id": "sha256:8d5aa1fbcdc4a64aee3dc6724437db2d3b1a6508366d5ad8e45a78917f0482bf"
+    },
+    {
+      "name": "newshub-local-uat-miniflux-1",
+      "running": true,
+      "health": "healthy",
+      "image_id": "sha256:49d7b60987616387c306a8023087b31f2c9b7b21288b523026cb04058e8b6dbb"
+    },
+    {
+      "name": "newshub-local-uat-rsshub-1",
+      "running": true,
+      "health": "healthy",
+      "image_id": "sha256:1945d3162e0a6a38399bed540b623bbb06829ad3dc9160de7e7dfbaac60854ff"
+    },
+    {
+      "name": "newshub-local-uat-rsshub-gateway-1",
+      "running": true,
+      "health": "not-configured",
+      "image_id": "sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94"
+    },
+    {
+      "name": "newshub-local-uat-rsshub-proxy-1",
+      "running": true,
+      "health": "not-configured",
+      "image_id": "sha256:6a097f68bae708cedbabd6188d68c7e2e7a38cedd05a176e1cc0ba29e3bbe029"
+    }
+  ],
+  "instance": "3580d422-9b94-44db-a834-ca1255e00eb2",
+  "account": 2,
+  "rsshub_feed_id": 13,
+  "source_id": 74,
+  "article_count": 1,
+  "old_feed_ids_retained": [
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+  ],
+  "twitter": "SKIPPED",
+  "ci": "NOT_RUN",
+  "production": "NOT_RUN"
+}

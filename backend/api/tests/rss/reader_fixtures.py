@@ -25,12 +25,13 @@ def without_article_context(message):
 
 def public_rss_source(source):
     """A synthetic connected Miniflux source; does not run engine/network work."""
-    import uuid
+    from api.rss.subscriptions import engine_identity
+    instance, account = engine_identity()
     from api.rss.models import FeedBinding, SourceFeedLink
     SourcePublication.objects.update_or_create(source=source, defaults={
         'publication': 'public', 'owner': 'miniflux', 'reading_policy': 'standard'})
     if not SourceFeedLink.objects.filter(source=source).exists():
-        binding = FeedBinding.objects.create(engine_instance_uuid=uuid.uuid4(), account_id=1,
+        binding = FeedBinding.objects.create(engine_instance_uuid=instance, account_id=account,
             engine_feed_id=source.pk, canonical_feed_url=f'https://feed.example/{source.pk}',
             desired_enabled=True, connection_state='ready', applied_policy_version=1)
         SourceFeedLink.objects.create(source=source, binding=binding, enabled=True,

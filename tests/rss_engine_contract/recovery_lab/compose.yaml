@@ -1,0 +1,34 @@
+services:
+  db:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: recovery
+      POSTGRES_USER: recovery
+      POSTGRES_PASSWORD: synthetic-recovery-only
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U recovery]
+      interval: 1s
+      retries: 40
+  engine:
+    image: miniflux/miniflux:2.3.3
+    depends_on:
+      db: {condition: service_healthy}
+    environment:
+      DATABASE_URL: postgres://recovery:synthetic-recovery-only@db/recovery?sslmode=disable
+      RUN_MIGRATIONS: '1'
+      CREATE_ADMIN: '1'
+      ADMIN_USERNAME: synthetic_admin
+      ADMIN_PASSWORD: synthetic-recovery-admin
+      POLLING_FREQUENCY: '999999'
+      LOG_LEVEL: error
+      FETCHER_ALLOW_PRIVATE_NETWORKS: '1'
+      SSL_CERT_FILE: /certs/ca.pem
+    volumes: [./certs:/certs:ro]
+  fixture:
+    image: python:3.12.12-alpine3.22
+    command: [python, /fixture/server.py]
+    volumes: [./server.py:/fixture/server.py:ro, ./certs:/certs:ro]
+    networks:
+      default:
+        aliases: [fixture.example]

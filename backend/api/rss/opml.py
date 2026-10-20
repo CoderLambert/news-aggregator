@@ -249,7 +249,7 @@ def export_opml(user):
     groups = {}
     for subscription in ChannelSubscription.objects.filter(user=user).select_related('source__publication').prefetch_related('groups', 'source__feed_links__binding'):
         labels = list(subscription.groups.values_list('name', flat=True)) or [None]
-        urls = [link.binding.canonical_feed_url for link in subscription.source.feed_links.all()]
+        urls = [link.binding.rsshub_alias or link.binding.canonical_feed_url for link in subscription.source.feed_links.all()]
         if not urls:
             from api.services.source_policy import policy_for_name
             policy = policy_for_name(subscription.source.name)
@@ -257,8 +257,12 @@ def export_opml(user):
                 urls.append(policy.feed_url)
         for feed_url in dict.fromkeys(urls):
             try:
-                url = canonicalize_feed_url(feed_url)
-            except OperationError:
+                if feed_url.startswith('rsshub://'):
+                    from api.rss.rsshub_url import normalize_alias
+                    url=normalize_alias(feed_url)
+                else:
+                    url = canonicalize_feed_url(feed_url,resolve_rsshub=False)
+            except ValueError:
                 continue
             for label in labels:
                 parent = body
