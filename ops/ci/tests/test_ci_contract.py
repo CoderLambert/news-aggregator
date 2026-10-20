@@ -188,6 +188,8 @@ class SelfHostedCIContract(unittest.TestCase):
         self.assertIn("DJANGO_ALLOWED_HOSTS=news.lambert.host ", t00_run)
         self.assertNotIn("DJANGO_ALLOWED_HOSTS=testserver", t00_run)
         self.assertIn('T00_PROXY_PYTHON="$t00_env/proxy/bin/python"', t00_run)
+        self.assertIn('CHROMA_DATA_DIR="$t00_env/chroma"', t00_run)
+        self.assertIn('TTS_CACHE_DIR="$t00_env/tts"', t00_run)
         self.assertIn('trap \'rm -rf "$t00_env"\' EXIT', t00_run)
         self.assertNotIn("|| true", t00_run)
         self.assertNotIn("continue-on-error", str(t00_step))

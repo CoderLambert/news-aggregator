@@ -319,6 +319,11 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
     from django.conf import settings
     assert settings.DJANGO_ENV == "production"
     assert Path(database_connection.settings_dict["NAME"]).is_file()
+    # Production defaults point at /var/lib/newshub. This synthetic process
+    # must own all derived state as well as its disposable SQLite database.
+    private_root = Path(os.environ["TMPDIR"]).resolve()
+    assert Path(settings.CHROMA_DATA_DIR).resolve().is_relative_to(private_root)
+    assert Path(settings.TTS_CACHE_DIR).resolve().is_relative_to(private_root)
     with database_connection.cursor() as cursor:
         assert cursor.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     proxy_python = os.environ.get("T00_PROXY_PYTHON")

@@ -275,6 +275,7 @@ jobs:
             WAITRESS_TRUSTED_PROXY=127.0.0.1 \
             DJANGO_ALLOWED_HOSTS=news.lambert.host \
             DJANGO_DB_PATH="$t00_env/t04-django.sqlite3" AI_BYOK_ENABLED=1 \
+            CHROMA_DATA_DIR="$t00_env/chroma" TTS_CACHE_DIR="$t00_env/tts" \
             PROVIDER_CREDENTIAL_ENCRYPTION_KEY=CI-only-synthetic-provider-key-material \
             T00_PROXY_PYTHON="$t00_env/proxy/bin/python" PYTHONDONTWRITEBYTECODE=1 \
             backend/venv/bin/python -m pytest -c backend/pytest.ini \

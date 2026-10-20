@@ -65,4 +65,6 @@ READY 表示绑定及采集策略已确认，不等于所有文章均确认全�
 
 Runner 离线时，本轮只在确认没有 Worker、GitHub busy=false 且 DinD 无容器后，将 `newshub-ci` 三个现有容器的网络命名空间 eth0 MTU 从 1500 临时改为 1280，HTTP 恢复 200、Runner 恢复在线；未改宿主网络、认证或生产服务。Compose 原已声明 1280，本次未在作业运行时重建网络；现存容器重建前应遵循 CI README 的空闲窗口流程。
 
+首轮 Ready [CI #39431887139](https://github.com/CoderLambert/news-aggregator/actions/runs/39431887139) 的 frontend 已通过（706 PASS），另一个 [三轮矩阵 #39431887165](https://github.com/CoderLambert/news-aggregator/actions/runs/39431887165) 每轮 2045 PASS / 16 SKIP、2061 身份对账通过。完整 backend 在 T00 合成研究工具处失败：临时 SQLite 已隔离，但 Chroma 仍沿用生产 `/var/lib/newshub/chroma`，非 root Runner 返回 PermissionError。PR 退回 Draft 后，将 Chroma/TTS 显式绑定同一临时目录，并在 T04 入口核验派生路径归属；CI 契约先红后绿（50 PASS）。未放宽目录权限、研究授权或业务错误断言；须由后续修正提交的完整 CI 重新证明联合流程。
+
 最终合并必须满足 PR #158 最新 head、当前 base 的选中完整 frontend、backend-and-release-gates 和 merge-gate SUCCESS。真实来源/本地浏览器证据限于上述场景；其他历史规模、生产上线、真实模型及人工签署仍不在本次完成范围。
