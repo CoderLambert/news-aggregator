@@ -136,7 +136,7 @@ def test_compatible_probe_chat_translation_tools_and_bad_terminal(tmp_path, sett
             translation.run_translation(new_task.pk, new_task.generation)
             new_task.refresh_from_db()
             task.refresh_from_db()
-            assert new_task.status == 'succeeded' and new_task.model_id == 'other/model:tag'
+            assert new_task.status == 'succeeded' and new_task.execution_snapshot['model']['model_id'] == 'other/model:tag'
             assert task.result == original_result
             assert ChatGPTArticleTranslation.objects.filter(user=owner, news=article).count() == 2
             from api.services.research.byok_execution import capture_snapshot, call_model_once
