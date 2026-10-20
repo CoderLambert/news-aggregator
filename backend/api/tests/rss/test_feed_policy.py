@@ -251,12 +251,12 @@ def test_dynamic_allowed_domains_restrict_article_urls_not_only_feed_endpoint(wo
         assert_article_fetch_allowed('http://publisher.example/other-article')
 
 
-def test_global_gate_defaults_off_and_admin_cannot_bypass(user, settings, worker):
+def test_explicit_global_opt_out_and_admin_cannot_bypass(user, settings, worker):
     settings.RSS_FULL_CONTENT_ENABLED = False
     status, _ = subscribe(user, {'feed_url': URL}, 'closed')
     binding = FeedBinding.objects.get()
     assert status == 202 and binding.desired_mode == 'feed'
-    assert not CONFIG.__class__(INSTANCE, 3, 'http://engine:8080', 'synthetic').full_content_enabled
+    assert not CONFIG.__class__(INSTANCE, 3, 'http://engine:8080', 'synthetic', full_content_enabled=False).full_content_enabled
     with pytest.raises(OperationError, match='full_content_disabled'):
         change_policy(binding.pk, expected_policy_version=binding.policy_version, desired_mode='full_content')
     drain(worker[0])

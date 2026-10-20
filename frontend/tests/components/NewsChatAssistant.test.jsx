@@ -105,3 +105,13 @@ describe('NewsChatAssistant open state', () => {
   })
 
 })
+
+
+it.each([
+  ['unknown', '已获取内容，完整性未确认'],
+  ['summary', '仅摘要'],
+  ['verified', '已确认全文'],
+])('shows honest %s context status', (completeness, label) => {
+  render(<NewsChatAssistant newsId="19" open articleContext={{ hasFullContent: true, completeness }} />)
+  expect(screen.getByText(label)).toBeInTheDocument()
+})

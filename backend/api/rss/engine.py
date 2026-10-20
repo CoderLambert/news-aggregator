@@ -107,7 +107,7 @@ class EngineConfig:
     # Server-owned immutable snapshot only, never a browser/API field. Mandatory
     # static restrictions are also merged in _policy and cannot be cleared.
     server_entry_url_block_rules: str = field(default_factory=_server_entry_url_rules)
-    full_content_enabled: bool = False
+    full_content_enabled: bool = True
 
     @classmethod
     def from_environment(cls):
@@ -117,7 +117,7 @@ class EngineConfig:
                 token = handle.read(65537).strip()
             if not token or len(token) > 65536:
                 raise ValueError
-            enabled = os.environ.get('RSS_FULL_CONTENT_ENABLED', '0')
+            enabled = os.environ.get('RSS_FULL_CONTENT_ENABLED', '1')
             if enabled not in {'0', '1'}:
                 raise ValueError
             return cls(os.environ["RSS_ENGINE_INSTANCE_UUID"], int(os.environ["RSS_ENGINE_ACCOUNT_ID"]),

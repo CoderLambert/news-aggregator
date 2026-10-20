@@ -16,7 +16,7 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def people(settings, monkeypatch):
     settings.PUBLIC_SITE_MODE = 'full'
-    settings.RSS_FULL_CONTENT_ENABLED = True  # Positive controls; default-off cases live in test_feed_policy.
+    settings.RSS_FULL_CONTENT_ENABLED = True  # Positive controls; explicit opt-out cases live in test_feed_policy.
     monkeypatch.setenv('RSS_ENGINE_INSTANCE_UUID', str(uuid.uuid4()))
     monkeypatch.setenv('RSS_ENGINE_ACCOUNT_ID', '7')
     return get_user_model().objects.create_user('sub-a'), get_user_model().objects.create_user('sub-b')
