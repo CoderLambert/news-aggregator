@@ -8,6 +8,7 @@ import re
 
 from api.services.ai_gateway import ARTICLE_CHAT_SUPPORTED_ALIAS, PROVIDER_SPECS
 from api.services.ai_registry import profile_route_prefix
+from api.services.ai_endpoint_profiles import SERVICE_PRESETS
 
 CATALOG_VERSION = '2026-10-20.2'
 _MODEL_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,159}$')
@@ -40,10 +41,10 @@ def normalize_model_id(provider_id, raw):
     if '://' in raw or '..' in raw or '//' in raw or raw.lower().startswith(('sk-', 'ark-', 'aiza')):
         return None
     spec = PROVIDER_SPECS.get(provider_id)
-    if spec is None:
+    if spec is None and provider_id not in SERVICE_PRESETS:
         return None
-    prefix = spec['route_prefix'] + '/'
-    normalized = raw[len(prefix):] if raw.startswith(prefix) else raw
+    prefix = spec['route_prefix'] + '/' if spec else None
+    normalized = raw[len(prefix):] if prefix and raw.startswith(prefix) else raw
     return normalized if normalized and _MODEL_RE.fullmatch(normalized) else None
 
 
@@ -74,6 +75,9 @@ def get_trusted_route(connection, model_id):
         # These old identities did not pin a region. Keep their saved Key
         # inert; users must explicitly create a fixed regional connection.
         return None
+    if prefix.startswith('newshub/'):
+        return {'display_name': model_id[:64], 'proxy_alias': prefix + '/' + model_id,
+                'protocol_family': 'chat_completions_v1'}
     # OpenRouter uses provider/model names inside its own fixed route. Other
     # trusted providers accept a bare ID, not nested router directives.
     if connection.provider_id != 'openrouter' and not _BARE_MODEL_RE.fullmatch(model_id):
