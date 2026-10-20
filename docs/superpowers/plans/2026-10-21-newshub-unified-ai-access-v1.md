@@ -47,9 +47,9 @@
 **Files:** Modify `ops/shared-litellm-proxy/provider_key_guard.py`, config/compose/entrypoint；Create manifest generator、出站策略模块与 tests；extend `tools/byok_t00_probe`。
 **Interfaces:** Task 1 manifest → 静态 route 配置；ProviderKeyGuard 仅接受批准路由的 Key/none；校验 HTTP 连接目标；逐协议 terminal provenance。
 
-- [ ] 先测请求级 api_base/headers/proxy/fallback/retry 覆盖、DNS 重绑定、redirect、metadata、private、none 升级、站点 Key 继承，上游应 0 次。
-- [ ] 对 openai-compatible 原始完整/EOF/error/length/duplicate/DONE 各场景做真实 LiteLLM 探针，native 协议沿现有原生证据。
-- [ ] 实现与跑 `python -m unittest discover -s ops/shared-litellm-proxy/tests -p 'test_*.py'`；真实 Proxy probe 报告逐项读取；scoped commit。
+- [x] 先测请求级 api_base/headers/proxy/fallback/retry 覆盖、DNS 重绑定、redirect、metadata、private、none 升级、站点 Key 继承，上游应 0 次。
+- [x] 对 openai-compatible 原始完整/EOF/error/length/duplicate/DONE 各场景做真实 LiteLLM 探针，native 协议沿现有原生证据。
+- [x] 实现与跑 `python -m unittest discover -s ops/shared-litellm-proxy/tests -p 'test_*.py'`；真实 Proxy probe 报告逐项读取；scoped commit。
 
 ### Task 4: 能力证明与业务消费者贯通
 

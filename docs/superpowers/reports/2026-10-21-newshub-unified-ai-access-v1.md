@@ -8,7 +8,7 @@
 
 - `f4f8f96`：管理员受信 manifest、纯配置校验、私网用户准入、内容版本路由、模型标签/命名空间、审核设计及计划。
 - `3b2b11e`：T01 显式 `api_key/none`、0080 加法迁移、端点策略摘要与新连接 AAD 绑定、旧 AAD/幂等/队列兼容、撤销围栏和 T03 状态；研究/分类共用严格解码。无 Key 不存假 Key，也不需要安装加密 Key。
-- 当前 Task 3 增量：所有既有协议拒绝请求级 URL/Header/HTTP client/provider/retry/fallback 覆盖；真实进程新增原始 JSON 负控并核对上游零调用。
+- `385bca8` / `bcafd00`：所有既有协议拒绝请求级 URL/Header/HTTP client/provider/retry/fallback 覆盖；新增管理员静态路由生成、原生 CustomLLM→成熟 raw adapter、Key/None 准入、DNS/IP pin、原始终态、单次发送、压缩拒绝、媒体预处理限制和错误脱敏。默认 manifest 仍为空。
 
 独立复查发现并解决：创建中途 manifest 改变会重绑 Key 的竞争；兼容端点误删 `openai/` 等模型前缀。已先复现失败，再修复；复审未发现 Task 1/2 重要问题。该复查使用主会话的测试证据，没有冒称独立重复运行。
 
@@ -26,9 +26,17 @@
 | 扩展真实 SDK/Proxy 矩阵，含 18 个 raw HTTP 覆盖请求及 18 个独立零调用收据 | **277 PASS / 0 FAIL** | 新泛化流式/私网 egress 尚不在矩阵中 |
 | Django→SDK→实际 Proxy→合成上游（问答、翻译、研究、取消与坏终态） | **3 passed** | production settings + 全新 WAL DB；这是合成业务链，不是部署 |
 | 临时 direct LiteLLM raw handler 探针 | 2 次合成请求 PASS | 无 Proxy，不能替代最终链路；有 Key/None 分别实际带/不带 Authorization |
+| Task 3 最终 Proxy unittest | **61 passed** | `bcafd00`；含新真实 HTTP/TLS/取消/deadline 负控；不是 Docker 镜像验收 |
+| Task 3 旧 SDK/Proxy 矩阵重跑 | **277 PASS / 0 FAIL** | 原有静态协议，新增传输不改变旧 parser |
+| Task 3 新受信 SDK→Proxy→合成 compatible | **30 PASS / 0 FAIL** | Key/None、命名空间、并发、坏终态/拒绝/压缩、媒体零请求、原子撤销、取消生产者、一次 tools；报告绑定 runtime blob |
+| Task 3 profiles/T02/manual routes | **52 passed、23 subtests** | 共享模型校验模块的受影响集 |
+| Task 3 CI / harness / config-runner | **50 / 37 / 5 passed** | CI 路由门禁未改变；不是远端 CI |
+| Task 3 Django legacy 业务链重跑 | **3 passed，29.33s** | 全新 production-isolated WAL DB，旧问答/翻译/研究/取消；新路由业务待 Task 4 |
 | 真实供应商（含指定 Ollama）、浏览器 UAT、全量 CI、生产 | NOT_RUN | 不得据上述结果宣布全功能完成 |
 
 原始脱敏 Proxy 报告保存在 `evidence/2026-10-21-ai-proxy-admission.json`；包含每条断言、版本、请求次数和清理结果。实际版本：Python 3.12.14、LiteLLM 1.105.0、OpenAI SDK 3.28.0、Anthropic 1.13.0、httpx2 2.13.1、临时 pgserver 0.1.4/Prisma 0.15.0。
+
+新增报告为 [30 项原始脱敏证据](evidence/2026-10-21-ai-trusted-proxy.json)，候选 `bcafd00`、runtime blob、命令和退出 0 均在文件内。连接层使用固定 httpx 0.28.1/httpcore 1.0.9。真实 TLS fixture 验证：缺 CA 拒绝、信任临时 CA 且正确 SNI 通过、错误 hostname 拒绝；未关闭证书验证。实际流取消和加速 deadline 均关闭生产者、没有终态、没有第二次发送。
 
 主会话临时日志：`/tmp/newshub-ai-v1-task2-final.log`、`/tmp/newshub-ai-v1-task2-regression.log`、`/tmp/newshub-ai-v1-business.log`。它们只含合成测试结果；不能依赖临时文件永久存在。
 
@@ -37,16 +45,12 @@
 - 第一次隔离 venv 的 T01/Worker 运行缺 `chromadb`，导致 URL 模块导入失败；补装 CI lock 约束下的私有依赖后通过。未修改共享 venv。
 - 一次 Proxy pytest 命令遗漏 PYTHONPATH，在收集前失败；按仓库约定补齐后 37 项通过。
 - 扩展 HTTP 负控初次结果 `268 PASS / 9 FAIL`：全部上游收据均为零，但 URL/NESTED 由 LiteLLM 的 virtual-key 准入提前返回 401，fallback 指向未经项目授权的模型提前返回 403，原用例错误地要求统一 400。修正为 URL/NESTED 接受明确的 400/401 拒绝，并将 fallback 目标改为本项目已授权模型、仍严格要求 guard 返回 400；最终 277/0。没有放宽“上游必须零调用”的断言。
+- Task 3 审查发现媒体 URL 被成熟 adapter 提前下载、HTTPx 压缩放大越过预算、malformed body 反射原文、refusal 被归一化丢失；分别观察 RED 后修复。新路由限定文本/function 数据、raw identity 正文、静态错误、原始 refusal 拒绝。独立复查只读，进程结果明确标为复用。
+- 单文件 bind mount 可能固守旧 inode；已改挂专用配置目录，进程探针使用 `os.replace` 撤销。此证据不冒充实际 Docker mount 验收。管理员重新启用必须提升 version；禁止通过恢复旧文件复活旧身份。
 
 ## 下一实施边界
 
-Task 3 尚未完成。新端点目前不能靠配置直接获得业务流式权限，必须继续实现并证明：
-
-1. 管理员 manifest 生成/激活 Proxy 路由，两端同一内容版本；无 Key admission 只准批准 profile，用户不能升级到其他模型服务。
-2. 实际 HTTP client 的 DNS/IP pin、TLS 原主机校验、禁重定向/环境代理、每次 dispatch 严格单次发送。LiteLLM `AsyncHTTPHandler.post` 有独立 reconnect retry，不能仅设 `num_retries=0` 就宣称无自动重试。
-3. 固定版本支持 `EXPERIMENTAL_OPENAI_BASE_LLM_HTTP_HANDLER`，临时探针已证明其输出为 `CustomStreamWrapper` + `OpenAIChatCompletionStreamingHandler`，model `org/model:cloud` 未丢失，None 不发送 Authorization。应复用成熟 raw 路径并限定到新受信路由；不要未经回归全局改变旧协议。
-4. 普通 OpenAI SDK 路径记录的是 `model_dump` 后的响应，重复 JSON key 已不可追溯；新完成证据必须来自真正 raw body/SSE。新 Chat 策略要求 stop+DONE，旧 DeepSeek clean EOF 策略保持独立。
-5. 完成 Task 4 真实消费者与能力/协议绑定，Task 5 UI/发现/诊断，Task 6 指定 Ollama 及最终 F01–F09/S01–S08/R01–R08 验收。深研/tools、usage、分类按完整合同逐项验证。
+Task 3 已完成代码和本地合成验收。新路由使用原生 CustomLLM 扩展，不启用全局实验开关；旧 DeepSeek clean EOF 与新 Chat stop+DONE 合同独立。继续 Task 4 消费者与能力/协议绑定，Task 5 UI/发现/诊断，Task 6 指定 Ollama 及最终 F01–F09/S01–S08/R01–R08。当前配置保存不代表新业务流式已贯通，深研/tools、usage、分类仍须完整验证。
 
 执行状态与下一任务见 Git ignored `.superpowers/sdd/2026-10-21-newshub-unified-ai-access-v1/progress.md`；临时 raw handler 脚本在 `/tmp/newshub-ai-v1-raw-handler-probe.py`，属于可删除调查脚本，未作为生产实现交付。
 
