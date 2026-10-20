@@ -66,6 +66,15 @@ def reset_content():
     """
     def model(name):
         return apps.get_model('api', name)
+    # A completed refetch can still await sync; detached audit rows must never
+    # be handed back to the worker. Preserve its result while fencing replay.
+    for operation in model('FeedOperation').objects.filter(safe_result__pending_sync=True).iterator():
+        model('FeedOperation').objects.filter(pk=operation.pk).update(safe_result={
+            **operation.safe_result, 'pending_sync': False, 'sync_status': 'stale', 'code': 'local_content_reset'})
+    # Pending OPML items are collection intents, not account configuration.
+    # Keeping them would re-register retired sources after the worker restarts.
+    model('RssImportBatch').objects.all().delete()
+    model('FeedState').objects.all().delete()
     model('FeedOperation').objects.update(binding=None, entry=None, lease_token=None,
         lease_until=None, lease_epoch=F('lease_epoch') + 1)
     model('FeedOperation').objects.exclude(state__in=['succeeded', 'failed', 'cancelled']).update(

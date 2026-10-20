@@ -13,7 +13,8 @@ from django.core.management.base import CommandError
 from api.ai_connection_models import UserAIConnection
 from api.models import Category, Favorite, News, Source, ChatSession, ChannelSubscription, AuthSecurityLock
 from api.rss.initialize import cutoff_date, initialize
-from api.rss.models import FeedBinding, FeedOperation, RSSInitialization, SourceFeedLink
+from api.rss.models import FeedBinding, FeedOperation, RSSInitialization, SourceFeedLink, EngineEntryMap
+from api.rss.import_models import RssImportBatch, RssImportItem
 
 pytestmark = pytest.mark.django_db
 
@@ -66,11 +67,25 @@ def test_reset_preserves_accounts_configuration_audits_and_replay_preserves_new_
     ChatSession.objects.create(user=user, news=news, messages=[{'role': 'assistant', 'content': 'private'}])
     ChannelSubscription.objects.create(user=user, source=source)
     operation = FeedOperation.objects.create(kind='discover', actor=user, dedupe_key='audit-operation', request_hash='b' * 64)
+    old_binding = FeedBinding.objects.create(engine_instance_uuid=local, account_id=3,
+        engine_feed_id=7, canonical_feed_url='https://old.example/feed')
+    old_entry = EngineEntryMap.objects.create(binding=old_binding, engine_entry_id=1,
+        news=news, source_url=news.url, disposition='linked')
+    handoff = FeedOperation.objects.create(kind='refetch_entry', actor=user, binding=old_binding,
+        entry=old_entry, dedupe_key='old-handoff', request_hash='c' * 64, state='succeeded',
+        safe_result={'pending_sync': True, 'connected': True})
+    batch = RssImportBatch.objects.create(user=user, file_hash='d' * 64, preview_token_hash='e' * 64,
+        expires_at=datetime(2099, 1, 1, tzinfo=timezone.utc), status='confirmed')
+    RssImportItem.objects.create(batch=batch, feed_url='https://old.example/resurrect', status='pending')
     backup = paired_backup(tmp_path / 'paired', local)
     call_command('rss_initialize', local_instance=str(local), apply=True, reset_content=True,
         backup_dir=str(backup), stdout=StringIO())
     assert not News.objects.exists() and not Favorite.objects.exists() and not ChatSession.objects.exists()
     assert not ChannelSubscription.objects.exists()
+    assert not RssImportBatch.objects.exists() and not RssImportItem.objects.exists()
+    handoff.refresh_from_db()
+    assert handoff.state == 'succeeded' and handoff.safe_result['pending_sync'] is False
+    assert handoff.binding_id is None and handoff.entry_id is None
     assert get_user_model().objects.get(pk=user.pk).check_password('synthetic-only')
     assert UserAIConnection.objects.get(pk=connection.pk).credential_ciphertext == 'synthetic-encrypted'
     assert AuthSecurityLock.objects.get(pk=audit.pk).revision == 42
