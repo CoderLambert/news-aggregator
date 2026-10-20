@@ -65,9 +65,9 @@
 **Files:** Modify `frontend/src/services/aiConnectionsApi.ts`, `AIModelSettingsPage.tsx`, `AIModelsManager.tsx`, `AITaskPreferencesSection.tsx` 及镜像测试；backend 模型发现与诊断 endpoint 沿原权限。
 **Interfaces:** 只读 auth_modes/protocol/data_destination、delivery_mode、stream_verified、安全错误；新连接 api_key 可选但仅 none；显式发现不推理。
 
-- [ ] 先写 Key/none 切换清空输入、未授权 profile 不出现、未知状态不变通过、目录失败可手填、保存无推理、退出后的 stale response 回归。
-- [ ] 实现 UI，不在持久缓存保留 Key；费用未知不显示零，云/服务器数据目的地明确。
-- [ ] Node 22 执行 typecheck、lint、AI settings/API/消费者 Vitest、build；浏览器检查宽/窄屏和键盘；scoped commit。
+- [x] 先写 Key/none 切换清空输入、未授权 profile 不出现、未知状态不变通过、目录失败可手填、保存无推理、退出后的 stale response 回归。
+- [x] 实现 UI，不在持久缓存保留 Key；费用未知不显示零，云/服务器数据目的地明确。
+- [x] Node 22 执行 typecheck、lint、AI settings/API/消费者 Vitest、build；浏览器检查宽/窄屏和键盘；scoped commit。
 
 ### Task 6: 整体证据与指定模型验收
 

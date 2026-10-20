@@ -10,6 +10,7 @@
 - `3b2b11e`：T01 显式 `api_key/none`、0080 加法迁移、端点策略摘要与新连接 AAD 绑定、旧 AAD/幂等/队列兼容、撤销围栏和 T03 状态；研究/分类共用严格解码。无 Key 不存假 Key，也不需要安装加密 Key。
 - `385bca8` / `bcafd00`：所有既有协议拒绝请求级 URL/Header/HTTP client/provider/retry/fallback 覆盖；新增管理员静态路由生成、原生 CustomLLM→成熟 raw adapter、Key/None 准入、DNS/IP pin、原始终态、单次发送、压缩拒绝、媒体预处理限制和错误脱敏。默认 manifest 仍为空。
 - `7312a90`：能力收据绑定 route/protocol/adapter/auth，业务 SDK 注入受信 owner/mode；兼容模型问答/分段翻译及工具消费者贯通。已有原生 Responses/Messages 提供明确 buffered 输出，其他旧 Chat 的业务准入保持原限制。0081 增加脱敏 usage 元数据，并将 alias 容量扩至 256，保留最大 profile+model 的 245 字符身份。
+- `f93831c`：界面支持批准的 Key/None，切换清空 Key、只读诊断和显式模型目录；保留手填与用户选择，不从 unknown 取得用途权限。问答/翻译入口接受有证明的无 Key 模型，并明确 buffered 输出、未知费用和服务器可能使用云服务。
 
 独立复查发现并解决：创建中途 manifest 改变会重绑 Key 的竞争；兼容端点误删 `openai/` 等模型前缀。已先复现失败，再修复；复审未发现 Task 1/2 重要问题。该复查使用主会话的测试证据，没有冒称独立重复运行。
 
@@ -37,6 +38,12 @@
 | Task 4 Django→SDK→实际 Proxy 业务链 | **5 passed，59.07s** | legacy3 + compatible Key/None2；真实探针、问答、分段翻译、工具、EOF 不落完成、owner usage 隔离 |
 | Task 4 受信 Proxy 矩阵 | **31 PASS / 0 FAIL** | 新增严格 JSON object 模式；[原始报告](evidence/2026-10-21-ai-business-proxy.json) 绑定 `7312a90` runtime blob |
 | Task 4 CI / Proxy direct / OpenRouter / migration | **50 / 27 / 1 / PASS** | OpenRouter 实际 HTTP 断言关闭上游 fallback；migration dry-run 无缺失；非远端 CI |
+| Task 5 前端定向 | **63 passed，7 files** | Node 22.23.3；认证/目录失败/不自动选模型/跨 viewer/问答翻译/usage |
+| Task 5 typecheck / build / lint | **PASS / PASS / 0 errors** | lint 仅既有 `useSuggestedQuestions.ts` warning；锁文件及共享依赖未改变 |
+| Task 5 后端 / CSRF / Proxy direct | **84 passed、5 subtests / 1 / 64** | owner、会话 CSRF、viewer、撤销、只读不发请求 |
+| Task 5 SDK→实际 Proxy→兼容目录 | **38 PASS / 0 FAIL** | Key/None；错误项目 key、缺 model 授权、owner 越权、伪造 none、URL 均零上游；[原始报告](evidence/2026-10-21-ai-discovery-proxy.json) |
+| Task 5 production-isolated Django 目录与业务 | **2 passed，35.98s** | Key/None 实际目录、探针、问答、分段翻译、工具与 EOF 围栏；目录无能力收据 |
+| Task 5 Chrome 浏览器 | **功能与 DOM 布局 PASS** | 合成 DB/账号/Proxy；宽屏及实际 CSS 413px，文档宽 394px；Enter/Esc/清空 Key/保存/目录/诊断/退出；[检查记录](evidence/2026-10-21-ai-browser-checks.json) |
 | 真实供应商（含指定 Ollama）、浏览器 UAT、全量 CI、生产 | NOT_RUN | 不得据上述结果宣布全功能完成 |
 
 原始脱敏 Proxy 报告保存在 `evidence/2026-10-21-ai-proxy-admission.json`；包含每条断言、版本、请求次数和清理结果。实际版本：Python 3.12.14、LiteLLM 1.105.0、OpenAI SDK 3.28.0、Anthropic 1.13.0、httpx2 2.13.1、临时 pgserver 0.1.4/Prisma 0.15.0。
@@ -52,10 +59,12 @@
 - 扩展 HTTP 负控初次结果 `268 PASS / 9 FAIL`：全部上游收据均为零，但 URL/NESTED 由 LiteLLM 的 virtual-key 准入提前返回 401，fallback 指向未经项目授权的模型提前返回 403，原用例错误地要求统一 400。修正为 URL/NESTED 接受明确的 400/401 拒绝，并将 fallback 目标改为本项目已授权模型、仍严格要求 guard 返回 400；最终 277/0。没有放宽“上游必须零调用”的断言。
 - Task 3 审查发现媒体 URL 被成熟 adapter 提前下载、HTTPx 压缩放大越过预算、malformed body 反射原文、refusal 被归一化丢失；分别观察 RED 后修复。新路由限定文本/function 数据、raw identity 正文、静态错误、原始 refusal 拒绝。独立复查只读，进程结果明确标为复用。
 - 单文件 bind mount 可能固守旧 inode；已改挂专用配置目录，进程探针使用 `os.replace` 撤销。此证据不冒充实际 Docker mount 验收。管理员重新启用必须提升 version；禁止通过恢复旧文件复活旧身份。
+- 新增 GET 记录后，Django 业务探针最初 2 项失败：启动已有 legacy unknown OpenAI fixture 路由时，LiteLLM 用实验室专用 sentinel 做两次目录检查。改为明确记录并验证这个启动基线，再严格要求设置保存新增零请求；未忽略未知认证或新路由启动请求。修正后 2 项通过。
+- 浏览器发现目录后，原生 select 会视觉选中首项而 React 状态仍为空；回归先失败，再增加空选择占位，保持用户明确选择。默认视口截图成功并展示；模拟视口下 CDP 截图超时，窄屏只确认实际 DOM 布局与功能，未冒称窄屏截图验收。视口已恢复，临时账号退出，验收标签与独立进程已清理。
 
 ## 下一实施边界
 
-Task 3/4 已完成代码和本地合成验收。兼容路由业务流式已贯通；通用分段使用产品预算，context/output 的供应商最大值仍为未知，失败不重试、不切换。新路由使用原生 CustomLLM 扩展，不启用全局实验开关；旧 DeepSeek clean EOF 与新 Chat stop+DONE 合同独立。继续 Task 5 UI/发现/诊断、Task 6 指定 Ollama与最终 F01–F09/S01–S08/R01–R08。尚不能宣称界面、真实服务或生产完成。
+Task 3/4/5 已完成代码与所列本地验收。通用分段使用产品预算，context/output 的供应商最大值仍为未知，失败不重试、不切换。旧 DeepSeek clean EOF 与新 Chat stop+DONE 合同独立。继续 Task 6 指定 Ollama、整体门禁和最终 F01–F09/S01–S08/R01–R08；真实服务、远端 CI、生产及用户手工验收仍未完成。
 
 执行状态与下一任务见 Git ignored `.superpowers/sdd/2026-10-21-newshub-unified-ai-access-v1/progress.md`；临时 raw handler 脚本在 `/tmp/newshub-ai-v1-raw-handler-probe.py`，属于可删除调查脚本，未作为生产实现交付。
 
