@@ -79,7 +79,7 @@ function Directory() {
     <div className="workspace-tabs" role="group" aria-label="频道范围">{[
       { key: 'all', label: '全部频道', count: sources.filter(source => source.subscription_status === 'active').length },
       { key: 'pending', label: '待验证候选', count: sources.filter(source => source.subscription_status !== 'active').length },
-      ...(config.enabled ? [{ key: 'subscribed', label: '已订阅', count: subscriptions.size }, { key: 'unsubscribed', label: '未订阅', count: sources.filter(source => !subscriptions.has(source.id)).length }] : []),
+      ...(config.enabled ? [{ key: 'subscribed', label: '已订阅', count: subscriptions.size }, { key: 'unsubscribed', label: '未订阅', count: sources.filter(source => source.subscription_status === 'active' && !subscriptions.has(source.id)).length }] : []),
     ].map(item => <button key={item.key} type="button" aria-pressed={tab === item.key} onClick={() => change('tab', item.key)}>{item.label}<small>{item.count}</small></button>)}</div>
     <section className="workspace-filter-toolbar" aria-label="查找频道">
       <label className="workspace-search"><Search size={16} aria-hidden="true" /><input type="search" aria-label="搜索频道" placeholder="搜索频道名称、简介…" value={search} onChange={event => change('q', event.target.value)} /></label>
