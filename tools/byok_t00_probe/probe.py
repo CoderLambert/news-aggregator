@@ -234,6 +234,9 @@ def main(argv: list[str] | None = None) -> int:
                     ('HEADER', {'headers': {'Authorization': 'synthetic-unapproved-key'}}),
                     ('EXTRA_HEADERS', {'extra_headers': {'Host': 'unapproved.invalid'}}),
                     ('RETRY', {'num_retries': 1}),
+                    ('RETRY_POLICY', {'model_group_retry_policy': {chosen: {'InternalServerErrorRetries': 2}}}),
+                    ('RETRY_GLOBAL', {'retry_policy': {'InternalServerErrorRetries': 2}}),
+                    ('RETRY_MAX', {'max_retries': 2}),
                     # An otherwise authorized target proves that the guard,
                     # rather than a missing model permission, denies fallback.
                     ('FALLBACK', {'fallbacks': ['t00-chat']}),

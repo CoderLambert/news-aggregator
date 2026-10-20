@@ -352,6 +352,21 @@ def test_t10_native_continuation_is_model_bound_and_not_visible():
         native_messages(session, snapshot)
 
 
+def test_tool_reply_with_text_preface_is_not_a_final_or_visible_answer():
+    from api.services.research.byok_execution import _validated_completion, visible_messages
+    call = {'id': 'call-preface', 'type': 'function',
+            'function': {'name': 'search_news', 'arguments': '{}'}}
+    message = {'role': 'assistant', 'content': 'Checking the evidence.', 'tool_calls': [call]}
+    response = {'choices': [{'finish_reason': 'tool_calls', 'message': message}]}
+    assert _validated_completion(response) == (message, [call])
+    assert visible_messages([{'role': 'user', 'content': 'Question'}, message]) == [
+        {'role': 'user', 'content': 'Question'}]
+    for content in ({'text': 'not a string'}, 2, []):
+        with pytest.raises(ResearchBYOKError):
+            _validated_completion({'choices': [{'finish_reason': 'tool_calls',
+                'message': {**message, 'content': content}}]})
+
+
 def test_t10_followup_rechecks_owner_and_locked_model(monkeypatch):
     from api.services.research.byok_execution import followup_snapshot, continuation_payload
     snapshot = {'model': {'model_config_id': 'original'}}

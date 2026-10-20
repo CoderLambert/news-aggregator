@@ -333,7 +333,9 @@ def _validated_completion(response):
     raw_calls = _get(message, "tool_calls") or []
     content = _get(message, "content")
     if finish_reason == "tool_calls":
-        if content not in (None, "") or not raw_calls:
+        # Compatible providers may prefix a valid function call with text.
+        # The tool terminal is never a final report; visible_messages omits it.
+        if (content is not None and type(content) is not str) or not raw_calls:
             raise ResearchBYOKError("invalid_response")
     elif finish_reason == "stop":
         if raw_calls or type(content) is not str or not content.strip():
@@ -424,6 +426,7 @@ def visible_messages(messages):
         {'role': item['role'], 'content': item['content']}
         for item in messages
         if item.get('role') in ('user', 'assistant')
+        and not (item.get('role') == 'assistant' and item.get('tool_calls'))
         and type(item.get('content')) is str and item['content']
     ]
 

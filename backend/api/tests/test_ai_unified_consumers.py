@@ -1,5 +1,6 @@
 """Owner-selected compatible Key/None routes use the same business fences."""
 import json
+import io
 import uuid
 from types import SimpleNamespace as N
 from unittest.mock import patch
@@ -100,6 +101,36 @@ def test_none_probe_without_snapshot_is_not_authorized(unified):
         result = send_model_probe(provider_key=None, model_alias=route['proxy_alias'], probe_kind='text')
     assert result.status == 'not_sent'
     network.assert_not_called()
+
+
+@pytest.mark.parametrize('kind', ['text', 'tools'])
+def test_compatible_probe_has_bounded_room_for_a_complete_answer(unified, settings, kind):
+    """Tiny legacy caps clipped real compatible text/tools before their terminal."""
+    settings.AI_BYOK_GATEWAY_URL = 'http://127.0.0.1:19999'
+    settings.AI_BYOK_GATEWAY_PROJECT_KEY = 'sk-synthetic-project-key-123456789'
+    settings.AI_BYOK_GATEWAY_PROJECT_KEY_FILE = ''
+    calls = []
+    def respond(request, **kwargs):
+        body = json.loads(request.data)
+        calls.append(body)
+        assert 0 < body['max_tokens'] <= 1024  # A bounded explicit probe, never an open generation.
+        complete = body['max_tokens'] >= 128
+        message = {'role': 'assistant', 'content': 'Confirmed' if complete else ''}
+        reason = 'stop' if complete else 'length'
+        if complete and kind == 'tools':
+            message.update(content=None, tool_calls=[{'id': 'call-bounded', 'type': 'function',
+                'function': {'name': 'byok_probe', 'arguments': '{"ok":true}'}}])
+            reason = 'tool_calls'
+        response = io.BytesIO(json.dumps({'choices': [{'index': 0, 'message': message,
+            'finish_reason': reason}]}).encode())
+        response.status, response.headers = 200, {}
+        return response
+    with patch('api.services.ai_model_probe._OPENER.open', side_effect=respond):
+        outcome = send_model_probe(provider_key=None, model_alias=get_trusted_route(
+            unified.connection, unified.model.model_id)['proxy_alias'], probe_kind=kind,
+            connection_snapshot=snapshot_connection(unified.connection))
+    assert outcome.status == 'succeeded'
+    assert len(calls) == 1
 
 
 def test_route_contract_exposes_transport_mode_and_not_endpoint(unified):

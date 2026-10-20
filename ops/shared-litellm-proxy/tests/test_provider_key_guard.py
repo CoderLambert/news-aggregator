@@ -99,6 +99,8 @@ class AllProtocolRequestAdmission(unittest.TestCase):
                 {'extra_headers': {'host': 'other.invalid'}}, {'custom_llm_provider': 'other'},
                 {'http_client': 'uncontrolled'}, {'proxy': 'http://other.invalid'},
                 {'fallbacks': ['other/model']}, {'num_retries': 1},
+                {'model_group_retry_policy': {'trusted/model': {'InternalServerErrorRetries': 2}}},
+                {'retry_policy': {'InternalServerErrorRetries': 2}}, {'max_retries': 2},
                 {'silent_model': 'other/model'}, {'extra_body': {'api_base': 'http://127.0.0.1'}},
             ):
                 with self.subTest(call_type=call_type, field=next(iter(override))):

@@ -79,6 +79,20 @@ class TrustedCustomProviderTests(unittest.IsolatedAsyncioTestCase):
             await self.call(admitted=False)
         self.assertEqual(self.requests, [])
 
+    async def test_same_model_tool_history_keeps_server_reasoning_text(self):
+        messages = [{'role': 'user', 'content': 'synthetic'},
+            {'role': 'assistant', 'content': None, 'reasoning_content': 'private synthetic continuation',
+             'tool_calls': [{'id': 'call-1', 'type': 'function',
+                 'function': {'name': 'lookup', 'arguments': '{}'}}]},
+            {'role': 'tool', 'tool_call_id': 'call-1', 'content': '{}'}]
+        response = await self.call(provider_messages=messages)
+        self.assertEqual(response.choices[0].finish_reason, 'stop')
+        self.assertEqual(self.requests[0]['body']['messages'][1]['reasoning_content'],
+                         'private synthetic continuation')
+        with self.assertRaises(Exception):
+            await self.call(provider_messages=[{'role': 'user', 'content': 'synthetic', 'reasoning_content': 'wrong role'}])
+        self.assertEqual(len(self.requests), 1)
+
     async def test_file_download_preprocessing_cannot_bypass_pinned_transport(self):
         module = 'litellm.llms.openai.chat.gpt_transformation'
         download = Mock(side_effect=ValueError('synthetic download trap'))

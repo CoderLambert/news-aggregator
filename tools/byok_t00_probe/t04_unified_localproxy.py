@@ -35,6 +35,8 @@ def test_compatible_probe_chat_translation_tools_and_bad_terminal(tmp_path, sett
     owner = get_user_model().objects.create_user('unified-process-' + auth_mode)
     provider_key = 'synthetic-' + secrets.token_hex(24)
     Handler, records = handler_type({'owner': provider_key})
+    # Reproduce the real reasoning-capable service's clipped tiny probe.
+    Handler.minimum_output_tokens = 128
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     server.daemon_threads = True
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -93,9 +95,9 @@ def test_compatible_probe_chat_translation_tools_and_bad_terminal(tmp_path, sett
                 url='https://publisher.example/process', source=source, category=category,
                 content='Synthetic summary', publish_time=timezone.now(), full_content_state='legacy',
                 full_content='Alpha paragraph.\n\nBeta paragraph.\n\nGamma paragraph.'))
-            def ask():
+            def ask(selected_model=model_id):
                 result = api.post(f'/api/news/{article.pk}/chat/', {'question': 'What happened?',
-                    'model_config_id': model_id, 'billing_consent': True, 'turn_id': str(uuid.uuid4())}, format='json')
+                    'model_config_id': selected_model, 'billing_consent': True, 'turn_id': str(uuid.uuid4())}, format='json')
                 assert result.status_code == 200, result.content
                 return b''.join(result.streaming_content)
             wire = ask()
@@ -112,6 +114,31 @@ def test_compatible_probe_chat_translation_tools_and_bad_terminal(tmp_path, sett
             task.refresh_from_db()
             assert task.status == 'succeeded', task.error_code
             assert ChatGPTArticleTranslation.objects.filter(user=owner, news=article).count() == 1
+            # Same article, explicitly different opaque model. Preserve the old
+            # answer/result and bind each new operation to the selected ID.
+            original_result = dict(task.result)
+            other_model = api.post(models_url, {'model_id': 'other/model:tag'}, format='json')
+            assert other_model.status_code == 201
+            other_id = other_model.data['id']
+            proof = api.post(models_url + other_id + '/probe/', {'probe_kind': 'text', 'revision': 1,
+                'request_id': str(uuid.uuid4())}, format='json')
+            assert proof.status_code == 200 and proof.data['status'] == 'succeeded'
+            assert b'"status": "complete"' in ask(other_id)
+            history.refresh_from_db()
+            assert [row['model_source']['model'] for row in history.messages if row['role'] == 'assistant'] == [
+                'org/model:cloud', 'other/model:tag']
+            with patch.object(translation, '_dispatch'):
+                retry = api.post(f'/api/me/ai/translations/{task.pk}/retry/', {'model_config_id': other_id,
+                    'billing_consent': True, 'target_language': 'zh'}, format='json',
+                    HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()))
+            assert retry.status_code == 202, retry.content
+            new_task = ChatGPTTranslationTask.objects.get(pk=retry.data['task_id'])
+            translation.run_translation(new_task.pk, new_task.generation)
+            new_task.refresh_from_db()
+            task.refresh_from_db()
+            assert new_task.status == 'succeeded' and new_task.model_id == 'other/model:tag'
+            assert task.result == original_result
+            assert ChatGPTArticleTranslation.objects.filter(user=owner, news=article).count() == 2
             from api.services.research.byok_execution import capture_snapshot, call_model_once
             payload = capture_snapshot(owner, model_id)
             response = call_model_once(payload, owner_id=owner.pk, messages=[{'role': 'user', 'content': 'synthetic'}],
@@ -125,7 +152,7 @@ def test_compatible_probe_chat_translation_tools_and_bad_terminal(tmp_path, sett
             assert b'"status": "complete"' not in wire
             assert len(records) == before + 1
             history.refresh_from_db()
-            assert len([row for row in history.messages if row['role'] == 'assistant']) == 1
+            assert len([row for row in history.messages if row['role'] == 'assistant']) == 2
             assert AICallAttempt.objects.filter(user=owner, status='unknown').exists()
             other = get_user_model().objects.create_user('unified-process-other-' + auth_mode)
             api.force_authenticate(other)

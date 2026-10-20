@@ -139,9 +139,13 @@ def _payload(model_alias, probe_kind, provider_key):
     # the probe's tiny output budget before producing a final text response.
     # These explicit capability checks need text/tools, not private reasoning.
     options = {'thinking': {'type': 'disabled'}} if model_alias == ARTICLE_CHAT_SUPPORTED_ALIAS else {}
+    # Compatible reasoning models can consume the old 8/32-token caps before
+    # emitting even one answer/tool call. Keep one bounded explicit request;
+    # never retry a clipped result or claim a capability from length/EOF.
+    compatible = model_alias.startswith('newshub/')
     if probe_kind == 'tools':
         return {
-            'model': model_alias, 'stream': False, 'max_tokens': 32,
+            'model': model_alias, 'stream': False, 'max_tokens': 512 if compatible else 32,
             'messages': [{'role': 'system', 'content': 'Call the requested function to confirm tool support.'},
                          {'role': 'user', 'content': 'Run the capability check now.'}],
             'tools': [{'type': 'function', 'function': {
@@ -153,7 +157,7 @@ def _payload(model_alias, probe_kind, provider_key):
             **options,
         }
     return {
-        'model': model_alias, 'stream': False, 'max_tokens': 8,
+        'model': model_alias, 'stream': False, 'max_tokens': 512 if compatible else 8,
         'messages': [{'role': 'user', 'content': 'Reply with one short word confirming text output.'}],
         'api_key': provider_key,
         **options,

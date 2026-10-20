@@ -165,6 +165,10 @@ def _terminal_stream_allowlisted(data: dict, call_type: str) -> bool:
 
 def _request_has_no_retry_or_fallback_override(data: dict) -> bool:
     """Reject request-level attempts to override the proxy's zero retry/fallback policy."""
+    # Pinned Router consumes model_group_retry_policy before sending upstream;
+    # an exception-specific value can override its configured num_retries=0.
+    if any(key in data for key in ('model_group_retry_policy', 'retry_policy', 'max_retries')):
+        return False
     if "num_retries" in data:
         retries = data["num_retries"]
         if retries is not None and (type(retries) is not int or retries != 0):

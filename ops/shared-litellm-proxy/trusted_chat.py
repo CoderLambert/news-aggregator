@@ -52,10 +52,13 @@ def validate_chat_input(messages, options, *, stream):
             or type(options) is not dict or options.keys() - _CHAT_OPTIONS or type(stream) is not bool):
         raise EgressDenied()
     for message in messages:
-        if type(message) is not dict or message.keys() - {'role', 'content', 'name', 'tool_calls', 'tool_call_id'}:
+        if type(message) is not dict or message.keys() - {'role', 'content', 'name', 'tool_calls', 'tool_call_id', 'reasoning_content'}:
             raise EgressDenied()
         role, content = message.get('role'), message.get('content')
         if role not in ('system', 'developer', 'user', 'assistant', 'tool'):
+            raise EgressDenied()
+        if 'reasoning_content' in message and (role != 'assistant'
+                or type(message['reasoning_content']) is not str or len(message['reasoning_content']) > MAX_BODY_BYTES):
             raise EgressDenied()
         if content is None:
             if role != 'assistant' or not message.get('tool_calls'):

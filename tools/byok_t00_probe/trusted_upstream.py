@@ -13,6 +13,7 @@ def handler_type(provider_keys):
     class Handler(BaseHTTPRequestHandler):
         cancel_closed = threading.Event()
         stream_override = None
+        minimum_output_tokens = 0
         def log_message(self, *args):
             pass
 
@@ -102,6 +103,8 @@ def handler_type(provider_keys):
                     choice.update(finish_reason='tool_calls', message={'role': 'assistant', 'content': None,
                                   'tool_calls': [{'id': 'call-synthetic', 'type': 'function',
                                                  'function': {'name': 'byok_probe', 'arguments': '{"ok":true}'}}]})
+                if body.get('max_tokens', 0) < type(self).minimum_output_tokens:
+                    choice.update(finish_reason='length', message={'role': 'assistant', 'content': ''})
                 wire = json.dumps(result).encode()
                 if model == 'nh-duplicate':
                     wire = wire.replace(b'"finish_reason": "stop"', b'"finish_reason": null,"finish_reason": "stop"')

@@ -148,11 +148,15 @@ class NativeMessagesTests(TestCase):
                 gateway.create(model=MODEL, timeout=timeout)
         self.assertEqual(native.create.call_count, 1)
 
-    def test_preset_does_not_claim_capability_or_stream_and_checks_profile(self):
+    def test_preset_is_profile_bound_and_buffered_without_claiming_capability(self):
         connection = N(provider_id='anthropic', endpoint_profile='anthropic_default', endpoint_profile_version=1)
         catalog = catalog_for(connection)
         self.assertEqual([item['model_id'] for item in catalog], ['claude-haiku-5-5'])
         self.assertEqual((catalog[0]['text'], catalog[0]['tools']), ('unknown', 'unknown'))
-        self.assertFalse(supports_article_chat(connection, 'claude-haiku-5-5'))
+        self.assertTrue(supports_article_chat(connection, 'claude-haiku-5-5'))
+        from api.services.ai_model_registry import get_trusted_route
+        route = get_trusted_route(connection, 'claude-haiku-5-5')
+        self.assertEqual(route['delivery_mode'], 'buffered')
+        self.assertFalse(route['stream_verified'])
         connection.endpoint_profile_version = 2
         self.assertIsNone(get_trusted_preset(connection, 'claude-haiku-5-5'))
