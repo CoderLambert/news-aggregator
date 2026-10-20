@@ -26,6 +26,12 @@ TERMINAL_STREAM_ENV = "BYOK_TERMINAL_STREAMING_MODELS"
 DENY_STREAM_ENV = "BYOK_DENY_STREAMING_CALL_TYPES"
 _STREAM_FALSE_STRINGS = frozenset({"0", "false", "f", "no", "n", "off"})
 _URL_OVERRIDE_FIELDS = frozenset({"api_base", "base_url", "api_url", "url"})
+_ROUTING_OVERRIDE_FIELDS = _URL_OVERRIDE_FIELDS | frozenset({
+    "headers", "extra_headers", "default_headers", "custom_llm_provider",
+    "http_client", "client", "proxy", "proxies", "extra_body", "silent_model",
+    "azure_endpoint", "azure_ad_token", "organization", "deployment_id",
+    "api_version", "aws_access_key_id", "aws_secret_access_key", "aws_session_token",
+})
 _TERMINAL_ERROR = {"code": "T00_STREAM_TERMINAL_UNVERIFIED"}
 _COMPLETION_TERMINAL_ERROR = {"code": "BYOK_COMPLETION_TERMINAL_UNVERIFIED"}
 _ROUTER_RAW_SOURCE_ATTR = "_byok_raw_terminal_source"
@@ -709,6 +715,16 @@ class ProviderKeyGuard(CustomLogger):
         provider_key = data.get("api_key")
         if not isinstance(provider_key, str) or not provider_key.strip():
             raise HTTPException(status_code=400, detail={"code": "BYOK_PROVIDER_KEY_REQUIRED"})
+
+        # This boundary applies to non-stream and native protocols too. A
+        # project key authorizes fixed server routes, never a second endpoint,
+        # authentication header, provider fallback or client transport.
+        if ((_ROUTING_OVERRIDE_FIELDS & data.keys())
+                or not _request_has_no_retry_or_fallback_override(data)):
+            legacy_chat_stream = (_stream_requested(data.get("stream"))
+                                  and normalized_call_type in ALWAYS_DENIED_STREAMING_CALL_TYPES)
+            code = "T00_CHAT_STREAMING_DISABLED" if legacy_chat_stream else "BYOK_REQUEST_OVERRIDE_REJECTED"
+            raise HTTPException(status_code=400, detail={"code": code})
 
         if _stream_requested(data.get("stream")):
             extra_denies = _extra_denied_streaming_call_types()
