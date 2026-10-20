@@ -6,6 +6,7 @@ the local stack directory, passing its complete Compose file list. No production
 mode, remote Docker endpoint, volume deletion, or automatic retry is supported.
 """
 import argparse
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import io
@@ -89,6 +90,28 @@ def sha(path):
     return digest.hexdigest()
 
 
+
+@contextmanager
+def readable_backup(backup, image):
+    """Keep mode 700/600 while lending this task-created backup to app UID.
+
+    The maintenance app retains cap_drop=ALL and its normal non-root UID.
+    A networkless helper changes only the new backup's ownership, then restores it.
+    """
+    def owner(uid, gid):
+        code = ("import os,pathlib; p=pathlib.Path('/backup'); "
+                "[(os.chown(f," + str(uid) + "," + str(gid) + "),os.chmod(f,0o600)) "
+                "for f in p.iterdir() if f.is_file()]; "
+                "os.chown(p," + str(uid) + "," + str(gid) + "); os.chmod(p,0o700)")
+        run(['docker', 'run', '--rm', '--network', 'none', '--user', '0:0', '--entrypoint', 'python',
+             '-v', str(backup) + ':/backup', image, '-c', code])
+    try:
+        owner(10001, 10001)
+        yield
+    finally:
+        owner(os.getuid(), os.getgid())
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--project', required=True)
@@ -119,11 +142,13 @@ def main(argv=None):
     require(not backup.is_symlink() and backup.parent.resolve() == backup.parent, 'Real absolute backup parent required.')
     command = ['/app/backend/manage.py', 'rss_initialize', '--local-instance', instance]
     def app_command(extra, *, mount=False):
-        call = compose + ['run', '--rm', '--no-deps', '--user', '0:0', '--entrypoint', 'python',
+        call = compose + ['run', '--rm', '--no-deps', '--user', '10001:10001', '--entrypoint', 'python',
             '-e', 'NEWSHUB_LOCAL_INSTANCE=' + instance, '-e', 'RSS_ENGINE_BASE_URL=http://miniflux:8080',
             '-e', 'RUN_MAIN=true']
         if mount:
             call += ['-v', str(backup) + ':/backup:ro']
+            with readable_backup(backup, services['app']['Image']):
+                return run(call + ['app'] + extra)
         return run(call + ['app'] + extra)
     # Before stopping anything, prove the selected image has the new command.
     preview = json.loads(app_command(command))
@@ -200,6 +225,10 @@ def main(argv=None):
     other = run(['docker', 'exec', pg['Id'], 'psql', '-XAt', '-U', 'miniflux', '-d', 'miniflux',
         '-c', f'SELECT count(*) FROM feeds WHERE user_id <> {account}']).decode().strip()
     require(other == '0', 'Other Miniflux accounts have feeds; refusing a shared engine reset.')
+    # Fail before clearing the engine if the app cannot write its own SQLite DB.
+    writer_probe = ("import sqlite3; c=sqlite3.connect('file:" + db_path
+        + "?mode=rw',uri=True,timeout=5); c.execute('BEGIN IMMEDIATE'); c.rollback(); c.close()")
+    app_command(['-c', writer_probe])
     checkpoint('engine_reset_started')
     run(['docker', 'exec', pg['Id'], 'psql', '-X', '-v', 'ON_ERROR_STOP=1', '-U', 'miniflux', '-d', 'miniflux',
         '-c', f'BEGIN; DELETE FROM feeds WHERE user_id = {account}; COMMIT;'])

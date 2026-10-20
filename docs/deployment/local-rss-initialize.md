@@ -36,7 +36,7 @@ python3 scripts/rss/initialize.py \
 
 1. 验证镜像中的预览命令及实际 Compose/卷身份。
 2. 停止应用、RSS 同步、相关 Worker 和 Miniflux，确认容器退出。
-3. 使用 SQLite backup API 生成一致快照；备份专用 PostgreSQL、配置及密钥引用到权限 700 的目录，记录校验和。
+3. 使用应用的非 root UID 进行维护，不放宽 `cap_drop=ALL`。备份只在维护调用期间以权限 700/600 借给该 UID，结束或异常时恢复本地备份所有者；在清理引擎前另行验证 SQLite 写权限。使用 SQLite backup API 生成一致快照；备份专用 PostgreSQL、配置及密钥引用到权限 700 的目录，记录校验和。
 4. 保留引擎用户、令牌、schema 和序列，仅清除专用账号 Feed/文章。其他账号持有 Feed 时拒绝继续。
 5. 应用前向迁移，在同一应用事务中清理内容并写入初始化审计，注册版本化默认来源；账号、通用模型/API 配置、安全策略及审计保留。不会删除 SQLite 文件。
 6. 归档并清除 Chroma/TTS 派生内容，先恢复 Miniflux 和同步服务。等待连接请求有界结束，且增量同步在其后完成，再恢复应用。默认等待上限为 1200 秒，可用 `--settle-timeout` 设置 30–1800 秒。
