@@ -74,7 +74,7 @@
 **Files:** Extend end-to-end fixtures/tests 与 `docs/superpowers/reports/2026-10-21-newshub-unified-ai-access-v1.md`。
 **Interfaces:** 全链用户→连接→模型→用途→快照→Proxy→完成→持久化；每条 F/S/R 关联最终证据。
 
-- [ ] 执行适用后端跨三个测试根、前端与真实 Proxy 合成矩阵；保留命令/exit/SHA/skip 原始结果。
-- [ ] 仅对用户指定 Ollama 模型做隔离受控真实调用，Key 从不入日志；问答、翻译、tools 各自记录；其他供应商真实调用 NOT_RUN。
-- [ ] fresh independent reviewer 审整个 base→head+dirty diff，修复重要问题并做定向回归；核对所有要求，不以部分绿色宣称全部完成。
-- [ ] 按授权交付本地 scoped commits；PR 若创建必须 Draft，Ready/CI/merge/production 状态真实报告；未授权不合并部署。
+- [x] 执行适用后端跨三个测试根、前端与真实 Proxy 合成矩阵；保留命令/exit/SHA/skip 原始结果。
+- [x] 仅对用户指定 Ollama 模型做隔离受控真实调用，Key 从不入日志；问答、翻译、tools 各自记录；其他供应商真实调用 NOT_RUN。
+- [x] fresh independent reviewer 审整个 base→head+dirty diff，修复重要问题并做定向回归；核对所有要求，不以部分绿色宣称全部完成。
+- [x] 按授权交付本地 scoped commits；PR 若创建必须 Draft，Ready/CI/merge/production 状态真实报告；未授权不合并部署。

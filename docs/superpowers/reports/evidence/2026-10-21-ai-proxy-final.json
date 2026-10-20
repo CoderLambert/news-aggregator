@@ -1,0 +1,4776 @@
+{
+  "task": "BYOK T00",
+  "task_status": "PARTIAL",
+  "implementation_baseline": "2e3254c890f52af626aa7d2400097301bf550d14",
+  "scope": "SDK_AND_PINNED_PROXY_PROCESS_SYNTHETIC_ONLY",
+  "versions": {
+    "openai": "3.28.0",
+    "anthropic": "1.13.0",
+    "httpx2": "2.13.1",
+    "litellm": "1.105.0",
+    "pgserver": "0.1.4",
+    "prisma": "0.15.0",
+    "proxy_python": "3.12.14"
+  },
+  "python": "3.12.14",
+  "PROVIDER_REAL": "NOT_RUN",
+  "UAT": "NOT_RUN",
+  "T00-10_historical_image": "NOT_RUN",
+  "pinned_image_digest_and_signature": "NOT_RUN",
+  "checks": [
+    {
+      "contract": "T00-01",
+      "case": "SDK_CHAT_COMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "terminal": "stop"
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "SDK_CHAT_INCOMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "terminal": "length"
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "SDK_CHAT_HTTP_ERROR",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 503,
+        "error_type": "InternalServerError"
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "SDK_CHAT_TIMEOUT",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": null,
+        "error_type": "APITimeoutError"
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "SDK_CHAT_TRUNCATED",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": null,
+        "error_type": "APIConnectionError"
+      }
+    },
+    {
+      "contract": "T00-01",
+      "case": "SDK_CHAT_STREAM_COMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "outcome": "stream_consumed",
+        "stream_consumed": true,
+        "event_count": 3,
+        "event_types": [
+          "chat.chunk",
+          "chat.chunk",
+          "chat.chunk"
+        ],
+        "terminals": [
+          "stop"
+        ],
+        "canceled_after_first_event": false,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": null
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "SDK_CHAT_STREAM_EOF",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "outcome": "stream_consumed",
+        "stream_consumed": true,
+        "event_count": 2,
+        "event_types": [
+          "chat.chunk",
+          "chat.chunk"
+        ],
+        "terminals": [],
+        "canceled_after_first_event": false,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": null
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "SDK_CHAT_STREAM_INCOMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "outcome": "stream_consumed",
+        "stream_consumed": true,
+        "event_count": 3,
+        "event_types": [
+          "chat.chunk",
+          "chat.chunk",
+          "chat.chunk"
+        ],
+        "terminals": [
+          "length"
+        ],
+        "canceled_after_first_event": false,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": null
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "SDK_CHAT_STREAM_SSE_ERROR",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": null,
+        "error_type": "APIError",
+        "event_count": 2,
+        "event_types": [
+          "chat.chunk",
+          "chat.chunk"
+        ],
+        "terminals": [],
+        "canceled_after_first_event": false,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": null
+      }
+    },
+    {
+      "contract": "T00-07",
+      "case": "SDK_CHAT_STREAM_CANCEL",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "outcome": "cancelled",
+        "stream_consumed": false,
+        "event_count": 1,
+        "event_types": [
+          "chat.chunk"
+        ],
+        "terminals": [],
+        "canceled_after_first_event": true,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": 23622533892165,
+        "cancel_observation_window_ms": 2000,
+        "upstream_disconnect_delay_ms": 5.234,
+        "upstream_producer_exit_delay_ms": 5.237,
+        "upstream_disconnect_monotonic_ns": 23622539126249,
+        "upstream_producer_exit_monotonic_ns": 23622539128730,
+        "upstream_disconnect_within_observation_window": true,
+        "upstream_producer_exited_within_observation_window": true,
+        "active_upstream_producers_at_observation_end": 0,
+        "proxy_liveness_http_2xx_after_cancel": null,
+        "upstream_disconnect_observed": true,
+        "upstream_producer_exit_reason": "client_disconnect",
+        "upstream_stream_body_finished": false,
+        "upstream_frames_written_at_disconnect": 2,
+        "upstream_frames_written_after_downstream_close": 0,
+        "upstream_cancel_fixture_frames_written": 1
+      }
+    },
+    {
+      "contract": "T00-05",
+      "case": "SDK_CHAT_TOOL_ROUNDTRIP",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "tool_dispatch_outcomes": [
+          "dispatched",
+          "dispatched"
+        ],
+        "continuation_in_public": false,
+        "key_in_public": false
+      }
+    },
+    {
+      "contract": "T00-01",
+      "case": "SDK_RESPONSES_COMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "terminal": "completed"
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "SDK_RESPONSES_INCOMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "terminal": "incomplete",
+        "incomplete_reason": "max_output_tokens"
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "SDK_RESPONSES_HTTP_ERROR",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 503,
+        "error_type": "InternalServerError"
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "SDK_RESPONSES_TIMEOUT",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": null,
+        "error_type": "APITimeoutError"
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "SDK_RESPONSES_TRUNCATED",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": null,
+        "error_type": "APIConnectionError"
+      }
+    },
+    {
+      "contract": "T00-01",
+      "case": "SDK_RESPONSES_STREAM_COMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "outcome": "stream_consumed",
+        "stream_consumed": true,
+        "event_count": 3,
+        "event_types": [
+          "response.created",
+          "response.output_text.delta",
+          "response.completed"
+        ],
+        "terminals": [
+          "completed"
+        ],
+        "canceled_after_first_event": false,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": null
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "SDK_RESPONSES_STREAM_EOF",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "outcome": "stream_consumed",
+        "stream_consumed": true,
+        "event_count": 2,
+        "event_types": [
+          "response.created",
+          "response.output_text.delta"
+        ],
+        "terminals": [],
+        "canceled_after_first_event": false,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": null
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "SDK_RESPONSES_STREAM_INCOMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "outcome": "stream_consumed",
+        "stream_consumed": true,
+        "event_count": 3,
+        "event_types": [
+          "response.created",
+          "response.output_text.delta",
+          "response.incomplete"
+        ],
+        "terminals": [
+          "incomplete"
+        ],
+        "canceled_after_first_event": false,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": null
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "SDK_RESPONSES_STREAM_SSE_ERROR",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": null,
+        "error_type": "APIError",
+        "event_count": 2,
+        "event_types": [
+          "response.created",
+          "response.output_text.delta"
+        ],
+        "terminals": [],
+        "canceled_after_first_event": false,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": null
+      }
+    },
+    {
+      "contract": "T00-07",
+      "case": "SDK_RESPONSES_STREAM_CANCEL",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "outcome": "cancelled",
+        "stream_consumed": false,
+        "event_count": 1,
+        "event_types": [
+          "response.created"
+        ],
+        "terminals": [],
+        "canceled_after_first_event": true,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": 23622901958901,
+        "cancel_observation_window_ms": 2000,
+        "upstream_disconnect_delay_ms": 5.358,
+        "upstream_producer_exit_delay_ms": 5.361,
+        "upstream_disconnect_monotonic_ns": 23622907317036,
+        "upstream_producer_exit_monotonic_ns": 23622907319819,
+        "upstream_disconnect_within_observation_window": true,
+        "upstream_producer_exited_within_observation_window": true,
+        "active_upstream_producers_at_observation_end": 0,
+        "proxy_liveness_http_2xx_after_cancel": null,
+        "upstream_disconnect_observed": true,
+        "upstream_producer_exit_reason": "client_disconnect",
+        "upstream_stream_body_finished": false,
+        "upstream_frames_written_at_disconnect": 2,
+        "upstream_frames_written_after_downstream_close": 0,
+        "upstream_cancel_fixture_frames_written": 1
+      }
+    },
+    {
+      "contract": "T00-05",
+      "case": "SDK_RESPONSES_TOOL_ROUNDTRIP",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "tool_dispatch_outcomes": [
+          "dispatched",
+          "dispatched"
+        ],
+        "continuation_in_public": false,
+        "key_in_public": false
+      }
+    },
+    {
+      "contract": "T00-01",
+      "case": "SDK_MESSAGES_COMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "terminal": "end_turn"
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "SDK_MESSAGES_INCOMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "terminal": "max_tokens"
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "SDK_MESSAGES_HTTP_ERROR",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 503,
+        "error_type": "InternalServerError"
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "SDK_MESSAGES_TIMEOUT",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": null,
+        "error_type": "APITimeoutError"
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "SDK_MESSAGES_TRUNCATED",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": null,
+        "error_type": "APIConnectionError"
+      }
+    },
+    {
+      "contract": "T00-01",
+      "case": "SDK_MESSAGES_STREAM_COMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "outcome": "stream_consumed",
+        "stream_consumed": true,
+        "event_count": 6,
+        "event_types": [
+          "message_start",
+          "content_block_start",
+          "content_block_delta",
+          "content_block_stop",
+          "message_delta",
+          "message_stop"
+        ],
+        "terminals": [
+          "end_turn",
+          "message_stop"
+        ],
+        "canceled_after_first_event": false,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": null
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "SDK_MESSAGES_STREAM_EOF",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "outcome": "stream_consumed",
+        "stream_consumed": true,
+        "event_count": 3,
+        "event_types": [
+          "message_start",
+          "content_block_start",
+          "content_block_delta"
+        ],
+        "terminals": [],
+        "canceled_after_first_event": false,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": null
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "SDK_MESSAGES_STREAM_INCOMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "outcome": "stream_consumed",
+        "stream_consumed": true,
+        "event_count": 6,
+        "event_types": [
+          "message_start",
+          "content_block_start",
+          "content_block_delta",
+          "content_block_stop",
+          "message_delta",
+          "message_stop"
+        ],
+        "terminals": [
+          "max_tokens",
+          "message_stop"
+        ],
+        "canceled_after_first_event": false,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": null
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "SDK_MESSAGES_STREAM_SSE_ERROR",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 200,
+        "error_type": "APIStatusError",
+        "event_count": 3,
+        "event_types": [
+          "message_start",
+          "content_block_start",
+          "content_block_delta"
+        ],
+        "terminals": [],
+        "canceled_after_first_event": false,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": null
+      }
+    },
+    {
+      "contract": "T00-07",
+      "case": "SDK_MESSAGES_STREAM_CANCEL",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "outcome": "cancelled",
+        "stream_consumed": false,
+        "event_count": 1,
+        "event_types": [
+          "message_start"
+        ],
+        "terminals": [],
+        "canceled_after_first_event": true,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": 23623160195613,
+        "cancel_observation_window_ms": 2000,
+        "upstream_disconnect_delay_ms": 5.182,
+        "upstream_producer_exit_delay_ms": 5.186,
+        "upstream_disconnect_monotonic_ns": 23623165378051,
+        "upstream_producer_exit_monotonic_ns": 23623165381785,
+        "upstream_disconnect_within_observation_window": true,
+        "upstream_producer_exited_within_observation_window": true,
+        "active_upstream_producers_at_observation_end": 0,
+        "proxy_liveness_http_2xx_after_cancel": null,
+        "upstream_disconnect_observed": true,
+        "upstream_producer_exit_reason": "client_disconnect",
+        "upstream_stream_body_finished": false,
+        "upstream_frames_written_at_disconnect": 2,
+        "upstream_frames_written_after_downstream_close": 0,
+        "upstream_cancel_fixture_frames_written": 1
+      }
+    },
+    {
+      "contract": "T00-05",
+      "case": "SDK_MESSAGES_TOOL_ROUNDTRIP",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "tool_dispatch_outcomes": [
+          "dispatched",
+          "dispatched"
+        ],
+        "continuation_in_public": false,
+        "key_in_public": false
+      }
+    },
+    {
+      "contract": "T00-01",
+      "case": "PROXY_CHAT_COMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "terminal": "stop"
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_CHAT_OVERRIDE_URL",
+      "status": "PASS",
+      "facts": {
+        "status_code": 401,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_CHAT_OVERRIDE_HEADER",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_CHAT_OVERRIDE_EXTRA_HEADERS",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_CHAT_OVERRIDE_RETRY",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_CHAT_OVERRIDE_RETRY_POLICY",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_CHAT_OVERRIDE_RETRY_GLOBAL",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_CHAT_OVERRIDE_RETRY_MAX",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_CHAT_OVERRIDE_FALLBACK",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_CHAT_OVERRIDE_NESTED",
+      "status": "PASS",
+      "facts": {
+        "status_code": 401,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "PROXY_CHAT_INCOMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "terminal": "length"
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "PROXY_CHAT_RAW_TERMINAL_MISSING",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 502,
+        "error_type": "InternalServerError"
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "PROXY_CHAT_HTTP_ERROR",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 503,
+        "error_type": "InternalServerError"
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "PROXY_CHAT_TIMEOUT",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": null,
+        "error_type": "APITimeoutError"
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "PROXY_CHAT_TRUNCATED",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 500,
+        "error_type": "InternalServerError"
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "PROXY_CHAT_STREAM_FAIL_CLOSED",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 400,
+        "error_type": "BadRequestError"
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "PROXY_CHAT_STREAM_EOF_STRING_FAIL_CLOSED",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "PROXY_CHAT_STREAM_EOF_NUMERIC_FAIL_CLOSED",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "PROXY_CHAT_STREAM_EOF_SHORT_T_FAIL_CLOSED",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "PROXY_CHAT_STREAM_EOF_SHORT_Y_FAIL_CLOSED",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "PROXY_CHAT_STREAM_EOF_UPPER_T_FAIL_CLOSED",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "PROXY_CHAT_STREAM_EOF_UPPER_Y_FAIL_CLOSED",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400
+      }
+    },
+    {
+      "contract": "T00-05",
+      "case": "PROXY_CHAT_TOOL_ROUNDTRIP",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "tool_dispatch_outcomes": [
+          "dispatched",
+          "dispatched"
+        ],
+        "continuation_in_public": false,
+        "key_in_public": false
+      }
+    },
+    {
+      "contract": "T00-04",
+      "case": "PROXY_CHAT_TOOL_MALFORMED",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "rejection": "partial_json",
+        "dispatched": false,
+        "tool_dispatch_count": 0
+      }
+    },
+    {
+      "contract": "T00-04",
+      "case": "PROXY_CHAT_TOOL_INVALID",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "rejection": "invalid_json",
+        "dispatched": false,
+        "tool_dispatch_count": 0
+      }
+    },
+    {
+      "contract": "T00-04",
+      "case": "PROXY_CHAT_TOOL_UNKNOWN",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "rejection": "not_allowlisted",
+        "dispatched": false,
+        "tool_dispatch_count": 0
+      }
+    },
+    {
+      "contract": "T00-01",
+      "case": "PROXY_RESPONSES_COMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "terminal": "completed"
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_RESPONSES_OVERRIDE_URL",
+      "status": "PASS",
+      "facts": {
+        "status_code": 401,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_RESPONSES_OVERRIDE_HEADER",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_RESPONSES_OVERRIDE_EXTRA_HEADERS",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_RESPONSES_OVERRIDE_RETRY",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_RESPONSES_OVERRIDE_RETRY_POLICY",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_RESPONSES_OVERRIDE_RETRY_GLOBAL",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_RESPONSES_OVERRIDE_RETRY_MAX",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_RESPONSES_OVERRIDE_FALLBACK",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_RESPONSES_OVERRIDE_NESTED",
+      "status": "PASS",
+      "facts": {
+        "status_code": 401,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "PROXY_RESPONSES_INCOMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "terminal": "incomplete",
+        "incomplete_reason": "max_output_tokens"
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "PROXY_RESPONSES_HTTP_ERROR",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 503,
+        "error_type": "InternalServerError"
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "PROXY_RESPONSES_TIMEOUT",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": null,
+        "error_type": "APITimeoutError"
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "PROXY_RESPONSES_TRUNCATED",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 500,
+        "error_type": "InternalServerError"
+      }
+    },
+    {
+      "contract": "T00-01",
+      "case": "PROXY_RESPONSES_STREAM_COMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "outcome": "stream_consumed",
+        "stream_consumed": true,
+        "event_count": 3,
+        "event_types": [
+          "response.created",
+          "response.output_text.delta",
+          "response.completed"
+        ],
+        "terminals": [
+          "completed"
+        ],
+        "canceled_after_first_event": false,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": null
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "PROXY_RESPONSES_STREAM_EOF",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "outcome": "stream_consumed",
+        "stream_consumed": true,
+        "event_count": 3,
+        "event_types": [
+          "response.created",
+          "response.output_text.delta",
+          "response.failed"
+        ],
+        "terminals": [
+          "failed"
+        ],
+        "canceled_after_first_event": false,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": null
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "PROXY_RESPONSES_STREAM_INCOMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "outcome": "stream_consumed",
+        "stream_consumed": true,
+        "event_count": 3,
+        "event_types": [
+          "response.created",
+          "response.output_text.delta",
+          "response.incomplete"
+        ],
+        "terminals": [
+          "incomplete"
+        ],
+        "canceled_after_first_event": false,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": null
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "PROXY_RESPONSES_STREAM_SSE_ERROR",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "outcome": "stream_consumed",
+        "stream_consumed": true,
+        "event_count": 3,
+        "event_types": [
+          "response.created",
+          "response.output_text.delta",
+          "response.failed"
+        ],
+        "terminals": [
+          "failed"
+        ],
+        "canceled_after_first_event": false,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": null
+      }
+    },
+    {
+      "contract": "T00-07",
+      "case": "PROXY_RESPONSES_STREAM_CANCEL",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "outcome": "cancelled",
+        "stream_consumed": false,
+        "event_count": 1,
+        "event_types": [
+          "response.created"
+        ],
+        "terminals": [],
+        "canceled_after_first_event": true,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": 23635775605348,
+        "cancel_observation_window_ms": 2000,
+        "upstream_disconnect_delay_ms": 7.656,
+        "upstream_producer_exit_delay_ms": 7.658,
+        "upstream_disconnect_monotonic_ns": 23635783261460,
+        "upstream_producer_exit_monotonic_ns": 23635783263625,
+        "upstream_disconnect_within_observation_window": true,
+        "upstream_producer_exited_within_observation_window": true,
+        "active_upstream_producers_at_observation_end": 0,
+        "proxy_liveness_http_2xx_after_cancel": true,
+        "upstream_disconnect_observed": true,
+        "upstream_producer_exit_reason": "client_disconnect",
+        "upstream_stream_body_finished": false,
+        "upstream_frames_written_at_disconnect": 3,
+        "upstream_frames_written_after_downstream_close": 1,
+        "upstream_cancel_fixture_frames_written": 2
+      }
+    },
+    {
+      "contract": "T00-05",
+      "case": "PROXY_RESPONSES_TOOL_ROUNDTRIP",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "tool_dispatch_outcomes": [
+          "dispatched",
+          "dispatched"
+        ],
+        "continuation_in_public": false,
+        "key_in_public": false
+      }
+    },
+    {
+      "contract": "T00-04",
+      "case": "PROXY_RESPONSES_TOOL_MALFORMED",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "rejection": "partial_json",
+        "dispatched": false,
+        "tool_dispatch_count": 0
+      }
+    },
+    {
+      "contract": "T00-04",
+      "case": "PROXY_RESPONSES_TOOL_INVALID",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "rejection": "invalid_json",
+        "dispatched": false,
+        "tool_dispatch_count": 0
+      }
+    },
+    {
+      "contract": "T00-04",
+      "case": "PROXY_RESPONSES_TOOL_UNKNOWN",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "rejection": "not_allowlisted",
+        "dispatched": false,
+        "tool_dispatch_count": 0
+      }
+    },
+    {
+      "contract": "T00-01",
+      "case": "PROXY_MESSAGES_COMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "terminal": "end_turn"
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_MESSAGES_OVERRIDE_URL",
+      "status": "PASS",
+      "facts": {
+        "status_code": 401,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_MESSAGES_OVERRIDE_HEADER",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_MESSAGES_OVERRIDE_EXTRA_HEADERS",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_MESSAGES_OVERRIDE_RETRY",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_MESSAGES_OVERRIDE_RETRY_POLICY",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_MESSAGES_OVERRIDE_RETRY_GLOBAL",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_MESSAGES_OVERRIDE_RETRY_MAX",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_MESSAGES_OVERRIDE_FALLBACK",
+      "status": "PASS",
+      "facts": {
+        "status_code": 400,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_MESSAGES_OVERRIDE_NESTED",
+      "status": "PASS",
+      "facts": {
+        "status_code": 401,
+        "expected_upstream_requests": 0,
+        "normal_route_control_passed": true
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "PROXY_MESSAGES_INCOMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "terminal": "max_tokens"
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "PROXY_MESSAGES_HTTP_ERROR",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 503,
+        "error_type": "InternalServerError"
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "PROXY_MESSAGES_TIMEOUT",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": null,
+        "error_type": "APITimeoutError"
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "PROXY_MESSAGES_TRUNCATED",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 500,
+        "error_type": "InternalServerError"
+      }
+    },
+    {
+      "contract": "T00-01",
+      "case": "PROXY_MESSAGES_STREAM_COMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "outcome": "stream_consumed",
+        "stream_consumed": true,
+        "event_count": 6,
+        "event_types": [
+          "message_start",
+          "content_block_start",
+          "content_block_delta",
+          "content_block_stop",
+          "message_delta",
+          "message_stop"
+        ],
+        "terminals": [
+          "end_turn",
+          "message_stop"
+        ],
+        "canceled_after_first_event": false,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": null
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "PROXY_MESSAGES_STREAM_EOF",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "outcome": "stream_consumed",
+        "stream_consumed": true,
+        "event_count": 3,
+        "event_types": [
+          "message_start",
+          "content_block_start",
+          "content_block_delta"
+        ],
+        "terminals": [],
+        "canceled_after_first_event": false,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": null
+      }
+    },
+    {
+      "contract": "T00-02",
+      "case": "PROXY_MESSAGES_STREAM_INCOMPLETE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "outcome": "stream_consumed",
+        "stream_consumed": true,
+        "event_count": 6,
+        "event_types": [
+          "message_start",
+          "content_block_start",
+          "content_block_delta",
+          "content_block_stop",
+          "message_delta",
+          "message_stop"
+        ],
+        "terminals": [
+          "max_tokens",
+          "message_stop"
+        ],
+        "canceled_after_first_event": false,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": null
+      }
+    },
+    {
+      "contract": "T00-03",
+      "case": "PROXY_MESSAGES_STREAM_SSE_ERROR",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 200,
+        "error_type": "APIStatusError",
+        "event_count": 3,
+        "event_types": [
+          "message_start",
+          "content_block_start",
+          "content_block_delta"
+        ],
+        "terminals": [],
+        "canceled_after_first_event": false,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": null
+      }
+    },
+    {
+      "contract": "T00-07",
+      "case": "PROXY_MESSAGES_STREAM_CANCEL",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "outcome": "cancelled",
+        "stream_consumed": false,
+        "event_count": 1,
+        "event_types": [
+          "message_start"
+        ],
+        "terminals": [],
+        "canceled_after_first_event": true,
+        "client_response_closed": true,
+        "downstream_close_monotonic_ns": 23636640571366,
+        "cancel_observation_window_ms": 2000,
+        "upstream_disconnect_delay_ms": 8.629,
+        "upstream_producer_exit_delay_ms": 8.63,
+        "upstream_disconnect_monotonic_ns": 23636649200107,
+        "upstream_producer_exit_monotonic_ns": 23636649201707,
+        "upstream_disconnect_within_observation_window": true,
+        "upstream_producer_exited_within_observation_window": true,
+        "active_upstream_producers_at_observation_end": 0,
+        "proxy_liveness_http_2xx_after_cancel": true,
+        "upstream_disconnect_observed": true,
+        "upstream_producer_exit_reason": "client_disconnect",
+        "upstream_stream_body_finished": false,
+        "upstream_frames_written_at_disconnect": 3,
+        "upstream_frames_written_after_downstream_close": 1,
+        "upstream_cancel_fixture_frames_written": 2
+      }
+    },
+    {
+      "contract": "T00-05",
+      "case": "PROXY_MESSAGES_TOOL_ROUNDTRIP",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "tool_dispatch_outcomes": [
+          "dispatched",
+          "dispatched"
+        ],
+        "continuation_in_public": false,
+        "key_in_public": false
+      }
+    },
+    {
+      "contract": "T00-04",
+      "case": "PROXY_MESSAGES_TOOL_MALFORMED",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "rejection": "invalid_argument_shape",
+        "dispatched": false,
+        "tool_dispatch_count": 0
+      }
+    },
+    {
+      "contract": "T00-04",
+      "case": "PROXY_MESSAGES_TOOL_INVALID",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "rejection": "invalid_argument_shape",
+        "dispatched": false,
+        "tool_dispatch_count": 0
+      }
+    },
+    {
+      "contract": "T00-04",
+      "case": "PROXY_MESSAGES_TOOL_UNKNOWN",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "rejection": "not_allowlisted",
+        "dispatched": false,
+        "tool_dispatch_count": 0
+      }
+    },
+    {
+      "contract": "T00-10",
+      "case": "NATIVE_DEEPSEEK_RAW_STOP",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "terminals": [
+          "stop"
+        ],
+        "event_types": [
+          "chat.chunk",
+          "chat.chunk",
+          "chat.chunk"
+        ],
+        "usage_chunks": 0,
+        "client_response_closed": true,
+        "duration_ms": 19.95,
+        "case_predicates": {
+          "expected_success": true,
+          "client_response_closed": true,
+          "expected_terminal": true,
+          "usage_count": true,
+          "single_upstream_request": true,
+          "native_deepseek_route": true,
+          "synthetic_key_isolation": true,
+          "upstream_terminal_receipt": true,
+          "request_key_redaction": true
+        }
+      }
+    },
+    {
+      "contract": "T00-10",
+      "case": "NATIVE_DEEPSEEK_RAW_STOP_CLEAN_EOF",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "terminals": [
+          "stop"
+        ],
+        "event_types": [
+          "chat.chunk",
+          "chat.chunk",
+          "chat.chunk"
+        ],
+        "usage_chunks": 0,
+        "client_response_closed": true,
+        "duration_ms": 16.14,
+        "case_predicates": {
+          "expected_success": true,
+          "client_response_closed": true,
+          "expected_terminal": true,
+          "usage_count": true,
+          "single_upstream_request": true,
+          "native_deepseek_route": true,
+          "synthetic_key_isolation": true,
+          "upstream_terminal_receipt": true,
+          "request_key_redaction": true
+        }
+      }
+    },
+    {
+      "contract": "T00-10",
+      "case": "NATIVE_DEEPSEEK_RAW_STOP_USAGE_DONE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "terminals": [
+          "stop"
+        ],
+        "event_types": [
+          "chat.chunk",
+          "chat.chunk",
+          "chat.chunk",
+          "chat.chunk"
+        ],
+        "usage_chunks": 1,
+        "client_response_closed": true,
+        "duration_ms": 17.32,
+        "case_predicates": {
+          "expected_success": true,
+          "client_response_closed": true,
+          "expected_terminal": true,
+          "usage_count": true,
+          "single_upstream_request": true,
+          "native_deepseek_route": true,
+          "synthetic_key_isolation": true,
+          "upstream_terminal_receipt": true,
+          "request_key_redaction": true
+        }
+      }
+    },
+    {
+      "contract": "T00-10",
+      "case": "NATIVE_DEEPSEEK_RAW_STOP_USAGE_SAME_FRAME",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "terminals": [
+          "stop"
+        ],
+        "event_types": [
+          "chat.chunk",
+          "chat.chunk",
+          "chat.chunk",
+          "chat.chunk"
+        ],
+        "usage_chunks": 1,
+        "client_response_closed": true,
+        "duration_ms": 16.93,
+        "case_predicates": {
+          "expected_success": true,
+          "client_response_closed": true,
+          "expected_terminal": true,
+          "usage_count": true,
+          "single_upstream_request": true,
+          "native_deepseek_route": true,
+          "synthetic_key_isolation": true,
+          "upstream_terminal_receipt": true,
+          "request_key_redaction": true
+        }
+      }
+    },
+    {
+      "contract": "T00-10",
+      "case": "NATIVE_DEEPSEEK_DONE_WITHOUT_RAW_STOP",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": null,
+        "error_type": "APIConnectionError",
+        "terminals": [],
+        "event_types": [
+          "chat.chunk",
+          "chat.chunk"
+        ],
+        "usage_chunks": 0,
+        "client_response_closed": true,
+        "duration_ms": 40.63,
+        "case_predicates": {
+          "expected_success": true,
+          "client_response_closed": true,
+          "expected_terminal": true,
+          "usage_count": true,
+          "single_upstream_request": true,
+          "native_deepseek_route": true,
+          "synthetic_key_isolation": true,
+          "upstream_terminal_receipt": true,
+          "request_key_redaction": true
+        }
+      }
+    },
+    {
+      "contract": "T00-10",
+      "case": "NATIVE_DEEPSEEK_EOF_WITHOUT_RAW_STOP",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": null,
+        "error_type": "APIConnectionError",
+        "terminals": [],
+        "event_types": [
+          "chat.chunk",
+          "chat.chunk"
+        ],
+        "usage_chunks": 0,
+        "client_response_closed": true,
+        "duration_ms": 29.43,
+        "case_predicates": {
+          "expected_success": true,
+          "client_response_closed": true,
+          "expected_terminal": true,
+          "usage_count": true,
+          "single_upstream_request": true,
+          "native_deepseek_route": true,
+          "synthetic_key_isolation": true,
+          "upstream_terminal_receipt": true,
+          "request_key_redaction": true
+        }
+      }
+    },
+    {
+      "contract": "T00-10",
+      "case": "NATIVE_DEEPSEEK_LENGTH_TERMINAL",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": null,
+        "error_type": "APIConnectionError",
+        "terminals": [],
+        "event_types": [
+          "chat.chunk",
+          "chat.chunk"
+        ],
+        "usage_chunks": 0,
+        "client_response_closed": true,
+        "duration_ms": 34.26,
+        "case_predicates": {
+          "expected_success": true,
+          "client_response_closed": true,
+          "expected_terminal": true,
+          "usage_count": true,
+          "single_upstream_request": true,
+          "native_deepseek_route": true,
+          "synthetic_key_isolation": true,
+          "upstream_terminal_receipt": true,
+          "request_key_redaction": true
+        }
+      }
+    },
+    {
+      "contract": "T00-10",
+      "case": "NATIVE_DEEPSEEK_CONTENT_FILTER_TERMINAL",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": null,
+        "error_type": "APIConnectionError",
+        "terminals": [],
+        "event_types": [
+          "chat.chunk",
+          "chat.chunk"
+        ],
+        "usage_chunks": 0,
+        "client_response_closed": true,
+        "duration_ms": 33.85,
+        "case_predicates": {
+          "expected_success": true,
+          "client_response_closed": true,
+          "expected_terminal": true,
+          "usage_count": true,
+          "single_upstream_request": true,
+          "native_deepseek_route": true,
+          "synthetic_key_isolation": true,
+          "upstream_terminal_receipt": true,
+          "request_key_redaction": true
+        }
+      }
+    },
+    {
+      "contract": "T00-10",
+      "case": "NATIVE_DEEPSEEK_SSE_ERROR",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": null,
+        "error_type": "APIConnectionError",
+        "terminals": [],
+        "event_types": [
+          "chat.chunk",
+          "chat.chunk"
+        ],
+        "usage_chunks": 0,
+        "client_response_closed": true,
+        "duration_ms": 37.61,
+        "case_predicates": {
+          "expected_success": true,
+          "client_response_closed": true,
+          "expected_terminal": true,
+          "usage_count": true,
+          "single_upstream_request": true,
+          "native_deepseek_route": true,
+          "synthetic_key_isolation": true,
+          "upstream_terminal_receipt": true,
+          "request_key_redaction": true
+        }
+      }
+    },
+    {
+      "contract": "T00-10",
+      "case": "NATIVE_DEEPSEEK_OPEN_AFTER_DONE",
+      "status": "PASS",
+      "facts": {
+        "success": true,
+        "terminals": [
+          "stop"
+        ],
+        "event_types": [
+          "chat.chunk",
+          "chat.chunk",
+          "chat.chunk"
+        ],
+        "usage_chunks": 0,
+        "client_response_closed": true,
+        "duration_ms": 14.13,
+        "completed_while_socket_held": true,
+        "request_thread_terminated": true,
+        "post_done_fixture_facts": {
+          "path": "/v1/chat/completions",
+          "model": "deepseek-flash",
+          "stream": true,
+          "thinking_disabled": true,
+          "tenant": "tenant-a",
+          "provider_key_match": true,
+          "project_key_match": false,
+          "upstream_terminal": "finish_reason_stop",
+          "post_done_socket_held": true,
+          "post_done_peer_close_state": "eof",
+          "post_done_peer_observation_monotonic_ns": 23637078547414,
+          "post_done_peer_observation_complete": true,
+          "post_done_barrier_release_monotonic_ns": 23637090239690,
+          "post_done_probe_write_attempted": true,
+          "post_done_probe_write_succeeded": true,
+          "client_disconnected": false,
+          "upstream_stream_producer_exit_monotonic_ns": 23637090408124
+        },
+        "case_predicates": {
+          "expected_success": true,
+          "client_response_closed": true,
+          "expected_terminal": true,
+          "usage_count": true,
+          "single_upstream_request": true,
+          "native_deepseek_route": true,
+          "synthetic_key_isolation": true,
+          "upstream_terminal_receipt": true,
+          "request_key_redaction": true,
+          "sdk_finished_while_barrier_held": true,
+          "held_socket_barrier_reached": true,
+          "peer_eof_or_reset_observed": true,
+          "peer_close_precedes_release": true,
+          "peer_observation_completed": true,
+          "sdk_request_thread_terminated": true,
+          "producer_exited_after_release": true
+        }
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_CHAT_MISSING_KEY",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 400,
+        "error_type": "BadRequestError"
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_CHAT_EMPTY_KEY",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 400,
+        "error_type": "BadRequestError"
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_CHAT_WHITESPACE_KEY",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 400,
+        "error_type": "BadRequestError"
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_CHAT_NONSTRING_KEY",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 400,
+        "error_type": "BadRequestError"
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_CHAT_BAD_PROJECT",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 401,
+        "error_type": "AuthenticationError"
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_CHAT_WRONG_MODEL",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 403,
+        "error_type": "PermissionDeniedError"
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_RESPONSES_MISSING_KEY",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 400,
+        "error_type": "BadRequestError"
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_RESPONSES_EMPTY_KEY",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 400,
+        "error_type": "BadRequestError"
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_RESPONSES_WHITESPACE_KEY",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 400,
+        "error_type": "BadRequestError"
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_RESPONSES_NONSTRING_KEY",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 400,
+        "error_type": "BadRequestError"
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_RESPONSES_BAD_PROJECT",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 401,
+        "error_type": "AuthenticationError"
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_RESPONSES_WRONG_MODEL",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 403,
+        "error_type": "PermissionDeniedError"
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_MESSAGES_MISSING_KEY",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 400,
+        "error_type": "BadRequestError"
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_MESSAGES_EMPTY_KEY",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 400,
+        "error_type": "BadRequestError"
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_MESSAGES_WHITESPACE_KEY",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 400,
+        "error_type": "BadRequestError"
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_MESSAGES_NONSTRING_KEY",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 400,
+        "error_type": "BadRequestError"
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_MESSAGES_BAD_PROJECT",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 401,
+        "error_type": "AuthenticationError"
+      }
+    },
+    {
+      "contract": "T00-08",
+      "case": "PROXY_MESSAGES_WRONG_MODEL",
+      "status": "PASS",
+      "facts": {
+        "success": false,
+        "status_code": 403,
+        "error_type": "PermissionDeniedError"
+      }
+    },
+    {
+      "contract": "T00-06",
+      "case": "PROXY_CONCURRENT_PROJECT_PROVIDER_ISOLATION",
+      "status": "PASS",
+      "facts": {
+        "requests": 4
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "ALL_UPSTREAM_REQUESTS_ACCOUNTED",
+      "status": "PASS",
+      "facts": {
+        "expected_total": 97,
+        "actual_total": 97
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_CHAT_COMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_CHAT_INCOMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_length"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_CHAT_HTTP_ERROR_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "http_503_no_completion"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_CHAT_TIMEOUT_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_CHAT_TRUNCATED_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "truncated_http_body"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_CHAT_STREAM_COMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_CHAT_STREAM_EOF_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "normal_eof_without_protocol_terminal"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_CHAT_STREAM_INCOMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_length"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_CHAT_STREAM_SSE_ERROR_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "stream_error_no_terminal"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_CHAT_STREAM_CANCEL_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_CHAT_TOOL_R1_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "tool_call_turn"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_CHAT_TOOL_R2_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "tool_call_turn"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_CHAT_TOOL_FINAL_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_RESPONSES_COMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "response_completed"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_RESPONSES_INCOMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "response_incomplete"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_RESPONSES_HTTP_ERROR_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "http_503_no_completion"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_RESPONSES_TIMEOUT_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "response_completed"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_RESPONSES_TRUNCATED_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "truncated_http_body"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_RESPONSES_STREAM_COMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "response_completed"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_RESPONSES_STREAM_EOF_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "normal_eof_without_protocol_terminal"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_RESPONSES_STREAM_INCOMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "response_incomplete"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_RESPONSES_STREAM_SSE_ERROR_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "stream_error_no_terminal"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_RESPONSES_STREAM_CANCEL_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "response_completed"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_RESPONSES_TOOL_R1_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "tool_call_turn"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_RESPONSES_TOOL_R2_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "tool_call_turn"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_RESPONSES_TOOL_FINAL_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "response_completed"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_MESSAGES_COMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "message_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_MESSAGES_INCOMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "message_stop_max_tokens"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_MESSAGES_HTTP_ERROR_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "http_503_no_completion"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_MESSAGES_TIMEOUT_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "message_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_MESSAGES_TRUNCATED_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "truncated_http_body"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_MESSAGES_STREAM_COMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "message_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_MESSAGES_STREAM_EOF_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "normal_eof_without_protocol_terminal"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_MESSAGES_STREAM_INCOMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "message_stop_max_tokens"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_MESSAGES_STREAM_SSE_ERROR_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "stream_error_no_terminal"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_MESSAGES_STREAM_CANCEL_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "message_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_MESSAGES_TOOL_R1_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "tool_call_turn"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_MESSAGES_TOOL_R2_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "tool_call_turn"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_SDK_MESSAGES_TOOL_FINAL_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "message_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_COMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_OVERRIDE_URL_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_OVERRIDE_HEADER_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_OVERRIDE_EXTRA_HEADERS_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_OVERRIDE_RETRY_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_OVERRIDE_RETRY_POLICY_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_OVERRIDE_RETRY_GLOBAL_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_OVERRIDE_RETRY_MAX_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_OVERRIDE_FALLBACK_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_OVERRIDE_NESTED_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_INCOMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_length"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_NO_FINISH_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "missing_finish_reason"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_HTTP_ERROR_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "http_503_no_completion"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_TIMEOUT_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_TRUNCATED_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "truncated_http_body"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_STREAM_GUARD_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_STREAM_EOF_STRING_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_STREAM_EOF_NUMERIC_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_STREAM_EOF_SHORT_T_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_STREAM_EOF_SHORT_Y_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_STREAM_EOF_UPPER_T_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_STREAM_EOF_UPPER_Y_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_TOOL_R1_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "tool_call_turn"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_TOOL_R2_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "tool_call_turn"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_TOOL_FINAL_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_TOOL_MALFORMED_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_TOOL_INVALID_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_TOOL_UNKNOWN_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_COMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "response_completed"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_OVERRIDE_URL_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_OVERRIDE_HEADER_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_OVERRIDE_EXTRA_HEADERS_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_OVERRIDE_RETRY_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_OVERRIDE_RETRY_POLICY_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_OVERRIDE_RETRY_GLOBAL_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_OVERRIDE_RETRY_MAX_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_OVERRIDE_FALLBACK_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_OVERRIDE_NESTED_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_INCOMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "response_incomplete"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_HTTP_ERROR_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "http_503_no_completion"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_TIMEOUT_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "response_completed"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_TRUNCATED_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "truncated_http_body"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_STREAM_COMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "response_completed"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_STREAM_EOF_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "normal_eof_without_protocol_terminal"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_STREAM_INCOMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "response_incomplete"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_STREAM_SSE_ERROR_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "stream_error_no_terminal"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_STREAM_CANCEL_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "response_completed"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_TOOL_R1_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "tool_call_turn"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_TOOL_R2_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "tool_call_turn"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_TOOL_FINAL_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "response_completed"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_TOOL_MALFORMED_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "response_completed"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_TOOL_INVALID_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "response_completed"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_TOOL_UNKNOWN_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "responses"
+        ],
+        "upstream_terminals": [
+          "response_completed"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_COMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "message_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_OVERRIDE_URL_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_OVERRIDE_HEADER_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_OVERRIDE_EXTRA_HEADERS_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_OVERRIDE_RETRY_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_OVERRIDE_RETRY_POLICY_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_OVERRIDE_RETRY_GLOBAL_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_OVERRIDE_RETRY_MAX_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_OVERRIDE_FALLBACK_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_OVERRIDE_NESTED_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_INCOMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "message_stop_max_tokens"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_HTTP_ERROR_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "http_503_no_completion"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_TIMEOUT_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "message_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_TRUNCATED_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "truncated_http_body"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_STREAM_COMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "message_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_STREAM_EOF_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "normal_eof_without_protocol_terminal"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_STREAM_INCOMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "message_stop_max_tokens"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_STREAM_SSE_ERROR_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "stream_error_no_terminal"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_STREAM_CANCEL_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "message_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_TOOL_R1_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "tool_call_turn"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_TOOL_R2_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "tool_call_turn"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_TOOL_FINAL_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "message_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_TOOL_MALFORMED_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "message_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_TOOL_INVALID_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "message_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_TOOL_UNKNOWN_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "message_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_DEEPSEEK_RAW_STOP_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "deepseek-flash"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_DEEPSEEK_STOP_EOF_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "deepseek-flash"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_stop_without_done"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_DEEPSEEK_USAGE_DONE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "deepseek-flash"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_stop_with_usage"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_DEEPSEEK_USAGE_SAME_FRAME_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "deepseek-flash"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_stop_with_usage_same_frame"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_DEEPSEEK_NO_STOP_DONE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "deepseek-flash"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "protocol_done_without_finish_reason"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_DEEPSEEK_EOF_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "deepseek-flash"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "normal_eof_without_protocol_terminal"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_DEEPSEEK_INCOMPLETE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "deepseek-flash"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_length"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_DEEPSEEK_CONTENT_FILTER_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "deepseek-flash"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_content_filter"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_DEEPSEEK_SSE_ERROR_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "deepseek-flash"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "stream_error_no_terminal"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_DEEPSEEK_OPEN_AFTER_DONE_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "deepseek-flash"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_MISSING_KEY_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_EMPTY_KEY_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_WHITESPACE_KEY_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_NONSTRING_KEY_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_BAD_PROJECT_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_WRONG_MODEL_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_MISSING_KEY_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_EMPTY_KEY_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_WHITESPACE_KEY_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_NONSTRING_KEY_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_BAD_PROJECT_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_RESPONSES_WRONG_MODEL_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_MISSING_KEY_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_EMPTY_KEY_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_WHITESPACE_KEY_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_NONSTRING_KEY_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_BAD_PROJECT_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_WRONG_MODEL_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 0,
+        "actual_count": 0,
+        "provider_labels": [],
+        "models": [],
+        "protocols": [],
+        "upstream_terminals": []
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_CONCURRENT_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_CHAT_CONCURRENT_B_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-b"
+        ],
+        "models": [
+          "other-test-model"
+        ],
+        "protocols": [
+          "completions"
+        ],
+        "upstream_terminals": [
+          "finish_reason_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_CONCURRENT_A_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-a"
+        ],
+        "models": [
+          "test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "message_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-09",
+      "case": "T00_PROXY_MESSAGES_CONCURRENT_B_RECEIPT",
+      "status": "PASS",
+      "facts": {
+        "expected_count": 1,
+        "actual_count": 1,
+        "provider_labels": [
+          "tenant-b"
+        ],
+        "models": [
+          "other-test-model"
+        ],
+        "protocols": [
+          "messages"
+        ],
+        "upstream_terminals": [
+          "message_stop"
+        ]
+      }
+    },
+    {
+      "contract": "T00-05",
+      "case": "SDK_CHAT_CONTINUATION_PRESERVED",
+      "status": "PASS",
+      "facts": {
+        "chat_r1_assistant_preserved": true,
+        "chat_r1_tool_result_id_preserved": true,
+        "chat_r2_assistant_preserved": true,
+        "chat_r2_tool_result_id_preserved": true
+      }
+    },
+    {
+      "contract": "T00-05",
+      "case": "SDK_RESPONSES_CONTINUATION_PRESERVED",
+      "status": "PASS",
+      "facts": {
+        "responses_r1_output_items_preserved": true,
+        "responses_r1_tool_result_preserved": true,
+        "responses_r2_output_items_preserved": true,
+        "responses_r2_tool_result_preserved": true
+      }
+    },
+    {
+      "contract": "T00-05",
+      "case": "SDK_MESSAGES_CONTINUATION_PRESERVED",
+      "status": "PASS",
+      "facts": {
+        "messages_r1_thinking_signature_preserved": true,
+        "messages_r1_tool_result_preserved": true,
+        "messages_r2_thinking_signature_preserved": true,
+        "messages_r2_tool_result_preserved": true
+      }
+    },
+    {
+      "contract": "T00-05",
+      "case": "PROXY_CHAT_CONTINUATION_PRESERVED",
+      "status": "PASS",
+      "facts": {
+        "chat_r1_assistant_preserved": true,
+        "chat_r1_tool_result_id_preserved": true,
+        "chat_r2_assistant_preserved": true,
+        "chat_r2_tool_result_id_preserved": true
+      }
+    },
+    {
+      "contract": "T00-05",
+      "case": "PROXY_RESPONSES_CONTINUATION_PRESERVED",
+      "status": "PASS",
+      "facts": {
+        "responses_r1_output_items_preserved": true,
+        "responses_r1_tool_result_preserved": true,
+        "responses_r2_output_items_preserved": true,
+        "responses_r2_tool_result_preserved": true
+      }
+    },
+    {
+      "contract": "T00-05",
+      "case": "PROXY_MESSAGES_CONTINUATION_PRESERVED",
+      "status": "PASS",
+      "facts": {
+        "messages_r1_thinking_signature_preserved": true,
+        "messages_r1_tool_result_preserved": true,
+        "messages_r2_thinking_signature_preserved": true,
+        "messages_r2_tool_result_preserved": true
+      }
+    },
+    {
+      "contract": "T00-06",
+      "case": "PROXY_CHAT_UPSTREAM_CONCURRENCY_OBSERVED",
+      "status": "PASS",
+      "facts": {}
+    },
+    {
+      "contract": "T00-06",
+      "case": "PROXY_MESSAGES_UPSTREAM_CONCURRENCY_OBSERVED",
+      "status": "PASS",
+      "facts": {}
+    },
+    {
+      "contract": "T00-07",
+      "case": "ALL_SDK_CLIENTS_CLOSED",
+      "status": "PASS",
+      "facts": {
+        "client_count": 104
+      }
+    },
+    {
+      "contract": "T00-07",
+      "case": "UPSTREAM_PRODUCERS_CLOSED",
+      "status": "PASS",
+      "facts": {}
+    },
+    {
+      "contract": "T00-07",
+      "case": "LOCAL_RUNTIME_CLEANUP",
+      "status": "PASS",
+      "facts": {}
+    }
+  ],
+  "SDK_LOCAL": "PASS",
+  "PROXY_PROCESS_LOCAL": "PASS",
+  "passed": 295,
+  "failed": 0,
+  "evidence_binding": {
+    "code_candidate": "b98f153e2a4970c77fa2d49a9d5be4d653c451df",
+    "runtime_scope": "legacy routes",
+    "note": "Legacy matrix ran before the assistant reasoning-history addition; legacy protocol files and guard blobs unchanged."
+  }
+}

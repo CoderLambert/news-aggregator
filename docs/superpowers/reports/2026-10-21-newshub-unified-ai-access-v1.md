@@ -1,6 +1,6 @@
 # 统一模型接入的实施进度与可复现证据
 
-目标保持完整；状态为 **IN_PROGRESS**，不是全功能完成或上线验收。
+状态为 **IMPLEMENTED / LOCAL_VERIFIED**：六项实施任务完成，授权的指定 Ollama 真实链路通过。生产上线与用户手工验收另列，未执行。
 工作区：`/home/lambert/githubRepos/lambert/news-aggregator-ai-v1`，分支 `feat/ai-unified-access-v1`。
 基线：`a6cf437d45b66b962f35e4427ad8c05c589e990a`。设计与计划分别在相邻 `specs/`、`plans/` 目录。
 
@@ -44,7 +44,8 @@
 | Task 5 SDK→实际 Proxy→兼容目录 | **38 PASS / 0 FAIL** | Key/None；错误项目 key、缺 model 授权、owner 越权、伪造 none、URL 均零上游；[原始报告](evidence/2026-10-21-ai-discovery-proxy.json) |
 | Task 5 production-isolated Django 目录与业务 | **2 passed，35.98s** | Key/None 实际目录、探针、问答、分段翻译、工具与 EOF 围栏；目录无能力收据 |
 | Task 5 Chrome 浏览器 | **功能与 DOM 布局 PASS** | 合成 DB/账号/Proxy；宽屏及实际 CSS 413px，文档宽 394px；Enter/Esc/清空 Key/保存/目录/诊断/退出；[检查记录](evidence/2026-10-21-ai-browser-checks.json) |
-| 真实供应商（含指定 Ollama）、浏览器 UAT、全量 CI、生产 | NOT_RUN | 不得据上述结果宣布全功能完成 |
+| 指定 Ollama 真实服务 | **9/9 PASS** | 仅指定模型；见最终证据，不外推其他真实服务 |
+| 其他真实供应商、用户 UAT、远端 CI、生产 | NOT_RUN | 本地结果不代表上线验收 |
 
 原始脱敏 Proxy 报告保存在 `evidence/2026-10-21-ai-proxy-admission.json`；包含每条断言、版本、请求次数和清理结果。实际版本：Python 3.12.14、LiteLLM 1.105.0、OpenAI SDK 3.28.0、Anthropic 1.13.0、httpx2 2.13.1、临时 pgserver 0.1.4/Prisma 0.15.0。
 
@@ -62,11 +63,11 @@
 - 新增 GET 记录后，Django 业务探针最初 2 项失败：启动已有 legacy unknown OpenAI fixture 路由时，LiteLLM 用实验室专用 sentinel 做两次目录检查。改为明确记录并验证这个启动基线，再严格要求设置保存新增零请求；未忽略未知认证或新路由启动请求。修正后 2 项通过。
 - 浏览器发现目录后，原生 select 会视觉选中首项而 React 状态仍为空；回归先失败，再增加空选择占位，保持用户明确选择。默认视口截图成功并展示；模拟视口下 CDP 截图超时，窄屏只确认实际 DOM 布局与功能，未冒称窄屏截图验收。视口已恢复，临时账号退出，验收标签与独立进程已清理。
 
-## 下一实施边界
+## 实施完成与交付边界
 
-Task 3/4/5 已完成代码与所列本地验收。通用分段使用产品预算，context/output 的供应商最大值仍为未知，失败不重试、不切换。旧 DeepSeek clean EOF 与新 Chat stop+DONE 合同独立。继续 Task 6 指定 Ollama、整体门禁和最终 F01–F09/S01–S08/R01–R08；真实服务、远端 CI、生产及用户手工验收仍未完成。
+Task 1–6 均完成。通用分段使用产品预算，context/output 的供应商最大值仍为未知，失败不重试、不切换。旧 DeepSeek clean EOF 与新 Chat stop+DONE 合同独立。保留本地分支与 worktree；未推送、建 PR、合并、迁移真实 DB 或部署。管理员发布实际端点与模型、项目目录权限和全量远端 CI 属于后续交付边界。
 
-执行状态与下一任务见 Git ignored `.superpowers/sdd/2026-10-21-newshub-unified-ai-access-v1/progress.md`；临时 raw handler 脚本在 `/tmp/newshub-ai-v1-raw-handler-probe.py`，属于可删除调查脚本，未作为生产实现交付。
+逐任务过程已归档到本报告和原始证据；计划临时目录在验收后清理。授权 Ollama 复现脚本在原始证据压缩包内，读取关闭回显的 stdin，仅允许指定主机及临时解析的公网 IP；普通合成测试仍严格只允许 loopback。
 
 ## 重现关键门禁
 
@@ -90,3 +91,93 @@ env -i PATH=/usr/bin:/bin LANG=C.UTF-8 .venv-sdk/bin/python \
 Django 业务链严格沿 `.github/workflows/ci.yml` 的 T00 production-isolated 命令运行：全新 TMPDIR/HOME、WAL DB、CHROMA/TTS 目录、仅合成 secrets、`T00_PROXY_PYTHON` 指向私有 Proxy venv，再执行 `pytest -c backend/pytest.ini -o 'python_files=t04_*.py' -q tools/byok_t00_probe/t04_django_localproxy.py`。勿直接用生产目录或用户 DB。
 
 交付边界：尚无 PR/远端 CI；未推送、未合并、未部署，原工作区数据库与现有预览未操作。回滚代码不能替代 schema 回滚；0080 的加法列保留，停用新增端点即可撤销其后续执行。
+
+
+## Task 6 最终证据
+
+运行代码候选 **`b98f153e2a4970c77fa2d49a9d5be4d653c451df`**，基线 `a6cf437d45b66b962f35e4427ad8c05c589e990a`。随后只提交证据与文档。可从仓库根运行 `python3 docs/superpowers/reports/evidence/2026-10-21-validate-ai-final.py` 检查来源、25项要求及证据完整性。完整命令、退出码、候选及来源绑定见 [最终门禁](evidence/2026-10-21-ai-final-gates.json)，原始日志/动态覆盖审计/JUnit/安全复现脚本见 [原始归档](evidence/2026-10-21-ai-final-raw.tar.gz)。
+
+| 最终门禁 | 结果 | 说明 |
+| --- | --- | --- |
+| 三根后端 hybrid | **2243 passed / 16 skipped / 0 failed** | serial52 + 两 worker loadfile2191；2259 collected/executed 身份一致；未放宽 skip 审计 |
+| 全量前端 | **739 passed / 105 files** | Node22；typecheck/build PASS；lint0 errors、1个既有 warning；最终候选的前端 tree/lock 未变化，复用有效 |
+| Proxy direct / harness+config | **65 / 40 passed** | 含取消、TLS、压缩、原始终态、assistant-only 文本 reasoning 续接 |
+| 既有协议真实 Proxy 矩阵 | **295/295 PASS** | [结果](evidence/2026-10-21-ai-proxy-final.json)；新增 retry policy/global/max 的三协议零请求负控 |
+| 新受信真实 Proxy 矩阵 | **38/38 PASS** | [结果](evidence/2026-10-21-ai-trusted-proxy-final.json)；Key/None、目录、终态、撤销、无隐式发送 |
+| production-isolated Django 业务 | **5 passed，67.68s** | 旧3 + Key/None2；同文显式切换两个模型问答、翻译 retry，旧译文不变；真实 Proxy、合成上游 |
+| CI 结构 / migration dry-run / diff | **50 / PASS / PASS** | 不是 GitHub CI；No changes detected；未迁移用户数据库 |
+| 指定 Ollama | **9/9 PASS** | [脱敏结果](evidence/2026-10-21-ai-ollama-live.json)；真实文本/tools 探针、同模型工具结果回放、流式问答/翻译及落库；临时资源全部清理 |
+| 秘钥检查 | **0 matches** | 用户提供的测试 Key 未出现在 tracked/deliverable untracked 文件；不保存实际 Key 或用户文章 |
+
+完整后端收集开始于 `f47f9a6`；之后的 `b98f153` 只修正测试根以外的 T04 断言，所有被收集的源码与测试字节相同。T04 最终业务、指定真实 Ollama 及新受信 Proxy 矩阵在 `b98f153` 完成。旧协议矩阵执行后只增加新路由的 assistant 文本续接字段，既有协议/guard 未变，来源绑定在证据中明确记录。
+
+Ollama 官方区分 CLI `minimax-m3.1-flash:cloud` 与云 API 模型名。目录实测返回 `minimax-m3.1-flash`，验收明确使用该官方映射，没有字符串猜测或转用其他模型。[官方云说明](https://docs.ollama.com/cloud)、[OpenAI 兼容接口](https://docs.ollama.com/api/openai-compatibility)。
+
+真实首轮并未通过：8-token 文本探针原始 `finish_reason=length`、空正文；32-token 工具预算也不足，业务因此保持不可用。保留 [首轮结果](evidence/2026-10-21-ai-ollama-initial.json)。新 manifest 探针单次上限改为512，旧协议预算不变；未将截断冒充成功，也未自动重发。工具回放首轮被有效 tool_calls 附带的说明文字/测试脚本的通用 model_dump 额外字段阻断，保留 [首轮回放](evidence/2026-10-21-ai-ollama-replay-initial.json)；修复校验与同模型文本续接，并使用业务原有 serializer 后，最终全部通过。工具前缀只保存在服务端续接，不作为报告或公开消息。
+
+独立全分支审查发现1项 Important：请求 `model_group_retry_policy` 可让实际 Proxy 将500失败发送3次（普通对照1次）。`f47f9a6` 拒绝该字段及其他 retry override；准入负控先出现12个失败，再通过；最终真实 Proxy 三协议相关请求均在上游前拒绝。Critical0 / 未解决 Important0 / Deferred minors0。审查者未判断的真实 Task6与生产效果在本轮分别验收或明确 NOT_RUN，没有伪称复审覆盖新增代码。
+
+其他已分类失败：完整后端首轮2185 passed、3 failed、16 skipped；两项测试仍断言原生协议不可用于文章，与已批准 buffered 行为冲突，现断言 buffered、非流式且能力仍未知；第三项是隔离环境未设置 HOME，改为全新 private HOME。最终动态全量门禁通过。新增跨模型翻译用例曾引用不存在的 task.model_id，改为读取不可变 execution_snapshot；业务断言未放松，最后5项通过。一次 harness 命令漏 PYTHONPATH，在收集前失败；修正路径后40项通过。
+
+## F / S / R 要求对应
+
+下表 PASS 指本地实现及所列证据；真实供应商的独立运行状态仍受最后一列限制。通用 adapter 的合成证明不代表每种服务版本、实际网络或生产配置通过。
+
+| ID | 实现与回归 | 最终证据及边界 |
+| --- | --- | --- |
+| F01 | 原有 DeepSeek guard、T04/T05/T09 | 旧矩阵295、业务5、后端全量 PASS；真实 DeepSeek NOT_RUN |
+| F02 | ai_model_registry / ai_gateway；native Responses/Messages buffered；管理员 qwen compatible profile | 原生协议/手工路由/用途回归、全量 PASS；真实 OpenAI/百炼 NOT_RUN |
+| F03 | ai_endpoint_profiles / opaque model ID；OpenRouter 无 provider fallback | namespaces及实际 HTTP断言 PASS；真实 OpenRouter/硅基 NOT_RUN |
+| F04 | auth_mode、无假 Key、同一 transport与UI | Key/None实际业务两组 PASS；指定 Ollama真实9项 PASS；LM Studio真实 NOT_RUN |
+| F05 | vllm 服务预设及受信 Chat profile | 共用已验证 compatible transport；真实 vLLM NOT_RUN |
+| F06 | t04_unified_localproxy 同文两模型问答及显式翻译 retry | 业务5 PASS，model_source/快照逐一匹配，旧结果保持 |
+| F07 | ai_model_capabilities / research.byok_execution / assistant continuation | 未证tools不启用研究；合成全量及指定模型真实工具回放 PASS；不代表整份真实研究质量验收 |
+| F08 | manual model API、AIModelsManager | 手填、目录失败保留手填、完整命名空间；frontend739/后端全量 PASS |
+| F09 | 保存与GET无推理、显式目录/probe | 实际 Proxy启动基线与保存0新增请求、浏览器显式选择 PASS |
+| S01 | PinnedBackend / OneShotClient | 固定 DNS→数值 connect、IP/port/TLS、禁代理/redirect、恶意网络负控 PASS |
+| S02 | 纯 manifest / 静态 config 生成 / 目录挂载 | 配置/atomic replace负控 PASS；生产 mount及重启 NOT_RUN |
+| S03 | ProviderKeyGuard 共享 override admission | 295矩阵含 URL/header/provider/client/retry/fallback 零上游；review重复发送缺口修复 |
+| S04 | connection/model/views/worker owner、CSRF与viewer | 后端全量、真实Proxy目录负控、浏览器退出 PASS |
+| S05 | 内容摘要 alias、immutable connection digest、epoch/version | 同版变更、撤销、晚结果、原子替换 PASS；管理员恢复旧身份违反发布合同 |
+| S06 | 0080/0081、原v2 AAD、新v3绑定、严格旧snapshot解码 | 兼容/幂等/迁移用例、dry-run PASS；真实DB迁移 NOT_RUN |
+| S07 | none准入、严格模式、Key replacement拒绝 | API/DB/实际Proxy Key/None/伪造模式负控 PASS |
+| S08 | 服务端凭据、safe DTO、无URL/Key日志、无浏览器缓存 | 脱敏异常、UI清空、secret scan0；证据不含实际Key |
+| R01 | raw/normalized completion、stop+DONE+clean body | direct65、可信矩阵38、真实Ollama问答翻译 PASS |
+| R02 | 缺stop/DONE、截断、异常EOF | 负控不释放terminal，不保存completed；保留旧DeepSeek cleanEOF合同 |
+| R03 | raw error/refusal/重复terminal | Proxy负控、probe unknown、研究拒绝 PASS |
+| R04 | 总deadline、正文预算、identity-only、分段产品预算 | direct及业务/全量 PASS；未知模型context不伪造已知值 |
+| R05 | 取消关闭producer/连接，viewer abort | 实际取消生产者、Django取消、前端/浏览器 PASS；在途计费只能best effort |
+| R06 | owner/content/revision/epoch/lease/generation commit fence | 统一消费者晚提交负控、T04/T05/T09全量 PASS |
+| R07 | 单次dispatch，SDK/Router/client零retry，不换模型 | 重试policy实际3次复现→准入零请求；跨模型仅显式retry；不自动重发unknown |
+| R08 | usage owner、route metadata、未知费用/token | AICallAttempt及UI回归 PASS；失败/取消不宣称未计费 |
+
+## 发布与人工验收
+
+生产 manifest 默认空。部署者需按 Proxy README 发布经审核的真实地址/IP/owner准入、同步两端配置、按需授予独立目录 route，再跑最终 SHA 的完整远端 CI/image/G1；此任务没有执行这些操作。停用新增 profile 可阻止后续派发，重新启用提升 version；代码回退保留0080/0081加法列，不能代替数据库回滚。
+
+人工验收只需记录版本及 PASS/FAIL/未测：连接与模型配置、同文切换问答/翻译、取消/退出后无晚结果。现有浏览器是合成验收，不能替代用户部署环境 UAT。
+
+## 实施中裁定及代价
+
+以下完整保留本次执行 ledger 中的 Ruling，按作出顺序排列。早期测试复用和阶段说明是历史证据，最终状态以前文最终门禁为准。
+
+- Ruling: native Python 3.15/Node 24 do not match CI; created private .venv-ai Python 3.12.14 with minimal required packages constrained to CI lock; Node 22 is available via mise. Shared dependencies unchanged.
+- Ruling: original DeepSeek permits raw stop + clean EOF. Preserve existing terminal policy and require raw stop+DONE for new chat policy; no blanket whitelist expansion.
+- Ruling: profile content hash excludes labels and enabled flag, includes adapter/auth/egress/user ACL; disabling still rejects current route. Per-profile aliases avoid unrelated evidence invalidation.
+- Ruling: stored endpoint_policy_digest is immutable and used in v3 AAD only for new manifest connections. Same-version target edits cannot inherit old Key even via a fresh enqueue; old v2 AAD remains unchanged.
+- Ruling: shared decode_connection_snapshot accepts exactly full new or full original legacy connection fields. Research and channel must use it so old queued Key jobs remain decodable; partial/transitional snapshots rejected.
+- Ruling: respect repository's no redundant test policy by reusing expanded T04/T05 results while their runtime paths remain unchanged; final review changes checked in178-test affected suite. Do not claim whole-repo or production PASS.
+- Task 3 override process RED268PASS/9FAIL: all18upstream receipts0 but URL/NESTED early virtualkey401 and unauthorizedfallback403 differed from expected400. Ruling: accept URL/NESTED explicit400/401 plus0receipts; changefallbacktarget to authorizedt00-chat so guardmustreject400. Finalmatrix277PASS/0FAIL; evidence persisted docs/superpowers/reports/evidence/2026-10-21-ai-proxy-admission.json with runtimeblob IDs.
+- Task 3: Ruling: use native CustomLLM extension to call pinned BaseLLMHTTPHandler + OpenAIUnknownModelConfig, not a global experimental switch or patched SDK transport; new routes alone receive one-shot raw proof. Cost if wrong: pinned native-extension upgrades must fail closed and be reverified.
+- Task 3: Ruling: pre-adapter accepts only text and function definitions/history, with a strict optional-parameter allowlist. Media and built-in tools are outside this text/tools release; their preprocessing can create unapproved network requests. Cost if wrong: unsupported media stays explicitly rejected until a separately approved capability.
+- Task 3: Ruling: mount administrator config directory rather than a single manifest file, so atomic replacements can be observed. Reactivation requires higher profile version; administrator rollback to an old identity is forbidden by publishing contract. Cost if wrong: operator violating version discipline can revive old receipts; no claim of adversarial-admin protection.
+- Task 4: Ruling: only manifest raw Chat + existing Flash stream; existing native Responses/Messages may deliver explicitly buffered validated one-shot text. Other old Chat aliases retain prior article/translation denial and need a manifest for new business support; do not expand the old parser whitelist. Cost if wrong: administrator must publish those compatible profiles before use.
+- Task 4: Ruling: new route capability receipts bind alias/protocol/adapter/auth/policy digest, while complete old legacy receipts remain decodable/current for unchanged legacy contracts. Owner/model/epoch audit rows still required. Cost if wrong: legacy evidence retains its existing terminal assurance and is not advertised as the new raw contract.
+- Task 4: Ruling: generic segmented translation reuses bounded Markdown product budgets without claiming a known provider context/output maximum (both None). DeepSeek T06 plan identity and guards remain unchanged. Native text output budget is capped at8000 for its existing adapter contract. Cost if wrong: an unknown model can reject input/output budgets, leading to explicit failure without fallback/retry.
+- Task 5: Ruling: model discovery is a separate catalog-only operation inside the existing pinned Proxy via LiteLLM native LITELLM_WORKER_STARTUP_HOOKS. It reuses user_api_key_auth + can_key_call_model and the admitted one-shot pinned client, GET /v1/models only,15s/64KiB/100IDs, no inference/probe receipts. Project key must explicitly add /newshub/models/discover to allowed_routes (alongside llm_api_routes); ungranted keys failclosed. Cost if wrong: operators must grant new catalog route; old connection catalog/manualentry remains available.
+- Task 5 actualDjangocatalog first2FAIL because new GETinstrumentation exposed twoexistingLiteLLM startupcatalogreads for lab's legacy unknownOpenAIroutes with syntheticdeploymentsentinel, before anysettingswrite. Ruling: explicitlyclassifyknownsentinelbootstraprecords and assert settings adds0calls; neverignoreunknownauth/newroute startupcalls. Providerlabels updatedonlyfixture. Correctedprocess2tests running; log/tmp/newshub-ai-v1-task5-business-process-final.log, session above. No realcredentials/providers.
+- Task 5: Ruling: always show empty discovery-selection placeholder, so native select cannot visually pick first discoveredID while React still has no selection. Cost if wrong: one extra explicit model selection, no implicit inference. Unknownmetadata coercesonly to unknown/false; completelegacyT02 remains usable. Browserfoundselectionbug RED1->GREEN, unknownmetadatapermission RED1->GREEN16focused.
+- Task 6: Ruling: new compatible probes use one capped512-token generation, legacy caps unchanged. Real Ollama text8 exhausted at length and tools32 clipped; official CLI :cloud maps to catalog API minimax-m3.1-flash. Cost if wrong: explicit probes may spend more tokens or return unknown, never auto retry/fallback.
+- Task 6: Ruling: valid tool_calls may contain a text preface, retained only in server continuation and omitted from visible messages; assistant-only bounded reasoning_content can replay to the exact fenced model. RED preface/replay cases then GREEN. Cost if wrong: provider-specific history remains subject to the same fail-closed body/terminal/owner checks.
+- Task 6: Ruling: full suite found two old native-protocol tests asserting article chat unavailable; approved Task4 explicitly adds buffered delivery. Update to assert buffered=true, stream_verified=false, capabilities remain unknown. Third failure was missing HOME in env-i; use fresh private HOME rather than read user config. Cost if wrong: production readiness still requires full canonical CI.
+- Final: Ruling: reviewer declined live Task6 and production deployment judgment. Complete authorized real Ollama evidence here; production/image/remote CI remain NOT_RUN and require separate delivery authorization. Cost if wrong: no production claim can be derived from local evidence.

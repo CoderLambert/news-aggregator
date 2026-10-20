@@ -1,0 +1,55 @@
+{
+  "scope": "AUTHORIZED_OLLAMA_ONLY",
+  "requested_model": "minimax-m3.1-flash:cloud",
+  "api_model": "minimax-m3.1-flash",
+  "checks": [
+    {
+      "case": "save_connection_no_inference",
+      "status": "PASS"
+    },
+    {
+      "case": "authorized_catalog",
+      "status": "PASS",
+      "http_status": 200
+    },
+    {
+      "case": "official_cli_api_identity_mapping",
+      "status": "PASS",
+      "api_model": "minimax-m3.1-flash"
+    },
+    {
+      "case": "save_manual_model",
+      "status": "PASS"
+    },
+    {
+      "case": "text_probe",
+      "status": "FAIL",
+      "http_status": 200,
+      "probe_status": "unknown",
+      "safe_error_code": "incomplete_or_invalid"
+    },
+    {
+      "case": "tools_probe",
+      "status": "FAIL",
+      "http_status": 200,
+      "probe_status": "unknown",
+      "safe_error_code": "gateway_rejected"
+    },
+    {
+      "case": "article_qa_and_translation",
+      "status": "BLOCKED",
+      "reason": "text_probe_unverified"
+    }
+  ],
+  "cleanup_complete": true,
+  "capabilities": {
+    "text": {
+      "status": "unknown"
+    },
+    "tools": {
+      "status": "unknown"
+    }
+  },
+  "attempt_statuses": [],
+  "candidate": "924b5ebd6d545ae45910d981d387b23690f08071"
+}
