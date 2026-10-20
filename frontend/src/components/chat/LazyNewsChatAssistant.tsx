@@ -12,6 +12,7 @@ interface LazyNewsChatAssistantProps {
   translationLabel?: string
   articleContext?: {
     hasFullContent?: boolean
+    completeness?: 'unknown' | 'summary' | 'verified'
     wordCount?: number
     contentRevision?: number
     title?: string

@@ -1,3 +1,4 @@
+import { contentCompletenessLabel } from '@/lib/contentCompleteness'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { KeyboardEvent, MouseEvent } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
@@ -303,6 +304,7 @@ export default function NewsDetail() {
         </nav>
 
         <article ref={articleRef} className="w-full min-w-0 break-words">
+          <p className="mb-3 text-xs text-muted-foreground">{contentCompletenessLabel(readableBody, news.full_content_completeness)}</p>
           <ArticleHeader news={news} displayTitle={displayTitle} displaySubtitle={displaySubtitle} isEnglishSource={isEnglishSource} />
 
           <div className="mb-6 mt-4 flex flex-wrap items-center gap-3">
@@ -364,6 +366,7 @@ export default function NewsDetail() {
           translationLabel={chatTranslationLabel}
           articleContext={{
             hasFullContent: readableBody,
+            completeness: news.full_content_completeness,
             wordCount: readableBody ? news.full_content.length : (news.content ? news.content.length : 0),
             contentRevision: news.full_content_revision ?? 0,
             title: news.title,
