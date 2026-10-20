@@ -75,7 +75,8 @@ def test_capture_is_secret_free_versioned_and_works_across_json_queue(users):
     assert queued == wire
     assert set(wire) == {'schema_version', 'user_id', 'connection_id',
                          'credential_epoch', 'credential_version',
-                         'provider_id', 'endpoint_profile', 'endpoint_profile_version'}
+                         'provider_id', 'endpoint_profile', 'endpoint_profile_version',
+                         'auth_mode', 'endpoint_policy_digest'}
     assert KEY not in json.dumps(wire)
     assert 'credential_ciphertext' not in wire
     assert check_at_claim(wire, task_owner_id=owner.pk).credential_epoch == 1

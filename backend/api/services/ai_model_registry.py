@@ -35,7 +35,7 @@ _PRESETS = {
 }
 
 
-def normalize_model_id(provider_id, raw):
+def normalize_model_id(provider_id, raw, *, connection=None):
     if not isinstance(raw, str) or raw != raw.strip() or not _MODEL_RE.fullmatch(raw):
         return None
     if '://' in raw or '..' in raw or '//' in raw or raw.lower().startswith(('sk-', 'ark-', 'aiza')):
@@ -43,7 +43,8 @@ def normalize_model_id(provider_id, raw):
     spec = PROVIDER_SPECS.get(provider_id)
     if spec is None and provider_id not in SERVICE_PRESETS:
         return None
-    prefix = spec['route_prefix'] + '/' if spec else None
+    compatible = connection is not None and bool(getattr(connection, 'endpoint_policy_digest', ''))
+    prefix = spec['route_prefix'] + '/' if spec and not compatible else None
     normalized = raw[len(prefix):] if prefix and raw.startswith(prefix) else raw
     return normalized if normalized and _MODEL_RE.fullmatch(normalized) else None
 
@@ -68,7 +69,7 @@ def get_trusted_route(connection, model_id):
     if preset is not None:
         return preset
     prefix = profile_route_prefix(connection)
-    if prefix is None or normalize_model_id(connection.provider_id, model_id) != model_id:
+    if prefix is None or normalize_model_id(connection.provider_id, model_id, connection=connection) != model_id:
         return None
     if (connection.provider_id in {'glm', 'qwen', 'kimi'}
             and connection.endpoint_profile == connection.provider_id + '_default'):

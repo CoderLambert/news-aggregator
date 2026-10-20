@@ -307,7 +307,13 @@ def test_t09_execution_snapshot_is_strict_and_secret_free():
     payload = {'schema_version': 1, 'consent': True, 'model': asdict(selection)}
     decoded = decode_snapshot(payload, owner_id=17)
     assert decoded == selection
-    assert 'api_key' not in json.dumps(payload).lower()
+    # auth_mode='api_key' is non-secret metadata, never an api_key field.
+    assert 'api_key' not in payload and 'api_key' not in payload['model']
+    assert 'api_key' not in payload['model']['connection']
+    legacy = json.loads(json.dumps(payload))
+    legacy['model']['connection'].pop('auth_mode')
+    legacy['model']['connection'].pop('endpoint_policy_digest')
+    assert decode_snapshot(legacy, owner_id=17) == selection
 
     extra = {**payload, 'api_key': 'must never persist'}
     with pytest.raises(ResearchBYOKError):

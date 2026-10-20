@@ -129,7 +129,7 @@ def validate_endpoint_profiles(raw):
             semantic[key] = sorted(semantic[key])
         digest = hashlib.sha256(json.dumps(semantic, sort_keys=True, separators=(',', ':')).encode()).hexdigest()[:20]
         item.update(route_prefix=f'newshub/{identity}-v{item["version"]}-{digest}',
-                    adapter_version=ADAPTER_VERSION)
+                    policy_digest=digest, adapter_version=ADAPTER_VERSION)
         result.append(item)
     return tuple(result)
 

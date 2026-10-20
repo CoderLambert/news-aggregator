@@ -67,7 +67,10 @@ def profile_route_prefix(connection):
     if profile is None or profile['version'] != connection.endpoint_profile_version:
         return None
     if 'route_prefix' in profile:
-        return profile['route_prefix'] if profile_allows_user(profile, getattr(connection, 'user_id', None)) else None
+        if (getattr(connection, 'endpoint_policy_digest', profile['policy_digest']) != profile['policy_digest']
+                or not profile_allows_user(profile, getattr(connection, 'user_id', None))):
+            return None
+        return profile['route_prefix']
     for provider, profile_id, _region, prefix in _REGIONAL_PROFILES:
         if (provider, profile_id) == (connection.provider_id, connection.endpoint_profile):
             return prefix

@@ -16,7 +16,7 @@ from django.conf import settings
 from django.db import transaction
 
 from api.services.ai_credentials import (
-    ConnectionSnapshot, CredentialUnavailable, lock_owner,
+    CredentialUnavailable, lock_owner, decode_connection_snapshot,
 )
 from api.services.ai_task_preferences import (
     ModelSelectionError, TaskModelSnapshot, require_task_model_snapshot,
@@ -37,10 +37,6 @@ MAX_TOOL_CALLS = 8
 _CALL_ID_RE = re.compile(r"^[\x21-\x7e]{1,128}$")
 _TOP_LEVEL_FIELDS = frozenset({"schema_version", "consent", "model"})
 _MODEL_FIELDS = frozenset(TaskModelSnapshot.__dataclass_fields__)
-_CONNECTION_FIELDS = frozenset({
-    "user_id", "connection_id", "credential_epoch", "credential_version",
-    "provider_id", "endpoint_profile", "endpoint_profile_version",
-})
 _SAFE_ERROR_MESSAGES = {
     "authorization_changed": "个人模型授权或配置已变化，研究任务已停止。",
     "model_unavailable": "所选个人研究模型当前不可用。",
@@ -119,8 +115,10 @@ def decode_snapshot(payload, *, owner_id: int) -> TaskModelSnapshot:
     if type(raw_model) is not dict or set(raw_model) != _MODEL_FIELDS:
         raise ResearchBYOKError("authorization_changed")
     raw_connection = raw_model.get("connection")
-    if type(raw_connection) is not dict or set(raw_connection) != _CONNECTION_FIELDS:
-        raise ResearchBYOKError("authorization_changed")
+    try:
+        connection_snapshot = decode_connection_snapshot(raw_connection)
+    except CredentialUnavailable:
+        raise ResearchBYOKError("authorization_changed") from None
     if (type(raw_model.get("user_id")) is not int
             or raw_model["user_id"] != owner_id
             or raw_model.get("task_kind") != "deep_research"
@@ -160,7 +158,7 @@ def decode_snapshot(payload, *, owner_id: int) -> TaskModelSnapshot:
         model_revision=raw_model["model_revision"],
         model_id=raw_model["model_id"],
         proxy_alias=raw_model["proxy_alias"],
-        connection=ConnectionSnapshot(**connection),
+        connection=connection_snapshot,
         text_attempt_id=raw_model["text_attempt_id"],
         tools_attempt_id=raw_model["tools_attempt_id"],
     )

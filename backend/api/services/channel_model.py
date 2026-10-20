@@ -4,7 +4,7 @@ from uuid import UUID
 
 from django.conf import settings
 from django.db import transaction
-from api.services.ai_credentials import ConnectionSnapshot, CredentialUnavailable, lock_owner
+from api.services.ai_credentials import CredentialUnavailable, lock_owner, decode_connection_snapshot
 from api.services.ai_task_preferences import TaskModelSnapshot, ModelSelectionError, resolve_task_model, require_task_model_snapshot
 from api.services.ai_worker_fencing import check_at_claim, commit_result
 
@@ -48,9 +48,7 @@ def verify_model(payload, *, owner_id, scope):
         if type(raw) is not dict or set(raw) != set(TaskModelSnapshot.__dataclass_fields__):
             raise ValueError
         raw = dict(raw)
-        if type(raw.get('connection')) is not dict or set(raw['connection']) != set(ConnectionSnapshot.__dataclass_fields__):
-            raise ValueError
-        raw['connection'] = ConnectionSnapshot(**raw['connection'])
+        raw['connection'] = decode_connection_snapshot(raw.get('connection'))
         model = TaskModelSnapshot(**raw)
         if model.user_id != owner_id or model.task_kind != 'default':
             raise ValueError

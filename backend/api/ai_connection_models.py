@@ -9,6 +9,9 @@ class UserAIConnection(models.Model):
     provider_id = models.CharField(max_length=32)
     endpoint_profile = models.CharField(max_length=48)
     endpoint_profile_version = models.PositiveSmallIntegerField(default=1)
+    endpoint_policy_digest = models.CharField(max_length=40, blank=True, default='')
+    auth_mode = models.CharField(max_length=8, choices=(('api_key', 'API Key'), ('none', 'No Key')),
+                                 default='api_key')
     display_name = models.CharField(max_length=64)
     # One-time preserved model selection; T02 converts it into UserAIModelConfig.
     # Never consulted by inference in the T01 transition.

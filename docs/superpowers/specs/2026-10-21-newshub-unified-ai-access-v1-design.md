@@ -54,7 +54,7 @@
 
 ## 认证、幂等与持久化
 
-新增 `UserAIConnection.auth_mode = api_key | none`，旧行默认 api_key；不重写密文，不改 `_aad`。
+新增 `UserAIConnection.auth_mode = api_key | none`，旧行默认 api_key；不重写密文，旧 AAD 字节不变。新 manifest 连接另存不可变 `endpoint_policy_digest`，仅新连接使用 v3 AAD 域绑定该摘要和认证模式，防止同版目标改变后旧 Key 被继承。
 none 只对 manifest 已批准 auth mode 且用户有权限的端点有效，密文与 encryption_key_id 必须为空。`decrypt_credential` 继续严格拒绝无密文，另一个统一 admission 函数返回 `None` 表达已授权无凭据；不得返回空字符串或保存假 Key。
 
 ConnectionSnapshot 增加有默认值的 auth_mode，旧持久化快照只按原 api_key 解码；unknown/malformed auth mode 拒绝。enqueue/claim/dispatch/commit 比较模式、endpoint、epoch/version。none→api_key 不通过更换 Key 隐式转换，必须新建连接。停用/重启/删除同样递增 epoch；模型 evidence 及所有结果提交保留原围栏。

@@ -28,19 +28,19 @@
 **Files:** Create `backend/api/services/ai_endpoint_profiles.py`, `backend/api/tests/test_ai_endpoint_profiles.py`; modify `ai_registry.py`, `ai_model_registry.py`, `settings.py`；后续 Proxy 挂载同一纯 Python 文件。
 **Interfaces:** `load_endpoint_profiles(path) -> tuple[dict,...]` 校验管理员 manifest；`profile_route_prefix(connection) -> str|None` 使用内容摘要前缀；`profile_allows_user(profile,user_id) -> bool`；目录只提供无敏感元数据。
 
-- [ ] 写负面测试：重复 ID/版本、非法 URL、未批准私网、无用户范围、非法 auth/protocol、模型 URL/转义/..、命名空间/标签、同版内容变更。
-- [ ] 运行 `env -i PATH=/usr/bin:/bin PYTHONPATH=backend:crawler RUN_MAIN=true .venv-ai/bin/python -m pytest -q backend/api/tests/test_ai_endpoint_profiles.py`，先确认缺失行为 FAIL。
-- [ ] 实现纯校验及 registry 消费，不改变默认旧路由，不默认发布 local endpoint。
-- [ ] 上述测试与 `test_ai_models_t02.py` 通过后 scoped commit。
+- [x] 写负面测试：重复 ID/版本、非法 URL、未批准私网、无用户范围、非法 auth/protocol、模型 URL/转义/..、命名空间/标签、同版内容变更。
+- [x] 运行 `env -i PATH=/usr/bin:/bin PYTHONPATH=backend:crawler RUN_MAIN=true .venv-ai/bin/python -m pytest -q backend/api/tests/test_ai_endpoint_profiles.py`，先确认缺失行为 FAIL。
+- [x] 实现纯校验及 registry 消费，不改变默认旧路由，不默认发布 local endpoint。
+- [x] 上述测试与 `test_ai_models_t02.py` 通过后 scoped commit。
 
 ### Task 2: T01 无 Key 身份与旧兼容
 
 **Files:** Modify `ai_connection_models.py`, `ai_connection_views.py`, `ai_credentials.py`, `ai_worker_fencing.py`, `ai_task_preferences.py`；Create forward migration after `0079`, `test_ai_connections_auth_modes.py`。
 **Interfaces:** `ConnectionSnapshot.auth_mode='api_key'`；`execution_credential(connection) -> str|None`；`read_execution_credential(snapshot) -> str|None`；旧快照缺 auth_mode 仅解释为 api_key。CRUD 接收 auth_mode，按可信 profile 校验。
 
-- [ ] 写测试：none 创建不存密文、密钥字段拒绝、API key 必填、none 不可换 Key、owner/停用/重新启用/版本改变阻止旧快照、旧 digest/AAD 不变、未知模式拒绝。
-- [ ] 运行新测试确认预期 FAIL；实现加法迁移和 admission，不在 decrypt 中容忍损坏密文。
-- [ ] 运行新测试及 `test_ai_connections.py test_ai_worker_fencing.py test_ai_task_preferences.py`；迁移 `makemigrations --check`；scoped commit。
+- [x] 写测试：none 创建不存密文、密钥字段拒绝、API key 必填、none 不可换 Key、owner/停用/重新启用/版本改变阻止旧快照、旧 digest/AAD 不变、未知模式拒绝。
+- [x] 运行新测试确认预期 FAIL；实现加法迁移和 admission，不在 decrypt 中容忍损坏密文。
+- [x] 运行新测试及 `test_ai_connections.py test_ai_worker_fencing.py test_ai_task_preferences.py`；迁移 `makemigrations --check`；scoped commit。
 
 ### Task 3: Proxy 配置生成、连接层出站与原始终态
 

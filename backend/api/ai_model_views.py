@@ -130,7 +130,7 @@ class AIModelListCreateView(ConnectionView):
             if connection is None:
                 return error('not_found', 404)
             values = serializer.validated_data
-            model_id = normalize_model_id(connection.provider_id, values['model_id'])
+            model_id = normalize_model_id(connection.provider_id, values['model_id'], connection=connection)
             if not model_id:
                 return error('invalid_model_id')
             if UserAIModelConfig.objects.filter(connection=connection, is_deleted=False).count() >= MODEL_LIMIT:
@@ -165,7 +165,7 @@ class AIModelDetailView(ConnectionView):
             if row.config_revision != values['revision']:
                 return error('model_changed', 409)
             if 'model_id' in values:
-                normalized = normalize_model_id(row.connection.provider_id, values['model_id'])
+                normalized = normalize_model_id(row.connection.provider_id, values['model_id'], connection=row.connection)
                 if not normalized:
                     return error('invalid_model_id')
                 if UserAIModelConfig.objects.filter(connection=row.connection, model_id=normalized,
