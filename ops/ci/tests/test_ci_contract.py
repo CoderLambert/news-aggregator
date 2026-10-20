@@ -253,10 +253,10 @@ class SelfHostedCIContract(unittest.TestCase):
         cfg = load(COMPOSE)
         svc = cfg["services"]
         # The existing private bridge's MTU=1500 caused GitHub TLS timeout.
-        # Scope 1280 to this Compose project and preserve network isolation.
+        # Pin the operator-requested 1200 to this project and its inner bridge.
         self.assertEqual(cfg["networks"]["default"], {
             "driver": "bridge",
-            "driver_opts": {"com.docker.network.driver.mtu": "${CI_BRIDGE_MTU:-1280}"},
+            "driver_opts": {"com.docker.network.driver.mtu": "1200"},
         })
         for name in ("docker", "runner", "runner-frontend"):
             self.assertNotIn("network_mode", svc[name])
@@ -270,6 +270,9 @@ class SelfHostedCIContract(unittest.TestCase):
             ["${CI_DIND_DNS_PRIMARY:-1.1.1.1}", "${CI_DIND_DNS_SECONDARY:-8.8.8.8}"],
         )
         dind_command = svc["docker"]["command"][0]
+        # BuildKit's default network and newly created Docker bridges must
+        # also fit the outer bridge; fixing only the listeners is insufficient.
+        self.assertIn("--mtu=1200", dind_command)
         # The Compose interpolation layer must preserve the shell variable.
         # A single $group would be eagerly expanded by Compose to empty.
         self.assertIn('--group="$$group"', dind_command)

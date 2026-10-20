@@ -193,7 +193,9 @@ docker exec newshub-ci-docker-1 docker -H unix:///ci-docker/docker.sock system d
 
 2026-10-19 Omarchy 实证：两个 Runner 同时 Offline，TCP 443 通而 api.github.com 的 TLS 握手在项目 Bridge MTU=1500 下超时。同一 Runner 镜像在 Host 网络正常；临时将两个容器的 eth0 调整到 MTU=1280 后 HTTPS 返回 200、Runner 恢复 Online 并领取排队 CI。此结果**支持 MTU/PMTU 路径问题**，尚未确定具体的丢包设备。
 
-Compose 为 **newshub-ci 项目自身**的默认 Bridge 网络设置 MTU=${CI_BRIDGE_MTU:-1280}，不改宿主机 Docker 全局设置，不授予前端 Runner Docker socket，也不自动改动现有正在运行的容器。仓库配置更新后旧网络不会自动应用新 MTU。DinD 内部新建网络如另有 MTU 异常应独立验证，不预先删除镜像和缓存。
+按用户要求，Compose 将 **newshub-ci 项目自身**的默认 Bridge 网络及 DinD 内部默认 Bridge **固定为 MTU=1200**，移除 `CI_BRIDGE_MTU` 覆盖入口，避免重启后回到旧值。不改宿主机 Docker 全局设置，不授予前端 Runner Docker socket，也不自动改动现有正在运行的容器。仓库配置更新后旧网络不会自动应用新 MTU。
+
+2026-10-20 补充实证：外层容器调整后，DinD 默认内层网络仍为 1500，同一 Python 镜像访问 PyPI TLS 超时；内层 host 网络返回 200/0.622 秒，独立 MTU=1280 bridge 返回 200/0.758 秒。`dockerd --mtu` 使后续默认容器及 BuildKit 网络使用相同 MTU；现有用户自建网络不自动变化。此对照支持内层 MTU/PMTU 故障，不证明具体丢包设备。刷新时须保留注册、工作卷和下载缓存，不预先删除镜像或缓存。
 
 仅在**当前 PR/main CI 全部完成**、两个 GitHub Runner Online/Idle 且本地没有 Runner.Worker 时，才在 Omarchy 上运行：
 
@@ -211,7 +213,7 @@ docker exec newshub-ci-runner-1 cat /sys/class/net/eth0/mtu
 docker exec newshub-ci-runner-frontend-1 cat /sys/class/net/eth0/mtu
 ~~~
 
-通过条件：两个 eth0 均为 1280，GitHub 两个 Runner 均 Online，随后适用的精确 PR head CI 实际运行成功。**真实 Omarchy 持久化操作在执行前为 NOT_RUN**。若需要回退，设置 `CI_BRIDGE_MTU=1500` 并在空闲状态按同一受保护流程重建网络；1500 可能重新触发本故障。不得在 CI Busy 时执行 down，不使用全局 prune，不删数据卷。
+通过条件：两个 Runner 的 eth0、DinD 的 eth0/docker0 及新建默认容器均为 1200，GitHub 两个 Runner 均 Online，随后适用的精确 PR head CI 实际运行成功。若需要回退，须审核修改 Compose 的外层及 `dockerd --mtu` 两处固定值，再在空闲状态按同一受保护流程重建网络；1500 可能重新触发本故障。不得在 CI Busy 时执行 down，不使用全局 prune，不删数据卷。
 
 - Runner 与 DinD 都需要联网拉镜像和工具；不需要公网入站端口。
 - 预装 Chromium，后端 venv 仍安装原工作流指定版本 playwright==1.62.0。

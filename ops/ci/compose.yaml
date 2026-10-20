@@ -44,6 +44,7 @@ services:
           group=ci-runner
         fi
         exec dockerd --host=unix:///ci-docker/docker.sock --group="$$group" \
+          --mtu=1200 \
           --dns=${CI_DIND_DNS_PRIMARY:-1.1.1.1} \
           --dns=${CI_DIND_DNS_SECONDARY:-8.8.8.8} \
           --storage-driver=overlay2
@@ -161,13 +162,13 @@ services:
       start_period: 40s
 
 # Keep this project's Docker bridge below tunnel path MTU. GitHub TLS
-# handshakes on Omarchy failed at 1500 and passed at 1280; host networking
-# or modifying the global Docker daemon is not required.
+# handshakes on Omarchy failed at 1500; pin both bridges to the requested 1200.
+# This does not require host networking or global Docker daemon changes.
 networks:
   default:
     driver: bridge
     driver_opts:
-      com.docker.network.driver.mtu: "${CI_BRIDGE_MTU:-1280}"
+      com.docker.network.driver.mtu: "1200"
 
 volumes:
   runner-work:

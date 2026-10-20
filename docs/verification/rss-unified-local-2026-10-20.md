@@ -63,7 +63,7 @@ READY 表示绑定及采集策略已确认，不等于所有文章均确认全�
 
 ## CI 与交付边界
 
-Runner 离线时，本轮只在确认没有 Worker、GitHub busy=false 且 DinD 无容器后，将 `newshub-ci` 三个现有容器的网络命名空间 eth0 MTU 从 1500 临时改为 1280，HTTP 恢复 200、Runner 恢复在线；未改宿主网络、认证或生产服务。Compose 原已声明 1280，本次未在作业运行时重建网络；现存容器重建前应遵循 CI README 的空闲窗口流程。
+Runner 最初离线时，在确认没有 Worker、GitHub busy=false 且 DinD 无容器后，将 `newshub-ci` 三个现有容器的网络命名空间 eth0 MTU 从 1500 临时改为 1280，HTTP 恢复 200、Runner 恢复在线；未改宿主网络、认证或生产服务。Compose 原已声明 1280，最初只做临时调整；随后按下述内层诊断及用户指定值，在空闲窗口持久化为 1200。
 
 首轮 Ready [CI #39431887139](https://github.com/CoderLambert/news-aggregator/actions/runs/39431887139) 的 frontend 已通过（706 PASS），另一个 [三轮矩阵 #39431887165](https://github.com/CoderLambert/news-aggregator/actions/runs/39431887165) 每轮 2045 PASS / 16 SKIP、2061 身份对账通过。完整 backend 在 T00 合成研究工具处失败：临时 SQLite 已隔离，但 Chroma 仍沿用生产 `/var/lib/newshub/chroma`，非 root Runner 返回 PermissionError。PR 退回 Draft 后，将 Chroma/TTS 显式绑定同一临时目录，并在 T04 入口核验派生路径归属；CI 契约先红后绿（50 PASS）。未放宽目录权限、研究授权或业务错误断言；须由后续修正提交的完整 CI 重新证明联合流程。
 
@@ -72,3 +72,5 @@ Runner 离线时，本轮只在确认没有 Worker、GitHub busy=false 且 DinD 
 修正提交 `f52461b` 的 [Ready CI #39435429873](https://github.com/CoderLambert/news-aggregator/actions/runs/39435429873) 已通过前端、T00 联合流程和完整后端矩阵，生产镜像仍因 PyPI 约 15 kB/s 的冷下载未完成，随后退回 Draft 处理。镜像未构建完成不计 PASS。MTU、镜像源及跨引擎构建缓存尝试的失败记录均保留；未切换包源、改全局网络、删除门禁或替换共享依赖。
 
 最终采用 [Docker 原生 pip 缓存挂载](https://docs.docker.com/build/cache/optimize/#use-cache-mounts)：生产依赖仍从官方 PyPI 安装，下载缓存独立于镜像层。使用同一 CI 已有的公开包缓存为新建 BuildKit 缓存预热，原缓存只读保留。同一 `anthropic==1.13.0` wheel 的官方 SHA256 校验一致，禁网缓存读取 0.282 秒，对照冷下载约 146 秒；这只证明该包缓存复用，不冒充整套镜像/CI 的通过或统一加速比例。新构建输入仍须重新完成完整 CI、镜像和 G1 门禁。
+
+补下载 `openai==3.35.1` 成功，SHA256 与官方发布一致。随后的网络对照发现 DinD 内层默认 MTU=1500 的 TLS 握手超时，同一镜像使用内层 host 网络和独立 MTU=1280 bridge 均返回 200（分别 0.622/0.758 秒）；外层 MTU 修正未覆盖内层。按用户要求，将专用 CI 外层 bridge 和 DinD `--mtu` 均固定为 **1200**，移除 MTU 环境覆盖入口。CI 契约先红后绿，50 PASS。经 GitHub busy=false、无 Runner.Worker/容器核对后，使用现有受保护脚本暂停并重建专用 CI 网络；保留全部注册身份、工作卷和 DinD 缓存，不改宿主全局网络或包源。实测外层、两个 Runner、DinD eth0/docker0 和新建默认容器均为 1200，默认网络 PyPI 返回 200/0.533 秒；Listener 旧会话等待回收，未修改认证。最终 CI 仍须对最新 SHA 完整执行。
