@@ -62,6 +62,18 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 describe('T05 private translation', () => {
+  it('offers a verified compatible no-Key model without a Flash model-id gate', async () => {
+    vi.mocked(models.listAIConnections).mockResolvedValue([
+      { id: 'connection', is_enabled: true, auth_mode: 'none', key_saved: false, display_name: 'Mine' } as models.AIConnection,
+    ])
+    vi.mocked(models.listAIModels).mockResolvedValue([
+      { id: 'model', model_id: 'org/model:cloud', display_name: 'Compatible', has_trusted_route: true,
+        article_chat_supported: true, delivery_mode: 'buffered', capabilities: { text: 'supported', tools: 'unknown' } } as models.AIModel,
+    ])
+    view()
+    await screen.findByRole('option', { name: 'Mine · Compatible' })
+    expect(api.startPrivateTranslation).not.toHaveBeenCalled()
+  })
   it('never submits on mount and requires explicit model and one-call consent', async () => {
     view()
     await screen.findByRole('option', { name: 'Mine · Flash' })

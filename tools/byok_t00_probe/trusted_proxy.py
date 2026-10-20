@@ -7,8 +7,9 @@ import os
 from pathlib import Path
 import secrets
 import threading
+import urllib.request
 
-from local_runtime import LocalProxy
+from local_runtime import LocalProxy, OPENER, post_json
 from protocol_cases import openai_client
 from trusted_upstream import handler_type
 
@@ -36,6 +37,41 @@ def run(python):
             prefix = proxy.trusted_profiles[0]['route_prefix']
             for tenant in ('tenant-a', 'tenant-b'):
                 clients.append(openai_client(proxy.project_keys[tenant], proxy.url + '/v1', timeout=20))
+
+            def catalog(*, key=None, owner=7, project=None, **extra):
+                body = {'model': prefix + '/model-discovery', 'api_key': key,
+                        'metadata': {'newshub_owner_id': owner, 'newshub_auth_mode': 'none' if key is None else 'api_key'}, **extra}
+                request = urllib.request.Request(proxy.url + '/newshub/models/discover', method='POST',
+                    data=json.dumps(body).encode(), headers={'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + (project or proxy.project_keys['tenant-a'])})
+                try:
+                    with OPENER.open(request, timeout=20) as response:
+                        return {'success': True, 'result': json.load(response)}
+                except Exception as error:
+                    return {'success': False, 'error_type': type(error).__name__}
+
+            for key, label in ((None, 'none'), (keys['owner-a'], 'owner-a')):
+                before = len(records)
+                result = catalog(key=key)
+                check('discovery_' + label, result['success'] and result['result']['models'] == ['org/model:cloud', 'other/model:tag']
+                      and len(records) == before + 1 and records[-1]['operation'] == 'catalog'
+                      and records[-1]['auth_label'] == label, result=result, upstream_count=len(records) - before)
+            for label, arguments in (('wrong_project', {'project': 'sk-synthetic-invalid-project-123456789'}),
+                                     ('owner_acl', {'owner': 9}), ('url_override', {'api_base': 'http://127.0.0.1:1'})):
+                before = len(records)
+                result = catalog(**arguments)
+                check('discovery_denied_' + label, not result['success'] and len(records) == before,
+                      result=result, upstream_count=len(records) - before)
+            restricted = post_json(proxy.url + '/key/generate', {'models': ['t00-chat'],
+                'key_alias': 'synthetic-no-trusted-model', 'allowed_routes': ['llm_api_routes', '/newshub/models/discover']}, proxy.master)['key']
+            for label, arguments in (
+                ('model_permission', {'project': restricted}),
+                ('forged_none', {'key': keys['owner-a'], 'metadata': {'newshub_owner_id': 7, 'newshub_auth_mode': 'none'}}),
+            ):
+                before = len(records)
+                result = catalog(**arguments)
+                check('discovery_denied_' + label, not result['success'] and len(records) == before,
+                      result=result, upstream_count=len(records) - before)
 
             def call(model, *, stream=False, key=None, owner=7, auth_mode=None, client=None, **extra):
                 client = client or clients[0]

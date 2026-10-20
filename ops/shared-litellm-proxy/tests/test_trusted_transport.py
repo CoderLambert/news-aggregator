@@ -148,6 +148,16 @@ class OneShotWireTests(unittest.IsolatedAsyncioTestCase):
             def log_message(self, *args):
                 pass
 
+            def do_GET(self):
+                records.append({'path': self.path, 'auth': self.headers.get('Authorization'), 'method': 'GET'})
+                wire = json.dumps({'data': [{'id': 'org/model:cloud'}, {'id': 'other:tag'},
+                    {'id': 'https://unapproved.invalid/model'}, {'id': 'org/model:cloud'}]}).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(wire)))
+                self.end_headers()
+                self.wfile.write(wire)
+
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                 records.append({'path': self.path, 'body': body, 'auth': self.headers.get('Authorization'),
@@ -235,6 +245,16 @@ class OneShotWireTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.requests), 1)
         self.assertEqual(self.requests[0]['body']['model'], 'org/model:tag')
         self.assertEqual(self.requests[0]['body']['provider'], {'allow_fallbacks': False})
+
+    async def test_discovery_is_one_bounded_get_with_exact_auth_and_model_filter(self):
+        from trusted_transport import OneShotClient, EgressDenied
+        client = OneShotClient(self.profile, provider_key=None, model_id='model-discovery', check_current=lambda: None)
+        self.assertEqual(await client.get_models(), {'models': ['org/model:cloud', 'other:tag'], 'truncated': False})
+        self.assertTrue(client.client.is_closed)
+        self.assertEqual(self.requests, [{'path': '/v1/models', 'auth': None, 'method': 'GET'}])
+        with self.assertRaises(EgressDenied):
+            await client.get_models()
+        self.assertEqual(len(self.requests), 1)
 
     async def test_redirect_and_truncated_body_each_send_exactly_once(self):
         from trusted_transport import OneShotClient

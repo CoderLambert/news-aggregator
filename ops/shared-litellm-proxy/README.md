@@ -109,6 +109,10 @@ PYTHONPATH=../../backend/api/services python configure_trusted_endpoints.py \
 
 连接层依赖精确版本 `httpx 0.28.1/httpcore 1.0.9`，漂移时关闭该路由。合成 TLS、取消和进程探针见[统一接入报告](../../docs/superpowers/reports/2026-10-21-newshub-unified-ai-access-v1.md)；本地 Python 进程证据不等于生产镜像、真实供应商或部署验收。
 
+模型发现是显式目录读取。固定启动 hook `trusted_discovery:register` 使用 LiteLLM 原生扩展注册 `/newshub/models/discover`；复用其 `user_api_key_auth` 和 model allowlist，不开放管理 API。需要目录功能的项目 key 须额外批准 `allowed_routes: ["llm_api_routes", "/newshub/models/discover"]`，同时保留最小的模型 alias 列表。未批准时目录请求关闭，原有推理权限不变；不要赋予全部管理路由。
+
+该操作只对已批准的 manifest profile 发出一次固定 `GET /v1/models`，与推理共用 DNS/IP pin、认证、TLS、禁重定向及环境隔离，限制 15 秒、64 KiB 和 100 个模型 ID。它不创建能力证明，不发送提示词、不自动添加模型；失败后继续允许手填 ID。兼容服务没有实现此目录时也保持失败，不猜测其他 URL。NewsHub 的只读连接诊断不发出供应商请求，也不把“配置存在”显示成真实推理成功。
+
 ## 健康检查、备份、恢复和升级
 
 - 运行健康检查：`GET /health/readiness`，该 endpoint 检查 Proxy 的 readiness；Postgres 是否可连接也以启动检查和运行日志确认。业务 SDK 遇到 Proxy 不可达时应清晰失败，不能直连 provider 或回退到平台 key。

@@ -16,6 +16,22 @@ def handler_type(provider_keys):
         def log_message(self, *args):
             pass
 
+        def do_GET(self):
+            auth = self.headers.get('Authorization')
+            label = 'none' if auth is None else next((label for label, key in provider_keys.items()
+                if auth == 'Bearer ' + key), 'unapproved')
+            if auth == 'Bearer sk-t00-nonfunctional-deployment-sentinel':
+                label = 'fixture-deployment-sentinel'
+            with lock:
+                records.append({'operation': 'catalog', 'model': None, 'stream': False,
+                                'auth_label': label, 'path': self.path})
+            wire = json.dumps({'data': [{'id': 'org/model:cloud'}, {'id': 'other/model:tag'}]}).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(wire)))
+            self.end_headers()
+            self.wfile.write(wire)
+
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             auth = self.headers.get('Authorization')

@@ -283,6 +283,46 @@ class OneShotClient:
         self._provider_key = None
         await self.client.aclose()
 
+    async def get_models(self):
+        """Explicit bounded catalog read, with the identical fixed egress boundary."""
+        from ai_endpoint_profiles import valid_upstream_model_id
+        response = None
+        try:
+            self._check_current()
+            if self._sent:
+                raise EgressDenied()
+            self._sent = True
+            headers = {'Accept': 'application/json', 'Accept-Encoding': 'identity'}
+            if self._provider_key is not None:
+                headers['Authorization'] = 'Bearer ' + self._provider_key
+            request = self.client.build_request('GET', self.profile['api_base'].rstrip('/') + '/models', headers=headers)
+            async with asyncio.timeout(15):
+                response = await self.client.send(request, stream=True, follow_redirects=False)
+                response.raise_for_status()
+                if (response.headers.get('content-encoding', '').strip().lower() not in ('', 'identity')
+                        or not response.headers.get('content-type', '').lower().startswith('application/json')):
+                    raise TerminalInvalid()
+                raw = bytearray()
+                async for chunk in response.aiter_raw():
+                    raw.extend(chunk)
+                    if len(raw) > 65536:
+                        raise TerminalInvalid()
+                data = strict_json(bytes(raw))
+                if type(data) is not dict or type(data.get('data')) is not list or data.get('error') is not None:
+                    raise TerminalInvalid()
+                models = []
+                for row in data['data']:
+                    if type(row) is dict and valid_upstream_model_id(row.get('id')) and row['id'] not in models:
+                        models.append(row['id'])
+                    if len(models) == 100:
+                        break
+                self._check_current()
+                return {'models': models, 'truncated': len(data['data']) > 100 or data.get('has_more') is True}
+        finally:
+            if response is not None:
+                await response.aclose()
+            await self.close()
+
     async def post(self, url, *, data, stream=False, headers=None, timeout=None, logging_obj=None):
         response = None
         handoff = False

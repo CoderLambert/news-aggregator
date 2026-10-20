@@ -246,6 +246,7 @@ class LocalProxy:
             manifest.write_text(json.dumps(self.trusted_manifest))
             manifest.chmod(0o600)
             env['AI_BYOK_ENDPOINT_MANIFEST'] = str(manifest)
+            env['LITELLM_WORKER_STARTUP_HOOKS'] = 'trusted_discovery:register'
             base_config = self.runtime / 'proxy-base.json'
             base_config.write_text(json.dumps(config))
             base_config.chmod(0o600)
@@ -276,7 +277,8 @@ class LocalProxy:
             "tenant-b": ["t00-other-chat", "t00-other-messages"],
         }.items():
             models = models + [profile['route_prefix'] + '/*' for profile in self.trusted_profiles]
-            result = post_json(self.url + "/key/generate", {"models": models, "key_alias": "t00-" + tenant}, self.master)
+            permissions = {'allowed_routes': ['llm_api_routes', '/newshub/models/discover']} if self.trusted_profiles else {}
+            result = post_json(self.url + "/key/generate", {"models": models, "key_alias": "t00-" + tenant, **permissions}, self.master)
             key = result.get("key")
             if not isinstance(key, str) or not key.startswith("sk-"):
                 raise RuntimeError("T00_PROJECT_KEY_CREATION_FAILED")

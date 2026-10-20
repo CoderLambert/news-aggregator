@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  ConnectionRequestError, listAIConnections, listAIModels,
+  ConnectionRequestError, hasAIConnectionAuthentication, listAIConnections, listAIModels,
   type AIConnection, type AIModel,
 } from '@/services/aiConnectionsApi'
 
@@ -41,7 +41,7 @@ function ChatModelSession({
     void (async () => {
       try {
         const connections = (await listAIConnections(controller.signal)).filter(
-          connection => connection.is_enabled && connection.key_saved,
+          connection => connection.is_enabled && hasAIConnectionAuthentication(connection),
         )
         const models = await Promise.all(connections.map(connection => listAIModels(connection, controller.signal)))
         if (controller.signal.aborted) return
@@ -84,12 +84,14 @@ function ChatModelSession({
       <Link to="/settings/ai" className="shrink-0 text-primary underline">模型设置</Link>
     </div>
     {error && <p role="alert" className="mt-1">暂时无法读取个人模型，仍可使用原有聊天方式；请重新打开助手重试。</p>}
-    {choices?.length === 0 && <p className="mt-1 text-muted-foreground">当前没有可用于文章聊天的个人模型。此用途暂只支持已验证的 DeepSeek Flash 流式路径，其他模型尚未开放。</p>}
+    {choices?.length === 0 && <p className="mt-1 text-muted-foreground">当前没有可用于文章聊天的个人模型。请在模型设置中验证文本能力并确认问答用途可用。</p>}
     {selected && <label className="mt-2 flex items-start gap-2">
       <input type="checkbox" checked={consent} disabled={disabled || !choices?.some(choice => choice.model.id === selected)}
         onChange={event => onConsent(event.target.checked)} />
       <span>我确认这次个人模型问答可能产生服务商费用。模型选择仅适用于之后发送的问题，不会自动重发或改写历史。</span>
     </label>}
-    {selected && <p className="mt-1 text-muted-foreground">个人模型暂不支持联网搜索；文章聊天只开放服务端明确标记支持的流式模型，其他模型不会发送请求。</p>}
+    {selected && <p className="mt-1 text-muted-foreground">个人模型暂不支持联网搜索；
+      {choices?.find(choice => choice.model.id === selected)?.model.delivery_mode === 'buffered'
+        ? '本轮完整生成后显示（buffered）。' : '仅在服务端验证完成后保存回答。'}不会自动切换模型。</p>}
   </section>
 }

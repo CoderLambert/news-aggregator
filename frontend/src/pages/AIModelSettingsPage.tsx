@@ -7,7 +7,7 @@ import AIModelsManager from '@/components/workspace/AIModelsManager'
 import AIUsageSection from '@/components/workspace/AIUsageSection'
 import AITaskPreferencesSection from '@/components/workspace/AITaskPreferencesSection'
 import { ConnectionRequestError, createAIConnection, deleteAIConnection, listAIConnections, listAIProviders,
-  patchAIConnection, replaceAIConnectionKey, type AIConnection, type AIProviderProfile } from '@/services/aiConnectionsApi'
+  patchAIConnection, replaceAIConnectionKey, type AIAuthMode, type AIConnection, type AIProviderProfile } from '@/services/aiConnectionsApi'
 
 type Editor = { kind: 'create' } | { kind: 'rename' | 'key' | 'delete'; connection: AIConnection }
 function errorMessage(error: unknown) {
@@ -69,7 +69,7 @@ export function AIConnectionsManager({ viewer }: { viewer: number }) {
   }
   return <div className="workspace-page min-w-0 break-words">
     <Link to="/settings" className="workspace-link">返回设置</Link>
-    <header className="workspace-page-heading"><div><h1>个人 AI 连接</h1><p>分别保存和管理多家服务商的 Key；名称、启停、替换和删除均只影响当前账号。</p></div></header>
+    <header className="workspace-page-heading"><div><h1>个人 AI 连接</h1><p>管理云服务和管理员授权的模型服务器；名称、启停、替换和删除均只影响当前账号。</p></div></header>
     <p className="workspace-soft-panel">在这里管理个人服务商连接、验证模型能力并保存五种用途偏好。打开页面或保存配置不会调用模型；主动验证、问答、翻译或研究可能产生费用。关闭个人模型调用后，已有调用记录仍可查看。</p>
     {loading && <p role="status">正在读取连接…</p>}
     {error && <p role="alert" className="workspace-error">{error}</p>}
@@ -80,12 +80,13 @@ export function AIConnectionsManager({ viewer }: { viewer: number }) {
     {data && !data.connections.length && <p className="workspace-empty">尚无个人 AI 连接。可新增多个连接，保存后仍需配置模型与用途。</p>}
     <div className="grid min-w-0 gap-4 sm:grid-cols-2">{data?.connections.map(connection => <section className="workspace-panel min-w-0" key={connection.id} aria-label={connection.display_name}>
       <h2>{connection.display_name}</h2><p>{connection.provider_name} · {connection.region_name}</p>
-      <p>{connection.masked_key} · {connection.is_enabled ? '已启用' : '已停用'} · 未测试</p>
+      <p>{connection.auth_mode === 'none' ? '无需 Key（管理员授权）' : connection.masked_key} · {connection.is_enabled ? '已启用' : '已停用'}</p>
+      <p className="workspace-caption">{connection.data_destination_label ?? '所选服务商接收模型请求；具体费用未知。'}</p>
       <p className="workspace-caption">更新时间：{new Date(connection.updated_at).toLocaleString()}</p>
       <div className="workspace-actions flex-wrap">
         <button type="button" className="workspace-button secondary" disabled={busy || loading} onClick={() => setEditor({ kind: 'rename', connection })}>修改名称</button>
         <button type="button" className="workspace-button secondary" disabled={busy || loading} onClick={() => void mutate(signal => patchAIConnection(connection, { is_enabled: !connection.is_enabled }, viewer, signal))}>{connection.is_enabled ? '停用' : '启用'}</button>
-        <button type="button" className="workspace-button secondary" disabled={busy || loading} onClick={() => setEditor({ kind: 'key', connection })}>替换 Key</button>
+        {connection.auth_mode !== 'none' && <button type="button" className="workspace-button secondary" disabled={busy || loading} onClick={() => setEditor({ kind: 'key', connection })}>替换 Key</button>}
         <button type="button" className="workspace-button danger" disabled={busy || loading} onClick={() => setEditor({ kind: 'delete', connection })}>删除连接</button>
       </div>
       <AIModelsManager key={connection.id} connection={connection} viewer={viewer} />
@@ -94,9 +95,9 @@ export function AIConnectionsManager({ viewer }: { viewer: number }) {
     <AIUsageSection key={`usage-${viewer}`} viewer={viewer} />
     {editor && data && <ConnectionEditor key={editor.kind + ('connection' in editor ? editor.connection.id : '')}
       editor={editor} profiles={data.providers} busy={busy} onClose={() => setEditor(null)}
-      onSave={(name, profile, key, requestId) => {
+      onSave={(name, profile, key, requestId, authMode) => {
         if (editor.kind === 'create' && profile) void mutate(signal => createAIConnection({ provider_id: profile.provider_id, endpoint_profile: profile.profile_id,
-          display_name: name, api_key: key, request_id: requestId }, viewer, signal))
+          display_name: name, request_id: requestId, ...(authMode === 'none' ? { auth_mode: 'none' as const } : { auth_mode: 'api_key' as const, api_key: key }) }, viewer, signal))
         else if (editor.kind === 'rename') void mutate(signal => patchAIConnection(editor.connection, { display_name: name }, viewer, signal))
         else if (editor.kind === 'key') void mutate(signal => replaceAIConnectionKey(editor.connection, key, viewer, signal))
         else if (editor.kind === 'delete') void mutate(signal => deleteAIConnection(editor.connection, viewer, signal))
@@ -106,13 +107,17 @@ export function AIConnectionsManager({ viewer }: { viewer: number }) {
 
 function ConnectionEditor({ editor, profiles, busy, onClose, onSave }: {
   editor: Editor; profiles: AIProviderProfile[]; busy: boolean; onClose: () => void
-  onSave: (name: string, profile: AIProviderProfile | undefined, key: string, requestId: string) => void
+  onSave: (name: string, profile: AIProviderProfile | undefined, key: string, requestId: string, authMode: AIAuthMode) => void
 }) {
   const [name, setName] = useState('connection' in editor ? editor.connection.display_name : '')
   const [profileId, setProfileId] = useState(profiles.find(profile => profile.provider_id === 'deepseek')?.profile_id ?? profiles[0]?.profile_id ?? '')
   const [apiKey, setApiKey] = useState('')
+  const [mode, setMode] = useState<AIAuthMode | null>(null)
+  const profile = profiles.find(profile => profile.profile_id === profileId)
+  const modes = profile?.auth_modes ?? ['api_key']
+  const authMode = mode && modes.includes(mode) ? mode : modes[0]
   const [requestId] = useState(() => crypto.randomUUID())
-  const needsKey = editor.kind === 'create' || editor.kind === 'key'
+  const needsKey = editor.kind === 'key' || editor.kind === 'create' && authMode === 'api_key'
   const needsName = editor.kind === 'create' || editor.kind === 'rename'
   const title = { create: '新增连接', rename: '修改连接名称', key: '替换连接 Key', delete: '确认删除连接' }[editor.kind]
   const submit = (event: FormEvent) => {
@@ -120,12 +125,16 @@ function ConnectionEditor({ editor, profiles, busy, onClose, onSave }: {
     if (busy) return
     const key = apiKey
     setApiKey('')
-    onSave(name.trim(), profiles.find(profile => profile.profile_id === profileId), key, requestId)
+    onSave(name.trim(), profile, key, requestId, authMode)
   }
   return <WorkspaceModal title={title} busy={busy} onClose={onClose}><form className="grid min-w-0 gap-4" onSubmit={submit}>
     {editor.kind === 'delete' ? <p>删除后将清除本连接 Key，并撤销旧授权版本；不会删除已经保存的历史内容。</p> : <p>Key 只在本次提交中发送，保存后不会回显；连接操作不会调用模型。</p>}
-    {editor.kind === 'create' && <label>服务商与受信端点<select className="max-w-full" value={profileId} disabled={busy} onChange={event => { setProfileId(event.target.value); setApiKey('') }}>
+    {editor.kind === 'create' && <label>服务商与受信端点<select className="max-w-full" value={profileId} disabled={busy} onChange={event => { setProfileId(event.target.value); setMode(null); setApiKey('') }}>
       {profiles.map(profile => <option key={profile.profile_id} value={profile.profile_id}>{profile.provider_name} · {profile.region_name}</option>)}</select></label>}
+    {editor.kind === 'create' && <><label>认证方式<select value={authMode} disabled={busy || modes.length === 1}
+      onChange={event => { setMode(event.target.value as AIAuthMode); setApiKey('') }}>
+      {modes.map(value => <option key={value} value={value}>{value === 'none' ? '无需 Key（管理员授权）' : 'API Key'}</option>)}</select></label>
+      <p className="workspace-caption">{profile?.data_destination_label ?? '请求发送至所选服务商。'} 无 Key 不代表免费或离线，模型服务器仍可能使用云服务。</p></>}
     {needsName && <label>连接名称<input value={name} disabled={busy} maxLength={64} required autoComplete="off" onChange={event => setName(event.target.value)} placeholder="例如：个人 DeepSeek" /></label>}
     {needsKey && <label>API Key<input type="password" value={apiKey} disabled={busy} minLength={8} maxLength={4096} required autoComplete="new-password" spellCheck={false} onChange={event => setApiKey(event.target.value)} /></label>}
     <footer className="workspace-modal-actions"><button type="button" className="workspace-button secondary" disabled={busy} onClick={onClose}>取消</button>

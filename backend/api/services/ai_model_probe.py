@@ -219,3 +219,37 @@ def send_model_probe(*, provider_key: str | None, model_alias: str, probe_kind: 
     except (urllib.error.URLError, TimeoutError, socket.timeout, OSError):
         # It may have been billed upstream even if the response was lost.
         return ProbeOutcome('unknown', 'result_unknown')
+
+
+class ModelDiscoveryError(RuntimeError):
+    def __init__(self):
+        super().__init__('model_discovery_unavailable')
+
+
+def send_model_discovery(*, provider_key, connection_snapshot):
+    """One explicit catalog request through the existing trusted local Proxy."""
+    from api.services.ai_registry import profile_route_prefix
+    from api.services.ai_endpoint_profiles import valid_upstream_model_id
+    try:
+        prefix = profile_route_prefix(connection_snapshot)
+        if not prefix or not prefix.startswith('newshub/'):
+            raise ModelDiscoveryError()
+        alias = prefix + '/model-discovery'
+        metadata = trusted_request_metadata(connection_snapshot, alias, provider_key)
+        gateway, project_key = _gateway_configuration()
+        payload = {'model': alias, 'api_key': provider_key, 'metadata': metadata}
+        request = urllib.request.Request(gateway + '/newshub/models/discover', method='POST',
+            data=json.dumps(payload, separators=(',', ':')).encode(), headers={
+                'Authorization': 'Bearer ' + project_key, 'Content-Type': 'application/json', 'Accept': 'application/json'})
+        with _OPENER.open(request, timeout=TIMEOUT_SECONDS) as response:
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+            if response.status != 200 or len(raw) > MAX_RESPONSE_BYTES:
+                raise ModelDiscoveryError()
+        result = _json_parse(raw)
+        if (type(result) is not dict or type(result.get('models')) is not list or len(result['models']) > 100
+                or type(result.get('truncated')) is not bool
+                or any(not valid_upstream_model_id(model) for model in result['models'])):
+            raise ModelDiscoveryError()
+        return {'models': result['models'], 'truncated': result['truncated']}
+    except Exception:
+        raise ModelDiscoveryError() from None

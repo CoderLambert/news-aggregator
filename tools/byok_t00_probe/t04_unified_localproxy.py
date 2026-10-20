@@ -54,6 +54,12 @@ def test_compatible_probe_chat_translation_tools_and_bad_terminal(tmp_path, sett
             AI_BYOK_GATEWAY_PROJECT_KEY_FILE='',
             PROVIDER_CREDENTIAL_ENCRYPTION_KEY='synthetic-unified-process-encryption-material',
         ):
+            # The fixture's two legacy unknown OpenAI models are inspected by
+            # LiteLLM at bootstrap using its synthetic deployment sentinel.
+            # Record that separately; settings must add zero calls afterward.
+            baseline = len(records)
+            assert all(row['operation'] == 'catalog' and row['auth_label'] == 'fixture-deployment-sentinel'
+                       for row in records)
             api = APIClient()
             api.force_authenticate(owner)
             arguments = {'provider_id': 'ollama', 'endpoint_profile': 'unified_fixture', 'auth_mode': auth_mode,
@@ -66,12 +72,21 @@ def test_compatible_probe_chat_translation_tools_and_bad_terminal(tmp_path, sett
             created = api.post(models_url, {'model_id': 'org/model:cloud'}, format='json')
             assert created.status_code == 201
             model_id = created.data['id']
-            assert records == []  # Saving settings did not infer anything.
+            assert len(records) == baseline  # Saving settings did not infer or discover anything.
             for kind in ('text', 'tools'):
                 outcome = api.post(models_url + model_id + '/probe/', {'probe_kind': kind, 'revision': 1,
                     'request_id': str(uuid.uuid4())}, format='json')
                 assert outcome.status_code == 200 and outcome.data['status'] == 'succeeded', outcome.content
-            assert len(records) == 2
+            assert len(records) == baseline + 2
+            catalog = api.post(models_url + 'discover/', {}, format='json')
+            assert catalog.status_code == 200, catalog.content
+            assert catalog.data['models'] == ['org/model:cloud', 'other/model:tag']
+            assert len(records) == baseline + 3 and records[-1]['operation'] == 'catalog'
+            diagnostics = api.get(models_url.removesuffix('models/') + 'diagnostics/')
+            assert diagnostics.status_code == 200 and diagnostics.data['inference_test_status'] == 'not_run'
+            diagnostics = api.get(BASE + arguments['request_id'] + '/diagnostics/')
+            assert diagnostics.status_code == 404
+            assert len(records) == baseline + 3  # Foreign/missing identities cannot perform IO.
             source = Source.objects.create(name='Synthetic process publisher', url='https://publisher.example/', language='en')
             category = Category.objects.create(name='Unified process', slug='unified-process')
             article = public_legacy_article(News.objects.create(title='Synthetic process article',
@@ -103,7 +118,7 @@ def test_compatible_probe_chat_translation_tools_and_bad_terminal(tmp_path, sett
                 tools=[{'type': 'function', 'function': {'name': 'byok_probe', 'parameters': {'type': 'object'}}}],
                 execution_guard=lambda: None)
             assert response.choices[0].finish_reason == 'tool_calls'
-            assert all(row['auth_label'] == ('owner' if auth_mode == 'api_key' else 'none') for row in records)
+            assert all(row['auth_label'] == ('owner' if auth_mode == 'api_key' else 'none') for row in records[baseline:])
             before = len(records)
             Handler.stream_override = 'nh-eof'
             wire = ask()

@@ -33,7 +33,10 @@ export default function AIUsageSection({ viewer }: { viewer: number }) {
             <thead><tr><th className="p-2">时间</th><th className="p-2">用途 / 模型</th><th className="p-2">状态</th><th className="p-2">输入 / 输出 Token</th></tr></thead>
             <tbody>{usage.data.attempts.map(row => <tr key={`${row.source}:${row.id}`} className="border-t border-border">
               <td className="p-2 whitespace-nowrap">{new Date(row.created_at).toLocaleString()}</td>
-              <td className="p-2 break-all">{PURPOSES[row.task_kind] ?? row.task_kind}<br />{row.provider_id} · {row.model_id}</td>
+              <td className="p-2 break-all">{PURPOSES[row.task_kind] ?? row.task_kind}<br />{row.provider_id} · {row.model_id}
+                {row.route_metadata && <p className="text-muted-foreground">{row.route_metadata.delivery_mode === 'buffered'
+                  ? '完整返回' : row.route_metadata.delivery_mode === 'streaming' ? '逐步输出' : '输出方式未知'} ·
+                  {row.route_metadata.terminal_verified === true ? '终态已验证' : '终态未知'}</p>}</td>
               <td className="p-2 whitespace-nowrap">{STATUSES[row.status] ?? '结果未知'}</td>
               <td className="p-2">{tokens(row.input_tokens)} / {tokens(row.output_tokens)}</td>
             </tr>)}</tbody>

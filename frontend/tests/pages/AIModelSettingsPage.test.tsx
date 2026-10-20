@@ -64,6 +64,31 @@ async function openCreate() {
 async function submitCreate() { await openCreate(); fireEvent.click(screen.getByRole('button', { name: '保存连接' })) }
 
 describe('BYOK T01 connection settings', () => {
+  it('clears Key on auth-mode changes and submits approved none without a placeholder', async () => {
+    vi.mocked(api.listAIProviders).mockResolvedValue([...profiles, { ...profile, provider_id: 'ollama',
+      provider_name: 'Ollama', profile_id: 'approved_server', auth_modes: ['api_key', 'none'],
+      data_destination_label: '管理员受信模型服务器；所选模型可能使用云服务' }])
+    setup(); await openCreate()
+    fireEvent.change(screen.getByLabelText('服务商与受信端点'), { target: { value: 'approved_server' } })
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: KEY } })
+    fireEvent.change(screen.getByLabelText('认证方式'), { target: { value: 'none' } })
+    expect(screen.queryByLabelText('API Key')).toBeNull()
+    fireEvent.change(screen.getByLabelText('认证方式'), { target: { value: 'api_key' } })
+    expect(screen.getByLabelText('API Key')).toHaveValue('')
+    fireEvent.change(screen.getByLabelText('认证方式'), { target: { value: 'none' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存连接' }))
+    await waitFor(() => expect(api.createAIConnection).toHaveBeenCalledOnce())
+    const body = vi.mocked(api.createAIConnection).mock.calls[0][0]
+    expect(body).toMatchObject({ auth_mode: 'none', provider_id: 'ollama', endpoint_profile: 'approved_server' })
+    expect(body).not.toHaveProperty('api_key')
+  })
+  it('does not offer Key replacement for a no-Key identity', async () => {
+    rows = [{ ...row, auth_mode: 'none', key_saved: false, masked_key: '' }]
+    setup(); await ready()
+    const connection = screen.getByRole('region', { name: '我的连接' })
+    expect(within(connection).queryByRole('button', { name: '替换 Key' })).toBeNull()
+    expect(within(connection).getByText(/无需 Key/)).toBeInTheDocument()
+  })
   it('lists multiple masked connections without any mutation', async () => {
     rows = [row, { ...row, id: 'other', display_name: '备用连接' }]
     setup(); await ready()

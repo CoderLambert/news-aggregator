@@ -7,6 +7,7 @@ vi.mock('@/services/aiConnectionsApi', async original => ({
   ...await original<typeof import('@/services/aiConnectionsApi')>(),
   listAIModels: vi.fn(), listAIModelCatalog: vi.fn(), createAIModel: vi.fn(),
   patchAIModel: vi.fn(), deleteAIModel: vi.fn(), probeAIModel: vi.fn(),
+  discoverAIModels: vi.fn(), getAIConnectionDiagnostics: vi.fn(),
 }))
 const connection = {
   id: 'connection-synthetic-id', provider_id: 'deepseek', provider_name: 'DeepSeek',
@@ -23,6 +24,7 @@ const model: api.AIModel = {
 }
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.mocked(api.discoverAIModels).mockReset().mockResolvedValue({ models: ['org/model:cloud'], truncated: false })
   vi.mocked(api.listAIModels).mockReset().mockResolvedValue([model])
   vi.mocked(api.listAIModelCatalog).mockReset().mockResolvedValue({
     catalog_version: 'synthetic', models: [{
@@ -45,6 +47,49 @@ async function ready() {
   await screen.findByRole('region', { name: '模型 DeepSeek Chat' })
 }
 describe('T02 per-connection models and explicit billing consent', () => {
+  it('keeps discovered IDs unselected until the user makes an explicit choice', async () => {
+    vi.mocked(api.listAIModelCatalog).mockResolvedValue({ catalog_version: 'empty', models: [] })
+    render(<AIModelsManager connection={{ ...connection, model_discovery_supported: true }} viewer={3} />)
+    await ready()
+    fireEvent.click(screen.getByRole('button', { name: '发现服务端模型' }))
+    await screen.findByRole('option', { name: /org\/model:cloud/ })
+    expect(screen.getByLabelText('预置模型（可选）')).toHaveValue('')
+    expect(screen.getByRole('button', { name: '添加模型（不调用服务商）' })).toBeDisabled()
+    expect(api.createAIModel).not.toHaveBeenCalled()
+  })
+  it('aborts a late discovery result after the viewer leaves', async () => {
+    let finish!: (result: { models: string[]; truncated: boolean }) => void
+    vi.mocked(api.discoverAIModels).mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const first = render(<AIModelsManager connection={{ ...connection, model_discovery_supported: true }} viewer={3} />)
+    await ready()
+    fireEvent.click(screen.getByRole('button', { name: '发现服务端模型' }))
+    const signal = vi.mocked(api.discoverAIModels).mock.calls[0][2]
+    first.unmount()
+    render(<AIModelsManager connection={connection} viewer={4} />)
+    await ready()
+    await act(async () => finish({ models: ['prior-viewer-private-model'], truncated: false }))
+    expect(signal?.aborted).toBe(true)
+    expect(screen.queryByRole('option', { name: /prior-viewer-private-model/ })).toBeNull()
+  })
+  it('keeps manual entry usable when the optional preset catalog fails', async () => {
+    vi.mocked(api.listAIModelCatalog).mockRejectedValue(new api.ConnectionRequestError(0))
+    render(<AIModelsManager connection={connection} viewer={3} />)
+    await ready()
+    fireEvent.change(screen.getByLabelText('或手动填写模型 ID'), { target: { value: 'org/manual:cloud' } })
+    fireEvent.click(screen.getByRole('button', { name: '添加模型（不调用服务商）' }))
+    await waitFor(() => expect(api.createAIModel).toHaveBeenCalledWith(connection, 'org/manual:cloud', 3, expect.any(AbortSignal)))
+    expect(api.probeAIModel).not.toHaveBeenCalled()
+  })
+  it('discovers only after a click and preserves manual entry after discovery failure', async () => {
+    vi.mocked(api.discoverAIModels).mockRejectedValue(new api.ConnectionRequestError(0))
+    render(<AIModelsManager connection={{ ...connection, model_discovery_supported: true }} viewer={3} />)
+    await ready()
+    expect(api.discoverAIModels).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '发现服务端模型' }))
+    await waitFor(() => expect(api.discoverAIModels).toHaveBeenCalledOnce())
+    expect(screen.getByLabelText('或手动填写模型 ID')).toBeEnabled()
+    expect(api.probeAIModel).not.toHaveBeenCalled()
+  })
   it('GET loads metadata only; never auto tests text or tools', async () => {
     render(<AIModelsManager connection={connection} viewer={3} />)
     await ready()

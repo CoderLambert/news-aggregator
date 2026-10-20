@@ -18,12 +18,13 @@ from api.ai_connection_views import ConnectionView, StrictSerializer, validate_n
 from api.services.ai_credentials import (
     CredentialUnavailable, lock_owner, require_active_snapshot, snapshot_connection,
 )
-from api.services.ai_worker_fencing import dispatch_once, SNAPSHOT_SCHEMA_VERSION
+from api.services.ai_worker_fencing import dispatch_once, commit_result, SNAPSHOT_SCHEMA_VERSION
 from api.services.ai_model_registry import (
     CATALOG_VERSION, catalog_for, get_trusted_preset, get_trusted_route, normalize_model_id,
     supports_article_chat,
 )
-from api.services.ai_model_probe import ProbeOutcome, send_model_probe
+from api.services.ai_model_probe import ProbeOutcome, send_model_probe, send_model_discovery, ModelDiscoveryError
+from api.services.ai_registry import get_profile, profile_route_prefix
 from api.services.ai_model_capabilities import current_capabilities as _effective_capabilities, route_binding
 
 
@@ -61,6 +62,53 @@ class ModelProbeSerializer(StrictSerializer):
     revision = serializers.IntegerField(min_value=1)
     request_id = serializers.UUIDField()
     probe_kind = serializers.ChoiceField(choices=_KINDS)
+
+
+class ModelDiscoverySerializer(StrictSerializer):
+    pass
+
+
+class AIModelDiscoveryView(ConnectionView):
+    def post(self, request, connection_id):
+        if set(request.query_params) - {'lang'} or not ModelDiscoverySerializer(data=request.data).is_valid():
+            return error('invalid_request')
+        connection = _connection(request.user, connection_id)
+        if connection is None:
+            return error('not_found', 404)
+        snapshot = snapshot_connection(connection)
+        fence = {'schema_version': SNAPSHOT_SCHEMA_VERSION, **asdict(snapshot)}
+        try:
+            result = dispatch_once(fence, task_owner_id=request.user.pk, send=lambda key: send_model_discovery(
+                provider_key=key, connection_snapshot=snapshot))
+        except ModelDiscoveryError:
+            return error('model_discovery_unavailable', 502)
+        # Return only after the same owner/epoch/policy fence. This is DB-only,
+        # creates no model/probe receipt, and never resends catalog IO.
+        return Response(commit_result(fence, task_owner_id=request.user.pk, persist=lambda: result))
+
+
+class AIConnectionDiagnosticsView(ConnectionView):
+    def get(self, request, connection_id):
+        connection = _connection(request.user, connection_id)
+        if connection is None:
+            return error('not_found', 404)
+        profile = get_profile(connection.provider_id, connection.endpoint_profile)
+        active = False
+        try:
+            require_active_snapshot(snapshot_connection(connection))
+            active = True
+        except CredentialUnavailable:
+            pass
+        prefix = profile_route_prefix(connection)
+        protocol = profile.get('protocol_family') if profile else None
+        if prefix and protocol is None:
+            protocol = ('openai-responses-v1' if connection.provider_id == 'openai' else
+                        'anthropic-messages-v1' if connection.provider_id == 'anthropic' else 'chat_completions_v1')
+        return Response({'connection_status': 'active' if active else 'authorization_unavailable',
+            'endpoint_status': 'approved' if prefix else 'unavailable', 'protocol_family': protocol,
+            'auth_mode': connection.auth_mode, 'inference_test_status': 'not_run',
+            'data_destination_label': '管理员受信模型服务器；所选模型可能使用云服务' if connection.endpoint_policy_digest
+            else '请求发送至所选云服务商；实际费用未知。'})
 
 
 def _connection(user, connection_id):

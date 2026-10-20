@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   ConnectionRequestError, listAIModels, listAITaskPreferences, saveAITaskPreferences,
+  hasAIConnectionAuthentication,
   type AIConnection, type AIModel, type AITaskKind, type AITaskPreferences,
   type AITaskPreferenceInput,
 } from '@/services/aiConnectionsApi'
@@ -74,7 +75,7 @@ export default function AITaskPreferencesSection({
   const validModel = (id: string, kind: AITaskKind) => {
     const model = modelsById.get(id)
     const connection = model && connectionsById.get(model.connection_id)
-    return Boolean(model && connection?.is_enabled && connection.key_saved &&
+    return Boolean(model && connection?.is_enabled && hasAIConnectionAuthentication(connection) &&
       model.has_trusted_route && model.capabilities.text === 'supported' &&
       (!['article_qa', 'full_translation'].includes(kind) || model.article_chat_supported === true) &&
       (kind !== 'deep_research' || model.capabilities.tools === 'supported'))
@@ -103,7 +104,7 @@ export default function AITaskPreferencesSection({
       if (controller.signal.aborted) return
       setRemote(updated)
       setDraft(null)
-      setNotice('用途偏好已保存。既有任务快照不重新绑定；业务调用仍需独立接入和授权。')
+      setNotice('用途偏好已保存。问答、翻译和研究按已选模型执行；已有任务保持原模型，不自动切换。')
     } catch (reason) {
       if (controller.signal.aborted) return
       setReconcileRequired(true)

@@ -3,7 +3,7 @@ from django.urls import path
 from api.ai_connection_views import (AIProviderCatalogView, UserAIConnectionListCreateView,
     UserAIConnectionDetailView, UserAIConnectionKeyView)
 from api.ai_model_views import (AIModelCatalogView, AIModelListCreateView,
-    AIModelDetailView, AIModelProbeView, AIModelAttemptListView)
+    AIModelDetailView, AIModelProbeView, AIModelAttemptListView, AIModelDiscoveryView, AIConnectionDiagnosticsView)
 from api.ai_preference_views import AITaskPreferencesView
 from api.ai_usage_views import AIUsageView
 
@@ -15,6 +15,8 @@ urlpatterns = [
     path('connections/<uuid:connection_id>/', UserAIConnectionDetailView.as_view(), name='ai-connection-detail'),
     path('connections/<uuid:connection_id>/key/', UserAIConnectionKeyView.as_view(), name='ai-connection-key'),
     path('connections/<uuid:connection_id>/model-catalog/', AIModelCatalogView.as_view(), name='ai-model-catalog'),
+    path('connections/<uuid:connection_id>/diagnostics/', AIConnectionDiagnosticsView.as_view(), name='ai-connection-diagnostics'),
+    path('connections/<uuid:connection_id>/models/discover/', AIModelDiscoveryView.as_view(), name='ai-model-discovery'),
     path('connections/<uuid:connection_id>/models/', AIModelListCreateView.as_view(), name='ai-model-list'),
     path('connections/<uuid:connection_id>/models/<uuid:model_id>/', AIModelDetailView.as_view(), name='ai-model-detail'),
     path('connections/<uuid:connection_id>/models/<uuid:model_id>/probe/', AIModelProbeView.as_view(), name='ai-model-probe'),

@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from api.authentication import AnonymousCsrfSessionAuthentication
 from api.ai_connection_models import UserAIConnection
-from api.services.ai_registry import get_profile, provider_catalog
+from api.services.ai_registry import get_profile, profile_route_prefix, provider_catalog
 from api.services.ai_endpoint_profiles import profile_allows_user
 from api.services.ai_credentials import (CredentialEncryptionUnavailable, CredentialUnavailable,
     creation_digest, execution_credential, encrypt_credential, lock_owner)
@@ -96,6 +96,9 @@ def payload(row):
         'endpoint_profile': row.endpoint_profile, 'endpoint_profile_version': row.endpoint_profile_version,
         'region_name': profile['region_name'] if profile else '不可用', 'display_name': row.display_name,
         'auth_mode': row.auth_mode,
+        'model_discovery_supported': bool(row.endpoint_policy_digest and profile_route_prefix(row)),
+        'data_destination_label': '管理员受信模型服务器；所选模型可能使用云服务' if row.endpoint_policy_digest
+        else '请求发送至所选云服务商；实际费用未知。',
         'key_saved': bool(row.credential_ciphertext), 'masked_key': '••••••••' if row.credential_ciphertext else '',
         'is_enabled': row.is_enabled, 'revision': row.revision, 'credential_epoch': row.credential_epoch,
         'verification_status': 'not_tested', 'updated_at': row.updated_at.isoformat()}
