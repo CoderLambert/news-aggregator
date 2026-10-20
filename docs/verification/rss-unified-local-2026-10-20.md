@@ -68,3 +68,7 @@ Runner 离线时，本轮只在确认没有 Worker、GitHub busy=false 且 DinD 
 首轮 Ready [CI #39431887139](https://github.com/CoderLambert/news-aggregator/actions/runs/39431887139) 的 frontend 已通过（706 PASS），另一个 [三轮矩阵 #39431887165](https://github.com/CoderLambert/news-aggregator/actions/runs/39431887165) 每轮 2045 PASS / 16 SKIP、2061 身份对账通过。完整 backend 在 T00 合成研究工具处失败：临时 SQLite 已隔离，但 Chroma 仍沿用生产 `/var/lib/newshub/chroma`，非 root Runner 返回 PermissionError。PR 退回 Draft 后，将 Chroma/TTS 显式绑定同一临时目录，并在 T04 入口核验派生路径归属；CI 契约先红后绿（50 PASS）。未放宽目录权限、研究授权或业务错误断言；须由后续修正提交的完整 CI 重新证明联合流程。
 
 最终合并必须满足 PR #158 最新 head、当前 base 的选中完整 frontend、backend-and-release-gates 和 merge-gate SUCCESS。真实来源/本地浏览器证据限于上述场景；其他历史规模、生产上线、真实模型及人工签署仍不在本次完成范围。
+
+修正提交 `f52461b` 的 [Ready CI #39435429873](https://github.com/CoderLambert/news-aggregator/actions/runs/39435429873) 已通过前端、T00 联合流程和完整后端矩阵，生产镜像仍因 PyPI 约 15 kB/s 的冷下载未完成，随后退回 Draft 处理。镜像未构建完成不计 PASS。MTU、镜像源及跨引擎构建缓存尝试的失败记录均保留；未切换包源、改全局网络、删除门禁或替换共享依赖。
+
+最终采用 [Docker 原生 pip 缓存挂载](https://docs.docker.com/build/cache/optimize/#use-cache-mounts)：生产依赖仍从官方 PyPI 安装，下载缓存独立于镜像层。使用同一 CI 已有的公开包缓存为新建 BuildKit 缓存预热，原缓存只读保留。同一 `anthropic==1.13.0` wheel 的官方 SHA256 校验一致，禁网缓存读取 0.282 秒，对照冷下载约 146 秒；这只证明该包缓存复用，不冒充整套镜像/CI 的通过或统一加速比例。新构建输入仍须重新完成完整 CI、镜像和 G1 门禁。

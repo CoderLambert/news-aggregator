@@ -42,7 +42,9 @@ RUN pip install --no-cache-dir \
 # Keep the large CPU wheel cached across ordinary requirements/source changes.
 COPY backend/requirements.txt /app/backend/requirements.txt
 ARG NEWSHUB_PYPI_INDEX=https://pypi.org/simple
-RUN pip install --no-cache-dir -r /app/backend/requirements.txt --index-url "${NEWSHUB_PYPI_INDEX}"
+# Cache public dependency downloads between production builds.
+RUN --mount=type=cache,id=newshub-runtime-pip-v1,target=/root/.cache/pip,sharing=locked \
+    pip install -r /app/backend/requirements.txt --index-url "${NEWSHUB_PYPI_INDEX}"
 COPY backend/ /app/backend/
 COPY start_waitress.py /app/start_waitress.py
 COPY scripts/docker-migrate.py /app/scripts/docker-migrate.py
