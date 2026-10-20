@@ -9,6 +9,7 @@
 - `f4f8f96`：管理员受信 manifest、纯配置校验、私网用户准入、内容版本路由、模型标签/命名空间、审核设计及计划。
 - `3b2b11e`：T01 显式 `api_key/none`、0080 加法迁移、端点策略摘要与新连接 AAD 绑定、旧 AAD/幂等/队列兼容、撤销围栏和 T03 状态；研究/分类共用严格解码。无 Key 不存假 Key，也不需要安装加密 Key。
 - `385bca8` / `bcafd00`：所有既有协议拒绝请求级 URL/Header/HTTP client/provider/retry/fallback 覆盖；新增管理员静态路由生成、原生 CustomLLM→成熟 raw adapter、Key/None 准入、DNS/IP pin、原始终态、单次发送、压缩拒绝、媒体预处理限制和错误脱敏。默认 manifest 仍为空。
+- `7312a90`：能力收据绑定 route/protocol/adapter/auth，业务 SDK 注入受信 owner/mode；兼容模型问答/分段翻译及工具消费者贯通。已有原生 Responses/Messages 提供明确 buffered 输出，其他旧 Chat 的业务准入保持原限制。0081 增加脱敏 usage 元数据，并将 alias 容量扩至 256，保留最大 profile+model 的 245 字符身份。
 
 独立复查发现并解决：创建中途 manifest 改变会重绑 Key 的竞争；兼容端点误删 `openai/` 等模型前缀。已先复现失败，再修复；复审未发现 Task 1/2 重要问题。该复查使用主会话的测试证据，没有冒称独立重复运行。
 
@@ -32,6 +33,10 @@
 | Task 3 profiles/T02/manual routes | **52 passed、23 subtests** | 共享模型校验模块的受影响集 |
 | Task 3 CI / harness / config-runner | **50 / 37 / 5 passed** | CI 路由门禁未改变；不是远端 CI |
 | Task 3 Django legacy 业务链重跑 | **3 passed，29.33s** | 全新 production-isolated WAL DB，旧问答/翻译/研究/取消；新路由业务待 Task 4 |
+| Task 4 最终受影响后端集 | **199 passed、48 subtests，112.46s** | T01/T02/T03/T04/T05、研究/分类/建议/usage/新统一消费者；不是整仓全量 |
+| Task 4 Django→SDK→实际 Proxy 业务链 | **5 passed，59.07s** | legacy3 + compatible Key/None2；真实探针、问答、分段翻译、工具、EOF 不落完成、owner usage 隔离 |
+| Task 4 受信 Proxy 矩阵 | **31 PASS / 0 FAIL** | 新增严格 JSON object 模式；[原始报告](evidence/2026-10-21-ai-business-proxy.json) 绑定 `7312a90` runtime blob |
+| Task 4 CI / Proxy direct / OpenRouter / migration | **50 / 27 / 1 / PASS** | OpenRouter 实际 HTTP 断言关闭上游 fallback；migration dry-run 无缺失；非远端 CI |
 | 真实供应商（含指定 Ollama）、浏览器 UAT、全量 CI、生产 | NOT_RUN | 不得据上述结果宣布全功能完成 |
 
 原始脱敏 Proxy 报告保存在 `evidence/2026-10-21-ai-proxy-admission.json`；包含每条断言、版本、请求次数和清理结果。实际版本：Python 3.12.14、LiteLLM 1.105.0、OpenAI SDK 3.28.0、Anthropic 1.13.0、httpx2 2.13.1、临时 pgserver 0.1.4/Prisma 0.15.0。
@@ -50,7 +55,7 @@
 
 ## 下一实施边界
 
-Task 3 已完成代码和本地合成验收。新路由使用原生 CustomLLM 扩展，不启用全局实验开关；旧 DeepSeek clean EOF 与新 Chat stop+DONE 合同独立。继续 Task 4 消费者与能力/协议绑定，Task 5 UI/发现/诊断，Task 6 指定 Ollama 及最终 F01–F09/S01–S08/R01–R08。当前配置保存不代表新业务流式已贯通，深研/tools、usage、分类仍须完整验证。
+Task 3/4 已完成代码和本地合成验收。兼容路由业务流式已贯通；通用分段使用产品预算，context/output 的供应商最大值仍为未知，失败不重试、不切换。新路由使用原生 CustomLLM 扩展，不启用全局实验开关；旧 DeepSeek clean EOF 与新 Chat stop+DONE 合同独立。继续 Task 5 UI/发现/诊断、Task 6 指定 Ollama与最终 F01–F09/S01–S08/R01–R08。尚不能宣称界面、真实服务或生产完成。
 
 执行状态与下一任务见 Git ignored `.superpowers/sdd/2026-10-21-newshub-unified-ai-access-v1/progress.md`；临时 raw handler 脚本在 `/tmp/newshub-ai-v1-raw-handler-probe.py`，属于可删除调查脚本，未作为生产实现交付。
 

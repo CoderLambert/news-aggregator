@@ -56,9 +56,9 @@
 **Files:** Modify `ai_gateway.py`, `ai_model_probe.py`, `ai_model_capabilities.py`, `ai_model_views.py`, `ai_article_chat.py`, `ai_private_translation.py`, `research/byok_execution.py`, `channel_ai.py`, `ai_usage.py` 及对应测试。
 **Interfaces:** Task 1/3 route descriptor/protocol → 实际调用；Key/None → Proxy；能力/adapter/route 绑定；`delivery_mode` 与稳定安全 error code。
 
-- [ ] 写云/compatible Key/none 问答与分段翻译回归、相同文章切换、raw terminal 失败不保存、取消/撤销 late commit 拒绝、tools 不推断研究、usage owner/no-secret。
-- [ ] 逐组 RED→实现→GREEN，移除所有业务 Flash 常量 gate，改为受信完成合同；保留 DeepSeek 专属 thinking 参数仅用于其 route。
-- [ ] 运行 T02/T03/T04/T05/research/channel/usage 影响测试，再 Django→SDK→真实 Proxy→合成上游端到端；scoped commit。
+- [x] 写云/compatible Key/none 问答与分段翻译回归、相同文章切换、raw terminal 失败不保存、取消/撤销 late commit 拒绝、tools 不推断研究、usage owner/no-secret。
+- [x] 逐组 RED→实现→GREEN，移除所有业务 Flash 常量 gate，改为受信完成合同；保留 DeepSeek 专属 thinking 参数仅用于其 route。
+- [x] 运行 T02/T03/T04/T05/research/channel/usage 影响测试，再 Django→SDK→真实 Proxy→合成上游端到端；scoped commit。
 
 ### Task 5: 连接、模型、用途和诊断界面
 
