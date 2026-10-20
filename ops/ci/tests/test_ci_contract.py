@@ -204,6 +204,16 @@ class SelfHostedCIContract(unittest.TestCase):
                           if step["name"] == "Run backend and offline deployment tests")
         self.assertLess(security_fast, full_suite)
         self.assertIn("--maxfail=1", backend_steps[security_fast]["run"])
+        # Retiring an implementation must not leave either CI stage pointing
+        # at a deleted security module (pytest exits before collecting tests).
+        for job in ("dev-backend", "backend-and-release-gates"):
+            security = next(step for step in wf["jobs"][job]["steps"]
+                            if step["name"] == "Fast backend security regressions")
+            paths = [word for word in security["run"].split()
+                     if word.endswith(".py")]
+            self.assertTrue(paths)
+            for path in paths:
+                self.assertTrue((ROOT / path).is_file(), f"{job}: missing {path}")
         # Default backend tests must invoke the same previously validated
         # hybrid as the opt-in benchmark, with only one CI round.
         self.assertEqual(backend_steps[full_suite]["run"], "bash ops/ci/benchmark-xdist.sh")

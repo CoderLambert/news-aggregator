@@ -139,7 +139,8 @@ jobs:
       - name: Fast backend security regressions
         run: |
           backend/venv/bin/python -m pytest -q --maxfail=1 --tb=short \
-            backend/api/tests/test_article_fetcher_security.py \
+            backend/api/tests/test_safe_http.py \
+            backend/api/tests/rss/test_retired_ingestion.py \
             backend/api/tests/test_research_csrf.py \
             scripts/deploy/tests/test_nginx_templates.py
       - name: Verify scoped CI contracts
@@ -243,7 +244,8 @@ jobs:
         # The complete suite below still runs all three test roots.
         run: |
           backend/venv/bin/python -m pytest -q --maxfail=1 --tb=short \
-            backend/api/tests/test_article_fetcher_security.py \
+            backend/api/tests/test_safe_http.py \
+            backend/api/tests/rss/test_retired_ingestion.py \
             backend/api/tests/test_research_csrf.py \
             scripts/deploy/tests/test_nginx_templates.py
       - name: Verify private self-hosted CI contract
