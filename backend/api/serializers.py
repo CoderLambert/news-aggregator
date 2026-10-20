@@ -17,6 +17,8 @@ class SourceSerializer(serializers.ModelSerializer):
     reading_policy = serializers.SerializerMethodField()
     subscription_status = serializers.SerializerMethodField()
     subscription_reason = serializers.SerializerMethodField()
+    can_subscribe = serializers.SerializerMethodField()
+    rss_status = serializers.SerializerMethodField()
 
     def get_name(self, obj):
         from api.rss.models import SourcePublication
@@ -47,9 +49,16 @@ class SourceSerializer(serializers.ModelSerializer):
         from api.services.channel_catalog import subscription_status
         return subscription_status(obj)[1]
 
+    def get_can_subscribe(self, obj):
+        return self.get_subscription_status(obj) == 'active'
+
+    def get_rss_status(self, obj):
+        from api.services.channel_catalog import rss_status
+        return rss_status(obj)
+
     class Meta:
         model = Source
-        fields = ['id', 'name', 'url', 'logo', 'country', 'language', 'source_type', 'news_count', 'description', 'region', 'reading_policy', 'subscription_status', 'subscription_reason']
+        fields = ['id', 'name', 'url', 'logo', 'country', 'language', 'source_type', 'news_count', 'description', 'region', 'reading_policy', 'subscription_status', 'subscription_reason', 'can_subscribe', 'rss_status']
 
 
 class AccessNewsListSerializer(serializers.ListSerializer):
@@ -107,15 +116,7 @@ class ChannelNewsSerializer(serializers.ModelSerializer):
                 binding__applied_policy_version=F('binding__policy_version')).exists())
 
     def get_can_fetch_full_content(self, obj):
-        if obj.body_owner_binding_id:
-            return self.get_can_rss_refetch(obj)
-        from api.rss.access import authorized_sources
-        from api.services.full_content_status import fetch_eligibility
-        user = getattr(self.context.get('request'), 'user', None)
-        if obj.body_owner_binding_id or not authorized_sources(user, body=True).filter(
-                pk=obj.body_owner_source_id or obj.source_id, publication__owner='legacy').exists():
-            return False
-        return obj.full_content_fetch_status != 'blocked' and obj.full_content_retry_count < 5 and not fetch_eligibility(obj, privileged=self.get_body_access_granted(obj))
+        return bool(obj.body_owner_binding_id and self.get_can_rss_refetch(obj))
 
     full_content_completeness = serializers.SerializerMethodField()
     content_completeness = serializers.SerializerMethodField()

@@ -39,6 +39,7 @@ export type CapabilityReason =
   | 'hosted_integration_unapproved'
   | 'chatgpt_plan_usage_disabled'
   | 'capabilities_unavailable'
+  | 'legacy_ingestion_retired'
 
 export interface CapabilityFeature {
   enabled: boolean
@@ -60,6 +61,7 @@ const CAPABILITY_REASONS = new Set<CapabilityReason>([
   'hosted_integration_unapproved',
   'chatgpt_plan_usage_disabled',
   'capabilities_unavailable',
+  'legacy_ingestion_retired',
 ])
 
 export function parseCapabilities(value: unknown): SiteCapabilities {
@@ -98,14 +100,6 @@ export function parseCapabilities(value: unknown): SiteCapabilities {
     features,
   }
 }
-
-export interface ProviderComparisonParams extends ApiQueryParams {
-  page?: number
-  page_size?: number
-  search?: string
-}
-
-export type ProviderComparisonInput = { news_id: string } | { url: string }
 
 export interface ResearchResultsParams extends ApiQueryParams {
   result_type?: string
@@ -273,28 +267,8 @@ export function fetchCategories(signal?: AbortSignal): Promise<unknown> {
   return api.get<unknown>('/categories/', { signal }).then(({ data }) => data)
 }
 
-export function fetchSources(signal?: AbortSignal): Promise<unknown> {
-  return api.get<unknown>('/sources/', { signal }).then(({ data }) => data)
-}
-
-// ---- Provider comparisons -------------------------------------------------
-
-export function fetchProviderComparisons(params: ProviderComparisonParams = {}, signal?: AbortSignal): Promise<unknown> {
-  return api.get<unknown>('/provider-comparisons/', { params, signal }).then(({ data }) => data)
-}
-
-export function createProviderComparison(payload: ProviderComparisonInput, signal?: AbortSignal): Promise<unknown> {
-  const request = signal
-    ? apiLong.post<unknown>('/provider-comparisons/', payload, { signal })
-    : apiLong.post<unknown>('/provider-comparisons/', payload)
-  return request.then(({ data }) => data)
-}
-
-export function retestProviderComparison(id: NewsId, signal?: AbortSignal): Promise<unknown> {
-  const request = signal
-    ? apiLong.post<unknown>(`/provider-comparisons/${id}/retest/`, undefined, { signal })
-    : apiLong.post<unknown>(`/provider-comparisons/${id}/retest/`)
-  return request.then(({ data }) => data)
+export function fetchSources(signal?: AbortSignal, purpose: 'subscribe' | 'history' = 'history'): Promise<unknown> {
+  return api.get<unknown>('/sources/', { signal, params: { purpose } }).then(({ data }) => data)
 }
 
 // ---- Chat -----------------------------------------------------------------

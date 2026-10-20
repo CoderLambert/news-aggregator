@@ -113,7 +113,12 @@ class ControlWorker:
             if unsettled.exists() and not claim.reconcile:
                 raise EngineError('binding_outcome_unknown', retryable=True)
             if operation.intent_version != binding.policy_version:
-                if claim.reconcile:
+                if (not claim.reconcile and 'subscription_request' in operation.safe_input
+                        and operation.kind in {'register', 'set_enabled'}):
+                    # A pending subscription has no mode override. Dispatch only
+                    # the CURRENT approved policy, still under this owned lease.
+                    self._owned(claim, timezone.now()).update(intent_version=binding.policy_version)
+                elif claim.reconcile:
                     # Recovery is read-only except a located committed create can
                     # converge CURRENT policy. No old refetch is reissued/published.
                     self._owned(claim, timezone.now()).update(intent_version=binding.policy_version)
@@ -130,7 +135,8 @@ class ControlWorker:
             from api.rss.feed_policy import assert_binding_policy
             assert_binding_policy(binding, enabled=binding.desired_enabled)
             policy = PolicyBinding(str(binding.engine_instance_uuid), binding.account_id,
-                binding.engine_feed_id, binding.policy_version, binding.desired_mode, binding.desired_enabled)
+                binding.engine_feed_id, binding.policy_version, binding.desired_mode, binding.desired_enabled,
+                published_since=binding.published_since.isoformat() if binding.published_since else None)
             applied = binding.applied_policy_version == binding.policy_version and binding.connection_state == (
                 'ready' if binding.desired_enabled else 'paused')
         else:
@@ -214,12 +220,14 @@ class ControlWorker:
                     if not policy.desired_enabled:
                         return Outcome({'connected': False, 'not_created': True})
                     feed_id = adapter.create_feed(request.url, desired_mode=policy.desired_mode,
-                                                  disabled=not policy.desired_enabled).id
+                                                  disabled=not policy.desired_enabled,
+                        **({'published_since': policy.published_since} if policy.published_since else {})).id
                 # Converge all approved fields together; never re-enable an old mode.
                 if feed_id is None:
                     return Outcome({'connected': False, 'not_created': True})
                 desired = PolicyBinding(policy.engine_instance_uuid, policy.account_id, feed_id,
-                    policy.policy_version, policy.desired_mode, policy.desired_enabled)
+                    policy.policy_version, policy.desired_mode, policy.desired_enabled,
+                    published_since=policy.published_since)
                 receipt = adapter.update_feed_policy(desired, desired.policy_version)
                 feed = receipt.feed
                 if (receipt.applied_policy_version != policy.policy_version
@@ -305,8 +313,9 @@ class ControlWorker:
                 result = {'code': code, 'retryable': retryable, 'outcome_unknown': unknown}
                 if cancelled:
                     result['cancelled'] = True
-                if binding and unknown:
-                    FeedBinding.objects.filter(pk=binding.pk).update(connection_state='paused', last_error=code)
+                if binding and (unknown or state == 'failed'):
+                    FeedBinding.objects.filter(pk=binding.pk).update(
+                        connection_state='paused' if unknown else 'error', last_error=code)
             else:
                 state, next_attempt = ('cancelled' if cancelled else 'succeeded'), None
                 result = {**(outcome.result or {}), **({'cancelled': True} if cancelled else {})}
@@ -316,8 +325,13 @@ class ControlWorker:
                     if outcome.feed:
                         fields['engine_feed_id'] = outcome.feed.id
                     FeedBinding.objects.filter(pk=binding.pk, policy_version=request.policy.policy_version).update(**fields)
+            if state == 'succeeded' and binding and request.kind in {'register', 'set_enabled'}:
+                from api.rss.subscriptions import complete_subscription
+                complete_subscription(operation)
             query.update(state=state, safe_result=result, next_attempt=next_attempt,
                          lease_token=None, lease_until=None, updated_at=now)
+            if binding:
+                reconcile_binding(binding.pk)
             return True
 
     def _prepare_or_finish(self, claim):

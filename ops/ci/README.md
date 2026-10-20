@@ -159,7 +159,7 @@ PR #81 自托管 Runner 的一次热缓存验收中，后端 pytest 测试为 24
 - 测试输出保留 `--durations=40 --durations-min=0.5`，按 setup/call/teardown 排序显示慢用例，便于持续排查。
 - RSS EngineAdapter 本地 HTTP server 的测试关闭轮询由默认 0.5 秒降为 0.02 秒，仍使用真实 HTTP 和标准 `shutdown()`。
 - 全文 Worker 的 SQLite 迁移只在模块级子进程执行一次，各测试通过独立临时数据库副本运行，不共享数据库、锁、心跳或持久进程。
-- 默认 CI 后端测试拟改为**受限混合并行**：7 个种子/状态敏感模块保持串行，其余三测试根目录通过固定 `pytest-xdist==3.8.0` / `execnet==2.1.1`、`-n 2 --dist=loadfile --max-worker-restart=0` 执行。每轮严格核对 `2410 passed / 16 skipped`、JUnit 零失败，禁止把失败转为跳过。主 CI `CI_XDIST_REPEATS=1`，独立实验仍重复 3 次。该修改是否正式可用须以本变更 SHA 的完整 CI（包括镜像构建及 G1）全绿为准；此处不是发布或生产验收结论。
+- 默认 CI 后端测试使用受限混合并行。T31 退役旧采集实现后，`test_smart_channel_workspace.py` 和 `test_channels.py` 继续串行；其余三测试根目录通过固定 `pytest-xdist==3.8.0` / `execnet==2.1.1`、`-n 2 --dist=loadfile --max-worker-restart=0` 执行。每轮按实际收集结果对账全部执行身份，检查 JUnit 零失败并保留原 skip 审计，不固定 passed 总数，不把失败改成跳过。主 CI `CI_XDIST_REPEATS=1`，独立实验仍重复 3 次。完整 CI、镜像与 G1 的实际结果须绑定对应提交；文档不能替代发布或生产验收。
 
 ## 6. 长期持久缓存
 
@@ -193,7 +193,9 @@ docker exec newshub-ci-docker-1 docker -H unix:///ci-docker/docker.sock system d
 
 2026-10-19 Omarchy 实证：两个 Runner 同时 Offline，TCP 443 通而 api.github.com 的 TLS 握手在项目 Bridge MTU=1500 下超时。同一 Runner 镜像在 Host 网络正常；临时将两个容器的 eth0 调整到 MTU=1280 后 HTTPS 返回 200、Runner 恢复 Online 并领取排队 CI。此结果**支持 MTU/PMTU 路径问题**，尚未确定具体的丢包设备。
 
-Compose 为 **newshub-ci 项目自身**的默认 Bridge 网络设置 MTU=${CI_BRIDGE_MTU:-1280}，不改宿主机 Docker 全局设置，不授予前端 Runner Docker socket，也不自动改动现有正在运行的容器。仓库配置更新后旧网络不会自动应用新 MTU。DinD 内部新建网络如另有 MTU 异常应独立验证，不预先删除镜像和缓存。
+按用户要求，Compose 将 **newshub-ci 项目自身**的默认 Bridge 网络及 DinD 内部默认 Bridge **固定为 MTU=1200**，移除 `CI_BRIDGE_MTU` 覆盖入口，避免重启后回到旧值。不改宿主机 Docker 全局设置，不授予前端 Runner Docker socket，也不自动改动现有正在运行的容器。仓库配置更新后旧网络不会自动应用新 MTU。
+
+2026-10-20 补充实证：外层容器调整后，DinD 默认内层网络仍为 1500，同一 Python 镜像访问 PyPI TLS 超时；内层 host 网络返回 200/0.622 秒，独立 MTU=1280 bridge 返回 200/0.758 秒。`dockerd --mtu` 使后续默认容器及 BuildKit 网络使用相同 MTU；现有用户自建网络不自动变化。此对照支持内层 MTU/PMTU 故障，不证明具体丢包设备。刷新时须保留注册、工作卷和下载缓存，不预先删除镜像或缓存。
 
 仅在**当前 PR/main CI 全部完成**、两个 GitHub Runner Online/Idle 且本地没有 Runner.Worker 时，才在 Omarchy 上运行：
 
@@ -211,7 +213,7 @@ docker exec newshub-ci-runner-1 cat /sys/class/net/eth0/mtu
 docker exec newshub-ci-runner-frontend-1 cat /sys/class/net/eth0/mtu
 ~~~
 
-通过条件：两个 eth0 均为 1280，GitHub 两个 Runner 均 Online，随后适用的精确 PR head CI 实际运行成功。**真实 Omarchy 持久化操作在执行前为 NOT_RUN**。若需要回退，设置 `CI_BRIDGE_MTU=1500` 并在空闲状态按同一受保护流程重建网络；1500 可能重新触发本故障。不得在 CI Busy 时执行 down，不使用全局 prune，不删数据卷。
+通过条件：两个 Runner 的 eth0、DinD 的 eth0/docker0 及新建默认容器均为 1200，GitHub 两个 Runner 均 Online，随后适用的精确 PR head CI 实际运行成功。若需要回退，须审核修改 Compose 的外层及 `dockerd --mtu` 两处固定值，再在空闲状态按同一受保护流程重建网络；1500 可能重新触发本故障。不得在 CI Busy 时执行 down，不使用全局 prune，不删数据卷。
 
 - Runner 与 DinD 都需要联网拉镜像和工具；不需要公网入站端口。
 - 预装 Chromium，后端 venv 仍安装原工作流指定版本 playwright==1.62.0。

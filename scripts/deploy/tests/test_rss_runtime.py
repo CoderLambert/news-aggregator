@@ -83,7 +83,7 @@ def test_optional_overlay_has_private_pg_scoped_secrets_and_loopback_api():
     assert all(services[name]['profiles'] == ['rss'] for name in ('rss-db', 'miniflux', 'rss-sync'))
     assert services['app']['volumes'] == ['rss-runtime-data:/var/lib/newshub/rss-runtime:ro']
     assert set(services['app']['environment']) == {'RSS_ENGINE_INSTANCE_UUID', 'RSS_ENGINE_ACCOUNT_ID', 'RSS_RUNTIME_DIR', 'RSS_FULL_CONTENT_ENABLED'}
-    assert services['app']['environment']['RSS_FULL_CONTENT_ENABLED'] == '${RSS_FULL_CONTENT_ENABLED:-0}'
+    assert services['app']['environment']['RSS_FULL_CONTENT_ENABLED'] == '${RSS_FULL_CONTENT_ENABLED:-1}'
     assert 'secrets' not in services['app']
     assert 'ports' not in services['rss-db']
     assert config['networks']['rss-db-net']['internal'] is True
@@ -106,7 +106,7 @@ def test_optional_overlay_has_private_pg_scoped_secrets_and_loopback_api():
     base = yaml.safe_load((ROOT / 'compose.prod.yaml').read_text())['services']
     assert base['app']['network_mode'] == 'host'
     assert base['app']['secrets'] == ['ai_byok_gateway_project_key']
-    assert {'crawler', 'indexer', 'full-content'} <= set(base)
+    assert set(base) == {'app', 'migrate', 'indexer'}
     workspace = yaml.safe_load((ROOT / 'compose.workspace.prod.yaml').read_text())
     assert workspace['services']['channel-worker']['network_mode'] == 'host'
 
@@ -123,3 +123,26 @@ def test_rss_image_is_an_independent_target_with_its_own_lock():
     pins = [line for line in requirements if line and not line.startswith('#')]
     assert all('==' in line and '>=' not in line for line in pins)
     assert not any(word in '\n'.join(pins).lower() for word in ('torch', 'scrapy', 'feedparser', 'playwright', 'chromadb'))
+
+
+def test_postgres_readiness_waits_for_tcp_before_starting_engine():
+    """The bootstrap server accepts Unix sockets before TCP is available."""
+    import shlex
+    services = yaml.safe_load((ROOT / 'compose.rss.prod.yaml').read_text())['services']
+    command = shlex.split(services['rss-db']['healthcheck']['test'][1])
+    assert '-h' in command, 'Unix bootstrap readiness must not start Miniflux'
+    assert command[command.index('-h') + 1] in {'127.0.0.1', 'localhost'}
+    assert services['miniflux']['depends_on']['rss-db']['condition'] == 'service_healthy'
+
+
+def test_application_defaults_full_content_on_with_explicit_opt_out(tmp_path):
+    for value, expected in ((None, True), ('0', False), ('1', True)):
+        env = runtime_env(tmp_path)
+        env.pop('RSS_FULL_CONTENT_ENABLED', None)
+        if value is not None:
+            env['RSS_FULL_CONTENT_ENABLED'] = value
+        result = subprocess.run([sys.executable, '-c',
+            'from newsaggregator.settings import RSS_FULL_CONTENT_ENABLED; print(RSS_FULL_CONTENT_ENABLED)'],
+            env=env, capture_output=True, text=True, timeout=15)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == str(expected)

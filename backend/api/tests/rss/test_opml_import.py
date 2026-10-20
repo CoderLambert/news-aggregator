@@ -13,7 +13,7 @@ from api.rss.import_models import RssImportBatch, RssImportItem
 from api.rss.models import FeedBinding, FeedOperation
 from api.rss.opml import MAX_BYTES, process_imports, parse_opml
 
-pytestmark = pytest.mark.django_db
+pytestmark = pytest.mark.django_db(transaction=True)
 XML = b'''<?xml version="1.0"?><opml version="2.0"><body><outline text="Tech"><outline type="rss" text="One" xmlUrl="https://example.com/feed"/></outline><outline text="Reading"><outline type="rss" text="One again" xmlUrl="https://EXAMPLE.com:443/feed#same"/><outline type="rss" text="Two" xmlUrl="https://example.org/rss"/></outline></body></opml>'''
 
 
@@ -78,6 +78,9 @@ def test_confirm_groups_replay_and_owner_binding(people):
     changed = {**data, 'selected_ids': data['selected_ids'][:1]}
     assert client(a).post('/api/me/rss-imports/confirm/', changed, format='json').status_code == 409
     assert process_imports() == 2 and process_imports() == 0
+    from api.tests.rss.registration_fixtures import connect_pending
+    assert not ChannelSubscription.objects.exists()
+    connect_pending()
     assert ChannelSubscription.objects.count() == 2
     assert sorted(ChannelSubscription.objects.get(source__feed_links__binding__canonical_feed_url='https://example.com/feed').groups.values_list('name', flat=True)) == ['Existing', 'New']
     assert client(b).get(f"/api/me/rss-imports/{result.data['id']}/").status_code == 404
@@ -110,7 +113,8 @@ def test_partial_failure_retries_only_failed_item_and_never_unknown(people):
     assert client(a).post(url, request, format='json').status_code == 202
     assert client(a).post(url, request, format='json').status_code == 202
     assert process_imports() == 1
-    assert ChannelSubscription.objects.count() == 2
+    # Remote operation labels alone do not grant a subscription before completion.
+    assert ChannelSubscription.objects.count() == 0
     items[0].refresh_from_db()
     items[1].refresh_from_db()
     assert items[0].operation.state == 'succeeded'
@@ -123,6 +127,8 @@ def test_personal_multigroup_export_roundtrip_preserves_relations(people):
     data = confirmation(result, group_map={'Tech': {'create': 'Tech'}, 'Reading': {'create': 'Reading'}})
     client(a).post('/api/me/rss-imports/confirm/', data, format='json')
     process_imports()
+    from api.tests.rss.registration_fixtures import connect_pending
+    connect_pending()
     exported = client(a).get('/api/me/rss-subscriptions/export/')
     assert exported.status_code == 200
     assert len(ET.fromstring(exported.content).find('body')) == 2
@@ -137,6 +143,8 @@ def test_personal_multigroup_export_roundtrip_preserves_relations(people):
 def test_old_channel_unsubscribe_reconciles_last_reference(people):
     a, _ = people
     result = client(a).post('/api/me/rss-subscriptions/', {'feed_url': 'https://example.com/feed'}, format='json', HTTP_IDEMPOTENCY_KEY='old-api')
-    response = client(a).post('/api/me/channel-subscriptions/', {'action': 'unsubscribe', 'source_ids': [result.data['subscription']['source_id']]}, format='json')
+    from api.tests.rss.registration_fixtures import connect_pending
+    connect_pending()
+    response = client(a).post('/api/me/channel-subscriptions/', {'action': 'unsubscribe', 'source_ids': [result.data['source_id']]}, format='json')
     assert response.status_code == 200
     assert not FeedBinding.objects.get().desired_enabled

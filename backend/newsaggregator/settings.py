@@ -86,9 +86,9 @@ CHATGPT_DEPLOYMENT_INSTANCE_FILE = Path(
 DEBUG = _RUNTIME_CONFIG.debug
 ALLOWED_HOSTS = list(_RUNTIME_CONFIG.allowed_hosts)
 PUBLIC_SITE_MODE = _RUNTIME_CONFIG.public_site_mode
-# A deployment gate, not a default-mode preference. Both web and worker must
-# opt in only after publisher redirect/rewrite policy has been accepted.
-_rss_full_content = os.environ.get('RSS_FULL_CONTENT_ENABLED', '0')
+# Public feeds attempt extraction by default in both web and worker. Explicit
+# opt-out and publisher/source restrictions remain independent gates.
+_rss_full_content = os.environ.get('RSS_FULL_CONTENT_ENABLED', '1')
 if _rss_full_content not in {'0', '1'}:
     raise ImproperlyConfigured('RSS_FULL_CONTENT_ENABLED must be 0 or 1.')
 RSS_FULL_CONTENT_ENABLED = _rss_full_content == '1'

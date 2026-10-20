@@ -12,7 +12,7 @@ import urllib.request
 import pytest
 from django.test import override_settings
 
-from api.services.article_fetcher import providers, safe_http
+from api.services import safe_http
 
 
 @pytest.fixture(autouse=True)
@@ -381,31 +381,6 @@ def test_safe_urlopen_follows_absolute_public_redirect_and_drops_cross_host_cred
     assert b'Host: final.example\r\n' in network.sockets[1].sent
 
 
-def test_production_direct_providers_fetch_html_and_markdown_over_safe_transport(monkeypatch):
-    network = FakeNetwork(
-        monkeypatch,
-        [
-            _response(headers='Content-Type: text/plain; charset=utf-8\r\nContent-Length: 14\r\n', body='# Readme\nBody.'),
-            _response(headers='Content-Type: text/html; charset=utf-8\r\nContent-Length: 31\r\n', body='<article>Article body</article>'),
-        ],
-        answers={
-            'raw.example': ['93.184.216.34'],
-            'article.example': ['8.8.8.8'],
-        },
-    )
-    context = FakeSSLContext()
-    context.verify_mode = ssl.CERT_REQUIRED
-    context.check_hostname = True
-    monkeypatch.setattr(safe_http.ssl, 'create_default_context', lambda: context)
-
-    with override_settings(DJANGO_ENV='production'):
-        markdown = providers.GitHubReadmeProvider()._download('https://raw.example/README.md')
-        html = providers.ScrapyHTTPProvider()._download('http://article.example/article')
-
-    assert markdown == '# Readme\nBody.'
-    assert html == '<article>Article body</article>'
-    assert [connection.address[0] for connection in network.sockets] == ['93.184.216.34', '8.8.8.8']
-    assert context.server_names == ['raw.example']
 
 
 def test_safe_urlopen_rejects_private_redirect_before_connecting_to_next_hop(monkeypatch):
@@ -755,3 +730,24 @@ def test_connection_close_response_keeps_real_socket_alive_until_body_is_read(mo
         thread.join(timeout=3)
         server.close()
     assert not thread.is_alive() and not errors
+
+
+@pytest.mark.parametrize('url', [
+    'https://m.36kr.com/article/example', 'https://leiphone.com./article/example',
+    'https://jiqizhixin.com/article/example', 'https://www.reuters.com/article/example',
+    'https://ai.meta.com/blog/example/',
+])
+def test_retired_aliases_are_rejected_before_dns_or_network_access(url):
+    from api.services.safe_http import validate_public_url, UnsafeURL
+    from unittest.mock import patch
+    with patch('api.services.safe_http._resolve_addrinfos') as dns:
+        with pytest.raises(UnsafeURL) as error:
+            validate_public_url(url)
+    assert error.value.error_code == 'unsupported' and not error.value.retryable
+    dns.assert_not_called()
+
+
+def test_retirement_does_not_match_an_unrelated_domain_suffix():
+    from api.services.source_policy import retired_policy_for_url
+    assert retired_policy_for_url('https://notleiphone.com/article') is None
+    assert retired_policy_for_url('https://reuters.com.example.org/article') is None

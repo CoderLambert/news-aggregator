@@ -6,20 +6,17 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 server() { "$SCRIPT_DIR/news-server" "$@"; }
 frontend() { "$SCRIPT_DIR/news-dev" "$@"; }
-crawler() { "$SCRIPT_DIR/news-cron" "$@"; }
 
 start() {
   server start || return 1
   frontend start || return 1
-  crawler start || return 1
-  echo "NewsHub 前端、后端和定时爬虫已全部启动"
+  echo "NewsHub 前端和后端已启动；订阅源同步由已配置的 RSS 引擎处理"
 }
 
 stop() {
-  crawler stop || true
   frontend stop || true
   server stop || true
-  echo "NewsHub 前端、后端和定时爬虫已全部停止"
+  echo "NewsHub 前端和后端已停止"
 }
 
 status() {
@@ -27,8 +24,6 @@ status() {
   server status || true
   echo "[前端]"
   frontend status || true
-  echo "[爬虫]"
-  crawler status || true
 }
 
 restart() {
@@ -40,13 +35,12 @@ logs() {
   case "${1:-all}" in
     backend|server) server log ;;
     frontend|dev) frontend log ;;
-    crawler|crawl) crawler log ;;
     all)
-      echo "用法: $0 log {backend|frontend|crawler}"
-      echo "三个服务日志分别位于 logs/django.log、logs/vite.log、logs/crawl.log"
+      echo "用法: $0 log {backend|frontend}"
+      echo "服务日志分别位于 logs/django.log、logs/vite.log"
       ;;
     *)
-      echo "用法: $0 log {backend|frontend|crawler}"
+      echo "用法: $0 log {backend|frontend}"
       return 1
       ;;
   esac
@@ -58,16 +52,15 @@ case "${1:-help}" in
   restart) restart ;;
   status)  status ;;
   build)   frontend build ;;
-  crawl)   crawler run ;;
+  crawl)   echo "旧抓取入口已退役，请在频道页面管理订阅源。" >&2; exit 2 ;;
   log|logs) logs "${2:-all}" ;;
   *)
-    echo "用法: news {start|stop|restart|status|build|crawl|log}"
-    echo "  start   - 启动前端、后端和定时爬虫"
-    echo "  stop    - 停止前端、后端和定时爬虫"
+    echo "用法: news {start|stop|restart|status|build|log}"
+    echo "  start   - 启动前端和后端"
+    echo "  stop    - 停止前端和后端"
     echo "  restart - 重启全部服务"
     echo "  status  - 查看全部服务状态"
     echo "  build   - 构建前端生产资源"
-    echo "  crawl   - 手动执行一次全部爬虫"
     echo "  log     - 查看指定服务日志"
     ;;
 esac

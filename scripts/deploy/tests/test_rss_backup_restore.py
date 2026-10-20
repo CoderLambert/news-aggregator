@@ -83,8 +83,8 @@ def test_backup_dry_run_has_no_docker_or_filesystem_mutation(target, tmp_path, m
     assert not result['databases_restored']
 
 
-@pytest.mark.parametrize('version', [1, 2, 4, True])
-def test_recovery_requires_exact_release_schema_three(target, version):
+@pytest.mark.parametrize('version', [1, 2, 4, 5, True])
+def test_recovery_rejects_unsupported_or_malformed_release_schemas(target, version):
     target['release']['schema_version'] = version
     with pytest.raises(rss.RecoveryError):
         rss.validate_manifest(target, 'isolated', target['project'])
@@ -200,7 +200,7 @@ def test_application_rollback_delegates_without_restore_or_legacy_collectors(tar
     assert not result['databases_restored'] and lab.restore_calls == 0
     call = rss.command.call_args.args[0]
     assert rss.command.call_args.kwargs['timeout'] is None  # delegate readiness/cleanup, never kill its shell at180s
-    assert call[-3:] == ['--worker-services', 'indexer,channel-worker', '--execute']
+    assert call[-4:] == ['--leave-rss-stopped', '--worker-services', 'indexer,channel-worker', '--execute']
     assert 'restore' not in call and 'crawler' not in call and 'rss-sync' not in call
     target['environment'] = 'production'
     with pytest.raises(rss.RecoveryError, match='not sealed'):
@@ -283,3 +283,32 @@ def test_explicit_container_volume_and_connection_allowlist_fails_closed(target,
     fake = Mock(inspect=lambda container: values[container])
     with pytest.raises(rss.RecoveryError):
         rss.verify_targets(target, fake)
+
+
+def test_v4_retired_release_supports_paired_recovery(target, lab, tmp_path):
+    target['release']['schema_version'] = 4
+    target['release']['capabilities'] = {'crawler_worker': False, 'full_content_worker': False, 'channel_worker': True}
+    assert rss.validate_manifest(target, 'isolated', target['project']) == target
+    pair = tmp_path / 'retired-pair'
+    rss.backup(target, lab, pair, execute=True)
+    loaded = rss.load_pair(pair, target)
+    assert loaded['release'] == target['release']
+    prior = tmp_path / 'before-restore'
+    rss.backup(target, lab, prior, execute=True)
+    result = rss.restore(target, lab, pair, prior_backup=prior, execute=True, replace=True)
+    assert result['writers_remain_stopped'] is True and result['foreign_keys'] == 'ok'
+    with sqlite3.connect(target['sqlite']['path']) as db:
+        assert db.execute('SELECT body FROM preserved').fetchall() == [('original body',)]
+
+
+def test_rss_rollback_command_explicitly_preserves_stopped_sync(target, tmp_path):
+    target_release = tmp_path / 'release.json'
+    target_release.write_text(json.dumps(target['release']))
+    proof = tmp_path / 'proof.json'
+    proof.write_text(json.dumps({'schema_version': 1, 'release': target['release'], 'rss_compatible': True, 'production_sealed': False}))
+    target['rollback'] = {'target_release': str(target_release), 'compatibility_evidence': str(proof),
+        'evidence_sha256': rss.digest(proof), 'env_file': str(tmp_path / 'synthetic.env'),
+        'static_root': str(tmp_path / 'static'), 'db_volume': target['project'] + '_db-data', 'worker_services': ['indexer']}
+    command = rss.rollback_command(target, tmp_path / 'current.json')
+    assert '--leave-rss-stopped' in command
+    assert '--with-rss' not in command

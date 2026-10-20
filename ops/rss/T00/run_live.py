@@ -16,5 +16,5 @@ with tempfile.TemporaryDirectory(prefix="newshub-rss-t00-") as directory:
     env.update(RSS_TEST_ALLOW_LIVE="1", RSS_TEST_CONFIG=str(config), PYTEST_DISABLE_PLUGIN_AUTOLOAD="1")
     print("T00 target:", config.read_text(), flush=True)
     result = subprocess.run([sys.executable, "-m", "pytest", "-c", str(suite / "pytest.ini"),
-        "--confcutdir", str(suite), str(suite / "test_engine_contract.py"), "-m", "rss_live", "-v"], env=env)
+        "--confcutdir", str(suite), str(suite / "test_engine_contract.py"), str(suite / "live_date_boundary.py"), "-m", "rss_live", "-v"], env=env)
     sys.exit(result.returncode)

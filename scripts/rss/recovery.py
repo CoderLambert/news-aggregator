@@ -89,7 +89,7 @@ def release(value):
         result = release_manifest.validate_manifest(value)
     except release_manifest.ManifestError:
         raise RecoveryError('invalid release manifest') from None
-    require(result['schema_version'] == 3, 'RSS recovery requires strict release schema 3')
+    require(result['schema_version'] in {3, 4}, 'RSS recovery requires strict release schema 3 or 4')
     return result
 
 
@@ -536,7 +536,7 @@ def rollback_command(manifest, current_release_path):
     return ['bash', str(ROOT / 'scripts/deploy/rollback.sh'), '--env-file', settings['env_file'], '--project', manifest['project'],
             '--sha', target['release_sha'], '--image', target['image'], '--root', settings['static_root'],
             '--manifest', settings['target_release'], '--current-manifest', str(current_release_path),
-            '--db-volume', settings['db_volume'], '--worker-services', ','.join(settings['worker_services'])]
+            '--db-volume', settings['db_volume'], '--leave-rss-stopped', '--worker-services', ','.join(settings['worker_services'])]
 
 
 def rollback(manifest, docker, *, prior_backup, execute=False, stop_writers=False):

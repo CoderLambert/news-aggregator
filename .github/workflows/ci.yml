@@ -102,7 +102,7 @@ jobs:
           test "$(node -p 'process.versions.node.split(".")[0]')" = 22
           test -z "${DOCKER_HOST:-}"
           test ! -S /ci-docker/docker.sock
-          python3 -m compileall -q backend/api backend/newsaggregator crawler scripts/deploy ops/ci
+          python3 -m compileall -q backend/api backend/newsaggregator scripts/deploy ops/ci
           bash -n ops/ci/*.sh scripts/deploy/*.sh scripts/deploy/tests/*.sh
           python3 ops/ci/agent_rules.py
       - name: Restore cached frontend dependencies
@@ -121,7 +121,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, newshub-ci]
     timeout-minutes: 20
     env:
-      PYTHONPATH: backend:crawler
+      PYTHONPATH: backend
       RUN_MAIN: 'true'
     steps:
       - name: Check out source
@@ -131,7 +131,7 @@ jobs:
       - name: Fast Python and shell syntax
         run: |
           test "$(python3 -c 'import sys; print(".".join(map(str,sys.version_info[:2])))')" = 3.12
-          python3 -m compileall -q backend/api backend/newsaggregator crawler scripts/deploy ops/ci
+          python3 -m compileall -q backend/api backend/newsaggregator scripts/deploy ops/ci
           bash -n ops/ci/*.sh scripts/deploy/*.sh scripts/deploy/tests/*.sh
           python3 ops/ci/agent_rules.py
       - name: Reuse cached backend dependencies
@@ -139,7 +139,8 @@ jobs:
       - name: Fast backend security regressions
         run: |
           backend/venv/bin/python -m pytest -q --maxfail=1 --tb=short \
-            backend/api/tests/test_article_fetcher_security.py \
+            backend/api/tests/test_safe_http.py \
+            backend/api/tests/rss/test_retired_ingestion.py \
             backend/api/tests/test_research_csrf.py \
             scripts/deploy/tests/test_nginx_templates.py
       - name: Verify scoped CI contracts
@@ -171,7 +172,7 @@ jobs:
         # Run without fetching Python or npm dependencies. The frontend Runner
         # has Python 3.12, but NO DinD access or backend cache.
         run: |
-          python3 -m compileall -q backend/api backend/newsaggregator crawler scripts/deploy ops/ci
+          python3 -m compileall -q backend/api backend/newsaggregator scripts/deploy ops/ci
           bash -n ops/ci/*.sh scripts/deploy/*.sh scripts/deploy/tests/*.sh
           python3 ops/ci/agent_rules.py
       - name: Restore installed frontend deps from lockfile-keyed local cache
@@ -196,7 +197,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, newshub-ci]
     timeout-minutes: 90
     env:
-      PYTHONPATH: backend:crawler
+      PYTHONPATH: backend
       RUN_MAIN: 'true'
     steps:
       - name: Check out source
@@ -243,7 +244,8 @@ jobs:
         # The complete suite below still runs all three test roots.
         run: |
           backend/venv/bin/python -m pytest -q --maxfail=1 --tb=short \
-            backend/api/tests/test_article_fetcher_security.py \
+            backend/api/tests/test_safe_http.py \
+            backend/api/tests/rss/test_retired_ingestion.py \
             backend/api/tests/test_research_csrf.py \
             scripts/deploy/tests/test_nginx_templates.py
       - name: Verify private self-hosted CI contract
@@ -267,12 +269,13 @@ jobs:
           # scoped by override_settings inside the synthetic test only.
           mkdir -m 700 "$t00_env/home"
           env -i PATH="$PATH" HOME="$t00_env/home" TMPDIR="$t00_env" LANG=C.UTF-8 \
-            PYTHONPATH="$GITHUB_WORKSPACE/backend:$GITHUB_WORKSPACE/crawler:$GITHUB_WORKSPACE/tools/byok_t00_probe" \
+            PYTHONPATH="$GITHUB_WORKSPACE/backend:$GITHUB_WORKSPACE/tools/byok_t00_probe" \
             DJANGO_ENV=production DJANGO_DEBUG=0 RUN_MAIN=true \
             DJANGO_SECRET_KEY=CI-only-synthetic-strong-secret-not-a-credential-9876543210-abcdef \
             WAITRESS_TRUSTED_PROXY=127.0.0.1 \
             DJANGO_ALLOWED_HOSTS=news.lambert.host \
             DJANGO_DB_PATH="$t00_env/t04-django.sqlite3" AI_BYOK_ENABLED=1 \
+            CHROMA_DATA_DIR="$t00_env/chroma" TTS_CACHE_DIR="$t00_env/tts" \
             PROVIDER_CREDENTIAL_ENCRYPTION_KEY=CI-only-synthetic-provider-key-material \
             T00_PROXY_PYTHON="$t00_env/proxy/bin/python" PYTHONDONTWRITEBYTECODE=1 \
             backend/venv/bin/python -m pytest -c backend/pytest.ini \
@@ -286,7 +289,7 @@ jobs:
           bash scripts/deploy/tests/test_preflight.sh
           bash scripts/deploy/tests/test_local_domain_args.sh
       - name: Run backend and offline deployment tests
-        # Fail-closed hybrid: seven seed/state-sensitive modules stay serial;
+        # Fail-closed hybrid: remaining seed/state-sensitive modules stay serial;
         # remaining files use two isolated xdist workers. All three test roots
         # are covered and the authoritative terminal/JUnit totals are checked.
         # One round is sufficient for normal CI; the separate benchmark still

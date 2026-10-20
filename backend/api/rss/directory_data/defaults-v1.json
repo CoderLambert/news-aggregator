@@ -1,0 +1,85 @@
+{
+  "version": "curated-tech-ai-dev-v1",
+  "feeds": [
+    {
+      "key": "ruanyifeng",
+      "name": "阮一峰",
+      "feed_url": "https://www.ruanyifeng.com/blog/atom.xml",
+      "website": "https://www.ruanyifeng.com/blog/",
+      "language": "zh",
+      "region": "domestic"
+    },
+    {
+      "key": "meituan",
+      "name": "美团技术团队",
+      "feed_url": "https://tech.meituan.com/feed/",
+      "website": "https://tech.meituan.com/",
+      "language": "zh",
+      "region": "domestic"
+    },
+    {
+      "key": "openai",
+      "name": "OpenAI Blog",
+      "feed_url": "https://openai.com/news/rss.xml",
+      "website": "https://openai.com/news/",
+      "language": "en",
+      "region": "international"
+    },
+    {
+      "key": "deepmind",
+      "name": "DeepMind",
+      "feed_url": "https://deepmind.google/blog/rss.xml",
+      "website": "https://deepmind.google/",
+      "language": "en",
+      "region": "international"
+    },
+    {
+      "key": "huggingface",
+      "name": "Hugging Face",
+      "feed_url": "https://huggingface.co/blog/feed.xml",
+      "website": "https://huggingface.co/blog",
+      "language": "en",
+      "region": "international"
+    },
+    {
+      "key": "webkit",
+      "name": "WebKit",
+      "feed_url": "https://webkit.org/feed/",
+      "website": "https://webkit.org/",
+      "language": "en",
+      "region": "international"
+    },
+    {
+      "key": "v8",
+      "name": "V8",
+      "feed_url": "https://v8.dev/blog.atom",
+      "website": "https://v8.dev/",
+      "language": "en",
+      "region": "international"
+    },
+    {
+      "key": "mozilla",
+      "name": "Mozilla Hacks",
+      "feed_url": "https://hacks.mozilla.org/feed/",
+      "website": "https://hacks.mozilla.org/",
+      "language": "en",
+      "region": "international"
+    },
+    {
+      "key": "github-blog",
+      "name": "GitHub Blog",
+      "feed_url": "https://github.blog/feed/",
+      "website": "https://github.blog/",
+      "language": "en",
+      "region": "international"
+    },
+    {
+      "key": "martinfowler",
+      "name": "Martin Fowler",
+      "feed_url": "https://martinfowler.com/feed.atom",
+      "website": "https://martinfowler.com/",
+      "language": "en",
+      "region": "international"
+    }
+  ]
+}

@@ -8,10 +8,9 @@ from django.contrib.auth.models import User, Permission, Group, AnonymousUser
 from django.utils import timezone
 from rest_framework.test import APIClient
 from api.models import Category, News, Source
+from api.services.source_policy import POLICIES
 from api.serializers import NewsDetailSerializer, NewsListSerializer
-from api.services.body_access import can_view_article_body, body_fetch_scope
-from api.services.full_content_status import fetch_eligibility, enqueue_fetch, claim_fetch
-from api.services.source_policy import POLICIES, html_candidate_contract_allows
+from api.services.body_access import can_view_article_body
 
 @pytest.fixture
 def story(db):
@@ -29,7 +28,7 @@ def test_superuser_reads_existing_body(story):
     user=User.objects.create(username='admin',is_superuser=True)
     d=data(story,user)
     assert d['reading_policy']=='standard'
-    assert d['body_access_granted'] and d['can_fetch_full_content'] and d['has_full_content']
+    assert d['body_access_granted'] and not d['can_fetch_full_content'] and d['has_full_content']
     assert d['full_content']=='Existing real body' and d['full_content_zh']=='Existing translated body'
     assert data(story,user,NewsListSerializer)['has_full_content']
 
@@ -56,59 +55,39 @@ def test_grant_permission_to_other_users(story,group):
 def test_cached_fetch_does_not_enqueue(story):
     user=User.objects.create(username='cached',is_superuser=True)
     client=APIClient();client.force_authenticate(user)
-    with patch('api.views.request_full_content') as enqueue:
+    with patch('socket.socket.connect', side_effect=AssertionError('publisher IO')) as enqueue:
         response=client.post(f'/api/news/{story.pk}/fetch-full/',{},format='json')
-    assert response.status_code==200 and response.data['full_content']=='Existing real body'
+    assert response.status_code==410
+    assert client.get(f'/api/news/{story.pk}/').data['full_content']=='Existing real body'
     enqueue.assert_not_called()
 
-def test_queue_checks_revoked_permission_and_is_idempotent(story):
-    user=User.objects.create(username='queue',is_superuser=True)
-    story.full_content='';story.full_content_state='missing';story.full_content_fetch_status='unsupported';story.full_content_requested_by=user;story.save()
-    assert fetch_eligibility(story,privileged=False)=='unsupported' and fetch_eligibility(story)==''
-    assert enqueue_fetch(story)=='queued' and enqueue_fetch(story)=='reused'
-    user.is_superuser=False;user.save();story=News.objects.get(pk=story.pk)
-    assert fetch_eligibility(story)=='permission_revoked' and claim_fetch(story) is None
 
-def test_source_and_identity_limits_remain(story):
-    for url,kind in [('https://www.reuters.com/world/story/','article'),('https://example.org/unknown/story/','article'),(story.url,'abstract'),('http://localhost/private','article')]:
-        story.url=url;story.content_kind=kind
-        assert fetch_eligibility(story,privileged=True)
 
-def test_contract_override_is_scoped_and_rejects_mismatch(story):
-    story.full_content_requested_by=User.objects.create(username='contract',is_superuser=True)
-    c=SimpleNamespace(target_url=story.url,retrieved_from_url=story.url,content_kind='article',source_key='energy_storage_news',body_field='article_html',content_format='html')
-    assert not html_candidate_contract_allows(c)
-    with body_fetch_scope(story):
-        assert html_candidate_contract_allows(c)
-        c.retrieved_from_url='https://evil.example/different'
-        assert not html_candidate_contract_allows(c)
-    c.retrieved_from_url=story.url
-    assert not html_candidate_contract_allows(c)
 
 def test_ordinary_cannot_forge_access_or_reuse_admin_fetch_intent(story):
     admin=User.objects.create(username='owner',is_superuser=True)
     ordinary=User.objects.create(username='intruder')
     story.full_content_requested_by=admin;story.save()
     client=APIClient();client.force_authenticate(ordinary)
-    with patch('api.views.request_full_content') as enqueue:
+    with patch('socket.socket.connect', side_effect=AssertionError('publisher IO')) as enqueue:
         response=client.post(f'/api/news/{story.pk}/fetch-full/',{'body_access_granted':True,'full_content_requested_by':admin.pk},format='json')
-    assert response.status_code==403
+    assert response.status_code==410
     story.refresh_from_db()
     assert story.full_content_requested_by_id == admin.pk
     enqueue.assert_not_called()
 
-def test_missing_body_request_records_actor_and_can_queue(story):
+def test_missing_body_cannot_create_retired_actor_or_queue(story):
     admin=User.objects.create(username='requester',is_superuser=True)
     story.full_content='';story.full_content_state='missing';story.full_content_fetch_status='unsupported';story.save()
     client=APIClient();client.force_authenticate(admin)
-    with patch('api.services.article_content.worker_health',return_value=True):
+    with patch('socket.socket.connect', side_effect=AssertionError('publisher IO')):
         response=client.post(f'/api/news/{story.pk}/fetch-full/',{},format='json')
-    assert response.status_code==202
+    assert response.status_code==410
     story.refresh_from_db()
-    assert story.full_content_requested_by_id==admin.pk and story.full_content_fetch_status=='queued'
-    with patch('api.services.article_content.worker_health',return_value=True):
+    assert story.full_content_requested_by_id is None and story.full_content_fetch_status=='unsupported'
+    with patch('socket.socket.connect', side_effect=AssertionError('publisher IO')):
         again=client.post(f'/api/news/{story.pk}/fetch-full/',{},format='json')
-    assert again.status_code==202 and story.full_content_retry_count==0
+    assert again.status_code==410 and story.full_content_retry_count==0
 
 def test_full_content_filter_and_badge_follow_reader_permission(story):
     client=APIClient()

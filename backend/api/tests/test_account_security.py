@@ -708,7 +708,7 @@ def test_provider_comparisons_require_an_active_superuser_without_leaking_diagno
         error='private-provider-error-detail',
     )
     retest = patch(
-        'api.services.article_fetcher.comparison.retest_comparison',
+        'socket.socket.connect',
         return_value=(comparison.run_id, [comparison]),
     )
     with retest as mocked_retest:
@@ -745,11 +745,11 @@ def test_provider_comparisons_require_an_active_superuser_without_leaking_diagno
         )
         admin_client = APIClient()
         admin_client.force_login(admin)
-        assert admin_client.get(paths[0]).status_code == 200
-        assert admin_client.get(paths[1]).status_code == 200
+        assert admin_client.get(paths[0]).status_code == 410
+        assert admin_client.get(paths[1]).status_code == 410
         allowed_retest = admin_client.post(paths[2], {}, format='json')
-        assert allowed_retest.status_code == 201
-        mocked_retest.assert_called_once_with(comparison)
+        assert allowed_retest.status_code == 410
+        mocked_retest.assert_not_called()
 
 
 @pytest.mark.django_db

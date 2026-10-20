@@ -1,6 +1,6 @@
-# 本机源码部署：前端构建、Django 与全文获取
+# 本机源码部署：前端、Django 与 RSS 同步
 
-适用于不安装 Docker、只在本机 `127.0.0.1:9527` 提供服务的单机部署。前端用 Vite 构建为 `frontend/dist/`，Waitress 从源码加载 Django 并同源提供页面、静态资源和 API；全文获取由独立进程处理持久队列。以下命令在目标代码目录执行。
+适用于不安装 Docker、只在本机 `127.0.0.1:9527` 提供服务的单机部署。前端用 Vite 构建为 `frontend/dist/`，Waitress 从源码加载 Django 并同源提供页面、静态资源和 API；订阅源由 Miniflux 获取，NewsHub 的独立 RSS 进程同步内容。以下命令在目标代码目录执行。
 
 ## 1. 代码、依赖和配置
 
@@ -23,7 +23,7 @@ python3 -c "from secrets import token_urlsafe; print(token_urlsafe(60))"
 # 把输出填入 .env 的 DJANGO_SECRET_KEY。
 ```
 
-`.env.local.example` 默认开启本机完整站点、注册、AI 入口、ChatGPT 本地授权、全文获取、结构化正文、爬虫调度、语义索引、智能频道后台任务和 TTS，并使用本机已验证的 `EDGE_TTS_ENDPOINT=msedgeservices`。ChatGPT 或其他模型功能仍需要各用户连接自己的订阅，或者通过设置页提供自己的厂商 Key；使用厂商 Key 时还需运行 `.env` 中配置的 LiteLLM BYOK 网关。Jina Key 可选。
+`.env.local.example` 提供本机站点、索引、智能频道、ChatGPT 本地连接和 TTS 配置。模型调用仍需用户明确配置自己的连接；LiteLLM BYOK 使用原有网关和项目凭据。Miniflux 使用独立的持久身份、专用账号与受保护 Token 文件，按 [RSS 部署配置](../../compose.rss.prod.yaml) 准备；该生产 overlay 不与开发版源码库 bind 混用。
 
 接管旧实例时必须复制旧密钥配置，否则原有会话、订阅令牌或用户提供的模型 Key 可能无法解密。`.env` 不进入 Git。模板中的相对数据、锁和心跳路径要求所有命令都从项目根目录启动；同一数据库的每类 Worker 只运行一个。此处使用 `DJANGO_ENV=development` 配合本机监听；项目的 `production` 配置要求指定正式域名及可信代理，应按容器生产部署文档使用。
 
@@ -63,47 +63,32 @@ export DJANGO_SETTINGS_MODULE=newsaggregator.settings
 backend/venv/bin/python -c 'from waitress import serve; from newsaggregator.wsgi import application; serve(application, host="127.0.0.1", port=9527, threads=4)'
 ```
 
-第二个终端在相同目录启动全文 Worker：
+其他终端使用相同的 `DJANGO_DB_PATH`、`CHROMA_DATA_DIR` 和受保护配置启动所需后台进程：
 
 ```bash
-export DJANGO_ENV=development
-export DJANGO_DB_PATH="$PWD/.runtime/live.sqlite3"
-export CHROMA_DATA_DIR="$PWD/.runtime/chroma"
-export NEWS_CRAWL_ONLY=1
-backend/venv/bin/python backend/manage.py auto_fetch_full_content --foreground
-```
-
-推荐模板同时开启爬虫调度、语义索引和智能频道任务。分别再启动三个常驻进程：
-
-```bash
-NEWS_CRAWL_ONLY=1 backend/venv/bin/python backend/manage.py crawl_worker
 backend/venv/bin/python backend/manage.py embedding_worker
 NEWS_CRAWL_ONLY=1 backend/venv/bin/python backend/manage.py channel_worker
 ```
 
-Worker 和爬虫需要访问来源站点。若进程继承的代理地址不可达，先确认目标站点可直连，再在这两个进程的启动命令中清除失效的 `http_proxy`、`https_proxy`、`HTTP_PROXY`、`HTTPS_PROXY` 和 `ALL_PROXY`；保留 TLS 证书校验。本机当前实例采用直连运行这两个进程。
-
-可用现有进程管理器托管这两个前台命令，并设置故障重启。启动后验证：
+RSS 引擎可单独托管。先按[启动说明](../startup.md#6-订阅源与-rss-同步)配置固定的引擎身份、专用账号、API 地址、Token 文件与持久 runtime 目录，再运行：
 
 ```bash
-curl -f http://127.0.0.1:9527/
+NEWSHUB_RUNTIME_ROLE=rss_sync backend/venv/bin/python backend/manage.py rss_sync_worker
+```
+
+每个命令由独立进程管理器托管，保持数据库路径一致。Web、同步、索引与频道进程分别检查：
+
+```bash
 curl -f http://127.0.0.1:9527/api/health/ready/
-backend/venv/bin/python backend/manage.py full_content_healthcheck
-backend/venv/bin/python backend/manage.py crawler_healthcheck
+NEWSHUB_RUNTIME_ROLE=rss_sync backend/venv/bin/python backend/manage.py rss_sync_worker --healthcheck
 backend/venv/bin/python backend/manage.py embedding_healthcheck
 backend/venv/bin/python backend/manage.py channel_worker_healthcheck
 ```
 
-## 4. 入队、进度和定时爬虫
+## 4. 订阅、状态与升级
 
-自动入队仅覆盖新采集、时间可靠且符合来源规则的文章。历史文章需显式入队；命令最多选 500 条，建议先小批量确认质量。`--since` 使用带时区的 ISO 时间；再次运行时用输出的 `next_after_id` 作为 `--after-id` 继续翻页。
+用户在频道页面管理订阅，管理员在 `/admin/rss` 查看引擎连接与同步状态。获取正文使用既有 RSS refetch 接口；历史正文继续保留，研究与翻译不启动网页抓取。同步失败由现有控制/对账流程处理，不另开旧采集进程。
 
-```bash
-backend/venv/bin/python backend/manage.py fetch_full_content --since 2026-10-01T00:00:00+08:00 --limit 100 --dry-run
-backend/venv/bin/python backend/manage.py fetch_full_content --since 2026-10-01T00:00:00+08:00 --limit 100
-backend/venv/bin/python backend/manage.py full_content_stats --json
-```
+旧 `crawl_worker`、全文 worker、宿主 `news-cron` 和 timer 模板已退出新版本。升级前须完成 [T29](../plans/rss-engine-migration/tasks/T29/task.md) 来源迁移和 [T30](../plans/rss-engine-migration/tasks/T30/task.md) 实际运行入口停止检查。不要用候选代码里的 `news stop` 推断旧宿主调度器已停。
 
-Worker 会按来源公平轮询，并保留限流、重试和正文校验状态。不要对全部历史文章使用 `--force`；已得到可读正文的文章会跳过。来源不允许抓取、被站点拦截、只提供摘要，或原文内容无法通过校验时，正文可能仍为空。
-
-如果使用推荐的 `crawl_worker`，不要再同时保留 cron 爬虫。若改用已有 cron，更新其代码目录及 `DJANGO_DB_PATH`，确保与 Web 和 Worker 使用同一数据库，并停用 `crawl_worker`。手动运行新代码的爬虫可使用 `NEWS_CRAWL_ONLY=1 backend/venv/bin/python backend/manage.py crawl all`。这种模式跳过 AI 侧效应，但经校验的结构化正文仍可写入。只保留一套定时调度，并用 `flock -n` 防止相邻轮次重叠。更新时先备份数据库，再停止 Web 和全部 Worker、构建前端、执行迁移并重启；回退代码前核对迁移版本，不能把已升级的数据库直接交给旧代码。
+更新和回退仍先核对不可变版本、当前迁移、数据库一致性备份和全部写入者。生产布局使用既有发布/回退脚本；历史镜像的兼容角色只有在目标清单明确声明时才加载。代码回退不等于数据库回滚。

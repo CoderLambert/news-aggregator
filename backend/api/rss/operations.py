@@ -9,7 +9,7 @@ from hashlib import sha256
 import json
 import re
 import time
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
 from uuid import UUID
 
 from django.db import OperationalError, connection, transaction
@@ -55,8 +55,14 @@ def canonicalize_feed_url(value):
         raise OperationError('invalid_public_url') from None
     parts = urlsplit(normalized)
     sensitive = {'token', 'access_token', 'api_key', 'apikey', 'password', 'secret',
-                 'auth', 'authorization', 'cookie', 'signature', 'access-token', 'api-key'}
-    if any(key.lower() in sensitive for key, _ in parse_qsl(parts.query, keep_blank_values=True)):
+                 'auth', 'authorization', 'cookie', 'signature', 'access-token', 'api-key',
+                 'key', 'k', 'sig', 'jwt', 'credential', 'access_key', 'feedkey'}
+    opaque = re.compile(r'(?i)^(?:[0-9a-f]{32,}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[a-z0-9_]{32,})$')
+    token_parts = [*unquote(parts.path).split('/'), *(value for _, value in parse_qsl(parts.query))]
+    if (any(opaque.fullmatch(value) and any(char.isdigit() for char in value) for value in token_parts)
+            or any(key.lower() in sensitive or re.search(r'token|secret|password|api.?key|cookie|signature|(?:^|[_-])auth(?:entication|orization)?(?:$|[_-])', key, re.I)
+            for key, _ in parse_qsl(parts.query, keep_blank_values=True))
+            or re.search(r'/(?:private|tokens?|secrets?|auth)/', unquote(parts.path), re.I)):
         raise OperationError('credential_feed_not_supported')
     return normalized
 
@@ -82,7 +88,11 @@ def effective_references(binding_id):
     links = SourceFeedLink.objects.filter(binding_id=binding_id, source__publication__owner='miniflux')
     if links.filter(editorial_pin=True).exists():
         return True
-    return links.filter(enabled=True, source__channel_subscriptions__isnull=False).exists()
+    if links.filter(enabled=True, source__channel_subscriptions__isnull=False).exists():
+        return True
+    return FeedOperation.objects.filter(binding_id=binding_id, actor__is_active=True,
+        safe_input__subscription_request__isnull=False,
+        state__in=['pending', 'running', 'retry_wait', 'unknown', 'manual_blocked']).exists()
 
 
 def refetch_fence(entry, source_id, actor_id):
@@ -206,7 +216,10 @@ def cancel_operation(actor, operation_id):
         scope.update(state='cancelled', lease_epoch=F('lease_epoch') + 1, lease_token=None,
             lease_until=None, next_attempt=timezone.now() if uncertain else None,
             safe_result={'cancelled': True, 'outcome_unknown': bool(uncertain)})
-        return scope.get()
+        updated = scope.get()
+        if 'subscription_request' in updated.safe_input and updated.binding_id:
+            reconcile_binding(updated.binding_id)
+        return updated
 
 
 def _cancel_old_refetches(binding):

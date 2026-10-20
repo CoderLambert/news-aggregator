@@ -5,6 +5,7 @@ export interface NewsPreference { scope: NewsScope; group_id: number | null }
 export interface Channel {
   region: import('@/types/news').SourceRegion; reading_policy: import('@/types/news').ReadingPolicy
   id: number; name: string; description: string; language: string; source_type: string
+  can_subscribe: boolean; rss_status: string
   subscription_status: 'active' | 'inactive'; subscription_reason: string; news_count: number
 }
 export interface ChannelSubscription { id: number; source_id: number; group_ids: number[] }
@@ -19,7 +20,7 @@ export function parseChannels(value: unknown): Channel[] {
   return value.map(item => {
     if (!isRecord(item) || typeof item.id !== 'number' || typeof item.name !== 'string' ||
       (item.subscription_status !== 'active' && item.subscription_status !== 'inactive')) throw new TypeError('Invalid channel')
-    return { region: item.region === 'domestic' ? 'domestic' : 'international', reading_policy: item.reading_policy === 'rss_summary_only' || item.reading_policy === 'public_rss' ? item.reading_policy : 'standard', id: item.id, name: item.name, description: typeof item.description === 'string' ? item.description : '',
+    return { can_subscribe: item.can_subscribe === true, rss_status: String(item.rss_status ?? 'unconfigured'), region: item.region === 'domestic' ? 'domestic' : 'international', reading_policy: item.reading_policy === 'rss_summary_only' || item.reading_policy === 'public_rss' ? item.reading_policy : 'standard', id: item.id, name: item.name, description: typeof item.description === 'string' ? item.description : '',
       language: String(item.language ?? ''), source_type: String(item.source_type ?? ''), subscription_status: item.subscription_status,
       subscription_reason: String(item.subscription_reason ?? ''), news_count: Number(item.news_count ?? 0) }
   })

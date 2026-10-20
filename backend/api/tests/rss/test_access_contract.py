@@ -313,7 +313,7 @@ def test_body_derived_question_cache_not_exposed_after_policy_restriction(world,
     SourcePublication.objects.filter(source=source).update(reading_policy='summary_only')
     monkeypatch.setattr('api.services.ai_execution.personal_clients_for_user', lambda user: [])
     monkeypatch.setattr('api.services.chatgpt_subscription.active_connection_for_user', lambda user: None)
-    monkeypatch.setattr('api.views.ensure_full_content', lambda *args: pytest.fail('reader initiated fetching'))
+    monkeypatch.setattr('socket.socket.connect', lambda *args: pytest.fail('reader initiated network'))
     response = api_client(a).post(f'/api/news/{news.pk}/suggested-questions/')
     assert response.status_code == 200
     assert not response.data['generated'] and response.data['context_scope'] == 'summary'
@@ -385,7 +385,8 @@ def test_preview_does_not_load_stored_full_body(world, monkeypatch):
 def test_paused_legacy_cached_body_still_readable_without_fetch(world, monkeypatch):
     a, _, make = world
     _, news = make('paused-cache', subscriber=a, owner='paused')
-    monkeypatch.setattr('api.views.request_full_content', lambda *args, **kwargs: pytest.fail('paused source fetched'))
+    monkeypatch.setattr('socket.socket.connect', lambda *args, **kwargs: pytest.fail('paused source fetched'))
     response = api_client(a).post(f'/api/news/{news.pk}/fetch-full/', {}, format='json')
-    assert response.status_code == 200 and response.data['full_content'] == news.full_content
-    assert api_client(a).post(f'/api/news/{news.pk}/fetch-full/', {'force': True}, format='json').status_code == 403
+    assert response.status_code == 410
+    assert api_client(a).get(f'/api/news/{news.pk}/').data['full_content'] == news.full_content
+    assert api_client(a).post(f'/api/news/{news.pk}/fetch-full/', {'force': True}, format='json').status_code == 410

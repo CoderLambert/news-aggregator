@@ -14,7 +14,8 @@ export const newsKeys = {
   detail: (id: number, lang: Language, viewerId: number | string) =>
     [...newsKeys.details(), { id, lang, viewerId }] as const,
   categories: (lang: Language) => [...newsKeys.all, 'categories', lang] as const,
-  sources: (lang: Language) => [...newsKeys.all, 'sources', lang] as const,
+  sources: (lang: Language, viewerId: number | string, purpose: 'subscribe' | 'history' = 'history') =>
+    [...newsKeys.all, 'sources', { lang, viewerId, purpose }] as const,
 }
 
 export const newsListOptions = (params: NewsListParams, lang: Language, viewerId: number | string, scopeSources?: number[] | null) =>
@@ -46,8 +47,8 @@ export const categoryOptions = (lang: Language) =>
     queryFn: async ({ signal }): Promise<FilterOption[]> => parseFilterOptions(await fetchCategories(signal)),
   })
 
-export const sourceOptions = (lang: Language) =>
+export const sourceOptions = (lang: Language, viewerId: number | string, purpose: 'subscribe' | 'history' = 'history') =>
   queryOptions({
-    queryKey: newsKeys.sources(lang),
-    queryFn: async ({ signal }): Promise<FilterOption[]> => parseFilterOptions(await fetchSources(signal)),
+    queryKey: newsKeys.sources(lang, viewerId, purpose),
+    queryFn: async ({ signal }): Promise<FilterOption[]> => parseFilterOptions(await fetchSources(signal, purpose)),
   })

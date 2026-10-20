@@ -117,8 +117,8 @@ function DiscoverySession({ viewer, groups, onClose, onDone }: DiscoverDialogPro
         {groups.length ? groups.map(group => <label className="workspace-resolved-choice" key={group.id}><input type="checkbox" disabled={busy} checked={groupIds.includes(group.id)} onChange={event => { subscribe.reset(); idempotency.current = crypto.randomUUID(); setGroupIds(ids => event.target.checked ? [...ids, group.id] : ids.filter(id => id !== group.id)) }} />{group.name}</label>) : <p className="workspace-caption">暂无分组，订阅后可在频道管理中整理。</p>}
       </fieldset></section>}
     </>}
-    {subscribe.data && <section aria-live="polite"><p>订阅已保存：{subscribe.data.subscription?.name ?? '此订阅已取消'}</p>
-      <p>{connection.error ? '暂时无法读取连接状态，订阅已保存。' : connection.data?.state === 'succeeded' ? '来源已连接，首次文章同步将在后台完成。' : connection.data && terminal.has(connection.data.state) ? '连接尚未完成，请在频道管理查看状态。' : '正在后台连接来源…'}</p></section>}
+    {subscribe.data && <section aria-live="polite"><p>{subscribe.data.subscription ? `已订阅：${subscribe.data.subscription.name}` : '连接请求已保存，验证成功后加入我的订阅'}</p>
+      <p>{connection.error ? '暂时无法读取连接状态，请稍后核对。' : connection.data?.state === 'succeeded' ? '来源已连接，首次文章同步将在后台完成。' : connection.data && terminal.has(connection.data.state) ? '连接尚未完成，请在频道管理查看状态。' : '正在后台连接来源…'}</p></section>}
     {!subscribe.data && mode === 'directory' && submittedInput === input.trim() && directory.error && <p role="alert" className="workspace-error">目录读取失败：{workspaceError(directory.error)}
       <button type="button" className="workspace-link" disabled={busy || directory.isFetching} onClick={() => { void directory.refetch({ cancelRefetch: false }) }}>重新加载目录</button>
     </p>}

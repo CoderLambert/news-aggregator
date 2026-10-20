@@ -44,7 +44,7 @@ def test_available_snapshot_metadata_and_summary_are_not_full(world):
 def test_research_no_provider_and_user_id_cannot_be_injected(world, monkeypatch):
     a, b, make = world
     _, news = make('personal', subscriber=a)
-    monkeypatch.setattr('api.services.article_content.request_full_content', lambda *a, **k: pytest.fail('implicit fetch'))
+    monkeypatch.setattr('socket.socket.connect', lambda *a, **k: pytest.fail('implicit publisher network'))
     assert _tool_fetch_article(news.pk, user=b).get('error')
     assert _tool_fetch_webpage(news.url, user=b)['capability'] == 'stored_articles_only'
     assert _tool_fetch_webpage('https://new.example/not-indexed', user=a)['content'] == ''

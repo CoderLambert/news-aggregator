@@ -11,17 +11,22 @@ The real authorized backup-copy rehearsal remains outstanding.
 python ops/rss/T26/run.py \
   --output /tmp/newshub-rss-t26-UNIQUE \
   --dependency-site /tmp/newshub-rss-coordinator-venv/lib/python3.12/site-packages \
+  --full-app-base newshub:TESTED-FULL-SHA \
   --rollback-candidate newshub-rss-t26:EXISTING-COMPATIBLE-CANDIDATE
 ```
 
 Omit `--rollback-candidate` for an initial same-image smoke test only. A final
 candidate comparison must identify two tested SHA/image IDs. `--candidate` reuses
 an existing explicitly named T26 image; otherwise an offline image is built using
-`Dockerfile.candidate`. `--full-app-base` and `--rss-dep-base` explicitly select
-local caches (defaults `news-aggregator:local`, `newshub-rss-t09:isolated-check`).
+`Dockerfile.candidate`. `--full-app-base` is required when building; there is no implicit old collector
+cache. `--rss-dep-base` selects the local RSS cache (default
+`newshub-rss-t09:isolated-check`). Existing `--candidate` images do not inspect
+unused build caches.
 Both base IDs/digests/revisions are recorded and tags are checked again after build.
-The full application cache retains AI/crawler packages and its built frontend;
-current backend/crawler source and pinned RSS dependencies overlay it. Installed
+The full application cache retains AI packages and its built frontend;
+current backend source and pinned RSS dependencies overlay it. After T31 the
+selected base must already omit retired collector packages. The probe refuses
+collector package/code mismatches; it does not reinstall removed writers. Installed
 `listparser==0.20` and `defusedxml==0.7.1` are copied read-only from the explicit
 site path after validating METADATA against the repository pins. No package
 installation modifies the shared virtualenv. This cached dependency/frontend build
@@ -31,7 +36,8 @@ The harness seeds historical ORM models at0051, then migrates forward to every
 current migration leaf. It compares the old columns of every table (PK/FK, counts,
 exact source/translation bytes included), checks FK/integrity and0059 exact legacy
 translation binding. It exercises the minimal shared source group, old ingestion
-and full-content worker rejection, ownership ABA, late translation history,
+and full-content worker rejection on transition images (or confirms their code
+is absent on retired images), ownership ABA, late translation history,
 available content, personal paused ACL, read states, subscription/OPML durable
 intents and owner-scoped import progress. The source-switch policy receipt is
 explicitly synthetic and makes no HTTP claim.
@@ -71,10 +77,19 @@ restored available/private content. T09 subsequently performs real incremental
 and full reconciliation against the restored engine. That approved reconciliation
 changes data after the restore comparison; it is not hidden restore drift.
 
+Release capabilities are read from the actual application image and recorded in
+strict v4, with v3 still supported by recovery. They are not hard-coded to restore
+retired workers. The application rollback wrapper explicitly uses
+`--leave-rss-stopped`: RSS must already be stopped, and the wrapper cannot
+silently stop a running RSS process or resume it before reconciliation.
+
 The restore points in evidence explicitly exclude deliberately committed later
 SQLite and PG changes. Helpers have exact T26 names and a separate rehearsal label
 so they cannot contaminate the T03 project inventory. Finally blocks remove that
-project's containers, networks, volumes and temporary secrets/backups. Only aggregate
+project's containers, networks, volumes and temporary secrets/backups. The temporary application processes run as the synthetic bind-mount owner,
+including restored 0600 files and the synthetic token. This does not change image
+users or widen protected file permissions. PostgreSQL readiness checks TCP rather
+than its Unix-only bootstrap server before Miniflux is started. Only aggregate
 evidence survives. No real provider credentials or paid AI services are used.
 
 ## Actual deployment wrapper chain is a separate gate
@@ -101,7 +116,7 @@ matching the manifest, while all collectors remain stopped.
 
 ```sh
 RSS_TEST_ALLOW_LIVE=1 RUN_MAIN=true \
-  DJANGO_DB_PATH=/tmp/newshub-rss-t26-tests.sqlite3 PYTHONPATH=backend:crawler \
+  DJANGO_DB_PATH=/tmp/newshub-rss-t26-tests.sqlite3 PYTHONPATH=backend \
   /tmp/newshub-rss-coordinator-venv/bin/python -m pytest -q \
   tests/rss_engine_contract/test_migration_rehearsal.py
 ```

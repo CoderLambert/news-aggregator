@@ -52,31 +52,16 @@ class NewsFetchFullViewTest(TestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_fetch_full_content_with_valid_url(self):
-        """A healthy worker accepts one intent without fetching from the API."""
-        with (
-            patch('api.services.article_content.worker_health', return_value=True),
-            patch('api.views.fetch_article_markdown') as fetch,
-        ):
-            response = self.client.post(
-                f'/api/news/{self.news.id}/fetch-full/',
-                content_type='application/json'
-            )
-
-        self.assertEqual(response.status_code, 202)
-        self.assertEqual(response.json()['full_content_fetch_status'], 'queued')
-        self.assertTrue(response['Location'].endswith(f'/api/news/{self.news.id}/'))
-        self.assertGreaterEqual(int(response['Retry-After']), 2)
-        self.news.refresh_from_db()
-        self.assertEqual(self.news.full_content, '')
-        fetch.assert_not_called()
-
-    def test_fetch_full_content_disabled_worker_does_not_enqueue(self):
-        with patch('api.services.article_content.worker_health', return_value=False):
+        """The retired admission does not create work for a valid article."""
+        with patch('socket.socket.connect', side_effect=AssertionError('publisher IO')) as fetch:
             response = self.client.post(f'/api/news/{self.news.id}/fetch-full/')
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json()['error_code'], 'full_content_worker_unavailable')
+        self.assertEqual(response.status_code, 410)
+        self.assertEqual(response.json()['error_code'], 'legacy_fetch_retired')
         self.news.refresh_from_db()
         self.assertEqual(self.news.full_content_fetch_status, 'pending')
+        self.assertIsNone(self.news.full_content_next_attempt_at)
+        self.assertEqual(self.news.full_content, '')
+        fetch.assert_not_called()
 
     def test_fetch_full_content_caches_result(self):
         """Second request should return cached result."""
@@ -89,8 +74,8 @@ class NewsFetchFullViewTest(TestCase):
             f'/api/news/{self.news.id}/fetch-full/',
             content_type='application/json'
         )
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
+        self.assertEqual(response.status_code, 410)
+        data = self.client.get(f'/api/news/{self.news.id}/').json()
         self.assertIn('cached content', data.get('full_content', ''))
 
     def test_fetch_full_content_missing_url(self):
@@ -102,7 +87,7 @@ class NewsFetchFullViewTest(TestCase):
             f'/api/news/{self.news.id}/fetch-full/',
             content_type='application/json'
         )
-        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.status_code, 410)
 
 
 class NewsTranslateFullViewTest(TestCase):

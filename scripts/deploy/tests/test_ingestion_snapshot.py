@@ -8,7 +8,8 @@ from scripts.deploy import sqlite_snapshot
 from scripts.deploy.tests.test_release_operations import make_database, manifest
 
 
-def test_online_backup_with_active_ingestion_writer_and_worker_manifest(tmp_path):
+@pytest.mark.parametrize('version', [3, 4])
+def test_online_backup_with_active_ingestion_writer_and_worker_manifest(tmp_path, version):
     source = tmp_path / 'writer.sqlite3'
     writer = make_database(source)
     try:
@@ -21,10 +22,12 @@ def test_online_backup_with_active_ingestion_writer_and_worker_manifest(tmp_path
           INSERT INTO api_requestbudget VALUES ('host:example.test', '2030-01-01');
         ''')
         release = manifest()
-        release.update(schema_version=3, capabilities={
+        release.update(schema_version=version, capabilities={
             'full_content_worker': True,
             'channel_worker': True,
         })
+        if version == 4:
+            release['capabilities']['crawler_worker'] = False
         manifest_file = tmp_path / 'release.json'
         manifest_file.write_text(json.dumps(release))
         # A new process-style independent connection can read a complete commit

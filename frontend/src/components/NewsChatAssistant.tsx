@@ -1,3 +1,4 @@
+import { contentCompletenessLabel } from '@/lib/contentCompleteness'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useChat, type ChatPhase } from '@/hooks/useChat'
 import { useSuggestedQuestions } from '@/hooks/useSuggestedQuestions'
@@ -31,6 +32,7 @@ interface NewsChatAssistantProps {
   translationLabel?: string
   articleContext?: {
     hasFullContent?: boolean
+    completeness?: 'unknown' | 'summary' | 'verified'
     wordCount?: number
     contentRevision?: number
     title?: string
@@ -186,11 +188,9 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, translat
         {/* Context Status Banner */}
         <div className="flex items-center justify-between border-b border-border bg-secondary/60 px-4 py-2 text-[11px] md:px-6 md:text-xs">
           <div className="flex items-center gap-1.5 font-medium">
-            <span className={`size-2 rounded-full ${articleContext?.hasFullContent ? 'bg-emerald-500' : 'bg-amber-400'}`} />
-            <span className={articleContext?.hasFullContent ? 'text-emerald-800 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-300'}>
-              {articleContext?.hasFullContent
-                ? `正文上下文就绪${articleContext.wordCount ? `（约 ${articleContext.wordCount} 字）` : ''}`
-                : '仅摘要上下文（建议抓取全文以获得深入分析）'}
+            <span className={`size-2 rounded-full ${articleContext?.completeness === 'verified' ? 'bg-emerald-500' : 'bg-amber-400'}`} />
+            <span className={articleContext?.completeness === 'verified' ? 'text-emerald-800 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-300'}>
+              {contentCompletenessLabel(Boolean(articleContext?.hasFullContent), articleContext?.completeness)}
             </span>
           </div>
           {suggestedQuestions.length > 0 && (

@@ -188,6 +188,8 @@ class SelfHostedCIContract(unittest.TestCase):
         self.assertIn("DJANGO_ALLOWED_HOSTS=news.lambert.host ", t00_run)
         self.assertNotIn("DJANGO_ALLOWED_HOSTS=testserver", t00_run)
         self.assertIn('T00_PROXY_PYTHON="$t00_env/proxy/bin/python"', t00_run)
+        self.assertIn('CHROMA_DATA_DIR="$t00_env/chroma"', t00_run)
+        self.assertIn('TTS_CACHE_DIR="$t00_env/tts"', t00_run)
         self.assertIn('trap \'rm -rf "$t00_env"\' EXIT', t00_run)
         self.assertNotIn("|| true", t00_run)
         self.assertNotIn("continue-on-error", str(t00_step))
@@ -204,6 +206,16 @@ class SelfHostedCIContract(unittest.TestCase):
                           if step["name"] == "Run backend and offline deployment tests")
         self.assertLess(security_fast, full_suite)
         self.assertIn("--maxfail=1", backend_steps[security_fast]["run"])
+        # Retiring an implementation must not leave either CI stage pointing
+        # at a deleted security module (pytest exits before collecting tests).
+        for job in ("dev-backend", "backend-and-release-gates"):
+            security = next(step for step in wf["jobs"][job]["steps"]
+                            if step["name"] == "Fast backend security regressions")
+            paths = [word for word in security["run"].split()
+                     if word.endswith(".py")]
+            self.assertTrue(paths)
+            for path in paths:
+                self.assertTrue((ROOT / path).is_file(), f"{job}: missing {path}")
         # Default backend tests must invoke the same previously validated
         # hybrid as the opt-in benchmark, with only one CI round.
         self.assertEqual(backend_steps[full_suite]["run"], "bash ops/ci/benchmark-xdist.sh")
@@ -241,10 +253,10 @@ class SelfHostedCIContract(unittest.TestCase):
         cfg = load(COMPOSE)
         svc = cfg["services"]
         # The existing private bridge's MTU=1500 caused GitHub TLS timeout.
-        # Scope 1280 to this Compose project and preserve network isolation.
+        # Pin the operator-requested 1200 to this project and its inner bridge.
         self.assertEqual(cfg["networks"]["default"], {
             "driver": "bridge",
-            "driver_opts": {"com.docker.network.driver.mtu": "${CI_BRIDGE_MTU:-1280}"},
+            "driver_opts": {"com.docker.network.driver.mtu": "1200"},
         })
         for name in ("docker", "runner", "runner-frontend"):
             self.assertNotIn("network_mode", svc[name])
@@ -258,6 +270,9 @@ class SelfHostedCIContract(unittest.TestCase):
             ["${CI_DIND_DNS_PRIMARY:-1.1.1.1}", "${CI_DIND_DNS_SECONDARY:-8.8.8.8}"],
         )
         dind_command = svc["docker"]["command"][0]
+        # BuildKit's default network and newly created Docker bridges must
+        # also fit the outer bridge; fixing only the listeners is insufficient.
+        self.assertIn("--mtu=1200", dind_command)
         # The Compose interpolation layer must preserve the shell variable.
         # A single $group would be eagerly expanded by Compose to empty.
         self.assertIn('--group="$$group"', dind_command)

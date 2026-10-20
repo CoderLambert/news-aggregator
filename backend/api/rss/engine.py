@@ -4,7 +4,7 @@ Socket timeouts are inactivity limits, not total deadlines or remote cancellatio
 A supervisor must recover a stalled worker. Mutations are never blindly retried.
 """
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from email.utils import parsedate_to_datetime
 from ipaddress import ip_address
 import time
@@ -107,7 +107,7 @@ class EngineConfig:
     # Server-owned immutable snapshot only, never a browser/API field. Mandatory
     # static restrictions are also merged in _policy and cannot be cleared.
     server_entry_url_block_rules: str = field(default_factory=_server_entry_url_rules)
-    full_content_enabled: bool = False
+    full_content_enabled: bool = True
 
     @classmethod
     def from_environment(cls):
@@ -117,7 +117,7 @@ class EngineConfig:
                 token = handle.read(65537).strip()
             if not token or len(token) > 65536:
                 raise ValueError
-            enabled = os.environ.get('RSS_FULL_CONTENT_ENABLED', '0')
+            enabled = os.environ.get('RSS_FULL_CONTENT_ENABLED', '1')
             if enabled not in {'0', '1'}:
                 raise ValueError
             return cls(os.environ["RSS_ENGINE_INSTANCE_UUID"], int(os.environ["RSS_ENGINE_ACCOUNT_ID"]),
@@ -188,6 +188,7 @@ class PolicyBinding:
     desired_mode: str
     desired_enabled: bool
     link_filter_key: str | None = None
+    published_since: str | None = None
 
 
 @dataclass(frozen=True)
@@ -343,12 +344,12 @@ class EngineAdapter:
             raise EngineError("identity_mismatch")
         return result
 
-    def create_feed(self, canonical_url, *, desired_mode="feed", disabled=False):
+    def create_feed(self, canonical_url, *, desired_mode="feed", disabled=False, published_since=None):
         # 2.3.3 processes initial entries even when disabled=True on creation.
         if desired_mode == 'full_content' and not self.config.full_content_enabled:
             raise EngineError('full_content_disabled')
         canonical_url = _url(canonical_url)
-        policy = self._policy(desired_mode, disabled, None)
+        policy = self._policy(desired_mode, disabled, None, published_since)
         self._identity()
         # Also handles a replay following process death before its result was saved.
         matches = [feed for feed in self.list_feeds() if feed.feed_url == canonical_url]
@@ -372,7 +373,7 @@ class EngineAdapter:
                 pass
             raise EngineError("create_unknown", unknown_result=True) from None
 
-    def _policy(self, mode, disabled, filter_key):
+    def _policy(self, mode, disabled, filter_key, published_since=None):
         if mode not in {"feed", "full_content"} or type(disabled) is not bool:
             raise EngineError("invalid_policy")
         if mode == 'full_content' and not disabled and not self.config.full_content_enabled:
@@ -383,6 +384,13 @@ class EngineAdapter:
         block, keep = filters.get(filter_key, ("", ""))
         rules = list(dict.fromkeys(filter(None, (_server_entry_url_rules(include_html=mode == 'full_content'),
                                                  self.config.server_entry_url_block_rules))))
+        if published_since is not None:
+            try:
+                if date.fromisoformat(published_since).isoformat() != published_since:
+                    raise ValueError
+            except (ValueError, TypeError):
+                raise EngineError('invalid_policy') from None
+            rules.append('EntryDate=before:' + published_since)
         return dict(crawler=mode == "full_content", disabled=disabled, blocklist_rules=block, keeplist_rules=keep,
                     block_filter_entry_rules='\n'.join(rules))
 
@@ -419,7 +427,8 @@ class EngineAdapter:
             raise EngineError("stale_policy")
         if type(binding.desired_enabled) is not bool:
             raise EngineError("invalid_policy")
-        fields = self._policy(binding.desired_mode, not binding.desired_enabled, getattr(binding, "link_filter_key", None))
+        fields = self._policy(binding.desired_mode, not binding.desired_enabled, getattr(binding, "link_filter_key", None),
+                              getattr(binding, "published_since", None))
         feed = self._update(_id(binding.engine_feed_id), fields)
         return PolicyReceipt(feed, expected_policy_version)  # caller must CAS current policy and lease
 

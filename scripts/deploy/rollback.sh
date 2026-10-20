@@ -5,8 +5,10 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
 COMPOSE_FILE="$PROJECT_ROOT/compose.prod.yaml"
 WORKSPACE_COMPOSE_FILE="$PROJECT_ROOT/compose.workspace.prod.yaml"
-STOP_SERVICES=(full-content crawler indexer app)
-TARGET_WORKERS=(crawler indexer)
+TARGET_WORKERS=(indexer)
+WITH_RSS=0
+LEAVE_RSS_STOPPED=0
+RSS_IMAGE=""
 WORKER_SERVICES_OVERRIDE=""
 WORKER_SERVICES_EXPLICIT=0
 EXECUTE=0
@@ -25,7 +27,7 @@ OLD_CURRENT_TARGET=""
 
 usage() {
     cat <<'EOF'
-Usage: rollback.sh [--execute] --env-file ABSOLUTE-FILE --project NAME \
+Usage: rollback.sh [--execute] [--with-rss] --env-file ABSOLUTE-FILE --project NAME \
     --sha 40-HEX-SHA --image IMAGE --root ABSOLUTE-STATIC-ROOT \
     --manifest TARGET-OLD-MANIFEST --current-manifest CURRENT-MANIFEST \
     --db-volume PROJECT_db-data [--worker-services COMMA-SEPARATED-SUBSET]
@@ -34,6 +36,12 @@ Without --execute this validates local release/static inputs and prints a plan.
 Execution stops only the selected project's app/workers, requires an exact database
 migration-set match for the target manifest, starts and health-checks that release,
 then atomically points static current at the existing target release.
+--with-rss includes the RSS overlay and requires an independent NEWSHUB_RSS_IMAGE
+at the target SHA and an already healthy Miniflux in this project. An explicit
+--worker-services subset must include rss-sync when --with-rss is selected.
+--leave-rss-stopped is an explicit recovery mode, exclusive with --with-rss:
+existing RSS containers must already be stopped before maintenance. It requires
+an explicit --worker-services subset and never resumes RSS or the engine.
 --worker-services selects only supported target workers; an empty value starts
 only app. RSS recovery uses this to keep legacy collectors stopped.
 EOF
@@ -62,7 +70,7 @@ cleanup() {
     local status=$?
     trap - EXIT
     if ((WINDOW_STARTED && !COMPLETE)); then
-        if ! compose_call stop --timeout 45 "${STOP_SERVICES[@]}" >/dev/null 2>&1; then
+        if ! python3 "$SCRIPT_DIR/release_manifest.py" project-writers --project "$PROJECT" --stop >/dev/null 2>&1; then
             printf 'rollback: failed to confirm fail-closed stop for this Compose project.\n' >&2
         fi
         if ! restore_current_if_needed; then
@@ -80,6 +88,8 @@ trap 'exit 143' TERM
 while (($#)); do
     case "$1" in
         --execute) EXECUTE=1; shift ;;
+        --with-rss) WITH_RSS=1; shift ;;
+        --leave-rss-stopped) LEAVE_RSS_STOPPED=1; shift ;;
         --worker-services) (($# >= 2)) || fail '--worker-services requires a value (possibly empty).'; WORKER_SERVICES_OVERRIDE=$2; WORKER_SERVICES_EXPLICIT=1; shift 2 ;;
         --env-file) (($# >= 2)) || fail '--env-file requires a value.'; ENV_FILE=$2; shift 2 ;;
         --project) (($# >= 2)) || fail '--project requires a value.'; PROJECT=$2; shift 2 ;;
@@ -93,6 +103,11 @@ while (($#)); do
         *) fail "unknown argument: $1" ;;
     esac
 done
+
+if ((LEAVE_RSS_STOPPED)); then
+    ((!WITH_RSS)) || fail '--leave-rss-stopped conflicts with --with-rss.'
+    ((WORKER_SERVICES_EXPLICIT)) || fail '--leave-rss-stopped requires explicit --worker-services.'
+fi
 
 [[ "$ENV_FILE" == /* && -f "$ENV_FILE" && ! -L "$ENV_FILE" ]] \
     || fail '--env-file must be an absolute path to a regular file.'
@@ -117,6 +132,7 @@ python3 "$SCRIPT_DIR/release_manifest.py" validate --manifest "$CURRENT_MANIFEST
 target_workers_text="$(python3 "$SCRIPT_DIR/release_manifest.py" worker-services --manifest "$MANIFEST")" \
     || fail 'could not identify target worker capabilities.'
 mapfile -t TARGET_WORKERS <<<"$target_workers_text"
+if ((WITH_RSS)); then TARGET_WORKERS+=(rss-sync); fi
 TARGET_WORKER_CAPABILITIES=("${TARGET_WORKERS[@]}")
 if ((WORKER_SERVICES_EXPLICIT)); then
     selected_workers=()
@@ -126,13 +142,17 @@ if ((WORKER_SERVICES_EXPLICIT)); then
         IFS=, read -r -a selected_workers <<<"$WORKER_SERVICES_OVERRIDE"
         declare -A selected_seen=()
         for service in "${selected_workers[@]}"; do
-            [[ "$service" =~ ^(crawler|indexer|full-content|channel-worker)$ ]] || fail '--worker-services contains an invalid worker.'
+            [[ "$service" =~ ^(crawler|indexer|full-content|channel-worker|rss-sync)$ ]] || fail '--worker-services contains an invalid worker.'
             [[ -z "${selected_seen[$service]:-}" ]] || fail '--worker-services contains a duplicate.'
             selected_seen[$service]=1
             supported=0
             for available in "${TARGET_WORKERS[@]}"; do [[ "$service" == "$available" ]] && supported=1; done
             ((supported)) || fail '--worker-services includes an unsupported target worker.'
         done
+    fi
+    if ((WITH_RSS)); then
+        [[ ",$WORKER_SERVICES_OVERRIDE," == *,rss-sync,* ]] \
+            || fail '--with-rss requires rss-sync in the explicit --worker-services subset.'
     fi
     TARGET_WORKERS=("${selected_workers[@]}")
 fi
@@ -177,12 +197,29 @@ PY
 )"
 [[ "$TARGET_SHA" == "$SHA" ]] || fail 'target manifest SHA does not match --sha.'
 
-COMPOSE=(docker compose --project-name "$PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+COMPOSE=(docker compose --project-name "$PROJECT" --env-file "$ENV_FILE")
+if ((WITH_RSS)); then COMPOSE+=(--profile rss); fi
+COMPOSE+=(-f "$COMPOSE_FILE")
 if ((USE_WORKSPACE_OVERLAY)); then
     [[ -f "$WORKSPACE_COMPOSE_FILE" && ! -L "$WORKSPACE_COMPOSE_FILE" ]] \
         || fail 'workspace worker capability requires compose.workspace.prod.yaml.'
     COMPOSE+=(-f "$WORKSPACE_COMPOSE_FILE")
-    STOP_SERVICES=(channel-worker full-content crawler indexer app)
+fi
+USE_LEGACY_OVERLAY=0
+for service in "${TARGET_WORKERS[@]}"; do
+    [[ "$service" == crawler || "$service" == full-content ]] && USE_LEGACY_OVERLAY=1
+done
+if ((USE_LEGACY_OVERLAY)); then
+    LEGACY_COMPOSE_FILE="$PROJECT_ROOT/compose.legacy-workers.prod.yaml"
+    [[ -f "$LEGACY_COMPOSE_FILE" && ! -L "$LEGACY_COMPOSE_FILE" ]] \
+        || fail 'historical worker capability requires compose.legacy-workers.prod.yaml.'
+    COMPOSE+=(-f "$LEGACY_COMPOSE_FILE")
+fi
+if ((WITH_RSS)); then
+    RSS_COMPOSE_FILE="$PROJECT_ROOT/compose.rss.prod.yaml"
+    [[ -f "$RSS_COMPOSE_FILE" && ! -L "$RSS_COMPOSE_FILE" ]] \
+        || fail '--with-rss requires compose.rss.prod.yaml.'
+    COMPOSE+=(-f "$RSS_COMPOSE_FILE")
 fi
 compose_call() {
     NEWSHUB_IMAGE="$IMAGE" NEWSHUB_ENV_FILE="$ENV_FILE" "${COMPOSE[@]}" "$@"
@@ -229,6 +266,19 @@ python3 "$SCRIPT_DIR/release_manifest.py" validate --manifest "$CURRENT_MANIFEST
     || fail 'current image revision/user did not match the current manifest.'
 compose_call config --quiet || fail 'production Compose configuration is incomplete or invalid.'
 
+# Read-only admission before the SQLite maintenance window. Never stop an
+# existing RSS writer unless this invocation will restore and verify it.
+if ((WITH_RSS)); then
+    RSS_IMAGE="$(compose_call config --format json | python3 "$SCRIPT_DIR/release_manifest.py" rss-preflight \
+        --project "$PROJECT" --sha "$SHA" --enabled)" \
+        || fail 'RSS image/engine preflight failed; no project writer was stopped.'
+else
+    RSS_STOP_ARGUMENTS=()
+    if ((LEAVE_RSS_STOPPED)); then RSS_STOP_ARGUMENTS+=(--leave-stopped); fi
+    python3 "$SCRIPT_DIR/release_manifest.py" rss-preflight --project "$PROJECT" --sha "$SHA" "${RSS_STOP_ARGUMENTS[@]}" >/dev/null \
+        || fail 'RSS runtime preflight failed; no project writer was stopped.'
+fi
+
 app_ids_raw="$("${COMPOSE[@]}" ps --all --quiet app)" || fail 'could not inspect the current app container.'
 mapfile -t app_ids <<<"$app_ids_raw"
 filtered_ids=()
@@ -248,7 +298,7 @@ if ((${#filtered_ids[@]} == 1)); then
 fi
 
 WINDOW_STARTED=1
-compose_call stop --timeout 45 "${STOP_SERVICES[@]}" \
+python3 "$SCRIPT_DIR/release_manifest.py" project-writers --project "$PROJECT" --stop \
     || fail 'could not stop all project writers; project remains stopped.'
 running="$(docker ps --quiet --filter "volume=$DB_VOLUME")" \
     || fail 'could not verify that database volume writers stopped.'
@@ -295,6 +345,8 @@ wait_healthy() {
 }
 assert_target_service_image() {
     local service=$1
+    local expected_image=$IMAGE
+    if [[ "$service" == rss-sync ]]; then expected_image=$RSS_IMAGE; fi
     local ids id image revision count=0
     ids="$("${COMPOSE[@]}" ps --all --quiet "$service")" || return 1
     mapfile -t ids <<<"$ids"
@@ -303,7 +355,7 @@ assert_target_service_image() {
         count=$((count + 1))
         image="$(docker inspect --format '{{.Config.Image}}' "$id")" || return 1
         revision="$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$id")" || return 1
-        [[ "$image" == "$IMAGE" && "$revision" == "$SHA" ]] || return 1
+        [[ "$image" == "$expected_image" && "$revision" == "$SHA" ]] || return 1
     done
     ((count == 1))
 }

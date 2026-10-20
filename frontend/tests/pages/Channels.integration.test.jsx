@@ -214,7 +214,7 @@ describe('channel management', () => {
     api.deleteChannelGroup.mockImplementation(async id => { groups = groups.filter(g => g.id !== id) })
     setup(<ChannelsPage />)
     fireEvent.click(await screen.findByRole('button', { name: '分组管理' }))
-    fireEvent.change(screen.getByRole('textbox', { name: '新分组名称' }), { target: { value: '  新频道分组  ' } })
+    fireEvent.change(await screen.findByRole('textbox', { name: '新分组名称' }), { target: { value: '  新频道分组  ' } })
     fireEvent.click(screen.getByRole('button', { name: '创建分组' }))
     expect(await screen.findByRole('button', { name: '新频道分组 (0)' })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(screen.getByRole('checkbox', { name: '选择 OpenAI Blog' }))

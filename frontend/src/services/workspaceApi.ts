@@ -94,14 +94,15 @@ export async function workspaceRequest<T>(path: string, options: { method?: stri
 export const workspaceKeys = {
   all: ['workspace'] as const,
   catalog: ['workspace', 'catalog'] as const,
+  viewerCatalog: (viewer: number | string, purpose: 'subscribe' | 'history') => ['workspace', 'catalog', { viewer, purpose }] as const,
   config: (viewer: number | string) => ['workspace', viewer, 'grouping-config'] as const,
   proposals: (viewer: number | string) => ['workspace', viewer, 'proposals'] as const,
   proposal: (viewer: number | string, id: string | null) => ['workspace', viewer, 'proposal', id] as const,
   stats: (viewer: number | string) => ['workspace', viewer, 'reading-stats'] as const,
 }
-export const workspaceCatalogOptions = () => queryOptions({
-  queryKey: workspaceKeys.catalog,
-  queryFn: ({ signal }) => workspaceRequest<Catalog>('/smart-channels/catalog/', { signal }), staleTime: 60_000,
+export const workspaceCatalogOptions = (viewer: number | string, purpose: 'subscribe' | 'history' = 'history') => queryOptions({
+  queryKey: workspaceKeys.viewerCatalog(viewer, purpose),
+  queryFn: ({ signal }) => workspaceRequest<Catalog>('/smart-channels/catalog/?purpose=' + purpose, { signal }), staleTime: 60_000,
 })
 export const workspaceConfigOptions = (viewer: number | string) => queryOptions({
   queryKey: workspaceKeys.config(viewer), queryFn: ({ signal }) => workspaceRequest<GroupingConfig>('/me/smart-channels/settings/', { signal }),

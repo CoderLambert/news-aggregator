@@ -1,9 +1,6 @@
-"""Explicit catalog initialization; directory reads never create sources."""
-from api.services.source_policy import policy_for_key, policy_for_name
-from api.services.source_registry import runtime_registry
+"""RSS-backed channel catalog. Reads never register static collector sources."""
+from django.db.models import F
 
-# Known publisher metadata, not a language/market inference. Unknown countries
-# remain empty; country of a Chinese edition is not automatically China.
 PUBLISHER_COUNTRIES = {'bbc': 'UK', 'bbc_health': 'UK', 'deepmind': 'UK', 'mistral': 'FR',
                        'leiphone': 'CN', 'jiqizhixin': 'CN', 'sanliu_kr': 'CN',
                        'ithome_energy': 'CN', 'ifanr_energy': 'CN'}
@@ -11,19 +8,43 @@ PUBLISHER_COUNTRIES = {'bbc': 'UK', 'bbc_health': 'UK', 'deepmind': 'UK', 'mistr
 
 def subscription_status(source):
     publication = getattr(source, 'publication', None)
-    if publication is not None and publication.owner != 'legacy':
-        if publication.owner == 'paused':
-            return 'inactive', publication.pause_reason or 'paused'
-        links = source.feed_links.filter(enabled=True)
-        if links.filter(binding__connection_state='ready').exists():
+    if publication is None or publication.owner == 'legacy':
+        from api.services.source_policy import policy_for_name
+        policy = policy_for_name(source.name)
+        return 'inactive', (policy.unsupported_reason if policy else '') or 'legacy_ingestion_retired'
+    if publication.owner != 'miniflux':
+        return 'inactive', publication.pause_reason or 'paused'
+    links = source.feed_links.filter(enabled=True, association_policy={'version': 1, 'mode': 'all'})
+    verified = links.filter(binding__engine_feed_id__isnull=False,
+        binding__connection_state__in=['ready', 'paused'],
+        binding__applied_policy_version=F('binding__policy_version'))
+    # A paused physical feed remains subscribable: subscribing reconciles its references.
+    if verified.exists():
+        from api.rss.feed_policy import assert_binding_policy
+        from api.rss.operations import OperationError
+        for link in verified.select_related('binding'):
+            try:
+                assert_binding_policy(link.binding)
+            except OperationError:
+                continue
             return 'active', ''
-        return 'inactive', 'connecting' if links.exists() else 'unconfigured_source'
-    policy = policy_for_name(source.name)
-    if not policy:
-        return 'inactive', 'unregistered_source'
-    if policy.unsupported_reason or policy.key not in runtime_registry():
-        return 'inactive', policy.unsupported_reason or 'unregistered_source'
-    return 'active', ''
+        return 'inactive', 'source_policy_not_permitted'
+    binding = links.select_related('binding').order_by('pk').first()
+    if binding:
+        if binding.binding.last_error and any(word in binding.binding.last_error for word in ('unknown', 'unproven')):
+            return 'inactive', 'feed_outcome_unknown'
+        return 'inactive', {'error': 'feed_error', 'unknown': 'feed_outcome_unknown'}.get(
+            binding.binding.connection_state, 'feed_verification_pending')
+    return 'inactive', 'unconfigured_source'
+
+
+def rss_status(source):
+    active, reason = subscription_status(source)
+    if active == 'active':
+        return 'ready'
+    return {'legacy_ingestion_retired': 'retired', 'unconfigured_source': 'unconfigured',
+            'feed_error': 'error', 'feed_outcome_unknown': 'unknown',
+            'feed_verification_pending': 'pending'}.get(reason, 'paused')
 
 
 def catalog_defaults(policy):
@@ -38,10 +59,19 @@ def catalog_defaults(policy):
     }
 
 
+
+
 def sync_channel_catalog():
-    from api.models import Source
-    from api.services.sector_feeds import SECTOR_KEYS
-    for key in dict.fromkeys([*runtime_registry(), *sorted(SECTOR_KEYS)]):
-        policy = policy_for_key(key)
-        # Explicit/manual existing values are never overwritten by a GET or sync.
-        Source.objects.get_or_create(name=policy.name, defaults=catalog_defaults(policy))
+    # Retained command/import compatibility. Initialization is explicit and versioned.
+    return 0
+
+
+def catalog_sources(user, purpose='history'):
+    from rest_framework.exceptions import ValidationError
+    from api.rss.access import authorized_sources
+    if purpose not in {'subscribe', 'history'}:
+        raise ValidationError({'purpose': '请选择 subscribe 或 history。'})
+    sources = authorized_sources(user)
+    if purpose == 'subscribe':
+        sources = sources.filter(publication__owner='miniflux', feed_links__enabled=True).distinct()
+    return sources

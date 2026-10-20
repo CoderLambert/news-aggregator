@@ -7,7 +7,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from api.crawler_views import IsActiveSuperuser, error_response
+from api.admin_api import IsActiveSuperuser, error_response
 from api.models import SearchIndexRun
 from api.search_index_serializers import (
     SearchIndexRunSerializer,

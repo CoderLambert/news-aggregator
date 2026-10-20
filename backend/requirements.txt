@@ -7,8 +7,6 @@ waitress>=3.0
 openai>=1.0
 anthropic==1.13.0
 pyyaml>=6.0
-scrapy>=2.11
-scrapy-playwright>=0.0.40
 beautifulsoup4==4.15.0
 deep-translator>=1.11.4
 edge-tts>=7.2.8,<8.0
@@ -17,7 +15,6 @@ chromadb>=0.4
 pytest>=8.0
 pytest-django>=4.8
 cryptography>=42.0
-feedparser>=6.0.12,<7.0
 # RSS HTML conversion: changing these pins requires a conversion-version bump.
 nh3==0.3.7
 markdownify==1.2.3

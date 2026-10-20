@@ -75,17 +75,19 @@ describe('Header navigation menu', () => {
     expect(screen.getByRole('link', { name: '设置' })).toHaveAttribute('aria-current', 'page')
   })
 
-  it('shows Provider comparisons only to a signed-in superuser', () => {
+  it('offers RSS management only to a superuser and removes retired comparisons', () => {
     authState.user = { id: 4, username: 'reader', isSuperuser: false }
     const reader = renderHeader()
     fireEvent.click(screen.getByRole('button', { name: '打开菜单' }))
     expect(screen.queryByRole('link', { name: 'Provider 对比' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '管理控制台' })).not.toBeInTheDocument()
     reader.unmount()
 
     authState.user = { id: 5, username: 'admin', isSuperuser: true }
     renderHeader()
     fireEvent.click(screen.getByRole('button', { name: '打开菜单' }))
-    expect(screen.getByRole('link', { name: 'Provider 对比' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Provider 对比' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '管理控制台' })).toHaveAttribute('href', '/admin/rss')
   })
 
   it('shows a visible warning when server logout fails without an unhandled rejection', async () => {

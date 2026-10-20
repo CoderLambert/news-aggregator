@@ -12,11 +12,12 @@ export const channelKeys = {
   subscriptions: (viewer: number | string) => ['channels', 'personal', viewer, 'subscriptions'] as const,
   groups: (viewer: number | string) => ['channels', 'personal', viewer, 'groups'] as const,
   preferences: (viewer: number | string) => ['channels', 'personal', viewer, 'preferences'] as const,
-  directory: ['channels', 'directory'] as const,
+  directories: ['channels', 'directory'] as const,
+  directory: (viewer: number | string, purpose: 'subscribe' | 'history') => ['channels', 'directory', { viewer, purpose }] as const,
 }
-export const channelDirectoryOptions = () => queryOptions({
-  queryKey: channelKeys.directory,
-  queryFn: async ({ signal }) => parseChannels(await fetchSources(signal)),
+export const channelDirectoryOptions = (viewer: number | string, purpose: 'subscribe' | 'history' = 'subscribe') => queryOptions({
+  queryKey: channelKeys.directory(viewer, purpose),
+  queryFn: async ({ signal }) => parseChannels(await fetchSources(signal, purpose)),
 })
 export function useChannelConfig() {
   const { user, loading } = useAuth()
@@ -69,9 +70,9 @@ export function useChannelMutation() {
       await client.cancelQueries({ queryKey: newsKeys.lists() })
       await Promise.all([
         client.invalidateQueries({ queryKey: channelKeys.personal(viewer) }),
-        client.invalidateQueries({ queryKey: channelKeys.directory }),
-        client.invalidateQueries({ queryKey: newsKeys.sources('zh') }),
-        client.invalidateQueries({ queryKey: newsKeys.sources('en') }),
+        client.invalidateQueries({ queryKey: channelKeys.directories }),
+        client.invalidateQueries({ queryKey: newsKeys.sources('zh', viewer) }),
+        client.invalidateQueries({ queryKey: newsKeys.sources('en', viewer) }),
         client.resetQueries({ queryKey: newsKeys.lists() }),
       ])
     } })

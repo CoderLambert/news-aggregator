@@ -554,14 +554,14 @@ class ReleaseManifestTests(unittest.TestCase):
 
     def test_describe_image_inspects_revision_and_nonroot_user_then_uses_network_none(self) -> None:
         image_json = json.dumps({"migrations": MIGRATIONS, "static_sha": "b" * 64})
-        with patch.object(release_manifest, "_docker_text", side_effect=[RELEASE_SHA, "10001:10001", '{"channel_worker":true,"full_content_worker":true}']), patch.object(
+        with patch.object(release_manifest, "_docker_text", side_effect=[RELEASE_SHA, "10001:10001", '{"channel_worker":true,"full_content_worker":true,"crawler_worker":true}']), patch.object(
             release_manifest.subprocess,
             "run",
             return_value=type("Result", (), {"stdout": image_json})(),
         ) as run:
             value = release_manifest.describe_image(f"newshub:{RELEASE_SHA}", RELEASE_SHA)
         self.assertEqual(value["migrations"], MIGRATIONS)
-        self.assertEqual(value['capabilities'], {'full_content_worker': True, 'channel_worker': True})
+        self.assertEqual(value['capabilities'], {'full_content_worker': True, 'channel_worker': True, 'crawler_worker': True})
         command = run.call_args.args[0]
         self.assertIn("--network", command)
         self.assertIn("none", command)
@@ -662,7 +662,7 @@ class CollectionAndWorkflowTests(unittest.TestCase):
         backend_job = jobs["backend-and-release-gates"]
         self.assertEqual(backend_job["runs-on"], ["self-hosted", "linux", "x64", "newshub-ci"])
         self.assertEqual(backend_job["env"]["RUN_MAIN"], "true")
-        self.assertEqual(backend_job["env"]["PYTHONPATH"], "backend:crawler")
+        self.assertEqual(backend_job["env"]["PYTHONPATH"], "backend")
         runs = "\n".join(step.get("run", "") for step in backend_job["steps"])
         self.assertIn("= 3.12", runs)
         self.assertIn('test "$DOCKER_HOST" = unix:///ci-docker/docker.sock', runs)

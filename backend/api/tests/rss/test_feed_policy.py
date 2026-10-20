@@ -72,7 +72,7 @@ def test_all_subscription_selectors_choose_identical_server_policy(user, worker,
     assert status == 202
     binding = FeedBinding.objects.get()
     assert binding.desired_mode == mode
-    publication = SourcePublication.objects.get(source_id=result['subscription']['source_id'])
+    publication = SourcePublication.objects.get(source_id=result['source_id'])
     assert publication.reading_policy == reading
     drain(control)
     assert engine.create_calls == 1
@@ -90,8 +90,10 @@ def test_retired_publishers_cannot_bypass_with_token_or_random_catalog_name(user
 
 def test_body_fields_are_not_native_evidence_and_exact_path_is_not_host_grant(settings):
     settings.RSS_FULL_CONTENT_ENABLED = True
-    assert POLICIES['v8'].body_fields
-    assert approved_feed_policy('https://v8.dev/blog.atom').desired_mode == 'full_content'
+    assert POLICIES['smashing_magazine'].body_fields
+    assert approved_feed_policy('https://www.smashingmagazine.com/feed/').desired_mode == 'full_content'
+    # V8 now has independent two-entry native-feed evidence, not just body_fields.
+    assert approved_feed_policy('https://v8.dev/blog.atom').desired_mode == 'feed'
     assert approved_feed_policy('https://webkit.org/different.xml').desired_mode == 'full_content'
     assert approved_feed_policy('https://webkit.org/feed/?tag=x').desired_mode == 'full_content'
 
@@ -169,10 +171,11 @@ def test_known_url_config_cannot_be_bypassed_by_new_personal_source(user):
     config_for(source, key='devto', reading='summary_only')  # built-in key does not hide the DB restriction.
     SourceFeedLink.objects.all().delete()
     FeedBinding.objects.all().delete()
-    subscribe(user, {'feed_url': URL}, 'new')
+    _, result = subscribe(user, {'feed_url': URL}, 'new')
     binding = FeedBinding.objects.get()
     assert binding.desired_mode == 'feed'
-    assert SourcePublication.objects.get(source_id=ChannelSubscription.objects.get(user=user).source_id).reading_policy == 'rss_summary_only'
+    assert SourcePublication.objects.get(source_id=result['source_id']).reading_policy == 'rss_summary_only'
+    assert not ChannelSubscription.objects.filter(user=user).exists()
 
 
 def test_policy_tightening_from_html_allowed_to_false_after_prepare(worker):
@@ -251,12 +254,12 @@ def test_dynamic_allowed_domains_restrict_article_urls_not_only_feed_endpoint(wo
         assert_article_fetch_allowed('http://publisher.example/other-article')
 
 
-def test_global_gate_defaults_off_and_admin_cannot_bypass(user, settings, worker):
+def test_explicit_global_opt_out_and_admin_cannot_bypass(user, settings, worker):
     settings.RSS_FULL_CONTENT_ENABLED = False
     status, _ = subscribe(user, {'feed_url': URL}, 'closed')
     binding = FeedBinding.objects.get()
     assert status == 202 and binding.desired_mode == 'feed'
-    assert not CONFIG.__class__(INSTANCE, 3, 'http://engine:8080', 'synthetic').full_content_enabled
+    assert not CONFIG.__class__(INSTANCE, 3, 'http://engine:8080', 'synthetic', full_content_enabled=False).full_content_enabled
     with pytest.raises(OperationError, match='full_content_disabled'):
         change_policy(binding.pk, expected_policy_version=binding.policy_version, desired_mode='full_content')
     drain(worker[0])

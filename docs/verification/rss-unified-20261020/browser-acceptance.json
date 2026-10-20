@@ -1,0 +1,17 @@
+{
+  "a_subscribed_source_ids": [
+    60
+  ],
+  "pending_candidates": [
+    "WebKit",
+    "美团技术团队"
+  ],
+  "mobile_no_horizontal_overflow": true,
+  "article_revision": 1,
+  "a_history_visible": true,
+  "b_subscribed_after_reuse": true,
+  "b_reuses_same_article_revision": true,
+  "b_has_no_a_private_subscriptions_groups_or_chat": true,
+  "no_article_inference_or_fetch_posts": true,
+  "request_count": 60
+}

@@ -21,7 +21,7 @@ function Profile({ id }: { id: number }) {
   const mutation = useChannelMutation()
   const client = useQueryClient()
   const viewer = user?.id ?? 'anonymous'
-  const catalog = useQuery(workspaceCatalogOptions())
+  const catalog = useQuery(workspaceCatalogOptions(user?.id ?? 'anonymous', 'history'))
   const profile = useQuery({ queryKey: ['workspace', viewer, 'source', id], enabled: Number.isSafeInteger(id) && id > 0,
     queryFn: ({ signal }) => workspaceRequest<ChannelProfile>('/smart-channels/sources/' + id + '/', { signal }) })
   const [login, setLogin] = useState(false)

@@ -19,7 +19,7 @@ export default function GroupWorkspace() {
 function Groups() {
   const { user, loading } = useAuth()
   const config = useChannelConfig()
-  const catalog = useQuery(workspaceCatalogOptions())
+  const catalog = useQuery(workspaceCatalogOptions(user?.id ?? 'anonymous', 'history'))
   const mutation = useChannelMutation()
   // Query pending state is notified asynchronously. Fence the request in the
   // same event that submits it, so fast Escape/cancel/re-submit cannot race it.

@@ -122,7 +122,7 @@ export default function NewsList() {
     placeholderData: undefined,
   })
   const categoriesQuery = useQuery(categoryOptions(lang))
-  const sourcesQuery = useQuery(sourceOptions(lang))
+  const sourcesQuery = useQuery(sourceOptions(lang, viewerId, 'history'))
   const currentViewerId = user?.id ?? null
 
   function updateParams(changes: Record<string, string | null>, replace = false) {
@@ -220,7 +220,7 @@ export default function NewsList() {
             <Link to="/channels" className="mt-3 inline-block text-primary underline">选择频道</Link>
           )}
           {reading.scope === 'all' && !search.trim() && categories.length === 0 && sources.length === 0 && (
-            <p className="mt-1 text-sm">{lang === 'en' ? 'Run crawler first: python manage.py crawl' : '请先运行爬虫: python manage.py crawl'}</p>
+            <p className="mt-1 text-sm">{lang === 'en' ? 'Subscribe to a source to see articles after syncing.' : '订阅来源后，文章会在同步完成后显示。'}</p>
           )}
         </div>
       )}

@@ -7,7 +7,7 @@
 | 模块 | 能力 |
 |------|------|
 | **个人频道** | 账号同步订阅与一层分组，支持多组归属、批量操作和首页范围筛选 |
-| **新闻聚合** | Scrapy 爬虫抓取多源科技资讯，自动分类存储，支持分页浏览 |
+| **新闻聚合** | Miniflux 获取订阅源，NewsHub 同步文章并提供分类和分页浏览 |
 | **AI 翻译** | 用户自带 Key，经 LiteLLM 统一路由到主流模型厂商 |
 | **智能助手** | 基于文章全文的多轮对话，自动抓取原文，推荐问题一键换批 |
 | **深度研究** | AI Research Agent — LLM 意图分析 + 本地语义搜索 + 多步骤深度分析 |
@@ -24,7 +24,7 @@
 
 首页支持 `scope=all|subscribed|ungrouped|group`，分组范围还需 `group_id`。范围与 `source`、`category` 和关键词/语义/混合搜索取交集，空范围保持零结果。切换范围保留搜索与分类、清除临时来源并回到第一页；清除筛选保留范围。URL 优先于账号保存的上次范围，支持刷新与浏览器历史。检索中心和收藏页保持独立，个人订阅不会改变站点采集计划。
 
-迁移 `0039`、`0040` 添加账号配置和缺失的受支持来源，不修改已有文章、用户或来源属性，也不自动订阅。更新来源策略/爬虫注册目录后，可执行 `python backend/manage.py sync_channel_catalog` 补充缺失频道；目录 GET 只读。公开只读模式仅提供全部资讯与频道目录。
+迁移 `0039`、`0040` 添加账号配置和缺失的受支持来源，不修改已有文章、用户或来源属性，也不自动订阅。更新来源元数据后，可执行 `python backend/manage.py sync_channel_catalog` 补充缺失频道；目录 GET 只读。公开只读模式仅提供全部资讯与频道目录。
 
 个人 API 使用现有会话认证与 CSRF，每个账号只能访问自己的分组，越权返回 404：
 
@@ -39,7 +39,7 @@
 
 频道新增独立的 `region=domestic|international`，按服务市场与版本划分；语言、内容分类和来源类型保持独立。首页、频道管理及检索中心均支持国内／国际筛选，首页地区与个人阅读范围取交集。URL 保存地区；切换地区清除临时来源并重置分页，保留搜索、分类和个人分组；清除筛选保留个人阅读范围。
 
-迁移 `0041/0042` 回填现有频道地区并增加 12 个新能源、14 个医疗来源配置，以及“新能源”“医疗健康”分类。FDA 官方 RSS 当前本机返回 404，作为待验证候选，不注册采集或开放新增订阅；其他 25 个 RSS 已通过独立 XML 解析检查，实际采集状态仍以爬虫结果为准。IT之家与爱范儿仅接收标题、摘要和标签命中新能源规则的条目。各来源的官方地址和规则集中在 `backend/api/services/sector_feeds.py`。
+迁移 `0041/0042` 保留既有频道地区、行业来源及分类。来源替代、连接状态和采集政策以当前 RSS 迁移清单与实际验收为准；历史 XML 解析结果不能证明当前可用。来源元数据保存在 `backend/api/services/sector_feeds.py`。
 
 Energy-Storage.news、Windpower Monthly 和医疗媒体、期刊仅展示 RSS 标题、摘要及真实原文链接，后端禁止正文获取；FDA、NIH 仅使用 RSS 公开提供的内容。未提供摘要时不生成占位内容。医疗资讯和相关 AI 回答标注“新闻资讯，不构成医疗建议”，单篇助手与研究助手使用实际文章 URL 展示来源链接。
 
@@ -49,7 +49,7 @@ Energy-Storage.news、Windpower Monthly 和医疗媒体、期刊仅展示 RSS �
 
 ```
 Frontend:  React 19 + Vite 8 + Tailwind 4 + shadcn/ui + React Compiler
-Backend:   Django 6 + DRF + SQLite + Scrapy
+Backend:   Django 6 + DRF + SQLite + Miniflux
 AI:        LiteLLM Gateway + 用户自带 API Key（受控的主流厂商白名单）
 向量检索:   ChromaDB（语义搜索支持）
 测试:      Vitest + Testing Library (前端) | pytest-django (后端)
@@ -63,15 +63,15 @@ AI:        LiteLLM Gateway + 用户自带 API Key（受控的主流厂商白名�
 
 ## 🚀 快速开始
 
-> 完整的初始化、开发/生产启动、爬虫、测试、数据和故障排查说明见 [启动与运维说明](./docs/startup.md)。
+> 完整的初始化、开发/生产启动、订阅源同步、测试、数据和故障排查说明见 [启动与运维说明](./docs/startup.md)。
 
-不安装 Docker 的单机部署（前端构建、Waitress、SQLite 数据迁移与全文 Worker）见 [源码部署说明](./docs/deployment/local-source.md)。
+不安装 Docker 的单机部署（前端构建、Waitress、SQLite 数据迁移与 RSS 同步）见 [源码部署说明](./docs/deployment/local-source.md)。
 
 ### Docker 一键部署（推荐）
 
 语义索引的同步、恢复和管理方案见 [docs/semantic-index-sync-design.md](docs/semantic-index-sync-design.md)。
 
-从克隆到健康服务只需要准备 `.env`，Compose 会构建前端和后端、自动执行数据库迁移，并启动 Waitress、爬虫 Worker、全文 Worker 与语义索引 Worker：
+从克隆到健康服务只需要准备 `.env`，Compose 会构建前端和后端、自动执行开发库迁移，并启动 Waitress 与语义索引 Worker；订阅源获取还需单独配置 Miniflux/RSS runtime：
 
 ```bash
 git clone https://github.com/CoderLambert/news-aggregator.git
@@ -95,7 +95,7 @@ curl -f http://127.0.0.1:9527/api/news/
 | SQLite、WAL、TTS 缓存 | `./backend/` | `/app/backend/` |
 | ChatGPT 部署实例标识 | `./backend/.runtime/` | `/app/backend/.runtime/` |
 | ChromaDB 向量数据 | `./chroma_data/` | `/app/chroma_data/` |
-| 爬虫运行日志 | `./logs/` | `/app/logs/` |
+| 后台进程日志 | `./logs/` | `/app/logs/` |
 | Hugging Face 模型缓存 | Docker volume `news-aggregator_huggingface-cache` | `/root/.cache/huggingface` |
 
 接管已有数据库时，先停止原后端和爬虫写入者，再把 `db.sqlite3` 及仍存在的 `db.sqlite3-wal`、`db.sqlite3-shm` 一起放入 `backend/`，然后启动 Compose。保存 ChatGPT 订阅连接时还必须沿用原来的 `DJANGO_SECRET_KEY` 或 `CHATGPT_TOKEN_ENCRYPTION_KEY`。如果目标是新机器/新 VM，不要复制 `backend/.runtime/chatgpt-deployment-id`；新部署会生成自己的 OAuth host ID。同一部署内所有站内用户共享这个非敏感 host 标识，但各自的 `client_id` 和 Token 分开保存。
@@ -104,8 +104,8 @@ curl -f http://127.0.0.1:9527/api/news/
 
 ```bash
 docker compose ps
-docker compose logs -f app crawler indexer
-docker compose restart app crawler indexer
+docker compose logs -f app indexer
+docker compose restart app indexer
 docker compose down                    # 数据仍保留
 
 # 更新代码和镜像；容器启动时会自动应用新迁移
@@ -114,13 +114,13 @@ git lfs pull
 docker compose up -d --build --wait
 ```
 
-Compose 默认在 crawler Worker 启动后抓取一次，之后每小时抓取；indexer Worker 会自动维护语义索引。`.env` 提供首次初始化值，运行后在 <http://127.0.0.1:9527/admin/crawlers> 调整爬虫和索引周期。创建超级管理员后，可在同一页面控制两类任务：
+indexer Worker 自动维护语义索引；管理员在 <http://127.0.0.1:9527/admin/rss> 查看 RSS 连接、同步状态并管理索引。RSS 引擎使用单独的 PostgreSQL、受保护凭据和持久身份，配置入口为 [RSS Compose](./compose.rss.prod.yaml) 与 [迁移架构](./docs/plans/rss-engine-migration/ARCHITECTURE.md)。此 overlay 使用生产布局，不能直接叠加到开发版的源码数据库 bind 上。创建管理员：
 
 ```bash
 docker compose exec app python backend/manage.py createsuperuser
 ```
 
-公开注册只会创建普通用户，不会授予爬虫管理权限。管理员使用同一个登录窗口；新管理员可通过上面的 `createsuperuser` 命令创建，已有账号则由部署者在服务端明确授予 `is_staff` 和 `is_superuser` 权限。
+公开注册只会创建普通用户，不会授予管理权限。管理员使用同一个登录窗口；新管理员可通过上面的 `createsuperuser` 命令创建，已有账号则由部署者在服务端明确授予 `is_staff` 和 `is_superuser` 权限。
 
 本地 Python/Node 开发方式如下。
 
@@ -193,7 +193,7 @@ npm run build
 
 ### 5. 启动服务
 
-**一键启动（前端 + 后端 + 定时爬虫）**
+**启动前端与后端**
 
 ```bash
 ./scripts/news start
@@ -234,35 +234,13 @@ python start_waitress.py
 # 访问 http://127.0.0.1:9527
 ```
 
-此方式需要另起一个进程运行全文 Worker；已有数据库的迁移、端口切换和定时爬虫路径见[源码部署说明](./docs/deployment/local-source.md)。
+订阅源获取由已配置的 Miniflux 与 RSS runtime 负责；已有数据库迁移和端口配置见[源码部署说明](./docs/deployment/local-source.md)。
 
-### 6. 抓取新闻数据
+### 6. 订阅与同步文章
 
-```bash
-cd backend
-source venv/bin/activate
+在“频道”页面选择或添加订阅源，文章同步完成后显示在列表中。管理员可在 `/admin/rss` 查看连接和同步状态。研究、翻译和朗读使用已保存内容；历史正文继续保留。
 
-# 抓取所有源
-python manage.py crawl all
-
-# 抓取指定源
-python manage.py crawl hackernews
-```
-
-全量抓取会逐个来源执行并共享持久化请求预算；只有每个来源都得到健康终态时才返回成功。
-
-也可以手动执行一次全部爬虫：
-
-```bash
-# 使用项目提供的脚本
-./scripts/crawl_cron.sh
-```
-
-持续定时抓取请使用统一命令：
-
-```bash
-./scripts/news start
-```
+升级到本版本前，必须完成 [T29 来源迁移](./docs/plans/rss-engine-migration/tasks/T29/task.md) 和 [T30 旧运行入口停止验收](./docs/plans/rss-engine-migration/tasks/T30/task.md)。移除仓库里的 timer/cron 模板不会停用主机上已经安装的任务；宿主检查须在原部署环境执行。源码清理候选不代表这些生产门禁已通过。
 
 ## 🧪 测试
 
@@ -314,19 +292,14 @@ news-aggregator/
 │   │   └── constants/        # 常量定义（TTS 配置）
 │   ├── vite.config.js        # Vite + React Compiler + 代理配置
 │   └── package.json
-├── crawler/                  # Scrapy 爬虫
-│   └── news_crawler/
-│       └── spiders/          # 各数据源 Spider
 ├── chroma_data/              # ChromaDB 运行时向量数据（Git 忽略）
 ├── backend/
 │   └── db.sqlite3            # Django SQLite 数据库（LFS 管理）
 ├── scripts/                  # 运维脚本
 │   ├── news-server           # Django 服务管理
 │   ├── news-dev              # Vite 开发服务器管理
-│   ├── news                  # 前端、后端、爬虫统一管理
-│   ├── news-cron             # 项目级定时爬虫
-│   ├── crawl_cron.sh         # 定时爬虫
-│   └── run_tests.sh          # 全量测试
+│   ├── news                  # 前端与后端控制
+│   └── run_tests.sh          # 本地定向测试入口
 ├── start_waitress.py         # Waitress 生产启动脚本
 ├── .env.example              # 环境变量模板
 ├── .gitattributes            # Git LFS 追踪规则

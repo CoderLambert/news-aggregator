@@ -1,0 +1,58 @@
+# Rollback compatibility for an explicitly selected historical image manifest.
+# Loaded by deploy/rollback only when that target image declares a retired role.
+# Profiles keep these services out of an ordinary Compose startup.
+x-legacy-worker: &legacy-worker
+  image: "${NEWSHUB_IMAGE:?Set NEWSHUB_IMAGE to the explicitly selected immutable historical image}"
+  profiles: [legacy-rollback]
+  environment:
+    DJANGO_ENV: production
+    DJANGO_DEBUG: "0"
+    DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY using the explicit Compose --env-file}"
+    WAITRESS_TRUSTED_PROXY: "${WAITRESS_TRUSTED_PROXY:?Set the verified Nginx proxy IP}"
+    DJANGO_DB_PATH: /var/lib/newshub/db/db.sqlite3
+    HF_HOME: /var/lib/newshub/model-cache
+    RUN_MAIN: "true"
+    NEWS_CRAWL_ONLY: "1"
+    CRAWLER_LOG_DIR: /var/lib/newshub/logs/crawler
+    CRAWLER_WORKER_LOCK: /var/lib/newshub/logs/crawler-worker.lock
+    FULL_CONTENT_WORKER_LOCK: /var/lib/newshub/logs/full-content.lock
+    FULL_CONTENT_WORKER_HEARTBEAT: /var/lib/newshub/logs/full-content-heartbeat.json
+    CRAWLER_SCHEDULER_ENABLED: "${CRAWLER_SCHEDULER_ENABLED:-0}"
+    CRAWL_RUN_ON_START: "${CRAWL_RUN_ON_START:-0}"
+    FULL_CONTENT_WORKER_ENABLED: "${FULL_CONTENT_WORKER_ENABLED:-0}"
+    FULL_CONTENT_AUTO_ENQUEUE_ENABLED: "${FULL_CONTENT_AUTO_ENQUEUE_ENABLED:-0}"
+    FULL_CONTENT_AUTO_SOURCE_KEYS: "${FULL_CONTENT_AUTO_SOURCE_KEYS:-}"
+    STRUCTURED_BODY_INGEST_ENABLED: "${STRUCTURED_BODY_INGEST_ENABLED:-0}"
+    STRUCTURED_BODY_SOURCE_KEYS: "${STRUCTURED_BODY_SOURCE_KEYS:-}"
+    TECHCRUNCH_WP_ENABLED: "${TECHCRUNCH_WP_ENABLED:-0}"
+  volumes:
+    - db-data:/var/lib/newshub/db
+    - logs-data:/var/lib/newshub/logs
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+    app:
+      condition: service_healthy
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 45s
+
+services:
+  crawler:
+    <<: *legacy-worker
+    command: [python, /app/backend/manage.py, crawl_worker]
+    healthcheck:
+      test: [CMD, python, /app/backend/manage.py, crawler_healthcheck]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 30s
+  full-content:
+    <<: *legacy-worker
+    command: [python, /app/backend/manage.py, auto_fetch_full_content, --foreground]
+    healthcheck:
+      test: [CMD, python, /app/backend/manage.py, full_content_healthcheck]
+      interval: 10s
+      timeout: 8s
+      retries: 3
+      start_period: 30s

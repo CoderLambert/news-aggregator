@@ -33,6 +33,15 @@ describe('channel workspace directory', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: '搜索频道' }), { target: { value: 'React' } })
     expect(screen.queryByRole('link', { name: 'Retired Channel' })).toBeNull()
   })
+  it('keeps pending candidates separate from subscribable totals', async () => {
+    setup()
+    await screen.findByRole('link', { name: 'React Blog' })
+    expect(screen.getByRole('button', { name: /^未订阅\s*1$/ })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^待验证候选\s*1$/ }))
+    expect(screen.queryByRole('link', { name: 'React Blog' })).toBeNull()
+    expect(screen.getByRole('link', { name: 'Retired Channel' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '+ 订阅' })).toBeDisabled()
+  })
   it('keeps batch actions hidden until sources are selected', async () => {
     setup()
     await screen.findByRole('link', { name: 'React Blog' })

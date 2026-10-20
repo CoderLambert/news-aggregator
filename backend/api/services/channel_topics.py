@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 from django.db.models import Q
 from api.models import News, Source
 from api.services.source_policy import policy_for_name
-from api.services.channel_catalog import subscription_status
+from api.services.channel_catalog import subscription_status, rss_status
 from api.smart_channel_models import SourceTopicProfile
 
 TAXONOMY_VERSION = '2026-10-13.1'
@@ -131,7 +131,8 @@ def profile_data(source, stored=None):
         'taxonomy_version': TAXONOMY_VERSION, 'evidence_version': PROFILE_EVIDENCE_VERSION,
         'metadata_status': ('stale_manual' if stale_manual else
             'needs_review' if needs_review else 'trusted'),
-        'subscription_status': status, 'subscription_reason': reason, 'feed_url': policy.feed_url if policy else '',
+        'subscription_status': status, 'subscription_reason': reason, 'can_subscribe': status == 'active',
+        'rss_status': rss_status(source), 'feed_url': policy.feed_url if policy else '',
         'policy_key': policy.key if policy else '', 'reading_policy': publication.reading_policy if publication else 'summary_only',
         'updated_at': stored.updated_at.isoformat() if stored else None}
 

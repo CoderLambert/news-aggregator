@@ -35,7 +35,7 @@ def _binding_snapshot(binding):
         'source_id', 'config_version', 'approved_config_version', 'status', 'category_id', 'content_kind'))
     return (binding.pk, binding.policy_version, binding.applied_policy_version,
             binding.desired_enabled, binding.connection_state, binding.desired_mode, links, configs,
-            str(binding.engine_instance_uuid), binding.account_id, binding.engine_feed_id)
+            str(binding.engine_instance_uuid), binding.account_id, binding.engine_feed_id, binding.published_since)
 
 
 def _news_snapshot(news):
@@ -181,6 +181,8 @@ def commit_entry(dto, fence, *, reserve):
             return _issue(dto, 'article_url_conflict', conflict=news)
         source = active[0]
         converted, summary, cover, comments, published, inferred = metadata
+        if binding.published_since and published.astimezone(datetime_timezone.utc).date() < binding.published_since:
+            return _issue(dto, 'before_initialization_bound')
         if news is None:
             config = SourceConfig.objects.filter(source_id=source[0]).first()
             from api.services.source_policy import policy_for_name

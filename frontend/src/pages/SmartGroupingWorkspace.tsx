@@ -50,7 +50,7 @@ export default function SmartGroupingWorkspace() {
 
 function SmartPage({ viewer, admin }: { viewer: number; admin: boolean }) {
   const channels = useChannelConfig()
-  const catalog = useQuery(workspaceCatalogOptions())
+  const catalog = useQuery(workspaceCatalogOptions(viewer, 'history'))
   const config = useQuery(workspaceConfigOptions(viewer))
   if (config.isError || catalog.isError || channels.error) return <div role="alert" className="workspace-empty"><h1>整理配置未能加载</h1><p>不会使用不完整的订阅数据生成建议。</p><button type="button" className="workspace-button secondary" onClick={() => { void config.refetch(); void catalog.refetch(); void channels.retry() }}>重试</button></div>
   if (!config.data || !catalog.data || !channels.ready) return <p role="status" className="workspace-empty">正在加载订阅与主题资料…</p>
