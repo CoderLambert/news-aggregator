@@ -20,6 +20,7 @@ SERVICE_PRESETS = {
 ADAPTER_VERSION = 'chat-terminal-egress-v1'
 _IDENTIFIER = re.compile(r'^[a-z][a-z0-9_]{0,47}$')
 _HOSTNAME = re.compile(r'^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$')
+_MODEL_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,159}$')
 _FIELDS = frozenset((
     'profile_id', 'version', 'provider_id', 'display_name', 'protocol_family',
     'api_base', 'network_zone', 'allowed_ips', 'auth_modes', 'allowed_user_ids', 'enabled',
@@ -29,6 +30,12 @@ _FIELDS = frozenset((
 class EndpointManifestError(ValueError):
     def __init__(self):
         super().__init__('invalid_endpoint_manifest')
+
+
+def valid_upstream_model_id(value):
+    return bool(type(value) is str and _MODEL_ID.fullmatch(value)
+                and '://' not in value and '..' not in value and '//' not in value
+                and not value.lower().startswith(('sk-', 'ark-', 'aiza')))
 
 
 def _require(condition):

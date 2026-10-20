@@ -8,7 +8,7 @@ import re
 
 from api.services.ai_gateway import ARTICLE_CHAT_SUPPORTED_ALIAS, PROVIDER_SPECS
 from api.services.ai_registry import profile_route_prefix
-from api.services.ai_endpoint_profiles import SERVICE_PRESETS
+from api.services.ai_endpoint_profiles import SERVICE_PRESETS, valid_upstream_model_id
 
 CATALOG_VERSION = '2026-10-20.2'
 _MODEL_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,159}$')
@@ -36,9 +36,7 @@ _PRESETS = {
 
 
 def normalize_model_id(provider_id, raw, *, connection=None):
-    if not isinstance(raw, str) or raw != raw.strip() or not _MODEL_RE.fullmatch(raw):
-        return None
-    if '://' in raw or '..' in raw or '//' in raw or raw.lower().startswith(('sk-', 'ark-', 'aiza')):
+    if not valid_upstream_model_id(raw):
         return None
     spec = PROVIDER_SPECS.get(provider_id)
     if spec is None and provider_id not in SERVICE_PRESETS:

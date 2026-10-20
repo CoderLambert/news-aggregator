@@ -263,6 +263,11 @@ jobs:
           "$t00_env/sdk/bin/python" -m unittest discover -s tools/byok_t00_probe -p 'test_*.py'
           "$t00_env/sdk/bin/python" -m unittest discover -s ops/shared-litellm-proxy/tests -p 'test_provider_key_guard.py'
           "$t00_env/sdk/bin/python" tools/byok_t00_probe/probe.py --proxy-python "$t00_env/proxy/bin/python" --report "$t00_env/report.json"
+          env -i PATH="$PATH" LANG=C.UTF-8 DO_NOT_TRACK=1 LITELLM_LOCAL_MODEL_COST_MAP=True \
+            PYTHONPATH="$GITHUB_WORKSPACE:$GITHUB_WORKSPACE/backend/api/services:$GITHUB_WORKSPACE/ops/shared-litellm-proxy" \
+            "$t00_env/proxy/bin/python" -m unittest discover -s ops/shared-litellm-proxy/tests -p 'test_trusted_*.py'
+          "$t00_env/sdk/bin/python" tools/byok_t00_probe/trusted_proxy.py \
+            --proxy-python "$t00_env/proxy/bin/python" --report "$t00_env/trusted-report.json"
           # Run the Django/API end-to-end proof only in this full, non-Draft
           # backend gate. The child receives no ambient provider credentials or DB configuration.
           # Bootstrap obeys production host validation; APIClient test hosts are

@@ -46,4 +46,15 @@ export LITELLM_SALT_KEY="$salt_key"
 export DATABASE_URL="postgresql://${POSTGRES_USER}:${postgres_password}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
 unset postgres_password master_key salt_key
 
+if [ -n "${AI_BYOK_ENDPOINT_MANIFEST:-}" ]; then
+  if [ "${1:-}" != --config ] || [ "${2:-}" != /app/proxy.yaml ]; then
+    printf '%s\n' 'trusted endpoints require the fixed production base config' >&2
+    exit 64
+  fi
+  python /app/configure_trusted_endpoints.py \
+    --manifest "$AI_BYOK_ENDPOINT_MANIFEST" --base /app/proxy.yaml --output /tmp/newshub-proxy.yaml
+  shift 2
+  set -- --config /tmp/newshub-proxy.yaml "$@"
+fi
+
 exec litellm "$@"

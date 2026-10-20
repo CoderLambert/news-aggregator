@@ -13,6 +13,8 @@
 
 ## 部署边界
 
+新增管理员 manifest 路由使用下面的独立严格合同；上面的 DeepSeek parser 合同仍只用于旧静态 alias。默认 `trusted-endpoints/manifest.json` 为 `[]`，不会发布无 Key 或内网服务。当前交付是代码与本地合成验证，尚未部署。
+
 - Postgres 只在 Compose 的内部 `gateway` 网络内可达，没有宿主机端口映射。调用方容器只能加入 `byok-gateway-backend`，不加入 Proxy 的 `provider_egress` 网络。
 - Proxy 的主机端口默认绑定 `127.0.0.1:4000`。同机反向代理可在本机终止 TLS；跨主机访问必须使用 TLS、上游鉴权和网络访问控制，不能把明文 Proxy 端口公开到公网。
 - NewsHub、知序、TranslateFlow 等消费者分别持有不同 virtual key，并只允许对应项目的模型 alias。`LITELLM_MASTER_KEY` 只挂载给 Proxy 运维容器，不传给业务容器。
@@ -87,6 +89,25 @@ master key 仅用于 Proxy 管理 API，轮换它不会替换项目 virtual key�
 按 BYOK 原方案第 3 节，新增连接可明确选择 `glm_cn`、`glm_zai`、`qwen_beijing`、`qwen_singapore`、`kimi_international`。它们分别绑定 `zai/cn/*`、`zai/international/*`、`dashscope/beijing/*`、`dashscope/singapore/*`、`moonshot/international/*`。`proxy.yaml` 将这些别名交给 LiteLLM 既有 provider，并固定原方案的通用 API 端点；没有新增协议适配器、Coding/Token Plan 或任意 URL。
 
 旧 `*_default` 身份/版本与原路由保留，不将已有 Key 静默切到新端点。变更地域须新建连接并重新提交 Key；应用层仍要求原模型白名单和本人/版本绑定的能力证明。该配置交付不代表模型能力或真实地域兼容已验收。部署时应核对 Proxy 配置与业务版本一致，并单独验证项目 key 的地域 alias 准入；本批未部署或修改任何真实 key。
+
+## 管理员发布兼容端点
+
+Web/Worker 的 `AI_BYOK_ENDPOINT_MANIFEST` 和 Proxy 必须读取同一份已验证内容。每条 profile 固定 `/v1` 目的地、协议 `chat_completions_v1`、精确允许 IP、认证模式和用户范围；普通用户不提供地址或 headers。私网、回环或 `none` 认证必须指定用户。容器中的 `same_host` 指 Proxy 自己所在的网络命名空间，不是用户浏览器所在机器。
+
+受控发布前可离线生成配置（以下不启动服务，也不调用供应商）：
+
+```sh
+PYTHONPATH=../../backend/api/services python configure_trusted_endpoints.py \
+  --manifest trusted-endpoints/manifest.json --base proxy.yaml --output /tmp/newshub-proxy-review.yaml
+```
+
+生成器验证整个 manifest，并以 0600 权限原子写出。入口脚本执行同一生成器；新路由形如 `newshub/<profile>-v<version>-<policy_digest>/*`，项目 virtual key 必须明确授权这些 alias。只有可信业务后端可持有项目 key，并写入 `metadata.newshub_owner_id/newshub_auth_mode`；它们不是面向浏览器的身份输入。带 Key 的请求仍显式携带本人 Key，`none` 必须显式传 null；不会继承环境 Key 或使用占位 Key。
+
+新增或更改端点需提升 profile version、同步两端配置、受控重建 Proxy 并重新验证连接/模型；保存连接不触发注册。已有 alias 每次 admission、实际连接前和完成前重新读取当前 manifest。紧急撤销可原子替换目录内 manifest，将 profile 设为 disabled：Compose 挂载整个专用目录，避免单文件 bind mount 固定旧 inode。撤销阻止后续 dispatch/完成，不承诺收回已经发出的 token 或账单；重新启用必须发布更高 version，不能恢复旧身份。目录、文件和所有历史版本由管理员保护，不得混放 secrets。
+
+新路由通过 LiteLLM 原生 CustomLLM 扩展复用其成熟 raw Chat adapter，不改变旧 provider parser 或全局实验开关。实际传输关闭环境代理、重定向、重试和 fallback；DNS 全部答案必须属于允许 IP，且只拨号第一个批准的字面 IP，保留原 Host、SNI 和 TLS 校验。请求只接受文本和 function tool 数据；媒体下载和内置联网工具在预处理前拒绝。响应不协商压缩，并拒绝非 identity Content-Encoding；正文/帧/整流分别有界。非流式校验原始 JSON，文本流要求原始 stop、精确 `[DONE]` 与干净 HTTP 正文结束才释放终态。工具仅允许非流式独立证明，不能将 tool_calls 当作最终文本完成。
+
+连接层依赖精确版本 `httpx 0.28.1/httpcore 1.0.9`，漂移时关闭该路由。合成 TLS、取消和进程探针见[统一接入报告](../../docs/superpowers/reports/2026-10-21-newshub-unified-ai-access-v1.md)；本地 Python 进程证据不等于生产镜像、真实供应商或部署验收。
 
 ## 健康检查、备份、恢复和升级
 
