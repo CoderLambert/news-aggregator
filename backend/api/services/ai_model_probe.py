@@ -11,7 +11,9 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
-from api.services.ai_gateway import AIGatewayError, ARTICLE_CHAT_SUPPORTED_ALIAS, _gateway_configuration
+from api.services.ai_gateway import (
+    AIGatewayError, ARTICLE_CHAT_SUPPORTED_ALIAS, _gateway_configuration, trusted_request_metadata,
+)
 from api.services.ai_responses_protocol import (
     uses_responses_protocol, ResponsesProtocolError, responses_completion, responses_payload,
 )
@@ -100,14 +102,18 @@ def parse_completion(status_code, headers, raw, probe_kind):
         data = _json_parse(raw)
     except (ValueError, UnicodeDecodeError, TypeError):
         return ProbeOutcome('unknown', 'invalid_response', request_id)
-    if not isinstance(data, dict) or not isinstance(data.get('choices'), list) or len(data['choices']) != 1:
+    if (not isinstance(data, dict) or data.get('error') is not None
+            or not isinstance(data.get('choices'), list) or len(data['choices']) != 1):
         return ProbeOutcome('unknown', 'invalid_response', request_id)
     choice = data['choices'][0]
     if not isinstance(choice, dict) or not isinstance(choice.get('message'), dict):
         return ProbeOutcome('unknown', 'invalid_response', request_id)
     finish, message = choice.get('finish_reason'), choice['message']
+    if message.get('refusal'):
+        return ProbeOutcome('unknown', 'incomplete_or_invalid', request_id)
     if probe_kind == 'text':
-        if finish != 'stop' or not isinstance(message.get('content'), str) or not message['content'].strip():
+        if (finish != 'stop' or message.get('tool_calls') or message.get('function_call')
+                or not isinstance(message.get('content'), str) or not message['content'].strip()):
             return ProbeOutcome('unknown', 'incomplete_or_invalid', request_id)
         status = 'succeeded'
     elif probe_kind == 'tools':
@@ -154,17 +160,28 @@ def _payload(model_alias, probe_kind, provider_key):
     }
 
 
-def send_model_probe(*, provider_key: str, model_alias: str, probe_kind: str) -> ProbeOutcome:
+def send_model_probe(*, provider_key: str | None, model_alias: str, probe_kind: str,
+                     connection_snapshot=None) -> ProbeOutcome:
     """One explicit paid-capable request; no retries, fallback or outside URLs."""
-    if probe_kind not in ('text', 'tools') or not provider_key or not isinstance(provider_key, str):
+    if probe_kind not in ('text', 'tools'):
         return ProbeOutcome('not_sent', 'invalid_probe')
-    if not isinstance(model_alias, str) or not model_alias or len(model_alias) > 240:
+    if not isinstance(model_alias, str) or not model_alias or len(model_alias) > 256:
         return ProbeOutcome('not_sent', 'invalid_route')
+    metadata = {}
+    if model_alias.startswith('newshub/'):
+        try:
+            metadata = trusted_request_metadata(connection_snapshot, model_alias, provider_key)
+        except AIGatewayError:
+            return ProbeOutcome('not_sent', 'authorization_changed')
+    elif type(provider_key) is not str or not provider_key:
+        return ProbeOutcome('not_sent', 'invalid_probe')
     try:
         gateway, project_key = _gateway_configuration()  # enforces local loopback
     except AIGatewayError:
         return ProbeOutcome('not_sent', 'gateway_unavailable')
     payload = _payload(model_alias, probe_kind, provider_key)
+    if metadata:
+        payload['metadata'] = metadata
     native_responses = uses_responses_protocol(model_alias)
     native_messages = uses_messages_protocol(model_alias)
     endpoint = 'chat/completions'

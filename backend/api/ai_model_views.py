@@ -24,7 +24,7 @@ from api.services.ai_model_registry import (
     supports_article_chat,
 )
 from api.services.ai_model_probe import ProbeOutcome, send_model_probe
-from api.services.ai_model_capabilities import current_capabilities as _effective_capabilities
+from api.services.ai_model_capabilities import current_capabilities as _effective_capabilities, route_binding
 
 
 MODEL_LIMIT = 30
@@ -78,6 +78,7 @@ def _model(user, connection_id, model_id):
 
 def model_payload(model):
     capabilities = _effective_capabilities(model)
+    route = get_trusted_route(model.connection, model.model_id)
     return {
         'id': str(model.pk), 'connection_id': str(model.connection_id),
         'model_id': model.model_id, 'display_name': model.display_name,
@@ -85,6 +86,9 @@ def model_payload(model):
         'config_revision': model.config_revision, 'capabilities': capabilities,
         'has_trusted_route': get_trusted_route(model.connection, model.model_id) is not None,
         'article_chat_supported': supports_article_chat(model.connection, model.model_id),
+        'delivery_mode': route['delivery_mode'] if route else 'unavailable',
+        'stream_verified': route['stream_verified'] if route else False,
+        'protocol_family': route['protocol_family'] if route else None,
         'context_window_tokens': None,  # unknown until separately evidenced
         'updated_at': model.updated_at.isoformat(),
     }
@@ -268,7 +272,8 @@ class AIModelProbeView(ConnectionView):
                 {'schema_version': SNAPSHOT_SCHEMA_VERSION, **asdict(snapshot)},
                 task_owner_id=request.user.pk,
                 send=lambda key: send_model_probe(
-                    provider_key=key, model_alias=preset['proxy_alias'], probe_kind=kind),
+                    provider_key=key, model_alias=preset['proxy_alias'], probe_kind=kind,
+                    **({'connection_snapshot': snapshot} if snapshot.endpoint_policy_digest else {})),
             )
         except CredentialUnavailable:
             outcome = ProbeOutcome('not_sent', 'authorization_changed')
@@ -320,6 +325,7 @@ class AIModelProbeView(ConnectionView):
                     'credential_version': snapshot.credential_version,
                     'endpoint_profile': snapshot.endpoint_profile,
                     'endpoint_profile_version': snapshot.endpoint_profile_version,
+                    'route_binding': route_binding(current.connection, current.model_id),
                 }
                 current.capability_results = receipts
                 current.save(update_fields=['capability_results', 'updated_at'])

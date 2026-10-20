@@ -12,6 +12,7 @@ def handler_type(provider_keys):
 
     class Handler(BaseHTTPRequestHandler):
         cancel_closed = threading.Event()
+        stream_override = None
         def log_message(self, *args):
             pass
 
@@ -23,7 +24,7 @@ def handler_type(provider_keys):
             model = body.get('model')
             with lock:
                 records.append({'model': model, 'stream': body.get('stream') is True, 'auth_label': label,
-                                'path': self.path})
+                                'path': self.path, 'json_object_mode': body.get('response_format') == {'type': 'json_object'}})
             if model == 'nh-redirect':
                 self.send_response(307)
                 self.send_header('Location', '/redirect-target')
@@ -59,18 +60,19 @@ def handler_type(provider_keys):
                       'created': 1, 'choices': [choice],
                       'usage': {'prompt_tokens': 2, 'completion_tokens': 2, 'total_tokens': 4}}
             if body.get('stream'):
+                mode = type(self).stream_override or model
                 def chunk(delta, reason=None):
                     return ('data: ' + json.dumps({'id': result['id'], 'object': 'chat.completion.chunk',
                             'model': model, 'created': 1, 'choices': [{'index': 0, 'delta': delta,
                             'finish_reason': reason}]}) + '\n\n').encode()
                 wire = chunk({'role': 'assistant', 'content': 'synthetic delta'})
-                if model != 'nh-no-stop':
-                    wire += chunk({}, 'length' if model == 'nh-length' else 'stop')
-                if model == 'nh-error':
+                if mode != 'nh-no-stop':
+                    wire += chunk({}, 'length' if mode == 'nh-length' else 'stop')
+                if mode == 'nh-error':
                     wire += b'data: {"error":{"message":"synthetic"}}\n\n'
-                if model != 'nh-eof':
+                if mode != 'nh-eof':
                     wire += b'data: [DONE]\n\n'
-                if model == 'nh-double-done':
+                if mode == 'nh-double-done':
                     wire += b'data: [DONE]\n\n'
                 content_type = 'text/event-stream'
             else:
@@ -80,7 +82,7 @@ def handler_type(provider_keys):
                     choice.pop('finish_reason')
                 if model == 'nh-length':
                     choice['finish_reason'] = 'length'
-                if model == 'nh-tools':
+                if model == 'nh-tools' or body.get('tools') and body['tools'][0].get('function', {}).get('name') == 'byok_probe':
                     choice.update(finish_reason='tool_calls', message={'role': 'assistant', 'content': None,
                                   'tool_calls': [{'id': 'call-synthetic', 'type': 'function',
                                                  'function': {'name': 'byok_probe', 'arguments': '{"ok":true}'}}]})

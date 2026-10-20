@@ -227,6 +227,15 @@ class OneShotWireTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([request['auth'] for request in self.requests], [None, 'Bearer synthetic-owner-key'])
         self.assertEqual([request['body']['model'] for request in self.requests], ['org/model:tag', 'org/model:tag'])
 
+    async def test_openrouter_disables_upstream_fallback_without_changing_opaque_model(self):
+        self.profile['provider_id'] = 'openrouter'
+        client, response = await self.invoke(model='org/model:tag', provider={'allow_fallbacks': True, 'order': ['unapproved']})
+        self.assertTrue(client.terminal_verified and client.client.is_closed)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(self.requests), 1)
+        self.assertEqual(self.requests[0]['body']['model'], 'org/model:tag')
+        self.assertEqual(self.requests[0]['body']['provider'], {'allow_fallbacks': False})
+
     async def test_redirect_and_truncated_body_each_send_exactly_once(self):
         from trusted_transport import OneShotClient
         for model in ('redirect', 'truncated'):

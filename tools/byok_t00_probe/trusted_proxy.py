@@ -104,6 +104,10 @@ def run(python):
             check('one_shot_function_tool_terminal', result['success'] and result['reasons'] == ['tool_calls'],
                   result=result)
             before = len(records)
+            result = call('org/model:cloud', response_format={'type': 'json_object'})
+            check('bounded_json_object_format', result['success'] and len(records) - before == 1
+                  and records[-1]['json_object_mode'], result=result, upstream_count=len(records) - before)
+            before = len(records)
             with ThreadPoolExecutor(max_workers=2) as pool:
                 a = pool.submit(call, 'shared/model:tag', key=keys['owner-a'], owner=7)
                 b = pool.submit(call, 'shared/model:tag', key=keys['owner-b'], owner=8, client=clients[1])

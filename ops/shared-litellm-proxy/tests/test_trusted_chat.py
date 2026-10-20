@@ -100,6 +100,14 @@ class TrustedCustomProviderTests(unittest.IsolatedAsyncioTestCase):
 
 
 class TrustedRequestShapeTests(unittest.TestCase):
+    def test_json_object_output_is_data_only_and_other_formats_remain_denied(self):
+        from trusted_chat import validate_chat_input
+        from trusted_transport import EgressDenied
+        messages = [{'role': 'user', 'content': 'synthetic'}]
+        validate_chat_input(messages, {'response_format': {'type': 'json_object'}}, stream=False)
+        with self.assertRaises(EgressDenied):
+            validate_chat_input(messages, {'response_format': {'type': 'json_schema', 'url': 'https://unapproved.invalid'}}, stream=False)
+
     def test_only_text_and_function_tool_history_reach_adapter(self):
         from trusted_chat import validate_chat_input
         from trusted_transport import EgressDenied

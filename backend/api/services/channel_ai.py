@@ -161,7 +161,7 @@ def execute_job(job):
         def send(key):
             nonlocal gateway
             _run_guard(job)
-            gateway = build_gateway_client(key)
+            gateway = build_gateway_client(key, selection=model)
             messages = [{'role': 'system', 'content': SYSTEM_PROMPT}, {'role': 'user', 'content': json.dumps({
                 'version': PROMPT_VERSION, 'allowed_topics': [t for t in TOPICS if t['key'] in job.topic_keys],
                 'channels': job.evidence}, ensure_ascii=False)}]
@@ -171,7 +171,8 @@ def execute_job(job):
         response = dispatch_once(connection_fence(model), task_owner_id=job.user_id, send=send)
         _run_guard(job)
         if (len(response.choices) != 1 or response.choices[0].finish_reason != 'stop'
-                or getattr(response.choices[0].message, 'tool_calls', None)):
+                or getattr(response.choices[0].message, 'tool_calls', None)
+                or getattr(response.choices[0].message, 'refusal', None)):
             raise ValueError('incomplete_output')
         result = parse_classification(response.choices[0].message.content, job.evidence, job.topic_keys)
     except Exception as exc:

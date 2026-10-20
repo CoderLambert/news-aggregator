@@ -285,7 +285,7 @@ jobs:
             T00_PROXY_PYTHON="$t00_env/proxy/bin/python" PYTHONDONTWRITEBYTECODE=1 \
             backend/venv/bin/python -m pytest -c backend/pytest.ini \
             -o 'python_files=t04_*.py' -q \
-            tools/byok_t00_probe/t04_django_localproxy.py
+            tools/byok_t00_probe/t04_django_localproxy.py tools/byok_t00_probe/t04_unified_localproxy.py
       - name: Validate release shell syntax and mocked script behavior
         run: |
           bash -n scripts/deploy/smoke.sh scripts/deploy/deploy.sh scripts/deploy/rollback.sh scripts/deploy/backup.sh scripts/deploy/restore.sh scripts/deploy/tests/test_release_scripts.sh

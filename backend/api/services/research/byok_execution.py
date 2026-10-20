@@ -328,7 +328,7 @@ def _validated_completion(response):
     choice = choices[0]
     message = _get(choice, "message")
     finish_reason = _get(choice, "finish_reason")
-    if message is None:
+    if message is None or _get(message, 'refusal'):
         raise ResearchBYOKError("invalid_response")
     raw_calls = _get(message, "tool_calls") or []
     content = _get(message, "content")
@@ -373,7 +373,7 @@ def _send_once(provider_key, model, *, messages, tools, payload, owner_id, execu
     verify_snapshot(payload, owner_id=owner_id)
     gateway = None
     try:
-        gateway = build_gateway_client(provider_key)
+        gateway = build_gateway_client(provider_key, selection=model)
         from api.services.ai_usage import complete_with_usage
         response = complete_with_usage(gateway, model, 'deep_research',
             model=model.proxy_alias, messages=messages, tools=tools,

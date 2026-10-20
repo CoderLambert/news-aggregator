@@ -111,7 +111,7 @@ def generate(user, stored, *, model_config_id, consent):
     def send(key):
         nonlocal gateway
         check()
-        gateway = build_gateway_client(key)
+        gateway = build_gateway_client(key, selection=selection)
         from api.services.ai_usage import complete_with_usage
         return complete_with_usage(gateway, selection, 'question_suggestions',
             model=selection.proxy_alias, max_tokens=512, temperature=0.6,
@@ -128,7 +128,8 @@ def generate(user, stored, *, model_config_id, consent):
             response = dispatch_once(fence, task_owner_id=user.pk, send=send)
         # Do not treat a truncated or tool-requesting answer as complete JSON.
         if (len(response.choices) != 1 or response.choices[0].finish_reason != 'stop'
-                or getattr(response.choices[0].message, 'tool_calls', None)):
+                or getattr(response.choices[0].message, 'tool_calls', None)
+                or getattr(response.choices[0].message, 'refusal', None)):
             raise SuggestionsError('suggestion_invalid_response', 502)
         questions = parse_questions(response.choices[0].message.content)
 

@@ -25,7 +25,7 @@ _EXECUTION_FIELD = '_newshub_execution_id'
 _FUNCTION_NAME = re.compile(r'[A-Za-z0-9_-]{1,64}\Z')
 _CHAT_OPTIONS = frozenset({'stream', 'max_tokens', 'max_completion_tokens', 'temperature', 'top_p',
                            'presence_penalty', 'frequency_penalty', 'seed', 'stop', 'n', 'tools',
-                           'tool_choice', 'parallel_tool_calls', 'stream_options'})
+                           'tool_choice', 'parallel_tool_calls', 'stream_options', 'response_format'})
 
 
 def _function(value, *, definition):
@@ -102,6 +102,8 @@ def validate_chat_input(messages, options, *, stream):
             raise EgressDenied()
         elif name == 'stream_options' and (not stream or type(value) is not dict
                 or set(value) != {'include_usage'} or type(value['include_usage']) is not bool):
+            raise EgressDenied()
+        elif name == 'response_format' and value != {'type': 'json_object'}:
             raise EgressDenied()
         elif name == 'tools':
             if stream or type(value) is not list or not 1 <= len(value) <= 32:

@@ -19,11 +19,17 @@ def _tokens(value):
 class _Receipt:
     def __init__(self, selection, task_kind):
         self.started = time.monotonic()
+        from api.services.ai_model_registry import get_trusted_route
+        route = get_trusted_route(selection.connection, selection.model_id)
+        metadata = ({key: route[key] for key in ('protocol_family', 'delivery_mode', 'adapter_version')}
+                    if route else {})
+        metadata.update(auth_mode=selection.connection.auth_mode, terminal_verified=False)
         # This insert is before the send. If it fails no model request is made.
         self.row = AICallAttempt.objects.create(
             user_id=selection.user_id, task_kind=task_kind,
             model_config_id=selection.model_config_id, model_id=selection.model_id,
             provider_id=selection.connection.provider_id,
+            route_metadata=metadata,
         )
         self.finished = False
 
@@ -37,6 +43,7 @@ class _Receipt:
                 latency_ms=min(int((time.monotonic() - self.started) * 1000), 2_147_483_647),
                 input_tokens=_tokens(_get(usage, 'prompt_tokens')) if status == 'succeeded' else None,
                 output_tokens=_tokens(_get(usage, 'completion_tokens')) if status == 'succeeded' else None,
+                route_metadata={**self.row.route_metadata, 'terminal_verified': status == 'succeeded'},
             )
         except Exception as exc:
             # Leave an unfinished receipt visibly unknown, never lose/retry a
@@ -97,6 +104,7 @@ def complete_with_usage(client, selection, task_kind, **kwargs):
     if kwargs.get('stream') is True:
         return _ObservedStream(result, receipt)
     choices = _get(result, 'choices') or []
-    valid = len(choices) == 1 and _get(choices[0], 'finish_reason') in ('stop', 'tool_calls')
+    valid = (len(choices) == 1 and _get(choices[0], 'finish_reason') in ('stop', 'tool_calls')
+             and not _get(_get(choices[0], 'message'), 'refusal'))
     receipt.finish('succeeded' if valid else 'unknown', _get(result, 'usage'))
     return result

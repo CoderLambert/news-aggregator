@@ -1,8 +1,8 @@
 """Neutral trusted LiteLLM Proxy transport for explicit BYOK consumers.
 
 No legacy user credential lookup, provider fallback, or implicit model selection.
-The only enabled Chat streaming route is the separately guarded DeepSeek T04
-alias; every other alias remains fail-closed.
+Approved manifest Chat routes and the existing DeepSeek route stream only with
+their Proxy proof. Native one-shot protocols use explicit buffered delivery.
 """
 import ipaddress
 import re
@@ -21,6 +21,69 @@ from api.services.ai_messages_protocol import (
 
 class AIGatewayError(RuntimeError):
     pass
+
+
+class _BufferedText:
+    """Deliver a complete verified one-shot response through the text consumer API."""
+    def __init__(self, response):
+        choices = getattr(response, 'choices', None)
+        if not isinstance(choices, (list, tuple)) or len(choices) != 1:
+            raise AIGatewayError('个人模型返回了不完整或无法验证的响应。')
+        choice = choices[0]
+        message = getattr(choice, 'message', None)
+        content = getattr(message, 'content', None)
+        if (getattr(choice, 'finish_reason', None) != 'stop' or type(content) is not str or not content.strip()
+                or len(content) > 262144 or any(getattr(message, name, None)
+                    for name in ('tool_calls', 'function_call', 'refusal'))):
+            raise AIGatewayError('个人模型返回了不完整或无法验证的响应。')
+        self.content, self.usage = content, getattr(response, 'usage', None)
+        self.closed = False
+
+    def __iter__(self):
+        if self.closed:
+            return
+        yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=self.content), finish_reason=None)])
+        if not self.closed:
+            yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None), finish_reason='stop')],
+                                  usage=self.usage)
+
+    def close(self):
+        self.closed = True
+
+
+def trusted_request_metadata(connection_snapshot, model_alias, provider_key):
+    """Build trusted-issuer metadata only after the shared current credential fence."""
+    from api.services.ai_credentials import ConnectionSnapshot, require_active_snapshot, read_execution_credential
+    from api.services.ai_model_registry import get_trusted_route
+    from api.services.ai_registry import profile_route_prefix
+    import hmac
+    if type(connection_snapshot) is not ConnectionSnapshot or type(model_alias) is not str:
+        raise AIGatewayError('个人模型身份不可用。')
+    try:
+        connection = require_active_snapshot(connection_snapshot)
+        expected = read_execution_credential(connection_snapshot)
+        if not ((expected is None and provider_key is None) or type(expected) is str
+                and type(provider_key) is str and hmac.compare_digest(expected.encode(), provider_key.encode())):
+            raise ValueError
+        prefix = profile_route_prefix(connection)
+        if not prefix or not model_alias.startswith(prefix + '/'):
+            raise ValueError
+        route = get_trusted_route(connection, model_alias[len(prefix) + 1:])
+        if route is None or route['proxy_alias'] != model_alias:
+            raise ValueError
+    except Exception:
+        raise AIGatewayError('个人模型身份不可用。') from None
+    return ({'newshub_owner_id': connection_snapshot.user_id, 'newshub_auth_mode': connection_snapshot.auth_mode}
+            if model_alias.startswith('newshub/') else {})
+
+
+def text_generation_options(selection, maximum):
+    """Keep provider-specific thinking settings on their verified legacy route."""
+    options = {'max_tokens': min(maximum, 8000) if uses_responses_protocol(selection.proxy_alias)
+               or uses_messages_protocol(selection.proxy_alias) else maximum}
+    if selection.proxy_alias == ARTICLE_CHAT_SUPPORTED_ALIAS:
+        options['reasoning_effort'] = 'none'
+    return options
 
 
 PROVIDER_SPECS = {
@@ -87,18 +150,39 @@ ARTICLE_CHAT_SUPPORTED_ALIAS = 'deepseek/deepseek-flash'
 
 
 class _GatewayCompletions:
-    def __init__(self, completions, provider_key: str, responses=None, messages_getter=None):
+    def __init__(self, completions, provider_key: str | None, responses=None, messages_getter=None, selection=None):
         self._completions = completions
         self._provider_key = provider_key
         self._responses = responses
         self._messages_getter = messages_getter
+        self._selection = selection
+        self._route = None
+        if selection is not None:
+            from api.services.ai_model_registry import get_trusted_route
+            self._route = get_trusted_route(selection.connection, selection.model_id)
 
     def create(self, **kwargs):
+        metadata = {}
         if kwargs.pop('extra_body', None) not in (None, {}):
             raise AIGatewayError('个人模型请求包含不受支持的额外参数。')
+        if 'metadata' in kwargs:
+            raise AIGatewayError('个人模型请求包含不受支持的额外参数。')
+        if self._selection is not None:
+            from api.services.ai_task_preferences import require_task_model_snapshot
+            require_task_model_snapshot(self._selection, owner_id=self._selection.user_id)
+            if not self._route or kwargs.get('model') != self._selection.proxy_alias:
+                raise AIGatewayError('个人模型路由不可用。')
+            metadata = trusted_request_metadata(self._selection.connection, kwargs['model'], self._provider_key)
+        elif str(kwargs.get('model', '')).startswith('newshub/'):
+            raise AIGatewayError('个人模型身份不可用。')
         requested_stream = kwargs.get('stream') is True
+        if requested_stream and self._route and self._route['delivery_mode'] == 'buffered':
+            kwargs['stream'] = False
+            kwargs.pop('stream_options', None)
+            return _BufferedText(self.create(**kwargs))
         if requested_stream and kwargs.get('model') != ARTICLE_CHAT_SUPPORTED_ALIAS:
-            raise AIGatewayError('个人模型流式路由不可用。')
+            if not self._route or self._route['delivery_mode'] != 'streaming':
+                raise AIGatewayError('个人模型流式路由不可用。')
         native_options = {}
         if uses_messages_protocol(kwargs.get('model')) or uses_responses_protocol(kwargs.get('model')):
             timeout = kwargs.pop('timeout', None)
@@ -128,7 +212,7 @@ class _GatewayCompletions:
                 return completion_object(responses_completion(raw))
             except ResponsesProtocolError:
                 raise AIGatewayError('个人模型返回了不完整或无法验证的响应。') from None
-        kwargs['extra_body'] = {'api_key': self._provider_key}
+        kwargs['extra_body'] = {'api_key': self._provider_key, **({'metadata': metadata} if metadata else {})}
         # OpenAI's SDK starts the HTTP request here and returns a closeable
         # iterator. Do not buffer, defer, retry, or convert an uncertain stream.
         return self._completions.create(**kwargs)
@@ -139,7 +223,7 @@ class _GatewayClient:
 
     _newshub_max_attempts = 1
 
-    def __init__(self, client, http_client, provider_key: str, messages_factory=None):
+    def __init__(self, client, http_client, provider_key: str | None, messages_factory=None, selection=None):
         self._client = client
         self._http_client = http_client
         self._messages_factory = messages_factory
@@ -147,7 +231,7 @@ class _GatewayClient:
         self.chat = SimpleNamespace(
             completions=_GatewayCompletions(client.chat.completions, provider_key,
                                            responses=getattr(client, 'responses', None),
-                                           messages_getter=self._native_messages),
+                                           messages_getter=self._native_messages, selection=selection),
         )
 
     def _native_messages(self):
@@ -202,7 +286,7 @@ def _gateway_configuration() -> tuple[str, str]:
 
 
 
-def build_gateway_client(provider_key: str):
+def build_gateway_client(provider_key: str | None, *, selection=None):
     """Create only a request-scoped client from an explicitly authorized key.
 
     The T01 management service does not call this function. T02+ must validate
@@ -210,6 +294,12 @@ def build_gateway_client(provider_key: str):
     """
     from openai import OpenAI
     import httpx
+    if selection is not None:
+        from api.services.ai_task_preferences import require_task_model_snapshot
+        require_task_model_snapshot(selection, owner_id=selection.user_id)
+        trusted_request_metadata(selection.connection, selection.proxy_alias, provider_key)
+    elif type(provider_key) is not str or not provider_key:
+        raise AIGatewayError('个人模型身份不可用。')
     gateway_url, project_key = _gateway_configuration()
     http_client = httpx.Client(
         trust_env=False, follow_redirects=False,
@@ -242,4 +332,4 @@ def build_gateway_client(provider_key: str):
             native_http.close()
             raise
 
-    return _GatewayClient(client, http_client, provider_key, messages_factory=messages_factory)
+    return _GatewayClient(client, http_client, provider_key, messages_factory=messages_factory, selection=selection)

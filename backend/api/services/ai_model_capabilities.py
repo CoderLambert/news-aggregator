@@ -5,8 +5,19 @@ from api.ai_model_models import AIModelProbeAttempt
 CAPABILITY_KINDS = ('text', 'tools')
 
 
+def route_binding(connection, model_id):
+    route = get_trusted_route(connection, model_id)
+    if route is None:
+        return None
+    return {key: route[key] for key in ('proxy_alias', 'protocol_family', 'adapter_version')} | {
+        'auth_mode': getattr(connection, 'auth_mode', 'api_key'),
+        'endpoint_policy_digest': getattr(connection, 'endpoint_policy_digest', ''),
+    }
+
+
 def current_capabilities(model):
     connection = model.connection
+    binding = route_binding(connection, model.model_id)
     result = {}
     for kind in CAPABILITY_KINDS:
         receipt = model.capability_results.get(kind)
@@ -22,6 +33,8 @@ def current_capabilities(model):
             and receipt.get('endpoint_profile_version') == connection.endpoint_profile_version
             and connection.is_enabled and not connection.is_deleted
             and get_trusted_route(connection, model.model_id) is not None
+            and (receipt.get('route_binding') == binding if connection.endpoint_policy_digest
+                 or 'route_binding' in receipt else True)
         )
         value = receipt.get('status') if valid else 'unknown'
         result[kind] = value if value in ('supported', 'unsupported') else 'unknown'
