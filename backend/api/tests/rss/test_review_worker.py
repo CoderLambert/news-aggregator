@@ -49,6 +49,7 @@ def test_revoked_regranted_authority_cannot_commit_old_response(admin):
     worker=ControlWorker(EngineConfig(INSTANCE,3,'http://127.0.0.1:1','synthetic'),adapter_factory=Engine)
     try:
         request=worker.prepare(worker.claim_next())
+        assert request.claim.operation_id == op.pk
         change_reviewer(user,reviewer.username,False,1,'revoke')
         change_reviewer(user,reviewer.username,True,2,'regrant')
         with pytest.raises(OperationError): worker._dispatch(request)
@@ -104,3 +105,31 @@ def test_initial_fill_skips_known_old_history_and_rotates_candidates(admin):
     recent=News.objects.create(source=private,category=candidate.category,title='Recent',content='Recent',url='https://example.com/recent',publish_time=timezone.now())
     EngineEntryMap.objects.create(binding=candidate.binding,engine_entry_id=99,news=recent,source_url=recent.url,disposition='linked')
     assert prepare_public_member()['entry_id']==99
+
+
+def test_system_convergence_rechecks_revoked_review_reference_before_dispatch(admin):
+    from api.rss.review_permissions import change_reviewer, review_authority
+    user,_=admin
+    candidate=register(user)
+    reviewer=get_user_model().objects.create_user('system-delegated')
+    change_reviewer(user,reviewer.username,True,None,'grant-system')
+    candidate.decision.actor=reviewer
+    candidate.decision.authority=asdict(review_authority(reviewer))
+    candidate.decision.save()
+    # Only the system convergence task remains; the independent approved
+    # candidate still holds a valid collection reference at preparation time.
+    FeedOperation.objects.filter(binding=candidate.binding,actor=user).update(state='cancelled')
+    worker=ControlWorker(EngineConfig(INSTANCE,3,'http://127.0.0.1:1','synthetic'),adapter_factory=Engine)
+    try:
+        request=worker.prepare(worker.claim_next())
+        operation=FeedOperation.objects.get(pk=request.claim.operation_id)
+        assert operation.actor_id is None and effective_references(candidate.binding_id)
+        change_reviewer(user,reviewer.username,False,1,'revoke-system')
+        change_reviewer(user,reviewer.username,True,2,'regrant-system')
+        assert not effective_references(candidate.binding_id)
+        with pytest.raises(OperationError):
+            worker._dispatch(request)
+        operation.refresh_from_db()
+        assert operation.execution_phase == 'not_sent' and operation.dispatched_at is None
+    finally:
+        worker.close()

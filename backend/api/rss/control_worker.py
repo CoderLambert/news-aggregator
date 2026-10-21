@@ -126,6 +126,17 @@ class ControlWorker:
             query = query.filter(recovering)
         elif recovery is False:
             query = query.exclude(recovering)
+        # Direct personal/review operations retain their own public status and
+        # authority fence. Do not let duplicate system convergence jump ahead;
+        # shared subscription roots and uncertain reconciliation stay eligible.
+        direct_controls = FeedOperation.objects.filter(binding_id=OuterRef('binding_id'),
+            actor__is_active=True, shared_operation__isnull=True, resolved_at__isnull=True,
+            kind__in=['register', 'set_enabled', 'update_feed_policy'],
+            state__in=['pending', 'retry_wait']).filter(due)
+        query = query.annotate(has_direct_control=Exists(direct_controls)).exclude(
+            Q(actor__isnull=True, state__in=['pending', 'retry_wait'],
+                kind__in=['register', 'set_enabled', 'update_feed_policy'], has_direct_control=True)
+            & (Q(safe_input__shared_subscription__isnull=True) | Q(safe_input__shared_subscription=False)))
         # Personal followers never occupy physical binding slots or fence roots.
         from api.rss.control_scheduler import fair_candidates, target_host
         from api.rss.subscription_work import active_waiters, active_intents
@@ -256,6 +267,8 @@ class ControlWorker:
         if request.binding_id:
             from api.rss.feed_policy import assert_binding_policy
             binding = FeedBinding.objects.get(pk=request.binding_id)
+            if effective_references(binding.pk) != binding.desired_enabled:
+                raise OperationError('stale_policy')
             if (binding.policy_version != request.policy.policy_version
                     or binding.desired_mode != request.policy.desired_mode
                     or binding.desired_enabled != request.policy.desired_enabled
