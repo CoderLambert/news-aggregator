@@ -23,6 +23,7 @@ RULE_PATHS = (
 )
 SKILL_NAMES = (
     'newshub-impact-analysis', 'newshub-verify', 'newshub-pr-handoff',
+    'newshub-stage-commit',
 )
 # Project budgets leave room for the user's own instructions. They are NOT
 # Codex's configured limits and don't measure actual token use.
