@@ -169,3 +169,26 @@ def test_fair_turn_survives_an_empty_recovery_lane_between_ticks(people, gated_w
     worker.tick()
     replacement = entered.get(timeout=3)
     assert worker._inflight[replacement][3] == owners[1].pk
+
+
+@pytest.mark.parametrize('recovery', [False, True])
+def test_cooling_site_cannot_fill_the_candidate_window_and_hide_other_sites(people, gated_workers, recovery):
+    from datetime import timedelta
+    from django.utils import timezone
+    queued_import(people[0], [f'https://cooling.example/feed{i}' for i in range(64)]
+        + ['https://cooling.example/backoff', 'https://available.example/feed'])
+    roots = FeedOperation.objects.filter(actor__isnull=True)
+    assert roots.count() == 66
+    if recovery:
+        roots.update(state='unknown', safe_result={'outcome_unknown': True})
+    roots.filter(binding__canonical_feed_url='https://cooling.example/backoff').update(
+        state='retry_wait', next_attempt=timezone.now() + timedelta(minutes=5),
+        safe_result={'code': 'rate_limited'})
+    worker, _, _ = gated_workers()
+    claim = worker.claim_next(recovery=recovery)
+    assert claim is not None
+    selected = FeedOperation.objects.select_related('binding').get(pk=claim.operation_id)
+    assert selected.binding.canonical_feed_url == 'https://available.example/feed'
+    assert claim.reconcile is recovery
+    assert roots.filter(binding__canonical_feed_url__startswith='https://cooling.example/',
+        state='running').count() == 0

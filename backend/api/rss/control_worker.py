@@ -132,9 +132,12 @@ class ControlWorker:
         query = query.annotate(has_waiters=Exists(active_intents(
             FeedOperation.objects.filter(shared_operation_id=OuterRef('pk'))))).filter(
                 Q(safe_input__shared_subscription__isnull=True) | Q(has_waiters=True) | recovering)
-        # Exclude busy targets before the fair candidate window, so an old slow
-        # host cannot hide unrelated later work from the same owner.
-        for host in blocked_hosts:
+        # Exclude unavailable hosts before the fair candidate window. A large
+        # same-site batch must not hide unrelated work behind its Retry-After.
+        cooling_hosts = {target_host(other) for other in FeedOperation.objects.filter(
+            scope, shared_operation__isnull=True, safe_result__code='rate_limited',
+            next_attempt__gt=now).select_related('binding')}
+        for host in set(blocked_hosts) | cooling_hosts:
             pattern = r'^https?://' + re.escape('[' + host + ']' if ':' in host else host) + r'(?::[0-9]+)?(?:/|$)'
             query = query.exclude(Q(binding__effective_feed_url__regex=pattern) |
                 Q(binding__effective_feed_url='', binding__canonical_feed_url__regex=pattern) |
