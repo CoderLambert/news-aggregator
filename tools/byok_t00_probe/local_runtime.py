@@ -67,10 +67,19 @@ def post_json(url: str, body: dict, key: str) -> dict:
 
 
 class LocalProxy:
-    def __init__(self, python: str, upstream_url: str):
+    def __init__(self, python: str, upstream_url: str, *, trusted_profiles=()):
         self.python = Path(python).absolute()
         self.prefix = self.python.parent.parent
         self.upstream_url = upstream_url
+        self.trusted_profiles = ()
+        if trusted_profiles:
+            import importlib.util
+            contract_path = ROOT / 'backend/api/services/ai_endpoint_profiles.py'
+            spec = importlib.util.spec_from_file_location('t00_endpoint_contract', contract_path)
+            contract = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(contract)
+            self.trusted_profiles = contract.validate_endpoint_profiles(list(trusted_profiles))
+        self.trusted_manifest = list(trusted_profiles)
         self.processes: list[subprocess.Popen] = []
         self.handles = []
         self.runtime: Path | None = None
@@ -179,7 +188,8 @@ class LocalProxy:
             "LITELLM_LOCAL_MODEL_COST_MAP": "True",
             "PRISMA_BINARY_CACHE_DIR": str(self.prefix / "t00-prisma/binaries"),
             "PRISMA_NODEENV_CACHE_DIR": str(self.prefix / "t00-prisma/nodeenv"),
-            "PYTHONPATH": str(ROOT / "ops/shared-litellm-proxy"),
+            "PYTHONPATH": os.pathsep.join((str(ROOT / "ops/shared-litellm-proxy"),
+                                          str(ROOT / 'backend/api/services'))),
             "BYOK_TERMINAL_STREAMING_MODELS": "deepseek/deepseek-flash",
             "BYOK_DENY_STREAMING_CALL_TYPES": "",
             # Safe stream-hook diagnostics are enabled only in this disposable,
@@ -231,8 +241,21 @@ class LocalProxy:
             },
         }
         config_path = self.runtime / "proxy.yaml"
-        config_path.write_text(json.dumps(config))
-        config_path.chmod(0o600)
+        if self.trusted_profiles:
+            manifest = self.runtime / 'trusted-endpoints.json'
+            manifest.write_text(json.dumps(self.trusted_manifest))
+            manifest.chmod(0o600)
+            env['AI_BYOK_ENDPOINT_MANIFEST'] = str(manifest)
+            env['LITELLM_WORKER_STARTUP_HOOKS'] = 'trusted_discovery:register'
+            base_config = self.runtime / 'proxy-base.json'
+            base_config.write_text(json.dumps(config))
+            base_config.chmod(0o600)
+            self._run([str(self.python), str(ROOT / 'ops/shared-litellm-proxy/configure_trusted_endpoints.py'),
+                       '--manifest', str(manifest), '--base', str(base_config), '--output', str(config_path)],
+                      env, stage='TRUSTED_ROUTES')
+        else:
+            config_path.write_text(json.dumps(config))
+            config_path.chmod(0o600)
         proxy = self._spawn(
             [str(self.python), str(HERE / "proxy_process.py"), "--config", str(config_path), "--port", self.url.rsplit(":", 1)[1]],
             env, "proxy.log",
@@ -253,7 +276,9 @@ class LocalProxy:
             "tenant-a": ["t00-chat", "t00-messages", "deepseek/deepseek-flash"],
             "tenant-b": ["t00-other-chat", "t00-other-messages"],
         }.items():
-            result = post_json(self.url + "/key/generate", {"models": models, "key_alias": "t00-" + tenant}, self.master)
+            models = models + [profile['route_prefix'] + '/*' for profile in self.trusted_profiles]
+            permissions = {'allowed_routes': ['llm_api_routes', '/newshub/models/discover']} if self.trusted_profiles else {}
+            result = post_json(self.url + "/key/generate", {"models": models, "key_alias": "t00-" + tenant, **permissions}, self.master)
             key = result.get("key")
             if not isinstance(key, str) or not key.startswith("sk-"):
                 raise RuntimeError("T00_PROJECT_KEY_CREATION_FAILED")

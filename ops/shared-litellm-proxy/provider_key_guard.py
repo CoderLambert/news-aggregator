@@ -26,6 +26,12 @@ TERMINAL_STREAM_ENV = "BYOK_TERMINAL_STREAMING_MODELS"
 DENY_STREAM_ENV = "BYOK_DENY_STREAMING_CALL_TYPES"
 _STREAM_FALSE_STRINGS = frozenset({"0", "false", "f", "no", "n", "off"})
 _URL_OVERRIDE_FIELDS = frozenset({"api_base", "base_url", "api_url", "url"})
+_ROUTING_OVERRIDE_FIELDS = _URL_OVERRIDE_FIELDS | frozenset({
+    "headers", "extra_headers", "default_headers", "custom_llm_provider",
+    "http_client", "client", "proxy", "proxies", "extra_body", "silent_model",
+    "azure_endpoint", "azure_ad_token", "organization", "deployment_id",
+    "api_version", "aws_access_key_id", "aws_secret_access_key", "aws_session_token",
+})
 _TERMINAL_ERROR = {"code": "T00_STREAM_TERMINAL_UNVERIFIED"}
 _COMPLETION_TERMINAL_ERROR = {"code": "BYOK_COMPLETION_TERMINAL_UNVERIFIED"}
 _ROUTER_RAW_SOURCE_ATTR = "_byok_raw_terminal_source"
@@ -159,6 +165,10 @@ def _terminal_stream_allowlisted(data: dict, call_type: str) -> bool:
 
 def _request_has_no_retry_or_fallback_override(data: dict) -> bool:
     """Reject request-level attempts to override the proxy's zero retry/fallback policy."""
+    # Pinned Router consumes model_group_retry_policy before sending upstream;
+    # an exception-specific value can override its configured num_retries=0.
+    if any(key in data for key in ('model_group_retry_policy', 'retry_policy', 'max_retries')):
+        return False
     if "num_retries" in data:
         retries = data["num_retries"]
         if retries is not None and (type(retries) is not int or retries != 0):
@@ -642,12 +652,30 @@ async def _aclose_stream(value):
 
 
 class ProviderKeyGuard(CustomLogger):
+    async def async_post_call_failure_hook(self, request_data, original_exception, user_api_key_dict,
+                                           traceback_str=None):
+        if str(request_data.get('model', '')).startswith('newshub/'):
+            from trusted_chat import finish_request
+            await finish_request(request_data)
+
     async def async_post_call_success_hook(self, data, user_api_key_dict, response):
         # Native Responses/Messages and streaming have their own terminal
         # contracts. A normalized Chat completion can invent a default stop;
         # verify the request-local original body retained by the pinned Proxy.
         if _stream_requested(data.get("stream")):
             return response
+        if str(data.get('model', '')).startswith('newshub/'):
+            from trusted_chat import execution_for, finish_request
+            state = execution_for(data)
+            valid = state is not None and state.client is not None and state.client.terminal_verified
+            try:
+                if not valid:
+                    raise ValueError
+                state.check_current()
+            except Exception:
+                raise HTTPException(status_code=502, detail=_COMPLETION_TERMINAL_ERROR) from None
+            finally:
+                await finish_request(data)
         try:
             from litellm import ModelResponse
         except Exception:
@@ -706,9 +734,31 @@ class ProviderKeyGuard(CustomLogger):
         if normalized_call_type not in BYOK_CALL_TYPES:
             return data
 
+        trusted_route = type(data.get('model')) is str and data['model'].startswith('newshub/')
         provider_key = data.get("api_key")
-        if not isinstance(provider_key, str) or not provider_key.strip():
+        if not trusted_route and (not isinstance(provider_key, str) or not provider_key.strip()):
             raise HTTPException(status_code=400, detail={"code": "BYOK_PROVIDER_KEY_REQUIRED"})
+
+        # This boundary applies to non-stream and native protocols too. A
+        # project key authorizes fixed server routes, never a second endpoint,
+        # authentication header, provider fallback or client transport.
+        if ((_ROUTING_OVERRIDE_FIELDS & data.keys())
+                or not _request_has_no_retry_or_fallback_override(data)):
+            legacy_chat_stream = (_stream_requested(data.get("stream"))
+                                  and normalized_call_type in ALWAYS_DENIED_STREAMING_CALL_TYPES)
+            code = "T00_CHAT_STREAMING_DISABLED" if legacy_chat_stream else "BYOK_REQUEST_OVERRIDE_REJECTED"
+            raise HTTPException(status_code=400, detail={"code": code})
+
+        if trusted_route:
+            from trusted_chat import admit_request
+            try:
+                if normalized_call_type != 'acompletion' or (
+                        _stream_requested(data.get('stream')) and normalized_call_type in _extra_denied_streaming_call_types()):
+                    raise ValueError
+                admit_request(data)
+            except Exception:
+                raise HTTPException(status_code=400, detail={'code': 'BYOK_TRUSTED_ROUTE_REJECTED'}) from None
+            return data
 
         if _stream_requested(data.get("stream")):
             extra_denies = _extra_denied_streaming_call_types()
@@ -735,6 +785,35 @@ class ProviderKeyGuard(CustomLogger):
         self, response, user_api_key_dict, request_data,
     ):
         model = request_data.get("model") if isinstance(request_data, dict) else None
+        if type(model) is str and model.startswith('newshub/'):
+            from trusted_chat import execution_for, finish_request
+            state = execution_for(request_data)
+            held = []
+            saw_terminal = False
+            try:
+                if state is None:
+                    raise HTTPException(status_code=502, detail=_TERMINAL_ERROR)
+                async for chunk in response:
+                    reason = _finish_reason(chunk)
+                    if reason is not None:
+                        if reason != 'stop' or saw_terminal:
+                            raise HTTPException(status_code=502, detail=_TERMINAL_ERROR)
+                        saw_terminal = True
+                    if saw_terminal:
+                        held.append(chunk)
+                    else:
+                        yield chunk
+                if not saw_terminal or state.client is None or not state.client.terminal_verified:
+                    raise HTTPException(status_code=502, detail=_TERMINAL_ERROR)
+                state.check_current()
+                for chunk in held:
+                    yield chunk
+            finally:
+                try:
+                    await _aclose_stream(response)
+                finally:
+                    await finish_request(request_data)
+            return
         if model != TERMINAL_STREAM_MODEL or not _stream_requested(
             request_data.get("stream") if isinstance(request_data, dict) else None,
         ):

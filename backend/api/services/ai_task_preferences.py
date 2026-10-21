@@ -12,8 +12,8 @@ from django.db import transaction
 from api.ai_model_models import UserAIModelConfig
 from api.ai_preference_models import TASK_KINDS, UserAITaskPreference
 from api.services.ai_credentials import (
-    ConnectionSnapshot, CredentialUnavailable, lock_owner,
-    require_active_snapshot, snapshot_connection,
+    ConnectionSnapshot, CredentialUnavailable, CredentialEncryptionUnavailable, lock_owner,
+    require_active_snapshot, snapshot_connection, execution_credential,
 )
 from api.services.ai_model_capabilities import verified_for_task
 from api.services.ai_model_registry import get_trusted_route, supports_task_route
@@ -47,11 +47,15 @@ def _selected_state(preference, kind, owner_id):
     info = {
         'id': str(model.pk), 'connection_id': str(model.connection_id),
         'model_id': model.model_id, 'display_name': model.display_name,
+        'research_eligible': verified_for_task(model, 'deep_research'),
     }
     connection = model.connection
     if (model.is_deleted or connection.is_deleted or not connection.is_enabled
-            or not connection.credential_ciphertext or not connection.encryption_key_id
             or not supports_task_route(connection, model.model_id, kind)):
+        return 'needs_reselection', info
+    try:
+        execution_credential(connection)
+    except (CredentialUnavailable, CredentialEncryptionUnavailable):
         return 'needs_reselection', info
     if not verified_for_task(model, kind):
         return 'needs_verification', info

@@ -42,10 +42,19 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-litellm}
       POSTGRES_USER: ${POSTGRES_USER:-litellm}
       BYOK_TERMINAL_STREAMING_MODELS: deepseek/deepseek-flash
+      AI_BYOK_ENDPOINT_MANIFEST: /app/trusted-endpoints/manifest.json
+      LITELLM_WORKER_STARTUP_HOOKS: trusted_discovery:register
     volumes:
       - ./proxy.yaml:/app/proxy.yaml:ro
       - ./entrypoint.sh:/app/entrypoint.sh:ro
       - ./provider_key_guard.py:/app/byok_gateway_policy.py:ro
+      - ./trusted_transport.py:/app/trusted_transport.py:ro
+      - ./trusted_chat.py:/app/trusted_chat.py:ro
+      - ./trusted_routes.py:/app/trusted_routes.py:ro
+      - ./trusted_discovery.py:/app/trusted_discovery.py:ro
+      - ./configure_trusted_endpoints.py:/app/configure_trusted_endpoints.py:ro
+      - ./trusted-endpoints:/app/trusted-endpoints:ro
+      - ../../backend/api/services/ai_endpoint_profiles.py:/app/ai_endpoint_profiles.py:ro
     secrets:
       - postgres_password
       - litellm_master_key

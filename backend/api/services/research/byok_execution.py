@@ -16,7 +16,7 @@ from django.conf import settings
 from django.db import transaction
 
 from api.services.ai_credentials import (
-    ConnectionSnapshot, CredentialUnavailable, lock_owner,
+    CredentialUnavailable, lock_owner, decode_connection_snapshot,
 )
 from api.services.ai_task_preferences import (
     ModelSelectionError, TaskModelSnapshot, require_task_model_snapshot,
@@ -37,13 +37,10 @@ MAX_TOOL_CALLS = 8
 _CALL_ID_RE = re.compile(r"^[\x21-\x7e]{1,128}$")
 _TOP_LEVEL_FIELDS = frozenset({"schema_version", "consent", "model"})
 _MODEL_FIELDS = frozenset(TaskModelSnapshot.__dataclass_fields__)
-_CONNECTION_FIELDS = frozenset({
-    "user_id", "connection_id", "credential_epoch", "credential_version",
-    "provider_id", "endpoint_profile", "endpoint_profile_version",
-})
 _SAFE_ERROR_MESSAGES = {
     "authorization_changed": "个人模型授权或配置已变化，研究任务已停止。",
     "model_unavailable": "所选个人研究模型当前不可用。",
+    "model_not_verified": "请先完成该模型的文本与工具能力验证，再发起研究。",
     "provider_unavailable": "个人模型暂时无法完成研究，请检查配置后重新发起。",
     "invalid_response": "个人模型返回了不完整或无法验证的响应。",
     "invalid_tool_call": "个人模型返回了无法验证的工具请求，未执行该批工具。",
@@ -103,7 +100,11 @@ def capture_snapshot(user, model_config_id: str) -> dict:
             return payload
     except ResearchBYOKError:
         raise
-    except (ModelSelectionError, CredentialUnavailable):
+    except ModelSelectionError as exc:
+        if exc.code == 'model_not_verified':
+            raise ResearchBYOKError('model_not_verified') from None
+        raise ResearchBYOKError("model_unavailable") from None
+    except CredentialUnavailable:
         raise ResearchBYOKError("model_unavailable") from None
 
 
@@ -119,8 +120,10 @@ def decode_snapshot(payload, *, owner_id: int) -> TaskModelSnapshot:
     if type(raw_model) is not dict or set(raw_model) != _MODEL_FIELDS:
         raise ResearchBYOKError("authorization_changed")
     raw_connection = raw_model.get("connection")
-    if type(raw_connection) is not dict or set(raw_connection) != _CONNECTION_FIELDS:
-        raise ResearchBYOKError("authorization_changed")
+    try:
+        connection_snapshot = decode_connection_snapshot(raw_connection)
+    except CredentialUnavailable:
+        raise ResearchBYOKError("authorization_changed") from None
     if (type(raw_model.get("user_id")) is not int
             or raw_model["user_id"] != owner_id
             or raw_model.get("task_kind") != "deep_research"
@@ -160,7 +163,7 @@ def decode_snapshot(payload, *, owner_id: int) -> TaskModelSnapshot:
         model_revision=raw_model["model_revision"],
         model_id=raw_model["model_id"],
         proxy_alias=raw_model["proxy_alias"],
-        connection=ConnectionSnapshot(**connection),
+        connection=connection_snapshot,
         text_attempt_id=raw_model["text_attempt_id"],
         tools_attempt_id=raw_model["tools_attempt_id"],
     )
@@ -330,12 +333,14 @@ def _validated_completion(response):
     choice = choices[0]
     message = _get(choice, "message")
     finish_reason = _get(choice, "finish_reason")
-    if message is None:
+    if message is None or _get(message, 'refusal'):
         raise ResearchBYOKError("invalid_response")
     raw_calls = _get(message, "tool_calls") or []
     content = _get(message, "content")
     if finish_reason == "tool_calls":
-        if content not in (None, "") or not raw_calls:
+        # Compatible providers may prefix a valid function call with text.
+        # The tool terminal is never a final report; visible_messages omits it.
+        if (content is not None and type(content) is not str) or not raw_calls:
             raise ResearchBYOKError("invalid_response")
     elif finish_reason == "stop":
         if raw_calls or type(content) is not str or not content.strip():
@@ -375,7 +380,7 @@ def _send_once(provider_key, model, *, messages, tools, payload, owner_id, execu
     verify_snapshot(payload, owner_id=owner_id)
     gateway = None
     try:
-        gateway = build_gateway_client(provider_key)
+        gateway = build_gateway_client(provider_key, selection=model)
         from api.services.ai_usage import complete_with_usage
         response = complete_with_usage(gateway, model, 'deep_research',
             model=model.proxy_alias, messages=messages, tools=tools,
@@ -426,6 +431,7 @@ def visible_messages(messages):
         {'role': item['role'], 'content': item['content']}
         for item in messages
         if item.get('role') in ('user', 'assistant')
+        and not (item.get('role') == 'assistant' and item.get('tool_calls'))
         and type(item.get('content')) is str and item['content']
     ]
 

@@ -16,24 +16,21 @@ from api.ai_connection_models import UserAIConnection
 from api.services.ai_credentials import (
     ConnectionSnapshot, CredentialUnavailable,
     lock_owner, locked_active_connection, read_execution_credential,
-    require_active_snapshot, snapshot_connection,
+    require_active_snapshot, snapshot_connection, decode_connection_snapshot,
 )
 
 T = TypeVar('T')
 SNAPSHOT_SCHEMA_VERSION = 1
-_FIELDS = frozenset(ConnectionSnapshot.__dataclass_fields__)
 
 
 def _decode(snapshot_data, task_owner_id: int) -> ConnectionSnapshot:
     if (type(snapshot_data) is not dict or
-            set(snapshot_data) != _FIELDS | {'schema_version'} or
             type(snapshot_data.get('schema_version')) is not int or
             snapshot_data['schema_version'] != SNAPSHOT_SCHEMA_VERSION or
             type(task_owner_id) is not int or task_owner_id < 1):
         raise CredentialUnavailable('execution_snapshot_invalid')
-    snapshot = ConnectionSnapshot(**{
-        key: snapshot_data[key] for key in ConnectionSnapshot.__dataclass_fields__
-    })
+    snapshot = decode_connection_snapshot({key: value for key, value in snapshot_data.items()
+                                           if key != 'schema_version'})
     if snapshot.user_id != task_owner_id:
         raise CredentialUnavailable('execution_owner_changed')
     return snapshot
@@ -78,7 +75,7 @@ def is_revoked(snapshot_data: dict, *, task_owner_id: int) -> bool:
         return True
 
 
-def prepare_dispatch(snapshot_data: dict, *, task_owner_id: int) -> str:
+def prepare_dispatch(snapshot_data: dict, *, task_owner_id: int) -> str | None:
     """Perform only the bounded, DB-only credential admission before a send.
 
     Callers may retry this function for recognized database lock errors, but
@@ -91,7 +88,7 @@ def prepare_dispatch(snapshot_data: dict, *, task_owner_id: int) -> str:
 
 
 def dispatch_once(snapshot_data: dict, *, task_owner_id: int,
-                  send: Callable[[str], T]) -> T:
+                  send: Callable[[str | None], T]) -> T:
     """Authorize immediately before ONE upstream send; never retry implicitly.
 
     The injected send callback receives a request-scoped plaintext Key. It must

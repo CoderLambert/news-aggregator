@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import MarkdownContent from '@/components/news-detail/MarkdownContent'
-import { ConnectionRequestError, listAIConnections, listAIModels } from '@/services/aiConnectionsApi'
+import { ConnectionRequestError, hasAIConnectionAuthentication, listAIConnections, listAIModels } from '@/services/aiConnectionsApi'
 import { WorkspaceError } from '@/services/workspaceApi'
 import {
   cancelPrivateTranslation, latestPrivateTranslation, retryPrivateTranslation, startPrivateTranslation,
@@ -31,12 +31,13 @@ function TranslationSession({ viewer, newsId, sourceRevision, sourceMarkdown }: 
   const models = useQuery({
     queryKey: ['private', 'byok-translation-models', viewer],
     queryFn: async ({ signal }) => {
-      const connections = (await listAIConnections(signal)).filter(c => c.is_enabled && c.key_saved)
+      const connections = (await listAIConnections(signal)).filter(c => c.is_enabled && hasAIConnectionAuthentication(c))
       const lists = await Promise.all(connections.map(c => listAIModels(c, signal)))
       return connections.flatMap((connection, index) => lists[index]
         .filter(model => model.has_trusted_route && model.capabilities.text === 'supported' &&
-          model.article_chat_supported === true && model.model_id === 'deepseek-flash')
-        .map(model => ({ id: model.id, name: connection.display_name + ' · ' + model.display_name })))
+          model.article_chat_supported === true)
+        .map(model => ({ id: model.id, name: connection.display_name + ' · ' + model.display_name,
+          deliveryMode: model.delivery_mode })))
     },
     retry: false,
   })
@@ -139,7 +140,9 @@ function TranslationSession({ viewer, newsId, sourceRevision, sourceMarkdown }: 
       </label>
       <Link to="/settings/ai" className="text-primary underline">模型设置</Link>
       {models.isError && <p role="alert">暂时无法读取个人模型。</p>}
-      {models.data?.length === 0 && <p>此用途暂只支持已验证的 DeepSeek Flash 流式模型。</p>}
+      {models.data?.length === 0 && <p>请先验证个人模型的文本能力，并确认全文翻译用途可用。</p>}
+      {models.data?.find(model => model.id === selected)?.deliveryMode === 'buffered' &&
+        <p className="text-xs text-muted-foreground">所选模型完整生成后显示（buffered）；费用未知，不会自动切换模型。</p>}
       {canChooseConsent && <label className="my-2 block">
         <input type="checkbox" checked={consent} disabled={sending}
           onChange={event => setConsent(event.target.checked)} />

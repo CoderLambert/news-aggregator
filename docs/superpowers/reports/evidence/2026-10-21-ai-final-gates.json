@@ -1,0 +1,136 @@
+{
+  "code_candidate": "b98f153e2a4970c77fa2d49a9d5be4d653c451df",
+  "base": "a6cf437d45b66b962f35e4427ad8c05c589e990a",
+  "runtime_source_tree_sha256": "a21510a13befd493e131a88968b0779c05a35d9e0276c09bb607c7e562c4dd01",
+  "commands": [
+    {
+      "gate": "collection",
+      "exit": 0,
+      "command": [
+        "/home/lambert/githubRepos/lambert/news-aggregator-ai-v1/.venv-ai/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "coverage_audit",
+        "--ci-audit-output=/tmp/newshub-ai-v1-task6-final-collection.json",
+        "--collect-only",
+        "tests/",
+        "backend/api/tests/",
+        "scripts/deploy/tests/"
+      ]
+    },
+    {
+      "gate": "serial",
+      "exit": 0,
+      "command": [
+        "/home/lambert/githubRepos/lambert/news-aggregator-ai-v1/.venv-ai/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "coverage_audit",
+        "--ci-audit-output=/tmp/newshub-ai-v1-task6-final-serial.json",
+        "--junitxml=/tmp/newshub-ai-v1-task6-final-serial.xml",
+        "backend/api/tests/test_smart_channel_workspace.py",
+        "backend/api/tests/test_channels.py"
+      ]
+    },
+    {
+      "gate": "parallel",
+      "exit": 0,
+      "command": [
+        "/home/lambert/githubRepos/lambert/news-aggregator-ai-v1/.venv-ai/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "coverage_audit",
+        "-n",
+        "2",
+        "--dist=loadfile",
+        "--max-worker-restart=0",
+        "--ci-audit-output=/tmp/newshub-ai-v1-task6-final-parallel.json",
+        "--junitxml=/tmp/newshub-ai-v1-task6-final-parallel.xml",
+        "--ignore=backend/api/tests/test_smart_channel_workspace.py",
+        "--ignore=backend/api/tests/test_channels.py",
+        "tests/",
+        "backend/api/tests/",
+        "scripts/deploy/tests/"
+      ]
+    },
+    {
+      "gate": "reconcile",
+      "exit": 0,
+      "command": [
+        "/home/lambert/githubRepos/lambert/news-aggregator-ai-v1/.venv-ai/bin/python",
+        "ops/ci/xdist_summary.py",
+        "/tmp/newshub-ai-v1-task6-final-collection.json",
+        "/tmp/newshub-ai-v1-task6-final-serial.json",
+        "/tmp/newshub-ai-v1-task6-final-parallel.json",
+        "/tmp/newshub-ai-v1-task6-final-serial.log",
+        "/tmp/newshub-ai-v1-task6-final-parallel.log",
+        "/tmp/newshub-ai-v1-task6-final-serial.xml",
+        "/tmp/newshub-ai-v1-task6-final-parallel.xml"
+      ]
+    }
+  ],
+  "backend": {
+    "passed": 2243,
+    "skipped": 16,
+    "collected": 2259,
+    "serial_passed": 52,
+    "parallel_passed": 2191,
+    "identity_audit": "PASS"
+  },
+  "frontend": {
+    "passed": 739,
+    "files": 105,
+    "typecheck": "PASS",
+    "build": "PASS",
+    "lint_errors": 0,
+    "existing_lint_warnings": 1,
+    "reuse": "frontend source and lock unchanged since f93831c"
+  },
+  "proxy": {
+    "unit_passed": 65,
+    "legacy_matrix_passed": 295,
+    "trusted_matrix_passed": 38,
+    "business_chain_passed": 5,
+    "harness_config_passed": 40
+  },
+  "ci_structure_passed": 50,
+  "migrations": "No changes detected",
+  "credential_scan": {
+    "matches": 0,
+    "scope": "all deliverable files and expanded raw archive"
+  },
+  "review": {
+    "base": "a6cf437d45b66b962f35e4427ad8c05c589e990a",
+    "reviewed_head": "924b5ebd6d545ae45910d981d387b23690f08071",
+    "critical": 0,
+    "important": 1,
+    "minor": 0,
+    "important_fixed": "f47f9a6",
+    "regression": "policy overrides now denied before upstream; actual legacy matrix includes three protocol zero-request controls"
+  },
+  "ollama": {
+    "checks_passed": 9,
+    "cli_model": "minimax-m3.1-flash:cloud",
+    "api_model": "minimax-m3.1-flash",
+    "cleanup_complete": true
+  },
+  "not_run": [
+    "other real providers",
+    "remote CI",
+    "production image/G1",
+    "production migration/deploy",
+    "human UAT"
+  ],
+  "archive": {
+    "path": "2026-10-21-ai-final-raw.tar.gz",
+    "sha256": "d209f955ac64f84dfd117127234fced70d51623c00de5b37b7dde2159c5a86dd",
+    "files": 46
+  },
+  "evidence_scope_note": "Full backend collection started on f47f9a6; b98f153 only corrects an outside-root integration assertion. All collected source/tests identical. Integration and final live/trusted matrix ran with b98f153. Subsequent delivery commits contain evidence/docs only."
+}

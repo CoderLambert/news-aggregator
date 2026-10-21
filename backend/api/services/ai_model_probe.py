@@ -11,7 +11,9 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
-from api.services.ai_gateway import AIGatewayError, ARTICLE_CHAT_SUPPORTED_ALIAS, _gateway_configuration
+from api.services.ai_gateway import (
+    AIGatewayError, ARTICLE_CHAT_SUPPORTED_ALIAS, _gateway_configuration, trusted_request_metadata,
+)
 from api.services.ai_responses_protocol import (
     uses_responses_protocol, ResponsesProtocolError, responses_completion, responses_payload,
 )
@@ -100,14 +102,18 @@ def parse_completion(status_code, headers, raw, probe_kind):
         data = _json_parse(raw)
     except (ValueError, UnicodeDecodeError, TypeError):
         return ProbeOutcome('unknown', 'invalid_response', request_id)
-    if not isinstance(data, dict) or not isinstance(data.get('choices'), list) or len(data['choices']) != 1:
+    if (not isinstance(data, dict) or data.get('error') is not None
+            or not isinstance(data.get('choices'), list) or len(data['choices']) != 1):
         return ProbeOutcome('unknown', 'invalid_response', request_id)
     choice = data['choices'][0]
     if not isinstance(choice, dict) or not isinstance(choice.get('message'), dict):
         return ProbeOutcome('unknown', 'invalid_response', request_id)
     finish, message = choice.get('finish_reason'), choice['message']
+    if message.get('refusal'):
+        return ProbeOutcome('unknown', 'incomplete_or_invalid', request_id)
     if probe_kind == 'text':
-        if finish != 'stop' or not isinstance(message.get('content'), str) or not message['content'].strip():
+        if (finish != 'stop' or message.get('tool_calls') or message.get('function_call')
+                or not isinstance(message.get('content'), str) or not message['content'].strip()):
             return ProbeOutcome('unknown', 'incomplete_or_invalid', request_id)
         status = 'succeeded'
     elif probe_kind == 'tools':
@@ -133,9 +139,13 @@ def _payload(model_alias, probe_kind, provider_key):
     # the probe's tiny output budget before producing a final text response.
     # These explicit capability checks need text/tools, not private reasoning.
     options = {'thinking': {'type': 'disabled'}} if model_alias == ARTICLE_CHAT_SUPPORTED_ALIAS else {}
+    # Compatible reasoning models can consume the old 8/32-token caps before
+    # emitting even one answer/tool call. Keep one bounded explicit request;
+    # never retry a clipped result or claim a capability from length/EOF.
+    compatible = model_alias.startswith('newshub/')
     if probe_kind == 'tools':
         return {
-            'model': model_alias, 'stream': False, 'max_tokens': 32,
+            'model': model_alias, 'stream': False, 'max_tokens': 512 if compatible else 32,
             'messages': [{'role': 'system', 'content': 'Call the requested function to confirm tool support.'},
                          {'role': 'user', 'content': 'Run the capability check now.'}],
             'tools': [{'type': 'function', 'function': {
@@ -147,24 +157,35 @@ def _payload(model_alias, probe_kind, provider_key):
             **options,
         }
     return {
-        'model': model_alias, 'stream': False, 'max_tokens': 8,
+        'model': model_alias, 'stream': False, 'max_tokens': 512 if compatible else 8,
         'messages': [{'role': 'user', 'content': 'Reply with one short word confirming text output.'}],
         'api_key': provider_key,
         **options,
     }
 
 
-def send_model_probe(*, provider_key: str, model_alias: str, probe_kind: str) -> ProbeOutcome:
+def send_model_probe(*, provider_key: str | None, model_alias: str, probe_kind: str,
+                     connection_snapshot=None) -> ProbeOutcome:
     """One explicit paid-capable request; no retries, fallback or outside URLs."""
-    if probe_kind not in ('text', 'tools') or not provider_key or not isinstance(provider_key, str):
+    if probe_kind not in ('text', 'tools'):
         return ProbeOutcome('not_sent', 'invalid_probe')
-    if not isinstance(model_alias, str) or not model_alias or len(model_alias) > 240:
+    if not isinstance(model_alias, str) or not model_alias or len(model_alias) > 256:
         return ProbeOutcome('not_sent', 'invalid_route')
+    metadata = {}
+    if model_alias.startswith('newshub/'):
+        try:
+            metadata = trusted_request_metadata(connection_snapshot, model_alias, provider_key)
+        except AIGatewayError:
+            return ProbeOutcome('not_sent', 'authorization_changed')
+    elif type(provider_key) is not str or not provider_key:
+        return ProbeOutcome('not_sent', 'invalid_probe')
     try:
         gateway, project_key = _gateway_configuration()  # enforces local loopback
     except AIGatewayError:
         return ProbeOutcome('not_sent', 'gateway_unavailable')
     payload = _payload(model_alias, probe_kind, provider_key)
+    if metadata:
+        payload['metadata'] = metadata
     native_responses = uses_responses_protocol(model_alias)
     native_messages = uses_messages_protocol(model_alias)
     endpoint = 'chat/completions'
@@ -202,3 +223,37 @@ def send_model_probe(*, provider_key: str, model_alias: str, probe_kind: str) ->
     except (urllib.error.URLError, TimeoutError, socket.timeout, OSError):
         # It may have been billed upstream even if the response was lost.
         return ProbeOutcome('unknown', 'result_unknown')
+
+
+class ModelDiscoveryError(RuntimeError):
+    def __init__(self):
+        super().__init__('model_discovery_unavailable')
+
+
+def send_model_discovery(*, provider_key, connection_snapshot):
+    """One explicit catalog request through the existing trusted local Proxy."""
+    from api.services.ai_registry import profile_route_prefix
+    from api.services.ai_endpoint_profiles import valid_upstream_model_id
+    try:
+        prefix = profile_route_prefix(connection_snapshot)
+        if not prefix or not prefix.startswith('newshub/'):
+            raise ModelDiscoveryError()
+        alias = prefix + '/model-discovery'
+        metadata = trusted_request_metadata(connection_snapshot, alias, provider_key)
+        gateway, project_key = _gateway_configuration()
+        payload = {'model': alias, 'api_key': provider_key, 'metadata': metadata}
+        request = urllib.request.Request(gateway + '/newshub/models/discover', method='POST',
+            data=json.dumps(payload, separators=(',', ':')).encode(), headers={
+                'Authorization': 'Bearer ' + project_key, 'Content-Type': 'application/json', 'Accept': 'application/json'})
+        with _OPENER.open(request, timeout=TIMEOUT_SECONDS) as response:
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+            if response.status != 200 or len(raw) > MAX_RESPONSE_BYTES:
+                raise ModelDiscoveryError()
+        result = _json_parse(raw)
+        if (type(result) is not dict or type(result.get('models')) is not list or len(result['models']) > 100
+                or type(result.get('truncated')) is not bool
+                or any(not valid_upstream_model_id(model) for model in result['models'])):
+            raise ModelDiscoveryError()
+        return {'models': result['models'], 'truncated': result['truncated']}
+    except Exception:
+        raise ModelDiscoveryError() from None

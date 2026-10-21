@@ -39,6 +39,7 @@ class AIUsageView(ConnectionView):
                 'status': 'unknown' if row.status == 'started' else row.status,
                 'input_tokens': row.input_tokens, 'output_tokens': row.output_tokens,
                 'latency_ms': row.latency_ms, 'created_at': row.created_at.isoformat(),
+                'route_metadata': row.route_metadata,
             })
         for row in probes.select_related('connection').order_by('-created_at', '-id')[:limit]:
             results.append({

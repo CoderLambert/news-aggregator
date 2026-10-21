@@ -16,8 +16,9 @@ from django.utils import timezone
 from django.db.models import Q
 
 from api.models import ChatGPTArticleTranslation, ChatGPTTranslationTask, News
-from api.services.ai_credentials import ConnectionSnapshot, lock_owner
-from api.services.ai_gateway import ARTICLE_CHAT_SUPPORTED_ALIAS, build_gateway_client
+from api.services.ai_credentials import decode_connection_snapshot, lock_owner
+from api.services.ai_gateway import build_gateway_client, text_generation_options
+from api.services.ai_model_registry import supports_article_chat, get_trusted_route
 from api.services.ai_task_preferences import (
     TaskModelSnapshot, resolve_task_model, require_task_model_snapshot,
 )
@@ -37,6 +38,7 @@ MAX_OUTPUT_CHARS = 32768
 # https://api-docs.deepseek.com/api/create-chat-completion/
 # https://api-docs.deepseek.com/quick_start/token_usage/
 T06_PROFILE_VERSION = 'deepseek-flash-2026-10-19-v1'
+GENERIC_TRANSLATION_PROFILE = 'bounded-markdown-v1'
 T06_CHUNKER_VERSION = 'markdown-block-v1'
 T06_PROVIDER_ID = 'deepseek'
 T06_MODEL_ID = 'deepseek-flash'
@@ -89,15 +91,21 @@ def _identity(stored):
 
 def _selection(data):
     data = dict(data)
-    data['connection'] = ConnectionSnapshot(**data['connection'])
+    data['connection'] = decode_connection_snapshot(data['connection'])
     selection = TaskModelSnapshot(**data)
-    if selection.task_kind != 'full_translation' or selection.proxy_alias != ARTICLE_CHAT_SUPPORTED_ALIAS:
+    if selection.task_kind != 'full_translation' or not supports_article_chat(selection.connection, selection.model_id):
         raise TranslationError('model_unavailable')
     return selection
 
 
 def _check_t06_profile(selection):
     connection = selection.connection
+    if selection.proxy_alias != T06_PROXY_ALIAS:
+        route = get_trusted_route(connection, selection.model_id)
+        if (selection.task_kind != 'full_translation' or not route or route['proxy_alias'] != selection.proxy_alias
+                or route['delivery_mode'] not in ('streaming', 'buffered')):
+            raise TranslationError('translation_profile_unavailable')
+        return
     if (selection.task_kind != 'full_translation'
             or selection.model_id != T06_MODEL_ID or selection.proxy_alias != T06_PROXY_ALIAS
             or connection.provider_id != T06_PROVIDER_ID
@@ -177,18 +185,26 @@ def _new_t06_plan(selection, markdown):
         return None
     _check_t06_profile(selection)
     chunks = _split_t06_markdown(markdown)
-    return {
-        'profile_version': T06_PROFILE_VERSION, 'chunker_version': T06_CHUNKER_VERSION,
-        'provider_id': T06_PROVIDER_ID, 'model_id': T06_MODEL_ID, 'proxy_alias': T06_PROXY_ALIAS,
-        'endpoint_profile': T06_ENDPOINT_PROFILE,
-        'endpoint_profile_version': T06_ENDPOINT_PROFILE_VERSION,
-        'context_window_tokens': T06_CONTEXT_WINDOW_TOKENS,
-        'provider_max_output_tokens': T06_PROVIDER_MAX_OUTPUT_TOKENS,
-        'output_tokens_per_chunk': T06_OUTPUT_TOKENS_PER_CHUNK,
-        'max_output_tokens': T06_MAX_OUTPUT_TOKENS, 'max_output_chars': T06_MAX_OUTPUT_CHARS,
+    return _translation_plan(selection) | {
         'source_hash': sha256(markdown.encode('utf-8')).hexdigest(),
         'chunk_hashes': [sha256(chunk.encode('utf-8')).hexdigest() for chunk in chunks],
         'chunk_count': len(chunks), 'next_chunk_index': 0,
+    }
+
+
+def _translation_plan(selection):
+    """Product budgets are bounded even when model context/cost is unknown."""
+    legacy = selection.proxy_alias == T06_PROXY_ALIAS
+    return {
+        'profile_version': T06_PROFILE_VERSION if legacy else GENERIC_TRANSLATION_PROFILE,
+        'chunker_version': T06_CHUNKER_VERSION,
+        'provider_id': selection.connection.provider_id, 'model_id': selection.model_id,
+        'proxy_alias': selection.proxy_alias, 'endpoint_profile': selection.connection.endpoint_profile,
+        'endpoint_profile_version': selection.connection.endpoint_profile_version,
+        'context_window_tokens': T06_CONTEXT_WINDOW_TOKENS if legacy else None,
+        'provider_max_output_tokens': T06_PROVIDER_MAX_OUTPUT_TOKENS if legacy else None,
+        'output_tokens_per_chunk': T06_OUTPUT_TOKENS_PER_CHUNK,
+        'max_output_tokens': T06_MAX_OUTPUT_TOKENS, 'max_output_chars': T06_MAX_OUTPUT_CHARS,
     }
 
 
@@ -198,17 +214,8 @@ def _task_chunks(snapshot):
         if not isinstance(markdown, str):
             raise TranslationError('execution_snapshot_invalid')
         return [markdown]
-    if (not isinstance(plan, dict) or plan.get('profile_version') != T06_PROFILE_VERSION
-            or plan.get('chunker_version') != T06_CHUNKER_VERSION
-            or plan.get('provider_id') != T06_PROVIDER_ID or plan.get('model_id') != T06_MODEL_ID
-            or plan.get('proxy_alias') != T06_PROXY_ALIAS
-            or plan.get('endpoint_profile') != T06_ENDPOINT_PROFILE
-            or plan.get('endpoint_profile_version') != T06_ENDPOINT_PROFILE_VERSION
-            or plan.get('context_window_tokens') != T06_CONTEXT_WINDOW_TOKENS
-            or plan.get('provider_max_output_tokens') != T06_PROVIDER_MAX_OUTPUT_TOKENS
-            or plan.get('output_tokens_per_chunk') != T06_OUTPUT_TOKENS_PER_CHUNK
-            or plan.get('max_output_tokens') != T06_MAX_OUTPUT_TOKENS
-            or plan.get('max_output_chars') != T06_MAX_OUTPUT_CHARS
+    expected = _translation_plan(_selection(snapshot['model']))
+    if (not isinstance(plan, dict) or any(plan.get(key) != value for key, value in expected.items())
             or not isinstance(markdown, str)
             or plan.get('source_hash') != sha256(markdown.encode('utf-8')).hexdigest()):
         raise TranslationError('translation_profile_unavailable')
@@ -392,8 +399,6 @@ def start_translation(user, news_id, *, model_config_id, request_id, billing_con
                     or len(stored.markdown.encode('utf-8')) > T06_MAX_INPUT_BYTES):
                 raise TranslationError('translation_input_budget', 400)
             selection = resolve_task_model(user, 'full_translation', explicit_model_id=model_config_id)
-            if selection.proxy_alias != ARTICLE_CHAT_SUPPORTED_ALIAS:
-                raise TranslationError('model_unavailable')
             require_task_model_snapshot(selection, owner_id=user.pk)
             long_plan = _new_t06_plan(selection, stored.markdown)
             credential = capture_at_enqueue(owner=user, connection_id=selection.connection.connection_id)
@@ -549,8 +554,6 @@ def retry_translation(user, task_id, *, model_config_id, request_id, billing_con
                     or len(stored.markdown.encode('utf-8')) > T06_MAX_INPUT_BYTES):
                 raise TranslationError('translation_input_budget', 400)
             selection = resolve_task_model(user, 'full_translation', explicit_model_id=model_config_id)
-            if selection.proxy_alias != ARTICLE_CHAT_SUPPORTED_ALIAS:
-                raise TranslationError('model_unavailable')
             require_task_model_snapshot(selection, owner_id=user.pk)
             long_plan = _new_t06_plan(selection, stored.markdown)
             credential = capture_at_enqueue(owner=user, connection_id=selection.connection.connection_id)
@@ -754,7 +757,7 @@ def run_translation(task_id, generation):
                         lambda: _live(task_id, generation, token),
                         stage='byok_pre_send_fence',
                     )
-                    gateway = build_gateway_client(key)
+                    gateway = build_gateway_client(key, selection=selection)
                     from api.services.ai_usage import complete_with_usage
                     stream = complete_with_usage(gateway, selection, 'full_translation',
                         model=selection.proxy_alias,
@@ -764,8 +767,8 @@ def run_translation(task_id, generation):
                             {'role': 'user', 'content': chunk_body},
                         ],
                         stream=True,
-                        max_tokens=T06_OUTPUT_TOKENS_PER_CHUNK if long_translation else MAX_OUTPUT_TOKENS,
-                        temperature=0.2, reasoning_effort='none',
+                        temperature=0.2,
+                        **text_generation_options(selection, T06_OUTPUT_TOKENS_PER_CHUNK if long_translation else MAX_OUTPUT_TOKENS),
                     )
                     return stream
                 try:

@@ -33,11 +33,12 @@ ACTIVE_STATUSES = ('queued', 'running')
 class ResearchRunError(Exception):
     """A fixed, safe failure that may be returned to a research caller."""
 
-    def __init__(self, error_code: str, message: str, status_code: int = 409):
+    def __init__(self, error_code: str, message: str, status_code: int = 409, *, request_rejected=False):
         super().__init__(message)
         self.error_code = error_code
         self.message = message
         self.status_code = status_code
+        self.request_rejected = request_rejected
 
 
 _capacity_lock = threading.Lock()
@@ -652,6 +653,7 @@ def submit_research_run(
                 except ResearchBYOKError as exc:
                     raise ResearchRunError(
                         f'research_{exc.code}', exc.message, 409,
+                        request_rejected=session_id is None,
                     ) from None
             if session_id is None:
                 session = ResearchSession.objects.create(user=user, title='', messages=[])

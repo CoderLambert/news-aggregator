@@ -48,6 +48,13 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 describe('T04 owner-only per-turn model picker', () => {
+  it('offers a verified no-Key model without requiring a saved Key', async () => {
+    vi.mocked(api.listAIConnections).mockResolvedValue([{ ...connection, auth_mode: 'none', key_saved: false }])
+    vi.mocked(api.listAIModels).mockResolvedValue([{ ...good, model_id: 'org/model:cloud', delivery_mode: 'buffered' }])
+    render(<Harness />)
+    await screen.findByRole('option', { name: 'My BYOK · Verified model' })
+    expect(api.probeAIModel).not.toHaveBeenCalled()
+  })
   it('loads GET metadata only, never picks a billable model or probes automatically', async () => {
     render(<Harness />)
     expect((await screen.findByRole('combobox', { name: '本轮聊天模型' }))).toHaveValue('')
@@ -59,10 +66,10 @@ describe('T04 owner-only per-turn model picker', () => {
     expect(api.probeAIModel).not.toHaveBeenCalled()
     expect(screen.queryByRole('checkbox', { name: /产生服务商费用/ })).not.toBeInTheDocument()
   })
-  it('names the exact supported streaming model when none are eligible', async () => {
+  it('explains that a current purpose verification is needed when none are eligible', async () => {
     vi.mocked(api.listAIModels).mockResolvedValue([unsupportedForArticleChat])
     render(<Harness />)
-    expect(await screen.findByText(/此用途暂只支持已验证的 DeepSeek Flash 流式路径/)).toBeInTheDocument()
+    expect(await screen.findByText(/请在模型设置中验证文本能力并确认问答用途可用/)).toBeInTheDocument()
     expect(screen.queryByText(/DeepSeek Chat 流式路径/)).not.toBeInTheDocument()
   })
 

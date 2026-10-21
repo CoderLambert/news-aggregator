@@ -89,6 +89,33 @@ CHAT = {"api_key": "sk-synthetic-provider", "stream": True}
 EOF_CHAT = {"api_key": "sk-synthetic-provider", "stream": True, "messages": "T00_PROXY_CHAT_STREAM_EOF_A"}
 
 
+class AllProtocolRequestAdmission(unittest.TestCase):
+    def test_nonstream_and_native_requests_cannot_override_trusted_routing(self):
+        for call_type in ('acompletion', 'completion', 'aresponses', 'anthropic_messages'):
+            for override in (
+                {'api_base': 'http://169.254.169.254/latest'},
+                {'base_url': 'http://127.0.0.1:1234'}, {'api_url': 'https://evil.invalid'},
+                {'url': 'https://evil.invalid'}, {'headers': {'authorization': 'other-key'}},
+                {'extra_headers': {'host': 'other.invalid'}}, {'custom_llm_provider': 'other'},
+                {'http_client': 'uncontrolled'}, {'proxy': 'http://other.invalid'},
+                {'fallbacks': ['other/model']}, {'num_retries': 1},
+                {'model_group_retry_policy': {'trusted/model': {'InternalServerErrorRetries': 2}}},
+                {'retry_policy': {'InternalServerErrorRetries': 2}}, {'max_retries': 2},
+                {'silent_model': 'other/model'}, {'extra_body': {'api_base': 'http://127.0.0.1'}},
+            ):
+                with self.subTest(call_type=call_type, field=next(iter(override))):
+                    result = run_hook({'api_key': 'synthetic-provider-key', 'stream': False,
+                                       'model': 'trusted/model', **override}, call_type)
+                    self.assertEqual(result, ('rejected', 400, 'BYOK_REQUEST_OVERRIDE_REJECTED'))
+
+    def test_native_streams_have_the_same_routing_boundary(self):
+        for call_type in ('aresponses', 'anthropic_messages'):
+            with self.subTest(call_type=call_type):
+                self.assertEqual(run_hook({'api_key': 'synthetic-provider-key', 'stream': True,
+                                           'api_base': 'http://127.0.0.1'}, call_type),
+                                 ('rejected', 400, 'BYOK_REQUEST_OVERRIDE_REJECTED'))
+
+
 class ChatStreamingFailClosed(unittest.TestCase):
     def test_chat_stream_eof_scenario_rejected_before_upstream(self):
         self.assertEqual(run_hook(EOF_CHAT, "acompletion"), ("rejected", 400, "T00_CHAT_STREAMING_DISABLED"))

@@ -62,6 +62,13 @@ async function ready() {
   await screen.findByRole('combobox', { name: '全局默认模型' })
 }
 describe('T03 model purpose settings', () => {
+  it('allows an approved no-Key model while keeping unverified tools out of research', async () => {
+    render(<AITaskPreferencesSection viewer={7} connections={[{ ...connection, auth_mode: 'none', key_saved: false }]} />)
+    await ready()
+    expect(within(screen.getByRole('combobox', { name: '新闻问答模型' })).getByText(/Text only/)).toBeInTheDocument()
+    expect(within(screen.getByRole('combobox', { name: '深度研究模型' })).queryByText(/Text only/)).toBeNull()
+    expect(api.saveAITaskPreferences).not.toHaveBeenCalled()
+  })
   it('keeps nonstream models available for research but excludes them from chat and translation', async () => {
     available = [textModel, { ...toolsModel, article_chat_supported: false }]
     setup(); await ready()

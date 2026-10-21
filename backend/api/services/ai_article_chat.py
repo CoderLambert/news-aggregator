@@ -1,7 +1,7 @@
 """T04 explicit per-turn BYOK chat with verified, token-by-token streaming.
 
-The only stream route is the pinned DeepSeek alias whose LiteLLM Proxy hook
-validates the upstream finish reason before releasing the terminal chunk.
+The gateway selects the approved route's verified streaming or buffered mode;
+only complete provider output may reach the fenced history commit.
 """
 from dataclasses import asdict
 import time
@@ -12,8 +12,8 @@ from django.db import OperationalError, connection
 
 from api.services.ai_verified_stream import IncompleteStream, verified_text_deltas
 from api.services.ai_credentials import CredentialUnavailable
-from api.services.ai_model_registry import ARTICLE_CHAT_SUPPORTED_ALIAS
-from api.services.ai_gateway import AIGatewayError, build_gateway_client
+from api.services.ai_model_registry import supports_article_chat
+from api.services.ai_gateway import AIGatewayError, build_gateway_client, text_generation_options
 from api.services.ai_task_preferences import (
     ModelSelectionError, require_task_model_snapshot, resolve_task_model,
 )
@@ -30,7 +30,6 @@ from api.services.stored_readers import StoredContentChanged, require_current, s
 
 MAX_CHAT_OUTPUT_TOKENS = 2048
 MAX_CHAT_ANSWER_CHARS = 32768
-SUPPORTED_STREAM_ALIAS = ARTICLE_CHAT_SUPPORTED_ALIAS
 
 
 MAX_TERMINAL_COMMIT_ATTEMPTS = 5
@@ -87,7 +86,7 @@ def prepare_article_chat(user, model_config_id):
         if error.code == 'model_not_found':
             raise ArticleChatError('model_not_found') from None
         raise ArticleChatError('model_unavailable') from None
-    if selection.proxy_alias != SUPPORTED_STREAM_ALIAS:
+    if not supports_article_chat(selection.connection, selection.model_id):
         raise ArticleChatError('model_unavailable')
     return selection
 
@@ -110,7 +109,7 @@ def complete_article_chat(*, user, stored, chat_snapshot, messages, selection, t
     """
     if selection.task_kind != 'article_qa' or selection.user_id != user.pk:
         raise ArticleChatError('model_unavailable')
-    if selection.proxy_alias != SUPPORTED_STREAM_ALIAS:
+    if not supports_article_chat(selection.connection, selection.model_id):
         raise ArticleChatError('model_unavailable')
     if (not isinstance(messages, list) or len(messages) > 24
             or any(not isinstance(msg, dict) or msg.get('role') not in {'system', 'user', 'assistant'}
@@ -143,12 +142,12 @@ def complete_article_chat(*, user, stored, chat_snapshot, messages, selection, t
                 mark_dispatched(
                     user_id=user.pk, news_id=stored.news_id, turn_id=turn_id,
                 )
-                gateway = build_gateway_client(provider_key)
+                gateway = build_gateway_client(provider_key, selection=selection)
                 from api.services.ai_usage import complete_with_usage
                 stream = complete_with_usage(gateway, selection, 'article_qa',
                     model=selection.proxy_alias, messages=messages,
-                    stream=True, max_tokens=MAX_CHAT_OUTPUT_TOKENS,
-                    temperature=0.7, reasoning_effort='none',
+                    stream=True, temperature=0.7,
+                    **text_generation_options(selection, MAX_CHAT_OUTPUT_TOKENS),
                 )
                 return stream
             except ArticleChatTurnError as error:

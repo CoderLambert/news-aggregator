@@ -1,0 +1,118 @@
+{
+  "scope": "UAT Ollama research admission and rejection recovery fix",
+  "baseline_head": "04bf2cd0510e9cbed452485a2c4215d37cdee876",
+  "base": "a6cf437d45b66b962f35e4427ad8c05c589e990a",
+  "source_state": "baseline head plus exact changed_file_sha256; no runtime edits after checks",
+  "changed_file_sha256": {
+    "backend/api/research_views.py": "e50f010ae939714f5f3547a81350cb48d3c069dcde547143daaaec90b4d7e73e",
+    "backend/api/services/ai_task_preferences.py": "b6c185fc35e33f018302e108e464bae966b2dd47acd88b460adc3ff5c50607cd",
+    "backend/api/services/research/byok_execution.py": "d402cfb2d5902a75d942bb22cdc5b88ba4a7a6205ee2d061741e0f1fbeee3ca7",
+    "backend/api/services/research/job_manager.py": "1d8c930c7245877d863b3e27cc72d52825f9602bbb7ea42735645ef56e76dbbc",
+    "backend/api/tests/test_ai_unified_consumers.py": "db39118a39b81342e5dd89b61d272267576713121b8999f9718cf82f7ff9b8fc",
+    "frontend/src/components/research/ResearchPanel.tsx": "25e2ebccc1582c5c03e77a436312bda65f1d71b63d38b9e613294a05e49fbfea",
+    "frontend/src/hooks/useResearch.ts": "0b5fbb01617af5a56b06ca2de94ffb3354f324af1e75b3e8b56eb67f3390ee2b",
+    "frontend/src/services/aiConnectionsApi.ts": "7cd92c13d49bd3ff460a7e62406950a6e26a6c2faa5bf8f8f6aa3aa6435cc1a8",
+    "frontend/src/utils/sse.ts": "125054ec167fa5f4d47e1909df173a2701ff567e4883047b42ed6b242bd16f56",
+    "frontend/tests/components/research/ResearchPanel.test.jsx": "31357badf529d1ac7179feefcc0db3c35f08f29d36fc5caec2e074c7e3989e10",
+    "frontend/tests/hooks/useResearch.test.jsx": "e2950f102f107388bafe8df13febd7d556bf96854ca46ac7aaec1a5ff7f998a9"
+  },
+  "red": {
+    "backend": "2 failed,1 passed,18 deselected",
+    "frontend": "4 failed,43 skipped"
+  },
+  "checks": [
+    {
+      "command": "env -i PATH=/usr/bin:/bin PYTHONPATH=backend:crawler RUN_MAIN=true .venv-ai/bin/python -m pytest -q backend/api/tests/test_ai_unified_consumers.py backend/api/tests/test_ai_task_preferences.py backend/api/tests/test_research_byok.py backend/api/tests/test_research_csrf.py",
+      "exit": 0,
+      "passed": 53,
+      "subtests_passed": 2
+    },
+    {
+      "command": "npm --prefix frontend run test:run -- tests/hooks/useResearch.test.jsx tests/components/research/ResearchPanel.test.jsx tests/services/researchStreamsApi.test.js tests/utils/sse.test.js tests/services/aiConnectionsApi.test.ts",
+      "exit": 0,
+      "passed": 71,
+      "files": 5,
+      "runtime": "Node22.23.3 isolated env"
+    },
+    {
+      "command": "npm --prefix frontend run typecheck",
+      "exit": 0
+    },
+    {
+      "command": "npm --prefix frontend run lint",
+      "exit": 0,
+      "errors": 0,
+      "preexisting_warnings": 1
+    },
+    {
+      "command": "npm --prefix frontend run build",
+      "exit": 0
+    }
+  ],
+  "live": {
+    "provider": "ollama",
+    "configured_model": "minimax-m3.1-flash",
+    "new_provider_requests": 3,
+    "requests": [
+      "one bounded tools probe",
+      "one synthetic article QA",
+      "one greeting local-only research"
+    ],
+    "checks": [
+      {
+        "case": "current_model_has_text_proof",
+        "status": "PASS"
+      },
+      {
+        "case": "missing_tools_rejected_before_task",
+        "status": "PASS",
+        "safe_error_code": "research_model_not_verified"
+      },
+      {
+        "case": "configured_model_live_tools_probe",
+        "status": "PASS",
+        "safe_error_code": ""
+      },
+      {
+        "case": "default_model_research_eligibility_refreshed",
+        "status": "PASS"
+      },
+      {
+        "case": "configured_model_article_qa",
+        "status": "PASS",
+        "http_status": 200,
+        "proof": "owner_scoped_http_history_and_terminal_db_receipt",
+        "initial_harness_result": "FAIL_wrong_research_wire_parser",
+        "stream_terminal_captured": false,
+        "provider_replayed": false
+      },
+      {
+        "case": "configured_model_research_create_complete",
+        "status": "PASS",
+        "http_status": 200,
+        "safe_error_code": null,
+        "unexpected_tools": false
+      },
+      {
+        "case": "configured_model_research_durable_result",
+        "status": "PASS",
+        "proof": "owner_scoped_terminal_db_receipt",
+        "provider_replayed": false
+      }
+    ],
+    "browser": "current settings shows text/tools supported; research panel displays same-model completed greeting",
+    "limits": "QA terminal was verified by owner-scoped HTTP history and terminal DB receipt after initial harness wire-parser error; no provider replay. Research tools/web report quality and production NOT_RUN.",
+    "preview": "original port and task-owned DB preserved; replacement backend restored after zombie-process reload detection error; parent/Proxy remain running; user Key never read or printed"
+  },
+  "review": {
+    "critical": 0,
+    "important": 0,
+    "scope": "11-file current fix; read-only independent review; tests reused"
+  },
+  "previous_full_suite": "historical baseline evidence only, not rerun for this fix",
+  "archive": {
+    "path": "2026-10-21-ai-uat-fix-raw.tar.gz",
+    "sha256": "d3907a0f9244876ccfe963512d8ebf3d31249875a0136a91260914fba8505665"
+  },
+  "remote_ci": "new head NOT_RUN at evidence creation; Draft-only fast CI required after push"
+}

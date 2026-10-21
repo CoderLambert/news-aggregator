@@ -307,7 +307,13 @@ def test_t09_execution_snapshot_is_strict_and_secret_free():
     payload = {'schema_version': 1, 'consent': True, 'model': asdict(selection)}
     decoded = decode_snapshot(payload, owner_id=17)
     assert decoded == selection
-    assert 'api_key' not in json.dumps(payload).lower()
+    # auth_mode='api_key' is non-secret metadata, never an api_key field.
+    assert 'api_key' not in payload and 'api_key' not in payload['model']
+    assert 'api_key' not in payload['model']['connection']
+    legacy = json.loads(json.dumps(payload))
+    legacy['model']['connection'].pop('auth_mode')
+    legacy['model']['connection'].pop('endpoint_policy_digest')
+    assert decode_snapshot(legacy, owner_id=17) == selection
 
     extra = {**payload, 'api_key': 'must never persist'}
     with pytest.raises(ResearchBYOKError):
@@ -344,6 +350,21 @@ def test_t10_native_continuation_is_model_bound_and_not_visible():
     session.native_continuation['protocol'] = 'other-provider'
     with pytest.raises(ResearchBYOKError):
         native_messages(session, snapshot)
+
+
+def test_tool_reply_with_text_preface_is_not_a_final_or_visible_answer():
+    from api.services.research.byok_execution import _validated_completion, visible_messages
+    call = {'id': 'call-preface', 'type': 'function',
+            'function': {'name': 'search_news', 'arguments': '{}'}}
+    message = {'role': 'assistant', 'content': 'Checking the evidence.', 'tool_calls': [call]}
+    response = {'choices': [{'finish_reason': 'tool_calls', 'message': message}]}
+    assert _validated_completion(response) == (message, [call])
+    assert visible_messages([{'role': 'user', 'content': 'Question'}, message]) == [
+        {'role': 'user', 'content': 'Question'}]
+    for content in ({'text': 'not a string'}, 2, []):
+        with pytest.raises(ResearchBYOKError):
+            _validated_completion({'choices': [{'finish_reason': 'tool_calls',
+                'message': {**message, 'content': content}}]})
 
 
 def test_t10_followup_rechecks_owner_and_locked_model(monkeypatch):

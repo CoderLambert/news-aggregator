@@ -11,9 +11,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from api.authentication import AnonymousCsrfSessionAuthentication
 from api.ai_connection_models import UserAIConnection
-from api.services.ai_registry import get_profile, provider_catalog
+from api.services.ai_registry import get_profile, profile_route_prefix, provider_catalog
+from api.services.ai_endpoint_profiles import profile_allows_user
 from api.services.ai_credentials import (CredentialEncryptionUnavailable, CredentialUnavailable,
-    creation_digest, decrypt_credential, encrypt_credential, lock_owner)
+    creation_digest, execution_credential, encrypt_credential, lock_owner)
 
 
 class StrictSerializer(serializers.Serializer):
@@ -41,6 +42,9 @@ class KeySerializer(StrictSerializer):
 
 
 class CreateSerializer(KeySerializer):
+    api_key = serializers.CharField(min_length=8, max_length=4096, trim_whitespace=False,
+                                    write_only=True, required=False)
+    auth_mode = serializers.ChoiceField(choices=('api_key', 'none'), default='api_key')
     provider_id = serializers.CharField(max_length=32)
     endpoint_profile = serializers.CharField(max_length=48)
     display_name = serializers.CharField(max_length=64)
@@ -50,10 +54,16 @@ class CreateSerializer(KeySerializer):
         return validate_name(value)
 
     def validate(self, values):
-        if get_profile(values['provider_id'], values['endpoint_profile']) is None:
+        profile = get_profile(values['provider_id'], values['endpoint_profile'])
+        if (profile is None or not profile_allows_user(profile, self.context['user_id'])
+                or values['auth_mode'] not in profile.get('auth_modes', ['api_key'])):
             raise serializers.ValidationError('invalid_endpoint')
-        if values['api_key'] in values['display_name']:
+        if ((values['auth_mode'] == 'api_key' and not values.get('api_key'))
+                or (values['auth_mode'] == 'none' and 'api_key' in values)):
+            raise serializers.ValidationError('invalid_authentication')
+        if values.get('api_key') and values['api_key'] in values['display_name']:
             raise serializers.ValidationError('invalid_name')
+        self.validated_profile = profile
         return values
 
 
@@ -85,6 +95,10 @@ def payload(row):
         'provider_name': profile['provider_name'] if profile else row.provider_id,
         'endpoint_profile': row.endpoint_profile, 'endpoint_profile_version': row.endpoint_profile_version,
         'region_name': profile['region_name'] if profile else '不可用', 'display_name': row.display_name,
+        'auth_mode': row.auth_mode,
+        'model_discovery_supported': bool(row.endpoint_policy_digest and profile_route_prefix(row)),
+        'data_destination_label': '管理员受信模型服务器；所选模型可能使用云服务' if row.endpoint_policy_digest
+        else '请求发送至所选云服务商；实际费用未知。',
         'key_saved': bool(row.credential_ciphertext), 'masked_key': '••••••••' if row.credential_ciphertext else '',
         'is_enabled': row.is_enabled, 'revision': row.revision, 'credential_epoch': row.credential_epoch,
         'verification_status': 'not_tested', 'updated_at': row.updated_at.isoformat()}
@@ -123,7 +137,7 @@ class ConnectionView(APIView):
 
 class AIProviderCatalogView(ConnectionView):
     def get(self, request):
-        return Response({'providers': provider_catalog()})
+        return Response({'providers': provider_catalog(user_id=request.user.pk)})
 
 
 class UserAIConnectionListCreateView(ConnectionView):
@@ -132,7 +146,7 @@ class UserAIConnectionListCreateView(ConnectionView):
         return Response({'connections': [payload(row) for row in rows]})
 
     def post(self, request):
-        serializer = CreateSerializer(data=request.data)
+        serializer = CreateSerializer(data=request.data, context={'user_id': request.user.pk})
         if not serializer.is_valid():
             return error('invalid_request')
         values = serializer.validated_data
@@ -147,10 +161,18 @@ class UserAIConnectionListCreateView(ConnectionView):
             if UserAIConnection.objects.filter(user=request.user, is_deleted=False).count() >= 20:
                 return error('connection_limit', 429)
             profile = get_profile(values['provider_id'], values['endpoint_profile'])
+            validated_profile = serializer.validated_profile
+            if (profile is None or not profile_allows_user(profile, request.user.pk)
+                    or values['auth_mode'] not in profile.get('auth_modes', ['api_key'])
+                    or (profile['version'], profile.get('policy_digest', '')) != (
+                        validated_profile['version'], validated_profile.get('policy_digest', ''))):
+                return error('endpoint_changed', 409)
             row = UserAIConnection(user=request.user, provider_id=values['provider_id'],
                 endpoint_profile=values['endpoint_profile'], endpoint_profile_version=profile['version'],
+                endpoint_policy_digest=profile.get('policy_digest', ''), auth_mode=values['auth_mode'],
                 display_name=values['display_name'], request_id=values['request_id'], request_hash=digest)
-            row.credential_ciphertext, row.encryption_key_id = encrypt_credential(row, values['api_key'])
+            if row.auth_mode == 'api_key':
+                row.credential_ciphertext, row.encryption_key_id = encrypt_credential(row, values['api_key'])
             row.save(force_insert=True)
         return Response(payload(row), status=201)
 
@@ -184,6 +206,15 @@ class UserAIConnectionDetailView(ConnectionView):
                 row.credential_epoch += 1
                 row.credential_ciphertext, row.encryption_key_id = '', ''
             elif action == 'key':
+                if row.auth_mode != 'api_key':
+                    return error('invalid_authentication')
+                # Replacing a Key cannot silently bind it to a changed target.
+                profile = get_profile(row.provider_id, row.endpoint_profile)
+                if (profile is None or not profile_allows_user(profile, request.user.pk)
+                        or row.endpoint_profile_version != profile['version']
+                        or row.endpoint_policy_digest != profile.get('policy_digest', '')
+                        or 'api_key' not in profile.get('auth_modes', ['api_key'])):
+                    raise CredentialUnavailable('endpoint_changed')
                 row.credential_epoch += 1
                 row.credential_version += 1
                 row.credential_ciphertext, row.encryption_key_id = encrypt_credential(row, values['api_key'])
@@ -195,7 +226,7 @@ class UserAIConnectionDetailView(ConnectionView):
                         profile = get_profile(row.provider_id, row.endpoint_profile)
                         if profile is None or profile['version'] != row.endpoint_profile_version:
                             raise CredentialUnavailable('endpoint_changed')
-                        decrypt_credential(row)
+                        execution_credential(row)
                     row.is_enabled = values['is_enabled']
                     row.credential_epoch += 1
             row.revision += 1

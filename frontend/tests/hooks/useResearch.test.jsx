@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
@@ -17,6 +17,9 @@ const api = vi.hoisted(() => ({
 vi.mock('@/services/researchApi', () => api)
 
 import { useResearch } from '@/hooks/useResearch'
+import { streamingFetch } from '@/utils/sse'
+
+afterEach(() => vi.unstubAllGlobals())
 
 function emptyPage(results = []) {
   return { count: results.length, next: null, previous: null, results }
@@ -80,6 +83,47 @@ beforeEach(() => {
 })
 
 describe('F03 queued and pre-header recovery', () => {
+  it.each([
+    [409, { error_code: 'research_model_not_verified' }],
+    [409, { error_code: 'research_run_active', request_state: 'rejected' }],
+    [500, { error_code: 'research_model_not_verified', request_state: 'rejected' }],
+  ])('keeps uncertain structured HTTP %s outcomes recoverable', async (status, body) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status })))
+    api.createResearchStream.mockImplementation(async function* () {
+      await streamingFetch('/api/research/')
+      yield* []
+    })
+    const { result, unmount } = renderResearchHook()
+    await waitFor(() => expect(result.current.loadingSessions).toBe(false))
+    act(() => { void result.current.handleSend('Synthetic uncertain request') })
+    await waitFor(() => expect(result.current.recoveryAction).toBe('resume'))
+    expect(sessionStorage.getItem('news-aggregator:research-pending-create:v1:1')).not.toBeNull()
+    expect(api.createResearchStream).toHaveBeenCalledTimes(1)
+    unmount()
+  })
+  it('shows a certified pre-admission rejection without preserving an unknown paid request', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: '请先完成文本与工具能力验证。', error_code: 'research_model_not_verified', request_state: 'rejected',
+    }), { status: 409, headers: { 'Content-Type': 'application/json' } })))
+    api.createResearchStream.mockImplementation(async function* () {
+      await streamingFetch('/api/research/')
+      yield* []
+    })
+    const { result, unmount } = renderResearchHook()
+    await waitFor(() => expect(result.current.loadingSessions).toBe(false))
+    act(() => { void result.current.handleSend('Synthetic rejected request') })
+    await waitFor(() => expect(result.current.phase).toBe('error'))
+    expect(result.current.recoveryAction).toBe('none')
+    expect(result.current.messages.at(-1).content).toContain('文本与工具能力验证')
+    expect(result.current.messages.at(-1).content).not.toContain('原请求可能')
+    expect(sessionStorage.getItem('news-aggregator:research-pending-create:v1:1')).toBeNull()
+    expect(api.createResearchStream).toHaveBeenCalledTimes(1)
+    unmount()
+    const reopened = renderResearchHook()
+    await waitFor(() => expect(reopened.result.current.loadingSessions).toBe(false))
+    expect(reopened.result.current.hasRecoverableTask).toBe(false)
+    reopened.unmount()
+  })
   it('restores a paused pre-header create in the new session and resumes only with its original key', async () => {
     const seenKeys = []
     api.createResearchStream.mockImplementation((_query, { signal, idempotencyKey }) => {

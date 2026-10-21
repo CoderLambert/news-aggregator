@@ -1,0 +1,71 @@
+{
+  "scope": "AUTHORIZED_OLLAMA_ONLY",
+  "requested_model": "minimax-m3.1-flash:cloud",
+  "api_model": "minimax-m3.1-flash",
+  "checks": [
+    {
+      "case": "save_connection_no_inference",
+      "status": "PASS"
+    },
+    {
+      "case": "authorized_catalog",
+      "status": "PASS",
+      "http_status": 200
+    },
+    {
+      "case": "official_cli_api_identity_mapping",
+      "status": "PASS",
+      "api_model": "minimax-m3.1-flash"
+    },
+    {
+      "case": "save_manual_model",
+      "status": "PASS"
+    },
+    {
+      "case": "text_probe",
+      "status": "PASS",
+      "http_status": 200,
+      "probe_status": "succeeded",
+      "safe_error_code": ""
+    },
+    {
+      "case": "tools_probe",
+      "status": "PASS",
+      "http_status": 200,
+      "probe_status": "succeeded",
+      "safe_error_code": ""
+    },
+    {
+      "case": "research_function_replay_same_model",
+      "status": "FAIL",
+      "safe_failure_type": "ResearchBYOKError"
+    },
+    {
+      "case": "article_qa_raw_stream_and_persistence",
+      "status": "PASS",
+      "http_status": 200
+    },
+    {
+      "case": "article_translation_raw_stream_and_persistence",
+      "status": "PASS",
+      "task_status": "succeeded",
+      "safe_error_code": ""
+    }
+  ],
+  "cleanup_complete": true,
+  "capabilities": {
+    "text": {
+      "status": "supported"
+    },
+    "tools": {
+      "status": "supported"
+    }
+  },
+  "attempt_statuses": [
+    "succeeded",
+    "succeeded",
+    "failed",
+    "succeeded"
+  ],
+  "candidate": "924b5ebd6d545ae45910d981d387b23690f08071"
+}

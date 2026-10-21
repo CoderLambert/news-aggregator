@@ -220,6 +220,52 @@ def main(argv: list[str] | None = None) -> int:
             check("T00-01", f"{source}_{upper}_COMPLETE", result.get("terminal") == expected, result)
             expect_receipt(source, marker, 1, terminal={"chat": "finish_reason_stop", "responses": "response_completed", "messages": "message_stop"}[protocol])
 
+            if via_proxy:
+                # Exercise actual JSON admission, not only direct callback
+                # invocation. No overridden request may reach any upstream.
+                import http.client
+                from urllib.parse import urlsplit
+                target = urlsplit(url)
+                endpoint = {'chat': '/v1/chat/completions', 'responses': '/v1/responses',
+                            'messages': '/v1/messages'}[protocol]
+                chosen = 't00-messages' if protocol == 'messages' else 't00-chat'
+                for label, override in (
+                    ('URL', {'api_base': 'http://127.0.0.1:1/v1'}),
+                    ('HEADER', {'headers': {'Authorization': 'synthetic-unapproved-key'}}),
+                    ('EXTRA_HEADERS', {'extra_headers': {'Host': 'unapproved.invalid'}}),
+                    ('RETRY', {'num_retries': 1}),
+                    ('RETRY_POLICY', {'model_group_retry_policy': {chosen: {'InternalServerErrorRetries': 2}}}),
+                    ('RETRY_GLOBAL', {'retry_policy': {'InternalServerErrorRetries': 2}}),
+                    ('RETRY_MAX', {'max_retries': 2}),
+                    # An otherwise authorized target proves that the guard,
+                    # rather than a missing model permission, denies fallback.
+                    ('FALLBACK', {'fallbacks': ['t00-chat']}),
+                    ('NESTED', {'extra_body': {'api_base': 'http://127.0.0.1:1/v1'}}),
+                ):
+                    marker = f'T00_PROXY_{upper}_OVERRIDE_{label}_A'
+                    body = cases.protocol_request(protocol, chosen, marker,
+                                                  provider_key=keys['tenant-a'], via_proxy=True, stream=False)
+                    body.update(body.pop('extra_body', {}))
+                    body.update(override)
+                    connection = http.client.HTTPConnection(target.hostname, target.port, timeout=10)
+                    try:
+                        connection.request('POST', endpoint, body=json.dumps(body).encode(),
+                                           headers={'Content-Type': 'application/json',
+                                                    'Authorization': 'Bearer ' + sdk_key})
+                        response = connection.getresponse()
+                        status = response.status
+                        response.read(65536)
+                    finally:
+                        connection.close()
+                    # Virtual-key URL policy may reject earlier than our
+                    # callback with 401. Both are explicit admission denials;
+                    # the independently reconciled receipt MUST remain zero.
+                    allowed_denials = (400, 401) if label in ('URL', 'NESTED') else (400,)
+                    check('T00-08', f'PROXY_{upper}_OVERRIDE_{label}', status in allowed_denials,
+                          {'status_code': status, 'expected_upstream_requests': 0,
+                           'normal_route_control_passed': True})
+                    expect_receipt(source, marker, 0)
+
             result = cases.run_incomplete_cases(base, protocol, project_key=sdk_key if via_proxy else None, provider_key=keys["tenant-a"])
             expected = {"chat": "length", "responses": "incomplete", "messages": "max_tokens"}[protocol]
             check("T00-02", f"{source}_{upper}_INCOMPLETE", result.get("terminal") == expected, result)

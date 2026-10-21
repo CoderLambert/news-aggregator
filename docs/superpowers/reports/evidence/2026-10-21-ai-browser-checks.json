@@ -1,0 +1,36 @@
+{
+  "scope": "SYNTHETIC_CHROME_BROWSER_ONLY",
+  "candidate_sha": "f93831c6de9a8efcbcf12dce72a573b65c439592",
+  "checks": {
+    "wide_layout": "PASS",
+    "narrow_css_413_no_horizontal_overflow": "PASS",
+    "enter_opens_create_dialog": "PASS",
+    "escape_restores_focus": "PASS",
+    "auth_none_removes_key_input": "PASS",
+    "switch_back_clears_key": "PASS",
+    "none_connection_save_and_no_replace_key": "PASS",
+    "explicit_discovery_two_ids_without_auto_select_or_add": "PASS",
+    "read_only_diagnostics": "PASS",
+    "opening_saving_discovery_keeps_one_seed_probe_usage_count": "PASS",
+    "tools_unknown_not_in_research_choices": "PASS",
+    "logout_removes_private_controls": "PASS",
+    "viewport_reset_tab_closed_fixture_exit_0": "PASS"
+  },
+  "narrow_layout_metrics": {
+    "viewport_css_width": 413,
+    "document_width": 394
+  },
+  "screenshots": {
+    "default_viewport": "PASS_DISPLAYED_IN_TOOL",
+    "emulated_viewport": "BLOCKED_CDP_CAPTURE_TIMEOUT"
+  },
+  "limitations": [
+    "No real provider used",
+    "No deployment or production acceptance",
+    "Narrow visual screenshot unavailable"
+  ],
+  "fixes": [
+    "Discovered catalog keeps empty placeholder until explicit selection; regression RED then GREEN",
+    "Unknown route, capability and terminal fields cannot grant article-chat permission; regression RED then GREEN"
+  ]
+}

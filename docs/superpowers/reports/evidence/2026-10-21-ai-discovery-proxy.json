@@ -1,0 +1,505 @@
+{
+  "scope": "PINNED_PROXY_COMPATIBLE_SYNTHETIC_ONLY",
+  "PROVIDER_REAL": "NOT_RUN",
+  "checks": [
+    {
+      "case": "discovery_none",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": true,
+          "result": {
+            "models": [
+              "org/model:cloud",
+              "other/model:tag"
+            ],
+            "truncated": false
+          }
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "discovery_owner-a",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": true,
+          "result": {
+            "models": [
+              "org/model:cloud",
+              "other/model:tag"
+            ],
+            "truncated": false
+          }
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "discovery_denied_wrong_project",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "error_type": "HTTPError"
+        },
+        "upstream_count": 0
+      }
+    },
+    {
+      "case": "discovery_denied_owner_acl",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "error_type": "HTTPError"
+        },
+        "upstream_count": 0
+      }
+    },
+    {
+      "case": "discovery_denied_url_override",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "error_type": "HTTPError"
+        },
+        "upstream_count": 0
+      }
+    },
+    {
+      "case": "discovery_denied_model_permission",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "error_type": "HTTPError"
+        },
+        "upstream_count": 0
+      }
+    },
+    {
+      "case": "discovery_denied_forged_none",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "error_type": "HTTPError"
+        },
+        "upstream_count": 0
+      }
+    },
+    {
+      "case": "auth_none_stream_False",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": true,
+          "reasons": [
+            "stop"
+          ]
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "auth_none_stream_True",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": true,
+          "reasons": [
+            "stop"
+          ]
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "auth_owner-a_stream_False",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": true,
+          "reasons": [
+            "stop"
+          ]
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "auth_owner-a_stream_True",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": true,
+          "reasons": [
+            "stop"
+          ]
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "auth_owner-b_stream_False",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": true,
+          "reasons": [
+            "stop"
+          ]
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "auth_owner-b_stream_True",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": true,
+          "reasons": [
+            "stop"
+          ]
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "nh-no-finishFalse",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "status_code": 502,
+          "error_type": "InternalServerError",
+          "reasons": []
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "nh-refusalFalse",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "status_code": 502,
+          "error_type": "InternalServerError",
+          "reasons": []
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "nh-duplicateFalse",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "status_code": 502,
+          "error_type": "InternalServerError",
+          "reasons": []
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "nh-truncatedFalse",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "status_code": 502,
+          "error_type": "InternalServerError",
+          "reasons": []
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "nh-redirectFalse",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "status_code": 502,
+          "error_type": "InternalServerError",
+          "reasons": []
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "nh-resetFalse",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "status_code": 502,
+          "error_type": "InternalServerError",
+          "reasons": []
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "nh-eofTrue",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "status_code": null,
+          "error_type": "APIError",
+          "reasons": []
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "nh-no-stopTrue",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "status_code": 502,
+          "error_type": "InternalServerError",
+          "reasons": []
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "nh-lengthTrue",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "status_code": 502,
+          "error_type": "InternalServerError",
+          "reasons": []
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "nh-errorTrue",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "status_code": 502,
+          "error_type": "InternalServerError",
+          "reasons": []
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "nh-double-doneTrue",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "status_code": 502,
+          "error_type": "InternalServerError",
+          "reasons": []
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "nh-compressedFalse",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "status_code": 502,
+          "error_type": "InternalServerError",
+          "reasons": []
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "nh-compressedTrue",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "status_code": 502,
+          "error_type": "InternalServerError",
+          "reasons": []
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "owner_acl",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "status_code": 400,
+          "error_type": "BadRequestError",
+          "reasons": []
+        },
+        "upstream_count": 0
+      }
+    },
+    {
+      "case": "key_none_forged",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "status_code": 400,
+          "error_type": "BadRequestError",
+          "reasons": []
+        },
+        "upstream_count": 0
+      }
+    },
+    {
+      "case": "key_missing",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "status_code": 400,
+          "error_type": "BadRequestError",
+          "reasons": []
+        },
+        "upstream_count": 0
+      }
+    },
+    {
+      "case": "url_override",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "status_code": 401,
+          "error_type": "AuthenticationError",
+          "reasons": []
+        },
+        "upstream_count": 0
+      }
+    },
+    {
+      "case": "media_download",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "status_code": 400,
+          "error_type": "BadRequestError",
+          "reasons": []
+        },
+        "upstream_count": 0
+      }
+    },
+    {
+      "case": "builtin_network_tool",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "status_code": 400,
+          "error_type": "BadRequestError",
+          "reasons": []
+        },
+        "upstream_count": 0
+      }
+    },
+    {
+      "case": "cancel_closes_producer",
+      "status": "PASS",
+      "facts": {
+        "upstream_count": 1,
+        "observed_terminal": []
+      }
+    },
+    {
+      "case": "one_shot_function_tool_terminal",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": true,
+          "reasons": [
+            "tool_calls"
+          ]
+        }
+      }
+    },
+    {
+      "case": "bounded_json_object_format",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": true,
+          "reasons": [
+            "stop"
+          ]
+        },
+        "upstream_count": 1
+      }
+    },
+    {
+      "case": "same_model_concurrent_credentials",
+      "status": "PASS",
+      "facts": {
+        "upstream_count": 2,
+        "results": [
+          {
+            "success": true,
+            "reasons": [
+              "stop"
+            ]
+          },
+          {
+            "success": true,
+            "reasons": [
+              "stop"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case": "revoked_manifest",
+      "status": "PASS",
+      "facts": {
+        "result": {
+          "success": false,
+          "status_code": 400,
+          "error_type": "BadRequestError",
+          "reasons": []
+        },
+        "upstream_count": 0
+      }
+    },
+    {
+      "case": "proxy_cleanup",
+      "status": "PASS",
+      "facts": {}
+    }
+  ],
+  "passed": 38,
+  "failed": 0,
+  "candidate_sha": "f93831c6de9a8efcbcf12dce72a573b65c439592",
+  "exit_status": 0,
+  "runtime_blob_ids": {
+    "ops/shared-litellm-proxy/trusted_discovery.py": "c901e9ff8fe95685b31526c09f31a81d7a1b732a",
+    "ops/shared-litellm-proxy/trusted_chat.py": "10fed0dc61710304e475aa1feed66182b333993b",
+    "ops/shared-litellm-proxy/trusted_transport.py": "01f6883282f7465f14104f892d02f11f5c54b84a",
+    "ops/shared-litellm-proxy/trusted_routes.py": "41c5e3a3a031cee2bf6c5a7ae03b83930b1cddd0",
+    "tools/byok_t00_probe/local_runtime.py": "1df967cb81448d0f496a33260d52325fa438df75",
+    "tools/byok_t00_probe/trusted_proxy.py": "c1287c622021de2e7ba0e30c3b32a9da900bf740",
+    "tools/byok_t00_probe/trusted_upstream.py": "86f05ef8ad5e3880e0e3bc33254ceee69dd63de9"
+  }
+}

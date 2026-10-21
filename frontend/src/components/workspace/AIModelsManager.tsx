@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import {
   ConnectionRequestError, createAIModel, deleteAIModel, listAIModelCatalog, listAIModels,
-  patchAIModel, probeAIModel, type AIConnection, type AIModel, type AIModelCatalogEntry,
+  discoverAIModels, getAIConnectionDiagnostics, patchAIModel, probeAIModel,
+  type AIConnection, type AIConnectionDiagnostics, type AIModel, type AIModelCatalogEntry,
 } from '@/services/aiConnectionsApi'
 
 const stateLabel = { supported: '已验证支持', unsupported: '已验证不支持', unknown: '未知 / 待验证' }
@@ -13,6 +14,8 @@ function safeError(error: unknown) {
 export default function AIModelsManager({ connection, viewer }: { connection: AIConnection; viewer: number }) {
   const [models, setModels] = useState<AIModel[] | null>(null)
   const [catalog, setCatalog] = useState<AIModelCatalogEntry[]>([])
+  const [catalogNotice, setCatalogNotice] = useState('')
+  const [diagnostics, setDiagnostics] = useState<AIConnectionDiagnostics | null>(null)
   const [loading, setLoading] = useState(true)
   const [revision, setRevision] = useState(0)
   const [busy, setBusy] = useState(false)
@@ -29,12 +32,14 @@ export default function AIModelsManager({ connection, viewer }: { connection: AI
   useEffect(() => {
     const controller = new AbortController()
     alive.current = controller
-    void Promise.all([listAIModels(connection, controller.signal), listAIModelCatalog(connection, controller.signal)])
+    void Promise.allSettled([listAIModels(connection, controller.signal), listAIModelCatalog(connection, controller.signal)])
       .then(([rows, known]) => {
         if (controller.signal.aborted) return
-        setModels(rows)
-        setCatalog(known.models)
-        setSelected(previous => previous || known.models[0]?.model_id || '')
+        if (rows.status === 'rejected') throw rows.reason
+        setModels(rows.value)
+        setCatalog(known.status === 'fulfilled' ? known.value.models : [])
+        setCatalogNotice(known.status === 'fulfilled' ? '' : '预置目录暂不可用，仍可手动填写模型 ID。')
+        if (known.status === 'fulfilled') setSelected(previous => previous || known.value.models[0]?.model_id || '')
       })
       .catch(reason => {
         if (controller.signal.aborted) return
@@ -92,19 +97,51 @@ export default function AIModelsManager({ connection, viewer }: { connection: AI
     void perform(signal => probeAIModel(connection, model, kind, requestId, viewer, signal),
       '已记录本次测试结果。文本和工具能力分别显示；结果未知时不会自动重试。')
   }
+  const inspect = async (kind: 'discover' | 'diagnostics') => {
+    const controller = alive.current
+    if (writing.current || !controller || controller.signal.aborted || !models) return
+    writing.current = true; setBusy(true); setError(''); setNotice('')
+    try {
+      if (kind === 'diagnostics') {
+        const result = await getAIConnectionDiagnostics(connection, controller.signal)
+        if (!controller.signal.aborted) setDiagnostics(result)
+      } else {
+        const result = await discoverAIModels(connection, viewer, controller.signal)
+        if (controller.signal.aborted) return
+        setCatalog(current => [...new Map([...current, ...result.models.map(id => ({ model_id: id,
+          display_name: id, catalog_version: 'discovered', context_window_tokens: null,
+          text: 'unknown' as const, tools: 'unknown' as const }))].map(item => [item.model_id, item])).values()])
+        setCatalogNotice(`发现 ${result.models.length} 个模型${result.truncated ? '（目录已截断）' : ''}；未验证能力，未添加配置。`)
+      }
+    } catch (reason) {
+      if (!controller.signal.aborted) setError(safeError(reason) + ' 可继续手动填写模型 ID。')
+    } finally {
+      writing.current = false
+      if (!controller.signal.aborted) setBusy(false)
+    }
+  }
   return <div className="mt-4 min-w-0 border-t pt-3" aria-label={`${connection.display_name}的模型配置`}>
     <h3>模型配置</h3>
     <p className="workspace-caption">选择预置或填写当前连接支持的模型 ID。保存不会调用服务商；主动测试可能产生费用，验证通过后才能用于相应用途。</p>
     {error && <p role="alert" className="workspace-error">{error}</p>}
     {notice && <p role="status" className="workspace-notice">{notice}</p>}
-    <button type="button" className="workspace-button secondary" disabled={busy || loading} onClick={reload}>重新读取模型</button>
+    {catalogNotice && <p role="status" className="workspace-caption">{catalogNotice}</p>}
+    <div className="workspace-actions flex-wrap"><button type="button" className="workspace-button secondary" disabled={busy || loading} onClick={reload}>重新读取模型</button>
+      {connection.model_discovery_supported && <button type="button" className="workspace-button secondary"
+        disabled={busy || loading || !models || !connection.is_enabled} onClick={() => { void inspect('discover') }}>发现服务端模型</button>}
+      <button type="button" className="workspace-button secondary" disabled={busy || loading || !models}
+        onClick={() => { void inspect('diagnostics') }}>检查配置（不调用模型）</button></div>
+    {diagnostics && <div className="workspace-soft-panel" role="status">
+      <p>连接：{diagnostics.connection_status === 'active' ? '授权有效' : '授权不可用'} · 端点：{diagnostics.endpoint_status === 'approved' ? '管理员已批准' : '不可用'}</p>
+      <p>{diagnostics.data_destination_label}</p><p>此检查未发送推理请求；模型能力以独立测试结果为准。</p>
+    </div>}
     {loading && <p role="status">正在读取模型…</p>}
     {!loading && !models && <p role="status">模型状态未知。重新读取成功前无法再次提交操作或收费探针。</p>}
     {models && <>
       <form onSubmit={add} className="grid min-w-0 gap-2 py-3">
         <label>预置模型（可选）<select value={selected} disabled={busy} onChange={event => setSelected(event.target.value)}>
-          {catalog.length ? catalog.map(item => <option key={item.model_id} value={item.model_id}>{item.display_name} · {item.model_id}</option>)
-            : <option value="">没有预置模型，可手动填写 ID</option>}
+          <option value="">{catalog.length ? '请选择模型，或继续手动填写 ID' : '没有预置模型，可手动填写 ID'}</option>
+          {catalog.map(item => <option key={item.model_id} value={item.model_id}>{item.display_name} · {item.model_id}</option>)}
         </select></label>
         <label>或手动填写模型 ID<input value={manualId} disabled={busy} maxLength={160} placeholder="例如：服务商控制台显示的模型 ID" onChange={event => setManualId(event.target.value)} /></label>
         <button type="submit" className="workspace-button secondary" disabled={busy || models.length >= 30 || !(manualId.trim() || selected)}>添加模型（不调用服务商）</button>
@@ -114,6 +151,8 @@ export default function AIModelsManager({ connection, viewer }: { connection: AI
         <strong>{model.display_name}</strong><p className="workspace-caption">{model.model_id} · {model.has_trusted_route ? '可主动测试' : '暂不可测试'}</p>
         {!model.has_trusted_route && <p className="workspace-caption">请检查模型 ID；GLM、百炼和 Kimi 的旧默认连接需新建为对应地域连接后再测试。</p>}
         <p>文本：{stateLabel[model.capabilities.text]} · 工具调用：{stateLabel[model.capabilities.tools]}</p>
+        <p className="workspace-caption">输出方式：{model.delivery_mode === 'streaming' && model.stream_verified === true ? '已验证终态的逐步输出'
+          : model.delivery_mode === 'buffered' ? '完整生成后显示（buffered）' : '尚未核实'}；费用未知。</p>
         <p className="workspace-caption">上下文上限：未核实 · 配置版本 {model.config_revision}</p>
         <div className="workspace-actions flex-wrap">
           <button type="button" className="workspace-button secondary" disabled={busy} onClick={() => setEdit({ model, field: 'display_name', value: model.display_name })}>修改模型名称</button>

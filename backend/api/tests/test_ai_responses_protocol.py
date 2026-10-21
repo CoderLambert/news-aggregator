@@ -130,12 +130,16 @@ class NativeResponsesTests(TestCase):
         with self.assertRaises(ResponsesProtocolError):
             responses_completion(response([CALL, CALL]))
 
-    def test_preset_is_owner_profile_bound_and_never_claims_capability_or_streaming(self):
+    def test_preset_is_profile_bound_and_buffered_without_claiming_capability(self):
         connection = N(provider_id='openai', endpoint_profile='openai_default', endpoint_profile_version=1)
         catalog = catalog_for(connection)
         self.assertEqual([row['model_id'] for row in catalog], ['gpt-5.4-mini'])
         self.assertEqual((catalog[0]['text'], catalog[0]['tools']), ('unknown', 'unknown'))
-        self.assertFalse(supports_article_chat(connection, 'gpt-5.4-mini'))
+        self.assertTrue(supports_article_chat(connection, 'gpt-5.4-mini'))
+        from api.services.ai_model_registry import get_trusted_route
+        route = get_trusted_route(connection, 'gpt-5.4-mini')
+        self.assertEqual(route['delivery_mode'], 'buffered')
+        self.assertFalse(route['stream_verified'])
         connection.endpoint_profile_version = 2
         self.assertIsNone(get_trusted_preset(connection, 'gpt-5.4-mini'))
         connection = N(provider_id='deepseek', endpoint_profile='deepseek_default', endpoint_profile_version=1)

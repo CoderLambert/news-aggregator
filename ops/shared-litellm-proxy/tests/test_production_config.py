@@ -84,3 +84,11 @@ def test_chat_streaming_guard_is_wired_and_fail_closed_in_production_config():
     assert '_byok_raw_terminal_source' in guard
     assert 'fallback_headers_adopted' in guard
     assert 'received_finish_reason' in guard
+
+
+def test_manifest_directory_mount_observes_atomic_revocation_and_defaults_empty():
+    root = Path(__file__).resolve().parents[1]
+    proxy = yaml.safe_load((root / 'compose.yaml').read_text())['services']['proxy']
+    assert proxy['environment']['AI_BYOK_ENDPOINT_MANIFEST'] == '/app/trusted-endpoints/manifest.json'
+    assert './trusted-endpoints:/app/trusted-endpoints:ro' in proxy['volumes']
+    assert yaml.safe_load((root / 'trusted-endpoints/manifest.json').read_text()) == []
