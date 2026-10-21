@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import '@tests/helpers/commandDom'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AIConnectionsManager } from '@/pages/AIModelSettingsPage'
@@ -61,21 +62,47 @@ async function openCreate() {
   fireEvent.change(screen.getByLabelText('连接名称'), { target: { value: '测试连接' } })
   fireEvent.change(screen.getByLabelText('API Key'), { target: { value: KEY } })
 }
+function choose(label: string, name: string) {
+  fireEvent.click(screen.getByRole('combobox', { name: label }))
+  fireEvent.click(screen.getByRole('option', { name: new RegExp(name) }))
+}
 async function submitCreate() { await openCreate(); fireEvent.click(screen.getByRole('button', { name: '保存连接' })) }
 
 describe('BYOK T01 connection settings', () => {
+  it('filters provider and endpoint options inside the dialog without writes', async () => {
+    vi.mocked(api.listAIProviders).mockResolvedValue([...profiles, { ...profile, profile_id: 'deepseek_other', region_name: '另一线路' }])
+    setup(); await ready()
+    fireEvent.click(screen.getByRole('button', { name: '新增连接' }))
+    fireEvent.click(screen.getByRole('combobox', { name: '服务商' }))
+    const search = screen.getByLabelText('搜索服务商')
+    expect(screen.getByRole('dialog', { name: '新增连接' })).toContainElement(search)
+    fireEvent.change(search, { target: { value: 'qwen' } })
+    expect(screen.getAllByRole('option')).toHaveLength(1)
+    expect(screen.getByRole('option', { name: /Qwen/ })).toBeInTheDocument()
+    fireEvent.change(search, { target: { value: 'missing-provider' } })
+    expect(screen.getByText('没有匹配的服务商。')).toBeInTheDocument()
+    fireEvent.keyDown(search, { key: 'Escape' })
+    expect(screen.getByRole('dialog', { name: '新增连接' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('combobox', { name: '连接线路' }))
+    fireEvent.change(screen.getByLabelText('搜索连接线路'), { target: { value: 'deepseek_other' } })
+    expect(screen.getAllByRole('option')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('option', { name: /另一线路/ }))
+    expect(screen.getByRole('combobox', { name: '连接线路' })).toHaveTextContent('另一线路')
+    expect(api.createAIConnection).not.toHaveBeenCalled()
+    expect(api.patchAIConnection).not.toHaveBeenCalled()
+  })
   it('clears Key on auth-mode changes and submits approved none without a placeholder', async () => {
     vi.mocked(api.listAIProviders).mockResolvedValue([...profiles, { ...profile, provider_id: 'ollama',
       provider_name: 'Ollama', profile_id: 'approved_server', auth_modes: ['api_key', 'none'],
       data_destination_label: '管理员受信模型服务器；所选模型可能使用云服务' }])
     setup(); await openCreate()
-    fireEvent.change(screen.getByLabelText('服务商与受信端点'), { target: { value: 'approved_server' } })
+    choose('服务商', 'Ollama Cloud')
     fireEvent.change(screen.getByLabelText('API Key'), { target: { value: KEY } })
-    fireEvent.change(screen.getByLabelText('认证方式'), { target: { value: 'none' } })
+    choose('认证方式', '无需 Key')
     expect(screen.queryByLabelText('API Key')).toBeNull()
-    fireEvent.change(screen.getByLabelText('认证方式'), { target: { value: 'api_key' } })
+    choose('认证方式', 'API Key')
     expect(screen.getByLabelText('API Key')).toHaveValue('')
-    fireEvent.change(screen.getByLabelText('认证方式'), { target: { value: 'none' } })
+    choose('认证方式', '无需 Key')
     fireEvent.click(screen.getByRole('button', { name: '保存连接' }))
     await waitFor(() => expect(api.createAIConnection).toHaveBeenCalledOnce())
     const body = vi.mocked(api.createAIConnection).mock.calls[0][0]
@@ -125,7 +152,7 @@ describe('BYOK T01 connection settings', () => {
   })
   it('clears a draft when switching providers', async () => {
     setup(); await openCreate()
-    fireEvent.change(screen.getByLabelText('服务商与受信端点'), { target: { value: 'qwen_default' } })
+    choose('服务商', 'Qwen')
     expect(screen.getByLabelText('API Key')).toHaveValue('')
     expect(api.createAIConnection).not.toHaveBeenCalled()
   })

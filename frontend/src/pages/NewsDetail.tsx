@@ -12,6 +12,7 @@ import ChatBubbleButton from '@/components/chat/ChatBubbleButton'
 import LazyNewsChatAssistant from '@/components/chat/LazyNewsChatAssistant'
 import { prefetchNewsChatAssistant } from '@/components/chat/newsChatAssistantLoader'
 import PrivateTranslationPanel from '@/components/news-detail/PrivateTranslationPanel'
+import type { PrivateTranslationTask } from '@/services/privateTranslationApi'
 import TranslationStatus from '@/components/news-detail/TranslationStatus'
 import ErrorBanner from '@/components/news-detail/ErrorBanner'
 import FullContentSection from '@/components/news-detail/FullContentSection'
@@ -26,6 +27,7 @@ import SpeechStartMenu from '@/components/speech/SpeechStartMenu'
 import { useNewsDetail } from '@/hooks/useNewsDetail'
 import { useFullArticle } from '@/hooks/useFullArticle'
 import { hasReadableFullContent, hasPendingFullContentTask } from '@/types/news'
+import { useDefaultAIModel } from '@/hooks/useDefaultAIModel'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useArticleSearch } from '@/hooks/useArticleSearch'
 import { useArticleToc } from '@/hooks/useArticleToc'
@@ -61,7 +63,21 @@ export default function NewsDetail() {
   const fetchFullEnabled = capabilities.features.fetch_full.enabled
   const translationEnabled = capabilities.features.translation.enabled
   const ttsEnabled = capabilities.features.tts.enabled
+  const translationModel = useDefaultAIModel(user?.id ?? null, 'full_translation', translationEnabled)
+  // A selected personal binding (even stale) must never enter the legacy provider path.
+  const personalTranslation = Boolean(user && (translationModel.isPending || translationModel.isError
+    || translationModel.data?.preferences.some(item => ['default', 'full_translation'].includes(item.task_kind) && item.model_config_id)))
+  const translationButtonRef = useRef<HTMLDivElement>(null)
+  const openPrivateTranslation = useCallback(() => {
+    translationButtonRef.current?.querySelector<HTMLButtonElement>('button')?.click()
+  }, [])
   const { news, setNews, loading, error, refetch } = useNewsDetail(id)
+  const privateTaskKey = `${privateSelectionKey}:${news?.full_content_revision ?? 0}`
+  const [privateTaskState, setPrivateTaskState] = useState<{ key: string; task: PrivateTranslationTask | null } | null>(null)
+  const privateTask = privateTaskState?.key === privateTaskKey ? privateTaskState.task : null
+  const receivePrivateTask = useCallback((task: PrivateTranslationTask | null) => {
+    setPrivateTaskState({ key: privateTaskKey, task })
+  }, [privateTaskKey])
   const speechContextRef = useRef<object | null>(null)
   const pendingSpeechRef = useRef<{ context: object; scope: SpeechScope } | null>(null)
   // Only the committed viewer/article version may consume its waiting speech action.
@@ -118,7 +134,7 @@ export default function NewsDetail() {
     setShowOriginal,
     handleTranslate,
     cancelTranslation,
-  } = useTranslation(id ?? '', news, setNews, loading)
+  } = useTranslation(id ?? '', news, setNews, loading, !personalTranslation)
   const selectPrivateResult = useCallback((resultId: number | null) => {
     pendingSpeechRef.current = null
     setPrivateSelection({ key: privateSelectionKey, resultId })
@@ -157,6 +173,7 @@ export default function NewsDetail() {
       setAuthModalOpen(true)
       return
     }
+    if (personalTranslation) { openPrivateTranslation(); return }
     selectPrivateResult(null)
     const context = speechContextRef.current
     if (!context) return
@@ -167,7 +184,7 @@ export default function NewsDetail() {
       pendingSpeechRef.current = null
       handleSpeak('zh', pending.scope, null)
     })
-  }, [handleSpeak, handleTranslate, selectPrivateResult, setAuthModalOpen, translationEnabled, ttsEnabled, user])
+  }, [handleSpeak, handleTranslate, openPrivateTranslation, personalTranslation, selectPrivateResult, setAuthModalOpen, translationEnabled, ttsEnabled, user])
   useEffect(() => {
     const pending = pendingSpeechRef.current
     if (!pending || pending.context !== speechContextRef.current || !news?.full_content_zh) return
@@ -312,7 +329,6 @@ export default function NewsDetail() {
             <ReadStateButton key={news.id} newsId={news.id} />
           </div>
 
-          {news.cover_image && <img src={news.cover_image} alt={displayTitle} className="mb-8 w-full rounded-2xl shadow-sm" />}
 
           {news.is_medical && <p role="note" className="mb-4 text-sm text-muted-foreground">新闻资讯，不构成医疗建议。</p>}
           {fetchFullEnabled && <FullContentFetchStatus news={news} articleLoading={articleLoading} onFetch={retryFullArticle} onResume={resumeExistingFetch} onCancel={cancelFetch} />}
@@ -324,14 +340,18 @@ export default function NewsDetail() {
               translating={translating}
               translationWaitingShared={translationWaitingShared}
               translationPaused={translationPaused}
-              translateError={translateError}
+              translateError={personalTranslation && translateError === '个人 AI 连接已保存；请等待模型与用途配置完成。' ? '' : translateError}
               translationProgress={translationProgress}
+              privateTask={personalTranslation ? privateTask : null}
+              translationControls={personalTranslation && translationEnabled && user ? <div ref={translationButtonRef}><PrivateTranslationPanel
+                viewer={user.id} newsId={news.id} sourceRevision={news.full_content_revision ?? 0}
+                sourceMarkdown={news.full_content} onTaskChange={receivePrivateTask} onStart={() => { selectPrivateResult(null); setShowOriginal(false) }} /></div> : undefined}
               showOriginal={showOriginal}
               onToggleOriginal={toggleOriginal}
               selectedPrivateResultId={selectedPrivateResultId}
               onSelectPrivateResult={selectPrivateResult}
-              onTranslate={() => { selectPrivateResult(null); return handleTranslate(Boolean(news.full_content_zh)) }}
-              onRetryTranslate={() => { selectPrivateResult(null); return handleTranslate(Boolean(news.full_content_zh)) }}
+              onTranslate={() => { selectPrivateResult(null); return personalTranslation ? openPrivateTranslation() : handleTranslate(Boolean(news.full_content_zh)) }}
+              onRetryTranslate={() => { selectPrivateResult(null); return personalTranslation ? openPrivateTranslation() : handleTranslate(Boolean(news.full_content_zh)) }}
               onResumeTranslation={() => handleTranslate(false)}
               onStopTranslation={handleStopTranslation}
               onRefetch={() => requestFullArticle(true)}
@@ -342,9 +362,7 @@ export default function NewsDetail() {
             />
           )}
 
-          {readableBody && translationEnabled && user && <PrivateTranslationPanel
-            viewer={user.id} newsId={news.id} sourceRevision={news.full_content_revision ?? 0}
-            sourceMarkdown={news.full_content} />}
+
 
           {!readableBody && displayContent ? (
             <SummarySection content={displayContent} readingPolicy={news.body_access_granted ? 'standard' : news.reading_policy} onAskAssistant={chatEnabled ? openAssistant : undefined} />

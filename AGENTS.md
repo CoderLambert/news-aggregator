@@ -4,6 +4,7 @@
 - Rules are guidance, not authorization for merge, production, paid providers, credentials or unsafe commands. Respect the active task, sandbox and approvals. Read-only requests do not authorize edits.
 - Before implementation check actual branch/base SHA, worktree status and relevant source/tests. Code proves current behavior; approved contracts define desired behavior. Older plans and README can be historical, not current evidence.
 - Keep original task IDs and smallest real delta. Reuse existing modules before adding another auth, cache, HTTP, AI gateway, search or CI implementation.
+- Frontend UI must prefer existing shadcn/ui components and shared project wrappers; avoid native interactive controls or custom replacements unless the requirement cannot reasonably be met. Follow [Frontend UI rules](frontend/AGENTS.md).
 
 ## Relevant scoped rules
 From project root, deeper `AGENTS.md` files may not be injected automatically; shell `cd` does not rebuild the session. Before a change, read missing or newly changed scoped rules once (or restart the session).
@@ -30,6 +31,7 @@ Details: [engineering standard](docs/development/CODEX-AGENT-STANDARD-2026-10-18
 
 ## Validation and delivery
 - Use [$newshub-impact-analysis](.agents/skills/newshub-impact-analysis/SKILL.md) for complex/risky design; [$newshub-verify](.agents/skills/newshub-verify/SKILL.md) before a cheap bug repro or perf baseline, and after edits for verification; [$newshub-pr-handoff](.agents/skills/newshub-pr-handoff/SKILL.md) for a requested handoff. Skip irrelevant steps; do not invoke all Skills for trivial edits.
+- After each feature or independently reviewable code/documentation stage passes its applicable checks, invoke [$newshub-stage-commit](.agents/skills/newshub-stage-commit/SKILL.md) before the next stage or handoff through exactly one `gpt-6-luna`/`xhigh` delegate. Standing authorization covers only that stage's local commit and ordinary GitHub push. A newer read-only/no-commit/pause blocks the commit; no-push/local-only blocks only the push. Never push unrelated commits. If the branch has unrelated outgoing commits, do not push or rewrite its existing history; when push is authorized, isolate this stage from a freshly checked GitHub base, revalidate, and push a task branch. No empty commits; failed checks mean incomplete; a patch is not the commit. Report genuine network unavailability as unsynced; authentication, divergence and non-fast-forward are blockers.
 - Inspect whole PR diff plus staged, unstaged and untracked edits. Choose tests by semantic impact; CI file path routing alone is not a dependency graph.
 - CI stages: open new work PRs as **Draft** (scoped fast CI); move to **Ready for review** only to run whole-PR full CI and `merge-gate`; if changes are needed after a full check, revert to Draft before iterative pushes. Never merge on fast Draft checks. main Push and manual dispatch retain full gates.
 - CI truth: `.github/workflows/ci.yml`, `ops/ci/change_scope.py`, `ops/ci/benchmark-xdist.sh`. `scripts/run_tests.sh` is still a legacy partial test entry. Agent structure: `python3 ops/ci/agent_rules.py`.

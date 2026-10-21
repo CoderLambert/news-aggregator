@@ -1,5 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "streamdown/styles.css";
+@source "../node_modules/streamdown/dist/*.js";
 
 /* ────────────────────────────────────────────────────────────────────── */
 /* shadcn/ui — Tailwind 4 @theme tokens                                   */
@@ -551,4 +553,8 @@ mark[data-article-search-match].article-search-current {
 
 .newshub-mermaid svg .edgeLabel rect {
   fill: #ffffff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-sd-animate] { animation: none !important; }
 }

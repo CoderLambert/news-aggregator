@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react'
-import { Check, CheckCircle2, Copy, Languages, Loader2, RefreshCw, XCircle } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
+import { useEffect, useState, type ReactNode } from 'react'
+import type { PrivateTranslationTask } from '@/services/privateTranslationApi'
+import { Check, Copy, Languages, Loader2, RefreshCw, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import type { NewsDetail } from '@/types/news'
 import { hasReadableFullContent } from '@/types/news'
 import MarkdownContent from './MarkdownContent'
+import StreamingMarkdown from './StreamingMarkdown'
 import ErrorBanner from './ErrorBanner'
 
 interface FullContentSectionProps {
@@ -27,6 +28,9 @@ interface FullContentSectionProps {
   onCancelRefetch: () => void
   allowFetch?: boolean
   allowTranslation?: boolean
+  translationActionLabel?: string
+  translationControls?: ReactNode
+  privateTask?: PrivateTranslationTask | null
   selectedPrivateResultId?: number | null
   onSelectPrivateResult?: (resultId: number | null) => void
 }
@@ -49,14 +53,19 @@ export default function FullContentSection({
   onCancelRefetch,
   allowFetch = true,
   allowTranslation = true,
+  translationActionLabel,
+  translationControls,
+  privateTask,
   selectedPrivateResultId = null,
   onSelectPrivateResult,
 }: FullContentSectionProps) {
   if (!hasReadableFullContent(news)) return null
   const privateHistory = news.full_content_zh_private_history ?? []
+  const hasHistory = privateHistory.length > 1 || privateHistory.some(item => !item.current_match)
   const selectedPrivate = privateHistory.find((item) => item.result_id === selectedPrivateResultId) ?? null
-  const content = showOriginal ? news.full_content : (selectedPrivate ? selectedPrivate.content : (news.full_content_zh || news.full_content))
-  const readingTranslation = !showOriginal && (selectedPrivate !== null || Boolean(news.full_content_zh))
+  const livePrivate = !showOriginal && !selectedPrivate && privateTask
+  const content = livePrivate && ['queued', 'running'].includes(livePrivate.status) ? livePrivate.progress : showOriginal ? news.full_content : (selectedPrivate ? selectedPrivate.content : (livePrivate && livePrivate.status === 'succeeded' && livePrivate.result ? livePrivate.result.content : (news.full_content_zh || news.full_content)))
+  const readingTranslation = !showOriginal && (selectedPrivate !== null || Boolean(privateTask?.result) || Boolean(news.full_content_zh))
   const legacyCodeRepair = readingTranslation
     ? selectedPrivate === null && news.full_content_zh_scope === 'legacy'
     : news.full_content_state === 'legacy'
@@ -76,39 +85,37 @@ export default function FullContentSection({
         onCancelRefetch={onCancelRefetch}
         allowFetch={allowFetch}
         allowTranslation={allowTranslation}
-        selectedPrivateTranslation={Boolean(selectedPrivate)}
+        translationActionLabel={translationActionLabel}
+        translationControls={translationControls}
+        selectedPrivateTranslation={Boolean(selectedPrivate || privateTask)}
       />
 
-      {privateHistory.length ? (
-        <section aria-label="已保存的个人译文" className="mb-4 rounded-xl border border-border bg-card p-3">
-          <label htmlFor="saved-private-translation" className="mb-2 block text-sm font-medium">选择已保存的个人译文</label>
+      {hasHistory ? (
+        <details className="mb-4 text-sm text-muted-foreground">
+          <summary className="cursor-pointer">历史译文</summary>
+          <label htmlFor="saved-private-translation" className="mb-2 block text-sm font-medium">选择历史译文</label>
           <select
             id="saved-private-translation"
-            aria-label="选择已保存的个人译文"
+            aria-label="选择历史译文"
             className="h-10 max-w-full rounded-md border border-input bg-background px-3 text-sm"
             value={selectedPrivateResultId ?? ''}
             onChange={(event) => onSelectPrivateResult?.(event.target.value ? Number(event.target.value) : null)}
           >
-            <option value="">当前推荐译文</option>
-            {privateHistory.map((item) => (
+            <option value="">当前译文</option>
+            {privateHistory.map((item, index) => (
               <option key={item.result_id} value={item.result_id}>
-                {item.model} · {item.current_match ? '当前原文版本' : '旧版原文'} · 结果 #{item.result_id}
+                版本 {privateHistory.length - index} · {item.current_match ? '当前原文' : '旧版原文'}
               </option>
             ))}
           </select>
-          {selectedPrivate && selectedPrivate.current_match && !showOriginal && (
-            <p role="status" className="mt-2 text-sm text-muted-foreground">
-              正在查看模型 {selectedPrivate.model} 生成的个人译文，结果 #{selectedPrivate.result_id}。
-            </p>
-          )}
-          {selectedPrivate && !selectedPrivate.current_match && !showOriginal && (
-            <p role="status" className="mt-2 text-sm text-amber-700">
-              正在查看旧版原文的个人译文。对应原文标题：{selectedPrivate.source_title || '标题不可用'}。
-              切换回“当前推荐译文”可查看当前版本。
-            </p>
-          )}
-        </section>
+        </details>
       ) : null}
+      {selectedPrivate && !selectedPrivate.current_match && !showOriginal && (
+        <p role="status" className="mb-4 text-sm text-amber-700">
+          这是原文更新前的译文。对应原文标题：{selectedPrivate.source_title || '标题不可用'}。
+          在历史译文中选择“当前译文”可返回当前版本。
+        </p>
+      )}
 
       {allowTranslation && translating && <TranslationProgressUI progress={translationProgress} waitingShared={translationWaitingShared} onStop={onStopTranslation} />}
       {allowTranslation && translationPaused && !translating && !translateError && (
@@ -118,16 +125,19 @@ export default function FullContentSection({
 
       <Card className="article-section-render py-5">
         <CardContent className="px-5">
-          <MarkdownContent content={content} legacyCodeRepair={legacyCodeRepair} />
+          {livePrivate && ['queued', 'running'].includes(livePrivate.status)
+            ? <div aria-label="正在生成的译文"><p role="status" className="mb-3 text-sm text-muted-foreground">翻译中，以下内容尚未完成。</p>
+                {livePrivate.progress ? <StreamingMarkdown content={livePrivate.progress} /> : <p className="text-sm text-muted-foreground">正在等待模型响应…</p>}</div>
+            : <MarkdownContent content={content} legacyCodeRepair={legacyCodeRepair} />}
         </CardContent>
       </Card>
     </div>
   )
 }
 
-type ToolbarProps = Pick<FullContentSectionProps, 'news' | 'translating' | 'translationPaused' | 'translateError' | 'showOriginal' | 'onToggleOriginal' | 'onTranslate' | 'onRefetch' | 'refetching' | 'onCancelRefetch' | 'allowFetch' | 'allowTranslation'> & { selectedPrivateTranslation: boolean; content: string }
+type ToolbarProps = Pick<FullContentSectionProps, 'news' | 'translating' | 'translationPaused' | 'translateError' | 'showOriginal' | 'onToggleOriginal' | 'onTranslate' | 'onRefetch' | 'refetching' | 'onCancelRefetch' | 'allowFetch' | 'allowTranslation' | 'translationActionLabel' | 'translationControls'> & { selectedPrivateTranslation: boolean; content: string }
 
-function Toolbar({ news, content, translating, translationPaused, translateError, showOriginal, onToggleOriginal, onTranslate, onRefetch, refetching, onCancelRefetch, allowFetch = true, allowTranslation = true, selectedPrivateTranslation }: ToolbarProps) {
+function Toolbar({ news, content, translating, translationPaused, translateError, showOriginal, onToggleOriginal, onTranslate, onRefetch, refetching, onCancelRefetch, allowFetch = true, allowTranslation = true, translationActionLabel, translationControls, selectedPrivateTranslation }: ToolbarProps) {
   const [copied, setCopied] = useState(false)
   const [copyMessage, setCopyMessage] = useState('')
   const [copyTimer, setCopyTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
@@ -154,35 +164,16 @@ function Toolbar({ news, content, translating, translationPaused, translateError
   const isChineseSource = news.source_language === 'zh'
 
   return (
-    <section aria-label="正文状态与操作" className="mb-5 rounded-xl border border-border bg-secondary/50 p-3 sm:p-4 backdrop-blur-xs">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Badge variant="outline" className="bg-primary/10 text-primary border-border rounded-full px-2.5 py-0.5 text-[11px] font-medium">
-              <CheckCircle2 className="size-3" />正文已就绪
-            </Badge>
-            {news.full_content_zh && !isChineseSource && (
-              <Badge variant="default" className="rounded-full px-2.5 py-0.5 text-[11px] font-medium">
-                <Languages className="size-3" />{news.full_content_zh_scope === 'shared' ? '共享译文' : news.full_content_zh_scope === 'private' ? '个人译文' : '已有中文译文'}
-              </Badge>
-            )}
-          </div>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            {allowFetch && allowTranslation
-              ? isChineseSource ? '正文排版已就绪，可复制或重新获取。' : news.full_content_zh_scope === 'shared' ? '正在复用共享译文，不消耗你的模型额度。个人重新翻译会使用你的账号额度。' : news.full_content_zh_scope === 'private' ? '这是当前账号的个人译文，重新翻译不会覆盖已有共享版本。' : '正文结构已保留，可复制、重新获取或翻译。首次完整翻译后可供其他读者复用。'
-              : isChineseSource ? '正文排版已就绪，可复制。' : news.full_content_zh_scope === 'shared' ? '正在复用共享译文。' : news.full_content_zh_scope === 'private' ? '这是当前账号的个人译文。' : '正文结构已保留，可复制或切换已缓存的语言。'}
-          </p>
-        </div>
-
+    <section aria-label="正文状态与操作" className="mb-4 flex flex-wrap items-center gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <CopyButton copied={copied} onCopy={() => { void handleCopy() }} />
           {allowFetch && <RefetchButton refetching={refetching} onClick={onRefetch} onCancel={onCancelRefetch} />}
           {(news.full_content_zh || selectedPrivateTranslation) && <LangToggle showOriginal={showOriginal} onToggle={onToggleOriginal} />}
-          {allowTranslation && !isChineseSource && !translating && !translationPaused && !translateError && (news.full_content_zh_scope !== 'shared' || news.full_translation_personal_available) && (
-            <TranslateButton hasTranslation={Boolean(news.full_content_zh)} shared={news.full_content_zh_scope === 'shared'} onClick={onTranslate} />
+          {allowTranslation && !translationControls && !isChineseSource && !translating && !translationPaused && !translateError && (news.full_content_zh_scope !== 'shared' || news.full_translation_personal_available) && (
+            <TranslateButton hasTranslation={Boolean(news.full_content_zh)} shared={news.full_content_zh_scope === 'shared'} onClick={onTranslate} actionLabel={translationActionLabel} />
           )}
+          {allowTranslation && translationControls}
         </div>
-      </div>
       {copyMessage && <span role="status" className="sr-only">{copyMessage}</span>}
     </section>
   )
@@ -205,8 +196,8 @@ function LangToggle({ showOriginal, onToggle }: { showOriginal: boolean; onToggl
   )
 }
 
-function TranslateButton({ hasTranslation, shared, onClick }: { hasTranslation: boolean; shared: boolean; onClick: () => void }) {
-  const label = shared ? '生成个人译文' : hasTranslation ? '重新翻译' : '翻译为中文'
+function TranslateButton({ hasTranslation, shared, onClick, actionLabel }: { hasTranslation: boolean; shared: boolean; onClick: () => void; actionLabel?: string }) {
+  const label = actionLabel ?? (shared ? '重新翻译' : hasTranslation ? '重新翻译' : '翻译为中文')
   return (
     <Button
       type="button"
@@ -269,7 +260,7 @@ function TranslationProgressUI({ progress, waitingShared, onStop }: { progress: 
       </div>
       <Card className="border-border py-5 opacity-80">
         <CardContent className="px-5">
-          <div className="article-markdown prose prose-gray max-w-none"><MarkdownContent content={progress} /></div>
+          <StreamingMarkdown content={progress} />
         </CardContent>
       </Card>
     </div>

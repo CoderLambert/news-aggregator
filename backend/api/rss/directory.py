@@ -280,7 +280,33 @@ def _fold(value):
     return unicodedata.normalize('NFKC', value).casefold().strip()
 
 
-def search_directory(q='', *, limit=20, cursor=None):
+# Reviewed display groups over the pinned directory tags; no model inference.
+DIRECTORY_CATEGORIES = (
+    ('ai', '人工智能', ('Artificial Intelligence',)),
+    ('engineering', '编程与技术', ('Engineering & Technology',)),
+    ('security', '网络安全', ('Security',)),
+    ('news', '科技与资讯', ('Technology Media', 'Tech Newsletters & Weeklies', 'News')),
+    ('science', '科学研究', ('Research & Science',)),
+    ('design', '产品与设计', ('Product & Design',)),
+    ('business', '商业与创业', ('Business & Startups',)),
+    ('culture', '人文与博客', ('Personal Blogs', 'Culture & Ideas')),
+    ('community', '社区与播客', ('Communities', 'Podcasts', 'Videos')),
+)
+FEATURED_CHANNELS = frozenset({
+    'OpenAI News', '机器之心', 'Hugging Face - Blog', 'Google DeepMind News',
+    'Martin Fowler', 'The GitHub Blog', '阮一峰的网络日志', '少数派', 'WIRED',
+    'CISA', 'Krebs on Security', 'Nature', 'NASA', 'Quanta Magazine',
+    '阿里云设计中心', '拾月的博客', '虹线', 'Macin', '卢昌海个人主页',
+    'Hacker News', 'V2EX · 技术', '硅谷101 — Podcast',
+})
+
+
+def directory_category_ids(tags):
+    return {key for key, _label, names in DIRECTORY_CATEGORIES
+            if any(tag.endswith(name) for tag in tags for name in names)}
+
+
+def search_directory(q='', *, limit=20, cursor=None, category=''):
     """Return local metadata only; T20 adds authorized user state/previews.
 
     `subscribed=None` means unknown until user-aware enrichment. Empty cached
@@ -290,6 +316,8 @@ def search_directory(q='', *, limit=20, cursor=None):
         raise DirectoryValidationError('query must be at most 200 characters')
     if type(limit) is not int or not 1 <= limit <= 50:
         raise DirectoryValidationError('limit must be between 1 and 50')
+    if category not in {'', *(row[0] for row in DIRECTORY_CATEGORIES)}:
+        raise DirectoryValidationError('invalid category')
     query = _fold(q)
     snapshot = FeedDirectorySnapshot.objects.filter(active=True).first()
     version = snapshot.checksum if snapshot else None
@@ -297,7 +325,7 @@ def search_directory(q='', *, limit=20, cursor=None):
     if cursor:
         try:
             state = signing.loads(cursor, salt='rss-directory-v1', max_age=86400)
-            if state['snapshot'] != version or state['query'] != query:
+            if state['snapshot'] != version or state['query'] != query or state.get('category', '') != category or state.get('order_version') != 2:
                 raise ValueError
             offset = state['offset']
             if type(offset) is not int or offset < 0 or offset > MAX_ENTRIES:
@@ -307,6 +335,8 @@ def search_directory(q='', *, limit=20, cursor=None):
     matches = []
     if snapshot:
         for entry in snapshot.entries.filter(visibility='public'):
+            if category and category not in directory_category_ids(entry.tags):
+                continue
             name, url = _fold(entry.name), _fold(entry.public_url)
             if not query or query in (name, url):
                 rank = 0
@@ -316,15 +346,16 @@ def search_directory(q='', *, limit=20, cursor=None):
                 rank = 2
             else:
                 continue
-            matches.append(((rank, entry.kind != 'feed', str(entry.entry_id)), entry))
+            matches.append(((rank, entry.name not in FEATURED_CHANNELS, entry.kind != 'feed', name, str(entry.entry_id)), entry))
     matches.sort(key=lambda match: match[0])
     page = matches[offset:offset + limit]
     fields = ('name', 'description', 'language', 'region', 'tags', 'origin', 'kind',
               'public_url', 'required_parameters', 'capability_requirements', 'verified_at')
     results = [dict(id=str(entry.entry_id), **{field: getattr(entry, field) for field in fields},
-                    subscribed=None, cached_articles=[]) for _, entry in page]
+                    subscribed=None, cached_articles=[], recommended=entry.name in FEATURED_CHANNELS) for _, entry in page]
     next_cursor = None
     if offset + limit < len(matches):
-        next_cursor = signing.dumps({'snapshot': version, 'query': query, 'offset': offset + limit},
+        next_cursor = signing.dumps({'snapshot': version, 'query': query, 'category': category, 'order_version': 2, 'offset': offset + limit},
                                     salt='rss-directory-v1', compress=True)
-    return {'results': results, 'next_cursor': next_cursor, 'snapshot_version': version}
+    return {'results': results, 'next_cursor': next_cursor, 'snapshot_version': version,
+            'categories': [{'id': key, 'name': label} for key, label, _tags in DIRECTORY_CATEGORIES]}

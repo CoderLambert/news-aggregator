@@ -1,3 +1,8 @@
+import { Box, Plus } from 'lucide-react'
+import { ModelCombobox } from '@/components/ui/model-combobox'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import {
   ConnectionRequestError, createAIModel, deleteAIModel, listAIModelCatalog, listAIModels,
@@ -11,7 +16,7 @@ function safeError(error: unknown) {
 }
 
 /** Personal models only: no automatic model requests on render, save or reload. */
-export default function AIModelsManager({ connection, viewer }: { connection: AIConnection; viewer: number }) {
+export default function AIModelsManager({ connection, viewer, onModelsChanged }: { connection: AIConnection; viewer: number; onModelsChanged?: () => void }) {
   const [models, setModels] = useState<AIModel[] | null>(null)
   const [catalog, setCatalog] = useState<AIModelCatalogEntry[]>([])
   const [catalogNotice, setCatalogNotice] = useState('')
@@ -65,6 +70,7 @@ export default function AIModelsManager({ connection, viewer }: { connection: AI
       const updated = await listAIModels(connection, controller.signal)
       if (controller.signal.aborted) return
       setModels(updated)
+      onModelsChanged?.()
       setNotice(note)
       setEdit(null); setConfirmDelete(null); setBillingConsent(false)
     } catch (reason) {
@@ -120,17 +126,17 @@ export default function AIModelsManager({ connection, viewer }: { connection: AI
       if (!controller.signal.aborted) setBusy(false)
     }
   }
-  return <div className="mt-4 min-w-0 border-t pt-3" aria-label={`${connection.display_name}的模型配置`}>
-    <h3>模型配置</h3>
-    <p className="workspace-caption">选择预置或填写当前连接支持的模型 ID。保存不会调用服务商；主动测试可能产生费用，验证通过后才能用于相应用途。</p>
+  return <div className="ai-models-manager min-w-0" aria-label={`${connection.display_name}的模型配置`}>
+    <h3 className="text-sm font-semibold">模型配置</h3>
+    <p className="workspace-caption">添加服务商提供的模型，验证后即可设为默认。</p>
     {error && <p role="alert" className="workspace-error">{error}</p>}
     {notice && <p role="status" className="workspace-notice">{notice}</p>}
     {catalogNotice && <p role="status" className="workspace-caption">{catalogNotice}</p>}
-    <div className="workspace-actions flex-wrap"><button type="button" className="workspace-button secondary" disabled={busy || loading} onClick={reload}>重新读取模型</button>
-      {connection.model_discovery_supported && <button type="button" className="workspace-button secondary"
-        disabled={busy || loading || !models || !connection.is_enabled} onClick={() => { void inspect('discover') }}>发现服务端模型</button>}
-      <button type="button" className="workspace-button secondary" disabled={busy || loading || !models}
-        onClick={() => { void inspect('diagnostics') }}>检查配置（不调用模型）</button></div>
+    <div className="workspace-actions flex-wrap"><Button type="button" variant="outline" size="sm" disabled={busy || loading} onClick={reload}>重新读取模型</Button>
+      {connection.model_discovery_supported && <Button type="button" variant="outline" size="sm"
+        disabled={busy || loading || !models || !connection.is_enabled} onClick={() => { void inspect('discover') }}>发现服务端模型</Button>}
+      <Button type="button" variant="outline" size="sm" disabled={busy || loading || !models}
+        onClick={() => { void inspect('diagnostics') }}>检查配置（不调用模型）</Button></div>
     {diagnostics && <div className="workspace-soft-panel" role="status">
       <p>连接：{diagnostics.connection_status === 'active' ? '授权有效' : '授权不可用'} · 端点：{diagnostics.endpoint_status === 'approved' ? '管理员已批准' : '不可用'}</p>
       <p>{diagnostics.data_destination_label}</p><p>此检查未发送推理请求；模型能力以独立测试结果为准。</p>
@@ -138,46 +144,50 @@ export default function AIModelsManager({ connection, viewer }: { connection: AI
     {loading && <p role="status">正在读取模型…</p>}
     {!loading && !models && <p role="status">模型状态未知。重新读取成功前无法再次提交操作或收费探针。</p>}
     {models && <>
-      <form onSubmit={add} className="grid min-w-0 gap-2 py-3">
-        <label>预置模型（可选）<select value={selected} disabled={busy} onChange={event => setSelected(event.target.value)}>
-          <option value="">{catalog.length ? '请选择模型，或继续手动填写 ID' : '没有预置模型，可手动填写 ID'}</option>
-          {catalog.map(item => <option key={item.model_id} value={item.model_id}>{item.display_name} · {item.model_id}</option>)}
-        </select></label>
-        <label>或手动填写模型 ID<input value={manualId} disabled={busy} maxLength={160} placeholder="例如：服务商控制台显示的模型 ID" onChange={event => setManualId(event.target.value)} /></label>
-        <button type="submit" className="workspace-button secondary" disabled={busy || models.length >= 30 || !(manualId.trim() || selected)}>添加模型（不调用服务商）</button>
-      </form>
+      <details className="ai-model-add mt-4 rounded-lg border border-dashed bg-secondary/15" open={models.length === 0}>
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-medium"><Plus className="size-4" />添加模型<span className="ml-auto text-xs font-normal text-muted-foreground">搜索目录或填写 ID</span></summary>
+        <form onSubmit={add} className="grid min-w-0 gap-3 border-t p-4">
+          <label className="grid gap-2 text-xs font-medium">预置模型（可选）
+            <ModelCombobox label="预置模型（可选）" value={selected} disabled={busy || catalog.length === 0} onChange={setSelected}
+              options={catalog.map(item => ({ value: item.model_id, label: item.display_name, description: item.display_name !== item.model_id ? item.model_id : undefined }))} />
+          </label>
+          <label className="grid gap-2 text-xs font-medium">或手动填写模型 ID<Input value={manualId} disabled={busy} maxLength={160} placeholder="例如：minimax-m3.1-flash" onChange={event => setManualId(event.target.value)} /></label>
+          <Button type="submit" variant="outline" size="sm" className="justify-self-start" disabled={busy || models.length >= 30 || !(manualId.trim() || selected)}><Plus />添加模型（不调用服务商）</Button>
+        </form>
+      </details>
       {models.length === 0 && <p>尚未添加模型。</p>}
-      {models.map(model => <section key={model.id} aria-label={`模型 ${model.display_name}`} className="my-3 border-t pt-3">
-        <strong>{model.display_name}</strong><p className="workspace-caption">{model.model_id} · {model.has_trusted_route ? '可主动测试' : '暂不可测试'}</p>
+      {models.map(model => <section key={model.id} aria-label={`模型 ${model.display_name}`} className="my-4 rounded-xl border bg-secondary/10 p-4">
+        <div className="mb-2 flex items-center gap-2"><Box className="size-4 text-primary" /><strong className="text-sm">{model.display_name}</strong></div><p className="workspace-caption">{model.model_id} · {model.has_trusted_route ? '可主动测试' : '暂不可测试'}</p>
         {!model.has_trusted_route && <p className="workspace-caption">请检查模型 ID；GLM、百炼和 Kimi 的旧默认连接需新建为对应地域连接后再测试。</p>}
-        <p>文本：{stateLabel[model.capabilities.text]} · 工具调用：{stateLabel[model.capabilities.tools]}</p>
+        <div className="my-3 flex flex-wrap gap-2"><Badge variant="outline" className={model.capabilities.text === 'supported' ? 'border-primary/20 bg-primary/5 text-primary' : 'text-muted-foreground'}>文本：{stateLabel[model.capabilities.text]}</Badge>
+          <Badge variant="outline" className={model.capabilities.tools === 'supported' ? 'border-primary/20 bg-primary/5 text-primary' : 'text-muted-foreground'}>工具调用：{stateLabel[model.capabilities.tools]}</Badge></div>
         <p className="workspace-caption">输出方式：{model.delivery_mode === 'streaming' && model.stream_verified === true ? '已验证终态的逐步输出'
           : model.delivery_mode === 'buffered' ? '完整生成后显示（buffered）' : '尚未核实'}；费用未知。</p>
         <p className="workspace-caption">上下文上限：未核实 · 配置版本 {model.config_revision}</p>
         <div className="workspace-actions flex-wrap">
-          <button type="button" className="workspace-button secondary" disabled={busy} onClick={() => setEdit({ model, field: 'display_name', value: model.display_name })}>修改模型名称</button>
-          <button type="button" className="workspace-button secondary" disabled={busy} onClick={() => setEdit({ model, field: 'model_id', value: model.model_id })}>修改模型 ID</button>
-          <button type="button" className="workspace-button secondary" disabled={busy || !billingConsent || !connection.is_enabled || !model.has_trusted_route}
-            onClick={() => probe(model, 'text')}>测试文本能力</button>
-          <button type="button" className="workspace-button secondary" disabled={busy || !billingConsent || !connection.is_enabled || !model.has_trusted_route}
-            onClick={() => probe(model, 'tools')}>测试工具能力</button>
+          <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setEdit({ model, field: 'display_name', value: model.display_name })}>修改模型名称</Button>
+          <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setEdit({ model, field: 'model_id', value: model.model_id })}>修改模型 ID</Button>
+          <Button type="button" variant="outline" size="sm" disabled={busy || !billingConsent || !connection.is_enabled || !model.has_trusted_route}
+            onClick={() => probe(model, 'text')}>测试文本能力</Button>
+          <Button type="button" variant="outline" size="sm" disabled={busy || !billingConsent || !connection.is_enabled || !model.has_trusted_route}
+            onClick={() => probe(model, 'tools')}>测试工具能力</Button>
           {confirmDelete === model.id
-            ? <><button type="button" className="workspace-button danger" disabled={busy} onClick={() => void perform(signal => deleteAIModel(connection, model, viewer, signal), '模型已删除。')}>确认删除模型</button>
-                <button type="button" className="workspace-button secondary" disabled={busy} onClick={() => setConfirmDelete(null)}>取消删除</button></>
-            : <button type="button" className="workspace-button danger" disabled={busy} onClick={() => setConfirmDelete(model.id)}>删除模型</button>}
+            ? <><Button type="button" variant="ghost" size="sm" className="text-destructive hover:text-destructive" disabled={busy} onClick={() => void perform(signal => deleteAIModel(connection, model, viewer, signal), '模型已删除。')}>确认删除模型</Button>
+                <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setConfirmDelete(null)}>取消删除</Button></>
+            : <Button type="button" variant="ghost" size="sm" className="text-destructive hover:text-destructive" disabled={busy} onClick={() => setConfirmDelete(model.id)}>删除模型</Button>}
         </div>
         {edit?.model.id === model.id && <form className="grid gap-2 py-2" onSubmit={saveEdit}>
           <label>{edit.field === 'model_id' ? '模型 ID' : '模型名称'}
-            <input value={edit.value} maxLength={edit.field === 'model_id' ? 160 : 64} required disabled={busy}
+            <Input value={edit.value} maxLength={edit.field === 'model_id' ? 160 : 64} required disabled={busy}
               onChange={event => setEdit({ ...edit, value: event.target.value })} /></label>
-          <div className="workspace-actions"><button type="submit" className="workspace-button" disabled={busy || !edit.value.trim()}>保存模型修改</button>
-            <button type="button" className="workspace-button secondary" onClick={() => setEdit(null)}>取消修改</button></div>
+          <div className="workspace-actions"><Button type="submit" size="sm" disabled={busy || !edit.value.trim()}>保存模型修改</Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => setEdit(null)}>取消修改</Button></div>
         </form>}
       </section>)}
-      <label className="flex items-start gap-2">
+      <label className="mt-3 flex items-start gap-2 rounded-lg bg-secondary/40 p-3 text-xs leading-relaxed text-muted-foreground">
         <input type="checkbox" checked={billingConsent} disabled={busy}
           onChange={event => setBillingConsent(event.target.checked)} />
-        <span>我确认主动测试可能产生服务商费用。不会自动测试、重试或切换模型；测试仅使用固定短提示。</span>
+        <span>我确认主动测试可能产生服务商费用。仅发送固定短提示，不自动重试。</span>
       </label>
     </>}
   </div>

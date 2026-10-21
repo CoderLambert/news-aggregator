@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import MermaidBlock from './MermaidBlock'
 import { highlightCode, normalizeShikiLanguage } from '@/lib/shiki'
 import { useNearViewport } from '@/hooks/useNearViewport'
+import { isAvatarAlt } from '@/lib/articleImages'
 
 const IMG_STYLE = { maxHeight: '480px', objectFit: 'contain' } satisfies CSSProperties
 const MAX_HIGHLIGHT_CHARS = 80_000
@@ -17,6 +18,8 @@ const MAX_HIGHLIGHT_CHARS = 80_000
 type MarkdownNode = {
   type: string
   value?: string
+  url?: string
+  alt?: string
   children?: MarkdownNode[]
 }
 
@@ -558,7 +561,9 @@ const MD_COMPONENTS: Components = {
     <td className="px-4 py-2.5 text-foreground border-b border-border">{children}</td>
   ),
   hr: () => <hr className="my-6 border-border" />,
-  img: ({ src, alt }) => (
+  img: ({ src, alt }) => isAvatarAlt(alt) ? (
+    <img src={src} alt={alt || ''} className="inline-block size-7 rounded-full object-cover align-middle" loading="lazy" />
+  ) : (
     <span className="my-6 block text-center">
       <img
         src={src}
@@ -576,8 +581,28 @@ function LegacyCodeBlock({ children }: { children?: ReactNode }) {
 }
 const LEGACY_MD_COMPONENTS: Components = { ...MD_COMPONENTS, pre: LegacyCodeBlock }
 
-const REMARK_PLUGINS = [remarkGfm]
-const LEGACY_SUMMARY_REMARK_PLUGINS = [remarkGfm, remarkLegacySummaryParagraphs]
+// Pair explicit avatars only with the next link to the same author.
+function mergeAvatarRows(node: MarkdownNode) {
+  if (!node.children) return
+  for (let index = 0; index < node.children.length - 1; index++) {
+    const current = node.children[index]
+    const next = node.children[index + 1]
+    const link = current.children?.[0]
+    const image = link?.children?.[0]
+    if (current.type === 'paragraph' && current.children?.length === 1
+      && link?.type === 'link' && link.children?.length === 1
+      && image?.type === 'image' && isAvatarAlt(image.alt)
+      && next.type === 'paragraph' && next.children?.[0]?.type === 'link'
+      && next.children[0].url === link.url) {
+      current.children = [link, { type: 'text', value: ' ' }, ...next.children]
+      node.children.splice(index + 1, 1)
+    }
+  }
+  node.children.forEach(mergeAvatarRows)
+}
+const remarkAvatarRows: Plugin = () => tree => mergeAvatarRows(tree as MarkdownNode)
+const REMARK_PLUGINS = [remarkGfm, remarkAvatarRows]
+const LEGACY_SUMMARY_REMARK_PLUGINS = [remarkGfm, remarkLegacySummaryParagraphs, remarkAvatarRows]
 
 /**
  * Apple-style article body Markdown renderer.

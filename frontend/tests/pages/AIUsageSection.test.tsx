@@ -32,3 +32,17 @@ it('removes the previous viewer records while the next viewer response is pendin
   await act(async () => resolve({ ...data, attempts: [] }))
   expect(await screen.findByText(/暂无调用记录/)).toBeInTheDocument()
 })
+
+it('reads the next page without retaining previous-page rows', async () => {
+  vi.mocked(listAIUsage).mockResolvedValueOnce({ ...data, has_more: true, page_count: 2 })
+    .mockResolvedValueOnce({ ...data, has_more: false, page_count: 2,
+      attempts: [{ ...data.attempts[0], id: 'two', model_id: 'page-two-model' }] })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<QueryClientProvider client={client}><AIUsageSection viewer={1} /></QueryClientProvider>)
+  await screen.findByText(/private-model-A/)
+  fireEvent.click(screen.getByRole('button', { name: '下一页' }))
+  await screen.findByText(/page-two-model/)
+  expect(screen.queryByText(/private-model-A/)).not.toBeInTheDocument()
+  expect(listAIUsage).toHaveBeenLastCalledWith(expect.any(AbortSignal), 2, 20)
+  expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled()
+})

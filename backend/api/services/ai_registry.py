@@ -46,8 +46,9 @@ def provider_catalog(user_id=None):
         {'provider_id': profile['provider_id'], 'provider_name': SERVICE_PRESETS[profile['provider_id']],
          'profile_id': profile['profile_id'], 'version': profile['version'],
          'region_name': profile['display_name'], 'auth_modes': list(profile['auth_modes']),
-         'protocol_family': profile['protocol_family'],
-         'data_destination_label': '管理员受信模型服务器；所选模型可能使用云服务'}
+         'protocol_family': profile['protocol_family'], 'network_zone': profile['network_zone'],
+         'data_destination_label': ('请求发送至所选云服务商。' if profile['network_zone'] == 'public_https'
+                                    else '请求发送至管理员授权的模型服务器。')}
         for profile in configured_profiles() if profile_allows_user(profile, user_id)
     ]
 

@@ -1,0 +1,51 @@
+.workspace-modal.rss-discover-modal { width:min(820px,calc(100vw - 32px)); }
+.rss-directory-card-list { display:grid; gap:14px; max-height:38svh; overflow-y:auto; overscroll-behavior:contain; padding:3px 5px 10px 2px; scrollbar-width:thin; }
+.rss-directory-card { min-width:0; padding:20px; border:1px solid var(--border); border-radius:14px; background:var(--card); transition:border-color .15s,box-shadow .15s; }
+.rss-directory-card:hover { border-color:color-mix(in oklab,var(--primary) 35%,var(--border)); }
+.rss-directory-card.is-selected { border-color:var(--primary); box-shadow:0 0 0 1px var(--primary); }
+.rss-directory-card-heading { display:flex; align-items:center; gap:13px; }
+.rss-directory-card-mark { position:relative; display:grid; place-items:center; flex:none; width:44px; height:44px; border-radius:12px; color:hsl(var(--channel-hue) 35% 38%); background:color-mix(in oklab,hsl(var(--channel-hue) 35% 65%) 23%,var(--card)); font-size:21px; font-weight:700; }
+.rss-directory-card-mark > svg { position:absolute; right:-3px; bottom:-3px; width:18px; height:18px; padding:3px; border-radius:6px; background:var(--card); color:var(--primary); }
+.rss-directory-card-identity { min-width:0; flex:1; }
+.rss-directory-card-identity h3 { margin:0; font-size:16px; line-height:1.5; font-weight:650; overflow-wrap:anywhere; color:var(--foreground); }
+.rss-directory-card-address { margin:3px 0 0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; color:var(--muted-foreground); }
+.rss-directory-card-description { margin:12px 0 0; font-size:13px; line-height:1.7; color:var(--muted-foreground); display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
+.rss-directory-card-tags { display:flex; flex-wrap:wrap; gap:6px; padding:0; margin:13px 0 0; list-style:none; }
+.rss-directory-card-tags li { max-width:100%; padding:4px 9px; border-radius:6px; background:var(--secondary); color:var(--muted-foreground); font-size:11px; line-height:1.5; overflow-wrap:anywhere; }
+.rss-directory-card-preview { margin-top:18px; }
+.rss-directory-card-section-title { display:flex; align-items:center; gap:6px; margin:0 0 9px; font-size:11px; font-weight:500; color:var(--muted-foreground); }
+.rss-directory-card-section-title > span { margin-left:auto; font-weight:400; }
+.rss-directory-card-stories { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+.rss-directory-card-story { display:flex; flex-direction:column; min-width:0; overflow:hidden; border:1px solid var(--border); border-radius:9px; color:var(--foreground); background:var(--background); text-decoration:none; }
+.rss-directory-card-story:hover { border-color:var(--primary); }
+.rss-directory-card-story-art { display:grid; place-items:center; height:72px; background:color-mix(in oklab,hsl(var(--channel-hue) 30% 66%) 25%,var(--card)); color:color-mix(in oklab,var(--foreground) 55%,transparent); font-size:25px; font-weight:500; }
+.rss-directory-card-story:nth-child(2) .rss-directory-card-story-art { background:color-mix(in oklab,hsl(calc(var(--channel-hue) + 45) 28% 66%) 25%,var(--card)); }
+.rss-directory-card-story:nth-child(3) .rss-directory-card-story-art { background:color-mix(in oklab,hsl(calc(var(--channel-hue) + 90) 28% 66%) 25%,var(--card)); }
+.rss-directory-card-story strong { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; margin:10px 10px 6px; font-size:12px; line-height:1.6; font-weight:500; overflow-wrap:anywhere; }
+.rss-directory-card-story time { display:flex; align-items:center; gap:4px; padding:0 10px 10px; margin-top:auto; font-size:10px; color:var(--muted-foreground); }
+.rss-directory-card-no-preview { display:flex; align-items:center; gap:10px; padding:13px; margin-top:15px; border-radius:8px; background:color-mix(in oklab,var(--secondary) 55%,var(--card)); color:var(--muted-foreground); font-size:12px; }
+.rss-directory-card-no-preview small { display:block; margin-top:3px; font-size:11px; opacity:.8; }
+.rss-directory-card-footer { display:flex; justify-content:space-between; align-items:center; gap:12px; padding-top:14px; margin-top:16px; border-top:1px solid var(--border); }
+.rss-directory-card-source { display:flex; align-items:center; gap:6px; min-width:0; color:var(--muted-foreground); font-size:11px; overflow-wrap:anywhere; }
+.rss-directory-card-source svg { flex:none; }
+.rss-directory-card-footer .workspace-button { display:inline-flex; align-items:center; gap:6px; flex:none; min-height:34px; padding:7px 11px; font-size:12px; }
+.rss-directory-card button:focus-visible,.rss-directory-card a:focus-visible { outline:2px solid var(--primary); outline-offset:3px; }
+@media(max-width:520px) {
+  .workspace-modal.rss-discover-modal { width:calc(100vw - 24px); }
+  .rss-directory-card { padding:15px; }
+  .rss-directory-card-identity h3 { font-size:15px; }
+  .rss-directory-card-stories { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .rss-directory-card-story-art { height:64px; }
+  .rss-directory-card-story:last-child:nth-child(3) { grid-column:1 / -1; display:grid; grid-template-columns:64px minmax(0,1fr); }
+  .rss-directory-card-story:last-child:nth-child(3) .rss-directory-card-story-art { grid-row:1 / 3; height:100%; min-height:64px; }
+  .rss-directory-card-footer .workspace-button { min-height:44px; }
+}
+@media(prefers-reduced-motion:reduce) { .rss-directory-card { transition:none; } }
+
+.rss-directory-categories { border:0; padding:0; margin:14px 0; min-width:0; }
+.rss-directory-categories legend { font-size:13px; font-weight:600; margin-bottom:10px; }
+.rss-directory-categories [role="group"] { display:flex; flex-wrap:wrap; gap:8px; }
+.rss-directory-categories button { border:1px solid var(--border); border-radius:999px; padding:7px 12px; background:var(--card); color:var(--muted-foreground); font-size:12px; cursor:pointer; }
+.rss-directory-categories button[aria-pressed="true"] { background:var(--primary); border-color:var(--primary); color:var(--primary-foreground); }
+.rss-directory-categories button:focus-visible { outline:2px solid var(--primary); outline-offset:3px; }
+.rss-directory-featured { display:inline-block; margin-left:8px; padding:2px 6px; border-radius:5px; font-size:10px; font-weight:500; background:var(--secondary); color:var(--primary); vertical-align:middle; }

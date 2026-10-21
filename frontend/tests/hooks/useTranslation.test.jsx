@@ -42,6 +42,14 @@ function waitForAbort(signal) {
 }
 
 describe('useTranslation', () => {
+  it('does not create legacy requests when using a personal translation binding', async () => {
+    const news = article({ full_translation_active: true })
+    const { result } = renderHook(() => useTranslation('42', news, vi.fn(), false, false), { wrapper: makeWrapper() })
+    await act(async () => { expect(await result.current.handleTranslate(false)).toBe(false) })
+    await act(async () => { expect(await result.current.handleTranslate(true)).toBe(false) })
+    expect(api.translateFullArticleStream).not.toHaveBeenCalled()
+    expect(api.getTranslationJob).not.toHaveBeenCalled()
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()

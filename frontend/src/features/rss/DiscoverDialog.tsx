@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import WorkspaceModal from '@/components/workspace/WorkspaceModal'
 import { workspaceRequest, workspaceError } from '@/services/workspaceApi'
 import { fetchReviewCategories, rssReviewKey } from '@/services/rssReviewApi'
 import { verificationError } from '@/services/rssAdminApi'
 import { refreshRssViews } from '@/features/rss/queryRefresh'
+import DirectoryChannelCard from '@/features/rss/DirectoryChannelCard'
+import type { DirectoryEntry } from '@/features/rss/DirectoryChannelCard'
 import type { ChannelGroup } from '@/types/channels'
 
 interface Candidate { url: string; title: string; candidate_token: string }
 interface Discovery { kind?: 'feed'; feed_url?: string; operation_id: string; state: string; candidates?: Candidate[]; error_code?: string; retryable?: boolean }
-interface DirectoryEntry { id: string; name: string; description: string; kind: string; public_url: string; executable: boolean; subscribed: boolean; cached_articles: { id: number; title: string }[] }
 interface Operation { state: string; result: Discovery & { code?: string } }
 interface SubscriptionResult { operation_id: string; state: string; subscription: { name: string } | null }
 type Selection = { feed_url: string } | { candidate_token: string } | { directory_entry_id: string }
@@ -35,6 +36,8 @@ function DiscoverySession({ viewer, groups, onClose, onDone }: DiscoverDialogPro
   const client = useQueryClient()
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
+  const [directoryCategory, setDirectoryCategory] = useState('')
+  const [composing, setComposing] = useState(false)
   const [mode, setMode] = useState<'directory' | 'website' | 'feed'>('directory')
   const [submittedInput, setSubmittedInput] = useState('')
   const [selection, setSelection] = useState<Selection | null>(null)
@@ -46,8 +49,26 @@ function DiscoverySession({ viewer, groups, onClose, onDone }: DiscoverDialogPro
   useEffect(() => { active.current = true; return () => { active.current = false } }, [])
   const idempotency = useRef(crypto.randomUUID())
   const choose = (value: Selection) => { setSelection(value); idempotency.current = crypto.randomUUID(); subscribe.reset() }
-  const directory = useQuery({ queryKey: ['private', 'rss-directory', viewer, query], enabled: mode === 'directory', retry: false,
-    queryFn: ({ signal }) => workspaceRequest<{ results: DirectoryEntry[]; next_cursor: string | null }>(`/rss/directory/?q=${encodeURIComponent(query)}`, { signal }) })
+  // Keep server results in Query; only debounce the input, never a copied result list.
+  useEffect(() => {
+    if (composing || mode !== 'directory') return
+    const timer = setTimeout(() => setQuery(input.trim()), input.trim() ? 250 : 0)
+    return () => clearTimeout(timer)
+  }, [input, composing, mode])
+  const directoryCurrent = !composing && query === input.trim()
+  const directory = useInfiniteQuery({
+    queryKey: ['private', 'rss-directory', viewer, query, directoryCategory],
+    enabled: mode === 'directory' && directoryCurrent && query.length <= 200,
+    retry: false, staleTime: 30_000, refetchOnWindowFocus: false,
+    placeholderData: keepPreviousData,
+    initialPageParam: '',
+    queryFn: ({ signal, pageParam }) => workspaceRequest<{ results: DirectoryEntry[]; next_cursor: string | null; categories?: { id: string; name: string }[] }>(
+      `/rss/directory/?q=${encodeURIComponent(query)}${directoryCategory ? `&category=${encodeURIComponent(directoryCategory)}` : ''}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''}`, { signal }),
+    getNextPageParam: page => page.next_cursor ?? undefined,
+  })
+  const resultsCurrent = directoryCurrent && !directory.isPlaceholderData
+  const directoryCategories = directory.data?.pages[0]?.categories ?? []
+  const entries = directory.data?.pages.flatMap(page => page.results).filter(entry => !entry.subscribed) ?? []
   const subscribe = useMutation({ retry: false, mutationFn: ({ selected, groupIds: chosenGroups, categoryId: chosenCategory, idempotencyKey }: SubscriptionRequest) => workspaceRequest<SubscriptionResult>('/me/rss-subscriptions/', {
     method: 'POST', viewer, idempotencyKey, body: { ...selected, group_ids: chosenGroups, ...(chosenCategory ? { category_id: chosenCategory } : {}) },
   }), onSuccess: () => { if (active.current) void refreshRssViews(client, viewer) } })
@@ -76,13 +97,13 @@ function DiscoverySession({ viewer, groups, onClose, onDone }: DiscoverDialogPro
   }, [connection.data?.state, subscribe.data?.state, subscribe.data?.operation_id, client, viewer])
   const busy = resolve.isPending || subscribe.isPending
   const discovering = !!resolve.data && !terminal.has(result?.state ?? 'pending')
-  return <WorkspaceModal title="添加订阅" onClose={subscribe.data ? onDone : onClose} busy={busy}>
-    <p className="workspace-muted">默认仅加入我的订阅，公开推荐需要另行提交。</p><p className="workspace-muted">输入关键词、网站或公开 RSS 地址，自动查找可订阅来源。无需选择接入方式。</p>
+  return <WorkspaceModal className="rss-discover-modal" title="添加订阅" onClose={subscribe.data ? onDone : onClose} busy={busy}>
+    <p className="workspace-muted">默认仅加入我的订阅，公开推荐需要另行提交。</p><p className="workspace-muted">输入关键词即显示可添加的渠道，已订阅渠道自动隐藏；网站或 RSS 地址也可点击查找订阅。</p>
     {!subscribe.data && <>
       <form className="workspace-inline-form" onSubmit={event => {
         event.preventDefault()
+        if (composing) return
         const value = input.trim()
-        if (!value) return
         setSubmittedInput(value)
         setSelection(null)
         subscribe.reset()
@@ -102,20 +123,41 @@ function DiscoverySession({ viewer, groups, onClose, onDone }: DiscoverDialogPro
         }
       }}>
         <label className="workspace-grow">搜索订阅源、网站或 RSS 地址
-          <input type="text" required value={input} disabled={busy} placeholder="RSS 地址、rsshub://freecomputerbooks 或网站" onChange={event => {
-            setInput(event.target.value); setSubmittedInput(''); setSelection(null); resolve.reset(); subscribe.reset()
+          <input type="text" value={input} disabled={busy} placeholder="输入即搜索渠道，也可粘贴 RSS 地址" onCompositionStart={() => {
+            setComposing(true)
+            void client.cancelQueries({ queryKey: ['private', 'rss-directory', viewer, query, directoryCategory], exact: true })
+          }} onCompositionEnd={() => setComposing(false)} onChange={event => {
+            if (event.target.value.trim() !== query) void client.cancelQueries({ queryKey: ['private', 'rss-directory', viewer, query, directoryCategory], exact: true })
+            setMode('directory'); setInput(event.target.value); setSubmittedInput(''); setSelection(null); resolve.reset(); subscribe.reset()
           }} />
-        </label><button className="workspace-button" disabled={busy || !input.trim()}>查找订阅</button>
+        </label><button className="workspace-button" disabled={busy}>{input.trim() ? '查找订阅' : '查看频道'}</button>
       </form>
+      {mode === 'directory' && <fieldset className="rss-directory-categories" disabled={busy}>
+        <legend>按领域发现频道</legend>
+        <div role="group" aria-label="频道领域分类">
+          {[{ id: '', name: '全部分类' }, ...directoryCategories].map(category => <button type="button" key={category.id}
+            aria-pressed={directoryCategory === category.id} onClick={() => {
+              if (directoryCategory === category.id) return
+              void client.cancelQueries({ queryKey: ['private', 'rss-directory', viewer, query, directoryCategory], exact: true })
+              setDirectoryCategory(category.id); setSelection(null); setCategoryId(''); subscribe.reset()
+            }}>{category.name}</button>)}
+        </div>
+        <p className="workspace-caption">{directoryCategory ? directoryCategories.find(category => category.id === directoryCategory)?.name : '全部领域'} · 优先展示目录精选频道，可输入关键词进一步筛选。</p>
+      </fieldset>}
       {mode === 'feed' && selection && <p className="workspace-caption">{'feed_url' in selection && /^rsshub:\/\//i.test(selection.feed_url) ? '已识别为 RSSHub 路由，将交给站点 RSSHub 实例连接；无需预先加入频道目录。' : '已识别为 RSS 地址。'}确认后由服务器校验公开 HTTPS 来源并交给 Miniflux 订阅，不会在浏览器抓取网页。</p>}
-      {mode === 'directory' && (submittedInput === input.trim()) && <section aria-label="目录搜索结果">
-        {directory.isPending && <p role="status">正在读取目录…</p>}
-        {directory.data?.results.length === 0 && <p role="status">没有匹配的来源。可以尝试网站地址或直接添加 RSS。</p>}
-        {directory.data?.results.map(entry => <label className="workspace-resolved-choice" key={entry.id}>
-          <input type="radio" name="rss-selection" disabled={busy || !entry.executable || entry.subscribed} checked={!!selection && 'directory_entry_id' in selection && selection.directory_entry_id === entry.id} onChange={() => choose({ directory_entry_id: entry.id })} />
-          <span><strong>{entry.name}</strong><small>{entry.description}</small><small>{entry.subscribed ? '已订阅' : entry.executable ? '公开订阅' : '需要额外配置，暂不可订阅'}</small>{entry.cached_articles.map(article => <small key={article.id}>{article.title}</small>)}</span>
-        </label>)}
-        {directory.data?.next_cursor && <p className="workspace-caption">还有更多结果，请用更具体的关键词缩小范围。</p>}
+      {mode === 'directory' && <section aria-label="目录搜索结果" aria-busy={!resultsCurrent || directory.isFetching}>
+        {(!resultsCurrent || directory.isLoading || (directory.isFetching && !directory.data)) && <p role="status">正在匹配渠道…</p>}
+        {resultsCurrent && input.trim().length > 200 && <p role="status">搜索关键词最多 200 个字符；添加长 RSS 地址可点击查找订阅。</p>}
+        {resultsCurrent && query.length <= 200 && directory.data && entries.length > 0 && <p role="status" className="workspace-caption">已显示 {entries.length} 个{query ? '匹配' : ''}渠道{directory.hasNextPage ? '，可继续加载' : ''}</p>}
+        {resultsCurrent && query.length <= 200 && directory.data && entries.length === 0 && <p role="status">{directory.hasNextPage ? '当前已加载的结果没有可添加渠道，可继续加载更多。' : '没有可添加的匹配渠道，已订阅渠道已隐藏。'}</p>}
+        {resultsCurrent && query.length <= 200 && entries.length > 0 && <div className="rss-directory-card-list">
+          {entries.map(entry => <DirectoryChannelCard key={entry.id} entry={entry} disabled={busy}
+            selected={!!selection && 'directory_entry_id' in selection && selection.directory_entry_id === entry.id}
+            onSelect={() => choose({ directory_entry_id: entry.id })} />)}
+        </div>}
+        {resultsCurrent && query.length <= 200 && directory.hasNextPage && <button type="button" className="workspace-button secondary" disabled={busy || directory.isFetching} onClick={() => { void directory.fetchNextPage() }}>
+          {directory.isFetchingNextPage ? '正在加载…' : '加载更多渠道'}
+        </button>}
       </section>}
       {mode === 'website' && <section aria-label="网站发现结果">
         {resolve.isPending && <p role="status">正在提交发现请求…</p>}
@@ -142,7 +184,7 @@ function DiscoverySession({ viewer, groups, onClose, onDone }: DiscoverDialogPro
     {subscribe.data && <section aria-live="polite"><a className="workspace-link" href="/channels/additions">在添加记录中持续查看进度</a><p>{subscribe.data.subscription ? `已订阅：${subscribe.data.subscription.name}` : '连接请求已保存，验证成功后加入我的订阅'}</p>
       {connection.data?.state === 'failed' && connection.data.result?.code && <p role="alert">{verificationError(connection.data.result.code)}</p>}
       <p>{connection.error ? '暂时无法读取连接状态，请稍后核对。' : connection.data?.state === 'succeeded' ? '来源已连接，首次文章同步将在后台完成。' : connection.data && terminal.has(connection.data.state) ? '连接尚未完成，请在频道管理查看状态。' : '正在后台连接来源…'}</p></section>}
-    {!subscribe.data && mode === 'directory' && submittedInput === input.trim() && directory.error && <p role="alert" className="workspace-error">目录读取失败：{workspaceError(directory.error)}
+    {!subscribe.data && mode === 'directory' && resultsCurrent && query.length <= 200 && directory.error && <p role="alert" className="workspace-error">目录读取失败：{workspaceError(directory.error)}
       <button type="button" className="workspace-link" disabled={busy || directory.isFetching} onClick={() => { void directory.refetch({ cancelRefetch: false }) }}>重新加载目录</button>
     </p>}
     {!subscribe.data && mode === 'website' && resolve.error && <p role="alert" className="workspace-error">发现请求未完成：{workspaceError(resolve.error)}

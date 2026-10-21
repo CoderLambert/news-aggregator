@@ -1,5 +1,6 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import '@tests/helpers/commandDom'
 import AITaskPreferencesSection from '@/components/workspace/AITaskPreferencesSection'
 import * as api from '@/services/aiConnectionsApi'
 
@@ -60,25 +61,53 @@ function setup(viewer = 7) {
 }
 async function ready() {
   await screen.findByRole('combobox', { name: '全局默认模型' })
+  fireEvent.click(screen.getByText('按用途单独配置'))
+}
+function choices(label: string) {
+  fireEvent.click(screen.getByRole('combobox', { name: label }))
+  const names = screen.queryAllByRole('option').map(option => option.textContent)
+  fireEvent.keyDown(screen.getByLabelText('搜索模型'), { key: 'Escape' })
+  return names.join(' ')
+}
+function choose(label: string, name: string) {
+  fireEvent.click(screen.getByRole('combobox', { name: label }))
+  fireEvent.click(screen.getByRole('option', { name: new RegExp(name.replace(/[+]/g, '\\+')) }))
 }
 describe('T03 model purpose settings', () => {
+  it('filters model choices by name and provider model ID without fetching or saving', async () => {
+    setup(); await ready()
+    fireEvent.click(screen.getByRole('combobox', { name: '全局默认模型' }))
+    const input = screen.getByLabelText('搜索模型')
+    fireEvent.change(input, { target: { value: 'Text only' } })
+    expect(screen.getAllByRole('option')).toHaveLength(1)
+    fireEvent.change(input, { target: { value: 'deepseek-chat' } })
+    expect(screen.getAllByRole('option')).toHaveLength(2)
+    fireEvent.change(input, { target: { value: 'no-such-model' } })
+    expect(screen.queryAllByRole('option')).toHaveLength(0)
+    expect(screen.getByText('没有匹配的可选模型。')).toBeInTheDocument()
+    fireEvent.change(input, { target: { value: '' } })
+    expect(screen.getAllByRole('option')).toHaveLength(3)
+    expect(api.listAIModels).toHaveBeenCalledOnce()
+    expect(api.saveAITaskPreferences).not.toHaveBeenCalled()
+    expect(api.probeAIModel).not.toHaveBeenCalled()
+  })
   it('allows an approved no-Key model while keeping unverified tools out of research', async () => {
     render(<AITaskPreferencesSection viewer={7} connections={[{ ...connection, auth_mode: 'none', key_saved: false }]} />)
     await ready()
-    expect(within(screen.getByRole('combobox', { name: '新闻问答模型' })).getByText(/Text only/)).toBeInTheDocument()
-    expect(within(screen.getByRole('combobox', { name: '深度研究模型' })).queryByText(/Text only/)).toBeNull()
+    expect(choices('新闻问答模型')).toContain('Text only')
+    expect(choices('深度研究模型')).not.toContain('Text only')
     expect(api.saveAITaskPreferences).not.toHaveBeenCalled()
   })
   it('keeps nonstream models available for research but excludes them from chat and translation', async () => {
     available = [textModel, { ...toolsModel, article_chat_supported: false }]
     setup(); await ready()
     for (const label of ['新闻问答模型', '全文翻译模型']) {
-      const choices = screen.getByRole('combobox', { name: label })
-      expect(within(choices).queryByText(/Text \+ tools/)).not.toBeInTheDocument()
-      expect(within(choices).getByText(/Text only/)).toBeInTheDocument()
+      const names = choices(label)
+      expect(names).not.toContain('Text + tools')
+      expect(names).toContain('Text only')
     }
-    expect(within(screen.getByRole('combobox', { name: '深度研究模型' })).getByText(/Text \+ tools/)).toBeInTheDocument()
-    expect(within(screen.getByRole('combobox', { name: '问题推荐模型' })).getByText(/Text \+ tools/)).toBeInTheDocument()
+    expect(choices('深度研究模型')).toContain('Text + tools')
+    expect(choices('问题推荐模型')).toContain('Text + tools')
     expect(api.saveAITaskPreferences).not.toHaveBeenCalled()
     expect(api.probeAIModel).not.toHaveBeenCalled()
   })
@@ -89,9 +118,7 @@ describe('T03 model purpose settings', () => {
     expect(api.listAIModels).toHaveBeenCalledOnce()
     expect(api.saveAITaskPreferences).not.toHaveBeenCalled()
     expect(api.probeAIModel).not.toHaveBeenCalled()
-    fireEvent.change(screen.getByRole('combobox', { name: '全局默认模型' }), {
-      target: { value: textModel.id },
-    })
+    choose('全局默认模型', 'Text only')
     expect(screen.getByText('存在未保存的用途变更。')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '保存用途偏好' }))
     await waitFor(() => expect(api.saveAITaskPreferences).toHaveBeenCalledOnce())
@@ -107,26 +134,21 @@ describe('T03 model purpose settings', () => {
   })
   it('can undo a draft without a write and disables unverified deep research choices', async () => {
     setup(); await ready()
-    const research = screen.getByRole('combobox', { name: '深度研究模型' })
-    expect(within(research).queryByText(/Text only/)).not.toBeInTheDocument()
-    expect(within(research).getByText(/Text \+ tools/)).toBeInTheDocument()
-    fireEvent.change(screen.getByRole('combobox', { name: '新闻问答模型' }), {
-      target: { value: textModel.id },
-    })
+    expect(choices('深度研究模型')).not.toContain('Text only')
+    expect(choices('深度研究模型')).toContain('Text + tools')
+    choose('新闻问答模型', 'Text only')
     fireEvent.click(screen.getByRole('button', { name: '撤销修改' }))
-    expect(screen.getByRole('combobox', { name: '新闻问答模型' })).toHaveValue('')
+    expect(screen.getByRole('combobox', { name: '新闻问答模型' })).toHaveTextContent('跟随个人默认模型')
     expect(api.saveAITaskPreferences).not.toHaveBeenCalled()
   })
   it('keeps unsaved draft but freezes resubmission after an uncertain PATCH, until GET reconciliation', async () => {
     vi.mocked(api.saveAITaskPreferences).mockRejectedValue(new api.ConnectionRequestError(0))
     setup(); await ready()
-    fireEvent.change(screen.getByRole('combobox', { name: '全局默认模型' }), {
-      target: { value: textModel.id },
-    })
+    choose('全局默认模型', 'Text only')
     fireEvent.click(screen.getByRole('button', { name: '保存用途偏好' }))
     await screen.findByText(/请先重新读取，不自动重发保存/)
     expect(screen.getByRole('button', { name: '保存用途偏好' })).toBeDisabled()
-    expect(screen.getByRole('combobox', { name: '全局默认模型' })).toHaveValue(textModel.id)
+    expect(screen.getByRole('combobox', { name: '全局默认模型' })).toHaveTextContent('Text only')
     fireEvent.click(screen.getByRole('button', { name: '重新读取用途偏好' }))
     await waitFor(() => expect(api.listAITaskPreferences).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(screen.getByRole('button', { name: '保存用途偏好' })).toBeEnabled())
@@ -144,7 +166,7 @@ describe('T03 model purpose settings', () => {
       } : null,
     })) as api.AITaskPreference[] }
     setup(); await ready()
-    expect(screen.getByRole('combobox', { name: '全局默认模型' })).toHaveValue('99999999-9999-4999-8999-999999999999')
+    expect(screen.getByRole('combobox', { name: '全局默认模型' })).toHaveTextContent('原模型已失效')
     expect(screen.getByText(/必须重新选择/)).toBeInTheDocument()
     expect(api.saveAITaskPreferences).not.toHaveBeenCalled()
   })

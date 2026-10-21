@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import '@tests/helpers/commandDom'
 import AIModelsManager from '@/components/workspace/AIModelsManager'
 import * as api from '@/services/aiConnectionsApi'
 
@@ -45,6 +46,8 @@ beforeEach(() => {
 afterEach(cleanup)
 async function ready() {
   await screen.findByRole('region', { name: '模型 DeepSeek Chat' })
+  const summary = screen.getByText('添加模型', { exact: true }).closest('summary')!
+  if (!summary.parentElement?.hasAttribute('open')) fireEvent.click(summary)
 }
 describe('T02 per-connection models and explicit billing consent', () => {
   it('keeps discovered IDs unselected until the user makes an explicit choice', async () => {
@@ -52,8 +55,11 @@ describe('T02 per-connection models and explicit billing consent', () => {
     render(<AIModelsManager connection={{ ...connection, model_discovery_supported: true }} viewer={3} />)
     await ready()
     fireEvent.click(screen.getByRole('button', { name: '发现服务端模型' }))
+    await screen.findByText(/发现 1 个模型/)
+    expect(screen.getByRole('combobox', { name: '预置模型（可选）' })).toHaveTextContent('搜索并选择模型')
+    fireEvent.click(screen.getByRole('combobox', { name: '预置模型（可选）' }))
     await screen.findByRole('option', { name: /org\/model:cloud/ })
-    expect(screen.getByLabelText('预置模型（可选）')).toHaveValue('')
+    fireEvent.keyDown(screen.getByLabelText('搜索模型'), { key: 'Escape' })
     expect(screen.getByRole('button', { name: '添加模型（不调用服务商）' })).toBeDisabled()
     expect(api.createAIModel).not.toHaveBeenCalled()
   })
@@ -96,7 +102,7 @@ describe('T02 per-connection models and explicit billing consent', () => {
     expect(api.listAIModels).toHaveBeenCalledOnce()
     expect(api.listAIModelCatalog).toHaveBeenCalledOnce()
     expect(api.probeAIModel).not.toHaveBeenCalled()
-    expect(screen.getByText(/文本：未知/)).toBeInTheDocument()
+    expect(screen.getAllByText(/未知/, { selector: '[data-slot=badge]' })).toHaveLength(2)
     expect(screen.getByRole('button', { name: '测试文本能力' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '测试工具能力' })).toBeDisabled()
   })
