@@ -40,6 +40,7 @@ _MODEL_FIELDS = frozenset(TaskModelSnapshot.__dataclass_fields__)
 _SAFE_ERROR_MESSAGES = {
     "authorization_changed": "个人模型授权或配置已变化，研究任务已停止。",
     "model_unavailable": "所选个人研究模型当前不可用。",
+    "model_not_verified": "请先完成该模型的文本与工具能力验证，再发起研究。",
     "provider_unavailable": "个人模型暂时无法完成研究，请检查配置后重新发起。",
     "invalid_response": "个人模型返回了不完整或无法验证的响应。",
     "invalid_tool_call": "个人模型返回了无法验证的工具请求，未执行该批工具。",
@@ -99,7 +100,11 @@ def capture_snapshot(user, model_config_id: str) -> dict:
             return payload
     except ResearchBYOKError:
         raise
-    except (ModelSelectionError, CredentialUnavailable):
+    except ModelSelectionError as exc:
+        if exc.code == 'model_not_verified':
+            raise ResearchBYOKError('model_not_verified') from None
+        raise ResearchBYOKError("model_unavailable") from None
+    except CredentialUnavailable:
         raise ResearchBYOKError("model_unavailable") from None
 
 

@@ -31,6 +31,19 @@ function createHeaders(inputHeaders?: HeadersInit): Headers {
 }
 
 /** Fetch helper for the project's POST SSE and raw-text stream endpoints. */
+export class StreamingHttpError extends Error {
+  readonly requestRejected: boolean
+  readonly code: string | null
+  constructor(message: string, readonly status: number, payload: unknown) {
+    super(message)
+    this.name = 'StreamingHttpError'
+    const data = payload !== null && typeof payload === 'object' && !Array.isArray(payload)
+      ? payload as Record<string, unknown> : {}
+    this.code = typeof data.error_code === 'string' ? data.error_code : null
+    this.requestRejected = data.request_state === 'rejected'
+  }
+}
+
 export async function streamingFetch(url: string, init: RequestInit = {}): Promise<Response> {
   const { headers: inputHeaders, method = 'POST', credentials = 'include', ...restInit } = init
   const response = await fetch(withLang(url), {
@@ -42,14 +55,18 @@ export async function streamingFetch(url: string, init: RequestInit = {}): Promi
 
   if (!response.ok) {
     let message = `HTTP ${response.status}`
+    let payload: unknown = null
     try {
       const text = await response.text()
-      if (text.trim()) message = text
+      if (text.trim()) {
+        message = text
+        try { payload = JSON.parse(text) as unknown } catch { /* Unstructured errors remain uncertain. */ }
+      }
       else if (response.statusText) message = `${response.status} ${response.statusText}`
     } catch {
       if (response.statusText) message = `${response.status} ${response.statusText}`
     }
-    throw new Error(message)
+    throw new StreamingHttpError(message, response.status, payload)
   }
 
   if (!response.body) {

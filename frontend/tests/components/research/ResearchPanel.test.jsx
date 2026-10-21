@@ -95,6 +95,21 @@ beforeEach(() => {
 })
 
 describe('ResearchPanel', () => {
+  it.each([false, undefined, 'true'])('does not inherit a text-only or unproven default into research (%s)', async eligible => {
+    taskPreferenceApi.listAITaskPreferences.mockResolvedValue({ revision: 1, preferences: [
+      { task_kind: 'deep_research', model_config_id: null, selection_state: 'inherit_default', model: null },
+      { task_kind: 'default', model_config_id: 'dc8beed6-9efb-45ae-aacc-e8b8ce426b7f', selection_state: 'available',
+        model: { id: 'dc8beed6-9efb-45ae-aacc-e8b8ce426b7f', display_name: 'Text only',
+          model_id: 'minimax-m3.1-flash', research_eligible: eligible } },
+    ] })
+    renderPanel()
+    await userEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    expect(await screen.findByText(/研究所需的文本与工具能力验证/)).toBeInTheDocument()
+    expect(screen.queryByTestId('research-model-consent')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByRole('textbox', { name: '输入研究问题' }), { target: { value: 'Synthetic query' } })
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
+    expect(api.createResearchStream).not.toHaveBeenCalled()
+  })
 
   it('shows the actual verified research model and requires per-run cost consent before the create POST', async () => {
     taskPreferenceApi.listAITaskPreferences.mockResolvedValue({

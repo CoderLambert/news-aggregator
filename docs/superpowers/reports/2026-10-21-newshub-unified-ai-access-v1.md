@@ -1,5 +1,7 @@
 # 统一模型接入的实施进度与可复现证据
 
+最新 UAT 修复见文末「已配置 Ollama 的研究准入与恢复」。此前全量结果属于原代码候选；当前修复使用单独来源绑定及定向、真实模型证据，不能把旧全量结果当作当前候选重新通过。
+
 状态为 **IMPLEMENTED / LOCAL_VERIFIED**：六项实施任务完成，授权的指定 Ollama 真实链路通过。生产上线与用户手工验收另列，未执行。
 工作区：`/home/lambert/githubRepos/lambert/news-aggregator-ai-v1`，分支 `feat/ai-unified-access-v1`。
 基线：`a6cf437d45b66b962f35e4427ad8c05c589e990a`。设计与计划分别在相邻 `specs/`、`plans/` 目录。
@@ -181,3 +183,26 @@ Ollama 官方区分 CLI `minimax-m3.1-flash:cloud` 与云 API 模型名。目录
 - Task 6: Ruling: valid tool_calls may contain a text preface, retained only in server continuation and omitted from visible messages; assistant-only bounded reasoning_content can replay to the exact fenced model. RED preface/replay cases then GREEN. Cost if wrong: provider-specific history remains subject to the same fail-closed body/terminal/owner checks.
 - Task 6: Ruling: full suite found two old native-protocol tests asserting article chat unavailable; approved Task4 explicitly adds buffered delivery. Update to assert buffered=true, stream_verified=false, capabilities remain unknown. Third failure was missing HOME in env-i; use fresh private HOME rather than read user config. Cost if wrong: production readiness still requires full canonical CI.
 - Final: Ruling: reviewer declined live Task6 and production deployment judgment. Complete authorized real Ollama evidence here; production/image/remote CI remain NOT_RUN and require separate delivery authorization. Cost if wrong: no production claim can be derived from local evidence.
+
+## 已配置 Ollama 的研究准入与恢复
+
+用户本地 UAT 的当前连接仅完成文本验证，工具能力未知。默认用途因此可用，但旧研究面板直接继承了该默认模型；服务端实际在任务创建之前拒绝。客户端丢失结构化 HTTP 错误后，又把明确拒绝误认为可能已发送，持续显示“继续接收”。
+
+修复基于 `04bf2cd0510e9cbed452485a2c4215d37cdee876`，范围为 11 个代码/测试文件：用途 DTO 输出当前 `research_eligible`；研究入口严格要求其为 `true`，缺少能力或失效时显示检查提示。服务端仅在 owner 锁与幂等二次查询后、创建 session/run 前的模型准入失败返回 `request_state=rejected`。客户端仅对当前新建请求、结构化 409、明确标记和允许的错误码清除对应 pending；网络断开、未知冲突、已有任务和续问继续保留原幂等键。
+
+本轮 [脱敏证据与来源摘要](evidence/2026-10-21-ai-uat-fix.json) 绑定每个修改文件的 SHA256；[原始日志及验收脚本](evidence/2026-10-21-ai-uat-fix-raw.tar.gz) 保留失败与通过结果。此前最终全量验证器只适用于其原代码候选，没有修改它来接受新的源码。
+
+| 范围 | 结果 | 边界 |
+| --- | --- | --- |
+| 缺陷先行复现 | 后端 2 fail / 1 pass；前端 4 fail | 缺少资格字段、错误码、UI 准入及拒绝恢复均有 RED |
+| 后端受影响集 | 53 passed、2 subtests | unified consumers、用途偏好、BYOK research、CSRF；合成 DB |
+| 前端受影响集 | 71 passed / 5 files | research hook/panel、streams API、SSE、AI API；含未标记 409、非允许码、500 均保留恢复 |
+| typecheck / lint / build | PASS / 0 errors / PASS | lint 1 个既有 useSuggestedQuestions warning |
+| 用户现有 `minimax-m3.1-flash` | 工具探针、文章问答、简短研究及落库 PASS | 本轮新增 3 次实际模型请求；文本证明沿用用户已有有效收据 |
+| 浏览器 | 配置页文本/工具均显示已验证；研究面板显示同模型完整问候 | 未提交用户原来的复杂研究问题 |
+| 独立聚焦审查 | Critical 0、Important 0 | 只读审查 11 文件；复用主会话日志，无冒称独立重跑 |
+| 整仓全量、复杂工具/联网报告质量、生产 | NOT_RUN | 旧候选全量结果不替代本轮；远端当前头检查以 PR 实际结果为准 |
+
+真实问答首轮验收脚本误按 research 的 `data:` 格式解析，记录 FAIL；问答接口实际使用 `__META__`，随后通过当前 owner 的 HTTP 历史及 terminal DB receipt 确认该次问答已完成，没有重放模型请求。原始 FAIL 与更正依据都保留。研究已收到 complete 事件且 DB 为 succeeded。
+
+本地预览原端口和任务所属 DB 保留。第一次重载把已退出的 zombie 子进程误判为仍运行，导致暂时停服；随后保持原父进程、Proxy、加密材料和 DB，在原端口恢复后端。没有读取或打印用户 Key。原来的待恢复请求没有自动重放，也没有自动切换模型。此修复无迁移；回滚代码会恢复原 UI 缺陷，已取得的有效能力收据可保留。

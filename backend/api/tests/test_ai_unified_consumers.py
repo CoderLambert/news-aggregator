@@ -95,6 +95,38 @@ def test_verified_text_enables_chat_translation_but_not_research(unified):
     assert not verified_for_task(unified.model, 'article_qa')
 
 
+def test_default_model_reports_research_eligibility_from_current_tools_receipt(unified):
+    from api.services.ai_task_preferences import _selected_state
+    preference = N(model_config_id=unified.model.pk, model_config=unified.model)
+    prove(unified)
+    state, info = _selected_state(preference, 'default', unified.owner.pk)
+    assert state == 'available' and info['research_eligible'] is False
+    prove(unified, ('tools',))
+    state, info = _selected_state(preference, 'default', unified.owner.pk)
+    assert state == 'available' and info['research_eligible'] is True
+
+
+def test_research_without_tools_is_rejected_before_any_run_or_dispatch(unified):
+    from api.models import ResearchRun, ResearchSession
+    prove(unified)
+    with patch('api.services.research.job_manager._dispatch') as dispatch:
+        response = unified.api.post('/api/research/', {'query': 'Synthetic local research',
+            'model_config_id': str(unified.model.pk), 'consent': True}, format='json',
+            HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()))
+    assert response.status_code == 409
+    assert response.data['error_code'] == 'research_model_not_verified'
+    assert response.data['request_state'] == 'rejected'
+    assert not ResearchRun.objects.exists() and not ResearchSession.objects.exists()
+    dispatch.assert_not_called()
+
+
+def test_generic_research_conflict_does_not_claim_request_was_never_created():
+    from api.research_views import _run_error_response
+    from api.services.research.job_manager import ResearchRunError
+    result = _run_error_response(ResearchRunError('research_run_active', 'Active task'))
+    assert 'request_state' not in result.data
+
+
 def test_none_probe_without_snapshot_is_not_authorized(unified):
     route = get_trusted_route(unified.connection, unified.model.model_id)
     with patch('api.services.ai_model_probe._OPENER.open') as network:

@@ -18,6 +18,7 @@ import {
 } from '@/services/researchQueries'
 import type { ResearchViewerId } from '@/services/researchQueries'
 import { isRecord } from '@/types/news'
+import { StreamingHttpError } from '@/utils/sse'
 import type {
   JsonRecord,
   ResearchEvent,
@@ -694,6 +695,17 @@ export function useResearch(
       if (!connectionIsCurrent(connection)) return
       const task = currentConnectionTask(connection)
       if (!task) return
+      if (!task.sessionId && connection.requestMode === 'create' && connection.idempotencyKey && error instanceof StreamingHttpError
+        && error.status === 409 && error.requestRejected && error.code
+        && ['research_model_not_verified', 'research_model_unavailable', 'research_feature_disabled',
+          'research_authorization_changed'].includes(error.code)) {
+        clearPendingCreate(connection.viewerId, connection.idempotencyKey)
+        const notice = error.code === 'research_model_not_verified'
+          ? '请先完成该模型的文本与工具能力验证，再发起研究。此次请求未创建研究任务。'
+          : '所选个人研究模型或授权当前不可用，请在 AI 设置中检查。此次请求未创建研究任务。'
+        putTask(connection.taskKey, { ...markResearchTaskInterrupted(task, notice), recovery: 'none' })
+        return
+      }
       const message = error instanceof Error ? error.message : ERROR_MESSAGE
       const isAuthError = /\b(401|403)\b/.test(message)
       const interrupted = markResearchTaskInterrupted(

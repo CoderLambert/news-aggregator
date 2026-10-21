@@ -162,7 +162,7 @@ export interface AITaskPreference {
   task_kind: AITaskKind
   model_config_id: string | null
   selection_state: AITaskSelectionState
-  model: { id: string; connection_id: string; model_id: string; display_name: string } | null
+  model: { id: string; connection_id: string; model_id: string; display_name: string; research_eligible?: boolean } | null
 }
 export interface AITaskPreferences {
   revision: number

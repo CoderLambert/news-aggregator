@@ -47,6 +47,7 @@ def _selected_state(preference, kind, owner_id):
     info = {
         'id': str(model.pk), 'connection_id': str(model.connection_id),
         'model_id': model.model_id, 'display_name': model.display_name,
+        'research_eligible': verified_for_task(model, 'deep_research'),
     }
     connection = model.connection
     if (model.is_deleted or connection.is_deleted or not connection.is_enabled
