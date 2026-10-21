@@ -99,6 +99,7 @@ export function useTranslation(
   news: NewsDetail | null,
   setNews: Dispatch<SetStateAction<NewsDetail | null>>,
   loading: boolean,
+  allowNewRequests = true,
 ) {
   const { user } = useAuth()
   const { lang } = useLanguage()
@@ -213,6 +214,7 @@ export function useTranslation(
     requestRef.current?.controller.abort()
 
     const storedJobId = force ? null : loadTranslationRecovery(viewerId, newsId, sourceRevision)
+    if (!allowNewRequests && !storedJobId) return false
     if (force) clearTranslationRecovery(viewerId, newsId)
     const request: TranslationRequest = {
       ownerKey,
@@ -331,7 +333,7 @@ export function useTranslation(
     } finally {
       if (isCurrent()) requestRef.current = null
     }
-  }, [finishExplicitStop, news, newsId, ownerKey, pausedKey, setNews, sourceRevision, translationEnabled, updateState, viewerId])
+  }, [allowNewRequests, finishExplicitStop, news, newsId, ownerKey, pausedKey, setNews, sourceRevision, translationEnabled, updateState, viewerId])
 
   const cancelTranslation = useCallback(async () => {
     const request = requestRef.current
@@ -385,6 +387,7 @@ export function useTranslation(
       return
     }
 
+    if (!allowNewRequests) return
     const paused = pausedKey ? localStorage.getItem(pausedKey) : null
     if (paused) {
       let terminalStatus: string | null = null
@@ -418,7 +421,7 @@ export function useTranslation(
     if (news.full_translation_active) {
       void handleTranslate(false)
     }
-  }, [handleTranslate, loading, news, newsId, ownerKey, pausedKey, sourceRevision, translationEnabled, updateState, viewerId])
+  }, [allowNewRequests, handleTranslate, loading, news, newsId, ownerKey, pausedKey, sourceRevision, translationEnabled, updateState, viewerId])
 
   return {
     translating: visibleState.translating,

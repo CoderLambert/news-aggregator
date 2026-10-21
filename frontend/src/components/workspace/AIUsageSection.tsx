@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { listAIUsage } from '@/services/aiConnectionsApi'
 
@@ -11,8 +12,9 @@ const STATUSES: Record<string, string> = {
 const tokens = (value: number | null) => value === null ? '未知' : value.toLocaleString()
 
 export default function AIUsageSection({ viewer }: { viewer: number }) {
+  const [page, setPage] = useState(1)
   const usage = useQuery({
-    queryKey: ['ai-usage', viewer], queryFn: ({ signal }) => listAIUsage(signal),
+    queryKey: ['ai-usage', viewer, page], queryFn: ({ signal }) => listAIUsage(signal, page, 20),
     staleTime: 30_000, retry: false,
   })
   return <section className="workspace-card min-w-0" aria-labelledby="ai-usage-title">
@@ -23,7 +25,7 @@ export default function AIUsageSection({ viewer }: { viewer: number }) {
     </div>
     <p className="mt-2 text-sm text-muted-foreground">记录本站个人模型调用尝试；进行中或中断的请求可能显示结果未知。研究工具轮次与翻译分段分别计数；读取缓存、历史和重连不新增调用。Token 缺失或结果未知时不估算，不代表服务商账户余额或费用。</p>
     {usage.isPending && <p role="status" className="mt-3 text-sm">正在读取使用记录…</p>}
-    {usage.isError && <p role="alert" className="mt-3 text-sm text-destructive">暂时无法读取使用记录，请稍后刷新。</p>}
+    {usage.isError && <p role="alert" className="mt-3 text-sm text-destructive">暂时无法读取使用记录，请稍后刷新。<button type="button" className="ml-2 underline" onClick={() => setPage(1)}>返回第一页</button></p>}
     {usage.data && <>
       <p className="mt-3 text-sm">共 {usage.data.summary.calls} 次尝试；已知输入 Token {tokens(usage.data.summary.input_tokens)}，已知输出 Token {tokens(usage.data.summary.output_tokens)}。</p>
       <p className="text-xs text-muted-foreground">输入未知 {usage.data.summary.input_tokens_unknown_calls} 次，输出未知 {usage.data.summary.output_tokens_unknown_calls} 次。成功状态表示模型响应完成，业务结果是否保存请查看相应任务。</p>
@@ -42,7 +44,13 @@ export default function AIUsageSection({ viewer }: { viewer: number }) {
             </tr>)}</tbody>
           </table>
         </div>}
-      {usage.data.has_more && <p className="mt-2 text-xs text-muted-foreground">显示最近 50 条记录；汇总包含全部已有记录。</p>}
+      <nav aria-label="使用记录分页" className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <span className="text-sm text-muted-foreground">第 {page} / {usage.data.page_count ?? 1} 页 · 每页 20 条</span>
+        <div className="flex gap-2">
+          <button type="button" className="workspace-button secondary" disabled={page === 1 || usage.isFetching} onClick={() => setPage(value => value - 1)}>上一页</button>
+          <button type="button" className="workspace-button secondary" disabled={!usage.data.has_more || usage.isFetching} onClick={() => setPage(value => value + 1)}>下一页</button>
+        </div>
+      </nav>
     </>}
   </section>
 }

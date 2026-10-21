@@ -35,13 +35,14 @@ describe('saved private translation reader selection', () => {
     const rendered = render(<FullContentSection {...initial} />)
     expect(screen.getByTestId('article-body')).toHaveTextContent('当前推荐中文')
 
-    fireEvent.change(screen.getByRole('combobox', { name: '选择已保存的个人译文' }), { target: { value: '42' } })
+    fireEvent.click(screen.getByText('历史译文', { exact: true }))
+    fireEvent.change(screen.getByRole('combobox', { name: '选择历史译文' }), { target: { value: '42' } })
     expect(onSelect).toHaveBeenCalledWith(42)
 
     rendered.rerender(<FullContentSection {...props(42, onSelect)} />)
     expect(screen.getByTestId('article-body')).toHaveTextContent('旧版本个人中文')
     expect(screen.getByRole('status')).toHaveTextContent('旧版标题')
-    expect(screen.getByRole('combobox', { name: '选择已保存的个人译文' })).toHaveValue('42')
+    expect(screen.getByRole('combobox', { name: '选择历史译文' })).toHaveValue('42')
   })
 })
 

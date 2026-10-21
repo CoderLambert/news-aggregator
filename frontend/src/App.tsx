@@ -31,6 +31,7 @@ const NewsList = lazy(() => import('@/pages/NewsList'))
 const NewsDetail = lazy(() => import('@/pages/NewsDetail'))
 const FavoritesPage = lazy(() => import('@/pages/FavoritesPage'))
 const ChatGPTSubscriptionSettings = lazy(() => import('@/pages/ChatGPTSubscriptionSettings'))
+const AIUsagePage = lazy(() => import('@/pages/AIUsagePage'))
 const AIModelSettingsPage = lazy(() => import('@/pages/AIModelSettingsPage'))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
 const LocalSearch = lazy(() => import('@/pages/LocalSearch'))
@@ -79,6 +80,7 @@ export default function App() {
             <Route path="/favorites" element={<FeatureRoute feature="favorites"><FavoritesPage /></FeatureRoute>} />
             <Route path="/provider-comparisons" element={<FeatureRoute feature="admin" requireSuperuser><Navigate to="/admin/rss" replace /></FeatureRoute>} />
             <Route path="/settings" element={<><SettingsPage /><AIConnectionSettingsLink /></>} />
+            <Route path="/settings/ai/usage" element={<FeatureRoute feature="accounts"><AIUsagePage /></FeatureRoute>} />
             <Route path="/settings/ai" element={<FeatureRoute feature="accounts"><AIModelSettingsPage /></FeatureRoute>} />
             <Route path="/settings/chatgpt" element={<FeatureRoute feature="accounts"><FeatureRoute feature="chatgpt_subscription"><ChatGPTSubscriptionSettings /></FeatureRoute></FeatureRoute>} />
             <Route path="/channels/additions" element={<FeatureRoute feature="accounts"><RssAdditionsPage /></FeatureRoute>} />

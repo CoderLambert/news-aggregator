@@ -6,6 +6,7 @@ import { workspaceKeys } from '@/services/workspaceApi'
 /** Invalidate only this viewer; never discard another account's retained state. */
 export function refreshRssViews(client: QueryClient, viewer: number) {
   return Promise.all([
+    client.invalidateQueries({ queryKey: ['private', 'rss-directory', viewer] }),
     client.invalidateQueries({ queryKey: channelKeys.personal(viewer) }),
     client.invalidateQueries({ queryKey: channelKeys.directory(viewer, 'history') }),
     client.invalidateQueries({ queryKey: channelKeys.directory(viewer, 'subscribe') }),

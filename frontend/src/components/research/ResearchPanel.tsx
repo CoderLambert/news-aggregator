@@ -131,7 +131,8 @@ function ResearchPanelView({
   const researchModelUnavailable = !activeSessionId && hasPersonalSelection && !preferredModel
   const researchModelLabel = activeSessionId
     ? sessionResearchModel?.model_id ?? null
-    : preferredModel ? `${preferredModel.display_name} (${preferredModel.model_id})` : null
+    : preferredModel ? preferredModel.display_name === preferredModel.model_id
+      ? preferredModel.display_name : `${preferredModel.display_name} (${preferredModel.model_id})` : null
 
   const billingConsentKey = JSON.stringify([
     user?.id ?? 'anonymous',
@@ -347,7 +348,7 @@ function ResearchPanelView({
                   请先到 AI 设置中配置并验证支持工具调用的个人研究模型，再返回开始研究。
                 </div>
               )}
-              {researchModelConfigId && researchModel && (
+              {researchModelConfigId && researchModel && !hasRecoverableTask && (
                 <section
                   aria-labelledby="research-model-consent-title"
                   className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs leading-relaxed"
@@ -358,8 +359,7 @@ function ResearchPanelView({
                     {!activeSessionId && researchPreference?.selection_state === 'inherit_default' ? '（已保存的个人默认模型）' : ''}
                   </p>
                   <p className="mt-1 text-muted-foreground">
-                    仅在明确提交新研究或续问时使用此个人模型。研究问题和必要上下文会发送给该模型服务商；
-                    服务商可能按其资费计费，本站无法代为确认费用。
+                    使用已保存的模型；发送的问题和相关内容由该服务商处理。
                   </p>
                   <label className="mt-2 flex cursor-pointer items-start gap-2 text-foreground">
                     <input
@@ -371,12 +371,13 @@ function ResearchPanelView({
                       })}
                       className="mt-0.5 accent-primary"
                     />
-                    <span>我同意本次发送研究内容并接受服务商可能产生的费用。</span>
+                    <span>同意本次发送内容及服务商可能产生的费用。</span>
                   </label>
                 </section>
               )}
               <ResearchMessageList
-                messages={messages}
+                messages={recoveryAction === 'resume' || recoveryAction === 'retry'
+                  ? messages.filter(message => !message.id.endsWith(':notice')) : messages}
                 phase={phase}
                 searchResults={searchResults}
                 onSuggestionClick={handleSuggestionClick}

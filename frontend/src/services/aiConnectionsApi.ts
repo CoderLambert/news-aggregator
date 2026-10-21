@@ -3,6 +3,7 @@ import { WorkspaceError, workspaceRequest } from '@/services/workspaceApi'
 export type AIAuthMode = 'api_key' | 'none'
 export interface AIProviderProfile {
   provider_id: string; provider_name: string; profile_id: string; region_name: string; version: number
+  network_zone?: 'public_https' | 'same_host' | 'trusted_private'
   auth_modes?: AIAuthMode[]; protocol_family?: string; data_destination_label?: string
 }
 export interface AIConnection {
@@ -190,7 +191,8 @@ export interface AIUsage {
   summary: { calls: number; input_tokens: number | null; output_tokens: number | null
     input_tokens_unknown_calls: number; output_tokens_unknown_calls: number }
   attempts: AIUsageAttempt[]; has_more: boolean
+  page?: number; page_size?: number; count?: number; page_count?: number
 }
-export function listAIUsage(signal?: AbortSignal) {
-  return call<AIUsage>('/me/ai/usage/', { signal })
+export function listAIUsage(signal?: AbortSignal, page?: number, limit = 20) {
+  return call<AIUsage>(`/me/ai/usage/${page === undefined ? '' : `?page=${page}&limit=${limit}`}`, { signal })
 }

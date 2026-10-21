@@ -10,7 +10,7 @@ import NewsDetail from '@/pages/NewsDetail'
 import { CapabilitiesTestProvider } from '../helpers/capabilities'
 import { blockNews, checkFavoriteStatus, fetchCategories, fetchNews, fetchNewsDetail, fetchSources, unblockNews } from '@/services/api'
 
-const apiState = vi.hoisted(() => ({ blocked: false, fetchFullArticle: vi.fn(), translate: vi.fn(), translateError: '', articleError: '', speechSupported: false, speak: vi.fn() }))
+const apiState = vi.hoisted(() => ({ blocked: false, fetchFullArticle: vi.fn(), translate: vi.fn(), personalTranslate: vi.fn(), personalModel: false, translateError: '', articleError: '', speechSupported: false, speak: vi.fn() }))
 
 vi.mock('@/services/api', () => ({
   fetchChannelSubscriptions: vi.fn().mockResolvedValue([]),
@@ -28,6 +28,7 @@ vi.mock('@/services/api', () => ({
   unblockNews: vi.fn(async () => { apiState.blocked = false; return { removed: true } }),
 }))
 
+vi.mock('@/hooks/useDefaultAIModel', () => ({ useDefaultAIModel: () => ({ isPending: false, isError: false, data: { preferences: apiState.personalModel ? [{ task_kind: 'full_translation', model_config_id: 'saved-model' }] : [] } }) }))
 vi.mock('@/hooks/useFullArticle', () => ({ useFullArticle: () => ({ articleLoading: false, articleError: apiState.articleError, handleFetchFullArticle: apiState.fetchFullArticle, resumeExistingFetch: vi.fn(), cancelFetch: vi.fn() }) }))
 vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => ({ translating: false, translateError: apiState.translateError, translationProgress: '', showOriginal: false, setShowOriginal: vi.fn(), handleTranslate: apiState.translate }) }))
 vi.mock('@/hooks/useArticleSearch', () => ({ useArticleSearch: () => ({ matchCount: 0, currentIndex: 0, goNext: vi.fn(), goPrev: vi.fn() }) }))
@@ -38,7 +39,7 @@ vi.mock('@/context/SpeechPlayerContext', () => ({
   useSpeechPlayerCapabilities: () => ({ supported: apiState.speechSupported }),
   useSpeechPlayerActivity: () => false,
 }))
-vi.mock('@/components/news-detail/PrivateTranslationPanel', () => ({ default: () => null }))
+vi.mock('@/components/news-detail/PrivateTranslationPanel', () => ({ default: () => <button type="button" onClick={apiState.personalTranslate}>翻译为中文</button> }))
 vi.mock('@/components/NewsChatAssistant', () => ({
   default: ({ open, onOpenChange }) => (
     <div>
@@ -94,6 +95,7 @@ function renderRoutes(initialEntry, user = { id: 12, username: 'reader' }) {
 beforeEach(() => {
   vi.clearAllMocks()
   apiState.blocked = false
+  apiState.personalModel = false
   apiState.translateError = ''
   apiState.articleError = ''
   apiState.speechSupported = false
@@ -109,6 +111,18 @@ beforeEach(() => {
 })
 
 describe('news list return navigation and invalidation', () => {
+  it('starts configured personal translation directly from the body toolbar instead of showing a form', async () => {
+    apiState.personalModel = true
+    apiState.translateError = '个人 AI 连接已保存；请等待模型与用途配置完成。'
+    fetchNewsDetail.mockResolvedValue({ ...detailStory, full_content: 'Original article body', full_content_zh: '' })
+    Element.prototype.scrollIntoView = vi.fn()
+    renderRoutes('/news/21', { id: 12, username: 'reader' })
+    fireEvent.click(await screen.findByRole('button', { name: '翻译为中文' }))
+    expect(apiState.translate).not.toHaveBeenCalled()
+    expect(apiState.personalTranslate).toHaveBeenCalledOnce()
+    expect(screen.queryByLabelText('个人翻译操作')).not.toBeInTheDocument()
+    expect(screen.queryByText('个人 AI 连接已保存；请等待模型与用途配置完成。')).not.toBeInTheDocument()
+  })
   it.each([['', false], ['已有完整译文', true]])('retries a missing translation through shared dedup and keeps explicit regeneration personal (%s)', async (saved, force) => {
     apiState.translateError = '翻译任务失败，请重试'
     fetchNewsDetail.mockResolvedValue({ ...detailStory, full_content: 'Original article body', full_content_zh: saved })

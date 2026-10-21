@@ -474,6 +474,7 @@ describe('ResearchPanel', () => {
 
     expect(await screen.findByRole('status')).toHaveTextContent('原请求可能已到达服务器')
     expect(screen.getByRole('status')).toHaveTextContent('复用原请求标识')
+    expect(screen.getAllByText(/原请求可能已到达服务器/)).toHaveLength(1)
     expect(api.createResearchStream).toHaveBeenCalledTimes(1)
     const resumeButton = screen.getByRole('button', { name: '继续接收' })
     resumeButton.focus()

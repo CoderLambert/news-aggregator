@@ -40,7 +40,21 @@ describe('ErrorBanner', () => {
   })
 })
 
+Element.prototype.scrollTo = vi.fn()
 describe('FullContentSection', () => {
+  it('renders growing private Markdown in the article body without a second translation panel', async () => {
+    const privateTask = { status: 'running', progress: '## 译文标题\n\n第一段', result: null }
+    const view = renderSection({ privateTask, translationControls: <button>正在翻译</button> })
+    const heading = screen.getByRole('heading', { name: '译文标题' })
+    expect(screen.queryByText('English source body')).not.toBeInTheDocument()
+    expect(screen.getAllByLabelText('正在生成的译文')).toHaveLength(1)
+    view.rerender(<FullContentSection {...view.props} privateTask={{ ...privateTask, progress: privateTask.progress + '\n\n第二段' }} />)
+    expect(screen.getByRole('heading', { name: '译文标题' })).toBe(heading)
+    expect(await screen.findByText((_, el) => el?.tagName === 'P' && el.textContent === '第二段')).toBeInTheDocument()
+    view.rerender(<FullContentSection {...view.props} privateTask={{ status: 'succeeded', progress: '', result: { content: '## 已保存译文\n\n完整结果' } }} />)
+    expect(screen.getByRole('heading', { name: '已保存译文' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('正在生成的译文')).not.toBeInTheDocument()
+  })
   const baseNews = {
     full_content: 'English source body',
     full_content_zh: '',
@@ -74,16 +88,16 @@ describe('FullContentSection', () => {
     expect(screen.queryByRole('group', { name: '切换语言' })).not.toBeInTheDocument()
   })
 
-  it('labels a public copy and hides paid personal regeneration without an account', () => {
+  it('reads an existing translation without ownership labels and hides regeneration without an account', () => {
     renderSection({ news: { ...baseNews, full_content_zh: '共享文本', full_content_zh_scope: 'shared', full_translation_personal_available: false } })
-    expect(screen.getByText('共享译文')).toBeInTheDocument()
-    expect(screen.getByText(/不消耗你的模型额度/)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '生成个人译文' })).not.toBeInTheDocument()
+    expect(screen.queryByText('共享译文')).not.toBeInTheDocument()
+    expect(screen.queryByText(/模型额度|个人译文/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '重新翻译' })).not.toBeInTheDocument()
   })
 
   it('offers an explicit personal version when a subscription is available', () => {
     const { props } = renderSection({ news: { ...baseNews, full_content_zh: '共享文本', full_content_zh_scope: 'shared', full_translation_personal_available: true } })
-    fireEvent.click(screen.getByRole('button', { name: '生成个人译文' }))
+    fireEvent.click(screen.getByRole('button', { name: '重新翻译' }))
     expect(props.onTranslate).toHaveBeenCalledOnce()
   })
 
@@ -99,7 +113,7 @@ describe('FullContentSection', () => {
     renderSection({ news })
     expect(screen.getByRole('button', { name: '重新翻译' })).toBeInTheDocument()
     expect(screen.getByRole('group', { name: '切换语言' })).toBeInTheDocument()
-    expect(screen.getByText('已有中文译文')).toBeInTheDocument()
+    expect(screen.queryByText('已有中文译文')).not.toBeInTheDocument()
   })
 
   it('clicking 翻译为中文 calls onTranslate', () => {

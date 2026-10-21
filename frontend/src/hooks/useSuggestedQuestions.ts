@@ -27,7 +27,7 @@ export function useSuggestedQuestions(newsId: string | number | null | undefined
     : task?.selection_state === 'inherit_default'
       ? preferences.data?.preferences.find(item => item.task_kind === 'default' && item.selection_state === 'available') : null
   const modelConfigId = selected?.model_config_id ?? undefined
-  const modelLabel = selected?.model ? `${selected.model.display_name} (${selected.model.model_id})` : null
+  const modelLabel = selected?.model ? selected.model.display_name === selected.model.model_id ? selected.model.display_name : `${selected.model.display_name} (${selected.model.model_id})` : null
   const parsedId = parseNewsId(newsId)
   const queryKey = parsedId === null
     ? ['newsWorkflow', 'suggestedQuestions', 'disabled'] as const

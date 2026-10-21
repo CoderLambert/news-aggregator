@@ -46,6 +46,15 @@ describe('RSS discovery and subscription', () => {
     expect(screen.getByRole('button', { name: '确认订阅' })).toBeDisabled()
     expect(request.mock.calls.every(([path]) => path !== '/me/rss-subscriptions/')).toBe(true)
   })
+  it('combines a directory category with the keyword without subscribing', async () => {
+    request.mockResolvedValue({ ...emptyDirectory, categories: [{ id: 'ai', name: '人工智能' }] })
+    setup()
+    fireEvent.click(await screen.findByRole('button', { name: '人工智能' }))
+    await waitFor(() => expect(callsTo('/rss/directory/?q=&category=ai')).toHaveLength(1))
+    search('OpenAI')
+    await waitFor(() => expect(callsTo('/rss/directory/?q=OpenAI&category=ai')).toHaveLength(1))
+    expect(callsTo('/me/rss-subscriptions/')).toHaveLength(0)
+  })
   it('sends a direct URL through the ordinary subscription service with viewer, groups and an idempotency key', async () => {
     request.mockImplementation(async path => path.startsWith('/rss/directory/') ? { results: [], next_cursor: null } : path === '/me/rss-subscriptions/' ?
       { operation_id: 'register', state: 'pending', subscription: { name: 'My feed' } } : { state: 'succeeded', result: {} })
@@ -96,7 +105,7 @@ describe('RSS discovery and subscription', () => {
   it('keeps unconfigured route templates non-executable', async () => {
     request.mockResolvedValue({ results: [{ id: 'route', name: 'Template', description: 'Needs account', kind: 'route_template', public_url: '', executable: false, subscribed: false, cached_articles: [] }], next_cursor: null })
     setup()
-    expect(await screen.findByRole('radio')).toBeDisabled()
+    expect(await screen.findByRole('button', { name: '选择订阅 Template' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '确认订阅' })).toBeDisabled()
   })
 
@@ -113,11 +122,11 @@ describe('RSS discovery and subscription', () => {
     setup()
     search('React')
     fireEvent.click(await screen.findByRole('button', { name: '重新加载目录' }))
-    expect(await screen.findByText('正在读取目录…')).toBeInTheDocument()
+    expect(await screen.findByText('正在匹配渠道…')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '查找订阅' }))
     expect(callsTo('/rss/directory/?q=React')).toHaveLength(2)
     await act(async () => { retry.resolve(emptyDirectory) })
-    expect(await screen.findByText('没有匹配的来源。可以尝试网站地址或直接添加 RSS。')).toBeInTheDocument()
+    expect(await screen.findByText('没有可添加的匹配渠道，已订阅渠道已隐藏。')).toBeInTheDocument()
     expect(callsTo('/rss/directory/?q=React')).toHaveLength(2)
     expect(callsTo('/rss/discovery/resolve/')).toHaveLength(0)
     expect(callsTo('/me/rss-subscriptions/')).toHaveLength(0)
@@ -250,7 +259,7 @@ describe('RSS discovery and subscription', () => {
     search('example.com')
     await screen.findByRole('button', { name: '重新查找订阅' })
     search('React')
-    expect(await screen.findByText('没有匹配的来源。可以尝试网站地址或直接添加 RSS。')).toBeInTheDocument()
+    expect(await screen.findByText('没有可添加的匹配渠道，已订阅渠道已隐藏。')).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(callsTo('/rss/discovery/resolve/')).toHaveLength(1)
     expect(callsTo('/rss/directory/?q=React')).toHaveLength(1)

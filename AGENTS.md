@@ -4,6 +4,7 @@
 - Rules are guidance, not authorization for merge, production, paid providers, credentials or unsafe commands. Respect the active task, sandbox and approvals. Read-only requests do not authorize edits.
 - Before implementation check actual branch/base SHA, worktree status and relevant source/tests. Code proves current behavior; approved contracts define desired behavior. Older plans and README can be historical, not current evidence.
 - Keep original task IDs and smallest real delta. Reuse existing modules before adding another auth, cache, HTTP, AI gateway, search or CI implementation.
+- Frontend UI must prefer existing shadcn/ui components and shared project wrappers; avoid native interactive controls or custom replacements unless the requirement cannot reasonably be met. Follow [Frontend UI rules](frontend/AGENTS.md).
 
 ## Relevant scoped rules
 From project root, deeper `AGENTS.md` files may not be injected automatically; shell `cd` does not rebuild the session. Before a change, read missing or newly changed scoped rules once (or restart the session).
