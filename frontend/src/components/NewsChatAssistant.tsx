@@ -7,7 +7,7 @@ import ChatBubbleButton from '@/components/chat/ChatBubbleButton'
 import ChatHeader from '@/components/chat/ChatHeader'
 import ChatMessageList from '@/components/chat/ChatMessageList'
 import ChatInput from '@/components/chat/ChatInput'
-import ChatModelPicker from '@/components/chat/ChatModelPicker'
+import { useDefaultAIModel } from '@/hooks/useDefaultAIModel'
 import { useAuth } from '@/context/AuthContext'
 import ClearChatDialog from '@/components/chat/ClearChatDialog'
 import Confetti from '@/components/chat/Confetti'
@@ -44,14 +44,11 @@ interface NewsChatAssistantProps {
 export default function NewsChatAssistant({ newsId, open, onOpenChange, translationResultId, translationMode, translationLabel, articleContext }: NewsChatAssistantProps) {
   const resolvedTranslationMode = translationMode ?? (translationResultId != null ? 'result' : 'current')
   const { user } = useAuth()
-  // Never let a previous viewer's selected billable model cross account changes.
-  const [selection, setSelection] = useState<{ viewer: number; modelId: string | null; consent: boolean } | null>(null)
-  const activeSelection = selection && user && selection.viewer === user.id ? selection : null
-  const selectedModelId = activeSelection?.modelId ?? null
-  const modelConsent = Boolean(selectedModelId && activeSelection?.consent)
-  const [suggestionConsent, setSuggestionConsent] = useState<{ key: string; checked: boolean }>({ key: '', checked: false })
   const [internalOpen, setInternalOpen] = useState(false)
   const isOpen = open ?? internalOpen
+  const defaultModel = useDefaultAIModel(user?.id ?? null, 'article_qa', isOpen)
+  const selectedModelId = defaultModel.selection?.model_config_id ?? null
+  const defaultUnavailable = Boolean(user && (!selectedModelId || defaultModel.isPending || defaultModel.isError))
   const setIsOpen = useCallback((nextOpen: boolean) => {
     if (open === undefined) setInternalOpen(nextOpen)
     onOpenChange?.(nextOpen)
@@ -68,15 +65,13 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, translat
     confirmingClear, isClearing, clearError, requestClearChat, cancelClear, confirmClear,
     uncertainTurn, checkPendingTurn, resendUncertainTurn,
     webSearch, toggleWebSearch,
-  } = useChat(newsId, isOpen, selectedModelId, modelConsent, translationResultId, resolvedTranslationMode)
+  } = useChat(newsId, isOpen, selectedModelId, Boolean(selectedModelId && !defaultUnavailable), translationResultId, resolvedTranslationMode)
   const { scrollRef: chatScrollRef, onScroll: onChatScroll, onWheel: onChatWheel } = useChatScroll(messages, phase, isOpen)
   const submitChatTurn = (send: () => Promise<boolean>) => {
-    // Consume the opt-in once for this explicit billable attempt; a later
-    // question, failed reply, or deliberate resend needs fresh confirmation.
+    if (defaultUnavailable) return
+    // Only an explicit send or suggested-question click calls this path.
+    // Reading preferences/history never submits inference.
     void send()
-    if (selectedModelId && user) {
-      setSelection({ viewer: user.id, modelId: selectedModelId, consent: false })
-    }
   }
 
   const {
@@ -87,16 +82,13 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, translat
     refresh: refreshSuggestions,
     error: suggestionError,
     modelConfigId: suggestionModelId,
-    modelLabel: suggestionModelLabel,
-    modelSource: suggestionModelSource,
   } = useSuggestedQuestions(newsId, isOpen, articleContext?.contentRevision ?? 0)
 
-  const suggestionConsentKey = JSON.stringify([user?.id, newsId, articleContext?.contentRevision, suggestionModelId])
-  const hasSuggestionConsent = suggestionConsent.key === suggestionConsentKey && suggestionConsent.checked
-
+  const canGenerateSuggestions = !user || Boolean(suggestionModelId)
   const generateSuggestions = () => {
-    void refreshSuggestions(hasSuggestionConsent)
-    setSuggestionConsent({ key: '', checked: false })
+    if (!canGenerateSuggestions) return
+    // Clicking generate/refresh is the explicit authorization for this request.
+    void refreshSuggestions(true)
   }
 
   useEffect(() => {
@@ -178,12 +170,11 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, translat
           clearDisabled={confirmingClear}
           onClose={closePanel}
         />
-        {user && <ChatModelPicker key={user.id} viewer={user.id}
-          selected={selectedModelId} consent={modelConsent}
-          disabled={isLoading || confirmingClear || isClearing}
-          onSelect={modelId => setSelection({ viewer: user.id, modelId, consent: false })}
-          onConsent={consent => setSelection({ viewer: user.id, modelId: selectedModelId, consent })}
-        />}
+        {user && defaultUnavailable && <section aria-label="问答状态" className="border-b border-border px-4 py-2 text-xs md:px-6" role="status">
+          <p>{defaultModel.isPending ? '正在准备小闻…' : defaultModel.isError
+            ? '暂时无法读取默认模型，请重试。' : '小闻暂不可用。'}
+            {defaultModel.isError && <Button type="button" variant="link" size="sm" onClick={() => void defaultModel.refetch()}>重新读取</Button>}</p>
+        </section>}
 
         {/* Context Status Banner */}
         <div className="flex items-center justify-between border-b border-border bg-secondary/60 px-4 py-2 text-[11px] md:px-6 md:text-xs">
@@ -194,26 +185,17 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, translat
             </span>
           </div>
           {suggestedQuestions.length > 0 && (
-            <button
-              type="button"
+            <Button
+              type="button" variant="ghost" size="sm"
               onClick={generateSuggestions}
-              disabled={refreshingSuggestions || (Boolean(suggestionModelId) && !hasSuggestionConsent)}
+              disabled={refreshingSuggestions || !canGenerateSuggestions}
               className="text-muted-foreground hover:text-foreground text-[10px]"
             >
               {suggestionsGenerated ? '换一批建议' : '生成推荐问题'}
-            </button>
+            </Button>
           )}
         </div>
 
-        {suggestionModelId && suggestionModelLabel && <div className="border-b border-border px-4 py-2 text-xs">
-          <p>推荐问题模型：{suggestionModelLabel}。首次打开仅查看缓存或免费模板。</p>
-          <label className="mt-1 flex items-start gap-2">
-            <input type="checkbox" checked={hasSuggestionConsent} disabled={refreshingSuggestions}
-              onChange={event => setSuggestionConsent({ key: suggestionConsentKey, checked: event.target.checked })} />
-            <span>我同意本次生成推荐问题可能产生服务商费用。</span>
-          </label>
-        </div>}
-        {suggestionModelSource && suggestionsGenerated && <p className="px-4 py-1 text-xs text-muted-foreground">推荐来源：{suggestionModelSource.provider} · {suggestionModelSource.model}</p>}
         {suggestionError && <p role="alert" className="px-4 py-1 text-xs text-destructive">推荐问题生成失败，未自动重试。仍可使用现有问题或免费模板。</p>}
         <div ref={chatScrollRef} onScroll={onChatScroll} onWheel={onChatWheel} className="chat-panel-scroll min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-background/55 p-4 sm:p-5 md:p-7">
           {historyError && (
@@ -260,7 +242,7 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, translat
             suggestedQuestions={suggestedQuestions}
             suggestionContextScope={suggestionContextScope}
             suggestionsGenerated={suggestionsGenerated}
-            onRefreshSuggestions={suggestionModelId && !hasSuggestionConsent ? undefined : generateSuggestions}
+            onRefreshSuggestions={canGenerateSuggestions ? generateSuggestions : undefined}
             refreshingSuggestions={refreshingSuggestions}
           />
         </div>
@@ -271,7 +253,7 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, translat
           onSend={() => submitChatTurn(handleSend)}
           onStop={phase === 'thinking' || phase === 'streaming' ? stopWaiting : undefined}
           isLoading={isLoading}
-          sendDisabled={Boolean(uncertainTurn) || confirmingClear || Boolean(selectedModelId && !modelConsent)}
+          sendDisabled={defaultUnavailable || Boolean(uncertainTurn) || confirmingClear}
           disabled={confirmingClear || isClearing}
           autoFocus={isOpen}
           webSearch={selectedModelId ? false : webSearch}
