@@ -181,6 +181,9 @@ def complete_subscription(operation):
     Unknown/failed/cancelled results never grant a relationship. Replays after
     unsubscribe cannot recreate it because subscription_request is consumed.
     """
+    from api.rss.import_models import RssImportItem
+    if RssImportItem.objects.filter(operation=operation, batch__removed_at__isnull=False).exists():
+        return
     request = operation.safe_input.get('subscription_request')
     if not request or operation.actor_id is None or not operation.actor.is_active:
         return
@@ -188,7 +191,7 @@ def complete_subscription(operation):
     groups = list(ChannelGroup.objects.filter(user_id=operation.actor_id, pk__in=group_ids))
     if len(groups) != len(group_ids):
         return
-    subscription, _ = ChannelSubscription.objects.get_or_create(user_id=operation.actor_id, source_id=request['source_id'])
+    subscription, created = ChannelSubscription.objects.get_or_create(user_id=operation.actor_id, source_id=request['source_id'])
     if 'category_id' in request:
         newer=FeedOperation.objects.filter(actor_id=operation.actor_id,binding_id=operation.binding_id,
             created_at__gt=operation.created_at,safe_input__subscription_request__category_id__isnull=False).exclude(state__in=['cancelled','failed']).exists()
@@ -197,9 +200,9 @@ def complete_subscription(operation):
                 category_id=request['category_id'],category_version=F('category_version')+1)
     ChannelGroupMember.objects.bulk_create([ChannelGroupMember(group=g, subscription=subscription) for g in groups], ignore_conflicts=True)
     FeedOperation.objects.filter(pk=operation.pk).update(safe_input={
-        'subscription': {**request, 'id': subscription.pk}})
-    from api.rss.import_models import RssImportItem
-    RssImportItem.objects.filter(operation=operation).update(subscription=subscription, status='succeeded')
+        'subscription': {**request, 'id': subscription.pk, 'created_by_operation': created}})
+    RssImportItem.objects.filter(operation=operation).update(
+        subscription=subscription, created_subscription=created, status='succeeded')
 
 
 

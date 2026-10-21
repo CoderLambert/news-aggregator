@@ -1,4 +1,5 @@
 """Bounded OPML preview/confirm. Parsing never resolves or fetches feed URLs."""
+from collections import Counter
 from datetime import timedelta
 from hashlib import sha256
 import json
@@ -16,8 +17,9 @@ from rest_framework.exceptions import APIException, Throttled, ValidationError
 from api.models import ChannelGroup, ChannelSubscription
 from api.rss.http import RssConflict
 from api.rss.import_models import RssImportBatch, RssImportItem
-from api.rss.operations import OperationError, canonicalize_feed_url, sqlite_retry
-from api.rss.subscriptions import subscribe
+from api.rss.operations import OperationError, cancel_operation, canonicalize_feed_url, sqlite_retry
+from api.rss.subscriptions import subscribe, unsubscribe
+from api.rss.models import FeedOperation
 
 SALT = 'rss-opml-v1'
 MAX_BYTES = 1024 * 1024
@@ -62,7 +64,7 @@ def parse_opml(raw):
         try:
             url = canonicalize_feed_url(feed.get('url', ''))
         except OperationError as exc:
-            # Credential-bearing invalid URLs and their labels are not persisted.
+            # Keep credential-bearing invalid URLs and labels out of parsed rows/DTOs.
             rows.append(dict(feed_url='', title='无效订阅', groups=[], status='invalid', error_code=exc.code))
             continue
         if url in urls:
@@ -74,11 +76,11 @@ def parse_opml(raw):
     return rows
 
 
-def batch_data(batch):
+def batch_data(batch, *, include_items=True):
     items = []
     for item in batch.items.select_related('operation').order_by('pk'):
         state = item.status
-        if item.operation_id:
+        if item.operation_id and item.status != 'removed':
             if item.operation.state == 'succeeded':
                 state = 'succeeded'
             elif item.operation.state in {'failed', 'cancelled', 'manual_blocked'}:
@@ -88,18 +90,26 @@ def batch_data(batch):
                       'status': state, 'error_code': item.error_code or (item.operation.safe_result.get('code', '') if item.operation_id else ''),
                       'operation_id': str(item.operation_id) if item.operation_id else None,
                       'subscription_id': item.subscription_id})
-    return {'id': str(batch.pk), 'status': batch.status, 'expires_at': batch.expires_at,
-            'items': items, 'groups': sorted({group for item in items for group in item['groups']})}
+    result = {'id': str(batch.pk), 'status': batch.status, 'expires_at': batch.expires_at,
+              'filename': batch.filename, 'file_size': batch.file_size,
+              'file_available': bool(batch.file_size), 'created_at': batch.created_at,
+              'removed_at': batch.removed_at, 'removed_count': batch.removed_count,
+              'counts': dict(Counter(item['status'] for item in items)), 'total': len(items)}
+    if include_items:
+        result.update(items=items, groups=sorted({group for item in items for group in item['groups']}))
+    return result
 
 
 @sqlite_retry
 @transaction.atomic
-def preview(user, raw):
+def preview(user, raw, filename='subscriptions.opml'):
     rows = parse_opml(raw)
     get_user_model().objects.filter(pk=user.pk).update(last_login=F('last_login'))
     if RssImportBatch.objects.filter(user=user, created_at__gte=timezone.now() - timedelta(hours=1)).count() >= 10:
         raise Throttled(detail='导入预览过于频繁，请稍后重试。')
-    batch = RssImportBatch.objects.create(user=user, file_hash=sha256(raw).hexdigest(),
+    filename = ''.join(c for c in str(filename).replace('\\', '/').rsplit('/', 1)[-1] if c.isprintable())[:255] or 'subscriptions.opml'
+    batch = RssImportBatch.objects.create(user=user, filename=filename, file_content=raw,
+                                        file_size=len(raw), file_hash=sha256(raw).hexdigest(),
                                         expires_at=timezone.now() + timedelta(minutes=30))
     token = signing.dumps({'id': str(batch.pk), 'user': user.pk, 'file_hash': batch.file_hash}, salt=SALT)
     batch.preview_token_hash = sha256(token.encode()).hexdigest()
@@ -123,10 +133,12 @@ def confirm(user, data):
         raise ValidationError('预览已过期或无效。') from None
     get_user_model().objects.filter(pk=user.pk).update(last_login=F('last_login'))
     try:
-        batch = RssImportBatch.objects.get(pk=identity, user=user, file_hash=payload['file_hash'],
+        batch = RssImportBatch.objects.defer('file_content').get(pk=identity, user=user, file_hash=payload['file_hash'],
             preview_token_hash=sha256(token.encode()).hexdigest())
     except RssImportBatch.DoesNotExist:
         raise Http404 from None
+    if batch.removed_at:
+        raise RssConflict('此批次已移除，不能重新导入。')
     if payload['user'] != user.pk or batch.expires_at <= timezone.now():
         raise ValidationError('预览已过期或无效。')
     selected, mapping = data['selected_ids'], data['group_map']
@@ -183,8 +195,8 @@ def process_imports(limit=10):
     for identity in list(RssImportItem.objects.filter(status='pending').order_by('updated_at').values_list('pk', flat=True)[:limit]):
         with transaction.atomic():
             RssImportItem.objects.filter(pk=identity).update(updated_at=F('updated_at'))
-            item = RssImportItem.objects.select_related('batch__user').get(pk=identity)
-            if item.status != 'pending':
+            item = RssImportItem.objects.select_related('batch__user').defer('batch__file_content').get(pk=identity)
+            if item.status != 'pending' or item.batch.removed_at:
                 continue
             try:
                 # Savepoint lets permanent item failures leave other imports intact.
@@ -200,7 +212,9 @@ def process_imports(limit=10):
                 item.status = 'queued'
                 item.operation_id = result['operation_id']
                 item.subscription_id = result['subscription']['id'] if result['subscription'] else None
-            item.save(update_fields=['status', 'error_code', 'operation', 'subscription', 'updated_at'])
+                operation = FeedOperation.objects.get(pk=item.operation_id)
+                item.created_subscription = operation.safe_input.get('subscription', {}).get('created_by_operation', False)
+            item.save(update_fields=['status', 'error_code', 'operation', 'subscription', 'created_subscription', 'updated_at'])
             if not item.batch.items.filter(status='pending').exists():
                 RssImportBatch.objects.filter(pk=item.batch_id).update(status='complete')
             completed += 1
@@ -212,9 +226,11 @@ def process_imports(limit=10):
 def retry_failed(user, identity, data):
     get_user_model().objects.filter(pk=user.pk).update(last_login=F('last_login'))
     try:
-        batch = RssImportBatch.objects.get(pk=identity, user=user)
+        batch = RssImportBatch.objects.defer('file_content').get(pk=identity, user=user)
     except RssImportBatch.DoesNotExist:
         raise Http404 from None
+    if batch.removed_at:
+        raise RssConflict('此批次已移除，不能重试。')
     if not isinstance(data, dict) or set(data) != {'selected_ids'} or not isinstance(data['selected_ids'], list) or not 1 <= len(data['selected_ids']) <= MAX_FEEDS:
         raise ValidationError('请选择失败的导入项目。')
     try:
@@ -239,6 +255,38 @@ def retry_failed(user, identity, data):
     batch.options = {**batch.options, 'retry_keys': retries}
     batch.status = 'confirmed'
     batch.save(update_fields=['options', 'status', 'updated_at'])
+    return batch_data(batch)
+
+
+@sqlite_retry
+@transaction.atomic
+def remove_batch(user, identity):
+    # Serialize against import processing and worker completion before reading
+    # provenance. Cancellation fences leases before any relationship is removed.
+    get_user_model().objects.filter(pk=user.pk).update(last_login=F('last_login'))
+    try:
+        batch = RssImportBatch.objects.defer('file_content').get(pk=identity, user=user)
+    except RssImportBatch.DoesNotExist:
+        raise Http404 from None
+    if batch.removed_at:
+        return batch_data(batch)
+    batch.removed_at = timezone.now()
+    batch.status = 'removed'
+    batch.save(update_fields=['removed_at', 'status', 'updated_at'])
+    items = list(batch.items.all())
+    for item in items:
+        if item.operation_id:
+            cancel_operation(user, item.operation_id)
+    # An FK cleared by an earlier unsubscribe cannot target a later subscription
+    # to the same source. Old batches default to unproven and remove nothing.
+    subscription_ids = {item.subscription_id for item in items
+                        if item.created_subscription and item.subscription_id}
+    owned = list(ChannelSubscription.objects.filter(user=user, pk__in=subscription_ids).values_list('pk', flat=True))
+    for identity in owned:
+        unsubscribe(user, identity)
+    batch.removed_count = len(owned)
+    batch.save(update_fields=['removed_count'])
+    batch.items.exclude(status__in=['invalid', 'preview']).update(status='removed')
     return batch_data(batch)
 
 
