@@ -146,3 +146,9 @@ def test_application_defaults_full_content_on_with_explicit_opt_out(tmp_path):
             env=env, capture_output=True, text=True, timeout=15)
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == str(expected)
+
+
+def test_rss_polling_defaults_shorten_both_capacity_and_per_feed_minimum():
+    env = yaml.safe_load((ROOT / 'compose.rss.prod.yaml').read_text())['services']['miniflux']['environment']
+    assert env['POLLING_FREQUENCY'] == '${RSS_POLLING_FREQUENCY:-10}'
+    assert env['SCHEDULER_ROUND_ROBIN_MIN_INTERVAL'] == '${RSS_POLLING_MIN_INTERVAL:-10}'

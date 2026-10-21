@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useLocation, useNavigationType, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { useLanguage } from '@/context/useLanguage'
@@ -14,6 +14,7 @@ import { Pagination } from '@/components/Pagination'
 import { Button } from '@/components/ui/button'
 import { useUnblockNews } from '@/hooks/useNewsMutations'
 import { useNewsScope } from '@/hooks/useNewsScope'
+import { useNewsUpdates } from '@/hooks/useNewsUpdates'
 import NewsScopeBar from '@/components/NewsScopeBar'
 import AuthModal from '@/components/AuthModal'
 import { useCapability } from '@/context/CapabilitiesContext'
@@ -63,6 +64,7 @@ function readLegacyFilters(): LegacyFilters | null {
 
 export default function NewsList() {
   const { lang } = useLanguage()
+  const queryClient = useQueryClient()
   const { user, loading: authLoading } = useAuth()
   const semanticSearchEnabled = useCapability('semantic_search').enabled
   const blockedNewsEnabled = useCapability('blocked_news').enabled
@@ -121,6 +123,9 @@ export default function NewsList() {
     // Changing reading conditions clears old results and aborts their requests.
     placeholderData: undefined,
   })
+  const hasNewArticles = useNewsUpdates(query, lang, viewerId, reading.sourceIds,
+    newsQuery.data, newsQuery.dataUpdatedAt,
+    !invalidRegion && !authLoading && reading.ready && !reading.configError)
   const categoriesQuery = useQuery(categoryOptions(lang))
   const sourcesQuery = useQuery(sourceOptions(lang, viewerId, 'history'))
   const currentViewerId = user?.id ?? null
@@ -208,6 +213,20 @@ export default function NewsList() {
         </div>
       )}
 
+      {hasNewArticles && <div role="status" className="my-4 text-center">
+        <Button type="button" variant="outline" onClick={() => {
+          if (page !== 1) {
+            void queryClient.invalidateQueries({
+              queryKey: newsListOptions({ ...query, page: 1 }, lang, viewerId, reading.sourceIds).queryKey,
+              exact: true,
+            })
+            updateParams({ page: null })
+          } else void newsQuery.refetch()
+          window.scrollTo({ top: 0, behavior: 'smooth' })
+        }}>
+          {lang === 'en' ? 'New articles available — click to update' : '有新文章，点击更新'}
+        </Button>
+      </div>}
       {initialLoading && <LoadingSpinner />}
       {!initialLoading && !newsQuery.isError && data?.results.length === 0 && (
         <div className="py-20 text-center text-muted-foreground">

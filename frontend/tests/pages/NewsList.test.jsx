@@ -408,3 +408,85 @@ describe('NewsList URL and server state', () => {
     await waitFor(() => expect(unblockNews).toHaveBeenLastCalledWith(secondStory.id))
   })
 })
+
+describe('new article checks', () => {
+  it('announces new articles on focus without replacing the reading list, then loads on click', async () => {
+    renderList('/')
+    await screen.findByRole('heading', { name: story.title })
+    fetchNews.mockResolvedValue({ count: 42, next: null, previous: null, results: [secondStory, story] })
+    act(() => window.dispatchEvent(new Event('focus')))
+    const update = await screen.findByRole('button', { name: '有新文章，点击更新' })
+    expect(screen.queryByRole('heading', { name: secondStory.title })).not.toBeInTheDocument()
+    fireEvent.click(update)
+    await screen.findByRole('heading', { name: secondStory.title })
+    await waitFor(() => expect(screen.queryByRole('button', { name: '有新文章，点击更新' })).not.toBeInTheDocument())
+  })
+
+  it('preserves filters when checking and returns to page one on update', async () => {
+    renderList('/?page=2&source=8&category=2&region=international')
+    await screen.findByRole('heading', { name: story.title })
+    fetchNews.mockResolvedValue({ count: 42, next: null, previous: null, results: [secondStory] })
+    act(() => window.dispatchEvent(new Event('focus')))
+    fireEvent.click(await screen.findByRole('button', { name: '有新文章，点击更新' }))
+    await waitFor(() => expect(screen.getByTestId('location-search')).not.toHaveTextContent('page=2'))
+    expect(screen.getByTestId('location-search')).toHaveTextContent('source=8')
+    expect(fetchNews).toHaveBeenCalledWith(expect.objectContaining({ page: 1, source: '8', category: '2', region: 'international' }), expect.any(AbortSignal))
+  })
+
+  it('does not run background checks for searches', async () => {
+    renderList('/?search=climate&mode=semantic')
+    await screen.findByRole('heading', { name: story.title })
+    const before = fetchNews.mock.calls.length
+    act(() => window.dispatchEvent(new Event('focus')))
+    await act(async () => {})
+    expect(fetchNews).toHaveBeenCalledTimes(before)
+  })
+})
+
+
+it('checks every thirty seconds while the list stays in place', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+  renderList('/')
+  await screen.findByRole('heading', { name: story.title })
+  fetchNews.mockResolvedValue({ count: 42, next: null, previous: null, results: [secondStory, story] })
+  try {
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_100) })
+    await screen.findByRole('button', { name: '有新文章，点击更新' })
+    expect(screen.queryByRole('heading', { name: secondStory.title })).not.toBeInTheDocument()
+  } finally { vi.useRealTimers() }
+})
+
+it('does not poll or check focus while the tab is hidden', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+  renderList('/')
+  await screen.findByRole('heading', { name: story.title })
+  const before = fetchNews.mock.calls.length
+  const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+  act(() => document.dispatchEvent(new Event('visibilitychange')))
+  try {
+    act(() => window.dispatchEvent(new Event('focus')))
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_100) })
+    expect(fetchNews).toHaveBeenCalledTimes(before)
+  } finally {
+    vi.useRealTimers()
+    hidden.mockRestore()
+    visibility.mockRestore()
+    act(() => document.dispatchEvent(new Event('visibilitychange')))
+  }
+})
+
+it('ignores a previous viewer update check after switching accounts', async () => {
+  renderViewerList()
+  await screen.findByRole('heading', { name: story.title })
+  const pending = deferred()
+  fetchNews.mockReturnValueOnce(pending.promise)
+  act(() => window.dispatchEvent(new Event('focus')))
+  await waitFor(() => expect(fetchNews).toHaveBeenCalledTimes(2))
+  fetchNews.mockResolvedValue({ count: 1, next: null, previous: null, results: [secondStory] })
+  fireEvent.click(screen.getByRole('button', { name: 'Switch viewer' }))
+  await screen.findByRole('heading', { name: secondStory.title })
+  await act(async () => pending.resolve({ count: 100, next: null, previous: null, results: [story] }))
+  expect(screen.queryByRole('button', { name: '有新文章，点击更新' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('heading', { name: story.title })).not.toBeInTheDocument()
+})

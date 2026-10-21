@@ -40,6 +40,9 @@ services:
       CLEANUP_ARCHIVE_READ_DAYS: '90'
       CLEANUP_ARCHIVE_UNREAD_DAYS: '90'
       FETCHER_ALLOW_PRIVATE_NETWORKS: '0'
+      # Scheduler batch capacity and per-feed minimum must both be shortened.
+      POLLING_FREQUENCY: '${RSS_POLLING_FREQUENCY:-10}'
+      SCHEDULER_ROUND_ROBIN_MIN_INTERVAL: '${RSS_POLLING_MIN_INTERVAL:-10}'
       LOG_LEVEL: error
     secrets: [rss_database_url, rss_engine_admin_password]
     ports: ['127.0.0.1:${RSS_ENGINE_PORT:-18080}:8080']
