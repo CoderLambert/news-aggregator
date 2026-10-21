@@ -1,4 +1,5 @@
 import logging
+import os
 import threading
 
 logger = logging.getLogger(__name__)
@@ -28,8 +29,8 @@ class EmbeddingService:
                 return self._model
             from sentence_transformers import SentenceTransformer
             logger.info('Loading sentence-transformer model...')
-            self._model = SentenceTransformer(MODEL_NAME)
-            logger.info('Sentence-transformer model loaded.')
+            self._model = SentenceTransformer(MODEL_NAME, device=os.environ.get('EMBEDDING_DEVICE') or None)
+            logger.info('Sentence-transformer model loaded on %s.', self._model.device)
             self._ready_event.set()
             return self._model
 

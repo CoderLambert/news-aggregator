@@ -36,10 +36,11 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 ARG TORCH_VERSION=2.14.1+cpu
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir \
-        --index-url https://download.pytorch.org/whl/cpu \
+        --index-url "${TORCH_INDEX_URL}" \
         "torch==${TORCH_VERSION}"
-# Keep the large CPU wheel cached across ordinary requirements/source changes.
+# Keep the large PyTorch wheel cached across ordinary requirements/source changes.
 COPY backend/requirements.txt /app/backend/requirements.txt
 ARG NEWSHUB_PYPI_INDEX=https://pypi.org/simple
 # Cache public dependency downloads between production builds.

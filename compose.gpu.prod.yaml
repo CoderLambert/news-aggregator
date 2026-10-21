@@ -1,0 +1,11 @@
+# Optional NVIDIA GPU overlay; requires a matching CUDA-enabled image and a
+# working NVIDIA CDI setup. CPU-only hosts continue using compose.prod.yaml.
+services:
+  app:
+    environment:
+      EMBEDDING_DEVICE: cuda
+    devices: [nvidia.com/gpu=all]
+  indexer:
+    environment:
+      EMBEDDING_DEVICE: cuda
+    devices: [nvidia.com/gpu=all]
