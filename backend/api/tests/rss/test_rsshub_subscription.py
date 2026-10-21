@@ -67,6 +67,7 @@ def test_late_gateway_response_cannot_commit_after_configuration_change(people,g
     worker=ControlWorker(EngineConfig(str(instance),account,'http://127.0.0.1:1','synthetic'))
     try:
         request=worker.prepare(worker.claim_next())
+        assert str(request.claim.operation_id) == str(response.data['operation_id'])
         settings.RSSHUB_GATEWAY={**gateway,'version':2}
         outcome=Outcome(feed=FeedDTO(str(instance),account,111,request.url,'Gateway',False,False))
         worker.complete(request,outcome)

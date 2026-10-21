@@ -454,8 +454,11 @@ def test_network_does_not_hold_sqlite_writer_and_read_slot_remains_available(lab
         Source.objects.filter(pk=source.pk).update(description='write during network')
     future = worker.submit_short_read(lambda adapter: adapter.list_feeds())
     assert future.result(timeout=2)[0].id == 7
-    # Lease expiry must not reclaim the still-running local future or add a third slot.
-    worker._started = time.monotonic() - worker.lease_seconds - 1
+    # Expire the actual physical lease/slot clock, not the legacy observation
+    # attribute. The still-running future must retain its real slot.
+    identity, job = next(iter(worker._inflight.items()))
+    worker._inflight[identity] = (job[0], job[1], time.monotonic() - worker.lease_seconds - 1, job[3], job[4])
+    FeedOperation.objects.filter(pk=identity).update(lease_until=timezone.now() - timedelta(seconds=1))
     assert worker.tick()['control_stalled']
     assert remote.create_calls == 1
     release.set()

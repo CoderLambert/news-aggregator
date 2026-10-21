@@ -6,6 +6,14 @@ import userEvent from '@testing-library/user-event'
 import { SpeechPlayerProvider } from '@/context/SpeechPlayerProvider'
 import { useSpeechPlayerActions, useSpeechPlayerState } from '@/context/SpeechPlayerContext'
 import GlobalSpeechPlayer from '@/components/speech/GlobalSpeechPlayer'
+import { checkSpeechReadiness, SpeechPreparationError } from '@/services/api'
+
+vi.mock('@/services/api', () => ({
+  checkSpeechReadiness: vi.fn(async (_id, options) => ({ language: options.language })),
+  SpeechPreparationError: class extends Error {
+    constructor(message, retryable) { super(message); this.retryable = retryable }
+  },
+}))
 
 const audioInstances = []
 let deferNextAudioMetadata = false
@@ -82,6 +90,7 @@ function PlayerActions() {
       <button type="button" onClick={() => player.speak(12, '第二篇虚构新闻', { language: 'original' })}>朗读第二篇</button>
       <button type="button" onClick={() => player.speak(11, '译文版本 A', { language: 'zh', scope: 'full', translationResultId: 41 })}>朗读译文 A</button>
       <button type="button" onClick={() => player.speak(11, '译文版本 B', { language: 'zh', scope: 'full', translationResultId: 42 })}>朗读译文 B</button>
+      <button type="button" onClick={() => player.speak(12, '第二篇摘要', { language: 'original', scope: 'summary' })}>朗读摘要</button>
       <button type="button" onClick={player.stop}>停止播放器</button>
       <output data-testid="player-status">{state.status}</output>
     </div>
@@ -113,6 +122,9 @@ function renderPlayer() {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks()
+  checkSpeechReadiness.mockReset()
+  checkSpeechReadiness.mockImplementation(async (_id, options) => ({ language: options.language }))
   audioInstances.length = 0
   deferNextAudioMetadata = false
   retainedViewerASpeak = null
@@ -187,7 +199,7 @@ describe('global speech player', () => {
 
     await user.click(screen.getByRole('button', { name: '朗读第一篇' }))
     const oldAudio = audioInstances[0]
-    oldAudio.pause()
+    act(() => oldAudio.pause())
     const oldPlayAction = mediaSession.actionHandlers.get('play')
     const oldPlay = deferred()
     vi.spyOn(oldAudio, 'play').mockReturnValue(oldPlay.promise)
@@ -211,7 +223,7 @@ describe('global speech player', () => {
 
     await user.click(screen.getByRole('button', { name: '朗读第一篇' }))
     const oldAudio = audioInstances[0]
-    oldAudio.pause()
+    act(() => oldAudio.pause())
     const oldPlayAction = mediaSession.actionHandlers.get('play')
     const oldPlay = deferred()
     vi.spyOn(oldAudio, 'play').mockReturnValue(oldPlay.promise)
@@ -308,4 +320,92 @@ describe('global speech player', () => {
     expect(audioInstances.at(-1).src).not.toContain('translation_result_id=41')
   })
 
+})
+
+
+it('checks content before synthesis and exposes a missing translation without a blind retry', async () => {
+  checkSpeechReadiness.mockRejectedValueOnce(new SpeechPreparationError('暂无对应中文译文，请先翻译或选择原文朗读。', false))
+  const user = userEvent.setup()
+  renderPlayer()
+  await user.click(screen.getByRole('button', { name: '朗读第一篇' }))
+  expect(await screen.findByText('暂无对应中文译文，请先翻译或选择原文朗读。')).toBeInTheDocument()
+  expect(audioInstances.every(audio => audio.src === '')).toBe(true)
+  expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '展开语音设置' }))
+  await user.click(screen.getByRole('button', { name: '原文' }))
+  expect(await screen.findByTestId('player-status')).toHaveTextContent('playing')
+  expect(audioInstances.at(-1).src).toContain('language=original')
+})
+
+it('retries exactly the selected private result after a synthesis error', async () => {
+  const user = userEvent.setup()
+  renderPlayer()
+  await user.click(screen.getByRole('button', { name: '朗读译文 A' }))
+  act(() => audioInstances.at(-1).onerror())
+  await user.click(await screen.findByRole('button', { name: '重试' }))
+  expect(audioInstances.at(-1).src).toContain('translation_result_id=41')
+  expect(audioInstances.at(-1).src).toContain('scope=full')
+})
+
+it('ignores a readiness result after stop or account switch', async () => {
+  let resolveCheck
+  checkSpeechReadiness.mockImplementationOnce(() => new Promise(resolve => { resolveCheck = resolve }))
+  const user = userEvent.setup()
+  renderPlayer()
+  await user.click(screen.getByRole('button', { name: '朗读译文 A' }))
+  await user.click(screen.getByRole('button', { name: '切换用户' }))
+  await act(async () => resolveCheck({ language: 'zh' }))
+  expect(audioInstances.every(audio => audio.src === '')).toBe(true)
+  expect(screen.getByTestId('player-status')).toHaveTextContent('idle')
+})
+
+
+it('keeps displayed scope and retry selection equal to a summary request', async () => {
+  const user = userEvent.setup()
+  renderPlayer()
+  await user.click(screen.getByRole('button', { name: '朗读摘要' }))
+  expect(screen.getByRole('region', { name: '全局语音播放器' })).toHaveTextContent('原文 · 摘要')
+  act(() => audioInstances.at(-1).onerror())
+  await user.click(await screen.findByRole('button', { name: '重试' }))
+  expect(audioInstances.at(-1).src).toContain('scope=summary')
+})
+
+it('does not synthesize an old article when its readiness resolves after the next article', async () => {
+  let resolveOld
+  checkSpeechReadiness.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+  const user = userEvent.setup()
+  renderPlayer()
+  await user.click(screen.getByRole('button', { name: '朗读第一篇' }))
+  await user.click(screen.getByRole('button', { name: '朗读第二篇' }))
+  await act(async () => resolveOld({ language: 'zh' }))
+  expect(audioInstances[0].src).toBe('')
+  expect(audioInstances.at(-1).src).toContain('/api/news/12/tts/')
+  expect(screen.getByTestId('player-status')).toHaveTextContent('playing')
+})
+
+
+it('restarts a pending preparation when the selected scope changes', async () => {
+  let resolveOld
+  checkSpeechReadiness.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+  const user = userEvent.setup()
+  renderPlayer()
+  await user.click(screen.getByRole('button', { name: '朗读第一篇' }))
+  const oldSignal = checkSpeechReadiness.mock.calls[0][2]
+  await user.click(screen.getByRole('button', { name: '展开语音设置' }))
+  await user.click(screen.getByRole('button', { name: '摘要' }))
+  await act(async () => resolveOld({ language: 'zh' }))
+  expect(oldSignal.aborted).toBe(true)
+  expect(audioInstances[0].src).toBe('')
+  expect(audioInstances.at(-1).src).toContain('scope=summary')
+  expect(screen.getByRole('region', { name: '全局语音播放器' })).toHaveTextContent('中文 · 摘要')
+})
+
+it('keeps an explicit private result when clicking the already selected language', async () => {
+  const user = userEvent.setup()
+  renderPlayer()
+  await user.click(screen.getByRole('button', { name: '朗读译文 A' }))
+  await user.click(screen.getByRole('button', { name: '展开语音设置' }))
+  await user.click(screen.getByRole('button', { name: '中文译文' }))
+  expect(audioInstances.at(-1).src).toContain('translation_result_id=41')
+  expect(checkSpeechReadiness).toHaveBeenCalledTimes(1)
 })

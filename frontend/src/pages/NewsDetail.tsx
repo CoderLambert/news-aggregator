@@ -304,10 +304,11 @@ export default function NewsDetail() {
               </button>}
               {speechSupported && ttsEnabled && (
                 <SpeechStartMenu
-                  isEnglishSource={isEnglishSource}
+                  sourceLanguage={news.source_language}
                   hasOriginalFull={readableBody}
-                  hasChineseFull={readableBody && (isEnglishSource ? Boolean(news.full_content_zh) : true)}
-                  hasChineseSummary={isEnglishSource ? Boolean(news.content_zh) : Boolean(news.content)}
+                  hasOriginalSummary={Boolean(news.content?.trim())}
+                  hasChineseFull={readableBody && (news.source_language === 'zh' || Boolean(news.full_content_zh))}
+                  hasChineseSummary={news.source_language === 'zh' ? Boolean(news.content) : Boolean(news.content_zh)}
                   translating={translating}
                   onPlay={handleSpeak}
                   onTranslateAndPlay={handleTranslateAndPlay}

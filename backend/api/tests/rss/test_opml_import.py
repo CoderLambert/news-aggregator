@@ -103,13 +103,18 @@ def test_partial_failure_retries_only_failed_item_and_never_unknown(people):
     result = preview(a)
     client(a).post('/api/me/rss-imports/confirm/', confirmation(result), format='json')
     process_imports()
-    items = list(RssImportItem.objects.select_related('operation'))
+    items = list(RssImportItem.objects.select_related('operation__shared_operation'))
     FeedOperation.objects.filter(pk=items[0].operation_id).update(state='succeeded')
     FeedOperation.objects.filter(pk=items[1].operation_id).update(state='manual_blocked')
+    FeedOperation.objects.filter(pk=items[1].operation.shared_operation_id).update(state='manual_blocked')
     url = f"/api/me/rss-imports/{result.data['id']}/"
     request = {'selected_ids': [str(items[1].pk)]}
     assert client(a).post(url, request, format='json').status_code == 409
     FeedOperation.objects.filter(pk=items[1].operation_id).update(state='failed')
+    # A local follower label cannot authorize retry of unknown physical work.
+    assert client(a).post(url, request, format='json').status_code == 409
+    FeedOperation.objects.filter(pk=items[1].operation.shared_operation_id).update(
+        state='failed', execution_phase='final_response', safe_result={'outcome_unknown': False})
     assert client(a).post(url, request, format='json').status_code == 202
     assert client(a).post(url, request, format='json').status_code == 202
     assert process_imports() == 1

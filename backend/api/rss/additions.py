@@ -21,17 +21,21 @@ STATES = {'pending','running','retry_wait','unknown','manual_blocked','succeeded
 def owned_additions(user):
     instance,account=engine_identity()
     return FeedOperation.objects.filter(actor=user,binding__engine_instance_uuid=instance,binding__account_id=account).filter(
-        Q(safe_input__subscription_request__isnull=False)|Q(safe_input__subscription__isnull=False)).select_related('binding')
+        Q(safe_input__subscription_request__isnull=False)|Q(safe_input__subscription__isnull=False)).select_related('binding', 'shared_operation')
 
 
 def addition_data(op):
     request=op.safe_input.get('subscription_request',op.safe_input.get('subscription',{}))
-    unknown=bool(op.safe_result.get('outcome_unknown')) or op.state in {'unknown','manual_blocked'}
+    work = (op.shared_operation or op) if op.state not in {'succeeded', 'cancelled', 'failed'} else op
+    state = 'pending' if work.state == 'succeeded' and op.state != 'succeeded' else work.state
+    unknown=bool(work.safe_result.get('outcome_unknown')) or state in {'unknown','manual_blocked'}
     actions=[]
-    if op.state not in {'succeeded','failed','cancelled'} or (op.state=='manual_blocked'):
+    if state not in {'succeeded','failed','cancelled'} or (state=='manual_blocked'):
         actions.append('cancel')
-    if unknown and op.state in {'unknown','manual_blocked'}: actions.append('reconcile')
-    elif op.state=='failed' and op.execution_phase in {'not_sent','final_response'}: actions.append('retry')
+    if unknown and state in {'unknown','manual_blocked'}: actions.append('reconcile')
+    elif state=='failed' and work.execution_phase in {'not_sent','final_response'} and not op.safe_input.get('bulk_import'):
+        from api.rss.import_models import RssImportItem
+        if not RssImportItem.objects.filter(operation=op).exists(): actions.append('retry')
     cooldown=op.created_at+timedelta(seconds=60)
     # Count only the actor's current source audience, never the whole physical Feed.
     from api.rss.access import authorized_sources, news_in_sources
@@ -46,8 +50,8 @@ def addition_data(op):
     return {'operation_id':str(op.pk),'source_id':request.get('source_id'),
         'name': op.binding.rsshub_alias or op.binding.canonical_feed_url,'feed_url':op.binding.rsshub_alias or op.binding.canonical_feed_url,
         'article_count':article_count,'article_state':article_state,
-        'state':op.state,'version':op.user_intent_version,'actions':actions,
-        'error_code':op.safe_result.get('code',''),'cooldown_until':cooldown.isoformat(),
+        'state':state,'version':op.user_intent_version,'actions':actions,
+        'error_code':work.safe_result.get('code',''),'cooldown_until':cooldown.isoformat(),
         'created_at':op.created_at.isoformat(),'connection_state':op.binding.connection_state,
         'recovery_of':str(op.recovery_of_id) if op.recovery_of_id else None,
         'can_recommend':op.state=='succeeded' and ChannelSubscription.objects.filter(user_id=op.actor_id,source_id=request.get('source_id'),source__publication__publication='personal').exists()}
@@ -69,12 +73,17 @@ def list_additions(user, *, status='all', page=1, page_size=25):
         'count':rows.count(),'page':page,'page_size':page_size,'server_time':timezone.now().isoformat()}
 
 
-def check_addition_limit(user,url):
-    rows=owned_additions(user)
+def check_addition_limit(user,url, *, bulk_import=False):
+    rows=owned_additions(user).filter(Q(safe_input__bulk_import__isnull=True) | Q(safe_input__bulk_import=False))
     if rows.filter(binding__canonical_feed_url=url,state__in=['pending','running','retry_wait','unknown','manual_blocked']).exists(): return
-    recent=rows.filter(created_at__gte=timezone.now()-timedelta(hours=1)).values('binding_id').distinct().count()
-    active=rows.filter(state__in=['pending','running','retry_wait','unknown','manual_blocked']).values('binding_id').distinct().count()
-    if recent>=getattr(settings,'RSS_ADDITION_HOURLY_LIMIT',20): raise Throttled(wait=3600,detail='每小时新增来源次数已达上限。')
+    # A confirmed, bounded OPML batch is one bulk intent, not hundreds of
+    # manual additions. Keep its live queue bounded; uncertain targets retain
+    # their own reconciliation fences without blocking unrelated feed URLs.
+    active_states = ['pending', 'running', 'retry_wait'] if bulk_import else ['pending', 'running', 'retry_wait', 'unknown', 'manual_blocked']
+    active=rows.filter(state__in=active_states).values('binding_id').distinct().count()
+    if not bulk_import:
+        recent=rows.filter(created_at__gte=timezone.now()-timedelta(hours=1)).values('binding_id').distinct().count()
+        if recent>=getattr(settings,'RSS_ADDITION_HOURLY_LIMIT',20): raise Throttled(wait=3600,detail='每小时新增来源次数已达上限。')
     if active>=getattr(settings,'RSS_ADDITION_ACTIVE_LIMIT',5): raise Throttled(wait=60,detail='请先处理已有连接任务。')
 
 
@@ -106,10 +115,16 @@ def addition_action(user, operation_id, *, action, expected_version, key):
     if action=='cancel':
         cancel_operation(user,op.pk)
     elif action=='reconcile':
-        FeedOperation.objects.filter(pk=op.pk).update(state='unknown',next_attempt=timezone.now(),lease_epoch=F('lease_epoch')+1,lease_token=None,lease_until=None)
+        target = op.shared_operation_id or op.pk
+        if not FeedOperation.objects.filter(pk=target, state__in=['unknown', 'manual_blocked']).update(
+                state='unknown', next_attempt=timezone.now(), lease_epoch=F('lease_epoch')+1, lease_token=None, lease_until=None):
+            raise RssConflict('共享任务已开始处理，请刷新进度。')
     else:
+        from api.rss.import_models import RssImportItem
+        if op.safe_input.get('bulk_import') or RssImportItem.objects.filter(operation=op).exists():
+            raise RssConflict('请在导入历史中重试此项，以保留批次取消和移除范围。')
         # An explicit failure is not authority to resend another possibly-sent request.
-        uncertain=FeedOperation.objects.filter(binding=op.binding,resolved_at__isnull=True).exclude(pk=op.pk).filter(
+        uncertain=FeedOperation.objects.filter(binding=op.binding,shared_operation__isnull=True,resolved_at__isnull=True).exclude(pk=op.pk).filter(
             Q(state__in=['unknown','manual_blocked'])|Q(safe_result__outcome_unknown=True))
         if uncertain.exists(): raise RssConflict('存在结果未知的请求，请先核对。')
         elapsed=(timezone.now()-op.created_at).total_seconds()

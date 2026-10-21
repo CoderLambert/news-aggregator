@@ -294,3 +294,19 @@ it('autoplays the matching translated article once when cache and completion arr
   expect(apiState.speak).toHaveBeenCalledTimes(1)
   expect(apiState.speak.mock.calls[0][0]).toBe(21)
 })
+
+
+it.each(['', 'fr'])('does not treat unknown/non-Chinese source language %s as ready Chinese speech', async (sourceLanguage) => {
+  apiState.speechSupported = true
+  fetchNewsDetail.mockResolvedValue({ ...detailStory, source_language: sourceLanguage,
+    full_content: 'Original body', full_content_state: 'available', body_access_granted: true })
+  renderRoutes('/news/21')
+  await screen.findByRole('heading', { name: 'Climate technology update' })
+  fireEvent.click(screen.getByRole('button', { name: '选择语音播报方式' }))
+  expect(screen.queryByText('中文内容已就绪，可以播放。')).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '翻译全文并播放' })).toBeEnabled()
+  fireEvent.click(screen.getByRole('button', { name: /^原文/ }))
+  fireEvent.click(screen.getByRole('button', { name: '开始播放' }))
+  expect(apiState.speak).toHaveBeenCalledWith(21, 'Climate technology update', { language: 'original', scope: 'full' })
+  expect(apiState.translate).not.toHaveBeenCalled()
+})

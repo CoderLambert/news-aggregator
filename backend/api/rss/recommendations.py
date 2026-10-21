@@ -33,7 +33,7 @@ def candidates():
 def candidate_data(candidate, *, viewer):
     authority=review_authority(viewer)
     own=candidate.submissions.filter(user=viewer).exists()
-    last=FeedOperation.objects.filter(binding=candidate.binding,kind__in=['register','set_enabled','update_feed_policy']).order_by('-created_at').first()
+    last=FeedOperation.objects.filter(binding=candidate.binding,shared_operation__isnull=True,kind__in=['register','set_enabled','update_feed_policy']).order_by('-created_at').first()
     cooldown=(last.created_at+timedelta(seconds=60)).isoformat() if last else None
     return {'candidate_id':str(candidate.pk),'name':candidate.name,'feed_url':candidate.binding.rsshub_alias or candidate.binding.canonical_feed_url,
         'effective_feed_url':candidate.binding.effective_feed_url,'category_id':candidate.category_id,

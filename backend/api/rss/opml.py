@@ -1,4 +1,5 @@
 """Bounded OPML preview/confirm. Parsing never resolves or fetches feed URLs."""
+from collections import Counter
 from datetime import timedelta
 from hashlib import sha256
 import json
@@ -16,8 +17,9 @@ from rest_framework.exceptions import APIException, Throttled, ValidationError
 from api.models import ChannelGroup, ChannelSubscription
 from api.rss.http import RssConflict
 from api.rss.import_models import RssImportBatch, RssImportItem
-from api.rss.operations import OperationError, canonicalize_feed_url, sqlite_retry
-from api.rss.subscriptions import subscribe
+from api.rss.operations import OperationError, cancel_operation, canonicalize_feed_url, sqlite_retry
+from api.rss.subscriptions import unsubscribe
+from api.rss.models import FeedOperation
 
 SALT = 'rss-opml-v1'
 MAX_BYTES = 1024 * 1024
@@ -62,49 +64,97 @@ def parse_opml(raw):
         try:
             url = canonicalize_feed_url(feed.get('url', ''))
         except OperationError as exc:
-            # Credential-bearing invalid URLs and their labels are not persisted.
+            # Keep credential-bearing invalid URLs and labels out of parsed rows/DTOs.
             rows.append(dict(feed_url='', title='无效订阅', groups=[], status='invalid', error_code=exc.code))
             continue
         if url in urls:
             urls[url]['groups'] = sorted(set(urls[url]['groups']) | set(groups))[:100]
+            urls[url]['duplicate_count'] += 1
             continue
-        row = dict(feed_url=url, title=str(feed.get('title', ''))[:255], groups=groups, status='preview')
+        row = dict(feed_url=url, title=str(feed.get('title', ''))[:255], groups=groups, status='preview', duplicate_count=0)
         rows.append(row)
         urls[url] = row
     return rows
 
 
-def batch_data(batch):
+def batch_data(batch, *, include_items=True):
     items = []
-    for item in batch.items.select_related('operation').order_by('pk'):
+    classifications = {}
+    if batch.status == 'preview':
+        from api.rss.import_scheduler import classify_imports
+        classifications = classify_imports(batch.user, set(batch.items.values_list('feed_url', flat=True)))
+    for item in batch.items.select_related('operation__shared_operation').order_by('pk'):
+        operation = item.operation
+        work = (operation.shared_operation or operation) if operation else None
+        outcome = classifications.get(item.feed_url, item.outcome or 'waiting')
+        next_attempt = item.next_attempt
+        can_retry = False
         state = item.status
-        if item.operation_id:
-            if item.operation.state == 'succeeded':
+        if (state == 'failed' and item.error_code == 'throttled' and not item.operation_id
+                and batch.confirmed_request_hash and not batch.removed_at):
+            state = 'pending'
+        if operation and item.status != 'removed':
+            if operation.state == 'succeeded':
                 state = 'succeeded'
-            elif item.operation.state in {'failed', 'cancelled', 'manual_blocked'}:
-                state = 'failed'
+                if outcome not in {'already_subscribed', 'reused'}:
+                    outcome = 'connected'
+            elif operation.state == 'cancelled':
+                state, outcome = 'removed', 'cancelled'
+            elif work.state in {'failed', 'cancelled', 'manual_blocked'}:
+                state, outcome = 'failed', 'needs_attention'
+                can_retry = work.state == 'failed' and not work.safe_result.get('outcome_unknown')
+            elif work.state == 'succeeded' and operation.state in {'pending', 'retry_wait', 'unknown', 'manual_blocked'}:
+                state, outcome = 'queued', 'waiting'
+            elif work.state == 'unknown':
+                state, outcome = 'queued', 'checking'
+            elif work.state == 'retry_wait':
+                state, outcome = 'queued', 'retry_wait'
+            elif work.state == 'running':
+                state, outcome = 'queued', 'connecting'
+            next_attempt = work.next_attempt
+        elif state == 'failed':
+            can_retry = True
+        if state == 'invalid':
+            outcome = 'invalid'
+        if batch.paused and state in {'pending', 'queued'}:
+            outcome = 'paused'
         items.append({'id': str(item.pk), 'feed_url': item.feed_url, 'title': item.title,
                       'groups': item.groups, 'group_ids': item.selected_group_ids,
-                      'status': state, 'error_code': item.error_code or (item.operation.safe_result.get('code', '') if item.operation_id else ''),
+                      'status': state, 'error_code': item.error_code or (work.safe_result.get('code', '') if work else ''),
+                      'outcome': outcome, 'next_attempt': next_attempt, 'can_retry': can_retry,
+                      'duplicate_count': item.duplicate_count,
                       'operation_id': str(item.operation_id) if item.operation_id else None,
                       'subscription_id': item.subscription_id})
-    return {'id': str(batch.pk), 'status': batch.status, 'expires_at': batch.expires_at,
-            'items': items, 'groups': sorted({group for item in items for group in item['groups']})}
+    result = {'id': str(batch.pk), 'status': batch.status, 'expires_at': batch.expires_at,
+              'filename': batch.filename, 'file_size': batch.file_size,
+              'file_available': bool(batch.file_size), 'created_at': batch.created_at,
+              'removed_at': batch.removed_at, 'removed_count': batch.removed_count,
+              'paused': batch.paused, 'cancelled_at': batch.cancelled_at,
+              'duplicate_count': sum(item['duplicate_count'] for item in items),
+              'outcomes': dict(Counter(item['outcome'] for item in items)),
+              'counts': dict(Counter(item['status'] for item in items)), 'total': len(items)}
+    if include_items:
+        result.update(items=items, groups=sorted({group for item in items for group in item['groups']}))
+    return result
 
 
 @sqlite_retry
 @transaction.atomic
-def preview(user, raw):
+def preview(user, raw, filename='subscriptions.opml'):
     rows = parse_opml(raw)
     get_user_model().objects.filter(pk=user.pk).update(last_login=F('last_login'))
     if RssImportBatch.objects.filter(user=user, created_at__gte=timezone.now() - timedelta(hours=1)).count() >= 10:
         raise Throttled(detail='导入预览过于频繁，请稍后重试。')
-    batch = RssImportBatch.objects.create(user=user, file_hash=sha256(raw).hexdigest(),
+    filename = ''.join(c for c in str(filename).replace('\\', '/').rsplit('/', 1)[-1] if c.isprintable())[:255] or 'subscriptions.opml'
+    batch = RssImportBatch.objects.create(user=user, filename=filename, file_content=raw,
+                                        file_size=len(raw), file_hash=sha256(raw).hexdigest(),
                                         expires_at=timezone.now() + timedelta(minutes=30))
     token = signing.dumps({'id': str(batch.pk), 'user': user.pk, 'file_hash': batch.file_hash}, salt=SALT)
     batch.preview_token_hash = sha256(token.encode()).hexdigest()
     batch.save(update_fields=['preview_token_hash'])
-    RssImportItem.objects.bulk_create([RssImportItem(batch=batch, **row) for row in rows])
+    from api.rss.import_scheduler import classify_imports
+    known = classify_imports(user, {row['feed_url'] for row in rows})
+    RssImportItem.objects.bulk_create([RssImportItem(batch=batch, outcome=known.get(row['feed_url'], ''), **row) for row in rows])
     return {**batch_data(batch), 'preview_token': token}
 
 
@@ -123,10 +173,12 @@ def confirm(user, data):
         raise ValidationError('预览已过期或无效。') from None
     get_user_model().objects.filter(pk=user.pk).update(last_login=F('last_login'))
     try:
-        batch = RssImportBatch.objects.get(pk=identity, user=user, file_hash=payload['file_hash'],
+        batch = RssImportBatch.objects.defer('file_content').get(pk=identity, user=user, file_hash=payload['file_hash'],
             preview_token_hash=sha256(token.encode()).hexdigest())
     except RssImportBatch.DoesNotExist:
         raise Http404 from None
+    if batch.removed_at:
+        raise RssConflict('此批次已移除，不能重新导入。')
     if payload['user'] != user.pk or batch.expires_at <= timezone.now():
         raise ValidationError('预览已过期或无效。')
     selected, mapping = data['selected_ids'], data['group_map']
@@ -178,33 +230,8 @@ def confirm(user, data):
 
 
 def process_imports(limit=10):
-    """Durable local intents only. T08 owns physical feed registration/retries."""
-    completed = 0
-    for identity in list(RssImportItem.objects.filter(status='pending').order_by('updated_at').values_list('pk', flat=True)[:limit]):
-        with transaction.atomic():
-            RssImportItem.objects.filter(pk=identity).update(updated_at=F('updated_at'))
-            item = RssImportItem.objects.select_related('batch__user').get(pk=identity)
-            if item.status != 'pending':
-                continue
-            try:
-                # Savepoint lets permanent item failures leave other imports intact.
-                with transaction.atomic():
-                    if not item.batch.user.is_active:
-                        raise ValidationError('账户已停用。')
-                    _, result = subscribe(item.batch.user, {'feed_url': item.feed_url, 'group_ids': item.selected_group_ids},
-                                          item.batch.options.get('retry_keys', {}).get(str(item.pk), f'opml:{item.batch_id}:{item.pk}'))
-            except (APIException, OperationError, Http404) as exc:
-                item.status = 'failed'
-                item.error_code = exc.code if isinstance(exc, OperationError) else getattr(exc, 'default_code', 'invalid_input')
-            else:
-                item.status = 'queued'
-                item.operation_id = result['operation_id']
-                item.subscription_id = result['subscription']['id'] if result['subscription'] else None
-            item.save(update_fields=['status', 'error_code', 'operation', 'subscription', 'updated_at'])
-            if not item.batch.items.filter(status='pending').exists():
-                RssImportBatch.objects.filter(pk=item.batch_id).update(status='complete')
-            completed += 1
-    return completed
+    from api.rss.import_scheduler import process_imports as schedule
+    return schedule(limit=limit)
 
 
 @sqlite_retry
@@ -212,16 +239,18 @@ def process_imports(limit=10):
 def retry_failed(user, identity, data):
     get_user_model().objects.filter(pk=user.pk).update(last_login=F('last_login'))
     try:
-        batch = RssImportBatch.objects.get(pk=identity, user=user)
+        batch = RssImportBatch.objects.defer('file_content').get(pk=identity, user=user)
     except RssImportBatch.DoesNotExist:
         raise Http404 from None
+    if batch.removed_at or batch.cancelled_at:
+        raise RssConflict('此批次已停止，不能重试。')
     if not isinstance(data, dict) or set(data) != {'selected_ids'} or not isinstance(data['selected_ids'], list) or not 1 <= len(data['selected_ids']) <= MAX_FEEDS:
         raise ValidationError('请选择失败的导入项目。')
     try:
         selected = {str(UUID(value)) for value in data['selected_ids']}
     except (ValueError, TypeError, AttributeError):
         raise ValidationError('项目无效。') from None
-    items = list(batch.items.filter(pk__in=selected).select_related('operation'))
+    items = list(batch.items.filter(pk__in=selected).select_related('operation__shared_operation'))
     if len(items) != len(selected):
         raise Http404
     retries = dict(batch.options.get('retry_keys', {}))
@@ -229,16 +258,84 @@ def retry_failed(user, identity, data):
         # Unknown outcomes stay gated in the control worker; retries cannot bypass it.
         if item.status == 'pending':
             continue
-        if not ((item.status == 'failed' and item.operation_id is None) or
-                (item.operation_id and item.operation.state == 'failed')):
+        work = (item.operation.shared_operation or item.operation) if item.operation_id else None
+        if not ((item.status == 'failed' and work is None) or
+                (work and work.state == 'failed' and not work.safe_result.get('outcome_unknown'))):
             raise RssConflict('只能重试明确失败的项目。')
         if item.operation_id:
             retries[str(item.pk)] = f'opml:{item.batch_id}:{item.pk}:{item.operation_id}'
+            cancel_operation(user, item.operation_id)
         item.status, item.error_code, item.operation_id = 'pending', '', None
-        item.save(update_fields=['status', 'error_code', 'operation', 'updated_at'])
+        item.outcome, item.next_attempt = 'waiting', None
+        item.save(update_fields=['status', 'error_code', 'operation', 'outcome', 'next_attempt', 'updated_at'])
     batch.options = {**batch.options, 'retry_keys': retries}
     batch.status = 'confirmed'
     batch.save(update_fields=['options', 'status', 'updated_at'])
+    return batch_data(batch)
+
+
+@sqlite_retry
+@transaction.atomic
+def remove_batch(user, identity):
+    # Serialize against import processing and worker completion before reading
+    # provenance. Cancellation fences leases before any relationship is removed.
+    get_user_model().objects.filter(pk=user.pk).update(last_login=F('last_login'))
+    try:
+        batch = RssImportBatch.objects.defer('file_content').get(pk=identity, user=user)
+    except RssImportBatch.DoesNotExist:
+        raise Http404 from None
+    if batch.removed_at:
+        return batch_data(batch)
+    batch.removed_at = timezone.now()
+    batch.status = 'removed'
+    batch.save(update_fields=['removed_at', 'status', 'updated_at'])
+    items = list(batch.items.all())
+    for item in items:
+        if item.operation_id and not RssImportItem.objects.filter(operation_id=item.operation_id,
+                batch__removed_at__isnull=True, batch__cancelled_at__isnull=True).exclude(batch=batch).exists():
+            cancel_operation(user, item.operation_id)
+    # An FK cleared by an earlier unsubscribe cannot target a later subscription
+    # to the same source. Old batches default to unproven and remove nothing.
+    subscription_ids = {item.subscription_id for item in items
+                        if item.created_subscription and item.subscription_id}
+    owned = list(ChannelSubscription.objects.filter(user=user, pk__in=subscription_ids).values_list('pk', flat=True))
+    for identity in owned:
+        unsubscribe(user, identity)
+    batch.removed_count = len(owned)
+    batch.save(update_fields=['removed_count'])
+    batch.items.exclude(status__in=['invalid', 'preview']).update(status='removed')
+    return batch_data(batch)
+
+
+@sqlite_retry
+@transaction.atomic
+def control_batch(user, identity, data):
+    if not isinstance(data, dict) or set(data) != {'action'} or data['action'] not in {'pause', 'resume', 'cancel'}:
+        raise ValidationError('请选择暂停、继续或取消剩余任务。')
+    if not get_user_model().objects.filter(pk=user.pk, is_active=True).update(last_login=F('last_login')):
+        raise Http404
+    try:
+        batch = RssImportBatch.objects.defer('file_content').get(pk=identity, user=user)
+    except RssImportBatch.DoesNotExist:
+        raise Http404 from None
+    if batch.removed_at or batch.status == 'preview':
+        raise RssConflict('此批次当前不能执行该操作。')
+    if batch.cancelled_at:
+        if data['action'] == 'cancel':
+            return batch_data(batch)
+        raise RssConflict('已取消的批次不能继续，请重新导入。')
+    if data['action'] == 'cancel':
+        batch.cancelled_at, batch.paused = timezone.now(), False
+        batch.save(update_fields=['cancelled_at', 'paused', 'updated_at'])
+        unfinished = list(batch.items.filter(status__in=['pending', 'queued', 'failed']).select_related('operation'))
+        for item in unfinished:
+            if item.operation_id and not RssImportItem.objects.filter(operation_id=item.operation_id,
+                    batch__removed_at__isnull=True, batch__cancelled_at__isnull=True).exists():
+                cancel_operation(user, item.operation_id)
+        batch.items.filter(pk__in=[item.pk for item in unfinished]).update(status='removed', outcome='cancelled', error_code='')
+    else:
+        batch.paused = data['action'] == 'pause'
+        batch.save(update_fields=['paused', 'updated_at'])
     return batch_data(batch)
 
 

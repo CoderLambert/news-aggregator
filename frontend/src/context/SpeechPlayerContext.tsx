@@ -17,6 +17,7 @@ export interface SpeechPlayerState {
   newsId: NewsId | null
   language: SpeechLanguage
   errorMessage: string | null
+  canRetry: boolean
 }
 
 export interface SpeechPlayerCapabilities {
@@ -25,6 +26,8 @@ export interface SpeechPlayerCapabilities {
 
 export interface SpeechPlayerActions {
   speak: (newsId: NewsId, title: string, options?: Partial<SpeechRequestOptions>) => void
+  retry: () => void
+  setLanguage: (language: SpeechLanguage) => void
   pause: () => void
   resume: () => void
   stop: () => void
