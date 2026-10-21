@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import OpmlDialog from '@/features/rss/OpmlDialog'
 import { workspaceRequest } from '@/services/workspaceApi'
 
-vi.mock('@/services/workspaceApi', () => ({ workspaceRequest: vi.fn(), workspaceError: () => '操作未完成，请重试。' }))
+vi.mock('@/services/workspaceApi', async importOriginal => ({ ...await importOriginal<typeof import('@/services/workspaceApi')>(), workspaceRequest: vi.fn(), workspaceError: () => '操作未完成，请重试。' }))
 const request = vi.mocked(workspaceRequest)
 const batch = { id: 'batch', status: 'preview', preview_token: 'signed-token', groups: ['Tech'], items: [
   { id: 'one', title: 'One', feed_url: 'https://example.com/rss', groups: ['Tech'], status: 'preview', error_code: '', operation_id: null },
@@ -45,4 +45,18 @@ describe('personal OPML workflow', () => {
     expect(screen.getByRole('link', { name: '导出我的订阅' })).toHaveAttribute('href', '/api/me/rss-subscriptions/export/')
     expect(request).not.toHaveBeenCalled()
   })
+  it('selects only valid entries in bulk and reports preview counts', async () => {
+    request.mockResolvedValue(batch)
+    setup()
+    fireEvent.change(screen.getByLabelText('OPML 文件'), { target: { files: [new File(['<opml/>'], 'feeds.opml')] } })
+    fireEvent.click(screen.getByRole('button', { name: '预览文件' }))
+    expect(await screen.findByText('共 2 项 · 可导入 1 项 · 无效 1 项 · 已选 1 项')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '取消全选' }))
+    expect(screen.getByRole('checkbox', { name: '导入 One' })).not.toBeChecked()
+    expect(screen.getByRole('button', { name: '确认导入 0 项' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '全选有效频道' }))
+    expect(screen.getByRole('checkbox', { name: '导入 One' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: '导入 Invalid' })).not.toBeChecked()
+  })
+
 })
