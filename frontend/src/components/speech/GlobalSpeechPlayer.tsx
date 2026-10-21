@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ChevronUp, CircleAlert, FileText, Gauge, Headphones, Loader2, Pause, Play, RotateCcw, Square } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { RATES, SCOPES, VOICES } from '@/constants/tts'
+import { RATES, SCOPES, VOICES, SPEECH_LANGUAGES } from '@/constants/tts'
 import { useSpeechPlayerActions, useSpeechPlayerState } from '@/context/SpeechPlayerContext'
 
 function formatTime(seconds: number): string {
@@ -60,12 +60,12 @@ export default function GlobalSpeechPlayer() {
               ? '正在生成语音…'
               : isError
                 ? player.errorMessage
-                : `${player.language === 'zh' ? '中文' : '英文原文'} · ${player.scope === 'full' ? '全文' : '摘要'} · ${formatTime(player.currentTime)} / ${formatTime(player.duration)} · ${percent}%`}
+                : `${player.language === 'zh' ? '中文' : '原文'} · ${player.scope === 'full' ? '全文' : '摘要'} · ${formatTime(player.currentTime)} / ${formatTime(player.duration)} · ${percent}%`}
           </p>
         </div>
 
-        {isError && player.newsId !== null && (
-          <Button type="button" variant="ghost" size="sm" onClick={() => actions.speak(player.newsId!, player.title, { language: player.language, scope: player.scope, voice: player.voice, rate: player.rate })}>
+        {isError && player.canRetry && player.newsId !== null && (
+          <Button type="button" variant="ghost" size="sm" onClick={actions.retry}>
             <RotateCcw aria-hidden="true" />重试
           </Button>
         )}
@@ -86,8 +86,15 @@ export default function GlobalSpeechPlayer() {
         </Button>
       </div>
 
-      {expanded && !isError && (
+      {expanded && (
         <div id="speech-player-options" className="mx-auto max-w-3xl space-y-2 border-t border-border px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="朗读语言">
+            {SPEECH_LANGUAGES.map((item) => <Button key={item.key} type="button" size="pill-sm"
+              variant={player.language === item.key ? 'secondary' : 'ghost'}
+              aria-pressed={player.language === item.key} onClick={() => actions.setLanguage(item.key)}>
+              {item.label}
+            </Button>)}
+          </div>
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label="播放速度">
             <Gauge aria-hidden="true" className="size-4 text-muted-foreground" />
             <span className="mr-1 text-xs text-muted-foreground">倍速</span>

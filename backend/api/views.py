@@ -1663,7 +1663,18 @@ class NewsTTSView(ArticleAccessMixin, generics.GenericAPIView):
                 if (latest.namespace, latest.content, latest.title) != (resolved.namespace, resolved.content, resolved.title):
                     from api.services.stored_readers import StoredContentChanged
                     raise StoredContentChanged('朗读译文或连接已变化。')
-        speech_guard()
+        from api.services.stored_readers import StoredContentChanged
+        try:
+            speech_guard()
+        except (StoredContentChanged, TTSContentUnavailable):
+            return Response({'code': 'content_changed', 'message': '朗读内容已变化，请重新选择。'}, status=409)
+        # One authority for every player entry point. This checks current ACL,
+        # selected translation, scope and text limits without synthesizing audio.
+        if request.query_params.get('check') == '1':
+            return Response(
+                {'status': 'ready', 'language': resolved.language, 'voice': voice},
+                headers={'Cache-Control': 'private, no-store'},
+            )
         cached = get_cached_audio(pk, cache_variant)
         if cached:
             def cached_stream():
@@ -1745,6 +1756,9 @@ class NewsTTSView(ArticleAccessMixin, generics.GenericAPIView):
                     getattr(settings, 'EDGE_TTS_ENDPOINT', 'default'),
                     type(exc).__name__,
                 )
+                # Break the HTTP transfer instead of presenting a truncated MP3
+                # as a clean EOF. Keep provider details out of server tracebacks.
+                raise RuntimeError('tts_stream_interrupted') from None
             finally:
                 try:
                     loop.run_until_complete(gen.aclose())

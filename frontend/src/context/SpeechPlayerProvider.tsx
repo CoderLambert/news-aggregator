@@ -13,7 +13,7 @@ import {
   VOICE_KEY,
 } from '@/constants/tts'
 import type { PlaybackRate, SpeechLanguage, SpeechScope, VoiceKey } from '@/constants/tts'
-import type { NewsId } from '@/services/api'
+import { checkSpeechReadiness, SpeechPreparationError, type NewsId } from '@/services/api'
 import type { SpeechRequestOptions, SpeechStatus } from './SpeechPlayerContext'
 import { isRecord } from '@/types/news'
 import { useAuth } from '@/context/AuthContext'
@@ -25,6 +25,7 @@ interface ActiveArticle {
   scope: SpeechScope
   translationResultId?: number | null
   viewerId: string
+  options: SpeechOptions
 }
 
 type SpeechOptions = SpeechRequestOptions
@@ -70,9 +71,11 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
   const [rate, setRateState] = useState<PlaybackRate>(readStoredRate)
   const [voice, setVoiceState] = useState<VoiceKey>(() => readStoredValue<VoiceKey>(VOICE_KEY, 'yunyang', VOICES))
   const [scope, setScopeState] = useState<SpeechScope>(() => readStoredValue<SpeechScope>(SCOPE_KEY, 'full', SCOPES))
-  const [language, setLanguage] = useState<SpeechLanguage>(() => readStoredValue<SpeechLanguage>(SPEECH_LANGUAGE_KEY, 'zh', SPEECH_LANGUAGES))
+  const [language, setLanguageState] = useState<SpeechLanguage>(() => readStoredValue<SpeechLanguage>(SPEECH_LANGUAGE_KEY, 'zh', SPEECH_LANGUAGES))
   const [title, setTitle] = useState('')
   const [newsId, setNewsId] = useState<NewsId | null>(null)
+  const [canRetry, setCanRetry] = useState(false)
+  const preparationRef = useRef<AbortController | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -128,6 +131,8 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
   const stop = useCallback(() => {
     savePosition()
     requestIdRef.current += 1
+    preparationRef.current?.abort()
+    preparationRef.current = null
     const audio = audioRef.current
     audioRef.current = null
     activeArticleRef.current = null
@@ -144,6 +149,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     setTitle('')
     setNewsId(null)
     setErrorMessage(null)
+    setCanRetry(false)
   }, [clearMediaSession, savePosition, updateStatus])
 
   useLayoutEffect(() => {
@@ -189,6 +195,9 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     savePosition()
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
+    preparationRef.current?.abort()
+    const controller = new AbortController()
+    preparationRef.current = controller
 
     const previousAudio = audioRef.current
     if (previousAudio) {
@@ -209,7 +218,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     }
     const translationResultId = selected.language === 'zh' && selected.scope === 'full'
       ? overrides.translationResultId ?? null : null
-    const article = { id, title: articleTitle, language: selected.language, scope: selected.scope, translationResultId, viewerId }
+    const article: ActiveArticle = { id, title: articleTitle, language: selected.language, scope: selected.scope, translationResultId, viewerId, options: { ...selected, translationResultId } }
     const audio = new Audio()
     audioRef.current = audio
     activeArticleRef.current = article
@@ -222,11 +231,14 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     setDuration(0)
     setTitle(articleTitle)
     setNewsId(id)
-    setLanguage(selected.language)
+    setScopeState(selected.scope)
+    setRateState(selected.rate)
+    setLanguageState(selected.language)
     setVoiceState(selected.voice)
     persist(SPEECH_LANGUAGE_KEY, selected.language)
     persist(VOICE_KEY, selected.voice)
     setErrorMessage(null)
+    setCanRetry(false)
 
     const isCurrent = () => isCurrentAudio(audio, requestId)
     audio.onplay = () => {
@@ -250,12 +262,15 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     audio.onerror = () => {
       if (!isCurrent()) return
       audioRef.current = null
-      activeArticleRef.current = null
       updateStatus('error')
+      setCanRetry(true)
       setProgress(0)
       setCurrentTime(0)
       setDuration(0)
-      setErrorMessage('语音生成失败，请稍后重试。')
+      audio.pause()
+      audio.removeAttribute('src')
+      audio.load()
+      setErrorMessage('语音合成或音频传输失败，请重试。')
       clearMediaSession()
     }
     audio.onended = () => {
@@ -279,11 +294,28 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
       void audio.play().catch(() => { if (isCurrent()) updateStatus('paused') })
     }
 
-    const query = new URLSearchParams({ language: selected.language, voice: selected.voice, scope: selected.scope })
-    if (translationResultId !== null) query.set('translation_result_id', String(translationResultId))
-    audio.src = `/api/news/${id}/tts/?${query.toString()}`
-    updateMediaSession(articleTitle, audio, requestId)
-    audio.load()
+    // All starts, preference changes and retries pass the same server-side
+    // content/owner admission. The check never generates audio or translations.
+    void checkSpeechReadiness(id, article.options, controller.signal).then((ready) => {
+      if (controller.signal.aborted || !isCurrent()) return
+      article.language = ready.language
+      article.options.language = ready.language
+      if (ready.language === 'zh' && article.options.voice === 'guy') article.options.voice = 'yunyang'
+      setLanguageState(ready.language)
+      setVoiceState(article.options.voice)
+      const query = new URLSearchParams({ language: ready.language, voice: article.options.voice, scope: selected.scope })
+      if (translationResultId !== null) query.set('translation_result_id', String(translationResultId))
+      audio.src = `/api/news/${id}/tts/?${query.toString()}`
+      updateMediaSession(articleTitle, audio, requestId)
+      audio.load()
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted || !isCurrent()) return
+      audioRef.current = null
+      updateStatus('error')
+      setCanRetry(error instanceof SpeechPreparationError ? error.retryable : true)
+      setErrorMessage(error instanceof SpeechPreparationError ? error.message : '无法确认朗读内容，请稍后重试。')
+      clearMediaSession()
+    })
   }, [clearMediaSession, isCurrentAudio, language, rate, restorePosition, savePosition, scope, supported, updateMediaSession, updateStatus, viewerId, voice])
 
   const pause = useCallback(() => {
@@ -310,17 +342,31 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
   const setRate = useCallback((nextRate: PlaybackRate) => {
     setRateState(nextRate)
     persist(RATE_KEY, String(nextRate))
+    if (activeArticleRef.current) activeArticleRef.current.options.rate = nextRate
     if (audioRef.current) audioRef.current.playbackRate = nextRate
   }, [])
 
   const replayWithPreference = useCallback((override: Partial<SpeechOptions>) => {
     const article = activeArticleRef.current
     const currentStatus = statusRef.current
-    if (article && (currentStatus === 'playing' || currentStatus === 'paused')) {
-      speak(article.id, article.title, { ...override, language: article.language,
-        translationResultId: article.translationResultId })
+    if (article && (currentStatus === 'playing' || currentStatus === 'paused' || currentStatus === 'error' || currentStatus === 'loading')) {
+      speak(article.id, article.title, { ...article.options, ...override })
     }
   }, [speak])
+
+  const retry = useCallback(() => {
+    const article = activeArticleRef.current
+    if (canRetry && statusRef.current === 'error' && article?.viewerId === viewerIdRef.current) {
+      speak(article.id, article.title, article.options)
+    }
+  }, [canRetry, speak])
+
+  const setLanguage = useCallback((nextLanguage: SpeechLanguage) => {
+    if (activeArticleRef.current?.language === nextLanguage) return
+    setLanguageState(nextLanguage)
+    persist(SPEECH_LANGUAGE_KEY, nextLanguage)
+    replayWithPreference({ language: nextLanguage, translationResultId: null })
+  }, [replayWithPreference])
 
   const setVoice = useCallback((nextVoice: VoiceKey) => {
     setVoiceState(nextVoice)
@@ -336,6 +382,8 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => () => {
     requestIdRef.current += 1
+    preparationRef.current?.abort()
+    preparationRef.current = null
     const audio = audioRef.current
     audioRef.current = null
     activeArticleRef.current = null
@@ -359,10 +407,11 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     newsId,
     language,
     errorMessage,
-  }), [currentTime, duration, errorMessage, language, newsId, progress, rate, scope, status, title, voice])
+    canRetry,
+  }), [currentTime, duration, errorMessage, language, newsId, progress, rate, scope, status, title, voice, canRetry])
 
-  const playerActions = useMemo(() => ({ speak, pause, resume, stop, seek, setRate, setVoice, setScope }), [
-    pause, resume, seek, setRate, setScope, setVoice, speak, stop,
+  const playerActions = useMemo(() => ({ speak, retry, setLanguage, pause, resume, stop, seek, setRate, setVoice, setScope }), [
+    pause, resume, retry, setLanguage, seek, setRate, setScope, setVoice, speak, stop,
   ])
   const playerCapabilities = useMemo(() => ({ supported }), [supported])
 

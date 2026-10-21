@@ -153,7 +153,10 @@ def test_tts_interrupted_stream_leaves_no_partial_audio(client, tts_news, tmp_pa
         'api.services.tts_service.configure_edge_tts_endpoint', return_value='wss://reviewed.invalid'
     ):
         response = client.get(reverse('news-tts', args=[tts_news.pk]), {'language': 'original', 'scope': 'summary'})
-        assert b''.join(response.streaming_content) == b'X' * 140
+        chunks = iter(response.streaming_content)
+        assert next(chunks) == b'X' * 140
+        with pytest.raises(RuntimeError, match='tts_stream_interrupted'):
+            list(chunks)
         assert not list(tmp_path.iterdir())
 
 
@@ -183,3 +186,66 @@ def test_atomic_audio_replacement_cleans_stage_when_replace_fails(monkeypatch, t
             tts.save_to_cache(1, 'voice-variant', b'B' * 150)
         assert open(prior, 'rb').read() == original
         assert not list(tmp_path.glob('*.part'))
+
+
+@pytest.mark.django_db
+@override_settings(PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_tts_check_validates_without_synthesis_or_cache(client, tts_news, tmp_path):
+    user = get_user_model().objects.create_user(username='tts-check')
+    tts_news.full_content_state = 'available'
+    tts_news.save(update_fields=['full_content_state'])
+    client.force_login(user)
+    with override_settings(TTS_CACHE_DIR=tmp_path), patch('edge_tts.Communicate') as provider:
+        response = client.get(reverse('news-tts', args=[tts_news.pk]), {
+            'language': 'original', 'scope': 'full', 'check': '1', 'voice': 'guy',
+        })
+    assert response.status_code == 200
+    assert response['Content-Type'].startswith('application/json')
+    assert response['Cache-Control'] == 'private, no-store'
+    assert response.json()['language'] == 'zh'
+    assert response.json()['voice'].startswith('zh-CN-')
+    assert response.json()['status'] == 'ready'
+    provider.assert_not_called()
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.django_db
+@override_settings(PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_tts_check_unknown_language_requires_chinese_translation_but_allows_original(client, tts_news):
+    user = get_user_model().objects.create_user(username='tts-check-unknown')
+    tts_news.full_content_state = 'available'
+    tts_news.save(update_fields=['full_content_state'])
+    client.force_login(user)
+    tts_news.source.language = ''
+    tts_news.source.save(update_fields=['language'])
+    with patch('edge_tts.Communicate') as provider:
+        denied = client.get(reverse('news-tts', args=[tts_news.pk]), {
+            'language': 'zh', 'scope': 'full', 'check': '1',
+        })
+        ready = client.get(reverse('news-tts', args=[tts_news.pk]), {
+            'language': 'original', 'scope': 'full', 'check': '1',
+        })
+    assert denied.status_code == 409
+    assert denied.json()['code'] == 'translation_required'
+    assert ready.status_code == 200
+    assert ready.json()['language'] == 'original'
+    provider.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_tts_check_enforces_auth_and_explicit_translation_identity(client, tts_news):
+    url = reverse('news-tts', args=[tts_news.pk])
+    with patch('edge_tts.Communicate') as provider:
+        assert client.get(url, {'check': '1'}).status_code == 403
+        user = get_user_model().objects.create_user(username='tts-check-private')
+        client.force_login(user)
+        tts_news.full_content_state = 'available'
+        tts_news.source.language = ''
+        tts_news.save(update_fields=['full_content_state'])
+        tts_news.source.save(update_fields=['language'])
+        response = client.get(url, {'check': '1', 'language': 'zh', 'scope': 'full',
+                                    'translation_result_id': '999999'})
+    assert response.status_code == 404
+    assert response.json()['code'] == 'translation_result_unavailable'
+    provider.assert_not_called()

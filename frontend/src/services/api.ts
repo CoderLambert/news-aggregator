@@ -210,6 +210,43 @@ export function fetchNewsDetail(id: NewsId, signal?: AbortSignal): Promise<unkno
   return api.get<unknown>(`/news/${id}/`, { signal }).then(({ data }) => data)
 }
 
+export class SpeechPreparationError extends Error {
+  constructor(message: string, readonly retryable: boolean) {
+    super(message)
+    this.name = 'SpeechPreparationError'
+  }
+}
+
+/** Read-only admission: never triggers translation, extraction or synthesis. */
+export async function checkSpeechReadiness(id: NewsId, options: {
+  language: 'zh' | 'original'; scope: 'full' | 'summary'; voice: string
+  translationResultId?: number | null
+}, signal: AbortSignal): Promise<{ language: 'zh' | 'original' }> {
+  try {
+    const { data } = await api.get<unknown>(`/news/${id}/tts/`, {
+      params: { check: '1', language: options.language, scope: options.scope, voice: options.voice,
+        ...(options.translationResultId != null ? { translation_result_id: options.translationResultId } : {}) },
+      signal,
+    })
+    if (!isRecord(data) || data.status !== 'ready' || (data.language !== 'zh' && data.language !== 'original')) {
+      throw new SpeechPreparationError('无法确认朗读内容，请稍后重试。', true)
+    }
+    return { language: data.language }
+  } catch (error) {
+    if (error instanceof SpeechPreparationError || signal.aborted) throw error
+    const response = isRecord(error) && isRecord(error.response) ? error.response : null
+    const status = response?.status
+    const code = isRecord(response?.data) ? response.data.code : null
+    if (status === 401 || status === 403) throw new SpeechPreparationError('登录状态或朗读权限已变化，请重新登录后再试。', false)
+    if (status === 404) throw new SpeechPreparationError('所选文章或个人译文已不可用，请重新选择。', false)
+    if (code === 'translation_required') throw new SpeechPreparationError('暂无对应中文译文，请先翻译或选择原文朗读。', false)
+    if (code === 'source_content_required') throw new SpeechPreparationError('所选范围暂无可朗读原文，请获取正文或选择摘要。', false)
+    if (code === 'tts_text_too_long') throw new SpeechPreparationError('正文过长，请选择摘要朗读。', false)
+    if (status === 400 || status === 409) throw new SpeechPreparationError('朗读内容或选项已变化，请重新选择。', false)
+    throw new SpeechPreparationError('语音服务暂不可用，请稍后重试。', true)
+  }
+}
+
 export interface NewsReadState {
   is_read: boolean
   version: number

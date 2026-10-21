@@ -3,8 +3,9 @@ import { FileText, Headphones, Languages, Loader2, Volume2, X } from 'lucide-rea
 import type { SpeechLanguage, SpeechScope } from '@/constants/tts'
 
 interface SpeechStartMenuProps {
-  isEnglishSource: boolean
+  sourceLanguage: string
   hasOriginalFull: boolean
+  hasOriginalSummary: boolean
   hasChineseFull: boolean
   hasChineseSummary: boolean
   translating: boolean
@@ -13,14 +14,17 @@ interface SpeechStartMenuProps {
 }
 
 export default function SpeechStartMenu({
-  isEnglishSource,
+  sourceLanguage,
   hasOriginalFull,
+  hasOriginalSummary,
   hasChineseFull,
   hasChineseSummary,
   translating,
   onPlay,
   onTranslateAndPlay,
 }: SpeechStartMenuProps) {
+  const isEnglishSource = sourceLanguage === 'en'
+  const needsTranslation = sourceLanguage !== 'zh'
   const [open, setOpen] = useState(false)
   const [language, setLanguage] = useState<SpeechLanguage>('zh')
   const [scope, setScope] = useState<SpeechScope>('full')
@@ -49,7 +53,7 @@ export default function SpeechStartMenu({
   }, [open])
 
   const chineseReady = scope === 'full' ? hasChineseFull : hasChineseSummary
-  const originalReady = scope === 'full' ? hasOriginalFull : true
+  const originalReady = scope === 'full' ? hasOriginalFull : hasOriginalSummary
   const selectedReady = language === 'zh' ? chineseReady : originalReady
   const canTranslate = language === 'zh' && scope === 'full' && hasOriginalFull
 
@@ -89,7 +93,7 @@ export default function SpeechStartMenu({
             </button>
           </div>
 
-          {isEnglishSource && (
+          {needsTranslation && (
             <div className="mb-3" role="group" aria-label="朗读语言">
               <p className="mb-1.5 flex items-center gap-1 text-xs font-medium text-neutral-600"><Languages aria-hidden="true" className="size-3.5" />语言</p>
               <div className="grid grid-cols-2 gap-2">
@@ -97,7 +101,7 @@ export default function SpeechStartMenu({
                   <span className="block font-medium">中文译文</span><span className="text-[11px] opacity-70">推荐</span>
                 </button>
                 <button type="button" aria-pressed={language === 'original'} onClick={() => setLanguage('original')} className={`rounded-xl border px-3 py-2 text-left text-sm ${language === 'original' ? 'border-violet-400 bg-violet-50 text-violet-800' : 'border-neutral-200 hover:bg-neutral-50'}`}>
-                  <span className="block font-medium">英文原文</span><span className="text-[11px] opacity-70">原声朗读</span>
+                  <span className="block font-medium">{isEnglishSource ? '英文原文' : '原文'}</span><span className="text-[11px] opacity-70">原声朗读</span>
                 </button>
               </div>
             </div>
@@ -108,7 +112,7 @@ export default function SpeechStartMenu({
             <div className="flex gap-2">
               {(['full', 'summary'] as const).map((value) => (
                 <button
-                  ref={!isEnglishSource && value === 'full' ? firstChoiceRef : undefined}
+                  ref={!needsTranslation && value === 'full' ? firstChoiceRef : undefined}
                   key={value}
                   type="button"
                   aria-pressed={scope === value}
@@ -126,7 +130,7 @@ export default function SpeechStartMenu({
             {language === 'zh' && !chineseReady && scope === 'summary' && '暂无中文摘要，可选择中文全文。'}
             {language === 'zh' && !chineseReady && scope === 'full' && hasOriginalFull && (translating ? '翻译任务正在进行，继续等待后将自动播放。' : '需要先翻译全文，完成后自动播放。')}
             {language === 'zh' && !chineseReady && scope === 'full' && !hasOriginalFull && '请先获取完整原文。'}
-            {language === 'original' && !originalReady && '请先获取完整原文。'}
+            {language === 'original' && !originalReady && (scope === 'full' ? '请先获取完整原文。' : '暂无可朗读摘要，请选择全文或获取正文。')}
           </p>
 
           <button

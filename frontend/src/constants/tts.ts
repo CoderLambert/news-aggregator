@@ -20,7 +20,7 @@ export const SCOPES = [
 
 export const SPEECH_LANGUAGES = [
   { key: 'zh', label: '中文译文' },
-  { key: 'original', label: '英文原文' },
+  { key: 'original', label: '原文' },
 ] as const
 
 export type VoiceKey = (typeof VOICES)[number]['key']
