@@ -4,7 +4,7 @@ from django.utils.http import content_disposition_header
 from rest_framework.response import Response
 from api.rss.http import RssAPIView
 from api.rss.import_models import RssImportBatch
-from api.rss.opml import MAX_BYTES, TooLarge, batch_data, confirm, export_opml, preview, retry_failed, remove_batch
+from api.rss.opml import MAX_BYTES, TooLarge, batch_data, confirm, export_opml, preview, retry_failed, remove_batch, control_batch
 
 
 class OpmlPreviewView(RssAPIView):
@@ -30,6 +30,9 @@ class OpmlBatchView(RssAPIView):
 
     def delete(self, request, pk):
         return Response(remove_batch(request.user, pk))
+
+    def patch(self, request, pk):
+        return Response(control_batch(request.user, pk, request.data))
 
     def post(self, request, pk):
         return Response(retry_failed(request.user, pk, request.data), status=202)

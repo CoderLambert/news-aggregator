@@ -112,7 +112,6 @@ def subscribe(user, data, idempotency_key, *, bulk_import=False):
             raise RssConflict('幂等键已用于不同的请求。', code='idempotency_conflict')
         return 200, _subscription_result(user, old)
     from api.rss.additions import check_addition_limit
-    check_addition_limit(user, url, bulk_import=bulk_import)
     admission = approved_feed_policy(url)
     groups = list(ChannelGroup.objects.filter(user=user, pk__in=group_ids))
     if len(groups) != len(group_ids):
@@ -143,9 +142,25 @@ def subscribe(user, data, idempotency_key, *, bulk_import=False):
         source = link.source
         if not hasattr(source, 'publication'):
             raise RssConflict('来源配置尚未完成。')
+        if source.publication.owner != 'miniflux':
+            raise RssConflict('此来源当前不可新增订阅。', code='source_collection_not_permitted')
         if not link.enabled and source.publication.owner == 'miniflux':
             link.enabled = True
             link.save(update_fields=['enabled'])
+    existing = ChannelSubscription.objects.filter(user=user, source=source).first()
+    if bulk_import and existing:
+        # An audit intent records this batch without mutating existing groups or
+        # claiming deletion provenance. No admission slot or external work.
+        operation = enqueue_operation('set_enabled', actor=user, dedupe_key=key, binding=binding)
+        FeedOperation.objects.filter(pk=operation.pk).update(request_hash=request_hash,
+            state='succeeded', execution_phase='final_response',
+            safe_input={'bulk_import': True, 'subscription': {'id': existing.pk,
+                'source_id': source.pk, 'created_by_operation': False}},
+            safe_result={'connected': binding.connection_state == 'ready', 'outcome': 'already_subscribed'})
+        operation.refresh_from_db()
+        return 200, _subscription_result(user, operation)
+    if not bulk_import:
+        check_addition_limit(user, url)
     pending_sources = FeedOperation.objects.filter(actor=user, safe_input__subscription_request__isnull=False,
         state__in=['pending', 'running', 'retry_wait', 'unknown', 'manual_blocked']).values_list(
             'safe_input__subscription_request__source_id', flat=True)
@@ -160,7 +175,15 @@ def subscribe(user, data, idempotency_key, *, bulk_import=False):
         current=ChannelSubscription.objects.filter(user=user,source=source).first()
         request_data.update(category_id=category_id,category_expected_version=current.category_version if current else 0)
     FeedOperation.objects.filter(pk=operation.pk).update(request_hash=request_hash,
-        safe_input={'subscription_request':request_data})
+        safe_input={'subscription_request': request_data, 'bulk_import': bulk_import})
+    if bulk_import:
+        from api.rss.subscription_work import attach_subscription_work
+        operation.refresh_from_db()
+        outcome = attach_subscription_work(operation)
+        operation.refresh_from_db()
+        result = _subscription_result(user, operation)
+        result['outcome'] = outcome
+        return (201 if operation.state == 'succeeded' else 202), result
     # The durable request holds a collection reference, but grants no article ACL.
     reconcile_binding(binding.pk)
     binding.refresh_from_db()
@@ -171,6 +194,7 @@ def subscribe(user, data, idempotency_key, *, bulk_import=False):
              and binding.applied_policy_version == binding.policy_version)
     if ready:
         complete_subscription(operation)
+        FeedOperation.objects.filter(pk=operation.pk).update(state='succeeded', execution_phase='final_response')
         operation.refresh_from_db()
     return (201 if ready else 202), _subscription_result(user, operation)
 
@@ -182,27 +206,41 @@ def complete_subscription(operation):
     unsubscribe cannot recreate it because subscription_request is consumed.
     """
     from api.rss.import_models import RssImportItem
-    if RssImportItem.objects.filter(operation=operation, batch__removed_at__isnull=False).exists():
+    linked = RssImportItem.objects.filter(operation=operation)
+    if linked.exists() and not linked.filter(batch__removed_at__isnull=True,
+            batch__cancelled_at__isnull=True, batch__paused=False).exclude(status='removed').exists():
         return
     request = operation.safe_input.get('subscription_request')
-    if not request or operation.actor_id is None or not operation.actor.is_active:
+    if not request or operation.actor_id is None or not get_user_model().objects.filter(pk=operation.actor_id, is_active=True).exists():
         return
+    source = Source.objects.select_related('publication').filter(pk=request['source_id'],
+        publication__owner='miniflux', feed_links__binding_id=operation.binding_id,
+        feed_links__association_policy={'version': 1, 'mode': 'all'}).first()
+    if source is None:
+        return
+    assert_binding_policy(FeedBinding.objects.get(pk=operation.binding_id))
     group_ids = request['group_ids']
     groups = list(ChannelGroup.objects.filter(user_id=operation.actor_id, pk__in=group_ids))
     if len(groups) != len(group_ids):
         return
     subscription, created = ChannelSubscription.objects.get_or_create(user_id=operation.actor_id, source_id=request['source_id'])
-    if 'category_id' in request:
+    preserve_existing = operation.safe_input.get('bulk_import', False) and not created
+    if 'category_id' in request and not preserve_existing:
         newer=FeedOperation.objects.filter(actor_id=operation.actor_id,binding_id=operation.binding_id,
             created_at__gt=operation.created_at,safe_input__subscription_request__category_id__isnull=False).exclude(state__in=['cancelled','failed']).exists()
         if not newer and (request['category_id'] is None or Category.objects.filter(pk=request['category_id']).exists()):
             ChannelSubscription.objects.filter(pk=subscription.pk,category_version=request.get('category_expected_version',0)).update(
                 category_id=request['category_id'],category_version=F('category_version')+1)
-    ChannelGroupMember.objects.bulk_create([ChannelGroupMember(group=g, subscription=subscription) for g in groups], ignore_conflicts=True)
+    if not preserve_existing:
+        ChannelGroupMember.objects.bulk_create([ChannelGroupMember(group=g, subscription=subscription) for g in groups], ignore_conflicts=True)
     FeedOperation.objects.filter(pk=operation.pk).update(safe_input={
+        'bulk_import': operation.safe_input.get('bulk_import', False),
         'subscription': {**request, 'id': subscription.pk, 'created_by_operation': created}})
-    RssImportItem.objects.filter(operation=operation).update(
-        subscription=subscription, created_subscription=created, status='succeeded')
+    active = linked.filter(batch__removed_at__isnull=True, batch__cancelled_at__isnull=True).exclude(status='removed')
+    creator = active.order_by('batch__created_at', 'pk').first() if created else None
+    active.update(subscription=subscription, created_subscription=False, status='succeeded', error_code='', next_attempt=None)
+    if creator:
+        RssImportItem.objects.filter(pk=creator.pk).update(created_subscription=True)
 
 
 

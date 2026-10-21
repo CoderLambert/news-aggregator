@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { workspaceRequest, workspaceError } from '@/services/workspaceApi'
-import { batchKey, historyKey, importStatusText, invalidateImportEffects, type ImportBatch, type ImportSummary } from './opmlTypes'
+import { batchKey, historyKey, importStatusText, importOutcomeText, invalidateImportEffects, type ImportBatch, type ImportSummary } from './opmlTypes'
 
 interface HistoryPage { count: number; page: number; has_next: boolean; results: ImportSummary[] }
 const batchLabels: Record<string, string> = { preview: '尚未确认', confirmed: '后台处理中', complete: '已提交处理', removed: '已移除' }
@@ -30,7 +30,7 @@ export default function OpmlHistory({ viewer, onOpen, onBusyChange }: { viewer: 
     },
   })
   useEffect(() => { onBusyChange(removal.isPending); return () => onBusyChange(false) }, [removal.isPending, onBusyChange])
-  const counts = (row: ImportSummary) => Object.entries(row.counts).map(([status, count]) => `${importStatusText[status] ?? status} ${count}`).join(' · ')
+  const counts = (row: ImportSummary) => Object.entries(row.outcomes ?? row.counts).map(([status, count]) => `${importOutcomeText[status] ?? importStatusText[status] ?? status} ${count}`).join(' · ')
   return <section aria-label="导入历史" className="space-y-4">
     <p className="text-sm text-muted-foreground">原文件和导入记录仅自己可见。移除订阅后，仍可下载文件和查看记录。</p>
     {history.isPending && <p role="status">正在加载导入历史…</p>}
@@ -45,7 +45,7 @@ export default function OpmlHistory({ viewer, onOpen, onBusyChange }: { viewer: 
         <Button variant="outline" disabled={removal.isPending} onClick={() => { setTarget(null); removal.reset() }}>保留订阅</Button></div>
     </section>}
     <ul className="space-y-3">{history.data?.results.map(row => <li key={row.id} className="space-y-2 rounded-lg border border-border p-4">
-      <div className="flex flex-wrap justify-between gap-2"><strong className="break-all">{row.filename || '历史导入（未保存原文件）'}</strong><span className="text-sm text-muted-foreground">{batchLabels[row.status] ?? row.status}</span></div>
+      <div className="flex flex-wrap justify-between gap-2"><strong className="break-all">{row.filename || '历史导入（未保存原文件）'}</strong><span className="text-sm text-muted-foreground">{row.cancelled_at ? '剩余任务已取消' : row.paused ? '已暂停' : batchLabels[row.status] ?? row.status}</span></div>
       <p className="text-xs text-muted-foreground"><time dateTime={row.created_at}>{new Date(row.created_at).toLocaleString('zh-CN')}</time> · 共 {row.total} 项{row.file_available && ` · ${(row.file_size / 1024).toFixed(1)} KiB`}</p>
       <p className="text-sm">{counts(row)}</p>
       {row.removed_at && <p className="text-sm">已移除 {row.removed_count} 个新增订阅</p>}

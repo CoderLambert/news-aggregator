@@ -14,6 +14,8 @@ class RssImportBatch(models.Model):
     file_size = models.PositiveIntegerField(default=0)
     removed_at = models.DateTimeField(null=True, blank=True)
     removed_count = models.PositiveIntegerField(default=0)
+    paused = models.BooleanField(default=False)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
     file_hash = models.CharField(max_length=64)
     preview_token_hash = models.CharField(max_length=64)
     expires_at = models.DateTimeField()
@@ -33,7 +35,13 @@ class RssImportItem(models.Model):
     selected_group_ids = models.JSONField(default=list)
     status = models.CharField(max_length=16, default='preview', choices=[(v, v) for v in ('preview', 'invalid', 'pending', 'queued', 'failed', 'succeeded', 'removed')])
     error_code = models.CharField(max_length=64, blank=True, default='')
+    outcome = models.CharField(max_length=32, blank=True, default='')
+    duplicate_count = models.PositiveIntegerField(default=0)
+    next_attempt = models.DateTimeField(null=True, blank=True)
     operation = models.ForeignKey('api.FeedOperation', null=True, blank=True, on_delete=models.PROTECT)
     created_subscription = models.BooleanField(default=False)
     subscription = models.ForeignKey('api.ChannelSubscription', null=True, blank=True, on_delete=models.SET_NULL)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['status', 'next_attempt'], name='rss_import_due_idx')]

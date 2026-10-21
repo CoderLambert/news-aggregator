@@ -176,6 +176,9 @@ class FeedOperation(models.Model):
     dedupe_key = models.CharField(max_length=128)
     request_hash = models.CharField(max_length=64)
     state = models.CharField(max_length=24, default='pending', choices=choices('pending', 'running', 'retry_wait', 'unknown', 'manual_blocked', 'succeeded', 'failed', 'cancelled'))
+    # Personal intents follow a system-owned physical operation; never dispatched.
+    shared_operation = models.ForeignKey('self', null=True, blank=True, on_delete=models.PROTECT,
+        related_name='subscription_waiters')
     attempts = models.PositiveIntegerField(default=0)
     next_attempt = models.DateTimeField(null=True, blank=True)
     lease_token = models.UUIDField(null=True, blank=True)

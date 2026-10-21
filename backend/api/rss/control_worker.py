@@ -1,4 +1,4 @@
-"""One control slot plus one reserved short-read slot, no network DB transactions.
+"""Bounded fair control slots plus reserved recovery/read capacity; no network DB transactions.
 
 Lease expiry/future timeout never frees a running slot or proves remote cancellation.
 Unknown create/refetch operations only reconcile; absence never authorizes reissue.
@@ -7,12 +7,14 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import timedelta
 import re
+import random
 import time
 import uuid
 from urllib.parse import urlsplit
 
 from django.db import connection, transaction
-from django.db.models import Case, F, Q, Value, When
+from django.db.models import F, Q, Value, IntegerField, Exists, OuterRef, Subquery
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from api.rss.engine import EngineAdapter, EngineError, PolicyBinding
@@ -78,7 +80,12 @@ class ControlWorker:
         self.adapter_factory = adapter_factory
         self.lease_seconds = lease_seconds
         self.max_attempts = max_attempts
-        self._control = ThreadPoolExecutor(max_workers=1, thread_name_prefix='rss-control')
+        from api.rss.control_scheduler import bounded_setting
+        self.control_slots = bounded_setting('RSS_IMPORT_CONCURRENCY', 4)
+        self.user_slots = bounded_setting('RSS_IMPORT_USER_CONCURRENCY', 2)
+        self._control = ThreadPoolExecutor(max_workers=self.control_slots + 1, thread_name_prefix='rss-control')
+        self._inflight = {}
+        self._served = {}
         self._reads = ThreadPoolExecutor(max_workers=1, thread_name_prefix='rss-short-read')
         self._future = self._request = self._read_future = None
         self._started = None
@@ -88,7 +95,7 @@ class ControlWorker:
             lease_token=claim.token, lease_epoch=claim.epoch, lease_until__gt=now)
 
     @sqlite_retry
-    def claim_next(self, now=None):
+    def claim_next(self, now=None, *, recovery=None, blocked_ids=(), blocked_hosts=(), owner_counts=None):
         now = now or timezone.now()
         due = Q(next_attempt__isnull=True) | Q(next_attempt__lte=now)
         ready = Q(state__in=['pending', 'retry_wait', 'unknown']) & due
@@ -96,10 +103,53 @@ class ControlWorker:
         ready |= Q(state='running', lease_until__lte=now)
         scope = Q(binding__isnull=True) | Q(binding__engine_instance_uuid=self.config.engine_instance_uuid,
                                            binding__account_id=self.config.account_id)
-        candidates = list(FeedOperation.objects.filter(ready & scope, resolved_at__isnull=True).annotate(priority=Case(
-            When(state='running', then=Value(0)), When(state__in=['unknown', 'cancelled'], then=Value(1)),
-            default=Value(2))).order_by('priority', 'created_at')[:20])
+        query = FeedOperation.objects.filter(ready & scope, resolved_at__isnull=True,
+            shared_operation__isnull=True).exclude(pk__in=blocked_ids)
+        recovering = Q(state__in=['running', 'unknown', 'cancelled'])
+        if recovery is True:
+            query = query.filter(recovering)
+        elif recovery is False:
+            query = query.exclude(recovering)
+        # Personal followers never occupy physical binding slots or fence roots.
+        from api.rss.control_scheduler import fair_candidates, target_host
+        from api.rss.subscription_work import active_waiters, active_intents
+        query = query.annotate(has_waiters=Exists(active_intents(
+            FeedOperation.objects.filter(shared_operation_id=OuterRef('pk'))))).filter(
+                Q(safe_input__shared_subscription__isnull=True) | Q(has_waiters=True) | recovering)
+        # Exclude busy targets before the fair candidate window, so an old slow
+        # host cannot hide unrelated later work from the same owner.
+        for host in blocked_hosts:
+            pattern = r'^https?://' + re.escape('[' + host + ']' if ':' in host else host) + r'(?::[0-9]+)?(?:/|$)'
+            query = query.exclude(Q(binding__effective_feed_url__regex=pattern) |
+                Q(binding__effective_feed_url='', binding__canonical_feed_url__regex=pattern) |
+                Q(binding__isnull=True, safe_input__url__regex=pattern))
+        query = query.annotate(scheduling_owner=Coalesce(Subquery(active_intents(
+            FeedOperation.objects.filter(shared_operation_id=OuterRef('pk'))).order_by('actor_id').values('actor_id')[:1]),
+            'actor_id', Value(0), output_field=IntegerField()))
+        identities = fair_candidates(query, 'scheduling_owner', limit=64, served=self._served)
+        candidates = list(FeedOperation.objects.filter(pk__in=identities).select_related('binding'))
+        candidates.sort(key=lambda op: identities.index(op.pk))
+        uncertain = FeedOperation.objects.filter(scope, shared_operation__isnull=True,
+            resolved_at__isnull=True).filter(Q(state__in=['unknown', 'manual_blocked']) |
+                Q(safe_result__outcome_unknown=True)).count()
         for old in candidates:
+            if target_host(old) in blocked_hosts:
+                continue
+            cooling = FeedOperation.objects.filter(scope, shared_operation__isnull=True,
+                safe_result__code='rate_limited', next_attempt__gt=now).select_related('binding')
+            if any(target_host(other) == target_host(old) for other in cooling):
+                continue
+            owners = list(active_waiters(old).values_list('actor_id', flat=True)) if old.safe_input.get('shared_subscription') else [old.actor_id]
+            if old.safe_input.get('shared_subscription') and not owners and old.state in {'pending', 'retry_wait'}:
+                continue  # Paused/removed intents do not dispatch a new create.
+            counts = owner_counts or {}
+            if owners and all(counts.get(owner or 0, 0) >= self.user_slots for owner in owners):
+                # A sole waiting owner may borrow idle slots.
+                competing = any(owner not in {value or 0 for value in owners} for owner in self._served)
+                if competing:
+                    continue
+            if uncertain >= self.control_slots and old.kind == 'register' and old.state in {'pending', 'retry_wait'}:
+                continue
             with transaction.atomic():
                 token = uuid.uuid4()
                 query = FeedOperation.objects.filter(pk=old.pk, state=old.state, lease_epoch=old.lease_epoch)
@@ -109,9 +159,11 @@ class ControlWorker:
                     continue
                 # The UPDATE acquired SQLite's writer lock before any read below.
                 if old.binding_id and FeedOperation.objects.filter(binding_id=old.binding_id,
-                        state='running').exclude(pk=old.pk).exists():
+                        shared_operation__isnull=True, state='running').exclude(pk=old.pk).exists():
                     transaction.set_rollback(True)
                     continue
+                credited = min((owner or 0 for owner in owners), key=lambda value: self._served.get(value, 0), default=0)
+                self._served[credited] = time.monotonic()
                 return Claim(old.pk, token, old.lease_epoch + 1,
                              old.state in {'running', 'unknown', 'cancelled'})
         return None
@@ -130,14 +182,14 @@ class ControlWorker:
                 reconcile_binding(binding.pk)
                 binding.refresh_from_db()
             # A different unsettled mutation fences new physical writes.
-            unsettled = FeedOperation.objects.filter(binding=binding).exclude(pk=operation.pk).filter(
+            unsettled = FeedOperation.objects.filter(binding=binding, shared_operation__isnull=True).exclude(pk=operation.pk).filter(
                 Q(state='unknown') | Q(safe_result__outcome_unknown=True,
                     state__in=['manual_blocked', 'cancelled'])).filter(resolved_at__isnull=True).filter(
                         kind__in=['register', 'set_enabled', 'update_feed_policy'])
             if unsettled.exists() and not claim.reconcile and 'admin_recovery' not in operation.safe_input:
                 raise EngineError('binding_outcome_unknown', retryable=True)
             if operation.intent_version != binding.policy_version:
-                if (not claim.reconcile and 'subscription_request' in operation.safe_input
+                if (not claim.reconcile and ('subscription_request' in operation.safe_input or operation.safe_input.get('shared_subscription'))
                         and operation.kind in {'register', 'set_enabled'}):
                     # A pending subscription has no mode override. Dispatch only
                     # the CURRENT approved policy, still under this owned lease.
@@ -398,13 +450,20 @@ class ControlWorker:
             cancelled = request.cancelled
             if error:
                 code = error.code if re.fullmatch('[a-z0-9_]{1,64}', str(error.code)) else 'upstream_error'
-                unknown = bool(getattr(error, 'unknown_result', False))
+                # Reconciliation failures cannot prove a prior mutation did not
+                # happen. Keep the unknown fence until positive reconciliation.
+                unknown = bool(getattr(error, 'unknown_result', False) or request.claim.reconcile
+                    or operation.safe_result.get('outcome_unknown', False))
                 retryable = bool(getattr(error, 'retryable', False)) or unknown
                 if isinstance(error, OperationError):
                     state, next_attempt = 'cancelled', None
-                elif retryable and operation.attempts < self.max_attempts:
+                elif retryable and ((operation.safe_input.get('shared_subscription')
+                        and now - operation.created_at < timedelta(hours=24))
+                        or (not operation.safe_input.get('shared_subscription') and operation.attempts < self.max_attempts)):
                     state = 'unknown' if unknown else 'retry_wait'
-                    delay = max(min(2 ** (operation.attempts - 1), 60), getattr(error, 'retry_after', None) or 0)
+                    delays = (10, 30, 120, 600, 1800)
+                    delay = delays[min(operation.attempts - 1, len(delays) - 1)] if operation.safe_input.get('shared_subscription') else min(2 ** min(operation.attempts - 1, 8), 60)
+                    delay = max(delay + random.uniform(0, delay * .1), getattr(error, 'retry_after', None) or 0)
                     next_attempt = now + timedelta(seconds=delay)
                 else:
                     state, next_attempt = ('manual_blocked' if unknown else 'failed'), None
@@ -432,12 +491,28 @@ class ControlWorker:
                             resolved_at=now, resolved_by=operation, resolution={'reason': 'unique_feed_confirmed'})
             if state == 'succeeded' and binding and request.kind in {'register', 'set_enabled'}:
                 from api.rss.subscriptions import complete_subscription
-                complete_subscription(operation)
+                try:
+                    complete_subscription(operation)
+                except OperationError:
+                    state, next_attempt = 'failed', None
+                    result = {'code': 'subscription_intent_changed', 'retryable': False}
             if not error or (not request.claim.reconcile and isinstance(error, EngineError)
                     and not error.unknown_result and error.code != 'binding_outcome_unknown'):
                 query.update(execution_phase='final_response')
             query.update(state=state, safe_result=result, next_attempt=next_attempt,
                          lease_token=None, lease_until=None, updated_at=now)
+            if state == 'succeeded' and binding:
+                from api.rss.subscription_work import finish_subscription_work
+                finish_subscription_work(operation)
+            elif state in {'retry_wait', 'unknown', 'manual_blocked', 'failed', 'cancelled'}:
+                from api.rss.subscription_work import active_waiters
+                followers = active_waiters(operation)
+                follower_ids = list(followers.values_list('pk', flat=True))
+                followers.update(state=state, safe_result=result, next_attempt=next_attempt, updated_at=now)
+                if state in {'manual_blocked', 'failed', 'cancelled'}:
+                    from api.rss.import_models import RssImportItem
+                    RssImportItem.objects.filter(operation_id__in=follower_ids).exclude(status='removed').update(
+                        status='failed', outcome='needs_attention', error_code=result.get('code', ''))
             if binding:
                 reconcile_binding(binding.pk)
             return True
@@ -475,19 +550,36 @@ class ControlWorker:
         return True
 
     def tick(self):
-        """Main thread owns DB writes; executor owns network only, with no queue."""
-        if connection.in_atomic_block:
-            raise OperationError('worker_inside_transaction')
-        if self._future is not None and self._future.done():
-            self.complete(self._request, self._future.result())
-            self._future = self._request = self._started = None
-        if self._future is None:
-            claim = self.claim_next()
-            request = self._prepare_or_finish(claim) if claim else None
-            request = self._dispatch_or_finish(request) if request else None
-            if request:
-                self._request, self._started = request, time.monotonic()
-                self._future = self._control.submit(self.network, request)
+        """Coordinator commits finished results, then fills real free slots."""
+        for identity, (future, request, started, owner, lane) in list(self._inflight.items()):
+            if future.done():
+                self.complete(request, future.result())
+                del self._inflight[identity]
+        for lane, capacity in ((False, self.control_slots), (True, 1)):
+            while sum(job[4] == lane for job in self._inflight.values()) < capacity:
+                hosts = {urlsplit(job[1].effective_url or job[1].url).hostname or '' for job in self._inflight.values()}
+                counts = {}
+                for job in self._inflight.values():
+                    counts[job[3]] = counts.get(job[3], 0) + 1
+                claim = self.claim_next(recovery=lane, blocked_ids=self._inflight,
+                    blocked_hosts=hosts, owner_counts=counts)
+                if not claim:
+                    break
+                request = self._prepare_or_finish(claim)
+                request = self._dispatch_or_finish(request) if request else None
+                if request:
+                    operation = FeedOperation.objects.get(pk=claim.operation_id)
+                    owners = list(operation.subscription_waiters.filter(actor__is_active=True,
+                        state__in=['pending', 'retry_wait', 'unknown']).values_list('actor_id', flat=True))
+                    owner = min(owners, key=lambda value: (counts.get(value, 0), self._served.get(value, 0))) if owners else operation.actor_id
+                    owner = owner or 0
+                    self._inflight[claim.operation_id] = (
+                        self._control.submit(self.network, request), request, time.monotonic(), owner, lane)
+        # Preserve the old observational attributes; they are not slot authority.
+        first = next(iter(self._inflight.values()), None)
+        self._future = first[0] if first else None
+        self._request = first[1] if first else None
+        self._started = min((job[2] for job in self._inflight.values()), default=None)
         return self.status()
 
     def submit_short_read(self, callback):
@@ -505,7 +597,8 @@ class ControlWorker:
 
     def status(self):
         age = time.monotonic() - self._started if self._started is not None else 0
-        return {'control_busy': self._future is not None,
+        return {'control_busy': bool(self._inflight) or self._future is not None,
+                'control_active': len(self._inflight), 'control_capacity': self.control_slots + 1,
                 'short_read_busy': self._read_future is not None and not self._read_future.done(),
                 'control_stalled': self._started is not None and age > self.lease_seconds,
                 'control_age_seconds': round(age, 2)}

@@ -76,6 +76,13 @@ def run(*, once=False, healthcheck=False, control=False, sync=False):
             last_import = last_seed = 0
             started = time.monotonic()
             while not stopped.is_set():
+                # Import intents are independent of article synchronization and
+                # its readiness. Admission precedes tick so new work starts now.
+                now = time.monotonic()
+                if worker and now - last_import >= 1:
+                    from api.rss.opml import process_imports
+                    process_imports(limit=20)
+                    last_import = now
                 status = {**probe(), **({'mode': 'control_worker', 'control_worker_integrated': True,
                     **worker.tick()} if worker else {})}
                 if synchronizer:
@@ -85,14 +92,12 @@ def run(*, once=False, healthcheck=False, control=False, sync=False):
                     status['sync_ready'] = status['engine_ready']
                     status['sync_read_stalled'] = status['sync_read_age_seconds'] >= stall_limit
                     now = time.monotonic()
-                    if now - last_import >= 10:
-                        from api.rss.opml import process_imports
-                        process_imports(limit=10)
-                        last_import = now
                     if now - last_seed >= 86400:
                         from api.rss.directory import import_pinned_seed
                         import_pinned_seed()
                         last_seed = now
+                if worker:
+                    status.update(worker.tick())  # Complete and refill without the old batch cooldown.
                 if worker and (status['control_age_seconds'] >= stall_limit or status.get('sync_read_stalled')):
                     # Terminate the process, including blocked HTTP threads. Docker
                     # restart policy handles the nonzero exit; remote result remains

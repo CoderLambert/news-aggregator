@@ -249,11 +249,20 @@ def cancel_operation(actor, operation_id):
             raise OperationError('not_found') from None
         if operation.state in {'succeeded', 'failed', 'cancelled'}:
             return operation
-        uncertain = operation.state in {'running', 'unknown'} or operation.safe_result.get('outcome_unknown', False)
+        # A follower owns no network request; cancellation never revokes the
+        # system physical lease or creates an unknown remote result.
+        uncertain = not operation.shared_operation_id and (operation.state in {'running', 'unknown'} or operation.safe_result.get('outcome_unknown', False))
         scope.update(state='cancelled', lease_epoch=F('lease_epoch') + 1, lease_token=None,
             lease_until=None, next_attempt=timezone.now() if uncertain else None,
             safe_result={**operation.safe_result, 'cancelled': True, 'outcome_unknown': bool(uncertain)})
         updated = scope.get()
+        if updated.shared_operation_id and not effective_references(updated.binding_id):
+            root = FeedOperation.objects.get(pk=updated.shared_operation_id)
+            # Only a positively never-dispatched root can be retired here.
+            FeedOperation.objects.filter(pk=root.pk, state__in=['pending', 'retry_wait'],
+                execution_phase='not_sent').update(state='cancelled', resolved_at=timezone.now(),
+                    resolution={'reason': 'no_subscription_intents'}, lease_epoch=F('lease_epoch') + 1,
+                    lease_token=None, lease_until=None, next_attempt=None)
         if 'subscription_request' in updated.safe_input and updated.binding_id:
             reconcile_binding(updated.binding_id)
         return updated
@@ -349,5 +358,5 @@ def acknowledge_refetch(operation_id, request_hash, *, sync_status='accepted', r
 
 def unresolved_control_operations(binding_id):
     from django.db.models import Q
-    return FeedOperation.objects.filter(binding_id=binding_id, kind__in=['register', 'set_enabled', 'update_feed_policy'],
+    return FeedOperation.objects.filter(binding_id=binding_id, shared_operation__isnull=True, kind__in=['register', 'set_enabled', 'update_feed_policy'],
         resolved_at__isnull=True).filter(Q(state__in=['unknown', 'manual_blocked']) | Q(safe_result__outcome_unknown=True)).exclude(state='succeeded')

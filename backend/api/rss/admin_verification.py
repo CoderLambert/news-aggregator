@@ -69,7 +69,7 @@ def binding_snapshot(binding):
 
 
 def operations(binding):
-    return FeedOperation.objects.filter(binding=binding, kind__in=CONTROL_KINDS)
+    return FeedOperation.objects.filter(binding=binding, shared_operation__isnull=True, kind__in=CONTROL_KINDS)
 
 
 def cooldown(binding):
@@ -316,7 +316,7 @@ def record_restart_boundary(instance, account, evidence):
         raise ValueError('invalid_restart_order')
     FeedBinding.objects.filter(engine_instance_uuid=instance, account_id=account).update(updated_at=F('updated_at'))
     candidates = FeedOperation.objects.filter(binding__engine_instance_uuid=instance, binding__account_id=account,
-        kind__in=CONTROL_KINDS, resolved_at__isnull=True, updated_at__lte=stopped).filter(
+        shared_operation__isnull=True, kind__in=CONTROL_KINDS, resolved_at__isnull=True, updated_at__lte=stopped).filter(
             Q(dispatched_at__isnull=True) | Q(dispatched_at__lte=stopped)).exclude(state__in=['succeeded', 'cancelled'])
     total = 0
     for operation in candidates:
@@ -335,7 +335,7 @@ def source_status_queryset():
     instance, account = engine_identity()
     links = SourceFeedLink.objects.filter(source_id=OuterRef('pk'), binding__engine_instance_uuid=instance,
         binding__account_id=account)
-    ops = FeedOperation.objects.filter(binding_id=OuterRef('binding_id'), kind__in=CONTROL_KINDS)
+    ops = FeedOperation.objects.filter(binding_id=OuterRef('binding_id'), shared_operation__isnull=True, kind__in=CONTROL_KINDS)
     # Latest failure matters only while the binding is not currently confirmed.
     from django.db.models import Subquery
     links = links.annotate(_active=Exists(ops.filter(state__in=ACTIVE)),
