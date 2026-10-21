@@ -4,6 +4,7 @@ import type { ChatPhase } from '@/hooks/useChat'
 import type { ChatMessage, WebSource } from '@/services/newsWorkflowApi'
 import MarkdownContent from '@/components/news-detail/MarkdownContent'
 import XiaowenMascot from '@/components/mascot/XiaowenMascot'
+import { Button } from '@/components/ui/button'
 
 const DEFAULT_SUGGESTED_QUESTIONS = [
   '帮我用一句话总结这篇文章',
@@ -30,7 +31,6 @@ export default function ChatMessageList({
   onSuggestionClick,
   suggestedQuestions,
   suggestionContextScope,
-  suggestionsGenerated,
   onRefreshSuggestions,
   refreshingSuggestions = false,
 }: ChatMessageListProps) {
@@ -48,29 +48,29 @@ export default function ChatMessageList({
         <p className="mt-1.5 max-w-lg text-sm leading-relaxed text-muted-foreground">我会根据当前可用的文章内容回答。选择一个问题，或者直接在下方输入。</p>
         {suggestionContextScope === 'excerpt' && <p className="mt-2 text-xs text-muted-foreground">推荐问题仅根据文章节选生成，可能未覆盖全文。</p>}
         {suggestionContextScope === 'summary' && <p className="mt-2 text-xs text-muted-foreground">推荐问题依据当前可用摘要生成。</p>}
-        {suggestionsGenerated === false && <p className="mt-2 text-xs text-muted-foreground">当前为通用建议；AI 个性化推荐需要配置个人模型额度。</p>}
         <div className="mt-5 grid w-full max-w-3xl grid-cols-1 gap-2 sm:grid-cols-2">
           {questions.map((question) => (
-            <button
+            <Button
+              variant="outline"
               key={question}
               type="button"
               onClick={() => onSuggestionClick?.(question)}
-              className="rounded-xl border border-border bg-card px-4 py-3 text-left text-sm leading-relaxed text-foreground transition-colors hover:border-primary/35 hover:bg-primary/6 focus:outline-none focus:ring-2 focus:ring-primary/25"
+              className="h-auto justify-start whitespace-normal rounded-xl border border-border bg-card px-4 py-3 text-left text-sm leading-relaxed text-foreground transition-colors hover:border-primary/35 hover:bg-primary/6 focus:outline-none focus:ring-2 focus:ring-primary/25"
             >
               {question}
-            </button>
+            </Button>
           ))}
         </div>
         {onRefreshSuggestions && (
-          <button
-            type="button"
+          <Button
+            type="button" variant="ghost" size="sm"
             onClick={onRefreshSuggestions}
             disabled={refreshingSuggestions}
             aria-label="换一批推荐问题"
             className="mt-3 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/25 disabled:cursor-wait disabled:opacity-50"
           >
             <RefreshCw className={`size-3 ${refreshingSuggestions ? 'animate-spin' : ''}`} /><span>换一批</span>
-          </button>
+          </Button>
         )}
       </div>
     )
