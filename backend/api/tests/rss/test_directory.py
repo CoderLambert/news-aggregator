@@ -130,23 +130,29 @@ def test_reimport_and_updates_keep_stable_ids_and_retained_snapshots():
 
 
 @pytest.mark.django_db
-def test_ranking_exact_prefix_text_then_availability_and_id():
+def test_ranking_exact_prefix_then_featured_and_text_kind_name_id():
     document = seed()
     document.pop('collections')
     document['entries'] = [
         {'key': 'exact', 'name': 'React', 'public_url': 'https://exact.example.org/feed'},
         {'key': 'prefix', 'name': 'React news', 'public_url': 'https://prefix.example.org/feed'},
+        {'key': 'featured', 'name': 'OpenAI News', 'tags': ['React'], 'public_url': 'https://featured.example.org/feed'},
         {'key': 'tag', 'name': 'Other', 'tags': ['React'], 'public_url': 'https://other.example.org/feed'},
         {'key': 'template', 'name': 'Other route', 'tags': ['React'], 'kind': 'route_template', 'public_url': '/example/:user', 'required_parameters': ['user']},
         {'key': 'tie-a', 'name': 'Other A', 'tags': ['React'], 'public_url': 'https://a.example.org/feed'},
-        {'key': 'tie-b', 'name': 'Other B', 'tags': ['React'], 'public_url': 'https://b.example.org/feed'},
+        {'key': 'tie-b', 'name': 'Other A', 'tags': ['React'], 'public_url': 'https://b.example.org/feed'},
         {'key': 'hidden', 'name': 'React hidden', 'visibility': 'hidden', 'public_url': 'https://hidden.example.org/feed'},
     ]
     publish(document)
     results = search_directory('react')['results']
     assert [row['name'] for row in results[:2]] == ['React', 'React news']
+    assert [(row['name'], row['recommended']) for row in results] == [
+        ('React', False), ('React news', False), ('OpenAI News', True),
+        ('Other', False), ('Other A', False), ('Other A', False), ('Other route', False),
+    ]
     assert results[-1]['kind'] == 'route_template'
-    assert [row['id'] for row in results[2:-1]] == sorted(row['id'] for row in results[2:-1])
+    duplicate_names = [row['id'] for row in results if row['name'] == 'Other A']
+    assert duplicate_names == sorted(duplicate_names)
     assert all(row['name'] != 'React hidden' for row in results)
     assert search_directory('https://exact.example.org/feed')['results'][0]['name'] == 'React'
 
@@ -182,7 +188,20 @@ def test_rsshub_ignores_scripts_analytics_and_preserves_requirements():
 
 @pytest.mark.django_db
 def test_empty_directory_and_input_limits():
-    assert search_directory() == {'results': [], 'next_cursor': None, 'snapshot_version': None}
+    assert search_directory() == {
+        'results': [], 'next_cursor': None, 'snapshot_version': None,
+        'categories': [
+            {'id': 'ai', 'name': '人工智能'},
+            {'id': 'engineering', 'name': '编程与技术'},
+            {'id': 'security', 'name': '网络安全'},
+            {'id': 'news', 'name': '科技与资讯'},
+            {'id': 'science', 'name': '科学研究'},
+            {'id': 'design', 'name': '产品与设计'},
+            {'id': 'business', 'name': '商业与创业'},
+            {'id': 'culture', 'name': '人文与博客'},
+            {'id': 'community', 'name': '社区与播客'},
+        ],
+    }
     for limit in (0, 51, True, '2'):
         with pytest.raises(DirectoryValidationError): search_directory(limit=limit)
     with pytest.raises(DirectoryValidationError): search_directory('x' * 201)
