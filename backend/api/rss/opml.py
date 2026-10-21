@@ -9,7 +9,7 @@ from xml.etree import ElementTree as ET
 from django.contrib.auth import get_user_model
 from django.core import signing
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Q
 from django.http import Http404
 from django.utils import timezone
 from rest_framework.exceptions import APIException, Throttled, ValidationError
@@ -80,6 +80,9 @@ def batch_data(batch, *, include_items=True):
     items = []
     for item in batch.items.select_related('operation').order_by('pk'):
         state = item.status
+        if (state == 'failed' and item.error_code == 'throttled' and not item.operation_id
+                and batch.confirmed_request_hash and not batch.removed_at):
+            state = 'pending'
         if item.operation_id and item.status != 'removed':
             if item.operation.state == 'succeeded':
                 state = 'succeeded'
@@ -191,12 +194,26 @@ def confirm(user, data):
 
 def process_imports(limit=10):
     """Durable local intents only. T08 owns physical feed registration/retries."""
+    now = timezone.now()
+    # Older importers marked local admission throttles as permanent failures.
+    # No operation means subscribe's savepoint rolled back before dispatch: it
+    # is safe to recover only those durable, confirmed, still-authorized intents.
+    recoverable = RssImportItem.objects.filter(
+        status='failed', error_code='throttled', operation__isnull=True,
+        batch__status__in=['confirmed', 'complete'], batch__removed_at__isnull=True,
+        batch__user__is_active=True).exclude(batch__confirmed_request_hash='')
+    identities = list(recoverable.order_by('updated_at').values_list('pk', flat=True)[:limit])
+    recoverable.filter(pk__in=identities).update(status='pending', updated_at=now)
+    due = RssImportItem.objects.filter(status='pending', batch__removed_at__isnull=True).filter(
+        Q(batch__options__import_retry_after__isnull=True) |
+        Q(batch__options__import_retry_after__lte=now.timestamp()))
     completed = 0
-    for identity in list(RssImportItem.objects.filter(status='pending').order_by('updated_at').values_list('pk', flat=True)[:limit]):
+    for identity in list(due.order_by('updated_at').values_list('pk', flat=True)[:limit]):
         with transaction.atomic():
             RssImportItem.objects.filter(pk=identity).update(updated_at=F('updated_at'))
             item = RssImportItem.objects.select_related('batch__user').defer('batch__file_content').get(pk=identity)
-            if item.status != 'pending' or item.batch.removed_at:
+            if (item.status != 'pending' or item.batch.removed_at
+                    or item.batch.options.get('import_retry_after', 0) > timezone.now().timestamp()):
                 continue
             try:
                 # Savepoint lets permanent item failures leave other imports intact.
@@ -204,11 +221,25 @@ def process_imports(limit=10):
                     if not item.batch.user.is_active:
                         raise ValidationError('账户已停用。')
                     _, result = subscribe(item.batch.user, {'feed_url': item.feed_url, 'group_ids': item.selected_group_ids},
-                                          item.batch.options.get('retry_keys', {}).get(str(item.pk), f'opml:{item.batch_id}:{item.pk}'))
+                                          item.batch.options.get('retry_keys', {}).get(str(item.pk), f'opml:{item.batch_id}:{item.pk}'),
+                                          bulk_import=True)
+            except Throttled as exc:
+                code = getattr(exc.detail, 'code', 'throttled')
+                if code == 'subscription_limit':
+                    item.status, item.error_code = 'failed', code
+                else:
+                    # No network request has been made. Leave the intent queued,
+                    # respecting Retry-After rather than requiring manual retries.
+                    item.status, item.error_code = 'pending', 'throttled'
+                    item.batch.options = {**item.batch.options,
+                        'import_retry_after': timezone.now().timestamp() + max(float(exc.wait or 60), 10)}
+                    item.batch.status = 'confirmed'
+                    item.batch.save(update_fields=['options', 'status', 'updated_at'])
             except (APIException, OperationError, Http404) as exc:
                 item.status = 'failed'
                 item.error_code = exc.code if isinstance(exc, OperationError) else getattr(exc, 'default_code', 'invalid_input')
             else:
+                item.error_code = ''
                 item.status = 'queued'
                 item.operation_id = result['operation_id']
                 item.subscription_id = result['subscription']['id'] if result['subscription'] else None

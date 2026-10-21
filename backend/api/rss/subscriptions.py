@@ -90,7 +90,7 @@ def _subscription_result(user, operation):
 
 @sqlite_retry
 @transaction.atomic
-def subscribe(user, data, idempotency_key):
+def subscribe(user, data, idempotency_key, *, bulk_import=False):
     if not isinstance(data, dict):
         raise ValidationError('请求内容须为对象。')
     if not isinstance(idempotency_key, str) or not 1 <= len(idempotency_key) <= 128 or not idempotency_key.isprintable():
@@ -112,7 +112,7 @@ def subscribe(user, data, idempotency_key):
             raise RssConflict('幂等键已用于不同的请求。', code='idempotency_conflict')
         return 200, _subscription_result(user, old)
     from api.rss.additions import check_addition_limit
-    check_addition_limit(user, url)
+    check_addition_limit(user, url, bulk_import=bulk_import)
     admission = approved_feed_policy(url)
     groups = list(ChannelGroup.objects.filter(user=user, pk__in=group_ids))
     if len(groups) != len(group_ids):
@@ -152,7 +152,7 @@ def subscribe(user, data, idempotency_key):
     if (not ChannelSubscription.objects.filter(user=user, source=source).exists()
             and source.pk not in pending_sources
             and ChannelSubscription.objects.filter(user=user).count() + len(set(pending_sources)) >= int(getattr(settings, 'RSS_SUBSCRIPTION_LIMIT', 500))):
-        raise Throttled(detail='已达到订阅数量上限。')
+        raise Throttled(detail='已达到订阅数量上限。', code='subscription_limit')
     operation = enqueue_operation('register' if binding.engine_feed_id is None else 'set_enabled',
         actor=user, dedupe_key=key, binding=binding)
     request_data={'source_id':source.pk,'url':url,'group_ids':group_ids}

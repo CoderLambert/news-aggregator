@@ -155,7 +155,7 @@ function OpmlSession({ viewer, groups, onClose }: OpmlDialogProps) {
         </NativeSelect></label>)}
       <ul className="workspace-resolved max-h-[40vh] overflow-y-auto overscroll-contain">{batch.items.map(item => <li key={item.id} className="workspace-resolved-choice">
         {!batchId && <Input className="size-4 shrink-0 accent-primary shadow-none" type="checkbox" aria-label={'导入 ' + (item.title || item.feed_url)} disabled={busy || confirm.isError || item.status === 'invalid'} checked={selected.includes(item.id)} onChange={event => setSelected(current => event.target.checked ? [...current, item.id] : current.filter(id => id !== item.id))} />}
-        <span><strong>{item.title || item.feed_url}</strong><small className="break-all">{item.feed_url}</small><small>{batchId && item.status === 'preview' ? '未选择，未导入' : statusText[item.status] ?? '等待确认'}{item.error_code ? ' · ' + item.error_code : ''}</small></span>
+        <span><strong>{item.title || item.feed_url}</strong><small className="break-all">{item.feed_url}</small><small>{batchId && item.status === 'preview' ? '未选择，未导入' : statusText[item.status] ?? '等待确认'}{item.error_code ? ' · ' + (item.error_code === 'throttled' ? (item.status === 'pending' ? '连接名额暂满，等待自动继续' : '连接暂受限，请稍后重试') : item.error_code === 'subscription_limit' ? '已达到订阅数量上限' : item.error_code) : ''}</small></span>
         {batchId && item.status === 'failed' && <Button type="button" variant="outline" disabled={busy || progress.isFetching || progress.isError || retry.isError} onClick={() => retry.mutate({ batchId, selected_ids: [item.id] })}>重试此项</Button>}
       </li>)}</ul>
     </section>}

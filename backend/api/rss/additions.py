@@ -69,12 +69,17 @@ def list_additions(user, *, status='all', page=1, page_size=25):
         'count':rows.count(),'page':page,'page_size':page_size,'server_time':timezone.now().isoformat()}
 
 
-def check_addition_limit(user,url):
+def check_addition_limit(user,url, *, bulk_import=False):
     rows=owned_additions(user)
     if rows.filter(binding__canonical_feed_url=url,state__in=['pending','running','retry_wait','unknown','manual_blocked']).exists(): return
-    recent=rows.filter(created_at__gte=timezone.now()-timedelta(hours=1)).values('binding_id').distinct().count()
-    active=rows.filter(state__in=['pending','running','retry_wait','unknown','manual_blocked']).values('binding_id').distinct().count()
-    if recent>=getattr(settings,'RSS_ADDITION_HOURLY_LIMIT',20): raise Throttled(wait=3600,detail='每小时新增来源次数已达上限。')
+    # A confirmed, bounded OPML batch is one bulk intent, not hundreds of
+    # manual additions. Keep its live queue bounded; uncertain targets retain
+    # their own reconciliation fences without blocking unrelated feed URLs.
+    active_states = ['pending', 'running', 'retry_wait'] if bulk_import else ['pending', 'running', 'retry_wait', 'unknown', 'manual_blocked']
+    active=rows.filter(state__in=active_states).values('binding_id').distinct().count()
+    if not bulk_import:
+        recent=rows.filter(created_at__gte=timezone.now()-timedelta(hours=1)).values('binding_id').distinct().count()
+        if recent>=getattr(settings,'RSS_ADDITION_HOURLY_LIMIT',20): raise Throttled(wait=3600,detail='每小时新增来源次数已达上限。')
     if active>=getattr(settings,'RSS_ADDITION_ACTIVE_LIMIT',5): raise Throttled(wait=60,detail='请先处理已有连接任务。')
 
 
