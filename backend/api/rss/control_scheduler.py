@@ -9,7 +9,7 @@ def bounded_setting(name, default, maximum=32):
     return max(1, min(int(getattr(settings, name, os.environ.get(name, default))), maximum))
 
 
-def fair_candidates(queryset, owner_field, *, limit, served=None, order=('created_at', 'pk')):
+def fair_candidates(queryset, owner_field, *, limit, served=None, order=('created_at', 'pk'), prune=True):
     """Select across owners BEFORE taking each owner's oldest work.
 
     A large oldest batch must not fill a global [:limit] before fairness runs.
@@ -18,11 +18,13 @@ def fair_candidates(queryset, owner_field, *, limit, served=None, order=('create
     served = served if served is not None else {}
     owners = list(queryset.values_list(owner_field, flat=True).distinct().order_by(owner_field))
     owners.sort(key=lambda owner: (served.get(owner or 0, 0), owner or 0))
-    # Remove inactive owners so the in-memory hint cannot grow with history.
-    live = {owner or 0 for owner in owners}
-    for owner in list(served):
-        if owner not in live:
-            served.pop(owner, None)
+    # A lane/host-filtered window is not the complete set of active owners.
+    # Its caller must prune against the full work scope instead.
+    if prune:
+        live = {owner or 0 for owner in owners}
+        for owner in list(served):
+            if owner not in live:
+                served.pop(owner, None)
     queues = [list(queryset.filter(**{owner_field: owner}).order_by(*order).values_list('pk', flat=True)[:limit])
         for owner in owners[:limit]]
     chosen = []

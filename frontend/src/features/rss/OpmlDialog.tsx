@@ -168,7 +168,7 @@ function OpmlSession({ viewer, groups, onClose }: OpmlDialogProps) {
     </p>}
     {batch && <section aria-label="导入预览与进度" className="space-y-3">
       {!batchId ? <div className="space-y-2">
-        <p role="status">共 {batch.items.length} 项 · 可导入 {validItems.length} 项 · 无效 {batch.items.length - validItems.length} 项 · 重复合并 {batch.duplicate_count ?? 0} 项 · 已订阅 {batch.items.filter(item => item.outcome === 'already_subscribed').length} 项 · 已选 {selected.length} 项</p>
+        <p role="status">共 {batch.items.length} 项 · 可导入 {validItems.length} 项 · 无效 {batch.items.filter(item => item.status === 'invalid').length} 项 · 重复合并 {batch.duplicate_count ?? 0} 项 · 已订阅 {batch.items.filter(item => item.outcome === 'already_subscribed').length} 项 · 已选 {selected.length} 项</p>
         <Button type="button" variant="outline" disabled={busy || confirm.isError || !validItems.length} onClick={() => setSelected(selected.length === validItems.length ? [] : validItems.map(item => item.id))}>{selected.length === validItems.length && validItems.length ? '取消全选' : '全选有效频道'}</Button>
       </div> : <p role="status" aria-live="polite">{batch.status === 'removed' ? `本批次已移除 ${batch.removed_count} 个新增订阅` : `已订阅/接入 ${batch.items.filter(item => item.status === 'succeeded').length} · 失败 ${batch.items.filter(item => item.status === 'failed').length} · 处理中 ${batch.items.filter(item => ['pending', 'queued'].includes(item.status)).length}`}</p>}
       {!batchId && batch.groups.map(label => <label className="workspace-resolved-choice" key={label}>{label}

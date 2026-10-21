@@ -86,6 +86,7 @@ class ControlWorker:
         self._control = ThreadPoolExecutor(max_workers=self.control_slots + 1, thread_name_prefix='rss-control')
         self._inflight = {}
         self._served = {}
+        self._fairness_trimmed_at = 0
         self._reads = ThreadPoolExecutor(max_workers=1, thread_name_prefix='rss-short-read')
         self._future = self._request = self._read_future = None
         self._started = None
@@ -97,12 +98,27 @@ class ControlWorker:
     @sqlite_retry
     def claim_next(self, now=None, *, recovery=None, blocked_ids=(), blocked_hosts=(), owner_counts=None):
         now = now or timezone.now()
+        if recovery is None:
+            # Prefer due reconciliation, but a cooled/busy recovery must not
+            # hide ordinary work for unrelated targets in one-shot mode.
+            return self.claim_next(now, recovery=True, blocked_ids=blocked_ids,
+                blocked_hosts=blocked_hosts, owner_counts=owner_counts) or self.claim_next(
+                    now, recovery=False, blocked_ids=blocked_ids, blocked_hosts=blocked_hosts, owner_counts=owner_counts)
         due = Q(next_attempt__isnull=True) | Q(next_attempt__lte=now)
         ready = Q(state__in=['pending', 'retry_wait', 'unknown']) & due
         ready |= Q(state='cancelled', safe_result__outcome_unknown=True) & due
         ready |= Q(state='running', lease_until__lte=now)
         scope = Q(binding__isnull=True) | Q(binding__engine_instance_uuid=self.config.engine_instance_uuid,
                                            binding__account_id=self.config.account_id)
+        # Trim historical owners against BOTH lanes, never against the current
+        # filtered candidate window (an empty recovery lane must not reset turns).
+        if len(self._served) > 4096 and time.monotonic() - self._fairness_trimmed_at >= 60:
+            from api.rss.subscription_work import LIVE
+            live = set(FeedOperation.objects.filter(scope, actor__is_active=True, state__in=LIVE).values_list('actor_id', flat=True)) | {0}
+            for owner in list(self._served):
+                if owner not in live:
+                    self._served.pop(owner, None)
+            self._fairness_trimmed_at = time.monotonic()
         query = FeedOperation.objects.filter(ready & scope, resolved_at__isnull=True,
             shared_operation__isnull=True).exclude(pk__in=blocked_ids)
         recovering = Q(state__in=['running', 'unknown', 'cancelled'])
@@ -126,7 +142,8 @@ class ControlWorker:
         query = query.annotate(scheduling_owner=Coalesce(Subquery(active_intents(
             FeedOperation.objects.filter(shared_operation_id=OuterRef('pk'))).order_by('actor_id').values('actor_id')[:1]),
             'actor_id', Value(0), output_field=IntegerField()))
-        identities = fair_candidates(query, 'scheduling_owner', limit=64, served=self._served)
+        waiting_owners = set(query.values_list('scheduling_owner', flat=True).distinct())
+        identities = fair_candidates(query, 'scheduling_owner', limit=64, served=self._served, prune=False)
         candidates = list(FeedOperation.objects.filter(pk__in=identities).select_related('binding'))
         candidates.sort(key=lambda op: identities.index(op.pk))
         uncertain = FeedOperation.objects.filter(scope, shared_operation__isnull=True,
@@ -145,7 +162,7 @@ class ControlWorker:
             counts = owner_counts or {}
             if owners and all(counts.get(owner or 0, 0) >= self.user_slots for owner in owners):
                 # A sole waiting owner may borrow idle slots.
-                competing = any(owner not in {value or 0 for value in owners} for owner in self._served)
+                competing = any(owner not in {value or 0 for value in owners} for owner in waiting_owners)
                 if competing:
                     continue
             if uncertain >= self.control_slots and old.kind == 'register' and old.state in {'pending', 'retry_wait'}:
@@ -465,6 +482,10 @@ class ControlWorker:
                     delay = delays[min(operation.attempts - 1, len(delays) - 1)] if operation.safe_input.get('shared_subscription') else min(2 ** min(operation.attempts - 1, 8), 60)
                     delay = max(delay + random.uniform(0, delay * .1), getattr(error, 'retry_after', None) or 0)
                     next_attempt = now + timedelta(seconds=delay)
+                    if code == 'stale_create_requires_reconciliation' and binding and not binding.desired_enabled:
+                        # A cancelled last reference needs immediate read-only
+                        # reconciliation of its late create before disabling it.
+                        next_attempt = now
                 else:
                     state, next_attempt = ('manual_blocked' if unknown else 'failed'), None
                 result = {'code': code, 'retryable': retryable, 'outcome_unknown': unknown}
