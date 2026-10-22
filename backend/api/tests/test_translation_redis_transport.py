@@ -133,3 +133,16 @@ def test_redis_loss_never_creates_a_success_event(channel):
         with pytest.raises(transport.ChannelUnavailable):
             channel.mutate('delta','current',delta='partial')
     assert channel.read()['status']=='running'
+
+
+def test_translation_link_signature_allows_reordered_links_but_preserves_targets_and_counts():
+    from api.services.ai_private_translation import _markdown_signature
+    source='Read [first](https://example.test/one) and [second](https://example.test/two).'
+    translated='先看[第二项](https://example.test/two)，再看[第一项](https://example.test/one)。'
+    assert _markdown_signature(source) == _markdown_signature(translated)
+    for malformed in (
+        '[第一项](https://example.test/one)',
+        '[第一项](https://example.test/one) [重复](https://example.test/one)',
+        '[第一项](https://example.test/one) [篡改](https://other.test/two)',
+    ):
+        assert _markdown_signature(source) != _markdown_signature(malformed)

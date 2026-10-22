@@ -23,7 +23,7 @@ from api.services.ai_task_preferences import (
     TaskModelSnapshot, resolve_task_model, require_task_model_snapshot,
 )
 from api.services.ai_worker_fencing import capture_at_enqueue, check_at_claim, prepare_dispatch, commit_result
-from api.services.ai_verified_stream import verified_text_deltas
+from api.services.ai_verified_stream import IncompleteStream, verified_text_deltas
 from api.services.stored_readers import article_snapshot, require_current
 from api.services import chatgpt_subscription_jobs as durable
 from api.services import translation_channel as transport
@@ -263,7 +263,8 @@ def _markdown_signature(markdown):
     inline_code = tuple(re.findall(r'(?<!`)(`+)(.+?)\1(?!`)', visible, re.DOTALL))
     links = tuple(re.findall(r'\]\(([^)\s]+)(?:\s+[^)]*)?\)', visible))
     tables = tuple(line.count('|') for line in visible.splitlines() if '|' in line)
-    return tuple(code), headings, inline_code, links, tables
+    # Chinese word order may move links; exact targets and multiplicity still matter.
+    return tuple(code), headings, inline_code, tuple(sorted(links)), tables
 
 
 def _authorize(task):
@@ -837,18 +838,30 @@ def run_translation(task_id, generation):
             channel.mutate('terminal', token, status='succeeded', result=result, error_code='')
         except transport.ChannelUnavailable:
             pass  # An authorized GET recovers the committed result; never resend upstream.
-    except Exception:
+    except Exception as exc:
+        # Only content validation failures permit retaining an already-observed
+        # client draft. Authority/storage failures remain generic and clear it.
+        failure_code = ('incomplete_response' if isinstance(exc, IncompleteStream) or
+                        isinstance(exc, TranslationError) and exc.code == 'incomplete_response'
+                        else 'translation_failed')
+        if failure_code == 'incomplete_response':
+            try:
+                # A simultaneous revocation/source change takes precedence over
+                # a malformed provider terminal, even between control ticks.
+                _live(task_id, generation, token, started=False)
+            except Exception:
+                failure_code = 'translation_failed'
         # Never persist upstream exception text, credentials, or partial results.
         query = _query().filter(pk=task_id, generation=generation)
         query = query.filter(status='running', run_token=token) if claimed else query.filter(status='queued')
         try:
-            changed = query.update(status='failed', error_code='translation_failed',
+            changed = query.update(status='failed', error_code=failure_code,
                          error_message='翻译未完成；不会自动重复收费请求。',
                          run_token=None, lease_expires_at=None, finished_at=timezone.now(),
                          updated_at=timezone.now())
             if changed and channel is not None:
                 try:
-                    channel.mutate('terminal', token, status='failed', result=None, error_code='translation_failed')
+                    channel.mutate('terminal', token, status='failed', result=None, error_code=failure_code)
                 except transport.ChannelUnavailable:
                     pass
         except Exception:

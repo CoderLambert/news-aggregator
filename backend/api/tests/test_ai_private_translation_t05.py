@@ -78,6 +78,60 @@ class PrivateTranslationTests(TransactionTestCase):
         self.assertEqual(task.status, 'succeeded')
         return task
 
+    def test_segmented_translation_accepts_reordered_links_and_finishes_both_chunks(self):
+        self.news.full_content = '[one](https://example.test/one) [two](https://example.test/two) ' + 'A' * 5000 + '\n\n' + 'B' * 5000
+        self.news.save(update_fields=['full_content'])
+        task = self.queued()
+        first = FakeGateway([gateway_frame('[二](https://example.test/two) [一](https://example.test/one) 第一段')])
+        second = FakeGateway([gateway_frame('第二段')])
+        with patch.object(service, 'build_gateway_client', side_effect=[first, second]) as build:
+            service.run_translation(task.pk, task.generation)
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'succeeded')
+        self.assertEqual(build.call_count, 2)
+        self.assertIn('第二段', task.result['content'])
+        self.assertEqual(ChatGPTArticleTranslation.objects.count(), 1)
+        self.assertFalse(SharedArticleTranslation.objects.exists())
+
+    def test_content_validation_failure_reports_incomplete_without_saving_a_result(self):
+        self.news.full_content = '[one](https://example.test/one) ' + 'A' * 5000 + '\n\n' + 'B' * 5000
+        self.news.save(update_fields=['full_content'])
+        task = self.queued()
+        self.execute(task, [gateway_frame('[篡改](https://other.test/one)')])
+        self.assertEqual(task.status, 'failed')
+        self.assertEqual(task.error_code, 'incomplete_response')
+        self.assertFalse(task.result)
+        self.assertFalse(ChatGPTArticleTranslation.objects.exists())
+
+    def test_authority_change_before_incomplete_terminal_does_not_preserve_draft(self):
+        for mutation in ('credential', 'source'):
+            with self.subTest(mutation=mutation):
+                self.request_id = str(uuid.uuid4())
+                task = self.queued()
+                original_epoch = self.connection.credential_epoch
+                original_body = self.news.full_content
+                def frames():
+                    yield gateway_frame('已生成的草稿', finish=None)
+                    if mutation == 'credential':
+                        self.connection.credential_epoch += 1
+                        self.connection.save(update_fields=['credential_epoch'])
+                    else:
+                        self.news.full_content += 'changed'
+                        self.news.save(update_fields=['full_content'])
+                    yield gateway_frame('', finish='length')
+                try:
+                    self.execute(task, frames())
+                    self.assertEqual(task.status, 'failed')
+                    self.assertEqual(task.error_code, 'translation_failed')
+                    self.assertFalse(task.result)
+                    self.assertFalse(ChatGPTArticleTranslation.objects.exists())
+                finally:
+                    self.connection.credential_epoch = original_epoch
+                    self.connection.save(update_fields=['credential_epoch'])
+                    self.news.full_content = original_body
+                    self.news.save(update_fields=['full_content'])
+                    task.delete()
+
     def test_real_redis_worker_publishes_success_only_after_result_commit(self):
         import os
         url = os.environ.get('TEST_TRANSLATION_REDIS_URL')

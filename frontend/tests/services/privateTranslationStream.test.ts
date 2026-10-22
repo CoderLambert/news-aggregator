@@ -109,3 +109,20 @@ it('exhausts consecutive outages even if queued HTTP snapshots precede unavailab
   expect(Source.all).toHaveLength(4)
   stop()
 })
+
+it('retains the observed draft on incomplete output without turning it into a saved result', () => {
+  const view = setup()
+  view.source.emit('snapshot', { ...identity, task: { ...initial, progress: '已收到的部分译文' } }, '1-0')
+  view.source.emit('terminal', { ...identity, task: { ...initial, status: 'failed', error_code: 'incomplete_response' } }, '2-0')
+  expect(view.onTask).toHaveBeenLastCalledWith(expect.objectContaining({
+    status: 'failed', progress: '已收到的部分译文', result: null,
+  }))
+  expect(view.source.close).toHaveBeenCalled()
+})
+
+it('clears the observed draft when failure may involve authorization or content revision', () => {
+  const view = setup()
+  view.source.emit('snapshot', { ...identity, task: { ...initial, progress: '旧版本私有译文' } }, '1-0')
+  view.source.emit('terminal', { ...identity, task: { ...initial, status: 'failed', error_code: 'translation_failed' } }, '2-0')
+  expect(view.onTask).toHaveBeenLastCalledWith(expect.objectContaining({ progress: '', result: null }))
+})

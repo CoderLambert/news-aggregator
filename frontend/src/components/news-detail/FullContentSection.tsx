@@ -64,7 +64,9 @@ export default function FullContentSection({
   const hasHistory = privateHistory.length > 1 || privateHistory.some(item => !item.current_match)
   const selectedPrivate = privateHistory.find((item) => item.result_id === selectedPrivateResultId) ?? null
   const livePrivate = !showOriginal && !selectedPrivate && privateTask
-  const content = livePrivate && ['queued', 'running'].includes(livePrivate.status) ? livePrivate.progress : showOriginal ? news.full_content : (selectedPrivate ? selectedPrivate.content : (livePrivate && livePrivate.status === 'succeeded' && livePrivate.result ? livePrivate.result.content : (news.full_content_zh || news.full_content)))
+  const incompletePrivate = livePrivate && ['failed', 'cancelled', 'interrupted'].includes(livePrivate.status)
+  const draft = incompletePrivate && livePrivate.error_code === 'incomplete_response' ? livePrivate.progress : ''
+  const content = incompletePrivate ? draft : livePrivate && ['queued', 'running'].includes(livePrivate.status) ? livePrivate.progress : showOriginal ? news.full_content : (selectedPrivate ? selectedPrivate.content : (livePrivate && livePrivate.status === 'succeeded' && livePrivate.result ? livePrivate.result.content : (news.full_content_zh || news.full_content)))
   const readingTranslation = !showOriginal && (selectedPrivate !== null || Boolean(privateTask?.result) || Boolean(news.full_content_zh))
   const legacyCodeRepair = readingTranslation
     ? selectedPrivate === null && news.full_content_zh_scope === 'legacy'
@@ -125,7 +127,10 @@ export default function FullContentSection({
 
       <Card className="article-section-render py-5">
         <CardContent className="px-5">
-          {livePrivate && ['queued', 'running'].includes(livePrivate.status)
+          {incompletePrivate
+            ? <div aria-label="未完成的译文"><p role="status" className="mb-3 text-sm text-amber-700">翻译未完成，未保存为完整译文。可重试翻译，或选择原文查看。</p>
+                {draft ? <><p className="mb-3 text-sm text-muted-foreground">以下是本次已接收的部分内容，仅供临时查看。</p><StreamingMarkdown content={draft} /></> : null}</div>
+            : livePrivate && ['queued', 'running'].includes(livePrivate.status)
             ? <div aria-label="正在生成的译文"><p role="status" className="mb-3 text-sm text-muted-foreground">翻译中，以下内容尚未完成。</p>
                 {livePrivate.progress ? <StreamingMarkdown content={livePrivate.progress} /> : <p className="text-sm text-muted-foreground">正在等待模型响应…</p>}</div>
             : <MarkdownContent content={content} legacyCodeRepair={legacyCodeRepair} />}

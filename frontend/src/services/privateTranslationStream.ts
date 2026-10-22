@@ -67,7 +67,9 @@ export function observePrivateTranslation(initial: PrivateTranslationTask, handl
           task = { ...task, status: 'running', progress: task.progress + data.delta }
         } else {
           const next = parsePrivateTranslation(data.task)
-          identity(next as unknown as Record<string, unknown>); immutable(next); task = next
+          identity(next as unknown as Record<string, unknown>); immutable(next)
+          const draft = next.status === 'failed' && next.error_code === 'incomplete_response' ? task.progress : ''
+          task = draft ? { ...next, progress: draft } : next
           if (kind === 'terminal' && ['queued', 'running'].includes(task.status)) throw new Error('Invalid terminal')
         }
         if (id) cursor = id
