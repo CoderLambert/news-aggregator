@@ -119,10 +119,29 @@ def get_cached_audio(news_id: int, variant: str):
     return None
 
 
-# Hard ceilings: never hold full audio in process memory or synthesize a whole
-# chapter in one upstream session. The UI can offer summary mode instead.
+# Bound each upstream session and cache file; long articles use a segment plan.
 MAX_TTS_SPEECH_CHARS = 12000
 MAX_TTS_AUDIO_BYTES = 16 * 1024 * 1024
+
+
+TTS_SEGMENT_CHARS = 3000
+
+
+def split_speech_text(text: str) -> list[str]:
+    """Losslessly split at sentence/word boundaries, including unbroken text."""
+    segments = []
+    while len(text) > TTS_SEGMENT_CHARS:
+        window = text[:TTS_SEGMENT_CHARS]
+        boundaries = list(re.finditer(r'[。！？.!?;；\n]\s*|\s+', window))
+        end = boundaries[-1].end() if boundaries else TTS_SEGMENT_CHARS
+        # Avoid tiny segments from an early isolated punctuation mark.
+        if end < TTS_SEGMENT_CHARS // 2:
+            end = TTS_SEGMENT_CHARS
+        segments.append(text[:end])
+        text = text[end:]
+    if text:
+        segments.append(text)
+    return segments
 
 
 class TTSCacheSink:

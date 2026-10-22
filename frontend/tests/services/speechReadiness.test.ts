@@ -41,3 +41,20 @@ describe('shared speech admission', () => {
     await expect(checkSpeechReadiness(11, options, new AbortController().signal)).rejects.toThrow(SpeechPreparationError)
   })
 })
+
+it('returns a validated segment plan without exposing content', async () => {
+  mocks.get.mockResolvedValue({ data: { status: 'ready', language: 'zh', segment_count: 5, content_token: 'a'.repeat(64) } })
+  await expect(checkSpeechReadiness(11, options, new AbortController().signal)).resolves.toEqual({
+    language: 'zh', segmentCount: 5, contentToken: 'a'.repeat(64),
+  })
+})
+
+
+it.each([
+  { segment_count: 0, content_token: 'a'.repeat(64) },
+  { segment_count: 2, content_token: 'invalid' },
+  { segment_count: 2 },
+])('rejects a malformed segment plan before starting audio %o', async (plan) => {
+  mocks.get.mockResolvedValue({ data: { status: 'ready', language: 'zh', ...plan } })
+  await expect(checkSpeechReadiness(11, options, new AbortController().signal)).rejects.toBeInstanceOf(SpeechPreparationError)
+})
