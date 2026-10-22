@@ -249,3 +249,82 @@ def test_tts_check_enforces_auth_and_explicit_translation_identity(client, tts_n
     assert response.status_code == 404
     assert response.json()['code'] == 'translation_result_unavailable'
     provider.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+@pytest.mark.parametrize('scope,field', [('summary', 'content'), ('full', 'full_content')])
+def test_long_article_plan_streams_bounded_segments_and_rejects_changed_content(client, tts_news, tmp_path, scope, field):
+    user = get_user_model().objects.create_user(username='tts-long-segments')
+    client.force_login(user)
+    text = 'A complete sentence about hardware. ' * 500
+    setattr(tts_news, field, text)
+    tts_news.full_content_state = 'legacy'
+    tts_news.save(update_fields=[field, 'full_content_state'])
+    url = reverse('news-tts', args=[tts_news.pk])
+    options = {'language': 'original', 'scope': scope}
+    with patch('edge_tts.Communicate') as provider:
+        response = client.get(url, {**options, 'check': '1'})
+    assert response.status_code == 200
+    provider.assert_not_called()
+    plan = response.json()
+    assert plan['segment_count'] > 1
+    token = plan['content_token']
+    spoken = []
+
+    class SegmentCommunicate:
+        def __init__(self, speech_text, voice):
+            spoken.append(speech_text)
+
+        async def stream(self):
+            yield {'type': 'audio', 'data': b'A' * 140}
+
+    with override_settings(TTS_CACHE_DIR=tmp_path), patch('edge_tts.Communicate', SegmentCommunicate):
+        for index in range(plan['segment_count']):
+            result = client.get(url, {**options, 'segment': str(index), 'content_token': token})
+            assert result.status_code == 200
+            assert b''.join(result.streaming_content) == b'A' * 140
+        assert all(0 < len(part) <= 3000 for part in spoken)
+        assert ''.join(spoken) == '语音测试标题。' + text.strip()
+        # Replaying one completed segment reuses its own cache.
+        cached = client.get(url, {**options, 'segment': '1', 'content_token': token})
+        assert b''.join(cached.streaming_content) == b'A' * 140
+        assert len(spoken) == plan['segment_count']
+        setattr(tts_news, field, 'changed saved content')
+        tts_news.save(update_fields=[field])
+        stale = client.get(url, {**options, 'segment': '1', 'content_token': token})
+        assert stale.status_code == 409
+        assert stale.json()['code'] == 'content_changed'
+        assert len(spoken) == plan['segment_count']
+
+
+@pytest.mark.django_db
+@override_settings(PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+@pytest.mark.parametrize('segment', ['-1', '1.2', '999999', ''])
+def test_segment_requires_valid_index_and_current_plan(client, tts_news, segment):
+    user = get_user_model().objects.create_user(username='tts-invalid-segment')
+    client.force_login(user)
+    with patch('edge_tts.Communicate') as provider:
+        response = client.get(reverse('news-tts', args=[tts_news.pk]), {
+            'language': 'original', 'scope': 'summary', 'segment': segment, 'content_token': 'wrong',
+        })
+    assert response.status_code in {400, 409}
+    provider.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_segment_plan_cannot_be_reused_by_another_viewer(client, tts_news):
+    owner = get_user_model().objects.create_user(username='tts-plan-owner')
+    other = get_user_model().objects.create_user(username='tts-plan-other')
+    url = reverse('news-tts', args=[tts_news.pk])
+    options = {'language': 'original', 'scope': 'summary'}
+    client.force_login(owner)
+    plan = client.get(url, {**options, 'check': '1'}).json()
+    client.force_login(other)
+    with patch('edge_tts.Communicate') as provider:
+        response = client.get(url, {**options, 'segment': '0', 'content_token': plan['content_token']})
+        assert response.status_code == 409
+        malformed = client.get(url, {**options, 'segment': '0', 'content_token': '非ASCII'})
+        assert malformed.status_code == 409
+    provider.assert_not_called()

@@ -38,7 +38,7 @@ export default function GlobalSpeechPlayer() {
           step={0.1}
           value={isLoading ? 0 : percent}
           disabled={isLoading || player.duration <= 0}
-          aria-valuetext={`${formatTime(player.currentTime)} / ${formatTime(player.duration)}`}
+          aria-valuetext={`${(player.segmentCount ?? 1) > 1 ? `第 ${(player.segmentIndex ?? 0) + 1} / ${player.segmentCount} 段 · 本段 ` : ''}${formatTime(player.currentTime)} / ${formatTime(player.duration)}`}
           onChange={(event) => actions.seek(Number(event.currentTarget.value) / 100)}
           className="h-1 min-w-0 flex-1 cursor-pointer accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait"
         />
@@ -60,7 +60,7 @@ export default function GlobalSpeechPlayer() {
               ? '正在生成语音…'
               : isError
                 ? player.errorMessage
-                : `${player.language === 'zh' ? '中文' : '原文'} · ${player.scope === 'full' ? '全文' : '摘要'} · ${formatTime(player.currentTime)} / ${formatTime(player.duration)} · ${percent}%`}
+                : `${player.language === 'zh' ? '中文' : '原文'} · ${player.scope === 'full' ? '全文' : '摘要'} · ${(player.segmentCount ?? 1) > 1 ? `第 ${(player.segmentIndex ?? 0) + 1} / ${player.segmentCount} 段 · 本段 ` : ''}${formatTime(player.currentTime)} / ${formatTime(player.duration)} · ${percent}%`}
           </p>
         </div>
 

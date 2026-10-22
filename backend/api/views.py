@@ -1600,7 +1600,7 @@ class NewsTTSView(ArticleAccessMixin, generics.GenericAPIView):
             TTSContentUnavailable, build_cache_variant, clean_for_tts,
             configure_edge_tts_endpoint,
             get_cached_audio, pick_tts_voice, resolve_tts_content,
-            TTSCacheSink, MAX_TTS_SPEECH_CHARS, MAX_TTS_AUDIO_BYTES,
+            TTSCacheSink, MAX_TTS_SPEECH_CHARS, MAX_TTS_AUDIO_BYTES, split_speech_text,
         )
 
         news = self.get_object()
@@ -1646,13 +1646,27 @@ class NewsTTSView(ArticleAccessMixin, generics.GenericAPIView):
                 {'code': 'source_content_required', 'message': '所选范围暂无可朗读内容。'},
                 status=status.HTTP_409_CONFLICT,
             )
-        if len(speech_text) > MAX_TTS_SPEECH_CHARS:
+        is_check = request.query_params.get('check') == '1'
+        segment = request.query_params.get('segment')
+        if not is_check and segment is None and len(speech_text) > MAX_TTS_SPEECH_CHARS:
             return Response(
                 {'code': 'tts_text_too_long', 'message': '正文过长，请切换到摘要朗读。'},
                 status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             )
 
         cache_variant = build_cache_variant(resolved, scope, voice, speech_text)
+        from hashlib import sha256
+        from secrets import compare_digest
+        segments = split_speech_text(speech_text)
+        content_token = sha256(f'segments-v1:{request.user.pk}:{pk}:{cache_variant}'.encode()).hexdigest()
+        if segment is not None:
+            if not compare_digest(request.query_params.get('content_token', '').encode(), content_token.encode()):
+                return Response({'code': 'content_changed', 'message': '朗读内容已变化，请重新选择。'}, status=409)
+            if not segment.isascii() or not segment.isdecimal() or len(segment) > 8 or int(segment) >= len(segments):
+                return Response({'code': 'invalid_segment', 'message': '无效的朗读分段。'}, status=400)
+            index = int(segment)
+            speech_text = segments[index]
+            cache_variant = f'{cache_variant}:segments-v1:{index}'
         from api.services.stored_readers import require_current
         def speech_guard():
             if resolved.snapshot is not None:
@@ -1670,9 +1684,10 @@ class NewsTTSView(ArticleAccessMixin, generics.GenericAPIView):
             return Response({'code': 'content_changed', 'message': '朗读内容已变化，请重新选择。'}, status=409)
         # One authority for every player entry point. This checks current ACL,
         # selected translation, scope and text limits without synthesizing audio.
-        if request.query_params.get('check') == '1':
+        if is_check:
             return Response(
-                {'status': 'ready', 'language': resolved.language, 'voice': voice},
+                {'status': 'ready', 'language': resolved.language, 'voice': voice,
+                 'segment_count': len(segments), 'content_token': content_token},
                 headers={'Cache-Control': 'private, no-store'},
             )
         cached = get_cached_audio(pk, cache_variant)

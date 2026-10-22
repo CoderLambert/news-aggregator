@@ -221,7 +221,7 @@ export class SpeechPreparationError extends Error {
 export async function checkSpeechReadiness(id: NewsId, options: {
   language: 'zh' | 'original'; scope: 'full' | 'summary'; voice: string
   translationResultId?: number | null
-}, signal: AbortSignal): Promise<{ language: 'zh' | 'original' }> {
+}, signal: AbortSignal): Promise<{ language: 'zh' | 'original'; segmentCount?: number; contentToken?: string }> {
   try {
     const { data } = await api.get<unknown>(`/news/${id}/tts/`, {
       params: { check: '1', language: options.language, scope: options.scope, voice: options.voice,
@@ -230,6 +230,13 @@ export async function checkSpeechReadiness(id: NewsId, options: {
     })
     if (!isRecord(data) || data.status !== 'ready' || (data.language !== 'zh' && data.language !== 'original')) {
       throw new SpeechPreparationError('无法确认朗读内容，请稍后重试。', true)
+    }
+    if (data.segment_count !== undefined || data.content_token !== undefined) {
+      if (typeof data.segment_count !== 'number' || !Number.isSafeInteger(data.segment_count) || data.segment_count < 1 ||
+          typeof data.content_token !== 'string' || !/^[a-f0-9]{64}$/.test(data.content_token)) {
+        throw new SpeechPreparationError('无法确认朗读分段，请稍后重试。', true)
+      }
+      return { language: data.language, segmentCount: data.segment_count, contentToken: data.content_token }
     }
     return { language: data.language }
   } catch (error) {
