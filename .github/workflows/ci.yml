@@ -273,7 +273,7 @@ jobs:
           # Bootstrap obeys production host validation; APIClient test hosts are
           # scoped by override_settings inside the synthetic test only.
           mkdir -m 700 "$t00_env/home"
-          env -i PATH="$PATH" HOME="$t00_env/home" TMPDIR="$t00_env" LANG=C.UTF-8 \
+          env -i DOCKER_HOST="${DOCKER_HOST:-}" PATH="$PATH" HOME="$t00_env/home" TMPDIR="$t00_env" LANG=C.UTF-8 \
             PYTHONPATH="$GITHUB_WORKSPACE/backend:$GITHUB_WORKSPACE/tools/byok_t00_probe" \
             DJANGO_ENV=production DJANGO_DEBUG=0 RUN_MAIN=true \
             DJANGO_SECRET_KEY=CI-only-synthetic-strong-secret-not-a-credential-9876543210-abcdef \
@@ -283,6 +283,7 @@ jobs:
             CHROMA_DATA_DIR="$t00_env/chroma" TTS_CACHE_DIR="$t00_env/tts" \
             PROVIDER_CREDENTIAL_ENCRYPTION_KEY=CI-only-synthetic-provider-key-material \
             T00_PROXY_PYTHON="$t00_env/proxy/bin/python" PYTHONDONTWRITEBYTECODE=1 \
+            bash ops/ci/with-translation-redis.sh \
             backend/venv/bin/python -m pytest -c backend/pytest.ini \
             -o 'python_files=t04_*.py' -q \
             tools/byok_t00_probe/t04_django_localproxy.py tools/byok_t00_probe/t04_unified_localproxy.py
