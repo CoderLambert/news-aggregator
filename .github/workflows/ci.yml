@@ -301,7 +301,7 @@ jobs:
         # runs three repeated rounds for safety experiments.
         env:
           CI_XDIST_REPEATS: '1'
-        run: bash ops/ci/benchmark-xdist.sh
+        run: bash ops/ci/with-translation-redis.sh bash ops/ci/benchmark-xdist.sh
       - name: Check production Django settings with synthetic values
         env:
           DJANGO_ENV: production

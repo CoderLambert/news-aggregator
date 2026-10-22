@@ -30,10 +30,11 @@ from api.services import translation_channel as transport
 @pytest.fixture
 def channel():
     # Explicit synthetic Redis only; never default to the application's URL.
-    url = os.environ.get('TEST_TRANSLATION_REDIS_URL')
-    if not url:
+    from api.tests.translation_transport_fixture import synthetic_redis_client
+    redis = synthetic_redis_client()
+    if redis is None:
         pytest.skip('requires an explicitly isolated synthetic Redis endpoint')
-    with patch.object(transport, 'client', return_value=transport._client(url)):
+    with patch.object(transport, 'client', return_value=redis):
         item = transport.Channel(1, uuid.uuid4(), 1)
         yield item
         item.redis.delete(*item.keys)
@@ -64,12 +65,14 @@ def test_independent_process_publishes_and_two_observers_receive_same_delta(chan
     channel.mutate('init', 'synthetic-run')
     cursor=channel.read()['cursor']
     code="""import os,django;django.setup()
-from api.services.translation_channel import Channel
-c=Channel(1,os.environ['SYNTHETIC_TASK'],1)
+from api.services import translation_channel as transport
+from api.tests.translation_transport_fixture import synthetic_redis_client
+transport.client=lambda: synthetic_redis_client()
+c=transport.Channel(1,os.environ['SYNTHETIC_TASK'],1)
 c.mutate('delta','synthetic-run',delta='跨进程片段')
 """
     task_id=channel.keys[0].split('{')[1].split('}')[0].split(':')[1]
-    env={**os.environ,'SYNTHETIC_TASK':task_id,'TRANSLATION_REDIS_URL':os.environ['TEST_TRANSLATION_REDIS_URL']}
+    env={**os.environ,'SYNTHETIC_TASK':task_id,'TRANSLATION_REDIS_URL':os.environ.get('TEST_TRANSLATION_REDIS_URL', '')}
     result=subprocess.run([sys.executable,'-c',code],env=env,capture_output=True,timeout=15)
     assert result.returncode == 0, result.stderr[-500:]
     first=channel.read(cursor); second=channel.read(cursor)

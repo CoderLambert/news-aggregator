@@ -302,3 +302,14 @@ docker exec -u runner newshub-ci-runner-1 docker info --format '{{.ServerVersion
 ## English quick reference
 
 Install **two repository-scoped Docker self-hosted Runners** on Omarchy without mounting the host Docker socket. Run bash ops/ci/manage.sh doctor and bash ops/ci/manage.sh install. Confirm **both** backend and frontend Runners are Online in GitHub runner settings, review concurrent PR checks, then merge. The separate privileged DinD daemon shares a CI-only workspace for the real NewsHub Docker/browser smoke test. Do not run untrusted pull requests or unrelated repositories on this persistent Runner. Deployment and GitHub CI verification are pending until this configuration is executed on the user host.
+
+### Private translation Redis tests
+
+The full backend hybrid runs through `with-translation-redis.sh`. It starts the
+pinned image from `compose.translation.yaml` without a network or TCP listener,
+using an authenticated Unix socket in a fresh shared `$TMPDIR` directory. This
+also works across the runner/private-DinD boundary. Tests receive only
+`TEST_TRANSLATION_REDIS_SOCKET`; neither the live application's Redis URL nor
+production data is used. The wrapper keeps the test command's failure status
+and removes its exact disposable container/directory on exit. The existing
+skip budget and collection/coverage reconciliation stay unchanged.

@@ -133,9 +133,9 @@ class PrivateTranslationTests(TransactionTestCase):
                     task.delete()
 
     def test_real_redis_worker_publishes_success_only_after_result_commit(self):
-        import os
-        url = os.environ.get('TEST_TRANSLATION_REDIS_URL')
-        if not url:
+        from api.tests.translation_transport_fixture import synthetic_redis_client
+        redis = synthetic_redis_client()
+        if redis is None:
             self.skipTest('requires explicitly isolated synthetic Redis')
         real_finish = service._finish
         def finish(*args):
@@ -145,7 +145,7 @@ class PrivateTranslationTests(TransactionTestCase):
             self.assertTrue(ChatGPTArticleTranslation.objects.filter(pk=result['result_id']).exists())
             self.assertEqual(channel.read()['status'], 'running')
             return result
-        with override_settings(TRANSLATION_REDIS_URL=url), patch.object(service.transport, 'Channel', RedisChannel):
+        with patch.object(service.transport, 'client', return_value=redis), patch.object(service.transport, 'Channel', RedisChannel):
             task = self.queued()
             try:
                 with patch.object(service, '_finish', side_effect=finish):

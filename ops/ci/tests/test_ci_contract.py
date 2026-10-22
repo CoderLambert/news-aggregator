@@ -218,7 +218,8 @@ class SelfHostedCIContract(unittest.TestCase):
                 self.assertTrue((ROOT / path).is_file(), f"{job}: missing {path}")
         # Default backend tests must invoke the same previously validated
         # hybrid as the opt-in benchmark, with only one CI round.
-        self.assertEqual(backend_steps[full_suite]["run"], "bash ops/ci/benchmark-xdist.sh")
+        self.assertEqual(backend_steps[full_suite]["run"],
+                         "bash ops/ci/with-translation-redis.sh bash ops/ci/benchmark-xdist.sh")
         self.assertEqual(backend_steps[full_suite]["env"]["CI_XDIST_REPEATS"], "1")
         hybrid = (ROOT / "ops/ci/benchmark-xdist.sh").read_text(encoding="utf-8")
         self.assertIn("tests/ backend/api/tests/ scripts/deploy/tests/", hybrid)
