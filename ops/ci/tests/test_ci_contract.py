@@ -182,6 +182,8 @@ class SelfHostedCIContract(unittest.TestCase):
         self.assertIn("unittest discover -s ops/shared-litellm-proxy/tests -p 'test_provider_key_guard.py'", t00_run)
         self.assertIn("tools/byok_t00_probe/t04_django_localproxy.py", t00_run)
         self.assertIn("env -i", t00_run)
+        self.assertIn("bash ops/ci/with-translation-redis.sh", t00_run)
+        self.assertIn('DOCKER_HOST="${DOCKER_HOST:-}"', t00_run)
         self.assertIn("DJANGO_ENV=production", t00_run)
         # pytest-django imports settings before function-level overrides run.
         # Keep the isolated bootstrap valid without relaxing production hosts.
@@ -218,7 +220,8 @@ class SelfHostedCIContract(unittest.TestCase):
                 self.assertTrue((ROOT / path).is_file(), f"{job}: missing {path}")
         # Default backend tests must invoke the same previously validated
         # hybrid as the opt-in benchmark, with only one CI round.
-        self.assertEqual(backend_steps[full_suite]["run"], "bash ops/ci/benchmark-xdist.sh")
+        self.assertEqual(backend_steps[full_suite]["run"],
+                         "bash ops/ci/with-translation-redis.sh bash ops/ci/benchmark-xdist.sh")
         self.assertEqual(backend_steps[full_suite]["env"]["CI_XDIST_REPEATS"], "1")
         hybrid = (ROOT / "ops/ci/benchmark-xdist.sh").read_text(encoding="utf-8")
         self.assertIn("tests/ backend/api/tests/ scripts/deploy/tests/", hybrid)

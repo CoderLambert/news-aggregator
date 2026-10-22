@@ -18,7 +18,7 @@ from rest_framework.test import APIClient
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from local_runtime import LocalProxy
 from trusted_upstream import handler_type
-from t04_django_localproxy import django_db_modify_db_settings
+from t04_django_localproxy import django_db_modify_db_settings, translation_redis
 
 from api.ai_model_models import AICallAttempt, UserAIModelConfig
 from api.models import News, Source, Category, ChatSession, ChatGPTArticleTranslation, ChatGPTTranslationTask

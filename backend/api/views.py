@@ -1648,7 +1648,10 @@ class NewsTTSView(ArticleAccessMixin, generics.GenericAPIView):
             )
         is_check = request.query_params.get('check') == '1'
         segment = request.query_params.get('segment')
-        if not is_check and segment is None and len(speech_text) > MAX_TTS_SPEECH_CHARS:
+        complete_track = request.query_params.get('complete') == '1'
+        if complete_track and segment is not None:
+            return Response({'code': 'invalid_segment', 'message': '无效的朗读范围。'}, status=400)
+        if not is_check and not complete_track and segment is None and len(speech_text) > MAX_TTS_SPEECH_CHARS:
             return Response(
                 {'code': 'tts_text_too_long', 'message': '正文过长，请切换到摘要朗读。'},
                 status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -1659,14 +1662,17 @@ class NewsTTSView(ArticleAccessMixin, generics.GenericAPIView):
         from secrets import compare_digest
         segments = split_speech_text(speech_text)
         content_token = sha256(f'segments-v1:{request.user.pk}:{pk}:{cache_variant}'.encode()).hexdigest()
-        if segment is not None:
+        if segment is not None or complete_track:
             if not compare_digest(request.query_params.get('content_token', '').encode(), content_token.encode()):
                 return Response({'code': 'content_changed', 'message': '朗读内容已变化，请重新选择。'}, status=409)
+        if segment is not None:
             if not segment.isascii() or not segment.isdecimal() or len(segment) > 8 or int(segment) >= len(segments):
                 return Response({'code': 'invalid_segment', 'message': '无效的朗读分段。'}, status=400)
             index = int(segment)
             speech_text = segments[index]
             cache_variant = f'{cache_variant}:segments-v1:{index}'
+        elif complete_track:
+            cache_variant = f'{cache_variant}:complete-v1'
         from api.services.stored_readers import require_current
         def speech_guard():
             if resolved.snapshot is not None:
@@ -1718,15 +1724,40 @@ class NewsTTSView(ArticleAccessMixin, generics.GenericAPIView):
         # opaque 500/broken audio stream to the browser.
         loop = asyncio.new_event_loop()
 
+        segment_boundary = object()
+
         async def _gen():
-            communicate = edge_tts.Communicate(speech_text, voice)
-            async for chunk in communicate.stream():
-                if chunk.get('type') == 'audio' and 'data' in chunk:
-                    yield chunk['data']
+            for part in segments if complete_track else [speech_text]:
+                # Yield control to the synchronous reader fence before the next
+                # provider session. Django ORM reads stay on this request thread.
+                yield segment_boundary
+                communicate = edge_tts.Communicate(part, voice)
+                received_audio = False
+                pending = bytearray()
+                async for chunk in communicate.stream():
+                    if chunk.get('type') == 'audio' and 'data' in chunk:
+                        data = chunk['data']
+                        if not isinstance(data, bytes) or len(data) > MAX_TTS_AUDIO_BYTES:
+                            raise ValueError('tts_invalid_audio_chunk')
+                        received_audio = received_audio or bool(data)
+                        if complete_track:
+                            pending.extend(data)
+                            while len(pending) >= 65536:
+                                yield bytes(pending[:65536])
+                                del pending[:65536]
+                        else:
+                            yield data
+                if not received_audio:
+                    raise ValueError('tts_empty_segment')
+                if pending:
+                    yield bytes(pending)
 
         gen = _gen()
         try:
             first_chunk = loop.run_until_complete(gen.__anext__())
+            while first_chunk is segment_boundary:
+                speech_guard()
+                first_chunk = loop.run_until_complete(gen.__anext__())
         except Exception as exc:
             try:
                 loop.run_until_complete(gen.aclose())
@@ -1754,12 +1785,13 @@ class NewsTTSView(ArticleAccessMixin, generics.GenericAPIView):
                 chunk = first_chunk
                 while True:
                     speech_guard()
-                    if not isinstance(chunk, bytes) or total_bytes + len(chunk) > MAX_TTS_AUDIO_BYTES:
-                        raise ValueError('tts_audio_too_large')
-                    total_bytes += len(chunk)
-                    if cache_sink is not None:
-                        cache_sink.append(chunk)
-                    yield chunk
+                    if chunk is not segment_boundary:
+                        if not isinstance(chunk, bytes) or total_bytes + len(chunk) > MAX_TTS_AUDIO_BYTES:
+                            raise ValueError('tts_audio_too_large')
+                        total_bytes += len(chunk)
+                        if cache_sink is not None:
+                            cache_sink.append(chunk)
+                        yield chunk
                     try:
                         chunk = loop.run_until_complete(gen.__anext__())
                     except StopAsyncIteration:

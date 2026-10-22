@@ -13,7 +13,7 @@ import {
   VOICE_KEY,
 } from '@/constants/tts'
 import type { PlaybackRate, SpeechLanguage, SpeechScope, VoiceKey } from '@/constants/tts'
-import { checkSpeechReadiness, SpeechPreparationError, type NewsId } from '@/services/api'
+import { checkSpeechReadiness, fetchSpeechAudio, SpeechPreparationError, type NewsId } from '@/services/api'
 import type { SpeechRequestOptions, SpeechStatus } from './SpeechPlayerContext'
 import { isRecord } from '@/types/news'
 import { useAuth } from '@/context/AuthContext'
@@ -26,16 +26,7 @@ interface ActiveArticle {
   translationResultId?: number | null
   viewerId: string
   options: SpeechOptions
-  segmentIndex: number
-  segmentCount: number
   contentToken?: string
-}
-
-function releaseAudio(audio: HTMLAudioElement | null) {
-  if (!audio) return
-  audio.pause()
-  audio.removeAttribute('src')
-  audio.load()
 }
 
 type SpeechOptions = SpeechRequestOptions
@@ -67,7 +58,7 @@ function persist(key: string, value: string): void {
 }
 
 function positionKey(article: Pick<ActiveArticle, 'id' | 'language' | 'scope' | 'translationResultId' | 'viewerId'>): string {
-  return `${POSITION_KEY_PREFIX}viewer_${article.viewerId}_${article.id}_${article.language}_${article.scope}_result_${article.translationResultId ?? 'current'}`
+  return `${POSITION_KEY_PREFIX}complete_v1_viewer_${article.viewerId}_${article.id}_${article.language}_${article.scope}_result_${article.translationResultId ?? 'current'}`
 }
 
 export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
@@ -84,14 +75,15 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
   const [language, setLanguageState] = useState<SpeechLanguage>(() => readStoredValue<SpeechLanguage>(SPEECH_LANGUAGE_KEY, 'zh', SPEECH_LANGUAGES))
   const [title, setTitle] = useState('')
   const [newsId, setNewsId] = useState<NewsId | null>(null)
-  const [segmentIndex, setSegmentIndex] = useState(0)
-  const [segmentCount, setSegmentCount] = useState(1)
-  const nextAudioRef = useRef<{ audio: HTMLAudioElement; index: number; ready: boolean; failed: boolean } | null>(null)
-  const loadSegmentRef = useRef<((index: number, fraction?: number, shouldPlay?: boolean) => void) | null>(null)
   const [canRetry, setCanRetry] = useState(false)
   const preparationRef = useRef<AbortController | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
+  const objectUrlRef = useRef<string | null>(null)
+  const releaseObjectUrl = useCallback(() => {
+    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
+    objectUrlRef.current = null
+  }, [])
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const activeArticleRef = useRef<ActiveArticle | null>(null)
   const statusRef = useRef<SpeechStatus>(status)
@@ -107,7 +99,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     const audio = audioRef.current
     const article = activeArticleRef.current
     if (!article || !audio || !Number.isFinite(audio.currentTime) || audio.currentTime <= 0) return
-    persist(positionKey(article), JSON.stringify({ time: audio.currentTime, ts: Date.now(), segment: article.segmentIndex, token: article.contentToken }))
+    persist(positionKey(article), JSON.stringify({ time: audio.currentTime, ts: Date.now(), token: article.contentToken }))
   }, [])
 
   useEffect(() => {
@@ -126,7 +118,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
       if (!savedText) return
       const saved: unknown = JSON.parse(savedText)
       if (!isRecord(saved) || typeof saved.time !== 'number' || typeof saved.ts !== 'number') return
-      if (article.contentToken && (saved.token !== article.contentToken || saved.segment !== article.segmentIndex)) return
+      if (saved.token !== article.contentToken) return
       if (Date.now() - saved.ts >= 3_600_000 || saved.time <= 0) return
       if (Number.isFinite(audio.duration) && saved.time < audio.duration) audio.currentTime = saved.time
     } catch {
@@ -148,9 +140,6 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     requestIdRef.current += 1
     preparationRef.current?.abort()
     preparationRef.current = null
-    loadSegmentRef.current = null
-    releaseAudio(nextAudioRef.current?.audio ?? null)
-    nextAudioRef.current = null
     const audio = audioRef.current
     audioRef.current = null
     activeArticleRef.current = null
@@ -159,6 +148,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
       audio.removeAttribute('src')
       audio.load()
     }
+    releaseObjectUrl()
     clearMediaSession()
     updateStatus('idle')
     setProgress(0)
@@ -168,7 +158,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     setNewsId(null)
     setErrorMessage(null)
     setCanRetry(false)
-  }, [clearMediaSession, savePosition, updateStatus])
+  }, [clearMediaSession, releaseObjectUrl, savePosition, updateStatus])
 
   useLayoutEffect(() => {
     const previousViewerId = viewerIdRef.current
@@ -208,16 +198,12 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     id: NewsId,
     articleTitle: string,
     overrides: Partial<SpeechOptions> = {},
-    retrySegment?: { index: number; token?: string },
   ) => {
     if (!supported || viewerIdRef.current !== viewerId) return
     savePosition()
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
     preparationRef.current?.abort()
-    loadSegmentRef.current = null
-    releaseAudio(nextAudioRef.current?.audio ?? null)
-    nextAudioRef.current = null
     const controller = new AbortController()
     preparationRef.current = controller
 
@@ -228,6 +214,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
       previousAudio.load()
     }
 
+    releaseObjectUrl()
     const selectedLanguage = overrides.language ?? language
     const requestedVoice = overrides.voice ?? voice
     const selected: SpeechOptions = {
@@ -240,7 +227,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     }
     const translationResultId = selected.language === 'zh' && selected.scope === 'full'
       ? overrides.translationResultId ?? null : null
-    const article: ActiveArticle = { id, title: articleTitle, language: selected.language, scope: selected.scope, translationResultId, viewerId, options: { ...selected, translationResultId }, segmentIndex: retrySegment?.index ?? 0, contentToken: retrySegment?.token, segmentCount: 1 }
+    const article: ActiveArticle = { id, title: articleTitle, language: selected.language, scope: selected.scope, translationResultId, viewerId, options: { ...selected, translationResultId } }
     const audio = new Audio()
     audioRef.current = audio
     activeArticleRef.current = article
@@ -253,8 +240,6 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     setDuration(0)
     setTitle(articleTitle)
     setNewsId(id)
-    setSegmentIndex(0)
-    setSegmentCount(1)
     setScopeState(selected.scope)
     setRateState(selected.rate)
     setLanguageState(selected.language)
@@ -264,147 +249,86 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     setErrorMessage(null)
     setCanRetry(false)
 
-    const query = new URLSearchParams({ language: selected.language, voice: selected.voice, scope: selected.scope })
-    if (translationResultId !== null) query.set('translation_result_id', String(translationResultId))
-    const segmentUrl = (index: number) => {
-      const params = new URLSearchParams(query)
-      if (article.contentToken) {
-        params.set('segment', String(index))
-        params.set('content_token', article.contentToken)
+    const isCurrent = () => isCurrentAudio(audio, requestId)
+    audio.onplay = () => {
+      if (!isCurrent()) return
+      setErrorMessage(null)
+      updateStatus('playing')
+    }
+    audio.onpause = () => {
+      if (!isCurrent() || audio.ended) return
+      updateStatus('paused')
+      savePosition()
+    }
+    audio.ontimeupdate = () => {
+      if (!isCurrent()) return
+      setCurrentTime(audio.currentTime)
+      if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        setDuration(audio.duration)
+        setProgress(Math.min(1, audio.currentTime / audio.duration))
       }
-      return `/api/news/${id}/tts/?${params.toString()}`
     }
-    const clearNext = () => {
-      releaseAudio(nextAudioRef.current?.audio ?? null)
-      nextAudioRef.current = null
-    }
-    let initialAudioAvailable = true
-    const loadSegment = (index: number, fraction?: number, shouldPlay = true) => {
-      if (controller.signal.aborted || activeArticleRef.current !== article || viewerIdRef.current !== article.viewerId) return
-      const prepared = nextAudioRef.current
-      nextAudioRef.current = null
-      const track = prepared?.index === index && !prepared.failed ? prepared.audio : initialAudioAvailable ? audio : new Audio()
-      initialAudioAvailable = false
-      if (prepared && prepared.audio !== track) releaseAudio(prepared.audio)
-      const previous = audioRef.current
-      audioRef.current = track
-      if (previous !== track) releaseAudio(previous)
-      article.segmentIndex = index
-      setSegmentIndex(index)
+    audio.onerror = () => {
+      if (!isCurrent()) return
+      savePosition()
+      audioRef.current = null
+      releaseObjectUrl()
+      updateStatus('error')
+      setCanRetry(true)
+      setProgress(0)
       setCurrentTime(0)
       setDuration(0)
-      setProgress(index / article.segmentCount)
-      updateStatus('loading')
-      track.preload = 'auto'
-      track.playbackRate = article.options.rate
-      const isCurrent = () => isCurrentAudio(track, requestId)
-      const preloadNext = () => {
-        if (!isCurrent() || nextAudioRef.current || index + 1 >= article.segmentCount) return
-        const next = { audio: new Audio(), index: index + 1, ready: false, failed: false }
-        nextAudioRef.current = next
-        next.audio.preload = 'auto'
-        next.audio.onloadedmetadata = () => { next.ready = true }
-        next.audio.onerror = () => { next.failed = true }
-        next.audio.src = segmentUrl(index + 1)
-        next.audio.load()
-      }
-      track.onplay = () => {
-        if (!isCurrent()) return
-        setErrorMessage(null)
-        updateStatus('playing')
-        preloadNext()
-      }
-      track.onpause = () => {
-        if (!isCurrent() || track.ended) return
-        updateStatus('paused')
-        savePosition()
-      }
-      track.ontimeupdate = () => {
-        if (!isCurrent()) return
-        setCurrentTime(track.currentTime)
-        if (Number.isFinite(track.duration) && track.duration > 0) {
-          setDuration(track.duration)
-          setProgress((index + Math.min(1, track.currentTime / track.duration)) / article.segmentCount)
-        }
-      }
-      track.onerror = () => {
-        if (!isCurrent()) return
-        savePosition()
-        audioRef.current = null
-        clearNext()
-        releaseAudio(track)
-        updateStatus('error')
-        setCanRetry(true)
-        setErrorMessage('语音合成或音频传输失败，请重试当前段。')
-        clearMediaSession()
-      }
-      track.onended = () => {
-        if (!isCurrent()) return
-        if (index + 1 < article.segmentCount) {
-          loadSegment(index + 1)
-          return
-        }
-        try { localStorage.removeItem(positionKey(article)) } catch { /* optional resume state */ }
-        audioRef.current = null
-        activeArticleRef.current = null
-        loadSegmentRef.current = null
-        releaseAudio(track)
-        clearNext()
-        updateStatus('idle')
-        setProgress(1)
-        setTitle('')
-        setNewsId(null)
-        setErrorMessage(null)
-        clearMediaSession()
-      }
-      const startTrack = () => {
-        if (!isCurrent()) return
-        if (Number.isFinite(track.duration) && track.duration > 0) setDuration(track.duration)
-        if (fraction !== undefined && Number.isFinite(track.duration)) track.currentTime = fraction * track.duration
-        else restorePosition(article, track)
-        setCurrentTime(track.currentTime)
-        if (shouldPlay) void track.play().catch(() => { if (isCurrent()) updateStatus('paused') })
-        else updateStatus('paused')
-      }
-      track.onloadedmetadata = startTrack
-      updateMediaSession(articleTitle, track, requestId)
-      if (prepared?.audio === track && prepared.ready) startTrack()
-      else if (prepared?.audio !== track) {
-        track.src = segmentUrl(index)
-        track.load()
-      }
+      audio.pause()
+      audio.removeAttribute('src')
+      audio.load()
+      setErrorMessage('语音合成或音频传输失败，请重试。')
+      clearMediaSession()
     }
-    const isCurrent = () => isCurrentAudio(audio, requestId)
+    audio.onended = () => {
+      if (!isCurrent()) return
+      try { localStorage.removeItem(positionKey(article)) } catch { /* optional resume state */ }
+      audioRef.current = null
+      activeArticleRef.current = null
+      releaseObjectUrl()
+      updateStatus('idle')
+      setProgress(1)
+      setCurrentTime(Number.isFinite(audio.duration) ? audio.duration : 0)
+      setTitle('')
+      setNewsId(null)
+      setErrorMessage(null)
+      clearMediaSession()
+    }
+    audio.onloadedmetadata = () => {
+      if (!isCurrent()) return
+      if (Number.isFinite(audio.duration) && audio.duration > 0) setDuration(audio.duration)
+      restorePosition(article, audio)
+      setCurrentTime(audio.currentTime)
+      void audio.play().catch(() => { if (isCurrent()) updateStatus('paused') })
+    }
 
     // All starts, preference changes and retries pass the same server-side
     // content/owner admission. The check never generates audio or translations.
-    void checkSpeechReadiness(id, article.options, controller.signal).then((ready) => {
+    void checkSpeechReadiness(id, article.options, controller.signal).then(async (ready) => {
       if (controller.signal.aborted || !isCurrent()) return
       article.language = ready.language
       article.options.language = ready.language
       if (ready.language === 'zh' && article.options.voice === 'guy') article.options.voice = 'yunyang'
       setLanguageState(ready.language)
       setVoiceState(article.options.voice)
-      query.set('language', ready.language)
-      query.set('voice', article.options.voice)
+      const query = new URLSearchParams({ language: ready.language, voice: article.options.voice, scope: selected.scope })
+      if (translationResultId !== null) query.set('translation_result_id', String(translationResultId))
       article.contentToken = ready.contentToken
-      article.segmentCount = ready.segmentCount ?? 1
-      setSegmentCount(article.segmentCount)
-      let index = 0
-      if (retrySegment) {
-        if ((retrySegment.token !== undefined && retrySegment.token !== article.contentToken) || retrySegment.index >= article.segmentCount) {
-          throw new SpeechPreparationError('朗读内容已变化，请重新选择文章开始朗读。', false)
-        }
-        index = retrySegment.index
-      } else if (article.contentToken) {
-        try {
-          const saved: unknown = JSON.parse(localStorage.getItem(positionKey(article)) ?? 'null')
-          if (isRecord(saved) && saved.token === article.contentToken && typeof saved.ts === 'number' && Date.now() - saved.ts < 3_600_000 &&
-              typeof saved.segment === 'number' && Number.isInteger(saved.segment) && saved.segment >= 0 && saved.segment < article.segmentCount) index = saved.segment
-        } catch { /* optional resume state */ }
+      if (ready.contentToken) {
+        const blob = await fetchSpeechAudio(id, { ...article.options, contentToken: ready.contentToken }, controller.signal)
+        if (controller.signal.aborted || !isCurrent()) return
+        objectUrlRef.current = URL.createObjectURL(blob)
+        audio.src = objectUrlRef.current
+      } else {
+        // Rolling upgrades may still expose the older short-track endpoint.
+        audio.src = `/api/news/${id}/tts/?${query.toString()}`
       }
-      loadSegmentRef.current = loadSegment
-      loadSegment(index)
+      updateMediaSession(articleTitle, audio, requestId)
+      audio.load()
     }).catch((error: unknown) => {
       if (controller.signal.aborted || !isCurrent()) return
       audioRef.current = null
@@ -413,7 +337,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
       setErrorMessage(error instanceof SpeechPreparationError ? error.message : '无法确认朗读内容，请稍后重试。')
       clearMediaSession()
     })
-  }, [clearMediaSession, isCurrentAudio, language, rate, restorePosition, savePosition, scope, supported, updateMediaSession, updateStatus, viewerId, voice])
+  }, [clearMediaSession, isCurrentAudio, language, rate, releaseObjectUrl, restorePosition, savePosition, scope, supported, updateMediaSession, updateStatus, viewerId, voice])
 
   const pause = useCallback(() => {
     const audio = audioRef.current
@@ -433,13 +357,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
   const seek = useCallback((fraction: number) => {
     const audio = audioRef.current
     if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) return
-    const article = activeArticleRef.current
-    if (!article) return
-    const target = Math.min(1, Math.max(0, fraction)) * article.segmentCount
-    const index = Math.min(article.segmentCount - 1, Math.floor(target))
-    const offset = Math.min(1, target - index)
-    if (index === article.segmentIndex) audio.currentTime = offset * audio.duration
-    else loadSegmentRef.current?.(index, offset, statusRef.current === 'playing')
+    audio.currentTime = Math.min(1, Math.max(0, fraction)) * audio.duration
   }, [])
 
   const setRate = useCallback((nextRate: PlaybackRate) => {
@@ -460,7 +378,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
   const retry = useCallback(() => {
     const article = activeArticleRef.current
     if (canRetry && statusRef.current === 'error' && article?.viewerId === viewerIdRef.current) {
-      speak(article.id, article.title, article.options, { index: article.segmentIndex, token: article.contentToken })
+      speak(article.id, article.title, article.options)
     }
   }, [canRetry, speak])
 
@@ -487,9 +405,6 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     requestIdRef.current += 1
     preparationRef.current?.abort()
     preparationRef.current = null
-    loadSegmentRef.current = null
-    releaseAudio(nextAudioRef.current?.audio ?? null)
-    nextAudioRef.current = null
     const audio = audioRef.current
     audioRef.current = null
     activeArticleRef.current = null
@@ -498,8 +413,9 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
       audio.removeAttribute('src')
       audio.load()
     }
+    releaseObjectUrl()
     clearMediaSession()
-  }, [clearMediaSession])
+  }, [clearMediaSession, releaseObjectUrl])
 
   const playerState = useMemo(() => ({
     status,
@@ -514,9 +430,7 @@ export function SpeechPlayerProvider({ children }: { children: ReactNode }) {
     language,
     errorMessage,
     canRetry,
-    segmentIndex,
-    segmentCount,
-  }), [currentTime, duration, errorMessage, language, newsId, progress, rate, scope, status, title, voice, canRetry, segmentIndex, segmentCount])
+  }), [currentTime, duration, errorMessage, language, newsId, progress, rate, scope, status, title, voice, canRetry])
 
   const playerActions = useMemo(() => ({ speak, retry, setLanguage, pause, resume, stop, seek, setRate, setVoice, setScope }), [
     pause, resume, retry, setLanguage, seek, setRate, setScope, setVoice, speak, stop,

@@ -254,6 +254,32 @@ export async function checkSpeechReadiness(id: NewsId, options: {
   }
 }
 
+/** Receive the complete bounded MP3 before giving it to the player. */
+export async function fetchSpeechAudio(id: NewsId, options: {
+  language: 'zh' | 'original'; scope: 'full' | 'summary'; voice: string
+  translationResultId?: number | null; contentToken: string
+}, signal: AbortSignal): Promise<Blob> {
+  try {
+    const { data } = await apiLong.get<Blob>(`/news/${id}/tts/`, {
+      params: { complete: '1', language: options.language, scope: options.scope, voice: options.voice,
+        content_token: options.contentToken,
+        ...(options.translationResultId != null ? { translation_result_id: options.translationResultId } : {}) },
+      responseType: 'blob', signal, timeout: 900_000,
+    })
+    if (!(data instanceof Blob) || data.size <= 100 || data.size > 16 * 1024 * 1024 ||
+        data.type.split(';')[0] !== 'audio/mpeg') {
+      throw new SpeechPreparationError('未收到完整有效的语音，请重试。', true)
+    }
+    return data
+  } catch (error) {
+    if (error instanceof SpeechPreparationError || signal.aborted) throw error
+    const response = isRecord(error) && isRecord(error.response) ? error.response : null
+    if (response?.status === 401 || response?.status === 403) throw new SpeechPreparationError('登录状态或朗读权限已变化，请重新登录后再试。', false)
+    if (response?.status === 404 || response?.status === 409) throw new SpeechPreparationError('朗读内容已变化，请重新选择文章开始朗读。', false)
+    throw new SpeechPreparationError('完整语音生成或下载失败，请重试。', true)
+  }
+}
+
 export interface NewsReadState {
   is_read: boolean
   version: number

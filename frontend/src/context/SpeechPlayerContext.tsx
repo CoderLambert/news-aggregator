@@ -17,8 +17,6 @@ export interface SpeechPlayerState {
   newsId: NewsId | null
   language: SpeechLanguage
   errorMessage: string | null
-  segmentIndex?: number
-  segmentCount?: number
   canRetry: boolean
 }
 

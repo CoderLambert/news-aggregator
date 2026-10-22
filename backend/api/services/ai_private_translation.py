@@ -23,9 +23,10 @@ from api.services.ai_task_preferences import (
     TaskModelSnapshot, resolve_task_model, require_task_model_snapshot,
 )
 from api.services.ai_worker_fencing import capture_at_enqueue, check_at_claim, prepare_dispatch, commit_result
-from api.services.ai_verified_stream import verified_text_deltas
+from api.services.ai_verified_stream import IncompleteStream, verified_text_deltas
 from api.services.stored_readers import article_snapshot, require_current
 from api.services import chatgpt_subscription_jobs as durable
+from api.services import translation_channel as transport
 
 MAX_INPUT_CHARS = 8000
 MAX_INPUT_BYTES = 32000
@@ -262,7 +263,8 @@ def _markdown_signature(markdown):
     inline_code = tuple(re.findall(r'(?<!`)(`+)(.+?)\1(?!`)', visible, re.DOTALL))
     links = tuple(re.findall(r'\]\(([^)\s]+)(?:\s+[^)]*)?\)', visible))
     tables = tuple(line.count('|') for line in visible.splitlines() if '|' in line)
-    return tuple(code), headings, inline_code, links, tables
+    # Chinese word order may move links; exact targets and multiplicity still matter.
+    return tuple(code), headings, inline_code, tuple(sorted(links)), tables
 
 
 def _authorize(task):
@@ -362,11 +364,19 @@ def payload(task):
                 previous_result = None
             else:
                 previous_result = previous.task.result
+    progress = task.progress if status == 'succeeded' else ''
+    if status in {'queued', 'running'}:
+        try:
+            state = transport.Channel(task.user_id, task.pk, task.generation).read()
+            if state['status'] == 'running':
+                progress = state['text']
+        except transport.ChannelUnavailable:
+            pass
     return {
         'task_id': str(task.pk), 'request_id': str(task.request_id), 'news_id': task.news_id,
         'generation': task.generation,
         'retry_of': task.execution_snapshot.get('retry_of'),
-        'status': status, 'progress': task.progress,
+        'status': status, 'progress': progress,
         'result': task.result if status == 'succeeded' else None,
         'previous_result': previous_result,
         'error_code': 'worker_interrupted' if expired else task.error_code,
@@ -380,6 +390,10 @@ def start_translation(user, news_id, *, model_config_id, request_id, billing_con
     _enabled()
     if billing_consent is not True:
         raise TranslationError('billing_consent_required', 400)
+    try:
+        transport.available()
+    except transport.ChannelUnavailable:
+        raise TranslationError('translation_channel_unavailable', 503) from None
     try:
         if not isinstance(model_config_id, str) or str(uuid.UUID(model_config_id)) != model_config_id:
             raise ValueError
@@ -495,7 +509,15 @@ def cancel_translation(user, task_id, *, generation):
     try:
         # Cancellation is an owner-scoped write. The HTTP endpoint returns only
         # a redacted receipt, never the task's private progress or result.
-        return durable._retry_task_database_operation(persist, stage='byok_cancel')
+        task = durable._retry_task_database_operation(persist, stage='byok_cancel')
+        if task.status == 'cancelled':
+            try:
+                transport.Channel(task.user_id, task.pk, task.generation).mutate(
+                    'cancel', status='cancelled', result=None, error_code='translation_cancelled',
+                )
+            except transport.ChannelUnavailable:
+                pass  # DB cancellation committed first; control freshness fails closed.
+        return task
     except OperationalError as exc:
         if durable._is_task_sqlite_lock(exc):
             raise TranslationError('task_storage_busy', 503) from None
@@ -506,6 +528,10 @@ def retry_translation(user, task_id, *, model_config_id, request_id, billing_con
     _enabled()
     if billing_consent is not True:
         raise TranslationError('billing_consent_required', 400)
+    try:
+        transport.available()
+    except transport.ChannelUnavailable:
+        raise TranslationError('translation_channel_unavailable', 503) from None
     try:
         if not isinstance(model_config_id, str) or str(uuid.UUID(model_config_id)) != model_config_id:
             raise ValueError
@@ -649,23 +675,6 @@ def _claim(task_id, generation, token):
     return durable._retry_task_database_operation(persist, stage='byok_claim')
 
 
-def _write_delta(task_id, generation, token, delta):
-    def persist():
-        with transaction.atomic():
-            now = timezone.now()
-            if not _query().filter(pk=task_id, generation=generation, run_token=token,
-                    status='running', provider_started=True, lease_expires_at__gt=now).update(updated_at=now):
-                raise TranslationError('task_lease_lost')
-            task = _live(task_id, generation, token)
-            max_chars = (T06_MAX_OUTPUT_CHARS if 'long_translation' in task.execution_snapshot
-                         else MAX_OUTPUT_CHARS)
-            if len(task.progress) + len(delta) > max_chars:
-                raise TranslationError('incomplete_response')
-            task.progress += delta
-            task.save(update_fields=['progress', 'updated_at'])
-    return durable._retry_task_database_operation(persist, stage='byok_delta')
-
-
 def _mark_dispatch(task_id, generation, token, chunk_index):
     """Commit a per-chunk one-shot marker before the provider call."""
     def persist():
@@ -708,7 +717,7 @@ def _finish(task_id, generation, token, text, credential, owner_id):
                   'target_language': 'zh'}
         changed = _query().filter(pk=task_id, generation=generation, run_token=token,
             status='running', provider_started=True, lease_expires_at__gt=timezone.now()).update(
-                status='succeeded', result=result, run_token=None, lease_expires_at=None,
+                status='succeeded', result=result, progress=text, run_token=None, lease_expires_at=None,
                 finished_at=timezone.now(), updated_at=timezone.now(),
             )
         if not changed:
@@ -724,6 +733,16 @@ def run_translation(task_id, generation):
     close_old_connections()
     token = uuid.uuid4()
     claimed = False
+    channel = publisher = None
+    resources = []
+    def abort():
+        for resource in tuple(resources):
+            close = getattr(resource, 'close', None)
+            if close:
+                try:
+                    close()
+                except Exception:
+                    pass
     try:
         task = _claim(task_id, generation, token)
         if task is None:
@@ -741,7 +760,11 @@ def run_translation(task_id, generation):
             'user__is_active': True,
         }
         completed_chunks = []
-        with durable._task_heartbeat(task_id, generation, token, authority_filter=authority):
+        channel = transport.Channel(task.user_id, task.pk, generation)
+        publisher = transport.BufferedPublisher(
+            channel, token, lambda: _live(task_id, generation, token, started=False), abort,
+        )
+        with durable._task_heartbeat(task_id, generation, token, authority_filter=authority), publisher:
             for chunk_index, chunk in enumerate(chunks):
                 gateway = stream = None
                 pieces = []
@@ -753,11 +776,13 @@ def run_translation(task_id, generation):
                     _mark_dispatch(task_id, generation, token, chunk_index)
                     # Recheck owner, credential epoch, model, source, and lease immediately
                     # before the one provider send. This is DB-only and safe to retry.
-                    current = durable._retry_task_database_operation(
+                    durable._retry_task_database_operation(
                         lambda: _live(task_id, generation, token),
                         stage='byok_pre_send_fence',
                     )
+                    publisher.check()
                     gateway = build_gateway_client(key, selection=selection)
+                    resources.append(gateway)
                     from api.services.ai_usage import complete_with_usage
                     stream = complete_with_usage(gateway, selection, 'full_translation',
                         model=selection.proxy_alias,
@@ -770,6 +795,8 @@ def run_translation(task_id, generation):
                         temperature=0.2,
                         **text_generation_options(selection, T06_OUTPUT_TOKENS_PER_CHUNK if long_translation else MAX_OUTPUT_TOKENS),
                     )
+                    resources.append(stream)
+                    publisher.check()
                     return stream
                 try:
                     key = durable._retry_task_database_operation(
@@ -778,10 +805,9 @@ def run_translation(task_id, generation):
                     )
                     stream = send(key)
                     for delta in verified_text_deltas(
-                            stream, check=lambda: _live(task_id, generation, token),
+                            stream, check=publisher.check,
                             max_chars=MAX_OUTPUT_CHARS):
-                        if not long_translation:
-                            _write_delta(task_id, generation, token, delta)
+                        publisher.append(delta)
                         pieces.append(delta)
                     translated_body = ''.join(pieces)
                     if separator:
@@ -791,8 +817,8 @@ def run_translation(task_id, generation):
                     translated_chunk = translated_body + separator
                     if long_translation and _markdown_signature(chunk) != _markdown_signature(translated_chunk):
                         raise TranslationError('incomplete_response')
-                    if long_translation:
-                        _write_delta(task_id, generation, token, translated_chunk)
+                    if long_translation and separator:
+                        publisher.append(separator)
                     completed_chunks.append(translated_chunk)
                 finally:
                     for resource in (stream, gateway):
@@ -802,16 +828,42 @@ def run_translation(task_id, generation):
                                 close()
                             except Exception:
                                 pass
-        _finish(task_id, generation, token, ''.join(completed_chunks), credential, task.user_id)
-    except Exception:
+                        resources[:] = [active for active in resources if active is not resource]
+        text = ''.join(completed_chunks)
+        if len(text) > (T06_MAX_OUTPUT_CHARS if long_translation else MAX_OUTPUT_CHARS):
+            raise TranslationError('incomplete_response')
+        result = _finish(task_id, generation, token, text, credential, task.user_id)
+        # The successful DB commit is the only source of a success event.
+        try:
+            channel.mutate('terminal', token, status='succeeded', result=result, error_code='')
+        except transport.ChannelUnavailable:
+            pass  # An authorized GET recovers the committed result; never resend upstream.
+    except Exception as exc:
+        # Only content validation failures permit retaining an already-observed
+        # client draft. Authority/storage failures remain generic and clear it.
+        failure_code = ('incomplete_response' if isinstance(exc, IncompleteStream) or
+                        isinstance(exc, TranslationError) and exc.code == 'incomplete_response'
+                        else 'translation_failed')
+        if failure_code == 'incomplete_response':
+            try:
+                # A simultaneous revocation/source change takes precedence over
+                # a malformed provider terminal, even between control ticks.
+                _live(task_id, generation, token, started=False)
+            except Exception:
+                failure_code = 'translation_failed'
         # Never persist upstream exception text, credentials, or partial results.
         query = _query().filter(pk=task_id, generation=generation)
         query = query.filter(status='running', run_token=token) if claimed else query.filter(status='queued')
         try:
-            query.update(status='failed', error_code='translation_failed',
+            changed = query.update(status='failed', error_code=failure_code,
                          error_message='翻译未完成；不会自动重复收费请求。',
                          run_token=None, lease_expires_at=None, finished_at=timezone.now(),
                          updated_at=timezone.now())
+            if changed and channel is not None:
+                try:
+                    channel.mutate('terminal', token, status='failed', result=None, error_code=failure_code)
+                except transport.ChannelUnavailable:
+                    pass
         except Exception:
             pass  # A lost worker lease remains interrupted on read, never complete.
     finally:

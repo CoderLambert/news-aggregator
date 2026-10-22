@@ -148,7 +148,7 @@ function TranslationSession({ viewer, newsId, sourceRevision, sourceMarkdown, on
     {active && <Button type="button" size="sm" variant="outline" className="rounded-full" disabled={sending}
       onClick={() => void runMutation('cancel')}>取消翻译</Button>}
     {!pending && !eligible && !active && !models.isError && <span role="status" className="text-xs text-muted-foreground">默认翻译模型当前不可用。</span>}
-    {active && <span role="status" className="text-xs text-muted-foreground">{live && task?.progress ? '正在接收译文' : '正在等待模型响应'}。</span>}
+    {active && <span role="status" className="text-xs text-muted-foreground">{observationLost ? '进度连接已断开，请读取翻译状态' : live && task?.progress ? '正在接收译文' : '正在等待模型响应'}。</span>}
     {task && ['failed', 'cancelled', 'interrupted'].includes(task.status) && <span role="status" className="text-xs text-muted-foreground">
       {task.status === 'cancelled' ? '翻译已取消' : '翻译未完成'}。
     </span>}

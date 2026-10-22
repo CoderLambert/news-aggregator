@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import FullContentSection from '@/components/news-detail/FullContentSection'
 import type { NewsDetail } from '@/types/news'
@@ -59,4 +59,30 @@ it('copies the selected saved translation instead of the current recommendation'
     if (previous) Object.defineProperty(navigator, 'clipboard', previous)
     else Reflect.deleteProperty(navigator, 'clipboard')
   }
+})
+
+it('labels an incomplete translation and keeps its draft until the reader explicitly selects original', async () => {
+  const base = props(null, vi.fn())
+  const task = {
+    task_id: 'task-failed', request_id: 'request-failed', news_id: 7, generation: 1,
+    status: 'failed' as const, progress: '尚未完成的中文草稿', error_code: 'incomplete_response',
+    result: null, previous_result: null, retry_of: null, model_config_id: 'model', target_language: 'zh' as const,
+  }
+  const rendered = render(<FullContentSection {...base} privateTask={task} />)
+  expect(screen.getByRole('status')).toHaveTextContent('翻译未完成')
+  expect(screen.queryByTestId('article-body')).toBeNull()
+  await waitFor(() => expect(screen.getByLabelText('未完成的译文')).toHaveTextContent('尚未完成的中文草稿'))
+  rendered.rerender(<FullContentSection {...base} privateTask={task} showOriginal />)
+  expect(screen.getByTestId('article-body')).toHaveTextContent('# 原文')
+})
+
+it('does not silently substitute original content when no failed draft remains', () => {
+  const task = {
+    task_id: 'task-failed', request_id: 'request-failed', news_id: 7, generation: 1,
+    status: 'failed' as const, progress: '', error_code: 'translation_failed',
+    result: null, previous_result: null, retry_of: null, model_config_id: 'model', target_language: 'zh' as const,
+  }
+  render(<FullContentSection {...props(null, vi.fn())} privateTask={task} />)
+  expect(screen.getByRole('status')).toHaveTextContent('翻译未完成')
+  expect(screen.queryByTestId('article-body')).toBeNull()
 })

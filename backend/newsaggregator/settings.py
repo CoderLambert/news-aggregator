@@ -75,6 +75,8 @@ _ai_byok_enabled = _env('AI_BYOK_ENABLED', '0')
 if _ai_byok_enabled not in {'0', '1'}:
     raise ImproperlyConfigured('AI_BYOK_ENABLED must be 0 or 1.')
 AI_BYOK_ENABLED = _ai_byok_enabled == '1'
+# Shared ephemeral translation replay; task/result authority remains in the DB.
+TRANSLATION_REDIS_URL = _env('TRANSLATION_REDIS_URL')
 AI_BYOK_GATEWAY_URL = _env('AI_BYOK_GATEWAY_URL')
 AI_BYOK_GATEWAY_PROJECT_KEY = _env('AI_BYOK_GATEWAY_PROJECT_KEY')
 AI_BYOK_GATEWAY_PROJECT_KEY_FILE = _env('AI_BYOK_GATEWAY_PROJECT_KEY_FILE')

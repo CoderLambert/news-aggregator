@@ -159,3 +159,6 @@ websocket-client==1.9.2
 websockets==17.2
 yarl==1.25.1
 zope-interface==8.7
+
+# Shared private-translation stream transport.
+redis==8.1.0

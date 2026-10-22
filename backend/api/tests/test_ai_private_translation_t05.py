@@ -17,6 +17,7 @@ from rest_framework.test import APIClient
 from api.models import (ChatGPTTranslationTask, ChatGPTArticleTranslation, ChatSession,
                         ChatGPTSubscriptionConnection, SharedArticleTranslation)
 from api.services import ai_private_translation as service
+from api.services.translation_channel import Channel as RedisChannel
 from api.services import chatgpt_subscription_jobs as subscription_jobs
 from api.tests import test_ai_article_chat_t04 as fixtures
 from api.tests.test_ai_article_chat_t04 import FakeGateway, gateway_frame
@@ -28,6 +29,9 @@ class PrivateTranslationTests(TransactionTestCase):
     _verify_text = fixtures.PersonalArticleChatTests._verify_text
 
     def setUp(self):
+        from api.tests.translation_transport_fake import channel_factory
+        self.enterContext(patch.object(service.transport, 'Channel', channel_factory(service.transport)))
+        self.enterContext(patch.object(service.transport, 'available'))
         fixtures.PersonalArticleChatTests.setUp(self)
         self.news.source.language = 'en'
         self.news.source.save(update_fields=['language'])
@@ -73,6 +77,101 @@ class PrivateTranslationTests(TransactionTestCase):
         self.execute(task, [gateway_frame(content)])
         self.assertEqual(task.status, 'succeeded')
         return task
+
+    def test_segmented_translation_accepts_reordered_links_and_finishes_both_chunks(self):
+        self.news.full_content = '[one](https://example.test/one) [two](https://example.test/two) ' + 'A' * 5000 + '\n\n' + 'B' * 5000
+        self.news.save(update_fields=['full_content'])
+        task = self.queued()
+        first = FakeGateway([gateway_frame('[二](https://example.test/two) [一](https://example.test/one) 第一段')])
+        second = FakeGateway([gateway_frame('第二段')])
+        with patch.object(service, 'build_gateway_client', side_effect=[first, second]) as build:
+            service.run_translation(task.pk, task.generation)
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'succeeded')
+        self.assertEqual(build.call_count, 2)
+        self.assertIn('第二段', task.result['content'])
+        self.assertEqual(ChatGPTArticleTranslation.objects.count(), 1)
+        self.assertFalse(SharedArticleTranslation.objects.exists())
+
+    def test_content_validation_failure_reports_incomplete_without_saving_a_result(self):
+        self.news.full_content = '[one](https://example.test/one) ' + 'A' * 5000 + '\n\n' + 'B' * 5000
+        self.news.save(update_fields=['full_content'])
+        task = self.queued()
+        self.execute(task, [gateway_frame('[篡改](https://other.test/one)')])
+        self.assertEqual(task.status, 'failed')
+        self.assertEqual(task.error_code, 'incomplete_response')
+        self.assertFalse(task.result)
+        self.assertFalse(ChatGPTArticleTranslation.objects.exists())
+
+    def test_authority_change_before_incomplete_terminal_does_not_preserve_draft(self):
+        for mutation in ('credential', 'source'):
+            with self.subTest(mutation=mutation):
+                self.request_id = str(uuid.uuid4())
+                task = self.queued()
+                original_epoch = self.connection.credential_epoch
+                original_body = self.news.full_content
+                def frames():
+                    yield gateway_frame('已生成的草稿', finish=None)
+                    if mutation == 'credential':
+                        self.connection.credential_epoch += 1
+                        self.connection.save(update_fields=['credential_epoch'])
+                    else:
+                        self.news.full_content += 'changed'
+                        self.news.save(update_fields=['full_content'])
+                    yield gateway_frame('', finish='length')
+                try:
+                    self.execute(task, frames())
+                    self.assertEqual(task.status, 'failed')
+                    self.assertEqual(task.error_code, 'translation_failed')
+                    self.assertFalse(task.result)
+                    self.assertFalse(ChatGPTArticleTranslation.objects.exists())
+                finally:
+                    self.connection.credential_epoch = original_epoch
+                    self.connection.save(update_fields=['credential_epoch'])
+                    self.news.full_content = original_body
+                    self.news.save(update_fields=['full_content'])
+                    task.delete()
+
+    def test_real_redis_worker_publishes_success_only_after_result_commit(self):
+        from api.tests.translation_transport_fixture import synthetic_redis_client
+        redis = synthetic_redis_client()
+        if redis is None:
+            self.skipTest('requires explicitly isolated synthetic Redis')
+        real_finish = service._finish
+        def finish(*args):
+            channel = RedisChannel(self.owner.pk, args[0], args[1])
+            self.assertEqual(channel.read()['status'], 'running')
+            result = real_finish(*args)
+            self.assertTrue(ChatGPTArticleTranslation.objects.filter(pk=result['result_id']).exists())
+            self.assertEqual(channel.read()['status'], 'running')
+            return result
+        with patch.object(service.transport, 'client', return_value=redis), patch.object(service.transport, 'Channel', RedisChannel):
+            task = self.queued()
+            try:
+                with patch.object(service, '_finish', side_effect=finish):
+                    self.execute(task)
+                self.assertEqual(task.status, 'succeeded')
+                state = RedisChannel(self.owner.pk, task.pk, task.generation).read()
+                self.assertEqual(state['status'], 'succeeded')
+                self.assertEqual(state['text'], '')
+            finally:
+                channel = RedisChannel(self.owner.pk, task.pk, task.generation)
+                channel.redis.delete(*channel.keys)
+
+    def test_burst_translation_never_queries_or_writes_database_per_delta(self):
+        from django.test.utils import CaptureQueriesContext
+        task = self.queued()
+        counts = []
+        def frames():
+            with CaptureQueriesContext(connection) as queries:
+                for _ in range(1000):
+                    yield gateway_frame('译', finish=None)
+                yield gateway_frame('', finish='stop')
+            counts.append(len(queries))
+        self.execute(task, frames())
+        self.assertEqual(task.status, 'succeeded')
+        self.assertEqual(task.result['content'], '译' * 1000)
+        self.assertEqual(counts, [0])
 
     def test_complete_commit_and_get_reopen_same_private_result_without_dispatch(self):
         task = self.queued()
@@ -1238,7 +1337,8 @@ class PrivateTranslationTests(TransactionTestCase):
                             service.run_translation(task.pk, task.generation)
                     task.refresh_from_db()
                     self.assertEqual(task.status, 'failed')
-                    self.assertEqual(task.progress, '第一段中文\n\n')
+                    self.assertEqual(task.progress, '')
+                    self.assertEqual(service.transport.Channel(task.user_id, task.pk, task.generation).read()['text'], '')
                     self.assertFalse(task.result)
                     self.assertEqual(build.call_count, 1)
                     self.assertEqual(len(first.sent), 1)
@@ -1257,7 +1357,7 @@ class PrivateTranslationTests(TransactionTestCase):
                         self.model.config_revision = original_revision
                         self.model.save(update_fields=['config_revision'])
 
-    def test_t06_middle_chunk_failures_are_progress_only_and_never_replayed(self):
+    def test_t06_middle_chunk_failures_clear_ephemeral_progress_and_never_replay(self):
         cases = (
             ('eof', gateway_frame('partial second', finish=None)),
             ('length', gateway_frame('partial second', finish='length')),
@@ -1277,7 +1377,8 @@ class PrivateTranslationTests(TransactionTestCase):
                     service.run_translation(task.pk, task.generation)
                 task.refresh_from_db()
                 self.assertEqual(task.status, 'failed')
-                self.assertEqual(task.progress, 'translated first\n\n')
+                self.assertEqual(task.progress, '')
+                self.assertEqual(service.transport.Channel(task.user_id, task.pk, task.generation).read()['text'], '')
                 self.assertFalse(task.result)
                 self.assertEqual(build.call_count, 2)
                 self.assertEqual(len(first.sent), 1)

@@ -49,6 +49,21 @@ def django_db_modify_db_settings(django_db_modify_db_settings_parallel_suffix, t
     settings.DATABASES["default"].setdefault("TEST", {})["NAME"] = str(root / "test.sqlite3")
 
 
+@pytest.fixture(autouse=True)
+def translation_redis(monkeypatch):
+    # Use a real isolated transport while keeping credential/DB scrubbing.
+    # Configuration injection changes only the Redis endpoint, never business
+    # admission, worker fences, SDK/Proxy requests or completion validation.
+    from api.services import translation_channel
+    from api.tests.translation_transport_fixture import synthetic_redis_client
+    redis = synthetic_redis_client()
+    assert redis is not None, 'full CI must provision an isolated translation Redis'
+    redis.ping()
+    monkeypatch.setattr(translation_channel, 'client', lambda: redis)
+    yield
+    redis.close()
+
+
 class QuietServer(ThreadingHTTPServer):
     daemon_threads = True
 
@@ -732,7 +747,7 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
             t06_failed = wait_translation(t06_failure_start.data["task_id"])
             assert t06_failed["status"] == "failed"
             assert t06_failed["result"] is None
-            assert t06_failed["progress"] == "synthetic t00 stream\n\n"
+            assert t06_failed["progress"] == ""  # Redis drafts are not durable results.
             assert not ChatGPTArticleTranslation.objects.filter(news=t06_failure_news).exists()
             assert not SharedArticleTranslation.objects.filter(news=t06_failure_news).exists()
             _assert_native_deepseek_request(_records(upstream_url, t06_failure_chunk1),

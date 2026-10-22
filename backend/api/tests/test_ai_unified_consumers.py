@@ -261,8 +261,11 @@ def test_compatible_article_chat_commits_selected_model_without_deepseek_options
 
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize('auth_mode', ['none', 'api_key'])
-def test_compatible_segmented_translation_keeps_selected_identity(unified, story, auth_mode):
+def test_compatible_segmented_translation_keeps_selected_identity(unified, story, auth_mode, monkeypatch):
     from api.services import ai_private_translation as service
+    from api.tests.translation_transport_fake import channel_factory
+    monkeypatch.setattr(service.transport, 'Channel', channel_factory(service.transport))
+    monkeypatch.setattr(service.transport, 'available', lambda: None)
     if auth_mode == 'api_key':
         response = unified.api.post(BASE, dict(provider_id='ollama', endpoint_profile='office_ollama',
             display_name='Synthetic Key', auth_mode=auth_mode, api_key='synthetic-unified-key',
