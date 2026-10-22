@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({ get: vi.fn() }))
 vi.mock('axios', () => ({ default: { create: () => ({
   get: mocks.get, interceptors: { request: { use: vi.fn() } },
 }) } }))
-import { checkSpeechReadiness, SpeechPreparationError } from '@/services/api'
+import { checkSpeechReadiness, fetchSpeechAudio, SpeechPreparationError } from '@/services/api'
 
 beforeEach(() => { mocks.get.mockReset() })
 const options = { language: 'zh' as const, scope: 'full' as const, voice: 'yunxi', translationResultId: 41 }
@@ -57,4 +57,25 @@ it.each([
 ])('rejects a malformed segment plan before starting audio %o', async (plan) => {
   mocks.get.mockResolvedValue({ data: { status: 'ready', language: 'zh', ...plan } })
   await expect(checkSpeechReadiness(11, options, new AbortController().signal)).rejects.toBeInstanceOf(SpeechPreparationError)
+})
+
+
+it('buffers the exact speech segment using an abortable audio response', async () => {
+  const audio = new Blob(['complete synthetic audio'.repeat(10)], { type: 'audio/mpeg' })
+  mocks.get.mockResolvedValue({ data: audio })
+  const signal = new AbortController().signal
+  await expect(fetchSpeechAudio(11, { ...options, contentToken: 'a'.repeat(64) }, signal)).resolves.toBe(audio)
+  expect(mocks.get).toHaveBeenCalledWith('/news/11/tts/', expect.objectContaining({
+    responseType: 'blob', signal,
+    params: expect.objectContaining({ complete: '1', content_token: 'a'.repeat(64), translation_result_id: 41 }),
+  }))
+})
+
+
+it.each([
+  new Blob(['short'], { type: 'audio/mpeg' }),
+  new Blob(['x'.repeat(200)], { type: 'text/html' }),
+])('does not expose invalid complete audio to the player', async (blob) => {
+  mocks.get.mockResolvedValue({ data: blob })
+  await expect(fetchSpeechAudio(11, { ...options, contentToken: 'a'.repeat(64) }, new AbortController().signal)).rejects.toBeInstanceOf(SpeechPreparationError)
 })

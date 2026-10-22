@@ -328,3 +328,96 @@ def test_segment_plan_cannot_be_reused_by_another_viewer(client, tts_news):
         malformed = client.get(url, {**options, 'segment': '0', 'content_token': '非ASCII'})
         assert malformed.status_code == 409
     provider.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_complete_track_joins_bounded_synthesis_and_caches_only_whole_audio(client, tts_news, tmp_path):
+    user = get_user_model().objects.create_user(username='tts-complete-track')
+    client.force_login(user)
+    tts_news.full_content = 'A whole continuous article. ' * 600
+    tts_news.full_content_state = 'legacy'
+    tts_news.save(update_fields=['full_content', 'full_content_state'])
+    url = reverse('news-tts', args=[tts_news.pk])
+    options = {'language': 'original', 'scope': 'full'}
+    plan = client.get(url, {**options, 'check': '1'}).json()
+    spoken = []
+
+    class WholeTrackCommunicate:
+        def __init__(self, text, voice):
+            spoken.append(text)
+
+        async def stream(self):
+            yield {'type': 'audio', 'data': b'frame' * 30}
+
+    with override_settings(TTS_CACHE_DIR=tmp_path), patch('edge_tts.Communicate', WholeTrackCommunicate):
+        response = client.get(url, {**options, 'complete': '1', 'content_token': plan['content_token']})
+        assert response.status_code == 200
+        audio = b''.join(response.streaming_content)
+        assert audio == b'frame' * 30 * plan['segment_count']
+        assert len(spoken) == plan['segment_count']
+        assert all(0 < len(text) <= 3000 for text in spoken)
+        assert ''.join(spoken) == '语音测试标题。' + tts_news.full_content.strip()
+        assert len(list(tmp_path.glob('*.mp3'))) == 1
+        replay = client.get(url, {**options, 'complete': '1', 'content_token': plan['content_token']})
+        assert b''.join(replay.streaming_content) == audio
+        assert len(spoken) == plan['segment_count']
+
+
+@pytest.mark.django_db
+@override_settings(PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_complete_track_with_empty_middle_segment_never_publishes_partial_audio(client, tts_news, tmp_path):
+    user = get_user_model().objects.create_user(username='tts-complete-empty')
+    client.force_login(user)
+    tts_news.content = 'Speech continuity matters. ' * 400
+    tts_news.save(update_fields=['content'])
+    url = reverse('news-tts', args=[tts_news.pk])
+    options = {'language': 'original', 'scope': 'summary'}
+    plan = client.get(url, {**options, 'check': '1'}).json()
+    calls = []
+
+    class EmptyMiddle:
+        def __init__(self, *_args):
+            calls.append(1)
+            self.index = len(calls)
+
+        async def stream(self):
+            if self.index == 1:
+                yield {'type': 'audio', 'data': b'A' * 140}
+
+    with override_settings(TTS_CACHE_DIR=tmp_path), patch('edge_tts.Communicate', EmptyMiddle):
+        response = client.get(url, {**options, 'complete': '1', 'content_token': plan['content_token']})
+        chunks = iter(response.streaming_content)
+        assert next(chunks) == b'A' * 140
+        with pytest.raises(RuntimeError, match='tts_stream_interrupted'):
+            list(chunks)
+    assert len(calls) == 2
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.django_db
+@override_settings(PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_complete_track_batches_tiny_audio_packets_before_reader_checks(client, tts_news, tmp_path):
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+    user = get_user_model().objects.create_user(username='tts-packet-batches')
+    client.force_login(user)
+    url = reverse('news-tts', args=[tts_news.pk])
+    options = {'language': 'original', 'scope': 'summary'}
+    plan = client.get(url, {**options, 'check': '1'}).json()
+
+    class TinyPackets:
+        def __init__(self, *_args):
+            pass
+
+        async def stream(self):
+            for _ in range(32):
+                yield {'type': 'audio', 'data': b'x' * 1600}
+
+    with override_settings(TTS_CACHE_DIR=tmp_path), patch('edge_tts.Communicate', TinyPackets):
+        with CaptureQueriesContext(connection) as queries:
+            response = client.get(url, {**options, 'complete': '1', 'content_token': plan['content_token']})
+            body = b''.join(response.streaming_content)
+    assert body == b'x' * 51200
+    # Packet count must not multiply database ACL/revision reads.
+    assert len(queries) < 300

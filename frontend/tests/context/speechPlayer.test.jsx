@@ -6,10 +6,11 @@ import userEvent from '@testing-library/user-event'
 import { SpeechPlayerProvider } from '@/context/SpeechPlayerProvider'
 import { useSpeechPlayerActions, useSpeechPlayerState } from '@/context/SpeechPlayerContext'
 import GlobalSpeechPlayer from '@/components/speech/GlobalSpeechPlayer'
-import { checkSpeechReadiness, SpeechPreparationError } from '@/services/api'
+import { checkSpeechReadiness, fetchSpeechAudio, SpeechPreparationError } from '@/services/api'
 
 vi.mock('@/services/api', () => ({
   checkSpeechReadiness: vi.fn(async (_id, options) => ({ language: options.language })),
+  fetchSpeechAudio: vi.fn(),
   SpeechPreparationError: class extends Error {
     constructor(message, retryable) { super(message); this.retryable = retryable }
   },
@@ -125,6 +126,14 @@ beforeEach(() => {
   vi.clearAllMocks()
   checkSpeechReadiness.mockReset()
   checkSpeechReadiness.mockImplementation(async (_id, options) => ({ language: options.language }))
+  fetchSpeechAudio.mockReset()
+  fetchSpeechAudio.mockResolvedValue(new Blob(['synthetic audio'.repeat(20)], { type: 'audio/mpeg' }))
+  const OriginalURL = URL
+  let urlId = 0
+  vi.stubGlobal('URL', class extends OriginalURL {
+    static createObjectURL = vi.fn(() => `blob:complete-audio-${++urlId}`)
+    static revokeObjectURL = vi.fn()
+  })
   audioInstances.length = 0
   deferNextAudioMetadata = false
   retainedViewerASpeak = null
@@ -410,117 +419,68 @@ it('keeps an explicit private result when clicking the already selected language
   expect(checkSpeechReadiness).toHaveBeenCalledTimes(1)
 })
 
-it('preloads one segment, advances only after completion and retries the failed segment', async () => {
-  checkSpeechReadiness.mockImplementation(async (_id, options) => ({
-    language: options.language, segmentCount: 3, contentToken: 'a'.repeat(64),
-  }))
+
+it('waits for the complete track, plays one audio and releases it at the end', async () => {
+  checkSpeechReadiness.mockResolvedValue({ language: 'original', segmentCount: 5, contentToken: 'a'.repeat(64) })
+  let resolveAudio
+  fetchSpeechAudio.mockImplementationOnce(() => new Promise(resolve => { resolveAudio = resolve }))
   const user = userEvent.setup()
   renderPlayer()
-  await user.click(screen.getByRole('button', { name: '朗读译文 A' }))
-  const first = audioInstances.find(audio => audio.src.includes('segment=0'))
-  expect(first).toBeTruthy()
-  const second = audioInstances.find(audio => audio.src.includes('segment=1'))
-  expect(second).toBeTruthy()
-  expect(second.paused).toBe(true)
-  expect(audioInstances.some(audio => audio.src.includes('segment=2'))).toBe(false)
-  act(() => { first.ended = true; first.onended() })
+  await user.click(screen.getByRole('button', { name: '朗读第二篇' }))
+  expect(screen.getByTestId('player-status')).toHaveTextContent('loading')
+  expect(audioInstances.every(audio => audio.src === '')).toBe(true)
+  await act(async () => resolveAudio(new Blob(['complete audio'.repeat(20)], { type: 'audio/mpeg' })))
   expect(screen.getByTestId('player-status')).toHaveTextContent('playing')
-  expect(second.paused).toBe(false)
-  expect(screen.getByRole('region', { name: '全局语音播放器' })).toHaveTextContent('第 2 / 3 段')
-  act(() => second.onerror())
-  await user.click(await screen.findByRole('button', { name: '重试' }))
-  const retried = audioInstances.filter(audio => audio.src.includes('segment=1')).at(-1)
-  expect(retried.paused).toBe(false)
-  expect(retried.src).toContain('translation_result_id=41')
-  await user.click(screen.getByRole('button', { name: '停止语音' }))
-  expect(audioInstances.every(audio => audio.src === '')).toBe(true)
-  act(() => first.onended())
-  expect(screen.getByTestId('player-status')).toHaveTextContent('idle')
-})
-
-it('never resumes a failed segment against a different content plan', async () => {
-  checkSpeechReadiness.mockResolvedValueOnce({ language: 'original', segmentCount: 2, contentToken: 'a'.repeat(64) })
-  const user = userEvent.setup()
-  renderPlayer()
-  await user.click(screen.getByRole('button', { name: '朗读第二篇' }))
-  const first = audioInstances.find(audio => audio.src.includes('segment=0'))
-  expect(first).toBeTruthy()
-  act(() => first.onerror())
-  checkSpeechReadiness.mockResolvedValueOnce({ language: 'original', segmentCount: 2, contentToken: 'b'.repeat(64) })
-  await user.click(await screen.findByRole('button', { name: '重试' }))
-  expect(screen.getByTestId('player-status')).toHaveTextContent('error')
-  expect(screen.getByText(/朗读内容已变化/)).toBeInTheDocument()
-  expect(audioInstances.every(audio => audio.src === '')).toBe(true)
-})
-
-
-it('retries a transient preparation failure that has no content plan yet', async () => {
-  checkSpeechReadiness.mockRejectedValueOnce(new SpeechPreparationError('暂不可用', true))
-  const user = userEvent.setup()
-  renderPlayer()
-  await user.click(screen.getByRole('button', { name: '朗读第二篇' }))
-  checkSpeechReadiness.mockResolvedValueOnce({ language: 'original', segmentCount: 2, contentToken: 'a'.repeat(64) })
-  await user.click(await screen.findByRole('button', { name: '重试' }))
-  expect(screen.getByTestId('player-status')).toHaveTextContent('playing')
-})
-
-it('clears preloaded private segments on account switch and ignores their late events', async () => {
-  checkSpeechReadiness.mockResolvedValueOnce({ language: 'zh', segmentCount: 3, contentToken: 'a'.repeat(64) })
-  const user = userEvent.setup()
-  renderPlayer()
-  await user.click(screen.getByRole('button', { name: '朗读译文 A' }))
-  const next = audioInstances.find(audio => audio.src.includes('segment=1'))
-  expect(next).toBeTruthy()
-  await user.click(screen.getByRole('button', { name: '切换用户' }))
-  expect(audioInstances.every(audio => audio.src === '')).toBe(true)
-  act(() => { next.onloadedmetadata?.(); next.onerror?.() })
-  expect(screen.getByTestId('player-status')).toHaveTextContent('idle')
-})
-
-it('retains the failed segment across a transient retry preparation failure', async () => {
-  const plan = { language: 'original', segmentCount: 3, contentToken: 'a'.repeat(64) }
-  checkSpeechReadiness.mockResolvedValue(plan)
-  const user = userEvent.setup()
-  renderPlayer()
-  await user.click(screen.getByRole('button', { name: '朗读第二篇' }))
-  const first = audioInstances.find(audio => audio.src.includes('segment=0'))
-  act(() => { first.ended = true; first.onended() })
-  const second = audioInstances.find(audio => audio.src.includes('segment=1'))
-  act(() => second.onerror())
-  checkSpeechReadiness.mockRejectedValueOnce(new SpeechPreparationError('暂不可用', true))
-  await user.click(await screen.findByRole('button', { name: '重试' }))
-  expect(screen.getByTestId('player-status')).toHaveTextContent('error')
-  await user.click(screen.getByRole('button', { name: '重试' }))
-  const retried = audioInstances.find(audio => audio.src.includes('segment=1') && !audio.paused)
-  expect(retried).toBeTruthy()
-  expect(screen.getByRole('region', { name: '全局语音播放器' })).toHaveTextContent('第 2 / 3 段')
-})
-
-it('keeps cross-segment seeking paused until explicitly resumed', async () => {
-  checkSpeechReadiness.mockResolvedValue({ language: 'original', segmentCount: 3, contentToken: 'a'.repeat(64) })
-  const user = userEvent.setup()
-  renderPlayer()
-  await user.click(screen.getByRole('button', { name: '朗读第二篇' }))
-  await user.click(screen.getByRole('button', { name: '暂停语音' }))
+  expect(audioInstances).toHaveLength(1)
+  expect(audioInstances[0].src).toBe('blob:complete-audio-1')
   fireEvent.change(screen.getByRole('slider', { name: '播放进度' }), { target: { value: '50' } })
-  const second = audioInstances.find(audio => audio.src.includes('segment=1'))
-  expect(second.currentTime).toBe(60)
-  expect(second.paused).toBe(true)
-  expect(screen.getByTestId('player-status')).toHaveTextContent('paused')
+  expect(audioInstances[0].currentTime).toBe(60)
+  await user.click(screen.getByRole('button', { name: '暂停语音' }))
+  fireEvent.change(screen.getByRole('slider', { name: '播放进度' }), { target: { value: '75' } })
+  expect(audioInstances[0].paused).toBe(true)
   await user.click(screen.getByRole('button', { name: '继续播放语音' }))
-  expect(second.paused).toBe(false)
+  act(() => { audioInstances[0].ended = true; audioInstances[0].onended() })
+  expect(screen.getByTestId('player-status')).toHaveTextContent('idle')
+  expect(fetchSpeechAudio).toHaveBeenCalledTimes(1)
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:complete-audio-1')
 })
 
-it('does not let an old ended callback advance a segment revisited by seeking', async () => {
-  checkSpeechReadiness.mockResolvedValue({ language: 'original', segmentCount: 3, contentToken: 'a'.repeat(64) })
+it.each(['停止语音', '切换用户'])('cancels the complete download and ignores late data after %s', async (action) => {
+  checkSpeechReadiness.mockResolvedValue({ language: 'zh', segmentCount: 5, contentToken: 'a'.repeat(64) })
+  let resolveAudio
+  fetchSpeechAudio.mockImplementationOnce(() => new Promise(resolve => { resolveAudio = resolve }))
+  const user = userEvent.setup()
+  renderPlayer()
+  await user.click(screen.getByRole('button', { name: '朗读译文 A' }))
+  const signal = fetchSpeechAudio.mock.calls[0][2]
+  await user.click(screen.getByRole('button', { name: action }))
+  expect(signal.aborted).toBe(true)
+  await act(async () => resolveAudio(new Blob(['late audio'], { type: 'audio/mpeg' })))
+  expect(URL.createObjectURL).not.toHaveBeenCalled()
+  expect(screen.getByTestId('player-status')).toHaveTextContent('idle')
+})
+
+it('retains the exact result and whole-track position when retrying decoded audio', async () => {
+  checkSpeechReadiness.mockResolvedValue({ language: 'zh', segmentCount: 5, contentToken: 'a'.repeat(64) })
+  const user = userEvent.setup()
+  renderPlayer()
+  await user.click(screen.getByRole('button', { name: '朗读译文 A' }))
+  act(() => { audioInstances[0].currentTime = 37; audioInstances[0].onerror() })
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:complete-audio-1')
+  await user.click(await screen.findByRole('button', { name: '重试' }))
+  expect(fetchSpeechAudio.mock.calls.at(-1)[1]).toEqual(expect.objectContaining({ translationResultId: 41, contentToken: 'a'.repeat(64) }))
+  expect(audioInstances.at(-1).currentTime).toBe(37)
+})
+
+it('does not start partial audio after a failed complete transfer', async () => {
+  checkSpeechReadiness.mockResolvedValue({ language: 'original', segmentCount: 5, contentToken: 'a'.repeat(64) })
+  fetchSpeechAudio.mockRejectedValueOnce(new SpeechPreparationError('完整语音下载失败', true))
   const user = userEvent.setup()
   renderPlayer()
   await user.click(screen.getByRole('button', { name: '朗读第二篇' }))
-  const first = audioInstances.find(audio => audio.src.includes('segment=0'))
-  const oldEnded = first.onended
-  act(() => { first.ended = true; oldEnded() })
-  fireEvent.change(screen.getByRole('slider', { name: '播放进度' }), { target: { value: '0' } })
-  expect(screen.getByRole('region', { name: '全局语音播放器' })).toHaveTextContent('第 1 / 3 段')
-  act(() => oldEnded())
-  expect(screen.getByRole('region', { name: '全局语音播放器' })).toHaveTextContent('第 1 / 3 段')
+  expect(screen.getByTestId('player-status')).toHaveTextContent('error')
+  expect(audioInstances[0].src).toBe('')
+  expect(URL.createObjectURL).not.toHaveBeenCalled()
+  await user.click(await screen.findByRole('button', { name: '重试' }))
+  expect(screen.getByTestId('player-status')).toHaveTextContent('playing')
 })
