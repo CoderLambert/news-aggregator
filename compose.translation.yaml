@@ -1,0 +1,27 @@
+# Standalone ephemeral replay channel for a host-run/host-network app.
+# Remote deployments use authenticated TLS Redis (rediss://).
+services:
+  translation-redis:
+    image: redis:8.10.2@sha256:2c2dff791878316e3b083188be0d578423b24813cdda5de0e80ea4f7b3e6bfd6
+    user: "${TRANSLATION_REDIS_UID:-1000}:${TRANSLATION_REDIS_GID:-1000}"
+    ports:
+      - "127.0.0.1:${TRANSLATION_REDIS_PORT:-16379}:6379"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - 'exec redis-server --bind 0.0.0.0 --protected-mode yes --requirepass "$$(cat /run/secrets/translation_redis_password)" --save "" --appendonly no --maxmemory 192mb --maxmemory-policy noeviction'
+    secrets:
+      - translation_redis_password
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/data, /tmp]
+    mem_limit: 256m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", 'REDISCLI_AUTH="$$(cat /run/secrets/translation_redis_password)" redis-cli ping | grep -qx PONG']
+      interval: 10s
+      timeout: 2s
+      retries: 3
+secrets:
+  translation_redis_password:
+    file: "${TRANSLATION_REDIS_PASSWORD_FILE:?Set an existing password file readable by TRANSLATION_REDIS_UID/GID}"

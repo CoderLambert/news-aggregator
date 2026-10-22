@@ -59,7 +59,7 @@ export function observePrivateTranslation(initial: PrivateTranslationTask, handl
         const id = event.lastEventId
         if (id && !CURSOR.test(id)) throw new Error('Invalid translation cursor')
         // Redis may replay the terminal at the same cursor; it remains authoritative.
-        if (id && cursor && compareCursor(id, cursor) <= 0 && kind !== 'terminal') return
+        if (id && cursor && compareCursor(id, cursor) <= 0 && kind !== 'terminal') { retries = 0; return }
         if (kind === 'delta') {
           if (!id || !cursor || data.previous_cursor !== cursor || typeof data.delta !== 'string') {
             throw new Error('Translation replay gap')
@@ -73,6 +73,8 @@ export function observePrivateTranslation(initial: PrivateTranslationTask, handl
         if (id) cursor = id
       }
       if (task.progress.length > MAX_PREVIEW) throw new Error('Translation preview budget exceeded')
+      // A healthy replay resets consecutive failures; long tasks may rotate SSE.
+      if (kind === 'message' || (event.lastEventId && task.status !== 'queued')) retries = 0
       const terminal = !['queued', 'running'].includes(task.status)
       publish(terminal)
       if (terminal) shutdown()

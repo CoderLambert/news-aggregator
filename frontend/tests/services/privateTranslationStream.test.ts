@@ -82,3 +82,30 @@ describe('private translation read-only stream', () => {
     expect(view.onTask).toHaveBeenCalledOnce()
   })
 })
+
+it('keeps observing a long task across healthy stream rotations without exhausting failure retries', () => {
+  const view = setup()
+  for (let i = 1; i <= 6; i++) {
+    Source.all.at(-1)?.emit('snapshot', { ...identity, task: { ...initial, progress: `片段 ${i}` } }, `${i}-0`)
+    vi.advanceTimersByTime(16)
+    Source.all.at(-1)?.onerror?.()
+    vi.advanceTimersByTime(1000)
+  }
+  expect(Source.all).toHaveLength(7)
+  expect(view.onLost).not.toHaveBeenCalled()
+  expect(view.onTask).toHaveBeenLastCalledWith(expect.objectContaining({ progress: '片段 6' }))
+  view.close()
+})
+
+it('exhausts consecutive outages even if queued HTTP snapshots precede unavailable events', () => {
+  const onLost = vi.fn()
+  const stop = observePrivateTranslation({ ...initial, status: 'queued' }, { onTask: vi.fn(), onLost })
+  for (let i = 0; i < 5; i++) {
+    Source.all.at(-1)?.emit('snapshot', { ...identity, task: { ...initial, status: 'queued' } })
+    Source.all.at(-1)?.emit('unavailable', identity)
+    vi.runOnlyPendingTimers()
+  }
+  expect(onLost).toHaveBeenCalledOnce()
+  expect(Source.all).toHaveLength(4)
+  stop()
+})
