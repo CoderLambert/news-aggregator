@@ -118,6 +118,13 @@ RSS T14 的两项本地回放差额现已合并，但仅关闭该条窄证据路
 
 RSS T14 已合并 [#142](https://github.com/CoderLambert/news-aggregator/pull/142)，main `cd83d88`。本轮代码交付、AG-03 既有功能源码复核，以及每个原编号的当前证据/未运行项目，统一见[交付与剩余执行门禁](DELIVERY-AND-REMAINING-GATES-2026-10-20.md)。代码已存在与“完成全部任务/发布验收通过”保持分开；真实六厂商/正式网关、真实数据恢复/来源/浏览器、RSS 试点与旧栈退出、最终发布仍未完成。当前没有本轮全量 CI 通过证据，未把 user 授权跳过的检查伪装成 PASS。
 
+### 统一运行健康检查与管理员状态面板（2026-10-23）
+
+- 基于本地 `main@6d9f0110248d3433f17406c9bf91343a5c720a5e` 的未提交工作树新增 `manage.py runtime_health`、`news health` 与超级管理员只读接口 `/api/admin/runtime-health/`；统一检查应用数据库、RSS 同步 Worker、RSS 引擎、频道 Worker、搜索索引 Worker、翻译 Redis 和 AI 网关。公共 `/api/health/ready/` 仍只检查应用就绪，避免启动依赖环；健康检查不调用模型、Provider 或订阅源，也不返回凭据、路径或原始异常。
+- 管理员 `/admin/rss` 新增服务健康状态卡片，30 秒刷新并区分正常、异常和未启用；普通用户继续无法访问该接口或管理页面。后端定向 12 项、前端定向 3 项、TypeScript、ESLint、临时目录生产构建与部署脚本定向 27 项通过。
+- 本地脏树镜像 `newshub:local-dirty-6d9f0110248d3433f17406c9bf91343a5c720a5e` 已构建并部署到隔离项目 `newshub-main-ad36959`。首次聚合检查实际发现 Miniflux PostgreSQL 数据目录权限错误；修复该本地运行目录的初始化边界和所有权后，命令、受保护 HTTP 接口及真实浏览器管理面板均显示 7/7 已配置服务正常。Capabilities 实测 `site_mode=full`，全文读取、翻译、问答、推荐问题、TTS、研究和 ChatGPT Subscription 站点功能均启用；个人 BYOK 研究仍要求本人完成连接、能力探针和任务偏好绑定。
+- 此证据仅覆盖本机部署和合成/本地检查；完整测试套件、正式 CI、生产部署、真实 Provider、付费调用和真实外部订阅源验收均 `NOT_RUN`。
+
 ## 2. 第 8 批实施状态与后续候选（最多两个独立写入目标）
 
 ### DeepSeek 有界真实验收与 T02 Flash 探针差额（2026-10-20）

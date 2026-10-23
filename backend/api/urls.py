@@ -10,6 +10,7 @@ from . import subscription_views
 from . import search_index_views
 from . import health_views
 from . import capabilities_views
+from . import runtime_health_views
 from .retired_ingestion_views import RetiredIngestionAdminView
 from .rss.reading import NewsReadStateView
 from .rss.discovery import ResolveFeedView
@@ -39,6 +40,7 @@ urlpatterns = [
     path('admin/rss/verification-batches/', VerificationBatchesView.as_view(), name='rss-verification-batches'),
     path('admin/rss/verification-batches/<uuid:pk>/', VerificationBatchView.as_view(), name='rss-verification-batch'),
     path('admin/rss/health/', RssHealthView.as_view(), name='rss-health'),
+    path('admin/runtime-health/', runtime_health_views.RuntimeHealthView.as_view(), name='runtime-health'),
     path('rss/directory/', DirectoryView.as_view(), name='rss-directory'),
     path('me/rss-imports/', opml_views.OpmlHistoryView.as_view(), name='rss-opml-history'),
     path('me/rss-imports/<uuid:pk>/file/', opml_views.OpmlFileView.as_view(), name='rss-opml-file'),

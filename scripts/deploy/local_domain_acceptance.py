@@ -1720,7 +1720,7 @@ def _is_g2_admin_dashboard_response(response) -> bool:
         and port in (None, 443)
         and parsed.username is None
         and parsed.password is None
-        and parsed.path == '/api/admin/rss/health/'
+        and parsed.path == '/api/admin/runtime-health/'
     )
 
 
@@ -1736,6 +1736,16 @@ async def _run_g2_admin_acceptance(
     await login_admin()
 
     _mark_g2_browser_subcheck(checks, 'g2.admin_dashboard_api')
+    runtime_api = await browser_api('GET', '/api/admin/runtime-health/')
+    _require(_safe_http_status(runtime_api) == 200, 'active synthetic superuser could not read runtime health')
+    runtime_body = runtime_api.get('body') if isinstance(runtime_api, dict) else None
+    runtime_checks = runtime_body.get('checks') if isinstance(runtime_body, dict) else None
+    _require(
+        runtime_body.get('schema_version') == 1
+        and isinstance(runtime_checks, dict)
+        and runtime_checks.get('database', {}).get('ready') is True,
+        'runtime health did not return the versioned database-ready snapshot',
+    )
     dashboard_api = await browser_api('GET', '/api/admin/rss/health/')
     _require(_safe_http_status(dashboard_api) == 200, 'active synthetic superuser could not read the admin dashboard')
     health_body = dashboard_api.get('body') if isinstance(dashboard_api, dict) else None
@@ -1766,13 +1776,14 @@ async def _run_g2_admin_acceptance(
     _require(_safe_http_status(dashboard_response) == 200, 'active admin dashboard response did not return HTTP 200')
 
     _mark_g2_browser_subcheck(checks, 'g2.admin_dashboard_ready')
-    await page.get_by_role('heading', name='RSS 与搜索管理', exact=True).wait_for(state='visible', timeout=15000)
+    await page.get_by_role('heading', name='系统运行管理', exact=True).wait_for(state='visible', timeout=15000)
 
     _mark_g2_browser_subcheck(checks, 'g2.admin_deactivate')
     await deactivate_admin()
 
     _mark_g2_browser_subcheck(checks, 'g2.admin_inactive_api')
     for path in (
+        '/api/admin/runtime-health/',
         '/api/auth/me/',
         '/api/admin/rss/health/',
         '/api/admin/search-index/dashboard/',
@@ -1788,8 +1799,8 @@ async def _run_g2_admin_acceptance(
     await page.get_by_role('dialog').get_by_role(
         'button', name='登录', exact=True,
     ).wait_for(state='visible', timeout=15000)
-    checks['g2_active_admin'] = 'active synthetic superuser reads RSS/index APIs, receives 410 from retired APIs and completes RSS UI before deactivation'
-    checks['g2_inactive_admin_session'] = 'after deactivation, old session receives RSS HTTP 401 and me/index/retired API HTTP 403, then returns to logged-out UI'
+    checks['g2_active_admin'] = 'active synthetic superuser reads runtime/RSS/index APIs, receives 410 from retired APIs and completes the admin UI before deactivation'
+    checks['g2_inactive_admin_session'] = 'after deactivation, old session receives protected API HTTP 401/403, then returns to logged-out UI'
 
 
 def _validated_auth_me_snapshot(response: dict, expected_username: str) -> dict:
@@ -2137,12 +2148,12 @@ async def _run_g2_browser_checks(args: argparse.Namespace, checks: dict[str, str
                     {'question': 'synthetic local-domain AI-disabled check'},
                 )
                 _require(b_ai_post['status'] == 403 and b_ai_post['body'].get('error_code') == 'ai_disabled', 'AI-disabled Chat POST was not blocked before a provider call')
-                for path in ('/api/admin/rss/health/', '/api/admin/search-index/dashboard/', '/api/admin/crawler/dashboard/', '/api/provider-comparisons/'):
+                for path in ('/api/admin/runtime-health/', '/api/admin/rss/health/', '/api/admin/search-index/dashboard/', '/api/admin/crawler/dashboard/', '/api/provider-comparisons/'):
                     response = await _browser_api(page, 'GET', path)
                     _require(response['status'] == 403, f'ordinary user accessed protected endpoint {path}')
                 checks['g2_b_owner_isolation'] = 'B receives no A favorites/chat/research; cross-owner DELETE returns 404; own empty chat DELETE is scoped'
                 checks['g2_ai_disabled_post'] = 'HTTP 403 ai_disabled before any model/provider request'
-                checks['g2_ordinary_admin_denied'] = 'RSS/index and retired collector/provider APIs return HTTP 403'
+                checks['g2_ordinary_admin_denied'] = 'runtime/RSS/index and retired collector/provider APIs return HTTP 403'
 
                 mark('g2.admin_gate')
                 request_paths: list[str] = []

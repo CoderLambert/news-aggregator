@@ -20,8 +20,9 @@ class ApiConfig(AppConfig):
         if os.environ.get('NEWSHUB_RUNTIME_ROLE') == 'rss_sync':
             return
         is_test_process = ('pytest' in sys.modules or 'PYTEST_CURRENT_TEST' in os.environ or 'test' in sys.argv)
+        is_lightweight_health = sys.argv[1:2] == ['runtime_health']
         crawl_only_mode = os.environ.get('NEWS_CRAWL_ONLY') == '1'
-        if (not is_test_process and not crawl_only_mode
+        if (not is_test_process and not crawl_only_mode and not is_lightweight_health
                 and os.environ.get('RUN_MAIN') != 'true'
                 and os.environ.get('DJANGO_AUTORELOAD_ENV') != 'true'):
             try:

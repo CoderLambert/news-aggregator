@@ -1,5 +1,9 @@
 # Development overlay: docker compose -f compose.yaml -f compose.workspace.yaml up -d channel-worker
 services:
+  app:
+    environment:
+      CHANNEL_WORKER_HEARTBEAT: /app/logs/channel-worker-heartbeat.json
+
   channel-worker:
     image: news-aggregator:local
     build:

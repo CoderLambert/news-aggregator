@@ -50,13 +50,23 @@ status() {
   return 1
 }
 
+health() {
+  if ! status; then
+    echo "Django 未运行" >&2
+    return 1
+  fi
+  cd "$PROJECT/backend"
+  NEWS_CRAWL_ONLY=1 "$PYTHON" manage.py runtime_health
+}
+
 case "${1:-help}" in
   start)  start ;;
   stop)   stop ;;
   status) if status; then echo "Django 运行中"; else echo "Django 未运行"; fi ;;
+  health) health ;;
   restart) stop; sleep 1; start ;;
   log)    tail -f "$LOG" ;;
   *)
-    echo "用法: news-server {start|stop|restart|status|log}"
+    echo "用法: news-server {start|stop|restart|status|health|log}"
     ;;
 esac

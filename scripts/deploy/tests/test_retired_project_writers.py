@@ -84,6 +84,9 @@ def test_local_start_dispatches_only_web_processes_and_rejects_retired_crawl(tmp
     assert result.returncode == 0, result.stderr
     assert 'news-server:start' in result.stdout and 'news-dev:start' in result.stdout
     assert '爬虫' not in result.stdout
+    health = subprocess.run(['bash', str(command), 'health'], capture_output=True, text=True, timeout=5)
+    assert health.returncode == 0, health.stderr
+    assert 'news-server:health' in health.stdout and 'news-dev:health' in health.stdout
     retired = subprocess.run(['bash', str(command), 'crawl'], capture_output=True, text=True, timeout=5)
     assert retired.returncode == 2 and '已退役' in retired.stderr
     assert not retired.stdout

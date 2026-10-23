@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, Pause, Play, RefreshCw, RotateCcw, SearchCheck, Square } from 'lucide-react'
 import AdminLayout from '@/components/admin/AdminLayout'
 import ConnectionStatus from '@/features/rss/ConnectionStatus'
+import RuntimeHealthCard from '@/components/admin/RuntimeHealthCard'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -136,9 +137,10 @@ export default function AdminPage() {
   const { user } = useAuth()
   return <AdminLayout>
     <section id="overview" className="scroll-mt-20 space-y-4">
-      <h1 className="text-2xl font-semibold">RSS 与搜索管理</h1>
-      <p className="text-sm text-muted-foreground">查看订阅源连接和文章同步状态，管理搜索索引。</p>
-      {user && <ConnectionStatus key={user.id} viewer={user.id} admin={user.isSuperuser} />}
+      <h1 className="text-2xl font-semibold">系统运行管理</h1>
+      <p className="text-sm text-muted-foreground">检查服务健康状态、订阅源连接和文章同步，管理搜索索引。</p>
+      {user && <RuntimeHealthCard key={`runtime-${user.id}`} viewer={user.id} />}
+      {user && <ConnectionStatus key={`rss-${user.id}`} viewer={user.id} admin={user.isSuperuser} />}
     </section>
     <SearchIndexSection />
   </AdminLayout>

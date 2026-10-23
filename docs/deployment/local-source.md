@@ -76,10 +76,15 @@ RSS 引擎可单独托管。先按[启动说明](../startup.md#6-订阅源与-rs
 NEWSHUB_RUNTIME_ROLE=rss_sync backend/venv/bin/python backend/manage.py rss_sync_worker
 ```
 
-每个命令由独立进程管理器托管，保持数据库路径一致。Web、同步、索引与频道进程分别检查：
+每个命令由独立进程管理器托管，保持数据库路径一致。Web 启动后优先运行统一的只读检查：
 
 ```bash
-curl -f http://127.0.0.1:9527/api/health/ready/
+backend/venv/bin/python backend/manage.py runtime_health
+```
+
+命令覆盖数据库及所有当前已配置的 RSS 同步/引擎、频道 Worker、索引 Worker、翻译 Redis 和 AI 网关；已启用项异常时退出非零。超级管理员可在 `/admin/rss` 查看同一状态。该命令不调用 Provider、模型或订阅源，也不用于阻塞 Web 的数据库就绪探针。排查单个 Worker 容器时仍可使用其更强的进程内检查：
+
+```bash
 NEWSHUB_RUNTIME_ROLE=rss_sync backend/venv/bin/python backend/manage.py rss_sync_worker --healthcheck
 backend/venv/bin/python backend/manage.py embedding_healthcheck
 backend/venv/bin/python backend/manage.py channel_worker_healthcheck

@@ -3,6 +3,10 @@
 # Explicit service avoids inheriting web container's volumes, broad env_file,
 # HTTP listener, and unrelated application secrets. Never use `extends: app`.
 services:
+  app:
+    environment:
+      CHANNEL_WORKER_HEARTBEAT: /var/lib/newshub/logs/channel-worker-heartbeat.json
+
   channel-worker:
     image: "${NEWSHUB_IMAGE:?Set NEWSHUB_IMAGE to an immutable SHA tag or digest using the explicit Compose --env-file}"
     command: ["python", "/app/backend/manage.py", "channel_worker"]

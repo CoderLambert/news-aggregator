@@ -48,15 +48,25 @@ status() {
   [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
 }
 
+health() {
+  if status; then
+    echo "Vite 运行正常"
+    return 0
+  fi
+  echo "Vite 未运行" >&2
+  return 1
+}
+
 case "${1:-help}" in
   start)   start ;;
   stop)    stop ;;
   status)  if status; then echo "Vite 运行中"; else echo "Vite 未运行"; fi ;;
+  health)  health ;;
   restart) stop; sleep 1; start ;;
   build)   cd "$PROJECT/frontend" && "${CMD[@]}" build ;;
   log)     tail -f "$LOG" ;;
   *)
-    echo "用法: news-dev {start|stop|restart|status|build|log}"
+    echo "用法: news-dev {start|stop|restart|status|health|build|log}"
     echo "  build - 构建前端生产版本"
     ;;
 esac

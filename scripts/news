@@ -26,6 +26,15 @@ status() {
   frontend status || true
 }
 
+health() {
+  local result=0
+  echo "[后端与依赖]"
+  server health || result=1
+  echo "[前端]"
+  frontend health || result=1
+  return "$result"
+}
+
 restart() {
   stop
   start
@@ -51,15 +60,17 @@ case "${1:-help}" in
   stop)    stop ;;
   restart) restart ;;
   status)  status ;;
+  health)  health ;;
   build)   frontend build ;;
   crawl)   echo "旧抓取入口已退役，请在频道页面管理订阅源。" >&2; exit 2 ;;
   log|logs) logs "${2:-all}" ;;
   *)
-    echo "用法: news {start|stop|restart|status|build|log}"
+    echo "用法: news {start|stop|restart|status|health|build|log}"
     echo "  start   - 启动前端和后端"
     echo "  stop    - 停止前端和后端"
     echo "  restart - 重启全部服务"
     echo "  status  - 查看全部服务状态"
+    echo "  health  - 检查前端、数据库及所有已配置的后台服务"
     echo "  build   - 构建前端生产资源"
     echo "  log     - 查看指定服务日志"
     ;;

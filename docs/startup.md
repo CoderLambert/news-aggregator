@@ -153,6 +153,16 @@ ChatGPT 订阅授权依赖浏览器在回调端口携带同一主机的本地会
 
 脚本会自动根据自身位置定位项目目录，优先使用 `backend/venv/bin/python` 和本地 Vite，不依赖固定的绝对路径。
 
+启动后可用统一健康命令检查前端、数据库以及当前部署已启用的 RSS、频道处理、搜索索引、翻译 Redis 和 AI 网关：
+
+```bash
+./scripts/news health
+# 仅检查后端及其依赖：
+backend/venv/bin/python backend/manage.py runtime_health
+```
+
+命令输出版本化 JSON；任一已启用服务不可用时退出码非零。未配置的可选服务显示为 `disabled`，不会误报故障。超级管理员也可在 `/admin/rss` 的“服务健康状态”卡片查看同一快照并手动刷新。该聚合检查不会调用模型、Provider 或订阅源，也不会替代 `/api/health/ready/` 的数据库启动探针，避免 Worker 启动顺序形成循环依赖。
+
 手动前台启动（适合容器、IDE 或需要直接查看日志的场景）：
 
 ```bash

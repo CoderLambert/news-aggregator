@@ -501,6 +501,9 @@ def test_channel_worker_minimal_permissions_and_real_gateway_compatibility():
     assert environment['PUBLIC_AI_ENABLED'] == '${PUBLIC_AI_ENABLED:-0}'
     assert environment['AI_BYOK_GATEWAY_PROJECT_KEY_FILE'] == '/run/secrets/ai_byok_gateway_project_key'
     assert environment['CHANNEL_WORKER_HEARTBEAT'].startswith('/var/lib/newshub/logs/')
+    app_health_environment = overlay['services']['app']['environment']
+    assert app_health_environment['CHANNEL_WORKER_HEARTBEAT'] == environment['CHANNEL_WORKER_HEARTBEAT']
+    assert 'logs-data:/var/lib/newshub/logs' in web['volumes']
     for web_only in ('WAITRESS_THREADS', 'WAITRESS_PORT', 'WAITRESS_CONN_LIMIT',
                      'CHATGPT_AUTH_MODE', 'CHATGPT_PLAN_USAGE_ENABLED',
                      'EDGE_TTS_ENDPOINT', 'TTS_CACHE_DIR', 'HF_HOME',

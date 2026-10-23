@@ -939,18 +939,18 @@ def test_g2_browser_subchecks_are_fixed_and_cover_the_account_flow():
 
 @pytest.mark.parametrize(('url', 'method', 'matches'), [
     (f'https://{acceptance.HOST}/api/admin/crawler/dashboard/', 'GET', False),
-    (f'https://{acceptance.HOST}/api/admin/rss/health/?lang=zh', 'GET', True),
-    (f'https://{acceptance.HOST}:443/api/admin/rss/health/', 'GET', True),
-    (f'http://{acceptance.HOST}/api/admin/rss/health/', 'GET', False),
-    ('https://evil.invalid/api/admin/rss/health/', 'GET', False),
-    (f'https://user@{acceptance.HOST}/api/admin/rss/health/', 'GET', False),
-    (f'https://{acceptance.HOST}:444/api/admin/rss/health/', 'GET', False),
-    (f'https://{acceptance.HOST}/api/admin/rss/health/extra', 'GET', False),
-    (f'https://{acceptance.HOST}/api/admin/rss/health-v2/', 'GET', False),
-    (f'https://{acceptance.HOST}/api/admin/rss/health/', 'POST', False),
-    (f'https://{acceptance.HOST}/api/admin/rss/health/', 'HEAD', False),
-    (f'https://{acceptance.HOST}/api/admin/rss/health/', 'get', False),
-    (f'https://{acceptance.HOST}:not-a-port/api/admin/rss/health/', 'GET', False),
+    (f'https://{acceptance.HOST}/api/admin/runtime-health/?lang=zh', 'GET', True),
+    (f'https://{acceptance.HOST}:443/api/admin/runtime-health/', 'GET', True),
+    (f'http://{acceptance.HOST}/api/admin/runtime-health/', 'GET', False),
+    ('https://evil.invalid/api/admin/runtime-health/', 'GET', False),
+    (f'https://user@{acceptance.HOST}/api/admin/runtime-health/', 'GET', False),
+    (f'https://{acceptance.HOST}:444/api/admin/runtime-health/', 'GET', False),
+    (f'https://{acceptance.HOST}/api/admin/runtime-health/extra', 'GET', False),
+    (f'https://{acceptance.HOST}/api/admin/runtime-health-v2/', 'GET', False),
+    (f'https://{acceptance.HOST}/api/admin/runtime-health/', 'POST', False),
+    (f'https://{acceptance.HOST}/api/admin/runtime-health/', 'HEAD', False),
+    (f'https://{acceptance.HOST}/api/admin/runtime-health/', 'get', False),
+    (f'https://{acceptance.HOST}:not-a-port/api/admin/runtime-health/', 'GET', False),
 ])
 def test_g2_admin_dashboard_response_matcher_requires_exact_https_url_and_get(url, method, matches):
     response = SimpleNamespace(url=url, request=SimpleNamespace(method=method))
@@ -959,7 +959,7 @@ def test_g2_admin_dashboard_response_matcher_requires_exact_https_url_and_get(ur
 
 class _FakeG2AdminResponse:
     def __init__(self, events, *, status=200, body_error=False):
-        self.url = f'https://{acceptance.HOST}/api/admin/rss/health/?lang=zh'
+        self.url = f'https://{acceptance.HOST}/api/admin/runtime-health/?lang=zh'
         self.request = SimpleNamespace(method='GET')
         self.status = status
         self.events = events
@@ -1013,7 +1013,7 @@ class _FakeG2AdminLocator:
 
     async def wait_for(self, *, state, timeout):
         if self.role == 'heading':
-            assert (self.name, state, timeout) == ('RSS 与搜索管理', 'visible', 15000)
+            assert (self.name, state, timeout) == ('系统运行管理', 'visible', 15000)
             self.page.events.append('dashboard.heading_wait')
             if not self.page.content_ready:
                 raise asyncio.TimeoutError('synthetic private content readiness detail')
@@ -1083,11 +1083,13 @@ def _fake_g2_admin_callbacks(events):
         assert method == 'GET'
         api_calls.append(path)
         events.append(f'api:{path}')
-        active = {'/api/admin/rss/health/', '/api/admin/search-index/dashboard/'}
+        active = {'/api/admin/runtime-health/', '/api/admin/rss/health/', '/api/admin/search-index/dashboard/'}
         retired = {'/api/admin/crawler/dashboard/', '/api/provider-comparisons/'}
         assert path in active | retired | {'/api/auth/me/'}
         if 'admin.deactivated' in events:
             return {'status': 401 if path == '/api/admin/rss/health/' else 403}
+        if path == '/api/admin/runtime-health/':
+            return {'status': 200, 'body': {'schema_version': 1, 'checks': {'database': {'ready': True}}}}
         return {'status': 410 if path in retired else 200,
                 'body': {'engine_ready': False} if path == '/api/admin/rss/health/' else {}}
 
@@ -1125,10 +1127,12 @@ def test_g2_admin_acceptance_waits_for_slow_dashboard_response_and_ready_content
     assert events.index('dashboard.heading_visible') < events.index('admin.deactivated')
     assert events.index('admin.deactivated') < events.index('api:/api/auth/me/')
     assert api_calls == [
-        '/api/admin/rss/health/', '/api/admin/search-index/dashboard/',
-        '/api/admin/crawler/dashboard/', '/api/provider-comparisons/',
-        '/api/auth/me/', '/api/admin/rss/health/', '/api/admin/search-index/dashboard/',
-        '/api/admin/crawler/dashboard/', '/api/provider-comparisons/',
+        '/api/admin/runtime-health/', '/api/admin/rss/health/',
+        '/api/admin/search-index/dashboard/', '/api/admin/crawler/dashboard/',
+        '/api/provider-comparisons/', '/api/admin/runtime-health/',
+        '/api/auth/me/', '/api/admin/rss/health/',
+        '/api/admin/search-index/dashboard/', '/api/admin/crawler/dashboard/',
+        '/api/provider-comparisons/',
     ]
     assert checks['_g2_active_subcheck'] == 'g2.admin_inactive_ui'
     assert checks['g2_active_admin'].startswith('active synthetic superuser')
@@ -2552,6 +2556,7 @@ def test_g2_rate_matrix_uses_real_loopback_buckets_and_xff_only_as_negative(tmp_
 
 
 @pytest.mark.parametrize(('path', 'status', 'subcheck'), [
+    ('/api/admin/runtime-health/', 503, 'g2.admin_dashboard_api'),
     ('/api/admin/rss/health/', 503, 'g2.admin_dashboard_api'),
     ('/api/admin/search-index/dashboard/', 503, 'g2.admin_retired_api'),
     ('/api/admin/crawler/dashboard/', 200, 'g2.admin_retired_api'),
