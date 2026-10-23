@@ -1,3 +1,4 @@
+import '@tests/helpers/commandDom'
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { ProposalEditor } from '@/pages/SmartGroupingWorkspace'
@@ -23,10 +24,12 @@ describe('editable grouping preview', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认应用分组' }))
     expect(onApply).toHaveBeenCalledWith({ mode: 'suggest', groups: [{ topic_key: 'frontend', name: '前端开发', source_ids: [1] }] })
   })
-  it('requires explicit selection before reusing an existing same-name group', () => {
+  it('requires explicit selection before reusing an existing same-name group', async () => {
     const { onApply } = setup([{ id: 7, name: '前端开发', source_ids: [] }])
     expect(screen.getByRole('button', { name: '确认应用分组' })).toBeDisabled()
-    fireEvent.change(screen.getByRole('combobox', { name: '目标分组 frontend' }), { target: { value: '7' } })
+    fireEvent.click(screen.getByRole('combobox', { name: '目标分组 frontend' }))
+    fireEvent.change(screen.getByRole('combobox', { name: '搜索目标分组 frontend' }), { target: { value: '7' } })
+    fireEvent.click(await screen.findByRole('option', { name: /前端开发.*ID 7/ }))
     fireEvent.click(screen.getByRole('button', { name: '确认应用分组' }))
     expect(onApply).toHaveBeenCalledWith({ mode: 'suggest', groups: [{ topic_key: 'frontend', group_id: 7, source_ids: [1] }] })
   })
