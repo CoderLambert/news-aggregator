@@ -4,6 +4,7 @@
 
 | 功能 | 总体方案 | 任务与依赖 | 当前阶段 |
 |---|---|---|---|
+| [新订阅自动整理与分组操作](channel-auto-organization/README.md) | [已批准方案与约束](channel-auto-organization/implementation.md) | [本地交付与恢复验证](channel-auto-organization/local-acceptance-20261023.md) | 已实现并完成本地合成验证；待用户验收，不推送 |
 | [RSS频道发现中心V1](rss-discovery-v1/README.md) | [完整方案](rss-discovery-v1/完整方案.md) | [任务总览](rss-discovery-v1/任务执行计划.md) | 最小MVP：导入、搜索、订阅三个任务；待开发，由用户逐项验收 |
 | [AI 连接、默认模型与翻译](ai-connections-ui/README.md) | [统一规范](ai-connections-ui/模型配置与翻译统一规范及检查清单.md) | [入口与验收清单](ai-connections-ui/模型配置与翻译统一规范及检查清单.md#3-入口与接口核对表) | 本地已更新；实现含未提交修改，用户验收及 Git 交付待完成 |
 

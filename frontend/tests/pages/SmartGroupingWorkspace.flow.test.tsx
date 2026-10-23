@@ -20,11 +20,16 @@ const proposal: Proposal = {
   created_at: '2026-10-17T00:00:00Z', expires_at: '2099-10-18T00:00:00Z', error_code: '', applied_count: 0, model_id: '', attempts: 0,
 }
 const clients: QueryClient[] = []
+// History pages are an explicit contract: a full first page is not the same as
+// "has_more", so mocks must state count/has_more instead of relying on length.
+const page = (results: Proposal[], extra: { page?: number; count?: number; has_more?: boolean } = {}) => ({
+  results, page: extra.page ?? 1, page_size: 30, count: extra.count ?? results.length, has_more: extra.has_more ?? false,
+})
 type Options = Parameters<typeof workspaceRequest>[1]
 let handler: (path: string, options?: Options) => unknown
 function defaults(path: string, options?: Options): unknown {
   if (path.endsWith('/settings/')) return { ...config, ...(options?.body as object ?? {}) }
-  if (path.endsWith('/proposals/')) return options?.method === 'POST' ? { ...proposal } : []
+  if (path.split('?')[0].endsWith('/proposals/')) return options?.method === 'POST' ? { ...proposal } : page([])
   if (path.endsWith('/apply/')) return { ...proposal, status: 'applied', applied_count: 1 }
   if (path.endsWith('/undo/')) return { ...proposal, status: 'undone' }
   if (path.endsWith('/cancel/')) return { ...proposal, status: 'cancelled' }
@@ -87,7 +92,7 @@ describe('AG-04 guided grouping', () => {
   it('retries the exact creation snapshot and request id after response loss', async () => {
     let attempts = 0
     handler = (path, options) => {
-      if (path.endsWith('/proposals/') && options?.method === 'POST' && attempts++ === 0) throw new Error('lost response')
+      if (path.split('?')[0].endsWith('/proposals/') && options?.method === 'POST' && attempts++ === 0) throw new Error('lost response')
       return defaults(path, options)
     }
     setup()
@@ -164,7 +169,7 @@ describe('AG-04 guided grouping', () => {
     const queued = { ...proposal, status: 'queued' }
     let reads = 0
     handler = (path, options) => {
-      if (path.endsWith('/proposals/') && options?.method === 'POST') return queued
+      if (path.split('?')[0].endsWith('/proposals/') && options?.method === 'POST') return queued
       if (path.endsWith('/' + proposal.id + '/')) { if (++reads === 1) throw new Error('offline'); return proposal }
       return defaults(path, options)
     }
@@ -176,7 +181,7 @@ describe('AG-04 guided grouping', () => {
     expect(postCalls()).toHaveLength(1)
   })
   it('restores a saved preview from history without generating again', async () => {
-    handler = (path, options) => path.endsWith('/proposals/') && !options?.method ? [proposal] : defaults(path, options)
+    handler = (path, options) => path.split('?')[0].endsWith('/proposals/') && !options?.method ? page([proposal]) : defaults(path, options)
     setup()
     fireEvent.click(await screen.findByRole('button', { name: '查看' }))
     await screen.findByRole('button', { name: '确认应用分组' })
