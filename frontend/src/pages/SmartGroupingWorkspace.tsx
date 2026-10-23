@@ -13,6 +13,7 @@ import { workspaceCatalogOptions, workspaceConfigOptions, workspaceKeys, workspa
 import type { ChannelGroup } from '@/types/channels'
 import ExistingGroupOrganizer from '@/components/workspace/ExistingGroupOrganizer'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { listAITaskPreferences } from '@/services/aiConnectionsApi'
 
 const modeOptions: Array<{ value: GroupingMode; title: string; description: string }> = [
@@ -59,9 +60,9 @@ function SmartPage({ viewer, admin }: { viewer: number; admin: boolean }) {
   if (!config.data || !catalog.data || !channels.ready) return <p role="status" className="workspace-empty">正在加载订阅与主题资料…</p>
   return <><ExistingGroupOrganizer viewer={viewer} initialConfig={config.data} groups={channels.groups.data ?? []}
     subscriptions={(channels.subscriptions.data ?? []).map(subscription => ({ id: subscription.source_id, groupIds: subscription.group_ids }))} />
-    <section className="workspace-panel"><header className="workspace-panel-heading"><h2>按主题预设整理</h2>
+    <section className="workspace-panel" aria-label="旧版主题预设入口"><header className="workspace-panel-heading"><div className="space-y-2"><Badge variant="outline">次要入口 · 旧版 · 可创建分组</Badge><h2>按主题预设整理</h2></div>
       <Button type="button" variant="ghost" aria-expanded={advanced} onClick={() => setAdvanced(value => !value)}>高级：按主题预设整理</Button></header>
-      <p className="workspace-caption">按预置主题生成建议，预览、调整后再应用；人工选择始终优先。</p>
+      <p className="workspace-caption">兼容旧流程：按预置主题创建或合并分组。默认请先使用上方“按已有分组整理”主流程。</p>
       {advanced && <Organizer embedded viewer={viewer} admin={admin} initialConfig={config.data} catalog={catalog.data} groups={channels.groups.data ?? []}
     subscriptions={(channels.subscriptions.data ?? []).map(subscription => ({ id: subscription.source_id, groupIds: subscription.group_ids }))} />}
     </section>{admin && !advanced && <SiteClassifierPanel viewer={viewer} />}</>

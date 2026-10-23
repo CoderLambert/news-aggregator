@@ -56,6 +56,39 @@ it('organizes only ungrouped subscriptions against existing groups without model
   expect(screen.queryByRole('heading', { name: '选择范围与主题' })).toBeNull()
   expect(screen.getByText('高级：按主题预设整理')).toBeInTheDocument()
 })
+it('presents existing-group organization as the primary flow and labels legacy topic creation as secondary', async () => {
+  await setup()
+  expect(within(screen.getByRole('navigation', { name: '已有分组整理步骤' })).getAllByRole('listitem').map(item => item.textContent)).toEqual([
+    expect.stringContaining('频道'), expect.stringContaining('建议的已有分组'), expect.stringContaining('匹配依据'), expect.stringContaining('调整并确认'),
+  ])
+  expect(screen.getByText('主流程')).toBeInTheDocument()
+  expect(screen.getByText('次要入口 · 旧版 · 可创建分组')).toBeInTheDocument()
+  expect(screen.getByText(/默认请先使用上方“按已有分组整理”主流程/)).toBeInTheDocument()
+  expect(screen.queryByRole('heading', { name: '选择范围与主题' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '高级：按主题预设整理' }))
+  expect(await screen.findByRole('heading', { name: '选择范围与主题' })).toBeInTheDocument()
+})
+it('distinguishes suggested existing groups from unmatched channels and shows the matching reason', async () => {
+  const mixed = { ...proposal, source_ids: [1, 2], result: [
+    proposal.result[0],
+    { ...proposal.result[0], source_id: 2, name: 'Unknown feed', group_ids: [], reason: '频道资料不足，无法可靠匹配' },
+  ] }
+  handler = (path, options) => path.split('?')[0].endsWith('/proposals/') && !options?.method ? page([mixed])
+    : path.endsWith('/p1/') ? mixed : defaults(path, options)
+  await setup()
+  fireEvent.click(await screen.findByRole('button', { name: '查看建议' }))
+  const matched = await screen.findByRole('group', { name: /React/ })
+  expect(within(matched).getByText('待确认')).toBeInTheDocument()
+  expect(within(matched).getByText('建议的已有分组')).toBeInTheDocument()
+  expect(within(matched).getByText('前端开发')).toBeInTheDocument()
+  expect(within(matched).getByText('匹配依据')).toBeInTheDocument()
+  expect(within(matched).getByText('可信频道主题')).toBeInTheDocument()
+  const unmatched = screen.getByRole('group', { name: /Unknown feed/ })
+  expect(within(unmatched).getByText('未匹配')).toBeInTheDocument()
+  expect(within(unmatched).getByText('未匹配到可靠的已有分组')).toBeInTheDocument()
+  expect(within(unmatched).getByText('待确认：保持未分组，或手动选择已有分组。')).toBeInTheDocument()
+  expect(within(unmatched).getByRole('button', { name: '调整 Unknown feed 的建议分组' })).toBeInTheDocument()
+})
 it('reviews group suggestions then applies only existing group IDs and allows undo', async () => {
   await setup()
   fireEvent.click(await screen.findByRole('button', { name: '查看建议' }))
@@ -237,7 +270,7 @@ it('mounts one group chooser at a time, preserves other rows, and restores focus
   fireEvent.click(await screen.findByRole('button', { name: '查看建议' }))
   await waitFor(() => expect(screen.getByRole('button', { name: '确认加入分组' })).toBeEnabled())
   expect(screen.queryByRole('checkbox', { name: '前端开发' })).toBeNull()
-  const adjustReact = screen.getByRole('button', { name: '调整 React 的分组' })
+  const adjustReact = screen.getByRole('button', { name: '调整 React 的建议分组' })
   fireEvent.click(adjustReact)
   const reactGroup = screen.getByRole('checkbox', { name: '前端开发' })
   expect(reactGroup).toBeChecked()
@@ -246,11 +279,11 @@ it('mounts one group chooser at a time, preserves other rows, and restores focus
   expect(adjustReact).toHaveFocus()
   expect(adjustReact).toHaveAttribute('aria-expanded', 'false')
   expect(screen.queryByRole('checkbox', { name: '前端开发' })).toBeNull()
-  expect(screen.getByText('保持未分组')).toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: '调整 Vue 的分组' }))
+  expect(screen.getByText('未匹配到可靠的已有分组')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: '调整 Vue 的建议分组' }))
   expect(screen.getAllByRole('checkbox', { name: '前端开发' })).toHaveLength(1)
   expect(screen.getByRole('checkbox', { name: '前端开发' })).toBeChecked()
-  const adjustVue = screen.getByRole('button', { name: '调整 Vue 的分组' })
+  const adjustVue = screen.getByRole('button', { name: '调整 Vue 的建议分组' })
   fireEvent.keyDown(adjustVue, { key: 'Escape' })
   expect(adjustVue).toHaveFocus()
   expect(adjustVue).toHaveAttribute('aria-expanded', 'false')

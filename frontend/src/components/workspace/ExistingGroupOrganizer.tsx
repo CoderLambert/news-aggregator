@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
@@ -80,8 +81,11 @@ export default function ExistingGroupOrganizer({ viewer, initialConfig, groups, 
   }, [active.data])
   const summary = initialConfig.summary
   return <div className="workspace-page workspace-smart">
-    <header className="workspace-page-heading"><div><p className="workspace-eyebrow">按你的方式阅读</p><h1>智能整理</h1><p>将新订阅匹配到已有个人分组；人工调整始终优先。</p></div><Button asChild variant="outline"><Link to="/channels/groups">管理分组</Link></Button></header>
-    <section className="workspace-panel"><h2>整理已有订阅</h2><p>基于已保存的频道资料整理未分组频道，不调用模型，不新建分组。</p>
+    <header className="workspace-page-heading"><div><Badge variant="sage" className="mb-2">主流程</Badge><p className="workspace-eyebrow">按你的方式阅读</p><h1>智能整理</h1><p>将新订阅匹配到已有个人分组；人工调整始终优先。</p></div><Button asChild variant="outline"><Link to="/channels/groups">管理分组</Link></Button></header>
+    <nav aria-label="已有分组整理步骤"><ol className="smart-steps">
+      {['频道', '建议的已有分组', '匹配依据', '调整并确认'].map((label, index) => <li key={label}><span>{index + 1}</span>{label}</li>)}
+    </ol></nav>
+    <section className="workspace-panel"><h2>整理已有订阅</h2><p>基于已保存的频道资料，把未分组频道匹配到已有个人分组；不调用模型，也不会新建分组。</p>
       <p className="workspace-caption">已订阅 {subscriptions.length} 个 · 未分组 {ungrouped.length} 个 · 已有分组 {groups.length} 个</p>
       <Button type="button" disabled={busy || processing || change.isError || !groups.length || !ungrouped.length} onClick={start}>{snapshot && create.isError ? '重试同一次整理' : '整理未分组频道'}</Button>
       {!groups.length && <p role="status">请先创建个人分组，再整理频道。</p>}
@@ -157,17 +161,25 @@ function ExistingAssignments({ proposal, groups, busy, onApply }: { proposal: Pr
   const selected = assignments.map(item => ({ ...item, group_ids: item.group_ids.filter(id => groups.some(group => group.id === id)) })).filter(item => item.group_ids.length)
   return <>
     <p>以下建议尚未写入个人分组。勾选已有分组后确认，仅新增归属。</p>
-    {proposal.result.map(item => <fieldset key={item.source_id} className="workspace-soft-panel" onKeyDown={event => {
-      if (event.key === 'Escape' && expanded === item.source_id) { event.preventDefault(); event.stopPropagation(); setExpanded(null); document.getElementById(editorId + item.source_id + '-toggle')?.focus() }
-    }}><legend>{item.name}</legend><p className="workspace-caption">{item.reason}{item.needs_review ? ' · 需人工确认' : ''}</p>
-      <p className="break-words text-sm">{(assignments.find(row => row.source_id === item.source_id)?.group_ids ?? [])
-        .map(id => groups.find(group => group.id === id)?.name).filter(Boolean).join('、') || '保持未分组'}</p>
-      <Button type="button" variant="ghost" id={editorId + item.source_id + '-toggle'} aria-label={'调整 ' + item.name + ' 的分组'}
-        aria-controls={editorId + item.source_id} aria-expanded={expanded === item.source_id}
-        onClick={() => setExpanded(current => current === item.source_id ? null : item.source_id)}>调整分组</Button>
-      {expanded === item.source_id && <div id={editorId + item.source_id} className="flex max-h-64 flex-wrap gap-3 overflow-y-auto">{groups.map(group => <label key={group.id} className="workspace-check break-words"><Input className="size-4 shrink-0" type="checkbox" disabled={busy} checked={assignments.find(row => row.source_id === item.source_id)?.group_ids.includes(group.id) ?? false}
-        onChange={event => setAssignments(current => current.map(row => row.source_id === item.source_id ? { ...row, group_ids: event.target.checked ? [...row.group_ids, group.id] : row.group_ids.filter(id => id !== group.id) } : row))} />{group.name}</label>)}</div>}
-    </fieldset>)}
+    {proposal.result.map(item => {
+      const row = assignments.find(assignment => assignment.source_id === item.source_id)
+      const groupNames = (row?.group_ids ?? []).map(id => groups.find(group => group.id === id)?.name).filter(Boolean)
+      const unmatched = groupNames.length === 0
+      return <fieldset key={item.source_id} className="workspace-soft-panel" onKeyDown={event => {
+        if (event.key === 'Escape' && expanded === item.source_id) { event.preventDefault(); event.stopPropagation(); setExpanded(null); document.getElementById(editorId + item.source_id + '-toggle')?.focus() }
+      }}><legend className="flex flex-wrap items-center gap-2"><span>{item.name}</span><Badge variant={unmatched ? 'gray' : item.needs_review ? 'amber' : 'sage'}>{unmatched ? '未匹配' : item.needs_review ? '待确认' : '建议匹配'}</Badge></legend>
+        <dl className="grid gap-2 text-sm"><div><dt className="font-medium">建议的已有分组</dt><dd className="break-words text-muted-foreground">{unmatched ? '未匹配到可靠的已有分组' : groupNames.join('、')}</dd></div>
+          <div><dt className="font-medium">匹配依据</dt><dd className="break-words text-muted-foreground">{item.reason}</dd></div></dl>
+        {unmatched ? <p className="workspace-caption">待确认：保持未分组，或手动选择已有分组。</p>
+          : item.needs_review ? <p className="workspace-caption">待确认：请核对建议的已有分组与匹配依据。</p>
+            : <p className="workspace-caption">建议已匹配到已有分组，确认前仍可调整。</p>}
+        <Button type="button" variant="ghost" id={editorId + item.source_id + '-toggle'} aria-label={'调整 ' + item.name + ' 的建议分组'}
+          aria-controls={editorId + item.source_id} aria-expanded={expanded === item.source_id}
+          onClick={() => setExpanded(current => current === item.source_id ? null : item.source_id)}>调整建议分组</Button>
+        {expanded === item.source_id && <div id={editorId + item.source_id} className="flex max-h-64 flex-wrap gap-3 overflow-y-auto">{groups.map(group => <label key={group.id} className="workspace-check break-words"><Input className="size-4 shrink-0" type="checkbox" disabled={busy} checked={row?.group_ids.includes(group.id) ?? false}
+          onChange={event => setAssignments(current => current.map(assignment => assignment.source_id === item.source_id ? { ...assignment, group_ids: event.target.checked ? [...assignment.group_ids, group.id] : assignment.group_ids.filter(id => id !== group.id) } : assignment))} />{group.name}</label>)}</div>}
+      </fieldset>
+    })}
     <Button type="button" disabled={busy || !selected.length} onClick={() => onApply(selected)}>确认加入分组</Button>
   </>
 }

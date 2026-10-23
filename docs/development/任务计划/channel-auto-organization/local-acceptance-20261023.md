@@ -7,7 +7,7 @@
 - 持久 worktree：`/home/lambert/githubRepos/lambert/news-aggregator-channel-organization-recovered-20261023`。
 - 本地分支：`fix/recover-channel-organization-20261023`；提交状态以实际 Git 记录为准。
 - 主工作树 `main` 的现有 SQLite 与两份未跟踪文档未纳入本功能；不推送、不建 PR、不执行 CI 或生产操作。
-- 用户于 2026-10-23 明确表示将当前本地预览“当作通过”；这是当前候选的本地体验验收，不扩大为真实 Provider、完整 CI、部署或生产授权。
+- 用户于 2026-10-23 明确表示将 `d93beac118be31767097e251f6447edcc59be87c` 对应的本地预览“当作通过”；这是当时候选的本地体验验收，不扩大为真实 Provider、完整 CI、部署或生产授权。看板 #21 已根据后续反馈改变智能整理信息层级，当前 UI 候选需重新体验确认。
 
 ## 恢复事实及限制
 
@@ -26,6 +26,14 @@
 - 批量加入/移动/移出保留订阅；未知批量结果在同一 SPA 生命周期的页面离开/重挂载后仍阻断写入，核对两条私有读取成功后才解除。该内存屏障不被描述为跨浏览器进程持久化保证。
 - F1 mode 草稿、F3 长名称卡片、F4 分组/主题历史编辑器分流、F5 单 h1、F6 跨页面屏障均保留定向回归。
 
+## 看板 #21：验收反馈后的主流程修正
+
+在 `d93beac118be31767097e251f6447edcc59be87c` 上完成本地 UI 修正：默认入口现在明确展示“频道 → 建议的已有分组 → 匹配依据 → 调整并确认”，每条建议分别显示状态、已有分组和依据；空匹配明确标为“未匹配”，并提示保持未分组或手动选择。旧 topics 流程未删除、未扩权，仍保持默认收起，但标记为“次要入口 · 旧版 · 可创建分组”。后台 AI 仍未开启，也没有新增授权。
+
+定向 Vitest 为 2 文件 38 项通过；Node 22 typecheck、受影响 lint、build 通过。全前端 lint 因命令脚本仍检查整个目录，结果为 0 errors、1 个未修改文件 `frontend/src/hooks/useSuggestedQuestions.ts:32` 的既存 warning。独立合成浏览器验收为 19/19：覆盖默认入口、两类建议状态、旧编辑器分流、单一 `h1`、390px 无横向溢出及当前 bundle 与本地构建一致。证据位于恢复包 `task-21-ui-feedback-fix-20261023/`。
+
+旧 9531 候选 `SmartGroupingWorkspace-B1pDhtt3.js` 的 SHA-256 `d43d7e7b539a505d97970734f2b3a80c317a810d2a4ab1c5df084d5d0ab9480b` 已失效，不得继续作为当前 UI 证据。当前本地预览加载 `SmartGroupingWorkspace-DRcD2yMp.js`，HTTP 与本地 `dist` 逐字节一致，SHA-256 为 `54a97bb2db1f4816f70bae8a2d80672cd766dbbd869b28b4911a5e4c53839d43`。这是新的本地验收候选，尚未取得用户对变更后交互的重新接受。
+
 ## 本次真实执行的验证
 
 运行环境：Python 3.12.14 / Django 6.1.2，复用现有兼容解释器；缺失的 `miniflux==1.1.6` 与 `redis==8.1.0` 从缓存离线安装到恢复包的独立 `deps/`，未修改共享 venv。Node 22.23.3，候选 worktree 中独立 `npm ci --offline --no-audit --no-fund`，未修改 lockfile。后端使用 `env -i`、合成 secret 与独立 SQLite，无 `.env`、真实 Key/Provider。
@@ -40,7 +48,7 @@
 | ESLint | 受影响文件 PASS：`eslint.log`；看板 #7 全前端 PASS（0 errors、1 个候选未修改文件中的既存 warning）：`task-7-verify-20261023/frontend.log` |
 | `npm run build` | PASS；`build.log`；看板 #7 重跑亦 PASS：`task-7-verify-20261023/frontend.log` |
 | Chromium / 真正本地 Django HTTP / 合成 DB | PASS：初次 33 checks；`browser-acceptance.log`、`browser-evidence/results.json`；看板 #14 重新初始化独立 DB 后 33/33、11 张截图：`task-14-verify-20261023/` |
-| 用户当前本地预览验收 | PASS：2026-10-23 明确接受当前预览；仅限此候选的本地体验 |
+| 用户原本地预览验收 | PASS（历史）：2026-10-23 接受 `d93beac` 对应预览；看板 #21 UI 改动后需重新体验确认 |
 | 完整套件、CI、真实 Provider/Miniflux、生产、部署、线上回滚 | NOT_RUN，不以历史全量结果或本地用户接受替代 |
 
 看板 #7 在未变更运行时代码的候选上再次执行同一后端定向范围，结果为 135 passed（36.66s）；并重跑 Node 22 typecheck、全前端 lint 和 build。独立证据摘要及原始日志位于恢复包的 `task-7-verify-20261023/`。全前端 lint 唯一 warning 位于本候选未修改的 `frontend/src/hooks/useSuggestedQuestions.ts:32`，退出码为 0；没有修改测试或源码来隐藏它。
@@ -59,17 +67,17 @@
 
 站点：`http://localhost:9531/channels/smart`；分组管理：`http://localhost:9531/channels/groups`。
 
-合成账号：`organizer-preview`；合成口令：`local-preview-only-9531`（仅此预览，不是业务凭据）。当前运行库、脚本、日志、结果和截图都在恢复包的 `task-14-verify-20261023/`；真实站点没有修改。旧的 `runtime/preview/` 与 `browser-evidence/` 作为初次验收历史保留，不冒充本轮新证据。
+合成账号：`organizer-preview`；合成口令：`local-preview-only-9531`（仅此预览，不是业务凭据）。合成运行库及服务脚本在恢复包 `task-14-verify-20261023/`；看板 #21 的脚本、日志、结果和 4 张新截图在 `task-21-ui-feedback-fix-20261023/`。真实站点没有修改。旧的 `runtime/preview/` 与 `browser-evidence/` 作为初次验收历史保留，不冒充本轮新证据。
 
 1. 查看首页三个固定范围与可搜索分组；在分组管理选择频道，批量移动/移出，确认个人订阅保留。
-2. 在智能整理查看规则预览、调整目标分组、确认、撤销；展开高级入口，确认只有一个页标题。
+2. 在智能整理先确认四步主流程与“主流程”标识；查看“待确认”和“未匹配”建议、匹配依据、调整入口，再展开明确标记的旧版次要入口并确认只有一个页标题。
 3. 查看自动整理设置、建议和历史。预览没有开启后台 AI；不要把无真实模型的合成结果当真实 AI 验收。
 
 复用当前预览（无需重新初始化）：`/home/lambert/githubRepos/lambert/news-aggregator-accept/backend/venv/bin/python /home/lambert/.local/share/newshub/channel-organization-recovery-20261023/task-14-verify-20261023/local_preview.py serve`。脚本固定合成环境；端口已占用时不要启动第二份。恢复包根目录与 task #14 目录的 `preview-process.json` 记录当前服务 PID，停止前先核对其命令行，不按端口批量杀进程。`channel_worker --once` 已由验收脚本执行，没有遗留后台循环 worker。
 
 ## 用户验收、风险与回退
 
-- 用户已接受 2026-10-23 当前本地预览。验收中指出旧主题预设编辑器的视觉变化有限，且其中仍有原生下拉框；用户随后明确表示当前版本可当作通过。该反馈不应被改写成“未发现问题”。shadcn 搜索选择器替换及更清晰的新旧流程区分尚未实现；若后续改变该交互，需重新提供本地验收。
-- 这是已通过当前本地体验验收的候选，不是已部署版本。新版分页响应和前端消费者必须同批交付；不能只部署一侧。
+- 用户已接受的是 `d93beac` 对应的先前本地预览。验收中指出旧主题预设编辑器的视觉变化有限，且其中仍有原生下拉框；该反馈不应被改写成“未发现问题”。看板 #21 已实现更清晰的新旧流程区分，因此先前接受不能自动覆盖当前 UI 候选，需重新提供本地验收。旧编辑器的 shadcn 搜索选择器替换仍留给后续任务。
+- `d93beac` 候选曾通过用户本地体验验收；看板 #21 当前 UI 候选仅完成自动化本地验收，用户重新验收仍为 PENDING。两者都不是已部署版本。新版分页响应和前端消费者必须同批交付；不能只部署一侧。
 - `0084` 是前向迁移，恢复测试验证保留旧配置/提案/成员；回退应用时保留已写入的新表列与历史，不删除真实数据。
-- 源码和证据现在在持久目录；后续本地提交必须按 stage-commit 规则由指定 Luna xhigh 委托完成。第一次尝试及看板 #9 均因委托沙箱无法创建共享 worktree 的 `index.lock` 而 BLOCKED，0 个文件被暂存，HEAD 未变化。该失败保留为交付事实，不能伪称完成或自行降级。
+- 源码和证据现在在持久目录；分组功能已通过指定 Luna/xhigh 委托本地提交为 `d93beac118be31767097e251f6447edcc59be87c`。更早两次 `index.lock` 只读失败仍作为历史事实保留；最终通过受支持的最小 Git 元数据授权解决，没有关闭沙箱或改写历史。看板 #21 的后续提交仍须遵守同一 stage-commit 规则。
