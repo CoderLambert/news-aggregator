@@ -35,6 +35,7 @@ from api.models import (
 )
 from api.serializers import NewsDetailSerializer
 from api.services import chatgpt_subscription as subscription
+from api.services import chatgpt_subscription_llm as subscription_llm
 from api.services import chatgpt_subscription_jobs as translation_jobs
 
 User = get_user_model()
@@ -1062,7 +1063,7 @@ def test_responses_http400_uses_safe_json_fields_without_echoing_provider_messag
         patch('api.services.chatgpt_subscription.requests.post', return_value=response),
     ):
         with pytest.raises(subscription.SubscriptionError) as error:
-            subscription.stream_full_translation(
+            subscription_llm.stream_full_translation(
                 connection.pk, connection.generation, 'listed-model-slug',
                 'mock article body', Mock(),
             )
@@ -1089,7 +1090,7 @@ def test_responses_http400_uses_recognized_type_when_code_is_unknown(user, crypt
         patch('api.services.chatgpt_subscription.requests.post', return_value=response),
     ):
         with pytest.raises(subscription.SubscriptionError) as error:
-            subscription.stream_full_translation(
+            subscription_llm.stream_full_translation(
                 connection.pk, connection.generation, 'listed-model-slug',
                 'mock article body', Mock(),
             )
@@ -1115,7 +1116,7 @@ def test_responses_http400_non_json_body_stays_generic_and_safe(user, crypto):
         patch('api.services.chatgpt_subscription.requests.post', return_value=response),
     ):
         with pytest.raises(subscription.SubscriptionError) as error:
-            subscription.stream_full_translation(
+            subscription_llm.stream_full_translation(
                 connection.pk, connection.generation, 'listed-model-slug',
                 'mock article body', Mock(),
             )
@@ -1140,7 +1141,7 @@ def test_responses_http400_unknown_json_error_does_not_echo_sensitive_fields(use
         patch('api.services.chatgpt_subscription.requests.post', return_value=response),
     ):
         with pytest.raises(subscription.SubscriptionError) as error:
-            subscription.stream_full_translation(
+            subscription_llm.stream_full_translation(
                 connection.pk, connection.generation, 'listed-model-slug',
                 'mock article body', Mock(),
             )

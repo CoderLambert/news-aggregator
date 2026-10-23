@@ -559,8 +559,16 @@ class NewsTranslateFullView(ArticleAccessMixin, generics.GenericAPIView):
         force = request.data.get('force', False)
         if type(force) is not bool:
             return shared.error_response('force 必须是布尔值。', error_code='invalid_force')
+        execution_source = request.data.get('execution_source')
+        if execution_source not in {None, 'chatgpt_subscription'}:
+            return shared.error_response(
+                '此接口只接受 ChatGPT 订阅翻译来源。',
+                error_code='execution_source_mismatch',
+            )
         from api.services.translation_jobs import get_job
-        own_job = get_job(news.pk, user_id=request.user.pk, source_digest=stored.canonical_hash)
+        own_job = None if execution_source == 'chatgpt_subscription' else get_job(
+            news.pk, user_id=request.user.pk, source_digest=stored.canonical_hash,
+        )
         if own_job is not None and not own_job.done:
             return _translation_job_response(request, news, stored, own_job)
         # A separately authorized ChatGPT subscription remains usable even
@@ -570,6 +578,11 @@ class NewsTranslateFullView(ArticleAccessMixin, generics.GenericAPIView):
         if subscription is not None:
             from api.subscription_views import subscription_translation_response
             return subscription_translation_response(request, news, force=force)
+        if execution_source == 'chatgpt_subscription':
+            return shared.error_response(
+                '请先连接 ChatGPT 订阅账号。',
+                error_code='subscription_unavailable',
+            )
         record, visibility = current_translation(request.user, stored, include_private=not personal)
         if record is not None and not force:
             return shared.completed_response(record, visibility, user=request.user, stored=stored)
@@ -696,6 +709,14 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
                 {'error_code': 'invalid_question', 'error': '问题必须是非空文本'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        execution_source = payload.get('execution_source')
+        if execution_source not in {None, 'byok', 'chatgpt_subscription'}:
+            return Response({'error_code': 'invalid_execution_source'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if ((execution_source == 'byok' and 'model_config_id' not in payload)
+                or (execution_source == 'chatgpt_subscription' and 'model_config_id' in payload)):
+            return Response({'error_code': 'execution_source_mismatch'},
+                            status=status.HTTP_400_BAD_REQUEST)
         translation_result_id = payload.get('translation_result_id')
         translation_mode = payload.get('translation_mode')
         if translation_mode is None:
@@ -707,7 +728,8 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
             return Response({'error_code': 'invalid_translation_selection'},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        from api.services.chatgpt_subscription import active_connection_for_user, stream_chat_response
+        from api.services.chatgpt_subscription import active_connection_for_user
+        from api.services.chatgpt_subscription_llm import stream_chat_response
         from api.services.ai_execution import PersonalAIUnavailable, personal_clients_for_user
         from api.services.ai_article_chat import ArticleChatError, prepare_article_chat
         # A personal model is billable only after explicit per-turn selection.
@@ -737,7 +759,11 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
             subscription_connection, personal_clients = None, []
         else:
             subscription_connection = active_connection_for_user(request.user)
-            if subscription_connection is None:
+            if execution_source == 'chatgpt_subscription':
+                # An explicit source is an authorization boundary: never
+                # substitute BYOK when the subscription is unavailable.
+                personal_clients = []
+            elif subscription_connection is None:
                 try:
                     personal_clients = personal_clients_for_user(request.user)
                 except PersonalAIUnavailable as exc:
@@ -1070,6 +1096,14 @@ class NewsSuggestedQuestionsView(ArticleAccessMixin, generics.GenericAPIView):
 
     def post(self, request, pk):
         body = request.data
+        execution_source = body.get('execution_source') if isinstance(body, dict) else None
+        if execution_source not in {None, 'byok', 'chatgpt_subscription'}:
+            return Response({'error_code': 'invalid_execution_source'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if ((execution_source == 'byok' and 'model_config_id' not in body)
+                or (execution_source == 'chatgpt_subscription' and 'model_config_id' in body)):
+            return Response({'error_code': 'execution_source_mismatch'},
+                            status=status.HTTP_400_BAD_REQUEST)
         if isinstance(body, dict) and ('model_config_id' in body or 'consent' in body):
             return self._personal_post(request, pk)
         import json
@@ -1091,10 +1125,14 @@ class NewsSuggestedQuestionsView(ArticleAccessMixin, generics.GenericAPIView):
         suggestion_scope = 'excerpt' if len(stored.markdown) > 6000 and stored.scope == 'full' else stored.scope
 
         try:
-            from api.services.chatgpt_subscription import active_connection_for_user, stream_chat_response
+            from api.services.chatgpt_subscription import active_connection_for_user
+            from api.services.chatgpt_subscription_llm import stream_chat_response
             from api.services.ai_execution import personal_clients_for_user, PersonalAIUnavailable
             connection = active_connection_for_user(request.user)
-            if connection is None:
+            if execution_source == 'chatgpt_subscription':
+                # Explicit subscription selection cannot fall through to BYOK.
+                personal_clients = []
+            elif connection is None:
                 try:
                     personal_clients = personal_clients_for_user(request.user)
                 except PersonalAIUnavailable:

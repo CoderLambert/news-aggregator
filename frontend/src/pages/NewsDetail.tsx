@@ -64,9 +64,11 @@ export default function NewsDetail() {
   const translationEnabled = capabilities.features.translation.enabled
   const ttsEnabled = capabilities.features.tts.enabled
   const translationModel = useDefaultAIModel(user?.id ?? null, 'full_translation', translationEnabled)
-  // A selected personal binding (even stale) must never enter the legacy provider path.
+  // A selected BYOK binding (even stale) must never enter the subscription/legacy path.
   const personalTranslation = Boolean(user && (translationModel.isPending || translationModel.isError
-    || translationModel.data?.preferences.some(item => ['default', 'full_translation'].includes(item.task_kind) && item.model_config_id)))
+    || translationModel.data?.preferences.some(item =>
+      ['default', 'full_translation'].includes(item.task_kind)
+      && item.selection_source === 'byok')))
   const translationButtonRef = useRef<HTMLDivElement>(null)
   const openPrivateTranslation = useCallback(() => {
     translationButtonRef.current?.querySelector<HTMLButtonElement>('button')?.click()

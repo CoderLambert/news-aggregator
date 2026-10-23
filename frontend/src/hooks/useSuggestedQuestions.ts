@@ -26,12 +26,17 @@ export function useSuggestedQuestions(newsId: string | number | null | undefined
   const selected = task?.selection_state === 'available' ? task
     : task?.selection_state === 'inherit_default'
       ? preferences.data?.preferences.find(item => item.task_kind === 'default' && item.selection_state === 'available') : null
-  const modelConfigId = selected?.model_config_id ?? undefined
-  const modelLabel = selected?.model ? selected.model.display_name === selected.model.model_id ? selected.model.display_name : `${selected.model.display_name} (${selected.model.model_id})` : null
+  const selectionSource = selected?.selection_source ?? null
+  const modelConfigId = selectionSource === 'byok' ? selected?.model_config_id ?? undefined : undefined
+  const executionSource = selectionSource === 'byok' || selectionSource === 'chatgpt_subscription'
+    ? selectionSource : undefined
+  const modelLabel = selected?.model ? selected.model.display_name === selected.model.model_id ? selected.model.display_name : `${selected.model.display_name} (${selected.model.model_id})`
+    : selectionSource === 'chatgpt_subscription' ? preferences.data?.subscription.display_name ?? 'ChatGPT 订阅' : null
   const parsedId = parseNewsId(newsId)
   const queryKey = parsedId === null
     ? ['newsWorkflow', 'suggestedQuestions', 'disabled'] as const
-    : [...newsWorkflowKeys.suggestedQuestions(parsedId, lang, viewerId, revision), modelConfigId ?? null, preferences.data?.revision ?? null]
+    : [...newsWorkflowKeys.suggestedQuestions(parsedId, lang, viewerId, revision),
+        selectionSource, modelConfigId ?? null, preferences.data?.revision ?? null]
   const query = useQuery<SuggestedQuestionsSnapshot>({
     queryKey,
     queryFn: ({ signal }) => parsedId === null
@@ -47,12 +52,16 @@ export function useSuggestedQuestions(newsId: string | number | null | undefined
   const refreshLock = useRef(false)
 
   const refresh = useCallback(async (consent?: boolean) => {
-    if (parsedId === null || authLoading || refreshLock.current || query.isFetching || (modelConfigId && consent !== true)) return false
+    if (parsedId === null || authLoading || refreshLock.current || query.isFetching
+        || (selectionSource === 'byok' && consent !== true)) return false
     refreshLock.current = true
     try {
       await queryClient.fetchQuery({
         queryKey,
-        queryFn: ({ signal }) => fetchSuggestedQuestions(parsedId, { force: true, signal, ...(modelConfigId ? { modelConfigId } : {}), ...(consent === true ? { consent: true } : {}) }),
+        queryFn: ({ signal }) => fetchSuggestedQuestions(parsedId, { force: true, signal,
+          executionSource,
+          ...(modelConfigId ? { modelConfigId } : {}),
+          ...(consent === true ? { consent: true } : {}) }),
         staleTime: 0,
       })
       return true
@@ -62,13 +71,14 @@ export function useSuggestedQuestions(newsId: string | number | null | undefined
     } finally {
       refreshLock.current = false
     }
-  }, [authLoading, parsedId, queryClient, query.isFetching, queryKey, modelConfigId])
+  }, [authLoading, executionSource, parsedId, queryClient, query.isFetching, queryKey,
+    modelConfigId, selectionSource])
 
   return {
     questions: query.data?.questions ?? [],
     contextScope: query.data?.contextScope,
     generated: query.data?.generated,
-    modelConfigId, modelLabel, modelSource: query.data?.modelSource,
+    modelConfigId, modelLabel, selectionSource, modelSource: query.data?.modelSource,
     loading: query.isFetching || (enabled && Boolean(user) && preferences.isPending),
     error: query.error,
     refresh,

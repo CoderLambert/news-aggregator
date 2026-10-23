@@ -29,8 +29,8 @@ from api.services.chatgpt_subscription import (
     SubscriptionError,
     save_completed_translation,
     source_hash,
-    stream_full_translation,
 )
+from api.services.chatgpt_subscription_llm import stream_full_translation
 from api.services.shared_translations import (
     SharedTranslationError,
     LEASE_TTL as SHARED_LEASE_TTL,

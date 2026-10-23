@@ -29,7 +29,7 @@ vi.mock('@/services/api', () => ({
   unblockNews: vi.fn(async () => { apiState.blocked = false; return { removed: true } }),
 }))
 
-vi.mock('@/hooks/useDefaultAIModel', () => ({ useDefaultAIModel: () => ({ isPending: false, isError: false, data: { preferences: apiState.personalModel ? [{ task_kind: 'full_translation', model_config_id: 'saved-model' }] : [] } }) }))
+vi.mock('@/hooks/useDefaultAIModel', () => ({ useDefaultAIModel: () => ({ isPending: false, isError: false, data: { preferences: apiState.personalModel ? [{ task_kind: 'full_translation', selection_source: 'byok', model_config_id: 'saved-model' }] : [] } }) }))
 vi.mock('@/hooks/useFullArticle', () => ({ useFullArticle: () => ({ articleLoading: false, articleError: apiState.articleError, handleFetchFullArticle: apiState.fetchFullArticle, resumeExistingFetch: vi.fn(), cancelFetch: vi.fn() }) }))
 vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => ({ translating: false, translateError: apiState.translateError, translationProgress: '', showOriginal: false, setShowOriginal: vi.fn(), handleTranslate: apiState.translate }) }))
 vi.mock('@/hooks/useArticleSearch', () => ({ useArticleSearch: () => ({ matchCount: 0, currentIndex: 0, goNext: vi.fn(), goPrev: vi.fn() }) }))

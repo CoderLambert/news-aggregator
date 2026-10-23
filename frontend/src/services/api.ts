@@ -137,6 +137,7 @@ export type OpenResearchSessionStreamResponse =
   | { kind: 'stream'; events: AsyncIterable<unknown> }
 
 interface SuggestedQuestionsOptions {
+  executionSource?: 'byok' | 'chatgpt_subscription'
   modelConfigId?: string
   consent?: true
   force?: boolean
@@ -146,6 +147,7 @@ interface SuggestedQuestionsOptions {
 export type ChatTranslationMode = 'current' | 'original' | 'result'
 
 interface ChatStreamOptions {
+  executionSource?: 'byok' | 'chatgpt_subscription'
   webSearch?: boolean
   modelConfigId?: string | null
   billingConsent?: boolean
@@ -358,17 +360,17 @@ export function clearChatHistory(newsId: NewsId, signal?: AbortSignal): Promise<
   return api.delete<unknown>(`/news/${newsId}/chat/`, { signal }).then(({ data }) => data)
 }
 
-export function fetchSuggestedQuestions(newsId: NewsId, { force = false, signal, modelConfigId, consent }: SuggestedQuestionsOptions = {}): Promise<unknown> {
+export function fetchSuggestedQuestions(newsId: NewsId, { force = false, signal, modelConfigId, consent, executionSource }: SuggestedQuestionsOptions = {}): Promise<unknown> {
   if (!force) {
     return api.get<unknown>(`/news/${newsId}/suggested-questions/`, {
       params: modelConfigId ? { model_config_id: modelConfigId } : undefined, signal,
     }).then(({ data }) => data)
   }
   if (modelConfigId && consent !== true) throw new TypeError('Explicit suggestion billing consent required')
-  return api.post<unknown>(`/news/${newsId}/suggested-questions/`,
-    modelConfigId ? { model_config_id: modelConfigId, consent: true } : null,
-    { params: { force: 1 }, signal },
-  ).then(({ data }) => data)
+  return api.post<unknown>(`/news/${newsId}/suggested-questions/`, {
+    ...(executionSource ? { execution_source: executionSource } : {}),
+    ...(modelConfigId ? { model_config_id: modelConfigId, consent: true } : {}),
+  }, { params: { force: 1 }, signal }).then(({ data }) => data)
 }
 
 export async function* translateFullArticleStream(
@@ -380,7 +382,7 @@ export async function* translateFullArticleStream(
   } = {},
 ): AsyncGenerator<unknown> {
   const response = await streamingFetch(`/api/news/${id}/translate/`, {
-    body: JSON.stringify({ force }),
+    body: JSON.stringify({ force, execution_source: 'chatgpt_subscription' }),
     signal,
   })
   const jobId = response.headers.get('Job-ID')
@@ -434,10 +436,11 @@ export async function* translateFullArticleStream(
 export async function* chatStream(
   newsId: NewsId,
   question: string,
-  { webSearch = false, modelConfigId, billingConsent = false, turnId, translationResultId, translationMode, signal }: ChatStreamOptions = {},
+  { webSearch = false, modelConfigId, billingConsent = false, turnId, translationResultId, translationMode, executionSource, signal }: ChatStreamOptions = {},
 ): AsyncGenerator<string> {
   const response = await streamingFetch(`/api/news/${newsId}/chat/`, {
     body: JSON.stringify({ question, web_search: webSearch,
+      ...(executionSource ? { execution_source: executionSource } : {}),
       ...(translationMode ? { translation_mode: translationMode } : {}),
       ...(translationResultId !== undefined && translationResultId !== null
         ? { translation_result_id: translationResultId } : {}),

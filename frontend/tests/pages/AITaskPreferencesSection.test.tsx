@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@tests/helpers/commandDom'
 import AITaskPreferencesSection from '@/components/workspace/AITaskPreferencesSection'
@@ -32,11 +33,17 @@ const toolsModel: api.AIModel = {
   display_name: 'Text + tools',
   capabilities: { text: 'supported', tools: 'supported' },
 }
+const disconnected: api.ChatGPTTaskOption = {
+  state: 'not_connected', model_id: null, display_name: null, research_eligible: false,
+}
 const initial: api.AITaskPreferences = {
   revision: 0, preferences: KINDS.map(kind => ({
-    task_kind: kind, model_config_id: null,
+    task_kind: kind,
+    selection_source: kind === 'default' ? 'unset' : 'inherit',
+    model_config_id: null,
     selection_state: kind === 'default' ? 'unset' : 'inherit_default', model: null,
   })),
+  subscription: disconnected,
 }
 let current: api.AITaskPreferences
 let available: api.AIModel[]
@@ -47,17 +54,22 @@ beforeEach(() => {
   vi.mocked(api.listAITaskPreferences).mockReset().mockImplementation(async () => current)
   vi.mocked(api.listAIModels).mockReset().mockImplementation(async () => available)
   vi.mocked(api.saveAITaskPreferences).mockReset().mockImplementation(async (revision, selections) => {
-    current = { revision: revision + 1, preferences: selections.map(item => ({
-      ...item, selection_state: item.model_config_id ? 'available' :
-        item.task_kind === 'default' ? 'unset' : 'inherit_default',
-      model: null,
-    })) as api.AITaskPreference[] }
+    current = {
+      revision: revision + 1,
+      preferences: selections.map(item => ({
+        ...item,
+        selection_state: item.selection_source === 'byok' || item.selection_source === 'chatgpt_subscription'
+          ? 'available' : item.task_kind === 'default' ? 'unset' : 'inherit_default',
+        model: null,
+      })) as api.AITaskPreference[],
+      subscription: current.subscription,
+    }
     return current
   })
 })
 afterEach(cleanup)
 function setup(viewer = 7) {
-  return render(<AITaskPreferencesSection key={viewer} viewer={viewer} connections={[connection]} />)
+  return render(<MemoryRouter><AITaskPreferencesSection key={viewer} viewer={viewer} connections={[connection]} /></MemoryRouter>)
 }
 async function ready() {
   await screen.findByRole('combobox', { name: '全局默认模型' })
@@ -92,11 +104,32 @@ describe('T03 model purpose settings', () => {
     expect(api.probeAIModel).not.toHaveBeenCalled()
   })
   it('allows an approved no-Key model while keeping unverified tools out of research', async () => {
-    render(<AITaskPreferencesSection viewer={7} connections={[{ ...connection, auth_mode: 'none', key_saved: false }]} />)
+    render(<MemoryRouter><AITaskPreferencesSection viewer={7} connections={[{ ...connection, auth_mode: 'none', key_saved: false }]} /></MemoryRouter>)
     await ready()
     expect(choices('新闻问答模型')).toContain('Text only')
     expect(choices('深度研究模型')).not.toContain('Text only')
     expect(api.saveAITaskPreferences).not.toHaveBeenCalled()
+  })
+  it('offers an authorized subscription only for explicit supported purposes', async () => {
+    current = {
+      ...initial,
+      subscription: {
+        state: 'available', model_id: 'gpt-subscription',
+        display_name: 'GPT Subscription', research_eligible: false,
+      },
+    }
+    setup(); await ready()
+    expect(choices('全局默认模型')).not.toContain('ChatGPT 订阅')
+    expect(choices('新闻问答模型')).toContain('ChatGPT 订阅 · GPT Subscription')
+    choose('新闻问答模型', 'ChatGPT 订阅')
+    fireEvent.click(screen.getByRole('button', { name: '保存用途偏好' }))
+    await waitFor(() => expect(api.saveAITaskPreferences).toHaveBeenCalledOnce())
+    const rows = vi.mocked(api.saveAITaskPreferences).mock.calls[0][1]
+    expect(rows.find(row => row.task_kind === 'article_qa')).toEqual({
+      task_kind: 'article_qa',
+      selection_source: 'chatgpt_subscription',
+      model_config_id: null,
+    })
   })
   it('keeps nonstream models available for research but excludes them from chat and translation', async () => {
     available = [textModel, { ...toolsModel, article_chat_supported: false }]
@@ -125,8 +158,9 @@ describe('T03 model purpose settings', () => {
     const [revision, rows, viewer, signal] = vi.mocked(api.saveAITaskPreferences).mock.calls[0]
     expect(revision).toBe(0)
     expect(rows).toHaveLength(5)
-    expect(rows[0]).toEqual({ task_kind: 'default', model_config_id: textModel.id })
-    expect(rows.slice(1).every(row => row.model_config_id === null)).toBe(true)
+    expect(rows[0]).toEqual({ task_kind: 'default', selection_source: 'byok', model_config_id: textModel.id })
+    expect(rows.slice(1).every(row =>
+      row.selection_source === 'inherit' && row.model_config_id === null)).toBe(true)
     expect(viewer).toBe(7)
     expect(signal).toBeInstanceOf(AbortSignal)
     expect(api.probeAIModel).not.toHaveBeenCalled()
@@ -157,6 +191,7 @@ describe('T03 model purpose settings', () => {
   it('marks a stale saved preference as unselectable and never silently chooses another model', async () => {
     current = { revision: 3, preferences: KINDS.map(kind => ({
       task_kind: kind,
+      selection_source: kind === 'default' ? 'byok' : 'inherit',
       model_config_id: kind === 'default' ? '99999999-9999-4999-8999-999999999999' : null,
       selection_state: kind === 'default' ? 'needs_reselection' : 'inherit_default',
       model: kind === 'default' ? {
@@ -164,7 +199,7 @@ describe('T03 model purpose settings', () => {
         connection_id: connection.id, display_name: 'Revoked',
         model_id: 'removed',
       } : null,
-    })) as api.AITaskPreference[] }
+    })) as api.AITaskPreference[], subscription: disconnected }
     setup(); await ready()
     expect(screen.getByRole('combobox', { name: '全局默认模型' })).toHaveTextContent('原模型已失效')
     expect(screen.getByText(/必须重新选择/)).toBeInTheDocument()

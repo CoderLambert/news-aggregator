@@ -44,7 +44,7 @@ describe('translateFullArticleStream', () => {
     expect(url).toContain('/api/news/42/translate/')
     expect(url).toContain('lang=zh')
     expect(init.method).toBe('POST')
-    expect(JSON.parse(init.body)).toEqual({ force: true })
+    expect(JSON.parse(init.body)).toEqual({ force: true, execution_source: 'chatgpt_subscription' })
   })
 
   it('reassembles long translated articles and incremental progress under the 32-KiB wire limit', async () => {
@@ -105,7 +105,7 @@ describe('translateFullArticleStream', () => {
     await collect(translateFullArticleStream('42', { force: false, signal: controller.signal }))
     const [, init] = globalThis.fetch.mock.calls[0]
     expect(init.signal).toBe(controller.signal)
-    expect(JSON.parse(init.body)).toEqual({ force: false })
+    expect(JSON.parse(init.body)).toEqual({ force: false, execution_source: 'chatgpt_subscription' })
   })
 })
 

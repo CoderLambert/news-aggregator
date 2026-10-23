@@ -461,6 +461,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
       }
       try {
         for await (const chunk of chatStream(parsedId, trimmed, {
+          executionSource: selectedForTurn ? 'byok' : 'chatgpt_subscription',
           webSearch, ...(selectedForTurn ? { modelConfigId: selectedForTurn, billingConsent,
             turnId: serverTurnId ?? undefined } : {}),
           ...(translationMode === 'result' && translationResultId !== null ? { translationResultId } : {}),

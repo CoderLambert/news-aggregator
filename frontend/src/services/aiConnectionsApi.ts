@@ -159,17 +159,26 @@ export function getAIConnectionDiagnostics(connection: AIConnection, signal?: Ab
 
 export type AITaskKind = 'default' | 'article_qa' | 'full_translation' | 'deep_research' | 'question_suggestions'
 export type AITaskSelectionState = 'unset' | 'inherit_default' | 'available' | 'needs_reselection' | 'needs_verification'
+export type AITaskSelectionSource = 'unset' | 'inherit' | 'byok' | 'chatgpt_subscription'
 export interface AITaskPreference {
   task_kind: AITaskKind
+  selection_source: AITaskSelectionSource
   model_config_id: string | null
   selection_state: AITaskSelectionState
   model: { id: string; connection_id: string; model_id: string; display_name: string; research_eligible?: boolean } | null
 }
+export interface ChatGPTTaskOption {
+  state: 'not_connected' | 'needs_reauth' | 'model_required' | 'available'
+  model_id: string | null
+  display_name: string | null
+  research_eligible: boolean
+}
 export interface AITaskPreferences {
   revision: number
   preferences: AITaskPreference[]
+  subscription: ChatGPTTaskOption
 }
-export type AITaskPreferenceInput = Pick<AITaskPreference, 'task_kind' | 'model_config_id'>
+export type AITaskPreferenceInput = Pick<AITaskPreference, 'task_kind' | 'selection_source' | 'model_config_id'>
 const TASK_PREFERENCES_PATH = '/me/ai/task-preferences/'
 export function listAITaskPreferences(signal?: AbortSignal) {
   return call<AITaskPreferences>(TASK_PREFERENCES_PATH, { signal })

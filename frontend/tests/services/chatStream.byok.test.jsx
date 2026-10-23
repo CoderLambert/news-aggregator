@@ -14,12 +14,13 @@ beforeEach(() => vi.clearAllMocks())
 describe('T04 personal chat request billing consent transport', () => {
   it('serializes explicit per-turn billing approval only for selected BYOK models', async () => {
     for await (const chunk of chatStream(71, 'Question', {
-      modelConfigId: '11111111-1111-4111-8111-111111111111', billingConsent: true,
-      turnId: '22222222-2222-4222-8222-222222222222',
+      executionSource: 'byok', modelConfigId: '11111111-1111-4111-8111-111111111111',
+      billingConsent: true, turnId: '22222222-2222-4222-8222-222222222222',
     })) { expect(chunk).toBe('synthetic') }
     expect(wire.streamingFetch).toHaveBeenCalledTimes(1)
     expect(JSON.parse(wire.streamingFetch.mock.calls[0][1].body)).toEqual({
       question: 'Question', web_search: false,
+      execution_source: 'byok',
       model_config_id: '11111111-1111-4111-8111-111111111111', billing_consent: true,
       turn_id: '22222222-2222-4222-8222-222222222222',
     })
@@ -33,6 +34,16 @@ describe('T04 personal chat request billing consent transport', () => {
     for await (const chunk of chatStream(71, 'Existing route')) { expect(chunk).toBe('synthetic') }
     expect(JSON.parse(wire.streamingFetch.mock.calls[1][1].body)).toEqual({
       question: 'Existing route', web_search: false,
+    })
+  })
+
+  it('serializes an explicitly selected subscription without BYOK billing fields', async () => {
+    for await (const chunk of chatStream(71, 'Subscription question', {
+      executionSource: 'chatgpt_subscription',
+    })) { expect(chunk).toBe('synthetic') }
+    expect(JSON.parse(wire.streamingFetch.mock.calls[0][1].body)).toEqual({
+      question: 'Subscription question', web_search: false,
+      execution_source: 'chatgpt_subscription',
     })
   })
   it('transmits explicit original and saved-result modes independently', async () => {

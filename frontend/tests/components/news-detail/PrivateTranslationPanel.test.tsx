@@ -27,6 +27,9 @@ function view(viewer = 7, sourceMarkdown = 'a'.repeat(100)) {
   </MemoryRouter></QueryClientProvider>
   return { ...render(tree(viewer)), tree, client, changed }
 }
+const noSubscription: models.ChatGPTTaskOption = {
+  state: 'not_connected', model_id: null, display_name: null, research_eligible: false,
+}
 beforeEach(() => {
   vi.resetAllMocks()
   vi.stubGlobal('EventSource', class { addEventListener() {} close() {} })
@@ -34,8 +37,8 @@ beforeEach(() => {
   vi.mocked(models.listAIModels).mockResolvedValue([{ id: 'model', model_id: 'deepseek-flash', display_name: 'Flash', has_trusted_route: true,
     article_chat_supported: true, capabilities: { text: 'supported', tools: 'unknown' } } as models.AIModel])
   vi.mocked(models.listAITaskPreferences).mockResolvedValue({ revision: 1, preferences: [
-    { task_kind: 'full_translation', model_config_id: 'model', selection_state: 'available', model: null },
-  ] })
+    { task_kind: 'full_translation', selection_source: 'byok', model_config_id: 'model', selection_state: 'available', model: null },
+  ], subscription: noSubscription })
   vi.mocked(api.latestPrivateTranslation).mockResolvedValue(null)
   vi.mocked(api.startPrivateTranslation).mockResolvedValue(completed)
   vi.mocked(api.retryPrivateTranslation).mockResolvedValue(completed)
@@ -58,16 +61,16 @@ it('uses the saved translation model and one explicit billable click, without a 
 })
 it('inherits only the explicitly saved default, never the first available model', async () => {
   vi.mocked(models.listAITaskPreferences).mockResolvedValue({ revision: 1, preferences: [
-    { task_kind: 'full_translation', model_config_id: null, selection_state: 'inherit_default', model: null },
-    { task_kind: 'default', model_config_id: 'model', selection_state: 'available', model: null },
-  ] })
+    { task_kind: 'full_translation', selection_source: 'inherit', model_config_id: null, selection_state: 'inherit_default', model: null },
+    { task_kind: 'default', selection_source: 'byok', model_config_id: 'model', selection_state: 'available', model: null },
+  ], subscription: noSubscription })
   view(); await waitFor(() => expect(screen.getByRole('button', { name: '翻译为中文' })).toBeEnabled())
   expect(api.startPrivateTranslation).not.toHaveBeenCalled()
 })
 it.each(['unset', 'needs_reselection', 'needs_verification'] as const)('blocks missing or stale model configuration without adding a configuration form (%s)', async state => {
   vi.mocked(models.listAITaskPreferences).mockResolvedValue({ revision: 1, preferences: [
-    { task_kind: 'full_translation', model_config_id: 'model', selection_state: state, model: null },
-  ] })
+    { task_kind: 'full_translation', selection_source: 'byok', model_config_id: 'model', selection_state: state, model: null },
+  ], subscription: noSubscription })
   view()
   expect(await screen.findByText('默认翻译模型当前不可用。')).toBeInTheDocument()
   expect(screen.queryByRole('link')).toBeNull()
@@ -75,8 +78,8 @@ it.each(['unset', 'needs_reselection', 'needs_verification'] as const)('blocks m
 })
 it('does not use an unverified text model even if its preference remains saved', async () => {
   vi.mocked(models.listAITaskPreferences).mockResolvedValue({ revision: 2, preferences: [
-    { task_kind: 'full_translation', model_config_id: 'model', selection_state: 'needs_verification', model: null },
-  ] })
+    { task_kind: 'full_translation', selection_source: 'byok', model_config_id: 'model', selection_state: 'needs_verification', model: null },
+  ], subscription: noSubscription })
   view(); await screen.findByText('默认翻译模型当前不可用。')
   expect(api.startPrivateTranslation).not.toHaveBeenCalled()
 })

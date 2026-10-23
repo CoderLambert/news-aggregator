@@ -24,6 +24,7 @@ from api.models import (
 )
 from api.tests.rss.reader_fixtures import public_legacy_article
 from api.services import chatgpt_subscription as subscription
+from api.services import chatgpt_subscription_llm as subscription_llm
 from api.services import chatgpt_subscription_jobs as jobs
 from api.services import shared_translations
 from api.subscription_views import subscription_translation_response
@@ -544,7 +545,7 @@ def test_cancel_during_delta_blocks_later_delta_and_closes_response(owner, artic
     monkeypatch.setattr(subscription, 'access_token_for', lambda *_args, **_kwargs: 'synthetic-token')
     with patch.object(subscription.requests, 'post', return_value=response) as post:
         with pytest.raises(subscription.SubscriptionError, match='已取消'):
-            subscription.stream_full_translation(
+            subscription_llm.stream_full_translation(
                 connection.pk, connection.generation, connection.selected_model,
                 article.full_content, append, execution_guard=guard,
             )
@@ -606,7 +607,7 @@ def test_guard_after_refresh_return_blocks_model_post(owner, article):
     with patch.object(subscription, 'access_token_for', side_effect=after_refresh), \
             patch.object(subscription.requests, 'post') as post:
         with pytest.raises(subscription.SubscriptionError, match='已取消'):
-            subscription.stream_full_translation(
+            subscription_llm.stream_full_translation(
                 connection.pk, connection.generation, connection.selected_model,
                 article.full_content, lambda _delta: None, execution_guard=guard,
             )
