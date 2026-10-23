@@ -10,12 +10,13 @@ export interface ChannelProfile {
   recent_articles?: Array<{ id: number; title: string; publish_time: string }>
 }
 export interface Catalog { topics: Topic[]; presets: Array<{ key: string; name: string; topics: string[] }>; sources: ChannelProfile[] }
-export interface GroupingConfig { mode: GroupingMode; bindings: Record<string, number>; revision: number; ai_available: boolean }
-export interface ProposalItem { source_id: number; name: string; topic_keys: string[]; reason: string; origin: string; needs_review: boolean }
+export interface GroupingConfig { mode: GroupingMode; bindings: Record<string, number>; revision: number; ai_available: boolean; match_existing?: boolean; ai_enabled?: boolean; ai_model_id?: string | null; daily_limit?: number; error_code?: string; summary?: { pending: number; suggested: number; applied: number } }
+export interface ProposalItem { source_id: number; name: string; topic_keys: string[]; group_ids?: number[]; reason: string; origin: string; needs_review: boolean }
 export interface Proposal {
-  id: string; engine: 'rules' | 'ai'; status: string; source_ids: number[]; topic_keys: string[]; result: ProposalItem[]
+  id: string; target?: 'groups' | 'topics'; engine: 'rules' | 'ai'; status: string; source_ids: number[]; topic_keys: string[]; result: ProposalItem[]
   error_code: string; created_at: string; expires_at: string; applied_count: number; model_id: string; attempts: number
 }
+export interface ProposalPage { results: Proposal[]; page: number; page_size: number; count: number; has_more: boolean }
 export interface ReadingStats { today: number; total: number; streak: number; timezone: string; week: Array<{ day: string; count: number }> }
 export interface Dashboard { kind: 'latest' | 'popular'; stories: Array<{ id: number; title: string; source_name: string; publish_time: string }> }
 export interface ClassifierRuntime {
@@ -97,6 +98,7 @@ export const workspaceKeys = {
   viewerCatalog: (viewer: number | string, purpose: 'subscribe' | 'history') => ['workspace', 'catalog', { viewer, purpose }] as const,
   config: (viewer: number | string) => ['workspace', viewer, 'grouping-config'] as const,
   proposals: (viewer: number | string) => ['workspace', viewer, 'proposals'] as const,
+  proposalHistory: (viewer: number | string, target: 'groups' | 'topics', page: number) => ['workspace', viewer, 'proposals', { target, page }] as const,
   proposal: (viewer: number | string, id: string | null) => ['workspace', viewer, 'proposal', id] as const,
   stats: (viewer: number | string) => ['workspace', viewer, 'reading-stats'] as const,
 }

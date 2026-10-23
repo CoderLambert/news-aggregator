@@ -1,3 +1,4 @@
+import '@tests/helpers/commandDom'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
@@ -20,11 +21,16 @@ const proposal: Proposal = {
   created_at: '2026-10-17T00:00:00Z', expires_at: '2099-10-18T00:00:00Z', error_code: '', applied_count: 0, model_id: '', attempts: 0,
 }
 const clients: QueryClient[] = []
+// History pages are an explicit contract: a full first page is not the same as
+// "has_more", so mocks must state count/has_more instead of relying on length.
+const page = (results: Proposal[], extra: { page?: number; count?: number; has_more?: boolean } = {}) => ({
+  results, page: extra.page ?? 1, page_size: 30, count: extra.count ?? results.length, has_more: extra.has_more ?? false,
+})
 type Options = Parameters<typeof workspaceRequest>[1]
 let handler: (path: string, options?: Options) => unknown
 function defaults(path: string, options?: Options): unknown {
   if (path.endsWith('/settings/')) return { ...config, ...(options?.body as object ?? {}) }
-  if (path.endsWith('/proposals/')) return options?.method === 'POST' ? { ...proposal } : []
+  if (path.split('?')[0].endsWith('/proposals/')) return options?.method === 'POST' ? { ...proposal } : page([])
   if (path.endsWith('/apply/')) return { ...proposal, status: 'applied', applied_count: 1 }
   if (path.endsWith('/undo/')) return { ...proposal, status: 'undone' }
   if (path.endsWith('/cancel/')) return { ...proposal, status: 'cancelled' }
@@ -87,7 +93,7 @@ describe('AG-04 guided grouping', () => {
   it('retries the exact creation snapshot and request id after response loss', async () => {
     let attempts = 0
     handler = (path, options) => {
-      if (path.endsWith('/proposals/') && options?.method === 'POST' && attempts++ === 0) throw new Error('lost response')
+      if (path.split('?')[0].endsWith('/proposals/') && options?.method === 'POST' && attempts++ === 0) throw new Error('lost response')
       return defaults(path, options)
     }
     setup()
@@ -164,7 +170,7 @@ describe('AG-04 guided grouping', () => {
     const queued = { ...proposal, status: 'queued' }
     let reads = 0
     handler = (path, options) => {
-      if (path.endsWith('/proposals/') && options?.method === 'POST') return queued
+      if (path.split('?')[0].endsWith('/proposals/') && options?.method === 'POST') return queued
       if (path.endsWith('/' + proposal.id + '/')) { if (++reads === 1) throw new Error('offline'); return proposal }
       return defaults(path, options)
     }
@@ -176,7 +182,7 @@ describe('AG-04 guided grouping', () => {
     expect(postCalls()).toHaveLength(1)
   })
   it('restores a saved preview from history without generating again', async () => {
-    handler = (path, options) => path.endsWith('/proposals/') && !options?.method ? [proposal] : defaults(path, options)
+    handler = (path, options) => path.split('?')[0].endsWith('/proposals/') && !options?.method ? page([proposal]) : defaults(path, options)
     setup()
     fireEvent.click(await screen.findByRole('button', { name: '查看' }))
     await screen.findByRole('button', { name: '确认应用分组' })
@@ -192,6 +198,49 @@ describe('AG-04 guided grouping', () => {
     fireEvent.keyDown(checkbox, { key: 'Escape' })
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
     expect(toggle).toHaveFocus()
+  })
+  it('uses a searchable shadcn group picker while preserving existing-group IDs and legacy create-new semantics', async () => {
+    const onApply = vi.fn()
+    const groups = [{ id: 8, name: '前端开发', source_ids: [] }, { id: 19, name: '后端研究与基础设施', source_ids: [] }]
+    render(<ProposalEditor proposal={proposal} topics={topics} groups={groups} mode="suggest" busy={false} onApply={onApply} onCancel={vi.fn()} />)
+    const trigger = screen.getByRole('combobox', { name: '目标分组 frontend' })
+    expect(trigger.tagName).toBe('BUTTON')
+    expect(trigger).toHaveAttribute('data-slot', 'button')
+    expect(document.querySelector('select[aria-label="目标分组 frontend"]')).toBeNull()
+    expect(trigger).toHaveTextContent('创建新分组')
+    expect(screen.getByRole('textbox', { name: '新分组名称 frontend' })).toBeInTheDocument()
+
+    fireEvent.click(trigger)
+    const search = screen.getByRole('combobox', { name: '搜索目标分组 frontend' })
+    fireEvent.change(search, { target: { value: '19' } })
+    const existing = await screen.findByRole('option', { name: /后端研究与基础设施.*ID 19/ })
+    fireEvent.keyDown(existing, { key: 'Enter' })
+    await waitFor(() => expect(trigger).toHaveFocus())
+    expect(trigger).toHaveTextContent('后端研究与基础设施')
+    expect(screen.queryByRole('textbox', { name: '新分组名称 frontend' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '确认应用分组' }))
+    expect(onApply).toHaveBeenLastCalledWith({ mode: 'suggest', groups: [{ topic_key: 'frontend', source_ids: [1], group_id: 19 }] })
+
+    fireEvent.click(trigger)
+    fireEvent.change(screen.getByRole('combobox', { name: '搜索目标分组 frontend' }), { target: { value: '创建新分组' } })
+    fireEvent.click(await screen.findByRole('option', { name: /创建新分组.*仅旧版主题预设/ }))
+    const name = screen.getByRole('textbox', { name: '新分组名称 frontend' })
+    fireEvent.change(name, { target: { value: '自定义前端组' } })
+    fireEvent.click(screen.getByRole('button', { name: '确认应用分组' }))
+    expect(onApply).toHaveBeenLastCalledWith({ mode: 'suggest', groups: [{ topic_key: 'frontend', source_ids: [1], name: '自定义前端组' }] })
+  })
+  it('closes the group picker on Escape, restores trigger focus, and leaves the member editor open', async () => {
+    render(<ProposalEditor proposal={proposal} topics={topics} groups={[{ id: 8, name: '前端开发', source_ids: [] }]} mode="suggest" busy={false} onApply={vi.fn()} onCancel={vi.fn()} />)
+    const members = screen.getByRole('button', { name: '调整频道归属' })
+    fireEvent.click(members)
+    const trigger = screen.getByRole('combobox', { name: '目标分组 frontend' })
+    fireEvent.click(trigger)
+    const search = screen.getByRole('combobox', { name: '搜索目标分组 frontend' })
+    search.focus()
+    fireEvent.keyDown(search, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('combobox', { name: '搜索目标分组 frontend' })).toBeNull())
+    expect(trigger).toHaveFocus()
+    expect(members).toHaveAttribute('aria-expanded', 'true')
   })
 })
 
