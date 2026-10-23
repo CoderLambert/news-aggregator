@@ -46,12 +46,12 @@ TASK_HEARTBEAT_SECONDS = 20
 TERMINAL_STATUSES = frozenset({'succeeded', 'failed', 'cancelled', 'interrupted'})
 RESTART_ERROR = '任务已重新开始，请重新连接。'
 GENERATION_CHANGED_MESSAGE = '任务已重新开始，请刷新后重试。'
-_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='chatgpt-translation')
+_translation_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='ai-translation')
 
 
-def submit_background_task(function, *args, **kwargs):
-    """Submit one private background task to the shared two-worker executor."""
-    return _executor.submit(function, *args, **kwargs)
+def submit_translation_task(function, *args, **kwargs):
+    """Submit translation work without sharing capacity with research runs."""
+    return _translation_executor.submit(function, *args, **kwargs)
 _legacy_jobs: dict[tuple, ChatGPTTranslationJob] = {}
 # Legacy test fixture name; durable job state never depends on this mapping.
 _jobs = _legacy_jobs
@@ -594,7 +594,7 @@ def _dispatch_task(task_id, generation):
             return
         _dispatching.add(key)
     try:
-        _executor.submit(_run_persistent_task, task_id, generation)
+        submit_translation_task(_run_persistent_task, task_id, generation)
     except Exception as exc:
         with _jobs_lock:
             _dispatching.discard(key)

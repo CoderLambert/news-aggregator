@@ -641,7 +641,7 @@ def _dispatch(task_id, generation):
             return
         durable._dispatching.add(dispatch_key)
     try:
-        durable.submit_background_task(run_translation, task_id, generation)
+        durable.submit_translation_task(run_translation, task_id, generation)
     except Exception:
         with durable._jobs_lock:
             durable._dispatching.discard(dispatch_key)

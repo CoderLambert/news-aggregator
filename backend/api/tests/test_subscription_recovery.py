@@ -474,6 +474,51 @@ def test_sse_disconnect_does_not_cancel_background_worker(owner, article, monkey
             time.sleep(0.01)
         assert not pending, 'background test worker did not exit before cleanup'
 
+def test_translation_stream_flushes_before_a_queued_worker_produces_output(owner, article, monkeypatch):
+    connection = make_connection(owner)
+    handle = start_queued(owner, connection, article, monkeypatch)
+    monkeypatch.setattr(jobs, '_dispatch_task', Mock())
+    request = APIRequestFactory().post('/api/news/1/translate/', {'force': False}, format='json')
+    request.user = owner
+
+    response = subscription_translation_response(request, article, force=False)
+    stream = iter(response.streaming_content)
+    try:
+        first_event = next(stream)
+        assert b'"progress": ""' in first_event
+        assert ChatGPTTranslationTask.objects.get(pk=handle.id).status == 'queued'
+    finally:
+        response.close()
+        close = getattr(stream, 'close', None)
+        if close:
+            close()
+
+
+def test_research_worker_saturation_does_not_block_translation_dispatch():
+    from api.services.research import job_manager
+
+    release = threading.Event()
+    research_started = [threading.Event(), threading.Event()]
+
+    def occupy_research_worker(index):
+        research_started[index].set()
+        assert release.wait(5)
+
+    research_futures = [
+        job_manager.submit_research_task(occupy_research_worker, index)
+        for index in range(2)
+    ]
+    translation_started = threading.Event()
+    try:
+        assert all(started.wait(2) for started in research_started)
+        translation_future = jobs.submit_translation_task(translation_started.set)
+        assert translation_started.wait(2)
+        assert translation_future.result(timeout=2) is None
+    finally:
+        release.set()
+        for future in research_futures:
+            future.result(timeout=5)
+
 
 def test_cancel_during_token_refresh_wait_blocks_decrypt_and_network(owner, monkeypatch):
     connection = make_connection(owner)

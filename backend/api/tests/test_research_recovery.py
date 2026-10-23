@@ -41,7 +41,7 @@ def fake_executor(monkeypatch):
         submitted.append((function, args, kwargs))
         return SimpleNamespace(done=False)
 
-    monkeypatch.setattr(chatgpt_subscription_jobs, 'submit_background_task', capture)
+    monkeypatch.setattr(job_manager, 'submit_research_task', capture)
     return submitted
 
 

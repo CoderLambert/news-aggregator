@@ -82,6 +82,8 @@ News Aggregator 使用 OpenAI 的开源应用 Sign in with ChatGPT 流程，让�
 
 订阅全文翻译任务在 SQLite WAL 下以写入预留开始 claim 事务，再读取并复核 owner、连接 generation、模型和正文快照，最后通过条件更新取得租约。这样竞争写入只能在读取快照前等待，不能把已读取的 WAL 快照升级成 `SQLITE_BUSY_SNAPSHOT`；模型调用仍在短事务之外执行。
 
+订阅/BYOK 全文翻译与深度研究使用相互独立的有界执行器，研究任务占满容量时不会阻塞翻译 claim。翻译 SSE 在排队后立即发送空进度帧以提交响应头，之后只附着同一 durable task；断开连接不会取消或重复提交模型调用。
+
 相关入口：
 
 - `POST /api/chatgpt-subscription/connections/{id}/research-probe/`：请求体只能是 `{\"consent\": true}`；主动验证可能使用订阅额度。

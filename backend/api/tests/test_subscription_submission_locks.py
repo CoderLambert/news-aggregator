@@ -76,7 +76,7 @@ def simultaneous_submission(owner, article, monkeypatch):
     def submit_provider(*args):
         assert not connection.in_atomic_block
         dispatches.append(args)
-    monkeypatch.setattr(jobs._executor, 'submit', submit_provider)
+    monkeypatch.setattr(jobs._translation_executor, 'submit', submit_provider)
     monkeypatch.setattr(jobs, 'stream_full_translation', Mock(side_effect=AssertionError('provider forbidden')))
     errors = first_insert_race(monkeypatch)
 

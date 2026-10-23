@@ -429,6 +429,9 @@ def subscription_translation_response(request, news: News, force=False):
     def stream():
         sent_length = 0
         try:
+            # Flush headers immediately; task execution is durable and may wait
+            # for worker capacity before the first model delta arrives.
+            yield from translation_sse_records({'progress': ''})
             require_current(user, stored, full=True)
             if job.text:
                 initial = job.text

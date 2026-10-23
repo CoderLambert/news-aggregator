@@ -10,6 +10,7 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
 from django.conf import settings
@@ -29,6 +30,13 @@ MAX_RUN_WIRE_BYTES = 2 * 1024 * 1024
 MAX_TEXT_DELTA_BYTES = 2048
 IDEMPOTENCY_KEY_RE = re.compile(r'^[\x20-\x7e]{1,64}$')
 ACTIVE_STATUSES = ('queued', 'running')
+
+_research_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='deep-research')
+
+
+def submit_research_task(function, *args, **kwargs):
+    """Submit research work without occupying translation worker capacity."""
+    return _research_executor.submit(function, *args, **kwargs)
 
 
 class ResearchRunError(Exception):
@@ -543,8 +551,7 @@ def _dispatch(run_id, query, local_only):
             return
         _dispatching.add(key)
     try:
-        from api.services.chatgpt_subscription_jobs import submit_background_task
-        submit_background_task(_run_worker, run_id, query, local_only)
+        submit_research_task(_run_worker, run_id, query, local_only)
     except Exception as exc:
         with _dispatch_lock:
             _dispatching.discard(key)
