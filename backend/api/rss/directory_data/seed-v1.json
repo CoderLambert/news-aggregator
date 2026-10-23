@@ -1,522 +1,1757 @@
 {
   "schema_version": 1,
   "source": {
-    "id": "newshub-curated-v1",
-    "commit": "17d48915bbacd6a448578c64676a6dac4c2f263e",
-    "license": "CC0-1.0 AND AGPL-3.0-only",
-    "url": "https://github.com/CoderLambert/news-aggregator"
+    "id": "fuxiaoai/tidings-rss",
+    "commit": "f9b54abf9dd3e7af2a1dda12bca06c8fe8b57d7b",
+    "license": "CC0-1.0",
+    "url": "https://github.com/fuxiaoai/tidings-rss"
   },
-  "collections": [
+  "entries": [
     {
-      "source": {
-        "id": "plenaryapp/awesome-rss-feeds",
-        "commit": "9ab2482cae9031a5a39635c887fcfc8ece7e130a",
-        "license": "CC0-1.0",
-        "url": "https://github.com/plenaryapp/awesome-rss-feeds"
-      },
-      "entries": [
-        {
-          "key": "https://medium.com/feed/better-programming",
-          "name": "Better Programming - Medium",
-          "description": "Advice for programmers. - Medium",
-          "public_url": "https://medium.com/feed/better-programming",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://feeds.feedburner.com/codinghorror",
-          "name": "Coding Horror",
-          "description": "programming and human factors",
-          "public_url": "https://blog.codinghorror.com/rss/",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://feeds.simplecast.com/dLRotFGk",
-          "name": "Developer Tea",
-          "description": "Developer Tea exists to help driven developers connect to their ultimate purpose and excel at their work so that they can positively impact the people they influence. With over 17 million downloads to date, Developer Tea is a short podcast hosted by Jonathan Cutrell, engineering leader with over 15 years of industry experience. We hope you'll take the topics from this podcast and continue the conversation, either online or in person with your peers. Email: developertea@gmail.com",
-          "public_url": "https://feeds.simplecast.com/dLRotFGk",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://engineering.fb.com/feed/",
-          "name": "Engineering at Meta",
-          "description": "Engineering at Meta Blog",
-          "public_url": "https://engineering.fb.com/feed/",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://slack.engineering/feed",
-          "name": "Engineering at Slack",
-          "description": "Hear directly from Slack's engineers about what we build, why and how we build it, and how you can use it.",
-          "public_url": "https://slack.engineering/feed",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://codeascraft.com/feed/atom/",
-          "name": "Etsy Engineering | Code as Craft",
-          "description": "The engineers who make Etsy make our living with a craft we love: software. This is where we'll write about our craft and our collective experience building and running the world's most vibrant handmade marketplace.",
-          "public_url": "https://codeascraft.com/feed/atom/",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://feeds.twit.tv/floss.xml",
-          "name": "FLOSS Weekly (Audio)",
-          "description": "We're not talking dentistry here; FLOSS is all about Free Libre Open Source Software. Join host Doc Searls and his rotating panel of co-hosts as they talk with the most interesting and important people in the Open Source and Free Software community. Although the show is no longer in production at TWiT, you can enjoy episodes from our archives.",
-          "public_url": "https://feeds.twit.tv/floss.xml",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://about.gitlab.com/atom.xml",
-          "name": "GitLab",
-          "description": "GitLab Blog RSS feed",
-          "public_url": "https://about.gitlab.com/atom.xml",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://www.youtube.com/feeds/videos.xml?user=GoogleTechTalks",
-          "name": "Google TechTalks",
-          "description": "",
-          "public_url": "https://www.youtube.com/feeds/videos.xml?user=GoogleTechTalks",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://medium.com/feed/hackernoon",
-          "name": "HackerNoon.com - Medium",
-          "description": "Elijah McClain, George Floyd, Eric Garner, Breonna Taylor, Ahmaud Arbery, Michael Brown, Oscar Grant, Atatiana Jefferson, Tamir Rice, Bettie Jones, Botham Jean - Medium",
-          "public_url": "https://medium.com/feed/hackernoon",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://feeds.simplecast.com/gvtxUiIf",
-          "name": "Hanselminutes with Scott Hanselman",
-          "description": "Hanselminutes is Fresh Air for Developers. A weekly commute-time podcast that promotes fresh technology and fresh voices. Talk and Tech for Developers, Life-long Learners, and Technologists.",
-          "public_url": "https://feeds.simplecast.com/gvtxUiIf",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://feed.infoq.com",
-          "name": "InfoQ",
-          "description": "InfoQ feed",
-          "public_url": "https://feed.infoq.com",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://blog.jooq.org/feed",
-          "name": "Java, SQL and jOOQ.",
-          "description": "Best Practices and Lessons Learned from Writing Awesome Java and SQL Code. Get some hands-on insight on what's behind developing jOOQ.",
-          "public_url": "https://blog.jooq.org/feed",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://www.joelonsoftware.com/feed/",
-          "name": "Joel on Software",
-          "description": "",
-          "public_url": "https://www.joelonsoftware.com/feed/",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://martinfowler.com/feed.atom",
-          "name": "Martin Fowler",
-          "description": "Master feed of news and updates from martinfowler.com",
-          "public_url": "https://martinfowler.com/feed.atom",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://buffer.com/resources/overflow/rss/",
-          "name": "Overflow - Buffer Resources",
-          "description": "In-depth ideas and guides to social media & online marketing strategy, published by the team at Buffer",
-          "public_url": "https://buffer.com/resources/overflow/rss/",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://softwareengineeringdaily.com/category/podcast/feed",
-          "name": "Podcast Archives - Software Engineering Daily",
-          "description": "",
-          "public_url": "https://softwareengineeringdaily.com/category/podcast/feed",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://www.thecrazyprogrammer.com/category/programming/feed",
-          "name": "Programming Archives - The Crazy Programmer",
-          "description": "Programming, Design and Development",
-          "public_url": "https://www.thecrazyprogrammer.com/category/programming/feed",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://robertheaton.com/feed.xml",
-          "name": "Robert Heaton | Blog",
-          "description": "Software engineer. One-track lover down a two-way lane",
-          "public_url": "https://robertheaton.com/feed.xml",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://feeds.fireside.fm/sdt/rss",
-          "name": "Software Defined Talk",
-          "description": "Get ready for a weekly dose of all things Enterprise Software and Cloud Computing! Join us as we dive into topics including Kubernetes, DevOps, Serverless, Security and Coding. Plus, we’ll keep you entertained with plenty of off-topic banter and nonsense. Don’t worry if you miss the latest industry conference - we’ve got you covered with recaps of all the latest news from AWS, Microsoft Azure, Google Cloud Platform (GCP) and the Cloud Native Computing Foundation (CNCF).",
-          "public_url": "https://feeds.fireside.fm/sdt/rss",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://developers.soundcloud.com/blog/blog.rss",
-          "name": "SoundCloud Backstage Blog",
-          "description": "SoundCloud's developer blog.",
-          "public_url": "https://developers.soundcloud.com/blog/blog.rss",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://labs.spotify.com/feed/",
-          "name": "Spotify Engineering",
-          "description": "Spotify’s official technology blog",
-          "public_url": "https://labs.spotify.com/feed/",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://stackabuse.com/rss/",
-          "name": "Stack Abuse",
-          "description": "Learn Python, Java, JavaScript/Node, Machine Learning, and Web Development through articles, code examples, and tutorials for developers of all skill levels.",
-          "public_url": "https://stackabuse.com/rss/",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://stackoverflow.blog/feed/",
-          "name": "Stack Overflow Blog",
-          "description": "Essays, opinions, and advice on the act of computer programming from Stack Overflow.",
-          "public_url": "https://stackoverflow.blog/feed/",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://medium.com/feed/airbnb-engineering",
-          "name": "The Airbnb Tech Blog - Medium",
-          "description": "Creative engineers and data scientists building a world where you can belong anywhere. http://airbnb.io - Medium",
-          "public_url": "https://medium.com/feed/airbnb-engineering",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://cynicaldeveloper.com/feed/podcast",
-          "name": "The Cynical Developer",
-          "description": "A UK based Technology and Software Developer Podcast that helps you to improve your development knowledge and career, through explaining the latest and greatest in development technology and providing you with what you need to succeed as a developer.",
-          "public_url": "https://cynicaldeveloper.com/feed/podcast",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://github.blog/feed/",
-          "name": "The GitHub Blog",
-          "description": "Updates, ideas, and inspiration from GitHub to help developers build and design software.",
-          "public_url": "https://github.blog/feed/",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://blog.jetbrains.com/feed",
-          "name": "The JetBrains Blog",
-          "description": "Developer Tools for Professionals and Teams",
-          "public_url": "https://blog.jetbrains.com/feed",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://feeds.transistor.fm/productivity-in-tech-podcast",
-          "name": "The PIT Show: Reflections and Interviews in the Tech World",
-          "description": "This is the show where I sit down with people in the tech space and talk about what they are doing and how they get it all done.",
-          "public_url": "https://feeds.transistor.fm/productivity-in-tech-podcast",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://feeds.simplecast.com/XA_851k3",
-          "name": "The Stack Overflow Podcast",
-          "description": "<p>For well over a decade, the Stack Overflow Podcast has been exploring what it means to be a developer and how the art and practice of software engineering is changing our world. From creating code to running it in production, we host important conversations and fascinating guests that will help you understand how technology is made and where it’s headed. Hosted by Ryan Donovan, the Stack Overflow Podcast is your home for all things software.</p>",
-          "public_url": "https://feeds.simplecast.com/XA_851k3",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://thewomenintechshow.com/category/podcast/feed/",
-          "name": "The Women in Tech Show: A Technical Podcast",
-          "description": "A podcast about what we work on, not what it feels like to be a woman in tech. Hosted by Edaena Salinas, Software Engineer at Microsoft. Website: wit.fm",
-          "public_url": "https://thewomenintechshow.com/category/podcast/feed/",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://overreacted.io/rss.xml",
-          "name": "overreacted — A blog by Dan Abramov",
-          "description": "A blog by Dan Abramov",
-          "public_url": "https://overreacted.io/rss.xml",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://www.reddit.com/r/programming/.rss",
-          "name": "programming",
-          "description": "Computer Programming",
-          "public_url": "https://www.reddit.com/r/programming/.rss",
-          "tags": [
-            "Programming"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://alistapart.com/main/feed/",
-          "name": "A List Apart: The Full Feed",
-          "description": "Articles for people who make web sites.",
-          "public_url": "https://alistapart.com/main/feed/",
-          "tags": [
-            "Web Development"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://css-tricks.com/feed/",
-          "name": "CSS-Tricks",
-          "description": "Tips, Tricks, and Techniques on using Cascading Style Sheets.",
-          "public_url": "https://css-tricks.com/feed/",
-          "tags": [
-            "Web Development"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://www.codewall.co.uk/feed/",
-          "name": "Code Wall",
-          "description": "",
-          "public_url": "https://www.codewall.co.uk/feed/",
-          "tags": [
-            "Web Development"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://davidwalsh.name/feed",
-          "name": "David Walsh Blog",
-          "description": "A blog featuring tutorials about JavaScript, HTML5, AJAX, PHP, CSS, WordPress, and everything else development.",
-          "public_url": "https://davidwalsh.name/feed",
-          "tags": [
-            "Web Development"
-          ],
-          "language": "en",
-          "region": "international"
-        },
-        {
-          "key": "https://gosink.in/rss/",
-          "name": "Sink In - Tech Learnings",
-          "description": "Sink In - Tech Learnings (Shah Code Exporters - FZCO)",
-          "public_url": "https://gosink.in/rss/",
-          "tags": [
-            "Web Development"
-          ],
-          "language": "en",
-          "region": "international"
-        }
-      ]
+      "key": "https://ainews.liduos.com/rss.xml",
+      "name": "AI 开发者日报",
+      "public_url": "https://ainews.liduos.com/rss.xml",
+      "tags": [
+        "🤖 Artificial Intelligence"
+      ],
+      "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。"
     },
     {
-      "source": {
-        "id": "newshub-curated-v1",
-        "commit": "17d48915bbacd6a448578c64676a6dac4c2f263e",
-        "license": "CC0-1.0",
-        "url": "https://github.com/CoderLambert/news-aggregator"
-      },
-      "entries": [
-        {
-          "key": "react-releases",
-          "name": "React releases",
-          "description": "React library releases on GitHub",
-          "language": "en",
-          "region": "international",
-          "tags": [
-            "React",
-            "JavaScript",
-            "github"
-          ],
-          "public_url": "https://github.com/facebook/react/releases.atom"
-        },
-        {
-          "key": "chinanews-health",
-          "name": "中新网健康",
-          "description": "中国新闻社健康资讯",
-          "language": "zh",
-          "region": "domestic",
-          "tags": [
-            "中文",
-            "健康",
-            "医疗"
-          ],
-          "public_url": "https://www.chinanews.com.cn/rss/jk.xml"
-        }
-      ]
+      "key": "https://rsshub.bestblogs.dev/anthropic/news",
+      "name": "Anthropic News",
+      "public_url": "https://rsshub.bestblogs.dev/anthropic/news",
+      "tags": [
+        "🤖 Artificial Intelligence"
+      ],
+      "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。"
     },
     {
-      "source": {
-        "id": "DIYgod/RSSHub",
-        "commit": "140f27c701b499703cb3e22cb4541d50b1406c40",
-        "license": "AGPL-3.0-only",
-        "url": "https://github.com/DIYgod/RSSHub"
-      },
-      "namespaces": {
-        "github": {
-          "name": "GitHub",
-          "description": "::: tip\nGitHub provides some official RSS feeds:\n\n- Repo releases: `https://github.com/:owner/:repo/releases.atom`\n- Repo commits: `https://github.com/:owner/:repo/commits.atom`\n- User activities: `https://github.com/:user.atom`\n- Private feed: `https://github.com/:user.private.atom?token=:secret` (Note: You can ONLY obtain this url via an [API](https://docs.github.com/en/rest/activity/feeds?apiVersion=2022-11-28) call with a [Personal Access Token](https://github.com/settings/tokens/new) with **ENOUGH** scopes now.)\n- Wiki history: `https://github.com/:owner/:repo/wiki.atom`\n\n:::",
-          "lang": "en",
-          "routes": {
-            "/issue/:user/:repo/:state?/:labels?": {
-              "path": "/issue/:user/:repo/:state?/:labels?",
-              "categories": [
-                "programming"
-              ],
-              "parameters": {
-                "user": "GitHub username",
-                "repo": "GitHub repo name",
-                "state": {
-                  "description": "the state of the issues.",
-                  "default": "open",
-                  "options": [
-                    {
-                      "label": "Open",
-                      "value": "open"
-                    },
-                    {
-                      "label": "Closed",
-                      "value": "closed"
-                    },
-                    {
-                      "label": "All",
-                      "value": "all"
-                    }
-                  ]
-                },
-                "labels": "a list of comma separated label names"
-              },
-              "name": "Repo Issues"
-            }
-          }
-        }
-      }
+      "key": "https://machinelearning.apple.com/rss.xml",
+      "name": "Apple Machine Learning Research",
+      "public_url": "https://machinelearning.apple.com/rss.xml",
+      "tags": [
+        "🤖 Artificial Intelligence"
+      ],
+      "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。"
+    },
+    {
+      "key": "https://aws.amazon.com/blogs/amazon-ai/feed/",
+      "name": "Artificial Intelligence",
+      "public_url": "https://aws.amazon.com/blogs/amazon-ai/feed/",
+      "tags": [
+        "🤖 Artificial Intelligence"
+      ],
+      "description": "AWS 人工智能博客，分享 AI 服务、开发实践、研究与应用案例。"
+    },
+    {
+      "key": "https://export.arxiv.org/rss/cs.CL",
+      "name": "cs.CL updates on arXiv.org",
+      "public_url": "https://export.arxiv.org/rss/cs.CL",
+      "tags": [
+        "🤖 Artificial Intelligence"
+      ],
+      "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。"
+    },
+    {
+      "key": "https://wechat2rss.bestblogs.dev/feed/1709da4f538d4ce4fb6d7a8ba1a5a1c297919601.xml",
+      "name": "DeepSeek",
+      "public_url": "https://wechat2rss.bestblogs.dev/feed/1709da4f538d4ce4fb6d7a8ba1a5a1c297919601.xml",
+      "tags": [
+        "🤖 Artificial Intelligence"
+      ],
+      "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。"
+    },
+    {
+      "key": "https://deepmind.com/blog/feed/basic/",
+      "name": "Google DeepMind News",
+      "public_url": "https://deepmind.com/blog/feed/basic/",
+      "tags": [
+        "🤖 Artificial Intelligence"
+      ],
+      "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。"
+    },
+    {
+      "key": "https://huggingface.co/blog/feed.xml",
+      "name": "Hugging Face - Blog",
+      "public_url": "https://huggingface.co/blog/feed.xml",
+      "tags": [
+        "🤖 Artificial Intelligence"
+      ],
+      "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。"
+    },
+    {
+      "key": "https://news.mit.edu/rss/topic/artificial-intelligence2",
+      "name": "MIT News - Artificial intelligence",
+      "public_url": "https://news.mit.edu/rss/topic/artificial-intelligence2",
+      "tags": [
+        "🤖 Artificial Intelligence"
+      ],
+      "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。"
+    },
+    {
+      "key": "https://openai.com/news/rss.xml",
+      "name": "OpenAI News",
+      "public_url": "https://openai.com/news/rss.xml",
+      "tags": [
+        "🤖 Artificial Intelligence"
+      ],
+      "description": "OpenAI 官方动态，涵盖人工智能研究、产品发布、安全与应用进展。"
+    },
+    {
+      "key": "https://simonwillison.net/atom/everything/",
+      "name": "Simon Willison's Weblog",
+      "public_url": "https://simonwillison.net/atom/everything/",
+      "tags": [
+        "🤖 Artificial Intelligence"
+      ],
+      "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。"
+    },
+    {
+      "key": "https://research.google/blog/rss/",
+      "name": "The latest research from Google",
+      "public_url": "https://research.google/blog/rss/",
+      "tags": [
+        "🤖 Artificial Intelligence"
+      ],
+      "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。"
+    },
+    {
+      "key": "https://wechat2rss.xlab.app/feed/b81ffcfff1107b5265cd7e39de610dc7ca72caf4.xml",
+      "name": "我爱计算机视觉",
+      "public_url": "https://wechat2rss.xlab.app/feed/b81ffcfff1107b5265cd7e39de610dc7ca72caf4.xml",
+      "tags": [
+        "🤖 Artificial Intelligence"
+      ],
+      "description": "公众号，主要关注计算机视觉研究与应用。"
+    },
+    {
+      "key": "https://wechat2rss.xlab.app/feed/ede30346413ea70dbef5d485ea5cbb95cca446e7.xml",
+      "name": "新智元",
+      "public_url": "https://wechat2rss.xlab.app/feed/ede30346413ea70dbef5d485ea5cbb95cca446e7.xml",
+      "tags": [
+        "🤖 Artificial Intelligence"
+      ],
+      "description": "公众号，主要关注人工智能产业与研究。"
+    },
+    {
+      "key": "https://wechat2rss.bestblogs.dev/feed/433d2134dca54d80804daf32e8be546155be3300.xml",
+      "name": "智谱",
+      "public_url": "https://wechat2rss.bestblogs.dev/feed/433d2134dca54d80804daf32e8be546155be3300.xml",
+      "tags": [
+        "🤖 Artificial Intelligence"
+      ],
+      "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。"
+    },
+    {
+      "key": "https://wechat2rss.bestblogs.dev/feed/8d97af31b0de9e48da74558af128a4673d78c9a3.xml",
+      "name": "机器之心",
+      "public_url": "https://wechat2rss.bestblogs.dev/feed/8d97af31b0de9e48da74558af128a4673d78c9a3.xml",
+      "tags": [
+        "🤖 Artificial Intelligence"
+      ],
+      "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。"
+    },
+    {
+      "key": "https://wechat2rss.bestblogs.dev/feed/306ce19a1ca590c9c2df781789e828d1acfa1356.xml",
+      "name": "腾讯混元",
+      "public_url": "https://wechat2rss.bestblogs.dev/feed/306ce19a1ca590c9c2df781789e828d1acfa1356.xml",
+      "tags": [
+        "🤖 Artificial Intelligence"
+      ],
+      "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。"
+    },
+    {
+      "key": "https://wechat2rss.bestblogs.dev/feed/4ebee6222ae08705b8aabc9116f0defbcb6b17c6.xml",
+      "name": "通义实验室",
+      "public_url": "https://wechat2rss.bestblogs.dev/feed/4ebee6222ae08705b8aabc9116f0defbcb6b17c6.xml",
+      "tags": [
+        "🤖 Artificial Intelligence"
+      ],
+      "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。"
+    },
+    {
+      "key": "https://www.qbitai.com/feed",
+      "name": "量子位",
+      "public_url": "https://www.qbitai.com/feed",
+      "tags": [
+        "🤖 Artificial Intelligence"
+      ],
+      "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。"
+    },
+    {
+      "key": "https://www.rsnocsi.cn/feed",
+      "name": "Abyss的小屋",
+      "public_url": "https://www.rsnocsi.cn/feed",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写AI、技术、生活、随笔。"
+    },
+    {
+      "key": "https://blog.sayori.org/rss.xml",
+      "name": "Amiya的书桌",
+      "public_url": "https://blog.sayori.org/rss.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写日记、资源、技术。"
+    },
+    {
+      "key": "https://www.androidperformance.com/atom.xml",
+      "name": "Android Performance",
+      "public_url": "https://www.androidperformance.com/atom.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程、Android、分享。"
+    },
+    {
+      "key": "https://www.bboy.app/atom.xml",
+      "name": "Bboysoul's Blog",
+      "public_url": "https://www.bboy.app/atom.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写k8s 运维。"
+    },
+    {
+      "key": "https://www.canva.dev/blog/engineering/feed.xml",
+      "name": "Canva - Engineering Blog",
+      "public_url": "https://www.canva.dev/blog/engineering/feed.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://www.databricks.com/feed",
+      "name": "Databricks",
+      "public_url": "https://www.databricks.com/feed",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://www.elastic.co/blog/feed",
+      "name": "Elastic Blog - Elasticsearch, Kibana, and ELK Stack",
+      "public_url": "https://www.elastic.co/blog/feed",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://slack.engineering/feed/",
+      "name": "Engineering at Slack",
+      "public_url": "https://slack.engineering/feed/",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://wsdjeg.net/feed.xml",
+      "name": "Eric's Blog",
+      "public_url": "https://wsdjeg.net/feed.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程、生活、笔记。"
+    },
+    {
+      "key": "https://codeascraft.com/feed/atom/",
+      "name": "Etsy Engineering | Code as Craft",
+      "public_url": "https://codeascraft.com/feed/atom/",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://www.freecodecamp.org/news/rss/",
+      "name": "freeCodeCamp Programming Tutorials: Python, JavaScript, Git & More",
+      "public_url": "https://www.freecodecamp.org/news/rss/",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://icodex.me/atom.xml",
+      "name": "icodex | 前端技术博客 | 专注 React、TypeScript、AI 与性能优化 Blog",
+      "public_url": "https://icodex.me/atom.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程、前端、互联网、技术。"
+    },
+    {
+      "key": "https://laike9m.com/blog/rss/",
+      "name": "laike9m's blog",
+      "public_url": "https://laike9m.com/blog/rss/",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写Python、生活、编程。"
+    },
+    {
+      "key": "https://www.liesauer.net/blog/feed/",
+      "name": "LiesAuer's Blog",
+      "public_url": "https://www.liesauer.net/blog/feed/",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程。"
+    },
+    {
+      "key": "https://martinfowler.com/feed.atom",
+      "name": "Martin Fowler",
+      "public_url": "https://martinfowler.com/feed.atom",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://azure.microsoft.com/en-us/blog/feed/",
+      "name": "Microsoft Azure Blog",
+      "public_url": "https://azure.microsoft.com/en-us/blog/feed/",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://netflixtechblog.com/feed",
+      "name": "Netflix TechBlog - Medium",
+      "public_url": "https://netflixtechblog.com/feed",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://nicksxs.me/atom.xml",
+      "name": "Nicksxs's Blog",
+      "public_url": "https://nicksxs.me/atom.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程、后端、Java、PHP。"
+    },
+    {
+      "key": "https://nodejs.org/en/feed/blog.xml",
+      "name": "Node.js Blog",
+      "public_url": "https://nodejs.org/en/feed/blog.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://h4ck.org.cn/feed/",
+      "name": "obaby 𝐢‍𝐧⃝ void",
+      "public_url": "https://h4ck.org.cn/feed/",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写生活、编程、硬件、人工智能。"
+    },
+    {
+      "key": "https://onevcat.com/feed.xml",
+      "name": "OneV's Den",
+      "public_url": "https://onevcat.com/feed.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程、iOS。"
+    },
+    {
+      "key": "https://www.pseudoyu.com/zh/index.xml",
+      "name": "pseudoyu",
+      "public_url": "https://www.pseudoyu.com/zh/index.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写区块链、编程、工具、随笔。"
+    },
+    {
+      "key": "https://blog.python.org/feeds/posts/default",
+      "name": "Python Insider",
+      "public_url": "https://blog.python.org/feeds/posts/default",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://blog.rust-lang.org/feed.xml",
+      "name": "Rust Blog",
+      "public_url": "https://blog.rust-lang.org/feed.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://blog.rxliuli.com/atom.xml",
+      "name": "rxliuli blog",
+      "public_url": "https://blog.rxliuli.com/atom.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写前端、编程、随笔。"
+    },
+    {
+      "key": "https://ryanuo.cc/sitemap.xml",
+      "name": "RYANUO",
+      "public_url": "https://ryanuo.cc/sitemap.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程、嵌入式、前端、AI。"
+    },
+    {
+      "key": "https://blog.diqigan.cn/atom.xml",
+      "name": "Seven's blog",
+      "public_url": "https://blog.diqigan.cn/atom.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程、随笔、Geek、Java。"
+    },
+    {
+      "key": "https://sjdhome.com/blog/atom.xml",
+      "name": "sjdhome",
+      "public_url": "https://sjdhome.com/blog/atom.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程、生活、学习。"
+    },
+    {
+      "key": "https://smallyu.net/atom.xml",
+      "name": "smallyu的博客",
+      "public_url": "https://smallyu.net/atom.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写技术、生活、区块链。"
+    },
+    {
+      "key": "https://engineering.atspotify.com/feed/",
+      "name": "Spotify Engineering",
+      "public_url": "https://engineering.atspotify.com/feed/",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://blog.stackoverflow.com/feed/",
+      "name": "Stack Overflow Blog",
+      "public_url": "https://blog.stackoverflow.com/feed/",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://stripe.com/blog/feed.rss",
+      "name": "Stripe Blog",
+      "public_url": "https://stripe.com/blog/feed.rss",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://supabase.com/rss.xml",
+      "name": "Supabase Blog",
+      "public_url": "https://supabase.com/rss.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://taxodium.ink/rss.xml",
+      "name": "Taxodium",
+      "public_url": "https://taxodium.ink/rss.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程、随笔。"
+    },
+    {
+      "key": "https://medium.com/feed/airbnb-engineering",
+      "name": "The Airbnb Tech Blog - Medium",
+      "public_url": "https://medium.com/feed/airbnb-engineering",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://blog.cloudflare.com/rss",
+      "name": "The Cloudflare Blog",
+      "public_url": "https://blog.cloudflare.com/rss",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://github.blog/feed/",
+      "name": "The GitHub Blog",
+      "public_url": "https://github.blog/feed/",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://blog.jetbrains.com/feed/",
+      "name": "The JetBrains Blog",
+      "public_url": "https://blog.jetbrains.com/feed/",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://thenewstack.io/feed/",
+      "name": "The New Stack",
+      "public_url": "https://thenewstack.io/feed/",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://tianheg.co/index.xml",
+      "name": "Tianhe Gao",
+      "public_url": "https://tianheg.co/index.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写生活、技术。"
+    },
+    {
+      "key": "https://tw93.fun/feed.xml",
+      "name": "Tw93 Blog",
+      "public_url": "https://tw93.fun/feed.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写开源、前端、分享、MacOS。"
+    },
+    {
+      "key": "https://ssshooter.com/rss.xml",
+      "name": "Usubeni Fantasy",
+      "public_url": "https://ssshooter.com/rss.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写前端、随想、游戏、摄影。"
+    },
+    {
+      "key": "https://vercel.com/atom",
+      "name": "Vercel News",
+      "public_url": "https://vercel.com/atom",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。"
+    },
+    {
+      "key": "https://weishu.me/atom.xml",
+      "name": "Weishu's Notes",
+      "public_url": "https://weishu.me/atom.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程。"
+    },
+    {
+      "key": "https://zdyxry.github.io/atom.xml",
+      "name": "Yiran's Blog",
+      "public_url": "https://zdyxry.github.io/atom.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程、Linux。"
+    },
+    {
+      "key": "https://blog.yasking.org/atom.xml",
+      "name": "东东's Blog",
+      "public_url": "https://blog.yasking.org/atom.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程、技术、笔记。"
+    },
+    {
+      "key": "https://wiki.eryajf.net/rss.xml",
+      "name": "二丫讲梵",
+      "public_url": "https://wiki.eryajf.net/rss.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写运维、思索、编程。"
+    },
+    {
+      "key": "https://nicrosoft.net/blog/feed/",
+      "name": "农码生涯，无酒无花 – The coding life, no wine, no shine.",
+      "public_url": "https://nicrosoft.net/blog/feed/",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程、生活。"
+    },
+    {
+      "key": "https://blog.gadore.top/feed.xml",
+      "name": "千里之豪的格物垛",
+      "public_url": "https://blog.gadore.top/feed.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写技术、生活、图片。"
+    },
+    {
+      "key": "https://www.kawabangga.com/feed",
+      "name": "卡瓦邦噶！",
+      "public_url": "https://www.kawabangga.com/feed",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程、随笔、技术。"
+    },
+    {
+      "key": "https://rowkey.cn/atom.xml",
+      "name": "后端技术杂谈",
+      "public_url": "https://rowkey.cn/atom.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程。"
+    },
+    {
+      "key": "https://blog.devtang.com/atom.xml",
+      "name": "唐巧的博客",
+      "public_url": "https://blog.devtang.com/atom.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程、创业、iOS。"
+    },
+    {
+      "key": "https://www.mmbkz.cn/feed",
+      "name": "喵喵小站・博客志",
+      "public_url": "https://www.mmbkz.cn/feed",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写生活、日常、编程、笔记。"
+    },
+    {
+      "key": "https://blog.17lai.site/atom.xml",
+      "name": "夜法之书",
+      "public_url": "https://blog.17lai.site/atom.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写技术、开源、hexo、成长。"
+    },
+    {
+      "key": "https://51.ruyo.net/feed",
+      "name": "如有乐享",
+      "public_url": "https://51.ruyo.net/feed",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写技术、分享。"
+    },
+    {
+      "key": "https://www.coderlock.site/index.php/feed/",
+      "name": "寒夜雨",
+      "public_url": "https://www.coderlock.site/index.php/feed/",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程、生活、AI、随想。"
+    },
+    {
+      "key": "https://blog.zhheo.com/rss.xml",
+      "name": "张洪Heo",
+      "public_url": "https://blog.zhheo.com/rss.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写设计、编程、生活、产品。"
+    },
+    {
+      "key": "https://www.tortorse.com/atom.xml",
+      "name": "愆伏",
+      "public_url": "https://www.tortorse.com/atom.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写产品、前端、设计、杂谈。"
+    },
+    {
+      "key": "https://www.iconpik.com/rss/",
+      "name": "王圆圆 - ICONPIK",
+      "public_url": "https://www.iconpik.com/rss/",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写AI、编程、随笔。"
+    },
+    {
+      "key": "https://afoo.me/feeds.xml",
+      "name": "王福强的个人博客：一个架构士的思考与沉淀",
+      "public_url": "https://afoo.me/feeds.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写架构、创业、思考。"
+    },
+    {
+      "key": "https://howiehz.top/rss.xml",
+      "name": "皓子的小站",
+      "public_url": "https://howiehz.top/rss.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写技术、编程、开源、前端。"
+    },
+    {
+      "key": "https://sugarat.top/feed.rss",
+      "name": "粥里有勺糖",
+      "public_url": "https://sugarat.top/feed.rss",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程、大前端、开源、生活。"
+    },
+    {
+      "key": "https://www.wikimoe.com/rss.php",
+      "name": "维基萌",
+      "public_url": "https://www.wikimoe.com/rss.php",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写动画、漫画、游戏、日常。"
+    },
+    {
+      "key": "https://hutusi.com/feed.xml",
+      "name": "胡涂说",
+      "public_url": "https://hutusi.com/feed.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程、随笔、生活。"
+    },
+    {
+      "key": "https://www.imaegoo.com/atom.xml",
+      "name": "虹墨空间站",
+      "public_url": "https://www.imaegoo.com/atom.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程、前端、Serverless。"
+    },
+    {
+      "key": "https://pythoncat.top/rss.xml",
+      "name": "豌豆花下猫",
+      "public_url": "https://pythoncat.top/rss.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程、Python、翻译、随笔。"
+    },
+    {
+      "key": "https://dfine.tech/atom.xml",
+      "name": "阁子",
+      "public_url": "https://dfine.tech/atom.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程、算法、生活。"
+    },
+    {
+      "key": "https://colobu.com/atom.xml",
+      "name": "鸟窝",
+      "public_url": "https://colobu.com/atom.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程。"
+    },
+    {
+      "key": "https://blog.thetbw.xyz/atom.xml",
+      "name": "黑羽的个人博客",
+      "public_url": "https://blog.thetbw.xyz/atom.xml",
+      "tags": [
+        "🛠️ Engineering & Technology"
+      ],
+      "description": "主要写编程、随笔、生活。"
+    },
+    {
+      "key": "https://www.cisa.gov/news.xml",
+      "name": "CISA",
+      "public_url": "https://www.cisa.gov/news.xml",
+      "tags": [
+        "🛡️ Security"
+      ],
+      "description": "美国网络安全和基础设施安全局发布的安全通告、漏洞与防护建议。"
+    },
+    {
+      "key": "https://www.freebuf.com/feed",
+      "name": "FreeBuf 网络安全行业门户",
+      "public_url": "https://www.freebuf.com/feed",
+      "tags": [
+        "🛡️ Security"
+      ],
+      "description": "中文网络安全媒体，覆盖攻防研究、漏洞分析与安全产业动态。"
+    },
+    {
+      "key": "https://krebsonsecurity.com/feed/",
+      "name": "Krebs on Security",
+      "public_url": "https://krebsonsecurity.com/feed/",
+      "tags": [
+        "🛡️ Security"
+      ],
+      "description": "独立安全记者 Brian Krebs 对网络犯罪、数据泄露与数字欺诈的调查。"
+    },
+    {
+      "key": "https://www.schneier.com/blog/index.rdf",
+      "name": "Schneier on Security",
+      "public_url": "https://www.schneier.com/blog/index.rdf",
+      "tags": [
+        "🛡️ Security"
+      ],
+      "description": "Bruce Schneier 对安全工程、隐私和公共政策的长期观察。"
+    },
+    {
+      "key": "https://securityaffairs.co/wordpress/feed",
+      "name": "Security Affairs",
+      "public_url": "https://securityaffairs.co/wordpress/feed",
+      "tags": [
+        "🛡️ Security"
+      ],
+      "description": "全球网络攻击、恶意软件、漏洞与安全事件报道。"
+    },
+    {
+      "key": "https://www.zdnet.com/topic/security/rss.xml",
+      "name": "ZDNET Security",
+      "public_url": "https://www.zdnet.com/topic/security/rss.xml",
+      "tags": [
+        "🛡️ Security"
+      ],
+      "description": "企业安全、漏洞、威胁情报与安全产品动态。"
+    },
+    {
+      "key": "https://api.anquanke.com/data/v1/rss",
+      "name": "安全客",
+      "public_url": "https://api.anquanke.com/data/v1/rss",
+      "tags": [
+        "🛡️ Security"
+      ],
+      "description": "中文漏洞分析、攻防研究与网络安全行业动态。"
+    },
+    {
+      "key": "https://wechat2rss.xlab.app/feed/923c0e2f33b6d39c8a826a90f185725f0edb10e8.xml",
+      "name": "腾讯玄武实验室",
+      "public_url": "https://wechat2rss.xlab.app/feed/923c0e2f33b6d39c8a826a90f185725f0edb10e8.xml",
+      "tags": [
+        "🛡️ Security"
+      ],
+      "description": "腾讯玄武实验室发布的漏洞研究、攻防技术与安全实践。"
+    },
+    {
+      "key": "https://www.36kr.com/feed",
+      "name": "36氪",
+      "public_url": "https://www.36kr.com/feed",
+      "tags": [
+        "📰 Technology Media"
+      ],
+      "description": "中文商业与科技媒体，关注创业公司、互联网产品和产业变化。"
+    },
+    {
+      "key": "https://feeds.arstechnica.com/arstechnica/index",
+      "name": "Ars Technica",
+      "public_url": "https://feeds.arstechnica.com/arstechnica/index",
+      "tags": [
+        "📰 Technology Media"
+      ],
+      "description": "面向技术读者的科技媒体，长期报道软件、硬件、科学与互联网政策。"
+    },
+    {
+      "key": "https://www.engadget.com/rss.xml",
+      "name": "Engadget",
+      "public_url": "https://www.engadget.com/rss.xml",
+      "tags": [
+        "📰 Technology Media"
+      ],
+      "description": "消费电子、软件服务与科技产品评测。"
+    },
+    {
+      "key": "https://www.ithome.com/rss/",
+      "name": "IT之家",
+      "public_url": "https://www.ithome.com/rss/",
+      "tags": [
+        "📰 Technology Media"
+      ],
+      "description": "中文科技新闻，覆盖硬件、软件、移动设备与互联网公司。"
+    },
+    {
+      "key": "https://www.technologyreview.com/feed/",
+      "name": "MIT Technology Review",
+      "public_url": "https://www.technologyreview.com/feed/",
+      "tags": [
+        "📰 Technology Media"
+      ],
+      "description": "人工智能、计算、气候与生物技术的深度报道。"
+    },
+    {
+      "key": "https://techcrunch.com/feed/",
+      "name": "TechCrunch",
+      "public_url": "https://techcrunch.com/feed/",
+      "tags": [
+        "📰 Technology Media"
+      ],
+      "description": "创业公司、风险投资、互联网产品与科技行业动态。"
+    },
+    {
+      "key": "https://www.theverge.com/rss/index.xml",
+      "name": "The Verge — News",
+      "public_url": "https://www.theverge.com/rss/index.xml",
+      "tags": [
+        "📰 Technology Media"
+      ],
+      "description": "消费科技、互联网平台、科学与数字文化报道。"
+    },
+    {
+      "key": "https://www.wired.com/feed/rss",
+      "name": "WIRED",
+      "public_url": "https://www.wired.com/feed/rss",
+      "tags": [
+        "📰 Technology Media"
+      ],
+      "description": "科技、科学、商业与数字社会的深度报道。"
+    },
+    {
+      "key": "https://sspai.com/feed",
+      "name": "少数派",
+      "public_url": "https://sspai.com/feed",
+      "tags": [
+        "📰 Technology Media"
+      ],
+      "description": "数字工具、效率方法、软件体验与个人工作流。"
+    },
+    {
+      "key": "https://www.ifanr.com/feed",
+      "name": "爱范儿",
+      "public_url": "https://www.ifanr.com/feed",
+      "tags": [
+        "📰 Technology Media"
+      ],
+      "description": "中文消费科技、智能设备与产品趋势报道。"
+    },
+    {
+      "key": "https://quaily.com/op7418/feed/atom",
+      "name": "AIGC Weekly",
+      "public_url": "https://quaily.com/op7418/feed/atom",
+      "tags": [
+        "📮 Tech Newsletters & Weeklies"
+      ],
+      "description": "中文生成式 AI 产品、工具与行业观察周刊。"
+    },
+    {
+      "key": "https://golangweekly.com/rss/",
+      "name": "Golang Weekly",
+      "public_url": "https://golangweekly.com/rss/",
+      "tags": [
+        "📮 Tech Newsletters & Weeklies"
+      ],
+      "description": "Go 语言文章、工具、项目与社区动态周刊。"
+    },
+    {
+      "key": "https://javascriptweekly.com/rss/",
+      "name": "JavaScript Weekly",
+      "public_url": "https://javascriptweekly.com/rss/",
+      "tags": [
+        "📮 Tech Newsletters & Weeklies"
+      ],
+      "description": "JavaScript 新闻、文章、工具与项目周刊。"
+    },
+    {
+      "key": "https://lastweekin.ai/feed",
+      "name": "Last Week in AI",
+      "public_url": "https://lastweekin.ai/feed",
+      "tags": [
+        "📮 Tech Newsletters & Weeklies"
+      ],
+      "description": "每周梳理人工智能研究、产品与政策动态。"
+    },
+    {
+      "key": "https://rsshub.bestblogs.dev/deeplearning/the-batch",
+      "name": "The Batch",
+      "public_url": "https://rsshub.bestblogs.dev/deeplearning/the-batch",
+      "tags": [
+        "📮 Tech Newsletters & Weeklies"
+      ],
+      "description": "DeepLearning.AI 的人工智能新闻与研究周报。"
+    },
+    {
+      "key": "https://this-week-in-rust.org/atom.xml",
+      "name": "This Week in Rust",
+      "public_url": "https://this-week-in-rust.org/atom.xml",
+      "tags": [
+        "📮 Tech Newsletters & Weeklies"
+      ],
+      "description": "Rust 项目、文章、版本与社区动态周刊。"
+    },
+    {
+      "key": "https://weekly.tw93.fun/rss.xml",
+      "name": "潮流周刊",
+      "public_url": "https://weekly.tw93.fun/rss.xml",
+      "tags": [
+        "📮 Tech Newsletters & Weeklies"
+      ],
+      "description": "记录技术见闻、开源项目、产品与生活灵感的中文周刊。"
+    },
+    {
+      "key": "https://www.ruanyifeng.com/blog/atom.xml",
+      "name": "阮一峰的网络日志",
+      "public_url": "https://www.ruanyifeng.com/blog/atom.xml",
+      "tags": [
+        "📮 Tech Newsletters & Weeklies"
+      ],
+      "description": "阮一峰的技术文章与科技爱好者周刊，覆盖开发工具、互联网与开源项目。"
+    },
+    {
+      "key": "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=science",
+      "name": "AAAS: Science: Table of Contents",
+      "public_url": "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=science",
+      "tags": [
+        "🔬 Research & Science"
+      ],
+      "description": "关注科研与科学领域的文章、论文或研究动态。"
+    },
+    {
+      "key": "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+      "name": "BBC News — Science",
+      "public_url": "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+      "tags": [
+        "🔬 Research & Science"
+      ],
+      "description": "关注科研与科学领域的文章、论文或研究动态。"
+    },
+    {
+      "key": "https://elifesciences.org/rss/recent.xml",
+      "name": "eLife: latest articles",
+      "public_url": "https://elifesciences.org/rss/recent.xml",
+      "tags": [
+        "🔬 Research & Science"
+      ],
+      "description": "关注科研与科学领域的文章、论文或研究动态。"
+    },
+    {
+      "key": "https://flowingdata.com/feed",
+      "name": "FlowingData",
+      "public_url": "https://flowingdata.com/feed",
+      "tags": [
+        "🔬 Research & Science"
+      ],
+      "description": "关注科研与科学领域的文章、论文或研究动态。"
+    },
+    {
+      "key": "https://www.nasa.gov/news-release/feed/",
+      "name": "NASA",
+      "public_url": "https://www.nasa.gov/news-release/feed/",
+      "tags": [
+        "🔬 Research & Science"
+      ],
+      "description": "关注科研与科学领域的文章、论文或研究动态。"
+    },
+    {
+      "key": "https://www.nature.com/nature.rss",
+      "name": "Nature",
+      "public_url": "https://www.nature.com/nature.rss",
+      "tags": [
+        "🔬 Research & Science"
+      ],
+      "description": "关注科研与科学领域的文章、论文或研究动态。"
+    },
+    {
+      "key": "https://rss.nytimes.com/services/xml/rss/nyt/Science.xml",
+      "name": "NYT > Science",
+      "public_url": "https://rss.nytimes.com/services/xml/rss/nyt/Science.xml",
+      "tags": [
+        "🔬 Research & Science"
+      ],
+      "description": "关注科研与科学领域的文章、论文或研究动态。"
+    },
+    {
+      "key": "https://phys.org/rss-feed/",
+      "name": "Phys.org - latest science and technology news stories",
+      "public_url": "https://phys.org/rss-feed/",
+      "tags": [
+        "🔬 Research & Science"
+      ],
+      "description": "关注科研与科学领域的文章、论文或研究动态。"
+    },
+    {
+      "key": "https://journals.plos.org/plosone/feed/atom",
+      "name": "PLOS One",
+      "public_url": "https://journals.plos.org/plosone/feed/atom",
+      "tags": [
+        "🔬 Research & Science"
+      ],
+      "description": "关注科研与科学领域的文章、论文或研究动态。"
+    },
+    {
+      "key": "https://www.quantamagazine.org/feed/",
+      "name": "Quanta Magazine",
+      "public_url": "https://www.quantamagazine.org/feed/",
+      "tags": [
+        "🔬 Research & Science"
+      ],
+      "description": "关注科研与科学领域的文章、论文或研究动态。"
+    },
+    {
+      "key": "https://www.theguardian.com/science/space/rss",
+      "name": "Space | The Guardian",
+      "public_url": "https://www.theguardian.com/science/space/rss",
+      "tags": [
+        "🔬 Research & Science"
+      ],
+      "description": "关注科研与科学领域的文章、论文或研究动态。"
+    },
+    {
+      "key": "https://www.newscientist.com/subject/space/feed/",
+      "name": "Space – latest in science and technology | New Scientist",
+      "public_url": "https://www.newscientist.com/subject/space/feed/",
+      "tags": [
+        "🔬 Research & Science"
+      ],
+      "description": "关注科研与科学领域的文章、论文或研究动态。"
+    },
+    {
+      "key": "https://www.aljazeera.com/xml/rss/all.xml",
+      "name": "Al Jazeera – Breaking News, World News and Video from Al Jazeera",
+      "public_url": "https://www.aljazeera.com/xml/rss/all.xml",
+      "tags": [
+        "🗞️ News"
+      ],
+      "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。"
+    },
+    {
+      "key": "https://feeds.bbci.co.uk/news/world/rss.xml",
+      "name": "BBC News — News",
+      "public_url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+      "tags": [
+        "🗞️ News"
+      ],
+      "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。"
+    },
+    {
+      "key": "https://cointelegraph.com/rss/tag/blockchain",
+      "name": "Cointelegraph.com News",
+      "public_url": "https://cointelegraph.com/rss/tag/blockchain",
+      "tags": [
+        "🗞️ News"
+      ],
+      "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。"
+    },
+    {
+      "key": "https://feed.infoq.com/",
+      "name": "InfoQ — News",
+      "public_url": "https://feed.infoq.com/",
+      "tags": [
+        "🗞️ News"
+      ],
+      "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。"
+    },
+    {
+      "key": "https://feeds.npr.org/1004/rss.xml",
+      "name": "NPR Topics: World",
+      "public_url": "https://feeds.npr.org/1004/rss.xml",
+      "tags": [
+        "🗞️ News"
+      ],
+      "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。"
+    },
+    {
+      "key": "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml",
+      "name": "NYT > Technology",
+      "public_url": "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml",
+      "tags": [
+        "🗞️ News"
+      ],
+      "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。"
+    },
+    {
+      "key": "https://www.propublica.org/feeds/propublica/main",
+      "name": "ProPublica",
+      "public_url": "https://www.propublica.org/feeds/propublica/main",
+      "tags": [
+        "🗞️ News"
+      ],
+      "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。"
+    },
+    {
+      "key": "https://www.theguardian.com/world/rss",
+      "name": "World news | The Guardian",
+      "public_url": "https://www.theguardian.com/world/rss",
+      "tags": [
+        "🗞️ News"
+      ],
+      "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。"
+    },
+    {
+      "key": "https://www.solidot.org/index.rss",
+      "name": "奇客Solidot–传递最新科技情报",
+      "public_url": "https://www.solidot.org/index.rss",
+      "tags": [
+        "🗞️ News"
+      ],
+      "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。"
+    },
+    {
+      "key": "https://rss.huxiu.com/",
+      "name": "虎嗅",
+      "public_url": "https://rss.huxiu.com/",
+      "tags": [
+        "🗞️ News"
+      ],
+      "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。"
+    },
+    {
+      "key": "https://www.tmtpost.com/feed",
+      "name": "钛媒体：引领未来商业与生活新知",
+      "public_url": "https://www.tmtpost.com/feed",
+      "tags": [
+        "🗞️ News"
+      ],
+      "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。"
+    },
+    {
+      "key": "https://61.life/feed.xml",
+      "name": "61’s life",
+      "public_url": "https://61.life/feed.xml",
+      "tags": [
+        "🎨 Product & Design"
+      ],
+      "description": "主要写创业、管理、产品。"
+    },
+    {
+      "key": "https://cdjax.com/?feed=rss2",
+      "name": "jax",
+      "public_url": "https://cdjax.com/?feed=rss2",
+      "tags": [
+        "🎨 Product & Design"
+      ],
+      "description": "主要写产品、数码、随笔。"
+    },
+    {
+      "key": "https://www.velasx.com/feed",
+      "name": "Velas电波站",
+      "public_url": "https://www.velasx.com/feed",
+      "tags": [
+        "🎨 Product & Design"
+      ],
+      "description": "主要写动画、游戏、小说、设计。"
+    },
+    {
+      "key": "https://www.skyue.com/feed/",
+      "name": "拾月的博客",
+      "public_url": "https://www.skyue.com/feed/",
+      "tags": [
+        "🎨 Product & Design"
+      ],
+      "description": "主要写生活、股票投资、产品经理、软件数码。"
+    },
+    {
+      "key": "https://wechat2rss.xlab.app/feed/31e04606d37f684059e23a8fd3e05f1db0186495.xml",
+      "name": "阿里云设计中心",
+      "public_url": "https://wechat2rss.xlab.app/feed/31e04606d37f684059e23a8fd3e05f1db0186495.xml",
+      "tags": [
+        "🎨 Product & Design"
+      ],
+      "description": "公众号，主要关注产品设计与用户体验。"
+    },
+    {
+      "key": "https://www.macin.org/atom.xml",
+      "name": "Macin",
+      "public_url": "https://www.macin.org/atom.xml",
+      "tags": [
+        "💼 Business & Startups"
+      ],
+      "description": "主要写分享、投资、学习、Crypto。"
+    },
+    {
+      "key": "https://1q43.blog/feed",
+      "name": "虹线",
+      "public_url": "https://1q43.blog/feed",
+      "tags": [
+        "💼 Business & Startups"
+      ],
+      "description": "主要写商业、社科、科技、生活。"
+    },
+    {
+      "key": "https://raymondhouch.com/feed",
+      "name": "雷蒙三十｜幫助忙碌現代人的聰明工作、好好生活的生產力指南",
+      "public_url": "https://raymondhouch.com/feed",
+      "tags": [
+        "💼 Business & Startups"
+      ],
+      "description": "主要写创业、数码、数字游民、生产力工具。"
+    },
+    {
+      "key": "https://blog.abb00717.com/index.xml",
+      "name": "ABB00717",
+      "public_url": "https://blog.abb00717.com/index.xml",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写資訊安全、程式設計、技術、寫作。"
+    },
+    {
+      "key": "https://anotherdayu.com/feed/",
+      "name": "Another Dayu",
+      "public_url": "https://anotherdayu.com/feed/",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写日常、流行病与卫生统计、科技、数码。"
+    },
+    {
+      "key": "https://blog.dort.me/rss.xml",
+      "name": "Dort 的博客",
+      "public_url": "https://blog.dort.me/rss.xml",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写随笔、生活、记录。"
+    },
+    {
+      "key": "https://happyxiao.com/feed",
+      "name": "happy xiao",
+      "public_url": "https://happyxiao.com/feed",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写个人成长。"
+    },
+    {
+      "key": "https://jaketao.com/feed/",
+      "name": "Jake blog",
+      "public_url": "https://jaketao.com/feed/",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写硅谷科技、主机游戏、留学旅居、跨境电商。"
+    },
+    {
+      "key": "https://jame.work/feed.xml",
+      "name": "Jame",
+      "public_url": "https://jame.work/feed.xml",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写随笔。"
+    },
+    {
+      "key": "https://www.justzht.com/rss/",
+      "name": "JustZht's EchoChamber",
+      "public_url": "https://www.justzht.com/rss/",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写随笔。"
+    },
+    {
+      "key": "https://chriszheng.science/atom.xml",
+      "name": "M-x Chris-An-Emacser",
+      "public_url": "https://chriszheng.science/atom.xml",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写随笔、Emacs。"
+    },
+    {
+      "key": "https://www.seis-jun.xyz/atom.xml",
+      "name": "SEISAMUSE",
+      "public_url": "https://www.seis-jun.xyz/atom.xml",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写科研、学习、生活。"
+    },
+    {
+      "key": "https://shuiba.co/feed",
+      "name": "Shuibaco • 水八口",
+      "public_url": "https://shuiba.co/feed",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写日常、旅途、思考。"
+    },
+    {
+      "key": "https://www.wsh233.cn/feed.xml",
+      "name": "WSH",
+      "public_url": "https://www.wsh233.cn/feed.xml",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写生活、随笔、GISer、地信。"
+    },
+    {
+      "key": "https://yipai.me/feed",
+      "name": "一派胡言 · Blog",
+      "public_url": "https://yipai.me/feed",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写胡一派、随笔、不折腾。"
+    },
+    {
+      "key": "https://mianao.info/atom.xml",
+      "name": "不吐不快",
+      "public_url": "https://mianao.info/atom.xml",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写生活、硬件、教程、DIY。"
+    },
+    {
+      "key": "https://www.changhai.org/feed.xml",
+      "name": "卢昌海个人主页",
+      "public_url": "https://www.changhai.org/feed.xml",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写物理、科普。"
+    },
+    {
+      "key": "https://yinji.org/feed",
+      "name": "印记",
+      "public_url": "https://yinji.org/feed",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写生活、随笔。"
+    },
+    {
+      "key": "https://fourhappylions.com/index.xml",
+      "name": "四喜丸子",
+      "public_url": "https://fourhappylions.com/index.xml",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写养娃、家庭、海外生活。"
+    },
+    {
+      "key": "https://wangjiezhe.com/atom.xml",
+      "name": "如鱼饮水",
+      "public_url": "https://wangjiezhe.com/atom.xml",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写数学、随笔。"
+    },
+    {
+      "key": "https://localfreedom.pages.dev/index.xml",
+      "name": "局域自由博客",
+      "public_url": "https://localfreedom.pages.dev/index.xml",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写软件、隐私、笔记、本地化。"
+    },
+    {
+      "key": "https://blog.moran.im/rss.xml",
+      "name": "廊桥遗梦",
+      "public_url": "https://blog.moran.im/rss.xml",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写随笔、生活、教程。"
+    },
+    {
+      "key": "https://blog.mcenahle.page/feed.xml",
+      "name": "梅之夏",
+      "public_url": "https://blog.mcenahle.page/feed.xml",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写随笔、记录、成长、学习。"
+    },
+    {
+      "key": "https://iluc.cn/rss.xml",
+      "name": "涵哲子居",
+      "public_url": "https://iluc.cn/rss.xml",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写日常、随笔、乱七八糟。"
+    },
+    {
+      "key": "https://zhurongshuo.com/index.xml",
+      "name": "祝融说。",
+      "public_url": "https://zhurongshuo.com/index.xml",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写法不净空，觉无性也。。"
+    },
+    {
+      "key": "https://blog.giveanornot.com/index.xml",
+      "name": "資工小廢物 - JN",
+      "public_url": "https://blog.giveanornot.com/index.xml",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写來自台灣、生活反思、社群媒體負面影響、開源軟體。"
+    },
+    {
+      "key": "https://www.xianrenlife.com/feeds/posts/default",
+      "name": "闲人LIFE",
+      "public_url": "https://www.xianrenlife.com/feeds/posts/default",
+      "tags": [
+        "✍️ Personal Blogs"
+      ],
+      "description": "主要写随笔、小说、书评。"
+    },
+    {
+      "key": "https://news.ycombinator.com/rss",
+      "name": "Hacker News",
+      "public_url": "https://news.ycombinator.com/rss",
+      "tags": [
+        "👥 Communities"
+      ],
+      "description": "Hacker News 首页的热门技术、创业与产品讨论。"
+    },
+    {
+      "key": "https://linuxdorss.longpink.com/wiki.xml",
+      "name": "LINUX DO · 文档共建",
+      "public_url": "https://linuxdorss.longpink.com/wiki.xml",
+      "tags": [
+        "👥 Communities"
+      ],
+      "description": "LINUX DO 社区的教程、学习笔记与共建文档。"
+    },
+    {
+      "key": "https://lobste.rs/rss",
+      "name": "Lobsters",
+      "public_url": "https://lobste.rs/rss",
+      "tags": [
+        "👥 Communities"
+      ],
+      "description": "由社区筛选的软件、编程与计算机科学讨论。"
+    },
+    {
+      "key": "https://discourse.nixos.org/c/dev/14.rss?order=created",
+      "name": "NixOS Development",
+      "public_url": "https://discourse.nixos.org/c/dev/14.rss?order=created",
+      "tags": [
+        "👥 Communities"
+      ],
+      "description": "NixOS 开发、打包与基础设施讨论。"
+    },
+    {
+      "key": "https://www.v2ex.com/feed/tab/tech.xml",
+      "name": "V2EX · 技术",
+      "public_url": "https://www.v2ex.com/feed/tab/tech.xml",
+      "tags": [
+        "👥 Communities"
+      ],
+      "description": "V2EX 技术板块的新主题，适合只订阅编程、架构与开发工具讨论。"
+    },
+    {
+      "key": "https://kaix.in/feed/",
+      "name": "KAIX.IN",
+      "public_url": "https://kaix.in/feed/",
+      "tags": [
+        "📚 Culture & Ideas"
+      ],
+      "description": "主要写读书、咖啡、随笔。"
+    },
+    {
+      "key": "https://kangaroogao.com/atom.xml",
+      "name": "Maohang Gao's Blog",
+      "public_url": "https://kangaroogao.com/atom.xml",
+      "tags": [
+        "📚 Culture & Ideas"
+      ],
+      "description": "主要写游记、读书笔记、随笔。"
+    },
+    {
+      "key": "https://shinekid.com/feed/",
+      "name": "ShineKid",
+      "public_url": "https://shinekid.com/feed/",
+      "tags": [
+        "📚 Culture & Ideas"
+      ],
+      "description": "主要写生活、影视、文学。"
+    },
+    {
+      "key": "https://tripper.press/atom.xml",
+      "name": "Tripper Press - Take Photo, Think Seriously.",
+      "public_url": "https://tripper.press/atom.xml",
+      "tags": [
+        "📚 Culture & Ideas"
+      ],
+      "description": "主要写摄影、文化产业、新媒体。"
+    },
+    {
+      "key": "https://dongjunke.cn/atom.xml",
+      "name": "东评西就",
+      "public_url": "https://dongjunke.cn/atom.xml",
+      "tags": [
+        "📚 Culture & Ideas"
+      ],
+      "description": "主要写社交媒体、科技互联网、思考、读书。"
+    },
+    {
+      "key": "https://wechat2rss.xlab.app/feed/313326d41db4f54b1cc09e7c986a5ac4e5f88ca0.xml",
+      "name": "先生制造",
+      "public_url": "https://wechat2rss.xlab.app/feed/313326d41db4f54b1cc09e7c986a5ac4e5f88ca0.xml",
+      "tags": [
+        "📚 Culture & Ideas"
+      ],
+      "description": "公众号，主要关注人物与社会记录。"
+    },
+    {
+      "key": "https://kqh.me/index.xml",
+      "name": "赫赫文王",
+      "public_url": "https://kqh.me/index.xml",
+      "tags": [
+        "📚 Culture & Ideas"
+      ],
+      "description": "主要写历史、人文、艺术、日常。"
+    },
+    {
+      "key": "https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw",
+      "name": "3Blue1Brown",
+      "public_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw",
+      "tags": [
+        "🎬 Videos"
+      ],
+      "description": "视频创作者的 RSS 频道，订阅获取新发布的内容。"
+    },
+    {
+      "key": "https://www.youtube.com/feeds/videos.xml?channel_id=UCcefcZRL2oaA_uBNeo5UOWg",
+      "name": "Y Combinator",
+      "public_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCcefcZRL2oaA_uBNeo5UOWg",
+      "tags": [
+        "🎬 Videos"
+      ],
+      "description": "视频创作者的 RSS 频道，订阅获取新发布的内容。"
+    },
+    {
+      "key": "https://feeds.megaphone.fm/darknetdiaries",
+      "name": "Darknet Diaries",
+      "public_url": "https://feeds.megaphone.fm/darknetdiaries",
+      "tags": [
+        "🎧 Podcasts"
+      ],
+      "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。"
+    },
+    {
+      "key": "https://feeds.simplecast.com/gvtxUiIf",
+      "name": "Hanselminutes with Scott Hanselman",
+      "public_url": "https://feeds.simplecast.com/gvtxUiIf",
+      "tags": [
+        "🎧 Podcasts"
+      ],
+      "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。"
+    },
+    {
+      "key": "https://investlikethebest.libsyn.com/rss",
+      "name": "Invest Like the Best with Patrick O'Shaughnessy",
+      "public_url": "https://investlikethebest.libsyn.com/rss",
+      "tags": [
+        "🎧 Podcasts"
+      ],
+      "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。"
+    },
+    {
+      "key": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/5e74b52c418a84a046ecaceb",
+      "name": "What's Next｜科技早知道",
+      "public_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/5e74b52c418a84a046ecaceb",
+      "tags": [
+        "🎧 Podcasts"
+      ],
+      "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。"
+    },
+    {
+      "key": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/62382c1103bea1ebfffa1c00",
+      "name": "半拿铁 | 商业沉浮录",
+      "public_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/62382c1103bea1ebfffa1c00",
+      "tags": [
+        "🎧 Podcasts"
+      ],
+      "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。"
+    },
+    {
+      "key": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/60de7c003dd577b40d5a40f3",
+      "name": "声动早咖啡",
+      "public_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/60de7c003dd577b40d5a40f3",
+      "tags": [
+        "🎧 Podcasts"
+      ],
+      "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。"
+    },
+    {
+      "key": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/5e4ee557418a84a0466737b7",
+      "name": "忽左忽右",
+      "public_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/5e4ee557418a84a0466737b7",
+      "tags": [
+        "🎧 Podcasts"
+      ],
+      "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。"
+    },
+    {
+      "key": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/5e4515bd418a84a046e2b11a",
+      "name": "文化有限",
+      "public_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/5e4515bd418a84a046e2b11a",
+      "tags": [
+        "🎧 Podcasts"
+      ],
+      "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。"
+    },
+    {
+      "key": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/61933ace1b4320461e91fd55",
+      "name": "晚点聊 LateTalk",
+      "public_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/61933ace1b4320461e91fd55",
+      "tags": [
+        "🎧 Podcasts"
+      ],
+      "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。"
+    },
+    {
+      "key": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/6013f9f58e2f7ee375cf4216",
+      "name": "知行小酒馆",
+      "public_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/6013f9f58e2f7ee375cf4216",
+      "tags": [
+        "🎧 Podcasts"
+      ],
+      "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。"
+    },
+    {
+      "key": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/5e5c52c9418a84a04625e6cc",
+      "name": "硅谷101 — Podcast",
+      "public_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/5e5c52c9418a84a04625e6cc",
+      "tags": [
+        "🎧 Podcasts"
+      ],
+      "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。"
     }
   ]
 }

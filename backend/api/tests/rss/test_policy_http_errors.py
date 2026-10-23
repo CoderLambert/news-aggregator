@@ -7,7 +7,7 @@ from api.rss.operations import OperationError
 
 @pytest.mark.parametrize('code', [
     'source_collection_not_permitted', 'full_content_policy_not_permitted',
-    'unsupported_association_policy', 'full_content_disabled',
+    'unsupported_association_policy', 'full_content_disabled', 'wechat_feed_only',
 ])
 def test_collection_policy_refusals_are_safe_forbidden_responses(code):
     class RefusedView(RssAPIView):

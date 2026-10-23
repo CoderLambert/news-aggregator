@@ -511,6 +511,11 @@ class EngineAdapter:
         if not self.config.full_content_enabled:
             raise EngineError('full_content_disabled')
         before = self.get_entry(entry_id)
+        from api.rss.feed_policy import is_wechat_article_url
+        if is_wechat_article_url(before.url):
+            # Defence at the physical write boundary, even for stale intents.
+            # WeChat content comes from the RSS bridge, never fetch-content.
+            raise EngineError('wechat_feed_only')
 
         def persist():
             response = self._session.get(self._client._get_endpoint(f"/entries/{entry_id}/fetch-content"),

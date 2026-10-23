@@ -1,34 +1,30 @@
 {
-  "sha256": "5834f66ea0cdf00794fecfe8ef24e005c29815bdfb392a3222219734ac2a5987",
+  "sha256": "84600e5cfd0a9215b42fe779f57d6f10d87db56bd76606dc80fc98fe77f3b106",
   "schema_version": 1,
-  "metadata_revision": "newshub-curated-v1",
-  "provenance_commit": "17d48915bbacd6a448578c64676a6dac4c2f263e",
-  "license": "CC0-1.0 AND AGPL-3.0-only",
   "upstream": {
-    "id": "plenaryapp/awesome-rss-feeds",
-    "commit": "9ab2482cae9031a5a39635c887fcfc8ece7e130a",
+    "id": "fuxiaoai/tidings-rss",
+    "commit": "f9b54abf9dd3e7af2a1dda12bca06c8fe8b57d7b",
     "license": "CC0-1.0",
-    "url": "https://github.com/plenaryapp/awesome-rss-feeds",
-    "files": {
-      "recommended/with_category/Programming.opml": {
-        "sha256": "0c3e43dc3fdecf2d8f99e4192d85d4a0d35ccbed2db9c9ef01bd357e85745333",
-        "url": "https://github.com/plenaryapp/awesome-rss-feeds/blob/9ab2482cae9031a5a39635c887fcfc8ece7e130a/recommended/with_category/Programming.opml"
-      },
-      "recommended/with_category/Web%20Development.opml": {
-        "sha256": "687624b4102e35b2a2231ae41f2c6ccecec4c8c3ce0f930d357be312a9695f39",
-        "url": "https://github.com/plenaryapp/awesome-rss-feeds/blob/9ab2482cae9031a5a39635c887fcfc8ece7e130a/recommended/with_category/Web%20Development.opml"
-      }
-    },
-    "license_sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
-    "included_entries": 38,
-    "excluded_insecure_http_urls": [
-      "http://feeds.codenewbie.org/cnpodcast.xml",
-      "http://feeds.feedburner.com/GDBcode",
-      "http://feeds.feedburner.com/ProgrammingThrowdown",
-      "http://feeds.hanselman.com/ScottHanselman",
-      "http://scripting.com/rss.xml",
-      "http://feeds.feedburner.com/se-radio",
-      "http://6figuredev.com/feed/rss/"
-    ]
+    "url": "https://github.com/fuxiaoai/tidings-rss",
+    "path": "opml/tidings-top200.opml",
+    "sha256": "642a56712e128fa37c8239845d33ea7c8c216b69cf9f9087924a6db208db9e04",
+    "license_path": "tidings-CC0-1.0.txt",
+    "license_sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499"
+  },
+  "selected_entries": 200,
+  "included_entries": 194,
+  "restricted_entries": 6,
+  "metadata_revision": "tidings-top200-descriptions-v1",
+  "import_report": {
+    "path": "tidings-import-report.json",
+    "sha256": "99e96acbaddb861cf7cafb620b2c8c6f8270deb01467ccf778db750c3ae22088"
+  },
+  "description_input": {
+    "path": "data/feeds.json",
+    "commit": "f9b54abf9dd3e7af2a1dda12bca06c8fe8b57d7b",
+    "sha256": "614f39163c2b36329db6fe2e3b5a48f7d799c14e2f008050f59f669f051610d2",
+    "selected_entries": 194,
+    "receipt": "tidings-descriptions.json",
+    "receipt_sha256": "f57bb62c4ac43e109214603b4277d3df60658c2c58b4582d7503d482572cfe13"
   }
 }

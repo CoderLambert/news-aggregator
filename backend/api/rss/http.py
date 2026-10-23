@@ -44,7 +44,7 @@ class RssAPIView(APIView):
             if exc.code == 'not_found':
                 from rest_framework.exceptions import NotFound
                 exc = NotFound()
-            elif exc.code in {'refetch_not_allowed', 'invalid_actor',
+            elif exc.code in {'refetch_not_allowed', 'invalid_actor', 'wechat_feed_only',
                               'source_collection_not_permitted', 'full_content_policy_not_permitted',
                               'unsupported_association_policy', 'full_content_disabled'}:
                 exc = PermissionDenied('当前策略不允许此操作。', code=exc.code)

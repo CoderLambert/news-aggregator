@@ -1,0 +1,1602 @@
+[
+  {
+    "name": "AI 开发者日报",
+    "feed_url": "https://ainews.liduos.com/rss.xml",
+    "website_url": "https://ainews.liduos.com",
+    "category": "🤖 Artificial Intelligence",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Anthropic News",
+    "feed_url": "https://rsshub.bestblogs.dev/anthropic/news",
+    "website_url": "https://www.anthropic.com/news",
+    "category": "🤖 Artificial Intelligence",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Apple Machine Learning Research",
+    "feed_url": "https://machinelearning.apple.com/rss.xml",
+    "website_url": "https://machinelearning.apple.com",
+    "category": "🤖 Artificial Intelligence",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Artificial Intelligence",
+    "feed_url": "https://aws.amazon.com/blogs/amazon-ai/feed/",
+    "website_url": "https://aws.amazon.com/blogs/machine-learning/",
+    "category": "🤖 Artificial Intelligence",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "cs.CL updates on arXiv.org",
+    "feed_url": "https://export.arxiv.org/rss/cs.CL",
+    "website_url": "http://rss.arxiv.org/rss/cs.CL",
+    "category": "🤖 Artificial Intelligence",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "DeepSeek",
+    "feed_url": "https://wechat2rss.bestblogs.dev/feed/1709da4f538d4ce4fb6d7a8ba1a5a1c297919601.xml",
+    "website_url": "https://wechat2rss.bestblogs.dev/feed/1709da4f538d4ce4fb6d7a8ba1a5a1c297919601.xml",
+    "category": "🤖 Artificial Intelligence",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Google DeepMind News",
+    "feed_url": "https://deepmind.com/blog/feed/basic/",
+    "website_url": "https://deepmind.google/blog/",
+    "category": "🤖 Artificial Intelligence",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Hugging Face - Blog",
+    "feed_url": "https://huggingface.co/blog/feed.xml",
+    "website_url": "https://huggingface.co/blog",
+    "category": "🤖 Artificial Intelligence",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "MIT News - Artificial intelligence",
+    "feed_url": "https://news.mit.edu/rss/topic/artificial-intelligence2",
+    "website_url": "https://news.mit.edu/rss/topic/artificial-intelligence2",
+    "category": "🤖 Artificial Intelligence",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "OpenAI News",
+    "feed_url": "https://openai.com/news/rss.xml",
+    "website_url": "https://openai.com/news",
+    "category": "🤖 Artificial Intelligence",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Simon Willison's Weblog",
+    "feed_url": "https://simonwillison.net/atom/everything/",
+    "website_url": "http://simonwillison.net/",
+    "category": "🤖 Artificial Intelligence",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "The latest research from Google",
+    "feed_url": "https://research.google/blog/rss/",
+    "website_url": "https://research.google/blog/",
+    "category": "🤖 Artificial Intelligence",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "我爱计算机视觉",
+    "feed_url": "https://wechat2rss.xlab.app/feed/b81ffcfff1107b5265cd7e39de610dc7ca72caf4.xml",
+    "website_url": "https://wechat2rss.xlab.app/feed/b81ffcfff1107b5265cd7e39de610dc7ca72caf4.xml",
+    "category": "🤖 Artificial Intelligence",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "新智元",
+    "feed_url": "https://wechat2rss.xlab.app/feed/ede30346413ea70dbef5d485ea5cbb95cca446e7.xml",
+    "website_url": "https://wechat2rss.xlab.app/feed/ede30346413ea70dbef5d485ea5cbb95cca446e7.xml",
+    "category": "🤖 Artificial Intelligence",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "智谱",
+    "feed_url": "https://wechat2rss.bestblogs.dev/feed/433d2134dca54d80804daf32e8be546155be3300.xml",
+    "website_url": "https://wechat2rss.bestblogs.dev/feed/433d2134dca54d80804daf32e8be546155be3300.xml",
+    "category": "🤖 Artificial Intelligence",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "机器之心",
+    "feed_url": "https://wechat2rss.bestblogs.dev/feed/8d97af31b0de9e48da74558af128a4673d78c9a3.xml",
+    "website_url": "https://wechat2rss.bestblogs.dev/feed/8d97af31b0de9e48da74558af128a4673d78c9a3.xml",
+    "category": "🤖 Artificial Intelligence",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "腾讯混元",
+    "feed_url": "https://wechat2rss.bestblogs.dev/feed/306ce19a1ca590c9c2df781789e828d1acfa1356.xml",
+    "website_url": "https://wechat2rss.bestblogs.dev/feed/306ce19a1ca590c9c2df781789e828d1acfa1356.xml",
+    "category": "🤖 Artificial Intelligence",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "通义实验室",
+    "feed_url": "https://wechat2rss.bestblogs.dev/feed/4ebee6222ae08705b8aabc9116f0defbcb6b17c6.xml",
+    "website_url": "https://wechat2rss.bestblogs.dev/feed/4ebee6222ae08705b8aabc9116f0defbcb6b17c6.xml",
+    "category": "🤖 Artificial Intelligence",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "量子位",
+    "feed_url": "https://www.qbitai.com/feed",
+    "website_url": "https://www.qbitai.com",
+    "category": "🤖 Artificial Intelligence",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Abyss的小屋",
+    "feed_url": "https://www.rsnocsi.cn/feed",
+    "website_url": "https://www.rsnocsi.cn/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Amiya的书桌",
+    "feed_url": "https://blog.sayori.org/rss.xml",
+    "website_url": "https://blog.sayori.org/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Android Performance",
+    "feed_url": "https://www.androidperformance.com/atom.xml",
+    "website_url": "https://androidperformance.com/atom.xml",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Bboysoul's Blog",
+    "feed_url": "https://www.bboy.app/atom.xml",
+    "website_url": "https://www.bboy.app/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Canva - Engineering Blog",
+    "feed_url": "https://www.canva.dev/blog/engineering/feed.xml",
+    "website_url": "https://www.canva.dev/blog/engineering/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Databricks",
+    "feed_url": "https://www.databricks.com/feed",
+    "website_url": "https://www.databricks.com",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Elastic Blog - Elasticsearch, Kibana, and ELK Stack",
+    "feed_url": "https://www.elastic.co/blog/feed",
+    "website_url": "https://www.elastic.co",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Engineering at Slack",
+    "feed_url": "https://slack.engineering/feed/",
+    "website_url": "https://slack.engineering",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Eric's Blog",
+    "feed_url": "https://wsdjeg.net/feed.xml",
+    "website_url": "https://wsdjeg.net/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Etsy Engineering | Code as Craft",
+    "feed_url": "https://codeascraft.com/feed/atom/",
+    "website_url": "http://www.etsy.com/codeascraft/rss",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "freeCodeCamp Programming Tutorials: Python, JavaScript, Git & More",
+    "feed_url": "https://www.freecodecamp.org/news/rss/",
+    "website_url": "https://www.freecodecamp.org/news/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "icodex | 前端技术博客 | 专注 React、TypeScript、AI 与性能优化 Blog",
+    "feed_url": "https://icodex.me/atom.xml",
+    "website_url": "https://icodex.me/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "laike9m's blog",
+    "feed_url": "https://laike9m.com/blog/rss/",
+    "website_url": "https://laike9m.com/blog/rss",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "LiesAuer's Blog",
+    "feed_url": "https://www.liesauer.net/blog/feed/",
+    "website_url": "https://www.liesauer.net/blog/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "MacTalk-池建强的 Blog",
+    "feed_url": "http://macshuo.com/?feed=rss2",
+    "website_url": "https://macshuo.com",
+    "category": "🛠️ Engineering & Technology",
+    "status": "restricted",
+    "reason": "Current subscription policy requires HTTPS; original HTTP URL retained without rewriting."
+  },
+  {
+    "name": "Martin Fowler",
+    "feed_url": "https://martinfowler.com/feed.atom",
+    "website_url": "https://martinfowler.com/feed.atom",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Microsoft Azure Blog",
+    "feed_url": "https://azure.microsoft.com/en-us/blog/feed/",
+    "website_url": "https://azure.microsoft.com/en-us/blog/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Netflix TechBlog - Medium",
+    "feed_url": "https://netflixtechblog.com/feed",
+    "website_url": "https://netflixtechblog.com?source=rss----2615bd06b42e---4",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Nicksxs's Blog",
+    "feed_url": "https://nicksxs.me/atom.xml",
+    "website_url": "https://nicksxs.me/atom.xml",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Node.js Blog",
+    "feed_url": "https://nodejs.org/en/feed/blog.xml",
+    "website_url": "https://nodejs.org/en",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "obaby 𝐢‍𝐧⃝ void",
+    "feed_url": "https://h4ck.org.cn/feed/",
+    "website_url": "https://zhongxiaojie.cn/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "OneV's Den",
+    "feed_url": "https://onevcat.com/feed.xml",
+    "website_url": "https://onevcat.com",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "pseudoyu",
+    "feed_url": "https://www.pseudoyu.com/zh/index.xml",
+    "website_url": "https://www.pseudoyu.com/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Python Insider",
+    "feed_url": "https://blog.python.org/feeds/posts/default",
+    "website_url": "https://blog.python.org/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Rust Blog",
+    "feed_url": "https://blog.rust-lang.org/feed.xml",
+    "website_url": "https://blog.rust-lang.org/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "rxliuli blog",
+    "feed_url": "https://blog.rxliuli.com/atom.xml",
+    "website_url": "https://blog.rxliuli.com/atom.xml",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "RYANUO",
+    "feed_url": "https://ryanuo.cc/sitemap.xml",
+    "website_url": "https://ryanuo.cc",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Seven's blog",
+    "feed_url": "https://blog.diqigan.cn/atom.xml",
+    "website_url": "https://blog.diqigan.cn/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "sjdhome",
+    "feed_url": "https://sjdhome.com/blog/atom.xml",
+    "website_url": "https://sjdhome.com/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "smallyu的博客",
+    "feed_url": "https://smallyu.net/atom.xml",
+    "website_url": "https://smallyu.net/atom.xml",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Spotify Engineering",
+    "feed_url": "https://engineering.atspotify.com/feed/",
+    "website_url": "https://engineering.atspotify.com/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Stack Overflow Blog",
+    "feed_url": "https://blog.stackoverflow.com/feed/",
+    "website_url": "https://stackoverflow.blog/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Stripe Blog",
+    "feed_url": "https://stripe.com/blog/feed.rss",
+    "website_url": "https://stripe.com/blog",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Supabase Blog",
+    "feed_url": "https://supabase.com/rss.xml",
+    "website_url": "https://supabase.com",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Taxodium",
+    "feed_url": "https://taxodium.ink/rss.xml",
+    "website_url": "https://taxodium.ink/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "The Airbnb Tech Blog - Medium",
+    "feed_url": "https://medium.com/feed/airbnb-engineering",
+    "website_url": "https://medium.com/airbnb-engineering?source=rss----53c7c27702d5---4",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "The Cloudflare Blog",
+    "feed_url": "https://blog.cloudflare.com/rss",
+    "website_url": "https://blog.cloudflare.com/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "The GitHub Blog",
+    "feed_url": "https://github.blog/feed/",
+    "website_url": "https://github.blog/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "The JetBrains Blog",
+    "feed_url": "https://blog.jetbrains.com/feed/",
+    "website_url": "https://blog.jetbrains.com",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "The New Stack",
+    "feed_url": "https://thenewstack.io/feed/",
+    "website_url": "https://thenewstack.io/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Tianhe Gao",
+    "feed_url": "https://tianheg.co/index.xml",
+    "website_url": "https://tianheg.co/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Tw93 Blog",
+    "feed_url": "https://tw93.fun/feed.xml",
+    "website_url": "https://tw93.fun",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Usubeni Fantasy",
+    "feed_url": "https://ssshooter.com/rss.xml",
+    "website_url": "https://ssshooter.com/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Vercel News",
+    "feed_url": "https://vercel.com/atom",
+    "website_url": "https://vercel.com/atom",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Weishu's Notes",
+    "feed_url": "https://weishu.me/atom.xml",
+    "website_url": "https://weishu.me/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Yiran's Blog",
+    "feed_url": "https://zdyxry.github.io/atom.xml",
+    "website_url": "https://zdyxry.github.io/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "东东's Blog",
+    "feed_url": "https://blog.yasking.org/atom.xml",
+    "website_url": "https://blog.yasking.org/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "二丫讲梵",
+    "feed_url": "https://wiki.eryajf.net/rss.xml",
+    "website_url": "https://wiki.eryajf.net",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "农码生涯，无酒无花 – The coding life, no wine, no shine.",
+    "feed_url": "https://nicrosoft.net/blog/feed/",
+    "website_url": "https://nicrosoft.net/blog",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "千里之豪的格物垛",
+    "feed_url": "https://blog.gadore.top/feed.xml",
+    "website_url": "https://blog.gadore.top",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "卡瓦邦噶！",
+    "feed_url": "https://www.kawabangga.com/feed",
+    "website_url": "https://www.kawabangga.com",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "后端技术杂谈",
+    "feed_url": "https://rowkey.cn/atom.xml",
+    "website_url": "https://www.rowkey.cn/atom.xml",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "唐巧的博客",
+    "feed_url": "https://blog.devtang.com/atom.xml",
+    "website_url": "https://blog.devtang.com/atom.xml",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "喵喵小站・博客志",
+    "feed_url": "https://www.mmbkz.cn/feed",
+    "website_url": "https://www.mmbkz.cn/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "夜法之书",
+    "feed_url": "https://blog.17lai.site/atom.xml",
+    "website_url": "https://blog.17lai.site",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "如有乐享",
+    "feed_url": "https://51.ruyo.net/feed",
+    "website_url": "https://51.ruyo.net",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "寒夜雨",
+    "feed_url": "https://www.coderlock.site/index.php/feed/",
+    "website_url": "https://www.coderlock.site/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "张洪Heo",
+    "feed_url": "https://blog.zhheo.com/rss.xml",
+    "website_url": "https://blog.zhheo.com/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "张鑫旭-鑫空间-鑫生活",
+    "feed_url": "http://www.zhangxinxu.com/wordpress/?feed=rss2",
+    "website_url": "https://www.zhangxinxu.com/wordpress",
+    "category": "🛠️ Engineering & Technology",
+    "status": "restricted",
+    "reason": "Current subscription policy requires HTTPS; original HTTP URL retained without rewriting."
+  },
+  {
+    "name": "愆伏",
+    "feed_url": "https://www.tortorse.com/atom.xml",
+    "website_url": "https://www.tortorse.com/atom.xml",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "王圆圆 - ICONPIK",
+    "feed_url": "https://www.iconpik.com/rss/",
+    "website_url": "https://www.iconpik.com/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "王福强的个人博客：一个架构士的思考与沉淀",
+    "feed_url": "https://afoo.me/feeds.xml",
+    "website_url": "http://afoo.me",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "皓子的小站",
+    "feed_url": "https://howiehz.top/rss.xml",
+    "website_url": "https://howiehz.top",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "粥里有勺糖",
+    "feed_url": "https://sugarat.top/feed.rss",
+    "website_url": "https://sugarat.top",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "维基萌",
+    "feed_url": "https://www.wikimoe.com/rss.php",
+    "website_url": "https://www.wikimoe.com",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "老范讲故事｜AI、大模型与商业世界的故事",
+    "feed_url": "http://lukefan.com/?feed=rss2",
+    "website_url": "https://lukefan.com",
+    "category": "🛠️ Engineering & Technology",
+    "status": "restricted",
+    "reason": "Current subscription policy requires HTTPS; original HTTP URL retained without rewriting."
+  },
+  {
+    "name": "胡涂说",
+    "feed_url": "https://hutusi.com/feed.xml",
+    "website_url": "https://hutusi.com",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "虹墨空间站",
+    "feed_url": "https://www.imaegoo.com/atom.xml",
+    "website_url": "https://www.imaegoo.com/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "豌豆花下猫",
+    "feed_url": "https://pythoncat.top/rss.xml",
+    "website_url": "https://pythoncat.top/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "阁子",
+    "feed_url": "https://dfine.tech/atom.xml",
+    "website_url": "https://dfine.tech/atom.xml",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "鸟窝",
+    "feed_url": "https://colobu.com/atom.xml",
+    "website_url": "https://colobu.com/",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "黑羽的个人博客",
+    "feed_url": "https://blog.thetbw.xyz/atom.xml",
+    "website_url": "https://blog.thetbw.xyz",
+    "category": "🛠️ Engineering & Technology",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "CISA",
+    "feed_url": "https://www.cisa.gov/news.xml",
+    "website_url": "https://www.cisa.gov/news-events",
+    "category": "🛡️ Security",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "FreeBuf 网络安全行业门户",
+    "feed_url": "https://www.freebuf.com/feed",
+    "website_url": "https://www.freebuf.com/",
+    "category": "🛡️ Security",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Krebs on Security",
+    "feed_url": "https://krebsonsecurity.com/feed/",
+    "website_url": "https://krebsonsecurity.com",
+    "category": "🛡️ Security",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Schneier on Security",
+    "feed_url": "https://www.schneier.com/blog/index.rdf",
+    "website_url": "https://www.schneier.com/",
+    "category": "🛡️ Security",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Security Affairs",
+    "feed_url": "https://securityaffairs.co/wordpress/feed",
+    "website_url": "https://securityaffairs.com/",
+    "category": "🛡️ Security",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "ZDNET Security",
+    "feed_url": "https://www.zdnet.com/topic/security/rss.xml",
+    "website_url": "https://www.zdnet.com/",
+    "category": "🛡️ Security",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "安全客",
+    "feed_url": "https://api.anquanke.com/data/v1/rss",
+    "website_url": "https://www.anquanke.com",
+    "category": "🛡️ Security",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "腾讯玄武实验室",
+    "feed_url": "https://wechat2rss.xlab.app/feed/923c0e2f33b6d39c8a826a90f185725f0edb10e8.xml",
+    "website_url": "https://wechat2rss.xlab.app/feed/923c0e2f33b6d39c8a826a90f185725f0edb10e8.xml",
+    "category": "🛡️ Security",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "36氪",
+    "feed_url": "https://www.36kr.com/feed",
+    "website_url": "http://36kr.com",
+    "category": "📰 Technology Media",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Ars Technica",
+    "feed_url": "https://feeds.arstechnica.com/arstechnica/index",
+    "website_url": "https://arstechnica.com",
+    "category": "📰 Technology Media",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Engadget",
+    "feed_url": "https://www.engadget.com/rss.xml",
+    "website_url": "https://www.engadget.com/",
+    "category": "📰 Technology Media",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "IT之家",
+    "feed_url": "https://www.ithome.com/rss/",
+    "website_url": "https://www.ithome.com/",
+    "category": "📰 Technology Media",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "MIT Technology Review",
+    "feed_url": "https://www.technologyreview.com/feed/",
+    "website_url": "https://www.technologyreview.com/",
+    "category": "📰 Technology Media",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "TechCrunch",
+    "feed_url": "https://techcrunch.com/feed/",
+    "website_url": "https://techcrunch.com/",
+    "category": "📰 Technology Media",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "The Verge — News",
+    "feed_url": "https://www.theverge.com/rss/index.xml",
+    "website_url": "https://www.theverge.com",
+    "category": "📰 Technology Media",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "WIRED",
+    "feed_url": "https://www.wired.com/feed/rss",
+    "website_url": "https://www.wired.com",
+    "category": "📰 Technology Media",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "少数派",
+    "feed_url": "https://sspai.com/feed",
+    "website_url": "https://sspai.com",
+    "category": "📰 Technology Media",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "爱范儿",
+    "feed_url": "https://www.ifanr.com/feed",
+    "website_url": "https://www.ifanr.com?utm_source=rss&utm_medium=rss&utm_campaign=",
+    "category": "📰 Technology Media",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "AIGC Weekly",
+    "feed_url": "https://quaily.com/op7418/feed/atom",
+    "website_url": "https://quaily.com/op7418/feed/atom",
+    "category": "📮 Tech Newsletters & Weeklies",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Golang Weekly",
+    "feed_url": "https://golangweekly.com/rss/",
+    "website_url": "https://golangweekly.com/",
+    "category": "📮 Tech Newsletters & Weeklies",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "JavaScript Weekly",
+    "feed_url": "https://javascriptweekly.com/rss/",
+    "website_url": "https://javascriptweekly.com/",
+    "category": "📮 Tech Newsletters & Weeklies",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Last Week in AI",
+    "feed_url": "https://lastweekin.ai/feed",
+    "website_url": "https://lastweekin.ai",
+    "category": "📮 Tech Newsletters & Weeklies",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "The Batch",
+    "feed_url": "https://rsshub.bestblogs.dev/deeplearning/the-batch",
+    "website_url": "https://www.deeplearning.ai/the-batch/",
+    "category": "📮 Tech Newsletters & Weeklies",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "This Week in Rust",
+    "feed_url": "https://this-week-in-rust.org/atom.xml",
+    "website_url": "https://this-week-in-rust.org/",
+    "category": "📮 Tech Newsletters & Weeklies",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "潮流周刊",
+    "feed_url": "https://weekly.tw93.fun/rss.xml",
+    "website_url": "https://weekly.tw93.fun/",
+    "category": "📮 Tech Newsletters & Weeklies",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "阮一峰的网络日志",
+    "feed_url": "https://www.ruanyifeng.com/blog/atom.xml",
+    "website_url": "https://www.ruanyifeng.com/blog/",
+    "category": "📮 Tech Newsletters & Weeklies",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "AAAS: Science: Table of Contents",
+    "feed_url": "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=science",
+    "website_url": "https://www.science.org/loi/science?af=R",
+    "category": "🔬 Research & Science",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "BBC News — Science",
+    "feed_url": "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+    "website_url": "https://www.bbc.co.uk/news/science_and_environment",
+    "category": "🔬 Research & Science",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "eLife: latest articles",
+    "feed_url": "https://elifesciences.org/rss/recent.xml",
+    "website_url": "https://elifesciences.org",
+    "category": "🔬 Research & Science",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "FlowingData",
+    "feed_url": "https://flowingdata.com/feed",
+    "website_url": "https://flowingdata.com",
+    "category": "🔬 Research & Science",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "NASA",
+    "feed_url": "https://www.nasa.gov/news-release/feed/",
+    "website_url": "https://www.nasa.gov",
+    "category": "🔬 Research & Science",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Nature",
+    "feed_url": "https://www.nature.com/nature.rss",
+    "website_url": "http://feeds.nature.com/nature/rss/current",
+    "category": "🔬 Research & Science",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "NYT > Science",
+    "feed_url": "https://rss.nytimes.com/services/xml/rss/nyt/Science.xml",
+    "website_url": "https://www.nytimes.com/section/science",
+    "category": "🔬 Research & Science",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Phys.org - latest science and technology news stories",
+    "feed_url": "https://phys.org/rss-feed/",
+    "website_url": "https://phys.org/",
+    "category": "🔬 Research & Science",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "PLOS One",
+    "feed_url": "https://journals.plos.org/plosone/feed/atom",
+    "website_url": "https://journals.plos.org/plosone/",
+    "category": "🔬 Research & Science",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Quanta Magazine",
+    "feed_url": "https://www.quantamagazine.org/feed/",
+    "website_url": "https://www.quantamagazine.org",
+    "category": "🔬 Research & Science",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Scientific American Content: Global",
+    "feed_url": "http://rss.sciam.com/ScientificAmerican-Global",
+    "website_url": "https://www.scientificamerican.com",
+    "category": "🔬 Research & Science",
+    "status": "restricted",
+    "reason": "Current subscription policy requires HTTPS; original HTTP URL retained without rewriting."
+  },
+  {
+    "name": "Space | The Guardian",
+    "feed_url": "https://www.theguardian.com/science/space/rss",
+    "website_url": "https://www.theguardian.com/science/space",
+    "category": "🔬 Research & Science",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Space – latest in science and technology | New Scientist",
+    "feed_url": "https://www.newscientist.com/subject/space/feed/",
+    "website_url": "https://www.newscientist.com/subject/space/",
+    "category": "🔬 Research & Science",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Al Jazeera – Breaking News, World News and Video from Al Jazeera",
+    "feed_url": "https://www.aljazeera.com/xml/rss/all.xml",
+    "website_url": "https://www.aljazeera.com",
+    "category": "🗞️ News",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "BBC News — News",
+    "feed_url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "website_url": "https://www.bbc.co.uk/news/world",
+    "category": "🗞️ News",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Cointelegraph.com News",
+    "feed_url": "https://cointelegraph.com/rss/tag/blockchain",
+    "website_url": "https://cointelegraph.com",
+    "category": "🗞️ News",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "InfoQ — News",
+    "feed_url": "https://feed.infoq.com/",
+    "website_url": "https://www.infoq.com",
+    "category": "🗞️ News",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "NPR Topics: World",
+    "feed_url": "https://feeds.npr.org/1004/rss.xml",
+    "website_url": "https://www.npr.org/templates/story/story.php?storyId=1004",
+    "category": "🗞️ News",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "NYT > Technology",
+    "feed_url": "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml",
+    "website_url": "https://www.nytimes.com/section/technology",
+    "category": "🗞️ News",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "ProPublica",
+    "feed_url": "https://www.propublica.org/feeds/propublica/main",
+    "website_url": "https://www.propublica.org/",
+    "category": "🗞️ News",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "World news | The Guardian",
+    "feed_url": "https://www.theguardian.com/world/rss",
+    "website_url": "https://www.theguardian.com/world",
+    "category": "🗞️ News",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "奇客Solidot–传递最新科技情报",
+    "feed_url": "https://www.solidot.org/index.rss",
+    "website_url": "https://www.solidot.org",
+    "category": "🗞️ News",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "虎嗅",
+    "feed_url": "https://rss.huxiu.com/",
+    "website_url": "https://www.huxiu.com",
+    "category": "🗞️ News",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "钛媒体：引领未来商业与生活新知",
+    "feed_url": "https://www.tmtpost.com/feed",
+    "website_url": "http://www.tmtpost.com",
+    "category": "🗞️ News",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "61’s life",
+    "feed_url": "https://61.life/feed.xml",
+    "website_url": "https://61.life/",
+    "category": "🎨 Product & Design",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "jax",
+    "feed_url": "https://cdjax.com/?feed=rss2",
+    "website_url": "https://cdjax.com",
+    "category": "🎨 Product & Design",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Velas电波站",
+    "feed_url": "https://www.velasx.com/feed",
+    "website_url": "https://www.velasx.com/",
+    "category": "🎨 Product & Design",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "拾月的博客",
+    "feed_url": "https://www.skyue.com/feed/",
+    "website_url": "https://www.skyue.com/",
+    "category": "🎨 Product & Design",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "阿里云设计中心",
+    "feed_url": "https://wechat2rss.xlab.app/feed/31e04606d37f684059e23a8fd3e05f1db0186495.xml",
+    "website_url": "https://wechat2rss.xlab.app/feed/31e04606d37f684059e23a8fd3e05f1db0186495.xml",
+    "category": "🎨 Product & Design",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Macin",
+    "feed_url": "https://www.macin.org/atom.xml",
+    "website_url": "https://macin.org/atom.xml",
+    "category": "💼 Business & Startups",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "知足常乐-水星投资理财的基本意念",
+    "feed_url": "http://mercurychong.blogspot.com/feeds/posts/default",
+    "website_url": "http://mercurychong.blogspot.com/",
+    "category": "💼 Business & Startups",
+    "status": "restricted",
+    "reason": "Current subscription policy requires HTTPS; original HTTP URL retained without rewriting."
+  },
+  {
+    "name": "虹线",
+    "feed_url": "https://1q43.blog/feed",
+    "website_url": "https://1q43.blog",
+    "category": "💼 Business & Startups",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "雷蒙三十｜幫助忙碌現代人的聰明工作、好好生活的生產力指南",
+    "feed_url": "https://raymondhouch.com/feed",
+    "website_url": "https://raymondhouch.com",
+    "category": "💼 Business & Startups",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "ABB00717",
+    "feed_url": "https://blog.abb00717.com/index.xml",
+    "website_url": "https://blog.abb00717.com",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Another Dayu",
+    "feed_url": "https://anotherdayu.com/feed/",
+    "website_url": "https://anotherdayu.com/",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Dort 的博客",
+    "feed_url": "https://blog.dort.me/rss.xml",
+    "website_url": "https://blog.dort.me/",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "happy xiao",
+    "feed_url": "https://happyxiao.com/feed",
+    "website_url": "https://happyxiao.com",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Jake blog",
+    "feed_url": "https://jaketao.com/feed/",
+    "website_url": "https://jaketao.com",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Jame",
+    "feed_url": "https://jame.work/feed.xml",
+    "website_url": "https://jame.work/",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "JustZht's EchoChamber",
+    "feed_url": "https://www.justzht.com/rss/",
+    "website_url": "https://www.justzht.com/",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "M-x Chris-An-Emacser",
+    "feed_url": "https://chriszheng.science/atom.xml",
+    "website_url": "https://chriszheng.science/",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "SEISAMUSE",
+    "feed_url": "https://www.seis-jun.xyz/atom.xml",
+    "website_url": "https://www.seis-jun.xyz/atom.xml",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Shuibaco • 水八口",
+    "feed_url": "https://shuiba.co/feed",
+    "website_url": "http://shuiba.co/",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "WSH",
+    "feed_url": "https://www.wsh233.cn/feed.xml",
+    "website_url": "https://www.wsh233.cn",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "一派胡言 · Blog",
+    "feed_url": "https://yipai.me/feed",
+    "website_url": "https://yipai.me/blog",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "不吐不快",
+    "feed_url": "https://mianao.info/atom.xml",
+    "website_url": "https://mianao.info/atom.xml",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "卢昌海个人主页",
+    "feed_url": "https://www.changhai.org/feed.xml",
+    "website_url": "http://www.changhai.org",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "印记",
+    "feed_url": "https://yinji.org/feed",
+    "website_url": "https://yinji.org/",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "四喜丸子",
+    "feed_url": "https://fourhappylions.com/index.xml",
+    "website_url": "https://fourhappylions.com/",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "如鱼饮水",
+    "feed_url": "https://wangjiezhe.com/atom.xml",
+    "website_url": "https://wangjiezhe.com/atom.xml",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "局域自由博客",
+    "feed_url": "https://localfreedom.pages.dev/index.xml",
+    "website_url": "https://localfreedom.pages.dev/",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "廊桥遗梦",
+    "feed_url": "https://blog.moran.im/rss.xml",
+    "website_url": "https://blog.moran.im/",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "梅之夏",
+    "feed_url": "https://blog.mcenahle.page/feed.xml",
+    "website_url": "https://blog.mcenahle.page/",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "涵哲子居",
+    "feed_url": "https://iluc.cn/rss.xml",
+    "website_url": "https://iluc.cn/",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "祝融说。",
+    "feed_url": "https://zhurongshuo.com/index.xml",
+    "website_url": "https://zhurongshuo.com/",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "資工小廢物 - JN",
+    "feed_url": "https://blog.giveanornot.com/index.xml",
+    "website_url": "https://blog.giveanornot.com/",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "闲人LIFE",
+    "feed_url": "https://www.xianrenlife.com/feeds/posts/default",
+    "website_url": "https://www.xianrenlife.com/",
+    "category": "✍️ Personal Blogs",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Hacker News",
+    "feed_url": "https://news.ycombinator.com/rss",
+    "website_url": "https://news.ycombinator.com/",
+    "category": "👥 Communities",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "LINUX DO · 文档共建",
+    "feed_url": "https://linuxdorss.longpink.com/wiki.xml",
+    "website_url": "https://linux.do/c/wiki/42",
+    "category": "👥 Communities",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Lobsters",
+    "feed_url": "https://lobste.rs/rss",
+    "website_url": "https://lobste.rs/",
+    "category": "👥 Communities",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "NixOS Development",
+    "feed_url": "https://discourse.nixos.org/c/dev/14.rss?order=created",
+    "website_url": "https://discourse.nixos.org/c/dev/14",
+    "category": "👥 Communities",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "V2EX · 技术",
+    "feed_url": "https://www.v2ex.com/feed/tab/tech.xml",
+    "website_url": "https://www.v2ex.com/?tab=tech",
+    "category": "👥 Communities",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "KAIX.IN",
+    "feed_url": "https://kaix.in/feed/",
+    "website_url": "https://kaix.in/",
+    "category": "📚 Culture & Ideas",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Maohang Gao's Blog",
+    "feed_url": "https://kangaroogao.com/atom.xml",
+    "website_url": "http://kangaroogao.com/atom.xml",
+    "category": "📚 Culture & Ideas",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "ShineKid",
+    "feed_url": "https://shinekid.com/feed/",
+    "website_url": "https://shinekid.com",
+    "category": "📚 Culture & Ideas",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Tripper Press - Take Photo, Think Seriously.",
+    "feed_url": "https://tripper.press/atom.xml",
+    "website_url": "https://tripper.press",
+    "category": "📚 Culture & Ideas",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "东评西就",
+    "feed_url": "https://dongjunke.cn/atom.xml",
+    "website_url": "https://dongjunke.cn/",
+    "category": "📚 Culture & Ideas",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "先生制造",
+    "feed_url": "https://wechat2rss.xlab.app/feed/313326d41db4f54b1cc09e7c986a5ac4e5f88ca0.xml",
+    "website_url": "https://wechat2rss.xlab.app/feed/313326d41db4f54b1cc09e7c986a5ac4e5f88ca0.xml",
+    "category": "📚 Culture & Ideas",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "赫赫文王",
+    "feed_url": "https://kqh.me/index.xml",
+    "website_url": "https://kqh.me/",
+    "category": "📚 Culture & Ideas",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "静风说",
+    "feed_url": "http://www.jfsay.com/feed",
+    "website_url": "https://www.jfsay.com",
+    "category": "📚 Culture & Ideas",
+    "status": "restricted",
+    "reason": "Current subscription policy requires HTTPS; original HTTP URL retained without rewriting."
+  },
+  {
+    "name": "3Blue1Brown",
+    "feed_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw",
+    "website_url": "https://www.youtube.com/channel/UCYO_jab_esuFRV4b17AJtAw",
+    "category": "🎬 Videos",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Y Combinator",
+    "feed_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCcefcZRL2oaA_uBNeo5UOWg",
+    "website_url": "https://www.youtube.com/channel/UCcefcZRL2oaA_uBNeo5UOWg",
+    "category": "🎬 Videos",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Darknet Diaries",
+    "feed_url": "https://feeds.megaphone.fm/darknetdiaries",
+    "website_url": "https://darknetdiaries.com/",
+    "category": "🎧 Podcasts",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Hanselminutes with Scott Hanselman",
+    "feed_url": "https://feeds.simplecast.com/gvtxUiIf",
+    "website_url": "https://www.hanselminutes.com",
+    "category": "🎧 Podcasts",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "Invest Like the Best with Patrick O'Shaughnessy",
+    "feed_url": "https://investlikethebest.libsyn.com/rss",
+    "website_url": "https://colossus.com/",
+    "category": "🎧 Podcasts",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "What's Next｜科技早知道",
+    "feed_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/5e74b52c418a84a046ecaceb",
+    "website_url": "https://www.xiaoyuzhoufm.com/podcast/5e74b52c418a84a046ecaceb",
+    "category": "🎧 Podcasts",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "半拿铁 | 商业沉浮录",
+    "feed_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/62382c1103bea1ebfffa1c00",
+    "website_url": "https://www.xiaoyuzhoufm.com/podcast/62382c1103bea1ebfffa1c00",
+    "category": "🎧 Podcasts",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "声动早咖啡",
+    "feed_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/60de7c003dd577b40d5a40f3",
+    "website_url": "https://www.xiaoyuzhoufm.com/podcast/60de7c003dd577b40d5a40f3",
+    "category": "🎧 Podcasts",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "忽左忽右",
+    "feed_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/5e4ee557418a84a0466737b7",
+    "website_url": "https://www.xiaoyuzhoufm.com/podcast/5e4ee557418a84a0466737b7",
+    "category": "🎧 Podcasts",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "文化有限",
+    "feed_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/5e4515bd418a84a046e2b11a",
+    "website_url": "https://www.xiaoyuzhoufm.com/podcast/5e4515bd418a84a046e2b11a",
+    "category": "🎧 Podcasts",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "晚点聊 LateTalk",
+    "feed_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/61933ace1b4320461e91fd55",
+    "website_url": "https://www.xiaoyuzhoufm.com/podcast/61933ace1b4320461e91fd55",
+    "category": "🎧 Podcasts",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "知行小酒馆",
+    "feed_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/6013f9f58e2f7ee375cf4216",
+    "website_url": "https://www.xiaoyuzhoufm.com/podcast/6013f9f58e2f7ee375cf4216",
+    "category": "🎧 Podcasts",
+    "status": "included",
+    "reason": ""
+  },
+  {
+    "name": "硅谷101 — Podcast",
+    "feed_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/5e5c52c9418a84a04625e6cc",
+    "website_url": "https://www.xiaoyuzhoufm.com/podcast/5e5c52c9418a84a04625e6cc",
+    "category": "🎧 Podcasts",
+    "status": "included",
+    "reason": ""
+  }
+]

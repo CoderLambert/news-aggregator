@@ -3,48 +3,40 @@
 These are metadata candidates, not health-checked feeds. No source content was
 requested to prepare these artifacts. All `verified_at` values remain null.
 
-## Provenance and license
+## Active seed: Tidings Top200
 
-- `seed-v1.lock.json` pins the exact UTF-8 JSON bytes imported by
-  `import_pinned_seed()`. Root `source.commit` identifies the NewsHub code baseline
-  used for the authored supplement; `newshub-curated-v1` identifies its metadata
-  revision. It does not claim the generated seed existed in that baseline commit.
-- The first collection is **38 actual HTTPS entries** from
-  [plenaryapp/awesome-rss-feeds at 9ab2482](https://github.com/plenaryapp/awesome-rss-feeds/tree/9ab2482cae9031a5a39635c887fcfc8ece7e130a),
-  specifically `recommended/with_category/Programming.opml` and
-  `recommended/with_category/Web Development.opml`. The Coding Horror record
-  preserves its upstream FeedBurner URL as the stable key, while `public_url`
-  uses the final HTTPS feed URL observed after the alias redirected twice during
-  live acceptance. Other entries retain their upstream xmlUrl. The enclosing
-  outline becomes a category tag. Seven HTTP URLs were excluded, without
-  rewriting them to HTTPS. The lock records source-file hashes, paths, and every
-  exclusion.
-  Upstream's CC0-1.0 license is preserved as `plenary-CC0-1.0.txt`.
-- The second collection contains two newly authored CC0-1.0 metadata records:
-  React's GitHub release Atom URL and 中新网健康's RSS URL. This collection carries
-  its own origin and does not replace Plenary attribution. The supplement is
-  explicitly dedicated under [CC0-1.0](https://creativecommons.org/publicdomain/zero/1.0/).
-- The third collection is a declarative projection of the GitHub issue route
-  from RSSHub's real
-  [build/routes.json at gh-pages 140f27c](https://github.com/DIYgod/RSSHub/blob/140f27c701b499703cb3e22cb4541d50b1406c40/build/routes.json).
-  It includes only name, description, categories, path, parameters and features.
-  No handler, module, Radar or analytics is shipped in the projection.
-  `rsshub-subset-v1.json` provides that collection independently for contract tests.
-  `rsshub-format.lock.json` pins both the full upstream JSON hash and subset hash,
-  plus source type and license hashes at source commit
-  `8e94b949479ba3295ee9653806f59b2be6559158`.
-  RSSHub currently supplies the GNU AGPL v3 license, preserved in full as
-  `rsshub-AGPL-3.0.txt`. Its metadata remains attributed **AGPL-3.0-only**, never
-  relabeled CC0. The generated artifact commit and separately inspected source
-  commit are recorded separately; no unproven build correspondence is claimed.
-  Source is available through the pinned upstream URLs and this repository's
-  JSON projection. Publisher content rights and RSSHub gateway approval remain
-  separate from software/data licensing.
+`seed-v1.json` is the schema-v1 projection of `tidings-top200.opml` from
+`fuxiaoai/tidings-rss` at
+`f9b54abf9dd3e7af2a1dda12bca06c8fe8b57d7b`. The lock pins the seed, original
+OPML, CC0-1.0 license, import report, and selected-description receipt.
 
-The default bundle's license expression is `CC0-1.0 AND AGPL-3.0-only`. Each result
-carries the relevant collection's source id, commit, license and stable key.
-This bounded subset deliberately does not claim to cover the full Plenary or
-RSSHub catalog, nor to have tested the routes against live publishers.
+The selected OPML contains 200 records under 14 category outlines. The active
+directory includes the 194 original HTTPS feed URLs; the six HTTP records remain
+excluded by the existing HTTPS-only policy. URLs are neither upgraded nor
+replaced. `tidings-import-report.json` records every selected item, original
+category, and inclusion or restriction reason.
+
+Names and categories come from the pinned OPML. Descriptions match the same
+commit's `data/feeds.json` by exact feed URL; category-only labels use short
+readable descriptions. AWS and OpenAI have locally authored summaries referenced
+to their primary news/blog pages. `tidings-descriptions.json` records each
+description and its basis. No feed health, language, region, or statistics are
+inferred.
+
+Importing this seed does not subscribe to or fetch any feed. The normal runtime
+calls `import_pinned_seed()` on its metadata schedule; local operators can call
+the same function for an immediate refresh. Existing user subscriptions are
+unaffected by seed updates. Old database snapshots are retained, and Git history
+provides the previous seed for source-level rollback.
+
+## Supplementary format fixtures
+
+The retained Plenary and NewsHub-curated artifacts document the previous seed and
+remain available as schema fixtures. `rsshub-subset-v1.json` independently tests
+the declarative RSSHub namespace format. `rsshub-format.lock.json` pins that
+projection and its AGPL-3.0-only license receipts; RSSHub metadata is never
+relabelled as CC0. These supplementary artifacts are not part of the active
+Tidings seed.
 
 ## Import format and service contract
 

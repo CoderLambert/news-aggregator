@@ -12,7 +12,7 @@ from markdownify import MarkdownConverter
 
 MAX_CONTENT_BYTES = 2 * 1024 * 1024
 # Bump whenever cleaning, URL policy, Markdown formatting, or dependencies change.
-CONVERSION_VERSION = "rss-html-v1:nh3-0.3.7:markdownify-1.2.3:bs4-4.15.0"
+CONVERSION_VERSION = "rss-html-v2:nh3-0.3.7:markdownify-1.2.3:bs4-4.15.0"
 
 
 class ConversionError(ValueError):
@@ -97,7 +97,13 @@ class _ContentConverter(MarkdownConverter):
         href = el.get("href")
         if not href or "_noformat" in parent_tags or not text.strip():
             return text
-        return "[" + text + "](" + href + ")"
+        # CommonMark link labels cannot contain blank paragraphs. Publisher
+        # author/action links often wrap <p> nodes; keep the inline label valid.
+        # Never rewrite whitespace inside literal code to repair a link.
+        if "\n\n" in text and el.find(["pre", "code"]):
+            return text.rstrip("\n") + "\n\n[打开链接](" + href + ")"
+        label = re.sub(r"\n[ \t]*\n+", " ", text).strip()
+        return "[" + label + "](" + href + ")"
 
     def convert_img(self, el, text, parent_tags):
         alt = _literal_markdown(el.get("alt", ""))

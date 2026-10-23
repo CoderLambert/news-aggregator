@@ -192,6 +192,15 @@ def test_refetch_persists_and_gets_independently(server):
     assert calls[3][1] == "/v1/entries/12"
 
 
+def test_refetch_wechat_entry_stops_before_fetch_content(server):
+    routes, calls, config = server
+    row = entry()
+    row['url'] = 'https://mp.weixin.qq.com/s/article-id'
+    routes['/v1/entries/12'].append(ok(row))
+    assert_error('wechat_feed_only', lambda: EngineAdapter(config).refetch_entry(12))
+    assert [urlsplit(call[1]).path for call in calls] == ['/v1/me', '/v1/entries/12']
+
+
 def test_refetch_nonpersistent_result_and_unknown(server):
     routes, _, config = server
     routes["/v1/entries/12"].extend([ok(entry()), ok(entry())])

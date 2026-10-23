@@ -98,6 +98,24 @@ def test_body_fields_are_not_native_evidence_and_exact_path_is_not_host_grant(se
     assert approved_feed_policy('https://webkit.org/feed/?tag=x').desired_mode == 'full_content'
 
 
+@pytest.mark.parametrize('feed_url', [
+    'https://wechat2rss.com/feed/123.xml',
+    'https://wechat2rss.xlab.app/feed/123.xml',
+])
+def test_wechat_bridges_are_feed_only(settings, feed_url):
+    settings.RSS_FULL_CONTENT_ENABLED = True
+    decision = approved_feed_policy(feed_url)
+    assert (decision.desired_mode, decision.reading_policy, decision.full_content_allowed,
+            decision.reason) == ('feed', 'public_feed', False, 'wechat_feed_only')
+
+
+def test_wechat_article_cannot_be_sent_to_fetch_content(settings):
+    settings.RSS_FULL_CONTENT_ENABLED = True
+    from api.rss.feed_policy import assert_article_fetch_allowed
+    with pytest.raises(OperationError, match='wechat_feed_only'):
+        assert_article_fetch_allowed('https://mp.weixin.qq.com/s/article-id')
+
+
 def test_global_opt_out_and_existing_admin_mode_endpoint(user, settings, worker):
     settings.RSS_DEFAULT_FEED_MODE = 'feed'
     subscribe(user, {'feed_url': URL}, 'subscribe')

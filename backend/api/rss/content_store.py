@@ -24,6 +24,16 @@ from api.rss.legacy_translation import archive_changed_translations, exact_hash
 
 SUMMARY_POLICIES = {'summary_only', 'rss_summary_only'}
 BODY_POLICIES = {'standard', 'public_rss', 'public_feed', 'official_html', 'regulatory_data'}
+WECHAT_CONTROL_MARKERS = ('轻点两下取消赞', '轻点两下取消在看')
+WECHAT_CONTROL_LABELS = ('轻点两下取消在看', '轻点两下取消赞', '小程序', '视频', '在看', '赞')
+UPSTREAM_UNAVAILABLE_CONTENT = frozenset({
+    '环境异常',
+    '访问过于频繁，请稍后再试',
+    '当前环境异常，完成验证后即可继续访问',
+    '该内容已被发布者删除',
+    '此内容因违规无法查看',
+    '该内容已被投诉且经审核涉嫌侵权，无法查看',
+})
 
 
 class StaleWrite(ValueError):
@@ -182,6 +192,20 @@ def _content_error(converted, completeness, evidence):
         return 'invalid_completeness'
     if completeness == 'verified' and evidence.get('verified_canonical_hash') != converted.canonical_hash:
         return 'verification_not_hash_bound'
+    # A WeChat control-only response is not an article. Keep genuine short
+    # articles: reject only when both distinctive controls are present and
+    # removing known widget labels leaves no text.
+    if all(marker in converted.markdown for marker in WECHAT_CONTROL_MARKERS):
+        remaining = converted.markdown
+        for label in WECHAT_CONTROL_LABELS:
+            remaining = remaining.replace(label, '')
+        if not re.search(r'[^\W\d_]', remaining):
+            return 'non_article_content'
+    # Exact upstream status responses are not readable articles. Do not use a
+    # length threshold that could reject a genuine short post.
+    normalized = ''.join(converted.markdown.split()).strip('。！!：:')
+    if normalized in UPSTREAM_UNAVAILABLE_CONTENT:
+        return 'upstream_unavailable_content'
     if converted.markdown.strip().lower() in {'access denied', '403 forbidden', '404 not found', '500 internal server error', 'service unavailable'}:
         return 'explicit_error_content'
     if evidence.get('error_code'):

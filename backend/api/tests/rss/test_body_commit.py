@@ -134,6 +134,8 @@ def test_invalid_content_still_checks_current_entry_identity(story):
     ('', 'unknown', {}, 'empty_content'),
     ('   ', 'unknown', {}, 'empty_content'),
     ('Access denied', 'unknown', {}, 'explicit_error_content'),
+    ('环境异常！！', 'unknown', {}, 'upstream_unavailable_content'),
+    ('轻点两下取消赞\n小程序\n视频\n轻点两下取消在看', 'unknown', {}, 'non_article_content'),
     ('Some error response', 'unknown', {'error_code': 'upstream_failed'}, 'explicit_error_content'),
     ('Short summary', 'summary', {}, 'summary_cannot_replace_complete'),
     ('Claims verified', 'verified', {}, 'verification_not_hash_bound'),
@@ -145,6 +147,16 @@ def test_rejected_content_preserves_old_complete(story, text, completeness, evid
     news.refresh_from_db()
     assert news.full_content_revision == 8 and news.full_content_zh == '唯一旧全文译文'
     assert not LegacyTranslationSnapshot.objects.exists()
+
+
+def test_wechat_controls_do_not_hide_real_article_text(story):
+    news, *_, token = story
+    text = ('这是一篇真实文章，包含足够正文，不能因为页面末尾包含微信互动控件而丢弃。' * 3
+            + '\n轻点两下取消赞\n轻点两下取消在看')
+    result = commit_body(token, converted(text))
+    assert result.status == 'accepted'
+    news.refresh_from_db()
+    assert news.full_content == text
 
 
 def test_canonical_hash_and_size_are_checked_without_truncation(story):

@@ -114,3 +114,10 @@ def test_empty_content_and_malformed_html_are_not_marked_complete():
         convert("\ud800")
     with pytest.raises(ConversionError, match="invalid_base_url"):
         convert_html("safe", base_url="http://127.0.0.1/feed")
+
+
+def test_block_children_in_links_do_not_create_broken_markdown_labels():
+    body = convert('<a href="/author">Alice<p>alice</p><p>Follow</p></a>').markdown
+    assert body == '[Alice alice Follow](https://publisher.example/author)'
+    literal = convert('<a href="/code"><pre>a\n\nb</pre></a>').markdown
+    assert literal == '```\na\n\nb\n```\n\n[打开链接](https://publisher.example/code)'

@@ -1,0 +1,1168 @@
+[
+  {
+    "feed_url": "https://ainews.liduos.com/rss.xml",
+    "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Artificial Intelligence 订阅源"
+  },
+  {
+    "feed_url": "https://rsshub.bestblogs.dev/anthropic/news",
+    "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Artificial Intelligence 订阅源"
+  },
+  {
+    "feed_url": "https://machinelearning.apple.com/rss.xml",
+    "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Artificial Intelligence 订阅源"
+  },
+  {
+    "feed_url": "https://aws.amazon.com/blogs/amazon-ai/feed/",
+    "description": "AWS 人工智能博客，分享 AI 服务、开发实践、研究与应用案例。",
+    "basis": "editorial_primary_source",
+    "upstream_description": "Artificial Intelligence 订阅源",
+    "reference": "https://aws.amazon.com/blogs/machine-learning/"
+  },
+  {
+    "feed_url": "https://export.arxiv.org/rss/cs.CL",
+    "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Artificial Intelligence 订阅源"
+  },
+  {
+    "feed_url": "https://wechat2rss.bestblogs.dev/feed/1709da4f538d4ce4fb6d7a8ba1a5a1c297919601.xml",
+    "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Artificial Intelligence 订阅源"
+  },
+  {
+    "feed_url": "https://deepmind.com/blog/feed/basic/",
+    "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Artificial Intelligence 订阅源"
+  },
+  {
+    "feed_url": "https://huggingface.co/blog/feed.xml",
+    "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Artificial Intelligence 订阅源"
+  },
+  {
+    "feed_url": "https://news.mit.edu/rss/topic/artificial-intelligence2",
+    "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Artificial Intelligence 订阅源"
+  },
+  {
+    "feed_url": "https://openai.com/news/rss.xml",
+    "description": "OpenAI 官方动态，涵盖人工智能研究、产品发布、安全与应用进展。",
+    "basis": "editorial_primary_source",
+    "upstream_description": "Artificial Intelligence 订阅源",
+    "reference": "https://openai.com/news/"
+  },
+  {
+    "feed_url": "https://simonwillison.net/atom/everything/",
+    "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Artificial Intelligence 订阅源"
+  },
+  {
+    "feed_url": "https://research.google/blog/rss/",
+    "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Artificial Intelligence 订阅源"
+  },
+  {
+    "feed_url": "https://wechat2rss.xlab.app/feed/b81ffcfff1107b5265cd7e39de610dc7ca72caf4.xml",
+    "description": "公众号，主要关注计算机视觉研究与应用。",
+    "basis": "upstream",
+    "upstream_description": "公众号，主要关注计算机视觉研究与应用。"
+  },
+  {
+    "feed_url": "https://wechat2rss.xlab.app/feed/ede30346413ea70dbef5d485ea5cbb95cca446e7.xml",
+    "description": "公众号，主要关注人工智能产业与研究。",
+    "basis": "upstream",
+    "upstream_description": "公众号，主要关注人工智能产业与研究。"
+  },
+  {
+    "feed_url": "https://wechat2rss.bestblogs.dev/feed/433d2134dca54d80804daf32e8be546155be3300.xml",
+    "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Artificial Intelligence 订阅源"
+  },
+  {
+    "feed_url": "https://wechat2rss.bestblogs.dev/feed/8d97af31b0de9e48da74558af128a4673d78c9a3.xml",
+    "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Artificial Intelligence 订阅源"
+  },
+  {
+    "feed_url": "https://wechat2rss.bestblogs.dev/feed/306ce19a1ca590c9c2df781789e828d1acfa1356.xml",
+    "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Artificial Intelligence 订阅源"
+  },
+  {
+    "feed_url": "https://wechat2rss.bestblogs.dev/feed/4ebee6222ae08705b8aabc9116f0defbcb6b17c6.xml",
+    "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Artificial Intelligence 订阅源"
+  },
+  {
+    "feed_url": "https://www.qbitai.com/feed",
+    "description": "关注人工智能相关资讯、研究与技术进展的 RSS 频道。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Artificial Intelligence 订阅源"
+  },
+  {
+    "feed_url": "https://www.rsnocsi.cn/feed",
+    "description": "主要写AI、技术、生活、随笔。",
+    "basis": "upstream",
+    "upstream_description": "主要写AI、技术、生活、随笔。"
+  },
+  {
+    "feed_url": "https://blog.sayori.org/rss.xml",
+    "description": "主要写日记、资源、技术。",
+    "basis": "upstream",
+    "upstream_description": "主要写日记、资源、技术。"
+  },
+  {
+    "feed_url": "https://www.androidperformance.com/atom.xml",
+    "description": "主要写编程、Android、分享。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程、Android、分享。"
+  },
+  {
+    "feed_url": "https://www.bboy.app/atom.xml",
+    "description": "主要写k8s 运维。",
+    "basis": "upstream",
+    "upstream_description": "主要写k8s 运维。"
+  },
+  {
+    "feed_url": "https://www.canva.dev/blog/engineering/feed.xml",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://www.databricks.com/feed",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://www.elastic.co/blog/feed",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://slack.engineering/feed/",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://wsdjeg.net/feed.xml",
+    "description": "主要写编程、生活、笔记。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程、生活、笔记。"
+  },
+  {
+    "feed_url": "https://codeascraft.com/feed/atom/",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://www.freecodecamp.org/news/rss/",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://icodex.me/atom.xml",
+    "description": "主要写编程、前端、互联网、技术。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程、前端、互联网、技术。"
+  },
+  {
+    "feed_url": "https://laike9m.com/blog/rss/",
+    "description": "主要写Python、生活、编程。",
+    "basis": "upstream",
+    "upstream_description": "主要写Python、生活、编程。"
+  },
+  {
+    "feed_url": "https://www.liesauer.net/blog/feed/",
+    "description": "主要写编程。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程。"
+  },
+  {
+    "feed_url": "https://martinfowler.com/feed.atom",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://azure.microsoft.com/en-us/blog/feed/",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://netflixtechblog.com/feed",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://nicksxs.me/atom.xml",
+    "description": "主要写编程、后端、Java、PHP。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程、后端、Java、PHP。"
+  },
+  {
+    "feed_url": "https://nodejs.org/en/feed/blog.xml",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://h4ck.org.cn/feed/",
+    "description": "主要写生活、编程、硬件、人工智能。",
+    "basis": "upstream",
+    "upstream_description": "主要写生活、编程、硬件、人工智能。"
+  },
+  {
+    "feed_url": "https://onevcat.com/feed.xml",
+    "description": "主要写编程、iOS。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程、iOS。"
+  },
+  {
+    "feed_url": "https://www.pseudoyu.com/zh/index.xml",
+    "description": "主要写区块链、编程、工具、随笔。",
+    "basis": "upstream",
+    "upstream_description": "主要写区块链、编程、工具、随笔。"
+  },
+  {
+    "feed_url": "https://blog.python.org/feeds/posts/default",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://blog.rust-lang.org/feed.xml",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://blog.rxliuli.com/atom.xml",
+    "description": "主要写前端、编程、随笔。",
+    "basis": "upstream",
+    "upstream_description": "主要写前端、编程、随笔。"
+  },
+  {
+    "feed_url": "https://ryanuo.cc/sitemap.xml",
+    "description": "主要写编程、嵌入式、前端、AI。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程、嵌入式、前端、AI。"
+  },
+  {
+    "feed_url": "https://blog.diqigan.cn/atom.xml",
+    "description": "主要写编程、随笔、Geek、Java。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程、随笔、Geek、Java。"
+  },
+  {
+    "feed_url": "https://sjdhome.com/blog/atom.xml",
+    "description": "主要写编程、生活、学习。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程、生活、学习。"
+  },
+  {
+    "feed_url": "https://smallyu.net/atom.xml",
+    "description": "主要写技术、生活、区块链。",
+    "basis": "upstream",
+    "upstream_description": "主要写技术、生活、区块链。"
+  },
+  {
+    "feed_url": "https://engineering.atspotify.com/feed/",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://blog.stackoverflow.com/feed/",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://stripe.com/blog/feed.rss",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://supabase.com/rss.xml",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://taxodium.ink/rss.xml",
+    "description": "主要写编程、随笔。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程、随笔。"
+  },
+  {
+    "feed_url": "https://medium.com/feed/airbnb-engineering",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://blog.cloudflare.com/rss",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://github.blog/feed/",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://blog.jetbrains.com/feed/",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://thenewstack.io/feed/",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://tianheg.co/index.xml",
+    "description": "主要写生活、技术。",
+    "basis": "upstream",
+    "upstream_description": "主要写生活、技术。"
+  },
+  {
+    "feed_url": "https://tw93.fun/feed.xml",
+    "description": "主要写开源、前端、分享、MacOS。",
+    "basis": "upstream",
+    "upstream_description": "主要写开源、前端、分享、MacOS。"
+  },
+  {
+    "feed_url": "https://ssshooter.com/rss.xml",
+    "description": "主要写前端、随想、游戏、摄影。",
+    "basis": "upstream",
+    "upstream_description": "主要写前端、随想、游戏、摄影。"
+  },
+  {
+    "feed_url": "https://vercel.com/atom",
+    "description": "关注软件开发与工程技术，订阅该站点的技术文章和更新。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Engineering & Technology 订阅源"
+  },
+  {
+    "feed_url": "https://weishu.me/atom.xml",
+    "description": "主要写编程。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程。"
+  },
+  {
+    "feed_url": "https://zdyxry.github.io/atom.xml",
+    "description": "主要写编程、Linux。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程、Linux。"
+  },
+  {
+    "feed_url": "https://blog.yasking.org/atom.xml",
+    "description": "主要写编程、技术、笔记。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程、技术、笔记。"
+  },
+  {
+    "feed_url": "https://wiki.eryajf.net/rss.xml",
+    "description": "主要写运维、思索、编程。",
+    "basis": "upstream",
+    "upstream_description": "主要写运维、思索、编程。"
+  },
+  {
+    "feed_url": "https://nicrosoft.net/blog/feed/",
+    "description": "主要写编程、生活。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程、生活。"
+  },
+  {
+    "feed_url": "https://blog.gadore.top/feed.xml",
+    "description": "主要写技术、生活、图片。",
+    "basis": "upstream",
+    "upstream_description": "主要写技术、生活、图片。"
+  },
+  {
+    "feed_url": "https://www.kawabangga.com/feed",
+    "description": "主要写编程、随笔、技术。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程、随笔、技术。"
+  },
+  {
+    "feed_url": "https://rowkey.cn/atom.xml",
+    "description": "主要写编程。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程。"
+  },
+  {
+    "feed_url": "https://blog.devtang.com/atom.xml",
+    "description": "主要写编程、创业、iOS。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程、创业、iOS。"
+  },
+  {
+    "feed_url": "https://www.mmbkz.cn/feed",
+    "description": "主要写生活、日常、编程、笔记。",
+    "basis": "upstream",
+    "upstream_description": "主要写生活、日常、编程、笔记。"
+  },
+  {
+    "feed_url": "https://blog.17lai.site/atom.xml",
+    "description": "主要写技术、开源、hexo、成长。",
+    "basis": "upstream",
+    "upstream_description": "主要写技术、开源、hexo、成长。"
+  },
+  {
+    "feed_url": "https://51.ruyo.net/feed",
+    "description": "主要写技术、分享。",
+    "basis": "upstream",
+    "upstream_description": "主要写技术、分享。"
+  },
+  {
+    "feed_url": "https://www.coderlock.site/index.php/feed/",
+    "description": "主要写编程、生活、AI、随想。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程、生活、AI、随想。"
+  },
+  {
+    "feed_url": "https://blog.zhheo.com/rss.xml",
+    "description": "主要写设计、编程、生活、产品。",
+    "basis": "upstream",
+    "upstream_description": "主要写设计、编程、生活、产品。"
+  },
+  {
+    "feed_url": "https://www.tortorse.com/atom.xml",
+    "description": "主要写产品、前端、设计、杂谈。",
+    "basis": "upstream",
+    "upstream_description": "主要写产品、前端、设计、杂谈。"
+  },
+  {
+    "feed_url": "https://www.iconpik.com/rss/",
+    "description": "主要写AI、编程、随笔。",
+    "basis": "upstream",
+    "upstream_description": "主要写AI、编程、随笔。"
+  },
+  {
+    "feed_url": "https://afoo.me/feeds.xml",
+    "description": "主要写架构、创业、思考。",
+    "basis": "upstream",
+    "upstream_description": "主要写架构、创业、思考。"
+  },
+  {
+    "feed_url": "https://howiehz.top/rss.xml",
+    "description": "主要写技术、编程、开源、前端。",
+    "basis": "upstream",
+    "upstream_description": "主要写技术、编程、开源、前端。"
+  },
+  {
+    "feed_url": "https://sugarat.top/feed.rss",
+    "description": "主要写编程、大前端、开源、生活。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程、大前端、开源、生活。"
+  },
+  {
+    "feed_url": "https://www.wikimoe.com/rss.php",
+    "description": "主要写动画、漫画、游戏、日常。",
+    "basis": "upstream",
+    "upstream_description": "主要写动画、漫画、游戏、日常。"
+  },
+  {
+    "feed_url": "https://hutusi.com/feed.xml",
+    "description": "主要写编程、随笔、生活。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程、随笔、生活。"
+  },
+  {
+    "feed_url": "https://www.imaegoo.com/atom.xml",
+    "description": "主要写编程、前端、Serverless。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程、前端、Serverless。"
+  },
+  {
+    "feed_url": "https://pythoncat.top/rss.xml",
+    "description": "主要写编程、Python、翻译、随笔。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程、Python、翻译、随笔。"
+  },
+  {
+    "feed_url": "https://dfine.tech/atom.xml",
+    "description": "主要写编程、算法、生活。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程、算法、生活。"
+  },
+  {
+    "feed_url": "https://colobu.com/atom.xml",
+    "description": "主要写编程。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程。"
+  },
+  {
+    "feed_url": "https://blog.thetbw.xyz/atom.xml",
+    "description": "主要写编程、随笔、生活。",
+    "basis": "upstream",
+    "upstream_description": "主要写编程、随笔、生活。"
+  },
+  {
+    "feed_url": "https://www.cisa.gov/news.xml",
+    "description": "美国网络安全和基础设施安全局发布的安全通告、漏洞与防护建议。",
+    "basis": "upstream",
+    "upstream_description": "美国网络安全和基础设施安全局发布的安全通告、漏洞与防护建议。"
+  },
+  {
+    "feed_url": "https://www.freebuf.com/feed",
+    "description": "中文网络安全媒体，覆盖攻防研究、漏洞分析与安全产业动态。",
+    "basis": "upstream",
+    "upstream_description": "中文网络安全媒体，覆盖攻防研究、漏洞分析与安全产业动态。"
+  },
+  {
+    "feed_url": "https://krebsonsecurity.com/feed/",
+    "description": "独立安全记者 Brian Krebs 对网络犯罪、数据泄露与数字欺诈的调查。",
+    "basis": "upstream",
+    "upstream_description": "独立安全记者 Brian Krebs 对网络犯罪、数据泄露与数字欺诈的调查。"
+  },
+  {
+    "feed_url": "https://www.schneier.com/blog/index.rdf",
+    "description": "Bruce Schneier 对安全工程、隐私和公共政策的长期观察。",
+    "basis": "upstream",
+    "upstream_description": "Bruce Schneier 对安全工程、隐私和公共政策的长期观察。"
+  },
+  {
+    "feed_url": "https://securityaffairs.co/wordpress/feed",
+    "description": "全球网络攻击、恶意软件、漏洞与安全事件报道。",
+    "basis": "upstream",
+    "upstream_description": "全球网络攻击、恶意软件、漏洞与安全事件报道。"
+  },
+  {
+    "feed_url": "https://www.zdnet.com/topic/security/rss.xml",
+    "description": "企业安全、漏洞、威胁情报与安全产品动态。",
+    "basis": "upstream",
+    "upstream_description": "企业安全、漏洞、威胁情报与安全产品动态。"
+  },
+  {
+    "feed_url": "https://api.anquanke.com/data/v1/rss",
+    "description": "中文漏洞分析、攻防研究与网络安全行业动态。",
+    "basis": "upstream",
+    "upstream_description": "中文漏洞分析、攻防研究与网络安全行业动态。"
+  },
+  {
+    "feed_url": "https://wechat2rss.xlab.app/feed/923c0e2f33b6d39c8a826a90f185725f0edb10e8.xml",
+    "description": "腾讯玄武实验室发布的漏洞研究、攻防技术与安全实践。",
+    "basis": "upstream",
+    "upstream_description": "腾讯玄武实验室发布的漏洞研究、攻防技术与安全实践。"
+  },
+  {
+    "feed_url": "https://www.36kr.com/feed",
+    "description": "中文商业与科技媒体，关注创业公司、互联网产品和产业变化。",
+    "basis": "upstream",
+    "upstream_description": "中文商业与科技媒体，关注创业公司、互联网产品和产业变化。"
+  },
+  {
+    "feed_url": "https://feeds.arstechnica.com/arstechnica/index",
+    "description": "面向技术读者的科技媒体，长期报道软件、硬件、科学与互联网政策。",
+    "basis": "upstream",
+    "upstream_description": "面向技术读者的科技媒体，长期报道软件、硬件、科学与互联网政策。"
+  },
+  {
+    "feed_url": "https://www.engadget.com/rss.xml",
+    "description": "消费电子、软件服务与科技产品评测。",
+    "basis": "upstream",
+    "upstream_description": "消费电子、软件服务与科技产品评测。"
+  },
+  {
+    "feed_url": "https://www.ithome.com/rss/",
+    "description": "中文科技新闻，覆盖硬件、软件、移动设备与互联网公司。",
+    "basis": "upstream",
+    "upstream_description": "中文科技新闻，覆盖硬件、软件、移动设备与互联网公司。"
+  },
+  {
+    "feed_url": "https://www.technologyreview.com/feed/",
+    "description": "人工智能、计算、气候与生物技术的深度报道。",
+    "basis": "upstream",
+    "upstream_description": "人工智能、计算、气候与生物技术的深度报道。"
+  },
+  {
+    "feed_url": "https://techcrunch.com/feed/",
+    "description": "创业公司、风险投资、互联网产品与科技行业动态。",
+    "basis": "upstream",
+    "upstream_description": "创业公司、风险投资、互联网产品与科技行业动态。"
+  },
+  {
+    "feed_url": "https://www.theverge.com/rss/index.xml",
+    "description": "消费科技、互联网平台、科学与数字文化报道。",
+    "basis": "upstream",
+    "upstream_description": "消费科技、互联网平台、科学与数字文化报道。"
+  },
+  {
+    "feed_url": "https://www.wired.com/feed/rss",
+    "description": "科技、科学、商业与数字社会的深度报道。",
+    "basis": "upstream",
+    "upstream_description": "科技、科学、商业与数字社会的深度报道。"
+  },
+  {
+    "feed_url": "https://sspai.com/feed",
+    "description": "数字工具、效率方法、软件体验与个人工作流。",
+    "basis": "upstream",
+    "upstream_description": "数字工具、效率方法、软件体验与个人工作流。"
+  },
+  {
+    "feed_url": "https://www.ifanr.com/feed",
+    "description": "中文消费科技、智能设备与产品趋势报道。",
+    "basis": "upstream",
+    "upstream_description": "中文消费科技、智能设备与产品趋势报道。"
+  },
+  {
+    "feed_url": "https://quaily.com/op7418/feed/atom",
+    "description": "中文生成式 AI 产品、工具与行业观察周刊。",
+    "basis": "upstream",
+    "upstream_description": "中文生成式 AI 产品、工具与行业观察周刊。"
+  },
+  {
+    "feed_url": "https://golangweekly.com/rss/",
+    "description": "Go 语言文章、工具、项目与社区动态周刊。",
+    "basis": "upstream",
+    "upstream_description": "Go 语言文章、工具、项目与社区动态周刊。"
+  },
+  {
+    "feed_url": "https://javascriptweekly.com/rss/",
+    "description": "JavaScript 新闻、文章、工具与项目周刊。",
+    "basis": "upstream",
+    "upstream_description": "JavaScript 新闻、文章、工具与项目周刊。"
+  },
+  {
+    "feed_url": "https://lastweekin.ai/feed",
+    "description": "每周梳理人工智能研究、产品与政策动态。",
+    "basis": "upstream",
+    "upstream_description": "每周梳理人工智能研究、产品与政策动态。"
+  },
+  {
+    "feed_url": "https://rsshub.bestblogs.dev/deeplearning/the-batch",
+    "description": "DeepLearning.AI 的人工智能新闻与研究周报。",
+    "basis": "upstream",
+    "upstream_description": "DeepLearning.AI 的人工智能新闻与研究周报。"
+  },
+  {
+    "feed_url": "https://this-week-in-rust.org/atom.xml",
+    "description": "Rust 项目、文章、版本与社区动态周刊。",
+    "basis": "upstream",
+    "upstream_description": "Rust 项目、文章、版本与社区动态周刊。"
+  },
+  {
+    "feed_url": "https://weekly.tw93.fun/rss.xml",
+    "description": "记录技术见闻、开源项目、产品与生活灵感的中文周刊。",
+    "basis": "upstream",
+    "upstream_description": "记录技术见闻、开源项目、产品与生活灵感的中文周刊。"
+  },
+  {
+    "feed_url": "https://www.ruanyifeng.com/blog/atom.xml",
+    "description": "阮一峰的技术文章与科技爱好者周刊，覆盖开发工具、互联网与开源项目。",
+    "basis": "upstream",
+    "upstream_description": "阮一峰的技术文章与科技爱好者周刊，覆盖开发工具、互联网与开源项目。"
+  },
+  {
+    "feed_url": "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=science",
+    "description": "关注科研与科学领域的文章、论文或研究动态。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Research & Science 订阅源"
+  },
+  {
+    "feed_url": "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+    "description": "关注科研与科学领域的文章、论文或研究动态。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Research & Science 订阅源"
+  },
+  {
+    "feed_url": "https://elifesciences.org/rss/recent.xml",
+    "description": "关注科研与科学领域的文章、论文或研究动态。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Research & Science 订阅源"
+  },
+  {
+    "feed_url": "https://flowingdata.com/feed",
+    "description": "关注科研与科学领域的文章、论文或研究动态。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Research & Science 订阅源"
+  },
+  {
+    "feed_url": "https://www.nasa.gov/news-release/feed/",
+    "description": "关注科研与科学领域的文章、论文或研究动态。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Research & Science 订阅源"
+  },
+  {
+    "feed_url": "https://www.nature.com/nature.rss",
+    "description": "关注科研与科学领域的文章、论文或研究动态。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Research & Science 订阅源"
+  },
+  {
+    "feed_url": "https://rss.nytimes.com/services/xml/rss/nyt/Science.xml",
+    "description": "关注科研与科学领域的文章、论文或研究动态。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Research & Science 订阅源"
+  },
+  {
+    "feed_url": "https://phys.org/rss-feed/",
+    "description": "关注科研与科学领域的文章、论文或研究动态。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Research & Science 订阅源"
+  },
+  {
+    "feed_url": "https://journals.plos.org/plosone/feed/atom",
+    "description": "关注科研与科学领域的文章、论文或研究动态。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Research & Science 订阅源"
+  },
+  {
+    "feed_url": "https://www.quantamagazine.org/feed/",
+    "description": "关注科研与科学领域的文章、论文或研究动态。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Research & Science 订阅源"
+  },
+  {
+    "feed_url": "https://www.theguardian.com/science/space/rss",
+    "description": "关注科研与科学领域的文章、论文或研究动态。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Research & Science 订阅源"
+  },
+  {
+    "feed_url": "https://www.newscientist.com/subject/space/feed/",
+    "description": "关注科研与科学领域的文章、论文或研究动态。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "Research & Science 订阅源"
+  },
+  {
+    "feed_url": "https://www.aljazeera.com/xml/rss/all.xml",
+    "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "News 订阅源"
+  },
+  {
+    "feed_url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "News 订阅源"
+  },
+  {
+    "feed_url": "https://cointelegraph.com/rss/tag/blockchain",
+    "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "News 订阅源"
+  },
+  {
+    "feed_url": "https://feed.infoq.com/",
+    "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "News 订阅源"
+  },
+  {
+    "feed_url": "https://feeds.npr.org/1004/rss.xml",
+    "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "News 订阅源"
+  },
+  {
+    "feed_url": "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml",
+    "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "News 订阅源"
+  },
+  {
+    "feed_url": "https://www.propublica.org/feeds/propublica/main",
+    "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "News 订阅源"
+  },
+  {
+    "feed_url": "https://www.theguardian.com/world/rss",
+    "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "News 订阅源"
+  },
+  {
+    "feed_url": "https://www.solidot.org/index.rss",
+    "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "News 订阅源"
+  },
+  {
+    "feed_url": "https://rss.huxiu.com/",
+    "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "News 订阅源"
+  },
+  {
+    "feed_url": "https://www.tmtpost.com/feed",
+    "description": "通过 RSS 持续获取该媒体发布的新闻与资讯。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "News 订阅源"
+  },
+  {
+    "feed_url": "https://61.life/feed.xml",
+    "description": "主要写创业、管理、产品。",
+    "basis": "upstream",
+    "upstream_description": "主要写创业、管理、产品。"
+  },
+  {
+    "feed_url": "https://cdjax.com/?feed=rss2",
+    "description": "主要写产品、数码、随笔。",
+    "basis": "upstream",
+    "upstream_description": "主要写产品、数码、随笔。"
+  },
+  {
+    "feed_url": "https://www.velasx.com/feed",
+    "description": "主要写动画、游戏、小说、设计。",
+    "basis": "upstream",
+    "upstream_description": "主要写动画、游戏、小说、设计。"
+  },
+  {
+    "feed_url": "https://www.skyue.com/feed/",
+    "description": "主要写生活、股票投资、产品经理、软件数码。",
+    "basis": "upstream",
+    "upstream_description": "主要写生活、股票投资、产品经理、软件数码。"
+  },
+  {
+    "feed_url": "https://wechat2rss.xlab.app/feed/31e04606d37f684059e23a8fd3e05f1db0186495.xml",
+    "description": "公众号，主要关注产品设计与用户体验。",
+    "basis": "upstream",
+    "upstream_description": "公众号，主要关注产品设计与用户体验。"
+  },
+  {
+    "feed_url": "https://www.macin.org/atom.xml",
+    "description": "主要写分享、投资、学习、Crypto。",
+    "basis": "upstream",
+    "upstream_description": "主要写分享、投资、学习、Crypto。"
+  },
+  {
+    "feed_url": "https://1q43.blog/feed",
+    "description": "主要写商业、社科、科技、生活。",
+    "basis": "upstream",
+    "upstream_description": "主要写商业、社科、科技、生活。"
+  },
+  {
+    "feed_url": "https://raymondhouch.com/feed",
+    "description": "主要写创业、数码、数字游民、生产力工具。",
+    "basis": "upstream",
+    "upstream_description": "主要写创业、数码、数字游民、生产力工具。"
+  },
+  {
+    "feed_url": "https://blog.abb00717.com/index.xml",
+    "description": "主要写資訊安全、程式設計、技術、寫作。",
+    "basis": "upstream",
+    "upstream_description": "主要写資訊安全、程式設計、技術、寫作。"
+  },
+  {
+    "feed_url": "https://anotherdayu.com/feed/",
+    "description": "主要写日常、流行病与卫生统计、科技、数码。",
+    "basis": "upstream",
+    "upstream_description": "主要写日常、流行病与卫生统计、科技、数码。"
+  },
+  {
+    "feed_url": "https://blog.dort.me/rss.xml",
+    "description": "主要写随笔、生活、记录。",
+    "basis": "upstream",
+    "upstream_description": "主要写随笔、生活、记录。"
+  },
+  {
+    "feed_url": "https://happyxiao.com/feed",
+    "description": "主要写个人成长。",
+    "basis": "upstream",
+    "upstream_description": "主要写个人成长。"
+  },
+  {
+    "feed_url": "https://jaketao.com/feed/",
+    "description": "主要写硅谷科技、主机游戏、留学旅居、跨境电商。",
+    "basis": "upstream",
+    "upstream_description": "主要写硅谷科技、主机游戏、留学旅居、跨境电商。"
+  },
+  {
+    "feed_url": "https://jame.work/feed.xml",
+    "description": "主要写随笔。",
+    "basis": "upstream",
+    "upstream_description": "主要写随笔。"
+  },
+  {
+    "feed_url": "https://www.justzht.com/rss/",
+    "description": "主要写随笔。",
+    "basis": "upstream",
+    "upstream_description": "主要写随笔。"
+  },
+  {
+    "feed_url": "https://chriszheng.science/atom.xml",
+    "description": "主要写随笔、Emacs。",
+    "basis": "upstream",
+    "upstream_description": "主要写随笔、Emacs。"
+  },
+  {
+    "feed_url": "https://www.seis-jun.xyz/atom.xml",
+    "description": "主要写科研、学习、生活。",
+    "basis": "upstream",
+    "upstream_description": "主要写科研、学习、生活。"
+  },
+  {
+    "feed_url": "https://shuiba.co/feed",
+    "description": "主要写日常、旅途、思考。",
+    "basis": "upstream",
+    "upstream_description": "主要写日常、旅途、思考。"
+  },
+  {
+    "feed_url": "https://www.wsh233.cn/feed.xml",
+    "description": "主要写生活、随笔、GISer、地信。",
+    "basis": "upstream",
+    "upstream_description": "主要写生活、随笔、GISer、地信。"
+  },
+  {
+    "feed_url": "https://yipai.me/feed",
+    "description": "主要写胡一派、随笔、不折腾。",
+    "basis": "upstream",
+    "upstream_description": "主要写胡一派、随笔、不折腾。"
+  },
+  {
+    "feed_url": "https://mianao.info/atom.xml",
+    "description": "主要写生活、硬件、教程、DIY。",
+    "basis": "upstream",
+    "upstream_description": "主要写生活、硬件、教程、DIY。"
+  },
+  {
+    "feed_url": "https://www.changhai.org/feed.xml",
+    "description": "主要写物理、科普。",
+    "basis": "upstream",
+    "upstream_description": "主要写物理、科普。"
+  },
+  {
+    "feed_url": "https://yinji.org/feed",
+    "description": "主要写生活、随笔。",
+    "basis": "upstream",
+    "upstream_description": "主要写生活、随笔。"
+  },
+  {
+    "feed_url": "https://fourhappylions.com/index.xml",
+    "description": "主要写养娃、家庭、海外生活。",
+    "basis": "upstream",
+    "upstream_description": "主要写养娃、家庭、海外生活。"
+  },
+  {
+    "feed_url": "https://wangjiezhe.com/atom.xml",
+    "description": "主要写数学、随笔。",
+    "basis": "upstream",
+    "upstream_description": "主要写数学、随笔。"
+  },
+  {
+    "feed_url": "https://localfreedom.pages.dev/index.xml",
+    "description": "主要写软件、隐私、笔记、本地化。",
+    "basis": "upstream",
+    "upstream_description": "主要写软件、隐私、笔记、本地化。"
+  },
+  {
+    "feed_url": "https://blog.moran.im/rss.xml",
+    "description": "主要写随笔、生活、教程。",
+    "basis": "upstream",
+    "upstream_description": "主要写随笔、生活、教程。"
+  },
+  {
+    "feed_url": "https://blog.mcenahle.page/feed.xml",
+    "description": "主要写随笔、记录、成长、学习。",
+    "basis": "upstream",
+    "upstream_description": "主要写随笔、记录、成长、学习。"
+  },
+  {
+    "feed_url": "https://iluc.cn/rss.xml",
+    "description": "主要写日常、随笔、乱七八糟。",
+    "basis": "upstream",
+    "upstream_description": "主要写日常、随笔、乱七八糟。"
+  },
+  {
+    "feed_url": "https://zhurongshuo.com/index.xml",
+    "description": "主要写法不净空，觉无性也。。",
+    "basis": "upstream",
+    "upstream_description": "主要写法不净空，觉无性也。。"
+  },
+  {
+    "feed_url": "https://blog.giveanornot.com/index.xml",
+    "description": "主要写來自台灣、生活反思、社群媒體負面影響、開源軟體。",
+    "basis": "upstream",
+    "upstream_description": "主要写來自台灣、生活反思、社群媒體負面影響、開源軟體。"
+  },
+  {
+    "feed_url": "https://www.xianrenlife.com/feeds/posts/default",
+    "description": "主要写随笔、小说、书评。",
+    "basis": "upstream",
+    "upstream_description": "主要写随笔、小说、书评。"
+  },
+  {
+    "feed_url": "https://news.ycombinator.com/rss",
+    "description": "Hacker News 首页的热门技术、创业与产品讨论。",
+    "basis": "upstream",
+    "upstream_description": "Hacker News 首页的热门技术、创业与产品讨论。"
+  },
+  {
+    "feed_url": "https://linuxdorss.longpink.com/wiki.xml",
+    "description": "LINUX DO 社区的教程、学习笔记与共建文档。",
+    "basis": "upstream",
+    "upstream_description": "LINUX DO 社区的教程、学习笔记与共建文档。"
+  },
+  {
+    "feed_url": "https://lobste.rs/rss",
+    "description": "由社区筛选的软件、编程与计算机科学讨论。",
+    "basis": "upstream",
+    "upstream_description": "由社区筛选的软件、编程与计算机科学讨论。"
+  },
+  {
+    "feed_url": "https://discourse.nixos.org/c/dev/14.rss?order=created",
+    "description": "NixOS 开发、打包与基础设施讨论。",
+    "basis": "upstream",
+    "upstream_description": "NixOS 开发、打包与基础设施讨论。"
+  },
+  {
+    "feed_url": "https://www.v2ex.com/feed/tab/tech.xml",
+    "description": "V2EX 技术板块的新主题，适合只订阅编程、架构与开发工具讨论。",
+    "basis": "upstream",
+    "upstream_description": "V2EX 技术板块的新主题，适合只订阅编程、架构与开发工具讨论。"
+  },
+  {
+    "feed_url": "https://kaix.in/feed/",
+    "description": "主要写读书、咖啡、随笔。",
+    "basis": "upstream",
+    "upstream_description": "主要写读书、咖啡、随笔。"
+  },
+  {
+    "feed_url": "https://kangaroogao.com/atom.xml",
+    "description": "主要写游记、读书笔记、随笔。",
+    "basis": "upstream",
+    "upstream_description": "主要写游记、读书笔记、随笔。"
+  },
+  {
+    "feed_url": "https://shinekid.com/feed/",
+    "description": "主要写生活、影视、文学。",
+    "basis": "upstream",
+    "upstream_description": "主要写生活、影视、文学。"
+  },
+  {
+    "feed_url": "https://tripper.press/atom.xml",
+    "description": "主要写摄影、文化产业、新媒体。",
+    "basis": "upstream",
+    "upstream_description": "主要写摄影、文化产业、新媒体。"
+  },
+  {
+    "feed_url": "https://dongjunke.cn/atom.xml",
+    "description": "主要写社交媒体、科技互联网、思考、读书。",
+    "basis": "upstream",
+    "upstream_description": "主要写社交媒体、科技互联网、思考、读书。"
+  },
+  {
+    "feed_url": "https://wechat2rss.xlab.app/feed/313326d41db4f54b1cc09e7c986a5ac4e5f88ca0.xml",
+    "description": "公众号，主要关注人物与社会记录。",
+    "basis": "upstream",
+    "upstream_description": "公众号，主要关注人物与社会记录。"
+  },
+  {
+    "feed_url": "https://kqh.me/index.xml",
+    "description": "主要写历史、人文、艺术、日常。",
+    "basis": "upstream",
+    "upstream_description": "主要写历史、人文、艺术、日常。"
+  },
+  {
+    "feed_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw",
+    "description": "视频创作者的 RSS 频道，订阅获取新发布的内容。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "视频频道"
+  },
+  {
+    "feed_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCcefcZRL2oaA_uBNeo5UOWg",
+    "description": "视频创作者的 RSS 频道，订阅获取新发布的内容。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "视频频道"
+  },
+  {
+    "feed_url": "https://feeds.megaphone.fm/darknetdiaries",
+    "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "播客节目"
+  },
+  {
+    "feed_url": "https://feeds.simplecast.com/gvtxUiIf",
+    "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "播客节目"
+  },
+  {
+    "feed_url": "https://investlikethebest.libsyn.com/rss",
+    "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "播客节目"
+  },
+  {
+    "feed_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/5e74b52c418a84a046ecaceb",
+    "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "播客节目"
+  },
+  {
+    "feed_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/62382c1103bea1ebfffa1c00",
+    "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "播客节目"
+  },
+  {
+    "feed_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/60de7c003dd577b40d5a40f3",
+    "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "播客节目"
+  },
+  {
+    "feed_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/5e4ee557418a84a0466737b7",
+    "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "播客节目"
+  },
+  {
+    "feed_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/5e4515bd418a84a046e2b11a",
+    "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "播客节目"
+  },
+  {
+    "feed_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/61933ace1b4320461e91fd55",
+    "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "播客节目"
+  },
+  {
+    "feed_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/6013f9f58e2f7ee375cf4216",
+    "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "播客节目"
+  },
+  {
+    "feed_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/5e5c52c9418a84a04625e6cc",
+    "description": "播客节目的 RSS 频道，订阅获取新一期节目信息。",
+    "basis": "category_or_format_summary",
+    "upstream_description": "播客节目"
+  }
+]

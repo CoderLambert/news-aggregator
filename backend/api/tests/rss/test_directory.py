@@ -30,16 +30,25 @@ def publish(document):
 
 def test_pinned_source_format_and_license_receipts():
     lock = json.loads(SEED_PATH.with_suffix('.lock.json').read_text())
+    data = SEED_PATH.parent
     assert hashlib.sha256(SEED_PATH.read_bytes()).hexdigest() == lock['sha256']
-    assert lock['upstream']['commit'] == '9ab2482cae9031a5a39635c887fcfc8ece7e130a'
+    assert lock['upstream']['commit'] == 'f9b54abf9dd3e7af2a1dda12bca06c8fe8b57d7b'
     assert lock['upstream']['license'] == 'CC0-1.0'
-    assert lock['upstream']['included_entries'] == 38
-    assert len(lock['upstream']['excluded_insecure_http_urls']) == 7
-    assert hashlib.sha256((SEED_PATH.parent / 'plenary-CC0-1.0.txt').read_bytes()).hexdigest() == lock['upstream']['license_sha256']
-    rsshub = json.loads((SEED_PATH.parent / 'rsshub-format.lock.json').read_text())
+    assert (lock['selected_entries'], lock['included_entries'], lock['restricted_entries']) == (200, 194, 6)
+    assert hashlib.sha256((data / 'tidings-top200.opml').read_bytes()).hexdigest() == lock['upstream']['sha256']
+    assert hashlib.sha256((data / lock['upstream']['license_path']).read_bytes()).hexdigest() == lock['upstream']['license_sha256']
+    assert hashlib.sha256((data / lock['import_report']['path']).read_bytes()).hexdigest() == lock['import_report']['sha256']
+    receipt = lock['description_input']
+    assert hashlib.sha256((data / receipt['receipt']).read_bytes()).hexdigest() == receipt['receipt_sha256']
+    report = json.loads((data / lock['import_report']['path']).read_text())
+    descriptions = json.loads((data / receipt['receipt']).read_text())
+    assert len(report) == 200 and len(descriptions) == 194
+    assert sum(row['status'] == 'included' for row in report) == 194
+    assert sum(row['status'] == 'restricted' for row in report) == 6
+    rsshub = json.loads((data / 'rsshub-format.lock.json').read_text())
     assert rsshub['license'] == 'AGPL-3.0-only'
-    assert hashlib.sha256((SEED_PATH.parent / 'rsshub-AGPL-3.0.txt').read_bytes()).hexdigest() == rsshub['files']['LICENSE']['sha256']
-    assert hashlib.sha256((SEED_PATH.parent / 'rsshub-subset-v1.json').read_bytes()).hexdigest() == rsshub['subset_sha256']
+    assert hashlib.sha256((data / 'rsshub-AGPL-3.0.txt').read_bytes()).hexdigest() == rsshub['files']['LICENSE']['sha256']
+    assert hashlib.sha256((data / 'rsshub-subset-v1.json').read_bytes()).hexdigest() == rsshub['subset_sha256']
 
 
 @pytest.mark.django_db
@@ -50,8 +59,8 @@ def test_real_seed_queries_are_local_and_deterministic(monkeypatch):
         raise AssertionError('directory search/import attempted network')
     monkeypatch.setattr(socket, 'socket', no_network)
     snapshot = import_pinned_seed()
-    assert snapshot.entries.count() == 41
-    for query in ['github', 'React', '健康', '中文']:
+    assert snapshot.entries.count() == 194
+    for query in ['OpenAI', '机器之心', 'Security', 'Podcasts']:
         first = search_directory(query)
         assert first['results'], query
         assert first == search_directory(query)
@@ -61,18 +70,17 @@ def test_real_seed_queries_are_local_and_deterministic(monkeypatch):
             assert result['subscribed'] is None
             assert result['cached_articles'] == []
             assert not {'heat', 'topFeeds', 'subscriptionCount', 'radar', 'handler'} & result.keys()
-    github = search_directory('github')['results']
-    native = next(row for row in github if row['name'] == 'The GitHub Blog')
-    assert native['origin']['id'] == 'plenaryapp/awesome-rss-feeds'
-    assert native['origin']['license'] == 'CC0-1.0'
-    coding_horror = next(row for row in search_directory('Coding Horror')['results']
-                         if row['name'] == 'Coding Horror')
-    assert coding_horror['origin']['key'] == 'https://feeds.feedburner.com/codinghorror'
-    assert coding_horror['public_url'] == 'https://blog.codinghorror.com/rss/'
-    template = next(row for row in github if row['kind'] == 'route_template')
-    assert template['public_url'] == '/github/issue/:user/:repo/:state?/:labels?'
-    assert template['required_parameters'] == ['repo', 'user']
-    assert template['origin']['license'] == 'AGPL-3.0-only'
+    openai = next(row for row in search_directory('OpenAI')['results']
+                  if row['name'] == 'OpenAI News')
+    assert openai['origin']['id'] == 'fuxiaoai/tidings-rss'
+    assert openai['origin']['license'] == 'CC0-1.0'
+    assert openai['origin']['key'] == 'https://openai.com/news/rss.xml'
+    assert openai['description'].startswith('OpenAI 官方动态')
+    machine_heart = next(row for row in search_directory('机器之心')['results']
+                         if row['name'] == '机器之心')
+    assert machine_heart['public_url'].startswith('https://wechat2rss.')
+    assert machine_heart['tags'] == ['🤖 Artificial Intelligence']
+    assert not snapshot.entries.exclude(kind='feed').exists()
     assert before == (Source.objects.count(), ChannelSubscription.objects.count())
 
 
@@ -81,24 +89,24 @@ def test_real_seed_queries_are_local_and_deterministic(monkeypatch):
 def test_bad_updates_keep_old_snapshot(damage):
     previous = import_pinned_seed()
     document = seed()
-    rows = document['collections'][0]['entries']
+    rows = document['entries']
     if damage == 'checksum':
         with pytest.raises(DirectoryValidationError, match='checksum'):
             import_snapshot(SEED_PATH.read_bytes(), expected_checksum='0' * 64)
         assert FeedDirectorySnapshot.objects.get(active=True).pk == previous.pk
         return
     if damage == 'schema': document['schema_version'] = 99
-    elif damage == 'license': del document['collections'][0]['source']['license']
+    elif damage == 'license': del document['source']['license']
     elif damage == 'duplicate': rows.append(copy.deepcopy(rows[0]))
     elif damage == 'late-invalid': rows[-1]['name'] = None
     elif damage == 'personal': rows[0]['visibility'] = 'personal'
     elif damage == 'verified': rows[0]['verified_at'] = '2026-10-16T00:00:00Z'
-    elif damage == 'ambiguous': document['collections'][0]['namespaces'] = {}
-    elif damage == 'empty': document['collections'] = []
+    elif damage == 'ambiguous': document['namespaces'] = {}
+    elif damage == 'empty': document['entries'] = []
     elif damage == 'private-url': rows[0]['public_url'] = 'https://127.0.0.1/feed'
     with pytest.raises(DirectoryValidationError): publish(document)
     assert FeedDirectorySnapshot.objects.get(active=True).pk == previous.pk
-    assert previous.entries.count() == 41
+    assert previous.entries.count() == 194
     assert FeedDirectorySnapshot.objects.count() == 1
 
 
@@ -106,7 +114,7 @@ def test_bad_updates_keep_old_snapshot(damage):
 def test_failed_database_write_rolls_back_activation():
     previous = import_pinned_seed()
     document = seed()
-    document['collections'][0]['entries'][0]['description'] += ' next'
+    document['entries'][0]['description'] += ' next'
     with patch.object(FeedDirectoryEntry.objects, 'bulk_create', side_effect=IntegrityError('simulated write failure')):
         with pytest.raises(IntegrityError): publish(document)
     assert FeedDirectorySnapshot.objects.get(active=True).pk == previous.pk
@@ -120,19 +128,18 @@ def test_reimport_and_updates_keep_stable_ids_and_retained_snapshots():
     assert import_pinned_seed().pk == previous.pk
     assert FeedDirectorySnapshot.objects.count() == 1
     document = seed()
-    document['collections'][0]['entries'].reverse()
+    document['entries'].reverse()
     current = publish(document)
     assert set(current.entries.values_list('entry_id', flat=True)) == ids
     previous.refresh_from_db()
     assert not previous.active
-    assert current.active and previous.entries.count() == 41
-    assert search_directory('React') == search_directory('REACT')
+    assert current.active and previous.entries.count() == 194
+    assert search_directory('OpenAI') == search_directory('OPENAI')
 
 
 @pytest.mark.django_db
 def test_ranking_exact_prefix_then_featured_and_text_kind_name_id():
     document = seed()
-    document.pop('collections')
     document['entries'] = [
         {'key': 'exact', 'name': 'React', 'public_url': 'https://exact.example.org/feed'},
         {'key': 'prefix', 'name': 'React news', 'public_url': 'https://prefix.example.org/feed'},
@@ -166,7 +173,7 @@ def test_signed_cursor_binds_query_and_snapshot():
     assert first['results'] + second['results'] == all_rows[:10]
     for cursor, q in [('garbage', ''), (first['next_cursor'], 'different')]:
         with pytest.raises(DirectoryCursorError): search_directory(q, cursor=cursor)
-    document = seed(); document['collections'][0]['entries'][0]['name'] += ' changed'
+    document = seed(); document['entries'][0]['name'] += ' changed'
     publish(document)
     with pytest.raises(DirectoryCursorError): search_directory(cursor=first['next_cursor'])
 

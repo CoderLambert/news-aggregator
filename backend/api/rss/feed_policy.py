@@ -49,6 +49,21 @@ def _canonical(value):
     return canonicalize_feed_url(value)
 
 
+def is_wechat_article_url(url):
+    """Identify a WeChat publisher URL without granting collection permission."""
+    return (urlsplit(url).hostname or '').lower().rstrip('.') == 'mp.weixin.qq.com'
+
+
+def is_wechat_feed_url(url):
+    """Identify WeChat2RSS bridges so their embedded body remains authoritative.
+
+    This selects a more restrictive mode. It grants no source, network, reading,
+    or public visibility permission to a matching hostname.
+    """
+    host = (urlsplit(url).hostname or '').lower().rstrip('.')
+    return host == 'wechat2rss.com' or host.startswith('wechat2rss.')
+
+
 def _restricted(policy):
     return (policy.unsupported_reason or not policy.html_allowed or policy.content_kind != 'article'
             or policy.reading_policy not in BODY_POLICIES or policy.keyword_filter)
@@ -133,10 +148,11 @@ def _decide(url, policies, *, publications=()):
     kinds = [p.content_kind for p in policies if p.content_kind != 'article']
     kind = 'discussion' if mixed else kinds[0] if kinds else 'article'
     allowed = not (summary or mixed or kinds or any(not p.html_allowed for p in policies))
-    native = url in NATIVE_FEEDS
+    wechat = is_wechat_feed_url(url)
+    native = wechat or url in NATIVE_FEEDS
     reason = ('restricted' if summary else 'mixed_external_links' if mixed else
               'non_article' if kinds else 'html_not_permitted' if not allowed else
-              'observed_native_feed' if native else 'ordinary_public_article')
+              'wechat_feed_only' if wechat else 'observed_native_feed' if native else 'ordinary_public_article')
     # Existing server setting and the admin mode endpoint are the opt-out. No
     # client rule/CSS input and no subscriber may change a shared mode implicitly.
     mode = getattr(settings, 'RSS_DEFAULT_FEED_MODE', 'full_content')
@@ -152,7 +168,7 @@ def _decide(url, policies, *, publications=()):
         reading = 'public_feed' if native else 'standard'
     if native and not summary:
         reading = 'public_feed'
-    return FeedAdmission(mode, reading, kind, allowed, reason)
+    return FeedAdmission(mode, reading, kind, allowed and not wechat, reason)
 
 
 def _gateway_policy(url,decision):
@@ -223,6 +239,8 @@ def assert_article_fetch_allowed(url):
         raise OperationError('full_content_disabled')
     # C02 permits public HTTP article identities; only subscriptions require HTTPS.
     url = normalize_article_url(url, require_article=False)
+    if is_wechat_article_url(url):
+        raise OperationError('wechat_feed_only')
     decision = _decide(url, _policies_for_url(url))
     if not decision.full_content_allowed:
         raise OperationError('full_content_policy_not_permitted')
