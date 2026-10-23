@@ -64,11 +64,20 @@ export default function NewsDetail() {
   const translationEnabled = capabilities.features.translation.enabled
   const ttsEnabled = capabilities.features.tts.enabled
   const translationModel = useDefaultAIModel(user?.id ?? null, 'full_translation', translationEnabled)
-  // A selected BYOK binding (even stale) must never enter the subscription/legacy path.
-  const personalTranslation = Boolean(user && (translationModel.isPending || translationModel.isError
-    || translationModel.data?.preferences.some(item =>
-      ['default', 'full_translation'].includes(item.task_kind)
-      && item.selection_source === 'byok')))
+  // Route by the effective task source. An explicit subscription override must
+  // win over a BYOK default, while stale explicit BYOK bindings stay fail-closed.
+  const translationPreference = translationModel.data?.preferences.find(
+    item => item.task_kind === 'full_translation',
+  )
+  const defaultTranslationPreference = translationModel.data?.preferences.find(
+    item => item.task_kind === 'default',
+  )
+  const translationSource = (translationPreference?.selection_source ?? 'inherit') === 'inherit'
+    ? defaultTranslationPreference?.selection_source
+    : translationPreference?.selection_source
+  const personalTranslation = Boolean(user && (
+    translationModel.isPending || translationModel.isError || translationSource === 'byok'
+  ))
   const translationButtonRef = useRef<HTMLDivElement>(null)
   const openPrivateTranslation = useCallback(() => {
     translationButtonRef.current?.querySelector<HTMLButtonElement>('button')?.click()

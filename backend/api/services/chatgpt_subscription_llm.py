@@ -222,6 +222,7 @@ def stream_text(
             raise _structured_error(response.status_code, response)
 
         completed_response = None
+        completed_items = {}
         current_event = ''
         emitted = False
         output_bytes = 0
@@ -254,8 +255,23 @@ def stream_text(
                             raise auth.SubscriptionError('模型输出超过安全上限，结果未保存。', 'output_limit_exceeded', 413)
                         emitted = True
                         yield delta
+                elif event_type == 'response.output_item.done':
+                    output_index = event.get('output_index')
+                    item = event.get('item')
+                    if (type(output_index) is not int or not 0 <= output_index < 256
+                            or type(item) is not dict or output_index in completed_items):
+                        raise auth.SubscriptionError('OpenAI 返回了无效的输出项事件。')
+                    completed_items[output_index] = item
                 elif event_type == 'response.completed':
                     completed_response = event.get('response') if isinstance(event.get('response'), dict) else event
+                    if completed_response.get('output') == [] and completed_items:
+                        indexes = sorted(completed_items)
+                        if indexes != list(range(len(indexes))):
+                            raise auth.SubscriptionError('OpenAI 返回了不连续的输出项事件。')
+                        completed_response = {
+                            **completed_response,
+                            'output': [completed_items[index] for index in indexes],
+                        }
                     break
                 elif event_type in {'response.failed', 'response.incomplete', 'error'}:
                     detail = event.get('error')

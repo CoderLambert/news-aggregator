@@ -76,7 +76,9 @@ News Aggregator 使用 OpenAI 的开源应用 Sign in with ChatGPT 流程，让�
 
 验证结果保存为不可变、无密钥的 `ChatGPTSubscriptionCapabilityReceipt`，绑定连接 generation、模型 slug 和能力类型。只有当前连接、当前 generation、当前模型存在 `supported` 回执时，AI 设置才允许把 `deep_research` 显式绑定到 ChatGPT Subscription。切换模型、切换账号、撤销或重授权导致连接 generation 变化后都会 fail closed；文本能力不会被当作工具能力。
 
-研究任务保存秘密无关的执行快照：来源、owner、连接 generation、模型和能力回执 ID。首轮和每次续问都要求明确的来源与本次同意；Worker 在调用前、工具执行期间和提交结果时复核快照。Responses API 始终使用 `stream: true`、`store: false`，服务端保留原生 function-call/output items 以安全续接，不使用 `previous_response_id`。选择订阅后不会回退到 BYOK、站点 Key 或其他模型，失败也不会自动重发。
+研究任务保存秘密无关的执行快照：来源、owner、连接 generation、模型和能力回执 ID。首轮和每次续问都要求明确的来源与本次同意；Worker 在调用前、工具执行期间和提交结果时复核快照。Responses API 始终使用 `stream: true`、`store: false`，服务端保留原生 function-call/output items 以安全续接，不使用 `previous_response_id`。ChatGPT Subscription 的流式终态可能不重复携带 `output`，此时只从同一条已完成流里按连续 `output_index` 重建 `response.output_item.done`，仍由原生 Responses 校验器验证后使用。选择订阅后不会回退到 BYOK、站点 Key 或其他模型，失败也不会自动重发。
+
+文章页按 `full_translation` 的有效来源路由翻译：显式 ChatGPT Subscription 选择优先于 BYOK 全局默认，只有有效来源为 BYOK 时才进入个人 Key 翻译队列。这样不会因另一个用途的默认模型遮蔽已保存的订阅翻译选择，也不会新增隐式来源回退。
 
 相关入口：
 

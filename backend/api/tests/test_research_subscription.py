@@ -29,12 +29,20 @@ User = get_user_model()
 
 
 class FakeStreamResponse:
-    def __init__(self, completed):
+    def __init__(self, completed, streamed_items=()):
         self.status_code = 200
         self._completed = completed
+        self._streamed_items = tuple(streamed_items)
         self.closed = False
 
     def iter_lines(self, decode_unicode=True):
+        for output_index, item in enumerate(self._streamed_items):
+            yield 'event: response.output_item.done'
+            yield 'data: ' + json.dumps({
+                'type': 'response.output_item.done',
+                'output_index': output_index,
+                'item': item,
+            })
         yield 'event: response.completed'
         yield 'data: ' + json.dumps({
             'type': 'response.completed', 'response': self._completed,
@@ -137,6 +145,42 @@ def test_subscription_native_tool_transport_is_streamed_stateless_and_fenced(mon
         'tool_choice': 'auto',
     }
     assert not ({'temperature', 'max_tokens', 'max_output_tokens', 'previous_response_id'} & posted['json'].keys())
+
+@pytest.mark.django_db
+def test_subscription_transport_reconstructs_output_from_completed_item_events(monkeypatch):
+    user = User.objects.create_user(username='subscription-stream-items')
+    connection = make_connection(user)
+    snapshot = subscription_llm.snapshot_for_connection(connection)
+    item = completed_tool_call(
+        'search_news', 'call-1', {'query': 'chips'},
+    )['output'][0]
+    completed = {
+        'status': 'completed', 'error': None,
+        'incomplete_details': None, 'output': [],
+    }
+    response = FakeStreamResponse(completed, [item])
+    monkeypatch.setattr(
+        subscription, 'access_token_for',
+        lambda *args, **kwargs: 'synthetic-token',
+    )
+    monkeypatch.setattr(
+        subscription_llm.requests, 'post',
+        lambda *args, **kwargs: response,
+    )
+
+    result = subscription_llm.complete_response(
+        snapshot,
+        [{'role': 'developer', 'content': 'Use one local tool.'}],
+        tools=[{
+            'type': 'function', 'name': 'search_news',
+            'description': 'Search', 'parameters': {'type': 'object'},
+            'strict': False,
+        }],
+        tool_choice={'type': 'function', 'name': 'search_news'},
+    )
+
+    assert result == {**completed, 'output': [item]}
+    assert response.closed is True
 
 
 @pytest.mark.django_db
