@@ -94,6 +94,8 @@ backend/venv/bin/python backend/manage.py channel_worker_healthcheck
 
 用户在频道页面管理订阅，管理员在 `/admin/rss` 查看引擎连接与同步状态。获取正文使用既有 RSS refetch 接口；历史正文继续保留，研究与翻译不启动网页抓取。同步失败由现有控制/对账流程处理，不另开旧采集进程。
 
+OPML 导入默认有 4 路基础容量和最多 12 路共享突发上限。普通用户在未触发安全熔断时会公平借用全部空闲容量；多个普通用户同时导入时按账号轮转，活跃超级管理员批量导入优先取得空闲突发槽位。没有待发送创建请求时，unknown 操作的只读安全对账也会使用空闲容量。`RSS_IMPORT_BURST_CONCURRENCY` 控制共享上限，`RSS_IMPORT_SUPERUSER_UNCERTAIN_LIMIT` 控制管理员批次同时存在的远端结果不明操作上限，二者默认均为 12。管理员降权后立即失去优先权和放宽的 unknown 上限。任何账号都不能绕过单 Feed unknown/manual-blocked 防重发、同域名冷却、租约或取消 fence。
+
 旧 `crawl_worker`、全文 worker、宿主 `news-cron` 和 timer 模板已退出新版本。升级前须完成 [T29](../plans/rss-engine-migration/tasks/T29/task.md) 来源迁移和 [T30](../plans/rss-engine-migration/tasks/T30/task.md) 实际运行入口停止检查。不要用候选代码里的 `news stop` 推断旧宿主调度器已停。
 
 更新和回退仍先核对不可变版本、当前迁移、数据库一致性备份和全部写入者。生产布局使用既有发布/回退脚本；历史镜像的兼容角色只有在目标清单明确声明时才加载。代码回退不等于数据库回滚。

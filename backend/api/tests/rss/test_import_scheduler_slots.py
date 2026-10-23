@@ -4,8 +4,8 @@ from queue import Queue
 from threading import Event, Lock
 
 import pytest
+from django.contrib.auth import get_user_model
 from django.db import connection
-
 from api.rss.control_worker import ControlWorker, Outcome
 from api.rss.engine import EngineConfig, EngineError
 from api.rss.models import FeedBinding, FeedOperation
@@ -56,7 +56,8 @@ def gated_workers():
         worker._control.shutdown(wait=True)
 
 
-def test_four_actual_slots_and_finished_slot_refills_without_waiting_for_other_requests(people, gated_workers):
+def test_configured_four_slots_refill_without_waiting_for_other_requests(people, gated_workers, settings):
+    settings.RSS_IMPORT_BURST_CONCURRENCY = 4
     queued_import(people[0], [f'https://site{i}.example/feed' for i in range(6)])
     worker, entered, gates = gated_workers()
     # A past user without queued work must not prevent this sole owner borrowing.
@@ -75,7 +76,8 @@ def test_four_actual_slots_and_finished_slot_refills_without_waiting_for_other_r
     assert all(not worker._inflight[identity][0].done() for identity in first[1:])
 
 
-def test_competing_users_receive_two_actual_slots_each(people, gated_workers):
+def test_configured_base_slots_preserve_two_per_user(people, gated_workers, settings):
+    settings.RSS_IMPORT_BURST_CONCURRENCY = 4
     for index, user in enumerate(people):
         queued_import(user, [f'https://user{index}-site{i}.example/feed' for i in range(5)])
     worker, entered, _ = gated_workers()
@@ -83,6 +85,75 @@ def test_competing_users_receive_two_actual_slots_each(people, gated_workers):
     for _ in range(4):
         entered.get(timeout=3)
     assert Counter(job[3] for job in worker._inflight.values()) == {people[0].pk: 2, people[1].pk: 2}
+
+
+def test_ordinary_imports_share_idle_burst_capacity_fairly(people, gated_workers):
+    for index, user in enumerate(people):
+        queued_import(user, [f'https://burst-user{index}-site{i}.example/feed' for i in range(6)])
+    worker, entered, _ = gated_workers()
+    worker.tick()
+    for _ in range(12):
+        entered.get(timeout=3)
+    assert len(worker._inflight) == 12
+    assert Counter(job[3] for job in worker._inflight.values()) == {
+        people[0].pk: 6,
+        people[1].pk: 6,
+    }
+
+
+def test_superuser_import_gets_extra_slots_without_reducing_ordinary_share(people, gated_workers):
+    ordinary = people[0]
+    admin = get_user_model().objects.create_superuser('opml-admin', password='synthetic')
+    queued_import(ordinary, [f'https://ordinary-{index}.example/feed' for index in range(5)])
+    queued_import(admin, [f'https://admin-{index}.example/feed' for index in range(12)])
+    worker, entered, _ = gated_workers()
+    worker.tick()
+    for _ in range(12):
+        entered.get(timeout=3)
+    assert len(worker._inflight) == 12
+    assert Counter(job[3] for job in worker._inflight.values()) == {admin.pk: 10, ordinary.pk: 2}
+
+
+def test_superuser_import_can_progress_past_regular_uncertainty_limit(people, gated_workers):
+    ordinary = people[0]
+    admin = get_user_model().objects.create_superuser('opml-fast-admin', password='synthetic')
+    queued_import(ordinary, [f'https://uncertain-{index}.example/feed' for index in range(4)])
+    FeedOperation.objects.filter(
+        subscription_waiters__actor=ordinary,
+        shared_operation__isnull=True,
+    ).update(state='unknown', safe_result={'outcome_unknown': True})
+    queued_import(admin, ['https://admin-ready.example/feed'])
+    worker, _, _ = gated_workers()
+    claim = worker.claim_next(recovery=False)
+    assert claim is not None
+    assert FeedOperation.objects.get(pk=claim.operation_id).subscription_waiters.filter(actor=admin).exists()
+
+
+def test_superuser_fast_lane_is_revoked_immediately_after_demotion(people, gated_workers):
+    ordinary = people[0]
+    admin = get_user_model().objects.create_superuser('opml-demoted-admin', password='synthetic')
+    queued_import(ordinary, [f'https://demotion-uncertain-{index}.example/feed' for index in range(4)])
+    FeedOperation.objects.filter(
+        subscription_waiters__actor=ordinary,
+        shared_operation__isnull=True,
+    ).update(state='unknown', safe_result={'outcome_unknown': True})
+    queued_import(admin, ['https://demoted-admin.example/feed'])
+    admin.is_superuser = False
+    admin.save(update_fields=['is_superuser'])
+    worker, _, _ = gated_workers()
+    assert worker.claim_next(recovery=False) is None
+
+
+def test_ordinary_import_stays_blocked_at_regular_uncertainty_limit(people, gated_workers):
+    first, second = people
+    queued_import(first, [f'https://ordinary-uncertain-{index}.example/feed' for index in range(4)])
+    FeedOperation.objects.filter(
+        subscription_waiters__actor=first,
+        shared_operation__isnull=True,
+    ).update(state='unknown', safe_result={'outcome_unknown': True})
+    queued_import(second, ['https://ordinary-ready.example/feed'])
+    worker, _, _ = gated_workers()
+    assert worker.claim_next(recovery=False) is None
 
 
 def test_busy_site_does_not_hide_later_work_for_other_sites(people, gated_workers):
@@ -106,6 +177,19 @@ def test_reconciliation_has_a_reserved_slot_when_all_four_registration_slots_are
     assert len(worker._inflight) == 5
     assert Counter(job[4] for job in worker._inflight.values()) == {False: 4, True: 1}
     assert worker._inflight[root.pk][1].claim.reconcile
+
+
+def test_idle_capacity_accelerates_safe_unknown_reconciliation(people, gated_workers):
+    queued_import(people[0], [f'https://reconcile-{index}.example/feed' for index in range(12)])
+    FeedOperation.objects.filter(actor__isnull=True).update(
+        state='unknown', safe_result={'outcome_unknown': True})
+    worker, entered, _ = gated_workers()
+    worker.tick()
+    for _ in range(12):
+        entered.get(timeout=3)
+    assert len(worker._inflight) == 12
+    assert Counter(job[4] for job in worker._inflight.values()) == {False: 4, True: 1, 'burst': 7}
+    assert all(job[1].claim.reconcile for job in worker._inflight.values())
 
 
 def test_import_admission_runs_before_control_even_without_article_sync(monkeypatch, tmp_path):
@@ -151,7 +235,8 @@ def test_one_shot_falls_back_to_other_sites_when_due_recovery_is_rate_limited(pe
     assert FeedOperation.objects.get(pk=claim.operation_id).binding.canonical_feed_url == 'https://other.example/feed'
 
 
-def test_fair_turn_survives_an_empty_recovery_lane_between_ticks(people, gated_workers):
+def test_fair_turn_survives_an_empty_recovery_lane_between_ticks(people, gated_workers, settings):
+    settings.RSS_IMPORT_BURST_CONCURRENCY = 4
     from django.contrib.auth import get_user_model
     third = get_user_model().objects.create_user('opml-c')
     owners = [*people, third]
