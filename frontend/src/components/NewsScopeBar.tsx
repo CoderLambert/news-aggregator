@@ -1,14 +1,15 @@
 import { Link, useLocation } from 'react-router-dom'
-import type { ChannelGroup, NewsScope } from '@/types/channels'
+import { channelGroupPath, type ChannelGroup, type ChannelGroupRoot, type NewsScope } from '@/types/channels'
 import type { SourceRegion } from '@/types/news'
 import RegionFilter from '@/components/RegionFilter'
 import { Button } from '@/components/ui/button'
 import { ModelCombobox } from '@/components/ui/model-combobox'
 
-export default function NewsScopeBar({ scope, groupId, groups, personal, accounts, resultCount, onChange, region, onRegionChange }: {
+export default function NewsScopeBar({ scope, groupId, groups, roots, personal, accounts, resultCount, onChange, region, onRegionChange }: {
   scope: NewsScope
   groupId?: number
   groups: ChannelGroup[]
+  roots: ChannelGroupRoot[]
   personal: boolean
   accounts: boolean
   resultCount?: number
@@ -33,7 +34,7 @@ export default function NewsScopeBar({ scope, groupId, groups, personal, account
             onClick={() => onChange(option.value)}>{option.name}</Button>)}
           {personal && <div className="w-full min-w-0 sm:w-64">
             <ModelCombobox label="选择分组" placeholder="搜索并选择分组" searchLabel="搜索分组" searchPlaceholder="搜索分组名称…"
-              emptyText="没有匹配的分组。" wrapLabels options={groups.map(group => ({ value: 'group:' + group.id, label: group.name }))}
+              emptyText="没有匹配的分组。" wrapLabels options={groups.map(group => ({ value: 'group:' + group.id, label: channelGroupPath(group, roots) }))}
               value={value} onChange={onChange} />
           </div>}
         </div>

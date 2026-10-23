@@ -2,14 +2,15 @@ import { useLayoutEffect, useRef } from 'react'
 import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/context/AuthContext'
 import { useCapability } from '@/context/CapabilitiesContext'
-import { fetchSources, fetchChannelSubscriptions, fetchChannelGroups, fetchNewsPreferences, saveNewsPreferences } from '@/services/api'
-import { parseChannels, parseSubscriptions, parseGroups, parseNewsPreference } from '@/types/channels'
+import { fetchSources, fetchChannelSubscriptions, fetchChannelGroups, fetchChannelGroupRoots, fetchNewsPreferences, saveNewsPreferences } from '@/services/api'
+import { parseChannels, parseSubscriptions, parseGroups, parseRoots, parseNewsPreference, validateHierarchy } from '@/types/channels'
 import { newsKeys } from '@/services/newsQueries'
 
 export const channelKeys = {
   all: ['channels'] as const,
   personal: (viewer: number | string) => ['channels', 'personal', viewer] as const,
   subscriptions: (viewer: number | string) => ['channels', 'personal', viewer, 'subscriptions'] as const,
+  roots: (viewer: number | string) => ['channels', 'personal', viewer, 'roots'] as const,
   groups: (viewer: number | string) => ['channels', 'personal', viewer, 'groups'] as const,
   preferences: (viewer: number | string) => ['channels', 'personal', viewer, 'preferences'] as const,
   directories: ['channels', 'directory'] as const,
@@ -26,12 +27,16 @@ export function useChannelConfig() {
   const enabled = !loading && accounts && !!user
   const subscriptions = useQuery({ queryKey: channelKeys.subscriptions(viewer), enabled,
     queryFn: async ({ signal }) => parseSubscriptions(await fetchChannelSubscriptions(signal)) })
+  const roots = useQuery({ queryKey: channelKeys.roots(viewer), enabled,
+    queryFn: async ({ signal }) => parseRoots(await fetchChannelGroupRoots(signal)) })
   const groups = useQuery({ queryKey: channelKeys.groups(viewer), enabled,
     queryFn: async ({ signal }) => parseGroups(await fetchChannelGroups(signal)) })
-  return { subscriptions, groups, enabled, viewer, accounts,
-    ready: !enabled || (subscriptions.isSuccess && groups.isSuccess),
-    error: enabled && (subscriptions.isError || groups.isError),
-    retry: () => Promise.all([subscriptions.refetch(), groups.refetch()]) }
+  const topologyValid = !!roots.data && !!groups.data && validateHierarchy(roots.data, groups.data)
+  return { subscriptions, roots, groups, enabled, viewer, accounts,
+    ready: !enabled || (subscriptions.isSuccess && roots.isSuccess && groups.isSuccess && topologyValid),
+    error: enabled && (subscriptions.isError || roots.isError || groups.isError ||
+      (roots.isSuccess && groups.isSuccess && !topologyValid)),
+    retry: () => Promise.all([subscriptions.refetch(), roots.refetch(), groups.refetch()]) }
 }
 export function useNewsPreference(enabled: boolean, viewer: number | string) {
   return useQuery({ queryKey: channelKeys.preferences(viewer), enabled,

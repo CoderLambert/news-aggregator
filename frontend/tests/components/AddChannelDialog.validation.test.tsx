@@ -5,7 +5,7 @@ import AddChannelDialog from '@/components/workspace/AddChannelDialog'
 import { setWorkspaceViewer } from '@/services/workspaceApi'
 import { AuthContext } from '@/context/AuthContext'
 
-vi.mock('@/services/channelQueries', () => ({ useChannelConfig: () => ({ groups: { data: [] } }) }))
+vi.mock('@/services/channelQueries', () => ({ useChannelConfig: () => ({ roots: { data: [] }, groups: { data: [] } }) }))
 const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal')
 const originalClose = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close')
 beforeAll(() => {

@@ -38,7 +38,7 @@ def cutoff_date(now=None):
 
 def counts():
     return {name: apps.get_model('api', name).objects.count() for name in (
-        'News', 'Source', 'ChannelSubscription', 'ChannelGroup', 'Favorite', 'NewsReadState',
+        'News', 'Source', 'ChannelSubscription', 'ChannelGroup', 'ChannelGroupRoot', 'Favorite', 'NewsReadState',
         'ArticleChatTurn', 'ChatSession', 'ResearchSession', 'FeedBinding')}
 
 
@@ -81,7 +81,7 @@ def reset_content():
         state='cancelled', safe_result={'code': 'local_content_reset'})
     for name in ('BodyCandidate', 'IdentityConflict', 'LegacyTranslationSnapshot', 'EngineEntryMap',
                  'News', 'LegacyChatArchive', 'ProviderComparison', 'ResearchSession',
-                 'ChannelSubscription', 'ChannelGroup', 'SourceFeedLink', 'SourcePublication'):
+                 'ChannelSubscription', 'ChannelGroup', 'ChannelGroupRoot', 'SourceFeedLink', 'SourcePublication'):
         model(name).objects.all().delete()
     model('NewsPreference').objects.update(scope='all', group=None)
     model('SourceConfig').objects.update(source=None)

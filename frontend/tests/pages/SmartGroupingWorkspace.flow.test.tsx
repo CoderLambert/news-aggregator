@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { listAITaskPreferences } from '@/services/aiConnectionsApi'
 import { Organizer, ProposalEditor } from '@/pages/SmartGroupingWorkspace'
 import { workspaceKeys, workspaceRequest, type Catalog, type GroupingConfig, type Proposal } from '@/services/workspaceApi'
+import type { ChannelGroup } from '@/types/channels'
 
 vi.mock('@/services/aiConnectionsApi', () => ({ listAITaskPreferences: vi.fn() }))
 vi.mock('@/services/workspaceApi', async importOriginal => ({
@@ -15,6 +16,8 @@ const request = vi.mocked(workspaceRequest)
 const topics = [{ key: 'frontend', name: '前端开发', description: 'Web 平台' }]
 const catalog: Catalog = { topics, presets: [{ key: 'dev', name: '开发者', topics: ['frontend'] }], sources: [] }
 const config: GroupingConfig = { mode: 'suggest', bindings: {}, revision: 1, ai_available: false }
+const roots = [{ id: 1, name: '技术', version: 1, child_count: 2, created_at: '2026-01-01', updated_at: '2026-01-01' }]
+const group = (id: number, name: string): ChannelGroup => ({ id, root_id: 1, name, source_ids: [], version: 1, created_at: '2026-01-01', updated_at: '2026-01-01' })
 const proposal: Proposal = {
   id: '7f40e403-d118-4339-a615-a934d96ce5e3', engine: 'rules', status: 'ready', source_ids: [1], topic_keys: ['frontend'],
   result: [{ source_id: 1, name: 'React Blog', topic_keys: ['frontend'], reason: '框架资料', origin: 'catalog', needs_review: false }],
@@ -40,7 +43,7 @@ function setup(subscriptions = [{ id: 1, groupIds: [] as number[] }], viewer = 1
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   clients.push(client)
   const view = render(<QueryClientProvider client={client}><MemoryRouter>
-    <Organizer viewer={viewer} admin={false} initialConfig={{ ...config, ai_available: aiAvailable }} catalog={catalog} groups={[]} subscriptions={subscriptions} />
+    <Organizer viewer={viewer} admin={false} initialConfig={{ ...config, ai_available: aiAvailable }} catalog={catalog} roots={[]} groups={[]} subscriptions={subscriptions} />
   </MemoryRouter></QueryClientProvider>)
   return { ...view, client }
 }
@@ -190,7 +193,7 @@ describe('AG-04 guided grouping', () => {
     expect(postCalls()).toHaveLength(0)
   })
   it('Escape collapses the editable member list and restores its toggle focus', () => {
-    render(<ProposalEditor proposal={proposal} topics={topics} groups={[]} mode="suggest" busy={false} onApply={vi.fn()} onCancel={vi.fn()} />)
+    render(<ProposalEditor proposal={proposal} topics={topics} roots={[]} groups={[]} mode="suggest" busy={false} onApply={vi.fn()} onCancel={vi.fn()} />)
     const toggle = screen.getByRole('button', { name: '调整频道归属' })
     fireEvent.click(toggle)
     const checkbox = screen.getByRole('checkbox', { name: /React Blog/ })
@@ -201,8 +204,8 @@ describe('AG-04 guided grouping', () => {
   })
   it('uses a searchable shadcn group picker while preserving existing-group IDs and legacy create-new semantics', async () => {
     const onApply = vi.fn()
-    const groups = [{ id: 8, name: '前端开发', source_ids: [] }, { id: 19, name: '后端研究与基础设施', source_ids: [] }]
-    render(<ProposalEditor proposal={proposal} topics={topics} groups={groups} mode="suggest" busy={false} onApply={onApply} onCancel={vi.fn()} />)
+    const groups = [group(8, '前端开发'), group(19, '后端研究与基础设施')]
+    render(<ProposalEditor proposal={proposal} topics={topics} roots={roots} groups={groups} mode="suggest" busy={false} onApply={onApply} onCancel={vi.fn()} />)
     const trigger = screen.getByRole('combobox', { name: '目标分组 frontend' })
     expect(trigger.tagName).toBe('BUTTON')
     expect(trigger).toHaveAttribute('data-slot', 'button')
@@ -230,7 +233,7 @@ describe('AG-04 guided grouping', () => {
     expect(onApply).toHaveBeenLastCalledWith({ mode: 'suggest', groups: [{ topic_key: 'frontend', source_ids: [1], name: '自定义前端组' }] })
   })
   it('closes the group picker on Escape, restores trigger focus, and leaves the member editor open', async () => {
-    render(<ProposalEditor proposal={proposal} topics={topics} groups={[{ id: 8, name: '前端开发', source_ids: [] }]} mode="suggest" busy={false} onApply={vi.fn()} onCancel={vi.fn()} />)
+    render(<ProposalEditor proposal={proposal} topics={topics} roots={roots} groups={[group(8, '前端开发')]} mode="suggest" busy={false} onApply={vi.fn()} onCancel={vi.fn()} />)
     const members = screen.getByRole('button', { name: '调整频道归属' })
     fireEvent.click(members)
     const trigger = screen.getByRole('combobox', { name: '目标分组 frontend' })

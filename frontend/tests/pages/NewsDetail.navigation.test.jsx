@@ -15,6 +15,7 @@ const apiState = vi.hoisted(() => ({ blocked: false, fetchFullArticle: vi.fn(), 
 vi.mock('@/services/api', () => ({
   fetchChannelSubscriptions: vi.fn().mockResolvedValue([]),
   fetchChannelGroups: vi.fn().mockResolvedValue([]),
+  fetchChannelGroupRoots: vi.fn().mockResolvedValue([]),
   fetchNewsPreferences: vi.fn().mockResolvedValue({ scope: 'all', group_id: null }),
   saveNewsPreferences: vi.fn().mockImplementation(value => Promise.resolve(value)),
   fetchNews: vi.fn(),

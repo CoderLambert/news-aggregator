@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.contrib.auth.models import User
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
-from api.models import Source, ChannelSubscription, ChannelGroup
+from api.models import Source, ChannelSubscription, ChannelGroup, ChannelGroupRoot
 from api.smart_channel_models import ChannelGroupingProposal, ChannelGroupingConfig
 from api.services.channel_ai import retry_delay, execute_job, process_incremental_subscriptions
 
@@ -33,6 +33,7 @@ class RetryHeaderTests(SimpleTestCase):
 class DurableGroupingLimitTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user('grouping-lease-reader')
+        self.root = ChannelGroupRoot.objects.create(user=self.user, name='Test root')
         self.source, _ = Source.objects.get_or_create(name='React Blog', defaults={'url': 'https://react.dev'})
 
     def test_cancelled_claim_never_calls_a_provider(self):
@@ -57,7 +58,7 @@ class DurableGroupingLimitTests(TestCase):
     def test_old_subscriptions_do_not_starve_new_subscription_processing(self):
         old = ChannelSubscription.objects.create(user=self.user, source=self.source)
         ChannelSubscription.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=2))
-        group = ChannelGroup.objects.create(user=self.user, name='New source group')
+        group = ChannelGroup.objects.create(user=self.user, root=self.root, name='New source group')
         ChannelGroupingConfig.objects.create(user=self.user, mode='suggest', bindings={'ai': group.pk})
         second, _ = Source.objects.get_or_create(name='OpenAI Blog', defaults={'url': 'https://openai.com/news'})
         new = ChannelSubscription.objects.create(user=self.user, source=second)

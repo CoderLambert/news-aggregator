@@ -11,11 +11,17 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from api.models import Source, News, Category, ChannelSubscription, ChannelGroup, ChannelGroupMember
+from api.models import (Source, News, Category, ChannelSubscription, ChannelGroup,
+                        ChannelGroupMember, ChannelGroupRoot)
 from api.smart_channel_models import ChannelGroupingConfig, ChannelGroupingProposal, ChannelGroupingOverride, SubscriptionGroupingState, SourceTopicProfile
 from api.services.channel_grouping import process_subscription
 from api.services.channel_ai import process_incremental_subscriptions, claim_next, execute_job
 from api.tests.test_classification_evidence import example
+
+
+def make_group(user, name, *, root_name='Test root'):
+    root, _ = ChannelGroupRoot.objects.get_or_create(user=user, name=root_name)
+    return ChannelGroup.objects.create(user=user, root=root, name=name)
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +43,7 @@ class PersonalOrganizationTests(TestCase):
         self.client = APIClient()
         self.client.force_authenticate(self.user)
         self.source = Source.objects.create(name='React Blog', url='https://react.dev')
-        self.group = ChannelGroup.objects.create(user=self.user, name='前端开发')
+        self.group = make_group(self.user, '前端开发')
         self.category = Category.objects.create(name='Test', slug='personal-test')
 
     def configure(self, **kwargs):
@@ -52,7 +58,9 @@ class PersonalOrganizationTests(TestCase):
         return self.client.post('/api/me/smart-channels/proposals/', {'target': 'groups', 'source_ids': [self.source.pk], **kwargs}, format='json')
 
     def apply(self, proposal, assignments=None):
-        return self.client.post(f'/api/me/smart-channels/proposals/{proposal}/apply/', {'assignments': assignments or [{'source_id': self.source.pk, 'group_ids': [self.group.pk]}]}, format='json')
+        entries = assignments or [{'source_id': self.source.pk, 'group_ids': [self.group.pk]}]
+        entries = [{**entry, 'new_group_paths': entry.get('new_group_paths', [])} for entry in entries]
+        return self.client.post(f'/api/me/smart-channels/proposals/{proposal}/apply/', {'assignments': entries}, format='json')
 
     def bulk(self, action, group=None, sources=None):
         return self.client.post('/api/me/channel-subscriptions/', {'action': action, 'group_id': (group or self.group).pk, 'source_ids': sources or [self.source.pk]}, format='json')
@@ -118,7 +126,7 @@ class PersonalOrganizationTests(TestCase):
 
     def test_group_assignments_are_owned_unique_and_bounded(self):
         self.subscribe()
-        foreign = ChannelGroup.objects.create(user=self.other, name='Private')
+        foreign = make_group(self.other, 'Private')
         proposal = self.propose().data['id']
         self.assertEqual(self.apply(proposal, [{'source_id': self.source.pk, 'group_ids': [foreign.pk]}]).status_code, 404)
         row = {'source_id': self.source.pk, 'group_ids': [self.group.pk]}
@@ -131,7 +139,7 @@ class PersonalOrganizationTests(TestCase):
     def test_move_is_atomic_and_manual_remove_blocks_later_worker(self):
         self.configure()
         subscription = self.subscribe()
-        old = ChannelGroup.objects.create(user=self.user, name='Old')
+        old = make_group(self.user, 'Old')
         old.subscriptions.add(subscription)
         self.assertEqual(self.bulk('move_to_group', sources=[self.source.pk, 987654]).status_code, 404)
         self.assertTrue(old.subscriptions.filter(pk=subscription.pk).exists())
@@ -165,7 +173,7 @@ def enable_background(example, daily_limit=2):
     user, source, article = example
     client = APIClient()
     client.force_authenticate(user)
-    group = ChannelGroup.objects.create(user=user, name='Personal research picks')
+    group = make_group(user, 'Personal research picks')
     model = UserAIModelConfig.objects.get(connection__user=user)
     response = client.patch('/api/me/smart-channels/settings/', {'mode': 'auto', 'match_existing': True,
         'ai_enabled': True, 'consent': True, 'model_config_id': str(model.pk), 'daily_limit': daily_limit}, format='json')
@@ -182,8 +190,9 @@ def test_custom_group_ai_proposal_uses_private_ids_and_never_writes_public_profi
     gateway = Mock()
     def completion(**kwargs):
         prompt = json.loads(kwargs['messages'][1]['content'])
-        assert prompt['allowed_groups'][0]['group_id'] == group.pk
-        assert prompt['allowed_groups'][0]['name'] == 'Personal research picks'
+        child = prompt['allowed_groups']['children'][0]
+        assert child['group_id'] == group.pk
+        assert child['name'] == 'Personal research picks'
         return SimpleNamespace(usage=None, choices=[SimpleNamespace(finish_reason='stop', message=SimpleNamespace(
             tool_calls=None, refusal=None, content=json.dumps({'channels': [{'source_id': example[1].pk, 'group_ids': [group.pk], 'reason': 'Matches saved evidence'}]})))])
     gateway.chat.completions.create.side_effect = completion
@@ -243,7 +252,9 @@ def test_unrelated_import_during_ai_does_not_discard_valid_result(example):
     job.refresh_from_db()
     assert job.status == 'ready', job.error_code
     response = client.post(f'/api/me/smart-channels/proposals/{job.pk}/apply/', {
-        'assignments': [{'source_id': example[1].pk, 'group_ids': [group.pk]}]}, format='json')
+        'assignments': [{
+            'source_id': example[1].pk, 'group_ids': [group.pk], 'new_group_paths': [],
+        }]}, format='json')
     assert response.status_code == 200, response.data
 
 
@@ -303,7 +314,7 @@ def test_two_owners_progress_under_bounded_round_robin_scan(db, settings):
     for user in owners:
         ChannelGroupingConfig.objects.create(user=user, mode='auto', match_existing=True,
             active_since=timezone.now()-timedelta(days=1), personal_active_since=timezone.now()-timedelta(days=1))
-        ChannelGroup.objects.create(user=user, name='前端开发')
+        make_group(user, '前端开发')
     unknowns = Source.objects.bulk_create([Source(name=f'Unknown {i}', url=f'https://example.test/{i}') for i in range(5)])
     ChannelSubscription.objects.bulk_create([ChannelSubscription(user=owners[0], source=source) for source in unknowns])
     trusted = Source.objects.create(name='React Blog', url='https://react.dev')
@@ -337,12 +348,12 @@ def test_private_group_examples_have_global_prompt_budget(db):
         News.objects.create(source=source, category=category, title='title' * 36, content='summary',
             url=f'https://example.test/title/{i}', publish_time=timezone.now())
     for i in range(40):
-        group = ChannelGroup.objects.create(user=user, name=f'Group {i}')
+        group = make_group(user, f'Group {i}')
         group.subscriptions.add(subscription)
     context = private_groups(user)
-    assert len(context) == 40
+    assert len(context['children']) == 40
     assert len(json.dumps(context, ensure_ascii=False)) < 18000
-    assert sum(len(g['examples']) for g in context) <= 20
+    assert sum(len(g['examples']) for g in context['children']) <= 20
 
 
 @pytest.mark.parametrize('change', ['group_name', 'example_title', 'target_subscription'])
@@ -384,6 +395,86 @@ def test_group_output_rejects_cross_owner_boolean_duplicate_and_invented_ids(db)
         parse_group_classification('{"channels":[],"channels":[]}', evidence, groups)
 
 
+def test_manual_ai_plans_new_groups_and_applies_them_in_one_review(example):
+    from api.ai_model_models import UserAIModelConfig
+
+    user, source, _ = example
+    client = APIClient()
+    client.force_authenticate(user)
+    model = UserAIModelConfig.objects.get(connection__user=user)
+    response = client.post('/api/me/smart-channels/proposals/', {
+        'target': 'groups', 'source_ids': [source.pk], 'engine': 'ai',
+        'consent': True, 'model_config_id': str(model.pk), 'request_id': str(uuid.uuid4()),
+    }, format='json')
+    assert response.status_code == 202, response.data
+    job = claim_next()
+    assert job is not None
+    gateway = Mock()
+    gateway.chat.completions.create.return_value = SimpleNamespace(
+        usage=None, choices=[SimpleNamespace(finish_reason='stop', message=SimpleNamespace(
+            tool_calls=None, refusal=None, content=json.dumps({'channels': [{
+                'source_id': source.pk, 'group_ids': [],
+                'new_group_paths': [{'root_id': None, 'root_name': '工程', 'name': 'AI 工程'}],
+                'reason': '近期内容集中于模型工程',
+            }]})))])
+    with patch('api.services.channel_ai.build_gateway_client', return_value=gateway):
+        execute_job(job)
+    job.refresh_from_db()
+    assert job.status == 'ready', job.error_code
+    assert job.result[0]['new_group_paths'] == [
+        {'root_id': None, 'root_name': '工程', 'name': 'AI 工程'},
+    ]
+    assert not ChannelGroup.objects.filter(user=user).exists()
+
+    rejected = client.post(f'/api/me/smart-channels/proposals/{job.pk}/apply/', {
+        'assignments': [{
+            'source_id': source.pk, 'group_ids': [],
+            'new_group_paths': [{'root_id': None, 'root_name': '工程', 'name': '模型未建议的分组'}],
+        }],
+    }, format='json')
+    assert rejected.status_code == 400
+    assert not ChannelGroup.objects.filter(user=user).exists()
+
+    applied = client.post(f'/api/me/smart-channels/proposals/{job.pk}/apply/', {
+        'assignments': [{
+            'source_id': source.pk, 'group_ids': [],
+            'new_group_paths': [{'root_id': None, 'root_name': '工程', 'name': 'AI 工程'}],
+        }],
+    }, format='json')
+    assert applied.status_code == 200, applied.data
+    group = ChannelGroup.objects.get(user=user, name='AI 工程')
+    assert group.subscriptions.filter(source=source).exists()
+
+    undone = client.post(f'/api/me/smart-channels/proposals/{job.pk}/undo/', {}, format='json')
+    assert undone.status_code == 200, undone.data
+    assert ChannelGroup.objects.filter(pk=group.pk).exists()
+    assert not group.subscriptions.exists()
+
+
+def test_group_planner_normalizes_existing_names_and_rejects_unbounded_new_groups(db):
+    from api.services.channel_ai import parse_group_classification
+
+    evidence = [{'source_id': 1, 'name': 'A'}]
+    groups = {
+        'roots': [{'root_id': 1, 'name': '技术'}],
+        'children': [{'group_id': 2, 'root_id': 1, 'name': '前端开发'}],
+    }
+    parsed = parse_group_classification(json.dumps({'channels': [{
+        'source_id': 1, 'group_ids': [], 'new_group_paths': [
+            {'root_id': 1, 'root_name': None, 'name': ' 前端开发 '},
+        ], 'reason': '匹配现有分组',
+    }]}), evidence, groups, allow_new_paths=True)
+    assert parsed[0]['group_ids'] == [2]
+    assert parsed[0]['new_group_paths'] == []
+
+    with pytest.raises(ValueError, match='invalid_group'):
+        parse_group_classification(json.dumps({'channels': [{
+            'source_id': 1, 'group_ids': [], 'new_group_paths': [
+                {'root_id': 1, 'root_name': None, 'name': name} for name in ['A', 'B', 'C', 'D']
+            ], 'reason': '过度拆分',
+        }]}), evidence, groups, allow_new_paths=True)
+
+
 def test_deleted_legacy_binding_cannot_prevent_disabling_background_ai(example):
     client, group = enable_background(example)
     ChannelGroupingConfig.objects.filter(user=example[0]).update(bindings={'ai': group.pk})
@@ -406,7 +497,7 @@ def test_first_personal_activation_excludes_existing_legacy_backlog(db, settings
     assert client.patch('/api/me/smart-channels/settings/', initial, format='json').status_code == 200
     source = Source.objects.create(name='React Blog', url='https://react.dev')
     old = ChannelSubscription.objects.create(user=user, source=source)
-    group = ChannelGroup.objects.create(user=user, name='前端开发')
+    group = make_group(user, '前端开发')
     assert client.patch('/api/me/smart-channels/settings/', {'mode': 'auto', 'match_existing': True}, format='json').status_code == 200
     process_incremental_subscriptions()
     assert not group.subscriptions.filter(pk=old.pk).exists()
@@ -427,8 +518,11 @@ def test_oversized_owner_defers_observably_without_blocking_other_owners_or_jobs
         client = APIClient()
         client.force_authenticate(user)
         assert client.patch('/api/me/smart-channels/settings/', {'mode': 'auto', 'match_existing': True}, format='json').status_code == 200
-    ChannelGroup.objects.bulk_create([ChannelGroup(user=users[0], name=f'Excess {i}') for i in range(201)])
-    normal_group = ChannelGroup.objects.create(user=users[1], name='前端开发')
+    excess_root = ChannelGroupRoot.objects.create(user=users[0], name='Excess root')
+    ChannelGroup.objects.bulk_create([
+        ChannelGroup(user=users[0], root=excess_root, name=f'Excess {i}') for i in range(201)
+    ])
+    normal_group = make_group(users[1], '前端开发')
     source = Source.objects.create(name='React Blog', url='https://react.dev')
     for user in users:
         ChannelSubscription.objects.create(user=user, source=source)
@@ -447,7 +541,7 @@ def _deferral_pair(prefix):
     for user in users:
         ChannelGroupingConfig.objects.create(user=user, mode='auto', match_existing=True,
             active_since=timezone.now() - timedelta(days=1), personal_active_since=timezone.now() - timedelta(days=1))
-        ChannelGroup.objects.create(user=user, name='前端开发')
+        make_group(user, '前端开发')
     failing = ChannelSubscription.objects.create(user=users[0], source=Source.objects.create(name='React Blog', url='https://react.dev'))
     other = ChannelSubscription.objects.create(user=users[1], source=Source.objects.create(name='WebKit', url='https://webkit.org'))
     return users, failing, other
@@ -604,7 +698,7 @@ def test_legacy_config_anchors_cutoff_instead_of_legacy_active_since(db, setting
     """A topics-era config must not organize its existing backlog on first personal use."""
     settings.PUBLIC_SITE_MODE = 'full'
     user = User.objects.create_user(f'legacy-cutoff-{legacy_mode}')
-    group = ChannelGroup.objects.create(user=user, name='前端开发')
+    group = make_group(user, '前端开发')
     source = Source.objects.create(name='React Blog', url='https://react.dev')
     old = ChannelSubscription.objects.create(user=user, source=source)
     ChannelSubscription.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=30))
@@ -633,7 +727,7 @@ def test_new_subscription_anchors_legacy_cutoff_without_being_skipped(db, settin
     """The first personal event anchors the cutoff at that subscription, not after it."""
     settings.PUBLIC_SITE_MODE = 'full'
     user = User.objects.create_user('legacy-event')
-    group = ChannelGroup.objects.create(user=user, name='前端开发')
+    group = make_group(user, '前端开发')
     old_source = Source.objects.create(name='React Blog', url='https://react.dev')
     old = ChannelSubscription.objects.create(user=user, source=old_source)
     ChannelSubscription.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=30))

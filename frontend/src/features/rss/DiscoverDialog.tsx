@@ -7,7 +7,7 @@ import { verificationError } from '@/services/rssAdminApi'
 import { refreshRssViews } from '@/features/rss/queryRefresh'
 import DirectoryChannelCard from '@/features/rss/DirectoryChannelCard'
 import type { DirectoryEntry } from '@/features/rss/DirectoryChannelCard'
-import type { ChannelGroup } from '@/types/channels'
+import { channelGroupPath, type ChannelGroup, type ChannelGroupRoot } from '@/types/channels'
 
 interface Candidate { url: string; title: string; candidate_token: string }
 interface Discovery { kind?: 'feed'; feed_url?: string; operation_id: string; state: string; candidates?: Candidate[]; error_code?: string; retryable?: boolean }
@@ -15,7 +15,7 @@ interface Operation { state: string; result: Discovery & { code?: string } }
 interface SubscriptionResult { operation_id: string; state: string; subscription: { name: string } | null }
 type Selection = { feed_url: string } | { candidate_token: string } | { directory_entry_id: string }
 interface SubscriptionRequest { selected: Selection; groupIds: number[]; categoryId?: number; idempotencyKey: string }
-interface DiscoverDialogProps { viewer: number; groups: ChannelGroup[]; onClose: () => void; onDone: () => void }
+interface DiscoverDialogProps { viewer: number; roots: ChannelGroupRoot[]; groups: ChannelGroup[]; onClose: () => void; onDone: () => void }
 const terminal = new Set(['succeeded', 'failed', 'cancelled', 'manual_blocked'])
 
 // Free text searches the reviewed local directory; URLs use the engine or the
@@ -32,7 +32,7 @@ export default function DiscoverDialog(props: DiscoverDialogProps) {
   return <DiscoverySession key={props.viewer} {...props} />
 }
 
-function DiscoverySession({ viewer, groups, onClose, onDone }: DiscoverDialogProps) {
+function DiscoverySession({ viewer, roots, groups, onClose, onDone }: DiscoverDialogProps) {
   const client = useQueryClient()
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
@@ -177,8 +177,8 @@ function DiscoverySession({ viewer, groups, onClose, onDone }: DiscoverDialogPro
         </label>)}
       </section>}
       {selection && <label>频道分类（用于首页筛选）<select aria-label="频道分类（用于首页筛选）" value={categoryId} disabled={busy} onChange={event => { setCategoryId(event.target.value); idempotency.current = crypto.randomUUID() }}><option value="">沿用原文章分类</option>{categories.data?.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}</select><small>仅影响我的频道筛选，与下方多选分组独立。</small></label>}
-      {selection && <section><p role="status">已选择订阅，请确认分组。</p><fieldset><legend>加入我的分组（可多选）</legend>
-        {groups.length ? groups.map(group => <label className="workspace-resolved-choice" key={group.id}><input type="checkbox" disabled={busy} checked={groupIds.includes(group.id)} onChange={event => { subscribe.reset(); idempotency.current = crypto.randomUUID(); setGroupIds(ids => event.target.checked ? [...ids, group.id] : ids.filter(id => id !== group.id)) }} />{group.name}</label>) : <p className="workspace-caption">暂无分组，订阅后可在频道管理中整理。</p>}
+      {selection && <section><p role="status">已选择订阅，请确认分组。</p><fieldset><legend>加入我的子分组（最多 3 个）</legend>
+        {groups.length ? groups.map(group => <label className="workspace-resolved-choice" key={group.id}><input type="checkbox" disabled={busy || (!groupIds.includes(group.id) && groupIds.length >= 3)} checked={groupIds.includes(group.id)} onChange={event => { subscribe.reset(); idempotency.current = crypto.randomUUID(); setGroupIds(ids => event.target.checked ? [...ids, group.id] : ids.filter(id => id !== group.id)) }} />{channelGroupPath(group, roots)}</label>) : <p className="workspace-caption">暂无子分组，订阅后可在频道管理中整理。</p>}
       </fieldset></section>}
     </>}
     {subscribe.data && <section aria-live="polite"><a className="workspace-link" href="/channels/additions">在添加记录中持续查看进度</a><p>{subscribe.data.subscription ? `已订阅：${subscribe.data.subscription.name}` : '连接请求已保存，验证成功后加入我的订阅'}</p>

@@ -25,7 +25,7 @@ function setup(viewer = 12) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: 2 }, mutations: { retry: 2 } } })
   clients.push(client)
   const ui = (id: number) => <QueryClientProvider client={client}>
-    <OpmlDialog viewer={id} groups={[{ id: id === 12 ? 7 : 8, name: id === 12 ? 'Mine' : 'Other', source_ids: [] }]} onClose={vi.fn()} />
+    <OpmlDialog viewer={id} roots={[{ id: id, name: id === 12 ? 'Personal' : 'Other root', version: 1, child_count: 1, created_at: '2026-01-01', updated_at: '2026-01-01' }]} groups={[{ id: id === 12 ? 7 : 8, root_id: id, name: id === 12 ? 'Mine' : 'Other', source_ids: [], version: 1, created_at: '2026-01-01', updated_at: '2026-01-01' }]} onClose={vi.fn()} />
   </QueryClientProvider>
   const view = render(ui(viewer))
   return { ...view, client, switchViewer: (id: number) => view.rerender(ui(id)) }

@@ -9,8 +9,9 @@ import WorkspaceModal from '@/components/workspace/WorkspaceModal'
 import { useChannelConfig } from '@/services/channelQueries'
 import { newsKeys } from '@/services/newsQueries'
 import { workspaceCatalogOptions, workspaceConfigOptions, workspaceKeys, workspaceRequest, workspaceError,
-  originLabel, proposalStatus, type GroupingMode, type GroupingConfig, type Proposal, type ProposalPage, type Topic, type SiteClassifier } from '@/services/workspaceApi'
-import type { ChannelGroup } from '@/types/channels'
+  originLabel, proposalStatus, type Catalog, type GroupingMode, type GroupingConfig, type HierarchyProposalRow,
+  type Proposal, type ProposalItem, type ProposalPage, type Topic, type SiteClassifier } from '@/services/workspaceApi'
+import { channelGroupPath, type ChannelGroup, type ChannelGroupRoot } from '@/types/channels'
 import ExistingGroupOrganizer from '@/components/workspace/ExistingGroupOrganizer'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -32,6 +33,7 @@ const errorMessages: Record<string, string> = {
   model_request_failed: '模型请求失败，请检查模型连接；可使用规则推荐继续整理。',
   incomplete_output: '模型返回不完整，未应用任何分组。', worker_interrupted: '任务已中断或结果未知，不会自动重发；确认后可显式重新预览。',
   invalid_output: '模型输出格式无效，未修改你的分组。', invalid_topic: '模型返回了未允许的主题。',
+  invalid_group: '模型返回了无效或过多的分组建议，未修改你的分组。',
   invalid_source: '模型返回了未知频道。', expired: '任务已过期，请重新生成。',
 }
 
@@ -57,24 +59,118 @@ export default function SmartGroupingWorkspace() {
 function SmartPage({ viewer, admin }: { viewer: number; admin: boolean }) {
   const channels = useChannelConfig()
   const [advanced, setAdvanced] = useState(false)
+  const [organizer, setOrganizer] = useState<'hierarchy' | 'channels'>('hierarchy')
   const catalog = useQuery(workspaceCatalogOptions(viewer, 'history'))
   const config = useQuery(workspaceConfigOptions(viewer))
   if (config.isError || catalog.isError || channels.error) return <div role="alert" className="workspace-empty"><h1>整理配置未能加载</h1><p>不会使用不完整的订阅数据生成建议。</p><button type="button" className="workspace-button secondary" onClick={() => { void config.refetch(); void catalog.refetch(); void channels.retry() }}>重试</button></div>
   if (!config.data || !catalog.data || !channels.ready) return <p role="status" className="workspace-empty">正在加载订阅与主题资料…</p>
-  return <><ExistingGroupOrganizer viewer={viewer} initialConfig={config.data} groups={channels.groups.data ?? []}
-    subscriptions={(channels.subscriptions.data ?? []).map(subscription => ({ id: subscription.source_id, groupIds: subscription.group_ids }))} />
-    <section className="workspace-panel" aria-label="旧版主题预设入口"><header className="workspace-panel-heading"><div className="space-y-2"><Badge variant="outline">次要入口 · 旧版 · 可创建分组</Badge><h2>按主题预设整理</h2></div>
+  return <><nav aria-label="智能整理方式" className="workspace-engine-options">
+    <Button type="button" variant="outline" aria-pressed={organizer === 'hierarchy'} onClick={() => setOrganizer('hierarchy')}>整理层级</Button>
+    <Button type="button" variant="outline" aria-pressed={organizer === 'channels'} onClick={() => setOrganizer('channels')}>整理频道</Button>
+  </nav>
+  {organizer === 'hierarchy' ? <HierarchyOrganizer viewer={viewer} roots={channels.roots.data ?? []} groups={channels.groups.data ?? []} />
+    : <ExistingGroupOrganizer viewer={viewer} initialConfig={config.data} roots={channels.roots.data ?? []} groups={channels.groups.data ?? []}
+      subscriptions={(channels.subscriptions.data ?? []).map(subscription => ({ id: subscription.source_id, groupIds: subscription.group_ids }))} />}
+    {organizer === 'channels' && <section className="workspace-panel" aria-label="旧版主题预设入口"><header className="workspace-panel-heading"><div className="space-y-2"><Badge variant="outline">次要入口 · 固定主题模板</Badge><h2>按主题预设整理</h2></div>
       <Button type="button" variant="ghost" aria-expanded={advanced} onClick={() => setAdvanced(value => !value)}>高级：按主题预设整理</Button></header>
-      <p className="workspace-caption">兼容旧流程：按预置主题创建或合并分组。默认请先使用上方“按已有分组整理”主流程。</p>
-      {advanced && <Organizer embedded viewer={viewer} admin={admin} initialConfig={config.data} catalog={catalog.data} groups={channels.groups.data ?? []}
-    subscriptions={(channels.subscriptions.data ?? []).map(subscription => ({ id: subscription.source_id, groupIds: subscription.group_ids }))} />}
-    </section>{admin && !advanced && <SiteClassifierPanel viewer={viewer} />}</>
+      <p className="workspace-caption">需要固定主题模板时再使用这里；默认请使用上方“整理频道”，模型可复用已有分组并建议必要的新路径。</p>
+      {advanced && <Organizer embedded viewer={viewer} admin={admin} initialConfig={config.data} catalog={catalog.data} roots={channels.roots.data ?? []} groups={channels.groups.data ?? []}
+        subscriptions={(channels.subscriptions.data ?? []).map(subscription => ({ id: subscription.source_id, groupIds: subscription.group_ids }))} />}
+    </section>}{admin && organizer === 'channels' && !advanced && <SiteClassifierPanel viewer={viewer} />}</>
 }
 
-export function Organizer({ viewer, admin, initialConfig, catalog, groups, subscriptions, embedded = false }: {
+function HierarchyOrganizer({ viewer, roots, groups }: { viewer: number; roots: ChannelGroupRoot[]; groups: ChannelGroup[] }) {
+  const client = useQueryClient()
+  const model = useClassificationModel(viewer, true)
+  const consentKey = model.consentKey
+  const [confirmed, setConfirmed] = useState<string | null>(null)
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [request, setRequest] = useState<{ target: 'hierarchy'; engine: 'ai'; consent: true; model_config_id: string; request_id: string } | null>(null)
+  const [notice, setNotice] = useState('')
+  const history = useQuery({ queryKey: workspaceKeys.proposalHistory(viewer, 'hierarchy', 1), retry: false,
+    queryFn: ({ signal }) => workspaceRequest<ProposalPage>('/me/smart-channels/proposals/?target=hierarchy&page=1', { viewer, signal }),
+    refetchInterval: query => query.state.data?.results.some(item => ['queued', 'running'].includes(item.status)) ? 3000 : false })
+  const active = useQuery({ queryKey: workspaceKeys.proposal(viewer, activeId), enabled: !!activeId, retry: false,
+    queryFn: ({ signal }) => workspaceRequest<Proposal>('/me/smart-channels/proposals/' + activeId + '/', { viewer, signal }),
+    refetchInterval: query => ['queued', 'running'].includes(query.state.data?.status ?? '') ? 2000 : false })
+  const refresh = () => Promise.all([
+    client.invalidateQueries({ queryKey: workspaceKeys.proposals(viewer) }),
+    client.invalidateQueries({ queryKey: ['channels', 'personal', viewer] }),
+  ])
+  const create = useMutation({ mutationFn: (body: NonNullable<typeof request>) => workspaceRequest<Proposal>('/me/smart-channels/proposals/', { method: 'POST', viewer, body }),
+    onSuccess: proposal => { setRequest(null); setConfirmed(null); setActiveId(proposal.id); client.setQueryData(workspaceKeys.proposal(viewer, proposal.id), proposal); void refresh() } })
+  const change = useMutation({ mutationFn: ({ action, body }: { action: 'apply' | 'cancel' | 'undo'; body?: unknown }) => {
+    if (!activeId) throw new Error('没有可操作的层级建议。')
+    return workspaceRequest<Proposal>(`/me/smart-channels/proposals/${activeId}/${action}/`, { method: 'POST', viewer, body: body ?? {} })
+  }, onSuccess: proposal => {
+    client.setQueryData(workspaceKeys.proposal(viewer, proposal.id), proposal)
+    setNotice(proposal.status === 'applied' ? '已应用选中的层级移动。' : proposal.status === 'undone' ? '已撤销仍未被人工修改的层级移动。' : '层级任务已取消。')
+    void refresh()
+  } })
+  const start = () => {
+    if (!model.id || confirmed !== consentKey || create.isPending) return
+    const body = request ?? { target: 'hierarchy' as const, engine: 'ai' as const, consent: true as const,
+      model_config_id: model.id, request_id: crypto.randomUUID() }
+    setRequest(body); create.mutate(body)
+  }
+  const busy = create.isPending || change.isPending || active.isFetching
+  return <div className="workspace-page workspace-smart">
+    <header className="workspace-page-heading"><div><Badge variant="sage" className="mb-2">两级结构</Badge><p className="workspace-eyebrow">先整理结构，再整理频道</p><h1>整理根分类与子分组</h1>
+      <p>AI 只建议把现有子分组移动到根分类；不会重命名、删除或改变频道成员。</p></div><Button asChild variant="outline"><Link to="/channels/groups">手动管理层级</Link></Button></header>
+    <section className="workspace-panel"><h2>生成层级建议</h2>
+      <p className="workspace-caption">当前 {roots.length} 个根分类、{groups.length} 个子分组。模型会读取分组路径、成员频道和有限公开资料；确认前不会写入任何层级或成员数据。</p>
+      <div className="workspace-soft-panel"><p><strong>本次模型：</strong>{model.model ? `${model.model.display_name} (${model.model.model_id})` : model.loading ? '正在读取模型…' : '请先保存并验证默认模型。'} <Link className="workspace-link" to="/settings/ai">模型设置</Link></p>
+        {model.error && <p role="alert">模型设置读取失败。</p>}
+        <label className="workspace-check"><Input className="size-4 shrink-0" type="checkbox" checked={confirmed === consentKey} disabled={!model.id || busy}
+          onChange={event => setConfirmed(event.target.checked ? consentKey : null)} />同意本次使用本人模型额度生成层级建议。</label>
+      </div>
+      <Button type="button" disabled={!groups.length || !model.id || confirmed !== consentKey || busy || change.isError} onClick={start}>{create.isPending ? '正在创建任务…' : request && create.isError ? '重试同一次建议' : '生成层级建议'}</Button>
+      {!groups.length && <p role="status">还没有子分组；请先手动创建子分组或在“整理频道”中审核首个路径建议。</p>}
+      {create.isError && <div role="alert" className="workspace-error"><p>{workspaceError(create.error)} 重试会复用同一请求编号。</p><Button variant="ghost" onClick={() => { setRequest(null); create.reset() }}>放弃本次请求</Button></div>}
+    </section>
+    {notice && <p role="status" className="workspace-notice">{notice}</p>}
+    {activeId && <section className="workspace-panel" aria-label="层级建议"><header className="workspace-panel-heading"><h2>层级建议</h2>{active.data && <Badge variant="outline">{proposalStatus[active.data.status] ?? active.data.status}</Badge>}</header>
+      {active.isPending && <p role="status">正在读取层级建议…</p>}
+      {active.isError && <p role="alert">建议读取失败。<Button variant="outline" onClick={() => void active.refetch()}>重试</Button></p>}
+      {change.isError && <p role="alert">{workspaceError(change.error)} 操作结果尚未确认，请重新读取任务状态。</p>}
+      {active.data && ['queued', 'running'].includes(active.data.status) && <p role="status">AI 正在规划层级；任务已保存，可以稍后从记录恢复。</p>}
+      {active.data?.status === 'ready' && active.data.target === 'hierarchy' && <HierarchyReview key={active.data.id} rows={active.data.result as HierarchyProposalRow[]} roots={roots} groups={groups} busy={busy || change.isError}
+        onApply={rows => change.mutate({ action: 'apply', body: { rows } })} />}
+      {active.data && ['queued', 'running', 'ready'].includes(active.data.status) && <Button variant="outline" disabled={busy || change.isError} onClick={() => change.mutate({ action: 'cancel' })}>取消任务</Button>}
+      {active.data?.status === 'applied' && <><p>层级移动已应用；后续人工修改不会被撤销覆盖。</p><Button variant="outline" disabled={busy || change.isError} onClick={() => change.mutate({ action: 'undo' })}>撤销未被改动的移动</Button></>}
+      {active.data?.status === 'undone' && <p>可撤销的层级移动已恢复；人工改动的项目已跳过。</p>}
+      {active.data?.status === 'failed' && <p role="alert">层级任务未完成，未写入任何建议。</p>}
+    </section>}
+    <section className="workspace-panel"><header className="workspace-panel-heading"><h2>层级整理记录</h2><Button variant="ghost" disabled={history.isFetching} onClick={() => void history.refetch()}>刷新记录</Button></header>
+      {history.isError && <p role="alert">层级记录加载失败。</p>}
+      <ul className="workspace-job-list">{(history.data?.results ?? []).filter(item => item.target === 'hierarchy').map(item => <li key={item.id}><span><strong>AI 层级整理</strong><small>{new Date(item.created_at).toLocaleString()}</small></span><span>{proposalStatus[item.status] ?? item.status}</span>
+        <Button variant="outline" disabled={busy} onClick={() => { setActiveId(item.id); client.setQueryData(workspaceKeys.proposal(viewer, item.id), item) }}>{item.status === 'ready' ? '审核建议' : '查看任务'}</Button></li>)}</ul>
+      {!history.isPending && !history.isError && !(history.data?.results ?? []).some(item => item.target === 'hierarchy') && <p className="workspace-muted">还没有层级整理记录。</p>}
+    </section>
+  </div>
+}
+
+function HierarchyReview({ rows, roots, groups, busy, onApply }: {
+  rows: HierarchyProposalRow[]; roots: ChannelGroupRoot[]; groups: ChannelGroup[]; busy: boolean; onApply: (rows: HierarchyProposalRow[]) => void
+}) {
+  const [selected, setSelected] = useState(() => rows.map((_, index) => index))
+  const destination = (row: HierarchyProposalRow) => row.root_id ? roots.find(root => root.id === row.root_id)?.name ?? '未知根分类' : row.root_name ?? '未命名根分类'
+  const chosen = rows.filter((_, index) => selected.includes(index))
+  return <><p className="workspace-caption">以下只是建议。选择后确认才会创建新根分类或移动子分组；频道成员不会改变。</p>
+    <div className="space-y-3">{rows.map((row, index) => <label key={JSON.stringify(row)} className="workspace-soft-panel flex items-start gap-3"><Input className="mt-1 size-4 shrink-0" type="checkbox" disabled={busy} checked={selected.includes(index)}
+      onChange={event => setSelected(current => event.target.checked ? [...current, index] : current.filter(value => value !== index))} /><span className="min-w-0"><strong>建议根分类：{destination(row)}</strong>
+      <small className="block break-words text-muted-foreground">{row.group_ids.map(id => {
+        const group = groups.find(item => item.id === id)
+        return group ? `${channelGroupPath(group, roots)} → ${destination(row)} / ${group.name}` : `未知子分组 ${id}`
+      }).join('；')}</small><small className="block break-words text-muted-foreground">依据：{row.reason}</small></span></label>)}</div>
+    <footer className="workspace-preview-actions"><span>将应用 {chosen.length} 条完整建议；未选择的建议不写入。</span><Button disabled={busy || !chosen.length} onClick={() => onApply(chosen)}>确认应用层级移动</Button></footer>
+  </>
+}
+
+export function Organizer({ viewer, admin, initialConfig, catalog, roots, groups, subscriptions, embedded = false }: {
   viewer: number; admin: boolean; initialConfig: GroupingConfig
-  catalog: NonNullable<ReturnType<typeof useQuery<import('@/services/workspaceApi').Catalog>>['data']>
-  groups: ChannelGroup[]; subscriptions: Array<{ id: number; groupIds: number[] }>; embedded?: boolean
+  catalog: Catalog
+  roots: ChannelGroupRoot[]; groups: ChannelGroup[]; subscriptions: Array<{ id: number; groupIds: number[] }>; embedded?: boolean
 }) {
   const client = useQueryClient()
   const [selectedTopics, setSelectedTopics] = useState<string[]>(catalog.presets[0]?.topics ?? [])
@@ -228,7 +324,7 @@ export function Organizer({ viewer, admin, initialConfig, catalog, groups, subsc
       <header className="workspace-panel-heading"><h2 ref={previewHeading} tabIndex={-1}>分组建议预览</h2><span className="workspace-caption">{active.data ? proposalStatus[active.data.status] ?? active.data.status : '正在读取'}</span></header>
       {active.isError && <p role="alert" className="workspace-error">{workspaceError(active.error)}<button type="button" onClick={() => void active.refetch()}>重试</button></p>}
       {processing && <div className="workspace-processing" role="status"><Sparkles size={24} aria-hidden="true" /><strong>{proposalStatus[active.data!.status]}</strong><p>任务已持久化，关闭页面后可从记录恢复。若长时间排队，请确认 channel_worker 已启动。</p><button type="button" className="workspace-button secondary" disabled={busy || change.isError || active.isError} onClick={() => change.mutate({ id: activeId, action: 'cancel' })}>取消任务</button></div>}
-      {active.data?.status === 'ready' && <ProposalEditor key={active.data.id} proposal={active.data} topics={catalog.topics} groups={groups} mode={initialConfig.mode} busy={busy || change.isError || active.isError || active.isFetching}
+      {active.data?.status === 'ready' && <ProposalEditor key={active.data.id} proposal={active.data} topics={catalog.topics} roots={roots} groups={groups} mode={initialConfig.mode} busy={busy || change.isError || active.isError || active.isFetching}
         onApply={body => change.mutate({ id: activeId, action: 'apply', body })} onCancel={() => change.mutate({ id: activeId, action: 'cancel' })} />}
       {active.data?.status === 'failed' && <p role="alert" className="workspace-error">{errorMessages[active.data.error_code] ?? '任务失败，未应用变更。请重新生成或改用资料推荐。'}</p>}
       {active.data?.status === 'applied' && <div className="workspace-applied"><Check size={22} aria-hidden="true" /><p>已新增 {active.data.applied_count} 条分组归属。</p><Link className="workspace-button" to="/channels/groups">查看分组</Link><button type="button" className="workspace-button secondary" disabled={busy || change.isError || active.isError} onClick={() => change.mutate({ id: activeId, action: 'undo' })}>撤销本次新增归属</button></div>}
@@ -260,24 +356,25 @@ export function Organizer({ viewer, admin, initialConfig, catalog, groups, subsc
 interface CreateRequest { model_config_id?: string; source_ids: number[]; topic_keys: string[]; engine: 'rules' | 'ai'; consent: boolean; request_id: string }
 
 interface DraftGroup { topic_key: string; group_id: string; name: string; source_ids: number[] }
-export function ProposalEditor({ proposal, topics, groups, mode, busy, onApply, onCancel }: {
-  proposal: Proposal; topics: Topic[]; groups: ChannelGroup[]; mode: GroupingMode; busy: boolean
+export function ProposalEditor({ proposal, topics, roots, groups, mode, busy, onApply, onCancel }: {
+  proposal: Proposal; topics: Topic[]; roots: ChannelGroupRoot[]; groups: ChannelGroup[]; mode: GroupingMode; busy: boolean
   onApply: (body: unknown) => void; onCancel: () => void
 }) {
+  const results = proposal.result as ProposalItem[]
   const [drafts, setDrafts] = useState<DraftGroup[]>(() => proposal.topic_keys.map(key => ({ topic_key: key, group_id: '', name: topics.find(topic => topic.key === key)?.name ?? key,
-    source_ids: proposal.result.filter(item => item.topic_keys.includes(key)).map(item => item.source_id) })))
+    source_ids: results.filter(item => item.topic_keys.includes(key)).map(item => item.source_id) })))
   const editorId = useId()
   const [expanded, setExpanded] = useState<string | null>(null)
   const update = (key: string, values: Partial<DraftGroup>) => setDrafts(current => current.map(draft => draft.topic_key === key ? { ...draft, ...values } : draft))
   const selected = drafts.filter(draft => draft.source_ids.length > 0)
-  const unknown = proposal.result.filter(item => !item.topic_keys.length)
+  const unknown = results.filter(item => !item.topic_keys.length)
   const invalidNames = selected.some(draft => !draft.group_id && (!draft.name.trim() || groups.some(group => group.name === draft.name.trim())))
   const groupOptions = [{ value: '', label: '创建新分组', description: '仅旧版主题预设可创建新分组' },
-    ...groups.map(group => ({ value: String(group.id), label: group.name, description: `已有分组 · ID ${group.id}` }))]
+    ...groups.map(group => ({ value: String(group.id), label: channelGroupPath(group, roots), description: `已有子分组 · ID ${group.id}` }))]
   return <>
     <p className="workspace-caption">{proposal.engine === 'ai' ? '以下为 AI 建议，尚未写入个人分组。' : '以下基于已登记频道资料，不消耗模型额度。'} 选择已有组可合并；空组不会创建。</p>
     {unknown.length > 0 && <p className="workspace-soft-panel">待确认：{unknown.map(item => item.name).join('、')}。可展开任意分组手动勾选，或暂时保持未分组。</p>}
-    {proposal.result.some(item => item.needs_review) && <p className="workspace-caption">其中 {proposal.result.filter(item => item.needs_review).length} 个频道需要人工确认；推荐依据可在“调整频道归属”中查看。</p>}
+    {results.some(item => item.needs_review) && <p className="workspace-caption">其中 {results.filter(item => item.needs_review).length} 个频道需要人工确认；推荐依据可在“调整频道归属”中查看。</p>}
     <div className="workspace-preview-groups">{drafts.map(draft => <section className="workspace-preview-group" key={draft.topic_key}>
       <header><strong>{topics.find(topic => topic.key === draft.topic_key)?.name ?? draft.topic_key}</strong><span>{draft.source_ids.length} 个频道</span></header>
       <div className="mb-3 min-w-0"><span className="text-sm">放入分组</span><div className="mt-1"><ModelCombobox label={'目标分组 ' + draft.topic_key} value={draft.group_id} disabled={busy} options={groupOptions}
@@ -288,8 +385,8 @@ export function ProposalEditor({ proposal, topics, groups, mode, busy, onApply, 
       {expanded === draft.topic_key ? <div id={editorId + draft.topic_key} className="workspace-preview-members" onKeyDown={event => {
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setExpanded(null)
           document.getElementById(editorId + draft.topic_key + '-toggle')?.focus() }
-      }}>{proposal.result.map(item => <label key={item.source_id}><Input className="size-4 shrink-0" type="checkbox" disabled={busy} checked={draft.source_ids.includes(item.source_id)} onChange={event => update(draft.topic_key, { source_ids: event.target.checked ? [...draft.source_ids, item.source_id] : draft.source_ids.filter(id => id !== item.source_id) })} /><span><strong>{item.name}</strong><small>{originLabel[item.origin] ?? item.origin} · {item.reason}</small></span></label>)}</div>
-        : <p className="workspace-caption">{proposal.result.filter(item => draft.source_ids.includes(item.source_id)).map(item => item.name).join('、') || '暂无建议频道'}</p>}
+      }}>{results.map(item => <label key={item.source_id}><Input className="size-4 shrink-0" type="checkbox" disabled={busy} checked={draft.source_ids.includes(item.source_id)} onChange={event => update(draft.topic_key, { source_ids: event.target.checked ? [...draft.source_ids, item.source_id] : draft.source_ids.filter(id => id !== item.source_id) })} /><span><strong>{item.name}</strong><small>{originLabel[item.origin] ?? item.origin} · {item.reason}</small></span></label>)}</div>
+        : <p className="workspace-caption">{results.filter(item => draft.source_ids.includes(item.source_id)).map(item => item.name).join('、') || '暂无建议频道'}</p>}
     </section>)}</div>
     {invalidNames && <p role="alert" className="workspace-error">新分组名称不能为空或与已有分组重复；请选择已有组进行合并，或修改新名称。</p>}
     <footer className="workspace-preview-actions"><span>将处理 {selected.length} 个主题、{new Set(selected.flatMap(draft => draft.source_ids)).size} 个频道；仅新增归属。</span><div className="workspace-actions"><Button type="button" variant="outline" className="flex-1 sm:flex-none" disabled={busy} onClick={onCancel}>取消预览</Button><Button type="button" className="flex-1 sm:flex-none" disabled={busy || !selected.length || invalidNames} onClick={() => onApply({ mode, groups: selected.map(draft => ({ topic_key: draft.topic_key, source_ids: draft.source_ids, ...(draft.group_id ? { group_id: Number(draft.group_id) } : { name: draft.name.trim() }) })) })}>{busy ? '正在应用…' : '确认应用分组'}</Button></div></footer>

@@ -3,11 +3,13 @@ import type { ReactNode, MouseEvent } from 'react'
 import { Link, useLocation, useNavigationType } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { readingPosition, rememberReadingPosition } from '@/services/readingPosition'
-import { BookOpen, FolderOpen, Heart, House, Menu, Moon, Plus, Rss, Search, Settings, Sparkles, Sun } from 'lucide-react'
+import { BookOpen, ChevronDown, ChevronRight, FolderOpen, Heart, House, Menu, Moon, Plus, Rss, Search, Settings, Sparkles, Sun } from 'lucide-react'
 import { useChannelConfig } from '@/services/channelQueries'
 import { useCapability } from '@/context/CapabilitiesContext'
 import WorkspaceModal from './WorkspaceModal'
 import '@/styles/workspace.css'
+import { Button } from '@/components/ui/button'
+import { channelGroupPath } from '@/types/channels'
 
 export default function WorkspaceShell({ children }: { children: ReactNode }) {
   const shellRef = useRef<HTMLDivElement>(null)
@@ -19,6 +21,7 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   const viewerKey = user?.id ?? 'anonymous'
   const [drawer, setDrawer] = useState(false)
+  const [collapsedRoots, setCollapsedRoots] = useState<Set<number>>(() => new Set())
   const [dark, setDark] = useState(() => { try { return localStorage.getItem('newshub-theme') === 'dark' } catch { return false } })
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark)
@@ -131,10 +134,26 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
       <p className="workspace-eyebrow">快捷分组 <span>频道数</span></p>
       <Link to={readingLink('all')} onClick={() => setDrawer(false)}><FolderOpen size={15} aria-hidden="true" />全部资讯</Link>
       <Link to={readingLink('ungrouped')} onClick={() => setDrawer(false)}><FolderOpen size={15} aria-hidden="true" />未加入分组</Link>
-      {(config.groups.data ?? []).map(group => <Link key={group.id} to={readingLink('group', group.id)} onClick={() => setDrawer(false)}
-        aria-current={location.pathname === '/' && new URLSearchParams(location.search).get('group_id') === String(group.id) ? 'page' : undefined}>
-        <span className="workspace-topic-dot" aria-hidden="true" /><span className="workspace-truncate">{group.name}</span><small title={group.source_ids.length + ' 个频道'}>{group.source_ids.length}</small>
-      </Link>)}
+      {(config.roots.data ?? []).map(root => {
+        const children = (config.groups.data ?? []).filter(group => group.root_id === root.id)
+        const collapsed = collapsedRoots.has(root.id)
+        return <div key={root.id} className="min-w-0">
+          <Button type="button" variant="ghost" className="w-full justify-start" aria-expanded={!collapsed}
+            aria-label={(collapsed ? '展开 ' : '折叠 ') + root.name}
+            onClick={() => setCollapsedRoots(current => {
+              const next = new Set(current)
+              if (next.has(root.id)) next.delete(root.id)
+              else next.add(root.id)
+              return next
+            })}>
+            {collapsed ? <ChevronRight size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />}<span className="workspace-truncate">{root.name}</span>
+          </Button>
+          {!collapsed && children.map(group => <Link className="ml-3" key={group.id} to={readingLink('group', group.id)} onClick={() => setDrawer(false)}
+            aria-current={location.pathname === '/' && new URLSearchParams(location.search).get('group_id') === String(group.id) ? 'page' : undefined}>
+            <span className="workspace-topic-dot" aria-hidden="true" /><span className="workspace-truncate">{channelGroupPath(group, config.roots.data ?? [])}</span><small title={group.source_ids.length + ' 个频道'}>{group.source_ids.length}</small>
+          </Link>)}
+        </div>
+      })}
       {config.error && <button type="button" className="workspace-link" onClick={() => void config.retry()}>重试加载分组</button>}
       <Link className="workspace-new-group" to="/channels/groups" onClick={() => setDrawer(false)}><Plus size={16} aria-hidden="true" />新建分组</Link>
     </section>}

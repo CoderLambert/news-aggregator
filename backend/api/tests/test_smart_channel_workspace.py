@@ -11,7 +11,8 @@ from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
-from api.models import Source, Category, News, ChannelGroup, ChannelSubscription, ChannelGroupMember, BlockedNews
+from api.models import (Source, Category, News, ChannelGroup, ChannelGroupRoot,
+                        ChannelSubscription, ChannelGroupMember, BlockedNews)
 from api.smart_channel_models import SourceTopicProfile, ChannelGroupingConfig, ChannelGroupingOverride, ChannelGroupingProposal, ReadingDay, SubscriptionGroupingState
 from api.services.channel_grouping import make_proposal, process_subscription, mark_manual
 from api.services.channel_topics import profile_data, digest, base_profile
@@ -25,6 +26,8 @@ class SmartChannelTests(TestCase):
         cache.clear()
         self.user = User.objects.create_user('smart-reader', password='Test-reader-123')
         self.other = User.objects.create_user('other-smart-reader')
+        self.root = ChannelGroupRoot.objects.create(user=self.user, name='Test root')
+        self.other_root = ChannelGroupRoot.objects.create(user=self.other, name='Test root')
         self.client = APIClient()
         self.client.force_authenticate(self.user)
         self.source, _ = Source.objects.get_or_create(name='React Blog', defaults={'url': 'https://react.dev', 'language': 'en'})
@@ -115,7 +118,7 @@ class SmartChannelTests(TestCase):
 
     def test_title_hints_do_not_authorize_automatic_grouping(self):
         source, subscription = self._unclassified_subscription()
-        group = ChannelGroup.objects.create(user=self.user, name='Unreviewed Frontend')
+        group = ChannelGroup.objects.create(user=self.user, root=self.root, name='Unreviewed Frontend')
         ChannelGroupingConfig.objects.create(user=self.user, mode='auto',
             bindings={'frontend': group.pk}, active_since=timezone.now() - timedelta(days=1))
         process_subscription(subscription.pk)
@@ -147,7 +150,7 @@ class SmartChannelTests(TestCase):
 
     def test_preview_rejects_unsubscribed_source_and_other_user_group(self):
         self.assertEqual(self.propose(source_ids=[self.source2.pk]).status_code, 404)
-        group = ChannelGroup.objects.create(user=self.other, name='Private')
+        group = ChannelGroup.objects.create(user=self.other, root=self.other_root, name='Private')
         proposal = self.propose().data['id']
         response = self.apply(proposal, groups=[{'topic_key': 'frontend', 'group_id': group.pk, 'source_ids': [self.source.pk]}])
         self.assertEqual(response.status_code, 404)
@@ -161,7 +164,7 @@ class SmartChannelTests(TestCase):
 
     def test_changed_group_rejects_stale_preview(self):
         proposal = self.propose().data['id']
-        ChannelGroup.objects.create(user=self.user, name='Another group')
+        ChannelGroup.objects.create(user=self.user, root=self.root, name='Another group')
         self.assertEqual(self.apply(proposal).status_code, 409)
         self.assertEqual(ChannelGroupMember.objects.count(), 0)
 
@@ -205,7 +208,7 @@ class SmartChannelTests(TestCase):
         self.assertEqual(self.apply(proposal2).status_code, 409)
 
     def test_existing_same_name_requires_explicit_existing_group(self):
-        group = ChannelGroup.objects.create(user=self.user, name='Web development')
+        group = ChannelGroup.objects.create(user=self.user, root=self.root, name='Web development')
         proposal = self.propose().data['id']
         self.assertEqual(self.apply(proposal).status_code, 409)
         self.assertEqual(self.apply(proposal, groups=[{'topic_key': 'frontend', 'group_id': group.pk, 'source_ids': [self.source.pk]}]).status_code, 200)
@@ -229,14 +232,14 @@ class SmartChannelTests(TestCase):
         self.assertEqual(ChannelGroupMember.objects.count(), 1)
 
     def test_manual_remove_through_existing_api_is_remembered(self):
-        group = ChannelGroup.objects.create(user=self.user, name='Frontend')
+        group = ChannelGroup.objects.create(user=self.user, root=self.root, name='Frontend')
         group.subscriptions.add(self.subscription)
         response = self.client.patch(f'/api/me/channel-groups/{group.pk}/', {'remove_source_ids': [self.source.pk]}, format='json')
         self.assertEqual(response.status_code, 200)
         self.assertTrue(ChannelGroupingOverride.objects.get(user=self.user, source=self.source, group=group).suppressed)
 
     def test_auto_mode_only_assigns_new_subscriptions_to_bound_groups(self):
-        group = ChannelGroup.objects.create(user=self.user, name='My AI')
+        group = ChannelGroup.objects.create(user=self.user, root=self.root, name='My AI')
         ChannelGroupingConfig.objects.create(user=self.user, mode='auto', bindings={'ai': group.pk})
         response = self.client.post('/api/me/channel-subscriptions/', {'action': 'subscribe', 'source_ids': [self.source2.pk]}, format='json')
         self.assertEqual(response.status_code, 200)
@@ -244,7 +247,7 @@ class SmartChannelTests(TestCase):
         self.assertEqual(ChannelSubscription.objects.filter(user=self.user).count(), 2)
 
     def test_suggestion_mode_does_not_auto_apply(self):
-        group = ChannelGroup.objects.create(user=self.user, name='My AI')
+        group = ChannelGroup.objects.create(user=self.user, root=self.root, name='My AI')
         ChannelGroupingConfig.objects.create(user=self.user, mode='suggest', bindings={'ai': group.pk})
         new = ChannelSubscription.objects.create(user=self.user, source=self.source2)
         process_subscription(new.pk)
@@ -253,7 +256,7 @@ class SmartChannelTests(TestCase):
         self.assertEqual(ChannelGroupingProposal.objects.filter(user=self.user).count(), 1)
 
     def test_suggested_subscription_is_revisited_after_manual_topic_confirmation(self):
-        group = ChannelGroup.objects.create(user=self.user, name='Verified frontend')
+        group = ChannelGroup.objects.create(user=self.user, root=self.root, name='Verified frontend')
         ChannelGroupingConfig.objects.create(user=self.user, mode='auto', bindings={'frontend': group.pk})
         SourceTopicProfile.objects.update_or_create(source=self.source2, defaults={
             'topics': ['frontend'], 'origin': 'ai', 'about': 'Public metadata',
@@ -272,7 +275,7 @@ class SmartChannelTests(TestCase):
         self.assertEqual(process_incremental_subscriptions(limit=1), 0)
 
     def test_subscription_removed_at_owner_lock_is_not_grouped(self):
-        group = ChannelGroup.objects.create(user=self.user, name='No stale subscription')
+        group = ChannelGroup.objects.create(user=self.user, root=self.root, name='No stale subscription')
         ChannelGroupingConfig.objects.create(user=self.user, mode='auto', bindings={'ai': group.pk})
         newcomer = ChannelSubscription.objects.create(user=self.user, source=self.source2)
         with patch('api.services.channel_grouping.lock_user', side_effect=lambda user: ChannelSubscription.objects.filter(pk=newcomer.pk).delete()):
@@ -282,10 +285,10 @@ class SmartChannelTests(TestCase):
 
     def test_one_owner_preview_limit_does_not_block_other_owner(self):
         from rest_framework.exceptions import Throttled
-        group = ChannelGroup.objects.create(user=self.user, name='Busy owner')
+        group = ChannelGroup.objects.create(user=self.user, root=self.root, name='Busy owner')
         ChannelGroupingConfig.objects.create(user=self.user, mode='suggest', bindings={'frontend': group.pk},
             active_since=timezone.now() - timedelta(days=1))
-        other_group = ChannelGroup.objects.create(user=self.other, name='Other owner')
+        other_group = ChannelGroup.objects.create(user=self.other, root=self.other_root, name='Other owner')
         ChannelGroupingConfig.objects.create(user=self.other, mode='suggest', bindings={'ai': other_group.pk})
         other_subscription = ChannelSubscription.objects.create(user=self.other, source=self.source2)
         def process(pk):
@@ -299,7 +302,7 @@ class SmartChannelTests(TestCase):
         # Existing fixture subscription predates the grouping-mode activation.
         ChannelSubscription.objects.filter(pk=self.subscription.pk).update(
             created_at=timezone.now() - timedelta(days=3))
-        group = ChannelGroup.objects.create(user=self.user, name='My Frontend')
+        group = ChannelGroup.objects.create(user=self.user, root=self.root, name='My Frontend')
         cfg = ChannelGroupingConfig.objects.create(user=self.user, mode='suggest', bindings={'frontend': group.pk},
             active_since=timezone.now() - timedelta(days=1))
         sources = Source.objects.bulk_create([

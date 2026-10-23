@@ -18,8 +18,8 @@ from api.rss.discovery import resolve_candidate_token
 from api.rss.http import RssConflict
 from api.rss.feed_policy import approved_feed_policy, assert_binding_policy
 from api.rss.models import FeedBinding, FeedOperation, SourceFeedLink, SourcePublication
-from api.rss.operations import (canonicalize_feed_url, cancel_operation, enqueue_operation,
-                                get_or_create_binding, reconcile_binding, sqlite_retry)
+from api.rss.operations import (OperationError, canonicalize_feed_url, cancel_operation,
+                                enqueue_operation, get_or_create_binding, reconcile_binding, sqlite_retry)
 
 
 class EngineUnavailable(APIException):
@@ -62,8 +62,8 @@ def _selection(user, data):
 
 
 def _group_ids(value):
-    if not isinstance(value, list) or len(value) > 100 or any(type(x) is not int or x <= 0 for x in value):
-        raise ValidationError('group_ids 须为最多100个分组ID。')
+    if not isinstance(value, list) or len(value) > 3 or any(type(x) is not int or x <= 0 for x in value):
+        raise ValidationError('group_ids 须为最多3个分组ID。')
     return sorted(set(value))
 
 
@@ -222,7 +222,7 @@ def complete_subscription(operation):
     group_ids = request['group_ids']
     groups = list(ChannelGroup.objects.filter(user_id=operation.actor_id, pk__in=group_ids))
     if len(groups) != len(group_ids):
-        return
+        raise OperationError('subscription_intent_changed')
     subscription, created = ChannelSubscription.objects.get_or_create(user_id=operation.actor_id, source_id=request['source_id'])
     preserve_existing = operation.safe_input.get('bulk_import', False) and not created
     if 'category_id' in request and not preserve_existing:

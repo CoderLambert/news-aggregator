@@ -10,24 +10,24 @@ import { clearBulkUncertain } from '@/services/bulkWriteBarrier'
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ user: { id: 1 }, loading: false }) }))
 const reload = vi.hoisted(() => vi.fn())
 vi.mock('@/services/channelQueries', () => ({
-  useChannelConfig: () => ({ enabled: true, ready: true, error: false, retry: reload, groups: { data: [{ id: 1, name: '前端', source_ids: [2] }, { id: 3, name: '后端', source_ids: [] }] }, subscriptions: { data: [{ source_id: 2, group_ids: [1] }, { source_id: 4, group_ids: [] }] } }),
+  useChannelConfig: () => ({ enabled: true, ready: true, error: false, retry: reload, roots: { data: [{ id: 9, name: '技术', version: 1, child_count: 2, created_at: '2026-01-01', updated_at: '2026-01-01' }] }, groups: { data: [{ id: 1, root_id: 9, name: '前端', source_ids: [2], version: 1, created_at: '2026-01-01', updated_at: '2026-01-01' }, { id: 3, root_id: 9, name: '后端', source_ids: [], version: 1, created_at: '2026-01-01', updated_at: '2026-01-01' }] }, subscriptions: { data: [{ source_id: 2, group_ids: [1] }, { source_id: 4, group_ids: [] }] } }),
   useChannelMutation: () => useMutation({ mutationFn: (perform: () => Promise<unknown>) => perform() }),
 }))
 vi.mock('@/services/workspaceApi', async original => ({
   ...await original<typeof import('@/services/workspaceApi')>(), workspaceRequest: vi.fn(),
   workspaceCatalogOptions: () => ({ queryKey: ['bulk-catalog'], queryFn: async () => ({ sources: [{ id: 2, name: 'React', topics: [] }, { id: 4, name: 'Vue', topics: [] }], topics: [] }) }),
 }))
-beforeEach(() => { clearBulkUncertain(1); vi.mocked(workspaceRequest).mockReset().mockResolvedValue([]); reload.mockReset().mockResolvedValue([{ isSuccess: true }, { isSuccess: true }]) })
+beforeEach(() => { clearBulkUncertain(1); vi.mocked(workspaceRequest).mockReset().mockResolvedValue([]); reload.mockReset().mockResolvedValue([{ isSuccess: true }, { isSuccess: true }, { isSuccess: true }]) })
 afterEach(cleanup)
 function view() {
-  return <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><MemoryRouter><GroupWorkspace /></MemoryRouter></QueryClientProvider>
+  return <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><MemoryRouter initialEntries={['/channels/groups?root=9&group=1']}><GroupWorkspace /></MemoryRouter></QueryClientProvider>
 }
 function setup() { return render(view()) }
 it('moves a selected channel to a searchable target with one atomic bulk request', async () => {
   setup()
   fireEvent.click(await screen.findByRole('checkbox', { name: '选择 React' }))
-  fireEvent.click(screen.getByRole('combobox', { name: '目标分组' }))
-  fireEvent.click(screen.getByRole('option', { name: '后端' }))
+  fireEvent.click(screen.getByRole('combobox', { name: '目标子分组' }))
+  fireEvent.click(screen.getByRole('option', { name: '技术 / 后端' }))
   fireEvent.click(screen.getByRole('button', { name: '移动到目标分组' }))
   await waitFor(() => expect(workspaceRequest).toHaveBeenCalledWith('/me/channel-subscriptions/', expect.objectContaining({ method: 'POST', viewer: 1, signal: expect.any(AbortSignal), body: { action: 'move_to_group', group_id: 3, source_ids: [2] } })))
   expect(await screen.findByRole('status')).toHaveTextContent('移动')
@@ -50,19 +50,19 @@ it('blocks every write after an unknown bulk outcome until both private reads re
   fireEvent.click(screen.getByRole('button', { name: '移动到目标分组' }))
   await waitFor(() => expect(screen.getByRole('button', { name: '移动到目标分组' })).toBeDisabled())
   expect(screen.getByRole('checkbox', { name: '选择 React' })).toBeChecked()
-  expect(screen.getByRole('button', { name: '新建分组' })).toBeDisabled()
-  expect(screen.getByRole('button', { name: '重命名分组' })).toBeDisabled()
-  expect(screen.getByRole('button', { name: '删除分组' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: '新建根分类' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: '编辑子分组' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: '删除子分组' })).toBeDisabled()
   fireEvent.click(screen.getByRole('button', { name: '移动到目标分组' }))
   expect(workspaceRequest).toHaveBeenCalledTimes(1)
-  fireEvent.click(screen.getByRole('button', { name: '重新读取分组与订阅' }))
+  fireEvent.click(screen.getByRole('button', { name: '重新读取层级、分组与订阅' }))
   await screen.findByText('重新读取失败，仍暂停所有修改。')
   expect(screen.getByRole('button', { name: '移动到目标分组' })).toBeDisabled()
-  reload.mockResolvedValueOnce([{ isSuccess: true }, { isSuccess: false }])
-  fireEvent.click(screen.getByRole('button', { name: '重新读取分组与订阅' }))
+  reload.mockResolvedValueOnce([{ isSuccess: true }, { isSuccess: false }, { isSuccess: true }])
+  fireEvent.click(screen.getByRole('button', { name: '重新读取层级、分组与订阅' }))
   await waitFor(() => expect(reload).toHaveBeenCalledTimes(2))
   expect(screen.getByRole('button', { name: '移动到目标分组' })).toBeDisabled()
-  fireEvent.click(screen.getByRole('button', { name: '重新读取分组与订阅' }))
+  fireEvent.click(screen.getByRole('button', { name: '重新读取层级、分组与订阅' }))
   await waitFor(() => expect(screen.getByRole('button', { name: '移动到目标分组' })).toBeEnabled())
   expect(screen.getByRole('checkbox', { name: '选择 React' })).toBeChecked()
   expect(workspaceRequest).toHaveBeenCalledTimes(1)
@@ -79,11 +79,11 @@ it('keeps the unknown-bulk barrier across a remount so nothing is retried blindl
   // been applied server-side and the cached reads are pre-write data.
   setup()
   expect(await screen.findByText(/批量操作结果尚未确认/)).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: '新建分组' })).toBeDisabled()
-  expect(screen.getByRole('button', { name: '重命名分组' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: '新建根分类' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: '编辑子分组' })).toBeDisabled()
   expect(workspaceRequest).toHaveBeenCalledTimes(1)
-  fireEvent.click(screen.getByRole('button', { name: '重新读取分组与订阅' }))
-  await waitFor(() => expect(screen.getByRole('button', { name: '新建分组' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: '重新读取层级、分组与订阅' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: '新建根分类' })).toBeEnabled())
   expect(workspaceRequest).toHaveBeenCalledTimes(1)
 })
 

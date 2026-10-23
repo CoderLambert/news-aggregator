@@ -18,7 +18,7 @@ function setup() {
   client.setQueryData(newsKeys.sources('zh', 12), [])
   client.setQueryData(['news', 'list', { viewerId: 12, scope: 'all', lang: 'zh' }], { results: [] })
   client.setQueryData(newsKeys.sources('zh', 13), [])
-  const ui = (viewer: number) => <QueryClientProvider client={client}><OpmlDialog viewer={viewer} groups={[]} onClose={vi.fn()} /></QueryClientProvider>
+  const ui = (viewer: number) => <QueryClientProvider client={client}><OpmlDialog viewer={viewer} roots={[]} groups={[]} onClose={vi.fn()} /></QueryClientProvider>
   const view = render(ui(12))
   return { client, switchViewer: (viewer: number) => view.rerender(ui(viewer)) }
 }

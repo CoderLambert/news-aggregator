@@ -6,7 +6,8 @@ from django.contrib.auth.models import User
 from django.test import override_settings
 from rest_framework.test import APIClient
 
-from api.models import Category, Source, News, NewsSourceItem, ChannelGroup, ChannelSubscription
+from api.models import (Category, Source, News, NewsSourceItem, ChannelGroup,
+                        ChannelGroupRoot, ChannelSubscription)
 from api.services.source_policy import POLICIES
 from api.services.sector_feeds import SECTOR_KEYS
 from api.services.energy_keywords import matches_new_energy
@@ -95,7 +96,8 @@ def test_regions_share_all_search_modes_and_group_intersection(vector, version, 
     vector.return_value.count.return_value = 2
     vector.return_value.search.return_value = [(n.id, .9) for n in stories]
     user = User.objects.create_user('regional-reader')
-    group = ChannelGroup.objects.create(user=user, name='Selected feeds')
+    root = ChannelGroupRoot.objects.create(user=user, name='Test root')
+    group = ChannelGroup.objects.create(user=user, root=root, name='Selected feeds')
     for source in [domestic, medical]:
         subscription = ChannelSubscription.objects.create(user=user, source=source)
         group.subscriptions.add(subscription)

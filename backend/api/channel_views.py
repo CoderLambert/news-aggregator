@@ -3,15 +3,16 @@ from collections.abc import Mapping
 
 from django.contrib.auth.models import User
 from django.db import transaction
-from django.db.models import F
+from django.db.models import Count, F
 from django.shortcuts import get_object_or_404
 from django.http import Http404
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import APIException, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from api.models import Source, ChannelSubscription, ChannelGroup, NewsPreference
+from api.models import Source, ChannelSubscription, ChannelGroup, ChannelGroupRoot, NewsPreference
 from api.services.channel_catalog import subscription_status
+from api.services.channel_grouping import record_group_structure_change
 
 
 def ids(data, key):
@@ -22,22 +23,41 @@ def ids(data, key):
 
 
 def group_data(group):
-    return {'id': group.id, 'name': group.name, 'source_ids': [subscription.source_id for subscription in group.subscriptions.all()],
-            'created_at': group.created_at}
+    return {
+        'id': group.id, 'root_id': group.root_id, 'name': group.name,
+        'source_ids': [subscription.source_id for subscription in group.subscriptions.all()],
+        'version': group.version, 'created_at': group.created_at, 'updated_at': group.updated_at,
+    }
+
+
+def root_data(root):
+    child_count = getattr(root, 'child_count', None)
+    if child_count is None:
+        child_count = root.children.count()
+    return {
+        'id': root.id, 'name': root.name, 'version': root.version,
+        'child_count': child_count, 'created_at': root.created_at, 'updated_at': root.updated_at,
+    }
 
 
 def owned_group(user, pk):
     return get_object_or_404(ChannelGroup, user=user, pk=pk)
 
 
-def group_name(data, user, exclude=None):
+def group_name(data, user, exclude=None, *, model=ChannelGroup):
     value = data.get('name')
-    if not isinstance(value, str) or not 1 <= len(value.strip()) <= 40:
-        raise ValidationError({'name': '分组名称去除首尾空格后须为 1–40 字。'})
+    if (not isinstance(value, str) or not 1 <= len(value.strip()) <= 40
+            or any(ord(character) < 32 or ord(character) == 127 for character in value)):
+        raise ValidationError({'name': '分组名称去除首尾空格后须为 1–40 字，且不能包含控制字符。'})
     value = value.strip()
-    if ChannelGroup.objects.filter(user=user, name=value).exclude(pk=exclude).exists():
+    if model.objects.filter(user=user, name=value).exclude(pk=exclude).exists():
         raise ValidationError({'name': '已有同名分组。'})
     return value
+
+
+class ChannelGroupConflict(APIException):
+    status_code = 409
+    default_detail = '分组结构已经变化，请刷新后重试。'
 
 
 def scope_config(data, user):
@@ -129,9 +149,16 @@ class ChannelSubscriptionsView(PersonalChannelsView):
             if type(group_id) is not int or group_id <= 0 or not source_ids:
                 raise ValidationError('请选择有效的分组和频道。')
             group = owned_group(request.user, group_id)
-            subscriptions = list(ChannelSubscription.objects.filter(user=request.user, source_id__in=source_ids))
+            subscriptions = list(ChannelSubscription.objects.filter(
+                user=request.user, source_id__in=source_ids,
+            ).prefetch_related('groups'))
             if len(subscriptions) != len(source_ids):
                 raise Http404
+            if action == 'add_to_group' and any(
+                group not in subscription.groups.all() and len(subscription.groups.all()) >= 3
+                for subscription in subscriptions
+            ):
+                raise ValidationError('每个频道最多属于三个子分组。')
             for subscription in subscriptions:
                 if action == 'move_to_group':
                     subscription.groups.set([group])
@@ -141,6 +168,8 @@ class ChannelSubscriptionsView(PersonalChannelsView):
                     subscription.groups.remove(group)
         elif action == 'set_groups':
             group_ids = ids(request.data, 'group_ids')
+            if len(group_ids) > 3:
+                raise ValidationError('每个频道最多属于三个子分组。')
             groups = list(ChannelGroup.objects.filter(user=request.user, pk__in=group_ids))
             if len(groups) != len(group_ids):
                 from rest_framework.exceptions import NotFound
@@ -155,14 +184,85 @@ class ChannelSubscriptionsView(PersonalChannelsView):
         return self.get(request)
 
 
-class ChannelGroupsView(PersonalChannelsView):
+class ChannelGroupRootsView(PersonalChannelsView):
     def get(self, request):
-        return Response([group_data(g) for g in ChannelGroup.objects.filter(user=request.user).prefetch_related('subscriptions')])
+        roots = ChannelGroupRoot.objects.filter(user=request.user).annotate(child_count=Count('children'))
+        return Response([root_data(root) for root in roots])
 
     @transaction.atomic
     def post(self, request):
         self.lock(request.user)
-        group = ChannelGroup.objects.create(user=request.user, name=group_name(request.data, request.user))
+        if set(request.data) != {'name'}:
+            raise ValidationError('请只提交根分类名称。')
+        if ChannelGroupRoot.objects.filter(user=request.user).count() >= 40:
+            raise ValidationError('每个账号最多创建 40 个根分类。')
+        root = ChannelGroupRoot.objects.create(
+            user=request.user,
+            name=group_name(request.data, request.user, model=ChannelGroupRoot),
+        )
+        record_group_structure_change(request.user)
+        return Response(root_data(root), status=201)
+
+
+class ChannelGroupRootDetailView(PersonalChannelsView):
+    def get(self, request, pk):
+        root = get_object_or_404(
+            ChannelGroupRoot.objects.annotate(child_count=Count('children')),
+            user=request.user, pk=pk,
+        )
+        return Response(root_data(root))
+
+    @transaction.atomic
+    def patch(self, request, pk):
+        self.lock(request.user)
+        if set(request.data) != {'name', 'expected_version'}:
+            raise ValidationError('重命名须提交名称与当前版本。')
+        root = get_object_or_404(ChannelGroupRoot, user=request.user, pk=pk)
+        expected = request.data.get('expected_version')
+        if type(expected) is not int or expected < 1:
+            raise ValidationError('请提交有效的当前版本。')
+        if root.version != expected:
+            raise ChannelGroupConflict('根分类已经变化，请刷新后重试。')
+        root.name = group_name(request.data, request.user, exclude=pk, model=ChannelGroupRoot)
+        root.version += 1
+        root.save(update_fields=['name', 'version', 'updated_at'])
+        record_group_structure_change(request.user)
+        return Response(root_data(root))
+
+    @transaction.atomic
+    def delete(self, request, pk):
+        self.lock(request.user)
+        root = get_object_or_404(ChannelGroupRoot, user=request.user, pk=pk)
+        raw_expected = request.query_params.get('expected_version')
+        if raw_expected is None or not raw_expected.isascii() or not raw_expected.isdecimal():
+            raise ValidationError('请提交有效的当前版本。')
+        if root.version != int(raw_expected):
+            raise ChannelGroupConflict('根分类已经变化，请刷新后重试。')
+        if root.children.exists():
+            raise ChannelGroupConflict('根分类仍包含子分组，不能删除。')
+        root.delete()
+        record_group_structure_change(request.user)
+        return Response(status=204)
+
+
+class ChannelGroupsView(PersonalChannelsView):
+    def get(self, request):
+        groups = ChannelGroup.objects.filter(user=request.user).prefetch_related('subscriptions')
+        return Response([group_data(group) for group in groups])
+
+    @transaction.atomic
+    def post(self, request):
+        self.lock(request.user)
+        if set(request.data) != {'name', 'root_id'} or type(request.data.get('root_id')) is not int:
+            raise ValidationError('创建子分组须提交名称与根分类。')
+        if ChannelGroup.objects.filter(user=request.user).count() >= 200:
+            raise ValidationError('每个账号最多创建 200 个子分组。')
+        root = get_object_or_404(ChannelGroupRoot, user=request.user, pk=request.data['root_id'])
+        group = ChannelGroup.objects.create(
+            user=request.user, root=root,
+            name=group_name(request.data, request.user),
+        )
+        record_group_structure_change(request.user, root_ids=[root.pk])
         return Response(group_data(group), status=201)
 
 
@@ -174,15 +274,50 @@ class ChannelGroupDetailView(PersonalChannelsView):
     def patch(self, request, pk):
         self.lock(request.user)
         group = owned_group(request.user, pk)
-        if 'name' in request.data:
-            group.name = group_name(request.data, request.user, exclude=pk)
-            group.save(update_fields=['name'])
+        structural = bool({'name', 'root_id'} & set(request.data))
+        if structural:
+            if not {'name', 'root_id', 'expected_version'} >= set(request.data) or 'expected_version' not in request.data:
+                raise ValidationError('结构调整须提交名称或根分类，以及当前版本。')
+            expected = request.data.get('expected_version')
+            if type(expected) is not int or expected < 1:
+                raise ValidationError('请提交有效的当前版本。')
+            if group.version != expected:
+                raise ChannelGroupConflict()
+            next_root = group.root
+            if 'root_id' in request.data:
+                if type(request.data['root_id']) is not int:
+                    raise ValidationError('请选择有效的根分类。')
+                next_root = get_object_or_404(ChannelGroupRoot, user=request.user, pk=request.data['root_id'])
+            next_name = group.name
+            if 'name' in request.data:
+                next_name = group_name(request.data, request.user, exclude=pk)
+            changed_roots = {group.root_id, next_root.pk} if next_root.pk != group.root_id else set()
+            if next_name != group.name or next_root.pk != group.root_id:
+                group.name, group.root, group.version = next_name, next_root, group.version + 1
+                group.save(update_fields=['name', 'root', 'version', 'updated_at'])
+                record_group_structure_change(request.user, root_ids=changed_roots)
+            return Response(group_data(group))
+
+        membership_keys = {'source_ids', 'add_source_ids', 'remove_source_ids'}
+        if not request.data or set(request.data) - membership_keys:
+            raise ValidationError('请提交有效的成员调整。')
+        operations = []
         for key, operation in [('source_ids', 'set'), ('add_source_ids', 'add'), ('remove_source_ids', 'remove')]:
-            if key not in request.data: continue
+            if key not in request.data:
+                continue
             source_ids = ids(request.data, key)
-            subscriptions = list(ChannelSubscription.objects.filter(user=request.user, source_id__in=source_ids))
+            subscriptions = list(ChannelSubscription.objects.filter(
+                user=request.user, source_id__in=source_ids,
+            ).prefetch_related('groups'))
             if len(subscriptions) != len(source_ids):
                 raise ValidationError({key: '只能操作自己的已订阅频道。'})
+            if operation in {'set', 'add'} and any(
+                group not in subscription.groups.all() and len(subscription.groups.all()) >= 3
+                for subscription in subscriptions
+            ):
+                raise ValidationError('每个频道最多属于三个子分组。')
+            operations.append((operation, subscriptions))
+        for operation, subscriptions in operations:
             if operation == 'set':
                 group.subscriptions.set(subscriptions)
             else:
@@ -193,8 +328,13 @@ class ChannelGroupDetailView(PersonalChannelsView):
     def delete(self, request, pk):
         self.lock(request.user)
         group = owned_group(request.user, pk)
+        root_id = group.root_id
         NewsPreference.objects.filter(user=request.user, group=group).update(scope='subscribed', group=None)
+        group_id = group.pk
         group.delete()
+        record_group_structure_change(
+            request.user, root_ids=[root_id], removed_group_ids=[group_id],
+        )
         return Response(status=204)
 
 

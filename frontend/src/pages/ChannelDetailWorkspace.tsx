@@ -9,6 +9,7 @@ import { fetchReviewCategories, rssReviewKey } from '@/services/rssReviewApi'
 import AuthModal from '@/components/AuthModal'
 import { ChannelMark, TopicTags, Availability } from '@/components/workspace/ChannelIdentity'
 import { workspaceRequest, workspaceError, workspaceCatalogOptions, workspaceKeys, safeExternalUrl, originLabel, type ChannelProfile } from '@/services/workspaceApi'
+import { channelGroupPath } from '@/types/channels'
 
 export default function ChannelDetailWorkspace() {
   const { id } = useParams()
@@ -32,7 +33,7 @@ function Profile({ id }: { id: number }) {
   const source = profile.data
   const subscription = (config.subscriptions.data ?? []).find(item => item.source_id === id)
   const categories = useQuery({ queryKey: [...rssReviewKey(Number(viewer)), 'categories'], queryFn: ({ signal }) => fetchReviewCategories(signal), enabled: !!subscription })
-  const memberNames = (config.groups.data ?? []).filter(group => subscription?.group_ids.includes(group.id)).map(group => group.name)
+  const memberNames = (config.groups.data ?? []).filter(group => subscription?.group_ids.includes(group.id)).map(group => channelGroupPath(group, config.roots.data ?? []))
   if (!Number.isSafeInteger(id) || id <= 0) return <div className="workspace-empty"><h1>无效的频道地址</h1><Link to="/channels">返回频道管理</Link></div>
   return <div className="workspace-page">
     <Link className="workspace-back-link" to="/channels"><ArrowLeft size={16} aria-hidden="true" />返回频道管理</Link>

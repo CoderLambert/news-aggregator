@@ -17,7 +17,7 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 function setup() { return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>
-  <OpmlDialog viewer={12} groups={[{ id: 7, name: 'Mine', source_ids: [] }]} onClose={vi.fn()} />
+  <OpmlDialog viewer={12} roots={[{ id: 1, name: 'Personal', version: 1, child_count: 1, created_at: '2026-01-01', updated_at: '2026-01-01' }]} groups={[{ id: 7, root_id: 1, name: 'Mine', source_ids: [], version: 1, created_at: '2026-01-01', updated_at: '2026-01-01' }]} onClose={vi.fn()} />
 </QueryClientProvider>) }
 
 describe('personal OPML workflow', () => {
@@ -36,6 +36,30 @@ describe('personal OPML workflow', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认导入 1 项' }))
     await waitFor(() => expect(request).toHaveBeenCalledWith('/me/rss-imports/confirm/', expect.objectContaining({ viewer: 12,
       body: { preview_token: 'signed-token', selected_ids: ['one'], group_map: { Tech: 7 } } })))
+  })
+  it('preselects an exact nested path and keeps existing-child mappings numeric', async () => {
+    const nested = { ...batch, groups: ['Personal / Mine'], group_matches: { 'Personal / Mine': 7 } }
+    request.mockResolvedValueOnce(nested).mockResolvedValueOnce({ ...nested, status: 'confirmed' })
+    setup()
+    fireEvent.change(screen.getByLabelText('OPML 文件'), { target: { files: [new File(['<opml/>'], 'nested.opml')] } })
+    fireEvent.click(screen.getByRole('button', { name: '预览文件' }))
+    expect(await screen.findByRole('combobox', { name: 'Personal / Mine映射分组' })).toHaveValue('7')
+    fireEvent.click(screen.getByRole('button', { name: '确认导入 1 项' }))
+    await waitFor(() => expect(request).toHaveBeenCalledWith('/me/rss-imports/confirm/', expect.objectContaining({
+      body: { preview_token: 'signed-token', selected_ids: ['one'], group_map: { 'Personal / Mine': 7 } },
+    })))
+  })
+
+  it('requires an explicit owned root when confirming a new child', async () => {
+    request.mockResolvedValueOnce(batch).mockResolvedValueOnce({ ...batch, status: 'confirmed' })
+    setup()
+    fireEvent.change(screen.getByLabelText('OPML 文件'), { target: { files: [new File(['<opml/>'], 'new-child.opml')] } })
+    fireEvent.click(screen.getByRole('button', { name: '预览文件' }))
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Tech映射分组' }), { target: { value: 'new:1' } })
+    fireEvent.click(screen.getByRole('button', { name: '确认导入 1 项' }))
+    await waitFor(() => expect(request).toHaveBeenCalledWith('/me/rss-imports/confirm/', expect.objectContaining({
+      body: { preview_token: 'signed-token', selected_ids: ['one'], group_map: { Tech: { create: 'Tech', root_id: 1 } } },
+    })))
   })
   it('keeps oversized upload local and offers personal export', () => {
     setup()

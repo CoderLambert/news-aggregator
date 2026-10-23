@@ -11,7 +11,10 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 
 from api.ai_connection_models import UserAIConnection
-from api.models import Category, Favorite, News, Source, ChatSession, ChannelSubscription, AuthSecurityLock
+from api.models import (
+    AuthSecurityLock, Category, ChannelGroup, ChannelGroupRoot, ChannelSubscription,
+    ChatSession, Favorite, News, Source,
+)
 from api.rss.initialize import cutoff_date, initialize
 from api.rss.models import FeedBinding, FeedOperation, RSSInitialization, SourceFeedLink, EngineEntryMap
 from api.rss.import_models import RssImportBatch, RssImportItem
@@ -65,7 +68,9 @@ def test_reset_preserves_accounts_configuration_audits_and_replay_preserves_new_
         content='old content', publish_time=datetime.now(timezone.utc))
     Favorite.objects.create(user=user, news=news)
     ChatSession.objects.create(user=user, news=news, messages=[{'role': 'assistant', 'content': 'private'}])
-    ChannelSubscription.objects.create(user=user, source=source)
+    subscription = ChannelSubscription.objects.create(user=user, source=source)
+    group_root = ChannelGroupRoot.objects.create(user=user, name='Old root')
+    ChannelGroup.objects.create(user=user, root=group_root, name='Old child').subscriptions.add(subscription)
     operation = FeedOperation.objects.create(kind='discover', actor=user, dedupe_key='audit-operation', request_hash='b' * 64)
     old_binding = FeedBinding.objects.create(engine_instance_uuid=local, account_id=3,
         engine_feed_id=7, canonical_feed_url='https://old.example/feed')
@@ -82,6 +87,7 @@ def test_reset_preserves_accounts_configuration_audits_and_replay_preserves_new_
         backup_dir=str(backup), stdout=StringIO())
     assert not News.objects.exists() and not Favorite.objects.exists() and not ChatSession.objects.exists()
     assert not ChannelSubscription.objects.exists()
+    assert not ChannelGroup.objects.exists() and not ChannelGroupRoot.objects.exists()
     assert not RssImportBatch.objects.exists() and not RssImportItem.objects.exists()
     handoff.refresh_from_db()
     assert handoff.state == 'succeeded' and handoff.safe_result['pending_sync'] is False

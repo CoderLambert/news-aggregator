@@ -7,18 +7,18 @@ import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import OpmlHistory from './OpmlHistory'
 import { batchKey, importStatusText as statusText, importOutcomeText, invalidateImportEffects, type ImportBatch } from './opmlTypes'
-import type { ChannelGroup } from '@/types/channels'
+import { channelGroupPath, type ChannelGroup, type ChannelGroupRoot } from '@/types/channels'
 
-interface ConfirmRequest { preview_token: string; selected_ids: string[]; group_map: Record<string, number | { create: string } | null> }
+interface ConfirmRequest { preview_token: string; selected_ids: string[]; group_map: Record<string, number | { create: string; root_id: number } | null> }
 interface RetryRequest { batchId: string; selected_ids: string[] }
-interface OpmlDialogProps { viewer: number; groups: ChannelGroup[]; onClose: () => void }
+interface OpmlDialogProps { viewer: number; roots: ChannelGroupRoot[]; groups: ChannelGroup[]; onClose: () => void }
 const validBatchId = (value: string) => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value)
 
 export default function OpmlDialog(props: OpmlDialogProps) {
   return <OpmlSession key={props.viewer} {...props} />
 }
 
-function OpmlSession({ viewer, groups, onClose }: OpmlDialogProps) {
+function OpmlSession({ viewer, roots, groups, onClose }: OpmlDialogProps) {
   const client = useQueryClient()
   const lifetime = useRef<AbortController | null>(null)
   useEffect(() => {
@@ -42,7 +42,7 @@ function OpmlSession({ viewer, groups, onClose }: OpmlDialogProps) {
   }, onSuccess: batch => {
     if (!lifetime.current) return
     setSelected(batch.items.filter(item => item.status !== 'invalid' && item.outcome !== 'already_subscribed').map(item => item.id))
-    setGroupMap({})
+    setGroupMap(Object.fromEntries(Object.entries(batch.group_matches ?? {}).map(([path, id]) => [path, String(id)])))
   } })
   const confirm = useMutation({ retry: false, mutationFn: (body: ConfirmRequest) => workspaceRequest<ImportBatch>('/me/rss-imports/confirm/', {
     method: 'POST', viewer, body, signal: lifetime.current?.signal,
@@ -93,7 +93,10 @@ function OpmlSession({ viewer, groups, onClose }: OpmlDialogProps) {
   const submitConfirm = () => {
     if (busy || confirm.isError || !preview.data?.preview_token || !selected.length) return
     confirm.mutate({ preview_token: preview.data.preview_token, selected_ids: [...selected],
-      group_map: Object.fromEntries(Object.entries(groupMap).map(([label, value]) => [label, value === 'new' ? { create: label.slice(0, 40) } : value ? Number(value) : null])),
+      group_map: Object.fromEntries(Object.entries(groupMap).map(([label, value]) => {
+        if (value.startsWith('new:')) return [label, { create: (label.split(' / ').at(-1) ?? label).slice(0, 40), root_id: Number(value.slice(4)) }]
+        return [label, value ? Number(value) : null]
+      })),
     })
   }
   const validItems = preview.data?.items.filter(item => item.status !== 'invalid' && item.outcome !== 'already_subscribed') ?? []
@@ -173,7 +176,9 @@ function OpmlSession({ viewer, groups, onClose }: OpmlDialogProps) {
       </div> : <p role="status" aria-live="polite">{batch.status === 'removed' ? `本批次已移除 ${batch.removed_count} 个新增订阅` : `已订阅/接入 ${batch.items.filter(item => item.status === 'succeeded').length} · 失败 ${batch.items.filter(item => item.status === 'failed').length} · 处理中 ${batch.items.filter(item => ['pending', 'queued'].includes(item.status)).length}`}</p>}
       {!batchId && batch.groups.map(label => <label className="workspace-resolved-choice" key={label}>{label}
         <NativeSelect aria-label={label + '映射分组'} disabled={busy || confirm.isError} value={groupMap[label] ?? ''} onChange={event => setGroupMap(current => ({ ...current, [label]: event.target.value }))}>
-          <option value="">不加入分组</option><option value="new">创建「{label.slice(0, 40)}」</option>{groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
+          <option value="">不加入分组</option>
+          {roots.map(root => <option key={'new:' + root.id} value={'new:' + root.id}>在「{root.name}」下创建「{(label.split(' / ').at(-1) ?? label).slice(0, 40)}」</option>)}
+          {groups.map(group => <option key={group.id} value={group.id}>{channelGroupPath(group, roots)}</option>)}
         </NativeSelect></label>)}
       <ul className="workspace-resolved max-h-[40vh] overflow-y-auto overscroll-contain">{batch.items.map(item => <li key={item.id} className="workspace-resolved-choice">
         {!batchId && <Input className="size-4 shrink-0 accent-primary shadow-none" type="checkbox" aria-label={'导入 ' + (item.title || item.feed_url)} disabled={busy || confirm.isError || item.status === 'invalid' || item.outcome === 'already_subscribed'} checked={selected.includes(item.id)} onChange={event => setSelected(current => event.target.checked ? [...current, item.id] : current.filter(id => id !== item.id))} />}

@@ -17,6 +17,7 @@ import { useNewsScope } from '@/hooks/useNewsScope'
 import NewsScopeBar from '@/components/NewsScopeBar'
 import AuthModal from '@/components/AuthModal'
 import { useCapability } from '@/context/CapabilitiesContext'
+import { channelGroupPath } from '@/types/channels'
 
 const PAGE_SIZE = 20
 const LEGACY_FILTERS_KEY = 'news-aggregator-filters'
@@ -143,11 +144,12 @@ export default function NewsList() {
   const initialLoading = !invalidRegion && !reading.configError && !reading.needsLogin && !reading.invalidScope && (authLoading || newsQuery.isPending)
   const activeFilterCount = categories.length + sources.length + (search.trim() ? 1 : 0) + (region !== 'all' ? 1 : 0)
 
+  const activeGroup = reading.groups.data?.find(group => group.id === reading.groupId)
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
       <h1 id="news-list-title" tabIndex={-1} className="sr-only">{lang === 'en' ? 'Latest news' : '最新资讯'}</h1>
 
-      <NewsScopeBar scope={reading.scope} groupId={reading.groupId} groups={reading.groups.data ?? []}
+      <NewsScopeBar scope={reading.scope} groupId={reading.groupId} groups={reading.groups.data ?? []} roots={reading.roots.data ?? []}
         personal={reading.enabled} accounts={reading.accounts} onChange={reading.select}
         resultCount={!initialLoading && data ? data.count : undefined}
         region={region} onRegionChange={value => updateParams({ region: value === 'all' ? null : value, source: null, page: null })} />
@@ -170,7 +172,7 @@ export default function NewsList() {
           onModeChange={(value) => updateParams({ mode: value, page: null })}
         />
         <p className="mt-2 break-words text-xs text-muted-foreground" aria-label="当前搜索范围">搜索范围：{reading.scope === 'group'
-          ? (reading.groups.data?.find(group => group.id === reading.groupId)?.name ?? '当前分组')
+          ? (activeGroup ? channelGroupPath(activeGroup, reading.roots.data ?? []) : '当前分组')
           : reading.scope === 'subscribed' ? '我的订阅' : reading.scope === 'ungrouped' ? '未加入分组' : '全部资讯'}</p>
         {!semanticSearchEnabled && <p className="mt-1 text-xs text-muted-foreground" role="status">当前仅支持关键词搜索。</p>}
       </div>

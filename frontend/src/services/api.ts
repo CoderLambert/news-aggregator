@@ -794,10 +794,25 @@ export function changeChannelSubscriptions(payload: { action: 'subscribe' | 'uns
 export function fetchChannelGroups(signal?: AbortSignal): Promise<unknown> {
   return api.get<unknown>('/me/channel-groups/', { signal }).then(({ data }) => data)
 }
-export function createChannelGroup(name: string): Promise<unknown> {
-  return api.post<unknown>('/me/channel-groups/', { name }).then(({ data }) => data)
+export function fetchChannelGroupRoots(signal?: AbortSignal): Promise<unknown> {
+  return api.get<unknown>('/me/channel-group-roots/', { signal }).then(({ data }) => data)
 }
-export function updateChannelGroup(id: number, payload: { name?: string; source_ids?: number[]; add_source_ids?: number[]; remove_source_ids?: number[] }): Promise<unknown> {
+export function createChannelGroupRoot(name: string): Promise<unknown> {
+  return api.post<unknown>('/me/channel-group-roots/', { name }).then(({ data }) => data)
+}
+export function updateChannelGroupRoot(id: number, payload: { name: string; expected_version: number }): Promise<unknown> {
+  return api.patch<unknown>(`/me/channel-group-roots/${id}/`, payload).then(({ data }) => data)
+}
+export function deleteChannelGroupRoot(id: number, expectedVersion: number): Promise<unknown> {
+  return api.delete<unknown>(`/me/channel-group-roots/${id}/`, { params: { expected_version: expectedVersion } }).then(({ data }) => data)
+}
+export function createChannelGroup(name: string, rootId: number): Promise<unknown> {
+  return api.post<unknown>('/me/channel-groups/', { name, root_id: rootId }).then(({ data }) => data)
+}
+export function updateChannelGroup(id: number, payload: {
+  name?: string; root_id?: number; expected_version?: number
+  source_ids?: number[]; add_source_ids?: number[]; remove_source_ids?: number[]
+}): Promise<unknown> {
   return api.patch<unknown>(`/me/channel-groups/${id}/`, payload).then(({ data }) => data)
 }
 export function deleteChannelGroup(id: number): Promise<unknown> {

@@ -8,7 +8,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from api.models import ChannelGroup, ChannelSubscription
+from api.models import ChannelGroup, ChannelGroupRoot, ChannelSubscription
 from api.rss.import_models import RssImportBatch, RssImportItem
 from api.rss.models import FeedBinding, FeedOperation
 from api.rss.opml import MAX_BYTES, process_imports, parse_opml
@@ -69,8 +69,11 @@ def test_credential_url_redacted(people):
 def test_confirm_groups_replay_and_owner_binding(people):
     a, b = people
     result = preview(a)
-    group = ChannelGroup.objects.create(user=a, name='Existing')
-    data = confirmation(result, group_map={'Tech': group.pk, 'Reading': {'create': 'New'}})
+    root = ChannelGroupRoot.objects.create(user=a, name='Imported')
+    group = ChannelGroup.objects.create(user=a, root=root, name='Existing')
+    data = confirmation(result, group_map={
+        'Tech': group.pk, 'Reading': {'create': 'New', 'root_id': root.pk},
+    })
     assert client(b).post('/api/me/rss-imports/confirm/', data, format='json').status_code == 404
     first = client(a).post('/api/me/rss-imports/confirm/', data, format='json')
     assert first.status_code == 202, first.data
@@ -90,12 +93,34 @@ def test_confirm_groups_replay_and_owner_binding(people):
 def test_foreign_groups_and_expired_token_rejected_without_writes(people):
     a, b = people
     result = preview(a)
-    group = ChannelGroup.objects.create(user=b, name='Private')
+    root = ChannelGroupRoot.objects.create(user=b, name='Private root')
+    group = ChannelGroup.objects.create(user=b, root=root, name='Private')
     data = confirmation(result, group_map={'Tech': group.pk})
     assert client(a).post('/api/me/rss-imports/confirm/', data, format='json').status_code == 404
     RssImportBatch.objects.update(expires_at=timezone.now())
     assert client(a).post('/api/me/rss-imports/confirm/', confirmation(result), format='json').status_code == 400
     assert not ChannelSubscription.objects.exists()
+
+def test_confirm_rejects_more_than_three_child_groups_before_any_write(people):
+    a, _ = people
+    outlines = ''.join(
+        f'<outline text="Group {index}"><outline type="rss" text="One" xmlUrl="https://example.com/feed"/></outline>'
+        for index in range(4)
+    )
+    result = preview(a, f'<opml><body>{outlines}</body></opml>'.encode())
+    root = ChannelGroupRoot.objects.create(user=a, name='Imported')
+    groups = [
+        ChannelGroup.objects.create(user=a, root=root, name=f'Child {index}')
+        for index in range(4)
+    ]
+    response = client(a).post('/api/me/rss-imports/confirm/', confirmation(
+        result,
+        group_map={f'Group {index}': group.pk for index, group in enumerate(groups)},
+    ), format='json')
+    assert response.status_code == 400
+    assert not ChannelSubscription.objects.exists()
+    assert not RssImportItem.objects.exclude(status='preview').exists()
+
 
 
 def test_partial_failure_retries_only_failed_item_and_never_unknown(people):
@@ -129,18 +154,28 @@ def test_partial_failure_retries_only_failed_item_and_never_unknown(people):
 def test_personal_multigroup_export_roundtrip_preserves_relations(people):
     a, b = people
     result = preview(a)
-    data = confirmation(result, group_map={'Tech': {'create': 'Tech'}, 'Reading': {'create': 'Reading'}})
+    root = ChannelGroupRoot.objects.create(user=a, name='Imported')
+    data = confirmation(result, group_map={
+        'Tech': {'create': 'Tech', 'root_id': root.pk},
+        'Reading': {'create': 'Reading', 'root_id': root.pk},
+    })
     client(a).post('/api/me/rss-imports/confirm/', data, format='json')
     process_imports()
     from api.tests.rss.registration_fixtures import connect_pending
     connect_pending()
     exported = client(a).get('/api/me/rss-subscriptions/export/')
     assert exported.status_code == 200
-    assert len(ET.fromstring(exported.content).find('body')) == 2
+    body = ET.fromstring(exported.content).find('body')
+    assert len(body) == 1 and body[0].attrib['text'] == 'Imported'
+    assert {child.attrib['text'] for child in body[0]} == {'Tech', 'Reading'}
     assert len(parse_opml(exported.content)) == 2
     assert b'example.com' not in client(b).get('/api/me/rss-subscriptions/export/').content
     roundtrip = preview(a, exported.content)
-    client(a).post('/api/me/rss-imports/confirm/', confirmation(roundtrip), format='json')
+    assert roundtrip.data['group_matches'] == {
+        'Imported / Reading': ChannelGroup.objects.get(user=a, name='Reading').pk,
+        'Imported / Tech': ChannelGroup.objects.get(user=a, name='Tech').pk,
+    }
+    client(a).post('/api/me/rss-imports/confirm/', confirmation(roundtrip, group_map=roundtrip.data['group_matches']), format='json')
     process_imports()
     assert ChannelSubscription.objects.count() == 2 and FeedBinding.objects.count() == 2
 

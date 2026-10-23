@@ -13,6 +13,7 @@ import AddChannelDialog from '@/components/workspace/AddChannelDialog'
 import OpmlDialog from '@/features/rss/OpmlDialog'
 import ConnectionStatus from '@/features/rss/ConnectionStatus'
 import { Availability, ChannelMark, TopicTags } from '@/components/workspace/ChannelIdentity'
+import { channelGroupPath } from '@/types/channels'
 
 export default function ChannelWorkspace() {
   const { user } = useAuth()
@@ -41,6 +42,7 @@ function Directory() {
   const topics = catalog.data?.topics ?? []
   const subscriptions = new Map((config.subscriptions.data ?? []).map(subscription => [subscription.source_id, subscription]))
   const groups = config.groups.data ?? []
+  const roots = config.roots.data ?? []
   const region = params.get('region') ?? ''
   const language = params.get('language') ?? ''
   const sourceType = params.get('type') ?? ''
@@ -102,7 +104,7 @@ function Directory() {
       <button type="button" className="workspace-button secondary" disabled={!writable || !selectedVisible.some(source => source.subscription_status === 'active' && !subscriptions.has(source.id))}
         onClick={() => run(() => changeChannelSubscriptions({ action: 'subscribe', source_ids: selectedVisible.filter(source => source.subscription_status === 'active' && !subscriptions.has(source.id)).map(source => source.id) }), '批量订阅完成')}>批量订阅</button>
       <button type="button" className="workspace-button secondary" disabled={!writable || !selectedVisible.some(source => subscriptions.has(source.id))} onClick={() => setCancelIds(selectedVisible.filter(source => subscriptions.has(source.id)).map(source => source.id))}>取消订阅</button>
-      <select aria-label="批量加入分组" value={bulkGroup} onChange={event => setBulkGroup(event.target.value)}><option value="">选择目标分组</option>{groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select>
+      <select aria-label="批量加入分组" value={bulkGroup} onChange={event => setBulkGroup(event.target.value)}><option value="">选择目标分组</option>{groups.map(group => <option key={group.id} value={group.id}>{channelGroupPath(group, roots)}</option>)}</select>
       <button type="button" className="workspace-button secondary" disabled={!writable || !bulkGroup || !selectedVisible.some(source => subscriptions.has(source.id))} onClick={() => run(() => updateChannelGroup(Number(bulkGroup), { add_source_ids: selectedVisible.filter(source => subscriptions.has(source.id)).map(source => source.id) }), '已添加到分组')}>加入分组</button>
       <button type="button" className="workspace-link" onClick={() => setSelected([])}>清空选择</button>
     </div>}
@@ -124,18 +126,18 @@ function Directory() {
       {!catalog.isPending && !catalog.isError && !filtered.length && <div className="workspace-empty"><h2>没有匹配的频道</h2><p>调整筛选条件，或从全部频道中选择新的来源。</p><button type="button" className="workspace-button secondary" onClick={() => setParams({})}>查看全部频道</button></div>}
     </div>
     {login && <AuthModal onClose={() => setLogin(false)} />}
-    {importing && user && <OpmlDialog viewer={user.id} groups={groups} onClose={() => setImporting(false)} />}
+    {importing && user && <OpmlDialog viewer={user.id} roots={roots} groups={groups} onClose={() => setImporting(false)} />}
     {adding && <AddChannelDialog topics={topics} onClose={() => setAdding(false)} onDone={() => { setAdding(false); setNotice('订阅已保存，可在频道列表查看连接状态。') }} />}
     {editedSource && editedSubscription && <WorkspaceModal title={editedSource.name + ' · 订阅设置'} busy={mutation.isPending} onClose={() => setEditing(null)}>
       <p className="workspace-muted">一个频道可以加入多个分组，手动移出后不会被自动加回。</p>
-      <fieldset className="workspace-group-checkboxes"><legend>所属分组</legend>{groups.map(group => <label key={group.id}><input type="checkbox" disabled={!writable} checked={editedSubscription.group_ids.includes(group.id)} onChange={event => {
+      <fieldset className="workspace-group-checkboxes"><legend>所属子分组（最多 3 个）</legend>{groups.map(group => <label key={group.id}><input type="checkbox" disabled={!writable || (!editedSubscription.group_ids.includes(group.id) && editedSubscription.group_ids.length >= 3)} checked={editedSubscription.group_ids.includes(group.id)} onChange={event => {
         const groupIds = event.target.checked ? [...editedSubscription.group_ids, group.id] : editedSubscription.group_ids.filter(id => id !== group.id)
         run(() => changeChannelSubscriptions({ action: 'set_groups', source_ids: [editedSource.id], group_ids: groupIds }), '分组已更新')
-      }} />{group.name}</label>)}</fieldset>
+      }} />{channelGroupPath(group, roots)}</label>)}</fieldset>
       {!groups.length && <Link className="workspace-link" to="/channels/groups">先创建一个分组 →</Link>}
       <footer className="workspace-modal-actions"><button type="button" className="workspace-button secondary" disabled={mutation.isPending} onClick={() => { setEditing(null); setCancelIds([editedSource.id]) }}>取消订阅</button><button type="button" className="workspace-button" disabled={mutation.isPending} onClick={() => setEditing(null)}>完成</button></footer>
     </WorkspaceModal>}
-    {cancelIds && <WorkspaceModal title="确认取消订阅" busy={mutation.isPending} onClose={() => setCancelIds(null)}><p>取消 {cancelIds.length} 个频道的订阅，同时移除它们的分组归属。</p>{affectedGroups.length > 0 && <p className="workspace-muted">受影响分组：{affectedGroups.map(group => group.name).join('、')}</p>}
+    {cancelIds && <WorkspaceModal title="确认取消订阅" busy={mutation.isPending} onClose={() => setCancelIds(null)}><p>取消 {cancelIds.length} 个频道的订阅，同时移除它们的分组归属。</p>{affectedGroups.length > 0 && <p className="workspace-muted">受影响分组：{affectedGroups.map(group => channelGroupPath(group, roots)).join('、')}</p>}
       {mutation.isError && <p role="alert" className="workspace-error">取消订阅失败，请重试。</p>}
       <footer className="workspace-modal-actions"><button type="button" className="workspace-button secondary" disabled={mutation.isPending} onClick={() => setCancelIds(null)}>保留订阅</button><button type="button" className="workspace-button danger" disabled={!writable} onClick={() => run(() => changeChannelSubscriptions({ action: 'unsubscribe', source_ids: cancelIds }), '已取消订阅', () => { setCancelIds(null); setSelected([]) })}>确认取消</button></footer>
     </WorkspaceModal>}

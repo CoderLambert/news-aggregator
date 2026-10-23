@@ -7,5 +7,5 @@ export default function AddChannelDialog({ onClose, onDone }: { topics: Topic[];
   const { user } = useAuth()
   const config = useChannelConfig()
   if (!user) return null
-  return <DiscoverDialog key={user.id} viewer={user.id} groups={config.groups.data ?? []} onClose={onClose} onDone={onDone} />
+  return <DiscoverDialog key={user.id} viewer={user.id} roots={config.roots.data ?? []} groups={config.groups.data ?? []} onClose={onClose} onDone={onDone} />
 }

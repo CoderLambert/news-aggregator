@@ -196,4 +196,9 @@ describe('read-only application capabilities', () => {
     expect(mocks.fetchNews.mock.calls[0][0]).toMatchObject({ search: 'climate', mode: 'keyword' })
     expect(screen.getByText('当前仅支持关键词搜索。')).toBeInTheDocument()
   })
+  it('redirects the obsolete manual channel route to the canonical workspace', async () => {
+    renderAt('/channels/manual')
+    await waitFor(() => expect(window.location.pathname).toBe('/channels'))
+  })
+
 })

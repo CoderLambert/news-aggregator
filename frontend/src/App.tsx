@@ -22,7 +22,6 @@ import ReadingTracker from '@/components/workspace/ReadingTracker'
 import WorkspaceSession from '@/components/workspace/WorkspaceSession'
 import AIConnectionSettingsLink from '@/components/settings/AIConnectionSettingsLink'
 
-const ChannelsPage = lazy(() => import('@/pages/ChannelsPage'))
 const ChannelWorkspace = lazy(() => import('@/pages/ChannelWorkspace'))
 const GroupWorkspace = lazy(() => import('@/pages/GroupWorkspace'))
 const SmartGroupingWorkspace = lazy(() => import('@/pages/SmartGroupingWorkspace'))
@@ -73,7 +72,7 @@ export default function App() {
             <Route path="/channels" element={<ChannelWorkspace />} />
             <Route path="/channels/groups" element={<FeatureRoute feature="accounts"><GroupWorkspace /></FeatureRoute>} />
             <Route path="/channels/smart" element={<FeatureRoute feature="accounts"><SmartGroupingWorkspace /></FeatureRoute>} />
-            <Route path="/channels/manual" element={<ChannelsPage />} />
+            <Route path="/channels/manual" element={<Navigate to="/channels" replace />} />
             <Route path="/channels/:id" element={<ChannelDetailWorkspace />} />
             <Route path="/search" element={<LocalSearch />} />
             <Route path="/news/:id" element={<><ReadingTracker /><NewsDetail /></>} />

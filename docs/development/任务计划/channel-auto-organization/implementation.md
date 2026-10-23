@@ -2,22 +2,22 @@
 
 > 执行：superpowers:subagent-driven-development；两条独立写入目标（后端 / 前端），共享契约由主 Agent 固定。用户已批准设计并要求开始开发。
 
-Goal: 新订阅可靠匹配自动加入已有个人分组，模糊结果待确认；简化首页范围选择与批量调整。
-Architecture: 复用 ChannelGroupingConfig / Proposal / SubscriptionGroupingState / channel_worker、现有 owner 锁和 BYOK 模型 fencing。保留 topics 模式兼容，新增 groups 目标；DB 为任务事实源，RSS 导入不等待分类。
+Goal: 以严格两级“根分类 → 子分组 → 频道”整理个人订阅；可靠规则可复用已有子分组，AI 层级变更和新路径必须人工确认。
+Architecture: 复用 `ChannelGroupingConfig` / `ChannelGroupingProposal` / `SubscriptionGroupingState` / `channel_worker`、现有 owner 锁和 BYOK fencing。`ChannelGroupRoot` 只承载结构，成员、读取偏好、RSS 操作和覆盖规则继续引用 `ChannelGroup` 子分组 ID。
 Tech stack: Django / SQLite WAL / React / TanStack Query / shadcn/ui；Python 3.12、Node 22。
-Spec: 本文中的已批准行为与接口契约。
+Spec: 原 AG 合同保留为历史基线；本文后述两级扩展是当前接口合同。
 Base: f97c34e305522446efc4f53645c5d4dfb4f1f444（原开发基线；2026-10-23 恢复仍使用此精确基线，非最新远程声明）。
 
-2026-10-23：临时 worktree 丢失后，源码按成功操作记录恢复到持久 worktree；以下勾选仅代表实现和本地合成验证。用户接受的是 `d93beac` 对应预览，原生下拉与新旧流程反馈不阻塞当次验收；#21/#22 随后改变交互，因此当前 `c760382` 候选需重新体验确认。详情见[本地交付记录](local-acceptance-20261023.md)，仍不代表真实 Provider、生产、CI 或部署验收。
+2026-10-23：历史平面分组实现及 `d93beac`、#21/#22 的验收边界保留；随后主工作树新增两级层级候选。旧候选的 PASS 不覆盖新层级行为，真实 Provider、生产、CI 和部署仍未授权。
 
 ## 约束与评审重点
 
-- 不自动创建/改名/合并分组；多个分组成员关系保留。已有订阅仅显式“整理未分组”处理。
-- 人工操作优先；自动撤销只删除本批新增且之后未被手动触碰的成员关系。
-- 不新增爬虫/模型客户端/队列；只使用已有保存的简介与最多 12 条标题。私有分组及结果不写入公共 SourceTopicProfile。
-- AI 建议默认人工确认；不采信模型自报置信度。后台 AI 独立显式授权，模型/凭据/模式撤销须阻断派发和最终写入。
-- 组/订阅/标题证据变化使旧预览不可应用；未知已派发调用不可盲目重发。
-- 必测：跨 owner ID、手动移出后 worker 重跑、首次无标题后补齐、关闭配置时在途 AI、批量移动原子性、URL 搜索范围保留。
+- 层级固定为两级。根分类没有频道成员或阅读范围；所有成员、偏好、RSS、绑定和覆盖操作继续使用子分组 ID。
+- 迁移保留已有子分组 ID 及其成员、偏好、绑定、覆盖和历史；旧组归入各 owner 的 `已有分组` 根分类。
+- 人工操作优先；自动撤销只删除本批新增且之后未被手动触碰的成员关系。AI 创建的根分类和子分组不因撤销删除。
+- AI 建议默认人工确认，不采信模型自报置信度。后台 AI 独立显式授权；模型、凭据、结构或模式撤销须阻断派发和最终写入。
+- 层级、订阅或标题证据变化使对应旧预览不可应用；未知已派发调用不可盲目重发。
+- 必测：跨 owner ID、根删除保护、子组改挂不改成员、首个根/子路径、OPML 完整路径、RSS 完成时二次校验、手动优先和 URL 深链回退。
 - 只运行相关测试/类型检查、前端 lint/build；本地交付。用户已接受 `d93beac` 对应预览，当前交互修正候选重新验收仍为 PENDING；未请求 push、PR 或 CI，仍不运行全量测试或真实 provider 调用。
 
 ## AG-05.1 / AG-06.1 后端契约
@@ -25,30 +25,32 @@ Base: f97c34e305522446efc4f53645c5d4dfb4f1f444（原开发基线；2026-10-23 �
 - [x] 原开发批次先补失败测试（历史 RED，不算本次重跑），本次重跑覆盖无绑定时匹配既有“前端开发”、资料补齐后续跑、自定义组建议、owner/撤销/手动保护。
 - [x] 扩展配置（默认保持旧行为）：`match_existing: boolean`、`ai_enabled: boolean`、`ai_model_id: string|null`、`daily_limit: integer 1..20`（每用户 AI 任务/日，上限兼容既有 20）。内部保存后台 AI immutable model snapshot。
 - [x] PATCH `/api/me/smart-channels/settings/`：mode/off|suggest|auto、match_existing、ai_enabled、daily_limit；开启后台 AI 必须 consent:true + 明确 model_config_id。GET 附 `summary: {pending:number,suggested:number,applied:number}`。重复保存不得重置 active_since 漏掉积压，首次开通只处理之后新增。
-- [x] POST 原 proposals URL 新增 `target:'groups'`；rules <=200、ai <=40；source_ids 显式本人订阅。目标为当前已有个人分组，response 新增 target，result 可含 group_ids，topic_keys 保留 []；reason/origin/needs_review 继续保留。
-- [x] GET proposals 列表为显式分页契约：`?target=groups|topics&page=N`（N 为 1–10000 整数），每页固定 30 条，返回 `{results,page,page_size,count,has_more}`；按 `-created_at,-id` 稳定排序，不接受 page_size 覆盖，更早的 pending/ready 记录靠翻页到达；不能用“满页”推断还有下一页。
-- [x] group proposals apply payload `assignments:[{source_id:number,group_ids:number[]}]`，拒绝源/组越权、重复/过量/陈旧，返回原 proposal DTO；不创建组。现有 topics apply 不变。
+- [x] POST 原 proposals URL 支持 `target:'groups'|'hierarchy'`。groups 结果使用子分组 `group_ids` 和完整 `new_group_paths`；hierarchy 结果只建议现有子分组改挂到现有或新根分类。
+- [x] GET proposals 列表为显式分页契约：`?target=groups|hierarchy|topics&page=N`（N 为 1–10000 整数），每页固定 30 条，返回 `{results,page,page_size,count,has_more}`；按 `-created_at,-id` 稳定排序。
+- [x] groups apply payload 为 `assignments:[{source_id,group_ids,new_group_paths}]`，其中 `new_group_paths` 项为 `{root_id:number|null,root_name:string|null,name:string}`；只能提交持久预览中的精确路径。hierarchy apply 只接受持久预览行的子集。
 - [x] 后台先可信绑定/无歧义可信主题名称匹配（只有可信 profile 才自动加入），其余生成待确认或按已授权模型批处理。只有低信任标题/名称匹配时不能自动应用。去重签名包含实际标题/分组定义/配置版本；已应用与人工分组优先。额度恢复后自动续跑，可安全拒绝的请求有限重试；未知派发维持 barrier。
 - [x] 扩展 `/api/me/channel-subscriptions/` bulk action `add_to_group|move_to_group|remove_from_group` + `group_id:number` + `source_ids:number[]`；事务处理并记录人工 override，原响应 subscriptions[]。
 - [x] 正向迁移、保留旧记录；相关 smart channel/model/evidence/RSS 订阅回归通过。
 
-## AG-04.1 / AG-07.1 前端契约
+## 两级层级前端合同
 
-- [x] 原开发批次先补失败测试（历史 RED），本次重跑：分组搜索选择、当前范围提示/全订阅搜索、批量移动、自动模式/建议确认/撤销与失败重试。
-- [x] NewsScopeBar 只展示三个固定范围 + 搜索分组 Popover/Command；完整名称、键盘与窄屏可用；URL/返回与已有过滤器保持。
-- [x] NewsList 显示实际搜索范围；分组无结果可仅切为全部订阅，保留搜索词及其他筛选。
-- [x] GroupWorkspace 批量加入/移动/移出，选择清晰、受影响数量；复用 shadcn wrappers，保留重命名/删除/提交期间防重入。
-- [x] 默认智能整理界面围绕已有分组：一次“整理未分组”、后台模式设置、后台 AI 明确授权、可见状态与建议/历史（可取消/应用/撤销）。主流程明确展示“频道 → 建议的已有分组 → 匹配依据 → 调整并确认”，区分待确认匹配和未匹配；legacy topics Organizer 保留为默认收起且明确标记的旧版次要入口，其目标分组使用 shadcn Popover + Command 搜索选择器。
-- [x] workspaceApi 扩展 DTO；所有新私有异步写入沿用 viewer/AbortSignal/CSRF guards。
-- [x] 定向 Vitest、typecheck、受影响 ESLint、build；本地浏览器验证使用 synthetic data，不能声称真实 provider 或用户 UAT 通过。
+- [x] `ChannelGroupRoot` 与子分组结构字段严格解析；拓扑、ID、版本和名称不一致时失败关闭。
+- [x] `/channels/groups?root=<id>&group=<id>` 为唯一层级管理入口：根分类用于展开与子组管理，子分组用于成员管理；无效深链安全回退。
+- [x] 根分类支持创建、重命名和仅空时删除；子分组支持创建、重命名、改挂和删除。所有结构写入使用预期版本。
+- [x] 侧栏、频道卡片/详情、发现订阅、阅读范围、OPML 和建议编辑器统一显示“根分类 / 子分组”；可选成员和阅读范围只列子分组。
+- [x] `/channels/smart` 分为“整理层级”和“整理频道”。层级建议显示当前路径、目标根分类和原因；频道建议显示现有或新根/子路径，确认前不写数据。
+- [x] OPML 导入精确匹配嵌套路径；创建新子分组必须发送 `{create,root_id}`，不隐式创建根分类。
+- [x] `/channels/manual` 重定向到 `/channels`，旧 `ChannelsPage.tsx` 和重复平面管理测试已删除，有效目录/订阅断言迁入 `ChannelWorkspace` 测试。
+- [x] 所有新私有异步写入沿用 viewer、AbortSignal、CSRF 和未知结果屏障。
+- [x] 定向 Vitest、typecheck、lint、build 和合成浏览器检查构成当前本地证据；不能声称真实 Provider 或用户 UAT 通过。
 
 ## 当前实现边界
 
 | 状态 | 内容 |
 |---|---|
-| 已实现 | AG-04.1 / AG-05.1 / AG-06.1 / AG-07.1；B1–B3；F1–F6；个人已有分组规则整理、建议确认/撤销、批量分组、显式分页、owner 隔离及 worker fencing；看板 #21 主流程层级与建议状态区分；看板 #22 shadcn 目标分组搜索选择器 |
-| 保留兼容 | 旧 topics 主题预设整理作为明确标记的旧版次要入口；没有删除其导出、历史及创建新分组能力，已有分组仍按数字 ID 提交 |
-| 未实现 / 后续改进 | 看板 #21/#22 改动后的本地 UI 尚待用户重新体验确认；完整套件与真实手机硬件仍未运行 |
+| 已实现 | 严格两级模型与迁移；owner-safe 根/子 CRUD；层级与频道两种审核式 AI 提案；首个分组路径；共享路径标签；RSS/OPML 层级合同；统一频道入口 |
+| 保留兼容 | 旧 topics 主题预设整理仍是明确标记的次要入口；历史成员、偏好、绑定、覆盖与提案继续使用稳定的子分组 ID |
+| 待用户确认 | 当前两级 UI 候选的桌面和移动体验；历史 `d93beac` 与 #21/#22 的验收不自动覆盖本次行为变更 |
 | NOT_RUN | 完整后端/前端套件、CI、真实 Provider/Miniflux、生产迁移/部署、真实手机硬件、线上回滚 |
 
 ## 交付记录

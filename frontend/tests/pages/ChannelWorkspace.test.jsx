@@ -9,7 +9,7 @@ const state = vi.hoisted(() => ({ user: { id: 11, username: 'reader', isSuperuse
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ user: state.user, loading: false }) }))
 vi.mock('@/services/api', () => ({ changeChannelSubscriptions: vi.fn().mockResolvedValue([]), updateChannelGroup: vi.fn().mockResolvedValue({}) }))
 vi.mock('@/services/channelQueries', () => ({
-  useChannelConfig: () => ({ enabled: state.enabled, accounts: state.enabled, ready: true, error: state.error, retry: vi.fn(), groups: { data: [] }, subscriptions: { data: [] } }),
+  useChannelConfig: () => ({ enabled: state.enabled, accounts: state.enabled, ready: true, error: state.error, retry: vi.fn(), roots: { data: [] }, groups: { data: [] }, subscriptions: { data: [] } }),
   useChannelMutation: () => useMutation({ mutationFn: perform => perform() }),
 }))
 vi.mock('@/services/workspaceApi', async importOriginal => {

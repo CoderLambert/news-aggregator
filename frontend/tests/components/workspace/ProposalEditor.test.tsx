@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { ProposalEditor } from '@/pages/SmartGroupingWorkspace'
 import type { Proposal } from '@/services/workspaceApi'
+import type { ChannelGroup } from '@/types/channels'
 
 const proposal: Proposal = {
   id: 'test-preview', engine: 'rules', status: 'ready', source_ids: [1, 2], topic_keys: ['frontend'],
@@ -12,9 +13,10 @@ const proposal: Proposal = {
 }
 const topics = [{ key: 'frontend', name: '前端开发', description: 'Web 平台' }]
 
-function setup(groups: Array<{ id: number; name: string; source_ids: number[] }> = []) {
+const roots = [{ id: 1, name: '技术', version: 1, child_count: 1, created_at: '2026-01-01', updated_at: '2026-01-01' }]
+function setup(groups: ChannelGroup[] = []) {
   const onApply = vi.fn(), onCancel = vi.fn()
-  render(<ProposalEditor proposal={proposal} topics={topics} groups={groups} mode="suggest" busy={false} onApply={onApply} onCancel={onCancel} />)
+  render(<ProposalEditor proposal={proposal} topics={topics} roots={roots} groups={groups} mode="suggest" busy={false} onApply={onApply} onCancel={onCancel} />)
   return { onApply, onCancel }
 }
 describe('editable grouping preview', () => {
@@ -25,7 +27,7 @@ describe('editable grouping preview', () => {
     expect(onApply).toHaveBeenCalledWith({ mode: 'suggest', groups: [{ topic_key: 'frontend', name: '前端开发', source_ids: [1] }] })
   })
   it('requires explicit selection before reusing an existing same-name group', async () => {
-    const { onApply } = setup([{ id: 7, name: '前端开发', source_ids: [] }])
+    const { onApply } = setup([{ id: 7, root_id: 1, name: '前端开发', source_ids: [], version: 1, created_at: '2026-01-01', updated_at: '2026-01-01' }])
     expect(screen.getByRole('button', { name: '确认应用分组' })).toBeDisabled()
     fireEvent.click(screen.getByRole('combobox', { name: '目标分组 frontend' }))
     fireEvent.change(screen.getByRole('combobox', { name: '搜索目标分组 frontend' }), { target: { value: '7' } })
@@ -48,7 +50,7 @@ describe('editable grouping preview', () => {
         reason: '最近 4 篇不同文章标题：前端开发 3 篇；仅供人工确认。' }],
     }
     const onApply = vi.fn()
-    render(<ProposalEditor proposal={inferred} topics={topics} groups={[]}
+    render(<ProposalEditor proposal={inferred} topics={topics} roots={[]} groups={[]}
       mode="suggest" busy={false} onApply={onApply} onCancel={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: '调整频道归属' }))
     expect(screen.getByText(/标题证据推测·待确认/)).toBeInTheDocument()

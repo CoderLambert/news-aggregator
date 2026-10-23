@@ -14,7 +14,8 @@ from django.http import Http404
 from django.utils import timezone
 from rest_framework.exceptions import APIException, Throttled, ValidationError
 
-from api.models import ChannelGroup, ChannelSubscription
+from api.models import ChannelGroup, ChannelGroupRoot, ChannelSubscription
+from api.services.channel_grouping import record_group_structure_change
 from api.rss.http import RssConflict
 from api.rss.import_models import RssImportBatch, RssImportItem
 from api.rss.operations import OperationError, cancel_operation, canonicalize_feed_url, sqlite_retry
@@ -134,7 +135,17 @@ def batch_data(batch, *, include_items=True):
               'outcomes': dict(Counter(item['outcome'] for item in items)),
               'counts': dict(Counter(item['status'] for item in items)), 'total': len(items)}
     if include_items:
-        result.update(items=items, groups=sorted({group for item in items for group in item['groups']}))
+        labels = sorted({group for item in items for group in item['groups']})
+        owned_paths = {
+            f'{group.root.name} / {group.name}': group.pk
+            for group in ChannelGroup.objects.filter(
+                user=batch.user,
+            ).select_related('root')
+        }
+        result.update(
+            items=items, groups=labels,
+            group_matches={label: owned_paths[label] for label in labels if label in owned_paths},
+        )
     return result
 
 
@@ -194,31 +205,80 @@ def confirm(user, data):
     known_groups = {group for item in batch.items.all() for group in item.groups}
     if set(mapping) - known_groups:
         raise ValidationError('分组不属于此预览。')
+    selected_labels = {label for item in items for label in item.groups}
     normalized = {}
     for label, value in mapping.items():
+        if label not in selected_labels:
+            continue
         if value is None or type(value) is int and value > 0:
             normalized[label] = value
-        elif isinstance(value, dict) and set(value) == {'create'} and isinstance(value['create'], str) and 1 <= len(value['create'].strip()) <= 40:
-            normalized[label] = {'create': value['create'].strip()}
+        elif (isinstance(value, dict) and set(value) == {'create', 'root_id'}
+                and isinstance(value['create'], str)
+                and 1 <= len(value['create'].strip()) <= 40
+                and type(value['root_id']) is int and value['root_id'] > 0):
+            name = value['create'].strip()
+            if any(ord(character) < 32 or ord(character) == 127 for character in name):
+                raise ValidationError('新子分组名称不能包含控制字符。')
+            normalized[label] = {'create': name, 'root_id': value['root_id']}
         else:
-            raise ValidationError('分组映射须为自己的分组ID、新分组名称或空值。')
+            raise ValidationError('分组映射须为自己的子分组ID、带根分类的新子分组或空值。')
+    for item in items:
+        selected_groups = {
+            ('new', value['create']) if isinstance(value, dict) else ('existing', value)
+            for label in item.groups
+            if (value := normalized.get(label)) is not None
+        }
+        if len(selected_groups) > 3:
+            raise ValidationError('每个频道最多属于三个子分组。')
     digest = sha256(json.dumps({'selected': selected, 'groups': normalized}, sort_keys=True).encode()).hexdigest()
     if batch.confirmed_request_hash:
         if batch.confirmed_request_hash != digest:
             raise RssConflict('已确认的导入不能改变选择。', code='idempotency_conflict')
         return batch_data(batch)
+    root_ids = {
+        value['root_id'] for value in normalized.values() if isinstance(value, dict)
+    }
+    roots = {
+        root.pk: root for root in ChannelGroupRoot.objects.filter(
+            user=user, pk__in=root_ids,
+        )
+    }
+    if set(roots) != root_ids:
+        raise Http404
+    requested_children = {}
+    for value in normalized.values():
+        if not isinstance(value, dict):
+            continue
+        prior_root_id = requested_children.setdefault(value['create'], value['root_id'])
+        if prior_root_id != value['root_id']:
+            raise ValidationError('同名子分组不能映射到不同根分类。')
+    if ChannelGroup.objects.filter(user=user).count() + len(requested_children) > 200:
+        raise ValidationError('每个账号最多创建 200 个子分组。')
+    if ChannelGroup.objects.filter(user=user, name__in=requested_children).exists():
+        raise RssConflict('已有同名子分组，请选择其数字 ID。')
+
     resolved = {}
+    created_groups = {}
+    touched_roots = set()
     for label, value in normalized.items():
         if value is None:
             continue
         if isinstance(value, dict):
-            group, _ = ChannelGroup.objects.get_or_create(user=user, name=value['create'])
+            group = created_groups.get(value['create'])
+            if group is None:
+                group = ChannelGroup.objects.create(
+                    user=user, root=roots[value['root_id']], name=value['create'],
+                )
+                created_groups[value['create']] = group
+                touched_roots.add(group.root_id)
         else:
             try:
                 group = ChannelGroup.objects.get(user=user, pk=value)
             except ChannelGroup.DoesNotExist:
                 raise Http404 from None
         resolved[label] = group.pk
+    if touched_roots:
+        record_group_structure_change(user, root_ids=touched_roots)
     for item in items:
         item.selected_group_ids = sorted({resolved[label] for label in item.groups if label in resolved})
         item.status = 'pending'
@@ -340,13 +400,21 @@ def control_batch(user, identity, data):
 
 
 def export_opml(user):
-    root = ET.Element('opml', version='2.0')
-    ET.SubElement(ET.SubElement(root, 'head'), 'title').text = '我的订阅'
-    body = ET.SubElement(root, 'body')
-    groups = {}
-    for subscription in ChannelSubscription.objects.filter(user=user).select_related('source__publication').prefetch_related('groups', 'source__feed_links__binding'):
-        labels = list(subscription.groups.values_list('name', flat=True)) or [None]
-        urls = [link.binding.rsshub_alias or link.binding.canonical_feed_url for link in subscription.source.feed_links.all()]
+    document = ET.Element('opml', version='2.0')
+    ET.SubElement(ET.SubElement(document, 'head'), 'title').text = '我的订阅'
+    body = ET.SubElement(document, 'body')
+    root_outlines = {}
+    child_outlines = {}
+    subscriptions = ChannelSubscription.objects.filter(user=user).select_related(
+        'source__publication',
+    ).prefetch_related('groups__root', 'source__feed_links__binding')
+    for subscription in subscriptions:
+        groups = list(subscription.groups.all())
+        destinations = groups or [None]
+        urls = [
+            link.binding.rsshub_alias or link.binding.canonical_feed_url
+            for link in subscription.source.feed_links.all()
+        ]
         if not urls:
             from api.services.source_policy import policy_for_name
             policy = policy_for_name(subscription.source.name)
@@ -356,17 +424,24 @@ def export_opml(user):
             try:
                 if feed_url.startswith('rsshub://'):
                     from api.rss.rsshub_url import normalize_alias
-                    url=normalize_alias(feed_url)
+                    url = normalize_alias(feed_url)
                 else:
-                    url = canonicalize_feed_url(feed_url,resolve_rsshub=False)
+                    url = canonicalize_feed_url(feed_url, resolve_rsshub=False)
             except ValueError:
                 continue
-            for label in labels:
+            for group in destinations:
                 parent = body
-                if label:
-                    if label not in groups:
-                        groups[label] = ET.SubElement(body, 'outline', text=label, title=label)
-                    parent = groups[label]
+                if group is not None:
+                    if group.root_id not in root_outlines:
+                        root_outlines[group.root_id] = ET.SubElement(
+                            body, 'outline', text=group.root.name, title=group.root.name,
+                        )
+                    if group.pk not in child_outlines:
+                        child_outlines[group.pk] = ET.SubElement(
+                            root_outlines[group.root_id], 'outline',
+                            text=group.name, title=group.name,
+                        )
+                    parent = child_outlines[group.pk]
                 name = subscription.source.publication.display_name or subscription.source.name
                 ET.SubElement(parent, 'outline', type='rss', text=name, title=name, xmlUrl=url)
-    return ET.tostring(root, encoding='utf-8', xml_declaration=True)
+    return ET.tostring(document, encoding='utf-8', xml_declaration=True)

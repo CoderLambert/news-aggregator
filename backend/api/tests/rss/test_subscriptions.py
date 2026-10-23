@@ -5,7 +5,8 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from api.models import Category, ChannelGroup, ChannelGroupMember, ChannelSubscription, News, Source, SourcePublication
+from api.models import (Category, ChannelGroup, ChannelGroupMember, ChannelGroupRoot,
+                        ChannelSubscription, News, Source, SourcePublication)
 from api.rss.models import FeedBinding, FeedOperation, SourceFeedLink
 from api.rss.reading_models import NewsReadState
 from api.services.channel_catalog import subscription_status
@@ -58,14 +59,19 @@ def test_shared_feed_and_source_have_personal_subscriptions_and_actor_operation_
 
 def test_idempotency_and_group_union_with_cross_user_groups_rejected(people):
     a, b = people
-    ga = ChannelGroup.objects.create(user=a, name='A')
-    gb = ChannelGroup.objects.create(user=b, name='B')
+    root_a = ChannelGroupRoot.objects.create(user=a, name='Root A')
+    root_b = ChannelGroupRoot.objects.create(user=b, name='Root B')
+    ga = ChannelGroup.objects.create(user=a, root=root_a, name='A')
+    gb = ChannelGroup.objects.create(user=b, root=root_b, name='B')
     body = {'feed_url': 'https://example.com/feed', 'group_ids': [ga.pk]}
     first = subscribe(a, **body)
     again = subscribe(a, **body)
     assert first.status_code == 202 and again.status_code == 200
     assert again.data['operation_id'] == first.data['operation_id']
     assert ChannelGroupMember.objects.count() == 0
+    moved_root = ChannelGroupRoot.objects.create(user=a, name='Moved')
+    ga.root = moved_root
+    ga.save(update_fields=['root'])
     connect_pending()
     assert ChannelGroupMember.objects.count() == 1
     response = subscribe(a, group_ids=[], feed_url=body['feed_url'])
@@ -74,6 +80,22 @@ def test_idempotency_and_group_union_with_cross_user_groups_rejected(people):
     assert not ChannelGroupMember.objects.filter(group=gb).exists()
     ga.delete()
     assert ChannelSubscription.objects.count() == 1
+
+
+def test_deleted_group_rejects_durable_subscription_intent_without_partial_membership(people):
+    a, _ = people
+    root = ChannelGroupRoot.objects.create(user=a, name='Temporary')
+    group = ChannelGroup.objects.create(user=a, root=root, name='Delete before completion')
+    response = subscribe(a, key='deleted-group', feed_url='https://example.com/deleted-group',
+                         group_ids=[group.pk])
+    assert response.status_code == 202
+    group.delete()
+    connect_pending()
+    operation = FeedOperation.objects.get(pk=response.data['operation_id'])
+    assert operation.state == 'failed'
+    assert operation.safe_result['code'] == 'subscription_intent_changed'
+    assert not ChannelSubscription.objects.exists()
+    assert not ChannelGroupMember.objects.exists()
 
 
 def test_unsubscribe_during_registration_retains_other_reference_and_history(people):
@@ -194,7 +216,8 @@ def test_twenty_concurrent_subscription_replays_keep_one_relation_and_view(peopl
     from django.db import connections
     from api.rss.subscriptions import subscribe as subscribe_service
     a, _ = people
-    group = ChannelGroup.objects.create(user=a, name='Concurrent')
+    root = ChannelGroupRoot.objects.create(user=a, name='Concurrent root')
+    group = ChannelGroup.objects.create(user=a, root=root, name='Concurrent')
     barrier = Barrier(20)
     def call(_):
         try:

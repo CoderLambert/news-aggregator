@@ -6,7 +6,10 @@ from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
-from api.models import Category, Source, News, BlockedNews, ChannelSubscription, ChannelGroup, NewsPreference
+from api.models import (
+    BlockedNews, Category, ChannelGroup, ChannelGroupRoot, ChannelSubscription,
+    News, NewsPreference, Source,
+)
 from api.services.channel_catalog import sync_channel_catalog
 from api.tests.rss.reader_fixtures import public_rss_source
 
@@ -18,6 +21,7 @@ class ChannelsTests(TestCase):
         self.user = User.objects.create_user('channel-reader', password='test-pass-123')
         self.other = User.objects.create_user('other-reader')
         self.client = APIClient()
+        self.root = ChannelGroupRoot.objects.create(user=self.user, name='默认分类')
         self.client.force_authenticate(self.user)
         self.source, _ = Source.objects.get_or_create(name='OpenAI Blog', defaults={'url': 'https://openai.com/news'})
         self.second, _ = Source.objects.get_or_create(name='DeepMind', defaults={'url': 'https://deepmind.google'})
@@ -38,8 +42,10 @@ class ChannelsTests(TestCase):
     def subscribe(self, source_ids, action='subscribe', **extra):
         return self.client.post('/api/me/channel-subscriptions/', {'source_ids': source_ids, 'action': action, **extra}, format='json')
 
-    def group(self, name='AI'):
-        response = self.client.post('/api/me/channel-groups/', {'name': name}, format='json')
+    def group(self, name='AI', root_id=None):
+        response = self.client.post('/api/me/channel-groups/', {
+            'name': name, 'root_id': root_id or self.root.pk,
+        }, format='json')
         self.assertEqual(response.status_code, 201, response.data)
         return response.data['id']
 
@@ -134,8 +140,11 @@ class ChannelsTests(TestCase):
         self.assign(a, [self.source.id]); self.assign(b, [self.source.id])
         self.client.patch(f'/api/me/channel-groups/{a}/', {'remove_source_ids': [self.source.id]}, format='json')
         self.assertEqual(ChannelGroup.objects.get(pk=b).subscriptions.count(), 1)
+        from api.smart_channel_models import ChannelGroupingConfig
+        ChannelGroupingConfig.objects.update_or_create(user=self.user, defaults={'bindings': {'frontend': b}})
         self.client.patch('/api/me/news-preferences/', {'scope': 'group', 'group_id': b}, format='json')
         self.assertEqual(self.client.delete(f'/api/me/channel-groups/{b}/').status_code, 204)
+        self.assertEqual(ChannelGroupingConfig.objects.get(user=self.user).bindings, {})
         self.assertEqual(self.client.get('/api/me/news-preferences/').data, {'scope': 'subscribed', 'group_id': None})
         self.assertEqual(ChannelSubscription.objects.filter(user=self.user).count(), 1)
         self.assertEqual(self.client.get('/api/news/', {'scope': 'ungrouped'}).data['count'], 1)
@@ -147,7 +156,80 @@ class ChannelsTests(TestCase):
             self.assertEqual(self.client.post('/api/me/channel-groups/', {'name': name}, format='json').status_code, 400)
         self.group('x' * 40)
         self.client.force_authenticate(self.other)
-        self.group('AI')
+        other_root = ChannelGroupRoot.objects.create(user=self.other, name='Other root')
+        self.group('AI', other_root.pk)
+
+    def test_root_child_versions_reparenting_and_protected_delete(self):
+        created_root = self.client.post(
+            '/api/me/channel-group-roots/', {'name': '工程'}, format='json',
+        )
+        self.assertEqual(created_root.status_code, 201, created_root.data)
+        target_root = created_root.data
+        self.assertEqual(set(target_root), {
+            'id', 'name', 'version', 'child_count', 'created_at', 'updated_at',
+        })
+        child_response = self.client.post('/api/me/channel-groups/', {
+            'name': '后端', 'root_id': self.root.pk,
+        }, format='json')
+        self.assertEqual(child_response.status_code, 201, child_response.data)
+        child = child_response.data
+        self.assertEqual(child['root_id'], self.root.pk)
+        self.assertEqual(child['version'], 1)
+        self.subscribe([self.source.pk])
+        membership = self.client.patch(
+            f"/api/me/channel-groups/{child['id']}/",
+            {'add_source_ids': [self.source.pk]}, format='json',
+        )
+        self.assertEqual(membership.status_code, 200, membership.data)
+        self.assertEqual(membership.data['version'], 1)
+
+        stale = self.client.patch(f"/api/me/channel-groups/{child['id']}/", {
+            'root_id': target_root['id'], 'expected_version': 2,
+        }, format='json')
+        self.assertEqual(stale.status_code, 409)
+        moved = self.client.patch(f"/api/me/channel-groups/{child['id']}/", {
+            'root_id': target_root['id'], 'expected_version': 1,
+        }, format='json')
+        self.assertEqual(moved.status_code, 200, moved.data)
+        self.assertEqual((moved.data['root_id'], moved.data['version']), (target_root['id'], 2))
+        self.assertEqual(moved.data['source_ids'], [self.source.pk])
+        self.root.refresh_from_db()
+        self.assertEqual(self.root.version, 3)
+        populated = self.client.delete(
+            f"/api/me/channel-group-roots/{target_root['id']}/?expected_version=2",
+        )
+        self.assertEqual(populated.status_code, 409)
+        self.assertTrue(ChannelGroup.objects.filter(pk=child['id']).exists())
+
+        self.assertEqual(self.client.delete(f"/api/me/channel-groups/{child['id']}/").status_code, 204)
+        stale_delete = self.client.delete(
+            f"/api/me/channel-group-roots/{target_root['id']}/?expected_version=2",
+        )
+        self.assertEqual(stale_delete.status_code, 409)
+        deleted = self.client.delete(
+            f"/api/me/channel-group-roots/{target_root['id']}/?expected_version=3",
+        )
+        self.assertEqual(deleted.status_code, 204)
+
+    def test_foreign_roots_fail_closed_for_every_mutation(self):
+        foreign_root = ChannelGroupRoot.objects.create(user=self.other, name='Private root')
+        before = ChannelGroup.objects.count()
+        self.assertEqual(self.client.post('/api/me/channel-groups/', {
+            'name': 'Stolen child', 'root_id': foreign_root.pk,
+        }, format='json').status_code, 404)
+        self.assertEqual(ChannelGroup.objects.count(), before)
+        for method, payload in [
+            ('get', {}),
+            ('patch', {'name': 'Stolen', 'expected_version': 1}),
+            ('delete', {}),
+        ]:
+            path = f'/api/me/channel-group-roots/{foreign_root.pk}/'
+            if method == 'delete':
+                path += '?expected_version=1'
+            self.assertEqual(
+                getattr(self.client, method)(path, payload, format='json').status_code,
+                404,
+            )
 
     def test_ownership_404_on_every_group_route_and_scope(self):
         a = self.group()

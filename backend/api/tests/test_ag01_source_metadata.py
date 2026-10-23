@@ -8,7 +8,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from api.models import Source, ChannelGroup, ChannelGroupMember, ChannelSubscription
+from api.models import Source, ChannelGroup, ChannelGroupMember, ChannelGroupRoot, ChannelSubscription
 from api.rss.models import SourcePublication
 from api.smart_channel_models import SourceTopicProfile, ChannelGroupingConfig
 from api.services.channel_grouping import process_subscription
@@ -29,6 +29,7 @@ class SourceMetadataContractTests(TestCase):
         self.source.save(update_fields=['url', 'language', 'description'])
         self.owner = get_user_model().objects.create_user('ag01-owner')
         self.other = get_user_model().objects.create_user('ag01-other')
+        self.root = ChannelGroupRoot.objects.create(user=self.owner, name='Test root')
 
     def _manual(self):
         return SourceTopicProfile.objects.update_or_create(
@@ -70,7 +71,7 @@ class SourceMetadataContractTests(TestCase):
 
     def test_stale_manual_topics_are_retained_but_not_auto_applied(self):
         profile = self._manual()
-        group = ChannelGroup.objects.create(user=self.owner, name='My frontend')
+        group = ChannelGroup.objects.create(user=self.owner, root=self.root, name='My frontend')
         subscription = ChannelSubscription.objects.create(user=self.owner, source=self.source)
         ChannelGroupingConfig.objects.create(user=self.owner, mode='auto',
             bindings={'frontend': group.pk}, active_since=timezone.now() - timedelta(days=1))
@@ -118,7 +119,7 @@ class SourceMetadataContractTests(TestCase):
         self._manual()
         first = ChannelSubscription.objects.create(user=self.owner, source=self.source)
         second = ChannelSubscription.objects.create(user=self.other, source=self.source)
-        group = ChannelGroup.objects.create(user=self.owner, name='Manual assignment')
+        group = ChannelGroup.objects.create(user=self.owner, root=self.root, name='Manual assignment')
         ChannelGroupMember.objects.create(group=group, subscription=first)
         old = profile_data(self.source)['evidence_hash']
         self.source.url = 'https://example.invalid/new-publisher'

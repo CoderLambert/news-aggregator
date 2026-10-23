@@ -226,7 +226,7 @@ class ProposalsView(PrivateWorkspaceView):
     page_size = 30
     def get(self, request):
         target = request.query_params.get('target')
-        if target is not None and target not in ('groups', 'topics'):
+        if target is not None and target not in ('groups', 'topics', 'hierarchy'):
             raise ValidationError('无效的整理目标。')
         raw_page = request.query_params.get('page', '1')
         if len(raw_page) > 5 or not raw_page.isascii() or not raw_page.isdecimal() or not 1 <= int(raw_page) <= 10000:

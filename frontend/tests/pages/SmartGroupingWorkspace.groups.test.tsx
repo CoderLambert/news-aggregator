@@ -5,16 +5,18 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import SmartGroupingWorkspace from '@/pages/SmartGroupingWorkspace'
 import ExistingGroupOrganizer from '@/components/workspace/ExistingGroupOrganizer'
-import type { ChannelGroup } from '@/types/channels'
+import type { ChannelGroup, ChannelGroupRoot } from '@/types/channels'
 import { listAITaskPreferences } from '@/services/aiConnectionsApi'
 import { workspaceRequest, type GroupingConfig, type Proposal } from '@/services/workspaceApi'
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ user: { id: 1, isSuperuser: false }, loading: false }) }))
 vi.mock('@/services/aiConnectionsApi', () => ({ listAITaskPreferences: vi.fn() }))
-vi.mock('@/services/channelQueries', async original => ({ ...await original<typeof import('@/services/channelQueries')>(), useChannelConfig: () => ({ ready: true, error: false, groups: { data: [{ id: 8, name: '前端开发', source_ids: [2] }] }, subscriptions: { data: [{ source_id: 1, group_ids: [] }, { source_id: 2, group_ids: [8] }] } }) }))
+vi.mock('@/services/channelQueries', async original => ({ ...await original<typeof import('@/services/channelQueries')>(), useChannelConfig: () => ({ ready: true, error: false, roots: { data: roots }, groups: { data: groups }, subscriptions: { data: [{ source_id: 1, group_ids: [] }, { source_id: 2, group_ids: [8] }] } }) }))
 vi.mock('@/services/workspaceApi', async original => ({ ...await original<typeof import('@/services/workspaceApi')>(), workspaceRequest: vi.fn(),
   workspaceCatalogOptions: () => ({ queryKey: ['test-group-catalog'], queryFn: () => request('/smart-channels/catalog/') }),
   workspaceConfigOptions: () => ({ queryKey: ['workspace', 1, 'grouping-config'], queryFn: () => request('/me/smart-channels/settings/') }),
 }))
+const roots: ChannelGroupRoot[] = [{ id: 3, name: '技术', version: 1, child_count: 1, created_at: '2026-01-01', updated_at: '2026-01-01' }]
+const groups: ChannelGroup[] = [{ id: 8, root_id: 3, name: '前端开发', source_ids: [2], version: 1, created_at: '2026-01-01', updated_at: '2026-01-01' }]
 const config = { mode: 'suggest', bindings: {}, revision: 1, ai_available: true, match_existing: true, ai_enabled: false, ai_model_id: null, daily_limit: 5, summary: { pending: 0, suggested: 1, applied: 0 } } as GroupingConfig
 const proposal = { id: 'p1', target: 'groups', engine: 'rules', status: 'ready', source_ids: [1], topic_keys: [], result: [{ source_id: 1, name: 'React', group_ids: [8], topic_keys: [], reason: '可信频道主题', origin: 'catalog', needs_review: true }], error_code: '', created_at: '2026-10-22T00:00:00Z', expires_at: '', applied_count: 0, model_id: '', attempts: 0 } as Proposal
 const request = vi.mocked(workspaceRequest)
@@ -43,27 +45,72 @@ afterEach(() => { cleanup(); clients.splice(0).forEach(client => client.clear())
 async function setup() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }); clients.push(client)
   const view = render(<QueryClientProvider client={client}><MemoryRouter><SmartGroupingWorkspace /></MemoryRouter></QueryClientProvider>)
-  await screen.findByRole('button', { name: '整理未分组频道' })
+  fireEvent.click(await screen.findByRole('button', { name: '整理频道' }))
+  await screen.findByRole('heading', { name: 'AI 自动分组' })
   return { ...view, client }
 }
 function writes(method = 'POST') { return request.mock.calls.filter(([, options]) => options?.method === method) }
+it('keeps hierarchy planning review-only and applies only selected exact rows', async () => {
+  const row = { root_id: null, root_name: '工程', group_ids: [8], reason: '现有前端子分组属于工程主题' }
+  const hierarchy = { ...proposal, id: 'hierarchy-1', target: 'hierarchy' as const, engine: 'ai' as const, result: [row] }
+  handler = (path, options) => {
+    const body = options?.body
+    if (path === '/me/smart-channels/proposals/?target=hierarchy&page=1') return page([])
+    if (path === '/me/smart-channels/proposals/' && options?.method === 'POST' &&
+        body && typeof body === 'object' && 'target' in body && body.target === 'hierarchy') return hierarchy
+    if (path.endsWith('/hierarchy-1/')) return hierarchy
+    if (path.endsWith('/hierarchy-1/apply/')) return { ...hierarchy, status: 'applied' }
+    return defaults(path, options)
+  }
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }); clients.push(client)
+  render(<QueryClientProvider client={client}><MemoryRouter><SmartGroupingWorkspace /></MemoryRouter></QueryClientProvider>)
+  expect(await screen.findByRole('heading', { name: '整理根分类与子分组' })).toBeInTheDocument()
+  expect(screen.getByText(/确认前不会写入任何层级或成员数据/)).toBeInTheDocument()
+  fireEvent.click(await screen.findByRole('checkbox', { name: '同意本次使用本人模型额度生成层级建议。' }))
+  fireEvent.click(screen.getByRole('button', { name: '生成层级建议' }))
+  const preview = await screen.findByRole('region', { name: '层级建议' })
+  expect(within(preview).getByText('技术 / 前端开发 → 工程 / 前端开发')).toBeInTheDocument()
+  expect(request.mock.calls.some(([path]) => path.endsWith('/apply/'))).toBe(false)
+  const apply = within(preview).getByRole('button', { name: '确认应用层级移动' })
+  await waitFor(() => expect(apply).toBeEnabled())
+  fireEvent.click(apply)
+  await waitFor(() => expect(request).toHaveBeenCalledWith('/me/smart-channels/proposals/hierarchy-1/apply/', expect.objectContaining({
+    method: 'POST', viewer: 1, body: { rows: [row] },
+  })))
+})
+
+function startRules() {
+  fireEvent.click(screen.getByRole('button', { name: '免费规则匹配' }))
+  fireEvent.click(screen.getByRole('button', { name: '匹配到已有分组' }))
+}
 it('organizes only ungrouped subscriptions against existing groups without model spending', async () => {
   await setup()
   expect(writes()).toHaveLength(0)
-  fireEvent.click(screen.getByRole('button', { name: '整理未分组频道' }))
+  startRules()
   await waitFor(() => expect(writes()).toHaveLength(1))
   expect(writes()[0][1]).toMatchObject({ viewer: 1, signal: expect.any(AbortSignal), body: { target: 'groups', source_ids: [1], engine: 'rules', consent: false } })
   expect(screen.queryByRole('heading', { name: '选择范围与主题' })).toBeNull()
   expect(screen.getByText('高级：按主题预设整理')).toBeInTheDocument()
 })
-it('presents existing-group organization as the primary flow and labels legacy topic creation as secondary', async () => {
+it('starts one explicit AI planning job with the saved model and selected batch', async () => {
   await setup()
-  expect(within(screen.getByRole('navigation', { name: '已有分组整理步骤' })).getAllByRole('listitem').map(item => item.textContent)).toEqual([
-    expect.stringContaining('频道'), expect.stringContaining('建议的已有分组'), expect.stringContaining('匹配依据'), expect.stringContaining('调整并确认'),
+  const consent = await screen.findByRole('checkbox', { name: '同意本次使用上述个人模型额度生成分组建议。' })
+  fireEvent.click(consent)
+  fireEvent.click(screen.getByRole('button', { name: '生成 AI 分组建议' }))
+  await waitFor(() => expect(writes()).toHaveLength(1))
+  expect(writes()[0][1]).toMatchObject({ viewer: 1, body: {
+    target: 'groups', source_ids: [1], engine: 'ai', consent: true, model_config_id: 'model-1',
+  } })
+})
+it('makes batch AI planning the primary flow and keeps fixed topic templates secondary', async () => {
+  await setup()
+  expect(within(screen.getByRole('navigation', { name: '自动分组步骤' })).getAllByRole('listitem').map(item => item.textContent)).toEqual([
+    expect.stringContaining('选择范围'), expect.stringContaining('AI 分析'), expect.stringContaining('检查建议'), expect.stringContaining('批量应用'),
   ])
-  expect(screen.getByText('主流程')).toBeInTheDocument()
-  expect(screen.getByText('次要入口 · 旧版 · 可创建分组')).toBeInTheDocument()
-  expect(screen.getByText(/默认请先使用上方“按已有分组整理”主流程/)).toBeInTheDocument()
+  expect(screen.getByText('批量整理')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'AI 自动规划' })).toHaveAttribute('aria-pressed', 'true')
+  expect(screen.getByText('次要入口 · 固定主题模板')).toBeInTheDocument()
+  expect(screen.getByText(/默认请使用上方“整理频道”/)).toBeInTheDocument()
   expect(screen.queryByRole('heading', { name: '选择范围与主题' })).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: '高级：按主题预设整理' }))
   expect(await screen.findByRole('heading', { name: '选择范围与主题' })).toBeInTheDocument()
@@ -78,26 +125,43 @@ it('distinguishes suggested existing groups from unmatched channels and shows th
   await setup()
   fireEvent.click(await screen.findByRole('button', { name: '查看建议' }))
   const matched = await screen.findByRole('group', { name: /React/ })
-  expect(within(matched).getByText('待确认')).toBeInTheDocument()
-  expect(within(matched).getByText('建议的已有分组')).toBeInTheDocument()
-  expect(within(matched).getByText('前端开发')).toBeInTheDocument()
-  expect(within(matched).getByText('匹配依据')).toBeInTheDocument()
+  expect(within(matched).getByText('待分析')).toBeInTheDocument()
+  expect(within(matched).getByText('建议分组')).toBeInTheDocument()
+  expect(within(matched).getByText('技术 / 前端开发')).toBeInTheDocument()
+  expect(within(matched).getByText('建议依据')).toBeInTheDocument()
   expect(within(matched).getByText('可信频道主题')).toBeInTheDocument()
   const unmatched = screen.getByRole('group', { name: /Unknown feed/ })
   expect(within(unmatched).getByText('未匹配')).toBeInTheDocument()
-  expect(within(unmatched).getByText('未匹配到可靠的已有分组')).toBeInTheDocument()
-  expect(within(unmatched).getByText('待确认：保持未分组，或手动选择已有分组。')).toBeInTheDocument()
+  expect(within(unmatched).getByText('资料不足，暂时保持未分组')).toBeInTheDocument()
+  expect(within(unmatched).getByText('可手动选择任一已有或 AI 建议的新路径。')).toBeInTheDocument()
   expect(within(unmatched).getByRole('button', { name: '调整 Unknown feed 的建议分组' })).toBeInTheDocument()
 })
 it('reviews group suggestions then applies only existing group IDs and allows undo', async () => {
   await setup()
   fireEvent.click(await screen.findByRole('button', { name: '查看建议' }))
-  await waitFor(() => expect(screen.getByRole('button', { name: '确认加入分组' })).toBeEnabled())
-  fireEvent.click(screen.getByRole('button', { name: '确认加入分组' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认并批量应用' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: '确认并批量应用' }))
   await waitFor(() => expect(writes()[0][0]).toBe('/me/smart-channels/proposals/p1/apply/'))
-  expect(writes()[0][1]?.body).toEqual({ assignments: [{ source_id: 1, group_ids: [8] }] })
+  expect(writes()[0][1]?.body).toEqual({ assignments: [{ source_id: 1, group_ids: [8], new_group_paths: [] }] })
   fireEvent.click(await screen.findByRole('button', { name: '撤销本次新增归属' }))
   await waitFor(() => expect(writes()[1][0]).toBe('/me/smart-channels/proposals/p1/undo/'))
+})
+it('reviews AI-proposed new groups and creates them through one bulk payload', async () => {
+  const aiPlan = { ...proposal, engine: 'ai' as const, result: [{
+    ...proposal.result[0], group_ids: [], new_group_paths: [{ root_id: 3, root_name: null, name: 'AI 工程' }], reason: '近期内容集中于模型工程',
+  }] }
+  handler = (path, options) => path.split('?')[0].endsWith('/proposals/') && !options?.method ? page([aiPlan])
+    : path.endsWith('/p1/') ? aiPlan : defaults(path, options)
+  await setup()
+  fireEvent.click(await screen.findByRole('button', { name: '查看建议' }))
+  const channel = await screen.findByRole('group', { name: /React/ })
+  expect(within(channel).getByText('待确认 AI 建议')).toBeInTheDocument()
+  expect(within(channel).getByText('技术 / AI 工程')).toBeInTheDocument()
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认并批量应用' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: '确认并批量应用' }))
+  await waitFor(() => expect(writes()[0][1]?.body).toEqual({ assignments: [{
+    source_id: 1, group_ids: [], new_group_paths: [{ root_id: 3, root_name: null, name: 'AI 工程' }],
+  }] }))
 })
 it('requires new explicit saved-model consent for unattended AI and never saves by toggling', async () => {
   await setup()
@@ -116,16 +180,18 @@ it('retries the same preview request after response loss without duplicate task 
   let failed = false
   handler = (path, options) => { if (options?.method === 'POST' && !failed) { failed = true; throw Error('lost') }; return defaults(path, options) }
   await setup()
-  fireEvent.click(screen.getByRole('button', { name: '整理未分组频道' }))
-  fireEvent.click(await screen.findByRole('button', { name: '重试同一次整理' }))
+  startRules()
+  fireEvent.click(await screen.findByRole('button', { name: '重试同一次建议' }))
   await waitFor(() => expect(writes()).toHaveLength(2))
   expect(writes()[1][1]?.body).toEqual(writes()[0][1]?.body)
 })
 it('aborts pending private writes on unmount and cannot populate the old viewer cache', async () => {
   let finish!: (value: unknown) => void
-  handler = (path, options) => options?.method === 'POST' ? new Promise(resolve => { finish = resolve }) : defaults(path, options)
+  // Promise.withResolvers is unavailable under the application's ES2022 lib.
+  const pending = new Promise<unknown>(resolve => { finish = resolve })
+  handler = (path, options) => options?.method === 'POST' ? pending : defaults(path, options)
   const { unmount, client } = await setup()
-  fireEvent.click(screen.getByRole('button', { name: '整理未分组频道' }))
+  startRules()
   await waitFor(() => expect(writes()).toHaveLength(1))
   const signal = writes()[0][1]?.signal
   unmount()
@@ -136,7 +202,7 @@ it('aborts pending private writes on unmount and cannot populate the old viewer 
 it('cancels a queued persisted task without applying a suggestion', async () => {
   handler = (path, options) => { const value = defaults(path, options); return path.split('?')[0].endsWith('/proposals/') && options?.method === 'POST' ? { ...proposal, status: 'queued' } : value }
   await setup()
-  fireEvent.click(screen.getByRole('button', { name: '整理未分组频道' }))
+  startRules()
   await waitFor(() => expect(screen.getByRole('button', { name: '取消任务' })).toBeEnabled())
   fireEvent.click(screen.getByRole('button', { name: '取消任务' }))
   await waitFor(() => expect(writes()[1][0]).toBe('/me/smart-channels/proposals/p1/cancel/'))
@@ -151,10 +217,10 @@ it('reconciles an unknown apply outcome before allowing any further writes', asy
   }
   await setup()
   fireEvent.click(await screen.findByRole('button', { name: '查看建议' }))
-  await waitFor(() => expect(screen.getByRole('button', { name: '确认加入分组' })).toBeEnabled())
-  fireEvent.click(screen.getByRole('button', { name: '确认加入分组' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认并批量应用' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: '确认并批量应用' }))
   await screen.findByRole('button', { name: '读取操作结果' })
-  expect(screen.getByRole('button', { name: '确认加入分组' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: '确认并批量应用' })).toBeDisabled()
   fireEvent.click(screen.getByRole('button', { name: '读取操作结果' }))
   await waitFor(() => expect(screen.getByRole('button', { name: '撤销本次新增归属' })).toBeEnabled())
   expect(writes()).toHaveLength(1)
@@ -164,7 +230,7 @@ it('fails closed when organization configuration cannot be loaded', async () => 
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); clients.push(client)
   render(<QueryClientProvider client={client}><MemoryRouter><SmartGroupingWorkspace /></MemoryRouter></QueryClientProvider>)
   await screen.findByRole('heading', { name: '整理配置未能加载' })
-  expect(screen.queryByRole('button', { name: '整理未分组频道' })).toBeNull()
+  expect(screen.queryByRole('button', { name: '生成 AI 分组建议' })).toBeNull()
   expect(writes()).toHaveLength(0)
 })
 it('uses a legacy settings change as the authoritative mode when saving other drafts', async () => {
@@ -230,12 +296,12 @@ it('loads an older pending group proposal and keeps its editor when browsing bac
   const history = screen.getByRole('heading', { name: '建议与整理记录' }).closest('section')!
   fireEvent.click(await within(history).findByRole('button', { name: '较早记录' }))
   fireEvent.click(await within(history).findByRole('button', { name: '查看建议' }))
-  await waitFor(() => expect(screen.getByRole('button', { name: '确认加入分组' })).toBeEnabled())
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认并批量应用' })).toBeEnabled())
   fireEvent.click(within(history).getByRole('button', { name: '较新记录' }))
   await waitFor(() => expect(within(history).getByText('第 1 页')).toBeInTheDocument())
-  fireEvent.click(screen.getByRole('button', { name: '确认加入分组' }))
+  fireEvent.click(screen.getByRole('button', { name: '确认并批量应用' }))
   await waitFor(() => expect(writes()[0][0]).toBe('/me/smart-channels/proposals/older-pending/apply/'))
-  expect(writes()[0][1]?.body).toEqual({ assignments: [{ source_id: 1, group_ids: [8] }] })
+  expect(writes()[0][1]?.body).toEqual({ assignments: [{ source_id: 1, group_ids: [8], new_group_paths: [] }] })
 })
 it('explains why too many personal groups pause background organization', async () => {
   handler = (path, options) => path.endsWith('/settings/') ? { ...config, error_code: 'too_many_groups' } : defaults(path, options)
@@ -268,27 +334,27 @@ it('mounts one group chooser at a time, preserves other rows, and restores focus
     : path.endsWith('/p1/') ? twoSources : defaults(path, options)
   await setup()
   fireEvent.click(await screen.findByRole('button', { name: '查看建议' }))
-  await waitFor(() => expect(screen.getByRole('button', { name: '确认加入分组' })).toBeEnabled())
-  expect(screen.queryByRole('checkbox', { name: '前端开发' })).toBeNull()
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认并批量应用' })).toBeEnabled())
+  expect(screen.queryByRole('checkbox', { name: '技术 / 前端开发' })).toBeNull()
   const adjustReact = screen.getByRole('button', { name: '调整 React 的建议分组' })
   fireEvent.click(adjustReact)
-  const reactGroup = screen.getByRole('checkbox', { name: '前端开发' })
+  const reactGroup = screen.getByRole('checkbox', { name: '技术 / 前端开发' })
   expect(reactGroup).toBeChecked()
   fireEvent.click(reactGroup)
   fireEvent.keyDown(reactGroup, { key: 'Escape' })
   expect(adjustReact).toHaveFocus()
   expect(adjustReact).toHaveAttribute('aria-expanded', 'false')
-  expect(screen.queryByRole('checkbox', { name: '前端开发' })).toBeNull()
-  expect(screen.getByText('未匹配到可靠的已有分组')).toBeInTheDocument()
+  expect(screen.queryByRole('checkbox', { name: '技术 / 前端开发' })).toBeNull()
+  expect(screen.getByText('资料不足，暂时保持未分组')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: '调整 Vue 的建议分组' }))
-  expect(screen.getAllByRole('checkbox', { name: '前端开发' })).toHaveLength(1)
-  expect(screen.getByRole('checkbox', { name: '前端开发' })).toBeChecked()
+  expect(screen.getAllByRole('checkbox', { name: '技术 / 前端开发' })).toHaveLength(1)
+  expect(screen.getByRole('checkbox', { name: '技术 / 前端开发' })).toBeChecked()
   const adjustVue = screen.getByRole('button', { name: '调整 Vue 的建议分组' })
   fireEvent.keyDown(adjustVue, { key: 'Escape' })
   expect(adjustVue).toHaveFocus()
   expect(adjustVue).toHaveAttribute('aria-expanded', 'false')
-  fireEvent.click(screen.getByRole('button', { name: '确认加入分组' }))
-  await waitFor(() => expect(writes()[0][1]?.body).toEqual({ assignments: [{ source_id: 2, group_ids: [8] }] }))
+  fireEvent.click(screen.getByRole('button', { name: '确认并批量应用' }))
+  await waitFor(() => expect(writes()[0][1]?.body).toEqual({ assignments: [{ source_id: 2, group_ids: [8], new_group_paths: [] }] }))
 })
 it('treats a full older page as the end when the contract says has_more is false', async () => {
   handler = (path, options) => {
@@ -321,7 +387,7 @@ it('follows the saved authoritative mode instead of resurrecting a stale draft',
   clients.push(client)
   const view = (mode: GroupingConfig['mode']) => (
     <QueryClientProvider client={client}><MemoryRouter>
-      <ExistingGroupOrganizer viewer={1} initialConfig={{ ...initial, mode }} groups={[{ id: 8, name: '前端开发', source_ids: [] }] as ChannelGroup[]}
+      <ExistingGroupOrganizer viewer={1} initialConfig={{ ...initial, mode }} roots={roots} groups={groups}
         subscriptions={[{ id: 1, groupIds: [] }]} />
     </MemoryRouter></QueryClientProvider>)
   const rendered = render(view('suggest'))
