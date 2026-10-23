@@ -27,7 +27,7 @@ export function ModelCombobox({ label, options, value, onChange, disabled = fals
     </Popover.Trigger>
     <Popover.Portal container={container}><Popover.Content onEscapeKeyDown={event => event.stopPropagation()} align="start" sideOffset={6} collisionPadding={16}
       className="z-50 w-[var(--radix-popover-trigger-width)] min-w-64 max-w-[calc(100vw-32px)] overflow-hidden rounded-xl border bg-popover p-1 text-popover-foreground shadow-lg">
-      <Command label={label} className="w-full" loop>
+      <Command label={searchLabel} className="w-full" loop>
         <div className="model-picker-search flex items-center gap-2 border-b px-3"><Search className="size-4 text-muted-foreground" />
           <Command.Input aria-label={searchLabel} placeholder={searchPlaceholder} className="h-11 min-w-0 w-full bg-transparent text-sm outline-none" />
         </div>

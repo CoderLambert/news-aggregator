@@ -34,6 +34,14 @@
 
 旧 9531 候选 `SmartGroupingWorkspace-B1pDhtt3.js` 的 SHA-256 `d43d7e7b539a505d97970734f2b3a80c317a810d2a4ab1c5df084d5d0ab9480b` 已失效，不得继续作为当前 UI 证据。当前本地预览加载 `SmartGroupingWorkspace-DRcD2yMp.js`，HTTP 与本地 `dist` 逐字节一致，SHA-256 为 `54a97bb2db1f4816f70bae8a2d80672cd766dbbd869b28b4911a5e4c53839d43`。这是新的本地验收候选，尚未取得用户对变更后交互的重新接受。
 
+## 看板 #22：旧版目标分组选择器规范修正
+
+在看板 #21 提交 `91e1afde966237145c62278d8943aae27fa620ff` 上，将旧 topics `ProposalEditor` 的“放入分组”原生 `<select>` 替换为项目现有 shadcn `ModelCombobox`（Radix Popover + Command）。选择器支持按分组名称或数字 ID 搜索、键盘选择、Escape 关闭及触发器焦点恢复、长名称换行与受限滚动。空值仍代表“创建新分组”，且仅存在于明确标记的旧版次要入口；选择已有分组后仍向应用合同提交数字 `group_id`。同时将该编辑器中受影响的输入、按钮与复选框复用项目 `Input` / `Button`，两项短枚举“整理范围”改用已有 `NativeSelect`；没有用包装原生下拉冒充目标分组搜索选择器。
+
+定向 Vitest 为 6 文件 86 项通过，覆盖真实 Command 弹层筛选、键盘 Enter、Escape、焦点恢复、创建新分组与已有分组 ID payload；Node 22 typecheck、全前端 lint、build 通过。lint 为 0 errors、1 个未修改文件 `frontend/src/hooks/useSuggestedQuestions.ts:32` 的既存 warning。独立 localhost:9531 合成 Chromium 验收为 13/13，含桌面真实弹层操作、390px 弹层边界与无横向溢出，共 3 张截图。证据位于恢复包 `task-22-shadcn-group-picker-20261023/`。
+
+看板 #21 的 `SmartGroupingWorkspace-DRcD2yMp.js` 指纹 `54a97bb2db1f4816f70bae8a2d80672cd766dbbd869b28b4911a5e4c53839d43` 已失效。当前 9531 加载 `SmartGroupingWorkspace-Dp2PKxwB.js`，HTTP 与本地 `dist` 逐字节一致，SHA-256 为 `804a1c3e2da48694e3ed2ea17fa297051b59cae527be8d12c150a503f5c63419`。用户对变更后 UI 的重新验收仍为 PENDING。
+
 ## 本次真实执行的验证
 
 运行环境：Python 3.12.14 / Django 6.1.2，复用现有兼容解释器；缺失的 `miniflux==1.1.6` 与 `redis==8.1.0` 从缓存离线安装到恢复包的独立 `deps/`，未修改共享 venv。Node 22.23.3，候选 worktree 中独立 `npm ci --offline --no-audit --no-fund`，未修改 lockfile。后端使用 `env -i`、合成 secret 与独立 SQLite，无 `.env`、真实 Key/Provider。
@@ -67,17 +75,17 @@
 
 站点：`http://localhost:9531/channels/smart`；分组管理：`http://localhost:9531/channels/groups`。
 
-合成账号：`organizer-preview`；合成口令：`local-preview-only-9531`（仅此预览，不是业务凭据）。合成运行库及服务脚本在恢复包 `task-14-verify-20261023/`；看板 #21 的脚本、日志、结果和 4 张新截图在 `task-21-ui-feedback-fix-20261023/`。真实站点没有修改。旧的 `runtime/preview/` 与 `browser-evidence/` 作为初次验收历史保留，不冒充本轮新证据。
+合成账号：`organizer-preview`；合成口令：`local-preview-only-9531`（仅此预览，不是业务凭据）。合成运行库及服务脚本在恢复包 `task-14-verify-20261023/`；看板 #21 证据在 `task-21-ui-feedback-fix-20261023/`，看板 #22 的脚本、日志、结果和 3 张新截图在 `task-22-shadcn-group-picker-20261023/`。真实站点没有修改。旧的 `runtime/preview/` 与 `browser-evidence/` 作为初次验收历史保留，不冒充本轮新证据。
 
 1. 查看首页三个固定范围与可搜索分组；在分组管理选择频道，批量移动/移出，确认个人订阅保留。
-2. 在智能整理先确认四步主流程与“主流程”标识；查看“待确认”和“未匹配”建议、匹配依据、调整入口，再展开明确标记的旧版次要入口并确认只有一个页标题。
+2. 在智能整理先确认四步主流程与“主流程”标识；查看“待确认”和“未匹配”建议。再展开旧版次要入口，打开 topics 建议，验证“放入分组”可搜索名称/ID、键盘选择及 Escape 焦点恢复，并确认只有一个页标题。
 3. 查看自动整理设置、建议和历史。预览没有开启后台 AI；不要把无真实模型的合成结果当真实 AI 验收。
 
 复用当前预览（无需重新初始化）：`/home/lambert/githubRepos/lambert/news-aggregator-accept/backend/venv/bin/python /home/lambert/.local/share/newshub/channel-organization-recovery-20261023/task-14-verify-20261023/local_preview.py serve`。脚本固定合成环境；端口已占用时不要启动第二份。恢复包根目录与 task #14 目录的 `preview-process.json` 记录当前服务 PID，停止前先核对其命令行，不按端口批量杀进程。`channel_worker --once` 已由验收脚本执行，没有遗留后台循环 worker。
 
 ## 用户验收、风险与回退
 
-- 用户已接受的是 `d93beac` 对应的先前本地预览。验收中指出旧主题预设编辑器的视觉变化有限，且其中仍有原生下拉框；该反馈不应被改写成“未发现问题”。看板 #21 已实现更清晰的新旧流程区分，因此先前接受不能自动覆盖当前 UI 候选，需重新提供本地验收。旧编辑器的 shadcn 搜索选择器替换仍留给后续任务。
+- 用户已接受的是 `d93beac` 对应的先前本地预览。验收中指出旧主题预设编辑器的视觉变化有限，且其中仍有原生下拉框；该反馈不应被改写成“未发现问题”。看板 #21 已实现更清晰的新旧流程区分，看板 #22 已完成 shadcn 搜索选择器替换，因此先前接受不能自动覆盖当前 UI 候选，需重新提供本地验收。
 - `d93beac` 候选曾通过用户本地体验验收；看板 #21 当前 UI 候选仅完成自动化本地验收，用户重新验收仍为 PENDING。两者都不是已部署版本。新版分页响应和前端消费者必须同批交付；不能只部署一侧。
 - `0084` 是前向迁移，恢复测试验证保留旧配置/提案/成员；回退应用时保留已写入的新表列与历史，不删除真实数据。
 - 源码和证据现在在持久目录；分组功能已通过指定 Luna/xhigh 委托本地提交为 `d93beac118be31767097e251f6447edcc59be87c`。更早两次 `index.lock` 只读失败仍作为历史事实保留；最终通过受支持的最小 Git 元数据授权解决，没有关闭沙箱或改写历史。看板 #21 的后续提交仍须遵守同一 stage-commit 规则。

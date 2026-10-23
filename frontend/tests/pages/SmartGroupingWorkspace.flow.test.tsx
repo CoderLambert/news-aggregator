@@ -1,3 +1,4 @@
+import '@tests/helpers/commandDom'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
@@ -197,6 +198,49 @@ describe('AG-04 guided grouping', () => {
     fireEvent.keyDown(checkbox, { key: 'Escape' })
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
     expect(toggle).toHaveFocus()
+  })
+  it('uses a searchable shadcn group picker while preserving existing-group IDs and legacy create-new semantics', async () => {
+    const onApply = vi.fn()
+    const groups = [{ id: 8, name: '前端开发', source_ids: [] }, { id: 19, name: '后端研究与基础设施', source_ids: [] }]
+    render(<ProposalEditor proposal={proposal} topics={topics} groups={groups} mode="suggest" busy={false} onApply={onApply} onCancel={vi.fn()} />)
+    const trigger = screen.getByRole('combobox', { name: '目标分组 frontend' })
+    expect(trigger.tagName).toBe('BUTTON')
+    expect(trigger).toHaveAttribute('data-slot', 'button')
+    expect(document.querySelector('select[aria-label="目标分组 frontend"]')).toBeNull()
+    expect(trigger).toHaveTextContent('创建新分组')
+    expect(screen.getByRole('textbox', { name: '新分组名称 frontend' })).toBeInTheDocument()
+
+    fireEvent.click(trigger)
+    const search = screen.getByRole('combobox', { name: '搜索目标分组 frontend' })
+    fireEvent.change(search, { target: { value: '19' } })
+    const existing = await screen.findByRole('option', { name: /后端研究与基础设施.*ID 19/ })
+    fireEvent.keyDown(existing, { key: 'Enter' })
+    await waitFor(() => expect(trigger).toHaveFocus())
+    expect(trigger).toHaveTextContent('后端研究与基础设施')
+    expect(screen.queryByRole('textbox', { name: '新分组名称 frontend' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '确认应用分组' }))
+    expect(onApply).toHaveBeenLastCalledWith({ mode: 'suggest', groups: [{ topic_key: 'frontend', source_ids: [1], group_id: 19 }] })
+
+    fireEvent.click(trigger)
+    fireEvent.change(screen.getByRole('combobox', { name: '搜索目标分组 frontend' }), { target: { value: '创建新分组' } })
+    fireEvent.click(await screen.findByRole('option', { name: /创建新分组.*仅旧版主题预设/ }))
+    const name = screen.getByRole('textbox', { name: '新分组名称 frontend' })
+    fireEvent.change(name, { target: { value: '自定义前端组' } })
+    fireEvent.click(screen.getByRole('button', { name: '确认应用分组' }))
+    expect(onApply).toHaveBeenLastCalledWith({ mode: 'suggest', groups: [{ topic_key: 'frontend', source_ids: [1], name: '自定义前端组' }] })
+  })
+  it('closes the group picker on Escape, restores trigger focus, and leaves the member editor open', async () => {
+    render(<ProposalEditor proposal={proposal} topics={topics} groups={[{ id: 8, name: '前端开发', source_ids: [] }]} mode="suggest" busy={false} onApply={vi.fn()} onCancel={vi.fn()} />)
+    const members = screen.getByRole('button', { name: '调整频道归属' })
+    fireEvent.click(members)
+    const trigger = screen.getByRole('combobox', { name: '目标分组 frontend' })
+    fireEvent.click(trigger)
+    const search = screen.getByRole('combobox', { name: '搜索目标分组 frontend' })
+    search.focus()
+    fireEvent.keyDown(search, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('combobox', { name: '搜索目标分组 frontend' })).toBeNull())
+    expect(trigger).toHaveFocus()
+    expect(members).toHaveAttribute('aria-expanded', 'true')
   })
 })
 
