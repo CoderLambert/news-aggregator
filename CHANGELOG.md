@@ -25,7 +25,7 @@
 - **智能频道 Worker 模型授权**
   - 专用 `channel-worker` 现在显式继承 `AI_BYOK_ENABLED`，避免网页已启用个人模型而后台层级整理仍以 `authorization_changed` 失败
 - **本地 ChatGPT 订阅入口**
-  - 本地授权起始页会采用显式可信的 `127.0.0.1` HTTP 来源，不再把前端入口固定为 5173；OAuth handoff 与 callback 仍固定在受控的 9527 端口
+  - 本地授权的 handoff 与 callback 现在都跟随经过验证的当前 `127.0.0.1:<port>` 应用来源，不再要求额外暴露固定 9527 端口；回调仍在交换令牌前校验来源、会话和授权快照
 
 ## v0.2.0 (2026-05-31)
 

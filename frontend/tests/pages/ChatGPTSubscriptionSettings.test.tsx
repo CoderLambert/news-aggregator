@@ -59,7 +59,7 @@ function handoff(attemptId: string) {
   return {
     attempt_id: attemptId,
     handoff_token: `one-use-${attemptId}`,
-    handoff_url: 'http://127.0.0.1:9527/api/chatgpt-subscription/handoff/',
+    handoff_url: new URL('/api/chatgpt-subscription/handoff/', window.location.origin).href,
   }
 }
 
@@ -97,7 +97,7 @@ beforeEach(() => {
   api.startChatGPTSubscriptionConnect.mockResolvedValue({
     attempt_id: 'attempt-1',
     handoff_token: 'one-use-ticket',
-    handoff_url: 'http://127.0.0.1:9527/api/chatgpt-subscription/handoff/',
+    handoff_url: new URL('/api/chatgpt-subscription/handoff/', window.location.origin).href,
   })
   api.fetchChatGPTSubscriptionAttempt.mockResolvedValue({
     id: 'attempt-1', status: 'authorizing', message: '', connection_id: null,
@@ -217,7 +217,7 @@ describe('ChatGPT subscription settings', () => {
 
     await waitFor(() => expect(form.submit).toHaveBeenCalledOnce())
     expect(form.method).toBe('POST')
-    expect(form.action).toBe('http://127.0.0.1:9527/api/chatgpt-subscription/handoff/')
+    expect(form.action).toBe(new URL('/api/chatgpt-subscription/handoff/', window.location.origin).href)
     expect(inputs).toEqual([
       expect.objectContaining({ name: 'attempt_id', value: 'attempt-1' }),
       expect.objectContaining({ name: 'handoff_token', value: 'one-use-ticket' }),

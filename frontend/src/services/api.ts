@@ -608,9 +608,9 @@ export async function startChatGPTSubscriptionConnect(connectionId?: string): Pr
     throw new TypeError('Invalid ChatGPT authorization handoff response')
   }
   const handoff = new URL(value.handoff_url)
-  if (value.handoff_url !== 'http://127.0.0.1:9527/api/chatgpt-subscription/handoff/' ||
-    handoff.protocol !== 'http:' || handoff.hostname !== '127.0.0.1' || handoff.port !== '9527' ||
-    handoff.username || handoff.password || handoff.pathname !== '/api/chatgpt-subscription/handoff/' ||
+  const expectedHandoff = new URL('/api/chatgpt-subscription/handoff/', window.location.origin)
+  if (handoff.href !== expectedHandoff.href ||
+    handoff.username || handoff.password || handoff.pathname !== expectedHandoff.pathname ||
     handoff.search || handoff.hash) {
     throw new TypeError('Invalid ChatGPT authorization handoff URL')
   }

@@ -46,8 +46,7 @@ from api.models import (
 logger = logging.getLogger(__name__)
 
 DISCOVERY_URL = 'https://auth.openai.com/.well-known/openid-configuration'
-REDIRECT_URI = 'http://127.0.0.1:9527/api/chatgpt-subscription/callback/'
-HANDOFF_URI = 'http://127.0.0.1:9527/api/chatgpt-subscription/handoff/'
+HANDOFF_PATH = '/api/chatgpt-subscription/handoff/'
 BINDING_COOKIE_NAME = 'chatgpt_oauth_binding'
 BINDING_COOKIE_PATH = '/api/chatgpt-subscription/callback/'
 API_RESOURCE = 'https://api.openai.com/v1'
@@ -222,12 +221,12 @@ def _validate_https_url(value: str, *, label: str) -> str:
     return value
 
 
-def _configured_protocol(client_id: str) -> dict:
-    if not isinstance(client_id, str) or not client_id:
+def _configured_protocol(client_id: str, redirect_uri: str) -> dict:
+    if not isinstance(client_id, str) or not client_id or not isinstance(redirect_uri, str) or not redirect_uri:
         raise SubscriptionError('授权配置已变化，请重新连接。', 'config_changed', 400)
     return {
         'client_id': client_id,
-        'redirect_uri': REDIRECT_URI,
+        'redirect_uri': redirect_uri,
         'scopes': sorted(REQUESTED_SCOPES.split()),
         'resource': API_RESOURCE,
         'token_endpoint_auth_method': 'none',
@@ -235,7 +234,7 @@ def _configured_protocol(client_id: str) -> dict:
     }
 
 
-def _protocol_snapshot(discovery: dict, client_id: str) -> dict:
+def _validated_discovery(discovery: dict) -> dict:
     if not isinstance(discovery, dict):
         raise SubscriptionError('OpenAI 登录服务返回了无效配置。', 'invalid_protocol_config', 400)
     issuer = _validate_https_url(discovery.get('issuer'), label='issuer')
@@ -243,7 +242,14 @@ def _protocol_snapshot(discovery: dict, client_id: str) -> dict:
         key: _validate_https_url(discovery.get(key), label=key)
         for key in ('authorization_endpoint', 'token_endpoint', 'jwks_uri')
     }
-    return {**_configured_protocol(client_id), 'issuer': issuer, **endpoints}
+    return {'issuer': issuer, **endpoints}
+
+
+def _protocol_snapshot(discovery: dict, client_id: str, redirect_uri: str) -> dict:
+    return {
+        **_configured_protocol(client_id, redirect_uri),
+        **_validated_discovery(discovery),
+    }
 
 
 def _assert_attempt_protocol(attempt: ChatGPTAuthAttempt) -> dict:
@@ -256,10 +262,13 @@ def _assert_attempt_protocol(attempt: ChatGPTAuthAttempt) -> dict:
         attempt.auth_mode != mode or snapshot.get('client_id') != attempt.requested_client_id
     ):
         raise SubscriptionError('授权配置已变化，请重新连接。', 'config_changed', 400)
-    expected = _configured_protocol(attempt.requested_client_id)
-    if any(snapshot.get(key) != expected[key] for key in PROTOCOL_CONFIG_FIELDS):
-        raise SubscriptionError('授权配置已变化，请重新连接。', 'config_changed', 400)
     try:
+        expected = _configured_protocol(
+            attempt.requested_client_id,
+            _redirect_uri_for_origin(attempt.handoff_origin),
+        )
+        if any(snapshot.get(key) != expected[key] for key in PROTOCOL_CONFIG_FIELDS):
+            raise SubscriptionError('授权配置已变化，请重新连接。', 'config_changed', 400)
         _validate_https_url(snapshot.get('issuer'), label='issuer')
         for key in ('authorization_endpoint', 'token_endpoint', 'jwks_uri'):
             _validate_https_url(snapshot.get(key), label=key)
@@ -275,6 +284,10 @@ def _validate_handoff_origin(origin: str) -> str:
         detail = f'请从已配置的本地应用地址（{expected}）打开，再开始订阅连接。' if expected else '当前部署未配置可用于订阅连接的本地应用地址。'
         raise SubscriptionError(detail)
     return origin
+
+
+def _redirect_uri_for_origin(origin: str) -> str:
+    return f'{_validate_handoff_origin(origin)}{BINDING_COOKIE_PATH}'
 
 
 def _lock_selection(user_id) -> ChatGPTSubscriptionSelection:
@@ -375,7 +388,7 @@ def _discovery(execution_guard=None) -> dict:
             response.close()
     if not isinstance(data, dict):
         raise SubscriptionError('OpenAI 登录服务返回了无效配置。')
-    _protocol_snapshot(data, DYNAMIC_CLIENT_ID)
+    _validated_discovery(data)
     return data
 
 
@@ -389,6 +402,8 @@ def create_authorization_attempt(user, target_connection=None, session_key='', o
     if not session_key:
         raise SubscriptionError('请先登录本地账号后再连接 ChatGPT 订阅。')
     handoff_origin = _validate_handoff_origin(origin)
+    redirect_uri = _redirect_uri_for_origin(handoff_origin)
+    handoff_uri = f'{handoff_origin}{HANDOFF_PATH}'
     discovery = _discovery()
     oauth_host = get_oauth_host()
     handoff_token = secrets.token_urlsafe(32)
@@ -429,7 +444,7 @@ def create_authorization_attempt(user, target_connection=None, session_key='', o
         selection_generation = selection.generation
 
         params = {
-            'response_type': 'code', 'client_id': requested_client_id, 'redirect_uri': REDIRECT_URI,
+            'response_type': 'code', 'client_id': requested_client_id, 'redirect_uri': redirect_uri,
             'scope': REQUESTED_SCOPES, 'resource': API_RESOURCE, 'state': state, 'nonce': nonce,
             'code_challenge': challenge, 'code_challenge_method': 'S256',
             'ext_agent_host_id': oauth_host.host_id,
@@ -448,7 +463,7 @@ def create_authorization_attempt(user, target_connection=None, session_key='', o
                     # The verified email still gives OpenAI a safe returning-account
                     # hint. A damaged optional hint must not block reauthorization.
                     logger.info('Stored ChatGPT ID-token hint could not be decrypted; omitting it.')
-        protocol_snapshot = _protocol_snapshot(discovery, requested_client_id)
+        protocol_snapshot = _protocol_snapshot(discovery, requested_client_id, redirect_uri)
         params.update({
             'redirect_uri': protocol_snapshot['redirect_uri'],
             'scope': ' '.join(protocol_snapshot['scopes']),
@@ -468,7 +483,7 @@ def create_authorization_attempt(user, target_connection=None, session_key='', o
             selection_generation_at_start=selection_generation,
             expires_at=timezone.now() + AUTH_ATTEMPT_TTL,
         )
-    return {'attempt_id': str(attempt.pk), 'handoff_token': handoff_token, 'handoff_url': HANDOFF_URI}
+    return {'attempt_id': str(attempt.pk), 'handoff_token': handoff_token, 'handoff_url': handoff_uri}
 
 
 def handoff_authorization(
@@ -733,6 +748,7 @@ def complete_authorization(
     *,
     session_key: str,
     user_id,
+    callback_origin: str,
 ) -> ChatGPTSubscriptionConnection:
     _require_network_mode()
     if not isinstance(session_key, str) or not session_key or not user_id:
@@ -754,6 +770,26 @@ def complete_authorization(
     session_hash = _session_binding_hash(session_key)
     if attempt.user_id != user_id or not hmac.compare_digest(attempt.session_binding_hash, session_hash):
         raise SubscriptionError('本地登录状态已切换，请重新连接。', 'session_mismatch', 403)
+    try:
+        current_callback_origin = _validate_handoff_origin(callback_origin)
+        expected_redirect_uri = _redirect_uri_for_origin(attempt.handoff_origin)
+        if (
+            not hmac.compare_digest(attempt.handoff_origin, current_callback_origin) or
+            not isinstance(attempt.protocol_snapshot, dict) or
+            not hmac.compare_digest(
+                str(attempt.protocol_snapshot.get('redirect_uri', '')),
+                expected_redirect_uri,
+            )
+        ):
+            raise SubscriptionError(
+                '回调地址与授权请求不匹配。', 'callback_origin_mismatch', 400,
+            )
+    except SubscriptionError as exc:
+        if exc.error_code == 'callback_origin_mismatch':
+            raise
+        raise SubscriptionError(
+            '回调地址与授权请求不匹配。', 'callback_origin_mismatch', 400,
+        ) from exc
     if not hmac.compare_digest(attempt.browser_binding_hash, _digest(browser_binding_token or '')):
         raise SubscriptionError('授权窗口与发起连接的浏览器不匹配。')
     try:
@@ -793,7 +829,9 @@ def complete_authorization(
                 raise SubscriptionError('OpenAI 返回的 client_id 与此连接的注册不一致。')
         discovery = _discovery()
         _assert_attempt_protocol(attempt)
-        current_discovery = _protocol_snapshot(discovery, attempt.requested_client_id)
+        current_discovery = _protocol_snapshot(
+            discovery, attempt.requested_client_id, protocol_snapshot['redirect_uri'],
+        )
         if any(
             current_discovery[key] != protocol_snapshot[key]
             for key in ('issuer', 'authorization_endpoint', 'token_endpoint', 'jwks_uri')

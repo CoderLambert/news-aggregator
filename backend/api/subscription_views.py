@@ -2,7 +2,6 @@
 
 import html
 import json
-from urllib.parse import urlparse
 
 from django.http import HttpResponse, HttpResponseRedirect, StreamingHttpResponse
 from rest_framework import status
@@ -152,20 +151,19 @@ class ChatGPTSubscriptionCallbackView(APIView):
         result_code = 200
         try:
             subscription._require_network_mode()
-            redirect = urlparse(subscription.REDIRECT_URI)
-            if (
-                request.path != subscription.BINDING_COOKIE_PATH or
-                request.get_host().lower() != redirect.netloc.lower() or
-                request.is_secure() != (redirect.scheme == 'https')
-            ):
+            if request.path != subscription.BINDING_COOKIE_PATH:
                 raise subscription.SubscriptionError(
                     '回调地址与授权请求不匹配。', 'callback_origin_mismatch', 400,
                 )
+            callback_origin = (
+                f'{"https" if request.is_secure() else "http"}://{request.get_host().lower()}'
+            )
             subscription.complete_authorization(
                 request.query_params,
                 request.COOKIES.get(subscription.BINDING_COOKIE_NAME, ''),
                 session_key=request.session.session_key or '',
                 user_id=request.user.pk,
+                callback_origin=callback_origin,
             )
         except subscription.SubscriptionError as exc:
             message = _safe_callback_message(exc.error_code)

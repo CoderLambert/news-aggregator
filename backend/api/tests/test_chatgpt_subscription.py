@@ -136,7 +136,11 @@ def _attempt(
     user, state, *, expires_at=None, client_id=subscription.DYNAMIC_CLIENT_ID,
     target=None, browser_cookie='browser-cookie', session_key=CALLBACK_SESSION_KEY,
 ):
-    protocol_snapshot = subscription._protocol_snapshot(CALLBACK_DISCOVERY, client_id)
+    protocol_snapshot = subscription._protocol_snapshot(
+        CALLBACK_DISCOVERY,
+        client_id,
+        f'{HANDOFF_ORIGIN}{subscription.BINDING_COOKIE_PATH}',
+    )
     return ChatGPTAuthAttempt.objects.create(
         user=user,
         target_connection=target,
@@ -147,6 +151,7 @@ def _attempt(
         handoff_token_hash='unused-handoff-token',
         browser_binding_hash=subscription._digest(browser_cookie),
         session_binding_hash=subscription._session_binding_hash(session_key),
+        handoff_origin=HANDOFF_ORIGIN,
         requested_client_id=client_id,
         auth_mode='local_oss',
         protocol_snapshot=protocol_snapshot,
@@ -163,6 +168,7 @@ def _complete(user, query, browser_cookie, *, session_key=CALLBACK_SESSION_KEY):
         browser_cookie,
         session_key=session_key,
         user_id=user.pk,
+        callback_origin=HANDOFF_ORIGIN,
     )
 
 
@@ -286,6 +292,27 @@ def test_handoff_requires_the_starting_origin_and_local_session(user, crypto):
     assert subscription.BINDING_COOKIE_NAME in handed_off.cookies
 
 
+
+def test_authorization_uris_follow_the_validated_starting_origin(settings, user, crypto):
+    origin = 'http://127.0.0.1:19527'
+    settings.CHATGPT_HANDOFF_ALLOWED_ORIGINS = [origin]
+    with patch.object(subscription, '_discovery', return_value=CALLBACK_DISCOVERY):
+        started = subscription.create_authorization_attempt(
+            user, session_key='dynamic-origin-session', origin=origin,
+        )
+    attempt = ChatGPTAuthAttempt.objects.get(pk=started['attempt_id'])
+    assert started['handoff_url'] == f'{origin}/api/chatgpt-subscription/handoff/'
+    assert attempt.handoff_origin == origin
+    assert attempt.protocol_snapshot['redirect_uri'] == f'{origin}/api/chatgpt-subscription/callback/'
+
+    _, authorization_url = subscription.handoff_authorization(
+        started['attempt_id'], started['handoff_token'],
+        session_key='dynamic-origin-session', origin=origin,
+    )
+    assert parse_qs(urlparse(authorization_url).query)['redirect_uri'] == [
+        f'{origin}/api/chatgpt-subscription/callback/',
+    ]
+
 def test_reconnect_callback_does_not_override_a_newer_account_selection(user, crypto):
     account_a = make_connection(user, subject='account-a')
     account_b = make_connection(user, active=False, subject='account-b')
@@ -407,7 +434,7 @@ def test_dynamic_oauth_callback_persists_issued_client_id_and_encrypted_tokens(u
         browser_cookie, authorization_url = _handoff(start, session_key='local-session-1')
         params = parse_qs(urlparse(authorization_url).query)
         assert params['client_id'] == [subscription.DYNAMIC_CLIENT_ID]
-        assert params['redirect_uri'] == [subscription.REDIRECT_URI]
+        assert params['redirect_uri'] == [f'{HANDOFF_ORIGIN}{subscription.BINDING_COOKIE_PATH}']
         assert params['code_challenge_method'] == ['S256']
         assert params['resource'] == [subscription.API_RESOURCE]
         assert subscription.REQUIRED_DIRECT_SCOPE in params['scope'][0].split()

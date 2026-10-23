@@ -202,11 +202,11 @@ OpenAI 的开源流程文档明确面向开源和本地托管应用，并将付�
 
 | 文件/入口 | 当前状态 | 公网计划 |
 | --- | --- | --- |
-| `backend/api/services/chatgpt_subscription.py:48-55` | redirect、handoff 固定为本机，入口是 `dynamic_agent_client` | 增加模式、获批应用客户端与正式回调配置；host 参数是否发送按集成契约决定 |
-| `create_authorization_attempt`、`_exchange_code` | 回调使用全局常量；首次动态注册期待 OpenAI 返回新 client ID | 保存 attempt 配置快照；公网使用预配置客户端，匹配已登记回调与客户端认证方法 |
-| `backend/api/models.py:369` | attempt 已保存状态、会话绑定和请求客户端 | 增加模式/redirect 快照；旧本地连接不直接改造成网站注册，必要时分别重新授权 |
-| `backend/api/subscription_views.py:81-89` | 浏览器绑定 Cookie 的 `secure=False` | HTTPS 部署启用 Secure，保留 HttpOnly、SameSite=Lax、明确路径与有效期 |
-| `frontend/src/services/api.ts:326-337` | 只允许 `http://127.0.0.1:9527` handoff | 校验配置的网站来源、固定路径和协议；不接受任意后端 URL 或未经校验的 Host 拼接 |
+| `backend/api/services/chatgpt_subscription.py` | 本地 handoff 与 callback 从经过校验的当前 `127.0.0.1:<port>` 发起来源派生，入口是 `dynamic_agent_client` | 增加获批的网站模式、应用客户端与正式回调配置；host 参数是否发送按集成契约决定 |
+| `create_authorization_attempt`、`_exchange_code` | attempt 保存精确 callback 快照；首次动态注册期待 OpenAI 返回新 client ID | 公网使用预配置客户端，匹配已登记回调与客户端认证方法 |
+| `backend/api/models.py` | attempt 已保存模式、redirect/协议快照、状态、会话绑定和请求客户端 | 旧本地连接不直接改造成网站注册，必要时分别重新授权 |
+| `backend/api/subscription_views.py` | 本地 HTTP 浏览器绑定 Cookie 不设 Secure | HTTPS 部署启用 Secure，保留 HttpOnly、SameSite=Lax、明确路径与有效期 |
+| `frontend/src/services/api.ts` | handoff 必须与当前页面同源且路径精确，无凭据、query 或 fragment | 网站模式继续校验配置来源和固定路径；不接受任意后端 URL 或未经校验的 Host 拼接 |
 | `backend/newsaggregator/settings.py:174-185` | CORS 全部放行，CSRF/授权来源主要为本机 | 配置正式域名、明确 CORS/CSRF/授权来源、Secure 会话 Cookie、可信代理 HTTPS 判断 |
 | Token 与会话持久化 | 已按网站用户保存加密 Token，并用 lease 串行刷新 | 保留稳定密钥与隔离；多实例使用共享的持久化状态，不能依赖单进程内存保存授权事务 |
 

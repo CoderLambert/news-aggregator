@@ -121,6 +121,7 @@ def test_network_entries_fail_closed_before_secrets_or_network(
             ),
             lambda: subscription.complete_authorization(
                 {}, '', session_key='blocked-session', user_id=user.pk,
+                callback_origin=HANDOFF_ORIGIN,
             ),
             lambda: subscription._discovery(),
             lambda: subscription._exchange_code('code', 'client', 'verifier', {}),
@@ -173,7 +174,9 @@ def test_snapshot_is_canonical_and_dynamic_client_sentinel_is_immutable(user, cr
 
     assert attempt.auth_mode == 'local_oss'
     assert attempt.protocol_snapshot == subscription._protocol_snapshot(
-        DISCOVERY, subscription.DYNAMIC_CLIENT_ID,
+        DISCOVERY,
+        subscription.DYNAMIC_CLIENT_ID,
+        f'{HANDOFF_ORIGIN}{subscription.BINDING_COOKIE_PATH}',
     )
     assert attempt.protocol_snapshot['client_id'] == attempt.requested_client_id == subscription.DYNAMIC_CLIENT_ID
     assert attempt.protocol_snapshot['scopes'] == sorted(subscription.REQUESTED_SCOPES.split())
@@ -208,13 +211,15 @@ def test_discovery_snapshot_rejects_insecure_userinfo_or_fragment(user, crypto, 
         'https://user@news.lambert.host/api/chatgpt-subscription/callback/',
     ],
 )
-def test_handoff_rejects_untrusted_redirect_config_before_ticket_use(user, crypto, monkeypatch, redirect_uri):
+def test_handoff_rejects_untrusted_redirect_config_before_ticket_use(user, crypto, redirect_uri):
     start = _start(user)
-    with monkeypatch.context() as changed:
-        changed.setattr(subscription, 'REDIRECT_URI', redirect_uri)
-        with patch.object(subscription, 'decrypt_secret') as decrypt:
-            with pytest.raises(subscription.SubscriptionError) as caught:
-                _handoff(start)
+    attempt = ChatGPTAuthAttempt.objects.get(pk=start['attempt_id'])
+    attempt.protocol_snapshot = {**attempt.protocol_snapshot, 'redirect_uri': redirect_uri}
+    attempt.config_fingerprint = subscription._snapshot_fingerprint(attempt.protocol_snapshot)
+    attempt.save(update_fields=['protocol_snapshot', 'config_fingerprint'])
+    with patch.object(subscription, 'decrypt_secret') as decrypt:
+        with pytest.raises(subscription.SubscriptionError) as caught:
+            _handoff(start)
     assert caught.value.error_code == 'config_changed'
     decrypt.assert_not_called()
     assert ChatGPTAuthAttempt.objects.get(pk=start['attempt_id']).status == 'pending'
@@ -244,6 +249,7 @@ def test_handoff_and_callback_reject_protocol_change_before_decrypt_or_exchange(
                 subscription.complete_authorization(
                     {'state': state, 'code': 'authorization-code'}, browser_cookie,
                     session_key='mode-session', user_id=user.pk,
+                    callback_origin=HANDOFF_ORIGIN,
                 )
         assert caught.value.error_code == 'config_changed'
         decrypt.assert_not_called()
@@ -268,8 +274,34 @@ def test_callback_identity_must_match_session_and_attempt_owner(user, crypto):
                 subscription.complete_authorization(
                     {'state': state, 'code': 'authorization-code'}, browser_cookie,
                     session_key=session_key, user_id=user_id,
+                    callback_origin=HANDOFF_ORIGIN,
                 )
             assert caught.value.error_code == 'session_mismatch'
+    exchange.assert_not_called()
+    assert subscription.authorization_attempt_status(user, start['attempt_id'])['status'] == 'authorizing'
+
+
+def test_callback_origin_must_match_the_attempt_origin(user, crypto):
+    start = _start(user, session_key='callback-origin-session')
+    browser_cookie, authorization_url = _handoff(
+        start, session_key='callback-origin-session',
+    )
+    state = parse_qs(urlparse(authorization_url).query)['state'][0]
+    exchange = Mock()
+    with (
+        override_settings(CHATGPT_HANDOFF_ALLOWED_ORIGINS=[
+            HANDOFF_ORIGIN, 'http://127.0.0.1:19527',
+        ]),
+        patch.object(subscription, '_exchange_code', exchange),
+    ):
+        with pytest.raises(subscription.SubscriptionError) as caught:
+            subscription.complete_authorization(
+                {'state': state, 'code': 'authorization-code'}, browser_cookie,
+                session_key='callback-origin-session',
+                user_id=user.pk,
+                callback_origin='http://127.0.0.1:19527',
+            )
+    assert caught.value.error_code == 'callback_origin_mismatch'
     exchange.assert_not_called()
     assert subscription.authorization_attempt_status(user, start['attempt_id'])['status'] == 'authorizing'
 
@@ -282,6 +314,7 @@ def test_callback_maps_sqlite_consume_contention_to_safe_service_unavailable(use
             subscription.complete_authorization(
                 {'state': 'valid-shaped-state'}, 'browser-cookie',
                 session_key='contention-session', user_id=user.pk,
+                callback_origin=HANDOFF_ORIGIN,
             )
     assert caught.value.error_code == 'oauth_storage_busy'
     assert caught.value.status_code == 503
@@ -341,6 +374,7 @@ def test_callback_maps_final_sqlite_busy_without_reexchanging_code(user, crypto)
                 {'state': state, 'code': 'authorization-code', 'client_id': 'issued-client'},
                 browser_cookie,
                 session_key='final-storage-busy-session', user_id=user.pk,
+                callback_origin=HANDOFF_ORIGIN,
             )
 
     assert caught.value.error_code == 'oauth_storage_busy'
@@ -391,6 +425,7 @@ def test_callback_rechecks_attempt_fence_immediately_before_exchange(
                 browser_cookie,
                 session_key=session_key,
                 user_id=user.pk,
+                callback_origin=HANDOFF_ORIGIN,
             )
 
     exchange.assert_not_called()
@@ -427,6 +462,7 @@ def test_deleted_reauthorization_target_is_rejected_before_exchange(user, crypto
                 browser_cookie,
                 session_key=session_key,
                 user_id=user.pk,
+                callback_origin=HANDOFF_ORIGIN,
             )
         error = None
     except subscription.SubscriptionError as exc:
@@ -477,6 +513,7 @@ def test_deleted_reauthorization_target_is_rejected_after_exchange(user, crypto)
                 browser_cookie,
                 session_key=session_key,
                 user_id=user.pk,
+                callback_origin=HANDOFF_ORIGIN,
             )
         error = None
     except subscription.SubscriptionError as exc:
@@ -572,6 +609,7 @@ def test_two_database_connections_consume_callback_state_at_most_once(tmp_path):
                     browser_cookie,
                     session_key=session_key,
                     user_id=user.pk,
+                    callback_origin=origin,
                 )
                 with result_lock:
                     outcomes.append(result.pk)
@@ -658,7 +696,7 @@ def test_callback_view_uses_session_auth_and_clears_host_only_cookie(user, crypt
     ):
         response = client.get(
             f'{CALLBACK_PATH}?state={state}&code=mock-code&client_id=issued-client',
-            HTTP_HOST='127.0.0.1:9527',
+            HTTP_HOST='127.0.0.1:5173',
         )
 
     assert response.status_code == 200
@@ -677,7 +715,7 @@ def test_callback_view_rejects_anonymous_and_returns_fixed_error_html(user):
     anonymous = APIClient()
     denied = anonymous.get(
         f'{CALLBACK_PATH}?state=do-not-echo-this-state',
-        HTTP_HOST='127.0.0.1:9527',
+        HTTP_HOST='127.0.0.1:5173',
     )
     assert denied.status_code in (401, 403)
 
@@ -686,7 +724,7 @@ def test_callback_view_rejects_anonymous_and_returns_fixed_error_html(user):
     client.cookies[subscription.BINDING_COOKIE_NAME] = 'expired-binding'
     response = client.get(
         f'{CALLBACK_PATH}?state=do-not-echo-this-state',
-        HTTP_HOST='127.0.0.1:9527',
+        HTTP_HOST='127.0.0.1:5173',
     )
     assert response.status_code == 400
     assert 'do-not-echo-this-state' not in response.content.decode()

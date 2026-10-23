@@ -76,18 +76,19 @@ describe('capabilities service', () => {
     expect(parsed.features.research_byok_create).toEqual({ enabled: true, reason: null })
   })
 
-  it('accepts only the exact local handoff target', async () => {
+  it('accepts only the exact current-origin handoff target', async () => {
+    const handoffUrl = new URL('/api/chatgpt-subscription/handoff/', window.location.origin).href
     mocks.post.mockResolvedValueOnce({
       data: {
         attempt_id: 'attempt-1',
         handoff_token: 'opaque-test-token',
-        handoff_url: 'http://127.0.0.1:9527/api/chatgpt-subscription/handoff/',
+        handoff_url: handoffUrl,
       },
     })
 
     await expect(api.startChatGPTSubscriptionConnect()).resolves.toMatchObject({
       attempt_id: 'attempt-1',
-      handoff_url: 'http://127.0.0.1:9527/api/chatgpt-subscription/handoff/',
+      handoff_url: handoffUrl,
     })
     expect(mocks.post).toHaveBeenCalledWith('/chatgpt-subscription/connect/', {})
   })
@@ -96,11 +97,10 @@ describe('capabilities service', () => {
     'http://127.0.0.1.evil:9527/api/chatgpt-subscription/handoff/',
     'http://user@127.0.0.1:9527/api/chatgpt-subscription/handoff/',
     'https://127.0.0.1:9527/api/chatgpt-subscription/handoff/',
-    'http://localhost:9527/api/chatgpt-subscription/handoff/',
-    'http://127.0.0.1:9527/api/chatgpt-subscription/handoff/?token=secret',
-    'http://127.0.0.1:9527/api/chatgpt-subscription/handoff/#fragment',
     'http://127.0.0.1:9528/api/chatgpt-subscription/handoff/',
-    'http://127.0.0.1:9527/api/chatgpt-subscription/other/',
+    `${window.location.origin}/api/chatgpt-subscription/handoff/?token=secret`,
+    `${window.location.origin}/api/chatgpt-subscription/handoff/#fragment`,
+    `${window.location.origin}/api/chatgpt-subscription/other/`,
   ])('rejects unsafe handoff target %s', async (handoff_url) => {
     mocks.post.mockResolvedValueOnce({
       data: { attempt_id: 'attempt-1', handoff_token: 'opaque-test-token', handoff_url },
