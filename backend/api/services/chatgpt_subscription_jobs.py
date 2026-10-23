@@ -817,6 +817,14 @@ def _mark_failed(task_id, generation, run_token, exc):
 def _claim_persistent_task(task_id, generation, run_token):
     def persist():
         with transaction.atomic():
+            # Reserve SQLite's single writer before taking the validation
+            # snapshot. A read-first transaction cannot be upgraded after a
+            # competing WAL commit and fails immediately with BUSY_SNAPSHOT.
+            reserved = ChatGPTTranslationTask.objects.filter(
+                pk=task_id, generation=generation, status='queued',
+            ).update(updated_at=F('updated_at'))
+            if not reserved:
+                return 0
             queued_task = _queued_task_snapshot(task_id, generation)
             if queued_task is None:
                 return 0
