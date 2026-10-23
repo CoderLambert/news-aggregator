@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import axios from 'axios'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Check, CircleDashed } from 'lucide-react'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Button } from '@/components/ui/button'
 import { Link } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import {
@@ -11,6 +13,7 @@ import {
   disconnectChatGPTSubscription,
   fetchChatGPTSubscriptionModels,
   fetchChatGPTSubscriptionStatus,
+  probeChatGPTSubscriptionResearch,
   selectChatGPTSubscriptionModel,
   startChatGPTSubscriptionConnect,
 } from '@/services/api'
@@ -46,6 +49,7 @@ export default function ChatGPTSubscriptionSettings() {
   const [connectPending, setConnectPending] = useState(false)
   const [attemptId, setAttemptId] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
+  const [researchProbeConsent, setResearchProbeConsent] = useState(false)
   const popupRef = useRef<Window | null>(null)
   const attemptIdRef = useRef<string | null>(null)
   const attemptOwnerRef = useRef<number | null>(null)
@@ -96,6 +100,7 @@ export default function ChatGPTSubscriptionSettings() {
   const invalidatePrivateNews = useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: subscriptionRootKey }),
+      queryClient.invalidateQueries({ queryKey: ['ai-task-preferences'] }),
       queryClient.invalidateQueries({ queryKey: newsKeys.details() }),
     ])
   }, [queryClient])
@@ -106,7 +111,20 @@ export default function ChatGPTSubscriptionSettings() {
   })
   const selectModelMutation = useMutation({
     mutationFn: ({ id, slug }: { id: string; slug: string }) => selectChatGPTSubscriptionModel(id, slug),
-    onSuccess: invalidatePrivateNews,
+    onSuccess: async () => {
+      setResearchProbeConsent(false)
+      await invalidatePrivateNews()
+    },
+  })
+  const researchProbeMutation = useMutation({
+    mutationFn: probeChatGPTSubscriptionResearch,
+    onSuccess: (result) => {
+      setResearchProbeConsent(false)
+      setNotice(result.status === 'supported'
+        ? '当前订阅模型已验证工具调用能力，可在 AI 设置中选择用于深度研究。'
+        : '当前订阅模型不支持可验证的工具调用，深度研究保持不可用。')
+    },
+    onSettled: invalidatePrivateNews,
   })
   const disconnectMutation = useMutation({
     mutationFn: disconnectChatGPTSubscription,
@@ -279,7 +297,7 @@ export default function ChatGPTSubscriptionSettings() {
         <p className="text-sm font-medium text-orange-600">本地订阅连接</p>
         <h1 className="mt-1 text-2xl font-semibold">ChatGPT 订阅设置</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          连接只属于当前 NewsHub 用户。小闻问答、问题推荐和全文翻译使用此处选中的 ChatGPT 账号与模型。
+          连接只属于当前 NewsHub 用户。问答、问题推荐、全文翻译以及验证后的深度研究使用此处选中的 ChatGPT 账号与模型。
         </p>
       </header>
 
@@ -320,6 +338,7 @@ export default function ChatGPTSubscriptionSettings() {
       {activateMutation.isError && <p role="alert" className="mb-4 text-sm text-destructive">{errorMessage(activateMutation.error)}</p>}
       {selectModelMutation.isError && <p role="alert" className="mb-4 text-sm text-destructive">{errorMessage(selectModelMutation.error)}</p>}
       {disconnectMutation.isError && <p role="alert" className="mb-4 text-sm text-destructive">{errorMessage(disconnectMutation.error)}</p>}
+      {researchProbeMutation.isError && <p role="alert" className="mb-4 text-sm text-destructive">{errorMessage(researchProbeMutation.error)}</p>}
 
       <div className="mb-5 rounded-2xl border border-border bg-card p-4 sm:p-5">
         <h2 className="font-semibold">1. 建立连接</h2>
@@ -358,7 +377,7 @@ export default function ChatGPTSubscriptionSettings() {
       </div>
 
       <div className="mb-3 flex items-end justify-between gap-3">
-        <div><h2 className="font-semibold">2. 选择账号与模型</h2><p className="mt-1 text-sm text-muted-foreground">当前账号和模型会用于小闻问答、问题推荐和全文翻译。</p></div>
+        <div><h2 className="font-semibold">2. 选择账号与模型</h2><p className="mt-1 text-sm text-muted-foreground">文本任务可直接使用；深度研究需对当前模型单独验证工具能力。</p></div>
         <span className="shrink-0 text-xs text-muted-foreground">3. 配置状态显示在账号卡片中</span>
       </div>
 
@@ -434,6 +453,43 @@ export default function ChatGPTSubscriptionSettings() {
                   {!connection.selected_model && modelsQuery.data?.models.length ? (
                     <p className="mt-2 text-sm text-muted-foreground">选择模型后即可使用小闻问答、问题推荐和全文翻译。</p>
                   ) : null}
+                  {connection.selected_model && (
+                    <div className="mt-4 rounded-lg border border-border bg-muted/30 p-3">
+                      <p className="text-sm font-medium">深度研究工具能力</p>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                        {connection.research_tools.status === 'supported'
+                          ? `已验证 ${connection.research_tools.model_slug}，可用于深度研究。`
+                          : connection.research_tools.status === 'unsupported'
+                            ? '当前模型或订阅不支持所需工具调用。'
+                            : connection.research_tools.status === 'unknown'
+                              ? '上次验证未能得到可信结果，请稍后明确重试。'
+                              : '尚未验证当前模型，AI 设置中不会开放订阅深度研究。'}
+                      </p>
+                      {connection.research_tools.status !== 'supported' && (
+                        <>
+                          <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs leading-5">
+                            <Checkbox
+                              checked={researchProbeConsent}
+                              onChange={(event) => setResearchProbeConsent(event.currentTarget.checked)}
+                              disabled={researchProbeMutation.isPending}
+                              aria-label="同意使用订阅额度验证深度研究能力"
+                              className="mt-0.5"
+                            />
+                            <span>我确认主动验证会向当前 ChatGPT 订阅模型发起一次工具调用，可能使用订阅额度。</span>
+                          </label>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => researchProbeMutation.mutate(connection.id)}
+                            disabled={!researchProbeConsent || researchProbeMutation.isPending}
+                            className="mt-3 min-h-11"
+                          >
+                            {researchProbeMutation.isPending ? '正在验证…' : '验证深度研究能力'}
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </article>

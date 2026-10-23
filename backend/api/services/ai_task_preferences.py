@@ -20,8 +20,8 @@ from api.services.ai_credentials import (
 from api.services.ai_model_capabilities import verified_for_task
 from api.services.ai_model_registry import get_trusted_route, supports_task_route
 
-SUBSCRIPTION_TEXT_TASKS = frozenset({
-    'article_qa', 'full_translation', 'question_suggestions',
+SUBSCRIPTION_TASKS = frozenset({
+    'article_qa', 'full_translation', 'question_suggestions', 'deep_research',
 })
 
 
@@ -46,6 +46,7 @@ def _rows(user_id):
 
 def _subscription_info(user):
     from api.services.chatgpt_subscription import active_connection_for_user
+    from api.services.research.subscription_execution import tools_supported
     connection = active_connection_for_user(user)
     if connection is None:
         return {
@@ -62,7 +63,7 @@ def _subscription_info(user):
         'state': state,
         'model_id': connection.selected_model or None,
         'display_name': connection.selected_model or None,
-        'research_eligible': False,
+        'research_eligible': state == 'available' and tools_supported(connection),
     }
 
 
@@ -79,14 +80,13 @@ def _selected_state(preference, kind, owner_id, subscription):
             source,
         )
     if source == 'chatgpt_subscription':
-        if kind not in SUBSCRIPTION_TEXT_TASKS:
+        if kind not in SUBSCRIPTION_TASKS:
             return 'needs_verification', None, source
         state = subscription['state']
-        return (
-            'available' if state == 'available' else 'needs_reselection',
-            None,
-            source,
+        available = state == 'available' and (
+            kind != 'deep_research' or subscription['research_eligible']
         )
+        return 'available' if available else 'needs_verification', None, source
     if source != 'byok' or preference is None or preference.model_config_id is None:
         return 'needs_reselection', None, source
     model = preference.model_config
@@ -172,10 +172,12 @@ def _validate_entry(entry, subscription):
     elif model_id is not None:
         raise ModelSelectionError('selection_source_invalid')
     if source == 'chatgpt_subscription':
-        if kind not in SUBSCRIPTION_TEXT_TASKS:
+        if kind not in SUBSCRIPTION_TASKS:
             raise ModelSelectionError('model_not_verified')
         if subscription['state'] != 'available':
             raise ModelSelectionError('subscription_unavailable')
+        if kind == 'deep_research' and not subscription['research_eligible']:
+            raise ModelSelectionError('model_not_verified')
 
 
 @transaction.atomic

@@ -17,6 +17,8 @@ from api.services import shared_translations
 
 
 def _connection_payload(connection):
+    from api.services.research.subscription_execution import current_tools_receipt
+    receipt = current_tools_receipt(connection)
     return {
         'id': str(connection.pk),
         'account_name': connection.account_name,
@@ -25,6 +27,12 @@ def _connection_payload(connection):
         'active': connection.is_active,
         'connected': connection.connected,
         'needs_reauth': connection.needs_reauth,
+        'research_tools': {
+            'status': receipt.status if receipt else 'not_tested',
+            'model_slug': receipt.model_slug if receipt else None,
+            'safe_error_code': receipt.safe_error_code if receipt else '',
+            'tested_at': receipt.created_at.isoformat() if receipt else None,
+        },
         'updated_at': connection.updated_at.isoformat(),
     }
 
@@ -233,6 +241,30 @@ class ChatGPTSubscriptionSelectModelView(APIView):
         except subscription.SubscriptionError as exc:
             return _subscription_error_response(exc)
         return Response({'selected_model': connection.selected_model})
+
+
+class ChatGPTSubscriptionResearchProbeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, connection_id):
+        if not hasattr(request.data, 'keys') or set(request.data.keys()) != {'consent'}:
+            return Response(
+                {'error': '请明确确认本次能力验证。', 'error_code': 'subscription_probe_consent_required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            connection = subscription.get_user_connection(request.user, connection_id)
+            active = subscription.active_connection_for_user(request.user)
+            if active is None or active.pk != connection.pk:
+                raise subscription.SubscriptionError(
+                    '只能测试当前启用的 ChatGPT 订阅连接。',
+                    'subscription_connection_inactive', 409,
+                )
+            from api.services.research.subscription_execution import probe_tools
+            receipt = probe_tools(connection, consent=request.data.get('consent'))
+        except subscription.SubscriptionError as exc:
+            return _subscription_error_response(exc)
+        return Response(receipt)
 
 
 class ChatGPTSubscriptionDisconnectView(APIView):

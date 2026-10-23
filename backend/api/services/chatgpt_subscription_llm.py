@@ -121,7 +121,7 @@ def _structured_error(status_code: int, response=None) -> auth.SubscriptionError
             raw_param = detail.get('param')
             if isinstance(raw_param, str) and raw_param in {
                 'model', 'input', 'stream', 'store', 'temperature',
-                'text', 'max_output_tokens', 'max_tokens',
+                'text', 'max_output_tokens', 'max_tokens', 'tools', 'tool_choice',
             }:
                 param = raw_param
     except Exception:
@@ -166,12 +166,26 @@ def _run_guard(execution_guard):
 
 def stream_text(
     snapshot: SubscriptionExecutionSnapshot,
-    messages: list[dict[str, str]],
+    messages: list[dict[str, str]] | None,
     *,
     execution_guard=None,
     _on_completed=None,
+    _input_items=None,
+    _payload_fields=None,
+    _require_text=True,
 ):
     """Yield verified text deltas and succeed only after response.completed."""
+    if _input_items is None:
+        input_items = _normalize_messages(messages)
+    elif type(_input_items) is list and _input_items:
+        input_items = _input_items
+    else:
+        raise auth.SubscriptionError('模型请求缺少有效输入。')
+    if _payload_fields is not None and (
+        type(_payload_fields) is not dict
+        or set(_payload_fields) - {'tools', 'tool_choice'}
+    ):
+        raise auth.SubscriptionError('模型请求包含不支持的参数。')
     _run_guard(execution_guard)
     connection = verify_snapshot(snapshot)
     access_token = auth.access_token_for(
@@ -181,9 +195,10 @@ def stream_text(
     connection = verify_snapshot(snapshot)
     payload = {
         'model': snapshot.model_slug,
-        'input': _normalize_messages(messages),
+        'input': input_items,
         'store': False,
         'stream': True,
+        **(_payload_fields or {}),
     }
     try:
         response = requests.post(
@@ -256,7 +271,7 @@ def stream_text(
 
         if completed_response is None:
             raise auth.SubscriptionError('模型 SSE 流在 response.completed 前中断，结果未保存。')
-        if not emitted:
+        if not emitted and _require_text:
             final_text = _extract_response_text(completed_response)
             if not final_text.strip():
                 raise auth.SubscriptionError('模型已完成响应，但没有返回文本。')
@@ -283,6 +298,42 @@ def complete_text(snapshot, messages, *, on_delta=None, execution_guard=None) ->
             on_delta(delta)
     final_text = _extract_response_text(completed[0]) if completed else ''
     return final_text or ''.join(chunks)
+
+
+def complete_response(
+    snapshot: SubscriptionExecutionSnapshot,
+    input_items: list[dict],
+    *,
+    tools: list[dict] | None = None,
+    tool_choice=None,
+    execution_guard=None,
+) -> dict:
+    """Return the completed native Responses object for a fenced tool call."""
+    payload_fields = {}
+    if tools is not None:
+        payload_fields['tools'] = tools
+    if tool_choice is not None:
+        payload_fields['tool_choice'] = tool_choice
+    completed = []
+    for _delta in stream_text(
+        snapshot, None, execution_guard=execution_guard,
+        _on_completed=completed.append, _input_items=input_items,
+        _payload_fields=payload_fields, _require_text=False,
+    ):
+        pass
+    if len(completed) != 1:
+        raise auth.SubscriptionError('模型完成回执无效。')
+    try:
+        completed_bytes = len(json.dumps(
+            completed[0], ensure_ascii=False, allow_nan=False,
+        ).encode('utf-8'))
+    except (TypeError, ValueError):
+        raise auth.SubscriptionError('模型完成回执格式无效。') from None
+    if completed_bytes > MAX_OUTPUT_BYTES:
+        raise auth.SubscriptionError(
+            '模型输出超过安全上限，结果未保存。', 'output_limit_exceeded', 413,
+        )
+    return completed[0]
 
 
 def stream_chat_response(connection: ChatGPTSubscriptionConnection, messages: list[dict[str, str]]):

@@ -120,7 +120,8 @@ def test_research_without_tools_is_rejected_before_any_run_or_dispatch(unified):
     prove(unified)
     with patch('api.services.research.job_manager._dispatch') as dispatch:
         response = unified.api.post('/api/research/', {'query': 'Synthetic local research',
-            'model_config_id': str(unified.model.pk), 'consent': True}, format='json',
+            'execution_source': 'byok', 'model_config_id': str(unified.model.pk),
+            'consent': True}, format='json',
             HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()))
     assert response.status_code == 409
     assert response.data['error_code'] == 'research_model_not_verified'

@@ -121,6 +121,11 @@ describe('T03 model purpose settings', () => {
     setup(); await ready()
     expect(choices('全局默认模型')).not.toContain('ChatGPT 订阅')
     expect(choices('新闻问答模型')).toContain('ChatGPT 订阅 · GPT Subscription')
+    const researchCombobox = screen.getByRole('combobox', { name: '深度研究模型' })
+    fireEvent.click(researchCombobox)
+    fireEvent.click(screen.getByText('ChatGPT 订阅 · GPT Subscription'))
+    expect(researchCombobox).toHaveTextContent('跟随个人默认模型')
+    fireEvent.keyDown(screen.getByLabelText('搜索模型'), { key: 'Escape' })
     choose('新闻问答模型', 'ChatGPT 订阅')
     fireEvent.click(screen.getByRole('button', { name: '保存用途偏好' }))
     await waitFor(() => expect(api.saveAITaskPreferences).toHaveBeenCalledOnce())
@@ -131,6 +136,27 @@ describe('T03 model purpose settings', () => {
       model_config_id: null,
     })
   })
+  it('offers subscription research only after the current model tool receipt is verified', async () => {
+    current = {
+      ...initial,
+      subscription: {
+        state: 'available', model_id: 'gpt-subscription',
+        display_name: 'GPT Subscription', research_eligible: true,
+      },
+    }
+    setup(); await ready()
+    expect(choices('深度研究模型')).toContain('ChatGPT 订阅 · GPT Subscription')
+    choose('深度研究模型', 'ChatGPT 订阅')
+    fireEvent.click(screen.getByRole('button', { name: '保存用途偏好' }))
+    await waitFor(() => expect(api.saveAITaskPreferences).toHaveBeenCalledOnce())
+    expect(vi.mocked(api.saveAITaskPreferences).mock.calls[0][1]
+      .find(row => row.task_kind === 'deep_research')).toEqual({
+      task_kind: 'deep_research',
+      selection_source: 'chatgpt_subscription',
+      model_config_id: null,
+    })
+  })
+
   it('keeps nonstream models available for research but excludes them from chat and translation', async () => {
     available = [textModel, { ...toolsModel, article_chat_supported: false }]
     setup(); await ready()

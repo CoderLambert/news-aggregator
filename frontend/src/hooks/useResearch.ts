@@ -157,9 +157,18 @@ function loadPendingCreate(viewerId: ResearchViewerId): PendingResearchCreate | 
       && Date.now() - raw.createdAt <= 24 * 60 * 60 * 1000
       && ((raw.authorization === undefined)
         || (isRecord(raw.authorization) && raw.authorization.consent === true
-          && typeof raw.authorization.modelConfigId === 'string'
-          && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-            .test(raw.authorization.modelConfigId)))
+          && (
+            (
+              raw.authorization.executionSource === 'byok'
+              && typeof raw.authorization.modelConfigId === 'string'
+              && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+                .test(raw.authorization.modelConfigId)
+            )
+            || (
+              raw.authorization.executionSource === 'chatgpt_subscription'
+              && raw.authorization.modelConfigId === undefined
+            )
+          )))
     if (valid) return raw as unknown as PendingResearchCreate
     clearPendingCreate(viewerId)
   } catch {
@@ -424,7 +433,7 @@ function querySessionMessages(
 
 export function useResearch(
   viewerId: ResearchViewerId | null,
-  { byokCreateOnly = false }: { byokCreateOnly?: boolean } = {},
+  { authorizedCreateOnly = false }: { authorizedCreateOnly?: boolean } = {},
 ) {
   const queryClient = useQueryClient()
   const { lang } = useLanguage()
@@ -701,8 +710,8 @@ export function useResearch(
           'research_authorization_changed'].includes(error.code)) {
         clearPendingCreate(connection.viewerId, connection.idempotencyKey)
         const notice = error.code === 'research_model_not_verified'
-          ? '请先完成该模型的文本与工具能力验证，再发起研究。此次请求未创建研究任务。'
-          : '所选个人研究模型或授权当前不可用，请在 AI 设置中检查。此次请求未创建研究任务。'
+          ? '请先完成该模型的工具能力验证，再发起研究。此次请求未创建研究任务。'
+          : '所选研究模型来源或授权当前不可用，请在 AI 设置中检查。此次请求未创建研究任务。'
         putTask(connection.taskKey, { ...markResearchTaskInterrupted(task, notice), recovery: 'none' })
         return
       }
@@ -844,7 +853,7 @@ export function useResearch(
       )
       if (!connectionIsCurrent(connection)) return
       if (stream.kind === 'queued') {
-        if (byokCreateOnly) {
+        if (authorizedCreateOnly) {
           putTask(taskKey, {
             ...nextTask,
             phase: 'cancelled',
@@ -927,7 +936,7 @@ export function useResearch(
         setConnectionBusy(false)
       }
     }
-  }, [byokCreateOnly, cancelConnectionOnServer, connectionIsCurrent, consumeResearchEvents, currentConnectionTask, lang, putTask, queryClient, queryViewerId, removeTask, viewerId])
+  }, [authorizedCreateOnly, cancelConnectionOnServer, connectionIsCurrent, consumeResearchEvents, currentConnectionTask, lang, putTask, queryClient, queryViewerId, removeTask, viewerId])
 
   const handleSend = useCallback(async (
     query: string,
@@ -938,7 +947,7 @@ export function useResearch(
   ) => {
     const normalizedQuery = query.trim()
     if (!normalizedQuery || connectionRef.current || sendLockRef.current || viewerId === null) return false
-    if (byokCreateOnly && (!authorization || authorization.consent !== true)) return false
+    if (authorizedCreateOnly && (!authorization || authorization.consent !== true)) return false
     if (authorization && authorization.consent !== true) return false
     // Without response headers, a prior create may already have reached Django.
     // Never create a different request key while its fate is unknown.
@@ -957,7 +966,7 @@ export function useResearch(
     const taskId = `research-${Date.now()}-${++taskSequenceRef.current}`
     const task = createResearchTask(taskId, normalizedQuery, localOnly, priorMessages, sessionId, messageCount)
     return runStreamTask(task, sessionId ? 'chat' : 'create', undefined, authorization)
-  }, [activeSessionId, activeTask, byokCreateOnly, lang, queryClient, queryViewerId, runStreamTask, viewerId])
+  }, [activeSessionId, activeTask, authorizedCreateOnly, lang, queryClient, queryViewerId, runStreamTask, viewerId])
 
   const handleNewSession = useCallback(() => {
     pauseCurrentConnection('已切换到新会话；原服务端任务可能仍在运行，可从历史会话继续接收。')
@@ -997,7 +1006,7 @@ export function useResearch(
 
   const handleRetry = useCallback(async (authorization?: ResearchCreateAuthorization) => {
     const task = activeTask
-    if (byokCreateOnly || !task || (task.phase !== 'error' && task.phase !== 'cancelled') || task.recovery !== 'retry' || viewerId === null) return
+    if (authorizedCreateOnly || !task || (task.phase !== 'error' && task.phase !== 'cancelled') || task.recovery !== 'retry' || viewerId === null) return
     // An unanswered create POST may already have invoked a paid provider.
     if (loadPendingCreate(viewerId)) return
     const next = createResearchTask(
@@ -1010,12 +1019,12 @@ export function useResearch(
     )
     await runStreamTask(next, next.sessionId ? 'chat' : 'create', undefined,
       next.sessionId ? undefined : authorization)
-  }, [activeTask, byokCreateOnly, runStreamTask, viewerId])
+  }, [activeTask, authorizedCreateOnly, runStreamTask, viewerId])
 
   const handleResume = useCallback(async () => {
     const task = activeTask
     if (!task || task.recovery !== 'resume' || viewerId === null) return
-    if (byokCreateOnly && !task.sessionId) return
+    if (authorizedCreateOnly && !task.sessionId) return
     if (!task.sessionId) {
       const pending = loadPendingCreate(viewerId)
       if (!pending || pending.taskId !== task.id) return
@@ -1025,7 +1034,7 @@ export function useResearch(
       return
     }
     await startSessionRecovery(task.sessionId, task)
-  }, [activeTask, byokCreateOnly, runStreamTask, startSessionRecovery, viewerId])
+  }, [activeTask, authorizedCreateOnly, runStreamTask, startSessionRecovery, viewerId])
 
   const handleCancel = useCallback(async () => {
     const connection = connectionRef.current

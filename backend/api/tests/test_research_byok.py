@@ -16,6 +16,7 @@ from api.services.research import agent_loop
 from api.services.research.byok_execution import (
     ResearchBYOKError, decode_snapshot, validate_tool_batch,
 )
+from api.services.research.execution import ResearchExecutionError
 from api.services.research.tools import TOOLS
 
 User = get_user_model()
@@ -48,7 +49,7 @@ def test_research_byok_create_capability_is_narrow_and_independent_of_public_ai(
 
     with override_settings(
         PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=False, AI_BYOK_ENABLED=False,
-        DJANGO_ENV='development',
+        CHATGPT_AUTH_MODE='disabled', DJANGO_ENV='development',
     ):
         assert _feature_snapshot()['research_byok_create']['enabled'] is False
 
@@ -108,7 +109,8 @@ def test_t09_production_requires_literal_consent_and_current_verified_model():
         DJANGO_ENV='production',
     ):
         missing_consent = client.post('/api/research/', {
-            'query': 'test missing consent', 'model_config_id': model_config_id,
+            'query': 'test missing consent', 'execution_source': 'byok',
+            'model_config_id': model_config_id,
         }, format='json')
         assert missing_consent.status_code == 400
         assert missing_consent.data['error_code'] == 'research_consent_required'
@@ -116,8 +118,8 @@ def test_t09_production_requires_literal_consent_and_current_verified_model():
         assert not ResearchSession.objects.exists()
 
         missing_model = client.post('/api/research/', {
-            'query': 'test no configured model', 'model_config_id': model_config_id,
-            'consent': True,
+            'query': 'test no configured model', 'execution_source': 'byok',
+            'model_config_id': model_config_id, 'consent': True,
         }, format='json')
         assert missing_model.status_code == 409
         assert missing_model.data['error_code'] == 'research_model_unavailable'
@@ -240,13 +242,14 @@ def test_t09_validates_entire_tool_batch_before_first_tool_side_effect(monkeypat
     )
     events = []
 
-    with pytest.raises(ResearchBYOKError) as rejected:
+    with pytest.raises(ResearchExecutionError) as rejected:
         agent_loop.run_agent_loop(
             session, 'query', lambda event, data: events.append((event, data)),
             local_only=True, execution_guard=lambda: None,
             persist_completion=lambda messages: side_effects.append('completed'),
             persist_tool_result=lambda *args: side_effects.append('persisted'),
-            user=owner, byok_snapshot={'test_snapshot': True},
+            user=owner,
+            execution_snapshot={'schema_version': 1, 'consent': True, 'model': {}},
         )
 
     assert rejected.value.code == 'invalid_tool_call'
@@ -274,13 +277,14 @@ def test_t09_failed_tool_write_cannot_emit_result_or_succeeded_completion(monkey
         raise RuntimeError('synthetic persistence failure')
     events = []
 
-    with pytest.raises(ResearchBYOKError) as failed:
+    with pytest.raises(ResearchExecutionError) as failed:
         agent_loop.run_agent_loop(
             session, 'query', lambda event, data: events.append((event, data)),
             local_only=True, execution_guard=lambda: None,
             persist_completion=lambda messages: pytest.fail('must not commit report'),
             persist_tool_result=failed_persistence,
-            user=owner, byok_snapshot={'test_snapshot': True},
+            user=owner,
+            execution_snapshot={'schema_version': 1, 'consent': True, 'model': {}},
         )
 
     assert failed.value.code == 'tool_failed'

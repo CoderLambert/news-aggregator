@@ -153,7 +153,49 @@ describe('ResearchPanel', () => {
     await userEvent.click(screen.getByRole('button', { name: '发送' }))
     await waitFor(() => expect(api.createResearchStream).toHaveBeenCalledTimes(1))
     expect(api.createResearchStream.mock.calls[0][1].authorization).toEqual({
+      executionSource: 'byok',
       modelConfigId: 'dc8beed6-9efb-45ae-aacc-e8b8ce426b7f',
+      consent: true,
+    })
+  })
+
+  it('uses an eligible ChatGPT subscription for research with per-run quota consent', async () => {
+    taskPreferenceApi.listAITaskPreferences.mockResolvedValue({
+      revision: 4,
+      preferences: [{
+        task_kind: 'deep_research',
+        selection_source: 'chatgpt_subscription',
+        model_config_id: null,
+        selection_state: 'available',
+        model: null,
+      }],
+      subscription: {
+        state: 'available',
+        model_id: 'gpt-subscription-research',
+        display_name: 'gpt-subscription-research',
+        research_eligible: true,
+      },
+    })
+    api.createResearchStream.mockImplementation(async function* (_query, options) {
+      options.onSessionId?.('subscription-research-session')
+      yield { type: 'session_created', session_id: 'subscription-research-session' }
+      yield { type: 'complete' }
+    })
+
+    renderPanel('/', false, signedInUser,
+      fullCapabilities({ research: false, research_byok_create: true }))
+    await userEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    expect(await screen.findByText(/ChatGPT 订阅 · gpt-subscription-research/)).toBeInTheDocument()
+    expect(screen.getByText(/可能使用订阅额度/)).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('textbox', { name: '输入研究问题' }), {
+      target: { value: '使用订阅执行研究' },
+    })
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
+    await userEvent.click(screen.getByRole('checkbox'))
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(api.createResearchStream).toHaveBeenCalledTimes(1))
+    expect(api.createResearchStream.mock.calls[0][1].authorization).toEqual({
+      executionSource: 'chatgpt_subscription',
       consent: true,
     })
   })
@@ -162,6 +204,7 @@ describe('ResearchPanel', () => {
     const history = {
       ...completedSession(),
       research_model: {
+        source: 'byok',
         model_config_id: 'dc8beed6-9efb-45ae-aacc-e8b8ce426b7f',
         model_id: 'deepseek-chat',
       },
@@ -189,6 +232,7 @@ describe('ResearchPanel', () => {
     await waitFor(() => expect(api.researchChatStream).toHaveBeenCalledTimes(1))
     expect(api.researchChatStream.mock.calls[0][0]).toBe(history.id)
     expect(api.researchChatStream.mock.calls[0][2].authorization).toEqual({
+      executionSource: 'byok',
       modelConfigId: history.research_model.model_config_id, consent: true,
     })
     expect(api.createResearchStream).not.toHaveBeenCalled()
@@ -204,7 +248,7 @@ describe('ResearchPanel', () => {
     )
     await userEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
 
-    expect(await screen.findByText(/配置并验证支持工具调用的个人研究模型/)).toBeInTheDocument()
+    expect(await screen.findByText(/个人模型或 ChatGPT 订阅模型/)).toBeInTheDocument()
     const input = screen.getByRole('textbox', { name: '输入研究问题' })
     fireEvent.change(input, { target: { value: '需要验证模型' } })
     expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()

@@ -98,6 +98,7 @@ urlpatterns = [
     path('chatgpt-subscription/connections/<uuid:connection_id>/models/', subscription_views.ChatGPTSubscriptionModelsView.as_view(), name='chatgpt-subscription-models'),
     path('chatgpt-subscription/connections/<uuid:connection_id>/activate/', subscription_views.ChatGPTSubscriptionActivateView.as_view(), name='chatgpt-subscription-activate'),
     path('chatgpt-subscription/connections/<uuid:connection_id>/select-model/', subscription_views.ChatGPTSubscriptionSelectModelView.as_view(), name='chatgpt-subscription-select-model'),
+    path('chatgpt-subscription/connections/<uuid:connection_id>/research-probe/', subscription_views.ChatGPTSubscriptionResearchProbeView.as_view(), name='chatgpt-subscription-research-probe'),
     path('chatgpt-subscription/connections/<uuid:connection_id>/', subscription_views.ChatGPTSubscriptionDisconnectView.as_view(), name='chatgpt-subscription-disconnect'),
     path('chatgpt-subscription/jobs/<uuid:job_id>/', subscription_views.ChatGPTTranslationTaskView.as_view(), name='chatgpt-subscription-translation-job'),
     path('chatgpt-subscription/jobs/<uuid:job_id>/cancel/', subscription_views.ChatGPTTranslationTaskCancelView.as_view(), name='chatgpt-subscription-translation-job-cancel'),

@@ -108,27 +108,26 @@ RESEARCH_SYSTEM_PROMPT = """\
 def run_agent_loop(
     session, user_query: str, on_event: Callable, local_only: bool = False,
     execution_guard=None, persist_completion=None, persist_tool_result=None,
-    user=None, clients=None, byok_snapshot=None,
+    user=None, clients=None, execution_snapshot=None,
 ):
     """Run the research agent with optional worker fences and durable writes."""
     guard = execution_guard or (lambda: None)
-    if byok_snapshot is not None and clients is not None:
-        from .byok_execution import ResearchBYOKError
-        raise ResearchBYOKError('authorization_changed')
-    if byok_snapshot is None and clients is None:
+    if execution_snapshot is not None and clients is not None:
+        from .execution import ResearchExecutionError
+        raise ResearchExecutionError('authorization_changed', '研究模型授权记录已变化。')
+    if execution_snapshot is None and clients is None:
         if user is None:
             on_event('error', {'message': '缺少个人 AI 授权上下文'})
             return
-        else:
-            from api.services.ai_execution import (
-                PersonalAIUnavailable,
-                personal_clients_for_user,
-            )
-            try:
-                clients = personal_clients_for_user(user)
-            except PersonalAIUnavailable:
-                on_event('error', {'message': '个人模型配置不可用，请前往设置重新配置'})
-                return
+        from api.services.ai_execution import (
+            PersonalAIUnavailable,
+            personal_clients_for_user,
+        )
+        try:
+            clients = personal_clients_for_user(user)
+        except PersonalAIUnavailable:
+            on_event('error', {'message': '个人模型配置不可用，请前往设置重新配置'})
+            return
         if not clients:
             on_event('error', {'message': '请先在设置中配置自己的模型 API Key'})
             return
@@ -141,9 +140,9 @@ def run_agent_loop(
 
     from .access import require_session_evidence
     require_session_evidence(session, user)
-    if byok_snapshot is not None and session.native_continuation:
-        from .byok_execution import native_messages
-        messages = native_messages(session, byok_snapshot)
+    if execution_snapshot is not None and session.native_continuation:
+        from .execution import native_messages
+        messages = native_messages(session, execution_snapshot)
     else:
         messages = list(session.messages)  # Legacy history remains readable
     evidence_links = history_evidence_links(messages)
@@ -172,10 +171,10 @@ def run_agent_loop(
         on_event('thinking', {'iteration': iteration})
 
         # Call LLM with tools
-        if byok_snapshot is not None:
-            from .byok_execution import call_model_once, validate_tool_batch
+        if execution_snapshot is not None:
+            from .execution import call_model_once, validate_tool_batch
             response = call_model_once(
-                byok_snapshot, owner_id=user.pk, messages=messages, tools=available_tools,
+                execution_snapshot, owner_id=user.pk, messages=messages, tools=available_tools,
                 execution_guard=guard,
             )
         else:
@@ -192,23 +191,25 @@ def run_agent_loop(
 
         assistant_message = response.choices[0].message
         raw_tool_calls = getattr(assistant_message, 'tool_calls', None) or []
-        byok_calls = None
-        if byok_snapshot is not None and raw_tool_calls:
+        authorized_calls = None
+        if execution_snapshot is not None and raw_tool_calls:
             # Validate the whole provider batch before the first event or tool side effect.
-            byok_calls = validate_tool_batch(raw_tool_calls, available_tools)
-        byok_args_by_id = {
-            call['id']: call for call in (byok_calls or [])
+            authorized_calls = validate_tool_batch(raw_tool_calls, available_tools)
+        authorized_args_by_id = {
+            call['id']: call for call in (authorized_calls or [])
         }
 
         # Check for tool calls
         if hasattr(assistant_message, 'tool_calls') and assistant_message.tool_calls:
             # Serialize the assistant message with tool_calls for history
-            msg_dict = _serialize_assistant_message(assistant_message, native=byok_snapshot is not None)
+            msg_dict = _serialize_assistant_message(
+                assistant_message, native=execution_snapshot is not None,
+            )
             messages.append(msg_dict)
 
             for tool_call in assistant_message.tool_calls:
-                if byok_snapshot is not None:
-                    validated_call = byok_args_by_id[tool_call.id]
+                if execution_snapshot is not None:
+                    validated_call = authorized_args_by_id[tool_call.id]
                     fn_name = validated_call['name']
                     fn_args = validated_call['arguments']
                     call_id = validated_call['id']
@@ -237,11 +238,11 @@ def run_agent_loop(
                     }
                 result = execute_tool(fn_name, fn_args, session=session, user=user, **tool_kwargs)
                 guard()
-                if byok_snapshot is not None and (
+                if execution_snapshot is not None and (
                     not isinstance(result, dict) or 'error' in result
                 ):
-                    from .byok_execution import ResearchBYOKError
-                    raise ResearchBYOKError('tool_failed')
+                    from .execution import ResearchExecutionError
+                    raise ResearchExecutionError('tool_failed', '研究工具未能安全完成，研究报告未保存。')
                 evidence_links.update(evidence_links_for_tool(fn_name, result))
 
                 # Build a brief summary for the frontend
@@ -279,8 +280,8 @@ def run_agent_loop(
             on_event('text_delta', {'text': final_text})
 
             final_message = {'role': 'assistant', 'content': final_text}
-            if byok_snapshot is not None:
-                from .byok_execution import preserve_native_fields
+            if execution_snapshot is not None:
+                from .execution import preserve_native_fields
                 preserve_native_fields(assistant_message, final_message)
             messages.append(final_message)
 
