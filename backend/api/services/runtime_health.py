@@ -108,13 +108,13 @@ def _channel_worker_check() -> dict[str, object]:
 def _search_index_check() -> dict[str, object]:
     configured = os.environ.get('SEARCH_INDEX_ENABLED')
     environment_enabled = configured is None or configured.strip().lower() in {'1', 'true', 'yes', 'on'}
-    if not environment_enabled:
-        return _check(enabled=False, ready=False)
     try:
         index_settings = SearchIndexSettings.objects.filter(pk=1).first()
     except Exception:
         return _check(enabled=True, ready=False, code='query_failed')
     if index_settings is None:
+        if not environment_enabled:
+            return _check(enabled=False, ready=False)
         return _check(enabled=True, ready=False, code='settings_missing')
     if not index_settings.enabled:
         return _check(enabled=False, ready=False)

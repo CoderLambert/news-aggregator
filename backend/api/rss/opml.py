@@ -33,6 +33,34 @@ class TooLarge(APIException):
     default_code = 'too_large'
 
 
+_GROUP_PATH_PREFIX = 'opml-path:'
+_GROUP_LABEL_PREFIX = 'opml-label:'
+
+
+def _group_path_key(path):
+    parts = tuple(str(part)[:160] for part in path if str(part))
+    if len(parts) == 1 and not parts[0].startswith((_GROUP_PATH_PREFIX, _GROUP_LABEL_PREFIX)):
+        return parts[0]
+    if len(parts) == 1:
+        return _GROUP_LABEL_PREFIX + json.dumps(parts[0], ensure_ascii=False, separators=(',', ':'))
+    return _GROUP_PATH_PREFIX + json.dumps(parts, ensure_ascii=False, separators=(',', ':'))
+
+
+def _group_path_parts(key):
+    try:
+        if key.startswith(_GROUP_PATH_PREFIX):
+            value = json.loads(key[len(_GROUP_PATH_PREFIX):])
+            if isinstance(value, list) and value and all(isinstance(part, str) and part for part in value):
+                return tuple(value)
+        elif key.startswith(_GROUP_LABEL_PREFIX):
+            value = json.loads(key[len(_GROUP_LABEL_PREFIX):])
+            if isinstance(value, str) and value:
+                return (value,)
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return (key,)
+
+
 def parse_opml(raw):
     # Imports stay local: the lightweight sync worker never imports XML libraries.
     from defusedxml.ElementTree import fromstring
@@ -61,7 +89,7 @@ def parse_opml(raw):
         raise ValidationError('OPML 须包含1–500个订阅。')
     rows, urls = [], {}
     for feed in feeds:
-        groups = sorted({' / '.join(path)[:160] for path in feed.get('categories', []) if path})[:100]
+        groups = sorted({_group_path_key(path) for path in feed.get('categories', []) if path})[:100]
         try:
             url = canonicalize_feed_url(feed.get('url', ''))
         except OperationError as exc:
@@ -136,15 +164,19 @@ def batch_data(batch, *, include_items=True):
               'counts': dict(Counter(item['status'] for item in items)), 'total': len(items)}
     if include_items:
         labels = sorted({group for item in items for group in item['groups']})
+        group_paths = {key: _group_path_parts(key) for key in labels}
         owned_paths = {
-            f'{group.root.name} / {group.name}': group.pk
+            _group_path_key((group.root.name, group.name)): group.pk
             for group in ChannelGroup.objects.filter(
                 user=batch.user,
             ).select_related('root')
         }
         result.update(
-            items=items, groups=labels,
-            group_matches={label: owned_paths[label] for label in labels if label in owned_paths},
+            items=items,
+            groups=labels,
+            group_labels={key: ' / '.join(group_paths[key]) for key in labels},
+            group_names={key: group_paths[key][-1] for key in labels},
+            group_matches={key: owned_paths[key] for key in labels if key in owned_paths},
         )
     return result
 

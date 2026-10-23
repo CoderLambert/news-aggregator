@@ -116,6 +116,23 @@ def test_hierarchy_apply_is_atomic_idempotent_and_cas_undo_reports_skips():
     assert [change['undo_status'] for change in undone.applied_changes] == ['restored', 'skipped']
     assert undo_proposal(user, proposal.pk).status == 'undone'
 
+def test_hierarchy_undo_skips_a_move_when_its_original_root_was_deleted():
+    user, original, destination, first, second, _ = hierarchy_example()
+    row = {
+        'root_id': destination.pk, 'root_name': None,
+        'group_ids': [first.pk], 'reason': '技术归并',
+    }
+    proposal = ready_proposal(user, [row])
+    apply_proposal(user, proposal.pk, {'rows': [row]})
+    second.delete()
+    original.delete()
+
+    undone = undo_proposal(user, proposal.pk)
+
+    first.refresh_from_db()
+    assert first.root_id == destination.pk
+    assert undone.applied_changes[0]['undo_status'] == 'skipped'
+
 
 def test_hierarchy_snapshot_stales_on_structure_membership_and_evidence_but_not_unrelated_subscription():
     user, _, destination, first, _, subscription = hierarchy_example()

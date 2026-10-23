@@ -163,6 +163,26 @@ it('reviews AI-proposed new groups and creates them through one bulk payload', a
     source_id: 1, group_ids: [], new_group_paths: [{ root_id: 3, root_name: null, name: 'AI 工程' }],
   }] }))
 })
+it('blocks an assignment that would exceed the limit after existing memberships are counted', async () => {
+  const fullRoots = [{ ...roots[0], child_count: 4 }]
+  const fullGroups = [
+    groups[0],
+    { ...groups[0], id: 9, name: '后端开发', source_ids: [1] },
+    { ...groups[0], id: 10, name: '产品设计', source_ids: [1] },
+    { ...groups[0], id: 11, name: '候选分组', source_ids: [] },
+  ]
+  const overLimit = { ...proposal, result: [{ ...proposal.result[0], group_ids: [11] }] }
+  handler = (path, options) => path.split('?')[0].endsWith('/proposals/') && !options?.method ? page([overLimit])
+    : path.endsWith('/p1/') ? overLimit : defaults(path, options)
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }); clients.push(client)
+  render(<QueryClientProvider client={client}><MemoryRouter>
+    <ExistingGroupOrganizer viewer={1} initialConfig={config} roots={fullRoots} groups={fullGroups}
+      subscriptions={[{ id: 1, groupIds: [8, 9, 10] }]} />
+  </MemoryRouter></QueryClientProvider>)
+  fireEvent.click(await screen.findByRole('button', { name: '查看建议' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: '取消任务' })).toBeEnabled())
+  expect(screen.getByRole('button', { name: '确认并批量应用' })).toBeDisabled()
+})
 it('requires new explicit saved-model consent for unattended AI and never saves by toggling', async () => {
   await setup()
   fireEvent.click(screen.getByRole('checkbox', { name: '后台 AI 生成待确认建议' }))

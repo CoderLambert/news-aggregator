@@ -122,6 +122,24 @@ def test_confirm_rejects_more_than_three_child_groups_before_any_write(people):
     assert not RssImportItem.objects.exclude(status='preview').exists()
 
 
+def test_nested_paths_with_delimiters_match_distinct_owned_groups(people):
+    a, _ = people
+    first_root = ChannelGroupRoot.objects.create(user=a, name='A / B')
+    first = ChannelGroup.objects.create(user=a, root=first_root, name='C')
+    second_root = ChannelGroupRoot.objects.create(user=a, name='A')
+    second = ChannelGroup.objects.create(user=a, root=second_root, name='B / C')
+    raw = b'''<opml><body>
+      <outline text="A / B"><outline text="C"><outline type="rss" text="One" xmlUrl="https://one.example/feed"/></outline></outline>
+      <outline text="A"><outline text="B / C"><outline type="rss" text="Two" xmlUrl="https://two.example/feed"/></outline></outline>
+    </body></opml>'''
+
+    result = preview(a, raw)
+
+    assert result.status_code == 201
+    assert len(result.data['group_matches']) == 2
+    assert set(result.data['group_matches'].values()) == {first.pk, second.pk}
+    assert set(result.data['group_labels'].values()) == {'A / B / C'}
+
 
 def test_partial_failure_retries_only_failed_item_and_never_unknown(people):
     a, _ = people
@@ -171,9 +189,11 @@ def test_personal_multigroup_export_roundtrip_preserves_relations(people):
     assert len(parse_opml(exported.content)) == 2
     assert b'example.com' not in client(b).get('/api/me/rss-subscriptions/export/').content
     roundtrip = preview(a, exported.content)
-    assert roundtrip.data['group_matches'] == {
-        'Imported / Reading': ChannelGroup.objects.get(user=a, name='Reading').pk,
-        'Imported / Tech': ChannelGroup.objects.get(user=a, name='Tech').pk,
+    assert set(roundtrip.data['group_matches'].values()) == set(
+        ChannelGroup.objects.filter(user=a).values_list('pk', flat=True)
+    )
+    assert set(roundtrip.data['group_labels'].values()) == {
+        'Imported / Reading', 'Imported / Tech',
     }
     client(a).post('/api/me/rss-imports/confirm/', confirmation(roundtrip, group_map=roundtrip.data['group_matches']), format='json')
     process_imports()

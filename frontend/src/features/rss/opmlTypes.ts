@@ -6,7 +6,10 @@ export interface ImportSummary {
   id: string; status: string; filename: string; file_size: number; file_available: boolean; created_at: string
   removed_at: string | null; removed_count: number; paused?: boolean; cancelled_at?: string | null; duplicate_count?: number; outcomes?: Record<string, number>; counts: Record<string, number>; total: number
 }
-export interface ImportBatch extends ImportSummary { preview_token?: string; items: ImportItem[]; groups: string[]; group_matches?: Record<string, number> }
+export interface ImportBatch extends ImportSummary {
+  preview_token?: string; items: ImportItem[]; groups: string[]
+  group_matches?: Record<string, number>; group_labels?: Record<string, string>; group_names?: Record<string, string>
+}
 export const batchKey = (viewer: number, id: string | null) => ['private', 'rss-import', viewer, id] as const
 export const historyKey = (viewer: number) => ['private', 'rss-import-history', viewer] as const
 export function invalidateImportEffects(client: QueryClient, viewer: number) {

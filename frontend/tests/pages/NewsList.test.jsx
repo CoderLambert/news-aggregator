@@ -6,6 +6,7 @@ import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { AuthContext } from '@/context/AuthContext'
 import { usePreferencesStore } from '@/stores/preferences'
 import NewsList from '@/pages/NewsList'
+import NewsScopeBar from '@/components/NewsScopeBar'
 import { CapabilitiesTestProvider } from '../helpers/capabilities'
 import { blockNews, fetchCategories, fetchNews, fetchNewsDetail, fetchSources, unblockNews } from '@/services/api'
 
@@ -159,6 +160,22 @@ describe('NewsList URL and server state', () => {
     expect(screen.getByRole('heading', { name: '最新资讯' })).toHaveClass('sr-only')
     expect(screen.getByText('41')).toBeInTheDocument()
     expect(screen.getByText('篇内容')).toBeInTheDocument()
+  })
+
+  it('does not format child paths until their roots are available', () => {
+    expect(() => render(<MemoryRouter><NewsScopeBar
+      scope="all"
+      groups={[{
+        id: 8, root_id: 4, name: '前端', source_ids: [8], version: 1,
+        created_at: '2026-01-01', updated_at: '2026-01-01',
+      }]}
+      roots={[]}
+      personal
+      accounts
+      onChange={vi.fn()}
+      region="all"
+      onRegionChange={vi.fn()}
+    /></MemoryRouter>)).not.toThrow()
   })
 
   it('fetches the URL-selected page and filters, then updates URL and query when a category changes', async () => {

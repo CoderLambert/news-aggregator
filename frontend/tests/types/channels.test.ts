@@ -11,21 +11,23 @@ describe('channel hierarchy parsers', () => {
     expect(validateHierarchy(roots, groups)).toBe(true)
     expect(channelGroupPath(groups[0], roots)).toBe('技术 / 前端')
   })
-  it('rejects malformed or duplicate roots', () => {
+  it('rejects malformed or exactly duplicate roots while preserving case-distinct backend names', () => {
     for (const value of [
       [{ ...root, id: true }],
       [{ ...root, version: 0 }],
       [{ ...root, name: ' 技术' }],
       [root, { ...root, id: 2, name: '技术' }],
     ]) expect(() => parseRoots(value)).toThrow(TypeError)
+    expect(parseRoots([root, { ...root, id: 2, name: '技术部' }])).toHaveLength(2)
+    expect(parseRoots([{ ...root, name: 'AI' }, { ...root, id: 2, name: 'ai' }])).toHaveLength(2)
   })
-  it('rejects duplicate or excessive membership IDs', () => {
+  it('keeps legacy memberships readable while rejecting duplicate membership IDs', () => {
     expect(() => parseSubscriptions([{
       id: 1, source_id: 11, group_ids: [2, 2], category_id: null, category_version: 0,
     }])).toThrow(TypeError)
-    expect(() => parseSubscriptions([{
+    expect(parseSubscriptions([{
       id: 1, source_id: 11, group_ids: [1, 2, 3, 4], category_id: null, category_version: 0,
-    }])).toThrow(TypeError)
+    }])[0].group_ids).toEqual([1, 2, 3, 4])
     expect(() => parseGroups([{ ...child, source_ids: [11, 11] }])).toThrow(TypeError)
   })
 

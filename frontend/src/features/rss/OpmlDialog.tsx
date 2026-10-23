@@ -93,9 +93,10 @@ function OpmlSession({ viewer, roots, groups, onClose }: OpmlDialogProps) {
   const submitConfirm = () => {
     if (busy || confirm.isError || !preview.data?.preview_token || !selected.length) return
     confirm.mutate({ preview_token: preview.data.preview_token, selected_ids: [...selected],
-      group_map: Object.fromEntries(Object.entries(groupMap).map(([label, value]) => {
-        if (value.startsWith('new:')) return [label, { create: (label.split(' / ').at(-1) ?? label).slice(0, 40), root_id: Number(value.slice(4)) }]
-        return [label, value ? Number(value) : null]
+      group_map: Object.fromEntries(Object.entries(groupMap).map(([key, value]) => {
+        const childName = preview.data?.group_names?.[key] ?? (key.split(' / ').at(-1) ?? key)
+        if (value.startsWith('new:')) return [key, { create: childName.slice(0, 40), root_id: Number(value.slice(4)) }]
+        return [key, value ? Number(value) : null]
       })),
     })
   }
@@ -174,12 +175,16 @@ function OpmlSession({ viewer, roots, groups, onClose }: OpmlDialogProps) {
         <p role="status">共 {batch.items.length} 项 · 可导入 {validItems.length} 项 · 无效 {batch.items.filter(item => item.status === 'invalid').length} 项 · 重复合并 {batch.duplicate_count ?? 0} 项 · 已订阅 {batch.items.filter(item => item.outcome === 'already_subscribed').length} 项 · 已选 {selected.length} 项</p>
         <Button type="button" variant="outline" disabled={busy || confirm.isError || !validItems.length} onClick={() => setSelected(selected.length === validItems.length ? [] : validItems.map(item => item.id))}>{selected.length === validItems.length && validItems.length ? '取消全选' : '全选有效频道'}</Button>
       </div> : <p role="status" aria-live="polite">{batch.status === 'removed' ? `本批次已移除 ${batch.removed_count} 个新增订阅` : `已订阅/接入 ${batch.items.filter(item => item.status === 'succeeded').length} · 失败 ${batch.items.filter(item => item.status === 'failed').length} · 处理中 ${batch.items.filter(item => ['pending', 'queued'].includes(item.status)).length}`}</p>}
-      {!batchId && batch.groups.map(label => <label className="workspace-resolved-choice" key={label}>{label}
-        <NativeSelect aria-label={label + '映射分组'} disabled={busy || confirm.isError} value={groupMap[label] ?? ''} onChange={event => setGroupMap(current => ({ ...current, [label]: event.target.value }))}>
-          <option value="">不加入分组</option>
-          {roots.map(root => <option key={'new:' + root.id} value={'new:' + root.id}>在「{root.name}」下创建「{(label.split(' / ').at(-1) ?? label).slice(0, 40)}」</option>)}
-          {groups.map(group => <option key={group.id} value={group.id}>{channelGroupPath(group, roots)}</option>)}
-        </NativeSelect></label>)}
+      {!batchId && batch.groups.map(key => {
+        const label = batch.group_labels?.[key] ?? key
+        const childName = batch.group_names?.[key] ?? (label.split(' / ').at(-1) ?? label)
+        return <label className="workspace-resolved-choice" key={key}>{label}
+          <NativeSelect aria-label={label + '映射分组'} disabled={busy || confirm.isError} value={groupMap[key] ?? ''} onChange={event => setGroupMap(current => ({ ...current, [key]: event.target.value }))}>
+            <option value="">不加入分组</option>
+            {roots.map(root => <option key={'new:' + root.id} value={'new:' + root.id}>在「{root.name}」下创建「{childName.slice(0, 40)}」</option>)}
+            {groups.map(group => <option key={group.id} value={group.id}>{channelGroupPath(group, roots)}</option>)}
+          </NativeSelect></label>
+      })}
       <ul className="workspace-resolved max-h-[40vh] overflow-y-auto overscroll-contain">{batch.items.map(item => <li key={item.id} className="workspace-resolved-choice">
         {!batchId && <Input className="size-4 shrink-0 accent-primary shadow-none" type="checkbox" aria-label={'导入 ' + (item.title || item.feed_url)} disabled={busy || confirm.isError || item.status === 'invalid' || item.outcome === 'already_subscribed'} checked={selected.includes(item.id)} onChange={event => setSelected(current => event.target.checked ? [...current, item.id] : current.filter(id => id !== item.id))} />}
         <span><strong>{item.title || item.feed_url}</strong><small className="break-all">{item.feed_url}</small><small>{batchId && item.status === 'preview' ? '未选择，未导入' : (item.status === 'succeeded' && item.outcome !== 'already_subscribed' ? '已接入' : importOutcomeText[item.outcome ?? ''] ?? statusText[item.status] ?? '等待确认')}{item.error_code ? ' · ' + (item.error_code === 'throttled' ? (item.status === 'pending' ? '连接名额暂满，等待自动继续' : '连接暂受限，请稍后重试') : item.error_code === 'subscription_limit' ? '已达到订阅数量上限' : item.error_code) : ''}</small>{!!item.duplicate_count && <small>文件内已合并 {item.duplicate_count} 个重复条目</small>}{item.next_attempt && <small>下次自动处理：{new Date(item.next_attempt).toLocaleTimeString('zh-CN')}</small>}</span>

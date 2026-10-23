@@ -40,7 +40,7 @@ function validTimestamp(value: unknown): value is string {
 }
 function assertUnique(rows: Array<{ id: number; name: string }>, label: string) {
   if (new Set(rows.map(row => row.id)).size !== rows.length ||
-      new Set(rows.map(row => row.name.toLocaleLowerCase())).size !== rows.length) {
+      new Set(rows.map(row => row.name)).size !== rows.length) {
     throw new TypeError(`Invalid ${label} uniqueness`)
   }
 }
@@ -61,7 +61,6 @@ export function parseSubscriptions(value: unknown): ChannelSubscription[] {
     if (item.category_id != null && (!Number.isSafeInteger(item.category_id) || (item.category_id as number) <= 0)) throw new TypeError('Invalid category')
     if (item.category_version !== undefined && (!Number.isSafeInteger(item.category_version) || (item.category_version as number) < 0)) throw new TypeError('Invalid category version')
     const groupIds = numberIds(item.group_ids)
-    if (groupIds.length > 3) throw new TypeError('Invalid subscription groups')
     return { id: item.id, source_id: item.source_id, group_ids: groupIds, category_id: item.category_id as number | null | undefined, category_version: (item.category_version as number | undefined) ?? 0 }
   })
 }

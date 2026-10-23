@@ -67,6 +67,18 @@ def test_missing_search_index_settings_is_reported_without_creating_a_row(monkey
     }
     assert not SearchIndexSettings.objects.exists()
 
+@pytest.mark.django_db
+def test_persisted_search_index_enablement_overrides_the_initial_environment_default(monkeypatch):
+    monkeypatch.setenv('SEARCH_INDEX_ENABLED', '0')
+    SearchIndexSettings.objects.create(pk=1, enabled=True, worker_heartbeat_at=None)
+
+    assert runtime_health._search_index_check() == {
+        'enabled': True,
+        'ready': False,
+        'status': 'unavailable',
+        'code': 'heartbeat_unavailable',
+    }
+
 
 def test_channel_worker_uses_bounded_shared_heartbeat_without_cross_namespace_pid_check(tmp_path, monkeypatch):
     heartbeat = tmp_path / 'channel.json'

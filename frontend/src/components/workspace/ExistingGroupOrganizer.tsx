@@ -177,7 +177,7 @@ export default function ExistingGroupOrganizer({ viewer, initialConfig, roots, g
         <p role="status">{proposalStatus[active.data.status] ?? active.data.status}</p>
         {processing && <p>{active.data.engine === 'ai' ? 'AI 正在规划分组' : '任务正在处理'}，任务已保存，可关闭页面并稍后从记录恢复。</p>}
         {active.data.status === 'failed' && <p role="alert">任务未完成，未应用分组。请重新整理或检查模型与频道资料。</p>}
-        {active.data.status === 'ready' && active.data.target === 'groups' && <ExistingAssignments key={active.data.id} proposal={active.data} roots={roots} groups={groups} busy={busy || change.isError || active.isFetching} onApply={assignments => act('apply', { assignments })} />}
+        {active.data.status === 'ready' && active.data.target === 'groups' && <ExistingAssignments key={active.data.id} proposal={active.data} roots={roots} groups={groups} subscriptions={subscriptions} busy={busy || change.isError || active.isFetching} onApply={assignments => act('apply', { assignments })} />}
         {active.data.status === 'ready' && active.data.target !== 'groups' && <p>这是主题预设任务，请在高级整理入口中查看。</p>}
         {['queued', 'running', 'ready'].includes(active.data.status) && <Button type="button" variant="outline" disabled={busy || change.isError || active.isFetching} onClick={() => act('cancel')}>取消任务</Button>}
         {active.data.status === 'applied' && <><p>已新增 {active.data.applied_count} 条分组归属。AI 新建的空分组会保留，避免撤销时误删你后续的调整。</p><Button type="button" variant="outline" disabled={busy || change.isError || active.isFetching} onClick={() => act('undo')}>撤销本次新增归属</Button></>}
@@ -203,8 +203,9 @@ const pathKey = (path: NewGroupPath) => JSON.stringify([path.root_id, path.root_
 const newPathLabel = (path: NewGroupPath, roots: ChannelGroupRoot[]) =>
   `${path.root_id ? roots.find(root => root.id === path.root_id)?.name ?? '未知根分类' : path.root_name} / ${path.name}`
 
-function ExistingAssignments({ proposal, roots, groups, busy, onApply }: {
-  proposal: Proposal; roots: ChannelGroupRoot[]; groups: ChannelGroup[]; busy: boolean; onApply: (assignments: Assignment[]) => void
+function ExistingAssignments({ proposal, roots, groups, subscriptions, busy, onApply }: {
+  proposal: Proposal; roots: ChannelGroupRoot[]; groups: ChannelGroup[]; subscriptions: Array<{ id: number; groupIds: number[] }>
+  busy: boolean; onApply: (assignments: Assignment[]) => void
 }) {
   const editorId = useId()
   const [expanded, setExpanded] = useState<number | null>(null)
@@ -220,6 +221,10 @@ function ExistingAssignments({ proposal, roots, groups, busy, onApply }: {
     group_ids: item.group_ids.filter(id => groups.some(group => group.id === id)),
     new_group_paths: item.new_group_paths.filter(path => proposedPaths.some(candidate => pathKey(candidate) === pathKey(path))),
   })).filter(item => item.group_ids.length || item.new_group_paths.length)
+  const existingBySource = new Map(subscriptions.map(item => [item.id, new Set(item.groupIds)]))
+  const membershipCount = (assignment: Assignment) =>
+    new Set([...(existingBySource.get(assignment.source_id) ?? []), ...assignment.group_ids]).size + assignment.new_group_paths.length
+  const overLimit = selected.some(item => membershipCount(item) > 3)
   return <>
     <p>建议尚未写入。已为 {selected.length} 个频道规划 {new Set(selected.flatMap(item => [...item.group_ids.map(String), ...item.new_group_paths.map(pathKey)])).size} 个子分组；确认一次才会批量应用。</p>
     {proposedPaths.length > 0 && <p className="workspace-caption">AI 建议新建：{proposedPaths.map(path => newPathLabel(path, roots)).join('、')}。建议中的根分类和子分组在确认前都不会创建。</p>}
@@ -227,6 +232,8 @@ function ExistingAssignments({ proposal, roots, groups, busy, onApply }: {
       const row = assignments.find(assignment => assignment.source_id === item.source_id)
       const existingNames = (row?.group_ids ?? []).map(id => groups.find(group => group.id === id)).filter((group): group is ChannelGroup => !!group).map(group => channelGroupPath(group, roots))
       const newPaths = row?.new_group_paths ?? []
+      const existingIds = existingBySource.get(item.source_id) ?? new Set<number>()
+      const count = row ? membershipCount(row) : existingIds.size
       const assignedNames = [...existingNames, ...newPaths.map(path => newPathLabel(path, roots))]
       const unmatched = assignedNames.length === 0
       const status = unmatched ? '未匹配' : proposal.engine === 'ai' ? '待确认 AI 建议' : item.needs_review ? '待分析' : '已自动归类'
@@ -240,13 +247,13 @@ function ExistingAssignments({ proposal, roots, groups, busy, onApply }: {
           aria-controls={editorId + item.source_id} aria-expanded={expanded === item.source_id}
           onClick={() => setExpanded(current => current === item.source_id ? null : item.source_id)}>调整建议分组</Button>
         {expanded === item.source_id && <div id={editorId + item.source_id} className="grid max-h-72 gap-3 overflow-y-auto">
-          {groups.length > 0 && <fieldset><legend className="mb-2 text-sm font-medium">已有子分组</legend><div className="flex flex-wrap gap-3">{groups.map(group => <label key={group.id} className="workspace-check break-words"><Input className="size-4 shrink-0" type="checkbox" disabled={busy || (!(row?.group_ids.includes(group.id)) && (row?.group_ids.length ?? 0) + (row?.new_group_paths.length ?? 0) >= 3)} checked={row?.group_ids.includes(group.id) ?? false}
+          {groups.length > 0 && <fieldset><legend className="mb-2 text-sm font-medium">已有子分组</legend><div className="flex flex-wrap gap-3">{groups.map(group => <label key={group.id} className="workspace-check break-words"><Input className="size-4 shrink-0" type="checkbox" disabled={busy || (!(row?.group_ids.includes(group.id)) && !existingIds.has(group.id) && count >= 3)} checked={row?.group_ids.includes(group.id) ?? false}
             onChange={event => setAssignments(current => current.map(assignment => assignment.source_id === item.source_id ? { ...assignment, group_ids: event.target.checked ? [...assignment.group_ids, group.id] : assignment.group_ids.filter(id => id !== group.id) } : assignment))} />{channelGroupPath(group, roots)}</label>)}</div></fieldset>}
-          {proposedPaths.length > 0 && <fieldset><legend className="mb-2 text-sm font-medium">AI 建议新建路径</legend><div className="flex flex-wrap gap-3">{proposedPaths.map(path => <label key={pathKey(path)} className="workspace-check break-words"><Input className="size-4 shrink-0" type="checkbox" disabled={busy || (!(row?.new_group_paths.some(value => pathKey(value) === pathKey(path))) && (row?.group_ids.length ?? 0) + (row?.new_group_paths.length ?? 0) >= 3)} checked={row?.new_group_paths.some(value => pathKey(value) === pathKey(path)) ?? false}
+          {proposedPaths.length > 0 && <fieldset><legend className="mb-2 text-sm font-medium">AI 建议新建路径</legend><div className="flex flex-wrap gap-3">{proposedPaths.map(path => <label key={pathKey(path)} className="workspace-check break-words"><Input className="size-4 shrink-0" type="checkbox" disabled={busy || (!(row?.new_group_paths.some(value => pathKey(value) === pathKey(path))) && count >= 3)} checked={row?.new_group_paths.some(value => pathKey(value) === pathKey(path)) ?? false}
             onChange={event => setAssignments(current => current.map(assignment => assignment.source_id === item.source_id ? { ...assignment, new_group_paths: event.target.checked ? [...assignment.new_group_paths, path] : assignment.new_group_paths.filter(value => pathKey(value) !== pathKey(path)) } : assignment))} />新建：{newPathLabel(path, roots)}</label>)}</div></fieldset>}
         </div>}
       </fieldset>
     })}
-    <div className="workspace-preview-actions"><span>将处理 {selected.length} 个频道；只新增子分组与归属。</span><Button type="button" disabled={busy || !selected.length} onClick={() => onApply(selected)}>确认并批量应用</Button></div>
+    <div className="workspace-preview-actions"><span>{overLimit ? '部分频道已有三个分组，请取消额外建议后再应用。' : `将处理 ${selected.length} 个频道；只新增子分组与归属。`}</span><Button type="button" disabled={busy || !selected.length || overLimit} onClick={() => onApply(selected)}>确认并批量应用</Button></div>
   </>
 }

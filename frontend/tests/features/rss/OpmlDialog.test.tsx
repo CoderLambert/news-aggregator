@@ -37,8 +37,15 @@ describe('personal OPML workflow', () => {
     await waitFor(() => expect(request).toHaveBeenCalledWith('/me/rss-imports/confirm/', expect.objectContaining({ viewer: 12,
       body: { preview_token: 'signed-token', selected_ids: ['one'], group_map: { Tech: 7 } } })))
   })
-  it('preselects an exact nested path and keeps existing-child mappings numeric', async () => {
-    const nested = { ...batch, groups: ['Personal / Mine'], group_matches: { 'Personal / Mine': 7 } }
+  it('preselects an exact nested path and keeps its opaque identity out of the label', async () => {
+    const key = 'opml-path:["Personal","Mine"]'
+    const nested = {
+      ...batch,
+      groups: [key],
+      group_labels: { [key]: 'Personal / Mine' },
+      group_names: { [key]: 'Mine' },
+      group_matches: { [key]: 7 },
+    }
     request.mockResolvedValueOnce(nested).mockResolvedValueOnce({ ...nested, status: 'confirmed' })
     setup()
     fireEvent.change(screen.getByLabelText('OPML 文件'), { target: { files: [new File(['<opml/>'], 'nested.opml')] } })
@@ -46,7 +53,7 @@ describe('personal OPML workflow', () => {
     expect(await screen.findByRole('combobox', { name: 'Personal / Mine映射分组' })).toHaveValue('7')
     fireEvent.click(screen.getByRole('button', { name: '确认导入 1 项' }))
     await waitFor(() => expect(request).toHaveBeenCalledWith('/me/rss-imports/confirm/', expect.objectContaining({
-      body: { preview_token: 'signed-token', selected_ids: ['one'], group_map: { 'Personal / Mine': 7 } },
+      body: { preview_token: 'signed-token', selected_ids: ['one'], group_map: { [key]: 7 } },
     })))
   })
 

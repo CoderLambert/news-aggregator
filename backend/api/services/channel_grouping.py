@@ -505,7 +505,10 @@ def undo_proposal(user, proposal_id):
                 pk=change['child_id'], user=user,
                 root_id=change['after_root_id'], version=change['after_version'],
             ).first()
-            if group is None:
+            original_root_exists = ChannelGroupRoot.objects.filter(
+                pk=change['before_root_id'], user=user,
+            ).exists()
+            if group is None or not original_root_exists:
                 changes.append({**change, 'undo_status': 'skipped'})
                 continue
             group.root_id = change['before_root_id']
