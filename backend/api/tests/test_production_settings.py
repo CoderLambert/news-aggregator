@@ -171,6 +171,28 @@ print(json.dumps({'debug': s.DEBUG, 'hosts': s.ALLOWED_HOSTS,
     }
 
 
+def test_development_chatgpt_handoff_allows_only_explicit_loopback_csrf_origins(tmp_path):
+    env = _base_env(tmp_path)
+    env.pop("DJANGO_SECRET_KEY", None)
+    env.pop("WAITRESS_TRUSTED_PROXY", None)
+    env.pop("DJANGO_DEBUG", None)
+    env["DJANGO_ENV"] = "development"
+    env["DJANGO_CSRF_TRUSTED_ORIGINS"] = ",".join((
+        "http://127.0.0.1:19527",
+        "http://localhost:19527",
+        "https://127.0.0.1:19528",
+        "http://127.0.0.1.evil:19529",
+    ))
+    script = """import json, newsaggregator.settings as s
+print(json.dumps(s.CHATGPT_HANDOFF_ALLOWED_ORIGINS))"""
+    result = subprocess.run(
+        [sys.executable, "-c", script], cwd=REPO_ROOT, env=env,
+        text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == ["http://127.0.0.1:19527"]
+
+
 @pytest.mark.parametrize(
     ("name", "value"),
     [

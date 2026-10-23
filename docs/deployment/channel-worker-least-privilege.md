@@ -9,10 +9,11 @@ release gates. No new task broker or external platform is introduced.
 ## Required configuration
 Use the same production Compose project, pinned NEWSHUB_IMAGE, and explicit
 `--env-file` as the existing deployment scripts. The worker needs
-DJANGO_SECRET_KEY, WAITRESS_TRUSTED_PROXY, database path, site mode and AI
-enablement, the provider credential encryption key, and the configured
-loopback-only LiteLLM gateway URL/project secret. It must not receive the
-web server's generic env_file or Chroma/TTS/runtime/model-cache volumes.
+DJANGO_SECRET_KEY, WAITRESS_TRUSTED_PROXY, database path, site mode,
+`PUBLIC_AI_ENABLED` and `AI_BYOK_ENABLED`, the provider credential encryption
+key, and the configured loopback-only LiteLLM gateway URL/project secret. It
+must not receive the web server's generic env_file or
+Chroma/TTS/runtime/model-cache volumes.
 
 The gateway adapter **requires a loopback IP URL** by design. Therefore
 `network_mode: host` remains explicitly necessary until an approved

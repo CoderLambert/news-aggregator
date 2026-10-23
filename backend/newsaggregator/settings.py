@@ -16,7 +16,7 @@ from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
 
-from .runtime_config import parse_runtime_config, resolve_django_environment
+from .runtime_config import chatgpt_handoff_origins, parse_runtime_config, resolve_django_environment
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -252,7 +252,7 @@ CORS_ALLOW_CREDENTIALS = DJANGO_ENV != 'production'
 
 # CSRF & Session — SPA served from same origin (Django :9527) or Vite dev proxy
 CSRF_TRUSTED_ORIGINS = list(_RUNTIME_CONFIG.csrf_trusted_origins)
-CHATGPT_HANDOFF_ALLOWED_ORIGINS = ['http://127.0.0.1:5173', 'http://127.0.0.1:9527']
+CHATGPT_HANDOFF_ALLOWED_ORIGINS = list(chatgpt_handoff_origins(tuple(CSRF_TRUSTED_ORIGINS)))
 SESSION_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SECURE = DJANGO_ENV == 'production'

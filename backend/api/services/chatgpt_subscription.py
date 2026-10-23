@@ -271,7 +271,9 @@ def _assert_attempt_protocol(attempt: ChatGPTAuthAttempt) -> dict:
 def _validate_handoff_origin(origin: str) -> str:
     allowed_origins = getattr(settings, 'CHATGPT_HANDOFF_ALLOWED_ORIGINS', ())
     if not isinstance(origin, str) or not origin or origin not in allowed_origins:
-        raise SubscriptionError('请从 http://127.0.0.1:5173 打开本地应用，再开始订阅连接。')
+        expected = '、'.join(allowed_origins)
+        detail = f'请从已配置的本地应用地址（{expected}）打开，再开始订阅连接。' if expected else '当前部署未配置可用于订阅连接的本地应用地址。'
+        raise SubscriptionError(detail)
     return origin
 
 

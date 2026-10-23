@@ -499,6 +499,7 @@ def test_channel_worker_minimal_permissions_and_real_gateway_compatibility():
     assert environment['DJANGO_ENV'] == 'production'
     assert environment['PUBLIC_SITE_MODE'] == '${PUBLIC_SITE_MODE:-read_only}'
     assert environment['PUBLIC_AI_ENABLED'] == '${PUBLIC_AI_ENABLED:-0}'
+    assert environment['AI_BYOK_ENABLED'] == '${AI_BYOK_ENABLED:-0}'
     assert environment['AI_BYOK_GATEWAY_PROJECT_KEY_FILE'] == '/run/secrets/ai_byok_gateway_project_key'
     assert environment['CHANNEL_WORKER_HEARTBEAT'].startswith('/var/lib/newshub/logs/')
     app_health_environment = overlay['services']['app']['environment']

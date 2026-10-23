@@ -7,6 +7,7 @@ import os
 import secrets
 from pathlib import Path
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 from typing import Mapping
 
 from django.core.exceptions import ImproperlyConfigured
@@ -94,6 +95,28 @@ def _strict_comma_separated(value: str) -> tuple[str, ...]:
     if any(not part for part in parts):
         return ()
     return parts
+
+
+def chatgpt_handoff_origins(csrf_origins: tuple[str, ...]) -> tuple[str, ...]:
+    """Keep OAuth handoff on explicitly trusted, exact IPv4 loopback origins."""
+    allowed = []
+    for origin in csrf_origins:
+        try:
+            parsed = urlsplit(origin)
+            port = parsed.port
+        except (TypeError, ValueError):
+            continue
+        if (
+            parsed.scheme == "http"
+            and parsed.hostname == "127.0.0.1"
+            and port is not None
+            and parsed.netloc == f"127.0.0.1:{port}"
+            and not parsed.path
+            and not parsed.query
+            and not parsed.fragment
+        ):
+            allowed.append(origin)
+    return tuple(dict.fromkeys(allowed))
 
 
 def _enum(
