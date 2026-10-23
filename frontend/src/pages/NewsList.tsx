@@ -169,6 +169,9 @@ export default function NewsList() {
           onChange={(value) => updateParams({ search: value.trim() || null, page: null }, true)}
           onModeChange={(value) => updateParams({ mode: value, page: null })}
         />
+        <p className="mt-2 break-words text-xs text-muted-foreground" aria-label="当前搜索范围">搜索范围：{reading.scope === 'group'
+          ? (reading.groups.data?.find(group => group.id === reading.groupId)?.name ?? '当前分组')
+          : reading.scope === 'subscribed' ? '我的订阅' : reading.scope === 'ungrouped' ? '未加入分组' : '全部资讯'}</p>
         {!semanticSearchEnabled && <p className="mt-1 text-xs text-muted-foreground" role="status">当前仅支持关键词搜索。</p>}
       </div>
 
@@ -212,6 +215,8 @@ export default function NewsList() {
       {!initialLoading && !newsQuery.isError && data?.results.length === 0 && (
         <div className="py-20 text-center text-muted-foreground">
           <p className="text-lg">{lang === 'en' ? 'No results found' : '未找到结果'}</p>
+          {reading.enabled && reading.scope === 'group' && search.trim() && <Button type="button" variant="outline" className="mt-3"
+            onClick={() => updateParams({ scope: 'subscribed', group_id: null, page: null })}>搜索全部订阅</Button>}
           {reading.scope !== 'all' && reading.sourceIds?.length === 0 ? (
             <Link to="/channels" className="mt-3 inline-block text-primary underline">{reading.scope === 'group' ? '添加频道' : '选择频道'}</Link>
           ) : activeFilterCount > 0 ? (

@@ -18,7 +18,7 @@ from api.rss.access import authorized_news, authorized_sources, news_in_sources,
 from api.models import Source, News, NewsSourceItem, BlockedNews, ChannelGroup, ChannelSubscription
 from api.channel_views import PersonalChannelsView, ChannelSubscriptionsView, ChannelGroupDetailView, ids
 from api.smart_channel_models import (SourceTopicProfile, ChannelGroupingConfig, ChannelGroupingProposal,
-    ChannelClassifierSettings, ReadingDay, ChannelIntakeRequest)
+    ChannelClassifierSettings, ReadingDay, ChannelIntakeRequest, SubscriptionGroupingState)
 from api.services.channel_topics import TOPICS, PRESETS, TOPIC_MAP, channel_articles, profile_data, base_profile
 from api.services.channel_grouping import (lock_user, config_data, credential_fingerprint, make_proposal, apply_proposal,
     undo_proposal, proposal_data, validated_mode, validated_topics, GroupingConflict, mark_manual, process_subscription)
@@ -163,17 +163,44 @@ class IntakeView(PrivateWorkspaceView):
         return Response({'id': item.pk, 'url': item.url, 'status': item.status}, status=201 if created else 200)
 
 
+
 class GroupingConfigView(PrivateWorkspaceView):
     def get(self, request):
         data = config_data(request.user)
         data['ai_available'] = settings.PUBLIC_AI_ENABLED and getattr(settings, 'AI_BYOK_ENABLED', False) and bool(credential_fingerprint(request.user))
+        cfg = ChannelGroupingConfig.objects.filter(user=request.user).first()
+        data['error_code'] = cfg.last_error_code if cfg else ''
+        states = SubscriptionGroupingState.objects.filter(subscription__user=request.user)
+        data['summary'] = {status: states.filter(status=status).count() for status in ('pending', 'suggested', 'applied')}
         return Response(data)
     @transaction.atomic
     def patch(self, request):
         lock_user(request.user)
         cfg, _ = ChannelGroupingConfig.objects.get_or_create(user=request.user)
+        before = config_data(request.user)
+        old_snapshot = cfg.execution_snapshot
         cfg.mode = validated_mode(request.data.get('mode', cfg.mode))
-        bindings = request.data.get('bindings', cfg.bindings)
+        for key in ('match_existing', 'ai_enabled'):
+            if key in request.data:
+                if type(request.data[key]) is not bool:
+                    raise ValidationError('整理开关必须为布尔值。')
+                setattr(cfg, key, request.data[key])
+        limit = request.data.get('daily_limit', cfg.daily_limit)
+        if type(limit) is not int or not 1 <= limit <= 20:
+            raise ValidationError('每日 AI 上限应为 1–20。')
+        cfg.daily_limit = limit
+        if cfg.ai_enabled and (not before['ai_enabled'] or 'model_config_id' in request.data):
+            if request.data.get('consent') is not True or not isinstance(request.data.get('model_config_id'), str):
+                raise ValidationError('开启后台 AI 需要明确同意并选择已验证的个人模型。')
+            from api.services.channel_model import capture_model, ClassificationAuthorizationChanged
+            try:
+                cfg.execution_snapshot = capture_model(request.user, scope='personal', model_config_id=request.data['model_config_id'])
+            except ClassificationAuthorizationChanged:
+                raise ValidationError('个人模型授权不可用，请重新选择。') from None
+            cfg.ai_model_id = request.data['model_config_id']
+        if not cfg.ai_enabled:
+            cfg.execution_snapshot, cfg.ai_model_id = {}, None
+        bindings = request.data.get('bindings', before['bindings'])
         if not isinstance(bindings, dict) or len(bindings) > len(TOPIC_MAP):
             raise ValidationError('无效的主题绑定。')
         for key, group_id in bindings.items():
@@ -182,16 +209,39 @@ class GroupingConfigView(PrivateWorkspaceView):
             if not ChannelGroup.objects.filter(pk=group_id, user=request.user).exists():
                 raise NotFound()
         cfg.bindings = bindings
-        cfg.revision += 1
-        cfg.active_since = timezone.now()
+        if cfg.mode != 'off' and (cfg.match_existing or cfg.ai_enabled) and cfg.personal_active_since is None:
+            cfg.personal_active_since = timezone.now()
+        changed = any(getattr(cfg, key) != before[key] for key in ('mode', 'bindings', 'match_existing', 'ai_enabled', 'ai_model_id', 'daily_limit')) or cfg.execution_snapshot != old_snapshot
+        if changed:
+            cfg.revision += 1
+            cfg.scan_cursor = 0
         cfg.save()
+        if changed:
+            ChannelGroupingProposal.objects.filter(user=request.user, background=True, engine='ai', status__in=['queued', 'running']).update(
+                status='cancelled', error_code='configuration_changed', lease_token='', lease_until=None)
         return self.get(request)
 
 
 class ProposalsView(PrivateWorkspaceView):
+    page_size = 30
     def get(self, request):
-        items = ChannelGroupingProposal.objects.filter(user=request.user, public_source__isnull=True)[:30]
-        return Response([proposal_data(item) for item in items])
+        target = request.query_params.get('target')
+        if target is not None and target not in ('groups', 'topics'):
+            raise ValidationError('无效的整理目标。')
+        raw_page = request.query_params.get('page', '1')
+        if len(raw_page) > 5 or not raw_page.isascii() or not raw_page.isdecimal() or not 1 <= int(raw_page) <= 10000:
+            raise ValidationError('页码应为 1–10000 的整数。')
+        page = int(raw_page)
+        items = ChannelGroupingProposal.objects.filter(user=request.user, public_source__isnull=True)
+        if target is not None:
+            items = items.filter(target=target)
+        # The page size is fixed by the server, and the (created_at, id) order is
+        # stable so paging never shows a record twice or skips an older one.
+        offset = (page - 1) * self.page_size
+        results = [proposal_data(item) for item in items.order_by('-created_at', '-id')[offset:offset + self.page_size]]
+        total = items.count()
+        return Response({'results': results, 'page': page, 'page_size': self.page_size,
+                         'count': total, 'has_more': offset + len(results) < total})
     def post(self, request):
         proposal = make_proposal(request.user, request.data)
         return Response(proposal_data(proposal), status=202 if proposal.status == 'queued' else 201)
@@ -215,8 +265,8 @@ class CancelProposalView(PrivateWorkspaceView):
         proposal = get_object_or_404(ChannelGroupingProposal, pk=pk, user=request.user, public_source__isnull=True)
         if proposal.status in {'applied', 'undone'}:
             raise GroupingConflict('已应用的建议请使用撤销。')
-        proposal.status, proposal.lease_token = 'cancelled', ''
-        proposal.save(update_fields=['status', 'lease_token'])
+        proposal.status, proposal.lease_token, proposal.error_code = 'cancelled', '', 'user_cancelled'
+        proposal.save(update_fields=['status', 'lease_token', 'error_code'])
         return Response(proposal_data(proposal))
 
 
@@ -279,9 +329,14 @@ class SmartSubscriptionsView(ChannelSubscriptionsView):
         before = {s.source_id: set(s.groups.values_list('id', flat=True)) for s in ChannelSubscription.objects.filter(user=request.user, source_id__in=source_ids).prefetch_related('groups')}
         response = super().post(request)
         action = request.data.get('action', 'subscribe')
-        if action == 'set_groups':
-            for source_id in source_ids:
-                mark_manual(request.user, source_id, before.get(source_id, set()), set(request.data['group_ids']))
+        if action in {'set_groups', 'add_to_group', 'move_to_group', 'remove_from_group'}:
+            for subscription in ChannelSubscription.objects.filter(user=request.user, source_id__in=source_ids).prefetch_related('groups'):
+                previous = before.get(subscription.source_id, set())
+                after = set(subscription.groups.values_list('pk', flat=True))
+                # Explicit remove of an absent member is still a suppression.
+                if action == 'remove_from_group':
+                    previous = previous | {request.data['group_id']}
+                mark_manual(request.user, subscription.source_id, previous, after)
         if action == 'subscribe':
             for subscription in ChannelSubscription.objects.filter(user=request.user, source_id__in=set(source_ids) - set(before)):
                 try:

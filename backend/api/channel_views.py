@@ -124,6 +124,21 @@ class ChannelSubscriptionsView(PersonalChannelsView):
                 from api.services.channel_catalog import current_feed_links
                 for binding_id in current_feed_links(source).values_list('binding_id', flat=True):
                     reconcile_binding(binding_id)
+        elif action in {'add_to_group', 'move_to_group', 'remove_from_group'}:
+            group_id = request.data.get('group_id')
+            if type(group_id) is not int or group_id <= 0 or not source_ids:
+                raise ValidationError('请选择有效的分组和频道。')
+            group = owned_group(request.user, group_id)
+            subscriptions = list(ChannelSubscription.objects.filter(user=request.user, source_id__in=source_ids))
+            if len(subscriptions) != len(source_ids):
+                raise Http404
+            for subscription in subscriptions:
+                if action == 'move_to_group':
+                    subscription.groups.set([group])
+                elif action == 'add_to_group':
+                    subscription.groups.add(group)
+                else:
+                    subscription.groups.remove(group)
         elif action == 'set_groups':
             group_ids = ids(request.data, 'group_ids')
             groups = list(ChannelGroup.objects.filter(user=request.user, pk__in=group_ids))

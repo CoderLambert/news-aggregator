@@ -9,8 +9,14 @@ import WorkspaceModal from '@/components/workspace/WorkspaceModal'
 import { useChannelConfig } from '@/services/channelQueries'
 import { newsKeys } from '@/services/newsQueries'
 import { workspaceCatalogOptions, workspaceConfigOptions, workspaceKeys, workspaceRequest, workspaceError,
-  originLabel, proposalStatus, type GroupingMode, type GroupingConfig, type Proposal, type Topic, type SiteClassifier } from '@/services/workspaceApi'
+  originLabel, proposalStatus, type GroupingMode, type GroupingConfig, type Proposal, type ProposalPage, type Topic, type SiteClassifier } from '@/services/workspaceApi'
 import type { ChannelGroup } from '@/types/channels'
+import ExistingGroupOrganizer from '@/components/workspace/ExistingGroupOrganizer'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { ModelCombobox } from '@/components/ui/model-combobox'
+import { NativeSelect } from '@/components/ui/native-select'
 import { listAITaskPreferences } from '@/services/aiConnectionsApi'
 
 const modeOptions: Array<{ value: GroupingMode; title: string; description: string }> = [
@@ -50,18 +56,25 @@ export default function SmartGroupingWorkspace() {
 
 function SmartPage({ viewer, admin }: { viewer: number; admin: boolean }) {
   const channels = useChannelConfig()
+  const [advanced, setAdvanced] = useState(false)
   const catalog = useQuery(workspaceCatalogOptions(viewer, 'history'))
   const config = useQuery(workspaceConfigOptions(viewer))
   if (config.isError || catalog.isError || channels.error) return <div role="alert" className="workspace-empty"><h1>整理配置未能加载</h1><p>不会使用不完整的订阅数据生成建议。</p><button type="button" className="workspace-button secondary" onClick={() => { void config.refetch(); void catalog.refetch(); void channels.retry() }}>重试</button></div>
   if (!config.data || !catalog.data || !channels.ready) return <p role="status" className="workspace-empty">正在加载订阅与主题资料…</p>
-  return <Organizer viewer={viewer} admin={admin} initialConfig={config.data} catalog={catalog.data} groups={channels.groups.data ?? []}
+  return <><ExistingGroupOrganizer viewer={viewer} initialConfig={config.data} groups={channels.groups.data ?? []}
     subscriptions={(channels.subscriptions.data ?? []).map(subscription => ({ id: subscription.source_id, groupIds: subscription.group_ids }))} />
+    <section className="workspace-panel" aria-label="旧版主题预设入口"><header className="workspace-panel-heading"><div className="space-y-2"><Badge variant="outline">次要入口 · 旧版 · 可创建分组</Badge><h2>按主题预设整理</h2></div>
+      <Button type="button" variant="ghost" aria-expanded={advanced} onClick={() => setAdvanced(value => !value)}>高级：按主题预设整理</Button></header>
+      <p className="workspace-caption">兼容旧流程：按预置主题创建或合并分组。默认请先使用上方“按已有分组整理”主流程。</p>
+      {advanced && <Organizer embedded viewer={viewer} admin={admin} initialConfig={config.data} catalog={catalog.data} groups={channels.groups.data ?? []}
+    subscriptions={(channels.subscriptions.data ?? []).map(subscription => ({ id: subscription.source_id, groupIds: subscription.group_ids }))} />}
+    </section>{admin && !advanced && <SiteClassifierPanel viewer={viewer} />}</>
 }
 
-export function Organizer({ viewer, admin, initialConfig, catalog, groups, subscriptions }: {
+export function Organizer({ viewer, admin, initialConfig, catalog, groups, subscriptions, embedded = false }: {
   viewer: number; admin: boolean; initialConfig: GroupingConfig
   catalog: NonNullable<ReturnType<typeof useQuery<import('@/services/workspaceApi').Catalog>>['data']>
-  groups: ChannelGroup[]; subscriptions: Array<{ id: number; groupIds: number[] }>
+  groups: ChannelGroup[]; subscriptions: Array<{ id: number; groupIds: number[] }>; embedded?: boolean
 }) {
   const client = useQueryClient()
   const [selectedTopics, setSelectedTopics] = useState<string[]>(catalog.presets[0]?.topics ?? [])
@@ -70,7 +83,9 @@ export function Organizer({ viewer, admin, initialConfig, catalog, groups, subsc
   const classification = useClassificationModel(viewer, engine === 'ai')
   const [confirmedModel, setConfirmedModel] = useState<string | null>(null)
   const consent = Boolean(classification.id && confirmedModel === classification.consentKey)
-  const [mode, setMode] = useState<GroupingMode>(initialConfig.mode)
+  const [modeDraft, setMode] = useState<GroupingMode | null>(null)
+  const mode = modeDraft ?? initialConfig.mode
+  const [historyPage, setHistoryPage] = useState(1)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
   const [clearHistory, setClearHistory] = useState(false)
@@ -89,9 +104,9 @@ export function Organizer({ viewer, admin, initialConfig, catalog, groups, subsc
   const sourceIds = subscriptions.filter(subscription => scope === 'all' || subscription.groupIds.length === 0).map(subscription => subscription.id)
   const knownIds = new Set(catalog.sources.filter(source => source.topics.length > 0).map(source => source.id))
   const supportedCount = sourceIds.filter(id => knownIds.has(id)).length
-  const history = useQuery({ queryKey: workspaceKeys.proposals(viewer), queryFn: ({ signal }) => workspaceRequest<Proposal[]>('/me/smart-channels/proposals/', { signal }),
+  const history = useQuery({ queryKey: workspaceKeys.proposalHistory(viewer, 'topics', historyPage), queryFn: ({ signal }) => workspaceRequest<ProposalPage>('/me/smart-channels/proposals/?target=topics&page=' + historyPage, { signal, viewer }),
     retry: false, refetchOnWindowFocus: false,
-    refetchInterval: query => query.state.status !== 'error' && query.state.data?.some(item => item.status === 'queued' || item.status === 'running') ? 3000 : false })
+    refetchInterval: query => query.state.status !== 'error' && query.state.data?.results.some(item => item.status === 'queued' || item.status === 'running') ? 3000 : false })
   const active = useQuery({ queryKey: workspaceKeys.proposal(viewer, activeId), enabled: !!activeId,
     queryFn: ({ signal }) => workspaceRequest<Proposal>('/me/smart-channels/proposals/' + activeId + '/', { signal }),
     retry: false, refetchOnWindowFocus: false,
@@ -144,7 +159,7 @@ export function Organizer({ viewer, admin, initialConfig, catalog, groups, subsc
   }),
     onSuccess: value => {
       if (!isCurrent()) return
-      setMode(value.mode)
+      setMode(null)
       client.setQueryData(workspaceKeys.config(viewer), value)
       setNotice('后续整理模式已保存，现有频道归属保持不变。')
       void refresh()
@@ -163,12 +178,12 @@ export function Organizer({ viewer, admin, initialConfig, catalog, groups, subsc
       focusRequested.current = false
     }
   }, [activeId, active.data?.status, active.data])
-  return <div className="workspace-page workspace-smart">
+  return <div className={embedded ? 'space-y-4' : 'workspace-page workspace-smart'}>
     <nav aria-label="整理步骤"><ol className="smart-steps">
       {['选择范围与主题', '生成预览', '调整并确认', '查看结果'].map((label, index) =>
         <li key={label} aria-current={step === index + 1 ? 'step' : undefined}><span>{index + 1}</span>{label}</li>)}
     </ol></nav>
-    <header className="workspace-page-heading"><div><p className="workspace-eyebrow">少一点整理，多一点阅读</p><h1>AI 智能整理 <span className="workspace-beta">Beta</span></h1><p>利用频道资料生成建议，预览、调整后再应用。人工选择始终优先。</p></div></header>
+    {!embedded && <header className="workspace-page-heading"><div><p className="workspace-eyebrow">少一点整理，多一点阅读</p><h1>AI 智能整理 <span className="workspace-beta">Beta</span></h1><p>利用频道资料生成建议，预览、调整后再应用。人工选择始终优先。</p></div></header>}
     <div className="workspace-organizer-hero"><section className="workspace-organizer-intro"><div className="workspace-folder-illustration" aria-hidden="true"><FolderOpen /><Sparkles /></div>
       <div><h2>选择范围与主题</h2><p>选择一个阅读主题包，整理已订阅来源。规则推荐无需模型调用，AI 精分仅在你明确授权后启动。</p>
         <div className="workspace-engine-options" role="group" aria-label="整理引擎"><button type="button" aria-pressed={engine === 'rules'} disabled={setupLocked} onClick={() => setEngine('rules')}>来源资料推荐</button><button type="button" aria-pressed={engine === 'ai'} disabled={!initialConfig.ai_available || setupLocked} onClick={() => setEngine('ai')}><Sparkles size={14} aria-hidden="true" />AI 精细分类</button></div>
@@ -182,7 +197,7 @@ export function Organizer({ viewer, admin, initialConfig, catalog, groups, subsc
           <label className="workspace-check"><input type="checkbox" disabled={setupLocked || !classification.id} checked={consent}
             onChange={event => setConfirmedModel(event.target.checked ? classification.consentKey : null)} />同意本次使用上述个人模型额度；仅发送公开频道资料和已收录标题。仅明确限流拒绝时最多重试一次，结果未知不会自动重发。</label>
         </div>}
-        <div className="workspace-actions"><label>整理范围<select aria-label="整理范围" disabled={setupLocked} value={scope} onChange={event => setScope(event.target.value === 'ungrouped' ? 'ungrouped' : 'all')}><option value="all">全部已订阅</option><option value="ungrouped">仅未分组频道</option></select></label>
+        <div className="workspace-actions"><label>整理范围<NativeSelect aria-label="整理范围" disabled={setupLocked} value={scope} onChange={event => setScope(event.target.value === 'ungrouped' ? 'ungrouped' : 'all')}><option value="all">全部已订阅</option><option value="ungrouped">仅未分组频道</option></NativeSelect></label>
 </div>
     <section className="workspace-preset-section"><header className="workspace-panel-heading"><div><h2>主题预设</h2><p className="workspace-caption">选择你关心的主题。生成的是可编辑建议，不会立即修改订阅。</p></div><div className="workspace-tabs" role="group" aria-label="主题包">{catalog.presets.map(preset => <button type="button" key={preset.key} aria-pressed={preset.topics.length === selectedTopics.length && preset.topics.every(topic => selectedTopics.includes(topic))} disabled={setupLocked} onClick={() => setSelectedTopics([...preset.topics])}>{preset.name}</button>)}</div></header>
       <div className="workspace-preset-cards">{catalog.topics.map(topic => <label key={topic.key} className="workspace-preset-card" data-selected={selectedTopics.includes(topic.key)}><input type="checkbox" disabled={setupLocked} checked={selectedTopics.includes(topic.key)} onChange={event => setSelectedTopics(current => event.target.checked ? [...current, topic.key] : current.filter(key => key !== topic.key))} /><span className="workspace-topic-symbol" data-topic={topic.key}><FolderOpen size={20} aria-hidden="true" /></span><span><strong>{topic.name}</strong><small>{topic.description}</small></span></label>)}</div>
@@ -221,8 +236,13 @@ export function Organizer({ viewer, admin, initialConfig, catalog, groups, subsc
     </section>}
     <section className="workspace-panel"><header className="workspace-panel-heading"><h2>整理记录与待确认建议</h2><button type="button" className="workspace-link" onClick={() => void history.refetch()}>刷新记录</button></header>
       {history.isError && <p role="alert" className="workspace-error">记录加载失败。</p>}
-      <ul className="workspace-job-list">{(history.data ?? []).map(item => <li key={item.id}><span><strong>{item.engine === 'ai' ? 'AI 精细分类' : '来源资料推荐'}</strong><small>{new Date(item.created_at).toLocaleString()} · {item.source_ids.length} 个频道</small></span><span>{proposalStatus[item.status] ?? item.status}</span><button type="button" className="workspace-button secondary" disabled={busy || change.isError} onClick={() => { focusRequested.current = true; setActiveId(item.id); client.setQueryData(workspaceKeys.proposal(viewer, item.id), item) }}>查看</button></li>)}</ul>
-      {history.data?.length === 0 && <p className="workspace-muted">还没有整理记录。新增订阅的建议也会出现在这里。</p>}
+      <ul className="workspace-job-list">{(history.data?.results ?? []).filter(item => item.target !== 'groups').map(item => <li key={item.id}><span><strong>{item.engine === 'ai' ? 'AI 精细分类' : '来源资料推荐'}</strong><small>{new Date(item.created_at).toLocaleString()} · {item.source_ids.length} 个频道</small></span><span>{proposalStatus[item.status] ?? item.status}</span><button type="button" className="workspace-button secondary" disabled={busy || change.isError} onClick={() => { focusRequested.current = true; setActiveId(item.id); client.setQueryData(workspaceKeys.proposal(viewer, item.id), item) }}>查看</button></li>)}</ul>
+      <nav aria-label="主题整理记录翻页" className="mt-3 flex flex-wrap items-center gap-3">
+        <Button type="button" variant="outline" disabled={busy || history.isFetching || historyPage === 1} onClick={() => setHistoryPage(page => page - 1)}>较新记录</Button>
+        <span className="text-sm text-muted-foreground">第 {historyPage} 页</span>
+        <Button type="button" variant="outline" disabled={busy || history.isFetching || history.isError || !history.data?.has_more} onClick={() => setHistoryPage(page => page + 1)}>较早记录</Button>
+      </nav>
+      {history.data && !history.data.results.some(item => item.target !== 'groups') && <p className="workspace-muted">还没有整理记录。新增订阅的建议也会出现在这里。</p>}
     </section>
     <section className="workspace-panel" aria-label="后续整理设置"><h2>以后新增订阅时</h2>
       <p className="workspace-caption">独立保存此设置；本次预览和确认不会提交这里尚未保存的修改。</p>
@@ -252,23 +272,27 @@ export function ProposalEditor({ proposal, topics, groups, mode, busy, onApply, 
   const selected = drafts.filter(draft => draft.source_ids.length > 0)
   const unknown = proposal.result.filter(item => !item.topic_keys.length)
   const invalidNames = selected.some(draft => !draft.group_id && (!draft.name.trim() || groups.some(group => group.name === draft.name.trim())))
+  const groupOptions = [{ value: '', label: '创建新分组', description: '仅旧版主题预设可创建新分组' },
+    ...groups.map(group => ({ value: String(group.id), label: group.name, description: `已有分组 · ID ${group.id}` }))]
   return <>
     <p className="workspace-caption">{proposal.engine === 'ai' ? '以下为 AI 建议，尚未写入个人分组。' : '以下基于已登记频道资料，不消耗模型额度。'} 选择已有组可合并；空组不会创建。</p>
     {unknown.length > 0 && <p className="workspace-soft-panel">待确认：{unknown.map(item => item.name).join('、')}。可展开任意分组手动勾选，或暂时保持未分组。</p>}
     {proposal.result.some(item => item.needs_review) && <p className="workspace-caption">其中 {proposal.result.filter(item => item.needs_review).length} 个频道需要人工确认；推荐依据可在“调整频道归属”中查看。</p>}
     <div className="workspace-preview-groups">{drafts.map(draft => <section className="workspace-preview-group" key={draft.topic_key}>
       <header><strong>{topics.find(topic => topic.key === draft.topic_key)?.name ?? draft.topic_key}</strong><span>{draft.source_ids.length} 个频道</span></header>
-      <label>放入分组<select aria-label={'目标分组 ' + draft.topic_key} value={draft.group_id} disabled={busy} onChange={event => update(draft.topic_key, { group_id: event.target.value })}><option value="">创建新分组</option>{groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
-      {!draft.group_id && <label>新分组名称<input aria-label={'新分组名称 ' + draft.topic_key} value={draft.name} maxLength={40} disabled={busy} onChange={event => update(draft.topic_key, { name: event.target.value })} /></label>}
-      <button type="button" id={editorId + draft.topic_key + "-toggle"} aria-controls={editorId + draft.topic_key} className="workspace-link" aria-expanded={expanded === draft.topic_key} onClick={() => setExpanded(current => current === draft.topic_key ? null : draft.topic_key)}>调整频道归属</button>
+      <div className="mb-3 min-w-0"><span className="text-sm">放入分组</span><div className="mt-1"><ModelCombobox label={'目标分组 ' + draft.topic_key} value={draft.group_id} disabled={busy} options={groupOptions}
+        onChange={value => update(draft.topic_key, { group_id: value })} searchLabel={'搜索目标分组 ' + draft.topic_key} searchPlaceholder="搜索分组名称或 ID…"
+        emptyText="没有匹配的已有分组。" placeholder="搜索并选择分组" wrapLabels /></div></div>
+      {!draft.group_id && <label>新分组名称<Input className="mt-1" aria-label={'新分组名称 ' + draft.topic_key} value={draft.name} maxLength={40} disabled={busy} onChange={event => update(draft.topic_key, { name: event.target.value })} /></label>}
+      <Button type="button" variant="link" size="sm" className="h-auto px-0" id={editorId + draft.topic_key + "-toggle"} aria-controls={editorId + draft.topic_key} aria-expanded={expanded === draft.topic_key} onClick={() => setExpanded(current => current === draft.topic_key ? null : draft.topic_key)}>调整频道归属</Button>
       {expanded === draft.topic_key ? <div id={editorId + draft.topic_key} className="workspace-preview-members" onKeyDown={event => {
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setExpanded(null)
           document.getElementById(editorId + draft.topic_key + '-toggle')?.focus() }
-      }}>{proposal.result.map(item => <label key={item.source_id}><input type="checkbox" disabled={busy} checked={draft.source_ids.includes(item.source_id)} onChange={event => update(draft.topic_key, { source_ids: event.target.checked ? [...draft.source_ids, item.source_id] : draft.source_ids.filter(id => id !== item.source_id) })} /><span><strong>{item.name}</strong><small>{originLabel[item.origin] ?? item.origin} · {item.reason}</small></span></label>)}</div>
+      }}>{proposal.result.map(item => <label key={item.source_id}><Input className="size-4 shrink-0" type="checkbox" disabled={busy} checked={draft.source_ids.includes(item.source_id)} onChange={event => update(draft.topic_key, { source_ids: event.target.checked ? [...draft.source_ids, item.source_id] : draft.source_ids.filter(id => id !== item.source_id) })} /><span><strong>{item.name}</strong><small>{originLabel[item.origin] ?? item.origin} · {item.reason}</small></span></label>)}</div>
         : <p className="workspace-caption">{proposal.result.filter(item => draft.source_ids.includes(item.source_id)).map(item => item.name).join('、') || '暂无建议频道'}</p>}
     </section>)}</div>
     {invalidNames && <p role="alert" className="workspace-error">新分组名称不能为空或与已有分组重复；请选择已有组进行合并，或修改新名称。</p>}
-    <footer className="workspace-preview-actions"><span>将处理 {selected.length} 个主题、{new Set(selected.flatMap(draft => draft.source_ids)).size} 个频道；仅新增归属。</span><div className="workspace-actions"><button type="button" className="workspace-button secondary" disabled={busy} onClick={onCancel}>取消预览</button><button type="button" className="workspace-button" disabled={busy || !selected.length || invalidNames} onClick={() => onApply({ mode, groups: selected.map(draft => ({ topic_key: draft.topic_key, source_ids: draft.source_ids, ...(draft.group_id ? { group_id: Number(draft.group_id) } : { name: draft.name.trim() }) })) })}>{busy ? '正在应用…' : '确认应用分组'}</button></div></footer>
+    <footer className="workspace-preview-actions"><span>将处理 {selected.length} 个主题、{new Set(selected.flatMap(draft => draft.source_ids)).size} 个频道；仅新增归属。</span><div className="workspace-actions"><Button type="button" variant="outline" className="flex-1 sm:flex-none" disabled={busy} onClick={onCancel}>取消预览</Button><Button type="button" className="flex-1 sm:flex-none" disabled={busy || !selected.length || invalidNames} onClick={() => onApply({ mode, groups: selected.map(draft => ({ topic_key: draft.topic_key, source_ids: draft.source_ids, ...(draft.group_id ? { group_id: Number(draft.group_id) } : { name: draft.name.trim() }) })) })}>{busy ? '正在应用…' : '确认应用分组'}</Button></div></footer>
   </>
 }
 
