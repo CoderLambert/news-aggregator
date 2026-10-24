@@ -1,0 +1,19 @@
+{
+  "base": "e74f7b1a4d0964680f90a4b808f59a7b180dce9e",
+  "status": "draft-awaiting-lockfile-and-local-acceptance",
+  "contracts": [
+    {"path":"frontend/src/services/api.ts","blob":"8eef17eab475a69baf21c260fd51e249ec8b0023"},
+    {"path":"frontend/src/services/queryClient.ts","blob":"ca1275362da786e2f387ca0c18d75a1467ad250b"},
+    {"path":"frontend/src/components/news-detail/ReadStateButton.tsx","blob":"bde078ae2a5a434ecbeb1debbea09f83c4071f29"},
+    {"path":"frontend/src/types/channels.ts","blob":"8bcbd4ef9dd9ce69ae5044cf7c39637172a1238b"},
+    {"path":"backend/api/rss/reading.py","blob":"3d04e5f85072bc74160b56bd7be175f5fd8b790e"},
+    {"path":"backend/api/rss/reading_models.py","blob":"bc9b1d02335bdd41b40b8c0fb202b7087af3d568"},
+    {"path":"backend/api/rss/http.py","blob":"4a2a3288130afa13f93c50297709e3a42f796388"},
+    {"path":"backend/api/public_policy.py","blob":"782b6a041f22f0730557e6ca8e4a0e19aea61c85"}
+  ],
+  "upstream": {
+    "msw": "https://github.com/mswjs/msw/releases/tag/v3.0.3",
+    "viteIntegration": "https://mswjs.io/guides/integrations/vite",
+    "playwright": "https://github.com/microsoft/playwright/releases/tag/v1.64.1"
+  }
+}
