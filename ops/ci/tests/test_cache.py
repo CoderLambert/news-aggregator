@@ -132,6 +132,72 @@ exit 73
         self.run_script(script)
         self.assertEqual(self.install_count(), 9)
 
+    def test_backend_failed_install_resumes_without_recreating_venv(self):
+        script = self.ops / "install-backend-deps.sh"
+        shutil.copyfile(REPO_ROOT / "ops/ci/install-backend-deps.sh", script)
+        backend = self.root / "backend"
+        backend.mkdir()
+        (backend / "requirements.txt").write_text("pytest>=8\n")
+        (backend / "requirements-ci.lock").write_text(
+            "pytest==8.0\ntorch==2.14.1+cpu\nplaywright==1.62.0\n"
+        )
+        shutil.copyfile(
+            REPO_ROOT / "ops/ci/check-backend-lock.py",
+            self.ops / "check-backend-lock.py",
+        )
+        executable(self.bin / "python3", r"""#!/usr/bin/env bash
+set -eu
+if [[ "$1" == -c ]]; then echo 'cpython-312 x86_64'; exit 0; fi
+if [[ "$1" == */check-backend-lock.py ]]; then
+    exec "$CI_TEST_REAL_PYTHON" "$@"
+fi
+if [[ "$1" == -m && "$2" == venv ]]; then
+    echo venv-create >> "$CI_TEST_LOG"
+    mkdir -p "$3/bin"
+    cat > "$3/bin/python" <<'PY'
+#!/usr/bin/env bash
+set -eu
+env_dir="$(cd -- "$(dirname -- "$0")/.." && pwd -P)"
+if [[ "$1" == -m && "$2" == pip ]]; then
+    case "$3" in
+        install)
+            if [[ "$*" == *"torch=="* ]]; then
+                if [[ ! -f "$env_dir/.torch-installed" ]]; then
+                    echo torch-network >> "$CI_TEST_LOG"
+                    : > "$env_dir/.torch-installed"
+                fi
+                exit 0
+            fi
+            if [[ "$*" == *" -r "* && ! -f "$CI_TEST_LOG.fail-once" ]]; then
+                : > "$CI_TEST_LOG.fail-once"
+                exit 80
+            fi
+            exit 0
+            ;;
+        check) exit 0 ;;
+        freeze) echo 'test==1.0'; exit 0 ;;
+    esac
+fi
+if [[ "$1" == */check-backend-lock.py ]]; then exit 0; fi
+exit 72
+PY
+    chmod +x "$3/bin/python"
+    exit 0
+fi
+exit 73
+""")
+        first = subprocess.run(
+            ["bash", str(script)], cwd=self.root, env=self.env,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, check=False, timeout=20,
+        )
+        self.assertNotEqual(first.returncode, 0)
+        second = self.run_script(script)
+        self.assertIn("RESUME", second)
+        entries = self.log.read_text().splitlines()
+        self.assertEqual(entries.count("venv-create"), 1)
+        self.assertEqual(entries.count("torch-network"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,6 +11,7 @@ CHECKER="$PROJECT_ROOT/ops/ci/check-backend-lock.py"
 TORCH_PIN="2.14.1+cpu"
 PLAYWRIGHT_PIN="1.62.0"
 CACHE_ROOT="${CI_BACKEND_CACHE_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/newshub-venvs}"
+PIP_CACHE_DIR="$CACHE_ROOT/.pip"
 REFRESH="${1:-}"
 
 case "$REFRESH" in
@@ -25,6 +26,10 @@ esac
 python3 "$CHECKER" "$REQ" "$LOCK"
 mkdir -p "$CACHE_ROOT"
 chmod 700 "$CACHE_ROOT"
+[[ ! -L "$PIP_CACHE_DIR" ]] || { echo "pip cache must not be a symlink" >&2; exit 2; }
+mkdir -p "$PIP_CACHE_DIR"
+chmod 700 "$PIP_CACHE_DIR"
+export PIP_CACHE_DIR
 exec 9>"$CACHE_ROOT/.install.lock"
 flock -x 9
 
@@ -45,10 +50,18 @@ cache_healthy() {
 }
 
 if [[ "$REFRESH" == --refresh ]] || ! cache_healthy; then
-    printf 'NewsHub backend dependency cache: MISS (%s)\n' "${KEY:0:16}"
-    # The only removable directory is the checked content-addressed entry.
-    rm -rf -- "$ENV_DIR"
-    python3 -m venv "$ENV_DIR"
+    if [[ "$REFRESH" != --refresh && -d "$ENV_DIR" && ! -L "$ENV_DIR" && -x "$ENV_DIR/bin/python" ]]; then
+        # An interrupted pip run leaves a usable partial venv. Resume in place:
+        # pip skips satisfied packages and the persistent download cache supplies
+        # completed wheels, avoiding another large torch/package download.
+        printf 'NewsHub backend dependency cache: RESUME (%s)\n' "${KEY:0:16}"
+    else
+        printf 'NewsHub backend dependency cache: MISS (%s)\n' "${KEY:0:16}"
+        # The only removable directory is the checked content-addressed entry.
+        rm -rf -- "$ENV_DIR"
+        python3 -m venv "$ENV_DIR"
+    fi
+    rm -f -- "$STAMP.tmp"
     "$ENV_DIR/bin/python" -m pip install --disable-pip-version-check \
         --index-url https://download.pytorch.org/whl/cpu "torch==$TORCH_PIN"
     "$ENV_DIR/bin/python" -m pip install --disable-pip-version-check -r "$LOCK"
@@ -56,7 +69,8 @@ if [[ "$REFRESH" == --refresh ]] || ! cache_healthy; then
     "$ENV_DIR/bin/python" -m pip check
     "$ENV_DIR/bin/python" "$CHECKER" "$REQ" "$LOCK" --installed
     "$ENV_DIR/bin/python" -m pip freeze > "$ENV_DIR/newshub-freeze.txt"
-    printf '%s\n' "$KEY" > "$STAMP"
+    printf '%s\n' "$KEY" > "$STAMP.tmp"
+    mv -f -- "$STAMP.tmp" "$STAMP"
 else
     printf 'NewsHub backend dependency cache: HIT (%s), skipping torch/pip installs\n' "${KEY:0:16}"
 fi
