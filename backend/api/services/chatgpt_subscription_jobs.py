@@ -594,7 +594,11 @@ def _dispatch_task(task_id, generation):
             return
         _dispatching.add(key)
     try:
-        submit_translation_task(_run_persistent_task, task_id, generation)
+        future = submit_translation_task(_run_persistent_task, task_id, generation)
+        logger.info(
+            'ChatGPT translation dispatch submitted (task_id=%s, generation=%s, running=%s, done=%s).',
+            task_id, generation, future.running(), future.done(),
+        )
     except Exception as exc:
         with _jobs_lock:
             _dispatching.discard(key)
@@ -843,8 +847,7 @@ def _claim_persistent_task(task_id, generation, run_token):
                 connection__encrypted_access_token__gt='',
                 connection__encrypted_refresh_token__gt='',
                 news__full_content=queued_task.news.full_content,
-                news__full_content__gt='',
-                news__full_content_state__in=['legacy', 'complete'],
+                news__full_content_state=queued_task.news.full_content_state,
             ).update(
                 status='running', run_token=run_token, provider_started=False,
                 started_at=now, lease_expires_at=now + TASK_LEASE_TTL,
@@ -854,6 +857,10 @@ def _claim_persistent_task(task_id, generation, run_token):
 
 
 def _run_persistent_task(task_id, generation):
+    logger.info(
+        'ChatGPT translation worker started (task_id=%s, generation=%s).',
+        task_id, generation,
+    )
     close_old_connections()
     key = (str(task_id), int(generation))
     run_token = uuid.uuid4()

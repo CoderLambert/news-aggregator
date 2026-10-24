@@ -80,7 +80,7 @@ News Aggregator 使用 OpenAI 的开源应用 Sign in with ChatGPT 流程，让�
 
 文章页按 `full_translation` 的有效来源路由翻译：显式 ChatGPT Subscription 选择优先于 BYOK 全局默认，只有有效来源为 BYOK 时才进入个人 Key 翻译队列。这样不会因另一个用途的默认模型遮蔽已保存的订阅翻译选择，也不会新增隐式来源回退。
 
-订阅全文翻译任务在 SQLite WAL 下以写入预留开始 claim 事务，再读取并复核 owner、连接 generation、模型和正文快照，最后通过条件更新取得租约。这样竞争写入只能在读取快照前等待，不能把已读取的 WAL 快照升级成 `SQLITE_BUSY_SNAPSHOT`；模型调用仍在短事务之外执行。
+订阅全文翻译任务在 SQLite WAL 下以写入预留开始 claim 事务，再读取并复核 owner、连接 generation、模型和正文快照，最后通过条件更新取得租约。正文是否可读由统一 stored-reader 授权（包括已授权的 `available` 正文），最终 CAS 精确匹配快照中的正文和状态，而不是维护另一份状态白名单。这样竞争写入只能在读取快照前等待，不能把已读取的 WAL 快照升级成 `SQLITE_BUSY_SNAPSHOT`；模型调用仍在短事务之外执行。
 
 订阅/BYOK 全文翻译与深度研究使用相互独立的有界执行器，研究任务占满容量时不会阻塞翻译 claim。翻译 SSE 在排队后立即发送空进度帧以提交响应头，之后只附着同一 durable task；断开连接不会取消或重复提交模型调用。
 

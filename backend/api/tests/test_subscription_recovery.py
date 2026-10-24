@@ -206,6 +206,20 @@ def test_worker_claim_is_single_and_started_state_precedes_provider(owner, artic
     assert len(provider_calls) == 1
     assert ChatGPTArticleTranslation.objects.get(user=owner, news=article).content == 'complete translation'
 
+def test_worker_claim_accepts_an_authorized_available_body(owner, article, monkeypatch):
+    article.full_content_state = 'available'
+    article.save(update_fields=['full_content_state'])
+    connection = make_connection(owner)
+    handle = start_queued(owner, connection, article, monkeypatch)
+    run_token = uuid.uuid4()
+
+    assert jobs._claim_persistent_task(handle.id, handle.generation, run_token) == 1
+
+    task = ChatGPTTranslationTask.objects.get(pk=handle.id)
+    assert task.status == 'running'
+    assert task.run_token == run_token
+    assert task.provider_started is False
+
 
 def test_registry_reset_and_new_handle_read_persistent_progress_and_result(owner, article, monkeypatch):
     connection = make_connection(owner)
