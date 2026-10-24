@@ -391,6 +391,8 @@ def _tool_result_summary(name: str, result: dict) -> str:
         return f'{label}: {title}'
     if name == 'search_web':
         count = len(result.get('results', []))
+        if count == 0 and result.get('source') == 'unavailable':
+            return '联网搜索暂时不可用，已跳过'
         return f'联网搜索到 {count} 条结果'
     if name == 'fetch_webpage':
         length = result.get('length', 0)

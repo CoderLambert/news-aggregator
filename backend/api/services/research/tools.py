@@ -871,17 +871,22 @@ def _search_web(query: str, count: int = 5, execution_guard=None) -> dict:
         errors.append(f'DuckDuckGo: {e}')
         logger.warning('DuckDuckGo fallback also failed: %s', e)
 
-    # All sources failed — return structured error with guidance
+    # All sources failed — soft-degrade with empty results.
+    # Do NOT set an 'error' key: execute_tool + BYOK agent_loop treat
+    # 'error' as a hard tool_failed and abort the whole research run.
+    # Local+web research must still be able to finish from news-library
+    # evidence when outbound web search is blocked (e.g. fake-ip DNS).
     return {
         'results': [],
         'query': query,
-        'error': '联网搜索暂时不可用',
+        'source': 'unavailable',
+        'message': '联网搜索暂时不可用；请基于已有本地新闻证据继续，勿反复重试联网搜索。',
         'error_details': errors,
         'recommendation': (
             '建议：\n'
             '1. 配置 JINA_API_KEY 以启用高质量联网搜索\n'
             '2. 尝试简化搜索关键词\n'
-            '3. 使用本地新闻库搜索相关内容'
+            '3. 使用本地新闻库搜索相关内容并直接生成报告'
         ),
     }
 
