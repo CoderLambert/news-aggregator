@@ -219,9 +219,12 @@ class SecretStore:
         if not isinstance(value, str) or not value or '\n' in value or '\r' in value:
             raise LocalRuntimeError('generated runtime secret is invalid')
         try:
-            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o444)
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
                 stream.write(value + '\n')
+                stream.flush()
+                # os.open applies umask; set the final mode on our owned fd.
+                os.fchmod(stream.fileno(), 0o444)
         except OSError:
             raise LocalRuntimeError('could not create runtime secret') from None
         self._validate(path)
@@ -248,10 +251,11 @@ class SecretStore:
         if temporary.exists() or temporary.is_symlink():
             raise LocalRuntimeError('runtime secret staging path is occupied')
         try:
-            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o444)
+            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
                 stream.write(value + '\n')
                 stream.flush()
+                os.fchmod(stream.fileno(), 0o444)
                 os.fsync(stream.fileno())
             os.replace(temporary, path)
         except OSError:
