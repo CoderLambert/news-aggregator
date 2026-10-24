@@ -590,3 +590,22 @@ def test_existing_0600_secrets_are_exposed_for_non_root_consumers(tmp_path):
     path = store.ensure('rss-database-url', lambda: 'unused')
     assert path == legacy
     assert path.stat().st_mode & 0o777 == 0o444
+
+
+def test_activation_accepts_pretty_printed_runtime_health_json():
+    ready = {
+        'schema_version': 1,
+        'ready': True,
+        'status': 'ready',
+        'checks': {
+            name: {'enabled': True, 'ready': True, 'status': 'ready', 'code': ''}
+            for name in local_full_runtime.REQUIRED_HEALTH_CHECKS
+        },
+    }
+    pretty = json.dumps(ready, ensure_ascii=False, indent=2, sort_keys=True) + '\n'
+    # Regression: Django prints indented JSON; last-line-only parsing is invalid JSON.
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(pretty.splitlines()[-1])
+    assert local_full_runtime._parse_runtime_health_stdout(pretty) == ready
+    with pytest.raises(local_full_runtime.LocalRuntimeError, match='invalid'):
+        local_full_runtime._parse_runtime_health_stdout('')

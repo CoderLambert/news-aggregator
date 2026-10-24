@@ -183,6 +183,14 @@ class SecretStore:
         return path
 
 
+def _parse_runtime_health_stdout(stdout: str):
+    try:
+        payload = json.loads(stdout)
+    except (TypeError, ValueError):
+        raise LocalRuntimeError('runtime health response is invalid') from None
+    return require_full_health(payload)
+
+
 def require_full_health(snapshot):
     if not isinstance(snapshot, dict) or snapshot.get('schema_version') != 1:
         raise LocalRuntimeError('runtime health response is invalid')
@@ -832,7 +840,7 @@ def _execute(*, project: str, code_root: Path, source_root: Path,
         environment = {**os.environ, **values}
         _run(commands.full, environment=environment, timeout=wait_timeout + 180)
         health_result = _run(commands.verify, environment=environment, timeout=60)
-        snapshot = require_full_health(json.loads(health_result.stdout.splitlines()[-1]))
+        snapshot = _parse_runtime_health_stdout(health_result.stdout)
         receipt = {
             'schema_version': 4,
             'project': project,
