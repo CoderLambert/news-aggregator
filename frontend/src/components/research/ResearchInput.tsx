@@ -17,6 +17,7 @@ interface ResearchInputProps {
   onCancel?: () => void
   isLoading: boolean
   disabled?: boolean
+  loginRequired?: boolean
   localOnly?: boolean
   onToggleLocalOnly?: () => void
 }
@@ -28,13 +29,12 @@ export default function ResearchInput({
   onCancel,
   isLoading,
   disabled = false,
+  loginRequired = false,
   localOnly = false,
   onToggleLocalOnly,
 }: ResearchInputProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const [placeholder] = useState(() => disabled
-    ? '请先登录'
-    : PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)])
+  const [placeholder] = useState(() => PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)])
 
   useEffect(() => {
     if (!isLoading && !disabled) inputRef.current?.focus()
@@ -78,7 +78,7 @@ export default function ResearchInput({
           value={value}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder}
+          placeholder={loginRequired ? '请先登录' : placeholder}
           aria-label="输入研究问题"
           rows={1}
           disabled={disabled}

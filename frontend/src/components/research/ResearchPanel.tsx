@@ -131,6 +131,7 @@ function ResearchPanelView({
     hasRecoverableTask,
     isBusy,
     recoveryAction,
+    recoveryNotice,
     handleSend,
     handleNewSession,
     handleSelectSession,
@@ -212,6 +213,13 @@ function ResearchPanelView({
         setInput((current) => current === submittedInput ? '' : current)
         setBillingConsentState({ key: '', checked: false })
       }
+    })
+  }
+
+  function handleRetryQuery() {
+    if (hasResearchModel && !billingConsent) return
+    void handleRetry(researchAuthorization).then((accepted) => {
+      if (accepted) setBillingConsentState({ key: '', checked: false })
     })
   }
 
@@ -439,8 +447,16 @@ function ResearchPanelView({
               )}
               {recoveryAction === 'retry' && !authorizedCreateOnly && (
                 <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-500/25 bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-200">
-                  <span>原请求可能已到达服务器。只有点击下方按钮才会新建任务，可能重复计算或产生费用。</span>
-                  <Button type="button" size="sm" variant="outline" onClick={() => void handleRetry()}>
+                  <span>{activeSessionId && recoveryNotice
+                    ? `${recoveryNotice} 重新研究会创建新任务，可能重复计算或产生费用。`
+                    : '原请求可能已到达服务器。只有点击下方按钮才会新建任务，可能重复计算或产生费用。'}</span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={handleRetryQuery}
+                    disabled={hasResearchModel && !billingConsent}
+                  >
                     重新研究
                   </Button>
                 </div>
@@ -455,6 +471,7 @@ function ResearchPanelView({
           onSend={user ? handleSendQuery : () => setShowAuthModal(true)}
           onCancel={handleCancel}
           isLoading={isLoading}
+          loginRequired={!user}
           disabled={!user || hasRecoverableTask || researchModelUnavailable
             || (authorizedCreateOnly && (recoveryAction === 'retry' || !hasResearchModel))
             || (hasResearchModel && !billingConsent)}

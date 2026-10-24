@@ -684,7 +684,7 @@ def submit_research_run(
                 except ResearchExecutionError as exc:
                     raise ResearchRunError(
                         f'research_{exc.code}', exc.message, 409,
-                        request_rejected=session_id is None,
+                        request_rejected=True,
                     ) from None
             if session_id is None:
                 session = ResearchSession.objects.create(user=user, title='', messages=[])
@@ -736,10 +736,10 @@ def resume_queued_run(user, session, run_id):
     if run is None:
         raise ResearchRunError('research_run_not_found', '研究任务不存在。', 404)
     if run.execution_snapshot:
-        from .byok_execution import ResearchBYOKError, verify_snapshot
+        from .execution import ResearchExecutionError, verify_snapshot
         try:
             verify_snapshot(run.execution_snapshot, owner_id=run.user_id)
-        except ResearchBYOKError as exc:
+        except ResearchExecutionError as exc:
             raise ResearchRunError(
                 'research_authorization_changed', exc.message, 403,
             ) from None

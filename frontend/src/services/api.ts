@@ -688,7 +688,7 @@ export function disconnectChatGPTSubscription(connectionId: string): Promise<{ d
 export async function probeChatGPTSubscriptionResearch(
   connectionId: string,
 ): Promise<ChatGPTSubscriptionResearchTools> {
-  const value: unknown = (await api.post<unknown>(
+  const value: unknown = (await apiLong.post<unknown>(
     `/chatgpt-subscription/connections/${connectionId}/research-probe/`,
     { consent: true },
   )).data

@@ -23,7 +23,7 @@ from api.services.ai_task_preferences import (
     read_preferences,
     save_preferences,
 )
-from api.services.research import agent_loop, subscription_execution
+from api.services.research import agent_loop, job_manager, subscription_execution
 
 User = get_user_model()
 
@@ -380,6 +380,134 @@ def test_subscription_research_admission_is_explicit_and_never_falls_back_to_byo
         },
     }
     assert dispatched == [(run.pk, 'Research with my subscription', False)]
+
+
+@pytest.mark.django_db
+def test_subscription_queued_run_resume_uses_source_neutral_snapshot_verifier(monkeypatch):
+    user = User.objects.create_user(username='subscription-queued-resume')
+    connection = make_connection(user)
+    receipt = ChatGPTSubscriptionCapabilityReceipt.objects.create(
+        connection=connection,
+        model_slug=connection.selected_model,
+        connection_generation=connection.generation,
+        credential_generation=connection.credential_generation,
+        capability='tools',
+        status='supported',
+    )
+    snapshot = subscription_execution.capture_snapshot(user)
+    session = ResearchSession.objects.create(user=user, title='', messages=[])
+    run = ResearchRun.objects.create(
+        user=user,
+        session=session,
+        idempotency_key='subscription-queued-resume',
+        request_hash=job_manager.request_digest(
+            'Resume subscription research', False, None,
+            execution_source='chatgpt_subscription', consent=True,
+        ),
+        status='queued',
+        queued_query='Resume subscription research',
+        queued_local_only=False,
+        execution_snapshot=snapshot,
+    )
+    dispatched = []
+    monkeypatch.setattr(
+        job_manager, '_dispatch',
+        lambda run_id, query, local_only: dispatched.append((run_id, query, local_only)),
+    )
+
+    resumed = job_manager.resume_queued_run(user, session, str(run.pk))
+
+    assert resumed.pk == run.pk
+    assert dispatched == [(run.pk, 'Resume subscription research', False)]
+    assert snapshot['subscription']['receipt_id'] == str(receipt.pk)
+
+
+@pytest.mark.django_db
+def test_subscription_queued_run_resume_rejects_a_changed_connection(monkeypatch):
+    user = User.objects.create_user(username='subscription-queued-stale')
+    connection = make_connection(user)
+    ChatGPTSubscriptionCapabilityReceipt.objects.create(
+        connection=connection,
+        model_slug=connection.selected_model,
+        connection_generation=connection.generation,
+        credential_generation=connection.credential_generation,
+        capability='tools',
+        status='supported',
+    )
+    snapshot = subscription_execution.capture_snapshot(user)
+    session = ResearchSession.objects.create(user=user, title='', messages=[])
+    run = ResearchRun.objects.create(
+        user=user,
+        session=session,
+        idempotency_key='subscription-queued-stale',
+        request_hash=job_manager.request_digest(
+            'Reject stale subscription research', False, None,
+            execution_source='chatgpt_subscription', consent=True,
+        ),
+        status='queued',
+        queued_query='Reject stale subscription research',
+        queued_local_only=False,
+        execution_snapshot=snapshot,
+    )
+    ChatGPTSubscriptionConnection.objects.filter(pk=connection.pk).update(
+        generation=connection.generation + 1,
+    )
+    dispatched = []
+    monkeypatch.setattr(job_manager, '_dispatch', lambda *args: dispatched.append(args))
+
+    with pytest.raises(job_manager.ResearchRunError) as rejected:
+        job_manager.resume_queued_run(user, session, str(run.pk))
+
+    assert rejected.value.error_code == 'research_authorization_changed'
+    assert dispatched == []
+
+
+@pytest.mark.django_db
+def test_subscription_followup_admission_failure_certifies_that_no_run_was_created():
+    user = User.objects.create_user(username='subscription-followup-stale')
+    connection = make_connection(user)
+    ChatGPTSubscriptionCapabilityReceipt.objects.create(
+        connection=connection,
+        model_slug=connection.selected_model,
+        connection_generation=connection.generation,
+        credential_generation=connection.credential_generation,
+        capability='tools',
+        status='supported',
+    )
+    snapshot = subscription_execution.capture_snapshot(user)
+    native_messages = [
+        {'role': 'user', 'content': 'Original research'},
+        {'role': 'assistant', 'content': 'Original result'},
+    ]
+    session = ResearchSession.objects.create(
+        user=user,
+        title='Original research',
+        messages=native_messages,
+        native_continuation=subscription_execution.continuation_payload(
+            snapshot, native_messages,
+        ),
+    )
+    ChatGPTSubscriptionConnection.objects.filter(pk=connection.pk).update(
+        generation=connection.generation + 1,
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.post(
+        f'/api/research/{session.pk}/chat/',
+        {
+            'query': 'Follow up after authorization changed',
+            'execution_source': 'chatgpt_subscription',
+            'consent': True,
+        },
+        format='json',
+        HTTP_IDEMPOTENCY_KEY='subscription-followup-stale',
+    )
+
+    assert response.status_code == 409
+    assert response.data['error_code'] == 'research_authorization_changed'
+    assert response.data['request_state'] == 'rejected'
+    assert ResearchRun.objects.filter(user=user, session=session).count() == 0
 
 
 @pytest.mark.django_db

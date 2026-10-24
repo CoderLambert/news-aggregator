@@ -17,7 +17,7 @@ const api = vi.hoisted(() => ({
 vi.mock('@/services/researchApi', () => api)
 
 import { useResearch } from '@/hooks/useResearch'
-import { streamingFetch } from '@/utils/sse'
+import { StreamingHttpError, streamingFetch } from '@/utils/sse'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -114,7 +114,6 @@ describe('F03 queued and pre-header recovery', () => {
     act(() => { void result.current.handleSend('Synthetic rejected request') })
     await waitFor(() => expect(result.current.phase).toBe('error'))
     expect(result.current.recoveryAction).toBe('none')
-    expect(result.current.messages.at(-1).content).toContain('文本与工具能力验证')
     expect(result.current.messages.at(-1).content).not.toContain('原请求可能')
     expect(sessionStorage.getItem('news-aggregator:research-pending-create:v1:1')).toBeNull()
     expect(api.createResearchStream).toHaveBeenCalledTimes(1)
@@ -601,8 +600,42 @@ describe('useResearch stream lifecycle', () => {
     expect(result.current.recoveryAction).toBe('retry')
     expect(api.researchChatStream).not.toHaveBeenCalled()
 
-    await act(async () => { await result.current.handleRetry() })
-    expect(api.researchChatStream).toHaveBeenCalledTimes(1)
+    const authorization = { executionSource: 'chatgpt_subscription', consent: true }
+    await act(async () => { await result.current.handleRetry(authorization) })
+    expect(api.researchChatStream).toHaveBeenCalledWith(
+      'session-error',
+      '研究失败后重试',
+      expect.objectContaining({ authorization }),
+    )
+  })
+
+  it('shows a certified follow-up admission rejection without ambiguous resume state', async () => {
+    const history = session('changed-subscription-session', [
+      { role: 'user', content: '原始研究' },
+      { role: 'assistant', content: '原始结果' },
+    ], 2)
+    api.listResearchSessions.mockResolvedValue(emptyPage([{ id: history.id, title: history.title }]))
+    api.getResearchSession.mockResolvedValue(history)
+    api.openResearchSessionStream.mockResolvedValue({ kind: 'session', session: history })
+    api.researchChatStream.mockImplementation(async function* rejectedFollowup() {
+      yield* []
+      throw new StreamingHttpError('safe rejection', 409, {
+        error_code: 'research_authorization_changed',
+        request_state: 'rejected',
+      })
+    })
+    const { result } = renderResearchHook()
+    await waitFor(() => expect(result.current.isBusy).toBe(false))
+    await waitFor(() => expect(result.current.activeSessionId).toBe(history.id))
+
+    await act(async () => {
+      expect(await result.current.handleSend('授权变化后的续问')).toBe(true)
+    })
+
+    await waitFor(() => expect(result.current.phase).toBe('error'))
+    expect(result.current.recoveryAction).toBe('none')
+    expect(result.current.messages.at(-1).content).toContain('会话原模型授权已变化')
+    expect(result.current.messages.at(-1).content).not.toContain('原请求可能')
   })
 
   it('offers explicit retry after stopping before headers arrive and never auto resends', async () => {
@@ -777,6 +810,40 @@ describe('useResearch stream lifecycle', () => {
       await waitFor(() => expect(sessionStorage.getItem(storageKey)).toBeNull())
     })
     expect(api.createResearchStream).toHaveBeenCalledTimes(1)
+  })
+
+  it('retires a successful stream snapshot when a later session hydration contains the saved answer', async () => {
+    const sessionId = 'session-late-hydration'
+    api.getResearchSession.mockResolvedValue(session(sessionId))
+    api.createResearchStream.mockImplementation(async function* completedBeforeHydration(_query, options) {
+      options.onSessionId(sessionId)
+      options.onRunId('run-late-hydration')
+      yield { type: 'session_created', session_id: sessionId }
+      yield { type: 'complete' }
+    })
+    const { result, client } = renderResearchHook(7)
+    await waitFor(() => expect(result.current.loadingSessions).toBe(false))
+
+    await act(async () => {
+      expect(await result.current.handleSend('稍后持久化的研究')).toBe(true)
+    })
+    await waitFor(() => expect(result.current.phase).toBe('success'))
+
+    act(() => {
+      client.setQueryData(
+        ['private', 'research', 'session', { viewerId: 7, lang: 'zh', sessionId }],
+        session(sessionId, [
+          { role: 'user', content: '稍后持久化的研究' },
+          { role: 'assistant', content: '数据库中的完整研究结果' },
+        ], 2),
+      )
+    })
+
+    await waitFor(() => expect(result.current.phase).toBe('idle'))
+    expect(result.current.messages.map((message) => message.content)).toEqual([
+      '稍后持久化的研究',
+      '数据库中的完整研究结果',
+    ])
   })
 
   it('clears viewer-scoped recovery metadata after deleting a session', async () => {

@@ -186,6 +186,7 @@ describe('ResearchPanel', () => {
       fullCapabilities({ research: false, research_byok_create: true }))
     await userEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
     expect(await screen.findByText(/ChatGPT 订阅 · gpt-subscription-research/)).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '输入研究问题' })).not.toHaveAttribute('placeholder', '请先登录')
     expect(screen.getByText(/可能使用订阅额度/)).toBeInTheDocument()
     fireEvent.change(screen.getByRole('textbox', { name: '输入研究问题' }), {
       target: { value: '使用订阅执行研究' },
@@ -198,6 +199,73 @@ describe('ResearchPanel', () => {
       executionSource: 'chatgpt_subscription',
       consent: true,
     })
+  })
+
+  it('shows a durable terminal research error instead of an ambiguous delivery warning', async () => {
+    api.createResearchStream.mockImplementation(async function* terminalFailure() {
+      yield { type: 'session_created', session_id: 'subscription-terminal-error' }
+      yield { type: 'error', message: 'ChatGPT 订阅模型暂时无法完成研究，请稍后明确重试。' }
+    })
+
+    renderPanel()
+    fireEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    fireEvent.click(await screen.findByRole('button', { name: '分析 AI 芯片竞争格局' }))
+
+    const terminalMessage = await screen.findByText(/ChatGPT 订阅模型暂时无法完成研究，请稍后明确重试。/)
+    const status = terminalMessage.closest('[role="status"]')
+    expect(status).not.toBeNull()
+    expect(status).toHaveTextContent('ChatGPT 订阅模型暂时无法完成研究，请稍后明确重试。')
+    expect(status).not.toHaveTextContent('原请求可能已到达服务器')
+    expect(screen.getByRole('button', { name: '重新研究' })).toBeInTheDocument()
+  })
+
+  it('requires fresh subscription consent before retrying a failed follow-up', async () => {
+    const history = {
+      ...completedSession(),
+      research_model: {
+        source: 'chatgpt_subscription',
+        model_config_id: null,
+        model_id: 'gpt-6-luna',
+      },
+    }
+    api.listResearchSessions.mockResolvedValue({
+      count: 1,
+      next: null,
+      previous: null,
+      results: [{ id: history.id, title: history.title }],
+    })
+    api.getResearchSession.mockResolvedValue(history)
+    api.openResearchSessionStream.mockResolvedValue({ kind: 'session', session: history })
+    api.researchChatStream
+      .mockImplementationOnce(async function* terminalFailure() {
+        yield { type: 'error', message: '订阅研究暂时失败，请稍后重试。' }
+      })
+      .mockImplementationOnce(async function* successfulRetry() {
+        yield { type: 'text_delta', text: '重试后的完整回答' }
+        yield { type: 'complete' }
+      })
+
+    renderPanel()
+    fireEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    await screen.findByText('本次研究模型：gpt-6-luna')
+    fireEvent.change(screen.getByRole('textbox', { name: '输入研究问题' }), {
+      target: { value: '继续分析' },
+    })
+    await userEvent.click(screen.getByRole('checkbox'))
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+
+    const retry = await screen.findByRole('button', { name: '重新研究' })
+    expect(retry).toBeDisabled()
+    await userEvent.click(screen.getByRole('checkbox'))
+    expect(retry).toBeEnabled()
+    await userEvent.click(retry)
+
+    await waitFor(() => expect(api.researchChatStream).toHaveBeenCalledTimes(2))
+    expect(api.researchChatStream.mock.calls[1][2].authorization).toEqual({
+      executionSource: 'chatgpt_subscription',
+      consent: true,
+    })
+    expect(await screen.findByText('重试后的完整回答')).toBeInTheDocument()
   })
 
   it('sends a consented follow-up using the stored session model without requiring current preferences', async () => {

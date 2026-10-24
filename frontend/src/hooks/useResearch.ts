@@ -671,6 +671,13 @@ export function useResearch(
     }
   }, [lang, queryClient, queryViewerId, removeTask, viewerId])
 
+  useEffect(() => {
+    if (!activeTask || activeTask.phase !== 'success' || !activeSessionId || !sessionQuery.data) return
+    if (activeTask.sessionId !== activeSessionId || !sessionHasSavedTask(sessionQuery.data, activeTask)) return
+    clearStoredRecovery(queryViewerId, activeSessionId)
+    removeTask(taskStorageKey(queryViewerId, activeSessionId), activeTask.id)
+  }, [activeSessionId, activeTask, queryViewerId, removeTask, sessionQuery.data])
+
   const consumeResearchEvents = useCallback(async (connection: ActiveConnection, events: AsyncIterable<ResearchEvent>) => {
     try {
       for await (const event of events) {
@@ -704,19 +711,23 @@ export function useResearch(
       if (!connectionIsCurrent(connection)) return
       const task = currentConnectionTask(connection)
       if (!task) return
-      if (!task.sessionId && connection.requestMode === 'create' && connection.idempotencyKey && error instanceof StreamingHttpError
+      if (connection.requestMode && error instanceof StreamingHttpError
         && error.status === 409 && error.requestRejected && error.code
         && ['research_model_not_verified', 'research_model_unavailable', 'research_feature_disabled',
           'research_authorization_changed'].includes(error.code)) {
-        clearPendingCreate(connection.viewerId, connection.idempotencyKey)
+        if (!task.sessionId && connection.requestMode === 'create' && connection.idempotencyKey) {
+          clearPendingCreate(connection.viewerId, connection.idempotencyKey)
+        }
         const notice = error.code === 'research_model_not_verified'
           ? '请先完成该模型的工具能力验证，再发起研究。此次请求未创建研究任务。'
-          : '所选研究模型来源或授权当前不可用，请在 AI 设置中检查。此次请求未创建研究任务。'
+          : error.code === 'research_authorization_changed' && task.sessionId
+            ? '会话原模型授权已变化，请新建研究并重新确认本次调用。此次请求未创建研究任务。'
+            : '所选研究模型来源或授权当前不可用，请在 AI 设置中检查。此次请求未创建研究任务。'
         putTask(connection.taskKey, { ...markResearchTaskInterrupted(task, notice), recovery: 'none' })
         return
       }
-      const message = error instanceof Error ? error.message : ERROR_MESSAGE
-      const isAuthError = /\b(401|403)\b/.test(message)
+      const isAuthError = error instanceof StreamingHttpError
+        && (error.status === 401 || error.status === 403)
       const interrupted = markResearchTaskInterrupted(
         task,
         isAuthError ? '请先登录后再使用研究助手 🔐' : ERROR_MESSAGE,
@@ -922,11 +933,11 @@ export function useResearch(
       if (!connectionIsCurrent(connection)) return
       const current = currentConnectionTask(connection)
       if (!current || !hasRecovery) return
+      const isAuthError = error instanceof StreamingHttpError
+        && (error.status === 401 || error.status === 403)
       const interrupted = markResearchTaskInterrupted(
         current,
-        error instanceof Error && /\b(401|403)\b/.test(error.message)
-          ? '请先登录后再使用研究助手 🔐'
-          : ERROR_MESSAGE,
+        isAuthError ? '请先登录后再使用研究助手 🔐' : ERROR_MESSAGE,
       )
       putTask(taskKey, interrupted)
     } finally {
@@ -1006,9 +1017,10 @@ export function useResearch(
 
   const handleRetry = useCallback(async (authorization?: ResearchCreateAuthorization) => {
     const task = activeTask
-    if (authorizedCreateOnly || !task || (task.phase !== 'error' && task.phase !== 'cancelled') || task.recovery !== 'retry' || viewerId === null) return
+    if (authorizedCreateOnly || !task || (task.phase !== 'error' && task.phase !== 'cancelled')
+      || task.recovery !== 'retry' || viewerId === null) return false
     // An unanswered create POST may already have invoked a paid provider.
-    if (loadPendingCreate(viewerId)) return
+    if (loadPendingCreate(viewerId)) return false
     const next = createResearchTask(
       `research-${Date.now()}-${++taskSequenceRef.current}`,
       task.query,
@@ -1017,8 +1029,7 @@ export function useResearch(
       task.sessionId,
       task.startingMessageCount,
     )
-    await runStreamTask(next, next.sessionId ? 'chat' : 'create', undefined,
-      next.sessionId ? undefined : authorization)
+    return runStreamTask(next, next.sessionId ? 'chat' : 'create', undefined, authorization)
   }, [activeTask, authorizedCreateOnly, runStreamTask, viewerId])
 
   const handleResume = useCallback(async () => {
@@ -1096,6 +1107,7 @@ export function useResearch(
     hasRecoverableTask: activeTask?.recovery === 'resume',
     isBusy: connectionBusy,
     recoveryAction: activeTask?.recovery ?? 'none',
+    recoveryNotice: activeTask?.notice ?? null,
     handleSend,
     handleNewSession,
     handleSelectSession,

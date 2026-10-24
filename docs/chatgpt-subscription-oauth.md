@@ -78,6 +78,8 @@ News Aggregator 使用 OpenAI 的开源应用 Sign in with ChatGPT 流程，让�
 
 研究任务保存秘密无关的执行快照：来源、owner、连接 generation、模型和能力回执 ID。首轮和每次续问都要求明确的来源与本次同意；Worker 在调用前、工具执行期间和提交结果时复核快照。Responses API 始终使用 `stream: true`、`store: false`，服务端保留原生 function-call/output items 以安全续接，不使用 `previous_response_id`。ChatGPT Subscription 的流式终态可能不重复携带 `output`，此时只从同一条已完成流里按连续 `output_index` 重建 `response.output_item.done`，仍由原生 Responses 校验器验证后使用。选择订阅后不会回退到 BYOK、站点 Key 或其他模型，失败也不会自动重发。
 
+工具能力验证属于可能超过普通 API 十秒窗口的同步模型调用，前端使用与后端 provider 上限匹配的长请求预算，不能因客户端先超时而自动重发。深度研究的终端失败会显示服务端保存的安全原因；只有响应头前无法确认是否到达服务端的请求才显示“可能已到达服务器”。完成事件后，界面持续以流式快照显示结果，直到 owner-scoped 会话 DTO 包含已提交回答，再切换到持久化内容。
+
 文章页按 `full_translation` 的有效来源路由翻译：显式 ChatGPT Subscription 选择优先于 BYOK 全局默认，只有有效来源为 BYOK 时才进入个人 Key 翻译队列。这样不会因另一个用途的默认模型遮蔽已保存的订阅翻译选择，也不会新增隐式来源回退。
 
 订阅全文翻译任务在 SQLite WAL 下以写入预留开始 claim 事务，再读取并复核 owner、连接 generation、模型和正文快照，最后通过条件更新取得租约。正文是否可读由统一 stored-reader 授权（包括已授权的 `available` 正文），最终 CAS 精确匹配快照中的正文和状态，而不是维护另一份状态白名单。这样竞争写入只能在读取快照前等待，不能把已读取的 WAL 快照升级成 `SQLITE_BUSY_SNAPSHOT`；模型调用仍在短事务之外执行。

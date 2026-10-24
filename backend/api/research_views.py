@@ -110,8 +110,8 @@ def _stream_response(run, session_id=None):
 
 def _run_error_response(exc):
     payload = {'error': exc.message, 'error_code': exc.error_code}
-    # Only a failed new-run model admission certifies no run was created.
-    # A generic conflict/timeout may still have an existing queued/running run.
+    # A certified admission failure means this request created no run.
+    # Generic conflicts/timeouts remain uncertain because work may exist.
     if exc.request_rejected:
         payload['request_state'] = 'rejected'
     response = Response(
