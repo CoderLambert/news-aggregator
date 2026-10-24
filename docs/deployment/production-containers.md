@@ -51,7 +51,7 @@ scripts/deploy/deploy.sh \
 
 ## 本地前端动态预览（非生产发布）
 
-纯前端改动可用 `scripts/deploy/local-frontend-preview.sh` 复用宿主现有 Node 22 与 `frontend/node_modules`，生成内容寻址的静态 release，并以只读 bind mount 覆盖本地 app 容器的 `/app/frontend/dist`。脚本默认仅打印计划；`--execute` 才会校验 Compose、构建前端并只重建指定的 app 服务。它核对重建前后镜像 ID 不变、挂载路径精确且只读，并为当前/上一份 override 保存原子 symlink；激活或核对失败时恢复之前的 app 配置。release 根目录必须位于源码树之外，因此可供同一机器上的多个分支复用而不会把产物写回工作树。
+纯前端改动可用 `scripts/deploy/local-frontend-preview.sh` 复用宿主现有 Node 22 与 `frontend/node_modules`，生成内容寻址的静态 release，并以只读 bind mount 覆盖本地 app 容器的 `/app/frontend/dist`。脚本默认仅打印计划；`--execute` 才会校验 Compose、构建前端，并把指定 app 与合并 Compose 配置中所有 `network_mode: service:app` 的侧车作为同一重建单元。激活与失败回滚使用相同的服务集合，避免 app 单独重建后侧车继续绑定已经失效的网络命名空间。它核对重建前后镜像 ID 不变、挂载路径精确且只读，并为当前/上一份 override 保存原子 symlink；激活或核对失败时恢复之前的 app 配置。release 根目录必须位于源码树之外，因此可供同一机器上的多个分支复用而不会把产物写回工作树。
 
 ```sh
 scripts/deploy/local-frontend-preview.sh --execute \

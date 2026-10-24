@@ -20,7 +20,8 @@ usage() {
 Usage: local-frontend-preview.sh [--execute] --project NAME --compose ABSOLUTE_FILE [--compose ABSOLUTE_FILE ...] [--root ABSOLUTE_DIR]
 
 Builds a content-addressed frontend release with the existing Node environment and,
-with --execute, mounts it read-only at /app/frontend/dist and recreates only app.
+with --execute, mounts it read-only at /app/frontend/dist and recreates app together
+with services that share its network namespace.
 Without --execute, validates inputs and prints the planned release; Docker is not used.
 EOF
 }
@@ -31,7 +32,7 @@ fail() {
 }
 
 cleanup() {
-    local status=$?
+    local exit_status=${1:-$?}
     trap - EXIT
     if [[ -n "$STAGE_DIR" && -d "$STAGE_DIR" ]]; then
         rm -rf -- "$STAGE_DIR"
@@ -39,7 +40,7 @@ cleanup() {
     [[ -z "$CURRENT_TMP" || ! -L "$CURRENT_TMP" ]] || rm -f -- "$CURRENT_TMP"
     [[ -z "$PREVIOUS_TMP" || ! -L "$PREVIOUS_TMP" ]] || rm -f -- "$PREVIOUS_TMP"
     [[ -z "$OVERRIDE_TMP" || ! -f "$OVERRIDE_TMP" ]] || rm -f -- "$OVERRIDE_TMP"
-    exit "$status"
+    exit "$exit_status"
 }
 trap cleanup EXIT
 
@@ -82,7 +83,7 @@ NODE_VERSION="$("${NODE_RUNNER[@]}" node --version)"
 [[ "$NODE_VERSION" == v22.* ]] || fail 'the selected Node runtime is not version 22.'
 
 SOURCE_MANIFEST="$(mktemp "${TMPDIR:-/tmp}/newshub-frontend-manifest.XXXXXX")"
-trap 'rm -f -- "$SOURCE_MANIFEST"; cleanup' EXIT
+trap 'exit_status=$?; rm -f -- "$SOURCE_MANIFEST"; cleanup "$exit_status"' EXIT
 while IFS= read -r -d '' source_file; do
     case "$source_file" in
         frontend/dist/*|frontend/node_modules/*|frontend/.env|frontend/.env.*) continue ;;
@@ -102,7 +103,7 @@ PROJECT_DIR="$ROOT/projects/$PROJECT"
 OVERRIDE="$PROJECT_DIR/releases/$FINGERPRINT.yaml"
 
 if ((!EXECUTE)); then
-    printf 'Dry run only: frontend %s would use release %s and recreate only service %s in project %s.\n' \
+    printf 'Dry run only: frontend %s would use release %s and recreate service %s plus its network-sharing sidecars in project %s.\n' \
         "$FINGERPRINT" "$RELEASE" "$SERVICE" "$PROJECT"
     exit 0
 fi
@@ -161,6 +162,30 @@ for compose_file in "${COMPOSE_FILES[@]}"; do COMPOSE+=(-f "$compose_file"); don
 BASE_COMPOSE=("${COMPOSE[@]}")
 COMPOSE+=(-f "$OVERRIDE")
 "${COMPOSE[@]}" config --quiet
+if ! SHARED_NETWORK_SERVICES="$("${COMPOSE[@]}" config --format json | python3 -c '
+import json
+import re
+import sys
+
+target = sys.argv[1]
+document = json.load(sys.stdin)
+services = document.get("services")
+if not isinstance(services, dict) or target not in services:
+    raise SystemExit("target service is missing from Compose config")
+safe = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+for name in sorted(services):
+    if not safe.fullmatch(name):
+        raise SystemExit("unsafe service name in Compose config")
+    config = services[name]
+    if isinstance(config, dict) and config.get("network_mode") == f"service:{target}":
+        print(name)
+' "$SERVICE")"; then
+    fail 'could not identify services that share the app network namespace.'
+fi
+RECREATE_SERVICES=("$SERVICE")
+while IFS= read -r sidecar; do
+    [[ -z "$sidecar" ]] || RECREATE_SERVICES+=("$sidecar")
+done <<< "$SHARED_NETWORK_SERVICES"
 CONTAINER_ID="$("${BASE_COMPOSE[@]}" ps -q "$SERVICE")"
 [[ -n "$CONTAINER_ID" ]] || fail "service $SERVICE is not running in project $PROJECT."
 OLD_IMAGE_ID="$(docker inspect --format '{{.Image}}' "$CONTAINER_ID")"
@@ -176,10 +201,10 @@ fi
 restore_configuration() {
     if [[ -n "$old_current" ]]; then
         "${BASE_COMPOSE[@]}" -f "$old_current" up -d --no-deps --force-recreate --wait \
-            --wait-timeout "$WAIT_TIMEOUT" "$SERVICE"
+            --wait-timeout "$WAIT_TIMEOUT" "${RECREATE_SERVICES[@]}"
     else
         "${BASE_COMPOSE[@]}" up -d --no-deps --force-recreate --wait \
-            --wait-timeout "$WAIT_TIMEOUT" "$SERVICE"
+            --wait-timeout "$WAIT_TIMEOUT" "${RECREATE_SERVICES[@]}"
     fi
 }
 
@@ -189,7 +214,7 @@ restore_and_fail() {
     fail "$message"
 }
 
-if ! "${COMPOSE[@]}" up -d --no-deps --force-recreate --wait --wait-timeout "$WAIT_TIMEOUT" "$SERVICE"; then
+if ! "${COMPOSE[@]}" up -d --no-deps --force-recreate --wait --wait-timeout "$WAIT_TIMEOUT" "${RECREATE_SERVICES[@]}"; then
     restore_and_fail 'frontend preview activation failed; attempted to restore the previous app configuration.'
 fi
 
@@ -217,5 +242,5 @@ CURRENT_TMP="$PROJECT_DIR/.current.new.$$"
 ln -s "releases/$FINGERPRINT.yaml" "$CURRENT_TMP"
 mv -Tf -- "$CURRENT_TMP" "$PROJECT_DIR/current"
 CURRENT_TMP=""
-printf 'Activated frontend %s from %s on %s/%s; backend image unchanged (%s).\n' \
-    "$FINGERPRINT" "$DIST" "$PROJECT" "$SERVICE" "$NEW_IMAGE_ID"
+printf 'Activated frontend %s from %s on project %s; recreated services [%s]; backend image unchanged (%s).\n' \
+    "$FINGERPRINT" "$DIST" "$PROJECT" "${RECREATE_SERVICES[*]}" "$NEW_IMAGE_ID"
