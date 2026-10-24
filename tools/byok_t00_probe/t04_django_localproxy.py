@@ -187,6 +187,11 @@ def _enable_deep_research_capability(owner, model):
         'preferences': [
             {
                 'task_kind': kind,
+                    'selection_source': (
+                        'byok' if kind == 'deep_research'
+                        else 'unset' if kind == 'default'
+                        else 'inherit'
+                    ),
                 'model_config_id': str(model.pk) if kind == 'deep_research' else None,
             }
             for kind in TASK_KINDS
@@ -792,6 +797,7 @@ def test_t04_real_django_sdk_proxy_deepseek_stream_terminal_and_cancel():
                     {
                         "query": marker,
                         "local_only": True,
+                            "execution_source": "byok",
                         "model_config_id": str(model.pk),
                         "consent": True,
                     },

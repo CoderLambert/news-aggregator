@@ -198,6 +198,9 @@ class SelfHostedCIContract(unittest.TestCase):
         t04_source = (ROOT / "tools/byok_t00_probe/t04_django_localproxy.py").read_text(
             encoding="utf-8",
         )
+        self.assertIn("'selection_source':", t04_source)
+        self.assertIn("'byok' if kind == 'deep_research'", t04_source)
+        self.assertIn('"execution_source": "byok"', t04_source)
         self.assertNotIn("pytest.skip", t04_source)
         self.assertNotIn("skipif", t04_source)
         self.assertNotIn("tools/byok_t00_probe/t04_django_localproxy.py",
