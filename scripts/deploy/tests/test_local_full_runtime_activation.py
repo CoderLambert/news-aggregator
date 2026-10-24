@@ -60,6 +60,7 @@ def test_activation_commands_start_every_service_and_restore_previous_runtime():
         current_env_file=Path('/state/candidate.env'),
         previous_env_file=Path('/state/previous.env'),
         previous_services=local_full_runtime.REQUIRED_SERVICES,
+        project_directory=Path('/repo'),
         wait_timeout=300,
     )
 
@@ -86,9 +87,22 @@ def test_first_minimal_runtime_needs_no_business_io_quiesce():
         project='newshub-local-main', compose_files=(Path('/repo/compose.yaml'),),
         previous_compose=(Path('/repo/compose.yaml'),),
         current_env_file=Path('/state/candidate.env'), previous_env_file=None,
-        previous_services=('app', 'indexer'), wait_timeout=300,
+        previous_services=('app', 'indexer'), project_directory=Path('/repo'),
+        wait_timeout=300,
     )
     assert plan.quiesce is None
+
+
+def test_rollback_stops_candidate_indexer_when_it_was_not_previously_running():
+    plan = local_full_runtime.activation_commands(
+        project='newshub-local-main', compose_files=(Path('/repo/compose.yaml'),),
+        previous_compose=(Path('/previous/compose.yaml'),),
+        current_env_file=Path('/state/candidate.env'), previous_env_file=None,
+        previous_services=('app',), wait_timeout=300,
+        project_directory=Path('/repo'),
+    )
+    assert plan.stop_new[-9:] == list(reversed(local_full_runtime.REQUIRED_SERVICES))
+    assert plan.rollback[-1:] == ['app']
 
 
 def test_dry_run_does_not_create_runtime_state(tmp_path, capsys):
@@ -178,10 +192,11 @@ def test_previous_complete_activation_restores_versioned_env_and_all_services(tm
     runtime = tmp_path / 'runtime'
     runtime.mkdir(mode=0o700)
     receipt = {
-        'schema_version': 2, 'project': 'newshub-local-main',
+        'schema_version': 3, 'project': 'newshub-local-main',
         'source_root': str(source), 'image': 'newshub:dev-' + 'a' * 40,
         'compose_files': [str(base), str(overlay)],
-        'base_compose_files': [str(base)], 'env_file': str(env_file),
+        'base_compose_files': [str(base)], 'base_source_files': [str(base)],
+        'env_file': str(env_file),
         'services': list(local_full_runtime.REQUIRED_SERVICES),
     }
     path = runtime / 'last-activation.json'
@@ -198,6 +213,19 @@ def test_previous_complete_activation_restores_versioned_env_and_all_services(tm
     assert previous_env == env_file
     assert services == local_full_runtime.REQUIRED_SERVICES
     assert base_files == (base,)
+
+
+def test_frozen_base_compose_is_unchanged_when_source_is_edited(tmp_path):
+    source = tmp_path / 'compose.yaml'
+    source.write_text('services:\n  app:\n    ports: ["127.0.0.1:9527:9527"]\n')
+    releases = tmp_path / 'releases'
+    releases.mkdir(mode=0o700)
+
+    frozen = local_full_runtime._freeze_compose_files((source,), releases, 'candidate')
+    source.write_text('services:\n  app:\n    ports: ["127.0.0.1:9999:9527"]\n')
+
+    assert '9527:9527' in frozen[0].read_text()
+    assert '9999:9527' not in frozen[0].read_text()
 
 
 def test_failed_rollback_is_reported_separately(monkeypatch):
@@ -249,7 +277,9 @@ def test_activation_failure_stops_new_services_and_restores_previous_compose(tmp
     source = tmp_path / 'source'
     for directory in ('backend', 'chroma_data', 'logs'):
         (source / directory).mkdir(parents=True, exist_ok=True)
-    previous = (Path('/previous/compose.yaml'), Path('/previous/runtime.yaml'))
+    previous = (source / 'compose.yaml', source / 'runtime.yaml')
+    for path in previous:
+        path.write_text('services: {}\n')
     candidate = 'newshub:dev-' + 'a' * 40
     calls = []
     overlay = tmp_path / 'compose.local-full.yaml'
@@ -283,7 +313,7 @@ def test_activation_failure_stops_new_services_and_restores_previous_compose(tmp
         )
 
     assert any('stop' in call and 'ai-gateway' in call for call in calls)
-    rollback = [call for call in calls if '/previous/runtime.yaml' in call and call[-2:] == ['app', 'indexer']]
+    rollback = [call for call in calls if str(previous[1]) in call and call[-2:] == ['app', 'indexer']]
     assert len(rollback) == 1
 
 
@@ -291,7 +321,9 @@ def test_partial_infrastructure_failure_also_restores_previous_compose(tmp_path,
     source = tmp_path / 'source'
     for directory in ('backend', 'chroma_data', 'logs'):
         (source / directory).mkdir(parents=True, exist_ok=True)
-    previous = (Path('/previous/compose.yaml'), Path('/previous/runtime.yaml'))
+    previous = (source / 'compose.yaml', source / 'runtime.yaml')
+    for path in previous:
+        path.write_text('services: {}\n')
     candidate = 'newshub:dev-' + 'b' * 40
     calls = []
     overlay = tmp_path / 'compose.local-full.yaml'
@@ -324,7 +356,7 @@ def test_partial_infrastructure_failure_also_restores_previous_compose(tmp_path,
 
     assert any('stop' in call and 'ai-gateway' in call for call in calls)
     assert len([call for call in calls
-                if '/previous/runtime.yaml' in call and call[-2:] == ['app', 'indexer']]) == 1
+                if str(previous[1]) in call and call[-2:] == ['app', 'indexer']]) == 1
 
 
 def test_repeat_activation_quiesces_old_business_services_before_infrastructure(tmp_path, monkeypatch):
@@ -342,10 +374,11 @@ def test_repeat_activation_quiesces_old_business_services_before_infrastructure(
     runtime = tmp_path / 'runtime'
     runtime.mkdir(mode=0o700)
     receipt = {
-        'schema_version': 2, 'project': 'newshub-local-main',
+        'schema_version': 3, 'project': 'newshub-local-main',
         'source_root': str(source), 'image': candidate,
         'compose_files': [str(base), str(previous_overlay)],
-        'base_compose_files': [str(base)], 'env_file': str(previous_env),
+        'base_compose_files': [str(base)], 'base_source_files': [str(base)],
+        'env_file': str(previous_env),
         'services': list(local_full_runtime.REQUIRED_SERVICES),
     }
     receipt_path = runtime / 'last-activation.json'
@@ -382,3 +415,53 @@ def test_repeat_activation_quiesces_old_business_services_before_infrastructure(
     infrastructure_index = next(index for index, call in enumerate(calls)
                                 if 'up' in call and call[-7:] == list(local_full_runtime.INFRASTRUCTURE_SERVICES))
     assert quiesce_index < infrastructure_index
+
+
+def test_receipt_publish_failure_rolls_back_and_stops_all_candidate_services(tmp_path, monkeypatch):
+    source = tmp_path / 'source'
+    for directory in ('backend', 'chroma_data', 'logs'):
+        (source / directory).mkdir(parents=True, exist_ok=True)
+    base = source / 'compose.yaml'
+    base.write_text('services: {}\n')
+    overlay = tmp_path / 'candidate.yaml'
+    overlay.write_text('services: {}\n')
+    candidate = 'newshub:dev-' + 'd' * 40
+    calls = []
+    ready = {
+        'schema_version': 1, 'ready': True,
+        'checks': {name: {'enabled': True, 'ready': True, 'status': 'ready', 'code': ''}
+                   for name in local_full_runtime.REQUIRED_HEALTH_CHECKS},
+    }
+
+    monkeypatch.setattr(local_full_runtime, '_local_docker', lambda: None)
+    monkeypatch.setattr(local_full_runtime, '_previous_runtime',
+                        lambda _project: ((base,), candidate, source))
+    monkeypatch.setattr(local_full_runtime, '_running_services', lambda _project: ('app',))
+    monkeypatch.setattr(local_full_runtime, '_backup_sqlite', lambda *_args: None)
+    monkeypatch.setattr(local_full_runtime, '_bootstrap_miniflux', lambda *_args: 2)
+    monkeypatch.setattr(local_full_runtime, '_bootstrap_ai_gateway', lambda *_args: None)
+    monkeypatch.setattr(local_full_runtime, '_write_receipt',
+                        lambda *_args: (_ for _ in ()).throw(
+                            local_full_runtime.LocalRuntimeError('synthetic receipt failure')))
+
+    def command(arguments, **_kwargs):
+        calls.append(arguments)
+        if arguments[:3] == ['docker', 'image', 'inspect']:
+            return type('Result', (), {'stdout': '[]', 'returncode': 0})()
+        if arguments[-2:] == ['config', '--images']:
+            return type('Result', (), {'stdout': candidate + '\n', 'returncode': 0})()
+        if arguments[-1:] == ['runtime_health']:
+            return type('Result', (), {'stdout': json.dumps(ready) + '\n', 'returncode': 0})()
+        return type('Result', (), {'stdout': '', 'returncode': 0})()
+
+    monkeypatch.setattr(local_full_runtime, '_run', command)
+    with pytest.raises(local_full_runtime.LocalRuntimeError, match='receipt failure'):
+        local_full_runtime._execute(
+            project='newshub-local-main', source_root=source,
+            runtime_root=tmp_path / 'runtime', image=candidate, wait_timeout=300,
+            complete_overlay=overlay,
+        )
+
+    stop = next(call for call in calls if 'stop' in call and 'indexer' in call)
+    assert stop[-9:] == list(reversed(local_full_runtime.REQUIRED_SERVICES))
+    assert any('up' in call and call[-1:] == ['app'] for call in calls)

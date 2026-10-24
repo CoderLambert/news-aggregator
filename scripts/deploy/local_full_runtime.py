@@ -58,8 +58,11 @@ class ActivationCommands:
     rollback: list[str]
 
 
-def _compose(project: str, files: tuple[Path, ...], env_file: Path | None = None) -> list[str]:
+def _compose(project: str, files: tuple[Path, ...], env_file: Path | None = None,
+             project_directory: Path | None = None) -> list[str]:
     command = ['docker', 'compose', '-p', project]
+    if project_directory is not None:
+        command += ['--project-directory', str(project_directory)]
     for path in files:
         command += ['-f', str(path)]
     if env_file is not None:
@@ -70,9 +73,10 @@ def _compose(project: str, files: tuple[Path, ...], env_file: Path | None = None
 def activation_commands(*, project: str, compose_files: tuple[Path, ...],
                         previous_compose: tuple[Path, ...], current_env_file: Path,
                         previous_env_file: Path | None,
-                        previous_services: tuple[str, ...], wait_timeout: int) -> ActivationCommands:
-    current = _compose(project, compose_files, current_env_file)
-    old = _compose(project, previous_compose, previous_env_file)
+                        previous_services: tuple[str, ...], project_directory: Path,
+                        wait_timeout: int) -> ActivationCommands:
+    current = _compose(project, compose_files, current_env_file, project_directory)
+    old = _compose(project, previous_compose, previous_env_file, project_directory)
     up = ['up', '-d', '--no-build', '--pull', 'never', '--wait', '--wait-timeout', str(wait_timeout)]
     replace = [*up, '--force-recreate']
     quiesce_targets = [name for name in ('miniflux', 'rss-sync', 'channel-worker')
@@ -83,7 +87,7 @@ def activation_commands(*, project: str, compose_files: tuple[Path, ...],
         preflight=current + replace + list(REQUIRED_SERVICES),
         full=current + replace + list(REQUIRED_SERVICES),
         verify=current + ['exec', '-T', 'app', 'python', '/app/backend/manage.py', 'runtime_health'],
-        stop_new=current + ['stop', '--timeout', '45', *reversed(REQUIRED_SERVICES[2:])],
+        stop_new=current + ['stop', '--timeout', '45', *reversed(REQUIRED_SERVICES)],
         rollback=old + up + list(previous_services),
     )
 
@@ -431,6 +435,16 @@ def _copy_release_file(source: Path, target: Path) -> Path:
     return target
 
 
+def _freeze_compose_files(sources: tuple[Path, ...], releases: Path,
+                          release_id: str) -> tuple[Path, ...]:
+    frozen = []
+    for index, source in enumerate(sources):
+        suffix = source.suffix if source.suffix in {'.yaml', '.yml'} else '.yaml'
+        target = releases / f'compose-base-{release_id}-{index}{suffix}'
+        frozen.append(_copy_release_file(source, target))
+    return tuple(frozen)
+
+
 def _previous_activation(runtime_root: Path, *, project: str, source_root: Path,
                          image: str, detected_compose: tuple[Path, ...],
                          detected_services: tuple[str, ...]):
@@ -443,19 +457,20 @@ def _previous_activation(runtime_root: Path, *, project: str, source_root: Path,
                 or info.st_mode & 0o077 or info.st_size > 1024 * 1024):
             raise ValueError
         value = json.loads(path.read_text(encoding='utf-8'))
-        if (value.get('schema_version') != 2 or value.get('project') != project
+        if (value.get('schema_version') != 3 or value.get('project') != project
                 or value.get('source_root') != str(source_root)
                 or value.get('image') != image):
             raise ValueError
         compose_files = tuple(Path(item) for item in value['compose_files'])
         base_files = tuple(Path(item) for item in value['base_compose_files'])
+        base_source_files = tuple(Path(item) for item in value['base_source_files'])
         env_file = Path(value['env_file'])
         services = tuple(value['services'])
         env_info = env_file.stat()
-        if (not compose_files or not base_files or not services
+        if (not compose_files or not base_files or not base_source_files or not services
                 or compose_files != detected_compose
                 or any(not item.is_absolute() or not item.is_file() or item.is_symlink()
-                       for item in (*compose_files, *base_files, env_file))
+                       for item in (*compose_files, *base_files, *base_source_files, env_file))
                 or env_info.st_uid != os.getuid() or env_info.st_mode & 0o077
                 or len(set(services)) != len(services)
                 or not {'app', 'indexer'}.issubset(services)
@@ -464,7 +479,7 @@ def _previous_activation(runtime_root: Path, *, project: str, source_root: Path,
             raise ValueError
     except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError):
         raise LocalRuntimeError('previous activation receipt is invalid; refusing unsafe replacement') from None
-    return compose_files, env_file, detected_services, base_files
+    return compose_files, env_file, detected_services, base_source_files
 
 
 def _restore_previous_runtime(commands: ActivationCommands, *, current_environment,
@@ -489,12 +504,17 @@ def _restore_previous_runtime(commands: ActivationCommands, *, current_environme
         )
 
 
-def _write_receipt(path: Path, value: dict[str, object]) -> None:
+def _receipt_preflight(path: Path) -> None:
     if path.is_symlink():
         raise LocalRuntimeError('activation receipt must not be a symlink')
     temporary = path.with_name('.' + path.name + '.new')
     if temporary.exists() or temporary.is_symlink():
         raise LocalRuntimeError('activation receipt staging path is occupied')
+
+
+def _write_receipt(path: Path, value: dict[str, object]) -> None:
+    _receipt_preflight(path)
+    temporary = path.with_name('.' + path.name + '.new')
     try:
         descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
@@ -503,6 +523,10 @@ def _write_receipt(path: Path, value: dict[str, object]) -> None:
             os.fsync(stream.fileno())
         os.replace(temporary, path)
     except OSError:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
         raise LocalRuntimeError('could not write the activation receipt') from None
 
 
@@ -518,11 +542,12 @@ def _execute(*, project: str, source_root: Path, runtime_root: Path, image: str,
     _private_directory(runtime_root)
     releases = runtime_root / 'releases'
     _private_directory(releases)
-    previous, previous_env_file, previous_services, base_compose = _previous_activation(
+    previous, previous_env_file, previous_services, base_sources = _previous_activation(
         runtime_root, project=project, source_root=source_root, image=current_image,
         detected_compose=detected_compose, detected_services=detected_services,
     )
     release_id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '-' + uuid.uuid4().hex
+    base_compose = _freeze_compose_files(base_sources, releases, release_id)
     release_overlay = _copy_release_file(
         complete_overlay, releases / ('compose-local-full-' + release_id + '.yaml'))
     store = SecretStore(runtime_root / 'secrets')
@@ -536,14 +561,17 @@ def _execute(*, project: str, source_root: Path, runtime_root: Path, image: str,
                                   previous_compose=previous, current_env_file=env_file,
                                   previous_env_file=previous_env_file,
                                   previous_services=previous_services,
+                                  project_directory=source_root,
                                   wait_timeout=wait_timeout)
-    compose = _compose(project, compose_files, env_file)
+    compose = _compose(project, compose_files, env_file, source_root)
     environment = {**os.environ, **values}
     _run(compose + ['config', '--quiet'], environment=environment)
     images = _run(compose + ['config', '--images'], environment=environment).stdout.splitlines()
     for candidate in sorted(set(filter(None, images))):
         _run(['docker', 'image', 'inspect', candidate])
     backup = _backup_sqlite(source_root, runtime_root / 'backups')
+    receipt_path = runtime_root / 'last-activation.json'
+    _receipt_preflight(receipt_path)
     previous_environment = os.environ.copy()
     if previous_env_file is not None:
         for name in values:
@@ -571,6 +599,23 @@ def _execute(*, project: str, source_root: Path, runtime_root: Path, image: str,
         _run(commands.full, environment=environment, timeout=wait_timeout + 180)
         health_result = _run(commands.verify, environment=environment, timeout=60)
         snapshot = require_full_health(json.loads(health_result.stdout.splitlines()[-1]))
+        receipt = {
+            'schema_version': 3,
+            'project': project,
+            'image': image,
+            'previous_image': current_image,
+            'source_root': str(source_root),
+            'services': list(REQUIRED_SERVICES),
+            'compose_files': [str(path) for path in compose_files],
+            'base_compose_files': [str(path) for path in base_compose],
+            'base_source_files': [str(path) for path in base_sources],
+            'env_file': str(env_file),
+            'business_io_released': True,
+            'health': {name: snapshot['checks'][name]['status'] for name in REQUIRED_HEALTH_CHECKS},
+            'backup': str(backup) if backup else '',
+            'activated_at': datetime.now(timezone.utc).isoformat(),
+        }
+        _write_receipt(receipt_path, receipt)
     except Exception as activation_error:
         if changed:
             try:
@@ -580,23 +625,6 @@ def _execute(*, project: str, source_root: Path, runtime_root: Path, image: str,
             except LocalRuntimeError as rollback_error:
                 raise rollback_error from activation_error
         raise
-    receipt = {
-        'schema_version': 2,
-        'project': project,
-        'image': image,
-        'previous_image': current_image,
-        'source_root': str(source_root),
-        'services': list(REQUIRED_SERVICES),
-        'compose_files': [str(path) for path in compose_files],
-        'base_compose_files': [str(path) for path in base_compose],
-        'env_file': str(env_file),
-        'business_io_released': True,
-        'health': {name: snapshot['checks'][name]['status'] for name in REQUIRED_HEALTH_CHECKS},
-        'backup': str(backup) if backup else '',
-        'activated_at': datetime.now(timezone.utc).isoformat(),
-    }
-    receipt_path = runtime_root / 'last-activation.json'
-    _write_receipt(receipt_path, receipt)
     return receipt
 
 
