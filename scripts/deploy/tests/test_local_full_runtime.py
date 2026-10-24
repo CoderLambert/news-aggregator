@@ -90,3 +90,12 @@ def test_local_full_overlay_mounts_only_required_secrets_and_persistent_state():
         'ai_gateway_postgres_password', 'litellm_master_key', 'litellm_salt_key',
         'ai_byok_gateway_project_key',
     }
+
+
+def test_ai_gateway_tmpfs_options_stay_one_absolute_mount():
+    """YAML flow lists split on commas; tmpfs options must remain one mount string."""
+    services = yaml.safe_load((ROOT / 'compose.local-full.yaml').read_text())['services']
+    mounts = services['ai-gateway']['tmpfs']
+    assert mounts == ['/tmp:rw,size=512m,mode=1777']
+    assert all(isinstance(item, str) and item.startswith('/') for item in mounts)
+    assert not any(item.startswith(('size=', 'mode=', 'rw,')) for item in mounts)

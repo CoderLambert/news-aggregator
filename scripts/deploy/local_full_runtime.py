@@ -204,14 +204,105 @@ def _candidate_revision(image: str) -> str:
     return match.group(1)
 
 
+_PROTECTED_FAILURE_LOG_DIR: Path | None = None
+
+_REDACT_PATTERNS = (
+    (re.compile(r'(?i)\b(password|passwd|secret|token|api[_-]?key|authorization|bearer)\b(\s*[:=]\s*)\S+'),
+     r'\1\2***'),
+    (re.compile(r'(?i)\bsk-[A-Za-z0-9_-]{8,}'), 'sk-***'),
+    (re.compile(r'(?i)(redis://:)[^@\s]+(@)'), r'\1***\2'),
+    (re.compile(r'(?i)(postgres(?:ql)?://[^:/\s]+:)[^@\s]+(@)'), r'\1***\2'),
+    (re.compile(r'(?i)/[^\s]*(/secrets/)[^\s]+'), r'[secret-path]'),
+    (re.compile(r'\b[0-9a-f]{48,}\b'), '***'),
+)
+
+
+def _configure_failure_logs(directory: Path | None) -> None:
+    global _PROTECTED_FAILURE_LOG_DIR
+    _PROTECTED_FAILURE_LOG_DIR = directory
+
+
+def _redact_command_output(text: str) -> str:
+    redacted = text.replace('\x00', '')
+    for pattern, replacement in _REDACT_PATTERNS:
+        redacted = pattern.sub(replacement, redacted)
+    return redacted
+
+
+def _summarize_command_failure(stdout: str, stderr: str) -> str:
+    combined = ((stderr or '') + '\n' + (stdout or '')).strip()
+    if not combined:
+        return 'no command output captured'
+    lines = [line.strip() for line in combined.splitlines() if line.strip()]
+    useful = [line for line in lines if not line.startswith('#')]
+    snippet = '\n'.join((useful or lines)[-12:])
+    return _redact_command_output(snippet)[:800]
+
+
+def _write_protected_failure_log(arguments: list[str], *, returncode: int,
+                                 stdout: str, stderr: str) -> Path | None:
+    directory = _PROTECTED_FAILURE_LOG_DIR
+    if directory is None:
+        return None
+    temporary = None
+    try:
+        _private_directory(directory)
+        stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+        target = directory / f'compose-failure-{stamp}-{uuid.uuid4().hex[:8]}.log'
+        temporary = target.with_name('.' + target.name + '.new')
+        if temporary.exists() or temporary.is_symlink() or target.exists() or target.is_symlink():
+            return None
+        body = (
+            f'returncode={returncode}\n'
+            f'argv={json.dumps(list(arguments), ensure_ascii=False)}\n'
+            '--- stdout ---\n'
+            f'{stdout or ""}\n'
+            '--- stderr ---\n'
+            f'{stderr or ""}\n'
+        )
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, 'w', encoding='utf-8', errors='replace') as stream:
+            stream.write(body)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+        return target
+    except OSError:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+        return None
+
+
 def _run(arguments: list[str], *, environment=None, input_text=None, timeout=300, check=True):
     try:
         result = subprocess.run(arguments, env=environment, input=input_text, text=True,
                                 capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        stdout = error.stdout if isinstance(error.stdout, str) else (
+            error.stdout or b'').decode('utf-8', 'replace')
+        stderr = error.stderr if isinstance(error.stderr, str) else (
+            error.stderr or b'').decode('utf-8', 'replace')
+        log_path = _write_protected_failure_log(
+            arguments, returncode=-1, stdout=stdout or '', stderr=stderr or '')
+        summary = _summarize_command_failure(stdout or '', stderr or '')
+        detail = f' ({log_path.name}): {summary}' if log_path is not None else f': {summary}'
+        raise LocalRuntimeError(
+            'local runtime command timed out; inspect protected Docker logs' + detail
+        ) from None
     except (OSError, subprocess.SubprocessError):
         raise LocalRuntimeError('local runtime command could not be executed') from None
     if check and result.returncode != 0:
-        raise LocalRuntimeError('local runtime command failed; inspect protected Docker logs')
+        log_path = _write_protected_failure_log(
+            arguments, returncode=result.returncode,
+            stdout=result.stdout or '', stderr=result.stderr or '')
+        summary = _summarize_command_failure(result.stdout or '', result.stderr or '')
+        detail = f' ({log_path.name}): {summary}' if log_path is not None else f': {summary}'
+        raise LocalRuntimeError(
+            'local runtime command failed; inspect protected Docker logs' + detail
+        )
     return result
 
 
@@ -668,6 +759,9 @@ def _execute(*, project: str, code_root: Path, source_root: Path,
     require_immutable_image(image)
     _run(['docker', 'image', 'inspect', image])
     _private_directory(runtime_root)
+    logs = runtime_root / 'logs'
+    _private_directory(logs)
+    _configure_failure_logs(logs)
     releases = runtime_root / 'releases'
     _private_directory(releases)
     previous, previous_env_file, previous_services, base_sources = _previous_activation(

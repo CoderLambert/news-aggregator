@@ -546,3 +546,34 @@ def test_receipt_publish_failure_rolls_back_and_stops_all_candidate_services(tmp
     stop = next(call for call in calls if 'stop' in call and 'indexer' in call)
     assert stop[-9:] == list(reversed(local_full_runtime.REQUIRED_SERVICES))
     assert any('up' in call and call[-1:] == ['app'] for call in calls)
+
+
+def test_failed_compose_output_is_written_to_protected_log(tmp_path, monkeypatch):
+    logs = tmp_path / 'logs'
+    local_full_runtime._configure_failure_logs(logs)
+    monkeypatch.setattr(
+        local_full_runtime.subprocess, 'run',
+        lambda *_args, **_kwargs: type('Result', (), {
+            'returncode': 1,
+            'stdout': 'Container candidate Creating\n',
+            'stderr': (
+                "Error response from daemon: invalid mount path: 'mode=1777' "
+                'mount path must be absolute\n'
+                'password=super-secret-value sk-abcdefghijklmnopqrstuvwxyz\n'
+            ),
+        })(),
+    )
+    with pytest.raises(local_full_runtime.LocalRuntimeError, match='protected Docker logs') as raised:
+        local_full_runtime._run(['docker', 'compose', 'up', '-d'])
+    message = str(raised.value)
+    assert 'mode=1777' in message
+    assert 'super-secret-value' not in message
+    assert 'sk-abcdefghijklmnopqrstuvwxyz' not in message
+    assert 'password=***' in message
+    assert 'sk-***' in message
+    written = list(logs.glob('compose-failure-*.log'))
+    assert len(written) == 1
+    assert written[0].stat().st_mode & 0o777 == 0o600
+    body = written[0].read_text()
+    assert "invalid mount path: 'mode=1777'" in body
+    assert 'password=super-secret-value' in body
