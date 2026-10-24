@@ -163,6 +163,25 @@ backend/venv/bin/python backend/manage.py runtime_health
 
 命令输出版本化 JSON；任一已启用服务不可用时退出码非零。未配置的可选服务显示为 `disabled`，不会误报故障。超级管理员也可在 `/admin/rss` 的“服务健康状态”卡片查看同一快照并手动刷新。该聚合检查不会调用模型、Provider 或订阅源，也不会替代 `/api/health/ready/` 的数据库启动探针，避免 Worker 启动顺序形成循环依赖。
 
+`newshub-local-main` 手工验收环境必须使用完整运行时入口，不能直接用基础
+Compose 只启动 `app` 和 `indexer`：
+
+```bash
+./scripts/deploy/local-full-runtime.sh \
+  --project newshub-local-main \
+  --image newshub:dev-<精确40位源码SHA>
+
+# 核对预览后显式执行；脚本复用当前数据库、源码挂载、端口和已有内部密钥。
+./scripts/deploy/local-full-runtime.sh --execute \
+  --project newshub-local-main \
+  --image newshub:dev-<精确40位源码SHA>
+```
+
+入口在仓库外的 `~/.local/share/newshub-local-main/` 持久保存内部服务密钥、
+SQLite 更新前备份及非敏感激活回执。它以全部七项运行检查均为 `ready` 作为成功条件；
+任一项 `disabled` 或 `unavailable` 都会失败并尝试恢复更新前的 `app + indexer`。
+启动和健康门禁不会调用真实 Provider、模型或订阅源，模型和 RSS 业务能力仍需用户随后主动验收。
+
 手动前台启动（适合容器、IDE 或需要直接查看日志的场景）：
 
 ```bash
