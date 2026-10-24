@@ -26,6 +26,7 @@ function probeResultMessage(receipt: AIModelProbeReceipt): ProbeFeedback {
     result_unknown: '本地 AI 网关或网络未返回可验证结果。',
     incomplete_or_invalid: '模型返回了不完整或无法验证的响应。',
     tool_call_not_observed: '模型未按要求调用测试工具。',
+    gateway_unavailable: '本地 AI 网关未启动或配置不可用。',
     gateway_rejected: '本地 AI 网关拒绝了请求。',
     authorization_changed: '授权或模型配置在测试期间发生变化，结果已丢弃。',
   }[receipt.safe_error_code]
