@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+from pathlib import PurePosixPath
 import re
 import secrets
 import shutil
@@ -21,6 +22,7 @@ import sqlite3
 import stat
 import subprocess
 import sys
+import tarfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -194,6 +196,14 @@ def require_immutable_image(image: str) -> str:
     return image
 
 
+def _candidate_revision(image: str) -> str:
+    require_immutable_image(image)
+    match = re.search(r'([0-9a-f]{40})$', image)
+    if match is None:
+        raise LocalRuntimeError('local image tag must end with the exact source SHA')
+    return match.group(1)
+
+
 def _run(arguments: list[str], *, environment=None, input_text=None, timeout=300, check=True):
     try:
         result = subprocess.run(arguments, env=environment, input=input_text, text=True,
@@ -326,12 +336,19 @@ def _previous_runtime(project: str):
         files = tuple(Path(item).resolve(strict=True)
                       for item in labels['com.docker.compose.project.config_files'].split(','))
         image = inspected['Config']['Image']
-        backend = next(Path(item['Source']) for item in inspected['Mounts']
-                       if item['Destination'] == '/app/backend' and item['Type'] == 'bind')
+        data_backend = next(
+            Path(item['Source']) for item in inspected['Mounts']
+            if item['Type'] == 'bind'
+            and item['Destination'] in {'/var/lib/newshub/db', '/app/backend'}
+            and (item['Destination'] == '/var/lib/newshub/db'
+                 or not any(mount['Type'] == 'bind'
+                            and mount['Destination'] == '/var/lib/newshub/db'
+                            for mount in inspected['Mounts']))
+        )
     except (ValueError, KeyError, IndexError, StopIteration, OSError, TypeError):
         raise LocalRuntimeError('existing local app metadata is invalid') from None
-    source = backend.parent.resolve(strict=True)
-    if backend != source / 'backend' or any(not path.is_absolute() or path.is_symlink() for path in files):
+    source = data_backend.parent.resolve(strict=True)
+    if data_backend != source / 'backend' or any(not path.is_absolute() or path.is_symlink() for path in files):
         raise LocalRuntimeError('existing local app paths are unsafe')
     return files, image, source
 
@@ -384,12 +401,16 @@ def _seed_secrets(store: SecretStore) -> dict[str, Path]:
     return paths
 
 
-def _environment(*, source_root: Path, image: str, store: SecretStore,
-                 paths: dict[str, Path], account: int, activation_paused: bool) -> dict[str, str]:
+def _environment(*, source_root: Path, release_root: Path, image: str,
+                 store: SecretStore, paths: dict[str, Path], account: int,
+                 activation_paused: bool) -> dict[str, str]:
     password = urllib.parse.quote(store.read('translation-redis-password'), safe='')
     return {
         'NEWSHUB_IMAGE': image,
-        'NEWSHUB_SOURCE_ROOT': str(source_root),
+        'NEWSHUB_DATA_ROOT': str(source_root),
+        'NEWSHUB_RELEASE_ROOT': str(release_root),
+        'NEWSHUB_ENV_FILE': str(source_root / '.env'),
+        'NEWSHUB_BACKEND_ENV_FILE': str(source_root / 'backend/.env'),
         'RSS_ENGINE_INSTANCE_UUID': store.read('rss-engine-instance'),
         'RSS_ENGINE_ACCOUNT_ID': str(account),
         'RSS_ENGINE_PORT': '18080',
@@ -435,6 +456,110 @@ def _copy_release_file(source: Path, target: Path) -> Path:
     return target
 
 
+def _copy_release_tree(source: Path, target: Path) -> None:
+    if not source.is_dir() or source.is_symlink():
+        raise LocalRuntimeError('release asset directory must be a real directory')
+    _private_directory(target)
+    for item in sorted(source.iterdir()):
+        destination = target / item.name
+        if item.is_symlink():
+            raise LocalRuntimeError('release assets must not contain symlinks')
+        if item.is_dir():
+            _copy_release_tree(item, destination)
+        elif item.is_file():
+            _copy_release_file(item, destination)
+        else:
+            raise LocalRuntimeError('release assets must contain only regular files')
+
+
+def _verify_candidate_root(code_root: Path, image: str) -> str:
+    revision = _candidate_revision(image)
+    head = _run(['git', '-C', str(code_root), 'rev-parse', 'HEAD']).stdout.strip()
+    image_revision = _run([
+        'docker', 'image', 'inspect', image, '--format',
+        '{{ index .Config.Labels "org.opencontainers.image.revision" }}',
+    ]).stdout.strip()
+    if head != revision or image_revision != revision:
+        raise LocalRuntimeError('candidate source and image revision do not match')
+    status = _run([
+        'git', '-C', str(code_root), 'status', '--porcelain', '--untracked-files=all', '--',
+        'compose.local-full.yaml', 'ops/shared-litellm-proxy',
+        'scripts/deploy/ai_gateway_bootstrap.py',
+    ]).stdout
+    if status.strip():
+        raise LocalRuntimeError('candidate runtime assets contain uncommitted changes')
+    return revision
+
+
+def _extract_backend_from_image(image: str, bundle: Path) -> None:
+    _private_directory(bundle)
+    archive = bundle / '.backend.tar'
+    try:
+        descriptor = os.open(archive, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, 'wb') as output:
+            result = subprocess.run([
+                'docker', 'run', '--rm', '--network', 'none', '--entrypoint', '/bin/tar',
+                image, '-C', '/app', '-cf', '-', 'backend',
+            ], stdout=output, stderr=subprocess.PIPE, timeout=180)
+            output.flush()
+            os.fsync(output.fileno())
+        if result.returncode != 0:
+            raise LocalRuntimeError('could not extract candidate backend from the local image')
+        total = 0
+        with tarfile.open(archive, mode='r:') as source:
+            members = source.getmembers()
+            for member in members:
+                path = PurePosixPath(member.name)
+                if (not path.parts or path.parts[0] != 'backend' or '..' in path.parts
+                        or member.issym() or member.islnk() or member.isdev()):
+                    raise LocalRuntimeError('candidate backend archive contains an unsafe entry')
+                if path.name in {'db.sqlite3', 'db.sqlite3-wal', 'db.sqlite3-shm'}:
+                    raise LocalRuntimeError('candidate backend archive contains business database state')
+                total += max(0, member.size)
+                if total > 512 * 1024 * 1024:
+                    raise LocalRuntimeError('candidate backend archive exceeds the local safety limit')
+            source.extractall(bundle, members=members, filter='data')
+    except (OSError, subprocess.SubprocessError, tarfile.TarError):
+        raise LocalRuntimeError('could not build the frozen candidate backend bundle') from None
+    finally:
+        try:
+            archive.unlink(missing_ok=True)
+        except OSError:
+            pass
+    backend = bundle / 'backend'
+    if (not (backend / 'manage.py').is_file()
+            or any((backend / name).exists() for name in ('db.sqlite3', 'db.sqlite3-wal', 'db.sqlite3-shm'))):
+        raise LocalRuntimeError('frozen candidate backend bundle is invalid')
+
+
+def _build_release_bundle(*, code_root: Path, image: str, releases: Path,
+                          release_id: str) -> Path:
+    _verify_candidate_root(code_root, image)
+    bundle = releases / ('bundle-' + release_id)
+    _extract_backend_from_image(image, bundle)
+    file_assets = (
+        'ops/shared-litellm-proxy/proxy.yaml',
+        'ops/shared-litellm-proxy/entrypoint.sh',
+        'ops/shared-litellm-proxy/provider_key_guard.py',
+        'ops/shared-litellm-proxy/trusted_transport.py',
+        'ops/shared-litellm-proxy/trusted_chat.py',
+        'ops/shared-litellm-proxy/trusted_routes.py',
+        'ops/shared-litellm-proxy/trusted_discovery.py',
+        'ops/shared-litellm-proxy/configure_trusted_endpoints.py',
+        'scripts/deploy/ai_gateway_bootstrap.py',
+    )
+    for relative in file_assets:
+        source = code_root / relative
+        target = bundle / relative
+        _private_directory(target.parent)
+        _copy_release_file(source, target)
+    _copy_release_tree(
+        code_root / 'ops/shared-litellm-proxy/trusted-endpoints',
+        bundle / 'ops/shared-litellm-proxy/trusted-endpoints',
+    )
+    return bundle
+
+
 def _freeze_compose_files(sources: tuple[Path, ...], releases: Path,
                           release_id: str) -> tuple[Path, ...]:
     frozen = []
@@ -457,13 +582,14 @@ def _previous_activation(runtime_root: Path, *, project: str, source_root: Path,
                 or info.st_mode & 0o077 or info.st_size > 1024 * 1024):
             raise ValueError
         value = json.loads(path.read_text(encoding='utf-8'))
-        if (value.get('schema_version') != 3 or value.get('project') != project
+        if (value.get('schema_version') != 4 or value.get('project') != project
                 or value.get('source_root') != str(source_root)
                 or value.get('image') != image):
             raise ValueError
         compose_files = tuple(Path(item) for item in value['compose_files'])
         base_files = tuple(Path(item) for item in value['base_compose_files'])
         base_source_files = tuple(Path(item) for item in value['base_source_files'])
+        release_root = Path(value['release_root'])
         env_file = Path(value['env_file'])
         services = tuple(value['services'])
         env_info = env_file.stat()
@@ -471,6 +597,7 @@ def _previous_activation(runtime_root: Path, *, project: str, source_root: Path,
                 or compose_files != detected_compose
                 or any(not item.is_absolute() or not item.is_file() or item.is_symlink()
                        for item in (*compose_files, *base_files, *base_source_files, env_file))
+                or not release_root.is_absolute() or not release_root.is_dir() or release_root.is_symlink()
                 or env_info.st_uid != os.getuid() or env_info.st_mode & 0o077
                 or len(set(services)) != len(services)
                 or not {'app', 'indexer'}.issubset(services)
@@ -530,8 +657,9 @@ def _write_receipt(path: Path, value: dict[str, object]) -> None:
         raise LocalRuntimeError('could not write the activation receipt') from None
 
 
-def _execute(*, project: str, source_root: Path, runtime_root: Path, image: str,
-             wait_timeout: int, complete_overlay: Path) -> dict[str, object]:
+def _execute(*, project: str, code_root: Path, source_root: Path,
+             runtime_root: Path, image: str, wait_timeout: int,
+             complete_overlay: Path) -> dict[str, object]:
     _local_docker()
     detected_compose, current_image, current_source = _previous_runtime(project)
     detected_services = _running_services(project)
@@ -550,11 +678,13 @@ def _execute(*, project: str, source_root: Path, runtime_root: Path, image: str,
     base_compose = _freeze_compose_files(base_sources, releases, release_id)
     release_overlay = _copy_release_file(
         complete_overlay, releases / ('compose-local-full-' + release_id + '.yaml'))
+    release_root = _build_release_bundle(
+        code_root=code_root, image=image, releases=releases, release_id=release_id)
     store = SecretStore(runtime_root / 'secrets')
     paths = _seed_secrets(store)
     env_file = releases / ('runtime-' + release_id + '.env')
-    values = _environment(source_root=source_root, image=image, store=store, paths=paths,
-                          account=2, activation_paused=True)
+    values = _environment(source_root=source_root, release_root=release_root, image=image,
+                          store=store, paths=paths, account=2, activation_paused=True)
     _write_runtime_env(env_file, values=values)
     compose_files = (*base_compose, release_overlay)
     commands = activation_commands(project=project, compose_files=compose_files,
@@ -587,24 +717,26 @@ def _execute(*, project: str, source_root: Path, runtime_root: Path, image: str,
         _run(commands.infrastructure, environment=environment, timeout=wait_timeout + 180)
         account = _bootstrap_miniflux(store, 18080)
         _bootstrap_ai_gateway(store, compose, environment)
-        values = _environment(source_root=source_root, image=image, store=store, paths=paths,
-                              account=account, activation_paused=True)
+        values = _environment(source_root=source_root, release_root=release_root, image=image,
+                              store=store, paths=paths, account=account, activation_paused=True)
         _write_runtime_env(env_file, values=values)
         environment = {**os.environ, **values}
         _run(commands.preflight, environment=environment, timeout=wait_timeout + 180)
-        values = _environment(source_root=source_root, image=image, store=store, paths=paths,
-                              account=account, activation_paused=False)
+        values = _environment(source_root=source_root, release_root=release_root, image=image,
+                              store=store, paths=paths, account=account, activation_paused=False)
         _write_runtime_env(env_file, values=values)
         environment = {**os.environ, **values}
         _run(commands.full, environment=environment, timeout=wait_timeout + 180)
         health_result = _run(commands.verify, environment=environment, timeout=60)
         snapshot = require_full_health(json.loads(health_result.stdout.splitlines()[-1]))
         receipt = {
-            'schema_version': 3,
+            'schema_version': 4,
             'project': project,
             'image': image,
             'previous_image': current_image,
             'source_root': str(source_root),
+            'code_root': str(code_root),
+            'release_root': str(release_root),
             'services': list(REQUIRED_SERVICES),
             'compose_files': [str(path) for path in compose_files],
             'base_compose_files': [str(path) for path in base_compose],
@@ -646,16 +778,19 @@ def main(argv=None) -> int:
     if not 30 <= args.wait_timeout <= 1200:
         raise LocalRuntimeError('wait timeout must be between 30 and 1200 seconds')
     script_root = Path(__file__).resolve().parents[2]
-    source_root = (args.source_root or script_root).resolve(strict=True)
+    source_root = args.source_root.resolve(strict=True) if args.source_root else script_root
     runtime_root = (args.runtime_root or Path.home() / '.local/share' / args.project).absolute()
     image = args.image
-    if image is None:
-        if not args.execute:
-            raise LocalRuntimeError('--image is required for a side-effect-free preview')
-        _previous, image, detected = _previous_runtime(args.project)
+    if args.execute and (image is None or args.source_root is None):
+        _previous, detected_image, detected = _previous_runtime(args.project)
+        if image is None:
+            image = detected_image
         if args.source_root is None:
             source_root = detected
-    base_compose = source_root / 'compose.yaml'
+    elif image is None:
+        if not args.execute:
+            raise LocalRuntimeError('--image is required for a side-effect-free preview')
+    base_compose = script_root / 'compose.yaml'
     complete_overlay = script_root / 'compose.local-full.yaml'
     if not base_compose.is_file() or base_compose.is_symlink():
         raise LocalRuntimeError('source root is missing compose.yaml')
@@ -667,14 +802,15 @@ def main(argv=None) -> int:
         'project': args.project,
         'image': image,
         'source_root': str(source_root),
+        'code_root': str(script_root),
         'runtime_root': str(runtime_root),
         'required_services': list(REQUIRED_SERVICES),
     }
     if not args.execute:
         print(json.dumps(preview, sort_keys=True))
         return 0
-    receipt = _execute(project=args.project, source_root=source_root, runtime_root=runtime_root,
-                       image=image, wait_timeout=args.wait_timeout,
+    receipt = _execute(project=args.project, code_root=script_root, source_root=source_root,
+                       runtime_root=runtime_root, image=image, wait_timeout=args.wait_timeout,
                        complete_overlay=complete_overlay)
     print(json.dumps(receipt, sort_keys=True))
     return 0

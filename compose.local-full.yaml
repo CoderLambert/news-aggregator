@@ -3,19 +3,33 @@
 services:
   app:
     image: "${NEWSHUB_IMAGE:?set an exact local image}"
+    env_file:
+      - path: "${NEWSHUB_BACKEND_ENV_FILE:?set the existing backend environment file}"
+        required: false
+      - path: "${NEWSHUB_ENV_FILE:?set the existing environment file}"
+        required: false
     environment:
       AI_BYOK_ENABLED: "1"
       AI_BYOK_GATEWAY_URL: http://127.0.0.1:4000
       AI_BYOK_GATEWAY_PROJECT_KEY_FILE: /run/secrets/ai_byok_gateway_project_key
       CHANNEL_WORKER_HEARTBEAT: /app/logs/channel-worker-heartbeat.json
       RSS_RUNTIME_DIR: /app/rss-runtime
+      DJANGO_DB_PATH: /var/lib/newshub/db/db.sqlite3
+      CHROMA_DATA_DIR: /var/lib/newshub/chroma
+      TTS_CACHE_DIR: /var/lib/newshub/tts
+      CHATGPT_DEPLOYMENT_INSTANCE_FILE: /var/lib/newshub/db/.runtime/chatgpt-deployment-id
+      FULL_CONTENT_WORKER_LOCK: /app/logs/full-content.lock
+      FULL_CONTENT_WORKER_HEARTBEAT: /app/logs/full-content-heartbeat.json
+      SEARCH_INDEX_WORKER_LOCK: /app/logs/embedding-worker.lock
       RSS_ENGINE_INSTANCE_UUID: "${RSS_ENGINE_INSTANCE_UUID:?set by local-full-runtime.sh}"
       RSS_ENGINE_ACCOUNT_ID: "${RSS_ENGINE_ACCOUNT_ID:?set by local-full-runtime.sh}"
       TRANSLATION_REDIS_URL: "${TRANSLATION_REDIS_URL:?set by local-full-runtime.sh}"
     volumes:
-      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/backend:/app/backend"
-      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/chroma_data:/app/chroma_data"
-      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/logs:/app/logs"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/backend:/app/backend:ro"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/backend:/var/lib/newshub/db"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/chroma_data:/var/lib/newshub/chroma"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/backend/media/tts_cache:/var/lib/newshub/tts"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/logs:/app/logs"
       - rss-runtime-data:/app/rss-runtime:ro
     secrets:
       - ai_byok_gateway_project_key
@@ -25,16 +39,29 @@ services:
 
   indexer:
     image: "${NEWSHUB_IMAGE:?set an exact local image}"
+    env_file:
+      - path: "${NEWSHUB_BACKEND_ENV_FILE:?set the existing backend environment file}"
+        required: false
+      - path: "${NEWSHUB_ENV_FILE:?set the existing environment file}"
+        required: false
+    environment:
+      DJANGO_DB_PATH: /var/lib/newshub/db/db.sqlite3
+      CHROMA_DATA_DIR: /var/lib/newshub/chroma
+      CHATGPT_DEPLOYMENT_INSTANCE_FILE: /var/lib/newshub/db/.runtime/chatgpt-deployment-id
+      SEARCH_INDEX_WORKER_LOCK: /app/logs/embedding-worker.lock
     volumes:
-      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/backend:/app/backend"
-      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/chroma_data:/app/chroma_data"
-      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/logs:/app/logs"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/backend:/app/backend:ro"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/backend:/var/lib/newshub/db"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/chroma_data:/var/lib/newshub/chroma"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/logs:/app/logs"
 
   channel-worker:
     image: "${NEWSHUB_IMAGE:?set an exact local image}"
     command: ["python", "/app/backend/manage.py", "channel_worker"]
     env_file:
-      - path: "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/.env"
+      - path: "${NEWSHUB_BACKEND_ENV_FILE:?set the existing backend environment file}"
+        required: false
+      - path: "${NEWSHUB_ENV_FILE:?set the existing environment file}"
         required: false
     environment:
       RUN_MAIN: "true"
@@ -44,10 +71,15 @@ services:
       AI_BYOK_GATEWAY_PROJECT_KEY_FILE: /run/secrets/ai_byok_gateway_project_key
       CHANNEL_WORKER_HEARTBEAT: /app/logs/channel-worker-heartbeat.json
       NEWSHUB_ACTIVATION_PAUSED: "${NEWSHUB_ACTIVATION_PAUSED:-1}"
+      DJANGO_DB_PATH: /var/lib/newshub/db/db.sqlite3
+      CHATGPT_DEPLOYMENT_INSTANCE_FILE: /var/lib/newshub/db/.runtime/chatgpt-deployment-id
+      FULL_CONTENT_WORKER_LOCK: /app/logs/full-content.lock
+      FULL_CONTENT_WORKER_HEARTBEAT: /app/logs/full-content-heartbeat.json
     network_mode: service:app
     volumes:
-      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/backend:/app/backend"
-      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/logs:/app/logs"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/backend:/app/backend:ro"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/backend:/var/lib/newshub/db"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/logs:/app/logs"
     secrets:
       - ai_byok_gateway_project_key
     depends_on:
@@ -135,7 +167,9 @@ services:
     image: "${NEWSHUB_IMAGE:?set an exact local image}"
     command: ["python", "/app/backend/manage.py", "rss_sync_worker"]
     env_file:
-      - path: "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/.env"
+      - path: "${NEWSHUB_BACKEND_ENV_FILE:?set the existing backend environment file}"
+        required: false
+      - path: "${NEWSHUB_ENV_FILE:?set the existing environment file}"
         required: false
     environment:
       RUN_MAIN: "true"
@@ -147,10 +181,13 @@ services:
       RSS_RUNTIME_DIR: /app/rss-runtime
       RSS_FULL_CONTENT_ENABLED: "1"
       NEWSHUB_ACTIVATION_PAUSED: "${NEWSHUB_ACTIVATION_PAUSED:-1}"
+      DJANGO_DB_PATH: /var/lib/newshub/db/db.sqlite3
+      CHATGPT_DEPLOYMENT_INSTANCE_FILE: /var/lib/newshub/db/.runtime/chatgpt-deployment-id
     secrets: [rss_engine_token]
     volumes:
-      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/backend:/app/backend"
-      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/logs:/app/logs"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/backend:/app/backend:ro"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/backend:/var/lib/newshub/db"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/logs:/app/logs"
       - rss-runtime-data:/app/rss-runtime
     networks: [rss-engine]
     depends_on:
@@ -203,17 +240,17 @@ services:
       AI_BYOK_ENDPOINT_MANIFEST: /app/trusted-endpoints/manifest.json
       LITELLM_WORKER_STARTUP_HOOKS: trusted_discovery:register
     volumes:
-      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/ops/shared-litellm-proxy/proxy.yaml:/app/proxy.yaml:ro"
-      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/ops/shared-litellm-proxy/entrypoint.sh:/app/entrypoint.sh:ro"
-      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/ops/shared-litellm-proxy/provider_key_guard.py:/app/byok_gateway_policy.py:ro"
-      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/ops/shared-litellm-proxy/trusted_transport.py:/app/trusted_transport.py:ro"
-      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/ops/shared-litellm-proxy/trusted_chat.py:/app/trusted_chat.py:ro"
-      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/ops/shared-litellm-proxy/trusted_routes.py:/app/trusted_routes.py:ro"
-      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/ops/shared-litellm-proxy/trusted_discovery.py:/app/trusted_discovery.py:ro"
-      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/ops/shared-litellm-proxy/configure_trusted_endpoints.py:/app/configure_trusted_endpoints.py:ro"
-      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/ops/shared-litellm-proxy/trusted-endpoints:/app/trusted-endpoints:ro"
-      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/backend/api/services/ai_endpoint_profiles.py:/app/ai_endpoint_profiles.py:ro"
-      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/scripts/deploy/ai_gateway_bootstrap.py:/app/local-bootstrap.py:ro"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/ops/shared-litellm-proxy/proxy.yaml:/app/proxy.yaml:ro"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/ops/shared-litellm-proxy/entrypoint.sh:/app/entrypoint.sh:ro"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/ops/shared-litellm-proxy/provider_key_guard.py:/app/byok_gateway_policy.py:ro"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/ops/shared-litellm-proxy/trusted_transport.py:/app/trusted_transport.py:ro"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/ops/shared-litellm-proxy/trusted_chat.py:/app/trusted_chat.py:ro"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/ops/shared-litellm-proxy/trusted_routes.py:/app/trusted_routes.py:ro"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/ops/shared-litellm-proxy/trusted_discovery.py:/app/trusted_discovery.py:ro"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/ops/shared-litellm-proxy/configure_trusted_endpoints.py:/app/configure_trusted_endpoints.py:ro"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/ops/shared-litellm-proxy/trusted-endpoints:/app/trusted-endpoints:ro"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/backend/api/services/ai_endpoint_profiles.py:/app/ai_endpoint_profiles.py:ro"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/scripts/deploy/ai_gateway_bootstrap.py:/app/local-bootstrap.py:ro"
     secrets:
       - source: ai_gateway_postgres_password
         target: postgres_password

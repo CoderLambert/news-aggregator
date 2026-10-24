@@ -4,7 +4,7 @@
 
 **Goal:** 让 `newshub-local-main` 的手工验收运行时强制启动并验证管理页列出的全部依赖服务。
 
-**Architecture:** 保留轻量 `compose.yaml` 作为开发基座，新增一个本地完整覆盖层和唯一激活脚本。脚本在仓库外持久内部密钥，幂等初始化 Miniflux 专用账号与 LiteLLM 项目 Key，然后以 `runtime_health` 的全七项 ready 作为成功门禁。
+**Architecture:** 保留轻量 `compose.yaml` 作为开发基座，新增一个本地完整覆盖层和唯一激活脚本。脚本在仓库外冻结精确候选代码并与既有数据库/数据所有者分离，持久内部密钥，幂等初始化 Miniflux 专用账号与 LiteLLM 项目 Key，然后以 `runtime_health` 的全七项 ready 作为成功门禁。
 
 **Tech Stack:** Docker Compose v2, Bash, Python 3 standard library, Django, React/TypeScript, pytest, Vitest.
 

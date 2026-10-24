@@ -178,7 +178,10 @@ Compose 只启动 `app` 和 `indexer`：
 ```
 
 入口在仓库外的 `~/.local/share/newshub-local-main/` 持久保存内部服务密钥、
-版本化 Compose/环境文件、SQLite 更新前备份及非敏感激活回执。它先暂停频道任务、
+版本化 Compose/环境文件、从精确候选镜像提取的只读后端代码、SQLite 更新前备份及
+非敏感激活回执。候选代码与数据所有者严格分离：容器从冻结候选运行代码，数据库、
+Chroma、日志和 `.env` 仍由原 `newshub-local-main` 数据目录持有，旧 checkout 的源码
+不会覆盖候选代码。入口先暂停频道任务、
 RSS Worker 和 Miniflux 调度完成全栈预热，随后强制重建密钥消费者并释放业务 I/O，
 最后以全部七项运行检查均为 `ready` 作为成功条件。任一项 `disabled` 或
 `unavailable` 都会失败，并使用上一份版本化环境和原服务集合恢复更新前运行态；

@@ -21,12 +21,29 @@ def test_local_full_overlay_enables_every_operator_health_dependency():
         'AI_BYOK_GATEWAY_PROJECT_KEY_FILE': '/run/secrets/ai_byok_gateway_project_key',
         'CHANNEL_WORKER_HEARTBEAT': '/app/logs/channel-worker-heartbeat.json',
         'RSS_RUNTIME_DIR': '/app/rss-runtime',
+        'DJANGO_DB_PATH': '/var/lib/newshub/db/db.sqlite3',
+        'CHROMA_DATA_DIR': '/var/lib/newshub/chroma',
+        'TTS_CACHE_DIR': '/var/lib/newshub/tts',
+        'CHATGPT_DEPLOYMENT_INSTANCE_FILE': '/var/lib/newshub/db/.runtime/chatgpt-deployment-id',
+        'FULL_CONTENT_WORKER_LOCK': '/app/logs/full-content.lock',
+        'FULL_CONTENT_WORKER_HEARTBEAT': '/app/logs/full-content-heartbeat.json',
+        'SEARCH_INDEX_WORKER_LOCK': '/app/logs/embedding-worker.lock',
         'RSS_ENGINE_INSTANCE_UUID': '${RSS_ENGINE_INSTANCE_UUID:?set by local-full-runtime.sh}',
         'RSS_ENGINE_ACCOUNT_ID': '${RSS_ENGINE_ACCOUNT_ID:?set by local-full-runtime.sh}',
         'TRANSLATION_REDIS_URL': '${TRANSLATION_REDIS_URL:?set by local-full-runtime.sh}',
     }
     assert app['secrets'] == ['ai_byok_gateway_project_key']
+    assert '${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/backend:/app/backend:ro' in app['volumes']
+    assert all(not (volume.startswith('${NEWSHUB_DATA_ROOT') and volume.endswith(':/app/backend'))
+               for volume in app['volumes'])
+    assert '${NEWSHUB_DATA_ROOT:?set the existing data owner}/backend:/var/lib/newshub/db' in app['volumes']
+    assert [item['path'] for item in app['env_file']] == [
+        '${NEWSHUB_BACKEND_ENV_FILE:?set the existing backend environment file}',
+        '${NEWSHUB_ENV_FILE:?set the existing environment file}',
+    ]
     assert services['indexer']['image'] == '${NEWSHUB_IMAGE:?set an exact local image}'
+    for name in ('indexer', 'channel-worker', 'rss-sync'):
+        assert '${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/backend:/app/backend:ro' in services[name]['volumes']
 
 
 def test_local_full_overlay_keeps_internal_services_private_and_pinned():
@@ -58,6 +75,8 @@ def test_local_full_overlay_mounts_only_required_secrets_and_persistent_state():
         {'source': 'ai_gateway_postgres_password', 'target': 'postgres_password'},
         'litellm_master_key', 'litellm_salt_key', 'ai_byok_gateway_project_key',
     ]
+    assert any(volume.startswith('${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}')
+               for volume in services['ai-gateway']['volumes'])
     assert any(volume.endswith('/scripts/deploy/ai_gateway_bootstrap.py:/app/local-bootstrap.py:ro')
                for volume in services['ai-gateway']['volumes'])
     assert set(overlay['volumes']) == {

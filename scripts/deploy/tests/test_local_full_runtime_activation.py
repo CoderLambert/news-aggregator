@@ -26,6 +26,75 @@ def test_secret_store_creates_private_values_once_and_rejects_symlinks(tmp_path)
         store.ensure('unsafe', lambda: 'unused')
 
 
+def test_previous_runtime_prefers_separate_data_mount_over_frozen_code_mount(tmp_path, monkeypatch):
+    data_root = tmp_path / 'data-owner'
+    (data_root / 'backend').mkdir(parents=True)
+    frozen_backend = tmp_path / 'release/backend'
+    frozen_backend.mkdir(parents=True)
+    compose = tmp_path / 'compose.yaml'
+    compose.write_text('services: {}\n')
+    identity = 'a' * 64
+
+    def command(arguments, **_kwargs):
+        if arguments[:2] == ['docker', 'ps']:
+            return type('Result', (), {'stdout': identity + '\n', 'returncode': 0})()
+        return type('Result', (), {'stdout': json.dumps([{
+            'Config': {'Image': 'newshub:dev-' + 'b' * 40, 'Labels': {
+                'com.docker.compose.project.config_files': str(compose),
+            }},
+            'Mounts': [
+                {'Type': 'bind', 'Source': str(frozen_backend), 'Destination': '/app/backend'},
+                {'Type': 'bind', 'Source': str(data_root / 'backend'), 'Destination': '/var/lib/newshub/db'},
+            ],
+        }]), 'returncode': 0})()
+
+    monkeypatch.setattr(local_full_runtime, '_run', command)
+    _files, _image, owner = local_full_runtime._previous_runtime('newshub-local-main')
+    assert owner == data_root
+
+
+def test_release_bundle_combines_image_backend_with_committed_gateway_assets(tmp_path, monkeypatch):
+    code = tmp_path / 'code'
+    files = (
+        'ops/shared-litellm-proxy/proxy.yaml',
+        'ops/shared-litellm-proxy/entrypoint.sh',
+        'ops/shared-litellm-proxy/provider_key_guard.py',
+        'ops/shared-litellm-proxy/trusted_transport.py',
+        'ops/shared-litellm-proxy/trusted_chat.py',
+        'ops/shared-litellm-proxy/trusted_routes.py',
+        'ops/shared-litellm-proxy/trusted_discovery.py',
+        'ops/shared-litellm-proxy/configure_trusted_endpoints.py',
+        'scripts/deploy/ai_gateway_bootstrap.py',
+    )
+    for relative in files:
+        path = code / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(relative + '\n')
+    endpoint = code / 'ops/shared-litellm-proxy/trusted-endpoints/manifest.json'
+    endpoint.parent.mkdir(parents=True)
+    endpoint.write_text('{}\n')
+    releases = tmp_path / 'releases'
+    releases.mkdir(mode=0o700)
+    monkeypatch.setattr(local_full_runtime, '_verify_candidate_root', lambda *_args: 'a' * 40)
+
+    def extract(_image, bundle):
+        backend = bundle / 'backend'
+        backend.mkdir(parents=True)
+        (backend / 'manage.py').write_text('pass\n')
+        profile = backend / 'api/services/ai_endpoint_profiles.py'
+        profile.parent.mkdir(parents=True)
+        profile.write_text('PROFILES = {}\n')
+
+    monkeypatch.setattr(local_full_runtime, '_extract_backend_from_image', extract)
+    bundle = local_full_runtime._build_release_bundle(
+        code_root=code, image='newshub:dev-' + 'a' * 40,
+        releases=releases, release_id='test',
+    )
+    assert (bundle / 'backend/manage.py').is_file()
+    assert (bundle / 'scripts/deploy/ai_gateway_bootstrap.py').is_file()
+    assert (bundle / 'ops/shared-litellm-proxy/trusted-endpoints/manifest.json').is_file()
+
+
 def test_full_health_rejects_disabled_missing_or_unavailable_checks():
     ready = {
         'schema_version': 1,
@@ -191,12 +260,14 @@ def test_previous_complete_activation_restores_versioned_env_and_all_services(tm
         path.chmod(0o600)
     runtime = tmp_path / 'runtime'
     runtime.mkdir(mode=0o700)
+    release_root = tmp_path / 'previous-release'
+    release_root.mkdir()
     receipt = {
-        'schema_version': 3, 'project': 'newshub-local-main',
+        'schema_version': 4, 'project': 'newshub-local-main',
         'source_root': str(source), 'image': 'newshub:dev-' + 'a' * 40,
         'compose_files': [str(base), str(overlay)],
         'base_compose_files': [str(base)], 'base_source_files': [str(base)],
-        'env_file': str(env_file),
+        'env_file': str(env_file), 'release_root': str(release_root),
         'services': list(local_full_runtime.REQUIRED_SERVICES),
     }
     path = runtime / 'last-activation.json'
@@ -291,6 +362,8 @@ def test_activation_failure_stops_new_services_and_restores_previous_compose(tmp
     monkeypatch.setattr(local_full_runtime, '_running_services',
                         lambda _project: ('app', 'indexer'))
     monkeypatch.setattr(local_full_runtime, '_backup_sqlite', lambda *_args: None)
+    monkeypatch.setattr(local_full_runtime, '_build_release_bundle',
+                        lambda **_kwargs: tmp_path / 'bundle')
     monkeypatch.setattr(local_full_runtime, '_bootstrap_miniflux', lambda *_args: 2)
     monkeypatch.setattr(local_full_runtime, '_bootstrap_ai_gateway', lambda *_args: None)
 
@@ -307,7 +380,7 @@ def test_activation_failure_stops_new_services_and_restores_previous_compose(tmp
     monkeypatch.setattr(local_full_runtime, '_run', command)
     with pytest.raises(local_full_runtime.LocalRuntimeError, match='synthetic'):
         local_full_runtime._execute(
-            project='newshub-local-main', source_root=source,
+            project='newshub-local-main', code_root=source, source_root=source,
             runtime_root=tmp_path / 'runtime', image=candidate, wait_timeout=300,
             complete_overlay=overlay,
         )
@@ -335,6 +408,8 @@ def test_partial_infrastructure_failure_also_restores_previous_compose(tmp_path,
     monkeypatch.setattr(local_full_runtime, '_running_services',
                         lambda _project: ('app', 'indexer'))
     monkeypatch.setattr(local_full_runtime, '_backup_sqlite', lambda *_args: None)
+    monkeypatch.setattr(local_full_runtime, '_build_release_bundle',
+                        lambda **_kwargs: tmp_path / 'bundle')
 
     def command(arguments, **_kwargs):
         calls.append(arguments)
@@ -349,7 +424,7 @@ def test_partial_infrastructure_failure_also_restores_previous_compose(tmp_path,
     monkeypatch.setattr(local_full_runtime, '_run', command)
     with pytest.raises(local_full_runtime.LocalRuntimeError, match='partial infrastructure'):
         local_full_runtime._execute(
-            project='newshub-local-main', source_root=source,
+            project='newshub-local-main', code_root=source, source_root=source,
             runtime_root=tmp_path / 'runtime', image=candidate, wait_timeout=300,
             complete_overlay=overlay,
         )
@@ -373,12 +448,14 @@ def test_repeat_activation_quiesces_old_business_services_before_infrastructure(
     candidate = 'newshub:dev-' + 'c' * 40
     runtime = tmp_path / 'runtime'
     runtime.mkdir(mode=0o700)
+    release_root = tmp_path / 'previous-release'
+    release_root.mkdir()
     receipt = {
-        'schema_version': 3, 'project': 'newshub-local-main',
+        'schema_version': 4, 'project': 'newshub-local-main',
         'source_root': str(source), 'image': candidate,
         'compose_files': [str(base), str(previous_overlay)],
         'base_compose_files': [str(base)], 'base_source_files': [str(base)],
-        'env_file': str(previous_env),
+        'env_file': str(previous_env), 'release_root': str(release_root),
         'services': list(local_full_runtime.REQUIRED_SERVICES),
     }
     receipt_path = runtime / 'last-activation.json'
@@ -392,6 +469,8 @@ def test_repeat_activation_quiesces_old_business_services_before_infrastructure(
     monkeypatch.setattr(local_full_runtime, '_running_services',
                         lambda _project: local_full_runtime.REQUIRED_SERVICES)
     monkeypatch.setattr(local_full_runtime, '_backup_sqlite', lambda *_args: None)
+    monkeypatch.setattr(local_full_runtime, '_build_release_bundle',
+                        lambda **_kwargs: tmp_path / 'bundle')
 
     def command(arguments, **_kwargs):
         calls.append(arguments)
@@ -406,7 +485,7 @@ def test_repeat_activation_quiesces_old_business_services_before_infrastructure(
     monkeypatch.setattr(local_full_runtime, '_run', command)
     with pytest.raises(local_full_runtime.LocalRuntimeError, match='infrastructure'):
         local_full_runtime._execute(
-            project='newshub-local-main', source_root=source, runtime_root=runtime,
+            project='newshub-local-main', code_root=source, source_root=source, runtime_root=runtime,
             image=candidate, wait_timeout=300, complete_overlay=candidate_overlay,
         )
 
@@ -438,6 +517,8 @@ def test_receipt_publish_failure_rolls_back_and_stops_all_candidate_services(tmp
                         lambda _project: ((base,), candidate, source))
     monkeypatch.setattr(local_full_runtime, '_running_services', lambda _project: ('app',))
     monkeypatch.setattr(local_full_runtime, '_backup_sqlite', lambda *_args: None)
+    monkeypatch.setattr(local_full_runtime, '_build_release_bundle',
+                        lambda **_kwargs: tmp_path / 'bundle')
     monkeypatch.setattr(local_full_runtime, '_bootstrap_miniflux', lambda *_args: 2)
     monkeypatch.setattr(local_full_runtime, '_bootstrap_ai_gateway', lambda *_args: None)
     monkeypatch.setattr(local_full_runtime, '_write_receipt',
@@ -457,7 +538,7 @@ def test_receipt_publish_failure_rolls_back_and_stops_all_candidate_services(tmp
     monkeypatch.setattr(local_full_runtime, '_run', command)
     with pytest.raises(local_full_runtime.LocalRuntimeError, match='receipt failure'):
         local_full_runtime._execute(
-            project='newshub-local-main', source_root=source,
+            project='newshub-local-main', code_root=source, source_root=source,
             runtime_root=tmp_path / 'runtime', image=candidate, wait_timeout=300,
             complete_overlay=overlay,
         )
